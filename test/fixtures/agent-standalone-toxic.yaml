@@ -1,0 +1,22 @@
+server:
+  url: http://pglens-server:8080
+  token: dev-token
+identity_path: /var/lib/pglens/identity.json
+push_interval: 5s
+buffer:
+  path: /var/lib/pglens/buffer
+  max_size: 64MiB
+  max_age: 1h
+targets:
+  # Routed through toxiproxy's "agent-to-pg" proxy (created by
+  # Harness.InitToxiproxy() at listen port 20001 on the toxiproxy service)
+  # instead of "pg" directly, so a Toxic() on LinkAgentToPG("pg") actually
+  # affects this connection. Requires harness.Config{Toxiproxy: true}.
+  - name: pg
+    dsn: postgres://pglens:pglens-monitoring-test@toxiproxy:20001/postgres?sslmode=disable
+    databases:
+      max: 10
+checks:
+  activity: { interval: 5s }
+  database_stats: { interval: 5s }
+  stat_statements: { interval: 10s, top_n: 50 }

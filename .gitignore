@@ -1,0 +1,25 @@
+# binaries
+/bin/
+/dist/
+pglens-agent
+pglens-server
+/workload
+
+# go
+*.test
+*.out
+coverage.out
+coverage.html
+
+# test artifacts
+/test/e2e/_artifacts/
+/test/**/testdata/fuzz/**/[0-9a-f]*
+
+# local state
+.env
+*.local.yaml
+
+# editor / tool-local state
+.vscode/
+.idea/
+.serena/

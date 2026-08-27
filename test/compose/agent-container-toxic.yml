@@ -1,0 +1,40 @@
+services:
+  pglens-agent:
+    image: ghcr.io/manprint/pglens-agent:dev
+    depends_on:
+      pglens-server:
+        condition: service_healthy
+      # toxiproxy has no Docker healthcheck (see the comment in
+      # toxiproxy.yml) — only service_started is available here; the agent
+      # will still reach a not-yet-proxied "toxiproxy:20001" until
+      # InitToxiproxy() creates that proxy, and waitForTarget()
+      # (cmd/pglens-agent/run.go) is what actually absorbs that startup race.
+      toxiproxy:
+        condition: service_started
+    environment:
+      PGLENS_CONFIG: /etc/pglens/agent.yaml
+      PGLENS_SERVER_URL: http://pglens-server:8080
+      PGLENS_BOOTSTRAP_TOKEN: dev-token
+    ports:
+      - "9187" # the agent's own /healthz — see agent-container.yml
+    volumes:
+      - agent-data:/var/lib/pglens
+      # Points at toxiproxy's "agent-to-pg" proxy (toxiproxy:20001, created by
+      # Harness.InitToxiproxy() against the standalone "pg" service) instead
+      # of "pg" directly, so a Toxic() injected on LinkAgentToPG("pg")
+      # actually affects the agent's real connection.
+      - ../fixtures/agent-standalone-toxic.yaml:/etc/pglens/agent.yaml:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    # The distroless image has no shell or curl; the binary's own
+    # --healthcheck flag makes one real HTTP request to its /healthz and
+    # exits 0/1 accordingly (see cmd/pglens-agent/main.go).
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/pglens-agent", "--healthcheck"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  agent-data:

@@ -1,0 +1,21 @@
+server:
+  url: http://pglens-server:8080
+  token_file: /run/secrets/pglens_token
+identity_path: /var/lib/pglens/identity.json
+push_interval: 15s
+buffer:
+  path: /var/lib/pglens/buffer
+  max_size: 512MiB
+  max_age: 6h
+targets:
+  - name: pg-app
+    dsn: postgres://pglens@pg-app:5432/postgres?sslmode=require
+    cluster_name: pg-prod-eu
+    databases:
+      include: ["app_.*"]
+      exclude: ["^template\\d$"]
+      max: 10
+checks:
+  activity: { interval: 10s }
+  database_stats: { interval: 30s }
+  stat_statements: { interval: 60s, top_n: 50 }

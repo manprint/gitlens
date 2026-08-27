@@ -1,0 +1,40 @@
+{
+  "protocol_version": 1,
+  "agent_id": "00000000-0000-0000-0000-000000000000",
+  "agent_version": "dev",
+  "sent_at": "2026-01-01T00:00:00Z",
+  "instances": [
+    {
+      "instance_id": "11111111-1111-1111-1111-111111111111",
+      "cluster_id": "1234567890",
+      "cluster_id_source": "system_identifier",
+      "addr": "127.0.0.1",
+      "port": 5432,
+      "pg_version": 150014,
+      "role": "primary",
+      "perm_tier": "T0",
+      "capabilities": [
+        "instance_info"
+      ],
+      "databases": [
+        {
+          "name": "app",
+          "monitored": true
+        }
+      ],
+      "results": [
+        {
+          "check": "instance_info",
+          "ts": "2026-01-01T00:00:00Z",
+          "metrics": [
+            {
+              "name": "pg_up",
+              "value": 1,
+              "kind": "gauge"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

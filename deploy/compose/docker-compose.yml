@@ -1,0 +1,23 @@
+services:
+  timescaledb:
+    image: timescale/timescaledb:2.29.0-pg17
+    environment:
+      POSTGRES_PASSWORD: pglens
+      POSTGRES_USER: pglens
+      POSTGRES_DB: pglens
+  pglens-server:
+    image: ghcr.io/manprint/pglens-server:dev
+    depends_on: [timescaledb]
+    environment:
+      PGLENS_DSN: postgres://pglens:pglens@timescaledb:5432/pglens?sslmode=disable
+      PGLENS_BOOTSTRAP_TOKEN: dev-token
+    ports: ["8080:8080"]
+  pglens-agent:
+    image: ghcr.io/manprint/pglens-agent:dev
+    depends_on: [pglens-server]
+    volumes: ["agent-data:/var/lib/pglens", "/proc:/host/proc:ro", "/sys:/host/sys:ro"]
+    environment:
+      PGLENS_SERVER_URL: http://pglens-server:8080
+      PGLENS_BOOTSTRAP_TOKEN: dev-token
+volumes:
+  agent-data:

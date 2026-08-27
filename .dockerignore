@@ -1,0 +1,32 @@
+# Both Dockerfiles COPY the whole build context and run `make build`, which
+# only needs go.mod/go.sum, cmd/, and internal/ — everything below is
+# irrelevant to compiling the two binaries and only slows down (or, for
+# .git/.serena, potentially leaks into) the build context sent to the
+# daemon.
+.git/
+.github/
+.serena/
+.vscode/
+.idea/
+
+# Not needed to build the binaries
+docs/
+deploy/
+test/
+scripts/
+*.md
+
+# Build/test byproducts that might exist locally
+bin/
+dist/
+coverage.out
+coverage.html
+*.test
+*.out
+workload
+pglens-agent
+pglens-server
+
+# Lint/editor config, irrelevant inside the image
+.golangci.yml
+.editorconfig

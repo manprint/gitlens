@@ -1,0 +1,41 @@
+services:
+  pg:
+    image: timescale/timescaledb:2.29.0-pg17
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      # timescaledb must stay first in shared_preload_libraries (see base.yml
+      # for why): this image installs the timescaledb extension into every
+      # database by default, and overriding POSTGRES_INITDB_ARGS at all
+      # drops that default preload, crashing the container on startup with
+      # "extension timescaledb must be preloaded" the moment its own
+      # init script runs CREATE EXTENSION.
+      POSTGRES_INITDB_ARGS: "-c shared_preload_libraries=timescaledb,pg_stat_statements -c compute_query_id=on -c pg_stat_statements.track=all"
+    ports:
+      - "5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # pg_stat_statements is preloaded (POSTGRES_INITDB_ARGS above) but was
+      # never actually CREATE EXTENSIONed anywhere in this topology — every
+      # check depending on it (stat_statements, SYS-RESET-002, SYS-LOAD-008)
+      # saw "missing extension pg_stat_statements" until this was added.
+      - ../fixtures/sql/00_extensions.sql:/docker-entrypoint-initdb.d/00-extensions.sql
+      # monitoring_user.sql is mounted OUTSIDE docker-entrypoint-initdb.d: the
+      # shipped file needs a :'pw' psql variable no init-script runner
+      # supplies, so it must not be auto-run directly (which would fail and,
+      # since the postgres entrypoint aborts on any failing init script,
+      # take the whole container down with it) — init_monitoring_user.sh
+      # (which IS in docker-entrypoint-initdb.d) invokes it with that
+      # variable supplied.
+      - ../fixtures/sql/monitoring_user.sql:/opt/pglens/monitoring_user.sql
+      - ../fixtures/sql/init_monitoring_user.sh:/docker-entrypoint-initdb.d/01-monitoring.sh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  pgdata:

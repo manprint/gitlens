@@ -1,0 +1,6 @@
+# Agent binary mode: the pglens-agent binary runs as a host process,
+# not in a container. The harness (test/harness/harness.go) starts it via
+# os/exec against the published ports of pglens-server and PostgreSQL.
+#
+# This compose file is effectively empty because the agent is not a Docker service.
+# It is included for completeness and to document the deployment model.

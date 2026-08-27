@@ -1,0 +1,27 @@
+FROM golang:1.26 AS builder
+WORKDIR /src
+COPY . .
+RUN make build
+# distroless has no shell to mkdir/chown at runtime, and a `VOLUME` directive
+# for a path that doesn't already exist in the image gets created by Docker
+# as an empty root-owned directory — the "nonroot" user (below) then can't
+# write to it. Pre-create it here, in the builder stage that still has a
+# shell, and copy it across with the right ownership.
+RUN mkdir -p /pglens-data && chown 65532:65532 /pglens-data
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=builder /src/bin/pglens-agent /usr/local/bin/pglens-agent
+COPY --from=builder --chown=65532:65532 /pglens-data /var/lib/pglens
+# No VOLUME directive here (deliberately, found live running SYS-AGENT-002):
+# it would make Docker mount an anonymous volume at this path on every run
+# regardless of whether compose declares one, and `docker compose up
+# --force-recreate` PRESERVES anonymous volumes across a recreate by
+# default (that's the whole point of `--renew-anon-volumes`, which nothing
+# here passes) — silently defeating agent-container-no-volume.yml's entire
+# purpose of proving what happens with no persistent identity. The COPY
+# above still gives the directory correct ownership for both cases: a real
+# named volume (agent-container.yml) gets it copied in on first mount same
+# as any image directory; no volume at all (agent-container-no-volume.yml)
+# just keeps it as a normal, correctly-owned part of the writable layer.
+HEALTHCHECK CMD ["/usr/local/bin/pglens-agent", "--healthcheck"]
+USER nonroot
+ENTRYPOINT ["/usr/local/bin/pglens-agent"]

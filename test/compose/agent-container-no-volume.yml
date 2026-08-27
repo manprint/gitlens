@@ -1,0 +1,33 @@
+services:
+  pglens-agent:
+    image: ghcr.io/manprint/pglens-agent:dev
+    depends_on:
+      pglens-server:
+        condition: service_healthy
+    environment:
+      # No PGLENS_CONFIG/config mount was ever present here — the agent
+      # would fail LoadConfig and exit(1) immediately, and the
+      # PGLENS_*_INTERVAL vars below were dead configuration regardless
+      # (internal/agent/config.go never reads them; only PGLENS_SERVER_URL/
+      # PGLENS_BOOTSTRAP_TOKEN[_FILE] are real env overrides — see
+      # cmd/pglens-agent/run.go). Mirrors agent-container.yml's real config
+      # deliberately, minus the persistent volume: that absence is the
+      # entire point of this fragment (SYS-AGENT-002 — identity does not
+      # survive a restart without one).
+      PGLENS_CONFIG: /etc/pglens/agent.yaml
+      PGLENS_SERVER_URL: http://pglens-server:8080
+      PGLENS_BOOTSTRAP_TOKEN: dev-token
+    ports:
+      - "9187"
+    volumes:
+      - ../fixtures/agent-standalone.yaml:/etc/pglens/agent.yaml:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    # curl doesn't exist in the distroless image — see the identical fix in
+    # agent-container.yml/Dockerfile.agent.
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/pglens-agent", "--healthcheck"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
+      start_period: 5s

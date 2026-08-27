@@ -1,0 +1,60 @@
+services:
+  pg-primary:
+    image: timescale/timescaledb:2.29.0-pg17
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      # timescaledb must stay first in shared_preload_libraries — see the
+      # identical note in topo-standalone.yml/base.yml; overriding
+      # POSTGRES_INITDB_ARGS at all drops this image's default preload and
+      # crashes the container on its own CREATE EXTENSION init script.
+      POSTGRES_INITDB_ARGS: "-c shared_preload_libraries=timescaledb,pg_stat_statements -c compute_query_id=on -c pg_stat_statements.track=all -c wal_level=replica -c max_wal_senders=10 -c hot_standby=on"
+    ports:
+      - "5432"
+    volumes:
+      - pgdata-primary:/var/lib/postgresql/data
+      # pg_stat_statements is preloaded but was never CREATE EXTENSIONed —
+      # see the identical fix/comment in topo-standalone.yml.
+      - ../fixtures/sql/00_extensions.sql:/docker-entrypoint-initdb.d/00-extensions.sql
+      # monitoring_user.sql is mounted OUTSIDE docker-entrypoint-initdb.d and
+      # invoked via a wrapper that supplies its :'pw' psql variable — see the
+      # identical comment in topo-standalone.yml for why (an unsupplied
+      # variable is a syntax error, and the postgres entrypoint aborts the
+      # whole container on any failing init script).
+      - ../fixtures/sql/monitoring_user.sql:/opt/pglens/monitoring_user.sql
+      - ../fixtures/sql/init_monitoring_user.sh:/docker-entrypoint-initdb.d/01-monitoring.sh
+      - ../fixtures/sql/replica_setup.sh:/docker-entrypoint-initdb.d/02-replication.sh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  pg-standby:
+    image: timescale/timescaledb:2.29.0-pg17
+    depends_on:
+      pg-primary:
+        condition: service_healthy
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      PGDATA: /var/lib/postgresql/data
+    ports:
+      - "5432"
+    volumes:
+      - pgdata-standby:/var/lib/postgresql/data
+      - ../fixtures/sql/standby_init.sh:/docker-entrypoint-initdb.d/00-standby-init.sh
+    entrypoint: /docker-entrypoint-initdb.d/00-standby-init.sh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  pgdata-primary:
+  pgdata-standby:

@@ -1,0 +1,41 @@
+services:
+  timescaledb:
+    image: timescale/timescaledb:2.29.0-pg17
+    environment:
+      POSTGRES_PASSWORD: pglens
+      POSTGRES_USER: pglens
+      POSTGRES_DB: pglens
+      # timescaledb must stay first in shared_preload_libraries: overriding
+      # POSTGRES_INITDB_ARGS at all drops the image's own default (which
+      # preloads timescaledb), so it has to be listed explicitly here or the
+      # image's own init script fails with "extension timescaledb must be
+      # preloaded" the moment it tries to create the extension.
+      POSTGRES_INITDB_ARGS: "-c shared_preload_libraries=timescaledb,pg_stat_statements -c compute_query_id=on -c pg_stat_statements.track=all"
+    ports:
+      - "5432" # published so test/harness.DB() can connect from the host test process, not just from other containers
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pglens -d pglens"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  pglens-server:
+    image: ghcr.io/manprint/pglens-server:dev
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      PGLENS_DSN: postgres://pglens:pglens@timescaledb:5432/pglens?sslmode=disable
+      PGLENS_BOOTSTRAP_TOKEN: dev-token
+    ports:
+      - "8080"
+    # The distroless image has no shell or curl; the binary's own
+    # --healthcheck flag makes one real HTTP request to its /readyz and
+    # exits 0/1 accordingly (see cmd/pglens-server/main.go).
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/pglens-server", "--healthcheck"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
+      start_period: 5s

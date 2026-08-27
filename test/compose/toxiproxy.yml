@@ -1,0 +1,17 @@
+services:
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.9.0
+    ports:
+      - "8474"  # admin API
+      - "20000-20010"  # proxy ports for server and databases
+    # This image is a single static /toxiproxy binary with no shell and no
+    # curl, so a container-exec-based HEALTHCHECK (as originally written
+    # here) can never run at all — `docker compose ps` reported the same
+    # "curl: not found" failure forever, which waitHealthy() (see
+    # test/harness/harness.go) would have treated as permanently unhealthy.
+    # Real readiness is already checked from the host side in Go
+    # (Harness.waitToxiproxyReady, toxic.go), which is what InitToxiproxy()
+    # actually waits on before creating any proxies — no Docker healthcheck
+    # needed on top of that.
+    networks:
+      - default

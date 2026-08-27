@@ -1,0 +1,504 @@
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/manprint/pglens/internal/clock"
+)
+
+// Staleness implements the self-monitoring staleness evaluator described in
+// phase_04.md §3.6. It runs every 15s on an injectable clock, updates
+// pglens_up and pglens_agent_last_seen_seconds, and emits transition events
+// once per transition while holding a session-scoped advisory lock so two
+// replicas never emit duplicate events.
+
+const (
+	defaultExpectedInterval = 30 * time.Second
+	evaluatorInterval       = 15 * time.Second
+	noPrimaryThreshold      = 60 * time.Second
+)
+
+// ---------------------------------------------------------------------------
+// Simple in-memory metric primitives (no external Prometheus dependency).
+// They expose the counter/gauge names required by the spec and are used by
+// ingest/pipeline as well as the evaluator. Values are kept in-process; a
+// real Prometheus exposition would read from these globals.
+// ---------------------------------------------------------------------------
+
+type gaugeVec struct {
+	mu   sync.Mutex
+	vals map[string]float64
+}
+
+func newGaugeVec() *gaugeVec {
+	return &gaugeVec{vals: make(map[string]float64)}
+}
+
+func (g *gaugeVec) Set(key string, v float64) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.vals[key] = v
+}
+
+func (g *gaugeVec) Get(key string) float64 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.vals[key]
+}
+
+func (g *gaugeVec) Add(key string, v float64) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.vals[key] += v
+}
+
+type counterVec struct {
+	mu   sync.Mutex
+	vals map[string]float64
+}
+
+func (c *counterVec) Inc(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.vals[key]++
+}
+
+func (c *counterVec) Add(key string, v float64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.vals[key] += v
+}
+
+func (c *counterVec) Get(key string) float64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.vals[key]
+}
+
+type counter struct {
+	mu sync.Mutex
+	v  float64
+}
+
+func (c *counter) Inc() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.v++
+}
+
+func (c *counter) Add(v float64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.v += v
+}
+
+func (c *counter) Get() float64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.v
+}
+
+type gauge struct {
+	mu sync.Mutex
+	v  float64
+}
+
+func (g *gauge) Set(v float64) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.v = v
+}
+
+func (g *gauge) Add(v float64) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.v += v
+}
+
+func (g *gauge) Get() float64 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.v
+}
+
+// Metrics required by phase_04 §3.6. They are package-level so ingest and
+// pipeline can increment them without importing a separate metrics package.
+
+var (
+	pglensUpGauge                   = newGaugeVec()
+	pglensAgentLastSeenGauge        = newGaugeVec()
+	pglensIngestEnvelopesTotal      = &counterVec{vals: make(map[string]float64)}
+	pglensIngestRejectedTotal       = &counterVec{vals: make(map[string]float64)}
+	pglensSamplesTooOldTotal        = &counter{}
+	pglensAgentClockSkewSeconds     = &gauge{}
+	pglensSeriesTotalGauge          = newGaugeVec()
+	pglensCardinalityTruncatedTotal = &counter{}
+)
+
+// Exported helpers for other packages (ingest, pipeline) to update self-monitoring
+// counters. Keeping them here avoids a separate metrics package for phase 3.
+
+func IncIngestEnvelopes(result string) {
+	pglensIngestEnvelopesTotal.Inc(result)
+}
+
+func IncIngestRejected(reason string) {
+	pglensIngestRejectedTotal.Inc(reason)
+}
+
+func IncSamplesTooOld() {
+	pglensSamplesTooOldTotal.Inc()
+}
+
+func ObserveAgentClockSkew(seconds float64) {
+	pglensAgentClockSkewSeconds.Set(seconds)
+}
+
+func SetSeriesTotal(instanceID string, v float64) {
+	pglensSeriesTotalGauge.Set(instanceID, v)
+}
+
+func IncCardinalityTruncated() {
+	pglensCardinalityTruncatedTotal.Inc()
+}
+
+func boolToFloat(b bool) float64 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// isStaleUp reports whether lastSeen is within threshold of now, inclusive at the
+// boundary (exactly threshold is still up, one second past is down).
+func isStaleUp(lastSeen, now time.Time, threshold time.Duration) bool {
+	return !now.After(lastSeen.Add(threshold))
+}
+
+// ---------------------------------------------------------------------------
+// Staleness evaluator
+// ---------------------------------------------------------------------------
+
+// Staleness evaluates instance staleness and emits transition events under an
+// advisory lock.
+type Staleness struct {
+	pool     *pgxpool.Pool
+	clock    clock.Clock
+	interval time.Duration
+
+	mu sync.Mutex
+	// instanceUp tracks last emitted up state per instance_id string.
+	instanceUp map[string]bool
+	// clusterPrimarySeen tracks last time a primary was seen per cluster.
+	clusterPrimarySeen map[string]time.Time
+	// clusterNoPrimaryEmitted tracks whether no_primary_in_cluster already emitted.
+	clusterNoPrimaryEmitted map[string]bool
+
+	conn    *pgxpool.Conn
+	hasLock bool
+
+	ticker    clock.Ticker
+	stopCh    chan struct{}
+	doneCh    chan struct{}
+	stopOnce  sync.Once
+	startOnce sync.Once
+}
+
+// NewStaleness creates a Staleness evaluator.
+// Pool and clock may be nil in tests; clock defaults to system clock and
+// interval defaults to 30s (threshold 90s).
+func NewStaleness(pool *pgxpool.Pool, clk clock.Clock) *Staleness {
+	if clk == nil {
+		clk = clock.System()
+	}
+	return &Staleness{
+		pool:                    pool,
+		clock:                   clk,
+		interval:                defaultExpectedInterval,
+		instanceUp:              make(map[string]bool),
+		clusterPrimarySeen:      make(map[string]time.Time),
+		clusterNoPrimaryEmitted: make(map[string]bool),
+		stopCh:                  make(chan struct{}),
+		doneCh:                  make(chan struct{}),
+	}
+}
+
+// threshold returns 3*expected_interval, defaulting to 90s.
+func (s *Staleness) threshold() time.Duration {
+	iv := s.interval
+	if iv == 0 {
+		iv = defaultExpectedInterval
+	}
+	return 3 * iv
+}
+
+// ensureLeader acquires a dedicated session-scoped connection and tries to
+// hold the advisory lock. Two replicas must not both emit. The lock is held
+// on s.conn for the lifetime of the evaluator.
+func (s *Staleness) ensureLeader(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.pool == nil {
+		return nil
+	}
+	if s.hasLock && s.conn != nil {
+		return nil
+	}
+	if s.conn == nil {
+		conn, err := s.pool.Acquire(ctx)
+		if err != nil {
+			return fmt.Errorf("acquire conn for staleness lock: %w", err)
+		}
+		s.conn = conn
+	}
+	var locked bool
+	err := s.conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtext('pglens:staleness'))`).Scan(&locked)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			s.hasLock = false
+			return nil
+		}
+		return fmt.Errorf("try advisory lock: %w", err)
+	}
+	s.hasLock = locked
+	return nil
+}
+
+// emitEvent inserts a single event row. Caller must hold s.mu if it needs the
+// transition guarantee, but this helper does not acquire the mutex itself for
+// the DB operation to avoid holding it across network I/O; callers should
+// manage locking as needed. It always checks errors.
+func (s *Staleness) emitEvent(ctx context.Context, typ string, clusterID *int64, instanceID *uuid.UUID, payload map[string]any) error {
+	if s.pool == nil {
+		return nil
+	}
+	var payloadJSON []byte
+	var err error
+	if payload != nil {
+		payloadJSON, err = json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("marshal event payload: %w", err)
+		}
+	} else {
+		payloadJSON = []byte(`{}`)
+	}
+	var cidParam any
+	if clusterID != nil {
+		cidParam = *clusterID
+	}
+	var iidParam any
+	if instanceID != nil {
+		iidParam = *instanceID
+	}
+	tenantID := "default"
+	ts := s.clock.Now()
+	_, execErr := s.pool.Exec(ctx,
+		`INSERT INTO events (tenant_id, ts, type, cluster_id, instance_id, payload) VALUES ($1,$2,$3,$4,$5,$6::jsonb)`,
+		tenantID, ts, typ, cidParam, iidParam, string(payloadJSON))
+	if execErr != nil {
+		return fmt.Errorf("insert event %s: %w", typ, execErr)
+	}
+	return nil
+}
+
+// Evaluate performs a single staleness evaluation. It is safe to call
+// concurrently, but leader election ensures only one replica emits.
+func (s *Staleness) Evaluate(ctx context.Context) error {
+	if s.pool == nil {
+		return nil
+	}
+	if err := s.ensureLeader(ctx); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	hasLock := s.hasLock
+	s.mu.Unlock()
+	if !hasLock {
+		return nil
+	}
+
+	now := s.clock.Now()
+	threshold := s.threshold()
+
+	rows, err := s.pool.Query(ctx, `SELECT instance_id, cluster_id, last_seen, role, agent_id FROM instances`)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("query instances: %w", err)
+	}
+	defer rows.Close()
+
+	type instInfo struct {
+		id        uuid.UUID
+		clusterID int64
+		lastSeen  time.Time
+		role      string
+		agentID   uuid.UUID
+	}
+	var instances []instInfo
+	clusterHasPrimary := make(map[int64]bool)
+	clusterIDs := make(map[int64]struct{})
+
+	for rows.Next() {
+		var iid uuid.UUID
+		var cid int64
+		var lastSeen time.Time
+		var role string
+		var agentID uuid.UUID
+		if scanErr := rows.Scan(&iid, &cid, &lastSeen, &role, &agentID); scanErr != nil {
+			return fmt.Errorf("scan instance: %w", scanErr)
+		}
+		instances = append(instances, instInfo{id: iid, clusterID: cid, lastSeen: lastSeen, role: role, agentID: agentID})
+		clusterIDs[cid] = struct{}{}
+		if role == "primary" {
+			clusterHasPrimary[cid] = true
+		}
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		return fmt.Errorf("iterate instances: %w", rowsErr)
+	}
+
+	// Update gauges and emit transitions under lock to ensure once-per-transition.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, inst := range instances {
+		iidStr := inst.id.String()
+		up := isStaleUp(inst.lastSeen, now, threshold)
+
+		pglensUpGauge.Set(iidStr, boolToFloat(up))
+		pglensAgentLastSeenGauge.Set(iidStr, float64(inst.lastSeen.Unix()))
+
+		prevUp, seenBefore := s.instanceUp[iidStr]
+		if !seenBefore {
+			s.instanceUp[iidStr] = up
+			if !up {
+				// First observation already stale: emit down once.
+				cid := inst.clusterID
+				iidCopy := inst.id
+				if emitErr := s.emitEvent(ctx, "agent_down", &cid, &iidCopy, map[string]any{"instance_id": iidStr, "last_seen": inst.lastSeen}); emitErr != nil {
+					return emitErr
+				}
+				if emitErr := s.emitEvent(ctx, "instance_unreachable", &cid, &iidCopy, map[string]any{"instance_id": iidStr}); emitErr != nil {
+					return emitErr
+				}
+			}
+			continue
+		}
+		if prevUp != up {
+			s.instanceUp[iidStr] = up
+			cid := inst.clusterID
+			iidCopy := inst.id
+			if up {
+				if emitErr := s.emitEvent(ctx, "agent_up", &cid, &iidCopy, map[string]any{"instance_id": iidStr}); emitErr != nil {
+					return emitErr
+				}
+				if emitErr := s.emitEvent(ctx, "instance_reachable", &cid, &iidCopy, map[string]any{"instance_id": iidStr}); emitErr != nil {
+					return emitErr
+				}
+			} else {
+				if emitErr := s.emitEvent(ctx, "agent_down", &cid, &iidCopy, map[string]any{"instance_id": iidStr, "last_seen": inst.lastSeen}); emitErr != nil {
+					return emitErr
+				}
+				if emitErr := s.emitEvent(ctx, "instance_unreachable", &cid, &iidCopy, map[string]any{"instance_id": iidStr}); emitErr != nil {
+					return emitErr
+				}
+			}
+		}
+	}
+
+	// no_primary_in_cluster handling
+	for cid := range clusterIDs {
+		cidStr := fmt.Sprintf("%d", cid)
+		hasPrimary := clusterHasPrimary[cid]
+		lastSeen, ok := s.clusterPrimarySeen[cidStr]
+		if hasPrimary {
+			s.clusterPrimarySeen[cidStr] = now
+			s.clusterNoPrimaryEmitted[cidStr] = false
+			_ = ok
+			_ = lastSeen
+		} else {
+			if !ok || lastSeen.IsZero() {
+				if !ok {
+					s.clusterPrimarySeen[cidStr] = now
+				}
+				continue
+			}
+			if now.Sub(lastSeen) > noPrimaryThreshold && !s.clusterNoPrimaryEmitted[cidStr] {
+				cidCopy := cid
+				if emitErr := s.emitEvent(ctx, "no_primary_in_cluster", &cidCopy, nil, map[string]any{"cluster_id": cidStr}); emitErr != nil {
+					return emitErr
+				}
+				s.clusterNoPrimaryEmitted[cidStr] = true
+			}
+		}
+	}
+
+	return nil
+}
+
+// Start launches the evaluator goroutine that runs every 15s on the injected
+// clock. It is idempotent. The goroutine stops when ctx is cancelled or
+// Stop is called.
+func (s *Staleness) Start(ctx context.Context) {
+	s.startOnce.Do(func() {
+		ticker := s.clock.NewTicker(evaluatorInterval)
+		s.mu.Lock()
+		s.ticker = ticker
+		s.mu.Unlock()
+		go func() {
+			defer close(s.doneCh)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-s.stopCh:
+					return
+				case t := <-ticker.C():
+					_ = t
+					evalCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+					_ = s.Evaluate(evalCtx)
+					cancel()
+				}
+			}
+		}()
+	})
+}
+
+// Stop stops the evaluator and releases the advisory lock connection.
+// It is safe to call multiple times.
+func (s *Staleness) Stop() {
+	s.stopOnce.Do(func() {
+		close(s.stopCh)
+		// Wait briefly for goroutine to exit.
+		select {
+		case <-s.doneCh:
+		case <-time.After(2 * time.Second):
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.conn != nil {
+			unlockCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_, _ = s.conn.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtext('pglens:staleness'))`)
+			cancel()
+			s.conn.Release()
+			s.conn = nil
+		}
+		s.hasLock = false
+		if s.ticker != nil {
+			s.ticker.Stop()
+		}
+	})
+}

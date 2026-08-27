@@ -1,0 +1,12 @@
+[Unit]
+Description=pglens agent
+After=network.target
+[Service]
+ExecStart=/usr/local/bin/pglens-agent run --config /etc/pglens/agent.yaml
+StateDirectory=pglens
+DynamicUser=yes
+ProtectSystem=strict
+NoNewPrivileges=yes
+Restart=on-failure
+[Install]
+WantedBy=multi-user.target

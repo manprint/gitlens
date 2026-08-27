@@ -1,0 +1,14 @@
+services:
+  timescaledb:
+    image: timescale/timescaledb:2.29.0-pg17
+    environment:
+      POSTGRES_PASSWORD: pglens
+      POSTGRES_USER: pglens
+      POSTGRES_DB: pglens
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

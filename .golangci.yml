@@ -1,0 +1,40 @@
+version: "2"
+run:
+  timeout: 5m
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - ineffassign
+    - unused
+    - misspell
+    - bodyclose
+    - rowserrcheck
+    - sqlclosecheck
+    - contextcheck
+    - errorlint
+    - nilerr
+  settings:
+    errcheck:
+      exclude-functions:
+        - (*testing.T).Helper
+        - (*testing.T).Cleanup
+        - (*testing.T).Setenv
+        - (*testing.T).Log
+        - (*testing.T).Logf
+        - (*testing.T).Skip
+        - (*testing.T).FailNow
+        - (*testing.T).Fatal
+        - (*testing.T).Fatalf
+linters-settings: {}
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+      text: "Error return value of.*Setenv"
+formatters:
+  enable:
+    - gofmt
+    - goimports
