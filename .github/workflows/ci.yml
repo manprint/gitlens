@@ -25,7 +25,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: make fmt-check
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v7
         with:
           version: v2.1.6
           args: ./...
@@ -51,7 +51,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pg: ['15', '16', '17', '18']
+        # The documented PR/integration matrix is oldest + newest supported;
+        # the test suite's golden fixtures are versioned for these two majors.
+        pg: ['15', '18']
         profile: ['vanilla', 'rds-like']
     steps:
       - uses: actions/checkout@v4

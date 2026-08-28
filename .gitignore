@@ -1,8 +1,8 @@
 # binaries
 /bin/
 /dist/
-pglens-agent
-pglens-server
+/pglens-agent
+/pglens-server
 /workload
 
 # local indexes, caches, and temporary files
