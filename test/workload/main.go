@@ -331,7 +331,16 @@ func cmdRace(ctx context.Context, args []string) error {
 		return err
 	}
 
-	pool, err := pgxpool.New(ctx, *dsn)
+	poolCfg, err := pgxpool.ParseConfig(*dsn)
+	if err != nil {
+		return err
+	}
+	// The race workload is explicitly a 20-session contention generator.
+	// pgxpool's default limit is only a handful of connections on CI
+	// runners, which serializes most workers in the client and makes
+	// ClientRead outnumber the transactionid waits we intend to produce.
+	poolCfg.MaxConns = int32(*workers)
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		return err
 	}

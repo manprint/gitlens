@@ -344,7 +344,11 @@ buffer:
 checks:
   activity: { interval: 5s }
   database_stats: { interval: 5s }
-  stat_statements: { interval: 10s, top_n: 50 }
+  # Keep the cadence aligned with the cardinality workload's 65s rotations.
+  # Selector hysteresis is measured in scrape cycles, so a 10s cadence would
+  # forget each previous hot group before the next rotation and never reach
+  # MaxKeys in binary mode (the container fixture uses the same 60s cadence).
+  stat_statements: { interval: 60s, top_n: 50 }
 `, h.serverPort, identityPath, bufferPath, targetsYAML)
 	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
 		return fmt.Errorf("write agent config: %w", err)

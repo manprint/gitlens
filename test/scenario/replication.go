@@ -773,8 +773,10 @@ func init() {
 			// here) is what keeps instance_id stable across this rebuild.
 			if err := e.Compose(
 				"run", "--rm", "--user", "root", "--entrypoint", "/bin/bash", "pg-primary", "-c",
-				"rm -rf /var/lib/postgresql/data/* && chown postgres:postgres /var/lib/postgresql/data && "+
-					"gosu postgres pg_basebackup -h pg-standby -U postgres -D /var/lib/postgresql/data -Fp -Xs -R",
+				"until pg_isready -h pg-standby -U postgres -d postgres; do sleep 1; done && "+
+					"rm -rf /var/lib/postgresql/data/* && chown postgres:postgres /var/lib/postgresql/data && "+
+					"PGPASSWORD=postgres gosu postgres psql -h pg-standby -U postgres -d postgres -c \"SELECT pg_create_physical_replication_slot('standby1') WHERE NOT EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name='standby1')\" && "+
+					"PGPASSWORD=postgres gosu postgres pg_basebackup -h pg-standby -U postgres -S standby1 -D /var/lib/postgresql/data -Fp -Xs -R",
 			); err != nil {
 				return fmt.Errorf("rebuild old primary as a standby: %w", err)
 			}
@@ -783,7 +785,7 @@ func init() {
 			}
 
 			// The rebuilt instance actually streams from the new primary.
-			streamCtx, cancelStream := context.WithTimeout(ctx, 60*time.Second)
+			streamCtx, cancelStream := context.WithTimeout(ctx, 180*time.Second)
 			defer cancelStream()
 			oldPrimaryPG := e.PG("pg-primary")
 			if err := poll(streamCtx, 2*time.Second, func(ctx context.Context) (bool, error) {

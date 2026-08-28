@@ -30,6 +30,32 @@ func init() {
 				return fmt.Errorf("resolve monitored instance: %w", err)
 			}
 
+			// Establish a meaningful steady-state commit rate before the crash.
+			// On an otherwise idle CI database the baseline can be close to zero,
+			// so normal post-startup transactions look like a false 10x spike.
+			// This loop is deliberately owned by the scenario and uses the same
+			// pool that reconnects after PostgreSQL comes back.
+			loadCtx, cancelLoad := context.WithCancel(ctx)
+			loadDone := make(chan struct{})
+			defer func() {
+				cancelLoad()
+				<-loadDone
+			}()
+			pg := e.PG("pg")
+			go func() {
+				defer close(loadDone)
+				ticker := time.NewTicker(100 * time.Millisecond)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-loadCtx.Done():
+						return
+					case <-ticker.C:
+						_, _ = pg.Exec(loadCtx, "SELECT 1")
+					}
+				}
+			}()
+
 			// Wait for a real pre-restart rate to exist, not just a fixed
 			// sleep: database_stats.DefaultInterval() is 30s (agent config's
 			// per-check `interval:` setting is parsed but never actually

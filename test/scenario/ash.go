@@ -40,7 +40,12 @@ func init() {
 			// capacity is sized for ordinary test queries, not 10
 			// simultaneously held ones).
 			const sessions = 10
-			const sleepSeconds = 35 // > 30s asked for, to comfortably span three full 10s windows
+			// Leave enough wall-clock room for the sampler's fixed 10s windows
+			// after all sessions have connected.  A 35s sleep left only a narrow
+			// middle interval on a busy hosted runner, so edge windows could
+			// still dominate the average even though all sessions were observed
+			// active before measurement began.
+			const sleepSeconds = 60
 			startTS := time.Now().UTC()
 			var wg sync.WaitGroup
 			for i := 0; i < sessions; i++ {
