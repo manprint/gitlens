@@ -116,7 +116,7 @@ func TestIntASH011_SignificanceWarning(t *testing.T) {
 
 	instID := uuid.New()
 	cid := pgtype.ClusterID(12345)
-	ts := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	ts := time.Now().UTC().Truncate(time.Second)
 
 	// Case 1: ingest 59 ticks total
 	for i := 0; i < 59; i++ {
