@@ -182,7 +182,7 @@ dependencies are chosen once here so no phase re-decides them.
 | Unit (L1) | `make test` (`go test -race -shuffle=on ./...`) | every phase |
 | Coverage gate | `make coverage-gate` | from phase 1 |
 | Integration (L2) | `make test-integration` (`go test -tags=integration -race ./...`) | from phase 2 |
-| E2E (L3) | `make test-e2e` (`go test -tags=e2e -timeout=20m ./test/e2e/...`) | from phase 5 |
+| E2E (L3) | `make test-e2e` (`go test -tags=e2e -timeout=35m -count=1 ./test/e2e/... -run 'Smoke'`) / `make test-e2e-full` (`-timeout=45m`, no `-run` filter) | from phase 5 |
 
 **Acceptance:** the reference scenario is proven by `SYS-REPL-001` — a real
 `pg_ctl promote` on the standby, after which the API reports the roles inverted,

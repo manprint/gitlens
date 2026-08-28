@@ -99,9 +99,9 @@ purpose.
   1. Makefile:
      ```makefile
      test-e2e:
-     	$(GO) test -tags=e2e -timeout=25m -count=1 ./test/e2e/... -run 'Smoke'
+     	$(GO) test -tags=e2e -timeout=35m -count=1 ./test/e2e/... -run 'Smoke'
      test-e2e-full:
-     	$(GO) test -tags=e2e -timeout=60m -count=1 ./test/e2e/...
+     	$(GO) test -tags=e2e -timeout=45m -count=1 ./test/e2e/...
      e2e-stack-up:
      	./test/harness/stack.sh up
      e2e-stack-down:
@@ -114,9 +114,9 @@ purpose.
      which is how anyone will actually develop against this.
   2. CI job in `.github/workflows/pr.yml`:
      ```yaml
-       e2e-system:
+       e2e-smoke:
          runs-on: ubuntu-latest
-         timeout-minutes: 30
+         timeout-minutes: 45
          strategy:
            fail-fast: false
            matrix:
