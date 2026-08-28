@@ -5,9 +5,21 @@ pglens-agent
 pglens-server
 /workload
 
+# local indexes, caches, and temporary files
+.tokensave/
+.cache/
+/tmp/
+/reports/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
 # go
 *.test
 *.out
+*.prof
 coverage.out
 coverage.html
 
@@ -17,9 +29,15 @@ coverage.html
 
 # local state
 .env
+.env.*
+!.env.example
 *.local.yaml
+*.local.yml
 
 # editor / tool-local state
 .vscode/
 .idea/
 .serena/
+
+# local Docker overrides
+docker-compose.override.yml

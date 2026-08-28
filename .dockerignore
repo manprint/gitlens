@@ -5,9 +5,20 @@
 # daemon.
 .git/
 .github/
+.tokensave/
 .serena/
 .vscode/
 .idea/
+
+# Local credentials and environment files
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.crt
+*.secret
 
 # Not needed to build the binaries
 docs/
@@ -21,6 +32,8 @@ bin/
 dist/
 coverage.out
 coverage.html
+*.prof
+*.log
 *.test
 *.out
 workload

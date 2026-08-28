@@ -4,7 +4,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
 .PHONY: build fmt fmt-check lint test test-integration test-e2e test-e2e-full test-e2e-matrix \
-        coverage coverage-gate generate golden clean build-images
+        coverage coverage-gate generate golden clean build-images build-images-multiarch
 
 build:
 	CGO_ENABLED=0 $(GO) build $(LDFLAGS) -o bin/pglens-agent  ./cmd/pglens-agent
@@ -63,5 +63,5 @@ build-images:
 	docker build -f Dockerfile.server -t ghcr.io/manprint/pglens-server:dev --build-arg VERSION=$(VERSION) .
 
 build-images-multiarch:
-	docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.agent -t ghcr.io/manprint/pglens-agent:dev .
-	docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.server -t ghcr.io/manprint/pglens-server:dev .
+	docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.agent -t ghcr.io/manprint/pglens-agent:dev --build-arg VERSION=$(VERSION) .
+	docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.server -t ghcr.io/manprint/pglens-server:dev --build-arg VERSION=$(VERSION) .

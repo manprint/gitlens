@@ -1,0 +1,127 @@
+name: Release alpha images
+
+on:
+  push:
+    tags:
+      - 'v*-alpha.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Semantic version for the prerelease, for example v0.1.0-alpha.1'
+        required: true
+        default: v0.1.0-alpha.1
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  tests:
+    name: Complete CI gate
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  publish:
+    name: Publish multi-arch alpha images
+    needs: tests
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version || github.ref_name }}
+      REGISTRY: ghcr.io
+      IMAGE_OWNER: ${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate prerelease version
+        run: |
+          case "$VERSION" in
+            v*-alpha.*) ;;
+            *) echo "VERSION must match v*-alpha.* (got $VERSION)" >&2; exit 1 ;;
+          esac
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare agent image metadata
+        id: meta-agent
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/pglens-agent
+          tags: |
+            type=raw,value=${{ env.VERSION }}
+            type=raw,value=alpha
+          labels: |
+            org.opencontainers.image.title=pglens-agent
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      - name: Prepare server image metadata
+        id: meta-server
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/pglens-server
+          tags: |
+            type=raw,value=${{ env.VERSION }}
+            type=raw,value=alpha
+          labels: |
+            org.opencontainers.image.title=pglens-server
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      - name: Build and push agent image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.agent
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: VERSION=${{ env.VERSION }}
+          tags: ${{ steps.meta-agent.outputs.tags }}
+          labels: ${{ steps.meta-agent.outputs.labels }}
+          cache-from: type=gha,scope=pglens-agent
+          cache-to: type=gha,mode=max,scope=pglens-agent
+
+      - name: Build and push server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.server
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: VERSION=${{ env.VERSION }}
+          tags: ${{ steps.meta-server.outputs.tags }}
+          labels: ${{ steps.meta-server.outputs.labels }}
+          cache-from: type=gha,scope=pglens-server
+          cache-to: type=gha,mode=max,scope=pglens-server
+
+      - name: Verify published image versions
+        run: |
+          docker pull "ghcr.io/$IMAGE_OWNER/pglens-agent:$VERSION"
+          docker pull "ghcr.io/$IMAGE_OWNER/pglens-server:$VERSION"
+          test "$(docker run --rm "ghcr.io/$IMAGE_OWNER/pglens-agent:$VERSION" --version)" = "$VERSION"
+          test "$(docker run --rm "ghcr.io/$IMAGE_OWNER/pglens-server:$VERSION" --version)" = "$VERSION"
+
+      - name: Create GitHub prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "Release $VERSION already exists; images were refreshed."
+          else
+            gh release create "$VERSION" \
+              --repo "$GITHUB_REPOSITORY" \
+              --prerelease \
+              --title "pglens $VERSION" \
+              --generate-notes
+          fi

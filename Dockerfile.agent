@@ -1,7 +1,8 @@
 FROM golang:1.26 AS builder
+ARG VERSION=dev
 WORKDIR /src
 COPY . .
-RUN make build
+RUN make build VERSION="$VERSION"
 # distroless has no shell to mkdir/chown at runtime, and a `VOLUME` directive
 # for a path that doesn't already exist in the image gets created by Docker
 # as an empty root-owned directory — the "nonroot" user (below) then can't
@@ -9,6 +10,10 @@ RUN make build
 # shell, and copy it across with the right ownership.
 RUN mkdir -p /pglens-data && chown 65532:65532 /pglens-data
 FROM gcr.io/distroless/static-debian12:nonroot
+ARG VERSION=dev
+LABEL org.opencontainers.image.title="pglens-agent" \
+      org.opencontainers.image.version="$VERSION" \
+      org.opencontainers.image.source="https://github.com/manprint/gitlens"
 COPY --from=builder /src/bin/pglens-agent /usr/local/bin/pglens-agent
 COPY --from=builder --chown=65532:65532 /pglens-data /var/lib/pglens
 # No VOLUME directive here (deliberately, found live running SYS-AGENT-002):

@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Format and lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make fmt-check
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.1.6
+          args: ./...
+
+  unit:
+    name: Unit, build, vet, and coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make build
+      - run: go vet ./...
+      - run: make test
+      - run: make coverage-gate
+
+  integration:
+    name: Integration PG${{ matrix.pg }} / ${{ matrix.profile }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        pg: ['15', '16', '17', '18']
+        profile: ['vanilla', 'rds-like']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make test-integration
+        env:
+          PGLENS_PG_VERSIONS: ${{ matrix.pg }}
+          PGLENS_PG_PROFILE: ${{ matrix.profile }}
+
+  e2e:
+    name: E2E ${{ matrix.suite }} / ${{ matrix.agent_mode }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [smoke, full]
+        agent_mode: [container, binary]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make build-images
+      - name: Run E2E suite
+        env:
+          AGENT_MODE: ${{ matrix.agent_mode }}
+        run: |
+          if [ "${{ matrix.suite }}" = "smoke" ]; then
+            make test-e2e
+          else
+            make test-e2e-full
+          fi
+      - name: Upload E2E diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts-${{ matrix.suite }}-${{ matrix.agent_mode }}
+          path: test/e2e/_artifacts/
+          if-no-files-found: ignore
