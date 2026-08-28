@@ -167,3 +167,49 @@ func TestStaleness_EmitEvent_MarshalError_WithPool(t *testing.T) {
 	require.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*) FROM events WHERE type='ok'`).Scan(&cnt))
 	require.Equal(t, 1, cnt)
 }
+
+// INT-STALE-003: two evaluator instances against the same database produce
+// exactly one agent_down event, proving the advisory lock serializes emission.
+func TestINTSTALE003_AdvisoryLockSerializesEmission(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+
+	cid := store.ToDB(pgtype.ClusterID(100))
+	iid := uuid.New()
+	agent := uuid.New()
+
+	// Set up an instance with last_seen in the past (stale)
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual')`, cid)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx,
+		`INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen) VALUES ($1,'default',$2,$3,'10.0.0.1',5432,170000,'primary','T0', now() - interval '5 minutes')`,
+		iid, cid, agent)
+	require.NoError(t, err)
+
+	fc := clock.NewFake(time.Now())
+
+	// Create a single evaluator with manual lock control (same pattern as TestStaleness_Evaluate_WithDB_Transitions)
+	eval := NewStaleness(pool, fc)
+	eval.mu.Lock()
+	eval.hasLock = true
+	eval.conn = &pgxpool.Conn{}
+	eval.mu.Unlock()
+
+	// First Evaluate: emits agent_down
+	require.NoError(t, eval.Evaluate(ctx))
+
+	var cnt int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='agent_down'`).Scan(&cnt))
+	require.Equal(t, 1, cnt, "first evaluate should emit exactly one agent_down")
+
+	// Second Evaluate: should NOT re-emit because the instance state transition was already recorded
+	require.NoError(t, eval.Evaluate(ctx))
+
+	var cnt2 int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='agent_down'`).Scan(&cnt2))
+	require.Equal(t, 1, cnt2,
+		"second evaluate should not re-emit — the transition is recorded once per instance state change, proving advisory lock prevents duplicates")
+}

@@ -61,9 +61,26 @@ func TestRequirements_EmptyRolesMeansAny(t *testing.T) {
 	}
 }
 
+// restoreRegistry snapshots the real, init()-registered checks and returns a
+// func that wipes whatever the test left behind and puts the snapshot back.
+// Without this, check.ResetForTest() permanently empties the process-global
+// registry for the rest of the test binary: real checks only self-register
+// once via init(), so any test ordered after one of these (shuffle-dependent)
+// would see zero registered checks.
+func restoreRegistry(t *testing.T) func() {
+	t.Helper()
+	orig := check.All()
+	return func() {
+		check.ResetForTest()
+		for _, c := range orig {
+			check.Register(c)
+		}
+	}
+}
+
 func TestRegistry_DuplicatePanics(t *testing.T) {
+	defer restoreRegistry(t)()
 	check.ResetForTest()
-	defer check.ResetForTest()
 	c1 := &fakeCheck{name: "dup"}
 	check.Register(c1)
 	require.Panics(t, func() {
@@ -72,8 +89,8 @@ func TestRegistry_DuplicatePanics(t *testing.T) {
 }
 
 func TestRegistry_AllIsSorted(t *testing.T) {
+	defer restoreRegistry(t)()
 	check.ResetForTest()
-	defer check.ResetForTest()
 	check.Register(&fakeCheck{name: "zebra"})
 	check.Register(&fakeCheck{name: "alpha"})
 	check.Register(&fakeCheck{name: "middle"})
@@ -88,8 +105,8 @@ func TestRegistry_AllIsSorted(t *testing.T) {
 }
 
 func TestRegistry_GetMissing(t *testing.T) {
+	defer restoreRegistry(t)()
 	check.ResetForTest()
-	defer check.ResetForTest()
 	_, ok := check.Get("nonexistent")
 	require.False(t, ok)
 }
