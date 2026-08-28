@@ -26,7 +26,7 @@ if [ ! -f "$PGDATA/PG_VERSION" ]; then
   # PGAPPNAME (pg_basebackup's -c/--checkpoint only accepts fast|spread — an
   # earlier version of this script passed the application_name SET statement
   # to -c by mistake, which pg_basebackup rejected outright).
-  PGAPPNAME=pg-standby pg_basebackup -h pg-primary -U postgres -D "$PGDATA" -Fp -Xs -R
+  PGAPPNAME=pg-standby pg_basebackup -h pg-primary -U postgres -S standby1 -D "$PGDATA" -Fp -Xs -R
 
   # Fix permissions: this whole script runs as root (it replaces the base
   # image's own entrypoint, which normally does this before ever touching

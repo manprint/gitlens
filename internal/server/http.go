@@ -15,6 +15,10 @@ func NewRouter(auth *Auth, inv *Inventory, pipeline *Pipeline, api *API, topoAPI
 		_, _ = w.Write([]byte("ok"))
 	})
 	r.Get("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		if err := api.Ready(r.Context()); err != nil {
+			http.Error(w, "not ready", http.StatusServiceUnavailable)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})

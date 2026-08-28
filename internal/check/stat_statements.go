@@ -31,6 +31,17 @@ type statStatementsCheck struct {
 
 func (c *statStatementsCheck) Name() string { return "stat_statements" }
 
+// SetTopN applies the configured cardinality limit before scheduling begins.
+func (c *statStatementsCheck) SetTopN(topN int) {
+	if topN <= 0 {
+		return
+	}
+	c.mu.Lock()
+	c.selector = cardinality.NewSelector(cardinality.Options{TopN: topN})
+	c.cycle = 0
+	c.mu.Unlock()
+}
+
 func (c *statStatementsCheck) Requires() Requirements {
 	return Requirements{
 		Scope:      ScopeDatabase,
@@ -139,6 +150,7 @@ SELECT s.queryid, s.calls, s.total_exec_time, s.rows,
 	}
 	c.cycle++
 	cycle := c.cycle
+	selector := c.selector
 	c.mu.Unlock()
 
 	// A real, monotonically increasing cycle is what makes
@@ -153,8 +165,8 @@ SELECT s.queryid, s.calls, s.total_exec_time, s.rows,
 	// capping any single Select() call's result. Forget then prunes
 	// exactly what Hysteresis says should no longer be retained, so the
 	// check's own retention state stays bounded too, not just its output.
-	selected, truncated := c.selector.Select(cycle, candidates)
-	c.selector.Forget(cycle)
+	selected, truncated := selector.Select(cycle, candidates)
+	selector.Forget(cycle)
 	queryTexts := make(map[int64]string)
 
 	var metrics []pgtype.Metric

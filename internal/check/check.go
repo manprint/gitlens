@@ -82,6 +82,12 @@ type Check interface {
 	Scrape(ctx context.Context, t Target) (Result, error)
 }
 
+// TopNConfigurable is implemented by checks that expose a bounded top-N
+// selection policy through agent configuration.
+type TopNConfigurable interface {
+	SetTopN(topN int)
+}
+
 // Conn is the subset of *pgxpool.Conn a check needs. Narrowing the Target
 // interface to this instead of the concrete pgxpool type lets Scrape() be
 // exercised in unit tests against a mock, without a real database.

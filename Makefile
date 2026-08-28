@@ -17,7 +17,13 @@ fmt-check:
 	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "unformatted:"; echo "$$out"; exit 1; fi
 
 lint:
-	golangci-lint run
+	@if command -v golangci-lint >/dev/null 2>&1; then \
+		golangci-lint run ./...; \
+	elif test -x "$$(go env GOPATH)/bin/golangci-lint"; then \
+		"$$(go env GOPATH)/bin/golangci-lint" run ./...; \
+	else \
+		echo "golangci-lint is required (install it or put it on PATH)" >&2; exit 1; \
+	fi
 
 test:
 	$(GO) test -race -shuffle=on $(PKG)

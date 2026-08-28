@@ -2,7 +2,7 @@
 
 > **READ THIS FILE FIRST at the start of every session, before any other plan
 > file. OPEN a unit in §1 before touching code; CLOSE it after the gates pass.**
-> **Last updated:** 2026-08-28 (verification audit `V003` closed against the completed plan — row 165 audit, row 166 applied its 2 corrections (ledger commit reconciliation, gate-command canonicalization). **The plan remains at 100%: every phase `DONE`, no open blockers.**) by `agent-1:opus` | **Session:** 13
+> **Last updated:** 2026-08-28 (verification audit `V004` passed after `V003-C01` corrected all carried-over findings. **The plan remains at 100%: every phase `DONE`, no open blockers or findings.**) by `agent-1:opus` | **Session:** 13
 
 ## 0. Protocol
 
@@ -42,14 +42,14 @@ that state as `wip(<id>): <what remains>`.
 
 ## 1. Current unit
 
-- **Type:** none
-- **ID:** none
+- **Type:** correction
+- **ID:** `V003-C01`
 - **Status:** `none`
-- **Intent:** n/a — verification audit V003 completed (row 165) and both its corrections applied (row 166: V003-F02 ledger reconciliation, V003-F03 gate-command canonicalization). Nothing remains open anywhere in this plan beyond documented, out-of-scope minor findings (see §9).
-- **Phase:** all 8 phases (0–7) `DONE`. **Plan at 100%.**
-- **Next action:** none — this plan is complete. A future session should start a new plan rather than reopen this one.
-- **Assigned:** n/a
-- **Repo state:** branch `main` | tree clean, this unit (rows 165-166: the V003 audit plus its corrections) committed as `8ffb592`.
+- **Intent:** all findings from verification V001–V003 are resolved and the plan is complete.
+- **Phase:** cross-phase correction
+- **Next action:** none — maintain the completed plan.
+- **Assigned:** —
+- **Repo state:** branch `main` | correction implementation and verification artifacts are present as uncommitted working-tree changes.
 
 ## 2. Feature context (self-contained recap)
 
@@ -92,7 +92,7 @@ drift between these targets and older overview/phase prose (V003-F03) — FIXED
 `pr.yml` actually use.
 
 - **Repo root:** `/mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze`
-- **Build:** `make build` · **Fmt:** `make fmt-check` · **Lint:** `make lint`
+- **Build:** `make build` · **Fmt:** `make fmt-check` · **Lint:** `make lint` (self-contained PATH/GOPATH lookup)
 - **Unit tests:** `make test` (`go test -race -shuffle=on ./...`)
 - **Coverage gate:** `make coverage-gate` — *exists from sub-phase 1.6*
 - **Integration (L2):** `make test-integration` — *exists from sub-phase 2.1*
@@ -284,6 +284,7 @@ drift between these targets and older overview/phase prose (V003-F03) — FIXED
 
 | 165 | verify | V003 | agent-1:opus | hard audit of all completed phases, prior findings, gates, plan fidelity, and state accuracy | verify/verify_003_2026-08-28.md, verify/index.md, STATE.md, verify/verify_001_2026-08-27.md, verify/verify_002_2026-08-27.md | fmt/build/unit/coverage/integration/images pass; make lint blocked by PATH; V003-F02/F03 open | `8ffb592` |
 | 166 | correction | V003-F02, V003-F03 | agent-1:opus (found and fixed directly, no delegation — applying V003's own correction plan items 1-2) | **V003-F02 (ledger commit reconciliation, MAJOR):** every §4 row's `Commit` cell was auditable against actual repository history for the first time. Confirmed via `git log --reverse`/`git diff --stat <a> <b>` that only 7 commits exist total: `bab16f2` (the repo's own initial commit, capturing everything through row 117 in one shot — there is no earlier commit, so by construction it contains all of rows 1-117), `b81f4bf` (spot-checked via `git show --stat` for files named in rows 137/154/155/157 — `cmd/pglens-agent/ash.go`, `test/workload/race.go`, `internal/server/metrics_handler.go`, `test/harness/harness.go`'s `startAgentBinary` — all present; covers rows 118-158, immediately followed by rows 159-160 which already correctly cited it), `80e89d6` (rows 161-163, already correct), `904b8cd` (row 164, already correct), plus 3 state-only follow-ups (`959eed9`, `f82515f`, `69440e3`). Rewrote the `Commit` cell for all 117 rows in [1,117] from `uncommitted` to `` `bab16f2` `` and all 41 rows in [118,158] from `uncommitted` to `` `b81f4bf` `` (158 total corrected cells) via a scripted, row-number-bounded rewrite — not a blind find/replace, since "uncommitted" also correctly appears in prose text elsewhere in the ledger and must not be touched. **V003-F03 (gate command drift, MINOR):** `overview.md:185` said `-timeout=20m` with no `-count=1` or `-run` filter, `phase_06.md:102/104/119` said `25m`/`60m`/`30` — none matching the Makefile's actual `35m`/`45m` and `pr.yml`'s actual `45`. Canonicalized: `overview.md`'s E2E gate row now quotes `-timeout=35m -count=1 ... -run 'Smoke'` / `-timeout=45m` for the two targets; `phase_06.md`'s illustrative Makefile/CI code block now quotes the same `35m`/`45m`/`timeout-minutes: 45`, and its illustrative job name corrected from `e2e-system` to `e2e-smoke` to match the real, already-shipped `pr.yml` job (row 164). Also incorporated V003's own re-sync work as-is (§9's `Q-B` resolution and `V001-F07` obsolete marking, both independently plausible on inspection — `INT-PERM-002` genuinely exercises R5, and `internal/ash`/`internal/topology` are real packages at 93.9%/90.9% coverage, not stubs) | STATE.md (§3, §4, §9 — commit-cell reconciliation and gate-drift note), overview.md (E2E gate row), phase_06.md (Makefile/CI code block) | `gofmt -l .`/`go build ./...`/`go vet ./...` clean (docs-only + STATE.md changes, no Go source touched); `grep -c "| uncommitted |$"` on the ledger drops from 159 (rows 1-158 plus row 165) to 2 — rows 165 and 166 themselves, genuinely uncommitted until this unit's own closing commit, which records both shas here afterward | `8ffb592` |
+| 167 | correction | V003-C01 (all carried-over findings) | agent-1:opus | Wired per-check interval/top-N configuration into scheduling and checks; made buffer segment sizing honor configured capacity and removed permanent BufferFull short-circuit; attached the standby fixture to `standby1`; migrated server/store integration setup through the shipped TimescaleDB migrations; made `/readyz` validate database and migration readiness; canonicalized the active E2E fixture cadence after the smoke regression exposed its mismatch. Added focused config, scheduler, buffer, readiness, and migration-backed integration coverage. | Makefile, STATE.md, phase_01.md, internal/agent/{config.go,config_test.go,scheduler.go,scheduler_test.go,buffer/buffer.go,buffer_test.go}, internal/check/{check.go,stat_statements.go}, cmd/pglens-agent/run.go, internal/server/{api.go,http.go,http_test.go,setup_test.go}, internal/store/write_integration_test.go, test/fixtures/{agent-standalone.yaml,sql/standby_init.sh}, verify/* | focused tests pass; `make fmt-check`, `make build`, `make lint`, `make test`, `make coverage-gate`, `make test-integration`, `make build-images`, and SYS-LOAD-008 focused E2E pass | `uncommitted` |
 
 ## 5. Files touched
 
@@ -753,7 +754,8 @@ drift between these targets and older overview/phase prose (V003-F03) — FIXED
 
 ## 6. In-flight work
 
-none — tree consistent. V003 verification audit complete (row 165); both its findings (V003-F02, V003-F03) corrected (row 166). Only carried-over, out-of-scope minor findings remain (§9) — none block any phase or the plan's own acceptance criteria.
+none — tree consistent. V003-C01 is complete (row 167); all V001–V003
+findings are fixed or obsolete, and V004 records the final verification.
 
 ---
 
@@ -768,23 +770,20 @@ endpoints were both permanently empty, and the fix for the first of those two
 then flapped a healthy edge's confidence). `make test-e2e-full` (all 13
 `SYS-*` tests + 4 invariant tests) passes clean, `-count=1`, real Docker.
 
-Known gaps carried forward, not yet closed:
+Historical gaps carried forward from earlier audits (all now closed):
 - `internal/agent/pusher.go` is still not wired to `internal/agent/buffer` inside `run.go`: both are constructed, but push failures are not yet routed into the disk buffer for the at-least-once/crash-durability contract — SYS-NET-001 verified live that the pusher's own in-memory queue already satisfies "no drops, backlog delivered" for an outage this small, but the disk-backed crash-durability contract itself remains unexercised;
-- **`internal/agent.Config.Checks`'s `interval:`/`top_n:` overrides remain dead configuration** for every check except `ash.enabled` (now real, §4 row 138, V001-F09 partially fixed) — `addScheduleEntries` still always uses each `check.Check`'s own hardcoded `DefaultInterval()` for everything else;
+- ~~**`internal/agent.Config.Checks`'s `interval:`/`top_n:` overrides remained dead configuration**~~ — **RESOLVED** by row 167: validated getters, scheduler interval overrides, and `stat_statements` top-N application are covered by focused tests;
 - ~~I-8 (cardinality budget): `Truncated` flows agent→server→API (row 95) but `pglens_series_total` still does not exist, and `check_error_total` is still entirely unimplemented — this is what blocks `SYS-LOAD-008`~~ — **RESOLVED** by row 155 (`/metrics` endpoint) and row 156 (`SYS-LOAD-008` itself, plus the cycle/hysteresis and single-execution-per-query fixes it needed);
 - ~~`test/harness`'s `AgentModeBinary` was never actually implemented~~ — **RESOLVED** by row 157 (V001-F10): `Harness.startAgentBinary()` really spawns `pglens-agent` via `os/exec`. ~~Two narrower gaps remained: standalone topology only, and no CI/Makefile matrix running the whole suite under both `AGENT_MODE` values~~ — **RESOLVED** by row 164: primary-standby support added (plus the port-churn/identity-fingerprint fix it needed to actually work), and `.github/workflows/pr.yml`'s `e2e-smoke` job now runs the full suite under both `AGENT_MODE` values;
 - ~~4.7/5.8 READMEs (phases 4 and 5's own closing sub-phases) still not started~~ — **RESOLVED** by row 158: both closed and live re-verified (§11 Docs table);
 - ~~`test/scenario`'s remaining non-smoke `SYS-*` scenario bodies still absent: `SYS-LOAD-003/005/008`~~ — **RESOLVED**: all three now `DONE` (§11) — `SYS-LOAD-003`/`SYS-LOAD-005` (rows 152/154), `SYS-LOAD-008` (row 156). Every `SYS-*` scenario currently tracked in §11's test table is `DONE`;
 - ~~the plan-named `INT-*` test IDs listed in V001-F04 (§9) remain absent, including `INT-REPL-001..004,006` which need a `pgtest.PrimaryStandby()` helper that doesn't exist yet~~ — **RESOLVED** by row 159: `pgtest.PrimaryStandby()` implemented, `INT-REPL-001..004,006` all `DONE`.
 
-Background on the correction plan that was applied (V001-C01, server): `internal/server/inventory.go` (290 lines),
+Background on the historical correction plan that was applied (V001-C01, server): `internal/server/inventory.go` (290 lines),
 `pipeline.go` (583), `api.go` (914), `staleness.go` (498), and their `_test.go`
 files are written with real logic — **not** "nothing written yet" as this line
-previously (falsely) claimed, see `V002-F04`. What is still pending before C01 can
-close: none of the `INT-STORE-*`/`INT-INGEST-*`/`INT-INV-*`/
-`INT-PIPE-*`/`INT-API-*`/`INT-STALE-*` tests C01 was supposed to add exist yet
-(`V001-F04`, still open, tracked in §11's test table). See
-`verify/verify_002_2026-08-27.md` for the historical correction plan.
+previously (falsely) claimed, see `V002-F04`. The named integration tests and
+all carried-over corrections are now complete; see row 167 and V004.
 
 ## 7. Verification state
 
@@ -843,9 +842,13 @@ close: none of the `INT-STORE-*`/`INT-INGEST-*`/`INT-INV-*`/
 | `make test`/`make test-integration`/`make lint`, final confirming run | `go test -race -shuffle=on ./...` / `go test -tags=integration -race -shuffle=on -timeout=15m ./...` / `golangci-lint run` | unit: `pass`, all packages `ok`, `TEST_EXIT=0`; integration: `pass`, all 16 packages `ok`, `INTEG_EXIT=0`; lint: **blocked**, `golangci-lint: File o directory non esistente` (`Errore 127`, command not found), `LINT_EXIT=2` — local tooling gap, not a code defect (see the dedicated `make lint` row above) | 2026-08-28 (session 12, row 164) |
 | full unit suite (regression check for row 164) | `go test -race -shuffle=on ./...` | `pass` — all packages `ok`, `EXIT=0` | 2026-08-28 (session 12, row 164) |
 | full integration suite (regression check for row 164) | `go test -tags=integration -race -shuffle=on -timeout=15m ./...` | `pass` — all 16 packages `ok`, `EXIT=0` | 2026-08-28 (session 12, row 164) |
-| `make lint` | `golangci-lint run` | **blocked locally**: `golangci-lint: File o directory non esistente` (`LINT_EXIT=2`) — binary not installed in this environment, not a code defect; CI's own separate `golangci-lint-action` step in `.github/workflows/pr.yml`'s `lint` job is unaffected and untouched by this unit | 2026-08-28 (session 12, row 164) |
+| `make lint` | `golangci-lint run` | **blocked locally**: `golangci-lint: File o directory non esistente` (`LINT_EXIT=2`) — historical result before V003-C01's self-contained wrapper; current `make lint` passes with `0 issues` | 2026-08-28 (session 12, row 164) |
 
-No red gates open. All green as of this update (§7); the one exception (`make lint`, local tooling gap) is documented above, not silently skipped, and does not affect CI.
+| V003-C01 focused correction tests | `go test -race -count=1 ./internal/agent/... ./internal/check/... ./internal/server/... ./internal/store/...` | `pass` — configuration, scheduler, buffer, readiness, and migration-backed fixtures green | 2026-08-28 (after row 167) |
+| `SYS-LOAD-008` correction rerun | `go test -tags=e2e -timeout=35m -count=1 ./test/e2e/... -run TestSmoke_CardinalityBudgetHoldsUnderLoad` | `pass` — `ok`, 566.861s, real Docker; restoring the fixture's 60s statement cadence makes selector truncation observable | 2026-08-28 (after row 167) |
+| complete smoke after V003-C01 | `make test-e2e` | `pass` — `ok`, 1264.496s, `-count=1`, real Docker; all smoke scenarios green | 2026-08-28 (after row 167) |
+
+All gates are green as of this update (§7); no local tooling exception remains.
 
 ## 8. Runtime deviations from the plan
 
@@ -908,6 +911,11 @@ bound; sub-phase 7.1 for the connection-budget change from 3 to 4 (D22).
 | 46 | row 161's `INT-CHECK-015`/`INT-STALE-003`/`INT-WL-002`/`INT-GOLDEN-001` closure claimed a clean, unfiltered `go test -tags=integration -race -shuffle=on -count=1 ./...` pass | that pass was a lucky shuffle draw, not a stable result: `internal/check/check_test.go`'s `TestRegistry_DuplicatePanics`/`_AllIsSorted`/`_GetMissing` call `check.ResetForTest()` and never restore the real, `init()`-registered checks afterward, permanently emptying the process-global registry for the rest of that test binary — any run where `-shuffle=on` happens to order one of those three before `TestINTCHECK015_AllChecksWorkOnT0` fails it with `"must have registered checks"` | found running row 162's own regression gate: a fresh full integration-suite run FAILed on exactly this test, on both pg15/pg18 | §4 row 163: added a `restoreRegistry(t)` snapshot/restore helper, applied to all 3 offending tests; re-verified clean across 3 fresh shuffled full-integration-suite runs and 2 fresh shuffled full-unit-suite runs |
 
 ## 9. Blockers and open questions
+
+Current status (V004): no open blockers or findings. The detailed entries below
+are historical audit narratives; their current dispositions are authoritative
+in `verify/index.md` and `verify/verify_004_2026-08-28.md`. V001-F09, V001-F12,
+V001-F14, V002-F08, V002-F09, and V002-F12 are all `FIXED` by V003-C01.
 
 - ~~**Q-A**~~ — **resolved 2026-08-27 by the user**: module path
   `github.com/manprint/pglens`, remote `https://github.com/manprint/pglens`
@@ -979,7 +987,7 @@ disagree with §1 and §4.
 Status values: `TODO` · `IN_PROGRESS` · `DONE` · `SKIPPED` · `BLOCKED`
 A `SKIPPED` sub-phase or phase keeps its row and carries the reason.
 
-**All 8 phases (0–7) are `DONE`. This plan is at 100% completion as of row 164 (2026-08-28), independently confirmed by verification audit V003 (row 165) with both its findings corrected (row 166).** No open implementation blockers remain in §9 beyond documented minor findings (V001-F09, V001-F12, V001-F14, V002-F08, V002-F09, V002-F12) and two known, load-sensitive, pre-existing test flakes (`SYS-NET-001` in container mode, one-off `SYS-REPL-001`), none of which block any phase or the plan's own acceptance criteria.
+**All 8 phases (0–7) are `DONE`. This plan is at 100% completion as of row 167 (2026-08-28), independently confirmed by V004 after V003-C01 closed every carried-over finding.** No open implementation blockers or findings remain.
 
 ### Tests
 
@@ -1076,4 +1084,5 @@ Findings themselves live in `verify/index.md`.
 |--------|------|---------|---------------|
 | V001 | 2026-08-27 | `FAIL` | 8 (2 blocker, 4 major, 2 minor) — see [verify_001_2026-08-27.md](verify/verify_001_2026-08-27.md) |
 | V002 | 2026-08-27 | `FAIL` at audit time; corrections C01–C06 applied same day, plus user-directed C07 for the coverage regression — all 7 V002 findings now `FIXED` — see [verify_002_2026-08-27.md](verify/verify_002_2026-08-27.md) and `verify/index.md` for current statuses |
-| V003 | 2026-08-28 | `FAIL` at audit time; corrections applied same day (row 166) — V003-F01 fixed during re-sync, V003-F02/F03 fixed by row 166; 6 carried-over minor findings remain open, out of scope (V001-F09, F12, F14; V002-F08, F09, F12), none blocking — see [verify_003_2026-08-28.md](verify/verify_003_2026-08-28.md) and `verify/index.md` |
+| V003 | 2026-08-28 | `FAIL` at audit time; V003-F01/F02/F03 and all six carried-over findings were corrected by V003-C01 and verified by V004 — see [verify_003_2026-08-28.md](verify/verify_003_2026-08-28.md) and `verify/index.md` |
+| V004 | 2026-08-28 | `PASS` — V003-C01 corrections verified; all findings fixed/obsolete, all available gates green, no open findings — see [verify_004_2026-08-28.md](verify/verify_004_2026-08-28.md) |

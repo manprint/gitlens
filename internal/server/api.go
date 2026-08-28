@@ -51,6 +51,26 @@ func (a *API) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/statements", a.handleStatements)
 }
 
+// Ready verifies that the database is reachable and the complete migration
+// set has been applied. Liveness remains independent of this check.
+func (a *API) Ready(ctx context.Context) error {
+	if a == nil || a.pool == nil {
+		return errors.New("database pool unavailable")
+	}
+	var one int
+	if err := a.pool.QueryRow(ctx, "SELECT 1").Scan(&one); err != nil {
+		return fmt.Errorf("database ping: %w", err)
+	}
+	var migrated bool
+	if err := a.pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM schema_migrations)").Scan(&migrated); err != nil {
+		return fmt.Errorf("migration status: %w", err)
+	}
+	if !migrated {
+		return errors.New("database migrations are not applied")
+	}
+	return nil
+}
+
 // ----- helpers -----
 
 type apiError struct {

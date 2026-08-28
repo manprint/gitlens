@@ -207,7 +207,7 @@
      	$(GO) test -tags=integration -race -shuffle=on $(PKG)
 
      test-e2e:
-     	$(GO) test -tags=e2e -timeout=20m ./test/e2e/...
+	     $(GO) test -tags=e2e -timeout=35m -count=1 ./test/e2e/... -run 'Smoke'
 
      coverage:
      	$(GO) test -race -coverprofile=coverage.out -covermode=atomic $(PKG)

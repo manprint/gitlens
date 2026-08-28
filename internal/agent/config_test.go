@@ -65,6 +65,31 @@ checks:
 	require.Equal(t, 15*time.Second, cfg.GetParsedPushInterval())
 }
 
+func TestConfig_ParsesBufferAndCheckOverrides(t *testing.T) {
+	yaml := `
+server:
+  url: http://localhost:8080
+  token: test-token
+identity_path: /var/lib/pglens/identity.json
+buffer:
+  path: /var/lib/pglens/buffer
+  max_size: 64KiB
+  max_age: 2h
+targets:
+  - name: pg-app
+    dsn: postgres://pglens@localhost/postgres
+checks:
+  activity:
+    interval: 2s
+    top_n: 7
+`
+	cfg, err := LoadConfig(writeConfigFile(t, yaml))
+	require.NoError(t, err)
+	require.Equal(t, int64(64*1024), cfg.GetParsedBufferMaxSize())
+	require.Equal(t, 2*time.Hour, cfg.GetParsedBufferMaxAge())
+	require.Equal(t, 2*time.Second, cfg.GetCheckInterval("activity"))
+}
+
 // TestConfig_EnvOverrides verifies that environment variables override file settings.
 func TestConfig_EnvOverrides(t *testing.T) {
 	yaml := `

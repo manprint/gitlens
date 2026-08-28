@@ -58,6 +58,7 @@ type schedEntry struct {
 	target   check.Target
 	check    check.Check
 	database string // empty for instance scope
+	interval time.Duration
 	breaker  *Breaker
 	jitter   time.Duration
 }
@@ -102,6 +103,12 @@ func NewScheduler(opts ScheduleOptions) *Scheduler {
 
 // AddEntry registers a (target, check, database?) entry. Must be called before Start().
 func (s *Scheduler) AddEntry(target check.Target, c check.Check, database string) {
+	s.AddEntryWithInterval(target, c, database, 0)
+}
+
+// AddEntryWithInterval registers an entry with an optional configuration
+// override. A non-positive interval uses the check's implementation default.
+func (s *Scheduler) AddEntryWithInterval(target check.Target, c check.Check, database string, interval time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -115,10 +122,12 @@ func (s *Scheduler) AddEntry(target check.Target, c check.Check, database string
 		s.breaker[c.Name()] = br
 	}
 
+	if interval <= 0 {
+		interval = c.DefaultInterval()
+	}
 	jitter := time.Duration(0)
 	if !s.noJitter {
 		// Jitter up to one interval per entry
-		interval := c.DefaultInterval()
 		if interval > 0 {
 			jitter = time.Duration(rand.Int63n(int64(interval)))
 		}
@@ -128,6 +137,7 @@ func (s *Scheduler) AddEntry(target check.Target, c check.Check, database string
 		target:   target,
 		check:    c,
 		database: database,
+		interval: interval,
 		breaker:  br,
 		jitter:   jitter,
 	})
@@ -199,7 +209,7 @@ func (s *Scheduler) run(ctx context.Context) {
 }
 
 func (s *Scheduler) runEntry(ctx context.Context, entry schedEntry) {
-	interval := entry.check.DefaultInterval()
+	interval := entry.interval
 	if interval == 0 {
 		interval = 1 * time.Second
 	}

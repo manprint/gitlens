@@ -128,6 +128,26 @@ func TestScheduler_RunsAtInterval(t *testing.T) {
 	}
 }
 
+func TestScheduler_AddEntryWithIntervalOverride(t *testing.T) {
+	s := NewScheduler(ScheduleOptions{
+		MaxWorkers: 1, NoJitter: true, Clock: clock.System(), ShutdownTimeout: 5 * time.Second,
+	})
+	mc := &mockCheck{name: "overridden", interval: time.Hour, timeout: time.Second}
+	s.AddEntryWithInterval(&mockTarget{name: "target", conn: &mockConn{}}, mc, "", 20*time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+	select {
+	case <-s.Results():
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("configured interval was not applied")
+	}
+}
+
 // TestScheduler_DatabaseScopedEntry_OverridesTargetDatabase proves a
 // ScopeDatabase entry's Scrape() sees the entry's own discovered database
 // name via t.Database(), not the target's own name — the two are

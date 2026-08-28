@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,7 +20,10 @@ type Config struct {
 	Checks       ChecksConfig   `yaml:"checks"`
 
 	// Parsed versions for convenience
-	parsedPushInterval time.Duration
+	parsedPushInterval   time.Duration
+	parsedBufferMaxSize  int64
+	parsedBufferMaxAge   time.Duration
+	parsedCheckIntervals map[string]time.Duration
 }
 
 // ServerConfig configures the server connection.
@@ -134,6 +138,41 @@ func (c *Config) validate() error {
 	if c.Buffer.Path == "" {
 		return fmt.Errorf("validation: buffer.path is required")
 	}
+	c.parsedBufferMaxSize = 512 * 1024 * 1024
+	if c.Buffer.MaxSize != "" {
+		size, err := parseByteSize(c.Buffer.MaxSize)
+		if err != nil {
+			return fmt.Errorf("validation: buffer.max_size: %w", err)
+		}
+		c.parsedBufferMaxSize = size
+	}
+	c.parsedBufferMaxAge = 6 * time.Hour
+	if c.Buffer.MaxAge != "" {
+		age, err := time.ParseDuration(c.Buffer.MaxAge)
+		if err != nil || age <= 0 {
+			if err == nil {
+				err = fmt.Errorf("must be greater than zero")
+			}
+			return fmt.Errorf("validation: buffer.max_age: %w", err)
+		}
+		c.parsedBufferMaxAge = age
+	}
+	c.parsedCheckIntervals = make(map[string]time.Duration, len(c.Checks))
+	for name, check := range c.Checks {
+		if check.Interval != "" {
+			interval, err := time.ParseDuration(check.Interval)
+			if err != nil || interval <= 0 {
+				if err == nil {
+					err = fmt.Errorf("must be greater than zero")
+				}
+				return fmt.Errorf("validation: checks.%s.interval: %w", name, err)
+			}
+			c.parsedCheckIntervals[name] = interval
+		}
+		if check.TopN < 0 {
+			return fmt.Errorf("validation: checks.%s.top_n must be >= 0", name)
+		}
+	}
 
 	// Validate targets
 	if len(c.Targets) == 0 {
@@ -162,6 +201,51 @@ func (c *Config) validate() error {
 // GetParsedPushInterval returns the parsed push interval duration.
 func (c *Config) GetParsedPushInterval() time.Duration {
 	return c.parsedPushInterval
+}
+
+// GetParsedBufferMaxSize returns the validated buffer size limit.
+func (c *Config) GetParsedBufferMaxSize() int64 { return c.parsedBufferMaxSize }
+
+// GetParsedBufferMaxAge returns the validated buffer age limit.
+func (c *Config) GetParsedBufferMaxAge() time.Duration { return c.parsedBufferMaxAge }
+
+// GetCheckInterval returns a validated per-check interval, or zero when the
+// check uses its implementation default.
+func (c *Config) GetCheckInterval(name string) time.Duration {
+	return c.parsedCheckIntervals[name]
+}
+
+func parseByteSize(raw string) (int64, error) {
+	s := strings.TrimSpace(raw)
+	units := []struct {
+		suffix string
+		factor int64
+	}{
+		{"GIB", 1 << 30}, {"MIB", 1 << 20}, {"KIB", 1 << 10},
+		{"GB", 1e9}, {"MB", 1e6}, {"KB", 1e3}, {"B", 1},
+	}
+	upper := strings.ToUpper(s)
+	factor := int64(1)
+	number := upper
+	for _, unit := range units {
+		if strings.HasSuffix(upper, unit.suffix) {
+			factor = unit.factor
+			number = strings.TrimSpace(upper[:len(upper)-len(unit.suffix)])
+			break
+		}
+	}
+	n, err := strconv.ParseInt(number, 10, 64)
+	if err != nil || n <= 0 {
+		if err == nil {
+			err = fmt.Errorf("must be greater than zero")
+		}
+		return 0, fmt.Errorf("invalid size %q: %w", raw, err)
+	}
+	maxInt64 := int64(^uint64(0) >> 1)
+	if n > maxInt64/factor {
+		return 0, fmt.Errorf("size %q overflows int64", raw)
+	}
+	return n * factor, nil
 }
 
 // GetToken returns the server token.

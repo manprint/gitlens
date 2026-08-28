@@ -26,7 +26,7 @@ func getStoreTestPool(t *testing.T) *pgxpool.Pool {
 		return storeTestPool
 	}
 	ctx := context.Background()
-	c, err := postgres.Run(ctx, "postgres:17-alpine",
+	c, err := postgres.Run(ctx, "timescale/timescaledb:2.29.0-pg17",
 		postgres.WithDatabase("test"),
 		postgres.WithUsername("postgres"),
 		postgres.WithPassword("postgres"),
@@ -43,22 +43,9 @@ func getStoreTestPool(t *testing.T) *pgxpool.Pool {
 	pool, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err, "create pool")
 
-	// Not the real internal/store/migrate.go migrations: those call
-	// create_hypertable(), which requires the TimescaleDB extension this
-	// plain postgres:17-alpine container doesn't have — the same
-	// TimescaleDB-vs-plain-postgres constraint internal/server's own
-	// setup_test.go already works around by hand-copying its schema too
-	// (tracked as the pre-existing, deliberately out-of-scope V002-F08).
-	// This copy is verified column-for-column against
-	// internal/store/migrations/0002_hypertables.sql's real "metrics"
-	// table definition (minus the hypertable call, which doesn't change
-	// the unique-index behavior this test exercises).
-	schema := `
-CREATE TABLE metrics (ts timestamptz NOT NULL, tenant_id text NOT NULL DEFAULT 'default', cluster_id bigint NOT NULL, instance_id uuid NOT NULL, datname text NOT NULL DEFAULT '', metric text NOT NULL, labels jsonb NOT NULL DEFAULT '{}'::jsonb, series_id bigint NOT NULL, value double precision NOT NULL);
-CREATE UNIQUE INDEX metrics_dedup_idx ON metrics (series_id, ts);
-`
-	_, err = pool.Exec(ctx, schema)
-	require.NoError(t, err, "create schema")
+	_, err = pool.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS timescaledb`)
+	require.NoError(t, err, "create timescaledb extension")
+	require.NoError(t, Migrate(ctx, pool), "apply store migrations")
 
 	storeTestPool = pool
 	return pool

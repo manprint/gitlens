@@ -159,6 +159,27 @@ func TestBuffer_SegmentRoll(t *testing.T) {
 	}
 }
 
+func TestBuffer_ConfiguredMaxSizeControlsSegmentRoll(t *testing.T) {
+	buf, err := Open(t.TempDir(), Options{MaxSize: 64, Clock: clock.System()})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = buf.Close() }()
+
+	for i := 0; i < 3; i++ {
+		if err := buf.Append([]byte("01234567890123456789")); err != nil {
+			t.Fatalf("Append %d: %v", i, err)
+		}
+	}
+	stats := buf.Stats()
+	if got := stats.SamplesDropped["size_limit"]; got != 2 {
+		t.Errorf("expected the first segment's two records to be dropped after configured roll, got %d", got)
+	}
+	if stats.Segments != 1 {
+		t.Errorf("expected one retained segment, got %d", stats.Segments)
+	}
+}
+
 // TestBuffer_TruncatedTailSkipped — truncating the last segment mid-record makes Open succeed,
 // return every intact record, and increment the corrupt counter.
 func TestBuffer_TruncatedTailSkipped(t *testing.T) {
@@ -407,18 +428,8 @@ func TestBuffer_DiskFull(t *testing.T) {
 	buf.stats.BufferFull = true
 	buf.mu.Unlock()
 
-	// Try to append; should fail because buffer_full is set.
-	err = buf.Append([]byte("will-fail"))
-	if err == nil {
-		t.Error("expected append to fail when buffer_full is set")
-	}
-
-	// Clear the flag to simulate recovery.
-	buf.mu.Lock()
-	buf.stats.BufferFull = false
-	buf.mu.Unlock()
-
-	// Verify that a write after clearing buffer_full succeeds.
+	// A prior ENOSPC must not permanently latch the buffer. The next write
+	// retries the filesystem and clears the health flag if it succeeds.
 	if err := buf.Append([]byte("success")); err != nil {
 		t.Fatalf("Append after recovery: %v", err)
 	}

@@ -105,6 +105,7 @@ func Open(dir string, opts Options) (*Buffer, error) {
 			return nil, fmt.Errorf("parse segment filename %s: %w", fname, err)
 		}
 		seg.id = segID
+		seg.maxSize = segmentSize(opts.MaxSize)
 		if segID >= b.nextSegID {
 			b.nextSegID = segID + 1
 		}
@@ -140,14 +141,11 @@ func (b *Buffer) Append(env []byte) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if b.stats.BufferFull {
-		return fmt.Errorf("buffer full")
-	}
-
 	// Create a new segment if needed.
 	if len(b.segments) == 0 {
 		seg, err := b.newSegment()
 		if err != nil {
+			b.handleWriteError(err)
 			return err
 		}
 		b.segments = append(b.segments, seg)
@@ -293,6 +291,7 @@ func (b *Buffer) newSegment() (*Segment, error) {
 		path:      fname,
 		id:        segID,
 		createdAt: b.opts.Clock.Now(),
+		maxSize:   segmentSize(b.opts.MaxSize),
 	}
 	b.stats.Segments++
 	return seg, nil
@@ -432,6 +431,7 @@ type Segment struct {
 	path        string
 	id          uint32
 	createdAt   time.Time
+	maxSize     int64
 	recordCount int64
 	fileSize    int64
 	mu          sync.Mutex
@@ -537,7 +537,19 @@ func (s *Segment) Append(data []byte) error {
 func (s *Segment) WouldRoll(size int) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.fileSize+int64(size+8) > 8*1024*1024 // 8 MiB
+	maxSize := s.maxSize
+	if maxSize <= 0 {
+		maxSize = 8 * 1024 * 1024
+	}
+	return s.fileSize+int64(size+8) > maxSize
+}
+
+func segmentSize(maxSize int64) int64 {
+	const defaultSize = 8 * 1024 * 1024
+	if maxSize > 0 && maxSize < defaultSize {
+		return maxSize
+	}
+	return defaultSize
 }
 
 // Sync flushes the segment to disk.

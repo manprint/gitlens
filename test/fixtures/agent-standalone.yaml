@@ -15,4 +15,7 @@ targets:
 checks:
   activity: { interval: 5s }
   database_stats: { interval: 5s }
-  stat_statements: { interval: 10s, top_n: 50 }
+  # The cardinality E2E workload rotates its hot query group just beyond
+  # stat_statements' 60s cadence so the selector's truncation path is
+  # exercised across multiple scrapes.
+  stat_statements: { interval: 60s, top_n: 50 }
