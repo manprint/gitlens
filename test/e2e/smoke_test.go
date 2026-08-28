@@ -4,11 +4,24 @@ package e2e
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/manprint/pglens/test/harness"
 	"github.com/manprint/pglens/test/scenario"
 )
+
+// resolveAgentMode returns the AgentMode from the AGENT_MODE environment
+// variable if set, otherwise returns the provided fallback. This allows
+// the smoke suite to be run with different agent modes via env-driven CI
+// matrices (AGENT_MODE=binary go test ...) while preserving the existing
+// default behavior (AGENT_MODE unset defaults to the fallback).
+func resolveAgentMode(fallback harness.AgentMode) harness.AgentMode {
+	if v := os.Getenv("AGENT_MODE"); v != "" {
+		return harness.AgentMode(v)
+	}
+	return fallback
+}
 
 func init() {
 	scenario.Register(scenario.Scenario{
@@ -48,7 +61,7 @@ func TestSmoke_HarnessStartsHealthy(t *testing.T) {
 	}
 	h := harness.Start(t, harness.Config{
 		Topology:  harness.TopologyStandalone,
-		AgentMode: harness.AgentModeContainer,
+		AgentMode: resolveAgentMode(harness.AgentModeContainer),
 	})
 	h.Scenario(t, "SYS-HARNESS-001")
 }
@@ -60,7 +73,8 @@ func TestSmoke_TopologyReplicationEstablishes(t *testing.T) {
 		t.Skip("skipping E2E smoke test in short mode")
 	}
 	h := harness.Start(t, harness.Config{
-		Topology: harness.TopologyPrimaryStandby,
+		Topology:  harness.TopologyPrimaryStandby,
+		AgentMode: resolveAgentMode(harness.AgentModeContainer),
 	})
 	h.Scenario(t, "SYS-TOPO-001")
 }
@@ -72,7 +86,7 @@ func TestSmoke_RestartNoNegativeRate(t *testing.T) {
 	}
 	h := harness.Start(t, harness.Config{
 		Topology:  harness.TopologyStandalone,
-		AgentMode: harness.AgentModeContainer,
+		AgentMode: resolveAgentMode(harness.AgentModeContainer),
 	})
 	h.Scenario(t, "SYS-RESET-001")
 }
@@ -84,7 +98,7 @@ func TestSmoke_AgentRestartKeepsInstanceID(t *testing.T) {
 	}
 	h := harness.Start(t, harness.Config{
 		Topology:  harness.TopologyStandalone,
-		AgentMode: harness.AgentModeContainer,
+		AgentMode: resolveAgentMode(harness.AgentModeContainer),
 	})
 	h.Scenario(t, "SYS-AGENT-001")
 }
@@ -96,7 +110,7 @@ func TestSmoke_PermTierT0Only(t *testing.T) {
 	}
 	h := harness.Start(t, harness.Config{
 		Topology:  harness.TopologyStandalone,
-		AgentMode: harness.AgentModeContainer,
+		AgentMode: resolveAgentMode(harness.AgentModeContainer),
 	})
 	h.Scenario(t, "SYS-PERM-001")
 }
@@ -108,7 +122,8 @@ func TestSmoke_PromoteInvertsRolesNoIdentityLoss(t *testing.T) {
 		t.Skip("skipping E2E smoke test in short mode")
 	}
 	h := harness.Start(t, harness.Config{
-		Topology: harness.TopologyPrimaryStandby,
+		Topology:  harness.TopologyPrimaryStandby,
+		AgentMode: resolveAgentMode(harness.AgentModeContainer),
 	})
 	h.Scenario(t, "SYS-REPL-001")
 }
@@ -120,7 +135,7 @@ func TestSmoke_BlackHoleAgentStaysResponsive(t *testing.T) {
 	}
 	h := harness.Start(t, harness.Config{
 		Topology:  harness.TopologyStandalone,
-		AgentMode: harness.AgentModeContainer,
+		AgentMode: resolveAgentMode(harness.AgentModeContainer),
 		Toxiproxy: true,
 	})
 	h.Scenario(t, "SYS-NET-003")
@@ -133,7 +148,7 @@ func TestSmoke_ServerOutageBacklogSurvives(t *testing.T) {
 	}
 	h := harness.Start(t, harness.Config{
 		Topology:  harness.TopologyStandalone,
-		AgentMode: harness.AgentModeContainer,
+		AgentMode: resolveAgentMode(harness.AgentModeContainer),
 	})
 	h.Scenario(t, "SYS-NET-001")
 }
@@ -146,7 +161,8 @@ func TestSmoke_SlowQueryASHAndStatementsAgree(t *testing.T) {
 		t.Skip("skipping E2E smoke test in short mode")
 	}
 	h := harness.Start(t, harness.Config{
-		Topology: harness.TopologyStandalone,
+		Topology:  harness.TopologyStandalone,
+		AgentMode: resolveAgentMode(harness.AgentModeContainer),
 	})
 	h.Scenario(t, "SYS-LOAD-003")
 }
@@ -160,7 +176,8 @@ func TestSmoke_CardinalityBudgetHoldsUnderLoad(t *testing.T) {
 		t.Skip("skipping E2E smoke test in short mode")
 	}
 	h := harness.Start(t, harness.Config{
-		Topology: harness.TopologyStandalone,
+		Topology:  harness.TopologyStandalone,
+		AgentMode: resolveAgentMode(harness.AgentModeContainer),
 	})
 	h.Scenario(t, "SYS-LOAD-008")
 }

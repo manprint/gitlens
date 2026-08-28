@@ -55,30 +55,36 @@ type Config struct {
 
 // Harness orchestrates an E2E stack via docker-compose.
 type Harness struct {
-	t               *testing.T
-	projectName     string
-	baseFile        string
-	topologyFile    string
-	agentFile       string
-	toxiproxyFile   string // "" unless Config.Toxiproxy is set
-	composeDir      string
-	containerName   string
-	serverPort      int
-	agentPort       int
-	agentMode       AgentMode
-	agentCmd        *exec.Cmd // non-nil only for AgentModeBinary: the running host subprocess
-	agentLogFile    *os.File  // kept open until cleanup() closes it, after Dump has read agentLogPath
-	agentRunDir     string    // os.MkdirTemp'd (not h.t.TempDir(): see startAgentBinary), removed by cleanup()
-	agentBinaryPath string    // built cmd/pglens-agent binary path, AgentModeBinary only
-	agentBinaryDSN  string    // the DSN the binary agent itself uses to reach "pg", AgentModeBinary only
-	agentLogPath    string    // stdout/stderr capture file for the binary-mode subprocess
-	pools           map[string]*pgxpool.Pool
-	poolMu          sync.Mutex
-	apiClient       *APIClient
-	workloadBin     string
-	workloadMu      sync.Mutex
-	cleaned         bool
-	cleanMu         sync.Mutex
+	t                 *testing.T
+	projectName       string
+	baseFile          string
+	topologyFile      string
+	agentFile         string
+	toxiproxyFile     string // "" unless Config.Toxiproxy is set
+	composeDir        string
+	containerName     string
+	serverPort        int
+	agentPort         int
+	topology          Topology
+	agentMode         AgentMode
+	agentCmd          *exec.Cmd // non-nil only for AgentModeBinary: the running host subprocess
+	agentLogFile      *os.File  // kept open until cleanup() closes it, after Dump has read agentLogPath
+	agentRunDir       string    // os.MkdirTemp'd (not h.t.TempDir(): see startAgentBinary), removed by cleanup()
+	agentBinaryPath   string    // built cmd/pglens-agent binary path, AgentModeBinary only
+	agentBinaryDSN    string    // the DSN the binary agent itself uses to reach "pg", AgentModeBinary only
+	agentLogPath      string    // stdout/stderr capture file for the binary-mode subprocess
+	agentConfigPath   string    // agent.yaml config file path, AgentModeBinary only, preserved across restarts
+	agentIdentityPath string    // identity.json file path, AgentModeBinary only, preserved across restarts
+	agentPrimaryPort  int       // host port for "pg"/"pg-primary" baked into the currently-running agent config
+	agentStandbyPort  int       // host port for "pg-standby" baked into the currently-running agent config (0 for standalone)
+	agentServerPort   int       // host port for pglens-server baked into the currently-running agent config
+	pools             map[string]*pgxpool.Pool
+	poolMu            sync.Mutex
+	apiClient         *APIClient
+	workloadBin       string
+	workloadMu        sync.Mutex
+	cleaned           bool
+	cleanMu           sync.Mutex
 }
 
 // Start brings up the stack and blocks until every service is healthy.
@@ -144,6 +150,8 @@ func Start(t *testing.T, cfg Config) *Harness {
 		agentFile:     agentFile,
 		toxiproxyFile: toxiproxyFile,
 		composeDir:    composeDir,
+		topology:      cfg.Topology,
+		agentMode:     cfg.AgentMode,
 		pools:         make(map[string]*pgxpool.Pool),
 	}
 
@@ -173,7 +181,6 @@ func Start(t *testing.T, cfg Config) *Harness {
 		t.Fatalf("resolve pglens-server port: %v", err)
 	}
 	h.serverPort = port
-	h.agentMode = cfg.AgentMode
 
 	if cfg.AgentMode == AgentModeBinary {
 		// agent-binary.yml deliberately defines no pglens-agent service (see
@@ -214,9 +221,8 @@ func Start(t *testing.T, cfg Config) *Harness {
 // test/compose/agent-binary.yml's own comment promises but that, until now,
 // nothing provided — AgentModeBinary picked the (deliberately empty) compose
 // fragment but nothing ever called os/exec, so the agent simply never ran at
-// all in this mode. Only standalone topology is supported: the monitored
-// target is always the "pg" service, matching every other single-target
-// AgentMode variant (AgentModeContainerTinyBuffer, etc.).
+// all in this mode. Supports both TopologyStandalone (single "pg" target) and
+// TopologyPrimaryStandby (two targets: "pg-primary" and "pg-standby").
 func (h *Harness) startAgentBinary() error {
 	// A plain os.MkdirTemp, not h.t.TempDir(): TempDir()'s own auto-cleanup
 	// is a t.Cleanup registered the moment it's called here, deep inside
@@ -228,11 +234,19 @@ func (h *Harness) startAgentBinary() error {
 	// paths failed with "no such file or directory". This directory is
 	// instead removed by h.cleanup() itself, which already runs (as part of
 	// the SAME "Dump then cleanup" callback) strictly after Dump.
-	runDir, err := os.MkdirTemp("", "pglens-agent-binary-*")
-	if err != nil {
-		return fmt.Errorf("create agent run dir: %w", err)
+	// Reused on restart (Compose's "restart pglens-agent" interception calls
+	// this function again): a fresh MkdirTemp every call would leak the
+	// pre-restart directory forever, since cleanup() only ever removes
+	// h.agentRunDir's current value.
+	runDir := h.agentRunDir
+	if runDir == "" {
+		var err error
+		runDir, err = os.MkdirTemp("", "pglens-agent-binary-*")
+		if err != nil {
+			return fmt.Errorf("create agent run dir: %w", err)
+		}
+		h.agentRunDir = runDir
 	}
-	h.agentRunDir = runDir
 
 	binPath := filepath.Join(runDir, "pglens-agent")
 	buildCmd := exec.Command("go", "build", "-o", binPath, "./cmd/pglens-agent")
@@ -241,9 +255,26 @@ func (h *Harness) startAgentBinary() error {
 		return fmt.Errorf("build cmd/pglens-agent: %w, output: %s", err, out)
 	}
 
-	pgPort, err := h.getServicePort("pg", 5432)
-	if err != nil {
-		return fmt.Errorf("resolve pg port: %w", err)
+	// Resolve ports for the target(s) based on topology.
+	var primaryPort, standbyPort int
+	if h.topology == TopologyPrimaryStandby {
+		// Primary-standby topology: resolve both pg-primary and pg-standby.
+		var err error
+		primaryPort, err = h.getServicePort("pg-primary", 5432)
+		if err != nil {
+			return fmt.Errorf("resolve pg-primary port: %w", err)
+		}
+		standbyPort, err = h.getServicePort("pg-standby", 5432)
+		if err != nil {
+			return fmt.Errorf("resolve pg-standby port: %w", err)
+		}
+	} else {
+		// Standalone topology (default): resolve single "pg" service.
+		var err error
+		primaryPort, err = h.getServicePort("pg", 5432)
+		if err != nil {
+			return fmt.Errorf("resolve pg port: %w", err)
+		}
 	}
 
 	// The healthz port has no CLI flag, only PGLENS_HEALTHZ_LISTEN (env) — an
@@ -257,13 +288,49 @@ func (h *Harness) startAgentBinary() error {
 		return fmt.Errorf("pick healthz port: %w", err)
 	}
 
-	identityPath := filepath.Join(runDir, "identity.json")
+	// Reuse the identity file across restarts to preserve the instance ID
+	// (important for scenarios that test agent restart behavior).
+	var identityPath string
+	if h.agentIdentityPath != "" {
+		identityPath = h.agentIdentityPath
+	} else {
+		identityPath = filepath.Join(runDir, "identity.json")
+		h.agentIdentityPath = identityPath
+	}
 	bufferPath := filepath.Join(runDir, "buffer")
 	if err := os.MkdirAll(bufferPath, 0o755); err != nil {
 		return fmt.Errorf("create buffer dir: %w", err)
 	}
 
-	configPath := filepath.Join(runDir, "agent.yaml")
+	// Reuse config path across restarts
+	var configPath string
+	if h.agentConfigPath != "" {
+		configPath = h.agentConfigPath
+	} else {
+		configPath = filepath.Join(runDir, "agent.yaml")
+		h.agentConfigPath = configPath
+	}
+	var targetsYAML string
+	if h.topology == TopologyPrimaryStandby {
+		// Two targets for primary-standby topology.
+		targetsYAML = fmt.Sprintf(`targets:
+  - name: pg-primary
+    dsn: postgres://pglens:pglens-monitoring-test@localhost:%d/postgres?sslmode=disable
+    databases:
+      max: 10
+  - name: pg-standby
+    dsn: postgres://pglens:pglens-monitoring-test@localhost:%d/postgres?sslmode=disable
+    databases:
+      max: 10`, primaryPort, standbyPort)
+	} else {
+		// Single target for standalone topology.
+		targetsYAML = fmt.Sprintf(`targets:
+  - name: pg
+    dsn: postgres://pglens:pglens-monitoring-test@localhost:%d/postgres?sslmode=disable
+    databases:
+      max: 10`, primaryPort)
+	}
+
 	config := fmt.Sprintf(`server:
   url: http://localhost:%d
   token: dev-token
@@ -273,16 +340,12 @@ buffer:
   path: %s
   max_size: 64MiB
   max_age: 1h
-targets:
-  - name: pg
-    dsn: postgres://pglens:pglens-monitoring-test@localhost:%d/postgres?sslmode=disable
-    databases:
-      max: 10
+%s
 checks:
   activity: { interval: 5s }
   database_stats: { interval: 5s }
   stat_statements: { interval: 10s, top_n: 50 }
-`, h.serverPort, identityPath, bufferPath, pgPort)
+`, h.serverPort, identityPath, bufferPath, targetsYAML)
 	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
 		return fmt.Errorf("write agent config: %w", err)
 	}
@@ -301,11 +364,18 @@ checks:
 		return fmt.Errorf("start pglens-agent: %w", err)
 	}
 
+	h.agentPrimaryPort = primaryPort
+	h.agentStandbyPort = standbyPort
+	h.agentServerPort = h.serverPort
+
 	h.agentCmd = cmd
 	h.agentLogFile = logFile
 	h.agentPort = healthzPort
 	h.agentBinaryPath = binPath
-	h.agentBinaryDSN = fmt.Sprintf("postgres://pglens:pglens-monitoring-test@localhost:%d/postgres?sslmode=disable", pgPort)
+	// For primary-standby, store the primary's DSN; for standalone, store the
+	// single pg DSN. This field is diagnostic-only, used by dump.go's check
+	// invocation — not correctness-critical.
+	h.agentBinaryDSN = fmt.Sprintf("postgres://pglens:pglens-monitoring-test@localhost:%d/postgres?sslmode=disable", primaryPort)
 	h.agentLogPath = logPath
 
 	return nil
@@ -341,12 +411,40 @@ func (h *Harness) composeFiles() []string {
 	return args
 }
 
-// composeUp brings up the stack via docker-compose.
+// composeUp brings up the stack via docker-compose. In AgentModeBinary, pins
+// the PG target(s)' host port via PG_HOST_PORT/PG_PRIMARY_HOST_PORT/
+// PG_STANDBY_HOST_PORT (see the comment on these in test/compose/topo-*.yml)
+// instead of letting Docker assign an ephemeral one, so a mid-test container
+// restart can never churn the port the binary-mode agent's DSN — and
+// therefore its identity fingerprint — depends on.
 func (h *Harness) composeUp() error {
 	args := append([]string{"compose", "-p", h.projectName}, h.composeFiles()...)
 	args = append(args, "up", "-d")
 	cmd := exec.Command("docker", args...)
 	cmd.Dir = h.composeDir
+	if h.agentMode == AgentModeBinary {
+		env := os.Environ()
+		if h.topology == TopologyPrimaryStandby {
+			primaryPort, err := freeTCPPort()
+			if err != nil {
+				return fmt.Errorf("pick fixed pg-primary host port: %w", err)
+			}
+			standbyPort, err := freeTCPPort()
+			if err != nil {
+				return fmt.Errorf("pick fixed pg-standby host port: %w", err)
+			}
+			env = append(env,
+				fmt.Sprintf("PG_PRIMARY_HOST_PORT=%d", primaryPort),
+				fmt.Sprintf("PG_STANDBY_HOST_PORT=%d", standbyPort))
+		} else {
+			pgPort, err := freeTCPPort()
+			if err != nil {
+				return fmt.Errorf("pick fixed pg host port: %w", err)
+			}
+			env = append(env, fmt.Sprintf("PG_HOST_PORT=%d", pgPort))
+		}
+		cmd.Env = env
+	}
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("docker compose up: %w, output: %s", err, output)
 	}
@@ -538,8 +636,109 @@ func (h *Harness) ExecAs(service, user string, argv ...string) (string, error) {
 
 // Compose runs a docker-compose command.
 func (h *Harness) Compose(argv ...string) error {
+	// In binary mode, the pglens-agent service doesn't exist (it's a host
+	// subprocess). If a scenario tries to restart it, handle that by killing
+	// and respawning the subprocess.
+	if h.agentMode == AgentModeBinary && len(argv) >= 2 && argv[0] == "restart" && argv[1] == "pglens-agent" {
+		if h.agentCmd == nil || h.agentCmd.Process == nil {
+			return fmt.Errorf("agent subprocess not running (cannot restart)")
+		}
+		// Kill the subprocess
+		if err := h.agentCmd.Process.Kill(); err != nil {
+			return fmt.Errorf("kill agent subprocess: %w", err)
+		}
+		// Wait for it to exit
+		if err := h.agentCmd.Wait(); err != nil {
+			// Kill might exit with error; that's OK
+		}
+		// Close the log file
+		if h.agentLogFile != nil {
+			h.agentLogFile.Close()
+		}
+		// Respawn the agent
+		return h.startAgentBinary()
+	}
 	_, err := h.composeOutput(argv...)
-	return err
+	if err != nil {
+		return err
+	}
+	// docker compose reassigns a NEW ephemeral host port on every "start" of
+	// a container, even the SAME container ID — verified live: both
+	// `kill -SIGKILL`+`start` and `stop`+`start` moved the published port.
+	// Container-mode agents are unaffected (they reach targets/server via
+	// stable internal docker DNS names), but a binary-mode agent's config
+	// bakes in the HOST port resolved once at startAgentBinary() time, so a
+	// scenario that restarts "pg"/"pg-primary"/"pg-standby"/"pglens-server"
+	// mid-test silently strands it pointed at a now-dead port forever (this
+	// is what made SYS-RESET-001 and SYS-NET-001 hang to their own timeout
+	// under AGENT_MODE=binary: "connection refused" on the stale port,
+	// never recovering). Re-resolve and, if a tracked port moved, restart
+	// the agent subprocess so it reconnects.
+	if h.agentMode == AgentModeBinary && len(argv) >= 2 && argv[0] == "start" {
+		return h.reconcileAgentBinaryPort(argv[1])
+	}
+	return nil
+}
+
+// reconcileAgentBinaryPort re-resolves the host port for a compose service
+// the binary-mode agent (or the harness's own API client) depends on and, if
+// it changed since the agent's config was last written, rewrites the config
+// and restarts the agent subprocess. See the comment in Compose for why this
+// is necessary. A no-op for services the binary-mode agent has no config
+// entry for.
+func (h *Harness) reconcileAgentBinaryPort(service string) error {
+	switch service {
+	case "pg", "pg-primary", "pg-standby", "pglens-server":
+	default:
+		return nil
+	}
+
+	newPrimaryPort := h.agentPrimaryPort
+	newStandbyPort := h.agentStandbyPort
+	newServerPort := h.agentServerPort
+
+	switch service {
+	case "pg", "pg-primary":
+		port, err := h.getServicePort(service, 5432)
+		if err != nil {
+			return fmt.Errorf("re-resolve %s port: %w", service, err)
+		}
+		newPrimaryPort = port
+	case "pg-standby":
+		port, err := h.getServicePort("pg-standby", 5432)
+		if err != nil {
+			return fmt.Errorf("re-resolve pg-standby port: %w", err)
+		}
+		newStandbyPort = port
+	case "pglens-server":
+		port, err := h.getServicePort("pglens-server", 8080)
+		if err != nil {
+			return fmt.Errorf("re-resolve pglens-server port: %w", err)
+		}
+		newServerPort = port
+		h.serverPort = port
+		if h.apiClient != nil {
+			h.apiClient.baseURL = fmt.Sprintf("http://localhost:%d", port)
+		}
+	}
+
+	if newPrimaryPort == h.agentPrimaryPort && newStandbyPort == h.agentStandbyPort && newServerPort == h.agentServerPort {
+		return nil // port unchanged, nothing to reconnect
+	}
+
+	if h.agentCmd == nil || h.agentCmd.Process == nil {
+		return nil // agent subprocess not started yet
+	}
+	if err := h.agentCmd.Process.Kill(); err != nil {
+		return fmt.Errorf("kill agent subprocess for port reconcile: %w", err)
+	}
+	if err := h.agentCmd.Wait(); err != nil {
+		// Kill might exit with error; that's OK
+	}
+	if h.agentLogFile != nil {
+		h.agentLogFile.Close()
+	}
+	return h.startAgentBinary()
 }
 
 // Logs returns a service's captured stdout/stderr (docker compose logs).

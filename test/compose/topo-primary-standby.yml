@@ -11,7 +11,10 @@ services:
       # crashes the container on its own CREATE EXTENSION init script.
       POSTGRES_INITDB_ARGS: "-c shared_preload_libraries=timescaledb,pg_stat_statements -c compute_query_id=on -c pg_stat_statements.track=all -c wal_level=replica -c max_wal_senders=10 -c hot_standby=on"
     ports:
-      - "5432"
+      # PG_PRIMARY_HOST_PORT: see the identical PG_HOST_PORT comment in
+      # topo-standalone.yml — AgentModeBinary pins this to avoid a churned
+      # ephemeral host port minting a new identity fingerprint mid-test.
+      - "${PG_PRIMARY_HOST_PORT:-0}:5432"
     volumes:
       - pgdata-primary:/var/lib/postgresql/data
       # pg_stat_statements is preloaded but was never CREATE EXTENSIONed —
@@ -43,7 +46,9 @@ services:
       POSTGRES_DB: postgres
       PGDATA: /var/lib/postgresql/data
     ports:
-      - "5432"
+      # PG_STANDBY_HOST_PORT: see the identical PG_HOST_PORT comment in
+      # topo-standalone.yml.
+      - "${PG_STANDBY_HOST_PORT:-0}:5432"
     volumes:
       - pgdata-standby:/var/lib/postgresql/data
       - ../fixtures/sql/standby_init.sh:/docker-entrypoint-initdb.d/00-standby-init.sh

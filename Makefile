@@ -3,7 +3,7 @@ PKG     := ./...
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
-.PHONY: build fmt fmt-check lint test test-integration test-e2e test-e2e-full \
+.PHONY: build fmt fmt-check lint test test-integration test-e2e test-e2e-full test-e2e-matrix \
         coverage coverage-gate generate golden clean build-images
 
 build:
@@ -26,10 +26,14 @@ test-integration:
 	$(GO) test -tags=integration -race -shuffle=on -timeout=15m $(PKG)
 
 test-e2e:
-	$(GO) test -tags=e2e -timeout=25m -count=1 ./test/e2e/... -run 'Smoke'
+	$(GO) test -tags=e2e -timeout=35m -count=1 ./test/e2e/... -run 'Smoke'
 
 test-e2e-full:
 	$(GO) test -tags=e2e -timeout=45m -count=1 ./test/e2e/...
+
+test-e2e-matrix:
+	AGENT_MODE=container $(MAKE) test-e2e
+	AGENT_MODE=binary $(MAKE) test-e2e
 
 coverage:
 	$(GO) test -race -coverprofile=coverage.out -covermode=atomic $(PKG)

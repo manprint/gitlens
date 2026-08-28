@@ -13,7 +13,22 @@ services:
       # init script runs CREATE EXTENSION.
       POSTGRES_INITDB_ARGS: "-c shared_preload_libraries=timescaledb,pg_stat_statements -c compute_query_id=on -c pg_stat_statements.track=all"
     ports:
-      - "5432"
+      # PG_HOST_PORT lets AgentModeBinary pin a fixed host port (set by
+      # test/harness before `docker compose up`) instead of Docker's default
+      # ephemeral one: verified live that a plain "5432" gets a NEW random
+      # host port on every `kill`/`stop` + `start` of this SAME container,
+      # even though the container itself isn't recreated. That's invisible
+      # to a container-mode agent (it reaches "pg" via stable internal
+      # docker DNS, never the host port) but a binary-mode agent runs on the
+      # host and must dial this port directly — its DSN's host:port also
+      # feeds internal/identity.Fingerprint, so a churned port mid-test was
+      # silently minting a brand-new instance identity on every PG restart
+      # (SYS-RESET-001: false split_brain_detected + the reset scenario's
+      # own instance never showing a resumed rate; SYS-NET-001: agent
+      # permanently pointed at a dead port). Defaults to "0" (Docker picks
+      # an ephemeral port, same as bare "5432") when unset, so every other
+      # AgentMode is unaffected.
+      - "${PG_HOST_PORT:-0}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       # pg_stat_statements is preloaded (POSTGRES_INITDB_ARGS above) but was
