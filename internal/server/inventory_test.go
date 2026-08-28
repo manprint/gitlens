@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/manprint/pglens/internal/store"
 	"github.com/manprint/pglens/internal/wire"
@@ -59,6 +60,58 @@ func TestInventory_Upsert_NilPool_NoValidation(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, res.Accepted)
 	require.Equal(t, 0, res.Rejected)
+}
+
+func TestInventory_IsRevoked_NilPool(t *testing.T) {
+	t.Parallel()
+	inv := NewInventory(nil)
+	revoked, err := inv.IsRevoked(context.Background(), uuid.NewString())
+	require.NoError(t, err)
+	require.False(t, revoked)
+}
+
+func TestInventory_IsRevoked_EmptyAgentID(t *testing.T) {
+	t.Parallel()
+	inv := &Inventory{pool: &mockPool{}}
+	revoked, err := inv.IsRevoked(context.Background(), "")
+	require.NoError(t, err)
+	require.False(t, revoked)
+}
+
+func TestInventory_IsRevoked_UnknownAgent(t *testing.T) {
+	t.Parallel()
+	pool := &mockPool{queryRowVals: []*mockRow{{err: pgx.ErrNoRows}}}
+	inv := &Inventory{pool: pool}
+	revoked, err := inv.IsRevoked(context.Background(), uuid.NewString())
+	require.NoError(t, err)
+	require.False(t, revoked)
+}
+
+func TestInventory_IsRevoked_NotRevoked(t *testing.T) {
+	t.Parallel()
+	pool := &mockPool{queryRowVals: []*mockRow{{vals: []any{nil}}}}
+	inv := &Inventory{pool: pool}
+	revoked, err := inv.IsRevoked(context.Background(), uuid.NewString())
+	require.NoError(t, err)
+	require.False(t, revoked)
+}
+
+func TestInventory_IsRevoked_Revoked(t *testing.T) {
+	t.Parallel()
+	revokedAt := time.Now()
+	pool := &mockPool{queryRowVals: []*mockRow{{vals: []any{&revokedAt}}}}
+	inv := &Inventory{pool: pool}
+	revoked, err := inv.IsRevoked(context.Background(), uuid.NewString())
+	require.NoError(t, err)
+	require.True(t, revoked)
+}
+
+func TestInventory_IsRevoked_QueryError(t *testing.T) {
+	t.Parallel()
+	pool := &mockPool{queryRowVals: []*mockRow{{err: errors.New("boom")}}}
+	inv := &Inventory{pool: pool}
+	_, err := inv.IsRevoked(context.Background(), uuid.NewString())
+	require.Error(t, err)
 }
 
 func TestInventory_EmitEvent_MarshalError(t *testing.T) {

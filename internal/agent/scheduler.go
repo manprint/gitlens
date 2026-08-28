@@ -22,10 +22,18 @@ type ScheduleEntry struct {
 
 // EntryResult is the result of a single entry's scrape.
 type EntryResult struct {
-	Entry     ScheduleEntry
-	Metrics   []pgtype.Metric
-	Truncated bool
-	Err       error
+	Entry      ScheduleEntry
+	Metrics    []pgtype.Metric
+	Truncated  bool
+	Err        error
+	QueryTexts map[int64]string // queryid -> text; stat_statements.go is the only producer today
+	// StatsReset is when the check itself detected its own counters were
+	// externally reset (e.g. pg_stat_statements_reset()) — stat_statements.go
+	// has always computed this via check.Result.StatsReset, but nothing
+	// carried it past scrapeEntry until SYS-RESET-002 needed it: without it,
+	// the server's delta engine has no explicit reset hint and only a
+	// generic counter-decrease heuristic to fall back on.
+	StatsReset *time.Time
 }
 
 // Scheduler schedules checks on a bounded worker pool with per-check timeouts and circuit breaker.
@@ -227,6 +235,32 @@ func (s *Scheduler) runEntry(ctx context.Context, entry schedEntry) {
 	}
 }
 
+// databaseScopedTarget wraps a check.Target for one ScopeDatabase entry,
+// overriding only Database() to return the entry's own discovered database
+// name. Every other method delegates to the embedded Target unchanged.
+//
+// Found live verifying phase 7.5's README against a real multi-database
+// agent config (target name "pg", monitored database "postgres" — genuinely
+// different strings): stat_statements.go's Scrape() calls
+// `t.ConnFor(ctx, t.Database())`, and the underlying Manager.Database()
+// always returns the *target's own name* ("pg"), never the per-entry
+// database this scheduler already resolved via entry.database — so the
+// check silently tried to connect to a database literally named "pg" (which
+// doesn't exist), failing every single scrape. This had gone completely
+// unnoticed because stat_statements is the only ScopeDatabase check in the
+// whole codebase, so no other check could have exposed the same interface
+// mismatch, and check-level Scrape errors are never logged to agent stderr
+// (only carried silently in wire.Result.Error — V001-F11's absent
+// check_error_total is exactly the visibility gap that let this hide). Every
+// pre-existing unit/integration test happened to use a target name equal to
+// its own database name, masking the bug by coincidence.
+type databaseScopedTarget struct {
+	check.Target
+	database string
+}
+
+func (d databaseScopedTarget) Database() string { return d.database }
+
 func (s *Scheduler) scrapeEntry(parentCtx context.Context, entry schedEntry) {
 	ctx, cancel := context.WithTimeout(parentCtx, entry.check.Timeout())
 	defer cancel()
@@ -244,7 +278,11 @@ func (s *Scheduler) scrapeEntry(parentCtx context.Context, entry schedEntry) {
 		return
 	}
 
-	result, err := entry.check.Scrape(ctx, entry.target)
+	scrapeTarget := entry.target
+	if entry.database != "" {
+		scrapeTarget = databaseScopedTarget{Target: entry.target, database: entry.database}
+	}
+	result, err := entry.check.Scrape(ctx, scrapeTarget)
 	if err != nil {
 		s.recordError(entry, fmt.Sprintf("scrape error: %v", err))
 		return
@@ -259,9 +297,11 @@ func (s *Scheduler) scrapeEntry(parentCtx context.Context, entry schedEntry) {
 			CheckName:  entry.check.Name(),
 			Database:   entry.database,
 		},
-		Metrics:   result.Metrics,
-		Truncated: result.Truncated,
-		Err:       nil,
+		Metrics:    result.Metrics,
+		Truncated:  result.Truncated,
+		QueryTexts: result.QueryTexts,
+		StatsReset: result.StatsReset,
+		Err:        nil,
 	}:
 	case <-s.ctx.Done():
 	}

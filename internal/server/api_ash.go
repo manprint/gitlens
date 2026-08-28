@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -48,6 +50,12 @@ type ashResponse struct {
 	ResolutionSeconds int         `json:"resolution_seconds"`
 	Statistical       bool        `json:"statistical"`
 	Warning           *string     `json:"warning,omitempty"`
+	// Enabled is only set (to false) when the instance's own agent reports
+	// ASH switched off — SYS-ASH-002: "no data" and "feature switched off"
+	// must not render identically. Omitted (nil) whenever ASH is enabled or
+	// the instance has never reported, which is indistinguishable from an
+	// idle database and therefore correctly not flagged either way.
+	Enabled *bool `json:"enabled,omitempty"`
 }
 
 type ashTopEntry struct {
@@ -152,6 +160,25 @@ func (a *AshAPI) handleASH(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+
+	// An instance explicitly reporting ASH disabled short-circuits before
+	// ever touching metrics_ash — an empty bucket list there would otherwise
+	// be indistinguishable from "no data yet" (SYS-ASH-002).
+	var ashEnabled *bool
+	if err := a.pool.QueryRow(ctx, `SELECT ash_enabled FROM instances WHERE instance_id=$1`, iid).Scan(&ashEnabled); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "query instance failed", err.Error())
+		return
+	}
+	if ashEnabled != nil && !*ashEnabled {
+		disabled := false
+		writeJSON(w, http.StatusOK, ashResponse{
+			Buckets:           []ashBucket{},
+			ResolutionSeconds: 1,
+			Statistical:       true,
+			Enabled:           &disabled,
+		})
+		return
+	}
 
 	// Query database
 	buckets, totalTicks, err := a.queryASHBuckets(ctx, iid, fromPtr, toPtr, database, groupByCols, limit)

@@ -8,9 +8,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/manprint/pglens/internal/agent/buffer"
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/wire"
 	"github.com/stretchr/testify/require"
@@ -162,6 +164,25 @@ func TestPusher_StopsOn401(t *testing.T) {
 	require.Equal(t, HealthUnauthorized, p.HealthState())
 }
 
+func TestPusher_StopsOn401Revoked(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"revoked"}`))
+	}))
+	defer srv.Close()
+
+	p := NewPusher(srv.URL, "token", clock.System())
+	env := &wire.Envelope{ProtocolVersion: wire.ProtocolVersion}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	p.Queue(env)
+	err := p.Push(ctx)
+	require.NoError(t, err)
+	require.Equal(t, HealthRevoked, p.HealthState())
+}
+
 func TestPusher_Drops413(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusRequestEntityTooLarge)
@@ -236,4 +257,85 @@ func TestPusher_HealthzHandlerUnhealthy(t *testing.T) {
 	p.HealthzHandler()(w, req)
 
 	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
+func TestPusher_SetBuffer_QueueAndPushRoundTrip(t *testing.T) {
+	var received int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received++
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	buf, err := buffer.Open(t.TempDir(), buffer.Options{})
+	require.NoError(t, err)
+	defer func() { _ = buf.Close() }()
+
+	p := NewPusher(srv.URL, "token", clock.System())
+	p.SetBuffer(buf)
+
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: "a"})
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: "b"})
+
+	// SetBuffer routes Queue through the disk buffer, not the legacy
+	// in-memory slice.
+	p.pendingMu.Lock()
+	require.Empty(t, p.pending)
+	p.pendingMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, p.Push(ctx))
+
+	require.Equal(t, 2, received)
+	acked, dropped := p.BufferStats()
+	require.Equal(t, int64(2), acked)
+	require.Equal(t, int64(0), dropped)
+}
+
+func TestPusher_SetBuffer_AppendFailureDropsAndCounts(t *testing.T) {
+	dir := t.TempDir()
+	buf, err := buffer.Open(dir, buffer.Options{})
+	require.NoError(t, err)
+	defer func() { _ = buf.Close() }()
+
+	// Real ENOSPC on a real tmpfs is exercised live by SYS-AGENT-003; here
+	// only Pusher's reaction to Append() failing (for any reason) is under
+	// test, so a read-only directory (blocking the first segment's
+	// os.Create) is a simpler, deterministic stand-in.
+	require.NoError(t, os.Chmod(dir, 0o555))
+	defer func() { _ = os.Chmod(dir, 0o755) }() // let t.TempDir() clean up
+
+	p := NewPusher("http://unused.invalid", "token", clock.System())
+	p.SetBuffer(buf)
+
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+
+	_, dropped := p.BufferStats()
+	require.Equal(t, int64(1), dropped, "Queue must count a buffer Append failure as dropped, not silently lose it")
+}
+
+func TestPusher_SetBuffer_SkipsUndecodableRecord(t *testing.T) {
+	var received int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received++
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	buf, err := buffer.Open(t.TempDir(), buffer.Options{})
+	require.NoError(t, err)
+	defer func() { _ = buf.Close() }()
+
+	require.NoError(t, buf.Append([]byte("not valid json")))
+	require.NoError(t, buf.Append([]byte(`{"protocol_version":1,"agent_id":"a"}`)))
+
+	p := NewPusher(srv.URL, "token", clock.System())
+	p.SetBuffer(buf)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, p.Push(ctx))
+
+	require.Equal(t, 1, received, "the corrupt record must be skipped, not block the valid one behind it")
 }

@@ -1,8 +1,10 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -105,14 +107,15 @@ func TestIsUp(t *testing.T) {
 func TestHealthForCluster(t *testing.T) {
 	t.Parallel()
 	lag := func(v float64) *float64 { return &v }
-	require.Equal(t, "unknown", healthForCluster(false, false, 0, nil))
-	require.Equal(t, "critical", healthForCluster(false, false, 1, nil))
-	require.Equal(t, "critical", healthForCluster(false, true, 2, nil))
-	require.Equal(t, "degraded", healthForCluster(true, true, 2, nil))
-	require.Equal(t, "ok", healthForCluster(true, false, 2, nil))
-	require.Equal(t, "ok", healthForCluster(true, false, 1, nil))
-	require.Equal(t, "degraded", healthForCluster(true, false, 2, lag(150.5)), "a lagging replica must degrade health even with every instance up")
-	require.Equal(t, "ok", healthForCluster(true, false, 2, lag(0)), "zero lag is not a reason to degrade")
+	require.Equal(t, "unknown", healthForCluster(0, false, 0, nil))
+	require.Equal(t, "critical", healthForCluster(0, false, 1, nil))
+	require.Equal(t, "critical", healthForCluster(0, true, 2, nil))
+	require.Equal(t, "degraded", healthForCluster(1, true, 2, nil))
+	require.Equal(t, "ok", healthForCluster(1, false, 2, nil))
+	require.Equal(t, "ok", healthForCluster(1, false, 1, nil))
+	require.Equal(t, "degraded", healthForCluster(1, false, 2, lag(150.5)), "a lagging replica must degrade health even with every instance up")
+	require.Equal(t, "ok", healthForCluster(1, false, 2, lag(0)), "zero lag is not a reason to degrade")
+	require.Equal(t, "critical", healthForCluster(2, false, 2, nil), "split-brain (2 primaries) is critical even with nothing else wrong")
 }
 
 func TestWriteErrorAndJSON(t *testing.T) {
@@ -440,6 +443,102 @@ func TestAPI_MockPool_Clusters_TwoInstances(t *testing.T) {
 	require.Equal(t, 1, resp[0].StandbyCount)
 }
 
+// TestAPI_MockPool_Clusters_TopologyEdgesAndLag exercises the topology_edges
+// scan loop (row 132) and the bounded max-replay-lag query (row 131) — both
+// added this session and, until now, never reached by any mockPool test
+// (whose queued query results never included a third result set for the
+// topology query at all, so it always fell through to the mock's default
+// empty result).
+func TestAPI_MockPool_Clusters_TopologyEdgesAndLag(t *testing.T) {
+	t.Parallel()
+	cid := pgtype.ClusterID(9003)
+	cidDB := store.ToDB(cid)
+	from := uuid.New()
+	toSync := uuid.New()
+	toLow := uuid.New()
+	pool := &mockPool{
+		queryResults: []*mockRows{
+			{rows: [][]any{{cidDB, nil, "manual"}}},
+			{rows: [][]any{
+				{from.String(), "10.0.0.1", 5432, "primary", 170000, "T0", time.Now()},
+				{toSync.String(), "10.0.0.2", 5432, "standby", 170000, "T0", time.Now()},
+			}},
+			{rows: [][]any{
+				{from.String(), toSync.String(), "streaming", "sync", "high"},
+				{from.String(), toLow.String(), "streaming", nil, "low"},
+			}},
+		},
+		queryRowVals: []*mockRow{{vals: []any{0.75}}},
+	}
+	api := &API{pool: pool}
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/clusters", http.NoBody)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp []clusterResp
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp, 1)
+	require.Len(t, resp[0].Topology, 2)
+	require.Equal(t, 1, resp[0].SyncStandbyCount)
+	require.NotNil(t, resp[0].MaxReplayLagSeconds)
+	require.Equal(t, 0.75, *resp[0].MaxReplayLagSeconds)
+	require.Equal(t, "degraded", resp[0].Health)
+
+	var sawSync, sawLowWithNote bool
+	for _, e := range resp[0].Topology {
+		if e.SyncState != nil && *e.SyncState == "sync" {
+			sawSync = true
+		}
+		if e.Confidence == "low" {
+			require.NotNil(t, e.Note)
+			sawLowWithNote = true
+		}
+	}
+	require.True(t, sawSync)
+	require.True(t, sawLowWithNote)
+}
+
+// TestAPI_MockPool_Clusters_MostRecentPrimaryWins covers a real bug found
+// live running SYS-REPL-001: after a real failover, the old (now-dead)
+// primary's own instances.role row still says "primary" for a while (a
+// promote doesn't retroactively update the instance it promoted away
+// from) — picking the first role="primary" row by addr/port order can
+// pick the stale one over the genuinely current one. The fix: prefer the
+// most recently-seen "primary" row.
+func TestAPI_MockPool_Clusters_MostRecentPrimaryWins(t *testing.T) {
+	t.Parallel()
+	cid := pgtype.ClusterID(9003)
+	cidDB := store.ToDB(cid)
+	staleID := uuid.NewString()
+	freshID := uuid.NewString()
+	pool := &mockPool{
+		queryResults: []*mockRows{
+			{rows: [][]any{{cidDB, nil, "manual"}}},
+			{rows: [][]any{
+				// "pg-primary" sorts before "pg-standby" by addr, but it's
+				// the stale, dead one; the freshly-promoted instance must
+				// still win.
+				{staleID, "pg-primary", 5432, "primary", 170000, "T0", time.Now().Add(-2 * time.Minute)},
+				{freshID, "pg-standby", 5432, "primary", 170000, "T0", time.Now()},
+			}},
+		},
+	}
+	api := &API{pool: pool}
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/clusters", http.NoBody)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp []clusterResp
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp, 1)
+	require.NotNil(t, resp[0].Primary)
+	require.Equal(t, freshID, *resp[0].Primary)
+}
+
 func TestAPI_MockPool_Clusters_QueryError(t *testing.T) {
 	t.Parallel()
 	pool := &mockPool{queryErrs: []error{errors.New("db down")}}
@@ -608,4 +707,55 @@ func TestAPI_MockPool_Statements_Truncated(t *testing.T) {
 	var resp statementsResp
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.True(t, resp.Truncated)
+}
+
+func TestAPI_InstanceTruncated_QueryVariants(t *testing.T) {
+	t.Parallel()
+	iid := uuid.New()
+	from := time.Now().Add(-time.Hour)
+	to := time.Now()
+
+	t.Run("no range, true", func(t *testing.T) {
+		t.Parallel()
+		pool := &mockPool{queryRowVals: []*mockRow{{vals: []any{true}}}}
+		api := &API{pool: pool}
+		truncated, err := api.instanceTruncated(context.Background(), iid, nil, nil)
+		require.NoError(t, err)
+		require.True(t, truncated)
+	})
+
+	t.Run("from only", func(t *testing.T) {
+		t.Parallel()
+		pool := &mockPool{queryRowVals: []*mockRow{{vals: []any{false}}}}
+		api := &API{pool: pool}
+		truncated, err := api.instanceTruncated(context.Background(), iid, &from, nil)
+		require.NoError(t, err)
+		require.False(t, truncated)
+	})
+
+	t.Run("to only", func(t *testing.T) {
+		t.Parallel()
+		pool := &mockPool{queryRowVals: []*mockRow{{vals: []any{false}}}}
+		api := &API{pool: pool}
+		truncated, err := api.instanceTruncated(context.Background(), iid, nil, &to)
+		require.NoError(t, err)
+		require.False(t, truncated)
+	})
+
+	t.Run("from and to", func(t *testing.T) {
+		t.Parallel()
+		pool := &mockPool{queryRowVals: []*mockRow{{vals: []any{true}}}}
+		api := &API{pool: pool}
+		truncated, err := api.instanceTruncated(context.Background(), iid, &from, &to)
+		require.NoError(t, err)
+		require.True(t, truncated)
+	})
+
+	t.Run("query error", func(t *testing.T) {
+		t.Parallel()
+		pool := &mockPool{queryRowVals: []*mockRow{{err: fmt.Errorf("boom")}}}
+		api := &API{pool: pool}
+		_, err := api.instanceTruncated(context.Background(), iid, nil, nil)
+		require.Error(t, err)
+	})
 }

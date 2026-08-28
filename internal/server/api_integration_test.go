@@ -289,4 +289,80 @@ func TestAPI_Statements_WithDB(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 }
 
+// INT-API-002: `/metrics/query` over a range containing a reset returns `null` for the affected bucket and numbers either side.
+func TestAPI_INT_API_002_MetricsQueryWithResetGap(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := contextBackground()
+
+	iid := uuid.New()
+	cid := store.ToDB(pgtype.ClusterID(555))
+	agent := uuid.New()
+	_, err := pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual')`, cid)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen) VALUES ($1,'default',$2,$3,'10.0.0.1',5432,170000,'primary','T0',now())`, iid, cid, agent)
+	require.NoError(t, err)
+
+	// Create a time range with 5 buckets
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := from.Add(5 * time.Minute) // 5 minutes total
+
+	// Insert metric values: 100 at ts[0], 150 at ts[1], <nothing at ts[2] - reset gap, 175 at ts[3], 200 at ts[4]
+	// This simulates: counter goes from 100 to 150 (normal), then resets (gap), then 175, then 200
+	seriesID := int64(999)
+	ts0 := from.Add(0 * time.Minute)
+	ts1 := from.Add(1 * time.Minute)
+	// ts2 intentionally skipped to create a gap (reset)
+	ts3 := from.Add(3 * time.Minute)
+	ts4 := from.Add(4 * time.Minute)
+
+	_, err = pool.Exec(ctx, `INSERT INTO metrics (ts, tenant_id, cluster_id, instance_id, datname, metric, labels, series_id, value)
+		VALUES
+		($1,'default',$2,$3,'','counter_metric','{}', $4, 100),
+		($5,'default',$2,$3,'','counter_metric','{}', $4, 150),
+		($6,'default',$2,$3,'','counter_metric','{}', $4, 175),
+		($7,'default',$2,$3,'','counter_metric','{}', $4, 200)
+	`, ts0, cid, iid, seriesID, ts1, ts3, ts4)
+	require.NoError(t, err)
+
+	api := NewAPI(pool)
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+
+	// Query the range with 1-minute buckets
+	url := fmt.Sprintf("/api/v1/metrics/query?metric=counter_metric&instance_id=%s&from=%s&to=%s&step=60s",
+		iid.String(), from.Format(time.RFC3339), to.Format(time.RFC3339))
+	req := httptest.NewRequest(http.MethodGet, url, http.NoBody)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp metricsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+
+	// Should have 5 buckets (0-4 minutes)
+	require.Len(t, resp.Series, 5)
+
+	// ts0: has value 100
+	require.NotNil(t, resp.Series[0].Value)
+	require.Equal(t, 100.0, *resp.Series[0].Value)
+
+	// ts1: has value 150
+	require.NotNil(t, resp.Series[1].Value)
+	require.Equal(t, 150.0, *resp.Series[1].Value)
+
+	// ts2: should be null (reset gap - no metric written during reset)
+	require.Nil(t, resp.Series[2].Value)
+
+	// ts3: has value 175
+	require.NotNil(t, resp.Series[3].Value)
+	require.Equal(t, 175.0, *resp.Series[3].Value)
+
+	// ts4: has value 200
+	require.NotNil(t, resp.Series[4].Value)
+	require.Equal(t, 200.0, *resp.Series[4].Value)
+}
+
 func contextBackground() context.Context { return context.Background() }

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/manprint/pglens/internal/wire"
 	"github.com/stretchr/testify/require"
 )
@@ -38,6 +39,23 @@ func TestIngest_RejectsUnknownFields(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestIngest_RejectsRevokedAgent(t *testing.T) {
+	t.Parallel()
+	auth := NewAuth("token")
+	revokedAt := time.Now()
+	pool := &mockPool{queryRowVals: []*mockRow{{vals: []any{&revokedAt}}}}
+	inv := &Inventory{pool: pool}
+	h := IngestHandler(auth, inv, NewPipeline(nil, nil))
+	env := wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: uuid.NewString(), SentAt: time.Now()}
+	body, _ := json.Marshal(env)
+	req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer token")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	require.Contains(t, w.Body.String(), "revoked")
 }
 
 func TestIngest_RejectsStaleEnvelope(t *testing.T) {

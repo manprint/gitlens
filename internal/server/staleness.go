@@ -25,6 +25,11 @@ const (
 	defaultExpectedInterval = 30 * time.Second
 	evaluatorInterval       = 15 * time.Second
 	noPrimaryThreshold      = 60 * time.Second
+	// slotInactiveThreshold matches noPrimaryThreshold's own precedent in
+	// this file: a short, hardcoded default rather than an env-configurable
+	// one — nothing else in Staleness exposes its thresholds for override
+	// either (SYS-SLOT-001, phase_07.md#6.4).
+	slotInactiveThreshold = 30 * time.Second
 )
 
 // ---------------------------------------------------------------------------
@@ -61,6 +66,19 @@ func (g *gaugeVec) Add(key string, v float64) {
 	g.vals[key] += v
 }
 
+// Snapshot returns a copy of every key/value pair currently set — used by
+// the /metrics exposition handler, which must not hold the vec's own lock
+// while writing to an http.ResponseWriter.
+func (g *gaugeVec) Snapshot() map[string]float64 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	out := make(map[string]float64, len(g.vals))
+	for k, v := range g.vals {
+		out[k] = v
+	}
+	return out
+}
+
 type counterVec struct {
 	mu   sync.Mutex
 	vals map[string]float64
@@ -82,6 +100,19 @@ func (c *counterVec) Get(key string) float64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.vals[key]
+}
+
+// Snapshot returns a copy of every key/value pair currently counted — used
+// by the /metrics exposition handler, which must not hold the vec's own
+// lock while writing to an http.ResponseWriter.
+func (c *counterVec) Snapshot() map[string]float64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make(map[string]float64, len(c.vals))
+	for k, v := range c.vals {
+		out[k] = v
+	}
+	return out
 }
 
 type counter struct {
@@ -142,6 +173,7 @@ var (
 	pglensAgentClockSkewSeconds     = &gauge{}
 	pglensSeriesTotalGauge          = newGaugeVec()
 	pglensCardinalityTruncatedTotal = &counter{}
+	pglensCheckErrorTotal           = &counterVec{vals: make(map[string]float64)}
 )
 
 // Exported helpers for other packages (ingest, pipeline) to update self-monitoring
@@ -169,6 +201,15 @@ func SetSeriesTotal(instanceID string, v float64) {
 
 func IncCardinalityTruncated() {
 	pglensCardinalityTruncatedTotal.Inc()
+}
+
+// IncCheckError records one failed check scrape, keyed by check name — the
+// visibility gap that let stat_statements fail every single scrape,
+// invisibly, until it was found by chance re-verifying a README (STATE.md
+// §4 rows 141-142). wire.Result.Error was always sent by the agent but
+// never once read by the server before this.
+func IncCheckError(check string) {
+	pglensCheckErrorTotal.Inc(check)
 }
 
 func boolToFloat(b bool) float64 {
@@ -202,6 +243,11 @@ type Staleness struct {
 	clusterPrimarySeen map[string]time.Time
 	// clusterNoPrimaryEmitted tracks whether no_primary_in_cluster already emitted.
 	clusterNoPrimaryEmitted map[string]bool
+	// slotInactiveSince/slotInactiveEmitted track, per "instance_id/slot_name"
+	// key, when a slot was first observed inactive and whether slot_inactive
+	// has already been emitted for that spell of inactivity.
+	slotInactiveSince   map[string]time.Time
+	slotInactiveEmitted map[string]bool
 
 	conn    *pgxpool.Conn
 	hasLock bool
@@ -227,6 +273,8 @@ func NewStaleness(pool *pgxpool.Pool, clk clock.Clock) *Staleness {
 		instanceUp:              make(map[string]bool),
 		clusterPrimarySeen:      make(map[string]time.Time),
 		clusterNoPrimaryEmitted: make(map[string]bool),
+		slotInactiveSince:       make(map[string]time.Time),
+		slotInactiveEmitted:     make(map[string]bool),
 		stopCh:                  make(chan struct{}),
 		doneCh:                  make(chan struct{}),
 	}
@@ -361,7 +409,16 @@ func (s *Staleness) Evaluate(ctx context.Context) error {
 		}
 		instances = append(instances, instInfo{id: iid, clusterID: cid, lastSeen: lastSeen, role: role, agentID: agentID})
 		clusterIDs[cid] = struct{}{}
-		if role == "primary" {
+		// A stale primary (its agent has gone silent — no update ever
+		// retroactively changes `role` once that happens) must not count as
+		// "the cluster has a primary": found live via SYS-REPL-003 (stop the
+		// primary, never promote the standby), where this let
+		// clusterHasPrimary stay permanently true off the dead instance's
+		// last-known role, making no_primary_in_cluster structurally
+		// unreachable for the exact case it exists to detect. The pre-existing
+		// TestStaleness_NoPrimary only ever seeded a standby row, never a
+		// stale primary one, so this never surfaced before.
+		if role == "primary" && isStaleUp(lastSeen, now, threshold) {
 			clusterHasPrimary[cid] = true
 		}
 	}
@@ -445,6 +502,100 @@ func (s *Staleness) Evaluate(ctx context.Context) error {
 		}
 	}
 
+	if slotErr := s.evaluateSlots(ctx, now); slotErr != nil {
+		return slotErr
+	}
+
+	return nil
+}
+
+// slotRow is one (instance_id, slot_name)'s latest known state, as read by
+// evaluateSlots.
+type slotRow struct {
+	InstanceID uuid.UUID
+	ClusterID  int64
+	SlotName   string
+	Active     bool
+}
+
+// slotEmission is one slot_inactive event decideSlotInactiveEmissions has
+// decided to emit.
+type slotEmission struct {
+	ClusterID  int64
+	InstanceID uuid.UUID
+	SlotName   string
+}
+
+// decideSlotInactiveEmissions applies the slot_inactive state machine to one
+// evaluation's rows, mutating since/emitted in place (the same maps
+// evaluateSlots persists across calls as Staleness.slotInactiveSince/
+// slotInactiveEmitted) and returning the emissions this call newly triggers.
+// Deliberately pure otherwise — no DB, no clock read — so it is testable
+// directly at L1 without a database, unlike the rest of this file (Staleness
+// holds a concrete *pgxpool.Pool for its advisory-lock Acquire, which rules
+// out a mock-pool L1 test for the surrounding I/O).
+func decideSlotInactiveEmissions(rows []slotRow, now time.Time, since map[string]time.Time, emitted map[string]bool) []slotEmission {
+	var out []slotEmission
+	for _, r := range rows {
+		key := r.InstanceID.String() + "/" + r.SlotName
+		if r.Active {
+			delete(since, key)
+			delete(emitted, key)
+			continue
+		}
+		t, tracked := since[key]
+		if !tracked {
+			since[key] = now
+			continue
+		}
+		if now.Sub(t) > slotInactiveThreshold && !emitted[key] {
+			out = append(out, slotEmission{ClusterID: r.ClusterID, InstanceID: r.InstanceID, SlotName: r.SlotName})
+			emitted[key] = true
+		}
+	}
+	return out
+}
+
+// evaluateSlots emits slot_inactive once per continuous spell of inactivity
+// for any replication slot (physical slots live on the upstream/primary side
+// — pg_replication_slots is empty on a plain standby). Reads the latest
+// known state per (instance_id, slot_name) from metrics_replication, which
+// internal/check/replication_slots.go already populates every scrape cycle;
+// no new check or wire field was needed, only this periodic scan (SYS-SLOT-001,
+// phase_07.md#6.4). Called from Evaluate() with s.mu already held.
+func (s *Staleness) evaluateSlots(ctx context.Context, now time.Time) error {
+	rows, err := s.pool.Query(ctx, `
+SELECT DISTINCT ON (instance_id, slot_name) instance_id, cluster_id, slot_name, slot_active
+FROM metrics_replication
+WHERE slot_name <> '' AND slot_active IS NOT NULL
+ORDER BY instance_id, slot_name, ts DESC`)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("query slot state: %w", err)
+	}
+	defer rows.Close()
+
+	var slotRows []slotRow
+	for rows.Next() {
+		var r slotRow
+		if scanErr := rows.Scan(&r.InstanceID, &r.ClusterID, &r.SlotName, &r.Active); scanErr != nil {
+			return fmt.Errorf("scan slot state: %w", scanErr)
+		}
+		slotRows = append(slotRows, r)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, em := range decideSlotInactiveEmissions(slotRows, now, s.slotInactiveSince, s.slotInactiveEmitted) {
+		cidCopy := em.ClusterID
+		iidCopy := em.InstanceID
+		if emitErr := s.emitEvent(ctx, "slot_inactive", &cidCopy, &iidCopy, map[string]any{"slot_name": em.SlotName}); emitErr != nil {
+			return emitErr
+		}
+	}
 	return nil
 }
 

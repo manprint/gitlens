@@ -1,8 +1,13 @@
 package agent
 
 import (
+	"context"
 	"regexp"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 )
 
 func TestManager_AddrPort_ParsedFromDSN(t *testing.T) {
@@ -22,6 +27,28 @@ func TestManager_AddrPort_InvalidDSN(t *testing.T) {
 	}
 	if got := m.Port(); got != 0 {
 		t.Errorf("Port() = %d, want 0 on parse error", got)
+	}
+}
+
+// TestManager_AgentID_ZeroValueOnConnectFailure: AgentID() (like the
+// pre-existing InstanceID()) must degrade to the zero value rather than
+// panic or block when ensureCache can't reach the database at all — pgxpool
+// connects lazily, so NewManager itself succeeds against a merely-parseable
+// DSN; the real connection attempt (and its failure) only happens inside
+// ensureCache, which is exactly the path AgentID()/InstanceID() share.
+func TestManager_AgentID_ZeroValueOnConnectFailure(t *testing.T) {
+	ctx := context.Background()
+	mgr, err := NewManager(ctx, "unreachable-target", "postgres://user:pass@127.0.0.1:1/nonexistent?connect_timeout=1", DefaultConnOptions(), nil)
+	require.NoError(t, err)
+	defer mgr.Close()
+
+	done := make(chan uuid.UUID, 1)
+	go func() { done <- mgr.AgentID() }()
+	select {
+	case id := <-done:
+		require.Equal(t, uuid.Nil, id)
+	case <-time.After(15 * time.Second):
+		t.Fatal("AgentID() did not return within 15s against an unreachable database")
 	}
 }
 

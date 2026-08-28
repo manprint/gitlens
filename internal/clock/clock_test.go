@@ -9,6 +9,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestWithOffset_NowShiftsByOffset(t *testing.T) {
+	t.Parallel()
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	base := clock.NewFake(start)
+	behind := clock.WithOffset(base, -5*time.Minute)
+	ahead := clock.WithOffset(base, 5*time.Minute)
+
+	require.Equal(t, start.Add(-5*time.Minute), behind.Now())
+	require.Equal(t, start.Add(5*time.Minute), ahead.Now())
+}
+
+func TestWithOffset_SinceUsesShiftedNow(t *testing.T) {
+	t.Parallel()
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	base := clock.NewFake(start)
+	ahead := clock.WithOffset(base, 5*time.Minute)
+
+	require.Equal(t, 5*time.Minute, ahead.Since(start))
+}
+
 func TestFake_Now(t *testing.T) {
 	t.Parallel()
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)

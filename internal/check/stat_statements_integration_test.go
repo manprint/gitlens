@@ -120,6 +120,15 @@ func TestStatStatements_IntegrationCardinalityCap(t *testing.T) {
 		result, err := check.Scrape(context.Background(), mockTgt)
 		require.NoError(t, err)
 
+		// Regression for a column-name typo (queried "reset_time", the real
+		// column is "stats_reset") that made every StatsReset lookup fail
+		// with "column ... does not exist" — silently swallowed by the
+		// existing "does not exist" tolerance (there to handle PG versions
+		// without pg_stat_statements_info at all), so StatsReset was always
+		// nil in production despite this test's own pg_stat_statements_reset()
+		// call above. Found live while investigating SYS-LOAD-008.
+		require.NotNil(t, result.StatsReset, "stats_reset should be populated after pg_stat_statements_reset()")
+
 		require.True(t, result.Truncated, "expected truncation with 500 distinct queries")
 		metricCount := len(result.Metrics)
 		require.Greater(t, metricCount, 0, "should have metrics")

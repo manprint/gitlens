@@ -258,7 +258,12 @@ func TestSampler_DoSample_ComputeQueryIDDiscoveredFromFirstRow(t *testing.T) {
 
 // TestSampler_DoSample_WarnsOnceWhenQueryIDMissing proves the "compute_query_id
 // is off" condition warns at most once, no matter how many nil-query_id rows or
-// ticks occur (phase_08.md 7.1: "the warning is emitted once rather than per tick").
+// ticks occur (phase_08.md 7.1: "the warning is emitted once rather than per tick"),
+// and only after computeQueryIDOffSamples CONSECUTIVE fully-null samples — a
+// single early null sample must not latch "off" permanently (found live: it
+// falsely reported compute_query_id off even though the GUC was confirmed on
+// server-wide, because one sample happened to catch every active session
+// between statements).
 func TestSampler_DoSample_WarnsOnceWhenQueryIDMissing(t *testing.T) {
 	mk := func() *mockRows {
 		return &mockRows{rows: [][5]any{
@@ -269,22 +274,62 @@ func TestSampler_DoSample_WarnsOnceWhenQueryIDMissing(t *testing.T) {
 	q := &mockQuerier{rows: mk()}
 	s := NewSampler(q, clock.System(), nil)
 
-	if err := s.doSample(context.Background()); err != nil {
-		t.Fatalf("doSample: %v", err)
-	}
-	if !s.warnedNoQueryID.Load() {
-		t.Fatal("expected warnedNoQueryID to be set after a nil query_id row")
+	for i := 0; i < computeQueryIDOffSamples-1; i++ {
+		if err := s.doSample(context.Background()); err != nil {
+			t.Fatalf("doSample %d: %v", i, err)
+		}
+		if s.warnedNoQueryID.Load() {
+			t.Fatalf("warned after only %d null samples, want %d", i+1, computeQueryIDOffSamples)
+		}
+		q.rows = mk()
 	}
 
-	// A second tick (new mock rows, same sampler) must not flip anything further;
-	// the CompareAndSwap in doSample guards this — assert it stays true and no
-	// panic/duplicate state occurs across ticks.
+	if err := s.doSample(context.Background()); err != nil {
+		t.Fatalf("doSample (final): %v", err)
+	}
+	if !s.warnedNoQueryID.Load() {
+		t.Fatalf("expected warnedNoQueryID to be set after %d consecutive null samples", computeQueryIDOffSamples)
+	}
+
+	// A further tick (new mock rows, same sampler) must not flip anything
+	// further; the CompareAndSwap in doSample guards this.
 	q.rows = mk()
 	if err := s.doSample(context.Background()); err != nil {
-		t.Fatalf("doSample (second tick): %v", err)
+		t.Fatalf("doSample (extra tick): %v", err)
 	}
 	if !s.warnedNoQueryID.Load() {
 		t.Fatal("warnedNoQueryID must remain set across ticks")
+	}
+}
+
+// TestSampler_DoSample_SingleEarlyNullSampleDoesNotLatchOff is the direct
+// regression test for the bug: one fully-null sample followed by a sample
+// with a real query_id must discover compute_query_id as ON, not OFF.
+func TestSampler_DoSample_SingleEarlyNullSampleDoesNotLatchOff(t *testing.T) {
+	q := &mockQuerier{rows: &mockRows{rows: [][5]any{
+		{"app", "active", "CPU", "CPU", (*int64)(nil)},
+	}}}
+	s := NewSampler(q, clock.System(), nil)
+
+	if err := s.doSample(context.Background()); err != nil {
+		t.Fatalf("doSample 1: %v", err)
+	}
+	if enabled := s.ComputeQueryIDEnabled(); enabled != nil {
+		t.Fatalf("expected still undiscovered after one null sample, got %v", *enabled)
+	}
+
+	q.rows = &mockRows{rows: [][5]any{
+		{"app", "active", "CPU", "CPU", ptrInt64(42)},
+	}}
+	if err := s.doSample(context.Background()); err != nil {
+		t.Fatalf("doSample 2: %v", err)
+	}
+	enabled := s.ComputeQueryIDEnabled()
+	if enabled == nil || !*enabled {
+		t.Fatalf("expected compute_query_id discovered true after a real query_id, got %v", enabled)
+	}
+	if s.warnedNoQueryID.Load() {
+		t.Fatal("must not have warned — compute_query_id turned out to be on")
 	}
 }
 
@@ -309,6 +354,45 @@ type mockQuerierEachTick struct {
 func (m *mockQuerierEachTick) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
 	m.n.Add(1)
 	return &mockRows{rows: [][5]any{{"app", "active", "CPU", "CPU", (*int64)(nil)}}}, nil
+}
+
+// TestSampler_SetInterval_OverridesDefault proves SetInterval actually
+// changes the ticker Start uses (phase_08.md 7.1: "setting interval: 5s ...
+// is supported for sensitive instances").
+func TestSampler_SetInterval_OverridesDefault(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	q := &mockQuerierEachTick{}
+	s := NewSampler(q, clk, nil)
+	s.SetInterval(5 * time.Second)
+
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	// Advancing by less than the overridden 5s interval must not tick.
+	clk.Advance(4 * time.Second)
+	time.Sleep(time.Millisecond)
+	if q.n.Load() != 0 {
+		t.Fatalf("expected no tick before the 5s interval elapses, got %d", q.n.Load())
+	}
+	clk.Advance(1 * time.Second)
+	time.Sleep(time.Millisecond)
+	if q.n.Load() < 1 {
+		t.Fatal("expected a tick once the overridden 5s interval elapses")
+	}
+}
+
+// TestSampler_SetInterval_IgnoresNonPositive proves a zero or negative
+// override is ignored, keeping the 1s default rather than spinning on a
+// zero-length ticker.
+func TestSampler_SetInterval_IgnoresNonPositive(t *testing.T) {
+	s := NewSampler(&mockQuerierEachTick{}, clock.NewFake(time.Unix(0, 0)), nil)
+	s.SetInterval(0)
+	s.SetInterval(-1 * time.Second)
+	if s.interval != 1*time.Second {
+		t.Fatalf("expected the 1s default to survive non-positive SetInterval calls, got %v", s.interval)
+	}
 }
 
 // TestSampler_StartStop_RunsAtInterval proves Start ticks once per second via
@@ -339,5 +423,85 @@ func TestSampler_StartStop_RunsAtInterval(t *testing.T) {
 
 	if q.n.Load() < 1 {
 		t.Fatalf("expected at least one tick to have queried, got %d", q.n.Load())
+	}
+}
+
+// mockQuerierZeroRows always returns zero rows — a genuinely idle instance,
+// the case onSample alone cannot distinguish from a tick that never happened.
+type mockQuerierZeroRows struct{ err error }
+
+func (m *mockQuerierZeroRows) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &mockRows{rows: [][5]any{}}, nil
+}
+
+// TestSampler_TickCallback_FiresOnZeroRowTick proves onTick fires once per
+// tick attempt even when the tick returns no rows at all — onSample alone
+// never fires in that case, which would otherwise undercount a genuinely
+// idle instance's successful ticks.
+func TestSampler_TickCallback_FiresOnZeroRowTick(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	q := &mockQuerierZeroRows{}
+	s := NewSampler(q, clk, nil)
+	var ticks atomic.Int32
+	var successes atomic.Int32
+	s.SetTickCallback(func(success bool) {
+		ticks.Add(1)
+		if success {
+			successes.Add(1)
+		}
+	})
+
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for ticks.Load() < 3 && time.Now().Before(deadline) {
+		clk.Advance(1 * time.Second)
+		time.Sleep(time.Millisecond)
+	}
+
+	if ticks.Load() < 1 {
+		t.Fatal("expected onTick to fire at least once on a zero-row tick")
+	}
+	if successes.Load() != ticks.Load() {
+		t.Fatalf("expected every zero-row tick to be reported as success, got %d/%d", successes.Load(), ticks.Load())
+	}
+}
+
+// TestSampler_TickCallback_FiresOnFailedTick proves onTick reports success=false
+// when the query itself fails.
+func TestSampler_TickCallback_FiresOnFailedTick(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	q := &mockQuerierZeroRows{err: errors.New("connection reset")}
+	s := NewSampler(q, clk, nil)
+	var calls atomic.Int32
+	var lastSuccess atomic.Bool
+	lastSuccess.Store(true)
+	s.SetTickCallback(func(success bool) {
+		calls.Add(1)
+		lastSuccess.Store(success)
+	})
+
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for calls.Load() < 1 && time.Now().Before(deadline) {
+		clk.Advance(1 * time.Second)
+		time.Sleep(time.Millisecond)
+	}
+
+	if calls.Load() < 1 {
+		t.Fatal("expected onTick to fire at least once")
+	}
+	if lastSuccess.Load() {
+		t.Fatal("expected onTick to report success=false for a failed query")
 	}
 }

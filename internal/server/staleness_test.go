@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/stretchr/testify/require"
 )
@@ -151,4 +152,75 @@ func TestStaleness_EnsureLeader_NilPool(t *testing.T) {
 	t.Parallel()
 	s := NewStaleness(nil, nil)
 	require.NoError(t, s.ensureLeader(context.Background()))
+}
+
+func TestDecideSlotInactiveEmissions_FirstSightingStartsClock(t *testing.T) {
+	t.Parallel()
+	since := map[string]time.Time{}
+	emitted := map[string]bool{}
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	iid := uuid.New()
+
+	out := decideSlotInactiveEmissions(
+		[]slotRow{{InstanceID: iid, ClusterID: 1, SlotName: "s1", Active: false}},
+		now, since, emitted)
+
+	require.Empty(t, out, "must not emit on first sighting — the clock only just started")
+	require.Equal(t, now, since[iid.String()+"/s1"])
+}
+
+func TestDecideSlotInactiveEmissions_BeforeThresholdNoEmit(t *testing.T) {
+	t.Parallel()
+	iid := uuid.New()
+	key := iid.String() + "/s1"
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	since := map[string]time.Time{key: base}
+	emitted := map[string]bool{}
+
+	out := decideSlotInactiveEmissions(
+		[]slotRow{{InstanceID: iid, ClusterID: 1, SlotName: "s1", Active: false}},
+		base.Add(29*time.Second), since, emitted)
+
+	require.Empty(t, out, "must not emit before slotInactiveThreshold (30s) elapses")
+}
+
+func TestDecideSlotInactiveEmissions_AfterThresholdEmitsOnce(t *testing.T) {
+	t.Parallel()
+	iid := uuid.New()
+	key := iid.String() + "/s1"
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	since := map[string]time.Time{key: base}
+	emitted := map[string]bool{}
+
+	out := decideSlotInactiveEmissions(
+		[]slotRow{{InstanceID: iid, ClusterID: 42, SlotName: "s1", Active: false}},
+		base.Add(31*time.Second), since, emitted)
+
+	require.Len(t, out, 1)
+	require.Equal(t, slotEmission{ClusterID: 42, InstanceID: iid, SlotName: "s1"}, out[0])
+	require.True(t, emitted[key])
+
+	// A second evaluation of the same continuous spell must not re-emit.
+	out2 := decideSlotInactiveEmissions(
+		[]slotRow{{InstanceID: iid, ClusterID: 42, SlotName: "s1", Active: false}},
+		base.Add(45*time.Second), since, emitted)
+	require.Empty(t, out2, "slot_inactive must not re-emit for the same continuous spell")
+}
+
+func TestDecideSlotInactiveEmissions_ActiveClearsTrackingAndAllowsReEmission(t *testing.T) {
+	t.Parallel()
+	iid := uuid.New()
+	key := iid.String() + "/s1"
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	since := map[string]time.Time{key: base}
+	emitted := map[string]bool{key: true}
+
+	out := decideSlotInactiveEmissions(
+		[]slotRow{{InstanceID: iid, ClusterID: 1, SlotName: "s1", Active: true}},
+		base.Add(60*time.Second), since, emitted)
+
+	require.Empty(t, out)
+	_, tracked := since[key]
+	require.False(t, tracked, "an active slot must clear its inactivity tracking")
+	require.False(t, emitted[key], "clearing tracking must also clear the emitted flag, so a later spell can emit again")
 }

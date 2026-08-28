@@ -82,6 +82,56 @@ func TestBuffer_AppendReadRoundTrip(t *testing.T) {
 	}
 }
 
+// TestBuffer_NextCatchesUpThenSeesLaterAppends — a producer and consumer
+// sharing one live Buffer, below the 8 MiB segment-roll threshold (so
+// everything lands in a single, never-rolled segment): Next() catching up to
+// EOF once must not permanently strand later Appends to that same segment.
+// Found live via SYS-AGENT-003 (a 16 KiB tmpfs buffer): the agent's own
+// pushFromBuffer loop calls Next() roughly once a second, so on a lightly
+// loaded target it catches EOF almost immediately after startup — after
+// which every envelope queued from then on (including the entire backlog
+// built up during a real outage) became silently unreadable forever.
+func TestBuffer_NextCatchesUpThenSeesLaterAppends(t *testing.T) {
+	dir := t.TempDir()
+	buf, err := Open(dir, Options{Clock: clock.System()})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = buf.Close() }()
+
+	if err := buf.Append([]byte("first")); err != nil {
+		t.Fatalf("Append first: %v", err)
+	}
+
+	data, ack, err := buf.Next()
+	if err != nil || string(data) != "first" {
+		t.Fatalf("Next 1: data=%q err=%v", data, err)
+	}
+	if err := ack(context.Background()); err != nil {
+		t.Fatalf("ack 1: %v", err)
+	}
+
+	// Catch up to EOF on the single (never-rolled) segment.
+	if _, _, err := buf.Next(); !errors.Is(err, io.EOF) {
+		t.Fatalf("expected EOF after draining, got %v", err)
+	}
+
+	// A later Append to that same segment must still be visible.
+	if err := buf.Append([]byte("second")); err != nil {
+		t.Fatalf("Append second: %v", err)
+	}
+	data2, ack2, err := buf.Next()
+	if err != nil {
+		t.Fatalf("Next 2: %v", err)
+	}
+	if string(data2) != "second" {
+		t.Fatalf("Next 2: got %q, want %q (record appended after EOF was silently stranded)", data2, "second")
+	}
+	if err := ack2(context.Background()); err != nil {
+		t.Fatalf("ack 2: %v", err)
+	}
+}
+
 // TestBuffer_SegmentRoll — records crossing 8 MiB create a second segment.
 func TestBuffer_SegmentRoll(t *testing.T) {
 	dir := t.TempDir()

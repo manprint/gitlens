@@ -104,6 +104,44 @@ type ReplicationRow struct {
 	SlotRetainedBytes *int64
 }
 
+// TopologyEdgeRow is one row for the topology_edges table — the persisted
+// form of the in-memory topology.Edge objects internal/server/pipeline.go
+// already computes per envelope for internal/topology.Engine's own
+// detection logic. Nothing ever wrote these to the table until this was
+// found live while writing phase 6.5's README: GET /clusters/{id}/topology
+// (and the `topology` field on GET /clusters) can only ever return an empty
+// array without this, since both read from this table exclusively.
+type TopologyEdgeRow struct {
+	TenantID     string
+	ClusterID    int64
+	FromInstance uuid.UUID
+	ToInstance   uuid.UUID
+	EdgeType     string
+	SyncState    *string
+	Confidence   string
+}
+
+// WriteTopologyEdges replaces every topology_edges row FROM fromInstance in
+// clusterID with rows, so a since-resolved-away edge (the instance no longer
+// reports one, or now reports a different upstream) doesn't linger stale.
+// Row volume per instance is at most a handful, so delete-then-insert is
+// simpler than a real diff and cheap enough at this scale.
+func WriteTopologyEdges(ctx context.Context, tx pgx.Tx, tenantID string, clusterID int64, fromInstance uuid.UUID, rows []TopologyEdgeRow) error {
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM topology_edges WHERE tenant_id=$1 AND cluster_id=$2 AND from_instance=$3`,
+		tenantID, clusterID, fromInstance); err != nil {
+		return fmt.Errorf("delete stale topology edges: %w", err)
+	}
+	for _, r := range rows {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO topology_edges (tenant_id, cluster_id, from_instance, to_instance, edge_type, sync_state, confidence, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,now())`,
+			r.TenantID, r.ClusterID, r.FromInstance, r.ToInstance, r.EdgeType, r.SyncState, r.Confidence); err != nil {
+			return fmt.Errorf("insert topology edge: %w", err)
+		}
+	}
+	return nil
+}
+
 // QueryTextRow is one row for query_texts upsert.
 type QueryTextRow struct {
 	TenantID  string

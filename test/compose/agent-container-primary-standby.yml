@@ -1,0 +1,29 @@
+services:
+  pglens-agent:
+    image: ghcr.io/manprint/pglens-agent:dev
+    depends_on:
+      pglens-server:
+        condition: service_healthy
+    environment:
+      PGLENS_CONFIG: /etc/pglens/agent.yaml
+      PGLENS_SERVER_URL: http://pglens-server:8080
+      PGLENS_BOOTSTRAP_TOKEN: dev-token
+    ports:
+      - "9187"
+    volumes:
+      - agent-data:/var/lib/pglens
+      # Monitors both pg-primary and pg-standby — agent-standalone.yaml's
+      # single "pg" target does not exist as a service in this topology at
+      # all (see the comment in agent-primary-standby.yaml).
+      - ../fixtures/agent-primary-standby.yaml:/etc/pglens/agent.yaml:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/pglens-agent", "--healthcheck"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  agent-data:

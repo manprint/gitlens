@@ -13,6 +13,54 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAshAPI_ASHDisabled_ReturnsExplicitFalse(t *testing.T) {
+	t.Parallel()
+	instID := uuid.New()
+	pool := &mockPool{
+		queryRowVals: []*mockRow{{vals: []any{false}}},
+	}
+	api := &AshAPI{pool: pool}
+
+	req := httptest.NewRequest("GET", "/api/v1/ash?instance_id="+instID.String(), nil)
+	w := httptest.NewRecorder()
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	resp := ashResponse{}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.NotNil(t, resp.Enabled)
+	require.False(t, *resp.Enabled)
+	require.Equal(t, []ashBucket{}, resp.Buckets)
+	require.Equal(t, 1, pool.queryRowCalls, "must not query metrics_ash once short-circuited")
+	require.Equal(t, 0, pool.queryCalls)
+}
+
+func TestAshAPI_ASHUnknownOrEnabled_FallsThroughToBuckets(t *testing.T) {
+	t.Parallel()
+	instID := uuid.New()
+	pool := &mockPool{
+		// No row for this instance at all (pgx.ErrNoRows via the default
+		// mockRow{err: pgx.ErrNoRows}) — unknown/never-reported must behave
+		// exactly like "enabled", not like "disabled".
+		queryResults: []*mockRows{{rows: []([]any){}}},
+	}
+	api := &AshAPI{pool: pool}
+
+	req := httptest.NewRequest("GET", "/api/v1/ash?instance_id="+instID.String(), nil)
+	w := httptest.NewRecorder()
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	resp := ashResponse{}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.Nil(t, resp.Enabled)
+	require.Empty(t, resp.Buckets)
+}
+
 func TestAshAPI_NoPool_ReturnsEmpty(t *testing.T) {
 	t.Parallel()
 	api := NewAshAPI(nil)

@@ -51,6 +51,14 @@ type APIClient interface {
 	Readyz() (bool, error)
 	Healthz() (map[string]interface{}, error)
 	WaitReadyz(timeout time.Duration) error
+	// Get fetches an arbitrary JSON-object endpoint (path includes the query
+	// string, e.g. "/api/v1/ash?instance_id=..."). Endpoints with a
+	// dedicated typed method above should keep using it; this exists for
+	// endpoints (like /api/v1/ash's "enabled" field) that don't have one yet.
+	Get(path string) (map[string]interface{}, error)
+	// RawGet fetches an arbitrary endpoint and returns its raw text body —
+	// for non-JSON responses like /metrics (Prometheus text exposition).
+	RawGet(path string) (string, error)
 }
 
 // Env provides scenario execution context: DB/API access, container control,
@@ -74,8 +82,16 @@ type Env struct {
 
 	// Exec runs a command inside a named service container.
 	Exec func(service string, argv ...string) (string, error)
+	// ExecAs runs a command as a specific user — needed for anything
+	// postgres-privileged (`pg_ctl promote` refuses to run as root).
+	ExecAs func(service, user string, argv ...string) (string, error)
 	// Compose runs a docker-compose command against the running stack.
 	Compose func(argv ...string) error
+	// Logs returns a service's captured stdout/stderr (docker compose logs).
+	Logs func(service string) (string, error)
+	// Workload runs test/workload (workloadctl) as a host subprocess and
+	// returns its combined output (its JSON report on success).
+	Workload func(args ...string) (string, error)
 	// Toxic injects a fault on a link (requires harness.Config{Toxiproxy:
 	// true}) and returns a function to remove it.
 	Toxic func(link ToxicLink, t ToxicPayload) (RemoveFunc, error)

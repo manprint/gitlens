@@ -25,6 +25,11 @@ type Instance struct {
 	Databases       []Database `json:"databases"`
 	Results         []Result   `json:"results"`
 	TopologyEdges   []Edge     `json:"topology_edges,omitempty"`
+	// ASHEnabled reports the agent's own checks.ash.enabled config, so the
+	// server can distinguish "ASH is switched off" from "no data yet" —
+	// nil means an agent build that predates this field (unknown, treated
+	// as enabled by the server). SYS-ASH-002.
+	ASHEnabled *bool `json:"ash_enabled,omitempty"`
 }
 
 type Database struct {
@@ -34,9 +39,10 @@ type Database struct {
 }
 
 type Edge struct {
-	From string `json:"from"`
-	To   string `json:"to"`
-	Type string `json:"type"`
+	From       string `json:"from"`
+	To         string `json:"to"` // the upstream's addr, resolved to an instance_id server-side
+	Type       string `json:"type"`
+	Confidence string `json:"confidence"` // "high" (actively streaming) | "low" (last-known upstream, not currently connected)
 }
 
 type Result struct {

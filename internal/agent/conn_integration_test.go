@@ -113,6 +113,30 @@ func TestINTCONN003_ApplicationName(t *testing.T) {
 	})
 }
 
+// TestManager_DedicatedConn proves DedicatedConn (phase 7.1, the ASH
+// sampler's own connection) returns a real, immediately usable connection
+// tagged distinctly from Shared()'s.
+func TestManager_DedicatedConn(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		ctx := context.Background()
+		mgr, err := NewManager(ctx, "test-target", pg.DSN("postgres", pgtest.RoleT0), DefaultConnOptions(), clock.System())
+		require.NoError(t, err)
+		defer mgr.Close()
+
+		conn, err := mgr.DedicatedConn(ctx)
+		require.NoError(t, err)
+		defer conn.Release()
+
+		var appName string
+		require.NoError(t, conn.QueryRow(ctx, "SELECT current_setting('application_name')").Scan(&appName))
+		require.Equal(t, "pglens/ash", appName)
+
+		var one int
+		require.NoError(t, conn.QueryRow(ctx, "SELECT 1").Scan(&one))
+		require.Equal(t, 1, one)
+	})
+}
+
 // INT-CONN-004: new databases created after startup are discovered; dropped ones stop being scraped.
 func TestINTCONN004_DynamicDiscovery(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {

@@ -190,4 +190,104 @@ func init() {
 			return nil
 		},
 	})
+
+	Register(Scenario{
+		ID:       "SYS-NET-005",
+		Title:    "docker pause on PostgreSQL, then unpause: treated as unreachable, recovers cleanly, no duplicate rows",
+		Topology: TopologyStandalone,
+		Covers:   []string{"phase_06.md#5.7", "I-3"},
+		Expect:   Expectations{Events: []string{"agent_down", "agent_up"}, Invariants: []string{"I-1", "I-2", "I-3", "I-4"}},
+		Run: func(ctx context.Context, e *Env) error {
+			var instanceID string
+			resolveCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			if err := poll(resolveCtx, 2*time.Second, func(ctx context.Context) (bool, error) {
+				err := e.DB.QueryRow(ctx, `SELECT instance_id::text FROM instances ORDER BY last_seen DESC LIMIT 1`).Scan(&instanceID)
+				return err == nil, err
+			}); err != nil {
+				return fmt.Errorf("resolve monitored instance: %w", err)
+			}
+
+			// `docker pause` freezes every process in the container at the
+			// cgroup level (SIGSTOP-equivalent) — unlike SYS-NET-003's
+			// toxic, which only black-holes the agent<->PG TCP link, a
+			// paused PostgreSQL cannot answer ANY connection, including the
+			// one RefreshRole itself uses. In this standalone topology that
+			// is the agent's only target, so RefreshRole fails on every
+			// tick and the instance is excluded from every envelope
+			// (staleness.go's flushEnvelope skip, established fixing
+			// orphan_standby earlier this session) — instances.last_seen
+			// genuinely stops advancing, so unlike SYS-NET-003 this SHOULD
+			// cross the staleness evaluator's threshold() (3x
+			// defaultExpectedInterval, 90s default) and fire agent_down /
+			// instance_unreachable. This is the behavioral distinction the
+			// plan's own wording ("treated as unreachable") calls for.
+			pauseStart := time.Now().UTC()
+			if err := e.Compose("pause", "pg"); err != nil {
+				return fmt.Errorf("pause pg: %w", err)
+			}
+			paused := true
+			defer func() {
+				if paused {
+					_ = e.Compose("unpause", "pg")
+				}
+			}()
+
+			downCtx, cancel2 := context.WithTimeout(ctx, 150*time.Second)
+			defer cancel2()
+			if err := poll(downCtx, 3*time.Second, func(ctx context.Context) (bool, error) {
+				var n int
+				err := e.DB.QueryRow(ctx,
+					`SELECT count(*) FROM events WHERE instance_id=$1::uuid AND type IN ('instance_unreachable','agent_down') AND ts >= $2`,
+					instanceID, pauseStart).Scan(&n)
+				return err == nil && n > 0, err
+			}); err != nil {
+				return fmt.Errorf("agent_down/instance_unreachable never fired while pg was paused: %w", err)
+			}
+
+			// The agent process itself is unaffected (only pg's container
+			// is paused) — /healthz must keep answering throughout, same
+			// liveness guarantee as SYS-NET-003.
+			if _, err := e.AgentHealthz(); err != nil {
+				return fmt.Errorf("agent /healthz errored while pg was paused: %w", err)
+			}
+
+			if err := e.Compose("unpause", "pg"); err != nil {
+				return fmt.Errorf("unpause pg: %w", err)
+			}
+			paused = false
+			recoverTS := time.Now().UTC()
+
+			recoverCtx, cancel3 := context.WithTimeout(ctx, 150*time.Second)
+			defer cancel3()
+			if err := poll(recoverCtx, 3*time.Second, func(ctx context.Context) (bool, error) {
+				var n int
+				err := e.DB.QueryRow(ctx,
+					`SELECT count(*) FROM events WHERE instance_id=$1::uuid AND type IN ('instance_reachable','agent_up') AND ts >= $2`,
+					instanceID, recoverTS.Add(-1*time.Second)).Scan(&n)
+				return err == nil && n > 0, err
+			}); err != nil {
+				return fmt.Errorf("agent_up/instance_reachable never fired after unpause: %w", err)
+			}
+
+			freshCtx, cancel4 := context.WithTimeout(ctx, 90*time.Second)
+			defer cancel4()
+			if err := poll(freshCtx, 3*time.Second, func(ctx context.Context) (bool, error) {
+				var n int
+				err := e.DB.QueryRow(ctx,
+					`SELECT count(*) FROM metrics WHERE instance_id=$1::uuid AND metric='pg_backends' AND ts >= $2`,
+					instanceID, recoverTS).Scan(&n)
+				return err == nil && n > 0, err
+			}); err != nil {
+				return fmt.Errorf("no fresh pg_backends sample landed after unpause: %w", err)
+			}
+
+			// I-3 (no duplicate (series_id,ts)) is the strongest "no
+			// duplicate rows after resume" check available: the schema's
+			// own unique index enforces it, so AssertInvariants is the
+			// authoritative assertion rather than an ad-hoc count query.
+			e.AssertInvariants(e.T)
+			return nil
+		},
+	})
 }

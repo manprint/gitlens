@@ -37,14 +37,28 @@ type Sampler struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	timeout  time.Duration
-	onSample func(SampleRow) // invoked for every row of every successful tick; nil is valid (rows dropped)
+	interval time.Duration      // tick period; defaults to 1s in NewSampler, overridable via SetInterval before Start
+	onSample func(SampleRow)    // invoked for every row of every successful tick; nil is valid (rows dropped)
+	onTick   func(success bool) // invoked exactly once per tick attempt, success or not; nil is valid
 
-	mu               sync.Mutex
-	ticksMissed      atomic.Int64
-	computeQueryID   *bool // nil = unknown, true/false = discovered
-	computeQueryIDMu sync.Mutex
-	warnedNoQueryID  atomic.Bool
+	mu                  sync.Mutex
+	ticksMissed         atomic.Int64
+	computeQueryID      *bool // nil = unknown, true/false = discovered
+	computeQueryIDMu    sync.Mutex
+	nullOnlySampleCount int // consecutive samples with >=1 row and every row's query_id null
+	warnedNoQueryID     atomic.Bool
 }
+
+// computeQueryIDOffSamples is how many CONSECUTIVE samples must show every
+// row's query_id null before concluding compute_query_id is off. A single
+// early sample can catch every active session between statements (query_id
+// transiently null even with the GUC genuinely on) — latching "off" from
+// that one observation (the original behavior) reported it permanently,
+// even though compute_query_id was confirmed on server-wide via `SHOW
+// compute_query_id` and later samples would have shown real query_ids. "on"
+// still latches from a single non-null observation, since that can only
+// happen when the GUC is genuinely on.
+const computeQueryIDOffSamples = 5
 
 // NewSampler creates a new ASH sampler.
 // conn must be dedicated (not shared); it will be held for the lifetime of the sampler.
@@ -55,11 +69,26 @@ func NewSampler(conn querier, clk clock.Clock, onSample func(SampleRow)) *Sample
 		conn:     conn,
 		clk:      clk,
 		timeout:  500 * time.Millisecond,
+		interval: 1 * time.Second,
 		onSample: onSample,
 	}
 }
 
-// Start begins the 1-second sampling loop. Returns an error if already running.
+// SetInterval overrides the tick period (default 1s) — phase_08.md 7.1's own
+// "setting interval: 5s ... is supported for sensitive instances." Must be
+// called before Start; a non-positive duration is ignored (keeps the
+// default rather than spinning on a zero-length ticker).
+func (s *Sampler) SetInterval(d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.interval = d
+}
+
+// Start begins the sampling loop at the configured interval (default 1s).
+// Returns an error if already running.
 func (s *Sampler) Start(parentCtx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -70,7 +99,7 @@ func (s *Sampler) Start(parentCtx context.Context) error {
 
 	runCtx, cancel := context.WithCancel(parentCtx)
 	s.ctx, s.cancel = runCtx, cancel
-	s.ticker = s.clk.NewTicker(1 * time.Second)
+	s.ticker = s.clk.NewTicker(s.interval)
 
 	go s.run(runCtx)
 	return nil
@@ -97,6 +126,18 @@ func (s *Sampler) TicksMissed() int64 {
 	return s.ticksMissed.Load()
 }
 
+// SetTickCallback registers a callback invoked exactly once per tick attempt
+// (success or failure), regardless of how many rows that tick returned —
+// unlike onSample, which never fires for a genuinely idle, zero-row tick.
+// Callers that need an accurate tick count (e.g. driving
+// Aggregator.TickSucceeded/TickFailed for the honest samples/ticks average)
+// need this distinction; must be called before Start.
+func (s *Sampler) SetTickCallback(f func(success bool)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onTick = f
+}
+
 // ComputeQueryIDEnabled returns true if compute_query_id is on, false if off, nil if not yet discovered.
 func (s *Sampler) ComputeQueryIDEnabled() *bool {
 	s.computeQueryIDMu.Lock()
@@ -119,10 +160,14 @@ func (s *Sampler) run(ctx context.Context) {
 		case <-ticker.C():
 			// Create a context with timeout for this tick
 			tickCtx, cancel := context.WithTimeout(ctx, s.timeout)
-			if err := s.doSample(tickCtx); err != nil {
+			err := s.doSample(tickCtx)
+			if err != nil {
 				s.ticksMissed.Add(1)
 			}
 			cancel()
+			if s.onTick != nil {
+				s.onTick(err == nil)
+			}
 		}
 	}
 }
@@ -145,6 +190,7 @@ SELECT COALESCE(datname, '')             AS datname,
 	}
 	defer rows.Close()
 
+	var sawRow, sawNonNullQueryID bool
 	for rows.Next() {
 		var datname, state, waitEventType, waitEvent string
 		var queryID *int64
@@ -152,17 +198,9 @@ SELECT COALESCE(datname, '')             AS datname,
 		if err := rows.Scan(&datname, &state, &waitEventType, &waitEvent, &queryID); err != nil {
 			return err
 		}
-
-		// On first successful sample, check compute_query_id
-		s.computeQueryIDMu.Lock()
-		if s.computeQueryID == nil {
-			enabled := queryID != nil
-			s.computeQueryID = &enabled
-		}
-		s.computeQueryIDMu.Unlock()
-
-		if queryID == nil && s.warnedNoQueryID.CompareAndSwap(false, true) {
-			log.Printf("ash: compute_query_id is off — samples will not be attributable to a query")
+		sawRow = true
+		if queryID != nil {
+			sawNonNullQueryID = true
 		}
 
 		if s.onSample != nil {
@@ -175,6 +213,31 @@ SELECT COALESCE(datname, '')             AS datname,
 			})
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
 
-	return rows.Err()
+	s.computeQueryIDMu.Lock()
+	if s.computeQueryID == nil {
+		switch {
+		case sawNonNullQueryID:
+			enabled := true
+			s.computeQueryID = &enabled
+		case sawRow:
+			s.nullOnlySampleCount++
+			if s.nullOnlySampleCount >= computeQueryIDOffSamples {
+				disabled := false
+				s.computeQueryID = &disabled
+			}
+		}
+		// No active sessions at all this tick: inconclusive, don't count
+		// either way — waiting for a sample that actually has rows.
+	}
+	s.computeQueryIDMu.Unlock()
+
+	if s.computeQueryID != nil && !*s.computeQueryID && s.warnedNoQueryID.CompareAndSwap(false, true) {
+		log.Printf("ash: compute_query_id is off — samples will not be attributable to a query")
+	}
+
+	return nil
 }

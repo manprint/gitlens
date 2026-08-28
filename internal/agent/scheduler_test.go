@@ -56,11 +56,14 @@ func (m *mockTarget) Clock() clock.Clock {
 
 // mockCheck is a minimal check.Check for testing
 type mockCheck struct {
-	name     string
-	interval time.Duration
-	timeout  time.Duration
-	callCnt  int
-	mu       sync.Mutex
+	name       string
+	interval   time.Duration
+	timeout    time.Duration
+	callCnt    int
+	scrapedDBs []string         // t.Database() as seen by each Scrape call, in order
+	queryTexts map[int64]string // returned verbatim in check.Result.QueryTexts, if set
+	statsReset *time.Time       // returned verbatim in check.Result.StatsReset, if set
+	mu         sync.Mutex
 }
 
 func (m *mockCheck) Name() string {
@@ -79,7 +82,8 @@ func (m *mockCheck) Scrape(ctx context.Context, t check.Target) (check.Result, e
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.callCnt++
-	return check.Result{}, nil
+	m.scrapedDBs = append(m.scrapedDBs, t.Database())
+	return check.Result{QueryTexts: m.queryTexts, StatsReset: m.statsReset}, nil
 }
 
 // TestScheduler_RunsAtInterval tests that a check runs at its scheduled interval
@@ -122,6 +126,133 @@ func TestScheduler_RunsAtInterval(t *testing.T) {
 	if runCount < 1 {
 		t.Errorf("expected at least 1 run, got %d", runCount)
 	}
+}
+
+// TestScheduler_DatabaseScopedEntry_OverridesTargetDatabase proves a
+// ScopeDatabase entry's Scrape() sees the entry's own discovered database
+// name via t.Database(), not the target's own name — the two are
+// genuinely different strings in any real multi-database deployment (found
+// live: target "pg", monitored database "postgres"; stat_statements.go's
+// own `t.ConnFor(ctx, t.Database())` silently tried to connect to a
+// database literally named "pg", which doesn't exist, failing every scrape
+// with no visible log).
+func TestScheduler_DatabaseScopedEntry_OverridesTargetDatabase(t *testing.T) {
+	opts := ScheduleOptions{
+		MaxWorkers:      1,
+		NoJitter:        true,
+		Clock:           clock.System(),
+		ShutdownTimeout: 5 * time.Second,
+	}
+	s := NewScheduler(opts)
+
+	mc := &mockCheck{name: "db_scoped_check", interval: 50 * time.Millisecond, timeout: 50 * time.Millisecond}
+	target := &mockTarget{name: "pg", conn: &mockConn{}}
+	s.AddEntry(target, mc, "postgres")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	results := s.Results()
+	select {
+	case res := <-results:
+		if res.Err != nil {
+			t.Fatalf("unexpected scrape error: %v", res.Err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for a run")
+	}
+	s.Stop()
+
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	if len(mc.scrapedDBs) == 0 {
+		t.Fatal("Scrape was never called")
+	}
+	if got := mc.scrapedDBs[0]; got != "postgres" {
+		t.Fatalf("expected Scrape's target.Database() to report the entry's own database %q, got %q (the target's own name)", "postgres", got)
+	}
+}
+
+// TestScheduler_PropagatesQueryTexts proves check.Result.QueryTexts reaches
+// EntryResult unchanged — found live re-verifying phase 7.5's README:
+// stat_statements.go computed real query texts all along, but EntryResult
+// never carried the field at all, so /api/v1/ash/top's query_text join
+// always returned "" no matter how correctly the check itself ran.
+func TestScheduler_PropagatesQueryTexts(t *testing.T) {
+	opts := ScheduleOptions{
+		MaxWorkers:      1,
+		NoJitter:        true,
+		Clock:           clock.System(),
+		ShutdownTimeout: 5 * time.Second,
+	}
+	s := NewScheduler(opts)
+
+	want := map[int64]string{42: "SELECT 1"}
+	mc := &mockCheck{name: "stat_statements", interval: 50 * time.Millisecond, timeout: 50 * time.Millisecond, queryTexts: want}
+	target := &mockTarget{name: "pg", conn: &mockConn{}}
+	s.AddEntry(target, mc, "postgres")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	select {
+	case res := <-s.Results():
+		if res.Err != nil {
+			t.Fatalf("unexpected scrape error: %v", res.Err)
+		}
+		if len(res.QueryTexts) != 1 || res.QueryTexts[42] != "SELECT 1" {
+			t.Fatalf("expected QueryTexts to propagate unchanged, got %v", res.QueryTexts)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for a run")
+	}
+	s.Stop()
+}
+
+// TestScheduler_PropagatesStatsReset proves check.Result.StatsReset reaches
+// EntryResult unchanged — the same class of gap as QueryTexts (row 142):
+// stat_statements.go has always computed this from
+// pg_stat_statements_info.reset_time, but nothing carried it past
+// scrapeEntry, so SYS-RESET-002's counter_reset_detected event had no
+// explicit reset hint to work from.
+func TestScheduler_PropagatesStatsReset(t *testing.T) {
+	opts := ScheduleOptions{
+		MaxWorkers:      1,
+		NoJitter:        true,
+		Clock:           clock.System(),
+		ShutdownTimeout: 5 * time.Second,
+	}
+	s := NewScheduler(opts)
+
+	want := time.Now().Add(-time.Minute)
+	mc := &mockCheck{name: "stat_statements", interval: 50 * time.Millisecond, timeout: 50 * time.Millisecond, statsReset: &want}
+	target := &mockTarget{name: "pg", conn: &mockConn{}}
+	s.AddEntry(target, mc, "postgres")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	select {
+	case res := <-s.Results():
+		if res.Err != nil {
+			t.Fatalf("unexpected scrape error: %v", res.Err)
+		}
+		if res.StatsReset == nil || !res.StatsReset.Equal(want) {
+			t.Fatalf("expected StatsReset to propagate unchanged, got %v", res.StatsReset)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for a run")
+	}
+	s.Stop()
 }
 
 // TestScheduler_JitterWithinBounds tests that jitter and no-jitter modes work

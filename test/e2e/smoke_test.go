@@ -101,6 +101,18 @@ func TestSmoke_PermTierT0Only(t *testing.T) {
 	h.Scenario(t, "SYS-PERM-001")
 }
 
+// TestSmoke_PromoteInvertsRolesNoIdentityLoss runs SYS-REPL-001
+// (test/scenario/replication.go) — the plan's own acceptance test.
+func TestSmoke_PromoteInvertsRolesNoIdentityLoss(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping E2E smoke test in short mode")
+	}
+	h := harness.Start(t, harness.Config{
+		Topology: harness.TopologyPrimaryStandby,
+	})
+	h.Scenario(t, "SYS-REPL-001")
+}
+
 // TestSmoke_BlackHoleAgentStaysResponsive runs SYS-NET-003 (test/scenario/net.go).
 func TestSmoke_BlackHoleAgentStaysResponsive(t *testing.T) {
 	if testing.Short() {
@@ -124,4 +136,31 @@ func TestSmoke_ServerOutageBacklogSurvives(t *testing.T) {
 		AgentMode: harness.AgentModeContainer,
 	})
 	h.Scenario(t, "SYS-NET-001")
+}
+
+// TestSmoke_SlowQueryASHAndStatementsAgree runs SYS-LOAD-003
+// (test/scenario/ash.go) — phase_08.md line 229 explicitly names this
+// scenario as joining the smoke set.
+func TestSmoke_SlowQueryASHAndStatementsAgree(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping E2E smoke test in short mode")
+	}
+	h := harness.Start(t, harness.Config{
+		Topology: harness.TopologyStandalone,
+	})
+	h.Scenario(t, "SYS-LOAD-003")
+}
+
+// TestSmoke_CardinalityBudgetHoldsUnderLoad runs SYS-LOAD-008
+// (test/scenario/statements.go) — the last of the original 8-scenario smoke
+// suite, previously blocked on V001-F11 (pglens_series_total/
+// check_error_total not existing at all).
+func TestSmoke_CardinalityBudgetHoldsUnderLoad(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping E2E smoke test in short mode")
+	}
+	h := harness.Start(t, harness.Config{
+		Topology: harness.TopologyStandalone,
+	})
+	h.Scenario(t, "SYS-LOAD-008")
 }

@@ -3,6 +3,7 @@ package agent
 import (
 	"sync"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/manprint/pglens/internal/pgtype"
 )
@@ -10,6 +11,7 @@ import (
 // instanceIDCache caches values queried from the database to avoid repeated queries.
 type instanceIDCache struct {
 	instanceID  pgtype.InstanceID
+	agentID     uuid.UUID
 	clusterID   pgtype.ClusterID
 	role        pgtype.Role
 	pgVersion   pgtype.PGVersion

@@ -14,6 +14,7 @@ import (
 	"github.com/manprint/pglens/internal/delta"
 	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/manprint/pglens/internal/store"
+	"github.com/manprint/pglens/internal/topology"
 	"github.com/manprint/pglens/internal/wire"
 )
 
@@ -21,6 +22,7 @@ import (
 type Pipeline struct {
 	pool      dbPool
 	delta     *delta.Engine
+	topo      *topology.Engine
 	clock     clock.Clock
 	mu        sync.Mutex
 	lastEvict time.Time
@@ -42,6 +44,7 @@ func NewPipeline(pool *pgxpool.Pool, clk clock.Clock) *Pipeline {
 	return &Pipeline{
 		pool:      asDBPool(pool),
 		delta:     delta.New(delta.Options{}),
+		topo:      topology.NewEngine(clk),
 		clock:     clk,
 		lastEvict: clk.Now(),
 	}
@@ -108,6 +111,41 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	var queryTextRows []store.QueryTextRow
 	var eventRows []store.EventRow
 
+	// Resolves a wire.Edge.To (an upstream's addr, e.g. "pg-primary") to an
+	// instance_id. Tries the current envelope first (fast path, no query).
+	// Falls back to the instances table for an upstream that isn't in this
+	// envelope at all — found live via SYS-REPL-003: once a dead instance
+	// stops being pushed (it no longer has a live signal to report at all,
+	// see flushEnvelope's own comment on this), its addr would otherwise
+	// never resolve again, permanently breaking a standby's low-confidence
+	// edge back to it — exactly the edge orphan-standby detection depends on
+	// existing at all (topology.Engine's own TestEngine_OrphanStandby: an
+	// edge object with a resolvable target is required to start its clock).
+	addrToInstance := make(map[string]uuid.UUID, len(env.Instances))
+	for _, inst := range env.Instances {
+		if inst.Addr == "" {
+			continue
+		}
+		if id, err := uuid.Parse(inst.InstanceID); err == nil {
+			addrToInstance[inst.Addr] = id
+		}
+	}
+	dbAddrCache := make(map[string]uuid.UUID)
+	resolveAddr := func(ctx context.Context, cidDB int64, addr string) (uuid.UUID, bool) {
+		if id, ok := addrToInstance[addr]; ok {
+			return id, true
+		}
+		if id, ok := dbAddrCache[addr]; ok {
+			return id, true
+		}
+		var id uuid.UUID
+		if err := tx.QueryRow(ctx, `SELECT instance_id FROM instances WHERE cluster_id=$1 AND addr=$2 LIMIT 1`, cidDB, addr).Scan(&id); err != nil {
+			return uuid.UUID{}, false
+		}
+		dbAddrCache[addr] = id
+		return id, true
+	}
+
 	for _, inst := range env.Instances {
 		cid, err := pgtype.ParseClusterID(inst.ClusterID)
 		if err != nil {
@@ -132,7 +170,72 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		var instEvents []store.EventRow
 		var instErr error
 
+		// internal/topology.Engine (6.2, unit-tested at 90.9% coverage) was
+		// never actually called from anywhere in the real server — found
+		// live while building SYS-REPL-001 (the plan's own acceptance
+		// scenario), which needs a real `failover_detected` event and
+		// found none, ever, no matter how correctly a real promote
+		// happened.
+		var topoEdges []topology.Edge
+		for _, we := range inst.TopologyEdges {
+			toID, ok := resolveAddr(ctx, cidDB, we.To)
+			if !ok {
+				continue // unresolvable — no instance in this cluster has ever reported this addr
+			}
+			topoEdges = append(topoEdges, topology.Edge{
+				From:       instUUID,
+				To:         toID,
+				Type:       we.Type,
+				Confidence: we.Confidence,
+			})
+		}
+		{
+			edgeRows := make([]store.TopologyEdgeRow, 0, len(topoEdges))
+			for _, te := range topoEdges {
+				// SyncState is left unset: it comes from the primary's own
+				// replication_streaming check (pg_stat_replication), not
+				// from the standby-side edge this loop resolves.
+				edgeRows = append(edgeRows, store.TopologyEdgeRow{
+					TenantID:     tenantID,
+					ClusterID:    cidDB,
+					FromInstance: instUUID,
+					ToInstance:   te.To,
+					EdgeType:     te.Type,
+					Confidence:   te.Confidence,
+				})
+			}
+			// A DB write failure here is the same class of problem as
+			// store.WriteMetrics/WriteReplication/etc failing below — a
+			// real transaction-level error (e.g. disk full), not a
+			// per-instance data problem — so it aborts and rolls back the
+			// whole envelope the same way, rather than silently rejecting
+			// just this one instance.
+			if err := store.WriteTopologyEdges(ctx, tx, tenantID, cidDB, instUUID, edgeRows); err != nil {
+				return nil, fmt.Errorf("write topology edges: %w", err)
+			}
+		}
+		for _, ev := range p.topo.Apply(topology.Observation{
+			InstanceID: instUUID,
+			ClusterID:  cid,
+			Role:       pgtype.Role(inst.Role),
+			Edges:      topoEdges,
+		}) {
+			evCluster := cidDB
+			evInst := instUUID
+			instEvents = append(instEvents, store.EventRow{
+				TenantID:   tenantID,
+				TS:         ev.Timestamp,
+				Type:       string(ev.Type),
+				ClusterID:  &evCluster,
+				InstanceID: &evInst,
+				Payload:    ev.Payload,
+			})
+		}
+
 		for _, r := range inst.Results {
+			if r.Error != "" {
+				IncCheckError(r.Check)
+			}
 			if r.Truncated {
 				evCluster := cidDB
 				evInst := instUUID
@@ -305,11 +408,23 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 							SlotName:   rk.slot,
 							EdgeType:   "streaming",
 						}
-						// Fill upstream_id if present
+						// No check has ever set an "upstream_id" label (checked:
+						// replication_receiver.go/replication_streaming.go's
+						// own label sets) — GET /api/v1/clusters/{id}/replication
+						// (internal/server/api_topology.go) skips every row
+						// with a null upstream_id outright, so this endpoint
+						// always returned an empty edge list, found live
+						// verifying phase 6.5's README example. Falls back to
+						// the same resolved edge topoEdges already computed
+						// above for this instance (at most one, in every
+						// topology this plan tests).
 						if s, ok := m.Labels["upstream_id"]; ok {
 							if uid, err := uuid.Parse(s); err == nil {
 								row.UpstreamID = &uid
 							}
+						} else if len(topoEdges) > 0 {
+							to := topoEdges[0].To
+							row.UpstreamID = &to
 						}
 						if s, ok := m.Labels["sync_state"]; ok {
 							v := s
@@ -365,6 +480,13 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit tx: %w", err)
 	}
+	// I-8's own real number: how many distinct series each instance is
+	// currently reporting, straight from the delta engine's own tracked
+	// state (SetSeriesTotal/pglens_series_total existed since an earlier
+	// phase pass but nothing ever called it with a real value).
+	for instID, count := range p.delta.CountByInstance() {
+		SetSeriesTotal(instID.String(), float64(count))
+	}
 	return res, nil
 }
 
@@ -379,6 +501,9 @@ func (p *Pipeline) processInstanceNoDB(_ context.Context, inst wire.Instance) er
 	}
 	instUUID, _ := uuid.Parse(inst.InstanceID)
 	for _, r := range inst.Results {
+		if r.Error != "" {
+			IncCheckError(r.Check)
+		}
 		for _, m := range r.Metrics {
 			dest := destinationTable(r.Check)
 			if dest == "metrics_ash" {

@@ -102,6 +102,52 @@ func TestStaleness_NoPrimary(t *testing.T) {
 	s.mu.Unlock()
 }
 
+func TestStaleness_SlotInactive(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	cid := store.ToDB(pgtype.ClusterID(3))
+	iid := uuid.New()
+	agent := uuid.New()
+	_, err := pool.Exec(context.Background(), `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+	require.NoError(t, err)
+	_, err = pool.Exec(context.Background(), `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual')`, cid)
+	require.NoError(t, err)
+	_, err = pool.Exec(context.Background(), `INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen) VALUES ($1,'default',$2,$3,'10.0.0.1',5432,170000,'primary','T0', now())`, iid, cid, agent)
+	require.NoError(t, err)
+	_, err = pool.Exec(context.Background(),
+		`INSERT INTO metrics_replication (ts, tenant_id, cluster_id, instance_id, slot_name, edge_type, slot_active) VALUES (now(), 'default', $1, $2, 'testslot', 'streaming', false)`,
+		cid, iid)
+	require.NoError(t, err)
+
+	fc := clock.NewFake(time.Now())
+	s := NewStaleness(pool, fc)
+	s.mu.Lock()
+	s.hasLock = true
+	s.conn = &pgxpool.Conn{}
+	s.slotInactiveSince[iid.String()+"/testslot"] = fc.Now().Add(-40 * time.Second)
+	s.mu.Unlock()
+
+	require.NoError(t, s.Evaluate(context.Background()))
+	var cnt int
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*) FROM events WHERE type='slot_inactive'`).Scan(&cnt))
+	require.GreaterOrEqual(t, cnt, 1)
+
+	require.NoError(t, s.Evaluate(context.Background()))
+	var cnt2 int
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*) FROM events WHERE type='slot_inactive'`).Scan(&cnt2))
+	require.Equal(t, cnt, cnt2, "slot_inactive must not re-emit for the same continuous spell of inactivity")
+
+	_, err = pool.Exec(context.Background(),
+		`INSERT INTO metrics_replication (ts, tenant_id, cluster_id, instance_id, slot_name, edge_type, slot_active) VALUES (now(), 'default', $1, $2, 'testslot', 'streaming', true)`,
+		cid, iid)
+	require.NoError(t, err)
+	require.NoError(t, s.Evaluate(context.Background()))
+	s.mu.Lock()
+	_, tracked := s.slotInactiveSince[iid.String()+"/testslot"]
+	require.False(t, tracked, "an active slot must clear its inactivity tracking")
+	s.mu.Unlock()
+}
+
 func TestStaleness_EmitEvent_MarshalError_WithPool(t *testing.T) {
 	pool := getSharedPool(t)
 	truncateAll(t, pool)

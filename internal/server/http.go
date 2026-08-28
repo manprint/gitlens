@@ -19,6 +19,7 @@ func NewRouter(auth *Auth, inv *Inventory, pipeline *Pipeline, api *API, topoAPI
 		_, _ = w.Write([]byte("ok"))
 	})
 	r.Post("/api/v1/push", IngestHandler(auth, inv, pipeline))
+	r.Get("/metrics", MetricsHandler())
 	api.RegisterRoutes(r)
 	topoAPI.RegisterRoutes(r)
 	ashAPI.RegisterRoutes(r)

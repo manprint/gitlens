@@ -47,9 +47,10 @@ func (h *Harness) Dump(t *testing.T) {
 		dumpAgentHealth(h, artifactDir, t)
 	}
 
-	// pglens-agent check output (if binary mode)
-	if h.agentFile != "" {
+	// pglens-agent check output and its own stdout/stderr log (binary mode only)
+	if h.agentMode == AgentModeBinary {
 		dumpAgentCheck(h, artifactDir, t)
+		dumpAgentBinaryLog(h, artifactDir, t)
 	}
 
 	// Metric table row counts and recent rows
@@ -123,15 +124,38 @@ func dumpAgentHealth(h *Harness, artifactDir string, t *testing.T) {
 	writeJSON(filepath.Join(artifactDir, "agent-health.json"), health, t)
 }
 
-// dumpAgentCheck writes pglens-agent check output (for binary mode).
+// dumpAgentCheck writes `pglens-agent check` output (AgentModeBinary only —
+// runs the already-built subprocess binary directly against its own target
+// DSN; there is no compose service to `docker compose exec` into in this
+// mode, unlike every other AgentMode variant).
 func dumpAgentCheck(h *Harness, artifactDir string, t *testing.T) {
-	output, err := h.Exec("agent", "pglens-agent", "check")
-	if err != nil {
-		t.Logf("pglens-agent check failed: %v", err)
+	if h.agentBinaryPath == "" {
 		return
 	}
-	if err := os.WriteFile(filepath.Join(artifactDir, "agent-check.log"), []byte(output), 0644); err != nil {
+	cmd := exec.Command(h.agentBinaryPath, "check", "--dsn", h.agentBinaryDSN)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Logf("pglens-agent check failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(artifactDir, "agent-check.log"), output, 0644); err != nil {
 		t.Logf("failed to write agent-check.log: %v", err)
+	}
+}
+
+// dumpAgentBinaryLog copies the binary-mode agent subprocess's own captured
+// stdout/stderr into the artifact directory — the equivalent of
+// dumpComposeLogs for a process that was never a docker-compose service.
+func dumpAgentBinaryLog(h *Harness, artifactDir string, t *testing.T) {
+	if h.agentLogPath == "" {
+		return
+	}
+	data, err := os.ReadFile(h.agentLogPath)
+	if err != nil {
+		t.Logf("failed to read agent binary log: %v", err)
+		return
+	}
+	if err := os.WriteFile(filepath.Join(artifactDir, "agent-binary.log"), data, 0644); err != nil {
+		t.Logf("failed to write agent-binary.log: %v", err)
 	}
 }
 

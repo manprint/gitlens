@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/manprint/pglens/internal/check"
 	"github.com/manprint/pglens/internal/clock"
@@ -73,6 +74,26 @@ func NewManager(ctx context.Context, targetName string, dsn string, opts ConnOpt
 		dbtc:   make(map[string]time.Time),
 	}
 	return m, nil
+}
+
+// DedicatedConn acquires a connection from the pool for exclusive, long-lived
+// use — the ASH sampler's 1-second loop, specifically (phase 7.1: "the
+// sampler runs on its own dedicated connection, not the shared one," so a
+// high-frequency loop never contends with the other checks for the same
+// connection). Unlike Shared(), which callers acquire and release promptly,
+// the caller here holds this connection until the sampler itself stops; the
+// connection budget (DefaultConnOptions: 4) is already sized for this — 1
+// shared, 1 ASH, 2 rotating per-database.
+func (m *Manager) DedicatedConn(ctx context.Context) (*pgxpool.Conn, error) {
+	conn, err := m.target.pool.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := conn.Exec(ctx, "SET application_name = 'pglens/ash'"); err != nil {
+		conn.Release()
+		return nil, err
+	}
+	return conn, nil
 }
 
 // Shared returns the long-lived shared connection on the maintenance database.
@@ -373,9 +394,26 @@ func (m *Manager) ensureCache(ctx context.Context) error {
 		return fmt.Errorf("get instance id: %w", err)
 	}
 	m.target.cache.instanceID = instanceID
+	m.target.cache.agentID = idStore.AgentID()
 
 	m.target.cache.initialized = true
 	return nil
+}
+
+// AgentID returns this process's stable identity (internal/identity.Store's
+// own agent_id, distinct from any single target's instance_id) — the value
+// every pushed wire.Envelope should carry so the server can key per-agent
+// state (e.g. revocation, SYS-AGENT-005) by the actual agent process rather
+// than by whichever instance happened to flush first.
+func (m *Manager) AgentID() uuid.UUID {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := m.ensureCache(ctx); err != nil {
+		return uuid.Nil
+	}
+	m.target.cache.mu.RLock()
+	defer m.target.cache.mu.RUnlock()
+	return m.target.cache.agentID
 }
 
 func (m *Manager) InstanceID() pgtype.InstanceID {
@@ -409,6 +447,36 @@ func (m *Manager) Role() pgtype.Role {
 	m.target.cache.mu.RLock()
 	defer m.target.cache.mu.RUnlock()
 	return m.target.cache.role
+}
+
+// RefreshRole re-queries pg_is_in_recovery() and updates the cached role in
+// place, independent of ensureCache's one-time initialization gate. Without
+// this, a promoted standby (or a demoted primary) would report its
+// original, now-stale role for the rest of the agent process's lifetime —
+// found live building SYS-REPL-001 (the plan's own acceptance test): a real
+// `pg_ctl promote` never showed up anywhere, because Role() only ever
+// queries the database once, on the very first call, then serves the same
+// cached value forever. This does not re-evaluate which checks are
+// scheduled (addScheduleEntries still runs once at startup — a real,
+// separate, larger gap, not fixed this session), but it does keep the
+// pushed wire.Instance.Role current, which is what the server's topology
+// engine (internal/server/pipeline.go) needs to ever detect a failover.
+func (m *Manager) RefreshRole(ctx context.Context) error {
+	conn, err := m.Shared(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Release()
+
+	var inRecovery bool
+	if err := conn.QueryRow(ctx, "SELECT pg_is_in_recovery()").Scan(&inRecovery); err != nil {
+		return fmt.Errorf("query role: %w", err)
+	}
+
+	m.target.cache.mu.Lock()
+	defer m.target.cache.mu.Unlock()
+	m.target.cache.role = pgtype.RoleFromRecovery(inRecovery)
+	return nil
 }
 
 func (m *Manager) PGVersion() pgtype.PGVersion {

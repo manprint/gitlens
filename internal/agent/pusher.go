@@ -5,15 +5,18 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	"math/rand"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/manprint/pglens/internal/agent/buffer"
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/wire"
 )
@@ -45,6 +48,19 @@ type Pusher struct {
 	pending   []*wire.Envelope
 	nAcked    int64
 	nDropped  int64
+
+	// buf, when set via SetBuffer, is used as the durable queue instead of
+	// pending: Queue() persists to disk (so a bounded volume genuinely fills
+	// and genuinely drops, I-7) and Push() drains it via Next()/AckFunc
+	// instead of the in-memory slice.
+	buf *buffer.Buffer
+}
+
+// SetBuffer wires a disk-backed buffer.Buffer as the pusher's durable queue.
+// Must be called before the first Queue()/Push() to take effect; nil is a
+// no-op (keeps the legacy in-memory pending slice).
+func (p *Pusher) SetBuffer(buf *buffer.Buffer) {
+	p.buf = buf
 }
 
 // NewPusher creates a new Pusher with default settings.
@@ -63,8 +79,22 @@ func NewPusher(serverURL, token string, clk clock.Clock) *Pusher {
 	}
 }
 
-// Queue queues an envelope for delivery. Does not block on network.
+// Queue queues an envelope for delivery. Does not block on network. When a
+// buffer.Buffer is set (SetBuffer), a full disk buffer drops the envelope
+// (counted in nDropped, I-7) instead of growing without bound.
 func (p *Pusher) Queue(env *wire.Envelope) {
+	if p.buf != nil {
+		data, err := json.Marshal(env)
+		if err != nil {
+			atomic.AddInt64(&p.nDropped, 1)
+			return
+		}
+		if err := p.buf.Append(data); err != nil {
+			atomic.AddInt64(&p.nDropped, 1)
+			return
+		}
+		return
+	}
 	p.pendingMu.Lock()
 	defer p.pendingMu.Unlock()
 	p.pending = append(p.pending, env)
@@ -75,6 +105,9 @@ func (p *Pusher) Queue(env *wire.Envelope) {
 func (p *Pusher) Push(ctx context.Context) error {
 	if p.stopped.Load() {
 		return nil
+	}
+	if p.buf != nil {
+		return p.pushFromBuffer(ctx)
 	}
 
 	for {
@@ -94,6 +127,32 @@ func (p *Pusher) Push(ctx context.Context) error {
 			p.pendingMu.Unlock()
 			return err
 		}
+	}
+}
+
+// pushFromBuffer drains the disk buffer. An envelope is only acked after a
+// successful send: pushOne itself retries with backoff until it succeeds or
+// ctx is cancelled, so on cancellation the unacked record is simply re-read
+// from the last acked checkpoint on the next Push() (or after a restart).
+func (p *Pusher) pushFromBuffer(ctx context.Context) error {
+	for {
+		data, ack, err := p.buf.Next()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		var env wire.Envelope
+		if jsonErr := json.Unmarshal(data, &env); jsonErr != nil {
+			// Corrupt/undecodable record: nothing to retry, skip it.
+			_ = ack(ctx)
+			continue
+		}
+		if err := p.pushOne(ctx, &env); err != nil {
+			return err // context cancelled
+		}
+		_ = ack(ctx)
 	}
 }
 
@@ -143,10 +202,16 @@ func (p *Pusher) pushOne(ctx context.Context, env *wire.Envelope) error {
 
 		case http.StatusUnauthorized: // 401
 			p.mu.Lock()
-			p.health = HealthUnauthorized
-			// Check if "agent revoked" vs "bad token"
-			// Both treated as unauthorized; the error body would differentiate
-			// For now, assume revoked if the error mentions it; otherwise unauthorized
+			// internal/server/ingest.go's revocation check returns a body
+			// containing "revoked" specifically so this can tell "the
+			// server has flagged this agent" apart from "this token was
+			// never valid" — otherwise indistinguishable at the HTTP layer,
+			// both being a bare 401.
+			if strings.Contains(body, "revoked") {
+				p.health = HealthRevoked
+			} else {
+				p.health = HealthUnauthorized
+			}
 			p.lastError = body
 			p.mu.Unlock()
 			return nil // stop retry, process stays alive

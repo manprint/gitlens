@@ -57,3 +57,31 @@ func TestDistinct_ParseTreesDiffer(t *testing.T) {
 		}
 	})
 }
+
+// TestDistinct_ParseTreesDiffer_FullWorkloadRange verifies that all 5000
+// indices SYS-LOAD-008 actually drives (test/scenario/statements.go) stay
+// unique and that no single "+" chain gets anywhere near PostgreSQL's
+// max_stack_depth. A chain around ~4000-4200 terms starts failing with
+// "stack depth limit exceeded" — confirmed live against a real instance,
+// where the original unbounded-chain generateExpression silently dropped
+// ~18% of a --count 5000 run's highest-index queries for exactly this
+// reason.
+func TestDistinct_ParseTreesDiffer_FullWorkloadRange(t *testing.T) {
+	const workloadCount = 5000
+	const safeChainBound = 1000 // well under the ~4000-4200 term failure threshold
+
+	seen := make(map[string]int, workloadCount)
+	for i := 0; i < workloadCount; i++ {
+		expr := generateExpression(i)
+		if prev, exists := seen[expr]; exists {
+			t.Fatalf("duplicate expression at index %d (previously seen at %d): %q", i, prev, expr)
+		}
+		seen[expr] = i
+
+		for _, col := range strings.Split(expr, ",") {
+			if depth := strings.Count(col, "+"); depth > safeChainBound {
+				t.Errorf("generateExpression(%d) column %q has chain depth %d, exceeds safe bound %d", i, col, depth, safeChainBound)
+			}
+		}
+	}
+}

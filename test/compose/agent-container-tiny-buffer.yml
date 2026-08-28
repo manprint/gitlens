@@ -1,0 +1,33 @@
+services:
+  pglens-agent:
+    image: ghcr.io/manprint/pglens-agent:dev
+    depends_on:
+      pglens-server:
+        condition: service_healthy
+    environment:
+      PGLENS_CONFIG: /etc/pglens/agent.yaml
+      PGLENS_SERVER_URL: http://pglens-server:8080
+      PGLENS_BOOTSTRAP_TOKEN: dev-token
+    ports:
+      - "9187"
+    volumes:
+      - agent-data:/var/lib/pglens
+      - ../fixtures/agent-standalone.yaml:/etc/pglens/agent.yaml:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    # phase_06.md specifies 16 MiB; that is not fillable by the agent's real
+    # (non-configurable) check cadence within any reasonable test window — see
+    # SYS-AGENT-003's own comment in test/scenario/agent.go for the full
+    # reasoning. 16 KiB exercises the exact same real-ENOSPC code path in a
+    # couple of minutes of real agent traffic instead of hours.
+    tmpfs:
+      - /var/lib/pglens/buffer:size=16k
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/pglens-agent", "--healthcheck"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  agent-data:

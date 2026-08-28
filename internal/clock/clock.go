@@ -50,3 +50,27 @@ type systemTicker struct {
 func (s *systemTicker) C() <-chan time.Time { return s.t.C }
 
 func (s *systemTicker) Stop() { s.t.Stop() }
+
+// offsetClock shifts a base Clock's Now()/Since() by a fixed duration —
+// simulates a misconfigured system clock (e.g. NTP drift) without touching
+// the process's real time. Ticker/Sleep measure elapsed time, not absolute
+// time, so they pass through to base unchanged.
+type offsetClock struct {
+	base   Clock
+	offset time.Duration
+}
+
+// WithOffset returns a Clock whose Now() reports base.Now() shifted by
+// offset — positive makes it appear ahead of base, negative makes it appear
+// behind.
+func WithOffset(base Clock, offset time.Duration) Clock {
+	return offsetClock{base: base, offset: offset}
+}
+
+func (o offsetClock) Now() time.Time { return o.base.Now().Add(o.offset) }
+
+func (o offsetClock) Since(t time.Time) time.Duration { return o.Now().Sub(t) }
+
+func (o offsetClock) NewTicker(d time.Duration) Ticker { return o.base.NewTicker(d) }
+
+func (o offsetClock) Sleep(ctx context.Context, d time.Duration) error { return o.base.Sleep(ctx, d) }

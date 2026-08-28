@@ -273,10 +273,13 @@ checks:
 - Duration format: `10s`, `1m`, `1h` (Go time.ParseDuration syntax)
 - Size format: `512MiB`, `1GiB` (parsed by Go's time/humanize)
 
-**Environment overrides** (take precedence over config file):
+**Environment overrides** (take precedence over the config file's own value):
 - `PGLENS_SERVER_URL=http://...` — overrides `server.url`
 - `PGLENS_BOOTSTRAP_TOKEN=...` — overrides `server.token`
 - `PGLENS_BOOTSTRAP_TOKEN_FILE=/path/to/token` — overrides `server.token_file`
+- `PGLENS_IDENTITY_PATH=/path/to/identity.json` — overrides `identity_path`
+- `PGLENS_CONFIG=/path/to/agent.yaml` — path to the config file itself (default `/etc/pglens/agent.yaml`); the `--config` flag on `pglens-agent run` takes precedence over this
+- `PGLENS_HEALTHZ_LISTEN=:9187` — bind address for the agent's own `/healthz` endpoint (default `:9187`); change this if running more than one agent on the same host
 
 **Security notes:**
 - The DSN password is never logged at any level
@@ -400,7 +403,7 @@ curl -s localhost:8080/api/v1/clusters | jq '.[0]'
 - `health` is one of:
   - `ok` — primary exists, all instances up, no replication lag
   - `degraded` — primary exists but at least one instance is down OR any replica has measurable replay lag (`max_replay_lag_seconds > 0`)
-  - `critical` — no primary found in the cluster
+  - `critical` — no primary found in the cluster, **or more than one** (split-brain)
 - `standby_count` — number of instances in standby role (omitted if zero)
 - `sync_standby_count` — number of synchronous replicas per `sync_state` (omitted if zero)
 - `max_replay_lag_seconds` — largest replay lag from all active standby replicas; omitted if no lag data or all are caught up
@@ -594,6 +597,25 @@ Notes: `avg_active_sessions = samples / ticks`; when `ticks == 0`, `avg_active_s
 ### `POST /api/v1/push`
 
 Agent ingest. `401` when the agent is revoked; `400` for unknown `protocol_version` (body names supported version) or stale `sent_at` (>12h); `413` for body >32 MiB.
+
+### `GET /metrics`
+
+Prometheus-format metrics exposition (port 8080). Exposes server-side monitoring metrics:
+- `pglens_up` — gauge, 1 if an agent is currently reachable, 0 otherwise (by `instance_id`)
+- `pglens_agent_last_seen_seconds` — gauge, unix timestamp of the last accepted push (by `instance_id`)
+- `pglens_series_total` — gauge, distinct metric series tracked per instance (used to monitor cardinality budget compliance)
+- `pglens_ingest_envelopes_total` — counter, envelopes accepted by `/api/v1/push` (by `result`)
+- `pglens_ingest_rejected_total` — counter, envelopes rejected by `/api/v1/push` (by `reason`)
+- `pglens_check_error_total` — counter, check scrapes that reported an error (by `check` name)
+- `pglens_samples_too_old_total` — counter, samples rejected for exceeding max age (12 hours)
+- `pglens_cardinality_truncated_total` — counter, envelopes where cardinality budgets caused truncation
+- `pglens_agent_clock_skew_seconds` — gauge, most recently observed agent/server clock skew (useful for diagnosing timestamp misalignment)
+
+```sh
+curl -s localhost:8080/metrics | head -20
+```
+
+Use this endpoint to monitor pglens itself — feed it into Prometheus, Datadog, or your favorite metrics backend.
 
 ### `GET /healthz`, `/readyz`
 

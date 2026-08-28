@@ -69,6 +69,29 @@ func (inv *Inventory) Upsert(ctx context.Context, env wire.Envelope) (*UpsertRes
 	return res, nil
 }
 
+// IsRevoked reports whether agentID has a non-null agents.revoked_at, or
+// false if the agent is unknown (a brand-new agent's first push should not
+// be rejected). A nil pool (unit tests exercising validation only) never
+// reports revoked, matching Upsert's own nil-pool tolerance.
+func (inv *Inventory) IsRevoked(ctx context.Context, agentID string) (bool, error) {
+	if inv.pool == nil || agentID == "" {
+		return false, nil
+	}
+	parsed, parseErr := uuid.Parse(agentID)
+	if parseErr != nil {
+		return false, nil //nolint:nilerr // a malformed agent_id is treated as unknown, not an error worth rejecting the push over
+	}
+	var revokedAt *time.Time
+	err := inv.pool.QueryRow(ctx, `SELECT revoked_at FROM agents WHERE agent_id=$1`, parsed).Scan(&revokedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("query agent revoked_at: %w", err)
+	}
+	return revokedAt != nil, nil
+}
+
 // upsertOne handles a single wire Instance.
 func (inv *Inventory) upsertOne(ctx context.Context, tenantID string, agentID uuid.UUID, inst wire.Instance) error {
 	// Parse and validate cluster_id.
@@ -130,8 +153,8 @@ func (inv *Inventory) upsertOne(ctx context.Context, tenantID string, agentID uu
 		}
 		// Update mutable fields.
 		if _, execErr := inv.pool.Exec(ctx,
-			`UPDATE instances SET role=$1, pg_version=$2, perm_tier=$3, addr=$4, port=$5, last_seen=now() WHERE instance_id=$6`,
-			role, inst.PGVersion, inst.PermTier, inst.Addr, inst.Port, instUUID); execErr != nil {
+			`UPDATE instances SET role=$1, pg_version=$2, perm_tier=$3, addr=$4, port=$5, last_seen=now(), ash_enabled=$6 WHERE instance_id=$7`,
+			role, inst.PGVersion, inst.PermTier, inst.Addr, inst.Port, inst.ASHEnabled, instUUID); execErr != nil {
 			return fmt.Errorf("update instance %s: %w", inst.InstanceID, execErr)
 		}
 	} else {
@@ -151,10 +174,10 @@ func (inv *Inventory) upsertOne(ctx context.Context, tenantID string, agentID uu
 			return fmt.Errorf("ensure agent %s: %w", agentParam, err)
 		}
 		if _, err := inv.pool.Exec(ctx,
-			`INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now())
-			 ON CONFLICT (instance_id) DO UPDATE SET role=EXCLUDED.role, pg_version=EXCLUDED.pg_version, perm_tier=EXCLUDED.perm_tier, addr=EXCLUDED.addr, port=EXCLUDED.port, last_seen=now()`,
-			instUUID, tenantID, cidDB, agentParam, inst.Addr, inst.Port, inst.PGVersion, role, inst.PermTier); err != nil {
+			`INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen, ash_enabled)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now(),$10)
+			 ON CONFLICT (instance_id) DO UPDATE SET role=EXCLUDED.role, pg_version=EXCLUDED.pg_version, perm_tier=EXCLUDED.perm_tier, addr=EXCLUDED.addr, port=EXCLUDED.port, last_seen=now(), ash_enabled=EXCLUDED.ash_enabled`,
+			instUUID, tenantID, cidDB, agentParam, inst.Addr, inst.Port, inst.PGVersion, role, inst.PermTier, inst.ASHEnabled); err != nil {
 			return fmt.Errorf("insert instance %s: %w", inst.InstanceID, err)
 		}
 	}

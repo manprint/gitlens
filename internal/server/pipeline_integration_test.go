@@ -99,3 +99,90 @@ func TestPipeline_Process_WithRealDB(t *testing.T) {
 	_ = iid
 	_ = cidDB
 }
+
+// INT-PIPE-003: a `stats_reset` change writes a `counter_reset_detected` event and no metric row for that interval;
+// a query over the range shows a gap rather than a zero.
+func TestPipeline_INT_PIPE_003_ResetDetection(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+
+	instID := uuid.NewString()
+	cid := pgtype.ClusterID(55555).String()
+
+	// Use fake clock to control timestamps precisely
+	p := NewPipeline(pool, clock.NewFake(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)))
+
+	ts1 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	ts2 := ts1.Add(60 * time.Second)
+	ts3 := ts2.Add(60 * time.Second)
+
+	// First counter value: 1000
+	env1 := wire.Envelope{
+		Instances: []wire.Instance{{
+			InstanceID: instID,
+			ClusterID:  cid,
+			Results: []wire.Result{{
+				Check: "bgwriter",
+				TS:    ts1,
+				Metrics: []wire.Metric{{
+					Name:  "pg_xact_commit",
+					Value: 1000,
+					Kind:  "counter",
+				}},
+			}},
+		}},
+	}
+	_, _ = p.Process(ctx, env1)
+
+	// Second counter value: 1100 (normal increment, rate computed)
+	env2 := wire.Envelope{
+		Instances: []wire.Instance{{
+			InstanceID: instID,
+			ClusterID:  cid,
+			Results: []wire.Result{{
+				Check: "bgwriter",
+				TS:    ts2,
+				Metrics: []wire.Metric{{
+					Name:  "pg_xact_commit",
+					Value: 1100,
+					Kind:  "counter",
+				}},
+			}},
+		}},
+	}
+	_, _ = p.Process(ctx, env2)
+
+	// Verify metric was written for the normal interval
+	var cnt1 int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM metrics WHERE metric='pg_xact_commit' AND ts=$1`, ts2).Scan(&cnt1))
+	require.Equal(t, 1, cnt1, "should have metric for normal increment at ts2")
+
+	// Third counter value: 50 (RESET - value went backwards)
+	env3 := wire.Envelope{
+		Instances: []wire.Instance{{
+			InstanceID: instID,
+			ClusterID:  cid,
+			Results: []wire.Result{{
+				Check: "bgwriter",
+				TS:    ts3,
+				Metrics: []wire.Metric{{
+					Name:  "pg_xact_commit",
+					Value: 50,
+					Kind:  "counter",
+				}},
+			}},
+		}},
+	}
+	_, _ = p.Process(ctx, env3)
+
+	// Verify counter_reset_detected event was emitted
+	var eventCnt int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='counter_reset_detected'`).Scan(&eventCnt))
+	require.Greater(t, eventCnt, 0, "should emit counter_reset_detected event")
+
+	// Verify NO metric row was written for the reset interval (gap, not zero)
+	var cntReset int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM metrics WHERE metric='pg_xact_commit' AND ts=$1`, ts3).Scan(&cntReset))
+	require.Equal(t, 0, cntReset, "should NOT write metric row for reset interval (creates a gap)")
+}

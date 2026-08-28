@@ -230,12 +230,23 @@ func (b *Buffer) Next() ([]byte, AckFunc, error) {
 				continue
 			}
 
-			// Segment exhausted; move to the next.
-			b.nextReadOff = 0
-			b.nextReadSeg = si + 1
+			// Segment caught up to its current end. Only advance past it
+			// when a later segment already exists — proof this one is
+			// closed and will never receive another Append. Advancing past
+			// the last (still-active) segment here would permanently orphan
+			// every record appended to it after this point: with a single
+			// never-rolled segment (below the 8 MiB roll threshold), a
+			// producer and consumer racing on the same live Buffer would
+			// otherwise catch EOF once and then never see new data again.
+			if si < len(b.segments)-1 {
+				b.nextReadOff = 0
+				b.nextReadSeg = si + 1
+				continue
+			}
+			break
 		}
 
-		// No more records.
+		// No more records (yet) in the currently active segment.
 		return nil, nil, io.EOF
 	}
 }
@@ -569,9 +580,20 @@ func (s *Segment) ReadAt(offset uint64) ([]byte, uint64, error) {
 	data := make([]byte, length)
 	n, err = s.file.Read(data)
 	if int64(n) < int64(length) {
-		// Truncated; skip this record
-		nextOffset := offset + uint64(8+length)
-		return nil, nextOffset, nil
+		// Truncated tail (a torn write, e.g. ENOSPC partway through this
+		// record's data): unlike a corrupt/CRC-mismatched record, the file
+		// genuinely does not contain `length` more bytes here, so the next
+		// record does NOT start at offset+8+length — that position doesn't
+		// exist yet. Treating it as a skippable record (as an earlier
+		// version of this code did) advanced the read cursor past the true
+		// end of file; every future ReadAt then hit an immediate premature
+		// EOF at that unreachable offset, permanently stranding every
+		// record already durably appended before the torn one. Matches
+		// openSegment's own recovery-scan precedent: a truncated trailing
+		// record just means "nothing (more) to read here yet", not "skip
+		// forward" — the caller's own offset is still valid and will see
+		// this record once the rest of it is actually written.
+		return nil, offset, io.EOF
 	}
 	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, offset, err

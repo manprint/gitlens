@@ -253,6 +253,32 @@ func TestEngine_Evict(t *testing.T) {
 	require.Nil(t, ev)
 }
 
+func TestEngine_CountByInstance(t *testing.T) {
+	t.Parallel()
+	e := delta.New(delta.Options{})
+	instA := uuid.New()
+	instB := uuid.New()
+	now := time.Now()
+
+	keyA1 := pgtype.SeriesKey{Metric: "m1", Instance: instA, Database: "app"}
+	keyA2 := pgtype.SeriesKey{Metric: "m2", Instance: instA, Database: "app"}
+	keyB1 := pgtype.SeriesKey{Metric: "m1", Instance: instB, Database: "app"}
+
+	require.Empty(t, e.CountByInstance())
+
+	_, _ = e.Observe(delta.Observation{Key: keyA1, TS: now, Value: 1})
+	_, _ = e.Observe(delta.Observation{Key: keyA2, TS: now, Value: 1})
+	_, _ = e.Observe(delta.Observation{Key: keyB1, TS: now, Value: 1})
+
+	counts := e.CountByInstance()
+	require.Equal(t, 2, counts[instA])
+	require.Equal(t, 1, counts[instB])
+
+	n := e.Evict(now.Add(time.Second))
+	require.Equal(t, 3, n)
+	require.Empty(t, e.CountByInstance())
+}
+
 func TestEngine_Concurrent(t *testing.T) {
 	t.Parallel()
 	e := delta.New(delta.Options{})

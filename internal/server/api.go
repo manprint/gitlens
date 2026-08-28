@@ -119,14 +119,18 @@ func isUp(lastSeen time.Time, now time.Time) bool {
 }
 
 // healthForCluster computes ok/degraded/critical per phase_07.md §6.3:
-// critical when there is no primary, degraded when any instance is down or a
-// replica is lagging (maxReplayLagSeconds > 0 — nil/0 means "no lag reported",
-// never itself a reason to degrade), ok otherwise.
-func healthForCluster(hasPrimary bool, anyDown bool, instanceCount int, maxReplayLagSeconds *float64) string {
+// critical when there is no primary *or more than one* (split-brain —
+// phase_07.md §6.3 names this explicitly; found missing entirely while
+// running SYS-REPL-002 live: primaryCount was never even computed, only a
+// hasPrimary bool, so two simultaneous primaries reported "ok" like
+// everything was fine), degraded when any instance is down or a replica is
+// lagging (maxReplayLagSeconds > 0 — nil/0 means "no lag reported", never
+// itself a reason to degrade), ok otherwise.
+func healthForCluster(primaryCount int, anyDown bool, instanceCount int, maxReplayLagSeconds *float64) string {
 	if instanceCount == 0 {
 		return "unknown"
 	}
-	if !hasPrimary {
+	if primaryCount != 1 {
 		return "critical"
 	}
 	if anyDown {
@@ -262,7 +266,9 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 		}
 		instances := []clusterInstanceResp{}
 		var primaryID *string
+		var primaryLastSeen time.Time
 		hasPrimary := false
+		primaryCount := 0
 		anyDown := false
 		standbyCount := 0
 		syncStandbyCount := 0
@@ -283,9 +289,23 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 			if role == "standby" {
 				standbyCount++
 			}
-			if role == "primary" && !hasPrimary {
+			if role == "primary" {
+				primaryCount++
+			}
+			// Among (possibly multiple, in a split-brain) role="primary"
+			// rows, report the most recently-seen one — not simply the
+			// first by addr/port order. An `addr`-ordered "first match"
+			// picked a stale, already-dead former primary over a
+			// genuinely-just-promoted one every time their names happened
+			// to sort that way (found live running SYS-REPL-001: killing
+			// the old primary doesn't retroactively change its own
+			// instances.role row, so both rows legitimately say "primary"
+			// for a while after a real failover, and the old one kept
+			// winning).
+			if role == "primary" && (!hasPrimary || lastSeen.After(primaryLastSeen)) {
 				s := iid.String()
 				primaryID = &s
+				primaryLastSeen = lastSeen
 				hasPrimary = true
 			}
 			instances = append(instances, clusterInstanceResp{
@@ -349,17 +369,37 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 		}
 		trows.Close()
 
-		// Fetch max replay lag from replication metrics for this cluster.
+		// Fetch the CURRENT max replay lag across this cluster's instances —
+		// a recent reading per instance, not the all-time max. Found live
+		// while verifying the README's own "ok" health example against a
+		// real idle cluster: a plain all-time MAX() means one transient lag
+		// blip during replication's initial catch-up (routine, harmless, and
+		// exactly what SYS-REPL-004 exercises the recovery half of) makes a
+		// cluster report "degraded" forever, with no way for health to ever
+		// recover. A plain "latest non-null reading per instance" isn't
+		// enough either: `replication_streaming`'s replay_lag column reads
+		// NULL whenever PostgreSQL has no fresh feedback to report (common —
+		// confirmed live, most cycles), so "latest non-null" can still reach
+		// back to that same one-time stale blip while every truly recent
+		// row is null. Bounding to the last 60s (comfortably above every
+		// replication check's own interval, 10-15s) is what actually lets a
+		// resolved lag age out.
 		var maxReplayLag *float64
 		err = a.pool.QueryRow(ctx,
-			`SELECT MAX(replay_lag_sec) FROM metrics_replication WHERE tenant_id='default' AND cluster_id=$1 AND replay_lag_sec IS NOT NULL`,
+			`SELECT MAX(replay_lag_sec) FROM (
+				SELECT DISTINCT ON (instance_id) replay_lag_sec
+				FROM metrics_replication
+				WHERE tenant_id='default' AND cluster_id=$1 AND replay_lag_sec IS NOT NULL
+				  AND ts > now() - interval '60 seconds'
+				ORDER BY instance_id, ts DESC
+			) latest`,
 			c.idDB).Scan(&maxReplayLag)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusInternalServerError, "query max lag failed", err.Error())
 			return
 		}
 
-		health := healthForCluster(hasPrimary, anyDown, len(instances), maxReplayLag)
+		health := healthForCluster(primaryCount, anyDown, len(instances), maxReplayLag)
 		cr := clusterResp{
 			ClusterID:     cidStr,
 			Name:          namePtr,

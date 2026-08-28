@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/manprint/pglens/internal/pgtype"
+	"github.com/manprint/pglens/internal/store"
 	"github.com/manprint/pglens/internal/wire"
 )
 
@@ -390,4 +391,48 @@ func TestIntASH014_ASHBypassesDelta(t *testing.T) {
 	err = pool.QueryRow(ctx, `SELECT COUNT(*) FROM metrics WHERE instance_id = $1`, instID).Scan(&metricsCount)
 	require.NoError(t, err)
 	require.Equal(t, 0, metricsCount, "ASH data should NOT be in metrics table")
+}
+
+// TestASHDisabledInstance_ReturnsExplicitFalse proves SYS-ASH-002's own
+// requirement: an instance whose agent reports ASH switched off gets an
+// explicit "enabled": false from the API, distinct from an idle instance
+// with genuinely no data (which never sets ash_enabled at all, and
+// TestIntASH010/014 above confirm that case falls through unaffected).
+func TestASHDisabledInstance_ReturnsExplicitFalse(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := contextBackground()
+
+	cid := pgtype.ClusterID(777)
+	instID := uuid.New()
+	agentID := uuid.New()
+	cidDB := store.ToDB(cid)
+
+	_, err := pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agentID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual')`, cidDB)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx,
+		`INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen, ash_enabled)
+		 VALUES ($1,'default',$2,$3,'10.0.0.9',5432,170000,'primary','T0', now(), false)`,
+		instID, cidDB, agentID)
+	require.NoError(t, err)
+
+	api := &AshAPI{pool: asDBPool(pool)}
+	req := httptest.NewRequest("GET", "/api/v1/ash?instance_id="+instID.String(), nil)
+	w := httptest.NewRecorder()
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	resp := ashResponse{}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.NotNil(t, resp.Enabled)
+	require.False(t, *resp.Enabled)
+	require.Equal(t, []ashBucket{}, resp.Buckets)
 }

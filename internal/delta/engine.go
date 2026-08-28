@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/manprint/pglens/internal/pgtype"
 )
 
@@ -129,6 +130,21 @@ func (e *Engine) Evict(before time.Time) int {
 		}
 	}
 	return n
+}
+
+// CountByInstance returns the number of distinct series currently tracked
+// per instance — every (metric, database, labels) combination this engine
+// has ever Observe()'d and not yet Evict()'d. This is the cardinality
+// budget's own real number (I-8): how many distinct series an instance is
+// actually reporting right now.
+func (e *Engine) CountByInstance() map[uuid.UUID]int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	counts := make(map[uuid.UUID]int)
+	for k := range e.prev {
+		counts[k.Instance]++
+	}
+	return counts
 }
 
 func copyStatsReset(t *time.Time) *time.Time {

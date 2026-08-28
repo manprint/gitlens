@@ -81,6 +81,24 @@ func IngestHandler(auth *Auth, inv *Inventory, pipeline *Pipeline) http.HandlerF
 		}
 
 		ctx := r.Context()
+
+		// Revocation is checked independently of the shared bootstrap
+		// token above: that token authenticates "this is a pglens
+		// agent," not which one — per-agent revocation (`agents.
+		// revoked_at`) needs the envelope's own agent_id, only known
+		// once the body is decoded. A distinct body (rather than a
+		// generic 401) lets the agent tell "revoked" apart from "bad
+		// token" (internal/agent/pusher.go's pushOne).
+		revoked, err := inv.IsRevoked(ctx, env.AgentID)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"revocation check failed: %v"}`, err), http.StatusInternalServerError)
+			return
+		}
+		if revoked {
+			http.Error(w, `{"error":"revoked"}`, http.StatusUnauthorized)
+			return
+		}
+
 		invRes, err := inv.Upsert(ctx, env)
 		if err != nil {
 			IncIngestRejected("inventory_error")

@@ -26,6 +26,7 @@ type statStatementsCheck struct {
 	mu       sync.Mutex
 	selector *cardinality.Selector
 	caches   map[string]*lru.Cache[int64, string]
+	cycle    uint64
 }
 
 func (c *statStatementsCheck) Name() string { return "stat_statements" }
@@ -113,7 +114,7 @@ SELECT s.queryid, s.calls, s.total_exec_time, s.rows,
 	}
 
 	var statsReset *time.Time
-	err = conn.QueryRow(ctx, `SELECT reset_time FROM pg_stat_statements_info`).Scan(&statsReset)
+	err = conn.QueryRow(ctx, `SELECT stats_reset FROM pg_stat_statements_info`).Scan(&statsReset)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		if !strings.Contains(err.Error(), "does not exist") {
 			return Result{}, err
@@ -136,9 +137,24 @@ SELECT s.queryid, s.calls, s.total_exec_time, s.rows,
 		cache, _ = lru.New[int64, string](4096)
 		c.caches[datname] = cache
 	}
+	c.cycle++
+	cycle := c.cycle
 	c.mu.Unlock()
 
-	selected, truncated := c.selector.Select(0, candidates)
+	// A real, monotonically increasing cycle is what makes
+	// cardinality.Selector's Hysteresis a genuine N-cycle grace period
+	// instead of a permanently open one: Select's own hysteresisThreshold
+	// only advances past 0 once cycle > Hysteresis, so passing a constant
+	// cycle (as an earlier version of this line did) means any key that
+	// was ever fresh is retained forever, for as long as it keeps
+	// appearing in the SQL-side candidates — found live via SYS-LOAD-008,
+	// where pglens_series_total grew unbounded (2109, no sign of
+	// stabilizing) under a churning workload despite MaxKeys correctly
+	// capping any single Select() call's result. Forget then prunes
+	// exactly what Hysteresis says should no longer be retained, so the
+	// check's own retention state stays bounded too, not just its output.
+	selected, truncated := c.selector.Select(cycle, candidates)
+	c.selector.Forget(cycle)
 	queryTexts := make(map[int64]string)
 
 	var metrics []pgtype.Metric

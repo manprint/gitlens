@@ -27,7 +27,7 @@ type Report struct {
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: workloadctl <command> [options]\n")
-		fmt.Fprintf(os.Stderr, "commands: deadlock, lock-storm, slow-query, idle-in-txn, distinct-queries, oltp\n")
+		fmt.Fprintf(os.Stderr, "commands: deadlock, lock-storm, slow-query, idle-in-txn, distinct-queries, oltp, race\n")
 		os.Exit(1)
 	}
 
@@ -51,6 +51,8 @@ func main() {
 		err = cmdDistinctQueries(ctx, args)
 	case "oltp":
 		err = cmdOLTP(ctx, args)
+	case "race":
+		err = cmdRace(ctx, args)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
 		os.Exit(1)
@@ -239,6 +241,7 @@ func cmdDistinctQueries(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("distinct-queries", flag.ContinueOnError)
 	dsn := fs.String("dsn", os.Getenv("PGLENS_TEST_DSN"), "PostgreSQL connection string")
 	count := fs.Int("count", 5000, "number of distinct queries to execute")
+	duration := fs.Duration("duration", 0, "keep re-executing all --count queries for this long (0 = run once)")
 	seed := fs.Int64("seed", time.Now().UnixNano(), "random seed")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -256,7 +259,7 @@ func cmdDistinctQueries(ctx context.Context, args []string) error {
 	// Ensure pg_stat_statements is enabled
 	_, _ = pool.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
 
-	err = distinctQueries(ctx, pool, *count, &report)
+	err = distinctQueries(ctx, pool, *count, *duration, &report)
 	if err != nil {
 		return err
 	}
@@ -306,6 +309,58 @@ func cmdOLTP(ctx context.Context, args []string) error {
 	}
 
 	err = oltp(ctx, pool, *tps, *duration, &report)
+	if err != nil {
+		return err
+	}
+
+	printReport(report)
+	return nil
+}
+
+// cmdRace creates transactionid lock contention: --workers sessions each
+// UPDATE a random row out of --rows, holding the transaction open briefly —
+// distinct from lock-storm's tuple-level FOR UPDATE contention.
+func cmdRace(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("race", flag.ContinueOnError)
+	dsn := fs.String("dsn", os.Getenv("PGLENS_TEST_DSN"), "PostgreSQL connection string")
+	workers := fs.Int("workers", 20, "number of concurrent workers")
+	rows := fs.Int("rows", 100, "number of rows workers race to update")
+	duration := fs.Duration("duration", 20*time.Second, "how long to run")
+	seed := fs.Int64("seed", time.Now().UnixNano(), "random seed")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	pool, err := pgxpool.New(ctx, *dsn)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	report := newReport("race", *seed)
+	rand.Seed(*seed) //nolint:staticcheck // deterministic replay via --seed is the point; threading a *rand.Rand through every workload helper is not worth it for a test-only tool
+
+	// Create test table
+	_, err = pool.Exec(ctx, `
+		DROP TABLE IF EXISTS race_test CASCADE;
+		CREATE TABLE race_test (
+			id INT PRIMARY KEY,
+			value INT
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	// Insert initial rows
+	for i := 1; i <= *rows; i++ {
+		_, err = pool.Exec(ctx, "INSERT INTO race_test (id, value) VALUES ($1, 0)", i)
+		if err != nil {
+			return err
+		}
+	}
+
+	err = race(ctx, pool, *workers, *rows, *duration, &report)
 	if err != nil {
 		return err
 	}

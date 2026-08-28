@@ -113,6 +113,49 @@ func (c *APIClient) Healthz() (map[string]interface{}, error) {
 	return map[string]interface{}{"status_code": resp.StatusCode, "body": string(body)}, nil
 }
 
+// Get fetches an arbitrary JSON-object endpoint. path must start with "/"
+// and may include a query string (e.g. "/api/v1/ash?instance_id=...").
+func (c *APIClient) Get(path string) (map[string]interface{}, error) {
+	url := c.baseURL + path
+	resp, err := c.httpClient.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("GET %s: %d, body: %s", path, resp.StatusCode, body)
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// RawGet fetches an arbitrary endpoint and returns its raw text body — for
+// non-JSON responses like /metrics (Prometheus text exposition), where Get
+// would fail decoding.
+func (c *APIClient) RawGet(path string) (string, error) {
+	url := c.baseURL + path
+	resp, err := c.httpClient.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("GET %s: %d, body: %s", path, resp.StatusCode, body)
+	}
+	return string(body), nil
+}
+
 // WaitReadyz polls /readyz until it returns 200 or timeout.
 func (c *APIClient) WaitReadyz(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)

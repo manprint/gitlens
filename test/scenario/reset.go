@@ -127,4 +127,94 @@ func init() {
 			return nil
 		},
 	})
+
+	Register(Scenario{
+		ID:       "SYS-RESET-002",
+		Title:    "pg_stat_statements_reset(): discarded delta, named reset event, recovers",
+		Topology: TopologyStandalone,
+		Covers:   []string{"phase_06.md#5.7", "I-2"},
+		Expect: Expectations{
+			Events:     []string{"counter_reset_detected"},
+			Invariants: []string{"I-2"},
+		},
+		Run: func(ctx context.Context, e *Env) error {
+			var instanceID string
+			resolveCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			if err := poll(resolveCtx, 2*time.Second, func(ctx context.Context) (bool, error) {
+				err := e.DB.QueryRow(ctx, `SELECT instance_id::text FROM instances ORDER BY last_seen DESC LIMIT 1`).Scan(&instanceID)
+				return err == nil, err
+			}); err != nil {
+				return fmt.Errorf("resolve monitored instance: %w", err)
+			}
+
+			// Generate some statement activity so pg_stat_statements has
+			// something real to report, then wait for a genuine pre-reset
+			// rate to land — stat_statements.DefaultInterval() is 60s (the
+			// only ScopeDatabase check; per-check `interval:` config is
+			// still dead for it, same as every check but ash — STATE.md
+			// §6/V001-F09), so this takes a while.
+			if _, err := e.Exec("pg", "psql", "-U", "postgres", "-d", "postgres", "-c",
+				"SELECT count(*) FROM generate_series(1,1000)"); err != nil {
+				return fmt.Errorf("generate statement activity: %w", err)
+			}
+			baselineCtx, cancel1 := context.WithTimeout(ctx, 200*time.Second)
+			defer cancel1()
+			if err := poll(baselineCtx, 3*time.Second, func(ctx context.Context) (bool, error) {
+				var n int
+				err := e.DB.QueryRow(ctx,
+					`SELECT count(*) FROM metrics_statements WHERE instance_id=$1::uuid`,
+					instanceID).Scan(&n)
+				return err == nil && n > 0, err
+			}); err != nil {
+				return fmt.Errorf("no pre-reset metrics_statements row ever appeared: %w", err)
+			}
+			resetTS := time.Now().UTC()
+
+			// pg_stat_statements_reset() requires superuser (pglens has no
+			// EXECUTE grant on it — a real external session doing this
+			// would be an admin, not the monitoring role).
+			if _, err := e.Exec("pg", "psql", "-U", "postgres", "-d", "postgres", "-c",
+				"SELECT pg_stat_statements_reset()"); err != nil {
+				return fmt.Errorf("pg_stat_statements_reset: %w", err)
+			}
+			// Generate more activity after the reset so the next scrape has
+			// something to report (and something for the delta engine to
+			// compute a fresh, non-reset rate from on the interval after
+			// this one).
+			if _, err := e.Exec("pg", "psql", "-U", "postgres", "-d", "postgres", "-c",
+				"SELECT count(*) FROM generate_series(1,1000)"); err != nil {
+				return fmt.Errorf("generate post-reset statement activity: %w", err)
+			}
+
+			// counter_reset_detected names a pg_stat_statements_* metric.
+			eventCtx, cancel2 := context.WithTimeout(ctx, 200*time.Second)
+			defer cancel2()
+			var metricName string
+			if err := poll(eventCtx, 3*time.Second, func(ctx context.Context) (bool, error) {
+				err := e.DB.QueryRow(ctx,
+					`SELECT payload->>'metric' FROM events WHERE instance_id=$1::uuid AND type='counter_reset_detected' AND ts >= $2 AND payload->>'metric' LIKE '%stat_statements%' LIMIT 1`,
+					instanceID, resetTS).Scan(&metricName)
+				return err == nil, nil
+			}); err != nil {
+				return fmt.Errorf("counter_reset_detected naming a stat_statements metric never appeared: %w", err)
+			}
+
+			// The next interval produces a normal (non-negative) rate again.
+			normalCtx, cancel3 := context.WithTimeout(ctx, 200*time.Second)
+			defer cancel3()
+			if err := poll(normalCtx, 3*time.Second, func(ctx context.Context) (bool, error) {
+				var n int
+				err := e.DB.QueryRow(ctx,
+					`SELECT count(*) FROM metrics_statements WHERE instance_id=$1::uuid AND ts > $2 AND calls_rate >= 0`,
+					instanceID, resetTS).Scan(&n)
+				return err == nil && n > 0, err
+			}); err != nil {
+				return fmt.Errorf("no normal post-reset rate ever appeared: %w", err)
+			}
+
+			e.AssertInvariants(e.T)
+			return nil
+		},
+	})
 }

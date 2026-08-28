@@ -58,6 +58,11 @@ type ChecksConfig map[string]CheckConfig
 type CheckConfig struct {
 	Interval string `yaml:"interval"`
 	TopN     int    `yaml:"top_n"` // for stat_statements
+	// Enabled is nil (default enabled) unless explicitly set; only "ash"
+	// consults this today (SYS-ASH-002: disabling it must produce no
+	// metrics_ash rows, no error, and an explicit "enabled": false from the
+	// API — never an empty result indistinguishable from an idle database).
+	Enabled *bool `yaml:"enabled"`
 }
 
 // LoadConfig loads the configuration from a YAML file, applying environment overrides.

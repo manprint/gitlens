@@ -403,3 +403,31 @@ func (b *mockBatchResults) Close() error {
 type mockRow struct{}
 
 func (r *mockRow) Scan(_ ...any) error { return nil }
+
+func TestWriteTopologyEdges_Empty(t *testing.T) {
+	t.Parallel()
+	m := &mockTx{}
+	err := WriteTopologyEdges(context.Background(), m, "default", 1, uuid.New(), nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, m.execCalls, "must still delete stale rows even when there is nothing new to insert")
+}
+
+func TestWriteTopologyEdges_InsertsRows(t *testing.T) {
+	t.Parallel()
+	m := &mockTx{}
+	from := uuid.New()
+	rows := []TopologyEdgeRow{
+		{TenantID: "default", ClusterID: 1, FromInstance: from, ToInstance: uuid.New(), EdgeType: "streaming", Confidence: "high"},
+	}
+	err := WriteTopologyEdges(context.Background(), m, "default", 1, from, rows)
+	require.NoError(t, err)
+	require.Equal(t, 2, m.execCalls, "1 delete + 1 insert")
+}
+
+func TestWriteTopologyEdges_DeleteError(t *testing.T) {
+	t.Parallel()
+	m := &mockTx{execErr: fmt.Errorf("boom")}
+	err := WriteTopologyEdges(context.Background(), m, "default", 1, uuid.New(), nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "delete stale topology edges")
+}

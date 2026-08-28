@@ -426,6 +426,92 @@ func TestStatStatementsCheck_Scrape_NoExtension(t *testing.T) {
 	}
 }
 
+// TestStatStatementsCheck_Scrape_CycleAdvancesAndForgetsStaleRetained is a
+// regression for a bug where Scrape called selector.Select(0, candidates)
+// with a hardcoded cycle: since cardinality.Selector's hysteresis window
+// only starts advancing once cycle > Hysteresis, a constant cycle meant any
+// key that was ever "fresh" got retained forever, as long as it kept
+// appearing in the SQL-side candidates — found live via SYS-LOAD-008, where
+// pglens_series_total grew unbounded under a churning workload. With a real,
+// per-Scrape-call incrementing cycle (and Forget after each Select), a key
+// that stops being top-ranked must eventually drop out of the kept set once
+// Hysteresis cycles have passed, even though it keeps showing up in `in`.
+func TestStatStatementsCheck_Scrape_CycleAdvancesAndForgetsStaleRetained(t *testing.T) {
+	// round 1: only q1 exists -> fresh.
+	// round 2: q1 (now stale) + q2 (higher, fresh) -> q1 retained (within Hysteresis=1).
+	// round 3: q1 + q2 + q3 (highest, fresh) -> q1's retention has now expired
+	// (cycle 3 - Hysteresis 1 = 2 > q1's lastSeen of 1), so it must be dropped
+	// even though it is still present in `in`.
+	rounds := [][][]any{
+		{
+			{int64(1), int64(100), float64(100), int64(1), int64(0), int64(0), int64(0), (*string)(nil)},
+		},
+		{
+			{int64(1), int64(100), float64(100), int64(1), int64(0), int64(0), int64(0), (*string)(nil)},
+			{int64(2), int64(200), float64(200), int64(1), int64(0), int64(0), int64(0), (*string)(nil)},
+		},
+		{
+			{int64(1), int64(100), float64(100), int64(1), int64(0), int64(0), int64(0), (*string)(nil)},
+			{int64(2), int64(200), float64(200), int64(1), int64(0), int64(0), int64(0), (*string)(nil)},
+			{int64(3), int64(300), float64(300), int64(1), int64(0), int64(0), int64(0), (*string)(nil)},
+		},
+	}
+	call := 0
+
+	conn := &mockConn{
+		execFunc: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+			return pgconn.CommandTag{}, nil
+		},
+		queryFunc: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+			rows := rounds[call]
+			call++
+			return &mockRows{rows: rows}, nil
+		},
+		queryRowFunc: func(ctx context.Context, sql string, args ...any) pgx.Row {
+			var t *time.Time
+			return &mockRow{vals: []any{t}}
+		},
+	}
+
+	target := &SimpleTarget{
+		ConnFunc:       func(ctx context.Context) (Conn, error) { return conn, nil },
+		ConnForFunc:    func(ctx context.Context, datname string) (Conn, error) { return conn, nil },
+		ClockValue:     clock.System(),
+		PGVersionValue: 150000,
+		PermTierValue:  1,
+		Extensions:     map[string]bool{"pg_stat_statements": true},
+		DatabaseValue:  "app",
+	}
+
+	check := &statStatementsCheck{
+		selector: cardinality.NewSelector(cardinality.Options{TopN: 1, Hysteresis: 1, MaxKeys: 10}),
+		caches:   make(map[string]*lru.Cache[int64, string]),
+	}
+
+	hasQueryID := func(result Result, id string) bool {
+		for _, m := range result.Metrics {
+			if m.Labels["queryid"] == id {
+				return true
+			}
+		}
+		return false
+	}
+
+	for i, expectQ1 := range []bool{true, true, false} {
+		result, err := check.Scrape(context.Background(), target)
+		if err != nil {
+			t.Fatalf("round %d: unexpected error: %v", i+1, err)
+		}
+		if got := hasQueryID(result, "1"); got != expectQ1 {
+			t.Errorf("round %d: queryid=1 present=%v, want %v (metrics: %+v)", i+1, got, expectQ1, result.Metrics)
+		}
+	}
+
+	if check.cycle != 3 {
+		t.Errorf("expected cycle to reach 3 after 3 Scrape calls, got %d", check.cycle)
+	}
+}
+
 // TestAshCheck_Scrape_Happy exercises ash check.
 func TestAshCheck_Scrape_Happy(t *testing.T) {
 	conn := &mockConn{

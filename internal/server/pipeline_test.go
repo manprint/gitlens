@@ -228,6 +228,33 @@ func TestPipeline_GaugeBypassesDelta(t *testing.T) {
 	require.Equal(t, 0, res.Rejected)
 }
 
+// TestPipeline_ResultErrorIncrementsCheckErrorTotal proves wire.Result.Error
+// is actually read now — found live via SYS-LOAD-003 prep that it never was
+// (row 141-142's stat_statements bug hid invisibly for exactly this
+// reason). Uses a unique check name since pglens_check_error_total is a
+// shared package-level counter other tests may also touch.
+func TestPipeline_ResultErrorIncrementsCheckErrorTotal(t *testing.T) {
+	t.Parallel()
+	p := NewPipeline(nil, clock.NewFake(time.Now()))
+	instID := uuid.NewString()
+	cid := pgtype.ClusterID(123).String()
+	const checkName = "pipeline_test_unique_check_error"
+	env := wire.Envelope{
+		Instances: []wire.Instance{
+			{
+				InstanceID: instID, ClusterID: cid,
+				Results: []wire.Result{
+					{Check: checkName, TS: time.Now(), Error: "connection refused"},
+				},
+			},
+		},
+	}
+	before := pglensCheckErrorTotal.Get(checkName)
+	_, err := p.Process(context.Background(), env)
+	require.NoError(t, err)
+	require.Equal(t, before+1, pglensCheckErrorTotal.Get(checkName))
+}
+
 func TestPipeline_CounterProducesRate(t *testing.T) {
 	t.Parallel()
 	fc := clock.NewFake(time.Now())
@@ -437,6 +464,27 @@ func TestPipeline_MockPool_Gauge(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, res.Accepted)
 	require.Equal(t, 0, res.Rejected)
+}
+
+// TestPipeline_MockPool_SetsSeriesTotal proves I-8's real number: after
+// processing an envelope with one counter series, pglens_series_total
+// reflects it — SetSeriesTotal existed since an earlier phase pass but
+// nothing ever called it with a real value before this.
+func TestPipeline_MockPool_SetsSeriesTotal(t *testing.T) {
+	t.Parallel()
+	p, _, _ := newPipelineWithMockPool()
+	instID := uuid.NewString()
+	env := wire.Envelope{Instances: []wire.Instance{{
+		InstanceID: instID,
+		ClusterID:  pgtype.ClusterID(3).String(),
+		Results: []wire.Result{{
+			Check: "bgwriter", TS: time.Now(),
+			Metrics: []wire.Metric{{Name: "pg_xact_commit_total", Value: 100, Kind: "counter"}},
+		}},
+	}}}
+	_, err := p.Process(context.Background(), env)
+	require.NoError(t, err)
+	require.Equal(t, 1.0, pglensSeriesTotalGauge.Get(instID))
 }
 
 func TestPipeline_MockPool_CounterReset(t *testing.T) {

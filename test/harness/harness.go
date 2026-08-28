@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -34,9 +36,12 @@ const (
 type AgentMode string
 
 const (
-	AgentModeContainer         AgentMode = "container"
-	AgentModeBinary            AgentMode = "binary"
-	AgentModeContainerNoVolume AgentMode = "container-no-volume"
+	AgentModeContainer            AgentMode = "container"
+	AgentModeBinary               AgentMode = "binary"
+	AgentModeContainerNoVolume    AgentMode = "container-no-volume"
+	AgentModeContainerASHDisabled AgentMode = "container-ash-disabled"
+	AgentModeContainerTinyBuffer  AgentMode = "container-tiny-buffer"
+	AgentModeContainerClockSkew   AgentMode = "container-clock-skew"
 )
 
 // Config configures a Harness.
@@ -50,21 +55,30 @@ type Config struct {
 
 // Harness orchestrates an E2E stack via docker-compose.
 type Harness struct {
-	t             *testing.T
-	projectName   string
-	baseFile      string
-	topologyFile  string
-	agentFile     string
-	toxiproxyFile string // "" unless Config.Toxiproxy is set
-	composeDir    string
-	containerName string
-	serverPort    int
-	agentPort     int
-	pools         map[string]*pgxpool.Pool
-	poolMu        sync.Mutex
-	apiClient     *APIClient
-	cleaned       bool
-	cleanMu       sync.Mutex
+	t               *testing.T
+	projectName     string
+	baseFile        string
+	topologyFile    string
+	agentFile       string
+	toxiproxyFile   string // "" unless Config.Toxiproxy is set
+	composeDir      string
+	containerName   string
+	serverPort      int
+	agentPort       int
+	agentMode       AgentMode
+	agentCmd        *exec.Cmd // non-nil only for AgentModeBinary: the running host subprocess
+	agentLogFile    *os.File  // kept open until cleanup() closes it, after Dump has read agentLogPath
+	agentRunDir     string    // os.MkdirTemp'd (not h.t.TempDir(): see startAgentBinary), removed by cleanup()
+	agentBinaryPath string    // built cmd/pglens-agent binary path, AgentModeBinary only
+	agentBinaryDSN  string    // the DSN the binary agent itself uses to reach "pg", AgentModeBinary only
+	agentLogPath    string    // stdout/stderr capture file for the binary-mode subprocess
+	pools           map[string]*pgxpool.Pool
+	poolMu          sync.Mutex
+	apiClient       *APIClient
+	workloadBin     string
+	workloadMu      sync.Mutex
+	cleaned         bool
+	cleanMu         sync.Mutex
 }
 
 // Start brings up the stack and blocks until every service is healthy.
@@ -92,6 +106,12 @@ func Start(t *testing.T, cfg Config) *Harness {
 		agentFile = filepath.Join(composeDir, "agent-binary.yml")
 	} else if cfg.AgentMode == AgentModeContainerNoVolume {
 		agentFile = filepath.Join(composeDir, "agent-container-no-volume.yml")
+	} else if cfg.AgentMode == AgentModeContainerASHDisabled {
+		agentFile = filepath.Join(composeDir, "agent-container-ash-disabled.yml")
+	} else if cfg.AgentMode == AgentModeContainerTinyBuffer {
+		agentFile = filepath.Join(composeDir, "agent-container-tiny-buffer.yml")
+	} else if cfg.AgentMode == AgentModeContainerClockSkew {
+		agentFile = filepath.Join(composeDir, "agent-container-clock-skew.yml")
 	} else if cfg.Toxiproxy {
 		// Points the agent's target DSN at toxiproxy's proxy instead of "pg"
 		// directly (test/fixtures/agent-standalone-toxic.yaml) — without
@@ -99,6 +119,16 @@ func Start(t *testing.T, cfg Config) *Harness {
 		// traffic through them. Toxiproxy fault injection is only wired up
 		// for AgentModeContainer/"" (the default) currently.
 		agentFile = filepath.Join(composeDir, "agent-container-toxic.yml")
+	} else if cfg.Topology == TopologyPrimaryStandby {
+		// agent-standalone.yaml's single "pg" target doesn't exist as a
+		// service in this topology at all (it's "pg-primary"/"pg-standby")
+		// — found live running SYS-REPL-001: the agent silently monitored
+		// nothing for the entire primary-standby topology all session,
+		// with no error beyond one stderr warning after waitForTarget's
+		// 60s timeout (cmd/pglens-agent/run.go), because every dependent
+		// scenario before this one asserted only against PostgreSQL
+		// directly (e.PG), never against agent-derived data.
+		agentFile = filepath.Join(composeDir, "agent-container-primary-standby.yml")
 	}
 
 	var toxiproxyFile string
@@ -143,8 +173,17 @@ func Start(t *testing.T, cfg Config) *Harness {
 		t.Fatalf("resolve pglens-server port: %v", err)
 	}
 	h.serverPort = port
+	h.agentMode = cfg.AgentMode
 
-	if cfg.AgentMode != "" {
+	if cfg.AgentMode == AgentModeBinary {
+		// agent-binary.yml deliberately defines no pglens-agent service (see
+		// its own comment), so there is no container port to resolve —
+		// startAgentBinary spawns the real host subprocess and sets
+		// h.agentPort itself, once its healthz port is actually known.
+		if err := h.startAgentBinary(); err != nil {
+			t.Fatalf("start agent binary: %v", err)
+		}
+	} else if cfg.AgentMode != "" {
 		if agentPort, err := h.getServicePort("pglens-agent", 9187); err == nil {
 			h.agentPort = agentPort
 		}
@@ -166,6 +205,121 @@ func Start(t *testing.T, cfg Config) *Harness {
 	}
 
 	return h
+}
+
+// startAgentBinary builds cmd/pglens-agent (once per Harness — there is only
+// ever one binary-mode agent per stack) and runs it as a real host
+// subprocess against the stack's already-published ports, rather than as a
+// docker-compose service. This is the actual implementation
+// test/compose/agent-binary.yml's own comment promises but that, until now,
+// nothing provided — AgentModeBinary picked the (deliberately empty) compose
+// fragment but nothing ever called os/exec, so the agent simply never ran at
+// all in this mode. Only standalone topology is supported: the monitored
+// target is always the "pg" service, matching every other single-target
+// AgentMode variant (AgentModeContainerTinyBuffer, etc.).
+func (h *Harness) startAgentBinary() error {
+	// A plain os.MkdirTemp, not h.t.TempDir(): TempDir()'s own auto-cleanup
+	// is a t.Cleanup registered the moment it's called here, deep inside
+	// Start() — LATER than the "Dump then compose down" cleanup Start()
+	// registers right at its own top. Cleanups run LIFO (last registered
+	// runs first), so a TempDir()-backed directory would already be deleted
+	// by the time Dump() tried to read the agent's log/binary from it —
+	// found live via a first attempt where every dump.go read of these
+	// paths failed with "no such file or directory". This directory is
+	// instead removed by h.cleanup() itself, which already runs (as part of
+	// the SAME "Dump then cleanup" callback) strictly after Dump.
+	runDir, err := os.MkdirTemp("", "pglens-agent-binary-*")
+	if err != nil {
+		return fmt.Errorf("create agent run dir: %w", err)
+	}
+	h.agentRunDir = runDir
+
+	binPath := filepath.Join(runDir, "pglens-agent")
+	buildCmd := exec.Command("go", "build", "-o", binPath, "./cmd/pglens-agent")
+	buildCmd.Dir = filepath.Join(h.composeDir, "..", "..")
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("build cmd/pglens-agent: %w, output: %s", err, out)
+	}
+
+	pgPort, err := h.getServicePort("pg", 5432)
+	if err != nil {
+		return fmt.Errorf("resolve pg port: %w", err)
+	}
+
+	// The healthz port has no CLI flag, only PGLENS_HEALTHZ_LISTEN (env) — an
+	// OS-assigned free port is picked the same way a *_test.go net/http test
+	// server would: bind, read back the port, close, reuse the number. The
+	// small window between close and the subprocess's own bind is the same
+	// race docker-compose's own random host-port publishing already carries
+	// throughout this harness.
+	healthzPort, err := freeTCPPort()
+	if err != nil {
+		return fmt.Errorf("pick healthz port: %w", err)
+	}
+
+	identityPath := filepath.Join(runDir, "identity.json")
+	bufferPath := filepath.Join(runDir, "buffer")
+	if err := os.MkdirAll(bufferPath, 0o755); err != nil {
+		return fmt.Errorf("create buffer dir: %w", err)
+	}
+
+	configPath := filepath.Join(runDir, "agent.yaml")
+	config := fmt.Sprintf(`server:
+  url: http://localhost:%d
+  token: dev-token
+identity_path: %s
+push_interval: 5s
+buffer:
+  path: %s
+  max_size: 64MiB
+  max_age: 1h
+targets:
+  - name: pg
+    dsn: postgres://pglens:pglens-monitoring-test@localhost:%d/postgres?sslmode=disable
+    databases:
+      max: 10
+checks:
+  activity: { interval: 5s }
+  database_stats: { interval: 5s }
+  stat_statements: { interval: 10s, top_n: 50 }
+`, h.serverPort, identityPath, bufferPath, pgPort)
+	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
+		return fmt.Errorf("write agent config: %w", err)
+	}
+
+	cmd := exec.Command(binPath, "run", "--config", configPath)
+	cmd.Env = append(os.Environ(), fmt.Sprintf("PGLENS_HEALTHZ_LISTEN=:%d", healthzPort))
+	logPath := filepath.Join(runDir, "agent.log")
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		return fmt.Errorf("create agent log file: %w", err)
+	}
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
+		return fmt.Errorf("start pglens-agent: %w", err)
+	}
+
+	h.agentCmd = cmd
+	h.agentLogFile = logFile
+	h.agentPort = healthzPort
+	h.agentBinaryPath = binPath
+	h.agentBinaryDSN = fmt.Sprintf("postgres://pglens:pglens-monitoring-test@localhost:%d/postgres?sslmode=disable", pgPort)
+	h.agentLogPath = logPath
+
+	return nil
+}
+
+// freeTCPPort asks the OS for an unused TCP port by binding to port 0 and
+// immediately releasing it.
+func freeTCPPort() (int, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port, nil
 }
 
 // composeService is one row of `docker compose ps --format json`.
@@ -369,10 +523,58 @@ func (h *Harness) Exec(service string, argv ...string) (string, error) {
 	return string(output), err
 }
 
+// ExecAs runs a command inside a named service container as a specific
+// user — needed for anything postgres-privileged (e.g. `pg_ctl promote`,
+// which refuses outright to run as the container's default root user:
+// "pg_ctl: cannot be run as root").
+func (h *Harness) ExecAs(service, user string, argv ...string) (string, error) {
+	args := []string{"compose", "-p", h.projectName, "exec", "-T", "-u", user, service}
+	args = append(args, argv...)
+	cmd := exec.Command("docker", args...)
+	cmd.Dir = h.composeDir
+	output, err := cmd.CombinedOutput()
+	return string(output), err
+}
+
 // Compose runs a docker-compose command.
 func (h *Harness) Compose(argv ...string) error {
 	_, err := h.composeOutput(argv...)
 	return err
+}
+
+// Logs returns a service's captured stdout/stderr (docker compose logs).
+func (h *Harness) Logs(service string) (string, error) {
+	return h.composeOutput("logs", "--no-color", service)
+}
+
+// Workload runs test/workload (workloadctl) as a host subprocess with the
+// given CLI args (e.g. "lock-storm", "--sessions", "50", "--dsn", dsn) and
+// returns its combined output — the tool's own JSON report on success.
+// test/workload has no compose service or Dockerfile of its own; it runs on
+// the host, exactly like the test process itself, which is why callers pass
+// a DSN pointed at a service's published port (see pg.Config().ConnConfig,
+// already used this way by SYS-ASH-001) rather than a container-internal
+// hostname. The binary is built once per Harness and cached.
+func (h *Harness) Workload(args ...string) (string, error) {
+	h.workloadMu.Lock()
+	defer h.workloadMu.Unlock()
+
+	if h.workloadBin == "" {
+		bin := filepath.Join(h.t.TempDir(), "workloadctl")
+		buildCmd := exec.Command("go", "build", "-o", bin, "./test/workload")
+		buildCmd.Dir = filepath.Join(h.composeDir, "..", "..")
+		if out, err := buildCmd.CombinedOutput(); err != nil {
+			return "", fmt.Errorf("build test/workload: %w, output: %s", err, out)
+		}
+		h.workloadBin = bin
+	}
+
+	cmd := exec.Command(h.workloadBin, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(out), fmt.Errorf("workloadctl %s: %w, output: %s", strings.Join(args, " "), err, out)
+	}
+	return string(out), nil
 }
 
 // composeOutput runs a docker-compose command and returns its trimmed
@@ -414,7 +616,10 @@ func (h *Harness) Scenario(t *testing.T, id string) {
 		API:          h.apiClient,
 		AgentHealthz: h.AgentHealthz,
 		Exec:         h.Exec,
+		ExecAs:       h.ExecAs,
 		Compose:      h.Compose,
+		Logs:         h.Logs,
+		Workload:     h.Workload,
 		Toxic: func(link scenario.ToxicLink, tox scenario.ToxicPayload) (scenario.RemoveFunc, error) {
 			hLink := LinkAgentToPG(link.Service)
 			if link.Kind == "server" {
@@ -444,6 +649,22 @@ func (h *Harness) cleanup() {
 		return
 	}
 	h.cleaned = true
+
+	// Stop the binary-mode agent subprocess before anything else — Dump has
+	// already run by the time cleanup() is called (both are part of the same
+	// t.Cleanup registered at the top of Start()), so this is safe to tear
+	// down now, unlike a separate, earlier-registered cleanup would be (see
+	// startAgentBinary's own comment on why it doesn't use h.t.TempDir()).
+	if h.agentCmd != nil && h.agentCmd.Process != nil {
+		_ = h.agentCmd.Process.Kill()
+		_ = h.agentCmd.Wait()
+	}
+	if h.agentLogFile != nil {
+		_ = h.agentLogFile.Close()
+	}
+	if h.agentRunDir != "" {
+		_ = os.RemoveAll(h.agentRunDir)
+	}
 
 	// Close all pools
 	h.poolMu.Lock()
