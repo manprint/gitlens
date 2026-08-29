@@ -55,7 +55,7 @@ work — a phase that looks blocked is a signal to read §9, not to skip ahead.
 - **Phase:** 8 — Command channel and query plans ([phase_09.md](phase_09.md))
 - **Next action:** read `phase_09.md` §8.1 and add `internal/store/migrations/0010_commands.sql` plus migration coverage.
 - **Assigned:** `agent:gpt5.6-luna`
-- **Repo state:** branch `main`, phase 6 close is `436ac99` (docs SHA sync `73e2355`); phase 7 implementation, tests and docs are ready for the phase-close commit.
+- **Repo state:** branch `main`, phase 6 close is `436ac99` (docs SHA sync `73e2355`); phase 7 close is `8891d6b`.
 
 ## 2. Feature context (self-contained recap)
 
@@ -182,7 +182,7 @@ The authoritative gate commands are the Makefile targets. These are identical to
 | 62 | sub-phase | 7.8 | agent:gpt5.6-luna | Added findings list, lookup, mute/unmute and advisor catalogue HTTP endpoints | `internal/server/api_findings.go`, `internal/server/api_findings_test.go`, `internal/server/api_findings_integration_test.go`, `internal/server/api.go`, `STATE.md` | focused INT-ADV-006 and full gate matrix PASS | phase-7 close |
 | 63 | sub-phase | 7.9 | agent:gpt5.6-luna | Completed the advisor integration sweep and deterministic seed fixture for the complete rule catalogue | `internal/advisor/rules_integration_test.go`, `test/fixtures/sql/advisor_seed.sql`, `STATE.md` | INT-ADV-007/008 PASS; full L2 PASS | phase-7 close |
 | 64 | sub-phase | 7.10 | agent:gpt5.6-luna | Documented advisor endpoints, JSON contracts, complete rule catalogue and operational limitations | `README.md`, `STATE.md` | README review and full phase gate matrix PASS | phase-7 close |
-| 65 | phase | 7 | agent:gpt5.6-luna | Synchronized phase-7 state, deviations and final gate evidence | `STATE.md`, `README.md`, all phase-7 implementation and test files | fmt/lint/build/unit-race/coverage 75.2%; advisor coverage 88.6%; full L2 exit 0 | phase-7 close |
+| 65 | phase | 7 | agent:gpt5.6-luna | Synchronized phase-7 state, deviations and final gate evidence | `STATE.md`, `README.md`, all phase-7 implementation and test files | fmt/lint/build/unit-race/coverage 75.2%; advisor coverage 88.6%; full L2 exit 0 | `8891d6b` |
 
 ## 5. Files touched
 
@@ -364,7 +364,7 @@ the units that touched it, so a later audit can attribute every diff.
 
 ## 6. In-flight work
 
-`none — tree consistent; phase 7 implementation, tests and documentation are complete, all phase gates pass, and the phase-close commit is pending. Phase 8 is next.`
+`none — tree consistent; phase 7 implementation, tests and documentation are complete, all phase gates pass, and phase-close commit is 8891d6b. Phase 8 is next.`
 
 ## 7. Verification state
 
@@ -520,7 +520,7 @@ disagree with §1 and §4.
 | 4 — Space and maintenance: tables, indexes, vacuum, bloat | phase_05.md | `DONE` | 8/8 sub-phases closed; coverage 75.1%; INT-TBL/IDX/VAC/BLOAT and INT-CHECK-016 green; primary `agent:gpt5.6-luna`; phase commit recorded in §4 |
 | 5 — Configuration and durability: settings, WAL, checkpointer, I/O, archiver | phase_06.md | `DONE` | 9/9 sub-phases closed; coverage 75.2%; full L2 PASS; D-026 records live archive-mode harness limitation; phase commit `a0dcbf3`; primary `agent:gpt5.6-luna` |
 | 6 — Host and container metrics | phase_07.md | `DONE` | 6/6 sub-phases closed; INT-HOST-001..005 and SYS-HARNESS-001 focused validation green; coverage 75.1%; phase commit `436ac99`; primary `agent:gpt5.6-luna` |
-| 7 — Advisor engine and rule packs | phase_08.md | `DONE` | 10/10 sub-phases closed; INT-ADV-001..008 green; advisor coverage 88.6%; global coverage 75.2%; phase commit pending |
+| 7 — Advisor engine and rule packs | phase_08.md | `DONE` | 10/10 sub-phases closed; INT-ADV-001..008 green; advisor coverage 88.6%; global coverage 75.2%; phase commit `8891d6b` |
 | 8 — Command channel and query plans | phase_09.md | `TODO` | 0/11 sub-phases closed; primary `agent:gpt5.6-luna` |
 | 9 — L3 end-to-end scenarios | phase_10.md | `TODO` | 0/8 sub-phases closed; primary `agent:gpt5.6-luna` |
 | 10 — Packaging, CI, final documentation | phase_11.md | `TODO` | 0/5 sub-phases closed; primary `agent:gpt5.6-luna` |
