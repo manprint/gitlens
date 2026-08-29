@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -18,12 +19,14 @@ type Config struct {
 	Buffer       BufferConfig   `yaml:"buffer"`
 	Targets      []TargetConfig `yaml:"targets"`
 	Checks       ChecksConfig   `yaml:"checks"`
+	Host         HostConfig     `yaml:"host"`
 
 	// Parsed versions for convenience
 	parsedPushInterval   time.Duration
 	parsedBufferMaxSize  int64
 	parsedBufferMaxAge   time.Duration
 	parsedCheckIntervals map[string]time.Duration
+	parsedHostInterval   time.Duration
 }
 
 // ServerConfig configures the server connection.
@@ -46,6 +49,57 @@ type TargetConfig struct {
 	DSN         string          `yaml:"dsn"`
 	ClusterName string          `yaml:"cluster_name"`
 	Databases   DatabasesConfig `yaml:"databases"`
+	HostLocal   *bool           `yaml:"host_local"`
+}
+
+type HostConfig struct {
+	Enabled  *bool  `yaml:"enabled"`
+	Interval string `yaml:"interval"`
+	ProcPath string `yaml:"proc_path"`
+	SysPath  string `yaml:"sys_path"`
+}
+
+func (c *Config) HostEnabled() bool              { return c.Host.Enabled == nil || *c.Host.Enabled }
+func (c *Config) GetHostInterval() time.Duration { return c.parsedHostInterval }
+func (c *Config) HostProcPath() string {
+	if c.Host.ProcPath != "" {
+		return c.Host.ProcPath
+	}
+	if p := os.Getenv("HOST_PROC"); p != "" {
+		return p
+	}
+	return "/proc"
+}
+func (c *Config) HostSysPath() string {
+	if c.Host.SysPath != "" {
+		return c.Host.SysPath
+	}
+	if p := os.Getenv("HOST_SYS"); p != "" {
+		return p
+	}
+	return "/sys"
+}
+func TargetIsLocal(t TargetConfig) bool {
+	if t.HostLocal != nil {
+		return *t.HostLocal
+	}
+	u, err := url.Parse(t.DSN)
+	if err != nil {
+		return false
+	}
+	h := u.Hostname()
+	if h == "" {
+		h = u.Query().Get("host")
+	}
+	if strings.HasPrefix(h, "/") {
+		return true
+	}
+	switch strings.ToLower(h) {
+	case "", "localhost", "127.0.0.1", "::1":
+		return true
+	default:
+		return false
+	}
 }
 
 // DatabasesConfig configures which databases to monitor.
@@ -159,6 +213,23 @@ func (c *Config) validate() error {
 		c.parsedBufferMaxAge = age
 	}
 	c.parsedCheckIntervals = make(map[string]time.Duration, len(c.Checks))
+	c.parsedHostInterval = 30 * time.Second
+	if c.Host.Interval != "" {
+		d, err := time.ParseDuration(c.Host.Interval)
+		if err != nil || d <= 0 {
+			if err == nil {
+				err = fmt.Errorf("must be greater than zero")
+			}
+			return fmt.Errorf("validation: host.interval: %w", err)
+		}
+		c.parsedHostInterval = d
+	}
+	if c.Host.ProcPath == "" {
+		c.Host.ProcPath = c.HostProcPath()
+	}
+	if c.Host.SysPath == "" {
+		c.Host.SysPath = c.HostSysPath()
+	}
 	for name, check := range c.Checks {
 		if check.Interval != "" {
 			interval, err := time.ParseDuration(check.Interval)

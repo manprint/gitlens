@@ -11,6 +11,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+const rotationPeriod = 65 * time.Second
+
 // distinctQueries generates many distinct queries to test queryid cardinality.
 // The key is to generate distinct **parse trees**, not just different literals.
 // We emit expressions of increasing length: SELECT 1+1, SELECT 1+1+1, etc.
@@ -61,19 +63,12 @@ import (
 // permanently win every scrape, with nothing ever transitioning out of
 // fresh into retained.
 func distinctQueries(ctx context.Context, pool *pgxpool.Pool, count int, duration time.Duration, report *Report) error {
-	const hotGroupSize = 50                 // matches cardinality.Selector's TopN
-	const rotationPeriod = 65 * time.Second // just above stat_statements.go's 60s DefaultInterval, so each rotation is caught by a scrape before the next one displaces it
+	const hotGroupSize = 50 // matches cardinality.Selector's TopN
 	const hotSleepMs = 300
 	const coldSleepMs = 1
 
 	numGroups := (count + hotGroupSize - 1) / hotGroupSize
-	numRotations := 0
-	if duration > 0 {
-		numRotations = numGroups
-		if byDuration := int(duration/rotationPeriod) + 1; byDuration < numRotations {
-			numRotations = byDuration
-		}
-	}
+	numRotations := rotationCount(duration, numGroups)
 
 	var successCount, failureCount atomic.Int64
 
@@ -161,6 +156,21 @@ runLoop:
 	report.Details["queries_failed"] = failureCount.Load()
 
 	return nil
+}
+
+// rotationCount returns the number of hot groups that fit in the requested
+// workload window. A duration exactly equal to N rotation periods contains N
+// groups; adding one unconditionally makes the workload run one extra group
+// beyond its declared duration (SYS-LOAD-008 exposed this at 390s).
+func rotationCount(duration time.Duration, groups int) int {
+	if duration <= 0 || groups <= 0 {
+		return 0
+	}
+	rotations := int((duration + rotationPeriod - 1) / rotationPeriod)
+	if rotations > groups {
+		return groups
+	}
+	return rotations
 }
 
 // generateExpression creates a distinct expression for each index.

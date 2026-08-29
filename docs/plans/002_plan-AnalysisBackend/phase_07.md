@@ -353,6 +353,23 @@ detail.
 
 ---
 
+## Execution record
+
+- **Assignment:** `agent:gpt5.6-luna`.
+- The agent health server starts before target initialization, so the
+  container healthcheck on port 9187 remains available during connection
+  retries.
+- The initial SYS-LOAD-008 diagnostic exposed an unconditional extra rotation
+  at the 390s boundary and an orphaned `workloadctl` child after an interrupted
+  runner. The correction uses an exact duration-window rotation count and a
+  Linux parent-death signal; it does not alter the 390s acceptance scenario or
+  the product contract.
+- Focused verification passed: the rotation-boundary unit test and real
+  `SYS-HARNESS-001` container startup/teardown smoke exited 0 in 27.323s. The
+  complete fmt/lint/build/unit-race/coverage/L2 matrix also passed, with
+  coverage 75.1% (4377/5830). The interrupted long diagnostic remains in
+  STATE.md as evidence only and is not claimed as a pass.
+
 ## Phase gates
 
 - **Fmt:** `make fmt-check`

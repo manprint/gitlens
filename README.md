@@ -193,11 +193,13 @@ services:
     depends_on: [pglens-server]
     volumes:
       - agent-data:/var/lib/pglens      # REQUIRED: persistent volume for identity.json
-      - /proc:/host/proc:ro              # optional: for better host introspection
-      - /sys:/host/sys:ro                # optional: for better host introspection
+      - /proc:/host/proc:ro              # read-only host introspection
+      - /sys:/host/sys:ro                # read-only host introspection
     environment:
       PGLENS_SERVER_URL: http://pglens-server:8080
       PGLENS_BOOTSTRAP_TOKEN: dev-token
+      HOST_PROC: /host/proc
+      HOST_SYS: /host/sys
       # OR mount the config file: 
       # PGLENS_CONFIG: /etc/pglens/agent.yaml
     healthcheck:
@@ -209,6 +211,9 @@ services:
 volumes:
   agent-data:                           # named volume persists across restarts
 ```
+
+The proc/sys mounts are read-only; they are preferred to running the agent
+container with `--privileged`.
 
 ### Binary with systemd
 
@@ -274,6 +279,13 @@ server:
 # Identity persistence (required)
 identity_path: /var/lib/pglens/identity.json  # string: path to identity file (must be on persistent mount)
 
+# Host metrics (optional; enabled by default)
+host:
+  enabled: true
+  interval: 30s
+  proc_path: /proc                 # defaults to $HOST_PROC, then /proc
+  sys_path: /sys                    # defaults to $HOST_SYS, then /sys
+
 # Push scheduling (optional)
 push_interval: 15s                   # duration: time between envelope deliveries (default 15s)
 
@@ -288,6 +300,7 @@ targets:
   - name: pg-app                     # string: identifier for this target (required)
     dsn: postgres://pglens@pg-app:5432/postgres?sslmode=require
                                      # string: PostgreSQL connection DSN (required; password never logged)
+    host_local: true                 # optional; otherwise inferred from localhost/loopback or Unix socket DSNs
     cluster_name: pg-prod-eu         # string: fallback cluster identity if pg_control_system() unavailable
     databases:
       include: ["app_.*"]            # string array: regex patterns to include (default empty = all)
@@ -330,6 +343,17 @@ Relation endpoints are available at `/api/v1/instances/{id}/tables`,
 budget limits the result. For example: `curl -s
 localhost:8080/api/v1/instances/11111111-1111-1111-1111-111111111111/tables | jq .`.
 
+Host metrics for a local target are available at:
+
+```sh
+curl -s http://localhost:8080/api/v1/instances/<instance-id>/host | jq .
+```
+
+The local response includes `available: true`, `source` (`host`, `cgroup_v1`,
+or `cgroup_v2`) and only fields that were measurable. A remote target returns
+`{"instance_id":"…","available":false,"reason":"target is not local to any agent"}`;
+it never returns zeros for unavailable host metrics.
+
 Settings and cluster drift are available with:
 
 ```sh
@@ -348,6 +372,7 @@ instance IDs, roles and values.
 - `PGLENS_BOOTSTRAP_TOKEN_FILE=/path/to/token` — overrides `server.token_file`
 - `PGLENS_IDENTITY_PATH=/path/to/identity.json` — overrides `identity_path`
 - `PGLENS_CONFIG=/path/to/agent.yaml` — path to the config file itself (default `/etc/pglens/agent.yaml`); the `--config` flag on `pglens-agent run` takes precedence over this
+- `HOST_PROC=/host/proc` and `HOST_SYS=/host/sys` — override the host collector's proc/sys roots (use with read-only container mounts)
 - `PGLENS_HEALTHZ_LISTEN=:9187` — bind address for the agent's own `/healthz` endpoint (default `:9187`); change this if running more than one agent on the same host
 
 **Security notes:**
@@ -997,6 +1022,7 @@ the server is rejected, so upgrade the server before upgrading agents.
 
 **Deployment:**
 - **An agent container without a persistent volume duplicates its instances on restart** — `/var/lib/pglens` must be a persistent volume (not ephemeral). Without it, every container restart creates a new instance ID, causing `duplicate_instance_suspected` events and fragmenting instance history. The compose file and systemd unit handle this correctly; Docker `--rm` breaks it.
+- **Host metrics are local-only** — they are attached only to targets declared or inferred as local to the agent. Remote targets report host metrics as unavailable, never as zero. In a container with a memory limit, the reported total is the cgroup limit rather than the machine's memory. Per-device IOPS, disk latency and network metrics are not collected.
 
 **Server and replication:**
 - PostgreSQL 15 to 18 only; 13 and 14 are not supported (EOL)

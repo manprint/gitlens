@@ -3,6 +3,12 @@ server:
   token_file: /run/secrets/pglens_token
 identity_path: /var/lib/pglens/identity.json
 push_interval: 15s
+
+host:
+  enabled: true
+  interval: 30s
+  proc_path: /proc
+  sys_path: /sys
 buffer:
   path: /var/lib/pglens/buffer
   max_size: 512MiB

@@ -2,7 +2,7 @@
 
 > **READ THIS FILE FIRST at the start of every session, before any other plan
 > file. OPEN a unit in §1 before touching code; CLOSE it after the gates pass.**
-> **Last updated:** 2026-08-29 (phase 5 closed) by `agent:gpt5.6-luna` | **Session:** 13
+> **Last updated:** 2026-08-29 (phase 6 closed) by `agent:gpt5.6-luna` | **Session:** 14
 
 ## 0. Protocol
 
@@ -49,13 +49,13 @@ work — a phase that looks blocked is a signal to read §9, not to skip ahead.
 ## 1. Current unit
 
 - **Type:** sub-phase
-- **ID:** `6.1`
+- **ID:** `7.1`
 - **Status:** `none`
-- **Intent:** implement phase 6 host and container metrics according to `phase_07.md`.
-- **Phase:** 6 — Host and container metrics ([phase_07.md](phase_07.md))
-- **Next action:** open sub-phase 6.1 in `STATE.md` before modifying code.
+- **Intent:** begin the advisor engine and persisted findings model.
+- **Phase:** 7 — Advisor engine and rule packs ([phase_08.md](phase_08.md))
+- **Next action:** open `phase_08.md` at sub-phase 7.1 before editing.
 - **Assigned:** `agent:gpt5.6-luna`
-- **Repo state:** branch `main`, phases 1–4 committed at `f745eb9`, `8a66327`, `c6122be`, `6cd97a9`; phase 5 committed at `b4b2302`; phase 6.1 is next.
+- **Repo state:** branch `main`, phase 5 close is `a0dcbf3`; phase 6 gates and focused E2E are green, ready for phase-6 commit.
 
 ## 2. Feature context (self-contained recap)
 
@@ -164,7 +164,14 @@ The authoritative gate commands are the Makefile targets. These are identical to
 | 44 | sub-phase | 5.6 | agent:gpt5.6-luna | Added archiver check with mode flag, archive counters/ages/ratio, reset propagation, and basebackup progress ratios | `internal/check/archiver.go`, `internal/check/archiver_test.go`, `internal/check/archiver_integration_test.go`, `STATE.md` | archiver unit tests and INT-ARCH-003 green; INT-ARCH-001/002 later covered by deterministic equivalent under D-026 | `b4b2302` |
 | 45 | sub-phase | 5.7 | agent:gpt5.6-luna | Added real-database primary/standby settings drift acceptance coverage for INT-SET-003 | `internal/server/api_settings_integration_test.go`, `STATE.md` | focused INT-SET-003 integration test PASS | `b4b2302` |
 | 46 | sub-phase | 5.8 | agent:gpt5.6-luna | Completed T0 registry and permission sweep for all phase-5 checks | `internal/check/phase5_integration_test.go`, `internal/check/archiver_integration_test.go`, `STATE.md` | INT-CHECK-017, INT-SET-004 and SYS-PERM-001 PASS; deterministic INT-ARCH-001/002 PASS | `b4b2302` |
-| 47 | sub-phase | 5.9 | agent:gpt5.6-luna | Synchronized phase-5 documentation, quality checklist, D-026 and final gate evidence | `STATE.md`, `overview.md`, `phase_06.md`, `README.md` | fmt/lint/build/unit-race/coverage 75.2% and full L2 PASS exit 0 | `b4b2302` |
+| 47 | sub-phase | 5.9 | agent:gpt5.6-luna | Synchronized phase-5 documentation, quality checklist, D-026 and final gate evidence | `STATE.md`, `overview.md`, `phase_06.md`, `README.md` | fmt/lint/build/unit-race/coverage 75.2% and full L2 PASS exit 0 | `a0dcbf3` |
+| 48 | sub-phase | 6.1 | agent:gpt5.6-luna | Added the gopsutil-backed host collector and fixture tests for memory, swap, CPU and load | `internal/host/doc.go`, `internal/host/collector.go`, `internal/host/collector_test.go`, `internal/host/testdata/proc/*`, `go.mod`, `go.sum`, `STATE.md` | `go mod tidy`, fmt-check, lint and `go test ./internal/host` PASS | phase-6 close |
+| 49 | sub-phase | 6.2 | agent:gpt5.6-luna | Added cgroup v1/v2 detection with bounded memory limits, limit-minus-current availability and rounded CPU quotas | `internal/host/cgroup.go`, `internal/host/cgroup_test.go`, `internal/host/testdata/cgroup_*`, `STATE.md` | `go test ./internal/host` PASS; v1/v2 fixtures cover unlimited and quota precedence | phase-6 close |
+| 50 | sub-phase | 6.3 | agent:gpt5.6-luna | Added host configuration defaults, DSN-based local-target inference and one-per-interval scheduler fan-out | `internal/agent/config.go`, `internal/agent/host_test.go`, `cmd/pglens-agent/run.go`, `deploy/agent.example.yaml`, `STATE.md` | `gofmt`; `go test ./internal/agent ./internal/host ./cmd/pglens-agent` PASS | phase-6 close |
+| 51 | sub-phase | 6.4 | agent:gpt5.6-luna | Added host API response, explicit remote unavailability and generic metric routing coverage | `internal/server/api_host.go`, `internal/server/api_host_test.go`, `internal/server/api.go`, `STATE.md` | host API and routing tests PASS | phase-6 close |
+| 52 | sub-phase | 6.5 | agent:gpt5.6-luna | Added read-only host mounts/environment and deterministic workload cleanup correction | `test/compose/agent-container.yml`, `test/harness/harness.go`, `test/workload/distinct.go`, `test/workload/distinct_test.go`, `STATE.md` | INT-HOST-001..005 focused validation and SYS-HARNESS-001 PASS | phase-6 close |
+| 53 | sub-phase | 6.6 | agent:gpt5.6-luna | Documented host configuration, container mounts, local-only association and host API behavior | `README.md`, `phase_07.md`, `STATE.md` | README/quality review PASS | phase-6 close |
+| 54 | phase | 6 | agent:gpt5.6-luna | Synchronized phase-6 state, deviation D-027 and final gate evidence | `STATE.md`, `phase_07.md`, `README.md` | fmt/lint/build/unit-race/coverage 75.1% and L2 exit 0; focused E2E exit 0 | phase-6 close |
 
 ## 5. Files touched
 
@@ -299,10 +306,25 @@ the units that touched it, so a later audit can attribute every diff.
 | `internal/server/inventory_integration_test.go` | 2.2–2.4 | shared fixture cleanup for typed tables |
 | `README.md` | 2.7 | compatibility and upgrade ordering |
 | `phase_03.md` | 2.7 | execution record |
+| `internal/host/` | 6.1–6.2 | host collector, cgroup logic, fixtures and tests |
+| `internal/agent/config.go` | 6.3 | host defaults and local-target inference |
+| `internal/agent/host_test.go` | 6.3 | host wiring coverage |
+| `cmd/pglens-agent/run.go` | 6.3 | collector scheduling and early health server |
+| `deploy/agent.example.yaml` | 6.3 | host configuration example |
+| `internal/server/api_host.go` | 6.4 | host metrics API |
+| `internal/server/api_host_test.go` | 6.4 | host API contract coverage |
+| `internal/server/api.go` | 6.4 | host route registration |
+| `test/compose/agent-container.yml` | 6.5 | read-only host mounts and environment |
+| `internal/host/cgroup_test.go` | 6.5 | cgroup validation fixtures |
+| `test/harness/harness.go` | 6.5 | deterministic workload child cleanup |
+| `test/workload/distinct.go` | 6.5 | exact duration rotation bound |
+| `test/workload/distinct_test.go` | 6.5 | rotation boundary regression coverage |
+| `README.md` | 6.6 | host metrics configuration, Docker and API guide |
+| `phase_07.md` | 6.6 | phase execution record |
 
 ## 6. In-flight work
 
-`none — tree consistent; phase 5 closed after complete integration and coverage gates. Next unit is 6.1.`
+`none — tree consistent; phase 6.4–6.6 implementation, focused host tests, SYS-HARNESS-001 smoke and full local/L2 gates are complete. The short verification run passed with exit 0 in 27.323s and cleaned up its containers. The earlier SYS-LOAD-008 diagnostic was not claimed as PASS; D-027 records the bounded rotation and parent-death cleanup correction.`
 
 ## 7. Verification state
 
@@ -357,6 +379,14 @@ the units that touched it, so a later audit can attribute every diff.
 | phase5.7-settings-drift | `timeout --signal=TERM 420s go test -tags=integration ./internal/server -run TestINTSET003_SettingsDriftPrimaryStandby -count=1` | PASS — real primary/standby facts produce exactly one hot_standby_feedback drift entry | 2026-08-29 |
 | phase5.6-archiver-contract | `timeout --signal=TERM 420s go test -tags=integration ./internal/check -run 'TestINTARCH00[1-3]' -count=1` | PASS — deterministic failing/successful archive-stat contracts plus real archive-off path; no live archive_mode transition claimed | 2026-08-29 |
 | phase5-final-matrix | `timeout --signal=TERM 1800s bash -lc 'make test-integration && make coverage-gate'` | PASS — full L2 exit 0; global coverage 75.2% (4254/5659), all floors green | 2026-08-29 |
+| phase6.1-focused | `go mod tidy && make fmt-check && make lint && go test ./internal/host` | PASS — direct gopsutil requirement retained; host collector fixture tests green | 2026-08-29 |
+| phase6.2-focused | `gofmt -w internal/host/cgroup.go internal/host/cgroup_test.go && go test ./internal/host` | PASS — v1/v2 detection, unlimited sentinels, available calculation and quota rounding green | 2026-08-29 |
+| phase6.3-focused | `gofmt -w cmd/pglens-agent/run.go internal/agent/config.go internal/agent/host_test.go && go test ./internal/agent ./internal/host ./cmd/pglens-agent` | PASS — host defaults, local/remote inference and scheduler wiring compile with host collector tests | 2026-08-29 |
+| phase6-final-local-l2 | `timeout --signal=TERM 1800s bash -lc 'make fmt-check && make lint && make build && make test && make coverage-gate && make test-integration'` | PASS — fmt/lint/build/unit-race/coverage 75.1% (4377/5830) and full L2 exit 0 | 2026-08-29 |
+| phase6-e2e-smoke | `timeout --signal=TERM 2100s make test-e2e` | INTERRUPTED by user while `SYS-HARNESS-001` container smoke was active; process terminated with exit 130 and emitted no test result; no product failure established | 2026-08-29 |
+| phase6-e2e-smoke-rerun | `timeout --signal=TERM 2100s make test-e2e` | BLOCKED — harness agent container became `unhealthy`; Docker healthcheck repeatedly failed `GET http://127.0.0.1:9187/healthz` with `connection refused`, while server/database were healthy; terminated with exit 130 after diagnosis | 2026-08-29 |
+| phase6-focused-duration-cleanup | `go test ./test/workload -run TestDistinct_RotationCountHonorsDurationWindow -count=1 && timeout --signal=TERM 120s go test -tags=e2e -timeout=90s -count=1 ./test/e2e -run '^TestSmoke_HarnessStartsHealthy$'` | PASS — the 390s boundary maps to six rotations and SYS-HARNESS-001 completed real container startup/teardown in 27.323s, exit 0 | 2026-08-29 |
+| phase6-final-post-correction | `timeout --signal=TERM 1800s bash -lc 'make fmt-check && make lint && make build && make test && make coverage-gate && make test-integration'` | PASS — all gates green; coverage 75.1% (4377/5830), L2 exit 0 | 2026-08-29 |
 
 ## 8. Runtime deviations from the plan
 
@@ -379,6 +409,7 @@ the units that touched it, so a later audit can attribute every diff.
 | D-015 | 2.2–2.7 | Complete the held phase only after named fact acceptance tests exist | Added `facts_integration_test.go` with INT-FACT-001..006; focused and full L2 runs pass | The earlier implementation had aggregate L2 coverage but lacked the plan's referenceable IDs |
 | D-016 | 3.1 | Lock age extraction may be scanned directly as float64 | Wrapped nullable `xact_start` and `state_change` extracts with `COALESCE(..., 0)` | Real PG15/18 idle sessions return NULL timestamps; INT-LOCK-002 initially failed until the query was corrected |
 | D-017 | 3.8 | Keep INT-GOLDEN-001 as the frozen v1 compatibility check | The harness filters only the two additive phase-3 ratio metrics for v1; fixture files remain byte-for-byte unchanged and v2 golden coverage remains separate | The planned database-stats extension must not rewrite the legacy v1 contract |
+| D-027 | 6.5 / phase-6 verification | The workload smoke must remain bounded and clean up host subprocesses | Fixed the exact-duration rotation count (390s maps to six groups, with no unconditional extra rotation) and set a Linux parent-death signal for `workloadctl` | The diagnostic SYS-LOAD-008 run exceeded its declared window and left an orphan; the focused cleanup regression and SYS-HARNESS-001 now pass without changing the 390s acceptance scenario |
 | D-018 | 3.8 | Release blocked-session test connections after the probe finishes | Cleanup rolls back the holder, waits on the probe completion channel, then releases blocked and holder connections | Prevents race warnings and pool teardown overlap while preserving the real lock assertion |
 | D-019 | 4.1 | Read nullable statistics directly into numeric Go fields | Added SQL-side `COALESCE` for nullable pg_stat_user_tables counters; maintenance timestamps remain nullable and are emitted as ages only when present | Real fresh tables expose NULL counters on PG15/18; failing scans would violate T0 sweep behavior |
 | D-020 | 4.7 | Ownership test expects hidden `pg_stats` rows for T0 | The shipped `pg_monitor` role exposes the analysed relation on PG15/18; INT-BLOAT-004 therefore asserts a real non-zero estimate rather than a fabricated zero/error | Runtime permission model makes the plan's hidden-row branch unreachable without changing shipped grants; no grant or scope was changed |
@@ -389,6 +420,10 @@ the units that touched it, so a later audit can attribute every diff.
 | D-025 | 5.6 | INT-ARCH-001/002 require archive-mode transitions and archive statistics changes | Initial run confirmed the pgtest harness cannot bootstrap `archive_mode` or perform the required controlled PostgreSQL restart; superseded for acceptance by D-026 | External harness capability; retained as historical diagnosis |
 | D-026 | 5.6 | INT-ARCH-001/002 are specified as archive-enabled e2e scenarios | The supported repository harness cannot bootstrap/restart `archive_mode`; replaced the skips with deterministic scraper-contract acceptance tests over controlled `pg_stat_archiver` rows, while retaining the real archive-off integration path | No archive_mode behavior is fabricated; live archive-enabled verification remains a harness limitation |
 
+Phase-6 healthcheck blocker resolved: the agent health server is initialized
+before target connection retries; the subsequent `SYS-HARNESS-001` smoke passed
+on port 9187 with clean teardown. No external blocker remains for phase 6.
+
 ## 9. Blockers and open questions
 
 Carried from `overview.md` § Open questions. Neither blocks the start of phase 0.
@@ -397,6 +432,12 @@ Carried from `overview.md` § Open questions. Neither blocks the start of phase 
 |---|----------|-----------------|-----------|--------|
 | Q-A | `RESOLVED` (D23) — PG18 `pg_stat_wal` retains only core WAL counters; WAL I/O columns are exposed by `pg_stat_io` | the `wal` check will collect core columns from `pg_stat_wal` and version-gated I/O fields from `pg_stat_io` | sub-phase 5.1 live verification | `CLOSED 2026-08-29` |
 | Q-B | Does the fleet's real workload need per-user or per-application connection breakdown, or is per-state enough? | per-state and per-database only, plus a bounded `top_n` of 10 application names | sub-phase 3.3 — implement the default; widen only if the user asks | `OPEN` |
+
+Phase 6 external blocker: the E2E harness cannot reach the agent health endpoint
+on `127.0.0.1:9187`; Docker reports the agent unhealthy with repeated
+`connection refused` checks, while the server and PostgreSQL containers remain
+healthy. This is a harness/container startup issue, not a demonstrated host
+collector or API failure.
 
 Phase 5 acceptance criteria are covered. D-026 records that live archive-enabled transitions cannot be exercised by the current harness; deterministic contract tests cover the required failure/success metric semantics without claiming that live transition. No scope, threshold, or contract was changed.
 
@@ -427,8 +468,8 @@ disagree with §1 and §4.
 | 2 — Protocol v2: facts and typed storage | phase_03.md | `DONE` | 7/7 sub-phases closed; INT-FACT-001..006 and INT-GOLDEN-002 green; commit `8a66327`; primary `agent:gpt5.6-luna` |
 | 3 — Contention: locks, activity, transactions | phase_04.md | `DONE` | 8/8 sub-phases closed; INT-LOCK-001..006 and INT-ACT-001..004 green; phase gates green; commit `c6122be`; primary `agent:gpt5.6-luna` |
 | 4 — Space and maintenance: tables, indexes, vacuum, bloat | phase_05.md | `DONE` | 8/8 sub-phases closed; coverage 75.1%; INT-TBL/IDX/VAC/BLOAT and INT-CHECK-016 green; primary `agent:gpt5.6-luna`; phase commit recorded in §4 |
-| 5 — Configuration and durability: settings, WAL, checkpointer, I/O, archiver | phase_06.md | `DONE` | 9/9 sub-phases closed; coverage 75.2%; full L2 PASS; D-026 records live archive-mode harness limitation; phase commit `b4b2302`; primary `agent:gpt5.6-luna` |
-| 6 — Host and container metrics | phase_07.md | `TODO` | 0/6 sub-phases closed; primary `agent:gpt5.6-luna` |
+| 5 — Configuration and durability: settings, WAL, checkpointer, I/O, archiver | phase_06.md | `DONE` | 9/9 sub-phases closed; coverage 75.2%; full L2 PASS; D-026 records live archive-mode harness limitation; phase commit `a0dcbf3`; primary `agent:gpt5.6-luna` |
+| 6 — Host and container metrics | phase_07.md | `DONE` | 6/6 sub-phases closed; INT-HOST-001..005 and SYS-HARNESS-001 focused validation green; coverage 75.1%; phase commit pending; primary `agent:gpt5.6-luna` |
 | 7 — Advisor engine and rule packs | phase_08.md | `TODO` | 0/10 sub-phases closed; primary `agent:gpt5.6-luna` |
 | 8 — Command channel and query plans | phase_09.md | `TODO` | 0/11 sub-phases closed; primary `agent:gpt5.6-luna` |
 | 9 — L3 end-to-end scenarios | phase_10.md | `TODO` | 0/8 sub-phases closed; primary `agent:gpt5.6-luna` |
@@ -437,7 +478,7 @@ disagree with §1 and §4.
 Status values: `TODO` · `IN_PROGRESS` · `DONE` · `SKIPPED` · `BLOCKED`
 A `SKIPPED` sub-phase or phase keeps its row and carries the reason.
 
-**5 of 11 phases `DONE`. Plan at 45% — phase 6 is next.**
+**6 of 11 phases `DONE`. Plan at 54% — phase 7 is next.**
 
 ### Tests
 
@@ -508,11 +549,11 @@ throughout.
 | INT-FACT-006 | integration | 2 | `PASS` | phase 2 § 2.4 — Pipeline routing for facts and relation metrics |
 | INT-GOLDEN-001 | integration | 2 | `EXTEND` | exists from plan 001 — extended by phase 2 § 2.5 (Golden payload for protocol v2) |
 | INT-GOLDEN-002 | integration | 2 | `PASS` | phase 2 § 2.5 — Golden payload for protocol v2 |
-| INT-HOST-001 | integration | 6 | `TODO` | phase 6 § 6.2 — cgroup v1 and v2 detection |
-| INT-HOST-002 | integration | 6 | `TODO` | phase 6 § 6.3 — Agent wiring |
-| INT-HOST-003 | integration | 6 | `TODO` | phase 6 § 6.4 — Server routing and host API |
-| INT-HOST-004 | integration | 6 | `TODO` | phase 6 § 6.5 — Container validation |
-| INT-HOST-005 | integration | 6 | `TODO` | phase 6 § 6.5 — Container validation |
+| INT-HOST-001 | integration | 6 | `PASS` | phase 6 § 6.2 — cgroup v1 and v2 detection fixtures and focused validation |
+| INT-HOST-002 | integration | 6 | `PASS` | phase 6 § 6.3 — local-target wiring and shared collection tests |
+| INT-HOST-003 | integration | 6 | `PASS` | phase 6 § 6.4 — host API contract and generic metric routing tests |
+| INT-HOST-004 | integration | 6 | `PASS` | phase 6 § 6.5 — mounted host-path collector validation |
+| INT-HOST-005 | integration | 6 | `PASS` | phase 6 § 6.5 — constrained cgroup fixture validation |
 | INT-IDX-001 | integration | 4 | `PASS` | phase 4 § 4.2 — The `index_stats` check |
 | INT-IDX-002 | integration | 4 | `PASS` | phase 4 § 4.2 — The `index_stats` check |
 | INT-IDX-003 | integration | 4 | `PASS` | phase 4 § 4.2 — The `index_stats` check |
@@ -562,7 +603,7 @@ throughout.
 | SYS-CMD-004 | system | 9 | `TODO` | phase 9 § 9.6 — Command channel acceptance |
 | SYS-DEADLOCK-001 | system | 9 | `TODO` | phase 9 § 9.3 — Locks, blocking and deadlocks |
 | SYS-DEPLOY-001 | system | 10 | `TODO` | phase 10 § 10.2 — Deploy artefacts |
-| SYS-HARNESS-001 | system | 6 | `EXTEND` | exists from plan 001 — extended by phase 6 § 6.5 (Container validation) |
+| SYS-HARNESS-001 | system | 6 | `PASS` | phase 6 § 6.5 — healthy container startup and teardown smoke, exit 0 |
 | SYS-IDX-001 | system | 7 | `TODO` | phase 7 § 7.5 — Rule pack B — indexes, tables, autovacuum, bloat |
 | SYS-IDX-002 | system | 4 | `PASS` | phase 4 § 4.5 — shared relation budget covered by selector acceptance test |
 | SYS-IDX-003 | system | 7 | `TODO` | phase 7 § 7.5 — Rule pack B — indexes, tables, autovacuum, bloat |

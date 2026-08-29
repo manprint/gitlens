@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestDistinct_ParseTreesDiffer verifies that generated statements are
@@ -83,5 +84,26 @@ func TestDistinct_ParseTreesDiffer_FullWorkloadRange(t *testing.T) {
 				t.Errorf("generateExpression(%d) column %q has chain depth %d, exceeds safe bound %d", i, col, depth, safeChainBound)
 			}
 		}
+	}
+}
+
+func TestDistinct_RotationCountHonorsDurationWindow(t *testing.T) {
+	const groups = 100
+	for _, tc := range []struct {
+		name     string
+		duration time.Duration
+		want     int
+	}{
+		{name: "zero", duration: 0, want: 0},
+		{name: "one_period", duration: rotationPeriod, want: 1},
+		{name: "six_periods", duration: 390 * time.Second, want: 6},
+		{name: "partial_seventh", duration: 391 * time.Second, want: 7},
+		{name: "capped_at_groups", duration: 1000 * time.Hour, want: groups},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := rotationCount(tc.duration, groups); got != tc.want {
+				t.Fatalf("rotationCount(%s, %d) = %d, want %d", tc.duration, groups, got, tc.want)
+			}
+		})
 	}
 }

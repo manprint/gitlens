@@ -8,6 +8,8 @@ services:
       PGLENS_CONFIG: /etc/pglens/agent.yaml
       PGLENS_SERVER_URL: http://pglens-server:8080
       PGLENS_BOOTSTRAP_TOKEN: dev-token
+      HOST_PROC: /host/proc
+      HOST_SYS: /host/sys
     ports:
       - "9187" # the agent's own /healthz (distinct from pglens-server's), so the host test process can read its real state/buffer_stats/last_error body
     volumes:

@@ -17,6 +17,7 @@ import (
 	"github.com/manprint/pglens/internal/agent/buffer"
 	"github.com/manprint/pglens/internal/check"
 	"github.com/manprint/pglens/internal/clock"
+	"github.com/manprint/pglens/internal/host"
 	"github.com/manprint/pglens/internal/wire"
 )
 
@@ -87,6 +88,17 @@ func runAgentCommand(args []string) {
 	defer func() { _ = buf.Close() }()
 	pusher.SetBuffer(buf)
 
+	// Start liveness before target initialization. A target connection can
+	// legitimately take longer than Docker's healthcheck grace period; the
+	// agent is still alive and must expose its health while it retries.
+	healthzAddr := envOr("PGLENS_HEALTHZ_LISTEN", ":9187")
+	healthSrv := &http.Server{Addr: healthzAddr, Handler: pusher.HealthzHandler()}
+	go func() {
+		if err := healthSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			fmt.Fprintf(os.Stderr, "healthz server: %v\n", err)
+		}
+	}()
+
 	// Accumulate scrape results per target between push cycles, build a
 	// wire.Envelope per cycle, and hand it to the pusher. Push failures stay
 	// queued in the pusher's disk-backed buffer (SetBuffer above) for the
@@ -114,6 +126,37 @@ func runAgentCommand(args []string) {
 		ashStop, enabled := startASH(ctx, mgr, tc.Name, cfg.Checks["ash"], clk, &mu, pending)
 		ashStops = append(ashStops, ashStop)
 		ashEnabled[tc.Name] = enabled
+	}
+	if cfg.HostEnabled() {
+		collector := host.NewCollector(cfg.HostProcPath(), cfg.HostSysPath())
+		go func() {
+			ticker := clk.NewTicker(cfg.GetHostInterval())
+			defer ticker.Stop()
+			collect := func() {
+				sample, err := collector.Collect(ctx, "")
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "warning: host collection: %v\n", err)
+					return
+				}
+				for _, tc := range cfg.Targets {
+					if !agent.TargetIsLocal(tc) {
+						continue
+					}
+					mu.Lock()
+					pending[tc.Name] = append(pending[tc.Name], hostWireResult(sample, clk.Now()))
+					mu.Unlock()
+				}
+			}
+			collect()
+			for {
+				select {
+				case <-ticker.C():
+					collect()
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
 	}
 	defer func() {
 		for _, stop := range ashStops {
@@ -219,14 +262,6 @@ func runAgentCommand(args []string) {
 		}
 	}()
 
-	healthzAddr := envOr("PGLENS_HEALTHZ_LISTEN", ":9187")
-	healthSrv := &http.Server{Addr: healthzAddr, Handler: pusher.HealthzHandler()}
-	go func() {
-		if err := healthSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			fmt.Fprintf(os.Stderr, "healthz server: %v\n", err)
-		}
-	}()
-
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT)
 	<-ch
@@ -239,6 +274,43 @@ func runAgentCommand(args []string) {
 	for _, mgr := range managers {
 		mgr.Close()
 	}
+}
+
+func hostWireResult(s host.Sample, now time.Time) wire.Result {
+	r := wire.Result{Check: "host", TS: now}
+	add := func(name string, v *uint64) {
+		if v != nil {
+			r.Metrics = append(r.Metrics, wire.Metric{Name: name, Value: float64(*v), Kind: "gauge"})
+		}
+	}
+	addFloat := func(name string, v *float64) {
+		if v != nil {
+			r.Metrics = append(r.Metrics, wire.Metric{Name: name, Value: *v, Kind: "gauge"})
+		}
+	}
+	addInt := func(name string, v *int) {
+		if v != nil {
+			r.Metrics = append(r.Metrics, wire.Metric{Name: name, Value: float64(*v), Kind: "gauge"})
+		}
+	}
+	add("host_mem_total_bytes", s.MemTotalBytes)
+	add("host_mem_available_bytes", s.MemAvailableBytes)
+	add("host_swap_total_bytes", s.SwapTotalBytes)
+	add("host_swap_used_bytes", s.SwapUsedBytes)
+	addInt("host_cpu_count", s.CPUCount)
+	addFloat("host_cpu_used_ratio", s.CPUUsedRatio)
+	addFloat("host_load1", s.Load1)
+	addFloat("host_load5", s.Load5)
+	addFloat("host_load15", s.Load15)
+	add("host_disk_total_bytes", s.DiskTotalBytes)
+	add("host_disk_free_bytes", s.DiskFreeBytes)
+	if s.DiskTotalBytes != nil && *s.DiskTotalBytes > 0 && s.DiskFreeBytes != nil {
+		ratio := float64(*s.DiskFreeBytes) / float64(*s.DiskTotalBytes)
+		addFloat("host_disk_free_ratio", &ratio)
+	}
+	source := map[string]float64{"host": 0, "cgroup_v1": 1, "cgroup_v2": 2}[s.Source]
+	r.Metrics = append(r.Metrics, wire.Metric{Name: "host_metrics_source", Value: source, Kind: "gauge"})
+	return r
 }
 
 func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mutex, pending map[string][]wire.Result, lastEdgeState map[string]edgeState, ashEnabled map[string]bool, pusher *agent.Pusher) {

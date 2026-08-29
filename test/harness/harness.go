@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -795,6 +796,11 @@ func (h *Harness) Workload(args ...string) (string, error) {
 	}
 
 	cmd := exec.Command(h.workloadBin, args...)
+	// workloadctl is a host subprocess. Ensure an abruptly terminated E2E
+	// runner cannot leave a long-running workload orphaned against the test
+	// database; normal completion and the existing harness cleanup are
+	// unchanged.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("workloadctl %s: %w, output: %s", strings.Join(args, " "), err, out)
