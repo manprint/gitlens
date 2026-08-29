@@ -328,6 +328,17 @@ func TestTypedFactRows_ArgsOrder(t *testing.T) {
 	require.Len(t, b.args(), 14)
 }
 
+func TestWriteLockSnapshot_ArgsOrder(t *testing.T) {
+	id := uuid.New()
+	ts := time.Unix(10, 0).UTC()
+	r := LockSnapshotRow{TenantID: "tenant", InstanceID: id, ClusterID: 7, TS: ts, Tree: []byte(`{"nodes":[]}`)}
+	require.Equal(t, "tenant", r.TenantID)
+	require.Equal(t, id, r.InstanceID)
+	require.Equal(t, int64(7), r.ClusterID)
+	require.Equal(t, ts, r.TS)
+	require.Equal(t, `{"nodes":[]}`, string(r.Tree))
+}
+
 // helpers
 
 func floatPtr(v float64) *float64    { return &v }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -63,6 +64,42 @@ checks:
 	require.NoError(t, err)
 	// If not specified in YAML, GetParsedPushInterval returns default of 15s
 	require.Equal(t, 15*time.Second, cfg.GetParsedPushInterval())
+}
+
+func TestConfig_LocksDefaultInterval(t *testing.T) {
+	yaml := `server: {url: http://localhost:8080, token: test}
+identity_path: /tmp/id
+buffer: {path: /tmp/buf}
+targets: [{name: pg, dsn: postgres://localhost/app}]
+checks: {locks: {}}`
+	path := writeConfigFile(t, yaml)
+	defer func() { _ = os.Remove(path) }()
+	cfg, err := LoadConfig(path)
+	require.NoError(t, err)
+	require.Equal(t, time.Duration(0), cfg.GetCheckInterval("locks"))
+}
+
+func TestConfig_ByApplicationDefaultsFalse(t *testing.T) {
+	yaml := `server: {url: http://localhost:8080, token: test}
+identity_path: /tmp/id
+buffer: {path: /tmp/buf}
+targets: [{name: pg, dsn: postgres://localhost/app}]
+checks: {activity: {}}`
+	path := writeConfigFile(t, yaml)
+	defer func() { _ = os.Remove(path) }()
+	cfg, err := LoadConfig(path)
+	require.NoError(t, err)
+	require.False(t, cfg.Checks["activity"].ByApplication)
+}
+
+func TestConfig_ExampleFileParses(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "deploy", "agent.example.yaml"))
+	require.NoError(t, err)
+	text := strings.Replace(string(data), "token_file: /run/secrets/pglens_token", "token: test", 1)
+	path := writeConfigFile(t, text)
+	defer func() { _ = os.Remove(path) }()
+	_, err = LoadConfig(path)
+	require.NoError(t, err)
 }
 
 func TestConfig_ParsesBufferAndCheckOverrides(t *testing.T) {

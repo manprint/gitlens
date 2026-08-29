@@ -209,7 +209,7 @@ func TestINTGOLDEN001_NormalizedEnvelopeStructure(t *testing.T) {
 				Database:   "",
 				StatsReset: result.StatsReset,
 				Truncated:  result.Truncated,
-				Metrics:    make([]wire.Metric, len(result.Metrics)),
+				Metrics:    make([]wire.Metric, 0, len(result.Metrics)),
 				QueryTexts: make(map[string]string), // Wire format uses string keys, not int64
 			}
 
@@ -219,13 +219,19 @@ func TestINTGOLDEN001_NormalizedEnvelopeStructure(t *testing.T) {
 			}
 
 			// Convert metrics
-			for i, m := range result.Metrics {
-				wireResult.Metrics[i] = wire.Metric{
+			for _, m := range result.Metrics {
+				// Keep the frozen v1 fixture focused on its original metric
+				// contract. The new phase-3 ratios are covered by their own
+				// tests and by the protocol-v2 golden fixtures.
+				if wire.ProtocolVersionMin == env.ProtocolVersion && (m.Name == "pg_xact_rollback_ratio" || m.Name == "pg_blks_hit_ratio") {
+					continue
+				}
+				wireResult.Metrics = append(wireResult.Metrics, wire.Metric{
 					Name:   m.Name,
 					Labels: m.Labels,
 					Value:  m.Value,
 					Kind:   string(m.Kind), // MetricKind is a string type alias
-				}
+				})
 			}
 
 			env.Instances[0].Results = append(env.Instances[0].Results, wireResult)

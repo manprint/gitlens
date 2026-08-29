@@ -243,6 +243,11 @@ sudo journalctl -u pglens-agent -n 50  # last 50 lines of logs
 
 ### Agent configuration
 
+Collected checks include `locks` (10s, instance scope, Tier 0), which reports
+sampled blocking trees and bounded wait-event gauges. The `activity` check also
+reports connection use, per-database counts, state age, prepared transactions,
+and frozen-XID age; per-application counts are opt-in.
+
 Annotated `deploy/agent.example.yaml`:
 
 ```yaml
@@ -279,7 +284,8 @@ targets:
 # Per-check configuration overrides (optional)
 checks:
   instance_info:    { interval: 60s }        # General instance metadata (mandatory)
-  activity:        { interval: 10s }        # Session activity and lock info
+  activity:        { interval: 10s, by_application: false } # Session activity
+  locks:           { interval: 10s }        # Blocking tree (instance scope, T0)
   database_stats:  { interval: 30s }        # Per-database counters and size
   stat_statements: { interval: 60s, top_n: 50 }  # Top N queries (requires pg_stat_statements)
   ash:             { interval: 1s }         # Activity sampling (ASH); lower for sensitive instances
@@ -521,6 +527,24 @@ curl -s localhost:8080/api/v1/instances/11111111-1111-1111-1111-111111111111 | j
 ```
 
 Returns the instance plus its databases with `monitored`, `skip_reason`, and `databases_not_monitored` count.
+
+### `GET /api/v1/locks`
+
+```sh
+curl -s "localhost:8080/api/v1/locks?instance_id=11111111-1111-1111-1111-111111111111" | jq .
+```
+
+Returns the latest sampled blocking tree. An instance with no stored tree still
+returns 200: `{"instance_id":"…","sampled_at":null,"stale":true,"nodes":[]}`.
+
+### `GET /api/v1/instances/{id}/activity`
+
+```sh
+curl -s "localhost:8080/api/v1/instances/11111111-1111-1111-1111-111111111111/activity" | jq .
+```
+
+The response groups recent activity metrics, including database connection
+counts and age gauges, for example `{"stale":false,"metrics":{"pg_connections_by_database":[{"value":3,"labels":{"datname":"app"}}]}}`.
 
 ### `GET /api/v1/metrics/query`
 
@@ -938,6 +962,11 @@ the server is rejected, so upgrade the server before upgrading agents.
 - PostgreSQL 15 to 18 only; 13 and 14 are not supported (EOL)
 - Only streaming replication is supported; logical, Patroni, and Aurora topologies are not detected
 - Raw retention is 30 days with no rollups; compression after 48h (`buffer 6h < sample_age 12h < compress_after 48h`)
+
+**Contention:**
+- The lock view is sampled every 10 seconds, not live; a contention episode shorter than the interval can be missed entirely
+- Query text in a lock tree is truncated to 2 048 bytes
+- Deadlocks are reported as a counter and a rate; identifying the statements involved in a specific deadlock requires PostgreSQL log analysis, which pglens does not do
 
 **Wait-event analysis (ASH):**
 - **Statistical sampling, not exact tracing.** ASH samples once per second, not continuously. Queries shorter than approximately 1 second are under-represented in results. This is the same fundamental trade-off made by Oracle ASH and AWS Performance Insights — acceptable for identifying where the database spends time over hours or days, not suitable for microsecond-level analysis.

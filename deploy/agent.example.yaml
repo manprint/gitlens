@@ -16,6 +16,8 @@ targets:
       exclude: ["^template\\d$"]
       max: 10
 checks:
-  activity: { interval: 10s }
+  activity: { interval: 10s, by_application: false }
+  # locks samples blocking sessions every 10 seconds at Tier 0
+  locks: { interval: 10s }
   database_stats: { interval: 30s }
   stat_statements: { interval: 60s, top_n: 50 }

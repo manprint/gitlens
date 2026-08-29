@@ -61,4 +61,56 @@ func TestBuildActivityResult(t *testing.T) {
 	}
 }
 
+func TestActivity_ConnectionsUsedRatio(t *testing.T) {
+	res := activityCheckResult([]activityRow{{State: strPtr("active"), WaitEventType: strPtr("CPU"), Count: 25}}, "100", false, nil, nil, nil, 0, 0, 0)
+	for _, m := range res.Metrics {
+		if m.Name == "pg_connections_used_ratio" {
+			require.Equal(t, .25, m.Value)
+			return
+		}
+	}
+	t.Fatal("connection ratio missing")
+}
+
+func TestActivity_ByDatabaseIsBounded(t *testing.T) {
+	rows := make([]activityGroup, 12)
+	for i := range rows {
+		rows[i] = activityGroup{Label: string(rune('a' + i)), Value: 1}
+	}
+	metrics := boundedActivityMetrics("pg_connections_by_database", "datname", rows)
+	require.Len(t, metrics, 11)
+}
+
+func TestActivity_ByApplicationDisabledByDefault(t *testing.T) {
+	res := activityCheckResult(nil, "", false, nil, []activityGroup{{Label: "api", Value: 1}}, nil, 0, 0, 0)
+	for _, m := range res.Metrics {
+		require.NotEqual(t, "pg_connections_by_application", m.Name)
+	}
+}
+
+func TestActivity_PreparedXactsZeroWhenEmpty(t *testing.T) {
+	res := activityCheckResult(nil, "", false, nil, nil, nil, 0, 0, 0)
+	require.Equal(t, 0.0, metricValue(res, "pg_prepared_xacts", nil))
+	require.Equal(t, 0.0, metricValue(res, "pg_oldest_prepared_xact_seconds", nil))
+}
+
+func TestActivity_MaxDatfrozenxidAge(t *testing.T) {
+	res := activityCheckResult(nil, "", false, nil, nil, nil, 0, 0, 123)
+	require.Equal(t, 123.0, metricValue(res, "pg_max_datfrozenxid_age", nil))
+}
+
+func TestActivity_ExistingMetricsUnchanged(t *testing.T) {
+	res := buildActivityResult([]activityRow{{State: strPtr("active"), WaitEventType: strPtr("CPU"), Count: 1}}, "10")
+	for _, name := range []string{"pg_backends", "pg_max_xact_age_seconds", "pg_max_idle_in_transaction_seconds", "pg_connections_used", "pg_connections_limit"} {
+		found := false
+		for _, m := range res.Metrics {
+			if m.Name == name {
+				found = true
+				break
+			}
+		}
+		require.True(t, found, name)
+	}
+}
+
 func strPtr(s string) *string { return &s }

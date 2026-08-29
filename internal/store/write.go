@@ -153,6 +153,15 @@ type ObjectFactRow struct {
 	FirstSeen, LastSeen, ChangedAt time.Time
 }
 
+// LockSnapshotRow contains the latest sampled lock tree for one instance.
+type LockSnapshotRow struct {
+	TenantID   string
+	InstanceID uuid.UUID
+	ClusterID  int64
+	TS         time.Time
+	Tree       []byte
+}
+
 func (r TableStatRow) args() []any {
 	return []any{r.TS, r.TenantID, r.ClusterID, r.InstanceID, r.Datname, r.Schemaname, r.Relname, r.SeqScan, r.SeqTupRead, r.IdxScan, r.IdxTupFetch, r.NTupIns, r.NTupUpd, r.NTupDel, r.NTupHotUpd, r.NLiveTup, r.NDeadTup, r.NModSinceAnalyze, r.LastVacuum, r.LastAutovacuum, r.LastAnalyze, r.LastAutoanalyze, r.AutovacuumCount, r.AutoanalyzeCount, r.Relpages, r.RelTuples, r.RelfrozenXIDAge, r.TotalBytes, r.TableBytes, r.ToastBytes}
 }
@@ -373,6 +382,20 @@ func WriteObjectFacts(ctx context.Context, tx pgx.Tx, rows []ObjectFactRow) erro
 		args = append(args, []any{r.TenantID, r.ClusterID, r.InstanceID, r.Datname, r.Kind, r.Key, labels, r.ValueText, r.ValueJSON, r.FirstSeen, r.LastSeen, r.ChangedAt})
 	}
 	return writeRows(ctx, tx, `INSERT INTO object_facts (tenant_id,cluster_id,instance_id,datname,kind,key,labels,value_text,value_json,first_seen,last_seen,changed_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (tenant_id,instance_id,datname,kind,key) DO UPDATE SET last_seen=EXCLUDED.last_seen,labels=EXCLUDED.labels,value_text=EXCLUDED.value_text,value_json=EXCLUDED.value_json,changed_at=CASE WHEN object_facts.value_text IS DISTINCT FROM EXCLUDED.value_text OR object_facts.value_json IS DISTINCT FROM EXCLUDED.value_json THEN EXCLUDED.last_seen ELSE object_facts.changed_at END`, args)
+}
+
+// WriteLockSnapshots keeps only the newest tree per instance and removes trees
+// older than the fifteen-minute freshness window for each touched instance.
+func WriteLockSnapshots(ctx context.Context, tx pgx.Tx, rows []LockSnapshotRow) error {
+	for _, r := range rows {
+		if _, err := tx.Exec(ctx, `DELETE FROM lock_snapshots WHERE tenant_id=$1 AND instance_id=$2 AND ts < $3::timestamptz - interval '15 minutes'`, r.TenantID, r.InstanceID, r.TS); err != nil {
+			return fmt.Errorf("prune lock snapshot: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO lock_snapshots (tenant_id,instance_id,cluster_id,ts,tree) VALUES ($1,$2,$3,$4,$5::jsonb) ON CONFLICT (tenant_id,instance_id) DO UPDATE SET cluster_id=EXCLUDED.cluster_id,ts=EXCLUDED.ts,tree=EXCLUDED.tree WHERE EXCLUDED.ts > lock_snapshots.ts`, r.TenantID, r.InstanceID, r.ClusterID, r.TS, r.Tree); err != nil {
+			return fmt.Errorf("write lock snapshot: %w", err)
+		}
+	}
+	return nil
 }
 
 // WriteASH writes ASH rows with ON CONFLICT DO NOTHING.

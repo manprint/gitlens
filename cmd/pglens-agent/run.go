@@ -420,11 +420,18 @@ func waitForTarget(ctx context.Context, mgr *agent.Manager) {
 func configureChecks(cfg *agent.Config) {
 	for _, c := range check.All() {
 		policy, ok := cfg.Checks[c.Name()]
-		if !ok || policy.TopN <= 0 {
+		if !ok {
 			continue
 		}
-		if configurable, ok := c.(check.TopNConfigurable); ok {
-			configurable.SetTopN(policy.TopN)
+		if policy.TopN > 0 {
+			if configurable, ok := c.(check.TopNConfigurable); ok {
+				configurable.SetTopN(policy.TopN)
+			}
+		}
+		if c.Name() == "activity" {
+			if configurable, ok := c.(interface{ SetByApplication(bool) }); ok {
+				configurable.SetByApplication(policy.ByApplication)
+			}
 		}
 	}
 }

@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -98,6 +99,34 @@ func TestPipeline_Process_WithRealDB(t *testing.T) {
 	require.Equal(t, 1, res.Rejected)
 	_ = iid
 	_ = cidDB
+}
+
+func TestINTLOCK004_LockSnapshotNewestWins(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	p := NewPipeline(pool, clock.NewFake(time.Now()))
+	iid := uuid.NewString()
+	cid := pgtype.ClusterID(70001).String()
+	oldTS := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	newTS := oldTS.Add(time.Minute)
+	push := func(ts time.Time, tree string) {
+		_, err := p.Process(context.Background(), wire.Envelope{ProtocolVersion: wire.ProtocolVersionCurrent, Instances: []wire.Instance{{InstanceID: iid, ClusterID: cid, Results: []wire.Result{{Check: "locks", TS: ts, Facts: []wire.Fact{{Kind: "lock_tree", Key: "current", ValueJSON: []byte(tree)}}}}}}})
+		require.NoError(t, err)
+	}
+	push(newTS, `{"nodes":[{"pid":2}]}`)
+	push(oldTS, `{"nodes":[{"pid":1}]}`)
+	var ts time.Time
+	var tree []byte
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT ts, tree FROM lock_snapshots WHERE instance_id=$1`, uuid.MustParse(iid)).Scan(&ts, &tree))
+	require.True(t, newTS.Equal(ts), "stored timestamp %s does not match newest timestamp %s", ts, newTS)
+	var got struct {
+		Nodes []struct {
+			PID int `json:"pid"`
+		} `json:"nodes"`
+	}
+	require.NoError(t, json.Unmarshal(tree, &got))
+	require.Len(t, got.Nodes, 1)
+	require.Equal(t, 2, got.Nodes[0].PID)
 }
 
 // INT-PIPE-003: a `stats_reset` change writes a `counter_reset_detected` event and no metric row for that interval;

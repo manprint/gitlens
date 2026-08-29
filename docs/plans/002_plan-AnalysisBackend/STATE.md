@@ -2,7 +2,7 @@
 
 > **READ THIS FILE FIRST at the start of every session, before any other plan
 > file. OPEN a unit in §1 before touching code; CLOSE it after the gates pass.**
-> **Last updated:** 2026-08-29 (phase 2 complete; phase 3 ready) by `agent:gpt5.6-luna` | **Session:** 7
+> **Last updated:** 2026-08-29 (phase 3 closed) by `agent:gpt5.6-luna` | **Session:** 8
 
 ## 0. Protocol
 
@@ -49,13 +49,13 @@ work — a phase that looks blocked is a signal to read §9, not to skip ahead.
 ## 1. Current unit
 
 - **Type:** sub-phase
-- **ID:** `3.1`
+- **ID:** `4.1`
 - **Status:** `none`
-- **Intent:** begin phase 3 contention implementation exactly as phase_04.md specifies.
-- **Phase:** 2 — Protocol v2: facts and typed storage ([phase_03.md](phase_03.md))
-- **Next action:** open sub-phase 3.1 in STATE §1 before editing any phase-3 file.
+- **Intent:** implement the `table_stats` check and its named integration coverage.
+- **Phase:** 3 — Contention: locks, activity, transactions ([phase_04.md](phase_04.md))
+- **Next action:** read `phase_05.md` §4.1, open it here, then implement only its planned scope.
 - **Assigned:** `agent:gpt5.6-luna`
-- **Repo state:** branch `main`, phase 1 committed at `f745eb9`; phase-2 implementation and all named acceptance tests are present; phase-close commit is next after the final gate matrix.
+- **Repo state:** branch `main`, phase 1 committed at `f745eb9`, phase 2 committed at `8a66327`, phase 3 committed at `11d0e61`; phase 4.1 is next.
 
 ## 2. Feature context (self-contained recap)
 
@@ -140,6 +140,14 @@ The authoritative gate commands are the Makefile targets. These are identical to
 | 20 | sub-phase | 2.5 | agent:gpt5.6-luna | Preserved v1 goldens and added independent v2 fact fixtures | `internal/wire/envelope_integration_test.go`, `internal/wire/envelope_golden_v2_test.go`, `internal/wire/testdata/payload_v2_pg15.json`, `internal/wire/testdata/payload_v2_pg18.json`, `STATE.md` | INT-GOLDEN-001/002 green | phase-2 close |
 | 21 | sub-phase | 2.6 | agent:gpt5.6-luna | Added check-local Fact result and agent conversion to validated wire facts with protocol v2 | `internal/check/check.go`, `internal/agent/scheduler.go`, `cmd/pglens-agent/run.go`, `internal/wire/envelope.go`, `STATE.md` | check/agent/wire tests and full L2 green | phase-2 close |
 | 22 | sub-phase | 2.7 | agent:gpt5.6-luna | Documented protocol compatibility and upgrade ordering | `README.md`, `phase_03.md`, `STATE.md` | README review and full gate matrix green | phase-2 close |
+| 23 | sub-phase | 3.1 | agent:gpt5.6-luna | Added the T0 locks check with bounded wait-event metrics, lock-tree fact, query truncation, and INT-LOCK-001/002 coverage | `internal/check/locks.go`, `internal/check/locks_test.go`, `internal/check/locks_integration_test.go`, `STATE.md` | locks unit tests and INT-LOCK-001/002 green on PG15/18 | phase-3 close |
+| 24 | sub-phase | 3.2 | agent:gpt5.6-luna | Added lock snapshot migration, newest-wins persistence, stale pruning, pipeline routing, and structural INT-LOCK-004 assertion | `internal/store/migrations/0008_locks.sql`, `internal/store/write.go`, `internal/store/write_test.go`, `internal/server/pipeline.go`, `internal/server/pipeline_integration_test.go`, `STATE.md` | focused INT-LOCK-004 and activity regression tests green | phase-3 close |
+| 25 | sub-phase | 3.3 | agent:gpt5.6-luna | Extended activity with connection ratios, bounded database/application breakdowns, state age, prepared transactions, and frozen-xid age | `internal/check/activity.go`, `internal/check/activity_test.go`, `internal/check/activity_integration_test.go`, `STATE.md` | activity/database unit tests, INTACT-001/002/004, and INTCHECK-015 green | phase-3 close |
+| 26 | sub-phase | 3.4 | agent:gpt5.6-luna | Added lifetime transaction rollback and buffer-hit ratio gauges with zero-denominator omission | `internal/check/database_stats.go`, `internal/check/database_stats_test.go`, `STATE.md` | database-stats unit matrix green | phase-3 close |
+| 27 | sub-phase | 3.5 | agent:gpt5.6-luna | Added contention API routes, staleness contract, lock/activity round-trip integration tests, and database companion response | `internal/server/api_locks.go`, `internal/server/api_locks_test.go`, `internal/server/api_locks_integration_test.go`, `internal/server/api.go`, `STATE.md` | API unit tests, INT-LOCK-005, and INTACT-003 green | phase-3 close |
+| 28 | sub-phase | 3.6 | agent:gpt5.6-luna | Added activity by-application configuration and enabled the locks check in the agent example/configuration path | `internal/agent/config.go`, `cmd/pglens-agent/run.go`, `deploy/agent.example.yaml`, `internal/agent/config_test.go`, `STATE.md` | config and locks registration tests green | phase-3 close |
+| 29 | sub-phase | 3.7 | agent:gpt5.6-luna | Completed the PostgreSQL version sweep with structural blocker assertions and stable no-contention metric-shape checks | `internal/check/locks_integration_test.go`, `internal/check/activity_integration_test.go`, `STATE.md` | INT-LOCK-001/003/006 and INTACT-004 green on PG15/18 | phase-3 close |
+| 30 | sub-phase | 3.8 | agent:gpt5.6-luna | Finalized contention documentation and corrected the v1 golden harness to ignore only additive phase-3 ratio metrics while preserving frozen fixtures; synchronized blocked-session cleanup before connection release | `README.md`, `internal/wire/envelope_integration_test.go`, `internal/check/locks_integration_test.go`, `STATE.md`, `phase_04.md` | fmt-check, lint, build, unit/race, coverage 75.1%, L2 green; INT-GOLDEN-001 and lock race sweep green | `11d0e61` |
 
 ## 5. Files touched
 
@@ -195,6 +203,34 @@ the units that touched it, so a later audit can attribute every diff.
 | `internal/agent/scheduler.go` | 2.6 | Fact result propagation |
 | `cmd/pglens-agent/run.go` | 2.6 | Fact conversion and validation |
 | `internal/wire/envelope.go` | 2.1, 2.6 | protocol constants and Fact transport |
+| `internal/check/locks.go` | 3.1 | lock contention metrics and lock-tree fact |
+| `internal/check/locks_test.go` | 3.1 | locks unit coverage |
+| `internal/check/locks_integration_test.go` | 3.1 | INT-LOCK-001/002 |
+| `internal/check/locks_integration_test.go` | 3.7–3.8 | version sweep and deterministic blocked-session cleanup |
+| `internal/check/activity_integration_test.go` | 3.3, 3.7 | activity integration and version sweep |
+| `internal/check/locks.go` | 3.1 | lock contention metrics and lock-tree fact |
+| `internal/check/locks_test.go` | 3.1 | locks unit coverage |
+| `internal/check/activity.go` | 3.3 | extended activity metrics |
+| `internal/check/activity_test.go` | 3.3 | activity unit coverage |
+| `internal/check/database_stats.go` | 3.4 | ratio gauges |
+| `internal/check/database_stats_test.go` | 3.4 | ratio tests |
+| `internal/store/migrations/0008_locks.sql` | 3.2 | lock snapshot schema |
+| `internal/store/write.go` | 2.3, 3.2 | typed writers and lock snapshots |
+| `internal/store/write_test.go` | 2.3, 3.2 | writer tests |
+| `internal/server/pipeline.go` | 2.4, 3.2 | fact and lock snapshot routing |
+| `internal/server/api.go` | 3.5 | contention API registration |
+| `internal/server/api_locks.go` | 3.5 | lock/activity API |
+| `internal/server/api_locks_test.go` | 3.5 | API contract tests |
+| `internal/server/api_locks_integration_test.go` | 3.5 | INT-LOCK-005 and INTACT-003 |
+| `internal/server/inventory_integration_test.go` | 2.2–2.4 | shared fixture cleanup |
+| `internal/server/pipeline_integration_test.go` | 3.2 | INT-LOCK-004 |
+| `internal/agent/config.go` | 3.6 | activity/locks configuration |
+| `internal/agent/config_test.go` | 3.6 | configuration tests |
+| `cmd/pglens-agent/run.go` | 2.6, 3.6 | check registration/config wiring |
+| `deploy/agent.example.yaml` | 3.6 | shipped example configuration |
+| `internal/wire/envelope_integration_test.go` | 2.5, 3.8 | v1 golden compatibility harness |
+| `README.md` | 0.7, 2.7, 3.8 | user-facing feature and compatibility documentation |
+| `phase_04.md` | 3.8 | phase execution record |
 | `internal/wire/envelope_test.go` | 2.1 | Fact and v1/v2 round-trip tests |
 | `internal/server/ingest.go` | 2.1 | protocol range acceptance |
 | `internal/server/ingest_test.go` | 2.1 | future protocol rejection test |
@@ -204,7 +240,7 @@ the units that touched it, so a later audit can attribute every diff.
 
 ## 6. In-flight work
 
-`Phase 2 is complete. Migration 0007, typed row/writer code, pipeline typed routing, v2 golden fixtures, check/agent Fact conversion, README compatibility text, and named INT-FACT-001..006 integration tests are present. The full technical gate matrix is green, including L2 and coverage 75.1%. Preserve v1 golden fixtures; INT-GOLDEN-001 explicitly constructs protocol v1 and passes, while INT-GOLDEN-002 validates separate v2 fixtures. The next unit is 3.1 and is not yet opened.`
+`none — tree consistent; phase 3.8 README, golden-harness compatibility correction, and deterministic lock-probe cleanup are complete. Full phase gates are green and no command is active.`
 
 ## 7. Verification state
 
@@ -219,14 +255,28 @@ the units that touched it, so a later audit can attribute every diff.
 | coverage | `make coverage-gate` | FAIL — global 74.9%, threshold 75% | 2026-08-29 |
 | coverage-final | `make coverage-gate` | PASS — global 75.1%, threshold 75% | 2026-08-29 |
 | integration-final | `timeout 120s make test-integration` | PASS | 2026-08-29 |
+| phase3-focused-lock-activity | `timeout --signal=TERM 300s go test -tags=integration ./internal/server ./internal/check -run 'TestINTLOCK004\|TestINTACT00[124]' -count=1` | FAIL — INT-LOCK-004 timestamp assertion was corrected, then JSON assertion failed on whitespace (`"pid":2` vs `"pid": 2`); INTACT-001/002/004 PASS | 2026-08-29 |
 | integration-alert-store-api | `go test -tags=integration -run 'TestINTALERT003_Through007_AlertStorePersistence\|TestAlertAPI_INT_ALERTAPI_' ./internal/alert ./internal/server` | PASS | 2026-08-29 |
 | phase1-post-modification-coverage | `make coverage-gate` | FAIL — global 72.7% (3343/4598), threshold 75%; L2 not started | 2026-08-29 |
 | phase1-focused-tests-coverage | `make coverage-gate` | FAIL — global 74.5% (3426/4598), threshold 75%; focused package tests passed; no phase commit | 2026-08-29 |
 | phase1-final-matrix | `make fmt-check && make lint && make build && make test && go test -race ./internal/alert/... && timeout --signal=TERM 180s make test-integration && make coverage-gate` | PASS — all gates green; global coverage 75.0% (3449/4598) | 2026-08-29 |
 | phase2-focused-coverage | `make coverage-gate` | PASS — global 75.1% (3574/4762) | 2026-08-29 |
 | phase2-golden-regression | `go test ./internal/wire && timeout --signal=TERM 120s go test -tags=integration -run TestINTGOLDEN001_NormalizedEnvelopeStructure ./internal/wire -count=1` | PASS — v1 fixtures unchanged and v2 golden fixture test green | 2026-08-29 |
-| phase2-gate-matrix | `make fmt-check && make lint && make build && make test && go test -race ./internal/alert/... && timeout --signal=TERM 180s make test-integration` | PASS — all packages and L2 integration green | 2026-08-29 |
+| phase2-gate-matrix | `make fmt-check && make lint && make build && make test && go test -race ./internal/alert/... && timeout --signal=TERM 180s make test-integration` | PASS — all packages and L2 integration green; `make test-integration` exited `0` | 2026-08-29 |
 | phase2-fact-acceptance | `timeout --signal=TERM 180s go test -tags=integration -run 'TestINTFACT00[1-6]' ./internal/server -count=1` | PASS — INT-FACT-001..006 green | 2026-08-29 |
+| phase3.1-unit | `go test ./internal/check -run 'TestLocks_' -count=1` | PASS | 2026-08-29 |
+| phase3.1-integration | `timeout --signal=TERM 240s go test -tags=integration ./internal/check -run 'TestINTLOCK00[12]' -count=1` | PASS — INT-LOCK-001/002 green on PG15 and PG18 | 2026-08-29 |
+| phase3.2-focused-lock-activity | `timeout --signal=TERM 300s go test -tags=integration ./internal/server ./internal/check -run 'TestINTLOCK004\|TestINTACT00[124]' -count=1` | PASS — INT-LOCK-004 and INTACT-001/002/004 green | 2026-08-29 |
+| phase3.3-activity | `go test ./internal/check -run 'TestActivity_|TestDatabaseStats_' -count=1 && timeout --signal=TERM 300s go test -tags=integration ./internal/check -run 'TestINTACT00[124]|TestINTCHECK015' -count=1` | PASS — activity/database unit tests, INTACT-001/002/004, and INTCHECK-015 green | 2026-08-29 |
+| phase3.5-api | `go test ./internal/server -run 'TestLocksAPI_|TestActivityAPI_|TestDatabasesAPI_' -count=1 && timeout --signal=TERM 300s go test -tags=integration ./internal/server -run 'TestINTLOCK005|TestINTACT003' -count=1` | PASS — API contract tests, INT-LOCK-005, and INTACT-003 green | 2026-08-29 |
+| phase3.6-config | `go test ./internal/agent -run 'TestConfig_|Test.*Check|Test.*Command' -count=1 && go test ./internal/check -run 'TestLocks_' -count=1` | PASS — config defaults/example and locks registration tests green | 2026-08-29 |
+| phase3.7-sweep-attempt | `timeout --signal=TERM 360s go test -tags=integration ./internal/check -run 'TestINTLOCK00[136]' -count=1` | INTERRUPTED by user after startup; no test result was produced and no command remains active | 2026-08-29 |
+| phase3.7-sweep | `timeout --signal=TERM 360s go test -tags=integration ./internal/check -run 'TestINTLOCK00[136]|TestINTACT004' -count=1` | PASS — INT-LOCK-001/003/006 and INTACT-004 green on PG15/18 | 2026-08-29 |
+| phase3-coverage | `timeout --signal=TERM 300s make coverage-gate` | PASS — global 75.1% (3720/4956), threshold 75% | 2026-08-29 |
+| phase3-l2 | `timeout --signal=TERM 900s make test-integration` | FAIL — INT-GOLDEN-001 v1 normalized envelope mismatch after additive phase-3 ratio metrics; run also emitted race warnings while blocked-session cleanup raced with the probe goroutine | 2026-08-29 |
+| phase3-focused-rerun | `timeout --signal=TERM 300s go test -tags=integration -race ./internal/check -run 'TestINTLOCK00[13]' -count=1 && timeout --signal=TERM 300s go test -tags=integration ./internal/wire -run 'TestINTGOLDEN001_NormalizedEnvelopeStructure' -count=1` | INTERRUPTED by user after 0.4s; no result produced and no command remains active | 2026-08-29 |
+| phase3-focused-final | `timeout --signal=TERM 300s go test -tags=integration -race ./internal/check -run 'TestINTLOCK00[13]' -count=1 && timeout --signal=TERM 300s go test -tags=integration ./internal/wire -run 'TestINTGOLDEN001_NormalizedEnvelopeStructure' -count=1` | PASS — deterministic cleanup has no race report and INT-GOLDEN-001 passes with v1 fixtures unchanged | 2026-08-29 |
+| phase3-final-matrix | `make fmt-check && make lint && make build && timeout 600s make test && make coverage-gate && timeout 1200s make test-integration` | PASS — all gates green; coverage 75.1% (3720/4956); L2 all integration packages PASS | 2026-08-29 |
 
 ## 8. Runtime deviations from the plan
 
@@ -247,6 +297,9 @@ the units that touched it, so a later audit can attribute every diff.
 | D-013 | 2.1–2.5 | Keep legacy v1 goldens unchanged while adding protocol-v2 goldens | The current protocol changed the existing integration harness to v2 and exposed a fixture mismatch; the harness now pins INT-GOLDEN-001 to `ProtocolVersionMin`, while separate v2 fixtures and INT-GOLDEN-002 validate facts | Backward compatibility requires two explicit golden contracts; no v1 fixture was regenerated |
 | D-014 | 2.2–2.7 | Close each sub-phase only after its named integration IDs exist and pass | Technical gates pass, but INT-FACT-001..006 are not yet implemented as named integration tests, so phase closure is held | Done criterion and STATE test board take precedence over aggregate L2 success |
 | D-015 | 2.2–2.7 | Complete the held phase only after named fact acceptance tests exist | Added `facts_integration_test.go` with INT-FACT-001..006; focused and full L2 runs pass | The earlier implementation had aggregate L2 coverage but lacked the plan's referenceable IDs |
+| D-016 | 3.1 | Lock age extraction may be scanned directly as float64 | Wrapped nullable `xact_start` and `state_change` extracts with `COALESCE(..., 0)` | Real PG15/18 idle sessions return NULL timestamps; INT-LOCK-002 initially failed until the query was corrected |
+| D-017 | 3.8 | Keep INT-GOLDEN-001 as the frozen v1 compatibility check | The harness filters only the two additive phase-3 ratio metrics for v1; fixture files remain byte-for-byte unchanged and v2 golden coverage remains separate | The planned database-stats extension must not rewrite the legacy v1 contract |
+| D-018 | 3.8 | Release blocked-session test connections after the probe finishes | Cleanup rolls back the holder, waits on the probe completion channel, then releases blocked and holder connections | Prevents race warnings and pool teardown overlap while preserving the real lock assertion |
 
 ## 9. Blockers and open questions
 
@@ -283,8 +336,8 @@ disagree with §1 and §4.
 |-------|------|--------|-------|
 | 0 — Alert data model and pure logic | phase_01.md | `DONE` | 7/7 sub-phases closed; primary `agent:gpt5.6-luna`; commit `ab5394f` |
 | 1 — Alert engine, notifiers, alert API | phase_02.md | `DONE` | 8/8 sub-phases closed; primary `agent:gpt5.6-luna`; phase commit pending |
-| 2 — Protocol v2: facts and typed storage | phase_03.md | `DONE` | 7/7 sub-phases closed; INT-FACT-001..006 and INT-GOLDEN-002 green; phase-close commit pending; primary `agent:gpt5.6-luna` |
-| 3 — Contention: locks, activity, transactions | phase_04.md | `TODO` | 0/8 sub-phases closed; primary `agent:gpt5.6-luna` |
+| 2 — Protocol v2: facts and typed storage | phase_03.md | `DONE` | 7/7 sub-phases closed; INT-FACT-001..006 and INT-GOLDEN-002 green; commit `8a66327`; primary `agent:gpt5.6-luna` |
+| 3 — Contention: locks, activity, transactions | phase_04.md | `DONE` | 8/8 sub-phases closed; INT-LOCK-001..006 and INT-ACT-001..004 green; phase gates green; commit `11d0e61`; primary `agent:gpt5.6-luna` |
 | 4 — Space and maintenance: tables, indexes, vacuum, bloat | phase_05.md | `TODO` | 0/8 sub-phases closed; primary `agent:gpt5.6-luna` |
 | 5 — Configuration and durability: settings, WAL, checkpointer, I/O, archiver | phase_06.md | `TODO` | 0/9 sub-phases closed; primary `agent:gpt5.6-luna` |
 | 6 — Host and container metrics | phase_07.md | `TODO` | 0/6 sub-phases closed; primary `agent:gpt5.6-luna` |
@@ -296,7 +349,7 @@ disagree with §1 and §4.
 Status values: `TODO` · `IN_PROGRESS` · `DONE` · `SKIPPED` · `BLOCKED`
 A `SKIPPED` sub-phase or phase keeps its row and carries the reason.
 
-**2 of 11 phases `DONE`. Plan at 18% — phase 3 ready.**
+**3 of 11 phases `DONE`. Plan at 27% — phase 4 is next.**
 
 ### Tests
 
@@ -309,10 +362,10 @@ throughout.
 
 | ID | Type | Phase | Status | Notes |
 |----|------|-------|--------|-------|
-| INT-ACT-001 | integration | 3 | `TODO` | phase 3 § 3.3 — Extend the `activity` check |
-| INT-ACT-002 | integration | 3 | `TODO` | phase 3 § 3.3 — Extend the `activity` check |
-| INT-ACT-003 | integration | 3 | `TODO` | phase 3 § 3.5 — Contention API |
-| INT-ACT-004 | integration | 3 | `TODO` | phase 3 § 3.7 — Contention integration test sweep |
+| INT-ACT-001 | integration | 3 | `PASS` | phase 3 § 3.3 — Extend the `activity` check |
+| INT-ACT-002 | integration | 3 | `PASS` | phase 3 § 3.3 — Extend the `activity` check |
+| INT-ACT-003 | integration | 3 | `PASS` | phase 3 § 3.5 — Contention API |
+| INT-ACT-004 | integration | 3 | `PASS` | phase 3 § 3.7 — Contention integration test sweep |
 | INT-ADV-001 | integration | 7 | `TODO` | phase 7 § 7.1 — Migration `0009_findings.sql` |
 | INT-ADV-002 | integration | 7 | `TODO` | phase 7 § 7.3 — The snapshot |
 | INT-ADV-003 | integration | 7 | `TODO` | phase 7 § 7.3 — The snapshot |
@@ -379,12 +432,12 @@ throughout.
 | INT-INGEST-002 | integration | 0 | `EXTEND` | exists from plan 001 — extended by phase 0 § 0.1 (Migration `0006_alerts.sql`) |
 | INT-IO-001 | integration | 5 | `TODO` | phase 5 § 5.5 — The `io` check |
 | INT-IO-002 | integration | 5 | `TODO` | phase 5 § 5.5 — The `io` check |
-| INT-LOCK-001 | integration | 3 | `TODO` | phase 3 § 3.1 — The `locks` check |
-| INT-LOCK-002 | integration | 3 | `TODO` | phase 3 § 3.1 — The `locks` check |
-| INT-LOCK-003 | integration | 3 | `TODO` | phase 3 § 3.1 — The `locks` check |
-| INT-LOCK-004 | integration | 3 | `TODO` | phase 3 § 3.2 — Lock snapshot storage |
-| INT-LOCK-005 | integration | 3 | `TODO` | phase 3 § 3.5 — Contention API |
-| INT-LOCK-006 | integration | 3 | `TODO` | phase 3 § 3.7 — Contention integration test sweep |
+| INT-LOCK-001 | integration | 3 | `PASS` | phase 3 § 3.1 — The `locks` check |
+| INT-LOCK-002 | integration | 3 | `PASS` | phase 3 § 3.1 — The `locks` check |
+| INT-LOCK-003 | integration | 3 | `PASS` | phase 3 § 3.1 — The `locks` check |
+| INT-LOCK-004 | integration | 3 | `PASS` | phase 3 § 3.2 — Lock snapshot storage |
+| INT-LOCK-005 | integration | 3 | `PASS` | phase 3 § 3.5 — Contention API |
+| INT-LOCK-006 | integration | 3 | `PASS` | phase 3 § 3.7 — Contention integration test sweep |
 | INT-PIPE-003 | integration | 2 | `EXTEND` | exists from plan 001 — extended by phase 2 § 2.4 (Pipeline routing for facts and relation metrics) |
 | INT-PLAN-001 | integration | 8 | `TODO` | phase 8 § 8.9 — Plan storage and history API |
 | INT-PLAN-002 | integration | 8 | `TODO` | phase 8 § 8.9 — Plan storage and history API |
@@ -441,7 +494,7 @@ other docs get their own rows.
 | README.md | 0 | `DONE` | verified and corrected obsolete unshipped claim in 0.7 |
 | README.md | 1 | `TODO` | closing sub-phase of phase_02.md |
 | README.md | 2 | `DONE` | protocol 1/2 compatibility, upgrade ordering, and supported range documented in 2.7 |
-| README.md | 3 | `TODO` | closing sub-phase of phase_04.md |
+| README.md | 3 | `DONE` | locks/activity configuration, APIs, sampling, truncation, and deadlock limitations documented in 3.8 |
 | README.md | 4 | `TODO` | closing sub-phase of phase_05.md |
 | README.md | 5 | `TODO` | closing sub-phase of phase_06.md |
 | README.md | 6 | `TODO` | closing sub-phase of phase_07.md |

@@ -84,6 +84,12 @@ func buildDatabaseStatsResult(rows []dbStatRow) Result {
 		metrics = append(metrics, pgtype.Metric{Name: "pg_temp_bytes_total", Value: float64(r.TempBytes), Kind: pgtype.KindCounter, Labels: labels})
 		metrics = append(metrics, pgtype.Metric{Name: "pg_conflicts_total", Value: float64(r.Conflicts), Kind: pgtype.KindCounter, Labels: labels})
 		metrics = append(metrics, pgtype.Metric{Name: "pg_numbackends", Value: float64(r.Numbackends), Kind: pgtype.KindGauge, Labels: labels})
+		if total := r.XactCommit + r.XactRollback; total > 0 {
+			metrics = append(metrics, pgtype.Metric{Name: "pg_xact_rollback_ratio", Value: float64(r.XactRollback) / float64(total), Kind: pgtype.KindGauge, Labels: labels})
+		}
+		if total := r.BlksRead + r.BlksHit; total > 0 {
+			metrics = append(metrics, pgtype.Metric{Name: "pg_blks_hit_ratio", Value: float64(r.BlksHit) / float64(total), Kind: pgtype.KindGauge, Labels: labels})
+		}
 		if r.StatsReset != nil {
 			if maxReset == nil || r.StatsReset.After(*maxReset) {
 				maxReset = r.StatsReset

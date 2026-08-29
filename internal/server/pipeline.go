@@ -120,6 +120,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	var tableRows []store.TableStatRow
 	var indexRows []store.IndexStatRow
 	var bloatRows []store.BloatRow
+	var lockSnapshotRows []store.LockSnapshotRow
 
 	// Resolves a wire.Edge.To (an upstream's addr, e.g. "pg-primary") to an
 	// instance_id. Tries the current envelope first (fast path, no query).
@@ -179,6 +180,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		replMap := make(map[replicationKey]*store.ReplicationRow)
 		var instEvents []store.EventRow
 		var instFacts []store.ObjectFactRow
+		var instLockSnapshot *store.LockSnapshotRow
 		tableMap := make(map[tableStatKey]*store.TableStatRow)
 		indexMap := make(map[indexStatKey]*store.IndexStatRow)
 		bloatMap := make(map[bloatKey]*store.BloatRow)
@@ -267,8 +269,12 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 					IncIngestRejected("invalid_fact")
 					continue
 				}
-				if f.Kind == "lock_tree" || f.Kind == "plan" {
-					// phase 3 / phase 8: these facts are routed to dedicated tables.
+				if f.Kind == "lock_tree" {
+					instLockSnapshot = &store.LockSnapshotRow{TenantID: tenantID, InstanceID: instUUID, ClusterID: cidDB, TS: r.TS, Tree: append([]byte(nil), f.ValueJSON...)}
+					continue
+				}
+				if f.Kind == "plan" {
+					// phase 8: plans are routed to their dedicated history table.
 					continue
 				}
 				var text *string
@@ -524,6 +530,9 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		queryTextRows = append(queryTextRows, instQueryTexts...)
 		eventRows = append(eventRows, instEvents...)
 		objectFactRows = append(objectFactRows, instFacts...)
+		if instLockSnapshot != nil {
+			lockSnapshotRows = append(lockSnapshotRows, *instLockSnapshot)
+		}
 		res.Accepted++
 	}
 
@@ -547,6 +556,9 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	}
 	if err := store.WriteObjectFacts(ctx, tx, objectFactRows); err != nil {
 		return nil, fmt.Errorf("write object facts: %w", err)
+	}
+	if err := store.WriteLockSnapshots(ctx, tx, lockSnapshotRows); err != nil {
+		return nil, fmt.Errorf("write lock snapshots: %w", err)
 	}
 	if err := store.WriteTableStats(ctx, tx, tableRows); err != nil {
 		return nil, fmt.Errorf("write table stats: %w", err)

@@ -433,3 +433,16 @@ prepared-transaction gauges. `INT-LOCK-001` to `INT-LOCK-006` and `INT-ACT-001`
 to `INT-ACT-004` are green on every supported PostgreSQL version. README.md
 reflects this phase's shipped behavior, and `STATE.md` §11 shows phase 3 `DONE`
 with every sub-phase closed.
+
+## Execution record
+
+- **Assignment:** `agent:gpt5.6-luna`
+- **Status:** complete
+- **Result:** 3.1–3.8 completed in order. INT-LOCK-001..006 and INT-ACT-001..004
+  pass across the supported PostgreSQL matrix. INT-GOLDEN-001 remains an active
+  v1 compatibility check with its fixtures unchanged; the harness excludes only
+  the additive phase-3 ratio metrics, while v2 golden coverage remains separate.
+  Blocked-session cleanup waits deterministically for the probe goroutine before
+  releasing pooled connections.
+- **Final gates:** `make fmt-check`, `make lint`, `make build`, `make test`,
+  `make coverage-gate` (75.1%, 3720/4956), and `make test-integration` all pass.
