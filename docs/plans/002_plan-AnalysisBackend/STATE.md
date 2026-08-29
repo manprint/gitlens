@@ -2,7 +2,7 @@
 
 > **READ THIS FILE FIRST at the start of every session, before any other plan
 > file. OPEN a unit in §1 before touching code; CLOSE it after the gates pass.**
-> **Last updated:** 2026-08-29 (phase 9.2 closed) by `agent:gpt5.6-luna` | **Session:** 23
+> **Last updated:** 2026-08-30 (phase 9.3 closed) by `agent:gpt5.6-luna` | **Session:** 24
 
 ## 0. Protocol
 
@@ -49,13 +49,13 @@ work — a phase that looks blocked is a signal to read §9, not to skip ahead.
 ## 1. Current unit
 
 - **Type:** sub-phase
-- **ID:** `9.3`
-- **Status:** `OPEN`
-- **Intent:** prove real lock contention and deadlock detection through the L3 API and PostgreSQL.
+- **ID:** `9.4`
+- **Status:** `none`
+- **Intent:** prove vacuum, bloat, index usage and relation cardinality through the L3 API and PostgreSQL.
 - **Phase:** 9 — L3 end-to-end scenarios ([phase_10.md](phase_10.md))
-- **Next action:** read phase_10.md §9.3, implement contention and deadlock scenarios, then run the 9.3 gates.
+- **Next action:** read phase_10.md §9.4, implement the maintenance scenario, then run the 9.4 gates.
 - **Assigned:** `agent:gpt5.6-luna`
-- **Repo state:** branch `main`, phase 7 close is `8891d6b`; phase 8 close is `78dbf94`.
+- **Repo state:** branch `main`, phase 9.3 close is recorded in the ledger below; next unit is 9.4.
 
 ## 2. Feature context (self-contained recap)
 
@@ -196,6 +196,7 @@ The authoritative gate commands are the Makefile targets. These are identical to
 | 76 | sub-phase | 8.11 | agent:gpt5.6-luna | Documented on-demand operations, configuration, curl usage, security boundaries and limitations; closed phase 8 after final gates | `README.md`, `internal/command/gate_test.go`, `internal/server/api_commands_test.go`, `STATE.md` | complete phase-8 matrix, SYS-PERM-001, global coverage 75.0%, command coverage 100.0% PASS | `78dbf94` |
 | 77 | sub-phase | 9.1 | agent:gpt5.6-luna | Added a real three-node cascading PostgreSQL stack, agent fixture and SYS-REPL-006 API scenario; tightened instance staleness to the required 60-second bound | `test/compose/topo-cascading.yml`, `test/compose/agent-container-cascading.yml`, `test/fixtures/agent-cascading.yaml`, `test/fixtures/sql/cascading_standby_init.sh`, `test/e2e/scenarios/topo-cascading.yml`, `test/scenario/topo_cascading.go`, `test/e2e/topo_cascading_test.go`, `test/harness/harness.go`, `internal/server/api.go`, `internal/server/api_test.go`, `STATE.md` | compile/vet, Docker images and three consecutive SYS-REPL-006 L3 runs PASS | phase-9 close |
 | 78 | sub-phase | 9.2 | agent:gpt5.6-luna | Added the containerized mock receiver, two-replica alerting stack and SYS-ALERT-001..004 L3 scenarios; persisted evaluator state across leader failover so an existing alert episode cannot be re-fired | `.dockerignore`, `test/e2e/mockreceiver/main.go`, `test/e2e/mockreceiver/Dockerfile`, `test/e2e/scenarios/alerting.yml`, `test/e2e/alerting_test.go`, `test/compose/agent-container-alerting.yml`, `test/compose/scenario-alerting.yml`, `test/scenario/alerting.go`, `internal/alert/eval.go`, `internal/alert/engine.go`, `internal/alert/source_sql.go`, `internal/server/api_alerts.go`, `test/harness/api.go`, `test/harness/harness.go`, `test/harness/toxic.go`, `test/scenario/registry.go`, `internal/alert/engine_test.go`, `STATE.md` | fmt/lint/build/vet, rebuilt Docker images, and three consecutive four-scenario SYS-ALERT L3 runs PASS | phase-9.2 close |
+| 79 | sub-phase | 9.3 | agent:gpt5.6-luna | Added real lock-contention and deadlock scenarios with deterministic cleanup, empty lock-tree snapshots, database label propagation and event-aware deadlock alert sourcing | `internal/alert/source_sql.go`, `internal/check/locks.go`, `internal/check/locks_test.go`, `internal/server/pipeline.go`, `test/e2e/contention_test.go`, `test/e2e/scenarios/contention.yml`, `STATE.md` | fmt/lint/build/unit/vet, rebuilt Docker images, and three consecutive combined SYS-LOCK-001/SYS-DEADLOCK-001 L3 runs PASS | phase-9.3 close |
 
 ## 5. Files touched
 
@@ -433,10 +434,16 @@ the units that touched it, so a later audit can attribute every diff.
 | `test/harness/toxic.go` | 9.2 | scaled-service port discovery |
 | `test/scenario/registry.go` | 9.2 | replica APIs and alerting environment hooks |
 | `internal/alert/engine_test.go` | 9.2 | persisted evaluator restoration regression test |
+| `internal/alert/source_sql.go` | 9.3 | positive deadlock-counter event selection within the alert lookback |
+| `internal/check/locks.go` | 9.3 | empty lock-tree fact after contention disappears |
+| `internal/check/locks_test.go` | 9.3 | empty lock-tree persistence regression test |
+| `internal/server/pipeline.go` | 9.3 | database label fallback for generic metric rows |
+| `test/e2e/contention_test.go` | 9.3 | SYS-LOCK-001 and SYS-DEADLOCK-001 L3 scenarios |
+| `test/e2e/scenarios/contention.yml` | 9.3 | contention scenario metadata |
 
 ## 6. In-flight work
 
-`none — 9.2 is closed. SYS-ALERT-001..004 passed three consecutive full alerting-suite runs on the final image; next unit is 9.3.`
+`none — 9.3 is closed. SYS-LOCK-001 and SYS-DEADLOCK-001 passed three consecutive combined L3 runs on the final image; next unit is 9.4.`
 
 ## 7. Verification state
 
@@ -525,6 +532,12 @@ the units that touched it, so a later audit can attribute every diff.
 | phase9.2-focused-run-1 | `go test -tags=e2e ./test/e2e -run 'TestFull_Alert(Episode|Retry|LeaderFailover|Silence)$' -count=1 -v` | PASS — all four SYS-ALERT scenarios in 420.4s | 2026-08-29 |
 | phase9.2-focused-run-2 | `go test -tags=e2e ./test/e2e -run 'TestFull_Alert(Episode|Retry|LeaderFailover|Silence)$' -count=1 -v` | PASS — all four SYS-ALERT scenarios in 422.1s | 2026-08-29 |
 | phase9.2-focused-run-3 | `go test -tags=e2e ./test/e2e -run 'TestFull_Alert(Episode|Retry|LeaderFailover|Silence)$' -count=1 -v` | PASS — all four SYS-ALERT scenarios in 422.2s | 2026-08-29 |
+| phase9.3-unit | `go test ./internal/alert ./internal/check ./internal/server` | PASS — alert-source, lock-check and metric-pipeline regression tests | 2026-08-30 |
+| phase9.3-static | `make fmt-check && make lint && make build && go vet -tags=e2e ./test/e2e/...` | PASS — all static gates green | 2026-08-30 |
+| phase9.3-images | `make build-images` plus no-cache server rebuild | PASS — final server image contains the contention/deadlock fixes | 2026-08-30 |
+| phase9.3-focused-run-1 | `go test -tags=e2e -timeout=8m -count=1 -v ./test/e2e/... -run '^(TestFull_LockContention|TestFull_Deadlock)$'` | PASS — SYS-LOCK-001 54.88s; SYS-DEADLOCK-001 77.04s; total 131.927s | 2026-08-30 |
+| phase9.3-focused-run-2 | `go test -tags=e2e -timeout=8m -count=1 -v ./test/e2e/... -run '^(TestFull_LockContention|TestFull_Deadlock)$'` | PASS — SYS-LOCK-001 59.46s; SYS-DEADLOCK-001 77.62s; total 137.089s | 2026-08-30 |
+| phase9.3-focused-run-3 | `go test -tags=e2e -timeout=8m -count=1 -v ./test/e2e/... -run '^(TestFull_LockContention|TestFull_Deadlock)$'` | PASS — SYS-LOCK-001 59.98s; SYS-DEADLOCK-001 77.53s; total 137.513s | 2026-08-30 |
 
 ## 8. Runtime deviations from the plan
 
@@ -563,6 +576,11 @@ the units that touched it, so a later audit can attribute every diff.
 | D-030 | 9.1 | Plan names a standalone `test/e2e/run.go` plus YAML-driven runner and a `/api/v1/topology` endpoint | Repository reality uses the registered `test/scenario` harness and cluster-scoped `/api/v1/clusters/{id}/topology`; added the plan YAML artifact and exercised the same semantics through the existing harness/API contract | Preserved the existing E2E architecture; the test proves exactly two chain edges, role/cluster identity, and sticky B→A edge after A stops |
 | D-031 | 9.1 | Cascading parent must be reported stale within 60 seconds | Existing API threshold was 90 seconds; changed the production staleness contract and its unit test to an inclusive 60-second bound | Required by phase_10.md §9.1; all three focused L3 runs passed |
 | D-032 | 9.2 | Leader failover must preserve alert deduplication | The evaluator was process-local, so a new leader could derive a new `StartedAt`; restored active persisted alerts when the new engine first acquired leadership and added a regression test | Required by phase_10.md §9.2 SYS-ALERT-003; three final alerting-suite runs passed |
+| D-033 | 9.3 | Plan names `/api/v1/contention` and a standalone runner | Repository reality exposes the existing cluster-scoped `/api/v1/locks` contract through the registered `test/scenario` harness; the scenario metadata remains in `test/e2e/scenarios/contention.yml` | Preserved the established E2E architecture while proving the specified lock semantics |
+| D-034 | 9.3 | A released contention episode must disappear from the lock snapshot | The lock check previously skipped persistence when no sessions were blocked, leaving a stale typed fact; it now emits an empty `lock_tree` fact and has a regression test | Required for SYS-LOCK-001 release verification; three combined L3 runs passed |
+| D-035 | 9.3 | Database-stat metrics carry their database only in labels | The pipeline now falls back from the result database field to the `database` label when persisting generic metric rows | Required for database-scoped SYS-DEADLOCK-001 alert assertions; no metric names or label contracts changed |
+| D-036 | 9.3 | A positive deadlock rate can be overwritten by a later zero sample before alert evaluation | The SQL alert source selects positive `pg_deadlocks_total` observations in the lookback window instead of only the latest sample | Preserves the event-like counter pulse for the planned deadlock alert; three combined L3 runs passed |
+| D-037 | 9.3 | Lock cleanup context was too short for the contention polling duration | Extended only the test cleanup context from 10 seconds to 2 minutes so the holder release is guaranteed after a long successful poll | Test-only reliability correction; no production timeout changed |
 
 Phase-6 healthcheck blocker resolved: the agent health server is initialized
 before target connection retries; the subsequent `SYS-HARNESS-001` smoke passed
@@ -621,7 +639,7 @@ disagree with §1 and §4.
 | 6 — Host and container metrics | phase_07.md | `DONE` | 6/6 sub-phases closed; INT-HOST-001..005 and SYS-HARNESS-001 focused validation green; coverage 75.1%; phase commit `436ac99`; primary `agent:gpt5.6-luna` |
 | 7 — Advisor engine and rule packs | phase_08.md | `DONE` | 10/10 sub-phases closed; INT-ADV-001..008 green; advisor coverage 88.6%; global coverage 75.2%; phase commit `8891d6b` |
 | 8 — Command channel and query plans | phase_09.md | `DONE` | 11/11 sub-phases closed; INT-CMD-001..011, INT-PLAN-001/002 and SYS-PERM-001 green; coverage 75.0%, `internal/command` 100.0%; primary `agent:gpt5.6-luna`; phase commit `78dbf94` |
-| 9 — L3 end-to-end scenarios | phase_10.md | `TODO` | 0/8 sub-phases closed; primary `agent:gpt5.6-luna` |
+| 9 — L3 end-to-end scenarios | phase_10.md | `IN_PROGRESS` | 3/8 sub-phases closed; SYS-REPL-006, SYS-ALERT-001..004, SYS-LOCK-001 and SYS-DEADLOCK-001 green; primary `agent:gpt5.6-luna` |
 | 10 — Packaging, CI, final documentation | phase_11.md | `TODO` | 0/5 sub-phases closed; primary `agent:gpt5.6-luna` |
 
 Status values: `TODO` · `IN_PROGRESS` · `DONE` · `SKIPPED` · `BLOCKED`
@@ -750,13 +768,13 @@ throughout.
 | SYS-CMD-002 | system | 9 | `TODO` | phase 9 § 9.6 — Command channel acceptance |
 | SYS-CMD-003 | system | 9 | `TODO` | phase 9 § 9.6 — Command channel acceptance |
 | SYS-CMD-004 | system | 9 | `TODO` | phase 9 § 9.6 — Command channel acceptance |
-| SYS-DEADLOCK-001 | system | 9 | `TODO` | phase 9 § 9.3 — Locks, blocking and deadlocks |
+| SYS-DEADLOCK-001 | system | 9 | `DONE` | phase 9 § 9.3 — three consecutive combined L3 runs |
 | SYS-DEPLOY-001 | system | 10 | `TODO` | phase 10 § 10.2 — Deploy artefacts |
 | SYS-HARNESS-001 | system | 6 | `PASS` | phase 6 § 6.5 — healthy container startup and teardown smoke, exit 0 |
 | SYS-IDX-001 | system | 7 | `TODO` | phase 7 § 7.5 — Rule pack B — indexes, tables, autovacuum, bloat |
 | SYS-IDX-002 | system | 4 | `PASS` | phase 4 § 4.5 — shared relation budget covered by selector acceptance test |
 | SYS-IDX-003 | system | 7 | `TODO` | phase 7 § 7.5 — Rule pack B — indexes, tables, autovacuum, bloat |
-| SYS-LOCK-001 | system | 9 | `TODO` | phase 9 § 9.3 — Locks, blocking and deadlocks |
+| SYS-LOCK-001 | system | 9 | `DONE` | phase 9 § 9.3 — three consecutive combined L3 runs |
 | SYS-PERM-001 | system | 4 | `EXTEND` | exists from plan 001 — phase-8 regression PASS with T0 and both command flags false |
 | SYS-PERM-002 | system | 10 | `TODO` | phase 10 § 10.3 — Permission-tier grant scripts |
 | SYS-REPL-006 | system | 9 | `DONE` | phase 9 § 9.1 — Cascading replication topology |

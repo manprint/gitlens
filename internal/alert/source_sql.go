@@ -107,7 +107,14 @@ func (s *metricSource) Samples(ctx context.Context, r Rule, now time.Time) ([]Sa
 	cutoff := now.Add(-lookback(s.interval))
 	var query string
 	if table == "metrics" {
-		query = `SELECT DISTINCT ON (cluster_id, instance_id, datname) cluster_id, instance_id, datname, value, ts FROM metrics WHERE metric = $1 AND ts >= $2 ORDER BY cluster_id, instance_id, datname, ts DESC`
+		if r.Metric == "pg_deadlocks_total" {
+			// Counter deltas represent events. Keep a positive observation in
+			// the lookback window so the alert engine cannot miss a deadlock
+			// merely because the next scrape persisted a zero rate.
+			query = `SELECT DISTINCT ON (cluster_id, instance_id, datname) cluster_id, instance_id, datname, value, ts FROM metrics WHERE metric = $1 AND ts >= $2 AND value > 0 ORDER BY cluster_id, instance_id, datname, ts DESC`
+		} else {
+			query = `SELECT DISTINCT ON (cluster_id, instance_id, datname) cluster_id, instance_id, datname, value, ts FROM metrics WHERE metric = $1 AND ts >= $2 ORDER BY cluster_id, instance_id, datname, ts DESC`
+		}
 	} else {
 		query = fmt.Sprintf(`SELECT DISTINCT ON (cluster_id, instance_id) cluster_id, instance_id, '' AS datname, %s, ts FROM %s WHERE ts >= $1 ORDER BY cluster_id, instance_id, ts DESC`, valueColumn, table)
 	}

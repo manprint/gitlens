@@ -26,9 +26,12 @@ func lockValues(pid int32, wait string, blocked []int32, age float64, query stri
 	return []any{pid, "app", "app", "client", "127.0.0.1", "active", "Lock", wait, 1.0, age, query, blocked}
 }
 
-func TestLocks_NoBlockedSessionsEmitsNoFact(t *testing.T) {
+func TestLocks_NoBlockedSessionsEmitsEmptyFact(t *testing.T) {
 	result := scrapeLocks(t, []([]any){lockValues(1, "", nil, 0, "select 1")})
-	require.Empty(t, result.Facts)
+	require.Len(t, result.Facts, 1)
+	var tree lockTree
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
+	require.Empty(t, tree.Nodes)
 	require.Equal(t, 0.0, metricValue(result, "pg_blocked_sessions", nil))
 }
 

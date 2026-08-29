@@ -310,6 +310,14 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 				})
 			}
 			for _, m := range r.Metrics {
+				metricDatname := r.Database
+				// Database-scoped checks such as database_stats emit one result
+				// containing labelled rows. Preserve that database identity in the
+				// generic metric row when the envelope result itself has no
+				// Database field, so database-scoped alert samples retain datname.
+				if metricDatname == "" {
+					metricDatname = m.Labels["database"]
+				}
 				dest := destinationTable(r.Check)
 				// ASH buckets are counts, never through delta, regardless of Kind.
 				if dest == "metrics_ash" {
@@ -333,7 +341,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 					key := pgtype.SeriesKey{
 						Metric:   m.Name,
 						Instance: instUUID,
-						Database: r.Database,
+						Database: metricDatname,
 						Labels:   canonical,
 					}
 					obs := delta.Observation{
@@ -380,7 +388,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 					key := pgtype.SeriesKey{
 						Metric:   m.Name,
 						Instance: instUUID,
-						Database: r.Database,
+						Database: metricDatname,
 						Labels:   canonical,
 					}
 					sid := store.SeriesID(key)
@@ -394,7 +402,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 						TenantID:   tenantID,
 						ClusterID:  cidDB,
 						InstanceID: instUUID,
-						Datname:    r.Database,
+						Datname:    metricDatname,
 						Metric:     m.Name,
 						Labels:     labelsJSON,
 						SeriesID:   sid,

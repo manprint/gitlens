@@ -151,11 +151,12 @@ func buildLocksResult(rows []lockRow, sampledAt time.Time) Result {
 		metrics = append(metrics, pgtype.Metric{Name: "pg_lock_waits", Value: float64(other), Kind: pgtype.KindGauge, Labels: map[string]string{"wait_event": "other"}})
 	}
 	result := Result{Metrics: metrics}
-	if blocked > 0 {
-		raw, err := json.Marshal(lockTree{SampledAt: sampledAt, Nodes: nodes})
-		if err == nil {
-			result.Facts = []Fact{{Kind: "lock_tree", Key: "current", ValueJSON: raw}}
-		}
+	// Persist an empty tree as well as a populated one. Without the empty
+	// snapshot, a released blocker remains visible in the API until the
+	// fifteen-minute retention cleanup, rather than disappearing on the next
+	// locks scrape.
+	if raw, err := json.Marshal(lockTree{SampledAt: sampledAt, Nodes: nodes}); err == nil {
+		result.Facts = []Fact{{Kind: "lock_tree", Key: "current", ValueJSON: raw}}
 	}
 	return result
 }

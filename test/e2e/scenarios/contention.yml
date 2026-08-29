@@ -1,0 +1,10 @@
+id: SYS-LOCK-001
+name: locks-and-deadlocks
+topology: standalone
+agent: test/compose/agent-container.yml
+scenarios:
+  - id: SYS-LOCK-001
+    endpoint: /api/v1/locks
+    assertion: SELECT FOR UPDATE blocking is visible, query text is bounded, and the node clears after release
+  - id: SYS-DEADLOCK-001
+    assertion: a real two-row deadlock increments pg_deadlocks_total once and produces an alert naming the database
