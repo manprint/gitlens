@@ -171,7 +171,7 @@ The authoritative gate commands are the Makefile targets. These are identical to
 | 51 | sub-phase | 6.4 | agent:gpt5.6-luna | Added host API response, explicit remote unavailability and generic metric routing coverage | `internal/server/api_host.go`, `internal/server/api_host_test.go`, `internal/server/api.go`, `STATE.md` | host API and routing tests PASS | phase-6 close |
 | 52 | sub-phase | 6.5 | agent:gpt5.6-luna | Added read-only host mounts/environment and deterministic workload cleanup correction | `test/compose/agent-container.yml`, `test/harness/harness.go`, `test/workload/distinct.go`, `test/workload/distinct_test.go`, `STATE.md` | INT-HOST-001..005 focused validation and SYS-HARNESS-001 PASS | phase-6 close |
 | 53 | sub-phase | 6.6 | agent:gpt5.6-luna | Documented host configuration, container mounts, local-only association and host API behavior | `README.md`, `phase_07.md`, `STATE.md` | README/quality review PASS | phase-6 close |
-| 54 | phase | 6 | agent:gpt5.6-luna | Synchronized phase-6 state, deviation D-027 and final gate evidence | `STATE.md`, `phase_07.md`, `README.md` | fmt/lint/build/unit-race/coverage 75.1% and L2 exit 0; focused E2E exit 0 | phase-6 close |
+| 54 | phase | 6 | agent:gpt5.6-luna | Synchronized phase-6 state, deviation D-027 and final gate evidence | `STATE.md`, `phase_07.md`, `README.md` | fmt/lint/build/unit-race/coverage 75.1% and L2 exit 0; focused E2E exit 0 | `436ac99` |
 
 ## 5. Files touched
 
@@ -469,7 +469,7 @@ disagree with §1 and §4.
 | 3 — Contention: locks, activity, transactions | phase_04.md | `DONE` | 8/8 sub-phases closed; INT-LOCK-001..006 and INT-ACT-001..004 green; phase gates green; commit `c6122be`; primary `agent:gpt5.6-luna` |
 | 4 — Space and maintenance: tables, indexes, vacuum, bloat | phase_05.md | `DONE` | 8/8 sub-phases closed; coverage 75.1%; INT-TBL/IDX/VAC/BLOAT and INT-CHECK-016 green; primary `agent:gpt5.6-luna`; phase commit recorded in §4 |
 | 5 — Configuration and durability: settings, WAL, checkpointer, I/O, archiver | phase_06.md | `DONE` | 9/9 sub-phases closed; coverage 75.2%; full L2 PASS; D-026 records live archive-mode harness limitation; phase commit `a0dcbf3`; primary `agent:gpt5.6-luna` |
-| 6 — Host and container metrics | phase_07.md | `DONE` | 6/6 sub-phases closed; INT-HOST-001..005 and SYS-HARNESS-001 focused validation green; coverage 75.1%; phase commit pending; primary `agent:gpt5.6-luna` |
+| 6 — Host and container metrics | phase_07.md | `DONE` | 6/6 sub-phases closed; INT-HOST-001..005 and SYS-HARNESS-001 focused validation green; coverage 75.1%; phase commit `436ac99`; primary `agent:gpt5.6-luna` |
 | 7 — Advisor engine and rule packs | phase_08.md | `TODO` | 0/10 sub-phases closed; primary `agent:gpt5.6-luna` |
 | 8 — Command channel and query plans | phase_09.md | `TODO` | 0/11 sub-phases closed; primary `agent:gpt5.6-luna` |
 | 9 — L3 end-to-end scenarios | phase_10.md | `TODO` | 0/8 sub-phases closed; primary `agent:gpt5.6-luna` |
