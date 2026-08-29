@@ -913,7 +913,6 @@ To fix: mount the persistent volume and restart. Old duplicate instances will ag
 - **Statistical sampling, not exact tracing.** ASH samples once per second, not continuously. Queries shorter than approximately 1 second are under-represented in results. This is the same fundamental trade-off made by Oracle ASH and AWS Performance Insights — acceptable for identifying where the database spends time over hours or days, not suitable for microsecond-level analysis.
 - **Fewer than 60 samples is not statistically meaningful.** When a requested time range contains fewer than 60 total samples across all wait events, the API response includes a `warning` field to alert you that results may be unreliable. This is a built-in guard against drawing conclusions from too-small a sample set.
 - **At most 100 distinct wait keys per 10-second window.** When more than 100 unique combinations of (database, wait_event_type, wait_event, state, query) appear in a single 10-second window, the top 99 by sample count are kept individually and the remainder is folded into an `other` bucket. The total sample count is always conserved exactly (never underestimated), making this a safe operation for producing aggregate statistics.
-- **Alerts are available only through the HTTP API.** There is no email, Slack, or PagerDuty integration yet.
 
 ## Licence
 
