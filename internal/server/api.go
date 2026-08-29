@@ -28,7 +28,11 @@ const (
 	defaultStatementsLimit = 20
 	maxStatementsLimit     = 1000
 	maxMetricPoints        = 10000
-	upThreshold            = 90 * time.Second
+	// An instance is considered down after one minute without an accepted
+	// envelope. L3 topology scenarios use this bound to distinguish a stale
+	// parent from a live upstream without waiting for the agent's longer
+	// retry horizon.
+	upThreshold = 60 * time.Second
 )
 
 // API handles read endpoints.

@@ -98,8 +98,8 @@ func TestIsUp(t *testing.T) {
 	t.Parallel()
 	now := time.Now()
 	require.True(t, isUp(now.Add(-30*time.Second), now))
-	require.True(t, isUp(now.Add(-90*time.Second), now)) // inclusive at 90s
-	require.False(t, isUp(now.Add(-91*time.Second), now))
+	require.True(t, isUp(now.Add(-60*time.Second), now)) // inclusive at 60s
+	require.False(t, isUp(now.Add(-61*time.Second), now))
 	require.False(t, isUp(now.Add(-200*time.Second), now))
 	require.True(t, isUp(now, now))
 }
