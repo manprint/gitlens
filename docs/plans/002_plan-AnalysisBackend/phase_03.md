@@ -466,6 +466,14 @@ detail.
   `INT-STORE-003`, `INT-CHECK-015` must all still pass unchanged.
 - **README:** upgrade ordering documented.
 
+## Execution record
+
+- **Status:** complete, pending phase-close commit
+- **Model:** `agent:gpt5.6-luna`
+- **Sub-phases:** 2.1–2.7 implemented and verified in order
+- **Acceptance tests:** `INT-FACT-001..006` and `INT-GOLDEN-002` pass; legacy `INT-GOLDEN-001` remains green against unchanged v1 fixtures
+- **Final technical gates:** fmt-check, lint, build, unit/race, L2 integration, and coverage 75.1% pass
+
 ## Phase done criterion
 
 A v2 agent and a v1 agent both push successfully to the same server;

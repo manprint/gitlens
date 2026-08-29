@@ -25,6 +25,9 @@ func TestDestinationTable(t *testing.T) {
 		{"replication", "metrics_replication"},
 		{"replication_slots", "metrics_replication"},
 		{"replication_streaming", "metrics_replication"},
+		{"table_stats", "metrics_tables"},
+		{"index_stats", "metrics_indexes"},
+		{"bloat_estimate", "metrics_bloat"},
 		{"something_else", "metrics"},
 		{"bgwriter", "metrics"},
 		{"", "metrics"},
@@ -36,6 +39,110 @@ func TestDestinationTable(t *testing.T) {
 			require.Equal(t, c.want, destinationTable(c.check))
 		})
 	}
+}
+
+func TestProcess_GroupsTableMetricsPerRelation(t *testing.T) {
+	p, _, _ := newPipelineWithMockPool()
+	instID := uuid.NewString()
+	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	env := wire.Envelope{Instances: []wire.Instance{{InstanceID: instID, ClusterID: "1", Results: []wire.Result{{
+		Check: "table_stats", TS: ts,
+		Metrics: []wire.Metric{
+			{Name: "n_live_tup", Value: 12, Kind: "gauge", Labels: map[string]string{"schemaname": "public", "relname": "orders"}},
+			{Name: "seq_scan", Value: 10, Kind: "counter", Labels: map[string]string{"schemaname": "public", "relname": "orders"}},
+			{Name: "table_bytes", Value: 4096, Kind: "gauge", Labels: map[string]string{"schemaname": "public", "relname": "orders"}},
+		},
+	}}}}}
+	res, err := p.Process(context.Background(), env)
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Accepted)
+}
+
+func TestProcess_CounterVsGaugeClassification(t *testing.T) {
+	p, _, _ := newPipelineWithMockPool()
+	instID := uuid.NewString()
+	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	base := func(metrics ...wire.Metric) wire.Envelope {
+		return wire.Envelope{Instances: []wire.Instance{{InstanceID: instID, ClusterID: "2", Results: []wire.Result{{Check: "table_stats", TS: ts, Metrics: metrics}}}}}
+	}
+	_, err := p.Process(context.Background(), base(
+		wire.Metric{Name: "n_live_tup", Value: 12, Kind: "gauge", Labels: map[string]string{"schemaname": "public", "relname": "t"}},
+		wire.Metric{Name: "idx_scan", Value: 10, Kind: "counter", Labels: map[string]string{"schemaname": "public", "relname": "t"}},
+	))
+	require.NoError(t, err)
+	_, err = p.Process(context.Background(), base(wire.Metric{Name: "idx_scan", Value: 20, Kind: "counter", Labels: map[string]string{"schemaname": "public", "relname": "t"}}))
+	require.NoError(t, err)
+}
+
+func TestProcess_InvalidFactIsSkippedNotFatal(t *testing.T) {
+	p, _, _ := newPipelineWithMockPool()
+	env := wire.Envelope{Instances: []wire.Instance{{InstanceID: uuid.NewString(), ClusterID: "3", Results: []wire.Result{{
+		Check: "settings", TS: time.Now(), Facts: []wire.Fact{{Kind: "setting", Key: "", ValueText: "bad"}},
+	}}}}}
+	res, err := p.Process(context.Background(), env)
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Accepted)
+	require.Equal(t, 0, res.Rejected)
+}
+
+func TestProcess_LockTreeFactIsAcceptedAndDropped(t *testing.T) {
+	p, _, _ := newPipelineWithMockPool()
+	env := wire.Envelope{Instances: []wire.Instance{{InstanceID: uuid.NewString(), ClusterID: "4", Results: []wire.Result{{
+		Check: "locks", TS: time.Now(), Facts: []wire.Fact{{Kind: "lock_tree", Key: "root", ValueJSON: []byte(`{"pid":1}`)}},
+	}}}}}
+	res, err := p.Process(context.Background(), env)
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Accepted)
+}
+
+func TestApplyTableMetric_CoversTypedColumns(t *testing.T) {
+	row := &store.TableStatRow{}
+	for _, name := range []string{"seq_scan", "seq_tup_read", "idx_scan", "idx_tup_fetch", "n_tup_ins", "n_tup_upd", "n_tup_del", "n_tup_hot_upd", "autovacuum_count", "autoanalyze_count", "n_live_tup", "n_dead_tup", "n_mod_since_analyze", "relpages", "reltuples", "relfrozenxid_age", "total_bytes", "table_bytes", "toast_bytes"} {
+		applyTableMetric(row, name, 7)
+	}
+	require.NotNil(t, row.SeqScan)
+	require.NotNil(t, row.NLiveTup)
+	require.NotNil(t, row.TotalBytes)
+}
+
+func TestApplyIndexMetric_CoversTypedColumns(t *testing.T) {
+	row := &store.IndexStatRow{}
+	labels := map[string]string{"def_hash": "abc"}
+	for _, name := range []string{"idx_scan", "idx_tup_read", "idx_tup_fetch", "idx_blks_read", "idx_blks_hit", "index_bytes", "is_unique", "is_primary", "is_valid", "def_hash"} {
+		applyIndexMetric(row, name, 1, labels)
+	}
+	require.NotNil(t, row.IdxScan)
+	require.NotNil(t, row.IndexBytes)
+	require.NotNil(t, row.DefHash)
+}
+
+func TestApplyBloatMetric_CoversTypedColumns(t *testing.T) {
+	row := &store.BloatRow{}
+	for _, name := range []string{"real_bytes", "expected_bytes", "bloat_bytes", "bloat_ratio"} {
+		applyBloatMetric(row, name, 3)
+	}
+	require.NotNil(t, row.RealBytes)
+	require.NotNil(t, row.BloatRatio)
+}
+
+func TestProcess_RoutesTypedFactsAndRelationChecks(t *testing.T) {
+	p, _, _ := newPipelineWithMockPool()
+	env := wire.Envelope{Instances: []wire.Instance{{InstanceID: uuid.NewString(), ClusterID: "5", Results: []wire.Result{
+		{Check: "index_stats", TS: time.Now(), Metrics: []wire.Metric{
+			{Name: "idx_scan", Value: 4, Kind: "counter", Labels: map[string]string{"schemaname": "public", "relname": "orders", "indexrelname": "orders_pkey"}},
+			{Name: "index_bytes", Value: 128, Kind: "gauge", Labels: map[string]string{"schemaname": "public", "relname": "orders", "indexrelname": "orders_pkey"}},
+		}},
+		{Check: "bloat_estimate", TS: time.Now(), Metrics: []wire.Metric{
+			{Name: "bloat_ratio", Value: 0.25, Kind: "gauge", Labels: map[string]string{"schemaname": "public", "relname": "orders", "object_kind": "table", "method": "estimate"}},
+		}},
+		{Check: "settings", TS: time.Now(), Database: "app", Facts: []wire.Fact{
+			{Kind: "setting", Key: "work_mem", ValueText: "4MB"},
+			{Kind: "index_def", Key: "orders_pkey", ValueJSON: []byte(`{"definition":"PRIMARY KEY (id)"}`)},
+		}},
+	}}}}
+	res, err := p.Process(context.Background(), env)
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Accepted)
 }
 
 func TestReplicationSlot(t *testing.T) {

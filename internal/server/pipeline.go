@@ -71,6 +71,12 @@ func destinationTable(check string) string {
 		return "metrics_ash"
 	case strings.HasPrefix(check, "replication"):
 		return "metrics_replication"
+	case check == "table_stats":
+		return "metrics_tables"
+	case check == "index_stats":
+		return "metrics_indexes"
+	case check == "bloat_estimate":
+		return "metrics_bloat"
 	default:
 		return "metrics"
 	}
@@ -110,6 +116,10 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	var replicationRows []store.ReplicationRow
 	var queryTextRows []store.QueryTextRow
 	var eventRows []store.EventRow
+	var objectFactRows []store.ObjectFactRow
+	var tableRows []store.TableStatRow
+	var indexRows []store.IndexStatRow
+	var bloatRows []store.BloatRow
 
 	// Resolves a wire.Edge.To (an upstream's addr, e.g. "pg-primary") to an
 	// instance_id. Tries the current envelope first (fast path, no query).
@@ -168,6 +178,10 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		stmtMap := make(map[statementKey]*store.StatementRow)
 		replMap := make(map[replicationKey]*store.ReplicationRow)
 		var instEvents []store.EventRow
+		var instFacts []store.ObjectFactRow
+		tableMap := make(map[tableStatKey]*store.TableStatRow)
+		indexMap := make(map[indexStatKey]*store.IndexStatRow)
+		bloatMap := make(map[bloatKey]*store.BloatRow)
 		var instErr error
 
 		// internal/topology.Engine (6.2, unit-tested at 90.9% coverage) was
@@ -247,6 +261,26 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 					InstanceID: &evInst,
 					Payload:    map[string]any{"check": r.Check, "database": r.Database},
 				})
+			}
+			for _, f := range r.Facts {
+				if err := f.Validate(); err != nil {
+					IncIngestRejected("invalid_fact")
+					continue
+				}
+				if f.Kind == "lock_tree" || f.Kind == "plan" {
+					// phase 3 / phase 8: these facts are routed to dedicated tables.
+					continue
+				}
+				var text *string
+				if f.ValueText != "" {
+					v := f.ValueText
+					text = &v
+				}
+				var raw []byte
+				if len(f.ValueJSON) > 0 {
+					raw = append([]byte(nil), f.ValueJSON...)
+				}
+				instFacts = append(instFacts, store.ObjectFactRow{TenantID: tenantID, ClusterID: cidDB, InstanceID: instUUID, Datname: r.Database, Kind: f.Kind, Key: f.Key, Labels: f.Labels, ValueText: text, ValueJSON: raw, FirstSeen: r.TS, LastSeen: r.TS, ChangedAt: r.TS})
 			}
 			// QueryTexts upsert
 			for qidStr, text := range r.QueryTexts {
@@ -433,6 +467,30 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 						replMap[rk] = row
 					}
 					applyReplicationMetric(row, m.Name, value, m.Labels)
+				case "metrics_tables":
+					key := tableStatKey{ts: r.TS, datname: r.Database, schema: m.Labels["schemaname"], relname: m.Labels["relname"]}
+					row := tableMap[key]
+					if row == nil {
+						row = &store.TableStatRow{TS: r.TS, TenantID: tenantID, ClusterID: cidDB, InstanceID: instUUID, Datname: r.Database, Schemaname: key.schema, Relname: key.relname}
+						tableMap[key] = row
+					}
+					applyTableMetric(row, m.Name, value)
+				case "metrics_indexes":
+					key := indexStatKey{ts: r.TS, datname: r.Database, schema: m.Labels["schemaname"], indexrelname: m.Labels["indexrelname"]}
+					row := indexMap[key]
+					if row == nil {
+						row = &store.IndexStatRow{TS: r.TS, TenantID: tenantID, ClusterID: cidDB, InstanceID: instUUID, Datname: r.Database, Schemaname: key.schema, Relname: m.Labels["relname"], IndexRelname: key.indexrelname}
+						indexMap[key] = row
+					}
+					applyIndexMetric(row, m.Name, value, m.Labels)
+				case "metrics_bloat":
+					key := bloatKey{ts: r.TS, datname: r.Database, schema: m.Labels["schemaname"], relname: m.Labels["relname"], indexrelname: m.Labels["indexrelname"], method: m.Labels["method"]}
+					row := bloatMap[key]
+					if row == nil {
+						row = &store.BloatRow{TS: r.TS, TenantID: tenantID, ClusterID: cidDB, InstanceID: instUUID, Datname: r.Database, Schemaname: key.schema, Relname: key.relname, IndexRelname: key.indexrelname, ObjectKind: m.Labels["object_kind"], Method: key.method}
+						bloatMap[key] = row
+					}
+					applyBloatMetric(row, m.Name, value)
 				}
 			}
 			if instErr != nil {
@@ -454,8 +512,18 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		for _, row := range replMap {
 			replicationRows = append(replicationRows, *row)
 		}
+		for _, row := range tableMap {
+			tableRows = append(tableRows, *row)
+		}
+		for _, row := range indexMap {
+			indexRows = append(indexRows, *row)
+		}
+		for _, row := range bloatMap {
+			bloatRows = append(bloatRows, *row)
+		}
 		queryTextRows = append(queryTextRows, instQueryTexts...)
 		eventRows = append(eventRows, instEvents...)
+		objectFactRows = append(objectFactRows, instFacts...)
 		res.Accepted++
 	}
 
@@ -476,6 +544,18 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	}
 	if err := store.WriteEvents(ctx, tx, eventRows); err != nil {
 		return nil, fmt.Errorf("write events: %w", err)
+	}
+	if err := store.WriteObjectFacts(ctx, tx, objectFactRows); err != nil {
+		return nil, fmt.Errorf("write object facts: %w", err)
+	}
+	if err := store.WriteTableStats(ctx, tx, tableRows); err != nil {
+		return nil, fmt.Errorf("write table stats: %w", err)
+	}
+	if err := store.WriteIndexStats(ctx, tx, indexRows); err != nil {
+		return nil, fmt.Errorf("write index stats: %w", err)
+	}
+	if err := store.WriteBloat(ctx, tx, bloatRows); err != nil {
+		return nil, fmt.Errorf("write bloat: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit tx: %w", err)
@@ -550,6 +630,120 @@ type replicationKey struct {
 	ts      time.Time
 	slot    string
 	datname string
+}
+
+type tableStatKey struct {
+	ts                       time.Time
+	datname, schema, relname string
+}
+type indexStatKey struct {
+	ts                            time.Time
+	datname, schema, indexrelname string
+}
+type bloatKey struct {
+	ts                                             time.Time
+	datname, schema, relname, indexrelname, method string
+}
+
+func applyTableMetric(row *store.TableStatRow, name string, value float64) {
+	v := value
+	switch strings.ToLower(name) {
+	case "seq_scan":
+		row.SeqScan = &v
+	case "seq_tup_read":
+		row.SeqTupRead = &v
+	case "idx_scan":
+		row.IdxScan = &v
+	case "idx_tup_fetch":
+		row.IdxTupFetch = &v
+	case "n_tup_ins":
+		row.NTupIns = &v
+	case "n_tup_upd":
+		row.NTupUpd = &v
+	case "n_tup_del":
+		row.NTupDel = &v
+	case "n_tup_hot_upd":
+		row.NTupHotUpd = &v
+	case "autovacuum_count":
+		row.AutovacuumCount = &v
+	case "autoanalyze_count":
+		row.AutoanalyzeCount = &v
+	case "n_live_tup":
+		x := int64(value)
+		row.NLiveTup = &x
+	case "n_dead_tup":
+		x := int64(value)
+		row.NDeadTup = &x
+	case "n_mod_since_analyze":
+		x := int64(value)
+		row.NModSinceAnalyze = &x
+	case "relpages":
+		x := int64(value)
+		row.Relpages = &x
+	case "reltuples":
+		row.RelTuples = &v
+	case "relfrozenxid_age":
+		x := int64(value)
+		row.RelfrozenXIDAge = &x
+	case "total_bytes":
+		x := int64(value)
+		row.TotalBytes = &x
+	case "table_bytes":
+		x := int64(value)
+		row.TableBytes = &x
+	case "toast_bytes":
+		x := int64(value)
+		row.ToastBytes = &x
+	}
+}
+
+func applyIndexMetric(row *store.IndexStatRow, name string, value float64, labels map[string]string) {
+	v := value
+	switch strings.ToLower(name) {
+	case "idx_scan":
+		row.IdxScan = &v
+	case "idx_tup_read":
+		row.IdxTupRead = &v
+	case "idx_tup_fetch":
+		row.IdxTupFetch = &v
+	case "idx_blks_read":
+		row.IdxBlksRead = &v
+	case "idx_blks_hit":
+		row.IdxBlksHit = &v
+	case "index_bytes":
+		x := int64(value)
+		row.IndexBytes = &x
+	case "is_unique":
+		x := value != 0
+		row.IsUnique = &x
+	case "is_primary":
+		x := value != 0
+		row.IsPrimary = &x
+	case "is_valid":
+		x := value != 0
+		row.IsValid = &x
+	case "def_hash":
+		if s := labels["def_hash"]; s != "" {
+			row.DefHash = &s
+		}
+	}
+}
+
+func applyBloatMetric(row *store.BloatRow, name string, value float64) {
+	switch strings.ToLower(name) {
+	case "real_bytes":
+		x := int64(value)
+		row.RealBytes = &x
+	case "expected_bytes":
+		x := int64(value)
+		row.ExpectedBytes = &x
+	case "bloat_bytes":
+		x := int64(value)
+		row.BloatBytes = &x
+	case "bloat_ratio":
+		x := value
+		row.BloatRatio = &x
+	}
 }
 
 func replicationSlot(labels map[string]string) string {

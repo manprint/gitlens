@@ -96,3 +96,47 @@ func TestGolden_AssertGolden(t *testing.T) {
 	require.FileExists(t, path)
 	wire.AssertGolden(t, data, path, false)
 }
+
+func TestFact_Validate_RejectsEmptyKind(t *testing.T) {
+	require.Error(t, (wire.Fact{Key: "k", ValueText: "v"}).Validate())
+}
+
+func TestFact_Validate_RejectsEmptyKey(t *testing.T) {
+	require.Error(t, (wire.Fact{Kind: "setting", ValueText: "v"}).Validate())
+}
+
+func TestFact_Validate_RejectsBothValues(t *testing.T) {
+	require.Error(t, (wire.Fact{Kind: "setting", Key: "k", ValueText: "v", ValueJSON: []byte(`{}`)}).Validate())
+}
+
+func TestFact_Validate_RejectsNeitherValue(t *testing.T) {
+	require.Error(t, (wire.Fact{Kind: "setting", Key: "k"}).Validate())
+}
+
+func TestFact_Validate_RejectsMalformedJSON(t *testing.T) {
+	require.Error(t, (wire.Fact{Kind: "setting", Key: "k", ValueJSON: []byte(`{`)}).Validate())
+}
+
+func TestFact_Validate_RejectsUnknownKind(t *testing.T) {
+	require.Error(t, (wire.Fact{Kind: "other", Key: "k", ValueText: "v"}).Validate())
+}
+
+func TestEnvelope_V1RoundTripsWithoutFacts(t *testing.T) {
+	var env wire.Envelope
+	require.NoError(t, json.Unmarshal([]byte(`{"protocol_version":1,"agent_id":"a","sent_at":"2026-08-29T00:00:00Z","instances":[{"results":[{}]}]}`), &env))
+	require.Nil(t, env.Instances[0].Results[0].Facts)
+	b, err := json.Marshal(env)
+	require.NoError(t, err)
+	require.NotContains(t, string(b), `"facts"`)
+}
+
+func TestEnvelope_V2RoundTripsFacts(t *testing.T) {
+	env := wire.Envelope{ProtocolVersion: wire.ProtocolVersionCurrent}
+	f := wire.Fact{Kind: "setting", Key: "work_mem", ValueText: "64MB"}
+	env.Instances = []wire.Instance{{Results: []wire.Result{{Facts: []wire.Fact{f}}}}}
+	b, err := json.Marshal(env)
+	require.NoError(t, err)
+	var got wire.Envelope
+	require.NoError(t, json.Unmarshal(b, &got))
+	require.Equal(t, f, got.Instances[0].Results[0].Facts[0])
+}

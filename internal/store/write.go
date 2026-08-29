@@ -104,6 +104,65 @@ type ReplicationRow struct {
 	SlotRetainedBytes *int64
 }
 
+type TableStatRow struct {
+	TS                                                                               time.Time
+	TenantID                                                                         string
+	ClusterID                                                                        int64
+	InstanceID                                                                       uuid.UUID
+	Datname, Schemaname, Relname                                                     string
+	SeqScan, SeqTupRead, IdxScan, IdxTupFetch, NTupIns, NTupUpd, NTupDel, NTupHotUpd *float64
+	NLiveTup, NDeadTup, NModSinceAnalyze                                             *int64
+	LastVacuum, LastAutovacuum, LastAnalyze, LastAutoanalyze                         *time.Time
+	AutovacuumCount, AutoanalyzeCount                                                *float64
+	Relpages                                                                         *int64
+	RelTuples                                                                        *float64
+	RelfrozenXIDAge                                                                  *int64
+	TotalBytes, TableBytes, ToastBytes                                               *int64
+}
+
+type IndexStatRow struct {
+	TS                                                        time.Time
+	TenantID                                                  string
+	ClusterID                                                 int64
+	InstanceID                                                uuid.UUID
+	Datname, Schemaname, Relname, IndexRelname                string
+	IdxScan, IdxTupRead, IdxTupFetch, IdxBlksRead, IdxBlksHit *float64
+	IndexBytes                                                *int64
+	IsUnique, IsPrimary, IsValid                              *bool
+	DefHash                                                   *string
+}
+
+type BloatRow struct {
+	TS                                                             time.Time
+	TenantID                                                       string
+	ClusterID                                                      int64
+	InstanceID                                                     uuid.UUID
+	Datname, Schemaname, Relname, IndexRelname, ObjectKind, Method string
+	RealBytes, ExpectedBytes, BloatBytes                           *int64
+	BloatRatio                                                     *float64
+}
+
+type ObjectFactRow struct {
+	TenantID                       string
+	ClusterID                      int64
+	InstanceID                     uuid.UUID
+	Datname, Kind, Key             string
+	Labels                         map[string]string
+	ValueText                      *string
+	ValueJSON                      []byte
+	FirstSeen, LastSeen, ChangedAt time.Time
+}
+
+func (r TableStatRow) args() []any {
+	return []any{r.TS, r.TenantID, r.ClusterID, r.InstanceID, r.Datname, r.Schemaname, r.Relname, r.SeqScan, r.SeqTupRead, r.IdxScan, r.IdxTupFetch, r.NTupIns, r.NTupUpd, r.NTupDel, r.NTupHotUpd, r.NLiveTup, r.NDeadTup, r.NModSinceAnalyze, r.LastVacuum, r.LastAutovacuum, r.LastAnalyze, r.LastAutoanalyze, r.AutovacuumCount, r.AutoanalyzeCount, r.Relpages, r.RelTuples, r.RelfrozenXIDAge, r.TotalBytes, r.TableBytes, r.ToastBytes}
+}
+func (r IndexStatRow) args() []any {
+	return []any{r.TS, r.TenantID, r.ClusterID, r.InstanceID, r.Datname, r.Schemaname, r.Relname, r.IndexRelname, r.IdxScan, r.IdxTupRead, r.IdxTupFetch, r.IdxBlksRead, r.IdxBlksHit, r.IndexBytes, r.IsUnique, r.IsPrimary, r.IsValid, r.DefHash}
+}
+func (r BloatRow) args() []any {
+	return []any{r.TS, r.TenantID, r.ClusterID, r.InstanceID, r.Datname, r.Schemaname, r.Relname, r.IndexRelname, r.ObjectKind, r.Method, r.RealBytes, r.ExpectedBytes, r.BloatBytes, r.BloatRatio}
+}
+
 // TopologyEdgeRow is one row for the topology_edges table — the persisted
 // form of the in-memory topology.Edge objects internal/server/pipeline.go
 // already computes per envelope for internal/topology.Engine's own
@@ -260,6 +319,60 @@ func WriteStatements(ctx context.Context, tx pgx.Tx, rows []StatementRow) error 
 		return fmt.Errorf("drop tmp_metrics_statements: %w", err)
 	}
 	return nil
+}
+
+func writeRows(ctx context.Context, tx pgx.Tx, query string, args [][]any) error {
+	if len(args) == 0 {
+		return nil
+	}
+	b := &pgx.Batch{}
+	for _, a := range args {
+		b.Queue(query, a...)
+	}
+	br := tx.SendBatch(ctx, b)
+	defer func() { _ = br.Close() }()
+	for i := range args {
+		if _, err := br.Exec(); err != nil {
+			return fmt.Errorf("write batch row %d: %w", i, err)
+		}
+	}
+	return br.Close()
+}
+
+func WriteTableStats(ctx context.Context, tx pgx.Tx, rows []TableStatRow) error {
+	args := make([][]any, len(rows))
+	for i := range rows {
+		args[i] = rows[i].args()
+	}
+	return writeRows(ctx, tx, `INSERT INTO metrics_tables (ts,tenant_id,cluster_id,instance_id,datname,schemaname,relname,seq_scan,seq_tup_read,idx_scan,idx_tup_fetch,n_tup_ins,n_tup_upd,n_tup_del,n_tup_hot_upd,n_live_tup,n_dead_tup,n_mod_since_analyze,last_vacuum,last_autovacuum,last_analyze,last_autoanalyze,autovacuum_count,autoanalyze_count,relpages,reltuples,relfrozenxid_age,total_bytes,table_bytes,toast_bytes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30) ON CONFLICT DO NOTHING`, args)
+}
+
+func WriteIndexStats(ctx context.Context, tx pgx.Tx, rows []IndexStatRow) error {
+	args := make([][]any, len(rows))
+	for i := range rows {
+		args[i] = rows[i].args()
+	}
+	return writeRows(ctx, tx, `INSERT INTO metrics_indexes (ts,tenant_id,cluster_id,instance_id,datname,schemaname,relname,indexrelname,idx_scan,idx_tup_read,idx_tup_fetch,idx_blks_read,idx_blks_hit,index_bytes,is_unique,is_primary,is_valid,def_hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) ON CONFLICT DO NOTHING`, args)
+}
+
+func WriteBloat(ctx context.Context, tx pgx.Tx, rows []BloatRow) error {
+	args := make([][]any, len(rows))
+	for i := range rows {
+		args[i] = rows[i].args()
+	}
+	return writeRows(ctx, tx, `INSERT INTO metrics_bloat (ts,tenant_id,cluster_id,instance_id,datname,schemaname,relname,indexrelname,object_kind,method,real_bytes,expected_bytes,bloat_bytes,bloat_ratio) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT DO NOTHING`, args)
+}
+
+func WriteObjectFacts(ctx context.Context, tx pgx.Tx, rows []ObjectFactRow) error {
+	args := make([][]any, 0, len(rows))
+	for _, r := range rows {
+		labels, err := json.Marshal(r.Labels)
+		if err != nil {
+			return fmt.Errorf("marshal fact labels: %w", err)
+		}
+		args = append(args, []any{r.TenantID, r.ClusterID, r.InstanceID, r.Datname, r.Kind, r.Key, labels, r.ValueText, r.ValueJSON, r.FirstSeen, r.LastSeen, r.ChangedAt})
+	}
+	return writeRows(ctx, tx, `INSERT INTO object_facts (tenant_id,cluster_id,instance_id,datname,kind,key,labels,value_text,value_json,first_seen,last_seen,changed_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (tenant_id,instance_id,datname,kind,key) DO UPDATE SET last_seen=EXCLUDED.last_seen,labels=EXCLUDED.labels,value_text=EXCLUDED.value_text,value_json=EXCLUDED.value_json,changed_at=CASE WHEN object_facts.value_text IS DISTINCT FROM EXCLUDED.value_text OR object_facts.value_json IS DISTINCT FROM EXCLUDED.value_json THEN EXCLUDED.last_seen ELSE object_facts.changed_at END`, args)
 }
 
 // WriteASH writes ASH rows with ON CONFLICT DO NOTHING.
@@ -453,4 +566,17 @@ func (w *Writer) WriteReplication(ctx context.Context, tx pgx.Tx, rows []Replica
 
 func (w *Writer) WriteQueryTexts(ctx context.Context, tx pgx.Tx, rows []QueryTextRow) error {
 	return WriteQueryTexts(ctx, tx, rows)
+}
+
+func (w *Writer) WriteTableStats(ctx context.Context, tx pgx.Tx, rows []TableStatRow) error {
+	return WriteTableStats(ctx, tx, rows)
+}
+func (w *Writer) WriteIndexStats(ctx context.Context, tx pgx.Tx, rows []IndexStatRow) error {
+	return WriteIndexStats(ctx, tx, rows)
+}
+func (w *Writer) WriteBloat(ctx context.Context, tx pgx.Tx, rows []BloatRow) error {
+	return WriteBloat(ctx, tx, rows)
+}
+func (w *Writer) WriteObjectFacts(ctx context.Context, tx pgx.Tx, rows []ObjectFactRow) error {
+	return WriteObjectFacts(ctx, tx, rows)
 }

@@ -2,7 +2,7 @@
 
 > **READ THIS FILE FIRST at the start of every session, before any other plan
 > file. OPEN a unit in §1 before touching code; CLOSE it after the gates pass.**
-> **Last updated:** 2026-08-29 (phase 1 complete; sub-phase 2.1 open) by `agent:gpt5.6-luna` | **Session:** 6
+> **Last updated:** 2026-08-29 (phase 2 complete; phase 3 ready) by `agent:gpt5.6-luna` | **Session:** 7
 
 ## 0. Protocol
 
@@ -49,13 +49,13 @@ work — a phase that looks blocked is a signal to read §9, not to skip ahead.
 ## 1. Current unit
 
 - **Type:** sub-phase
-- **ID:** `2.1`
-- **Status:** `OPEN`
-- **Intent:** implement phase 2 sub-phase 2.1 exactly as phase_03.md specifies.
+- **ID:** `3.1`
+- **Status:** `none`
+- **Intent:** begin phase 3 contention implementation exactly as phase_04.md specifies.
 - **Phase:** 2 — Protocol v2: facts and typed storage ([phase_03.md](phase_03.md))
-- **Next action:** open phase_03.md §2.1 and implement the additive wire v2 envelope in the assigned scope.
+- **Next action:** open sub-phase 3.1 in STATE §1 before editing any phase-3 file.
 - **Assigned:** `agent:gpt5.6-luna`
-- **Repo state:** branch `main`, phase 0 committed at `ab5394f`; phase 1 gates green and ready for local commit; phase 2 sub-phase 2.1 open.
+- **Repo state:** branch `main`, phase 1 committed at `f745eb9`; phase-2 implementation and all named acceptance tests are present; phase-close commit is next after the final gate matrix.
 
 ## 2. Feature context (self-contained recap)
 
@@ -133,6 +133,13 @@ The authoritative gate commands are the Makefile targets. These are identical to
 | 13 | sub-phase | 1.6 | agent:gpt5.6-luna | Wired alert configuration, sources, channels, notifier, engine lifecycle, and alert API into server startup and routing | `internal/server/config.go`, `internal/server/config_test.go`, `cmd/pglens-server/main.go`, `internal/server/http.go`, `STATE.md` | fmt-check, lint, build, make test, race-alert, L2, coverage-gate green | phase-1 close |
 | 14 | sub-phase | 1.7 | agent:gpt5.6-luna | Added INT-ALERT-008..012 integration coverage for threshold transitions, deduplicated delivery, silence, resolve, and leadership behavior | `internal/alert/engine_integration_test.go`, `STATE.md` | full L2 green; INT-ALERT-008..012 green | phase-1 close |
 | 15 | sub-phase | 1.8 | agent:gpt5.6-luna | Documented alert configuration, API examples, Tier 0 rules, and operational limits | `README.md`, `STATE.md` | README verification and complete phase gate matrix green | phase-1 close |
+| 16 | sub-phase | 2.1 | agent:gpt5.6-luna | Added protocol v2 Fact transport, validation, backward-compatible facts omission, and v1/v2 ingest acceptance range | `internal/wire/envelope.go`, `internal/wire/envelope_test.go`, `internal/server/ingest.go`, `internal/server/ingest_test.go`, `STATE.md` | focused wire/server/agent tests and fmt-check green | phase-2 close |
+| 17 | sub-phase | 2.2 | agent:gpt5.6-luna | Added migration 0007 for typed relation hypertables and relational facts | `internal/store/migrations/0007_facts.sql`, `internal/store/migrate_test.go`, `internal/server/facts_integration_test.go`, `STATE.md` | INT-FACT-001 and full L2 green | phase-2 close |
+| 18 | sub-phase | 2.3 | agent:gpt5.6-luna | Added typed row models, bulk writers, deduplication, and fact history upsert | `internal/store/write.go`, `internal/store/write_test.go`, `internal/server/facts_integration_test.go`, `STATE.md` | INT-FACT-002/003 and full L2 green | phase-2 close |
+| 19 | sub-phase | 2.4 | agent:gpt5.6-luna | Routed relation metrics and validated/routed object facts in the ingest pipeline | `internal/server/pipeline.go`, `internal/server/pipeline_test.go`, `internal/server/facts_integration_test.go`, `STATE.md` | INT-FACT-004/005/006 and full L2 green | phase-2 close |
+| 20 | sub-phase | 2.5 | agent:gpt5.6-luna | Preserved v1 goldens and added independent v2 fact fixtures | `internal/wire/envelope_integration_test.go`, `internal/wire/envelope_golden_v2_test.go`, `internal/wire/testdata/payload_v2_pg15.json`, `internal/wire/testdata/payload_v2_pg18.json`, `STATE.md` | INT-GOLDEN-001/002 green | phase-2 close |
+| 21 | sub-phase | 2.6 | agent:gpt5.6-luna | Added check-local Fact result and agent conversion to validated wire facts with protocol v2 | `internal/check/check.go`, `internal/agent/scheduler.go`, `cmd/pglens-agent/run.go`, `internal/wire/envelope.go`, `STATE.md` | check/agent/wire tests and full L2 green | phase-2 close |
+| 22 | sub-phase | 2.7 | agent:gpt5.6-luna | Documented protocol compatibility and upgrade ordering | `README.md`, `phase_03.md`, `STATE.md` | README review and full gate matrix green | phase-2 close |
 
 ## 5. Files touched
 
@@ -173,10 +180,31 @@ the units that touched it, so a later audit can attribute every diff.
 | `internal/server/api_alerts_test.go` | 1.5 | API validation and rendering tests |
 | `internal/server/api_alerts_integration_test.go` | 1.5 | INT-ALERTAPI-001/002 |
 | `internal/alert/store_integration_test.go` | 1.4 | INT-ALERT-003..007 |
+| `internal/store/migrations/0007_facts.sql` | 2.2 | typed relation hypertables and object facts |
+| `internal/server/facts_integration_test.go` | 2.2–2.4 | INT-FACT-001..006 |
+| `internal/store/migrate_test.go` | 2.2 | migration structure assertion |
+| `internal/store/write.go` | 2.3 | typed row models and writers |
+| `internal/store/write_test.go` | 2.3 | typed row argument mapping |
+| `internal/server/pipeline.go` | 2.4 | relation metric and fact routing |
+| `internal/server/pipeline_test.go` | 2.4 | typed routing and validation tests |
+| `internal/wire/envelope_integration_test.go` | 2.5 | v1 golden regression harness |
+| `internal/wire/envelope_golden_v2_test.go` | 2.5 | INT-GOLDEN-002 fixture validation |
+| `internal/wire/testdata/payload_v2_pg15.json` | 2.5 | protocol-v2 PG15 golden |
+| `internal/wire/testdata/payload_v2_pg18.json` | 2.5 | protocol-v2 PG18 golden |
+| `internal/check/check.go` | 2.6 | check-local Fact result type |
+| `internal/agent/scheduler.go` | 2.6 | Fact result propagation |
+| `cmd/pglens-agent/run.go` | 2.6 | Fact conversion and validation |
+| `internal/wire/envelope.go` | 2.1, 2.6 | protocol constants and Fact transport |
+| `internal/wire/envelope_test.go` | 2.1 | Fact and v1/v2 round-trip tests |
+| `internal/server/ingest.go` | 2.1 | protocol range acceptance |
+| `internal/server/ingest_test.go` | 2.1 | future protocol rejection test |
+| `internal/server/inventory_integration_test.go` | 2.2–2.4 | shared fixture cleanup for typed tables |
+| `README.md` | 2.7 | compatibility and upgrade ordering |
+| `phase_03.md` | 2.7 | execution record |
 
 ## 6. In-flight work
 
-`No command is active. Sub-phases 1.6, 1.7, and 1.8 are closed after the complete gate matrix passed. Focused in-scope tests raised coverage to 75.0% (3449/4598); fmt-check, lint, build, make test, race-alert, L2, and coverage-gate are green. Phase 1 is complete and its local commit is being created; phase 2 sub-phase 2.1 is open for the next execution turn.`
+`Phase 2 is complete. Migration 0007, typed row/writer code, pipeline typed routing, v2 golden fixtures, check/agent Fact conversion, README compatibility text, and named INT-FACT-001..006 integration tests are present. The full technical gate matrix is green, including L2 and coverage 75.1%. Preserve v1 golden fixtures; INT-GOLDEN-001 explicitly constructs protocol v1 and passes, while INT-GOLDEN-002 validates separate v2 fixtures. The next unit is 3.1 and is not yet opened.`
 
 ## 7. Verification state
 
@@ -195,6 +223,10 @@ the units that touched it, so a later audit can attribute every diff.
 | phase1-post-modification-coverage | `make coverage-gate` | FAIL — global 72.7% (3343/4598), threshold 75%; L2 not started | 2026-08-29 |
 | phase1-focused-tests-coverage | `make coverage-gate` | FAIL — global 74.5% (3426/4598), threshold 75%; focused package tests passed; no phase commit | 2026-08-29 |
 | phase1-final-matrix | `make fmt-check && make lint && make build && make test && go test -race ./internal/alert/... && timeout --signal=TERM 180s make test-integration && make coverage-gate` | PASS — all gates green; global coverage 75.0% (3449/4598) | 2026-08-29 |
+| phase2-focused-coverage | `make coverage-gate` | PASS — global 75.1% (3574/4762) | 2026-08-29 |
+| phase2-golden-regression | `go test ./internal/wire && timeout --signal=TERM 120s go test -tags=integration -run TestINTGOLDEN001_NormalizedEnvelopeStructure ./internal/wire -count=1` | PASS — v1 fixtures unchanged and v2 golden fixture test green | 2026-08-29 |
+| phase2-gate-matrix | `make fmt-check && make lint && make build && make test && go test -race ./internal/alert/... && timeout --signal=TERM 180s make test-integration` | PASS — all packages and L2 integration green | 2026-08-29 |
+| phase2-fact-acceptance | `timeout --signal=TERM 180s go test -tags=integration -run 'TestINTFACT00[1-6]' ./internal/server -count=1` | PASS — INT-FACT-001..006 green | 2026-08-29 |
 
 ## 8. Runtime deviations from the plan
 
@@ -212,6 +244,9 @@ the units that touched it, so a later audit can attribute every diff.
 | D-012 | 1.6–1.8 | Test constructors with nil dependencies | Initial constructor test called through a typed-nil pool and panicked; removed the invalid database call while retaining constructor/kind coverage | Go interface typed-nil behavior; corrected and verified |
 | D-009 | 1.4 | Add dedicated `store_integration_test.go` for INT-ALERT-003..007 | Added dedicated PostgreSQL integration coverage with a test-local alert schema; all five IDs are green | Existing shared fixture did not expose the alert migration schema, so the test provisions only the planned alert tables |
 | D-010 | 1.6–1.8 | Keep the global coverage gate green | New API/config/notifier/engine integration code lowered measured global coverage to 72.7%; phase close is held for targeted in-scope tests | Coverage threshold and scope remain unchanged; no production code is removed to mask the gap |
+| D-013 | 2.1–2.5 | Keep legacy v1 goldens unchanged while adding protocol-v2 goldens | The current protocol changed the existing integration harness to v2 and exposed a fixture mismatch; the harness now pins INT-GOLDEN-001 to `ProtocolVersionMin`, while separate v2 fixtures and INT-GOLDEN-002 validate facts | Backward compatibility requires two explicit golden contracts; no v1 fixture was regenerated |
+| D-014 | 2.2–2.7 | Close each sub-phase only after its named integration IDs exist and pass | Technical gates pass, but INT-FACT-001..006 are not yet implemented as named integration tests, so phase closure is held | Done criterion and STATE test board take precedence over aggregate L2 success |
+| D-015 | 2.2–2.7 | Complete the held phase only after named fact acceptance tests exist | Added `facts_integration_test.go` with INT-FACT-001..006; focused and full L2 runs pass | The earlier implementation had aggregate L2 coverage but lacked the plan's referenceable IDs |
 
 ## 9. Blockers and open questions
 
@@ -248,7 +283,7 @@ disagree with §1 and §4.
 |-------|------|--------|-------|
 | 0 — Alert data model and pure logic | phase_01.md | `DONE` | 7/7 sub-phases closed; primary `agent:gpt5.6-luna`; commit `ab5394f` |
 | 1 — Alert engine, notifiers, alert API | phase_02.md | `DONE` | 8/8 sub-phases closed; primary `agent:gpt5.6-luna`; phase commit pending |
-| 2 — Protocol v2: facts and typed storage | phase_03.md | `IN_PROGRESS` | 0/7 sub-phases closed; sub-phase 2.1 open; primary `agent:gpt5.6-luna` |
+| 2 — Protocol v2: facts and typed storage | phase_03.md | `DONE` | 7/7 sub-phases closed; INT-FACT-001..006 and INT-GOLDEN-002 green; phase-close commit pending; primary `agent:gpt5.6-luna` |
 | 3 — Contention: locks, activity, transactions | phase_04.md | `TODO` | 0/8 sub-phases closed; primary `agent:gpt5.6-luna` |
 | 4 — Space and maintenance: tables, indexes, vacuum, bloat | phase_05.md | `TODO` | 0/8 sub-phases closed; primary `agent:gpt5.6-luna` |
 | 5 — Configuration and durability: settings, WAL, checkpointer, I/O, archiver | phase_06.md | `TODO` | 0/9 sub-phases closed; primary `agent:gpt5.6-luna` |
@@ -261,7 +296,7 @@ disagree with §1 and §4.
 Status values: `TODO` · `IN_PROGRESS` · `DONE` · `SKIPPED` · `BLOCKED`
 A `SKIPPED` sub-phase or phase keeps its row and carries the reason.
 
-**1 of 11 phases `DONE`. Plan at 9% — phase 2 in progress.**
+**2 of 11 phases `DONE`. Plan at 18% — phase 3 ready.**
 
 ### Tests
 
@@ -324,14 +359,14 @@ throughout.
 | INT-CMD-009 | integration | 8 | `TODO` | phase 8 § 8.8 — The `pgstattuple` executor |
 | INT-CMD-010 | integration | 8 | `TODO` | phase 8 § 8.8 — The `pgstattuple` executor |
 | INT-CMD-011 | integration | 8 | `TODO` | phase 8 § 8.10 — Audit trail verification |
-| INT-FACT-001 | integration | 2 | `TODO` | phase 2 § 2.2 — Migration `0007_facts.sql` |
-| INT-FACT-002 | integration | 2 | `TODO` | phase 2 § 2.3 — Store row types and writers |
-| INT-FACT-003 | integration | 2 | `TODO` | phase 2 § 2.3 — Store row types and writers |
-| INT-FACT-004 | integration | 2 | `TODO` | phase 2 § 2.4 — Pipeline routing for facts and relation metrics |
-| INT-FACT-005 | integration | 2 | `TODO` | phase 2 § 2.4 — Pipeline routing for facts and relation metrics |
-| INT-FACT-006 | integration | 2 | `TODO` | phase 2 § 2.4 — Pipeline routing for facts and relation metrics |
+| INT-FACT-001 | integration | 2 | `PASS` | phase 2 § 2.2 — Migration `0007_facts.sql` |
+| INT-FACT-002 | integration | 2 | `PASS` | phase 2 § 2.3 — Store row types and writers |
+| INT-FACT-003 | integration | 2 | `PASS` | phase 2 § 2.3 — Store row types and writers |
+| INT-FACT-004 | integration | 2 | `PASS` | phase 2 § 2.4 — Pipeline routing for facts and relation metrics |
+| INT-FACT-005 | integration | 2 | `PASS` | phase 2 § 2.4 — Pipeline routing for facts and relation metrics |
+| INT-FACT-006 | integration | 2 | `PASS` | phase 2 § 2.4 — Pipeline routing for facts and relation metrics |
 | INT-GOLDEN-001 | integration | 2 | `EXTEND` | exists from plan 001 — extended by phase 2 § 2.5 (Golden payload for protocol v2) |
-| INT-GOLDEN-002 | integration | 2 | `TODO` | phase 2 § 2.5 — Golden payload for protocol v2 |
+| INT-GOLDEN-002 | integration | 2 | `PASS` | phase 2 § 2.5 — Golden payload for protocol v2 |
 | INT-HOST-001 | integration | 6 | `TODO` | phase 6 § 6.2 — cgroup v1 and v2 detection |
 | INT-HOST-002 | integration | 6 | `TODO` | phase 6 § 6.3 — Agent wiring |
 | INT-HOST-003 | integration | 6 | `TODO` | phase 6 § 6.4 — Server routing and host API |
@@ -405,7 +440,7 @@ other docs get their own rows.
 |-----|-------|--------|-------|
 | README.md | 0 | `DONE` | verified and corrected obsolete unshipped claim in 0.7 |
 | README.md | 1 | `TODO` | closing sub-phase of phase_02.md |
-| README.md | 2 | `TODO` | closing sub-phase of phase_03.md |
+| README.md | 2 | `DONE` | protocol 1/2 compatibility, upgrade ordering, and supported range documented in 2.7 |
 | README.md | 3 | `TODO` | closing sub-phase of phase_04.md |
 | README.md | 4 | `TODO` | closing sub-phase of phase_05.md |
 | README.md | 5 | `TODO` | closing sub-phase of phase_06.md |

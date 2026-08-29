@@ -65,8 +65,8 @@ func IngestHandler(auth *Auth, inv *Inventory, pipeline *Pipeline) http.HandlerF
 			http.Error(w, fmt.Sprintf(`{"error":"bad json: %v"}`, err), http.StatusBadRequest)
 			return
 		}
-		if env.ProtocolVersion != wire.ProtocolVersion {
-			http.Error(w, fmt.Sprintf(`{"error":"unsupported protocol_version %d, expected %d"}`, env.ProtocolVersion, wire.ProtocolVersion), http.StatusBadRequest)
+		if env.ProtocolVersion < wire.ProtocolVersionMin || env.ProtocolVersion > wire.ProtocolVersionCurrent {
+			http.Error(w, fmt.Sprintf(`{"error":"unsupported protocol_version %d, supported range %d-%d"}`, env.ProtocolVersion, wire.ProtocolVersionMin, wire.ProtocolVersionCurrent), http.StatusBadRequest)
 			return
 		}
 		// Check sent_at age

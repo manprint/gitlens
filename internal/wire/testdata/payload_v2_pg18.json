@@ -1,0 +1,33 @@
+{
+  "protocol_version": 2,
+  "agent_id": "",
+  "agent_version": "",
+  "sent_at": "0001-01-01T00:00:00Z",
+  "instances": [
+    {
+      "instance_id": "",
+      "cluster_id": "",
+      "cluster_id_source": "manual",
+      "addr": "",
+      "port": 0,
+      "pg_version": 180002,
+      "role": "primary",
+      "perm_tier": "T0",
+      "capabilities": [],
+      "databases": [],
+      "results": [
+        {
+          "check": "settings",
+          "ts": "0001-01-01T00:00:00Z",
+          "facts": [
+            {
+              "kind": "setting",
+              "key": "work_mem",
+              "value_text": "4MB"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

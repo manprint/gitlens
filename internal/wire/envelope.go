@@ -1,8 +1,16 @@
 package wire
 
-import "time"
+import (
+	"encoding/json"
+	"fmt"
+	"time"
+)
 
-const ProtocolVersion = 1
+const (
+	ProtocolVersionMin     = 1
+	ProtocolVersionCurrent = 2
+	ProtocolVersion        = ProtocolVersionCurrent
+)
 
 type Envelope struct {
 	ProtocolVersion int        `json:"protocol_version"`
@@ -54,7 +62,41 @@ type Result struct {
 	Error      string            `json:"error,omitempty"`
 	SkipReason string            `json:"skip_reason,omitempty"`
 	Metrics    []Metric          `json:"metrics,omitempty"`
+	Facts      []Fact            `json:"facts,omitempty"`
 	QueryTexts map[string]string `json:"query_texts,omitempty"` // queryid -> text
+}
+
+// Fact is an observation that is not a number: an index definition, a GUC
+// value, a lock tree, or a query plan. Exactly one value representation is set.
+type Fact struct {
+	Kind      string            `json:"kind"`
+	Key       string            `json:"key"`
+	Labels    map[string]string `json:"labels,omitempty"`
+	ValueText string            `json:"value_text,omitempty"`
+	ValueJSON json.RawMessage   `json:"value_json,omitempty"`
+}
+
+func (f Fact) Validate() error {
+	if f.Kind == "" {
+		return fmt.Errorf("fact kind is required")
+	}
+	if f.Key == "" {
+		return fmt.Errorf("fact key is required")
+	}
+	switch f.Kind {
+	case "index_def", "setting", "lock_tree", "plan":
+	default:
+		return fmt.Errorf("unknown fact kind %q", f.Kind)
+	}
+	textSet := f.ValueText != ""
+	jsonSet := len(f.ValueJSON) > 0
+	if textSet == jsonSet {
+		return fmt.Errorf("exactly one fact value is required")
+	}
+	if jsonSet && !json.Valid(f.ValueJSON) {
+		return fmt.Errorf("fact value_json is malformed")
+	}
+	return nil
 }
 
 type Metric struct {

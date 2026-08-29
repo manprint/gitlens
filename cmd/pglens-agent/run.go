@@ -133,6 +133,14 @@ func runAgentCommand(args []string) {
 				m = append(m, wire.Metric{Name: pm.Name, Labels: pm.Labels, Value: pm.Value, Kind: string(pm.Kind)})
 			}
 			wr := wire.Result{Check: res.Entry.CheckName, TS: clk.Now(), Database: res.Entry.Database, Metrics: m, Truncated: res.Truncated}
+			for _, f := range res.Facts {
+				wf := wire.Fact{Kind: f.Kind, Key: f.Key, Labels: f.Labels, ValueText: f.ValueText, ValueJSON: f.ValueJSON}
+				if err := wf.Validate(); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: drop invalid fact check=%s key=%s: %v\n", res.Entry.CheckName, f.Key, err)
+					continue
+				}
+				wr.Facts = append(wr.Facts, wf)
+			}
 			if res.Err != nil {
 				wr.Error = res.Err.Error()
 			}

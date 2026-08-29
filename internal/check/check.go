@@ -68,9 +68,19 @@ func (r Requirements) Supports(role pgtype.Role, v pgtype.PGVersion, tier pgtype
 // Result is the result of a check scrape.
 type Result struct {
 	Metrics    []pgtype.Metric
+	Facts      []Fact
 	StatsReset *time.Time
 	Truncated  bool
 	QueryTexts map[int64]string
+}
+
+// Fact is the check-local representation of a non-numeric observation.
+type Fact struct {
+	Kind      string
+	Key       string
+	Labels    map[string]string
+	ValueText string
+	ValueJSON []byte
 }
 
 // Check is the interface for a monitoring check.

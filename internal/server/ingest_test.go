@@ -18,7 +18,7 @@ func TestIngest_RejectsUnknownProtocolVersion(t *testing.T) {
 	t.Parallel()
 	auth := NewAuth("token")
 	h := IngestHandler(auth, NewInventory(nil), NewPipeline(nil, nil))
-	env := wire.Envelope{ProtocolVersion: 2, AgentID: "a", SentAt: time.Now()}
+	env := wire.Envelope{ProtocolVersion: 3, AgentID: "a", SentAt: time.Now()}
 	body, _ := json.Marshal(env)
 	req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")

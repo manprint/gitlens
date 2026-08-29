@@ -133,7 +133,9 @@ func TestINTGOLDEN001_NormalizedEnvelopeStructure(t *testing.T) {
 		// Build the envelope by collecting results from all checks
 		now := time.Now()
 		env := &wire.Envelope{
-			ProtocolVersion: wire.ProtocolVersion,
+			// INT-GOLDEN-001 is the frozen v1 regression fixture. Keep these
+			// documents unchanged while protocol-v2 fixtures are tested separately.
+			ProtocolVersion: wire.ProtocolVersionMin,
 			AgentID:         uuid.NewString(),
 			SentAt:          now,
 			Instances: []wire.Instance{

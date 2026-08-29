@@ -825,6 +825,10 @@ UPDATE agents SET revoked_at = NULL WHERE agent_id = '...';
 
 The agent will resume after the next health check (default every push interval, ~15 seconds). Do not exit the agent container/service — the `revoked` state is visible in logs and health checks; restarting just delays visibility.
 
+**Ingest returns HTTP 400 for an unsupported protocol**
+
+A response such as `{"error":"unsupported protocol_version 3, supported range 1-2"}` means the agent is newer than the server. Upgrade the server first, then retry the agent.
+
 **Databases missing or showing `skip_reason=db_budget`**
 
 By default, the agent monitors the 10 most active databases per instance (measured by `xact_commit`). If you have more databases:
@@ -917,6 +921,9 @@ The agent did not persist its identity across a restart. Verify:
 To fix: mount the persistent volume and restart. Old duplicate instances will age out (last_seen >3× interval) and trigger `agent_down` events.
 
 ## Known limits
+
+The server accepts agents speaking protocol version 1 or 2. An agent newer than
+the server is rejected, so upgrade the server before upgrading agents.
 
 **Agent:**
 - **No token rotation or mTLS** — the bootstrap token is a shared secret; revocation only (no key rotation, no mutual TLS, no approval queue, single-tenant)

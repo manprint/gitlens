@@ -24,6 +24,7 @@ type ScheduleEntry struct {
 type EntryResult struct {
 	Entry      ScheduleEntry
 	Metrics    []pgtype.Metric
+	Facts      []check.Fact
 	Truncated  bool
 	Err        error
 	QueryTexts map[int64]string // queryid -> text; stat_statements.go is the only producer today
@@ -308,6 +309,7 @@ func (s *Scheduler) scrapeEntry(parentCtx context.Context, entry schedEntry) {
 			Database:   entry.database,
 		},
 		Metrics:    result.Metrics,
+		Facts:      result.Facts,
 		Truncated:  result.Truncated,
 		QueryTexts: result.QueryTexts,
 		StatsReset: result.StatsReset,
