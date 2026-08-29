@@ -28,3 +28,20 @@ func TestMigrations_0007_ContainsHypertables(t *testing.T) {
 	require.Contains(t, sql, "create_hypertable('metrics_indexes'")
 	require.Contains(t, sql, "create_hypertable('metrics_bloat'")
 }
+
+func TestMigrations_0009_ContainsFindings(t *testing.T) {
+	data, err := migrationFS.ReadFile("migrations/0009_findings.sql")
+	require.NoError(t, err)
+	sql := string(data)
+	require.Contains(t, sql, "CREATE TABLE IF NOT EXISTS findings")
+	for _, index := range []string{
+		"findings_lookup_idx",
+		"findings_instance_idx",
+		"findings_rule_idx",
+	} {
+		require.Contains(t, sql, "CREATE INDEX IF NOT EXISTS "+index)
+	}
+	for _, state := range []string{"open", "degraded", "muted", "resolved"} {
+		require.Contains(t, sql, "'"+state+"'")
+	}
+}

@@ -53,6 +53,7 @@ func (a *API) RegisterRoutes(r chi.Router) {
 	a.registerRelationRoutes(r)
 	a.registerSettingsRoutes(r)
 	a.registerHostRoutes(r)
+	a.registerFindingsRoutes(r)
 }
 
 // Ready verifies that the database is reachable and the complete migration

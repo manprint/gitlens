@@ -2,7 +2,7 @@
 
 > **READ THIS FILE FIRST at the start of every session, before any other plan
 > file. OPEN a unit in §1 before touching code; CLOSE it after the gates pass.**
-> **Last updated:** 2026-08-29 (phase 6 closed) by `agent:gpt5.6-luna` | **Session:** 14
+> **Last updated:** 2026-08-29 (phase 7 closed) by `agent:gpt5.6-luna` | **Session:** 19
 
 ## 0. Protocol
 
@@ -49,13 +49,13 @@ work — a phase that looks blocked is a signal to read §9, not to skip ahead.
 ## 1. Current unit
 
 - **Type:** sub-phase
-- **ID:** `7.1`
+- **ID:** `8.1`
 - **Status:** `none`
-- **Intent:** begin the advisor engine and persisted findings model.
-- **Phase:** 7 — Advisor engine and rule packs ([phase_08.md](phase_08.md))
-- **Next action:** open `phase_08.md` at sub-phase 7.1 before editing.
+- **Intent:** add the command channel migration and schema.
+- **Phase:** 8 — Command channel and query plans ([phase_09.md](phase_09.md))
+- **Next action:** read `phase_09.md` §8.1 and add `internal/store/migrations/0010_commands.sql` plus migration coverage.
 - **Assigned:** `agent:gpt5.6-luna`
-- **Repo state:** branch `main`, phase 5 close is `a0dcbf3`; phase 6 gates and focused E2E are green, ready for phase-6 commit.
+- **Repo state:** branch `main`, phase 6 close is `436ac99` (docs SHA sync `73e2355`); phase 7 implementation, tests and docs are ready for the phase-close commit.
 
 ## 2. Feature context (self-contained recap)
 
@@ -172,6 +172,17 @@ The authoritative gate commands are the Makefile targets. These are identical to
 | 52 | sub-phase | 6.5 | agent:gpt5.6-luna | Added read-only host mounts/environment and deterministic workload cleanup correction | `test/compose/agent-container.yml`, `test/harness/harness.go`, `test/workload/distinct.go`, `test/workload/distinct_test.go`, `STATE.md` | INT-HOST-001..005 focused validation and SYS-HARNESS-001 PASS | phase-6 close |
 | 53 | sub-phase | 6.6 | agent:gpt5.6-luna | Documented host configuration, container mounts, local-only association and host API behavior | `README.md`, `phase_07.md`, `STATE.md` | README/quality review PASS | phase-6 close |
 | 54 | phase | 6 | agent:gpt5.6-luna | Synchronized phase-6 state, deviation D-027 and final gate evidence | `STATE.md`, `phase_07.md`, `README.md` | fmt/lint/build/unit-race/coverage 75.1% and L2 exit 0; focused E2E exit 0 | `436ac99` |
+| 55 | sub-phase | 7.1 | agent:gpt5.6-luna | Added findings migration with durable state, evidence and lookup indexes | `internal/store/migrations/0009_findings.sql`, `internal/store/migrate_test.go`, `STATE.md` | `go test ./internal/store -run TestMigrations_0009_ContainsFindings` and diff-check PASS | phase-7 close |
+| 56 | sub-phase | 7.2 | agent:gpt5.6-luna | Added advisor severity/scope/state/finding contract and deterministic rule registry | `internal/advisor/doc.go`, `internal/advisor/rule.go`, `internal/advisor/registry.go`, `internal/advisor/rule_test.go`, `STATE.md` | `go test ./internal/advisor` PASS | phase-7 close |
+| 57 | sub-phase | 7.3 | agent:gpt5.6-luna | Added bounded snapshot model, canonical metric lookup and no-history behavior | `internal/advisor/snapshot.go`, `internal/advisor/snapshot_test.go`, `internal/advisor/snapshot_integration_test.go`, `STATE.md` | advisor unit tests and INT-ADV-002/003 integration PASS; query count ≤12 | phase-7 close |
+| 58 | sub-phase | 7.4 | agent:gpt5.6-luna | Completed rule pack A for query latency, execution share, regressions, temporary I/O, cache misses and transaction risks | `internal/advisor/rules_query.go`, `internal/advisor/rules_query_test.go`, `internal/advisor/ruletest_test.go`, `STATE.md` | full pack-A firing/quiet matrix, degraded regression and contract sweep PASS | phase-7 close |
+| 59 | sub-phase | 7.5 | agent:gpt5.6-luna | Added rule pack B for index, table, vacuum and bloat findings, including expression-index parsing and degraded short-history behavior | `internal/advisor/snapshot.go`, `internal/advisor/rules_relation.go`, `internal/advisor/rules_relation_test.go`, `STATE.md` | pack-B firing/quiet matrix, short-history, expression parser, duplicate-name and contract tests PASS | phase-7 close |
+| 60 | sub-phase | 7.6 | agent:gpt5.6-luna | Added rule pack C for configuration, connections, durability, archive and backup findings with host-memory degradation | `internal/advisor/snapshot.go`, `internal/advisor/rules_config.go`, `internal/advisor/rules_config_test.go`, `internal/advisor/ruletest_test.go`, `STATE.md` | pack-C firing/quiet matrix, host degradation, cgroup preference, drift exclusion and contract tests PASS | phase-7 close |
+| 61 | sub-phase | 7.7 | agent:gpt5.6-luna | Added bounded advisor engine, durable finding store, per-instance advisory lock leadership, panic isolation and lifecycle wiring | `internal/advisor/engine.go`, `internal/advisor/store.go`, `internal/advisor/engine_test.go`, `internal/advisor/engine_integration_test.go`, `internal/advisor/store_test.go`, `cmd/pglens-server/main.go`, `STATE.md` | focused INT-ADV-004/005 and full gate matrix PASS | phase-7 close |
+| 62 | sub-phase | 7.8 | agent:gpt5.6-luna | Added findings list, lookup, mute/unmute and advisor catalogue HTTP endpoints | `internal/server/api_findings.go`, `internal/server/api_findings_test.go`, `internal/server/api_findings_integration_test.go`, `internal/server/api.go`, `STATE.md` | focused INT-ADV-006 and full gate matrix PASS | phase-7 close |
+| 63 | sub-phase | 7.9 | agent:gpt5.6-luna | Completed the advisor integration sweep and deterministic seed fixture for the complete rule catalogue | `internal/advisor/rules_integration_test.go`, `test/fixtures/sql/advisor_seed.sql`, `STATE.md` | INT-ADV-007/008 PASS; full L2 PASS | phase-7 close |
+| 64 | sub-phase | 7.10 | agent:gpt5.6-luna | Documented advisor endpoints, JSON contracts, complete rule catalogue and operational limitations | `README.md`, `STATE.md` | README review and full phase gate matrix PASS | phase-7 close |
+| 65 | phase | 7 | agent:gpt5.6-luna | Synchronized phase-7 state, deviations and final gate evidence | `STATE.md`, `README.md`, all phase-7 implementation and test files | fmt/lint/build/unit-race/coverage 75.2%; advisor coverage 88.6%; full L2 exit 0 | phase-7 close |
 
 ## 5. Files touched
 
@@ -321,10 +332,39 @@ the units that touched it, so a later audit can attribute every diff.
 | `test/workload/distinct_test.go` | 6.5 | rotation boundary regression coverage |
 | `README.md` | 6.6 | host metrics configuration, Docker and API guide |
 | `phase_07.md` | 6.6 | phase execution record |
+| `internal/store/migrations/0009_findings.sql` | 7.1 | durable findings table and lookup indexes |
+| `internal/store/migrate_test.go` | 7.1 | migration structure coverage |
+| `internal/advisor/doc.go` | 7.2 | advisor package documentation |
+| `internal/advisor/rule.go` | 7.2 | finding and rule contracts |
+| `internal/advisor/registry.go` | 7.2 | deterministic rule registry |
+| `internal/advisor/rule_test.go` | 7.2 | rule contract tests |
+| `internal/advisor/snapshot.go` | 7.3, 7.5, 7.6 | bounded snapshot and history degradation |
+| `internal/advisor/snapshot_test.go` | 7.3 | snapshot and metric lookup tests |
+| `internal/advisor/snapshot_integration_test.go` | 7.3 | bounded snapshot integration coverage |
+| `internal/advisor/rules_query.go` | 7.4 | query and transaction rule pack |
+| `internal/advisor/rules_query_test.go` | 7.4 | query rule matrix |
+| `internal/advisor/ruletest_test.go` | 7.4–7.6 | shared rule contract and degradation tests |
+| `internal/advisor/rules_relation.go` | 7.5 | relation, index, vacuum and bloat rule pack |
+| `internal/advisor/rules_relation_test.go` | 7.5 | relation rule matrix and parsing tests |
+| `internal/advisor/rules_config.go` | 7.6 | configuration, connection and durability rule pack |
+| `internal/advisor/rules_config_test.go` | 7.6 | configuration rule matrix |
+| `internal/advisor/engine.go` | 7.7 | advisor lifecycle and per-instance evaluation |
+| `internal/advisor/engine_test.go` | 7.7 | engine scheduling, lock and panic isolation tests |
+| `internal/advisor/engine_integration_test.go` | 7.7 | INT-ADV-004/005 |
+| `internal/advisor/store.go` | 7.7 | durable finding persistence and resolution |
+| `internal/advisor/store_test.go` | 7.7 | store mock-backed coverage |
+| `internal/server/api_findings.go` | 7.8 | findings and advisor catalogue API |
+| `internal/server/api_findings_test.go` | 7.8 | findings API contract tests |
+| `internal/server/api_findings_integration_test.go` | 7.8 | INT-ADV-006 |
+| `internal/server/api.go` | 7.8 | findings route registration |
+| `cmd/pglens-server/main.go` | 7.7 | advisor lifecycle wiring |
+| `internal/advisor/rules_integration_test.go` | 7.9 | INT-ADV-007/008 |
+| `test/fixtures/sql/advisor_seed.sql` | 7.9 | deterministic advisor acceptance seed |
+| `README.md` | 7.10 | advisor API, catalogue and limitations |
 
 ## 6. In-flight work
 
-`none — tree consistent; phase 6.4–6.6 implementation, focused host tests, SYS-HARNESS-001 smoke and full local/L2 gates are complete. The short verification run passed with exit 0 in 27.323s and cleaned up its containers. The earlier SYS-LOAD-008 diagnostic was not claimed as PASS; D-027 records the bounded rotation and parent-death cleanup correction.`
+`none — tree consistent; phase 7 implementation, tests and documentation are complete, all phase gates pass, and the phase-close commit is pending. Phase 8 is next.`
 
 ## 7. Verification state
 
@@ -387,6 +427,9 @@ the units that touched it, so a later audit can attribute every diff.
 | phase6-e2e-smoke-rerun | `timeout --signal=TERM 2100s make test-e2e` | BLOCKED — harness agent container became `unhealthy`; Docker healthcheck repeatedly failed `GET http://127.0.0.1:9187/healthz` with `connection refused`, while server/database were healthy; terminated with exit 130 after diagnosis | 2026-08-29 |
 | phase6-focused-duration-cleanup | `go test ./test/workload -run TestDistinct_RotationCountHonorsDurationWindow -count=1 && timeout --signal=TERM 120s go test -tags=e2e -timeout=90s -count=1 ./test/e2e -run '^TestSmoke_HarnessStartsHealthy$'` | PASS — the 390s boundary maps to six rotations and SYS-HARNESS-001 completed real container startup/teardown in 27.323s, exit 0 | 2026-08-29 |
 | phase6-final-post-correction | `timeout --signal=TERM 1800s bash -lc 'make fmt-check && make lint && make build && make test && make coverage-gate && make test-integration'` | PASS — all gates green; coverage 75.1% (4377/5830), L2 exit 0 | 2026-08-29 |
+| phase7-focused-integration | `go test -tags=integration -race ./internal/advisor -run 'TestINTADV00[4578]' -count=1 && go test -tags=integration -race ./internal/server -run 'TestINTADV006_' -count=1` | PASS — INT-ADV-004/005/007/008 and INT-ADV-006 green | 2026-08-29 |
+| phase7-coverage-retry | `make test && make coverage-gate` | PASS — advisor coverage 88.6% (505/570); global coverage 75.2% (4905/6523) | 2026-08-29 |
+| phase7-final-matrix | `make fmt-check && make lint && make build && make test && make coverage-gate && make test-integration` | PASS — all gates green; advisor coverage 88.6%, global coverage 75.2%, full L2 exit 0 | 2026-08-29 |
 
 ## 8. Runtime deviations from the plan
 
@@ -419,6 +462,8 @@ the units that touched it, so a later audit can attribute every diff.
 | D-024 | 4.8/5.2 | Phase4 close ledger initially referenced pre-amend SHA `3b41c3b` | Phase4 commit was amended to include final STATE synchronization; actual verified SHA is `6cd97a9` and ledger rows were corrected | Repository history is authoritative; no user code was reverted |
 | D-025 | 5.6 | INT-ARCH-001/002 require archive-mode transitions and archive statistics changes | Initial run confirmed the pgtest harness cannot bootstrap `archive_mode` or perform the required controlled PostgreSQL restart; superseded for acceptance by D-026 | External harness capability; retained as historical diagnosis |
 | D-026 | 5.6 | INT-ARCH-001/002 are specified as archive-enabled e2e scenarios | The supported repository harness cannot bootstrap/restart `archive_mode`; replaced the skips with deterministic scraper-contract acceptance tests over controlled `pg_stat_archiver` rows, while retaining the real archive-off integration path | No archive_mode behavior is fabricated; live archive-enabled verification remains a harness limitation |
+| D-028 | 7.7 | Advisor integration tests can use the shared pgtest base schema unchanged | The engine integration setup drops and recreates its test-local `agents`, `clusters`, `instances` and `findings` tables before seeding | Bounded snapshot tests may leave a simplified `instances` table; the isolated setup prevents schema interference without changing production behavior |
+| D-029 | 7.7 | The global coverage floor remains green after adding the advisor store | The first phase-7 coverage run measured 74.9%; added focused pgxmock coverage for store error and lifecycle paths, raising the final result to 75.2% | Coverage threshold and production scope are unchanged; the missing coverage was in planned persistence code |
 
 Phase-6 healthcheck blocker resolved: the agent health server is initialized
 before target connection retries; the subsequent `SYS-HARNESS-001` smoke passed
@@ -441,6 +486,10 @@ collector or API failure.
 
 Phase 5 acceptance criteria are covered. D-026 records that live archive-enabled transitions cannot be exercised by the current harness; deterministic contract tests cover the required failure/success metric semantics without claiming that live transition. No scope, threshold, or contract was changed.
 
+Phase 7 acceptance has no open blocker: INT-ADV-001..008 and the complete local
+gate matrix pass. The remaining `SYS-ADV-001..003` system tests are intentionally
+scheduled for the phase-9 end-to-end sweep.
+
 ## 10. Do-not-repeat
 
 Approaches already ruled out, so nobody spends a session rediscovering them.
@@ -453,6 +502,7 @@ Approaches already ruled out, so nobody spends a session rediscovering them.
 | 4 | Do not `CREATE EXTENSION` from the agent, for any reason | plan 001's constraint is that no monitored instance needs one; the moment the agent creates one, that constraint is gone (D6) | plan authoring (D6) |
 | 5 | Do not evaluate the command gates server-side | the agent holds the authoritative tier and per-target flags; duplicating them on the server lets the two drift silently | plan authoring (phase 8 § 8.3) |
 | 6 | Do not give each advisor rule its own queries | D26 forces one bounded snapshot per instance per run, so adding a rule costs no database load | plan authoring (D26) |
+| 7 | Do not resolve advisor findings globally across all instances or rules | resolution must be scoped to the instance and rule IDs evaluated in the current run; panicked or skipped rules must remain untouched | phase 7.7 implementation |
 
 ## 11. Progress board
 
@@ -470,7 +520,7 @@ disagree with §1 and §4.
 | 4 — Space and maintenance: tables, indexes, vacuum, bloat | phase_05.md | `DONE` | 8/8 sub-phases closed; coverage 75.1%; INT-TBL/IDX/VAC/BLOAT and INT-CHECK-016 green; primary `agent:gpt5.6-luna`; phase commit recorded in §4 |
 | 5 — Configuration and durability: settings, WAL, checkpointer, I/O, archiver | phase_06.md | `DONE` | 9/9 sub-phases closed; coverage 75.2%; full L2 PASS; D-026 records live archive-mode harness limitation; phase commit `a0dcbf3`; primary `agent:gpt5.6-luna` |
 | 6 — Host and container metrics | phase_07.md | `DONE` | 6/6 sub-phases closed; INT-HOST-001..005 and SYS-HARNESS-001 focused validation green; coverage 75.1%; phase commit `436ac99`; primary `agent:gpt5.6-luna` |
-| 7 — Advisor engine and rule packs | phase_08.md | `TODO` | 0/10 sub-phases closed; primary `agent:gpt5.6-luna` |
+| 7 — Advisor engine and rule packs | phase_08.md | `DONE` | 10/10 sub-phases closed; INT-ADV-001..008 green; advisor coverage 88.6%; global coverage 75.2%; phase commit pending |
 | 8 — Command channel and query plans | phase_09.md | `TODO` | 0/11 sub-phases closed; primary `agent:gpt5.6-luna` |
 | 9 — L3 end-to-end scenarios | phase_10.md | `TODO` | 0/8 sub-phases closed; primary `agent:gpt5.6-luna` |
 | 10 — Packaging, CI, final documentation | phase_11.md | `TODO` | 0/5 sub-phases closed; primary `agent:gpt5.6-luna` |
@@ -478,7 +528,7 @@ disagree with §1 and §4.
 Status values: `TODO` · `IN_PROGRESS` · `DONE` · `SKIPPED` · `BLOCKED`
 A `SKIPPED` sub-phase or phase keeps its row and carries the reason.
 
-**6 of 11 phases `DONE`. Plan at 54% — phase 7 is next.**
+**7 of 11 phases `DONE`. Plan at 63% — phase 8 is next.**
 
 ### Tests
 
@@ -495,14 +545,14 @@ throughout.
 | INT-ACT-002 | integration | 3 | `PASS` | phase 3 § 3.3 — Extend the `activity` check |
 | INT-ACT-003 | integration | 3 | `PASS` | phase 3 § 3.5 — Contention API |
 | INT-ACT-004 | integration | 3 | `PASS` | phase 3 § 3.7 — Contention integration test sweep |
-| INT-ADV-001 | integration | 7 | `TODO` | phase 7 § 7.1 — Migration `0009_findings.sql` |
-| INT-ADV-002 | integration | 7 | `TODO` | phase 7 § 7.3 — The snapshot |
-| INT-ADV-003 | integration | 7 | `TODO` | phase 7 § 7.3 — The snapshot |
-| INT-ADV-004 | integration | 7 | `TODO` | phase 7 § 7.7 — The advisor engine |
-| INT-ADV-005 | integration | 7 | `TODO` | phase 7 § 7.7 — The advisor engine |
-| INT-ADV-006 | integration | 7 | `TODO` | phase 7 § 7.8 — Findings API |
-| INT-ADV-007 | integration | 7 | `TODO` | phase 7 § 7.9 — Advisor integration sweep |
-| INT-ADV-008 | integration | 7 | `TODO` | phase 7 § 7.9 — Advisor integration sweep |
+| INT-ADV-001 | integration | 7 | `PASS` | phase 7 § 7.1 — Migration `0009_findings.sql` |
+| INT-ADV-002 | integration | 7 | `PASS` | phase 7 § 7.3 — bounded snapshot |
+| INT-ADV-003 | integration | 7 | `PASS` | phase 7 § 7.3 — no-history/degraded snapshot |
+| INT-ADV-004 | integration | 7 | `PASS` | phase 7 § 7.7 — advisor engine evaluates and persists findings |
+| INT-ADV-005 | integration | 7 | `PASS` | phase 7 § 7.7 — leader lock, panic isolation and resolution scope |
+| INT-ADV-006 | integration | 7 | `PASS` | phase 7 § 7.8 — findings list, lookup and mute flow |
+| INT-ADV-007 | integration | 7 | `PASS` | phase 7 § 7.9 — exact advisor rule catalogue |
+| INT-ADV-008 | integration | 7 | `PASS` | phase 7 § 7.9 — T0 missing bloat data degrades cleanly |
 | INT-ALERT-001 | integration | 1 | `PASS` | phase 1 § 1.2 — SQL sources |
 | INT-ALERT-002 | integration | 1 | `PASS` | phase 1 § 1.2 — SQL sources |
 | INT-ALERT-003 | integration | 1 | `PASS` | phase 1 § 1.4 — Alert persistence and once-only delivery |
@@ -627,7 +677,7 @@ other docs get their own rows.
 | README.md | 4 | `TODO` | closing sub-phase of phase_05.md |
 | README.md | 5 | `TODO` | closing sub-phase of phase_06.md |
 | README.md | 6 | `TODO` | closing sub-phase of phase_07.md |
-| README.md | 7 | `TODO` | closing sub-phase of phase_08.md |
+| README.md | 7 | `DONE` | advisor endpoints, JSON contracts, complete rule catalogue and limitations documented in 7.10 |
 | README.md | 8 | `TODO` | closing sub-phase of phase_09.md |
 | README.md | 9 | `TODO` | closing sub-phase of phase_10.md |
 | README.md | 10 | `TODO` | closing sub-phase of phase_11.md |

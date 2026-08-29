@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/manprint/pglens/internal/advisor"
 	"github.com/manprint/pglens/internal/alert"
 	"github.com/manprint/pglens/internal/alert/notify"
 	"github.com/manprint/pglens/internal/server"
@@ -104,6 +105,9 @@ func main() {
 	alertEngine := alert.NewEngineWithInterval(pool, nil, alertCfg.Interval, alertStore, alertNotifier, alertSources)
 	alertEngine.Start(startupCtx)
 	defer alertEngine.Stop()
+	advisorEngine := advisor.NewEngine(pool, nil, 0)
+	advisorEngine.Start(startupCtx)
+	defer advisorEngine.Stop()
 	alertAPI := server.NewAlertAPI(pool, alertStore)
 	router := server.NewRouter(auth, inv, pipeline, api, topoAPI, ashAPI, alertAPI)
 	srv := &http.Server{Addr: listen, Handler: router}

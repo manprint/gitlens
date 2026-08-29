@@ -133,6 +133,7 @@ PGLENS_LISTEN=:8080 \
 | `PGLENS_BOOTSTRAP_TOKEN` | string | — | shared secret for agent auth |
 | `PGLENS_BOOTSTRAP_TOKEN_FILE` | path | — | file containing the token (trailing newline trimmed) |
 | `PGLENS_ALERT_INTERVAL` | duration | `30s` | alert evaluation interval |
+| `PGLENS_ADVISOR_INTERVAL` | duration | `15m` | advisor finding evaluation interval |
 | `PGLENS_SLACK_WEBHOOK_URL` | URL | unset | enables Slack notifications |
 | `PGLENS_SLACK_WEBHOOK_URL_FILE` | path | unset | reads the Slack URL; takes precedence over the inline URL |
 | `PGLENS_WEBHOOK_URL` | URL | unset | enables generic webhook notifications |
@@ -157,6 +158,99 @@ curl -s -X DELETE http://localhost:8080/api/v1/silences/<silence-id>
 An alert listing contains objects such as `{"alert_key":"agent_down/...","state":"firing","severity":"critical","cluster_id":"7381927364512345678","suppressed":false}`. The API returns cluster identifiers as strings and timestamps in RFC 3339 format.
 
 Alerting delivers only to Slack and generic webhooks. Email and PagerDuty are not supported.
+
+## Advisor findings
+
+Advisor findings are durable, ranked statements about the current state of an
+instance. Unlike alerts, they are not one-time events: `open` means the rule is
+currently firing, `degraded` means a required metric, check, permission tier or
+host view is unavailable, `muted` means an operator has temporarily hidden the
+finding, and `resolved` means a later pass no longer reproduced it. Muting does
+not delete the finding; the next pass restores its real state after the mute
+expires or is removed.
+
+```sh
+curl -s 'http://localhost:8080/api/v1/findings?severity=critical&limit=100' | jq .
+curl -s 'http://localhost:8080/api/v1/advisor/rules' | jq .
+curl -s -X POST http://localhost:8080/api/v1/findings/<finding-id>/mute \
+  -H 'Content-Type: application/json' \
+  -d '{"reason":"accepted risk","until":"2026-08-29T11:00:00Z"}' | jq .
+```
+
+The findings listing returns a JSON array, for example:
+
+```json
+[{"finding_id":"txn.long_running/11111111-1111-1111-1111-111111111111","rule_id":"txn.long_running","severity":"warning","state":"open","scope":"instance","title":"Long-running transaction"}]
+```
+
+Mute returns the changed state and expiry; remove it with
+`DELETE /api/v1/findings/<finding-id>/mute` (which returns `204`):
+
+```json
+{"finding_id":"txn.long_running/11111111-1111-1111-1111-111111111111","state":"muted","muted_until":"2026-08-29T11:00:00Z","mute_reason":"accepted risk"}
+```
+
+The rule catalogue is available from `/api/v1/advisor/rules`; it is the
+authoritative list of rule IDs, severity, scope, required inputs and minimum
+permission tier. Findings are based on collected statistics, not query plans,
+so index recommendations are candidates rather than certainties. Rules that
+need seven days of history remain degraded until that history exists, and
+host-memory rules are unavailable for remote instances.
+
+The catalogue response is a JSON array, for example:
+
+```json
+[{"id":"query.slow_mean","severity":"warning","scope":"instance","needs":["Statements"],"min_tier":"T0"}]
+```
+
+### Advisor rule catalogue
+
+| Rule ID | Severity | Meaning |
+|---|---|---|
+| `query.slow_mean` | warning | A frequently executed query has a high mean execution time. |
+| `query.total_time_share` | warning | One query consumes a disproportionate share of execution time. |
+| `query.regression` | critical | A query is materially slower than its seven-day baseline. |
+| `query.temp_bytes_high` | warning | A query writes unusually large temporary volumes per call. |
+| `query.cache_miss_high` | info | A high-volume query has an excessive shared-buffer read ratio. |
+| `txn.long_running` | warning | A transaction has remained open beyond the safe age threshold. |
+| `txn.idle_in_transaction` | warning | A session is idle in a transaction for too long. |
+| `txn.prepared_orphan` | critical | An old prepared transaction can prevent vacuum progress. |
+| `txn.high_rollback_ratio` | info | The database is seeing an unusually high rollback ratio. |
+| `txn.wraparound_risk` | critical | Transaction ID age is approaching wraparound risk. |
+| `index.unused` | warning | A large non-primary index has no recorded usage over seven days. |
+| `index.duplicate` | warning | Multiple indexes share the same definition on one table. |
+| `index.redundant_prefix` | info | A shorter non-unique index is a prefix of another index. |
+| `index.invalid` | critical | An invalid index is still present and maintained on writes. |
+| `index.bloat_high` | warning | An index exceeds the configured bloat ratio and size thresholds. |
+| `index.divergence` | warning | An index definition is absent from a sibling cluster member. |
+| `table.dead_tuples_high` | warning | Dead tuples exceed the ratio and count thresholds. |
+| `table.never_autovacuumed` | warning | A large table has no recorded vacuum or autovacuum. |
+| `table.autoanalyze_stale` | info | Table modifications exceed the threshold since the last analyze. |
+| `table.wraparound_risk` | critical | A relation's frozen transaction ID age is dangerously high. |
+| `table.bloat_high` | warning | A table exceeds the configured bloat ratio and size thresholds. |
+| `table.seq_scan_heavy` | info | A large table is dominated by sequential scans and may need review. |
+| `vacuum.starvation` | critical | Too many bloated tables coincide with all autovacuum workers being busy. |
+| `vacuum.disabled` | critical | Autovacuum is disabled. |
+| `config.work_mem_oversized` | warning | The work_mem and connection budget can exceed usable memory. |
+| `config.work_mem_low` | info | work_mem is low while queries are writing temporary data. |
+| `config.shared_buffers_low` | warning | shared_buffers is below the recommended share of usable memory. |
+| `config.shared_buffers_high` | warning | shared_buffers consumes an excessive share of usable memory. |
+| `config.effective_cache_size_mismatch` | info | effective_cache_size is far outside the usable-memory range. |
+| `config.maintenance_work_mem_low` | info | maintenance_work_mem is low for a large host. |
+| `config.max_connections_high` | warning | Many configured connections appear unnecessary without a pooler. |
+| `config.track_io_timing_off` | info | I/O timing collection is disabled. |
+| `config.checkpoints_too_frequent` | warning | Requested checkpoints are occurring too frequently. |
+| `config.wal_keep_size_low` | warning | Replication lag exceeds wal_keep_size without slot protection. |
+| `config.fsync_off` | critical | fsync is disabled and committed data may be lost after a power failure. |
+| `config.full_page_writes_off` | critical | Full-page writes are disabled, reducing crash-recovery protection. |
+| `config.drift` | warning | A shared configuration setting differs between cluster members. |
+| `conn.saturation` | warning | Connection usage is above the saturation threshold. |
+| `conn.idle_share_high` | info | More than 70% of connections are idle. |
+| `archive.disabled` | info | WAL archiving is disabled. |
+| `archive.failing` | critical | Archive failures dominate the observed archive attempts. |
+| `archive.stalled` | critical | The last successful archive is older than the allowed interval. |
+| `backup.no_basebackup_seen` | warning | No recent base backup has been observed in the available history. |
+| `backup.no_strategy` | critical | Neither archiving nor a visible base-backup strategy is configured. |
 
 ## Running the agent
 
