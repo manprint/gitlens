@@ -109,6 +109,7 @@ type mockPool struct {
 	queryErrs     []error
 	queryRowVals  []*mockRow
 	execErrs      []error
+	execRows      []int64
 	execCalls     int
 	queryCalls    int
 	queryRowCalls int
@@ -121,6 +122,9 @@ func (m *mockPool) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTa
 	m.execCalls++
 	if i < len(m.execErrs) && m.execErrs[i] != nil {
 		return pgconn.CommandTag{}, m.execErrs[i]
+	}
+	if i < len(m.execRows) {
+		return pgconn.NewCommandTag(fmt.Sprintf("UPDATE %d", m.execRows[i])), nil
 	}
 	return pgconn.NewCommandTag("OK"), nil
 }

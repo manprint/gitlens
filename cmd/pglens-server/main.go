@@ -13,6 +13,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/manprint/pglens/internal/alert"
+	"github.com/manprint/pglens/internal/alert/notify"
 	"github.com/manprint/pglens/internal/server"
 	"github.com/manprint/pglens/internal/store"
 )
@@ -76,7 +78,34 @@ func main() {
 	staleness.Start(startupCtx)
 	defer staleness.Stop()
 
-	router := server.NewRouter(auth, inv, pipeline, api, topoAPI, ashAPI)
+	alertCfg, err := server.LoadAlertConfig(nil, nil)
+	if err != nil {
+		log.Fatalf("alert configuration: %v", err)
+	}
+	var alertStore alert.Store
+	var alertSources []alert.Source
+	var alertNotifier alert.Notifier
+	if pool != nil {
+		alertStore = alert.NewPgStore(pool)
+		alertSources = []alert.Source{alert.NewMetricSource(pool, alertCfg.Interval), alert.NewEventSource(pool, alertCfg.Interval)}
+		channels := []notify.Channel{}
+		if alertCfg.SlackURL != "" {
+			channels = append(channels, notify.NewSlack(alertCfg.SlackURL, nil))
+		}
+		if alertCfg.WebhookURL != "" {
+			channels = append(channels, notify.NewWebhook(alertCfg.WebhookURL, nil))
+		}
+		if len(channels) == 0 {
+			log.Println("no alert notification channel configured; alerts will be persisted but not delivered")
+		} else {
+			alertNotifier = alert.NewChannelNotifier(alertStore, channels...)
+		}
+	}
+	alertEngine := alert.NewEngineWithInterval(pool, nil, alertCfg.Interval, alertStore, alertNotifier, alertSources)
+	alertEngine.Start(startupCtx)
+	defer alertEngine.Stop()
+	alertAPI := server.NewAlertAPI(pool, alertStore)
+	router := server.NewRouter(auth, inv, pipeline, api, topoAPI, ashAPI, alertAPI)
 	srv := &http.Server{Addr: listen, Handler: router}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

@@ -8,7 +8,7 @@ import (
 
 // NewRouter builds the full server handler: liveness/readiness, the agent
 // ingest endpoint (wired to inv/pipeline), and the read API (api.RegisterRoutes).
-func NewRouter(auth *Auth, inv *Inventory, pipeline *Pipeline, api *API, topoAPI *TopologyAPI, ashAPI *AshAPI) http.Handler {
+func NewRouter(auth *Auth, inv *Inventory, pipeline *Pipeline, api *API, topoAPI *TopologyAPI, ashAPI *AshAPI, alertAPIs ...*AlertAPI) http.Handler {
 	r := chi.NewRouter()
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -27,5 +27,8 @@ func NewRouter(auth *Auth, inv *Inventory, pipeline *Pipeline, api *API, topoAPI
 	api.RegisterRoutes(r)
 	topoAPI.RegisterRoutes(r)
 	ashAPI.RegisterRoutes(r)
+	if len(alertAPIs) > 0 && alertAPIs[0] != nil {
+		alertAPIs[0].RegisterRoutes(r)
+	}
 	return r
 }

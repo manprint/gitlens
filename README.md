@@ -132,8 +132,31 @@ PGLENS_LISTEN=:8080 \
 | `PGLENS_LISTEN` | `host:port` | `:8080` | HTTP listen address |
 | `PGLENS_BOOTSTRAP_TOKEN` | string | — | shared secret for agent auth |
 | `PGLENS_BOOTSTRAP_TOKEN_FILE` | path | — | file containing the token (trailing newline trimmed) |
+| `PGLENS_ALERT_INTERVAL` | duration | `30s` | alert evaluation interval |
+| `PGLENS_SLACK_WEBHOOK_URL` | URL | unset | enables Slack notifications |
+| `PGLENS_SLACK_WEBHOOK_URL_FILE` | path | unset | reads the Slack URL; takes precedence over the inline URL |
+| `PGLENS_WEBHOOK_URL` | URL | unset | enables generic webhook notifications |
 
 The bootstrap token is a shared secret; this release has no token rotation, no mTLS, and no approval queue. Revocation is supported: `UPDATE agents SET revoked_at = now()` makes the next push return 401.
+
+## Alerting
+
+The server evaluates ten built-in Tier 0 rules: `agent_down`, `instance_unreachable`, `check_failing`, `no_primary_in_cluster`, `agent_buffer_full`, `clock_skew`, `cardinality_budget_exceeded`, `failover_detected`, `split_brain_detected`, and `slot_inactive`. Tier 0 rules are always enabled. Tier 1 rules are editable through the alert-rules endpoint.
+
+Configure Slack or a generic webhook with the variables above. A silence suppresses notification while the alert remains visible and continues to be evaluated.
+
+```sh
+curl -s http://localhost:8080/api/v1/alerts | jq .
+curl -s -X POST http://localhost:8080/api/v1/silences \
+  -H 'Content-Type: application/json' \
+  -d '{"matchers":[{"name":"severity","value":"warning"}],"reason":"maintenance","starts_at":"2026-08-29T10:00:00Z","ends_at":"2026-08-29T11:00:00Z"}'
+curl -s http://localhost:8080/api/v1/alert-rules | jq .
+curl -s -X DELETE http://localhost:8080/api/v1/silences/<silence-id>
+```
+
+An alert listing contains objects such as `{"alert_key":"agent_down/...","state":"firing","severity":"critical","cluster_id":"7381927364512345678","suppressed":false}`. The API returns cluster identifiers as strings and timestamps in RFC 3339 format.
+
+Alerting delivers only to Slack and generic webhooks. Email and PagerDuty are not supported.
 
 ## Running the agent
 

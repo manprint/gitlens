@@ -2,7 +2,7 @@
 
 > **READ THIS FILE FIRST at the start of every session, before any other plan
 > file. OPEN a unit in §1 before touching code; CLOSE it after the gates pass.**
-> **Last updated:** 2026-08-29 (phase 0 complete; phase 1 ready) by `agent:gpt5.6-luna` | **Session:** 3
+> **Last updated:** 2026-08-29 (phase 1 complete; sub-phase 2.1 open) by `agent:gpt5.6-luna` | **Session:** 6
 
 ## 0. Protocol
 
@@ -49,13 +49,13 @@ work — a phase that looks blocked is a signal to read §9, not to skip ahead.
 ## 1. Current unit
 
 - **Type:** sub-phase
-- **ID:** `1.1`
-- **Status:** `none`
-- **Intent:** implement phase 1 sub-phase 1.1 exactly as phase_02.md specifies.
-- **Phase:** 0 — Alert data model and pure logic ([phase_01.md](phase_01.md))
-- **Next action:** open sub-phase `1.1` in this section, then implement it exactly as [phase_02.md](phase_02.md) § 1.1 specifies.
+- **ID:** `2.1`
+- **Status:** `OPEN`
+- **Intent:** implement phase 2 sub-phase 2.1 exactly as phase_03.md specifies.
+- **Phase:** 2 — Protocol v2: facts and typed storage ([phase_03.md](phase_03.md))
+- **Next action:** open phase_03.md §2.1 and implement the additive wire v2 envelope in the assigned scope.
 - **Assigned:** `agent:gpt5.6-luna`
-- **Repo state:** branch `main`, phase 0 in progress; sub-phase 0.6 has implementation and tests written, gates need rerun.
+- **Repo state:** branch `main`, phase 0 committed at `ab5394f`; phase 1 gates green and ready for local commit; phase 2 sub-phase 2.1 open.
 
 ## 2. Feature context (self-contained recap)
 
@@ -124,7 +124,15 @@ The authoritative gate commands are the Makefile targets. These are identical to
 | 4 | sub-phase | 0.4 | agent:gpt5.6-luna | Added silence validation, active-window and matcher logic with tests | `internal/alert/silence.go`, `internal/alert/silence_test.go`, `STATE.md` | `go test -cover ./internal/alert/...` PASS at 91.4% | phase-0 close |
 | 5 | sub-phase | 0.5 | agent:gpt5.6-luna | Completed stable alert key and dedup identity tests | `internal/alert/key.go`, `internal/alert/key_test.go`, `STATE.md` | `go test ./internal/alert/...` PASS | phase-0 close |
 | 6 | sub-phase | 0.6 | agent:gpt5.6-luna | Added deterministic Tier 0 catalogue and tests | `internal/alert/builtin.go`, `internal/alert/builtin_test.go`, `internal/alert/eval_test.go`, `STATE.md` | fmt-check, lint, build, test, coverage-gate green; alert coverage 91.5% | phase-0 close |
-| 7 | sub-phase | 0.7 | agent:gpt5.6-luna | Verified README and removed an obsolete alerting capability claim | `README.md`, `STATE.md` | README verification and all phase-0 gates green | phase-0 close |
+| 7 | sub-phase | 0.7 | agent:gpt5.6-luna | Verified README and removed an obsolete alerting capability claim | `README.md`, `STATE.md` | README verification and all phase-0 gates green | `ab5394f` |
+| 8 | sub-phase | 1.1 | agent:gpt5.6-luna | Added alert evaluation lifecycle, advisory-lock leadership, ticker shutdown, and transition tests | `internal/alert/engine.go`, `internal/alert/engine_test.go`, `STATE.md` | fmt-check, lint, build, test, race alert tests green | phase-1 close |
+| 9 | sub-phase | 1.2 | agent:gpt5.6-luna | Added metric/event SQL sources, typed routing, lookback handling, and L2 coverage | `internal/alert/source_sql.go`, `internal/alert/source_test.go`, `internal/alert/source_sql_integration_test.go`, `STATE.md` | fmt-check, lint, build, test, race alert, targeted L2 green | phase-1 close |
+| 10 | sub-phase | 1.3 | agent:gpt5.6-luna | Added Slack/webhook channels, retry policy, JSON rendering, URL redaction, and tests | `internal/alert/notify/notify.go`, `internal/alert/notify/http.go`, `internal/alert/notify/slack.go`, `internal/alert/notify/webhook.go`, `internal/alert/notify/notify_test.go`, `STATE.md` | fmt-check, lint, build, unit and race notifier tests green | phase-1 close |
+| 11 | sub-phase | 1.4 | agent:gpt5.6-luna | Added PostgreSQL alert store, rule/silence loading, alert upsert, once-only claim, delivery marking, active query, and mock-backed tests | `internal/alert/store.go`, `internal/alert/store_test.go`, `STATE.md` | fmt-check, lint, build, make test, coverage-gate, full controlled L2 green | phase-1 close |
+| 12 | sub-phase | 1.5 | agent:gpt5.6-luna | Added alert/rule/silence HTTP routes, validation, Tier 0 conflict handling, soft-delete, and real-database API tests | `internal/server/api_alerts.go`, `internal/server/api_alerts_test.go`, `internal/server/api_alerts_integration_test.go`, `internal/server/http.go`, `internal/alert/engine.go`, `internal/alert/store.go`, `STATE.md` | unit and targeted integration tests green; INT-ALERTAPI-001/002 green | phase-1 close |
+| 13 | sub-phase | 1.6 | agent:gpt5.6-luna | Wired alert configuration, sources, channels, notifier, engine lifecycle, and alert API into server startup and routing | `internal/server/config.go`, `internal/server/config_test.go`, `cmd/pglens-server/main.go`, `internal/server/http.go`, `STATE.md` | fmt-check, lint, build, make test, race-alert, L2, coverage-gate green | phase-1 close |
+| 14 | sub-phase | 1.7 | agent:gpt5.6-luna | Added INT-ALERT-008..012 integration coverage for threshold transitions, deduplicated delivery, silence, resolve, and leadership behavior | `internal/alert/engine_integration_test.go`, `STATE.md` | full L2 green; INT-ALERT-008..012 green | phase-1 close |
+| 15 | sub-phase | 1.8 | agent:gpt5.6-luna | Documented alert configuration, API examples, Tier 0 rules, and operational limits | `README.md`, `STATE.md` | README verification and complete phase gate matrix green | phase-1 close |
 
 ## 5. Files touched
 
@@ -149,10 +157,26 @@ the units that touched it, so a later audit can attribute every diff.
 | `internal/alert/builtin.go` | 0.6 | Tier 0 rule catalogue |
 | `internal/alert/builtin_test.go` | 0.6 | catalogue tests |
 | `README.md` | 0.7 | removed obsolete unshipped alert API claim |
+| `internal/alert/engine.go` | 1.1 | alert loop, leadership, persistence and notification orchestration |
+| `internal/alert/engine_test.go` | 1.1 | engine lifecycle and transition tests |
+| `internal/alert/source_sql.go` | 1.2 | metric and event SQL sources |
+| `internal/alert/source_test.go` | 1.2 | source routing and lookback tests |
+| `internal/alert/source_sql_integration_test.go` | 1.2 | INT-ALERT-001/002 |
+| `internal/alert/notify/notify.go` | 1.3 | notifier interfaces |
+| `internal/alert/notify/http.go` | 1.3 | shared retry and redaction |
+| `internal/alert/notify/slack.go` | 1.3 | Slack channel |
+| `internal/alert/notify/webhook.go` | 1.3 | generic webhook channel |
+| `internal/alert/notify/notify_test.go` | 1.3 | notifier tests |
+| `internal/alert/store.go` | 1.4 | PostgreSQL persistence implementation |
+| `internal/alert/store_test.go` | 1.4 | persistence unit tests |
+| `internal/server/api_alerts.go` | 1.5 | alert/rule/silence HTTP API |
+| `internal/server/api_alerts_test.go` | 1.5 | API validation and rendering tests |
+| `internal/server/api_alerts_integration_test.go` | 1.5 | INT-ALERTAPI-001/002 |
+| `internal/alert/store_integration_test.go` | 1.4 | INT-ALERT-003..007 |
 
 ## 6. In-flight work
 
-`claimed — nothing written yet`
+`No command is active. Sub-phases 1.6, 1.7, and 1.8 are closed after the complete gate matrix passed. Focused in-scope tests raised coverage to 75.0% (3449/4598); fmt-check, lint, build, make test, race-alert, L2, and coverage-gate are green. Phase 1 is complete and its local commit is being created; phase 2 sub-phase 2.1 is open for the next execution turn.`
 
 ## 7. Verification state
 
@@ -162,6 +186,15 @@ the units that touched it, so a later audit can attribute every diff.
 | lint | `make lint` | PASS | 2026-08-29 |
 | build | `make build` | PASS | 2026-08-29 |
 | unit | `make test` | PASS | 2026-08-29 |
+| race-alert | `go test -race ./internal/alert/...` | PASS | 2026-08-29 |
+| integration-alert | `timeout 120s go test -tags=integration -race -shuffle=on -timeout=110s ./internal/alert/...` | PASS | 2026-08-29 |
+| coverage | `make coverage-gate` | FAIL — global 74.9%, threshold 75% | 2026-08-29 |
+| coverage-final | `make coverage-gate` | PASS — global 75.1%, threshold 75% | 2026-08-29 |
+| integration-final | `timeout 120s make test-integration` | PASS | 2026-08-29 |
+| integration-alert-store-api | `go test -tags=integration -run 'TestINTALERT003_Through007_AlertStorePersistence\|TestAlertAPI_INT_ALERTAPI_' ./internal/alert ./internal/server` | PASS | 2026-08-29 |
+| phase1-post-modification-coverage | `make coverage-gate` | FAIL — global 72.7% (3343/4598), threshold 75%; L2 not started | 2026-08-29 |
+| phase1-focused-tests-coverage | `make coverage-gate` | FAIL — global 74.5% (3426/4598), threshold 75%; focused package tests passed; no phase commit | 2026-08-29 |
+| phase1-final-matrix | `make fmt-check && make lint && make build && make test && go test -race ./internal/alert/... && timeout --signal=TERM 180s make test-integration && make coverage-gate` | PASS — all gates green; global coverage 75.0% (3449/4598) | 2026-08-29 |
 
 ## 8. Runtime deviations from the plan
 
@@ -172,6 +205,13 @@ the units that touched it, so a later audit can attribute every diff.
 | D-003 | 0.1 | WIP setting was enabled during initial claim | WIP setting reset to `off`; one local commit will close the complete phase | User explicitly requires a coherent commit after each complete phase |
 | D-004 | 0.3 | Key derivation is specified in later sub-phase 0.5 | Added `key.go` and its tests as a compile-time prerequisite for evaluator state keys; remaining 0.5 validation will still be completed | Go package symbols must compile as a unit; no behavior beyond the planned key API was added |
 | D-005 | 0.7 | Verify README unchanged because phase 0 has no user-visible behavior | Removed one existing unshipped alerting claim, because it contradicted phase 0's shipped behavior and the README accuracy gate | Corrected documentation without adding product behavior |
+| D-006 | 1.2 → 1.3 | Complete and close each unit before starting the next | Notifier files were created before 1.2's final documentation close; recorded as in-flight 1.3 work and kept isolated from the 1.2 ledger row | User interruption occurred during the L2 gate; no 1.2 source scope was changed |
+| D-007 | 1.3 → 1.4 | Complete and close each unit before starting the next | `store.go` was created before the 1.3 documentation close; it is recorded as the open 1.4 in-flight implementation and will be verified before closure | Continued execution after the user-requested resume exposed the procedural overlap; no scope was silently dropped |
+| D-008 | 1.4 | Coverage gate remains green after each phase | Initial store coverage correction left global coverage at 74.9%; an additional error-path test is pending verification | New planned persistence paths lowered global coverage by 0.1 percentage point |
+| D-011 | 1.6–1.8 | Close the phase only after all required gates are green | Added focused in-scope tests for alert API, source constructors, engine interval normalization, and channel names; final coverage is 75.0% and all phase gates pass | Current alert/server implementation added uncovered paths; threshold and package scope remain unchanged |
+| D-012 | 1.6–1.8 | Test constructors with nil dependencies | Initial constructor test called through a typed-nil pool and panicked; removed the invalid database call while retaining constructor/kind coverage | Go interface typed-nil behavior; corrected and verified |
+| D-009 | 1.4 | Add dedicated `store_integration_test.go` for INT-ALERT-003..007 | Added dedicated PostgreSQL integration coverage with a test-local alert schema; all five IDs are green | Existing shared fixture did not expose the alert migration schema, so the test provisions only the planned alert tables |
+| D-010 | 1.6–1.8 | Keep the global coverage gate green | New API/config/notifier/engine integration code lowered measured global coverage to 72.7%; phase close is held for targeted in-scope tests | Coverage threshold and scope remain unchanged; no production code is removed to mask the gap |
 
 ## 9. Blockers and open questions
 
@@ -206,9 +246,9 @@ disagree with §1 and §4.
 
 | Phase | File | Status | Notes |
 |-------|------|--------|-------|
-| 0 — Alert data model and pure logic | phase_01.md | `DONE` | 7/7 sub-phases closed; primary `agent:gpt5.6-luna`; commit pending |
-| 1 — Alert engine, notifiers, alert API | phase_02.md | `TODO` | 0/8 sub-phases closed; primary `agent:gpt5.6-luna` |
-| 2 — Protocol v2: facts and typed storage | phase_03.md | `TODO` | 0/7 sub-phases closed; primary `agent:gpt5.6-luna` |
+| 0 — Alert data model and pure logic | phase_01.md | `DONE` | 7/7 sub-phases closed; primary `agent:gpt5.6-luna`; commit `ab5394f` |
+| 1 — Alert engine, notifiers, alert API | phase_02.md | `DONE` | 8/8 sub-phases closed; primary `agent:gpt5.6-luna`; phase commit pending |
+| 2 — Protocol v2: facts and typed storage | phase_03.md | `IN_PROGRESS` | 0/7 sub-phases closed; sub-phase 2.1 open; primary `agent:gpt5.6-luna` |
 | 3 — Contention: locks, activity, transactions | phase_04.md | `TODO` | 0/8 sub-phases closed; primary `agent:gpt5.6-luna` |
 | 4 — Space and maintenance: tables, indexes, vacuum, bloat | phase_05.md | `TODO` | 0/8 sub-phases closed; primary `agent:gpt5.6-luna` |
 | 5 — Configuration and durability: settings, WAL, checkpointer, I/O, archiver | phase_06.md | `TODO` | 0/9 sub-phases closed; primary `agent:gpt5.6-luna` |
@@ -221,7 +261,7 @@ disagree with §1 and §4.
 Status values: `TODO` · `IN_PROGRESS` · `DONE` · `SKIPPED` · `BLOCKED`
 A `SKIPPED` sub-phase or phase keeps its row and carries the reason.
 
-**0 of 11 phases `DONE`. Plan at 0% — nothing implemented yet.**
+**1 of 11 phases `DONE`. Plan at 9% — phase 2 in progress.**
 
 ### Tests
 
@@ -246,20 +286,20 @@ throughout.
 | INT-ADV-006 | integration | 7 | `TODO` | phase 7 § 7.8 — Findings API |
 | INT-ADV-007 | integration | 7 | `TODO` | phase 7 § 7.9 — Advisor integration sweep |
 | INT-ADV-008 | integration | 7 | `TODO` | phase 7 § 7.9 — Advisor integration sweep |
-| INT-ALERT-001 | integration | 1 | `TODO` | phase 1 § 1.2 — SQL sources |
-| INT-ALERT-002 | integration | 1 | `TODO` | phase 1 § 1.2 — SQL sources |
-| INT-ALERT-003 | integration | 1 | `TODO` | phase 1 § 1.4 — Alert persistence and once-only delivery |
-| INT-ALERT-004 | integration | 1 | `TODO` | phase 1 § 1.4 — Alert persistence and once-only delivery |
-| INT-ALERT-005 | integration | 1 | `TODO` | phase 1 § 1.4 — Alert persistence and once-only delivery |
-| INT-ALERT-006 | integration | 1 | `TODO` | phase 1 § 1.4 — Alert persistence and once-only delivery |
-| INT-ALERT-007 | integration | 1 | `TODO` | phase 1 § 1.4 — Alert persistence and once-only delivery |
-| INT-ALERT-008 | integration | 1 | `TODO` | phase 1 § 1.7 — Engine integration tests |
-| INT-ALERT-009 | integration | 1 | `TODO` | phase 1 § 1.7 — Engine integration tests |
-| INT-ALERT-010 | integration | 1 | `TODO` | phase 1 § 1.7 — Engine integration tests |
-| INT-ALERT-011 | integration | 1 | `TODO` | phase 1 § 1.7 — Engine integration tests |
-| INT-ALERT-012 | integration | 1 | `TODO` | phase 1 § 1.7 — Engine integration tests |
-| INT-ALERTAPI-001 | integration | 1 | `TODO` | phase 1 § 1.5 — Alert and silence HTTP API |
-| INT-ALERTAPI-002 | integration | 1 | `TODO` | phase 1 § 1.5 — Alert and silence HTTP API |
+| INT-ALERT-001 | integration | 1 | `PASS` | phase 1 § 1.2 — SQL sources |
+| INT-ALERT-002 | integration | 1 | `PASS` | phase 1 § 1.2 — SQL sources |
+| INT-ALERT-003 | integration | 1 | `PASS` | phase 1 § 1.4 — Alert persistence and once-only delivery |
+| INT-ALERT-004 | integration | 1 | `PASS` | phase 1 § 1.4 — Alert persistence and once-only delivery |
+| INT-ALERT-005 | integration | 1 | `PASS` | phase 1 § 1.4 — Alert persistence and once-only delivery |
+| INT-ALERT-006 | integration | 1 | `PASS` | phase 1 § 1.4 — Alert persistence and once-only delivery |
+| INT-ALERT-007 | integration | 1 | `PASS` | phase 1 § 1.4 — Alert persistence and once-only delivery |
+| INT-ALERT-008 | integration | 1 | `PASS` | phase 1 § 1.7 — Engine integration tests |
+| INT-ALERT-009 | integration | 1 | `PASS` | phase 1 § 1.7 — Engine integration tests |
+| INT-ALERT-010 | integration | 1 | `PASS` | phase 1 § 1.7 — Engine integration tests |
+| INT-ALERT-011 | integration | 1 | `PASS` | phase 1 § 1.7 — Engine integration tests |
+| INT-ALERT-012 | integration | 1 | `PASS` | phase 1 § 1.7 — Engine integration tests |
+| INT-ALERTAPI-001 | integration | 1 | `PASS` | phase 1 § 1.5 — Alert and silence HTTP API |
+| INT-ALERTAPI-002 | integration | 1 | `PASS` | phase 1 § 1.5 — Alert and silence HTTP API |
 | INT-ARCH-001 | integration | 5 | `TODO` | phase 5 § 5.6 — The `archiver` check |
 | INT-ARCH-002 | integration | 5 | `TODO` | phase 5 § 5.6 — The `archiver` check |
 | INT-ARCH-003 | integration | 5 | `TODO` | phase 5 § 5.6 — The `archiver` check |
