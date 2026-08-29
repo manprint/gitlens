@@ -534,3 +534,17 @@ checks run green as a T0-only user on every supported version. `INT-TBL-001` to
 `INT-BLOAT-001` to `INT-BLOAT-004` and `INT-CHECK-016` are green. README.md
 reflects this phase's shipped behavior, and `STATE.md` §11 shows phase 4 `DONE`
 with every sub-phase closed.
+
+## Execution record
+
+- **Assignment:** `agent:gpt5.6-luna`
+- **Status:** complete
+- **Result:** 4.1–4.8 completed in order. Table, index, vacuum and bloat checks,
+  shared relation selection, relation API, T0 registry verification and README
+  documentation are present. INT-TBL-001..004, INT-IDX-001..004,
+  INT-VAC-001/002, INT-BLOAT-001..004 and INT-CHECK-016 pass in the focused
+  acceptance run; the ownership behavior records the actual shipped
+  `pg_monitor` visibility in STATE D-020.
+- **Final gates:** `make fmt-check`, `make lint`, `make build`, `make test`
+  (race), `make coverage-gate` (75.1%, 3968/5287), and
+  `make test-integration` all pass.

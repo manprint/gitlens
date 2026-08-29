@@ -50,6 +50,7 @@ func (a *API) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/events", a.handleEvents)
 	r.Get("/api/v1/statements", a.handleStatements)
 	a.registerContentionRoutes(r)
+	a.registerRelationRoutes(r)
 }
 
 // Ready verifies that the database is reachable and the complete migration

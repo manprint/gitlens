@@ -248,6 +248,11 @@ sampled blocking trees and bounded wait-event gauges. The `activity` check also
 reports connection use, per-database counts, state age, prepared transactions,
 and frozen-XID age; per-application counts are opt-in.
 
+Maintenance checks include `table_stats` and `index_stats` (5m, database scope,
+Tier 0), `vacuum_progress` (30s, instance scope, Tier 0), and `bloat_estimate`
+(6h, database scope, Tier 0). Relation reporting is bounded by a top-N budget
+shared per instance across databases; table and index defaults are 50.
+
 Annotated `deploy/agent.example.yaml`:
 
 ```yaml
@@ -286,6 +291,10 @@ checks:
   instance_info:    { interval: 60s }        # General instance metadata (mandatory)
   activity:        { interval: 10s, by_application: false } # Session activity
   locks:           { interval: 10s }        # Blocking tree (instance scope, T0)
+  table_stats:     { interval: 5m, top_n: 50 }
+  index_stats:     { interval: 5m, top_n: 50 }
+  vacuum_progress: { interval: 30s }
+  bloat_estimate:  { interval: 6h, top_n: 50 }
   database_stats:  { interval: 30s }        # Per-database counters and size
   stat_statements: { interval: 60s, top_n: 50 }  # Top N queries (requires pg_stat_statements)
   ash:             { interval: 1s }         # Activity sampling (ASH); lower for sensitive instances
@@ -301,6 +310,11 @@ checks:
 - `targets` must be non-empty; each target requires `name` and `dsn`
 - Duration format: `10s`, `1m`, `1h` (Go time.ParseDuration syntax)
 - Size format: `512MiB`, `1GiB` (parsed by Go's time/humanize)
+
+Relation endpoints are available at `/api/v1/instances/{id}/tables`,
+`/indexes`, and `/bloat`; each response includes `truncated` when the relation
+budget limits the result. For example: `curl -s
+localhost:8080/api/v1/instances/11111111-1111-1111-1111-111111111111/tables | jq .`.
 
 **Environment overrides** (take precedence over the config file's own value):
 - `PGLENS_SERVER_URL=http://...` — overrides `server.url`
@@ -967,6 +981,11 @@ the server is rejected, so upgrade the server before upgrading agents.
 - The lock view is sampled every 10 seconds, not live; a contention episode shorter than the interval can be missed entirely
 - Query text in a lock tree is truncated to 2 048 bytes
 - Deadlocks are reported as a counter and a rate; identifying the statements involved in a specific deadlock requires PostgreSQL log analysis, which pglens does not do
+
+**Space and maintenance:**
+- Bloat is a statistical estimate, not a measurement; exact figures require `pgstattuple` on demand where already installed
+- Relations under 1 MiB and never-analysed relations are not estimated
+- Only top-N relations per instance are listed; the rest are counted as truncated
 
 **Wait-event analysis (ASH):**
 - **Statistical sampling, not exact tracing.** ASH samples once per second, not continuously. Queries shorter than approximately 1 second are under-represented in results. This is the same fundamental trade-off made by Oracle ASH and AWS Performance Insights — acceptable for identifying where the database spends time over hours or days, not suitable for microsecond-level analysis.

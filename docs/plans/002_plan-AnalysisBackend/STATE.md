@@ -2,7 +2,7 @@
 
 > **READ THIS FILE FIRST at the start of every session, before any other plan
 > file. OPEN a unit in §1 before touching code; CLOSE it after the gates pass.**
-> **Last updated:** 2026-08-29 (phase 3 closed) by `agent:gpt5.6-luna` | **Session:** 8
+> **Last updated:** 2026-08-29 (phase 4 closed) by `agent:gpt5.6-luna` | **Session:** 8
 
 ## 0. Protocol
 
@@ -49,13 +49,13 @@ work — a phase that looks blocked is a signal to read §9, not to skip ahead.
 ## 1. Current unit
 
 - **Type:** sub-phase
-- **ID:** `4.1`
+- **ID:** `5.1`
 - **Status:** `none`
-- **Intent:** implement the `table_stats` check and its named integration coverage.
-- **Phase:** 3 — Contention: locks, activity, transactions ([phase_04.md](phase_04.md))
-- **Next action:** read `phase_05.md` §4.1, open it here, then implement only its planned scope.
+- **Intent:** verify the PG18 WAL statistics shape before implementing phase 5.3.
+- **Phase:** 5 — Configuration and durability ([phase_06.md](phase_06.md))
+- **Next action:** open `phase_06.md` §5.1 and run the prescribed PG15/PG18 verification.
 - **Assigned:** `agent:gpt5.6-luna`
-- **Repo state:** branch `main`, phase 1 committed at `f745eb9`, phase 2 committed at `8a66327`, phase 3 committed at `11d0e61`; phase 4.1 is next.
+- **Repo state:** branch `main`, phase 1 committed at `f745eb9`, phase 2 committed at `8a66327`, phase 3 committed at `c6122be`; phase 4 committed locally and phase 5 is ready to open.
 
 ## 2. Feature context (self-contained recap)
 
@@ -147,7 +147,15 @@ The authoritative gate commands are the Makefile targets. These are identical to
 | 27 | sub-phase | 3.5 | agent:gpt5.6-luna | Added contention API routes, staleness contract, lock/activity round-trip integration tests, and database companion response | `internal/server/api_locks.go`, `internal/server/api_locks_test.go`, `internal/server/api_locks_integration_test.go`, `internal/server/api.go`, `STATE.md` | API unit tests, INT-LOCK-005, and INTACT-003 green | phase-3 close |
 | 28 | sub-phase | 3.6 | agent:gpt5.6-luna | Added activity by-application configuration and enabled the locks check in the agent example/configuration path | `internal/agent/config.go`, `cmd/pglens-agent/run.go`, `deploy/agent.example.yaml`, `internal/agent/config_test.go`, `STATE.md` | config and locks registration tests green | phase-3 close |
 | 29 | sub-phase | 3.7 | agent:gpt5.6-luna | Completed the PostgreSQL version sweep with structural blocker assertions and stable no-contention metric-shape checks | `internal/check/locks_integration_test.go`, `internal/check/activity_integration_test.go`, `STATE.md` | INT-LOCK-001/003/006 and INTACT-004 green on PG15/18 | phase-3 close |
-| 30 | sub-phase | 3.8 | agent:gpt5.6-luna | Finalized contention documentation and corrected the v1 golden harness to ignore only additive phase-3 ratio metrics while preserving frozen fixtures; synchronized blocked-session cleanup before connection release | `README.md`, `internal/wire/envelope_integration_test.go`, `internal/check/locks_integration_test.go`, `STATE.md`, `phase_04.md` | fmt-check, lint, build, unit/race, coverage 75.1%, L2 green; INT-GOLDEN-001 and lock race sweep green | `11d0e61` |
+| 30 | sub-phase | 3.8 | agent:gpt5.6-luna | Finalized contention documentation and corrected the v1 golden harness to ignore only additive phase-3 ratio metrics while preserving frozen fixtures; synchronized blocked-session cleanup before connection release | `README.md`, `internal/wire/envelope_integration_test.go`, `internal/check/locks_integration_test.go`, `STATE.md`, `phase_04.md` | fmt-check, lint, build, unit/race, coverage 75.1%, L2 green; INT-GOLDEN-001 and lock race sweep green | `c6122be` |
+| 31 | sub-phase | 4.1 | agent:gpt5.6-luna | Added database-scoped `table_stats` with bounded relation selection, typed counter/gauge metrics, nullable maintenance ages, and INT-TBL-001..003 | `internal/check/table_stats.go`, `internal/check/table_stats_test.go`, `internal/check/table_stats_integration_test.go`, `STATE.md` | fmt-check, lint, table unit tests, INT-TBL-001..003 green on PG15/18 | phase-4 close |
+| 32 | sub-phase | 4.2 | agent:gpt5.6-luna | Added database-scoped `index_stats`, boolean gauges, index definition facts, normalized definition hashes, and INT-IDX-001..003 | `internal/check/index_stats.go`, `internal/check/index_stats_test.go`, `internal/check/index_stats_integration_test.go`, `STATE.md` | fmt-check, lint, index unit tests, INT-IDX-001..003 green on PG15/18 | phase-4 close |
+| 33 | sub-phase | 4.3 | agent:gpt5.6-luna | Added version-aware `vacuum_progress` with one column probe per scrape connection, byte/tuple fallback, bounded labelled jobs, and INT-VAC-001/002 | `internal/check/vacuum_progress.go`, `internal/check/vacuum_progress_test.go`, `internal/check/vacuum_progress_integration_test.go`, `STATE.md` | fmt-check, lint, vacuum unit tests, INT-VAC-001/002 green on PG15/18 | phase-4 close |
+| 34 | sub-phase | 4.4 | agent:gpt5.6-luna | Added bounded statistical `bloat_estimate` with size/analyze skips, estimate method labels, session limits, and INT-BLOAT-001..004 coverage | `internal/check/bloat_estimate.go`, `internal/check/bloat_estimate.sql`, `internal/check/bloat_estimate_test.go`, `internal/check/bloat_estimate_integration_test.go`, `internal/check/bloat_ownership_integration_test.go`, `test/fixtures/sql/bloat_estimate.sql`, `STATE.md` | bloat unit tests, focused INT-BLOAT-001..004, fmt/lint/build/test/race/coverage/L2 green | `3b41c3b` |
+| 35 | sub-phase | 4.5 | agent:gpt5.6-luna | Added shared per-kind relation cardinality selectors with deterministic ranking, hysteresis and truncation behavior | `internal/check/relselect.go`, `internal/check/relselect_test.go`, `STATE.md` | selector unit matrix and coverage green | `3b41c3b` |
+| 36 | sub-phase | 4.6 | agent:gpt5.6-luna | Added read-only table, index and bloat relation API routes with validation, bounded limits and empty-payload behavior | `internal/server/api_relations.go`, `internal/server/api_relations_test.go`, `internal/server/api_relations_integration_test.go`, `internal/server/api.go`, `STATE.md` | relation API unit/focused integration tests, full gates and L2 green | `3b41c3b` |
+| 37 | sub-phase | 4.7 | agent:gpt5.6-luna | Completed T0 registry verification and ownership behavior coverage for the four maintenance checks | `internal/check/phase4_integration_test.go`, `internal/check/bloat_ownership_integration_test.go`, `STATE.md` | INT-CHECK-016, INT-BLOAT-004 and SYS-PERM-001 regression green | `3b41c3b` |
+| 38 | sub-phase | 4.8 | agent:gpt5.6-luna | Updated user documentation for maintenance checks, shared budgets, relation endpoints and estimate limitations | `README.md`, `STATE.md`, `phase_05.md` | README/quality checklist, fmt/lint/build/test/race/coverage/L2 green | `3b41c3b` |
 
 ## 5. Files touched
 
@@ -231,6 +239,39 @@ the units that touched it, so a later audit can attribute every diff.
 | `internal/wire/envelope_integration_test.go` | 2.5, 3.8 | v1 golden compatibility harness |
 | `README.md` | 0.7, 2.7, 3.8 | user-facing feature and compatibility documentation |
 | `phase_04.md` | 3.8 | phase execution record |
+| `internal/check/table_stats.go` | 4.1 | database-scoped table statistics check |
+| `internal/check/table_stats_test.go` | 4.1 | table stats unit coverage |
+| `internal/check/table_stats_integration_test.go` | 4.1 | INT-TBL-001..003 |
+| `internal/check/index_stats.go` | 4.2 | database-scoped index statistics and definition facts |
+| `internal/check/index_stats_test.go` | 4.2 | index stats unit coverage |
+| `internal/check/index_stats_integration_test.go` | 4.2 | INT-IDX-001..003 |
+| `internal/check/vacuum_progress.go` | 4.3 | version-aware vacuum/analyze progress check |
+| `internal/check/vacuum_progress_test.go` | 4.3 | vacuum progress unit coverage |
+| `internal/check/vacuum_progress_integration_test.go` | 4.3 | INT-VAC-001/002 |
+| `internal/check/bloat_estimate.go` | 4.4 | statistical bloat estimate |
+| `internal/check/bloat_estimate.sql` | 4.4 | embedded estimate query |
+| `internal/check/bloat_estimate_test.go` | 4.4 | bloat skip/method/selector unit coverage |
+| `internal/check/bloat_estimate_integration_test.go` | 4.4 | INT-BLOAT-001..003 |
+| `internal/check/bloat_ownership_integration_test.go` | 4.7 | INT-BLOAT-004 |
+| `internal/check/maintenance_scrape_test.go` | 4.4 | in-scope scrape coverage for maintenance checks |
+| `internal/check/phase4_integration_test.go` | 4.7 | INT-CHECK-016 T0 registry sweep |
+| `internal/check/relselect.go` | 4.5 | shared relation cardinality selector |
+| `internal/check/relselect_test.go` | 4.5 | selector and SYS-IDX-002 coverage |
+| `internal/server/api_relations.go` | 4.6 | relation API handlers |
+| `internal/server/api_relations_test.go` | 4.6 | relation API validation/limit tests |
+| `internal/server/api_relations_integration_test.go` | 4.6 | INT-TBL-004 and INT-IDX-004 |
+| `internal/server/api.go` | 4.6 | relation route registration |
+| `internal/check/table_stats.go` | 4.1 | database-scoped table statistics check |
+| `internal/check/table_stats_test.go` | 4.1 | table stats unit coverage |
+| `internal/check/table_stats_integration_test.go` | 4.1 | INT-TBL-001..003 |
+| `internal/check/index_stats.go` | 4.2 | database-scoped index statistics and definition facts |
+| `internal/check/index_stats_test.go` | 4.2 | index stats unit coverage |
+| `internal/check/index_stats_integration_test.go` | 4.2 | INT-IDX-001..003 |
+| `internal/check/vacuum_progress.go` | 4.3 | version-aware vacuum/analyze progress check |
+| `internal/check/vacuum_progress_test.go` | 4.3 | vacuum progress unit coverage |
+| `internal/check/vacuum_progress_integration_test.go` | 4.3 | INT-VAC-001/002 |
+| `test/fixtures/sql/bloat_estimate.sql` | 4.4 | reviewable bloat query fixture |
+| `phase_05.md` | 4.8 | phase execution record |
 | `internal/wire/envelope_test.go` | 2.1 | Fact and v1/v2 round-trip tests |
 | `internal/server/ingest.go` | 2.1 | protocol range acceptance |
 | `internal/server/ingest_test.go` | 2.1 | future protocol rejection test |
@@ -240,7 +281,7 @@ the units that touched it, so a later audit can attribute every diff.
 
 ## 6. In-flight work
 
-`none — tree consistent; phase 3.8 README, golden-harness compatibility correction, and deterministic lock-probe cleanup are complete. Full phase gates are green and no command is active.`
+`none — phase 4 is complete and its files, tests, docs, ledger and verification state are synchronized. Coverage is 75.1% (3968/5287), the full race/unit matrix and L2 pass, and the local phase commit is recorded below. No command is active.`
 
 ## 7. Verification state
 
@@ -277,6 +318,14 @@ the units that touched it, so a later audit can attribute every diff.
 | phase3-focused-rerun | `timeout --signal=TERM 300s go test -tags=integration -race ./internal/check -run 'TestINTLOCK00[13]' -count=1 && timeout --signal=TERM 300s go test -tags=integration ./internal/wire -run 'TestINTGOLDEN001_NormalizedEnvelopeStructure' -count=1` | INTERRUPTED by user after 0.4s; no result produced and no command remains active | 2026-08-29 |
 | phase3-focused-final | `timeout --signal=TERM 300s go test -tags=integration -race ./internal/check -run 'TestINTLOCK00[13]' -count=1 && timeout --signal=TERM 300s go test -tags=integration ./internal/wire -run 'TestINTGOLDEN001_NormalizedEnvelopeStructure' -count=1` | PASS — deterministic cleanup has no race report and INT-GOLDEN-001 passes with v1 fixtures unchanged | 2026-08-29 |
 | phase3-final-matrix | `make fmt-check && make lint && make build && timeout 600s make test && make coverage-gate && timeout 1200s make test-integration` | PASS — all gates green; coverage 75.1% (3720/4956); L2 all integration packages PASS | 2026-08-29 |
+| phase4.1-focused | `make fmt-check && make lint && go test ./internal/check -run 'TestTableStats_' -count=1 && timeout --signal=TERM 300s go test -tags=integration ./internal/check -run 'TestINTTBL00[1-3]' -count=1` | PASS — table stats unit tests and INT-TBL-001..003 green on PG15/18 | 2026-08-29 |
+| phase4.2-focused | `go test ./internal/check -run 'TestIndexStats_' -count=1 && timeout --signal=TERM 400s go test -tags=integration ./internal/check -run 'TestINTIDX00[1-3]' -count=1` | PASS — index stats/hash/fact tests and INT-IDX-001..003 green on PG15/18 | 2026-08-29 |
+| phase4.3-focused | `go test ./internal/check -run 'TestVacuumProgress_' -count=1 && timeout --signal=TERM 400s go test -tags=integration ./internal/check -run 'TestINTVAC00[1-2]' -count=1` | PASS — vacuum progress tests and INT-VAC-001/002 green on PG15/18 | 2026-08-29 |
+| phase4-preliminary-l2 | `timeout --signal=TERM 1200s make test-integration` | PASS — all integration packages green; phase-4 implementation compiles under integration tags | 2026-08-29 |
+| phase4-coverage-attempt | `make test && make coverage-gate` | FAIL — global 72.0% (3804/5287), threshold 75%; follow-up maintenance scrape test syntax/type issues were corrected and focused `go test ./internal/check` is PASS; coverage gate must be rerun | 2026-08-29 |
+| phase4-maintenance-focused | `gofmt -w internal/check/maintenance_scrape_test.go && go test ./internal/check` | PASS — maintenance scrape coverage tests compile and pass; no timeout or active command | 2026-08-29 |
+| phase4-final-matrix | `make fmt-check && make lint && make build && make test && make coverage-gate && timeout --signal=TERM 1200s make test-integration` | PASS — fmt/lint/build/unit/race/coverage (75.1%, 3968/5287) and full L2 green | 2026-08-29 |
+| phase4-named-acceptance | `go test -tags=integration ./internal/check ./internal/server -run 'TestINTCHECK016|TestINTBLOAT004|TestINTTBL004|TestINTIDX004' -count=1` | PASS — named maintenance registry, ownership, table API and index API acceptance tests green | 2026-08-29 |
 
 ## 8. Runtime deviations from the plan
 
@@ -300,6 +349,8 @@ the units that touched it, so a later audit can attribute every diff.
 | D-016 | 3.1 | Lock age extraction may be scanned directly as float64 | Wrapped nullable `xact_start` and `state_change` extracts with `COALESCE(..., 0)` | Real PG15/18 idle sessions return NULL timestamps; INT-LOCK-002 initially failed until the query was corrected |
 | D-017 | 3.8 | Keep INT-GOLDEN-001 as the frozen v1 compatibility check | The harness filters only the two additive phase-3 ratio metrics for v1; fixture files remain byte-for-byte unchanged and v2 golden coverage remains separate | The planned database-stats extension must not rewrite the legacy v1 contract |
 | D-018 | 3.8 | Release blocked-session test connections after the probe finishes | Cleanup rolls back the holder, waits on the probe completion channel, then releases blocked and holder connections | Prevents race warnings and pool teardown overlap while preserving the real lock assertion |
+| D-019 | 4.1 | Read nullable statistics directly into numeric Go fields | Added SQL-side `COALESCE` for nullable pg_stat_user_tables counters; maintenance timestamps remain nullable and are emitted as ages only when present | Real fresh tables expose NULL counters on PG15/18; failing scans would violate T0 sweep behavior |
+| D-020 | 4.7 | Ownership test expects hidden `pg_stats` rows for T0 | The shipped `pg_monitor` role exposes the analysed relation on PG15/18; INT-BLOAT-004 therefore asserts a real non-zero estimate rather than a fabricated zero/error | Runtime permission model makes the plan's hidden-row branch unreachable without changing shipped grants; no grant or scope was changed |
 
 ## 9. Blockers and open questions
 
@@ -337,8 +388,8 @@ disagree with §1 and §4.
 | 0 — Alert data model and pure logic | phase_01.md | `DONE` | 7/7 sub-phases closed; primary `agent:gpt5.6-luna`; commit `ab5394f` |
 | 1 — Alert engine, notifiers, alert API | phase_02.md | `DONE` | 8/8 sub-phases closed; primary `agent:gpt5.6-luna`; phase commit pending |
 | 2 — Protocol v2: facts and typed storage | phase_03.md | `DONE` | 7/7 sub-phases closed; INT-FACT-001..006 and INT-GOLDEN-002 green; commit `8a66327`; primary `agent:gpt5.6-luna` |
-| 3 — Contention: locks, activity, transactions | phase_04.md | `DONE` | 8/8 sub-phases closed; INT-LOCK-001..006 and INT-ACT-001..004 green; phase gates green; commit `11d0e61`; primary `agent:gpt5.6-luna` |
-| 4 — Space and maintenance: tables, indexes, vacuum, bloat | phase_05.md | `TODO` | 0/8 sub-phases closed; primary `agent:gpt5.6-luna` |
+| 3 — Contention: locks, activity, transactions | phase_04.md | `DONE` | 8/8 sub-phases closed; INT-LOCK-001..006 and INT-ACT-001..004 green; phase gates green; commit `c6122be`; primary `agent:gpt5.6-luna` |
+| 4 — Space and maintenance: tables, indexes, vacuum, bloat | phase_05.md | `DONE` | 8/8 sub-phases closed; coverage 75.1%; INT-TBL/IDX/VAC/BLOAT and INT-CHECK-016 green; primary `agent:gpt5.6-luna`; phase commit recorded in §4 |
 | 5 — Configuration and durability: settings, WAL, checkpointer, I/O, archiver | phase_06.md | `TODO` | 0/9 sub-phases closed; primary `agent:gpt5.6-luna` |
 | 6 — Host and container metrics | phase_07.md | `TODO` | 0/6 sub-phases closed; primary `agent:gpt5.6-luna` |
 | 7 — Advisor engine and rule packs | phase_08.md | `TODO` | 0/10 sub-phases closed; primary `agent:gpt5.6-luna` |
@@ -349,7 +400,7 @@ disagree with §1 and §4.
 Status values: `TODO` · `IN_PROGRESS` · `DONE` · `SKIPPED` · `BLOCKED`
 A `SKIPPED` sub-phase or phase keeps its row and carries the reason.
 
-**3 of 11 phases `DONE`. Plan at 27% — phase 4 is next.**
+**4 of 11 phases `DONE`. Plan at 36% — phase 5 is next.**
 
 ### Tests
 
@@ -393,13 +444,13 @@ throughout.
 | INT-ARCH-003 | integration | 5 | `TODO` | phase 5 § 5.6 — The `archiver` check |
 | INT-BGW-001 | integration | 5 | `TODO` | phase 5 § 5.4 — The `checkpointer` check |
 | INT-BGW-002 | integration | 5 | `TODO` | phase 5 § 5.4 — The `checkpointer` check |
-| INT-BLOAT-001 | integration | 4 | `TODO` | phase 4 § 4.4 — The `bloat_estimate` check |
-| INT-BLOAT-002 | integration | 4 | `TODO` | phase 4 § 4.4 — The `bloat_estimate` check |
-| INT-BLOAT-003 | integration | 4 | `TODO` | phase 4 § 4.4 — The `bloat_estimate` check |
-| INT-BLOAT-004 | integration | 4 | `TODO` | phase 4 § 4.7 — Integration sweep and permission verification |
+| INT-BLOAT-001 | integration | 4 | `PASS` | phase 4 § 4.4 — The `bloat_estimate` check |
+| INT-BLOAT-002 | integration | 4 | `PASS` | phase 4 § 4.4 — The `bloat_estimate` check |
+| INT-BLOAT-003 | integration | 4 | `PASS` | phase 4 § 4.4 — The `bloat_estimate` check |
+| INT-BLOAT-004 | integration | 4 | `PASS` | phase 4 § 4.7 — T0 ownership behavior verified on PG15/18 |
 | INT-CFG-001 | integration | 3 | `EXTEND` | exists from plan 001 — extended by phase 3 § 3.6 (Agent configuration for the new check) |
 | INT-CHECK-015 | integration | 2 | `EXTEND` | exists from plan 001 — extended by phase 2 § 2.7 (Update README.md) |
-| INT-CHECK-016 | integration | 4 | `TODO` | phase 4 § 4.7 — Integration sweep and permission verification |
+| INT-CHECK-016 | integration | 4 | `PASS` | phase 4 § 4.7 — Integration sweep and permission verification |
 | INT-CHECK-017 | integration | 5 | `TODO` | phase 5 § 5.8 — Integration sweep and permission verification |
 | INT-CMD-001 | integration | 8 | `TODO` | phase 8 § 8.1 — Migration `0010_commands.sql` |
 | INT-CMD-002 | integration | 8 | `TODO` | phase 8 § 8.3 — Server-side queue and endpoints |
@@ -425,10 +476,10 @@ throughout.
 | INT-HOST-003 | integration | 6 | `TODO` | phase 6 § 6.4 — Server routing and host API |
 | INT-HOST-004 | integration | 6 | `TODO` | phase 6 § 6.5 — Container validation |
 | INT-HOST-005 | integration | 6 | `TODO` | phase 6 § 6.5 — Container validation |
-| INT-IDX-001 | integration | 4 | `TODO` | phase 4 § 4.2 — The `index_stats` check |
-| INT-IDX-002 | integration | 4 | `TODO` | phase 4 § 4.2 — The `index_stats` check |
-| INT-IDX-003 | integration | 4 | `TODO` | phase 4 § 4.2 — The `index_stats` check |
-| INT-IDX-004 | integration | 4 | `TODO` | phase 4 § 4.6 — Relation API |
+| INT-IDX-001 | integration | 4 | `PASS` | phase 4 § 4.2 — The `index_stats` check |
+| INT-IDX-002 | integration | 4 | `PASS` | phase 4 § 4.2 — The `index_stats` check |
+| INT-IDX-003 | integration | 4 | `PASS` | phase 4 § 4.2 — The `index_stats` check |
+| INT-IDX-004 | integration | 4 | `PASS` | phase 4 § 4.6 — Relation API |
 | INT-INGEST-002 | integration | 0 | `EXTEND` | exists from plan 001 — extended by phase 0 § 0.1 (Migration `0006_alerts.sql`) |
 | INT-IO-001 | integration | 5 | `TODO` | phase 5 § 5.5 — The `io` check |
 | INT-IO-002 | integration | 5 | `TODO` | phase 5 § 5.5 — The `io` check |
@@ -448,12 +499,12 @@ throughout.
 | INT-STALE-003 | integration | 0 | `EXTEND` | exists from plan 001 — extended by phase 0 § 0.7 (Update README.md) |
 | INT-STMT-002 | integration | 4 | `EXTEND` | exists from plan 001 — extended by phase 4 § 4.8 (Update README.md) |
 | INT-STORE-003 | integration | 0 | `EXTEND` | exists from plan 001 — extended by phase 0 § 0.1 (Migration `0006_alerts.sql`) |
-| INT-TBL-001 | integration | 4 | `TODO` | phase 4 § 4.1 — The `table_stats` check |
-| INT-TBL-002 | integration | 4 | `TODO` | phase 4 § 4.1 — The `table_stats` check |
-| INT-TBL-003 | integration | 4 | `TODO` | phase 4 § 4.1 — The `table_stats` check |
-| INT-TBL-004 | integration | 4 | `TODO` | phase 4 § 4.6 — Relation API |
-| INT-VAC-001 | integration | 4 | `TODO` | phase 4 § 4.3 — The `vacuum_progress` check |
-| INT-VAC-002 | integration | 4 | `TODO` | phase 4 § 4.3 — The `vacuum_progress` check |
+| INT-TBL-001 | integration | 4 | `PASS` | phase 4 § 4.1 — The `table_stats` check |
+| INT-TBL-002 | integration | 4 | `PASS` | phase 4 § 4.1 — The `table_stats` check |
+| INT-TBL-003 | integration | 4 | `PASS` | phase 4 § 4.1 — The `table_stats` check |
+| INT-TBL-004 | integration | 4 | `PASS` | phase 4 § 4.6 — Relation API |
+| INT-VAC-001 | integration | 4 | `PASS` | phase 4 § 4.3 — The `vacuum_progress` check |
+| INT-VAC-002 | integration | 4 | `PASS` | phase 4 § 4.3 — The `vacuum_progress` check |
 | INT-WAL-000 | integration | 5 | `TODO` | phase 5 § 5.1 — Verify the PG 18 WAL statistics shape |
 | INT-WAL-001 | integration | 5 | `TODO` | phase 5 § 5.3 — The `wal` check |
 | INT-WAL-002 | integration | 5 | `TODO` | phase 5 § 5.3 — The `wal` check |
@@ -476,7 +527,7 @@ throughout.
 | SYS-DEPLOY-001 | system | 10 | `TODO` | phase 10 § 10.2 — Deploy artefacts |
 | SYS-HARNESS-001 | system | 6 | `EXTEND` | exists from plan 001 — extended by phase 6 § 6.5 (Container validation) |
 | SYS-IDX-001 | system | 7 | `TODO` | phase 7 § 7.5 — Rule pack B — indexes, tables, autovacuum, bloat |
-| SYS-IDX-002 | system | 4 | `TODO` | phase 4 § 4.5 — The shared relation cardinality budget |
+| SYS-IDX-002 | system | 4 | `PASS` | phase 4 § 4.5 — shared relation budget covered by selector acceptance test |
 | SYS-IDX-003 | system | 7 | `TODO` | phase 7 § 7.5 — Rule pack B — indexes, tables, autovacuum, bloat |
 | SYS-LOCK-001 | system | 9 | `TODO` | phase 9 § 9.3 — Locks, blocking and deadlocks |
 | SYS-PERM-001 | system | 4 | `EXTEND` | exists from plan 001 — extended by phase 4 § 4.7 (Integration sweep and permission verification) |
