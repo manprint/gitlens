@@ -243,6 +243,20 @@ func (h *Harness) waitToxiproxyReady(toxiproxyURL string) error {
 
 // getServicePort retrieves the published port for a service from docker-compose.
 func (h *Harness) getServicePort(service string, containerPort int) (int, error) {
+	ports, err := h.getServicePorts(service, containerPort)
+	if err != nil {
+		return 0, err
+	}
+	if len(ports) == 0 {
+		return 0, fmt.Errorf("no published port for %s:%d", service, containerPort)
+	}
+	return ports[0], nil
+}
+
+// getServicePorts is the plural form used by scaled services. Docker Compose
+// prints one host binding per replica; keeping all of them lets L3 tests query
+// every server replica while the ordinary harness continues to use the first.
+func (h *Harness) getServicePorts(service string, containerPort int) ([]int, error) {
 	cmd := exec.Command("docker", "compose",
 		"-p", h.projectName,
 		"port", service, fmt.Sprintf("%d", containerPort))
@@ -250,21 +264,23 @@ func (h *Harness) getServicePort(service string, containerPort int) (int, error)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return 0, fmt.Errorf("docker compose port failed: %w, output: %s", err, output)
+		return nil, fmt.Errorf("docker compose port failed: %w, output: %s", err, output)
 	}
 
 	// Output is "127.0.0.1:PORT"
-	parts := strings.Split(strings.TrimSpace(string(output)), ":")
-	if len(parts) != 2 {
-		return 0, fmt.Errorf("unexpected port output format: %s", output)
+	var ports []int
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		parts := strings.Split(strings.TrimSpace(line), ":")
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("unexpected port output format: %s", output)
+		}
+		var port int
+		if _, err := fmt.Sscanf(parts[1], "%d", &port); err != nil {
+			return nil, fmt.Errorf("failed to parse port: %w", err)
+		}
+		ports = append(ports, port)
 	}
-
-	var port int
-	_, err = fmt.Sscanf(parts[1], "%d", &port)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse port: %w", err)
-	}
-	return port, nil
+	return ports, nil
 }
 
 // Toxic adds a fault injection to a link and returns a function to remove it.

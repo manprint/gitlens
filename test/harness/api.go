@@ -3,12 +3,50 @@
 package harness
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 )
+
+// Request performs an arbitrary JSON API request and returns the decoded JSON
+// value. It is intentionally small so scenarios can exercise array-shaped
+// endpoints and operator actions without duplicating HTTP plumbing.
+func (c *APIClient) Request(method, path string, payload []byte) (interface{}, error) {
+	var body io.Reader
+	if len(payload) > 0 {
+		body = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequest(method, c.baseURL+path, body)
+	if err != nil {
+		return nil, err
+	}
+	if len(payload) > 0 {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("%s %s: %d, body: %s", method, path, resp.StatusCode, raw)
+	}
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var result interface{}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
 
 // APIClient wraps the HTTP client for the pglens server API.
 type APIClient struct {

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/manprint/pglens/internal/clock"
@@ -61,6 +62,19 @@ func TestTick_NotifiesOnFire(t *testing.T) {
 	require.NoError(t, testEngine(rule, s, store, notifier, now).Tick(context.Background()))
 	require.Len(t, store.alerts, 1)
 	require.Len(t, notifier.alerts, 1)
+}
+
+func TestTick_RestoresPersistedFiringAlert(t *testing.T) {
+	now := time.Unix(100, 0)
+	id := uuid.New()
+	rule := Rule{ID: "custom", Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1, Summary: "x"}
+	stored := Alert{Key: "custom/" + id.String() + "/", RuleID: rule.ID, Severity: rule.Severity, State: StateFiring, InstanceID: &id, StartedAt: now.Add(-time.Minute), LastEvalAt: now.Add(-time.Second), Summary: rule.Summary}
+	store := &engineStore{alerts: []Alert{stored}}
+	notifier := &engineNotifier{}
+	e := testEngine(rule, engineSource{kind: "metric", samples: []Sample{{InstanceID: &id, Value: 2, TS: now}}}, store, notifier, now)
+
+	require.NoError(t, e.Tick(context.Background()))
+	require.Empty(t, notifier.alerts, "a newly elected engine must not re-fire a persisted episode")
 }
 
 func TestTick_NotifiesOnResolve(t *testing.T) {

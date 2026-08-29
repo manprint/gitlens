@@ -24,6 +24,10 @@
 docs/
 deploy/
 test/
+!test/
+!test/e2e/
+!test/e2e/mockreceiver/
+!test/e2e/mockreceiver/**
 scripts/
 *.md
 

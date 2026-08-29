@@ -1,0 +1,15 @@
+services:
+  mockreceiver:
+    build:
+      context: ../..
+      dockerfile: test/e2e/mockreceiver/Dockerfile
+    ports:
+      - "9099"
+
+  pglens-server:
+    depends_on:
+      mockreceiver:
+        condition: service_started
+    environment:
+      PGLENS_ALERT_INTERVAL: 2s
+      PGLENS_WEBHOOK_URL: http://mockreceiver:9099/

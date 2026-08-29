@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -69,6 +70,30 @@ func renderAlert(v alert.Alert) alertJSON {
 	return o
 }
 
+func (a *AlertAPI) activeSilences(ctx context.Context) ([]alert.Silence, error) {
+	if a.pool == nil {
+		return nil, nil
+	}
+	rows, err := a.pool.Query(ctx, `SELECT silence_id,matchers,reason,starts_at,ends_at FROM silences WHERE starts_at <= now() AND ends_at > now()`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []alert.Silence
+	for rows.Next() {
+		var s alert.Silence
+		var raw []byte
+		if err := rows.Scan(&s.ID, &raw, &s.Reason, &s.StartsAt, &s.EndsAt); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(raw, &s.Matchers); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
 func (a *AlertAPI) listAlerts(w http.ResponseWriter, r *http.Request) {
 	if a.store == nil {
 		writeError(w, http.StatusServiceUnavailable, "alerts unavailable", "alert store is not configured")
@@ -101,11 +126,17 @@ func (a *AlertAPI) listAlerts(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "alert query failed", err.Error())
 		return
 	}
+	silences, err := a.activeSilences(r.Context())
+	if err != nil {
+		writeError(w, 500, "silence query failed", err.Error())
+		return
+	}
 	if len(rows) > 500 {
 		rows = rows[:500]
 	}
 	out := make([]alertJSON, 0, len(rows))
 	for _, v := range rows {
+		v.Suppressed = alert.FirstMatch(silences, v, time.Now()) != nil
 		out = append(out, renderAlert(v))
 	}
 	writeJSON(w, 200, out)
@@ -305,5 +336,11 @@ func (a *AlertAPI) alertDetail(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "alert decode failed", err.Error())
 		return
 	}
+	silences, err := a.activeSilences(r.Context())
+	if err != nil {
+		writeError(w, 500, "silence query failed", err.Error())
+		return
+	}
+	v.Suppressed = alert.FirstMatch(silences, v, time.Now()) != nil
 	writeJSON(w, 200, renderAlert(v))
 }

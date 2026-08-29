@@ -68,6 +68,38 @@ func (s *metricSource) Samples(ctx context.Context, r Rule, now time.Time) ([]Sa
 	if s.db == nil {
 		return nil, nil
 	}
+	// `up` is the staleness signal. It is exposed as a process-local
+	// Prometheus gauge, not as an ingest metric, so read the durable instance
+	// last_seen value directly. This keeps alert evaluation shared by all
+	// server replicas and, unlike an event-only rule, supplies the false
+	// sample needed to resolve the alert when the agent returns.
+	if r.Metric == "up" {
+		rows, err := s.db.Query(ctx, `SELECT cluster_id, instance_id, '' AS datname, CASE WHEN last_seen >= now() - interval '60 seconds' THEN 1.0 ELSE 0.0 END, last_seen FROM instances`)
+		if err != nil {
+			return nil, fmt.Errorf("query staleness: %w", err)
+		}
+		defer rows.Close()
+		var out []Sample
+		for rows.Next() {
+			var cluster int64
+			var instance uuid.UUID
+			var datname string
+			var value float64
+			var ts time.Time
+			if err := rows.Scan(&cluster, &instance, &datname, &value, &ts); err != nil {
+				return nil, err
+			}
+			// last_seen already records when this outage began. Seed the
+			// stale sample at the rule boundary so agent_down's documented
+			// 90-second duration is not added after the 60-second staleness
+			// threshold a second time.
+			if value < 1 && r.For > 0 {
+				ts = now.Add(-r.For)
+			}
+			out = append(out, Sample{ClusterID: &cluster, InstanceID: &instance, Datname: datname, Value: value, TS: ts})
+		}
+		return out, rows.Err()
+	}
 	table, valueColumn, err := metricTable(r.Metric)
 	if err != nil {
 		return nil, err

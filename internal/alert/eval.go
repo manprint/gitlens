@@ -38,6 +38,21 @@ type evalState struct {
 type Evaluator struct{ states map[string]evalState }
 
 func NewEvaluator() *Evaluator { return &Evaluator{states: make(map[string]evalState)} }
+
+// Restore seeds the in-memory evaluator from a persisted non-terminal alert.
+// A newly elected engine must resume the existing episode instead of deriving
+// a new StartedAt from its first post-failover sample.
+func (e *Evaluator) Restore(a Alert) {
+	if a.State != StatePending && a.State != StateFiring {
+		return
+	}
+	e.states[a.Key] = evalState{
+		first:  a.StartedAt,
+		firing: a.State == StateFiring,
+		alert:  a,
+	}
+}
+
 func (e *Evaluator) Step(r Rule, s Sample, now time.Time) (*Alert, Transition) {
 	k := Key(r, s)
 	st, ok := e.states[k]

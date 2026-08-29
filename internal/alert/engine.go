@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -59,15 +60,16 @@ type Engine struct {
 	notifier Notifier
 	sources  []Source
 
-	mu        sync.Mutex
-	conn      *pgxpool.Conn
-	hasLock   bool
-	ticker    clock.Ticker
-	stopCh    chan struct{}
-	doneCh    chan struct{}
-	stopOnce  sync.Once
-	startOnce sync.Once
-	started   bool
+	mu          sync.Mutex
+	conn        *pgxpool.Conn
+	hasLock     bool
+	ticker      clock.Ticker
+	stopCh      chan struct{}
+	doneCh      chan struct{}
+	stopOnce    sync.Once
+	startOnce   sync.Once
+	started     bool
+	stateLoaded bool
 }
 
 func NewEngine(pool *pgxpool.Pool, clk clock.Clock, st Store, n Notifier, srcs []Source) *Engine {
@@ -117,7 +119,9 @@ func (e *Engine) Start(ctx context.Context) {
 					return
 				case <-ticker.C():
 					cycleCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-					_ = e.Tick(cycleCtx)
+					if err := e.Tick(cycleCtx); err != nil {
+						log.Printf("alert engine: %v", err)
+					}
 					cancel()
 				}
 			}
@@ -190,6 +194,18 @@ func (e *Engine) Tick(ctx context.Context) error {
 	e.mu.Unlock()
 	if !leader {
 		return nil
+	}
+	if !e.stateLoaded {
+		if e.store != nil {
+			active, err := e.store.Active(ctx, Filter{})
+			if err != nil {
+				return fmt.Errorf("restore active alerts: %w", err)
+			}
+			for _, a := range active {
+				e.eval.Restore(a)
+			}
+		}
+		e.stateLoaded = true
 	}
 	now := e.clock.Now()
 	rules := Builtin()

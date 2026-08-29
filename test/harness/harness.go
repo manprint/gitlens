@@ -53,6 +53,7 @@ type Config struct {
 	AgentMode AgentMode
 	Toxiproxy bool
 	Pgbouncer bool // reserved; not used in this plan
+	Alerting  bool // add the mock receiver and run two server replicas
 }
 
 // Harness orchestrates an E2E stack via docker-compose.
@@ -63,10 +64,13 @@ type Harness struct {
 	topologyFile      string
 	agentFile         string
 	toxiproxyFile     string // "" unless Config.Toxiproxy is set
+	extraFile         string // optional scenario-specific compose fragment
 	composeDir        string
 	containerName     string
 	serverPort        int
+	serverPorts       []int
 	agentPort         int
+	mockPort          int
 	topology          Topology
 	agentMode         AgentMode
 	agentCmd          *exec.Cmd // non-nil only for AgentModeBinary: the running host subprocess
@@ -84,6 +88,7 @@ type Harness struct {
 	pools             map[string]*pgxpool.Pool
 	poolMu            sync.Mutex
 	apiClient         *APIClient
+	apiClients        []*APIClient
 	workloadBin       string
 	workloadMu        sync.Mutex
 	cleaned           bool
@@ -110,6 +115,10 @@ func Start(t *testing.T, cfg Config) *Harness {
 		topologyFile = filepath.Join(composeDir, "topo-cascading.yml")
 	} else {
 		topologyFile = filepath.Join(composeDir, "topo-standalone.yml")
+	}
+	var extraFile string
+	if cfg.Alerting {
+		extraFile = filepath.Join(composeDir, "scenario-alerting.yml")
 	}
 
 	agentFile := filepath.Join(composeDir, "agent-container.yml")
@@ -158,6 +167,7 @@ func Start(t *testing.T, cfg Config) *Harness {
 		baseFile:      baseFile,
 		topologyFile:  topologyFile,
 		agentFile:     agentFile,
+		extraFile:     extraFile,
 		toxiproxyFile: toxiproxyFile,
 		composeDir:    composeDir,
 		topology:      cfg.Topology,
@@ -186,11 +196,17 @@ func Start(t *testing.T, cfg Config) *Harness {
 		t.Fatalf("stack failed health check: %v", err)
 	}
 
-	port, err := h.getServicePort("pglens-server", 8080)
+	ports, err := h.getServicePorts("pglens-server", 8080)
 	if err != nil {
 		t.Fatalf("resolve pglens-server port: %v", err)
 	}
-	h.serverPort = port
+	h.serverPorts = ports
+	h.serverPort = ports[0]
+	if cfg.Alerting {
+		if h.mockPort, err = h.getServicePort("mockreceiver", 9099); err != nil {
+			t.Fatalf("resolve mockreceiver port: %v", err)
+		}
+	}
 
 	if cfg.AgentMode == AgentModeBinary {
 		// agent-binary.yml deliberately defines no pglens-agent service (see
@@ -219,6 +235,9 @@ func Start(t *testing.T, cfg Config) *Harness {
 		client:     &http.Client{Timeout: 10 * time.Second},
 		baseURL:    fmt.Sprintf("http://localhost:%d", h.serverPort),
 		httpClient: &http.Client{Timeout: 10 * time.Second},
+	}
+	for _, p := range h.serverPorts {
+		h.apiClients = append(h.apiClients, &APIClient{client: &http.Client{Timeout: 10 * time.Second}, baseURL: fmt.Sprintf("http://localhost:%d", p), httpClient: &http.Client{Timeout: 10 * time.Second}})
 	}
 
 	return h
@@ -471,6 +490,9 @@ type composeService struct {
 // the fix note on dumpComposeLogs in dump.go).
 func (h *Harness) composeFiles() []string {
 	args := []string{"-f", h.baseFile, "-f", h.topologyFile, "-f", h.agentFile}
+	if h.extraFile != "" {
+		args = append(args, "-f", h.extraFile)
+	}
 	if h.toxiproxyFile != "" {
 		args = append(args, "-f", h.toxiproxyFile)
 	}
@@ -486,6 +508,9 @@ func (h *Harness) composeFiles() []string {
 func (h *Harness) composeUp() error {
 	args := append([]string{"compose", "-p", h.projectName}, h.composeFiles()...)
 	args = append(args, "up", "-d")
+	if h.extraFile != "" {
+		args = append(args, "--build", "--scale", "pglens-server=2")
+	}
 	cmd := exec.Command("docker", args...)
 	cmd.Dir = h.composeDir
 	if h.agentMode == AgentModeBinary {
@@ -809,6 +834,25 @@ func (h *Harness) Logs(service string) (string, error) {
 	return h.composeOutput("logs", "--no-color", service)
 }
 
+// KillServerReplica terminates exactly one pglens-server container from a
+// scaled alerting stack. A service-level compose kill would terminate both
+// replicas, so resolve one container id and use Docker directly.
+func (h *Harness) KillServerReplica() error {
+	out, err := h.composeOutput("ps", "-q", "pglens-server")
+	if err != nil {
+		return err
+	}
+	ids := strings.Fields(out)
+	if len(ids) == 0 {
+		return fmt.Errorf("no pglens-server replica is running")
+	}
+	cmd := exec.Command("docker", "kill", ids[0])
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("docker kill %s: %w, output: %s", ids[0], err, output)
+	}
+	return nil
+}
+
 // Workload runs test/workload (workloadctl) as a host subprocess with the
 // given CLI args (e.g. "lock-storm", "--sessions", "50", "--dsn", dsn) and
 // returns its combined output — the tool's own JSON report on success.
@@ -877,10 +921,17 @@ func (h *Harness) Scenario(t *testing.T, id string) {
 	}
 
 	env := &scenario.Env{
-		T:            t,
-		DB:           h.DB(t),
-		PG:           func(service string) *pgxpool.Pool { return h.PG(t, service) },
-		API:          h.apiClient,
+		T:    t,
+		DB:   h.DB(t),
+		PG:   func(service string) *pgxpool.Pool { return h.PG(t, service) },
+		API:  h.apiClient,
+		APIs: make([]scenario.APIClient, 0, len(h.apiClients)),
+		MockReceiverURL: func() string {
+			if h.mockPort == 0 {
+				return ""
+			}
+			return fmt.Sprintf("http://localhost:%d", h.mockPort)
+		}(),
 		AgentHealthz: h.AgentHealthz,
 		Exec:         h.Exec,
 		ExecAs:       h.ExecAs,
@@ -898,7 +949,14 @@ func (h *Harness) Scenario(t *testing.T, id string) {
 			}
 			return scenario.RemoveFunc(remove), nil
 		},
-		AssertInvariants: h.AssertInvariants,
+		AssertInvariants:  h.AssertInvariants,
+		KillServerReplica: h.KillServerReplica,
+	}
+	for _, api := range h.apiClients {
+		env.APIs = append(env.APIs, api)
+	}
+	if len(env.APIs) == 0 {
+		env.APIs = append(env.APIs, h.apiClient)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)

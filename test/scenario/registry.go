@@ -59,6 +59,7 @@ type APIClient interface {
 	// RawGet fetches an arbitrary endpoint and returns its raw text body —
 	// for non-JSON responses like /metrics (Prometheus text exposition).
 	RawGet(path string) (string, error)
+	Request(method, path string, payload []byte) (interface{}, error)
 }
 
 // Env provides scenario execution context: DB/API access, container control,
@@ -75,6 +76,11 @@ type Env struct {
 	PG func(service string) *pgxpool.Pool
 	// API is a client for the pglens server HTTP API.
 	API APIClient
+	// APIs contains every server replica when a scenario explicitly scales the
+	// server. API remains the first replica for existing scenarios.
+	APIs []APIClient
+	// MockReceiverURL is populated by the alerting compose fragment.
+	MockReceiverURL string
 	// AgentHealthz fetches the agent's own /healthz (distinct from the
 	// server's — see Harness.AgentHealthz). Only populated when the
 	// harness was started with an AgentMode that publishes port 9187.
@@ -99,6 +105,9 @@ type Env struct {
 	// AssertInvariants runs the global invariant checks (phase_06.md §5.6).
 	// Every scenario must call this at the end, per phase_06.md §5.7.
 	AssertInvariants func(t *testing.T)
+	// KillServerReplica terminates exactly one scaled server container. L3
+	// alert tests use it to exercise advisory-lock failover.
+	KillServerReplica func() error
 }
 
 // ToxicLink identifies a connection to inject a fault into (mirrors

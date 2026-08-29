@@ -2,7 +2,7 @@
 
 > **READ THIS FILE FIRST at the start of every session, before any other plan
 > file. OPEN a unit in §1 before touching code; CLOSE it after the gates pass.**
-> **Last updated:** 2026-08-29 (phase 8.11 closed) by `agent:gpt5.6-luna` | **Session:** 21
+> **Last updated:** 2026-08-29 (phase 9.2 closed) by `agent:gpt5.6-luna` | **Session:** 23
 
 ## 0. Protocol
 
@@ -48,12 +48,12 @@ work — a phase that looks blocked is a signal to read §9, not to skip ahead.
 
 ## 1. Current unit
 
-- **Type:** phase
-- **ID:** `none`
-- **Status:** `none`
-- **Intent:** phase 8 command channel and query plans are complete.
-- **Phase:** 8 — Command channel and query plans ([phase_09.md](phase_09.md))
-- **Next action:** none — phase 8 is closed; open phase 9 explicitly when it starts.
+- **Type:** sub-phase
+- **ID:** `9.3`
+- **Status:** `OPEN`
+- **Intent:** prove real lock contention and deadlock detection through the L3 API and PostgreSQL.
+- **Phase:** 9 — L3 end-to-end scenarios ([phase_10.md](phase_10.md))
+- **Next action:** read phase_10.md §9.3, implement contention and deadlock scenarios, then run the 9.3 gates.
 - **Assigned:** `agent:gpt5.6-luna`
 - **Repo state:** branch `main`, phase 7 close is `8891d6b`; phase 8 close is `78dbf94`.
 
@@ -194,6 +194,8 @@ The authoritative gate commands are the Makefile targets. These are identical to
 | 74 | sub-phase | 8.9 | agent:gpt5.6-luna | Added deduplicated query-plan storage, plan history API with newest-first ordering, changed markers and total shape count | `internal/server/api_plans.go`, `internal/server/api_plans_test.go`, `internal/server/api_commands_integration_test.go`, `internal/server/commands.go`, `internal/store/write.go`, `internal/store/write_test.go`, `internal/server/api.go`, `STATE.md` | INT-PLAN-001/002, unit/race, fmt/lint/build/full test-integration PASS | phase-8 close |
 | 75 | sub-phase | 8.10 | agent:gpt5.6-luna | Added read-only command audit API with a 500-row cap and terminal outcome verification | `internal/server/api_audit.go`, `internal/server/api_audit_test.go`, `internal/server/api_commands_integration_test.go`, `internal/server/api.go`, `STATE.md` | audit unit/race, no-mutation route walk, INT-CMD-011 and full L2 PASS | phase-8 close |
 | 76 | sub-phase | 8.11 | agent:gpt5.6-luna | Documented on-demand operations, configuration, curl usage, security boundaries and limitations; closed phase 8 after final gates | `README.md`, `internal/command/gate_test.go`, `internal/server/api_commands_test.go`, `STATE.md` | complete phase-8 matrix, SYS-PERM-001, global coverage 75.0%, command coverage 100.0% PASS | `78dbf94` |
+| 77 | sub-phase | 9.1 | agent:gpt5.6-luna | Added a real three-node cascading PostgreSQL stack, agent fixture and SYS-REPL-006 API scenario; tightened instance staleness to the required 60-second bound | `test/compose/topo-cascading.yml`, `test/compose/agent-container-cascading.yml`, `test/fixtures/agent-cascading.yaml`, `test/fixtures/sql/cascading_standby_init.sh`, `test/e2e/scenarios/topo-cascading.yml`, `test/scenario/topo_cascading.go`, `test/e2e/topo_cascading_test.go`, `test/harness/harness.go`, `internal/server/api.go`, `internal/server/api_test.go`, `STATE.md` | compile/vet, Docker images and three consecutive SYS-REPL-006 L3 runs PASS | phase-9 close |
+| 78 | sub-phase | 9.2 | agent:gpt5.6-luna | Added the containerized mock receiver, two-replica alerting stack and SYS-ALERT-001..004 L3 scenarios; persisted evaluator state across leader failover so an existing alert episode cannot be re-fired | `.dockerignore`, `test/e2e/mockreceiver/main.go`, `test/e2e/mockreceiver/Dockerfile`, `test/e2e/scenarios/alerting.yml`, `test/e2e/alerting_test.go`, `test/compose/agent-container-alerting.yml`, `test/compose/scenario-alerting.yml`, `test/scenario/alerting.go`, `internal/alert/eval.go`, `internal/alert/engine.go`, `internal/alert/source_sql.go`, `internal/server/api_alerts.go`, `test/harness/api.go`, `test/harness/harness.go`, `test/harness/toxic.go`, `test/scenario/registry.go`, `internal/alert/engine_test.go`, `STATE.md` | fmt/lint/build/vet, rebuilt Docker images, and three consecutive four-scenario SYS-ALERT L3 runs PASS | phase-9.2 close |
 
 ## 5. Files touched
 
@@ -405,10 +407,36 @@ the units that touched it, so a later audit can attribute every diff.
 | `internal/server/api.go` | 8.9, 8.10 | plan and audit route registration |
 | `internal/server/api_audit.go` | 8.10 | command audit read API |
 | `internal/server/api_audit_test.go` | 8.10 | audit limit and no-mutation route coverage |
+| `test/compose/topo-cascading.yml` | 9.1 | three-node primary → standby-a → standby-b topology |
+| `test/compose/agent-container-cascading.yml` | 9.1 | container agent fixture for cascading topology |
+| `test/fixtures/agent-cascading.yaml` | 9.1 | three monitored PostgreSQL targets |
+| `test/fixtures/sql/cascading_standby_init.sh` | 9.1 | cascading standby bootstrap and replication slot setup |
+| `test/e2e/scenarios/topo-cascading.yml` | 9.1 | scenario metadata artifact |
+| `test/scenario/topo_cascading.go` | 9.1 | SYS-REPL-006 scenario registration and API assertions |
+| `test/e2e/topo_cascading_test.go` | 9.1 | L3 wrapper test |
+| `test/harness/harness.go` | 9.1 | cascading compose selection and binary target support |
+| `internal/server/api.go` | 9.1 | 60-second instance staleness bound |
+| `internal/server/api_test.go` | 9.1 | staleness-bound contract test |
+| `.dockerignore` | 9.2 | includes the mock receiver build context |
+| `test/e2e/mockreceiver/main.go` | 9.2 | deterministic JSON receiver with reset and failure injection |
+| `test/e2e/mockreceiver/Dockerfile` | 9.2 | mock receiver image |
+| `test/e2e/scenarios/alerting.yml` | 9.2 | alerting scenario metadata |
+| `test/e2e/alerting_test.go` | 9.2 | L3 wrappers for SYS-ALERT-001..004 |
+| `test/compose/agent-container-alerting.yml` | 9.2 | alerting agent fixture |
+| `test/compose/scenario-alerting.yml` | 9.2 | mock receiver and two-server alerting overlay |
+| `test/scenario/alerting.go` | 9.2 | alert fire/resolve, retry, failover and silence assertions |
+| `internal/alert/eval.go` | 9.2 | persisted alert-state restoration hook |
+| `internal/alert/engine.go` | 9.2 | restore active episodes after leader election |
+| `internal/alert/source_sql.go` | 9.2 | durable staleness metric source |
+| `internal/server/api_alerts.go` | 9.2 | API suppression rendering from active silences |
+| `test/harness/api.go` | 9.2 | generic JSON request helper |
+| `test/harness/toxic.go` | 9.2 | scaled-service port discovery |
+| `test/scenario/registry.go` | 9.2 | replica APIs and alerting environment hooks |
+| `internal/alert/engine_test.go` | 9.2 | persisted evaluator restoration regression test |
 
 ## 6. In-flight work
 
-`none — tree consistent; phase 8.11 documentation and final phase gates are closed.`
+`none — 9.2 is closed. SYS-ALERT-001..004 passed three consecutive full alerting-suite runs on the final image; next unit is 9.3.`
 
 ## 7. Verification state
 
@@ -486,6 +514,17 @@ the units that touched it, so a later audit can attribute every diff.
 | phase8.10-audit | `go test -race ./internal/server ./internal/agent ./internal/store && go test -tags=integration -race ./internal/server -run '^TestINTCMD011_' -count=1 && make test-integration` | PASS — audit API cap/no-mutation route tests, four terminal outcomes and full L2 green | 2026-08-29 |
 | phase8.11-final-matrix | `make fmt-check && make lint && make build && make test && make coverage-gate && make test-integration && go test -race ./internal/agent/... ./internal/server/...` | PASS — all phase gates green; global coverage 75.0% (5337/7115), `internal/command` 100.0% (48/48) | 2026-08-29 |
 | phase8.11-permission-regression | `go test -tags=e2e -race -count=1 -timeout=20m ./test/e2e -run '^TestSmoke_PermTierT0Only$'` | PASS — SYS-PERM-001, T0 agent with both command flags closed | 2026-08-29 |
+| phase9.1-compile-vet | `go test -tags=e2e -run '^$' ./test/e2e/... && go vet -tags=e2e ./test/e2e/...` | PASS — cascading harness/scenario compiles and vets cleanly | 2026-08-29 |
+| phase9.1-images | `make build-images` | PASS — agent and server dev images rebuilt for the L3 stack | 2026-08-29 |
+| phase9.1-focused-run-1 | `go test -tags=e2e -timeout=7m -count=1 ./test/e2e/... -run '^TestFull_CascadingReplicationTopology$'` | PASS — cascading chain and stale-parent assertion green in 106.8s | 2026-08-29 |
+| phase9.1-focused-run-2 | `go test -tags=e2e -timeout=7m -count=1 ./test/e2e/... -run '^TestFull_CascadingReplicationTopology$'` | PASS — consecutive anti-flake run green in 106.3s | 2026-08-29 |
+| phase9.1-focused-run-3 | `go test -tags=e2e -timeout=7m -count=1 ./test/e2e/... -run '^TestFull_CascadingReplicationTopology$'` | PASS — consecutive anti-flake run green in 106.3s | 2026-08-29 |
+| phase9.2-unit | `go test ./internal/alert` | PASS — evaluator restoration regression and alert package tests | 2026-08-29 |
+| phase9.2-static | `make fmt-check && make lint && make build && go vet -tags=e2e ./test/e2e/...` | PASS — all static gates green | 2026-08-29 |
+| phase9.2-images | `make build-images` plus no-cache server rebuild | PASS — final server image contains the failover restoration fix | 2026-08-29 |
+| phase9.2-focused-run-1 | `go test -tags=e2e ./test/e2e -run 'TestFull_Alert(Episode|Retry|LeaderFailover|Silence)$' -count=1 -v` | PASS — all four SYS-ALERT scenarios in 420.4s | 2026-08-29 |
+| phase9.2-focused-run-2 | `go test -tags=e2e ./test/e2e -run 'TestFull_Alert(Episode|Retry|LeaderFailover|Silence)$' -count=1 -v` | PASS — all four SYS-ALERT scenarios in 422.1s | 2026-08-29 |
+| phase9.2-focused-run-3 | `go test -tags=e2e ./test/e2e -run 'TestFull_Alert(Episode|Retry|LeaderFailover|Silence)$' -count=1 -v` | PASS — all four SYS-ALERT scenarios in 422.2s | 2026-08-29 |
 
 ## 8. Runtime deviations from the plan
 
@@ -521,6 +560,9 @@ the units that touched it, so a later audit can attribute every diff.
 | D-026 | 5.6 | INT-ARCH-001/002 are specified as archive-enabled e2e scenarios | The supported repository harness cannot bootstrap/restart `archive_mode`; replaced the skips with deterministic scraper-contract acceptance tests over controlled `pg_stat_archiver` rows, while retaining the real archive-off integration path | No archive_mode behavior is fabricated; live archive-enabled verification remains a harness limitation |
 | D-028 | 7.7 | Advisor integration tests can use the shared pgtest base schema unchanged | The engine integration setup drops and recreates its test-local `agents`, `clusters`, `instances` and `findings` tables before seeding | Bounded snapshot tests may leave a simplified `instances` table; the isolated setup prevents schema interference without changing production behavior |
 | D-029 | 7.7 | The global coverage floor remains green after adding the advisor store | The first phase-7 coverage run measured 74.9%; added focused pgxmock coverage for store error and lifecycle paths, raising the final result to 75.2% | Coverage threshold and production scope are unchanged; the missing coverage was in planned persistence code |
+| D-030 | 9.1 | Plan names a standalone `test/e2e/run.go` plus YAML-driven runner and a `/api/v1/topology` endpoint | Repository reality uses the registered `test/scenario` harness and cluster-scoped `/api/v1/clusters/{id}/topology`; added the plan YAML artifact and exercised the same semantics through the existing harness/API contract | Preserved the existing E2E architecture; the test proves exactly two chain edges, role/cluster identity, and sticky B→A edge after A stops |
+| D-031 | 9.1 | Cascading parent must be reported stale within 60 seconds | Existing API threshold was 90 seconds; changed the production staleness contract and its unit test to an inclusive 60-second bound | Required by phase_10.md §9.1; all three focused L3 runs passed |
+| D-032 | 9.2 | Leader failover must preserve alert deduplication | The evaluator was process-local, so a new leader could derive a new `StartedAt`; restored active persisted alerts when the new engine first acquired leadership and added a regression test | Required by phase_10.md §9.2 SYS-ALERT-003; three final alerting-suite runs passed |
 
 Phase-6 healthcheck blocker resolved: the agent health server is initialized
 before target connection retries; the subsequent `SYS-HARNESS-001` smoke passed
@@ -698,10 +740,10 @@ throughout.
 | SYS-ADV-002 | system | 7 | `TODO` | phase 7 § 7.4 — Rule pack A — queries and transactions |
 | SYS-ADV-003 | system | 7 | `TODO` | phase 7 § 7.6 — Rule pack C — configuration, connections, durability |
 | SYS-ADV-004 | system | 9 | `TODO` | phase 9 § 9.5 — Advisor acceptance |
-| SYS-ALERT-001 | system | 1 | `TODO` | phase 1 § 1.3 — Notifiers |
-| SYS-ALERT-002 | system | 9 | `TODO` | phase 9 § 9.2 — Alerting end to end |
-| SYS-ALERT-003 | system | 9 | `TODO` | phase 9 § 9.2 — Alerting end to end |
-| SYS-ALERT-004 | system | 9 | `TODO` | phase 9 § 9.2 — Alerting end to end |
+| SYS-ALERT-001 | system | 1 | `DONE` | phase 9 § 9.2 — Alert episode fire/resolve through webhook |
+| SYS-ALERT-002 | system | 9 | `DONE` | phase 9 § 9.2 — Webhook retry and once-only delivery |
+| SYS-ALERT-003 | system | 9 | `DONE` | phase 9 § 9.2 — Leader failover deduplication |
+| SYS-ALERT-004 | system | 9 | `DONE` | phase 9 § 9.2 — Silence suppresses notifications |
 | SYS-ARCH-001 | system | 9 | `TODO` | phase 9 § 9.7 — Backup and archiving |
 | SYS-BLOAT-001 | system | 9 | `TODO` | phase 9 § 9.4 — Vacuum, bloat, index usage and relation cardinality |
 | SYS-CMD-001 | system | 8 | `TODO` | phase 8 § 8.5 — Agent-side dispatcher; end-to-end coverage is deferred to phase 9 as specified |
@@ -717,7 +759,7 @@ throughout.
 | SYS-LOCK-001 | system | 9 | `TODO` | phase 9 § 9.3 — Locks, blocking and deadlocks |
 | SYS-PERM-001 | system | 4 | `EXTEND` | exists from plan 001 — phase-8 regression PASS with T0 and both command flags false |
 | SYS-PERM-002 | system | 10 | `TODO` | phase 10 § 10.3 — Permission-tier grant scripts |
-| SYS-REPL-006 | system | 9 | `TODO` | phase 9 § 9.1 — Cascading replication topology |
+| SYS-REPL-006 | system | 9 | `DONE` | phase 9 § 9.1 — Cascading replication topology |
 | SYS-VAC-001 | system | 9 | `TODO` | phase 9 § 9.4 — Vacuum, bloat, index usage and relation cardinality |
 
 ### Docs

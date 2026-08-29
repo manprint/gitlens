@@ -1,0 +1,5 @@
+id: SYS-ALERT-001
+name: alerting-retry-failover-silence
+topology: standalone
+compose: test/compose/scenario-alerting.yml
+agent: test/compose/agent-container-alerting.yml
