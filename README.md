@@ -243,6 +243,11 @@ sudo journalctl -u pglens-agent -n 50  # last 50 lines of logs
 
 ### Agent configuration
 
+The instance `settings` check records curated or operator-changed PostgreSQL
+GUCs and exposes normalized byte/time gauges for advisory rules. For safety,
+`archive_command` facts retain only the first command token; any remaining
+arguments are emitted as `[redacted]` because they may contain credentials.
+
 Collected checks include `locks` (10s, instance scope, Tier 0), which reports
 sampled blocking trees and bounded wait-event gauges. The `activity` check also
 reports connection use, per-database counts, state age, prepared transactions,
@@ -252,6 +257,10 @@ Maintenance checks include `table_stats` and `index_stats` (5m, database scope,
 Tier 0), `vacuum_progress` (30s, instance scope, Tier 0), and `bloat_estimate`
 (6h, database scope, Tier 0). Relation reporting is bounded by a top-N budget
 shared per instance across databases; table and index defaults are 50.
+
+Durability checks are `settings` (1h, instance/Tier 0), `wal` (15s,
+instance/Tier 0), `checkpointer` (30s, instance/Tier 0), `io` (30s,
+instance/Tier 0, PostgreSQL 16+), and `archiver` (60s, instance/Tier 0).
 
 Annotated `deploy/agent.example.yaml`:
 
@@ -295,6 +304,11 @@ checks:
   index_stats:     { interval: 5m, top_n: 50 }
   vacuum_progress: { interval: 30s }
   bloat_estimate:  { interval: 6h, top_n: 50 }
+  settings:         { interval: 1h }
+  wal:              { interval: 15s }
+  checkpointer:     { interval: 30s }
+  io:               { interval: 30s }        # PostgreSQL 16+
+  archiver:         { interval: 60s }
   database_stats:  { interval: 30s }        # Per-database counters and size
   stat_statements: { interval: 60s, top_n: 50 }  # Top N queries (requires pg_stat_statements)
   ash:             { interval: 1s }         # Activity sampling (ASH); lower for sensitive instances
@@ -315,6 +329,18 @@ Relation endpoints are available at `/api/v1/instances/{id}/tables`,
 `/indexes`, and `/bloat`; each response includes `truncated` when the relation
 budget limits the result. For example: `curl -s
 localhost:8080/api/v1/instances/11111111-1111-1111-1111-111111111111/tables | jq .`.
+
+Settings and cluster drift are available with:
+
+```sh
+curl -s 'localhost:8080/api/v1/instances/<instance-id>/settings' | jq .
+curl -s 'localhost:8080/api/v1/instances/<instance-id>/settings?changed_since=2026-08-28T00:00:00Z' | jq .
+curl -s 'localhost:8080/api/v1/clusters/<cluster-id>/settings-drift' | jq .
+```
+
+The settings response contains `name`, `value`, source, context, pending-restart
+and observation timestamps. Drift returns only differing settings with their
+instance IDs, roles and values.
 
 **Environment overrides** (take precedence over the config file's own value):
 - `PGLENS_SERVER_URL=http://...` — overrides `server.url`
@@ -986,6 +1012,12 @@ the server is rejected, so upgrade the server before upgrading agents.
 - Bloat is a statistical estimate, not a measurement; exact figures require `pgstattuple` on demand where already installed
 - Relations under 1 MiB and never-analysed relations are not estimated
 - Only top-N relations per instance are listed; the rest are counted as truncated
+
+**Configuration and durability:**
+- `archive_command` facts retain only the first token and redact remaining arguments because they may contain credentials
+- I/O timing is zero unless `track_io_timing` is enabled; `pg_io_timing_enabled` reports which case applies
+- `pg_stat_io` and the `io` check are unavailable below PostgreSQL 16
+- Archiver metrics report whether WAL archiving is working; pglens does not verify restoreability and does not integrate with pgBackRest, Barman or WAL-G
 
 **Wait-event analysis (ASH):**
 - **Statistical sampling, not exact tracing.** ASH samples once per second, not continuously. Queries shorter than approximately 1 second are under-represented in results. This is the same fundamental trade-off made by Oracle ASH and AWS Performance Insights — acceptable for identifying where the database spends time over hours or days, not suitable for microsecond-level analysis.

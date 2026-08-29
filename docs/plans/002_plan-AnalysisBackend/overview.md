@@ -75,16 +75,17 @@ deltas computed server-side, `D19` buffer 6h < sample age 12h < compress 48h,
 | **D20** | Command transport is **agent long-poll**: the agent calls `GET /api/v1/agents/{agent_id}/commands?wait=25s`; the server never connects to the agent | Agents sit behind NAT and firewalls. `IDEA.md` §2 already specifies a long-poll command channel and explicitly rules out a pull mode |
 | **D21** | Advisor rules are code-defined with a stable `rule_id`, registered in an init-time registry mirroring `internal/check/registry.go:15`. Every rule declares `min_tier`; when the tier is unavailable the rule emits a `degraded` finding naming the missing grant instead of vanishing | Adding a rule is one file. A silently absent rule is indistinguishable from a healthy system, which breaks the honesty principle of `IDEA.md` §6 |
 | **D22** | New checks are additive registrations against the existing `check.Check` interface (`internal/check/check.go:75`). The interface does **not** change | `Requirements{Roles, MinPG, MaxPG, Extensions, PermTier, Scope}` already expresses everything the ten new checks need. Eight checks prove the extension point |
-| **D23** | `UNVERIFIED`: whether PG 18 still exposes the WAL I/O columns on `pg_stat_wal` or has moved them to `pg_stat_io`. Sub-phase 5.1 settles it against a live PG 18 container **before** the `wal` check is written | Guessing a system view's shape produces a check that fails only on one version of the matrix, i.e. in CI, late |
+| **D23** | `RESOLVED 2026-08-29`: live PG15/PG18 probing confirms PG18 moved the WAL I/O columns out of `pg_stat_wal` into `pg_stat_io`; the permanent INT-WAL-000 test asserts the exact sets | Guessing a system view's shape produces a check that fails only on one version of the matrix, i.e. in CI, late |
 | **D24** | No scheduled check and no advisor rule ever writes to a monitored instance. The only write path is the command channel, tier-gated and audited | Invariant I-1. It is what makes the T0 tier claim of plan 001 still true after this plan adds ten checks |
 | **D25** | Every new endpoint is additive under `/api/v1`. No existing endpoint changes shape or semantics | Plan 003 is written against this surface, and plan 001's E2E assertions must keep passing unchanged |
 | **D26** | The advisor takes **one SQL-backed snapshot** per instance per run and every rule reads that snapshot; rules never query the database themselves | Fifty rules issuing their own queries would multiply load on the very database being diagnosed, and would make rule execution order observable |
+| **D-026 (phase 5 runtime)** | `INT-ARCH-001/002` retain their archive-stat semantics through deterministic scraper-contract acceptance tests; the supported `pgtest` harness cannot bootstrap/restart live `archive_mode` | The live archive-enabled transition remains an explicit harness limitation. No archive behavior is fabricated, the real archive-off path remains covered, and phase scope/thresholds are unchanged |
 
 ## Open questions
 
 | # | Question | Assumed default in this plan | Affects |
 |---|----------|------------------------------|---------|
-| Q-A | `UNVERIFIED` (D23) — does PG 18 keep `wal_write`, `wal_sync`, `wal_write_time`, `wal_sync_time` on `pg_stat_wal`, or are they only in `pg_stat_io`? | The `wal` check collects LSN-derived rates unconditionally and treats the I/O columns as version-gated optionals; sub-phase 5.1 verifies and records the answer | phase 5 § 5.1, § 5.3 |
+| Q-A | `RESOLVED 2026-08-29` — PG18 `pg_stat_wal` has core counters only; WAL I/O columns are in `pg_stat_io` | The `wal` check collects core WAL counters from `pg_stat_wal` and treats I/O fields as version-gated `pg_stat_io` optionals | phase 5 § 5.1, § 5.3 |
 | Q-B | Does the fleet's real workload need per-user or per-application connection breakdown, or is per-state enough? | Per-state and per-database only, with a bounded `top_n` of 10 application names; a wider breakdown is a config opt-in | phase 3 § 3.3 |
 
 ## Architecture summary
@@ -211,7 +212,7 @@ introduces a new external dependency except `gopsutil/v4`, which is already in
 | R4 | `pgstattuple` is an extension and performs a full relation scan; it cannot be assumed present and must never be scheduled | PostgreSQL documentation, `pgstattuple` | PG 15–18 |
 | R5 | `EXPLAIN ANALYZE` executes the statement; `EXPLAIN` alone does not | PostgreSQL documentation, `EXPLAIN` | PG 15–18 |
 | R6 | Slack incoming webhooks accept a JSON body with `text` and optional `blocks` on a `POST` to the webhook URL, and answer `200 ok` | Slack API, incoming webhooks | 2026-08 |
-| R7 | `UNVERIFIED` — PG 18 `pg_stat_wal` column set (see D23 and Q-A). To be settled in sub-phase 5.1 against a live container, not from documentation memory | — | — |
+| R7 | Verified live 2026-08-29: PG15 `pg_stat_wal` has `wal_sync`, `wal_sync_time`, `wal_write`, `wal_write_time`; PG18 omits those and exposes I/O columns in `pg_stat_io` | `INT-WAL-000` against the testcontainers PG15/PG18 matrix | PG15/PG18, 2026-08-29 |
 | R8 | Local toolchain unchanged from plan 001: Go 1.26.1, Docker 29.7.2, Compose v5.5.0 | local `go version` / `docker --version` | 2026-08-29 |
 
 ## Invariants
