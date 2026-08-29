@@ -133,7 +133,10 @@ func TestProcess_RoutesTypedFactsAndRelationChecks(t *testing.T) {
 			{Name: "index_bytes", Value: 128, Kind: "gauge", Labels: map[string]string{"schemaname": "public", "relname": "orders", "indexrelname": "orders_pkey"}},
 		}},
 		{Check: "bloat_estimate", TS: time.Now(), Metrics: []wire.Metric{
-			{Name: "bloat_ratio", Value: 0.25, Kind: "gauge", Labels: map[string]string{"schemaname": "public", "relname": "orders", "object_kind": "table", "method": "estimate"}},
+			{Name: "pg_bloat_real_bytes", Value: 100, Kind: "gauge", Labels: map[string]string{"schemaname": "public", "relname": "orders", "object_kind": "table", "method": "estimate"}},
+			{Name: "pg_bloat_expected_bytes", Value: 75, Kind: "gauge", Labels: map[string]string{"schemaname": "public", "relname": "orders", "object_kind": "table", "method": "estimate"}},
+			{Name: "pg_bloat_bytes", Value: 25, Kind: "gauge", Labels: map[string]string{"schemaname": "public", "relname": "orders", "object_kind": "table", "method": "estimate"}},
+			{Name: "pg_bloat_ratio", Value: 0.25, Kind: "gauge", Labels: map[string]string{"schemaname": "public", "relname": "orders", "object_kind": "table", "method": "estimate"}},
 		}},
 		{Check: "settings", TS: time.Now(), Database: "app", Facts: []wire.Fact{
 			{Kind: "setting", Key: "work_mem", ValueText: "4MB"},

@@ -28,6 +28,7 @@ services:
     environment:
       PGLENS_DSN: postgres://pglens:pglens@timescaledb:5432/pglens?sslmode=disable
       PGLENS_BOOTSTRAP_TOKEN: dev-token
+      PGLENS_ADVISOR_INTERVAL: 5s
     ports:
       - "8080"
     # The distroless image has no shell or curl; the binary's own

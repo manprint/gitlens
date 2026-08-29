@@ -102,6 +102,10 @@ WHERE c.relkind = 'r'`)
 	}
 	selected, truncated := selector.Select(cycle, candidates)
 	selector.Forget(cycle)
+	// TopN is itself a reporting budget.  The selector's truncation bit only
+	// reports the hard MaxKeys cap, so also mark a result truncated whenever
+	// the selected set is smaller than the candidate set.
+	truncated = truncated || len(selected) < len(candidates)
 	result := tableStatsResult(selected, byKey, t.Clock().Now())
 	result.Truncated = truncated
 	return result, nil
@@ -136,6 +140,9 @@ func tableStatsResult(selected []cardinality.Candidate, rows map[string]tableSta
 			{"relfrozenxid_age", float64(r.RelfrozenXIDAge)}, {"total_bytes", float64(r.TotalBytes)}, {"table_bytes", float64(r.TableBytes)}, {"toast_bytes", float64(r.ToastBytes)},
 		} {
 			add(m.name, m.value, pgtype.KindGauge)
+		}
+		if r.NLiveTup > 0 {
+			add("dead_tuple_ratio", float64(r.NDeadTup)/float64(r.NLiveTup), pgtype.KindGauge)
 		}
 		for _, m := range []struct {
 			name  string

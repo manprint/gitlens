@@ -2,7 +2,7 @@
 
 > **READ THIS FILE FIRST at the start of every session, before any other plan
 > file. OPEN a unit in §1 before touching code; CLOSE it after the gates pass.**
-> **Last updated:** 2026-08-30 (phase 9.3 closed) by `agent:gpt5.6-luna` | **Session:** 24
+> **Last updated:** 2026-08-30 (phase 9.4 closed) by `agent:gpt5.6-luna` | **Session:** 26
 
 ## 0. Protocol
 
@@ -49,13 +49,13 @@ work — a phase that looks blocked is a signal to read §9, not to skip ahead.
 ## 1. Current unit
 
 - **Type:** sub-phase
-- **ID:** `9.4`
+- **ID:** `9.5`
 - **Status:** `none`
-- **Intent:** prove vacuum, bloat, index usage and relation cardinality through the L3 API and PostgreSQL.
+- **Intent:** prove the advisor exact-set acceptance and degraded-mode behavior through the L3 API and PostgreSQL.
 - **Phase:** 9 — L3 end-to-end scenarios ([phase_10.md](phase_10.md))
-- **Next action:** read phase_10.md §9.4, implement the maintenance scenario, then run the 9.4 gates.
+- **Next action:** open phase_10.md §9.5, implement the advisor acceptance scenario, then run the 9.5 gates.
 - **Assigned:** `agent:gpt5.6-luna`
-- **Repo state:** branch `main`, phase 9.3 close is recorded in the ledger below; next unit is 9.4.
+- **Repo state:** branch `main`, phase 9.4 complete.
 
 ## 2. Feature context (self-contained recap)
 
@@ -197,6 +197,7 @@ The authoritative gate commands are the Makefile targets. These are identical to
 | 77 | sub-phase | 9.1 | agent:gpt5.6-luna | Added a real three-node cascading PostgreSQL stack, agent fixture and SYS-REPL-006 API scenario; tightened instance staleness to the required 60-second bound | `test/compose/topo-cascading.yml`, `test/compose/agent-container-cascading.yml`, `test/fixtures/agent-cascading.yaml`, `test/fixtures/sql/cascading_standby_init.sh`, `test/e2e/scenarios/topo-cascading.yml`, `test/scenario/topo_cascading.go`, `test/e2e/topo_cascading_test.go`, `test/harness/harness.go`, `internal/server/api.go`, `internal/server/api_test.go`, `STATE.md` | compile/vet, Docker images and three consecutive SYS-REPL-006 L3 runs PASS | phase-9 close |
 | 78 | sub-phase | 9.2 | agent:gpt5.6-luna | Added the containerized mock receiver, two-replica alerting stack and SYS-ALERT-001..004 L3 scenarios; persisted evaluator state across leader failover so an existing alert episode cannot be re-fired | `.dockerignore`, `test/e2e/mockreceiver/main.go`, `test/e2e/mockreceiver/Dockerfile`, `test/e2e/scenarios/alerting.yml`, `test/e2e/alerting_test.go`, `test/compose/agent-container-alerting.yml`, `test/compose/scenario-alerting.yml`, `test/scenario/alerting.go`, `internal/alert/eval.go`, `internal/alert/engine.go`, `internal/alert/source_sql.go`, `internal/server/api_alerts.go`, `test/harness/api.go`, `test/harness/harness.go`, `test/harness/toxic.go`, `test/scenario/registry.go`, `internal/alert/engine_test.go`, `STATE.md` | fmt/lint/build/vet, rebuilt Docker images, and three consecutive four-scenario SYS-ALERT L3 runs PASS | phase-9.2 close |
 | 79 | sub-phase | 9.3 | agent:gpt5.6-luna | Added real lock-contention and deadlock scenarios with deterministic cleanup, empty lock-tree snapshots, database label propagation and event-aware deadlock alert sourcing | `internal/alert/source_sql.go`, `internal/check/locks.go`, `internal/check/locks_test.go`, `internal/server/pipeline.go`, `test/e2e/contention_test.go`, `test/e2e/scenarios/contention.yml`, `STATE.md` | fmt/lint/build/unit/vet, rebuilt Docker images, and three consecutive combined SYS-LOCK-001/SYS-DEADLOCK-001 L3 runs PASS | phase-9.3 close |
+| 80 | sub-phase | 9.4 | agent:gpt5.6-luna | Added live vacuum, bloat, unused-index, relation-cardinality and duplicate-index L3 scenarios plus typed relation persistence/API/advisor support | `internal/check/table_stats.go`, `internal/check/index_stats.go`, `internal/check/bloat_estimate.go`, `internal/check/bloat_estimate.sql`, `internal/store/migrations/0011_relation_metrics.sql`, `internal/store/write.go`, `internal/server/pipeline.go`, `internal/server/api_relations.go`, `internal/advisor/snapshot.go`, `test/e2e/maintenance_test.go`, `test/e2e/scenarios/maintenance.yml`, `STATE.md` | all five SYS-VAC/BLOAT/IDX scenarios PASS in three consecutive full-suite runs; SYS-IDX-002 PASS 3/3; fmt/lint/build/test/vet and Docker images green | `853019a` |
 
 ## 5. Files touched
 
@@ -440,10 +441,26 @@ the units that touched it, so a later audit can attribute every diff.
 | `internal/server/pipeline.go` | 9.3 | database label fallback for generic metric rows |
 | `test/e2e/contention_test.go` | 9.3 | SYS-LOCK-001 and SYS-DEADLOCK-001 L3 scenarios |
 | `test/e2e/scenarios/contention.yml` | 9.3 | contention scenario metadata |
+| `internal/check/table_stats.go` | 9.4 | dead-tuple ratio metric and selector truncation metadata |
+| `internal/check/index_stats.go` | 9.4 | selector truncation metadata for index cardinality |
+| `internal/check/bloat_estimate.go` | 9.4 | estimate method label and selector truncation metadata |
+| `internal/check/bloat_estimate.sql` | 9.4 | zero-safe bloat ratio calculation |
+| `internal/check/bloat_estimate_test.go` | 9.4 | zero-safe bloat SQL regression assertion |
+| `internal/store/migrations/0011_relation_metrics.sql` | 9.4 | persisted dead-tuple ratio and vacuum age columns |
+| `internal/store/write.go` | 9.4 | relation metric persistence and stale-row pruning |
+| `internal/store/write_test.go` | 9.4 | relation writer argument coverage |
+| `internal/server/pipeline.go` | 9.4 | relation metric mapping, labels and stale-row pruning |
+| `internal/server/pipeline_test.go` | 9.4 | bloat metric mapping regression coverage |
+| `internal/server/api_relations.go` | 9.4 | relation order, bloat method and truncation metadata API |
+| `internal/advisor/snapshot.go` | 9.4 | typed relation snapshot loading and index definition hashes |
+| `test/compose/base.yml` | 9.4 | advisor interval and relation scrape timing |
+| `test/fixtures/agent-standalone.yaml` | 9.4 | maintenance check intervals for L3 scenarios |
+| `test/e2e/maintenance_test.go` | 9.4 | SYS-VAC-001, SYS-BLOAT-001, SYS-IDX-001..003 L3 scenarios |
+| `test/e2e/scenarios/maintenance.yml` | 9.4 | maintenance scenario metadata |
 
 ## 6. In-flight work
 
-`none — 9.3 is closed. SYS-LOCK-001 and SYS-DEADLOCK-001 passed three consecutive combined L3 runs on the final image; next unit is 9.4.`
+`none — tree consistent`
 
 ## 7. Verification state
 
@@ -538,6 +555,11 @@ the units that touched it, so a later audit can attribute every diff.
 | phase9.3-focused-run-1 | `go test -tags=e2e -timeout=8m -count=1 -v ./test/e2e/... -run '^(TestFull_LockContention|TestFull_Deadlock)$'` | PASS — SYS-LOCK-001 54.88s; SYS-DEADLOCK-001 77.04s; total 131.927s | 2026-08-30 |
 | phase9.3-focused-run-2 | `go test -tags=e2e -timeout=8m -count=1 -v ./test/e2e/... -run '^(TestFull_LockContention|TestFull_Deadlock)$'` | PASS — SYS-LOCK-001 59.46s; SYS-DEADLOCK-001 77.62s; total 137.089s | 2026-08-30 |
 | phase9.3-focused-run-3 | `go test -tags=e2e -timeout=8m -count=1 -v ./test/e2e/... -run '^(TestFull_LockContention|TestFull_Deadlock)$'` | PASS — SYS-LOCK-001 59.98s; SYS-DEADLOCK-001 77.53s; total 137.513s | 2026-08-30 |
+| phase9.4-static | `make fmt-check && make lint && make build && go test ./... && go test -tags=e2e ./test/e2e -run '^$' && go vet -tags=e2e ./test/e2e/...` | PASS — formatting, lint, build, complete Go suite, e2e compile and vet green | 2026-08-30 |
+| phase9.4-images | `make build-images` | PASS — agent and server dev images rebuilt with the maintenance implementation | 2026-08-30 |
+| phase9.4-full-suite-1 | `go test -tags=e2e -timeout=8m -count=1 -v ./test/e2e/... -run '^(TestFull_VacuumMaintenance|TestFull_BloatMaintenance|TestFull_UnusedIndexMaintenance|TestFull_RelationCardinality|TestFull_DuplicateIndexMaintenance)$'` | PASS — SYS-VAC-001 70.60s; SYS-BLOAT-001 44.40s; SYS-IDX-001 47.47s; SYS-IDX-002 44.89s; SYS-IDX-003 57.58s; suite 264.940s | 2026-08-30 |
+| phase9.4-full-suite-2 | `go test -tags=e2e -timeout=8m -count=1 -v ./test/e2e/... -run '^(TestFull_VacuumMaintenance|TestFull_BloatMaintenance|TestFull_UnusedIndexMaintenance|TestFull_RelationCardinality|TestFull_DuplicateIndexMaintenance)$'` | PASS — SYS-VAC-001 65.08s; SYS-BLOAT-001 40.89s; SYS-IDX-001 46.95s; SYS-IDX-002 45.35s; SYS-IDX-003 52.09s; suite 250.362s | 2026-08-30 |
+| phase9.4-full-suite-3 | `go test -tags=e2e -timeout=8m -count=1 -v ./test/e2e/... -run '^(TestFull_VacuumMaintenance|TestFull_BloatMaintenance|TestFull_UnusedIndexMaintenance|TestFull_RelationCardinality|TestFull_DuplicateIndexMaintenance)$'` | PASS — SYS-VAC-001 60.53s; SYS-BLOAT-001 50.88s; SYS-IDX-001 46.99s; SYS-IDX-002 45.32s; SYS-IDX-003 57.08s; suite 260.792s | 2026-08-30 |
 
 ## 8. Runtime deviations from the plan
 
@@ -581,6 +603,10 @@ the units that touched it, so a later audit can attribute every diff.
 | D-035 | 9.3 | Database-stat metrics carry their database only in labels | The pipeline now falls back from the result database field to the `database` label when persisting generic metric rows | Required for database-scoped SYS-DEADLOCK-001 alert assertions; no metric names or label contracts changed |
 | D-036 | 9.3 | A positive deadlock rate can be overwritten by a later zero sample before alert evaluation | The SQL alert source selects positive `pg_deadlocks_total` observations in the lookback window instead of only the latest sample | Preserves the event-like counter pulse for the planned deadlock alert; three combined L3 runs passed |
 | D-037 | 9.3 | Lock cleanup context was too short for the contention polling duration | Extended only the test cleanup context from 10 seconds to 2 minutes so the holder release is guaranteed after a long successful poll | Test-only reliability correction; no production timeout changed |
+| D-038 | 9.4 | Plan names `/api/v1/relations?instance_id=...&order=dead_ratio` | Used the repository's established instance-scoped `/api/v1/instances/{id}/tables`, `/indexes` and `/bloat` routes, adding the planned order/method filters and truncation metadata there | Preserved the existing L3 API contract while exposing every phase-9.4 assertion |
+| D-039 | 9.4 | Duplicate indexes are described as a `redundant` advisor finding | The existing rule catalogue emits the stable `index.duplicate` rule ID; the scenario asserts that exact rule and its resolution | Reused the shipped advisor contract rather than inventing a second equivalent rule |
+| D-040 | 9.4 | Relation cardinality is described as a configured budget without naming the effective value | SYS-IDX-002 asserts the configured hard selector budget of 200; the selector may return the union of independently ranked primary/secondary candidates below that hard cap | The test verifies the actual shared selector contract and API truncation signal, including a positive lower-bound `relations_not_reported` value |
+| D-041 | 9.4 | Relation metric persistence requires new vacuum fields | Added forward-only migration `0011_relation_metrics.sql` instead of editing committed migration `0007_facts.sql` | Maintains the repository's append-only migration history while persisting the phase-9.4 API data |
 
 Phase-6 healthcheck blocker resolved: the agent health server is initialized
 before target connection retries; the subsequent `SYS-HARNESS-001` smoke passed
@@ -639,13 +665,13 @@ disagree with §1 and §4.
 | 6 — Host and container metrics | phase_07.md | `DONE` | 6/6 sub-phases closed; INT-HOST-001..005 and SYS-HARNESS-001 focused validation green; coverage 75.1%; phase commit `436ac99`; primary `agent:gpt5.6-luna` |
 | 7 — Advisor engine and rule packs | phase_08.md | `DONE` | 10/10 sub-phases closed; INT-ADV-001..008 green; advisor coverage 88.6%; global coverage 75.2%; phase commit `8891d6b` |
 | 8 — Command channel and query plans | phase_09.md | `DONE` | 11/11 sub-phases closed; INT-CMD-001..011, INT-PLAN-001/002 and SYS-PERM-001 green; coverage 75.0%, `internal/command` 100.0%; primary `agent:gpt5.6-luna`; phase commit `78dbf94` |
-| 9 — L3 end-to-end scenarios | phase_10.md | `IN_PROGRESS` | 3/8 sub-phases closed; SYS-REPL-006, SYS-ALERT-001..004, SYS-LOCK-001 and SYS-DEADLOCK-001 green; primary `agent:gpt5.6-luna` |
+| 9 — L3 end-to-end scenarios | phase_10.md | `IN_PROGRESS` | 4/8 sub-phases closed; SYS-REPL-006, SYS-ALERT-001..004, SYS-LOCK-001, SYS-DEADLOCK-001 and SYS-VAC/BLOAT/IDX-001..003 green; primary `agent:gpt5.6-luna` |
 | 10 — Packaging, CI, final documentation | phase_11.md | `TODO` | 0/5 sub-phases closed; primary `agent:gpt5.6-luna` |
 
 Status values: `TODO` · `IN_PROGRESS` · `DONE` · `SKIPPED` · `BLOCKED`
 A `SKIPPED` sub-phase or phase keeps its row and carries the reason.
 
-**8 of 11 phases `DONE`. Plan at 72% — phase 9 is next.**
+**8 of 11 phases `DONE`. Plan at 73% — phase 9 continues.**
 
 ### Tests
 
@@ -763,7 +789,7 @@ throughout.
 | SYS-ALERT-003 | system | 9 | `DONE` | phase 9 § 9.2 — Leader failover deduplication |
 | SYS-ALERT-004 | system | 9 | `DONE` | phase 9 § 9.2 — Silence suppresses notifications |
 | SYS-ARCH-001 | system | 9 | `TODO` | phase 9 § 9.7 — Backup and archiving |
-| SYS-BLOAT-001 | system | 9 | `TODO` | phase 9 § 9.4 — Vacuum, bloat, index usage and relation cardinality |
+| SYS-BLOAT-001 | system | 9 | `DONE` | phase 9 § 9.4 — estimate bloat and optional pgstattuple method through the relation API; three full-suite runs green |
 | SYS-CMD-001 | system | 8 | `TODO` | phase 8 § 8.5 — Agent-side dispatcher; end-to-end coverage is deferred to phase 9 as specified |
 | SYS-CMD-002 | system | 9 | `TODO` | phase 9 § 9.6 — Command channel acceptance |
 | SYS-CMD-003 | system | 9 | `TODO` | phase 9 § 9.6 — Command channel acceptance |
@@ -771,14 +797,14 @@ throughout.
 | SYS-DEADLOCK-001 | system | 9 | `DONE` | phase 9 § 9.3 — three consecutive combined L3 runs |
 | SYS-DEPLOY-001 | system | 10 | `TODO` | phase 10 § 10.2 — Deploy artefacts |
 | SYS-HARNESS-001 | system | 6 | `PASS` | phase 6 § 6.5 — healthy container startup and teardown smoke, exit 0 |
-| SYS-IDX-001 | system | 7 | `TODO` | phase 7 § 7.5 — Rule pack B — indexes, tables, autovacuum, bloat |
-| SYS-IDX-002 | system | 4 | `PASS` | phase 4 § 4.5 — shared relation budget covered by selector acceptance test |
-| SYS-IDX-003 | system | 7 | `TODO` | phase 7 § 7.5 — Rule pack B — indexes, tables, autovacuum, bloat |
+| SYS-IDX-001 | system | 9 | `DONE` | phase 9 § 9.4 — unused index finding through the real L3 workload; three full-suite runs green |
+| SYS-IDX-002 | system | 9 | `DONE` | phase 9 § 9.4 — 5000-table cardinality budget, API truncation and relations-not-reported metadata; three full-suite runs green |
+| SYS-IDX-003 | system | 9 | `DONE` | phase 9 § 9.4 — duplicate-index finding and resolution after drop; three full-suite runs green |
 | SYS-LOCK-001 | system | 9 | `DONE` | phase 9 § 9.3 — three consecutive combined L3 runs |
 | SYS-PERM-001 | system | 4 | `EXTEND` | exists from plan 001 — phase-8 regression PASS with T0 and both command flags false |
 | SYS-PERM-002 | system | 10 | `TODO` | phase 10 § 10.3 — Permission-tier grant scripts |
 | SYS-REPL-006 | system | 9 | `DONE` | phase 9 § 9.1 — Cascading replication topology |
-| SYS-VAC-001 | system | 9 | `TODO` | phase 9 § 9.4 — Vacuum, bloat, index usage and relation cardinality |
+| SYS-VAC-001 | system | 9 | `DONE` | phase 9 § 9.4 — dead-tuple ratio falls after VACUUM and last-vacuum age is fresh; three full-suite runs green |
 
 ### Docs
 

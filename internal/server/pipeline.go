@@ -121,6 +121,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	var indexRows []store.IndexStatRow
 	var bloatRows []store.BloatRow
 	var lockSnapshotRows []store.LockSnapshotRow
+	var relationPrunes []store.RelationStatsPrune
 
 	// Resolves a wire.Edge.To (an upstream's addr, e.g. "pg-primary") to an
 	// instance_id. Tries the current envelope first (fast path, no query).
@@ -184,6 +185,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		tableMap := make(map[tableStatKey]*store.TableStatRow)
 		indexMap := make(map[indexStatKey]*store.IndexStatRow)
 		bloatMap := make(map[bloatKey]*store.BloatRow)
+		var instRelationPrunes []store.RelationStatsPrune
 		var instErr error
 
 		// internal/topology.Engine (6.2, unit-tested at 90.9% coverage) was
@@ -249,6 +251,12 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		}
 
 		for _, r := range inst.Results {
+			if r.Error == "" && !r.Truncated {
+				switch dest := destinationTable(r.Check); dest {
+				case "metrics_tables", "metrics_indexes", "metrics_bloat":
+					instRelationPrunes = append(instRelationPrunes, store.RelationStatsPrune{TableName: dest, TenantID: tenantID, InstanceID: instUUID, Datname: r.Database, Before: r.TS})
+				}
+			}
 			if r.Error != "" {
 				IncCheckError(r.Check)
 			}
@@ -488,7 +496,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 						row = &store.TableStatRow{TS: r.TS, TenantID: tenantID, ClusterID: cidDB, InstanceID: instUUID, Datname: r.Database, Schemaname: key.schema, Relname: key.relname}
 						tableMap[key] = row
 					}
-					applyTableMetric(row, m.Name, value)
+					applyTableMetric(row, strings.TrimPrefix(m.Name, "pg_table_"), value)
 				case "metrics_indexes":
 					key := indexStatKey{ts: r.TS, datname: r.Database, schema: m.Labels["schemaname"], indexrelname: m.Labels["indexrelname"]}
 					row := indexMap[key]
@@ -496,7 +504,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 						row = &store.IndexStatRow{TS: r.TS, TenantID: tenantID, ClusterID: cidDB, InstanceID: instUUID, Datname: r.Database, Schemaname: key.schema, Relname: m.Labels["relname"], IndexRelname: key.indexrelname}
 						indexMap[key] = row
 					}
-					applyIndexMetric(row, m.Name, value, m.Labels)
+					applyIndexMetric(row, strings.TrimPrefix(m.Name, "pg_index_"), value, m.Labels)
 				case "metrics_bloat":
 					key := bloatKey{ts: r.TS, datname: r.Database, schema: m.Labels["schemaname"], relname: m.Labels["relname"], indexrelname: m.Labels["indexrelname"], method: m.Labels["method"]}
 					row := bloatMap[key]
@@ -504,7 +512,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 						row = &store.BloatRow{TS: r.TS, TenantID: tenantID, ClusterID: cidDB, InstanceID: instUUID, Datname: r.Database, Schemaname: key.schema, Relname: key.relname, IndexRelname: key.indexrelname, ObjectKind: m.Labels["object_kind"], Method: key.method}
 						bloatMap[key] = row
 					}
-					applyBloatMetric(row, m.Name, value)
+					applyBloatMetric(row, strings.TrimPrefix(m.Name, "pg_bloat_"), value)
 				}
 			}
 			if instErr != nil {
@@ -541,6 +549,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		if instLockSnapshot != nil {
 			lockSnapshotRows = append(lockSnapshotRows, *instLockSnapshot)
 		}
+		relationPrunes = append(relationPrunes, instRelationPrunes...)
 		res.Accepted++
 	}
 
@@ -567,6 +576,11 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	}
 	if err := store.WriteLockSnapshots(ctx, tx, lockSnapshotRows); err != nil {
 		return nil, fmt.Errorf("write lock snapshots: %w", err)
+	}
+	for _, prune := range relationPrunes {
+		if err := store.PruneRelationStats(ctx, tx, prune); err != nil {
+			return nil, err
+		}
 	}
 	if err := store.WriteTableStats(ctx, tx, tableRows); err != nil {
 		return nil, fmt.Errorf("write table stats: %w", err)
@@ -697,6 +711,12 @@ func applyTableMetric(row *store.TableStatRow, name string, value float64) {
 	case "n_mod_since_analyze":
 		x := int64(value)
 		row.NModSinceAnalyze = &x
+	case "dead_tuple_ratio":
+		x := value
+		row.DeadTupleRatio = &x
+	case "last_vacuum_age_seconds":
+		x := value
+		row.LastVacuumAgeSeconds = &x
 	case "relpages":
 		x := int64(value)
 		row.Relpages = &x
@@ -751,16 +771,16 @@ func applyIndexMetric(row *store.IndexStatRow, name string, value float64, label
 
 func applyBloatMetric(row *store.BloatRow, name string, value float64) {
 	switch strings.ToLower(name) {
-	case "real_bytes":
+	case "real_bytes", "bloat_real_bytes":
 		x := int64(value)
 		row.RealBytes = &x
-	case "expected_bytes":
+	case "expected_bytes", "bloat_expected_bytes":
 		x := int64(value)
 		row.ExpectedBytes = &x
-	case "bloat_bytes":
+	case "bytes", "bloat_bytes":
 		x := int64(value)
 		row.BloatBytes = &x
-	case "bloat_ratio":
+	case "ratio", "bloat_ratio":
 		x := value
 		row.BloatRatio = &x
 	}

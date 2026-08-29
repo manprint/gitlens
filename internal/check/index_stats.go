@@ -91,6 +91,7 @@ LEFT JOIN pg_statio_user_indexes io ON io.indexrelid = s.indexrelid`)
 	}
 	selected, truncated := selector.Select(cycle, candidates)
 	selector.Forget(cycle)
+	truncated = truncated || len(selected) < len(candidates)
 	result := indexStatsResult(selected, byKey)
 	result.Truncated = truncated
 	return result, nil

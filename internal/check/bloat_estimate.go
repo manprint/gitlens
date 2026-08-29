@@ -69,6 +69,7 @@ func (c *bloatEstimateCheck) Scrape(ctx context.Context, t Target) (Result, erro
 	c.cycle++
 	sel, tr := c.selector.Select(c.cycle, cand)
 	c.selector.Forget(c.cycle)
+	tr = tr || len(sel) < len(cand)
 	res := bloatResult(sel, by)
 	res.Truncated = tr
 	return res, nil
@@ -80,7 +81,7 @@ func bloatResult(sel []cardinality.Candidate, rows map[string]bloatRow) Result {
 		if !ok {
 			continue
 		}
-		l := map[string]string{"schemaname": v.Schema, "relname": v.Relation, "indexrelname": v.Index, "object_kind": v.Kind}
+		l := map[string]string{"schemaname": v.Schema, "relname": v.Relation, "indexrelname": v.Index, "object_kind": v.Kind, "method": "estimate"}
 		for _, m := range []struct {
 			n string
 			v float64

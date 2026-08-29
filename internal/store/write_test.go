@@ -328,7 +328,8 @@ func TestWriter_Wrappers(t *testing.T) {
 func TestTypedFactRows_ArgsOrder(t *testing.T) {
 	inst := uuid.New()
 	r := TableStatRow{TS: time.Unix(1, 0), TenantID: "t", ClusterID: 2, InstanceID: inst, Datname: "db", Schemaname: "public", Relname: "tab"}
-	require.Equal(t, []any{r.TS, r.TenantID, r.ClusterID, r.InstanceID, r.Datname, r.Schemaname, r.Relname, r.SeqScan, r.SeqTupRead, r.IdxScan, r.IdxTupFetch, r.NTupIns, r.NTupUpd, r.NTupDel, r.NTupHotUpd, r.NLiveTup, r.NDeadTup, r.NModSinceAnalyze, r.LastVacuum, r.LastAutovacuum, r.LastAnalyze, r.LastAutoanalyze, r.AutovacuumCount, r.AutoanalyzeCount, r.Relpages, r.RelTuples, r.RelfrozenXIDAge, r.TotalBytes, r.TableBytes, r.ToastBytes}, r.args())
+	require.Equal(t, []any{r.TS, r.TenantID, r.ClusterID, r.InstanceID, r.Datname, r.Schemaname, r.Relname, r.SeqScan, r.SeqTupRead, r.IdxScan, r.IdxTupFetch, r.NTupIns, r.NTupUpd, r.NTupDel, r.NTupHotUpd, r.NLiveTup, r.NDeadTup, r.NModSinceAnalyze, r.DeadTupleRatio, r.LastVacuumAgeSeconds, r.LastVacuum, r.LastAutovacuum, r.LastAnalyze, r.LastAutoanalyze, r.AutovacuumCount, r.AutoanalyzeCount, r.Relpages, r.RelTuples, r.RelfrozenXIDAge, r.TotalBytes, r.TableBytes, r.ToastBytes}, r.args())
+	require.Len(t, r.args(), 32)
 	i := IndexStatRow{TS: r.TS, TenantID: "t", ClusterID: 2, InstanceID: inst, Datname: "db", Schemaname: "public", Relname: "tab", IndexRelname: "idx"}
 	require.Len(t, i.args(), 18)
 	b := BloatRow{TS: r.TS, TenantID: "t", ClusterID: 2, InstanceID: inst, Datname: "db", Schemaname: "public", Relname: "tab", ObjectKind: "table", Method: "estimate"}

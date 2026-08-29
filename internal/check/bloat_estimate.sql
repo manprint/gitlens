@@ -13,5 +13,5 @@ WITH widths AS (
 SELECT schemaname, relname, '' AS indexrelname, 'table' AS object_kind, real_bytes,
        GREATEST(reltuples * (tuple_width + 23), 0) AS expected_bytes,
        GREATEST(real_bytes - GREATEST(reltuples * (tuple_width + 23), 0), 0) AS bloat_bytes,
-       GREATEST(real_bytes - GREATEST(reltuples * (tuple_width + 23), 0), 0) / NULLIF(real_bytes,0) AS bloat_ratio,
+       COALESCE(GREATEST(real_bytes - GREATEST(reltuples * (tuple_width + 23), 0), 0) / NULLIF(real_bytes,0), 0)::float8 AS bloat_ratio,
        reltuples FROM relations

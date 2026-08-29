@@ -112,6 +112,7 @@ type TableStatRow struct {
 	Datname, Schemaname, Relname                                                     string
 	SeqScan, SeqTupRead, IdxScan, IdxTupFetch, NTupIns, NTupUpd, NTupDel, NTupHotUpd *float64
 	NLiveTup, NDeadTup, NModSinceAnalyze                                             *int64
+	DeadTupleRatio, LastVacuumAgeSeconds                                             *float64
 	LastVacuum, LastAutovacuum, LastAnalyze, LastAutoanalyze                         *time.Time
 	AutovacuumCount, AutoanalyzeCount                                                *float64
 	Relpages                                                                         *int64
@@ -175,8 +176,33 @@ type LockSnapshotRow struct {
 	Tree       []byte
 }
 
+// RelationStatsPrune describes a successful, complete relation check. Its
+// older rows can be removed before the current sample is written, so dropped
+// relations do not remain visible to the advisor as fresh observations.
+type RelationStatsPrune struct {
+	TableName  string
+	TenantID   string
+	InstanceID uuid.UUID
+	Datname    string
+	Before     time.Time
+}
+
+func PruneRelationStats(ctx context.Context, tx pgx.Tx, p RelationStatsPrune) error {
+	var table string
+	switch p.TableName {
+	case "metrics_tables", "metrics_indexes", "metrics_bloat":
+		table = p.TableName
+	default:
+		return fmt.Errorf("unknown relation stats table %q", p.TableName)
+	}
+	if _, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE tenant_id=$1 AND instance_id=$2 AND datname=$3 AND ts < $4", p.TenantID, p.InstanceID, p.Datname, p.Before); err != nil {
+		return fmt.Errorf("prune %s: %w", table, err)
+	}
+	return nil
+}
+
 func (r TableStatRow) args() []any {
-	return []any{r.TS, r.TenantID, r.ClusterID, r.InstanceID, r.Datname, r.Schemaname, r.Relname, r.SeqScan, r.SeqTupRead, r.IdxScan, r.IdxTupFetch, r.NTupIns, r.NTupUpd, r.NTupDel, r.NTupHotUpd, r.NLiveTup, r.NDeadTup, r.NModSinceAnalyze, r.LastVacuum, r.LastAutovacuum, r.LastAnalyze, r.LastAutoanalyze, r.AutovacuumCount, r.AutoanalyzeCount, r.Relpages, r.RelTuples, r.RelfrozenXIDAge, r.TotalBytes, r.TableBytes, r.ToastBytes}
+	return []any{r.TS, r.TenantID, r.ClusterID, r.InstanceID, r.Datname, r.Schemaname, r.Relname, r.SeqScan, r.SeqTupRead, r.IdxScan, r.IdxTupFetch, r.NTupIns, r.NTupUpd, r.NTupDel, r.NTupHotUpd, r.NLiveTup, r.NDeadTup, r.NModSinceAnalyze, r.DeadTupleRatio, r.LastVacuumAgeSeconds, r.LastVacuum, r.LastAutovacuum, r.LastAnalyze, r.LastAutoanalyze, r.AutovacuumCount, r.AutoanalyzeCount, r.Relpages, r.RelTuples, r.RelfrozenXIDAge, r.TotalBytes, r.TableBytes, r.ToastBytes}
 }
 func (r IndexStatRow) args() []any {
 	return []any{r.TS, r.TenantID, r.ClusterID, r.InstanceID, r.Datname, r.Schemaname, r.Relname, r.IndexRelname, r.IdxScan, r.IdxTupRead, r.IdxTupFetch, r.IdxBlksRead, r.IdxBlksHit, r.IndexBytes, r.IsUnique, r.IsPrimary, r.IsValid, r.DefHash}
@@ -366,7 +392,7 @@ func WriteTableStats(ctx context.Context, tx pgx.Tx, rows []TableStatRow) error 
 	for i := range rows {
 		args[i] = rows[i].args()
 	}
-	return writeRows(ctx, tx, `INSERT INTO metrics_tables (ts,tenant_id,cluster_id,instance_id,datname,schemaname,relname,seq_scan,seq_tup_read,idx_scan,idx_tup_fetch,n_tup_ins,n_tup_upd,n_tup_del,n_tup_hot_upd,n_live_tup,n_dead_tup,n_mod_since_analyze,last_vacuum,last_autovacuum,last_analyze,last_autoanalyze,autovacuum_count,autoanalyze_count,relpages,reltuples,relfrozenxid_age,total_bytes,table_bytes,toast_bytes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30) ON CONFLICT DO NOTHING`, args)
+	return writeRows(ctx, tx, `INSERT INTO metrics_tables (ts,tenant_id,cluster_id,instance_id,datname,schemaname,relname,seq_scan,seq_tup_read,idx_scan,idx_tup_fetch,n_tup_ins,n_tup_upd,n_tup_del,n_tup_hot_upd,n_live_tup,n_dead_tup,n_mod_since_analyze,dead_tuple_ratio,last_vacuum_age_seconds,last_vacuum,last_autovacuum,last_analyze,last_autoanalyze,autovacuum_count,autoanalyze_count,relpages,reltuples,relfrozenxid_age,total_bytes,table_bytes,toast_bytes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32) ON CONFLICT DO NOTHING`, args)
 }
 
 func WriteIndexStats(ctx context.Context, tx pgx.Tx, rows []IndexStatRow) error {

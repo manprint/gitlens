@@ -1,0 +1,20 @@
+id: SYS-VAC-001,SYS-BLOAT-001,SYS-IDX-001,SYS-IDX-002,SYS-IDX-003
+name: relation-maintenance
+topology: standalone
+agent: test/compose/agent-container.yml
+scenarios:
+  - id: SYS-VAC-001
+    endpoint: /api/v1/instances/{id}/tables?order=dead_ratio
+    assertion: autovacuum-off delete raises dead tuple ratio above 20 percent, then VACUUM lowers it and reports a recent last-vacuum age
+  - id: SYS-BLOAT-001
+    endpoint: /api/v1/instances/{id}/bloat?method=estimate
+    assertion: estimated bloat exceeds 20 percent; when pgstattuple is already installed, an exact method=pgstattuple row is also retrievable
+  - id: SYS-IDX-001
+    endpoint: /api/v1/findings?rule_id=index.unused
+    assertion: a large unused index is reported by its exact schema-qualified name after seven days of seeded usage history
+  - id: SYS-IDX-002
+    endpoint: /api/v1/instances/{id}/indexes?limit=50
+    assertion: 5000 indexed tables remain within the configured relation budget and expose truncation metadata without a scrape timeout
+  - id: SYS-IDX-003
+    endpoint: /api/v1/findings?rule_id=index.duplicate
+    assertion: duplicate indexes are named as a pair and the finding resolves after one is dropped
