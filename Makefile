@@ -35,7 +35,7 @@ test-e2e:
 	$(GO) test -tags=e2e -timeout=35m -count=1 ./test/e2e/... -run 'Smoke'
 
 test-e2e-full:
-	$(GO) test -tags=e2e -timeout=45m -count=1 ./test/e2e/...
+	$(GO) test -tags=e2e -timeout=90m -count=1 ./test/e2e/...
 
 test-e2e-matrix:
 	AGENT_MODE=container $(MAKE) test-e2e

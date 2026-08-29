@@ -396,6 +396,31 @@ func freeTCPPort() (int, error) {
 	return l.Addr().(*net.TCPAddr).Port, nil
 }
 
+// freeTCPPorts reserves a distinct set of ephemeral ports while the caller
+// chooses the compose bindings. Calling freeTCPPort twice can return the same
+// port after the first listener is closed; that collision is especially easy
+// to hit in the primary/standby binary matrix, where both PostgreSQL services
+// are assigned ports in one compose invocation.
+func freeTCPPorts(count int) ([]int, error) {
+	listeners := make([]net.Listener, 0, count)
+	ports := make([]int, 0, count)
+	for i := 0; i < count; i++ {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			for _, open := range listeners {
+				_ = open.Close()
+			}
+			return nil, err
+		}
+		listeners = append(listeners, l)
+		ports = append(ports, l.Addr().(*net.TCPAddr).Port)
+	}
+	for _, l := range listeners {
+		_ = l.Close()
+	}
+	return ports, nil
+}
+
 // composeService is one row of `docker compose ps --format json`.
 type composeService struct {
 	Service string `json:"Service"`
@@ -429,14 +454,11 @@ func (h *Harness) composeUp() error {
 	if h.agentMode == AgentModeBinary {
 		env := os.Environ()
 		if h.topology == TopologyPrimaryStandby {
-			primaryPort, err := freeTCPPort()
+			ports, err := freeTCPPorts(2)
 			if err != nil {
-				return fmt.Errorf("pick fixed pg-primary host port: %w", err)
+				return fmt.Errorf("pick fixed PostgreSQL host ports: %w", err)
 			}
-			standbyPort, err := freeTCPPort()
-			if err != nil {
-				return fmt.Errorf("pick fixed pg-standby host port: %w", err)
-			}
+			primaryPort, standbyPort := ports[0], ports[1]
 			env = append(env,
 				fmt.Sprintf("PG_PRIMARY_HOST_PORT=%d", primaryPort),
 				fmt.Sprintf("PG_STANDBY_HOST_PORT=%d", standbyPort))
