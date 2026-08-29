@@ -134,11 +134,60 @@ PGLENS_LISTEN=:8080 \
 | `PGLENS_BOOTSTRAP_TOKEN_FILE` | path | — | file containing the token (trailing newline trimmed) |
 | `PGLENS_ALERT_INTERVAL` | duration | `30s` | alert evaluation interval |
 | `PGLENS_ADVISOR_INTERVAL` | duration | `15m` | advisor finding evaluation interval |
+| `PGLENS_COMMAND_TTL` | duration | `5m` | lifetime of an on-demand command before expiry |
 | `PGLENS_SLACK_WEBHOOK_URL` | URL | unset | enables Slack notifications |
 | `PGLENS_SLACK_WEBHOOK_URL_FILE` | path | unset | reads the Slack URL; takes precedence over the inline URL |
 | `PGLENS_WEBHOOK_URL` | URL | unset | enables generic webhook notifications |
 
 The bootstrap token is a shared secret; this release has no token rotation, no mTLS, and no approval queue. Revocation is supported: `UPDATE agents SET revoked_at = now()` makes the next push return 401.
+
+## On-demand operations
+
+On-demand commands use a pull channel: the server queues a command and the
+agent polls for work. The server never opens an inbound PostgreSQL connection
+to an agent target. Supported commands are `explain`, `cancel`, `terminate`,
+and `pgstattuple`; every request, claim, result, expiry, rejection, and error
+is recorded in the command audit stream.
+
+Enable the channel explicitly on the server and agent. The agent-side
+dispatcher is disabled by default for mutating or potentially expensive
+operations; `targets[].allow_explain_analyze` and `targets[].allow_signal`
+also default to `false`.
+
+```sh
+INSTANCE_ID=11111111-1111-1111-1111-111111111111
+
+# Queue EXPLAIN (the command carries queryid and options, never SQL text).
+COMMAND_ID=$(curl -s -X POST http://localhost:8080/api/v1/commands \
+  -H 'Content-Type: application/json' \
+  -d '{"instance_id":"'"$INSTANCE_ID"'","kind":"explain","args":{"queryid":1234,"datname":"app","analyze":false}}' \
+  | jq -r .command_id)
+
+# Poll state/result, then inspect the persisted plan history and audit trail.
+curl -s "http://localhost:8080/api/v1/commands/$COMMAND_ID" | jq .
+curl -s "http://localhost:8080/api/v1/plans?instance_id=$INSTANCE_ID&queryid=1234&datname=app" | jq .
+curl -s "http://localhost:8080/api/v1/instances/$INSTANCE_ID/command-audit" | jq .
+```
+
+`explain` resolves the query through `pg_stat_statements`; `EXPLAIN ANALYZE`
+requires permission tier T1 and `allow_explain_analyze: true` for the target.
+`cancel` and `terminate` require T2 and `allow_signal: true`, and only target
+client backends. `pgstattuple` requires the `pgstattuple` extension to already
+be installed and a permitted relation; pglens never installs extensions.
+Command results are immutable, and expired commands reject late results.
+
+Security and operational boundaries:
+
+- With `commands.enabled: false` the agent remains strictly read-only; it
+  does not poll or execute on-demand commands.
+- The server performs command-kind, argument, permission-tier, target-policy,
+  and expiry checks before accepting or dispatching work.
+- `EXPLAIN ANALYZE` executes the selected statement inside a transaction that
+  is rolled back, but it still consumes database resources and can observe
+  locks or invoke side effects that PostgreSQL permits during execution.
+- Query text is never sent in a command payload. Plan history stores a
+  normalized query hash and JSON plan; placeholders may prevent a useful plan
+  for parameter-sensitive statements.
 
 ## Alerting
 
@@ -383,6 +432,10 @@ host:
 # Push scheduling (optional)
 push_interval: 15s                   # duration: time between envelope deliveries (default 15s)
 
+# On-demand operations (optional; disabled when false)
+commands:
+  enabled: true
+
 # Disk buffer configuration (required)
 buffer:
   path: /var/lib/pglens/buffer       # string: directory for buffer segments (required)
@@ -396,6 +449,8 @@ targets:
                                      # string: PostgreSQL connection DSN (required; password never logged)
     host_local: true                 # optional; otherwise inferred from localhost/loopback or Unix socket DSNs
     cluster_name: pg-prod-eu         # string: fallback cluster identity if pg_control_system() unavailable
+    allow_explain_analyze: false     # permit EXPLAIN ANALYZE for this target (default false)
+    allow_signal: false              # permit cancel/terminate for this target (default false)
     databases:
       include: ["app_.*"]            # string array: regex patterns to include (default empty = all)
       exclude: ["^template\\d$", "^rdsadmin$", "^azure_.*$"]
@@ -1130,6 +1185,9 @@ the server is rejected, so upgrade the server before upgrading agents.
 
 **Space and maintenance:**
 - Bloat is a statistical estimate, not a measurement; exact figures require `pgstattuple` on demand where already installed
+- Exact bloat commands require a pre-installed `pgstattuple` extension; pglens never creates it automatically
+- Plan history is captured only when an `explain` command is requested; it is not an automatic query sampler
+- Normalized query placeholders can make a plan less representative for parameter-sensitive workloads; inspect the returned hash and metadata
 - Relations under 1 MiB and never-analysed relations are not estimated
 - Only top-N relations per instance are listed; the rest are counted as truncated
 

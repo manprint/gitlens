@@ -13,10 +13,18 @@ buffer:
   path: /var/lib/pglens/buffer
   max_size: 512MiB
   max_age: 6h
+
+# The command channel is enabled by default. Set enabled: false for a
+# strictly read-only agent that must never poll the server for commands.
+commands:
+  enabled: true
+
 targets:
   - name: pg-app
     dsn: postgres://pglens@pg-app:5432/postgres?sslmode=require
     cluster_name: pg-prod-eu
+    allow_explain_analyze: false
+    allow_signal: false
     databases:
       include: ["app_.*"]
       exclude: ["^template\\d$"]

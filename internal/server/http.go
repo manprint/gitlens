@@ -25,6 +25,9 @@ func NewRouter(auth *Auth, inv *Inventory, pipeline *Pipeline, api *API, topoAPI
 	r.Post("/api/v1/push", IngestHandler(auth, inv, pipeline))
 	r.Get("/metrics", MetricsHandler())
 	api.RegisterRoutes(r)
+	if api != nil {
+		NewCommandService(api.pool, auth).RegisterRoutes(r)
+	}
 	topoAPI.RegisterRoutes(r)
 	ashAPI.RegisterRoutes(r)
 	if len(alertAPIs) > 0 && alertAPIs[0] != nil {

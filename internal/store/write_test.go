@@ -57,6 +57,13 @@ func TestWriteMetrics_NilLabels(t *testing.T) {
 	require.Equal(t, 1, m.batchCalls)
 }
 
+func TestWriteQueryPlan_DedupOnHash(t *testing.T) {
+	tx := &mockTx{}
+	row := QueryPlanRow{TenantID: "default", InstanceID: uuid.New(), ClusterID: 1, Datname: "postgres", QueryID: 7, PlanHash: "same", CapturedAt: time.Now(), Plan: []byte(`[]`)}
+	require.NoError(t, WriteQueryPlan(context.Background(), tx, row))
+	require.Contains(t, tx.execSQL[0], "ON CONFLICT (tenant_id, instance_id, datname, queryid, plan_hash, analyzed) DO NOTHING")
+}
+
 func TestWriteMetrics_Empty(t *testing.T) {
 	t.Parallel()
 	require.NoError(t, WriteMetrics(context.Background(), &mockTx{}, nil))
@@ -351,6 +358,7 @@ type mockTx struct {
 	batchCalls int
 	execCalls  int
 	copyCalls  int
+	execSQL    []string
 	// error injection
 	batchExecErr  error
 	batchCloseErr error
@@ -376,8 +384,9 @@ func (m *mockTx) LargeObjects() pgx.LargeObjects { return pgx.LargeObjects{} }
 func (m *mockTx) Prepare(_ context.Context, _, _ string) (*pgconn.StatementDescription, error) {
 	return nil, nil
 }
-func (m *mockTx) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+func (m *mockTx) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
 	m.execCalls++
+	m.execSQL = append(m.execSQL, sql)
 	if m.execErr != nil {
 		return pgconn.NewCommandTag(""), m.execErr
 	}

@@ -142,6 +142,19 @@ type BloatRow struct {
 	BloatRatio                                                     *float64
 }
 
+// QueryPlanRow is one distinct plan shape captured by an explain command.
+type QueryPlanRow struct {
+	TenantID   string
+	InstanceID uuid.UUID
+	ClusterID  int64
+	Datname    string
+	QueryID    int64
+	PlanHash   string
+	Analyzed   bool
+	CapturedAt time.Time
+	Plan       []byte
+}
+
 type ObjectFactRow struct {
 	TenantID                       string
 	ClusterID                      int64
@@ -370,6 +383,16 @@ func WriteBloat(ctx context.Context, tx pgx.Tx, rows []BloatRow) error {
 		args[i] = rows[i].args()
 	}
 	return writeRows(ctx, tx, `INSERT INTO metrics_bloat (ts,tenant_id,cluster_id,instance_id,datname,schemaname,relname,indexrelname,object_kind,method,real_bytes,expected_bytes,bloat_bytes,bloat_ratio) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT DO NOTHING`, args)
+}
+
+// WriteQueryPlan stores a plan shape once. Re-capturing the same shape is a
+// successful no-op, while a changed hash creates the next history row.
+func WriteQueryPlan(ctx context.Context, tx pgx.Tx, r QueryPlanRow) error {
+	_, err := tx.Exec(ctx, `INSERT INTO query_plans (tenant_id, instance_id, cluster_id, datname, queryid, plan_hash, analyzed, captured_at, plan) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (tenant_id, instance_id, datname, queryid, plan_hash, analyzed) DO NOTHING`, r.TenantID, r.InstanceID, r.ClusterID, r.Datname, r.QueryID, r.PlanHash, r.Analyzed, r.CapturedAt, r.Plan)
+	if err != nil {
+		return fmt.Errorf("write query plan: %w", err)
+	}
+	return nil
 }
 
 func WriteObjectFacts(ctx context.Context, tx pgx.Tx, rows []ObjectFactRow) error {

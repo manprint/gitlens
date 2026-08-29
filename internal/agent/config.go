@@ -19,6 +19,7 @@ type Config struct {
 	Buffer       BufferConfig   `yaml:"buffer"`
 	Targets      []TargetConfig `yaml:"targets"`
 	Checks       ChecksConfig   `yaml:"checks"`
+	Commands     CommandsConfig `yaml:"commands"`
 	Host         HostConfig     `yaml:"host"`
 
 	// Parsed versions for convenience
@@ -45,11 +46,20 @@ type BufferConfig struct {
 
 // TargetConfig is a single PostgreSQL target to monitor.
 type TargetConfig struct {
-	Name        string          `yaml:"name"`
-	DSN         string          `yaml:"dsn"`
-	ClusterName string          `yaml:"cluster_name"`
-	Databases   DatabasesConfig `yaml:"databases"`
-	HostLocal   *bool           `yaml:"host_local"`
+	Name                string          `yaml:"name"`
+	DSN                 string          `yaml:"dsn"`
+	ClusterName         string          `yaml:"cluster_name"`
+	Databases           DatabasesConfig `yaml:"databases"`
+	HostLocal           *bool           `yaml:"host_local"`
+	AllowExplainAnalyze bool            `yaml:"allow_explain_analyze"`
+	AllowSignal         bool            `yaml:"allow_signal"`
+}
+
+// CommandsConfig controls the agent-side command channel. Enabled defaults to
+// true; setting it explicitly to false makes the agent strictly read-only by
+// stopping command polling entirely.
+type CommandsConfig struct {
+	Enabled *bool `yaml:"enabled"`
 }
 
 type HostConfig struct {
@@ -60,6 +70,7 @@ type HostConfig struct {
 }
 
 func (c *Config) HostEnabled() bool              { return c.Host.Enabled == nil || *c.Host.Enabled }
+func (c *Config) CommandsEnabled() bool          { return c.Commands.Enabled == nil || *c.Commands.Enabled }
 func (c *Config) GetHostInterval() time.Duration { return c.parsedHostInterval }
 func (c *Config) HostProcPath() string {
 	if c.Host.ProcPath != "" {

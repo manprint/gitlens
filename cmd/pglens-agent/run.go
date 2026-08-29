@@ -169,6 +169,22 @@ func runAgentCommand(args []string) {
 		os.Exit(1)
 	}
 
+	// Commands are long-polled once per agent, independently from the check
+	// scheduler. Executors are registered by the command-executor phases; the
+	// dispatcher itself is wired here so commands.enabled=false can disable all
+	// polling without affecting scheduled collection.
+	if len(managers) > 0 {
+		dispatcher := agent.NewDispatcher(cfg.Server.URL, cfg.GetToken(), managers[0].AgentID(), cfg.CommandsEnabled())
+		dispatcher.AddExecutor(agent.NewExplainExecutor())
+		dispatcher.AddExecutor(agent.NewCancelExecutor())
+		dispatcher.AddExecutor(agent.NewTerminateExecutor())
+		dispatcher.AddExecutor(agent.NewPgstattupleExecutor())
+		for i, mgr := range managers {
+			dispatcher.AddTarget(mgr.InstanceID(), mgr, cfg.Targets[i].AllowExplainAnalyze, cfg.Targets[i].AllowSignal)
+		}
+		go dispatcher.Run(ctx)
+	}
+
 	go func() {
 		for res := range scheduler.Results() {
 			m := make([]wire.Metric, 0, len(res.Metrics))

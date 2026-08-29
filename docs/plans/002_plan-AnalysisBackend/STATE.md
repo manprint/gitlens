@@ -2,7 +2,7 @@
 
 > **READ THIS FILE FIRST at the start of every session, before any other plan
 > file. OPEN a unit in §1 before touching code; CLOSE it after the gates pass.**
-> **Last updated:** 2026-08-29 (phase 7 closed) by `agent:gpt5.6-luna` | **Session:** 19
+> **Last updated:** 2026-08-29 (phase 8.11 closed) by `agent:gpt5.6-luna` | **Session:** 21
 
 ## 0. Protocol
 
@@ -48,14 +48,14 @@ work — a phase that looks blocked is a signal to read §9, not to skip ahead.
 
 ## 1. Current unit
 
-- **Type:** sub-phase
-- **ID:** `8.1`
+- **Type:** phase
+- **ID:** `none`
 - **Status:** `none`
-- **Intent:** add the command channel migration and schema.
+- **Intent:** phase 8 command channel and query plans are complete.
 - **Phase:** 8 — Command channel and query plans ([phase_09.md](phase_09.md))
-- **Next action:** read `phase_09.md` §8.1 and add `internal/store/migrations/0010_commands.sql` plus migration coverage.
+- **Next action:** none — phase 8 is closed; open phase 9 explicitly when it starts.
 - **Assigned:** `agent:gpt5.6-luna`
-- **Repo state:** branch `main`, phase 6 close is `436ac99` (docs SHA sync `73e2355`); phase 7 close is `8891d6b`.
+- **Repo state:** branch `main`, phase 7 close is `8891d6b`; phase 8 implementation commit is pending.
 
 ## 2. Feature context (self-contained recap)
 
@@ -183,6 +183,17 @@ The authoritative gate commands are the Makefile targets. These are identical to
 | 63 | sub-phase | 7.9 | agent:gpt5.6-luna | Completed the advisor integration sweep and deterministic seed fixture for the complete rule catalogue | `internal/advisor/rules_integration_test.go`, `test/fixtures/sql/advisor_seed.sql`, `STATE.md` | INT-ADV-007/008 PASS; full L2 PASS | phase-7 close |
 | 64 | sub-phase | 7.10 | agent:gpt5.6-luna | Documented advisor endpoints, JSON contracts, complete rule catalogue and operational limitations | `README.md`, `STATE.md` | README review and full phase gate matrix PASS | phase-7 close |
 | 65 | phase | 7 | agent:gpt5.6-luna | Synchronized phase-7 state, deviations and final gate evidence | `STATE.md`, `README.md`, all phase-7 implementation and test files | fmt/lint/build/unit-race/coverage 75.2%; advisor coverage 88.6%; full L2 exit 0 | `8891d6b` |
+| 66 | sub-phase | 8.1 | agent:gpt5.6-luna | Added command channel, audit and query-plan schema migration with DDL presence coverage | `internal/store/migrations/0010_commands.sql`, `internal/store/migrate_test.go`, `STATE.md` | fmt/lint/build/migration unit/test-integration PASS | phase-8 close |
+| 67 | sub-phase | 8.2 | agent:gpt5.6-luna | Added command argument validation, permission gates and exhaustive gate matrix tests | `internal/command/doc.go`, `internal/command/types.go`, `internal/command/gate.go`, `internal/command/gate_test.go`, `STATE.md` | fmt/lint/build/race command unit PASS | phase-8 close |
+| 68 | sub-phase | 8.3 | agent:gpt5.6-luna | Added authenticated command enqueue, poll, result and lookup endpoints with transactional audit write | `internal/server/api_commands.go`, `internal/server/commands.go`, `internal/server/api_commands_test.go`, `internal/server/api_commands_integration_test.go`, `internal/server/http.go`, `STATE.md` | fmt/lint/build/command unit/test-integration PASS | phase-8 close |
+| 69 | sub-phase | 8.4 | agent:gpt5.6-luna | Added atomic command claiming, poll-time expiry and rejected audit rows for late results | `internal/server/commands.go`, `internal/server/api_commands_integration_test.go`, `internal/server/commands_integration_test.go`, `STATE.md` | focused INT-CMD-004/005 race tests `-count=5`, fmt/lint/build/full test-integration PASS | phase-8 close |
+| 70 | sub-phase | 8.5 | agent:gpt5.6-luna | Added agent-side long-poll dispatcher, exponential backoff, local gates, execution deadline and commands.enabled configuration | `internal/agent/command.go`, `internal/agent/command_test.go`, `internal/agent/config.go`, `cmd/pglens-agent/run.go`, `deploy/agent.example.yaml`, `STATE.md` | dispatcher unit/race tests, fmt/lint/build PASS | phase-8 close |
+| 71 | sub-phase | 8.6 | agent:gpt5.6-luna | Added explain executor with queryid lookup, statement safety filtering, JSON plan hashing and rollback-only execution | `internal/agent/exec_explain.go`, `internal/agent/exec_explain_test.go`, `internal/agent/exec_explain_integration_test.go`, `cmd/pglens-agent/run.go`, `STATE.md` | INT-CMD-006/007, unit/race, fmt/lint/build PASS | phase-8 close |
+| 72 | sub-phase | 8.7 | agent:gpt5.6-luna | Added cancel and terminate executors with client-backend verification, pglens-agent self-protection and target identity results | `internal/agent/exec_signal.go`, `internal/agent/exec_signal_test.go`, `internal/agent/exec_signal_integration_test.go`, `cmd/pglens-agent/run.go`, `STATE.md` | INT-CMD-008, unit/race, fmt/lint/build PASS | phase-8 close |
+| 73 | sub-phase | 8.8 | agent:gpt5.6-luna | Added pgstattuple executor with extension gate, sanitized regclass, 300s timeout and server-side exact bloat persistence | `internal/agent/exec_pgstattuple.go`, `internal/agent/exec_pgstattuple_test.go`, `internal/agent/exec_pgstattuple_integration_test.go`, `internal/server/commands.go`, `internal/server/api_commands_integration_test.go`, `cmd/pglens-agent/run.go`, `STATE.md` | INT-CMD-009/010, unit/race, fmt/lint/build PASS | phase-8 close |
+| 74 | sub-phase | 8.9 | agent:gpt5.6-luna | Added deduplicated query-plan storage, plan history API with newest-first ordering, changed markers and total shape count | `internal/server/api_plans.go`, `internal/server/api_plans_test.go`, `internal/server/api_commands_integration_test.go`, `internal/server/commands.go`, `internal/store/write.go`, `internal/store/write_test.go`, `internal/server/api.go`, `STATE.md` | INT-PLAN-001/002, unit/race, fmt/lint/build/full test-integration PASS | phase-8 close |
+| 75 | sub-phase | 8.10 | agent:gpt5.6-luna | Added read-only command audit API with a 500-row cap and terminal outcome verification | `internal/server/api_audit.go`, `internal/server/api_audit_test.go`, `internal/server/api_commands_integration_test.go`, `internal/server/api.go`, `STATE.md` | audit unit/race, no-mutation route walk, INT-CMD-011 and full L2 PASS | phase-8 close |
+| 76 | sub-phase | 8.11 | agent:gpt5.6-luna | Documented on-demand operations, configuration, curl usage, security boundaries and limitations; closed phase 8 after final gates | `README.md`, `internal/command/gate_test.go`, `internal/server/api_commands_test.go`, `STATE.md` | complete phase-8 matrix, SYS-PERM-001, global coverage 75.0%, command coverage 100.0% PASS | phase-8 close |
 
 ## 5. Files touched
 
@@ -360,11 +371,44 @@ the units that touched it, so a later audit can attribute every diff.
 | `cmd/pglens-server/main.go` | 7.7 | advisor lifecycle wiring |
 | `internal/advisor/rules_integration_test.go` | 7.9 | INT-ADV-007/008 |
 | `test/fixtures/sql/advisor_seed.sql` | 7.9 | deterministic advisor acceptance seed |
-| `README.md` | 7.10 | advisor API, catalogue and limitations |
+| `README.md` | 7.10, 8.11 | advisor API plus on-demand operations, configuration and limitations |
+| `internal/store/migrations/0010_commands.sql` | 8.1 | command, audit and query-plan schema |
+| `internal/store/migrate_test.go` | 8.1 | command migration DDL presence test |
+| `internal/command/doc.go` | 8.2 | command package documentation |
+| `internal/command/types.go` | 8.2 | command kinds, arguments and validation |
+| `internal/command/gate.go` | 8.2 | command permission gates |
+| `internal/command/gate_test.go` | 8.2 | exhaustive gate and validation tests |
+| `internal/server/api_commands.go` | 8.3 | command API boundary |
+| `internal/server/commands.go` | 8.3, 8.4, 8.8, 8.9 | command queue service, atomic claim/expiry and artifact persistence |
+| `internal/server/api_commands_test.go` | 8.3, 8.11 | command endpoint and coverage-gate error-path tests |
+| `internal/server/api_commands_integration_test.go` | 8.3, 8.4, 8.8, 8.9, 8.10 | INT-CMD-001..005, artifact/plan history and audit coverage |
+| `internal/server/commands_integration_test.go` | 8.4 | INT-CMD-004..005 concurrency and expiry coverage |
+| `internal/server/http.go` | 8.3 | command route registration |
+| `internal/agent/command.go` | 8.5 | agent-side command dispatcher |
+| `internal/agent/command_test.go` | 8.5 | dispatcher unit and deadline/backoff coverage |
+| `internal/agent/config.go` | 3.6, 6.3, 8.5 | command channel configuration |
+| `cmd/pglens-agent/run.go` | 2.6, 3.6, 6.3, 8.5, 8.6, 8.7 | dispatcher startup wiring and command executor registration |
+| `deploy/agent.example.yaml` | 3.6, 6.3, 8.5 | command channel example configuration |
+| `internal/agent/exec_explain.go` | 8.6 | explain executor and plan hashing |
+| `internal/agent/exec_explain_test.go` | 8.6 | explain safety and rollback unit coverage |
+| `internal/agent/exec_explain_integration_test.go` | 8.6 | INT-CMD-006/007 explain integration coverage |
+| `internal/agent/exec_signal.go` | 8.7 | cancel and terminate signal executors |
+| `internal/agent/exec_signal_test.go` | 8.7 | signal safety and identity unit coverage |
+| `internal/agent/exec_signal_integration_test.go` | 8.7 | INT-CMD-008 signal integration coverage |
+| `internal/agent/exec_pgstattuple.go` | 8.8 | exact pgstattuple executor |
+| `internal/agent/exec_pgstattuple_test.go` | 8.8 | pgstattuple safety and timeout unit coverage |
+| `internal/agent/exec_pgstattuple_integration_test.go` | 8.8 | INT-CMD-009/010 pgstattuple integration coverage |
+| `internal/server/api_plans.go` | 8.9 | plan history API |
+| `internal/server/api_plans_test.go` | 8.9 | plan ordering, changed marker, total and validation coverage |
+| `internal/store/write.go` | 8.9 | deduplicated query plan writer |
+| `internal/store/write_test.go` | 8.9 | query plan dedup writer coverage |
+| `internal/server/api.go` | 8.9, 8.10 | plan and audit route registration |
+| `internal/server/api_audit.go` | 8.10 | command audit read API |
+| `internal/server/api_audit_test.go` | 8.10 | audit limit and no-mutation route coverage |
 
 ## 6. In-flight work
 
-`none — tree consistent; phase 7 implementation, tests and documentation are complete, all phase gates pass, and phase-close commit is 8891d6b. Phase 8 is next.`
+`none — tree consistent; phase 8.11 documentation and final phase gates are closed.`
 
 ## 7. Verification state
 
@@ -430,6 +474,18 @@ the units that touched it, so a later audit can attribute every diff.
 | phase7-focused-integration | `go test -tags=integration -race ./internal/advisor -run 'TestINTADV00[4578]' -count=1 && go test -tags=integration -race ./internal/server -run 'TestINTADV006_' -count=1` | PASS — INT-ADV-004/005/007/008 and INT-ADV-006 green | 2026-08-29 |
 | phase7-coverage-retry | `make test && make coverage-gate` | PASS — advisor coverage 88.6% (505/570); global coverage 75.2% (4905/6523) | 2026-08-29 |
 | phase7-final-matrix | `make fmt-check && make lint && make build && make test && make coverage-gate && make test-integration` | PASS — all gates green; advisor coverage 88.6%, global coverage 75.2%, full L2 exit 0 | 2026-08-29 |
+| phase8.1-migration | `make fmt-check && make lint && make build && go test ./internal/store -run '^TestMigrations_0010_ContainsCommands$' -count=1 && make test-integration` | PASS — migration coverage and full L2 green | 2026-08-29 |
+| phase8.2-command-gates | `make fmt-check && go test -race ./internal/command/... -count=1 && make lint && make build` | PASS — command validation and exhaustive gate matrix green | 2026-08-29 |
+| phase8.3-command-api | `make fmt-check && go test -race ./internal/server -run 'Test(Enqueue|Poll|Result)' -count=1 && make lint && make build && make test-integration` | PASS — command API unit coverage and INT-CMD-001..003/full L2 green | 2026-08-29 |
+| phase8.4-claim-expiry | `go test -tags=integration -race ./internal/server -run 'TestINTCMD00[45]' -count=5 && make fmt-check && make lint && make build && make test-integration` | PASS — atomic ten-poller/five-command claim, expiry and late-result rejected audit; full L2 green | 2026-08-29 |
+| phase8.5-dispatcher | `go test -race ./internal/agent ./cmd/pglens-agent && make fmt-check && make lint && make build` | PASS — dispatcher backoff/reset, local gate, disabled polling, dedicated connection and 60s deadline tests green | 2026-08-29 |
+| phase8.6-explain | `go test -tags=integration -race ./internal/agent -run 'TestINTCMD00[67]' -count=1 && go test -race ./internal/agent ./cmd/pglens-agent && make fmt-check && make lint && make build` | PASS — explain query lookup, safety gates, plan hash stability, rollback and dedicated-connection integration green | 2026-08-29 |
+| phase8.7-signal | `go test -tags=integration -race ./internal/agent -run '^TestINTCMD008_' -count=1 && go test -race ./internal/agent ./cmd/pglens-agent && make fmt-check && make lint && make build` | PASS — cancel/terminate client verification, self-backend refusal, identity result and signal integration green | 2026-08-29 |
+| phase8.8-pgstattuple | `go test -tags=integration -race ./internal/agent -run '^TestINTCMD00(9|10)_' -count=1 && go test -tags=integration -race ./internal/server -run 'TestINT(CMD009|PLAN00[12])_' -count=1 && make test-integration` | PASS — extension-gated exact bloat, server metrics persistence, plan dedup/history and full L2 green | 2026-08-29 |
+| phase8.9-plan-history | `go test -race ./internal/server ./internal/store && go test -tags=integration -race ./internal/server -run 'TestINTPLAN00[12]_' -count=1 && make test-integration` | PASS — plan writer/API unit coverage, INT-PLAN-001/002 and full L2 green | 2026-08-29 |
+| phase8.10-audit | `go test -race ./internal/server ./internal/agent ./internal/store && go test -tags=integration -race ./internal/server -run '^TestINTCMD011_' -count=1 && make test-integration` | PASS — audit API cap/no-mutation route tests, four terminal outcomes and full L2 green | 2026-08-29 |
+| phase8.11-final-matrix | `make fmt-check && make lint && make build && make test && make coverage-gate && make test-integration && go test -race ./internal/agent/... ./internal/server/...` | PASS — all phase gates green; global coverage 75.0% (5337/7115), `internal/command` 100.0% (48/48) | 2026-08-29 |
+| phase8.11-permission-regression | `go test -tags=e2e -race -count=1 -timeout=20m ./test/e2e -run '^TestSmoke_PermTierT0Only$'` | PASS — SYS-PERM-001, T0 agent with both command flags closed | 2026-08-29 |
 
 ## 8. Runtime deviations from the plan
 
@@ -455,6 +511,7 @@ the units that touched it, so a later audit can attribute every diff.
 | D-027 | 6.5 / phase-6 verification | The workload smoke must remain bounded and clean up host subprocesses | Fixed the exact-duration rotation count (390s maps to six groups, with no unconditional extra rotation) and set a Linux parent-death signal for `workloadctl` | The diagnostic SYS-LOAD-008 run exceeded its declared window and left an orphan; the focused cleanup regression and SYS-HARNESS-001 now pass without changing the 390s acceptance scenario |
 | D-018 | 3.8 | Release blocked-session test connections after the probe finishes | Cleanup rolls back the holder, waits on the probe completion channel, then releases blocked and holder connections | Prevents race warnings and pool teardown overlap while preserving the real lock assertion |
 | D-019 | 4.1 | Read nullable statistics directly into numeric Go fields | Added SQL-side `COALESCE` for nullable pg_stat_user_tables counters; maintenance timestamps remain nullable and are emitted as ages only when present | Real fresh tables expose NULL counters on PG15/18; failing scans would violate T0 sweep behavior |
+| D-029 | 8.11 | Keep the final coverage gate green after all phase-8 paths are added | Added focused command-validation and command-service error-path tests; final global coverage is 75.0% and `internal/command` is 100.0% | The initial phase-8 implementation measured 74.2% globally and 77.1% for the command package; production behavior was unchanged |
 | D-020 | 4.7 | Ownership test expects hidden `pg_stats` rows for T0 | The shipped `pg_monitor` role exposes the analysed relation on PG15/18; INT-BLOAT-004 therefore asserts a real non-zero estimate rather than a fabricated zero/error | Runtime permission model makes the plan's hidden-row branch unreachable without changing shipped grants; no grant or scope was changed |
 | D-021 | 5.1 | PG18 WAL I/O columns were unverified before implementation | Live PG15/PG18 probing found `wal_write`, `wal_sync` and timing columns only on PG15 `pg_stat_wal`; PG18 exposes the reduced WAL view plus the I/O columns in `pg_stat_io` | Exact column sets are now permanent in INT-WAL-000; the WAL implementation must branch by version as specified |
 | D-022 | 5.2 | INT-SET-001 names the requested `64MB` value | Real PG15/18 `pg_settings.setting` returns canonical `65536` with unit `kB`; the fact preserves that catalog value while the byte gauge is exactly 67108864 | The test asserts the real catalog contract; no threshold, scope, or query changed |
@@ -521,14 +578,14 @@ disagree with §1 and §4.
 | 5 — Configuration and durability: settings, WAL, checkpointer, I/O, archiver | phase_06.md | `DONE` | 9/9 sub-phases closed; coverage 75.2%; full L2 PASS; D-026 records live archive-mode harness limitation; phase commit `a0dcbf3`; primary `agent:gpt5.6-luna` |
 | 6 — Host and container metrics | phase_07.md | `DONE` | 6/6 sub-phases closed; INT-HOST-001..005 and SYS-HARNESS-001 focused validation green; coverage 75.1%; phase commit `436ac99`; primary `agent:gpt5.6-luna` |
 | 7 — Advisor engine and rule packs | phase_08.md | `DONE` | 10/10 sub-phases closed; INT-ADV-001..008 green; advisor coverage 88.6%; global coverage 75.2%; phase commit `8891d6b` |
-| 8 — Command channel and query plans | phase_09.md | `TODO` | 0/11 sub-phases closed; primary `agent:gpt5.6-luna` |
+| 8 — Command channel and query plans | phase_09.md | `DONE` | 11/11 sub-phases closed; INT-CMD-001..011, INT-PLAN-001/002 and SYS-PERM-001 green; coverage 75.0%, `internal/command` 100.0%; primary `agent:gpt5.6-luna`; phase commit pending |
 | 9 — L3 end-to-end scenarios | phase_10.md | `TODO` | 0/8 sub-phases closed; primary `agent:gpt5.6-luna` |
 | 10 — Packaging, CI, final documentation | phase_11.md | `TODO` | 0/5 sub-phases closed; primary `agent:gpt5.6-luna` |
 
 Status values: `TODO` · `IN_PROGRESS` · `DONE` · `SKIPPED` · `BLOCKED`
 A `SKIPPED` sub-phase or phase keeps its row and carries the reason.
 
-**7 of 11 phases `DONE`. Plan at 63% — phase 8 is next.**
+**8 of 11 phases `DONE`. Plan at 72% — phase 9 is next.**
 
 ### Tests
 
@@ -580,17 +637,17 @@ throughout.
 | INT-CHECK-015 | integration | 2 | `EXTEND` | exists from plan 001 — extended by phase 2 § 2.7 (Update README.md) |
 | INT-CHECK-016 | integration | 4 | `PASS` | phase 4 § 4.7 — Integration sweep and permission verification |
 | INT-CHECK-017 | integration | 5 | `PASS` | phase 5 § 5.8 — T0 registry sweep on PG15/18 |
-| INT-CMD-001 | integration | 8 | `TODO` | phase 8 § 8.1 — Migration `0010_commands.sql` |
-| INT-CMD-002 | integration | 8 | `TODO` | phase 8 § 8.3 — Server-side queue and endpoints |
-| INT-CMD-003 | integration | 8 | `TODO` | phase 8 § 8.3 — Server-side queue and endpoints |
-| INT-CMD-004 | integration | 8 | `TODO` | phase 8 § 8.4 — Atomic claim and expiry |
-| INT-CMD-005 | integration | 8 | `TODO` | phase 8 § 8.4 — Atomic claim and expiry |
-| INT-CMD-006 | integration | 8 | `TODO` | phase 8 § 8.2 — Command types and gate evaluation |
-| INT-CMD-007 | integration | 8 | `TODO` | phase 8 § 8.6 — The `explain` executor |
-| INT-CMD-008 | integration | 8 | `TODO` | phase 8 § 8.7 — The `cancel` and `terminate` executors |
-| INT-CMD-009 | integration | 8 | `TODO` | phase 8 § 8.8 — The `pgstattuple` executor |
-| INT-CMD-010 | integration | 8 | `TODO` | phase 8 § 8.8 — The `pgstattuple` executor |
-| INT-CMD-011 | integration | 8 | `TODO` | phase 8 § 8.10 — Audit trail verification |
+| INT-CMD-001 | integration | 8 | `PASS` | phase 8 § 8.1 — Migration `0010_commands.sql` |
+| INT-CMD-002 | integration | 8 | `PASS` | phase 8 § 8.3 — Server-side queue and endpoints |
+| INT-CMD-003 | integration | 8 | `PASS` | phase 8 § 8.3 — Server-side queue and endpoints |
+| INT-CMD-004 | integration | 8 | `PASS` | phase 8 § 8.4 — Atomic claim and expiry |
+| INT-CMD-005 | integration | 8 | `PASS` | phase 8 § 8.4 — Atomic claim and expiry |
+| INT-CMD-006 | integration | 8 | `PASS` | phase 8 § 8.6 — The `explain` executor on a real query |
+| INT-CMD-007 | integration | 8 | `PASS` | phase 8 § 8.6 — The `explain` executor analyze rollback contract |
+| INT-CMD-008 | integration | 8 | `PASS` | phase 8 § 8.7 — The `cancel` and `terminate` executors |
+| INT-CMD-009 | integration | 8 | `PASS` | phase 8 § 8.8 — The `pgstattuple` executor and metrics_bloat persistence |
+| INT-CMD-010 | integration | 8 | `PASS` | phase 8 § 8.8 — The `pgstattuple` extension absence rejection |
+| INT-CMD-011 | integration | 8 | `PASS` | phase 8 § 8.10 — Audit trail verification |
 | INT-FACT-001 | integration | 2 | `PASS` | phase 2 § 2.2 — Migration `0007_facts.sql` |
 | INT-FACT-002 | integration | 2 | `PASS` | phase 2 § 2.3 — Store row types and writers |
 | INT-FACT-003 | integration | 2 | `PASS` | phase 2 § 2.3 — Store row types and writers |
@@ -618,8 +675,8 @@ throughout.
 | INT-LOCK-005 | integration | 3 | `PASS` | phase 3 § 3.5 — Contention API |
 | INT-LOCK-006 | integration | 3 | `PASS` | phase 3 § 3.7 — Contention integration test sweep |
 | INT-PIPE-003 | integration | 2 | `EXTEND` | exists from plan 001 — extended by phase 2 § 2.4 (Pipeline routing for facts and relation metrics) |
-| INT-PLAN-001 | integration | 8 | `TODO` | phase 8 § 8.9 — Plan storage and history API |
-| INT-PLAN-002 | integration | 8 | `TODO` | phase 8 § 8.9 — Plan storage and history API |
+| INT-PLAN-001 | integration | 8 | `PASS` | phase 8 § 8.9 — identical plan hashes deduplicate |
+| INT-PLAN-002 | integration | 8 | `PASS` | phase 8 § 8.9 — changed plan hashes remain visible in history/API |
 | INT-SET-001 | integration | 5 | `PASS` | phase 5 § 5.2 — The `settings` check |
 | INT-SET-002 | integration | 5 | `PASS` | phase 5 § 5.2 — The `settings` check |
 | INT-SET-003 | integration | 5 | `PASS` | phase 5 § 5.7 — real primary/standby settings drift endpoint |
@@ -647,7 +704,7 @@ throughout.
 | SYS-ALERT-004 | system | 9 | `TODO` | phase 9 § 9.2 — Alerting end to end |
 | SYS-ARCH-001 | system | 9 | `TODO` | phase 9 § 9.7 — Backup and archiving |
 | SYS-BLOAT-001 | system | 9 | `TODO` | phase 9 § 9.4 — Vacuum, bloat, index usage and relation cardinality |
-| SYS-CMD-001 | system | 8 | `TODO` | phase 8 § 8.5 — Agent-side dispatcher |
+| SYS-CMD-001 | system | 8 | `TODO` | phase 8 § 8.5 — Agent-side dispatcher; end-to-end coverage is deferred to phase 9 as specified |
 | SYS-CMD-002 | system | 9 | `TODO` | phase 9 § 9.6 — Command channel acceptance |
 | SYS-CMD-003 | system | 9 | `TODO` | phase 9 § 9.6 — Command channel acceptance |
 | SYS-CMD-004 | system | 9 | `TODO` | phase 9 § 9.6 — Command channel acceptance |
@@ -658,7 +715,7 @@ throughout.
 | SYS-IDX-002 | system | 4 | `PASS` | phase 4 § 4.5 — shared relation budget covered by selector acceptance test |
 | SYS-IDX-003 | system | 7 | `TODO` | phase 7 § 7.5 — Rule pack B — indexes, tables, autovacuum, bloat |
 | SYS-LOCK-001 | system | 9 | `TODO` | phase 9 § 9.3 — Locks, blocking and deadlocks |
-| SYS-PERM-001 | system | 4 | `EXTEND` | exists from plan 001 — extended by phase 4 § 4.7 (Integration sweep and permission verification) |
+| SYS-PERM-001 | system | 4 | `EXTEND` | exists from plan 001 — phase-8 regression PASS with T0 and both command flags false |
 | SYS-PERM-002 | system | 10 | `TODO` | phase 10 § 10.3 — Permission-tier grant scripts |
 | SYS-REPL-006 | system | 9 | `TODO` | phase 9 § 9.1 — Cascading replication topology |
 | SYS-VAC-001 | system | 9 | `TODO` | phase 9 § 9.4 — Vacuum, bloat, index usage and relation cardinality |
@@ -678,7 +735,7 @@ other docs get their own rows.
 | README.md | 5 | `TODO` | closing sub-phase of phase_06.md |
 | README.md | 6 | `TODO` | closing sub-phase of phase_07.md |
 | README.md | 7 | `DONE` | advisor endpoints, JSON contracts, complete rule catalogue and limitations documented in 7.10 |
-| README.md | 8 | `TODO` | closing sub-phase of phase_09.md |
+| README.md | 8 | `DONE` | on-demand operations, configuration, curl usage, security and limitations documented in 8.11 |
 | README.md | 9 | `TODO` | closing sub-phase of phase_10.md |
 | README.md | 10 | `TODO` | closing sub-phase of phase_11.md |
 | CONTRIBUTING.md | 9 | `TODO` | 9.8 — how to add an E2E scenario, plus the five anti-flake rules |
