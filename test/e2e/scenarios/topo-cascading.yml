@@ -1,0 +1,5 @@
+id: SYS-REPL-006
+name: cascading-replication-topology
+topology: cascading
+compose: test/compose/topo-cascading.yml
+agent: test/compose/agent-container-cascading.yml
