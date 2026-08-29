@@ -1,0 +1,28 @@
+services:
+  pglens-agent:
+    image: ghcr.io/manprint/pglens-agent:dev
+    depends_on:
+      pglens-server:
+        condition: service_healthy
+    environment:
+      PGLENS_CONFIG: /etc/pglens/agent.yaml
+      PGLENS_SERVER_URL: http://pglens-server:8080
+      PGLENS_BOOTSTRAP_TOKEN: dev-token
+      HOST_PROC: /host/proc
+      HOST_SYS: /host/sys
+    ports:
+      - "9187"
+    volumes:
+      - agent-data-cascading:/var/lib/pglens
+      - ../fixtures/agent-cascading.yaml:/etc/pglens/agent.yaml:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/pglens-agent", "--healthcheck"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  agent-data-cascading:

@@ -1,0 +1,79 @@
+services:
+  pg-primary:
+    image: timescale/timescaledb:2.29.0-pg17
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_INITDB_ARGS: "-c shared_preload_libraries=timescaledb,pg_stat_statements -c compute_query_id=on -c pg_stat_statements.track=all -c wal_level=replica -c max_wal_senders=10 -c hot_standby=on"
+    ports:
+      - "0:5432"
+    volumes:
+      - pgdata-cascading-primary:/var/lib/postgresql/data
+      - ../fixtures/sql/00_extensions.sql:/docker-entrypoint-initdb.d/00-extensions.sql
+      - ../fixtures/sql/monitoring_user.sql:/opt/pglens/monitoring_user.sql
+      - ../fixtures/sql/init_monitoring_user.sh:/docker-entrypoint-initdb.d/01-monitoring.sh
+      - ../fixtures/sql/replica_setup.sh:/docker-entrypoint-initdb.d/02-replication.sh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  pg-standby-a:
+    image: timescale/timescaledb:2.29.0-pg17
+    depends_on:
+      pg-primary:
+        condition: service_healthy
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      PGDATA: /var/lib/postgresql/data
+      UPSTREAM_HOST: pg-primary
+      REPLICATION_SLOT: standby_a
+      PGAPPNAME: pg-standby-a
+    ports:
+      - "0:5432"
+    volumes:
+      - pgdata-cascading-a:/var/lib/postgresql/data
+      - ../fixtures/sql/cascading_standby_init.sh:/opt/pglens/cascading_standby_init.sh:ro
+    entrypoint: /opt/pglens/cascading_standby_init.sh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  pg-standby-b:
+    image: timescale/timescaledb:2.29.0-pg17
+    depends_on:
+      pg-standby-a:
+        condition: service_healthy
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      PGDATA: /var/lib/postgresql/data
+      UPSTREAM_HOST: pg-standby-a
+      REPLICATION_SLOT: standby_b
+      PGAPPNAME: pg-standby-b
+    ports:
+      - "0:5432"
+    volumes:
+      - pgdata-cascading-b:/var/lib/postgresql/data
+      - ../fixtures/sql/cascading_standby_init.sh:/opt/pglens/cascading_standby_init.sh:ro
+    entrypoint: /opt/pglens/cascading_standby_init.sh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  pgdata-cascading-primary:
+  pgdata-cascading-a:
+  pgdata-cascading-b:

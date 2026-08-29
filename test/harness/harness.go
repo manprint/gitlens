@@ -31,6 +31,7 @@ type Topology string
 const (
 	TopologyStandalone     Topology = "standalone"
 	TopologyPrimaryStandby Topology = "primary-standby"
+	TopologyCascading      Topology = "cascading"
 )
 
 // AgentMode specifies how the agent is deployed.
@@ -78,6 +79,7 @@ type Harness struct {
 	agentIdentityPath string    // identity.json file path, AgentModeBinary only, preserved across restarts
 	agentPrimaryPort  int       // host port for "pg"/"pg-primary" baked into the currently-running agent config
 	agentStandbyPort  int       // host port for "pg-standby" baked into the currently-running agent config (0 for standalone)
+	agentStandbyBPort int       // host port for "pg-standby-b" in cascading binary mode
 	agentServerPort   int       // host port for pglens-server baked into the currently-running agent config
 	pools             map[string]*pgxpool.Pool
 	poolMu            sync.Mutex
@@ -104,6 +106,8 @@ func Start(t *testing.T, cfg Config) *Harness {
 	var topologyFile string
 	if cfg.Topology == TopologyPrimaryStandby {
 		topologyFile = filepath.Join(composeDir, "topo-primary-standby.yml")
+	} else if cfg.Topology == TopologyCascading {
+		topologyFile = filepath.Join(composeDir, "topo-cascading.yml")
 	} else {
 		topologyFile = filepath.Join(composeDir, "topo-standalone.yml")
 	}
@@ -136,6 +140,11 @@ func Start(t *testing.T, cfg Config) *Harness {
 		// scenario before this one asserted only against PostgreSQL
 		// directly (e.PG), never against agent-derived data.
 		agentFile = filepath.Join(composeDir, "agent-container-primary-standby.yml")
+	} else if cfg.Topology == TopologyCascading {
+		agentFile = filepath.Join(composeDir, "agent-container-cascading.yml")
+	}
+	if cfg.Alerting && cfg.AgentMode != AgentModeBinary {
+		agentFile = filepath.Join(composeDir, "agent-container-alerting.yml")
 	}
 
 	var toxiproxyFile string
@@ -257,17 +266,27 @@ func (h *Harness) startAgentBinary() error {
 	}
 
 	// Resolve ports for the target(s) based on topology.
-	var primaryPort, standbyPort int
-	if h.topology == TopologyPrimaryStandby {
-		// Primary-standby topology: resolve both pg-primary and pg-standby.
+	var primaryPort, standbyPort, standbyBPort int
+	if h.topology == TopologyPrimaryStandby || h.topology == TopologyCascading {
+		// Resolve the primary and standby target services.
 		var err error
 		primaryPort, err = h.getServicePort("pg-primary", 5432)
 		if err != nil {
 			return fmt.Errorf("resolve pg-primary port: %w", err)
 		}
-		standbyPort, err = h.getServicePort("pg-standby", 5432)
+		standbyService := "pg-standby"
+		if h.topology == TopologyCascading {
+			standbyService = "pg-standby-a"
+		}
+		standbyPort, err = h.getServicePort(standbyService, 5432)
 		if err != nil {
-			return fmt.Errorf("resolve pg-standby port: %w", err)
+			return fmt.Errorf("resolve %s port: %w", standbyService, err)
+		}
+		if h.topology == TopologyCascading {
+			standbyBPort, err = h.getServicePort("pg-standby-b", 5432)
+			if err != nil {
+				return fmt.Errorf("resolve pg-standby-b port: %w", err)
+			}
 		}
 	} else {
 		// Standalone topology (default): resolve single "pg" service.
@@ -312,9 +331,24 @@ func (h *Harness) startAgentBinary() error {
 		h.agentConfigPath = configPath
 	}
 	var targetsYAML string
-	if h.topology == TopologyPrimaryStandby {
+	if h.topology == TopologyPrimaryStandby || h.topology == TopologyCascading {
 		// Two targets for primary-standby topology.
-		targetsYAML = fmt.Sprintf(`targets:
+		if h.topology == TopologyCascading {
+			targetsYAML = fmt.Sprintf(`targets:
+	  - name: pg-primary
+	    dsn: postgres://pglens:pglens-monitoring-test@localhost:%d/postgres?sslmode=disable
+	    databases:
+	      max: 10
+	  - name: pg-standby-a
+	    dsn: postgres://pglens:pglens-monitoring-test@localhost:%d/postgres?sslmode=disable
+	    databases:
+	      max: 10
+	  - name: pg-standby-b
+	    dsn: postgres://pglens:pglens-monitoring-test@localhost:%d/postgres?sslmode=disable
+	    databases:
+	      max: 10`, primaryPort, standbyPort, standbyBPort)
+		} else {
+			targetsYAML = fmt.Sprintf(`targets:
   - name: pg-primary
     dsn: postgres://pglens:pglens-monitoring-test@localhost:%d/postgres?sslmode=disable
     databases:
@@ -322,7 +356,8 @@ func (h *Harness) startAgentBinary() error {
   - name: pg-standby
     dsn: postgres://pglens:pglens-monitoring-test@localhost:%d/postgres?sslmode=disable
     databases:
-      max: 10`, primaryPort, standbyPort)
+    max: 10`, primaryPort, standbyPort)
+		}
 	} else {
 		// Single target for standalone topology.
 		targetsYAML = fmt.Sprintf(`targets:
@@ -371,6 +406,7 @@ checks:
 
 	h.agentPrimaryPort = primaryPort
 	h.agentStandbyPort = standbyPort
+	h.agentStandbyBPort = standbyBPort
 	h.agentServerPort = h.serverPort
 
 	h.agentCmd = cmd
