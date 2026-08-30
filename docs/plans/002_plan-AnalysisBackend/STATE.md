@@ -2,7 +2,7 @@
 
 > **READ THIS FILE FIRST at the start of every session, before any other plan
 > file. OPEN a unit in §1 before touching code; CLOSE it after the gates pass.**
-> **Last updated:** 2026-08-30 (phase 10.3 closed, 10.4 opened) by `agent:gpt5.6-luna` | **Session:** 32
+> **Last updated:** 2026-08-30 (phase 10.4 closed, 10.5 opened) by `agent:gpt5.6-luna` | **Session:** 32
 
 ## 0. Protocol
 
@@ -49,13 +49,13 @@ work — a phase that looks blocked is a signal to read §9, not to skip ahead.
 ## 1. Current unit
 
 - **Type:** sub-phase
-- **ID:** `10.4`
+- **ID:** `10.5`
 - **Status:** `none`
-- **Intent:** document the ten declared product limits and cross-check each one against evidence or an explicit gap.
+- **Intent:** perform the final documentation read, execute the documented commands, resolve remaining test/plan IDs, and close the plan.
 - **Phase:** 10 — Packaging, CI, final documentation ([phase_11.md](phase_11.md))
-- **Next action:** implement phase_11.md §10.4 exactly, then run the documentation cross-check and close the phase.
+- **Next action:** execute phase_11.md §10.5 final documentation review and closure gates.
 - **Assigned:** `agent:gpt5.6-luna`
-- **Repo state:** branch `main`, phase 10.3 complete.
+- **Repo state:** branch `main`, phase 10.4 complete.
 
 ## 2. Feature context (self-contained recap)
 
@@ -205,6 +205,7 @@ The authoritative gate commands are the Makefile targets. These are identical to
 | 85 | sub-phase | 10.1 | agent:gpt5.6-luna | Added reproducible local CI unit/integration/E2E targets, hosted CI workflows, PG15–18/profile matrix fixtures, deterministic E2E cleanup and final gate regressions | `Makefile`, `.github/workflows/ci.yml`, `.github/workflows/e2e.yml`, `test/harness/harness.go`, `test/scenario/net.go`, `internal/**`, `STATE.md` | unit/coverage green, 8/8 L2 child jobs green, deliberate failure probe non-zero as expected, focused E2E regressions green; hosted Actions not invoked | phase-10.1 close |
 | 86 | sub-phase | 10.2 | agent:gpt5.6-luna | Added reproducible deployment Compose, agent/server environment examples, hardened systemd units, alert-webhook aliases, the instance collection route required by deployment acceptance, and SYS-DEPLOY-001 | `deploy/docker-compose.yml`, `deploy/agent.example.yaml`, `deploy/server.example.env`, `deploy/systemd/pglens-agent.service`, `deploy/systemd/pglens-server.service`, `internal/server/config.go`, `internal/server/config_test.go`, `internal/server/api.go`, `internal/server/api_test.go`, `test/e2e/deploy_test.go`, `STATE.md` | Compose config, server tests, build/images, isolated systemd verification, healthy root stack, and SYS-DEPLOY-001 PASS | phase-10.2 close |
 | 87 | sub-phase | 10.3 | agent:gpt5.6-luna | Added one idempotent tiered monitoring-role SQL script and README, switched compose acceptance to the shipped script, refreshed agent capabilities after runtime grants, removed the stale duplicate fixture, and added SYS-PERM-002 | `deploy/sql/monitoring_user.sql`, `deploy/sql/README.md`, `test/compose/topo-standalone.yml`, `test/compose/topo-primary-standby.yml`, `test/compose/topo-cascading.yml`, `test/fixtures/sql/init_monitoring_user.sh`, `test/fixtures/sql/monitoring_user.sql`, `internal/agent/conn.go`, `internal/agent/command.go`, `cmd/pglens-agent/run.go`, `test/scenario/perm.go`, `test/e2e/smoke_test.go`, `STATE.md` | SQL T0/T1/T2 applied in a real container; SYS-PERM-002 PASS in 40.232s; agent/pgtype unit tests PASS; images rebuilt | phase-10.3 close |
+| 88 | sub-phase | 10.4 | agent:gpt5.6-luna | Added `docs/LIMITS.md` with the ten declared product limits and cross-checked every item against the suite or an explicit absence | `docs/LIMITS.md`, `STATE.md` | ten limit-to-evidence verification rows recorded; documentation content review PASS | phase-10.4 close |
 
 ## 5. Files touched
 
@@ -519,10 +520,12 @@ the units that touched it, so a later audit can attribute every diff.
 | `test/scenario/perm.go` | 10.3 | SYS-PERM-002 real-container tier and no-restart acceptance |
 | `test/e2e/smoke_test.go` | 10.3 | SYS-PERM-002 smoke entry point |
 | `STATE.md` | 10.3 | phase close evidence, deviations and board |
+| `docs/LIMITS.md` | 10.4 | ten user-facing product limits and explicit backup/recovery boundary |
+| `STATE.md` | 10.4 | phase close evidence and limit-to-evidence mapping |
 
 ## 6. In-flight work
 
-`none — phase 10.3 is closed; phase 10.4 is the next unit.`
+`none — phase 10.4 is closed; phase 10.5 is the next unit.`
 
 ## 7. Verification state
 
@@ -659,6 +662,16 @@ the units that touched it, so a later audit can attribute every diff.
 | phase10.3-images | `make build-images` | PASS — rebuilt agent/server images after runtime-refresh changes | 2026-08-30 |
 | phase10.3-e2e-compile | `go test -tags=e2e -run '^$' ./test/scenario ./test/e2e` | PASS — E2E scenario registration and helpers compile | 2026-08-30 |
 | phase10.3-permission-e2e | `go test -tags=e2e -run '^TestSmoke_PermTierGrantAtRuntime$' -count=1 -v ./test/e2e/...` | PASS — SYS-PERM-002 applies T0/T1/T2 in a real container, checks named T1/T2 rejection, observes T1 without restart, and reaches T2 in 40.232s | 2026-08-30 |
+| phase10.4-limit-backups | `INT-ARCH-001..003`, `SYS-ARCH-001` and archive metric review | PASS — archiver behavior is covered; no `pg_basebackup` restoreability proof exists, so the limit is explicitly stated | 2026-08-30 |
+| phase10.4-limit-bloat | `INT-BLOAT-001..004`, `SYS-BLOAT-001`, `INT-CMD-009` | PASS — estimate, truncation, ownership and optional exact `pgstattuple` paths are covered; full scans remain on demand | 2026-08-30 |
+| phase10.4-limit-plans | `INT-CMD-006`, `SYS-CMD-001` and explain executor review | PASS — normalized `pg_stat_statements` input, request-only capture and unexplainable placeholders are represented; parameter invention is absent by design | 2026-08-30 |
+| phase10.4-limit-analyze | `INT-CMD-007`, `SYS-CMD-001..002` and the three command gates | PASS — rollback contract and `allow_explain_analyze`/explicit-analyze/tier checks are covered; external side effects are documented as not rollback-safe | 2026-08-30 |
+| phase10.4-limit-cardinality | `INT-BLOAT-003`, `SYS-IDX-002`, relation API tests | PASS — rank budget, `truncated` and `relations_not_reported` are asserted; omitted relations are not backfilled | 2026-08-30 |
+| phase10.4-limit-host | `INT-HOST-001..005` and host endpoint contract tests | PASS — local host collection and remote `available:false` behavior are covered; PostgreSQL does not supply inferred host memory | 2026-08-30 |
+| phase10.4-limit-advisor | `INT-ADV-001..008`, `SYS-ADV-001..004` and rule-catalogue tests | PASS — rule thresholds and reasons are exercised as advice, not correctness verdicts | 2026-08-30 |
+| phase10.4-limit-sampling | `SYS-LOAD-003`, `SYS-LOAD-005`, `SYS-ASH-001..002` plus configured scrape intervals | PASS — ASH sampling and scrape cadence are explicit; sub-interval events remain an intentional blind spot | 2026-08-30 |
+| phase10.4-limit-versions | `INT-WAL-000`, PG15–18 integration matrix and version-gated check tests | PASS — PostgreSQL 15–18 are probed/verified; older/newer versions remain outside the tested contract | 2026-08-30 |
+| phase10.4-limit-tenancy | schema/API review and existing tenant-scoped persistence tests | PASS — `tenant_id` is carried through storage, but no user authentication or tenant-isolation acceptance exists; the document calls this a single-tenant gap | 2026-08-30 |
 
 ## 8. Runtime deviations from the plan
 
@@ -789,12 +802,12 @@ disagree with §1 and §4.
 | 7 — Advisor engine and rule packs | phase_08.md | `DONE` | 10/10 sub-phases closed; INT-ADV-001..008 green; advisor coverage 88.6%; global coverage 75.2%; phase commit `8891d6b` |
 | 8 — Command channel and query plans | phase_09.md | `DONE` | 11/11 sub-phases closed; INT-CMD-001..011, INT-PLAN-001/002 and SYS-PERM-001 green; coverage 75.0%, `internal/command` 100.0%; primary `agent:gpt5.6-luna`; phase commit `78dbf94` |
 | 9 — L3 end-to-end scenarios | phase_10.md | `DONE` | 8/8 sub-phases closed; all planned SYS-* scenarios green, including SYS-ARCH-001; primary `agent:gpt5.6-luna` |
-| 10 — Packaging, CI, final documentation | phase_11.md | `IN_PROGRESS` | 2/5 sub-phases closed; primary `agent:gpt5.6-luna`; 10.2 deployment and 10.3 permission artefacts/acceptance green |
+| 10 — Packaging, CI, final documentation | phase_11.md | `IN_PROGRESS` | 3/5 sub-phases closed; primary `agent:gpt5.6-luna`; deployment, permission and limits artefacts/acceptance green |
 
 Status values: `TODO` · `IN_PROGRESS` · `DONE` · `SKIPPED` · `BLOCKED`
 A `SKIPPED` sub-phase or phase keeps its row and carries the reason.
 
-**9 of 11 phases `DONE`; phase 10 is 2/5 sub-phases closed. Plan at 86% — phase 10 continues.**
+**9 of 11 phases `DONE`; phase 10 is 3/5 sub-phases closed. Plan at 88% — phase 10 continues.**
 
 ### Tests
 
@@ -949,7 +962,7 @@ other docs get their own rows.
 | README.md | 10 | `TODO` | closing sub-phase of phase_11.md |
 | CONTRIBUTING.md | 9 | `DONE` | current E2E file layout, SYS id registration and five anti-flake rules documented in 9.8 |
 | deploy/sql/README.md | 10 | `DONE` | 10.3 — what each permission tier unlocks and what degrades without it |
-| docs/LIMITS.md | 10 | `TODO` | 10.4 — the ten declared limits, including that pglens does not verify backups |
+| docs/LIMITS.md | 10 | `DONE` | 10.4 — the ten declared limits, including that pglens does not verify backups |
 
 ### Audits
 
