@@ -5,7 +5,7 @@
 - **L1 — Unit tests** (`make test`). Pure logic, no I/O, no Docker. Uses fake clock where timing is needed (the `clock.Frozen` fake time and `test.Eventually`/`Consistently` in harness for polling, never `time.Sleep`). Tests pass `-race -shuffle=on` for data-race detection and randomized execution order. Runs in seconds.
   - Belongs here: parsing, validation, calculations, marshaling, single-component behavior.
 
-- **L2 — Integration tests** (`make test-integration`). One real PostgreSQL container per major version (15, 18), tests inside each container run serially (exclusive access needed for `postgres.Restore()`). Parallelism comes from the version matrix (`PGLENS_PG_VERSIONS`) and profile matrix (`vanilla` / `rds-like`). Covers agent-to-database behavior and wire format across versions. See `test/pgtest/`.
+- **L2 — Integration tests** (`make test-integration`). Real PostgreSQL containers across the configured version matrix (PG 15–18 in CI); tests inside one container run serially because `postgres.Restore()` needs exclusive access. Covers agent-to-database behavior, storage and wire-format differences. See `test/pgtest/`.
   - Belongs here: agent connection, scheduling, query execution, per-version codec differences.
   - Runs in 15 minutes.
 
@@ -19,101 +19,18 @@
 
 **Key principle:** No `time.Sleep` anywhere except background wait loops. Use `Eventually` (poll 200ms, return last error), `Consistently` (assert non-event for a window), or `clock.Frozen` (fake time in tests that need absolute timing).
 
-## Running one scenario against a live stack
+## How to add an E2E scenario
 
-The scenario API and harness are implemented (phase 5.5-5.6), but scenario bodies (phase 5.7) have not yet been implemented. Once scenarios are registered, the workflow will be:
+1. Put the acceptance test in `test/e2e/<area>_test.go` and its scenario metadata in `test/e2e/scenarios/<area>.yml`. Reuse the compose and fixture files under `test/compose/` and `test/fixtures/`; add a new stack only when the existing topologies cannot express the failure.
+2. Give the scenario a stable id in the form `SYS-<AREA>-<NNN>` and use that exact id in the Go test, metadata and assertions.
+3. Register the id in `docs/plans/002_plan-AnalysisBackend/STATE.md` §11 test table before closing the change. An id in code but not the table, or in the table but not code, is incomplete.
+4. Exercise the scenario with the E2E command, for example:
 
 ```sh
-make e2e-stack-up          # brings up the full stack and leaves it running
-make scenario ID=SYS-REPL-001  # runs one scenario against that stack
-# explore the API between runs
-curl -s localhost:8080/api/v1/clusters | jq .
-make e2e-stack-down        # clean up when done
+go test -tags=e2e -timeout=8m ./test/e2e -run '^TestFull_Archiving$' -count=1 -v
 ```
 
-The test harness (`test/harness/Harness`) is the core E2E infrastructure. Its API includes:
-- `Start(t, cfg)` — brings up a complete stack (topology + agent + optional Toxiproxy) with dynamic port allocation and unique compose project name.
-- `API()`, `DB(service)`, `PG(service)` — clients for server HTTP, metrics DB, and monitored PostgreSQL instances.
-- `Exec(service, ...)`, `Compose(...)` — container and compose control.
-- `Toxic(link, t)` — injects network faults (latency, timeout, bandwidth limit, connection reset, data truncation) via Toxiproxy; returns a removal function.
-- `Eventually(timeout, fn)` — polls `fn` every 200ms until it returns nil or timeout; fails with the last error (the diagnosis).
-- `Consistently(window, fn)` — asserts `fn` stays nil for the entire window (used to prove non-events, e.g., "no second restart was logged").
-- `AssertInvariants(t)` — checks global invariants (no duplicate samples, no negative rates, no orphan metrics, cardinality limits, connection ceilings, no goroutine leaks, stable cluster_id, clean teardown).
-- `Dump(t)` — captures logs, API state, row counts, and health status on failure; auto-called by `t.Cleanup`.
-
-The scenario registry (`test/scenario`) defines the interface for scenarios (not yet populated):
-- `Register(scenario)` — registers a scenario by stable ID.
-- `Get(id)`, `All()`, `Smoke()` — retrieves scenarios (no scenarios registered yet).
-
-Compose topologies in `test/compose/`:
-- `base.yml` — TimescaleDB and pglens-server with healthchecks.
-- `topo-standalone.yml` — one PostgreSQL with `pg_stat_statements` and `compute_query_id=on`.
-- `topo-primary-standby.yml` — PostgreSQL primary + standby with streaming replication.
-- `agent-container.yml`, `agent-binary.yml`, `agent-container-no-volume.yml` — three deployment variants.
-- `toxiproxy.yml` — optional fault injection layer.
-
-Workload generator (`test/workload/workloadctl`):
-```
-workloadctl deadlock --dsn ... --pairs 10 --duration 30s
-workloadctl lock-storm --dsn ... --sessions 50 --duration 20s
-workloadctl slow-query --dsn ... --sleep 30s --count 3
-workloadctl idle-in-txn --dsn ... --sessions 5 --hold 2m
-workloadctl distinct-queries --dsn ... --count 5000
-workloadctl oltp --dsn ... --tps 200 --duration 60s
-```
-Each command outputs a JSON report with seed, duration, succeeded/failed counts, and command-specific details. Supports `--seed` for reproducibility.
-
-## Adding a new scenario (phase 5.7+)
-
-When scenario bodies are implemented, new scenarios are added to `test/scenario/`. Outline:
-
-1. Create a file `test/scenario/sys_<feature>.go` (e.g., `sys_replication.go` for replication scenarios).
-
-2. Define the scenario and register it:
-```go
-func init() {
-	scenario.Register(scenario.Scenario{
-		ID:          "SYS-REPL-001",
-		Title:       "Failover detected on promote",
-		Topology:    scenario.TopologyPrimaryStandby,
-		EstDuration: 30 * time.Second,
-		Covers:      []string{"IDEA.md#5.1", "I-1"},
-		Smoke:       true,  // include in 10-minute smoke test
-		Run:         runSysRepl001,
-		Expect: scenario.Expectations{
-			Events:     []string{"failover_detected"},
-			Invariants: []string{"cluster_id unchanged", "no duplicate samples"},
-		},
-	})
-}
-
-func runSysRepl001(ctx context.Context, e *scenario.Env) error {
-	// 1. Use e.PG("pg-primary") and e.PG("pg-standby") to connect
-	// 2. Trigger the failure (e.g., promote standby with pg_ctl promote)
-	// 3. Assert on API or database state via e.API or e.DB
-	// 4. Use e.Eventually or e.Consistently to wait for or verify events
-	// 5. MUST call e.AssertInvariants(e.T) at the end
-	return nil
-}
-```
-
-3. Each scenario **must**:
-   - Have at least one `Covers` entry (what design decision or invariant it tests).
-   - Have at least one `Expect.Events` or `Expect.Invariants` entry.
-   - Call `e.AssertInvariants(e.T)` at the end.
-   - Use `e.Eventually` or `e.Consistently` instead of `time.Sleep`.
-   - Return `nil` on success, `error` on failure.
-
-4. Test locally:
-```sh
-make e2e-stack-up
-make scenario ID=SYS-REPL-001
-# repeat with different topologies and agent modes
-make scenario ID=SYS-REPL-001 TOPOLOGY=primary-standby AGENT_MODE=binary
-make e2e-stack-down
-```
-
-5. Once ready, add to the smoke set in `phase_06.md §5.7` and verify `make test-e2e` passes.
+5. The test must call the harness invariant check, clean up all resources through `t.Cleanup`, and use the five rules below. Run `make test-e2e` before submitting; run `make test-e2e-full` when the scenario changes shared harness behavior.
 
 ## Reading a CI failure
 
@@ -149,31 +66,21 @@ This runs `go test -tags=integration -run Golden -update ./internal/wire`.
 
 ## Anti-flake rules
 
-**Timing:** No `time.Sleep` anywhere below L5. Use precise coordination mechanisms instead:
-- In L1 (unit tests): fake time with `clock.Frozen` or `clock.NewFake()` and advance it explicitly.
-- In L2/L3 (integration/E2E): `Eventually(timeout, fn)` polls every 200ms until `fn() error` returns nil, then reports the last error on timeout (the actual diagnosis). Use `Consistently(window, fn)` to assert that something does NOT happen for a full window.
+**The five rules that keep L3 from becoming flaky**, learned in plan 001 and
+non-negotiable here:
 
-**Retries:** Never retry a test below L5. A flaky test at L2 or L3 is evidence of a real race in the product:
-- Add synchronization primitives (channels, condition variables).
-- Fix the race (add a lock, make an operation atomic).
-- If the test itself is genuinely racy (e.g., it depends on timing it cannot control), quarantine it (see below).
-
-**Quarantine:** When a test must be skipped:
-```go
-if os.Getenv("ALLOW_FLAKY_TEST_SYS_LOAD_002") != "1" {
-	t.Skip("SYS-LOAD-002: flaky on slow runners; owner: alice@example.com; expires: 2026-09-27")
-}
-```
-- Use a distinct env var and test ID.
-- Name the owner (who is responsible for fixing or removing it).
-- Set an expiry date (14 days from now, or when the underlying issue is expected to be fixed).
-
-**Parallelism:** 
-- `t.Parallel()` only at the top level of test functions or via `pgtest.ForEach` (which parallelizes across versions).
-- Never use `t.Parallel()` inside a `pgtest.ForEach` body — `postgres.Restore()` needs exclusive access to the container.
-- L3 tests do not call `t.Parallel()`; each test uses a unique compose project name, so they can run concurrently anyway (orchestrated by `-parallel` in the test runner).
-
-**ASH (Active Session History):** ASH counts are independent observations (samples), not cumulative counters. Never pipe them through `internal/delta` — each sample is a point-in-time snapshot, not a delta from the previous one. ASH rates and totals are computed by the query layer, not by the ingestion path.
+1. **Never `sleep` to wait for a condition.** Poll the condition with a deadline.
+   The helper is `e2e.Eventually(t, timeout, interval, func() bool)`.
+2. **Never assert on a timestamp being "recent"** unless the scenario controls
+   the clock. Assert on ordering and on presence.
+3. **Every scenario cleans up what it created**, including any session it left
+   open, in a `t.Cleanup`. A leaked `idle in transaction` session breaks the
+   *next* scenario, and that failure looks like it belongs to the wrong test.
+4. **Assert on the API, not on the database**, wherever the API exposes the
+   fact. The API is the contract; the schema is an implementation detail. Query
+   the store directly only for things no endpoint exposes.
+5. **One scenario proves one thing.** When a scenario needs three unrelated
+   assertions, it is three scenarios.
 
 ## Project layout
 
@@ -183,4 +90,3 @@ deploy/sql/ deploy/compose/ test/{pgtest,fixtures,harness,compose,scenario,workl
 ```
 
 Follow this layout; no new top-level directory unless the plan names it.
-

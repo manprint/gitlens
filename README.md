@@ -1006,7 +1006,15 @@ make test-e2e         # E2E smoke subset (requires Docker, ~10m)
 make test-e2e-full    # full E2E suite (requires Docker, ~60m)
 ```
 
-**L3 E2E tests** (L1 unit, L2 integration, L3 E2E system)
+### Test levels
+
+- **L1 — Unit** (`make test`): fast, isolated Go tests for pure logic and component behavior; no Docker or external PostgreSQL is required.
+- **L2 — Integration** (`make test-integration`): agent, wire and storage tests against real PostgreSQL versions; requires Docker and takes roughly 15 minutes.
+- **L3 — E2E system** (`make test-e2e` or `make test-e2e-full`): operator-style multi-container scenarios and failure recovery; requires Docker, with the smoke subset taking roughly 10 minutes and the full suite roughly 60 minutes.
+- **L4 — API/UI contract**: endpoint and consumer-facing contract checks; the backend API is covered by repository tests, while the frontend belongs to plan 003.
+- **L5 — Performance and profiling**: workload, benchmark and resource-budget investigation; run these as an explicitly scoped performance exercise rather than as a correctness gate.
+
+**L3 E2E tests**
 
 L3 requires Docker and the following host ports:
 - Port `8080` (server HTTP)
