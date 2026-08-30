@@ -330,48 +330,10 @@ func (m *Manager) ensureCache(ctx context.Context) error {
 		m.target.cache.clusterID = pgtype.ManualClusterID(m.target.name)
 	}
 
-	// Query permission tier
-	tier := pgtype.TierReadOnly
-	var hasReadAllData bool
-	err = conn.QueryRow(ctx, `
-		SELECT EXISTS(
-			SELECT 1 FROM pg_auth_members m
-			JOIN pg_roles r ON m.roleid = r.oid
-			WHERE r.rolname = 'pg_read_all_data'
-			AND m.member = current_user::regrole::oid
-		)
-	`).Scan(&hasReadAllData)
-	if err == nil && hasReadAllData {
-		tier = pgtype.TierExplain
-	}
-
-	var hasSignalBackend bool
-	err = conn.QueryRow(ctx, `
-		SELECT EXISTS(
-			SELECT 1 FROM pg_auth_members m
-			JOIN pg_roles r ON m.roleid = r.oid
-			WHERE r.rolname = 'pg_signal_backend'
-			AND m.member = current_user::regrole::oid
-		)
-	`).Scan(&hasSignalBackend)
-	if err == nil && hasSignalBackend {
-		tier = pgtype.TierSignal
-	}
-	m.target.cache.permTier = tier
-
-	// Query extensions
-	m.target.cache.extensions = make(map[string]bool)
-	rows, err := conn.Query(ctx, "SELECT extname FROM pg_extension")
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var name string
-			if err := rows.Scan(&name); err != nil {
-				continue
-			}
-			m.target.cache.extensions[name] = true
-		}
-	}
+	// Query permission tier and extensions. The initial snapshot is refreshed
+	// again by RefreshCapabilities so a DBA grant takes effect on the next
+	// scrape/command without an agent restart.
+	m.target.cache.permTier, m.target.cache.extensions = m.queryCapabilities(ctx, conn)
 
 	// Get or create InstanceID via identity store
 	identityPath := os.Getenv("PGLENS_IDENTITY_PATH")
@@ -397,6 +359,72 @@ func (m *Manager) ensureCache(ctx context.Context) error {
 	m.target.cache.agentID = idStore.AgentID()
 
 	m.target.cache.initialized = true
+	return nil
+}
+
+// queryCapabilities reads the privileges and extensions relevant to checks
+// and commands. Errors are treated conservatively: T0 and an empty extension
+// set keep monitoring read-only instead of making an unavailable target look
+// more capable than it is.
+func (m *Manager) queryCapabilities(ctx context.Context, conn *pgxpool.Conn) (pgtype.PermTier, map[string]bool) {
+	tier := pgtype.TierReadOnly
+	var hasReadAllData bool
+	if err := conn.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM pg_auth_members m
+			JOIN pg_roles r ON m.roleid = r.oid
+			WHERE r.rolname = 'pg_read_all_data'
+			AND m.member = current_user::regrole::oid
+		)
+	`).Scan(&hasReadAllData); err == nil && hasReadAllData {
+		tier = pgtype.TierExplain
+	}
+
+	var hasSignalBackend bool
+	if err := conn.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM pg_auth_members m
+			JOIN pg_roles r ON m.roleid = r.oid
+			WHERE r.rolname = 'pg_signal_backend'
+			AND m.member = current_user::regrole::oid
+		)
+	`).Scan(&hasSignalBackend); err == nil && hasSignalBackend {
+		tier = pgtype.TierSignal
+	}
+
+	exts := make(map[string]bool)
+	rows, err := conn.Query(ctx, "SELECT extname FROM pg_extension")
+	if err != nil {
+		return tier, exts
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err == nil {
+			exts[name] = true
+		}
+	}
+	return tier, exts
+}
+
+// RefreshCapabilities re-reads privilege membership and installed
+// extensions after the initial identity cache has been established. PostgreSQL
+// grants are intended to become effective at the next scrape/command, so
+// capability state must not be process-lifetime cached.
+func (m *Manager) RefreshCapabilities(ctx context.Context) error {
+	if err := m.ensureCache(ctx); err != nil {
+		return err
+	}
+	conn, err := m.Shared(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Release()
+	tier, extensions := m.queryCapabilities(ctx, conn)
+	m.target.cache.mu.Lock()
+	m.target.cache.permTier = tier
+	m.target.cache.extensions = extensions
+	m.target.cache.mu.Unlock()
 	return nil
 }
 

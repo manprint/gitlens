@@ -115,6 +115,20 @@ func TestSmoke_PermTierT0Only(t *testing.T) {
 	h.Scenario(t, "SYS-PERM-001")
 }
 
+// TestSmoke_PermTierGrantAtRuntime runs SYS-PERM-002: the deployed monitoring
+// SQL is applied at T0, T1 and T2 and the running agent observes T1 without a
+// restart before accepting EXPLAIN.
+func TestSmoke_PermTierGrantAtRuntime(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping E2E smoke test in short mode")
+	}
+	h := harness.Start(t, harness.Config{
+		Topology:  harness.TopologyStandalone,
+		AgentMode: resolveAgentMode(harness.AgentModeContainer),
+	})
+	h.Scenario(t, "SYS-PERM-002")
+}
+
 // TestSmoke_PromoteInvertsRolesNoIdentityLoss runs SYS-REPL-001
 // (test/scenario/replication.go) — the plan's own acceptance test.
 func TestSmoke_PromoteInvertsRolesNoIdentityLoss(t *testing.T) {

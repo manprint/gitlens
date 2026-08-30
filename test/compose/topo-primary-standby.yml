@@ -25,7 +25,7 @@ services:
       # identical comment in topo-standalone.yml for why (an unsupplied
       # variable is a syntax error, and the postgres entrypoint aborts the
       # whole container on any failing init script).
-      - ../fixtures/sql/monitoring_user.sql:/opt/pglens/monitoring_user.sql
+      - ../../deploy/sql/monitoring_user.sql:/opt/pglens/monitoring_user.sql
       - ../fixtures/sql/init_monitoring_user.sh:/docker-entrypoint-initdb.d/01-monitoring.sh
       - ../fixtures/sql/replica_setup.sh:/docker-entrypoint-initdb.d/02-replication.sh
       - ../fixtures/sql/command_users.sql:/docker-entrypoint-initdb.d/03-command-users.sql

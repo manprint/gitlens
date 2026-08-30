@@ -360,9 +360,12 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 		if !ok {
 			continue
 		}
+		if err := mgr.RefreshCapabilities(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: refresh capabilities for %s: %v\n", mgr.Database(), err)
+		}
 		exts := map[string]bool{}
 		for _, name := range []string{"pg_stat_statements"} {
-			exts[name] = mgr.HasExtension(name) //nolint:contextcheck // Manager caches this at connect time; the accessor takes no context
+			exts[name] = mgr.HasExtension(name) //nolint:contextcheck // Manager refreshes this before each envelope; accessor takes no context
 		}
 		// Discover was never being called again after startup, so
 		// wire.Instance.Databases (and therefore the server's `databases`
@@ -479,8 +482,8 @@ func buildTopologyEdges(mgr *agent.Manager, results []wire.Result, lastEdgeState
 }
 
 // waitForTarget blocks (up to 60s) until mgr's identity cache initializes
-// successfully, retrying every second. addScheduleEntries below reads
-// mgr.Role()/PGVersion()/PermTier()/HasExtension() exactly once, at startup,
+	// successfully, retrying every second. addScheduleEntries below reads
+	// mgr.Role()/PGVersion()/PermTier()/HasExtension() exactly once, at startup,
 // to decide which checks ever get scheduled for this target's entire
 // lifetime — those accessors DO retry internally on a later call (their
 // underlying ensureCache doesn't latch a failure), but addScheduleEntries

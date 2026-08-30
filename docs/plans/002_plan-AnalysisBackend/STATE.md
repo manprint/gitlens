@@ -2,7 +2,7 @@
 
 > **READ THIS FILE FIRST at the start of every session, before any other plan
 > file. OPEN a unit in §1 before touching code; CLOSE it after the gates pass.**
-> **Last updated:** 2026-08-30 (phase 10.2 closed, 10.3 opened) by `agent:gpt5.6-luna` | **Session:** 32
+> **Last updated:** 2026-08-30 (phase 10.3 closed, 10.4 opened) by `agent:gpt5.6-luna` | **Session:** 32
 
 ## 0. Protocol
 
@@ -49,13 +49,13 @@ work — a phase that looks blocked is a signal to read §9, not to skip ahead.
 ## 1. Current unit
 
 - **Type:** sub-phase
-- **ID:** `10.3`
-- **Status:** `OPEN`
-- **Intent:** add and verify the permission-tier SQL artefacts and acceptance test.
+- **ID:** `10.4`
+- **Status:** `none`
+- **Intent:** document the ten declared product limits and cross-check each one against evidence or an explicit gap.
 - **Phase:** 10 — Packaging, CI, final documentation ([phase_11.md](phase_11.md))
-- **Next action:** implement phase_11.md §10.3 exactly, then run the permission-tier SQL and SYS-PERM-002 checks.
+- **Next action:** implement phase_11.md §10.4 exactly, then run the documentation cross-check and close the phase.
 - **Assigned:** `agent:gpt5.6-luna`
-- **Repo state:** branch `main`, phase 10.2 complete.
+- **Repo state:** branch `main`, phase 10.3 complete.
 
 ## 2. Feature context (self-contained recap)
 
@@ -204,6 +204,7 @@ The authoritative gate commands are the Makefile targets. These are identical to
 | 84 | sub-phase | 9.8 | agent:gpt5.6-luna | Updated README test-level guidance and replaced stale contributor scenario instructions with the current E2E layout and five anti-flake rules | `README.md`, `CONTRIBUTING.md`, `STATE.md` | diff-check, fmt-check and documented E2E command green | `c70edcc` |
 | 85 | sub-phase | 10.1 | agent:gpt5.6-luna | Added reproducible local CI unit/integration/E2E targets, hosted CI workflows, PG15–18/profile matrix fixtures, deterministic E2E cleanup and final gate regressions | `Makefile`, `.github/workflows/ci.yml`, `.github/workflows/e2e.yml`, `test/harness/harness.go`, `test/scenario/net.go`, `internal/**`, `STATE.md` | unit/coverage green, 8/8 L2 child jobs green, deliberate failure probe non-zero as expected, focused E2E regressions green; hosted Actions not invoked | phase-10.1 close |
 | 86 | sub-phase | 10.2 | agent:gpt5.6-luna | Added reproducible deployment Compose, agent/server environment examples, hardened systemd units, alert-webhook aliases, the instance collection route required by deployment acceptance, and SYS-DEPLOY-001 | `deploy/docker-compose.yml`, `deploy/agent.example.yaml`, `deploy/server.example.env`, `deploy/systemd/pglens-agent.service`, `deploy/systemd/pglens-server.service`, `internal/server/config.go`, `internal/server/config_test.go`, `internal/server/api.go`, `internal/server/api_test.go`, `test/e2e/deploy_test.go`, `STATE.md` | Compose config, server tests, build/images, isolated systemd verification, healthy root stack, and SYS-DEPLOY-001 PASS | phase-10.2 close |
+| 87 | sub-phase | 10.3 | agent:gpt5.6-luna | Added one idempotent tiered monitoring-role SQL script and README, switched compose acceptance to the shipped script, refreshed agent capabilities after runtime grants, removed the stale duplicate fixture, and added SYS-PERM-002 | `deploy/sql/monitoring_user.sql`, `deploy/sql/README.md`, `test/compose/topo-standalone.yml`, `test/compose/topo-primary-standby.yml`, `test/compose/topo-cascading.yml`, `test/fixtures/sql/init_monitoring_user.sh`, `test/fixtures/sql/monitoring_user.sql`, `internal/agent/conn.go`, `internal/agent/command.go`, `cmd/pglens-agent/run.go`, `test/scenario/perm.go`, `test/e2e/smoke_test.go`, `STATE.md` | SQL T0/T1/T2 applied in a real container; SYS-PERM-002 PASS in 40.232s; agent/pgtype unit tests PASS; images rebuilt | phase-10.3 close |
 
 ## 5. Files touched
 
@@ -505,10 +506,23 @@ the units that touched it, so a later audit can attribute every diff.
 | `internal/server/api_test.go` | 10.2 | collection route response coverage |
 | `test/e2e/deploy_test.go` | 10.2 | SYS-DEPLOY-001 root Compose acceptance |
 | `STATE.md` | 10.2 | phase close evidence and ledger |
+| `deploy/sql/monitoring_user.sql` | 10.3 | idempotent T0/T1/T2 role grants with commented DBA-only T3 extension block |
+| `deploy/sql/README.md` | 10.3 | permission-tier capability/degradation matrix and application commands |
+| `test/compose/topo-standalone.yml` | 10.3 | mount the shipped monitoring SQL into the standalone acceptance stack |
+| `test/compose/topo-primary-standby.yml` | 10.3 | mount the shipped monitoring SQL into the replication acceptance stack |
+| `test/compose/topo-cascading.yml` | 10.3 | mount the shipped monitoring SQL into the cascading acceptance stack |
+| `test/fixtures/sql/init_monitoring_user.sh` | 10.3 | invoke the shipped SQL with explicit psql variables during initialization |
+| `test/fixtures/sql/monitoring_user.sql` | 10.3 | removed stale duplicate of the shipped deployment script |
+| `internal/agent/conn.go` | 10.3 | capability query and runtime refresh hook |
+| `internal/agent/command.go` | 10.3 | refresh capability state before command gates |
+| `cmd/pglens-agent/run.go` | 10.3 | refresh capability state before every envelope |
+| `test/scenario/perm.go` | 10.3 | SYS-PERM-002 real-container tier and no-restart acceptance |
+| `test/e2e/smoke_test.go` | 10.3 | SYS-PERM-002 smoke entry point |
+| `STATE.md` | 10.3 | phase close evidence, deviations and board |
 
 ## 6. In-flight work
 
-`none — phase 10.2 is closed; phase 10.3 is the active unit.`
+`none — phase 10.3 is closed; phase 10.4 is the next unit.`
 
 ## 7. Verification state
 
@@ -640,6 +654,11 @@ the units that touched it, so a later audit can attribute every diff.
 | phase10.2-systemd | isolated `systemd-analyze verify --root=<temporary-install> pglens-agent.service pglens-server.service` | PASS — both shipped units verify when the built binaries are installed at their declared paths | 2026-08-30 |
 | phase10.2-deploy-stack | root Compose `up -d --wait` plus `/api/v1/instances` poll | PASS — healthy stack reported exactly one recent primary instance | 2026-08-30 |
 | phase10.2-e2e | `go test -tags=e2e -run '^TestFull_DeployExampleStack$' -count=1 -timeout=8m ./test/e2e/...` | PASS — SYS-DEPLOY-001 in 41.766s | 2026-08-30 |
+| phase10.3-sql-probe | clean standalone PostgreSQL container; `psql -f /opt/pglens/monitoring_user.sql` at T0 and T1 | PASS — role script is idempotent; T1 membership is visible to both catalog and `pg_has_role` queries | 2026-08-30 |
+| phase10.3-agent-unit | `go test ./internal/agent ./internal/pgtype` | PASS — capability refresh and permission-tier contracts | 2026-08-30 |
+| phase10.3-images | `make build-images` | PASS — rebuilt agent/server images after runtime-refresh changes | 2026-08-30 |
+| phase10.3-e2e-compile | `go test -tags=e2e -run '^$' ./test/scenario ./test/e2e` | PASS — E2E scenario registration and helpers compile | 2026-08-30 |
+| phase10.3-permission-e2e | `go test -tags=e2e -run '^TestSmoke_PermTierGrantAtRuntime$' -count=1 -v ./test/e2e/...` | PASS — SYS-PERM-002 applies T0/T1/T2 in a real container, checks named T1/T2 rejection, observes T1 without restart, and reaches T2 in 40.232s | 2026-08-30 |
 
 ## 8. Runtime deviations from the plan
 
@@ -700,6 +719,9 @@ the units that touched it, so a later audit can attribute every diff.
 | D-052 | 10.1 | The local integration matrix returns through one bounded wrapper call | The 8 child jobs all completed green; the orchestration wrapper timed out while collecting the final output | Tool RPC collection limit, not a test failure; child process inspection found no remaining jobs or failure markers |
 | D-053 | 10.2 | `systemd-analyze verify` can validate the units directly in the checkout | Direct host verification reports missing `/usr/local/bin` installation paths; the same units passed in an isolated temporary root populated with the built binaries | The repository is not installed as a system service during development; the declared production paths remain explicit and verified |
 | D-054 | 10.2 | SYS-DEPLOY-001 can query the planned instance collection endpoint | Added the missing `GET /api/v1/instances` route with the existing instance staleness semantics | The acceptance contract names the collection route while the pre-phase server exposed only instance-scoped routes |
+| D-055 | 10.3 | The plan names `pg_read_all_stats` as the T1 grant while the current EXPLAIN gate requires table-read access | The shipped T1 block grants both `pg_read_all_stats` (documented capability) and `pg_read_all_data` (the actual PostgreSQL EXPLAIN gate), with the reason stated inline and in `deploy/sql/README.md` | Preserves the plan's named grant while making the advertised T1 EXPLAIN behavior real |
+| D-056 | 10.3 | SYS-PERM-002 describes missing capabilities as advisor `degraded` findings | The current runtime contract has all scheduled checks and advisor rules at T0; command-only T1/T2 capabilities therefore surface as terminal rejected command results with named reasons. The README records this exact matrix and the E2E asserts both rejection and runtime promotion | No T0 check or advisor rule was incorrectly reclassified merely to manufacture a degraded finding |
+| D-057 | 10.3 | Test compose files carried a second stale copy of the monitoring SQL | All compose topologies now mount `deploy/sql/monitoring_user.sql`; the unused fixture copy was removed and the init wrapper invokes the shipped file | Keeps the real acceptance path and deployment artefact single-sourced |
 
 Phase-6 healthcheck blocker resolved: the agent health server is initialized
 before target connection retries; the subsequent `SYS-HARNESS-001` smoke passed
@@ -767,12 +789,12 @@ disagree with §1 and §4.
 | 7 — Advisor engine and rule packs | phase_08.md | `DONE` | 10/10 sub-phases closed; INT-ADV-001..008 green; advisor coverage 88.6%; global coverage 75.2%; phase commit `8891d6b` |
 | 8 — Command channel and query plans | phase_09.md | `DONE` | 11/11 sub-phases closed; INT-CMD-001..011, INT-PLAN-001/002 and SYS-PERM-001 green; coverage 75.0%, `internal/command` 100.0%; primary `agent:gpt5.6-luna`; phase commit `78dbf94` |
 | 9 — L3 end-to-end scenarios | phase_10.md | `DONE` | 8/8 sub-phases closed; all planned SYS-* scenarios green, including SYS-ARCH-001; primary `agent:gpt5.6-luna` |
-| 10 — Packaging, CI, final documentation | phase_11.md | `IN_PROGRESS` | 1/5 sub-phases closed; primary `agent:gpt5.6-luna`; 10.2 deployment artefacts and SYS-DEPLOY-001 green |
+| 10 — Packaging, CI, final documentation | phase_11.md | `IN_PROGRESS` | 2/5 sub-phases closed; primary `agent:gpt5.6-luna`; 10.2 deployment and 10.3 permission artefacts/acceptance green |
 
 Status values: `TODO` · `IN_PROGRESS` · `DONE` · `SKIPPED` · `BLOCKED`
 A `SKIPPED` sub-phase or phase keeps its row and carries the reason.
 
-**9 of 11 phases `DONE`; phase 10 is 1/5 sub-phases closed. Plan at 84% — phase 10 continues.**
+**9 of 11 phases `DONE`; phase 10 is 2/5 sub-phases closed. Plan at 86% — phase 10 continues.**
 
 ### Tests
 
@@ -903,7 +925,7 @@ throughout.
 | SYS-IDX-003 | system | 9 | `DONE` | phase 9 § 9.4 — duplicate-index finding and resolution after drop; three full-suite runs green |
 | SYS-LOCK-001 | system | 9 | `DONE` | phase 9 § 9.3 — three consecutive combined L3 runs |
 | SYS-PERM-001 | system | 4 | `EXTEND` | exists from plan 001 — phase-8 regression PASS with T0 and both command flags false |
-| SYS-PERM-002 | system | 10 | `TODO` | phase 10 § 10.3 — Permission-tier grant scripts |
+| SYS-PERM-002 | system | 10 | `DONE` | phase 10 § 10.3 — real T0/T1/T2 grant-script application, named command degradation and runtime T1 promotion without agent restart |
 | SYS-REPL-006 | system | 9 | `DONE` | phase 9 § 9.1 — Cascading replication topology |
 | SYS-VAC-001 | system | 9 | `DONE` | phase 9 § 9.4 — dead-tuple ratio falls after VACUUM and last-vacuum age is fresh; three full-suite runs green |
 
@@ -926,7 +948,7 @@ other docs get their own rows.
 | README.md | 9 | `DONE` | five test levels, Docker needs and smoke/full durations documented in 9.8 |
 | README.md | 10 | `TODO` | closing sub-phase of phase_11.md |
 | CONTRIBUTING.md | 9 | `DONE` | current E2E file layout, SYS id registration and five anti-flake rules documented in 9.8 |
-| deploy/sql/README.md | 10 | `TODO` | 10.3 — what each permission tier unlocks and what degrades without it |
+| deploy/sql/README.md | 10 | `DONE` | 10.3 — what each permission tier unlocks and what degrades without it |
 | docs/LIMITS.md | 10 | `TODO` | 10.4 — the ten declared limits, including that pglens does not verify backups |
 
 ### Audits

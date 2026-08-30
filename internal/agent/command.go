@@ -175,6 +175,17 @@ func (d *Dispatcher) dispatch(ctx context.Context, polled polledCommand) error {
 	if err := polled.Args.Validate(polled.Kind); err != nil {
 		return d.postResult(ctx, polled.CommandID, commandResult{ClaimToken: polled.ClaimToken, Outcome: "rejected", Error: err.Error()})
 	}
+	// Privilege grants are expected to take effect for the next command while
+	// the agent remains running. Managers expose this optional refresh hook so
+	// older test targets and lightweight fakes keep working unchanged.
+	if refresher, ok := binding.target.(interface {
+		RefreshCapabilities(context.Context) error
+	}); ok {
+		if err := refresher.RefreshCapabilities(ctx); err != nil {
+			// Keep the last known conservative capability state on a transient
+			// refresh failure; the executor will still enforce its gates.
+		}
+	}
 	gates := command.Gates{
 		Tier:                binding.target.PermTier(),
 		AllowExplainAnalyze: binding.allowExplainAnalyze,
