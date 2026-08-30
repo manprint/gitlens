@@ -2,7 +2,7 @@
 
 > **READ THIS FILE FIRST at the start of every session, before any other plan
 > file. OPEN a unit in §1 before touching code; CLOSE it after the gates pass.**
-> **Last updated:** 2026-08-30 (phase 10.5 closed; plan complete) by `agent:gpt5.6-luna` | **Session:** 32
+> **Last updated:** 2026-08-30 (verification V001 closed) by `agent:gpt5.6-luna` | **Session:** 32
 
 ## 0. Protocol
 
@@ -51,9 +51,9 @@ work — a phase that looks blocked is a signal to read §9, not to skip ahead.
 - **Type:** none
 - **ID:** `none`
 - **Status:** `none`
-- **Intent:** plan 002 is complete; all planned phases, gates and documented acceptance work are closed.
+- **Intent:** plan 002 implementation is complete; formal audit V001 is closed with a `PASS WITH FINDINGS` verdict.
 - **Phase:** 10 — Packaging, CI, final documentation ([phase_11.md](phase_11.md))
-- **Next action:** none — plan 002 closed; start a new plan for further scope.
+- **Next action:** execute the correction plan in `verify/verify_001_2026-08-30.md` to close the three `OPEN MINOR` findings.
 - **Assigned:** `agent:gpt5.6-luna`
 - **Repo state:** branch `main`, phases 0–10 complete; phase-close commit `06f50ea` recorded.
 
@@ -207,6 +207,7 @@ The authoritative gate commands are the Makefile targets. These are identical to
 | 87 | sub-phase | 10.3 | agent:gpt5.6-luna | Added one idempotent tiered monitoring-role SQL script and README, switched compose acceptance to the shipped script, refreshed agent capabilities after runtime grants, removed the stale duplicate fixture, and added SYS-PERM-002 | `deploy/sql/monitoring_user.sql`, `deploy/sql/README.md`, `test/compose/topo-standalone.yml`, `test/compose/topo-primary-standby.yml`, `test/compose/topo-cascading.yml`, `test/fixtures/sql/init_monitoring_user.sh`, `test/fixtures/sql/monitoring_user.sql`, `internal/agent/conn.go`, `internal/agent/command.go`, `cmd/pglens-agent/run.go`, `test/scenario/perm.go`, `test/e2e/smoke_test.go`, `STATE.md` | SQL T0/T1/T2 applied in a real container; SYS-PERM-002 PASS in 40.232s; agent/pgtype unit tests PASS; images rebuilt | phase-10.3 close |
 | 88 | sub-phase | 10.4 | agent:gpt5.6-luna | Added `docs/LIMITS.md` with the ten declared product limits and cross-checked every item against the suite or an explicit absence | `docs/LIMITS.md`, `STATE.md` | ten limit-to-evidence verification rows recorded; documentation content review PASS | phase-10.4 close |
 | 89 | sub-phase | 10.5 | agent:gpt5.6-luna | Performed the end-to-end README/configuration/endpoint/security review, repaired stale operational instructions, added capability-branch coverage, rebuilt images and closed the plan | `README.md`, `cmd/pglens-agent/run.go`, `internal/agent/command.go`, `internal/agent/conn.go`, `internal/agent/conn_test.go`, `docs/plans/002_plan-AnalysisBackend/overview.md`, `docs/plans/002_plan-AnalysisBackend/STATE.md` | fmt/lint/build/unit/integration/coverage green; rebuilt-image SYS-PERM-002 PASS in 40.323s; full E2E runner completed with no failure markers, residual process or container; hosted CI remains skipped under D-051 | `06f50ea` |
+| 90 | verify | V001 | agent:gpt5.6-luna | Audited all phases, gates, decisions, invariants, state claims and final-tree scope; verdict `PASS WITH FINDINGS` with 0 BLOCKER, 0 MAJOR and 3 MINOR findings | `docs/plans/002_plan-AnalysisBackend/verify/index.md`, `docs/plans/002_plan-AnalysisBackend/verify/verify_001_2026-08-30.md`, `docs/plans/002_plan-AnalysisBackend/STATE.md` | fmt/lint/build/unit/coverage/integration and focused PG15–18 WAL checks PASS; full E2E and local CI wrapper exit codes not directly verifiable; hosted CI remains skipped under D-051 | uncommitted |
 
 ## 5. Files touched
 
@@ -533,7 +534,7 @@ the units that touched it, so a later audit can attribute every diff.
 
 ## 6. In-flight work
 
-`none — tree consistent; no unit is in flight.`
+`none — audit V001 is closed; verification artifacts are written, no production changes were made, and the three MINOR corrections are recorded in the report.`
 
 ## 7. Verification state
 
@@ -689,6 +690,12 @@ the units that touched it, so a later audit can attribute every diff.
 | phase10.5-deploy-permissions | `docker compose -f deploy/docker-compose.yml config`; SYS-DEPLOY-001; SYS-PERM-001/002 | PASS — deployment and permission acceptance remained green from phases 10.2/10.3 and final documentation references match shipped artefacts | 2026-08-30 |
 | phase10.5-readme-docs | README/LIMITS/deploy SQL/CONTRIBUTING command and static audit | PASS — links, environment keys, routes, command ownership and security gates cross-checked; stale instructions repaired | 2026-08-30 |
 | phase10.5-ci | local CI matrix and deliberate failure probe | PASS locally — 8/8 matrix jobs green and deliberate failure returned non-zero; hosted Actions skipped under D-051 because no remote push authority was available | 2026-08-30 |
+| V001-fmt-lint-build-test | `make fmt-check && make lint && make build && make test` | PASS — all four commands returned exit 0 on the audited tree | 2026-08-30 |
+| V001-coverage | `make coverage-gate` | PASS — global coverage and package floors remained green | 2026-08-30 |
+| V001-integration | `make test-integration` | PASS — all integration-tagged packages returned exit 0 | 2026-08-30 |
+| V001-int-wal-focused | `go test -tags=integration -race -shuffle=on -timeout=10m ./internal/check -run '^TestINTWAL000_WALStatisticsColumnShape$'` on PG15–18 | PASS — focused version-gated WAL shape checks passed for every supported version | 2026-08-30 |
+| V001-ci-local-integration | `make ci-local-integration` | NOT DIRECTLY VERIFIABLE — child jobs later disappeared without failure markers, but the timed-out wrapper did not expose its final exit code | 2026-08-30 |
+| V001-e2e-full | `make test-e2e-full` | NOT DIRECTLY VERIFIABLE — the long runner completed with no failure markers or residuals, but the timed-out wrapper did not expose its final exit code | 2026-08-30 |
 
 ## 8. Runtime deviations from the plan
 
@@ -753,6 +760,7 @@ the units that touched it, so a later audit can attribute every diff.
 | D-056 | 10.3 | SYS-PERM-002 describes missing capabilities as advisor `degraded` findings | The current runtime contract has all scheduled checks and advisor rules at T0; command-only T1/T2 capabilities therefore surface as terminal rejected command results with named reasons. The README records this exact matrix and the E2E asserts both rejection and runtime promotion | No T0 check or advisor rule was incorrectly reclassified merely to manufacture a degraded finding |
 | D-057 | 10.3 | Test compose files carried a second stale copy of the monitoring SQL | All compose topologies now mount `deploy/sql/monitoring_user.sql`; the unused fixture copy was removed and the init wrapper invokes the shipped file | Keeps the real acceptance path and deployment artefact single-sourced |
 | D-058 | 10.5 | The final E2E invocation exceeded the context tool's 5-minute output RPC window | The child runner continued to completion under a persistent monitor; no failure markers, residual E2E process or pglens container remained, but the final stdout/exit line was not recoverable from the timed-out RPC | Records the evidence boundary without treating the tool transport timeout as a test failure |
+| D-059 | 10.5 | The final review's declared Files list contains documentation and state files only | The phase-close commit also changed agent capability-refresh production code and its tests; the change is behavior-preserving gate/coverage repair but was not explicitly reconciled against the phase scope | Verification V001 records and scopes the deviation so final-tree attribution remains auditable |
 
 Phase-6 healthcheck blocker resolved: the agent health server is initialized
 before target connection retries; the subsequent `SYS-HARNESS-001` smoke passed
@@ -768,8 +776,10 @@ command passed.
 
 ## 9. Blockers and open questions
 
-No blockers remain for plan 002. Q-B is explicitly deferred to plan 003 with its
-scope and reason recorded below; no current phase depends on it.
+No blockers remain for plan 002. V001 has no `OPEN BLOCKER` or `OPEN MAJOR`
+finding; three `OPEN MINOR` findings and their executable corrections are listed
+in `verify/index.md`. Q-B is explicitly deferred to plan 003 with its scope and
+reason recorded below; no current phase depends on it.
 
 | # | Question | Assumed default | Resolve at | Status |
 |---|----------|-----------------|-----------|--------|
@@ -815,12 +825,12 @@ disagree with §1 and §4.
 | 7 — Advisor engine and rule packs | phase_08.md | `DONE` | 10/10 sub-phases closed; INT-ADV-001..008 green; advisor coverage 88.6%; global coverage 75.2%; phase commit `8891d6b` |
 | 8 — Command channel and query plans | phase_09.md | `DONE` | 11/11 sub-phases closed; INT-CMD-001..011, INT-PLAN-001/002 and SYS-PERM-001 green; coverage 75.0%, `internal/command` 100.0%; primary `agent:gpt5.6-luna`; phase commit `78dbf94` |
 | 9 — L3 end-to-end scenarios | phase_10.md | `DONE` | 8/8 sub-phases closed; all planned SYS-* scenarios green, including SYS-ARCH-001; primary `agent:gpt5.6-luna` |
-| 10 — Packaging, CI, final documentation | phase_11.md | `DONE` | 5/5 sub-phases closed; primary `agent:gpt5.6-luna`; final documentation, deployment, permission, coverage and local CI gates green; hosted CI skipped under D-051 |
+| 10 — Packaging, CI, final documentation | phase_11.md | `DONE` | 5/5 sub-phases closed; primary `agent:gpt5.6-luna`; final documentation, deployment, permission, coverage and local CI gates green; full-E2E wrapper exit remains unverified under V001-F1; hosted CI skipped under D-051 |
 
 Status values: `TODO` · `IN_PROGRESS` · `DONE` · `SKIPPED` · `BLOCKED`
 A `SKIPPED` sub-phase or phase keeps its row and carries the reason.
 
-**11 of 11 phases `DONE`; phase 10 is 5/5 sub-phases closed. Plan at 100% — closed.**
+**11 of 11 phases `DONE`; phase 10 is 5/5 sub-phases closed. Plan implementation is at 100%; audit V001 is closed `PASS WITH FINDINGS` with three `OPEN MINOR` corrections.**
 
 ### Tests
 
@@ -985,3 +995,4 @@ Findings themselves live in `verify/index.md`.
 | Report | Date | Verdict | Open findings |
 |--------|------|---------|---------------|
 | phase_11 final review | 2026-08-30 | `DONE` | no open findings; plan closure recorded in the state ledger |
+| V001 — formal plan audit | 2026-08-30 | `PASS WITH FINDINGS` | 3 `OPEN MINOR` findings; see `verify/index.md` |
