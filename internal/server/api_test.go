@@ -32,6 +32,16 @@ func TestAPI_RegisterRoutes(t *testing.T) {
 	require.NotPanics(t, func() { api.RegisterRoutes(r) })
 }
 
+func TestAPI_InstanceCollectionRouteReturnsArrayWithoutPool(t *testing.T) {
+	t.Parallel()
+	r := chi.NewRouter()
+	NewAPI(nil).RegisterRoutes(r)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/instances", http.NoBody))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.JSONEq(t, "[]", rec.Body.String())
+}
+
 func TestParseTimeParam(t *testing.T) {
 	t.Parallel()
 	_, err := parseTimeParam("")

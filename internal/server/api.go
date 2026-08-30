@@ -49,6 +49,7 @@ func NewAPI(pool *pgxpool.Pool) *API {
 // RegisterRoutes mounts all read API handlers onto r.
 func (a *API) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/clusters", a.handleClusters)
+	r.Get("/api/v1/instances", a.handleInstances)
 	r.Get("/api/v1/instances/{id}", a.handleInstance)
 	r.Get("/api/v1/metrics/query", a.handleMetricsQuery)
 	r.Get("/api/v1/events", a.handleEvents)
@@ -455,6 +456,58 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 		resp = append(resp, cr)
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ----- /api/v1/instances -----
+
+type instanceListResp struct {
+	InstanceID string    `json:"instance_id"`
+	ClusterID  string    `json:"cluster_id"`
+	Addr       string    `json:"addr"`
+	Port       int       `json:"port"`
+	Role       string    `json:"role"`
+	PGVersion  int       `json:"pg_version"`
+	PermTier   string    `json:"perm_tier"`
+	LastSeen   time.Time `json:"last_seen"`
+	Up         bool      `json:"up"`
+}
+
+func (a *API) handleInstances(w http.ResponseWriter, r *http.Request) {
+	if a.pool == nil {
+		writeJSON(w, http.StatusOK, []instanceListResp{})
+		return
+	}
+	rows, err := a.pool.Query(r.Context(), `
+		SELECT instance_id, cluster_id, addr, port, role, pg_version, perm_tier, last_seen
+		  FROM instances
+		 WHERE tenant_id='default'
+		 ORDER BY addr, port`)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query instances failed", err.Error())
+		return
+	}
+	defer rows.Close()
+
+	now := time.Now().UTC()
+	instances := []instanceListResp{}
+	for rows.Next() {
+		var iid uuid.UUID
+		var clusterID int64
+		var instance instanceListResp
+		if err := rows.Scan(&iid, &clusterID, &instance.Addr, &instance.Port, &instance.Role, &instance.PGVersion, &instance.PermTier, &instance.LastSeen); err != nil {
+			writeError(w, http.StatusInternalServerError, "scan instance failed", err.Error())
+			return
+		}
+		instance.InstanceID = iid.String()
+		instance.ClusterID = store.FromDB(clusterID).String()
+		instance.Up = isUp(instance.LastSeen, now)
+		instances = append(instances, instance)
+	}
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "instances rows error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, instances)
 }
 
 // ----- /api/v1/instances/{id} -----

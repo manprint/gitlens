@@ -1,0 +1,88 @@
+# Standalone example deployment. Build the images first with `make build-images`.
+# The agent monitors the same TimescaleDB service used by the server so this
+# file is self-contained; replace its target DSN for a production database.
+services:
+  timescaledb:
+    image: timescale/timescaledb:2.29.0-pg17
+    environment:
+      POSTGRES_DB: ${PGLENS_DB_NAME:-pglens}
+      POSTGRES_USER: ${PGLENS_DB_USER:-pglens}
+      POSTGRES_PASSWORD: ${PGLENS_DB_PASSWORD:-pglens}
+    ports:
+      - "${PGLENS_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pglens-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  pglens-server:
+    image: ghcr.io/manprint/pglens-server:dev
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      # Required database connection; the server runs migrations on startup.
+      PGLENS_DSN: ${PGLENS_DSN:-postgres://pglens:pglens@timescaledb:5432/pglens?sslmode=disable}
+      # Optional bind address inside the container (default :8080).
+      PGLENS_LISTEN: ${PGLENS_LISTEN:-:8080}
+      # Required outside this local example; replace dev-token in production.
+      PGLENS_BOOTSTRAP_TOKEN: ${PGLENS_BOOTSTRAP_TOKEN:-dev-token}
+      # Optional secret-file alternative to PGLENS_BOOTSTRAP_TOKEN.
+      PGLENS_BOOTSTRAP_TOKEN_FILE: ${PGLENS_BOOTSTRAP_TOKEN_FILE:-}
+      # Alert evaluator cadence; accepts a Go duration or positive seconds.
+      PGLENS_ALERT_INTERVAL: ${PGLENS_ALERT_INTERVAL:-30s}
+      # Descriptive Slack variable; the legacy PGLENS_SLACK_WEBHOOK_URL is also accepted.
+      PGLENS_ALERT_SLACK_WEBHOOK_URL: ${PGLENS_ALERT_SLACK_WEBHOOK_URL:-}
+      # Optional file-secret alias for the Slack webhook.
+      PGLENS_ALERT_SLACK_WEBHOOK_URL_FILE: ${PGLENS_ALERT_SLACK_WEBHOOK_URL_FILE:-}
+      # Backwards-compatible Slack variable names.
+      PGLENS_SLACK_WEBHOOK_URL: ${PGLENS_SLACK_WEBHOOK_URL:-}
+      PGLENS_SLACK_WEBHOOK_URL_FILE: ${PGLENS_SLACK_WEBHOOK_URL_FILE:-}
+      # Optional generic webhook notifier.
+      PGLENS_WEBHOOK_URL: ${PGLENS_WEBHOOK_URL:-}
+      # Advisor cadence; accepts a Go duration or positive seconds.
+      PGLENS_ADVISOR_INTERVAL: ${PGLENS_ADVISOR_INTERVAL:-15m}
+      # Time before a queued command expires (default 5m).
+      PGLENS_COMMAND_TTL: ${PGLENS_COMMAND_TTL:-5m}
+    ports:
+      - "${PGLENS_HTTP_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/pglens-server", "--healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  pglens-agent:
+    image: ghcr.io/manprint/pglens-agent:dev
+    depends_on:
+      pglens-server:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    environment:
+      # These two values override the sample file without changing it.
+      PGLENS_SERVER_URL: ${PGLENS_SERVER_URL:-http://pglens-server:8080}
+      PGLENS_BOOTSTRAP_TOKEN: ${PGLENS_BOOTSTRAP_TOKEN:-dev-token}
+      PGLENS_CONFIG: /etc/pglens/agent.yaml
+      PGLENS_HEALTHZ_LISTEN: ${PGLENS_HEALTHZ_LISTEN:-:9187}
+    volumes:
+      - pglens-agent-data:/var/lib/pglens
+      - ./agent.example.yaml:/etc/pglens/agent.yaml:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    ports:
+      - "${PGLENS_AGENT_HEALTHZ_PORT:-9187}:9187"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/pglens-agent", "--healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+volumes:
+  pglens-db-data:
+  pglens-agent-data:

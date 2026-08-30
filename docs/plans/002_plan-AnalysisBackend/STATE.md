@@ -2,7 +2,7 @@
 
 > **READ THIS FILE FIRST at the start of every session, before any other plan
 > file. OPEN a unit in §1 before touching code; CLOSE it after the gates pass.**
-> **Last updated:** 2026-08-30 (phase 10.2 opened) by `agent:gpt5.6-luna` | **Session:** 32
+> **Last updated:** 2026-08-30 (phase 10.2 closed, 10.3 opened) by `agent:gpt5.6-luna` | **Session:** 32
 
 ## 0. Protocol
 
@@ -49,13 +49,13 @@ work — a phase that looks blocked is a signal to read §9, not to skip ahead.
 ## 1. Current unit
 
 - **Type:** sub-phase
-- **ID:** `10.2`
+- **ID:** `10.3`
 - **Status:** `OPEN`
-- **Intent:** add and verify the deployment compose, environment and systemd artefacts.
+- **Intent:** add and verify the permission-tier SQL artefacts and acceptance test.
 - **Phase:** 10 — Packaging, CI, final documentation ([phase_11.md](phase_11.md))
-- **Next action:** implement phase_11.md §10.2 exactly, then run the deployment health and SYS-DEPLOY-001 checks.
+- **Next action:** implement phase_11.md §10.3 exactly, then run the permission-tier SQL and SYS-PERM-002 checks.
 - **Assigned:** `agent:gpt5.6-luna`
-- **Repo state:** branch `main`, phase 10.1 complete.
+- **Repo state:** branch `main`, phase 10.2 complete.
 
 ## 2. Feature context (self-contained recap)
 
@@ -203,6 +203,7 @@ The authoritative gate commands are the Makefile targets. These are identical to
 | 83 | sub-phase | 9.7 | agent:gpt5.6-luna | Added SYS-ARCH-001 L3 acceptance for failing and repaired archiving, plus valid PostgreSQL setting-sentinel handling in the harness invariant | `test/e2e/archiving_test.go`, `test/e2e/scenarios/archiving.yml`, `test/fixtures/agent-standalone.yaml`, `test/harness/invariants.go`, `STATE.md` | SYS-ARCH-001 PASS in three consecutive runs; fmt/lint/build/test/e2e compile/vet and Docker images green | `0dcf4f4` |
 | 84 | sub-phase | 9.8 | agent:gpt5.6-luna | Updated README test-level guidance and replaced stale contributor scenario instructions with the current E2E layout and five anti-flake rules | `README.md`, `CONTRIBUTING.md`, `STATE.md` | diff-check, fmt-check and documented E2E command green | `c70edcc` |
 | 85 | sub-phase | 10.1 | agent:gpt5.6-luna | Added reproducible local CI unit/integration/E2E targets, hosted CI workflows, PG15–18/profile matrix fixtures, deterministic E2E cleanup and final gate regressions | `Makefile`, `.github/workflows/ci.yml`, `.github/workflows/e2e.yml`, `test/harness/harness.go`, `test/scenario/net.go`, `internal/**`, `STATE.md` | unit/coverage green, 8/8 L2 child jobs green, deliberate failure probe non-zero as expected, focused E2E regressions green; hosted Actions not invoked | phase-10.1 close |
+| 86 | sub-phase | 10.2 | agent:gpt5.6-luna | Added reproducible deployment Compose, agent/server environment examples, hardened systemd units, alert-webhook aliases, the instance collection route required by deployment acceptance, and SYS-DEPLOY-001 | `deploy/docker-compose.yml`, `deploy/agent.example.yaml`, `deploy/server.example.env`, `deploy/systemd/pglens-agent.service`, `deploy/systemd/pglens-server.service`, `internal/server/config.go`, `internal/server/config_test.go`, `internal/server/api.go`, `internal/server/api_test.go`, `test/e2e/deploy_test.go`, `STATE.md` | Compose config, server tests, build/images, isolated systemd verification, healthy root stack, and SYS-DEPLOY-001 PASS | phase-10.2 close |
 
 ## 5. Files touched
 
@@ -493,10 +494,21 @@ the units that touched it, so a later audit can attribute every diff.
 | `README.md` | 9.8 | five test levels and command durations |
 | `CONTRIBUTING.md` | 9.8 | E2E scenario layout, registration and anti-flake rules |
 | `STATE.md` | 9.8 | phase close evidence and ledger |
+| `deploy/docker-compose.yml` | 10.2 | reproducible root deployment stack with TimescaleDB, server and agent |
+| `deploy/agent.example.yaml` | 10.2 | complete agent example with target gates and all checks |
+| `deploy/server.example.env` | 10.2 | server DSN, intervals, TTL and storage policy configuration notes |
+| `deploy/systemd/pglens-agent.service` | 10.2 | hardened agent service with restart policy and host metric access notes |
+| `deploy/systemd/pglens-server.service` | 10.2 | hardened server service with restart policy |
+| `internal/server/config.go` | 10.2 | descriptive alert webhook environment aliases |
+| `internal/server/config_test.go` | 10.2 | alert webhook alias and file-alias coverage |
+| `internal/server/api.go` | 10.2 | instance collection API used by deployment acceptance |
+| `internal/server/api_test.go` | 10.2 | collection route response coverage |
+| `test/e2e/deploy_test.go` | 10.2 | SYS-DEPLOY-001 root Compose acceptance |
+| `STATE.md` | 10.2 | phase close evidence and ledger |
 
 ## 6. In-flight work
 
-`none — phase 10.1 is closed; phase 10.2 is the active unit.`
+`none — phase 10.2 is closed; phase 10.3 is the active unit.`
 
 ## 7. Verification state
 
@@ -622,6 +634,12 @@ the units that touched it, so a later audit can attribute every diff.
 | phase10.1-deliberate-failure | temporary failing advisor test, `go test ./internal/advisor -run '^TestCIDeliberateFailure$' -count=1` | PASS — probe returned non-zero as expected; temporary file was removed | 2026-08-30 |
 | phase10.1-e2e-fixes | `make build-images` plus focused L3 regressions | PASS — SYS-NET-001 135.508s; SYS-REPL-005 and SYS-REPL-006 passed in the same 290.565s trio run before final NET hardening; final NET rerun passed | 2026-08-30 |
 | phase10.1-e2e-full | `AGENT_MODE=container make test-e2e-full` | INTERMITTENT — the full 64m36s run reached only SYS-REPL-005, SYS-NET-001 and SYS-REPL-006 timeouts; the same three scenarios passed sequentially after cleanup/teardown hardening | 2026-08-30 |
+| phase10.2-compose-config | `docker compose -f deploy/docker-compose.yml config` | PASS — root deployment Compose interpolates and validates successfully | 2026-08-30 |
+| phase10.2-server-tests | `go test ./internal/server` | PASS — webhook aliases and `/api/v1/instances` collection route covered | 2026-08-30 |
+| phase10.2-build | `make build && make build-images` | PASS — binaries and current agent/server development images rebuilt | 2026-08-30 |
+| phase10.2-systemd | isolated `systemd-analyze verify --root=<temporary-install> pglens-agent.service pglens-server.service` | PASS — both shipped units verify when the built binaries are installed at their declared paths | 2026-08-30 |
+| phase10.2-deploy-stack | root Compose `up -d --wait` plus `/api/v1/instances` poll | PASS — healthy stack reported exactly one recent primary instance | 2026-08-30 |
+| phase10.2-e2e | `go test -tags=e2e -run '^TestFull_DeployExampleStack$' -count=1 -timeout=8m ./test/e2e/...` | PASS — SYS-DEPLOY-001 in 41.766s | 2026-08-30 |
 
 ## 8. Runtime deviations from the plan
 
@@ -680,6 +698,8 @@ the units that touched it, so a later audit can attribute every diff.
 | D-050 | 10.1 | SYS-NET-001 can infer backlog delivery from `pg_backends` on a quiet target | The scenario holds one real monitored-PostgreSQL client connection across the outage so the metric shape remains present; the original timestamp-window assertion is unchanged | `pg_backends` is absent when no other client backend exists, making the former assertion nondeterministic |
 | D-051 | 10.1 | Push the deliberately broken test and verify hosted CI fails before reverting it | A local temporary failing test returned non-zero and was removed; no hosted run was started because this session has no push/CI credentials and the user did not authorize an external push | The failure-path contract was exercised locally without mutating the remote repository |
 | D-052 | 10.1 | The local integration matrix returns through one bounded wrapper call | The 8 child jobs all completed green; the orchestration wrapper timed out while collecting the final output | Tool RPC collection limit, not a test failure; child process inspection found no remaining jobs or failure markers |
+| D-053 | 10.2 | `systemd-analyze verify` can validate the units directly in the checkout | Direct host verification reports missing `/usr/local/bin` installation paths; the same units passed in an isolated temporary root populated with the built binaries | The repository is not installed as a system service during development; the declared production paths remain explicit and verified |
+| D-054 | 10.2 | SYS-DEPLOY-001 can query the planned instance collection endpoint | Added the missing `GET /api/v1/instances` route with the existing instance staleness semantics | The acceptance contract names the collection route while the pre-phase server exposed only instance-scoped routes |
 
 Phase-6 healthcheck blocker resolved: the agent health server is initialized
 before target connection retries; the subsequent `SYS-HARNESS-001` smoke passed
@@ -747,12 +767,12 @@ disagree with §1 and §4.
 | 7 — Advisor engine and rule packs | phase_08.md | `DONE` | 10/10 sub-phases closed; INT-ADV-001..008 green; advisor coverage 88.6%; global coverage 75.2%; phase commit `8891d6b` |
 | 8 — Command channel and query plans | phase_09.md | `DONE` | 11/11 sub-phases closed; INT-CMD-001..011, INT-PLAN-001/002 and SYS-PERM-001 green; coverage 75.0%, `internal/command` 100.0%; primary `agent:gpt5.6-luna`; phase commit `78dbf94` |
 | 9 — L3 end-to-end scenarios | phase_10.md | `DONE` | 8/8 sub-phases closed; all planned SYS-* scenarios green, including SYS-ARCH-001; primary `agent:gpt5.6-luna` |
-| 10 — Packaging, CI, final documentation | phase_11.md | `IN_PROGRESS` | 0/5 sub-phases closed; primary `agent:gpt5.6-luna` |
+| 10 — Packaging, CI, final documentation | phase_11.md | `IN_PROGRESS` | 1/5 sub-phases closed; primary `agent:gpt5.6-luna`; 10.2 deployment artefacts and SYS-DEPLOY-001 green |
 
 Status values: `TODO` · `IN_PROGRESS` · `DONE` · `SKIPPED` · `BLOCKED`
 A `SKIPPED` sub-phase or phase keeps its row and carries the reason.
 
-**9 of 11 phases `DONE`. Plan at 82% — phase 10 continues.**
+**9 of 11 phases `DONE`; phase 10 is 1/5 sub-phases closed. Plan at 84% — phase 10 continues.**
 
 ### Tests
 
@@ -876,7 +896,7 @@ throughout.
 | SYS-CMD-003 | system | 9 | `DONE` | phase 9 § 9.6 — at-most-once restart and stale result rejection; three full command-suite runs green |
 | SYS-CMD-004 | system | 9 | `DONE` | phase 9 § 9.6 — TTL expiry and audit state; three full command-suite runs green |
 | SYS-DEADLOCK-001 | system | 9 | `DONE` | phase 9 § 9.3 — three consecutive combined L3 runs |
-| SYS-DEPLOY-001 | system | 10 | `TODO` | phase 10 § 10.2 — Deploy artefacts |
+| SYS-DEPLOY-001 | system | 10 | `DONE` | phase 10 § 10.2 — root Compose stack healthy and deployment E2E returned one recent primary instance |
 | SYS-HARNESS-001 | system | 6 | `PASS` | phase 6 § 6.5 — healthy container startup and teardown smoke, exit 0 |
 | SYS-IDX-001 | system | 9 | `DONE` | phase 9 § 9.4 — unused index finding through the real L3 workload; three full-suite runs green |
 | SYS-IDX-002 | system | 9 | `DONE` | phase 9 § 9.4 — 5000-table cardinality budget, API truncation and relations-not-reported metadata; three full-suite runs green |

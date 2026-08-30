@@ -1,12 +1,23 @@
 [Unit]
-Description=pglens agent
-After=network.target
+Description=pglens PostgreSQL monitoring agent
+After=network-online.target
+Wants=network-online.target
+
 [Service]
+Type=simple
 ExecStart=/usr/local/bin/pglens-agent run --config /etc/pglens/agent.yaml
+EnvironmentFile=-/etc/pglens/agent.env
 StateDirectory=pglens
 DynamicUser=yes
+NoNewPrivileges=true
+PrivateTmp=true
 ProtectSystem=strict
-NoNewPrivileges=yes
+ProtectHome=true
 Restart=on-failure
+RestartSec=5
+
+# Host metrics need /proc and /sys readable; ProtectSystem=strict protects
+# writable system paths and does not prevent read access to these filesystems.
+
 [Install]
 WantedBy=multi-user.target

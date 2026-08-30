@@ -21,7 +21,13 @@ func LoadAlertConfig(getenv func(string) string, readFile func(string) ([]byte, 
 	if readFile == nil {
 		readFile = os.ReadFile
 	}
-	c := AlertConfig{Interval: 30 * time.Second, SlackURL: getenv("PGLENS_SLACK_WEBHOOK_URL"), WebhookURL: getenv("PGLENS_WEBHOOK_URL")}
+	// PGLENS_ALERT_SLACK_WEBHOOK_URL is the descriptive deployment name. Keep
+	// the original PGLENS_SLACK_WEBHOOK_URL as a backwards-compatible alias.
+	slackURL := getenv("PGLENS_ALERT_SLACK_WEBHOOK_URL")
+	if slackURL == "" {
+		slackURL = getenv("PGLENS_SLACK_WEBHOOK_URL")
+	}
+	c := AlertConfig{Interval: 30 * time.Second, SlackURL: slackURL, WebhookURL: getenv("PGLENS_WEBHOOK_URL")}
 	if raw := strings.TrimSpace(getenv("PGLENS_ALERT_INTERVAL")); raw != "" {
 		d, err := time.ParseDuration(raw)
 		if err != nil {
@@ -36,7 +42,11 @@ func LoadAlertConfig(getenv func(string) string, readFile func(string) ([]byte, 
 		}
 		c.Interval = d
 	}
-	if p := strings.TrimSpace(getenv("PGLENS_SLACK_WEBHOOK_URL_FILE")); p != "" {
+	slackFile := strings.TrimSpace(getenv("PGLENS_ALERT_SLACK_WEBHOOK_URL_FILE"))
+	if slackFile == "" {
+		slackFile = strings.TrimSpace(getenv("PGLENS_SLACK_WEBHOOK_URL_FILE"))
+	}
+	if p := slackFile; p != "" {
 		b, err := readFile(p)
 		if err != nil {
 			return AlertConfig{}, fmt.Errorf("read Slack webhook file: %w", err)

@@ -25,6 +25,34 @@ func TestConfig_WebhookFileTakesPrecedence(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "from-file", c.SlackURL)
 }
+
+func TestConfig_AlertSlackAlias(t *testing.T) {
+	c, err := LoadAlertConfig(func(k string) string {
+		if k == "PGLENS_ALERT_SLACK_WEBHOOK_URL" {
+			return "alert-inline"
+		}
+		if k == "PGLENS_SLACK_WEBHOOK_URL" {
+			return "legacy-inline"
+		}
+		return ""
+	}, nil)
+	require.NoError(t, err)
+	require.Equal(t, "alert-inline", c.SlackURL)
+}
+
+func TestConfig_AlertSlackFileAlias(t *testing.T) {
+	c, err := LoadAlertConfig(func(k string) string {
+		if k == "PGLENS_ALERT_SLACK_WEBHOOK_URL_FILE" {
+			return "/run/secrets/slack"
+		}
+		return ""
+	}, func(path string) ([]byte, error) {
+		require.Equal(t, "/run/secrets/slack", path)
+		return []byte("alert-file\n"), nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, "alert-file", c.SlackURL)
+}
 func TestConfig_InvalidIntervalIsRejected(t *testing.T) {
 	_, err := LoadAlertConfig(func(k string) string {
 		if k == "PGLENS_ALERT_INTERVAL" {

@@ -1,37 +1,50 @@
+# Copy this file to /etc/pglens/agent.yaml and replace the example DSN.
 server:
-  url: http://pglens-server:8080
-  token_file: /run/secrets/pglens_token
-identity_path: /var/lib/pglens/identity.json
-push_interval: 15s
+  url: http://pglens-server:8080 # Server base URL; use the real hostname outside Compose.
+  token_file: /run/secrets/pglens_token # Read the enrollment token from this file.
+identity_path: /var/lib/pglens/identity.json # Persistent identity; keep /var/lib/pglens on a volume.
+push_interval: 15s # Envelope upload cadence; default is 15s.
 
 host:
-  enabled: true
-  interval: 30s
-  proc_path: /proc
-  sys_path: /sys
-buffer:
-  path: /var/lib/pglens/buffer
-  max_size: 512MiB
-  max_age: 6h
+  enabled: true # Collect host metrics for local targets; default is true.
+  interval: 30s # Host scrape cadence; default is 30s.
+  proc_path: /proc # procfs path; use /host/proc when the container mounts the host tree.
+  sys_path: /sys # sysfs path; use /host/sys when the container mounts the host tree.
 
-# The command channel is enabled by default. Set enabled: false for a
-# strictly read-only agent that must never poll the server for commands.
+buffer:
+  path: /var/lib/pglens/buffer # Durable WAL-like sample buffer directory.
+  max_size: 512MiB # Maximum buffer size; default is 512MiB.
+  max_age: 6h # Oldest buffered sample; default is 6h.
+
+# Disable this to make the agent strictly read-only: it will not poll or run commands.
 commands:
-  enabled: true
+  enabled: true # Command polling; default is true, so set false for read-only operation.
 
 targets:
-  - name: pg-app
-    dsn: postgres://pglens@pg-app:5432/postgres?sslmode=require
-    cluster_name: pg-prod-eu
-    allow_explain_analyze: false
-    allow_signal: false
+  - name: timescaledb
+    dsn: postgres://pglens:pglens@timescaledb:5432/pglens?sslmode=disable # Replace for production.
+    cluster_name: pglens-example # Optional stable cluster label for this target.
+    host_local: false # Host metrics are unavailable for a remote target.
+    allow_explain_analyze: false # Keep false unless the target policy explicitly permits it.
+    allow_signal: false # Keep false unless pg_signal_backend and operator approval are present.
     databases:
-      include: ["app_.*"]
-      exclude: ["^template\\d$"]
-      max: 10
+      include: ["^pglens$"] # Monitor only this database in the self-contained example.
+      exclude: ["^template\\d$"] # Never monitor PostgreSQL template databases.
+      max: 10 # Maximum databases discovered per target; 0 means the default.
+
 checks:
-  activity: { interval: 10s, by_application: false }
-  # locks samples blocking sessions every 10 seconds at Tier 0
-  locks: { interval: 10s }
-  database_stats: { interval: 30s }
-  stat_statements: { interval: 60s, top_n: 50 }
+  activity: { interval: 10s, by_application: false } # Session state and wait groups.
+  locks: { interval: 10s } # Blocking/blocked lock tree at Tier 0.
+  table_stats: { interval: 5m, top_n: 50 } # Table access, tuple and vacuum statistics.
+  index_stats: { interval: 5m, top_n: 50 } # Index usage and size statistics.
+  vacuum_progress: { interval: 30s } # In-progress VACUUM counters.
+  bloat_estimate: { interval: 6h, top_n: 50 } # Bounded table/index bloat estimates.
+  settings: { interval: 1h } # Allowlisted PostgreSQL settings and restart flags.
+  wal: { interval: 15s } # WAL position and activity counters.
+  checkpointer: { interval: 30s } # Checkpoint and background-writer counters.
+  io: { interval: 30s } # PostgreSQL I/O counters (PG16+ when the view exists).
+  archiver: { interval: 1m } # WAL archiver counters and last activity.
+
+  # Existing checks not overridden above continue to use their code defaults.
+  database_stats: { interval: 30s } # Per-database transaction/cache counters.
+  stat_statements: { interval: 1m, top_n: 50 } # Top query counters when the extension is present.
