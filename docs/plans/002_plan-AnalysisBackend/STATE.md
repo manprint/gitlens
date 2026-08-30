@@ -2,7 +2,7 @@
 
 > **READ THIS FILE FIRST at the start of every session, before any other plan
 > file. OPEN a unit in §1 before touching code; CLOSE it after the gates pass.**
-> **Last updated:** 2026-08-30 (phase 9.7 opened) by `agent:gpt5.6-luna` | **Session:** 30
+> **Last updated:** 2026-08-30 (phase 9.8 opened) by `agent:gpt5.6-luna` | **Session:** 31
 
 ## 0. Protocol
 
@@ -49,13 +49,13 @@ work — a phase that looks blocked is a signal to read §9, not to skip ahead.
 ## 1. Current unit
 
 - **Type:** sub-phase
-- **ID:** `9.7`
+- **ID:** `9.8`
 - **Status:** `OPEN`
-- **Intent:** prove archiver failure visibility and the backup/archiving finding through L3.
+- **Intent:** close phase 9 documentation with contributor guidance and anti-flake rules.
 - **Phase:** 9 — L3 end-to-end scenarios ([phase_10.md](phase_10.md))
-- **Next action:** inspect the existing archiver check, findings API and harness controls, then implement phase_10.md §9.7 exactly.
+- **Next action:** update `README.md` and `CONTRIBUTING.md` for the five test levels and E2E contribution workflow, then run the documentation gates and close phase 9.
 - **Assigned:** `agent:gpt5.6-luna`
-- **Repo state:** branch `main`, phase 9.6 complete.
+- **Repo state:** branch `main`, phase 9.7 complete.
 
 ## 2. Feature context (self-contained recap)
 
@@ -200,6 +200,7 @@ The authoritative gate commands are the Makefile targets. These are identical to
 | 80 | sub-phase | 9.4 | agent:gpt5.6-luna | Added live vacuum, bloat, unused-index, relation-cardinality and duplicate-index L3 scenarios plus typed relation persistence/API/advisor support | `internal/check/table_stats.go`, `internal/check/index_stats.go`, `internal/check/bloat_estimate.go`, `internal/check/bloat_estimate.sql`, `internal/store/migrations/0011_relation_metrics.sql`, `internal/store/write.go`, `internal/server/pipeline.go`, `internal/server/api_relations.go`, `internal/advisor/snapshot.go`, `test/e2e/maintenance_test.go`, `test/e2e/scenarios/maintenance.yml`, `STATE.md` | all five SYS-VAC/BLOAT/IDX scenarios PASS in three consecutive full-suite runs; SYS-IDX-002 PASS 3/3; fmt/lint/build/test/vet and Docker images green | `6fefc91` |
 | 81 | sub-phase | 9.5 | agent:gpt5.6-luna | Added advisor snapshot completeness, persisted capability skips, degraded reasons and SYS-ADV-001..004 acceptance scenarios | `cmd/pglens-agent/run.go`, `internal/advisor/engine.go`, `internal/advisor/rules_config.go`, `internal/advisor/snapshot.go`, `internal/server/pipeline.go`, `internal/store/write.go`, `internal/wire/envelope.go`, `test/e2e/advisor_test.go`, `test/e2e/scenarios/advisor.yml`, `STATE.md` | all four advisor scenarios PASS in three consecutive full-suite runs; fmt/lint/build/test and rebuilt Docker images green | `ba41abb` |
 | 82 | sub-phase | 9.6 | agent:gpt5.6-luna | Added command-channel L3 acceptance for explain, signal, bloat, gate rejection, at-most-once restart and TTL expiry | `internal/agent/conn.go`, `internal/agent/exec_explain.go`, `internal/server/api_plans.go`, `internal/server/api_commands_integration_test.go`, `internal/server/api_plans_test.go`, `test/compose/base.yml`, `test/compose/topo-primary-standby.yml`, `test/compose/agent-container-primary-standby.yml`, `test/fixtures/agent-primary-standby.yaml`, `test/fixtures/sql/command_users.sql`, `test/harness/api.go`, `test/e2e/commands_test.go`, `test/e2e/scenarios/commands.yml`, `STATE.md` | SYS-CMD-001..004 PASS individually and in three consecutive command suites; fmt/lint/build/test/race/e2e compile/vet and Docker images green | `2f212a4` |
+| 83 | sub-phase | 9.7 | agent:gpt5.6-luna | Added SYS-ARCH-001 L3 acceptance for failing and repaired archiving, plus valid PostgreSQL setting-sentinel handling in the harness invariant | `test/e2e/archiving_test.go`, `test/e2e/scenarios/archiving.yml`, `test/fixtures/agent-standalone.yaml`, `test/harness/invariants.go`, `STATE.md` | SYS-ARCH-001 PASS in three consecutive runs; fmt/lint/build/test/e2e compile/vet and Docker images green | `0dcf4f4` |
 
 ## 5. Files touched
 
@@ -482,10 +483,15 @@ the units that touched it, so a later audit can attribute every diff.
 | `test/e2e/commands_test.go` | 9.6 | SYS-CMD-001..004 L3 acceptance scenarios |
 | `test/e2e/scenarios/commands.yml` | 9.6 | command scenario metadata |
 | `STATE.md` | 9.6 | phase close evidence and ledger |
+| `test/fixtures/agent-standalone.yaml` | 9.7 | faster settings and archiver intervals |
+| `test/harness/invariants.go` | 9.7 | valid PostgreSQL setting sentinels and metric-name diagnostics |
+| `test/e2e/archiving_test.go` | 9.7 | SYS-ARCH-001 L3 acceptance scenario |
+| `test/e2e/scenarios/archiving.yml` | 9.7 | archiving scenario metadata |
+| `STATE.md` | 9.7 | phase close evidence and ledger |
 
 ## 6. In-flight work
 
-`claimed — nothing written yet`
+`none — tree consistent`
 
 ## 7. Verification state
 
@@ -596,6 +602,13 @@ the units that touched it, so a later audit can attribute every diff.
 | phase9.6-suite-2 | `go test -tags=e2e -timeout=15m ./test/e2e -run '^TestFull_Command' -count=1` | PASS — all four command scenarios green in 176.269s | 2026-08-30 |
 | phase9.6-suite-3 | `go test -tags=e2e -timeout=15m ./test/e2e -run '^TestFull_Command' -count=1` | PASS — all four command scenarios green in 174.736s | 2026-08-30 |
 | phase9.6-gates | `make fmt-check && make lint && make build && make test && go test -tags=e2e ./test/e2e -run '^$' && go vet -tags=e2e ./test/e2e/...` | PASS — format/lint/build/race/shuffle/unit/e2e compile/vet green; Docker images rebuilt before L3 | 2026-08-30 |
+| phase9.7-static | `go vet -tags=e2e ./test/e2e/...` | PASS — e2e vet green | 2026-08-30 |
+| phase9.7-images | `make build-images` | PASS — agent and server dev images rebuilt before L3 | 2026-08-30 |
+| phase9.7-compile | `go test -tags=e2e ./test/e2e -run '^$'` | PASS — e2e package compiles | 2026-08-30 |
+| phase9.7-focused | `go test -tags=e2e -timeout=8m ./test/e2e -run '^TestFull_Archiving$' -count=1 -v` | PASS — SYS-ARCH-001 in 57.09s | 2026-08-30 |
+| phase9.7-run-1 | `go test -tags=e2e -timeout=8m ./test/e2e -run '^TestFull_Archiving$' -count=1 -v` | PASS — SYS-ARCH-001 in 51.935s | 2026-08-30 |
+| phase9.7-run-2 | `go test -tags=e2e -timeout=8m ./test/e2e -run '^TestFull_Archiving$' -count=1 -v` | PASS — SYS-ARCH-001 in 51.912s | 2026-08-30 |
+| phase9.7-run-3 | `go test -tags=e2e -timeout=8m ./test/e2e -run '^TestFull_Archiving$' -count=1 -v` | PASS — SYS-ARCH-001 in 47.124s | 2026-08-30 |
 
 ## 8. Runtime deviations from the plan
 
@@ -611,6 +624,8 @@ the units that touched it, so a later audit can attribute every diff.
 | D-044 | 9.6 | Use the assigned target tiers for command acceptance | Primary/standby permissions are derived from the fixture's real PostgreSQL role memberships: primary uses `pglens_t2`, standby uses the default T0 role | The command flags and database grants must be exercised by the live agent; no permission tier is simulated in the test |
 | D-045 | 9.6 | Make the at-most-once restart window observable with a long bloat command | The scenario seeds a 500k-row table and holds an `ACCESS EXCLUSIVE` lock after claim before killing the agent | A controlled live lock makes claim/in-flight/restart deterministic while still exercising the real pgstattuple path |
 | D-046 | 9.6 | Configure command TTL with the command worker | `PGLENS_COMMAND_TTL` is set on the server service that owns `CommandService`, not on the agent container | TTL expiry is server-side state and the acceptance test verifies the actual production owner |
+| D-047 | 9.7 | Use the assigned target pool after PostgreSQL restart | Post-restart queries, workload and repair use `psql` through `e.Exec` inside the PostgreSQL container; the pool is reset but not used for post-restart checks | Compose restart can reassign the published host port; in-container execution makes control independent of a stale host DSN |
+| D-048 | 9.7 | Assert I-2 across generic metrics | I-2 excludes only `pg_setting_bytes` and `pg_setting_seconds` from negative values and names the metric in failures | PostgreSQL `temp_file_limit=-1` is a valid gauge sentinel; counters/rates and synthetic `bad_metric` remain covered |
 | D-008 | 1.4 | Coverage gate remains green after each phase | Initial store coverage correction left global coverage at 74.9%; an additional error-path test is pending verification | New planned persistence paths lowered global coverage by 0.1 percentage point |
 | D-011 | 1.6–1.8 | Close the phase only after all required gates are green | Added focused in-scope tests for alert API, source constructors, engine interval normalization, and channel names; final coverage is 75.0% and all phase gates pass | Current alert/server implementation added uncovered paths; threshold and package scope remain unchanged |
 | D-012 | 1.6–1.8 | Test constructors with nil dependencies | Initial constructor test called through a typed-nil pool and panicked; removed the invalid database call while retaining constructor/kind coverage | Go interface typed-nil behavior; corrected and verified |
@@ -655,6 +670,9 @@ on port 9187 with clean teardown. No external blocker remains for phase 6.
 
 Phase 9.6 has no open blocker: SYS-CMD-001..004 passed individually and in
 three consecutive full command-suite runs, with the repository gates green.
+Phase 9.7 has no open blocker: SYS-ARCH-001 passed in three consecutive runs;
+the test uses in-container PostgreSQL control after restart and documents the
+archiver-versus-backup verification boundary.
 
 ## 9. Blockers and open questions
 
@@ -709,7 +727,7 @@ disagree with §1 and §4.
 | 6 — Host and container metrics | phase_07.md | `DONE` | 6/6 sub-phases closed; INT-HOST-001..005 and SYS-HARNESS-001 focused validation green; coverage 75.1%; phase commit `436ac99`; primary `agent:gpt5.6-luna` |
 | 7 — Advisor engine and rule packs | phase_08.md | `DONE` | 10/10 sub-phases closed; INT-ADV-001..008 green; advisor coverage 88.6%; global coverage 75.2%; phase commit `8891d6b` |
 | 8 — Command channel and query plans | phase_09.md | `DONE` | 11/11 sub-phases closed; INT-CMD-001..011, INT-PLAN-001/002 and SYS-PERM-001 green; coverage 75.0%, `internal/command` 100.0%; primary `agent:gpt5.6-luna`; phase commit `78dbf94` |
-| 9 — L3 end-to-end scenarios | phase_10.md | `IN_PROGRESS` | 6/8 sub-phases closed; SYS-REPL-006, SYS-ALERT-001..004, SYS-LOCK-001, SYS-DEADLOCK-001, SYS-VAC/BLOAT/IDX-001..003, SYS-ADV-001..004 and SYS-CMD-001..004 green; primary `agent:gpt5.6-luna` |
+| 9 — L3 end-to-end scenarios | phase_10.md | `IN_PROGRESS` | 7/8 sub-phases closed; SYS-REPL-006, SYS-ALERT-001..004, SYS-LOCK-001, SYS-DEADLOCK-001, SYS-VAC/BLOAT/IDX-001..003, SYS-ADV-001..004, SYS-CMD-001..004 and SYS-ARCH-001 green; primary `agent:gpt5.6-luna` |
 | 10 — Packaging, CI, final documentation | phase_11.md | `TODO` | 0/5 sub-phases closed; primary `agent:gpt5.6-luna` |
 
 Status values: `TODO` · `IN_PROGRESS` · `DONE` · `SKIPPED` · `BLOCKED`
@@ -832,7 +850,7 @@ throughout.
 | SYS-ALERT-002 | system | 9 | `DONE` | phase 9 § 9.2 — Webhook retry and once-only delivery |
 | SYS-ALERT-003 | system | 9 | `DONE` | phase 9 § 9.2 — Leader failover deduplication |
 | SYS-ALERT-004 | system | 9 | `DONE` | phase 9 § 9.2 — Silence suppresses notifications |
-| SYS-ARCH-001 | system | 9 | `TODO` | phase 9 § 9.7 — Backup and archiving |
+| SYS-ARCH-001 | system | 9 | `DONE` | phase 9 § 9.7 — failing and repaired archiving through the API; three consecutive runs; backup/restore proof explicitly out of scope |
 | SYS-BLOAT-001 | system | 9 | `DONE` | phase 9 § 9.4 — estimate bloat and optional pgstattuple method through the relation API; three full-suite runs green |
 | SYS-CMD-001 | system | 9 | `DONE` | phase 9 § 9.6 — explain, signal and bloat command acceptance; three full command-suite runs green |
 | SYS-CMD-002 | system | 9 | `DONE` | phase 9 § 9.6 — gate rejection and permission behavior; three full command-suite runs green |
