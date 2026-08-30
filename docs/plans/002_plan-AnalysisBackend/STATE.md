@@ -2,7 +2,7 @@
 
 > **READ THIS FILE FIRST at the start of every session, before any other plan
 > file. OPEN a unit in §1 before touching code; CLOSE it after the gates pass.**
-> **Last updated:** 2026-08-30 (phase 9.6 opened) by `agent:gpt5.6-luna` | **Session:** 29
+> **Last updated:** 2026-08-30 (phase 9.7 opened) by `agent:gpt5.6-luna` | **Session:** 30
 
 ## 0. Protocol
 
@@ -49,13 +49,13 @@ work — a phase that looks blocked is a signal to read §9, not to skip ahead.
 ## 1. Current unit
 
 - **Type:** sub-phase
-- **ID:** `9.6`
+- **ID:** `9.7`
 - **Status:** `OPEN`
-- **Intent:** prove command enqueue, gate rejection, at-most-once restart and TTL expiry through L3.
+- **Intent:** prove archiver failure visibility and the backup/archiving finding through L3.
 - **Phase:** 9 — L3 end-to-end scenarios ([phase_10.md](phase_10.md))
-- **Next action:** inspect the existing command API, dispatcher and harness restart controls, then implement phase_10.md §9.6 exactly.
+- **Next action:** inspect the existing archiver check, findings API and harness controls, then implement phase_10.md §9.7 exactly.
 - **Assigned:** `agent:gpt5.6-luna`
-- **Repo state:** branch `main`, phase 9.5 complete.
+- **Repo state:** branch `main`, phase 9.6 complete.
 
 ## 2. Feature context (self-contained recap)
 
@@ -199,6 +199,7 @@ The authoritative gate commands are the Makefile targets. These are identical to
 | 79 | sub-phase | 9.3 | agent:gpt5.6-luna | Added real lock-contention and deadlock scenarios with deterministic cleanup, empty lock-tree snapshots, database label propagation and event-aware deadlock alert sourcing | `internal/alert/source_sql.go`, `internal/check/locks.go`, `internal/check/locks_test.go`, `internal/server/pipeline.go`, `test/e2e/contention_test.go`, `test/e2e/scenarios/contention.yml`, `STATE.md` | fmt/lint/build/unit/vet, rebuilt Docker images, and three consecutive combined SYS-LOCK-001/SYS-DEADLOCK-001 L3 runs PASS | phase-9.3 close |
 | 80 | sub-phase | 9.4 | agent:gpt5.6-luna | Added live vacuum, bloat, unused-index, relation-cardinality and duplicate-index L3 scenarios plus typed relation persistence/API/advisor support | `internal/check/table_stats.go`, `internal/check/index_stats.go`, `internal/check/bloat_estimate.go`, `internal/check/bloat_estimate.sql`, `internal/store/migrations/0011_relation_metrics.sql`, `internal/store/write.go`, `internal/server/pipeline.go`, `internal/server/api_relations.go`, `internal/advisor/snapshot.go`, `test/e2e/maintenance_test.go`, `test/e2e/scenarios/maintenance.yml`, `STATE.md` | all five SYS-VAC/BLOAT/IDX scenarios PASS in three consecutive full-suite runs; SYS-IDX-002 PASS 3/3; fmt/lint/build/test/vet and Docker images green | `6fefc91` |
 | 81 | sub-phase | 9.5 | agent:gpt5.6-luna | Added advisor snapshot completeness, persisted capability skips, degraded reasons and SYS-ADV-001..004 acceptance scenarios | `cmd/pglens-agent/run.go`, `internal/advisor/engine.go`, `internal/advisor/rules_config.go`, `internal/advisor/snapshot.go`, `internal/server/pipeline.go`, `internal/store/write.go`, `internal/wire/envelope.go`, `test/e2e/advisor_test.go`, `test/e2e/scenarios/advisor.yml`, `STATE.md` | all four advisor scenarios PASS in three consecutive full-suite runs; fmt/lint/build/test and rebuilt Docker images green | `ba41abb` |
+| 82 | sub-phase | 9.6 | agent:gpt5.6-luna | Added command-channel L3 acceptance for explain, signal, bloat, gate rejection, at-most-once restart and TTL expiry | `internal/agent/conn.go`, `internal/agent/exec_explain.go`, `internal/server/api_plans.go`, `internal/server/api_commands_integration_test.go`, `internal/server/api_plans_test.go`, `test/compose/base.yml`, `test/compose/topo-primary-standby.yml`, `test/compose/agent-container-primary-standby.yml`, `test/fixtures/agent-primary-standby.yaml`, `test/fixtures/sql/command_users.sql`, `test/harness/api.go`, `test/e2e/commands_test.go`, `test/e2e/scenarios/commands.yml`, `STATE.md` | SYS-CMD-001..004 PASS individually and in three consecutive command suites; fmt/lint/build/test/race/e2e compile/vet and Docker images green | `2f212a4` |
 
 ## 5. Files touched
 
@@ -467,6 +468,20 @@ the units that touched it, so a later audit can attribute every diff.
 | `internal/wire/envelope.go` | 9.5 | validate check-skip facts |
 | `test/e2e/advisor_test.go` | 9.5 | SYS-ADV-001..004 L3 advisor acceptance scenarios |
 | `test/e2e/scenarios/advisor.yml` | 9.5 | advisor scenario metadata |
+| `internal/agent/conn.go` | 9.6 | omitted command database uses the shared connection |
+| `internal/agent/exec_explain.go` | 9.6 | exclude EXPLAIN self-statements from query-plan lookup |
+| `internal/server/api_plans.go` | 9.6 | newest-first changed-marker contract |
+| `internal/server/api_commands_integration_test.go` | 9.6 | changed-marker regression expectations |
+| `internal/server/api_plans_test.go` | 9.6 | changed-marker unit regression |
+| `test/compose/base.yml` | 9.6 | command TTL on the server service |
+| `test/compose/topo-primary-standby.yml` | 9.6 | command-role fixture mount |
+| `test/compose/agent-container-primary-standby.yml` | 9.6 | primary/standby agent fixture wiring |
+| `test/fixtures/agent-primary-standby.yaml` | 9.6 | T2 primary and T0 standby command targets |
+| `test/fixtures/sql/command_users.sql` | 9.6 | pglens_t2 grants and pgstattuple support |
+| `test/harness/api.go` | 9.6 | lossless queryid decoding and stale-result headers |
+| `test/e2e/commands_test.go` | 9.6 | SYS-CMD-001..004 L3 acceptance scenarios |
+| `test/e2e/scenarios/commands.yml` | 9.6 | command scenario metadata |
+| `STATE.md` | 9.6 | phase close evidence and ledger |
 
 ## 6. In-flight work
 
@@ -576,6 +591,11 @@ the units that touched it, so a later audit can attribute every diff.
 | phase9.5-full-suite-1 | `go test -tags=e2e -timeout=20m ./test/e2e -run '^TestFull_Advisor' -count=1` | PASS — all four advisor scenarios green in 133.715s | 2026-08-30 |
 | phase9.5-full-suite-2 | `go test -tags=e2e -timeout=20m ./test/e2e -run '^TestFull_Advisor' -count=1` | PASS — all four advisor scenarios green in 133.754s | 2026-08-30 |
 | phase9.5-full-suite-3 | `go test -tags=e2e -timeout=20m ./test/e2e -run '^TestFull_Advisor' -count=1` | PASS — all four advisor scenarios green in 133.633s | 2026-08-30 |
+| phase9.6-command-focused | `go test -tags=e2e -timeout=15m ./test/e2e -run '^(TestFull_CommandExplain|TestFull_CommandSignal|TestFull_CommandBloat|TestFull_CommandRestart)$' -count=1` | PASS — SYS-CMD-001..004 individually green | 2026-08-30 |
+| phase9.6-suite-1 | `go test -tags=e2e -timeout=15m ./test/e2e -run '^TestFull_Command' -count=1` | PASS — all four command scenarios green in 170.267s | 2026-08-30 |
+| phase9.6-suite-2 | `go test -tags=e2e -timeout=15m ./test/e2e -run '^TestFull_Command' -count=1` | PASS — all four command scenarios green in 176.269s | 2026-08-30 |
+| phase9.6-suite-3 | `go test -tags=e2e -timeout=15m ./test/e2e -run '^TestFull_Command' -count=1` | PASS — all four command scenarios green in 174.736s | 2026-08-30 |
+| phase9.6-gates | `make fmt-check && make lint && make build && make test && go test -tags=e2e ./test/e2e -run '^$' && go vet -tags=e2e ./test/e2e/...` | PASS — format/lint/build/race/shuffle/unit/e2e compile/vet green; Docker images rebuilt before L3 | 2026-08-30 |
 
 ## 8. Runtime deviations from the plan
 
@@ -588,6 +608,9 @@ the units that touched it, so a later audit can attribute every diff.
 | D-005 | 0.7 | Verify README unchanged because phase 0 has no user-visible behavior | Removed one existing unshipped alerting claim, because it contradicted phase 0's shipped behavior and the README accuracy gate | Corrected documentation without adding product behavior |
 | D-006 | 1.2 → 1.3 | Complete and close each unit before starting the next | Notifier files were created before 1.2's final documentation close; recorded as in-flight 1.3 work and kept isolated from the 1.2 ledger row | User interruption occurred during the L2 gate; no 1.2 source scope was changed |
 | D-007 | 1.3 → 1.4 | Complete and close each unit before starting the next | `store.go` was created before the 1.3 documentation close; it is recorded as the open 1.4 in-flight implementation and will be verified before closure | Continued execution after the user-requested resume exposed the procedural overlap; no scope was silently dropped |
+| D-044 | 9.6 | Use the assigned target tiers for command acceptance | Primary/standby permissions are derived from the fixture's real PostgreSQL role memberships: primary uses `pglens_t2`, standby uses the default T0 role | The command flags and database grants must be exercised by the live agent; no permission tier is simulated in the test |
+| D-045 | 9.6 | Make the at-most-once restart window observable with a long bloat command | The scenario seeds a 500k-row table and holds an `ACCESS EXCLUSIVE` lock after claim before killing the agent | A controlled live lock makes claim/in-flight/restart deterministic while still exercising the real pgstattuple path |
+| D-046 | 9.6 | Configure command TTL with the command worker | `PGLENS_COMMAND_TTL` is set on the server service that owns `CommandService`, not on the agent container | TTL expiry is server-side state and the acceptance test verifies the actual production owner |
 | D-008 | 1.4 | Coverage gate remains green after each phase | Initial store coverage correction left global coverage at 74.9%; an additional error-path test is pending verification | New planned persistence paths lowered global coverage by 0.1 percentage point |
 | D-011 | 1.6–1.8 | Close the phase only after all required gates are green | Added focused in-scope tests for alert API, source constructors, engine interval normalization, and channel names; final coverage is 75.0% and all phase gates pass | Current alert/server implementation added uncovered paths; threshold and package scope remain unchanged |
 | D-012 | 1.6–1.8 | Test constructors with nil dependencies | Initial constructor test called through a typed-nil pool and panicked; removed the invalid database call while retaining constructor/kind coverage | Go interface typed-nil behavior; corrected and verified |
@@ -629,6 +652,9 @@ the units that touched it, so a later audit can attribute every diff.
 Phase-6 healthcheck blocker resolved: the agent health server is initialized
 before target connection retries; the subsequent `SYS-HARNESS-001` smoke passed
 on port 9187 with clean teardown. No external blocker remains for phase 6.
+
+Phase 9.6 has no open blocker: SYS-CMD-001..004 passed individually and in
+three consecutive full command-suite runs, with the repository gates green.
 
 ## 9. Blockers and open questions
 
@@ -683,7 +709,7 @@ disagree with §1 and §4.
 | 6 — Host and container metrics | phase_07.md | `DONE` | 6/6 sub-phases closed; INT-HOST-001..005 and SYS-HARNESS-001 focused validation green; coverage 75.1%; phase commit `436ac99`; primary `agent:gpt5.6-luna` |
 | 7 — Advisor engine and rule packs | phase_08.md | `DONE` | 10/10 sub-phases closed; INT-ADV-001..008 green; advisor coverage 88.6%; global coverage 75.2%; phase commit `8891d6b` |
 | 8 — Command channel and query plans | phase_09.md | `DONE` | 11/11 sub-phases closed; INT-CMD-001..011, INT-PLAN-001/002 and SYS-PERM-001 green; coverage 75.0%, `internal/command` 100.0%; primary `agent:gpt5.6-luna`; phase commit `78dbf94` |
-| 9 — L3 end-to-end scenarios | phase_10.md | `IN_PROGRESS` | 5/8 sub-phases closed; SYS-REPL-006, SYS-ALERT-001..004, SYS-LOCK-001, SYS-DEADLOCK-001, SYS-VAC/BLOAT/IDX-001..003 and SYS-ADV-001..004 green; primary `agent:gpt5.6-luna` |
+| 9 — L3 end-to-end scenarios | phase_10.md | `IN_PROGRESS` | 6/8 sub-phases closed; SYS-REPL-006, SYS-ALERT-001..004, SYS-LOCK-001, SYS-DEADLOCK-001, SYS-VAC/BLOAT/IDX-001..003, SYS-ADV-001..004 and SYS-CMD-001..004 green; primary `agent:gpt5.6-luna` |
 | 10 — Packaging, CI, final documentation | phase_11.md | `TODO` | 0/5 sub-phases closed; primary `agent:gpt5.6-luna` |
 
 Status values: `TODO` · `IN_PROGRESS` · `DONE` · `SKIPPED` · `BLOCKED`
@@ -808,10 +834,10 @@ throughout.
 | SYS-ALERT-004 | system | 9 | `DONE` | phase 9 § 9.2 — Silence suppresses notifications |
 | SYS-ARCH-001 | system | 9 | `TODO` | phase 9 § 9.7 — Backup and archiving |
 | SYS-BLOAT-001 | system | 9 | `DONE` | phase 9 § 9.4 — estimate bloat and optional pgstattuple method through the relation API; three full-suite runs green |
-| SYS-CMD-001 | system | 8 | `TODO` | phase 8 § 8.5 — Agent-side dispatcher; end-to-end coverage is deferred to phase 9 as specified |
-| SYS-CMD-002 | system | 9 | `TODO` | phase 9 § 9.6 — Command channel acceptance |
-| SYS-CMD-003 | system | 9 | `TODO` | phase 9 § 9.6 — Command channel acceptance |
-| SYS-CMD-004 | system | 9 | `TODO` | phase 9 § 9.6 — Command channel acceptance |
+| SYS-CMD-001 | system | 9 | `DONE` | phase 9 § 9.6 — explain, signal and bloat command acceptance; three full command-suite runs green |
+| SYS-CMD-002 | system | 9 | `DONE` | phase 9 § 9.6 — gate rejection and permission behavior; three full command-suite runs green |
+| SYS-CMD-003 | system | 9 | `DONE` | phase 9 § 9.6 — at-most-once restart and stale result rejection; three full command-suite runs green |
+| SYS-CMD-004 | system | 9 | `DONE` | phase 9 § 9.6 — TTL expiry and audit state; three full command-suite runs green |
 | SYS-DEADLOCK-001 | system | 9 | `DONE` | phase 9 § 9.3 — three consecutive combined L3 runs |
 | SYS-DEPLOY-001 | system | 10 | `TODO` | phase 10 § 10.2 — Deploy artefacts |
 | SYS-HARNESS-001 | system | 6 | `PASS` | phase 6 § 6.5 — healthy container startup and teardown smoke, exit 0 |
