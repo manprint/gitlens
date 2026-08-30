@@ -72,6 +72,11 @@ func TestActivity_ConnectionsUsedRatio(t *testing.T) {
 	t.Fatal("connection ratio missing")
 }
 
+func TestActivity_StateAgeClampedAtZero(t *testing.T) {
+	res := activityCheckResult(nil, "", false, nil, nil, []activityGroup{{Label: "active", Value: -0.000019}}, 0, 0, 0)
+	require.Equal(t, 0.0, metricValue(res, "pg_max_state_age_seconds", map[string]string{"state": "active"}))
+}
+
 func TestActivity_ByDatabaseIsBounded(t *testing.T) {
 	rows := make([]activityGroup, 12)
 	for i := range rows {

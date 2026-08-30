@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,7 +21,9 @@ func TestAlertAPI_INT_ALERTAPI_001_SilenceLifecycle(t *testing.T) {
 	pool := getSharedPool(t)
 	truncateAll(t, pool)
 	r := alertRouter(NewAlertAPI(pool, alert.NewPgStore(pool)))
-	body := `{"matchers":[{"name":"rule_id","value":"agent_down"}],"reason":"maintenance","starts_at":"2026-08-29T00:00:00Z","ends_at":"2026-08-30T00:00:00Z"}`
+	now := time.Now().UTC()
+	body := fmt.Sprintf(`{"matchers":[{"name":"rule_id","value":"agent_down"}],"reason":"maintenance","starts_at":%q,"ends_at":%q}`,
+		now.Add(-time.Hour).Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/silences", strings.NewReader(body)))
 	require.Equal(t, http.StatusCreated, w.Code)

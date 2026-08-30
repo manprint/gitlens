@@ -29,6 +29,12 @@ func TestTableStats_NullLastAutovacuumEmitsNothing(t *testing.T) {
 	}
 }
 
+func TestTableStats_EmptyTableEmitsZeroDeadTupleRatio(t *testing.T) {
+	r := tableStatsRow{Schema: "public", Relation: "empty"}
+	result := tableStatsResult([]cardinality.Candidate{{Key: "public.empty"}}, map[string]tableStatsRow{"public.empty": r}, time.Now())
+	require.Equal(t, 0.0, metricValue(result, "pg_table_dead_tuple_ratio", map[string]string{"schemaname": "public", "relname": "empty"}))
+}
+
 func TestTableStats_CounterGaugeClassification(t *testing.T) {
 	r := tableStatsRow{Schema: "public", Relation: "orders", SeqScan: 1, NLiveTup: 2}
 	result := tableStatsResult([]cardinality.Candidate{{Key: "public.orders"}}, map[string]tableStatsRow{"public.orders": r}, time.Now())

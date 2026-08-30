@@ -58,7 +58,7 @@ func (a *API) handleTables(w http.ResponseWriter, r *http.Request) {
 		case "seq_scan":
 			orderExpr = "seq_scan DESC NULLS LAST"
 		}
-		rows, e := a.pool.Query(r.Context(), "SELECT schemaname,relname,n_live_tup,n_dead_tup,dead_tuple_ratio,last_vacuum_age_seconds,total_bytes,seq_scan,ts FROM metrics_tables WHERE instance_id=$1 AND ts >= now()-interval '15 minutes' ORDER BY "+orderExpr+" LIMIT $2", id, relationLimit(r))
+		rows, e := a.pool.Query(r.Context(), "SELECT schemaname,relname,COALESCE(n_live_tup,0),COALESCE(n_dead_tup,0),dead_tuple_ratio,last_vacuum_age_seconds,COALESCE(total_bytes,0),COALESCE(seq_scan,0),ts FROM metrics_tables WHERE instance_id=$1 AND ts >= now()-interval '15 minutes' ORDER BY "+orderExpr+" LIMIT $2", id, relationLimit(r))
 		if e == nil {
 			defer rows.Close()
 			for rows.Next() {

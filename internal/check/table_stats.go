@@ -141,9 +141,15 @@ func tableStatsResult(selected []cardinality.Candidate, rows map[string]tableSta
 		} {
 			add(m.name, m.value, pgtype.KindGauge)
 		}
+		deadTupleRatio := 0.0
 		if r.NLiveTup > 0 {
-			add("dead_tuple_ratio", float64(r.NDeadTup)/float64(r.NLiveTup), pgtype.KindGauge)
+			deadTupleRatio = float64(r.NDeadTup) / float64(r.NLiveTup)
 		}
+		// Keep the typed relation contract dense even for an empty table:
+		// the ratio is defined as zero when there are no live tuples, rather
+		// than being persisted as NULL and making consumers handle a missing
+		// metric on an otherwise valid table row.
+		add("dead_tuple_ratio", deadTupleRatio, pgtype.KindGauge)
 		for _, m := range []struct {
 			name  string
 			value *time.Time

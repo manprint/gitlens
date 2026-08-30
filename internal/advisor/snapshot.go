@@ -8,10 +8,15 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/manprint/pglens/internal/pgtype"
 )
+
+type snapshotDB interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
 
 type Fact struct {
 	Key        string
@@ -111,7 +116,7 @@ func (s *Snapshot) Metric(name string, labels map[string]string) (float64, bool)
 // LoadSnapshot obtains the instance identity in one bounded query. Additional
 // snapshot sections are populated by the advisor loaders as they are enabled;
 // an empty section is intentionally distinguishable from a zero-valued fact.
-func LoadSnapshot(ctx context.Context, pool *pgxpool.Pool, instanceID uuid.UUID, now time.Time) (*Snapshot, error) {
+func LoadSnapshot(ctx context.Context, pool snapshotDB, instanceID uuid.UUID, now time.Time) (*Snapshot, error) {
 	s := &Snapshot{
 		Now: now, InstanceID: instanceID, PermTier: pgtype.TierReadOnly,
 		Metrics: map[string]map[string]float64{}, Facts: map[string]map[string]Fact{},
@@ -162,7 +167,7 @@ func LoadSnapshot(ctx context.Context, pool *pgxpool.Pool, instanceID uuid.UUID,
 // Older isolated advisor fixtures may not have migration 0007 installed; in
 // that case the relation inputs remain unavailable and the engine degrades the
 // affected rules as designed.
-func loadRelationSnapshot(ctx context.Context, pool *pgxpool.Pool, s *Snapshot, now time.Time) error {
+func loadRelationSnapshot(ctx context.Context, pool snapshotDB, s *Snapshot, now time.Time) error {
 	if err := loadTables(ctx, pool, s, now); err != nil {
 		if !isOptionalSnapshotError(err) {
 			return err
@@ -194,7 +199,7 @@ func isOptionalSnapshotError(err error) bool {
 	return pgErr.Code == "42P01" || pgErr.Code == "42703"
 }
 
-func loadMetrics(ctx context.Context, pool *pgxpool.Pool, s *Snapshot, now time.Time) error {
+func loadMetrics(ctx context.Context, pool snapshotDB, s *Snapshot, now time.Time) error {
 	rows, err := pool.Query(ctx, `SELECT DISTINCT ON (metric, labels)
 		metric, labels, value
 		FROM metrics
@@ -266,7 +271,7 @@ func hostSourceName(value float64) string {
 	}
 }
 
-func loadFacts(ctx context.Context, pool *pgxpool.Pool, s *Snapshot) error {
+func loadFacts(ctx context.Context, pool snapshotDB, s *Snapshot) error {
 	rows, err := pool.Query(ctx, `SELECT kind, key, labels, COALESCE(value_text, ''), last_seen
 		FROM object_facts
 		WHERE tenant_id='default' AND instance_id=$1`, s.InstanceID)
@@ -309,7 +314,7 @@ func loadFacts(ctx context.Context, pool *pgxpool.Pool, s *Snapshot) error {
 	return rows.Err()
 }
 
-func loadStatements(ctx context.Context, pool *pgxpool.Pool, s *Snapshot, now time.Time) error {
+func loadStatements(ctx context.Context, pool snapshotDB, s *Snapshot, now time.Time) error {
 	rows, err := pool.Query(ctx, `SELECT DISTINCT ON (datname, queryid)
 		datname, queryid, COALESCE(calls_rate, 0), COALESCE(exec_time_rate_ms, 0),
 		COALESCE(shared_blks_read_rate, 0), COALESCE(shared_blks_hit_rate, 0)
@@ -339,7 +344,7 @@ func loadStatements(ctx context.Context, pool *pgxpool.Pool, s *Snapshot, now ti
 	return rows.Err()
 }
 
-func loadBaseline(ctx context.Context, pool *pgxpool.Pool, s *Snapshot, now time.Time) error {
+func loadBaseline(ctx context.Context, pool snapshotDB, s *Snapshot, now time.Time) error {
 	rows, err := pool.Query(ctx, `SELECT queryid,
 		percentile_cont(0.5) WITHIN GROUP (ORDER BY CASE WHEN calls_rate > 0 THEN exec_time_rate_ms / calls_rate ELSE 0 END)
 		FROM metrics_statements
@@ -365,7 +370,7 @@ func loadBaseline(ctx context.Context, pool *pgxpool.Pool, s *Snapshot, now time
 	return nil
 }
 
-func loadSiblings(ctx context.Context, pool *pgxpool.Pool, s *Snapshot) error {
+func loadSiblings(ctx context.Context, pool snapshotDB, s *Snapshot) error {
 	rows, err := pool.Query(ctx, `SELECT i.instance_id, i.role, f.kind, f.key,
 		COALESCE(f.value_text, ''), COALESCE(f.labels->>'def_hash', '')
 		FROM instances i
@@ -412,7 +417,7 @@ func loadSiblings(ctx context.Context, pool *pgxpool.Pool, s *Snapshot) error {
 	return nil
 }
 
-func loadTables(ctx context.Context, pool *pgxpool.Pool, s *Snapshot, now time.Time) error {
+func loadTables(ctx context.Context, pool snapshotDB, s *Snapshot, now time.Time) error {
 	rows, err := pool.Query(ctx, `SELECT schemaname, relname,
 		COALESCE(n_live_tup, 0)::float8, COALESCE(n_dead_tup, 0)::float8,
 		COALESCE(n_mod_since_analyze, 0)::float8, last_autovacuum, last_vacuum,
@@ -439,7 +444,7 @@ func loadTables(ctx context.Context, pool *pgxpool.Pool, s *Snapshot, now time.T
 	return rows.Err()
 }
 
-func loadIndexes(ctx context.Context, pool *pgxpool.Pool, s *Snapshot, now time.Time) error {
+func loadIndexes(ctx context.Context, pool snapshotDB, s *Snapshot, now time.Time) error {
 	rows, err := pool.Query(ctx, `WITH latest AS (
 		SELECT DISTINCT ON (datname, schemaname, indexrelname)
 			datname, schemaname, relname, indexrelname,
@@ -481,7 +486,7 @@ func loadIndexes(ctx context.Context, pool *pgxpool.Pool, s *Snapshot, now time.
 	return rows.Err()
 }
 
-func loadIndexFacts(ctx context.Context, pool *pgxpool.Pool, s *Snapshot) error {
+func loadIndexFacts(ctx context.Context, pool snapshotDB, s *Snapshot) error {
 	rows, err := pool.Query(ctx, `SELECT key, COALESCE(value_text, ''), COALESCE(labels->>'def_hash', '') FROM object_facts WHERE tenant_id='default' AND instance_id=$1 AND kind='index_def'`, s.InstanceID)
 	if err != nil {
 		return err
@@ -514,7 +519,7 @@ func loadIndexFacts(ctx context.Context, pool *pgxpool.Pool, s *Snapshot) error 
 	return nil
 }
 
-func loadBloat(ctx context.Context, pool *pgxpool.Pool, s *Snapshot, now time.Time) error {
+func loadBloat(ctx context.Context, pool snapshotDB, s *Snapshot, now time.Time) error {
 	rows, err := pool.Query(ctx, `SELECT DISTINCT ON (datname, schemaname, relname, indexrelname, object_kind)
 		datname, schemaname, relname, indexrelname, object_kind,
 		COALESCE(real_bytes, 0)::float8, COALESCE(bloat_ratio, 0)::float8,

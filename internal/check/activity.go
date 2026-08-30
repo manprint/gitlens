@@ -175,7 +175,14 @@ func activityCheckResult(rows []activityRow, maxConnStr string, byApplication bo
 		result.Metrics = append(result.Metrics, boundedActivityMetrics("pg_connections_by_application", "application_name", applicationRows)...)
 	}
 	for _, row := range stateAgeRows {
-		result.Metrics = append(result.Metrics, pgtype.Metric{Name: "pg_max_state_age_seconds", Value: row.Value, Kind: pgtype.KindGauge, Labels: map[string]string{"state": row.Label}})
+		// PostgreSQL timestamps can be a few microseconds ahead of the
+		// collector's clock under concurrency. An age is never meaningful as a
+		// negative value, and the metric invariant rejects negative samples.
+		age := row.Value
+		if age < 0 {
+			age = 0
+		}
+		result.Metrics = append(result.Metrics, pgtype.Metric{Name: "pg_max_state_age_seconds", Value: age, Kind: pgtype.KindGauge, Labels: map[string]string{"state": row.Label}})
 	}
 	result.Metrics = append(result.Metrics,
 		pgtype.Metric{Name: "pg_prepared_xacts", Value: prepared, Kind: pgtype.KindGauge},

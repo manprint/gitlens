@@ -8,6 +8,11 @@ import (
 
 func assertRuleContract(t *testing.T, r Rule, s *Snapshot) {
 	t.Helper()
+	require.NotEmpty(t, r.ID())
+	require.NotEmpty(t, r.Severity())
+	require.NotEmpty(t, r.Scope())
+	require.NotEmpty(t, r.Needs())
+	_ = r.MinTier()
 	a := r.Evaluate(s)
 	b := r.Evaluate(s)
 	for i, f := range a {

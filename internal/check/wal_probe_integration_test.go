@@ -36,9 +36,14 @@ func TestINTWAL000_WALStatisticsColumnShape(t *testing.T) {
 		io := columns("pg_stat_io")
 		t.Logf("PG%d pg_stat_wal columns: %v", pg.Version/10000, wal)
 		t.Logf("PG%d pg_stat_io columns: %v", pg.Version/10000, io)
-		if pg.Version < 180000 {
+		if pg.Version < 160000 {
 			require.ElementsMatch(t, []string{"stats_reset", "wal_buffers_full", "wal_bytes", "wal_fpi", "wal_records", "wal_sync", "wal_sync_time", "wal_write", "wal_write_time"}, wal)
 			require.Empty(t, io)
+			return
+		}
+		if pg.Version < 180000 {
+			require.ElementsMatch(t, []string{"stats_reset", "wal_buffers_full", "wal_bytes", "wal_fpi", "wal_records", "wal_sync", "wal_sync_time", "wal_write", "wal_write_time"}, wal)
+			require.ElementsMatch(t, []string{"backend_type", "context", "evictions", "extend_time", "extends", "fsync_time", "fsyncs", "hits", "object", "op_bytes", "read_time", "reads", "reuses", "stats_reset", "write_time", "writeback_time", "writebacks", "writes"}, io)
 			return
 		}
 		require.ElementsMatch(t, []string{"stats_reset", "wal_buffers_full", "wal_bytes", "wal_fpi", "wal_records"}, wal)

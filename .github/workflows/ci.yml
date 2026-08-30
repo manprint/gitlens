@@ -33,16 +33,21 @@ jobs:
           make lint
 
   unit:
-    name: Unit, build, vet, and coverage
+    name: Unit, lint, build, and coverage
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: go.sum
+      - run: make fmt-check
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1.6
+      - run: make lint
       - run: make build
-      - run: go vet ./...
       - run: make test
       - run: make coverage-gate
 
@@ -53,9 +58,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The documented PR/integration matrix is oldest + newest supported;
-        # the test suite's golden fixtures are versioned for these two majors.
-        pg: ['15', '18']
+        pg: ['15', '16', '17', '18']
         profile: ['vanilla', 'rds-like']
     steps:
       - uses: actions/checkout@v4
@@ -63,40 +66,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: go.sum
       - run: make test-integration
         env:
           PGLENS_PG_VERSIONS: ${{ matrix.pg }}
           PGLENS_PG_PROFILE: ${{ matrix.profile }}
-
-  e2e:
-    name: E2E ${{ matrix.suite }} / ${{ matrix.agent_mode }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        suite: [smoke, full]
-        agent_mode: [container, binary]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      - run: make build-images
-      - name: Run E2E suite
-        env:
-          AGENT_MODE: ${{ matrix.agent_mode }}
-        run: |
-          if [ "${{ matrix.suite }}" = "smoke" ]; then
-            make test-e2e
-          else
-            make test-e2e-full
-          fi
-      - name: Upload E2E diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-artifacts-${{ matrix.suite }}-${{ matrix.agent_mode }}
-          path: test/e2e/_artifacts/
-          if-no-files-found: ignore

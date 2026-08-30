@@ -168,3 +168,50 @@ func TestFake_Concurrent(t *testing.T) {
 	}
 	<-done
 }
+
+func TestSystem_ClockAndTicker(t *testing.T) {
+	t.Parallel()
+	c := clock.System()
+	before := time.Now()
+	now := c.Now()
+	require.False(t, now.Before(before))
+	require.Less(t, c.Since(now), time.Second)
+
+	ticker := c.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	select {
+	case <-ticker.C():
+	case <-time.After(time.Second):
+		t.Fatal("system ticker did not fire")
+	}
+}
+
+func TestSystem_Sleep(t *testing.T) {
+	t.Parallel()
+	c := clock.System()
+	require.NoError(t, c.Sleep(context.Background(), time.Millisecond))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, c.Sleep(ctx, time.Second), context.Canceled)
+}
+
+func TestWithOffset_DelegatesTickerAndSleep(t *testing.T) {
+	t.Parallel()
+	f := clock.NewFake(time.Unix(0, 0))
+	c := clock.WithOffset(f, time.Hour)
+	ticker := c.NewTicker(time.Second)
+	f.Advance(time.Second)
+	select {
+	case <-ticker.C():
+	default:
+		t.Fatal("delegated ticker did not fire")
+	}
+	ticker.Stop()
+
+	done := make(chan error, 1)
+	go func() { done <- c.Sleep(context.Background(), time.Second) }()
+	f.BlockUntilSleepers(1)
+	f.Advance(time.Second)
+	require.NoError(t, <-done)
+}

@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestINTLOCK002_NoContentionEmitsGaugesAndNoFact(t *testing.T) {
+func TestINTLOCK002_NoContentionEmitsGaugesAndEmptyFact(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
 		pg.Lock(t)
 		pool := pg.Pool(t, "app", pgtest.RoleT0)
@@ -24,7 +24,12 @@ func TestINTLOCK002_NoContentionEmitsGaugesAndNoFact(t *testing.T) {
 		target := &registryTestTarget{conn: conn, version: pg.Version, database: "app", instanceID: uuid.New(), clusterID: 1, role: pgtype.RolePrimary, permTier: pgtype.TierReadOnly}
 		result, err := (&locksCheck{}).Scrape(context.Background(), target)
 		require.NoError(t, err)
-		require.Empty(t, result.Facts)
+		require.Len(t, result.Facts, 1)
+		var tree struct {
+			Nodes []json.RawMessage `json:"nodes"`
+		}
+		require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
+		require.Empty(t, tree.Nodes)
 		require.Equal(t, 0.0, metricValue(result, "pg_blocked_sessions", nil))
 	})
 }
@@ -153,7 +158,12 @@ func TestINTLOCK006_LockShapeAcrossVersions(t *testing.T) {
 		result, err := (&locksCheck{}).Scrape(context.Background(), target)
 		require.NoError(t, err)
 		require.Equal(t, []string{"pg_blocked_sessions", "pg_blocking_sessions", "pg_max_block_age_seconds"}, metricNames(result))
-		require.Empty(t, result.Facts)
+		require.Len(t, result.Facts, 1)
+		var tree struct {
+			Nodes []json.RawMessage `json:"nodes"`
+		}
+		require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
+		require.Empty(t, tree.Nodes)
 	})
 }
 

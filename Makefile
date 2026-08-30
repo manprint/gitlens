@@ -4,7 +4,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
 .PHONY: build fmt fmt-check lint test test-integration test-e2e test-e2e-full test-e2e-matrix \
-        coverage coverage-gate generate golden clean build-images build-images-multiarch
+        ci-local ci-local-unit ci-local-integration coverage coverage-gate generate golden clean build-images build-images-multiarch
 
 build:
 	CGO_ENABLED=0 $(GO) build $(LDFLAGS) -o bin/pglens-agent  ./cmd/pglens-agent
@@ -40,6 +40,26 @@ test-e2e-full:
 test-e2e-matrix:
 	AGENT_MODE=container $(MAKE) test-e2e
 	AGENT_MODE=binary $(MAKE) test-e2e
+
+ci-local:
+	$(MAKE) ci-local-unit
+	$(MAKE) ci-local-integration
+
+ci-local-unit:
+	$(MAKE) fmt-check
+	$(MAKE) lint
+	$(MAKE) build
+	$(MAKE) test
+	$(MAKE) coverage-gate
+
+ci-local-integration:
+	@set -eu; \
+	for pg in 15 16 17 18; do \
+		for profile in vanilla rds-like; do \
+			echo "==> integration PG$$pg / $$profile"; \
+			PGLENS_PG_VERSIONS=$$pg PGLENS_PG_PROFILE=$$profile $(MAKE) test-integration; \
+		done; \
+	done
 
 coverage:
 	$(GO) test -race -coverprofile=coverage.out -covermode=atomic $(PKG)

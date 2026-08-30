@@ -126,9 +126,14 @@ func init() {
 			// Give the series one more interval to resume normally.
 			time.Sleep(10 * time.Second)
 
+			// The generic metrics table also contains raw setting gauges. PostgreSQL
+			// uses -1 for "unlimited" byte/time settings; that sentinel is not a
+			// negative rate and is intentionally excluded by invariant I-2 too.
 			var negCount int
 			if err := e.DB.QueryRow(ctx,
-				`SELECT count(*) FROM metrics WHERE instance_id=$1::uuid AND ts >= $2 AND value < 0`,
+				`SELECT count(*) FROM metrics
+				 WHERE instance_id=$1::uuid AND ts >= $2 AND value < 0
+				   AND metric NOT IN ('pg_setting_bytes', 'pg_setting_seconds')`,
 				instanceID, restartTS).Scan(&negCount); err != nil {
 				return fmt.Errorf("query negative rates: %w", err)
 			}

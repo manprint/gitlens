@@ -27,6 +27,19 @@ func init() {
 				return fmt.Errorf("resolve monitored instance: %w", err)
 			}
 
+			// Keep one real client backend on the monitored PostgreSQL alive
+			// across the outage. Without this, a quiet target can legitimately
+			// have no pg_stat_activity client rows once the server-side
+			// connections disappear, so the activity check emits no
+			// pg_backends metric even though the agent continues collecting.
+			// The held backend makes the backlog assertion about delivery and
+			// original timestamps, not about incidental target concurrency.
+			targetConn, err := e.PG("pg").Acquire(ctx)
+			if err != nil {
+				return fmt.Errorf("hold monitored PostgreSQL client: %w", err)
+			}
+			defer targetConn.Release()
+
 			if err := e.Compose("stop", "pglens-server"); err != nil {
 				return fmt.Errorf("stop pglens-server: %w", err)
 			}

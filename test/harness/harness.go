@@ -399,6 +399,7 @@ buffer:
 checks:
   activity: { interval: 5s }
   database_stats: { interval: 5s }
+  replication_slots: { interval: 5s }
   # Keep the cadence aligned with the cardinality workload's 65s rotations.
   # Selector hysteresis is measured in scrape cycles, so a 10s cadence would
   # forget each previous hot group before the next rotation and never reach
@@ -1001,8 +1002,13 @@ func (h *Harness) cleanup() {
 	h.pools = make(map[string]*pgxpool.Pool)
 	h.poolMu.Unlock()
 
-	// Stop and remove the compose stack
-	cmd := exec.Command("docker", "compose", "-p", h.projectName, "down", "-v")
+	// Stop and remove the compose stack. The harness is assembled from
+	// multiple fragment files, so teardown must use the same complete file set
+	// as startup; without it Docker Compose can treat down as a no-op and
+	// leak the scenario's containers, networks and volumes into later tests.
+	args := append([]string{"compose", "-p", h.projectName}, h.composeFiles()...)
+	args = append(args, "down", "-v")
+	cmd := exec.Command("docker", args...)
 	cmd.Dir = h.composeDir
 	_ = cmd.Run() // Ignore errors; best-effort cleanup
 }

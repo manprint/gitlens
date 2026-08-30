@@ -94,6 +94,12 @@ func TestPermTier_StringRoundTrip(t *testing.T) {
 	}
 	_, err := pgtype.ParsePermTier("T99")
 	require.Error(t, err)
+	require.Equal(t, "Tier99", pgtype.PermTier(99).String())
+}
+
+func TestParseClusterID_Invalid(t *testing.T) {
+	_, err := pgtype.ParseClusterID("not-a-cluster-id")
+	require.Error(t, err)
 }
 
 func FuzzCanonicalLabels(f *testing.F) {

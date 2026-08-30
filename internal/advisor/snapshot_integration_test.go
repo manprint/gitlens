@@ -37,6 +37,7 @@ func TestINTADV002_LoadSnapshotUsesBoundedQueries(t *testing.T) {
 		instanceID := uuid.New()
 		_, err = pool.Exec(context.Background(), `INSERT INTO instances(instance_id,cluster_id,role) VALUES ($1,$2,'primary')`, instanceID, int64(9915))
 		require.NoError(t, err)
+		tracer.count.Store(0)
 		_, err = LoadSnapshot(context.Background(), pool, instanceID, time.Now())
 		require.NoError(t, err)
 		require.LessOrEqual(t, tracer.count.Load(), int32(12))

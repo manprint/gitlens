@@ -1,0 +1,417 @@
+{
+  "protocol_version": 1,
+  "agent_id": "",
+  "agent_version": "",
+  "sent_at": "0001-01-01T00:00:00Z",
+  "instances": [
+    {
+      "instance_id": "",
+      "cluster_id": "",
+      "cluster_id_source": "manual",
+      "addr": "",
+      "port": 0,
+      "pg_version": 170006,
+      "role": "primary",
+      "perm_tier": "T0",
+      "capabilities": [],
+      "databases": [
+        {
+          "name": "app",
+          "monitored": true
+        }
+      ],
+      "results": [
+        {
+          "check": "database_stats",
+          "ts": "0001-01-01T00:00:00Z",
+          "metrics": [
+            {
+              "name": "pg_xact_commit_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_xact_rollback_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_blks_read_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_blks_hit_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_deadlocks_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_temp_bytes_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_conflicts_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_numbackends",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "gauge"
+            },
+            {
+              "name": "pg_xact_commit_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_xact_rollback_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_blks_read_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_blks_hit_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_deadlocks_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_temp_bytes_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_conflicts_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_numbackends",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "gauge"
+            },
+            {
+              "name": "pg_xact_commit_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_xact_rollback_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_blks_read_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_blks_hit_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_deadlocks_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_temp_bytes_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_conflicts_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_numbackends",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "gauge"
+            },
+            {
+              "name": "pg_xact_commit_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_xact_rollback_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_blks_read_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_blks_hit_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_deadlocks_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_temp_bytes_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_conflicts_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_numbackends",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "gauge"
+            },
+            {
+              "name": "pg_xact_commit_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_xact_rollback_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_blks_read_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_blks_hit_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_deadlocks_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_temp_bytes_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_conflicts_total",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "counter"
+            },
+            {
+              "name": "pg_numbackends",
+              "labels": {
+                "database": ""
+              },
+              "value": 0,
+              "kind": "gauge"
+            }
+          ]
+        },
+        {
+          "check": "instance_info",
+          "ts": "0001-01-01T00:00:00Z",
+          "metrics": [
+            {
+              "name": "pg_up",
+              "labels": {
+                "cluster_id_source": "",
+                "role": "",
+                "system_identifier": ""
+              },
+              "value": 0,
+              "kind": "gauge"
+            },
+            {
+              "name": "pg_in_recovery",
+              "labels": {
+                "cluster_id_source": "",
+                "role": "",
+                "system_identifier": ""
+              },
+              "value": 0,
+              "kind": "gauge"
+            },
+            {
+              "name": "pg_version_num",
+              "labels": {
+                "cluster_id_source": "",
+                "role": "",
+                "system_identifier": ""
+              },
+              "value": 0,
+              "kind": "gauge"
+            },
+            {
+              "name": "pg_uptime_seconds",
+              "labels": {
+                "cluster_id_source": "",
+                "role": "",
+                "system_identifier": ""
+              },
+              "value": 0,
+              "kind": "gauge"
+            },
+            {
+              "name": "pg_addr",
+              "labels": {
+                "addr": ""
+              },
+              "value": 0,
+              "kind": "gauge"
+            },
+            {
+              "name": "pg_port",
+              "labels": {
+                "cluster_id_source": "",
+                "role": "",
+                "system_identifier": ""
+              },
+              "value": 0,
+              "kind": "gauge"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
