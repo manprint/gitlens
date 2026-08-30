@@ -1,0 +1,8 @@
+id: SYS-ARCH-001
+name: backup-archiving
+topology: standalone
+agent: test/compose/agent-container.yml
+scenarios:
+  - id: SYS-ARCH-001
+    endpoint: /api/v1/findings?instance_id={id}&rule_id=archive.failing&state=all
+    assertion: archive failures and recent failure age are observed, the finding names the instance and mentions WAL retention, then archive success advances and resolves it

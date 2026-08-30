@@ -131,19 +131,24 @@ func assertNoDuplicateSamples(ctx context.Context, t TestingT, pool *pgxpool.Poo
 }
 
 // assertNoNegativeRates backs I-2: a counter reset never produces a negative
-// rate; the affected interval must emit no point at all instead.
+// rate; the affected interval must emit no point at all instead. The generic
+// metrics table also stores raw gauges, including PostgreSQL's -1 "unlimited"
+// setting sentinel converted to bytes/seconds, so those gauge families are
+// intentionally outside this rate invariant.
 func assertNoNegativeRates(ctx context.Context, t TestingT, pool *pgxpool.Pool) {
 	t.Helper()
-	rows, err := pool.Query(ctx, `SELECT series_id, ts, value FROM metrics WHERE value < 0 LIMIT 20`)
+	rows, err := pool.Query(ctx, `SELECT metric, series_id, ts, value FROM metrics
+		WHERE value < 0 AND metric NOT IN ('pg_setting_bytes', 'pg_setting_seconds') LIMIT 20`)
 	if err != nil {
 		t.Fatalf("I-2 (metrics): query failed: %v", err)
 	}
 	defer rows.Close()
 	dumpAndFail(t, "I-2: negative rate in metrics", rows, func() []any {
+		var metric string
 		var seriesID int64
 		var ts time.Time
 		var v float64
-		return []any{&seriesID, &ts, &v}
+		return []any{&metric, &seriesID, &ts, &v}
 	})
 
 	rows2, err := pool.Query(ctx, `
