@@ -2,7 +2,7 @@
 
 > **READ THIS FILE FIRST at the start of every session, before any other plan
 > file. OPEN a unit in §1 before touching code; CLOSE it after the gates pass.**
-> **Last updated:** 2026-08-30 (phase 9.5 closed) by `agent:gpt5.6-luna` | **Session:** 28
+> **Last updated:** 2026-08-30 (phase 9.6 opened) by `agent:gpt5.6-luna` | **Session:** 29
 
 ## 0. Protocol
 
@@ -50,10 +50,10 @@ work — a phase that looks blocked is a signal to read §9, not to skip ahead.
 
 - **Type:** sub-phase
 - **ID:** `9.6`
-- **Status:** `none`
-- **Intent:** execute phase 9.6 command-channel acceptance.
+- **Status:** `OPEN`
+- **Intent:** prove command enqueue, gate rejection, at-most-once restart and TTL expiry through L3.
 - **Phase:** 9 — L3 end-to-end scenarios ([phase_10.md](phase_10.md))
-- **Next action:** open unit 9.6, read phase_10.md §9.6, implement the command-channel acceptance scenarios, then run the 9.6 gates.
+- **Next action:** inspect the existing command API, dispatcher and harness restart controls, then implement phase_10.md §9.6 exactly.
 - **Assigned:** `agent:gpt5.6-luna`
 - **Repo state:** branch `main`, phase 9.5 complete.
 
@@ -470,7 +470,7 @@ the units that touched it, so a later audit can attribute every diff.
 
 ## 6. In-flight work
 
-`none — tree consistent`
+`claimed — nothing written yet`
 
 ## 7. Verification state
 

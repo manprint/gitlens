@@ -34,7 +34,7 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 	defer conn.Release()
 
 	var statement string
-	err = conn.QueryRow(ctx, `SELECT query FROM pg_stat_statements WHERE queryid = $1 LIMIT 1`, *args.QueryID).Scan(&statement)
+	err = conn.QueryRow(ctx, `SELECT query FROM pg_stat_statements WHERE queryid = $1 AND query !~ '^[[:space:]]*EXPLAIN' LIMIT 1`, *args.QueryID).Scan(&statement)
 	if errorsIsNoRows(err) {
 		return nil, rejectedf("queryid %d is unknown on this instance", *args.QueryID)
 	}

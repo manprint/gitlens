@@ -1,0 +1,17 @@
+id: SYS-CMD-001,SYS-CMD-002,SYS-CMD-003,SYS-CMD-004
+name: command-channel
+topology: primary-standby
+agent: test/compose/agent-container-primary-standby.yml
+scenarios:
+  - id: SYS-CMD-001
+    endpoint: /api/v1/instances/{permissive_id}/commands
+    assertion: permitted explain persists a visible plan shape, deduplicates identical plans, and records a changed shape
+  - id: SYS-CMD-002
+    endpoint: /api/v1/instances/{restrictive_id}/commands
+    assertion: closed EXPLAIN ANALYZE, signal, and pgstattuple gates reject without touching PostgreSQL
+  - id: SYS-CMD-003
+    endpoint: /api/v1/instances/{permissive_id}/commands
+    assertion: a claimed slow command is not executed twice across an agent restart
+  - id: SYS-CMD-004
+    endpoint: /api/v1/instances/{permissive_id}/commands
+    assertion: a command left pending beyond its TTL expires without execution

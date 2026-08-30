@@ -73,12 +73,17 @@ func (a *API) handlePlans(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		item.Plan = json.RawMessage(rawPlan)
-		item.Changed = len(out.Plans) > 0
 		out.Plans = append(out.Plans, item)
 	}
 	if err := rows.Err(); err != nil {
 		writeError(w, http.StatusInternalServerError, "plan history read failed", err.Error())
 		return
+	}
+	// Rows are newest-first. A row is changed when it has an older shape to
+	// compare against, so the newest row—not the historical predecessor—must
+	// carry changed=true when more than one shape exists.
+	for i := range out.Plans {
+		out.Plans[i].Changed = i < len(out.Plans)-1
 	}
 	out.TotalShapes = len(out.Plans)
 	writeJSON(w, http.StatusOK, out)

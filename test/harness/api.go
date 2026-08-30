@@ -48,6 +48,45 @@ func (c *APIClient) Request(method, path string, payload []byte) (interface{}, e
 	return result, nil
 }
 
+// RequestWithHeaders is the authenticated variant used by command-channel
+// acceptance tests to submit a result with a deliberately stale claim token.
+func (c *APIClient) RequestWithHeaders(method, path string, payload []byte, headers map[string]string) (interface{}, int, error) {
+	var body io.Reader
+	if len(payload) > 0 {
+		body = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequest(method, c.baseURL+path, body)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(payload) > 0 {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, resp.StatusCode, fmt.Errorf("%s %s: %d, body: %s", method, path, resp.StatusCode, raw)
+	}
+	if len(raw) == 0 {
+		return nil, resp.StatusCode, nil
+	}
+	var result interface{}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, resp.StatusCode, err
+	}
+	return result, resp.StatusCode, nil
+}
+
 // APIClient wraps the HTTP client for the pglens server API.
 type APIClient struct {
 	client     interface{} // kept for compat; use httpClient
@@ -168,6 +207,28 @@ func (c *APIClient) Get(path string) (map[string]interface{}, error) {
 
 	var result map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// GetExact is the lossless counterpart of Get for endpoints carrying int64
+// identifiers such as PostgreSQL queryids. It is kept separate so existing
+// scenarios that consume float64 JSON numbers remain source-compatible.
+func (c *APIClient) GetExact(path string) (interface{}, error) {
+	resp, err := c.httpClient.Get(c.baseURL + path)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("GET %s: %d, body: %s", path, resp.StatusCode, body)
+	}
+	decoder := json.NewDecoder(resp.Body)
+	decoder.UseNumber()
+	var result interface{}
+	if err := decoder.Decode(&result); err != nil {
 		return nil, err
 	}
 	return result, nil

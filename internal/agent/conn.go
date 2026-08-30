@@ -515,6 +515,12 @@ func (m *Manager) Conn(ctx context.Context) (check.Conn, error) {
 	return m.Shared(ctx)
 }
 func (m *Manager) ConnFor(ctx context.Context, datname string) (check.Conn, error) {
+	// Commands may omit datname when they target the database from the
+	// instance DSN. ForDatabase would overwrite that database with an empty
+	// string, which libpq interprets as the user name.
+	if datname == "" {
+		return m.Shared(ctx)
+	}
 	return m.ForDatabase(ctx, datname)
 }
 func (m *Manager) Database() string {

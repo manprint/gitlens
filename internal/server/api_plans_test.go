@@ -42,8 +42,8 @@ func TestPlansAPI_MarksChangedAfterFirst(t *testing.T) {
 	plansRouter(&API{pool: p}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/plans?queryid=7", http.NoBody))
 	var response planHistoryResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
-	require.False(t, response.Plans[0].Changed)
-	require.True(t, response.Plans[1].Changed)
+	require.True(t, response.Plans[0].Changed)
+	require.False(t, response.Plans[1].Changed)
 }
 
 func TestPlansAPI_TotalShapes(t *testing.T) {

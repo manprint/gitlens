@@ -198,7 +198,8 @@ func TestINTPLAN002_DifferentPlanCreatesHistoryShape(t *testing.T) {
 	var response planHistoryResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
 	require.Equal(t, 2, response.TotalShapes)
-	require.True(t, response.Plans[1].Changed)
+	require.True(t, response.Plans[0].Changed)
+	require.False(t, response.Plans[1].Changed)
 }
 
 func TestINTCMD011_AuditHasOneRowPerTerminalOutcome(t *testing.T) {
