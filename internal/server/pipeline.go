@@ -181,6 +181,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		replMap := make(map[replicationKey]*store.ReplicationRow)
 		var instEvents []store.EventRow
 		var instFacts []store.ObjectFactRow
+		var clearCheckSkips []string
 		var instLockSnapshot *store.LockSnapshotRow
 		tableMap := make(map[tableStatKey]*store.TableStatRow)
 		indexMap := make(map[indexStatKey]*store.IndexStatRow)
@@ -251,6 +252,16 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		}
 
 		for _, r := range inst.Results {
+			if r.SkipReason != "" {
+				reason := r.SkipReason
+				instFacts = append(instFacts, store.ObjectFactRow{
+					TenantID: tenantID, ClusterID: cidDB, InstanceID: instUUID,
+					Kind: "check_skip", Key: r.Check, ValueText: &reason,
+					FirstSeen: r.TS, LastSeen: r.TS, ChangedAt: r.TS,
+				})
+			} else if r.Error == "" {
+				clearCheckSkips = append(clearCheckSkips, r.Check)
+			}
 			if r.Error == "" && !r.Truncated {
 				switch dest := destinationTable(r.Check); dest {
 				case "metrics_tables", "metrics_indexes", "metrics_bloat":
@@ -546,6 +557,11 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		queryTextRows = append(queryTextRows, instQueryTexts...)
 		eventRows = append(eventRows, instEvents...)
 		objectFactRows = append(objectFactRows, instFacts...)
+		for _, checkName := range uniqueStrings(clearCheckSkips) {
+			if err := store.DeleteCheckSkipFacts(ctx, tx, tenantID, instUUID, checkName); err != nil {
+				return nil, err
+			}
+		}
 		if instLockSnapshot != nil {
 			lockSnapshotRows = append(lockSnapshotRows, *instLockSnapshot)
 		}
@@ -602,6 +618,19 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		SetSeriesTotal(instID.String(), float64(count))
 	}
 	return res, nil
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func (p *Pipeline) processInstanceNoDB(_ context.Context, inst wire.Instance) error {

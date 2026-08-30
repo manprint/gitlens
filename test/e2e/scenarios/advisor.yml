@@ -1,0 +1,17 @@
+id: SYS-ADV-001,SYS-ADV-002,SYS-ADV-003,SYS-ADV-004
+name: advisor-acceptance-degradation-lifecycle
+topology: standalone,primary-standby
+agent: test/compose/agent-container.yml,test/compose/agent-container-primary-standby.yml
+scenarios:
+  - id: SYS-ADV-001
+    endpoint: /api/v1/findings?instance_id={id}
+    assertion: exact open rule set for unused index, dead tuples with table autovacuum disabled, and work_mem memory overcommit
+  - id: SYS-ADV-002
+    endpoint: /api/v1/findings?instance_id={id}
+    assertion: configuration findings remain available while every pg_stat_statements-dependent rule is degraded with the missing extension reason
+  - id: SYS-ADV-003
+    endpoint: /api/v1/findings?instance_id={id}&state=all
+    assertion: dropping the index, vacuuming the table, and lowering work_mem resolves all three findings without reopening them
+  - id: SYS-ADV-004
+    endpoint: /api/v1/findings?instance_id={id}
+    assertion: exact findings for shared_buffers, effective_cache_size, fsync, and failing archive_command all carry remediation

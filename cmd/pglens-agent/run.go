@@ -122,7 +122,7 @@ func runAgentCommand(args []string) {
 		}
 		managers = append(managers, mgr)
 		waitForTarget(ctx, mgr)
-		addScheduleEntries(scheduler, mgr, ctx, cfg)
+		addScheduleEntries(scheduler, mgr, ctx, cfg, pending)
 		ashStop, enabled := startASH(ctx, mgr, tc.Name, cfg.Checks["ash"], clk, &mu, pending)
 		ashStops = append(ashStops, ashStop)
 		ashEnabled[tc.Name] = enabled
@@ -524,7 +524,7 @@ func configureChecks(cfg *agent.Config) {
 	}
 }
 
-func addScheduleEntries(scheduler *agent.Scheduler, mgr *agent.Manager, ctx context.Context, cfg *agent.Config) {
+func addScheduleEntries(scheduler *agent.Scheduler, mgr *agent.Manager, ctx context.Context, cfg *agent.Config, pending map[string][]wire.Result) {
 	role := mgr.Role()                                                                    //nolint:contextcheck // Manager caches this at connect time; the accessor takes no context
 	version := mgr.PGVersion()                                                            //nolint:contextcheck // same as above
 	tier := mgr.PermTier()                                                                //nolint:contextcheck // same as above
@@ -548,7 +548,10 @@ func addScheduleEntries(scheduler *agent.Scheduler, mgr *agent.Manager, ctx cont
 			continue
 		}
 		req := c.Requires()
-		if ok, _ := req.Supports(role, version, tier, exts); !ok {
+		if ok, reason := req.Supports(role, version, tier, exts); !ok {
+			pending[mgr.Database()] = append(pending[mgr.Database()], wire.Result{
+				Check: c.Name(), TS: time.Now().UTC(), SkipReason: reason,
+			})
 			continue
 		}
 		if req.Scope == check.ScopeDatabase {

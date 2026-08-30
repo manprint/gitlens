@@ -84,7 +84,7 @@ func (f Fact) Validate() error {
 		return fmt.Errorf("fact key is required")
 	}
 	switch f.Kind {
-	case "index_def", "setting", "lock_tree", "plan":
+	case "index_def", "setting", "lock_tree", "plan", "check_skip":
 	default:
 		return fmt.Errorf("unknown fact kind %q", f.Kind)
 	}

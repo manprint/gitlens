@@ -92,7 +92,7 @@ func init() {
 	}})
 	Register(memoryRule("config.shared_buffers_low", SeverityWarning, func(mem float64, s *Snapshot) []Finding {
 		v, ok := settingFloat(s, "shared_buffers_bytes")
-		if ok && mem > 4*1024*1024*1024 && v < .15*mem {
+		if ok && v < .15*mem {
 			return []Finding{configFinding("config.shared_buffers_low", SeverityWarning, "shared_buffers is low", "shared_buffers is below 15% of usable memory", "Review shared_buffers for the workload", nil)}
 		}
 		return nil

@@ -2,7 +2,7 @@
 
 > **READ THIS FILE FIRST at the start of every session, before any other plan
 > file. OPEN a unit in §1 before touching code; CLOSE it after the gates pass.**
-> **Last updated:** 2026-08-30 (phase 9.4 closed) by `agent:gpt5.6-luna` | **Session:** 26
+> **Last updated:** 2026-08-30 (phase 9.5 closed) by `agent:gpt5.6-luna` | **Session:** 28
 
 ## 0. Protocol
 
@@ -49,13 +49,13 @@ work — a phase that looks blocked is a signal to read §9, not to skip ahead.
 ## 1. Current unit
 
 - **Type:** sub-phase
-- **ID:** `9.5`
+- **ID:** `9.6`
 - **Status:** `none`
-- **Intent:** prove the advisor exact-set acceptance and degraded-mode behavior through the L3 API and PostgreSQL.
+- **Intent:** execute phase 9.6 command-channel acceptance.
 - **Phase:** 9 — L3 end-to-end scenarios ([phase_10.md](phase_10.md))
-- **Next action:** open phase_10.md §9.5, implement the advisor acceptance scenario, then run the 9.5 gates.
+- **Next action:** open unit 9.6, read phase_10.md §9.6, implement the command-channel acceptance scenarios, then run the 9.6 gates.
 - **Assigned:** `agent:gpt5.6-luna`
-- **Repo state:** branch `main`, phase 9.4 complete.
+- **Repo state:** branch `main`, phase 9.5 complete.
 
 ## 2. Feature context (self-contained recap)
 
@@ -198,6 +198,7 @@ The authoritative gate commands are the Makefile targets. These are identical to
 | 78 | sub-phase | 9.2 | agent:gpt5.6-luna | Added the containerized mock receiver, two-replica alerting stack and SYS-ALERT-001..004 L3 scenarios; persisted evaluator state across leader failover so an existing alert episode cannot be re-fired | `.dockerignore`, `test/e2e/mockreceiver/main.go`, `test/e2e/mockreceiver/Dockerfile`, `test/e2e/scenarios/alerting.yml`, `test/e2e/alerting_test.go`, `test/compose/agent-container-alerting.yml`, `test/compose/scenario-alerting.yml`, `test/scenario/alerting.go`, `internal/alert/eval.go`, `internal/alert/engine.go`, `internal/alert/source_sql.go`, `internal/server/api_alerts.go`, `test/harness/api.go`, `test/harness/harness.go`, `test/harness/toxic.go`, `test/scenario/registry.go`, `internal/alert/engine_test.go`, `STATE.md` | fmt/lint/build/vet, rebuilt Docker images, and three consecutive four-scenario SYS-ALERT L3 runs PASS | phase-9.2 close |
 | 79 | sub-phase | 9.3 | agent:gpt5.6-luna | Added real lock-contention and deadlock scenarios with deterministic cleanup, empty lock-tree snapshots, database label propagation and event-aware deadlock alert sourcing | `internal/alert/source_sql.go`, `internal/check/locks.go`, `internal/check/locks_test.go`, `internal/server/pipeline.go`, `test/e2e/contention_test.go`, `test/e2e/scenarios/contention.yml`, `STATE.md` | fmt/lint/build/unit/vet, rebuilt Docker images, and three consecutive combined SYS-LOCK-001/SYS-DEADLOCK-001 L3 runs PASS | phase-9.3 close |
 | 80 | sub-phase | 9.4 | agent:gpt5.6-luna | Added live vacuum, bloat, unused-index, relation-cardinality and duplicate-index L3 scenarios plus typed relation persistence/API/advisor support | `internal/check/table_stats.go`, `internal/check/index_stats.go`, `internal/check/bloat_estimate.go`, `internal/check/bloat_estimate.sql`, `internal/store/migrations/0011_relation_metrics.sql`, `internal/store/write.go`, `internal/server/pipeline.go`, `internal/server/api_relations.go`, `internal/advisor/snapshot.go`, `test/e2e/maintenance_test.go`, `test/e2e/scenarios/maintenance.yml`, `STATE.md` | all five SYS-VAC/BLOAT/IDX scenarios PASS in three consecutive full-suite runs; SYS-IDX-002 PASS 3/3; fmt/lint/build/test/vet and Docker images green | `6fefc91` |
+| 81 | sub-phase | 9.5 | agent:gpt5.6-luna | Added advisor snapshot completeness, persisted capability skips, degraded reasons and SYS-ADV-001..004 acceptance scenarios | `cmd/pglens-agent/run.go`, `internal/advisor/engine.go`, `internal/advisor/rules_config.go`, `internal/advisor/snapshot.go`, `internal/server/pipeline.go`, `internal/store/write.go`, `internal/wire/envelope.go`, `test/e2e/advisor_test.go`, `test/e2e/scenarios/advisor.yml`, `STATE.md` | all four advisor scenarios PASS in three consecutive full-suite runs; fmt/lint/build/test and rebuilt Docker images green | `PENDING` |
 
 ## 5. Files touched
 
@@ -457,6 +458,15 @@ the units that touched it, so a later audit can attribute every diff.
 | `test/fixtures/agent-standalone.yaml` | 9.4 | maintenance check intervals for L3 scenarios |
 | `test/e2e/maintenance_test.go` | 9.4 | SYS-VAC-001, SYS-BLOAT-001, SYS-IDX-001..003 L3 scenarios |
 | `test/e2e/scenarios/maintenance.yml` | 9.4 | maintenance scenario metadata |
+| `cmd/pglens-agent/run.go` | 9.5 | persist unsupported-check skip reasons and clear them after recovery |
+| `internal/advisor/engine.go` | 9.5 | render capability-specific degraded reasons |
+| `internal/advisor/rules_config.go` | 9.5 | evaluate shared_buffers thresholds on the acceptance memory size |
+| `internal/advisor/snapshot.go` | 9.5 | load generic metrics, facts, host memory, statements, baseline and siblings |
+| `internal/server/pipeline.go` | 9.5 | persist and clear check-skip facts |
+| `internal/store/write.go` | 9.5 | delete recovered check-skip facts |
+| `internal/wire/envelope.go` | 9.5 | validate check-skip facts |
+| `test/e2e/advisor_test.go` | 9.5 | SYS-ADV-001..004 L3 advisor acceptance scenarios |
+| `test/e2e/scenarios/advisor.yml` | 9.5 | advisor scenario metadata |
 
 ## 6. In-flight work
 
@@ -560,6 +570,12 @@ the units that touched it, so a later audit can attribute every diff.
 | phase9.4-full-suite-1 | `go test -tags=e2e -timeout=8m -count=1 -v ./test/e2e/... -run '^(TestFull_VacuumMaintenance|TestFull_BloatMaintenance|TestFull_UnusedIndexMaintenance|TestFull_RelationCardinality|TestFull_DuplicateIndexMaintenance)$'` | PASS — SYS-VAC-001 70.60s; SYS-BLOAT-001 44.40s; SYS-IDX-001 47.47s; SYS-IDX-002 44.89s; SYS-IDX-003 57.58s; suite 264.940s | 2026-08-30 |
 | phase9.4-full-suite-2 | `go test -tags=e2e -timeout=8m -count=1 -v ./test/e2e/... -run '^(TestFull_VacuumMaintenance|TestFull_BloatMaintenance|TestFull_UnusedIndexMaintenance|TestFull_RelationCardinality|TestFull_DuplicateIndexMaintenance)$'` | PASS — SYS-VAC-001 65.08s; SYS-BLOAT-001 40.89s; SYS-IDX-001 46.95s; SYS-IDX-002 45.35s; SYS-IDX-003 52.09s; suite 250.362s | 2026-08-30 |
 | phase9.4-full-suite-3 | `go test -tags=e2e -timeout=8m -count=1 -v ./test/e2e/... -run '^(TestFull_VacuumMaintenance|TestFull_BloatMaintenance|TestFull_UnusedIndexMaintenance|TestFull_RelationCardinality|TestFull_DuplicateIndexMaintenance)$'` | PASS — SYS-VAC-001 60.53s; SYS-BLOAT-001 50.88s; SYS-IDX-001 46.99s; SYS-IDX-002 45.32s; SYS-IDX-003 57.08s; suite 260.792s | 2026-08-30 |
+| phase9.5-static | `make fmt-check && make lint && make build && make test && go test -tags=e2e ./test/e2e -run '^$'` | PASS — complete format/lint/build/race suite and e2e compile green | 2026-08-30 |
+| phase9.5-images | `make build-images` | PASS — agent and server dev images rebuilt with advisor snapshot and skip-reason support | 2026-08-30 |
+| phase9.5-advisor-focused | `go test -tags=e2e -timeout=10m ./test/e2e -run '^TestFull_Advisor(ExactSet|Degraded|FixLifecycle|Misconfiguration)$' -count=1` | PASS — all SYS-ADV-001..004 individually green after deterministic setup corrections | 2026-08-30 |
+| phase9.5-full-suite-1 | `go test -tags=e2e -timeout=20m ./test/e2e -run '^TestFull_Advisor' -count=1` | PASS — all four advisor scenarios green in 133.715s | 2026-08-30 |
+| phase9.5-full-suite-2 | `go test -tags=e2e -timeout=20m ./test/e2e -run '^TestFull_Advisor' -count=1` | PASS — all four advisor scenarios green in 133.754s | 2026-08-30 |
+| phase9.5-full-suite-3 | `go test -tags=e2e -timeout=20m ./test/e2e -run '^TestFull_Advisor' -count=1` | PASS — all four advisor scenarios green in 133.633s | 2026-08-30 |
 
 ## 8. Runtime deviations from the plan
 
@@ -607,6 +623,8 @@ the units that touched it, so a later audit can attribute every diff.
 | D-039 | 9.4 | Duplicate indexes are described as a `redundant` advisor finding | The existing rule catalogue emits the stable `index.duplicate` rule ID; the scenario asserts that exact rule and its resolution | Reused the shipped advisor contract rather than inventing a second equivalent rule |
 | D-040 | 9.4 | Relation cardinality is described as a configured budget without naming the effective value | SYS-IDX-002 asserts the configured hard selector budget of 200; the selector may return the union of independently ranked primary/secondary candidates below that hard cap | The test verifies the actual shared selector contract and API truncation signal, including a positive lower-bound `relations_not_reported` value |
 | D-041 | 9.4 | Relation metric persistence requires new vacuum fields | Added forward-only migration `0011_relation_metrics.sql` instead of editing committed migration `0007_facts.sql` | Maintains the repository's append-only migration history while persisting the phase-9.4 API data |
+| D-042 | 9.5 | Plan describes a degraded findings list in the response | The established `/api/v1/findings` contract returns one flat array; the acceptance filters rows with `state=degraded` and checks their `degraded_reason` | Preserved the existing API contract while proving every degraded rule and its capability-specific reason |
+| D-043 | 9.5 | SYS-ADV-004 describes a third misconfigured instance | The scenario creates a third persisted instance in a separate synthetic cluster and seeds its bounded snapshot directly; the other three scenarios use live PostgreSQL, and ADV-003 executes real DROP/VACUUM/ALTER SYSTEM fixes | The repository harness starts one standalone PostgreSQL service; direct snapshot seeding keeps the exact-set acceptance deterministic without changing production APIs |
 
 Phase-6 healthcheck blocker resolved: the agent health server is initialized
 before target connection retries; the subsequent `SYS-HARNESS-001` smoke passed
@@ -630,8 +648,8 @@ collector or API failure.
 Phase 5 acceptance criteria are covered. D-026 records that live archive-enabled transitions cannot be exercised by the current harness; deterministic contract tests cover the required failure/success metric semantics without claiming that live transition. No scope, threshold, or contract was changed.
 
 Phase 7 acceptance has no open blocker: INT-ADV-001..008 and the complete local
-gate matrix pass. The remaining `SYS-ADV-001..003` system tests are intentionally
-scheduled for the phase-9 end-to-end sweep.
+gate matrix pass. SYS-ADV-001..004 now also pass through the phase-9 end-to-end
+advisor sweep.
 
 ## 10. Do-not-repeat
 
@@ -665,7 +683,7 @@ disagree with §1 and §4.
 | 6 — Host and container metrics | phase_07.md | `DONE` | 6/6 sub-phases closed; INT-HOST-001..005 and SYS-HARNESS-001 focused validation green; coverage 75.1%; phase commit `436ac99`; primary `agent:gpt5.6-luna` |
 | 7 — Advisor engine and rule packs | phase_08.md | `DONE` | 10/10 sub-phases closed; INT-ADV-001..008 green; advisor coverage 88.6%; global coverage 75.2%; phase commit `8891d6b` |
 | 8 — Command channel and query plans | phase_09.md | `DONE` | 11/11 sub-phases closed; INT-CMD-001..011, INT-PLAN-001/002 and SYS-PERM-001 green; coverage 75.0%, `internal/command` 100.0%; primary `agent:gpt5.6-luna`; phase commit `78dbf94` |
-| 9 — L3 end-to-end scenarios | phase_10.md | `IN_PROGRESS` | 4/8 sub-phases closed; SYS-REPL-006, SYS-ALERT-001..004, SYS-LOCK-001, SYS-DEADLOCK-001 and SYS-VAC/BLOAT/IDX-001..003 green; primary `agent:gpt5.6-luna` |
+| 9 — L3 end-to-end scenarios | phase_10.md | `IN_PROGRESS` | 5/8 sub-phases closed; SYS-REPL-006, SYS-ALERT-001..004, SYS-LOCK-001, SYS-DEADLOCK-001, SYS-VAC/BLOAT/IDX-001..003 and SYS-ADV-001..004 green; primary `agent:gpt5.6-luna` |
 | 10 — Packaging, CI, final documentation | phase_11.md | `TODO` | 0/5 sub-phases closed; primary `agent:gpt5.6-luna` |
 
 Status values: `TODO` · `IN_PROGRESS` · `DONE` · `SKIPPED` · `BLOCKED`
@@ -780,10 +798,10 @@ throughout.
 | INT-WAL-001 | integration | 5 | `PASS` | phase 5 § 5.3 — The `wal` check |
 | INT-WAL-002 | integration | 5 | `PASS` | phase 5 § 5.3 — The `wal` check |
 | INT-WAL-003 | integration | 5 | `PASS` | phase 5 § 5.3 — The `wal` check |
-| SYS-ADV-001 | system | 7 | `TODO` | phase 7 § 7.5 — Rule pack B — indexes, tables, autovacuum, bloat |
-| SYS-ADV-002 | system | 7 | `TODO` | phase 7 § 7.4 — Rule pack A — queries and transactions |
-| SYS-ADV-003 | system | 7 | `TODO` | phase 7 § 7.6 — Rule pack C — configuration, connections, durability |
-| SYS-ADV-004 | system | 9 | `TODO` | phase 9 § 9.5 — Advisor acceptance |
+| SYS-ADV-001 | system | 9 | `DONE` | phase 9 § 9.5 — exact three-finding relation/memory acceptance; three full-suite runs green |
+| SYS-ADV-002 | system | 9 | `DONE` | phase 9 § 9.5 — missing pg_stat_statements degrades query rules with named reasons; three full-suite runs green |
+| SYS-ADV-003 | system | 9 | `DONE` | phase 9 § 9.5 — DROP/VACUUM/work_mem reload resolves findings without reopening; three full-suite runs green |
+| SYS-ADV-004 | system | 9 | `DONE` | phase 9 § 9.5 — exact misconfiguration set and non-empty remediation; three full-suite runs green |
 | SYS-ALERT-001 | system | 1 | `DONE` | phase 9 § 9.2 — Alert episode fire/resolve through webhook |
 | SYS-ALERT-002 | system | 9 | `DONE` | phase 9 § 9.2 — Webhook retry and once-only delivery |
 | SYS-ALERT-003 | system | 9 | `DONE` | phase 9 § 9.2 — Leader failover deduplication |

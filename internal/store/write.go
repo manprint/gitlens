@@ -433,6 +433,18 @@ func WriteObjectFacts(ctx context.Context, tx pgx.Tx, rows []ObjectFactRow) erro
 	return writeRows(ctx, tx, `INSERT INTO object_facts (tenant_id,cluster_id,instance_id,datname,kind,key,labels,value_text,value_json,first_seen,last_seen,changed_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (tenant_id,instance_id,datname,kind,key) DO UPDATE SET last_seen=EXCLUDED.last_seen,labels=EXCLUDED.labels,value_text=EXCLUDED.value_text,value_json=EXCLUDED.value_json,changed_at=CASE WHEN object_facts.value_text IS DISTINCT FROM EXCLUDED.value_text OR object_facts.value_json IS DISTINCT FROM EXCLUDED.value_json THEN EXCLUDED.last_seen ELSE object_facts.changed_at END`, args)
 }
 
+// DeleteCheckSkipFacts removes capability-skip observations after a check has
+// become runnable again. Skip facts are instance-scoped even when the check's
+// normal results are database-scoped, so one successful result clears the
+// stale degraded state for the whole instance.
+func DeleteCheckSkipFacts(ctx context.Context, tx pgx.Tx, tenantID string, instanceID uuid.UUID, check string) error {
+	_, err := tx.Exec(ctx, `DELETE FROM object_facts WHERE tenant_id=$1 AND instance_id=$2 AND kind='check_skip' AND key=$3`, tenantID, instanceID, check)
+	if err != nil {
+		return fmt.Errorf("delete check skip fact: %w", err)
+	}
+	return nil
+}
+
 // WriteLockSnapshots keeps only the newest tree per instance and removes trees
 // older than the fifteen-minute freshness window for each touched instance.
 func WriteLockSnapshots(ctx context.Context, tx pgx.Tx, rows []LockSnapshotRow) error {

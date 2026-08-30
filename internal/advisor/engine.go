@@ -248,7 +248,11 @@ func (e *Engine) evaluateRule(r Rule, s *Snapshot) (out []Finding, panicked bool
 	}
 	for _, need := range r.Needs() {
 		if missingSnapshotInput(s, need) {
-			return []Finding{{RuleID: r.ID(), Severity: r.Severity(), State: StateDegraded, Scope: r.Scope(), Title: "Advisor input unavailable", Detail: "required advisor input is unavailable: " + need, DegradedReason: "missing input: " + need}}, false
+			reason := "missing input: " + need
+			if skipped, ok := s.SkippedChecks[need]; ok && strings.TrimSpace(skipped) != "" {
+				reason = skipped
+			}
+			return []Finding{{RuleID: r.ID(), Severity: r.Severity(), State: StateDegraded, Scope: r.Scope(), Title: "Advisor input unavailable", Detail: "required advisor input is unavailable: " + reason, DegradedReason: reason}}, false
 		}
 	}
 	return r.Evaluate(s), false

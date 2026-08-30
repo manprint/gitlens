@@ -2,7 +2,9 @@ package advisor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -124,7 +126,32 @@ func LoadSnapshot(ctx context.Context, pool *pgxpool.Pool, instanceID uuid.UUID,
 		return nil, err
 	}
 	s.Role = pgtype.Role(role)
+	var pgVersion int
+	var tier string
+	if err := pool.QueryRow(ctx, `SELECT pg_version, perm_tier FROM instances WHERE instance_id=$1`, instanceID).Scan(&pgVersion, &tier); err == nil {
+		s.PGVersion = pgtype.PGVersion(pgVersion)
+		if parsed, parseErr := pgtype.ParsePermTier(tier); parseErr == nil {
+			s.PermTier = parsed
+		}
+	} else if !isOptionalSnapshotError(err) {
+		return nil, err
+	}
+	if err := loadMetrics(ctx, pool, s, now); err != nil && !isOptionalSnapshotError(err) {
+		return nil, err
+	}
+	if err := loadFacts(ctx, pool, s); err != nil && !isOptionalSnapshotError(err) {
+		return nil, err
+	}
 	if err := loadRelationSnapshot(ctx, pool, s, now); err != nil {
+		return nil, err
+	}
+	if err := loadStatements(ctx, pool, s, now); err != nil && !isOptionalSnapshotError(err) {
+		return nil, err
+	}
+	if err := loadBaseline(ctx, pool, s, now); err != nil && !isOptionalSnapshotError(err) {
+		return nil, err
+	}
+	if err := loadSiblings(ctx, pool, s); err != nil && !isOptionalSnapshotError(err) {
 		return nil, err
 	}
 	return s, nil
@@ -137,35 +164,252 @@ func LoadSnapshot(ctx context.Context, pool *pgxpool.Pool, instanceID uuid.UUID,
 // affected rules as designed.
 func loadRelationSnapshot(ctx context.Context, pool *pgxpool.Pool, s *Snapshot, now time.Time) error {
 	if err := loadTables(ctx, pool, s, now); err != nil {
-		if isMissingRelationTable(err) {
-			return nil
+		if !isOptionalSnapshotError(err) {
+			return err
 		}
-		return err
 	}
 	if err := loadIndexes(ctx, pool, s, now); err != nil {
-		if isMissingRelationTable(err) {
-			return nil
+		if !isOptionalSnapshotError(err) {
+			return err
 		}
-		return err
 	}
 	if err := loadIndexFacts(ctx, pool, s); err != nil {
-		if isMissingRelationTable(err) {
-			return nil
+		if !isOptionalSnapshotError(err) {
+			return err
 		}
-		return err
 	}
 	if err := loadBloat(ctx, pool, s, now); err != nil {
-		if isMissingRelationTable(err) {
-			return nil
+		if !isOptionalSnapshotError(err) {
+			return err
 		}
-		return err
 	}
 	return nil
 }
 
-func isMissingRelationTable(err error) bool {
+func isOptionalSnapshotError(err error) bool {
 	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "42P01"
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	return pgErr.Code == "42P01" || pgErr.Code == "42703"
+}
+
+func loadMetrics(ctx context.Context, pool *pgxpool.Pool, s *Snapshot, now time.Time) error {
+	rows, err := pool.Query(ctx, `SELECT DISTINCT ON (metric, labels)
+		metric, labels, value
+		FROM metrics
+		WHERE tenant_id='default' AND instance_id=$1 AND ts >= $2
+		ORDER BY metric, labels, ts DESC`, s.InstanceID, now.Add(-15*time.Minute))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var hostTotal, hostSource float64
+	var hasHostTotal, hasHostAvailable, hasHostSource bool
+	for rows.Next() {
+		var name string
+		var rawLabels []byte
+		var value float64
+		if err := rows.Scan(&name, &rawLabels, &value); err != nil {
+			return err
+		}
+		labels := map[string]string{}
+		if len(rawLabels) > 0 {
+			_ = json.Unmarshal(rawLabels, &labels)
+		}
+		canonical := pgtype.CanonicalLabels(labels)
+		if s.Metrics[name] == nil {
+			s.Metrics[name] = map[string]float64{}
+		}
+		s.Metrics[name][canonical] = value
+		if canonical == "" {
+			switch name {
+			case "host_mem_total_bytes":
+				hostTotal, hasHostTotal = value, true
+			case "host_mem_available_bytes":
+				hasHostAvailable = true
+			case "host_metrics_source":
+				hostSource, hasHostSource = value, true
+			}
+		}
+		if name == "pg_setting_bytes" || name == "pg_setting_seconds" {
+			if setting := labels["name"]; setting != "" {
+				suffix := "_bytes"
+				if name == "pg_setting_seconds" {
+					suffix = "_seconds"
+				}
+				s.Settings[setting+suffix] = strconv.FormatFloat(value, 'f', -1, 64)
+			}
+		}
+	}
+	if hasHostTotal && hasHostAvailable && hostTotal > 0 {
+		s.Host = HostInfo{
+			Available:  true,
+			Source:     hostSourceName(hostSource),
+			TotalBytes: hostTotal,
+		}
+		if hasHostSource && (int(hostSource) == 1 || int(hostSource) == 2) {
+			s.Host.CgroupLimitBytes = hostTotal
+		}
+	}
+	return rows.Err()
+}
+
+func hostSourceName(value float64) string {
+	switch int(value) {
+	case 1:
+		return "cgroup_v1"
+	case 2:
+		return "cgroup_v2"
+	default:
+		return "host"
+	}
+}
+
+func loadFacts(ctx context.Context, pool *pgxpool.Pool, s *Snapshot) error {
+	rows, err := pool.Query(ctx, `SELECT kind, key, labels, COALESCE(value_text, ''), last_seen
+		FROM object_facts
+		WHERE tenant_id='default' AND instance_id=$1`, s.InstanceID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var kind, key, value string
+		var rawLabels []byte
+		var observed time.Time
+		if err := rows.Scan(&kind, &key, &rawLabels, &value, &observed); err != nil {
+			return err
+		}
+		labels := map[string]string{}
+		if len(rawLabels) > 0 {
+			_ = json.Unmarshal(rawLabels, &labels)
+		}
+		if s.Facts[kind] == nil {
+			s.Facts[kind] = map[string]Fact{}
+		}
+		s.Facts[kind][key] = Fact{Key: key, ValueText: value, ObservedAt: observed}
+		if kind == "setting" {
+			s.Settings[key] = value
+		}
+		if kind == "check_skip" {
+			s.SkippedChecks[key] = value
+			switch key {
+			case "stat_statements":
+				s.SkippedChecks["Statements"] = value
+			case "table_stats":
+				s.SkippedChecks["Tables"] = value
+			case "index_stats":
+				s.SkippedChecks["Indexes"] = value
+			case "bloat_estimate":
+				s.SkippedChecks["Bloat"] = value
+			}
+		}
+	}
+	return rows.Err()
+}
+
+func loadStatements(ctx context.Context, pool *pgxpool.Pool, s *Snapshot, now time.Time) error {
+	rows, err := pool.Query(ctx, `SELECT DISTINCT ON (datname, queryid)
+		datname, queryid, COALESCE(calls_rate, 0), COALESCE(exec_time_rate_ms, 0),
+		COALESCE(shared_blks_read_rate, 0), COALESCE(shared_blks_hit_rate, 0)
+		FROM metrics_statements
+		WHERE instance_id=$1 AND ts >= $2
+		ORDER BY datname, queryid, ts DESC`, s.InstanceID, now.Add(-15*time.Minute))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	s.Statements = make([]StatementStat, 0)
+	for rows.Next() {
+		var datname string
+		var q StatementStat
+		var exec, reads, hits float64
+		if err := rows.Scan(&datname, &q.QueryID, &q.Calls, &exec, &reads, &hits); err != nil {
+			return err
+		}
+		q.TotalExecTimeMs = exec
+		if q.Calls > 0 {
+			q.MeanExecTimeMs = exec / q.Calls
+		}
+		q.SharedBlksRead = reads
+		q.SharedBlksHit = hits
+		s.Statements = append(s.Statements, q)
+	}
+	return rows.Err()
+}
+
+func loadBaseline(ctx context.Context, pool *pgxpool.Pool, s *Snapshot, now time.Time) error {
+	rows, err := pool.Query(ctx, `SELECT queryid,
+		percentile_cont(0.5) WITHIN GROUP (ORDER BY CASE WHEN calls_rate > 0 THEN exec_time_rate_ms / calls_rate ELSE 0 END)
+		FROM metrics_statements
+		WHERE instance_id=$1 AND ts >= $2 AND ts < $3
+		GROUP BY queryid`, s.InstanceID, now.Add(-8*24*time.Hour), now.Add(-time.Hour))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	baseline := &Baseline{MeanExecTimeByQueryID: map[int64]float64{}}
+	for rows.Next() {
+		var queryID int64
+		var mean float64
+		if err := rows.Scan(&queryID, &mean); err != nil {
+			return err
+		}
+		baseline.MeanExecTimeByQueryID[queryID] = mean
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	s.Baseline = baseline
+	return nil
+}
+
+func loadSiblings(ctx context.Context, pool *pgxpool.Pool, s *Snapshot) error {
+	rows, err := pool.Query(ctx, `SELECT i.instance_id, i.role, f.kind, f.key,
+		COALESCE(f.value_text, ''), COALESCE(f.labels->>'def_hash', '')
+		FROM instances i
+		LEFT JOIN object_facts f ON f.instance_id=i.instance_id AND f.tenant_id='default'
+			AND f.kind IN ('setting', 'index_def')
+		WHERE i.cluster_id=$1 AND i.instance_id<>$2
+		ORDER BY i.instance_id`, s.ClusterID, s.InstanceID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	byID := map[uuid.UUID]*SiblingInfo{}
+	for rows.Next() {
+		var id uuid.UUID
+		var role, kind, key, value, hash *string
+		if err := rows.Scan(&id, &role, &kind, &key, &value, &hash); err != nil {
+			return err
+		}
+		sib := byID[id]
+		if sib == nil {
+			sib = &SiblingInfo{InstanceID: id, Settings: map[string]string{}, IndexHashes: map[string]string{}}
+			if role != nil {
+				sib.Role = pgtype.Role(*role)
+			}
+			byID[id] = sib
+		}
+		if kind == nil || key == nil {
+			continue
+		}
+		if *kind == "setting" && value != nil {
+			sib.Settings[*key] = *value
+		}
+		if *kind == "index_def" && hash != nil {
+			sib.IndexHashes[*key] = *hash
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	s.Siblings = make([]SiblingInfo, 0, len(byID))
+	for _, sibling := range byID {
+		s.Siblings = append(s.Siblings, *sibling)
+	}
+	return nil
 }
 
 func loadTables(ctx context.Context, pool *pgxpool.Pool, s *Snapshot, now time.Time) error {
