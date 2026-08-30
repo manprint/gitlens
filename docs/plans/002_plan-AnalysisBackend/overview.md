@@ -86,7 +86,7 @@ deltas computed server-side, `D19` buffer 6h < sample age 12h < compress 48h,
 | # | Question | Assumed default in this plan | Affects |
 |---|----------|------------------------------|---------|
 | Q-A | `RESOLVED 2026-08-29` — PG18 `pg_stat_wal` has core counters only; WAL I/O columns are in `pg_stat_io` | The `wal` check collects core WAL counters from `pg_stat_wal` and treats I/O fields as version-gated `pg_stat_io` optionals | phase 5 § 5.1, § 5.3 |
-| Q-B | Does the fleet's real workload need per-user or per-application connection breakdown, or is per-state enough? | Per-state and per-database only, with a bounded `top_n` of 10 application names; a wider breakdown is a config opt-in | phase 3 § 3.3 |
+| Q-B | Does the fleet's real workload need per-user or per-application connection breakdown, or is per-state enough? | Per-state and per-database only, with a bounded `top_n` of 10 application names | **DEFERRED TO PLAN 003** — no wider breakdown is required by the current backend contract; revisit it with the UI and tenant analytics requirements |
 
 ## Architecture summary
 

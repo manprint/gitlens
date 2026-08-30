@@ -482,8 +482,8 @@ func buildTopologyEdges(mgr *agent.Manager, results []wire.Result, lastEdgeState
 }
 
 // waitForTarget blocks (up to 60s) until mgr's identity cache initializes
-	// successfully, retrying every second. addScheduleEntries below reads
-	// mgr.Role()/PGVersion()/PermTier()/HasExtension() exactly once, at startup,
+// successfully, retrying every second. addScheduleEntries below reads
+// mgr.Role()/PGVersion()/PermTier()/HasExtension() exactly once, at startup,
 // to decide which checks ever get scheduled for this target's entire
 // lifetime — those accessors DO retry internally on a later call (their
 // underlying ensureCache doesn't latch a failure), but addScheduleEntries

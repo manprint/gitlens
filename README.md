@@ -4,9 +4,14 @@ pglens is a self-hostable monitoring system for fleets of PostgreSQL instances, 
 
 ## Project status
 
-This project is pre-alpha. The foundations (types, clock, identity, delta, cardinality, wire envelope, server schema) are implemented and tested. The agent (connections, scheduler, buffer, push), L3 harness, replication topology, and ASH are scaffolded as stubs and will be completed in the next iteration (see `docs/plans/001_plan-Foundations/`). The current release builds two binaries (`pglens-agent` and `pglens-server`); the agent requires implementation to collect, the server accepts pushes on `/api/v1/push`.
+The backend implementation is complete through phase 10 of the analysis-backend
+plan. It ships the agent, server, durable ingest, replication/topology views,
+ASH, alerts, advisor findings, on-demand command gates, deployment artefacts,
+and the L1–L3 verification suites. The frontend/UI is intentionally outside
+this repository phase.
 
-**Phase 5 (L3 E2E test harness)** ships test infrastructure and scenarios only — no new user-visible product behavior is added in this phase. It provides the foundation for proving system-level correctness through controlled failure injection, workload generation, and global invariant checking.
+For the product boundary and the behaviour that is intentionally not promised,
+see [Product limits](docs/LIMITS.md).
 
 ## Requirements
 
@@ -34,28 +39,24 @@ Three commands from nothing to data (requires Docker and a target PostgreSQL 15+
 
 ```sh
 # 1. Create the monitoring role on each target PostgreSQL instance (as superuser)
-psql -U postgres -h <target-host> -v pw="'<password>'" -f deploy/sql/monitoring_user.sql
+export PGLENS_DSN='postgres://postgres@<target-host>/postgres'
+export PGLENS_MONITORING_PASSWORD='<password>'
+psql "$PGLENS_DSN" -v pglens_password="$PGLENS_MONITORING_PASSWORD" \
+  -v dbname=postgres -f deploy/sql/monitoring_user.sql
 
 # 2. Configure the agent and start the stack
-# Edit deploy/agent.example.yaml with your target DSN, or use environment variables:
-PGLENS_SERVER_URL=http://localhost:8080 \
+# Edit deploy/agent.example.yaml with your target DSN and set a real token.
 PGLENS_BOOTSTRAP_TOKEN=dev-token \
-docker compose -f deploy/compose/docker-compose.yml up -d
+docker compose -f deploy/docker-compose.yml up -d
 
 # 3. Check that data is appearing
-curl -s localhost:8080/healthz | jq .
-curl -s localhost:8080/api/v1/clusters | jq .
+curl -fsS localhost:8080/readyz
+curl -fsS localhost:8080/api/v1/clusters | jq .
 ```
 
-Output from `healthz`:
-```json
-{
-  "state": "ok",
-  "last_successful_push": "2026-08-27T02:00:00Z",
-  "buffer": {"bytes_used": 1234567, "segments": 2, "samples_dropped": 0},
-  "clock_skew_seconds": 0.5
-}
-```
+The server health endpoints return the plain-text body `ok`; the agent's
+separate health endpoint at `:9187/healthz` returns JSON status and buffer
+details.
 
 Output from `/api/v1/clusters` (first cluster):
 ```json
@@ -89,29 +90,33 @@ The monitoring user is created by `deploy/sql/monitoring_user.sql`. It creates a
 Run it as a superuser (or as `rds_superuser` on Amazon RDS):
 
 ```sh
-psql -v pw="'<password>'" -f deploy/sql/monitoring_user.sql
+export PGLENS_DSN='postgres://postgres@<target-host>/postgres'
+export PGLENS_MONITORING_PASSWORD='<password>'
+psql "$PGLENS_DSN" -v pglens_password="$PGLENS_MONITORING_PASSWORD" \
+  -v dbname=postgres -f deploy/sql/monitoring_user.sql
 ```
 
 The two `GRANT EXECUTE ON FUNCTION pg_control_system()` and `pg_control_checkpoint()` are required because these functions are not covered by `pg_monitor`. Without them the cluster identity falls back to the configured `cluster_name` and a failover can split one cluster into two (see Monitoring a replicated cluster).
 
-The script leaves two optional grants commented out:
+The script supports explicit higher tiers:
 
-- `GRANT pg_read_all_data TO pglens` — enables `EXPLAIN` without `ANALYZE` (tier T1)
-- `GRANT pg_signal_backend TO pglens` — enables cancelling queries from the UI (tier T2)
+- `-v tier1=1` — adds `pg_read_all_data` and enables plan-only `EXPLAIN` (T1)
+- `-v tier2=1` — adds `pg_signal_backend` and enables cancel/terminate (T2; also pass `tier1=1`)
 
-Uncomment them only if you need those features.
+The script never creates extensions. See [the permission-tier guide](deploy/sql/README.md)
+for the complete matrix and downgrade procedure.
 
 ## Running the server
 
 **Docker Compose (recommended):**
 
 ```sh
-docker compose -f deploy/compose/docker-compose.yml up -d
+docker compose -f deploy/docker-compose.yml up -d
 # or the minimal TimescaleDB service
 docker compose -f deploy/compose/timescaledb.yml up -d
 ```
 
-The server applies migrations on startup (forward-only, idempotent) and listens on `:8080`. See `deploy/compose/docker-compose.yml` for the pinned image `timescale/timescaledb:2.29.0-pg17`.
+The server applies migrations on startup (forward-only, idempotent) and listens on `:8080`. See `deploy/docker-compose.yml` for the pinned image `timescale/timescaledb:2.29.0-pg17` and the self-contained server/agent stack.
 
 **Binary:**
 
@@ -135,8 +140,9 @@ PGLENS_LISTEN=:8080 \
 | `PGLENS_ALERT_INTERVAL` | duration | `30s` | alert evaluation interval |
 | `PGLENS_ADVISOR_INTERVAL` | duration | `15m` | advisor finding evaluation interval |
 | `PGLENS_COMMAND_TTL` | duration | `5m` | lifetime of an on-demand command before expiry |
-| `PGLENS_SLACK_WEBHOOK_URL` | URL | unset | enables Slack notifications |
-| `PGLENS_SLACK_WEBHOOK_URL_FILE` | path | unset | reads the Slack URL; takes precedence over the inline URL |
+| `PGLENS_ALERT_SLACK_WEBHOOK_URL` | URL | unset | enables Slack notifications (preferred name) |
+| `PGLENS_ALERT_SLACK_WEBHOOK_URL_FILE` | path | unset | reads the Slack URL; takes precedence over the inline URL |
+| `PGLENS_SLACK_WEBHOOK_URL[_FILE]` | URL/path | unset | legacy Slack aliases, still accepted |
 | `PGLENS_WEBHOOK_URL` | URL | unset | enables generic webhook notifications |
 
 The bootstrap token is a shared secret; this release has no token rotation, no mTLS, and no approval queue. Revocation is supported: `UPDATE agents SET revoked_at = now()` makes the next push return 401.
@@ -149,18 +155,18 @@ to an agent target. Supported commands are `explain`, `cancel`, `terminate`,
 and `pgstattuple`; every request, claim, result, expiry, rejection, and error
 is recorded in the command audit stream.
 
-Enable the channel explicitly on the server and agent. The agent-side
-dispatcher is disabled by default for mutating or potentially expensive
-operations; `targets[].allow_explain_analyze` and `targets[].allow_signal`
-also default to `false`.
+The pull channel is available by default, but each target is deny-by-default
+for mutating or potentially expensive operations:
+`targets[].allow_explain_analyze` and `targets[].allow_signal` default to
+`false`. Set `commands.enabled: false` for a strictly read-only agent.
 
 ```sh
 INSTANCE_ID=11111111-1111-1111-1111-111111111111
 
 # Queue EXPLAIN (the command carries queryid and options, never SQL text).
-COMMAND_ID=$(curl -s -X POST http://localhost:8080/api/v1/commands \
+COMMAND_ID=$(curl -s -X POST "http://localhost:8080/api/v1/instances/$INSTANCE_ID/commands" \
   -H 'Content-Type: application/json' \
-  -d '{"instance_id":"'"$INSTANCE_ID"'","kind":"explain","args":{"queryid":1234,"datname":"app","analyze":false}}' \
+  -d '{"kind":"explain","args":{"queryid":1234,"datname":"app","analyze":false}}' \
   | jq -r .command_id)
 
 # Poll state/result, then inspect the persisted plan history and audit trail.
@@ -180,8 +186,8 @@ Security and operational boundaries:
 
 - With `commands.enabled: false` the agent remains strictly read-only; it
   does not poll or execute on-demand commands.
-- The server performs command-kind, argument, permission-tier, target-policy,
-  and expiry checks before accepting or dispatching work.
+- The server validates authentication, envelope shape, command state and expiry;
+  the agent is authoritative for capability, target-policy and execution gates.
 - `EXPLAIN ANALYZE` executes the selected statement inside a transaction that
   is rolled back, but it still consumes database resources and can observe
   locks or invoke side effects that PostgreSQL permits during execution.
@@ -229,14 +235,14 @@ curl -s -X POST http://localhost:8080/api/v1/findings/<finding-id>/mute \
 The findings listing returns a JSON array, for example:
 
 ```json
-[{"finding_id":"txn.long_running/11111111-1111-1111-1111-111111111111","rule_id":"txn.long_running","severity":"warning","state":"open","scope":"instance","title":"Long-running transaction"}]
+[{"finding_id":"query.slow_mean/11111111-1111-1111-1111-111111111111","rule_id":"query.slow_mean","severity":"warning","state":"open","scope":"instance","title":"High mean query latency"}]
 ```
 
 Mute returns the changed state and expiry; remove it with
 `DELETE /api/v1/findings/<finding-id>/mute` (which returns `204`):
 
 ```json
-{"finding_id":"txn.long_running/11111111-1111-1111-1111-111111111111","state":"muted","muted_until":"2026-08-29T11:00:00Z","mute_reason":"accepted risk"}
+{"finding_id":"query.slow_mean/11111111-1111-1111-1111-111111111111","state":"muted","muted_until":"2026-08-29T11:00:00Z","mute_reason":"accepted risk"}
 ```
 
 The rule catalogue is available from `/api/v1/advisor/rules`; it is the
@@ -261,11 +267,6 @@ The catalogue response is a JSON array, for example:
 | `query.regression` | critical | A query is materially slower than its seven-day baseline. |
 | `query.temp_bytes_high` | warning | A query writes unusually large temporary volumes per call. |
 | `query.cache_miss_high` | info | A high-volume query has an excessive shared-buffer read ratio. |
-| `txn.long_running` | warning | A transaction has remained open beyond the safe age threshold. |
-| `txn.idle_in_transaction` | warning | A session is idle in a transaction for too long. |
-| `txn.prepared_orphan` | critical | An old prepared transaction can prevent vacuum progress. |
-| `txn.high_rollback_ratio` | info | The database is seeing an unusually high rollback ratio. |
-| `txn.wraparound_risk` | critical | Transaction ID age is approaching wraparound risk. |
 | `index.unused` | warning | A large non-primary index has no recorded usage over seven days. |
 | `index.duplicate` | warning | Multiple indexes share the same definition on one table. |
 | `index.redundant_prefix` | info | A shorter non-unique index is a prefix of another index. |
@@ -310,10 +311,11 @@ The agent collects from each configured target, buffers samples to disk, and pus
 ```sh
 docker run -d --name pglens-agent \
   -v agent-data:/var/lib/pglens \
+  -v "$PWD/deploy/agent.example.yaml":/etc/pglens/agent.yaml:ro \
   -v /proc:/host/proc:ro -v /sys:/host/sys:ro \
   -e PGLENS_SERVER_URL=http://pglens-server:8080 \
   -e PGLENS_BOOTSTRAP_TOKEN=dev-token \
-  ghcr.io/manprint/pglens-agent:dev --config /etc/pglens/agent.yaml
+  ghcr.io/manprint/pglens-agent:dev run --config /etc/pglens/agent.yaml
 ```
 
 **Persistent volume explanation:** The `-v agent-data:/var/lib/pglens` flag mounts a named volume at `/var/lib/pglens`. This directory holds `identity.json`, which contains the agent's instance UUID. **Without this persistent mount:**
@@ -336,20 +338,22 @@ services:
     depends_on: [pglens-server]
     volumes:
       - agent-data:/var/lib/pglens      # REQUIRED: persistent volume for identity.json
+      - ./deploy/agent.example.yaml:/etc/pglens/agent.yaml:ro
       - /proc:/host/proc:ro              # read-only host introspection
       - /sys:/host/sys:ro                # read-only host introspection
     environment:
       PGLENS_SERVER_URL: http://pglens-server:8080
       PGLENS_BOOTSTRAP_TOKEN: dev-token
+      PGLENS_CONFIG: /etc/pglens/agent.yaml
       HOST_PROC: /host/proc
       HOST_SYS: /host/sys
       # OR mount the config file: 
       # PGLENS_CONFIG: /etc/pglens/agent.yaml
     healthcheck:
-      test: ["CMD", "/usr/local/bin/pglens-agent", "check", "--dsn", "postgres://..."]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test: ["CMD", "/usr/local/bin/pglens-agent", "--healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
 volumes:
   agent-data:                           # named volume persists across restarts
@@ -416,8 +420,8 @@ Annotated `deploy/agent.example.yaml`:
 # Server connection (required)
 server:
   url: http://pglens-server:8080     # string: HTTP URL to pglens server (required)
-  token: dev-token                   # string: bootstrap token (required unless token_file is set)
-  token_file: /run/secrets/pglens    # string: path to file containing token; overrides token field
+  token: dev-token                   # string: bootstrap token (use token_file instead for a file secret)
+  token_file: /run/secrets/pglens    # string: path to file containing token; used when token is empty
   
 # Identity persistence (required)
 identity_path: /var/lib/pglens/identity.json  # string: path to identity file (must be on persistent mount)
@@ -485,7 +489,7 @@ checks:
 - `identity_path` must be on a persistent mount (not container root); use `pglens-agent check` to verify
 - `targets` must be non-empty; each target requires `name` and `dsn`
 - Duration format: `10s`, `1m`, `1h` (Go time.ParseDuration syntax)
-- Size format: `512MiB`, `1GiB` (parsed by Go's time/humanize)
+- Size format: `512MiB`, `1GiB`, `512MB` or `512B` (binary/decimal units are parsed by the agent)
 
 Relation endpoints are available at `/api/v1/instances/{id}/tables`,
 `/indexes`, and `/bloat`; each response includes `truncated` when the relation
@@ -570,8 +574,8 @@ warnings
 - **system_identifier** — stable cluster identity; if it says `N/A (requires pg_control_system privilege)`, you need the grant from `monitoring_user.sql`
 - **permission tier**:
   - `T0 (pg_monitor)` — minimum, enables all core monitoring
-  - `T1 (pg_monitor + pg_read_all_data)` — enables `EXPLAIN` without `ANALYZE` in the UI
-  - `T2 (pg_monitor + pg_read_all_data + pg_signal_backend)` — enables query cancellation
+  - `T1 (pg_monitor + pg_read_all_stats + pg_read_all_data)` — enables plan-only `EXPLAIN` in the UI
+  - `T2 (T1 + pg_signal_backend)` — enables query cancellation and termination
 - **extensions** — `pg_stat_statements=yes` is required for the `stat_statements` check; `pg_buffercache` is optional
 - **databases** — number of databases found and how many will be monitored; if some are skipped due to `db_budget`, the reason is shown
 
@@ -885,6 +889,46 @@ curl -s localhost:8080/healthz
 curl -s localhost:8080/readyz
 ```
 
+### Endpoint index
+
+The API is authenticated with the configured bearer token where applicable.
+The complete route surface is:
+
+```text
+GET    /api/v1/clusters
+GET    /api/v1/clusters/{id}/topology
+GET    /api/v1/clusters/{id}/replication
+GET    /api/v1/clusters/{id}/settings-drift
+GET    /api/v1/instances
+GET    /api/v1/instances/{id}
+GET    /api/v1/instances/{id}/activity|databases|host|settings|tables|indexes|bloat|command-audit
+GET    /api/v1/locks
+GET    /api/v1/metrics/query
+GET    /api/v1/events
+GET    /api/v1/statements
+GET    /api/v1/ash|ash/top
+POST   /api/v1/push
+GET    /api/v1/plans
+POST   /api/v1/instances/{id}/commands
+GET    /api/v1/commands/{id}
+GET    /api/v1/agents/{agent_id}/commands
+POST   /api/v1/commands/{id}/result
+GET    /api/v1/alerts|alerts/{alert_key}
+GET    /api/v1/alert-rules
+PUT    /api/v1/alert-rules/{rule_id}
+GET    /api/v1/silences
+POST   /api/v1/silences
+DELETE /api/v1/silences/{id}
+GET    /api/v1/findings|findings/{finding-id}
+POST   /api/v1/findings/{finding-id}/mute
+DELETE /api/v1/findings/{finding-id}/mute
+GET    /api/v1/advisor/rules
+```
+
+The agent-only command poll and result routes are listed for operators
+debugging the pull channel; normal users enqueue commands through the instance
+route and read them through the command status route.
+
 ## Monitoring a replicated cluster
 
 **Setup:** Point the agent at each instance (primary and all standbys) in your configuration. Instances are grouped into a cluster automatically by `system_identifier`, which is read from `pg_control_system()` during each agent check. No manual clustering is needed.
@@ -1051,7 +1095,10 @@ GRANT EXECUTE ON FUNCTION pg_control_checkpoint() TO pglens;
 
 Or re-run the setup script:
 ```sh
-psql -U postgres -v pw="'mypassword'" -f deploy/sql/monitoring_user.sql
+export PGLENS_DSN='postgres://postgres@<target-host>/postgres'
+export PGLENS_MONITORING_PASSWORD='<password>'
+psql "$PGLENS_DSN" -v pglens_password="$PGLENS_MONITORING_PASSWORD" \
+  -v dbname=postgres -f deploy/sql/monitoring_user.sql
 ```
 
 Without this grant, the agent falls back to `cluster_name` for cluster identity, and a failover can split the cluster into two in the UI.
@@ -1168,6 +1215,9 @@ To fix: mount the persistent volume and restart. Old duplicate instances will ag
 
 ## Known limits
 
+The authoritative, numbered list is [docs/LIMITS.md](docs/LIMITS.md). The
+following is a short operational summary.
+
 The server accepts agents speaking protocol version 1 or 2. An agent newer than
 the server is rejected, so upgrade the server before upgrading agents.
 
@@ -1209,6 +1259,12 @@ the server is rejected, so upgrade the server before upgrading agents.
 - **Statistical sampling, not exact tracing.** ASH samples once per second, not continuously. Queries shorter than approximately 1 second are under-represented in results. This is the same fundamental trade-off made by Oracle ASH and AWS Performance Insights — acceptable for identifying where the database spends time over hours or days, not suitable for microsecond-level analysis.
 - **Fewer than 60 samples is not statistically meaningful.** When a requested time range contains fewer than 60 total samples across all wait events, the API response includes a `warning` field to alert you that results may be unreliable. This is a built-in guard against drawing conclusions from too-small a sample set.
 - **At most 100 distinct wait keys per 10-second window.** When more than 100 unique combinations of (database, wait_event_type, wait_event, state, query) appear in a single 10-second window, the top 99 by sample count are kept individually and the remainder is folded into an `other` bucket. The total sample count is always conserved exactly (never underestimated), making this a safe operation for producing aggregate statistics.
+
+## Contributing
+
+Build, lint, and test commands are documented above. Before opening a change,
+read [CONTRIBUTING.md](CONTRIBUTING.md) and keep implementation and plan state
+in sync with the active phase.
 
 ## Licence
 

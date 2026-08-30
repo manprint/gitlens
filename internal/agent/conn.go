@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/manprint/pglens/internal/check"
 	"github.com/manprint/pglens/internal/clock"
@@ -49,6 +50,11 @@ type Manager struct {
 	mu     sync.Mutex
 	dbs    map[string]*pgxpool.Pool // per-database pools
 	dbtc   map[string]time.Time     // last access time per database
+}
+
+type capabilityConn interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+	Query(context.Context, string, ...any) (pgx.Rows, error)
 }
 
 // NewManager creates a connection manager for the given target DSN.
@@ -366,7 +372,7 @@ func (m *Manager) ensureCache(ctx context.Context) error {
 // and commands. Errors are treated conservatively: T0 and an empty extension
 // set keep monitoring read-only instead of making an unavailable target look
 // more capable than it is.
-func (m *Manager) queryCapabilities(ctx context.Context, conn *pgxpool.Conn) (pgtype.PermTier, map[string]bool) {
+func (m *Manager) queryCapabilities(ctx context.Context, conn capabilityConn) (pgtype.PermTier, map[string]bool) {
 	tier := pgtype.TierReadOnly
 	var hasReadAllData bool
 	if err := conn.QueryRow(ctx, `

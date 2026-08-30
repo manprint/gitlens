@@ -2,13 +2,88 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"regexp"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pashagolub/pgxmock/v4"
 	"github.com/stretchr/testify/require"
+
+	"github.com/manprint/pglens/internal/pgtype"
 )
+
+func TestManager_QueryCapabilities(t *testing.T) {
+	tests := []struct {
+		name       string
+		readAll    bool
+		signal     bool
+		exts       []string
+		wantTier   pgtype.PermTier
+		wantErrors bool
+	}{
+		{name: "T0 when optional queries fail", wantTier: pgtype.TierReadOnly, wantErrors: true},
+		{name: "T1 with extension", readAll: true, exts: []string{"pg_stat_statements"}, wantTier: pgtype.TierExplain},
+		{name: "T2 with extension", readAll: true, signal: true, exts: []string{"pgstattuple", "pg_stat_statements"}, wantTier: pgtype.TierSignal},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock, err := pgxmock.NewConn()
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				require.NoError(t, mock.Close(context.Background()))
+				require.NoError(t, mock.ExpectationsWereMet())
+			})
+
+			readExpectation := mock.ExpectQuery("pg_read_all_data").WillReturnRows(
+				pgxmock.NewRows([]string{"exists"}).AddRow(tt.readAll),
+			)
+			if tt.wantErrors {
+				readExpectation.WillReturnError(errors.New("capability probe failed"))
+			}
+			signalExpectation := mock.ExpectQuery("pg_signal_backend").WillReturnRows(
+				pgxmock.NewRows([]string{"exists"}).AddRow(tt.signal),
+			)
+			if tt.wantErrors {
+				signalExpectation.WillReturnError(errors.New("capability probe failed"))
+			}
+			if tt.exts == nil {
+				mock.ExpectQuery("SELECT extname").WillReturnError(errors.New("extension probe failed"))
+			} else {
+				rows := pgxmock.NewRows([]string{"extname"})
+				for _, ext := range tt.exts {
+					rows.AddRow(ext)
+				}
+				mock.ExpectQuery("SELECT extname").WillReturnRows(rows)
+			}
+			mock.ExpectClose()
+
+			m := &Manager{}
+			gotTier, gotExts := m.queryCapabilities(context.Background(), mock)
+			require.Equal(t, tt.wantTier, gotTier)
+			for _, ext := range tt.exts {
+				require.True(t, gotExts[ext])
+			}
+		})
+	}
+}
+
+func TestManager_RefreshCapabilities_ConnectionError(t *testing.T) {
+	m, err := NewManager(context.Background(), "refresh-capabilities", "postgres://user:pass@127.0.0.1:1/nonexistent?connect_timeout=1", DefaultConnOptions(), nil)
+	require.NoError(t, err)
+	defer m.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	require.Error(t, m.RefreshCapabilities(ctx))
+	cancel()
+
+	m.target.cache.initialized = true
+	ctx, cancel = context.WithTimeout(context.Background(), 100*time.Millisecond)
+	require.Error(t, m.RefreshCapabilities(ctx))
+	cancel()
+}
 
 func TestManager_AddrPort_ParsedFromDSN(t *testing.T) {
 	m := &Manager{target: &poolHolder{dsn: "postgres://user:pass@dbhost:6543/postgres?sslmode=disable"}}

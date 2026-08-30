@@ -181,10 +181,9 @@ func (d *Dispatcher) dispatch(ctx context.Context, polled polledCommand) error {
 	if refresher, ok := binding.target.(interface {
 		RefreshCapabilities(context.Context) error
 	}); ok {
-		if err := refresher.RefreshCapabilities(ctx); err != nil {
-			// Keep the last known conservative capability state on a transient
-			// refresh failure; the executor will still enforce its gates.
-		}
+		// Keep the last known conservative capability state on a transient
+		// refresh failure; the executor will still enforce its gates.
+		_ = refresher.RefreshCapabilities(ctx)
 	}
 	gates := command.Gates{
 		Tier:                binding.target.PermTier(),
