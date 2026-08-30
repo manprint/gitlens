@@ -2,7 +2,7 @@
 
 > **READ THIS FILE FIRST at the start of every session, before any other plan
 > file. OPEN a unit in §1 before touching code; CLOSE it after the gates pass.**
-> **Last updated:** 2026-08-30 (phase 9.8 opened) by `agent:gpt5.6-luna` | **Session:** 31
+> **Last updated:** 2026-08-30 (phase 10.1 opened) by `agent:gpt5.6-luna` | **Session:** 32
 
 ## 0. Protocol
 
@@ -49,13 +49,13 @@ work — a phase that looks blocked is a signal to read §9, not to skip ahead.
 ## 1. Current unit
 
 - **Type:** sub-phase
-- **ID:** `9.8`
+- **ID:** `10.1`
 - **Status:** `OPEN`
-- **Intent:** close phase 9 documentation with contributor guidance and anti-flake rules.
-- **Phase:** 9 — L3 end-to-end scenarios ([phase_10.md](phase_10.md))
-- **Next action:** update `README.md` and `CONTRIBUTING.md` for the five test levels and E2E contribution workflow, then run the documentation gates and close phase 9.
+- **Intent:** add the CI unit, integration and E2E jobs with a reproducible local target.
+- **Phase:** 10 — Packaging, CI, final documentation ([phase_11.md](phase_11.md))
+- **Next action:** inspect the existing workflows and Makefile, then implement phase_11.md §10.1 exactly.
 - **Assigned:** `agent:gpt5.6-luna`
-- **Repo state:** branch `main`, phase 9.7 complete.
+- **Repo state:** branch `main`, phase 9 complete.
 
 ## 2. Feature context (self-contained recap)
 
@@ -201,6 +201,7 @@ The authoritative gate commands are the Makefile targets. These are identical to
 | 81 | sub-phase | 9.5 | agent:gpt5.6-luna | Added advisor snapshot completeness, persisted capability skips, degraded reasons and SYS-ADV-001..004 acceptance scenarios | `cmd/pglens-agent/run.go`, `internal/advisor/engine.go`, `internal/advisor/rules_config.go`, `internal/advisor/snapshot.go`, `internal/server/pipeline.go`, `internal/store/write.go`, `internal/wire/envelope.go`, `test/e2e/advisor_test.go`, `test/e2e/scenarios/advisor.yml`, `STATE.md` | all four advisor scenarios PASS in three consecutive full-suite runs; fmt/lint/build/test and rebuilt Docker images green | `ba41abb` |
 | 82 | sub-phase | 9.6 | agent:gpt5.6-luna | Added command-channel L3 acceptance for explain, signal, bloat, gate rejection, at-most-once restart and TTL expiry | `internal/agent/conn.go`, `internal/agent/exec_explain.go`, `internal/server/api_plans.go`, `internal/server/api_commands_integration_test.go`, `internal/server/api_plans_test.go`, `test/compose/base.yml`, `test/compose/topo-primary-standby.yml`, `test/compose/agent-container-primary-standby.yml`, `test/fixtures/agent-primary-standby.yaml`, `test/fixtures/sql/command_users.sql`, `test/harness/api.go`, `test/e2e/commands_test.go`, `test/e2e/scenarios/commands.yml`, `STATE.md` | SYS-CMD-001..004 PASS individually and in three consecutive command suites; fmt/lint/build/test/race/e2e compile/vet and Docker images green | `2f212a4` |
 | 83 | sub-phase | 9.7 | agent:gpt5.6-luna | Added SYS-ARCH-001 L3 acceptance for failing and repaired archiving, plus valid PostgreSQL setting-sentinel handling in the harness invariant | `test/e2e/archiving_test.go`, `test/e2e/scenarios/archiving.yml`, `test/fixtures/agent-standalone.yaml`, `test/harness/invariants.go`, `STATE.md` | SYS-ARCH-001 PASS in three consecutive runs; fmt/lint/build/test/e2e compile/vet and Docker images green | `0dcf4f4` |
+| 84 | sub-phase | 9.8 | agent:gpt5.6-luna | Updated README test-level guidance and replaced stale contributor scenario instructions with the current E2E layout and five anti-flake rules | `README.md`, `CONTRIBUTING.md`, `STATE.md` | diff-check, fmt-check and documented E2E command green | `c70edcc` |
 
 ## 5. Files touched
 
@@ -488,6 +489,9 @@ the units that touched it, so a later audit can attribute every diff.
 | `test/e2e/archiving_test.go` | 9.7 | SYS-ARCH-001 L3 acceptance scenario |
 | `test/e2e/scenarios/archiving.yml` | 9.7 | archiving scenario metadata |
 | `STATE.md` | 9.7 | phase close evidence and ledger |
+| `README.md` | 9.8 | five test levels and command durations |
+| `CONTRIBUTING.md` | 9.8 | E2E scenario layout, registration and anti-flake rules |
+| `STATE.md` | 9.8 | phase close evidence and ledger |
 
 ## 6. In-flight work
 
@@ -609,6 +613,8 @@ the units that touched it, so a later audit can attribute every diff.
 | phase9.7-run-1 | `go test -tags=e2e -timeout=8m ./test/e2e -run '^TestFull_Archiving$' -count=1 -v` | PASS — SYS-ARCH-001 in 51.935s | 2026-08-30 |
 | phase9.7-run-2 | `go test -tags=e2e -timeout=8m ./test/e2e -run '^TestFull_Archiving$' -count=1 -v` | PASS — SYS-ARCH-001 in 51.912s | 2026-08-30 |
 | phase9.7-run-3 | `go test -tags=e2e -timeout=8m ./test/e2e -run '^TestFull_Archiving$' -count=1 -v` | PASS — SYS-ARCH-001 in 47.124s | 2026-08-30 |
+| phase9.8-docs-static | `git diff --check && make fmt-check` | PASS — documentation diff and repository formatting clean | 2026-08-30 |
+| phase9.8-document-command | `go test -tags=e2e -timeout=8m ./test/e2e -run '^TestFull_Archiving$' -count=1 -v` | PASS — command documented in CONTRIBUTING; TestFull_Archiving in 46.884s | 2026-08-30 |
 
 ## 8. Runtime deviations from the plan
 
@@ -672,7 +678,9 @@ Phase 9.6 has no open blocker: SYS-CMD-001..004 passed individually and in
 three consecutive full command-suite runs, with the repository gates green.
 Phase 9.7 has no open blocker: SYS-ARCH-001 passed in three consecutive runs;
 the test uses in-container PostgreSQL control after restart and documents the
-archiver-versus-backup verification boundary.
+archiver-versus-backup verification boundary. Phase 9.8 has no open blocker:
+the README and contributor documentation were updated and the documented E2E
+command passed.
 
 ## 9. Blockers and open questions
 
@@ -727,13 +735,13 @@ disagree with §1 and §4.
 | 6 — Host and container metrics | phase_07.md | `DONE` | 6/6 sub-phases closed; INT-HOST-001..005 and SYS-HARNESS-001 focused validation green; coverage 75.1%; phase commit `436ac99`; primary `agent:gpt5.6-luna` |
 | 7 — Advisor engine and rule packs | phase_08.md | `DONE` | 10/10 sub-phases closed; INT-ADV-001..008 green; advisor coverage 88.6%; global coverage 75.2%; phase commit `8891d6b` |
 | 8 — Command channel and query plans | phase_09.md | `DONE` | 11/11 sub-phases closed; INT-CMD-001..011, INT-PLAN-001/002 and SYS-PERM-001 green; coverage 75.0%, `internal/command` 100.0%; primary `agent:gpt5.6-luna`; phase commit `78dbf94` |
-| 9 — L3 end-to-end scenarios | phase_10.md | `IN_PROGRESS` | 7/8 sub-phases closed; SYS-REPL-006, SYS-ALERT-001..004, SYS-LOCK-001, SYS-DEADLOCK-001, SYS-VAC/BLOAT/IDX-001..003, SYS-ADV-001..004, SYS-CMD-001..004 and SYS-ARCH-001 green; primary `agent:gpt5.6-luna` |
-| 10 — Packaging, CI, final documentation | phase_11.md | `TODO` | 0/5 sub-phases closed; primary `agent:gpt5.6-luna` |
+| 9 — L3 end-to-end scenarios | phase_10.md | `DONE` | 8/8 sub-phases closed; all planned SYS-* scenarios green, including SYS-ARCH-001; primary `agent:gpt5.6-luna` |
+| 10 — Packaging, CI, final documentation | phase_11.md | `IN_PROGRESS` | 0/5 sub-phases closed; primary `agent:gpt5.6-luna` |
 
 Status values: `TODO` · `IN_PROGRESS` · `DONE` · `SKIPPED` · `BLOCKED`
 A `SKIPPED` sub-phase or phase keeps its row and carries the reason.
 
-**8 of 11 phases `DONE`. Plan at 73% — phase 9 continues.**
+**9 of 11 phases `DONE`. Plan at 82% — phase 10 continues.**
 
 ### Tests
 
@@ -884,9 +892,9 @@ other docs get their own rows.
 | README.md | 6 | `TODO` | closing sub-phase of phase_07.md |
 | README.md | 7 | `DONE` | advisor endpoints, JSON contracts, complete rule catalogue and limitations documented in 7.10 |
 | README.md | 8 | `DONE` | on-demand operations, configuration, curl usage, security and limitations documented in 8.11 |
-| README.md | 9 | `TODO` | closing sub-phase of phase_10.md |
+| README.md | 9 | `DONE` | five test levels, Docker needs and smoke/full durations documented in 9.8 |
 | README.md | 10 | `TODO` | closing sub-phase of phase_11.md |
-| CONTRIBUTING.md | 9 | `TODO` | 9.8 — how to add an E2E scenario, plus the five anti-flake rules |
+| CONTRIBUTING.md | 9 | `DONE` | current E2E file layout, SYS id registration and five anti-flake rules documented in 9.8 |
 | deploy/sql/README.md | 10 | `TODO` | 10.3 — what each permission tier unlocks and what degrades without it |
 | docs/LIMITS.md | 10 | `TODO` | 10.4 — the ten declared limits, including that pglens does not verify backups |
 
