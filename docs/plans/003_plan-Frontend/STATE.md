@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-08-31 — sub-phase 6.2 closed; sub-phase 6.3 opened._
+_Last updated: 2026-08-31 — sub-phase 6.3 claimed; no code written yet._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -231,7 +231,7 @@ failure/large-integer tests in `web/src/api/client.test.ts`.
 
 ## §6 — In-flight work
 
-`none — tree consistent; sub-phase 6.2 is committed and sub-phase 6.3 is the active unit`
+`claimed — nothing written yet; sub-phase 6.3 is the active unit`
 
 ---
 
