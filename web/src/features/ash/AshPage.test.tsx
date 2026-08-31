@@ -260,6 +260,53 @@ describe('AshPage', () => {
     expect(REFRESH.ash.staleAfter).toBeGreaterThanOrEqual(REFRESH.ash.interval * 3)
   })
 
+  it('shows a loading state while ASH is pending', () => {
+    renderAsh('/instances/instance-1/ash', ashResponse, [], success(undefined, { isPending: true }))
+
+    expect(
+      screen.getByRole('status', { name: 'Loading ASH and wait analysis' }),
+    ).toBeInTheDocument()
+  })
+
+  it('passes the database scope to ASH and top-query requests', () => {
+    renderAsh('/instances/instance-1/ash?group=queryid&db=analytics')
+
+    expect(mocks.ash).toHaveBeenLastCalledWith(expect.objectContaining({ database: 'analytics' }))
+    expect(mocks.ashTop).toHaveBeenLastCalledWith(
+      expect.objectContaining({ database: 'analytics' }),
+    )
+  })
+
+  it('ignores clicks on the folded other series', () => {
+    const view = renderAsh()
+    const chartProps = mocks.chart.mock.calls.at(-1)?.[0] as {
+      onEvents?: Record<string, (event: unknown) => void>
+    }
+
+    act(() => chartProps.onEvents?.click?.({ seriesName: 'other (folded)' }))
+
+    expect(view.router.state.location.search).toBe('?range=1h')
+  })
+
+  it('drills from a wait event to query ids', () => {
+    const view = renderAsh('/instances/instance-1/ash?group=wait_event&wait_event_type=Lock')
+    const chartProps = mocks.chart.mock.calls.at(-1)?.[0] as {
+      onEvents?: Record<string, (event: unknown) => void>
+    }
+
+    act(() => chartProps.onEvents?.click?.({ seriesName: 'relation' }))
+
+    const params = new URLSearchParams(view.router.state.location.search)
+    expect(params.get('group')).toBe('queryid')
+    expect(params.get('wait_event')).toBe('relation')
+  })
+
+  it('labels an unfiltered wait-event breadcrumb as all', () => {
+    renderAsh('/instances/instance-1/ash?group=wait_event')
+
+    expect(screen.getByText('Wait events: all')).toBeInTheDocument()
+  })
+
   it('UI-ASH-032 puts the sample warning above the chart and includes its count', () => {
     const view = renderAsh('/instances/instance-1/ash', {
       ...ashResponse,
