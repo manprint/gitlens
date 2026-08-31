@@ -153,7 +153,7 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 
 | # | Type | ID | Closed | Intent | Commit |
 |---|------|-----|--------|--------|--------|
-| 0.1 | sub-phase | 0.1 | 2026-08-31 | Capture durable E2E evidence and close V001-F1 | `25b7875` |
+| 0.1 | sub-phase | 0.1 | 2026-08-31 | Capture durable E2E evidence and close V001-F1 | `8824301` |
 
 ---
 
