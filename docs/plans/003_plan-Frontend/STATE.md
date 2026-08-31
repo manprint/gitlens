@@ -55,9 +55,9 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 |-------|-------|
 | **Type** | sub-phase |
 | **ID** | 1.2 |
-| **Status** | `none` |
+| **Status** | `OPEN` |
 | **Intent** | Document the read endpoints in the OpenAPI contract |
-| **Next action:** | Open sub-phase **1.2** in [phase_02.md](phase_02.md): document the read endpoints and response shapes |
+| **Next action:** | Complete sub-phase **1.2** in [phase_02.md](phase_02.md): document the read endpoints and response shapes |
 | **Assigned** | `agent-3:haiku` |
 | **Repo state** | Phase 0 sub-phases 0.1–0.6 and sub-phase 1.1 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, README documents the evidence target, and the OpenAPI foundation parses. This unit extends the contract with read routes. |
 | **Phase file** | [phase_01.md](phase_01.md) |
@@ -159,7 +159,7 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 | 0.4 | sub-phase | 0.4 | 2026-08-31 | Update plan 002 audit register and close V001-F1/F2/F3 | `7415f38` |
 | 0.5 | sub-phase | 0.5 | 2026-08-31 | Close plan 002 Q-B with D11 | `75c79ff` |
 | 0.6 | sub-phase | 0.6 | 2026-08-31 | Document durable E2E evidence command in README | `0bf364b` |
-| 1.1 | sub-phase | 1.1 | 2026-08-31 | Author OpenAPI skeleton and shared components | `<pending>` |
+| 1.1 | sub-phase | 1.1 | 2026-08-31 | Author OpenAPI skeleton and shared components | `c1a5122` |
 
 ---
 
@@ -171,7 +171,7 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 
 ## §6 — In-flight work
 
-`none — tree consistent`
+`claimed — nothing written yet`
 
 ---
 
