@@ -78,3 +78,23 @@ construction.
 **T-10 — Accessibility is asserted per page.** Every route test calls
 `expectNoA11yViolations` from § 5.7. A page with a serious or critical
 violation does not close its sub-phase.
+
+## Playwright acceptance policy
+
+The acceptance suite lives in `e2e/**/*.spec.ts` and runs against the real
+stack started by the Go harness. `playwright.config.ts` deliberately has no
+`webServer` block: Playwright must not start or stop the stack itself. The
+single Chromium worker and `fullyParallel: false` protect the shared
+PostgreSQL cluster from concurrent mutations. Results, traces, and failure
+screenshots are written below `test/e2e/_artifacts/ui/`.
+
+CI retries a failed test once to distinguish a transient flake from a real
+failure; a retry pass is not success. A spec that passes only on retry is
+quarantined the same day with `test.fixme`, a `B-A<NNN>` entry in the plan
+folder's `bugs.md`, the trace path, and the suspected cause. If it remains
+quarantined for two working days, it is escalated to `STATE.md` §9.
+
+Timeouts may be increased only with a written reason in the same commit that
+identifies the condition being awaited. `waitForTimeout` and arbitrary sleeps
+are prohibited; use Playwright auto-waiting, locator assertions, or the
+`waitForFreshData(page, predicate, { timeout })` helper from `e2e/fixtures.ts`.

@@ -136,6 +136,20 @@ export default tseslint.config(
     },
   },
   {
+    files: ['e2e/**/*.{ts,tsx}'],
+    rules: {
+      'react-hooks/rules-of-hooks': 'off',
+      'no-empty-pattern': 'off',
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "CallExpression[callee.property.name='waitForTimeout']",
+          message: 'wait for an observable condition with expect.poll instead of sleeping',
+        },
+      ],
+    },
+  },
+  {
     files: componentTestFiles,
     ...testingLibrary.configs['flat/react'],
     ...jestDom.configs['flat/recommended'],
