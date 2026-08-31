@@ -28,9 +28,11 @@ describe('renderWithProviders', () => {
     server.use(ok('getSession', session))
     renderRoute('/')
     await act(async () => {
-      await vi.runAllTimersAsync()
-      await Promise.resolve()
       await import('../routes/pages')
+      await vi.advanceTimersByTimeAsync(1)
+      for (let index = 0; index < 10; index += 1) {
+        await Promise.resolve()
+      }
     })
 
     expect(screen.getByRole('heading', { name: 'Fleet overview' })).toBeInTheDocument()

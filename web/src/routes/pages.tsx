@@ -12,7 +12,12 @@ function PlaceholderPage({ surface }: PlaceholderPageProps) {
 }
 
 export function FleetOverviewPage() {
-  return <PlaceholderPage surface="Fleet overview" />
+  return (
+    <>
+      <PlaceholderPage surface="Fleet overview" />
+      <small>Build {__PGLENS_BUILD__}</small>
+    </>
+  )
 }
 
 export function ClusterDetailPage() {

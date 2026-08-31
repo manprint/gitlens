@@ -1,13 +1,5 @@
-import { Outlet } from 'react-router-dom'
+import { AppShell } from '@/components/layout/AppShell'
 
 export default function App() {
-  return (
-    <main data-testid="application-shell">
-      <header>
-        <p>pglens web interface</p>
-        <small>Build {__PGLENS_BUILD__}</small>
-      </header>
-      <Outlet />
-    </main>
-  )
+  return <AppShell />
 }

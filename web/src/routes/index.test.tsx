@@ -37,7 +37,11 @@ describe('application route registry', () => {
     renderRoute('/does-not-exist')
 
     await act(async () => {
-      await vi.runAllTimersAsync()
+      await import('./pages')
+      await vi.advanceTimersByTimeAsync(1)
+      for (let index = 0; index < 10; index += 1) {
+        await Promise.resolve()
+      }
     })
 
     expect(screen.getByRole('heading', { name: 'Page not found' })).toBeInTheDocument()

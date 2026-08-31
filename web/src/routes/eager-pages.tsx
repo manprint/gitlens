@@ -11,19 +11,19 @@ export function RouteErrorBoundary() {
   const routePath = location.pathname || '/'
 
   return (
-    <main>
+    <section>
       <h1>Route error</h1>
       <ErrorState endpoint={routePath} failure={failure} onRetry={() => window.location.reload()} />
-    </main>
+    </section>
   )
 }
 
 export function NotFoundPage() {
   return (
-    <main>
+    <section>
       <h1>Page not found</h1>
       <p>The requested page does not exist.</p>
       <Link to="/">Back to fleet overview</Link>
-    </main>
+    </section>
   )
 }
