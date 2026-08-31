@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-08-31 — sub-phase 5.8 closed; sub-phase 5.9 opened._
+_Last updated: 2026-08-31 — sub-phase 5.9 closed; sub-phase 5.10 opened._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,16 +54,16 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 5.9 |
+| **ID** | 5.10 |
 | **Status** | `OPEN` |
-| **Intent** | Bootstrap Playwright and document the flake policy |
-| **Next action:** | Complete sub-phase **5.9** in [phase_06.md](phase_06.md): add the Playwright config, fixtures, smoke spec, and policy |
+| **Intent** | Prove the test harness rejects deliberate violations |
+| **Next action:** | Complete sub-phase **5.10** in [phase_06.md](phase_06.md): add the harness meta-tests for unhandled requests, contracts, console, timers, cache isolation, and a11y |
 | **Assigned** | `agent-2:sonnet` |
-| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, and phase 5 sub-phases 5.1–5.8 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, strict typed lint/format gates, Makefile web targets, clean placeholder preservation, the parallel CI web job, frontend workflow documentation, the real server image build, the phase-boundary L3 regression, the Vitest/jsdom test runner foundation, the frontend test architecture rules, the deterministic render/provider harness, the contract-validated OpenAPI fixture suite, the contract-aware MSW handler factory, the V8 UI coverage gate, the axe-core accessibility assertion, and the deterministic clock/timezone/locale/randomness rules are covered. The next unit bootstraps Playwright. |
+| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, and phase 5 sub-phases 5.1–5.9 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, strict typed lint/format gates, Makefile web targets, clean placeholder preservation, the parallel CI web job, frontend workflow documentation, the real server image build, the phase-boundary L3 regression, the Vitest/jsdom test runner foundation, the frontend test architecture rules, the deterministic render/provider harness, the contract-validated OpenAPI fixture suite, the contract-aware MSW handler factory, the V8 UI coverage gate, the axe-core accessibility assertion, the deterministic clock/timezone/locale/randomness rules, and the Playwright acceptance bootstrap are covered. The next unit proves the harness defenses. |
 | **Phase file** | [phase_06.md](phase_06.md) |
 
-Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, and phase 5 sub-phases 5.1–5.8 are closed; sub-phase 5.9 is open.
-Phase 4 is complete; phase 5 is in progress and its Playwright bootstrap is open.
+Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, and phase 5 sub-phases 5.1–5.9 are closed; sub-phase 5.10 is open.
+Phase 4 is complete; phase 5 is in progress and its harness meta-tests are open.
 
 ---
 
@@ -193,6 +193,7 @@ records start/end timestamps and elapsed time.
 | 5.6 | sub-phase | 5.6 | 2026-08-31 | Add coverage configuration and the UI coverage gate | `2a60118` |
 | 5.7 | sub-phase | 5.7 | 2026-08-31 | Add the accessibility assertion | `65588f7` |
 | 5.8 | sub-phase | 5.8 | 2026-08-31 | Make clock, timezone, locale, and randomness deterministic | `cc592ab` |
+| 5.9 | sub-phase | 5.9 | 2026-08-31 | Bootstrap Playwright and document the flake policy | `3472d42` |
 
 ---
 
@@ -202,6 +203,10 @@ Sub-phase 3.1 added `.gitignore`, `internal/webui/doc.go`, `internal/webui/webui
 
 Sub-phase 5.4 added `web/src/test/fixture-helpers.ts`, `web/src/test/contract.ts`, `web/src/test/contract.test.ts`, 44 OpenAPI operation fixture modules under `web/src/test/fixtures`, and excluded test-only Node imports from the browser TypeScript project while including them in the test project. Sub-phase 5.5 extended `web/src/test/contract.ts` with operation-route/response helpers and added `web/src/test/msw/handlers.ts` plus `web/src/test/msw/handlers.test.ts` for contract-aware response, status, delay, sequence, and never-resolving handler factories. Sub-phase 5.6 added V8 coverage configuration, `scripts/coverage_gate_ui.sh`, Makefile/CI coverage targets and artefacts, the Go gate meta-test, and the minimal current-scaffold tests for the App shell and `cn` utility. Sub-phase 5.7 added `web/src/test/a11y.ts` and `web/src/test/a11y.test.tsx`, including critical/serious filtering, disabled detached-jsdom rules, actionable element HTML, and the minor/moderate filter test. Sub-phase 5.8 pinned the test clock to `NOW`, forced UTC and `en-US` defaults, added deterministic time tests, and banned ambient locale and random-identifier calls in frontend sources.
 
+Sub-phase 5.9 added `web/playwright.config.ts`, `web/e2e/fixtures.ts`,
+`web/e2e/smoke.spec.ts`, the typed E2E project inclusion, the `waitForTimeout`
+lint rule, and the Playwright acceptance/flake policy in `web/docs/testing.md`.
+
 `docs/LIMITS.md` was also touched by sub-phase 2.7.
 
 `Makefile`; `README.md`; `scripts/e2e_evidence.sh`; `scripts/id_audit.sh`; `internal/scripts/doc.go`; `internal/scripts/scripts_test.go`; `test/harness/harness.go`; `test/harness/api.go`; `test/e2e/deploy_test.go`; `test/scenario/net.go`; `test/scenario/topo_cascading.go`; `docs/plans/002_plan-AnalysisBackend/STATE.md`; `docs/plans/002_plan-AnalysisBackend/phase_11.md`; `docs/plans/002_plan-AnalysisBackend/verify/index.md`; `docs/plans/002_plan-AnalysisBackend/verify/verify_001_2026-08-30.md`; `docs/plans/003_plan-Frontend/STATE.md`; `api/openapi.yaml`; `internal/server/openapi_test.go`; `internal/tools/apidocs/main.go`; `internal/tools/apidocs/main_test.go`; `docs/api.md`; `cmd/pglens-server/main.go`; `internal/server/config.go`; `internal/server/config_test.go`; `internal/server/session.go`; `internal/server/session_test.go`; `internal/server/http.go`; `internal/server/http_test.go`; `internal/server/facts_integration_test.go`; `internal/server/ingest_integration_test.go`; `internal/server/api_commands_integration_test.go`.
@@ -210,7 +215,7 @@ Sub-phase 5.4 added `web/src/test/fixture-helpers.ts`, `web/src/test/contract.ts
 
 ## §6 — In-flight work
 
-`claimed — sub-phase 5.9; nothing written yet`
+`claimed — sub-phase 5.10; nothing written yet`
 
 ---
 
@@ -309,6 +314,7 @@ Sub-phase 5.4 added `web/src/test/fixture-helpers.ts`, `web/src/test/contract.ts
 | 2026-08-31 | 5.7 | `pnpm test`; `pnpm run typecheck`; `pnpm run lint`; `pnpm run format:check` | PASS | Final frontend gates complete in 1.51s, 1.15s, 3.84s, and 1.12s respectively; 6 files and 97 tests pass, including the axe-core accessibility cases. Lint has 0 errors and retains only the three existing Fast Refresh warnings. No E2E was run because the phase-boundary policy defers L3 to phase 5 closure. |
 | 2026-08-31 | 5.8 | Two consecutive `pnpm test` runs; normalized functional signature comparison | PASS | Runs completed in 4.536s and 4.452s; both report 7 files and 101 tests passed. Vitest's timestamps, durations, and completion order are volatile, so the deterministic comparison strips those fields and sorts the per-file pass signature. |
 | 2026-08-31 | 5.8 | `pnpm test`; `pnpm run typecheck`; `pnpm run lint`; `pnpm run format:check` | PASS | Final gates complete in 4.490s, 0.365s, 3.606s, and 0.962s respectively; 101 tests pass, lint has 0 errors and retains only the three existing Fast Refresh warnings. No E2E was run because the phase-boundary policy defers L3 to phase 5 closure. |
+| 2026-08-31 | 5.9 | `pnpm exec playwright test --list`; `pnpm run typecheck`; `pnpm run lint`; `pnpm run format:check` | PASS | Playwright enumerates 1 test in 1 file (`SYS-UI-000`); final gates complete in 0.80s, 1.248s, 3.866s, and 0.976s respectively. Lint has 0 errors and retains only the three existing Fast Refresh warnings. Browser execution is intentionally deferred to the phase-5 boundary/phase-17 harness proof. |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -379,7 +385,7 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 | 2 | [phase_03.md](phase_03.md) | UI session authentication | `agent-2:sonnet` | 2.1, 2.2, 2.3 | DONE — 7/7 sub-phases closed |
 | 3 | [phase_04.md](phase_04.md) | Embedded SPA serving and dev proxy | `agent-2:sonnet` | 3.2 | DONE — 6/6 sub-phases closed |
 | 4 | [phase_05.md](phase_05.md) | Frontend workspace scaffold | `agent-2:sonnet` | 4.1 | DONE — 8/8 sub-phases closed |
-| 5 | [phase_06.md](phase_06.md) | Frontend test harness and quality gates | `agent-2:sonnet` | 5.2, 5.4, 5.6, 5.9 | IN_PROGRESS — 5.9 next |
+| 5 | [phase_06.md](phase_06.md) | Frontend test harness and quality gates | `agent-2:sonnet` | 5.2, 5.4, 5.6, 5.9 | IN_PROGRESS — 5.10 next |
 | 6 | [phase_07.md](phase_07.md) | Typed API client, query layer, state primitives | `agent-2:sonnet` | 6.4, 6.6 | TODO |
 | 7 | [phase_08.md](phase_08.md) | App shell, navigation, time range | `agent-2:sonnet` | 7.3 | TODO |
 | 8 | [phase_09.md](phase_09.md) | Fleet Overview | `agent-2:sonnet` | 8.4 | TODO |
@@ -441,8 +447,8 @@ the next one opens.
 | 5.6 | Coverage configuration and the UI coverage gate | `agent-2:sonnet` | DONE |
 | 5.7 | The accessibility assertion | `agent-2:sonnet` | DONE |
 | 5.8 | Determinism: clock, timezone, locale, randomness | `agent-2:sonnet` | DONE |
-| 5.9 | Playwright bootstrap and the flake policy | `agent-2:sonnet` | OPEN |
-| 5.10 | Meta-tests: prove the harness catches what it claims | `agent-2:sonnet` | TODO |
+| 5.9 | Playwright bootstrap and the flake policy | `agent-2:sonnet` | DONE |
+| 5.10 | Meta-tests: prove the harness catches what it claims | `agent-2:sonnet` | OPEN |
 | 5.11 | Update TESTING.md and README.md | `agent-3:haiku` | TODO |
 | 6.1 | Type generation from the contract | `agent-2:sonnet` | TODO |
 | 6.2 | The typed client | `agent-2:sonnet` | TODO |
