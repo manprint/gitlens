@@ -55,7 +55,7 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 |-------|-------|
 | **Type** | sub-phase |
 | **ID** | 9.2 |
-| **Status** | `none` |
+| **Status** | `OPEN` |
 | **Intent** | The topology graph |
 | **Next action:** | Complete sub-phase **9.2** in [phase_10.md](phase_10.md): build the topology graph |
 | **Assigned** | `agent-2:sonnet` |
@@ -352,7 +352,7 @@ and slot summaries, plus ten focused UI-REPL tests.
 
 ## §6 — In-flight work
 
-`none — tree consistent`
+`claimed — nothing written yet for sub-phase 9.2`
 
 ---
 
