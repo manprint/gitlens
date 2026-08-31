@@ -161,6 +161,12 @@ PGLENS_LISTEN=:8080 \
 
 ### Signing in
 
+Open `http://<host>:8080/` in a browser to see the sign-in form. Enter the
+password configured through `PGLENS_UI_PASSWORD`; a successful sign-in creates
+a session that lasts for `PGLENS_UI_SESSION_TTL`. The session does not survive
+a server restart, and signing out clears it. The current interface provides
+sign-in only; data pages are not available yet.
+
 When `PGLENS_UI_PASSWORD` is configured, sign in to obtain a session cookie and
 use it for the protected API:
 
