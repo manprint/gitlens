@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-08-31 — sub-phase 1.3 closed; sub-phase 1.4 opened._
+_Last updated: 2026-08-31 — sub-phase 1.4 closed; sub-phase 1.5 opened._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,15 +54,15 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 1.4 |
+| **ID** | 1.5 |
 | **Status** | `OPEN` |
-| **Intent** | Prove that every registered HTTP route is represented in the OpenAPI contract |
-| **Next action:** | Complete sub-phase **1.4** in [phase_02.md](phase_02.md): add and pass `TestOpenAPICoversEveryRoute` |
+| **Intent** | Generate a static API reference page from the OpenAPI contract |
+| **Next action:** | Complete sub-phase **1.5** in [phase_02.md](phase_02.md): generate the checked-in static API reference page |
 | **Assigned** | `agent-2:sonnet` |
-| **Repo state** | Phase 0 sub-phases 0.1–0.6 and sub-phases 1.1–1.3 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, README documents the evidence target, and the OpenAPI contract documents read, write, agent and infrastructure operations with explicit security. This unit adds the route-coverage gate. |
+| **Repo state** | Phase 0 sub-phases 0.1–0.6 and sub-phases 1.1–1.4 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, README documents the evidence target, the OpenAPI contract documents all production routes, and the bidirectional route-coverage gate rejects undocumented routes and stale operations. This unit generates the static reference page. |
 | **Phase file** | [phase_01.md](phase_01.md) |
 
-Phase 0 sub-phases 0.1–0.6 and sub-phases 1.1–1.3 are closed; sub-phase 1.4 is the next unit. Phase 1
+Phase 0 sub-phases 0.1–0.6 and sub-phases 1.1–1.4 are closed; sub-phase 1.5 is the next unit. Phase 1
 and the remaining frontend work are still pending.
 
 ---
@@ -162,6 +162,7 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 | 1.1 | sub-phase | 1.1 | 2026-08-31 | Author OpenAPI skeleton and shared components | `c1a5122` |
 | 1.2 | sub-phase | 1.2 | 2026-08-31 | Document the read endpoints | `21a0286` |
 | 1.3 | sub-phase | 1.3 | 2026-08-31 | Document the write, agent and infrastructure endpoints | `b197785` |
+| 1.4 | sub-phase | 1.4 | 2026-08-31 | Enforce OpenAPI route coverage | `f8dbc67` |
 
 ---
 
@@ -173,7 +174,7 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 
 ## §6 — In-flight work
 
-`claimed — sub-phase 1.4; nothing written yet`
+`claimed — sub-phase 1.5; nothing written yet`
 
 ---
 
@@ -200,6 +201,8 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 | 2026-08-31 | 1.2 | `make fmt-check lint test coverage-gate` | PASS | Go gates exit 0 at 05:43:48Z after 45s; race/shuffle passed and global coverage is 75.0%. |
 | 2026-08-31 | 1.3 | `go test ./internal/server -run 'TestOpenAPI(ReadOperationsHaveExamples|DocumentParses|OperationsHaveTagsAndUniqueIDs|AgentRoutesAreBearerOnly)$' -count=1` | PASS | OpenAPI parses; operation IDs are unique, every operation is tagged, agent routes require only `agentBearer`, and infrastructure routes are unauthenticated. |
 | 2026-08-31 | 1.3 | `make fmt-check lint test coverage-gate` | PASS | Go gates exit 0 at 05:52:21Z after 45s; race/shuffle passed and global coverage is 75.0%. |
+| 2026-08-31 | 1.4 | focused OpenAPI route/ID/normalization tests | PASS | Route set equality passed after canonicalizing the findings catch-all to its public parameterized paths; a temporary `GET /api/v1/__probe` made the gate fail with the expected missing-route diagnostic, then was reverted. |
+| 2026-08-31 | 1.4 | `make fmt-check lint test coverage-gate` | PASS | Go gates exit 0 at 05:56:21Z after 43s; race/shuffle passed and global coverage is 75.1%. |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -250,7 +253,7 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 | Phase | File | Title | Assigned | Review gate | Status |
 |-------|------|-------|----------|-------------|--------|
 | 0 | [phase_01.md](phase_01.md) | Plan 002 closure and contract prerequisites | `agent-2:sonnet` / `agent-3:haiku` | 0.4 | DONE — 6/6 sub-phases closed |
-| 1 | [phase_02.md](phase_02.md) | OpenAPI contract and route-coverage gate | `agent-2:sonnet` | 1.1, 1.4 | IN_PROGRESS — 1.4 next |
+| 1 | [phase_02.md](phase_02.md) | OpenAPI contract and route-coverage gate | `agent-2:sonnet` | 1.1, 1.4 | IN_PROGRESS — 1.5 next |
 | 2 | [phase_03.md](phase_03.md) | UI session authentication | `agent-2:sonnet` | 2.1, 2.2, 2.3 | TODO |
 | 3 | [phase_04.md](phase_04.md) | Embedded SPA serving and dev proxy | `agent-2:sonnet` | 3.2 | TODO |
 | 4 | [phase_05.md](phase_05.md) | Frontend workspace scaffold | `agent-2:sonnet` | 4.1 | TODO |
@@ -284,7 +287,7 @@ the next one opens.
 | 1.1 | Author `api/openapi.yaml` — skeleton and shared components | `agent-2:sonnet` | DONE |
 | 1.2 | Document the read endpoints | `agent-2:sonnet` | DONE |
 | 1.3 | Document the write, agent and infrastructure endpoints | `agent-2:sonnet` | DONE |
-| 1.4 | Route-coverage gate: `TestOpenAPICoversEveryRoute` | `agent-2:sonnet` | TODO |
+| 1.4 | Route-coverage gate: `TestOpenAPICoversEveryRoute` | `agent-2:sonnet` | DONE |
 | 1.5 | Generate a static API reference page | `agent-3:haiku` | TODO |
 | 1.6 | Update README.md | `agent-3:haiku` | TODO |
 | 2.1 | UI configuration loader | `agent-2:sonnet` | TODO |
