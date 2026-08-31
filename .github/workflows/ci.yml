@@ -29,7 +29,9 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
-      - run: make web-install web-lint web-typecheck web-test web-coverage-gate web-build
+      - name: Verify generated API types
+        run: make web-install web-gen-api && git diff --exit-code -- web/src/api/generated.ts
+      - run: make web-lint web-typecheck web-test web-coverage-gate web-build
       - name: Upload web coverage artefacts
         uses: actions/upload-artifact@v4
         with:

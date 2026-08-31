@@ -32,7 +32,9 @@ export default tseslint.config(
         ...globals.node,
       },
       parserOptions: {
-        projectService: true,
+        projectService: {
+          allowDefaultProject: ['scripts/gen-api-types.ts'],
+        },
         tsconfigRootDir: import.meta.dirname,
       },
     },
@@ -128,6 +130,12 @@ export default tseslint.config(
   {
     files: testFiles,
     ...vitestPlugin.configs.recommended,
+    rules: {
+      'vitest/expect-expect': [
+        'error',
+        { assertFunctionNames: ['expect', 'assert', 'expectTypeOf'] },
+      ],
+    },
   },
   {
     files: ['src/test/render.tsx'],

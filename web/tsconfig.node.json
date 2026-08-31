@@ -7,5 +7,6 @@
     "composite": true,
     "noEmit": true
   },
-  "include": ["vite.config.ts", "vitest.config.ts", "playwright.config.ts", "scripts"]
+  "include": ["vite.config.ts", "vitest.config.ts", "playwright.config.ts", "scripts"],
+  "exclude": ["scripts/gen-api-types.ts"]
 }

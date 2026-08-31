@@ -10,6 +10,7 @@
     "src/**/*.test.ts",
     "src/**/*.test.tsx",
     "src/test",
+    "src/api",
     "src/lib",
     "src/routes",
     "src/App.tsx",

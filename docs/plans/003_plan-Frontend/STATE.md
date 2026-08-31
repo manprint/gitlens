@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-08-31 — phase 5 closed with boundary E2E PASS; sub-phase 6.1 opened._
+_Last updated: 2026-08-31 — sub-phase 6.1 closed; sub-phase 6.2 opened._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,16 +54,16 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 6.1 |
+| **ID** | 6.2 |
 | **Status** | `OPEN` |
-| **Intent** | Generate the frontend API types from the OpenAPI contract and expose stable type aliases |
-| **Next action:** | Complete sub-phase **6.1** in [phase_07.md](phase_07.md): add the generator, committed generated types, aliases, drift gates, and type assertions |
+| **Intent** | Build the single typed API client and normalize HTTP, network, malformed, and large-integer failures |
+| **Next action:** | Complete sub-phase **6.2** in [phase_07.md](phase_07.md): add `web/src/api/client.ts` and its UI-API-001…005 tests |
 | **Assigned** | `agent-2:sonnet` |
-| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, and phase 5 sub-phases 5.1–5.11 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, strict typed lint/format gates, Makefile web targets, clean placeholder preservation, the parallel CI web job, frontend workflow documentation, the real server image build, the phase-boundary L3 regression, the Vitest/jsdom test runner foundation, the frontend test architecture rules, the deterministic render/provider harness, the contract-validated OpenAPI fixture suite, the contract-aware MSW handler factory, the V8 UI coverage gate, the axe-core accessibility assertion, the deterministic clock/timezone/locale/randomness rules, the Playwright acceptance bootstrap, the harness defense meta-tests, the frontend testing workflow documentation, and the phase-5 boundary E2E regression are covered. The next unit generates the typed API contract surface. |
+| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, and phase 5 sub-phases 5.1–5.11 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, strict typed lint/format gates, Makefile web targets, clean placeholder preservation, the parallel CI web job, frontend workflow documentation, the real server image build, the phase-boundary L3 regression, the Vitest/jsdom test runner foundation, the frontend test architecture rules, the deterministic render/provider harness, the contract-validated OpenAPI fixture suite, the contract-aware MSW handler factory, the V8 UI coverage gate, the axe-core accessibility assertion, the deterministic clock/timezone/locale/randomness rules, the Playwright acceptance bootstrap, the harness defense meta-tests, the frontend testing workflow documentation, the phase-5 boundary E2E regression, the OpenAPI type generator, committed generated API types, stable schema aliases, type-level contract assertions, and generator drift gates are covered. The next unit builds the single typed API client. |
 | **Phase file** | [phase_06.md](phase_06.md) |
 
-Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, and phase 5 sub-phases 5.1–5.11 are closed; sub-phase 6.1 is open.
-Phase 5 is complete; phase 6 is in progress and its type-generation unit is open.
+Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, and sub-phase 6.1 are closed; sub-phase 6.2 is open.
+Phase 5 is complete; phase 6 is in progress and its typed-client unit is open.
 
 ---
 
@@ -196,6 +196,7 @@ records start/end timestamps and elapsed time.
 | 5.9 | sub-phase | 5.9 | 2026-08-31 | Bootstrap Playwright and document the flake policy | `3472d42` |
 | 5.10 | sub-phase | 5.10 | 2026-08-31 | Prove the harness rejects unhandled requests, bad fixtures, console errors, leaked timers, shared query caches, and serious a11y violations | `38faae6` |
 | 5.11 | sub-phase | 5.11 | 2026-08-31 | Document the frontend test taxonomy and contributor workflow | `d881cb9` |
+| 6.1 | sub-phase | 6.1 | 2026-08-31 | Generate the frontend API types from the OpenAPI contract and expose stable type aliases | `PENDING` |
 
 ---
 
@@ -214,6 +215,11 @@ Sub-phase 5.11 updated `TESTING.md`, `README.md`, and `web/README.md` with the
 frontend test taxonomy, coverage floors, commands, fixtures, and phase-boundary
 E2E cadence. The phase-boundary `make test-e2e` Smoke run passed in 1159.400s
 wall-clock (`1159.199s` reported by Go).
+Sub-phase 6.1 added `web/scripts/gen-api-types.ts`, the committed generated
+`web/src/api/generated.ts`, `web/src/api/types.ts`, and its type assertions;
+it also added the `web-gen-api` Make target, CI drift check, exact `tsx`
+dependency pin, and the TypeScript project inclusion/configuration needed by
+the new API test.
 
 `docs/LIMITS.md` was also touched by sub-phase 2.7.
 
@@ -223,7 +229,7 @@ wall-clock (`1159.199s` reported by Go).
 
 ## §6 — In-flight work
 
-`claimed — phase 5 boundary E2E passed; sub-phase 6.1 is open and no code has been written yet`
+`none — tree consistent; sub-phase 6.1 is committed and sub-phase 6.2 is open`
 
 ---
 
@@ -324,6 +330,7 @@ wall-clock (`1159.199s` reported by Go).
 | 2026-08-31 | 5.8 | `pnpm test`; `pnpm run typecheck`; `pnpm run lint`; `pnpm run format:check` | PASS | Final gates complete in 4.490s, 0.365s, 3.606s, and 0.962s respectively; 101 tests pass, lint has 0 errors and retains only the three existing Fast Refresh warnings. No E2E was run because the phase-boundary policy defers L3 to phase 5 closure. |
 | 2026-08-31 | 5.9 | `pnpm exec playwright test --list`; `pnpm run typecheck`; `pnpm run lint`; `pnpm run format:check` | PASS | Playwright enumerates 1 test in 1 file (`SYS-UI-000`); final gates complete in 0.80s, 1.248s, 3.866s, and 0.976s respectively. Lint has 0 errors and retains only the three existing Fast Refresh warnings. Browser execution is intentionally deferred to the phase-5 boundary/phase-17 harness proof. |
 | 2026-08-31 | 5.10 | `pnpm test src/test/harness.meta.test.tsx`; `pnpm run typecheck`; `pnpm run lint`; `pnpm run format:check`; deliberate `onUnhandledRequest: 'warn'` mutation | PASS | Seven meta-tests pass in 1.383s; final lint and format checks complete in 5.099s and 1.084s with 0 errors and the three existing Fast Refresh warnings. The deliberate `warn` mutation makes the unhandled-request meta-test fail as expected (`fetch failed`, exit 1); `error` was restored before commit. |
+| 2026-08-31 | 6.1 | `make web-gen-api`; `pnpm exec vitest run src/api/types.test.ts`; `make web-typecheck`; `make web-lint`; `make web-test`; `make web-coverage-gate` | PASS | Generated API types are drift-free; the type-level contract test passes; typecheck passes; lint has 0 errors and the three existing Fast Refresh warnings; 9 files and 109 Vitest tests pass (5.29s); coverage is 100% lines/branches and the UI gate passes (5.97s). No E2E was run because 6.1 declares none. |
 | 2026-08-31 | 5.11 | `make web-test`; `make web-coverage-gate`; `make web-typecheck`; `make web-lint` | PASS | 108 Vitest tests pass; coverage reports 100% lines and branches; typecheck passes; lint has 0 errors and the three existing Fast Refresh warnings. No sub-phase E2E was run; L3 was deferred to the phase boundary as documented. |
 | 2026-08-31 | 5 | `make test-e2e` Smoke phase-boundary regression | PASS | Durable run from 12:05:50Z to 12:25:09Z, wall-clock 1159.400s (~19m19s), Go suite 1159.199s; exit 0. No pglens/receiver E2E containers remained. |
 
@@ -360,6 +367,7 @@ reconstruct.
 | 16 | 5.6 | The initial all-source coverage gate failed on the intentionally minimal scaffold. | The plan requires `all: true` and fixed floors; adding coverage tests for the current `App` shell and `cn` utility makes the gate pass without weakening those floors. | yes — §7 and the coverage tests |
 | 17 | 5.7 | axe-core does not complete under the harness's global fake timers. | The a11y tests temporarily restore real timers because axe performs asynchronous DOM work; all other tests retain the deterministic fake-clock setup. | yes — §7 and the a11y test |
 | 18 | 5.8 | Vitest includes timestamps, durations, and completion order in its default reporter, so byte-for-byte stdout is not stable across runs even with deterministic test data. | The repeat gate compares the stable functional signature (passed files, counts, and totals), while the test environment remains sequential and deterministic; both complete runs were green. | yes — §7 and `web/vitest.config.ts` |
+| 19 | 6.1 | `tsx` makes `esbuild` an active pnpm lifecycle dependency, and its generator typings pull optional Redocly declarations that are incompatible with the repository's TypeScript 6 project. | `esbuild` is explicitly allowed in `web/pnpm-workspace.yaml`; the runtime generator remains fully executable, while `scripts/gen-api-types.ts` is excluded from the config-only TypeScript project and the generated output plus type-level assertions remain checked. | yes — §5, §7, and the phase 6.1 implementation |
 
 ## §9 — Blockers and open questions
 
@@ -382,6 +390,7 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 | 3 | Letting Playwright's `webServer` block start the stack | The Go E2E harness already owns compose lifecycle, port allocation and teardown. Two orchestrators fighting over the same containers produces flakes that look like product bugs. | Decision **D17**: no `webServer` block. `test/e2e/ui_test.go` starts the stack via `harness.Start` and shells out to Playwright with the resolved base URL. |
 | 4 | Adding CORS middleware so a separately-served frontend could call the API | Introduces cross-origin cookie handling, `SameSite` decisions, preflight caching and a second deployable — all to solve a problem created by the split itself. | Decision **D2**: `go:embed` the built SPA and serve it from the same origin through chi's `NotFound` handler. Same-origin means no CORS at all. |
 | 5 | Keeping the original 10m harness timeout and narrow 90s/60s E2E evidence windows | Full-suite runs timed out during slow maintenance/propagation and cut across the actual network transition/staleness boundaries. | Use the 20m scenario timeout, pre-transition timestamps, a 180s fresh-sample window, and a 120s stale-edge window; verify each with focused tests before rerunning the full suite. |
+| 6 | Adding the API generator to the referenced TypeScript project without accounting for its optional Redocly declaration dependencies | TypeScript 6 reports missing optional modules or excessive stack depth in transitive declaration files; this makes the repository typecheck fail even though the generator runs correctly. | Keep the generator as a runtime `tsx` tool, exclude only that script from `tsconfig.node.json`, and typecheck the generated contract aliases and assertions in the test project. |
 
 ---
 
@@ -397,7 +406,7 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 | 3 | [phase_04.md](phase_04.md) | Embedded SPA serving and dev proxy | `agent-2:sonnet` | 3.2 | DONE — 6/6 sub-phases closed |
 | 4 | [phase_05.md](phase_05.md) | Frontend workspace scaffold | `agent-2:sonnet` | 4.1 | DONE — 8/8 sub-phases closed |
 | 5 | [phase_06.md](phase_06.md) | Frontend test harness and quality gates | `agent-2:sonnet` | 5.2, 5.4, 5.6, 5.9 | DONE — 11/11 sub-phases closed |
-| 6 | [phase_07.md](phase_07.md) | Typed API client, query layer, state primitives | `agent-2:sonnet` | 6.4, 6.6 | IN_PROGRESS — 6.1 open |
+| 6 | [phase_07.md](phase_07.md) | Typed API client, query layer, state primitives | `agent-2:sonnet` | 6.4, 6.6 | IN_PROGRESS — 6.2 open |
 | 7 | [phase_08.md](phase_08.md) | App shell, navigation, time range | `agent-2:sonnet` | 7.3 | TODO |
 | 8 | [phase_09.md](phase_09.md) | Fleet Overview | `agent-2:sonnet` | 8.4 | TODO |
 | 9 | [phase_10.md](phase_10.md) | Cluster Detail | `agent-2:sonnet` | 9.2 | TODO |
@@ -461,8 +470,8 @@ the next one opens.
 | 5.9 | Playwright bootstrap and the flake policy | `agent-2:sonnet` | DONE |
 | 5.10 | Meta-tests: prove the harness catches what it claims | `agent-2:sonnet` | DONE |
 | 5.11 | Update TESTING.md and README.md | `agent-3:haiku` | DONE |
-| 6.1 | Type generation from the contract | `agent-2:sonnet` | OPEN |
-| 6.2 | The typed client | `agent-2:sonnet` | TODO |
+| 6.1 | Type generation from the contract | `agent-2:sonnet` | DONE |
+| 6.2 | The typed client | `agent-2:sonnet` | OPEN |
 | 6.3 | Query layer: keys, policies, and the poll clock | `agent-2:sonnet` | TODO |
 | 6.4 | Authentication state and the single-flight 401 | `agent-2:sonnet` | TODO |
 | 6.5 | Formatting library | `agent-2:sonnet` | TODO |
@@ -566,6 +575,7 @@ not otherwise be visible.
 | `render.test.tsx` | Vitest, render/provider harness | 5.3 | DONE |
 | `contract.test.ts` + `fixtures/*.ts` | Vitest, OpenAPI contract fixtures | 5.4 | DONE |
 | `T-META-1` … `T-META-6` | Vitest, harness meta-tests | 5.10 | DONE |
+| `types.test.ts` | Vitest, compile-time API contract assertions | 6.1 | DONE |
 | `UI-API-001` … `UI-API-010` | Vitest, unit | 6.2 – 6.4 | TODO |
 | `UI-FMT-*` | Vitest, unit | 6.5 | TODO |
 | `UI-STATE-*` (100% coverage) | Vitest, unit | 6.6 | TODO |

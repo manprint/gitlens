@@ -7,7 +7,7 @@ LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
 .PHONY: build fmt fmt-check lint test test-integration test-e2e test-e2e-full test-e2e-full-evidence test-e2e-matrix api-docs \
         ci-local ci-local-unit ci-local-integration coverage coverage-gate generate golden clean build-images build-images-multiarch \
-        web-install web-typecheck web-lint web-build web-test web-coverage web-coverage-gate
+        web-install web-gen-api web-typecheck web-lint web-build web-test web-coverage web-coverage-gate
 
 build:
 	CGO_ENABLED=0 $(GO) build $(LDFLAGS) -o bin/pglens-agent  ./cmd/pglens-agent
@@ -87,7 +87,11 @@ web-install:
 web-typecheck:
 	cd $(WEB) && $(PNPM) run typecheck
 
-web-lint:
+web-gen-api:
+	cd $(WEB) && $(PNPM) run gen:api
+	git diff --exit-code -- web/src/api/generated.ts
+
+web-lint: web-gen-api
 	cd $(WEB) && $(PNPM) run lint && $(PNPM) run format:check
 
 web-build:
