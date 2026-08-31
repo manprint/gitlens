@@ -29,7 +29,8 @@ Da qui discendono i principi non negoziabili:
 
 ## 1. I cinque livelli
 
-> **Nota:** L4 e L5 sono documentati ma non implementati nel foundations plan (decisione D14); la directory `web/` e gli stack frontend non esistono in questa fase.
+> **Nota:** L4 e L5 sono i livelli frontend del piano 003; la loro architettura
+> normativa è descritta in [`web/docs/testing.md`](web/docs/testing.md).
 
 | L | Nome | Cosa verifica | Dove | Stack | Postgres reale? | Gira su | Budget |
 |---|------|---------------|------|-------|-----------------|---------|--------|
@@ -71,8 +72,8 @@ pglens/
 │   ├── store/                   # TimescaleDB access and migrations
 │   ├── topology/                # fusione grafo replica    -> L1 (gate 90%)
 │   ├── ash/                     # ASH aggregation          -> L1 (gate 90%)
-├── web/                         # Next.js 15 — out of scope for foundations plan (no frontend, D14)
-│   ├── app/ components/ lib/
+├── web/                         # Vite + React frontend
+│   ├── src/ components/ lib/ test/
 │   └── **/*.test.tsx            # L4
 ├── deploy/
 │   └── compose/                 # compose di produzione
@@ -1152,12 +1153,33 @@ Dichiarato per evitare che qualcuno lo scopra e lo consideri una dimenticanza.
 5. Decidere se entra nello smoke set (criterio: è un rischio ricorrente e costa meno di 60s?)
 
 **Nuova pagina o componente frontend**
-1. Logica estratta in `web/lib/` → test Vitest puri
+1. Logica estratta in `web/src/lib/` → test Vitest puri
 2. Client Component → L4 con Testing Library, inclusi gli stati vuoto/errore/gap
 3. L5 solo per i **flussi**: navigazione, form completo, interazione con dati reali
-4. `data-testid` su ogni elemento interattivo — **aggiunti insieme al componente**, non dopo, quando servono a un test
+4. `data-testid` solo nei tre casi ammessi dalla regola T-3 nel documento frontend
 5. Controllo axe sulla nuova pagina
 
 ---
 
 *Documento vivo. Ogni volta che un bug sfugge ai test, la domanda in post-mortem è: **a quale livello sarebbe dovuto essere intercettato, e perché non c'era?** La risposta diventa un test e, se serve, una modifica a questo documento.*
+
+---
+
+## 17. Architettura dei test frontend
+
+Le regole normative per i test in `web/` sono in [`web/docs/testing.md`](web/docs/testing.md).
+Sono dieci regole, T-1…T-10, e si applicano a ogni nuova pagina o componente.
+
+Nel frontend del piano 003 i quattro tipi di test si mappano sui livelli del
+repository così:
+
+| Tipo frontend | Livello | Scopo |
+|---|---|---|
+| **pure** | L1 | Funzioni deterministiche in `src/lib/`, senza React o DOM |
+| **component** | L1 | Un albero React con jsdom, Testing Library e MSW |
+| **route** | L2 UI | Una pagina completa con router e query client reali |
+| **acceptance** | L3 | Browser reale contro uno stack reale con Playwright |
+
+Le attese usano condizioni (`findBy…`, `waitFor`) o avanzamento esplicito dei
+fake timer; non si aggiungono `sleep` o timeout arbitrari. Le route test devono
+inoltre verificare l'accessibilità tramite `expectNoA11yViolations`.
