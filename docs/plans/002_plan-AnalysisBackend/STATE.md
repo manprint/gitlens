@@ -786,7 +786,7 @@ are listed as `FIXED` in `verify/index.md`. Q-B is explicitly deferred to plan
 | # | Question | Assumed default | Resolve at | Status |
 |---|----------|-----------------|-----------|--------|
 | Q-A | `RESOLVED` (D23) — PG18 `pg_stat_wal` retains only core WAL counters; WAL I/O columns are exposed by `pg_stat_io` | the `wal` check will collect core columns from `pg_stat_wal` and version-gated I/O fields from `pg_stat_io` | sub-phase 5.1 live verification | `CLOSED 2026-08-29` |
-| Q-B | Does the fleet's real workload need per-user or per-application connection breakdown, or is per-state enough? | per-state and per-database only, plus a bounded `top_n` of 10 application names | plan 003 — revisit with UI and tenant-analytics requirements; the current backend contract has no wider breakdown requirement | `DEFERRED TO PLAN 003` |
+| Q-B | Does the fleet's real workload need per-user or per-application connection breakdown, or is per-state enough? | per-state and per-database only, plus a bounded `top_n` of 10 application names | plan 003 — D11 | `CLOSED 2026-08-31 — resolved in plan 003 as D11: existing contract retained` |
 
 Phase 5 acceptance criteria are covered. D-026 records that live archive-enabled transitions cannot be exercised by the current harness; deterministic contract tests cover the required failure/success metric semantics without claiming that live transition. No scope, threshold, or contract was changed.
 
