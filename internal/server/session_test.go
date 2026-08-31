@@ -133,7 +133,7 @@ func TestRequireCredential_AnonymousApiIs401(t *testing.T) {
 
 	response, err := server.Client().Get(server.URL + "/api/v1/clusters")
 	require.NoError(t, err)
-	defer response.Body.Close()
+	defer func() { require.NoError(t, response.Body.Close()) }()
 	require.Equal(t, http.StatusUnauthorized, response.StatusCode)
 	require.Empty(t, response.Header.Get("WWW-Authenticate"))
 	body, err := io.ReadAll(response.Body)
@@ -150,7 +150,7 @@ func TestRequireCredential_BearerTokenStillWorks(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer agent-token")
 	response, err := server.Client().Do(request)
 	require.NoError(t, err)
-	defer response.Body.Close()
+	defer func() { require.NoError(t, response.Body.Close()) }()
 	require.NotEqual(t, http.StatusUnauthorized, response.StatusCode)
 }
 
@@ -166,7 +166,7 @@ func TestRequireCredential_SessionCookieWorks(t *testing.T) {
 	request.AddCookie(&http.Cookie{Name: "pglens_session", Value: token})
 	response, err := server.Client().Do(request)
 	require.NoError(t, err)
-	defer response.Body.Close()
+	defer func() { require.NoError(t, response.Body.Close()) }()
 	require.NotEqual(t, http.StatusUnauthorized, response.StatusCode)
 }
 
@@ -185,7 +185,7 @@ func TestRequireCredential_ExpiredCookieIs401(t *testing.T) {
 	request.AddCookie(&http.Cookie{Name: "pglens_session", Value: token})
 	response, err := server.Client().Do(request)
 	require.NoError(t, err)
-	defer response.Body.Close()
+	defer func() { require.NoError(t, response.Body.Close()) }()
 	require.Equal(t, http.StatusUnauthorized, response.StatusCode)
 }
 
@@ -212,7 +212,7 @@ func TestRequireCredential_ExemptPaths(t *testing.T) {
 			require.NoError(t, err)
 			response, err := server.Client().Do(request)
 			require.NoError(t, err)
-			defer response.Body.Close()
+			defer func() { require.NoError(t, response.Body.Close()) }()
 			require.NotEqual(t, http.StatusUnauthorized, response.StatusCode)
 		})
 	}
@@ -226,7 +226,7 @@ func TestRequireCredential_DeleteSessionIsNotExempt(t *testing.T) {
 	require.NoError(t, err)
 	response, err := server.Client().Do(request)
 	require.NoError(t, err)
-	defer response.Body.Close()
+	defer func() { require.NoError(t, response.Body.Close()) }()
 	require.Equal(t, http.StatusUnauthorized, response.StatusCode)
 }
 
@@ -242,7 +242,7 @@ func TestRequireCredential_PushStillUsesBearerOnly(t *testing.T) {
 	request.AddCookie(&http.Cookie{Name: "pglens_session", Value: token})
 	response, err := server.Client().Do(request)
 	require.NoError(t, err)
-	defer response.Body.Close()
+	defer func() { require.NoError(t, response.Body.Close()) }()
 	require.Equal(t, http.StatusUnauthorized, response.StatusCode)
 }
 
@@ -252,7 +252,7 @@ func TestRequireCredential_NoPasswordConfiguredIs503(t *testing.T) {
 
 	response, err := server.Client().Get(server.URL + "/api/v1/clusters")
 	require.NoError(t, err)
-	defer response.Body.Close()
+	defer func() { require.NoError(t, response.Body.Close()) }()
 	require.Equal(t, http.StatusServiceUnavailable, response.StatusCode)
 	body, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
@@ -265,7 +265,7 @@ func TestRequireCredential_DisabledLeavesRoutesOpen(t *testing.T) {
 
 	response, err := server.Client().Get(server.URL + "/api/v1/clusters")
 	require.NoError(t, err)
-	defer response.Body.Close()
+	defer func() { require.NoError(t, response.Body.Close()) }()
 	require.NotEqual(t, http.StatusUnauthorized, response.StatusCode)
 }
 
