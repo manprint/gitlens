@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 
 interface EmptyStateProps {
   title: string
@@ -7,9 +7,11 @@ interface EmptyStateProps {
 }
 
 export function EmptyState({ title, description, action }: EmptyStateProps) {
+  const titleId = `${useId().replaceAll(':', '')}-empty-state-title`
+
   return (
-    <section aria-labelledby="empty-state-title" className="border-muted bg-muted/20">
-      <h2 id="empty-state-title">{title}</h2>
+    <section aria-labelledby={titleId} className="border-muted bg-muted/20">
+      <h2 id={titleId}>{title}</h2>
       <p>{description}</p>
       {action ? <div>{action}</div> : null}
     </section>
