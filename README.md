@@ -49,6 +49,8 @@ make build-images-multiarch # linux/amd64 + linux/arm64 via docker buildx
 make web-lint
 make web-typecheck
 make web-build
+make web-test
+make web-coverage-gate
 ```
 
 These commands cover frontend formatting/linting, TypeScript checking, and the
@@ -1112,7 +1114,7 @@ make test-e2e-full-evidence # full E2E suite with a durable log and captured exi
 - **L1 — Unit** (`make test`): fast, isolated Go tests for pure logic and component behavior; no Docker or external PostgreSQL is required.
 - **L2 — Integration** (`make test-integration`): agent, wire and storage tests against real PostgreSQL versions; requires Docker and takes roughly 15 minutes.
 - **L3 — E2E system** (`make test-e2e` or `make test-e2e-full`): operator-style multi-container scenarios and failure recovery; requires Docker, with the smoke subset taking roughly 10 minutes and the full suite roughly 60 minutes.
-- **L4 — API/UI contract**: endpoint and consumer-facing contract checks; the backend API is covered by repository tests, while the frontend belongs to plan 003.
+- **L4 — API/UI contract**: endpoint and consumer-facing checks plus frontend Vitest tests, including contract validation against `api/openapi.yaml`. The backend API remains covered by repository tests, while frontend test details and floors belong in `TESTING.md`.
 - **L5 — Performance and profiling**: workload, benchmark and resource-budget investigation; run these as an explicitly scoped performance exercise rather than as a correctness gate.
 
 **L3 E2E tests**

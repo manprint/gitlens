@@ -40,6 +40,18 @@ web/
 Keep pure derivation in `src/lib/`: functions there should be deterministic,
 side-effect-free, and straightforward to test.
 
+## How to write a test here
+
+Choose the smallest applicable kind: **pure** for deterministic functions in
+`src/lib/`, **component** for one React tree with Testing Library and MSW,
+**route** for a complete page with its router and query client, and
+**acceptance** for a browser flow in `e2e/` against the real stack. Put reusable
+API fixtures in `src/test/fixtures/`, shared fixture values in
+`src/test/fixture-helpers.ts`, and HTTP handlers in `src/test/msw/`.
+
+Derivation belongs in `src/lib/`; components render values that those pure
+functions have already derived.
+
 ## TypeScript pin
 
 TypeScript is pinned to `6.0.3` because `typescript-eslint@8.68.0` requires

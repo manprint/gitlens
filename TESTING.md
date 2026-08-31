@@ -37,8 +37,54 @@ Da qui discendono i principi non negoziabili:
 | **L1** | Unit Go | Logica pura: aggregazione ASH, calcolo delta, reset detection, parsing LSN, selezione top-N, valutazione regole alert, matching topologia | `**/*_test.go` accanto al codice | `testing` + `testify/require` | ❌ no IO | ogni push | **< 60s** |
 | **L2** | Integration Go | Le query SQL fanno davvero quello che crediamo, su ogni versione PG. Permessi. Differenze di vista per versione. Reset reali | `internal/**/it_*_test.go`, tag `integration` | `testcontainers-go` | ✅ container effimero | ogni PR | **< 5 min** |
 | **L3** | E2E sistema | Il sistema completo (agent + server + TSDB) sotto guasti reali: failover, partizioni, deadlock, lock storm, slow query, cardinalità, buffer, skew | `test/e2e/` | Go + `docker compose` + Toxiproxy | ✅ topologie multi-nodo | PR (smoke) / nightly (full) | **10 min / 45 min** |
-| **L4** | Component frontend | Componenti React con logica: formattazione, stati vuoto/errore/gap, form validation, riduttori di filtro | `web/**/*.test.tsx` | Vitest + Testing Library + MSW | ❌ API mockata | ogni PR | **< 90s** |
-| **L5** | E2E frontend | Il browser vede la verità: click, form, drill-down, grafici, permessi UI, stati degradati | `test/web-e2e/` | Playwright | ✅ contro stack L3 | PR (smoke) / nightly (full) | **8 min / 20 min** |
+| **L4** | Component frontend | Componenti React con logica: formattazione, stati vuoto/errore/gap, form validation, riduttori di filtro | `web/src/**/*.test.{ts,tsx}` | Vitest + Testing Library + MSW | ❌ API mockata | ogni PR | **< 90s** |
+| **L5** | E2E frontend | Il browser vede la verità: click, form, drill-down, grafici, permessi UI, stati degradati | `web/e2e/` | Playwright | ✅ contro stack L3 | PR (smoke) / nightly (full) | **8 min / 20 min** |
+
+### Frontend — piano 003
+
+I quattro tipi di test frontend si innestano nella tassonomia L1–L5 già usata
+dal repository. La regola è scegliere il livello più basso che dimostra il
+comportamento, lasciando all'accettazione solo i flussi che richiedono un
+browser e lo stack reale.
+
+| Tipo | Livello | Scopo | Dove | Comando principale |
+|---|---|---|---|---|
+| **pure** | L1 | Funzioni deterministiche di derivazione, senza React o DOM | `web/src/lib/**/*.test.ts` | `make web-test` |
+| **component** | L1 | Un albero React con jsdom, Testing Library e MSW | `web/src/components/**/*.test.tsx`, `web/src/features/**/*.test.tsx` | `make web-test` |
+| **route** | L2 UI | Una pagina completa con router, provider e query client | `web/src/features/**/<page>.route.test.tsx` | `make web-test` |
+| **acceptance** | L3 | Un browser reale contro lo stack reale | `web/e2e/**/*.spec.ts` | `make test-ui-e2e` (da fase 17) |
+
+I test `pure`, `component` e `route` usano il clock deterministico, fixture
+validate contro `api/openapi.yaml`, MSW per l'IO HTTP e `expectNoA11yViolations`
+per le route. Le regole vincolanti sono in
+[`web/docs/testing.md`](web/docs/testing.md).
+
+#### Comandi frontend
+
+```sh
+make web-test             # tutti i test Vitest L1/L2 UI
+make web-coverage-gate    # test Vitest + floor V8
+make test-ui-e2e           # Playwright L3, disponibile dalla fase 17
+```
+
+`make test-ui-e2e` non fa parte del gate locale fino a quando la fase 17 non
+aggiunge il target e il relativo harness. L'E2E frontend si esegue alla
+chiusura di una fase completa o quando una modifica tocca direttamente il
+flusso di accettazione; non è richiesto dopo ogni test unitario.
+
+#### Floor di copertura frontend
+
+| Ambito | Linee | Branch | Note |
+|---|---:|---:|---|
+| Globale incluso | 85% | 80% | sul set incluso nel report V8 |
+| `web/src/lib/` | 95% | — | tutta la derivazione che determina i numeri mostrati |
+| `web/src/api/` | 95% | — | client, 401 e identificatori |
+| `web/src/components/state/` | 100% | — | primitive dell'onestà UI |
+| `web/src/components/charts/` | 90% | — | option builder dei grafici |
+| `web/src/features/` | 80% | — | composizione delle pagine |
+
+I floor si alzano, non si abbassano, nelle fasi successive. Una fase che non
+li raggiunge apre un finding in `STATE.md` §9; non modifica il gate.
 
 **Il ponte L3 ↔ L5** è la parte più importante di questa architettura: gli scenari che L3 usa per rompere il sistema sono gli **stessi** che L5 usa come precondizione per verificare che la UI mostri il problema. Un failover generato una volta viene verificato due volte: nei dati (L3) e negli occhi dell'utente (L5). Vedi sez. 8.
 
@@ -530,21 +576,24 @@ Queste invarianti sono la rete di sicurezza più efficace dell'intera suite: cat
 
 ## 6. L4 — Component test frontend
 
-> **Nota:** L4 e L5 sono specificati ma non implementati nel foundations plan (decisione D14); la directory `web/` non esiste ancora.
+Il frontend attuale è una Vite + React application. Le regole dettagliate e i
+helper condivisi sono in [`web/docs/testing.md`](web/docs/testing.md).
 
 ### 6.1 Stack
 
-**Vitest** + **@testing-library/react** + **MSW** (mock a livello di rete, non di modulo) + **happy-dom**.
+**Vitest** + **@testing-library/react** + **MSW** (mock a livello di rete, non
+di modulo) + **jsdom**.
 
-### 6.2 Vincolo Next.js 15 / React 19
+### 6.2 Separazione della logica e dei componenti
 
-I **Server Component non sono testabili** con Testing Library (girano solo nel runtime server di Next). Conseguenza architetturale, da rispettare scrivendo il codice:
+Con Vite + React tutto il codice applicativo gira nel client; la separazione da
+rispettare scrivendo il codice è quindi:
 
-- La **logica** (formattazione, aggregazione, decisione su stato vuoto/errore/gap) sta in **funzioni pure** in `web/lib/` → testate a fondo con Vitest, senza React
-- I **Client Component** (`"use client"`: grafici, tabelle, form, filtri) → testati con Testing Library
-- I **Server Component** → verificati solo in L5 (Playwright)
+- La **logica** (formattazione, aggregazione, decisione su stato vuoto/errore/gap) sta in **funzioni pure** in `web/src/lib/` → testate a fondo con Vitest, senza React
+- I **componenti** (grafici, tabelle, form, filtri) → testati con Testing Library e MSW
+- Le **route** → testate con router e query client reali; i flussi completi → verificati in L5 (Playwright)
 
-Questa separazione va difesa in review: se la logica finisce dentro un Server Component, diventa testabile solo con un browser, ed è un costo permanente.
+Questa separazione va difesa in review: se la logica finisce dentro un componente, diventa testabile solo con un browser, ed è un costo permanente.
 
 ### 6.3 Cosa si testa qui
 
@@ -568,13 +617,18 @@ it("mostra un gap, non uno zero, quando mancano i dati", () => {
 
 `IDEA.md` sez. 6 stabilisce il "principio di onestà UI": dove un dato manca, la UI deve mostrare il buco. Disegnare uno zero al posto di "sconosciuto" è il modo più diretto per far prendere una decisione sbagliata a chi è di turno alle 3 di notte. Questo comportamento è un requisito, quindi ha un test.
 
-**Gate copertura L4:** 60% su `web/components/**` e `web/lib/**`. Escluso: `web/app/**` (routing/layout, coperto da L5).
+**Gate copertura frontend:** floor globale 85% linee e 80% branch, più i floor
+per-directory descritti nella sezione Frontend sopra. Il gate include tutte le
+fonti applicative e mantiene fuori solo test, primitive shadcn generate,
+output OpenAPI e bootstrap Vite.
 
 ---
 
 ## 7. L5 — E2E frontend (Playwright)
 
-> **Nota:** L4 e L5 sono specificati ma non implementati nel foundations plan (decisione D14); la directory `web/` non esiste ancora.
+Il bootstrap Playwright è in `web/e2e/`; l'esecuzione contro lo stack condiviso
+è il livello L5 del piano 003 e il target `make test-ui-e2e` sarà aggiunto in
+fase 17.
 
 ### 7.1 Playwright, non Selenium
 
@@ -723,7 +777,7 @@ await expect(page).toHaveScreenshot("cluster-detail.png", {
 ### 7.6 Configurazione
 
 ```ts
-// test/web-e2e/playwright.config.ts
+// web/playwright.config.ts
 export default defineConfig({
   testDir: ".",
   fullyParallel: true,
@@ -936,7 +990,7 @@ jobs:
         with:
           filters: |
             go:  ['**/*.go', 'go.mod', 'go.sum', 'test/**']
-            web: ['web/**', 'test/web-e2e/**']
+            web: ['web/**']
 
   lint:
     runs-on: ubuntu-latest
@@ -984,9 +1038,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '22', cache: 'npm', cache-dependency-path: web/package-lock.json }
-      - run: npm ci --prefix web
-      - run: npm run test:unit --prefix web -- --coverage
+        with: { node-version: '22', cache: 'pnpm', cache-dependency-path: web/pnpm-lock.yaml }
+      - run: pnpm install --frozen-lockfile
+      - run: make web-test
+      - run: make web-coverage-gate
 
   e2e-system:                    # L3 smoke
     needs: [unit-go]
@@ -1018,19 +1073,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '22', cache: 'npm', cache-dependency-path: test/web-e2e/package-lock.json }
+        with: { node-version: '22', cache: 'pnpm', cache-dependency-path: web/pnpm-lock.yaml }
       - run: make build-images
       - run: make e2e-stack-up            # stack L3 + scenariod + web
-      - run: npx playwright install --with-deps chromium
-        working-directory: test/web-e2e
-      - run: npx playwright test --project=chromium
-        working-directory: test/web-e2e
+      - run: pnpm exec playwright install --with-deps chromium
+        working-directory: web
+      - run: pnpm exec playwright test --project=chromium
+        working-directory: web
         env: { APP_URL: 'http://localhost:3000', SCENARIOD_URL: 'http://localhost:9900' }
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: playwright-report
-          path: test/web-e2e/playwright-report/     # include le trace
+          path: test/e2e/_artifacts/ui/     # include le trace
       - run: make e2e-stack-down
         if: always()
 ```
@@ -1054,9 +1109,9 @@ make test                # L1 (default: veloce, si usa in loop mentre si svilupp
 make test-integration    # L2, PG_VERSION=16 di default
 make test-e2e            # L3 smoke
 make test-e2e-full       # L3 completo (lungo)
-make test-web            # L4
-make test-web-e2e        # L5 fixture mode (veloce)
-make test-web-e2e-live   # L5 contro stack L3 reale
+make web-test            # L4/L2 UI con Vitest
+make web-coverage-gate   # L4/L2 UI con floor V8
+make test-ui-e2e         # L5, dalla fase 17
 make test-all            # tutto, come su main
 
 make e2e-stack-up        # alza lo stack e lo lascia in piedi per esplorazione manuale
