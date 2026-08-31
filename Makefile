@@ -3,7 +3,7 @@ PKG     := ./...
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
-.PHONY: build fmt fmt-check lint test test-integration test-e2e test-e2e-full test-e2e-full-evidence test-e2e-matrix \
+.PHONY: build fmt fmt-check lint test test-integration test-e2e test-e2e-full test-e2e-full-evidence test-e2e-matrix api-docs \
         ci-local ci-local-unit ci-local-integration coverage coverage-gate generate golden clean build-images build-images-multiarch
 
 build:
@@ -74,6 +74,9 @@ coverage-gate:
 
 generate:
 	@echo "not implemented until phase 3"; exit 0
+
+api-docs:
+	$(GO) run ./internal/tools/apidocs -input api/openapi.yaml -output docs/api.md
 
 golden:
 	$(GO) test -tags=integration -run Golden ./internal/wire -update
