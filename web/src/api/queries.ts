@@ -241,30 +241,51 @@ export function useInstanceSettings(
   })
 }
 
-export function useInstanceTables(id: string) {
+export function useInstanceTables(
+  id: string,
+  params: QueryParameters<'/api/v1/instances/{id}/tables'> = {},
+) {
   return useApiQuery({
     policy: REFRESH.instance,
     queryFn: () =>
-      getApi(() => client.GET('/api/v1/instances/{id}/tables', { params: { path: { id } } })),
-    queryKey: qk.instanceTables(id),
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/tables', {
+          params: { path: { id }, query: params },
+        }),
+      ),
+    queryKey: qk.instanceTables(id, params.limit),
   })
 }
 
-export function useInstanceIndexes(id: string) {
+export function useInstanceIndexes(
+  id: string,
+  params: QueryParameters<'/api/v1/instances/{id}/indexes'> = {},
+) {
   return useApiQuery({
     policy: REFRESH.instance,
     queryFn: () =>
-      getApi(() => client.GET('/api/v1/instances/{id}/indexes', { params: { path: { id } } })),
-    queryKey: qk.instanceIndexes(id),
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/indexes', {
+          params: { path: { id }, query: params },
+        }),
+      ),
+    queryKey: qk.instanceIndexes(id, params.limit),
   })
 }
 
-export function useInstanceBloat(id: string) {
+export function useInstanceBloat(
+  id: string,
+  params: QueryParameters<'/api/v1/instances/{id}/bloat'> = {},
+) {
   return useApiQuery({
     policy: REFRESH.instance,
     queryFn: () =>
-      getApi(() => client.GET('/api/v1/instances/{id}/bloat', { params: { path: { id } } })),
-    queryKey: qk.instanceBloat(id),
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/bloat', {
+          params: { path: { id }, query: params },
+        }),
+      ),
+    queryKey: qk.instanceBloat(id, params.limit),
   })
 }
 

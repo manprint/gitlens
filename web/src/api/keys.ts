@@ -16,9 +16,9 @@ export const qk = {
   instanceHost: (id: string) => ['getInstanceHost', id] as const,
   instanceSettings: (id: string, changedSince?: string) =>
     ['getInstanceSettings', id, changedSince] as const,
-  instanceTables: (id: string) => ['getInstanceTables', id] as const,
-  instanceIndexes: (id: string) => ['getInstanceIndexes', id] as const,
-  instanceBloat: (id: string) => ['getInstanceBloat', id] as const,
+  instanceTables: (id: string, limit?: number) => ['getInstanceTables', id, limit] as const,
+  instanceIndexes: (id: string, limit?: number) => ['getInstanceIndexes', id, limit] as const,
+  instanceBloat: (id: string, limit?: number) => ['getInstanceBloat', id, limit] as const,
   instanceCommandAudit: (id: string) => ['getInstanceCommandAudit', id] as const,
   locks: (instanceId: string) => ['getLocks', instanceId] as const,
   queryMetrics: (

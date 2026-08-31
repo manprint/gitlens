@@ -49,6 +49,24 @@ function renderPage(
       reason: 'agent unreachable',
     }),
     ok('getInstanceSettings', { instance_id: INSTANCE_ID, settings: [] }),
+    ok('getInstanceTables', {
+      instance_id: INSTANCE_ID,
+      items: [],
+      truncated: false,
+      relations_not_reported: null,
+    }),
+    ok('getInstanceIndexes', {
+      instance_id: INSTANCE_ID,
+      items: [],
+      truncated: false,
+      relations_not_reported: null,
+    }),
+    ok('getInstanceBloat', {
+      instance_id: INSTANCE_ID,
+      items: [],
+      truncated: false,
+      relations_not_reported: null,
+    }),
     ok('queryMetrics', { series: [] }),
   )
   return renderWithProviders(<InstancePage instanceId={INSTANCE_ID} />, {

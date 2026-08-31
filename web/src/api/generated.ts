@@ -1425,7 +1425,10 @@ export interface operations {
     };
     getInstanceTables: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Maximum number of relations returned by the instance-level budget. */
+                limit?: number;
+            };
             header?: never;
             path: {
                 id: components["schemas"]["InstanceId"];
@@ -1448,7 +1451,10 @@ export interface operations {
     };
     getInstanceIndexes: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Maximum number of relations returned by the instance-level budget. */
+                limit?: number;
+            };
             header?: never;
             path: {
                 id: components["schemas"]["InstanceId"];
@@ -1471,7 +1477,10 @@ export interface operations {
     };
     getInstanceBloat: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Maximum number of relations returned by the instance-level budget. */
+                limit?: number;
+            };
             header?: never;
             path: {
                 id: components["schemas"]["InstanceId"];

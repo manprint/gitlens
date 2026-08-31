@@ -899,6 +899,11 @@ paths:
       summary: Return table relation statistics.
       parameters:
         - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, format: int32, minimum: 1, maximum: 500, default: 50 }
+          description: Maximum number of relations returned by the instance-level budget.
       responses:
         '200':
           description: Table rows and cardinality-budget metadata.
@@ -921,6 +926,11 @@ paths:
       summary: Return index relation statistics.
       parameters:
         - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, format: int32, minimum: 1, maximum: 500, default: 50 }
+          description: Maximum number of relations returned by the instance-level budget.
       responses:
         '200':
           description: Index rows and cardinality-budget metadata.
@@ -943,6 +953,11 @@ paths:
       summary: Return relation bloat estimates.
       parameters:
         - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, format: int32, minimum: 1, maximum: 500, default: 50 }
+          description: Maximum number of relations returned by the instance-level budget.
       responses:
         '200':
           description: Bloat rows and cardinality-budget metadata.

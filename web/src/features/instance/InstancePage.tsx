@@ -8,6 +8,7 @@ import { InstanceHeader } from './InstanceHeader'
 import { DatabaseSelector } from './DatabaseSelector'
 import { HostSection } from './HostSection'
 import { OverviewSection } from './OverviewSection'
+import { RelationsSection } from './RelationsSection'
 import { SettingsSection } from './SettingsSection'
 
 interface InstancePageProps {
@@ -98,6 +99,7 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
       )}
       <HostSection instanceId={instanceId} />
       <SettingsSection instanceId={instanceId} />
+      <RelationsSection instanceId={instanceId} />
     </div>
   )
 }
