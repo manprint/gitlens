@@ -90,11 +90,11 @@ func main() {
 	}
 	switch {
 	case !uiCfg.Enabled:
-		log.Println("UI disabled")
+		log.Println("PGLENS_UI_ENABLED=false; UI disabled")
 	case uiCfg.Password == "":
-		log.Println("UI enabled but no password configured; API requests will be rejected")
+		log.Println("PGLENS_UI_ENABLED=true; UI enabled but no password configured; API requests will be rejected")
 	default:
-		log.Println("UI enabled")
+		log.Println("PGLENS_UI_ENABLED=true; UI enabled")
 	}
 	sessionStore := server.NewSessionStore(uiCfg.SessionTTL)
 	var alertStore alert.Store

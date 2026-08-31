@@ -111,3 +111,29 @@ func TestSPA_SetsNosniff(t *testing.T) {
 		})
 	}
 }
+
+func TestRouter_UIDisabledServesNoSPA(t *testing.T) {
+	router := NewRouter(
+		UIConfig{Enabled: false},
+		testWebUIAssets(),
+		nil,
+		nil,
+		nil,
+		nil,
+		&API{},
+		NewTopologyAPI(nil),
+		NewAshAPI(nil),
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	require.NotEqual(t, testIndexHTML, rec.Body.String())
+
+	req = httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "ok", rec.Body.String())
+}
