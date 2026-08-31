@@ -48,6 +48,7 @@ function renderPage(
       available: false,
       reason: 'agent unreachable',
     }),
+    ok('getInstanceSettings', { instance_id: INSTANCE_ID, settings: [] }),
     ok('queryMetrics', { series: [] }),
   )
   return renderWithProviders(<InstancePage instanceId={INSTANCE_ID} />, {

@@ -8,6 +8,7 @@ import { InstanceHeader } from './InstanceHeader'
 import { DatabaseSelector } from './DatabaseSelector'
 import { HostSection } from './HostSection'
 import { OverviewSection } from './OverviewSection'
+import { SettingsSection } from './SettingsSection'
 
 interface InstancePageProps {
   /** Optional override keeps the page easy to exercise without the lazy route. */
@@ -96,6 +97,7 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
         </>
       )}
       <HostSection instanceId={instanceId} />
+      <SettingsSection instanceId={instanceId} />
     </div>
   )
 }
