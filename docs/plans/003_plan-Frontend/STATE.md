@@ -55,7 +55,7 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 |-------|-------|
 | **Type** | sub-phase |
 | **ID** | 9.1 |
-| **Status** | `none` |
+| **Status** | `OPEN` |
 | **Intent** | Replication derivation library |
 | **Next action:** | Complete sub-phase **9.1** in [phase_10.md](phase_10.md): build the replication derivation library |
 | **Assigned** | `agent-2:sonnet` |
@@ -347,7 +347,7 @@ guidance.
 
 ## §6 — In-flight work
 
-`none — tree consistent`
+`claimed — nothing written yet for sub-phase 9.1`
 
 ---
 
