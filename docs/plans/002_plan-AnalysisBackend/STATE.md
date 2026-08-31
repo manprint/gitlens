@@ -696,6 +696,7 @@ the units that touched it, so a later audit can attribute every diff.
 | V001-int-wal-focused | `go test -tags=integration -race -shuffle=on -timeout=10m ./internal/check -run '^TestINTWAL000_WALStatisticsColumnShape$'` on PG15–18 | PASS — focused version-gated WAL shape checks passed for every supported version | 2026-08-30 |
 | V001-ci-local-integration | `make ci-local-integration` | NOT DIRECTLY VERIFIABLE — child jobs later disappeared without failure markers, but the timed-out wrapper did not expose its final exit code | 2026-08-30 |
 | V001-e2e-full | `make test-e2e-full-evidence` | PASS — artifact `test/e2e/_artifacts/e2e-full-20260831T040622Z.log`; `RESIDUAL_CONTAINERS=0`; `RESIDUAL_NETWORKS=0`; `EXIT_STATUS=0 FINISHED_AT=2026-08-31T05:12:01Z COMMAND=make test-e2e-full`; elapsed 3939s (65m39s) | 2026-08-31 |
+| V001-F3-id-audit | `./scripts/id_audit.sh docs/plans/002_plan-AnalysisBackend/STATE.md` | PASS — every source-only identifier is now catalogued in §11; the rerun returned `DIFF_COUNT=68` with 0 `ONLY_IN_SOURCE` and 68 retained state-only historical/planned identifiers | 2026-08-31 |
 
 ## 8. Runtime deviations from the plan
 
@@ -842,6 +843,10 @@ and every `INT-*`/`SYS-*` id in the code must appear here. Former plan-001
 extensions remain identified in the notes; every test row is resolved as
 `DONE` for this plan closure.
 
+The 2026-08-31 identifier audit reports `DIFF_COUNT=68` after cataloguing every
+source-only identifier: the source side is complete, while the 68 state-only
+identifiers are retained historical/planned entries in this closed audit record.
+
 | ID | Type | Phase | Status | Notes |
 |----|------|-------|--------|-------|
 | INT-ACT-001 | integration | 3 | `DONE` | phase 3 § 3.3 — Extend the `activity` check |
@@ -965,6 +970,57 @@ extensions remain identified in the notes; every test row is resolved as
 | SYS-PERM-002 | system | 10 | `DONE` | phase 10 § 10.3 — real T0/T1/T2 grant-script application, named command degradation and runtime T1 promotion without agent restart |
 | SYS-REPL-006 | system | 9 | `DONE` | phase 9 § 9.1 — Cascading replication topology |
 | SYS-VAC-001 | system | 9 | `DONE` | phase 9 § 9.4 — dead-tuple ratio falls after VACUUM and last-vacuum age is fresh; three full-suite runs green |
+| INT-API-002 | integration | legacy | `DONE` | identifier audit — `internal/server/api_integration_test.go` |
+| INT-API-010 | integration | legacy | `DONE` | identifier audit — `internal/server/it_api_topology_test.go` |
+| INT-API-011 | integration | legacy | `DONE` | identifier audit — `internal/server/it_api_topology_test.go` |
+| INT-API-012 | integration | legacy | `DONE` | identifier audit — `internal/server/it_api_topology_test.go` |
+| INT-API-013 | integration | legacy | `DONE` | identifier audit — `internal/server/it_api_topology_test.go` |
+| INT-ASH-001 | integration | legacy | `DONE` | identifier audit — `internal/ash/sampler_integration_test.go` |
+| INT-ASH-002 | integration | legacy | `DONE` | identifier audit — `internal/ash/sampler_integration_test.go` |
+| INT-ASH-003 | integration | legacy | `DONE` | identifier audit — `internal/ash/sampler_integration_test.go` |
+| INT-ASH-004 | integration | legacy | `DONE` | identifier audit — `internal/ash/sampler_integration_test.go` |
+| INT-ASH-010 | integration | legacy | `DONE` | identifier audit — `internal/server/api_ash_integration_test.go` |
+| INT-ASH-011 | integration | legacy | `DONE` | identifier audit — `internal/server/api_ash_integration_test.go` |
+| INT-ASH-012 | integration | legacy | `DONE` | identifier audit — `internal/server/api_ash_integration_test.go` |
+| INT-ASH-013 | integration | legacy | `DONE` | identifier audit — `internal/server/api_ash_integration_test.go` |
+| INT-ASH-014 | integration | legacy | `DONE` | identifier audit — `internal/server/api_ash_integration_test.go` |
+| INT-CHECK-014 | integration | legacy | `DONE` | identifier audit — `internal/check/database_stats_integration_test.go` |
+| INT-CONN-001 | integration | legacy | `DONE` | identifier audit — `internal/agent/conn_integration_test.go` |
+| INT-CONN-002 | integration | legacy | `DONE` | identifier audit — `internal/agent/conn_integration_test.go` |
+| INT-CONN-003 | integration | legacy | `DONE` | identifier audit — `internal/agent/conn_integration_test.go` |
+| INT-CONN-004 | integration | legacy | `DONE` | identifier audit — `internal/agent/conn_integration_test.go` |
+| INT-CONN-005 | integration | legacy | `DONE` | identifier audit — `internal/agent/conn_integration_test.go` |
+| INT-REPL-001 | integration | legacy | `DONE` | identifier audit — `internal/check/replication_integration_test.go` |
+| INT-REPL-002 | integration | legacy | `DONE` | identifier audit — `internal/check/replication_integration_test.go` |
+| INT-REPL-003 | integration | legacy | `DONE` | identifier audit — `internal/check/replication_integration_test.go` |
+| INT-REPL-004 | integration | legacy | `DONE` | identifier audit — `internal/check/replication_integration_test.go` |
+| INT-REPL-005 | integration | legacy | `DONE` | identifier audit — `internal/check/replication_integration_test.go` |
+| INT-REPL-006 | integration | legacy | `DONE` | identifier audit — `internal/check/replication_integration_test.go` |
+| INT-SCHED-001 | integration | legacy | `DONE` | identifier audit — `internal/agent/scheduler_integration_test.go` |
+| INT-STMT-001 | integration | legacy | `DONE` | identifier audit — `internal/check/stat_statements_integration_test.go` |
+| INT-STMT-003 | integration | legacy | `DONE` | identifier audit — `internal/check/stat_statements_integration_test.go` |
+| INT-STMT-004 | integration | legacy | `DONE` | identifier audit — `internal/check/stat_statements_integration_test.go` |
+| INT-STMT-005 | integration | legacy | `DONE` | identifier audit — `internal/check/stat_statements_integration_test.go` |
+| INT-STMT-006 | integration | legacy | `DONE` | identifier audit — `internal/check/stat_statements_integration_test.go` |
+| INT-WL-002 | integration | legacy | `DONE` | identifier audit — `test/workload/distinct_integration_test.go` |
+| SYS-AGENT-001 | system | legacy | `DONE` | identifier audit — `test/e2e/smoke_test.go` |
+| SYS-AGENT-002 | system | legacy | `DONE` | identifier audit — `test/e2e/full_test.go` |
+| SYS-AGENT-003 | system | legacy | `DONE` | identifier audit — `test/e2e/full_test.go` |
+| SYS-AGENT-004 | system | legacy | `DONE` | identifier audit — `test/e2e/full_test.go` |
+| SYS-AGENT-005 | system | legacy | `DONE` | identifier audit — `test/e2e/full_test.go` |
+| SYS-ASH-002 | system | legacy | `DONE` | identifier audit — `test/e2e/ash_test.go` |
+| SYS-DB-001 | system | legacy | `DONE` | identifier audit — `test/e2e/full_test.go` |
+| SYS-LOAD-002 | system | legacy | `DONE` | identifier audit — `test/e2e/full_test.go` |
+| SYS-NET-003 | system | legacy | `DONE` | identifier audit — `test/e2e/smoke_test.go` |
+| SYS-NET-005 | system | legacy | `DONE` | identifier audit — `test/e2e/full_test.go` |
+| SYS-REPL-001 | system | legacy | `DONE` | identifier audit — `test/e2e/full_test.go` |
+| SYS-REPL-002 | system | legacy | `DONE` | identifier audit — `test/e2e/full_test.go` |
+| SYS-REPL-003 | system | legacy | `DONE` | identifier audit — `test/e2e/full_test.go` |
+| SYS-REPL-004 | system | legacy | `DONE` | identifier audit — `test/e2e/full_test.go` |
+| SYS-RESET-001 | system | legacy | `DONE` | identifier audit — `test/e2e/smoke_test.go` |
+| SYS-RESET-002 | system | legacy | `DONE` | identifier audit — `test/e2e/full_test.go` |
+| SYS-SLOT-001 | system | legacy | `DONE` | identifier audit — `test/e2e/full_test.go` |
+| SYS-TOPO-001 | system | legacy | `DONE` | identifier audit — `test/e2e/smoke_test.go` |
 
 ### Docs
 

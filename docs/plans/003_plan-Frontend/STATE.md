@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-08-31 — sub-phase 0.3 opened._
+_Last updated: 2026-08-31 — sub-phase 0.3 closed; sub-phase 0.4 next._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,16 +54,16 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 0.3 |
-| **Status** | `OPEN` |
-| **Intent** | Make plan 002's §11 traceability claim precise and complete, closing audit finding V001-F3 |
-| **Next action:** | Complete sub-phase **0.3** in [phase_01.md](phase_01.md): add `scripts/id_audit.sh`, reconcile plan 002's §11, and record the resulting diff count |
+| **ID** | 0.4 |
+| **Status** | `none` |
+| **Intent** | Update plan 002's audit register so V001-F1, V001-F2 and V001-F3 are marked fixed |
+| **Next action:** | Open sub-phase **0.4** in [phase_01.md](phase_01.md): update both audit-register files, preserve the original findings, and reconcile the summary counts |
 | **Assigned** | `agent-2:sonnet` |
-| **Repo state** | sub-phases 0.1 and 0.2 are complete and committed. Plan 002 phase 10.5 now names every path changed by close commit `06f50ea`, and D-059 remains unchanged. This unit adds the identifier audit and traceability correction. |
+| **Repo state** | sub-phases 0.1–0.3 are complete. Plan 002 §11 now catalogs all source-only identifiers; the audit rerun has 0 `ONLY_IN_SOURCE` and `DIFF_COUNT=68` because historical/state-only entries are retained. |
 | **Phase file** | [phase_01.md](phase_01.md) |
 
-Sub-phases 0.1 and 0.2 are closed; sub-phase 0.3 is the current unit. The
-remaining phase-0 units are still pending.
+Sub-phases 0.1–0.3 are closed; sub-phase 0.4 is the next unit. The remaining
+phase-0 units are still pending.
 
 ---
 
@@ -155,18 +155,19 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 |---|------|-----|--------|--------|--------|
 | 0.1 | sub-phase | 0.1 | 2026-08-31 | Capture durable E2E evidence and close V001-F1 | `8824301` |
 | 0.2 | sub-phase | 0.2 | 2026-08-31 | Reconcile phase-10.5 scope and close V001-F2 | `4341cb4` |
+| 0.3 | sub-phase | 0.3 | 2026-08-31 | Make plan 002 §11 traceability complete and close V001-F3 | `<pending>` |
 
 ---
 
 ## §5 — Files touched
 
-`Makefile`; `scripts/e2e_evidence.sh`; `internal/scripts/doc.go`; `internal/scripts/scripts_test.go`; `test/harness/harness.go`; `test/scenario/net.go`; `test/scenario/topo_cascading.go`; `docs/plans/002_plan-AnalysisBackend/STATE.md`; `docs/plans/002_plan-AnalysisBackend/phase_11.md`; `docs/plans/003_plan-Frontend/STATE.md`.
+`Makefile`; `scripts/e2e_evidence.sh`; `scripts/id_audit.sh`; `internal/scripts/doc.go`; `internal/scripts/scripts_test.go`; `test/harness/harness.go`; `test/scenario/net.go`; `test/scenario/topo_cascading.go`; `docs/plans/002_plan-AnalysisBackend/STATE.md`; `docs/plans/002_plan-AnalysisBackend/phase_11.md`; `docs/plans/003_plan-Frontend/STATE.md`.
 
 ---
 
 ## §6 — In-flight work
 
-`claimed — nothing written yet`
+`none — tree consistent`
 
 ---
 
@@ -183,6 +184,7 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 | 2026-08-31 | 0.1 | focused SYS-NET-001 / network pair / SYS-REPL-006 E2E regressions | PASS | Outage 135s, combined network pair 332s, cascading stale-edge regression 108s after timing-boundary corrections. |
 | 2026-08-31 | 0.1 | `make test-e2e-full-evidence` | PASS | Artifact `test/e2e/_artifacts/e2e-full-20260831T040622Z.log`; `RESIDUAL_CONTAINERS=0`; `RESIDUAL_NETWORKS=0`; `EXIT_STATUS=0 FINISHED_AT=2026-08-31T05:12:01Z COMMAND=make test-e2e-full`; elapsed 3939s (65m39s). |
 | 2026-08-31 | 0.2 | `make fmt-check lint test` | PASS | `0 issues`; race/shuffle unit suite green; exit 0 at 05:15:54Z after 18s. The phase-10.5 Files list now covers all seven paths in `06f50ea`, and D-059 is preserved exactly. |
+| 2026-08-31 | 0.3 | `bash -n scripts/id_audit.sh`; `go test ./internal/scripts -count=1` | PASS | Script syntax and both shell-script tests are green. After adding all 51 source-only IDs to plan 002 §11, rerun reports 0 `ONLY_IN_SOURCE`, 68 retained state-only historical/planned IDs, and `DIFF_COUNT=68`. |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -198,6 +200,7 @@ reconstruct.
 |---|-----------|-----------|-----|--------------|
 | 1 | 0.1 – 0.5 | This plan writes into **plan 002's** folder (`docs/plans/002_plan-AnalysisBackend/verify/index.md`, its report file, and its `STATE.md` §11) | Decision **D12**: the three open findings V001-F1/F2/F3 from plan 002's audit are fixed here rather than left open, and a finding's status must be updated in the register that owns it. Recorded in advance so a later audit reads a cross-plan write as intentional. | yes — D12 in [overview.md](overview.md) |
 | 2 | 0.1 | The E2E evidence implementation also adjusts the harness scenario timeout from 10m to 20m, captures network transition timestamps before Docker state changes, widens the fresh-sample window to 180s, and widens the cascading stale-edge window to 120s. | The full-suite evidence runs exposed legitimate propagation/load delays and timing-boundary races; focused regressions passed after each correction, and the successful full run completed with no residual resources. | yes — §6, §7 and this row |
+| 3 | 0.3 | The identifier audit's symmetric `DIFF_COUNT` remains 68 after the preferred source-side cataloguing resolution. | The 68 `ONLY_IN_STATE` entries are historical/planned identifiers retained by the closed plan; the claim being repaired is that every identifier present in Go source is enumerated in §11, which now has 0 `ONLY_IN_SOURCE`. | yes — plan 002 §11 scope sentence and §7 audit row |
 
 ---
 
@@ -259,7 +262,7 @@ the next one opens.
 |----|-------|----------|--------|
 | 0.1 | Capture durable evidence for `make test-e2e-full` (V001-F1) | `agent-2:sonnet` | DONE |
 | 0.2 | Reconcile the phase-10.5 declared scope (V001-F2) | `agent-2:sonnet` | DONE |
-| 0.3 | Make the §11 traceability claim precise and complete (V001-F3) | `agent-2:sonnet` | TODO |
+| 0.3 | Make the §11 traceability claim precise and complete (V001-F3) | `agent-2:sonnet` | DONE |
 | 0.4 | Update plan 002's audit register | `agent-3:haiku` | TODO |
 | 0.5 | Close plan 002's deferred question Q-B | `agent-3:haiku` | TODO |
 | 0.6 | Update README.md | `agent-3:haiku` | TODO |
