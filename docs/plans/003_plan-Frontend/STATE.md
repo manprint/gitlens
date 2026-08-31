@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-08-31 — phase 9 sub-phase 9.1 closed; sub-phase 9.2 open._
+_Last updated: 2026-08-31 — phase 9 sub-phase 9.2 closed; sub-phase 9.3 open._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,16 +54,16 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 9.2 |
+| **ID** | 9.3 |
 | **Status** | `OPEN` |
-| **Intent** | The topology graph |
-| **Next action:** | Complete sub-phase **9.2** in [phase_10.md](phase_10.md): build the topology graph |
+| **Intent** | Replication lag charts |
+| **Next action:** | Complete sub-phase **9.3** in [phase_10.md](phase_10.md): build replication lag charts |
 | **Assigned** | `agent-2:sonnet` |
-| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, and phase 6 sub-phases 6.1–6.8 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, strict typed lint/format gates, Makefile web targets, clean placeholder preservation, the parallel CI web job, frontend workflow documentation, the real server image build, the phase-boundary L3 regression, the Vitest/jsdom test runner foundation, the frontend test architecture rules, the deterministic render/provider harness, the contract-validated OpenAPI fixture suite, the contract-aware MSW handler factory, the V8 UI coverage gate, the axe-core accessibility assertion, the deterministic clock/timezone/locale/randomness rules, the Playwright acceptance bootstrap, the harness defense meta-tests, the frontend testing workflow documentation, the phase-5 boundary E2E regression, the OpenAPI type generator, committed generated API types, stable schema aliases, type-level contract assertions, generator drift gates, the single typed API client, normalized API failures, exact large-integer query identifiers, the query key factory, refresh policies, the visibility-aware polling hooks, query-layer coverage, session authentication, guarded routing, login/logout flows, single-flight 401 handling, auth/login coverage, the locale-aware formatting library, the accessible state-primitives library, freshness plumbing, the phase-6 browser sign-in documentation, the phase-7 route tree/code-splitting boundary, the accessible application shell, the URL-backed time-range state, the shared page scaffolding primitives, resilient namespaced theme/density/sidebar preferences, global error/offline handling, the phase-7 README web-interface guide, the phase-7 boundary E2E regression, the fleet derivation library, cluster cards, agent-health surfacing, server-defined health semantics, degraded/error paths, Fleet Overview documentation, and the phase-8 boundary E2E regression are covered. The replication derivation library and its ten pure UI-REPL tests are covered. The next unit is the topology graph. |
+| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, and phase 6 sub-phases 6.1–6.8 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, strict typed lint/format gates, Makefile web targets, clean placeholder preservation, the parallel CI web job, frontend workflow documentation, the real server image build, the phase-boundary L3 regression, the Vitest/jsdom test runner foundation, the frontend test architecture rules, the deterministic render/provider harness, the contract-validated OpenAPI fixture suite, the contract-aware MSW handler factory, the V8 UI coverage gate, the axe-core accessibility assertion, the deterministic clock/timezone/locale/randomness rules, the Playwright acceptance bootstrap, the harness defense meta-tests, the frontend testing workflow documentation, the phase-5 boundary E2E regression, the OpenAPI type generator, committed generated API types, stable schema aliases, type-level contract assertions, generator drift gates, the single typed API client, normalized API failures, exact large-integer query identifiers, the query key factory, refresh policies, the visibility-aware polling hooks, query-layer coverage, session authentication, guarded routing, login/logout flows, single-flight 401 handling, auth/login coverage, the locale-aware formatting library, the accessible state-primitives library, freshness plumbing, the phase-6 browser sign-in documentation, the phase-7 route tree/code-splitting boundary, the accessible application shell, the URL-backed time-range state, the shared page scaffolding primitives, resilient namespaced theme/density/sidebar preferences, global error/offline handling, the phase-7 README web-interface guide, the phase-7 boundary E2E regression, the fleet derivation library, cluster cards, agent-health surfacing, server-defined health semantics, degraded/error paths, Fleet Overview documentation, and the phase-8 boundary E2E regression are covered. The replication derivation library, topology graph, and UI-REPL/UI-CLUS tests completed so far are covered. The next unit is replication lag charts. |
 | **Phase file** | [phase_10.md](phase_10.md) |
 
-Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, phase 6 sub-phases 6.1–6.8, phase 7 sub-phases 7.1–7.7, phase 8 sub-phases 8.1–8.6, and phase 9 sub-phase 9.1 are closed; sub-phase 9.2 is open.
-- Phases 5, 6, 7, and 8 are complete; phase 9 is in progress and the topology graph is open.
+Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, phase 6 sub-phases 6.1–6.8, phase 7 sub-phases 7.1–7.7, phase 8 sub-phases 8.1–8.6, and phase 9 sub-phases 9.1–9.2 are closed; sub-phase 9.3 is open.
+- Phases 5, 6, 7, and 8 are complete; phase 9 is in progress and replication lag charts are open.
 
 ---
 
@@ -218,6 +218,7 @@ records start/end timestamps and elapsed time.
 | 8.5 | sub-phase | 8.5 | 2026-08-31 | Complete the degraded and error paths under rule T-4 | `4d3b44c` |
 | 8.6 | sub-phase | 8.6 | 2026-08-31 | Update README.md for the fleet overview | `83a5ea3` |
 | 9.1 | sub-phase | 9.1 | 2026-08-31 | Build the replication derivation library | `e356e38` |
+| 9.2 | sub-phase | 9.2 | 2026-08-31 | Build the replication topology graph | `2cd98c5` |
 
 ---
 
@@ -344,6 +345,11 @@ Sub-phase 9.1 added `web/src/lib/replication.ts` with pure graph construction,
 deterministic layout, anomaly detection, lag-series alignment, gap detection,
 and slot summaries, plus ten focused UI-REPL tests.
 
+Sub-phase 9.2 added the accessible React Flow topology graph and custom topology
+nodes, including role/state metadata, replication edge labels, anomaly banners,
+keyboard-readable edge tables, node navigation, and lag-chart selection hooks,
+with UI-CLUS-001–006 coverage.
+
 `docs/LIMITS.md` was also touched by sub-phase 2.7.
 
 `Makefile`; `README.md`; `scripts/e2e_evidence.sh`; `scripts/id_audit.sh`; `internal/scripts/doc.go`; `internal/scripts/scripts_test.go`; `test/harness/harness.go`; `test/harness/api.go`; `test/e2e/deploy_test.go`; `test/scenario/net.go`; `test/scenario/topo_cascading.go`; `docs/plans/002_plan-AnalysisBackend/STATE.md`; `docs/plans/002_plan-AnalysisBackend/phase_11.md`; `docs/plans/002_plan-AnalysisBackend/verify/index.md`; `docs/plans/002_plan-AnalysisBackend/verify/verify_001_2026-08-30.md`; `docs/plans/003_plan-Frontend/STATE.md`; `api/openapi.yaml`; `internal/server/openapi_test.go`; `internal/tools/apidocs/main.go`; `internal/tools/apidocs/main_test.go`; `docs/api.md`; `cmd/pglens-server/main.go`; `internal/server/config.go`; `internal/server/config_test.go`; `internal/server/session.go`; `internal/server/session_test.go`; `internal/server/http.go`; `internal/server/http_test.go`; `internal/server/facts_integration_test.go`; `internal/server/ingest_integration_test.go`; `internal/server/api_commands_integration_test.go`.
@@ -352,7 +358,7 @@ and slot summaries, plus ten focused UI-REPL tests.
 
 ## §6 — In-flight work
 
-`claimed — nothing written yet for sub-phase 9.2`
+`claimed — nothing written yet for sub-phase 9.3`
 
 ---
 
@@ -524,6 +530,9 @@ and slot summaries, plus ten focused UI-REPL tests.
 | 2026-08-31 | 8 | `make test-e2e` phase-boundary Smoke | PASS | Artifact `test/e2e/_artifacts/e2e-phase8-boundary-20260831T174310Z.log`; started 17:43:10Z, finished 18:01:40Z; wall-clock 1109.856s (18m29.856s), Go suite 1109.657s; exit 0. No residual pglens containers or networks remained. |
 | 2026-08-31 | 9.1 | `pnpm exec vitest run src/lib/replication.test.ts --reporter=dot` | PASS | Focused pure-derivation suite: 1 file and 10 tests passed in 1.124s wall-clock; final post-port run reported 499ms. |
 | 2026-08-31 | 9.1 | `make web-typecheck web-lint web-coverage-gate` | PASS | Final frontend gate completed in 59.438s; 37 files and 298 tests passed; coverage reports 89.02% statements, 81.57% branches, 87.68% functions, and 90.93% lines; `src/lib/` reports 95.8%. Typecheck and generated-API drift checks pass; lint has 0 errors and the three existing Fast Refresh warnings; UI coverage gate passes. |
+| 2026-08-31 | 9.2 | `pnpm exec vitest run src/features/cluster/TopologyGraph.test.tsx src/components/charts/topology.nodes.test.tsx --reporter=dot` | PASS | Focused topology suite: 2 files and 11 tests passed in 3.085s wall-clock (Vitest 2.51s). |
+| 2026-08-31 | 9.2 | `make web-typecheck web-lint web-coverage-gate` | PASS | Final frontend gate completed in 62.812s; 39 files and 309 tests passed; coverage reports 89.87% statements, 81.51% branches, 88.86% functions, and 91.73% lines; `src/components/charts/` reports 100.0%. Typecheck and generated-API drift checks pass; lint has 0 errors and four Fast Refresh warnings (three existing plus the topology node export); UI coverage gate passes. No E2E was run: deferred to phase 9 closure per documented cadence. |
+| 2026-08-31 | 9.2 | `make web-build`; `git diff --check` | PASS | Production build completed in 0.816s; generated embedded assets were restored to the tracked placeholder boundary and the diff check was clean. |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -604,7 +613,7 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 | 6 | [phase_07.md](phase_07.md) | Typed API client, query layer, state primitives | `agent-2:sonnet` | 6.4, 6.6 | DONE — 8/8 sub-phases closed |
 | 7 | [phase_08.md](phase_08.md) | App shell, navigation, time range | `agent-2:sonnet` | 7.3 | DONE — 7/7 sub-phases closed |
 | 8 | [phase_09.md](phase_09.md) | Fleet Overview | `agent-2:sonnet` | 8.4 | DONE — 6/6 sub-phases closed |
-| 9 | [phase_10.md](phase_10.md) | Cluster Detail | `agent-2:sonnet` | 9.2 | IN_PROGRESS — 9.2 open |
+| 9 | [phase_10.md](phase_10.md) | Cluster Detail | `agent-2:sonnet` | 9.3 | IN_PROGRESS — 9.3 open |
 | 10 | [phase_11.md](phase_11.md) | Instance Detail | `agent-2:sonnet` | — | TODO |
 | 11 | [phase_12.md](phase_12.md) | ASH and wait analysis | `agent-2:sonnet` | 11.2 | TODO |
 | 12 | [phase_13.md](phase_13.md) | Query Inspector and plan history | `agent-2:sonnet` | 12.3 | TODO |
@@ -687,8 +696,8 @@ the next one opens.
 | 8.5 | Degraded and error paths (rule T-4) | `agent-2:sonnet` | DONE |
 | 8.6 | Update README.md | `agent-3:haiku` | DONE |
 | 9.1 | Replication derivation library | `agent-2:sonnet` | DONE |
-| 9.2 | The topology graph | `agent-2:sonnet` | OPEN |
-| 9.3 | Replication lag charts | `agent-2:sonnet` | TODO |
+| 9.2 | The topology graph | `agent-2:sonnet` | DONE |
+| 9.3 | Replication lag charts | `agent-2:sonnet` | OPEN |
 | 9.4 | Slots, drift and cluster settings | `agent-2:sonnet` | TODO |
 | 9.5 | The event timeline | `agent-2:sonnet` | TODO |
 | 9.6 | Degraded and error paths (rule T-4) | `agent-2:sonnet` | TODO |
@@ -781,7 +790,8 @@ not otherwise be visible.
 | `UI-RANGE-*` | Vitest, unit | 7.3 | DONE |
 | `UI-FLEET-*` | Vitest, unit + route | 8.1 – 8.6 | DONE |
 | `UI-REPL-001` … `UI-REPL-010` | Vitest, pure derivation | 9.1 | DONE |
-| `UI-CLUS-*` | Vitest, unit + route | 9.1 – 9.6 | TODO |
+| `UI-CLUS-001` … `UI-CLUS-006` | Vitest, unit + route | 9.2 | DONE |
+| `UI-CLUS-*` (remaining) | Vitest, unit + route | 9.3 – 9.6 | TODO |
 | `UI-INST-*` | Vitest, unit + route | 10.1 – 10.6 | TODO |
 | `UI-ASH-*` | Vitest, unit + route | 11.1 – 11.5 | TODO |
 | `UI-QRY-*` | Vitest, unit + route | 12.1 – 12.6 | TODO |
