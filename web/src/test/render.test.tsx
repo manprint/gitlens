@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { screen } from '@testing-library/react'
+import { act, screen } from '@testing-library/react'
 import { useLocation } from 'react-router-dom'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { renderRoute, renderWithProviders } from './render'
 import { base as session } from './fixtures/getSession'
@@ -24,9 +24,12 @@ function ConsoleErrorProbe() {
 }
 
 describe('renderWithProviders', () => {
-  it('mounts the application route registry', () => {
+  it('mounts the application route registry', async () => {
     server.use(ok('getSession', session))
     renderRoute('/')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
 
     expect(
       screen.getByRole('heading', { name: 'Interface under construction' }),
