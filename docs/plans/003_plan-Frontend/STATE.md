@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-08-31 — sub-phase 2.3 closed; sub-phase 2.4 opened._
+_Last updated: 2026-08-31 — sub-phase 2.4 closed; sub-phase 2.5 opened._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,15 +54,15 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 2.4 |
+| **ID** | 2.5 |
 | **Status** | `OPEN` |
-| **Intent** | Implement the three session endpoints with secure password authentication and cookie lifecycle |
-| **Next action:** | Complete sub-phase **2.4** in [phase_03.md](phase_03.md): add the three session endpoints and their tests |
+| **Intent** | Make the E2E harness authenticate machine requests with the existing agent bearer token |
+| **Next action:** | Complete sub-phase **2.5** in [phase_03.md](phase_03.md): update the E2E harness client and audit anonymous API callers |
 | **Assigned** | `agent-2:sonnet` |
-| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.3 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults and the in-memory session store are covered, and API routes now enforce the session-or-bearer credential rule. This unit adds the session endpoints. |
+| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.4 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, and all three session endpoints are covered. This unit updates machine-client authentication. |
 | **Phase file** | [phase_03.md](phase_03.md) |
 
-Phase 0 sub-phases 0.1–0.6 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.3 are closed; sub-phase 2.4 is the next unit.
+Phase 0 sub-phases 0.1–0.6 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.4 are closed; sub-phase 2.5 is the next unit.
 Phase 2 and the remaining frontend work are still pending.
 
 ---
@@ -217,6 +217,8 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 | 2026-08-31 | 2.2 | `make fmt-check lint test coverage-gate` | PASS | Go gates exit 0 at 06:11:06Z after 47s; race/shuffle passed and global coverage is 75.3%. |
 | 2026-08-31 | 2.3 | focused session middleware/config/store tests; integration compile | PASS | Credential exemptions, bearer and cookie authentication, expired-cookie rejection, no-password 503, disabled-router behavior, session-store behavior, and integration package compilation are green. |
 | 2026-08-31 | 2.3 | `make fmt-check lint test coverage-gate` | FAIL then PASS | First run stopped after 1s at 06:19:25Z on unchecked `response.Body.Close` calls; all were corrected in `da1c2ac`. The rerun passed at 06:20:54Z after 45s; global coverage is 75.4%. |
+| 2026-08-31 | 2.4 | session endpoint, secure-cookie, and OpenAPI tests | PASS | Login success/failure, 4 KiB body limit, malformed JSON, session status states, logout deletion, secure-cookie resolution, OpenAPI parsing, and route coverage are green. |
+| 2026-08-31 | 2.4 | `make fmt-check lint test coverage-gate` | PASS | Go gates exit 0 at 06:29:53Z after 47s; race/shuffle passed and global coverage is 75.5%. |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -268,7 +270,7 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 |-------|------|-------|----------|-------------|--------|
 | 0 | [phase_01.md](phase_01.md) | Plan 002 closure and contract prerequisites | `agent-2:sonnet` / `agent-3:haiku` | 0.4 | DONE — 6/6 sub-phases closed |
 | 1 | [phase_02.md](phase_02.md) | OpenAPI contract and route-coverage gate | `agent-2:sonnet` | 1.1, 1.4 | DONE — 6/6 sub-phases closed |
-| 2 | [phase_03.md](phase_03.md) | UI session authentication | `agent-2:sonnet` | 2.1, 2.2, 2.3 | IN_PROGRESS — 2.4 next |
+| 2 | [phase_03.md](phase_03.md) | UI session authentication | `agent-2:sonnet` | 2.1, 2.2, 2.3 | IN_PROGRESS — 2.5 next |
 | 3 | [phase_04.md](phase_04.md) | Embedded SPA serving and dev proxy | `agent-2:sonnet` | 3.2 | TODO |
 | 4 | [phase_05.md](phase_05.md) | Frontend workspace scaffold | `agent-2:sonnet` | 4.1 | TODO |
 | 5 | [phase_06.md](phase_06.md) | Frontend test harness and quality gates | `agent-2:sonnet` | 5.2, 5.4, 5.6, 5.9 | TODO |
@@ -307,8 +309,8 @@ the next one opens.
 | 2.1 | UI configuration loader | `agent-2:sonnet` | DONE |
 | 2.2 | Session store | `agent-2:sonnet` | DONE |
 | 2.3 | Session middleware and the `either credential` rule | `agent-2:sonnet` | DONE |
-| 2.4 | The three session endpoints | `agent-2:sonnet` | OPEN |
-| 2.5 | Update the E2E harness client to authenticate | `agent-2:sonnet` | TODO |
+| 2.4 | The three session endpoints | `agent-2:sonnet` | DONE |
+| 2.5 | Update the E2E harness client to authenticate | `agent-2:sonnet` | OPEN |
 | 2.6 | Full regression sweep | `agent-2:sonnet` | TODO |
 | 2.7 | Update README.md and LIMITS.md | `agent-3:haiku` | TODO |
 | 3.1 | The embed package and its placeholder | `agent-2:sonnet` | TODO |
@@ -433,7 +435,7 @@ not otherwise be visible.
 | `TestLoadUIConfig` | Go, unit | 2.1 | DONE |
 | `TestSessionStore` | Go, unit | 2.2 | DONE |
 | `TestRequireCredential` | Go, unit | 2.3 | DONE |
-| `TestSessionEndpoints` | Go, integration | 2.4 | TODO |
+| `TestSessionEndpoints` | Go, integration | 2.4 | DONE |
 | `TestSPAHandler` | Go, unit | 3.2 | TODO |
 | `TestSPADisabled` | Go, unit | 3.3 | TODO |
 | `T-META-1` … `T-META-6` | Vitest, harness meta-tests | 5.10 | TODO |
