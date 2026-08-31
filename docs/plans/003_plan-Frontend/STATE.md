@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-08-31 — sub-phase 6.1 closed; sub-phase 6.2 opened._
+_Last updated: 2026-08-31 — sub-phase 6.2 claimed; no code written yet._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -229,7 +229,7 @@ the new API test.
 
 ## §6 — In-flight work
 
-`none — tree consistent; sub-phase 6.1 is committed and sub-phase 6.2 is open`
+`claimed — nothing written yet; sub-phase 6.2 is the active unit`
 
 ---
 
