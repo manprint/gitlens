@@ -29,7 +29,7 @@ afterEach(() => {
 })
 
 beforeEach(() => {
-  vi.useFakeTimers({ now: NOW, shouldAdvanceTime: false })
+  vi.useFakeTimers({ shouldAdvanceTime: false, now: NOW })
 
   for (const method of ['error', 'warn'] as const) {
     vi.spyOn(console, method).mockImplementation((...args) => {

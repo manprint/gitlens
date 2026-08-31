@@ -65,6 +65,40 @@ export default tseslint.config(
       '@typescript-eslint/switch-exhaustiveness-check': 'error',
       'react-hooks/exhaustive-deps': 'error',
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "CallExpression[callee.property.name='toLocaleString']",
+          message: 'use an explicit locale in src/lib/format',
+        },
+        {
+          selector: "CallExpression[callee.property.name='toLocaleDateString']",
+          message: 'use an explicit locale in src/lib/format',
+        },
+        {
+          selector: "CallExpression[callee.property.name='toLocaleTimeString']",
+          message: 'use an explicit locale in src/lib/format',
+        },
+      ],
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'Math',
+          property: 'random',
+          message: 'use a deterministic identifier source such as React useId',
+        },
+        {
+          object: 'crypto',
+          property: 'randomUUID',
+          message: 'use a deterministic identifier source such as React useId',
+        },
+      ],
+    },
+  },
+  {
+    files: ['src/lib/format/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': 'off',
     },
   },
   {
@@ -75,6 +109,18 @@ export default tseslint.config(
         {
           selector: "CallExpression[callee.name='Number']",
           message: 'cluster_id and queryid are strings (I-5); use the string form',
+        },
+        {
+          selector: "CallExpression[callee.property.name='toLocaleString']",
+          message: 'use an explicit locale in src/lib/format',
+        },
+        {
+          selector: "CallExpression[callee.property.name='toLocaleDateString']",
+          message: 'use an explicit locale in src/lib/format',
+        },
+        {
+          selector: "CallExpression[callee.property.name='toLocaleTimeString']",
+          message: 'use an explicit locale in src/lib/format',
         },
       ],
     },
