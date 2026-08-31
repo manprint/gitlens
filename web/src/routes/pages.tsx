@@ -1,3 +1,5 @@
+import { FleetPage } from '@/features/fleet/FleetPage'
+
 interface PlaceholderPageProps {
   surface: string
 }
@@ -12,12 +14,7 @@ function PlaceholderPage({ surface }: PlaceholderPageProps) {
 }
 
 export function FleetOverviewPage() {
-  return (
-    <>
-      <PlaceholderPage surface="Fleet overview" />
-      <small>Build {__PGLENS_BUILD__}</small>
-    </>
-  )
+  return <FleetPage />
 }
 
 export function ClusterDetailPage() {

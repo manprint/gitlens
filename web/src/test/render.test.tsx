@@ -4,6 +4,8 @@ import { useLocation } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
 import { renderRoute, renderWithProviders } from './render'
+import { base as alert } from './fixtures/getAlert'
+import { base as clusters } from './fixtures/getClusters'
 import { base as session } from './fixtures/getSession'
 import { ok } from './msw/handlers'
 import { server } from './msw/server'
@@ -25,17 +27,19 @@ function ConsoleErrorProbe() {
 
 describe('renderWithProviders', () => {
   it('mounts the application route registry', async () => {
-    server.use(ok('getSession', session))
+    server.use(ok('getSession', session), ok('getClusters', clusters), ok('getAlerts', [alert]))
     renderRoute('/')
     await act(async () => {
       await import('../routes/pages')
-      await vi.advanceTimersByTimeAsync(1)
-      for (let index = 0; index < 10; index += 1) {
+      for (let index = 0; index < 20; index += 1) {
+        await vi.advanceTimersByTimeAsync(0)
         await Promise.resolve()
       }
     })
 
-    expect(screen.getByRole('heading', { name: 'Fleet overview' })).toBeInTheDocument()
+    await vi.waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Fleet overview' })).toBeInTheDocument()
+    })
     expect(screen.getByText(/Build dev/)).toBeInTheDocument()
   })
 

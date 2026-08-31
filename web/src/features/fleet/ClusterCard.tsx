@@ -29,7 +29,7 @@ export function ClusterCard({ alertCount = 0, cluster }: ClusterCardProps) {
   const lagUnknown = cluster.max_replay_lag_seconds == null
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2" role="listitem">
       <Link
         to={`/clusters/${encodeURIComponent(cluster.cluster_id)}`}
         aria-label={`${cluster.name ?? 'Unnamed cluster'} (${cluster.cluster_id})`}
