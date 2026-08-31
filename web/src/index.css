@@ -1,5 +1,5 @@
-@import "tailwindcss";
-@import "tw-animate-css";
+@import 'tailwindcss';
+@import 'tw-animate-css';
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -47,7 +47,7 @@
   --severity-critical: #c53030;
   --focus-ring: #2563eb;
   --font-ui: Inter, ui-sans-serif, system-ui, sans-serif;
-  --font-code: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  --font-code: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
   --row-h-compact: 2.25rem;
   --row-h-comfortable: 3rem;
 }

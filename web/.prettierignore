@@ -1,0 +1,5 @@
+dist
+../internal/webui/dist
+coverage
+src/api/generated.ts
+pnpm-lock.yaml
