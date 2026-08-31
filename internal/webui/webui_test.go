@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"errors"
 	"io/fs"
 	"strings"
 	"testing"
@@ -21,13 +22,19 @@ func TestAssets_ContainsIndexHTML(t *testing.T) {
 	}
 }
 
-func TestIsPlaceholder_TrueWithoutMarker(t *testing.T) {
-	if !IsPlaceholder() {
-		t.Fatal("expected the committed asset tree to be reported as a placeholder")
+func TestIsPlaceholderMatchesMarker(t *testing.T) {
+	_, err := fs.Stat(embedded, "dist/.built")
+	wantPlaceholder := errors.Is(err, fs.ErrNotExist)
+	if got := IsPlaceholder(); got != wantPlaceholder {
+		t.Fatalf("IsPlaceholder() = %v, want %v for dist/.built error %v", got, wantPlaceholder, err)
 	}
 }
 
 func TestPlaceholderMentionsBuildCommand(t *testing.T) {
+	if !IsPlaceholder() {
+		t.Skip("real frontend build is embedded")
+	}
+
 	assets, err := Assets()
 	if err != nil {
 		t.Fatalf("Assets() error: %v", err)
