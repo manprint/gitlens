@@ -180,6 +180,11 @@ identified by `cluster_name` rather than `system_identifier`, the page flags tha
 identity and links to **Setting up the monitoring role** for the grant
 instructions.
 
+Selecting a cluster opens its detail view. From there, the replication story is
+available in one place: topology, lag, slot health, configuration drift, and
+the event timeline, with the same time-range control used by the rest of the
+interface.
+
 The selected time range is reflected in the URL, so a view can be shared as a
 link. Keyboard shortcuts are available for the main destinations and filters:
 
@@ -1076,6 +1081,15 @@ curl -s localhost:8080/api/v1/clusters/7381927364512345678/topology | jq .
 ```sh
 curl -s "localhost:8080/api/v1/clusters/7381927364512345678/replication?from=$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)&to=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | jq '.edges[] | select(.metric=="replay_lag_sec")'
 ```
+
+**Cluster Detail:** Open a cluster from the Fleet Overview to see its topology
+graph and the replication evidence behind the current health. Dashed edges
+identify upstreams that could not be resolved. Lag is plotted over the selected
+range, and missing intervals remain visible as gaps rather than being drawn as
+zero. The view also includes replication slot health, configuration drift, and
+the event timeline, including failover history. The `cluster_id` shown in the
+view is byte-identical before and after a failover or promote, so the same
+cluster remains one continuous story.
 
 The `cluster_id` returned by these endpoints is byte-identical before and after a failover or promote, proving invariant I-1 is honored.
 
