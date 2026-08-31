@@ -889,6 +889,11 @@ curl -s localhost:8080/healthz
 curl -s localhost:8080/readyz
 ```
 
+The complete machine-readable API contract is [`api/openapi.yaml`](api/openapi.yaml),
+with an offline rendered reference at [`docs/api.md`](docs/api.md). The OpenAPI
+document is authoritative for parameters, defaults, response shapes, and error
+codes; regenerate the reference with `make api-docs`.
+
 ### Endpoint index
 
 The API is authenticated with the configured bearer token where applicable.
@@ -1045,6 +1050,7 @@ make fmt-check        # verify formatting (gofmt -l must be empty)
 make lint             # run golangci-lint
 make test             # unit tests with -race -shuffle=on
 make coverage-gate    # enforce per-package and global coverage floors
+make api-docs         # regenerate the offline HTTP API reference from OpenAPI
 make test-integration # integration tests against real PostgreSQL (requires Docker)
 make test-e2e         # E2E smoke subset (requires Docker, ~10m)
 make test-e2e-full    # full E2E suite (requires Docker, ~60m)
