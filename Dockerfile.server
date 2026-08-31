@@ -10,7 +10,7 @@ FROM golang:1.26 AS builder
 ARG VERSION=dev
 WORKDIR /src
 COPY . .
-COPY --from=web-builder /src/web/dist /src/internal/webui/dist
+COPY --from=web-builder /src/internal/webui/dist /src/internal/webui/dist
 RUN make build VERSION="$VERSION"
 FROM gcr.io/distroless/static-debian12:nonroot
 ARG VERSION=dev
