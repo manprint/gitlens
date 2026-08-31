@@ -32,6 +32,8 @@ services:
       PGLENS_BOOTSTRAP_TOKEN: ${PGLENS_BOOTSTRAP_TOKEN:-dev-token}
       # Optional secret-file alternative to PGLENS_BOOTSTRAP_TOKEN.
       PGLENS_BOOTSTRAP_TOKEN_FILE: ${PGLENS_BOOTSTRAP_TOKEN_FILE:-}
+      # The interface is served on the same port as the API; set this password to use it.
+      PGLENS_UI_PASSWORD: ${PGLENS_UI_PASSWORD:-}
       # Alert evaluator cadence; accepts a Go duration or positive seconds.
       PGLENS_ALERT_INTERVAL: ${PGLENS_ALERT_INTERVAL:-30s}
       # Descriptive Slack variable; the legacy PGLENS_SLACK_WEBHOOK_URL is also accepted.

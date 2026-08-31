@@ -11,6 +11,8 @@ services:
     environment:
       PGLENS_DSN: postgres://pglens:pglens@timescaledb:5432/pglens?sslmode=disable
       PGLENS_BOOTSTRAP_TOKEN: dev-token
+      # The interface is served on the same port as the API; set this password to use it.
+      PGLENS_UI_PASSWORD: ${PGLENS_UI_PASSWORD:-}
     ports: ["8080:8080"]
   pglens-agent:
     image: ghcr.io/manprint/pglens-agent:dev
