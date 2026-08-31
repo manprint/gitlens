@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-08-31 — sub-phase 2.7 closed; sub-phase 3.1 opened._
+_Last updated: 2026-08-31 — sub-phase 3.1 closed; sub-phase 3.2 opened._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,16 +54,16 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 3.1 |
-| **Status** | `OPEN` |
-| **Intent** | Add the embedded web UI asset package and its committed placeholder |
-| **Next action:** | Complete sub-phase **3.1** in [phase_04.md](phase_04.md): add `internal/webui`, placeholder assets, tests, and ignore rules |
+| **ID** | 3.2 |
+| **Status** | `none` |
+| **Intent** | Add the static asset handler and SPA fallback |
+| **Next action:** | Complete sub-phase **3.2** in [phase_04.md](phase_04.md): serve embedded files, apply the SPA fallback, and add handler tests |
 | **Assigned** | `agent-2:sonnet` |
-| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, and the authentication documentation are covered. This unit adds the server-side embedded asset boundary needed by the frontend phase. |
+| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7 and phase 3 sub-phase 3.1 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, and the embedded placeholder asset boundary are covered. The next unit wires the asset filesystem into HTTP serving. |
 | **Phase file** | [phase_04.md](phase_04.md) |
 
-Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, and phase 2 sub-phases 2.1–2.7 are closed; sub-phase 3.1 is the next unit.
-Phase 2 is complete; phase 3 and the remaining frontend work are still pending.
+Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, and phase 3 sub-phase 3.1 are closed; sub-phase 3.2 is the next unit.
+Phase 2 is complete; phase 3 is in progress and the remaining frontend work is still pending.
 
 ---
 
@@ -168,10 +168,13 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 | 2.1 | sub-phase | 2.1 | 2026-08-31 | Add UI configuration loader and validation | `67965ac` |
 | 2.2 | sub-phase | 2.2 | 2026-08-31 | Add in-memory session store with expiry and reap | `103757f` |
 | 2.7 | sub-phase | 2.7 | 2026-08-31 | Document UI session authentication limits and configuration | `519cf67` |
+| 3.1 | sub-phase | 3.1 | 2026-08-31 | Add embedded web UI asset package and committed placeholder | `0676ced` |
 
 ---
 
 ## §5 — Files touched
+
+Sub-phase 3.1 added `.gitignore`, `internal/webui/doc.go`, `internal/webui/webui.go`, `internal/webui/webui_test.go`, and `internal/webui/dist/index.html`.
 
 `docs/LIMITS.md` was also touched by sub-phase 2.7.
 
@@ -181,7 +184,7 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 
 ## §6 — In-flight work
 
-`claimed — sub-phase 3.1; implementation not yet started`
+`none — tree consistent`
 
 ---
 
@@ -230,6 +233,9 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 | 2026-08-31 | 2.6 | `make test-e2e` | FAIL → PASS | Initial run took 1173.742s and failed SYS-LOAD-008 with pglens_series_total=2552 > 2500; sanity margin corrected to 3000 in `66548ad`, then rerun passed in ~1158s (go test 1157.338s, completed ~07:39:57Z). |
 | 2026-08-31 | 2.6 | `AGENT_MODE=binary make test-e2e` | FAIL → PASS | First run took 494s: binary agent YAML had a tab and then an incorrectly indented standby `max`; fixed in `4342261` and `8e30147`. Permission instance lookup then needed transport-neutral resolution, fixed in `4ec1fa6`; final full binary smoke run passed in ~967s (go test 965.790s, completed ~08:44:36Z). |
 | 2026-08-31 | 2.7 | README/LIMITS documentation review; `git diff --check` | PASS | README documents login, authenticated API access, configuration variables, and open operational endpoints; LIMITS documents the shared-password/session/tenant boundary. Commit `519cf67`. |
+| 2026-08-31 | 3.1 | `go test ./internal/webui -count=1` | PASS | Embedded `index.html`, placeholder detection, and build-command guidance pass in 0.09s. |
+| 2026-08-31 | 3.1 | `go build ./...` | PASS | Clean checkout build succeeds without pnpm in 0.46s. |
+| 2026-08-31 | 3.1 | `make fmt-check lint test coverage-gate` | PASS | Go gates exit 0 after 42.45s; global coverage is 75.5%, and `internal/webui` is 100.0%. |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -282,7 +288,7 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 | 0 | [phase_01.md](phase_01.md) | Plan 002 closure and contract prerequisites | `agent-2:sonnet` / `agent-3:haiku` | 0.4 | DONE — 6/6 sub-phases closed |
 | 1 | [phase_02.md](phase_02.md) | OpenAPI contract and route-coverage gate | `agent-2:sonnet` | 1.1, 1.4 | DONE — 6/6 sub-phases closed |
 | 2 | [phase_03.md](phase_03.md) | UI session authentication | `agent-2:sonnet` | 2.1, 2.2, 2.3 | DONE — 7/7 sub-phases closed |
-| 3 | [phase_04.md](phase_04.md) | Embedded SPA serving and dev proxy | `agent-2:sonnet` | 3.2 | IN_PROGRESS — 3.1 next |
+| 3 | [phase_04.md](phase_04.md) | Embedded SPA serving and dev proxy | `agent-2:sonnet` | 3.2 | IN_PROGRESS — 3.2 next |
 | 4 | [phase_05.md](phase_05.md) | Frontend workspace scaffold | `agent-2:sonnet` | 4.1 | TODO |
 | 5 | [phase_06.md](phase_06.md) | Frontend test harness and quality gates | `agent-2:sonnet` | 5.2, 5.4, 5.6, 5.9 | TODO |
 | 6 | [phase_07.md](phase_07.md) | Typed API client, query layer, state primitives | `agent-2:sonnet` | 6.4, 6.6 | TODO |
@@ -324,8 +330,8 @@ the next one opens.
 | 2.5 | Update the E2E harness client to authenticate | `agent-2:sonnet` | DONE |
 | 2.6 | Full regression sweep | `agent-2:sonnet` | DONE |
 | 2.7 | Update README.md and LIMITS.md | `agent-3:haiku` | DONE |
-| 3.1 | The embed package and its placeholder | `agent-2:sonnet` | OPEN |
-| 3.2 | The static handler and the SPA fallback | `agent-2:sonnet` | TODO |
+| 3.1 | The embed package and its placeholder | `agent-2:sonnet` | DONE |
+| 3.2 | The static handler and the SPA fallback | `agent-2:sonnet` | OPEN |
 | 3.3 | Serve the SPA only when the UI is enabled | `agent-2:sonnet` | TODO |
 | 3.4 | Container and compose wiring | `agent-2:sonnet` | TODO |
 | 3.5 | Prove both build modes | `agent-2:sonnet` | TODO |
