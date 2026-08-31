@@ -43,6 +43,11 @@ function renderPage(
     ok('getInstance', instance),
     ok('getClusters', [cluster]),
     ok('getInstanceDatabases', databases),
+    ok('getInstanceHost', {
+      instance_id: INSTANCE_ID,
+      available: false,
+      reason: 'agent unreachable',
+    }),
     ok('queryMetrics', { series: [] }),
   )
   return renderWithProviders(<InstancePage instanceId={INSTANCE_ID} />, {

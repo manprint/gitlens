@@ -6,6 +6,7 @@ import { selectedDatabase } from '@/lib/databases'
 
 import { InstanceHeader } from './InstanceHeader'
 import { DatabaseSelector } from './DatabaseSelector'
+import { HostSection } from './HostSection'
 import { OverviewSection } from './OverviewSection'
 
 interface InstancePageProps {
@@ -94,6 +95,7 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
           })()}
         </>
       )}
+      <HostSection instanceId={instanceId} />
     </div>
   )
 }
