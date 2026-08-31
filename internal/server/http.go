@@ -8,8 +8,11 @@ import (
 
 // NewRouter builds the full server handler: liveness/readiness, the agent
 // ingest endpoint (wired to inv/pipeline), and the read API (api.RegisterRoutes).
-func NewRouter(auth *Auth, inv *Inventory, pipeline *Pipeline, api *API, topoAPI *TopologyAPI, ashAPI *AshAPI, alertAPIs ...*AlertAPI) http.Handler {
+func NewRouter(uiCfg UIConfig, store *SessionStore, auth *Auth, inv *Inventory, pipeline *Pipeline, api *API, topoAPI *TopologyAPI, ashAPI *AshAPI, alertAPIs ...*AlertAPI) http.Handler {
 	r := chi.NewRouter()
+	if uiCfg.Enabled {
+		r.Use(RequireCredential(uiCfg, auth, store))
+	}
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))

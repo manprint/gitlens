@@ -83,6 +83,19 @@ func main() {
 	if err != nil {
 		log.Fatalf("alert configuration: %v", err)
 	}
+	uiCfg, err := server.LoadUIConfig(nil, nil)
+	if err != nil {
+		log.Fatalf("UI configuration: %v", err)
+	}
+	switch {
+	case !uiCfg.Enabled:
+		log.Println("UI disabled")
+	case uiCfg.Password == "":
+		log.Println("UI enabled but no password configured; API requests will be rejected")
+	default:
+		log.Println("UI enabled")
+	}
+	sessionStore := server.NewSessionStore(uiCfg.SessionTTL)
 	var alertStore alert.Store
 	var alertSources []alert.Source
 	var alertNotifier alert.Notifier
@@ -109,7 +122,7 @@ func main() {
 	advisorEngine.Start(startupCtx)
 	defer advisorEngine.Stop()
 	alertAPI := server.NewAlertAPI(pool, alertStore)
-	router := server.NewRouter(auth, inv, pipeline, api, topoAPI, ashAPI, alertAPI)
+	router := server.NewRouter(uiCfg, sessionStore, auth, inv, pipeline, api, topoAPI, ashAPI, alertAPI)
 	srv := &http.Server{Addr: listen, Handler: router}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

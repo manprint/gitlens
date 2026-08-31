@@ -4,6 +4,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -19,6 +21,14 @@ type SessionStore struct {
 }
 
 var sessionRandRead = rand.Read
+
+var sessionExemptPaths = map[string]struct{}{
+	"/healthz":             {},
+	"/readyz":              {},
+	"/metrics":             {},
+	"GET /api/v1/session":  {},
+	"POST /api/v1/session": {},
+}
 
 func NewSessionStore(ttl time.Duration) *SessionStore {
 	return &SessionStore{
@@ -83,4 +93,44 @@ func (s *SessionStore) Len() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.sessions)
+}
+
+func RequireCredential(cfg UIConfig, auth *Auth, store *SessionStore) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !cfg.Enabled || sessionRequestExempt(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if auth != nil && auth.Validate(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if cfg.Password == "" {
+				writeError(w, http.StatusServiceUnavailable, "ui_password_not_configured", "configure PGLENS_UI_PASSWORD or PGLENS_UI_PASSWORD_FILE")
+				return
+			}
+			if store != nil {
+				if cookie, err := r.Cookie("pglens_session"); err == nil {
+					if _, ok := store.Validate(cookie.Value); ok {
+						next.ServeHTTP(w, r)
+						return
+					}
+				}
+			}
+			writeError(w, http.StatusUnauthorized, "unauthorized", "sign in or present an agent token")
+		})
+	}
+}
+
+func sessionRequestExempt(r *http.Request) bool {
+	path := r.URL.Path
+	if !strings.HasPrefix(path, "/api/") {
+		return true
+	}
+	if _, ok := sessionExemptPaths[r.Method+" "+path]; ok {
+		return true
+	}
+	_, ok := sessionExemptPaths[path]
+	return ok
 }

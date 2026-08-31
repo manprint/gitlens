@@ -35,7 +35,7 @@ func TestAPI_ReadyRequiresDatabaseAndMigrations(t *testing.T) {
 
 func TestReadyzRouteReflectsReadiness(t *testing.T) {
 	api := &API{pool: &mockPool{queryRowVals: []*mockRow{{vals: []any{1}}, {vals: []any{true}}}}}
-	router := NewRouter(nil, nil, nil, api, NewTopologyAPI(nil), NewAshAPI(nil))
+	router := NewRouter(UIConfig{}, nil, nil, nil, nil, api, NewTopologyAPI(nil), NewAshAPI(nil))
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
