@@ -1,7 +1,8 @@
-import { useMemo } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useRef } from 'react'
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { useAsh, useInstanceSettings } from '@/api/queries'
+import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Degraded, Disabled, ErrorState } from '@/components/state'
 import { useTimeRange } from '@/hooks/useTimeRange'
@@ -117,7 +118,10 @@ export interface AshPageProps {
 }
 
 export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
+  const location = useLocation()
+  const navigate = useNavigate()
   const { instanceId: routeInstanceId } = useParams<{ instanceId: string }>()
+  const redirectedForUnauthorized = useRef(false)
   const [searchParams, setSearchParams] = useSearchParams()
   const { range } = useTimeRange()
   const instanceId = instanceIdOverride ?? routeInstanceId ?? ''
@@ -135,6 +139,15 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
   }
   const ashQuery = useAsh(params)
   const settingsQuery = useInstanceSettings(instanceId)
+  const unauthorized =
+    ashQuery.error?.kind === 'unauthorized' || settingsQuery.error?.kind === 'unauthorized'
+
+  useEffect(() => {
+    if (!unauthorized || redirectedForUnauthorized.current) return
+    redirectedForUnauthorized.current = true
+    const next = `${location.pathname}${location.search}`
+    void navigate(`/login?next=${encodeURIComponent(next)}`, { replace: true })
+  }, [location.pathname, location.search, navigate, unauthorized])
 
   const buckets = useMemo(
     () => filteredBuckets(ashQuery.data?.buckets ?? [], groupBy, waitEventType, waitEvent),
@@ -207,6 +220,7 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
   return (
     <div className="space-y-8">
       <PageHeader
+        freshness={<FreshnessBadge dataUpdatedAt={ashQuery.dataUpdatedAt} policy="ash" />}
         title="ASH and wait analysis"
         subtitle={
           <span>

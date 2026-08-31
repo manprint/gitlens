@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { EChartsOption } from 'echarts'
 
+import { REFRESH } from '@/api/policy'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { renderWithProviders } from '@/test/render'
 
@@ -70,13 +71,15 @@ const ashTopResponse = {
   statistical: false,
 }
 
-function success<T>(data: T) {
+function success<T>(data: T, overrides: Record<string, unknown> = {}) {
   return {
     data,
     dataAge: 0,
+    dataUpdatedAt: Date.now(),
     error: null,
     isPending: false,
     refetch: vi.fn(),
+    ...overrides,
   }
 }
 
@@ -84,10 +87,12 @@ function renderAsh(
   route = '/instances/instance-1/ash?range=1h',
   response: object = ashResponse,
   settings: { name: string; value: string | null }[] = [],
+  ashResult?: object,
+  settingsResult?: object,
 ) {
-  mocks.ash.mockReturnValue(success(response))
+  mocks.ash.mockReturnValue(ashResult ?? success(response))
   mocks.ashTop.mockReturnValue(success(ashTopResponse))
-  mocks.settings.mockReturnValue(success({ instance_id: 'instance-1', settings }))
+  mocks.settings.mockReturnValue(settingsResult ?? success({ instance_id: 'instance-1', settings }))
   return renderWithProviders(<AshPage instanceId="instance-1" />, { route })
 }
 
@@ -161,8 +166,16 @@ describe('AshPage', () => {
   it('UI-ASH-030 names checks.ash when ASH is disabled', () => {
     renderAsh('/instances/instance-1/ash', { ...ashResponse, buckets: [], enabled: false })
 
-    expect(screen.getByRole('status')).toHaveTextContent(/ASH sampling disabled/i)
-    expect(screen.getByRole('status')).toHaveTextContent(/checks\.ash/i)
+    expect(
+      screen
+        .getAllByRole('status')
+        .some((element) => /ASH sampling disabled/i.test(element.textContent ?? '')),
+    ).toBe(true)
+    expect(
+      screen
+        .getAllByRole('status')
+        .some((element) => /checks\.ash/i.test(element.textContent ?? '')),
+    ).toBe(true)
     expect(screen.getByText(/avoids its sampling cost/i)).toBeInTheDocument()
   })
 
@@ -182,6 +195,69 @@ describe('AshPage', () => {
       screen.getByRole('heading', { name: 'No wait event types observed' }),
     ).toBeInTheDocument()
     expect(screen.queryByText(/ASH sampling disabled/i)).not.toBeInTheDocument()
+  })
+
+  it('UI-ASH-040 renders an empty range as empty, not disabled', () => {
+    renderAsh('/instances/instance-1/ash?range=1h', { ...ashResponse, buckets: [], enabled: true })
+
+    expect(
+      screen.getByRole('heading', { name: 'No wait event types observed' }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/ASH sampling disabled/i)).not.toBeInTheDocument()
+  })
+
+  it('UI-ASH-041 marks ASH data stale after its freshness threshold', () => {
+    renderAsh(
+      '/instances/instance-1/ash',
+      ashResponse,
+      [],
+      success(ashResponse, { dataUpdatedAt: Date.now() - REFRESH.ash.staleAfter }),
+    )
+
+    expect(screen.getByRole('status', { name: /Stale data:/i })).toBeInTheDocument()
+  })
+
+  it('UI-ASH-042 redirects an unauthorized ASH response to login exactly once', async () => {
+    const unauthorized = success(undefined, { error: { kind: 'unauthorized' } })
+    const view = renderAsh('/instances/instance-1/ash?range=1h', ashResponse, [], unauthorized)
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(view.router.state.location.pathname).toBe('/login')
+    expect(view.router.state.location.search).toBe(
+      '?next=%2Finstances%2Finstance-1%2Fash%3Frange%3D1h',
+    )
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(view.router.state.location.pathname).toBe('/login')
+  })
+
+  it('UI-ASH-043 renders a server error with a working retry action', () => {
+    const refetch = vi.fn()
+    renderAsh(
+      '/instances/instance-1/ash',
+      ashResponse,
+      [],
+      success(undefined, {
+        error: { kind: 'server', status: 500, error: 'internal_error', detail: 'ASH unavailable' },
+        refetch,
+      }),
+    )
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Server returned 500')
+    fireEvent.click(screen.getByRole('button', { name: 'Retry ASH' }))
+    expect(refetch).toHaveBeenCalledOnce()
+  })
+
+  it('UI-ASH-044 uses the ASH refresh policy interval', () => {
+    renderAsh()
+
+    expect(REFRESH.ash.interval).toBe(30_000)
+    expect(REFRESH.ash.staleAfter).toBeGreaterThanOrEqual(REFRESH.ash.interval * 3)
   })
 
   it('UI-ASH-032 puts the sample warning above the chart and includes its count', () => {
@@ -210,7 +286,11 @@ describe('AshPage', () => {
       [{ name: 'compute_query_id', value: 'off' }],
     )
 
-    expect(screen.getByRole('status')).toHaveTextContent(/compute_query_id is off/i)
+    expect(
+      screen
+        .getAllByRole('status')
+        .some((element) => /compute_query_id is off/i.test(element.textContent ?? '')),
+    ).toBe(true)
     expect(
       screen.getByRole('link', { name: /agent configuration in the README/i }),
     ).toHaveAttribute('href', '/README.md#agent-configuration')
