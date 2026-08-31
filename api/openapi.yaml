@@ -8,6 +8,20 @@ servers:
   - url: /
     description: the pglens server itself
 
+tags:
+  - name: clusters
+  - name: instances
+  - name: metrics
+  - name: events
+  - name: statements
+  - name: ash
+  - name: commands
+  - name: alerts
+  - name: findings
+  - name: agent
+  - name: infrastructure
+  - name: session
+
 security:
   - uiSession: []
   - agentBearer: []
@@ -400,6 +414,127 @@ components:
         scope: { type: string }
         needs: { type: array, items: { type: string } }
         min_tier: { $ref: '#/components/schemas/PermTier' }
+    CommandArgs:
+      type: object
+      additionalProperties: false
+      properties:
+        queryid: { type: integer, format: int64 }
+        datname: { type: string }
+        analyze: { type: boolean }
+        pid: { type: integer, format: int32 }
+        schema: { type: string }
+        relation: { type: string }
+      description: >-
+        Per-kind arguments: explain requires queryid and may include datname or
+        analyze; cancel and terminate require pid; pgstattuple requires schema
+        and relation. Query text is never sent to this API.
+    CreateCommandRequest:
+      type: object
+      required: [kind, args]
+      properties:
+        kind: { type: string, enum: [explain, cancel, terminate, pgstattuple] }
+        args: { $ref: '#/components/schemas/CommandArgs' }
+      description: A command request contains identifiers and options only; query text is never sent.
+    CreateCommandResponse:
+      type: object
+      required: [command_id]
+      properties:
+        command_id: { type: string, format: uuid }
+    CommandResponse:
+      type: object
+      required: [command_id, state]
+      properties:
+        command_id: { type: string, format: uuid }
+        state:
+          type: string
+          enum: [pending, claimed, done, failed, expired]
+          description: Command lifecycle state persisted by the server.
+        result: {}
+        error: { type: string }
+    PollCommand:
+      type: object
+      required: [command_id, kind, args, instance_id, cluster_id, claim_token, expires_at]
+      properties:
+        command_id: { type: string, format: uuid }
+        kind: { type: string, enum: [explain, cancel, terminate, pgstattuple] }
+        args: { $ref: '#/components/schemas/CommandArgs' }
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        cluster_id: { $ref: '#/components/schemas/ClusterId' }
+        claim_token: { type: string, format: uuid }
+        expires_at: { $ref: '#/components/schemas/Timestamp' }
+    CommandResultRequest:
+      type: object
+      required: [claim_token, outcome]
+      properties:
+        claim_token: { type: string, format: uuid }
+        outcome: { type: string, enum: [ok, error, rejected] }
+        result: {}
+        error: { type: string }
+      description: >-
+        An ok outcome carries result; error and rejected outcomes carry error.
+        The claim token must match the token returned by the poll operation.
+    AlertRuleUpdate:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        severity: { type: string, enum: [critical, warning, info] }
+        threshold: { type: number }
+        for_seconds: { type: integer, format: int32, minimum: 0 }
+    AlertRuleUpdateResponse:
+      type: object
+      required: [rule_id, enabled, severity, threshold, for_seconds]
+      properties:
+        rule_id: { type: string }
+        enabled: { type: boolean }
+        severity: { type: string, enum: [critical, warning, info] }
+        threshold: { type: number }
+        for_seconds: { type: integer, format: int32 }
+    SilenceMatcher:
+      type: object
+      required: [name, value]
+      properties:
+        name: { type: string }
+        value: { type: string }
+        is_regex: { type: boolean }
+        negate: { type: boolean }
+    CreateSilenceRequest:
+      type: object
+      required: [matchers, reason, starts_at, ends_at]
+      properties:
+        silence_id: { type: string, format: uuid }
+        matchers: { type: array, items: { $ref: '#/components/schemas/SilenceMatcher' } }
+        reason: { type: string }
+        starts_at: { $ref: '#/components/schemas/Timestamp' }
+        ends_at: { $ref: '#/components/schemas/Timestamp' }
+    MuteFindingRequest:
+      type: object
+      required: [reason, until]
+      properties:
+        reason: { type: string }
+        until: { $ref: '#/components/schemas/Timestamp' }
+    MuteFindingResponse:
+      type: object
+      required: [finding_id, state, muted_until, mute_reason]
+      properties:
+        finding_id: { type: string }
+        state: { type: string, enum: [muted] }
+        muted_until: { $ref: '#/components/schemas/Timestamp' }
+        mute_reason: { type: string }
+    PushEnvelope:
+      type: object
+      required: [protocol_version, agent_id, agent_version, sent_at, instances]
+      properties:
+        protocol_version: { type: integer, format: int32 }
+        agent_id: { type: string }
+        agent_version: { type: string }
+        sent_at: { $ref: '#/components/schemas/Timestamp' }
+        instances: { type: array, items: { type: object, additionalProperties: true } }
+    PushResponse:
+      type: object
+      required: [accepted, rejected]
+      properties:
+        accepted: { type: integer, format: int32 }
+        rejected: { type: integer, format: int32 }
 
   responses:
     BadRequest:
@@ -1142,6 +1277,42 @@ paths:
                       reason: maintenance
                       starts_at: '2026-08-29T10:00:00Z'
                       ends_at: '2026-08-29T11:00:00Z'
+    post:
+      tags: [alerts]
+      operationId: createSilence
+      summary: Create an alert silence.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateSilenceRequest' }
+            examples:
+              default:
+                value:
+                  matchers: [{ name: severity, value: warning }]
+                  reason: maintenance
+                  starts_at: '2026-08-29T10:00:00Z'
+                  ends_at: '2026-08-29T11:00:00Z'
+      responses:
+        '201':
+          description: Silence created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Silence' }
+              examples:
+                default:
+                  value:
+                    silence_id: 33333333-3333-3333-3333-333333333333
+                    matchers: [{ name: severity, value: warning }]
+                    reason: maintenance
+                    starts_at: '2026-08-29T10:00:00Z'
+                    ends_at: '2026-08-29T11:00:00Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '503':
+          description: Alert storage is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/findings:
     get:
@@ -1217,3 +1388,328 @@ paths:
                 default:
                   value:
                     - { id: query.slow_mean, severity: warning, scope: instance, needs: [Statements], min_tier: T0 }
+
+  /api/v1/instances/{id}/commands:
+    post:
+      tags: [commands]
+      operationId: createCommand
+      summary: Queue a command for an instance.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateCommandRequest' }
+            examples:
+              default:
+                value: { kind: explain, args: { queryid: 123456789, datname: app, analyze: true } }
+      responses:
+        '202':
+          description: Command accepted and queued.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreateCommandResponse' }
+              examples:
+                default:
+                  value: { command_id: 22222222-2222-2222-2222-222222222222 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503':
+          description: Command storage is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/commands/{id}:
+    get:
+      tags: [commands]
+      operationId: getCommand
+      summary: Read the state and result of a command.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Command state and optional result.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommandResponse' }
+              examples:
+                default:
+                  value: { command_id: 22222222-2222-2222-2222-222222222222, state: done, result: { plan: {} } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503':
+          description: Command storage is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/alert-rules/{rule_id}:
+    put:
+      tags: [alerts]
+      operationId: updateAlertRule
+      summary: Update a stored alert rule.
+      parameters:
+        - { name: rule_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AlertRuleUpdate' }
+            examples:
+              default:
+                value: { enabled: true, severity: warning, threshold: 0.8, for_seconds: 60 }
+      responses:
+        '200':
+          description: Updated alert rule settings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlertRuleUpdateResponse' }
+              examples:
+                default:
+                  value: { rule_id: custom_latency, enabled: true, severity: warning, threshold: 0.8, for_seconds: 60 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Built-in tier-0 rules cannot be changed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: Alert storage is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/silences/{id}:
+    delete:
+      tags: [alerts]
+      operationId: deleteSilence
+      summary: End a silence immediately.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Silence ended; no response body. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503':
+          description: Alert storage is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/findings/{finding-id}/mute:
+    post:
+      tags: [findings]
+      operationId: muteFinding
+      summary: Mute a finding until a future timestamp.
+      parameters:
+        - { name: finding-id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MuteFindingRequest' }
+            examples:
+              default:
+                value: { reason: maintenance, until: '2026-08-29T11:00:00Z' }
+      responses:
+        '200':
+          description: Finding muted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MuteFindingResponse' }
+              examples:
+                default:
+                  value:
+                    finding_id: query.slow_mean/11111111-1111-1111-1111-111111111111
+                    state: muted
+                    muted_until: '2026-08-29T11:00:00Z'
+                    mute_reason: maintenance
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503':
+          description: Findings storage is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      tags: [findings]
+      operationId: unmuteFinding
+      summary: Remove a finding mute.
+      parameters:
+        - { name: finding-id, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Finding unmuted; no response body. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503':
+          description: Findings storage is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/push:
+    post:
+      tags: [agent]
+      operationId: pushEnvelope
+      summary: Push an agent envelope to the server.
+      security:
+        - agentBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PushEnvelope' }
+            examples:
+              default:
+                value:
+                  protocol_version: 1
+                  agent_id: agent-11111111-1111-1111-1111-111111111111
+                  agent_version: 0.1.0
+                  sent_at: '2026-08-29T10:00:00Z'
+                  instances: []
+      responses:
+        '202':
+          description: Envelope accepted for processing.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PushResponse' }
+              examples:
+                default: { value: { accepted: 1, rejected: 0 } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '500':
+          description: Ingest failed while checking or storing the envelope.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/agents/{agent_id}/commands:
+    get:
+      tags: [agent]
+      operationId: pollCommands
+      summary: Poll and claim the next command for an agent.
+      security:
+        - agentBearer: []
+      parameters:
+        - { name: agent_id, in: path, required: true, schema: { type: string } }
+        - name: wait
+          in: query
+          required: false
+          schema: { type: string, default: 0s }
+          description: Go duration to wait; negative values are rejected and values above 30s are capped.
+      responses:
+        '200':
+          description: A command was claimed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PollCommand' }
+              examples:
+                default:
+                  value:
+                    command_id: 22222222-2222-2222-2222-222222222222
+                    kind: cancel
+                    args: { pid: 4242 }
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    cluster_id: '7381927364512345678'
+                    claim_token: 44444444-4444-4444-4444-444444444444
+                    expires_at: '2026-08-29T10:05:00Z'
+        '204': { description: No command became available before the wait elapsed. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: The authenticated agent does not own the requested queue.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          description: Command polling failed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/commands/{id}/result:
+    post:
+      tags: [agent]
+      operationId: submitCommandResult
+      summary: Submit the result of a claimed command.
+      security:
+        - agentBearer: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CommandResultRequest' }
+            examples:
+              default:
+                value: { claim_token: 44444444-4444-4444-4444-444444444444, outcome: ok, result: { rows: [] } }
+      responses:
+        '204': { description: Command result accepted; no response body. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          description: Claim token did not match, or the command was expired or no longer claimed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          description: Command result could not be persisted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: Command storage is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /healthz:
+    get:
+      tags: [infrastructure]
+      operationId: healthz
+      summary: Report process liveness.
+      security: []
+      responses:
+        '200':
+          description: The process is alive.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: ok
+
+  /readyz:
+    get:
+      tags: [infrastructure]
+      operationId: readyz
+      summary: Report database and migration readiness.
+      security: []
+      responses:
+        '200':
+          description: The server is ready.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: ok
+        '503':
+          description: The server is not ready.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: not ready
+
+  /metrics:
+    get:
+      tags: [infrastructure]
+      operationId: getMetrics
+      summary: Expose Prometheus self-monitoring metrics.
+      security: []
+      responses:
+        '200':
+          description: Prometheus exposition text; the payload is intentionally not modeled as JSON.
+          content:
+            text/plain:
+              example: '# HELP pglens_up 1 if the instance agent is reachable'

@@ -45,6 +45,9 @@ func TestOpenAPIReadOperationsHaveExamples(t *testing.T) {
 			if method == "parameters" {
 				continue
 			}
+			if !strings.HasPrefix(path, "/api/v1/") {
+				continue
+			}
 			operation, ok := rawOperation.(map[string]any)
 			if !ok {
 				t.Fatalf("operation %s %s is not an object", method, path)
@@ -82,6 +85,86 @@ func TestOpenAPIReadOperationsHaveExamples(t *testing.T) {
 					t.Errorf("%s: 200 application/json example(s) missing", operationID)
 				}
 			}
+		}
+	}
+}
+
+func TestOpenAPIOperationsHaveTagsAndUniqueIDs(t *testing.T) {
+	document := loadOpenAPIDocument(t)
+	paths := document["paths"].(map[string]any)
+	seen := make(map[string]string)
+	for path, rawPathItem := range paths {
+		pathItem := rawPathItem.(map[string]any)
+		for method, rawOperation := range pathItem {
+			if method == "parameters" {
+				continue
+			}
+			operation := rawOperation.(map[string]any)
+			operationID, ok := operation["operationId"].(string)
+			if !ok || operationID == "" {
+				t.Errorf("%s %s: operationId missing", method, path)
+				continue
+			}
+			if previous, duplicate := seen[operationID]; duplicate {
+				t.Errorf("operationId %q is used by %s and %s %s", operationID, previous, method, path)
+			}
+			seen[operationID] = method + " " + path
+			tags, ok := operation["tags"].([]any)
+			if !ok || len(tags) == 0 {
+				t.Errorf("%s: tags missing", operationID)
+			}
+		}
+	}
+}
+
+func TestOpenAPIAgentRoutesAreBearerOnly(t *testing.T) {
+	document := loadOpenAPIDocument(t)
+	paths := document["paths"].(map[string]any)
+	want := map[string]struct {
+		method string
+		id     string
+	}{
+		"/api/v1/push":                       {method: "post", id: "pushEnvelope"},
+		"/api/v1/agents/{agent_id}/commands": {method: "get", id: "pollCommands"},
+		"/api/v1/commands/{id}/result":       {method: "post", id: "submitCommandResult"},
+	}
+	for path, route := range want {
+		rawPathItem, ok := paths[path]
+		if !ok {
+			t.Errorf("agent route %s missing", path)
+			continue
+		}
+		pathItem := rawPathItem.(map[string]any)
+		rawOperation, ok := pathItem[route.method]
+		if !ok {
+			t.Errorf("agent operation %s %s missing", route.method, path)
+			continue
+		}
+		operation := rawOperation.(map[string]any)
+		if got := operation["operationId"]; got != route.id {
+			t.Errorf("%s %s: operationId = %v, want %s", route.method, path, got, route.id)
+		}
+		security, ok := operation["security"].([]any)
+		if !ok || len(security) != 1 {
+			t.Errorf("%s %s: security must contain only agentBearer", route.method, path)
+			continue
+		}
+		bearer, ok := security[0].(map[string]any)
+		if !ok || len(bearer) != 1 {
+			t.Errorf("%s %s: security must contain only agentBearer", route.method, path)
+			continue
+		}
+		if values, ok := bearer["agentBearer"].([]any); !ok || len(values) != 0 {
+			t.Errorf("%s %s: security must be agentBearer: []", route.method, path)
+		}
+	}
+
+	for _, path := range []string{"/healthz", "/readyz", "/metrics"} {
+		pathItem := paths[path].(map[string]any)
+		operation := pathItem["get"].(map[string]any)
+		security, ok := operation["security"].([]any)
+		if !ok || len(security) != 0 {
+			t.Errorf("GET %s: security must be []", path)
 		}
 	}
 }
