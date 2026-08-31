@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-08-31 — phase 7 complete; sub-phase 8.1 open._
+_Last updated: 2026-08-31 — phase 8 sub-phase 8.1 closed; sub-phase 8.2 open._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,16 +54,16 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 8.1 |
+| **ID** | 8.2 |
 | **Status** | `OPEN` |
-| **Intent** | Build the fleet derivation library |
-| **Next action:** | Complete sub-phase **8.1** in [phase_09.md](phase_09.md): build the fleet derivation library |
+| **Intent** | Build cluster cards and the fleet grid |
+| **Next action:** | Complete sub-phase **8.2** in [phase_09.md](phase_09.md): build cluster cards and the fleet grid |
 | **Assigned** | `agent-2:sonnet` |
-| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, and phase 6 sub-phases 6.1–6.8 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, strict typed lint/format gates, Makefile web targets, clean placeholder preservation, the parallel CI web job, frontend workflow documentation, the real server image build, the phase-boundary L3 regression, the Vitest/jsdom test runner foundation, the frontend test architecture rules, the deterministic render/provider harness, the contract-validated OpenAPI fixture suite, the contract-aware MSW handler factory, the V8 UI coverage gate, the axe-core accessibility assertion, the deterministic clock/timezone/locale/randomness rules, the Playwright acceptance bootstrap, the harness defense meta-tests, the frontend testing workflow documentation, the phase-5 boundary E2E regression, the OpenAPI type generator, committed generated API types, stable schema aliases, type-level contract assertions, generator drift gates, the single typed API client, normalized API failures, exact large-integer query identifiers, the query key factory, refresh policies, the visibility-aware polling hooks, query-layer coverage, session authentication, guarded routing, login/logout flows, single-flight 401 handling, auth/login coverage, the locale-aware formatting library, the accessible state-primitives library, freshness plumbing, the phase-6 browser sign-in documentation, the phase-7 route tree/code-splitting boundary, the accessible application shell, the URL-backed time-range state, the shared page scaffolding primitives, resilient namespaced theme/density/sidebar preferences, global error/offline handling, the phase-7 README web-interface guide, and the phase-7 boundary E2E regression are covered. The final phase-6, sub-phase-7.1, sub-phase-7.2, sub-phase-7.3, sub-phase-7.5, and sub-phase-7.6 regression guards passed; the next unit is the Fleet derivation library. |
+| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, and phase 6 sub-phases 6.1–6.8 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, strict typed lint/format gates, Makefile web targets, clean placeholder preservation, the parallel CI web job, frontend workflow documentation, the real server image build, the phase-boundary L3 regression, the Vitest/jsdom test runner foundation, the frontend test architecture rules, the deterministic render/provider harness, the contract-validated OpenAPI fixture suite, the contract-aware MSW handler factory, the V8 UI coverage gate, the axe-core accessibility assertion, the deterministic clock/timezone/locale/randomness rules, the Playwright acceptance bootstrap, the harness defense meta-tests, the frontend testing workflow documentation, the phase-5 boundary E2E regression, the OpenAPI type generator, committed generated API types, stable schema aliases, type-level contract assertions, generator drift gates, the single typed API client, normalized API failures, exact large-integer query identifiers, the query key factory, refresh policies, the visibility-aware polling hooks, query-layer coverage, session authentication, guarded routing, login/logout flows, single-flight 401 handling, auth/login coverage, the locale-aware formatting library, the accessible state-primitives library, freshness plumbing, the phase-6 browser sign-in documentation, the phase-7 route tree/code-splitting boundary, the accessible application shell, the URL-backed time-range state, the shared page scaffolding primitives, resilient namespaced theme/density/sidebar preferences, global error/offline handling, the phase-7 README web-interface guide, the phase-7 boundary E2E regression, and the fleet derivation library plus server-health explanations are covered. The final phase-6, sub-phase-7.1, sub-phase-7.2, sub-phase-7.3, sub-phase-7.5, sub-phase-7.6, and sub-phase-8.1 regression guards passed; the next unit is cluster cards and the fleet grid. |
 | **Phase file** | [phase_09.md](phase_09.md) |
 
-Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, phase 6 sub-phases 6.1–6.8, and phase 7 sub-phases 7.1–7.7 are closed; sub-phase 8.1 is open.
-- Phases 5, 6, and 7 are complete; phase 8 is in progress and its fleet derivation unit is open.
+Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, phase 6 sub-phases 6.1–6.8, phase 7 sub-phases 7.1–7.7, and phase 8 sub-phase 8.1 are closed; sub-phase 8.2 is open.
+- Phases 5, 6, and 7 are complete; phase 8 is in progress and its cluster-card/fleet-grid unit is open.
 
 ---
 
@@ -211,6 +211,7 @@ records start/end timestamps and elapsed time.
 | 7.5 | sub-phase | 7.5 | 2026-08-31 | Add theme, density, and user preferences | `f446f91` |
 | 7.6 | sub-phase | 7.6 | 2026-08-31 | Add global error and offline handling | `c2adabd` |
 | 7.7 | sub-phase | 7.7 | 2026-08-31 | Update README.md with the usable web interface | `d95d32c` |
+| 8.1 | sub-phase | 8.1 | 2026-08-31 | Build the fleet derivation library | `02d6bf4` |
 
 ---
 
@@ -298,6 +299,12 @@ Sub-phase 7.7 updated the `Running the server` → `Signing in` documentation in
 `README.md` with the current web interface destinations, URL-backed time range,
 freshness/connection controls, and keyboard shortcuts.
 
+Sub-phase 8.1 added `web/src/lib/fleet.ts` and its tests plus
+`web/src/features/fleet/ClusterCard.tsx` and its tests. The cluster card keeps
+the server-supplied health authoritative, exposes the README-aligned
+explanation, preserves unknown primary/lag/permission values, and handles
+large cluster IDs and identity guidance without nested interactive controls.
+
 `docs/LIMITS.md` was also touched by sub-phase 2.7.
 
 `Makefile`; `README.md`; `scripts/e2e_evidence.sh`; `scripts/id_audit.sh`; `internal/scripts/doc.go`; `internal/scripts/scripts_test.go`; `test/harness/harness.go`; `test/harness/api.go`; `test/e2e/deploy_test.go`; `test/scenario/net.go`; `test/scenario/topo_cascading.go`; `docs/plans/002_plan-AnalysisBackend/STATE.md`; `docs/plans/002_plan-AnalysisBackend/phase_11.md`; `docs/plans/002_plan-AnalysisBackend/verify/index.md`; `docs/plans/002_plan-AnalysisBackend/verify/verify_001_2026-08-30.md`; `docs/plans/003_plan-Frontend/STATE.md`; `api/openapi.yaml`; `internal/server/openapi_test.go`; `internal/tools/apidocs/main.go`; `internal/tools/apidocs/main_test.go`; `docs/api.md`; `cmd/pglens-server/main.go`; `internal/server/config.go`; `internal/server/config_test.go`; `internal/server/session.go`; `internal/server/session_test.go`; `internal/server/http.go`; `internal/server/http_test.go`; `internal/server/facts_integration_test.go`; `internal/server/ingest_integration_test.go`; `internal/server/api_commands_integration_test.go`.
@@ -306,7 +313,7 @@ freshness/connection controls, and keyboard shortcuts.
 
 ## §6 — In-flight work
 
-`claimed — nothing written yet for sub-phase 8.1`
+`claimed — nothing written yet for sub-phase 8.2`
 
 ---
 
@@ -456,6 +463,11 @@ freshness/connection controls, and keyboard shortcuts.
 | 2026-08-31 | 5.11 | `make web-test`; `make web-coverage-gate`; `make web-typecheck`; `make web-lint` | PASS | 108 Vitest tests pass; coverage reports 100% lines and branches; typecheck passes; lint has 0 errors and the three existing Fast Refresh warnings. No sub-phase E2E was run; L3 was deferred to the phase boundary as documented. |
 | 2026-08-31 | 5 | `make test-e2e` Smoke phase-boundary regression | PASS | Durable run from 12:05:50Z to 12:25:09Z, wall-clock 1159.400s (~19m19s), Go suite 1159.199s; exit 0. No pglens/receiver E2E containers remained. |
 
+| 2026-08-31 | 8.1 | `pnpm exec vitest run src/lib/fleet.test.ts src/features/fleet/ClusterCard.test.tsx` | PASS | Focused fleet derivation/card suite: 2 files and 9 tests passed in 2.945s wall-clock; Vitest reported 2.32s. |
+| 2026-08-31 | 8.1 | `make web-typecheck web-lint` | PASS | Typecheck, generated API drift, lint, and format checks passed in 9.8s; lint has 0 errors and the three existing Fast Refresh warnings. |
+| 2026-08-31 | 8.1 | `make web-coverage-gate` | PASS | Full frontend coverage gate completed in 45.959s; 35 files and 265 tests passed; coverage reports 87.67% statements, 82.43% branches, 86.96% functions, and 89.75% lines. |
+| 2026-08-31 | 8.1 | `make web-build`; `git diff --check` | PASS | Production build completed in 0.9s; generated embedded assets were restored to the tracked placeholder boundary. No sub-phase E2E was run; L3 remains deferred to the phase-8 boundary. |
+
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
 sizes. Sub-phase 17.6 must record the captured `EXIT_STATUS` line from
@@ -534,7 +546,7 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 | 5 | [phase_06.md](phase_06.md) | Frontend test harness and quality gates | `agent-2:sonnet` | 5.2, 5.4, 5.6, 5.9 | DONE — 11/11 sub-phases closed |
 | 6 | [phase_07.md](phase_07.md) | Typed API client, query layer, state primitives | `agent-2:sonnet` | 6.4, 6.6 | DONE — 8/8 sub-phases closed |
 | 7 | [phase_08.md](phase_08.md) | App shell, navigation, time range | `agent-2:sonnet` | 7.3 | DONE — 7/7 sub-phases closed |
-| 8 | [phase_09.md](phase_09.md) | Fleet Overview | `agent-2:sonnet` | 8.4 | IN_PROGRESS — 8.1 open |
+| 8 | [phase_09.md](phase_09.md) | Fleet Overview | `agent-2:sonnet` | 8.4 | IN_PROGRESS — 8.2 open |
 | 9 | [phase_10.md](phase_10.md) | Cluster Detail | `agent-2:sonnet` | 9.2 | TODO |
 | 10 | [phase_11.md](phase_11.md) | Instance Detail | `agent-2:sonnet` | — | TODO |
 | 11 | [phase_12.md](phase_12.md) | ASH and wait analysis | `agent-2:sonnet` | 11.2 | TODO |
@@ -611,8 +623,8 @@ the next one opens.
 | 7.5 | Theme, density and preferences | `agent-2:sonnet` | DONE |
 | 7.6 | Global error and offline handling | `agent-2:sonnet` | DONE |
 | 7.7 | Update README.md | `agent-3:haiku` | DONE |
-| 8.1 | Fleet derivation library | `agent-2:sonnet` | OPEN |
-| 8.2 | Cluster cards and the fleet grid | `agent-2:sonnet` | TODO |
+| 8.1 | Fleet derivation library | `agent-2:sonnet` | DONE |
+| 8.2 | Cluster cards and the fleet grid | `agent-2:sonnet` | OPEN |
 | 8.3 | Agent health on the fleet page | `agent-2:sonnet` | TODO |
 | 8.4 | Health semantics, exactly as the server defines them | `agent-2:sonnet` | TODO |
 | 8.5 | Degraded and error paths (rule T-4) | `agent-2:sonnet` | TODO |
