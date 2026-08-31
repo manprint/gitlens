@@ -15,7 +15,15 @@ export default function RequireSession({ children }: RequireSessionProps) {
   configureAuth(queryClient, navigate)
   const session = useSession()
 
-  if (session.isPending) {
+  if (session.error?.kind === 'unauthorized') {
+    return <Navigate replace to="/login" />
+  }
+
+  if (session.error) {
+    return <main role="alert">Impossibile verificare la sessione.</main>
+  }
+
+  if (session.isPending || !session.data) {
     return (
       <main aria-busy="true" aria-label="Caricamento sessione" data-testid="session-loading">
         <div aria-hidden="true" style={{ minHeight: '100vh' }} />
@@ -33,20 +41,8 @@ export default function RequireSession({ children }: RequireSessionProps) {
     )
   }
 
-  if (session.error?.kind === 'unauthorized' || session.data?.authenticated === false) {
+  if (session.data.authenticated === false) {
     return <Navigate replace to="/login" />
-  }
-
-  if (session.error) {
-    return <main role="alert">Impossibile verificare la sessione.</main>
-  }
-
-  if (!session.data) {
-    return (
-      <main aria-busy="true" aria-label="Caricamento sessione" data-testid="session-loading">
-        <div aria-hidden="true" style={{ minHeight: '100vh' }} />
-      </main>
-    )
   }
 
   return <>{children}</>

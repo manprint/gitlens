@@ -87,13 +87,9 @@ export function configureAuth(
 
 client.use({
   onResponse: ({ request, response }) => {
-    const isSessionLogin =
-      request.method.toUpperCase() === 'POST' && new URL(request.url).pathname === '/api/v1/session'
-    const isSessionLogout =
-      request.method.toUpperCase() === 'DELETE' &&
-      new URL(request.url).pathname === '/api/v1/session'
+    const isSessionRequest = new URL(request.url).pathname === '/api/v1/session'
 
-    if (response.status === 401 && !isSessionLogin && !isSessionLogout) {
+    if (response.status === 401 && !isSessionRequest) {
       onUnauthorized()
     } else if (response.ok) {
       unauthorizedLatched = false

@@ -26,7 +26,7 @@ describe('LoginPage', () => {
     const input = screen.getByLabelText('Password')
 
     fireEvent.change(input, { target: { value: 'correct horse battery staple' } })
-    fireEvent.submit(input.closest('form') as HTMLFormElement)
+    fireEvent.click(screen.getByRole('button', { name: 'Accedi' }))
     await settle()
 
     expect(view.router.state.location.pathname).toBe('/clusters')
@@ -44,7 +44,7 @@ describe('LoginPage', () => {
     const input = screen.getByLabelText('Password')
 
     fireEvent.change(input, { target: { value: 'wrong' } })
-    fireEvent.submit(input.closest('form') as HTMLFormElement)
+    fireEvent.click(screen.getByRole('button', { name: 'Accedi' }))
     await settle()
 
     expect(screen.getByRole('alert')).toHaveTextContent('Password non valida.')
@@ -63,7 +63,7 @@ describe('LoginPage', () => {
     const input = screen.getByLabelText('Password')
 
     fireEvent.change(input, { target: { value: 'correct' } })
-    fireEvent.submit(input.closest('form') as HTMLFormElement)
+    fireEvent.click(screen.getByRole('button', { name: 'Accedi' }))
     await settle()
 
     expect(view.router.state.location.pathname).toBe(expected)
@@ -90,7 +90,7 @@ describe('LoginPage', () => {
     expect(view.router.state.location.pathname).toBe('/login')
   })
 
-  it('UI-AUTH-006 has no login flash while session status is loading', async () => {
+  it('UI-AUTH-006 has no login flash while session status is loading', () => {
     server.use(slow('getSession', { authenticated: true }, 1000))
     const view = renderRoute('/')
     expect(screen.getByTestId('session-loading')).toBeInTheDocument()
@@ -101,6 +101,7 @@ describe('LoginPage', () => {
   it('has no serious accessibility violations', async () => {
     vi.useRealTimers()
     const view = renderWithProviders(<LoginPage />, { route: '/login' })
+    expect(screen.getByRole('heading', { name: 'Accedi a pglens' })).toBeInTheDocument()
     await expectNoA11yViolations(view.container)
   })
 })
