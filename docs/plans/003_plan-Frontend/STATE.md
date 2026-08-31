@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-08-31 — sub-phase 3.3 closed; sub-phase 3.4 opened._
+_Last updated: 2026-08-31 — sub-phase 3.4 closed; sub-phase 3.5 opened._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,15 +54,15 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 3.4 |
+| **ID** | 3.5 |
 | **Status** | `none` |
-| **Intent** | Wire the frontend build into containers and compose deployments |
-| **Next action:** | Complete sub-phase **3.4** in [phase_04.md](phase_04.md): add the Node build stage, copy the built SPA, and update deployment environment wiring |
+| **Intent** | Prove the placeholder and frontend build modes |
+| **Next action:** | Complete sub-phase **3.5** in [phase_04.md](phase_04.md): verify placeholder mode, API 404 JSON, and the image build path |
 | **Assigned** | `agent-2:sonnet` |
-| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7 and phase 3 sub-phases 3.1–3.3 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, and the UI enablement guard are covered. The next unit wires the frontend build into images and compose deployments. |
+| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7 and phase 3 sub-phases 3.1–3.4 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, and the container build wiring are covered. The next unit verifies both build modes. |
 | **Phase file** | [phase_04.md](phase_04.md) |
 
-Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, and phase 3 sub-phases 3.1–3.3 are closed; sub-phase 3.4 is the next unit.
+Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, and phase 3 sub-phases 3.1–3.4 are closed; sub-phase 3.5 is the next unit.
 Phase 2 is complete; phase 3 is in progress and the remaining frontend work is still pending.
 
 ---
@@ -171,12 +171,13 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 | 3.1 | sub-phase | 3.1 | 2026-08-31 | Add embedded web UI asset package and committed placeholder | `0676ced` |
 | 3.2 | sub-phase | 3.2 | 2026-08-31 | Serve embedded assets with SPA fallback and API 404 guard | `893c2c3` |
 | 3.3 | sub-phase | 3.3 | 2026-08-31 | Prove UI enablement guard and log `PGLENS_UI_ENABLED` | `a8d3f11` |
+| 3.4 | sub-phase | 3.4 | 2026-08-31 | Wire frontend build into server image and deployments | `9c6b0f7` |
 
 ---
 
 ## §5 — Files touched
 
-Sub-phase 3.1 added `.gitignore`, `internal/webui/doc.go`, `internal/webui/webui.go`, `internal/webui/webui_test.go`, and `internal/webui/dist/index.html`. Sub-phase 3.2 added `internal/server/webui.go`, `internal/server/webui_test.go`, and updated the server router, command entry point, and router call-site tests. Sub-phase 3.3 updated startup logging and added the disabled-UI router test.
+Sub-phase 3.1 added `.gitignore`, `internal/webui/doc.go`, `internal/webui/webui.go`, `internal/webui/webui_test.go`, and `internal/webui/dist/index.html`. Sub-phase 3.2 added `internal/server/webui.go`, `internal/server/webui_test.go`, and updated the server router, command entry point, and router call-site tests. Sub-phase 3.3 updated startup logging and added the disabled-UI router test. Sub-phase 3.4 updated `Dockerfile.server`, `deploy/docker-compose.yml`, `deploy/compose/docker-compose.yml`, and `deploy/server.example.env`.
 
 `docs/LIMITS.md` was also touched by sub-phase 2.7.
 
@@ -242,6 +243,9 @@ Sub-phase 3.1 added `.gitignore`, `internal/webui/doc.go`, `internal/webui/webui
 | 2026-08-31 | 3.2 | `make fmt-check lint test coverage-gate` | PASS | Go gates exit 0 after 46.38s; global coverage is 75.6%, and `internal/server` is 70.8%. |
 | 2026-08-31 | 3.3 | `go test ./internal/server -run '^(TestSPA_|TestRouter_UIDisabledServesNoSPA$)' -count=1` | PASS | SPA routing and disabled-UI/healthz behaviour pass in 0.004s. |
 | 2026-08-31 | 3.3 | `make fmt-check lint test coverage-gate` | PASS | Go gates exit 0 after 46.37s; global coverage is 75.6%, and `internal/server` is 70.8%. |
+| 2026-08-31 | 3.4 | `docker compose -f deploy/docker-compose.yml config -q`; `docker compose -f deploy/compose/docker-compose.yml config -q` | PASS | Both deployment definitions parse with the UI password wiring and same-port comment. |
+| 2026-08-31 | 3.4 | `docker build --check -f Dockerfile.server .` | PASS | Node 24 build-stage ordering, manifest cache boundary, and final image syntax pass with no warnings in 1.7s. |
+| 2026-08-31 | 3.4 | `make build-images` | DEFERRED | The phase intentionally precedes phase 4, which creates `web/package.json` and `web/pnpm-lock.yaml`; image execution is the 3.5 proof after those manifests exist. |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -294,7 +298,7 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 | 0 | [phase_01.md](phase_01.md) | Plan 002 closure and contract prerequisites | `agent-2:sonnet` / `agent-3:haiku` | 0.4 | DONE — 6/6 sub-phases closed |
 | 1 | [phase_02.md](phase_02.md) | OpenAPI contract and route-coverage gate | `agent-2:sonnet` | 1.1, 1.4 | DONE — 6/6 sub-phases closed |
 | 2 | [phase_03.md](phase_03.md) | UI session authentication | `agent-2:sonnet` | 2.1, 2.2, 2.3 | DONE — 7/7 sub-phases closed |
-| 3 | [phase_04.md](phase_04.md) | Embedded SPA serving and dev proxy | `agent-2:sonnet` | 3.2 | IN_PROGRESS — 3.4 next |
+| 3 | [phase_04.md](phase_04.md) | Embedded SPA serving and dev proxy | `agent-2:sonnet` | 3.2 | IN_PROGRESS — 3.5 next |
 | 4 | [phase_05.md](phase_05.md) | Frontend workspace scaffold | `agent-2:sonnet` | 4.1 | TODO |
 | 5 | [phase_06.md](phase_06.md) | Frontend test harness and quality gates | `agent-2:sonnet` | 5.2, 5.4, 5.6, 5.9 | TODO |
 | 6 | [phase_07.md](phase_07.md) | Typed API client, query layer, state primitives | `agent-2:sonnet` | 6.4, 6.6 | TODO |
@@ -339,8 +343,8 @@ the next one opens.
 | 3.1 | The embed package and its placeholder | `agent-2:sonnet` | DONE |
 | 3.2 | The static handler and the SPA fallback | `agent-2:sonnet` | DONE |
 | 3.3 | Serve the SPA only when the UI is enabled | `agent-2:sonnet` | DONE |
-| 3.4 | Container and compose wiring | `agent-2:sonnet` | OPEN |
-| 3.5 | Prove both build modes | `agent-2:sonnet` | TODO |
+| 3.4 | Container and compose wiring | `agent-2:sonnet` | DONE |
+| 3.5 | Prove both build modes | `agent-2:sonnet` | OPEN |
 | 3.6 | Update README.md | `agent-3:haiku` | TODO |
 | 4.1 | Package manifest with exact pins | `agent-2:sonnet` | TODO |
 | 4.2 | TypeScript configuration | `agent-2:sonnet` | TODO |
