@@ -23,7 +23,7 @@ import (
 )
 
 func commandsIntegrationRouter(pool *pgxpool.Pool) http.Handler {
-	return NewRouter(UIConfig{}, nil, NewAuth("test-token"), NewInventory(pool), NewPipeline(pool, clock.NewFake(time.Now())), NewAPI(pool), NewTopologyAPI(pool), NewAshAPI(pool))
+	return NewRouter(UIConfig{}, nil, nil, NewAuth("test-token"), NewInventory(pool), NewPipeline(pool, clock.NewFake(time.Now())), NewAPI(pool), NewTopologyAPI(pool), NewAshAPI(pool))
 }
 
 func TestINTCMD001_MigrationCreatesCommandTablesAndIndexes(t *testing.T) {

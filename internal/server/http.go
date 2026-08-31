@@ -1,14 +1,16 @@
 package server
 
 import (
+	"io/fs"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 )
 
 // NewRouter builds the full server handler: liveness/readiness, the agent
 // ingest endpoint (wired to inv/pipeline), and the read API (api.RegisterRoutes).
-func NewRouter(uiCfg UIConfig, store *SessionStore, auth *Auth, inv *Inventory, pipeline *Pipeline, api *API, topoAPI *TopologyAPI, ashAPI *AshAPI, alertAPIs ...*AlertAPI) http.Handler {
+func NewRouter(uiCfg UIConfig, assets fs.FS, store *SessionStore, auth *Auth, inv *Inventory, pipeline *Pipeline, api *API, topoAPI *TopologyAPI, ashAPI *AshAPI, alertAPIs ...*AlertAPI) http.Handler {
 	r := chi.NewRouter()
 	if uiCfg.Enabled {
 		r.Use(RequireCredential(uiCfg, auth, store))
@@ -36,6 +38,16 @@ func NewRouter(uiCfg UIConfig, store *SessionStore, auth *Auth, inv *Inventory, 
 	ashAPI.RegisterRoutes(r)
 	if len(alertAPIs) > 0 && alertAPIs[0] != nil {
 		alertAPIs[0].RegisterRoutes(r)
+	}
+	if uiCfg.Enabled && assets != nil {
+		spa := SPAHandler(assets)
+		r.NotFound(func(w http.ResponseWriter, req *http.Request) {
+			if strings.HasPrefix(req.URL.Path, "/api/") {
+				writeError(w, http.StatusNotFound, "not_found", "no such endpoint")
+				return
+			}
+			spa.ServeHTTP(w, req)
+		})
 	}
 	return r
 }

@@ -146,6 +146,7 @@ func TestOpenAPICoversEveryRoute(t *testing.T) {
 	router := server.NewRouter(
 		server.UIConfig{},
 		nil,
+		nil,
 		server.NewAuth("t"),
 		server.NewInventory(nil),
 		server.NewPipeline(nil, nil),

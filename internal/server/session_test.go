@@ -438,6 +438,6 @@ func newSessionRoutes(cfg UIConfig, store *SessionStore) http.Handler {
 
 func newSessionTestServer(t *testing.T, cfg UIConfig, store *SessionStore) *httptest.Server {
 	t.Helper()
-	router := NewRouter(cfg, store, NewAuth("agent-token"), NewInventory(nil), NewPipeline(nil, nil), NewAPI(nil), NewTopologyAPI(nil), NewAshAPI(nil))
+	router := NewRouter(cfg, nil, store, NewAuth("agent-token"), NewInventory(nil), NewPipeline(nil, nil), NewAPI(nil), NewTopologyAPI(nil), NewAshAPI(nil))
 	return httptest.NewServer(router)
 }

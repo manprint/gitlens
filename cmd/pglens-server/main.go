@@ -18,6 +18,7 @@ import (
 	"github.com/manprint/pglens/internal/alert/notify"
 	"github.com/manprint/pglens/internal/server"
 	"github.com/manprint/pglens/internal/store"
+	"github.com/manprint/pglens/internal/webui"
 )
 
 var version = "dev" // overridden at build time with -ldflags
@@ -122,7 +123,11 @@ func main() {
 	advisorEngine.Start(startupCtx)
 	defer advisorEngine.Stop()
 	alertAPI := server.NewAlertAPI(pool, alertStore)
-	router := server.NewRouter(uiCfg, sessionStore, auth, inv, pipeline, api, topoAPI, ashAPI, alertAPI)
+	assets, err := webui.Assets()
+	if err != nil {
+		log.Fatalf("web UI assets: %v", err)
+	}
+	router := server.NewRouter(uiCfg, assets, sessionStore, auth, inv, pipeline, api, topoAPI, ashAPI, alertAPI)
 	srv := &http.Server{Addr: listen, Handler: router}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

@@ -20,7 +20,7 @@ import (
 )
 
 func factsRouter(pool *pgxpool.Pool) http.Handler {
-	return NewRouter(UIConfig{}, nil, NewAuth("test-token"), NewInventory(pool), NewPipeline(pool, clock.NewFake(time.Now())), NewAPI(pool), NewTopologyAPI(pool), NewAshAPI(pool))
+	return NewRouter(UIConfig{}, nil, nil, NewAuth("test-token"), NewInventory(pool), NewPipeline(pool, clock.NewFake(time.Now())), NewAPI(pool), NewTopologyAPI(pool), NewAshAPI(pool))
 }
 
 // INT-FACT-001: migration 0007 creates the three hypertables but leaves the

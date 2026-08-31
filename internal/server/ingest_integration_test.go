@@ -33,7 +33,7 @@ func TestIngest_EndToEnd_PushThenClusters(t *testing.T) {
 	api := NewAPI(pool)
 	topoAPI := NewTopologyAPI(pool)
 	ashAPI := NewAshAPI(pool)
-	router := NewRouter(UIConfig{}, nil, auth, inv, pipeline, api, topoAPI, ashAPI)
+	router := NewRouter(UIConfig{}, nil, nil, auth, inv, pipeline, api, topoAPI, ashAPI)
 
 	instID := uuid.NewString()
 	cid := pgtype.ClusterID(987654321).String()
@@ -96,7 +96,7 @@ func TestIngest_INT_INGEST_002_IdempotentPush(t *testing.T) {
 	api := NewAPI(pool)
 	topoAPI := NewTopologyAPI(pool)
 	ashAPI := NewAshAPI(pool)
-	router := NewRouter(UIConfig{}, nil, auth, inv, pipeline, api, topoAPI, ashAPI)
+	router := NewRouter(UIConfig{}, nil, nil, auth, inv, pipeline, api, topoAPI, ashAPI)
 
 	instID := uuid.NewString()
 	cid := pgtype.ClusterID(111222333).String()
