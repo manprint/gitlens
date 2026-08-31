@@ -4,6 +4,9 @@ import { useLocation } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 
 import { renderRoute, renderWithProviders } from './render'
+import { base as session } from './fixtures/getSession'
+import { ok } from './msw/handlers'
+import { server } from './msw/server'
 
 function ProviderProbe() {
   const queryClient = useQueryClient()
@@ -22,6 +25,7 @@ function ConsoleErrorProbe() {
 
 describe('renderWithProviders', () => {
   it('mounts the application route registry', () => {
+    server.use(ok('getSession', session))
     renderRoute('/')
 
     expect(

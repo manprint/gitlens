@@ -13,6 +13,7 @@
     "src/api",
     "src/lib",
     "src/routes",
+    "src/features",
     "src/App.tsx",
     "src/vite-env.d.ts",
     "e2e"
