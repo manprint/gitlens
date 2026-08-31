@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-08-31 — sub-phase 6.7 closed; sub-phase 6.8 open._
+_Last updated: 2026-08-31 — phase 6 closed; sub-phase 7.1 open._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,16 +54,16 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 6.8 |
+| **ID** | 7.1 |
 | **Status** | `OPEN` |
-| **Intent** | Update the user documentation |
-| **Next action:** | Complete sub-phase **6.8** in [phase_07.md](phase_07.md): document frontend client behaviour, poll intervals, and stale readings in `README.md` |
-| **Assigned** | `agent-3:haiku` |
-| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, and phase 5 sub-phases 5.1–5.11 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, strict typed lint/format gates, Makefile web targets, clean placeholder preservation, the parallel CI web job, frontend workflow documentation, the real server image build, the phase-boundary L3 regression, the Vitest/jsdom test runner foundation, the frontend test architecture rules, the deterministic render/provider harness, the contract-validated OpenAPI fixture suite, the contract-aware MSW handler factory, the V8 UI coverage gate, the axe-core accessibility assertion, the deterministic clock/timezone/locale/randomness rules, the Playwright acceptance bootstrap, the harness defense meta-tests, the frontend testing workflow documentation, the phase-5 boundary E2E regression, the OpenAPI type generator, committed generated API types, stable schema aliases, type-level contract assertions, generator drift gates, the single typed API client, normalized API failures, exact large-integer query identifiers, the query key factory, refresh policies, the visibility-aware polling hooks, query-layer coverage, session authentication, guarded routing, login/logout flows, single-flight 401 handling, auth/login coverage, the locale-aware formatting library, the accessible state-primitives library, and freshness plumbing are covered. The shared-auth boundary Smoke E2E passed after 6.4; the next unit is the phase-6 README update. |
+| **Intent** | Build the route tree and code-splitting boundary |
+| **Next action:** | Complete sub-phase **7.1** in [phase_08.md](phase_08.md): add the lazy route tree and its route-level tests |
+| **Assigned** | `agent-2:sonnet` |
+| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, and phase 6 sub-phases 6.1–6.8 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, strict typed lint/format gates, Makefile web targets, clean placeholder preservation, the parallel CI web job, frontend workflow documentation, the real server image build, the phase-boundary L3 regression, the Vitest/jsdom test runner foundation, the frontend test architecture rules, the deterministic render/provider harness, the contract-validated OpenAPI fixture suite, the contract-aware MSW handler factory, the V8 UI coverage gate, the axe-core accessibility assertion, the deterministic clock/timezone/locale/randomness rules, the Playwright acceptance bootstrap, the harness defense meta-tests, the frontend testing workflow documentation, the phase-5 boundary E2E regression, the OpenAPI type generator, committed generated API types, stable schema aliases, type-level contract assertions, generator drift gates, the single typed API client, normalized API failures, exact large-integer query identifiers, the query key factory, refresh policies, the visibility-aware polling hooks, query-layer coverage, session authentication, guarded routing, login/logout flows, single-flight 401 handling, auth/login coverage, the locale-aware formatting library, the accessible state-primitives library, freshness plumbing, and the phase-6 browser sign-in documentation are covered. The final phase-6 regression guard passed; the next unit is the route tree and code-splitting boundary. |
 | **Phase file** | [phase_07.md](phase_07.md) |
 
-Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, and sub-phases 6.1–6.7 are closed; sub-phase 6.8 is open.
-Phase 5 is complete; phase 6 is in progress and its README update is open.
+Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, and phase 6 sub-phases 6.1–6.8 are closed; sub-phase 7.1 is open.
+Phases 5 and 6 are complete; phase 7 is in progress and its route-tree unit is open.
 
 ---
 
@@ -203,6 +203,7 @@ records start/end timestamps and elapsed time.
 | 6.5 | sub-phase | 6.5 | 2026-08-31 | Add locale-aware duration, byte, lag, timestamp, relative-time, count, truncation, and percentage formatters | `ed7f484` |
 | 6.6 | sub-phase | 6.6 | 2026-08-31 | Add accessible state primitives with 100% directory coverage | `1200b6e` |
 | 6.7 | sub-phase | 6.7 | 2026-08-31 | Add freshness age derivation and the stale-data badge | `4bf676e` |
+| 6.8 | sub-phase | 6.8 | 2026-08-31 | Document browser sign-in, session lifetime, restart, and logout behaviour | `76b9949` |
 
 ---
 
@@ -247,6 +248,9 @@ Sub-phase 6.7 added `web/src/hooks/useFreshness.ts` and
 `web/src/components/layout/FreshnessBadge.tsx`, with deterministic tests for
 age, threshold transitions, unavailable timestamps, stale presentation, and
 errored refetches that preserve the last good timestamp.
+Sub-phase 6.8 updated `README.md` with the browser sign-in URL, configured
+password, session lifetime, restart behaviour, logout semantics, and current
+availability of data pages.
 
 `docs/LIMITS.md` was also touched by sub-phase 2.7.
 
@@ -256,7 +260,7 @@ errored refetches that preserve the last good timestamp.
 
 ## §6 — In-flight work
 
-`claimed — nothing written yet; sub-phase 6.8 is open for the phase-6 README update`
+`claimed — nothing written yet; sub-phase 7.1 is open for the route tree and code-splitting boundary`
 
 ---
 
@@ -378,6 +382,9 @@ errored refetches that preserve the last good timestamp.
 | 2026-08-31 | 6.7 | `pnpm exec vitest run src/hooks/useFreshness.test.tsx src/components/layout/FreshnessBadge.test.tsx` | PASS | 2 files and 6 tests passed in 3.87s wall-clock; the frozen-clock age, exact threshold, failed-refetch timestamp preservation, unavailable timestamp, and stale badge cases are covered. |
 | 2026-08-31 | 6.7 | Initial `make web-lint web-typecheck web-coverage-gate` | FAIL (fixed) | Lint rejected a synchronous timer-state reset; after removing it, the composite test project also required the `src/components` and `src/hooks` includes. No E2E was run because 6.7 declares none. |
 | 2026-08-31 | 6.7 | `make web-lint web-typecheck web-coverage-gate` | PASS | Full frontend chain completed in 35.55s; 24 files and 210 tests passed; statements 99.28%, branches 97.32%, functions 100%, lines 99.20%; `src/components/state/` 100.0% and UI coverage gate passed. Lint has 0 errors and the three existing Fast Refresh warnings. No E2E was run: 6.7 declares none and the next E2E boundary is phase 6 closure. |
+| 2026-08-31 | 6.8 | README review; `git diff --check` | PASS | The `Running the server` → `Signing in` guide now names the browser URL, `PGLENS_UI_PASSWORD`, `PGLENS_UI_SESSION_TTL`, restart/logout semantics, and the current absence of data pages. |
+| 2026-08-31 | 6 | `make test` regression guard | PASS | Go race/shuffle suite passes in 20.09s. |
+| 2026-08-31 | 6 | `make test-e2e` phase-boundary Smoke | PASS | Durable run from 14:31:15Z to 14:50:33Z; wall-clock 1158s (19m18s), Go suite 1157.75s; exit 0. No residual pglens containers or networks remained. |
 | 2026-08-31 | 5.11 | `make web-test`; `make web-coverage-gate`; `make web-typecheck`; `make web-lint` | PASS | 108 Vitest tests pass; coverage reports 100% lines and branches; typecheck passes; lint has 0 errors and the three existing Fast Refresh warnings. No sub-phase E2E was run; L3 was deferred to the phase boundary as documented. |
 | 2026-08-31 | 5 | `make test-e2e` Smoke phase-boundary regression | PASS | Durable run from 12:05:50Z to 12:25:09Z, wall-clock 1159.400s (~19m19s), Go suite 1159.199s; exit 0. No pglens/receiver E2E containers remained. |
 
@@ -457,8 +464,8 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 | 3 | [phase_04.md](phase_04.md) | Embedded SPA serving and dev proxy | `agent-2:sonnet` | 3.2 | DONE — 6/6 sub-phases closed |
 | 4 | [phase_05.md](phase_05.md) | Frontend workspace scaffold | `agent-2:sonnet` | 4.1 | DONE — 8/8 sub-phases closed |
 | 5 | [phase_06.md](phase_06.md) | Frontend test harness and quality gates | `agent-2:sonnet` | 5.2, 5.4, 5.6, 5.9 | DONE — 11/11 sub-phases closed |
-| 6 | [phase_07.md](phase_07.md) | Typed API client, query layer, state primitives | `agent-2:sonnet` | 6.4, 6.6 | IN_PROGRESS — 6.8 open |
-| 7 | [phase_08.md](phase_08.md) | App shell, navigation, time range | `agent-2:sonnet` | 7.3 | TODO |
+| 6 | [phase_07.md](phase_07.md) | Typed API client, query layer, state primitives | `agent-2:sonnet` | 6.4, 6.6 | DONE — 8/8 sub-phases closed |
+| 7 | [phase_08.md](phase_08.md) | App shell, navigation, time range | `agent-2:sonnet` | 7.3 | IN_PROGRESS — 7.1 open |
 | 8 | [phase_09.md](phase_09.md) | Fleet Overview | `agent-2:sonnet` | 8.4 | TODO |
 | 9 | [phase_10.md](phase_10.md) | Cluster Detail | `agent-2:sonnet` | 9.2 | TODO |
 | 10 | [phase_11.md](phase_11.md) | Instance Detail | `agent-2:sonnet` | — | TODO |
@@ -528,8 +535,8 @@ the next one opens.
 | 6.5 | Formatting library | `agent-2:sonnet` | DONE |
 | 6.6 | The state primitives | `agent-2:sonnet` | DONE |
 | 6.7 | Freshness plumbing | `agent-2:sonnet` | DONE |
-| 6.8 | Update README.md | `agent-3:haiku` | OPEN |
-| 7.1 | Route tree and code splitting | `agent-2:sonnet` | TODO |
+| 6.8 | Update README.md | `agent-3:haiku` | DONE |
+| 7.1 | Route tree and code splitting | `agent-2:sonnet` | OPEN |
 | 7.2 | The shell: header, sidebar, content region | `agent-2:sonnet` | TODO |
 | 7.3 | Time range as URL state | `agent-2:sonnet` | TODO |
 | 7.4 | Page scaffolding primitives | `agent-2:sonnet` | TODO |
@@ -670,7 +677,7 @@ undocumented feature is an unshipped one.
 | README — embedded interface | 3.6 | How the interface is served and how to disable it | DONE |
 | README + `web/README.md` | 4.8 | Building and developing the frontend | DONE |
 | TESTING.md + README | 5.11 | The frontend test architecture and its gates | DONE |
-| README — client behaviour | 6.8 | Poll intervals and what a stale reading means | TODO |
+| README — sign-in and client behaviour | 6.8 | Browser sign-in URL, password, session lifetime, restart/logout semantics | DONE |
 | README — navigation | 7.7 | Pages, time range, keyboard shortcuts | TODO |
 | README — Fleet Overview | 8.6 | The landing page and health semantics | TODO |
 | README — Cluster Detail | 9.7 | Topology, lag, slots, events | TODO |
