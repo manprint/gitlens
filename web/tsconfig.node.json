@@ -3,8 +3,9 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "types": ["node"],
+    "allowImportingTsExtensions": true,
     "composite": true,
     "noEmit": true
   },
-  "include": ["vite.config.ts", "scripts"]
+  "include": ["vite.config.ts", "vitest.config.ts", "scripts"]
 }

@@ -1,10 +1,15 @@
+import vitestPlugin from '@vitest/eslint-plugin'
 import eslint from '@eslint/js'
+import jestDom from 'eslint-plugin-jest-dom'
 import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
+import testingLibrary from 'eslint-plugin-testing-library'
 import globals from 'globals'
 import tseslint from 'typescript-eslint'
 
 const typedFiles = ['**/*.{ts,tsx}']
+const testFiles = ['src/**/*.test.{ts,tsx}']
+const componentTestFiles = ['src/**/*.test.tsx']
 
 export default tseslint.config(
   {
@@ -61,6 +66,19 @@ export default tseslint.config(
           message: 'cluster_id and queryid are strings (I-5); use the string form',
         },
       ],
+    },
+  },
+  {
+    files: testFiles,
+    ...vitestPlugin.configs.recommended,
+  },
+  {
+    files: componentTestFiles,
+    ...testingLibrary.configs['flat/react'],
+    ...jestDom.configs['flat/recommended'],
+    rules: {
+      'testing-library/no-node-access': 'error',
+      'testing-library/prefer-screen-queries': 'error',
     },
   },
 )
