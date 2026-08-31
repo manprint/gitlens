@@ -33,6 +33,21 @@ describe('application shell', () => {
     expect(screen.getByTestId('connection-indicator')).toHaveTextContent('2 minutes ago')
   })
 
+  it('UI-SHELL-021 distinguishes browser offline from an unreachable server', () => {
+    renderWithProviders(
+      <Header connection={{ lastPollFailed: true, lastSuccessAt: Date.now() - 120_000 }} />,
+    )
+
+    fireEvent(window, new Event('offline'))
+    expect(
+      screen.getByRole('status', { name: 'Connection: browser is offline' }),
+    ).toBeInTheDocument()
+    expect(screen.getByTestId('connection-indicator')).toHaveTextContent('Browser is offline.')
+
+    fireEvent(window, new Event('online'))
+    expect(screen.getByRole('status', { name: 'Connection: not reachable' })).toBeInTheDocument()
+  })
+
   it('UI-SHELL-013 makes skip to content the first focusable control', () => {
     renderWithProviders(<AppShell />)
     const skipLink = screen.getByRole('link', { name: 'Skip to content' })

@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { useTheme } from '@/hooks/useTheme'
+import { useOnline } from '@/hooks/useOnline'
 import { formatRelative } from '@/lib/format/relative'
 
 import { Breadcrumbs } from './Breadcrumbs'
@@ -14,6 +15,7 @@ import { TimeRangePicker } from './TimeRangePicker'
 export interface ConnectionState {
   lastPollFailed: boolean
   lastSuccessAt: number | null
+  online?: boolean
 }
 
 export interface HeaderProps {
@@ -34,16 +36,22 @@ function lastSuccessLabel(lastSuccessAt: number | null): string {
   return `Last success ${formatRelative(date.toISOString(), new Date())}`
 }
 
-export function ConnectionIndicator({ lastPollFailed, lastSuccessAt }: ConnectionState) {
-  const status = lastPollFailed ? 'not reachable' : 'reachable'
-  const variant = lastPollFailed ? 'destructive' : 'secondary'
+export function ConnectionIndicator({
+  lastPollFailed,
+  lastSuccessAt,
+  online = true,
+}: ConnectionState) {
+  const status = !online ? 'browser is offline' : lastPollFailed ? 'not reachable' : 'reachable'
+  const variant = !online || lastPollFailed ? 'destructive' : 'secondary'
 
   return (
     <div className="flex items-center gap-2" data-testid="connection-indicator">
       <Badge role="status" variant={variant} aria-label={`Connection: ${status}`}>
         {status}
       </Badge>
-      <span className="text-text-secondary text-xs">{lastSuccessLabel(lastSuccessAt)}</span>
+      <span className="text-text-secondary text-xs">
+        {online ? lastSuccessLabel(lastSuccessAt) : 'Browser is offline.'}
+      </span>
     </div>
   )
 }
@@ -52,6 +60,7 @@ export function Header({ connection = defaultConnection, dataUpdatedAt = 0 }: He
   const navigate = useNavigate()
   const signOut = useSignOut()
   const { resolvedTheme, setTheme, theme } = useTheme()
+  const online = useOnline()
   const [shortcutSheetOpen, setShortcutSheetOpen] = useState(false)
   const [pendingShortcut, setPendingShortcut] = useState(false)
 
@@ -118,7 +127,7 @@ export function Header({ connection = defaultConnection, dataUpdatedAt = 0 }: He
       <div className="flex flex-wrap items-center gap-3">
         <TimeRangePicker />
         <FreshnessBadge dataUpdatedAt={dataUpdatedAt} policy="fleet" />
-        <ConnectionIndicator {...connection} />
+        <ConnectionIndicator {...connection} online={online} />
         <Button aria-label="Toggle theme" onClick={toggleTheme} size="sm" variant="ghost">
           {theme === 'system'
             ? `System (${resolvedTheme})`
