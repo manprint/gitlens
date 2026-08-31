@@ -242,7 +242,7 @@ The shared-auth boundary `make test-e2e` Smoke run passed from 13:38:24Z to
 
 ## §6 — In-flight work
 
-`none — tree consistent; sub-phase 6.4 is committed and sub-phase 6.5 is the active unit`
+`claimed — nothing written yet; sub-phase 6.5 is open for the formatting library`
 
 ---
 
