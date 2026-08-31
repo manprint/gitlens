@@ -1,4 +1,5 @@
-import { act, screen } from '@testing-library/react'
+import { act, fireEvent, screen } from '@testing-library/react'
+import { http, HttpResponse } from 'msw'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { Schemas } from '@/api/types'
@@ -69,8 +70,8 @@ describe('RelationsSection', () => {
   it('UI-INST-050 renders the shared truncation budget and configuration key', async () => {
     renderRelations({
       tables: response([item({ n_live_tup: 100, n_dead_tup: 10 })], { truncated: true }),
-      indexes: response([item({ indexrelname: 'orders_pkey', idx_scan: 3 })]),
-      bloat: response([item({ bloat_bytes: 2048, method: 'estimate' })]),
+      indexes: response([item({ indexrelname: 'orders_pkey', idx_scan: 3 })], { truncated: true }),
+      bloat: response([item({ bloat_bytes: 2048, method: 'estimate' })], { truncated: true }),
     })
     await settle()
 
@@ -79,7 +80,17 @@ describe('RelationsSection', () => {
         'Showing 1 of 50 tables shared per instance across databases (truncated; budget 50).',
       ),
     ).toBeInTheDocument()
-    expect(screen.getByText('checks.table_stats.top_n')).toBeInTheDocument()
+    expect(screen.getAllByText('checks.table_stats.top_n')).toHaveLength(3)
+    expect(
+      screen.getByText(
+        'Showing 1 of 50 indexes shared per instance across databases (truncated; budget 50).',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'Showing 1 of 50 bloat estimates shared per instance across databases (truncated; budget 50).',
+      ),
+    ).toBeInTheDocument()
   })
 
   it('UI-INST-051 does not show a truncation notice for complete responses', async () => {
@@ -128,5 +139,118 @@ describe('RelationsSection', () => {
 
     vi.useRealTimers()
     await expectNoA11yViolations(container)
+  })
+
+  it('UI-INST-055 shows loading states and links exact bloat to Query Inspector', async () => {
+    renderRelations({
+      tables: response([item({ n_live_tup: 100 })]),
+      indexes: response([item({ indexrelname: 'orders_pkey' })]),
+      bloat: response([item({ bloat_bytes: 2048, method: 'pgstattuple' })]),
+    })
+
+    expect(screen.getByRole('status', { name: /Loading Tables/i })).toBeInTheDocument()
+    expect(screen.getByText(/Checking whether pgstattuple/i)).toBeInTheDocument()
+
+    await settle()
+
+    expect(screen.getByRole('link', { name: /Run exact bloat with pgstattuple/i })).toHaveAttribute(
+      'href',
+      `/instances/${INSTANCE_ID}/queries?command=pgstattuple`,
+    )
+  })
+
+  it('UI-INST-056 renders unknown relation values and exercises table sorting', async () => {
+    renderRelations({
+      tables: response([
+        item({
+          schemaname: null,
+          relname: 'orders',
+          n_live_tup: null,
+          n_dead_tup: 2,
+          dead_ratio: null,
+          total_bytes: null,
+          size_bytes: 1024,
+          seq_scan: null,
+          ts: null,
+        }),
+        item({
+          schemaname: 'public',
+          relname: '',
+          n_live_tup: 7,
+          n_dead_tup: 1,
+          dead_ratio: 0.1,
+          total_bytes: 2048,
+          seq_scan: 3,
+          ts: OBSERVED_AT,
+        }),
+      ]),
+      indexes: response([
+        item({
+          schemaname: null,
+          relname: 'orders',
+          indexrelname: 'orders_pkey',
+          idx_scan: 3,
+          index_bytes: null,
+          is_unique: true,
+          is_primary: false,
+          is_valid: true,
+          ts: null,
+        }),
+        item({
+          schemaname: 'public',
+          relname: '',
+          indexrelname: '',
+          idx_scan: 'unknown',
+          index_bytes: 2048,
+          is_unique: null,
+          is_primary: null,
+          is_valid: null,
+          ts: '',
+        }),
+      ]),
+      bloat: response([
+        item({
+          schemaname: null,
+          relname: 'orders',
+          indexrelname: null,
+          real_bytes: null,
+          expected_bytes: null,
+          bloat_bytes: null,
+          bloat_ratio: null,
+          method: 'estimate',
+          ts: null,
+        }),
+      ]),
+    })
+    await settle()
+
+    expect(screen.getAllByText('orders').length).toBeGreaterThan(0)
+    expect(screen.getAllByLabelText('not measured').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('yes').length).toBeGreaterThan(0)
+    expect(screen.getByText('no')).toBeInTheDocument()
+
+    const liveTuples = screen.getByRole('button', { name: 'Sort Tables by Live tuples' })
+    fireEvent.click(liveTuples)
+    fireEvent.click(liveTuples)
+    fireEvent.click(screen.getByRole('button', { name: 'Sort Tables by Relation' }))
+  })
+
+  it('UI-INST-057 renders a retryable error when table relations fail', async () => {
+    renderRelations()
+    server.use(
+      http.get('/api/v1/instances/:id/tables', () =>
+        HttpResponse.json({ message: 'table relations unavailable' }, { status: 500 }),
+      ),
+    )
+    renderWithProviders(<RelationsSection instanceId={INSTANCE_ID} />, {
+      route: `/instances/${INSTANCE_ID}`,
+    })
+    await settle()
+
+    expect(screen.getAllByRole('alert')).toHaveLength(1)
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not load table relations.')
+    fireEvent.click(screen.getByRole('button', { name: 'Retry table relations' }))
+    await settle()
+    expect(screen.getAllByRole('alert')).toHaveLength(1)
   })
 })
