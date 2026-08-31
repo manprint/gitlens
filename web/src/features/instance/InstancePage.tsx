@@ -1,0 +1,70 @@
+import { Link, useParams } from 'react-router-dom'
+
+import { useClusters, useInstance } from '@/api/queries'
+import { ErrorState } from '@/components/state'
+
+import { InstanceHeader } from './InstanceHeader'
+
+interface InstancePageProps {
+  /** Optional override keeps the page easy to exercise without the lazy route. */
+  instanceId?: string
+}
+
+function LoadingInstance() {
+  return (
+    <section aria-busy="true" aria-label="Loading instance detail" role="status">
+      Loading instance detail…
+    </section>
+  )
+}
+
+function InstanceNotFound({ instanceId }: { instanceId: string }) {
+  return (
+    <section aria-labelledby="instance-not-found-title">
+      <h1 id="instance-not-found-title">Instance not found</h1>
+      <p>
+        No monitored instance matches <code>{instanceId}</code>.
+      </p>
+      <Link to="/">Back to fleet overview</Link>
+    </section>
+  )
+}
+
+export function InstancePage({ instanceId: instanceIdOverride }: InstancePageProps = {}) {
+  const { instanceId: routeInstanceId } = useParams<{ instanceId: string }>()
+  const instanceId = instanceIdOverride ?? routeInstanceId ?? ''
+  const instanceQuery = useInstance(instanceId)
+  const clustersQuery = useClusters()
+
+  if (instanceQuery.error?.kind === 'not_found') {
+    return <InstanceNotFound instanceId={instanceId} />
+  }
+
+  if (instanceQuery.error && !instanceQuery.data) {
+    return (
+      <ErrorState
+        endpoint="instance"
+        failure={instanceQuery.error}
+        onRetry={() => void instanceQuery.refetch()}
+      />
+    )
+  }
+
+  if (instanceQuery.isPending || instanceQuery.data === undefined) {
+    return <LoadingInstance />
+  }
+
+  const cluster = clustersQuery.data?.find(
+    (candidate) => candidate.cluster_id === instanceQuery.data.cluster_id,
+  )
+
+  return (
+    <InstanceHeader
+      dataUpdatedAt={instanceQuery.dataUpdatedAt}
+      instance={instanceQuery.data}
+      replayLagSeconds={cluster?.max_replay_lag_seconds}
+    />
+  )
+}
+
+export default InstancePage

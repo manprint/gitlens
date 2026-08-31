@@ -7,7 +7,7 @@ export const INSTANCE_SUMMARY = {
   addr: 'postgres.example.test',
   port: 5432,
   role: 'primary',
-  pg_version: 16,
+  pg_version: 160000,
   perm_tier: 'T1',
   last_seen: NOW,
   up: true,

@@ -1,5 +1,6 @@
 import { FleetPage } from '@/features/fleet/FleetPage'
 import { ClusterPage } from '@/features/cluster/ClusterPage'
+import InstancePage from '@/features/instance/InstancePage'
 
 interface PlaceholderPageProps {
   surface: string
@@ -23,7 +24,7 @@ export function ClusterDetailPage() {
 }
 
 export function InstanceDetailPage() {
-  return <PlaceholderPage surface="Instance detail" />
+  return <InstancePage />
 }
 
 export function AshPage() {
