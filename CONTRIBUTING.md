@@ -44,7 +44,7 @@ build, unit-test, and coverage checks.
 go test -tags=e2e -timeout=8m ./test/e2e -run '^TestFull_Archiving$' -count=1 -v
 ```
 
-5. The test must call the harness invariant check, clean up all resources through `t.Cleanup`, and use the five rules below. Run `make test-e2e` before submitting; run `make test-e2e-full` when the scenario changes shared harness behavior.
+5. The test must call the harness invariant check, clean up all resources through `t.Cleanup`, and use the five rules below. Run `make test-e2e` at a complete phase boundary or when the change affects shared harness or cross-service behaviour; there is no need to repeat this long suite after every frontend sub-phase. Run `make test-e2e-full` when the scenario changes shared harness behavior.
 
 ## Reading a CI failure
 
