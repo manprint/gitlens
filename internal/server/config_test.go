@@ -151,6 +151,13 @@ func TestLoadUIConfigPasswordFileErrorDoesNotExposePassword(t *testing.T) {
 	require.NotContains(t, err.Error(), "super-secret-password")
 }
 
+func TestUIConfigStringRedactsPassword(t *testing.T) {
+	c := UIConfig{Enabled: true, Password: "super-secret-password", SessionTTL: 24 * time.Hour, CookieSecure: "auto"}
+	rendered := c.String()
+	require.Contains(t, rendered, "[redacted]")
+	require.NotContains(t, rendered, c.Password)
+}
+
 var errTestPasswordFile = &testPasswordFileError{}
 
 type testPasswordFileError struct{}

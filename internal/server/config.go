@@ -21,6 +21,10 @@ type UIConfig struct {
 	CookieSecure string // "auto" | "true" | "false"
 }
 
+func (c UIConfig) String() string {
+	return fmt.Sprintf("UIConfig{Enabled:%t Password:[redacted] SessionTTL:%s CookieSecure:%s}", c.Enabled, c.SessionTTL, c.CookieSecure)
+}
+
 func LoadAlertConfig(getenv func(string) string, readFile func(string) ([]byte, error)) (AlertConfig, error) {
 	if getenv == nil {
 		getenv = os.Getenv
