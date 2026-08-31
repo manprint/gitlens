@@ -8,6 +8,7 @@ import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { formatRelative } from '@/lib/format/relative'
 
 import { Breadcrumbs } from './Breadcrumbs'
+import { TimeRangePicker } from './TimeRangePicker'
 
 export interface ConnectionState {
   lastPollFailed: boolean
@@ -117,9 +118,7 @@ export function Header({ connection = defaultConnection, dataUpdatedAt = 0 }: He
     <header className="bg-background/95 sticky top-0 z-10 flex min-h-16 flex-wrap items-center justify-between gap-4 border-b px-4 py-3 backdrop-blur">
       <Breadcrumbs />
       <div className="flex flex-wrap items-center gap-3">
-        <Button aria-label="Time range" disabled size="sm" variant="outline">
-          Time range
-        </Button>
+        <TimeRangePicker />
         <FreshnessBadge dataUpdatedAt={dataUpdatedAt} policy="fleet" />
         <ConnectionIndicator {...connection} />
         <Button aria-label="Toggle theme" onClick={toggleTheme} size="sm" variant="ghost">
