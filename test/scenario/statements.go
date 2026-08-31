@@ -119,11 +119,11 @@ func init() {
 			// earlier 500 bound here failed on every correctly-bounded run
 			// (~1857-2217 observed, never approaching the true
 			// 5000-queries-leaked-through-uncapped disaster of ~30000) —
-			// the bound was simply never derived from this fanout. 2500
-			// stays comfortably above the realistic ~1200-1300 ceiling
-			// (with hysteresis-overlap margin) while remaining an order of
+			// the bound was simply never derived from this fanout. 3000
+			// covers the observed full-suite peak (2552) plus scheduling and
+			// hysteresis-overlap variation while remaining an order of
 			// magnitude below what an actual leak would produce.
-			const seriesBudgetSanityBound = 2500
+			const seriesBudgetSanityBound = 3000
 			if seriesTotal > seriesBudgetSanityBound {
 				return fmt.Errorf("pglens_series_total=%d exceeds the cardinality budget sanity bound (%d) — 5000 distinct queries may have leaked through uncapped", seriesTotal, seriesBudgetSanityBound)
 			}
