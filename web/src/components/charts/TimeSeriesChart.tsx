@@ -17,6 +17,7 @@ export interface TimeSeriesChartProps {
   ariaLabel: string
   series: readonly TimeSeriesTableSeries[]
   dataTableLabel?: string
+  valueLabel?: string
 }
 
 interface DataZoomWindow {
@@ -66,6 +67,7 @@ export function TimeSeriesChart({
   dataTableLabel = `${ariaLabel} data`,
   option,
   series,
+  valueLabel = 'Value (seconds)',
 }: TimeSeriesChartProps) {
   const { setRange } = useTimeRange()
 
@@ -89,7 +91,7 @@ export function TimeSeriesChart({
           <tr>
             <th scope="col">Metric</th>
             <th scope="col">Timestamp (UTC)</th>
-            <th scope="col">Value (seconds)</th>
+            <th scope="col">{valueLabel}</th>
           </tr>
         </thead>
         <tbody>
