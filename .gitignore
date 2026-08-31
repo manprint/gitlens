@@ -45,3 +45,7 @@ docker-compose.override.yml
 # generated frontend bundle; keep the build placeholder tracked
 internal/webui/dist/*
 !internal/webui/dist/index.html
+
+# frontend dependencies and TypeScript build metadata
+/web/node_modules/
+/web/*.tsbuildinfo
