@@ -99,6 +99,11 @@ export function deriveAgentHealth(
  * primary or more than one primary (split brain). The health field itself is
  * always supplied by the server and is never recomputed here.
  */
+// Server source of truth: README.md, `GET /api/v1/clusters` health field.
+// `ok` means a primary exists, all instances are up, and there is no replay lag;
+// `degraded` means a primary exists but an instance is down or replay lag exists;
+// `critical` means there is no primary or there is more than one (split brain).
+// Keep these explanatory sentences aligned with the server's documented rules.
 export function describeHealth(cluster: Cluster): string {
   const primaryCount = cluster.instances.filter((instance) => instance.role === 'primary').length
 

@@ -60,23 +60,34 @@ describe('describeHealth', () => {
 
   it('UI-FLEET-034 never contradicts the server health field', () => {
     const fixtures = [
-      cluster({ health: 'ok' }),
-      cluster({ health: 'degraded', max_replay_lag_seconds: 3 }),
-      cluster({ health: 'critical', primary: null, instances: [] }),
-      cluster({
-        health: 'critical',
-        instances: [
-          CLUSTER.instances[0],
-          { ...CLUSTER.instances[0], instance_id: '00000000-0000-4000-8000-000000000002' },
-        ],
-      }),
+      { health: 'ok' as const, expected: /healthy/i },
+      { health: 'degraded' as const, expected: /degraded/i },
+      { health: 'critical' as const, expected: /critical/i },
     ]
 
-    for (const cluster of fixtures) {
-      const sentence = describeHealth(cluster)
-      if (cluster.health === 'ok') expect(sentence).toMatch(/healthy/i)
-      if (cluster.health === 'degraded') expect(sentence).toMatch(/degraded/i)
-      if (cluster.health === 'critical') expect(sentence).toMatch(/critical/i)
+    for (const { health, expected } of fixtures) {
+      const sentence = describeHealth(
+        cluster({
+          health,
+          instances:
+            health === 'critical'
+              ? [
+                  CLUSTER.instances[0],
+                  { ...CLUSTER.instances[0], instance_id: '00000000-0000-4000-8000-000000000002' },
+                ]
+              : [...CLUSTER.instances],
+          max_replay_lag_seconds: health === 'degraded' ? 3 : 0,
+        }),
+      )
+
+      expect(sentence).toMatch(expected)
+      expect(sentence).not.toMatch(
+        health === 'ok'
+          ? /degraded|critical/i
+          : health === 'degraded'
+            ? /healthy|critical/i
+            : /healthy|degraded/i,
+      )
     }
   })
 })
