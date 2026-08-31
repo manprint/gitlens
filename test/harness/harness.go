@@ -411,7 +411,7 @@ checks:
   # forget each previous hot group before the next rotation and never reach
   # MaxKeys in binary mode (the container fixture uses the same 60s cadence).
   stat_statements: { interval: 60s, top_n: 50 }
-	`, h.serverPort, agentBootstrapToken, identityPath, bufferPath, targetsYAML)
+`, h.serverPort, agentBootstrapToken, identityPath, bufferPath, targetsYAML)
 	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
 		return fmt.Errorf("write agent config: %w", err)
 	}
