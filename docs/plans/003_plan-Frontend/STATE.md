@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-08-31 — sub-phase 4.5 closed; sub-phase 4.6 opened._
+_Last updated: 2026-08-31 — sub-phase 4.6 closed; sub-phase 4.7 opened._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,15 +54,15 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 4.6 |
+| **ID** | 4.7 |
 | **Status** | `OPEN` |
-| **Intent** | Configure strict typed linting and Prettier formatting |
-| **Next action:** | Complete sub-phase **4.6** in [phase_05.md](phase_05.md): add flat ESLint/Prettier configuration and demonstrate every custom rule |
+| **Intent** | Wire the frontend quality chain into Makefile and CI |
+| **Next action:** | Complete sub-phase **4.7** in [phase_05.md](phase_05.md): add web targets, local-unit integration, clean handling, and the parallel CI web job |
 | **Assigned** | `agent-2:sonnet` |
-| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7 and phase 3 sub-phases 3.1–3.6 and phase 4 sub-phases 4.1–4.5 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, and the 18 prescribed UI primitives are covered. The image build/L3 proof is deferred until the buildable frontend scaffold exists; the next unit installs the lint and formatting gates. |
+| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7 and phase 3 sub-phases 3.1–3.6 and phase 4 sub-phases 4.1–4.6 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, and strict typed lint/format gates are covered. The image build/L3 proof is deferred until the buildable frontend scaffold exists; the next unit wires these gates into Makefile and CI. |
 | **Phase file** | [phase_04.md](phase_04.md) |
 
-Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, and phase 4 sub-phases 4.1–4.5 are closed; sub-phase 4.6 is the next unit.
+Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, and phase 4 sub-phases 4.1–4.6 are closed; sub-phase 4.7 is the next unit.
 Phase 3 is complete; phase 4 is in progress and the remaining frontend work is still pending.
 
 ---
@@ -179,12 +179,13 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 | 4.3 | sub-phase | 4.3 | 2026-08-31 | Add Vite config, dev proxy, and React app shell | `fcefc86` |
 | 4.4 | sub-phase | 4.4 | 2026-08-31 | Add Tailwind CSS design tokens and focus styling | `2cbb28d` |
 | 4.5 | sub-phase | 4.5 | 2026-08-31 | Add shadcn configuration, helper, and 18 UI primitives | `2b9ba71` |
+| 4.6 | sub-phase | 4.6 | 2026-08-31 | Add typed ESLint, custom invariant rules, and Prettier | `c1ec960` |
 
 ---
 
 ## §5 — Files touched
 
-Sub-phase 3.1 added `.gitignore`, `internal/webui/doc.go`, `internal/webui/webui.go`, `internal/webui/webui_test.go`, and `internal/webui/dist/index.html`. Sub-phase 3.2 added `internal/server/webui.go`, `internal/server/webui_test.go`, and updated the server router, command entry point, and router call-site tests. Sub-phase 3.3 updated startup logging and added the disabled-UI router test. Sub-phase 3.4 updated `Dockerfile.server`, `deploy/docker-compose.yml`, `deploy/compose/docker-compose.yml`, and `deploy/server.example.env`. Sub-phase 3.5 was verification-only and touched no production files. Sub-phase 3.6 updated the `Running the server` section in `README.md`. Sub-phase 4.1 added `web/package.json`, `web/pnpm-lock.yaml`, and `web/.npmrc`. Sub-phase 4.2 added the three TypeScript project references, the initial Vite environment declaration/config scaffold, and frontend dependency/build ignores. Sub-phase 4.3 replaced the Vite config stub and added `web/index.html`, `web/src/App.tsx`, and `web/src/main.tsx`. Sub-phase 4.4 added `web/src/index.css` and imports it from `web/src/main.tsx`. Sub-phase 4.5 added `web/components.json`, `web/src/lib/utils.ts`, and the 18 generated files under `web/src/components/ui`.
+Sub-phase 3.1 added `.gitignore`, `internal/webui/doc.go`, `internal/webui/webui.go`, `internal/webui/webui_test.go`, and `internal/webui/dist/index.html`. Sub-phase 3.2 added `internal/server/webui.go`, `internal/server/webui_test.go`, and updated the server router, command entry point, and router call-site tests. Sub-phase 3.3 updated startup logging and added the disabled-UI router test. Sub-phase 3.4 updated `Dockerfile.server`, `deploy/docker-compose.yml`, `deploy/compose/docker-compose.yml`, and `deploy/server.example.env`. Sub-phase 3.5 was verification-only and touched no production files. Sub-phase 3.6 updated the `Running the server` section in `README.md`. Sub-phase 4.1 added `web/package.json`, `web/pnpm-lock.yaml`, and `web/.npmrc`. Sub-phase 4.2 added the three TypeScript project references, the initial Vite environment declaration/config scaffold, and frontend dependency/build ignores. Sub-phase 4.3 replaced the Vite config stub and added `web/index.html`, `web/src/App.tsx`, and `web/src/main.tsx`. Sub-phase 4.4 added `web/src/index.css` and imports it from `web/src/main.tsx`. Sub-phase 4.5 added `web/components.json`, `web/src/lib/utils.ts`, and the 18 generated files under `web/src/components/ui`. Sub-phase 4.6 added `web/eslint.config.js`, `.prettierrc.json`, and `.prettierignore`, and formatted the frontend sources.
 
 `docs/LIMITS.md` was also touched by sub-phase 2.7.
 
@@ -194,7 +195,7 @@ Sub-phase 3.1 added `.gitignore`, `internal/webui/doc.go`, `internal/webui/webui
 
 ## §6 — In-flight work
 
-`claimed — sub-phase 4.6; verification not yet started`
+`claimed — sub-phase 4.7; verification not yet started`
 
 ---
 
@@ -265,6 +266,8 @@ Sub-phase 3.1 added `.gitignore`, `internal/webui/doc.go`, `internal/webui/webui
 | 2026-08-31 | 4.4 | `pnpm build` | PASS | Tailwind 4.3.3 transforms the app and emits the stylesheet with semantic tokens in 0.79s; generated output was removed from the tracked placeholder boundary after verification. |
 | 2026-08-31 | 4.5 | `pnpm typecheck` | PASS | The 18 generated primitives type-check with the strict project references in 0.31s. |
 | 2026-08-31 | 4.5 | `pnpm install --frozen-lockfile`; generated-source review | PASS | Frozen install completes in 0.26s; all 18 prescribed files are under `src/components/ui`, use the configured aliases, and contain no informal/emoji copy. |
+| 2026-08-31 | 4.6 | `pnpm format:check`; `pnpm lint` | PASS | Formatting and typed lint exit 0 in 3.09s; three expected Fast Refresh warnings remain, with no lint errors. |
+| 2026-08-31 | 4.6 | Temporary custom-rule probes | PASS | Six temporary violations produced the six expected errors: restricted `fetch`, restricted `Number`, floating promises, misused promises, non-exhaustive switch, and missing hook dependency; probes were deleted afterward. |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -284,6 +287,7 @@ reconstruct.
 | 4 | 3.5 | The image build and L3 regression proof cannot run before the frontend manifests exist. | The Dockerfile deliberately consumes the exact `web/package.json` and `web/pnpm-lock.yaml` produced by phase 4; placeholder mode and authenticated API routing were proven now, while the expensive image/E2E pass is deferred to the first complete frontend build boundary. | yes — §7 verification rows |
 | 5 | 4.1 | pnpm reports one peer warning for the mandated TypeScript/openapi-typescript combination. | `openapi-typescript@7.13.0` still advertises `typescript ^5.x`, while D13 fixes TypeScript at 6.0.3 because `typescript-eslint@8.68.0` requires `<6.1.0`; the generator is not used until phase 6. | yes — D13 and §7 |
 | 6 | 4.2 | TypeScript 6 rejects `src/**`/`scripts/**` recursive directory globs and reports `baseUrl` as deprecated. | Directory includes preserve the intended coverage; `ignoreDeprecations: "6.0"` preserves the single `@/*` alias required by the plan. | yes — §7 and the TypeScript 6 compatibility note |
+| 7 | 4.6 | Prettier's YAML formatter rewrites pnpm's lockfile representation and creates noisy non-semantic diffs. | `pnpm-lock.yaml` is excluded from Prettier; pnpm remains the sole lockfile serializer, while all source/config files stay covered by `format:check`. | yes — `.prettierignore` and §7 |
 
 ---
 
@@ -321,7 +325,7 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 | 1 | [phase_02.md](phase_02.md) | OpenAPI contract and route-coverage gate | `agent-2:sonnet` | 1.1, 1.4 | DONE — 6/6 sub-phases closed |
 | 2 | [phase_03.md](phase_03.md) | UI session authentication | `agent-2:sonnet` | 2.1, 2.2, 2.3 | DONE — 7/7 sub-phases closed |
 | 3 | [phase_04.md](phase_04.md) | Embedded SPA serving and dev proxy | `agent-2:sonnet` | 3.2 | DONE — 6/6 sub-phases closed |
-| 4 | [phase_05.md](phase_05.md) | Frontend workspace scaffold | `agent-2:sonnet` | 4.1 | IN_PROGRESS — 4.6 next |
+| 4 | [phase_05.md](phase_05.md) | Frontend workspace scaffold | `agent-2:sonnet` | 4.1 | IN_PROGRESS — 4.7 next |
 | 5 | [phase_06.md](phase_06.md) | Frontend test harness and quality gates | `agent-2:sonnet` | 5.2, 5.4, 5.6, 5.9 | TODO |
 | 6 | [phase_07.md](phase_07.md) | Typed API client, query layer, state primitives | `agent-2:sonnet` | 6.4, 6.6 | TODO |
 | 7 | [phase_08.md](phase_08.md) | App shell, navigation, time range | `agent-2:sonnet` | 7.3 | TODO |
@@ -373,7 +377,8 @@ the next one opens.
 | 4.3 | Vite configuration and the dev proxy | `agent-2:sonnet` | DONE |
 | 4.4 | Tailwind CSS 4 and the design tokens | `agent-2:sonnet` | DONE |
 | 4.5 | shadcn/ui installation and the first primitives | `agent-2:sonnet` | DONE |
-| 4.6 | ESLint, Prettier, and the project's own rules | `agent-2:sonnet` | OPEN |
+| 4.6 | ESLint, Prettier, and the project's own rules | `agent-2:sonnet` | DONE |
+| 4.7 | Makefile and CI integration | `agent-2:sonnet` | OPEN |
 | 4.3 | Vite configuration and the dev proxy | `agent-2:sonnet` | TODO |
 | 4.4 | Tailwind CSS 4 and the design tokens | `agent-2:sonnet` | TODO |
 | 4.5 | shadcn/ui installation and the first primitives | `agent-2:sonnet` | TODO |
