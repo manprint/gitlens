@@ -12,6 +12,7 @@
     "src/test",
     "src/api",
     "src/lib",
+    "src/components/state",
     "src/routes",
     "src/features",
     "src/App.tsx",
