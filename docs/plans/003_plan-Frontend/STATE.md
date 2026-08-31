@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-08-31 — sub-phase 3.4 closed; sub-phase 3.5 opened._
+_Last updated: 2026-08-31 — sub-phase 3.5 closed; sub-phase 3.6 opened._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,15 +54,15 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 3.5 |
+| **ID** | 3.6 |
 | **Status** | `OPEN` |
-| **Intent** | Prove the placeholder and frontend build modes |
-| **Next action:** | Complete sub-phase **3.5** in [phase_04.md](phase_04.md): verify placeholder mode, API 404 JSON, and the image build path |
+| **Intent** | Document the user-facing web UI entry point and disable switch |
+| **Next action:** | Complete sub-phase **3.6** in [phase_04.md](phase_04.md): update the README with same-origin access, password requirement, disable switch, and placeholder guidance |
 | **Assigned** | `agent-2:sonnet` |
-| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7 and phase 3 sub-phases 3.1–3.4 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, and the container build wiring are covered. The next unit verifies both build modes. |
+| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7 and phase 3 sub-phases 3.1–3.5 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, and both placeholder HTTP/authentication smoke checks are covered. The image build/L3 proof is deferred until phase 4 creates the web manifests; the next unit updates the user documentation. |
 | **Phase file** | [phase_04.md](phase_04.md) |
 
-Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, and phase 3 sub-phases 3.1–3.4 are closed; sub-phase 3.5 is the next unit.
+Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, and phase 3 sub-phases 3.1–3.5 are closed; sub-phase 3.6 is the next unit.
 Phase 2 is complete; phase 3 is in progress and the remaining frontend work is still pending.
 
 ---
@@ -172,12 +172,13 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 | 3.2 | sub-phase | 3.2 | 2026-08-31 | Serve embedded assets with SPA fallback and API 404 guard | `893c2c3` |
 | 3.3 | sub-phase | 3.3 | 2026-08-31 | Prove UI enablement guard and log `PGLENS_UI_ENABLED` | `a8d3f11` |
 | 3.4 | sub-phase | 3.4 | 2026-08-31 | Wire frontend build into server image and deployments | `9c6b0f7` |
+| 3.5 | sub-phase | 3.5 | 2026-08-31 | Prove placeholder mode and authenticated API 404 JSON | verification-only |
 
 ---
 
 ## §5 — Files touched
 
-Sub-phase 3.1 added `.gitignore`, `internal/webui/doc.go`, `internal/webui/webui.go`, `internal/webui/webui_test.go`, and `internal/webui/dist/index.html`. Sub-phase 3.2 added `internal/server/webui.go`, `internal/server/webui_test.go`, and updated the server router, command entry point, and router call-site tests. Sub-phase 3.3 updated startup logging and added the disabled-UI router test. Sub-phase 3.4 updated `Dockerfile.server`, `deploy/docker-compose.yml`, `deploy/compose/docker-compose.yml`, and `deploy/server.example.env`.
+Sub-phase 3.1 added `.gitignore`, `internal/webui/doc.go`, `internal/webui/webui.go`, `internal/webui/webui_test.go`, and `internal/webui/dist/index.html`. Sub-phase 3.2 added `internal/server/webui.go`, `internal/server/webui_test.go`, and updated the server router, command entry point, and router call-site tests. Sub-phase 3.3 updated startup logging and added the disabled-UI router test. Sub-phase 3.4 updated `Dockerfile.server`, `deploy/docker-compose.yml`, `deploy/compose/docker-compose.yml`, and `deploy/server.example.env`. Sub-phase 3.5 was verification-only and touched no production files.
 
 `docs/LIMITS.md` was also touched by sub-phase 2.7.
 
@@ -187,7 +188,7 @@ Sub-phase 3.1 added `.gitignore`, `internal/webui/doc.go`, `internal/webui/webui
 
 ## §6 — In-flight work
 
-`claimed — sub-phase 3.5; verification not yet started`
+`claimed — sub-phase 3.6; verification not yet started`
 
 ---
 
@@ -246,6 +247,10 @@ Sub-phase 3.1 added `.gitignore`, `internal/webui/doc.go`, `internal/webui/webui
 | 2026-08-31 | 3.4 | `docker compose -f deploy/docker-compose.yml config -q`; `docker compose -f deploy/compose/docker-compose.yml config -q` | PASS | Both deployment definitions parse with the UI password wiring and same-port comment. |
 | 2026-08-31 | 3.4 | `docker build --check -f Dockerfile.server .` | PASS | Node 24 build-stage ordering, manifest cache boundary, and final image syntax pass with no warnings in 1.7s. |
 | 2026-08-31 | 3.4 | `make build-images` | DEFERRED | The phase intentionally precedes phase 4, which creates `web/package.json` and `web/pnpm-lock.yaml`; image execution is the 3.5 proof after those manifests exist. |
+| 2026-08-31 | 3.5 | `go build ./...`; `make test` | PASS | Placeholder-only checkout builds in 0.45s; unit/integration-lite gate passes in 19.08s. |
+| 2026-08-31 | 3.5 | UI-enabled binary with no `PGLENS_DSN`; `GET /` | PASS | Temporary smoke server returns the committed placeholder, `make web-build` guidance, and `Cache-Control: no-cache, no-store, must-revalidate`. |
+| 2026-08-31 | 3.5 | `POST /api/v1/session`; authenticated `GET /api/v1/nope` | PASS | Temporary password login returns 204; the unknown API route returns `404`, `Content-Type: application/json`, and `{"error":"not_found","detail":"no such endpoint"}`. |
+| 2026-08-31 | 3.5 | `make build-images`; `make test-e2e` | DEFERRED | The commands require `web/package.json` and `web/pnpm-lock.yaml`, which are created in phase 4; run the single L3 regression pass at the phase-3/4 frontend build boundary and retain its measured duration. |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -262,6 +267,7 @@ reconstruct.
 | 1 | 0.1 – 0.5 | This plan writes into **plan 002's** folder (`docs/plans/002_plan-AnalysisBackend/verify/index.md`, its report file, and its `STATE.md` §11) | Decision **D12**: the three open findings V001-F1/F2/F3 from plan 002's audit are fixed here rather than left open, and a finding's status must be updated in the register that owns it. Recorded in advance so a later audit reads a cross-plan write as intentional. | yes — D12 in [overview.md](overview.md) |
 | 2 | 0.1 | The E2E evidence implementation also adjusts the harness scenario timeout from 10m to 20m, captures network transition timestamps before Docker state changes, widens the fresh-sample window to 180s, and widens the cascading stale-edge window to 120s. | The full-suite evidence runs exposed legitimate propagation/load delays and timing-boundary races; focused regressions passed after each correction, and the successful full run completed with no residual resources. | yes — §6, §7 and this row |
 | 3 | 0.3 | The identifier audit's symmetric `DIFF_COUNT` remains 68 after the preferred source-side cataloguing resolution. | The 68 `ONLY_IN_STATE` entries are historical/planned identifiers retained by the closed plan; the claim being repaired is that every identifier present in Go source is enumerated in §11, which now has 0 `ONLY_IN_SOURCE`. | yes — plan 002 §11 scope sentence and §7 audit row |
+| 4 | 3.5 | The image build and L3 regression proof cannot run before the frontend manifests exist. | The Dockerfile deliberately consumes the exact `web/package.json` and `web/pnpm-lock.yaml` produced by phase 4; placeholder mode and authenticated API routing were proven now, while the expensive image/E2E pass is deferred to the first complete frontend build boundary. | yes — §7 verification rows |
 
 ---
 
@@ -298,7 +304,7 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 | 0 | [phase_01.md](phase_01.md) | Plan 002 closure and contract prerequisites | `agent-2:sonnet` / `agent-3:haiku` | 0.4 | DONE — 6/6 sub-phases closed |
 | 1 | [phase_02.md](phase_02.md) | OpenAPI contract and route-coverage gate | `agent-2:sonnet` | 1.1, 1.4 | DONE — 6/6 sub-phases closed |
 | 2 | [phase_03.md](phase_03.md) | UI session authentication | `agent-2:sonnet` | 2.1, 2.2, 2.3 | DONE — 7/7 sub-phases closed |
-| 3 | [phase_04.md](phase_04.md) | Embedded SPA serving and dev proxy | `agent-2:sonnet` | 3.2 | IN_PROGRESS — 3.5 next |
+| 3 | [phase_04.md](phase_04.md) | Embedded SPA serving and dev proxy | `agent-2:sonnet` | 3.2 | IN_PROGRESS — 3.6 next |
 | 4 | [phase_05.md](phase_05.md) | Frontend workspace scaffold | `agent-2:sonnet` | 4.1 | TODO |
 | 5 | [phase_06.md](phase_06.md) | Frontend test harness and quality gates | `agent-2:sonnet` | 5.2, 5.4, 5.6, 5.9 | TODO |
 | 6 | [phase_07.md](phase_07.md) | Typed API client, query layer, state primitives | `agent-2:sonnet` | 6.4, 6.6 | TODO |
@@ -344,8 +350,8 @@ the next one opens.
 | 3.2 | The static handler and the SPA fallback | `agent-2:sonnet` | DONE |
 | 3.3 | Serve the SPA only when the UI is enabled | `agent-2:sonnet` | DONE |
 | 3.4 | Container and compose wiring | `agent-2:sonnet` | DONE |
-| 3.5 | Prove both build modes | `agent-2:sonnet` | OPEN |
-| 3.6 | Update README.md | `agent-3:haiku` | TODO |
+| 3.5 | Prove both build modes | `agent-2:sonnet` | DONE |
+| 3.6 | Update README.md | `agent-3:haiku` | OPEN |
 | 4.1 | Package manifest with exact pins | `agent-2:sonnet` | TODO |
 | 4.2 | TypeScript configuration | `agent-2:sonnet` | TODO |
 | 4.3 | Vite configuration and the dev proxy | `agent-2:sonnet` | TODO |
