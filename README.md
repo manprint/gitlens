@@ -164,8 +164,22 @@ PGLENS_LISTEN=:8080 \
 Open `http://<host>:8080/` in a browser to see the sign-in form. Enter the
 password configured through `PGLENS_UI_PASSWORD`; a successful sign-in creates
 a session that lasts for `PGLENS_UI_SESSION_TTL`. The session does not survive
-a server restart, and signing out clears it. The current interface provides
-sign-in only; data pages are not available yet.
+a server restart, and signing out clears it.
+
+### Web interface
+
+After signing in, the shell provides Fleet, Findings, Alerts, and Settings
+navigation, plus the shared time-range control, freshness indicator, theme
+toggle, and connection status.
+
+The selected time range is reflected in the URL, so a view can be shared as a
+link. Keyboard shortcuts are available for the main destinations and filters:
+
+- `g f` — Fleet
+- `g a` — Alerts
+- `g s` — Settings
+- `/` — focus the primary filter
+- `?` — open the shortcut sheet
 
 When `PGLENS_UI_PASSWORD` is configured, sign in to obtain a session cookie and
 use it for the protected API:
