@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-09-01 — phase 11 sub-phase 11.1 closed; sub-phase 11.2 open._
+_Last updated: 2026-09-01 — phase 11 sub-phase 11.2 closed; sub-phase 11.3 open._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,12 +54,12 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 11.2 |
+| **ID** | 11.3 |
 | **Status** | `OPEN` |
-| **Intent** | Build the stacked wait chart |
-| **Next action:** | Complete sub-phase **11.2** in [phase_12.md](phase_12.md): build the stacked ASH chart option and wrapper |
+| **Intent** | Build the ASH drill-down page |
+| **Next action:** | Complete sub-phase **11.3** in [phase_12.md](phase_12.md): build the drill-down from wait type to event to query |
 | **Assigned** | `agent-2:sonnet` |
-| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, and phase 6 sub-phases 6.1–6.8 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, strict typed lint/format gates, Makefile web targets, clean placeholder preservation, the parallel CI web job, frontend workflow documentation, the real server image build, the phase-boundary L3 regression, the Vitest/jsdom test runner foundation, the frontend testing architecture rules, the deterministic render/provider harness, the contract-validated OpenAPI fixture suite, the contract-aware MSW handler factory, the V8 UI coverage gate, the axe-core accessibility assertion, the deterministic clock/timezone/locale/randomness rules, the Playwright acceptance bootstrap, the harness defense meta-tests, the frontend testing workflow documentation, the phase-5 boundary E2E regression, the OpenAPI type generator, committed generated API types, stable schema aliases, type-level contract assertions, generator drift gates, the single typed API client, normalized API failures, exact large-integer query identifiers, the query key factory, refresh policies, the visibility-aware polling hooks, query-layer coverage, session authentication, guarded routing, login/logout flows, single-flight 401 handling, auth/login coverage, the accessible state-primitives library, freshness plumbing, the phase-6 browser sign-in documentation, the phase-7 route tree/code-splitting boundary, the accessible application shell, the URL-backed time-range state, the shared page scaffolding primitives, resilient namespaced theme/density/sidebar preferences, global error/offline handling, the phase-7 README web-interface guide, the phase-7 boundary E2E regression, the fleet derivation library, cluster cards, agent-health surfacing, server-defined health semantics, degraded/error paths, Fleet Overview documentation, the phase-8 boundary E2E regression, the phase-9 boundary E2E regression, and the Cluster Detail documentation are covered. The replication derivation library, topology graph, lag charts, slots, configuration drift, event taxonomy/timeline, Cluster Detail route, degraded/error paths, UI-REPL/UI-CLUS tests, Instance Detail header, database selector, URL-backed database scope, unmonitored database visibility, metric tiles, time series, counter-reset annotations, host metrics, settings, change history, durability, relations, bloat, truncation, and the Instance Detail README guidance are covered. Phase 10 is complete, and phase 11.1 now covers the ASH derivation library with gap-safe stacking inputs, deterministic ordering, exact folding and under-sampling helpers, and string-safe query ids. The next unit is the phase 11.2 stacked wait chart. |
+| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, and phase 6 sub-phases 6.1–6.8 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, strict typed lint/format gates, Makefile web targets, clean placeholder preservation, the parallel CI web job, frontend workflow documentation, the real server image build, the phase-boundary L3 regression, the Vitest/jsdom test runner foundation, the frontend testing architecture rules, the deterministic render/provider harness, the contract-validated OpenAPI fixture suite, the contract-aware MSW handler factory, the V8 UI coverage gate, the axe-core accessibility assertion, the deterministic clock/timezone/locale/randomness rules, the Playwright acceptance bootstrap, the harness defense meta-tests, the frontend testing workflow documentation, the phase-5 boundary E2E regression, the OpenAPI type generator, committed generated API types, stable schema aliases, type-level contract assertions, generator drift gates, the single typed API client, normalized API failures, exact large-integer query identifiers, the query key factory, refresh policies, the visibility-aware polling hooks, query-layer coverage, session authentication, guarded routing, login/logout flows, single-flight 401 handling, auth/login coverage, the accessible state-primitives library, freshness plumbing, the phase-6 browser sign-in documentation, the phase-7 route tree/code-splitting boundary, the accessible application shell, the URL-backed time-range state, the shared page scaffolding primitives, resilient namespaced theme/density/sidebar preferences, global error/offline handling, the phase-7 README web-interface guide, the phase-7 boundary E2E regression, the fleet derivation library, cluster cards, agent-health surfacing, server-defined health semantics, degraded/error paths, Fleet Overview documentation, the phase-8 boundary E2E regression, the phase-9 boundary E2E regression, and the Cluster Detail documentation are covered. The replication derivation library, topology graph, lag charts, slots, configuration drift, event taxonomy/timeline, Cluster Detail route, degraded/error paths, UI-REPL/UI-CLUS tests, Instance Detail header, database selector, URL-backed database scope, unmonitored database visibility, metric tiles, time series, counter-reset annotations, host metrics, settings, change history, durability, relations, bloat, truncation, and the Instance Detail README guidance are covered. Phase 10 is complete, and phase 11.1–11.2 now cover the ASH derivation library and stacked wait chart with gap-safe inputs, deterministic ordering, exact folding, string-safe query ids, fixed wait-event palette tokens, folded `other` labelling, tooltip metadata, and an optional CPU reference line. The next unit is the phase 11.3 ASH drill-down page. |
 | **Phase file** | [phase_12.md](phase_12.md) |
 
 Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, phase 6 sub-phases 6.1–6.8, phase 7 sub-phases 7.1–7.7, phase 8 sub-phases 8.1–8.6, phase 9 sub-phases 9.1–9.7, phase 10 sub-phases 10.1–10.7, and phase 11 sub-phase 11.1 are closed; sub-phase 11.2 is open.
@@ -232,6 +232,7 @@ records start/end timestamps and elapsed time.
 | 10.6 | sub-phase | 10.6 | 2026-08-31 | Build Instance Detail relations, bloat and truncation | `cb74a41` |
 | 10.7 | sub-phase | 10.7 | 2026-09-01 | Update README.md for the complete Instance Detail experience | `a8ca9ec` |
 | 11.1 | sub-phase | 11.1 | 2026-09-01 | Build the ASH derivation library | `75fe127` |
+| 11.2 | sub-phase | 11.2 | 2026-09-01 | Build the stacked wait chart | `9a9f339` |
 
 ---
 
@@ -436,6 +437,16 @@ deterministic CPU/wait/other ordering, fold overflow without losing totals,
 expose the 60-sample guard and zero-tick null semantics, and stringify query
 ids before sorting/display.
 
+Sub-phase 11.2 added `web/src/components/charts/ash.options.ts`,
+`web/src/components/charts/ash.options.test.ts`,
+`web/src/features/ash/AshChart.tsx`, and
+`web/src/features/ash/AshChart.test.tsx`; it also extended
+`web/src/components/charts/TimeSeriesChart.tsx` with an honest value-column
+label for ASH tables. The chart sorts and stacks groups deterministically,
+preserves null gaps, uses fixed wait-event palette tokens, identifies
+`other (folded)` with tooltip counts and sample metadata, and omits the CPU
+reference line when host CPU count is unknown.
+
 `docs/LIMITS.md` was also touched by sub-phase 2.7.
 
 `Makefile`; `README.md`; `scripts/e2e_evidence.sh`; `scripts/id_audit.sh`; `internal/scripts/doc.go`; `internal/scripts/scripts_test.go`; `test/harness/harness.go`; `test/harness/api.go`; `test/e2e/deploy_test.go`; `test/scenario/net.go`; `test/scenario/topo_cascading.go`; `docs/plans/002_plan-AnalysisBackend/STATE.md`; `docs/plans/002_plan-AnalysisBackend/phase_11.md`; `docs/plans/002_plan-AnalysisBackend/verify/index.md`; `docs/plans/002_plan-AnalysisBackend/verify/verify_001_2026-08-30.md`; `docs/plans/003_plan-Frontend/STATE.md`; `api/openapi.yaml`; `internal/server/openapi_test.go`; `internal/tools/apidocs/main.go`; `internal/tools/apidocs/main_test.go`; `docs/api.md`; `cmd/pglens-server/main.go`; `internal/server/config.go`; `internal/server/config_test.go`; `internal/server/session.go`; `internal/server/session_test.go`; `internal/server/http.go`; `internal/server/http_test.go`; `internal/server/facts_integration_test.go`; `internal/server/ingest_integration_test.go`; `internal/server/api_commands_integration_test.go`.
@@ -444,7 +455,7 @@ ids before sorting/display.
 
 ## §6 — In-flight work
 
-`claimed — nothing written yet; sub-phase 11.2 is open for implementation in web/src/components/charts/ash.options.ts and web/src/features/ash/AshChart.tsx.`
+`none — tree consistent; sub-phase 11.3 is open for implementation in the ASH drill-down page.`
 
 ---
 
@@ -653,6 +664,9 @@ ids before sorting/display.
 | 2026-09-01 | 11.1 | `pnpm --dir web exec vitest run src/lib/ash.test.ts` | PASS | Focused ASH suite completed in 1.00s wall-clock; 1 file and 9 tests passed, covering UI-ASH-001–009. |
 | 2026-09-01 | 11.1 | `make web-lint web-typecheck web-test` | PASS | Web quality gate completed in 88.88s wall-clock; 58 files and 393 tests passed; lint has only the four existing Fast Refresh warnings. |
 | 2026-09-01 | 11.1 | E2E | DEFERRED | No E2E was run for this isolated pure-library sub-phase; the long L3 run remains scheduled at phase-11 closure. |
+| 2026-09-01 | 11.2 | `pnpm --dir web exec vitest run src/components/charts/ash.options.test.ts src/features/ash/AshChart.test.tsx` | PASS | Focused stacked-chart suite completed in 3.4s wall-clock; 2 files and 7 tests passed, covering UI-ASH-010–016. |
+| 2026-09-01 | 11.2 | `make web-lint web-typecheck web-test` | PASS | Web quality gate completed in 89.47s wall-clock; 60 files and 400 tests passed; lint has only the four existing Fast Refresh warnings. |
+| 2026-09-01 | 11.2 | E2E | DEFERRED | No E2E was run for this isolated chart sub-phase; the long L3 run remains scheduled once at phase-11 closure. |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -740,7 +754,7 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 | 8 | [phase_09.md](phase_09.md) | Fleet Overview | `agent-2:sonnet` | 8.4 | DONE — 6/6 sub-phases closed |
 | 9 | [phase_10.md](phase_10.md) | Cluster Detail | `agent-2:sonnet` | 9.7 | DONE — 7/7 sub-phases closed |
 | 10 | [phase_11.md](phase_11.md) | Instance Detail | `agent-2:sonnet` | 10.1 | DONE — 7/7 sub-phases closed |
-| 11 | [phase_12.md](phase_12.md) | ASH and wait analysis | `agent-2:sonnet` | 11.2 | IN_PROGRESS — 11.2 open |
+| 11 | [phase_12.md](phase_12.md) | ASH and wait analysis | `agent-2:sonnet` | 11.2 | IN_PROGRESS — 11.3 open |
 | 12 | [phase_13.md](phase_13.md) | Query Inspector and plan history | `agent-2:sonnet` | 12.3 | TODO |
 | 13 | [phase_14.md](phase_14.md) | Locks and Activity | `agent-2:sonnet` | 13.4 | TODO |
 | 14 | [phase_15.md](phase_15.md) | Advisor findings | `agent-2:sonnet` | — | TODO |
@@ -835,7 +849,7 @@ the next one opens.
 | 10.6 | Relations, bloat and truncation | `agent-2:sonnet` | DONE |
 | 10.7 | Update README.md | `agent-3:haiku` | DONE |
 | 11.1 | ASH derivation library | `agent-2:sonnet` | DONE |
-| 11.2 | The stacked wait chart | `agent-2:sonnet` | OPEN |
+| 11.2 | The stacked wait chart | `agent-2:sonnet` | DONE |
 | 11.3 | Drill-down: type to event to query | `agent-2:sonnet` | TODO |
 | 11.4 | Honesty: disabled, under-sampled, unattributable | `agent-2:sonnet` | TODO |
 | 11.5 | Degraded and error paths (rule T-4) | `agent-2:sonnet` | TODO |
@@ -927,7 +941,9 @@ not otherwise be visible.
 | `UI-INST-040 … UI-INST-046` | Vitest, unit + route | 10.5 | DONE |
 | `UI-INST-050 … UI-INST-057` | Vitest, unit + route | 10.6 | DONE |
 | `UI-ASH-001 … UI-ASH-009` | Vitest, pure unit | 11.1 | DONE |
-| `UI-ASH-010 … UI-ASH-*` | Vitest, unit + route | 11.2 – 11.5 | TODO |
+| `UI-ASH-010 … UI-ASH-014` | Vitest, pure unit | 11.2 | DONE |
+| `UI-ASH-015 … UI-ASH-016` | Vitest, component | 11.2 | DONE |
+| `UI-ASH-020 … UI-ASH-*` | Vitest, unit + route | 11.3 – 11.5 | TODO |
 | `UI-QRY-*` | Vitest, unit + route | 12.1 – 12.6 | TODO |
 | `UI-LOCK-*` | Vitest, unit + route | 13.1 – 13.5 | TODO |
 | `UI-FIND-*` | Vitest, unit + route | 14.1 – 14.5 | TODO |
