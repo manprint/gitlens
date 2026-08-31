@@ -1,0 +1,108 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-border: var(--border);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-status-ok: var(--status-ok);
+  --color-status-degraded: var(--status-degraded);
+  --color-status-critical: var(--status-critical);
+  --color-status-unknown: var(--status-unknown);
+  --color-status-muted: var(--status-muted);
+  --color-status-stale: var(--status-stale);
+  --color-severity-info: var(--severity-info);
+  --color-severity-warning: var(--severity-warning);
+  --color-severity-critical: var(--severity-critical);
+  --color-focus-ring: var(--focus-ring);
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-code);
+  --spacing-row-compact: var(--row-h-compact);
+  --spacing-row-comfortable: var(--row-h-comfortable);
+}
+
+:root {
+  color-scheme: light;
+  --background: #f5f7fa;
+  --surface: #ffffff;
+  --surface-raised: #edf1f5;
+  --border: #d4dce5;
+  --text-primary: #17202b;
+  --text-secondary: #465363;
+  --text-muted: #718096;
+  --status-ok: #138a5b;
+  --status-degraded: #a16207;
+  --status-critical: #c53030;
+  --status-unknown: #6b46c1;
+  --status-muted: #718096;
+  --status-stale: #087f8c;
+  --severity-info: #2563eb;
+  --severity-warning: #a16207;
+  --severity-critical: #c53030;
+  --focus-ring: #2563eb;
+  --font-ui: Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-code: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  --row-h-compact: 2.25rem;
+  --row-h-comfortable: 3rem;
+}
+
+.dark {
+  color-scheme: dark;
+  --background: #0b1017;
+  --surface: #111923;
+  --surface-raised: #182330;
+  --border: #293746;
+  --text-primary: #edf2f7;
+  --text-secondary: #aebbc9;
+  --text-muted: #718096;
+  --status-ok: #43d19a;
+  --status-degraded: #f4b942;
+  --status-critical: #ff6b6b;
+  --status-unknown: #b794f4;
+  --status-muted: #8a99aa;
+  --status-stale: #4fd1c5;
+  --severity-info: #63b3ed;
+  --severity-warning: #f4b942;
+  --severity-critical: #ff6b6b;
+  --focus-ring: #90cdf4;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    min-height: 100%;
+  }
+
+  body {
+    min-width: 320px;
+    min-height: 100vh;
+    margin: 0;
+    background: var(--background);
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .font-code {
+    font-family: var(--font-code);
+  }
+}
