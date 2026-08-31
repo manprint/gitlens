@@ -3,7 +3,13 @@ import createClient from 'openapi-fetch'
 import type { paths } from './generated'
 
 export const client = createClient<paths>({
-  baseUrl: '/',
+  // A browser resolves relative URLs against the current origin; Node's fetch
+  // does not. Keeping the origin explicit makes the same client deterministic
+  // in jsdom without changing its same-origin production behavior.
+  baseUrl: window.location.origin,
+  // Resolve fetch at request time so MSW (and other browser instrumentation)
+  // can install its interceptor after this module has been imported.
+  fetch: (...args) => globalThis.fetch(...args),
   credentials: 'same-origin',
   headers: { Accept: 'application/json' },
 })

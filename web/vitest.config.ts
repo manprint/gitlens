@@ -4,6 +4,7 @@ import viteConfig from './vite.config.ts'
 export default mergeConfig(viteConfig, {
   test: {
     environment: 'jsdom',
+    environmentOptions: { jsdom: { url: 'http://localhost/' } },
     globals: false,
     setupFiles: ['./src/test/setup.ts'],
     css: false,
