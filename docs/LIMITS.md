@@ -73,5 +73,8 @@ the PostgreSQL 18 compatibility work.
 ## 10. Tenant separation is not an isolation boundary
 
 The schema carries `tenant_id` through the data model, but the current product
-does not authenticate users or separate tenants. In practice this is a single-
-tenant deployment. Do not treat `tenant_id` as an authorization boundary.
+uses one shared password for browser/API sessions and does not identify users or
+separate tenants. There is no per-user audit trail and no user/tenant role model;
+in practice this is a single-tenant deployment. A session cookie does not survive
+a server restart, and session authentication is not a substitute for network
+controls or an authorization boundary. Do not treat `tenant_id` as one.

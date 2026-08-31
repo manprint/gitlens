@@ -129,6 +129,20 @@ PGLENS_LISTEN=:8080 \
 
 `/healthz` returns 200 once listening; `/readyz` returns 200 when migrations are applied and the pool answers `SELECT 1`. Graceful shutdown on `SIGTERM` with 15s drain.
 
+### Signing in
+
+When `PGLENS_UI_PASSWORD` is configured, sign in to obtain a session cookie and
+use it for the protected API:
+
+```sh
+curl -s -c cookies.txt -X POST localhost:8080/api/v1/session \
+  -H 'Content-Type: application/json' -d '{"password":"'"$PGLENS_UI_PASSWORD"'"}'
+curl -s -b cookies.txt localhost:8080/api/v1/clusters | jq .
+```
+
+The agent's bearer token also authenticates API requests. `/healthz`, `/readyz`
+and `/metrics` remain open for probes and monitoring.
+
 ### Configuration
 
 | Env | Type | Default | Meaning |
@@ -137,6 +151,11 @@ PGLENS_LISTEN=:8080 \
 | `PGLENS_LISTEN` | `host:port` | `:8080` | HTTP listen address |
 | `PGLENS_BOOTSTRAP_TOKEN` | string | — | shared secret for agent auth |
 | `PGLENS_BOOTSTRAP_TOKEN_FILE` | path | — | file containing the token (trailing newline trimmed) |
+| `PGLENS_UI_PASSWORD` | string | unset | shared password that enables browser/API session authentication |
+| `PGLENS_UI_PASSWORD_FILE` | path | unset | password file; trailing newline trimmed and takes precedence over the inline value |
+| `PGLENS_UI_SESSION_TTL` | duration | `24h` | session-cookie lifetime; accepted range is `5m` to `720h` |
+| `PGLENS_UI_ENABLED` | bool | `true` | serves the UI assets; `false` disables static assets while leaving the existing API gate unchanged |
+| `PGLENS_UI_COOKIE_SECURE` | bool | `auto` | sets cookie `Secure` for TLS/`X-Forwarded-Proto: https`; `true`/`false` force the attribute |
 | `PGLENS_ALERT_INTERVAL` | duration | `30s` | alert evaluation interval |
 | `PGLENS_ADVISOR_INTERVAL` | duration | `15m` | advisor finding evaluation interval |
 | `PGLENS_COMMAND_TTL` | duration | `5m` | lifetime of an on-demand command before expiry |
@@ -592,6 +611,9 @@ warnings
 - The persistent-mount warning indicates that `/var/lib/pglens` is not on a persistent volume. This is the #1 container misconfiguration and causes instance duplication on restart. Always mount the identity directory on a persistent volume (e.g., `docker run -v agent-data:/var/lib/pglens ...` or in compose: `volumes: ["agent-data:/var/lib/pglens"]`).
 
 ## HTTP API
+
+Every `/api/v1` endpoint requires a session cookie or an agent bearer token;
+`/healthz`, `/readyz` and `/metrics` are the unauthenticated operational endpoints.
 
 All responses carry `cluster_id` as a **decimal string** — `uint64` exceeds IEEE-754 exact integer range and would be rounded by `jq` or any JS consumer. Missing intervals are `null`, never `0` or interpolated.
 
