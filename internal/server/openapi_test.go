@@ -1,14 +1,20 @@
 package server_test
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/manprint/pglens/internal/server"
 	"gopkg.in/yaml.v3"
 )
+
+var openapiExemptRoutes = map[string]struct{}{}
 
 func TestOpenAPIDocumentParses(t *testing.T) {
 	document := loadOpenAPIDocument(t)
@@ -89,10 +95,9 @@ func TestOpenAPIReadOperationsHaveExamples(t *testing.T) {
 	}
 }
 
-func TestOpenAPIOperationsHaveTagsAndUniqueIDs(t *testing.T) {
+func TestOpenAPIOperationsHaveTags(t *testing.T) {
 	document := loadOpenAPIDocument(t)
 	paths := document["paths"].(map[string]any)
-	seen := make(map[string]string)
 	for path, rawPathItem := range paths {
 		pathItem := rawPathItem.(map[string]any)
 		for method, rawOperation := range pathItem {
@@ -105,16 +110,133 @@ func TestOpenAPIOperationsHaveTagsAndUniqueIDs(t *testing.T) {
 				t.Errorf("%s %s: operationId missing", method, path)
 				continue
 			}
-			if previous, duplicate := seen[operationID]; duplicate {
-				t.Errorf("operationId %q is used by %s and %s %s", operationID, previous, method, path)
-			}
-			seen[operationID] = method + " " + path
 			tags, ok := operation["tags"].([]any)
 			if !ok || len(tags) == 0 {
 				t.Errorf("%s: tags missing", operationID)
 			}
 		}
 	}
+}
+
+func TestOpenAPIOperationIdsAreUnique(t *testing.T) {
+	document := loadOpenAPIDocument(t)
+	paths := document["paths"].(map[string]any)
+	seen := make(map[string]string)
+	for path, rawPathItem := range paths {
+		pathItem := rawPathItem.(map[string]any)
+		for method, rawOperation := range pathItem {
+			if method == "parameters" {
+				continue
+			}
+			operation := rawOperation.(map[string]any)
+			operationID, ok := operation["operationId"].(string)
+			if !ok || operationID == "" {
+				continue
+			}
+			location := method + " " + path
+			if previous, duplicate := seen[operationID]; duplicate {
+				t.Errorf("operationId %q is used by %s and %s", operationID, previous, location)
+			}
+			seen[operationID] = location
+		}
+	}
+}
+
+func TestOpenAPICoversEveryRoute(t *testing.T) {
+	router := server.NewRouter(
+		server.NewAuth("t"),
+		server.NewInventory(nil),
+		server.NewPipeline(nil, nil),
+		server.NewAPI(nil),
+		server.NewTopologyAPI(nil),
+		server.NewAshAPI(nil),
+		server.NewAlertAPI(nil, nil),
+	)
+
+	registered := make(map[string]struct{})
+	err := chi.Walk(router.(chi.Routes), func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		normalized := canonicalizeRegisteredRoute(method, route)
+		if _, exempt := openapiExemptRoutes[method+" "+normalized]; !exempt {
+			registered[method+" "+normalized] = struct{}{}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk production routes: %v", err)
+	}
+
+	documented := make(map[string]struct{})
+	paths := loadOpenAPIDocument(t)["paths"].(map[string]any)
+	for path, rawPathItem := range paths {
+		pathItem := rawPathItem.(map[string]any)
+		for method := range pathItem {
+			if method == "parameters" {
+				continue
+			}
+			documented[strings.ToUpper(method)+" "+normalizeChiRoute(path)] = struct{}{}
+		}
+	}
+
+	registeredOnly := difference(registered, documented)
+	documentedOnly := difference(documented, registered)
+	if len(registeredOnly) > 0 {
+		t.Errorf("routes registered but absent from api/openapi.yaml: %s", strings.Join(registeredOnly, ", "))
+	}
+	if len(documentedOnly) > 0 {
+		t.Errorf("operations documented but not registered: %s", strings.Join(documentedOnly, ", "))
+	}
+}
+
+func TestNormalizeChiRoute(t *testing.T) {
+	tests := map[string]string{
+		"/api/v1/clusters/":        "/api/v1/clusters",
+		"/api/v1/instances/{id}/*": "/api/v1/instances/{id}",
+		"//api/v1/x":               "/api/v1/x",
+		"/api/v1/plain":            "/api/v1/plain",
+	}
+	for input, want := range tests {
+		t.Run(input, func(t *testing.T) {
+			if got := normalizeChiRoute(input); got != want {
+				t.Fatalf("normalizeChiRoute(%q) = %q, want %q", input, got, want)
+			}
+		})
+	}
+}
+
+func normalizeChiRoute(route string) string {
+	route = strings.TrimSuffix(route, "/*")
+	if route != "/" {
+		route = strings.TrimSuffix(route, "/")
+	}
+	for strings.Contains(route, "//") {
+		route = strings.ReplaceAll(route, "//", "/")
+	}
+	return route
+}
+
+func canonicalizeRegisteredRoute(method, route string) string {
+	normalized := normalizeChiRoute(route)
+	if !strings.HasSuffix(route, "/*") || normalized != "/api/v1/findings" {
+		return normalized
+	}
+	// Finding IDs may contain slashes, so the production router uses a
+	// catch-all. Canonicalize its public operations to the OpenAPI templates;
+	// the generic normalizer above still strips only chi's route suffix.
+	if method == "GET" {
+		return "/api/v1/findings/{finding-id}"
+	}
+	return "/api/v1/findings/{finding-id}/mute"
+}
+
+func difference(left, right map[string]struct{}) []string {
+	var out []string
+	for item := range left {
+		if _, ok := right[item]; !ok {
+			out = append(out, item)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func TestOpenAPIAgentRoutesAreBearerOnly(t *testing.T) {
@@ -184,6 +306,9 @@ func loadOpenAPIDocument(t *testing.T) map[string]any {
 	var document map[string]any
 	if err := yaml.Unmarshal(data, &document); err != nil {
 		t.Fatalf("parse OpenAPI document: %v", err)
+	}
+	if len(document) == 0 {
+		t.Fatal("OpenAPI document is empty")
 	}
 	return document
 }
