@@ -242,7 +242,11 @@ func permissionInstance(ctx context.Context, e *Env) (string, error) {
 	deadline := time.Now().Add(2 * time.Minute)
 	for time.Now().Before(deadline) {
 		var id string
-		if err := e.DB.QueryRow(ctx, `SELECT instance_id::text FROM instances WHERE addr='pg' OR addr LIKE '%pg%' ORDER BY last_seen DESC LIMIT 1`).Scan(&id); err == nil {
+		// The standalone stack has one monitored instance. Container agents
+		// report the Docker target name (pg), while the host binary reports
+		// localhost because it reaches the published PostgreSQL port; resolve
+		// by freshness instead of coupling this scenario to either transport.
+		if err := e.DB.QueryRow(ctx, `SELECT instance_id::text FROM instances ORDER BY last_seen DESC LIMIT 1`).Scan(&id); err == nil {
 			return id, nil
 		}
 		select {
