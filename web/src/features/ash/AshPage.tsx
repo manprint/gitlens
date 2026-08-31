@@ -1,10 +1,11 @@
 import { useMemo } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 
-import { useAsh } from '@/api/queries'
+import { useAsh, useInstanceSettings } from '@/api/queries'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { ErrorState } from '@/components/state'
+import { Degraded, Disabled, ErrorState } from '@/components/state'
 import { useTimeRange } from '@/hooks/useTimeRange'
+import { totalSamples } from '@/lib/ash'
 import type { AshBucket, AshGroupBy } from '@/lib/ash'
 
 import { AshBreakdown } from './AshBreakdown'
@@ -13,6 +14,21 @@ import { AshTopQueries } from './AshTopQueries'
 type DrillGroup = Extract<AshGroupBy, 'wait_event_type' | 'wait_event' | 'queryid'>
 
 const DEFAULT_GROUP: DrillGroup = 'wait_event_type'
+
+function AshFootnote() {
+  return (
+    <p className="text-text-secondary text-xs" data-testid="ash-sampling-footnote">
+      ASH uses 1 s statistical sampling; sub-second queries are under-represented. At most 100 wait
+      keys are retained per 10 s window; the remainder is folded into “other” and the total is
+      conserved.
+    </p>
+  )
+}
+
+function isComputeQueryIdOff(settings: readonly { name: string; value: string | null }[]) {
+  const setting = settings.find(({ name }) => name === 'compute_query_id')
+  return ['off', 'false', '0'].includes(setting?.value?.trim().toLocaleLowerCase('en-US') ?? '')
+}
 
 function readGroup(value: string | null): DrillGroup {
   return value === 'wait_event' || value === 'queryid' ? value : DEFAULT_GROUP
@@ -118,12 +134,20 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
     ...(database === undefined ? {} : { database }),
   }
   const ashQuery = useAsh(params)
+  const settingsQuery = useInstanceSettings(instanceId)
 
   const buckets = useMemo(
     () => filteredBuckets(ashQuery.data?.buckets ?? [], groupBy, waitEventType, waitEvent),
     [ashQuery.data?.buckets, groupBy, waitEvent, waitEventType],
   )
   const topQueryProps = database === undefined ? {} : { database }
+  const sampleCount = totalSamples(ashQuery.data?.buckets ?? [])
+  const queryIdsUnavailable =
+    groupBy === 'queryid' &&
+    ashQuery.data?.buckets.every(
+      (bucket) => bucket.queryid === null || bucket.queryid === undefined,
+    ) &&
+    isComputeQueryIdOff(settingsQuery.data?.settings ?? [])
 
   function navigateTo(nextGroup: DrillGroup) {
     const next = new URLSearchParams(searchParams)
@@ -158,15 +182,25 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
 
   if (ashQuery.error && !ashQuery.data) {
     return (
-      <ErrorState endpoint="ASH" failure={ashQuery.error} onRetry={() => void ashQuery.refetch()} />
+      <div className="space-y-4">
+        <ErrorState
+          endpoint="ASH"
+          failure={ashQuery.error}
+          onRetry={() => void ashQuery.refetch()}
+        />
+        <AshFootnote />
+      </div>
     )
   }
 
   if (ashQuery.isPending || ashQuery.data === undefined) {
     return (
-      <section aria-busy="true" aria-label="Loading ASH and wait analysis" role="status">
-        Loading ASH and wait analysis…
-      </section>
+      <div className="space-y-4">
+        <section aria-busy="true" aria-label="Loading ASH and wait analysis" role="status">
+          Loading ASH and wait analysis…
+        </section>
+        <AshFootnote />
+      </div>
     )
   }
 
@@ -186,21 +220,60 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
         waitEvent={waitEvent}
         waitEventType={waitEventType}
       />
-      <AshBreakdown
-        buckets={buckets}
-        filterLabel={
-          groupBy === 'wait_event'
-            ? (waitEventType ?? null)
-            : groupBy === 'queryid'
-              ? (waitEvent ?? null)
-              : null
-        }
-        groupBy={groupBy}
-        onSeriesSelect={selectSeries}
-      />
-      {groupBy === 'queryid' ? (
-        <AshTopQueries {...topQueryProps} from={range.from} instanceId={instanceId} to={range.to} />
-      ) : null}
+      {ashQuery.data.enabled === false ? (
+        <>
+          <Disabled feature="ASH sampling" configKey="checks.ash in the agent configuration file" />
+          <p className="text-text-secondary text-sm">
+            Keeping ASH disabled avoids its sampling cost but removes wait-analysis visibility.
+          </p>
+        </>
+      ) : (
+        <>
+          {ashQuery.data.warning ? (
+            <div className="border-warning/40 bg-warning/10 text-sm" role="status">
+              <strong>ASH sampling warning:</strong> {ashQuery.data.warning} {sampleCount} samples
+              were collected in this range; conclusions are unreliable.
+            </div>
+          ) : null}
+          {queryIdsUnavailable ? (
+            <div className="space-y-2">
+              <Degraded
+                reason="No non-null query_id was observed in this ASH range, and the instance setting compute_query_id is off."
+                requires="compute_query_id=on"
+              />
+              <p className="text-text-secondary text-sm">
+                See the{' '}
+                <a className="underline" href="/README.md#agent-configuration">
+                  agent configuration in the README
+                </a>{' '}
+                to enable query attribution.
+              </p>
+            </div>
+          ) : (
+            <AshBreakdown
+              buckets={buckets}
+              filterLabel={
+                groupBy === 'wait_event'
+                  ? (waitEventType ?? null)
+                  : groupBy === 'queryid'
+                    ? (waitEvent ?? null)
+                    : null
+              }
+              groupBy={groupBy}
+              onSeriesSelect={selectSeries}
+            />
+          )}
+          {groupBy === 'queryid' && !queryIdsUnavailable ? (
+            <AshTopQueries
+              {...topQueryProps}
+              from={range.from}
+              instanceId={instanceId}
+              to={range.to}
+            />
+          ) : null}
+        </>
+      )}
+      <AshFootnote />
     </div>
   )
 }

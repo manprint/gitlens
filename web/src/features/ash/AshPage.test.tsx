@@ -3,17 +3,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { EChartsOption } from 'echarts'
 
+import { expectNoA11yViolations } from '@/test/a11y'
 import { renderWithProviders } from '@/test/render'
 
 const mocks = vi.hoisted(() => ({
   ash: vi.fn(),
   ashTop: vi.fn(),
+  settings: vi.fn(),
   chart: vi.fn(),
 }))
 
 vi.mock('@/api/queries', () => ({
   useAsh: mocks.ash,
   useAshTop: mocks.ashTop,
+  useInstanceSettings: mocks.settings,
 }))
 
 vi.mock('echarts-for-react', () => ({
@@ -77,15 +80,21 @@ function success<T>(data: T) {
   }
 }
 
-function renderAsh(route = '/instances/instance-1/ash?range=1h') {
-  mocks.ash.mockReturnValue(success(ashResponse))
+function renderAsh(
+  route = '/instances/instance-1/ash?range=1h',
+  response: object = ashResponse,
+  settings: { name: string; value: string | null }[] = [],
+) {
+  mocks.ash.mockReturnValue(success(response))
   mocks.ashTop.mockReturnValue(success(ashTopResponse))
+  mocks.settings.mockReturnValue(success({ instance_id: 'instance-1', settings }))
   return renderWithProviders(<AshPage instanceId="instance-1" />, { route })
 }
 
 beforeEach(() => {
   mocks.ash.mockReset()
   mocks.ashTop.mockReset()
+  mocks.settings.mockReset()
   mocks.chart.mockReset()
 })
 
@@ -147,5 +156,101 @@ describe('AshPage', () => {
 
     expect(screen.getByText(/ASH never collects live query text/i)).toBeInTheDocument()
     expect(screen.getByText(/normalised text from pg_stat_statements/i)).toBeInTheDocument()
+  })
+
+  it('UI-ASH-030 names checks.ash when ASH is disabled', () => {
+    renderAsh('/instances/instance-1/ash', { ...ashResponse, buckets: [], enabled: false })
+
+    expect(screen.getByRole('status')).toHaveTextContent(/ASH sampling disabled/i)
+    expect(screen.getByRole('status')).toHaveTextContent(/checks\.ash/i)
+    expect(screen.getByText(/avoids its sampling cost/i)).toBeInTheDocument()
+  })
+
+  it('UI-ASH-031 distinguishes disabled ASH from an enabled empty result', () => {
+    const disabled = renderAsh('/instances/instance-1/ash', {
+      ...ashResponse,
+      buckets: [],
+      enabled: false,
+    })
+    expect(
+      screen.queryByRole('heading', { name: 'No wait event types observed' }),
+    ).not.toBeInTheDocument()
+    disabled.unmount()
+
+    renderAsh('/instances/instance-1/ash', { ...ashResponse, buckets: [], enabled: true })
+    expect(
+      screen.getByRole('heading', { name: 'No wait event types observed' }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/ASH sampling disabled/i)).not.toBeInTheDocument()
+  })
+
+  it('UI-ASH-032 puts the sample warning above the chart and includes its count', () => {
+    const view = renderAsh('/instances/instance-1/ash', {
+      ...ashResponse,
+      warning: 'The range is under-sampled.',
+    })
+
+    const warning = screen
+      .getAllByRole('status')
+      .find((element) => element.textContent?.includes('ASH sampling warning'))
+    const chart = screen.getByTestId('mock-echarts')
+    if (!warning) throw new Error('ASH sampling warning was not rendered')
+    expect(warning).toHaveTextContent('25 samples')
+    expect(warning.compareDocumentPosition(chart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    view.unmount()
+  })
+
+  it('UI-ASH-033 explains missing query attribution when compute_query_id is off', () => {
+    renderAsh(
+      '/instances/instance-1/ash?group=queryid',
+      {
+        ...ashResponse,
+        buckets: ashResponse.buckets.map((bucket) => ({ ...bucket, queryid: null })),
+      },
+      [{ name: 'compute_query_id', value: 'off' }],
+    )
+
+    expect(screen.getByRole('status')).toHaveTextContent(/compute_query_id is off/i)
+    expect(
+      screen.getByRole('link', { name: /agent configuration in the README/i }),
+    ).toHaveAttribute('href', '/README.md#agent-configuration')
+    expect(screen.queryByRole('heading', { name: 'Top queries' })).not.toBeInTheDocument()
+  })
+
+  it('UI-ASH-034 always explains the sampling limits', () => {
+    renderAsh()
+
+    expect(screen.getByTestId('ash-sampling-footnote')).toHaveTextContent(
+      /1 s statistical sampling/i,
+    )
+    expect(screen.getByTestId('ash-sampling-footnote')).toHaveTextContent(/100 wait keys/i)
+  })
+
+  it('keeps the disabled ASH state accessible', async () => {
+    const view = renderAsh('/instances/instance-1/ash', {
+      ...ashResponse,
+      buckets: [],
+      enabled: false,
+    })
+    expect(view.container).toBeTruthy()
+    vi.useRealTimers()
+    await expectNoA11yViolations(view.container)
+  })
+
+  it('keeps the warning ASH state accessible', async () => {
+    const view = renderAsh('/instances/instance-1/ash', {
+      ...ashResponse,
+      warning: 'The range is under-sampled.',
+    })
+    expect(view.container).toBeTruthy()
+    vi.useRealTimers()
+    await expectNoA11yViolations(view.container)
+  })
+
+  it('keeps the populated ASH state accessible', async () => {
+    const view = renderAsh()
+    expect(view.container).toBeTruthy()
+    vi.useRealTimers()
+    await expectNoA11yViolations(view.container)
   })
 })
