@@ -8,7 +8,9 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Input } from '@/components/ui/input'
+import { AGENT_STALE_AFTER_SECONDS, deriveAgentHealth } from '@/lib/fleet'
 
+import { AgentHealthStrip } from './AgentHealthStrip'
 import { ClusterCard } from './ClusterCard'
 import {
   FleetSummaryBar,
@@ -77,6 +79,15 @@ export function FleetPage() {
     () => summarize(clusters, firingAlerts.length),
     [clusters, firingAlerts.length],
   )
+  const agentHealthIssues = deriveAgentHealth(clusters, firingAlerts)
+  const staleAgeByCluster = new Map<string, number>()
+  for (const issue of agentHealthIssues) {
+    const staleAge = Math.max(issue.ageSeconds, AGENT_STALE_AFTER_SECONDS)
+    staleAgeByCluster.set(
+      issue.cluster.cluster_id,
+      Math.max(staleAgeByCluster.get(issue.cluster.cluster_id) ?? 0, staleAge),
+    )
+  }
 
   const visibleClusters = useMemo(
     () =>
@@ -152,6 +163,8 @@ export function FleetPage() {
         freshness={<FreshnessBadge dataUpdatedAt={clustersQuery.dataUpdatedAt} policy="fleet" />}
       />
 
+      <AgentHealthStrip issues={agentHealthIssues} />
+
       <FleetSummaryBar
         alertsOnly={alertsOnly}
         healthFilter={healthFilter}
@@ -192,16 +205,20 @@ export function FleetPage() {
             className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"
             role="list"
           >
-            {visibleClusters.map((cluster) => (
-              <ClusterCard
-                key={cluster.cluster_id}
-                alertCount={
-                  alertCounts.get(cluster.cluster_id) ??
-                  firingAlerts.filter((alert) => alertMatchesCluster(alert, cluster)).length
-                }
-                cluster={cluster}
-              />
-            ))}
+            {visibleClusters.map((cluster) => {
+              const agentStaleAgeSeconds = staleAgeByCluster.get(cluster.cluster_id)
+              return (
+                <ClusterCard
+                  {...(agentStaleAgeSeconds === undefined ? {} : { agentStaleAgeSeconds })}
+                  key={cluster.cluster_id}
+                  alertCount={
+                    alertCounts.get(cluster.cluster_id) ??
+                    firingAlerts.filter((alert) => alertMatchesCluster(alert, cluster)).length
+                  }
+                  cluster={cluster}
+                />
+              )
+            })}
           </div>
         ) : (
           <EmptyState

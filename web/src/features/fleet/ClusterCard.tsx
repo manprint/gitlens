@@ -3,11 +3,12 @@ import { Link } from 'react-router-dom'
 import type { Cluster } from '@/api/types'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Unknown } from '@/components/state'
+import { Stale, Unknown } from '@/components/state'
 import { formatLag } from '@/lib/format'
-import { describeHealth } from '@/lib/fleet'
+import { AGENT_STALE_AFTER_SECONDS, describeHealth } from '@/lib/fleet'
 
 interface ClusterCardProps {
+  agentStaleAgeSeconds?: number
   alertCount?: number
   cluster: Cluster
 }
@@ -18,7 +19,7 @@ function healthVariant(health: Cluster['health']): 'secondary' | 'outline' | 'de
   return 'secondary'
 }
 
-export function ClusterCard({ alertCount = 0, cluster }: ClusterCardProps) {
+export function ClusterCard({ agentStaleAgeSeconds, alertCount = 0, cluster }: ClusterCardProps) {
   const explanation = describeHealth(cluster)
   const primary = cluster.primary
     ? cluster.instances.find((instance) => instance.instance_id === cluster.primary)
@@ -27,6 +28,20 @@ export function ClusterCard({ alertCount = 0, cluster }: ClusterCardProps) {
     ...new Set(cluster.instances.map((instance) => instance.perm_tier)),
   ].join(', ')
   const lagUnknown = cluster.max_replay_lag_seconds == null
+  const healthBadge = (
+    <Badge
+      role="status"
+      variant={healthVariant(cluster.health)}
+      aria-label={`Health: ${cluster.health}. ${explanation}`}
+    >
+      {cluster.health}
+    </Badge>
+  )
+  const lagValue = lagUnknown ? (
+    <Unknown reason="No standby has reported replay lag." />
+  ) : (
+    formatLag(cluster.max_replay_lag_seconds ?? null)
+  )
 
   return (
     <div className="space-y-2" role="listitem">
@@ -44,13 +59,13 @@ export function ClusterCard({ alertCount = 0, cluster }: ClusterCardProps) {
                   <code className="font-mono text-xs">{cluster.cluster_id}</code>
                 </CardDescription>
               </div>
-              <Badge
-                role="status"
-                variant={healthVariant(cluster.health)}
-                aria-label={`Health: ${cluster.health}. ${explanation}`}
-              >
-                {cluster.health}
-              </Badge>
+              {agentStaleAgeSeconds === undefined ? (
+                healthBadge
+              ) : (
+                <Stale age={agentStaleAgeSeconds} threshold={AGENT_STALE_AFTER_SECONDS}>
+                  {healthBadge}
+                </Stale>
+              )}
             </div>
           </CardHeader>
           <CardContent className="grid gap-3 text-sm">
@@ -63,10 +78,12 @@ export function ClusterCard({ alertCount = 0, cluster }: ClusterCardProps) {
               <dd>{cluster.standby_count ?? 0}</dd>
               <dt className="text-text-secondary">Max replay lag</dt>
               <dd>
-                {lagUnknown ? (
-                  <Unknown reason="No standby has reported replay lag." />
+                {agentStaleAgeSeconds === undefined ? (
+                  lagValue
                 ) : (
-                  formatLag(cluster.max_replay_lag_seconds ?? null)
+                  <Stale age={agentStaleAgeSeconds} threshold={AGENT_STALE_AFTER_SECONDS}>
+                    {lagValue}
+                  </Stale>
                 )}
               </dd>
               <dt className="text-text-secondary">Permission tiers</dt>

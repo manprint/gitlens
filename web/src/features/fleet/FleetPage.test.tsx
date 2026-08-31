@@ -5,6 +5,7 @@ import type { Cluster } from '@/api/types'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { base as alertBase } from '@/test/fixtures/getAlert'
 import { CLUSTER, INSTANCE_SUMMARY } from '@/test/fixture-helpers'
+import { AGENT_STALE_AFTER_SECONDS } from '@/lib/fleet'
 import { renderWithProviders } from '@/test/render'
 import { ok, status } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
@@ -133,10 +134,11 @@ describe('FleetPage', () => {
     expect(screen.getByRole('button', { name: /instances down \(1\)/i })).toHaveTextContent('1')
     expect(screen.getByRole('button', { name: /firing alerts \(1\)/i })).toHaveTextContent('1')
     fireEvent.click(screen.getByRole('button', { name: /instances down \(1\)/i }))
-    expect(screen.getByText('outage')).toBeInTheDocument()
-    expect(screen.queryByText('production')).not.toBeInTheDocument()
+    const clusterCards = screen.getByRole('list', { name: 'Cluster cards' })
+    expect(within(clusterCards).getByText('outage')).toBeInTheDocument()
+    expect(within(clusterCards).queryByText('production')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /firing alerts \(1\)/i }))
-    expect(screen.getByText('outage')).toBeInTheDocument()
+    expect(within(clusterCards).getByText('outage')).toBeInTheDocument()
   })
 
   it('renders the loading and API error states', async () => {
@@ -160,6 +162,67 @@ describe('FleetPage', () => {
     view.unmount()
   })
 
+  it('UI-FLEET-020 omits the agent health strip when every agent reports', async () => {
+    renderFleet([CLUSTER as unknown as Cluster])
+    await settleInitialQuery()
+
+    expect(
+      screen.queryByRole('heading', { name: 'Agents requiring attention' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('UI-FLEET-021 lists an instance with a firing agent_down alert', async () => {
+    const alert = {
+      ...alertBase,
+      alert_key: `agent_down/${INSTANCE_SUMMARY.instance_id}`,
+      rule_id: 'agent_down',
+      instance_id: INSTANCE_SUMMARY.instance_id,
+      labels: { cause: 'agent stopped reporting' },
+      summary: 'Agent is down',
+    }
+    renderFleet([CLUSTER as unknown as Cluster], [alert])
+    await settleInitialQuery()
+
+    expect(screen.getByRole('heading', { name: 'Agents requiring attention' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('link', { name: /Open instance postgres\.example\.test \(production\)/i }),
+    ).toHaveAttribute('href', `/instances/${INSTANCE_SUMMARY.instance_id}`)
+    expect(screen.getByText('cause: agent stopped reporting')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'View agent troubleshooting' })).toHaveAttribute(
+      'href',
+      '/README.md#troubleshooting',
+    )
+  })
+
+  it('UI-FLEET-022 lists an instance older than three push intervals', async () => {
+    const staleLastSeen = new Date(
+      Date.now() - (AGENT_STALE_AFTER_SECONDS + 1) * 1000,
+    ).toISOString()
+    const staleCluster = makeCluster({
+      instances: [{ ...INSTANCE_SUMMARY, last_seen: staleLastSeen }],
+    })
+    renderFleet([staleCluster])
+    await settleInitialQuery()
+
+    expect(screen.getByRole('heading', { name: 'Agents requiring attention' })).toBeInTheDocument()
+    expect(screen.getByText('The agent has not reported recently.')).toBeInTheDocument()
+  })
+
+  it('UI-FLEET-023 marks cluster health and lag as stale for a down agent', async () => {
+    const alert = {
+      ...alertBase,
+      alert_key: `instance_unreachable/${INSTANCE_SUMMARY.instance_id}`,
+      rule_id: 'instance_unreachable',
+      instance_id: INSTANCE_SUMMARY.instance_id,
+      labels: { cause: 'network timeout' },
+    }
+    renderFleet([CLUSTER as unknown as Cluster], [alert])
+    await settleInitialQuery()
+
+    expect(screen.getAllByRole('status', { name: /Stale data:/i })).toHaveLength(2)
+    expect(screen.getAllByText('Stale — 45s old (threshold 45s)')).toHaveLength(2)
+  })
+
   it('has no serious or critical accessibility violations for a populated grid', async () => {
     vi.useRealTimers()
     const { container } = renderFleet([
@@ -168,6 +231,25 @@ describe('FleetPage', () => {
     ])
     await waitFor(() =>
       expect(screen.getByRole('list', { name: 'Cluster cards' })).toBeInTheDocument(),
+    )
+
+    await expect(expectNoA11yViolations(container)).resolves.toBeUndefined()
+  })
+
+  it('has no serious or critical accessibility violations with agent health present', async () => {
+    vi.useRealTimers()
+    const alert = {
+      ...alertBase,
+      alert_key: `agent_down/${INSTANCE_SUMMARY.instance_id}`,
+      rule_id: 'agent_down',
+      instance_id: INSTANCE_SUMMARY.instance_id,
+      labels: { cause: 'agent stopped reporting' },
+    }
+    const { container } = renderFleet([CLUSTER as unknown as Cluster], [alert])
+    await waitFor(() =>
+      expect(
+        screen.getByRole('heading', { name: 'Agents requiring attention' }),
+      ).toBeInTheDocument(),
     )
 
     await expect(expectNoA11yViolations(container)).resolves.toBeUndefined()
