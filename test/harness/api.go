@@ -19,7 +19,7 @@ func (c *APIClient) Request(method, path string, payload []byte) (interface{}, e
 	if len(payload) > 0 {
 		body = bytes.NewReader(payload)
 	}
-	req, err := http.NewRequest(method, c.baseURL+path, body)
+	req, err := c.newRequest(method, c.baseURL+path, body)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +55,7 @@ func (c *APIClient) RequestWithHeaders(method, path string, payload []byte, head
 	if len(payload) > 0 {
 		body = bytes.NewReader(payload)
 	}
-	req, err := http.NewRequest(method, c.baseURL+path, body)
+	req, err := c.newRequest(method, c.baseURL+path, body)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -64,6 +64,9 @@ func (c *APIClient) RequestWithHeaders(method, path string, payload []byte, head
 	}
 	for key, value := range headers {
 		req.Header.Set(key, value)
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -91,7 +94,27 @@ func (c *APIClient) RequestWithHeaders(method, path string, payload []byte, head
 type APIClient struct {
 	client     interface{} // kept for compat; use httpClient
 	baseURL    string
+	token      string
 	httpClient *http.Client
+}
+
+func (c *APIClient) newRequest(method, url string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequest(method, url, body)
+	if err != nil {
+		return nil, err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	return req, nil
+}
+
+func (c *APIClient) do(method, path string, body io.Reader) (*http.Response, error) {
+	req, err := c.newRequest(method, c.baseURL+path, body)
+	if err != nil {
+		return nil, err
+	}
+	return c.httpClient.Do(req)
 }
 
 // Clusters fetches the current cluster state from /api/v1/clusters. The
@@ -100,8 +123,7 @@ type APIClient struct {
 // always failed with a JSON type error the moment anything actually called
 // it; no scenario had, until SYS-PERM-001 (test/scenario/perm.go).
 func (c *APIClient) Clusters() ([]map[string]interface{}, error) {
-	url := fmt.Sprintf("%s/api/v1/clusters", c.baseURL)
-	resp, err := c.httpClient.Get(url)
+	resp, err := c.do(http.MethodGet, "/api/v1/clusters", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -122,8 +144,8 @@ func (c *APIClient) Clusters() ([]map[string]interface{}, error) {
 // Instance fetches one instance's detail (including its per-database
 // monitored/skip_reason breakdown) from /api/v1/instances/{id}.
 func (c *APIClient) Instance(id string) (map[string]interface{}, error) {
-	url := fmt.Sprintf("%s/api/v1/instances/%s", c.baseURL, id)
-	resp, err := c.httpClient.Get(url)
+	path := fmt.Sprintf("/api/v1/instances/%s", id)
+	resp, err := c.do(http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +153,7 @@ func (c *APIClient) Instance(id string) (map[string]interface{}, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("GET /api/v1/instances/%s: %d, body: %s", id, resp.StatusCode, body)
+		return nil, fmt.Errorf("GET %s: %d, body: %s", path, resp.StatusCode, body)
 	}
 
 	var result map[string]interface{}
@@ -143,8 +165,7 @@ func (c *APIClient) Instance(id string) (map[string]interface{}, error) {
 
 // Events fetches events from /api/v1/events.
 func (c *APIClient) Events() ([]map[string]interface{}, error) {
-	url := fmt.Sprintf("%s/api/v1/events", c.baseURL)
-	resp, err := c.httpClient.Get(url)
+	resp, err := c.do(http.MethodGet, "/api/v1/events", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -164,8 +185,7 @@ func (c *APIClient) Events() ([]map[string]interface{}, error) {
 
 // Readyz checks the server health endpoint.
 func (c *APIClient) Readyz() (bool, error) {
-	url := fmt.Sprintf("%s/readyz", c.baseURL)
-	resp, err := c.httpClient.Get(url)
+	resp, err := c.do(http.MethodGet, "/readyz", nil)
 	if err != nil {
 		return false, err
 	}
@@ -180,8 +200,7 @@ func (c *APIClient) Readyz() (bool, error) {
 // it to notice). For the agent's real, JSON-bodied health
 // (state/buffer_stats/last_error), see Harness.AgentHealthz.
 func (c *APIClient) Healthz() (map[string]interface{}, error) {
-	url := fmt.Sprintf("%s/healthz", c.baseURL)
-	resp, err := c.httpClient.Get(url)
+	resp, err := c.do(http.MethodGet, "/healthz", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -193,8 +212,7 @@ func (c *APIClient) Healthz() (map[string]interface{}, error) {
 // Get fetches an arbitrary JSON-object endpoint. path must start with "/"
 // and may include a query string (e.g. "/api/v1/ash?instance_id=...").
 func (c *APIClient) Get(path string) (map[string]interface{}, error) {
-	url := c.baseURL + path
-	resp, err := c.httpClient.Get(url)
+	resp, err := c.do(http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +234,7 @@ func (c *APIClient) Get(path string) (map[string]interface{}, error) {
 // identifiers such as PostgreSQL queryids. It is kept separate so existing
 // scenarios that consume float64 JSON numbers remain source-compatible.
 func (c *APIClient) GetExact(path string) (interface{}, error) {
-	resp, err := c.httpClient.Get(c.baseURL + path)
+	resp, err := c.do(http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -238,8 +256,7 @@ func (c *APIClient) GetExact(path string) (interface{}, error) {
 // non-JSON responses like /metrics (Prometheus text exposition), where Get
 // would fail decoding.
 func (c *APIClient) RawGet(path string) (string, error) {
-	url := c.baseURL + path
-	resp, err := c.httpClient.Get(url)
+	resp, err := c.do(http.MethodGet, path, nil)
 	if err != nil {
 		return "", err
 	}

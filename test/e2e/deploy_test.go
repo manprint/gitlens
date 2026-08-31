@@ -16,6 +16,8 @@ import (
 	"time"
 )
 
+const deployBootstrapToken = "dev-token"
+
 // TestFull_DeployExampleStack is SYS-DEPLOY-001: the checked-in deployment
 // example must start unedited, become healthy, and expose one recently
 // reporting instance through the documented collection endpoint.
@@ -34,7 +36,7 @@ func TestFull_DeployExampleStack(t *testing.T) {
 		fmt.Sprintf("PGLENS_HTTP_PORT=%d", httpPort),
 		fmt.Sprintf("PGLENS_POSTGRES_PORT=%d", postgresPort),
 		fmt.Sprintf("PGLENS_AGENT_HEALTHZ_PORT=%d", agentPort),
-		"PGLENS_BOOTSTRAP_TOKEN=dev-token",
+		fmt.Sprintf("PGLENS_BOOTSTRAP_TOKEN=%s", deployBootstrapToken),
 	)
 	compose := func(ctx context.Context, args ...string) ([]byte, error) {
 		full := append([]string{"compose", "-p", project, "-f", "deploy/docker-compose.yml"}, args...)
@@ -63,7 +65,7 @@ func TestFull_DeployExampleStack(t *testing.T) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	deadline := time.Now().Add(90 * time.Second)
 	for time.Now().Before(deadline) {
-		if instances, err := deploymentInstances(client, baseURL); err == nil && len(instances) == 1 {
+		if instances, err := deploymentInstances(client, baseURL, deployBootstrapToken); err == nil && len(instances) == 1 {
 			if age := time.Since(instances[0].LastSeen); age >= 0 && age < 2*time.Minute && instances[0].Up {
 				return
 			}
@@ -84,8 +86,13 @@ type deploymentInstance struct {
 	Up       bool      `json:"up"`
 }
 
-func deploymentInstances(client *http.Client, baseURL string) ([]deploymentInstance, error) {
-	resp, err := client.Get(baseURL + "/api/v1/instances")
+func deploymentInstances(client *http.Client, baseURL, token string) ([]deploymentInstance, error) {
+	req, err := http.NewRequest(http.MethodGet, baseURL+"/api/v1/instances", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}

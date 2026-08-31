@@ -46,6 +46,11 @@ const (
 	AgentModeContainerClockSkew   AgentMode = "container-clock-skew"
 )
 
+// agentBootstrapToken is shared by the compose fixtures and the generated
+// binary-agent configuration. API clients use this same value for server
+// requests instead of maintaining a second authentication token.
+const agentBootstrapToken = "dev-token"
+
 // Config configures a Harness.
 type Config struct {
 	Topology  Topology
@@ -234,10 +239,11 @@ func Start(t *testing.T, cfg Config) *Harness {
 	h.apiClient = &APIClient{
 		client:     &http.Client{Timeout: 10 * time.Second},
 		baseURL:    fmt.Sprintf("http://localhost:%d", h.serverPort),
+		token:      agentBootstrapToken,
 		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 	for _, p := range h.serverPorts {
-		h.apiClients = append(h.apiClients, &APIClient{client: &http.Client{Timeout: 10 * time.Second}, baseURL: fmt.Sprintf("http://localhost:%d", p), httpClient: &http.Client{Timeout: 10 * time.Second}})
+		h.apiClients = append(h.apiClients, &APIClient{client: &http.Client{Timeout: 10 * time.Second}, baseURL: fmt.Sprintf("http://localhost:%d", p), token: agentBootstrapToken, httpClient: &http.Client{Timeout: 10 * time.Second}})
 	}
 
 	return h
@@ -388,7 +394,7 @@ func (h *Harness) startAgentBinary() error {
 
 	config := fmt.Sprintf(`server:
   url: http://localhost:%d
-  token: dev-token
+  token: %s
 identity_path: %s
 push_interval: 5s
 buffer:
@@ -405,7 +411,7 @@ checks:
   # forget each previous hot group before the next rotation and never reach
   # MaxKeys in binary mode (the container fixture uses the same 60s cadence).
   stat_statements: { interval: 60s, top_n: 50 }
-`, h.serverPort, identityPath, bufferPath, targetsYAML)
+	`, h.serverPort, agentBootstrapToken, identityPath, bufferPath, targetsYAML)
 	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
 		return fmt.Errorf("write agent config: %w", err)
 	}
