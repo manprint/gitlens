@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-08-31 — sub-phase 0.1 closed; sub-phase 0.2 next._
+_Last updated: 2026-08-31 — sub-phase 0.2 closed; sub-phase 0.3 next._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,12 +54,12 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 0.2 |
+| **ID** | 0.3 |
 | **Status** | `none` |
-| **Intent** | Reconcile plan 002 phase-10.5's declared file scope, closing audit finding V001-F2 |
-| **Next action:** | Open sub-phase **0.2** in [phase_01.md](phase_01.md): reconcile phase 10.5's Files list with its closing commit and preserve the existing D-059 deviation |
+| **Intent** | Make plan 002's §11 traceability claim precise and complete, closing audit finding V001-F3 |
+| **Next action:** | Open sub-phase **0.3** in [phase_01.md](phase_01.md): add the identifier audit script, reconcile plan 002's §11, and record the resulting diff count |
 | **Assigned** | `agent-2:sonnet` |
-| **Repo state** | sub-phase 0.1 implementation and evidence are complete; its close commit records this state. Plan 002's `STATE.md` is intentionally updated by 0.1, and sub-phases 0.2-0.4 will continue the deliberate cross-plan audit closure. |
+| **Repo state** | sub-phases 0.1 and 0.2 are complete and committed. Plan 002 phase 10.5 now names every path changed by close commit `06f50ea`, and D-059 remains unchanged. |
 | **Phase file** | [phase_01.md](phase_01.md) |
 
 Sub-phase 0.1 is closed with durable E2E evidence; sub-phase 0.2 is the next
@@ -154,18 +154,19 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 | # | Type | ID | Closed | Intent | Commit |
 |---|------|-----|--------|--------|--------|
 | 0.1 | sub-phase | 0.1 | 2026-08-31 | Capture durable E2E evidence and close V001-F1 | `8824301` |
+| 0.2 | sub-phase | 0.2 | 2026-08-31 | Reconcile phase-10.5 scope and close V001-F2 | `<pending>` |
 
 ---
 
 ## §5 — Files touched
 
-`Makefile`; `scripts/e2e_evidence.sh`; `internal/scripts/doc.go`; `internal/scripts/scripts_test.go`; `test/harness/harness.go`; `test/scenario/net.go`; `test/scenario/topo_cascading.go`; `docs/plans/002_plan-AnalysisBackend/STATE.md`; `docs/plans/003_plan-Frontend/STATE.md`.
+`Makefile`; `scripts/e2e_evidence.sh`; `internal/scripts/doc.go`; `internal/scripts/scripts_test.go`; `test/harness/harness.go`; `test/scenario/net.go`; `test/scenario/topo_cascading.go`; `docs/plans/002_plan-AnalysisBackend/STATE.md`; `docs/plans/002_plan-AnalysisBackend/phase_11.md`; `docs/plans/003_plan-Frontend/STATE.md`.
 
 ---
 
 ## §6 — In-flight work
 
-`none — tree consistent`
+`claimed — nothing written yet`
 
 ---
 
@@ -181,6 +182,7 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 | 2026-08-31 | 0.1 | `go test -tags=e2e -timeout=20m -count=1 ./test/e2e -run '^TestFull_PgPausedTreatedAsUnreachable$'` | PASS | Focused paused/unpause regression passed in 200s. |
 | 2026-08-31 | 0.1 | focused SYS-NET-001 / network pair / SYS-REPL-006 E2E regressions | PASS | Outage 135s, combined network pair 332s, cascading stale-edge regression 108s after timing-boundary corrections. |
 | 2026-08-31 | 0.1 | `make test-e2e-full-evidence` | PASS | Artifact `test/e2e/_artifacts/e2e-full-20260831T040622Z.log`; `RESIDUAL_CONTAINERS=0`; `RESIDUAL_NETWORKS=0`; `EXIT_STATUS=0 FINISHED_AT=2026-08-31T05:12:01Z COMMAND=make test-e2e-full`; elapsed 3939s (65m39s). |
+| 2026-08-31 | 0.2 | `make fmt-check lint test` | PASS | `0 issues`; race/shuffle unit suite green; exit 0 at 05:15:54Z after 18s. The phase-10.5 Files list now covers all seven paths in `06f50ea`, and D-059 is preserved exactly. |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -256,7 +258,7 @@ the next one opens.
 | ID | Title | Assigned | Status |
 |----|-------|----------|--------|
 | 0.1 | Capture durable evidence for `make test-e2e-full` (V001-F1) | `agent-2:sonnet` | DONE |
-| 0.2 | Reconcile the phase-10.5 declared scope (V001-F2) | `agent-2:sonnet` | TODO |
+| 0.2 | Reconcile the phase-10.5 declared scope (V001-F2) | `agent-2:sonnet` | DONE |
 | 0.3 | Make the §11 traceability claim precise and complete (V001-F3) | `agent-2:sonnet` | TODO |
 | 0.4 | Update plan 002's audit register | `agent-3:haiku` | TODO |
 | 0.5 | Close plan 002's deferred question Q-B | `agent-3:haiku` | TODO |

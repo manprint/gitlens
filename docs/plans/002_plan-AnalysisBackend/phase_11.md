@@ -252,12 +252,19 @@ the closing read of the whole plan.
 - **Model:** `agent:gpt5.6-luna`
 - **Assignment:** `agent:gpt5.6-luna` — final review gate
 - **Files:** `README.md` (repo root), `docs/LIMITS.md` (modified as needed),
-  `CONTRIBUTING.md` (modified as needed), `STATE.md`
+  `CONTRIBUTING.md` (modified as needed), `cmd/pglens-agent/run.go`,
+  `internal/agent/command.go`, `internal/agent/conn.go`,
+  `internal/agent/conn_test.go`,
+  `docs/plans/002_plan-AnalysisBackend/overview.md`,
+  `docs/plans/002_plan-AnalysisBackend/STATE.md`
 - **Change:** read `README.md` end to end **as a new user who has never seen this
   repository**, with the product running in front of you, and fix what is wrong.
   This is a read-and-repair sub-phase, not a writing sub-phase; the earlier
   README sub-phases already wrote the content, and what is being tested here is
   whether they cohere.
+
+  The capability-refresh edits belong to the phase-10.3 permission work; see
+  § 10.3 — runtime permission-tier capability refresh.
 
   Check, concretely:
 
