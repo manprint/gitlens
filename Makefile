@@ -7,7 +7,7 @@ LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
 .PHONY: build fmt fmt-check lint test test-integration test-e2e test-e2e-full test-e2e-full-evidence test-e2e-matrix api-docs \
         ci-local ci-local-unit ci-local-integration coverage coverage-gate generate golden clean build-images build-images-multiarch \
-        web-install web-typecheck web-lint web-build
+        web-install web-typecheck web-lint web-build web-test web-coverage web-coverage-gate
 
 build:
 	CGO_ENABLED=0 $(GO) build $(LDFLAGS) -o bin/pglens-agent  ./cmd/pglens-agent
@@ -60,6 +60,8 @@ ci-local-unit:
 	$(MAKE) web-install
 	$(MAKE) web-lint
 	$(MAKE) web-typecheck
+	$(MAKE) web-test
+	$(MAKE) web-coverage-gate
 	$(MAKE) web-build
 
 ci-local-integration:
@@ -91,6 +93,15 @@ web-lint:
 web-build:
 	cd $(WEB) && PGLENS_VERSION=$(VERSION) $(PNPM) run build
 	@printf 'built_at=%s\nvite=8.2.2\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" > internal/webui/dist/.built
+
+web-test:
+	cd $(WEB) && $(PNPM) run test
+
+web-coverage:
+	cd $(WEB) && $(PNPM) run test:coverage
+
+web-coverage-gate: web-coverage
+	./scripts/coverage_gate_ui.sh
 
 generate:
 	@echo "not implemented until phase 3"; exit 0

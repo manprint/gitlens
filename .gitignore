@@ -48,4 +48,5 @@ internal/webui/dist/*
 
 # frontend dependencies and TypeScript build metadata
 /web/node_modules/
+/web/coverage/
 /web/*.tsbuildinfo

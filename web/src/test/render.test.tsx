@@ -3,7 +3,7 @@ import { screen } from '@testing-library/react'
 import { useLocation } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 
-import { renderWithProviders } from './render'
+import { renderRoute, renderWithProviders } from './render'
 
 function ProviderProbe() {
   const queryClient = useQueryClient()
@@ -21,6 +21,15 @@ function ConsoleErrorProbe() {
 }
 
 describe('renderWithProviders', () => {
+  it('mounts the application route registry', () => {
+    renderRoute('/')
+
+    expect(
+      screen.getByRole('heading', { name: 'Interface under construction' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Build dev/)).toBeInTheDocument()
+  })
+
   it('renders a component with providers', () => {
     renderWithProviders(<ProviderProbe />)
 
