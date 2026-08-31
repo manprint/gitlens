@@ -381,7 +381,7 @@ func (h *Harness) startAgentBinary() error {
   - name: pg-standby
     dsn: postgres://pglens:pglens-monitoring-test@localhost:%d/postgres?sslmode=disable
     databases:
-    max: 10`, primaryPort, standbyPort)
+      max: 10`, primaryPort, standbyPort)
 		}
 	} else {
 		// Single target for standalone topology.
