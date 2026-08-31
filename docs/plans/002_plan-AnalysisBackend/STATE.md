@@ -51,9 +51,9 @@ work — a phase that looks blocked is a signal to read §9, not to skip ahead.
 - **Type:** none
 - **ID:** `none`
 - **Status:** `none`
-- **Intent:** plan 002 implementation is complete; formal audit V001 is closed with a `PASS WITH FINDINGS` verdict.
+- **Intent:** plan 002 implementation is complete; formal audit V001 is closed with a `PASS WITH FINDINGS` verdict and all three minor findings are fixed.
 - **Phase:** 10 — Packaging, CI, final documentation ([phase_11.md](phase_11.md))
-- **Next action:** execute the correction plan in `verify/verify_001_2026-08-30.md` to close the three `OPEN MINOR` findings.
+- **Next action:** none — V001 corrections are complete in plan 003; retain the audit evidence and revisit only for a new finding.
 - **Assigned:** `agent:gpt5.6-luna`
 - **Repo state:** branch `main`, phases 0–10 complete; phase-close commit `06f50ea` recorded.
 
@@ -778,10 +778,10 @@ command passed.
 
 ## 9. Blockers and open questions
 
-No blockers remain for plan 002. V001 has no `OPEN BLOCKER` or `OPEN MAJOR`
-finding; three `OPEN MINOR` findings and their executable corrections are listed
-in `verify/index.md`. Q-B is explicitly deferred to plan 003 with its scope and
-reason recorded below; no current phase depends on it.
+No blockers remain for plan 002. V001 has no `OPEN BLOCKER`, `OPEN MAJOR` or
+`OPEN MINOR` finding; all three minor findings and their executable corrections
+are listed as `FIXED` in `verify/index.md`. Q-B is explicitly deferred to plan
+003 with its scope and reason recorded below; no current phase depends on it.
 
 | # | Question | Assumed default | Resolve at | Status |
 |---|----------|-----------------|-----------|--------|
@@ -827,12 +827,12 @@ disagree with §1 and §4.
 | 7 — Advisor engine and rule packs | phase_08.md | `DONE` | 10/10 sub-phases closed; INT-ADV-001..008 green; advisor coverage 88.6%; global coverage 75.2%; phase commit `8891d6b` |
 | 8 — Command channel and query plans | phase_09.md | `DONE` | 11/11 sub-phases closed; INT-CMD-001..011, INT-PLAN-001/002 and SYS-PERM-001 green; coverage 75.0%, `internal/command` 100.0%; primary `agent:gpt5.6-luna`; phase commit `78dbf94` |
 | 9 — L3 end-to-end scenarios | phase_10.md | `DONE` | 8/8 sub-phases closed; all planned SYS-* scenarios green, including SYS-ARCH-001; primary `agent:gpt5.6-luna` |
-| 10 — Packaging, CI, final documentation | phase_11.md | `DONE` | 5/5 sub-phases closed; primary `agent:gpt5.6-luna`; final documentation, deployment, permission, coverage and local CI gates green; full-E2E wrapper exit remains unverified under V001-F1; hosted CI skipped under D-051 |
+| 10 — Packaging, CI, final documentation | phase_11.md | `DONE` | 5/5 sub-phases closed; primary `agent:gpt5.6-luna`; final documentation, deployment, permission, coverage and local CI gates green; full-E2E wrapper exit 0 is recorded by V001-F1 correction; hosted CI skipped under D-051 |
 
 Status values: `TODO` · `IN_PROGRESS` · `DONE` · `SKIPPED` · `BLOCKED`
 A `SKIPPED` sub-phase or phase keeps its row and carries the reason.
 
-**11 of 11 phases `DONE`; phase 10 is 5/5 sub-phases closed. Plan implementation is at 100%; audit V001 is closed `PASS WITH FINDINGS` with three `OPEN MINOR` corrections.**
+**11 of 11 phases `DONE`; phase 10 is 5/5 sub-phases closed. Plan implementation is at 100%; audit V001 is closed `PASS WITH FINDINGS` with all three minor corrections `FIXED`.**
 
 ### Tests
 
@@ -1052,4 +1052,4 @@ Findings themselves live in `verify/index.md`.
 | Report | Date | Verdict | Open findings |
 |--------|------|---------|---------------|
 | phase_11 final review | 2026-08-30 | `DONE` | no open findings; plan closure recorded in the state ledger |
-| V001 — formal plan audit | 2026-08-30 | `PASS WITH FINDINGS` | 3 `OPEN MINOR` findings; see `verify/index.md` |
+| V001 — formal plan audit | 2026-08-30 | `PASS WITH FINDINGS` | 0 `OPEN MINOR` (3 `FIXED`); see `verify/index.md` |

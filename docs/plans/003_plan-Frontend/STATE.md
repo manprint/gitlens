@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-08-31 — sub-phase 0.3 closed; sub-phase 0.4 next._
+_Last updated: 2026-08-31 — sub-phase 0.4 closed; sub-phase 0.5 next._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,15 +54,15 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 0.4 |
+| **ID** | 0.5 |
 | **Status** | `none` |
-| **Intent** | Update plan 002's audit register so V001-F1, V001-F2 and V001-F3 are marked fixed |
-| **Next action:** | Open sub-phase **0.4** in [phase_01.md](phase_01.md): update both audit-register files, preserve the original findings, and reconcile the summary counts |
-| **Assigned** | `agent-2:sonnet` |
-| **Repo state** | sub-phases 0.1–0.3 are complete. Plan 002 §11 now catalogs all source-only identifiers; the audit rerun has 0 `ONLY_IN_SOURCE` and `DIFF_COUNT=68` because historical/state-only entries are retained. |
+| **Intent** | Close plan 002's deferred question Q-B with decision D11 |
+| **Next action:** | Open sub-phase **0.5** in [phase_01.md](phase_01.md): update only plan 002 `STATE.md` §9 Q-B status and resolution target, preserving the question and default |
+| **Assigned** | `agent-3:haiku` |
+| **Repo state** | sub-phases 0.1–0.4 are complete. Plan 002's audit index/report mark V001-F1/F2/F3 `FIXED`, preserve the original finding text, and show 0 open minor findings. |
 | **Phase file** | [phase_01.md](phase_01.md) |
 
-Sub-phases 0.1–0.3 are closed; sub-phase 0.4 is the next unit. The remaining
+Sub-phases 0.1–0.4 are closed; sub-phase 0.5 is the next unit. The remaining
 phase-0 units are still pending.
 
 ---
@@ -155,13 +155,14 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 |---|------|-----|--------|--------|--------|
 | 0.1 | sub-phase | 0.1 | 2026-08-31 | Capture durable E2E evidence and close V001-F1 | `8824301` |
 | 0.2 | sub-phase | 0.2 | 2026-08-31 | Reconcile phase-10.5 scope and close V001-F2 | `4341cb4` |
-| 0.3 | sub-phase | 0.3 | 2026-08-31 | Make plan 002 §11 traceability complete and close V001-F3 | `<pending>` |
+| 0.3 | sub-phase | 0.3 | 2026-08-31 | Make plan 002 §11 traceability complete and close V001-F3 | `31b8436` |
+| 0.4 | sub-phase | 0.4 | 2026-08-31 | Update plan 002 audit register and close V001-F1/F2/F3 | `<pending>` |
 
 ---
 
 ## §5 — Files touched
 
-`Makefile`; `scripts/e2e_evidence.sh`; `scripts/id_audit.sh`; `internal/scripts/doc.go`; `internal/scripts/scripts_test.go`; `test/harness/harness.go`; `test/scenario/net.go`; `test/scenario/topo_cascading.go`; `docs/plans/002_plan-AnalysisBackend/STATE.md`; `docs/plans/002_plan-AnalysisBackend/phase_11.md`; `docs/plans/003_plan-Frontend/STATE.md`.
+`Makefile`; `scripts/e2e_evidence.sh`; `scripts/id_audit.sh`; `internal/scripts/doc.go`; `internal/scripts/scripts_test.go`; `test/harness/harness.go`; `test/scenario/net.go`; `test/scenario/topo_cascading.go`; `docs/plans/002_plan-AnalysisBackend/STATE.md`; `docs/plans/002_plan-AnalysisBackend/phase_11.md`; `docs/plans/002_plan-AnalysisBackend/verify/index.md`; `docs/plans/002_plan-AnalysisBackend/verify/verify_001_2026-08-30.md`; `docs/plans/003_plan-Frontend/STATE.md`.
 
 ---
 
@@ -185,6 +186,7 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 | 2026-08-31 | 0.1 | `make test-e2e-full-evidence` | PASS | Artifact `test/e2e/_artifacts/e2e-full-20260831T040622Z.log`; `RESIDUAL_CONTAINERS=0`; `RESIDUAL_NETWORKS=0`; `EXIT_STATUS=0 FINISHED_AT=2026-08-31T05:12:01Z COMMAND=make test-e2e-full`; elapsed 3939s (65m39s). |
 | 2026-08-31 | 0.2 | `make fmt-check lint test` | PASS | `0 issues`; race/shuffle unit suite green; exit 0 at 05:15:54Z after 18s. The phase-10.5 Files list now covers all seven paths in `06f50ea`, and D-059 is preserved exactly. |
 | 2026-08-31 | 0.3 | `bash -n scripts/id_audit.sh`; `go test ./internal/scripts -count=1` | PASS | Script syntax and both shell-script tests are green. After adding all 51 source-only IDs to plan 002 §11, rerun reports 0 `ONLY_IN_SOURCE`, 68 retained state-only historical/planned IDs, and `DIFF_COUNT=68`. |
+| 2026-08-31 | 0.4 | audit-register consistency review | PASS | Both `verify/index.md` and `verify_001_2026-08-30.md` mark V001-F1/F2/F3 `FIXED`; the index reports `0 OPEN MINOR (3 FIXED)`; original finding text and `Open blockers: None` are preserved. |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -263,7 +265,7 @@ the next one opens.
 | 0.1 | Capture durable evidence for `make test-e2e-full` (V001-F1) | `agent-2:sonnet` | DONE |
 | 0.2 | Reconcile the phase-10.5 declared scope (V001-F2) | `agent-2:sonnet` | DONE |
 | 0.3 | Make the §11 traceability claim precise and complete (V001-F3) | `agent-2:sonnet` | DONE |
-| 0.4 | Update plan 002's audit register | `agent-3:haiku` | TODO |
+| 0.4 | Update plan 002's audit register | `agent-3:haiku` | DONE |
 | 0.5 | Close plan 002's deferred question Q-B | `agent-3:haiku` | TODO |
 | 0.6 | Update README.md | `agent-3:haiku` | TODO |
 | 1.1 | Author `api/openapi.yaml` — skeleton and shared components | `agent-2:sonnet` | TODO |
