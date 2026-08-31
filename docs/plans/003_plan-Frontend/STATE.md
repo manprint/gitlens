@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-08-31 — sub-phase 0.5 closed; sub-phase 0.6 next._
+_Last updated: 2026-08-31 — phase 0 closed; sub-phase 1.1 next._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,16 +54,16 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 0.6 |
+| **ID** | 1.1 |
 | **Status** | `none` |
-| **Intent** | Document the new durable E2E evidence command in README.md |
-| **Next action:** | Open sub-phase **0.6** in [phase_01.md](phase_01.md): add one user-facing command row under Running the checks and change nothing else |
+| **Intent** | Author the OpenAPI contract skeleton and shared components |
+| **Next action:** | Open sub-phase **1.1** in [phase_02.md](phase_02.md): create `api/openapi.yaml` with the contract skeleton and reusable schemas/security components |
 | **Assigned** | `agent-3:haiku` |
-| **Repo state** | sub-phases 0.1–0.5 are complete. Plan 002 Q-B is now `CLOSED 2026-08-31` with resolution target `plan 003 — D11`; question text and default are unchanged. |
+| **Repo state** | phase 0 sub-phases 0.1–0.6 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, and README documents the evidence target. |
 | **Phase file** | [phase_01.md](phase_01.md) |
 
-Sub-phases 0.1–0.5 are closed; sub-phase 0.6 is the next unit. The remaining
-phase-0 units are still pending.
+Phase 0 sub-phases 0.1–0.6 are closed; sub-phase 1.1 is the next unit. Phase 1
+and the remaining frontend work are still pending.
 
 ---
 
@@ -157,13 +157,14 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 | 0.2 | sub-phase | 0.2 | 2026-08-31 | Reconcile phase-10.5 scope and close V001-F2 | `4341cb4` |
 | 0.3 | sub-phase | 0.3 | 2026-08-31 | Make plan 002 §11 traceability complete and close V001-F3 | `31b8436` |
 | 0.4 | sub-phase | 0.4 | 2026-08-31 | Update plan 002 audit register and close V001-F1/F2/F3 | `7415f38` |
-| 0.5 | sub-phase | 0.5 | 2026-08-31 | Close plan 002 Q-B with D11 | `<pending>` |
+| 0.5 | sub-phase | 0.5 | 2026-08-31 | Close plan 002 Q-B with D11 | `75c79ff` |
+| 0.6 | sub-phase | 0.6 | 2026-08-31 | Document durable E2E evidence command in README | `<pending>` |
 
 ---
 
 ## §5 — Files touched
 
-`Makefile`; `scripts/e2e_evidence.sh`; `scripts/id_audit.sh`; `internal/scripts/doc.go`; `internal/scripts/scripts_test.go`; `test/harness/harness.go`; `test/scenario/net.go`; `test/scenario/topo_cascading.go`; `docs/plans/002_plan-AnalysisBackend/STATE.md`; `docs/plans/002_plan-AnalysisBackend/phase_11.md`; `docs/plans/002_plan-AnalysisBackend/verify/index.md`; `docs/plans/002_plan-AnalysisBackend/verify/verify_001_2026-08-30.md`; `docs/plans/003_plan-Frontend/STATE.md`.
+`Makefile`; `README.md`; `scripts/e2e_evidence.sh`; `scripts/id_audit.sh`; `internal/scripts/doc.go`; `internal/scripts/scripts_test.go`; `test/harness/harness.go`; `test/scenario/net.go`; `test/scenario/topo_cascading.go`; `docs/plans/002_plan-AnalysisBackend/STATE.md`; `docs/plans/002_plan-AnalysisBackend/phase_11.md`; `docs/plans/002_plan-AnalysisBackend/verify/index.md`; `docs/plans/002_plan-AnalysisBackend/verify/verify_001_2026-08-30.md`; `docs/plans/003_plan-Frontend/STATE.md`.
 
 ---
 
@@ -189,6 +190,7 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 | 2026-08-31 | 0.3 | `bash -n scripts/id_audit.sh`; `go test ./internal/scripts -count=1` | PASS | Script syntax and both shell-script tests are green. After adding all 51 source-only IDs to plan 002 §11, rerun reports 0 `ONLY_IN_SOURCE`, 68 retained state-only historical/planned IDs, and `DIFF_COUNT=68`. |
 | 2026-08-31 | 0.4 | audit-register consistency review | PASS | Both `verify/index.md` and `verify_001_2026-08-30.md` mark V001-F1/F2/F3 `FIXED`; the index reports `0 OPEN MINOR (3 FIXED)`; original finding text and `Open blockers: None` are preserved. |
 | 2026-08-31 | 0.5 | plan 002 §9 Q-B documentation review | PASS | Question text and assumed default are unchanged; status is `CLOSED 2026-08-31 — resolved in plan 003 as D11: existing contract retained`; `Resolve at` is `plan 003 — D11`. |
+| 2026-08-31 | 0.6 | README command-list review; `make fmt-check lint test` | PASS | README contains the new `make test-e2e-full-evidence` command with the required durable-log/exit-status description; Go gates exit 0 at 05:28:18Z after 18s. |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -238,8 +240,8 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 
 | Phase | File | Title | Assigned | Review gate | Status |
 |-------|------|-------|----------|-------------|--------|
-| 0 | [phase_01.md](phase_01.md) | Plan 002 closure and contract prerequisites | `agent-2:sonnet` / `agent-3:haiku` | 0.4 | IN_PROGRESS — 0.1 closed; 0.2 next |
-| 1 | [phase_02.md](phase_02.md) | OpenAPI contract and route-coverage gate | `agent-2:sonnet` | 1.1, 1.4 | TODO |
+| 0 | [phase_01.md](phase_01.md) | Plan 002 closure and contract prerequisites | `agent-2:sonnet` / `agent-3:haiku` | 0.4 | DONE — 6/6 sub-phases closed |
+| 1 | [phase_02.md](phase_02.md) | OpenAPI contract and route-coverage gate | `agent-2:sonnet` | 1.1, 1.4 | IN_PROGRESS — 1.1 next |
 | 2 | [phase_03.md](phase_03.md) | UI session authentication | `agent-2:sonnet` | 2.1, 2.2, 2.3 | TODO |
 | 3 | [phase_04.md](phase_04.md) | Embedded SPA serving and dev proxy | `agent-2:sonnet` | 3.2 | TODO |
 | 4 | [phase_05.md](phase_05.md) | Frontend workspace scaffold | `agent-2:sonnet` | 4.1 | TODO |
@@ -269,7 +271,7 @@ the next one opens.
 | 0.3 | Make the §11 traceability claim precise and complete (V001-F3) | `agent-2:sonnet` | DONE |
 | 0.4 | Update plan 002's audit register | `agent-3:haiku` | DONE |
 | 0.5 | Close plan 002's deferred question Q-B | `agent-3:haiku` | DONE |
-| 0.6 | Update README.md | `agent-3:haiku` | TODO |
+| 0.6 | Update README.md | `agent-3:haiku` | DONE |
 | 1.1 | Author `api/openapi.yaml` — skeleton and shared components | `agent-2:sonnet` | TODO |
 | 1.2 | Document the read endpoints | `agent-2:sonnet` | TODO |
 | 1.3 | Document the write, agent and infrastructure endpoints | `agent-2:sonnet` | TODO |

@@ -1048,6 +1048,7 @@ make coverage-gate    # enforce per-package and global coverage floors
 make test-integration # integration tests against real PostgreSQL (requires Docker)
 make test-e2e         # E2E smoke subset (requires Docker, ~10m)
 make test-e2e-full    # full E2E suite (requires Docker, ~60m)
+make test-e2e-full-evidence # full E2E suite with a durable log and captured exit status (requires Docker, ~60m)
 ```
 
 ### Test levels
