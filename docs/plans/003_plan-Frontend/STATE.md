@@ -196,7 +196,7 @@ records start/end timestamps and elapsed time.
 | 5.9 | sub-phase | 5.9 | 2026-08-31 | Bootstrap Playwright and document the flake policy | `3472d42` |
 | 5.10 | sub-phase | 5.10 | 2026-08-31 | Prove the harness rejects unhandled requests, bad fixtures, console errors, leaked timers, shared query caches, and serious a11y violations | `38faae6` |
 | 5.11 | sub-phase | 5.11 | 2026-08-31 | Document the frontend test taxonomy and contributor workflow | `d881cb9` |
-| 6.1 | sub-phase | 6.1 | 2026-08-31 | Generate the frontend API types from the OpenAPI contract and expose stable type aliases | `PENDING` |
+| 6.1 | sub-phase | 6.1 | 2026-08-31 | Generate the frontend API types from the OpenAPI contract and expose stable type aliases | `edf684c` |
 
 ---
 
