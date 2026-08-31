@@ -172,6 +172,14 @@ After signing in, the shell provides Fleet, Findings, Alerts, and Settings
 navigation, plus the shared time-range control, freshness indicator, theme
 toggle, and connection status.
 
+The Fleet Overview shows monitored clusters in health order, with their health,
+instances, firing alerts, and replication lag; a missing lag is shown as
+`Unknown`, never as zero. An agent that is down or has stopped reporting appears
+at the top with its likely cause and a link to troubleshooting. If a cluster is
+identified by `cluster_name` rather than `system_identifier`, the page flags that
+identity and links to **Setting up the monitoring role** for the grant
+instructions.
+
 The selected time range is reflected in the URL, so a view can be shared as a
 link. Keyboard shortcuts are available for the main destinations and filters:
 
