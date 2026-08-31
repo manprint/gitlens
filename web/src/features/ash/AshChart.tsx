@@ -11,6 +11,7 @@ export interface AshChartProps {
   foldedCount?: AshOptionOptions['foldedCount']
   ariaLabel?: string
   dataTableLabel?: string
+  onSeriesSelect?: (name: string) => void
 }
 
 /** Accessible ASH chart wrapper; brush events are delegated to TimeSeriesChart. */
@@ -19,6 +20,7 @@ export function AshChart({
   cpuCount,
   dataTableLabel,
   foldedCount = 0,
+  onSeriesSelect,
   series,
 }: AshChartProps) {
   const option =
@@ -26,11 +28,13 @@ export function AshChart({
       ? buildAshOption(series, { foldedCount })
       : buildAshOption(series, { cpuCount, foldedCount })
   const tableProps = dataTableLabel === undefined ? {} : { dataTableLabel }
+  const interactionProps = onSeriesSelect === undefined ? {} : { onSeriesSelect }
 
   return (
     <TimeSeriesChart
       ariaLabel={ariaLabel}
       {...tableProps}
+      {...interactionProps}
       option={option}
       series={series}
       valueLabel="Average active sessions"

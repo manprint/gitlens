@@ -17,6 +17,7 @@ export interface TimeSeriesChartProps {
   ariaLabel: string
   series: readonly TimeSeriesTableSeries[]
   dataTableLabel?: string
+  onSeriesSelect?: (name: string) => void
   valueLabel?: string
 }
 
@@ -65,6 +66,7 @@ function rangeFromDataZoom(event: unknown): { from: Date; to: Date } | null {
 export function TimeSeriesChart({
   ariaLabel,
   dataTableLabel = `${ariaLabel} data`,
+  onSeriesSelect,
   option,
   series,
   valueLabel = 'Value (seconds)',
@@ -77,11 +79,20 @@ export function TimeSeriesChart({
     setRange({ from: range.from, kind: 'absolute', label: 'Custom range', to: range.to })
   }
 
+  function handleSeriesClick(event: unknown) {
+    if (typeof event !== 'object' || event === null) return
+    const name = (event as Record<string, unknown>).seriesName
+    if (typeof name === 'string' && name.length > 0) onSeriesSelect?.(name)
+  }
+
   return (
     <div role="img" aria-label={ariaLabel}>
       <EChartsReact
         aria-hidden="true"
-        onEvents={{ datazoom: handleDataZoom }}
+        onEvents={{
+          datazoom: handleDataZoom,
+          ...(onSeriesSelect === undefined ? {} : { click: handleSeriesClick }),
+        }}
         option={option}
         style={{ height: 300, width: '100%' }}
       />

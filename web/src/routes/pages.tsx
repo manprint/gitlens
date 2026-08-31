@@ -1,5 +1,6 @@
 import { FleetPage } from '@/features/fleet/FleetPage'
 import { ClusterPage } from '@/features/cluster/ClusterPage'
+import AshPageComponent from '@/features/ash/AshPage'
 import InstancePage from '@/features/instance/InstancePage'
 
 interface PlaceholderPageProps {
@@ -28,7 +29,7 @@ export function InstanceDetailPage() {
 }
 
 export function AshPage() {
-  return <PlaceholderPage surface="ASH and wait analysis" />
+  return <AshPageComponent />
 }
 
 export function QueryInspectorPage() {
