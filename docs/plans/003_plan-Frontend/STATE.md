@@ -55,7 +55,7 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 |-------|-------|
 | **Type** | sub-phase |
 | **ID** | 3.3 |
-| **Status** | `none` |
+| **Status** | `OPEN` |
 | **Intent** | Serve the SPA only when the UI is enabled |
 | **Next action:** | Complete sub-phase **3.3** in [phase_04.md](phase_04.md): prove disabled UI behaviour and log the configuration decision |
 | **Assigned** | `agent-2:sonnet` |
@@ -185,7 +185,7 @@ Sub-phase 3.1 added `.gitignore`, `internal/webui/doc.go`, `internal/webui/webui
 
 ## §6 — In-flight work
 
-`none — tree consistent`
+`claimed — sub-phase 3.3; implementation not yet started`
 
 ---
 
