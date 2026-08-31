@@ -3,7 +3,7 @@ PKG     := ./...
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
-.PHONY: build fmt fmt-check lint test test-integration test-e2e test-e2e-full test-e2e-matrix \
+.PHONY: build fmt fmt-check lint test test-integration test-e2e test-e2e-full test-e2e-full-evidence test-e2e-matrix \
         ci-local ci-local-unit ci-local-integration coverage coverage-gate generate golden clean build-images build-images-multiarch
 
 build:
@@ -36,6 +36,9 @@ test-e2e:
 
 test-e2e-full:
 	$(GO) test -tags=e2e -timeout=90m -count=1 ./test/e2e/...
+
+test-e2e-full-evidence:
+	./scripts/e2e_evidence.sh $(MAKE) test-e2e-full
 
 test-e2e-matrix:
 	AGENT_MODE=container $(MAKE) test-e2e

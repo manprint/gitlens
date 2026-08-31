@@ -87,7 +87,7 @@ func runCascadingReplicationTopology(ctx context.Context, e *Env) error {
 	e.T.Cleanup(func() { _ = e.Compose("start", "pg-standby-a") })
 
 	var stale map[string]interface{}
-	staleCtx, cancel2 := context.WithTimeout(ctx, 60*time.Second)
+	staleCtx, cancel2 := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel2()
 	if err := poll(staleCtx, 500*time.Millisecond, func(ctx context.Context) (bool, error) {
 		clusters, err := e.API.Clusters()

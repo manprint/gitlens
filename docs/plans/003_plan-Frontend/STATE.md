@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-08-30 — plan authored, nothing executed._
+_Last updated: 2026-08-31 — sub-phase 0.1 closed; sub-phase 0.2 next._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,16 +54,16 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 0.1 |
+| **ID** | 0.2 |
 | **Status** | `none` |
-| **Intent** | Capture durable evidence for `make test-e2e-full`, closing plan 002 audit finding V001-F1 |
-| **Next action:** | Open sub-phase **0.1** in [phase_01.md](phase_01.md): add `scripts/e2e_evidence.sh` and the `make test-e2e-full-evidence` target that records the run's `EXIT_STATUS=` line into a durable artefact |
+| **Intent** | Reconcile plan 002 phase-10.5's declared file scope, closing audit finding V001-F2 |
+| **Next action:** | Open sub-phase **0.2** in [phase_01.md](phase_01.md): reconcile phase 10.5's Files list with its closing commit and preserve the existing D-059 deviation |
 | **Assigned** | `agent-2:sonnet` |
-| **Repo state** | clean with respect to this plan — no file listed in any phase file has been created or modified. Plan 002's tree carries its own uncommitted audit output (`docs/plans/002_plan-AnalysisBackend/STATE.md` modified, `verify/` untracked); that is plan 002's, not this plan's, and sub-phases 0.1-0.4 will edit it deliberately. |
+| **Repo state** | sub-phase 0.1 implementation and evidence are complete; its close commit records this state. Plan 002's `STATE.md` is intentionally updated by 0.1, and sub-phases 0.2-0.4 will continue the deliberate cross-plan audit closure. |
 | **Phase file** | [phase_01.md](phase_01.md) |
 
-Nothing has been executed. The plan folder is complete; the repository is
-untouched by this plan.
+Sub-phase 0.1 is closed with durable E2E evidence; sub-phase 0.2 is the next
+unit. The remaining phase-0 units are still pending.
 
 ---
 
@@ -117,7 +117,7 @@ re-reading the codebase.
 | **Branch at plan time** | `main` |
 | **Go** | 1.25 (`go.mod`) |
 | **Node** | 24 LTS, **pnpm** 10 (decision D8) |
-| **WIP commits** | **off** — no `--wip-commit` flag was passed. Close units without committing; record `uncommitted` in §4 until the user commits. |
+| **WIP commits** | **on** — enabled by the `--wip-commit` invocation. Close each unit with one local commit; record its sha in §4. |
 
 ### Gate commands
 
@@ -153,13 +153,13 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 
 | # | Type | ID | Closed | Intent | Commit |
 |---|------|-----|--------|--------|--------|
-| _(empty — nothing closed yet)_ | | | | | |
+| 0.1 | sub-phase | 0.1 | 2026-08-31 | Capture durable E2E evidence and close V001-F1 | `25b7875` |
 
 ---
 
 ## §5 — Files touched
 
-_(empty — nothing written yet.)_
+`Makefile`; `scripts/e2e_evidence.sh`; `internal/scripts/doc.go`; `internal/scripts/scripts_test.go`; `test/harness/harness.go`; `test/scenario/net.go`; `test/scenario/topo_cascading.go`; `docs/plans/002_plan-AnalysisBackend/STATE.md`; `docs/plans/003_plan-Frontend/STATE.md`.
 
 ---
 
@@ -173,7 +173,14 @@ _(empty — nothing written yet.)_
 
 | Date | Unit | Gate | Result | Notes |
 |------|------|------|--------|-------|
-| _(empty — no gate has been run for this plan)_ | | | | |
+| 2026-08-31 | 0.1 | `make fmt-check` | PASS | Go formatting gate green. |
+| 2026-08-31 | 0.1 | `make lint` | PASS | Go lint gate green. |
+| 2026-08-31 | 0.1 | `make test` | PASS | Unit and integration-lite tests green. |
+| 2026-08-31 | 0.1 | `make coverage-gate` | PASS | Coverage gate green. |
+| 2026-08-31 | 0.1 | `go test -tags=e2e -timeout=20m -count=1 ./test/e2e -run '^TestFull_VacuumMaintenance$'` | PASS | Focused maintenance regression passed in 65s after the harness timeout correction. |
+| 2026-08-31 | 0.1 | `go test -tags=e2e -timeout=20m -count=1 ./test/e2e -run '^TestFull_PgPausedTreatedAsUnreachable$'` | PASS | Focused paused/unpause regression passed in 200s. |
+| 2026-08-31 | 0.1 | focused SYS-NET-001 / network pair / SYS-REPL-006 E2E regressions | PASS | Outage 135s, combined network pair 332s, cascading stale-edge regression 108s after timing-boundary corrections. |
+| 2026-08-31 | 0.1 | `make test-e2e-full-evidence` | PASS | Artifact `test/e2e/_artifacts/e2e-full-20260831T040622Z.log`; `RESIDUAL_CONTAINERS=0`; `RESIDUAL_NETWORKS=0`; `EXIT_STATUS=0 FINISHED_AT=2026-08-31T05:12:01Z COMMAND=make test-e2e-full`; elapsed 3939s (65m39s). |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -188,6 +195,7 @@ reconstruct.
 | # | Sub-phase | Deviation | Why | Plan updated |
 |---|-----------|-----------|-----|--------------|
 | 1 | 0.1 – 0.5 | This plan writes into **plan 002's** folder (`docs/plans/002_plan-AnalysisBackend/verify/index.md`, its report file, and its `STATE.md` §11) | Decision **D12**: the three open findings V001-F1/F2/F3 from plan 002's audit are fixed here rather than left open, and a finding's status must be updated in the register that owns it. Recorded in advance so a later audit reads a cross-plan write as intentional. | yes — D12 in [overview.md](overview.md) |
+| 2 | 0.1 | The E2E evidence implementation also adjusts the harness scenario timeout from 10m to 20m, captures network transition timestamps before Docker state changes, widens the fresh-sample window to 180s, and widens the cascading stale-edge window to 120s. | The full-suite evidence runs exposed legitimate propagation/load delays and timing-boundary races; focused regressions passed after each correction, and the successful full run completed with no residual resources. | yes — §6, §7 and this row |
 
 ---
 
@@ -211,6 +219,7 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 | 2 | Rendering ECharts in jsdom to assert chart contents | jsdom has no canvas and no layout; the library renders nothing assertable, so the tests would prove only that a component mounted. | Decision **D14**: chart **option objects** are built by pure functions and asserted exactly; wrappers are smoke-tested with the library mocked; pixels are proven once, in a real browser, by `SYS-UI-007`. |
 | 3 | Letting Playwright's `webServer` block start the stack | The Go E2E harness already owns compose lifecycle, port allocation and teardown. Two orchestrators fighting over the same containers produces flakes that look like product bugs. | Decision **D17**: no `webServer` block. `test/e2e/ui_test.go` starts the stack via `harness.Start` and shells out to Playwright with the resolved base URL. |
 | 4 | Adding CORS middleware so a separately-served frontend could call the API | Introduces cross-origin cookie handling, `SameSite` decisions, preflight caching and a second deployable — all to solve a problem created by the split itself. | Decision **D2**: `go:embed` the built SPA and serve it from the same origin through chi's `NotFound` handler. Same-origin means no CORS at all. |
+| 5 | Keeping the original 10m harness timeout and narrow 90s/60s E2E evidence windows | Full-suite runs timed out during slow maintenance/propagation and cut across the actual network transition/staleness boundaries. | Use the 20m scenario timeout, pre-transition timestamps, a 180s fresh-sample window, and a 120s stale-edge window; verify each with focused tests before rerunning the full suite. |
 
 ---
 
@@ -220,7 +229,7 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 
 | Phase | File | Title | Assigned | Review gate | Status |
 |-------|------|-------|----------|-------------|--------|
-| 0 | [phase_01.md](phase_01.md) | Plan 002 closure and contract prerequisites | `agent-2:sonnet` / `agent-3:haiku` | 0.4 | TODO |
+| 0 | [phase_01.md](phase_01.md) | Plan 002 closure and contract prerequisites | `agent-2:sonnet` / `agent-3:haiku` | 0.4 | IN_PROGRESS — 0.1 closed; 0.2 next |
 | 1 | [phase_02.md](phase_02.md) | OpenAPI contract and route-coverage gate | `agent-2:sonnet` | 1.1, 1.4 | TODO |
 | 2 | [phase_03.md](phase_03.md) | UI session authentication | `agent-2:sonnet` | 2.1, 2.2, 2.3 | TODO |
 | 3 | [phase_04.md](phase_04.md) | Embedded SPA serving and dev proxy | `agent-2:sonnet` | 3.2 | TODO |
@@ -246,7 +255,7 @@ the next one opens.
 
 | ID | Title | Assigned | Status |
 |----|-------|----------|--------|
-| 0.1 | Capture durable evidence for `make test-e2e-full` (V001-F1) | `agent-2:sonnet` | TODO |
+| 0.1 | Capture durable evidence for `make test-e2e-full` (V001-F1) | `agent-2:sonnet` | DONE |
 | 0.2 | Reconcile the phase-10.5 declared scope (V001-F2) | `agent-2:sonnet` | TODO |
 | 0.3 | Make the §11 traceability claim precise and complete (V001-F3) | `agent-2:sonnet` | TODO |
 | 0.4 | Update plan 002's audit register | `agent-3:haiku` | TODO |

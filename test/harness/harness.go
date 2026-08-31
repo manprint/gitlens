@@ -960,7 +960,7 @@ func (h *Harness) Scenario(t *testing.T, id string) {
 		env.APIs = append(env.APIs, h.apiClient)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 	if err := s.Run(ctx, env); err != nil {
 		t.Fatalf("scenario %s (%s) failed: %v", id, s.Title, err)

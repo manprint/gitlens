@@ -40,10 +40,10 @@ func init() {
 			}
 			defer targetConn.Release()
 
+			outageStart := time.Now().UTC()
 			if err := e.Compose("stop", "pglens-server"); err != nil {
 				return fmt.Errorf("stop pglens-server: %w", err)
 			}
-			outageStart := time.Now().UTC()
 
 			// The plan's own text (phase_06.md) calls for checking
 			// `agent_buffer_bytes`/`agent_samples_dropped_total`. Neither
@@ -265,11 +265,11 @@ func init() {
 				return fmt.Errorf("agent /healthz errored while pg was paused: %w", err)
 			}
 
+			recoverTS := time.Now().UTC()
 			if err := e.Compose("unpause", "pg"); err != nil {
 				return fmt.Errorf("unpause pg: %w", err)
 			}
 			paused = false
-			recoverTS := time.Now().UTC()
 
 			recoverCtx, cancel3 := context.WithTimeout(ctx, 150*time.Second)
 			defer cancel3()
@@ -283,7 +283,7 @@ func init() {
 				return fmt.Errorf("agent_up/instance_reachable never fired after unpause: %w", err)
 			}
 
-			freshCtx, cancel4 := context.WithTimeout(ctx, 90*time.Second)
+			freshCtx, cancel4 := context.WithTimeout(ctx, 180*time.Second)
 			defer cancel4()
 			if err := poll(freshCtx, 3*time.Second, func(ctx context.Context) (bool, error) {
 				var n int

@@ -695,7 +695,7 @@ the units that touched it, so a later audit can attribute every diff.
 | V001-integration | `make test-integration` | PASS — all integration-tagged packages returned exit 0 | 2026-08-30 |
 | V001-int-wal-focused | `go test -tags=integration -race -shuffle=on -timeout=10m ./internal/check -run '^TestINTWAL000_WALStatisticsColumnShape$'` on PG15–18 | PASS — focused version-gated WAL shape checks passed for every supported version | 2026-08-30 |
 | V001-ci-local-integration | `make ci-local-integration` | NOT DIRECTLY VERIFIABLE — child jobs later disappeared without failure markers, but the timed-out wrapper did not expose its final exit code | 2026-08-30 |
-| V001-e2e-full | `make test-e2e-full` | NOT DIRECTLY VERIFIABLE — the long runner completed with no failure markers or residuals, but the timed-out wrapper did not expose its final exit code | 2026-08-30 |
+| V001-e2e-full | `make test-e2e-full-evidence` | PASS — artifact `test/e2e/_artifacts/e2e-full-20260831T040622Z.log`; `RESIDUAL_CONTAINERS=0`; `RESIDUAL_NETWORKS=0`; `EXIT_STATUS=0 FINISHED_AT=2026-08-31T05:12:01Z COMMAND=make test-e2e-full`; elapsed 3939s (65m39s) | 2026-08-31 |
 
 ## 8. Runtime deviations from the plan
 
