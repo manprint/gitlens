@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-08-31 — sub-phase 2.1 closed; sub-phase 2.2 opened._
+_Last updated: 2026-08-31 — sub-phase 2.2 closed; sub-phase 2.3 opened._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,15 +54,15 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 2.2 |
+| **ID** | 2.3 |
 | **Status** | `OPEN` |
-| **Intent** | Implement the in-memory session store with expiry, constant-time validation, and bounded cleanup |
-| **Next action:** | Complete sub-phase **2.2** in [phase_03.md](phase_03.md): add `SessionStore` and its unit tests |
+| **Intent** | Protect API routes with the exact session, bearer, and exemption credential rule |
+| **Next action:** | Complete sub-phase **2.3** in [phase_03.md](phase_03.md): add session middleware and its tests |
 | **Assigned** | `agent-2:sonnet` |
-| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 and sub-phase 2.1 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, README links the authoritative contract, and UI configuration defaults/validation are covered. This unit implements session state. |
+| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 and phase 2 sub-phases 2.1–2.2 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, README links the authoritative contract, UI configuration defaults/validation are covered, and the in-memory session store has bounded expiry cleanup. This unit adds the security boundary. |
 | **Phase file** | [phase_03.md](phase_03.md) |
 
-Phase 0 sub-phases 0.1–0.6 and phase 1 sub-phases 1.1–1.6 plus sub-phase 2.1 are closed; sub-phase 2.2 is the next unit.
+Phase 0 sub-phases 0.1–0.6 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.2 are closed; sub-phase 2.3 is the next unit.
 Phase 2 and the remaining frontend work are still pending.
 
 ---
@@ -166,6 +166,7 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 | 1.5 | sub-phase | 1.5 | 2026-08-31 | Generate the checked-in static API reference | `3eb931c`, `0002314` |
 | 1.6 | sub-phase | 1.6 | 2026-08-31 | Link the API contract and generated reference from README | `5f1561d` |
 | 2.1 | sub-phase | 2.1 | 2026-08-31 | Add UI configuration loader and validation | `67965ac` |
+| 2.2 | sub-phase | 2.2 | 2026-08-31 | Add in-memory session store with expiry and reap | `103757f` |
 
 ---
 
@@ -177,7 +178,7 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 
 ## §6 — In-flight work
 
-`claimed — sub-phase 2.2; nothing written yet`
+`claimed — sub-phase 2.3; nothing written yet`
 
 ---
 
@@ -212,6 +213,8 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 | 2026-08-31 | 1.6 | `make fmt-check lint test coverage-gate` | PASS | Go gates exit 0 at 06:04:43Z after 44s; race/shuffle passed and global coverage is 75.1%. |
 | 2026-08-31 | 2.1 | `go test ./internal/server -run '^TestLoadUIConfig' -count=1` | PASS | UI configuration defaults, password-file precedence/trimming, TTL bounds, secure-cookie parsing, and secret-safe errors pass. |
 | 2026-08-31 | 2.1 | `make fmt-check lint test coverage-gate` | PASS | Go gates exit 0 at 06:07:58Z after 46s; race/shuffle passed and global coverage is 75.2%. |
+| 2026-08-31 | 2.2 | `go test -race ./internal/server -run '^TestSessionStore' -count=1` | PASS | Creation, URL-safe token shape, validation, expiry, deletion, bounded reap, and randomness error propagation pass under the race detector. |
+| 2026-08-31 | 2.2 | `make fmt-check lint test coverage-gate` | PASS | Go gates exit 0 at 06:11:06Z after 47s; race/shuffle passed and global coverage is 75.3%. |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -263,7 +266,7 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 |-------|------|-------|----------|-------------|--------|
 | 0 | [phase_01.md](phase_01.md) | Plan 002 closure and contract prerequisites | `agent-2:sonnet` / `agent-3:haiku` | 0.4 | DONE — 6/6 sub-phases closed |
 | 1 | [phase_02.md](phase_02.md) | OpenAPI contract and route-coverage gate | `agent-2:sonnet` | 1.1, 1.4 | DONE — 6/6 sub-phases closed |
-| 2 | [phase_03.md](phase_03.md) | UI session authentication | `agent-2:sonnet` | 2.1, 2.2, 2.3 | IN_PROGRESS — 2.2 next |
+| 2 | [phase_03.md](phase_03.md) | UI session authentication | `agent-2:sonnet` | 2.1, 2.2, 2.3 | IN_PROGRESS — 2.3 next |
 | 3 | [phase_04.md](phase_04.md) | Embedded SPA serving and dev proxy | `agent-2:sonnet` | 3.2 | TODO |
 | 4 | [phase_05.md](phase_05.md) | Frontend workspace scaffold | `agent-2:sonnet` | 4.1 | TODO |
 | 5 | [phase_06.md](phase_06.md) | Frontend test harness and quality gates | `agent-2:sonnet` | 5.2, 5.4, 5.6, 5.9 | TODO |
@@ -300,8 +303,8 @@ the next one opens.
 | 1.5 | Generate a static API reference page | `agent-3:haiku` | DONE |
 | 1.6 | Update README.md | `agent-3:haiku` | DONE |
 | 2.1 | UI configuration loader | `agent-2:sonnet` | DONE |
-| 2.2 | Session store | `agent-2:sonnet` | OPEN |
-| 2.3 | Session middleware and the `either credential` rule | `agent-2:sonnet` | TODO |
+| 2.2 | Session store | `agent-2:sonnet` | DONE |
+| 2.3 | Session middleware and the `either credential` rule | `agent-2:sonnet` | OPEN |
 | 2.4 | The three session endpoints | `agent-2:sonnet` | TODO |
 | 2.5 | Update the E2E harness client to authenticate | `agent-2:sonnet` | TODO |
 | 2.6 | Full regression sweep | `agent-2:sonnet` | TODO |
@@ -426,7 +429,7 @@ not otherwise be visible.
 | `TestOpenAPICoversEveryRoute` | Go, contract gate | 1.4 | DONE |
 | `TestAPIDocsGeneratorIsDeterministic` | Go, unit | 1.5 | DONE |
 | `TestLoadUIConfig` | Go, unit | 2.1 | DONE |
-| `TestSessionStore` | Go, unit | 2.2 | TODO |
+| `TestSessionStore` | Go, unit | 2.2 | DONE |
 | `TestRequireCredential` | Go, unit | 2.3 | TODO |
 | `TestSessionEndpoints` | Go, integration | 2.4 | TODO |
 | `TestSPAHandler` | Go, unit | 3.2 | TODO |
