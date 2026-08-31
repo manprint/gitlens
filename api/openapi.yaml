@@ -78,6 +78,329 @@ components:
       type: boolean
       description: True means the relation or cardinality budget cut the result.
 
+    TopologyEdge:
+      type: object
+      required: [from, to, type, confidence]
+      properties:
+        from: { $ref: '#/components/schemas/InstanceId' }
+        to: { $ref: '#/components/schemas/InstanceId' }
+        type: { type: string }
+        sync_state:
+          type: [string, 'null']
+          description: sync or async; null when not yet known.
+        confidence: { type: string, enum: [high, low] }
+        note: { type: [string, 'null'] }
+    Event:
+      type: object
+      required: [event_id, ts, type, cluster_id, instance_id, payload]
+      properties:
+        event_id: { type: integer, format: int64 }
+        ts: { $ref: '#/components/schemas/Timestamp' }
+        type: { type: string }
+        cluster_id: { type: [string, 'null'] }
+        instance_id: { type: [string, 'null'], format: uuid }
+        payload: { type: object, additionalProperties: true }
+    InstanceSummary:
+      type: object
+      required: [instance_id, addr, port, role, pg_version, perm_tier, last_seen, up]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        addr: { type: string }
+        port: { type: integer, format: int32 }
+        role: { type: string }
+        pg_version: { type: integer, format: int32 }
+        perm_tier: { $ref: '#/components/schemas/PermTier' }
+        last_seen: { $ref: '#/components/schemas/Timestamp' }
+        up: { type: boolean }
+    Cluster:
+      type: object
+      required: [cluster_id, name, id_source, primary, instance_count, health, instances]
+      properties:
+        cluster_id: { $ref: '#/components/schemas/ClusterId' }
+        name: { type: [string, 'null'] }
+        id_source: { type: string }
+        primary: { type: [string, 'null'], format: uuid }
+        instance_count: { type: integer, format: int32 }
+        health: { $ref: '#/components/schemas/Health' }
+        instances: { type: array, items: { $ref: '#/components/schemas/InstanceSummary' } }
+        standby_count: { type: integer, format: int32 }
+        sync_standby_count: { type: integer, format: int32 }
+        max_replay_lag_seconds:
+          allOf: [{ $ref: '#/components/schemas/NullableSeconds' }]
+          description: Largest measurable replay lag; null means not measured, never zero.
+        topology: { type: array, items: { $ref: '#/components/schemas/TopologyEdge' } }
+    Database:
+      type: object
+      required: [datname, monitored]
+      properties:
+        datname: { type: string }
+        monitored: { type: boolean }
+        skip_reason: { type: [string, 'null'] }
+    Instance:
+      allOf:
+        - $ref: '#/components/schemas/InstanceSummary'
+        - type: object
+          required: [cluster_id, databases, databases_not_monitored]
+          properties:
+            cluster_id: { $ref: '#/components/schemas/ClusterId' }
+            databases: { type: array, items: { $ref: '#/components/schemas/Database' } }
+            databases_not_monitored: { type: integer, format: int32 }
+    MetricPoint:
+      $ref: '#/components/schemas/SeriesPoint'
+    MetricsResponse:
+      type: object
+      required: [series]
+      properties:
+        series: { type: array, items: { $ref: '#/components/schemas/MetricPoint' } }
+    ReplicationEdge:
+      type: object
+      required: [from, to, metric, series]
+      properties:
+        from: { $ref: '#/components/schemas/InstanceId' }
+        to: { $ref: '#/components/schemas/InstanceId' }
+        metric: { type: string, enum: [write_lag_sec, flush_lag_sec, replay_lag_sec] }
+        sync_state: { type: [string, 'null'] }
+        series: { type: array, items: { $ref: '#/components/schemas/MetricPoint' } }
+    ReplicationResponse:
+      type: object
+      required: [cluster_id, edges]
+      properties:
+        cluster_id: { $ref: '#/components/schemas/ClusterId' }
+        edges: { type: array, items: { $ref: '#/components/schemas/ReplicationEdge' } }
+    TopologyResponse:
+      type: object
+      required: [cluster_id, topology, events]
+      properties:
+        cluster_id: { $ref: '#/components/schemas/ClusterId' }
+        topology: { type: array, items: { $ref: '#/components/schemas/TopologyEdge' } }
+        events: { type: array, items: { $ref: '#/components/schemas/Event' } }
+    Statement:
+      type: object
+      required: [queryid, datname, query_text, truncated]
+      properties:
+        queryid: { type: integer, format: int64 }
+        datname: { type: string }
+        query_text: { type: string }
+        calls: { type: [number, 'null'] }
+        total_exec_time_ms: { type: [number, 'null'] }
+        rows: { type: [number, 'null'] }
+        truncated: { $ref: '#/components/schemas/Truncated' }
+    StatementsResponse:
+      type: object
+      required: [statements, truncated, comparable_scope]
+      properties:
+        statements: { type: array, items: { $ref: '#/components/schemas/Statement' } }
+        truncated: { $ref: '#/components/schemas/Truncated' }
+        comparable_scope: { type: string, enum: [cluster] }
+    AshBucket:
+      type: object
+      required: [ts, samples, ticks, avg_active_sessions]
+      properties:
+        ts: { $ref: '#/components/schemas/Timestamp' }
+        samples: { type: integer, format: int32 }
+        ticks: { type: integer, format: int32 }
+        avg_active_sessions:
+          type: [number, 'null']
+          description: samples divided by ticks; null when ticks is zero, never zero as a sentinel.
+        datname: { type: string }
+        wait_event_type: { type: string }
+        wait_event: { type: string }
+        state: { type: string }
+        queryid: { type: [integer, 'null'], format: int64 }
+    AshResponse:
+      type: object
+      required: [buckets, resolution_seconds, statistical]
+      properties:
+        buckets: { type: array, items: { $ref: '#/components/schemas/AshBucket' } }
+        resolution_seconds: { type: integer, format: int32 }
+        statistical: { type: boolean }
+        warning: { type: string }
+        enabled: { type: boolean, description: Present as false when ASH is disabled. }
+    AshTopEntry:
+      type: object
+      required: [queryid, query_text, samples, ticks, avg_active_sessions]
+      properties:
+        queryid: { type: integer, format: int64 }
+        query_text: { type: string }
+        samples: { type: integer, format: int32 }
+        ticks: { type: integer, format: int32 }
+        avg_active_sessions: { type: [number, 'null'] }
+    AshTopResponse:
+      type: object
+      required: [entries, resolution_seconds, statistical]
+      properties:
+        entries: { type: array, items: { $ref: '#/components/schemas/AshTopEntry' } }
+        resolution_seconds: { type: integer, format: int32 }
+        statistical: { type: boolean }
+        warning: { type: string }
+        enabled: { type: boolean }
+    Plan:
+      type: object
+      required: [plan_id, plan_hash, captured_at, analyzed, plan, changed]
+      properties:
+        plan_id: { type: integer, format: int64 }
+        plan_hash: { type: string }
+        captured_at: { $ref: '#/components/schemas/Timestamp' }
+        analyzed: { type: boolean }
+        plan: { type: object, additionalProperties: true }
+        changed: { type: boolean }
+    PlansResponse:
+      type: object
+      required: [plans, total_shapes]
+      properties:
+        plans: { type: array, items: { $ref: '#/components/schemas/Plan' } }
+        total_shapes: { type: integer, format: int32 }
+    ApiMetric:
+      type: object
+      required: [ts, value, labels]
+      properties:
+        ts: { $ref: '#/components/schemas/Timestamp' }
+        value: { type: number }
+        labels: { type: object, additionalProperties: { type: string } }
+    LocksResponse:
+      type: object
+      required: [instance_id, sampled_at, stale, nodes]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        sampled_at:
+          type: [string, 'null']
+          format: date-time
+          description: Null when no lock tree has ever been sampled, not an empty timestamp.
+        stale: { type: boolean }
+        nodes: { type: array, items: { type: object, additionalProperties: true } }
+    ActivityResponse:
+      type: object
+      required: [instance_id, stale, metrics]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        stale: { type: boolean }
+        metrics:
+          type: object
+          additionalProperties:
+            type: array
+            items: { $ref: '#/components/schemas/ApiMetric' }
+    DatabasesResponse:
+      type: object
+      required: [instance_id, databases, not_monitored_count]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        databases: { type: array, items: { $ref: '#/components/schemas/Database' } }
+        not_monitored_count: { type: integer, format: int32 }
+    HostResponse:
+      type: object
+      required: [instance_id, available]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        available: { type: boolean }
+        reason: { type: string }
+        source: { type: string }
+        sampled_at: { $ref: '#/components/schemas/Timestamp' }
+        stale: { type: boolean }
+        metrics: { type: object, additionalProperties: { type: number } }
+    Setting:
+      type: object
+      required: [name, value, unit, source, context, pending_restart, first_seen, last_seen, changed_at]
+      properties:
+        name: { type: string }
+        value: { type: [string, 'null'] }
+        unit: { type: string }
+        source: { type: string }
+        context: { type: string }
+        pending_restart: { type: string }
+        first_seen: { $ref: '#/components/schemas/Timestamp' }
+        last_seen: { $ref: '#/components/schemas/Timestamp' }
+        changed_at: { $ref: '#/components/schemas/Timestamp' }
+    SettingsResponse:
+      type: object
+      required: [instance_id, settings]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        settings: { type: array, items: { $ref: '#/components/schemas/Setting' } }
+    DriftValue:
+      type: object
+      required: [instance_id, role, value]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        role: { type: string }
+        value: { type: string }
+    DriftEntry:
+      type: object
+      required: [name, values]
+      properties:
+        name: { type: string }
+        values: { type: array, items: { $ref: '#/components/schemas/DriftValue' } }
+    RelationResponse:
+      type: object
+      required: [instance_id, items, truncated, relations_not_reported]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        items: { type: array, items: { type: object, additionalProperties: true } }
+        truncated: { $ref: '#/components/schemas/Truncated' }
+        relations_not_reported: { type: [integer, 'null'], format: int32 }
+    Alert:
+      type: object
+      required: [alert_key, rule_id, severity, state, datname, labels, value, summary, started_at, last_eval_at, resolved_at, suppressed]
+      properties:
+        alert_key: { type: string }
+        rule_id: { type: string }
+        severity: { type: string, enum: [info, warning, critical] }
+        state: { type: string, enum: [pending, firing, resolved] }
+        cluster_id: { $ref: '#/components/schemas/ClusterId' }
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        datname: { type: string }
+        labels: { type: object, additionalProperties: true }
+        value: { type: number }
+        summary: { type: string }
+        started_at: { $ref: '#/components/schemas/Timestamp' }
+        last_eval_at: { $ref: '#/components/schemas/Timestamp' }
+        resolved_at: { type: [string, 'null'], format: date-time }
+        suppressed: { type: boolean }
+    AlertRule:
+      type: object
+      required: [id, severity, scope, needs, min_tier]
+      properties:
+        id: { type: string }
+        severity: { type: string }
+        scope: { type: string }
+        needs: { type: array, items: { type: string } }
+        min_tier: { $ref: '#/components/schemas/PermTier' }
+    Silence:
+      type: object
+      required: [silence_id, matchers, reason, starts_at, ends_at]
+      properties:
+        silence_id: { type: string, format: uuid }
+        matchers: { type: array, items: { type: object, additionalProperties: true } }
+        reason: { type: string }
+        starts_at: { $ref: '#/components/schemas/Timestamp' }
+        ends_at: { $ref: '#/components/schemas/Timestamp' }
+    Finding:
+      type: object
+      required: [finding_id, rule_id, severity, state, scope, title]
+      properties:
+        finding_id: { type: string }
+        rule_id: { type: string }
+        severity: { type: string }
+        state: { type: string, enum: [open, degraded, muted, resolved] }
+        scope: { type: string }
+        cluster_id: { $ref: '#/components/schemas/ClusterId' }
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        datname: { type: string }
+        object_name: { type: string }
+        title: { type: string }
+        detail: { type: string }
+        remediation: { type: string }
+        evidence: { type: object, additionalProperties: true }
+        degraded_reason: { type: string }
+    AdvisorRule:
+      type: object
+      required: [id, severity, scope, needs, min_tier]
+      properties:
+        id: { type: string }
+        severity: { type: string }
+        scope: { type: string }
+        needs: { type: array, items: { type: string } }
+        min_tier: { $ref: '#/components/schemas/PermTier' }
+
   responses:
     BadRequest:
       description: Bad request.
@@ -110,4 +433,787 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
 
-paths: {}
+paths:
+  /api/v1/clusters:
+    get:
+      tags: [clusters]
+      operationId: getClusters
+      summary: List monitored clusters.
+      responses:
+        '200':
+          description: Cluster list.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Cluster' } }
+              examples:
+                default:
+                  value:
+                    - cluster_id: '7381927364512345678'
+                      name: pg-prod-eu
+                      id_source: system_identifier
+                      primary: 11111111-1111-1111-1111-111111111111
+                      instance_count: 2
+                      health: ok
+                      standby_count: 1
+                      sync_standby_count: 0
+                      max_replay_lag_seconds: 0.12
+                      topology:
+                        - from: 11111111-1111-1111-1111-111111111111
+                          to: 22222222-2222-2222-2222-222222222222
+                          type: streaming
+                          sync_state: async
+                          confidence: high
+                      instances:
+                        - instance_id: 11111111-1111-1111-1111-111111111111
+                          addr: pg-primary
+                          port: 5432
+                          role: primary
+                          pg_version: 170006
+                          perm_tier: T0
+                          last_seen: '2026-08-27T02:00:00Z'
+                          up: true
+                        - instance_id: 22222222-2222-2222-2222-222222222222
+                          addr: pg-standby
+                          port: 5432
+                          role: standby
+                          pg_version: 170006
+                          perm_tier: T0
+                          last_seen: '2026-08-27T02:00:00Z'
+                          up: true
+
+  /api/v1/clusters/{id}/topology:
+    get:
+      tags: [clusters]
+      operationId: getClusterTopology
+      summary: Return the replication topology and failover events for a cluster.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/ClusterId' } }
+      responses:
+        '200':
+          description: Topology graph and failover events.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TopologyResponse' }
+              examples:
+                default:
+                  value:
+                    cluster_id: '7381927364512345678'
+                    topology:
+                      - from: 11111111-1111-1111-1111-111111111111
+                        to: 22222222-2222-2222-2222-222222222222
+                        type: streaming
+                        sync_state: async
+                        confidence: high
+                    events:
+                      - event_id: 1
+                        ts: '2026-08-27T01:45:23Z'
+                        type: failover_detected
+                        cluster_id: '7381927364512345678'
+                        instance_id: 22222222-2222-2222-2222-222222222222
+                        payload:
+                          old_primary: 11111111-1111-1111-1111-111111111111
+                          new_primary: 22222222-2222-2222-2222-222222222222
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/clusters/{id}/replication:
+    get:
+      tags: [clusters]
+      operationId: getClusterReplication
+      summary: Return replication lag series for a cluster.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/ClusterId' } }
+        - name: from
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Timestamp' }
+        - name: to
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Timestamp' }
+      responses:
+        '200':
+          description: Lag series by replication edge and metric.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReplicationResponse' }
+              examples:
+                default:
+                  value:
+                    cluster_id: '7381927364512345678'
+                    edges:
+                      - from: 11111111-1111-1111-1111-111111111111
+                        to: 22222222-2222-2222-2222-222222222222
+                        metric: replay_lag_sec
+                        sync_state: async
+                        series:
+                          - { ts: '2026-08-27T00:00:00Z', value: 0.0 }
+                          - { ts: '2026-08-27T00:01:00Z', value: null }
+                          - { ts: '2026-08-27T00:02:00Z', value: 0.05 }
+                      - from: 11111111-1111-1111-1111-111111111111
+                        to: 22222222-2222-2222-2222-222222222222
+                        metric: write_lag_sec
+                        sync_state: async
+                        series:
+                          - { ts: '2026-08-27T00:00:00Z', value: 0.001 }
+                          - { ts: '2026-08-27T00:01:00Z', value: null }
+                          - { ts: '2026-08-27T00:02:00Z', value: 0.002 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/clusters/{id}/settings-drift:
+    get:
+      tags: [clusters]
+      operationId: getClusterSettingsDrift
+      summary: Return settings that differ between instances in a cluster.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/ClusterId' } }
+      responses:
+        '200':
+          description: Differing settings only.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DriftEntry' } }
+              examples:
+                default:
+                  value:
+                    - name: max_connections
+                      values:
+                        - { instance_id: 11111111-1111-1111-1111-111111111111, role: primary, value: '200' }
+                        - { instance_id: 22222222-2222-2222-2222-222222222222, role: standby, value: '100' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances:
+    get:
+      tags: [instances]
+      operationId: getInstances
+      summary: List monitored instances.
+      responses:
+        '200':
+          description: Instance list.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/InstanceSummary' } }
+              examples:
+                default:
+                  value:
+                    - instance_id: 11111111-1111-1111-1111-111111111111
+                      cluster_id: '7381927364512345678'
+                      addr: pg-primary
+                      port: 5432
+                      role: primary
+                      pg_version: 170006
+                      perm_tier: T0
+                      last_seen: '2026-08-27T02:00:00Z'
+                      up: true
+
+  /api/v1/instances/{id}:
+    get:
+      tags: [instances]
+      operationId: getInstance
+      summary: Return one instance and its databases.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+      responses:
+        '200':
+          description: Instance detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Instance' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    cluster_id: '7381927364512345678'
+                    addr: pg-primary
+                    port: 5432
+                    role: primary
+                    pg_version: 170006
+                    perm_tier: T0
+                    last_seen: '2026-08-27T02:00:00Z'
+                    up: true
+                    databases:
+                      - { datname: app, monitored: true, skip_reason: null }
+                    databases_not_monitored: 0
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/instances/{id}/activity:
+    get:
+      tags: [instances]
+      operationId: getInstanceActivity
+      summary: Return recent activity metrics grouped by metric name.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+      responses:
+        '200':
+          description: Recent activity; stale true means no fresh sample was observed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActivityResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    stale: false
+                    metrics:
+                      pg_connections_by_database:
+                        - { ts: '2026-08-27T02:00:00Z', value: 3, labels: { datname: app } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/databases:
+    get:
+      tags: [instances]
+      operationId: getInstanceDatabases
+      summary: List databases and monitoring status for an instance.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+      responses:
+        '200':
+          description: Database inventory.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DatabasesResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    databases: [{ datname: app, monitored: true, skip_reason: null }]
+                    not_monitored_count: 0
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/host:
+    get:
+      tags: [instances]
+      operationId: getInstanceHost
+      summary: Return measurable host metrics for an instance.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+      responses:
+        '200':
+          description: Host metrics or an explicit unavailable response; unavailable values are never zero-filled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HostResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    available: false
+                    reason: target is not local to any agent
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/settings:
+    get:
+      tags: [instances]
+      operationId: getInstanceSettings
+      summary: Return observed PostgreSQL settings.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - name: changed_since
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/Timestamp' }
+          description: Return settings changed at or after this RFC3339 timestamp.
+      responses:
+        '200':
+          description: Settings observed for the instance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SettingsResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    settings:
+                      - name: max_connections
+                        value: '200'
+                        unit: connections
+                        source: config_file
+                        context: postmaster
+                        pending_restart: 'false'
+                        first_seen: '2026-08-27T01:00:00Z'
+                        last_seen: '2026-08-27T02:00:00Z'
+                        changed_at: '2026-08-27T01:00:00Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/tables:
+    get:
+      tags: [instances]
+      operationId: getInstanceTables
+      summary: Return table relation statistics.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+      responses:
+        '200':
+          description: Table rows and cardinality-budget metadata.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RelationResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    items: [{ schemaname: public, relname: users, size_bytes: 1048576 }]
+                    truncated: false
+                    relations_not_reported: null
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/indexes:
+    get:
+      tags: [instances]
+      operationId: getInstanceIndexes
+      summary: Return index relation statistics.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+      responses:
+        '200':
+          description: Index rows and cardinality-budget metadata.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RelationResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    items: [{ schemaname: public, relname: users_pkey, size_bytes: 524288 }]
+                    truncated: false
+                    relations_not_reported: null
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/bloat:
+    get:
+      tags: [instances]
+      operationId: getInstanceBloat
+      summary: Return relation bloat estimates.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+      responses:
+        '200':
+          description: Bloat rows and cardinality-budget metadata.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RelationResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    items: [{ schemaname: public, relname: users, bloat_ratio: 1.2 }]
+                    truncated: false
+                    relations_not_reported: null
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/command-audit:
+    get:
+      tags: [instances]
+      operationId: getInstanceCommandAudit
+      summary: Return the immutable command audit stream for an instance.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+      responses:
+        '200':
+          description: Command audit entries.
+          content:
+            application/json:
+              schema: { type: array, items: { type: object, additionalProperties: true } }
+              examples:
+                default:
+                  value:
+                    - command_id: 1
+                      kind: explain
+                      state: succeeded
+                      created_at: '2026-08-27T02:00:00Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/locks:
+    get:
+      tags: [instances]
+      operationId: getLocks
+      summary: Return the latest sampled blocking tree.
+      parameters:
+        - name: instance_id
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/InstanceId' }
+      responses:
+        '200':
+          description: Lock tree; sampled_at null means no tree was ever sampled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LocksResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    sampled_at: null
+                    stale: true
+                    nodes: []
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/metrics/query:
+    get:
+      tags: [metrics]
+      operationId: queryMetrics
+      summary: Query a metric as a time series.
+      parameters:
+        - { name: metric, in: query, required: true, schema: { type: string } }
+        - { name: instance_id, in: query, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - { name: database, in: query, required: false, schema: { type: string } }
+        - { name: from, in: query, required: true, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - { name: to, in: query, required: true, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - name: step
+          in: query
+          required: true
+          schema: { type: string, example: 60s }
+          description: Go duration string; a step producing more than 10000 points returns 422.
+      responses:
+        '200':
+          description: Fixed-step series; missing intervals are null, never zero or interpolated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MetricsResponse' }
+              examples:
+                default:
+                  value:
+                    series:
+                      - { ts: '2026-08-27T00:00:00Z', value: 12 }
+                      - { ts: '2026-08-27T00:01:00Z', value: null }
+                      - { ts: '2026-08-27T00:02:00Z', value: 15 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/v1/events:
+    get:
+      tags: [events]
+      operationId: getEvents
+      summary: List events newest first.
+      parameters:
+        - { name: cluster_id, in: query, required: false, schema: { $ref: '#/components/schemas/ClusterId' } }
+        - { name: type, in: query, required: false, schema: { type: string } }
+        - { name: from, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - { name: to, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, format: int32, default: 100, minimum: 1, maximum: 1000 }
+          description: Maximum number of events; capped at 1000.
+      responses:
+        '200':
+          description: Events newest first.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Event' } }
+              examples:
+                default:
+                  value:
+                    - event_id: 1
+                      ts: '2026-08-27T01:45:23Z'
+                      type: failover_detected
+                      cluster_id: '7381927364512345678'
+                      instance_id: 22222222-2222-2222-2222-222222222222
+                      payload: { old_primary: 11111111-1111-1111-1111-111111111111, new_primary: 22222222-2222-2222-2222-222222222222 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/statements:
+    get:
+      tags: [statements]
+      operationId: getStatements
+      summary: Return top statements joined to query text.
+      parameters:
+        - { name: instance_id, in: query, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - { name: database, in: query, required: false, schema: { type: string } }
+        - { name: from, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - { name: to, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - name: order_by
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [calls, calls_rate, total_calls, total_exec_time, total_exec_time_ms, exec_time, total_time, total_rows, rows, rows_rate, shared_blks_hit, shared_blks_hit_rate, shared_blks_read, shared_blks_read_rate, wal_bytes, wal_bytes_rate, mean_exec_time, mean_time]
+            default: total_exec_time
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, format: int32, default: 20, minimum: 1, maximum: 1000 }
+      responses:
+        '200':
+          description: Top statements and comparability scope.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatementsResponse' }
+              examples:
+                default:
+                  value:
+                    statements:
+                      - { queryid: 1234, datname: app, query_text: SELECT 1, calls: 10, total_exec_time_ms: 12.5, rows: 10, truncated: false }
+                    truncated: false
+                    comparable_scope: cluster
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/ash:
+    get:
+      tags: [ash]
+      operationId: getAsh
+      summary: Return activity samples grouped by the requested dimensions.
+      parameters:
+        - { name: instance_id, in: query, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - { name: from, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - { name: to, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - name: group_by
+          in: query
+          required: false
+          schema: { type: string, enum: [wait_event_type, wait_event, queryid, state, datname] }
+        - { name: database, in: query, required: false, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, format: int32, default: 1000, minimum: 1, maximum: 10000 } }
+      responses:
+        '200':
+          description: ASH buckets; avg_active_sessions is null when ticks is zero.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AshResponse' }
+              examples:
+                default:
+                  value:
+                    resolution_seconds: 1
+                    statistical: true
+                    buckets:
+                      - { ts: '2026-08-27T00:00:00Z', wait_event_type: CPU, samples: 42, ticks: 10, avg_active_sessions: 4.2 }
+                      - { ts: '2026-08-27T00:00:00Z', wait_event_type: Lock, samples: 8, ticks: 10, avg_active_sessions: 0.8 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/ash/top:
+    get:
+      tags: [ash]
+      operationId: getAshTop
+      summary: Return top ASH queries joined to their text.
+      parameters:
+        - { name: instance_id, in: query, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - { name: from, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - { name: to, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - { name: database, in: query, required: false, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, format: int32, default: 1000, minimum: 1, maximum: 10000 } }
+      responses:
+        '200':
+          description: Top ASH queries; disabled ASH is represented explicitly with enabled false.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AshTopResponse' }
+              examples:
+                default:
+                  value:
+                    resolution_seconds: 1
+                    statistical: true
+                    entries:
+                      - { queryid: 1234567890, query_text: SELECT '* FROM users WHERE id = $1', samples: 45, ticks: 10, avg_active_sessions: 4.5 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/plans:
+    get:
+      tags: [statements]
+      operationId: getPlans
+      summary: Return plan history for a query.
+      parameters:
+        - name: queryid
+          in: query
+          required: true
+          schema: { type: integer, format: int64 }
+        - { name: instance_id, in: query, required: false, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - { name: datname, in: query, required: false, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, format: int32, default: 20, minimum: 1, maximum: 500 } }
+      responses:
+        '200':
+          description: Plan history newest first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlansResponse' }
+              examples:
+                default:
+                  value:
+                    plans:
+                      - plan_id: 1
+                        plan_hash: abc123
+                        captured_at: '2026-08-27T02:00:00Z'
+                        analyzed: false
+                        plan: { Plan: { Node Type: Seq Scan } }
+                        changed: false
+                    total_shapes: 1
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/alerts:
+    get:
+      tags: [alerts]
+      operationId: getAlerts
+      summary: List alerts and their suppression state.
+      parameters:
+        - { name: state, in: query, required: false, schema: { type: string, enum: [pending, firing, resolved, all], default: pending } }
+        - { name: severity, in: query, required: false, schema: { type: string } }
+        - { name: rule_id, in: query, required: false, schema: { type: string } }
+        - { name: instance_id, in: query, required: false, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - { name: cluster_id, in: query, required: false, schema: { $ref: '#/components/schemas/ClusterId' } }
+      responses:
+        '200':
+          description: Alerts, capped by the server at 500 entries.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Alert' } }
+              examples:
+                default:
+                  value:
+                    - alert_key: agent_down/11111111-1111-1111-1111-111111111111
+                      rule_id: agent_down
+                      severity: critical
+                      state: firing
+                      cluster_id: '7381927364512345678'
+                      instance_id: 11111111-1111-1111-1111-111111111111
+                      datname: ''
+                      labels: {}
+                      value: 1
+                      summary: Agent is down
+                      started_at: '2026-08-27T02:00:00Z'
+                      last_eval_at: '2026-08-27T02:01:00Z'
+                      resolved_at: null
+                      suppressed: false
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/alerts/{alert_key}:
+    get:
+      tags: [alerts]
+      operationId: getAlert
+      summary: Return one alert by alert key.
+      parameters:
+        - { name: alert_key, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Alert detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Alert' }
+              examples:
+                default:
+                  value:
+                    alert_key: agent_down/11111111-1111-1111-1111-111111111111
+                    rule_id: agent_down
+                    severity: critical
+                    state: firing
+                    cluster_id: '7381927364512345678'
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    datname: ''
+                    labels: {}
+                    value: 1
+                    summary: Agent is down
+                    started_at: '2026-08-27T02:00:00Z'
+                    last_eval_at: '2026-08-27T02:01:00Z'
+                    resolved_at: null
+                    suppressed: false
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/alert-rules:
+    get:
+      tags: [alerts]
+      operationId: getAlertRules
+      summary: List alert rules.
+      responses:
+        '200':
+          description: Built-in and stored alert rules.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AlertRule' } }
+              examples:
+                default:
+                  value:
+                    - { id: agent_down, severity: critical, scope: instance, needs: [Heartbeat], min_tier: T0 }
+
+  /api/v1/silences:
+    get:
+      tags: [alerts]
+      operationId: getSilences
+      summary: List active silences, or all silences when requested.
+      parameters:
+        - { name: all, in: query, required: false, schema: { type: boolean, default: false } }
+      responses:
+        '200':
+          description: Silences ordered by end time.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Silence' } }
+              examples:
+                default:
+                  value:
+                    - silence_id: 33333333-3333-3333-3333-333333333333
+                      matchers: [{ name: severity, value: warning }]
+                      reason: maintenance
+                      starts_at: '2026-08-29T10:00:00Z'
+                      ends_at: '2026-08-29T11:00:00Z'
+
+  /api/v1/findings:
+    get:
+      tags: [findings]
+      operationId: getFindings
+      summary: List advisor findings.
+      parameters:
+        - { name: state, in: query, required: false, schema: { type: string, default: open,degraded } }
+        - { name: severity, in: query, required: false, schema: { type: string } }
+        - { name: rule_id, in: query, required: false, schema: { type: string } }
+        - { name: datname, in: query, required: false, schema: { type: string } }
+        - { name: scope, in: query, required: false, schema: { type: string } }
+        - { name: instance_id, in: query, required: false, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - { name: cluster_id, in: query, required: false, schema: { $ref: '#/components/schemas/ClusterId' } }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, format: int32, default: 100, minimum: 1, maximum: 1000 }
+          description: Maximum findings; default 100 and maximum 1000.
+      responses:
+        '200':
+          description: Findings ordered by severity and recency.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Finding' } }
+              examples:
+                default:
+                  value:
+                    - finding_id: query.slow_mean/11111111-1111-1111-1111-111111111111
+                      rule_id: query.slow_mean
+                      severity: warning
+                      state: open
+                      scope: instance
+                      title: High mean query latency
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/findings/{finding-id}:
+    get:
+      tags: [findings]
+      operationId: getFinding
+      summary: Return one advisor finding.
+      parameters:
+        - { name: finding-id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Finding detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Finding' }
+              examples:
+                default:
+                  value:
+                    finding_id: query.slow_mean/11111111-1111-1111-1111-111111111111
+                    rule_id: query.slow_mean
+                    severity: warning
+                    state: open
+                    scope: instance
+                    title: High mean query latency
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/advisor/rules:
+    get:
+      tags: [findings]
+      operationId: getAdvisorRules
+      summary: List the advisor rule catalogue.
+      responses:
+        '200':
+          description: Advisor rule catalogue.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AdvisorRule' } }
+              examples:
+                default:
+                  value:
+                    - { id: query.slow_mean, severity: warning, scope: instance, needs: [Statements], min_tier: T0 }
