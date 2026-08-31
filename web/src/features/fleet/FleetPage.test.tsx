@@ -2,12 +2,14 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { Cluster } from '@/api/types'
+import { qk } from '@/api/keys'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { base as alertBase } from '@/test/fixtures/getAlert'
 import { CLUSTER, INSTANCE_SUMMARY } from '@/test/fixture-helpers'
 import { AGENT_STALE_AFTER_SECONDS } from '@/lib/fleet'
+import { REFRESH } from '@/api/policy'
 import { renderWithProviders } from '@/test/render'
-import { ok, status } from '@/test/msw/handlers'
+import { ok, sequence, status } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 
 import { FleetPage } from './FleetPage'
@@ -158,8 +160,103 @@ describe('FleetPage', () => {
     )
     const view = renderWithProviders(<FleetPage />)
     await settleInitialQuery()
-    expect(screen.getByRole('alert')).toHaveTextContent('Could not load alerts')
+    expect(screen.getByRole('alert')).toHaveTextContent('Alert counts unavailable')
     view.unmount()
+  })
+
+  it('UI-FLEET-040 an empty fleet names the agent setup step', async () => {
+    renderFleet([])
+    await settleInitialQuery()
+
+    expect(screen.getByRole('heading', { name: 'No monitored clusters yet' })).toBeInTheDocument()
+    expect(screen.getByText(/set up the pglens agent/i)).toBeInTheDocument()
+  })
+
+  it('UI-FLEET-041 marks stale fleet data in the header', async () => {
+    const clusters = [CLUSTER as unknown as Cluster]
+    const view = renderFleet(clusters)
+    await settleInitialQuery()
+
+    view.queryClient.setQueryData(qk.clusters(), clusters, {
+      updatedAt: Date.now() - REFRESH.fleet.staleAfter - 1_000,
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000)
+    })
+
+    expect(screen.getByRole('status', { name: /Stale data:/i })).toHaveTextContent('Stale')
+  })
+
+  it('UI-FLEET-042 redirects a 401 to login exactly once', async () => {
+    server.use(
+      status('getClusters', 401, { error: 'unauthorized', detail: 'login required' }),
+      ok('getAlerts', []),
+    )
+    const view = renderWithProviders(<FleetPage />, { route: '/fleet' })
+    await settleInitialQuery()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(view.router.state.location.pathname).toBe('/login')
+    expect(view.router.state.location.search).toBe('?next=%2Ffleet')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000)
+    })
+    expect(view.router.state.location.pathname).toBe('/login')
+    expect(view.router.state.location.search).toBe('?next=%2Ffleet')
+  })
+
+  it('UI-FLEET-043 retries a 500 and renders the cluster grid', async () => {
+    const clusters = [CLUSTER as unknown as Cluster]
+    server.use(
+      sequence(
+        'getClusters',
+        { status: 500, body: { error: 'internal_error', detail: 'database unavailable' } },
+        clusters,
+      ),
+      ok('getAlerts', []),
+    )
+    renderWithProviders(<FleetPage />)
+    await settleInitialQuery()
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not load clusters')
+    fireEvent.click(screen.getByRole('button', { name: 'Retry clusters' }))
+    await settleInitialQuery()
+    expect(screen.getByRole('list', { name: 'Cluster cards' })).toBeInTheDocument()
+  })
+
+  it('UI-FLEET-044 keeps the grid and marks alert counts unavailable', async () => {
+    server.use(
+      ok('getClusters', [CLUSTER as unknown as Cluster]),
+      status('getAlerts', 500, { error: 'internal_error', detail: 'alerts unavailable' }),
+    )
+    renderWithProviders(<FleetPage />)
+    await settleInitialQuery()
+
+    expect(screen.getByRole('list', { name: 'Cluster cards' })).toBeInTheDocument()
+    expect(screen.getByText('Alert counts unavailable.')).toBeInTheDocument()
+    const alertFilter = screen.getByRole('button', {
+      name: /Filter clusters with firing alerts \(unavailable\)/i,
+    })
+    expect(alertFilter).toHaveTextContent('Unavailable')
+    expect(alertFilter).not.toHaveTextContent('0')
+    expect(screen.getByRole('button', { name: 'Retry alerts' })).toBeInTheDocument()
+  })
+
+  it('UI-FLEET-045 polls the fleet interval', async () => {
+    const first = makeCluster({ name: 'first snapshot' })
+    const second = makeCluster({ name: 'second snapshot' })
+    server.use(sequence('getClusters', [first], [second]), ok('getAlerts', []))
+    renderWithProviders(<FleetPage />)
+    await settleInitialQuery()
+
+    expect(screen.getByText('first snapshot')).toBeInTheDocument()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH.fleet.interval)
+      await vi.runOnlyPendingTimersAsync()
+    })
+    expect(screen.getByText('second snapshot')).toBeInTheDocument()
   })
 
   it('UI-FLEET-020 omits the agent health strip when every agent reports', async () => {
@@ -231,6 +328,32 @@ describe('FleetPage', () => {
     ])
     await waitFor(() =>
       expect(screen.getByRole('list', { name: 'Cluster cards' })).toBeInTheDocument(),
+    )
+
+    await expect(expectNoA11yViolations(container)).resolves.toBeUndefined()
+  })
+
+  it('has no serious or critical accessibility violations for an empty fleet', async () => {
+    vi.useRealTimers()
+    const { container } = renderFleet([])
+    await waitFor(() =>
+      expect(
+        screen.getByRole('heading', { name: 'No monitored clusters yet' }),
+      ).toBeInTheDocument(),
+    )
+
+    await expect(expectNoA11yViolations(container)).resolves.toBeUndefined()
+  })
+
+  it('has no serious or critical accessibility violations for an API error', async () => {
+    vi.useRealTimers()
+    server.use(
+      status('getClusters', 500, { error: 'internal_error', detail: 'unavailable' }),
+      ok('getAlerts', []),
+    )
+    const { container } = renderWithProviders(<FleetPage />)
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('Could not load clusters'),
     )
 
     await expect(expectNoA11yViolations(container)).resolves.toBeUndefined()

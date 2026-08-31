@@ -7,7 +7,7 @@ export interface FleetSummary {
   health: Record<Cluster['health'], number>
   instancesDown: number
   instancesUp: number
-  firingAlerts: number
+  firingAlerts: number | null
 }
 
 interface FleetSummaryBarProps {
@@ -24,12 +24,14 @@ function SummaryFilter({
   active,
   children,
   count,
+  disabled = false,
   label,
   onClick,
 }: {
   active: boolean
   children: string
-  count: number
+  count: number | string
+  disabled?: boolean
   label: string
   onClick: () => void
 }) {
@@ -38,6 +40,7 @@ function SummaryFilter({
       aria-label={label}
       aria-pressed={active}
       className="border-input bg-background hover:bg-accent flex min-w-28 flex-col rounded-md border px-3 py-2 text-left text-sm transition-colors"
+      disabled={disabled}
       onClick={onClick}
       type="button"
     >
@@ -112,8 +115,9 @@ export function FleetSummaryBar({
         </SummaryFilter>
         <SummaryFilter
           active={alertsOnly}
-          count={summary.firingAlerts}
-          label={`Filter clusters with firing alerts (${summary.firingAlerts})`}
+          count={summary.firingAlerts ?? 'Unavailable'}
+          disabled={summary.firingAlerts === null}
+          label={`Filter clusters with firing alerts (${summary.firingAlerts ?? 'unavailable'})`}
           onClick={() => onAlertsOnlyChange(!alertsOnly)}
         >
           Firing alerts

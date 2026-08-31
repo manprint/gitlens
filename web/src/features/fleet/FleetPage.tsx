@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { useAlerts, useClusters } from '@/api/queries'
 import type { Cluster, Schemas } from '@/api/types'
@@ -36,7 +36,7 @@ function alertMatchesCluster(
   return typeof alert.labels.cluster === 'string' && alert.labels.cluster === cluster.name
 }
 
-function summarize(clusters: readonly Cluster[], firingAlerts: number): FleetSummary {
+function summarize(clusters: readonly Cluster[], firingAlerts: number | null): FleetSummary {
   const summary: FleetSummary = {
     health: { ok: 0, degraded: 0, critical: 0 },
     instancesDown: 0,
@@ -58,12 +58,16 @@ function summarize(clusters: readonly Cluster[], firingAlerts: number): FleetSum
 export function FleetPage() {
   const clustersQuery = useClusters()
   const alertsQuery = useAlerts({ state: 'firing' })
+  const location = useLocation()
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [instanceFilter, setInstanceFilter] = useState<InstanceFilter>('all')
   const [alertsOnly, setAlertsOnly] = useState(false)
+  const redirectedForUnauthorized = useRef(false)
 
   const clusters = clustersQuery.data ?? EMPTY_CLUSTERS
   const firingAlerts = alertsQuery.data ?? EMPTY_ALERTS
+  const alertsAvailable = alertsQuery.error === null && !alertsQuery.isPending
   const healthFilter = readHealthFilter(searchParams.get('health'))
   const textFilter = searchParams.get('q') ?? ''
   const normalizedTextFilter = textFilter.trim().toLocaleLowerCase('en-US')
@@ -76,8 +80,8 @@ export function FleetPage() {
   }, [firingAlerts])
 
   const summary = useMemo(
-    () => summarize(clusters, firingAlerts.length),
-    [clusters, firingAlerts.length],
+    () => summarize(clusters, alertsAvailable ? firingAlerts.length : null),
+    [alertsAvailable, clusters, firingAlerts.length],
   )
   const agentHealthIssues = deriveAgentHealth(clusters, firingAlerts)
   const staleAgeByCluster = new Map<string, number>()
@@ -110,15 +114,35 @@ export function FleetPage() {
         })
         .filter((cluster) => {
           if (!alertsOnly) return true
-          return firingAlerts.some((alert) => alertMatchesCluster(alert, cluster))
+          return (
+            alertsAvailable && firingAlerts.some((alert) => alertMatchesCluster(alert, cluster))
+          )
         })
         .sort(
           (left, right) =>
             HEALTH_RANK[left.health] - HEALTH_RANK[right.health] ||
             (left.name ?? left.cluster_id).localeCompare(right.name ?? right.cluster_id),
         ),
-    [alertsOnly, clusters, firingAlerts, healthFilter, instanceFilter, normalizedTextFilter],
+    [
+      alertsOnly,
+      alertsAvailable,
+      clusters,
+      firingAlerts,
+      healthFilter,
+      instanceFilter,
+      normalizedTextFilter,
+    ],
   )
+
+  const unauthorized =
+    clustersQuery.error?.kind === 'unauthorized' || alertsQuery.error?.kind === 'unauthorized'
+
+  useEffect(() => {
+    if (!unauthorized || redirectedForUnauthorized.current) return
+    redirectedForUnauthorized.current = true
+    const next = `${location.pathname}${location.search}`
+    void navigate(`/login?next=${encodeURIComponent(next)}`, { replace: true })
+  }, [location.pathname, location.search, navigate, unauthorized])
 
   function updateSearchParam(key: 'q' | 'health', value: string | null) {
     const next = new URLSearchParams(searchParams)
@@ -133,16 +157,6 @@ export function FleetPage() {
         endpoint="clusters"
         failure={clustersQuery.error}
         onRetry={() => void clustersQuery.refetch()}
-      />
-    )
-  }
-
-  if (alertsQuery.error) {
-    return (
-      <ErrorState
-        endpoint="alerts"
-        failure={alertsQuery.error}
-        onRetry={() => void alertsQuery.refetch()}
       />
     )
   }
@@ -162,6 +176,16 @@ export function FleetPage() {
         subtitle="Every monitored cluster, its instances, and the problems that need attention."
         freshness={<FreshnessBadge dataUpdatedAt={clustersQuery.dataUpdatedAt} policy="fleet" />}
       />
+
+      {alertsQuery.error ? (
+        <div role="alert" className="border-warning/40 bg-warning/10 text-sm">
+          <strong>Alert counts unavailable.</strong>
+          <p>Firing alerts could not be loaded, but the cluster grid remains available.</p>
+          <button onClick={() => void alertsQuery.refetch()} type="button">
+            Retry alerts
+          </button>
+        </div>
+      ) : null}
 
       <AgentHealthStrip issues={agentHealthIssues} />
 
@@ -220,6 +244,11 @@ export function FleetPage() {
               )
             })}
           </div>
+        ) : clusters.length === 0 ? (
+          <EmptyState
+            description="Set up the pglens agent on a PostgreSQL host to add your first cluster."
+            title="No monitored clusters yet"
+          />
         ) : (
           <EmptyState
             description="Try clearing the search or changing the active fleet filters."
