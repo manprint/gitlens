@@ -60,5 +60,8 @@ export function selectedDatabase(
   requestedDatabase: string | null,
 ): DatabaseEntry | null {
   const { monitored } = partitionDatabases(list)
-  return monitored.find((database) => database.datname === requestedDatabase) ?? defaultDatabase(monitored)
+  return (
+    monitored.find((database) => database.datname === requestedDatabase) ??
+    defaultDatabase(monitored)
+  )
 }
