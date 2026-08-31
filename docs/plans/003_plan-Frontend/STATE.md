@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-08-31 — sub-phase 5.4 closed; sub-phase 5.5 opened._
+_Last updated: 2026-08-31 — sub-phase 5.5 closed; sub-phase 5.6 opened._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,16 +54,16 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 5.5 |
+| **ID** | 5.6 |
 | **Status** | `OPEN` |
-| **Intent** | Add the MSW server and reusable handler factory |
-| **Next action:** | Complete sub-phase **5.5** in [phase_06.md](phase_06.md): add typed handlers, response overrides, and unhandled-request enforcement |
+| **Intent** | Add coverage configuration and the UI coverage gate |
+| **Next action:** | Complete sub-phase **5.6** in [phase_06.md](phase_06.md): add the UI coverage thresholds, gate script, and deterministic coverage meta-test |
 | **Assigned** | `agent-2:sonnet` |
-| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, and phase 5 sub-phases 5.1–5.4 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, strict typed lint/format gates, Makefile web targets, clean placeholder preservation, the parallel CI web job, frontend workflow documentation, the real server image build, the phase-boundary L3 regression, the Vitest/jsdom test runner foundation, the frontend test architecture rules, the deterministic render/provider harness, and the contract-validated OpenAPI fixture suite are covered. The next unit adds MSW handlers. |
+| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, and phase 5 sub-phases 5.1–5.5 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, strict typed lint/format gates, Makefile web targets, clean placeholder preservation, the parallel CI web job, frontend workflow documentation, the real server image build, the phase-boundary L3 regression, the Vitest/jsdom test runner foundation, the frontend test architecture rules, the deterministic render/provider harness, the contract-validated OpenAPI fixture suite, and the contract-aware MSW handler factory are covered. The next unit adds the UI coverage gate. |
 | **Phase file** | [phase_06.md](phase_06.md) |
 
-Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, and phase 5 sub-phases 5.1–5.4 are closed; sub-phase 5.5 is open.
-Phase 4 is complete; phase 5 is in progress and its MSW server is open.
+Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, and phase 5 sub-phases 5.1–5.5 are closed; sub-phase 5.6 is open.
+Phase 4 is complete; phase 5 is in progress and its coverage gate is open.
 
 ---
 
@@ -189,6 +189,7 @@ records start/end timestamps and elapsed time.
 | 5.2 | sub-phase | 5.2 | 2026-08-31 | Define the frontend test architecture rules | `4f24344` |
 | 5.3 | sub-phase | 5.3 | 2026-08-31 | Add deterministic render helpers and provider wrappers | `3537c6e` |
 | 5.4 | sub-phase | 5.4 | 2026-08-31 | Add contract-validated fixtures and OpenAPI assertion helper | `62b3040` |
+| 5.5 | sub-phase | 5.5 | 2026-08-31 | Add the MSW server and reusable handler factory | `7d9e590` |
 
 ---
 
@@ -196,7 +197,7 @@ records start/end timestamps and elapsed time.
 
 Sub-phase 3.1 added `.gitignore`, `internal/webui/doc.go`, `internal/webui/webui.go`, `internal/webui/webui_test.go`, and `internal/webui/dist/index.html`. Sub-phase 3.2 added `internal/server/webui.go`, `internal/server/webui_test.go`, and updated the server router, command entry point, and router call-site tests. Sub-phase 3.3 updated startup logging and added the disabled-UI router test. Sub-phase 3.4 updated `Dockerfile.server`, `deploy/docker-compose.yml`, `deploy/compose/docker-compose.yml`, and `deploy/server.example.env`. Sub-phase 3.5 was verification-only and touched no production files. Sub-phase 3.6 updated the `Running the server` section in `README.md`. Sub-phase 4.1 added `web/package.json`, `web/pnpm-lock.yaml`, and `web/.npmrc`. Sub-phase 4.2 added the three TypeScript project references, the initial Vite environment declaration/config scaffold, and frontend dependency/build ignores. Sub-phase 4.3 replaced the Vite config stub and added `web/index.html`, `web/src/App.tsx`, and `web/src/main.tsx`. Sub-phase 4.4 added `web/src/index.css` and imports it from `web/src/main.tsx`. Sub-phase 4.5 added `web/components.json`, `web/src/lib/utils.ts`, and the 18 generated files under `web/src/components/ui`. Sub-phase 4.6 added `web/eslint.config.js`, `.prettierrc.json`, and `.prettierignore`, and formatted the frontend sources. Sub-phase 4.7 updated `Makefile`, `.github/workflows/ci.yml`, and the strictness fixes in two generated wrappers. Sub-phase 4.8 updated `README.md`, `CONTRIBUTING.md`, and `web/README.md`, made `internal/webui/webui_test.go` valid for both placeholder and real-build embeds, and corrected the frontend asset path in `Dockerfile.server`. Sub-phase 5.1 added the exact test dependencies and scripts in `web/package.json`, `web/pnpm-lock.yaml`, `web/pnpm-workspace.yaml`, `web/vitest.config.ts`, `web/tsconfig.test.json`, the project reference, the test setup/self-test, and typed lint configuration. Sub-phase 5.2 added `web/docs/testing.md` and the frontend architecture section in `TESTING.md`. Sub-phase 5.3 added `web/src/test/render.tsx`, its unit tests, the test lifecycle in `web/src/test/setup.ts`, the shared deterministic instant in `web/src/test/time.ts`, the empty MSW server bootstrap, and the initial application route registry in `web/src/routes/index.tsx`.
 
-Sub-phase 5.4 added `web/src/test/fixture-helpers.ts`, `web/src/test/contract.ts`, `web/src/test/contract.test.ts`, 44 OpenAPI operation fixture modules under `web/src/test/fixtures`, and excluded test-only Node imports from the browser TypeScript project while including them in the test project.
+Sub-phase 5.4 added `web/src/test/fixture-helpers.ts`, `web/src/test/contract.ts`, `web/src/test/contract.test.ts`, 44 OpenAPI operation fixture modules under `web/src/test/fixtures`, and excluded test-only Node imports from the browser TypeScript project while including them in the test project. Sub-phase 5.5 extended `web/src/test/contract.ts` with operation-route/response helpers and added `web/src/test/msw/handlers.ts` plus `web/src/test/msw/handlers.test.ts` for contract-aware response, status, delay, sequence, and never-resolving handler factories.
 
 `docs/LIMITS.md` was also touched by sub-phase 2.7.
 
@@ -206,7 +207,7 @@ Sub-phase 5.4 added `web/src/test/fixture-helpers.ts`, `web/src/test/contract.ts
 
 ## §6 — In-flight work
 
-`claimed — sub-phase 5.5; nothing written yet`
+`claimed — sub-phase 5.6; nothing written yet`
 
 ---
 
@@ -297,6 +298,8 @@ Sub-phase 5.4 added `web/src/test/fixture-helpers.ts`, `web/src/test/contract.ts
 
 | 2026-08-31 | 5.4 | `pnpm test` | PASS | Vitest runs 3 files and 88 tests, including 83 contract-fixture/assertion cases; final timed run completed in 1s (Vitest-reported duration 769ms). |
 | 2026-08-31 | 5.4 | `pnpm run typecheck`; `pnpm run lint`; `pnpm run format:check` | PASS | Final gates completed in 1s, 4s, and 1s respectively; lint retains only the three existing Fast Refresh warnings. No E2E was run because this sub-phase adds isolated frontend fixtures and the phase-boundary policy defers L3 to phase 5 closure. |
+| 2026-08-31 | 5.5 | `pnpm test` | PASS | Vitest runs 4 files and 92 tests; final timed run completed in 1.41s (Vitest-reported duration 819ms), including the MSW handler factory tests. |
+| 2026-08-31 | 5.5 | `pnpm run typecheck`; `pnpm run lint`; `pnpm run format:check` | PASS | Final gates completed in 1.11s, 3.76s, and 1.09s respectively; lint has 0 errors and retains only the three existing Fast Refresh warnings. No E2E was run because the phase-boundary policy defers L3 to phase 5 closure. |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -327,6 +330,7 @@ reconstruct.
 ---
 
 | 14 | 5.4 | The contract validator reads `api/openapi.yaml` from the filesystem and the browser app project excludes test-only sources. | Vite's root disallows a test glob outside `web/`, while the validator needs the repository contract at runtime; keeping the Node filesystem imports in the test project preserves a browser-safe production bundle and lets the test project type-check all fixtures. | yes — §3, §5 and §7 |
+| 15 | 5.5 | MSW 2.15 with `onUnhandledRequest: 'error'` surfaces an unhandled fetch as an HTTP 500 response in the jsdom test environment rather than rejecting the fetch promise. | The handler test asserts the observable failure response and `Error` payload while the setup still fails loudly through the console spy. | yes — §7 and the handler test |
 
 ## §9 — Blockers and open questions
 
@@ -363,7 +367,7 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 | 2 | [phase_03.md](phase_03.md) | UI session authentication | `agent-2:sonnet` | 2.1, 2.2, 2.3 | DONE — 7/7 sub-phases closed |
 | 3 | [phase_04.md](phase_04.md) | Embedded SPA serving and dev proxy | `agent-2:sonnet` | 3.2 | DONE — 6/6 sub-phases closed |
 | 4 | [phase_05.md](phase_05.md) | Frontend workspace scaffold | `agent-2:sonnet` | 4.1 | DONE — 8/8 sub-phases closed |
-| 5 | [phase_06.md](phase_06.md) | Frontend test harness and quality gates | `agent-2:sonnet` | 5.2, 5.4, 5.6, 5.9 | IN_PROGRESS — 5.5 next |
+| 5 | [phase_06.md](phase_06.md) | Frontend test harness and quality gates | `agent-2:sonnet` | 5.2, 5.4, 5.6, 5.9 | IN_PROGRESS — 5.6 next |
 | 6 | [phase_07.md](phase_07.md) | Typed API client, query layer, state primitives | `agent-2:sonnet` | 6.4, 6.6 | TODO |
 | 7 | [phase_08.md](phase_08.md) | App shell, navigation, time range | `agent-2:sonnet` | 7.3 | TODO |
 | 8 | [phase_09.md](phase_09.md) | Fleet Overview | `agent-2:sonnet` | 8.4 | TODO |
@@ -421,8 +425,8 @@ the next one opens.
 | 5.2 | The test architecture rules (T-1…T-10) | `agent-2:sonnet` | DONE |
 | 5.3 | Render helpers and the provider wrapper | `agent-2:sonnet` | DONE |
 | 5.4 | Fixtures and contract validation | `agent-2:sonnet` | DONE |
-| 5.5 | The MSW server and handler factory | `agent-2:sonnet` | OPEN |
-| 5.6 | Coverage configuration and the UI coverage gate | `agent-2:sonnet` | TODO |
+| 5.5 | The MSW server and handler factory | `agent-2:sonnet` | DONE |
+| 5.6 | Coverage configuration and the UI coverage gate | `agent-2:sonnet` | OPEN |
 | 5.7 | The accessibility assertion | `agent-2:sonnet` | TODO |
 | 5.8 | Determinism: clock, timezone, locale, randomness | `agent-2:sonnet` | TODO |
 | 5.9 | Playwright bootstrap and the flake policy | `agent-2:sonnet` | TODO |
