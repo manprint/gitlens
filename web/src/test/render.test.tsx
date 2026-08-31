@@ -28,12 +28,12 @@ describe('renderWithProviders', () => {
     server.use(ok('getSession', session))
     renderRoute('/')
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(0)
+      await vi.runAllTimersAsync()
+      await Promise.resolve()
+      await import('../routes/pages')
     })
 
-    expect(
-      screen.getByRole('heading', { name: 'Interface under construction' }),
-    ).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Fleet overview' })).toBeInTheDocument()
     expect(screen.getByText(/Build dev/)).toBeInTheDocument()
   })
 
