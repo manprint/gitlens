@@ -55,7 +55,7 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 |-------|-------|
 | **Type** | sub-phase |
 | **ID** | 3.5 |
-| **Status** | `none` |
+| **Status** | `OPEN` |
 | **Intent** | Prove the placeholder and frontend build modes |
 | **Next action:** | Complete sub-phase **3.5** in [phase_04.md](phase_04.md): verify placeholder mode, API 404 JSON, and the image build path |
 | **Assigned** | `agent-2:sonnet` |
@@ -187,7 +187,7 @@ Sub-phase 3.1 added `.gitignore`, `internal/webui/doc.go`, `internal/webui/webui
 
 ## §6 — In-flight work
 
-`claimed — sub-phase 3.3; implementation not yet started`
+`claimed — sub-phase 3.5; verification not yet started`
 
 ---
 
