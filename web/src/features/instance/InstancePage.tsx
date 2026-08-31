@@ -1,9 +1,10 @@
 import { Link, useParams } from 'react-router-dom'
 
-import { useClusters, useInstance } from '@/api/queries'
+import { useClusters, useInstance, useInstanceDatabases } from '@/api/queries'
 import { ErrorState } from '@/components/state'
 
 import { InstanceHeader } from './InstanceHeader'
+import { DatabaseSelector } from './DatabaseSelector'
 
 interface InstancePageProps {
   /** Optional override keeps the page easy to exercise without the lazy route. */
@@ -35,6 +36,7 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
   const instanceId = instanceIdOverride ?? routeInstanceId ?? ''
   const instanceQuery = useInstance(instanceId)
   const clustersQuery = useClusters()
+  const databasesQuery = useInstanceDatabases(instanceId)
 
   if (instanceQuery.error?.kind === 'not_found') {
     return <InstanceNotFound instanceId={instanceId} />
@@ -59,11 +61,29 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
   )
 
   return (
-    <InstanceHeader
-      dataUpdatedAt={instanceQuery.dataUpdatedAt}
-      instance={instanceQuery.data}
-      replayLagSeconds={cluster?.max_replay_lag_seconds}
-    />
+    <div className="space-y-8">
+      <InstanceHeader
+        dataUpdatedAt={instanceQuery.dataUpdatedAt}
+        instance={instanceQuery.data}
+        replayLagSeconds={cluster?.max_replay_lag_seconds}
+      />
+      {databasesQuery.error && !databasesQuery.data ? (
+        <ErrorState
+          endpoint="instance databases"
+          failure={databasesQuery.error}
+          onRetry={() => void databasesQuery.refetch()}
+        />
+      ) : databasesQuery.isPending || databasesQuery.data === undefined ? (
+        <section aria-busy="true" aria-label="Loading instance databases" role="status">
+          Loading instance databases…
+        </section>
+      ) : (
+        <DatabaseSelector
+          databases={databasesQuery.data.databases}
+          notMonitoredCount={databasesQuery.data.not_monitored_count}
+        />
+      )}
+    </div>
   )
 }
 

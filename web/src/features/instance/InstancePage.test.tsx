@@ -1,10 +1,11 @@
-import { act, screen } from '@testing-library/react'
+import { act, fireEvent, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { Cluster, Schemas } from '@/api/types'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { CLUSTER, CLUSTER_ID, INSTANCE_ID } from '@/test/fixture-helpers'
 import { makeGetInstance } from '@/test/fixtures/getInstance'
+import { makeGetInstanceDatabases } from '@/test/fixtures/getInstanceDatabases'
 import { renderWithProviders } from '@/test/render'
 import { ok } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
@@ -30,8 +31,15 @@ async function settle() {
   })
 }
 
-function renderPage(instance: Schemas['Instance'] = baseInstance) {
-  server.use(ok('getInstance', instance), ok('getClusters', [cluster]))
+function renderPage(
+  instance: Schemas['Instance'] = baseInstance,
+  databases: Schemas['DatabasesResponse'] = makeGetInstanceDatabases(),
+) {
+  server.use(
+    ok('getInstance', instance),
+    ok('getClusters', [cluster]),
+    ok('getInstanceDatabases', databases),
+  )
   return renderWithProviders(<InstancePage instanceId={INSTANCE_ID} />, {
     route: `/instances/${INSTANCE_ID}`,
   })
@@ -75,5 +83,57 @@ describe('InstancePage', () => {
       'href',
       `/clusters/${CLUSTER_ID}`,
     )
+  })
+
+  it('UI-INST-013 writes the selected database to the URL', async () => {
+    const view = renderPage(baseInstance, {
+      instance_id: INSTANCE_ID,
+      databases: [
+        { datname: 'app', monitored: true, skip_reason: null },
+        { datname: 'warehouse', monitored: true, skip_reason: null },
+      ],
+      not_monitored_count: 0,
+    })
+    await settle()
+
+    const selector = screen.getByRole('combobox', { name: 'Database' })
+    expect(selector).toHaveValue('app')
+    fireEvent.change(selector, { target: { value: 'warehouse' } })
+
+    expect(view.router.state.location.search).toBe('?db=warehouse')
+  })
+
+  it('UI-INST-014 displays the unmonitored count and grouped reasons', async () => {
+    renderPage(baseInstance, {
+      instance_id: INSTANCE_ID,
+      databases: [
+        { datname: 'app', monitored: true, skip_reason: null },
+        { datname: 'audit', monitored: false, skip_reason: 'excluded' },
+        { datname: 'legacy', monitored: false, skip_reason: 'db_budget' },
+      ],
+      not_monitored_count: 2,
+    })
+    await settle()
+
+    expect(screen.getByText('2 databases not monitored.')).toBeInTheDocument()
+    expect(screen.getByText('excluded')).toBeInTheDocument()
+    expect(screen.getByText('db_budget')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'databases.max' })).toHaveAttribute(
+      'href',
+      '/README.md#agent-configuration',
+    )
+  })
+
+  it('UI-INST-015 renders an explicit state when no database is monitored', async () => {
+    renderPage(baseInstance, {
+      instance_id: INSTANCE_ID,
+      databases: [{ datname: 'audit', monitored: false, skip_reason: 'excluded' }],
+      not_monitored_count: 1,
+    })
+    await settle()
+
+    expect(screen.getByText('No monitored databases')).toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'Database' })).not.toBeInTheDocument()
+    expect(screen.getByText('1 database not monitored.')).toBeInTheDocument()
   })
 })
