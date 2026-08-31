@@ -54,3 +54,11 @@ export function defaultDatabase(list: readonly DatabaseEntry[]): DatabaseEntry |
 
   return selected
 }
+
+export function selectedDatabase(
+  list: readonly DatabaseEntry[],
+  requestedDatabase: string | null,
+): DatabaseEntry | null {
+  const { monitored } = partitionDatabases(list)
+  return monitored.find((database) => database.datname === requestedDatabase) ?? defaultDatabase(monitored)
+}

@@ -1,10 +1,12 @@
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 
 import { useClusters, useInstance, useInstanceDatabases } from '@/api/queries'
 import { ErrorState } from '@/components/state'
+import { selectedDatabase } from '@/lib/databases'
 
 import { InstanceHeader } from './InstanceHeader'
 import { DatabaseSelector } from './DatabaseSelector'
+import { OverviewSection } from './OverviewSection'
 
 interface InstancePageProps {
   /** Optional override keeps the page easy to exercise without the lazy route. */
@@ -33,6 +35,7 @@ function InstanceNotFound({ instanceId }: { instanceId: string }) {
 
 export function InstancePage({ instanceId: instanceIdOverride }: InstancePageProps = {}) {
   const { instanceId: routeInstanceId } = useParams<{ instanceId: string }>()
+  const [searchParams] = useSearchParams()
   const instanceId = instanceIdOverride ?? routeInstanceId ?? ''
   const instanceQuery = useInstance(instanceId)
   const clustersQuery = useClusters()
@@ -78,10 +81,18 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
           Loading instance databases…
         </section>
       ) : (
-        <DatabaseSelector
-          databases={databasesQuery.data.databases}
-          notMonitoredCount={databasesQuery.data.not_monitored_count}
-        />
+        <>
+          <DatabaseSelector
+            databases={databasesQuery.data.databases}
+            notMonitoredCount={databasesQuery.data.not_monitored_count}
+          />
+          {(() => {
+            const selected = selectedDatabase(databasesQuery.data.databases, searchParams.get('db'))
+            return selected ? (
+              <OverviewSection database={selected.datname} instanceId={instanceId} />
+            ) : null
+          })()}
+        </>
       )}
     </div>
   )

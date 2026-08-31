@@ -12,6 +12,10 @@ import { server } from '@/test/msw/server'
 
 import { InstancePage } from './InstancePage'
 
+vi.mock('echarts-for-react', () => ({
+  default: () => null,
+}))
+
 const cluster = {
   ...(CLUSTER as unknown as Cluster),
   max_replay_lag_seconds: 1.25,
@@ -39,6 +43,7 @@ function renderPage(
     ok('getInstance', instance),
     ok('getClusters', [cluster]),
     ok('getInstanceDatabases', databases),
+    ok('queryMetrics', { series: [] }),
   )
   return renderWithProviders(<InstancePage instanceId={INSTANCE_ID} />, {
     route: `/instances/${INSTANCE_ID}`,

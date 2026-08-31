@@ -4,7 +4,7 @@ import { Unknown } from '../state/Unknown'
 
 interface MetricTileProps {
   label: string
-  value: number | null
+  value: ReactNode
   unit?: ReactNode
   sparkline?: ReactNode
 }
