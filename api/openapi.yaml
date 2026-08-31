@@ -1,0 +1,113 @@
+openapi: 3.1.0
+info:
+  title: pglens HTTP API
+  version: 1.0.0
+  license:
+    name: Apache-2.0
+servers:
+  - url: /
+    description: the pglens server itself
+
+security:
+  - uiSession: []
+  - agentBearer: []
+
+components:
+  securitySchemes:
+    agentBearer:
+      type: http
+      scheme: bearer
+      description: The agent bootstrap token.
+    uiSession:
+      type: apiKey
+      in: cookie
+      name: pglens_session
+
+  schemas:
+    Error:
+      type: object
+      required:
+        - error
+        - detail
+      properties:
+        error:
+          type: string
+        detail:
+          type: string
+    ClusterId:
+      type: string
+      pattern: '^[0-9]+$'
+      description: A uint64 rendered as a decimal string because it exceeds the exact integer range of IEEE-754 numbers.
+    InstanceId:
+      type: string
+      format: uuid
+    Timestamp:
+      type: string
+      format: date-time
+      description: RFC 3339 timestamp.
+    NullableSeconds:
+      type:
+        - number
+        - 'null'
+      description: Duration in seconds; null means not measured, never zero.
+    SeriesPoint:
+      type: object
+      required:
+        - ts
+        - value
+      properties:
+        ts:
+          $ref: '#/components/schemas/Timestamp'
+        value:
+          type:
+            - number
+            - 'null'
+    PermTier:
+      type: string
+      enum:
+        - T0
+        - T1
+        - T2
+    Health:
+      type: string
+      enum:
+        - ok
+        - degraded
+        - critical
+    Truncated:
+      type: boolean
+      description: True means the relation or cardinality budget cut the result.
+
+  responses:
+    BadRequest:
+      description: Bad request.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Authentication required or invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unprocessable:
+      description: Request could not be processed.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PayloadTooLarge:
+      description: Request payload is too large.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+paths: {}
