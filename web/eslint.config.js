@@ -42,6 +42,17 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.flat.recommended.rules,
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@testing-library/user-event',
+              message: 'use the user factory exported by @/test/render',
+            },
+          ],
+        },
+      ],
       'no-restricted-globals': [
         'error',
         {
@@ -73,9 +84,19 @@ export default tseslint.config(
     ...vitestPlugin.configs.recommended,
   },
   {
+    files: ['src/test/render.tsx'],
+    rules: {
+      'no-restricted-imports': 'off',
+    },
+  },
+  {
     files: componentTestFiles,
     ...testingLibrary.configs['flat/react'],
     ...jestDom.configs['flat/recommended'],
+    plugins: {
+      ...testingLibrary.configs['flat/react'].plugins,
+      ...jestDom.configs['flat/recommended'].plugins,
+    },
     rules: {
       'testing-library/no-node-access': 'error',
       'testing-library/prefer-screen-queries': 'error',

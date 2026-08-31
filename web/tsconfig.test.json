@@ -5,5 +5,13 @@
     "noEmit": true,
     "composite": true
   },
-  "include": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/test", "e2e"]
+  "include": [
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "src/test",
+    "src/routes",
+    "src/App.tsx",
+    "src/vite-env.d.ts",
+    "e2e"
+  ]
 }
