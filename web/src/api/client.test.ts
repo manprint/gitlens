@@ -99,14 +99,14 @@ describe('parseLargeIntStrings', () => {
     expect(parseLargeIntStrings(raw)).toEqual({ queryid: '9007199254740993' })
   })
 
-  it('UI-API-006 leaves other numbers untouched', () => {
+  it('leaves other numbers untouched', () => {
     expect(parseLargeIntStrings('{"queryid":42,"samples":7}')).toEqual({
       queryid: 42,
       samples: 7,
     })
   })
 
-  it('UI-API-007 does not corrupt a queryid inside a query text string', () => {
+  it('does not corrupt a queryid inside a query text string', () => {
     const raw = '{"query_text":"select \\"queryid\\": 9007199254740993","queryid":9007199254740993}'
 
     expect(parseLargeIntStrings(raw)).toEqual({
