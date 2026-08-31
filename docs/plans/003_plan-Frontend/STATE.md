@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-08-31 — sub-phase 1.5 closed; sub-phase 1.6 opened._
+_Last updated: 2026-08-31 — sub-phase 1.6 closed; sub-phase 2.1 opened._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,16 +54,16 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 1.6 |
+| **ID** | 2.1 |
 | **Status** | `OPEN` |
-| **Intent** | Link the authoritative OpenAPI contract and generated API reference from the README |
-| **Next action:** | Complete sub-phase **1.6** in [phase_02.md](phase_02.md): document `api/openapi.yaml`, `docs/api.md`, and `make api-docs` |
-| **Assigned** | `agent-3:haiku` |
-| **Repo state** | Phase 0 sub-phases 0.1–0.6 and sub-phases 1.1–1.5 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract documents all production routes, the bidirectional route-coverage gate rejects undocumented routes and stale operations, and `docs/api.md` is regenerated deterministically by `make api-docs`. This unit updates the README entry points. |
-| **Phase file** | [phase_02.md](phase_02.md) |
+| **Intent** | Load UI configuration from environment with safe defaults and validation |
+| **Next action:** | Complete sub-phase **2.1** in [phase_03.md](phase_03.md): implement and test the UI configuration loader |
+| **Assigned** | `agent-2:sonnet` |
+| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, and README links the authoritative contract. This unit begins session-authentication prerequisites. |
+| **Phase file** | [phase_03.md](phase_03.md) |
 
-Phase 0 sub-phases 0.1–0.6 and sub-phases 1.1–1.5 are closed; sub-phase 1.6 is the next unit. Phase 1
-and the remaining frontend work are still pending.
+Phase 0 sub-phases 0.1–0.6 and phase 1 sub-phases 1.1–1.6 are closed; sub-phase 2.1 is the next unit.
+Phase 2 and the remaining frontend work are still pending.
 
 ---
 
@@ -164,6 +164,7 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 | 1.3 | sub-phase | 1.3 | 2026-08-31 | Document the write, agent and infrastructure endpoints | `b197785` |
 | 1.4 | sub-phase | 1.4 | 2026-08-31 | Enforce OpenAPI route coverage | `f8dbc67` |
 | 1.5 | sub-phase | 1.5 | 2026-08-31 | Generate the checked-in static API reference | `3eb931c`, `0002314` |
+| 1.6 | sub-phase | 1.6 | 2026-08-31 | Link the API contract and generated reference from README | `5f1561d` |
 
 ---
 
@@ -175,7 +176,7 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 
 ## §6 — In-flight work
 
-`claimed — sub-phase 1.6; nothing written yet`
+`claimed — sub-phase 2.1; nothing written yet`
 
 ---
 
@@ -206,6 +207,8 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 | 2026-08-31 | 1.4 | `make fmt-check lint test coverage-gate` | PASS | Go gates exit 0 at 05:56:21Z after 43s; race/shuffle passed and global coverage is 75.1%. |
 | 2026-08-31 | 1.5 | `go test ./internal/tools/apidocs -run '^TestAPIDocsGeneratorIsDeterministic$' -count=1` | PASS | Generator output is deterministic and matches the checked-in `docs/api.md`. |
 | 2026-08-31 | 1.5 | `make fmt-check lint test coverage-gate` | FAIL then PASS | First run completed in 42s at 06:00:36Z with global coverage 75.0% after adding the generator; validation tests in `0002314` raised generator coverage to 80.6%, and the rerun completed in 46s at 06:02:25Z with global coverage 75.1%. |
+| 2026-08-31 | 1.6 | `make api-docs`; `git diff --exit-code -- docs/api.md api/openapi.yaml`; `git diff --check` | PASS | The generated reference is reproducible and clean; README links the machine-readable and offline references and documents `make api-docs`. |
+| 2026-08-31 | 1.6 | `make fmt-check lint test coverage-gate` | PASS | Go gates exit 0 at 06:04:43Z after 44s; race/shuffle passed and global coverage is 75.1%. |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -256,8 +259,8 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 | Phase | File | Title | Assigned | Review gate | Status |
 |-------|------|-------|----------|-------------|--------|
 | 0 | [phase_01.md](phase_01.md) | Plan 002 closure and contract prerequisites | `agent-2:sonnet` / `agent-3:haiku` | 0.4 | DONE — 6/6 sub-phases closed |
-| 1 | [phase_02.md](phase_02.md) | OpenAPI contract and route-coverage gate | `agent-2:sonnet` | 1.1, 1.4 | IN_PROGRESS — 1.6 next |
-| 2 | [phase_03.md](phase_03.md) | UI session authentication | `agent-2:sonnet` | 2.1, 2.2, 2.3 | TODO |
+| 1 | [phase_02.md](phase_02.md) | OpenAPI contract and route-coverage gate | `agent-2:sonnet` | 1.1, 1.4 | DONE — 6/6 sub-phases closed |
+| 2 | [phase_03.md](phase_03.md) | UI session authentication | `agent-2:sonnet` | 2.1, 2.2, 2.3 | IN_PROGRESS — 2.1 next |
 | 3 | [phase_04.md](phase_04.md) | Embedded SPA serving and dev proxy | `agent-2:sonnet` | 3.2 | TODO |
 | 4 | [phase_05.md](phase_05.md) | Frontend workspace scaffold | `agent-2:sonnet` | 4.1 | TODO |
 | 5 | [phase_06.md](phase_06.md) | Frontend test harness and quality gates | `agent-2:sonnet` | 5.2, 5.4, 5.6, 5.9 | TODO |
@@ -292,7 +295,7 @@ the next one opens.
 | 1.3 | Document the write, agent and infrastructure endpoints | `agent-2:sonnet` | DONE |
 | 1.4 | Route-coverage gate: `TestOpenAPICoversEveryRoute` | `agent-2:sonnet` | DONE |
 | 1.5 | Generate a static API reference page | `agent-3:haiku` | DONE |
-| 1.6 | Update README.md | `agent-3:haiku` | OPEN |
+| 1.6 | Update README.md | `agent-3:haiku` | DONE |
 | 2.1 | UI configuration loader | `agent-2:sonnet` | TODO |
 | 2.2 | Session store | `agent-2:sonnet` | TODO |
 | 2.3 | Session middleware and the `either credential` rule | `agent-2:sonnet` | TODO |
@@ -461,7 +464,7 @@ undocumented feature is an unshipped one.
 | Doc unit | Sub-phase | Deliverable | Status |
 |----------|-----------|-------------|--------|
 | README — plan 002 closure | 0.6 | Evidence artefact and the corrected traceability claim | TODO |
-| README — API contract | 1.6 | `api/openapi.yaml` and the generated `docs/api.md` | OPEN |
+| README — API contract | 1.6 | `api/openapi.yaml` and the generated `docs/api.md` | DONE |
 | README + LIMITS — authentication | 2.7 | `PGLENS_UI_PASSWORD`, session TTL, the credential rule | TODO |
 | README — embedded interface | 3.6 | How the interface is served and how to disable it | TODO |
 | README + `web/README.md` | 4.8 | Building and developing the frontend | TODO |
