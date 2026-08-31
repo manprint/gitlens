@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-08-31 — phase 4 closed; sub-phase 5.1 opened._
+_Last updated: 2026-08-31 — sub-phase 5.1 closed; sub-phase 5.2 opened._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,16 +54,16 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 5.1 |
+| **ID** | 5.2 |
 | **Status** | `OPEN` |
-| **Intent** | Establish the Vitest test dependencies and configuration |
-| **Next action:** | Complete sub-phase **5.1** in [phase_06.md](phase_06.md): add the prescribed test dependencies, Vitest config, and scripts |
+| **Intent** | Specify the frontend test architecture rules |
+| **Next action:** | Complete sub-phase **5.2** in [phase_06.md](phase_06.md): add `web/docs/testing.md` with T-1 through T-10 and link it from `TESTING.md` |
 | **Assigned** | `agent-2:sonnet` |
-| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, and phase 4 sub-phases 4.1–4.8 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, strict typed lint/format gates, Makefile web targets, clean placeholder preservation, the parallel CI web job, frontend workflow documentation, the real server image build, and the phase-boundary L3 regression are covered. The next unit establishes the frontend test harness. |
+| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, and phase 5 sub-phase 5.1 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, strict typed lint/format gates, Makefile web targets, clean placeholder preservation, the parallel CI web job, frontend workflow documentation, the real server image build, the phase-boundary L3 regression, and the Vitest/jsdom test runner foundation are covered. The next unit defines the test architecture rules. |
 | **Phase file** | [phase_06.md](phase_06.md) |
 
-Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, and phase 4 sub-phases 4.1–4.8 are closed; sub-phase 5.1 is the next unit.
-Phase 4 is complete; phase 5 is in progress and the frontend test harness is next.
+Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, and phase 5 sub-phase 5.1 are closed; sub-phase 5.2 is the next unit.
+Phase 4 is complete; phase 5 is in progress and its architecture rules are next.
 
 ---
 
@@ -185,12 +185,13 @@ records start/end timestamps and elapsed time.
 | 4.6 | sub-phase | 4.6 | 2026-08-31 | Add typed ESLint, custom invariant rules, and Prettier | `c1ec960` |
 | 4.7 | sub-phase | 4.7 | 2026-08-31 | Wire web quality chain into Makefile and CI | `49543e3` |
 | 4.8 | sub-phase | 4.8 | 2026-08-31 | Document frontend workflow and close the image/L3 boundary | `c50686d`, `6afef51`, `567b834`, `3220b16` |
+| 5.1 | sub-phase | 5.1 | 2026-08-31 | Add the Vitest/jsdom test runner foundation | `c12f9fe` |
 
 ---
 
 ## §5 — Files touched
 
-Sub-phase 3.1 added `.gitignore`, `internal/webui/doc.go`, `internal/webui/webui.go`, `internal/webui/webui_test.go`, and `internal/webui/dist/index.html`. Sub-phase 3.2 added `internal/server/webui.go`, `internal/server/webui_test.go`, and updated the server router, command entry point, and router call-site tests. Sub-phase 3.3 updated startup logging and added the disabled-UI router test. Sub-phase 3.4 updated `Dockerfile.server`, `deploy/docker-compose.yml`, `deploy/compose/docker-compose.yml`, and `deploy/server.example.env`. Sub-phase 3.5 was verification-only and touched no production files. Sub-phase 3.6 updated the `Running the server` section in `README.md`. Sub-phase 4.1 added `web/package.json`, `web/pnpm-lock.yaml`, and `web/.npmrc`. Sub-phase 4.2 added the three TypeScript project references, the initial Vite environment declaration/config scaffold, and frontend dependency/build ignores. Sub-phase 4.3 replaced the Vite config stub and added `web/index.html`, `web/src/App.tsx`, and `web/src/main.tsx`. Sub-phase 4.4 added `web/src/index.css` and imports it from `web/src/main.tsx`. Sub-phase 4.5 added `web/components.json`, `web/src/lib/utils.ts`, and the 18 generated files under `web/src/components/ui`. Sub-phase 4.6 added `web/eslint.config.js`, `.prettierrc.json`, and `.prettierignore`, and formatted the frontend sources. Sub-phase 4.7 updated `Makefile`, `.github/workflows/ci.yml`, and the strictness fixes in two generated wrappers. Sub-phase 4.8 updated `README.md`, `CONTRIBUTING.md`, and `web/README.md`, made `internal/webui/webui_test.go` valid for both placeholder and real-build embeds, and corrected the frontend asset path in `Dockerfile.server`.
+Sub-phase 3.1 added `.gitignore`, `internal/webui/doc.go`, `internal/webui/webui.go`, `internal/webui/webui_test.go`, and `internal/webui/dist/index.html`. Sub-phase 3.2 added `internal/server/webui.go`, `internal/server/webui_test.go`, and updated the server router, command entry point, and router call-site tests. Sub-phase 3.3 updated startup logging and added the disabled-UI router test. Sub-phase 3.4 updated `Dockerfile.server`, `deploy/docker-compose.yml`, `deploy/compose/docker-compose.yml`, and `deploy/server.example.env`. Sub-phase 3.5 was verification-only and touched no production files. Sub-phase 3.6 updated the `Running the server` section in `README.md`. Sub-phase 4.1 added `web/package.json`, `web/pnpm-lock.yaml`, and `web/.npmrc`. Sub-phase 4.2 added the three TypeScript project references, the initial Vite environment declaration/config scaffold, and frontend dependency/build ignores. Sub-phase 4.3 replaced the Vite config stub and added `web/index.html`, `web/src/App.tsx`, and `web/src/main.tsx`. Sub-phase 4.4 added `web/src/index.css` and imports it from `web/src/main.tsx`. Sub-phase 4.5 added `web/components.json`, `web/src/lib/utils.ts`, and the 18 generated files under `web/src/components/ui`. Sub-phase 4.6 added `web/eslint.config.js`, `.prettierrc.json`, and `.prettierignore`, and formatted the frontend sources. Sub-phase 4.7 updated `Makefile`, `.github/workflows/ci.yml`, and the strictness fixes in two generated wrappers. Sub-phase 4.8 updated `README.md`, `CONTRIBUTING.md`, and `web/README.md`, made `internal/webui/webui_test.go` valid for both placeholder and real-build embeds, and corrected the frontend asset path in `Dockerfile.server`. Sub-phase 5.1 added the exact test dependencies and scripts in `web/package.json`, `web/pnpm-lock.yaml`, `web/pnpm-workspace.yaml`, `web/vitest.config.ts`, `web/tsconfig.test.json`, the project reference, the test setup/self-test, and typed lint configuration.
 
 `docs/LIMITS.md` was also touched by sub-phase 2.7.
 
@@ -200,7 +201,7 @@ Sub-phase 3.1 added `.gitignore`, `internal/webui/doc.go`, `internal/webui/webui
 
 ## §6 — In-flight work
 
-`claimed — sub-phase 5.1; verification not yet started`
+`claimed — sub-phase 5.2; verification not yet started`
 
 ---
 
@@ -282,6 +283,9 @@ Sub-phase 3.1 added `.gitignore`, `internal/webui/doc.go`, `internal/webui/webui
 | 2026-08-31 | 4.8 | `make build`; `make build-images` | FAIL then PASS | Go build passes in 0.69s. The first image build failed after 22.72s because the Dockerfile copied `/src/web/dist` although Vite writes `/src/internal/webui/dist`; the corrected build passes in 20.26s. |
 | 2026-08-31 | 4.8 | `make test-e2e` | PASS | Single phase-boundary L3 smoke run: started 09:44:01Z, finished 10:03:12Z; wall time 19:11.34, Go suite 1151.140s. |
 | 2026-08-31 | 4.8 | `git diff --check`; documentation review | PASS | Root README, contributor checks, and `web/README.md` document requirements, build modes, local proxy workflow, layout, pure derivations, and the TypeScript pin. |
+| 2026-08-31 | 5.1 | Initial frozen install; `pnpm approve-builds msw` | FAIL then PASS | pnpm 11 rejected the new `msw` postinstall until its build was explicitly allowed; `web/pnpm-workspace.yaml` records `allowBuilds: msw: true`, and the retry installs in 0.63s. |
+| 2026-08-31 | 5.1 | `pnpm test` | PASS | Vitest 4.1.11 runs the jsdom/jest-dom self-test: 1 file and 1 test in 0.97s. |
+| 2026-08-31 | 5.1 | `pnpm run typecheck`; `pnpm run lint`; `pnpm run format:check`; `pnpm build` | FAIL then PASS | Initial lint rejected the new Vitest config because the Node project did not include it; adding the reference and explicit TS-extension support made the final typed gates pass in 4.85s and the build in 0.56s, with only the three existing Fast Refresh warnings. |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -305,6 +309,8 @@ reconstruct.
 | 8 | 4.7 | Strict optional props in generated shadcn wrappers were incompatible with the repository's exact optional property setting. | The wrappers now omit undefined `checked`/`theme` values before spreading props; strictness remains enabled and the typecheck gate stays meaningful. | yes — §7 verification rows |
 | 9 | 4.8 | The embed tests originally assumed only the committed placeholder tree. | They now compare `IsPlaceholder()` with the embedded `.built` marker and skip the placeholder-copy assertion for a real build, allowing both build modes to be verified. | yes — `internal/webui/webui_test.go` and §7 |
 | 10 | 4.8 | The Dockerfile's frontend copy source did not match Vite's configured output directory. | The image stage now copies `/src/internal/webui/dist`, matching the Vite outDir and preserving the generated assets in the Go embed tree. | yes — `Dockerfile.server` and §7 |
+| 11 | 5.1 | pnpm 11 blocks dependency lifecycle scripts by default, including the required `msw` postinstall. | `web/pnpm-workspace.yaml` explicitly allows the `msw` build, so frozen installs remain reproducible and fail closed for unapproved packages. | yes — §7 and the workspace policy file |
+| 12 | 5.1 | Vitest's explicit `.ts` config import needs TypeScript support, and typed ESLint needs the config in a referenced project. | `tsconfig.node.json` enables `allowImportingTsExtensions` and includes `vitest.config.ts`; this keeps the native loader warning-free and the type gate complete. | yes — §7 |
 
 ---
 
@@ -397,8 +403,8 @@ the next one opens.
 | 4.6 | ESLint, Prettier, and the project's own rules | `agent-2:sonnet` | DONE |
 | 4.7 | Makefile and CI integration | `agent-2:sonnet` | DONE |
 | 4.8 | Update README.md and add `web/README.md` | `agent-3:haiku` | DONE |
-| 5.1 | Test dependencies and the Vitest configuration | `agent-2:sonnet` | TODO |
-| 5.2 | The test architecture rules (T-1…T-10) | `agent-2:sonnet` | TODO |
+| 5.1 | Test dependencies and the Vitest configuration | `agent-2:sonnet` | DONE |
+| 5.2 | The test architecture rules (T-1…T-10) | `agent-2:sonnet` | OPEN |
 | 5.3 | Render helpers and the provider wrapper | `agent-2:sonnet` | TODO |
 | 5.4 | Fixtures and contract validation | `agent-2:sonnet` | TODO |
 | 5.5 | The MSW server and handler factory | `agent-2:sonnet` | TODO |
@@ -509,6 +515,7 @@ not otherwise be visible.
 | `TestAssets_*`, `TestIsPlaceholderMatchesMarker`, `TestPlaceholderMentionsBuildCommand` | Go, unit | 3.1 | DONE |
 | `TestSPA_*` | Go, unit | 3.2 | DONE |
 | `TestRouter_UIDisabledServesNoSPA` | Go, unit | 3.3 | DONE |
+| `harness.selftest.test.ts` | Vitest, harness self-test | 5.1 | DONE |
 | `T-META-1` … `T-META-6` | Vitest, harness meta-tests | 5.10 | TODO |
 | `UI-API-001` … `UI-API-010` | Vitest, unit | 6.2 – 6.4 | TODO |
 | `UI-FMT-*` | Vitest, unit | 6.5 | TODO |
