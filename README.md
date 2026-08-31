@@ -118,6 +118,13 @@ docker compose -f deploy/compose/timescaledb.yml up -d
 
 The server applies migrations on startup (forward-only, idempotent) and listens on `:8080`. See `deploy/docker-compose.yml` for the pinned image `timescale/timescaledb:2.29.0-pg17` and the self-contained server/agent stack.
 
+The web interface is served by the server itself on the same address as the API:
+`http://<host>:8080/`. Set `PGLENS_UI_PASSWORD` (see the configuration table
+below) for the interface to be usable, or set `PGLENS_UI_ENABLED=false` to turn
+it off while leaving the API available. A binary built without running the
+frontend build serves a placeholder page that explains how to build the
+interface.
+
 **Binary:**
 
 ```sh
