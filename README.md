@@ -1114,6 +1114,8 @@ What it answers: where the database is spending its time, right now and historic
 
 `compute_query_id = on` is strongly recommended. Without it, samples cannot be attributed to a query and ASH loses much of its value. The server logs a warning once if `compute_query_id` is off.
 
+In the web UI, the Wait-event analysis page presents the samples as a stacked chart and lets you drill from a wait-event type to an individual wait event and then to a query. The `other` series is a fold of entries beyond the per-window retention limit, not a PostgreSQL wait event. When a range is under-sampled, the page shows the collected sample count and warns that conclusions are unreliable; when ASH is disabled it explains the `checks.ash` setting and the sampling-cost trade-off, and when `compute_query_id` is off it explains why query attribution is unavailable and points to the required configuration.
+
 Query by wait event type:
 
 ```sh
