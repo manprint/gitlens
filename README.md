@@ -7,8 +7,8 @@ pglens is a self-hostable monitoring system for fleets of PostgreSQL instances, 
 The backend implementation is complete through phase 10 of the analysis-backend
 plan. It ships the agent, server, durable ingest, replication/topology views,
 ASH, alerts, advisor findings, on-demand command gates, deployment artefacts,
-and the L1–L3 verification suites. The frontend/UI is intentionally outside
-this repository phase.
+and the L1–L3 verification suites. The frontend/UI currently ships as a minimal
+under-construction shell; the product views are being delivered incrementally.
 
 For the product boundary and the behaviour that is intentionally not promised,
 see [Product limits](docs/LIMITS.md).
@@ -16,6 +16,7 @@ see [Product limits](docs/LIMITS.md).
 ## Requirements
 
 - Go 1.26 or later to build
+- Node 20.19+ or 22.12+ and pnpm, only to build the web interface from source
 - Docker and Docker Compose for the test suites and for the server's storage
 - PostgreSQL 15 to 18 as monitoring targets
 - PostgreSQL 17 with TimescaleDB 2.29 for the server's own storage (see Running the server)
@@ -28,10 +29,30 @@ make build
 
 This produces `bin/pglens-agent` and `bin/pglens-server`.
 
+To build the web interface into the assets served by `pglens-server`:
+
+```sh
+make web-build
+```
+
+Running `make build` alone produces a binary with the committed placeholder
+page; run `make web-build` first when the built interface is required.
+
 ```sh
 make build-images          # builds ghcr.io/manprint/pglens-agent:dev and ...-server:dev
 make build-images-multiarch # linux/amd64 + linux/arm64 via docker buildx
 ```
+
+## Running the checks
+
+```sh
+make web-lint
+make web-typecheck
+make web-build
+```
+
+These commands cover frontend formatting/linting, TypeScript checking, and the
+production asset build.
 
 ## Quick start
 

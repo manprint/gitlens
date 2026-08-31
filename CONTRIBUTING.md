@@ -2,6 +2,20 @@
 
 ## Test levels
 
+## Checks required before submitting
+
+Changes to the web interface must pass the frontend gates:
+
+```sh
+make web-install
+make web-lint
+make web-typecheck
+make web-build
+```
+
+`make ci-local-unit` runs these gates together with the Go formatting, lint,
+build, unit-test, and coverage checks.
+
 - **L1 — Unit tests** (`make test`). Pure logic, no I/O, no Docker. Uses fake clock where timing is needed (the `clock.Frozen` fake time and `test.Eventually`/`Consistently` in harness for polling, never `time.Sleep`). Tests pass `-race -shuffle=on` for data-race detection and randomized execution order. Runs in seconds.
   - Belongs here: parsing, validation, calculations, marshaling, single-component behavior.
 
