@@ -185,6 +185,21 @@ available in one place: topology, lag, slot health, configuration drift, and
 the event timeline, with the same time-range control used by the rest of the
 interface.
 
+Selecting an instance opens Instance Detail. Choose a database to scope its
+metrics; the selector also shows how many databases are not monitored, so an
+empty panel is not mistaken for complete coverage. Standby instances are
+marked read-only, and every panel keeps the distinction between measured,
+stale, unavailable, and truncated data visible:
+
+- Counter resets appear as gaps with an annotation rather than a misleading
+  negative or zero rate.
+- Host metrics identify their source and say explicitly when the host cannot
+  provide them.
+- Settings show pending restarts and redact `archive_command` arguments with
+  an explanation.
+- Relation tables show a top-N truncation notice when the shared budget omits
+  rows; bloat values are estimates, not measurements.
+
 The selected time range is reflected in the URL, so a view can be shared as a
 link. Keyboard shortcuts are available for the main destinations and filters:
 
