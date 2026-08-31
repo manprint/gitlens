@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-08-31 — phase 3 closed; sub-phase 4.1 opened._
+_Last updated: 2026-08-31 — sub-phase 4.1 closed; sub-phase 4.2 opened._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,15 +54,15 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 4.1 |
+| **ID** | 4.2 |
 | **Status** | `OPEN` |
-| **Intent** | Create the pinned frontend package manifest |
-| **Next action:** | Complete sub-phase **4.1** in [phase_05.md](phase_05.md): add the exact-pinned package manifest, scripts, and lockfile |
+| **Intent** | Add strict TypeScript project references for app and Node tooling |
+| **Next action:** | Complete sub-phase **4.2** in [phase_05.md](phase_05.md): add the solution, app, and Node `tsconfig` files and prove `pnpm typecheck` |
 | **Assigned** | `agent-2:sonnet` |
-| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7 and phase 3 sub-phases 3.1–3.6 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, and the user-facing UI entry-point documentation are covered. The image build/L3 proof is deferred until phase 4 creates the web manifests; the next unit creates that manifest. |
+| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7 and phase 3 sub-phases 3.1–3.6 and phase 4 sub-phase 4.1 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, and the exact-pinned frontend manifest are covered. The image build/L3 proof is deferred until the buildable frontend scaffold exists; the next unit adds strict TypeScript project references. |
 | **Phase file** | [phase_04.md](phase_04.md) |
 
-Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, and phase 3 sub-phases 3.1–3.6 are closed; sub-phase 4.1 is the next unit.
+Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, and phase 4 sub-phase 4.1 are closed; sub-phase 4.2 is the next unit.
 Phase 3 is complete; phase 4 is in progress and the remaining frontend work is still pending.
 
 ---
@@ -174,12 +174,13 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 | 3.4 | sub-phase | 3.4 | 2026-08-31 | Wire frontend build into server image and deployments | `9c6b0f7` |
 | 3.5 | sub-phase | 3.5 | 2026-08-31 | Prove placeholder mode and authenticated API 404 JSON | verification-only |
 | 3.6 | sub-phase | 3.6 | 2026-08-31 | Document the embedded web interface entry point | `b7b005b` |
+| 4.1 | sub-phase | 4.1 | 2026-08-31 | Add exact-pinned frontend package manifest and lockfile | `ef0d3f0` |
 
 ---
 
 ## §5 — Files touched
 
-Sub-phase 3.1 added `.gitignore`, `internal/webui/doc.go`, `internal/webui/webui.go`, `internal/webui/webui_test.go`, and `internal/webui/dist/index.html`. Sub-phase 3.2 added `internal/server/webui.go`, `internal/server/webui_test.go`, and updated the server router, command entry point, and router call-site tests. Sub-phase 3.3 updated startup logging and added the disabled-UI router test. Sub-phase 3.4 updated `Dockerfile.server`, `deploy/docker-compose.yml`, `deploy/compose/docker-compose.yml`, and `deploy/server.example.env`. Sub-phase 3.5 was verification-only and touched no production files. Sub-phase 3.6 updated the `Running the server` section in `README.md`.
+Sub-phase 3.1 added `.gitignore`, `internal/webui/doc.go`, `internal/webui/webui.go`, `internal/webui/webui_test.go`, and `internal/webui/dist/index.html`. Sub-phase 3.2 added `internal/server/webui.go`, `internal/server/webui_test.go`, and updated the server router, command entry point, and router call-site tests. Sub-phase 3.3 updated startup logging and added the disabled-UI router test. Sub-phase 3.4 updated `Dockerfile.server`, `deploy/docker-compose.yml`, `deploy/compose/docker-compose.yml`, and `deploy/server.example.env`. Sub-phase 3.5 was verification-only and touched no production files. Sub-phase 3.6 updated the `Running the server` section in `README.md`. Sub-phase 4.1 added `web/package.json`, `web/pnpm-lock.yaml`, and `web/.npmrc`.
 
 `docs/LIMITS.md` was also touched by sub-phase 2.7.
 
@@ -189,7 +190,7 @@ Sub-phase 3.1 added `.gitignore`, `internal/webui/doc.go`, `internal/webui/webui
 
 ## §6 — In-flight work
 
-`claimed — sub-phase 4.1; verification not yet started`
+`claimed — sub-phase 4.2; verification not yet started`
 
 ---
 
@@ -253,6 +254,8 @@ Sub-phase 3.1 added `.gitignore`, `internal/webui/doc.go`, `internal/webui/webui
 | 2026-08-31 | 3.5 | `POST /api/v1/session`; authenticated `GET /api/v1/nope` | PASS | Temporary password login returns 204; the unknown API route returns `404`, `Content-Type: application/json`, and `{"error":"not_found","detail":"no such endpoint"}`. |
 | 2026-08-31 | 3.5 | `make build-images`; `make test-e2e` | DEFERRED | The commands require `web/package.json` and `web/pnpm-lock.yaml`, which are created in phase 4; run the single L3 regression pass at the phase-3/4 frontend build boundary and retain its measured duration. |
 | 2026-08-31 | 3.6 | README review; `git diff --check` | PASS | `Running the server` documents same-origin UI access, `PGLENS_UI_PASSWORD`, `PGLENS_UI_ENABLED=false`, and the placeholder build guidance without describing future pages. |
+| 2026-08-31 | 4.1 | `pnpm install --frozen-lockfile` | PASS | Exact-pinned workspace installs in 0.26s with pnpm 11.24.0; `pnpm ls typescript` reports 6.0.3. The non-frozen lockfile creation install took 4.29s. |
+| 2026-08-31 | 4.1 | `pnpm peers check` | WARN | `openapi-typescript@7.13.0` declares peer `typescript ^5.x`; the plan's required TypeScript 6.0.3 pin is retained for `typescript-eslint@8.68.0` compatibility (D13). |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -270,6 +273,7 @@ reconstruct.
 | 2 | 0.1 | The E2E evidence implementation also adjusts the harness scenario timeout from 10m to 20m, captures network transition timestamps before Docker state changes, widens the fresh-sample window to 180s, and widens the cascading stale-edge window to 120s. | The full-suite evidence runs exposed legitimate propagation/load delays and timing-boundary races; focused regressions passed after each correction, and the successful full run completed with no residual resources. | yes — §6, §7 and this row |
 | 3 | 0.3 | The identifier audit's symmetric `DIFF_COUNT` remains 68 after the preferred source-side cataloguing resolution. | The 68 `ONLY_IN_STATE` entries are historical/planned identifiers retained by the closed plan; the claim being repaired is that every identifier present in Go source is enumerated in §11, which now has 0 `ONLY_IN_SOURCE`. | yes — plan 002 §11 scope sentence and §7 audit row |
 | 4 | 3.5 | The image build and L3 regression proof cannot run before the frontend manifests exist. | The Dockerfile deliberately consumes the exact `web/package.json` and `web/pnpm-lock.yaml` produced by phase 4; placeholder mode and authenticated API routing were proven now, while the expensive image/E2E pass is deferred to the first complete frontend build boundary. | yes — §7 verification rows |
+| 5 | 4.1 | pnpm reports one peer warning for the mandated TypeScript/openapi-typescript combination. | `openapi-typescript@7.13.0` still advertises `typescript ^5.x`, while D13 fixes TypeScript at 6.0.3 because `typescript-eslint@8.68.0` requires `<6.1.0`; the generator is not used until phase 6. | yes — D13 and §7 |
 
 ---
 
@@ -307,7 +311,7 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 | 1 | [phase_02.md](phase_02.md) | OpenAPI contract and route-coverage gate | `agent-2:sonnet` | 1.1, 1.4 | DONE — 6/6 sub-phases closed |
 | 2 | [phase_03.md](phase_03.md) | UI session authentication | `agent-2:sonnet` | 2.1, 2.2, 2.3 | DONE — 7/7 sub-phases closed |
 | 3 | [phase_04.md](phase_04.md) | Embedded SPA serving and dev proxy | `agent-2:sonnet` | 3.2 | DONE — 6/6 sub-phases closed |
-| 4 | [phase_05.md](phase_05.md) | Frontend workspace scaffold | `agent-2:sonnet` | 4.1 | IN_PROGRESS — 4.1 next |
+| 4 | [phase_05.md](phase_05.md) | Frontend workspace scaffold | `agent-2:sonnet` | 4.1 | IN_PROGRESS — 4.2 next |
 | 5 | [phase_06.md](phase_06.md) | Frontend test harness and quality gates | `agent-2:sonnet` | 5.2, 5.4, 5.6, 5.9 | TODO |
 | 6 | [phase_07.md](phase_07.md) | Typed API client, query layer, state primitives | `agent-2:sonnet` | 6.4, 6.6 | TODO |
 | 7 | [phase_08.md](phase_08.md) | App shell, navigation, time range | `agent-2:sonnet` | 7.3 | TODO |
@@ -354,8 +358,8 @@ the next one opens.
 | 3.4 | Container and compose wiring | `agent-2:sonnet` | DONE |
 | 3.5 | Prove both build modes | `agent-2:sonnet` | DONE |
 | 3.6 | Update README.md | `agent-3:haiku` | DONE |
-| 4.1 | Package manifest with exact pins | `agent-2:sonnet` | OPEN |
-| 4.2 | TypeScript configuration | `agent-2:sonnet` | TODO |
+| 4.1 | Package manifest with exact pins | `agent-2:sonnet` | DONE |
+| 4.2 | TypeScript configuration | `agent-2:sonnet` | OPEN |
 | 4.3 | Vite configuration and the dev proxy | `agent-2:sonnet` | TODO |
 | 4.4 | Tailwind CSS 4 and the design tokens | `agent-2:sonnet` | TODO |
 | 4.5 | shadcn/ui installation and the first primitives | `agent-2:sonnet` | TODO |
