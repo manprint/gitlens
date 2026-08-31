@@ -5,6 +5,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
     <title>pglens</title>
+    <script>
+      ;(() => {
+        const fallback = 'dark'
+        try {
+          const raw = window.localStorage.getItem('pglens.preferences')
+          const parsed = raw ? JSON.parse(raw) : null
+          const storedTheme = parsed?.theme
+          const theme =
+            storedTheme === 'dark' || storedTheme === 'light' || storedTheme === 'system'
+              ? storedTheme
+              : fallback
+          const resolved =
+            theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : theme === 'light'
+                ? 'light'
+                : 'dark'
+          document.documentElement.classList.toggle('dark', resolved === 'dark')
+          document.documentElement.style.colorScheme = resolved
+        } catch {
+          document.documentElement.classList.add('dark')
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -5,6 +5,7 @@ import { useSignOut } from '@/api/auth'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
+import { useTheme } from '@/hooks/useTheme'
 import { formatRelative } from '@/lib/format/relative'
 
 import { Breadcrumbs } from './Breadcrumbs'
@@ -50,9 +51,7 @@ export function ConnectionIndicator({ lastPollFailed, lastSuccessAt }: Connectio
 export function Header({ connection = defaultConnection, dataUpdatedAt = 0 }: HeaderProps) {
   const navigate = useNavigate()
   const signOut = useSignOut()
-  const [dark, setDark] = useState(
-    () => typeof document !== 'undefined' && document.documentElement.classList.contains('dark'),
-  )
+  const { resolvedTheme, setTheme, theme } = useTheme()
   const [shortcutSheetOpen, setShortcutSheetOpen] = useState(false)
   const [pendingShortcut, setPendingShortcut] = useState(false)
 
@@ -109,9 +108,8 @@ export function Header({ connection = defaultConnection, dataUpdatedAt = 0 }: He
   }, [navigate, pendingShortcut])
 
   function toggleTheme() {
-    const next = !dark
-    document.documentElement.classList.toggle('dark', next)
-    setDark(next)
+    const next = theme === 'dark' ? 'light' : theme === 'light' ? 'system' : 'dark'
+    setTheme(next)
   }
 
   return (
@@ -122,7 +120,11 @@ export function Header({ connection = defaultConnection, dataUpdatedAt = 0 }: He
         <FreshnessBadge dataUpdatedAt={dataUpdatedAt} policy="fleet" />
         <ConnectionIndicator {...connection} />
         <Button aria-label="Toggle theme" onClick={toggleTheme} size="sm" variant="ghost">
-          {dark ? 'Light theme' : 'Dark theme'}
+          {theme === 'system'
+            ? `System (${resolvedTheme})`
+            : theme === 'dark'
+              ? 'Light theme'
+              : 'Dark theme'}
         </Button>
         <Button
           aria-label="Sign out"
