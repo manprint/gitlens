@@ -48,6 +48,28 @@ components:
           type: string
         detail:
           type: string
+    SessionLoginRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - password
+      properties:
+        password:
+          type: string
+          format: password
+          writeOnly: true
+    SessionStatus:
+      type: object
+      required:
+        - authenticated
+      properties:
+        authenticated:
+          type: boolean
+        configured:
+          type: boolean
+        expires_at:
+          type: string
+          format: date-time
     ClusterId:
       type: string
       pattern: '^[0-9]+$'
@@ -1548,6 +1570,58 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/session:
+    post:
+      tags: [session]
+      operationId: createSession
+      summary: Create a browser UI session.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SessionLoginRequest' }
+            examples:
+              default:
+                value: { password: correct-horse-battery-staple }
+      responses:
+        '204': { description: Session created; the response sets the pglens_session cookie. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+    get:
+      tags: [session]
+      operationId: getSession
+      summary: Report the current browser UI session.
+      security: []
+      responses:
+        '200':
+          description: A valid browser session is active.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionStatus' }
+              example: { authenticated: true, expires_at: '2026-08-31T13:00:00Z' }
+        '401':
+          description: No valid browser session is active.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionStatus' }
+              examples:
+                configured:
+                  value: { authenticated: false, configured: true }
+                notConfigured:
+                  value: { authenticated: false, configured: false }
+
+    delete:
+      tags: [session]
+      operationId: deleteSession
+      summary: Delete the current browser UI session.
+      security:
+        - uiSession: []
+      responses:
+        '204': { description: Session deleted; the response expires the pglens_session cookie. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
 
   /api/v1/push:
     post:

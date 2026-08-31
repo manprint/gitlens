@@ -2,12 +2,17 @@ package server
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // SessionStore keeps UI sessions in memory. Sessions are intentionally lost
@@ -29,6 +34,12 @@ var sessionExemptPaths = map[string]struct{}{
 	"GET /api/v1/session":  {},
 	"POST /api/v1/session": {},
 }
+
+const (
+	sessionCookieName       = "pglens_session"
+	sessionLoginMaxBody     = 4 << 10
+	sessionLoginFailureWait = 250 * time.Millisecond
+)
 
 func NewSessionStore(ttl time.Duration) *SessionStore {
 	return &SessionStore{
@@ -133,4 +144,116 @@ func sessionRequestExempt(r *http.Request) bool {
 	}
 	_, ok := sessionExemptPaths[path]
 	return ok
+}
+
+// RegisterSessionRoutes installs the browser login, status, and logout
+// endpoints. The GET and POST endpoints remain middleware exemptions so an
+// unauthenticated browser can establish and inspect its session state.
+func RegisterSessionRoutes(r chi.Router, cfg UIConfig, store *SessionStore) {
+	r.Post("/api/v1/session", func(w http.ResponseWriter, req *http.Request) {
+		var payload struct {
+			Password string `json:"password"`
+		}
+
+		decoder := json.NewDecoder(http.MaxBytesReader(w, req.Body, sessionLoginMaxBody))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON", "request body must contain a password")
+			return
+		}
+		var extra any
+		if err := decoder.Decode(&extra); err != io.EOF {
+			writeError(w, http.StatusBadRequest, "invalid JSON", "request body must contain one JSON object")
+			return
+		}
+
+		passwordMatches := cfg.Password != "" && constantTimePasswordMatch(payload.Password, cfg.Password)
+		if !passwordMatches {
+			time.Sleep(sessionLoginFailureWait)
+			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid password")
+			return
+		}
+		if store == nil {
+			writeError(w, http.StatusServiceUnavailable, "session_unavailable", "session store is not configured")
+			return
+		}
+
+		token, _, err := store.Create()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "session_unavailable", "could not create session")
+			return
+		}
+		http.SetCookie(w, sessionCookie(cfg, req, token, int(sessionTTL(cfg, store)/time.Second)))
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	r.Get("/api/v1/session", func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		if store != nil {
+			if cookie, err := req.Cookie(sessionCookieName); err == nil {
+				if expiresAt, ok := store.Validate(cookie.Value); ok {
+					writeJSON(w, http.StatusOK, map[string]any{
+						"authenticated": true,
+						"expires_at":    expiresAt.Format(time.RFC3339Nano),
+					})
+					return
+				}
+			}
+		}
+		writeJSON(w, http.StatusUnauthorized, map[string]any{
+			"authenticated": false,
+			"configured":    cfg.Password != "",
+		})
+	})
+
+	r.Delete("/api/v1/session", func(w http.ResponseWriter, req *http.Request) {
+		if store != nil {
+			if cookie, err := req.Cookie(sessionCookieName); err == nil {
+				store.Delete(cookie.Value)
+			}
+		}
+		http.SetCookie(w, sessionCookie(cfg, req, "", -1))
+		w.WriteHeader(http.StatusNoContent)
+	})
+}
+
+func sessionTTL(cfg UIConfig, store *SessionStore) time.Duration {
+	if cfg.SessionTTL > 0 {
+		return cfg.SessionTTL
+	}
+	if store != nil && store.ttl > 0 {
+		return store.ttl
+	}
+	return 24 * time.Hour
+}
+
+func constantTimePasswordMatch(got, want string) bool {
+	if len(got) != len(want) {
+		_ = subtle.ConstantTimeCompare([]byte(got), []byte(want))
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+}
+
+func sessionCookie(cfg UIConfig, req *http.Request, value string, maxAge int) *http.Cookie {
+	return &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    value,
+		Path:     "/",
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		Secure:   secureCookie(cfg, req),
+		SameSite: http.SameSiteStrictMode,
+	}
+}
+
+func secureCookie(cfg UIConfig, req *http.Request) bool {
+	switch strings.ToLower(strings.TrimSpace(cfg.CookieSecure)) {
+	case "true":
+		return true
+	case "false":
+		return false
+	default:
+		return req.TLS != nil || strings.EqualFold(strings.TrimSpace(req.Header.Get("X-Forwarded-Proto")), "https")
+	}
 }

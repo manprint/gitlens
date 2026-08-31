@@ -97,3 +97,11 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | GET | `/healthz` | `healthz` | Report process liveness. |
 | GET | `/metrics` | `getMetrics` | Expose Prometheus self-monitoring metrics. |
 | GET | `/readyz` | `readyz` | Report database and migration readiness. |
+
+## session
+
+| METHOD | Path | operationId | Summary |
+|---|---|---|---|
+| GET | `/api/v1/session` | `getSession` | Report the current browser UI session. |
+| POST | `/api/v1/session` | `createSession` | Create a browser UI session. |
+| DELETE | `/api/v1/session` | `deleteSession` | Delete the current browser UI session. |

@@ -1,14 +1,18 @@
 package server
 
 import (
+	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/require"
 )
 
@@ -213,6 +217,13 @@ func TestRequireCredential_ExemptPaths(t *testing.T) {
 			response, err := server.Client().Do(request)
 			require.NoError(t, err)
 			defer func() { require.NoError(t, response.Body.Close()) }()
+			if tt.name == "get session" {
+				require.Equal(t, http.StatusUnauthorized, response.StatusCode)
+				body, err := io.ReadAll(response.Body)
+				require.NoError(t, err)
+				require.Contains(t, string(body), `"configured":true`)
+				return
+			}
 			require.NotEqual(t, http.StatusUnauthorized, response.StatusCode)
 		})
 	}
@@ -267,6 +278,162 @@ func TestRequireCredential_DisabledLeavesRoutesOpen(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, response.Body.Close()) }()
 	require.NotEqual(t, http.StatusUnauthorized, response.StatusCode)
+}
+
+func TestSessionLogin_Success(t *testing.T) {
+	cfg := UIConfig{Enabled: true, Password: "correct", SessionTTL: time.Hour, CookieSecure: "false"}
+	store := NewSessionStore(time.Hour)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/session", strings.NewReader(`{"password":"correct"}`))
+
+	newSessionRoutes(cfg, store).ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusNoContent, recorder.Code)
+	require.Empty(t, recorder.Body.String())
+	cookies := recorder.Result().Cookies()
+	require.Len(t, cookies, 1)
+	cookie := cookies[0]
+	require.Equal(t, sessionCookieName, cookie.Name)
+	require.NotEmpty(t, cookie.Value)
+	require.Equal(t, "/", cookie.Path)
+	require.True(t, cookie.HttpOnly)
+	require.Equal(t, http.SameSiteStrictMode, cookie.SameSite)
+	require.Equal(t, 3600, cookie.MaxAge)
+	_, ok := store.Validate(cookie.Value)
+	require.True(t, ok)
+}
+
+func TestSessionLogin_WrongPassword(t *testing.T) {
+	cfg := UIConfig{Enabled: true, Password: "correct", SessionTTL: time.Hour}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/session", strings.NewReader(`{"password":"wrong"}`))
+	started := time.Now()
+
+	newSessionRoutes(cfg, NewSessionStore(time.Hour)).ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
+	require.GreaterOrEqual(t, time.Since(started), sessionLoginFailureWait)
+	require.Empty(t, recorder.Header().Values("Set-Cookie"))
+}
+
+func TestSessionLogin_BodyTooLarge(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/session", strings.NewReader(strings.Repeat("x", 1<<20)))
+
+	newSessionRoutes(UIConfig{Password: "correct"}, NewSessionStore(time.Hour)).ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+}
+
+func TestSessionLogin_MalformedJSON(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/session", strings.NewReader(`{"password":`))
+
+	newSessionRoutes(UIConfig{Password: "correct"}, NewSessionStore(time.Hour)).ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Contains(t, recorder.Body.String(), `"error":"invalid JSON"`)
+}
+
+func TestSessionGet_States(t *testing.T) {
+	tests := []struct {
+		name          string
+		password      string
+		authenticated bool
+		configured    bool
+		wantStatus    int
+	}{
+		{name: "authenticated", password: "correct", authenticated: true, configured: true, wantStatus: http.StatusOK},
+		{name: "unauthenticated", password: "correct", configured: true, wantStatus: http.StatusUnauthorized},
+		{name: "not configured", wantStatus: http.StatusUnauthorized},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := UIConfig{Password: tt.password, SessionTTL: time.Hour}
+			store := NewSessionStore(time.Hour)
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, "/api/v1/session", nil)
+			if tt.authenticated {
+				token, _, err := store.Create()
+				require.NoError(t, err)
+				request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+			}
+
+			newSessionRoutes(cfg, store).ServeHTTP(recorder, request)
+
+			require.Equal(t, tt.wantStatus, recorder.Code)
+			require.Equal(t, "no-store", recorder.Header().Get("Cache-Control"))
+			var status struct {
+				Authenticated bool   `json:"authenticated"`
+				Configured    bool   `json:"configured"`
+				ExpiresAt     string `json:"expires_at"`
+			}
+			require.NoError(t, json.NewDecoder(recorder.Body).Decode(&status))
+			require.Equal(t, tt.authenticated, status.Authenticated)
+			if !tt.authenticated {
+				require.Equal(t, tt.configured, status.Configured)
+			}
+			if tt.authenticated {
+				require.NotEmpty(t, status.ExpiresAt)
+			}
+		})
+	}
+}
+
+func TestSessionDelete_ClearsCookie(t *testing.T) {
+	cfg := UIConfig{Password: "correct", SessionTTL: time.Hour, CookieSecure: "false"}
+	store := NewSessionStore(time.Hour)
+	token, _, err := store.Create()
+	require.NoError(t, err)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/session", nil)
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+
+	newSessionRoutes(cfg, store).ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusNoContent, recorder.Code)
+	require.Contains(t, recorder.Header().Get("Set-Cookie"), "Max-Age=0")
+	cookies := recorder.Result().Cookies()
+	require.Len(t, cookies, 1)
+	require.Equal(t, -1, cookies[0].MaxAge)
+	_, ok := store.Validate(token)
+	require.False(t, ok)
+}
+
+func TestSecureCookie_Resolution(t *testing.T) {
+	tests := []struct {
+		name     string
+		setting  string
+		withTLS  bool
+		forward  string
+		expected bool
+	}{
+		{name: "auto TLS", setting: "auto", withTLS: true, expected: true},
+		{name: "auto forwarded HTTPS", setting: "auto", forward: "https", expected: true},
+		{name: "auto plain", setting: "auto", expected: false},
+		{name: "forced true", setting: "true", expected: true},
+		{name: "forced false", setting: "false", withTLS: true, expected: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/session", nil)
+			if tt.withTLS {
+				request.TLS = &tls.ConnectionState{}
+			}
+			if tt.forward != "" {
+				request.Header.Set("X-Forwarded-Proto", tt.forward)
+			}
+			require.Equal(t, tt.expected, secureCookie(UIConfig{CookieSecure: tt.setting}, request))
+		})
+	}
+}
+
+func newSessionRoutes(cfg UIConfig, store *SessionStore) http.Handler {
+	router := chi.NewRouter()
+	RegisterSessionRoutes(router, cfg, store)
+	return router
 }
 
 func newSessionTestServer(t *testing.T, cfg UIConfig, store *SessionStore) *httptest.Server {

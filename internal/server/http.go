@@ -25,6 +25,7 @@ func NewRouter(uiCfg UIConfig, store *SessionStore, auth *Auth, inv *Inventory, 
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+	RegisterSessionRoutes(r, uiCfg, store)
 	r.Post("/api/v1/push", IngestHandler(auth, inv, pipeline))
 	r.Get("/metrics", MetricsHandler())
 	api.RegisterRoutes(r)
