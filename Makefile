@@ -1,10 +1,13 @@
 GO      ?= go
+PNPM    ?= pnpm
+WEB     := web
 PKG     := ./...
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
 .PHONY: build fmt fmt-check lint test test-integration test-e2e test-e2e-full test-e2e-full-evidence test-e2e-matrix api-docs \
-        ci-local ci-local-unit ci-local-integration coverage coverage-gate generate golden clean build-images build-images-multiarch
+        ci-local ci-local-unit ci-local-integration coverage coverage-gate generate golden clean build-images build-images-multiarch \
+        web-install web-typecheck web-lint web-build
 
 build:
 	CGO_ENABLED=0 $(GO) build $(LDFLAGS) -o bin/pglens-agent  ./cmd/pglens-agent
@@ -54,6 +57,10 @@ ci-local-unit:
 	$(MAKE) build
 	$(MAKE) test
 	$(MAKE) coverage-gate
+	$(MAKE) web-install
+	$(MAKE) web-lint
+	$(MAKE) web-typecheck
+	$(MAKE) web-build
 
 ci-local-integration:
 	@set -eu; \
@@ -72,6 +79,19 @@ coverage-gate:
 	$(GO) test -race -coverprofile=coverage.out -covermode=atomic ./internal/...
 	./scripts/coverage_gate.sh coverage.out
 
+web-install:
+	cd $(WEB) && $(PNPM) install --frozen-lockfile
+
+web-typecheck:
+	cd $(WEB) && $(PNPM) run typecheck
+
+web-lint:
+	cd $(WEB) && $(PNPM) run lint && $(PNPM) run format:check
+
+web-build:
+	cd $(WEB) && PGLENS_VERSION=$(VERSION) $(PNPM) run build
+	@printf 'built_at=%s\nvite=8.2.2\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" > internal/webui/dist/.built
+
 generate:
 	@echo "not implemented until phase 3"; exit 0
 
@@ -82,7 +102,11 @@ golden:
 	$(GO) test -tags=integration -run Golden ./internal/wire -update
 
 clean:
-	rm -rf bin dist coverage.out coverage.html
+	rm -rf bin dist coverage.out coverage.html web/node_modules web/dist
+	@if test -d internal/webui/dist; then \
+		find internal/webui/dist -mindepth 1 -maxdepth 1 ! -name index.html -exec rm -rf {} +; \
+		git checkout -- internal/webui/dist/index.html; \
+	fi
 
 build-images:
 	docker build -f Dockerfile.agent -t ghcr.io/manprint/pglens-agent:dev --build-arg VERSION=$(VERSION) .

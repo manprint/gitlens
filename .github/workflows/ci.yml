@@ -15,6 +15,22 @@ permissions:
   contents: read
 
 jobs:
+  web:
+    name: Web build and quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: make web-install web-lint web-typecheck web-build
+
   lint:
     name: Format and lint
     runs-on: ubuntu-latest
