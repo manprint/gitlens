@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-08-31 — sub-phase 0.2 closed; sub-phase 0.3 next._
+_Last updated: 2026-08-31 — sub-phase 0.3 opened._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -55,15 +55,15 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 |-------|-------|
 | **Type** | sub-phase |
 | **ID** | 0.3 |
-| **Status** | `none` |
+| **Status** | `OPEN` |
 | **Intent** | Make plan 002's §11 traceability claim precise and complete, closing audit finding V001-F3 |
-| **Next action:** | Open sub-phase **0.3** in [phase_01.md](phase_01.md): add the identifier audit script, reconcile plan 002's §11, and record the resulting diff count |
+| **Next action:** | Complete sub-phase **0.3** in [phase_01.md](phase_01.md): add `scripts/id_audit.sh`, reconcile plan 002's §11, and record the resulting diff count |
 | **Assigned** | `agent-2:sonnet` |
-| **Repo state** | sub-phases 0.1 and 0.2 are complete and committed. Plan 002 phase 10.5 now names every path changed by close commit `06f50ea`, and D-059 remains unchanged. |
+| **Repo state** | sub-phases 0.1 and 0.2 are complete and committed. Plan 002 phase 10.5 now names every path changed by close commit `06f50ea`, and D-059 remains unchanged. This unit adds the identifier audit and traceability correction. |
 | **Phase file** | [phase_01.md](phase_01.md) |
 
-Sub-phase 0.1 is closed with durable E2E evidence; sub-phase 0.2 is the next
-unit. The remaining phase-0 units are still pending.
+Sub-phases 0.1 and 0.2 are closed; sub-phase 0.3 is the current unit. The
+remaining phase-0 units are still pending.
 
 ---
 
@@ -154,7 +154,7 @@ web-test`. Coverage gates run at every phase boundary, not only at the end.
 | # | Type | ID | Closed | Intent | Commit |
 |---|------|-----|--------|--------|--------|
 | 0.1 | sub-phase | 0.1 | 2026-08-31 | Capture durable E2E evidence and close V001-F1 | `8824301` |
-| 0.2 | sub-phase | 0.2 | 2026-08-31 | Reconcile phase-10.5 scope and close V001-F2 | `<pending>` |
+| 0.2 | sub-phase | 0.2 | 2026-08-31 | Reconcile phase-10.5 scope and close V001-F2 | `4341cb4` |
 
 ---
 
