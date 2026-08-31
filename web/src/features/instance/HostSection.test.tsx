@@ -30,7 +30,7 @@ function renderHost(data: Schemas['HostResponse']) {
 }
 
 describe('HostSection', () => {
-  it('UI-INST-030 renders measured host values and identifies the source', async () => {
+  it('UI-INST-030 renders measured host values', async () => {
     renderHost({
       instance_id: INSTANCE_ID,
       available: true,
@@ -47,7 +47,6 @@ describe('HostSection', () => {
     })
     await settle()
 
-    expect(screen.getByText('cgroup_v2')).toBeInTheDocument()
     expect(screen.getByText('25.0%')).toBeInTheDocument()
     expect(screen.getByText('8.0 GiB')).toBeInTheDocument()
     expect(screen.getByText('0.42')).toBeInTheDocument()
@@ -84,7 +83,32 @@ describe('HostSection', () => {
     expect(screen.queryByRole('article', { name: 'Memory total' })).not.toBeInTheDocument()
   })
 
-  it('UI-INST-033 supports the flat response emitted by the server', async () => {
+  it('UI-INST-033 displays the cgroup source for limited memory', async () => {
+    renderHost({
+      instance_id: INSTANCE_ID,
+      available: true,
+      source: 'cgroup_v2',
+      metrics: { host_mem_total_bytes: 4 * 1024 ** 3 },
+    })
+    await settle()
+
+    expect(screen.getByText('cgroup_v2')).toBeInTheDocument()
+    expect(screen.getByText('4.0 GiB')).toBeInTheDocument()
+  })
+
+  it('UI-INST-034 keeps the host section visible when metrics are unavailable', async () => {
+    renderHost({
+      instance_id: INSTANCE_ID,
+      available: false,
+      reason: 'target is not local to any agent',
+    })
+    await settle()
+
+    expect(screen.getByRole('region', { name: 'Host metrics' })).toBeInTheDocument()
+    expect(screen.getByText('target is not local to any agent')).toBeInTheDocument()
+  })
+
+  it('supports the flat response emitted by the server', async () => {
     renderHost({
       instance_id: INSTANCE_ID,
       available: true,
