@@ -14,6 +14,13 @@ type AlertConfig struct {
 	WebhookURL string
 }
 
+type UIConfig struct {
+	Enabled      bool
+	Password     string
+	SessionTTL   time.Duration
+	CookieSecure string // "auto" | "true" | "false"
+}
+
 func LoadAlertConfig(getenv func(string) string, readFile func(string) ([]byte, error)) (AlertConfig, error) {
 	if getenv == nil {
 		getenv = os.Getenv
@@ -54,4 +61,58 @@ func LoadAlertConfig(getenv func(string) string, readFile func(string) ([]byte, 
 		c.SlackURL = strings.TrimSpace(string(b))
 	}
 	return c, nil
+}
+
+func LoadUIConfig(getenv func(string) string, readFile func(string) ([]byte, error)) (UIConfig, error) {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	if readFile == nil {
+		readFile = os.ReadFile
+	}
+
+	config := UIConfig{
+		Enabled:      true,
+		SessionTTL:   24 * time.Hour,
+		CookieSecure: "auto",
+	}
+	if raw := strings.TrimSpace(getenv("PGLENS_UI_ENABLED")); raw != "" {
+		enabled, err := strconv.ParseBool(raw)
+		if err != nil {
+			return UIConfig{}, fmt.Errorf("invalid PGLENS_UI_ENABLED %q: %w", raw, err)
+		}
+		config.Enabled = enabled
+	}
+
+	passwordFile := strings.TrimSpace(getenv("PGLENS_UI_PASSWORD_FILE"))
+	if passwordFile != "" {
+		password, err := readFile(passwordFile)
+		if err != nil {
+			return UIConfig{}, fmt.Errorf("read UI password file: %w", err)
+		}
+		config.Password = strings.TrimSpace(string(password))
+	} else {
+		config.Password = getenv("PGLENS_UI_PASSWORD")
+	}
+
+	if raw := strings.TrimSpace(getenv("PGLENS_UI_SESSION_TTL")); raw != "" {
+		ttl, err := time.ParseDuration(raw)
+		if err != nil {
+			return UIConfig{}, fmt.Errorf("invalid PGLENS_UI_SESSION_TTL %q: %w", raw, err)
+		}
+		if ttl < 5*time.Minute || ttl > 720*time.Hour {
+			return UIConfig{}, fmt.Errorf("invalid PGLENS_UI_SESSION_TTL %q: accepted range is 5m to 720h", raw)
+		}
+		config.SessionTTL = ttl
+	}
+
+	if raw := strings.TrimSpace(getenv("PGLENS_UI_COOKIE_SECURE")); raw != "" {
+		secure := strings.ToLower(raw)
+		if secure != "auto" && secure != "true" && secure != "false" {
+			return UIConfig{}, fmt.Errorf("invalid PGLENS_UI_COOKIE_SECURE %q: accepted values are auto, true, false", raw)
+		}
+		config.CookieSecure = secure
+	}
+
+	return config, nil
 }
