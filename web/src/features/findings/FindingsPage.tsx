@@ -1,7 +1,8 @@
-import { useMemo } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useRef } from 'react'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { useAdvisorRules, useFindings } from '@/api/queries'
+import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState } from '@/components/state'
@@ -96,7 +97,10 @@ function SummaryButton({
 export function FindingsPage() {
   const findingsQuery = useFindings({ state: 'all', limit: 1000 })
   const rulesQuery = useAdvisorRules()
+  const location = useLocation()
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
+  const redirectedForUnauthorized = useRef(false)
 
   const state = readFilter(searchParams.get('state'), stateFilters, 'active')
   const severity = readFilter(searchParams.get('severity'), severityFilters, 'all')
@@ -111,6 +115,7 @@ export function FindingsPage() {
   const rules = useMemo(() => rulesQuery.data ?? [], [rulesQuery.data])
   const joinedFindings = useMemo(() => joinCatalogue(findings, rules), [findings, rules])
   const summary = useMemo(() => summariseFindings(findings), [findings])
+  const allFindingsDegraded = findings.length > 0 && findings.every((finding) => finding.state === 'degraded')
   const visibleFindings = useMemo(
     () =>
       rankFindings(
@@ -133,7 +138,17 @@ export function FindingsPage() {
     updateSearchParams(searchParams, setSearchParams, { state: 'degraded', severity: '' })
   }
 
-  if (findingsQuery.error) {
+  const unauthorized =
+    findingsQuery.error?.kind === 'unauthorized' || rulesQuery.error?.kind === 'unauthorized'
+
+  useEffect(() => {
+    if (!unauthorized || redirectedForUnauthorized.current) return
+    redirectedForUnauthorized.current = true
+    const next = `${location.pathname}${location.search}`
+    void navigate(`/login?next=${encodeURIComponent(next)}`, { replace: true })
+  }, [location.pathname, location.search, navigate, unauthorized])
+
+  if (findingsQuery.error && !findingsQuery.data) {
     return (
       <ErrorState
         endpoint="findings"
@@ -142,16 +157,7 @@ export function FindingsPage() {
       />
     )
   }
-  if (rulesQuery.error) {
-    return (
-      <ErrorState
-        endpoint="advisor rules"
-        failure={rulesQuery.error}
-        onRetry={() => void rulesQuery.refetch()}
-      />
-    )
-  }
-  if (findingsQuery.isPending || rulesQuery.isPending) {
+  if (findingsQuery.isPending || (rulesQuery.isPending && !rulesQuery.data)) {
     return (
       <section aria-busy="true" aria-label="Loading advisor findings" role="status">
         Loading advisor findings…
@@ -170,7 +176,29 @@ export function FindingsPage() {
       <PageHeader
         title="Advisor findings"
         subtitle="Rules evaluated from collected PostgreSQL statistics, with the evidence and inputs behind each result."
+        freshness={<FreshnessBadge dataUpdatedAt={findingsQuery.dataUpdatedAt} policy="findings" />}
       />
+
+      {findingsQuery.error ? (
+        <ErrorState
+          endpoint="findings"
+          failure={findingsQuery.error}
+          onRetry={() => void findingsQuery.refetch()}
+        />
+      ) : null}
+
+      {rulesQuery.error ? (
+        <div className="space-y-2">
+          <ErrorState
+            endpoint="advisor rules"
+            failure={rulesQuery.error}
+            onRetry={() => void rulesQuery.refetch()}
+          />
+          <p role="status">
+            Advisor rule explanations are unavailable; findings remain visible without catalogue context.
+          </p>
+        </div>
+      ) : null}
 
       <Section
         title="Summary"
@@ -206,6 +234,11 @@ export function FindingsPage() {
           <p className="text-muted-foreground mt-3 text-sm">
             By default, {hiddenMuted} muted and {hiddenResolved} resolved findings are hidden. Use the
             state filter to show them.
+          </p>
+        ) : null}
+        {allFindingsDegraded ? (
+          <p className="text-warning mt-3 text-sm" role="status">
+            Rules could not be evaluated; this is not a healthy “no findings” result.
           </p>
         ) : null}
       </Section>
@@ -297,8 +330,12 @@ export function FindingsPage() {
           </div>
         ) : (
           <EmptyState
-            description="Try clearing one or more filters or choose a different state."
-            title="No findings match these filters"
+            description={
+              findings.length === 0
+                ? `No findings are currently firing. ${rules.length} advisor rule${rules.length === 1 ? '' : 's'} evaluated successfully.`
+                : 'Try clearing one or more filters or choose a different state.'
+            }
+            title={findings.length === 0 ? 'No active findings' : 'No findings match these filters'}
           />
         )}
       </Section>

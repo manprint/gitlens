@@ -2,8 +2,10 @@ import { act, fireEvent, screen, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { qk } from '@/api/keys'
+import { REFRESH } from '@/api/policy'
 import { NOW } from '@/test/time'
-import { ok } from '@/test/msw/handlers'
+import { ok, sequence, status } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { renderWithProviders } from '@/test/render'
@@ -39,17 +41,25 @@ function rule(overrides: Partial<AdvisorRule> = {}): AdvisorRule {
   return { ...baseRule, ...overrides }
 }
 
+async function settlePage() {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0)
+  })
+}
+
+async function renderPage(route = '/findings') {
+  const view = renderWithProviders(<FindingsPage />, { route })
+  await settlePage()
+  return view
+}
+
 async function renderFindings(
   findings: FindingRecord[] = [finding()],
   rules: AdvisorRule[] = [rule()],
   route = '/findings',
 ) {
   server.use(ok('getFindings', findings), ok('getAdvisorRules', rules))
-  const view = renderWithProviders(<FindingsPage />, { route })
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(0)
-  })
-  return view
+  return renderPage(route)
 }
 
 async function settleMutation() {
@@ -134,7 +144,8 @@ describe('FindingsPage', () => {
       [rule({ needs: ['history_7d'] })],
     )
 
-    expect(screen.getByRole('status')).toHaveTextContent(/seven days of history/)
+    const card = screen.getByRole('article', { name: 'History unavailable' })
+    expect(within(card).getByRole('status')).toHaveTextContent(/seven days of history/)
     expect(screen.getByText(/^Remedy: waiting for seven days of history\.$/)).toBeInTheDocument()
   })
 
@@ -156,6 +167,90 @@ describe('FindingsPage', () => {
     expect(screen.getByText('lag_seconds')).toBeInTheDocument()
     expect(screen.getByText('42')).toBeInTheDocument()
     expect(screen.getByText('true')).toBeInTheDocument()
+  })
+
+  it('UI-FIND-040 presents an affirmative empty state with the evaluated rule count', async () => {
+    await renderFindings([], [rule(), rule({ id: 'rule-2', severity: 'info', scope: 'instance' })])
+
+    expect(screen.getByRole('heading', { name: 'No active findings' })).toBeInTheDocument()
+    expect(screen.getByText(/No findings are currently firing/)).toBeInTheDocument()
+    expect(screen.getByText(/2 advisor rules evaluated successfully/)).toBeInTheDocument()
+  })
+
+  it('UI-FIND-041 makes an all-degraded result explicit instead of presenting it as healthy', async () => {
+    await renderFindings([finding({ state: 'degraded', title: 'Evaluation unavailable' })])
+
+    expect(screen.getByText(/not a healthy “no findings” result/i)).toBeInTheDocument()
+  })
+
+  it('UI-FIND-042 keeps findings visible when the rule catalogue fails', async () => {
+    server.use(
+      ok('getFindings', [finding()]),
+      status('getAdvisorRules', 500, { error: 'internal_error', detail: 'catalogue unavailable' }),
+    )
+    await renderPage()
+
+    expect(screen.getByRole('heading', { name: 'Replication lag' })).toBeInTheDocument()
+    expect(screen.getByText(/explanations are unavailable/i)).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not load advisor rules')
+  })
+
+  it('UI-FIND-043 renders Stale after the last findings snapshot ages past its threshold', async () => {
+    const view = await renderFindings()
+
+    view.queryClient.setQueryData(
+      qk.findings('all', undefined, undefined, undefined, undefined, undefined, undefined, 1000),
+      [finding()],
+      { updatedAt: Date.now() - REFRESH.findings.staleAfter },
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000)
+    })
+
+    expect(screen.getByRole('status', { name: /Stale data:/i })).toBeInTheDocument()
+  })
+
+  it('UI-FIND-044 navigates a 401 to login exactly once', async () => {
+    server.use(status('getFindings', 401), ok('getAdvisorRules', [rule()]))
+    const view = await renderPage()
+
+    expect(view.router.state.location.pathname).toBe('/login')
+    expect(view.router.state.location.search).toBe('?next=%2Ffindings')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH.findings.interval * 2)
+    })
+    expect(view.router.state.location.pathname).toBe('/login')
+    expect(view.router.state.location.search).toBe('?next=%2Ffindings')
+  })
+
+  it('UI-FIND-045 renders a retryable server error and recovers on retry', async () => {
+    server.use(
+      status('getFindings', 500, { error: 'internal_error', detail: 'findings unavailable' }),
+      ok('getAdvisorRules', [rule()]),
+    )
+    await renderPage()
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not load findings')
+    server.use(ok('getFindings', [finding()]))
+    fireEvent.click(screen.getByRole('button', { name: 'Retry findings' }))
+    await settlePage()
+    await settlePage()
+
+    expect(screen.getByRole('heading', { name: 'Replication lag' })).toBeInTheDocument()
+  })
+
+  it('UI-FIND-046 polls findings at the configured interval', async () => {
+    server.use(sequence('getFindings', [finding()], []), ok('getAdvisorRules', [rule()]))
+    await renderPage()
+
+    expect(screen.getByRole('heading', { name: 'Replication lag' })).toBeInTheDocument()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH.findings.interval)
+      await vi.runOnlyPendingTimersAsync()
+    })
+    await settlePage()
+
+    expect(screen.getByText(/No findings are currently firing/)).toBeInTheDocument()
   })
 
   it('UI-FIND-020 the mute dialog requires a reason', async () => {
