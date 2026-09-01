@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 
 import { usePlans } from '@/api/queries'
 import type { Schemas } from '@/api/types'
+import { Degraded } from '@/components/state/Degraded'
 import { ErrorState } from '@/components/state/ErrorState'
 import { formatTimestamp } from '@/lib/format'
 
@@ -171,6 +172,13 @@ export function PlanHistory({ queryid, instanceId, datname }: PlanHistoryProps) 
   }
 
   if (plansQuery.error && response === undefined) {
+    if (plansQuery.error.kind === 'not_found') {
+      return (
+        <Degraded
+          reason={`Query ${String(queryid)} is no longer available in plan history. The entry may have been evicted from pg_stat_statements; query ids are only comparable within this cluster.`}
+        />
+      )
+    }
     return (
       <ErrorState
         endpoint="plan history"

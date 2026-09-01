@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 
 import { useCreateCommand } from '@/api/commands'
 import type { PermTier } from '@/api/types'
-import { NotPermitted } from '@/components/state'
+import { ErrorState, NotPermitted } from '@/components/state'
 import {
   Dialog,
   DialogContent,
@@ -179,6 +179,17 @@ export function ExplainPanel({
       Plan only
     </button>
   )
+  const analyzeButton = (
+    <Button
+      type="button"
+      variant="outline"
+      aria-label="Plan with ANALYZE"
+      onClick={() => setConfirmationOpen(true)}
+      disabled={queryID === null || createCommand.isPending}
+    >
+      Plan with ANALYZE
+    </Button>
+  )
 
   return (
     <section aria-labelledby="explain-panel-title" className="space-y-5">
@@ -198,14 +209,13 @@ export function ExplainPanel({
             {planOnlyButton}
           </NotPermitted>
         )}
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => setConfirmationOpen(true)}
-          disabled={queryID === null || createCommand.isPending}
-        >
-          Plan with ANALYZE
-        </Button>
+        {currentTier === 'T2' ? (
+          analyzeButton
+        ) : (
+          <NotPermitted required="T2" current={currentTier}>
+            {analyzeButton}
+          </NotPermitted>
+        )}
       </div>
 
       {normalized && (
@@ -216,6 +226,13 @@ export function ExplainPanel({
       )}
 
       {status && <p role="status">{status}</p>}
+      {createCommand.error && (
+        <ErrorState
+          endpoint="EXPLAIN command"
+          failure={createCommand.error.failure}
+          onRetry={() => createCommand.reset()}
+        />
+      )}
       {result !== undefined && <PlanResult result={result} />}
 
       <Dialog open={confirmationOpen} onOpenChange={setConfirmationOpen}>

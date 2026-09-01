@@ -14,7 +14,7 @@ const COMMAND_ID = '22222222-2222-4222-8222-222222222222'
 function renderPanel(props: Partial<React.ComponentProps<typeof ExplainPanel>> = {}) {
   return renderWithProviders(
     <ExplainPanel
-      currentTier="T1"
+      currentTier="T2"
       datname="app"
       instanceId={INSTANCE_ID}
       queryid={123}
@@ -131,6 +131,32 @@ describe('ExplainPanel', () => {
 
     expect(screen.getByRole('note')).toHaveTextContent('normalised with placeholders')
     expect(screen.getByRole('note')).toHaveTextContent('parameter-sensitive')
+  })
+
+  it('gates ANALYZE at T2 and preserves the disabled control', () => {
+    renderPanel({ currentTier: 'T1' })
+
+    const button = screen.getByRole('button', { name: /Plan with ANALYZE/ })
+    expect(button).toBeDisabled()
+    expect(screen.getByText('Requires T2 permission; current tier is T1.')).toBeInTheDocument()
+  })
+
+  it('UI-QRY-045 renders the server detail for an unprocessable EXPLAIN request', async () => {
+    server.use(
+      http.post('*/api/v1/instances/:id/commands', () =>
+        HttpResponse.json(
+          { error: 'invalid command', detail: 'query was evicted before execution' },
+          { status: 422 },
+        ),
+      ),
+    )
+
+    renderPanel()
+    fireEvent.click(screen.getByRole('button', { name: /Run plan only/i }))
+    vi.useRealTimers()
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+    expect(screen.getByRole('alert')).toHaveTextContent('invalid command: query was evicted')
   })
 
   it('keeps the confirmation dialog accessible', async () => {
