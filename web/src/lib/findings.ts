@@ -59,7 +59,7 @@ function compareRank(left: FindingRecord, right: FindingRecord): number {
 }
 
 /** Rank findings without mutating the API response. Equal rows retain input order. */
-export function rankFindings(findings: readonly FindingRecord[]): FindingRecord[] {
+export function rankFindings<T extends FindingRecord>(findings: readonly T[]): T[] {
   return [...findings].sort(compareRank)
 }
 

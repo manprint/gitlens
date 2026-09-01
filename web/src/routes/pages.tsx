@@ -7,6 +7,7 @@ import ExplainPanel from '@/features/queries/ExplainPanel'
 import PlanHistory from '@/features/queries/PlanHistory'
 import QueryListPageComponent from '@/features/queries/QueryListPage'
 import LocksPageComponent from '@/features/locks/BlockingTree'
+import { FindingsPage as FindingsPageComponent } from '@/features/findings/FindingsPage'
 import { useParams } from 'react-router-dom'
 
 interface PlaceholderPageProps {
@@ -67,7 +68,7 @@ export function LocksPage() {
 }
 
 export function FindingsPage() {
-  return <PlaceholderPage surface="Advisor findings" />
+  return <FindingsPageComponent />
 }
 
 export function AlertsPage() {
