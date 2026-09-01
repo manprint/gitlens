@@ -42,7 +42,7 @@ async function fleetContext(api: any): Promise<{
 }> {
   const fleet = await clusters(api)
   expect(fleet.length, 'API must expose a populated fleet').toBeGreaterThan(0)
-  const cluster = fleet[0]
+  const cluster = fleet[0]!
   const listed = Array.isArray(cluster.instances) ? cluster.instances : []
   const allInstances = listed.length > 0 ? listed : await instances(api)
   const clusterInstances = allInstances.filter(
@@ -51,7 +51,7 @@ async function fleetContext(api: any): Promise<{
   expect(clusterInstances.length, 'cluster must expose at least one instance').toBeGreaterThan(0)
   const instance =
     clusterInstances.find((item) => String(item.perm_tier ?? item.permission_tier ?? '').toUpperCase() === 'T1') ??
-    clusterInstances[0]
+    clusterInstances[0]!
   return { cluster, instances: clusterInstances, instance }
 }
 
@@ -112,6 +112,7 @@ test('SYS-UI-001: failover preserves identity and raises an alert', async ({ sig
       return id && id !== String(before.cluster.primary ?? '') && !role.includes('primary')
     }) ?? before.instances[1]
   expect(standby, 'primary-standby fixture must expose a standby').toBeTruthy()
+  if (!standby) throw new Error('primary-standby fixture must expose a standby')
   const standbyID = instanceID(standby)
   const standbyAddress = instanceAddress(standby)
   expect(standbyID).not.toBe('')
@@ -121,7 +122,7 @@ test('SYS-UI-001: failover preserves identity and raises an alert', async ({ sig
   await writeFile(readyFile!, 'captured')
 
   await pollAPI(async () => {
-    const current = (await clusters(api))[0]
+    const current = (await clusters(api))[0]!
     const primary = JSON.stringify(current.primary ?? current.primary_instance_id ?? '').toLowerCase()
     return primary.includes(standbyID.toLowerCase()) || primary.includes(standbyAddress.toLowerCase())
   })
@@ -145,7 +146,7 @@ test('SYS-UI-001: failover preserves identity and raises an alert', async ({ sig
   await expect(page.locator('body')).toContainText(/failover_detected/i)
   await expect(page.locator('body')).toContainText(/firing/i)
 
-  const after = (await clusters(api))[0]
+  const after = (await clusters(api))[0]!
   expect(after.cluster_id).toBe(clusterID)
 })
 
