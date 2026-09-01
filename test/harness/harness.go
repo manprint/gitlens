@@ -92,6 +92,7 @@ type Harness struct {
 	agentStandbyPort  int       // host port for "pg-standby" baked into the currently-running agent config (0 for standalone)
 	agentStandbyBPort int       // host port for "pg-standby-b" in cascading binary mode
 	agentServerPort   int       // host port for pglens-server baked into the currently-running agent config
+	binaryComposeEnv  []string  // fixed host-port overrides reused by binary-mode compose commands
 	pools             map[string]*pgxpool.Pool
 	poolMu            sync.Mutex
 	apiClient         *APIClient
@@ -365,28 +366,30 @@ func (h *Harness) startAgentBinary() error {
 		// Two targets for primary-standby topology.
 		if h.topology == TopologyCascading {
 			targetsYAML = fmt.Sprintf(`targets:
-	  - name: pg-primary
-	    dsn: postgres://pglens:pglens-monitoring-test@localhost:%d/postgres?sslmode=disable
-	    databases:
-	      max: 10
-	  - name: pg-standby-a
-	    dsn: postgres://pglens:pglens-monitoring-test@localhost:%d/postgres?sslmode=disable
-	    databases:
-	      max: 10
-	  - name: pg-standby-b
-	    dsn: postgres://pglens:pglens-monitoring-test@localhost:%d/postgres?sslmode=disable
-	    databases:
-	      max: 10`, primaryPort, standbyPort, standbyBPort)
-		} else {
-			targetsYAML = fmt.Sprintf(`targets:
   - name: pg-primary
     dsn: postgres://pglens:pglens-monitoring-test@localhost:%d/postgres?sslmode=disable
     databases:
       max: 10
-  - name: pg-standby
+  - name: pg-standby-a
     dsn: postgres://pglens:pglens-monitoring-test@localhost:%d/postgres?sslmode=disable
     databases:
-      max: 10`, primaryPort, standbyPort)
+      max: 10
+  - name: pg-standby-b
+    dsn: postgres://pglens:pglens-monitoring-test@localhost:%d/postgres?sslmode=disable
+    databases:
+      max: 10`, primaryPort, standbyPort, standbyBPort)
+		} else {
+			targetsYAML = fmt.Sprintf(`targets:
+  - name: pg-standby
+    dsn: postgres://pglens_t2:pglens-monitoring-test@localhost:%d/postgres?sslmode=disable
+    databases:
+      max: 10
+    allow_signal: true
+  - name: pg-primary
+    dsn: postgres://pglens_t1:pglens-monitoring-test@localhost:%d/postgres?sslmode=disable
+    databases:
+      max: 10
+    allow_explain_analyze: true`, standbyPort, primaryPort)
 		}
 	} else {
 		// Single target for standalone topology.
@@ -536,16 +539,18 @@ func (h *Harness) composeUp() error {
 				return fmt.Errorf("pick fixed PostgreSQL host ports: %w", err)
 			}
 			primaryPort, standbyPort := ports[0], ports[1]
-			env = append(env,
+			h.binaryComposeEnv = []string{
 				fmt.Sprintf("PG_PRIMARY_HOST_PORT=%d", primaryPort),
-				fmt.Sprintf("PG_STANDBY_HOST_PORT=%d", standbyPort))
+				fmt.Sprintf("PG_STANDBY_HOST_PORT=%d", standbyPort),
+			}
 		} else {
 			pgPort, err := freeTCPPort()
 			if err != nil {
 				return fmt.Errorf("pick fixed pg host port: %w", err)
 			}
-			env = append(env, fmt.Sprintf("PG_HOST_PORT=%d", pgPort))
+			h.binaryComposeEnv = []string{fmt.Sprintf("PG_HOST_PORT=%d", pgPort)}
 		}
+		env = append(env, h.binaryComposeEnv...)
 		cmd.Env = env
 	}
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -932,6 +937,9 @@ func (h *Harness) composeOutput(argv ...string) (string, error) {
 	args = append(args, argv...)
 	cmd := exec.Command("docker", args...)
 	cmd.Dir = h.composeDir
+	if h.agentMode == AgentModeBinary {
+		cmd.Env = append(os.Environ(), h.binaryComposeEnv...)
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("docker %s: %w, output: %s", strings.Join(args, " "), err, out)

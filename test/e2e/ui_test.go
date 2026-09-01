@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -154,30 +155,38 @@ func runUISpec(ctx context.Context, e *scenario.Env, id string) error {
 	readyFile := filepath.Join(e.T.TempDir(), "ui-ready")
 	e.T.Setenv("PGLENS_UI_READY_FILE", readyFile)
 	cmd.Env = os.Environ()
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start Playwright %s: %w", id, err)
 	}
-	if err := waitForFile(ctx, readyFile); err != nil {
+	processDone := make(chan error, 1)
+	go func() { processDone <- cmd.Wait() }()
+	stopPlaywright := func() {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+		select {
+		case <-processDone:
+		case <-time.After(10 * time.Second):
+			e.T.Log("timed out waiting for Playwright process teardown")
+		}
+	}
+	if err := waitForFileOrProcess(ctx, readyFile, processDone); err != nil {
+		stopPlaywright()
 		return fmt.Errorf("wait for Playwright %s readiness: %w", id, err)
 	}
 	if err := e.Compose("kill", "-s", "SIGKILL", "pg-primary"); err != nil {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+		stopPlaywright()
 		return fmt.Errorf("kill pg-primary: %w", err)
 	}
 	if _, err := e.ExecAs("pg-standby", "postgres", "pg_ctl", "promote", "-D", "/var/lib/postgresql/data"); err != nil {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+		stopPlaywright()
 		return fmt.Errorf("promote pg-standby: %w", err)
 	}
 	if err := rejoinOldPrimary(ctx, e); err != nil {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+		stopPlaywright()
 		return err
 	}
-	if err := cmd.Wait(); err != nil {
+	if err := <-processDone; err != nil {
 		return fmt.Errorf("pnpm exec playwright test --grep %s: %w", id, err)
 	}
 	return nil
@@ -216,7 +225,7 @@ func rejoinOldPrimary(ctx context.Context, e *scenario.Env) error {
 	return nil
 }
 
-func waitForFile(ctx context.Context, path string) error {
+func waitForFileOrProcess(ctx context.Context, path string, processDone <-chan error) error {
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -226,6 +235,11 @@ func waitForFile(ctx context.Context, path string) error {
 			return err
 		}
 		select {
+		case err := <-processDone:
+			if err == nil {
+				return fmt.Errorf("Playwright exited before readiness")
+			}
+			return fmt.Errorf("Playwright exited before readiness: %w", err)
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:

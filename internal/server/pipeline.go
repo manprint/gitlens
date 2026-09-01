@@ -134,12 +134,18 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	// existing at all (topology.Engine's own TestEngine_OrphanStandby: an
 	// edge object with a resolvable target is required to start its clock).
 	addrToInstance := make(map[string]uuid.UUID, len(env.Instances))
+	var primaryID uuid.UUID
+	primaryCount := 0
 	for _, inst := range env.Instances {
 		if inst.Addr == "" {
-			continue
-		}
-		if id, err := uuid.Parse(inst.InstanceID); err == nil {
+		} else if id, err := uuid.Parse(inst.InstanceID); err == nil {
 			addrToInstance[inst.Addr] = id
+		}
+		if inst.Role == "primary" {
+			if id, err := uuid.Parse(inst.InstanceID); err == nil {
+				primaryID = id
+				primaryCount++
+			}
 		}
 	}
 	dbAddrCache := make(map[string]uuid.UUID)
@@ -198,6 +204,15 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		var topoEdges []topology.Edge
 		for _, we := range inst.TopologyEdges {
 			toID, ok := resolveAddr(ctx, cidDB, we.To)
+			if !ok && inst.Role == "standby" && primaryCount == 1 {
+				// A receiver may report the upstream's logical/container hostname
+				// while the agent reaches both databases through a shared address
+				// (for example localhost plus distinct published ports). In that
+				// case the address lookup is intentionally incomplete, but a single
+				// primary in this envelope is an unambiguous upstream for a
+				// standby. Keep the edge instead of silently dropping topology.
+				toID, ok = primaryID, true
+			}
 			if !ok {
 				continue // unresolvable — no instance in this cluster has ever reported this addr
 			}
