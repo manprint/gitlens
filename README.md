@@ -324,6 +324,8 @@ The server evaluates ten built-in Tier 0 rules: `agent_down`, `instance_unreacha
 
 Configure Slack or a generic webhook with the variables above. A silence suppresses notification while the alert remains visible and continues to be evaluated.
 
+The web interface provides an Alerts page with suppression details, an Alert Rules page that keeps Tier 0 rules always on and read-only while allowing Tier 1 edits, a Silences page that previews which currently firing alerts would be suppressed before creation, and a fleet-wide Events page with time-range, cluster, type, and limit filters that explains when the server's 1,000-event cap is reached; if no channel is configured, alerts are persisted but not delivered, and suppression is never resolution. Delivery remains limited to Slack via `PGLENS_ALERT_SLACK_WEBHOOK_URL` or `PGLENS_ALERT_SLACK_WEBHOOK_URL_FILE` (with the accepted legacy `PGLENS_SLACK_WEBHOOK_URL` aliases) and generic webhooks via `PGLENS_WEBHOOK_URL`.
+
 ```sh
 curl -s http://localhost:8080/api/v1/alerts | jq .
 curl -s -X POST http://localhost:8080/api/v1/silences \
