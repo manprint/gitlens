@@ -296,9 +296,8 @@ test('SYS-UI-006: plan-only execution is audited without query text', async ({
         const payload = await response.json()
         const statement = (Array.isArray(payload.statements) ? payload.statements : []).find(
           (item: JsonObject) =>
-            /^(select|with|values)\b/i.test(String(item.query_text ?? '').trim()) &&
-            !/\b(set|show|reset|alter|create|drop|insert|update|delete|grant|revoke|copy|vacuum|truncate)\b/i.test(
-              String(item.query_text ?? ''),
+            /^select current_database\(\), current_user\s*$/i.test(
+              String(item.query_text ?? '').trim(),
             ),
         )
         selectedQueryID = statement?.queryid

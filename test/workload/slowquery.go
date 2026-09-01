@@ -10,7 +10,7 @@ import (
 
 // slowQuery creates slow queries using pg_sleep. Multiple queries are executed
 // concurrently, each holding a connection open for the specified duration.
-func slowQuery(ctx context.Context, pool *pgxpool.Pool, sleepDuration time.Duration, count int, report *Report) error {
+func slowQuery(ctx context.Context, pool *pgxpool.Pool, sleepDuration time.Duration, count int, planSafe bool, report *Report) error {
 	var wg sync.WaitGroup
 	successCount := 0
 	failureCount := 0
@@ -30,8 +30,16 @@ func slowQuery(ctx context.Context, pool *pgxpool.Pool, sleepDuration time.Durat
 			}
 			defer conn.Release()
 
-			// Execute a sleep query
-			_, err = conn.Exec(ctx, "SELECT pg_sleep($1)", sleepDuration.Seconds())
+			// pg_stat_statements normalizes literal constants to $N. The
+			// parameter-free plan-safe variant intentionally uses only stable
+			// functions so the UI EXPLAIN acceptance test can execute it.
+			query := "SELECT pg_sleep($1)"
+			args := []any{sleepDuration.Seconds()}
+			if planSafe {
+				query = "SELECT current_database(), current_user"
+				args = nil
+			}
+			_, err = conn.Exec(ctx, query, args...)
 			if err != nil {
 				mu.Lock()
 				failureCount++

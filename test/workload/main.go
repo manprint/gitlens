@@ -185,6 +185,7 @@ func cmdSlowQuery(ctx context.Context, args []string) error {
 	dsn := fs.String("dsn", os.Getenv("PGLENS_TEST_DSN"), "PostgreSQL connection string")
 	sleep := fs.Duration("sleep", 30*time.Second, "how long each query sleeps")
 	count := fs.Int("count", 3, "number of queries to run")
+	planSafe := fs.Bool("plan-safe", false, "run a parameter-free SELECT suitable for EXPLAIN acceptance tests")
 	seed := fs.Int64("seed", time.Now().UnixNano(), "random seed")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -199,7 +200,7 @@ func cmdSlowQuery(ctx context.Context, args []string) error {
 	report := newReport("slow-query", *seed)
 	rand.Seed(*seed) //nolint:staticcheck // deterministic replay via --seed is the point; threading a *rand.Rand through every workload helper is not worth it for a test-only tool
 
-	err = slowQuery(ctx, pool, *sleep, *count, &report)
+	err = slowQuery(ctx, pool, *sleep, *count, *planSafe, &report)
 	if err != nil {
 		return err
 	}
