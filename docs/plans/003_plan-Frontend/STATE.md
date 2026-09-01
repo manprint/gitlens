@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-09-01 — phase 13 complete; phase 14 sub-phase 14.2 open (claimed)._
+_Last updated: 2026-09-01 — phase 13 complete; phase 14 sub-phase 14.3 open (claimed)._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,16 +54,16 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 14.2 |
+| **ID** | 14.3 |
 | **Status** | `OPEN` |
-| **Intent** | Build the advisor findings list |
-| **Next action:** | Complete sub-phase **14.2** in [phase_15.md](phase_15.md): render findings with explicit states, filters, and evidence |
+| **Intent** | Add advisor finding muting |
+| **Next action:** | Complete sub-phase **14.3** in [phase_15.md](phase_15.md): add mute/unmute controls and confirmation |
 | **Assigned** | `agent-2:sonnet` |
-| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, and phase 6 sub-phases 6.1–6.8 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, strict typed lint/format gates, Makefile web targets, clean placeholder preservation, the parallel CI web job, frontend workflow documentation, the real server image build, the phase-boundary L3 regression, the Vitest/jsdom test runner foundation, the frontend testing architecture rules, the deterministic render/provider harness, the contract-validated OpenAPI fixture suite, the contract-aware MSW handler factory, the V8 UI coverage gate, the axe-core accessibility assertion, the deterministic clock/timezone/locale/randomness rules, the Playwright acceptance bootstrap, the harness defense meta-tests, the frontend testing workflow documentation, the phase-5 boundary E2E regression, the OpenAPI type generator, committed generated API types, stable schema aliases, type-level contract assertions, generator drift gates, the single typed API client, normalized API failures, exact large-integer query identifiers, the query key factory, refresh policies, the visibility-aware polling hooks, query-layer coverage, session authentication, guarded routing, login/logout flows, single-flight 401 handling, auth/login coverage, the accessible state-primitives library, freshness plumbing, the phase-6 browser sign-in documentation, the phase-7 route tree/code-splitting boundary, the accessible application shell, the URL-backed time-range state, the shared page scaffolding primitives, resilient namespaced theme/density/sidebar preferences, global error/offline handling, the phase-7 README web-interface guide, the phase-7 boundary E2E regression, the fleet derivation library, cluster cards, agent-health surfacing, server-defined health semantics, degraded/error paths, Fleet Overview documentation, the phase-8 boundary E2E regression, the phase-9 boundary E2E regression, and the Cluster Detail documentation are covered. The replication derivation library, topology graph, lag charts, slots, configuration drift, event taxonomy/timeline, Cluster Detail route, degraded/error paths, UI-REPL/UI-CLUS tests, Instance Detail header, database selector, URL-backed database scope, unmonitored database visibility, metric tiles, time series, counter-reset annotations, host metrics, settings, change history, durability, relations, bloat, truncation, and the Instance Detail README guidance are covered. Phase 10 is complete and phase 11 is now complete: ASH derivation, stacked waits, drill-down, honest disabled/under-sampled/unattributable states, stale freshness, exactly-once unauthorized navigation, server-error retry, shared range-retention validation, permanent sampling-limit guidance, and the README wait-analysis guide are covered. Phase 12.1–12.7 and phase 13.1–13.6 are complete: statement ranking, execution-time shares, null-safe statement summaries, whitespace normalization, cluster/version comparability helpers, the complete Query Inspector, Locks and Activity derivation and views, command polling at the one-second policy, terminal-state polling stops, server and client expiry, agent rejection messaging, and no-retry command creation are covered. Phase 14.1 is complete: advisor findings ranking/grouping/summaries, authoritative catalogue joining, missing-rule preservation, and frozen-clock mute expiry are covered. The next unit is phase 14.2, the findings list. |
+| **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, and phase 6 sub-phases 6.1–6.8 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, strict typed lint/format gates, Makefile web targets, clean placeholder preservation, the parallel CI web job, frontend workflow documentation, the real server image build, the phase-boundary L3 regression, the Vitest/jsdom test runner foundation, the frontend testing architecture rules, the deterministic render/provider harness, the contract-validated OpenAPI fixture suite, the contract-aware MSW handler factory, the V8 UI coverage gate, the axe-core accessibility assertion, the deterministic clock/timezone/locale/randomness rules, the Playwright acceptance bootstrap, the harness defense meta-tests, the frontend testing workflow documentation, the phase-5 boundary E2E regression, the OpenAPI type generator, committed generated API types, stable schema aliases, type-level contract assertions, generator drift gates, the single typed API client, normalized API failures, exact large-integer query identifiers, the query key factory, refresh policies, the visibility-aware polling hooks, query-layer coverage, session authentication, guarded routing, login/logout flows, single-flight 401 handling, auth/login coverage, the accessible state-primitives library, freshness plumbing, the phase-6 browser sign-in documentation, the phase-7 route tree/code-splitting boundary, the accessible application shell, the URL-backed time-range state, the shared page scaffolding primitives, resilient namespaced theme/density/sidebar preferences, global error/offline handling, the phase-7 README web-interface guide, the phase-7 boundary E2E regression, the fleet derivation library, cluster cards, agent-health surfacing, server-defined health semantics, degraded/error paths, Fleet Overview documentation, the phase-8 boundary E2E regression, the phase-9 boundary E2E regression, and the Cluster Detail documentation are covered. The replication derivation library, topology graph, lag charts, slots, configuration drift, event taxonomy/timeline, Cluster Detail route, degraded/error paths, UI-REPL/UI-CLUS tests, Instance Detail header, database selector, URL-backed database scope, unmonitored database visibility, metric tiles, time series, counter-reset annotations, host metrics, settings, change history, durability, relations, bloat, truncation, and the Instance Detail README guidance are covered. Phase 10 is complete and phase 11 is now complete: ASH derivation, stacked waits, drill-down, honest disabled/under-sampled/unattributable states, stale freshness, exactly-once unauthorized navigation, server-error retry, shared range-retention validation, permanent sampling-limit guidance, and the README wait-analysis guide are covered. Phase 12.1–12.7 and phase 13.1–13.6 are complete: statement ranking, execution-time shares, null-safe statement summaries, whitespace normalization, cluster/version comparability helpers, the complete Query Inspector, Locks and Activity derivation and views, command polling at the one-second policy, terminal-state polling stops, server and client expiry, agent rejection messaging, and no-retry command creation are covered. Phase 14.1–14.2 are complete: advisor findings ranking/grouping/summaries, authoritative catalogue joining, missing-rule preservation, frozen-clock mute expiry, the URL-backed findings list, severity/state/scope/cluster/instance filters, explicit hidden-state counts, degraded input/tier guidance, evidence rendering, and findings accessibility coverage are covered. The next unit is phase 14.3, muting. |
 | **Phase file** | [phase_15.md](phase_15.md) |
 
-Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, phase 6 sub-phases 6.1–6.8, phase 7 sub-phases 7.1–7.7, phase 8 sub-phases 8.1–8.6, phase 9 sub-phases 9.1–9.7, phase 10 sub-phases 10.1–10.7, phase 11 sub-phases 11.1–11.6, sub-phases 12.1–12.7, and sub-phases 13.1–13.6 are closed; phase 13 is complete and sub-phase 14.2 is open.
-- Phases 5 through 13 are complete; phase 14 is in progress and sub-phase 14.2 is open.
+Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, phase 6 sub-phases 6.1–6.8, phase 7 sub-phases 7.1–7.7, phase 8 sub-phases 8.1–8.6, phase 9 sub-phases 9.1–9.7, phase 10 sub-phases 10.1–10.7, phase 11 sub-phases 11.1–11.6, sub-phases 12.1–12.7, and sub-phases 13.1–13.6 plus 14.1–14.2 are closed; phase 13 is complete and sub-phase 14.3 is open.
+- Phases 5 through 13 are complete; phase 14 is in progress and sub-phase 14.3 is open.
 - Phase 12 boundary evidence is recorded below: the non-E2E gate passed after the focused coverage repair, and the single scheduled E2E run passed.
 
 ---
@@ -252,6 +252,7 @@ records start/end timestamps and elapsed time.
 | 13.5 | sub-phase | 13.5 | 2026-09-01 | Cover degraded and error paths for Locks and Activity | `8740b3b` |
 | 13.6 | sub-phase | 13.6 | 2026-09-01 | Update README.md for Locks and Activity | `3ea5080` |
 | 14.1 | sub-phase | 14.1 | 2026-09-01 | Build the advisor findings derivation library | `d0c8313` |
+| 14.2 | sub-phase | 14.2 | 2026-09-01 | Build the advisor findings list | `45e5257` |
 
 ---
 
@@ -577,6 +578,13 @@ helpers rank findings deterministically, group cluster and instance scopes,
 separate open severity counts from degraded rules, join the server catalogue
 without dropping unknown rules, and derive mute expiry from an injected clock.
 
+Sub-phase 14.2 added `web/src/features/findings/FindingsPage.tsx`,
+`FindingCard.tsx`, and `FindingsPage.test.tsx`, and wired the existing findings
+route to the real page. The list renders severity/state/scope/object/timestamps
+and evidence, keeps filters in the URL, counts hidden muted/resolved findings,
+explains degraded catalogue inputs and permission tiers, and states that
+findings use collected statistics rather than query plans.
+
 Phase 13 boundary verification produced durable timing evidence for the full
 non-E2E gate and its one scheduled E2E run; the phase is complete and the next
 unit is sub-phase 14.2.
@@ -860,6 +868,9 @@ unit is sub-phase 14.2.
 | 2026-09-01 | 14.1 | `make fmt-check` | PASS | Formatting and generated-file drift gate completed in 0.07s wall-clock. |
 | 2026-09-01 | 14.1 | `pnpm test -- src/lib/findings.test.ts` | PASS | The package-script invocation did not filter Vitest and ran the full web suite: 75 files and 523 tests passed in 98.79s wall-clock; direct `pnpm exec vitest run <file>` is the selective command. |
 | 2026-09-01 | 14.1 | E2E | DEFERRED | No E2E was run for this isolated pure-library sub-phase; the single long L3 run remains scheduled at the phase-14 boundary. |
+| 2026-09-01 | 14.2 | `pnpm exec vitest run src/features/findings/FindingsPage.test.tsx` | PASS | Focused findings list suite completed in 2.77s wall-clock; 1 file and 8 tests passed, including URL filters, hidden-state counts, degraded guidance, evidence, and axe coverage. |
+| 2026-09-01 | 14.2 | `pnpm exec eslint src/features/findings/FindingsPage.tsx src/features/findings/FindingCard.tsx src/features/findings/FindingsPage.test.tsx src/lib/findings.ts`; `pnpm exec tsc -b --noEmit`; `make fmt-check` | PASS | Changed-file lint, web typecheck, and formatting/generated-file drift gates passed; `make fmt-check` completed in 0.06s. |
+| 2026-09-01 | 14.2 | E2E | DEFERRED | No E2E was run for this isolated findings-list sub-phase; the single long L3 run remains scheduled once at the phase-14 boundary. |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -910,6 +921,7 @@ reconstruct.
 | 32 | 12.5 | The `/api/v1/plans` query contract also accepts decimal string query ids. | Plan history is rendered from a browser route parameter and must share the EXPLAIN flow's lossless identifier path. | yes — §5 and §7 |
 | 33 | 12.6 | Query detail treats a plans `404` as an eviction/deprecation state rather than a generic API error. | A missing query id is expected after `pg_stat_statements` eviction and needs an operator explanation while retaining generic handling for 401, 422, and 500 failures. | yes — §5 and §7 |
 | 34 | 14.1 | The generated `Finding` schema does not yet include lifecycle fields emitted by the findings API. | `FindingRecord` extends the generated type locally with optional `first_seen`, `last_seen`, `resolved_at`, `muted_until`, and `mute_reason` so the pure UI helpers remain honest about the runtime response without changing the phase-14.1 API contract scope. | yes — §5 and §7 |
+| 35 | 14.2 | `rankFindings` now preserves the concrete joined-finding type through a generic return signature. | The findings page must rank records without losing the catalogue metadata required to render degraded guidance. | yes — §5 and §7 |
 
 ## §9 — Blockers and open questions
 
@@ -934,6 +946,7 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 | 5 | Keeping the original 10m harness timeout and narrow 90s/60s E2E evidence windows | Full-suite runs timed out during slow maintenance/propagation and cut across the actual network transition/staleness boundaries. | Use the 20m scenario timeout, pre-transition timestamps, a 180s fresh-sample window, and a 120s stale-edge window; verify each with focused tests before rerunning the full suite. |
 | 6 | Adding the API generator to the referenced TypeScript project without accounting for its optional Redocly declaration dependencies | TypeScript 6 reports missing optional modules or excessive stack depth in transitive declaration files; this makes the repository typecheck fail even though the generator runs correctly. | Keep the generator as a runtime `tsx` tool, exclude only that script from `tsconfig.node.json`, and typecheck the generated contract aliases and assertions in the test project. |
 | 7 | Passing a Vitest path through `pnpm test -- <path>` | This repository's package-script forwarding did not select the requested file and ran all 75 web test files, consuming 98.79s. | Use `pnpm exec vitest run <path>` for focused checks; reserve the full `make web-test` suite for the sub-phase or phase gate. |
+| 8 | Calling `server.listen()` from the new findings-page suite | The shared Vitest setup already owns the MSW lifecycle, so the suite failed with an already-enabled network and skipped all eight tests; the first failed run took 2.44s and the subsequent async-harness diagnosis took 7.45s. | Let the shared setup own MSW and use the repository's fake-timer flush helper after rendering. |
 
 ---
 
@@ -957,7 +970,7 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 | 11 | [phase_12.md](phase_12.md) | ASH and wait analysis | `agent-2:sonnet` | 11.5 | DONE — 6/6 sub-phases closed |
 | 12 | [phase_13.md](phase_13.md) | Query Inspector and plan history | `agent-2:sonnet` | 12.3 | DONE — 7/7 sub-phases closed |
 | 13 | [phase_14.md](phase_14.md) | Locks and Activity | `agent-2:sonnet` | 13.6 | DONE — 6/6 sub-phases closed |
-| 14 | [phase_15.md](phase_15.md) | Advisor findings | `agent-2:sonnet` | — | IN_PROGRESS — 14.2 open |
+| 14 | [phase_15.md](phase_15.md) | Advisor findings | `agent-2:sonnet` | — | IN_PROGRESS — 14.3 open |
 | 15 | [phase_16.md](phase_16.md) | Alerts, silences, rules, events | `agent-2:sonnet` | 15.3 | TODO |
 | 16 | [phase_17.md](phase_17.md) | Settings and fleet inventory | `agent-2:sonnet` | — | TODO |
 | 17 | [phase_18.md](phase_18.md) | Packaging, UI acceptance suite, documentation | `agent-2:sonnet` / `agent-3:haiku` | 17.2, 17.7, 17.8 | TODO |
@@ -1068,8 +1081,8 @@ the next one opens.
 | 13.5 | Degraded and error paths (rule T-4) | `agent-2:sonnet` | DONE |
 | 13.6 | Update README.md | `agent-3:haiku` | DONE |
 | 14.1 | Findings derivation library | `agent-2:sonnet` | DONE |
-| 14.2 | The findings list | `agent-2:sonnet` | OPEN |
-| 14.3 | Muting | `agent-2:sonnet` | TODO |
+| 14.2 | The findings list | `agent-2:sonnet` | DONE |
+| 14.3 | Muting | `agent-2:sonnet` | OPEN |
 | 14.4 | The rule catalogue view | `agent-2:sonnet` | TODO |
 | 14.5 | Degraded and error paths (rule T-4) | `agent-2:sonnet` | TODO |
 | 14.6 | Update README.md | `agent-3:haiku` | TODO |
