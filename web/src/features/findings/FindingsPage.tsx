@@ -15,6 +15,7 @@ import {
 } from '@/lib/findings'
 
 import { FindingCard } from './FindingCard'
+import { RuleCatalogue } from './RuleCatalogue'
 
 type StateFilter = 'active' | 'all' | 'open' | 'degraded' | 'muted' | 'resolved'
 type SeverityFilter = 'all' | 'critical' | 'warning' | 'info'
@@ -279,6 +280,8 @@ export function FindingsPage() {
         Findings come from collected statistics, not query plans. Index recommendations are candidates
         for review, not automatic changes.
       </aside>
+
+      <RuleCatalogue findings={findings} rules={rules} />
 
       <Section
         title="Findings"
