@@ -335,6 +335,22 @@ describe('FindingsPage', () => {
     expect(screen.queryByText(/remaining mute time/i)).not.toBeInTheDocument()
   })
 
+  it('reports a malformed mute response without muting the finding', async () => {
+    server.use(
+      http.post('*/api/v1/findings/:findingId/mute', () => new HttpResponse(null, { status: 200 })),
+    )
+    await renderFindings()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mute finding' }))
+    const dialog = screen.getByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'maintenance' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Mute finding' }))
+    await settleMutation()
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/could not mute the finding/i)
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
   it('UI-FIND-024 unmute issues a DELETE and restores the previous state', async () => {
     let deleteCalled = false
     await renderFindings(
@@ -357,6 +373,28 @@ describe('FindingsPage', () => {
     expect(screen.getByText('open')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Mute finding' })).toBeInTheDocument()
     expect(screen.queryByText('Reason: maintenance')).not.toBeInTheDocument()
+  })
+
+  it('reports an unmute failure and keeps the finding muted', async () => {
+    await renderFindings(
+      [finding({ state: 'muted', muted_until: mutedUntil, mute_reason: 'maintenance' })],
+      [rule()],
+      '/findings?state=all',
+    )
+    server.use(
+      http.delete('*/api/v1/findings/:findingId/mute', () =>
+        HttpResponse.json(
+          { error: 'finding unmute failed', detail: 'maintenance denied' },
+          { status: 500 },
+        ),
+      ),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Unmute finding' }))
+    await settleMutation()
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/could not remove the mute/i)
+    expect(screen.getByText('Reason: maintenance')).toBeInTheDocument()
   })
 
   it('UI-FIND-025 a muted finding shows its reason and remaining time', async () => {
