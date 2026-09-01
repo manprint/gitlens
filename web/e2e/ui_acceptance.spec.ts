@@ -366,19 +366,41 @@ test('SYS-UI-007: replication and ASH charts render data', async ({ signedInPage
   expect(ashPixels.nonBlank).toBeTruthy()
 })
 
-test('SYS-UI-008: blocking tree shows the lock root and child', async ({ signedInPage, api }) => {
+test('SYS-UI-008: blocking tree shows the lock root and child', async ({
+  signedInPage,
+  api,
+}, testInfo) => {
   const page = signedInPage
   const { instance } = await fleetContext(api)
   const selectedInstanceID = instanceID(instance)
+  let lastLocksResponse = ''
+  page.on('response', async (response) => {
+    if (!response.url().includes('/api/v1/locks')) return
+    try {
+      lastLocksResponse = await response.text()
+    } catch {
+      // The response may already be disposed when the page is torn down.
+    }
+  })
   await page.goto(`/instances/${selectedInstanceID}/locks`)
   await expect(page).toHaveURL(new RegExp(`/instances/${selectedInstanceID}/locks$`))
   await expect(page.getByRole('heading', { name: 'Locks and activity' })).toBeVisible()
-  await expect
-    .poll(() => page.getByRole('treeitem').count(), {
-      timeout: 60_000,
-      intervals: [1_000, 3_000, 5_000],
-    })
-    .toBeGreaterThan(1)
+  try {
+    await expect
+      .poll(() => page.getByRole('treeitem').count(), {
+        timeout: 60_000,
+        intervals: [1_000, 3_000, 5_000],
+      })
+      .toBeGreaterThan(1)
+  } catch (error) {
+    if (lastLocksResponse) {
+      await testInfo.attach('locks-api-last.json', {
+        body: lastLocksResponse,
+        contentType: 'application/json',
+      })
+    }
+    throw error
+  }
   const root = page.getByRole('treeitem').first()
   await expect(root).toContainText(/blocking session/i)
   await expect(root.getByRole('group')).toBeVisible()
