@@ -156,7 +156,7 @@ export function ExplainPanel({
         queryid: queryID,
       },
       kind: 'explain',
-      instanceId,
+      ...(instanceId === undefined ? {} : { instanceId }),
     })
   }
 
