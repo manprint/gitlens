@@ -18,6 +18,7 @@
     "src/features",
     "src/App.tsx",
     "src/vite-env.d.ts",
+    "scripts/bundle-budget.ts",
     "e2e"
   ]
 }

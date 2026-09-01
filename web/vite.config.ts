@@ -23,6 +23,20 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: false,
     chunkSizeWarningLimit: 900,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (
+            id.includes('/node_modules/echarts') ||
+            id.includes('/node_modules/echarts-for-react')
+          ) {
+            return 'vendor-echarts'
+          }
+          if (id.includes('/node_modules/@xyflow/')) return 'vendor-react-flow'
+          return undefined
+        },
+      },
+    },
   },
   server: {
     port: 5173,

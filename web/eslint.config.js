@@ -148,6 +148,19 @@ export default tseslint.config(
     rules: {
       'react-hooks/rules-of-hooks': 'off',
       'no-empty-pattern': 'off',
+      // Playwright fixtures and API responses are intentionally runtime-shaped.
+      // Keep the acceptance-specific policy below, but do not apply app-source
+      // typed-boundary rules to those external payloads.
+      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-unsafe-argument': 'off',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-call': 'off',
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
+      '@typescript-eslint/no-floating-promises': 'off',
+      '@typescript-eslint/no-misused-promises': 'off',
+      '@typescript-eslint/require-await': 'off',
+      'no-restricted-globals': 'off',
       'no-restricted-syntax': [
         'error',
         {

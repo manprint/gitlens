@@ -8,7 +8,7 @@ UI_E2E_RUN ?= UI
 
 .PHONY: build fmt fmt-check lint test test-integration test-e2e test-e2e-full test-e2e-full-evidence test-e2e-matrix api-docs \
         ci-local ci-local-unit ci-local-integration coverage coverage-gate generate golden clean build-images build-images-multiarch \
-        web-install web-gen-api web-typecheck web-lint web-build web-test web-coverage web-coverage-gate test-ui-e2e
+        web-install web-gen-api web-typecheck web-lint web-build web-budget web-test web-coverage web-coverage-gate test-ui-e2e
 
 build:
 	CGO_ENABLED=0 $(GO) build $(LDFLAGS) -o bin/pglens-agent  ./cmd/pglens-agent
@@ -72,7 +72,7 @@ ci-local-unit:
 	$(MAKE) web-typecheck
 	$(MAKE) web-test
 	$(MAKE) web-coverage-gate
-	$(MAKE) web-build
+	$(MAKE) web-budget
 
 ci-local-integration:
 	@set -eu; \
@@ -107,6 +107,9 @@ web-lint: web-gen-api
 web-build:
 	cd $(WEB) && PGLENS_VERSION=$(VERSION) $(PNPM) run build
 	@printf 'built_at=%s\nvite=8.2.2\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" > internal/webui/dist/.built
+
+web-budget: web-build
+	cd $(WEB) && $(PNPM) exec tsx scripts/bundle-budget.ts
 
 web-test:
 	cd $(WEB) && $(PNPM) run test
