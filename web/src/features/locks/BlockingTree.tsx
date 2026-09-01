@@ -1,10 +1,11 @@
 import { useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useParams } from 'react-router-dom'
 
-import { useLocks } from '@/api/queries'
+import { useInstanceActivity, useLocks } from '@/api/queries'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
 import { Degraded, EmptyState, ErrorState, Stale, Truncated } from '@/components/state'
+import { ActivitySection, type ActivityResponseLike } from './ActivitySection'
 import { formatDuration, formatRelative, truncateQuery } from '@/lib/format'
 import {
   buildBlockingTree,
@@ -401,7 +402,9 @@ export function LocksPage({ instanceId: explicitInstanceId }: LocksPageProps = {
   const { instanceId: routeInstanceId } = useParams<{ instanceId: string }>()
   const instanceId = explicitInstanceId ?? routeInstanceId
   const locksQuery = useLocks(instanceId ?? '')
+  const activityQuery = useInstanceActivity(instanceId ?? '')
   const response = locksQuery.data as LocksResponseLike | undefined
+  const activityResponse = activityQuery.data as ActivityResponseLike | undefined
 
   if (!instanceId) {
     return <p role="status">Select an instance to inspect locks.</p>
@@ -422,7 +425,20 @@ export function LocksPage({ instanceId: explicitInstanceId }: LocksPageProps = {
           endpoint="locks"
         />
       ) : response ? (
-        <BlockingTree response={response} />
+        <>
+          <BlockingTree response={response} />
+          {activityQuery.isError && activityResponse === undefined ? (
+            <ErrorState
+              failure={activityQuery.error}
+              onRetry={() => void activityQuery.refetch()}
+              endpoint="activity"
+            />
+          ) : activityResponse ? (
+            <ActivitySection response={activityResponse} />
+          ) : (
+            <p role="status">Loading activity sample…</p>
+          )}
+        </>
       ) : (
         <p role="status">Waiting for the first lock sample…</p>
       )}

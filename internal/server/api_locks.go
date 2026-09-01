@@ -83,7 +83,7 @@ func (a *API) handleActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := activityAPIResponse{InstanceID: id.String(), Stale: true, Metrics: map[string][]apiMetric{}}
 	if a.pool != nil {
-		rows, qerr := a.pool.Query(r.Context(), `SELECT ts, metric, labels, value FROM metrics WHERE tenant_id='default' AND instance_id=$1 AND ts >= now() - interval '30 seconds' AND metric IN ('pg_connections_by_database','pg_connections_by_application','pg_backends','pg_max_state_age_seconds','pg_prepared_xacts','pg_oldest_prepared_xact_seconds','pg_max_datfrozenxid_age') ORDER BY ts DESC`, id)
+		rows, qerr := a.pool.Query(r.Context(), `SELECT ts, metric, labels, value FROM metrics WHERE tenant_id='default' AND instance_id=$1 AND ts >= now() - interval '30 seconds' AND metric IN ('pg_connections_by_database','pg_connections_by_application','pg_backends','pg_max_state_age_seconds','pg_prepared_xacts','pg_oldest_prepared_xact_seconds','pg_max_datfrozenxid_age','pg_deadlocks_total') ORDER BY ts DESC`, id)
 		if qerr == nil {
 			defer rows.Close()
 			for rows.Next() {

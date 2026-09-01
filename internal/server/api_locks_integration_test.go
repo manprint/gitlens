@@ -50,6 +50,8 @@ func TestINTACT003_ActivityEndpointReportsDatabase(t *testing.T) {
 	ts := time.Now().UTC()
 	_, err := pool.Exec(context.Background(), `INSERT INTO metrics (ts,tenant_id,cluster_id,instance_id,datname,metric,labels,series_id,value) VALUES ($1,'default',$2,$3,'','pg_connections_by_database','{"datname":"app"}',$4,3)`, ts, cid, id, int64(91001))
 	require.NoError(t, err)
+	_, err = pool.Exec(context.Background(), `INSERT INTO metrics (ts,tenant_id,cluster_id,instance_id,datname,metric,labels,series_id,value) VALUES ($1,'default',$2,$3,'','pg_deadlocks_total','{"database":"app"}',$4,2)`, ts, cid, id, int64(91002))
+	require.NoError(t, err)
 
 	r := chi.NewRouter()
 	NewAPI(pool).RegisterRoutes(r)
@@ -61,4 +63,6 @@ func TestINTACT003_ActivityEndpointReportsDatabase(t *testing.T) {
 	require.False(t, got.Stale)
 	require.Len(t, got.Metrics["pg_connections_by_database"], 1)
 	require.Equal(t, float64(3), got.Metrics["pg_connections_by_database"][0].Value)
+	require.Len(t, got.Metrics["pg_deadlocks_total"], 1)
+	require.Equal(t, float64(2), got.Metrics["pg_deadlocks_total"][0].Value)
 }
