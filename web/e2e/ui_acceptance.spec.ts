@@ -32,10 +32,15 @@ function instanceID(instance: JsonObject): string {
 }
 
 function instanceAddress(instance: JsonObject): string {
-  return String(instance.address ?? instance.addr ?? instance.host ?? instance.name ?? instanceID(instance))
+  return String(
+    instance.address ?? instance.addr ?? instance.host ?? instance.name ?? instanceID(instance),
+  )
 }
 
-async function fleetContext(api: any, preferredTier?: string): Promise<{
+async function fleetContext(
+  api: any,
+  preferredTier?: string,
+): Promise<{
   cluster: JsonObject
   instances: JsonObject[]
   instance: JsonObject
@@ -53,10 +58,13 @@ async function fleetContext(api: any, preferredTier?: string): Promise<{
   const instance =
     (wantedTier
       ? clusterInstances.find(
-          (item) => String(item.perm_tier ?? item.permission_tier ?? '').toUpperCase() === wantedTier,
+          (item) =>
+            String(item.perm_tier ?? item.permission_tier ?? '').toUpperCase() === wantedTier,
         )
       : undefined) ??
-    clusterInstances.find((item) => String(item.perm_tier ?? item.permission_tier ?? '').toUpperCase() === 'T1') ??
+    clusterInstances.find(
+      (item) => String(item.perm_tier ?? item.permission_tier ?? '').toUpperCase() === 'T1',
+    ) ??
     clusterInstances[0]!
   return { cluster, instances: clusterInstances, instance }
 }
@@ -76,14 +84,13 @@ async function definitionValue(card: any, label: string): Promise<string> {
     .innerText()
 }
 
-async function reloadUntil(page: any, predicate: () => Promise<boolean>, timeout = 120_000): Promise<void> {
+async function reloadUntil(
+  page: any,
+  predicate: () => Promise<boolean>,
+  timeout = 120_000,
+): Promise<void> {
   await page.reload({ waitUntil: 'domcontentloaded' })
-  await expect
-    .poll(
-      predicate,
-      { timeout, intervals: [1_000, 3_000, 5_000] },
-    )
-    .toBe(true)
+  await expect.poll(predicate, { timeout, intervals: [1_000, 3_000, 5_000] }).toBe(true)
 }
 
 async function pollAPI(predicate: () => Promise<boolean>, timeout = 120_000): Promise<void> {
@@ -96,7 +103,10 @@ async function navigateToFleet(page: any): Promise<void> {
   await expect(page.getByRole('list', { name: 'Cluster cards' })).toBeVisible()
 }
 
-test('SYS-UI-001: failover preserves identity and raises an alert', async ({ signedInPage, api }) => {
+test('SYS-UI-001: failover preserves identity and raises an alert', async ({
+  signedInPage,
+  api,
+}) => {
   const page = signedInPage
   const before = await fleetContext(api)
   await navigateToFleet(page)
@@ -128,8 +138,12 @@ test('SYS-UI-001: failover preserves identity and raises an alert', async ({ sig
 
   await pollAPI(async () => {
     const current = (await clusters(api))[0]!
-    const primary = JSON.stringify(current.primary ?? current.primary_instance_id ?? '').toLowerCase()
-    return primary.includes(standbyID.toLowerCase()) || primary.includes(standbyAddress.toLowerCase())
+    const primary = JSON.stringify(
+      current.primary ?? current.primary_instance_id ?? '',
+    ).toLowerCase()
+    return (
+      primary.includes(standbyID.toLowerCase()) || primary.includes(standbyAddress.toLowerCase())
+    )
   })
 
   await navigateToFleet(page)
@@ -159,7 +173,9 @@ test('SYS-UI-002: unauthenticated navigation cannot restore fleet data', async (
   await expect(page.getByRole('heading', { name: /sign in|accedi/i })).toBeVisible()
   await expect(page.getByRole('list', { name: 'Cluster cards' })).toHaveCount(0)
 
-  const unauthenticatedStatus = await page.evaluate(async () => (await fetch('/api/v1/clusters')).status)
+  const unauthenticatedStatus = await page.evaluate(
+    async () => (await fetch('/api/v1/clusters')).status,
+  )
   expect(unauthenticatedStatus).toBe(401)
 
   await page.getByLabel(/password/i).fill(process.env.PGLENS_UI_PASSWORD ?? '')
@@ -171,7 +187,9 @@ test('SYS-UI-002: unauthenticated navigation cannot restore fleet data', async (
   await expect(page.getByRole('list', { name: 'Cluster cards' })).toHaveCount(0)
   await page.goto('/')
   await expect(page.getByRole('heading', { name: /sign in|accedi/i })).toBeVisible()
-  const backNavigationStatus = await page.evaluate(async () => (await fetch('/api/v1/clusters')).status)
+  const backNavigationStatus = await page.evaluate(
+    async () => (await fetch('/api/v1/clusters')).status,
+  )
   expect(backNavigationStatus).toBe(401)
 })
 
@@ -204,7 +222,11 @@ test('SYS-UI-003: agent outage is visible as stale fleet data', async ({ signedI
     page,
     async () => {
       const body = await page.locator('body').innerText()
-      return /Agents requiring attention/i.test(body) && body.includes(address) && /Stale\s+—/i.test(body)
+      return (
+        /Agents requiring attention/i.test(body) &&
+        body.includes(address) &&
+        /Stale\s+—/i.test(body)
+      )
     },
     30_000,
   )
@@ -216,7 +238,10 @@ test('SYS-UI-004: standalone replay lag stays unknown', async ({ signedInPage })
   const page = signedInPage
   await navigateToFleet(page)
   const card = cardLocator(page)
-  const lag = card.locator('dt').filter({ hasText: 'Max replay lag' }).locator('xpath=following-sibling::dd[1]')
+  const lag = card
+    .locator('dt')
+    .filter({ hasText: 'Max replay lag' })
+    .locator('xpath=following-sibling::dd[1]')
   await expect(lag.locator('[aria-label="not measured"]')).toBeVisible()
   await expect(lag).not.toContainText('0 s')
 })
@@ -232,7 +257,10 @@ test('SYS-UI-005: disabled ASH explains its configuration', async ({ signedInPag
   await expect(page.locator('body')).not.toContainText(/No wait event types observed/i)
 })
 
-test('SYS-UI-006: plan-only execution is audited without query text', async ({ signedInPage, api }) => {
+test('SYS-UI-006: plan-only execution is audited without query text', async ({
+  signedInPage,
+  api,
+}) => {
   const page = signedInPage
   const { instance } = await fleetContext(api)
   const commandRequests: string[] = []
@@ -257,11 +285,32 @@ test('SYS-UI-006: plan-only execution is audited without query text', async ({ s
     )
     .toBeGreaterThan(0)
 
-  await page.goto(`/instances/${selectedInstanceID}/queries`)
-  await expect(page.getByRole('heading', { name: 'Query inspector' })).toBeVisible()
-  const queryLink = page.locator('a[href*="/queries/"]').first()
-  await expect(queryLink).toBeVisible({ timeout: 60_000 })
-  await queryLink.click()
+  let selectedQueryID: string | number | undefined
+  await expect
+    .poll(
+      async () => {
+        const response = await api.get(
+          `/api/v1/statements?instance_id=${encodeURIComponent(selectedInstanceID)}&limit=50`,
+        )
+        if (!response.ok()) return false
+        const payload = await response.json()
+        const statement = (Array.isArray(payload.statements) ? payload.statements : []).find(
+          (item: JsonObject) =>
+            /^(select|with|values)\b/i.test(String(item.query_text ?? '').trim()) &&
+            !/\b(set|show|reset|alter|create|drop|insert|update|delete|grant|revoke|copy|vacuum|truncate)\b/i.test(
+              String(item.query_text ?? ''),
+            ),
+        )
+        selectedQueryID = statement?.queryid
+        return selectedQueryID !== undefined && selectedQueryID !== null
+      },
+      { timeout: 90_000, intervals: [1_000, 3_000, 5_000] },
+    )
+    .toBe(true)
+
+  await page.goto(
+    `/instances/${selectedInstanceID}/queries/${encodeURIComponent(String(selectedQueryID))}`,
+  )
   await expect(page.getByRole('heading', { name: 'Query detail and plan history' })).toBeVisible()
   const runPlan = page.getByRole('button', { name: 'Run plan only' })
   await expect(runPlan).toBeEnabled()
@@ -287,8 +336,13 @@ test('SYS-UI-007: replication and ASH charts render data', async ({ signedInPage
   const replicationCanvas = page.locator('canvas').first()
   const replicationPixels = await replicationCanvas.evaluate((canvas: HTMLCanvasElement) => {
     const context = canvas.getContext('2d')
-    const pixels = context?.getImageData(0, 0, canvas.width, canvas.height).data ?? new Uint8ClampedArray()
-    return { width: canvas.width, height: canvas.height, nonBlank: pixels.some((value) => value !== 0) }
+    const pixels =
+      context?.getImageData(0, 0, canvas.width, canvas.height).data ?? new Uint8ClampedArray()
+    return {
+      width: canvas.width,
+      height: canvas.height,
+      nonBlank: pixels.some((value) => value !== 0),
+    }
   })
   expect(replicationPixels.width).toBeGreaterThan(0)
   expect(replicationPixels.height).toBeGreaterThan(0)
@@ -300,8 +354,13 @@ test('SYS-UI-007: replication and ASH charts render data', async ({ signedInPage
   const ashCanvas = page.locator('canvas').first()
   const ashPixels = await ashCanvas.evaluate((canvas: HTMLCanvasElement) => {
     const context = canvas.getContext('2d')
-    const pixels = context?.getImageData(0, 0, canvas.width, canvas.height).data ?? new Uint8ClampedArray()
-    return { width: canvas.width, height: canvas.height, nonBlank: pixels.some((value) => value !== 0) }
+    const pixels =
+      context?.getImageData(0, 0, canvas.width, canvas.height).data ?? new Uint8ClampedArray()
+    return {
+      width: canvas.width,
+      height: canvas.height,
+      nonBlank: pixels.some((value) => value !== 0),
+    }
   })
   expect(ashPixels.width).toBeGreaterThan(0)
   expect(ashPixels.height).toBeGreaterThan(0)
@@ -314,7 +373,10 @@ test('SYS-UI-008: blocking tree shows the lock root and child', async ({ signedI
   await page.goto(`/instances/${instanceID(instance)}/locks`)
   await expect(page.getByRole('heading', { name: 'Locks and activity' })).toBeVisible()
   await expect
-    .poll(() => page.getByRole('treeitem').count(), { timeout: 60_000, intervals: [1_000, 3_000, 5_000] })
+    .poll(() => page.getByRole('treeitem').count(), {
+      timeout: 60_000,
+      intervals: [1_000, 3_000, 5_000],
+    })
     .toBeGreaterThan(1)
   const root = page.getByRole('treeitem').first()
   await expect(root).toContainText(/blocking session/i)
@@ -346,7 +408,11 @@ test('SYS-UI-009: signal controls enforce tier and confirmation', async ({ signe
   await expect(confirm).toBeEnabled()
   await confirm.click()
   await expect(dialog).toBeHidden()
-  await reloadUntil(page, async () => (await page.getByRole('button', { name: 'Cancel query' }).count()) === 0, 60_000)
+  await reloadUntil(
+    page,
+    async () => (await page.getByRole('button', { name: 'Cancel query' }).count()) === 0,
+    60_000,
+  )
   await expect(page.locator('body')).toContainText(/audit|cancel/i)
 })
 
@@ -354,7 +420,10 @@ test('SYS-UI-010: finding mute and unmute update state', async ({ signedInPage }
   const page = signedInPage
   await page.goto('/findings')
   await expect(page.getByRole('heading', { name: 'Advisor findings' })).toBeVisible()
-  const finding = page.locator('article').filter({ has: page.getByRole('button', { name: 'Mute finding' }) }).first()
+  const finding = page
+    .locator('article')
+    .filter({ has: page.getByRole('button', { name: 'Mute finding' }) })
+    .first()
   await expect(finding).toBeVisible({ timeout: 120_000 })
   await finding.getByRole('button', { name: 'Mute finding' }).click()
   const dialog = page.getByRole('dialog')
@@ -399,7 +468,9 @@ test('SYS-UI-011: phase seven routes pass accessibility checks', async ({ signed
     await page.goto(route)
     await expect(page.locator('body')).toBeVisible()
     const report = await new AxeBuilder({ page }).analyze()
-    const severe = report.violations.filter((violation) => violation.impact === 'serious' || violation.impact === 'critical')
+    const severe = report.violations.filter(
+      (violation) => violation.impact === 'serious' || violation.impact === 'critical',
+    )
     if (severe.length > 0) {
       await test.info().attach(`axe-${route.replace(/[^a-z0-9]+/gi, '-') || 'root'}`, {
         body: JSON.stringify(report, null, 2),
