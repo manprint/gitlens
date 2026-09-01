@@ -37,6 +37,21 @@ function instanceAddress(instance: JsonObject): string {
   )
 }
 
+function referenceID(value: unknown): string {
+  if (typeof value === 'string' || typeof value === 'number') return String(value)
+  if (typeof value !== 'object' || value === null) return ''
+  const record = value as JsonObject
+  return String(record.instance_id ?? record.id ?? record.instanceId ?? '')
+}
+
+function hasPlanNode(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hasPlanNode)
+  if (typeof value !== 'object' || value === null) return false
+  const record = value as JsonObject
+  if (typeof record['Node Type'] === 'string') return true
+  return Object.values(record).some(hasPlanNode)
+}
+
 async function fleetContext(
   api: any,
   preferredTier?: string,
@@ -113,12 +128,25 @@ test('SYS-UI-001: failover preserves identity and raises an alert', async ({
 
   const card = cardLocator(page)
   await expect(card).toBeVisible()
+  await expect(card.getByRole('status', { name: /^Health: ok\./i })).toBeVisible()
   const clusterID = String(before.cluster.cluster_id)
+  const renderedClusterID = (await card.locator('code').first().innerText()).trim()
+  expect(renderedClusterID).toBe(clusterID)
   const clusterLink = page.getByRole('list', { name: 'Cluster cards' }).getByRole('link').first()
   const linkLabel = await clusterLink.getAttribute('aria-label')
   expect(linkLabel).toContain(clusterID)
   const primaryAddress = await definitionValue(card, 'Primary')
   expect(primaryAddress).not.toBe('')
+  const beforePrimaryID =
+    referenceID(before.cluster.primary ?? before.cluster.primary_instance_id) ||
+    referenceID(
+      before.instances.find((item) =>
+        String(item.role ?? '')
+          .toLowerCase()
+          .includes('primary'),
+      ),
+    )
+  expect(beforePrimaryID, 'API must expose the original primary identity').not.toBe('')
 
   const standby =
     before.instances.find((item) => {
@@ -131,6 +159,25 @@ test('SYS-UI-001: failover preserves identity and raises an alert', async ({
   const standbyID = instanceID(standby)
   const standbyAddress = instanceAddress(standby)
   expect(standbyID).not.toBe('')
+  expect(standbyAddress).not.toBe('')
+
+  let initialTopologyEdge: JsonObject | undefined
+  await pollAPI(async () => {
+    const response = await api.get(`/api/v1/clusters/${encodeURIComponent(clusterID)}/topology`)
+    if (!response.ok()) return false
+    const topology = arrayPayload(await response.json(), 'topology')
+    initialTopologyEdge = topology.find(
+      (edge) =>
+        referenceID(edge.from) === standbyID &&
+        referenceID(edge.to) === beforePrimaryID &&
+        String(edge.confidence ?? '').toLowerCase() === 'high',
+    )
+    return initialTopologyEdge !== undefined
+  }, 60_000)
+  expect(
+    initialTopologyEdge,
+    'initial topology must show a high-confidence standby upstream',
+  ).toBeTruthy()
 
   const readyFile = process.env.PGLENS_UI_READY_FILE
   expect(readyFile, 'Go runner must provide the failover handshake path').toBeTruthy()
@@ -146,26 +193,115 @@ test('SYS-UI-001: failover preserves identity and raises an alert', async ({
     )
   })
 
+  let failoverEvent: JsonObject | undefined
+  await pollAPI(async () => {
+    const response = await api.get(
+      `/api/v1/events?cluster_id=${encodeURIComponent(clusterID)}&type=failover_detected&limit=100`,
+    )
+    if (!response.ok()) return false
+    const payload = await response.json()
+    failoverEvent = arrayPayload(payload, 'events').find(
+      (item) => String(item.type ?? '').toLowerCase() === 'failover_detected',
+    )
+    return failoverEvent !== undefined
+  })
+  expect(failoverEvent).toBeDefined()
+  const failoverPayload = (failoverEvent?.payload ?? {}) as JsonObject
+  expect(referenceID(failoverPayload.old_primary)).toBe(beforePrimaryID)
+  expect(referenceID(failoverPayload.new_primary)).toBe(standbyID)
+
+  await pollAPI(async () => {
+    const response = await api.get(
+      `/api/v1/alerts?cluster_id=${encodeURIComponent(clusterID)}&state=all`,
+    )
+    if (!response.ok()) return false
+    const payload = await response.json()
+    return arrayPayload(payload, 'alerts').some((item) => {
+      const text = JSON.stringify(item).toLowerCase()
+      return text.includes('failover_detected') && text.includes('firing')
+    })
+  })
+
   await navigateToFleet(page)
+  await reloadUntil(page, async () =>
+    (await cardLocator(page).innerText()).includes(standbyAddress),
+  )
   const afterCard = cardLocator(page)
   await expect(afterCard).toContainText(standbyAddress)
-  await expect(afterCard).toContainText(clusterID)
+  await expect(afterCard.locator('code').first()).toHaveText(renderedClusterID)
 
   await page.goto(`/instances/${standbyID}`)
-  await expect(page.getByText(/primary/i).first()).toBeVisible()
+  await expect(page.getByRole('heading', { name: new RegExp(standbyAddress) })).toBeVisible()
+  await expect(
+    page.locator('dt').filter({ hasText: 'Role' }).locator('xpath=following-sibling::dd[1]'),
+  ).toHaveText('primary')
   await page.goto(`/clusters/${clusterID}`)
   await expect(page.getByRole('region', { name: 'Replication topology graph' })).toBeVisible()
-  await expect(page.locator('body')).toContainText(standbyAddress)
-  await expect(page.locator('body')).toContainText(/failover_detected/i)
+  let promotedEdge: JsonObject | undefined
+  await pollAPI(async () => {
+    const response = await api.get(`/api/v1/clusters/${encodeURIComponent(clusterID)}/topology`)
+    if (!response.ok()) return false
+    const payload = await response.json()
+    const topology = arrayPayload(payload, 'topology')
+    promotedEdge = topology.find(
+      (edge) =>
+        referenceID(edge.from) === beforePrimaryID &&
+        referenceID(edge.to) === standbyID &&
+        String(edge.type ?? '').toLowerCase() === 'streaming',
+    )
+    return promotedEdge !== undefined
+  }, 90_000)
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await expect(page.getByRole('region', { name: 'Replication topology graph' })).toBeVisible()
+  const edgeTableToggle = page.getByRole('button', { name: 'Show accessible edge table' })
+  await expect(edgeTableToggle).toBeVisible()
+  await edgeTableToggle.click()
+  const edgeTable = page
+    .locator('#topology-edge-table-visible')
+    .getByRole('table', { name: 'Replication topology edges' })
+  await expect(edgeTable).toBeVisible()
+  expect(promotedEdge, 'topology must reverse from the old primary to the new primary').toBeTruthy()
+  const promotedRow = edgeTable
+    .getByRole('row')
+    .filter({ hasText: primaryAddress })
+    .filter({ hasText: standbyAddress })
+  await expect(promotedRow).toHaveCount(1)
+  const edgeCells = promotedRow.getByRole('cell')
+  await expect(edgeCells.nth(0)).toContainText(primaryAddress)
+  await expect(edgeCells.nth(1)).toContainText(standbyAddress)
+  await expect(edgeCells.nth(2)).toHaveText(String(promotedEdge?.type))
+  expect(String(promotedEdge?.confidence ?? '').toLowerCase()).toBe('high')
+  await reloadUntil(page, async () =>
+    /failover_detected/i.test(await page.locator('body').innerText()),
+  )
+  const failoverArticle = page
+    .locator('article[data-event-type="failover_detected"]')
+    .filter({ has: page.locator(`a[href="/instances/${beforePrimaryID}"]`) })
+    .filter({ has: page.locator(`a[href="/instances/${standbyID}"]`) })
+    .first()
+  await expect(failoverArticle).toBeVisible()
+  await expect(failoverArticle).toContainText('Old primary:')
+  await expect(failoverArticle).toContainText('New primary:')
+  await expect(
+    failoverArticle.getByRole('link', { name: beforePrimaryID, exact: true }),
+  ).toHaveAttribute('href', `/instances/${beforePrimaryID}`)
+  await expect(failoverArticle.getByRole('link', { name: standbyID, exact: true })).toHaveAttribute(
+    'href',
+    `/instances/${standbyID}`,
+  )
 
   await page.goto('/events')
-  await expect(page.locator('body')).toContainText(/failover_detected/i)
+  await reloadUntil(page, async () =>
+    /failover_detected/i.test(await page.locator('body').innerText()),
+  )
   await page.goto('/alerts')
-  await expect(page.locator('body')).toContainText(/failover_detected/i)
-  await expect(page.locator('body')).toContainText(/firing/i)
+  await reloadUntil(page, async () => {
+    const body = await page.locator('body').innerText()
+    return /failover_detected/i.test(body) && /firing/i.test(body)
+  })
 
   const after = (await clusters(api))[0]!
-  expect(after.cluster_id).toBe(clusterID)
+  expect(after.cluster_id).toBe(renderedClusterID)
 })
 
 test('SYS-UI-002: unauthenticated navigation cannot restore fleet data', async ({ page }) => {
@@ -195,7 +331,7 @@ test('SYS-UI-002: unauthenticated navigation cannot restore fleet data', async (
 
 test('SYS-UI-003: agent outage is visible as stale fleet data', async ({ signedInPage, api }) => {
   const page = signedInPage
-  const { instance } = await fleetContext(api)
+  const { cluster, instance } = await fleetContext(api)
   const id = instanceID(instance)
   const address = instanceAddress(instance)
 
@@ -230,8 +366,17 @@ test('SYS-UI-003: agent outage is visible as stale fleet data', async ({ signedI
     },
     30_000,
   )
-  await expect(page.getByRole('status', { name: /Stale data:/i }).first()).toBeVisible()
-  await expect(page.locator('body')).toContainText(address)
+  const issue = page
+    .locator('section[aria-labelledby="agent-health-title"]')
+    .getByRole('listitem')
+    .filter({ hasText: address })
+    .filter({ hasText: cluster.cluster_id })
+  await expect(issue).toBeVisible()
+  const staleCard = page
+    .getByRole('list', { name: 'Cluster cards' })
+    .getByRole('listitem')
+    .filter({ hasText: cluster.cluster_id })
+  await expect(staleCard.getByRole('status', { name: /Stale data:/i })).toBeVisible()
 })
 
 test('SYS-UI-004: standalone replay lag stays unknown', async ({ signedInPage }) => {
@@ -313,16 +458,92 @@ test('SYS-UI-006: plan-only execution is audited without query text', async ({
   await expect(page.getByRole('heading', { name: 'Query detail and plan history' })).toBeVisible()
   const runPlan = page.getByRole('button', { name: 'Run plan only' })
   await expect(runPlan).toBeEnabled()
+  const commandResponsePromise = page.waitForResponse(
+    (response) => response.request().method() === 'POST' && response.url().includes('/commands'),
+  )
   await runPlan.click()
+  const commandResponse = await commandResponsePromise
+  const commandResponsePayload = (await commandResponse.json()) as JsonObject
+  const commandID = String(commandResponsePayload.command_id ?? '')
+  expect(commandID, 'plan request must return a command id').not.toBe('')
   await expect(page.getByRole('heading', { name: 'Query plan' })).toBeVisible({ timeout: 60_000 })
   await expect(page.getByRole('heading', { name: 'Plan history', exact: true })).toBeVisible()
+
+  const queryPlanTree = page.getByRole('list', { name: 'Query plan tree' })
+  await expect(queryPlanTree).toBeVisible()
+  await expect(queryPlanTree.getByRole('listitem').first()).toBeVisible()
+  await expect
+    .poll(
+      async () => {
+        const response = await api.get(
+          `/api/v1/plans?queryid=${encodeURIComponent(String(selectedQueryID))}&instance_id=${encodeURIComponent(selectedInstanceID)}&limit=20`,
+        )
+        if (!response.ok()) return false
+        const payload = await response.json()
+        const plans = arrayPayload(payload, 'plans')
+        return plans.length > 0 && plans.some((plan) => hasPlanNode(plan.plan))
+      },
+      { timeout: 90_000, intervals: [1_000, 3_000, 5_000] },
+    )
+    .toBe(true)
+  await expect
+    .poll(() => page.getByRole('list', { name: 'Plan history entries' }).count(), {
+      timeout: 60_000,
+      intervals: [1_000, 3_000, 5_000],
+    })
+    .toBe(1)
+  await expect(
+    page.getByRole('list', { name: 'Plan history entries' }).getByRole('listitem').first(),
+  ).toBeVisible()
 
   await expect.poll(() => commandRequests.length, { timeout: 30_000 }).toBeGreaterThan(0)
   for (const body of commandRequests) {
     expect(body).not.toMatch(/select\s|pg_sleep|from\s/i)
   }
+  let command: JsonObject | undefined
+  await pollAPI(async () => {
+    const response = await api.get(`/api/v1/commands/${encodeURIComponent(commandID)}`)
+    if (!response.ok()) return false
+    command = await response.json()
+    return command?.state === 'done'
+  }, 90_000)
+  expect(command?.state).toBe('done')
+  expect(hasPlanNode(command?.result)).toBeTruthy()
+  let auditEntry: JsonObject | undefined
+  await pollAPI(async () => {
+    const response = await api.get(`/api/v1/instances/${selectedInstanceID}/command-audit`)
+    if (!response.ok()) return false
+    const audit = await response.json()
+    auditEntry = Array.isArray(audit)
+      ? audit.find(
+          (item: JsonObject) =>
+            String(item.command_id ?? '') === commandID &&
+            String(item.kind ?? '').toLowerCase() === 'explain' &&
+            String(item.outcome ?? '').toLowerCase() === 'ok',
+        )
+      : undefined
+    return auditEntry !== undefined
+  })
+  expect(auditEntry).toBeDefined()
   await page.goto('/settings')
-  await expect(page.locator('body')).toContainText(/command audit/i)
+  const auditTable = page.getByRole('table', { name: /Command audit for/i })
+  await expect(auditTable).toBeVisible()
+  await expect
+    .poll(
+      async () =>
+        (await auditTable
+          .getByRole('row')
+          .filter({ hasText: /explain/i })
+          .count()) > 0,
+      { timeout: 60_000, intervals: [1_000, 3_000, 5_000] },
+    )
+    .toBe(true)
+  const auditRow = auditTable
+    .getByRole('row')
+    .filter({ hasText: /explain/i })
+    .first()
+  await expect(auditRow).toContainText(/explain/i)
+  await expect(auditRow).toContainText(/ok/i)
 })
 
 test('SYS-UI-007: replication and ASH charts render data', async ({ signedInPage, api }) => {
@@ -413,6 +634,31 @@ test('SYS-UI-008: blocking tree shows the lock root and child', async ({
   const root = page.getByRole('treeitem').first()
   await expect(root).toContainText(/blocking session/i)
   await expect(root.getByRole('group')).toBeVisible()
+  const lockPayload = JSON.parse(lastLocksResponse) as JsonObject
+  const lockNodes = Array.isArray(lockPayload.nodes) ? lockPayload.nodes : []
+  const blockingNode = lockNodes.find((node: JsonObject) => {
+    const blockedBy = Array.isArray(node.blocked_by) ? node.blocked_by : []
+    return (
+      blockedBy.length === 0 &&
+      lockNodes.some((child: JsonObject) => {
+        const childBlockedBy = Array.isArray(child.blocked_by) ? child.blocked_by : []
+        return childBlockedBy.map(String).includes(String(node.pid))
+      })
+    )
+  })
+  const blockedNode = lockNodes.find((node: JsonObject) => {
+    const blockedBy = Array.isArray(node.blocked_by) ? node.blocked_by : []
+    return blockingNode && blockedBy.map(String).includes(String(blockingNode.pid))
+  })
+  expect(blockingNode?.pid).toBeDefined()
+  expect(blockedNode?.pid).toBeDefined()
+  expect(String(blockingNode?.query ?? '')).not.toBe('')
+  expect(String(blockedNode?.query ?? '')).not.toBe('')
+  await expect(root).toContainText(`PID ${blockingNode?.pid}`)
+  await expect(root).toContainText(String(blockingNode?.query ?? ''))
+  const child = root.getByRole('group').getByRole('treeitem').first()
+  await expect(child).toContainText(`PID ${blockedNode?.pid}`)
+  await expect(child).toContainText(String(blockedNode?.query ?? ''))
 })
 
 test('SYS-UI-009: signal controls enforce tier and confirmation', async ({ signedInPage, api }) => {
@@ -506,19 +752,17 @@ test('SYS-UI-009: signal controls enforce tier and confirmation', async ({ signe
 
 test('SYS-UI-010: finding mute and unmute update state', async ({ signedInPage, api }) => {
   const page = signedInPage
-  const findingsResponse = await api.get('/api/v1/findings?state=all&limit=1000')
-  expect(findingsResponse.ok()).toBe(true)
-  const findings = (await findingsResponse.json()) as JsonObject[]
-  const mutableFinding = findings.find((item) => item.state === 'open' || item.state === 'degraded')
-  if (!mutableFinding?.finding_id) {
-    const states = findings.reduce<Record<string, number>>((counts, item) => {
-      const state = String(item.state ?? '<missing>')
-      counts[state] = (counts[state] ?? 0) + 1
-      return counts
-    }, {})
-    throw new Error(`No mutable finding returned by API: ${JSON.stringify(states)}`)
-  }
-  const findingID = String(mutableFinding?.finding_id)
+  let mutableFinding: JsonObject | undefined
+  await pollAPI(async () => {
+    const response = await api.get('/api/v1/findings?state=all&limit=1000')
+    if (!response.ok()) return false
+    const findings = arrayPayload(await response.json(), 'findings')
+    mutableFinding = findings.find((item) => item.state === 'open' || item.state === 'degraded')
+    return mutableFinding?.finding_id !== undefined
+  }, 90_000)
+  const findingID = String(mutableFinding?.finding_id ?? '')
+  const realState = String(mutableFinding?.state)
+  expect(findingID).not.toBe('')
 
   await page.goto('/findings')
   await expect(page.getByRole('heading', { name: 'Advisor findings' })).toBeVisible()
@@ -532,19 +776,34 @@ test('SYS-UI-010: finding mute and unmute update state', async ({ signedInPage, 
   await dialog.getByRole('button', { name: 'Mute finding' }).click()
   await expect(page.getByRole('dialog')).toBeHidden()
   await page.getByLabel('State').selectOption('all')
-  const mutedFinding = page.locator('article').filter({ hasText: 'UI acceptance mute' }).first()
+  const mutedFinding = page.locator(`article[aria-labelledby="finding-${findingID}"]`)
   await expect(mutedFinding).toBeVisible()
   await expect(mutedFinding).toContainText(/muted/i)
   await expect(mutedFinding).toContainText('UI acceptance mute')
 
   await mutedFinding.getByRole('button', { name: 'Unmute finding' }).click()
+  await pollAPI(async () => {
+    const response = await api.get(`/api/v1/findings/${encodeURIComponent(findingID)}`)
+    if (!response.ok()) return false
+    const current = await response.json()
+    return current.state === realState && current.mute_reason == null
+  }, 60_000)
   await reloadUntil(
     page,
-    async () => (await page.getByRole('button', { name: 'Mute finding' }).count()) > 0,
+    async () => {
+      const sameFinding = page.locator(`article[aria-labelledby="finding-${findingID}"]`)
+      if ((await sameFinding.count()) !== 1) return false
+      return (
+        (await sameFinding.getByRole('button', { name: 'Mute finding' }).count()) === 1 &&
+        (await sameFinding.getByRole('button', { name: 'Unmute finding' }).count()) === 0 &&
+        (await sameFinding.getByText(realState, { exact: true }).count()) > 0
+      )
+    },
     60_000,
   )
-  await expect(page.getByRole('button', { name: 'Unmute finding' })).toHaveCount(0)
-  await expect(page.locator('article').filter({ hasText: 'UI acceptance mute' })).toHaveCount(0)
+  const unmutedFinding = page.locator(`article[aria-labelledby="finding-${findingID}"]`)
+  await expect(unmutedFinding).toContainText(realState)
+  await expect(unmutedFinding).not.toContainText('UI acceptance mute')
 })
 
 test('SYS-UI-011: phase seven routes pass accessibility checks', async ({ signedInPage, api }) => {
@@ -552,35 +811,43 @@ test('SYS-UI-011: phase seven routes pass accessibility checks', async ({ signed
   const { cluster, instance } = await fleetContext(api)
   const instanceIDValue = instanceID(instance)
   const routes = [
-    '/login',
-    '/',
-    `/clusters/${cluster.cluster_id}`,
-    `/instances/${instanceIDValue}`,
-    `/instances/${instanceIDValue}/ash`,
-    `/instances/${instanceIDValue}/queries`,
-    `/instances/${instanceIDValue}/queries/missing-query`,
-    `/instances/${instanceIDValue}/locks`,
-    '/findings',
-    '/alerts',
-    '/events',
-    '/alerts/rules',
-    '/alerts/silences',
-    '/settings',
+    { path: '/login', expected: /sign in|accedi/i },
+    { path: '/', expected: /Fleet overview/i },
+    { path: `/clusters/${cluster.cluster_id}`, expected: /Cluster identity:/i },
+    { path: `/instances/${instanceIDValue}`, expected: new RegExp(instanceAddress(instance)) },
+    { path: `/instances/${instanceIDValue}/ash`, expected: /ASH and wait analysis/i },
+    { path: `/instances/${instanceIDValue}/queries`, expected: /Query inspector/i },
+    {
+      path: `/instances/${instanceIDValue}/queries/missing-query`,
+      expected: /Query detail and plan history/i,
+    },
+    { path: `/instances/${instanceIDValue}/locks`, expected: /Locks and activity/i },
+    { path: '/findings', expected: /Advisor findings/i },
+    { path: '/alerts', expected: /Alerts and events/i },
+    { path: '/events', expected: /Fleet event timeline/i },
+    { path: '/alerts/rules', expected: /Alert rules/i },
+    { path: '/alerts/silences', expected: /Alert silences/i },
+    { path: '/settings', expected: /Settings and inventory/i },
+    { path: '/__ui_acceptance_not_found__', expected: /Page not found/i },
   ]
 
   for (const route of routes) {
-    await page.goto(route)
+    await page.goto(route.path)
+    await expect(page).toHaveURL(
+      new RegExp(`${route.path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`),
+    )
     await expect(page.locator('body')).toBeVisible()
+    await expect(page.locator('body')).toContainText(route.expected)
     const report = await new AxeBuilder({ page }).analyze()
     const severe = report.violations.filter(
       (violation) => violation.impact === 'serious' || violation.impact === 'critical',
     )
     if (severe.length > 0) {
-      await test.info().attach(`axe-${route.replace(/[^a-z0-9]+/gi, '-') || 'root'}`, {
+      await test.info().attach(`axe-${route.path.replace(/[^a-z0-9]+/gi, '-') || 'root'}`, {
         body: JSON.stringify(report, null, 2),
         contentType: 'application/json',
       })
     }
-    expect(severe, `serious/critical axe violations on ${route}`).toEqual([])
+    expect(severe, `serious/critical axe violations on ${route.path}`).toEqual([])
   }
 })

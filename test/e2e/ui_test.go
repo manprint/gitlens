@@ -172,8 +172,46 @@ func runUISpec(ctx context.Context, e *scenario.Env, id string) error {
 		_ = cmd.Wait()
 		return fmt.Errorf("promote pg-standby: %w", err)
 	}
+	if err := rejoinOldPrimary(ctx, e); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return err
+	}
 	if err := cmd.Wait(); err != nil {
 		return fmt.Errorf("pnpm exec playwright test --grep %s: %w", id, err)
+	}
+	return nil
+}
+
+func rejoinOldPrimary(ctx context.Context, e *scenario.Env) error {
+	if err := e.Compose(
+		"run", "--rm", "--user", "root", "--entrypoint", "/bin/bash", "pg-primary", "-c",
+		"until pg_isready -h pg-standby -U postgres -d postgres; do sleep 1; done && "+
+			"rm -rf /var/lib/postgresql/data/* && chown postgres:postgres /var/lib/postgresql/data && "+
+			"PGPASSWORD=postgres gosu postgres psql -h pg-standby -U postgres -d postgres -c \"SELECT pg_create_physical_replication_slot('standby1') WHERE NOT EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name='standby1')\" && "+
+			"PGPASSWORD=postgres gosu postgres pg_basebackup -h pg-standby -U postgres -S standby1 -D /var/lib/postgresql/data -Fp -Xs -R",
+	); err != nil {
+		return fmt.Errorf("rebuild old primary as a standby: %w", err)
+	}
+	if err := e.Compose("up", "-d", "pg-primary"); err != nil {
+		return fmt.Errorf("restart old primary as a standby: %w", err)
+	}
+	readyCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		if _, err := e.ExecAs("pg-primary", "postgres", "pg_isready", "-U", "postgres", "-d", "postgres"); err == nil {
+			break
+		}
+		select {
+		case <-readyCtx.Done():
+			return fmt.Errorf("wait for rejoined primary readiness: %w", readyCtx.Err())
+		case <-ticker.C:
+		}
+	}
+	if err := e.Compose("restart", "pglens-agent"); err != nil {
+		return fmt.Errorf("restart agent after topology role reversal: %w", err)
 	}
 	return nil
 }
