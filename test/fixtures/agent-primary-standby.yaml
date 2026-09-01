@@ -15,16 +15,19 @@ targets:
   # ended up with zero schedule entries after waitForTarget's 60s
   # timeout, and the agent never pushed a single envelope — confirmed
   # live before this file existed).
+  - name: pg-standby
+    dsn: postgres://pglens:pglens-monitoring-test@pg-standby:5432/postgres?sslmode=disable
+    databases:
+      max: 10
+  # Keep the former standby first: after the primary is fenced during a
+  # clean failover, the agent must publish the promoted target before the
+  # unreachable target can delay the next envelope flush.
   - name: pg-primary
     dsn: postgres://pglens_t2:pglens-monitoring-test@pg-primary:5432/postgres?sslmode=disable
     databases:
       max: 10
     allow_explain_analyze: true
     allow_signal: true
-  - name: pg-standby
-    dsn: postgres://pglens:pglens-monitoring-test@pg-standby:5432/postgres?sslmode=disable
-    databases:
-      max: 10
 checks:
   activity: { interval: 5s }
   database_stats: { interval: 5s }
