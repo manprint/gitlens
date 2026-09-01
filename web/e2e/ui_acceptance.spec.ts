@@ -315,7 +315,7 @@ test('SYS-UI-006: plan-only execution is audited without query text', async ({
   await expect(runPlan).toBeEnabled()
   await runPlan.click()
   await expect(page.getByRole('heading', { name: 'Query plan' })).toBeVisible({ timeout: 60_000 })
-  await expect(page.getByRole('heading', { name: /Plan history/i })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Plan history', exact: true })).toBeVisible()
 
   await expect.poll(() => commandRequests.length, { timeout: 30_000 }).toBeGreaterThan(0)
   for (const body of commandRequests) {
