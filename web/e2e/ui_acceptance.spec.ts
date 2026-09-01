@@ -376,7 +376,7 @@ test('SYS-UI-003: agent outage is visible as stale fleet data', async ({ signedI
     .getByRole('list', { name: 'Cluster cards' })
     .getByRole('listitem')
     .filter({ hasText: cluster.cluster_id })
-  await expect(staleCard.getByRole('status', { name: /Stale data:/i })).toBeVisible()
+  await expect(staleCard.getByRole('status', { name: /Stale data:/i }).first()).toBeVisible()
 })
 
 test('SYS-UI-004: standalone replay lag stays unknown', async ({ signedInPage }) => {
