@@ -208,6 +208,18 @@ after the UI confirmation; ANALYZE also requires T2 and the target's
 that were explicitly requested, and comparisons are limited to plans from
 the same cluster because query IDs are not portable across clusters.
 
+The Locks and Activity page shows the latest stored blocking tree and session
+activity for an instance. The blocking tree is a ten-second sample, not a live
+view, so a shorter contention episode can be missed; the page distinguishes
+"no sample yet" from "no lock contention in the latest sample" and shows the
+sample's own timestamp. Activity breakdowns are shown per state and database;
+application counts appear only when the agent has opted in. For a target client
+backend, the page offers per-session cancel and terminate actions only at T2
+when the target's `allow_signal` policy permits them. Each action requires
+confirmation naming the session and query, and its terminal result links to the
+command audit. See [Known limits](#known-limits) for the sampling and
+contention boundaries.
+
 The selected time range is reflected in the URL, so a view can be shared as a
 link. Keyboard shortcuts are available for the main destinations and filters:
 
