@@ -67,6 +67,12 @@ function describePlan(plan: Plan): string {
   return `${formatTimestamp(plan.captured_at, 'UTC')} · ${planKind(plan)} · ${plan.plan_hash}`
 }
 
+function firstTwo(plans: Plan[]): [Plan, Plan] | null {
+  if (plans.length < 2) return null
+  const [first, second] = plans
+  return first && second ? [first, second] : null
+}
+
 function plansDiffer(left: PlanNodeSnapshot | undefined, right: PlanNodeSnapshot | undefined) {
   return (
     left?.nodeType !== right?.nodeType ||
@@ -76,7 +82,7 @@ function plansDiffer(left: PlanNodeSnapshot | undefined, right: PlanNodeSnapshot
   )
 }
 
-function PlanComparison({ plans }: { plans: Plan[] }) {
+function PlanComparison({ plans }: { plans: [Plan, Plan] }) {
   const [left, right] = plans
   const leftNodes = flattenPlan(left.plan)
   const rightNodes = flattenPlan(right.plan)
@@ -150,6 +156,7 @@ export function PlanHistory({ queryid, instanceId, datname }: PlanHistoryProps) 
   const plans = useMemo(() => sortPlans(response?.plans ?? []), [response?.plans])
   const [selectedKeys, setSelectedKeys] = useState<string[]>([])
   const selectedPlans = plans.filter((plan) => selectedKeys.includes(planKey(plan))).slice(0, 2)
+  const selectedPair = firstTwo(selectedPlans)
 
   const togglePlan = (plan: Plan) => {
     const key = planKey(plan)
@@ -211,12 +218,12 @@ export function PlanHistory({ queryid, instanceId, datname }: PlanHistoryProps) 
             })}
           </ul>
 
-          {selectedPlans.length < 2 ? (
+          {selectedPair === null ? (
             <p role="status" className="text-muted-foreground text-sm">
               Select two plan entries to compare them side by side.
             </p>
           ) : (
-            <PlanComparison plans={selectedPlans} />
+            <PlanComparison plans={selectedPair} />
           )}
         </>
       )}
