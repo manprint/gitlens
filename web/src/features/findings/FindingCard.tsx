@@ -1,6 +1,8 @@
 import { Degraded } from '@/components/state'
 import { formatTimestamp } from '@/lib/format/timestamp'
-import type { JoinedFinding } from '@/lib/findings'
+import { muteExpiry, type JoinedFinding } from '@/lib/findings'
+
+import { MuteDialog } from './MuteDialog'
 
 interface FindingCardProps {
   finding: JoinedFinding
@@ -57,6 +59,15 @@ function timestamp(value: string | undefined): React.ReactNode {
   )
 }
 
+function remainingMuteTime(finding: JoinedFinding): string {
+  const seconds = muteExpiry(finding, new Date())
+  if (seconds === null) return 'unavailable'
+  if (seconds < 60) return `${Math.ceil(seconds)} seconds`
+  if (seconds < 60 * 60) return `${Math.ceil(seconds / 60)} minutes`
+  if (seconds < 24 * 60 * 60) return `${Math.ceil(seconds / (60 * 60))} hours`
+  return `${Math.ceil(seconds / (24 * 60 * 60))} days`
+}
+
 export function FindingCard({ finding }: FindingCardProps) {
   const requirements = requirementText(finding)
   const target = [
@@ -79,7 +90,26 @@ export function FindingCard({ finding }: FindingCardProps) {
           {finding.title}
         </h3>
         <p className="text-muted-foreground text-sm">Rule {finding.rule_id}</p>
+        <div>
+          <MuteDialog finding={finding} />
+        </div>
       </header>
+
+      {finding.state === 'muted' ? (
+        <div className="border-muted bg-muted/30 space-y-1 rounded-md border p-3 text-sm" role="status">
+          <strong>Muted</strong>
+          <p>Reason: {finding.mute_reason ?? 'No reason supplied by the server.'}</p>
+          <p>
+            Remaining mute time: {remainingMuteTime(finding)}
+            {finding.muted_until ? (
+              <>
+                {' '}
+                (expires {timestamp(finding.muted_until)})
+              </>
+            ) : null}
+          </p>
+        </div>
+      ) : null}
 
       {finding.state === 'degraded' ? (
         <div className="space-y-2">

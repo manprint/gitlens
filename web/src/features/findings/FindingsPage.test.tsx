@@ -1,6 +1,8 @@
-import { act, fireEvent, screen } from '@testing-library/react'
+import { act, fireEvent, screen, within } from '@testing-library/react'
+import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { NOW } from '@/test/time'
 import { ok } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 import { expectNoA11yViolations } from '@/test/a11y'
@@ -27,6 +29,8 @@ const baseRule: AdvisorRule = {
   min_tier: 'T0',
 }
 
+const mutedUntil = '2026-08-27T04:00:00.000Z'
+
 function finding(overrides: Partial<FindingRecord> = {}): FindingRecord {
   return { ...baseFinding, ...overrides }
 }
@@ -46,6 +50,15 @@ async function renderFindings(
     await vi.advanceTimersByTimeAsync(0)
   })
   return view
+}
+
+async function settleMutation() {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0)
+  })
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0)
+  })
 }
 
 describe('FindingsPage', () => {
@@ -143,6 +156,122 @@ describe('FindingsPage', () => {
     expect(screen.getByText('lag_seconds')).toBeInTheDocument()
     expect(screen.getByText('42')).toBeInTheDocument()
     expect(screen.getByText('true')).toBeInTheDocument()
+  })
+
+  it('UI-FIND-020 the mute dialog requires a reason', async () => {
+    await renderFindings([finding()], [rule()], '/findings?state=all')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mute finding' }))
+    const dialog = screen.getByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Mute finding' }))
+
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(/reason is required/i)
+  })
+
+  it('UI-FIND-021 the mute request carries reason and until', async () => {
+    let requestBody: unknown
+    const response = {
+      finding_id: 'finding-1',
+      state: 'muted' as const,
+      muted_until: mutedUntil,
+      mute_reason: 'maintenance window',
+    }
+    await renderFindings([finding()], [rule()], '/findings?state=all')
+    server.use(
+      ok('getFindings', [finding(response)]),
+      http.post('*/api/v1/findings/:findingId/mute', async ({ request }) => {
+        requestBody = await request.json()
+        return HttpResponse.json(response)
+      }),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mute finding' }))
+    const dialog = screen.getByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('Reason'), {
+      target: { value: 'maintenance window' },
+    })
+    fireEvent.click(within(dialog).getByLabelText('1 hour'))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Mute finding' }))
+    await settleMutation()
+
+    expect(requestBody).toEqual({
+      reason: 'maintenance window',
+      until: new Date(NOW.getTime() + 60 * 60 * 1000).toISOString(),
+    })
+    expect(screen.getByText('Reason: maintenance window')).toBeInTheDocument()
+  })
+
+  it('UI-FIND-022 the dialog states that muting is not resolution', async () => {
+    await renderFindings()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mute finding' }))
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveTextContent(/muting does not resolve this finding/i)
+    expect(within(dialog).getByRole('button', { name: 'Mute finding' })).not.toHaveTextContent(
+      /resolve/i,
+    )
+  })
+
+  it('UI-FIND-023 a failed mute leaves the finding unmuted and shows the error', async () => {
+    server.use(
+      http.post(
+        '*/api/v1/findings/:findingId/mute',
+        () => HttpResponse.json({ error: 'finding mute failed', detail: 'maintenance denied' }, { status: 500 }),
+      ),
+    )
+    await renderFindings()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mute finding' }))
+    const dialog = screen.getByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'maintenance' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Mute finding' }))
+    await settleMutation()
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent(/could not mute the finding/i)
+    expect(screen.queryByText(/remaining mute time/i)).not.toBeInTheDocument()
+  })
+
+  it('UI-FIND-024 unmute issues a DELETE and restores the previous state', async () => {
+    let deleteCalled = false
+    await renderFindings([finding({ state: 'muted', muted_until: mutedUntil, mute_reason: 'maintenance' })], [rule()], '/findings?state=all')
+    server.use(
+      ok('getFindings', [finding()]),
+      http.delete('*/api/v1/findings/:findingId/mute', () => {
+        deleteCalled = true
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Unmute finding' }))
+    await settleMutation()
+
+    expect(deleteCalled).toBe(true)
+    expect(screen.getByText('open')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Mute finding' })).toBeInTheDocument()
+    expect(screen.queryByText('Reason: maintenance')).not.toBeInTheDocument()
+  })
+
+  it('UI-FIND-025 a muted finding shows its reason and remaining time', async () => {
+    await renderFindings(
+      [finding({ state: 'muted', muted_until: mutedUntil, mute_reason: 'maintenance window' })],
+      [rule()],
+      '/findings?state=muted',
+    )
+
+    expect(screen.getByText('Reason: maintenance window')).toBeInTheDocument()
+    expect(screen.getByText(/Remaining mute time: 2 hours/)).toBeInTheDocument()
+  })
+
+  it('keeps the mute dialog accessible', async () => {
+    const view = await renderFindings()
+    fireEvent.click(screen.getByRole('button', { name: 'Mute finding' }))
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toBeInTheDocument()
+
+    vi.useRealTimers()
+    await expectNoA11yViolations(dialog)
+    view.unmount()
   })
 
   it('has no serious or critical accessibility violations with a populated list', async () => {
