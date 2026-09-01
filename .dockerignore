@@ -32,6 +32,7 @@ scripts/
 *.md
 
 # Build/test byproducts that might exist locally
+web/node_modules/
 bin/
 dist/
 coverage.out
