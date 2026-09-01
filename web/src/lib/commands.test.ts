@@ -39,8 +39,14 @@ describe('command lifecycle descriptions', () => {
 
   it('recognises every terminal state, including the server done state', () => {
     expect(isTerminalCommandState('pending')).toBe(false)
+    expect(isTerminalCommandState(null)).toBe(false)
     for (const state of ['done', 'succeeded', 'failed', 'expired', 'rejected']) {
       expect(isTerminalCommandState(state)).toBe(true)
     }
+  })
+
+  it('explains failed and rejected commands without an agent reason', () => {
+    expect(describeCommandState('failed')).toBe('Command failed without an agent result.')
+    expect(describeCommandState('rejected', null)).toBe('Command rejected by the agent.')
   })
 })
