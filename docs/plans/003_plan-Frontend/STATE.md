@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-09-01 — phase 13 complete; phase 14 sub-phase 14.2 open._
+_Last updated: 2026-09-01 — phase 13 complete; phase 14 sub-phase 14.2 open (claimed)._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -55,7 +55,7 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 |-------|-------|
 | **Type** | sub-phase |
 | **ID** | 14.2 |
-| **Status** | `none` |
+| **Status** | `OPEN` |
 | **Intent** | Build the advisor findings list |
 | **Next action:** | Complete sub-phase **14.2** in [phase_15.md](phase_15.md): render findings with explicit states, filters, and evidence |
 | **Assigned** | `agent-2:sonnet` |
@@ -589,7 +589,7 @@ unit is sub-phase 14.2.
 
 ## §6 — In-flight work
 
-`none — tree consistent`
+`claimed — nothing written yet`
 
 ---
 
