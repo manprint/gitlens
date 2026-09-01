@@ -989,6 +989,10 @@ export interface components {
             scope: string;
             needs: string[];
             min_tier: components["schemas"]["PermTier"];
+            enabled: boolean;
+            threshold: number;
+            /** Format: int32 */
+            for_seconds: number;
         };
         Silence: {
             /** Format: uuid */

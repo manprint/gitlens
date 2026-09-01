@@ -31,6 +31,7 @@ const FindingsPage = lazy(() =>
   import('./pages').then(({ FindingsPage: Page }) => ({ default: Page })),
 )
 const AlertsPage = lazy(() => import('./pages').then(({ AlertsPage: Page }) => ({ default: Page })))
+const RulesPage = lazy(() => import('./pages').then(({ RulesPage: Page }) => ({ default: Page })))
 const SettingsPage = lazy(() =>
   import('./pages').then(({ SettingsPage: Page }) => ({ default: Page })),
 )
@@ -85,6 +86,7 @@ const dataRoutes: RouteDefinition[] = [
   lazyRoute('/instances/:instanceId/locks', 'Locks and activity', LocksPage),
   lazyRoute('/findings', 'Advisor findings', FindingsPage),
   lazyRoute('/alerts', 'Alerts and events', AlertsPage),
+  lazyRoute('/alerts/rules', 'Alert rules', RulesPage),
   lazyRoute('/settings', 'Settings and inventory', SettingsPage),
 ]
 

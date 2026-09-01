@@ -57,6 +57,37 @@ type alertJSON struct {
 	Suppressed bool              `json:"suppressed"`
 }
 
+type alertRuleJSON struct {
+	ID         string         `json:"id"`
+	Severity   alert.Severity `json:"severity"`
+	Scope      alert.Scope    `json:"scope"`
+	Needs      []string       `json:"needs"`
+	MinTier    string         `json:"min_tier"`
+	Enabled    bool           `json:"enabled"`
+	Threshold  float64        `json:"threshold"`
+	ForSeconds int            `json:"for_seconds"`
+}
+
+func renderAlertRule(v alert.Rule) alertRuleJSON {
+	needs := make([]string, 0, 1)
+	if v.Metric != "" {
+		needs = append(needs, v.Metric)
+	}
+	if v.EventType != "" {
+		needs = append(needs, v.EventType)
+	}
+	return alertRuleJSON{
+		ID:         v.ID,
+		Severity:   v.Severity,
+		Scope:      v.Scope,
+		Needs:      needs,
+		MinTier:    "T" + strconv.Itoa(int(v.Tier)),
+		Enabled:    v.Enabled,
+		Threshold:  v.Threshold,
+		ForSeconds: int(v.For / time.Second),
+	}
+}
+
 func renderAlert(v alert.Alert) alertJSON {
 	o := alertJSON{Key: v.Key, RuleID: v.RuleID, Severity: v.Severity, State: v.State, Datname: v.Datname, Labels: v.Labels, Value: v.Value, Summary: v.Summary, StartedAt: v.StartedAt, LastEvalAt: v.LastEvalAt, ResolvedAt: v.ResolvedAt, Suppressed: v.Suppressed}
 	if v.ClusterID != nil {
@@ -153,7 +184,11 @@ func (a *AlertAPI) listRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	all := append(alert.Builtin(), stored...)
-	writeJSON(w, 200, all)
+	out := make([]alertRuleJSON, 0, len(all))
+	for _, v := range all {
+		out = append(out, renderAlertRule(v))
+	}
+	writeJSON(w, 200, out)
 }
 
 type ruleUpdate struct {

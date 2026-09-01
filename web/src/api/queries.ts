@@ -7,6 +7,7 @@ import {
 import { useEffect, useRef, useState } from 'react'
 
 import { client, type ApiFailure, toApiFailure } from './client'
+import type { AlertRule } from './alerts'
 import type { paths } from './generated'
 import { qk } from './keys'
 import { REFRESH, type RefreshPolicy } from './policy'
@@ -412,7 +413,7 @@ export function useAlert(alertKey: string) {
 }
 
 export function useAlertRules() {
-  return useApiQuery({
+  return useApiQuery<AlertRule[]>({
     policy: REFRESH.findings,
     queryFn: () => getApi(() => client.GET('/api/v1/alert-rules')),
     queryKey: qk.alertRules(),

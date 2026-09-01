@@ -393,13 +393,16 @@ components:
         suppressed: { type: boolean }
     AlertRule:
       type: object
-      required: [id, severity, scope, needs, min_tier]
+      required: [id, severity, scope, needs, min_tier, enabled, threshold, for_seconds]
       properties:
         id: { type: string }
         severity: { type: string }
         scope: { type: string }
         needs: { type: array, items: { type: string } }
         min_tier: { $ref: '#/components/schemas/PermTier' }
+        enabled: { type: boolean }
+        threshold: { type: number }
+        for_seconds: { type: integer, format: int32, minimum: 0 }
     Silence:
       type: object
       required: [silence_id, matchers, reason, starts_at, ends_at]

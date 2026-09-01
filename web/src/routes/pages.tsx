@@ -9,6 +9,7 @@ import QueryListPageComponent from '@/features/queries/QueryListPage'
 import LocksPageComponent from '@/features/locks/BlockingTree'
 import { FindingsPage as FindingsPageComponent } from '@/features/findings/FindingsPage'
 import { AlertsPage as AlertsPageComponent } from '@/features/alerts/AlertsPage'
+import { RulesPage as RulesPageComponent } from '@/features/alerts/RulesPage'
 import { useParams } from 'react-router-dom'
 
 interface PlaceholderPageProps {
@@ -74,6 +75,10 @@ export function FindingsPage() {
 
 export function AlertsPage() {
   return <AlertsPageComponent />
+}
+
+export function RulesPage() {
+  return <RulesPageComponent />
 }
 
 export function SettingsPage() {
