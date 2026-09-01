@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-09-01 — phase 12 sub-phase 12.5 closed; 12.6 open._
+_Last updated: 2026-09-01 — phase 12 sub-phase 12.6 closed; 12.7 open._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,16 +54,16 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 12.6 |
+| **ID** | 12.7 |
 | **Status** | `OPEN` |
-| **Intent** | Complete Query Inspector degraded and error paths |
-| **Next action:** | Complete sub-phase **12.6** in [phase_13.md](phase_13.md): implement Query Inspector degraded and error paths |
+| **Intent** | Document the complete Query Inspector experience |
+| **Next action:** | Complete sub-phase **12.7** in [phase_13.md](phase_13.md): update README.md for Query Inspector |
 | **Assigned** | `agent-2:sonnet` |
 | **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, and phase 6 sub-phases 6.1–6.8 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, strict typed lint/format gates, Makefile web targets, clean placeholder preservation, the parallel CI web job, frontend workflow documentation, the real server image build, the phase-boundary L3 regression, the Vitest/jsdom test runner foundation, the frontend testing architecture rules, the deterministic render/provider harness, the contract-validated OpenAPI fixture suite, the contract-aware MSW handler factory, the V8 UI coverage gate, the axe-core accessibility assertion, the deterministic clock/timezone/locale/randomness rules, the Playwright acceptance bootstrap, the harness defense meta-tests, the frontend testing workflow documentation, the phase-5 boundary E2E regression, the OpenAPI type generator, committed generated API types, stable schema aliases, type-level contract assertions, generator drift gates, the single typed API client, normalized API failures, exact large-integer query identifiers, the query key factory, refresh policies, the visibility-aware polling hooks, query-layer coverage, session authentication, guarded routing, login/logout flows, single-flight 401 handling, auth/login coverage, the accessible state-primitives library, freshness plumbing, the phase-6 browser sign-in documentation, the phase-7 route tree/code-splitting boundary, the accessible application shell, the URL-backed time-range state, the shared page scaffolding primitives, resilient namespaced theme/density/sidebar preferences, global error/offline handling, the phase-7 README web-interface guide, the phase-7 boundary E2E regression, the fleet derivation library, cluster cards, agent-health surfacing, server-defined health semantics, degraded/error paths, Fleet Overview documentation, the phase-8 boundary E2E regression, the phase-9 boundary E2E regression, and the Cluster Detail documentation are covered. The replication derivation library, topology graph, lag charts, slots, configuration drift, event taxonomy/timeline, Cluster Detail route, degraded/error paths, UI-REPL/UI-CLUS tests, Instance Detail header, database selector, URL-backed database scope, unmonitored database visibility, metric tiles, time series, counter-reset annotations, host metrics, settings, change history, durability, relations, bloat, truncation, and the Instance Detail README guidance are covered. Phase 10 is complete and phase 11 is now complete: ASH derivation, stacked waits, drill-down, honest disabled/under-sampled/unattributable states, stale freshness, exactly-once unauthorized navigation, server-error retry, shared range-retention validation, permanent sampling-limit guidance, and the README wait-analysis guide are covered. Phase 12.1–12.3 are complete: statement ranking, execution-time shares, null-safe statement summaries, whitespace normalization, cluster/version comparability helpers, the Query Inspector statement list, URL-backed server-side sorting, truncation and disabled-extension states, query detail links, eviction/scope guidance, command polling at the one-second policy, terminal-state polling stops, server and client expiry, agent rejection messaging, and no-retry command creation are covered. The next unit is phase 12.4 EXPLAIN flow and safety gates. |
 | **Phase file** | [phase_12.md](phase_12.md) |
 
-Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, phase 6 sub-phases 6.1–6.8, phase 7 sub-phases 7.1–7.7, phase 8 sub-phases 8.1–8.6, phase 9 sub-phases 9.1–9.7, phase 10 sub-phases 10.1–10.7, phase 11 sub-phases 11.1–11.6, and sub-phases 12.1–12.5 are closed; sub-phase 12.6 is open.
-- Phases 5, 6, 7, 8, 9, 10, and 11 are complete; phase 12 is in progress and sub-phase 12.6 is open.
+Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, phase 6 sub-phases 6.1–6.8, phase 7 sub-phases 7.1–7.7, phase 8 sub-phases 8.1–8.6, phase 9 sub-phases 9.1–9.7, phase 10 sub-phases 10.1–10.7, phase 11 sub-phases 11.1–11.6, and sub-phases 12.1–12.6 are closed; sub-phase 12.7 is open.
+- Phases 5, 6, 7, 8, 9, 10, and 11 are complete; phase 12 is in progress and sub-phase 12.7 is open.
 
 ---
 
@@ -242,6 +242,7 @@ records start/end timestamps and elapsed time.
 | 12.3 | sub-phase | 12.3 | 2026-09-01 | Build the command lifecycle client | `3d8be05` |
 | 12.4 | sub-phase | 12.4 | 2026-09-01 | Build the EXPLAIN flow and safety gates | `1bac53a` |
 | 12.5 | sub-phase | 12.5 | 2026-09-01 | Build plan history and comparison | `0a2fb26`, `853daf6` |
+| 12.6 | sub-phase | 12.6 | 2026-09-01 | Complete Query Inspector degraded and error paths | `86374a2` |
 
 ---
 
@@ -519,6 +520,12 @@ plans query contract so exact query-id strings are accepted. History is sorted
 newest first, explains its explicit-request-only scope, and compares two plans
 side by side with differing nodes and costs highlighted.
 
+Sub-phase 12.6 added `web/src/features/queries/QueryInspectorDegraded.test.tsx`
+and completed the Query Inspector state coverage. Empty results, stale data,
+authentication failure, server retry, unprocessable command detail, and evicted
+query history now have explicit user-facing behaviour; ANALYZE remains visible
+but disabled below T2.
+
 `docs/LIMITS.md` was also touched by sub-phase 2.7.
 
 `Makefile`; `README.md`; `scripts/e2e_evidence.sh`; `scripts/id_audit.sh`; `internal/scripts/doc.go`; `internal/scripts/scripts_test.go`; `test/harness/harness.go`; `test/harness/api.go`; `test/e2e/deploy_test.go`; `test/scenario/net.go`; `test/scenario/topo_cascading.go`; `docs/plans/002_plan-AnalysisBackend/STATE.md`; `docs/plans/002_plan-AnalysisBackend/phase_11.md`; `docs/plans/002_plan-AnalysisBackend/verify/index.md`; `docs/plans/002_plan-AnalysisBackend/verify/verify_001_2026-08-30.md`; `docs/plans/003_plan-Frontend/STATE.md`; `api/openapi.yaml`; `internal/server/openapi_test.go`; `internal/tools/apidocs/main.go`; `internal/tools/apidocs/main_test.go`; `docs/api.md`; `cmd/pglens-server/main.go`; `internal/server/config.go`; `internal/server/config_test.go`; `internal/server/session.go`; `internal/server/session_test.go`; `internal/server/http.go`; `internal/server/http_test.go`; `internal/server/facts_integration_test.go`; `internal/server/ingest_integration_test.go`; `internal/server/api_commands_integration_test.go`; `web/src/lib/statements.ts`; `web/src/lib/statements.test.ts`.
@@ -765,6 +772,9 @@ side by side with differing nodes and costs highlighted.
 | 2026-09-01 | 12.5 | `pnpm --dir web exec vitest run src/features/queries/PlanHistory.test.tsx` | PASS | Focused plan-history suite completed in 2.65s wall-clock; 1 file and 4 tests passed, covering UI-QRY-030–033 and accessibility. |
 | 2026-09-01 | 12.5 | `make fmt-check web-lint web-typecheck` | PASS | Static/format gate completed in 15.96s wall-clock; generated API drift, format, and typecheck passed; lint has only the four existing Fast Refresh warnings. |
 | 2026-09-01 | 12.5 | E2E | DEFERRED | No E2E was run for this isolated plan-history sub-phase; the long L3 run remains scheduled once at phase-12 closure after 12.7. |
+| 2026-09-01 | 12.6 | `pnpm --dir web exec vitest run src/features/queries/QueryInspectorDegraded.test.tsx src/features/queries/ExplainPanel.test.tsx src/features/queries/PlanHistory.test.tsx src/features/queries/QueryListPage.test.tsx` | PASS | Focused Query Inspector suite completed in 8.51s wall-clock; 4 files and 26 tests passed, covering UI-QRY-040–045 plus the existing query, plan-history, EXPLAIN, and ANALYZE tier regressions. |
+| 2026-09-01 | 12.6 | `make fmt-check web-lint web-typecheck` | PASS | Static/format gate completed in 14.25s wall-clock; generated API drift, format, and typecheck passed; lint has only the four existing Fast Refresh warnings. |
+| 2026-09-01 | 12.6 | E2E | DEFERRED | No E2E was run for this isolated degraded/error sub-phase; the long L3 run remains scheduled once at phase-12 closure after 12.7. |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -813,6 +823,7 @@ reconstruct.
 | 30 | 12.3 | The lifecycle implementation also updates `web/src/api/queries.ts` so its existing `useCommand` export delegates to the new command-specific hook. | Preserving the established import path prevents a stale polling implementation from remaining in the API surface while the new `commands.ts` module owns the lifecycle rules. | yes — §5 and §7 |
 | 31 | 12.4 | The EXPLAIN flow required a cross-layer lossless query-id contract: OpenAPI accepts integer or decimal string values, generated types preserve the union, and the Go decoder accepts both legacy numbers and exact strings. | Browser JSON numbers cannot safely represent every PostgreSQL `int64`; preserving the string path prevents precision loss while retaining compatibility with existing numeric clients. | yes — §5, §7 and the EXPLAIN implementation |
 | 32 | 12.5 | The `/api/v1/plans` query contract also accepts decimal string query ids. | Plan history is rendered from a browser route parameter and must share the EXPLAIN flow's lossless identifier path. | yes — §5 and §7 |
+| 33 | 12.6 | Query detail treats a plans `404` as an eviction/deprecation state rather than a generic API error. | A missing query id is expected after `pg_stat_statements` eviction and needs an operator explanation while retaining generic handling for 401, 422, and 500 failures. | yes — §5 and §7 |
 
 ## §9 — Blockers and open questions
 
@@ -857,7 +868,7 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 | 9 | [phase_10.md](phase_10.md) | Cluster Detail | `agent-2:sonnet` | 9.7 | DONE — 7/7 sub-phases closed |
 | 10 | [phase_11.md](phase_11.md) | Instance Detail | `agent-2:sonnet` | 10.1 | DONE — 7/7 sub-phases closed |
 | 11 | [phase_12.md](phase_12.md) | ASH and wait analysis | `agent-2:sonnet` | 11.5 | DONE — 6/6 sub-phases closed |
-| 12 | [phase_13.md](phase_13.md) | Query Inspector and plan history | `agent-2:sonnet` | 12.3 | IN_PROGRESS — 12.6 open |
+| 12 | [phase_13.md](phase_13.md) | Query Inspector and plan history | `agent-2:sonnet` | 12.3 | IN_PROGRESS — 12.7 open |
 | 13 | [phase_14.md](phase_14.md) | Locks and Activity | `agent-2:sonnet` | 13.4 | TODO |
 | 14 | [phase_15.md](phase_15.md) | Advisor findings | `agent-2:sonnet` | — | TODO |
 | 15 | [phase_16.md](phase_16.md) | Alerts, silences, rules, events | `agent-2:sonnet` | 15.3 | TODO |
@@ -961,8 +972,8 @@ the next one opens.
 | 12.3 | The command lifecycle client | `agent-2:sonnet` | DONE |
 | 12.4 | The EXPLAIN flow and its gates | `agent-2:sonnet` | DONE |
 | 12.5 | Plan history | `agent-2:sonnet` | DONE |
-| 12.6 | Degraded and error paths (rule T-4) | `agent-2:sonnet` | TODO |
-| 12.7 | Update README.md | `agent-3:haiku` | TODO |
+| 12.6 | Degraded and error paths (rule T-4) | `agent-2:sonnet` | DONE |
+| 12.7 | Update README.md | `agent-3:haiku` | OPEN |
 | 13.1 | Lock-tree derivation library | `agent-2:sonnet` | TODO |
 | 13.2 | The blocking tree view | `agent-2:sonnet` | TODO |
 | 13.3 | Activity view | `agent-2:sonnet` | TODO |
@@ -1053,7 +1064,7 @@ not otherwise be visible.
 | `UI-CMD-001 … UI-CMD-006` | Vitest, hook + pure unit | 12.3 | DONE |
 | `UI-QRY-020 … UI-QRY-026` | Vitest, unit + route | 12.4 | DONE |
 | `UI-QRY-030 … UI-QRY-033` | Vitest, unit + route | 12.5 | DONE |
-| `UI-QRY-040 … UI-QRY-045` | Vitest, unit + route | 12.6 | TODO |
+| `UI-QRY-040 … UI-QRY-045` | Vitest, unit + route | 12.6 | DONE |
 | `UI-LOCK-*` | Vitest, unit + route | 13.1 – 13.5 | TODO |
 | `UI-FIND-*` | Vitest, unit + route | 14.1 – 14.5 | TODO |
 | `UI-ALRT-*` | Vitest, unit + route | 15.1 – 15.6 | TODO |
