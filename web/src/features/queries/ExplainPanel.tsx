@@ -150,7 +150,11 @@ export function ExplainPanel({
   const submit = (analyze: boolean) => {
     if (queryID === null) return
     createCommand.mutate({
-      args: { analyze, datname, queryid: queryID },
+      args: {
+        analyze,
+        ...(datname === undefined ? {} : { datname }),
+        queryid: queryID,
+      },
       kind: 'explain',
       instanceId,
     })
