@@ -904,6 +904,10 @@ export interface components {
             nodes: {
                 [key: string]: unknown;
             }[];
+            /** @description All client sessions in the latest lock/activity sample. */
+            sessions: {
+                [key: string]: unknown;
+            }[];
         };
         ActivityResponse: {
             instance_id: components["schemas"]["InstanceId"];

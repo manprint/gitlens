@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -54,6 +55,9 @@ func findingPathID(r *http.Request, action string) string {
 	}
 	if action != "" {
 		id = strings.TrimSuffix(id, "/"+action)
+	}
+	if decoded, err := url.PathUnescape(id); err == nil {
+		id = decoded
 	}
 	return id
 }

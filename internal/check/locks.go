@@ -38,6 +38,7 @@ type lockRow struct {
 type lockTree struct {
 	SampledAt time.Time  `json:"sampled_at"`
 	Nodes     []lockNode `json:"nodes"`
+	Sessions  []lockNode `json:"sessions"`
 }
 
 type lockNode struct {
@@ -106,8 +107,10 @@ func buildLocksResult(rows []lockRow, sampledAt time.Time) Result {
 	waits := make(map[string]int)
 	maxAge := 0.0
 	nodes := make([]lockNode, 0, len(rows))
+	sessions := make([]lockNode, 0, len(rows))
 	nodePIDs := make(map[int32]struct{}, len(rows))
 	for _, r := range rows {
+		sessions = append(sessions, lockNode(r))
 		if len(r.BlockedBy) == 0 {
 			continue
 		}
@@ -169,7 +172,7 @@ func buildLocksResult(rows []lockRow, sampledAt time.Time) Result {
 	// snapshot, a released blocker remains visible in the API until the
 	// fifteen-minute retention cleanup, rather than disappearing on the next
 	// locks scrape.
-	if raw, err := json.Marshal(lockTree{SampledAt: sampledAt, Nodes: nodes}); err == nil {
+	if raw, err := json.Marshal(lockTree{SampledAt: sampledAt, Nodes: nodes, Sessions: sessions}); err == nil {
 		result.Facts = []Fact{{Kind: "lock_tree", Key: "current", ValueJSON: raw}}
 	}
 	return result

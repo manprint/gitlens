@@ -295,7 +295,7 @@ components:
         labels: { type: object, additionalProperties: { type: string } }
     LocksResponse:
       type: object
-      required: [instance_id, sampled_at, stale, nodes]
+      required: [instance_id, sampled_at, stale, nodes, sessions]
       properties:
         instance_id: { $ref: '#/components/schemas/InstanceId' }
         sampled_at:
@@ -304,6 +304,10 @@ components:
           description: Null when no lock tree has ever been sampled, not an empty timestamp.
         stale: { type: boolean }
         nodes: { type: array, items: { type: object, additionalProperties: true } }
+        sessions:
+          type: array
+          items: { type: object, additionalProperties: true }
+          description: All client sessions in the latest lock/activity sample.
     ActivityResponse:
       type: object
       required: [instance_id, stale, metrics]

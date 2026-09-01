@@ -50,3 +50,17 @@ func TestFindingsAPI_NilDatabaseForMutationsAndLookup(t *testing.T) {
 		require.Equal(t, http.StatusServiceUnavailable, w.Code)
 	}
 }
+
+func TestFindingPathID_DecodesEscapedSlash(t *testing.T) {
+	r := chi.NewRouter()
+	r.Post("/api/v1/findings/*", func(w http.ResponseWriter, req *http.Request) {
+		require.Equal(t, "ui.acceptance/mute", findingPathID(req, "mute"))
+	})
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(
+		w,
+		httptest.NewRequest(http.MethodPost, "/api/v1/findings/ui.acceptance%2Fmute/mute", nil),
+	)
+	require.Equal(t, http.StatusOK, w.Code)
+}

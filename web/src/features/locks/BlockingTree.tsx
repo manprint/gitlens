@@ -27,6 +27,7 @@ export interface LocksResponseLike {
   sampled_at: string | null
   stale: boolean
   nodes: readonly unknown[]
+  sessions?: readonly unknown[]
 }
 
 interface TreeEntry {
@@ -472,7 +473,16 @@ export function LocksPage({ instanceId: explicitInstanceId }: LocksPageProps = {
               endpoint="activity"
             />
           ) : activityResponse ? (
-            <ActivitySection response={activityResponse} />
+            <ActivitySection
+              currentTier={instanceQuery.data?.perm_tier ?? 'T0'}
+              instanceId={instanceId}
+              response={activityResponse}
+              sessions={
+                response.sessions
+                  ?.map(normalizeNode)
+                  .filter((node): node is LockNode => node !== null) ?? []
+              }
+            />
           ) : (
             <p role="status">Loading activity sample…</p>
           )}

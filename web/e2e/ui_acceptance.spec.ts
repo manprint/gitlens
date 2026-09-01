@@ -421,10 +421,34 @@ test('SYS-UI-009: signal controls enforce tier and confirmation', async ({ signe
     api,
     process.env.PGLENS_UI_CANCEL_MODE === 't0' ? 'T0' : 'T2',
   )
-  await page.goto(`/instances/${instanceID(instance)}/locks`)
+  const selectedInstanceID = instanceID(instance)
+  let sessionPID = ''
+  await expect
+    .poll(
+      async () => {
+        const response = await api.get(`/api/v1/locks?instance_id=${selectedInstanceID}`)
+        if (!response.ok()) return false
+        const payload = await response.json()
+        const sessions = Array.isArray(payload?.sessions) ? payload.sessions : []
+        const session = sessions.find((item: JsonObject) =>
+          /pg_sleep/i.test(String(item.query ?? '')),
+        )
+        if (!session) return false
+        sessionPID = String(session.pid ?? '')
+        return sessionPID !== ''
+      },
+      { timeout: 60_000, intervals: [1_000, 3_000, 5_000] },
+    )
+    .toBe(true)
+  await page.goto(`/instances/${selectedInstanceID}/locks`)
   await expect(page.getByRole('heading', { name: 'Locks and activity' })).toBeVisible()
-  const cancel = page.getByRole('button', { name: 'Cancel query' }).first()
-  await expect(cancel).toBeVisible({ timeout: 60_000 })
+  const session = page
+    .getByRole('list', { name: 'Active sessions' })
+    .getByRole('listitem')
+    .filter({ hasText: `PID ${sessionPID}` })
+  await expect(session).toBeVisible({ timeout: 60_000 })
+  const cancel = session.getByRole('button', { name: 'Cancel query' })
+  await expect(cancel).toBeVisible()
 
   if (process.env.PGLENS_UI_CANCEL_MODE === 't0') {
     await expect(cancel).toBeDisabled()
@@ -440,22 +464,65 @@ test('SYS-UI-009: signal controls enforce tier and confirmation', async ({ signe
   await expect(confirm).toBeEnabled()
   await confirm.click()
   await expect(dialog).toBeHidden()
+  await expect
+    .poll(
+      async () => {
+        const response = await api.get(`/api/v1/locks?instance_id=${selectedInstanceID}`)
+        if (!response.ok()) return false
+        const payload = await response.json()
+        const sessions = Array.isArray(payload?.sessions) ? payload.sessions : []
+        return !sessions.some((item: JsonObject) => String(item.pid ?? '') === sessionPID)
+      },
+      { timeout: 60_000, intervals: [1_000, 3_000, 5_000] },
+    )
+    .toBe(true)
   await reloadUntil(
     page,
-    async () => (await page.getByRole('button', { name: 'Cancel query' }).count()) === 0,
+    async () =>
+      (await page
+        .getByRole('list', { name: 'Active sessions' })
+        .getByText(`PID ${sessionPID}`)
+        .count()) === 0,
     60_000,
   )
-  await expect(page.locator('body')).toContainText(/audit|cancel/i)
+  await expect
+    .poll(
+      async () => {
+        const response = await api.get(`/api/v1/instances/${selectedInstanceID}/command-audit`)
+        if (!response.ok()) return false
+        const audit = await response.json()
+        return (
+          Array.isArray(audit) &&
+          audit.some(
+            (item: JsonObject) =>
+              item.kind === 'cancel' && String(item.args?.pid ?? '') === sessionPID,
+          )
+        )
+      },
+      { timeout: 60_000, intervals: [1_000, 3_000, 5_000] },
+    )
+    .toBe(true)
 })
 
-test('SYS-UI-010: finding mute and unmute update state', async ({ signedInPage }) => {
+test('SYS-UI-010: finding mute and unmute update state', async ({ signedInPage, api }) => {
   const page = signedInPage
+  const findingsResponse = await api.get('/api/v1/findings?state=all&limit=1000')
+  expect(findingsResponse.ok()).toBe(true)
+  const findings = (await findingsResponse.json()) as JsonObject[]
+  const mutableFinding = findings.find((item) => item.state === 'open' || item.state === 'degraded')
+  if (!mutableFinding?.finding_id) {
+    const states = findings.reduce<Record<string, number>>((counts, item) => {
+      const state = String(item.state ?? '<missing>')
+      counts[state] = (counts[state] ?? 0) + 1
+      return counts
+    }, {})
+    throw new Error(`No mutable finding returned by API: ${JSON.stringify(states)}`)
+  }
+  const findingID = String(mutableFinding?.finding_id)
+
   await page.goto('/findings')
   await expect(page.getByRole('heading', { name: 'Advisor findings' })).toBeVisible()
-  const finding = page
-    .locator('article')
-    .filter({ has: page.getByRole('button', { name: 'Mute finding' }) })
-    .first()
+  const finding = page.locator(`article[aria-labelledby="finding-${findingID}"]`)
   await expect(finding).toBeVisible({ timeout: 120_000 })
   await finding.getByRole('button', { name: 'Mute finding' }).click()
   const dialog = page.getByRole('dialog')
@@ -463,16 +530,21 @@ test('SYS-UI-010: finding mute and unmute update state', async ({ signedInPage }
   await dialog.getByLabel('Reason').fill('UI acceptance mute')
   await dialog.getByRole('radio').first().check()
   await dialog.getByRole('button', { name: 'Mute finding' }).click()
-  await expect(finding).toContainText(/muted/i)
-  await expect(finding).toContainText('UI acceptance mute')
+  await expect(page.getByRole('dialog')).toBeHidden()
+  await page.getByLabel('State').selectOption('all')
+  const mutedFinding = page.locator('article').filter({ hasText: 'UI acceptance mute' }).first()
+  await expect(mutedFinding).toBeVisible()
+  await expect(mutedFinding).toContainText(/muted/i)
+  await expect(mutedFinding).toContainText('UI acceptance mute')
 
-  await finding.getByRole('button', { name: 'Unmute finding' }).click()
+  await mutedFinding.getByRole('button', { name: 'Unmute finding' }).click()
   await reloadUntil(
     page,
     async () => (await page.getByRole('button', { name: 'Mute finding' }).count()) > 0,
     60_000,
   )
   await expect(page.getByRole('button', { name: 'Unmute finding' })).toHaveCount(0)
+  await expect(page.locator('article').filter({ hasText: 'UI acceptance mute' })).toHaveCount(0)
 })
 
 test('SYS-UI-011: phase seven routes pass accessibility checks', async ({ signedInPage, api }) => {

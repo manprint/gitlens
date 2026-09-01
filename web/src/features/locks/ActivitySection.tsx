@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 
+import type { PermTier } from '@/api/types'
 import { MetricTile } from '@/components/layout/MetricTile'
 import { Section } from '@/components/layout/Section'
 import { Disabled, Stale, Unknown } from '@/components/state'
@@ -15,10 +16,63 @@ import {
   type ActivityMetrics,
 } from '@/lib/activity'
 import { formatCount, formatDuration, formatPercent, formatRelative } from '@/lib/format'
+import type { LockNode } from '@/lib/locks'
+import { SignalActions } from './SignalActions'
 
 export interface ActivityResponseLike {
   stale: boolean
   metrics: ActivityMetrics
+}
+
+function sessionValue(value: unknown): string {
+  if (typeof value === 'string' && value.trim() !== '') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return '—'
+}
+
+function sessionQuery(value: unknown): string {
+  if (typeof value !== 'string' || value.trim() === '') return '—'
+  return value.split(/\r?\n/u, 1)[0]?.trim() ?? '—'
+}
+
+function ActiveSessions({
+  sessions,
+  currentTier,
+  instanceId,
+}: {
+  sessions: readonly LockNode[]
+  currentTier: PermTier
+  instanceId: string
+}) {
+  return (
+    <div className="mt-6">
+      <h3 className="font-medium">Active sessions</h3>
+      {sessions.length === 0 ? (
+        <p className="text-muted-foreground mt-2 text-sm">
+          No active sessions in the latest sample.
+        </p>
+      ) : (
+        <ul aria-label="Active sessions" className="mt-3 space-y-3">
+          {sessions.map((session) => (
+            <li key={String(session.pid)} className="rounded-md border p-3">
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
+                <strong>PID {sessionValue(session.pid)}</strong>
+                <span>{sessionValue(session.state)}</span>
+                <span className="text-muted-foreground">
+                  database {sessionValue(session.datname ?? session.database)}; user{' '}
+                  {sessionValue(session.usename ?? session.username ?? session.user)}
+                </span>
+              </div>
+              <p className="text-muted-foreground mt-1 truncate text-sm">
+                {sessionQuery(session.query)}
+              </p>
+              <SignalActions currentTier={currentTier} instanceId={instanceId} node={session} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 }
 
 const SAMPLE_INTERVAL_SECONDS = 10
@@ -64,9 +118,15 @@ function BreakdownList({
 
 export function ActivitySection({
   response,
+  sessions,
+  currentTier = 'T0',
+  instanceId,
   now = new Date(),
 }: {
   response: ActivityResponseLike
+  sessions?: readonly LockNode[]
+  currentTier?: PermTier
+  instanceId?: string
   now?: Date
 }) {
   const sampledAt = useMemo(() => latestSampleAt(response.metrics), [response.metrics])
@@ -191,6 +251,10 @@ export function ActivitySection({
           </>
         )}
       </div>
+
+      {sessions && instanceId ? (
+        <ActiveSessions currentTier={currentTier} instanceId={instanceId} sessions={sessions} />
+      ) : null}
     </Section>
   )
 }

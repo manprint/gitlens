@@ -102,6 +102,22 @@ func prepareUIScenario(e *scenario.Env, id string) (chan error, error) {
 			target = "pg-standby"
 		}
 		return startUIWorkload(e, target, "slow-query", "--sleep", "45s", "--count", "1"), nil
+	case "SYS-UI-010":
+		_, err := e.DB.Exec(context.Background(), `
+INSERT INTO findings (
+	tenant_id, finding_id, rule_id, severity, state, scope, datname, object_name,
+	title, detail, remediation, evidence, first_seen, last_seen
+)
+VALUES (
+	'default', 'ui.acceptance/mute', 'ui.acceptance', 'warning', 'open', 'database',
+	'postgres', 'ui.acceptance', 'UI acceptance finding', 'Seeded for the UI mute acceptance test.',
+	'', '{}'::jsonb, now(), now()
+)
+ON CONFLICT (tenant_id, finding_id) DO UPDATE SET
+	state = 'open', muted_until = NULL, mute_reason = NULL, last_seen = now()`)
+		if err != nil {
+			return nil, fmt.Errorf("seed UI finding: %w", err)
+		}
 	}
 	return nil, nil
 }

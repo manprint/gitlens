@@ -14,6 +14,7 @@ type lockAPIResponse struct {
 	SampledAt  *time.Time        `json:"sampled_at"`
 	Stale      bool              `json:"stale"`
 	Nodes      []json.RawMessage `json:"nodes"`
+	Sessions   []json.RawMessage `json:"sessions"`
 }
 
 type activityAPIResponse struct {
@@ -56,7 +57,12 @@ func (a *API) handleLocks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid instance_id", "query param instance_id is required and must be a UUID")
 		return
 	}
-	resp := lockAPIResponse{InstanceID: id.String(), Stale: true, Nodes: []json.RawMessage{}}
+	resp := lockAPIResponse{
+		InstanceID: id.String(),
+		Stale:      true,
+		Nodes:      []json.RawMessage{},
+		Sessions:   []json.RawMessage{},
+	}
 	if a.pool != nil {
 		var ts time.Time
 		var raw []byte
@@ -65,10 +71,12 @@ func (a *API) handleLocks(w http.ResponseWriter, r *http.Request) {
 			resp.SampledAt = &ts
 			resp.Stale = contentionStale(ts, time.Now())
 			var tree struct {
-				Nodes []json.RawMessage `json:"nodes"`
+				Nodes    []json.RawMessage `json:"nodes"`
+				Sessions []json.RawMessage `json:"sessions"`
 			}
 			if json.Unmarshal(raw, &tree) == nil {
 				resp.Nodes = tree.Nodes
+				resp.Sessions = tree.Sessions
 			}
 		}
 	}
