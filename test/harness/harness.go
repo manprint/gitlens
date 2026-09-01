@@ -742,7 +742,18 @@ func (h *Harness) ExecAs(service, user string, argv ...string) (string, error) {
 func (h *Harness) Compose(argv ...string) error {
 	// In binary mode, the pglens-agent service doesn't exist (it's a host
 	// subprocess). If a scenario tries to restart it, handle that by killing
-	// and respawning the subprocess.
+	// and respawning the subprocess. A stop is intentionally terminal: it is
+	// used by UI acceptance tests to exercise the agent-down state.
+	if h.agentMode == AgentModeBinary && len(argv) >= 2 && argv[0] == "stop" && argv[1] == "pglens-agent" {
+		if h.agentCmd == nil || h.agentCmd.Process == nil {
+			return fmt.Errorf("pglens-agent binary is not running")
+		}
+		if err := h.agentCmd.Process.Kill(); err != nil {
+			return fmt.Errorf("stop pglens-agent binary: %w", err)
+		}
+		_ = h.agentCmd.Wait()
+		return nil
+	}
 	if h.agentMode == AgentModeBinary && len(argv) >= 2 && argv[0] == "restart" && argv[1] == "pglens-agent" {
 		if h.agentCmd == nil || h.agentCmd.Process == nil {
 			return fmt.Errorf("agent subprocess not running (cannot restart)")
