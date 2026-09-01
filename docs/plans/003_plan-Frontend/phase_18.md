@@ -163,6 +163,16 @@
   `SYS-UI-002`, `SYS-UI-003` and `SYS-UI-011` additionally green in
   `AGENT_MODE=binary`; `agent-1:opus` has reviewed the assertions; closed in
   `STATE.md`.
+- **Closure evidence (2026-09-01):** after the read-only `agent-1:opus` assertion
+  review and its corrections, the final container gate passed all eleven
+  scenarios in 833.30s (13m53s), exit 0, with no residual `pglens-*` containers
+  or networks. The required binary checks passed in 45.32s for `SYS-UI-001` and
+  130.71s for `SYS-UI-002`, `SYS-UI-003`, and `SYS-UI-011`; the failover
+  assertion polls the event and firing-alert APIs before checking the rendered
+  routes, so the binary and container modes share the same readiness contract.
+  The first post-review closure retry found only a strict-mode ambiguity in the
+  outage stale-status locator; `.first()` corrected the test assertion and the
+  final gate was rerun once.
 
 ### 17.3 CI integration
 
