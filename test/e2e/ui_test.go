@@ -186,7 +186,12 @@ func startUIHarness(t *testing.T, cfg harness.Config) *harness.Harness {
 		if len(clusters) == 0 {
 			return fmt.Errorf("API returned no clusters yet")
 		}
-		return nil
+		for _, cluster := range clusters {
+			if fmt.Sprint(cluster["health"]) == "ok" {
+				return nil
+			}
+		}
+		return fmt.Errorf("API returned no healthy clusters yet: %v", clusters)
 	})
 	t.Setenv("PGLENS_UI_BASE_URL", fmt.Sprintf("http://127.0.0.1:%d", h.ServerPort()))
 	t.Setenv("PGLENS_BOOTSTRAP_TOKEN", uiBootstrapToken)

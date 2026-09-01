@@ -71,6 +71,7 @@ type Harness struct {
 	agentFile         string
 	toxiproxyFile     string // "" unless Config.Toxiproxy is set
 	extraFile         string // optional scenario-specific compose fragment
+	ui                bool   // true when the UI overlay is active
 	composeDir        string
 	containerName     string
 	serverPort        int
@@ -176,6 +177,7 @@ func Start(t *testing.T, cfg Config) *Harness {
 		topologyFile:  topologyFile,
 		agentFile:     agentFile,
 		extraFile:     extraFile,
+		ui:            cfg.UI,
 		toxiproxyFile: toxiproxyFile,
 		composeDir:    composeDir,
 		topology:      cfg.Topology,
@@ -518,7 +520,7 @@ func (h *Harness) composeFiles() []string {
 func (h *Harness) composeUp() error {
 	args := append([]string{"compose", "-p", h.projectName}, h.composeFiles()...)
 	args = append(args, "up", "-d")
-	if h.extraFile != "" {
+	if h.extraFile != "" && !h.ui {
 		args = append(args, "--build", "--scale", "pglens-server=2")
 	}
 	cmd := exec.Command("docker", args...)
