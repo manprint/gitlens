@@ -2,6 +2,7 @@ import { FleetPage } from '@/features/fleet/FleetPage'
 import { ClusterPage } from '@/features/cluster/ClusterPage'
 import AshPageComponent from '@/features/ash/AshPage'
 import InstancePage from '@/features/instance/InstancePage'
+import QueryListPageComponent from '@/features/queries/QueryListPage'
 
 interface PlaceholderPageProps {
   surface: string
@@ -33,7 +34,7 @@ export function AshPage() {
 }
 
 export function QueryInspectorPage() {
-  return <PlaceholderPage surface="Query inspector" />
+  return <QueryListPageComponent />
 }
 
 export function QueryDetailPage() {
