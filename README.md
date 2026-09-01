@@ -220,6 +220,15 @@ confirmation naming the session and query, and its terminal result links to the
 command audit. See [Known limits](#known-limits) for the sampling and
 contention boundaries.
 
+The Settings page lists every monitored instance and its databases, including
+databases that are not monitored and the reported reason (for example, a
+database budget); it also summarises permission tiers T0, T1 and T2 with the
+advisor rules and actions each tier unlocks. The command audit shows what was
+requested, its arguments, outcome, timing, expiry or rejection, and records
+actions rather than operator identities. The interface has no user accounts,
+roles, enrollment approval queue, or agent-revocation control; revoke an agent
+with the documented SQL operation under [Configuration](#configuration).
+
 The selected time range is reflected in the URL, so a view can be shared as a
 link. Keyboard shortcuts are available for the main destinations and filters:
 
