@@ -164,8 +164,9 @@ test('SYS-UI-002: unauthenticated navigation cannot restore fleet data', async (
   await page.getByRole('button', { name: /sign out|esci|logout/i }).click()
   await expect(page.getByRole('heading', { name: /sign in|accedi/i })).toBeVisible()
   await page.goBack()
-  await expect(page.getByRole('heading', { name: /sign in|accedi/i })).toBeVisible()
   await expect(page.getByRole('list', { name: 'Cluster cards' })).toHaveCount(0)
+  const backNavigationStatus = await page.evaluate(async () => (await fetch('/api/v1/clusters')).status)
+  expect(backNavigationStatus).toBe(401)
 })
 
 test('SYS-UI-003: agent outage is visible as stale fleet data', async ({ signedInPage, api }) => {

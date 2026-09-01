@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import './index.css'
 import { ErrorBoundary } from './components/layout/ErrorBoundary'
@@ -13,11 +14,14 @@ if (!root) {
 }
 
 const router = createBrowserRouter(routes)
+const queryClient = new QueryClient()
 
 createRoot(root).render(
   <StrictMode>
     <ErrorBoundary>
-      <RouterProvider router={router} />
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>
     </ErrorBoundary>
   </StrictMode>,
 )
