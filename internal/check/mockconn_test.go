@@ -138,8 +138,10 @@ func (m *mockConn) Release() {
 
 // TestApplySessionLimits_Happy applies session limits successfully.
 func TestApplySessionLimits_Happy(t *testing.T) {
+	var statements []string
 	conn := &mockConn{
 		execFunc: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+			statements = append(statements, sql)
 			return pgconn.CommandTag{}, nil
 		},
 	}
@@ -147,6 +149,14 @@ func TestApplySessionLimits_Happy(t *testing.T) {
 	err := ApplySessionLimits(context.Background(), conn, 30000000000) // 30s
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
+	}
+	expected := []string{
+		"SET statement_timeout = 30000",
+		"SET lock_timeout = '1s'",
+		"SET idle_in_transaction_session_timeout = '30s'",
+	}
+	if fmt.Sprint(statements) != fmt.Sprint(expected) {
+		t.Fatalf("unexpected session limits: got %v want %v", statements, expected)
 	}
 }
 

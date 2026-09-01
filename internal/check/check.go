@@ -125,13 +125,16 @@ type Target interface {
 // ApplySessionLimits sets per-check timeouts via SET LOCAL.
 func ApplySessionLimits(ctx context.Context, conn Conn, timeout time.Duration) error {
 	ms := int(timeout / time.Millisecond)
-	if _, err := conn.Exec(ctx, fmt.Sprintf("SET LOCAL statement_timeout = %d", ms)); err != nil {
+	// Conn does not expose a transaction to the check, so SET LOCAL would be
+	// rejected by PostgreSQL before the actual check query runs. These session
+	// settings are reapplied for every check connection before it is used.
+	if _, err := conn.Exec(ctx, fmt.Sprintf("SET statement_timeout = %d", ms)); err != nil {
 		return err
 	}
-	if _, err := conn.Exec(ctx, "SET LOCAL lock_timeout = '1s'"); err != nil {
+	if _, err := conn.Exec(ctx, "SET lock_timeout = '1s'"); err != nil {
 		return err
 	}
-	if _, err := conn.Exec(ctx, "SET LOCAL idle_in_transaction_session_timeout = '30s'"); err != nil {
+	if _, err := conn.Exec(ctx, "SET idle_in_transaction_session_timeout = '30s'"); err != nil {
 		return err
 	}
 	return nil
