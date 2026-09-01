@@ -54,15 +54,18 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 15.1 |
+| **ID** | 15.2 |
 | **Status** | `OPEN` |
-| **Intent** | Build the alerts derivation library for firing, suppressed, resolved, and silence states |
-| **Next action:** | Complete sub-phase **15.1** in [phase_16.md](phase_16.md): add `web/src/lib/alerts.ts` and its focused tests |
+| **Intent** | Build the alert list with summaries, filters, silence context, detail, and troubleshooting links |
+| **Next action:** | Complete sub-phase **15.2** in [phase_16.md](phase_16.md): add `web/src/features/alerts/AlertsPage.tsx` and `AlertRow.tsx` |
 | **Assigned** | `agent-2:sonnet` |
 | **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, and phase 6 sub-phases 6.1–6.8 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, strict typed lint/format gates, Makefile web targets, clean placeholder preservation, the parallel CI web job, frontend workflow documentation, the real server image build, the phase-boundary L3 regression, the Vitest/jsdom test runner foundation, the frontend testing architecture rules, the deterministic render/provider harness, the contract-validated OpenAPI fixture suite, the contract-aware MSW handler factory, the V8 UI coverage gate, the axe-core accessibility assertion, the deterministic clock/timezone/locale/randomness rules, the Playwright acceptance bootstrap, the harness defense meta-tests, the frontend testing workflow documentation, the phase-5 boundary E2E regression, the OpenAPI type generator, committed generated API types, stable schema aliases, type-level contract assertions, generator drift gates, the single typed API client, normalized API failures, exact large-integer query identifiers, the query key factory, refresh policies, the visibility-aware polling hooks, query-layer coverage, session authentication, guarded routing, login/logout flows, single-flight 401 handling, auth/login coverage, the accessible state-primitives library, freshness plumbing, the phase-6 browser sign-in documentation, the phase-7 route tree/code-splitting boundary, the accessible application shell, the URL-backed time-range state, the shared page scaffolding primitives, resilient namespaced theme/density/sidebar preferences, global error/offline handling, the phase-7 README web-interface guide, the phase-7 boundary E2E regression, the fleet derivation library, cluster cards, agent-health surfacing, server-defined health semantics, degraded/error paths, Fleet Overview documentation, the phase-8 boundary E2E regression, the phase-9 boundary E2E regression, and the Cluster Detail documentation are covered. The replication derivation library, topology graph, lag charts, slots, configuration drift, event taxonomy/timeline, Cluster Detail route, degraded/error paths, UI-REPL/UI-CLUS tests, Instance Detail header, database selector, URL-backed database scope, unmonitored database visibility, metric tiles, time series, counter-reset annotations, host metrics, settings, change history, durability, relations, bloat, truncation, and the Instance Detail README guidance are covered. Phase 10 is complete and phase 11 is now complete: ASH derivation, stacked waits, drill-down, honest disabled/under-sampled/unattributable states, stale freshness, exactly-once unauthorized navigation, server-error retry, shared range-retention validation, permanent sampling-limit guidance, and the README wait-analysis guide are covered. Phase 12.1–12.7 and phase 13.1–13.6 are complete: statement ranking, execution-time shares, null-safe statement summaries, whitespace normalization, cluster/version comparability helpers, the complete Query Inspector, Locks and Activity derivation and views, command polling at the one-second policy, terminal-state polling stops, server and client expiry, agent rejection messaging, and no-retry command creation are covered. Phase 14.1–14.5 are complete: advisor findings ranking/grouping/summaries, authoritative catalogue joining, missing-rule preservation, frozen-clock mute expiry, the URL-backed findings list, severity/state/scope/cluster/instance filters, explicit hidden-state counts, degraded input/tier guidance, evidence rendering, findings accessibility coverage, server-confirmed mute/unmute controls, reason/expiry validation, non-optimistic mutation handling, muted-state remaining-time presentation, rule catalogue rendering/filtering, affirmative empty-state semantics, degraded-only honesty, stale data, exactly-once unauthorized navigation, retryable failures, and findings polling are covered. The next unit is phase 14.6, the findings documentation. |
 | **Phase file** | [phase_16.md](phase_16.md) |
 
 The earlier phase-14.6 pointer in the repository-state narrative is superseded: phase 14.6 and the phase-14 boundary are complete, and the next unit is sub-phase 15.1.
+
+The earlier sub-phase-15.1 pointer is now superseded: sub-phase 15.1 is
+complete and sub-phase 15.2 is open.
 
 Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, phase 6 sub-phases 6.1–6.8, phase 7 sub-phases 7.1–7.7, phase 8 sub-phases 8.1–8.6, phase 9 sub-phases 9.1–9.7, phase 10 sub-phases 10.1–10.7, phase 11 sub-phases 11.1–11.6, sub-phases 12.1–12.7, sub-phases 13.1–13.6, and sub-phases 14.1–14.6 are closed; phase 14 is complete and sub-phase 15.1 is next.
 - Phases 5 through 14 are complete; phase 15 is in progress and sub-phase 15.1 is next.
@@ -259,6 +262,7 @@ records start/end timestamps and elapsed time.
 | 14.4 | sub-phase | 14.4 | 2026-09-01 | Add advisor rule catalogue view | `39ebd5a` |
 | 14.5 | sub-phase | 14.5 | 2026-09-01 | Complete advisor findings degraded and error paths | `50cd469` |
 | 14.6 | sub-phase | 14.6 | 2026-09-01 | Update README.md for advisor findings | `bde45a0` |
+| 15.1 | sub-phase | 15.1 | 2026-09-01 | Build the alerts derivation library | `87639aa` |
 
 ---
 
@@ -629,6 +633,11 @@ and `RESIDUAL_CONTAINERS=0` / `RESIDUAL_NETWORKS=0`; durable evidence is in
 `test/e2e/_artifacts/e2e-phase14-boundary-20260901.log`. Phase 14 is complete;
 the next unit is sub-phase 15.1.
 
+Sub-phase 15.1 added `web/src/lib/alerts.ts` and its pure test suite. The
+library ranks alerts without mutation, keeps suppressed counts separate from
+unsuppressed firing counts, mirrors server matcher semantics, and exposes the
+half-open silence window as pending, active, or expired with remaining seconds.
+
 `docs/LIMITS.md` was also touched by sub-phase 2.7.
 
 `Makefile`; `README.md`; `scripts/e2e_evidence.sh`; `scripts/id_audit.sh`; `internal/scripts/doc.go`; `internal/scripts/scripts_test.go`; `test/harness/harness.go`; `test/harness/api.go`; `test/e2e/deploy_test.go`; `test/scenario/net.go`; `test/scenario/topo_cascading.go`; `docs/plans/002_plan-AnalysisBackend/STATE.md`; `docs/plans/002_plan-AnalysisBackend/phase_11.md`; `docs/plans/002_plan-AnalysisBackend/verify/index.md`; `docs/plans/002_plan-AnalysisBackend/verify/verify_001_2026-08-30.md`; `docs/plans/003_plan-Frontend/STATE.md`; `api/openapi.yaml`; `internal/server/openapi_test.go`; `internal/tools/apidocs/main.go`; `internal/tools/apidocs/main_test.go`; `docs/api.md`; `cmd/pglens-server/main.go`; `internal/server/config.go`; `internal/server/config_test.go`; `internal/server/session.go`; `internal/server/session_test.go`; `internal/server/http.go`; `internal/server/http_test.go`; `internal/server/facts_integration_test.go`; `internal/server/ingest_integration_test.go`; `internal/server/api_commands_integration_test.go`; `web/src/lib/statements.ts`; `web/src/lib/statements.test.ts`.
@@ -925,6 +934,9 @@ the next unit is sub-phase 15.1.
 | 2026-09-01 | 14 | `make fmt-check web-lint web-typecheck web-test web-coverage-gate test` | DIAGNOSTIC then PASS | First boundary attempt completed in 12.41s and exposed formatting drift in eight findings files. After normalization, the final boundary gate completed in 253.83s (4m13.83s); 77 frontend files and 551 tests passed, API coverage was 95.8% (statements 89.96%, branches 80.5%, functions 89.46%, lines 91.61%), and Go race/shuffle passed. Lint retained only four existing Fast Refresh warnings. |
 | 2026-09-01 | 14 | coverage repair | PASS | The initial full boundary run completed in 241.19s (4m01.19s) but reported `src/api` at 94.4% below the unchanged 95% floor; two mutation-failure tests raised it to 95.8% before the final boundary rerun. |
 | 2026-09-01 | 14 | `make test-e2e` | PASS | Durable artifact `test/e2e/_artifacts/e2e-phase14-boundary-20260901.log`; Go E2E `Smoke` completed in 1103.743s, wrapper wall-clock 1103.97s (18m23.97s), exit 0, with zero residual containers and networks. |
+| 2026-09-01 | 15.1 | `pnpm --dir web exec vitest run src/lib/alerts.test.ts` | PASS | Focused pure suite completed in 1.08s wall-clock; 1 file and 6 tests passed, covering UI-ALERT-001–006. |
+| 2026-09-01 | 15.1 | `pnpm --dir web exec eslint src/lib/alerts.ts src/lib/alerts.test.ts`; `make web-typecheck`; `make fmt-check` | PASS | Changed-file lint, web typecheck, and formatter/generated-file drift checks passed after the explicit generated-matcher narrowing. |
+| 2026-09-01 | 15.1 | E2E | DEFERRED | No E2E was run for this pure derivation sub-phase; the browser boundary remains scheduled once at phase-15 closure. |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -1031,7 +1043,7 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 | 12 | [phase_13.md](phase_13.md) | Query Inspector and plan history | `agent-2:sonnet` | 12.3 | DONE — 7/7 sub-phases closed |
 | 13 | [phase_14.md](phase_14.md) | Locks and Activity | `agent-2:sonnet` | 13.6 | DONE — 6/6 sub-phases closed |
 | 14 | [phase_15.md](phase_15.md) | Advisor findings | `agent-2:sonnet` | — | DONE — 6/6 sub-phases closed |
-| 15 | [phase_16.md](phase_16.md) | Alerts, silences, rules, events | `agent-2:sonnet` | 15.3 | IN_PROGRESS — 15.1 open |
+| 15 | [phase_16.md](phase_16.md) | Alerts, silences, rules, events | `agent-2:sonnet` | 15.3 | IN_PROGRESS — 15.2 open |
 | 16 | [phase_17.md](phase_17.md) | Settings and fleet inventory | `agent-2:sonnet` | — | TODO |
 | 17 | [phase_18.md](phase_18.md) | Packaging, UI acceptance suite, documentation | `agent-2:sonnet` / `agent-3:haiku` | 17.2, 17.7, 17.8 | TODO |
 
@@ -1146,7 +1158,8 @@ the next one opens.
 | 14.4 | The rule catalogue view | `agent-2:sonnet` | DONE |
 | 14.5 | Degraded and error paths (rule T-4) | `agent-2:sonnet` | DONE |
 | 14.6 | Update README.md | `agent-3:haiku` | DONE |
-| 15.1 | Alerts derivation library | `agent-2:sonnet` | OPEN |
+| 15.1 | Alerts derivation library | `agent-2:sonnet` | DONE |
+| 15.2 | The alert list | `agent-2:sonnet` | OPEN |
 | 15.2 | The alert list | `agent-2:sonnet` | TODO |
 | 15.3 | Alert rules | `agent-2:sonnet` | TODO |
 | 15.4 | Silences | `agent-2:sonnet` | TODO |
