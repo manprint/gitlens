@@ -35,7 +35,7 @@ function instanceAddress(instance: JsonObject): string {
   return String(instance.address ?? instance.addr ?? instance.host ?? instance.name ?? instanceID(instance))
 }
 
-async function fleetContext(api: any): Promise<{
+async function fleetContext(api: any, preferredTier?: string): Promise<{
   cluster: JsonObject
   instances: JsonObject[]
   instance: JsonObject
@@ -49,7 +49,13 @@ async function fleetContext(api: any): Promise<{
     (item) => !item.cluster_id || item.cluster_id === cluster.cluster_id,
   )
   expect(clusterInstances.length, 'cluster must expose at least one instance').toBeGreaterThan(0)
+  const wantedTier = preferredTier?.toUpperCase()
   const instance =
+    (wantedTier
+      ? clusterInstances.find(
+          (item) => String(item.perm_tier ?? item.permission_tier ?? '').toUpperCase() === wantedTier,
+        )
+      : undefined) ??
     clusterInstances.find((item) => String(item.perm_tier ?? item.permission_tier ?? '').toUpperCase() === 'T1') ??
     clusterInstances[0]!
   return { cluster, instances: clusterInstances, instance }
@@ -302,7 +308,10 @@ test('SYS-UI-008: blocking tree shows the lock root and child', async ({ signedI
 
 test('SYS-UI-009: signal controls enforce tier and confirmation', async ({ signedInPage, api }) => {
   const page = signedInPage
-  const { instance } = await fleetContext(api)
+  const { instance } = await fleetContext(
+    api,
+    process.env.PGLENS_UI_CANCEL_MODE === 't0' ? 'T0' : 'T2',
+  )
   await page.goto(`/instances/${instanceID(instance)}/locks`)
   await expect(page.getByRole('heading', { name: 'Locks and activity' })).toBeVisible()
   const cancel = page.getByRole('button', { name: 'Cancel query' }).first()

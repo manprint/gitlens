@@ -138,6 +138,7 @@ func cmdLockStorm(ctx context.Context, args []string) error {
 	dsn := fs.String("dsn", os.Getenv("PGLENS_TEST_DSN"), "PostgreSQL connection string")
 	sessions := fs.Int("sessions", 50, "number of concurrent sessions")
 	duration := fs.Duration("duration", 20*time.Second, "how long to run")
+	hold := fs.Duration("hold", time.Millisecond, "how long each transaction holds the row lock")
 	seed := fs.Int64("seed", time.Now().UnixNano(), "random seed")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -169,7 +170,7 @@ func cmdLockStorm(ctx context.Context, args []string) error {
 		return err
 	}
 
-	err = lockStorm(ctx, pool, *sessions, *duration, &report)
+	err = lockStorm(ctx, pool, *sessions, *duration, *hold, &report)
 	if err != nil {
 		return err
 	}

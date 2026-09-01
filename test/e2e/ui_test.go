@@ -89,13 +89,17 @@ func prepareUIScenario(e *scenario.Env, id string) (chan error, error) {
 			return nil, fmt.Errorf("stop pglens-agent: %w", err)
 		}
 	case "SYS-UI-008":
-		return startUIWorkload(e, "pg", "lock-storm", "--sessions", "8", "--duration", "30s"), nil
+		return startUIWorkload(e, "pg", "lock-storm", "--sessions", "2", "--duration", "1s", "--hold", "15s"), nil
 	case "SYS-UI-006":
-		return startUIWorkload(e, "pg-standby", "slow-query", "--sleep", "30s", "--count", "1"), nil
+		return startUIWorkload(e, "pg-primary", "slow-query", "--sleep", "30s", "--count", "1"), nil
+	case "SYS-UI-007":
+		return startUIWorkload(e, "pg-primary", "slow-query", "--sleep", "30s", "--count", "3"), nil
 	case "SYS-UI-009":
 		target := "pg-primary"
 		if os.Getenv("PGLENS_UI_CANCEL_MODE") == "t0" {
 			target = "pg"
+		} else {
+			target = "pg-standby"
 		}
 		return startUIWorkload(e, target, "slow-query", "--sleep", "45s", "--count", "1"), nil
 	}

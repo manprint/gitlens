@@ -11,7 +11,7 @@ import (
 
 // lockStorm creates lock contention by having N sessions doing SELECT...FOR UPDATE
 // on one row. The report gives the observed maximum wait time.
-func lockStorm(ctx context.Context, pool *pgxpool.Pool, sessions int, duration time.Duration, report *Report) error {
+func lockStorm(ctx context.Context, pool *pgxpool.Pool, sessions int, duration, hold time.Duration, report *Report) error {
 	done := time.Now().Add(duration)
 	var maxWait atomic.Int64
 	var attempts atomic.Int64
@@ -37,8 +37,10 @@ func lockStorm(ctx context.Context, pool *pgxpool.Pool, sessions int, duration t
 						return err
 					}
 
-					// Hold the lock for a very short time
-					time.Sleep(1 * time.Millisecond)
+					// The default is deliberately short for the load scenario. UI
+					// acceptance can opt into a longer hold so the 10s lock sampler
+					// observes a stable blocking pair.
+					time.Sleep(hold)
 
 					return tx.Commit(ctx)
 				}()
