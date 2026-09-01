@@ -113,9 +113,7 @@ func startUIWorkload(e *scenario.Env, target string, command string, args ...str
 	done := make(chan error, 1)
 	go func() {
 		output, err := e.Workload(workloadArgs...)
-		if err != nil {
-			e.T.Logf("UI workload %s failed: %s", command, output)
-		}
+		e.T.Logf("UI workload %s report: %s", command, output)
 		done <- err
 	}()
 	return done
