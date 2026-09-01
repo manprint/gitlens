@@ -132,6 +132,7 @@ func runUISpec(ctx context.Context, e *scenario.Env, id string) error {
 
 	readyFile := filepath.Join(e.T.TempDir(), "ui-ready")
 	e.T.Setenv("PGLENS_UI_READY_FILE", readyFile)
+	cmd.Env = os.Environ()
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start Playwright %s: %w", id, err)
 	}
