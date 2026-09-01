@@ -106,6 +106,7 @@ func buildLocksResult(rows []lockRow, sampledAt time.Time) Result {
 	waits := make(map[string]int)
 	maxAge := 0.0
 	nodes := make([]lockNode, 0, len(rows))
+	nodePIDs := make(map[int32]struct{}, len(rows))
 	for _, r := range rows {
 		if len(r.BlockedBy) == 0 {
 			continue
@@ -119,6 +120,19 @@ func buildLocksResult(rows []lockRow, sampledAt time.Time) Result {
 			maxAge = r.StateAge
 		}
 		nodes = append(nodes, lockNode(r))
+		nodePIDs[r.PID] = struct{}{}
+	}
+	// The blocking session has no blocked_by values of its own, so the first
+	// pass intentionally skips it. Keep it in the snapshot when PostgreSQL
+	// returned the referenced PID; the UI needs that node to build the root of
+	// the blocking tree instead of rendering only the blocked child.
+	for _, r := range rows {
+		if _, isBlocking := blocking[r.PID]; isBlocking {
+			if _, alreadyIncluded := nodePIDs[r.PID]; !alreadyIncluded {
+				nodes = append(nodes, lockNode(r))
+				nodePIDs[r.PID] = struct{}{}
+			}
+		}
 	}
 	metrics := []pgtype.Metric{
 		{Name: "pg_blocked_sessions", Value: float64(blocked), Kind: pgtype.KindGauge},

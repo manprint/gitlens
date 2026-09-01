@@ -74,6 +74,18 @@ func TestLocks_TreeJSONShape(t *testing.T) {
 	require.Equal(t, int32(9), tree.Nodes[0].BlockedBy[0])
 }
 
+func TestLocks_TreeIncludesBlockingSession(t *testing.T) {
+	result := scrapeLocks(t, []([]any){
+		lockValues(9, "", nil, 0, "holder"),
+		lockValues(1, "transactionid", []int32{9}, 2, "waiter"),
+	})
+	var tree lockTree
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
+	require.Len(t, tree.Nodes, 2)
+	require.Equal(t, int32(1), tree.Nodes[0].PID)
+	require.Equal(t, int32(9), tree.Nodes[1].PID)
+}
+
 func TestLocks_QueryIsTruncated(t *testing.T) {
 	result := scrapeLocks(t, []([]any){lockValues(1, "transactionid", []int32{9}, 2, strings.Repeat("x", 3000))})
 	var tree lockTree
