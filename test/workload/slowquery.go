@@ -31,12 +31,13 @@ func slowQuery(ctx context.Context, pool *pgxpool.Pool, sleepDuration time.Durat
 			defer conn.Release()
 
 			// pg_stat_statements normalizes literal constants to $N. The
-			// parameter-free plan-safe variant intentionally uses a stable
-			// catalog query so the UI EXPLAIN acceptance test can execute it.
+			// parameter-free plan-safe variant intentionally uses a stable,
+			// moderately expensive catalog query so it is retained in the
+			// pg_stat_statements TopN for the UI EXPLAIN acceptance test.
 			query := "SELECT pg_sleep($1)"
 			args := []any{sleepDuration.Seconds()}
 			if planSafe {
-				query = "SELECT count(*) FROM pg_catalog.pg_proc"
+				query = "SELECT count(*) FROM pg_catalog.pg_proc CROSS JOIN pg_catalog.pg_class"
 				args = nil
 			}
 			_, err = conn.Exec(ctx, query, args...)

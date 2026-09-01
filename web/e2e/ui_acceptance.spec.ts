@@ -296,7 +296,7 @@ test('SYS-UI-006: plan-only execution is audited without query text', async ({
         const payload = await response.json()
         const statement = (Array.isArray(payload.statements) ? payload.statements : []).find(
           (item: JsonObject) =>
-            /^select count\(\*\) from pg_catalog\.pg_proc\s*$/i.test(
+            /^select count\(\*\) from pg_catalog\.pg_proc cross join pg_catalog\.pg_class\s*$/i.test(
               String(item.query_text ?? '').trim(),
             ),
         )

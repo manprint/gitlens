@@ -91,7 +91,7 @@ func prepareUIScenario(e *scenario.Env, id string) (chan error, error) {
 	case "SYS-UI-008":
 		return startUIWorkload(e, "pg", "lock-storm", "--sessions", "2", "--duration", "1s", "--hold", "15s"), nil
 	case "SYS-UI-006":
-		return startUIWorkload(e, "pg-primary", "slow-query", "--sleep", "0s", "--count", "1", "--plan-safe"), nil
+		return startUIWorkload(e, "pg-primary", "slow-query", "--sleep", "0s", "--count", "20", "--plan-safe"), nil
 	case "SYS-UI-007":
 		return startUIWorkload(e, "pg-primary", "slow-query", "--sleep", "30s", "--count", "3"), nil
 	case "SYS-UI-009":
