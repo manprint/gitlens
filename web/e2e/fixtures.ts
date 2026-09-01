@@ -45,7 +45,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
         const page = await context.newPage()
         await page.goto('/login')
         await page.getByLabel(/password/i).fill(password)
-        await page.getByRole('button', { name: /sign in|log in/i }).click()
+        await page.getByRole('button', { name: /sign in|log in|accedi/i }).click()
         await expect(page).not.toHaveURL(/\/login(?:[/?#]|$)/)
         await use(await context.storageState())
       } finally {
