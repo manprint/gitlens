@@ -5,7 +5,6 @@ import { Section } from '@/components/layout/Section'
 import { Unknown } from '@/components/state'
 import { formatTimestamp } from '@/lib/format'
 
-const API_CONTRACT_VERSION = '1.0.0'
 const LIMITS_URL = '/docs/LIMITS.md'
 
 const limits = [
@@ -54,7 +53,7 @@ export function ServerInfo() {
           </div>
           <div className="rounded-md border p-3">
             <dt className="text-muted-foreground text-sm">API contract</dt>
-            <dd className="mt-1 font-medium">{API_CONTRACT_VERSION}</dd>
+            <dd className="mt-1 font-medium">{__PGLENS_API_CONTRACT_VERSION__}</dd>
           </div>
           <div className="rounded-md border p-3">
             <dt className="text-muted-foreground text-sm">Session expiry</dt>
