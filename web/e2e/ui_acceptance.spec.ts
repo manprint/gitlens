@@ -369,7 +369,9 @@ test('SYS-UI-007: replication and ASH charts render data', async ({ signedInPage
 test('SYS-UI-008: blocking tree shows the lock root and child', async ({ signedInPage, api }) => {
   const page = signedInPage
   const { instance } = await fleetContext(api)
-  await page.goto(`/instances/${instanceID(instance)}/locks`)
+  const selectedInstanceID = instanceID(instance)
+  await page.goto(`/instances/${selectedInstanceID}/locks`)
+  await expect(page).toHaveURL(new RegExp(`/instances/${selectedInstanceID}/locks$`))
   await expect(page.getByRole('heading', { name: 'Locks and activity' })).toBeVisible()
   await expect
     .poll(() => page.getByRole('treeitem').count(), {
