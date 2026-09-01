@@ -43,10 +43,41 @@ describe('BlockingTree', () => {
     expect(screen.queryByText(/no lock contention/i)).not.toBeInTheDocument()
   })
 
+  it('UI-LOCK-040 renders an explicit no-blocking state for a sampled empty forest', () => {
+    render(<BlockingTree response={response([])} now={NOW} />)
+
+    expect(screen.getByText('No lock contention in the latest sample')).toBeInTheDocument()
+    expect(screen.getByText(/no blocked sessions were present/i)).toBeInTheDocument()
+  })
+
+  it('UI-LOCK-041 keeps no sample distinct from sampled no contention', () => {
+    render(<BlockingTree response={response([], { sampled_at: null, stale: true })} now={NOW} />)
+
+    expect(
+      screen.getByText(/no lock sample has been stored for this instance yet/i),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('No lock contention in the latest sample')).not.toBeInTheDocument()
+  })
+
   it('UI-LOCK-012 reports age from sampled_at rather than the fetch time', () => {
     const sampledAt = new Date(NOW.getTime() - 17_000).toISOString()
     render(<BlockingTree response={response([], { sampled_at: sampledAt })} now={NOW} />)
 
+    expect(screen.getByRole('region', { name: 'Blocking tree' })).toHaveTextContent(
+      /sample age:.*17s/i,
+    )
+  })
+
+  it('UI-LOCK-042 renders Stale with the sample age', () => {
+    const sampledAt = new Date(NOW.getTime() - 17_000).toISOString()
+    render(
+      <BlockingTree
+        response={response([{ pid: 42, blocked_by: [] }], { stale: true, sampled_at: sampledAt })}
+        now={NOW}
+      />,
+    )
+
+    expect(screen.getByRole('status', { name: /Stale data:/i })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Blocking tree' })).toHaveTextContent(
       /sample age:.*17s/i,
     )

@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { useParams } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 
 import { useInstance, useInstanceActivity, useLocks } from '@/api/queries'
 import type { PermTier } from '@/api/types'
@@ -418,13 +418,27 @@ export interface LocksPageProps {
 }
 
 export function LocksPage({ instanceId: explicitInstanceId }: LocksPageProps = {}) {
+  const location = useLocation()
+  const navigate = useNavigate()
   const { instanceId: routeInstanceId } = useParams<{ instanceId: string }>()
+  const redirectedForUnauthorized = useRef(false)
   const instanceId = explicitInstanceId ?? routeInstanceId
   const instanceQuery = useInstance(instanceId ?? '')
   const locksQuery = useLocks(instanceId ?? '')
   const activityQuery = useInstanceActivity(instanceId ?? '')
   const response = locksQuery.data as LocksResponseLike | undefined
   const activityResponse = activityQuery.data as ActivityResponseLike | undefined
+  const unauthorized =
+    instanceQuery.error?.kind === 'unauthorized' ||
+    locksQuery.error?.kind === 'unauthorized' ||
+    activityQuery.error?.kind === 'unauthorized'
+
+  useEffect(() => {
+    if (!unauthorized || redirectedForUnauthorized.current) return
+    redirectedForUnauthorized.current = true
+    const next = `${location.pathname}${location.search}`
+    void navigate(`/login?next=${encodeURIComponent(next)}`, { replace: true })
+  }, [location.pathname, location.search, navigate, unauthorized])
 
   if (!instanceId) {
     return <p role="status">Select an instance to inspect locks.</p>
