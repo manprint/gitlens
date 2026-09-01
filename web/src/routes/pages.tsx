@@ -12,6 +12,7 @@ import { AlertsPage as AlertsPageComponent } from '@/features/alerts/AlertsPage'
 import { EventsPage as EventsPageComponent } from '@/features/alerts/EventsPage'
 import { RulesPage as RulesPageComponent } from '@/features/alerts/RulesPage'
 import { SilencesPage as SilencesPageComponent } from '@/features/alerts/SilencesPage'
+import { SettingsPage as SettingsPageComponent } from '@/features/settings/SettingsPage'
 import { useParams } from 'react-router-dom'
 
 interface PlaceholderPageProps {
@@ -92,5 +93,5 @@ export function SilencesPage() {
 }
 
 export function SettingsPage() {
-  return <PlaceholderPage surface="Settings and inventory" />
+  return <SettingsPageComponent />
 }
