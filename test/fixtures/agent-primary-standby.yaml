@@ -31,6 +31,7 @@ targets:
     allow_explain_analyze: true
 checks:
   activity: { interval: 5s }
+  locks: { interval: 5s }
   database_stats: { interval: 5s }
   stat_statements: { interval: 10s, top_n: 50 }
   ash: { interval: 5s }
