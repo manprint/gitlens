@@ -401,6 +401,7 @@ export function useAlerts(params: QueryParameters<'/api/v1/alerts'> = {}) {
 
 export function useAlert(alertKey: string) {
   return useApiQuery({
+    enabled: Boolean(alertKey),
     policy: REFRESH.alerts,
     queryFn: () =>
       getApi(() =>

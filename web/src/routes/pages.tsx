@@ -8,6 +8,7 @@ import PlanHistory from '@/features/queries/PlanHistory'
 import QueryListPageComponent from '@/features/queries/QueryListPage'
 import LocksPageComponent from '@/features/locks/BlockingTree'
 import { FindingsPage as FindingsPageComponent } from '@/features/findings/FindingsPage'
+import { AlertsPage as AlertsPageComponent } from '@/features/alerts/AlertsPage'
 import { useParams } from 'react-router-dom'
 
 interface PlaceholderPageProps {
@@ -72,7 +73,7 @@ export function FindingsPage() {
 }
 
 export function AlertsPage() {
-  return <PlaceholderPage surface="Alerts and events" />
+  return <AlertsPageComponent />
 }
 
 export function SettingsPage() {
