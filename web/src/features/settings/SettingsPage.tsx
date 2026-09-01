@@ -4,6 +4,7 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { EmptyState, ErrorState } from '@/components/state'
 
 import { InventoryTables } from './InventoryTables'
+import { ServerInfo } from './ServerInfo'
 
 export function SettingsPage() {
   const instancesQuery = useInstances()
@@ -62,6 +63,7 @@ export function SettingsPage() {
         />
       ) : null}
       <InventoryTables alerts={alerts} clusters={clusters} instances={instances} rules={rules} />
+      <ServerInfo />
     </div>
   )
 }
