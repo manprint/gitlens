@@ -67,6 +67,7 @@ function renderSettings(options: RenderSettingsOptions = {}) {
     ok('getClusters', options.clusters ?? [CLUSTER]),
     ok('getAlerts', options.alerts ?? []),
     ok('getAdvisorRules', options.advisorRules ?? rules),
+    ok('getInstanceCommandAudit', []),
     ok('getSession', { authenticated: true, configured: true, expires_at: NOW }),
     ok('getInstanceDatabases', {
       instance_id: INSTANCE_ID,

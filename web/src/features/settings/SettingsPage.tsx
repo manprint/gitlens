@@ -3,6 +3,7 @@ import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { EmptyState, ErrorState } from '@/components/state'
 
+import { CommandAudit } from './CommandAudit'
 import { InventoryTables } from './InventoryTables'
 import { ServerInfo } from './ServerInfo'
 
@@ -63,6 +64,7 @@ export function SettingsPage() {
         />
       ) : null}
       <InventoryTables alerts={alerts} clusters={clusters} instances={instances} rules={rules} />
+      <CommandAudit instances={instances} />
       <ServerInfo />
     </div>
   )
