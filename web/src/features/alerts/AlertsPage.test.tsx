@@ -1,4 +1,4 @@
-import { act, fireEvent, screen } from '@testing-library/react'
+import { act, fireEvent, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { Schemas } from '@/api/types'
@@ -135,6 +135,28 @@ describe('AlertsPage', () => {
 
     expect(screen.getByTestId('alert-detail')).toHaveTextContent('replication')
     expect(screen.getByText('Labels')).toBeInTheDocument()
+  })
+
+  it('UI-ALERT-040 names only Slack and generic webhook as delivery channels', async () => {
+    await renderAlerts()
+
+    const channels = screen.getByRole('list', { name: 'Supported notification channels' })
+    expect(channels).toHaveTextContent('Slack')
+    expect(channels).toHaveTextContent('Generic webhook')
+    expect(within(channels).getAllByRole('heading', { level: 3 })).toHaveLength(2)
+  })
+
+  it('UI-ALERT-041 explains that unconfigured channels still persist alerts', async () => {
+    await renderAlerts()
+
+    expect(screen.getByRole('note')).toHaveTextContent('alerts are persisted but not delivered')
+  })
+
+  it('UI-ALERT-042 does not offer a webhook URL editor', async () => {
+    await renderAlerts()
+
+    expect(screen.queryByRole('textbox', { name: /webhook url/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /save webhook/i })).not.toBeInTheDocument()
   })
 
   it('has no serious or critical accessibility violations on a populated list', async () => {

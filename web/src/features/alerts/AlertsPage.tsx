@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { matchSilence, rankAlerts, summariseAlerts, type Alert, type Silence } from '@/lib/alerts'
 
 import { AlertRow } from './AlertRow'
+import { DeliverySection } from './DeliverySection'
 
 type StateFilter = 'all' | Alert['state']
 type SeverityFilter = 'all' | Alert['severity']
@@ -315,6 +316,13 @@ export function AlertsPage() {
             title={alerts.length === 0 ? 'No alerts' : 'No alerts match these filters'}
           />
         )}
+      </Section>
+
+      <Section
+        title="Notification delivery"
+        description="Delivery is controlled by the server environment and is never edited in the browser."
+      >
+        <DeliverySection />
       </Section>
     </div>
   )
