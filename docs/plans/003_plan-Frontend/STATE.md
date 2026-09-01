@@ -352,7 +352,7 @@ records start/end timestamps and elapsed time.
 | 17.2 | sub-phase | 17.2 | 2026-09-01 | Implement and verify the browser acceptance scenarios | `6e9c0ba` (assertion correction); closed in this state update |
 | 17.3 | sub-phase | 17.3 | 2026-09-01 | Add and validate the CI workflow for the bounded UI acceptance matrix | `4977d47`, `072b206` |
 | 17.4 | sub-phase | 17.4 | 2026-09-01 | Verify release packaging, image sizes, multi-arch builds, and deployment limits | verification-only; closed in this state update |
-| 17.5 | sub-phase | 17.5 | 2026-09-01 | Enforce the frontend bundle budget and preserve lazy visualization chunks | `4cbe0ec` |
+| 17.5 | sub-phase | 17.5 | 2026-09-01 | Enforce the frontend bundle budget and preserve lazy visualization chunks | `0a4eb0a` |
 
 ---
 
