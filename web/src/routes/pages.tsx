@@ -10,6 +10,7 @@ import LocksPageComponent from '@/features/locks/BlockingTree'
 import { FindingsPage as FindingsPageComponent } from '@/features/findings/FindingsPage'
 import { AlertsPage as AlertsPageComponent } from '@/features/alerts/AlertsPage'
 import { RulesPage as RulesPageComponent } from '@/features/alerts/RulesPage'
+import { SilencesPage as SilencesPageComponent } from '@/features/alerts/SilencesPage'
 import { useParams } from 'react-router-dom'
 
 interface PlaceholderPageProps {
@@ -79,6 +80,10 @@ export function AlertsPage() {
 
 export function RulesPage() {
   return <RulesPageComponent />
+}
+
+export function SilencesPage() {
+  return <SilencesPageComponent />
 }
 
 export function SettingsPage() {

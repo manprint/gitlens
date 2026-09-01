@@ -70,7 +70,8 @@ export function AlertRow({ alert, matchingSilence, onSelect }: AlertRowProps) {
               >
                 {matchingSilence.reason}
               </Link>{' '}
-              ({remainingTime(silenceWindow(matchingSilence, new Date()).remainingSeconds)} remaining)
+              ({remainingTime(silenceWindow(matchingSilence, new Date()).remainingSeconds)}{' '}
+              remaining)
             </>
           ) : (
             'Suppressed; matching silence details are unavailable.'

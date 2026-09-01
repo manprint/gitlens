@@ -146,8 +146,7 @@ export function AlertsPage() {
   }
 
   const unauthorized =
-    alertsQuery.error?.kind === 'unauthorized' ||
-    silencesQuery.error?.kind === 'unauthorized'
+    alertsQuery.error?.kind === 'unauthorized' || silencesQuery.error?.kind === 'unauthorized'
 
   useEffect(() => {
     if (!unauthorized || redirectedForUnauthorized.current) return
@@ -191,13 +190,20 @@ export function AlertsPage() {
       {silencesQuery.error ? (
         <div className="border-warning/40 bg-warning/10 p-3 text-sm" role="alert">
           Suppression details are unavailable; alerts remain visible without silence context.
-          <button className="ml-2 underline" onClick={() => void silencesQuery.refetch()} type="button">
+          <button
+            className="ml-2 underline"
+            onClick={() => void silencesQuery.refetch()}
+            type="button"
+          >
             Retry silences
           </button>
         </div>
       ) : null}
 
-      <Section title="Summary" description="Firing alerts are counted by severity; suppressed alerts are shown separately.">
+      <Section
+        title="Summary"
+        description="Firing alerts are counted by severity; suppressed alerts are shown separately."
+      >
         <div aria-label="Alert summary" className="flex flex-wrap gap-4 text-sm" role="group">
           <span>Critical firing: {summary.firing.critical}</span>
           <span>Warning firing: {summary.firing.warning}</span>
@@ -207,7 +213,10 @@ export function AlertsPage() {
         </div>
       </Section>
 
-      <Section title="Filters" description="Filters are kept in the URL so an alert view can be shared.">
+      <Section
+        title="Filters"
+        description="Filters are kept in the URL so an alert view can be shared."
+      >
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <label className="space-y-1 text-sm" htmlFor="alerts-state">
             <span className="font-medium">State</span>
@@ -264,14 +273,21 @@ export function AlertsPage() {
 
       {selectedAlertKey ? (
         <Section title={`Alert detail: ${selectedAlertKey}`}>
-          <button className="mb-3 underline" onClick={() => setSelectedAlertKey(null)} type="button">
+          <button
+            className="mb-3 underline"
+            onClick={() => setSelectedAlertKey(null)}
+            type="button"
+          >
             Close detail
           </button>
           <Detail alertKey={selectedAlertKey} />
         </Section>
       ) : null}
 
-      <Section title="Alerts" description={`${visibleAlerts.length} of ${alerts.length} alerts shown`}>
+      <Section
+        title="Alerts"
+        description={`${visibleAlerts.length} of ${alerts.length} alerts shown`}
+      >
         {visibleAlerts.length > 0 ? (
           <div aria-label="Alerts" className="grid gap-4" role="list">
             {visibleAlerts.map((alert) => {

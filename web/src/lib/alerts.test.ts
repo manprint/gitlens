@@ -43,11 +43,9 @@ describe('alerts derivation', () => {
     const suppressed = alert({ alert_key: 'b', suppressed: true })
     const unsuppressed = alert({ alert_key: 'c' })
 
-    expect(rankAlerts([resolved, suppressed, unsuppressed]).map(({ alert_key }) => alert_key)).toEqual([
-      'c',
-      'b',
-      'a',
-    ])
+    expect(
+      rankAlerts([resolved, suppressed, unsuppressed]).map(({ alert_key }) => alert_key),
+    ).toEqual(['c', 'b', 'a'])
   })
 
   it('UI-ALERT-002 summarise reports suppressed separately from firing', () => {
@@ -65,11 +63,18 @@ describe('alerts derivation', () => {
   })
 
   it('UI-ALERT-003 matchSilence selects on an exact name and value', () => {
-    expect(matchSilence(alert({ labels: { team: 'database' } }), silence({ matchers: [{ name: 'team', value: 'database' }] }))).toBe(true)
+    expect(
+      matchSilence(
+        alert({ labels: { team: 'database' } }),
+        silence({ matchers: [{ name: 'team', value: 'database' }] }),
+      ),
+    ).toBe(true)
   })
 
   it('UI-ALERT-004 matchSilence does not select on a partial value', () => {
-    expect(matchSilence(alert(), silence({ matchers: [{ name: 'rule_id', value: 'replication' }] }))).toBe(false)
+    expect(
+      matchSilence(alert(), silence({ matchers: [{ name: 'rule_id', value: 'replication' }] })),
+    ).toBe(false)
   })
 
   it('UI-ALERT-005 silenceWindow classifies pending, active and expired against the frozen clock', () => {
