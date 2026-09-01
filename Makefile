@@ -7,7 +7,7 @@ LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
 .PHONY: build fmt fmt-check lint test test-integration test-e2e test-e2e-full test-e2e-full-evidence test-e2e-matrix api-docs \
         ci-local ci-local-unit ci-local-integration coverage coverage-gate generate golden clean build-images build-images-multiarch \
-        web-install web-gen-api web-typecheck web-lint web-build web-test web-coverage web-coverage-gate
+        web-install web-gen-api web-typecheck web-lint web-build web-test web-coverage web-coverage-gate test-ui-e2e
 
 build:
 	CGO_ENABLED=0 $(GO) build $(LDFLAGS) -o bin/pglens-agent  ./cmd/pglens-agent
@@ -46,6 +46,15 @@ test-e2e-full-evidence:
 test-e2e-matrix:
 	AGENT_MODE=container $(MAKE) test-e2e
 	AGENT_MODE=binary $(MAKE) test-e2e
+
+test-ui-e2e: web-build build-images
+	@browser="$$(cd $(WEB) && $(PNPM) exec node -e 'process.stdout.write(require("@playwright/test").chromium.executablePath())')"; \
+	if test ! -x "$$browser"; then \
+		echo "Playwright Chromium is not installed at $$browser" >&2; \
+		echo "Install it once with: cd $(WEB) && $(PNPM) exec playwright install --with-deps chromium" >&2; \
+		exit 1; \
+	fi
+	$(GO) test -tags=e2e -timeout=40m -count=1 ./test/e2e/... -run 'UI'
 
 ci-local:
 	$(MAKE) ci-local-unit

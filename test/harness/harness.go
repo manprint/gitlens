@@ -59,6 +59,7 @@ type Config struct {
 	Toxiproxy bool
 	Pgbouncer bool // reserved; not used in this plan
 	Alerting  bool // add the mock receiver and run two server replicas
+	UI        bool // add the UI password overlay for browser acceptance tests
 }
 
 // Harness orchestrates an E2E stack via docker-compose.
@@ -122,7 +123,9 @@ func Start(t *testing.T, cfg Config) *Harness {
 		topologyFile = filepath.Join(composeDir, "topo-standalone.yml")
 	}
 	var extraFile string
-	if cfg.Alerting {
+	if cfg.UI {
+		extraFile = filepath.Join(composeDir, "server-ui.yml")
+	} else if cfg.Alerting {
 		extraFile = filepath.Join(composeDir, "scenario-alerting.yml")
 	}
 
@@ -635,6 +638,12 @@ func (h *Harness) composePS() ([]composeService, error) {
 // API returns a client for the pglens server HTTP API.
 func (h *Harness) API() *APIClient {
 	return h.apiClient
+}
+
+// ServerPort returns the host port mapped to the first pglens-server replica.
+// It is resolved only after Start has brought the stack up.
+func (h *Harness) ServerPort() int {
+	return h.serverPort
 }
 
 // AgentHealthz fetches the agent's own /healthz (pusher.HealthzHandler,

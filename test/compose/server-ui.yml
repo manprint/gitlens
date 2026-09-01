@@ -1,0 +1,4 @@
+services:
+  pglens-server:
+    environment:
+      PGLENS_UI_PASSWORD: ${PGLENS_UI_PASSWORD:?PGLENS_UI_PASSWORD must be set for UI E2E}

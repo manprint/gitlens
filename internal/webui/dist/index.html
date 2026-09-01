@@ -1,15 +1,38 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
     <title>pglens</title>
+    <script>
+      ;(() => {
+        const fallback = 'dark'
+        try {
+          const raw = window.localStorage.getItem('pglens.preferences')
+          const parsed = raw ? JSON.parse(raw) : null
+          const storedTheme = parsed?.theme
+          const theme =
+            storedTheme === 'dark' || storedTheme === 'light' || storedTheme === 'system'
+              ? storedTheme
+              : fallback
+          const resolved =
+            theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : theme === 'light'
+                ? 'light'
+                : 'dark'
+          document.documentElement.classList.toggle('dark', resolved === 'dark')
+          document.documentElement.style.colorScheme = resolved
+        } catch {
+          document.documentElement.classList.add('dark')
+        }
+      })()
+    </script>
+    <script type="module" crossorigin src="/assets/index-C38H9ybA.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-QJOM-YYH.css">
   </head>
   <body>
-    <main>
-      <h1>pglens interface</h1>
-      <p>The web interface was not built into this binary.</p>
-      <p>Build it with <code>make web-build</code>, then start the server again.</p>
-    </main>
+    <div id="root"></div>
   </body>
 </html>
