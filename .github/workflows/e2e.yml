@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    - cron: '0 2 * * *'
+    - cron: "0 2 * * *"
   workflow_dispatch:
 
 concurrency:
@@ -42,4 +42,51 @@ jobs:
         with:
           name: e2e-artifacts-${{ matrix.agent_mode }}
           path: test/e2e/_artifacts/
+          if-no-files-found: ignore
+
+  ui-acceptance:
+    name: UI acceptance / ${{ matrix.agent_mode }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        agent_mode: [container, binary]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Install frontend dependencies
+        run: make web-install
+      - name: Install Playwright Chromium
+        run: cd web && pnpm exec playwright install --with-deps chromium
+      - name: Run UI acceptance suite
+        # The binary leg runs the four phase-17.2 scenarios to keep CI bounded;
+        # the container leg remains the complete eleven-scenario acceptance gate.
+        run: |
+          if [ "${{ matrix.agent_mode }}" = binary ]; then
+            export UI_E2E_RUN='UI_(Failover|UnauthenticatedNavigation|AgentOutage|Accessibility)'
+          else
+            export UI_E2E_RUN='UI'
+          fi
+          make test-ui-e2e
+        env:
+          AGENT_MODE: ${{ matrix.agent_mode }}
+      - name: Upload UI acceptance diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-acceptance-artifacts-${{ matrix.agent_mode }}
+          path: test/e2e/_artifacts/ui/**
           if-no-files-found: ignore

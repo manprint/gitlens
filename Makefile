@@ -4,6 +4,7 @@ WEB     := web
 PKG     := ./...
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
+UI_E2E_RUN ?= UI
 
 .PHONY: build fmt fmt-check lint test test-integration test-e2e test-e2e-full test-e2e-full-evidence test-e2e-matrix api-docs \
         ci-local ci-local-unit ci-local-integration coverage coverage-gate generate golden clean build-images build-images-multiarch \
@@ -54,7 +55,7 @@ test-ui-e2e: web-build build-images
 		echo "Install it once with: cd $(WEB) && $(PNPM) exec playwright install --with-deps chromium" >&2; \
 		exit 1; \
 	fi
-	$(GO) test -tags=e2e -timeout=40m -count=1 ./test/e2e/... -run 'UI'
+	$(GO) test -tags=e2e -timeout=40m -count=1 ./test/e2e/... -run '$(UI_E2E_RUN)'
 
 ci-local:
 	$(MAKE) ci-local-unit
