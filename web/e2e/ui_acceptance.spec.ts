@@ -71,12 +71,10 @@ async function definitionValue(card: any, label: string): Promise<string> {
 }
 
 async function reloadUntil(page: any, predicate: () => Promise<boolean>, timeout = 120_000): Promise<void> {
+  await page.reload({ waitUntil: 'domcontentloaded' })
   await expect
     .poll(
-      async () => {
-        await page.reload({ waitUntil: 'domcontentloaded' })
-        return predicate()
-      },
+      predicate,
       { timeout, intervals: [1_000, 3_000, 5_000] },
     )
     .toBe(true)
@@ -174,13 +172,36 @@ test('SYS-UI-002: unauthenticated navigation cannot restore fleet data', async (
 test('SYS-UI-003: agent outage is visible as stale fleet data', async ({ signedInPage, api }) => {
   const page = signedInPage
   const { instance } = await fleetContext(api)
+  const id = instanceID(instance)
   const address = instanceAddress(instance)
+
+  await expect
+    .poll(
+      async () => {
+        const current = await clusters(api)
+        const observed = current
+          .flatMap((cluster) => (Array.isArray(cluster.instances) ? cluster.instances : []))
+          .find((item) => String(item.instance_id) === id)
+        return {
+          found: observed !== undefined,
+          last_seen: observed?.last_seen,
+          up: observed?.up,
+        }
+      },
+      { timeout: 90_000, intervals: [1_000, 3_000, 5_000] },
+    )
+    .toMatchObject({ found: true, up: false })
+
   await navigateToFleet(page)
 
-  await reloadUntil(page, async () => {
-    const body = await page.locator('body').innerText()
-    return /Agents requiring attention/i.test(body) && body.includes(address) && /Stale\s+—/i.test(body)
-  })
+  await reloadUntil(
+    page,
+    async () => {
+      const body = await page.locator('body').innerText()
+      return /Agents requiring attention/i.test(body) && body.includes(address) && /Stale\s+—/i.test(body)
+    },
+    30_000,
+  )
   await expect(page.getByRole('status', { name: /Stale data:/i }).first()).toBeVisible()
   await expect(page.locator('body')).toContainText(address)
 })
