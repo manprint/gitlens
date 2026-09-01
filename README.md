@@ -200,6 +200,14 @@ stale, unavailable, and truncated data visible:
 - Relation tables show a top-N truncation notice when the shared budget omits
   rows; bloat values are estimates, not measurements.
 
+The Query Inspector lists statements collected by `pg_stat_statements` and
+keeps their on-demand operations explicit. Select a statement to request a
+plan-only `EXPLAIN` (permission tier T1), or choose `EXPLAIN ANALYZE` only
+after the UI confirmation; ANALYZE also requires T2 and the target's
+`allow_explain_analyze` policy. Persisted plan history contains only plans
+that were explicitly requested, and comparisons are limited to plans from
+the same cluster because query IDs are not portable across clusters.
+
 The selected time range is reflected in the URL, so a view can be shared as a
 link. Keyboard shortcuts are available for the main destinations and filters:
 
@@ -272,8 +280,12 @@ curl -s "http://localhost:8080/api/v1/plans?instance_id=$INSTANCE_ID&queryid=123
 curl -s "http://localhost:8080/api/v1/instances/$INSTANCE_ID/command-audit" | jq .
 ```
 
-`explain` resolves the query through `pg_stat_statements`; `EXPLAIN ANALYZE`
-requires permission tier T1 and `allow_explain_analyze: true` for the target.
+`explain` resolves the query through `pg_stat_statements`. Plan-only
+`EXPLAIN` requires permission tier T1; `EXPLAIN ANALYZE` additionally
+requires T2, `allow_explain_analyze: true` for the target, and explicit
+confirmation in the web interface. ANALYZE runs inside a transaction that is
+rolled back afterward, but it still consumes database resources and may
+observe locks or invoke PostgreSQL-permitted side effects.
 `cancel` and `terminate` require T2 and `allow_signal: true`, and only target
 client backends. `pgstattuple` requires the `pgstattuple` extension to already
 be installed and a permitted relation; pglens never installs extensions.
@@ -288,9 +300,11 @@ Security and operational boundaries:
 - `EXPLAIN ANALYZE` executes the selected statement inside a transaction that
   is rolled back, but it still consumes database resources and can observe
   locks or invoke side effects that PostgreSQL permits during execution.
-- Query text is never sent in a command payload. Plan history stores a
-  normalized query hash and JSON plan; placeholders may prevent a useful plan
-  for parameter-sensitive statements.
+- Query text is never sent in a command payload. Plan history stores only
+  explicitly requested plans, using a normalized query hash and JSON plan;
+  placeholders may prevent a useful plan for parameter-sensitive statements.
+- Plan-history comparison is valid only within the same cluster; the UI does
+  not compare plans from different clusters.
 
 ## Alerting
 
