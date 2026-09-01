@@ -4,6 +4,7 @@ import AshPageComponent from '@/features/ash/AshPage'
 import InstancePage from '@/features/instance/InstancePage'
 import { useInstance } from '@/api/queries'
 import ExplainPanel from '@/features/queries/ExplainPanel'
+import PlanHistory from '@/features/queries/PlanHistory'
 import QueryListPageComponent from '@/features/queries/QueryListPage'
 import { useParams } from 'react-router-dom'
 
@@ -49,11 +50,14 @@ export function QueryDetailPage() {
   }
 
   return (
-    <ExplainPanel
-      currentTier={instanceQuery.data?.perm_tier ?? 'T0'}
-      instanceId={instanceId}
-      queryid={queryid}
-    />
+    <div className="space-y-8">
+      <ExplainPanel
+        currentTier={instanceQuery.data?.perm_tier ?? 'T0'}
+        instanceId={instanceId}
+        queryid={queryid}
+      />
+      <PlanHistory instanceId={instanceId} queryid={queryid} />
+    </div>
   )
 }
 

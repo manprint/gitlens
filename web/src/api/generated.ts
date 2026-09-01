@@ -1692,7 +1692,7 @@ export interface operations {
     getPlans: {
         parameters: {
             query: {
-                queryid: number;
+                queryid: number | string;
                 instance_id?: components["schemas"]["InstanceId"];
                 datname?: string;
                 limit?: number;

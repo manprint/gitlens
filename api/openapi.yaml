@@ -1189,7 +1189,10 @@ paths:
         - name: queryid
           in: query
           required: true
-          schema: { type: integer, format: int64 }
+          schema:
+            oneOf:
+              - { type: integer, format: int64 }
+              - { type: string, pattern: '^-?[0-9]+$' }
         - { name: instance_id, in: query, required: false, schema: { $ref: '#/components/schemas/InstanceId' } }
         - { name: datname, in: query, required: false, schema: { type: string } }
         - { name: limit, in: query, required: false, schema: { type: integer, format: int32, default: 20, minimum: 1, maximum: 500 } }
