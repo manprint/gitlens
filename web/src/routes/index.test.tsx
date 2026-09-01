@@ -23,6 +23,7 @@ describe('application route registry', () => {
       '/instances/:instanceId/locks',
       '/findings',
       '/alerts',
+      '/events',
       '/alerts/rules',
       '/alerts/silences',
       '/settings',

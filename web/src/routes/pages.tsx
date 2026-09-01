@@ -9,6 +9,7 @@ import QueryListPageComponent from '@/features/queries/QueryListPage'
 import LocksPageComponent from '@/features/locks/BlockingTree'
 import { FindingsPage as FindingsPageComponent } from '@/features/findings/FindingsPage'
 import { AlertsPage as AlertsPageComponent } from '@/features/alerts/AlertsPage'
+import { EventsPage as EventsPageComponent } from '@/features/alerts/EventsPage'
 import { RulesPage as RulesPageComponent } from '@/features/alerts/RulesPage'
 import { SilencesPage as SilencesPageComponent } from '@/features/alerts/SilencesPage'
 import { useParams } from 'react-router-dom'
@@ -76,6 +77,10 @@ export function FindingsPage() {
 
 export function AlertsPage() {
   return <AlertsPageComponent />
+}
+
+export function EventsPage() {
+  return <EventsPageComponent />
 }
 
 export function RulesPage() {
