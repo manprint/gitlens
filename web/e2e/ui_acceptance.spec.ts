@@ -179,7 +179,7 @@ test('SYS-UI-003: agent outage is visible as stale fleet data', async ({ signedI
 
   await reloadUntil(page, async () => {
     const body = await page.locator('body').innerText()
-    return /Agents requiring attention/i.test(body) && body.includes(address) && /Stale data:/i.test(body)
+    return /Agents requiring attention/i.test(body) && body.includes(address) && /Stale\s+—/i.test(body)
   })
   await expect(page.getByRole('status', { name: /Stale data:/i }).first()).toBeVisible()
   await expect(page.locator('body')).toContainText(address)
@@ -190,7 +190,7 @@ test('SYS-UI-004: standalone replay lag stays unknown', async ({ signedInPage })
   await navigateToFleet(page)
   const card = cardLocator(page)
   const lag = card.locator('dt').filter({ hasText: 'Max replay lag' }).locator('xpath=following-sibling::dd[1]')
-  await expect(lag).toHaveAttribute('aria-label', 'not measured')
+  await expect(lag.locator('[aria-label="not measured"]')).toBeVisible()
   await expect(lag).not.toContainText('0 s')
 })
 
