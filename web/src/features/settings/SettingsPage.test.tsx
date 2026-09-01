@@ -1,12 +1,15 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import type { HttpHandler } from 'msw'
 import { describe, expect, it, vi } from 'vitest'
 
+import { qk } from '@/api/keys'
+import { REFRESH } from '@/api/policy'
 import type { Schemas } from '@/api/types'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { base as hostBase } from '@/test/fixtures/getInstanceHost'
 import { CLUSTER, INSTANCE_ID, INSTANCE_SUMMARY, NOW } from '@/test/fixture-helpers'
-import { renderWithProviders } from '@/test/render'
-import { ok } from '@/test/msw/handlers'
+import { renderRoute, renderWithProviders } from '@/test/render'
+import { ok, sequence, status } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 
 import { SettingsPage } from './SettingsPage'
@@ -56,30 +59,128 @@ interface RenderSettingsOptions {
   clusters?: Schemas['Cluster'][]
   databases?: { datname: string; monitored: boolean; skip_reason?: string | null }[]
   instances?: Schemas['InstanceSummary'][]
+  instancesHandler?: HttpHandler
   route?: string
   advisorRules?: AdvisorRule[]
+  databaseHandler?: HttpHandler
 }
 
 function renderSettings(options: RenderSettingsOptions = {}) {
   const instances = options.instances ?? [INSTANCE_SUMMARY]
   server.use(
-    ok('getInstances', instances),
+    options.instancesHandler ?? ok('getInstances', instances),
     ok('getClusters', options.clusters ?? [CLUSTER]),
     ok('getAlerts', options.alerts ?? []),
     ok('getAdvisorRules', options.advisorRules ?? rules),
     ok('getInstanceCommandAudit', []),
     ok('getSession', { authenticated: true, configured: true, expires_at: NOW }),
-    ok('getInstanceDatabases', {
-      instance_id: INSTANCE_ID,
-      databases: options.databases ?? [],
-      not_monitored_count: options.databases?.filter((database) => !database.monitored).length ?? 0,
-    }),
+    options.databaseHandler ??
+      ok('getInstanceDatabases', {
+        instance_id: INSTANCE_ID,
+        databases: options.databases ?? [],
+        not_monitored_count:
+          options.databases?.filter((database) => !database.monitored).length ?? 0,
+      }),
     ok('getInstanceHost', hostBase),
   )
   return renderWithProviders(<SettingsPage />, options.route ? { route: options.route } : {})
 }
 
 describe('SettingsPage', () => {
+  it('UI-SET-030 an empty fleet renders setup guidance', async () => {
+    renderSettings({ clusters: [], instances: [] })
+    await settleInitialQueries()
+
+    expect(
+      screen.getByText(
+        'Install and configure the pglens agent on a PostgreSQL host to populate the fleet inventory.',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('UI-SET-031 keeps the instance inventory when a database endpoint fails', async () => {
+    const secondInstance = {
+      ...INSTANCE_SUMMARY,
+      addr: 'standby.example.test',
+      instance_id: SECOND_INSTANCE_ID,
+    }
+    renderSettings({
+      clusters: [],
+      databaseHandler: sequence(
+        'getInstanceDatabases',
+        {
+          status: 500,
+          body: { error: 'internal_error', detail: 'database inventory unavailable' },
+        },
+        {
+          body: {
+            instance_id: SECOND_INSTANCE_ID,
+            databases: [{ datname: 'app', monitored: true }],
+            not_monitored_count: 0,
+          },
+        },
+      ),
+      instances: [INSTANCE_SUMMARY, secondInstance],
+    })
+    await settleInitialQueries()
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not load databases for postgres')
+    const secondTable = await waitFor(() =>
+      screen.getByRole('table', { name: 'Databases for standby.example.test:5432' }),
+    )
+    expect(within(secondTable).getByText('app')).toBeInTheDocument()
+    expect(
+      within(screen.getByRole('table', { name: 'Monitored instances' })).getAllByRole('row'),
+    ).toHaveLength(3)
+  })
+
+  it('UI-SET-032 marks stale instance data as Stale', async () => {
+    const view = renderSettings()
+    await settleInitialQueries()
+    view.queryClient.setQueryData(qk.instances(), [INSTANCE_SUMMARY], {
+      updatedAt: Date.parse(NOW) - REFRESH.fleet.staleAfter,
+    })
+
+    expect(await screen.findByRole('status', { name: /Stale data:/i })).toBeInTheDocument()
+  })
+
+  it('UI-SET-033 navigates a 401 to login exactly once', async () => {
+    vi.useRealTimers()
+    server.use(
+      status('getInstances', 401),
+      ok('getClusters', []),
+      ok('getAlerts', []),
+      ok('getAdvisorRules', rules),
+      ok('getSession', { authenticated: true, configured: true, expires_at: NOW }),
+    )
+    const view = renderRoute('/settings')
+
+    await waitFor(() => expect(view.router.state.location.pathname).toBe('/login'))
+    expect(view.router.state.location.search).toBe('?next=%2F')
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    })
+    expect(view.router.state.location.pathname).toBe('/login')
+    expect(view.router.state.location.search).toBe('?next=%2F')
+  })
+
+  it('UI-SET-034 retries a server error and renders Settings after recovery', async () => {
+    renderSettings({
+      instancesHandler: sequence(
+        'getInstances',
+        { status: 500, body: { error: 'internal_error', detail: 'instances unavailable' } },
+        [INSTANCE_SUMMARY],
+      ),
+    })
+    await settleInitialQueries()
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not load instances')
+    fireEvent.click(screen.getByRole('button', { name: 'Retry instances' }))
+    await settleInitialQueries()
+
+    expect(screen.getByRole('heading', { name: 'Settings and inventory' })).toBeInTheDocument()
+  })
+
   it('UI-SET-001 unmonitored databases sort first with their skip reason', async () => {
     renderSettings({
       databases: [
