@@ -1,11 +1,13 @@
 import { useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useParams } from 'react-router-dom'
 
-import { useInstanceActivity, useLocks } from '@/api/queries'
+import { useInstance, useInstanceActivity, useLocks } from '@/api/queries'
+import type { PermTier } from '@/api/types'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
 import { Degraded, EmptyState, ErrorState, Stale, Truncated } from '@/components/state'
 import { ActivitySection, type ActivityResponseLike } from './ActivitySection'
+import { SignalActions } from './SignalActions'
 import { formatDuration, formatRelative, truncateQuery } from '@/lib/format'
 import {
   buildBlockingTree,
@@ -36,6 +38,8 @@ interface TreeEntry {
 
 interface TreeItemProps {
   entry: TreeEntry
+  currentTier: PermTier
+  instanceId: string | undefined
   sampledAt: string | null
   expanded: boolean
   onKeyDown: (event: KeyboardEvent<HTMLLIElement>, entry: TreeEntry) => void
@@ -173,6 +177,8 @@ function LockDetails({ node, sampledAt }: { node: LockNode; sampledAt: string | 
 
 function TreeItem({
   entry,
+  currentTier,
+  instanceId,
   sampledAt,
   expanded,
   onKeyDown,
@@ -225,7 +231,12 @@ function TreeItem({
               The blocking relationship forms a cycle; expansion stops at this marker.
             </p>
           ) : (
-            <LockDetails node={tree.node} sampledAt={sampledAt} />
+            <>
+              <LockDetails node={tree.node} sampledAt={sampledAt} />
+              {instanceId ? (
+                <SignalActions node={tree.node} currentTier={currentTier} instanceId={instanceId} />
+              ) : null}
+            </>
           )}
         </div>
       </div>
@@ -242,6 +253,8 @@ function TreeItem({
               <TreeItem
                 key={childEntry.key}
                 entry={childEntry}
+                currentTier={currentTier}
+                instanceId={instanceId}
                 sampledAt={sampledAt}
                 expanded={expandedKeys.has(childEntry.key)}
                 onKeyDown={onKeyDown}
@@ -260,9 +273,13 @@ function TreeItem({
 export function BlockingTree({
   response,
   now = new Date(),
+  currentTier = 'T0',
+  instanceId,
 }: {
   response: LocksResponseLike
   now?: Date
+  currentTier?: PermTier
+  instanceId?: string
 }) {
   const normalizedNodes = useMemo(
     () => response.nodes.map(normalizeNode).filter((node): node is LockNode => node !== null),
@@ -375,6 +392,8 @@ export function BlockingTree({
             <TreeItem
               key={entry.key}
               entry={entry}
+              currentTier={currentTier}
+              instanceId={instanceId}
               sampledAt={response.sampled_at}
               expanded={expandedKeys.has(entry.key)}
               onKeyDown={handleKeyDown}
@@ -401,6 +420,7 @@ export interface LocksPageProps {
 export function LocksPage({ instanceId: explicitInstanceId }: LocksPageProps = {}) {
   const { instanceId: routeInstanceId } = useParams<{ instanceId: string }>()
   const instanceId = explicitInstanceId ?? routeInstanceId
+  const instanceQuery = useInstance(instanceId ?? '')
   const locksQuery = useLocks(instanceId ?? '')
   const activityQuery = useInstanceActivity(instanceId ?? '')
   const response = locksQuery.data as LocksResponseLike | undefined
@@ -426,7 +446,11 @@ export function LocksPage({ instanceId: explicitInstanceId }: LocksPageProps = {
         />
       ) : response ? (
         <>
-          <BlockingTree response={response} />
+          <BlockingTree
+            response={response}
+            currentTier={instanceQuery.data?.perm_tier ?? 'T0'}
+            instanceId={instanceId}
+          />
           {activityQuery.isError && activityResponse === undefined ? (
             <ErrorState
               failure={activityQuery.error}
