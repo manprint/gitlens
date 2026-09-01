@@ -46,9 +46,7 @@ function renderCatalogue(
   catalogueRules: AdvisorRule[] = rules,
   catalogueFindings: FindingRecord[] = findings,
 ) {
-  return renderWithProviders(
-    <RuleCatalogue findings={catalogueFindings} rules={catalogueRules} />,
-  )
+  return renderWithProviders(<RuleCatalogue findings={catalogueFindings} rules={catalogueRules} />)
 }
 
 describe('RuleCatalogue', () => {

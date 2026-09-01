@@ -45,7 +45,8 @@ function compareText(left: string, right: string): number {
 }
 
 function compareRank(left: FindingRecord, right: FindingRecord): number {
-  const severity = (severityOrder[left.severity] ?? Number.MAX_SAFE_INTEGER) -
+  const severity =
+    (severityOrder[left.severity] ?? Number.MAX_SAFE_INTEGER) -
     (severityOrder[right.severity] ?? Number.MAX_SAFE_INTEGER)
   if (severity !== 0) return severity
 
@@ -64,9 +65,7 @@ export function rankFindings<T extends FindingRecord>(findings: readonly T[]): T
 }
 
 /** Group findings by their declared scope while preserving unknown scopes. */
-export function groupByScope(
-  findings: readonly FindingRecord[],
-): Record<string, FindingRecord[]> {
+export function groupByScope(findings: readonly FindingRecord[]): Record<string, FindingRecord[]> {
   const groups: Record<string, FindingRecord[]> = { cluster: [], instance: [] }
   for (const finding of findings) {
     const group = groups[finding.scope] ?? []

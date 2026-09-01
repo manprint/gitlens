@@ -59,8 +59,11 @@ function matchesFilter(
   instanceId: string,
 ): boolean {
   const stateMatches =
-    state === 'active' ? finding.state === 'open' || finding.state === 'degraded' :
-    state === 'all' ? true : finding.state === state
+    state === 'active'
+      ? finding.state === 'open' || finding.state === 'degraded'
+      : state === 'all'
+        ? true
+        : finding.state === state
   if (!stateMatches) return false
   if (severity !== 'all' && finding.severity !== severity) return false
   if (scope !== 'all' && finding.scope !== scope) return false
@@ -115,7 +118,8 @@ export function FindingsPage() {
   const rules = useMemo(() => rulesQuery.data ?? [], [rulesQuery.data])
   const joinedFindings = useMemo(() => joinCatalogue(findings, rules), [findings, rules])
   const summary = useMemo(() => summariseFindings(findings), [findings])
-  const allFindingsDegraded = findings.length > 0 && findings.every((finding) => finding.state === 'degraded')
+  const allFindingsDegraded =
+    findings.length > 0 && findings.every((finding) => finding.state === 'degraded')
   const visibleFindings = useMemo(
     () =>
       rankFindings(
@@ -166,7 +170,9 @@ export function FindingsPage() {
   }
 
   const defaultView = state === 'active' && !searchParams.has('state')
-  const hiddenMuted = defaultView ? findings.filter((finding) => finding.state === 'muted').length : 0
+  const hiddenMuted = defaultView
+    ? findings.filter((finding) => finding.state === 'muted').length
+    : 0
   const hiddenResolved = defaultView
     ? findings.filter((finding) => finding.state === 'resolved').length
     : 0
@@ -195,7 +201,8 @@ export function FindingsPage() {
             onRetry={() => void rulesQuery.refetch()}
           />
           <p role="status">
-            Advisor rule explanations are unavailable; findings remain visible without catalogue context.
+            Advisor rule explanations are unavailable; findings remain visible without catalogue
+            context.
           </p>
         </div>
       ) : null}
@@ -232,8 +239,8 @@ export function FindingsPage() {
         </div>
         {defaultView && (hiddenMuted > 0 || hiddenResolved > 0) ? (
           <p className="text-muted-foreground mt-3 text-sm">
-            By default, {hiddenMuted} muted and {hiddenResolved} resolved findings are hidden. Use the
-            state filter to show them.
+            By default, {hiddenMuted} muted and {hiddenResolved} resolved findings are hidden. Use
+            the state filter to show them.
           </p>
         ) : null}
         {allFindingsDegraded ? (
@@ -243,14 +250,19 @@ export function FindingsPage() {
         ) : null}
       </Section>
 
-      <Section title="Filters" description="Filters are kept in the URL so a findings view can be shared.">
+      <Section
+        title="Filters"
+        description="Filters are kept in the URL so a findings view can be shared."
+      >
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <label className="space-y-1 text-sm" htmlFor="findings-state">
             <span className="font-medium">State</span>
             <select
               className="border-input bg-background h-9 w-full rounded-md border px-3"
               id="findings-state"
-              onChange={(event) => updateFilter('state', event.target.value === 'active' ? '' : event.target.value)}
+              onChange={(event) =>
+                updateFilter('state', event.target.value === 'active' ? '' : event.target.value)
+              }
               value={state}
             >
               <option value="active">Open and degraded</option>
@@ -266,7 +278,9 @@ export function FindingsPage() {
             <select
               className="border-input bg-background h-9 w-full rounded-md border px-3"
               id="findings-severity"
-              onChange={(event) => updateFilter('severity', event.target.value === 'all' ? '' : event.target.value)}
+              onChange={(event) =>
+                updateFilter('severity', event.target.value === 'all' ? '' : event.target.value)
+              }
               value={severity}
             >
               <option value="all">All severities</option>
@@ -280,7 +294,9 @@ export function FindingsPage() {
             <select
               className="border-input bg-background h-9 w-full rounded-md border px-3"
               id="findings-scope"
-              onChange={(event) => updateFilter('scope', event.target.value === 'all' ? '' : event.target.value)}
+              onChange={(event) =>
+                updateFilter('scope', event.target.value === 'all' ? '' : event.target.value)
+              }
               value={scope}
             >
               <option value="all">All scopes</option>
@@ -310,8 +326,8 @@ export function FindingsPage() {
       </Section>
 
       <aside className="border-muted bg-muted/30 rounded-md border p-3 text-sm" role="note">
-        Findings come from collected statistics, not query plans. Index recommendations are candidates
-        for review, not automatic changes.
+        Findings come from collected statistics, not query plans. Index recommendations are
+        candidates for review, not automatic changes.
       </aside>
 
       <RuleCatalogue findings={findings} rules={rules} />

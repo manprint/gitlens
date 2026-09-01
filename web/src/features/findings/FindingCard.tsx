@@ -52,11 +52,7 @@ function remedyText(finding: JoinedFinding): string | undefined {
 
 function timestamp(value: string | undefined): React.ReactNode {
   if (!value) return '—'
-  return (
-    <time dateTime={value}>
-      {formatTimestamp(value, 'UTC')}
-    </time>
-  )
+  return <time dateTime={value}>{formatTimestamp(value, 'UTC')}</time>
 }
 
 function remainingMuteTime(finding: JoinedFinding): string {
@@ -79,7 +75,10 @@ export function FindingCard({ finding }: FindingCardProps) {
   const evidence = Object.entries(finding.evidence ?? {})
 
   return (
-    <article aria-labelledby={`finding-${finding.finding_id}`} className="space-y-4 rounded-lg border p-4">
+    <article
+      aria-labelledby={`finding-${finding.finding_id}`}
+      className="space-y-4 rounded-lg border p-4"
+    >
       <header className="space-y-2">
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="rounded border px-2 py-1 uppercase">{finding.severity}</span>
@@ -96,17 +95,15 @@ export function FindingCard({ finding }: FindingCardProps) {
       </header>
 
       {finding.state === 'muted' ? (
-        <div className="border-muted bg-muted/30 space-y-1 rounded-md border p-3 text-sm" role="status">
+        <div
+          className="border-muted bg-muted/30 space-y-1 rounded-md border p-3 text-sm"
+          role="status"
+        >
           <strong>Muted</strong>
           <p>Reason: {finding.mute_reason ?? 'No reason supplied by the server.'}</p>
           <p>
             Remaining mute time: {remainingMuteTime(finding)}
-            {finding.muted_until ? (
-              <>
-                {' '}
-                (expires {timestamp(finding.muted_until)})
-              </>
-            ) : null}
+            {finding.muted_until ? <> (expires {timestamp(finding.muted_until)})</> : null}
           </p>
         </div>
       ) : null}
@@ -114,7 +111,10 @@ export function FindingCard({ finding }: FindingCardProps) {
       {finding.state === 'degraded' ? (
         <div className="space-y-2">
           <Degraded
-            reason={finding.degraded_reason ?? 'The rule could not be evaluated with the collected inputs.'}
+            reason={
+              finding.degraded_reason ??
+              'The rule could not be evaluated with the collected inputs.'
+            }
             {...(requirements ? { requires: requirements } : {})}
           />
           {remedyText(finding) ? <p className="text-sm">{remedyText(finding)}</p> : null}

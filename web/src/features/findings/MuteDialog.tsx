@@ -120,7 +120,9 @@ export function MuteDialog({ finding }: { finding: JoinedFinding }) {
         </Button>
       )}
 
-      {unmute.error ? <p role="alert">{mutationErrorMessage(unmute.error, 'remove the mute')}</p> : null}
+      {unmute.error ? (
+        <p role="alert">{mutationErrorMessage(unmute.error, 'remove the mute')}</p>
+      ) : null}
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
@@ -163,7 +165,10 @@ export function MuteDialog({ finding }: { finding: JoinedFinding }) {
                   </label>
                 ))}
               </div>
-              <label className="flex flex-col gap-1 text-sm" htmlFor={`mute-until-${finding.finding_id}`}>
+              <label
+                className="flex flex-col gap-1 text-sm"
+                htmlFor={`mute-until-${finding.finding_id}`}
+              >
                 <span>Mute until</span>
                 <input
                   aria-label="Mute until"
@@ -182,7 +187,9 @@ export function MuteDialog({ finding }: { finding: JoinedFinding }) {
                 {formError}
               </p>
             ) : null}
-            {mute.error ? <p role="alert">{mutationErrorMessage(mute.error, 'mute the finding')}</p> : null}
+            {mute.error ? (
+              <p role="alert">{mutationErrorMessage(mute.error, 'mute the finding')}</p>
+            ) : null}
             {mute.isPending ? <p role="status">Sending mute request…</p> : null}
 
             <DialogFooter>

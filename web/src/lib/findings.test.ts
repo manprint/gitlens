@@ -38,8 +38,18 @@ describe('finding helpers', () => {
     const ranked = rankFindings([
       finding({ finding_id: 'resolved', severity: 'critical', state: 'resolved' }),
       finding({ finding_id: 'warning-muted', severity: 'warning', state: 'muted' }),
-      finding({ finding_id: 'warning-instance-z', severity: 'warning', scope: 'instance', rule_id: 'z' }),
-      finding({ finding_id: 'warning-instance-a', severity: 'warning', scope: 'instance', rule_id: 'a' }),
+      finding({
+        finding_id: 'warning-instance-z',
+        severity: 'warning',
+        scope: 'instance',
+        rule_id: 'z',
+      }),
+      finding({
+        finding_id: 'warning-instance-a',
+        severity: 'warning',
+        scope: 'instance',
+        rule_id: 'a',
+      }),
       finding({ finding_id: 'warning-cluster', severity: 'warning', scope: 'cluster' }),
       finding({ finding_id: 'info', severity: 'info' }),
       finding({ finding_id: 'critical-open', severity: 'critical', state: 'open' }),
@@ -57,10 +67,7 @@ describe('finding helpers', () => {
   })
 
   it('UI-FIND-002 ranking is stable for identical inputs', () => {
-    const input = [
-      finding({ finding_id: 'second' }),
-      finding({ finding_id: 'first' }),
-    ]
+    const input = [finding({ finding_id: 'second' }), finding({ finding_id: 'first' })]
     const ranked = rankFindings(input)
 
     expect(ranked).not.toBe(input)

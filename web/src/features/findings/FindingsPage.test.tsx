@@ -105,7 +105,15 @@ describe('FindingsPage', () => {
 
   it('UI-FIND-012 round-trips state, severity, scope, cluster, and instance filters through the URL', async () => {
     const view = await renderFindings(
-      [finding({ state: 'degraded', severity: 'critical', scope: 'instance', cluster_id: '42', instance_id: '00000000-0000-0000-0000-000000000007' })],
+      [
+        finding({
+          state: 'degraded',
+          severity: 'critical',
+          scope: 'instance',
+          cluster_id: '42',
+          instance_id: '00000000-0000-0000-0000-000000000007',
+        }),
+      ],
       [rule()],
       '/findings?state=degraded&severity=critical&scope=instance&cluster_id=42&instance_id=00000000-0000-0000-0000-000000000007',
     )
@@ -160,9 +168,7 @@ describe('FindingsPage', () => {
   })
 
   it('UI-FIND-016 renders evidence values', async () => {
-    await renderFindings([
-      finding({ evidence: { lag_seconds: 42, threshold: 10, primary: true } }),
-    ])
+    await renderFindings([finding({ evidence: { lag_seconds: 42, threshold: 10, primary: true } })])
 
     expect(screen.getByText('lag_seconds')).toBeInTheDocument()
     expect(screen.getByText('42')).toBeInTheDocument()
@@ -309,9 +315,11 @@ describe('FindingsPage', () => {
 
   it('UI-FIND-023 a failed mute leaves the finding unmuted and shows the error', async () => {
     server.use(
-      http.post(
-        '*/api/v1/findings/:findingId/mute',
-        () => HttpResponse.json({ error: 'finding mute failed', detail: 'maintenance denied' }, { status: 500 }),
+      http.post('*/api/v1/findings/:findingId/mute', () =>
+        HttpResponse.json(
+          { error: 'finding mute failed', detail: 'maintenance denied' },
+          { status: 500 },
+        ),
       ),
     )
     await renderFindings()
@@ -329,7 +337,11 @@ describe('FindingsPage', () => {
 
   it('UI-FIND-024 unmute issues a DELETE and restores the previous state', async () => {
     let deleteCalled = false
-    await renderFindings([finding({ state: 'muted', muted_until: mutedUntil, mute_reason: 'maintenance' })], [rule()], '/findings?state=all')
+    await renderFindings(
+      [finding({ state: 'muted', muted_until: mutedUntil, mute_reason: 'maintenance' })],
+      [rule()],
+      '/findings?state=all',
+    )
     server.use(
       ok('getFindings', [finding()]),
       http.delete('*/api/v1/findings/:findingId/mute', () => {

@@ -54,7 +54,10 @@ async function requestData<T>(run: () => Promise<ClientResponse<T>>): Promise<T>
       throw new FindingMutationError(toApiFailure(response, error))
     }
     if (data === undefined) {
-      throw new FindingMutationError({ kind: 'malformed', message: 'API response did not contain data' })
+      throw new FindingMutationError({
+        kind: 'malformed',
+        message: 'API response did not contain data',
+      })
     }
     return data
   } catch (error) {
