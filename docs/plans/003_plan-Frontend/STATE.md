@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-09-01 — phase 16 boundary open (claimed)._
+_Last updated: 2026-09-01 — phase 16 complete; sub-phase 17.1 ready._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -53,14 +53,14 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 
 | Field | Value |
 |-------|-------|
-| **Type** | phase-boundary |
-| **ID** | 16 |
-| **Status** | `OPEN` |
-| **Intent** | Complete phase-16 boundary verification |
-| **Next action:** | Run the non-E2E phase gate, then the single scheduled `make test-e2e` boundary run |
+| **Type** | sub-phase |
+| **ID** | 17.1 |
+| **Status** | `none` |
+| **Intent** | Implement the Go-driven UI acceptance runner |
+| **Next action:** | Open sub-phase 17.1 in [phase_18.md](phase_18.md) |
 | **Assigned** | `agent-2:sonnet` |
 | **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, and phase 6 sub-phases 6.1–6.8 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, strict typed lint/format gates, Makefile web targets, clean placeholder preservation, the parallel CI web job, frontend workflow documentation, the real server image build, the phase-boundary L3 regression, the Vitest/jsdom test runner foundation, the frontend testing architecture rules, the deterministic render/provider harness, the contract-validated OpenAPI fixture suite, the contract-aware MSW handler factory, the V8 UI coverage gate, the axe-core accessibility assertion, the deterministic clock/timezone/locale/randomness rules, the Playwright acceptance bootstrap, the harness defense meta-tests, the frontend testing workflow documentation, the phase-5 boundary E2E regression, the OpenAPI type generator, committed generated API types, stable schema aliases, type-level contract assertions, generator drift gates, the single typed API client, normalized API failures, exact large-integer query identifiers, the query key factory, refresh policies, the visibility-aware polling hooks, query-layer coverage, session authentication, guarded routing, login/logout flows, single-flight 401 handling, auth/login coverage, the accessible state-primitives library, freshness plumbing, the phase-6 browser sign-in documentation, the phase-7 route tree/code-splitting boundary, the accessible application shell, the URL-backed time-range state, the shared page scaffolding primitives, resilient namespaced theme/density/sidebar preferences, global error/offline handling, the phase-7 README web-interface guide, the phase-7 boundary E2E regression, the fleet derivation library, cluster cards, agent-health surfacing, server-defined health semantics, degraded/error paths, Fleet Overview documentation, the phase-8 boundary E2E regression, the phase-9 boundary E2E regression, and the Cluster Detail documentation are covered. The replication derivation library, topology graph, lag charts, slots, configuration drift, event taxonomy/timeline, Cluster Detail route, degraded/error paths, UI-REPL/UI-CLUS tests, Instance Detail header, database selector, URL-backed database scope, unmonitored database visibility, metric tiles, time series, counter-reset annotations, host metrics, settings, change history, durability, relations, bloat, truncation, and the Instance Detail README guidance are covered. Phase 10 is complete and phase 11 is now complete: ASH derivation, stacked waits, drill-down, honest disabled/under-sampled/unattributable states, stale freshness, exactly-once unauthorized navigation, server-error retry, shared range-retention validation, permanent sampling-limit guidance, and the README wait-analysis guide are covered. Phase 12.1–12.7 and phase 13.1–13.6 are complete: statement ranking, execution-time shares, null-safe statement summaries, whitespace normalization, cluster/version comparability helpers, the complete Query Inspector, Locks and Activity derivation and views, command polling at the one-second policy, terminal-state polling stops, server and client expiry, agent rejection messaging, and no-retry command creation are covered. Phase 14.1–14.5 are complete: advisor findings ranking/grouping/summaries, authoritative catalogue joining, missing-rule preservation, frozen-clock mute expiry, the URL-backed findings list, severity/state/scope/cluster/instance filters, explicit hidden-state counts, degraded input/tier guidance, evidence rendering, findings accessibility coverage, server-confirmed mute/unmute controls, reason/expiry validation, non-optimistic mutation handling, muted-state remaining-time presentation, rule catalogue rendering/filtering, affirmative empty-state semantics, degraded-only honesty, stale data, exactly-once unauthorized navigation, retryable failures, and findings polling are covered. The next unit is phase 14.6, the findings documentation. |
-| **Phase file** | [phase_17.md](phase_17.md) |
+| **Phase file** | [phase_18.md](phase_18.md) |
 
 The earlier phase-14.6 pointer in the repository-state narrative is superseded: phase 14.6 and the phase-14 boundary are complete, and the next unit is sub-phase 15.1.
 
@@ -100,11 +100,18 @@ complete and sub-phase 16.5 is open.
 The earlier sub-phase-16.5 pointer is now superseded: sub-phase 16.5 is
 complete and phase 16 boundary verification is open.
 
+The earlier phase-16-boundary pointer is now superseded: the non-E2E gate
+passed, the first full E2E run failed because local agent/server images were
+stale, the reproducible image-build fixes were committed in `ef9c7ac`, the
+focused replication retry passed, and the final `make test-e2e` boundary run
+passed. Phase 16 is complete; the next unit is sub-phase 17.1.
+
 Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, phase 6 sub-phases 6.1–6.8, phase 7 sub-phases 7.1–7.7, phase 8 sub-phases 8.1–8.6, phase 9 sub-phases 9.1–9.7, phase 10 sub-phases 10.1–10.7, phase 11 sub-phases 11.1–11.6, sub-phases 12.1–12.7, 13.1–13.6, and 14.1–15.7 are closed; phases 14 and 15 are complete, and the next unit is 16.1.
 - Phases 5 through 15 are complete; phase 16 is next and sub-phase 16.1 is ready to open.
 - Sub-phase 16.1 is complete; sub-phase 16.2 is ready to open.
 - Sub-phase 16.2 is complete; sub-phase 16.3 is ready to open.
-- Sub-phase 16.3 is complete; sub-phase 16.4 and 16.5 are complete; phase 16 boundary verification is open.
+- Sub-phase 16.3 is complete; sub-phase 16.4 and 16.5 are complete; phase 16 boundary verification passed and phase 16 is closed.
+- Phase 16 is complete; sub-phase 17.1 is the next unit.
 - Phase 12 boundary evidence is recorded below: the non-E2E gate passed after the focused coverage repair, and the single scheduled E2E run passed.
 
 ---
@@ -310,6 +317,7 @@ records start/end timestamps and elapsed time.
 | 16.3 | sub-phase | 16.3 | 2026-09-01 | Build the command audit | `ff9bcb9` |
 | 16.4 | sub-phase | 16.4 | 2026-09-01 | Complete degraded and error paths (rule T-4) | `787d93c` |
 | 16.5 | sub-phase | 16.5 | 2026-09-01 | Update README.md for Settings and fleet inventory | `729a576` |
+| 16-B | phase-boundary | 16 | 2026-09-01 | Verify the phase-16 non-E2E and scheduled E2E gates | `ef9c7ac` (image-build repair); state closure follows |
 
 ---
 
@@ -760,7 +768,18 @@ Sub-phase 16.5 added the Settings-page operator guide to the README, covering
 inventory visibility, unmonitored-database reasons, permission tiers and
 unlocks, command audit semantics, and the interface's account/enrollment/
 revocation limits. The documentation diff is clean; phase-16 boundary gates
-remain pending.
+were then completed at phase closure.
+
+The phase-16 boundary gate passed after the local images were rebuilt. The
+initial full E2E failure was traced to `ghcr.io/manprint/pglens-agent:dev` and
+`pglens-server:dev` being built from `567b834`, not the current source. The
+server image build also required the workspace policy, OpenAPI contract, and
+frontend dependency exclusion to be copied correctly; these Docker fixes are
+in `ef9c7ac`. The focused failover retry and final full E2E both passed.
+
+The phase-16 boundary repair also updated `Dockerfile.server` and
+`.dockerignore` so server-image builds include the pnpm workspace policy and
+OpenAPI contract while excluding local frontend modules.
 
 `docs/LIMITS.md` was also touched by sub-phase 2.7.
 
@@ -770,7 +789,7 @@ remain pending.
 
 ## §6 — In-flight work
 
-`phase-16 boundary pending: run the non-E2E gate, then the single scheduled E2E; sub-phases 16.1–16.5 are implemented and documented.`
+`none — tree consistent; phase 16 is closed and sub-phase 17.1 is ready to open.`
 
 ---
 
@@ -1098,6 +1117,10 @@ remain pending.
 | 2026-09-01 | 16.4 | `make web-test` | PASS | Full frontend suite passed: 85 files and 625 tests; Vitest duration 120.66s and wrapper wall-clock 121.29s (`user`/`sys` not surfaced by the filtered runner). |
 | 2026-09-01 | 16.4 | E2E | DEFERRED | No E2E was run for this sub-phase; the single browser run remains scheduled at phase-16 closure after README documentation. |
 | 2026-09-01 | 16.5 | `git diff --check` | PASS | README Settings guide is one operator-facing paragraph and has no whitespace errors. |
+| 2026-09-01 | 16 boundary | `make fmt-check web-lint web-typecheck web-test web-coverage-gate test` | PASS | Non-E2E gate passed in 288.32s wall-clock; 85 web files/625 tests passed, UI coverage passed (89.33% statements, 80.02% branches, 91.21% lines, `src/api` 98.5%), and Go tests passed. |
+| 2026-09-01 | 16 boundary | `make test-e2e` (initial run) | FAIL — repaired | 1110.12s wall-clock; `SYS-REPL-001` timed out because local images were stale (`567b834`). Artifact: `test/e2e/_artifacts/e2e-full-20260901T074715Z.log`; cleanup was clean. |
+| 2026-09-01 | 16 boundary | Focused `TestSmoke_PromoteInvertsRolesNoIdentityLoss` | PASS | Wrapper 45.01s, Go test 44.800s, exit 0; artifact: `test/e2e/_artifacts/e2e-full-20260901T081316Z.log`; cleanup was clean. |
+| 2026-09-01 | 16 boundary | `make test-e2e` (final) | PASS | Wrapper 1143.96s, Go test 1143.734s, exit 0; artifact: `test/e2e/_artifacts/e2e-full-20260901T081434Z.log`; residual containers/networks: 0/0. |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -1159,6 +1182,7 @@ reconstruct.
 | 43 | 15 | The phase-15 coverage gate initially fell below its unchanged thresholds after the new alerting API modules were added. | Focused malformed/network/server/unauthorized/missing-target/reset mutation tests restored global branches to 80.32% and `src/api` lines to 98.5%; no threshold was weakened. | yes — §5, §7 and commit `36102f2` |
 | 44 | 16.1 | Focused SettingsPage tests temporarily use real timers while settling child database/host requests. | The global fake clock otherwise leaves MSW child responses pending; production behavior and the timer policy are unchanged. | yes — §5 and §7 |
 | 45 | 16.3 | The live command-audit endpoint currently serializes terminal audit rows, while the plan also names request/claim lifecycle events. | The UI accepts and renders lifecycle fields when supplied (`created_at`, `claimed_at`, `finished_at`, `expires_at`, `state`), while accurately exposing the terminal fields the endpoint currently provides; no lifecycle event was invented client-side. | yes — §5 and §7 |
+| 46 | 16 boundary | The scheduled E2E needed a focused diagnostic retry and a fresh image build after the first full run used stale local images; the server image build additionally exposed missing workspace/OpenAPI/dependency inputs. | The first failure was not a product regression: the agent/server images predated the current source. `Dockerfile.server` now copies `web/pnpm-workspace.yaml` and `api/openapi.yaml`, while `.dockerignore` excludes `web/node_modules`; rebuilt images and the final full E2E passed. | yes — `ef9c7ac`, §5 and §7 |
 
 ## §9 — Blockers and open questions
 
@@ -1212,8 +1236,8 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 | 13 | [phase_14.md](phase_14.md) | Locks and Activity | `agent-2:sonnet` | 13.6 | DONE — 6/6 sub-phases closed |
 | 14 | [phase_15.md](phase_15.md) | Advisor findings | `agent-2:sonnet` | — | DONE — 6/6 sub-phases closed |
 | 15 | [phase_16.md](phase_16.md) | Alerts, silences, rules, events | `agent-2:sonnet` | 15.3 | DONE — 7/7 sub-phases closed |
-| 16 | [phase_17.md](phase_17.md) | Settings and fleet inventory | `agent-2:sonnet` | — | IN PROGRESS — 5/5 sub-phases implemented; boundary pending |
-| 17 | [phase_18.md](phase_18.md) | Packaging, UI acceptance suite, documentation | `agent-2:sonnet` / `agent-3:haiku` | 17.2, 17.7, 17.8 | TODO |
+| 16 | [phase_17.md](phase_17.md) | Settings and fleet inventory | `agent-2:sonnet` | — | DONE — 5/5 sub-phases closed; boundary gates passed |
+| 17 | [phase_18.md](phase_18.md) | Packaging, UI acceptance suite, documentation | `agent-2:sonnet` / `agent-3:haiku` | 17.2, 17.7, 17.8 | IN PROGRESS — 0/8 sub-phases closed; 17.1 ready |
 
 `agent-1:opus` owns every review gate listed above and approves each phase before
 the next one opens.
@@ -1416,6 +1440,7 @@ not otherwise be visible.
 | `UI-SET-*` | Vitest, unit + route | 16.1 – 16.4 | DONE |
 | `UI-SET-001 … UI-SET-005` | Vitest, route + accessibility | 16.1 | DONE |
 | `UI-SET-020 … UI-SET-024` | Vitest, route | 16.3 | DONE |
+| `UI-SET-030 … UI-SET-034` | Vitest, route + degraded/error paths | 16.4 | DONE |
 | `SYS-UI-000` — the stack serves the interface | Playwright via Go harness | 17.1 | TODO |
 | `SYS-UI-001` — failover visible, `cluster_id` byte-identical | Playwright via Go harness | 17.2 | TODO |
 | `SYS-UI-002` — the interface requires a session | Playwright via Go harness | 17.2 | TODO |
