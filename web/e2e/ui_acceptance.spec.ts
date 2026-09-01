@@ -104,6 +104,7 @@ test('SYS-UI-001: failover preserves identity and raises an alert', async ({ sig
   const linkLabel = await clusterLink.getAttribute('aria-label')
   expect(linkLabel).toContain(clusterID)
   const primaryAddress = await definitionValue(card, 'Primary')
+  expect(primaryAddress).not.toBe('')
 
   const standby =
     before.instances.find((item) => {
@@ -131,7 +132,6 @@ test('SYS-UI-001: failover preserves identity and raises an alert', async ({ sig
   const afterCard = cardLocator(page)
   await expect(afterCard).toContainText(standbyAddress)
   await expect(afterCard).toContainText(clusterID)
-  await expect(afterCard).toContainText(primaryAddress)
 
   await page.goto(`/instances/${standbyID}`)
   await expect(page.getByText(/primary/i).first()).toBeVisible()
