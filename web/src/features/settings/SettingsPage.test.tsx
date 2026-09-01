@@ -124,7 +124,9 @@ describe('SettingsPage', () => {
     })
     await settleInitialQueries()
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Could not load databases for postgres')
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not load databases for postgres',
+    )
     const secondTable = await waitFor(() =>
       screen.getByRole('table', { name: 'Databases for standby.example.test:5432' }),
     )

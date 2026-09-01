@@ -83,14 +83,27 @@ func TestINTLOCK001_BlockingSessionIsReported(t *testing.T) {
 		require.NotEmpty(t, result.Facts)
 		var tree struct {
 			Nodes []struct {
+				PID       int32   `json:"pid"`
 				BlockedBy []int32 `json:"blocked_by"`
 				WaitEvent string  `json:"wait_event"`
 			} `json:"nodes"`
 		}
 		require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
-		require.Len(t, tree.Nodes, 1)
-		require.Contains(t, tree.Nodes[0].BlockedBy, holderPID)
-		require.Equal(t, "transactionid", tree.Nodes[0].WaitEvent)
+		require.Len(t, tree.Nodes, 2)
+		blockedNodes := 0
+		sawHolder := false
+		for _, node := range tree.Nodes {
+			if len(node.BlockedBy) > 0 {
+				blockedNodes++
+				require.Contains(t, node.BlockedBy, holderPID)
+				require.Equal(t, "transactionid", node.WaitEvent)
+			}
+			if node.PID == holderPID {
+				sawHolder = true
+			}
+		}
+		require.Equal(t, 1, blockedNodes)
+		require.True(t, sawHolder)
 	})
 }
 
@@ -139,12 +152,20 @@ func TestINTLOCK003_RelationLockIsReported(t *testing.T) {
 		require.Equal(t, 1.0, metricValue(result, "pg_blocked_sessions", nil))
 		var tree struct {
 			Nodes []struct {
-				WaitEvent string `json:"wait_event"`
+				BlockedBy []int32 `json:"blocked_by"`
+				WaitEvent string  `json:"wait_event"`
 			} `json:"nodes"`
 		}
 		require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
-		require.Len(t, tree.Nodes, 1)
-		require.Equal(t, "relation", tree.Nodes[0].WaitEvent)
+		require.Len(t, tree.Nodes, 2)
+		blockedNodes := 0
+		for _, node := range tree.Nodes {
+			if len(node.BlockedBy) > 0 {
+				blockedNodes++
+				require.Equal(t, "relation", node.WaitEvent)
+			}
+		}
+		require.Equal(t, 1, blockedNodes)
 	})
 }
 

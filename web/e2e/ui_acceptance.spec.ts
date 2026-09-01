@@ -232,9 +232,14 @@ test('SYS-UI-001: failover preserves identity and raises an alert', async ({
 
   await page.goto(`/instances/${standbyID}`)
   await expect(page.getByRole('heading', { name: new RegExp(standbyAddress) })).toBeVisible()
-  await expect(
-    page.locator('dt').filter({ hasText: 'Role' }).locator('xpath=following-sibling::dd[1]'),
-  ).toHaveText('primary')
+  const roleValue = page
+    .locator('dt')
+    .filter({ hasText: 'Role' })
+    .locator('xpath=following-sibling::dd[1]')
+  await reloadUntil(page, async () => {
+    return (await roleValue.count()) === 1 && (await roleValue.innerText()).trim() === 'primary'
+  })
+  await expect(roleValue).toHaveText('primary')
   await page.goto(`/clusters/${clusterID}`)
   await expect(page.getByRole('region', { name: 'Replication topology graph' })).toBeVisible()
   let promotedEdge: JsonObject | undefined
@@ -407,7 +412,21 @@ test('SYS-UI-006: plan-only execution is audited without query text', async ({
   api,
 }) => {
   const page = signedInPage
-  const { instance } = await fleetContext(api)
+  const { instances } = await fleetContext(api)
+  // SYS-UI-006 seeds pg_stat_statements on pg-primary. Do not let the
+  // addr/port ordering used by fleetContext select the standby when the
+  // container and binary harnesses expose different endpoint orderings.
+  const instance =
+    instances.find(
+      (item) =>
+        String(item.role ?? '').toLowerCase() === 'primary' &&
+        String(item.perm_tier ?? item.permission_tier ?? '').toUpperCase() === 'T1',
+    ) ??
+    instances.find((item) => String(item.role ?? '').toLowerCase() === 'primary') ??
+    instances.find(
+      (item) => String(item.perm_tier ?? item.permission_tier ?? '').toUpperCase() === 'T1',
+    ) ??
+    instances[0]!
   const commandRequests: string[] = []
   page.on('request', (request) => {
     if (request.method() === 'POST' && request.url().includes('/commands')) {
@@ -420,7 +439,7 @@ test('SYS-UI-006: plan-only execution is audited without query text', async ({
     .poll(
       async () => {
         const response = await api.get(
-          `/api/v1/statements?instance_id=${encodeURIComponent(selectedInstanceID)}&limit=50`,
+          `/api/v1/statements?instance_id=${encodeURIComponent(selectedInstanceID)}&limit=300`,
         )
         if (!response.ok()) return 0
         const payload = await response.json()
@@ -435,15 +454,15 @@ test('SYS-UI-006: plan-only execution is audited without query text', async ({
     .poll(
       async () => {
         const response = await api.get(
-          `/api/v1/statements?instance_id=${encodeURIComponent(selectedInstanceID)}&limit=50`,
+          `/api/v1/statements?instance_id=${encodeURIComponent(selectedInstanceID)}&limit=300`,
         )
         if (!response.ok()) return false
         const payload = await response.json()
-        const statement = (Array.isArray(payload.statements) ? payload.statements : []).find(
-          (item: JsonObject) =>
-            /^select count\(\*\) from pg_catalog\.pg_proc cross join pg_catalog\.pg_class\s*$/i.test(
-              String(item.query_text ?? '').trim(),
-            ),
+        const statements = Array.isArray(payload.statements) ? payload.statements : []
+        const statement = statements.find((item: JsonObject) =>
+          /^select count\(\*\) from pg_catalog\.pg_proc cross join pg_catalog\.pg_class\s*$/i.test(
+            String(item.query_text ?? '').trim(),
+          ),
         )
         selectedQueryID = statement?.queryid
         return selectedQueryID !== undefined && selectedQueryID !== null

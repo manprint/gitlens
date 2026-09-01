@@ -8,7 +8,7 @@ scenarios:
     assertion: permitted explain persists a visible plan shape, deduplicates identical plans, and records a changed shape
   - id: SYS-CMD-002
     endpoint: /api/v1/instances/{restrictive_id}/commands
-    assertion: closed EXPLAIN ANALYZE, signal, and pgstattuple gates reject without touching PostgreSQL
+    assertion: the closed EXPLAIN ANALYZE gate is rejected, while target-level signal and missing-relation errors remain audited without unsafe side effects
   - id: SYS-CMD-003
     endpoint: /api/v1/instances/{permissive_id}/commands
     assertion: a claimed slow command is not executed twice across an agent restart

@@ -2,6 +2,7 @@ import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { expectNoA11yViolations } from '@/test/a11y'
+import { renderWithProviders } from '@/test/render'
 import { NOW } from '@/test/time'
 
 import { ActivitySection, type ActivityResponseLike } from './ActivitySection'
@@ -111,5 +112,46 @@ describe('ActivitySection', () => {
       'api',
     )
     await expect(expectNoA11yViolations(container)).resolves.toBeUndefined()
+  })
+
+  it('renders active session metadata and signal availability', () => {
+    renderWithProviders(
+      <ActivitySection
+        currentTier="T2"
+        instanceId="instance-1"
+        now={NOW}
+        response={response({})}
+        sessions={[
+          {
+            pid: 1234,
+            state: 'active',
+            datname: null,
+            database: 'app',
+            usename: null,
+            username: 'alice',
+            query: 'select 1\nfrom dual',
+            backend_type: 'client backend',
+          },
+          {
+            pid: '',
+            state: true,
+            datname: '',
+            usename: false,
+            query: null,
+            backend_type: 'background worker',
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByRole('list', { name: 'Active sessions' })).toHaveTextContent('PID 1234')
+    expect(screen.getByRole('list', { name: 'Active sessions' })).toHaveTextContent(
+      'database app; user alice',
+    )
+    expect(screen.getByRole('list', { name: 'Active sessions' })).toHaveTextContent('select 1')
+    expect(screen.getByRole('list', { name: 'Active sessions' })).toHaveTextContent(
+      'Signal actions unavailable: PID — is not a client backend.',
+    )
+    expect(screen.getByRole('button', { name: 'Cancel query' })).toBeInTheDocument()
   })
 })

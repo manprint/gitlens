@@ -400,6 +400,17 @@ func (h *Harness) startAgentBinary() error {
       max: 10`, primaryPort)
 	}
 
+	statStatementsInterval := "60s"
+	statStatementsTopN := 50
+	if h.ui {
+		// UI acceptance tests poll statements for a bounded time window. Keep
+		// the binary harness observable within that window even when the
+		// workload completes before the agent's first scheduled scrape.
+		statStatementsInterval = "10s"
+		// Keep the short plan-safe catalog workload in the binary UI result
+		// set despite the agent's startup and bootstrap statements.
+		statStatementsTopN = 300
+	}
 	config := fmt.Sprintf(`server:
   url: http://localhost:%d
   token: %s
@@ -414,12 +425,11 @@ checks:
   activity: { interval: 5s }
   database_stats: { interval: 5s }
   replication_slots: { interval: 5s }
-  # Keep the cadence aligned with the cardinality workload's 65s rotations.
-  # Selector hysteresis is measured in scrape cycles, so a 10s cadence would
-  # forget each previous hot group before the next rotation and never reach
-  # MaxKeys in binary mode (the container fixture uses the same 60s cadence).
-  stat_statements: { interval: 60s, top_n: 50 }
-`, h.serverPort, agentBootstrapToken, identityPath, bufferPath, targetsYAML)
+  # Keep the non-UI cadence aligned with the cardinality workload's 65s
+  # rotations. UI binary runs override it to 10s above so short workloads
+  # become observable within the browser acceptance polling window.
+  stat_statements: { interval: %s, top_n: %d }
+`, h.serverPort, agentBootstrapToken, identityPath, bufferPath, targetsYAML, statStatementsInterval, statStatementsTopN)
 	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
 		return fmt.Errorf("write agent config: %w", err)
 	}

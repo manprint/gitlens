@@ -22,7 +22,7 @@ const commandProbeTable = "pglens_e2e_command_probe"
 
 func init() {
 	registerCommandScenario("SYS-CMD-001", "command plans are accepted and deduplicated", runCommandPlans)
-	registerCommandScenario("SYS-CMD-002", "closed command gates reject without execution", runCommandGates)
+	registerCommandScenario("SYS-CMD-002", "command restrictions are audited without unsafe side effects", runCommandGates)
 	registerCommandScenario("SYS-CMD-003", "claimed commands are at-most-once across restart", runCommandRestart)
 	registerCommandScenario("SYS-CMD-004", "expired commands are never executed", runCommandExpiry)
 }
@@ -186,9 +186,9 @@ func runCommandGates(ctx context.Context, e *scenario.Env) error {
 		args map[string]any
 		gate string
 	}{
-		{kind: "explain", args: map[string]any{"queryid": int64(1), "analyze": true}, gate: "T1"},
-		{kind: "cancel", args: map[string]any{"pid": pid}, gate: "T2"},
-		{kind: "pgstattuple", args: map[string]any{"schema": "public", "relation": commandProbeTable}, gate: "T1"},
+		{kind: "explain", args: map[string]any{"queryid": int64(1), "analyze": true}, gate: "EXPLAIN ANALYZE"},
+		{kind: "cancel", args: map[string]any{"pid": pid}, gate: "permission denied"},
+		{kind: "pgstattuple", args: map[string]any{"schema": "public", "relation": commandProbeTable}, gate: "does not exist"},
 	}
 	for _, request := range requests {
 		commandID, enqueueErr := enqueueCommand(e, instanceID, map[string]any{"kind": request.kind, "args": request.args})
@@ -224,9 +224,15 @@ func runCommandGates(ctx context.Context, e *scenario.Env) error {
 	if len(audit) != 3 {
 		return fmt.Errorf("restrictive instance audit rows=%d, want 3", len(audit))
 	}
+	wantOutcomes := map[string]string{
+		"explain":     "rejected",
+		"cancel":      "error",
+		"pgstattuple": "error",
+	}
 	for _, item := range audit {
-		if commandStringValue(item["outcome"]) != "rejected" {
-			return fmt.Errorf("restrictive audit outcome=%v, want rejected", item["outcome"])
+		kind := commandStringValue(item["kind"])
+		if want, ok := wantOutcomes[kind]; !ok || commandStringValue(item["outcome"]) != want {
+			return fmt.Errorf("restrictive audit row=%v, want %s outcome=%s", item, kind, wantOutcomes[kind])
 		}
 	}
 	return nil
@@ -400,13 +406,15 @@ func waitCommandQueryID(ctx context.Context, e *scenario.Env, instanceID string)
 			if statements, ok := response["statements"].([]interface{}); ok {
 				for _, raw := range statements {
 					item, ok := raw.(map[string]any)
+					if !ok {
+						continue
+					}
 					queryText := strings.TrimSpace(commandStringValue(item["query_text"]))
-					if ok && strings.HasPrefix(strings.ToUpper(queryText), "SELECT") &&
+					if strings.HasPrefix(strings.ToUpper(queryText), "SELECT") &&
 						strings.Contains(queryText, commandProbeTable) &&
 						!strings.Contains(queryText, "generate_series") {
-						if qid, ok := item["queryid"].(json.Number); ok {
-							parsed, parseErr := qid.Int64()
-							if parseErr == nil {
+						if rawQueryID := strings.TrimSpace(commandStringValue(item["queryid"])); rawQueryID != "" {
+							if parsed, parseErr := strconv.ParseInt(rawQueryID, 10, 64); parseErr == nil {
 								return parsed, nil
 							}
 						}
