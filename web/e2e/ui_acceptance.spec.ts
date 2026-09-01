@@ -32,7 +32,7 @@ function instanceID(instance: JsonObject): string {
 }
 
 function instanceAddress(instance: JsonObject): string {
-  return String(instance.address ?? instance.host ?? instance.name ?? instanceID(instance))
+  return String(instance.address ?? instance.addr ?? instance.host ?? instance.name ?? instanceID(instance))
 }
 
 async function fleetContext(api: any): Promise<{
