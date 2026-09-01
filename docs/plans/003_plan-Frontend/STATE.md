@@ -241,7 +241,7 @@ records start/end timestamps and elapsed time.
 | 12.2 | sub-phase | 12.2 | 2026-09-01 | Build the Query Inspector statement list | `7df5681` |
 | 12.3 | sub-phase | 12.3 | 2026-09-01 | Build the command lifecycle client | `3d8be05` |
 | 12.4 | sub-phase | 12.4 | 2026-09-01 | Build the EXPLAIN flow and safety gates | `1bac53a` |
-| 12.5 | sub-phase | 12.5 | 2026-09-01 | Build plan history and comparison | `0a2fb26` |
+| 12.5 | sub-phase | 12.5 | 2026-09-01 | Build plan history and comparison | `0a2fb26`, `853daf6` |
 
 ---
 
