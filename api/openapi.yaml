@@ -214,7 +214,7 @@ components:
       type: object
       required: [queryid, datname, query_text, truncated]
       properties:
-        queryid: { type: integer, format: int64 }
+        queryid: { type: string, pattern: '^-?[0-9]+$', description: PostgreSQL query ID as a decimal string. }
         datname: { type: string }
         query_text: { type: string }
         calls: { type: [number, 'null'] }
@@ -242,7 +242,7 @@ components:
         wait_event_type: { type: string }
         wait_event: { type: string }
         state: { type: string }
-        queryid: { type: [integer, 'null'], format: int64 }
+        queryid: { type: [string, 'null'], pattern: '^-?[0-9]+$', description: PostgreSQL query ID as a decimal string. }
     AshResponse:
       type: object
       required: [buckets, resolution_seconds, statistical]
@@ -256,7 +256,7 @@ components:
       type: object
       required: [queryid, query_text, samples, ticks, avg_active_sessions]
       properties:
-        queryid: { type: integer, format: int64 }
+        queryid: { type: string, pattern: '^-?[0-9]+$', description: PostgreSQL query ID as a decimal string. }
         query_text: { type: string }
         samples: { type: integer, format: int32 }
         ticks: { type: integer, format: int32 }
@@ -1121,7 +1121,7 @@ paths:
                 default:
                   value:
                     statements:
-                      - { queryid: 1234, datname: app, query_text: SELECT 1, calls: 10, total_exec_time_ms: 12.5, rows: 10, truncated: false }
+                      - { queryid: '1234', datname: app, query_text: SELECT 1, calls: 10, total_exec_time_ms: 12.5, rows: 10, truncated: false }
                     truncated: false
                     comparable_scope: cluster
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -1180,7 +1180,7 @@ paths:
                     resolution_seconds: 1
                     statistical: true
                     entries:
-                      - { queryid: 1234567890, query_text: SELECT '* FROM users WHERE id = $1', samples: 45, ticks: 10, avg_active_sessions: 4.5 }
+                      - { queryid: '1234567890', query_text: SELECT '* FROM users WHERE id = $1', samples: 45, ticks: 10, avg_active_sessions: 4.5 }
         '400': { $ref: '#/components/responses/BadRequest' }
 
   /api/v1/plans:

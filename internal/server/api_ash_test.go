@@ -332,7 +332,7 @@ func TestAshTop_SignificanceWarning_Below60Ticks(t *testing.T) {
 		queryResults: []*mockRows{
 			{
 				rows: []([]any){
-					{int64(123), "SELECT 1", 100, 59},
+					{int64(9007199254740993), "SELECT 1", 100, 59},
 				},
 			},
 		},
@@ -343,6 +343,7 @@ func TestAshTop_SignificanceWarning_Below60Ticks(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 59, totalTicks)
 	require.Len(t, entries, 1)
+	require.Equal(t, "9007199254740993", entries[0].QueryID)
 
 	// When totalTicks < 60, warning should be set by handler
 	require.True(t, totalTicks < 60)

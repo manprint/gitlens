@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,7 +43,9 @@ type ashBucket struct {
 	WaitEventType     string    `json:"wait_event_type,omitempty"`
 	WaitEvent         string    `json:"wait_event,omitempty"`
 	State             string    `json:"state,omitempty"`
-	QueryID           *int64    `json:"queryid,omitempty"`
+	// PostgreSQL query IDs are int64 values. Keep them as decimal strings in
+	// JSON so browsers cannot round them past Number.MAX_SAFE_INTEGER.
+	QueryID *string `json:"queryid,omitempty"`
 }
 
 type ashResponse struct {
@@ -59,7 +62,7 @@ type ashResponse struct {
 }
 
 type ashTopEntry struct {
-	QueryID   int64    `json:"queryid"`
+	QueryID   string   `json:"queryid"`
 	QueryText string   `json:"query_text"`
 	Samples   int      `json:"samples"`
 	Ticks     int      `json:"ticks"`
@@ -265,7 +268,7 @@ func (a *AshAPI) queryASHBuckets(ctx context.Context, instanceID uuid.UUID, from
 			bucket.WaitEventType = wet
 			bucket.WaitEvent = we
 			bucket.State = state
-			bucket.QueryID = qid
+			bucket.QueryID = formatQueryID(qid)
 		} else {
 			// Only scan requested columns
 			for _, col := range groupByCols {
@@ -289,7 +292,7 @@ func (a *AshAPI) queryASHBuckets(ctx context.Context, instanceID uuid.UUID, from
 				case "queryid":
 					var v *int64
 					scanDests = append(scanDests, &v)
-					bucket.QueryID = v
+					bucket.QueryID = formatQueryID(v)
 				}
 			}
 			if err := rows.Scan(scanDests...); err != nil {
@@ -465,7 +468,7 @@ func (a *AshAPI) queryASHTop(ctx context.Context, instanceID uuid.UUID, from, to
 			Ticks:     ticks,
 		}
 		if qid != nil {
-			entry.QueryID = *qid
+			entry.QueryID = strconv.FormatInt(*qid, 10)
 		}
 		if ticks > 0 {
 			avg := float64(samples) / float64(ticks)
@@ -481,4 +484,12 @@ func (a *AshAPI) queryASHTop(ctx context.Context, instanceID uuid.UUID, from, to
 	}
 
 	return entries, totalTicks, nil
+}
+
+func formatQueryID(qid *int64) *string {
+	if qid == nil {
+		return nil
+	}
+	value := strconv.FormatInt(*qid, 10)
+	return &value
 }

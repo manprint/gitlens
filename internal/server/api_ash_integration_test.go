@@ -292,7 +292,7 @@ func TestIntASH012_QueryIDJoinToQueryTexts(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, entries, 1)
-	require.Equal(t, qid, entries[0].QueryID)
+	require.Equal(t, fmt.Sprintf("%d", qid), entries[0].QueryID)
 	require.Equal(t, queryText, entries[0].QueryText)
 	require.Equal(t, 100, entries[0].Samples)
 	require.Equal(t, 10, entries[0].Ticks)

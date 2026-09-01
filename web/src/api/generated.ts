@@ -813,8 +813,8 @@ export interface components {
             events: components["schemas"]["Event"][];
         };
         Statement: {
-            /** Format: int64 */
-            queryid: number;
+            /** @description PostgreSQL query ID as a decimal string. */
+            queryid: string;
             datname: string;
             query_text: string;
             calls?: number | null;
@@ -840,8 +840,8 @@ export interface components {
             wait_event_type?: string;
             wait_event?: string;
             state?: string;
-            /** Format: int64 */
-            queryid?: number | null;
+            /** @description PostgreSQL query ID as a decimal string. */
+            queryid?: string | null;
         };
         AshResponse: {
             buckets: components["schemas"]["AshBucket"][];
@@ -853,8 +853,8 @@ export interface components {
             enabled?: boolean;
         };
         AshTopEntry: {
-            /** Format: int64 */
-            queryid: number;
+            /** @description PostgreSQL query ID as a decimal string. */
+            queryid: string;
             query_text: string;
             /** Format: int32 */
             samples: number;

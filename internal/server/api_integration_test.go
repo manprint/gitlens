@@ -277,7 +277,7 @@ func TestAPI_Statements_WithDB(t *testing.T) {
 	var resp statementsResp
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Len(t, resp.Statements, 1)
-	require.Equal(t, int64(123), resp.Statements[0].QueryID)
+	require.Equal(t, "123", resp.Statements[0].QueryID)
 	require.Equal(t, "SELECT 1", resp.Statements[0].QueryText)
 	require.NotNil(t, resp.Statements[0].Calls)
 	// with database filter and from/to

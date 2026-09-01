@@ -664,7 +664,7 @@ func TestAPI_MockPool_Statements_WithRows(t *testing.T) {
 	pool := &mockPool{
 		queryResults: []*mockRows{
 			{rows: [][]any{
-				{int64(123), "app", "SELECT 1", 10.0, 100.0, 5.0, 1.0, 2.0, 3.0, 10.0},
+				{int64(9007199254740993), "app", "SELECT 1", 10.0, 100.0, 5.0, 1.0, 2.0, 3.0, 10.0},
 			}},
 		},
 		queryRowVals: []*mockRow{{vals: []any{false}}},
@@ -679,7 +679,7 @@ func TestAPI_MockPool_Statements_WithRows(t *testing.T) {
 	var resp statementsResp
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Len(t, resp.Statements, 1)
-	require.Equal(t, int64(123), resp.Statements[0].QueryID)
+	require.Equal(t, "9007199254740993", resp.Statements[0].QueryID)
 	require.Equal(t, "SELECT 1", resp.Statements[0].QueryText)
 	require.False(t, resp.Truncated)
 }

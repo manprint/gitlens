@@ -193,7 +193,9 @@ type eventResponse struct {
 }
 
 type statementEntry struct {
-	QueryID   int64    `json:"queryid"`
+	// PostgreSQL query IDs are int64 values. They must cross the JSON
+	// boundary as strings so browsers cannot round them past Number.MAX_SAFE_INTEGER.
+	QueryID   string   `json:"queryid"`
 	Datname   string   `json:"datname"`
 	QueryText string   `json:"query_text"`
 	Calls     *float64 `json:"calls,omitempty"`
@@ -1067,7 +1069,7 @@ func (a *API) handleStatements(w http.ResponseWriter, r *http.Request) {
 			text = qtext.String
 		}
 		e := statementEntry{
-			QueryID:   qid,
+			QueryID:   strconv.FormatInt(qid, 10),
 			Datname:   datname,
 			QueryText: text,
 			Truncated: false,
