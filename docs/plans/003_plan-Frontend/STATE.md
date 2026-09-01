@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-09-01 — sub-phase 17.3 OPEN for CI integration._
+_Last updated: 2026-09-01 — sub-phase 17.4 OPEN for release packaging._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,16 +54,16 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 17.3 |
+| **ID** | 17.4 |
 | **Status** | `OPEN` |
-| **Intent** | Add the CI workflows for the existing Go E2E matrix and the bounded UI acceptance matrix. |
-| **Next action:** | Implement the CI integration described in `phase_18.md`, then run its static workflow gates. |
+| **Intent** | Validate release packaging, image sizes, multi-arch builds, and the documented UI limits. |
+| **Next action:** | Implement the release-packaging checks described in `phase_18.md`, then record image sizes and deployment configuration gates. |
 | **Assigned** | `agent-2:sonnet` |
 | **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, and phase 6 sub-phases 6.1–6.8 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, strict typed lint/format gates, Makefile web targets, clean placeholder preservation, the parallel CI web job, frontend workflow documentation, the real server image build, the phase-boundary L3 regression, the Vitest/jsdom test runner foundation, the frontend testing architecture rules, the deterministic render/provider harness, the contract-validated OpenAPI fixture suite, the contract-aware MSW handler factory, the V8 UI coverage gate, the axe-core accessibility assertion, the deterministic clock/timezone/locale/randomness rules, the Playwright acceptance bootstrap, the harness defense meta-tests, the frontend testing workflow documentation, the phase-5 boundary E2E regression, the OpenAPI type generator, committed generated API types, stable schema aliases, type-level contract assertions, generator drift gates, the single typed API client, normalized API failures, exact large-integer query identifiers, the query key factory, refresh policies, the visibility-aware polling hooks, query-layer coverage, session authentication, guarded routing, login/logout flows, single-flight 401 handling, auth/login coverage, the accessible state-primitives library, freshness plumbing, the phase-6 browser sign-in documentation, the phase-7 route tree/code-splitting boundary, the accessible application shell, the URL-backed time-range state, the shared page scaffolding primitives, resilient namespaced theme/density/sidebar preferences, global error/offline handling, the phase-7 README web-interface guide, the phase-7 boundary E2E regression, the fleet derivation library, cluster cards, agent-health surfacing, server-defined health semantics, degraded/error paths, Fleet Overview documentation, the phase-8 boundary E2E regression, the phase-9 boundary E2E regression, and the Cluster Detail documentation are covered. The replication derivation library, topology graph, lag charts, slots, configuration drift, event taxonomy/timeline, Cluster Detail route, degraded/error paths, UI-REPL/UI-CLUS tests, Instance Detail header, database selector, URL-backed database scope, unmonitored database visibility, metric tiles, time series, counter-reset annotations, host metrics, settings, change history, durability, relations, bloat, truncation, and the Instance Detail README guidance are covered. Phase 10 is complete and phase 11 is now complete: ASH derivation, stacked waits, drill-down, honest disabled/under-sampled/unattributable states, stale freshness, exactly-once unauthorized navigation, server-error retry, shared range-retention validation, permanent sampling-limit guidance, and the README wait-analysis guide are covered. Phase 12.1–12.7 and phase 13.1–13.6 are complete: statement ranking, execution-time shares, null-safe statement summaries, whitespace normalization, cluster/version comparability helpers, the complete Query Inspector, Locks and Activity derivation and views, command polling at the one-second policy, terminal-state polling stops, server and client expiry, agent rejection messaging, and no-retry command creation are covered. Phase 14.1–14.5 are complete: advisor findings ranking/grouping/summaries, authoritative catalogue joining, missing-rule preservation, frozen-clock mute expiry, the URL-backed findings list, severity/state/scope/cluster/instance filters, explicit hidden-state counts, degraded input/tier guidance, evidence rendering, findings accessibility coverage, server-confirmed mute/unmute controls, reason/expiry validation, non-optimistic mutation handling, muted-state remaining-time presentation, rule catalogue rendering/filtering, affirmative empty-state semantics, degraded-only honesty, stale data, exactly-once unauthorized navigation, retryable failures, and findings polling are covered. The next unit is phase 14.6, the findings documentation. |
 | **Phase file** | [phase_18.md](phase_18.md) |
 
 The historical repository-state summary above predates the current execution
-pointer; §1 is authoritative and the next unit is sub-phase 17.3.
+pointer; §1 is authoritative and the next unit is sub-phase 17.4.
 
 The earlier phase-14.6 pointer in the repository-state narrative is superseded: phase 14.6 and the phase-14 boundary are complete, and the next unit is sub-phase 15.1.
 
@@ -117,6 +117,12 @@ The sub-phase-17.2 review correction is closed: the strengthened assertions
 passed the read-only `agent-1:opus` review, all eleven container scenarios passed
 in the final phase gate, the required binary scenarios passed, and the test
 stack was cleaned up. The next unit is sub-phase 17.3.
+
+Sub-phase 17.3 is closed: the UI acceptance workflow matrix and the fast/slow CI
+separation are committed, the workflow files pass Prettier and Makefile dry-run
+validation, the Go/E2E packages compile, and the four-scenario binary UI gate
+passed in 233s with no residual Docker resources. The next unit is sub-phase
+17.4.
 
 Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, phase 6 sub-phases 6.1–6.8, phase 7 sub-phases 7.1–7.7, phase 8 sub-phases 8.1–8.6, phase 9 sub-phases 9.1–9.7, phase 10 sub-phases 10.1–10.7, phase 11 sub-phases 11.1–11.6, sub-phases 12.1–12.7, 13.1–13.6, and 14.1–15.7 are closed; phases 14 and 15 are complete, and the next unit is 16.1.
 - Phases 5 through 15 are complete; phase 16 is next and sub-phase 16.1 is ready to open.
@@ -332,6 +338,7 @@ records start/end timestamps and elapsed time.
 | 16-B | phase-boundary | 16 | 2026-09-01 | Verify the phase-16 non-E2E and scheduled E2E gates | `ef9c7ac` (image-build repair); state closure follows |
 | 17.1 | sub-phase | 17.1 | 2026-09-01 | Add the Go-driven UI acceptance runner and `SYS-UI-000` | `5d1f983` |
 | 17.2 | sub-phase | 17.2 | 2026-09-01 | Implement and verify the browser acceptance scenarios | `6e9c0ba` (assertion correction); closed in this state update |
+| 17.3 | sub-phase | 17.3 | 2026-09-01 | Add and validate the CI workflow for the bounded UI acceptance matrix | `4977d47`, `072b206` |
 
 ---
 
@@ -814,6 +821,13 @@ review correction strengthened the failover identity/topology assertions,
 waited for old-primary rejoin readiness, corrected the plan-tree and audit
 semantics, and stabilized the outage stale-status locator.
 
+Sub-phase 17.3 added the `ui-acceptance` workflow job, the binary-mode scenario
+restriction, failure artifact upload wiring, and the Makefile selector that
+keeps the existing web job fast. The binary acceptance run also required a
+transport-neutral single-primary topology fallback in `internal/server` and
+stable Compose host-port reuse during binary rejoin; those corrections are in
+`072b206`.
+
 ---
 
 ## §6 — In-flight work
@@ -1164,6 +1178,9 @@ semantics, and stabilized the outage stale-status locator.
 | 2026-09-01 | 17.2 review | `agent-1:opus` read-only assertion audit | PASS | SYS-UI-001 through SYS-UI-011 passed the semantic review; no blocking gaps remained. |
 | 2026-09-01 | 17.2 review | `go test -tags=e2e -timeout=40m ./test/e2e/... -run '^TestUI_' -count=1` | FAIL — corrected | The first post-review closure retry ran 660.87s and exposed only a Playwright strict-mode ambiguity in SYS-UI-003: two valid stale-status nodes were rendered. The locator was stabilized with `.first()`. |
 | 2026-09-01 | 17.2 closure | `go test -tags=e2e -timeout=40m ./test/e2e/... -run '^TestUI_' -count=1` | PASS | Final all-eleven container gate exited 0 in 833.30s (13m53s); no `pglens-*` containers or networks remained. |
+| 2026-09-01 | 17.3 | `go test ./internal/server ./test/harness`; `go test -tags=e2e -run '^$' ./test/e2e/...`; workflow Prettier; Makefile dry-runs; `git diff --check` | PASS | Go packages compiled, the workflow files were formatted, both default/targeted UI selectors expanded correctly, and the diff was clean. |
+| 2026-09-01 | 17.3 closure | `AGENT_MODE=binary UI_E2E_RUN='UI_(Failover\|UnauthenticatedNavigation\|AgentOutage\|Accessibility)' make test-ui-e2e` | PASS | SYS-UI-001, SYS-UI-002, SYS-UI-003, and SYS-UI-011 passed; wrapper elapsed 233s, Go test 215.081s; residual `pglens-*` containers/networks: 0/0. |
+| 2026-09-01 | 17.3 closure | Local CI/artifact verification | DEFERRED | `actionlint` and `act` are absent, and no remote push/run was authorized. Prettier and Makefile dry-runs validate the workflow syntax/selection locally; the first remote CI run must confirm the hosted artifact upload. |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -1229,6 +1246,7 @@ reconstruct.
 | 47 | 17.1 | The planned `--with-deps` Playwright install requires interactive sudo in this environment, while the browser binary itself was absent. | The required browser was installed explicitly with `pnpm exec playwright install chromium` after the dependency-install attempt reported the sudo limitation; the Makefile performs only an executable-path check and leaves OS package installation to the operator. | yes — §7 and the phase-17.1 runner |
 | 48 | 17.2 | The first binary failover assertion used the default 10s locator timeout for an alert that is persisted asynchronously after promotion. | The scenario now polls the cluster event and firing alert through the API, then uses `reloadUntil` for the topology, events, and alerts pages. This preserves state-based waiting and passes in both agent modes. | yes — §7 and the phase-18 scenario evidence |
 | 49 | 17.2 review | The outage scenario treated the stale-data status as unique, but the rendered card can expose two valid status nodes. | Scope the assertion to the first matching status node; the final eleven-scenario gate passed without changing product behavior. | yes — `6e9c0ba`, §7 and the phase-18 scenario evidence |
+| 50 | 17.3 | The hosted artifact-upload branch could not be exercised locally because `actionlint` and `act` are unavailable and no remote CI push/run was authorized. | Validate workflow syntax and scenario selection with Prettier and Makefile dry-runs, run the complete bounded binary matrix locally, and leave the first remote CI run as the explicit artifact-upload confirmation. | yes — §7 and the phase-18 workflow definition |
 
 ## §9 — Blockers and open questions
 
@@ -1283,7 +1301,7 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 | 14 | [phase_15.md](phase_15.md) | Advisor findings | `agent-2:sonnet` | — | DONE — 6/6 sub-phases closed |
 | 15 | [phase_16.md](phase_16.md) | Alerts, silences, rules, events | `agent-2:sonnet` | 15.3 | DONE — 7/7 sub-phases closed |
 | 16 | [phase_17.md](phase_17.md) | Settings and fleet inventory | `agent-2:sonnet` | — | DONE — 5/5 sub-phases closed; boundary gates passed |
-| 17 | [phase_18.md](phase_18.md) | Packaging, UI acceptance suite, documentation | `agent-2:sonnet` / `agent-3:haiku` | 17.2, 17.7, 17.8 | IN PROGRESS — 2/8 sub-phases closed; 17.3 ready |
+| 17 | [phase_18.md](phase_18.md) | Packaging, UI acceptance suite, documentation | `agent-2:sonnet` / `agent-3:haiku` | 17.2, 17.7, 17.8 | IN PROGRESS — 3/8 sub-phases closed; 17.4 ready |
 
 `agent-1:opus` owns every review gate listed above and approves each phase before
 the next one opens.
@@ -1410,7 +1428,7 @@ the next one opens.
 | 16.5 | Update README.md | `agent-3:haiku` | DONE |
 | 17.1 | The Go-driven UI acceptance runner | `agent-2:sonnet` | DONE |
 | 17.2 | The acceptance scenarios | `agent-2:sonnet` | DONE |
-| 17.3 | CI integration | `agent-2:sonnet` | TODO |
+| 17.3 | CI integration | `agent-2:sonnet` | DONE |
 | 17.4 | Release packaging | `agent-2:sonnet` | TODO |
 | 17.5 | Performance and bundle budget | `agent-2:sonnet` | TODO |
 | 17.6 | Full regression sweep | `agent-2:sonnet` | TODO |
