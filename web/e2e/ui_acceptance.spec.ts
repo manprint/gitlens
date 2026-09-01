@@ -165,7 +165,10 @@ test('SYS-UI-002: unauthenticated navigation cannot restore fleet data', async (
   await expect(page.getByRole('heading', { name: /sign in|accedi/i })).toBeVisible()
   await page.goBack()
   await expect(page.getByRole('list', { name: 'Cluster cards' })).toHaveCount(0)
-  const backNavigationStatus = await page.evaluate(async () => (await fetch('/api/v1/clusters')).status)
+  const backNavigationStatus = await page.evaluate(
+    async (baseURL) => (await fetch(`${baseURL}/api/v1/clusters`)).status,
+    process.env.PGLENS_UI_BASE_URL,
+  )
   expect(backNavigationStatus).toBe(401)
 })
 
