@@ -360,7 +360,12 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 		if !ok {
 			continue
 		}
-		if err := mgr.RefreshCapabilities(ctx); err != nil {
+		// A dead target must not hold the whole envelope hostage while another
+		// target is still reachable (notably after primary->standby failover).
+		// Shared() can wait for a pool connection, so bound every target's
+		// refresh/discovery cycle independently of the agent lifetime.
+		targetCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		if err := mgr.RefreshCapabilities(targetCtx); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: refresh capabilities for %s: %v\n", mgr.Database(), err)
 		}
 		exts := map[string]bool{}
@@ -372,7 +377,7 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 		// table / db_budget skip_reason reporting) stayed permanently
 		// empty on every real push — nothing had ever exercised this path
 		// end to end before SYS-DB-001 (test/scenario/db.go).
-		dbs, err := mgr.Discover(ctx)
+		dbs, err := mgr.Discover(targetCtx)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: discover databases for %s: %v\n", mgr.Database(), err)
 		}
@@ -391,8 +396,9 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 		// a single dead target inside an otherwise-healthy multi-target
 		// agent process. Skipping the whole instance when there is no live
 		// signal at all lets the server's own staleness clock start.
-		if err := mgr.RefreshRole(ctx); err != nil {
+		if err := mgr.RefreshRole(targetCtx); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: refresh role for %s: %v (target unreachable this cycle, omitting from envelope)\n", mgr.Database(), err)
+			cancel()
 			continue
 		}
 		env.Instances = append(env.Instances, wire.Instance{
@@ -409,6 +415,7 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 			TopologyEdges:   buildTopologyEdges(mgr, results, lastEdgeState), //nolint:contextcheck // buildTopologyEdges->InstanceID: Manager caches this at connect time; the accessor takes no context
 			ASHEnabled:      boolPtr(ashEnabled[mgr.Database()]),
 		})
+		cancel()
 	}
 	pusher.Queue(env)
 }
