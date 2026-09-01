@@ -381,6 +381,8 @@ The catalogue response is a JSON array, for example:
 [{"id":"query.slow_mean","severity":"warning","scope":"instance","needs":["Statements"],"min_tier":"T0"}]
 ```
 
+From the signed-in web interface, open **Findings** to review the same ranked results with URL-backed state, severity, scope, cluster, instance, and catalogue filters, plus freshness and retry feedback when data ages or an endpoint fails. The four states retain their operational meaning: `open` is currently firing, `muted` is temporarily hidden, `resolved` stopped firing on a later evaluation, and `degraded` could not be evaluated because a required metric, check, permission tier, history window, or host view is unavailable; a degraded rule is not a pass and an empty result reports how many rules were evaluated. Muting never resolves or deletes a finding: the operator must provide a reason and a future expiry, after which the next evaluation restores the real state unless the mute is removed earlier. The **Advisor rule catalogue** shows every live rule, its inputs, scope, severity, firing/non-evaluable targets, and minimum permission tier, so the tier filter makes clear which rules a higher grant would unlock; findings are based on collected statistics, while index recommendations remain candidates for review.
+
 ### Advisor rule catalogue
 
 | Rule ID | Severity | Meaning |
