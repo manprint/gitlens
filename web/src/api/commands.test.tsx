@@ -109,8 +109,8 @@ describe('command lifecycle query', () => {
   })
 })
 
-function CreateProbe() {
-  const mutation = useCreateCommand('instance-a')
+function CreateProbe({ defaultInstanceId = 'instance-a' }: { defaultInstanceId?: string } = {}) {
+  const mutation = useCreateCommand(defaultInstanceId)
   return (
     <>
       <button
@@ -123,6 +123,26 @@ function CreateProbe() {
         {mutation.commandId ?? mutation.error?.kind ?? mutation.status}
       </output>
       <output data-testid="polled-state">{mutation.command.data?.state ?? 'none'}</output>
+      <button type="button" onClick={mutation.reset}>
+        reset
+      </button>
+    </>
+  )
+}
+
+function CreateWithoutDefaultProbe() {
+  const mutation = useCreateCommand()
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => mutation.mutate({ kind: 'explain', args: { queryid: 42 } })}
+      >
+        create
+      </button>
+      <output data-testid="create-state">
+        {mutation.commandId ?? mutation.error?.kind ?? mutation.status}
+      </output>
     </>
   )
 }
@@ -166,5 +186,53 @@ describe('command creation mutation', () => {
     await settle()
     expect(calls).toBe(1)
     expect(screen.getByTestId('create-state')).toHaveTextContent('server')
+  })
+
+  it('reports a malformed command creation response', async () => {
+    server.use(
+      http.post('*/api/v1/instances/:id/commands', () => new HttpResponse(null, { status: 202 })),
+    )
+
+    renderWithProviders(<CreateProbe />)
+    fireEvent.click(screen.getByRole('button', { name: 'create' }))
+    await settle()
+
+    expect(screen.getByTestId('create-state')).toHaveTextContent('malformed')
+  })
+
+  it('reports a network failure while creating a command', async () => {
+    server.use(http.post('*/api/v1/instances/:id/commands', () => HttpResponse.error()))
+
+    renderWithProviders(<CreateProbe />)
+    fireEvent.click(screen.getByRole('button', { name: 'create' }))
+    await settle()
+
+    expect(screen.getByTestId('create-state')).toHaveTextContent('network')
+  })
+
+  it('rejects command creation without a target instance', async () => {
+    renderWithProviders(<CreateWithoutDefaultProbe />)
+    fireEvent.click(screen.getByRole('button', { name: 'create' }))
+    await settle()
+
+    expect(screen.getByTestId('create-state')).toHaveTextContent('malformed')
+  })
+
+  it('resets the command mutation and removes its poll after success', async () => {
+    server.use(
+      http.post('*/api/v1/instances/:id/commands', () =>
+        HttpResponse.json({ command_id: commandId }, { status: 202 }),
+      ),
+    )
+
+    renderWithProviders(<CreateProbe />)
+    fireEvent.click(screen.getByRole('button', { name: 'create' }))
+    await settle()
+    expect(screen.getByTestId('create-state')).toHaveTextContent(commandId)
+
+    fireEvent.click(screen.getByRole('button', { name: 'reset' }))
+    await settle()
+    expect(screen.getByTestId('create-state')).toHaveTextContent('idle')
+    expect(screen.getByTestId('polled-state')).toHaveTextContent('none')
   })
 })

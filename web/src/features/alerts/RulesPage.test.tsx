@@ -2,7 +2,7 @@ import { act, fireEvent, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { http, HttpResponse } from 'msw'
 
-import type { AlertRule } from '@/api/alerts'
+import { AlertRuleMutationError, type AlertRule } from '@/api/alerts'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { assertMatchesContract } from '@/test/contract'
 import { renderWithProviders } from '@/test/render'
@@ -154,6 +154,54 @@ describe('RulesPage', () => {
     expect(
       screen.getByRole('heading', { name: 'Edit alert rule: replication-lag' }),
     ).toBeInTheDocument()
+  })
+
+  it('formats every alert-rule mutation failure category', () => {
+    expect(
+      new AlertRuleMutationError({
+        kind: 'unprocessable',
+        error: 'invalid rule',
+        detail: 'threshold is required',
+      }).message,
+    ).toBe('invalid rule: threshold is required')
+    expect(new AlertRuleMutationError({ kind: 'network', message: 'offline' }).message).toBe(
+      'offline',
+    )
+    expect(new AlertRuleMutationError({ kind: 'unauthorized' }).message).toBe(
+      'API request failed: unauthorized',
+    )
+  })
+
+  it('reports a malformed rule update response', async () => {
+    const rule = makeRule()
+    server.use(
+      ok('getAlertRules', [rule]),
+      http.put('*/api/v1/alert-rules/:rule_id', () => new HttpResponse(null, { status: 200 })),
+    )
+    renderWithProviders(<RulesPage />, { route: '/alerts/rules' })
+    await settle()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit replication-lag' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save rule' }))
+    await settle()
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/API response did not contain data/i)
+  })
+
+  it('reports a network failure while updating a rule', async () => {
+    const rule = makeRule()
+    server.use(
+      ok('getAlertRules', [rule]),
+      http.put('*/api/v1/alert-rules/:rule_id', () => HttpResponse.error()),
+    )
+    renderWithProviders(<RulesPage />, { route: '/alerts/rules' })
+    await settle()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit replication-lag' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save rule' }))
+    await settle()
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/network|fetch|failed/i)
   })
 
   it('UI-ALERT-025 invalidates the rules query after a successful save', async () => {

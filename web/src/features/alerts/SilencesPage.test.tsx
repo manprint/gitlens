@@ -2,6 +2,7 @@ import { act, fireEvent, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { http, HttpResponse } from 'msw'
 
+import { SilenceMutationError } from '@/api/silences'
 import type { Alert, Silence } from '@/lib/alerts'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { assertMatchesContract } from '@/test/contract'
@@ -179,6 +180,73 @@ describe('SilencesPage', () => {
     expect(screen.getByText('Silence created.')).toBeInTheDocument()
   })
 
+  it('formats every silence mutation failure category', () => {
+    expect(
+      new SilenceMutationError({
+        kind: 'unprocessable',
+        error: 'invalid silence',
+        detail: 'reason is required',
+      }).message,
+    ).toBe('invalid silence: reason is required')
+    expect(new SilenceMutationError({ kind: 'network', message: 'offline' }).message).toBe(
+      'offline',
+    )
+    expect(new SilenceMutationError({ kind: 'unauthorized' }).message).toBe(
+      'API request failed: unauthorized',
+    )
+  })
+
+  it('reports a malformed create response', async () => {
+    server.use(
+      ok('getSilences', []),
+      ok('getAlerts', []),
+      http.post('*/api/v1/silences', () => new HttpResponse(null, { status: 201 })),
+    )
+    renderWithProviders(<SilencesPage />, { route: '/alerts/silences' })
+    await settle()
+
+    openEditor()
+    fillMatcherAndReason()
+    fireEvent.click(screen.getByRole('button', { name: 'Create silence' }))
+    await settle()
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/API response did not contain data/i)
+  })
+
+  it('reports a network failure while creating a silence', async () => {
+    server.use(
+      ok('getSilences', []),
+      ok('getAlerts', []),
+      http.post('*/api/v1/silences', () => HttpResponse.error()),
+    )
+    renderWithProviders(<SilencesPage />, { route: '/alerts/silences' })
+    await settle()
+
+    openEditor()
+    fillMatcherAndReason()
+    fireEvent.click(screen.getByRole('button', { name: 'Create silence' }))
+    await settle()
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/network|fetch|failed/i)
+  })
+
+  it('reports a server failure while creating a silence', async () => {
+    server.use(
+      ok('getSilences', []),
+      ok('getAlerts', []),
+      status('createSilence', 500, { error: 'silence unavailable', detail: 'storage down' }),
+    )
+    renderWithProviders(<SilencesPage />, { route: '/alerts/silences' })
+    await settle()
+
+    openEditor()
+    fillMatcherAndReason()
+    fireEvent.click(screen.getByRole('button', { name: 'Create silence' }))
+    await settle()
+
+    expect(screen.getByRole('alert')).toHaveTextContent('silence unavailable: storage down')
+  })
+
   it('UI-ALERT-035 confirms deletion and refreshes the list', async () => {
     const silence = makeSilence()
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
@@ -198,6 +266,40 @@ describe('SilencesPage', () => {
     )
     expect(screen.getByText(`Ended silence ${silence.silence_id}.`)).toBeInTheDocument()
     expect(screen.getByText('No stored silences')).toBeInTheDocument()
+  })
+
+  it('reports a network failure while deleting a silence', async () => {
+    const silence = makeSilence()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    server.use(
+      ok('getSilences', [silence]),
+      ok('getAlerts', []),
+      http.delete('*/api/v1/silences/:id', () => HttpResponse.error()),
+    )
+    renderWithProviders(<SilencesPage />, { route: '/alerts/silences' })
+    await settle()
+
+    fireEvent.click(screen.getByRole('button', { name: `End silence ${silence.silence_id}` }))
+    await settle()
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/network|fetch|failed/i)
+  })
+
+  it('reports a server failure while deleting a silence', async () => {
+    const silence = makeSilence()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    server.use(
+      ok('getSilences', [silence]),
+      ok('getAlerts', []),
+      status('deleteSilence', 500, { error: 'silence delete failed', detail: 'storage down' }),
+    )
+    renderWithProviders(<SilencesPage />, { route: '/alerts/silences' })
+    await settle()
+
+    fireEvent.click(screen.getByRole('button', { name: `End silence ${silence.silence_id}` }))
+    await settle()
+
+    expect(screen.getByRole('alert')).toHaveTextContent('silence delete failed: storage down')
   })
 
   it('UI-ALERT-036 makes clear that suppression does not resolve an alert', async () => {

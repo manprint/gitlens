@@ -351,6 +351,20 @@ describe('FindingsPage', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 
+  it('reports a network failure while muting the finding', async () => {
+    server.use(http.post('*/api/v1/findings/:findingId/mute', () => HttpResponse.error()))
+    await renderFindings()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mute finding' }))
+    const dialog = screen.getByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'maintenance' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Mute finding' }))
+    await settleMutation()
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/could not mute the finding/i)
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
   it('UI-FIND-024 unmute issues a DELETE and restores the previous state', async () => {
     let deleteCalled = false
     await renderFindings(
@@ -389,6 +403,21 @@ describe('FindingsPage', () => {
         ),
       ),
     )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Unmute finding' }))
+    await settleMutation()
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/could not remove the mute/i)
+    expect(screen.getByText('Reason: maintenance')).toBeInTheDocument()
+  })
+
+  it('reports a network failure while unmuting the finding', async () => {
+    await renderFindings(
+      [finding({ state: 'muted', muted_until: mutedUntil, mute_reason: 'maintenance' })],
+      [rule()],
+      '/findings?state=all',
+    )
+    server.use(http.delete('*/api/v1/findings/:findingId/mute', () => HttpResponse.error()))
 
     fireEvent.click(screen.getByRole('button', { name: 'Unmute finding' }))
     await settleMutation()
