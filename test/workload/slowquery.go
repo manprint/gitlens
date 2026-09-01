@@ -31,12 +31,12 @@ func slowQuery(ctx context.Context, pool *pgxpool.Pool, sleepDuration time.Durat
 			defer conn.Release()
 
 			// pg_stat_statements normalizes literal constants to $N. The
-			// parameter-free plan-safe variant intentionally uses only stable
-			// functions so the UI EXPLAIN acceptance test can execute it.
+			// parameter-free plan-safe variant intentionally uses a stable
+			// catalog query so the UI EXPLAIN acceptance test can execute it.
 			query := "SELECT pg_sleep($1)"
 			args := []any{sleepDuration.Seconds()}
 			if planSafe {
-				query = "SELECT current_database(), current_user"
+				query = "SELECT count(*) FROM pg_catalog.pg_proc"
 				args = nil
 			}
 			_, err = conn.Exec(ctx, query, args...)
