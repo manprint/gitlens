@@ -2,7 +2,10 @@ import { FleetPage } from '@/features/fleet/FleetPage'
 import { ClusterPage } from '@/features/cluster/ClusterPage'
 import AshPageComponent from '@/features/ash/AshPage'
 import InstancePage from '@/features/instance/InstancePage'
+import { useInstance } from '@/api/queries'
+import ExplainPanel from '@/features/queries/ExplainPanel'
 import QueryListPageComponent from '@/features/queries/QueryListPage'
+import { useParams } from 'react-router-dom'
 
 interface PlaceholderPageProps {
   surface: string
@@ -38,7 +41,20 @@ export function QueryInspectorPage() {
 }
 
 export function QueryDetailPage() {
-  return <PlaceholderPage surface="Query detail and plan history" />
+  const { instanceId, queryid } = useParams<{ instanceId: string; queryid: string }>()
+  const instanceQuery = useInstance(instanceId ?? '')
+
+  if (!instanceId || !queryid) {
+    return <PlaceholderPage surface="Query detail and plan history" />
+  }
+
+  return (
+    <ExplainPanel
+      currentTier={instanceQuery.data?.perm_tier ?? 'T0'}
+      instanceId={instanceId}
+      queryid={queryid}
+    />
+  )
 }
 
 export function LocksPage() {

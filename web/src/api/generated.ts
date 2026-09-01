@@ -1028,8 +1028,7 @@ export interface components {
         };
         /** @description Per-kind arguments: explain requires queryid and may include datname or analyze; cancel and terminate require pid; pgstattuple requires schema and relation. Query text is never sent to this API. */
         CommandArgs: {
-            /** Format: int64 */
-            queryid?: number;
+            queryid?: number | string;
             datname?: string;
             analyze?: boolean;
             /** Format: int32 */

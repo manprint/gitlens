@@ -18,7 +18,10 @@ import {
 } from '@/lib/commands'
 
 export type CommandKind = components['schemas']['CreateCommandRequest']['kind']
-export type CommandArgs = components['schemas']['CommandArgs']
+export type CommandArgs = Omit<components['schemas']['CommandArgs'], 'queryid'> & {
+  /** Keep int64 query identifiers lossless across the browser/API boundary. */
+  queryid?: number | string
+}
 export type GeneratedCommandResponse = components['schemas']['CommandResponse']
 export type CommandResponse = Omit<GeneratedCommandResponse, 'state'> & { state: CommandState }
 export type CreateCommandResponse = components['schemas']['CreateCommandResponse']

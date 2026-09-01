@@ -440,7 +440,10 @@ components:
       type: object
       additionalProperties: false
       properties:
-        queryid: { type: integer, format: int64 }
+        queryid:
+          oneOf:
+            - { type: integer, format: int64 }
+            - { type: string, pattern: '^-?[0-9]+$' }
         datname: { type: string }
         analyze: { type: boolean }
         pid: { type: integer, format: int32 }
