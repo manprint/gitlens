@@ -540,7 +540,7 @@ duration, and never ages a snapshot against the current clock.
 
 Phase 12 boundary verification produced durable timing evidence for the full
 non-E2E gate and its one scheduled E2E run; the phase is complete and the next
-unit is sub-phase 13.1.
+unit is sub-phase 13.2.
 
 `docs/LIMITS.md` was also touched by sub-phase 2.7.
 
