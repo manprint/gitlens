@@ -373,24 +373,24 @@ test('SYS-UI-008: blocking tree shows the lock root and child', async ({
   const page = signedInPage
   const { instance } = await fleetContext(api)
   const selectedInstanceID = instanceID(instance)
+  const locksURL = `/api/v1/locks?instance_id=${encodeURIComponent(selectedInstanceID)}`
   let lastLocksResponse = ''
-  page.on('response', async (response) => {
-    if (!response.url().includes('/api/v1/locks')) return
-    try {
-      lastLocksResponse = await response.text()
-    } catch {
-      // The response may already be disposed when the page is torn down.
-    }
-  })
-  await page.goto(`/instances/${selectedInstanceID}/locks`)
-  await expect(page).toHaveURL(new RegExp(`/instances/${selectedInstanceID}/locks$`))
-  await expect(page.getByRole('heading', { name: 'Locks and activity' })).toBeVisible()
   try {
     await expect
-      .poll(() => page.getByRole('treeitem').count(), {
-        timeout: 60_000,
-        intervals: [1_000, 3_000, 5_000],
-      })
+      .poll(
+        async () => {
+          const response = await api.get(locksURL)
+          lastLocksResponse = await response.text()
+          if (!response.ok()) return 0
+          try {
+            const payload = JSON.parse(lastLocksResponse)
+            return Array.isArray(payload.nodes) ? payload.nodes.length : 0
+          } catch {
+            return 0
+          }
+        },
+        { timeout: 60_000, intervals: [1_000, 3_000, 5_000] },
+      )
       .toBeGreaterThan(1)
   } catch (error) {
     if (lastLocksResponse) {
@@ -401,6 +401,15 @@ test('SYS-UI-008: blocking tree shows the lock root and child', async ({
     }
     throw error
   }
+  await page.goto(`/instances/${selectedInstanceID}/locks`)
+  await expect(page).toHaveURL(new RegExp(`/instances/${selectedInstanceID}/locks$`))
+  await expect(page.getByRole('heading', { name: 'Locks and activity' })).toBeVisible()
+  await expect
+    .poll(() => page.getByRole('treeitem').count(), {
+      timeout: 60_000,
+      intervals: [1_000, 3_000, 5_000],
+    })
+    .toBeGreaterThan(1)
   const root = page.getByRole('treeitem').first()
   await expect(root).toContainText(/blocking session/i)
   await expect(root.getByRole('group')).toBeVisible()

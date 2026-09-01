@@ -89,7 +89,7 @@ func prepareUIScenario(e *scenario.Env, id string) (chan error, error) {
 			return nil, fmt.Errorf("stop pglens-agent: %w", err)
 		}
 	case "SYS-UI-008":
-		return startUIWorkload(e, "pg", "lock-storm", "--sessions", "2", "--duration", "1s", "--hold", "15s"), nil
+		return startUIWorkload(e, "pg", "lock-storm", "--sessions", "2", "--duration", "1s", "--hold", "45s"), nil
 	case "SYS-UI-006":
 		return startUIWorkload(e, "pg-primary", "slow-query", "--sleep", "0s", "--count", "20", "--plan-safe"), nil
 	case "SYS-UI-007":
