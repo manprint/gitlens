@@ -11,6 +11,8 @@ import type { paths } from './generated'
 import { qk } from './keys'
 import { REFRESH, type RefreshPolicy } from './policy'
 
+export { useCommand } from './commands'
+
 type GetPath = keyof paths
 type GetOperation<Path extends GetPath> = NonNullable<paths[Path]['get']>
 type OperationParameters<Path extends GetPath> = GetOperation<Path>['parameters']
@@ -459,14 +461,6 @@ export function useAdvisorRules() {
     policy: REFRESH.findings,
     queryFn: () => getApi(() => client.GET('/api/v1/advisor/rules')),
     queryKey: qk.advisorRules(),
-  })
-}
-
-export function useCommand(id: string) {
-  return useApiQuery({
-    policy: REFRESH.command,
-    queryFn: () => getApi(() => client.GET('/api/v1/commands/{id}', { params: { path: { id } } })),
-    queryKey: qk.command(id),
   })
 }
 
