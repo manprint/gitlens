@@ -14,6 +14,7 @@ targets:
       max: 10
 checks:
   activity: { interval: 5s }
+  locks: { interval: 5s }
   database_stats: { interval: 5s }
   settings: { interval: 5s }
   archiver: { interval: 5s }

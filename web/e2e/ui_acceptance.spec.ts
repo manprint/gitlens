@@ -242,7 +242,22 @@ test('SYS-UI-006: plan-only execution is audited without query text', async ({ s
     }
   })
 
-  await page.goto(`/instances/${instanceID(instance)}/queries`)
+  const selectedInstanceID = instanceID(instance)
+  await expect
+    .poll(
+      async () => {
+        const response = await api.get(
+          `/api/v1/statements?instance_id=${encodeURIComponent(selectedInstanceID)}&limit=50`,
+        )
+        if (!response.ok()) return 0
+        const payload = await response.json()
+        return Array.isArray(payload.statements) ? payload.statements.length : 0
+      },
+      { timeout: 90_000, intervals: [1_000, 3_000, 5_000] },
+    )
+    .toBeGreaterThan(0)
+
+  await page.goto(`/instances/${selectedInstanceID}/queries`)
   await expect(page.getByRole('heading', { name: 'Query inspector' })).toBeVisible()
   const queryLink = page.locator('a[href*="/queries/"]').first()
   await expect(queryLink).toBeVisible({ timeout: 60_000 })
