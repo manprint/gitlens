@@ -520,8 +520,11 @@ func (h *Harness) composeFiles() []string {
 func (h *Harness) composeUp() error {
 	args := append([]string{"compose", "-p", h.projectName}, h.composeFiles()...)
 	args = append(args, "up", "-d")
-	if h.extraFile != "" && !h.ui {
-		args = append(args, "--build", "--scale", "pglens-server=2")
+	if h.extraFile != "" {
+		args = append(args, "--build")
+		if !h.ui {
+			args = append(args, "--scale", "pglens-server=2")
+		}
 	}
 	cmd := exec.Command("docker", args...)
 	cmd.Dir = h.composeDir
