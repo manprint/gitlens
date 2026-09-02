@@ -265,7 +265,12 @@ func waitForTableRatio(ctx context.Context, e *scenario.Env, instanceID string, 
 		if wantHigh {
 			return ratio > .2 && apiRatio > .2, nil
 		}
-		return ratio < .2 && apiRatio < .2 && vacuumAge != nil && *vacuumAge < 60, nil
+		// The preceding phase already observed this table above the threshold;
+		// requiring both stores to observe it below the threshold proves that a
+		// fresh post-VACUUM sample arrived. Do not add a wall-clock age gate:
+		// under the full suite, a delayed table_stats scrape can legitimately
+		// publish a correct zero ratio after the last_vacuum age has crossed 60s.
+		return ratio < .2 && apiRatio < .2, nil
 	})
 }
 

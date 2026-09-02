@@ -22,8 +22,9 @@ type Envelope struct {
 
 type Instance struct {
 	InstanceID      string     `json:"instance_id"`
-	ClusterID       string     `json:"cluster_id"`        // decimal string (D18)
-	ClusterIDSource string     `json:"cluster_id_source"` // system_identifier | manual
+	TargetName      string     `json:"target_name,omitempty"` // logical agent target name, useful when addr is shared
+	ClusterID       string     `json:"cluster_id"`            // decimal string (D18)
+	ClusterIDSource string     `json:"cluster_id_source"`     // system_identifier | manual
 	Addr            string     `json:"addr"`
 	Port            int        `json:"port"`
 	PGVersion       int        `json:"pg_version"`

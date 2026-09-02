@@ -374,8 +374,8 @@ func TestStatStatementsCheck_Scrape_Happy(t *testing.T) {
 			q2 := "SELECT 2"
 			return &mockRows{
 				rows: []([]any){
-					{int64(1), int64(100), float64(10.5), int64(1000), int64(5000), int64(500), int64(0), &q1},
-					{int64(2), int64(200), float64(20.5), int64(2000), int64(15000), int64(1000), int64(512), &q2},
+					{int64(1), int64(100), float64(10.5), int64(1000), int64(5000), int64(500), int64(0), &q1, false},
+					{int64(2), int64(200), float64(20.5), int64(2000), int64(15000), int64(1000), int64(512), &q2, false},
 				},
 			}, nil
 		},
@@ -454,16 +454,16 @@ func TestStatStatementsCheck_Scrape_CycleAdvancesAndForgetsStaleRetained(t *test
 	// even though it is still present in `in`.
 	rounds := [][][]any{
 		{
-			{int64(1), int64(100), float64(100), int64(1), int64(0), int64(0), int64(0), (*string)(nil)},
+			{int64(1), int64(100), float64(100), int64(1), int64(0), int64(0), int64(0), (*string)(nil), false},
 		},
 		{
-			{int64(1), int64(100), float64(100), int64(1), int64(0), int64(0), int64(0), (*string)(nil)},
-			{int64(2), int64(200), float64(200), int64(1), int64(0), int64(0), int64(0), (*string)(nil)},
+			{int64(1), int64(100), float64(100), int64(1), int64(0), int64(0), int64(0), (*string)(nil), false},
+			{int64(2), int64(200), float64(200), int64(1), int64(0), int64(0), int64(0), (*string)(nil), false},
 		},
 		{
-			{int64(1), int64(100), float64(100), int64(1), int64(0), int64(0), int64(0), (*string)(nil)},
-			{int64(2), int64(200), float64(200), int64(1), int64(0), int64(0), int64(0), (*string)(nil)},
-			{int64(3), int64(300), float64(300), int64(1), int64(0), int64(0), int64(0), (*string)(nil)},
+			{int64(1), int64(100), float64(100), int64(1), int64(0), int64(0), int64(0), (*string)(nil), false},
+			{int64(2), int64(200), float64(200), int64(1), int64(0), int64(0), int64(0), (*string)(nil), false},
+			{int64(3), int64(300), float64(300), int64(1), int64(0), int64(0), int64(0), (*string)(nil), false},
 		},
 	}
 	call := 0

@@ -403,7 +403,8 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 		}
 		env.Instances = append(env.Instances, wire.Instance{
 			InstanceID:      mgr.InstanceID().String(), //nolint:contextcheck // Manager caches this at connect time; the accessor takes no context
-			ClusterID:       mgr.ClusterID().String(),  //nolint:contextcheck // same as above
+			TargetName:      mgr.TargetName(),
+			ClusterID:       mgr.ClusterID().String(), //nolint:contextcheck // same as above
 			ClusterIDSource: "system_identifier",
 			Addr:            mgr.Addr(),
 			Port:            mgr.Port(),

@@ -82,12 +82,14 @@ ranked AS (
 )
 SELECT s.queryid, s.calls, s.total_exec_time, s.rows,
        s.shared_blks_hit, s.shared_blks_read, s.wal_bytes,
-       LEFT(s.query, 8192) AS query
+       LEFT(s.query, 8192) AS query,
+       (SELECT count(*) > %d FROM pg_stat_statements, me
+         WHERE dbid = me.oid AND queryid IS NOT NULL) AS prefilter_truncated
   FROM pg_stat_statements s
   JOIN ranked r USING (queryid), me
  WHERE s.dbid = me.oid
  ORDER BY s.queryid
-`, sqlPrefilterLimit, sqlPrefilterLimit)
+`, sqlPrefilterLimit, sqlPrefilterLimit, sqlPrefilterLimit)
 
 	rows, err := conn.Query(ctx, query)
 	if err != nil {
@@ -100,21 +102,22 @@ SELECT s.queryid, s.calls, s.total_exec_time, s.rows,
 	defer rows.Close()
 
 	type row struct {
-		QueryID       int64
-		Calls         int64
-		TotalExecTime float64
-		Rows          int64
-		SharedBlksHit int64
-		SharedBlksRd  int64
-		WALBytes      int64
-		Query         *string
+		QueryID            int64
+		Calls              int64
+		TotalExecTime      float64
+		Rows               int64
+		SharedBlksHit      int64
+		SharedBlksRd       int64
+		WALBytes           int64
+		Query              *string
+		PrefilterTruncated bool
 	}
 
 	var parsed []row
 	for rows.Next() {
 		var r row
 		if err := rows.Scan(&r.QueryID, &r.Calls, &r.TotalExecTime, &r.Rows,
-			&r.SharedBlksHit, &r.SharedBlksRd, &r.WALBytes, &r.Query); err != nil {
+			&r.SharedBlksHit, &r.SharedBlksRd, &r.WALBytes, &r.Query, &r.PrefilterTruncated); err != nil {
 			return Result{}, err
 		}
 		parsed = append(parsed, r)
@@ -167,6 +170,13 @@ SELECT s.queryid, s.calls, s.total_exec_time, s.rows,
 	// check's own retention state stays bounded too, not just its output.
 	selected, truncated := selector.Select(cycle, candidates)
 	selector.Forget(cycle)
+	// The SQL pre-filter deliberately bounds the rows sent over the wire, so
+	// the selector cannot observe candidates discarded by that limit. Carry
+	// the count-based signal from SQL through to the public result instead of
+	// presenting a partial view as complete.
+	for _, r := range parsed {
+		truncated = truncated || r.PrefilterTruncated
+	}
 	queryTexts := make(map[int64]string)
 
 	var metrics []pgtype.Metric

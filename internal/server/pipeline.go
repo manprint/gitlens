@@ -134,6 +134,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	// existing at all (topology.Engine's own TestEngine_OrphanStandby: an
 	// edge object with a resolvable target is required to start its clock).
 	addrToInstance := make(map[string]uuid.UUID, len(env.Instances)*2)
+	targetNameToInstance := make(map[string]uuid.UUID, len(env.Instances))
 	endpointKey := func(addr string, port int) string {
 		if port > 0 {
 			return addr + ":" + strconv.Itoa(port)
@@ -150,6 +151,11 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 				addrToInstance[endpointKey(inst.Addr, inst.Port)] = id
 			}
 		}
+		if inst.TargetName != "" {
+			if id, err := uuid.Parse(inst.InstanceID); err == nil {
+				targetNameToInstance[inst.TargetName] = id
+			}
+		}
 		if inst.Role == "primary" {
 			if id, err := uuid.Parse(inst.InstanceID); err == nil {
 				primaryID = id
@@ -159,6 +165,14 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	}
 	dbAddrCache := make(map[string]uuid.UUID)
 	resolveAddr := func(ctx context.Context, cidDB int64, addr string, port int) (uuid.UUID, bool) {
+		// PostgreSQL may report the upstream's logical/container hostname
+		// while the agent connects through localhost plus a published port.
+		// TargetName is unambiguous within an agent envelope and must win over
+		// the single-primary fallback below, otherwise a cascading standby is
+		// incorrectly attached directly to the primary.
+		if id, ok := targetNameToInstance[addr]; ok {
+			return id, true
+		}
 		key := endpointKey(addr, port)
 		if id, ok := addrToInstance[key]; ok {
 			return id, true

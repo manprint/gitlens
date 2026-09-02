@@ -561,6 +561,14 @@ func (m *Manager) Database() string {
 	return m.target.name
 }
 
+// TargetName returns the stable logical name from the agent configuration.
+// It is carried in envelopes so the server can resolve replication receiver
+// hostnames such as pg-standby-a even when the agent connects through a
+// shared address with per-target ports.
+func (m *Manager) TargetName() string {
+	return m.target.name
+}
+
 // Addr and Port return the target's host and port, parsed from its DSN.
 // Used to populate wire.Instance.Addr/Port — previously never set by any
 // caller, which left the server's duplicate-instance detection
