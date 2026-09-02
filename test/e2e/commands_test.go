@@ -346,10 +346,19 @@ func runCommandExpiry(ctx context.Context, e *scenario.Env) error {
 }
 
 func commandInstance(ctx context.Context, e *scenario.Env, addr string) (string, error) {
+	pg := e.PG(addr)
+	pgConfig := pg.Config()
+	host := pgConfig.ConnConfig.Host
+	port := pgConfig.ConnConfig.Port
 	deadline := time.Now().Add(2 * time.Minute)
 	for time.Now().Before(deadline) {
 		var id string
-		err := e.DB.QueryRow(ctx, "SELECT instance_id::text FROM instances WHERE addr=$1 OR addr LIKE '%' || $1 || '%' ORDER BY last_seen DESC LIMIT 1", addr).Scan(&id)
+		err := e.DB.QueryRow(ctx, `
+			SELECT instance_id::text
+			  FROM instances
+			 WHERE (addr=$1 AND port=$2) OR addr=$3 OR addr LIKE '%' || $3 || '%'
+			 ORDER BY last_seen DESC
+			 LIMIT 1`, host, port, addr).Scan(&id)
 		if err == nil {
 			return id, nil
 		}

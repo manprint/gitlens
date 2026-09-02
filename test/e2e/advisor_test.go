@@ -228,6 +228,10 @@ VALUES ($1::uuid,'default',$2,$3::uuid,'advisor-misconfigured',5432,$4,'primary'
 }
 
 func advisorInstanceID(ctx context.Context, e *scenario.Env, addr string) (string, error) {
+	pg := e.PG(addr)
+	pgConfig := pg.Config()
+	host := pgConfig.ConnConfig.Host
+	port := pgConfig.ConnConfig.Port
 	deadline := time.NewTimer(advisorWait)
 	defer deadline.Stop()
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -235,7 +239,12 @@ func advisorInstanceID(ctx context.Context, e *scenario.Env, addr string) (strin
 	var lastErr error
 	for {
 		var id string
-		err := e.DB.QueryRow(ctx, `SELECT instance_id::text FROM instances WHERE addr=$1 ORDER BY last_seen DESC LIMIT 1`, addr).Scan(&id)
+		err := e.DB.QueryRow(ctx, `
+			SELECT instance_id::text
+			  FROM instances
+			 WHERE (addr=$1 AND port=$2) OR addr=$3
+			 ORDER BY last_seen DESC
+			 LIMIT 1`, host, port, addr).Scan(&id)
 		if err == nil {
 			return id, nil
 		}

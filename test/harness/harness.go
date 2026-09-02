@@ -423,9 +423,14 @@ buffer:
 %s
 checks:
   activity: { interval: 5s }
+  locks: { interval: 5s }
   database_stats: { interval: 5s }
   replication_slots: { interval: 5s }
+  settings: { interval: 5s }
+  archiver: { interval: 5s }
   table_stats: { interval: 5s }
+  index_stats: { interval: 5s }
+  bloat_estimate: { interval: 10s }
   # Keep the non-UI cadence aligned with the cardinality workload's 65s
   # rotations. UI binary runs override it to 10s above so short workloads
   # become observable within the browser acceptance polling window.
