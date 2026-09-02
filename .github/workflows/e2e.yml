@@ -18,7 +18,9 @@ jobs:
   e2e:
     name: Full E2E / ${{ matrix.agent_mode }}
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    # The complete Go suite has its own 90-minute timeout; leave runner
+    # headroom for image setup and artifact collection.
+    timeout-minutes: 100
     strategy:
       fail-fast: false
       matrix:
