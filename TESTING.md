@@ -653,7 +653,7 @@ Distinzione centrale, che tiene la suite veloce **e** vera:
 | **Fixture** | `*.fixture.spec.ts` | dump TimescaleDB deterministico, ripristinato prima della suite; clock del server fissato | ogni PR | rendering, interazioni, form, permessi UI, a11y, visual regression |
 | **Live** | `*.live.spec.ts` | stack L3 reale, scenari eseguiti in tempo reale | PR (smoke) + nightly (full) | il percorso completo evento → agent → server → UI |
 
-Il **fixture dataset** (`test/fixtures/dataset/`) è generato da una esecuzione L3 reale e committato come dump compresso (~5MB). Contiene di proposito: un cluster sano, un cluster con lag, un failover storico, uno slot inattivo, un agent down, una serie con un gap, query con testo lungo, un cluster in stato troncato per budget. Rigenerabile con `make fixture-dataset`.
+Il **fixture dataset** (`test/fixtures/dataset/`) è generato da una esecuzione L3 reale e committato come dump compresso (~5MB). Contiene di proposito: un cluster sano, un cluster con lag, un failover storico, uno slot inattivo, un agent down, una serie con un gap, query con testo lungo, un cluster in stato troncato per budget. Se il dataset cambia, il dump aggiornato va verificato con la suite frontend e committato insieme ai relativi test.
 
 Questo dà il meglio dei due mondi: la maggior parte dei test è deterministica e finisce in secondi; una minoranza dimostra che la catena reale funziona davvero.
 
@@ -1022,7 +1022,7 @@ jobs:
       - uses: actions/setup-go@v5
         with: { go-version: '1.26', cache: true }
       - uses: golangci/golangci-lint-action@v6
-      - run: make lint-web
+      - run: make web-lint
 
   unit-go:                       # L1
     needs: changes
@@ -1097,20 +1097,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: '22', cache: 'pnpm', cache-dependency-path: web/pnpm-lock.yaml }
-      - run: make build-images
-      - run: make e2e-stack-up            # stack L3 + scenariod + web
+      - run: make web-install
       - run: pnpm exec playwright install --with-deps chromium
         working-directory: web
-      - run: pnpm exec playwright test --project=chromium
-        working-directory: web
-        env: { APP_URL: 'http://localhost:3000', SCENARIOD_URL: 'http://localhost:9900' }
+      - run: make test-ui-e2e
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: playwright-report
           path: test/e2e/_artifacts/ui/     # include le trace
-      - run: make e2e-stack-down
-        if: always()
 ```
 
 ### 11.3 Note operative
@@ -1132,24 +1127,18 @@ make test                # L1 (default: veloce, si usa in loop mentre si svilupp
 make test-integration    # L2, PG_VERSION=16 di default
 make test-e2e            # L3 smoke
 make test-e2e-full       # L3 completo (lungo)
+make ci-local             # gate Go + web rapidi
+make web-install          # installazione frontend riproducibile
 make web-test            # L4/L2 UI con Vitest
 make web-coverage-gate   # L4/L2 UI con floor V8
 make test-ui-e2e         # L5, browser reale contro lo stack locale
-make test-all            # tutto, come su main
-
-make e2e-stack-up        # alza lo stack e lo lascia in piedi per esplorazione manuale
-make e2e-stack-down
-make scenario ID=SYS-REPL-001   # esegue uno scenario sullo stack attivo
-make ui                  # Playwright in modalità UI interattiva
-make trace F=…           # apre una trace Playwright scaricata da CI
 
 make golden              # rigenera i golden file
-make fixture-dataset     # rigenera il dump deterministico per L5 fixture mode
 make coverage            # report HTML
 make lint
 ```
 
-**Flusso di sviluppo consigliato:** `make e2e-stack-up` una volta, poi `make scenario ID=…` e `make ui` per lavorare contro uno stack vivo, senza ripagare l'avvio a ogni iterazione.
+**Flusso di sviluppo consigliato:** usa `make ci-local` per il gate rapido; esegui `make test-ui-e2e` quando una modifica coinvolge il percorso browser o alla chiusura di una fase UI. La suite L3 completa resta separata perché è intenzionalmente lunga.
 
 ---
 
