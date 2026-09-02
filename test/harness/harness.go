@@ -425,7 +425,7 @@ checks:
   table_stats: { interval: 5s }
   index_stats: { interval: 5s }
   bloat_estimate: { interval: 10s }
-	  # Keep command probes observable within their bounded polling window.
+  # Keep command probes observable within their bounded polling window.
   stat_statements: { interval: %s, top_n: %d }
 `, h.serverPort, agentBootstrapToken, identityPath, bufferPath, targetsYAML, statStatementsInterval, statStatementsTopN)
 	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
