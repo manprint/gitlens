@@ -218,20 +218,26 @@ func deleteMaintenanceRows(ctx context.Context, pg *pgxpool.Pool) error {
 	if _, err := pg.Exec(ctx, `DELETE FROM `+maintenanceTable+` WHERE id <= 120000`); err != nil {
 		return fmt.Errorf("delete maintenance rows: %w", err)
 	}
-	if _, err := pg.Exec(ctx, `ANALYZE `+maintenanceTable); err != nil {
-		return fmt.Errorf("analyze deleted maintenance table: %w", err)
-	}
+	// Leave the dead tuples visible to pg_stat_user_tables. Running ANALYZE
+	// immediately after the DELETE can race with the stats collector and make
+	// n_dead_tup read as zero before table_stats has observed the maintenance
+	// event, turning the high-ratio phase into a timeout.
 	return nil
 }
 
 func waitForTableRatio(ctx context.Context, e *scenario.Env, instanceID string, wantHigh bool) error {
+	attempt := 0
 	return pollMaintenance(ctx, time.Second, func(ctx context.Context) (bool, error) {
+		attempt++
 		var ratio float64
 		var vacuumAge *float64
 		err := e.DB.QueryRow(ctx, `SELECT dead_tuple_ratio,last_vacuum_age_seconds
 			FROM metrics_tables WHERE instance_id=$1 AND schemaname='public' AND relname=$2
 			ORDER BY ts DESC LIMIT 1`, instanceID, maintenanceTable).Scan(&ratio, &vacuumAge)
 		if errors.Is(err, pgx.ErrNoRows) {
+			if attempt%30 == 0 {
+				e.T.Logf("table ratio poll: phase=%s db row not observed after %d attempts", tableRatioPhase(wantHigh), attempt)
+			}
 			return false, nil
 		}
 		if err != nil {
@@ -249,11 +255,25 @@ func waitForTableRatio(ctx context.Context, e *scenario.Env, instanceID string, 
 		if !ok {
 			return false, nil
 		}
+		if attempt%30 == 0 {
+			age := "nil"
+			if vacuumAge != nil {
+				age = fmt.Sprintf("%.1fs", *vacuumAge)
+			}
+			e.T.Logf("table ratio poll: phase=%s db=%.3f api=%.3f vacuum_age=%s attempt=%d", tableRatioPhase(wantHigh), ratio, apiRatio, age, attempt)
+		}
 		if wantHigh {
 			return ratio > .2 && apiRatio > .2, nil
 		}
 		return ratio < .2 && apiRatio < .2 && vacuumAge != nil && *vacuumAge < 60, nil
 	})
+}
+
+func tableRatioPhase(wantHigh bool) string {
+	if wantHigh {
+		return "after-delete"
+	}
+	return "after-vacuum"
 }
 
 func waitForBloat(ctx context.Context, e *scenario.Env, instanceID string) error {

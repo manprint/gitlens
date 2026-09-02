@@ -133,13 +133,22 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	// edge back to it — exactly the edge orphan-standby detection depends on
 	// existing at all (topology.Engine's own TestEngine_OrphanStandby: an
 	// edge object with a resolvable target is required to start its clock).
-	addrToInstance := make(map[string]uuid.UUID, len(env.Instances))
+	addrToInstance := make(map[string]uuid.UUID, len(env.Instances)*2)
+	endpointKey := func(addr string, port int) string {
+		if port > 0 {
+			return addr + ":" + strconv.Itoa(port)
+		}
+		return addr
+	}
 	var primaryID uuid.UUID
 	primaryCount := 0
 	for _, inst := range env.Instances {
 		if inst.Addr == "" {
 		} else if id, err := uuid.Parse(inst.InstanceID); err == nil {
 			addrToInstance[inst.Addr] = id
+			if inst.Port > 0 {
+				addrToInstance[endpointKey(inst.Addr, inst.Port)] = id
+			}
 		}
 		if inst.Role == "primary" {
 			if id, err := uuid.Parse(inst.InstanceID); err == nil {
@@ -149,18 +158,25 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		}
 	}
 	dbAddrCache := make(map[string]uuid.UUID)
-	resolveAddr := func(ctx context.Context, cidDB int64, addr string) (uuid.UUID, bool) {
-		if id, ok := addrToInstance[addr]; ok {
+	resolveAddr := func(ctx context.Context, cidDB int64, addr string, port int) (uuid.UUID, bool) {
+		key := endpointKey(addr, port)
+		if id, ok := addrToInstance[key]; ok {
 			return id, true
 		}
-		if id, ok := dbAddrCache[addr]; ok {
+		if id, ok := dbAddrCache[key]; ok {
 			return id, true
 		}
 		var id uuid.UUID
-		if err := tx.QueryRow(ctx, `SELECT instance_id FROM instances WHERE cluster_id=$1 AND addr=$2 LIMIT 1`, cidDB, addr).Scan(&id); err != nil {
+		query := `SELECT instance_id FROM instances WHERE cluster_id=$1 AND addr=$2 LIMIT 1`
+		args := []any{cidDB, addr}
+		if port > 0 {
+			query = `SELECT instance_id FROM instances WHERE cluster_id=$1 AND addr=$2 AND port=$3 LIMIT 1`
+			args = append(args, port)
+		}
+		if err := tx.QueryRow(ctx, query, args...).Scan(&id); err != nil {
 			return uuid.UUID{}, false
 		}
-		dbAddrCache[addr] = id
+		dbAddrCache[key] = id
 		return id, true
 	}
 
@@ -203,7 +219,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		// happened.
 		var topoEdges []topology.Edge
 		for _, we := range inst.TopologyEdges {
-			toID, ok := resolveAddr(ctx, cidDB, we.To)
+			toID, ok := resolveAddr(ctx, cidDB, we.To, we.Port)
 			if !ok && inst.Role == "standby" && primaryCount == 1 {
 				// A receiver may report the upstream's logical/container hostname
 				// while the agent reaches both databases through a shared address

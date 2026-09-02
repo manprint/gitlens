@@ -429,6 +429,7 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 // be remembered separately from the current connected-ness.
 type edgeState struct {
 	host      string
+	port      int
 	connected bool
 }
 
@@ -467,12 +468,21 @@ func buildTopologyEdges(mgr *agent.Manager, results []wire.Result, lastEdgeState
 			continue
 		}
 		for _, m := range r.Metrics {
-			if m.Name != "replication_receiver_status" {
-				continue
-			}
-			state.connected = m.Value == 1 || m.Value == 2 // streaming or catchup
-			if host := m.Labels["sender_host"]; host != "" {
-				state.host = host
+			switch m.Name {
+			case "replication_receiver_status":
+				state.connected = m.Value == 1 || m.Value == 2 // streaming or catchup
+				if host := m.Labels["sender_host"]; host != "" {
+					if state.host != "" && state.host != host {
+						state.port = 0
+					}
+					state.host = host
+				}
+			case "replication_receiver_sender_port":
+				// The port metric is emitted alongside the status metric. Keep the
+				// last known value across disconnects, just like sender_host.
+				if m.Value > 0 {
+					state.port = int(m.Value)
+				}
 			}
 		}
 	}
@@ -485,7 +495,7 @@ func buildTopologyEdges(mgr *agent.Manager, results []wire.Result, lastEdgeState
 	if state.connected {
 		confidence = "high"
 	}
-	return []wire.Edge{{From: from, To: state.host, Type: "streaming", Confidence: confidence}}
+	return []wire.Edge{{From: from, To: state.host, Port: state.port, Type: "streaming", Confidence: confidence}}
 }
 
 // waitForTarget blocks (up to 60s) until mgr's identity cache initializes

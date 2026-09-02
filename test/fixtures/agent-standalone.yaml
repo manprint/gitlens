@@ -22,5 +22,6 @@ checks:
   index_stats: { interval: 5s }
   bloat_estimate: { interval: 10s }
   # Keep command probes observable within the bounded Full E2E polling window
-  # despite startup churn in pg_stat_statements.
-  stat_statements: { interval: 5s, top_n: 300 }
+  # despite startup churn in pg_stat_statements, without exceeding the
+  # per-instance series cardinality budget under the full workload.
+  stat_statements: { interval: 5s, top_n: 50 }

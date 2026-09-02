@@ -404,7 +404,13 @@ func (h *Harness) startAgentBinary() error {
 	// deadlines. Keep both binary and container harnesses observable before
 	// startup churn can evict the probe from the selector.
 	statStatementsInterval := "5s"
-	statStatementsTopN := 300
+	statStatementsTopN := 50
+	if h.ui {
+		// The UI smoke suite benefits from a wider statement sample, while the
+		// full suite must keep the cardinality budget bounded under its load.
+		statStatementsInterval = "10s"
+		statStatementsTopN = 300
+	}
 	config := fmt.Sprintf(`server:
   url: http://localhost:%d
   token: %s

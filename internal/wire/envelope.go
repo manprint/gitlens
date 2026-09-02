@@ -48,7 +48,8 @@ type Database struct {
 
 type Edge struct {
 	From       string `json:"from"`
-	To         string `json:"to"` // the upstream's addr, resolved to an instance_id server-side
+	To         string `json:"to"`             // the upstream's addr, resolved to an instance_id server-side
+	Port       int    `json:"port,omitempty"` // disambiguates targets sharing an address
 	Type       string `json:"type"`
 	Confidence string `json:"confidence"` // "high" (actively streaming) | "low" (last-known upstream, not currently connected)
 }
