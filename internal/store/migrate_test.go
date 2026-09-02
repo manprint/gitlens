@@ -70,3 +70,11 @@ func TestMigrations_0010_ContainsCommands(t *testing.T) {
 		require.Contains(t, sql, "'"+state+"'")
 	}
 }
+
+func TestMigrations_0012_ContainsTargetNameIdentity(t *testing.T) {
+	data, err := migrationFS.ReadFile("migrations/0012_target_name.sql")
+	require.NoError(t, err)
+	sql := string(data)
+	require.Contains(t, sql, "ALTER TABLE instances ADD COLUMN target_name text")
+	require.Contains(t, sql, "instances_target_name_idx")
+}

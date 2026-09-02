@@ -122,6 +122,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	var bloatRows []store.BloatRow
 	var lockSnapshotRows []store.LockSnapshotRow
 	var relationPrunes []store.RelationStatsPrune
+	currentSeries := make(map[uuid.UUID]map[pgtype.SeriesKey]struct{}, len(env.Instances))
 
 	// Resolves a wire.Edge.To (an upstream's addr, e.g. "pg-primary") to an
 	// instance_id. Tries the current envelope first (fast path, no query).
@@ -181,6 +182,12 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 			return id, true
 		}
 		var id uuid.UUID
+		if addr != "" {
+			if err := tx.QueryRow(ctx, `SELECT instance_id FROM instances WHERE cluster_id=$1 AND target_name=$2 LIMIT 1`, cidDB, addr).Scan(&id); err == nil {
+				dbAddrCache[key] = id
+				return id, true
+			}
+		}
 		query := `SELECT instance_id FROM instances WHERE cluster_id=$1 AND addr=$2 LIMIT 1`
 		args := []any{cidDB, addr}
 		if port > 0 {
@@ -224,6 +231,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		bloatMap := make(map[bloatKey]*store.BloatRow)
 		var instRelationPrunes []store.RelationStatsPrune
 		var instErr error
+		instSeries := make(map[pgtype.SeriesKey]struct{})
 
 		// internal/topology.Engine (6.2, unit-tested at 90.9% coverage) was
 		// never actually called from anywhere in the real server — found
@@ -408,6 +416,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 						Database: metricDatname,
 						Labels:   canonical,
 					}
+					instSeries[key] = struct{}{}
 					obs := delta.Observation{
 						Key:        key,
 						TS:         r.TS,
@@ -580,6 +589,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 			res.Errors[inst.InstanceID] = instErr
 			continue
 		}
+		currentSeries[instUUID] = instSeries
 		// Append per-instance buffers to envelope buffers
 		genericRows = append(genericRows, instGeneric...)
 		ashRows = append(ashRows, instASH...)
@@ -655,12 +665,12 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit tx: %w", err)
 	}
-	// I-8's own real number: how many distinct series each instance is
-	// currently reporting, straight from the delta engine's own tracked
-	// state (SetSeriesTotal/pglens_series_total existed since an earlier
-	// phase pass but nothing ever called it with a real value).
-	for instID, count := range p.delta.CountByInstance() {
-		SetSeriesTotal(instID.String(), float64(count))
+	// I-8's own real number: how many distinct counter series each instance is
+	// reporting in this envelope. The delta engine intentionally retains older
+	// observations for rate continuity, so its full state is not the current
+	// cardinality budget and must not be exposed as one.
+	for instID, series := range currentSeries {
+		SetSeriesTotal(instID.String(), float64(len(series)))
 	}
 	return res, nil
 }

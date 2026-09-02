@@ -578,8 +578,7 @@ func TestPipeline_MockPool_Gauge(t *testing.T) {
 
 // TestPipeline_MockPool_SetsSeriesTotal proves I-8's real number: after
 // processing an envelope with one counter series, pglens_series_total
-// reflects it — SetSeriesTotal existed since an earlier phase pass but
-// nothing ever called it with a real value before this.
+// reflects the current envelope's series count.
 func TestPipeline_MockPool_SetsSeriesTotal(t *testing.T) {
 	t.Parallel()
 	p, _, _ := newPipelineWithMockPool()
@@ -593,6 +592,33 @@ func TestPipeline_MockPool_SetsSeriesTotal(t *testing.T) {
 		}},
 	}}}
 	_, err := p.Process(context.Background(), env)
+	require.NoError(t, err)
+	require.Equal(t, 1.0, pglensSeriesTotalGauge.Get(instID))
+}
+
+func TestPipeline_MockPool_SeriesTotalExcludesRetainedDeltaHistory(t *testing.T) {
+	t.Parallel()
+	p, _, _ := newPipelineWithMockPool()
+	instID := uuid.NewString()
+	cid := pgtype.ClusterID(30).String()
+	_, err := p.Process(context.Background(), wire.Envelope{Instances: []wire.Instance{{
+		InstanceID: instID,
+		ClusterID:  cid,
+		Results: []wire.Result{{
+			Check: "bgwriter", TS: time.Now(),
+			Metrics: []wire.Metric{{Name: "pg_xact_commit_total", Value: 100, Kind: "counter"}},
+		}},
+	}}})
+	require.NoError(t, err)
+
+	_, err = p.Process(context.Background(), wire.Envelope{Instances: []wire.Instance{{
+		InstanceID: instID,
+		ClusterID:  cid,
+		Results: []wire.Result{{
+			Check: "bgwriter", TS: time.Now().Add(time.Second),
+			Metrics: []wire.Metric{{Name: "pg_xact_rollback_total", Value: 5, Kind: "counter"}},
+		}},
+	}}})
 	require.NoError(t, err)
 	require.Equal(t, 1.0, pglensSeriesTotalGauge.Get(instID))
 }
