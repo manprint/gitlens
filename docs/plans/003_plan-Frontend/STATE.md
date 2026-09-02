@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-09-01 — sub-phase 17.6 OPEN; regression sweep in progress._
+_Last updated: 2026-09-02 — sub-phase 17.6 CLOSED; full regression sweep passed._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -55,9 +55,9 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 |-------|-------|
 | **Type** | sub-phase |
 | **ID** | 17.6 |
-| **Status** | `OPEN` |
+| **Status** | `CLOSED` |
 | **Intent** | Run the complete Go, web, integration, legacy E2E, evidence, and UI acceptance regression sweep. |
-| **Next action:** | Execute the ordered gates described in sub-phase 17.6 of `phase_18.md`, recording timings and the durable evidence exit status. |
+| **Next action:** | Open sub-phase 17.7 and rewrite the README API examples with explicit authentication. |
 | **Assigned** | `agent-2:sonnet` |
 | **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, and phase 6 sub-phases 6.1–6.8 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, strict typed lint/format gates, Makefile web targets, clean placeholder preservation, the parallel CI web job, frontend workflow documentation, the real server image build, the phase-boundary L3 regression, the Vitest/jsdom test runner foundation, the frontend testing architecture rules, the deterministic render/provider harness, the contract-validated OpenAPI fixture suite, the contract-aware MSW handler factory, the V8 UI coverage gate, the axe-core accessibility assertion, the deterministic clock/timezone/locale/randomness rules, the Playwright acceptance bootstrap, the harness defense meta-tests, the frontend testing workflow documentation, the phase-5 boundary E2E regression, the OpenAPI type generator, committed generated API types, stable schema aliases, type-level contract assertions, generator drift gates, the single typed API client, normalized API failures, exact large-integer query identifiers, the query key factory, refresh policies, the visibility-aware polling hooks, query-layer coverage, session authentication, guarded routing, login/logout flows, single-flight 401 handling, auth/login coverage, the accessible state-primitives library, freshness plumbing, the phase-6 browser sign-in documentation, the phase-7 route tree/code-splitting boundary, the accessible application shell, the URL-backed time-range state, the shared page scaffolding primitives, resilient namespaced theme/density/sidebar preferences, global error/offline handling, the phase-7 README web-interface guide, the phase-7 boundary E2E regression, the fleet derivation library, cluster cards, agent-health surfacing, server-defined health semantics, degraded/error paths, Fleet Overview documentation, the phase-8 boundary E2E regression, the phase-9 boundary E2E regression, and the Cluster Detail documentation are covered. The replication derivation library, topology graph, lag charts, slots, configuration drift, event taxonomy/timeline, Cluster Detail route, degraded/error paths, UI-REPL/UI-CLUS tests, Instance Detail header, database selector, URL-backed database scope, unmonitored database visibility, metric tiles, time series, counter-reset annotations, host metrics, settings, change history, durability, relations, bloat, truncation, and the Instance Detail README guidance are covered. Phase 10 is complete and phase 11 is now complete: ASH derivation, stacked waits, drill-down, honest disabled/under-sampled/unattributable states, stale freshness, exactly-once unauthorized navigation, server-error retry, shared range-retention validation, permanent sampling-limit guidance, and the README wait-analysis guide are covered. Phase 12.1–12.7 and phase 13.1–13.6 are complete: statement ranking, execution-time shares, null-safe statement summaries, whitespace normalization, cluster/version comparability helpers, the complete Query Inspector, Locks and Activity derivation and views, command polling at the one-second policy, terminal-state polling stops, server and client expiry, agent rejection messaging, and no-retry command creation are covered. Phase 14.1–14.5 are complete: advisor findings ranking/grouping/summaries, authoritative catalogue joining, missing-rule preservation, frozen-clock mute expiry, the URL-backed findings list, severity/state/scope/cluster/instance filters, explicit hidden-state counts, degraded input/tier guidance, evidence rendering, findings accessibility coverage, server-confirmed mute/unmute controls, reason/expiry validation, non-optimistic mutation handling, muted-state remaining-time presentation, rule catalogue rendering/filtering, affirmative empty-state semantics, degraded-only honesty, stale data, exactly-once unauthorized navigation, retryable failures, and findings polling are covered. The next unit is phase 14.6, the findings documentation. |
 | **Phase file** | [phase_18.md](phase_18.md) |
@@ -135,6 +135,14 @@ Sub-phase 17.5 is closed: Vite keeps ECharts and React Flow in lazy vendor
 chunks, the initial gzip bundle is 119.32 KiB against the 350 KiB limit, every
 lazy chunk is below 500 KiB, the parser test passes, and the web lint/typecheck
 gate is green. The next unit is sub-phase 17.6.
+
+Sub-phase 17.6 is closed: the ordered Go, web, integration, image, legacy E2E,
+durable-evidence, and UI acceptance gates all passed. Both UI modes passed all
+eleven browser scenarios after the binary harness was made observable within
+the bounded polling window; the final binary matrix took 714.735s and the
+final container matrix took 844.547s, with no residual Docker resources. The
+captured full-evidence artifact exited 0 after 4728s. The next unit is
+sub-phase 17.7.
 
 Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, phase 6 sub-phases 6.1–6.8, phase 7 sub-phases 7.1–7.7, phase 8 sub-phases 8.1–8.6, phase 9 sub-phases 9.1–9.7, phase 10 sub-phases 10.1–10.7, phase 11 sub-phases 11.1–11.6, sub-phases 12.1–12.7, 13.1–13.6, and 14.1–15.7 are closed; phases 14 and 15 are complete, and the next unit is 16.1.
 - Phases 5 through 15 are complete; phase 16 is next and sub-phase 16.1 is ready to open.
@@ -353,6 +361,7 @@ records start/end timestamps and elapsed time.
 | 17.3 | sub-phase | 17.3 | 2026-09-01 | Add and validate the CI workflow for the bounded UI acceptance matrix | `4977d47`, `072b206` |
 | 17.4 | sub-phase | 17.4 | 2026-09-01 | Verify release packaging, image sizes, multi-arch builds, and deployment limits | verification-only; closed in this state update |
 | 17.5 | sub-phase | 17.5 | 2026-09-01 | Enforce the frontend bundle budget and preserve lazy visualization chunks | `0a4eb0a` |
+| 17.6 | sub-phase | 17.6 | 2026-09-02 | Complete the full regression sweep, durable evidence, and both UI acceptance modes | `59ea061` (test fixes); closed in this state update |
 
 ---
 
@@ -858,7 +867,7 @@ so the repository web gate is reproducibly green.
 
 ## §6 — In-flight work
 
-`claimed — running the ordered phase-17.6 regression sweep; record every gate, sparse-poll long E2E logs, and leave the tree consistent before closure.`
+`closed — phase-17.6 regression sweep complete; the tree is consistent and sub-phase 17.7 is ready to open.`
 
 ---
 
@@ -1216,6 +1225,15 @@ so the repository web gate is reproducibly green.
 | 2026-09-01 | 17.5 | `make web-lint web-typecheck` | PASS | Final gate completed in 15.41s; 0 lint errors, four pre-existing Fast Refresh warnings, generated API drift clean, and TypeScript 6 project references green. |
 | 2026-09-01 | 17.5 | `make web-budget` | PASS | Final build/budget gate completed in 1.49s: initial entry plus synchronous imports 119.32 KiB gzip (<350 KiB); lazy pages 85.34 KiB, runtime 0.42 KiB, ECharts 367.68 KiB, and React Flow 56.61 KiB (<500 KiB each). |
 | 2026-09-01 | 17.5 | UI acceptance E2E | NOT RUN — per plan | Phase 17.5 declares no E2E; the complete browser regression is scheduled at sub-phase 17.6. |
+| 2026-09-02 | 17.6 | `make fmt-check lint test coverage-gate` | PASS | Go format, lint, unit tests, and coverage gate passed in 61.56s. |
+| 2026-09-02 | 17.6 | `make web-install web-lint web-typecheck web-test web-coverage-gate web-build web-budget` | PASS | Final web gate passed in 279.86s: 86 files/628 tests; statements 89.39%, branches 80.32%, functions 88.49%, lines 91.23%; initial gzip 119.32 KiB and lazy chunks within budget. |
+| 2026-09-02 | 17.6 | `make test-integration` | PASS | Final integration gate passed in 39.95s after correcting the lock assertion to account for blocker plus blocked rows. |
+| 2026-09-02 | 17.6 | `make build-images` | PASS | Local server and agent images rebuilt in 20.24s before the E2E gates. |
+| 2026-09-02 | 17.6 | `make test-e2e`; `AGENT_MODE=binary make test-e2e` | PASS | Legacy container E2E passed in 1177s; binary E2E passed in 1032s; both cleanups left 0 containers and 0 networks. |
+| 2026-09-02 | 17.6 | `make test-e2e-full-evidence` | PASS | Captured `EXIT_STATUS=0` after 4728s; artifact `test/e2e/_artifacts/e2e-full-20260901T210517Z.log`; `RESIDUAL_CONTAINERS=0`, `RESIDUAL_NETWORKS=0`. |
+| 2026-09-02 | 17.6 | Targeted `AGENT_MODE=binary ... -run 'TestUI_PlanOnly'` | PASS | Final SYS-UI-006 retry passed in 108s after the binary UI harness used a 10s statement scrape, TopN 300, and API limit 300; cleanup 0/0. |
+| 2026-09-02 | 17.6 | Full UI container matrix `make test-ui-e2e` | PASS | All eleven UI scenarios passed in 844.547s; cleanup 0 containers and 0 networks. |
+| 2026-09-02 | 17.6 | Full UI binary matrix `AGENT_MODE=binary make test-ui-e2e` | PASS | All eleven UI scenarios passed in 714.735s; cleanup 0 containers and 0 networks. |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -1284,6 +1302,10 @@ reconstruct.
 | 50 | 17.3 | The hosted artifact-upload branch could not be exercised locally because `actionlint` and `act` are unavailable and no remote CI push/run was authorized. | Validate workflow syntax and scenario selection with Prettier and Makefile dry-runs, run the complete bounded binary matrix locally, and leave the first remote CI run as the explicit artifact-upload confirmation. | yes — §7 and the phase-18 workflow definition |
 | 51 | 17.4 | The default local BuildKit builder initially lacked `arm64` emulation, so the first multi-arch attempt ended with `exec format error`. | Register QEMU locally for the verification run; the release workflow already installs QEMU before its multi-arch builds. The retry passed for both images. | yes — §7 and `.github/workflows/release-alpha.yml` |
 | 52 | 17.5 | The app-wide typed ESLint rules treated Playwright's runtime-shaped fixtures and direct same-origin API probes as production application boundaries; an existing fixture also failed Prettier. | Add a focused E2E override for the unsafe typed-boundary/fetch rules while retaining the `waitForTimeout` prohibition, and format the fixture so the required web gate remains strict for application sources. | yes — §5, §7 and `web/eslint.config.js` |
+| 53 | 17.6 | The first regression pass exposed expected-count drift in the lock integration fixture, a frontend role-query mismatch, and an untested ActivitySection branch. | Corrected the assertions/tests and reran the complete non-E2E gate with all fixed coverage floors unchanged. | yes — §5 and §7 |
+| 54 | 17.6 | The first durable-evidence run exposed command query-id string handling, semantic command expectations, and SYS-UI-001 freshness timing. | Preserved lossless query ids, aligned the command assertions, and made the acceptance poll/reload the server-confirmed state; the final captured evidence run passed. | yes — §5 and §7 |
+| 55 | 17.6 | Binary SYS-UI-006 initially scraped too late and then requested only the top 50 statements, so the short catalog workload was not discoverable. | UI binary uses a 10s scrape interval and TopN 300, while SYS-UI-006 reads limit 300; the targeted and full binary matrices passed. | yes — `test/harness/harness.go`, `web/e2e/ui_acceptance.spec.ts`, and §7 |
+| 56 | 17.6 | A detached long-run launcher ended during the web-build recipe without a status file, so its result was unusable. | Re-ran the matrix in a persistent PTY session and captured the reliable Go test result and cleanup counts. | yes — §7 |
 
 ## §9 — Blockers and open questions
 
@@ -1338,7 +1360,7 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 | 14 | [phase_15.md](phase_15.md) | Advisor findings | `agent-2:sonnet` | — | DONE — 6/6 sub-phases closed |
 | 15 | [phase_16.md](phase_16.md) | Alerts, silences, rules, events | `agent-2:sonnet` | 15.3 | DONE — 7/7 sub-phases closed |
 | 16 | [phase_17.md](phase_17.md) | Settings and fleet inventory | `agent-2:sonnet` | — | DONE — 5/5 sub-phases closed; boundary gates passed |
-| 17 | [phase_18.md](phase_18.md) | Packaging, UI acceptance suite, documentation | `agent-2:sonnet` / `agent-3:haiku` | 17.2, 17.7, 17.8 | IN PROGRESS — 5/8 sub-phases closed; 17.6 OPEN |
+| 17 | [phase_18.md](phase_18.md) | Packaging, UI acceptance suite, documentation | `agent-2:sonnet` / `agent-3:haiku` | 17.2, 17.7, 17.8 | IN PROGRESS — 6/8 sub-phases closed; 17.7 READY |
 
 `agent-1:opus` owns every review gate listed above and approves each phase before
 the next one opens.
@@ -1468,8 +1490,8 @@ the next one opens.
 | 17.3 | CI integration | `agent-2:sonnet` | DONE |
 | 17.4 | Release packaging | `agent-2:sonnet` | DONE |
 | 17.5 | Performance and bundle budget | `agent-2:sonnet` | DONE |
-| 17.6 | Full regression sweep | `agent-2:sonnet` | IN PROGRESS |
-| 17.7 | Rewrite the README's API examples for authentication | `agent-3:haiku` | TODO |
+| 17.6 | Full regression sweep | `agent-2:sonnet` | DONE |
+| 17.7 | Rewrite the README's API examples for authentication | `agent-3:haiku` | READY |
 | 17.8 | Final documentation | `agent-3:haiku` | TODO |
 
 ### Tests
