@@ -29,7 +29,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock(hashtext('pglens:migrations'))`); err != nil {
 		return fmt.Errorf("acquire migration lock: %w", err)
 	}
-	unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	unlockCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	defer func() {
 		_, _ = conn.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtext('pglens:migrations'))`)
