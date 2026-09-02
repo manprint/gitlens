@@ -61,21 +61,27 @@ func runCascadingReplicationTopology(ctx context.Context, e *Env) error {
 	}
 	ids := make(map[string]string, len(instances))
 	roles := make(map[string]string, len(instances))
-	for _, raw := range instances {
-		instance, ok := raw.(map[string]interface{})
-		if !ok {
-			return fmt.Errorf("invalid instance entry: %v", raw)
-		}
-		addr, _ := instance["addr"].(string)
-		id, _ := instance["instance_id"].(string)
-		role, _ := instance["role"].(string)
-		ids[addr], roles[addr] = id, role
-	}
 	for addr, wantRole := range map[string]string{
 		"pg-primary":   "primary",
 		"pg-standby-a": "standby",
 		"pg-standby-b": "standby",
 	} {
+		pgConfig := e.PG(addr).Config().ConnConfig
+		for _, raw := range instances {
+			instance, ok := raw.(map[string]interface{})
+			if !ok {
+				return fmt.Errorf("invalid instance entry: %v", raw)
+			}
+			instanceAddr, _ := instance["addr"].(string)
+			instancePort, _ := instance["port"].(float64)
+			id, _ := instance["instance_id"].(string)
+			role, _ := instance["role"].(string)
+			if instanceAddr != addr && (instanceAddr != pgConfig.Host || instancePort != float64(pgConfig.Port)) {
+				continue
+			}
+			ids[addr], roles[addr] = id, role
+			break
+		}
 		if roles[addr] != wantRole || ids[addr] == "" {
 			return fmt.Errorf("unexpected role or missing instance for %s: roles=%v ids=%v", addr, roles, ids)
 		}

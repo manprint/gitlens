@@ -400,17 +400,11 @@ func (h *Harness) startAgentBinary() error {
       max: 10`, primaryPort)
 	}
 
-	statStatementsInterval := "60s"
-	statStatementsTopN := 50
-	if h.ui {
-		// UI acceptance tests poll statements for a bounded time window. Keep
-		// the binary harness observable within that window even when the
-		// workload completes before the agent's first scheduled scrape.
-		statStatementsInterval = "10s"
-		// Keep the short plan-safe catalog workload in the binary UI result
-		// set despite the agent's startup and bootstrap statements.
-		statStatementsTopN = 300
-	}
+	// Full E2E scenarios poll statement and relation samples on bounded
+	// deadlines. Keep both binary and container harnesses observable before
+	// startup churn can evict the probe from the selector.
+	statStatementsInterval := "5s"
+	statStatementsTopN := 300
 	config := fmt.Sprintf(`server:
   url: http://localhost:%d
   token: %s
@@ -431,9 +425,7 @@ checks:
   table_stats: { interval: 5s }
   index_stats: { interval: 5s }
   bloat_estimate: { interval: 10s }
-  # Keep the non-UI cadence aligned with the cardinality workload's 65s
-  # rotations. UI binary runs override it to 10s above so short workloads
-  # become observable within the browser acceptance polling window.
+	  # Keep command probes observable within their bounded polling window.
   stat_statements: { interval: %s, top_n: %d }
 `, h.serverPort, agentBootstrapToken, identityPath, bufferPath, targetsYAML, statStatementsInterval, statStatementsTopN)
 	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
