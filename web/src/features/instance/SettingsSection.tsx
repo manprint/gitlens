@@ -92,7 +92,12 @@ function DurabilitySummary({ settings }: { settings: Schemas['Setting'][] }) {
 
 function SettingTable({ settings }: { settings: Schemas['Setting'][] }) {
   return (
-    <div className="overflow-x-auto">
+    <div
+      className="overflow-x-auto"
+      role="region"
+      aria-label="Observed PostgreSQL settings"
+      tabIndex={0}
+    >
       <table>
         <caption className="sr-only">Observed PostgreSQL settings</caption>
         <thead>
