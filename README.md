@@ -69,12 +69,13 @@ psql "$PGLENS_DSN" -v pglens_password="$PGLENS_MONITORING_PASSWORD" \
 
 # 2. Configure the agent and start the stack
 # Edit deploy/agent.example.yaml with your target DSN and set a real token.
-PGLENS_BOOTSTRAP_TOKEN=dev-token \
+export PGLENS_BOOTSTRAP_TOKEN=dev-token
 docker compose -f deploy/docker-compose.yml up -d
 
 # 3. Check that data is appearing
 curl -fsS localhost:8080/readyz
-curl -fsS localhost:8080/api/v1/clusters | jq .
+curl -fsS -H "Authorization: Bearer $PGLENS_BOOTSTRAP_TOKEN" \
+  localhost:8080/api/v1/clusters | jq .
 ```
 
 The server health endpoints return the plain-text body `ok`; the agent's
@@ -239,16 +240,9 @@ link. Keyboard shortcuts are available for the main destinations and filters:
 - `?` — open the shortcut sheet
 
 When `PGLENS_UI_PASSWORD` is configured, sign in to obtain a session cookie and
-use it for the protected API:
-
-```sh
-curl -s -c cookies.txt -X POST localhost:8080/api/v1/session \
-  -H 'Content-Type: application/json' -d '{"password":"'"$PGLENS_UI_PASSWORD"'"}'
-curl -s -b cookies.txt localhost:8080/api/v1/clusters | jq .
-```
-
-The agent's bearer token also authenticates API requests. `/healthz`, `/readyz`
-and `/metrics` remain open for probes and monitoring.
+use the authenticated HTTP API examples below. The agent's bearer token also
+authenticates API requests. `/healthz`, `/readyz` and `/metrics` remain open for
+probes and monitoring.
 
 ### Configuration
 
@@ -289,16 +283,18 @@ for mutating or potentially expensive operations:
 ```sh
 INSTANCE_ID=11111111-1111-1111-1111-111111111111
 
+# Run the HTTP API sign-in block once first; these commands reuse cookies.txt.
+
 # Queue EXPLAIN (the command carries queryid and options, never SQL text).
-COMMAND_ID=$(curl -s -X POST "http://localhost:8080/api/v1/instances/$INSTANCE_ID/commands" \
+COMMAND_ID=$(curl -s -b cookies.txt -X POST "http://localhost:8080/api/v1/instances/$INSTANCE_ID/commands" \
   -H 'Content-Type: application/json' \
   -d '{"kind":"explain","args":{"queryid":1234,"datname":"app","analyze":false}}' \
   | jq -r .command_id)
 
 # Poll state/result, then inspect the persisted plan history and audit trail.
-curl -s "http://localhost:8080/api/v1/commands/$COMMAND_ID" | jq .
-curl -s "http://localhost:8080/api/v1/plans?instance_id=$INSTANCE_ID&queryid=1234&datname=app" | jq .
-curl -s "http://localhost:8080/api/v1/instances/$INSTANCE_ID/command-audit" | jq .
+curl -s -b cookies.txt "http://localhost:8080/api/v1/commands/$COMMAND_ID" | jq .
+curl -s -b cookies.txt "http://localhost:8080/api/v1/plans?instance_id=$INSTANCE_ID&queryid=1234&datname=app" | jq .
+curl -s -b cookies.txt "http://localhost:8080/api/v1/instances/$INSTANCE_ID/command-audit" | jq .
 ```
 
 `explain` resolves the query through `pg_stat_statements`. Plan-only
@@ -335,13 +331,16 @@ Configure Slack or a generic webhook with the variables above. A silence suppres
 
 The web interface provides an Alerts page with suppression details, an Alert Rules page that keeps Tier 0 rules always on and read-only while allowing Tier 1 edits, a Silences page that previews which currently firing alerts would be suppressed before creation, and a fleet-wide Events page with time-range, cluster, type, and limit filters that explains when the server's 1,000-event cap is reached; if no channel is configured, alerts are persisted but not delivered, and suppression is never resolution. Delivery remains limited to Slack via `PGLENS_ALERT_SLACK_WEBHOOK_URL` or `PGLENS_ALERT_SLACK_WEBHOOK_URL_FILE` (with the accepted legacy `PGLENS_SLACK_WEBHOOK_URL` aliases) and generic webhooks via `PGLENS_WEBHOOK_URL`.
 
+Run the HTTP API sign-in block once before these examples; reuse its
+`cookies.txt` for every protected request.
+
 ```sh
-curl -s http://localhost:8080/api/v1/alerts | jq .
-curl -s -X POST http://localhost:8080/api/v1/silences \
+curl -s -b cookies.txt http://localhost:8080/api/v1/alerts | jq .
+curl -s -b cookies.txt -X POST http://localhost:8080/api/v1/silences \
   -H 'Content-Type: application/json' \
-  -d '{"matchers":[{"name":"severity","value":"warning"}],"reason":"maintenance","starts_at":"2026-08-29T10:00:00Z","ends_at":"2026-08-29T11:00:00Z"}'
-curl -s http://localhost:8080/api/v1/alert-rules | jq .
-curl -s -X DELETE http://localhost:8080/api/v1/silences/<silence-id>
+  -d '{"matchers":[{"name":"severity","value":"warning"}],"reason":"maintenance","starts_at":"2030-08-29T10:00:00Z","ends_at":"2030-08-29T11:00:00Z"}'
+curl -s -b cookies.txt http://localhost:8080/api/v1/alert-rules | jq .
+curl -s -b cookies.txt -X DELETE http://localhost:8080/api/v1/silences/<silence-id>
 ```
 
 An alert listing contains objects such as `{"alert_key":"agent_down/...","state":"firing","severity":"critical","cluster_id":"7381927364512345678","suppressed":false}`. The API returns cluster identifiers as strings and timestamps in RFC 3339 format.
@@ -358,12 +357,15 @@ finding, and `resolved` means a later pass no longer reproduced it. Muting does
 not delete the finding; the next pass restores its real state after the mute
 expires or is removed.
 
+Run the HTTP API sign-in block once before these examples; reuse its
+`cookies.txt` for every protected request.
+
 ```sh
-curl -s 'http://localhost:8080/api/v1/findings?severity=critical&limit=100' | jq .
-curl -s 'http://localhost:8080/api/v1/advisor/rules' | jq .
-curl -s -X POST http://localhost:8080/api/v1/findings/<finding-id>/mute \
+curl -s -b cookies.txt 'http://localhost:8080/api/v1/findings?severity=critical&limit=100' | jq .
+curl -s -b cookies.txt 'http://localhost:8080/api/v1/advisor/rules' | jq .
+curl -s -b cookies.txt -X POST http://localhost:8080/api/v1/findings/<finding-id>/mute \
   -H 'Content-Type: application/json' \
-  -d '{"reason":"accepted risk","until":"2026-08-29T11:00:00Z"}' | jq .
+  -d '{"reason":"accepted risk","until":"2030-08-29T11:00:00Z"}' | jq .
 ```
 
 The findings listing returns a JSON array, for example:
@@ -629,13 +631,12 @@ checks:
 
 Relation endpoints are available at `/api/v1/instances/{id}/tables`,
 `/indexes`, and `/bloat`; each response includes `truncated` when the relation
-budget limits the result. For example: `curl -s
-localhost:8080/api/v1/instances/11111111-1111-1111-1111-111111111111/tables | jq .`.
+budget limits the result. For example: `curl -s -b cookies.txt localhost:8080/api/v1/instances/11111111-1111-1111-1111-111111111111/tables | jq .`.
 
 Host metrics for a local target are available at:
 
 ```sh
-curl -s http://localhost:8080/api/v1/instances/<instance-id>/host | jq .
+curl -s -b cookies.txt http://localhost:8080/api/v1/instances/<instance-id>/host | jq .
 ```
 
 The local response includes `available: true`, `source` (`host`, `cgroup_v1`,
@@ -646,9 +647,9 @@ it never returns zeros for unavailable host metrics.
 Settings and cluster drift are available with:
 
 ```sh
-curl -s 'localhost:8080/api/v1/instances/<instance-id>/settings' | jq .
-curl -s 'localhost:8080/api/v1/instances/<instance-id>/settings?changed_since=2026-08-28T00:00:00Z' | jq .
-curl -s 'localhost:8080/api/v1/clusters/<cluster-id>/settings-drift' | jq .
+curl -s -b cookies.txt 'localhost:8080/api/v1/instances/<instance-id>/settings' | jq .
+curl -s -b cookies.txt 'localhost:8080/api/v1/instances/<instance-id>/settings?changed_since=2026-08-28T00:00:00Z' | jq .
+curl -s -b cookies.txt 'localhost:8080/api/v1/clusters/<cluster-id>/settings-drift' | jq .
 ```
 
 The settings response contains `name`, `value`, source, context, pending-restart
@@ -732,12 +733,24 @@ warnings
 Every `/api/v1` endpoint requires a session cookie or an agent bearer token;
 `/healthz`, `/readyz` and `/metrics` are the unauthenticated operational endpoints.
 
+Authenticate once before running the protected examples below; the cookie jar
+authenticates every subsequent request:
+
+```sh
+# sign in once; the cookie jar authenticates the examples below
+curl -s -c cookies.txt -X POST localhost:8080/api/v1/session \
+  -H 'Content-Type: application/json' -d '{"password":"'"$PGLENS_UI_PASSWORD"'"}'
+```
+
+For scripts, `-H "Authorization: Bearer $PGLENS_BOOTSTRAP_TOKEN"` is the
+equivalent credential and can replace `-b cookies.txt` on protected requests.
+
 All responses carry `cluster_id` as a **decimal string** — `uint64` exceeds IEEE-754 exact integer range and would be rounded by `jq` or any JS consumer. Missing intervals are `null`, never `0` or interpolated.
 
 ### `GET /api/v1/clusters`
 
 ```sh
-curl -s localhost:8080/api/v1/clusters | jq '.[0]'
+curl -s -b cookies.txt localhost:8080/api/v1/clusters | jq '.[0]'
 ```
 
 ```json
@@ -799,7 +812,7 @@ curl -s localhost:8080/api/v1/clusters | jq '.[0]'
 ### `GET /api/v1/clusters/{id}/topology`
 
 ```sh
-curl -s localhost:8080/api/v1/clusters/7381927364512345678/topology | jq .
+curl -s -b cookies.txt localhost:8080/api/v1/clusters/7381927364512345678/topology | jq .
 ```
 
 ```json
@@ -842,7 +855,7 @@ curl -s localhost:8080/api/v1/clusters/7381927364512345678/topology | jq .
 ### `GET /api/v1/clusters/{id}/replication`
 
 ```sh
-curl -s "localhost:8080/api/v1/clusters/7381927364512345678/replication?from=2026-08-27T00:00:00Z&to=2026-08-27T01:00:00Z" | jq .
+curl -s -b cookies.txt "localhost:8080/api/v1/clusters/7381927364512345678/replication?from=2026-08-27T00:00:00Z&to=2026-08-27T01:00:00Z" | jq .
 ```
 
 ```json
@@ -880,7 +893,7 @@ curl -s "localhost:8080/api/v1/clusters/7381927364512345678/replication?from=202
 ### `GET /api/v1/instances/{id}`
 
 ```sh
-curl -s localhost:8080/api/v1/instances/11111111-1111-1111-1111-111111111111 | jq .
+curl -s -b cookies.txt localhost:8080/api/v1/instances/11111111-1111-1111-1111-111111111111 | jq .
 ```
 
 Returns the instance plus its databases with `monitored`, `skip_reason`, and `databases_not_monitored` count.
@@ -888,7 +901,7 @@ Returns the instance plus its databases with `monitored`, `skip_reason`, and `da
 ### `GET /api/v1/locks`
 
 ```sh
-curl -s "localhost:8080/api/v1/locks?instance_id=11111111-1111-1111-1111-111111111111" | jq .
+curl -s -b cookies.txt "localhost:8080/api/v1/locks?instance_id=11111111-1111-1111-1111-111111111111" | jq .
 ```
 
 Returns the latest sampled blocking tree. An instance with no stored tree still
@@ -897,7 +910,7 @@ returns 200: `{"instance_id":"…","sampled_at":null,"stale":true,"nodes":[]}`.
 ### `GET /api/v1/instances/{id}/activity`
 
 ```sh
-curl -s "localhost:8080/api/v1/instances/11111111-1111-1111-1111-111111111111/activity" | jq .
+curl -s -b cookies.txt "localhost:8080/api/v1/instances/11111111-1111-1111-1111-111111111111/activity" | jq .
 ```
 
 The response groups recent activity metrics, including database connection
@@ -906,7 +919,7 @@ counts and age gauges, for example `{"stale":false,"metrics":{"pg_connections_by
 ### `GET /api/v1/metrics/query`
 
 ```sh
-curl -s "localhost:8080/api/v1/metrics/query?metric=pg_backends&instance_id=11111111-1111-1111-1111-111111111111&from=2026-08-27T00:00:00Z&to=2026-08-27T01:00:00Z&step=60s" | jq .
+curl -s -b cookies.txt "localhost:8080/api/v1/metrics/query?metric=pg_backends&instance_id=11111111-1111-1111-1111-111111111111&from=2026-08-27T00:00:00Z&to=2026-08-27T01:00:00Z&step=60s" | jq .
 ```
 
 ```json
@@ -924,7 +937,7 @@ A counter reset yields `null` for that bucket, never a negative or a spike above
 ### `GET /api/v1/events`
 
 ```sh
-curl -s "localhost:8080/api/v1/events?cluster_id=7381927364512345678&type=failover_detected&limit=10" | jq .
+curl -s -b cookies.txt "localhost:8080/api/v1/events?cluster_id=7381927364512345678&type=failover_detected&limit=10" | jq .
 ```
 
 Newest first, `limit` capped at 1000.
@@ -932,7 +945,7 @@ Newest first, `limit` capped at 1000.
 ### `GET /api/v1/statements`
 
 ```sh
-curl -s "localhost:8080/api/v1/statements?instance_id=11111111-1111-1111-1111-111111111111&database=app&from=2026-08-27T00:00:00Z&to=2026-08-27T01:00:00Z&order_by=total_exec_time&limit=20" | jq .
+curl -s -b cookies.txt "localhost:8080/api/v1/statements?instance_id=11111111-1111-1111-1111-111111111111&database=app&from=2026-08-27T00:00:00Z&to=2026-08-27T01:00:00Z&order_by=total_exec_time&limit=20" | jq .
 ```
 
 Returns top queries joined to `query_texts`, with `truncated` and `comparable_scope: "cluster"` (`queryid` is comparable only within one cluster, not across clusters or major versions).
@@ -942,7 +955,7 @@ Returns top queries joined to `query_texts`, with `truncated` and `comparable_sc
 Grouped by wait event:
 
 ```sh
-curl -s "localhost:8080/api/v1/ash?instance_id=11111111-1111-1111-1111-111111111111&from=2026-08-27T00:00:00Z&to=2026-08-27T00:30:00Z&group_by=wait_event_type" | jq .
+curl -s -b cookies.txt "localhost:8080/api/v1/ash?instance_id=11111111-1111-1111-1111-111111111111&from=2026-08-27T00:00:00Z&to=2026-08-27T00:30:00Z&group_by=wait_event_type" | jq .
 ```
 
 ```json
@@ -971,13 +984,13 @@ curl -s "localhost:8080/api/v1/ash?instance_id=11111111-1111-1111-1111-111111111
 Grouped by query (requires `compute_query_id = on`):
 
 ```sh
-curl -s "localhost:8080/api/v1/ash?instance_id=11111111-1111-1111-1111-111111111111&from=2026-08-27T00:00:00Z&to=2026-08-27T00:30:00Z&group_by=queryid" | jq .
+curl -s -b cookies.txt "localhost:8080/api/v1/ash?instance_id=11111111-1111-1111-1111-111111111111&from=2026-08-27T00:00:00Z&to=2026-08-27T00:30:00Z&group_by=queryid" | jq .
 ```
 
 Returns `queryid` grouped rows; use `/api/v1/ash/top` for queries joined to their text:
 
 ```sh
-curl -s "localhost:8080/api/v1/ash/top?instance_id=11111111-1111-1111-1111-111111111111&from=2026-08-27T00:00:00Z&to=2026-08-27T00:30:00Z" | jq .
+curl -s -b cookies.txt "localhost:8080/api/v1/ash/top?instance_id=11111111-1111-1111-1111-111111111111&from=2026-08-27T00:00:00Z&to=2026-08-27T00:30:00Z" | jq .
 ```
 
 ```json
@@ -1123,17 +1136,17 @@ These checks are only emitted when applicable (e.g., replication streaming only 
 
 **Cluster overview:**
 ```sh
-curl -s localhost:8080/api/v1/clusters | jq '.[] | {name, primary, standby_count, max_replay_lag_seconds, health}'
+curl -s -b cookies.txt localhost:8080/api/v1/clusters | jq '.[] | {name, primary, standby_count, max_replay_lag_seconds, health}'
 ```
 
 **Topology graph and failover history:**
 ```sh
-curl -s localhost:8080/api/v1/clusters/7381927364512345678/topology | jq .
+curl -s -b cookies.txt localhost:8080/api/v1/clusters/7381927364512345678/topology | jq .
 ```
 
 **Replication lag over time (e.g., last hour):**
 ```sh
-curl -s "localhost:8080/api/v1/clusters/7381927364512345678/replication?from=$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)&to=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | jq '.edges[] | select(.metric=="replay_lag_sec")'
+curl -s -b cookies.txt "localhost:8080/api/v1/clusters/7381927364512345678/replication?from=$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)&to=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | jq '.edges[] | select(.metric=="replay_lag_sec")'
 ```
 
 **Cluster Detail:** Open a cluster from the Fleet Overview to see its topology
@@ -1158,13 +1171,13 @@ In the web UI, the Wait-event analysis page presents the samples as a stacked ch
 Query by wait event type:
 
 ```sh
-curl -s "localhost:8080/api/v1/ash?instance_id=11111111-1111-1111-1111-111111111111&from=2026-08-27T00:00:00Z&to=2026-08-27T01:00:00Z&group_by=wait_event_type" | jq .
+curl -s -b cookies.txt "localhost:8080/api/v1/ash?instance_id=11111111-1111-1111-1111-111111111111&from=2026-08-27T00:00:00Z&to=2026-08-27T01:00:00Z&group_by=wait_event_type" | jq .
 ```
 
 Query by query (requires `compute_query_id = on`):
 
 ```sh
-curl -s "localhost:8080/api/v1/ash/top?instance_id=11111111-1111-1111-1111-111111111111&from=2026-08-27T00:00:00Z&to=2026-08-27T01:00:00Z" | jq .
+curl -s -b cookies.txt "localhost:8080/api/v1/ash/top?instance_id=11111111-1111-1111-1111-111111111111&from=2026-08-27T00:00:00Z&to=2026-08-27T01:00:00Z" | jq .
 ```
 
 Configuration: `ash.interval` (default `1s`). Lower the interval for sensitive instances. See Agent configuration above for `checks.ash.interval`.
