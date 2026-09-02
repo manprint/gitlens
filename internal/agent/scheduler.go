@@ -276,19 +276,9 @@ func (s *Scheduler) scrapeEntry(parentCtx context.Context, entry schedEntry) {
 	ctx, cancel := context.WithTimeout(parentCtx, entry.check.Timeout())
 	defer cancel()
 
-	// Apply session limits if the target has a connection
-	conn, err := s.getConnection(ctx, entry)
-	if err != nil {
-		s.recordError(entry, fmt.Sprintf("connection error: %v", err))
-		return
-	}
-	defer conn.Release()
-
-	if err := check.ApplySessionLimits(ctx, conn, entry.check.Timeout()); err != nil {
-		s.recordError(entry, fmt.Sprintf("apply limits: %v", err))
-		return
-	}
-
+	// Checks acquire and release their own connection. Acquiring one here as
+	// well would consume a second pool slot for every scrape; with database-
+	// scoped checks that can exhaust the shared pool before Scrape can run.
 	scrapeTarget := entry.target
 	if entry.database != "" {
 		scrapeTarget = databaseScopedTarget{Target: entry.target, database: entry.database}
@@ -317,13 +307,6 @@ func (s *Scheduler) scrapeEntry(parentCtx context.Context, entry schedEntry) {
 	}:
 	case <-s.ctx.Done():
 	}
-}
-
-func (s *Scheduler) getConnection(ctx context.Context, entry schedEntry) (check.Conn, error) {
-	if entry.database == "" {
-		return entry.target.Conn(ctx)
-	}
-	return entry.target.ConnFor(ctx, entry.database)
 }
 
 func (s *Scheduler) recordError(entry schedEntry, reason string) {
