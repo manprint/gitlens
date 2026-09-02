@@ -378,7 +378,7 @@ Mute returns the changed state and expiry; remove it with
 `DELETE /api/v1/findings/<finding-id>/mute` (which returns `204`):
 
 ```json
-{"finding_id":"query.slow_mean/11111111-1111-1111-1111-111111111111","state":"muted","muted_until":"2026-08-29T11:00:00Z","mute_reason":"accepted risk"}
+{"finding_id":"query.slow_mean/11111111-1111-1111-1111-111111111111","state":"muted","muted_until":"2030-08-29T11:00:00Z","mute_reason":"accepted risk"}
 ```
 
 The rule catalogue is available from `/api/v1/advisor/rules`; it is the
@@ -730,8 +730,9 @@ warnings
 
 ## HTTP API
 
-Every `/api/v1` endpoint requires a session cookie or an agent bearer token;
-`/healthz`, `/readyz` and `/metrics` are the unauthenticated operational endpoints.
+Every `/api/v1` endpoint except `POST /api/v1/session` requires a session
+cookie or an agent bearer token; `/healthz`, `/readyz` and `/metrics` are the
+unauthenticated operational endpoints.
 
 Authenticate once before running the protected examples below; the cookie jar
 authenticates every subsequent request:

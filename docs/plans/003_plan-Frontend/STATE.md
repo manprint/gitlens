@@ -1,6 +1,6 @@
 # STATE — 003 Frontend
 
-_Last updated: 2026-09-02 — sub-phase 17.7 OPEN; README authentication examples in progress._
+_Last updated: 2026-09-02 — sub-phase 17.7 CLOSED; sub-phase 17.8 ready to open._
 
 Single source of execution truth for this plan. No other file in this folder
 claims a status. When this file and the repository disagree, **the repository
@@ -54,11 +54,11 @@ A unit is **not** `DONE` until its gates are green **and** it is closed here.
 | Field | Value |
 |-------|-------|
 | **Type** | sub-phase |
-| **ID** | 17.7 |
-| **Status** | `OPEN` |
-| **Intent** | Rewrite every README API example so it authenticates explicitly and is runnable by an operator. |
-| **Next action:** | Complete the README API authentication rewrite, validate the examples against a live server, and pass the `agent-1:opus` review gate. |
-| **Assigned** | `agent-2:sonnet` |
+| **ID** | 17.8 |
+| **Status** | `READY` |
+| **Intent** | Complete the final operator-facing documentation pass across README, limits, testing, contributing, and web guidance. |
+| **Next action:** | Open sub-phase 17.8, complete the final documentation coherence pass, exercise the documented interface, and pass the `agent-1:opus` review gate. |
+| **Assigned** | `agent-3:haiku` |
 | **Repo state** | Phase 0 and phase 1 sub-phases 1.1–1.6 plus phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, and phase 6 sub-phases 6.1–6.8 are complete and committed. E2E evidence is durable, all three plan 002 audit findings are `FIXED`, Q-B is closed by D11, the OpenAPI contract has bidirectional route coverage, the static API reference is generated offline, UI configuration/defaults, session storage, middleware, session endpoints, authenticated E2E machine clients, the full regression sweep, the authentication documentation, the embedded placeholder asset boundary, the safe SPA/API routing boundary, the UI enablement guard, the container build wiring, both placeholder HTTP/authentication smoke checks, the user-facing UI entry-point documentation, the exact-pinned frontend manifest, strict TypeScript project references, the Vite/React application shell, the Tailwind CSS design tokens, the shadcn configuration, the `cn` helper, the 18 prescribed UI primitives, strict typed lint/format gates, Makefile web targets, clean placeholder preservation, the parallel CI web job, frontend workflow documentation, the real server image build, the phase-boundary L3 regression, the Vitest/jsdom test runner foundation, the frontend testing architecture rules, the deterministic render/provider harness, the contract-validated OpenAPI fixture suite, the contract-aware MSW handler factory, the V8 UI coverage gate, the axe-core accessibility assertion, the deterministic clock/timezone/locale/randomness rules, the Playwright acceptance bootstrap, the harness defense meta-tests, the frontend testing workflow documentation, the phase-5 boundary E2E regression, the OpenAPI type generator, committed generated API types, stable schema aliases, type-level contract assertions, generator drift gates, the single typed API client, normalized API failures, exact large-integer query identifiers, the query key factory, refresh policies, the visibility-aware polling hooks, query-layer coverage, session authentication, guarded routing, login/logout flows, single-flight 401 handling, auth/login coverage, the accessible state-primitives library, freshness plumbing, the phase-6 browser sign-in documentation, the phase-7 route tree/code-splitting boundary, the accessible application shell, the URL-backed time-range state, the shared page scaffolding primitives, resilient namespaced theme/density/sidebar preferences, global error/offline handling, the phase-7 README web-interface guide, the phase-7 boundary E2E regression, the fleet derivation library, cluster cards, agent-health surfacing, server-defined health semantics, degraded/error paths, Fleet Overview documentation, the phase-8 boundary E2E regression, the phase-9 boundary E2E regression, and the Cluster Detail documentation are covered. The replication derivation library, topology graph, lag charts, slots, configuration drift, event taxonomy/timeline, Cluster Detail route, degraded/error paths, UI-REPL/UI-CLUS tests, Instance Detail header, database selector, URL-backed database scope, unmonitored database visibility, metric tiles, time series, counter-reset annotations, host metrics, settings, change history, durability, relations, bloat, truncation, and the Instance Detail README guidance are covered. Phase 10 is complete and phase 11 is now complete: ASH derivation, stacked waits, drill-down, honest disabled/under-sampled/unattributable states, stale freshness, exactly-once unauthorized navigation, server-error retry, shared range-retention validation, permanent sampling-limit guidance, and the README wait-analysis guide are covered. Phase 12.1–12.7 and phase 13.1–13.6 are complete: statement ranking, execution-time shares, null-safe statement summaries, whitespace normalization, cluster/version comparability helpers, the complete Query Inspector, Locks and Activity derivation and views, command polling at the one-second policy, terminal-state polling stops, server and client expiry, agent rejection messaging, and no-retry command creation are covered. Phase 14.1–14.5 are complete: advisor findings ranking/grouping/summaries, authoritative catalogue joining, missing-rule preservation, frozen-clock mute expiry, the URL-backed findings list, severity/state/scope/cluster/instance filters, explicit hidden-state counts, degraded input/tier guidance, evidence rendering, findings accessibility coverage, server-confirmed mute/unmute controls, reason/expiry validation, non-optimistic mutation handling, muted-state remaining-time presentation, rule catalogue rendering/filtering, affirmative empty-state semantics, degraded-only honesty, stale data, exactly-once unauthorized navigation, retryable failures, and findings polling are covered. The next unit is phase 14.6, the findings documentation. |
 | **Phase file** | [phase_18.md](phase_18.md) |
 
@@ -144,9 +144,10 @@ final container matrix took 844.547s, with no residual Docker resources. The
 captured full-evidence artifact exited 0 after 4728s. The next unit is
 sub-phase 17.7.
 
-Sub-phase 17.7 is open: the README API examples are being rewritten to show
-session-cookie authentication (with the bootstrap-token equivalent) before
-any protected request. The required review gate is `agent-1:opus`.
+Sub-phase 17.7 is closed: the README API examples now show session-cookie
+authentication (with the bootstrap-token equivalent) before every protected
+request. The live curl acceptance and the required `agent-1:opus` review gate
+passed; the next unit is sub-phase 17.8.
 
 Phase 0 sub-phases 0.1–0.6, phase 1 sub-phases 1.1–1.6, phase 2 sub-phases 2.1–2.7, phase 3 sub-phases 3.1–3.6, phase 4 sub-phases 4.1–4.8, phase 5 sub-phases 5.1–5.11, phase 6 sub-phases 6.1–6.8, phase 7 sub-phases 7.1–7.7, phase 8 sub-phases 8.1–8.6, phase 9 sub-phases 9.1–9.7, phase 10 sub-phases 10.1–10.7, phase 11 sub-phases 11.1–11.6, sub-phases 12.1–12.7, 13.1–13.6, and 14.1–15.7 are closed; phases 14 and 15 are complete, and the next unit is 16.1.
 - Phases 5 through 15 are complete; phase 16 is next and sub-phase 16.1 is ready to open.
@@ -366,6 +367,7 @@ records start/end timestamps and elapsed time.
 | 17.4 | sub-phase | 17.4 | 2026-09-01 | Verify release packaging, image sizes, multi-arch builds, and deployment limits | verification-only; closed in this state update |
 | 17.5 | sub-phase | 17.5 | 2026-09-01 | Enforce the frontend bundle budget and preserve lazy visualization chunks | `0a4eb0a` |
 | 17.6 | sub-phase | 17.6 | 2026-09-02 | Complete the full regression sweep, durable evidence, and both UI acceptance modes | `59ea061` (test fixes); closed in this state update |
+| 17.7 | sub-phase | 17.7 | 2026-09-02 | Authenticate and validate every README API example | `891632b`; closed in this state update |
 
 ---
 
@@ -871,7 +873,7 @@ so the repository web gate is reproducibly green.
 
 ## §6 — In-flight work
 
-`claimed — sub-phase 17.7 README authentication rewrite in progress; preserve the operator-facing scope and validate every protected curl example.`
+`none — sub-phase 17.7 closed; sub-phase 17.8 is ready to open.`
 
 ---
 
@@ -1238,6 +1240,8 @@ so the repository web gate is reproducibly green.
 | 2026-09-02 | 17.6 | Targeted `AGENT_MODE=binary ... -run 'TestUI_PlanOnly'` | PASS | Final SYS-UI-006 retry passed in 108s after the binary UI harness used a 10s statement scrape, TopN 300, and API limit 300; cleanup 0/0. |
 | 2026-09-02 | 17.6 | Full UI container matrix `make test-ui-e2e` | PASS | All eleven UI scenarios passed in 844.547s; cleanup 0 containers and 0 networks. |
 | 2026-09-02 | 17.6 | Full UI binary matrix `AGENT_MODE=binary make test-ui-e2e` | PASS | All eleven UI scenarios passed in 714.735s; cleanup 0 containers and 0 networks. |
+| 2026-09-02 | 17.7 | README protected-curl live acceptance on isolated server `127.0.0.1:18080` | PASS | Session login 204; all documented protected read endpoints (clusters, topology, replication, instances, locks, activity, metrics/query, events, statements, ASH, settings, alerts, advisor and audit) returned 200; silence create/delete returned 201/204; finding mute returned 200; exact on-demand example returned 202/200/200/200 for create/command/plans/audit; Bearer returned 200; public healthz/readyz/metrics returned 200. `git diff --check` passed. |
+| 2026-09-02 | 17.7 review | `agent-1:opus` read-only README gate | PASS | Full README reviewed after correcting the Advisor sample timestamp and explicitly excluding `POST /api/v1/session` from the protected-route rule; no anonymous protected curl remained. |
 
 Sub-phase 17.4 must record the server image size before and after the frontend
 is embedded. Sub-phase 17.5 must record the measured initial and lazy chunk
@@ -1310,6 +1314,7 @@ reconstruct.
 | 54 | 17.6 | The first durable-evidence run exposed command query-id string handling, semantic command expectations, and SYS-UI-001 freshness timing. | Preserved lossless query ids, aligned the command assertions, and made the acceptance poll/reload the server-confirmed state; the final captured evidence run passed. | yes — §5 and §7 |
 | 55 | 17.6 | Binary SYS-UI-006 initially scraped too late and then requested only the top 50 statements, so the short catalog workload was not discoverable. | UI binary uses a 10s scrape interval and TopN 300, while SYS-UI-006 reads limit 300; the targeted and full binary matrices passed. | yes — `test/harness/harness.go`, `web/e2e/ui_acceptance.spec.ts`, and §7 |
 | 56 | 17.6 | A detached long-run launcher ended during the web-build recipe without a status file, so its result was unusable. | Re-ran the matrix in a persistent PTY session and captured the reliable Go test result and cleanup counts. | yes — §7 |
+| 57 | 17.7 | The Advisor example had drifted timestamps between its request (`2026`) and sample response (`2030`), and the HTTP API authentication sentence omitted the login exception. | Updated both timestamps to the future `2030-08-29T11:00:00Z` value and stated the explicit `POST /api/v1/session` exception; the corrected commands and outputs were revalidated live. | yes — §7 |
 
 ## §9 — Blockers and open questions
 
@@ -1364,7 +1369,7 @@ Neither Q-C nor Q-D blocks any sub-phase. Do not stop to ask.
 | 14 | [phase_15.md](phase_15.md) | Advisor findings | `agent-2:sonnet` | — | DONE — 6/6 sub-phases closed |
 | 15 | [phase_16.md](phase_16.md) | Alerts, silences, rules, events | `agent-2:sonnet` | 15.3 | DONE — 7/7 sub-phases closed |
 | 16 | [phase_17.md](phase_17.md) | Settings and fleet inventory | `agent-2:sonnet` | — | DONE — 5/5 sub-phases closed; boundary gates passed |
-| 17 | [phase_18.md](phase_18.md) | Packaging, UI acceptance suite, documentation | `agent-2:sonnet` / `agent-3:haiku` | 17.2, 17.7, 17.8 | IN PROGRESS — 6/8 sub-phases closed; 17.7 OPEN |
+| 17 | [phase_18.md](phase_18.md) | Packaging, UI acceptance suite, documentation | `agent-2:sonnet` / `agent-3:haiku` | 17.2, 17.7, 17.8 | IN PROGRESS — 7/8 sub-phases closed; 17.8 READY |
 
 `agent-1:opus` owns every review gate listed above and approves each phase before
 the next one opens.
@@ -1495,8 +1500,8 @@ the next one opens.
 | 17.4 | Release packaging | `agent-2:sonnet` | DONE |
 | 17.5 | Performance and bundle budget | `agent-2:sonnet` | DONE |
 | 17.6 | Full regression sweep | `agent-2:sonnet` | DONE |
-| 17.7 | Rewrite the README's API examples for authentication | `agent-3:haiku` | IN PROGRESS |
-| 17.8 | Final documentation | `agent-3:haiku` | TODO |
+| 17.7 | Rewrite the README's API examples for authentication | `agent-3:haiku` | DONE |
+| 17.8 | Final documentation | `agent-3:haiku` | READY |
 
 ### Tests
 
@@ -1605,7 +1610,7 @@ undocumented feature is an unshipped one.
 | README — Advisor findings | 14.6 | Four states, `degraded`, mute semantics, catalogue | OPEN |
 | README — Alerts | 15.7 | Alerts, rules, silences, channels | DONE |
 | README — Settings | 16.5 | Inventory, tiers, audit, what does not exist | DONE |
-| README — API examples | 17.7 | Every `curl` example carries a credential and was run | TODO |
+| README — API examples | 17.7 | Every `curl` example carries a credential and was run | DONE |
 | Final documentation | 17.8 | README, LIMITS, TESTING, CONTRIBUTING coherent as one document | TODO |
 
 ### Audits
