@@ -91,14 +91,15 @@ func init() {
 			// any session had even connected) through startTS+45s, diluting
 			// the average with ramp-up/ramp-down windows that never had all
 			// 10 sessions active — observed live as 7.06 avg instead of ~10.
-			// windowStart is comfortably after allActiveTS (all 10 confirmed
-			// running); windowEnd stays comfortably before the earliest
-			// possible completion (sessions sleep the same duration from
-			// their own individually-staggered start, so the first one
-			// finishes at startTS+sleepSeconds at the earliest).
-			windowStart := allActiveTS.Add(2 * time.Second)
+			// A row's ts is the flush time at the end of its 10s window. Only
+			// count rows whose complete window starts after allActiveTS; this
+			// avoids including an edge window that began during connection
+			// ramp-up. windowEnd stays comfortably before the earliest possible
+			// completion (sessions sleep the same duration from their own
+			// individually-staggered start, so the first one finishes at
+			// startTS+sleepSeconds at the earliest).
 			windowEnd := startTS.Add(time.Duration(sleepSeconds)*time.Second - 5*time.Second)
-			if !windowStart.Before(windowEnd) {
+			if !allActiveTS.Add(10 * time.Second).Before(windowEnd) {
 				return fmt.Errorf("no safe measurement window: sessions became active too close to their own end (allActiveTS=%s, deadline=%s)", allActiveTS, windowEnd)
 			}
 
@@ -109,9 +110,11 @@ func init() {
 			rows, err := e.DB.Query(ctx, `
 				SELECT SUM(samples) AS total_samples, MAX(window_ticks) AS ticks
 				FROM metrics_ash
-				WHERE instance_id=$1::uuid AND ts >= $2 AND ts <= $3
+				WHERE instance_id=$1::uuid
+				  AND ts - interval '10 seconds' >= $2
+				  AND ts <= $3
 				GROUP BY ts`,
-				instanceID, windowStart, windowEnd)
+				instanceID, allActiveTS, windowEnd)
 			if err != nil {
 				return fmt.Errorf("query ASH windows: %w", err)
 			}

@@ -425,6 +425,7 @@ checks:
   activity: { interval: 5s }
   database_stats: { interval: 5s }
   replication_slots: { interval: 5s }
+  table_stats: { interval: 5s }
   # Keep the non-UI cadence aligned with the cardinality workload's 65s
   # rotations. UI binary runs override it to 10s above so short workloads
   # become observable within the browser acceptance polling window.
@@ -761,37 +762,30 @@ func (h *Harness) ExecAs(service, user string, argv ...string) (string, error) {
 // Compose runs a docker-compose command.
 func (h *Harness) Compose(argv ...string) error {
 	// In binary mode, the pglens-agent service doesn't exist (it's a host
-	// subprocess). If a scenario tries to restart it, handle that by killing
-	// and respawning the subprocess. A stop is intentionally terminal: it is
-	// used by UI acceptance tests to exercise the agent-down state.
-	if h.agentMode == AgentModeBinary && len(argv) >= 2 && argv[0] == "stop" && argv[1] == "pglens-agent" {
-		if h.agentCmd == nil || h.agentCmd.Process == nil {
-			return fmt.Errorf("pglens-agent binary is not running")
+	// subprocess). Translate every lifecycle operation used by scenarios to
+	// the equivalent subprocess operation. A stop/kill is intentionally
+	// terminal until a later start/up, which is how UI and command tests
+	// exercise the agent-down state.
+	if h.agentMode == AgentModeBinary && composeHasService(argv, "pglens-agent") {
+		switch argv[0] {
+		case "stop", "kill":
+			return h.stopAgentBinary()
+		case "restart":
+			if err := h.stopAgentBinary(); err != nil {
+				return fmt.Errorf("restart pglens-agent binary: %w", err)
+			}
+			return h.startAgentBinary()
+		case "start", "up":
+			if h.agentBinaryRunning() {
+				return nil
+			}
+			if h.agentCmd != nil {
+				if err := h.stopAgentBinary(); err != nil {
+					return fmt.Errorf("reap pglens-agent binary: %w", err)
+				}
+			}
+			return h.startAgentBinary()
 		}
-		if err := h.agentCmd.Process.Kill(); err != nil {
-			return fmt.Errorf("stop pglens-agent binary: %w", err)
-		}
-		_ = h.agentCmd.Wait()
-		return nil
-	}
-	if h.agentMode == AgentModeBinary && len(argv) >= 2 && argv[0] == "restart" && argv[1] == "pglens-agent" {
-		if h.agentCmd == nil || h.agentCmd.Process == nil {
-			return fmt.Errorf("agent subprocess not running (cannot restart)")
-		}
-		// Kill the subprocess
-		if err := h.agentCmd.Process.Kill(); err != nil {
-			return fmt.Errorf("kill agent subprocess: %w", err)
-		}
-		// Wait for it to exit
-		if err := h.agentCmd.Wait(); err != nil {
-			// Kill might exit with error; that's OK
-		}
-		// Close the log file
-		if h.agentLogFile != nil {
-			h.agentLogFile.Close()
-		}
-		// Respawn the agent
-		return h.startAgentBinary()
 	}
 	_, err := h.composeOutput(argv...)
 	if err != nil {
@@ -861,19 +855,52 @@ func (h *Harness) reconcileAgentBinaryPort(service string) error {
 		return nil // port unchanged, nothing to reconnect
 	}
 
-	if h.agentCmd == nil || h.agentCmd.Process == nil {
+	if !h.agentBinaryRunning() {
+		if h.agentCmd != nil {
+			_ = h.stopAgentBinary()
+		}
 		return nil // agent subprocess not started yet
 	}
-	if err := h.agentCmd.Process.Kill(); err != nil {
-		return fmt.Errorf("kill agent subprocess for port reconcile: %w", err)
-	}
-	if err := h.agentCmd.Wait(); err != nil {
-		// Kill might exit with error; that's OK
-	}
-	if h.agentLogFile != nil {
-		h.agentLogFile.Close()
+	if err := h.stopAgentBinary(); err != nil {
+		return fmt.Errorf("stop agent subprocess for port reconcile: %w", err)
 	}
 	return h.startAgentBinary()
+}
+
+func composeHasService(argv []string, service string) bool {
+	if len(argv) < 2 {
+		return false
+	}
+	for _, arg := range argv[1:] {
+		if arg == service {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *Harness) agentBinaryRunning() bool {
+	return h.agentCmd != nil && h.agentCmd.Process != nil && h.agentCmd.ProcessState == nil
+}
+
+func (h *Harness) stopAgentBinary() error {
+	if h.agentCmd == nil {
+		return nil
+	}
+	cmd := h.agentCmd
+	if cmd.Process != nil && cmd.ProcessState == nil {
+		// The child is owned by the harness; a concurrent exit is harmless and
+		// is reaped below. Ignoring Kill's race-prone error avoids turning a
+		// legitimate already-exited subprocess into a scenario failure.
+		_ = cmd.Process.Kill()
+	}
+	_ = cmd.Wait()
+	if h.agentLogFile != nil {
+		_ = h.agentLogFile.Close()
+		h.agentLogFile = nil
+	}
+	h.agentCmd = nil
+	return nil
 }
 
 // Logs returns a service's captured stdout/stderr (docker compose logs).
