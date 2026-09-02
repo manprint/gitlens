@@ -4,17 +4,35 @@
 
 ## Checks required before submitting
 
-Changes to the web interface must pass the frontend gates:
+Every change must pass the relevant Go and web gates. The complete local gate
+is:
 
 ```sh
+make fmt-check
+make lint
+make build
+make test
+make coverage-gate
 make web-install
 make web-lint
 make web-typecheck
+make web-test
+make web-coverage-gate
 make web-build
+make web-budget
+make test-integration
+make test-e2e
+AGENT_MODE=binary make test-e2e
+make test-ui-e2e
+AGENT_MODE=binary make test-ui-e2e
 ```
 
-`make ci-local-unit` runs these gates together with the Go formatting, lint,
-build, unit-test, and coverage checks.
+`make ci-local` runs the Go and web build, lint, unit, coverage, budget, and
+integration gates. The two E2E commands and the two UI acceptance commands are
+listed separately because they use Docker and take longer. Run
+`make test-e2e-full` when a change affects shared harness or cross-service
+behaviour; use `make test-e2e-full-evidence` when a durable result log is
+required.
 
 - **L1 — Unit tests** (`make test`). Pure logic, no I/O, no Docker. Uses fake clock where timing is needed (the `clock.Frozen` fake time and `test.Eventually`/`Consistently` in harness for polling, never `time.Sleep`). Tests pass `-race -shuffle=on` for data-race detection and randomized execution order. Runs in seconds.
   - Belongs here: parsing, validation, calculations, marshaling, single-component behavior.
@@ -29,7 +47,9 @@ build, unit-test, and coverage checks.
   - Smoke subset: ~10 minutes. Full suite: ~60 minutes.
   - Requires: Docker, ports 8080 (server), 5432+ (PostgreSQL), 8474 (Toxiproxy).
 
-- **L4/L5** — frontend/API testing and performance profiling (not in this plan; documented in `TESTING.md` but unimplemented).
+- **L4/L5** — frontend/API testing and performance profiling. L4 uses Vitest;
+  L5 uses Playwright against the real stack. The frontend gates and acceptance
+  scenarios are documented in `TESTING.md`.
 
 **Key principle:** No `time.Sleep` anywhere except background wait loops. Use `Eventually` (poll 200ms, return last error), `Consistently` (assert non-event for a window), or `clock.Frozen` (fake time in tests that need absolute timing).
 
@@ -37,14 +57,20 @@ build, unit-test, and coverage checks.
 
 1. Put the acceptance test in `test/e2e/<area>_test.go` and its scenario metadata in `test/e2e/scenarios/<area>.yml`. Reuse the compose and fixture files under `test/compose/` and `test/fixtures/`; add a new stack only when the existing topologies cannot express the failure.
 2. Give the scenario a stable id in the form `SYS-<AREA>-<NNN>` and use that exact id in the Go test, metadata and assertions.
-3. Register the id in `docs/plans/002_plan-AnalysisBackend/STATE.md` §11 test table before closing the change. An id in code but not the table, or in the table but not code, is incomplete.
+3. Register the id in the scenario catalogue and metadata before closing the
+   change. An id in code but not the catalogue, or in the catalogue but not
+   code, is incomplete.
 4. Exercise the scenario with the E2E command, for example:
 
 ```sh
 go test -tags=e2e -timeout=8m ./test/e2e -run '^TestFull_Archiving$' -count=1 -v
 ```
 
-5. The test must call the harness invariant check, clean up all resources through `t.Cleanup`, and use the five rules below. Run `make test-e2e` at a complete phase boundary or when the change affects shared harness or cross-service behaviour; there is no need to repeat this long suite after every frontend sub-phase. Run `make test-e2e-full` when the scenario changes shared harness behavior.
+5. The test must call the harness invariant check, clean up all resources through
+   `t.Cleanup`, and use the five rules below. Run `make test-e2e` when the
+   change affects shared harness or cross-service behaviour, or at an
+   integration milestone. Run `make test-e2e-full` when the scenario changes
+   shared harness behaviour.
 
 ## Reading a CI failure
 
@@ -80,8 +106,7 @@ This runs `go test -tags=integration -run Golden -update ./internal/wire`.
 
 ## Anti-flake rules
 
-**The five rules that keep L3 from becoming flaky**, learned in plan 001 and
-non-negotiable here:
+**The five rules that keep L3 from becoming flaky** are non-negotiable here:
 
 1. **Never `sleep` to wait for a condition.** Poll the condition with a deadline.
    The helper is `e2e.Eventually(t, timeout, interval, func() bool)`.
@@ -103,4 +128,4 @@ cmd/pglens-agent/  cmd/pglens-server/  internal/{pgtype,clock,identity,delta,car
 deploy/sql/ deploy/compose/ test/{pgtest,fixtures,harness,compose,scenario,workload}
 ```
 
-Follow this layout; no new top-level directory unless the plan names it.
+Follow this layout; justify and document any new top-level directory.

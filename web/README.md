@@ -21,6 +21,20 @@ Open the Vite address shown in the terminal, normally `http://localhost:5173`.
 Requests to `/api` are proxied to the local server on `:8080`, so the browser
 uses the same API and authentication flow as the built interface.
 
+For a production-style server-served build, run the repository commands from
+the project root:
+
+```sh
+make web-build
+make web-lint
+make web-typecheck
+make web-test
+```
+
+The built assets are embedded in the server image or binary. The server serves
+them at `/`; the Vite development server is only needed for an iterative local
+frontend session.
+
 ## Layout
 
 ```text
@@ -56,7 +70,5 @@ functions have already derived.
 
 TypeScript is pinned to `6.0.3` because `typescript-eslint@8.68.0` requires
 TypeScript `<6.1.0`; revisit the pin when typed linting supports a newer
-TypeScript release.
-
-The frontend scaffold and its workflow are tracked in
-`docs/plans/003_plan-Frontend/phase_05.md`.
+TypeScript release. Keep the lockfile and the pinned version in sync when
+updating the frontend toolchain.

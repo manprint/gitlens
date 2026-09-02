@@ -73,8 +73,21 @@ the PostgreSQL 18 compatibility work.
 ## 10. Tenant separation is not an isolation boundary
 
 The schema carries `tenant_id` through the data model, but the current product
-uses one shared password for browser/API sessions and does not identify users or
-separate tenants. There is no per-user audit trail and no user/tenant role model;
-in practice this is a single-tenant deployment. A session cookie does not survive
-a server restart, and session authentication is not a substitute for network
-controls or an authorization boundary. Do not treat `tenant_id` as one.
+does not provide per-tenant isolation or a user/tenant role model. There is no
+per-tenant data boundary or per-user audit trail; in practice this is a
+single-tenant deployment. Do not treat `tenant_id` as an authorization boundary.
+
+## 11. Authentication is shared
+
+Browser and API sessions use one deployment-wide `PGLENS_UI_PASSWORD`. pglens
+does not provide user accounts, roles, or per-user permissions. The session
+cookie is temporary and is lost when the server restarts, so operators must sign
+in again. Protect the service with the network controls appropriate to the
+deployment; a session is not a substitute for an authorization boundary.
+
+## 12. Pooler state is outside the product view
+
+pglens connects to PostgreSQL instances and does not expose a pooler view. It
+does not report pool sizes, queue depth, transaction-pooling state, or pooler
+health. When PgBouncer or another pooler is in use, inspect and alert on that
+component separately.

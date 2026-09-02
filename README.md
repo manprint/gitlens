@@ -4,11 +4,11 @@ pglens is a self-hostable monitoring system for fleets of PostgreSQL instances, 
 
 ## Project status
 
-The backend implementation is complete through phase 10 of the analysis-backend
-plan. It ships the agent, server, durable ingest, replication/topology views,
-ASH, alerts, advisor findings, on-demand command gates, deployment artefacts,
-and the L1–L3 verification suites. The frontend/UI currently ships as a minimal
-under-construction shell; the product views are being delivered incrementally.
+The repository ships the agent, server, durable ingest, replication/topology
+views, ASH, alerts, advisor findings, on-demand command gates, deployment
+artefacts, and the Go and web verification suites. `pglens-server` also serves
+the real web interface: Fleet, Cluster, Instance, Wait-event analysis, Queries,
+Locks, Advisor, Alerts, and Settings.
 
 For the product boundary and the behaviour that is intentionally not promised,
 see [Product limits](docs/LIMITS.md).
@@ -46,11 +46,13 @@ make build-images-multiarch # linux/amd64 + linux/arm64 via docker buildx
 ## Running the checks
 
 ```sh
+make web-install
 make web-lint
 make web-typecheck
 make web-build
 make web-test
 make web-coverage-gate
+make web-budget
 ```
 
 These commands cover frontend formatting/linting, TypeScript checking, and the
@@ -67,9 +69,12 @@ export PGLENS_MONITORING_PASSWORD='<password>'
 psql "$PGLENS_DSN" -v pglens_password="$PGLENS_MONITORING_PASSWORD" \
   -v dbname=postgres -f deploy/sql/monitoring_user.sql
 
-# 2. Configure the agent and start the stack
-# Edit deploy/agent.example.yaml with your target DSN and set a real token.
+# 2. Configure the agent, enable the web interface, and build the local images
+# Keep the defaults for the self-contained example, or edit
+# deploy/agent.example.yaml with your target DSN.
 export PGLENS_BOOTSTRAP_TOKEN=dev-token
+export PGLENS_UI_PASSWORD=dev-password
+make build-images
 docker compose -f deploy/docker-compose.yml up -d
 
 # 3. Check that data is appearing
@@ -145,9 +150,10 @@ The server applies migrations on startup (forward-only, idempotent) and listens 
 The web interface is served by the server itself on the same address as the API:
 `http://<host>:8080/`. Set `PGLENS_UI_PASSWORD` (see the configuration table
 below) for the interface to be usable, or set `PGLENS_UI_ENABLED=false` to turn
-it off while leaving the API available. A binary built without running the
-frontend build serves a placeholder page that explains how to build the
-interface.
+it off while leaving the API available. The published container image includes
+the web assets. A local binary built with `make build` uses the committed
+fallback page; run `make web-build` before `make build` when building the
+interface into that binary.
 
 **Binary:**
 
@@ -169,66 +175,68 @@ a server restart, and signing out clears it.
 
 ### Web interface
 
-After signing in, the shell provides Fleet, Findings, Alerts, and Settings
-navigation, plus the shared time-range control, freshness indicator, theme
-toggle, and connection status.
+After signing in, the interface provides shared navigation, a time-range
+control, freshness and connection status, and a theme toggle. The pages are:
 
-The Fleet Overview shows monitored clusters in health order, with their health,
-instances, firing alerts, and replication lag; a missing lag is shown as
-`Unknown`, never as zero. An agent that is down or has stopped reporting appears
-at the top with its likely cause and a link to troubleshooting. If a cluster is
-identified by `cluster_name` rather than `system_identifier`, the page flags that
-identity and links to **Setting up the monitoring role** for the grant
-instructions.
+#### Fleet
 
-Selecting a cluster opens its detail view. From there, the replication story is
-available in one place: topology, lag, slot health, configuration drift, and
-the event timeline, with the same time-range control used by the rest of the
-interface.
+Fleet Overview groups monitored instances by cluster and health, showing
+firing alerts, replication lag, stale agents, and identity warnings. Missing
+lag is shown as `Unknown`, never as zero.
 
-Selecting an instance opens Instance Detail. Choose a database to scope its
-metrics; the selector also shows how many databases are not monitored, so an
-empty panel is not mistaken for complete coverage. Standby instances are
-marked read-only, and every panel keeps the distinction between measured,
-stale, unavailable, and truncated data visible:
+#### Cluster
 
-- Counter resets appear as gaps with an annotation rather than a misleading
-  negative or zero rate.
-- Host metrics identify their source and say explicitly when the host cannot
-  provide them.
-- Settings show pending restarts and redact `archive_command` arguments with
-  an explanation.
-- Relation tables show a top-N truncation notice when the shared budget omits
-  rows; bloat values are estimates, not measurements.
+Cluster Detail brings together topology, replication lag, slot health,
+configuration drift, and the event timeline. A failover keeps the same
+`cluster_id`, so the cluster remains one continuous story.
 
-The Query Inspector lists statements collected by `pg_stat_statements` and
-keeps their on-demand operations explicit. Select a statement to request a
-plan-only `EXPLAIN` (permission tier T1), or choose `EXPLAIN ANALYZE` only
-after the UI confirmation; ANALYZE also requires T2 and the target's
-`allow_explain_analyze` policy. Persisted plan history contains only plans
-that were explicitly requested, and comparisons are limited to plans from
-the same cluster because query IDs are not portable across clusters.
+#### Instance
 
-The Locks and Activity page shows the latest stored blocking tree and session
-activity for an instance. The blocking tree is a ten-second sample, not a live
-view, so a shorter contention episode can be missed; the page distinguishes
-"no sample yet" from "no lock contention in the latest sample" and shows the
-sample's own timestamp. Activity breakdowns are shown per state and database;
-application counts appear only when the agent has opted in. For a target client
-backend, the page offers per-session cancel and terminate actions only at T2
-when the target's `allow_signal` policy permits them. Each action requires
-confirmation naming the session and query, and its terminal result links to the
-command audit. See [Known limits](#known-limits) for the sampling and
-contention boundaries.
+Instance Detail scopes metrics by database and makes unmonitored databases
+visible. It labels measured, stale, unavailable, and truncated data; shows
+counter-reset gaps, host-metric availability, pending settings restarts,
+redacted `archive_command` values, and relation-budget notices.
 
-The Settings page lists every monitored instance and its databases, including
-databases that are not monitored and the reported reason (for example, a
-database budget); it also summarises permission tiers T0, T1 and T2 with the
-advisor rules and actions each tier unlocks. The command audit shows what was
-requested, its arguments, outcome, timing, expiry or rejection, and records
-actions rather than operator identities. The interface has no user accounts,
-roles, enrollment approval queue, or agent-revocation control; revoke an agent
-with the documented SQL operation under [Configuration](#configuration).
+#### Wait-event analysis
+
+The Wait-event analysis page charts sampled activity and supports drill-down
+from wait-event type to wait event and query. It reports under-sampling, a
+disabled ASH check, missing query attribution, and the `other` aggregate
+explicitly.
+
+#### Queries
+
+Query Inspector lists statements collected by `pg_stat_statements`. Operators
+can request a plan-only `EXPLAIN` at T1; `EXPLAIN ANALYZE` requires confirmation,
+T2, and the target's `allow_explain_analyze` policy. Plan history contains only
+explicit requests and comparisons stay within one cluster.
+
+#### Locks and activity
+
+Locks and Activity shows the latest blocking-tree sample and session activity,
+with clear empty, stale, and unavailable states. At T2, and only when
+`allow_signal` permits it, an operator can confirm cancellation or termination
+of a target client backend; the result is recorded in command audit.
+
+#### Advisor
+
+Advisor ranks findings and explains whether each rule is open, degraded, muted,
+or resolved. Its rule catalogue shows inputs, scope, severity, affected
+targets, and the minimum permission tier. Muting requires a reason and expiry.
+
+#### Alerts
+
+Alerts shows firing and suppressed alerts, editable rules where permitted,
+silences with their preview, and the fleet-wide event timeline. Suppression
+does not resolve an alert; delivery remains configured separately for Slack or
+generic webhooks.
+
+#### Settings
+
+Settings lists instances and databases, summarizes permission tiers and
+available actions, and exposes the command audit. The audit records requests,
+arguments, outcomes, timing, expiry, or rejection; it does not identify an
+operator.
 
 The selected time range is reflected in the URL, so a view can be shared as a
 link. Keyboard shortcuts are available for the main destinations and filters:
@@ -329,7 +337,11 @@ The server evaluates ten built-in Tier 0 rules: `agent_down`, `instance_unreacha
 
 Configure Slack or a generic webhook with the variables above. A silence suppresses notification while the alert remains visible and continues to be evaluated.
 
-The web interface provides an Alerts page with suppression details, an Alert Rules page that keeps Tier 0 rules always on and read-only while allowing Tier 1 edits, a Silences page that previews which currently firing alerts would be suppressed before creation, and a fleet-wide Events page with time-range, cluster, type, and limit filters that explains when the server's 1,000-event cap is reached; if no channel is configured, alerts are persisted but not delivered, and suppression is never resolution. Delivery remains limited to Slack via `PGLENS_ALERT_SLACK_WEBHOOK_URL` or `PGLENS_ALERT_SLACK_WEBHOOK_URL_FILE` (with the accepted legacy `PGLENS_SLACK_WEBHOOK_URL` aliases) and generic webhooks via `PGLENS_WEBHOOK_URL`.
+Alerts are persisted and evaluated even when no delivery channel is configured.
+Delivery remains limited to Slack via `PGLENS_ALERT_SLACK_WEBHOOK_URL` or
+`PGLENS_ALERT_SLACK_WEBHOOK_URL_FILE` (with the accepted legacy
+`PGLENS_SLACK_WEBHOOK_URL` aliases) and generic webhooks via
+`PGLENS_WEBHOOK_URL`.
 
 Run the HTTP API sign-in block once before these examples; reuse its
 `cookies.txt` for every protected request.
@@ -394,7 +406,9 @@ The catalogue response is a JSON array, for example:
 [{"id":"query.slow_mean","severity":"warning","scope":"instance","needs":["Statements"],"min_tier":"T0"}]
 ```
 
-From the signed-in web interface, open **Findings** to review the same ranked results with URL-backed state, severity, scope, cluster, instance, and catalogue filters, plus freshness and retry feedback when data ages or an endpoint fails. The four states retain their operational meaning: `open` is currently firing, `muted` is temporarily hidden, `resolved` stopped firing on a later evaluation, and `degraded` could not be evaluated because a required metric, check, permission tier, history window, or host view is unavailable; a degraded rule is not a pass and an empty result reports how many rules were evaluated. Muting never resolves or deletes a finding: the operator must provide a reason and a future expiry, after which the next evaluation restores the real state unless the mute is removed earlier. The **Advisor rule catalogue** shows every live rule, its inputs, scope, severity, firing/non-evaluable targets, and minimum permission tier, so the tier filter makes clear which rules a higher grant would unlock; findings are based on collected statistics, while index recommendations remain candidates for review.
+Findings are based on collected statistics, while index recommendations remain
+candidates for review. The Advisor page described above exposes the same ranked
+results and their freshness state.
 
 ### Advisor rule catalogue
 
@@ -1150,15 +1164,6 @@ curl -s -b cookies.txt localhost:8080/api/v1/clusters/7381927364512345678/topolo
 curl -s -b cookies.txt "localhost:8080/api/v1/clusters/7381927364512345678/replication?from=$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)&to=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | jq '.edges[] | select(.metric=="replay_lag_sec")'
 ```
 
-**Cluster Detail:** Open a cluster from the Fleet Overview to see its topology
-graph and the replication evidence behind the current health. Dashed edges
-identify upstreams that could not be resolved. Lag is plotted over the selected
-range, and missing intervals remain visible as gaps rather than being drawn as
-zero. The view also includes replication slot health, configuration drift, and
-the event timeline, including failover history. The `cluster_id` shown in the
-view is byte-identical before and after a failover or promote, so the same
-cluster remains one continuous story.
-
 The `cluster_id` returned by these endpoints is byte-identical before and after a failover or promote, proving invariant I-1 is honored.
 
 ## Wait-event analysis
@@ -1166,8 +1171,6 @@ The `cluster_id` returned by these endpoints is byte-identical before and after 
 What it answers: where the database is spending its time, right now and historically. It samples `pg_stat_activity` once per second, aggregates into 10-second windows, and stores the sample counts by wait event. No extension or restart required — it works on managed PostgreSQL including Amazon RDS.
 
 `compute_query_id = on` is strongly recommended. Without it, samples cannot be attributed to a query and ASH loses much of its value. The server logs a warning once if `compute_query_id` is off.
-
-In the web UI, the Wait-event analysis page presents the samples as a stacked chart and lets you drill from a wait-event type to an individual wait event and then to a query. The `other` series is a fold of entries beyond the per-window retention limit, not a PostgreSQL wait event. When a range is under-sampled, the page shows the collected sample count and warns that conclusions are unreliable; when ASH is disabled it explains the `checks.ash` setting and the sampling-cost trade-off, and when `compute_query_id` is off it explains why query attribution is unavailable and points to the required configuration.
 
 Query by wait event type:
 
@@ -1431,11 +1434,18 @@ the server is rejected, so upgrade the server before upgrading agents.
 - **Fewer than 60 samples is not statistically meaningful.** When a requested time range contains fewer than 60 total samples across all wait events, the API response includes a `warning` field to alert you that results may be unreliable. This is a built-in guard against drawing conclusions from too-small a sample set.
 - **At most 100 distinct wait keys per 10-second window.** When more than 100 unique combinations of (database, wait_event_type, wait_event, state, query) appear in a single 10-second window, the top 99 by sample count are kept individually and the remainder is folded into an `other` bucket. The total sample count is always conserved exactly (never underestimated), making this a safe operation for producing aggregate statistics.
 
+**Web interface:**
+- **One shared password, no user accounts or roles.** Browser and API sessions use the deployment's shared `PGLENS_UI_PASSWORD`; the interface does not provide per-user identity, roles, or a per-user audit trail.
+- **Sessions are lost on restart.** Operators must sign in again after the server restarts; the session is not a durable credential.
+- **No pooler view.** pglens does not display pooler queues, pool sizes, or pooler health; inspect a pooler separately when one sits in front of PostgreSQL.
+- **Polling bounds freshness.** The interface refreshes on a polling cadence rather than a streaming connection, so displayed data can be as old as the applicable poll interval and storage delay.
+- **Responsive minimum only.** The interface is designed for desktop operations and has no dedicated mobile layout beyond a responsive minimum.
+
 ## Contributing
 
 Build, lint, and test commands are documented above. Before opening a change,
-read [CONTRIBUTING.md](CONTRIBUTING.md) and keep implementation and plan state
-in sync with the active phase.
+read [CONTRIBUTING.md](CONTRIBUTING.md) and keep the implementation, tests, and
+operator documentation in sync.
 
 ## Licence
 

@@ -29,8 +29,8 @@ Da qui discendono i principi non negoziabili:
 
 ## 1. I cinque livelli
 
-> **Nota:** L4 e L5 sono i livelli frontend del piano 003; la loro architettura
-> normativa è descritta in [`web/docs/testing.md`](web/docs/testing.md).
+> **Nota:** L4 e L5 sono i livelli frontend; la loro architettura normativa è
+> descritta in [`web/docs/testing.md`](web/docs/testing.md).
 
 | L | Nome | Cosa verifica | Dove | Stack | Postgres reale? | Gira su | Budget |
 |---|------|---------------|------|-------|-----------------|---------|--------|
@@ -40,7 +40,7 @@ Da qui discendono i principi non negoziabili:
 | **L4** | Component frontend | Componenti React con logica: formattazione, stati vuoto/errore/gap, form validation, riduttori di filtro | `web/src/**/*.test.{ts,tsx}` | Vitest + Testing Library + MSW | ❌ API mockata | ogni PR | **< 90s** |
 | **L5** | E2E frontend | Il browser vede la verità: click, form, drill-down, grafici, permessi UI, stati degradati | `web/e2e/` | Playwright | ✅ contro stack L3 | PR (smoke) / nightly (full) | **8 min / 20 min** |
 
-### Frontend — piano 003
+### Frontend
 
 I quattro tipi di test frontend si innestano nella tassonomia L1–L5 già usata
 dal repository. La regola è scegliere il livello più basso che dimostra il
@@ -52,7 +52,7 @@ browser e lo stack reale.
 | **pure** | L1 | Funzioni deterministiche di derivazione, senza React o DOM | `web/src/lib/**/*.test.ts` | `make web-test` |
 | **component** | L1 | Un albero React con jsdom, Testing Library e MSW | `web/src/components/**/*.test.tsx`, `web/src/features/**/*.test.tsx` | `make web-test` |
 | **route** | L2 UI | Una pagina completa con router, provider e query client | `web/src/features/**/<page>.route.test.tsx` | `make web-test` |
-| **acceptance** | L3 | Un browser reale contro lo stack reale | `web/e2e/**/*.spec.ts` | `make test-ui-e2e` (da fase 17) |
+| **acceptance** | L3 | Un browser reale contro lo stack reale | `web/e2e/**/*.spec.ts` | `make test-ui-e2e` |
 
 I test `pure`, `component` e `route` usano il clock deterministico, fixture
 validate contro `api/openapi.yaml`, MSW per l'IO HTTP e `expectNoA11yViolations`
@@ -64,13 +64,13 @@ per le route. Le regole vincolanti sono in
 ```sh
 make web-test             # tutti i test Vitest L1/L2 UI
 make web-coverage-gate    # test Vitest + floor V8
-make test-ui-e2e           # Playwright L3, disponibile dalla fase 17
+make test-ui-e2e           # Playwright L3, browser reale contro immagini locali
 ```
 
-`make test-ui-e2e` non fa parte del gate locale fino a quando la fase 17 non
-aggiunge il target e il relativo harness. L'E2E frontend si esegue alla
-chiusura di una fase completa o quando una modifica tocca direttamente il
-flusso di accettazione; non è richiesto dopo ogni test unitario.
+`make test-ui-e2e` richiede Docker, costruisce gli asset web e le immagini
+locali, quindi esegue l'accettazione con Chromium contro lo stack reale. È un
+gate mirato alle modifiche che toccano il flusso UI o alla chiusura di un
+milestone dell'interfaccia; non è necessario dopo ogni test unitario.
 
 #### Floor di copertura frontend
 
@@ -261,7 +261,7 @@ Il fuzzing nativo di Go è obbligatorio su tutto ciò che parsa input non fidato
 | Parsing LSN (`0/16B3748`) e differenza tra LSN | overflow, wrap, formati non validi |
 | Decoder payload protobuf lato server | input da rete, potenzialmente ostile |
 | Parser `primary_conninfo` | stringa arbitraria scritta dall'utente |
-| Parser csvlog/jsonlog Postgres (Phase 2) | righe troncate, multilinea, encoding |
+| Parser csvlog/jsonlog Postgres | righe troncate, multilinea, encoding |
 | Aggregatore ASH | `wait_event` nullo, stringhe unicode, cardinalità estrema |
 | Valutatore regole alert (YAML) | regola scritta a mano dall'utente |
 
@@ -626,9 +626,8 @@ output OpenAPI e bootstrap Vite.
 
 ## 7. L5 — E2E frontend (Playwright)
 
-Il bootstrap Playwright è in `web/e2e/`; l'esecuzione contro lo stack condiviso
-è il livello L5 del piano 003 e il target `make test-ui-e2e` sarà aggiunto in
-fase 17.
+Il bootstrap Playwright è in `web/e2e/`; l'esecuzione contro lo stack reale è il
+livello L5 e il target `make test-ui-e2e` esegue gli scenari di accettazione.
 
 ### 7.1 Playwright, non Selenium
 
@@ -803,6 +802,30 @@ export default defineConfig({
   ],
 });
 ```
+
+### 7.7 Scenari di accettazione `SYS-UI-*`
+
+Gli scenari Playwright coprono l'interfaccia servita dal server e vengono
+eseguiti con `make test-ui-e2e`. Il catalogo corrente è:
+
+| ID | Comportamento verificato |
+|---|---|
+| `SYS-UI-000` | Il server serve la shell applicativa autenticata |
+| `SYS-UI-001` | Il failover conserva l'identità del cluster e genera l'alert |
+| `SYS-UI-002` | La navigazione senza autenticazione non ripristina i dati fleet |
+| `SYS-UI-003` | Un agent fuori servizio appare come dati fleet obsoleti |
+| `SYS-UI-004` | Il replay lag di un'istanza standalone resta sconosciuto |
+| `SYS-UI-005` | ASH disabilitato mostra la relativa configurazione |
+| `SYS-UI-006` | L'EXPLAIN plan-only è auditato senza inviare query text |
+| `SYS-UI-007` | I grafici di replica e ASH visualizzano dati |
+| `SYS-UI-008` | L'albero dei lock mostra radice e figlio |
+| `SYS-UI-009` | I comandi di segnalazione rispettano tier e conferma |
+| `SYS-UI-010` | Mute e unmute di un finding aggiornano lo stato |
+| `SYS-UI-011` | Le route documentate superano i controlli di accessibilità |
+
+La suite usa Chromium per la verifica locale. Le esecuzioni complete sono
+costose: eseguirle quando cambia il flusso di accettazione o alla chiusura di
+un traguardo dell'interfaccia, non dopo ogni modifica isolata.
 
 ---
 
@@ -1111,7 +1134,7 @@ make test-e2e            # L3 smoke
 make test-e2e-full       # L3 completo (lungo)
 make web-test            # L4/L2 UI con Vitest
 make web-coverage-gate   # L4/L2 UI con floor V8
-make test-ui-e2e         # L5, dalla fase 17
+make test-ui-e2e         # L5, browser reale contro lo stack locale
 make test-all            # tutto, come su main
 
 make e2e-stack-up        # alza lo stack e lo lascia in piedi per esplorazione manuale
@@ -1183,7 +1206,7 @@ Dichiarato per evitare che qualcuno lo scopra e lo consideri una dimenticanza.
 |---|---|---|
 | RDS / Aurora reali | nessuna credenziale AWS al momento | profilo `rds-like` (sez. 4.4) copre i vincoli di permessi. Dichiarato in `IDEA.md` §11 |
 | XID wraparound end-to-end | consumare 10⁹ transazioni non è praticabile in CI | logica dell'advisor testata a L1 con `xid_age` iniettato |
-| Scala reale (100 DB, 50 agent) | costo infrastrutturale | test di carico dedicato a Phase 3 con agent sintetici che generano payload realistici |
+| Scala reale (100 DB, 50 agent) | costo infrastrutturale | test di carico dedicato con agent sintetici che generano payload realistici |
 | Postgres ≤ 12 | fuori supporto (§1) | il gate di versione è testato: un PG12 viene rifiutato con messaggio chiaro |
 | Browser mobili | la dashboard è desktop-first | layout responsive verificato solo a due viewport in L5 |
 | Upgrade da versione precedente del prodotto | non esiste ancora una v1 | da introdurre alla prima release stabile: test di migrazione schema N-1 → N |
@@ -1225,8 +1248,7 @@ Dichiarato per evitare che qualcuno lo scopra e lo consideri una dimenticanza.
 Le regole normative per i test in `web/` sono in [`web/docs/testing.md`](web/docs/testing.md).
 Sono dieci regole, T-1…T-10, e si applicano a ogni nuova pagina o componente.
 
-Nel frontend del piano 003 i quattro tipi di test si mappano sui livelli del
-repository così:
+Nel frontend i quattro tipi di test si mappano sui livelli del repository così:
 
 | Tipo frontend | Livello | Scopo |
 |---|---|---|
