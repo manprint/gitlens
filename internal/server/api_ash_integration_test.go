@@ -387,8 +387,11 @@ func TestIntASH014_ASHBypassesDelta(t *testing.T) {
 	require.NoError(t, err)
 	require.Greater(t, ashCount, 0, "ASH data should be in metrics_ash")
 
+	// Scoped past pglens_%: every push also writes the collector's own
+	// self-monitoring gauges into `metrics` (see selfMetricRows), which is
+	// not what this test is about.
 	var metricsCount int
-	err = pool.QueryRow(ctx, `SELECT COUNT(*) FROM metrics WHERE instance_id = $1`, instID).Scan(&metricsCount)
+	err = pool.QueryRow(ctx, `SELECT COUNT(*) FROM metrics WHERE instance_id = $1 AND metric NOT LIKE 'pglens_%'`, instID).Scan(&metricsCount)
 	require.NoError(t, err)
 	require.Equal(t, 0, metricsCount, "ASH data should NOT be in metrics table")
 }

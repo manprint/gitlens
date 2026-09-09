@@ -106,10 +106,18 @@ func (s *SessionStore) Len() int {
 	return len(s.sessions)
 }
 
+// RequireCredential gates every /api/ route on an agent bearer token or a UI
+// session cookie. The gate is independent of cfg.Enabled: PGLENS_UI_ENABLED
+// only decides whether the static assets are served ("false disables static
+// assets while leaving the existing API gate unchanged", README) — it is not
+// an authentication switch. It used to be wired as one, so a deployment that
+// turned the interface off to expose "just the API" got an entirely
+// unauthenticated read API (clusters, statements, ASH, findings, settings,
+// audit) plus an unauthenticated command surface.
 func RequireCredential(cfg UIConfig, auth *Auth, store *SessionStore) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !cfg.Enabled || sessionRequestExempt(r) {
+			if sessionRequestExempt(r) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -117,12 +125,15 @@ func RequireCredential(cfg UIConfig, auth *Auth, store *SessionStore) func(http.
 				next.ServeHTTP(w, r)
 				return
 			}
-			if cfg.Password == "" {
+			// A browser session is only ever obtainable when a password is
+			// configured, so "UI on, no password" stays the distinct,
+			// actionable 503 rather than a generic 401.
+			if cfg.Enabled && cfg.Password == "" {
 				writeError(w, http.StatusServiceUnavailable, "ui_password_not_configured", "configure PGLENS_UI_PASSWORD or PGLENS_UI_PASSWORD_FILE")
 				return
 			}
 			if store != nil {
-				if cookie, err := r.Cookie("pglens_session"); err == nil {
+				if cookie, err := r.Cookie(sessionCookieName); err == nil {
 					if _, ok := store.Validate(cookie.Value); ok {
 						next.ServeHTTP(w, r)
 						return

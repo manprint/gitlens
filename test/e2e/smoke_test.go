@@ -4,6 +4,8 @@ package e2e
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"os"
 	"testing"
 
@@ -32,6 +34,34 @@ func init() {
 		Smoke:    true,
 		Expect:   scenario.Expectations{Invariants: []string{"I-1", "I-2", "I-3", "I-4"}},
 		Run: func(ctx context.Context, e *scenario.Env) error {
+			// The API must never be reachable without credentials. The gate
+			// used to be installed only when the web UI was enabled, so a
+			// server started to expose "just the API" served the whole read
+			// API and the command surface anonymously. This stack runs with
+			// no UI password, which is the actionable 503 rather than a
+			// generic 401 — either way, never a 2xx.
+			for _, path := range []string{"/api/v1/clusters", "/api/v1/instances", "/api/v1/alerts"} {
+				status, err := e.API.AnonymousGet(path)
+				if err != nil {
+					return fmt.Errorf("anonymous GET %s: %w", path, err)
+				}
+				if status != http.StatusUnauthorized && status != http.StatusServiceUnavailable {
+					return fmt.Errorf("anonymous GET %s returned %d: the API must never answer an unauthenticated caller", path, status)
+				}
+			}
+			// The other direction: the liveness, readiness and Prometheus
+			// endpoints are deliberately exempt and must stay reachable, or
+			// every orchestrator probe and metrics scrape breaks.
+			for _, path := range []string{"/healthz", "/readyz", "/metrics"} {
+				status, err := e.API.AnonymousGet(path)
+				if err != nil {
+					return fmt.Errorf("anonymous GET %s: %w", path, err)
+				}
+				if status != http.StatusOK {
+					return fmt.Errorf("anonymous GET %s returned %d, want 200: probe and scrape endpoints must not be gated", path, status)
+				}
+			}
+
 			// The stack is already up (Harness.Start already waited for
 			// health) by the time a scenario's Run is invoked — this
 			// scenario's whole point is that reaching this line at all,

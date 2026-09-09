@@ -49,6 +49,11 @@ type Pusher struct {
 	nAcked    int64
 	nDropped  int64
 
+	// Drop-rate bookkeeping for the agent's own self-report metric, guarded
+	// by mu.
+	lastDropTotal int64
+	lastDropAt    time.Time
+
 	// buf, when set via SetBuffer, is used as the durable queue instead of
 	// pending: Queue() persists to disk (so a bounded volume genuinely fills
 	// and genuinely drops, I-7) and Push() drains it via Next()/AckFunc
@@ -120,20 +125,36 @@ func (p *Pusher) Push(ctx context.Context) error {
 		p.pending = p.pending[1:]
 		p.pendingMu.Unlock()
 
-		if err := p.pushOne(ctx, env); err != nil {
-			// Context cancelled; re-queue and propagate error
+		outcome, err := p.pushOne(ctx, env)
+		if outcome == pushRetryLater {
+			// Context cancelled, or a failure a later push may resolve
+			// (401): re-queue at the head so ordering is preserved and
+			// nothing is lost, then stop draining.
 			p.pendingMu.Lock()
 			p.pending = append([]*wire.Envelope{env}, p.pending...)
 			p.pendingMu.Unlock()
 			return err
 		}
+		if err != nil {
+			// Consumed and unusable: dropping it is the point, so it must not
+			// go back on the queue to be retried forever.
+			return err
+		}
 	}
 }
 
-// pushFromBuffer drains the disk buffer. An envelope is only acked after a
-// successful send: pushOne itself retries with backoff until it succeeds or
-// ctx is cancelled, so on cancellation the unacked record is simply re-read
-// from the last acked checkpoint on the next Push() (or after a restart).
+// pushFromBuffer drains the disk buffer. An envelope is only acked once it is
+// consumed — accepted by the server, or rejected in a way no retry can fix:
+// pushOne itself retries with backoff until one of those happens or ctx is
+// cancelled, so on cancellation the unacked record is simply re-read from the
+// last acked checkpoint on the next Push() (or after a restart).
+//
+// A pushRetryLater outcome (401) stops the drain and leaves the record
+// unacked. Acking it, as this used to, made an authentication outage
+// destructive: a rotated token or an agent awaiting re-approval answers 401
+// to every push, and the loop walked the entire buffer acking each record in
+// turn — permanently deleting hours of buffered metrics that the agent had
+// written to disk precisely so they would survive an outage.
 func (p *Pusher) pushFromBuffer(ctx context.Context) error {
 	for {
 		data, ack, err := p.buf.Next()
@@ -149,26 +170,61 @@ func (p *Pusher) pushFromBuffer(ctx context.Context) error {
 			_ = ack(ctx)
 			continue
 		}
-		if err := p.pushOne(ctx, &env); err != nil {
-			return err // context cancelled
+		outcome, err := p.pushOne(ctx, &env)
+		if outcome == pushRetryLater {
+			// Hand the unacked record back to the buffer: Next() has already
+			// advanced its read cursor past it, so without the rewind it
+			// would never be offered again in this process.
+			p.buf.Rewind()
+			return err
 		}
 		_ = ack(ctx)
+		if err != nil {
+			return err
+		}
 	}
 }
 
-// pushOne attempts to deliver one envelope with exponential backoff + jitter.
-func (p *Pusher) pushOne(ctx context.Context, env *wire.Envelope) error {
-	var attempt int
-	for {
-		attempt++
-		delay := backoffDelay(attempt, p.clk)
-		if err := p.clk.Sleep(ctx, delay); err != nil {
-			return err // context cancelled
+// pushOutcome tells the caller what to do with the envelope it handed to
+// pushOne.
+type pushOutcome int
+
+const (
+	// pushConsumed: the envelope must not be presented again. Either the
+	// server accepted it (202), or it rejected it in a way no retry can fix
+	// (400 protocol mismatch, 413 too large, an unexpected 4xx) — keeping
+	// those queued would wedge the whole queue behind a record the server is
+	// never going to take.
+	pushConsumed pushOutcome = iota
+	// pushRetryLater: delivery failed for a reason a later push may resolve
+	// (401 — token rotated, agent pending re-approval). The envelope must
+	// stay queued and the drain must stop.
+	pushRetryLater
+)
+
+// pushOne attempts to deliver one envelope, retrying transient failures with
+// exponential backoff + jitter until the envelope reaches a terminal outcome
+// or ctx is cancelled.
+func (p *Pusher) pushOne(ctx context.Context, env *wire.Envelope) (pushOutcome, error) {
+	for attempt := 0; ; attempt++ {
+		// Backoff applies to retries only. Sleeping before the first attempt
+		// delayed every push by backoffDelay(1) — 1 to 2 seconds — even
+		// against a perfectly healthy server, and made the flush at shutdown
+		// (and any test with a short deadline) race its own timeout.
+		if attempt > 0 {
+			if err := p.clk.Sleep(ctx, backoffDelay(attempt, p.clk)); err != nil {
+				return pushRetryLater, err // context cancelled
+			}
 		}
 
 		req, err := p.buildRequest(env)
 		if err != nil {
-			return err // fatal
+			// An envelope that cannot be encoded will never encode: keeping
+			// it queued would wedge the queue behind it forever (the disk
+			// buffer would re-offer the same record on every push), so it is
+			// dropped and counted.
+			atomic.AddInt64(&p.nDropped, 1)
+			return pushConsumed, fmt.Errorf("encode envelope: %w", err)
 		}
 
 		status, skew, body, err := p.doRequest(req)
@@ -184,6 +240,7 @@ func (p *Pusher) pushOne(ctx context.Context, env *wire.Envelope) error {
 			p.mu.Lock()
 			now := p.clk.Now()
 			p.lastSuccessfulPush = &now
+			p.health = HealthOK
 			p.mu.Unlock()
 			atomic.AddInt64(&p.nAcked, 1)
 			if skew != nil {
@@ -191,14 +248,14 @@ func (p *Pusher) pushOne(ctx context.Context, env *wire.Envelope) error {
 				p.clockSkew = *skew
 				p.mu.Unlock()
 			}
-			return nil
+			return pushConsumed, nil
 
 		case http.StatusBadRequest: // 400
 			p.mu.Lock()
 			p.health = HealthIncompatible
 			p.lastError = body
 			p.mu.Unlock()
-			return nil // stop retry
+			return pushConsumed, nil // stop retry
 
 		case http.StatusUnauthorized: // 401
 			p.mu.Lock()
@@ -214,12 +271,12 @@ func (p *Pusher) pushOne(ctx context.Context, env *wire.Envelope) error {
 			}
 			p.lastError = body
 			p.mu.Unlock()
-			return nil // stop retry, process stays alive
+			return pushRetryLater, nil // stop retry, process stays alive
 
 		case http.StatusRequestEntityTooLarge: // 413
 			// Drop this envelope
 			atomic.AddInt64(&p.nDropped, 1)
-			return nil
+			return pushConsumed, nil
 
 		default:
 			if status >= 500 {
@@ -227,7 +284,7 @@ func (p *Pusher) pushOne(ctx context.Context, env *wire.Envelope) error {
 				continue
 			}
 			// Unknown status: treat as error, don't retry forever
-			return nil
+			return pushConsumed, nil
 		}
 	}
 }
@@ -324,6 +381,44 @@ func (p *Pusher) ClockSkew() time.Duration {
 // BufferStats returns counts of acked and dropped envelopes.
 func (p *Pusher) BufferStats() (acked, dropped int64) {
 	return atomic.LoadInt64(&p.nAcked), atomic.LoadInt64(&p.nDropped)
+}
+
+// DroppedSamples returns the cumulative number of samples this agent has
+// lost: envelopes Queue() could not persist, plus every record the disk
+// buffer rolled off under its size and age retention policies.
+func (p *Pusher) DroppedSamples() int64 {
+	total := atomic.LoadInt64(&p.nDropped)
+	if p.buf != nil {
+		for _, n := range p.buf.Stats().SamplesDropped {
+			total += n
+		}
+	}
+	return total
+}
+
+// SamplesDroppedRate returns drops per second since the previous call, and is
+// what makes the agent_buffer_full alert rule reachable: the rule compares the
+// pglens_samples_dropped_rate metric, which no check produces and which the
+// agent is the only party able to observe. The first call establishes the
+// baseline and reports 0.
+//
+// Call it once per push cycle; each call consumes the interval since the last
+// one.
+func (p *Pusher) SamplesDroppedRate(now time.Time) float64 {
+	total := p.DroppedSamples()
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	last, lastAt := p.lastDropTotal, p.lastDropAt
+	p.lastDropTotal, p.lastDropAt = total, now
+	if lastAt.IsZero() {
+		return 0
+	}
+	elapsed := now.Sub(lastAt).Seconds()
+	if elapsed <= 0 || total <= last {
+		return 0
+	}
+	return float64(total-last) / elapsed
 }
 
 // Stop signals the pusher to stop.

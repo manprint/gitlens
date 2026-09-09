@@ -201,7 +201,9 @@ func TestReplicationStreaming_Integration_PrimaryWithStandby(t *testing.T) {
 			// Verify the standby's application_name is pg-standby
 			for _, m := range result.Metrics {
 				require.Equal(t, "pg-standby", m.Labels["standby"], "standby should use pg-standby as application_name")
-				require.Equal(t, "async", m.Labels["sync_mode"], "sync_state should be async")
+				// The label name is what the server reads to populate
+				// metrics_replication.sync_state — see the check's own comment.
+				require.Equal(t, "async", m.Labels["sync_state"], "sync_state should be async")
 			}
 
 			// Verify all three lag SECONDS values are present and non-NULL

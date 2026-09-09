@@ -52,6 +52,7 @@ type instanceState struct {
 	clusterID  pgtype.ClusterID
 	timestamp  time.Time
 	orphanAt   time.Time            // when the standby's upstream became unresolvable
+	orphanedAt time.Time            // when orphan_standby was last emitted for this standby
 	edgeSeenAt map[string]time.Time // per-edge last-seen time (key = "to_instance_id")
 }
 
@@ -62,8 +63,10 @@ type Engine struct {
 	instances        map[pgtype.InstanceID]*instanceState  // per instance
 	lastPrimary      map[pgtype.ClusterID]*lastPrimaryInfo // track recent primary per cluster
 	lastFailoverTime map[pgtype.ClusterID]time.Time        // track last failover time per cluster
+	lastSplitBrain   map[pgtype.ClusterID]time.Time        // last split_brain_detected emission per cluster
 	failoverWindow   time.Duration
 	orphanWindow     time.Duration
+	splitBrainWindow time.Duration
 	edgeTTL          time.Duration
 }
 
@@ -83,8 +86,10 @@ func NewEngine(clk clock.Clock) *Engine {
 		instances:        make(map[pgtype.InstanceID]*instanceState),
 		lastPrimary:      make(map[pgtype.ClusterID]*lastPrimaryInfo),
 		lastFailoverTime: make(map[pgtype.ClusterID]time.Time),
+		lastSplitBrain:   make(map[pgtype.ClusterID]time.Time),
 		failoverWindow:   120 * time.Second,
 		orphanWindow:     60 * time.Second,
+		splitBrainWindow: 60 * time.Second,
 		edgeTTL:          3 * time.Second, // placeholder: 3x sampling interval (assumed 1s)
 	}
 }
@@ -176,6 +181,7 @@ func (e *Engine) Apply(obs Observation) []Event {
 				edgeKey := edge.To.String()
 				inst.edgeSeenAt[edgeKey] = now
 				inst.orphanAt = time.Time{}
+				inst.orphanedAt = time.Time{}
 			}
 		}
 
@@ -183,8 +189,19 @@ func (e *Engine) Apply(obs Observation) []Event {
 		if !hasResolvedEdge && len(obs.Edges) > 0 {
 			if inst.orphanAt.IsZero() {
 				inst.orphanAt = now
-			} else if now.Sub(inst.orphanAt) >= e.orphanWindow {
-				// Emit orphan_standby once per 60s+ of silence
+			} else if now.Sub(inst.orphanAt) >= e.orphanWindow && now.Sub(inst.orphanedAt) >= e.orphanWindow {
+				// Emit orphan_standby at most once per orphanWindow, and keep
+				// reporting the age of the *whole* orphan episode.
+				//
+				// The re-emission guard is orphanedAt, not orphanAt: without it
+				// this fired on every single observation once the window had
+				// passed, so a standby orphaned for an hour wrote one event per
+				// scrape (240 rows at a 15s interval) — flooding the events
+				// table and re-notifying the split_brain/orphan alert rules over
+				// and over for one unchanged condition. Resetting orphanAt
+				// instead would have thrown away the episode's start time and
+				// pinned duration_seconds at ~60s forever.
+				inst.orphanedAt = now
 				events = append(events, Event{
 					Type:       EventOrphanStandby,
 					Timestamp:  now,
@@ -222,15 +239,24 @@ func (e *Engine) detectSplitBrain(clusterID pgtype.ClusterID, now time.Time) []E
 		// Check if there was a recent failover to suppress transient split-brain
 		lastFailover := e.lastFailoverTime[clusterID]
 		if lastFailover.IsZero() || now.Sub(lastFailover) > 30*time.Second {
-			events = append(events, Event{
-				Type:      EventSplitBrainDetected,
-				Timestamp: now,
-				ClusterID: clusterID,
-				Payload: map[string]any{
-					"primary_count": len(primaries),
-				},
-			})
+			// Throttled per cluster: this runs on every observation of every
+			// instance, so an unresolved split brain used to write one event
+			// per scrape per instance for as long as it lasted.
+			if last, seen := e.lastSplitBrain[clusterID]; !seen || now.Sub(last) >= e.splitBrainWindow {
+				e.lastSplitBrain[clusterID] = now
+				events = append(events, Event{
+					Type:      EventSplitBrainDetected,
+					Timestamp: now,
+					ClusterID: clusterID,
+					Payload: map[string]any{
+						"primary_count": len(primaries),
+					},
+				})
+			}
 		}
+	} else {
+		// Condition cleared: the next genuine occurrence must alert at once.
+		delete(e.lastSplitBrain, clusterID)
 	}
 
 	return events

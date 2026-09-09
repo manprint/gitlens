@@ -12,9 +12,9 @@ import (
 // ingest endpoint (wired to inv/pipeline), and the read API (api.RegisterRoutes).
 func NewRouter(uiCfg UIConfig, assets fs.FS, store *SessionStore, auth *Auth, inv *Inventory, pipeline *Pipeline, api *API, topoAPI *TopologyAPI, ashAPI *AshAPI, alertAPIs ...*AlertAPI) http.Handler {
 	r := chi.NewRouter()
-	if uiCfg.Enabled {
-		r.Use(RequireCredential(uiCfg, auth, store))
-	}
+	// The credential gate is always installed; uiCfg.Enabled only governs the
+	// static assets below. See RequireCredential's own comment.
+	r.Use(RequireCredential(uiCfg, auth, store))
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))

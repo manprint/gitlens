@@ -299,6 +299,16 @@ func (s *Staleness) ensureLeader(ctx context.Context) error {
 	if s.pool == nil {
 		return nil
 	}
+	// The advisory lock lives on this session, so leadership dies with the
+	// connection. A closed conn used to be indistinguishable from a live one
+	// here (hasLock && conn != nil short-circuited), so a server that lost
+	// its session — PostgreSQL restart, network blip, pg_terminate_backend —
+	// kept emitting staleness events believing it was the leader, while
+	// another server legitimately took the freed lock. Two leaders means
+	// duplicate agent_down/instance_unreachable events.
+	if s.conn != nil && s.conn.Conn().IsClosed() {
+		s.releaseLeaderConn()
+	}
 	if s.hasLock && s.conn != nil {
 		return nil
 	}
@@ -316,10 +326,24 @@ func (s *Staleness) ensureLeader(ctx context.Context) error {
 			s.hasLock = false
 			return nil
 		}
+		// Give the connection back instead of pinning a broken one: every
+		// later cycle would otherwise retry on the same dead session, and
+		// this evaluator could never regain leadership without a restart.
+		s.releaseLeaderConn()
 		return fmt.Errorf("try advisory lock: %w", err)
 	}
 	s.hasLock = locked
 	return nil
+}
+
+// releaseLeaderConn drops the lock-holding connection and the leadership it
+// carried. Caller must hold s.mu.
+func (s *Staleness) releaseLeaderConn() {
+	if s.conn != nil {
+		s.conn.Release()
+		s.conn = nil
+	}
+	s.hasLock = false
 }
 
 // emitEvent inserts a single event row. Caller must hold s.mu if it needs the

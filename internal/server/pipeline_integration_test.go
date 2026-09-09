@@ -215,3 +215,99 @@ func TestPipeline_INT_PIPE_003_ResetDetection(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM metrics WHERE metric='pg_xact_commit' AND ts=$1`, ts3).Scan(&cntReset))
 	require.Equal(t, 0, cntReset, "should NOT write metric row for reset interval (creates a gap)")
 }
+
+// TestPipeline_WritesCollectorSelfMetrics — check_failing,
+// cardinality_budget_exceeded and clock_skew all compare series in `metrics`
+// that nothing used to write, which made them unable to fire whatever
+// happened. This asserts the rows actually land in the table the alert engine
+// queries, with the values those rules need.
+func TestPipeline_WritesCollectorSelfMetrics(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+
+	received := time.Date(2026, 3, 1, 12, 0, 30, 0, time.UTC)
+	sentAt := received.Add(-30 * time.Second)
+	ts := sentAt.Add(-time.Second)
+	p := NewPipeline(pool, clock.NewFake(received))
+
+	instID := uuid.NewString()
+	env := wire.Envelope{
+		SentAt: sentAt,
+		Instances: []wire.Instance{{
+			InstanceID: instID,
+			ClusterID:  pgtype.ClusterID(4242).String(),
+			Results: []wire.Result{
+				{Check: "bgwriter", TS: ts, Metrics: []wire.Metric{{Name: "pg_buffers_alloc", Value: 1, Kind: "gauge"}}},
+				{Check: "conn_stats", TS: ts, Error: "permission denied for pg_stat_activity"},
+				{Check: "table_stats", TS: ts, Truncated: true},
+				{Check: "wal", TS: ts},
+			},
+		}},
+	}
+	res, err := p.Process(ctx, env)
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Accepted)
+
+	for metric, want := range map[string]float64{
+		"pglens_check_error_rate":           0.25,
+		"pglens_cardinality_truncated_rate": 0.25,
+		"pglens_agent_clock_skew_seconds":   30,
+	} {
+		var value float64
+		var rowTS time.Time
+		require.NoError(t, pool.QueryRow(ctx,
+			`SELECT value, ts FROM metrics WHERE metric=$1 AND instance_id=$2::uuid`, metric, instID).Scan(&value, &rowTS),
+			"%s must be written for every push", metric)
+		require.InDelta(t, want, value, 0.001, metric)
+		require.Equal(t, ts.UTC(), rowTS.UTC(), "%s must sit on the envelope's own timeline", metric)
+	}
+
+	// The healthy push that follows must write the zero sample the rules need
+	// in order to resolve.
+	ts2 := ts.Add(time.Minute)
+	env.SentAt = sentAt.Add(time.Minute)
+	env.Instances[0].Results = []wire.Result{{Check: "bgwriter", TS: ts2, Metrics: []wire.Metric{{Name: "pg_buffers_alloc", Value: 2, Kind: "gauge"}}}}
+	_, err = p.Process(ctx, env)
+	require.NoError(t, err)
+
+	var errRate float64
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT value FROM metrics WHERE metric='pglens_check_error_rate' AND instance_id=$1::uuid AND ts=$2`, instID, ts2).Scan(&errRate))
+	require.Zero(t, errRate)
+}
+
+// TestPipeline_ReplicationSyncStateIsStored — the streaming check labelled the
+// value "sync_mode" while the pipeline read "sync_state", so
+// metrics_replication.sync_state was NULL on every row ever written: the
+// cluster page's Sync column read "Unknown" for every standby and
+// replica.no_sync_standby had nothing to count.
+func TestPipeline_ReplicationSyncStateIsStored(t *testing.T) {
+	pool := getSharedPool(t)
+	ctx := context.Background()
+	p := NewPipeline(pool, clock.NewFake(time.Now()))
+
+	for _, label := range []string{"sync_state", "sync_mode"} {
+		t.Run(label, func(t *testing.T) {
+			truncateAll(t, pool)
+			env := wire.Envelope{Instances: []wire.Instance{{
+				InstanceID: uuid.NewString(),
+				ClusterID:  pgtype.ClusterID(777).String(),
+				Results: []wire.Result{{Check: "replication_streaming", TS: time.Now(), Metrics: []wire.Metric{{
+					Name:   "replication_replay_lag_seconds",
+					Value:  3,
+					Kind:   "gauge",
+					Labels: map[string]string{"standby": "pg-standby", label: "sync"},
+				}}}},
+			}}}
+			res, err := p.Process(ctx, env)
+			require.NoError(t, err)
+			require.Equal(t, 1, res.Accepted)
+
+			var syncState *string
+			require.NoError(t, pool.QueryRow(ctx, `SELECT sync_state FROM metrics_replication`).Scan(&syncState))
+			require.NotNil(t, syncState, "sync_state must be persisted, not left NULL")
+			require.Equal(t, "sync", *syncState)
+		})
+	}
+}

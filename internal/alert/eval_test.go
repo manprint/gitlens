@@ -123,3 +123,34 @@ func TestForget_DropsStaleKeys(t *testing.T) {
 	require.Equal(t, 1, e.Forget(n.Add(time.Second)))
 	require.Equal(t, 0, e.Forget(n.Add(time.Second)))
 }
+
+// TestForget_NeverDropsFiringState — the evaluator state machine is the only
+// record that an episode is currently firing. Forgetting it made every alert
+// that outlived the cutoff re-fire (and re-notify) as a new episode with a
+// reset StartedAt, and never emit its resolved transition.
+func TestForget_NeverDropsFiringState(t *testing.T) {
+	e := NewEvaluator()
+	r := evalRule()
+	start := time.Unix(1, 0)
+
+	e.Step(r, evalSample(start), start)
+	fired := start.Add(2 * time.Minute)
+	a, tr := e.Step(r, evalSample(fired), fired)
+	require.Equal(t, TransitionFired, tr)
+	require.Equal(t, start, a.StartedAt)
+
+	// Hours later, the condition is still true.
+	require.Equal(t, 0, e.Forget(fired.Add(24*time.Hour)), "a firing episode must never be forgotten")
+
+	later := fired.Add(25 * time.Hour)
+	a, tr = e.Step(r, evalSample(later), later)
+	require.Equal(t, TransitionNone, tr, "the episode must continue, not re-fire")
+	require.Equal(t, start, a.StartedAt, "StartedAt must keep the original episode start")
+
+	// And it still resolves.
+	clear := evalSample(later)
+	clear.Value = 0
+	a, tr = e.Step(r, clear, later)
+	require.Equal(t, TransitionResolved, tr)
+	require.Equal(t, StateResolved, a.State)
+}

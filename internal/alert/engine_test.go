@@ -2,6 +2,7 @@ package alert
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -110,10 +111,25 @@ func TestTick_BuiltinWinsOverStoredRuleWithSameID(t *testing.T) {
 
 func TestTick_ForgetsStaleEvaluatorState(t *testing.T) {
 	e := NewEngine(nil, clock.NewFake(time.Unix(0, 0)), nil, nil, nil)
-	r := Rule{ID: "r", Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1}
+	// For > 0, sampled once and never again: a pending episode that can never
+	// fire and would otherwise pin its key in memory forever.
+	r := Rule{ID: "r", Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1, For: time.Minute}
 	e.eval.Step(r, Sample{Value: 2, TS: time.Unix(-7200, 0)}, time.Unix(-7200, 0))
 	require.NoError(t, e.Tick(context.Background()))
 	require.Empty(t, e.eval.states)
+}
+
+// TestTick_KeepsFiringEvaluatorState — the cutoff must not reap a firing
+// episode. It used to: an alert that had been firing for over an hour lost
+// its state on every tick, so it was re-discovered as a new episode (re-fired
+// and re-notified, StartedAt reset) and never emitted a resolved transition.
+func TestTick_KeepsFiringEvaluatorState(t *testing.T) {
+	e := NewEngine(nil, clock.NewFake(time.Unix(0, 0)), nil, nil, nil)
+	r := Rule{ID: "r", Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1}
+	_, tr := e.eval.Step(r, Sample{Value: 2, TS: time.Unix(-7200, 0)}, time.Unix(-7200, 0))
+	require.Equal(t, TransitionFired, tr)
+	require.NoError(t, e.Tick(context.Background()))
+	require.Len(t, e.eval.states, 1)
 }
 
 func TestStop_IsIdempotent(t *testing.T) {
@@ -127,4 +143,67 @@ func TestNewEngineWithInterval_NormalizesInputs(t *testing.T) {
 	require.Equal(t, defaultEngineInterval, e.interval)
 	e = NewEngineWithInterval(nil, nil, 5*time.Second, nil, nil, nil)
 	require.Equal(t, 5*time.Second, e.interval)
+}
+
+// failingRuleSource fails for one named rule and behaves normally for the rest.
+type failingRuleSource struct {
+	failRuleID string
+	samples    []Sample
+	calls      []string
+}
+
+func (s *failingRuleSource) Kind() string { return "metric" }
+func (s *failingRuleSource) Samples(_ context.Context, r Rule, _ time.Time) ([]Sample, error) {
+	s.calls = append(s.calls, r.ID)
+	if r.ID == s.failRuleID {
+		return nil, errors.New("relation \"pg_stat_broken\" does not exist")
+	}
+	return s.samples, nil
+}
+
+// TestTick_OneBrokenRuleDoesNotStopTheCycle — a rule whose query fails used
+// to abort Tick at that point, so every rule after it in the list (builtin
+// criticals included) silently stopped being evaluated for as long as the
+// broken rule stayed enabled. The failure must be reported *and* the rest of
+// the cycle must still run.
+func TestTick_OneBrokenRuleDoesNotStopTheCycle(t *testing.T) {
+	now := time.Unix(100, 0)
+	broken := Rule{ID: "aaa_broken", Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1, Summary: "broken"}
+	healthy := Rule{ID: "zzz_healthy", Enabled: true, Severity: SeverityCritical, Scope: ScopeInstance, Metric: "y", Comparator: GT, Threshold: 1, Summary: "healthy"}
+
+	store := &engineStore{rules: []Rule{broken, healthy}}
+	notifier := &engineNotifier{}
+	source := &failingRuleSource{failRuleID: broken.ID, samples: []Sample{{Value: 2, TS: now}}}
+	e := NewEngine(nil, clock.NewFake(now), store, notifier, []Source{source})
+
+	err := e.Tick(context.Background())
+	require.ErrorContains(t, err, "sample rule aaa_broken")
+	require.Contains(t, source.calls, healthy.ID, "the healthy rule must still be evaluated")
+
+	var fired []string
+	for _, a := range notifier.alerts {
+		fired = append(fired, a.RuleID)
+	}
+	require.Contains(t, fired, healthy.ID, "the healthy rule must still be able to fire")
+}
+
+// failingStore fails every Upsert.
+type failingStore struct{ engineStore }
+
+func (s *failingStore) Upsert(context.Context, Alert) error { return errors.New("write failed") }
+
+// TestTick_PersistFailureIsReportedAndCycleContinues — a single alert failing
+// to persist must not stop the remaining alerts from being evaluated and
+// notified.
+func TestTick_PersistFailureIsReportedAndCycleContinues(t *testing.T) {
+	now := time.Unix(100, 0)
+	rule := Rule{ID: "custom", Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1, Summary: "x"}
+	store := &failingStore{}
+	store.rules = []Rule{rule}
+	notifier := &engineNotifier{}
+	e := NewEngine(nil, clock.NewFake(now), store, notifier, []Source{engineSource{kind: "metric", samples: []Sample{{Value: 2, TS: now}}}})
+
+	err := e.Tick(context.Background())
+	require.ErrorContains(t, err, "persist alert")
+	require.Len(t, notifier.alerts, 1, "a persistence failure must not swallow the notification")
 }

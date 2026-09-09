@@ -156,12 +156,32 @@ func (e *Engine) Stop() {
 	})
 }
 
+// releaseLeaderConn drops the lock-holding connection and the leadership it
+// carried. Caller must hold e.mu.
+func (e *Engine) releaseLeaderConn() {
+	if e.conn != nil {
+		e.conn.Release()
+		e.conn = nil
+	}
+	e.hasLock = false
+}
+
 func (e *Engine) ensureLeader(ctx context.Context) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.pool == nil {
 		e.hasLock = true
 		return nil
+	}
+	// The advisory lock lives on this session, so leadership dies with the
+	// connection. A closed conn was previously indistinguishable from a live
+	// one here (hasLock && conn != nil short-circuited), which meant a
+	// server that lost its session — PostgreSQL restart, network blip,
+	// termination by an admin — kept evaluating rules forever believing it
+	// was the leader, while another server legitimately took the freed lock.
+	// Two leaders means duplicate notifications for every alert.
+	if e.conn != nil && e.conn.Conn().IsClosed() {
+		e.releaseLeaderConn()
 	}
 	if e.hasLock && e.conn != nil {
 		return nil
@@ -179,6 +199,10 @@ func (e *Engine) ensureLeader(ctx context.Context) error {
 			e.hasLock = false
 			return nil
 		}
+		// Give the connection back instead of holding a broken one: keeping
+		// it pinned meant every later tick retried on the same dead session
+		// and the engine could never regain leadership without a restart.
+		e.releaseLeaderConn()
 		return fmt.Errorf("try alert advisory lock: %w", err)
 	}
 	e.hasLock = locked
@@ -234,6 +258,14 @@ func (e *Engine) Tick(ctx context.Context) error {
 			return fmt.Errorf("load alert silences: %w", err)
 		}
 	}
+	// Per-rule failures are collected, not propagated immediately: one rule
+	// whose query is broken (a metric that does not exist, a permission
+	// error, a statement timeout) used to abort the whole cycle at the point
+	// it failed, so every rule after it in the list — including every
+	// critical one — silently stopped being evaluated for as long as the bad
+	// rule stayed enabled. The same goes for a single alert failing to
+	// persist or to notify.
+	var errs []error
 	for _, rule := range rules {
 		for _, source := range e.sources {
 			if (rule.EventType != "" && source.Kind() != "event") || (rule.EventType == "" && source.Kind() != "metric") {
@@ -241,7 +273,11 @@ func (e *Engine) Tick(ctx context.Context) error {
 			}
 			samples, err := source.Samples(ctx, rule, now)
 			if err != nil {
-				return fmt.Errorf("sample rule %s: %w", rule.ID, err)
+				errs = append(errs, fmt.Errorf("sample rule %s: %w", rule.ID, err))
+				if ctx.Err() != nil {
+					return errors.Join(errs...)
+				}
+				continue
 			}
 			for _, sample := range samples {
 				alertValue, transition := e.eval.Step(rule, sample, now)
@@ -251,17 +287,20 @@ func (e *Engine) Tick(ctx context.Context) error {
 				alertValue.Suppressed = FirstMatch(silences, *alertValue, now) != nil
 				if e.store != nil {
 					if err := e.store.Upsert(ctx, *alertValue); err != nil {
-						return fmt.Errorf("persist alert %s: %w", alertValue.Key, err)
+						errs = append(errs, fmt.Errorf("persist alert %s: %w", alertValue.Key, err))
 					}
 				}
 				if !alertValue.Suppressed && e.notifier != nil {
 					if err := e.notifier.Notify(ctx, *alertValue); err != nil {
-						return fmt.Errorf("notify alert %s: %w", alertValue.Key, err)
+						errs = append(errs, fmt.Errorf("notify alert %s: %w", alertValue.Key, err))
 					}
+				}
+				if ctx.Err() != nil {
+					return errors.Join(append(errs, ctx.Err())...)
 				}
 			}
 		}
 	}
 	e.eval.Forget(now.Add(-time.Hour))
-	return nil
+	return errors.Join(errs...)
 }

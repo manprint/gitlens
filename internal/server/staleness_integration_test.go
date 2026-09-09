@@ -32,8 +32,8 @@ func TestStaleness_Evaluate_WithDB_Transitions(t *testing.T) {
 	fc := clock.NewFake(time.Now())
 	s := NewStaleness(pool, fc)
 	s.mu.Lock()
+	s.conn = mustAcquire(t, pool)
 	s.hasLock = true
-	s.conn = &pgxpool.Conn{}
 	s.mu.Unlock()
 
 	require.NoError(t, s.Evaluate(context.Background()))
@@ -76,8 +76,8 @@ func TestStaleness_NoPrimary(t *testing.T) {
 	fc := clock.NewFake(time.Now())
 	s := NewStaleness(pool, fc)
 	s.mu.Lock()
+	s.conn = mustAcquire(t, pool)
 	s.hasLock = true
-	s.conn = &pgxpool.Conn{}
 	s.clusterPrimarySeen[fmt.Sprintf("%d", cid)] = fc.Now().Add(-2 * time.Minute)
 	s.mu.Unlock()
 
@@ -122,8 +122,8 @@ func TestStaleness_SlotInactive(t *testing.T) {
 	fc := clock.NewFake(time.Now())
 	s := NewStaleness(pool, fc)
 	s.mu.Lock()
+	s.conn = mustAcquire(t, pool)
 	s.hasLock = true
-	s.conn = &pgxpool.Conn{}
 	s.slotInactiveSince[iid.String()+"/testslot"] = fc.Now().Add(-40 * time.Second)
 	s.mu.Unlock()
 
@@ -153,8 +153,8 @@ func TestStaleness_EmitEvent_MarshalError_WithPool(t *testing.T) {
 	truncateAll(t, pool)
 	s := NewStaleness(pool, clock.NewFake(time.Now()))
 	s.mu.Lock()
+	s.conn = mustAcquire(t, pool)
 	s.hasLock = true
-	s.conn = &pgxpool.Conn{}
 	s.mu.Unlock()
 	err := s.emitEvent(context.Background(), "t", nil, nil, map[string]any{"bad": make(chan int)})
 	require.Error(t, err)
@@ -194,8 +194,8 @@ func TestINTSTALE003_AdvisoryLockSerializesEmission(t *testing.T) {
 	// Create a single evaluator with manual lock control (same pattern as TestStaleness_Evaluate_WithDB_Transitions)
 	eval := NewStaleness(pool, fc)
 	eval.mu.Lock()
+	eval.conn = mustAcquire(t, pool)
 	eval.hasLock = true
-	eval.conn = &pgxpool.Conn{}
 	eval.mu.Unlock()
 
 	// First Evaluate: emits agent_down
@@ -212,4 +212,20 @@ func TestINTSTALE003_AdvisoryLockSerializesEmission(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='agent_down'`).Scan(&cnt2))
 	require.Equal(t, 1, cnt2,
 		"second evaluate should not re-emit — the transition is recorded once per instance state change, proving advisory lock prevents duplicates")
+}
+
+// mustAcquire hands out a real pooled connection for tests that force
+// leadership by hand.
+//
+// A zero-value &pgxpool.Conn{} was used here as a sentinel. Every method on
+// one panics — its pooled resource is nil — which made it impossible for
+// ensureLeader to check anything at all about the session that supposedly
+// holds the advisory lock, including whether it is still open, which is
+// exactly what it now has to do.
+func mustAcquire(t *testing.T, pool *pgxpool.Pool) *pgxpool.Conn {
+	t.Helper()
+	conn, err := pool.Acquire(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(conn.Release)
+	return conn
 }

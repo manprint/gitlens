@@ -547,7 +547,13 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 							to := topoEdges[0].To
 							row.UpstreamID = &to
 						}
+						// "sync_mode" is the name older agents used for this
+						// label; accept both so a fleet mid-upgrade still
+						// records sync_state.
 						if s, ok := m.Labels["sync_state"]; ok {
+							v := s
+							row.SyncState = &v
+						} else if s, ok := m.Labels["sync_mode"]; ok {
 							v := s
 							row.SyncState = &v
 						}
@@ -589,6 +595,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 			res.Errors[inst.InstanceID] = instErr
 			continue
 		}
+		instGeneric = append(instGeneric, selfMetricRows(env, inst, tenantID, cidDB, instUUID, p.clock.Now())...)
 		currentSeries[instUUID] = instSeries
 		// Append per-instance buffers to envelope buffers
 		genericRows = append(genericRows, instGeneric...)
@@ -686,6 +693,81 @@ func uniqueStrings(values []string) []string {
 		out = append(out, value)
 	}
 	return out
+}
+
+// selfMetricRows derives the ingest self-monitoring series for one instance of
+// one envelope.
+//
+// Three Tier 0 alert rules watch the collector itself — check_failing,
+// cardinality_budget_exceeded and clock_skew — by comparing metrics from the
+// `metrics` table, and nothing had ever written them: no check emits a
+// pglens_* metric, so all three were structurally unable to fire whatever
+// happened in the field, while looking perfectly configured in the API and
+// the docs. The envelope is the only place these are knowable.
+//
+// They are gauges, written on every push, so the rules also receive the false
+// sample that resolves them once the problem clears. `now` is the server's
+// receive time, used only to measure the agent's clock skew.
+func selfMetricRows(env wire.Envelope, inst wire.Instance, tenantID string, clusterID int64, instanceID uuid.UUID, now time.Time) []store.MetricRow {
+	if len(inst.Results) == 0 {
+		return nil
+	}
+	var failed, truncated int
+	var ts time.Time
+	for _, r := range inst.Results {
+		if r.Error != "" {
+			failed++
+		}
+		if r.Truncated {
+			truncated++
+		}
+		if r.TS.After(ts) {
+			ts = r.TS
+		}
+	}
+	if ts.IsZero() {
+		ts = env.SentAt
+	}
+	if ts.IsZero() {
+		ts = now
+	}
+	total := float64(len(inst.Results))
+	values := []struct {
+		name  string
+		value float64
+	}{
+		{"pglens_check_error_rate", float64(failed) / total},
+		{"pglens_cardinality_truncated_rate", float64(truncated) / total},
+	}
+	// Skew is measured against the agent's own SentAt: a drifting agent clock
+	// corrupts every ts in the envelope, so it has to be durable and shared,
+	// not only a process-local gauge on whichever server replica happened to
+	// receive this one push.
+	if !env.SentAt.IsZero() {
+		skew := now.Sub(env.SentAt).Seconds()
+		if skew < 0 {
+			skew = -skew
+		}
+		values = append(values, struct {
+			name  string
+			value float64
+		}{"pglens_agent_clock_skew_seconds", skew})
+	}
+	rows := make([]store.MetricRow, 0, len(values))
+	for _, v := range values {
+		key := pgtype.SeriesKey{Metric: v.name, Instance: instanceID}
+		rows = append(rows, store.MetricRow{
+			TS:         ts,
+			TenantID:   tenantID,
+			ClusterID:  clusterID,
+			InstanceID: instanceID,
+			Metric:     v.name,
+			Labels:     map[string]string{},
+			SeriesID:   store.SeriesID(key),
+			Value:      v.value,
+		})
+	}
+	return rows
 }
 
 func (p *Pipeline) processInstanceNoDB(_ context.Context, inst wire.Instance) error {
@@ -954,6 +1036,8 @@ func applyReplicationMetric(row *store.ReplicationRow, name string, value float6
 	case strings.Contains(lower, "sync_state"):
 		s := fmt.Sprintf("%v", value)
 		if v, ok := labels["sync_state"]; ok {
+			s = v
+		} else if v, ok := labels["sync_mode"]; ok {
 			s = v
 		}
 		row.SyncState = &s

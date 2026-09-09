@@ -34,20 +34,9 @@ func main() {
 	if *healthcheck {
 		os.Exit(runHealthcheck())
 	}
-	token := os.Getenv("PGLENS_BOOTSTRAP_TOKEN")
-	if token == "" {
-		if p := os.Getenv("PGLENS_BOOTSTRAP_TOKEN_FILE"); p != "" {
-			if data, err := os.ReadFile(p); err == nil {
-				token = string(data)
-				// Trim trailing newline
-				if len(token) > 0 && token[len(token)-1] == '\n' {
-					token = token[:len(token)-1]
-				}
-			}
-		}
-	}
-	if token == "" {
-		token = "dev-token"
+	token, err := server.LoadBootstrapToken(nil, nil)
+	if err != nil {
+		log.Fatalf("bootstrap token: %v", err)
 	}
 	listen := os.Getenv("PGLENS_LISTEN")
 	if listen == "" {
@@ -57,7 +46,6 @@ func main() {
 	startupCtx := context.Background()
 	var pool *pgxpool.Pool
 	if dsn := os.Getenv("PGLENS_DSN"); dsn != "" {
-		var err error
 		pool, err = pgxpool.New(startupCtx, dsn)
 		if err != nil {
 			log.Fatalf("connect db: %v", err)

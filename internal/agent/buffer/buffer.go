@@ -223,7 +223,17 @@ func (b *Buffer) Next() ([]byte, AckFunc, error) {
 					b.nextReadOff = nextOff
 					return env, ackFunc, nil
 				}
-				// Corrupted record (env == nil but we have an offset); keep advancing.
+				// Corrupted record (env == nil but we have an offset); keep
+				// advancing. This is the one place corruption is detected, and
+				// it is where CorruptRecords has to be counted: the counter
+				// used to be bumped by the size/age retention policies
+				// instead, so a buffer that was simply doing its job — rolling
+				// off old segments under a bounded volume — reported hundreds
+				// of "corrupt" records, while a genuinely unreadable record
+				// (torn write, bad CRC) reported none.
+				b.stats.CorruptRecords++
+				corruptAt := b.opts.Clock.Now()
+				b.stats.LastCorruptTime = &corruptAt
 				b.nextReadOff = nextOff
 				continue
 			}
@@ -247,6 +257,26 @@ func (b *Buffer) Next() ([]byte, AckFunc, error) {
 		// No more records (yet) in the currently active segment.
 		return nil, nil, io.EOF
 	}
+}
+
+// Rewind moves the read cursor back to the last acked position, so every
+// record that was handed out by Next() but never acked is offered again.
+//
+// Next() advances the cursor as soon as it returns a record, independently of
+// the ack — which is what makes a *skipped* ack silently lossy: the record
+// stays on disk and keeps counting against the size budget, but nothing ever
+// offers it again for the rest of the process's life, so the documented
+// at-least-once delivery degrades to at-most-once until the next restart.
+// Callers that stop a drain without acking (the pusher, when the server
+// answers 401, or when the push context is cancelled) call this to keep the
+// guarantee.
+func (b *Buffer) Rewind() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.nextReadSeg = 0
+	b.nextReadOff = 0
+	b.findSegmentAfterAcked()
 }
 
 // Stats returns current buffer statistics.
@@ -332,7 +362,6 @@ func (b *Buffer) enforceMaxSize() {
 		b.stats.SamplesDropped["size_limit"] += int64(recordCount)
 		now := b.opts.Clock.Now()
 		b.stats.LastDropTime = &now
-		b.stats.CorruptRecords += recordCount
 
 		// Adjust read position if we dropped the segment being read.
 		if b.nextReadSeg > 0 {
@@ -362,7 +391,6 @@ func (b *Buffer) enforceMaxAge() {
 		b.stats.SamplesDropped["age_limit"] += int64(recordCount)
 		now := b.opts.Clock.Now()
 		b.stats.LastDropTime = &now
-		b.stats.CorruptRecords += recordCount
 
 		// Adjust read position.
 		if b.nextReadSeg > 0 {

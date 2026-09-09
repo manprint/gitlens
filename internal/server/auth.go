@@ -15,6 +15,14 @@ func NewAuth(token string) *Auth {
 }
 
 func (a *Auth) Validate(r *http.Request) bool {
+	// An unconfigured token must never authenticate anything. Without this,
+	// a server built with an empty token accepted every request that carried
+	// no Authorization header at all (both sides being the empty string made
+	// the constant-time compare below succeed), silently turning the ingest
+	// endpoint and the whole read API into anonymous surfaces.
+	if a == nil || a.token == "" {
+		return false
+	}
 	got := ""
 	if h := r.Header.Get("Authorization"); len(h) > 7 && h[:7] == "Bearer " {
 		got = h[7:]

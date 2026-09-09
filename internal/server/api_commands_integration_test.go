@@ -67,6 +67,7 @@ func seedCommandInstance(t *testing.T, pool *pgxpool.Pool) (uuid.UUID, uuid.UUID
 func completeCommand(t *testing.T, router http.Handler, instanceID, agentID uuid.UUID, body, result string) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/instances/"+instanceID.String()+"/commands", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer test-token")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusAccepted, rec.Code, rec.Body.String())
@@ -100,6 +101,7 @@ func TestINTCMD002_EnqueuePollResultAndReadBack(t *testing.T) {
 
 	body := bytes.NewBufferString(`{"kind":"explain","args":{"queryid":7}}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/instances/"+instanceID.String()+"/commands", body)
+	req.Header.Set("Authorization", "Bearer test-token")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusAccepted, rec.Code)
@@ -127,6 +129,7 @@ func TestINTCMD002_EnqueuePollResultAndReadBack(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, rec.Code)
 
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/commands/"+claimed.CommandID.String(), nil)
+	req.Header.Set("Authorization", "Bearer test-token")
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -192,6 +195,7 @@ func TestINTPLAN002_DifferentPlanCreatesHistoryShape(t *testing.T) {
 	require.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*) FROM query_plans WHERE instance_id=$1 AND queryid=8`, instanceID).Scan(&count))
 	require.Equal(t, 2, count)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/plans?instance_id="+instanceID.String()+"&queryid=8", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -232,6 +236,7 @@ func TestINTCMD011_AuditHasOneRowPerTerminalOutcome(t *testing.T) {
 	require.Equal(t, map[string]int{"ok": 1, "error": 1, "rejected": 2}, counts)
 
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/instances/"+instanceID.String()+"/command-audit?limit=500", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())

@@ -95,7 +95,9 @@ func (e *Engine) Start(ctx context.Context) {
 					return
 				case <-t.C():
 					runCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-					_ = e.Run(runCtx)
+					if err := e.Run(runCtx); err != nil {
+						log.Printf("advisor engine: %v", err)
+					}
 					cancel()
 				}
 			}
@@ -142,13 +144,21 @@ func (e *Engine) ensureLeader(ctx context.Context) error {
 		e.hasLock = true
 		return nil
 	}
+	// The advisory lock is held by this session, so leadership dies with the
+	// connection. Without this check a closed conn was indistinguishable from
+	// a live one (hasLock && conn != nil short-circuited), so a server that
+	// lost its session kept writing findings as "the leader" while another
+	// server legitimately took the freed lock.
+	if e.conn != nil && e.conn.Conn().IsClosed() {
+		e.releaseLeaderConn()
+	}
 	if e.hasLock && e.conn != nil {
 		return nil
 	}
 	if e.conn == nil {
 		c, err := e.pool.Acquire(ctx)
 		if err != nil {
-			return err
+			return fmt.Errorf("acquire conn for advisor lock: %w", err)
 		}
 		e.conn = c
 	}
@@ -158,10 +168,24 @@ func (e *Engine) ensureLeader(ctx context.Context) error {
 			e.hasLock = false
 			return nil
 		}
+		// Hand the connection back rather than pinning a broken one: every
+		// later pass would otherwise retry on the same dead session and the
+		// engine could never regain leadership without a restart.
+		e.releaseLeaderConn()
 		return fmt.Errorf("try advisor advisory lock: %w", err)
 	}
 	e.hasLock = locked
 	return nil
+}
+
+// releaseLeaderConn drops the lock-holding connection and the leadership it
+// carried. Caller must hold e.mu.
+func (e *Engine) releaseLeaderConn() {
+	if e.conn != nil {
+		e.conn.Release()
+		e.conn = nil
+	}
+	e.hasLock = false
 }
 
 // Run executes one complete pass. A follower returns without touching findings.
@@ -183,12 +207,25 @@ func (e *Engine) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// One instance failing must not cost every other instance its pass. This
+	// used to abort at the first error, so a single unreachable or
+	// mis-permissioned instance (a snapshot that cannot be loaded) stopped
+	// advisor findings for every instance after it in the list and skipped
+	// the retention purge entirely — indefinitely, since the list order is
+	// stable.
+	var errs []error
 	for _, id := range ids {
 		if err := e.runInstance(ctx, id, now); err != nil {
-			return err
+			errs = append(errs, err)
+		}
+		if ctx.Err() != nil {
+			return errors.Join(append(errs, ctx.Err())...)
 		}
 	}
-	return e.store.PurgeResolved(ctx, now.Add(-90*24*time.Hour))
+	if err := e.store.PurgeResolved(ctx, now.Add(-90*24*time.Hour)); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
 }
 
 func (e *Engine) runInstance(ctx context.Context, id uuid.UUID, now time.Time) error {
@@ -199,6 +236,7 @@ func (e *Engine) runInstance(ctx context.Context, id uuid.UUID, now time.Time) e
 	rules := All()
 	ran := make([]string, 0, len(rules))
 	seen := []string{}
+	var errs []error
 	for _, r := range rules {
 		ran = append(ran, r.ID())
 		findings, panicked := e.evaluateRule(r, s)
@@ -226,13 +264,22 @@ func (e *Engine) runInstance(ctx context.Context, id uuid.UUID, now time.Time) e
 			if f.ID() == r.ID()+"/" {
 				f.ObjectName = id.String()
 			}
+			// A finding that fails to persist is still recorded as seen and
+			// the pass continues: aborting here skipped ResolveAbsent, so
+			// findings that had genuinely gone away were never resolved and
+			// stayed on the dashboard forever. Keeping it in `seen` also
+			// stops ResolveAbsent from resolving a finding that does exist
+			// and merely failed to be written this cycle.
 			if err := e.store.UpsertFinding(ctx, f, now); err != nil {
-				return fmt.Errorf("persist finding %s: %w", f.ID(), err)
+				errs = append(errs, fmt.Errorf("persist finding %s: %w", f.ID(), err))
 			}
 			seen = append(seen, f.ID())
 		}
 	}
-	return e.store.ResolveAbsent(ctx, s.InstanceID, ran, seen, now)
+	if err := e.store.ResolveAbsent(ctx, s.InstanceID, ran, seen, now); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
 }
 
 func (e *Engine) evaluateRule(r Rule, s *Snapshot) (out []Finding, panicked bool) {

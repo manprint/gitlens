@@ -80,7 +80,7 @@ INSERT INTO alert_rules (rule_id, severity, scope, metric, comparator, threshold
   ('replica.all_standbys_lagging', 'critical', 'cluster',  'pg_replication_lag_seconds',  'gt', 30,   120, 'Every standby in the cluster is lagging'),
   ('replica.no_sync_standby',      'critical', 'cluster',  'pg_sync_standby_count',       'lt', 1,     60, 'No synchronous standby available'),
   ('conn.near_max',                'warning',  'instance', 'pg_connections_used_ratio',   'gt', 0.8,  120, 'Connections above 80 percent of max_connections'),
-  ('conn.idle_in_transaction',     'warning',  'instance', 'pg_max_idle_in_txn_seconds',  'gt', 300,  120, 'A session has been idle in transaction for over 5 minutes'),
+  ('conn.idle_in_transaction',     'warning',  'instance', 'pg_max_idle_in_transaction_seconds',  'gt', 300,  120, 'A session has been idle in transaction for over 5 minutes'),
   ('txn.long_running',             'warning',  'instance', 'pg_max_xact_age_seconds',      'gt', 900,  120, 'A transaction has been open for over 15 minutes'),
   ('txn.wraparound_risk',          'critical', 'instance', 'pg_max_datfrozenxid_age',      'gt', 1e9,  300, 'Transaction ID age above one billion'),
   ('db.deadlock_rate',             'warning',  'instance', 'pg_deadlocks_total',           'gt', 0.1,  300, 'Deadlocks are occurring'),

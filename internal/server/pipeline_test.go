@@ -756,3 +756,86 @@ func TestPipeline_LabelsNilHandled(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, res.Accepted)
 }
+
+// TestSelfMetricRows_MakesTheCollectorRulesReachable — check_failing,
+// cardinality_budget_exceeded and clock_skew compare metrics from the
+// `metrics` table that nothing used to write, so all three were unable to
+// fire whatever happened. These rows are what makes them evaluable.
+func TestSelfMetricRows_MakesTheCollectorRulesReachable(t *testing.T) {
+	t.Parallel()
+	instID := uuid.New()
+	sentAt := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	ts := sentAt.Add(-time.Second)
+	now := sentAt.Add(45 * time.Second) // the server received this push 45s later
+
+	inst := wire.Instance{InstanceID: instID.String(), Results: []wire.Result{
+		{Check: "bgwriter", TS: ts},
+		{Check: "conn_stats", TS: ts, Error: "permission denied"},
+		{Check: "table_stats", TS: ts, Truncated: true},
+		{Check: "ash", TS: ts},
+	}}
+	rows := selfMetricRows(wire.Envelope{SentAt: sentAt}, inst, "default", 7, instID, now)
+
+	got := map[string]store.MetricRow{}
+	for _, r := range rows {
+		got[r.Metric] = r
+	}
+	require.Len(t, got, 3)
+	require.Equal(t, 0.25, got["pglens_check_error_rate"].Value, "one of four checks failed")
+	require.Equal(t, 0.25, got["pglens_cardinality_truncated_rate"].Value, "one of four results was truncated")
+	require.Equal(t, 45.0, got["pglens_agent_clock_skew_seconds"].Value)
+
+	for metric, row := range got {
+		require.Equal(t, instID, row.InstanceID, metric)
+		require.Equal(t, int64(7), row.ClusterID, metric)
+		require.Equal(t, "default", row.TenantID, metric)
+		require.Equal(t, ts, row.TS, metric, "the series must sit on the envelope's own timeline")
+		require.NotEmpty(t, row.SeriesID, metric)
+	}
+}
+
+// TestSelfMetricRows_HealthyPushReportsZero — the rules need the false sample
+// to resolve, so the series must be written when nothing is wrong too.
+func TestSelfMetricRows_HealthyPushReportsZero(t *testing.T) {
+	t.Parallel()
+	instID := uuid.New()
+	ts := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	inst := wire.Instance{InstanceID: instID.String(), Results: []wire.Result{{Check: "bgwriter", TS: ts}}}
+	rows := selfMetricRows(wire.Envelope{SentAt: ts}, inst, "default", 1, instID, ts)
+	require.Len(t, rows, 3)
+	for _, r := range rows {
+		require.Zero(t, r.Value, r.Metric)
+	}
+}
+
+// TestSelfMetricRows_SkewIsUnsignedAndOptional — an agent ahead of the server
+// is as broken as one behind it, and an envelope with no SentAt has no skew
+// to report rather than a bogus one.
+func TestSelfMetricRows_SkewIsUnsignedAndOptional(t *testing.T) {
+	t.Parallel()
+	instID := uuid.New()
+	ts := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	inst := wire.Instance{InstanceID: instID.String(), Results: []wire.Result{{Check: "bgwriter", TS: ts}}}
+
+	ahead := selfMetricRows(wire.Envelope{SentAt: ts.Add(90 * time.Second)}, inst, "default", 1, instID, ts)
+	var skew float64
+	var found bool
+	for _, r := range ahead {
+		if r.Metric == "pglens_agent_clock_skew_seconds" {
+			skew, found = r.Value, true
+		}
+	}
+	require.True(t, found)
+	require.Equal(t, 90.0, skew)
+
+	none := selfMetricRows(wire.Envelope{}, inst, "default", 1, instID, ts)
+	require.Len(t, none, 2)
+	for _, r := range none {
+		require.NotEqual(t, "pglens_agent_clock_skew_seconds", r.Metric)
+	}
+}
+
+func TestSelfMetricRows_NoResultsNoRows(t *testing.T) {
+	t.Parallel()
+	require.Empty(t, selfMetricRows(wire.Envelope{SentAt: time.Now()}, wire.Instance{}, "default", 1, uuid.New(), time.Now()))
+}

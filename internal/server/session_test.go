@@ -270,14 +270,51 @@ func TestRequireCredential_NoPasswordConfiguredIs503(t *testing.T) {
 	require.Contains(t, string(body), `"error":"ui_password_not_configured"`)
 }
 
-func TestRequireCredential_DisabledLeavesRoutesOpen(t *testing.T) {
-	server := newSessionTestServer(t, UIConfig{Password: "password"}, NewSessionStore(time.Hour))
+// PGLENS_UI_ENABLED=false only disables the static assets; the API keeps its
+// credential gate (README's own wording for the flag). It used to skip the
+// middleware entirely, leaving every read endpoint anonymous.
+func TestRequireCredential_UIDisabledStillGatesAPI(t *testing.T) {
+	server := newSessionTestServer(t, UIConfig{Enabled: false, Password: "password"}, NewSessionStore(time.Hour))
 	defer server.Close()
 
 	response, err := server.Client().Get(server.URL + "/api/v1/clusters")
 	require.NoError(t, err)
 	defer func() { require.NoError(t, response.Body.Close()) }()
-	require.NotEqual(t, http.StatusUnauthorized, response.StatusCode)
+	require.Equal(t, http.StatusUnauthorized, response.StatusCode)
+}
+
+func TestRequireCredential_UIDisabledAcceptsAgentToken(t *testing.T) {
+	server := newSessionTestServer(t, UIConfig{Enabled: false}, NewSessionStore(time.Hour))
+	defer server.Close()
+
+	request, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/clusters", http.NoBody)
+	require.NoError(t, err)
+	request.Header.Set("Authorization", "Bearer agent-token")
+	response, err := server.Client().Do(request)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, response.Body.Close()) }()
+	require.Equal(t, http.StatusOK, response.StatusCode)
+
+	anonymous, err := server.Client().Get(server.URL + "/api/v1/clusters")
+	require.NoError(t, err)
+	defer func() { require.NoError(t, anonymous.Body.Close()) }()
+	require.Equal(t, http.StatusUnauthorized, anonymous.StatusCode)
+}
+
+func TestRequireCredential_UIDisabledAcceptsSessionCookie(t *testing.T) {
+	store := NewSessionStore(time.Hour)
+	token, _, err := store.Create()
+	require.NoError(t, err)
+	server := newSessionTestServer(t, UIConfig{Enabled: false, Password: "password"}, store)
+	defer server.Close()
+
+	request, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/clusters", http.NoBody)
+	require.NoError(t, err)
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	response, err := server.Client().Do(request)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, response.Body.Close()) }()
+	require.Equal(t, http.StatusOK, response.StatusCode)
 }
 
 func TestSessionLogin_Success(t *testing.T) {

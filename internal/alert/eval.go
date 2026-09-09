@@ -97,9 +97,25 @@ func (e *Evaluator) Step(r Rule, s Sample, now time.Time) (*Alert, Transition) {
 	e.states[k] = st
 	return &st.alert, TransitionNone
 }
+
+// Forget drops evaluator state for pending episodes that started before the
+// cutoff — conditions that went true, never held long enough to fire, and
+// stopped being sampled (an instance that disappeared, a rule that was
+// disabled), which would otherwise pin their key in memory forever.
+//
+// Firing episodes are never forgotten, however old they are. Dropping them
+// was actively harmful: the state machine is the only record that an alert is
+// currently firing, so a condition that stayed true for more than the cutoff
+// had its state deleted and was then re-discovered as a brand-new episode —
+// re-firing and re-notifying with a reset StartedAt every cutoff period, and
+// never emitting the resolved transition when it finally cleared, leaving the
+// stored alert firing forever.
 func (e *Evaluator) Forget(before time.Time) int {
 	n := 0
 	for k, s := range e.states {
+		if s.firing {
+			continue
+		}
 		if s.first.Before(before) {
 			delete(e.states, k)
 			n++

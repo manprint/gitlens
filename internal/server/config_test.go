@@ -1,11 +1,53 @@
 package server
 
 import (
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestLoadBootstrapToken(t *testing.T) {
+	env := func(pairs map[string]string) func(string) string {
+		return func(k string) string { return pairs[k] }
+	}
+
+	t.Run("inline value wins", func(t *testing.T) {
+		token, err := LoadBootstrapToken(env(map[string]string{
+			"PGLENS_BOOTSTRAP_TOKEN":      "inline\n",
+			"PGLENS_BOOTSTRAP_TOKEN_FILE": "/run/secrets/token",
+		}), func(string) ([]byte, error) { return []byte("from-file"), nil })
+		require.NoError(t, err)
+		require.Equal(t, "inline", token)
+	})
+
+	t.Run("file is read and trimmed", func(t *testing.T) {
+		token, err := LoadBootstrapToken(env(map[string]string{"PGLENS_BOOTSTRAP_TOKEN_FILE": "/run/secrets/token"}),
+			func(string) ([]byte, error) { return []byte("  from-file\n"), nil })
+		require.NoError(t, err)
+		require.Equal(t, "from-file", token)
+	})
+
+	// An unreadable token file used to fall through to the hardcoded
+	// "dev-token" default, silently. It must be a startup failure instead.
+	t.Run("unreadable file is an error", func(t *testing.T) {
+		_, err := LoadBootstrapToken(env(map[string]string{"PGLENS_BOOTSTRAP_TOKEN_FILE": "/run/secrets/missing"}),
+			func(string) ([]byte, error) { return nil, errors.New("no such file") })
+		require.ErrorContains(t, err, "read bootstrap token file")
+	})
+
+	t.Run("empty file is an error", func(t *testing.T) {
+		_, err := LoadBootstrapToken(env(map[string]string{"PGLENS_BOOTSTRAP_TOKEN_FILE": "/run/secrets/token"}),
+			func(string) ([]byte, error) { return []byte("\n \n"), nil })
+		require.ErrorContains(t, err, "is empty")
+	})
+
+	t.Run("no token configured is an error", func(t *testing.T) {
+		_, err := LoadBootstrapToken(env(nil), nil)
+		require.ErrorContains(t, err, "PGLENS_BOOTSTRAP_TOKEN")
+	})
+}
 
 func TestConfig_AlertIntervalDefault(t *testing.T) {
 	c, err := LoadAlertConfig(func(string) string { return "" }, nil)

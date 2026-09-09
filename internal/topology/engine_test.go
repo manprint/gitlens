@@ -595,3 +595,121 @@ func TestEngine_NeverWritesClusterID(t *testing.T) {
 		})
 	}
 }
+
+// TestEngine_SplitBrainThrottledPerCluster — detectSplitBrain runs on every
+// observation of every instance, so an unresolved split brain used to write
+// one event per scrape per instance. It must be emitted at most once per
+// window, and again immediately after the condition clears and returns.
+func TestEngine_SplitBrainThrottledPerCluster(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+
+	primary1 := uuid.New()
+	primary2 := uuid.New()
+	cID := pgtype.ManualClusterID("cluster1")
+
+	observe := func(id uuid.UUID, role pgtype.Role) int {
+		events := e.Apply(Observation{InstanceID: id, ClusterID: cID, Role: role, Timestamp: clk.Now()})
+		n := 0
+		for _, evt := range events {
+			if evt.Type == EventSplitBrainDetected {
+				n++
+			}
+		}
+		return n
+	}
+
+	observe(primary1, pgtype.RolePrimary)
+	clk.Advance(30 * time.Second)
+	if got := observe(primary2, pgtype.RolePrimary); got != 1 {
+		t.Fatalf("expected the split brain to be reported once, got %d", got)
+	}
+
+	// Ten further scrapes inside the window: silence.
+	for i := 0; i < 5; i++ {
+		clk.Advance(5 * time.Second)
+		if got := observe(primary1, pgtype.RolePrimary) + observe(primary2, pgtype.RolePrimary); got != 0 {
+			t.Fatalf("split_brain_detected re-emitted inside the throttle window (iteration %d)", i)
+		}
+	}
+
+	// Past the window, the still-unresolved condition is reported again.
+	clk.Advance(40 * time.Second)
+	if got := observe(primary1, pgtype.RolePrimary); got != 1 {
+		t.Fatalf("expected one re-emission after the throttle window, got %d", got)
+	}
+
+	// The condition clears: one primary demoted back to standby.
+	clk.Advance(5 * time.Second)
+	if got := observe(primary2, pgtype.RoleStandby); got != 0 {
+		t.Fatalf("expected no split brain with a single primary, got %d", got)
+	}
+
+	// It returns. Re-promoting primary2 counts as a failover, so the engine's
+	// own 30s post-failover suppression applies; once that has passed the
+	// event must fire without also waiting out the throttle window (only 41s
+	// have elapsed since the previous emission).
+	clk.Advance(5 * time.Second)
+	if got := observe(primary2, pgtype.RolePrimary); got != 0 {
+		t.Fatalf("expected split brain to stay suppressed for 30s after the failover, got %d", got)
+	}
+	clk.Advance(31 * time.Second)
+	if got := observe(primary1, pgtype.RolePrimary); got != 1 {
+		t.Fatalf("expected an immediate report once the split brain recurs, got %d", got)
+	}
+}
+
+// TestEngine_OrphanStandbyThrottled — the orphan condition is re-checked on
+// every scrape; once the 60s window had elapsed the event used to be emitted
+// on every single one of them (240 rows/hour at a 15s interval), each one
+// re-notifying the alert rules for one unchanged condition.
+func TestEngine_OrphanStandbyThrottled(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+
+	standby := uuid.New()
+	cID := pgtype.ManualClusterID("cluster1")
+
+	observe := func() []Event {
+		events := e.Apply(Observation{
+			InstanceID: standby,
+			ClusterID:  cID,
+			Role:       pgtype.RoleStandby,
+			Timestamp:  clk.Now(),
+			Edges:      []Edge{{From: standby, To: uuid.New(), Confidence: "low"}},
+		})
+		var orphans []Event
+		for _, evt := range events {
+			if evt.Type == EventOrphanStandby {
+				orphans = append(orphans, evt)
+			}
+		}
+		return orphans
+	}
+
+	observe() // starts the orphan clock
+	clk.Advance(61 * time.Second)
+	if got := observe(); len(got) != 1 {
+		t.Fatalf("expected one orphan_standby past the window, got %d", len(got))
+	}
+
+	// Scrapes inside the next window are silent.
+	for i := 0; i < 3; i++ {
+		clk.Advance(15 * time.Second)
+		if got := observe(); len(got) != 0 {
+			t.Fatalf("orphan_standby re-emitted inside the throttle window (iteration %d)", i)
+		}
+	}
+
+	// Past it, one more event — reporting the age of the whole episode, not
+	// of the throttle window.
+	clk.Advance(15 * time.Second)
+	got := observe()
+	if len(got) != 1 {
+		t.Fatalf("expected one orphan_standby after the throttle window, got %d", len(got))
+	}
+	duration, _ := got[0].Payload["duration_seconds"].(float64)
+	if duration < 120 {
+		t.Errorf("expected duration_seconds to cover the whole orphan episode, got %v", duration)
+	}
+}

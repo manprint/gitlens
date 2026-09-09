@@ -82,11 +82,21 @@ FROM pg_stat_replication
 			return Result{}, err
 		}
 
+		// The label MUST be called sync_state: that is the name
+		// internal/server/pipeline.go reads to fill
+		// metrics_replication.sync_state. It was emitted as "sync_mode", so
+		// the column stayed NULL on every row ever written, and the value
+		// pg_stat_replication reports here — the one thing that says whether
+		// a standby is synchronous — never reached the server at all. The
+		// consequences were all silent: the Sync column of the cluster page's
+		// lag table read "Unknown" for every standby in every cluster,
+		// GET /api/v1/clusters/{id}/replication returned sync_state: null,
+		// and the replica.no_sync_standby alert rule had nothing to count.
 		labels := map[string]string{
-			"standby":   row.ApplicationName,
-			"client":    row.ClientAddr,
-			"state":     row.State,
-			"sync_mode": row.SyncState,
+			"standby":    row.ApplicationName,
+			"client":     row.ClientAddr,
+			"state":      row.State,
+			"sync_state": row.SyncState,
 		}
 
 		if row.WriteLagBytes != nil {

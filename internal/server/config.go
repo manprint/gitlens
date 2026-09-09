@@ -25,6 +25,42 @@ func (c UIConfig) String() string {
 	return fmt.Sprintf("UIConfig{Enabled:%t Password:[redacted] SessionTTL:%s CookieSecure:%s}", c.Enabled, c.SessionTTL, c.CookieSecure)
 }
 
+// LoadBootstrapToken resolves the agent bearer token from
+// PGLENS_BOOTSTRAP_TOKEN or PGLENS_BOOTSTRAP_TOKEN_FILE (trailing whitespace
+// trimmed, the inline value winning). It returns an error when no token is
+// configured, or when a configured token file cannot be read or is empty.
+//
+// It used to silently fall back to the literal "dev-token" — including when a
+// PGLENS_BOOTSTRAP_TOKEN_FILE was configured but unreadable (a wrong path, a
+// secret not mounted yet), so a production server could come up happily
+// accepting a token published in this repository's own quickstart with
+// nothing in its logs saying so. README documents the token as required with
+// no default; this makes the binary agree.
+func LoadBootstrapToken(getenv func(string) string, readFile func(string) ([]byte, error)) (string, error) {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	if readFile == nil {
+		readFile = os.ReadFile
+	}
+	if token := strings.TrimRight(getenv("PGLENS_BOOTSTRAP_TOKEN"), "\r\n"); token != "" {
+		return token, nil
+	}
+	path := strings.TrimSpace(getenv("PGLENS_BOOTSTRAP_TOKEN_FILE"))
+	if path == "" {
+		return "", fmt.Errorf("set PGLENS_BOOTSTRAP_TOKEN or PGLENS_BOOTSTRAP_TOKEN_FILE: the agent bearer token has no default")
+	}
+	data, err := readFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read bootstrap token file %s: %w", path, err)
+	}
+	token := strings.TrimSpace(string(data))
+	if token == "" {
+		return "", fmt.Errorf("bootstrap token file %s is empty", path)
+	}
+	return token, nil
+}
+
 func LoadAlertConfig(getenv func(string) string, readFile func(string) ([]byte, error)) (AlertConfig, error) {
 	if getenv == nil {
 		getenv = os.Getenv

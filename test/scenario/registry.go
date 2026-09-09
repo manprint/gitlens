@@ -59,6 +59,10 @@ type APIClient interface {
 	// RawGet fetches an arbitrary endpoint and returns its raw text body —
 	// for non-JSON responses like /metrics (Prometheus text exposition).
 	RawGet(path string) (string, error)
+	// AnonymousGet issues a GET with no credentials whatsoever and returns
+	// only the status code, so a scenario can assert that the API is not an
+	// anonymous surface.
+	AnonymousGet(path string) (int, error)
 	Request(method, path string, payload []byte) (interface{}, error)
 }
 

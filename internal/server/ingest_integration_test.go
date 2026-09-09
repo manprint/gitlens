@@ -74,6 +74,9 @@ func TestIngest_EndToEnd_PushThenClusters(t *testing.T) {
 	require.Equal(t, 0, pushResp.Rejected)
 
 	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/clusters", http.NoBody)
+	// The read API is credential-gated like the ingest endpoint: an
+	// unconfigured UI no longer leaves it anonymous.
+	getReq.Header.Set("Authorization", "Bearer test-token")
 	getRec := httptest.NewRecorder()
 	router.ServeHTTP(getRec, getReq)
 	require.Equal(t, http.StatusOK, getRec.Code, getRec.Body.String())
@@ -141,13 +144,15 @@ func TestIngest_INT_INGEST_002_IdempotentPush(t *testing.T) {
 	// actual I-3 signal: metrics(series_id, ts) is uniquely indexed with
 	// ON CONFLICT DO NOTHING — re-posting the identical envelope carries
 	// the identical ts, so a real dedup failure would show up here, not
-	// in the instances count).
+	// in the instances count). The pglens_% exclusion skips the collector's
+	// own self-monitoring gauges, which every push writes as well and which
+	// are covered by their own test.
 	var count1, metricsCount1 int
 	ctx := context.Background()
 	err = pool.QueryRow(ctx, "SELECT count(*) FROM instances").Scan(&count1)
 	require.NoError(t, err)
 	require.Equal(t, 1, count1, "should have 1 instance after first push")
-	err = pool.QueryRow(ctx, "SELECT count(*) FROM metrics").Scan(&metricsCount1)
+	err = pool.QueryRow(ctx, "SELECT count(*) FROM metrics WHERE metric NOT LIKE 'pglens_%'").Scan(&metricsCount1)
 	require.NoError(t, err)
 	require.Equal(t, 1, metricsCount1, "should have 1 metric row after first push")
 
@@ -171,7 +176,7 @@ func TestIngest_INT_INGEST_002_IdempotentPush(t *testing.T) {
 	err = pool.QueryRow(ctx, "SELECT count(*) FROM instances").Scan(&count2)
 	require.NoError(t, err)
 	require.Equal(t, count1, count2, "instance count should be unchanged after identical second push (idempotent)")
-	err = pool.QueryRow(ctx, "SELECT count(*) FROM metrics").Scan(&metricsCount2)
+	err = pool.QueryRow(ctx, "SELECT count(*) FROM metrics WHERE metric NOT LIKE 'pglens_%'").Scan(&metricsCount2)
 	require.NoError(t, err)
 	require.Equal(t, metricsCount1, metricsCount2, "metrics row count must remain the same after resubmitting an identical envelope (I-3)")
 }

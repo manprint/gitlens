@@ -6,9 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -338,4 +340,201 @@ func TestPusher_SetBuffer_SkipsUndecodableRecord(t *testing.T) {
 	require.NoError(t, p.Push(ctx))
 
 	require.Equal(t, 1, received, "the corrupt record must be skipped, not block the valid one behind it")
+}
+
+// TestPusher_FirstAttemptIsNotDelayed pins the fix for a backoff that was
+// applied *before* the first attempt: every push, against a healthy server,
+// waited backoffDelay(1) = 1-2s before even opening the connection.
+func TestPusher_FirstAttemptIsNotDelayed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	p := NewPusher(srv.URL, "token", clock.System())
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	require.NoError(t, p.Push(ctx))
+	require.Less(t, time.Since(start), 500*time.Millisecond, "the first attempt must go out immediately")
+	require.Equal(t, HealthOK, p.HealthState())
+}
+
+// TestPusher_SetBuffer_401KeepsBufferedEnvelopes covers the destructive
+// failure mode of an auth outage: the drain used to ack every record the
+// server answered 401 to, so a rotated token or an agent awaiting
+// re-approval permanently deleted the entire disk buffer — exactly the data
+// the buffer exists to protect. The drain must stop at the first 401, keep
+// the records, and deliver them once the token is accepted again.
+func TestPusher_SetBuffer_401KeepsBufferedEnvelopes(t *testing.T) {
+	var mu sync.Mutex
+	unauthorized := true
+	var received []string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gz, err := gzip.NewReader(r.Body)
+		require.NoError(t, err)
+		var env wire.Envelope
+		require.NoError(t, json.NewDecoder(gz).Decode(&env))
+
+		mu.Lock()
+		defer mu.Unlock()
+		received = append(received, env.AgentID)
+		if unauthorized {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	buf, err := buffer.Open(t.TempDir(), buffer.Options{})
+	require.NoError(t, err)
+	defer func() { _ = buf.Close() }()
+
+	p := NewPusher(srv.URL, "token", clock.System())
+	p.SetBuffer(buf)
+	for _, id := range []string{"a", "b", "c"} {
+		p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: id})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	require.NoError(t, p.Push(ctx))
+	require.Equal(t, HealthUnauthorized, p.HealthState())
+	mu.Lock()
+	require.Equal(t, []string{"a"}, received, "the drain must stop at the first 401 instead of walking the buffer")
+	mu.Unlock()
+	acked, dropped := p.BufferStats()
+	require.Equal(t, int64(0), acked)
+	require.Equal(t, int64(0), dropped, "a 401 is not a drop")
+
+	// The token is accepted again: nothing may have been lost.
+	mu.Lock()
+	unauthorized = false
+	mu.Unlock()
+	require.NoError(t, p.Push(ctx))
+
+	mu.Lock()
+	require.Equal(t, []string{"a", "a", "b", "c"}, received, "every buffered envelope must survive the auth outage")
+	mu.Unlock()
+	acked, dropped = p.BufferStats()
+	require.Equal(t, int64(3), acked)
+	require.Equal(t, int64(0), dropped)
+	require.Equal(t, HealthOK, p.HealthState(), "a successful push must clear the unauthorized state")
+}
+
+// TestPusher_SetBuffer_400DropsOnlyTheRejectedEnvelope is the counterpart:
+// a permanently rejected record must be acked so it cannot wedge the queue,
+// and the records behind it must still go out.
+func TestPusher_SetBuffer_400DropsOnlyTheRejectedEnvelope(t *testing.T) {
+	var mu sync.Mutex
+	var received []string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gz, err := gzip.NewReader(r.Body)
+		require.NoError(t, err)
+		var env wire.Envelope
+		require.NoError(t, json.NewDecoder(gz).Decode(&env))
+
+		mu.Lock()
+		received = append(received, env.AgentID)
+		mu.Unlock()
+
+		if env.AgentID == "bad" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"unsupported protocol_version"}`))
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	buf, err := buffer.Open(t.TempDir(), buffer.Options{})
+	require.NoError(t, err)
+	defer func() { _ = buf.Close() }()
+
+	p := NewPusher(srv.URL, "token", clock.System())
+	p.SetBuffer(buf)
+	for _, id := range []string{"bad", "good"} {
+		p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: id})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	require.NoError(t, p.Push(ctx))
+
+	mu.Lock()
+	require.Equal(t, []string{"bad", "good"}, received)
+	mu.Unlock()
+	acked, _ := p.BufferStats()
+	require.Equal(t, int64(1), acked)
+}
+
+// TestPusher_SamplesDroppedRate — the metric behind the agent_buffer_full
+// alert rule, which had no producer at all: the buffer's drop counters never
+// left the agent's own /healthz body.
+func TestPusher_SamplesDroppedRate(t *testing.T) {
+	dir := t.TempDir()
+	// A tiny volume so the retention policy genuinely rolls records off.
+	buf, err := buffer.Open(dir, buffer.Options{MaxSize: 64})
+	require.NoError(t, err)
+	defer func() { _ = buf.Close() }()
+
+	p := NewPusher("http://unused.invalid", "token", clock.System())
+	p.SetBuffer(buf)
+
+	start := time.Unix(1000, 0)
+	require.Zero(t, p.SamplesDroppedRate(start), "the first call only establishes the baseline")
+	require.Zero(t, p.SamplesDroppedRate(start.Add(10*time.Second)), "nothing dropped yet")
+
+	for i := 0; i < 3; i++ {
+		p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: "0123456789012345"})
+	}
+	dropped := p.DroppedSamples()
+	require.Positive(t, dropped, "the bounded buffer must have rolled records off")
+
+	rate := p.SamplesDroppedRate(start.Add(20 * time.Second))
+	require.InDelta(t, float64(dropped)/10.0, rate, 0.001, "drops per second over the interval since the last call")
+
+	require.Zero(t, p.SamplesDroppedRate(start.Add(30*time.Second)), "a quiet interval reports zero, not the running total")
+}
+
+// TestPusher_UnencodableEnvelopeIsDroppedNotRetriedForever — a NaN metric
+// value cannot be JSON-encoded. Keeping such an envelope queued would wedge
+// every later push behind a record that can never be sent.
+func TestPusher_UnencodableEnvelopeIsDroppedNotRetriedForever(t *testing.T) {
+	var received int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received++
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	p := NewPusher(srv.URL, "token", clock.System())
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion, Instances: []wire.Instance{{
+		InstanceID: "a",
+		Results:    []wire.Result{{Check: "bgwriter", Metrics: []wire.Metric{{Name: "x", Value: math.NaN(), Kind: "gauge"}}}},
+	}}})
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: "good"})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	require.ErrorContains(t, p.Push(ctx), "encode envelope")
+	_, dropped := p.BufferStats()
+	require.Equal(t, int64(1), dropped)
+
+	p.pendingMu.Lock()
+	remaining := len(p.pending)
+	p.pendingMu.Unlock()
+	require.Equal(t, 1, remaining, "only the good envelope may stay queued")
+
+	// The next push delivers the envelope that was stuck behind it.
+	require.NoError(t, p.Push(ctx))
+	require.Equal(t, 1, received)
 }

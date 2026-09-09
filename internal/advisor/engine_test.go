@@ -226,3 +226,49 @@ func TestStoreHelpers(t *testing.T) {
 	require.Equal(t, "value", nullIfEmpty("value"))
 	require.Equal(t, "*advisor.PgStore", (&PgStore{}).String())
 }
+
+// TestRun_OneFailingInstanceDoesNotStopTheOthers — the pass used to abort at
+// the first instance whose snapshot could not be loaded, so a single
+// unreachable or mis-permissioned instance stopped advisor findings for every
+// instance after it in the (stable) list and skipped the retention purge.
+func TestRun_OneFailingInstanceDoesNotStopTheOthers(t *testing.T) {
+	rule := engineTestRule{id: "ok", severity: SeverityInfo, scope: ScopeInstance, eval: func(s *Snapshot) []Finding {
+		return []Finding{{RuleID: "ok", State: StateOpen, Scope: ScopeInstance, Title: "ok", ObjectName: s.InstanceID.String()}}
+	}}
+	e, store, first := runWithRules(t, rule)
+	second := uuid.New()
+	store.ids = []uuid.UUID{first, second}
+	now := time.Unix(100, 0)
+	e.load = func(_ context.Context, id uuid.UUID, _ time.Time) (*Snapshot, error) {
+		if id == first {
+			return nil, errors.New("snapshot unavailable")
+		}
+		return &Snapshot{Now: now, InstanceID: id, PermTier: pgtype.TierReadOnly, Metrics: map[string]map[string]float64{}, Settings: map[string]string{}}, nil
+	}
+
+	err := e.Run(context.Background())
+	require.ErrorContains(t, err, "load advisor snapshot")
+	require.ErrorContains(t, err, first.String())
+	require.Len(t, store.findings, 1, "the healthy instance must still be evaluated")
+	require.Equal(t, second.String(), store.findings[0].ObjectName)
+	require.True(t, store.purged, "the retention purge must still run")
+}
+
+// TestRun_UpsertFailureStillResolvesAbsentFindings — aborting on a failed
+// write skipped ResolveAbsent, so findings that had gone away were never
+// resolved and stayed on the dashboard forever.
+func TestRun_UpsertFailureStillResolvesAbsentFindings(t *testing.T) {
+	rule := engineTestRule{id: "ok", severity: SeverityInfo, scope: ScopeInstance, eval: func(*Snapshot) []Finding {
+		return []Finding{{RuleID: "ok", State: StateOpen, Scope: ScopeInstance, Title: "ok"}}
+	}}
+	e, store, id := runWithRules(t, rule)
+	store.upsertErr = errors.New("upsert failed")
+
+	require.ErrorContains(t, e.Run(context.Background()), "persist finding")
+	require.True(t, store.resolved, "ResolveAbsent must still run")
+	require.Equal(t, []string{"ok"}, store.ranRules)
+	// The finding that failed to write must still count as seen, or the next
+	// ResolveAbsent would resolve a condition that is in fact still open.
+	require.Equal(t, []string{"ok/" + id.String()}, store.seen)
+	require.True(t, store.purged)
+}

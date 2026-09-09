@@ -272,6 +272,29 @@ func (c *APIClient) RawGet(path string) (string, error) {
 	return string(body), nil
 }
 
+// AnonymousGet issues a GET with no Authorization header and no cookies at
+// all, and returns only the status code.
+//
+// It exists so a scenario can assert what an unauthenticated caller gets from
+// the API. The server used to install its credential gate only when the web
+// UI was enabled, so a deployment that turned the interface off to expose
+// "just the API" served the entire read API — clusters, statements, ASH,
+// findings, settings, audit — and the command surface to anyone who could
+// reach the port, and nothing in the suite would have noticed.
+func (c *APIClient) AnonymousGet(path string) (int, error) {
+	req, err := http.NewRequest(http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return resp.StatusCode, nil
+}
+
 // WaitReadyz polls /readyz until it returns 200 or timeout.
 func (c *APIClient) WaitReadyz(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)

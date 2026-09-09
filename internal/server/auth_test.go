@@ -20,6 +20,28 @@ func TestAuth_Validate(t *testing.T) {
 	require.False(t, auth.Validate(req3))
 }
 
+// An unconfigured token must never authenticate: the empty configured token
+// and the empty presented token used to compare equal, so a server built
+// without a token accepted every unauthenticated request.
+func TestAuth_EmptyTokenNeverValidates(t *testing.T) {
+	t.Parallel()
+	auth := NewAuth("")
+
+	anonymous, _ := http.NewRequest("GET", "/", nil)
+	require.False(t, auth.Validate(anonymous))
+
+	emptyBearer, _ := http.NewRequest("GET", "/", nil)
+	emptyBearer.Header.Set("Authorization", "Bearer ")
+	require.False(t, auth.Validate(emptyBearer))
+
+	guessed, _ := http.NewRequest("GET", "/", nil)
+	guessed.Header.Set("Authorization", "Bearer anything")
+	require.False(t, auth.Validate(guessed))
+
+	var nilAuth *Auth
+	require.False(t, nilAuth.Validate(anonymous))
+}
+
 func TestAuth_ConstantTime(t *testing.T) {
 	t.Parallel()
 	// Ensure different length token still fails but does constant time compare

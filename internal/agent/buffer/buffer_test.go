@@ -337,6 +337,17 @@ func TestBuffer_CorruptCRCSkipped(t *testing.T) {
 	if readRecords[0] != "first-record" {
 		t.Errorf("first record mismatch: %q", readRecords[0])
 	}
+	// The skipped record is what CorruptRecords is for. The counter used to
+	// be driven by the retention policies instead, so a real bad CRC left it
+	// at zero — the one signal that says "this buffer lost data to
+	// corruption" never fired.
+	stats := buf.Stats()
+	if stats.CorruptRecords == 0 {
+		t.Error("expected the bad-CRC record to be counted in CorruptRecords")
+	}
+	if stats.LastCorruptTime == nil {
+		t.Error("expected LastCorruptTime to be stamped when a record is skipped")
+	}
 }
 
 // TestBuffer_MaxSizeDropsOldest — exceeding max_size deletes the oldest segment.
@@ -559,4 +570,118 @@ func TestBuffer_Concurrent(t *testing.T) {
 	if stats.Segments == 0 {
 		t.Errorf("expected at least one segment, got 0")
 	}
+}
+
+// TestBuffer_RewindReoffersUnackedRecords — Next() advances the read cursor
+// as soon as it hands a record out, so a caller that stops without acking
+// used to lose that record for the rest of the process's life even though it
+// was still on disk. Rewind puts the cursor back on the last acked position.
+func TestBuffer_RewindReoffersUnackedRecords(t *testing.T) {
+	buf, err := Open(t.TempDir(), Options{Clock: clock.System()})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = buf.Close() }()
+
+	for _, rec := range []string{"a", "b", "c"} {
+		if err := buf.Append([]byte(rec)); err != nil {
+			t.Fatalf("Append %s: %v", rec, err)
+		}
+	}
+
+	// Consume and ack "a".
+	data, ack, err := buf.Next()
+	if err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+	if string(data) != "a" {
+		t.Fatalf("expected record a, got %q", data)
+	}
+	if err := ack(context.Background()); err != nil {
+		t.Fatalf("ack: %v", err)
+	}
+
+	// Read "b" but do not ack it: the send failed.
+	data, _, err = buf.Next()
+	if err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+	if string(data) != "b" {
+		t.Fatalf("expected record b, got %q", data)
+	}
+
+	buf.Rewind()
+
+	var got []string
+	for {
+		data, ack, err := buf.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Next after rewind: %v", err)
+		}
+		got = append(got, string(data))
+		if err := ack(context.Background()); err != nil {
+			t.Fatalf("ack after rewind: %v", err)
+		}
+	}
+	if len(got) != 2 || got[0] != "b" || got[1] != "c" {
+		t.Errorf("expected [b c] to be re-offered after rewind, got %v", got)
+	}
+}
+
+// TestBuffer_RetentionDropsAreNotCorruption — the size and age policies used
+// to add every rolled-off record to CorruptRecords, so a buffer merely
+// honouring its own bounded volume reported data corruption. Corruption is
+// counted where it is detected: an unreadable record.
+func TestBuffer_RetentionDropsAreNotCorruption(t *testing.T) {
+	t.Run("size limit", func(t *testing.T) {
+		buf, err := Open(t.TempDir(), Options{MaxSize: 64, Clock: clock.System()})
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		defer func() { _ = buf.Close() }()
+
+		for i := 0; i < 3; i++ {
+			if err := buf.Append([]byte("01234567890123456789")); err != nil {
+				t.Fatalf("Append %d: %v", i, err)
+			}
+		}
+		stats := buf.Stats()
+		if stats.SamplesDropped["size_limit"] == 0 {
+			t.Fatal("expected size_limit drops, got none")
+		}
+		if stats.CorruptRecords != 0 {
+			t.Errorf("retention drops must not count as corruption, got %d", stats.CorruptRecords)
+		}
+		if stats.LastCorruptTime != nil {
+			t.Error("retention drops must not stamp LastCorruptTime")
+		}
+	})
+
+	t.Run("age limit", func(t *testing.T) {
+		clk := clock.NewFake(time.Unix(0, 0))
+		buf, err := Open(t.TempDir(), Options{MaxAge: 1 * time.Hour, Clock: clk})
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		defer func() { _ = buf.Close() }()
+
+		if err := buf.Append([]byte("record-1")); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+		clk.Advance(2 * time.Hour)
+		if err := buf.Append([]byte("record-2")); err != nil {
+			t.Fatalf("Append 2: %v", err)
+		}
+
+		stats := buf.Stats()
+		if stats.SamplesDropped["age_limit"] == 0 {
+			t.Fatal("expected age_limit drops, got none")
+		}
+		if stats.CorruptRecords != 0 {
+			t.Errorf("retention drops must not count as corruption, got %d", stats.CorruptRecords)
+		}
+	})
 }

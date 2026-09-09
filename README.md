@@ -150,7 +150,11 @@ The server applies migrations on startup (forward-only, idempotent) and listens 
 The web interface is served by the server itself on the same address as the API:
 `http://<host>:8080/`. Set `PGLENS_UI_PASSWORD` (see the configuration table
 below) for the interface to be usable, or set `PGLENS_UI_ENABLED=false` to turn
-it off while leaving the API available. The published container image includes
+it off while leaving the API available. `PGLENS_UI_ENABLED=false` disables the
+static assets only: the API still requires the agent bearer token or a valid
+session cookie, and a server with no `PGLENS_UI_PASSWORD` configured answers
+`503 ui_password_not_configured` to browser requests rather than serving them
+anonymously. The published container image includes
 the web assets. A local binary built with `make build` uses the committed
 fallback page; run `make web-build` before `make build` when building the
 interface into that binary.
@@ -258,12 +262,12 @@ probes and monitoring.
 |-----|------|---------|---------|
 | `PGLENS_DSN` | DSN | — | TimescaleDB connection (required) |
 | `PGLENS_LISTEN` | `host:port` | `:8080` | HTTP listen address |
-| `PGLENS_BOOTSTRAP_TOKEN` | string | — | shared secret for agent auth |
-| `PGLENS_BOOTSTRAP_TOKEN_FILE` | path | — | file containing the token (trailing newline trimmed) |
+| `PGLENS_BOOTSTRAP_TOKEN` | string | — | shared secret for agent auth (**required**: the server exits at startup if neither this nor the `_FILE` form resolves to a non-empty token) |
+| `PGLENS_BOOTSTRAP_TOKEN_FILE` | path | — | file containing the token (trailing newline trimmed); an unreadable or empty file is a startup failure, not a fallback |
 | `PGLENS_UI_PASSWORD` | string | unset | shared password that enables browser/API session authentication |
 | `PGLENS_UI_PASSWORD_FILE` | path | unset | password file; trailing newline trimmed and takes precedence over the inline value |
 | `PGLENS_UI_SESSION_TTL` | duration | `24h` | session-cookie lifetime; accepted range is `5m` to `720h` |
-| `PGLENS_UI_ENABLED` | bool | `true` | serves the UI assets; `false` disables static assets while leaving the existing API gate unchanged |
+| `PGLENS_UI_ENABLED` | bool | `true` | serves the UI assets; `false` disables the static assets only — the credential gate on the API stays installed, so requests still need the agent token or a session cookie |
 | `PGLENS_UI_COOKIE_SECURE` | bool | `auto` | sets cookie `Secure` for TLS/`X-Forwarded-Proto: https`; `true`/`false` force the attribute |
 | `PGLENS_ALERT_INTERVAL` | duration | `30s` | alert evaluation interval |
 | `PGLENS_ADVISOR_INTERVAL` | duration | `15m` | advisor finding evaluation interval |
@@ -334,6 +338,24 @@ Security and operational boundaries:
 ## Alerting
 
 The server evaluates ten built-in Tier 0 rules: `agent_down`, `instance_unreachable`, `check_failing`, `no_primary_in_cluster`, `agent_buffer_full`, `clock_skew`, `cardinality_budget_exceeded`, `failover_detected`, `split_brain_detected`, and `slot_inactive`. Tier 0 rules are always enabled. Tier 1 rules are editable through the alert-rules endpoint.
+
+Four of those rules watch the collector itself rather than PostgreSQL, and the
+series they compare are derived at ingest instead of being scraped from a
+database. They are written to `metrics` like any other gauge, per instance, on
+every push — so they also carry the zero sample that resolves the alert:
+
+| Metric | Rule | Produced by |
+|--------|------|-------------|
+| `pglens_check_error_rate` | `check_failing` | server, fraction of the push's checks that reported an error |
+| `pglens_cardinality_truncated_rate` | `cardinality_budget_exceeded` | server, fraction of the push's results truncated by a cardinality budget |
+| `pglens_agent_clock_skew_seconds` | `clock_skew` | server, unsigned difference between the push's `sent_at` and the receive time |
+| `pglens_samples_dropped_rate` | `agent_buffer_full` | agent, samples per second lost to a full disk buffer since the previous push |
+
+The two cluster-scoped Tier 1 replication rules are aggregated across the
+cluster's standbys, not per standby: `replica.all_standbys_lagging` compares
+the *smallest* replay lag among them (so it fires only when every standby is
+above the threshold), and `replica.no_sync_standby` counts the standbys whose
+`sync_state` is `sync` or `quorum`. Each opens one alert per cluster.
 
 Configure Slack or a generic webhook with the variables above. A silence suppresses notification while the alert remains visible and continues to be evaluated.
 

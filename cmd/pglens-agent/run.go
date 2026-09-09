@@ -292,6 +292,27 @@ func runAgentCommand(args []string) {
 	}
 }
 
+// agentSelfResult reports the agent's own delivery health as ordinary ingest
+// metrics, attached to every instance in the envelope.
+//
+// pglens_samples_dropped_rate is the metric the agent_buffer_full Tier 0 rule
+// compares, and nothing produced it: no check emits a pglens_* metric and the
+// agent's buffer counters never left the agent's own /healthz body, so the
+// rule could not fire however full the buffer got. The agent is the only
+// party that can observe this, so it ships it like any other gauge.
+func agentSelfResult(pusher *agent.Pusher, now time.Time) wire.Result {
+	r := wire.Result{Check: "agent_self", TS: now}
+	if pusher == nil {
+		return r
+	}
+	r.Metrics = append(r.Metrics, wire.Metric{
+		Name:  "pglens_samples_dropped_rate",
+		Value: pusher.SamplesDroppedRate(now),
+		Kind:  "gauge",
+	})
+	return r
+}
+
 func hostWireResult(s host.Sample, now time.Time) wire.Result {
 	r := wire.Result{Check: "host", TS: now}
 	add := func(name string, v *uint64) {
@@ -343,6 +364,10 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 	}
 
 	env := &wire.Envelope{ProtocolVersion: wire.ProtocolVersion, SentAt: time.Now(), AgentVersion: version}
+	// One reading per envelope, shared by every instance in it: the buffer is
+	// a process-wide resource, and SamplesDroppedRate consumes the interval
+	// since the previous call.
+	selfResult := agentSelfResult(pusher, env.SentAt)
 	// Every Manager shares the same identity.json (PGLENS_IDENTITY_PATH is
 	// one path for the whole process), so any of them reports the same
 	// process-wide agent_id — this was never actually sent before
@@ -401,6 +426,10 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 			cancel()
 			continue
 		}
+		edges := buildTopologyEdges(mgr, results, lastEdgeState) //nolint:contextcheck // buildTopologyEdges->InstanceID: Manager caches this at connect time; the accessor takes no context
+		// Appended after the edges are built so the synthetic result cannot
+		// influence topology derivation.
+		results = append(results, selfResult)
 		env.Instances = append(env.Instances, wire.Instance{
 			InstanceID:      mgr.InstanceID().String(), //nolint:contextcheck // Manager caches this at connect time; the accessor takes no context
 			TargetName:      mgr.TargetName(),
@@ -413,7 +442,7 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 			PermTier:        mgr.PermTier().String(), //nolint:contextcheck // same as above
 			Databases:       dbs,
 			Results:         results,
-			TopologyEdges:   buildTopologyEdges(mgr, results, lastEdgeState), //nolint:contextcheck // buildTopologyEdges->InstanceID: Manager caches this at connect time; the accessor takes no context
+			TopologyEdges:   edges,
 			ASHEnabled:      boolPtr(ashEnabled[mgr.Database()]),
 		})
 		cancel()
