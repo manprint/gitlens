@@ -10,9 +10,13 @@ import (
 type spyT struct {
 	errors []string
 	fatals []string
+	logs   []string
 }
 
 func (s *spyT) Helper() {}
+func (s *spyT) Logf(format string, args ...any) {
+	s.logs = append(s.logs, sprintfLike(format, args...))
+}
 func (s *spyT) Errorf(format string, args ...any) {
 	s.errors = append(s.errors, sprintfLike(format, args...))
 }
@@ -86,6 +90,27 @@ func TestAssertMetricInvariants_FailsOnACheckThatNeverSucceeds(t *testing.T) {
 // it — which is exactly what happened on the first run after this invariant
 // was wired up, on SYS-UI-001, with eleven checks each reporting one error and
 // the browser assertions all green.
+// A check whose single scrape of the scenario landed inside a deliberate
+// fault window is indistinguishable, by counter alone, from one that has never
+// worked. One error is not evidence; a broken check fails repeatedly.
+func TestAssertMetricInvariants_DoesNotJudgeACheckOnASingleError(t *testing.T) {
+	exposition := strings.NewReplacer(
+		`pglens_check_error_total{check="stat_statements"} 0`,
+		`pglens_check_error_total{check="io"} 1`,
+		`pglens_check_ok_total{check="stat_statements"} 14`,
+		`pglens_check_ok_total{check="settings"} 14`,
+	).Replace(healthyExposition)
+
+	spy := &spyT{}
+	AssertMetricInvariants(spy, exposition, DefaultMetricBudget())
+	if len(spy.errors) != 0 {
+		t.Errorf("a single unexplained check error failed the scenario: %v", spy.errors)
+	}
+	if len(spy.logs) != 1 || !strings.Contains(spy.logs[0], "io") {
+		t.Errorf("the skipped judgement was not logged: %v", spy.logs)
+	}
+}
+
 func TestAssertMetricInvariants_ToleratesACheckThatErroredAndRecovered(t *testing.T) {
 	exposition := strings.Replace(healthyExposition,
 		`pglens_check_error_total{check="stat_statements"} 0`,

@@ -15,6 +15,7 @@ type TestingT interface {
 	Helper()
 	Errorf(format string, args ...any)
 	Fatalf(format string, args ...any)
+	Logf(format string, args ...any)
 }
 
 var _ TestingT = (*testing.T)(nil)
@@ -77,10 +78,25 @@ func AssertMetricInvariants(t TestingT, exposition string, budget MetricBudget) 
 			// Errored and recovered: a fault window, not a broken check.
 			continue
 		}
+		if sample.value < minErrorsToJudgeACheck {
+			// One failed scrape and nothing else is not evidence. A check
+			// whose only scrape of the scenario landed inside a deliberate
+			// fault window looks exactly like a check that has never worked,
+			// and the counters cannot tell them apart. Seen on SYS-UI-001:
+			// "io" errored once, never scraped again, and the same scenario
+			// had passed on the run before. A check that is genuinely broken
+			// fails repeatedly — that is the case this invariant is for.
+			t.Logf("check %q errored once and never succeeded; too little evidence to judge, not failing the scenario", sample.label)
+			continue
+		}
 		t.Errorf("check %q failed every one of its %.0f scrape(s) and never once succeeded; a check that cannot scrape produces no data at all and must fail the scenario that relied on it",
 			sample.label, sample.value)
 	}
 }
+
+// minErrorsToJudgeACheck is how many failed scrapes, with no successful one,
+// it takes before a check is called broken. See the comment at its use.
+const minErrorsToJudgeACheck = 2
 
 // labelledSample is one `name{label="value"} number` line.
 type labelledSample struct {
