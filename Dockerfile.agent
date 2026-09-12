@@ -11,9 +11,13 @@ RUN make build VERSION="$VERSION"
 RUN mkdir -p /pglens-data && chown 65532:65532 /pglens-data
 FROM gcr.io/distroless/static-debian12:nonroot
 ARG VERSION=dev
+# image.source must be the repository that actually hosts this code.
+# The product is named pglens and the Go module path says so, but the
+# GitHub repository is manprint/gitlens; ghcr.io links a package to its
+# repository through this label, and a URL that 404s breaks that link.
 LABEL org.opencontainers.image.title="pglens-agent" \
       org.opencontainers.image.version="$VERSION" \
-      org.opencontainers.image.source="https://github.com/manprint/pglens" \
+      org.opencontainers.image.source="https://github.com/manprint/gitlens" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.description="pglens agent: PostgreSQL collection and push"
 COPY --from=builder /src/bin/pglens-agent /usr/local/bin/pglens-agent
