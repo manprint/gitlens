@@ -64,9 +64,13 @@ Three of these are easy to skip and expensive to have skipped:
 - **`make vet-tags`** — `go build ./...` never compiles the `integration` and
   `e2e` suites. Without it a refactor can leave them unbuildable while every
   fast check stays green.
-- **`make vuln`** — the `toolchain` directive in `go.mod` is what pins the
-  standard library out of a long list of advisories reachable from the ingest
-  endpoint and the agent's HTTP client. This is what proves the pin still holds.
+- **`make vuln`** — the exact patch `go.mod` names (`go 1.27.1`, not `go 1.27`)
+  is what pins the standard library out of a long list of advisories reachable
+  from the ingest endpoint and the agent's HTTP client. This is what proves the
+  pin still holds. Note that `make lint` has a floor of its own: golangci-lint
+  links `go/types`, so it must be v2.13.2 or later *and* built with the module's
+  own toolchain, or it either refuses to start or reports every import in the
+  tree as a typecheck failure.
 - **`make stress`** — repeats the concurrency-sensitive packages with a fresh
   shuffle seed per round. Run it whenever a change touches something that owns a
   goroutine. It is not in the list above because CI runs it on `main` rather

@@ -283,10 +283,15 @@ func FuzzParseLSN(f *testing.F) {
 
 CI: 30s per target su ogni PR; 10 minuti per target nel job nightly. Il corpus che trova un crash viene **committato** in `testdata/fuzz/` come test di regressione permanente.
 
-### 3.5 Gate di copertura L1+L2
+### 3.5 Gate di copertura L1
 
 Il gate vive in `scripts/coverage_gate.sh` (`make coverage-gate`) e contiene due
-tipi di soglia.
+tipi di soglia. Misura **solo L1**: `make coverage-gate` gira
+`go test -race -coverprofile ./internal/...` senza build tag, quindi le suite
+`integration` ed `e2e` non contribuiscono a nessuna delle percentuali sotto. È
+voluto — un floor che si alza perché è partito Docker non è un floor.
+Le percentuali "attuali" sono quelle riportate dal gate il 2026-09-12 sotto
+go1.27.1.
 
 **Obiettivi di progetto** — scelti prima che il codice esistesse, e il codice è
 stato scritto per raggiungerli:
@@ -294,11 +299,11 @@ stato scritto per raggiungerli:
 | Package | Gate | Copertura attuale | Perché |
 |---|---|---|---|
 | `internal/delta` | **90%** | 100.0% | se sbaglia, ogni grafico mente |
-| `internal/topology` | **90%** | 94.2% | se sbaglia, il failover non viene visto |
-| `internal/ash` | **90%** | 94.3% | è il differenziatore del prodotto |
-| `internal/cardinality` | **90%** | 92.5% | se sbaglia, il TSDB esplode in produzione |
-| `internal/identity` | **85%** | 89.8% | se sbaglia, un'istanza si sdoppia dopo un restart |
-| Complessivo Go (`./internal/...`) | **75%** | 76.8% | |
+| `internal/topology` | **90%** | 95.6% | se sbaglia, il failover non viene visto |
+| `internal/ash` | **90%** | 95.8% | è il differenziatore del prodotto |
+| `internal/cardinality` | **90%** | 93.1% | se sbaglia, il TSDB esplode in produzione |
+| `internal/identity` | **85%** | 92.1% | se sbaglia, un'istanza si sdoppia dopo un restart |
+| Complessivo Go (`./internal/...`) | **75%** | 78.4% | |
 
 **Ratchet** — soglie messe appena sotto la copertura reale di oggi, perché un
 comportamento già testato non possa perdere il suo test in silenzio. Si alzano
@@ -308,16 +313,16 @@ tornare verde una build rossa:
 | Package | Ratchet | Copertura attuale |
 |---|---|---|
 | `internal/advisor` | 87% | 88.6% |
-| `internal/agent/buffer` | 80% | 81.6% |
+| `internal/agent/buffer` | 80% | 87.5% |
 | `internal/alert` | 78% | 79.6% |
-| `internal/check` | 82% | 83.5% |
-| `internal/clock` | 95% | 96.9% |
-| `internal/command` | 94% | 95.7% |
+| `internal/check` | 82% | 85.0% |
+| `internal/clock` | 95% | 97.5% |
+| `internal/command` | 94% | 96.1% |
 | `internal/host` | 84% | 85.7% |
 | `internal/leaktest` | 88% | 90.3% |
 | `internal/pgtype` | 99% | 100.0% |
-| `internal/server` | 69% | 70.7% |
-| `internal/wire` | 95% | 96.4% |
+| `internal/server` | 69% | 73.0% |
+| `internal/wire` | 95% | 97.1% |
 
 Escluso dal calcolo: `main.go`, codice generato, migrazioni. Il floor globale è
 calcolato solo su `./internal/...`.
@@ -1101,7 +1106,7 @@ solo passo del gate, lo esegue.
 |---|---|---|
 | `web` | `web-lint`, `web-typecheck`, `web-test`, `web-coverage-gate`, `web-build`, `web-budget`, più il diff su `web/src/api/generated.ts` | i tipi generati dall'OpenAPI devono essere rigenerabili e identici a quelli committati: un contratto che diverge dal generato è un bug che il compilatore non vede |
 | `lint` | `fmt-check`, `golangci-lint`, **`vet-tags`** | `go build ./...` non compila mai le suite `integration` ed `e2e`: senza `vet-tags` un refactor le può lasciare non compilabili e superare comunque tutti i job veloci |
-| `security` | `tidy-check` (`go mod tidy` idempotente + `go mod verify`), `govulncheck ./...` | la direttiva `toolchain` in `go.mod` è ciò che tiene fuori una lista lunga di advisory della standard library raggiungibili dall'endpoint di ingest, dal client HTTP dell'agent e dai canali di notifica; senza questo job niente prova che il pin regga dopo un bump |
+| `security` | `tidy-check` (`go mod tidy` idempotente + `go mod verify`), `govulncheck ./...` | `go.mod` dichiara la patch esatta (`go 1.27.1`, non `go 1.27`), ed è quel pin a tenere fuori una lista lunga di advisory della standard library raggiungibili dall'endpoint di ingest, dal client HTTP dell'agent e dai canali di notifica; senza questo job niente prova che il pin regga dopo un bump |
 | `unit` | `build`, `test` (`-race -shuffle=on`), `coverage-gate` | L1 più i floor di §3.5 |
 | `race-stress` | `make stress STRESS_ROUNDS=10` — solo fuori dalle PR | la correttezza qui è una proprietà dei contratti `Stop()` e di un buffer su disco dove reader e writer condividono un file: un solo giro con `-race` prova meno di dieci giri con ordini di shuffle diversi |
 | `images` | build di `Dockerfile.agent` e `Dockerfile.server` con cache GHA, poi `--version` dentro ciascuna immagine | un Dockerfile rotto altrimenti emerge solo nel workflow E2E (nightly) o, peggio, nel job di release a gate già verde |
@@ -1120,7 +1125,7 @@ qualcuno possa installare.
 - **`concurrency` con `cancel-in-progress`**: un push nuovo annulla il run vecchio dello stesso ref.
 - **`persist-credentials: false`** su ogni checkout: nessun job spinge con git, quindi nessun job ha bisogno di un credential helper con un token scritto sul runner.
 - **Spazio disco**: i job E2E rimuovono i toolchain preinstallati Android/.NET/Haskell (~25 GB) prima di tirare giù le immagini PostgreSQL, Toxiproxy e le due immagini pglens. Un runner hosted parte con circa 14 GB liberi, che non bastano.
-- **Cache**: moduli Go via `setup-go`, `node_modules` via `pnpm`, binario `golangci-lint` pinnato per versione, layer Docker via cache GHA.
+- **Cache**: moduli Go via `setup-go`, `node_modules` via `pnpm`, layer Docker via cache GHA, e il binario `golangci-lint` con chiave `versione + hashFiles('go.mod')`. Il `go.mod` è nella chiave perché l'artefatto in cache è un binario compilato da `go install` con la toolchain *di quel job*, e golangci-lint incorpora la propria versione di build: una chiave sulla sola versione del linter ripescherebbe, dopo un bump di Go, un binario che si rifiuta di analizzare il modulo per cui era stato messo in cache.
 
 ---
 

@@ -1277,7 +1277,7 @@ Events are the system's way of notifying you of changes in replication topology 
 
 ```sh
 make fmt-check        # verify formatting (gofmt -l must be empty)
-make lint             # run golangci-lint
+make lint             # run golangci-lint (v2.13.2+, built with the toolchain go.mod names)
 make vet-tags         # go vet with no tags, -tags=integration, and -tags=e2e
 make test             # unit tests with -race -shuffle=on
 make stress           # repeat the concurrency-sensitive packages, new shuffle seed per round
