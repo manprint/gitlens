@@ -14,7 +14,19 @@ services:
     ports:
       - "5432" # published so test/harness.DB() can connect from the host test process, not just from other containers
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U pglens -d pglens"]
+      # -h 127.0.0.1 is load-bearing, not decoration. The postgres entrypoint
+      # runs initdb and every /docker-entrypoint-initdb.d script against a
+      # temporary server started with `-c listen_addresses=''` — reachable on
+      # the Unix socket and on nothing else — and only then restarts the real
+      # one. A socket-only `pg_isready` answers "accepting connections" during
+      # that window, so compose marks the service healthy, starts everything
+      # with `depends_on: service_healthy`, and pglens-server dies on
+      # `connect: connection refused` before the real listener exists. Probing
+      # TCP cannot pass early, because the temporary server is not on TCP.
+      # Seen exactly once, on a loaded machine where the init phase ran long
+      # enough to outlast start_period: five UI scenarios failed at
+      # `docker compose up` with "migrate: acquire migration connection".
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U pglens -d pglens"]
       interval: 2s
       timeout: 3s
       retries: 5

@@ -30,7 +30,7 @@ services:
       - ../fixtures/sql/replica_setup.sh:/docker-entrypoint-initdb.d/02-replication.sh
       - ../fixtures/sql/command_users.sql:/docker-entrypoint-initdb.d/03-command-users.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres"]
       interval: 2s
       timeout: 3s
       retries: 5
@@ -55,7 +55,7 @@ services:
       - ../fixtures/sql/standby_init.sh:/docker-entrypoint-initdb.d/00-standby-init.sh
     entrypoint: /docker-entrypoint-initdb.d/00-standby-init.sh
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres"]
       interval: 2s
       timeout: 3s
       retries: 5

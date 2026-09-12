@@ -13,7 +13,12 @@ services:
     volumes:
       - pglens-db-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      # -h 127.0.0.1, so the probe cannot pass while the entrypoint's
+      # temporary initdb server (socket only, `listen_addresses=''`) is the
+      # only thing running. Without it, a first boot marks this healthy early
+      # and pglens-server exits on a refused TCP connection. See the same
+      # comment in test/compose/base.yml.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 20

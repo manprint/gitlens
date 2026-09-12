@@ -1060,6 +1060,18 @@ Ogni comando emette su stdout un **report JSON** (quanti deadlock effettivi, qua
 3. **Mai risorse condivise tra test paralleli.** Porte assegnate dinamicamente, `cluster_id` per test, database per test.
 4. **Il tempo è iniettabile** a ogni livello (`clock.Clock` in Go, clock fissato del server per le fixture Playwright).
 5. **Casualità con seed esplicito**, stampato all'inizio del test così un fallimento è riproducibile.
+6. **Un healthcheck deve provare la porta che il client userà.** `depends_on:
+   service_healthy` è forte quanto l'healthcheck a cui si appoggia, e
+   `pg_isready` senza `-h` interroga il socket Unix. L'entrypoint delle immagini
+   PostgreSQL esegue `initdb` e tutti gli script di
+   `/docker-entrypoint-initdb.d` contro un server temporaneo avviato con
+   `-c listen_addresses=''`: raggiungibile sul socket e su nient'altro. In
+   quella finestra un probe sul socket risponde "accepting connections",
+   compose dichiara il servizio healthy, i dipendenti partono e muoiono su
+   `connect: connection refused`. Tutti gli healthcheck PostgreSQL di
+   `test/compose/` e di `deploy/docker-compose.yml` usano `-h 127.0.0.1` per
+   questo. Vale in generale: se il probe e il client non parlano lo stesso
+   trasporto, l'healthcheck non prova quello che serve.
 
 ### 10.2 Retry
 
@@ -1084,6 +1096,7 @@ Ogni comando emette su stdout un **report JSON** (quanti deadlock effettivi, qua
 - ❌ selettori CSS strutturali o classi Tailwind in Playwright
 - ❌ test che dipendono dall'esecuzione di un test precedente
 - ❌ `t.Skip()` senza una condizione verificata (vedi il pattern in sez. 4.3: lo skip afferma *perché* salta)
+- ❌ healthcheck che provano un trasporto diverso da quello del client (`pg_isready` senza `-h`, vedi regola 6)
 
 ---
 
