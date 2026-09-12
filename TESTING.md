@@ -1131,7 +1131,7 @@ Tutto ciò che gira in CI deve girare in locale con **un solo comando**, senza c
 ```makefile
 # gate veloci
 make fmt-check           # gofmt -l deve essere vuoto
-make lint                # golangci-lint
+make lint                # golangci-lint (>= v2.13.2, compilato con la stessa toolchain di go.mod)
 make vet-tags            # go vet senza tag, -tags=integration, -tags=e2e
 make test                # L1 con -race -shuffle=on
 make coverage-gate       # floor globali e per-package (sez. 3.5)
@@ -1140,7 +1140,21 @@ make stress              # L1 ripetuto, 5 giri, ogni giro con un nuovo seed di s
 # supply chain
 make tidy-check          # go mod tidy idempotente + go mod verify
 make vuln                # govulncheck ./...
+```
 
+> **golangci-lint e la toolchain.** Il linter linka `go/types`, quindi deve
+> saper decodificare l'export data che la toolchain di `go.mod` produce. Una
+> release compilata con un Go più vecchio si rifiuta di partire (`the Go
+> language version used to build golangci-lint is lower than the targeted Go
+> version`); una compilata con il Go giusto ma che imbarca una
+> `golang.org/x/tools` più vecchia segnala ogni import dell'albero come errore
+> `typecheck` (`export data version 4 is greater than maximum supported version
+> 2`). Installalo sempre con la toolchain del modulo:
+> `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2`.
+> In CI la cache key include `hashFiles('go.mod')` proprio per non ripescare un
+> binario costruito con la toolchain precedente dopo un bump di Go.
+
+```makefile
 # suite più lente
 make test-integration    # L2, matrice via PGLENS_PG_VERSIONS / PGLENS_PG_PROFILE
 make test-e2e            # L3 smoke

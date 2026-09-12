@@ -1,15 +1,16 @@
 module github.com/manprint/pglens
 
-go 1.26.1
-
-// Pinned above the language version on purpose: govulncheck reports 15
-// standard-library advisories against go1.26.1 that reach this code (net/http
-// ReadHeaderTimeout bypass on the HTTP/2 upgrade check, quadratic net/url
-// resolvePath, post-handshake crypto/tls flooding, crypto/x509 chain-building
-// blowups). Every one of them is fixed by 1.26.6, and all of them are on paths
-// this project actually serves: the ingest endpoint, the agent HTTP client and
-// the notification channels.
-toolchain go1.26.6
+// An exact patch, not a minor version, on purpose. The standard library is on
+// this project's serving paths — the ingest endpoint, the agent's HTTP client
+// and the notification channels — so a net/http, net/url, crypto/tls or
+// crypto/x509 advisory is a live one here, not a theoretical one. An earlier
+// pass found fifteen such advisories open against the version this module
+// declared. Naming the patch here makes every toolchain below it refuse the
+// build or upgrade itself, which is why there is no separate `toolchain`
+// directive: with the two equal, `go mod tidy` drops it as redundant.
+// `make vuln` is what proves the pin still holds; raise it whenever
+// govulncheck says otherwise, never lower it.
+go 1.27.1
 
 require (
 	github.com/Shopify/toxiproxy/v2 v2.12.0

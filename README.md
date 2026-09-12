@@ -25,9 +25,11 @@ acceptance suites run nightly and on every pull request into `main`.
 
 ## Requirements
 
-- Go 1.26.1 or later to build. `go.mod` pins `toolchain go1.26.6`, so a
-  compatible toolchain is fetched automatically; the pin is what keeps the
-  standard library clear of the advisories `make vuln` checks for.
+- Go 1.27.1 or later to build. `go.mod` declares the exact patch, `go 1.27.1`,
+  so an older toolchain fetches a compatible one instead of building; the pin is
+  what keeps the standard library clear of the advisories `make vuln` checks
+  for. Linting needs golangci-lint v2.13.2 or later, built with that same
+  toolchain — an older one cannot decode Go 1.27 export data.
 - Node 20.19+ or 22.12+ and pnpm 11.24.0, only to build the web interface from
   source. CI and the container images build on Node 24.
 - Docker and Docker Compose for the test suites and for the server's storage

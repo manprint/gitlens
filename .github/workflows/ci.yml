@@ -17,7 +17,16 @@ permissions:
 env:
   # Pinned in one place so the lint job's cache key and the install step can
   # never disagree about which binary is cached.
-  GOLANGCI_LINT_VERSION: v2.1.6
+  #
+  # This floor is set by go.mod, not by taste. golangci-lint links go/types and
+  # therefore has to be able to decode the export data the module's toolchain
+  # writes; a release built against an older Go refuses to start ("the Go
+  # language version used to build golangci-lint is lower than the targeted Go
+  # version"), and one built against the right Go but shipping an older
+  # golang.org/x/tools reports every import in the tree as a typecheck failure
+  # ("export data version 4 is greater than maximum supported version 2").
+  # Raise this whenever go.mod's version rises; never lower it independently.
+  GOLANGCI_LINT_VERSION: v2.13.2
 
 jobs:
   # Keep this fast gate independent; the Docker-backed browser gate lives in e2e.yml.
@@ -69,7 +78,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/go/bin/golangci-lint
-          key: golangci-lint-${{ runner.os }}-${{ env.GOLANGCI_LINT_VERSION }}
+          # go.mod is in the key because the cached artifact is a binary built
+          # by `go install` with *this job's* toolchain, and golangci-lint
+          # embeds its build Go version. Keying on the lint version alone would
+          # happily restore a binary compiled by the previous toolchain after a
+          # Go bump, and it would then refuse to lint the very module it was
+          # cached for.
+          key: golangci-lint-${{ runner.os }}-${{ env.GOLANGCI_LINT_VERSION }}-${{ hashFiles('go.mod') }}
       - name: Install golangci-lint
         if: steps.cache-golangci.outputs.cache-hit != 'true'
         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${{ env.GOLANGCI_LINT_VERSION }}
