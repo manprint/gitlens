@@ -23,6 +23,7 @@ func MetricsHandler() http.HandlerFunc {
 		writeCounterVec(w, "pglens_ingest_envelopes_total", "envelopes accepted by /api/v1/push, by outcome", "result", pglensIngestEnvelopesTotal.Snapshot())
 		writeCounterVec(w, "pglens_ingest_rejected_total", "envelopes rejected by /api/v1/push, by reason", "reason", pglensIngestRejectedTotal.Snapshot())
 		writeCounterVec(w, "pglens_check_error_total", "check scrapes that reported an error, by check name", "check", pglensCheckErrorTotal.Snapshot())
+		writeCounterVec(w, "pglens_check_ok_total", "check scrapes that completed without an error, by check name", "check", pglensCheckOKTotal.Snapshot())
 		writeCounter(w, "pglens_samples_too_old_total", "samples rejected for exceeding maxSampleAge", pglensSamplesTooOldTotal.Get())
 		writeCounter(w, "pglens_cardinality_truncated_total", "envelopes where a cardinality budget truncated results", pglensCardinalityTruncatedTotal.Get())
 		writeGauge(w, "pglens_agent_clock_skew_seconds", "most recently observed agent/server clock skew", pglensAgentClockSkewSeconds.Get())

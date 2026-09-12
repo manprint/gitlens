@@ -27,6 +27,9 @@ pglens_series_total{instance_id="22222222-2222-2222-2222-222222222222"} 88
 # HELP pglens_check_error_total check scrapes that reported an error, by check name
 # TYPE pglens_check_error_total counter
 pglens_check_error_total{check="stat_statements"} 0
+# HELP pglens_check_ok_total check scrapes that completed without an error, by check name
+# TYPE pglens_check_ok_total counter
+pglens_check_ok_total{check="stat_statements"} 14
 # HELP pglens_agent_clock_skew_seconds most recently observed agent/server clock skew
 # TYPE pglens_agent_clock_skew_seconds gauge
 pglens_agent_clock_skew_seconds 0
@@ -57,10 +60,14 @@ func TestAssertMetricInvariants_FailsOnCardinalityBlowup(t *testing.T) {
 
 // wire.Result.Error was carried from the agent and read by nothing for
 // months, which is how stat_statements failed every single scrape invisibly.
-func TestAssertMetricInvariants_FailsOnCheckErrors(t *testing.T) {
-	exposition := strings.Replace(healthyExposition,
+// The shape that proves it is "errored, and never once succeeded".
+func TestAssertMetricInvariants_FailsOnACheckThatNeverSucceeds(t *testing.T) {
+	exposition := strings.NewReplacer(
 		`pglens_check_error_total{check="stat_statements"} 0`,
-		`pglens_check_error_total{check="stat_statements"} 37`, 1)
+		`pglens_check_error_total{check="stat_statements"} 37`,
+		`pglens_check_ok_total{check="stat_statements"} 14`,
+		`pglens_check_ok_total{check="settings"} 14`,
+	).Replace(healthyExposition)
 
 	spy := &spyT{}
 	AssertMetricInvariants(spy, exposition, DefaultMetricBudget())
@@ -72,11 +79,35 @@ func TestAssertMetricInvariants_FailsOnCheckErrors(t *testing.T) {
 	}
 }
 
-// A scenario that deliberately breaks a target must be able to say so.
-func TestAssertMetricInvariants_HonoursAllowedCheckErrors(t *testing.T) {
+// The counterpart, and the reason the success counter had to exist at all: a
+// scenario that fails over a primary, partitions a link or restarts a
+// container makes every check against that instance report one error. Holding
+// the suite to "no check ever errored" fails every fault-injection scenario in
+// it — which is exactly what happened on the first run after this invariant
+// was wired up, on SYS-UI-001, with eleven checks each reporting one error and
+// the browser assertions all green.
+func TestAssertMetricInvariants_ToleratesACheckThatErroredAndRecovered(t *testing.T) {
 	exposition := strings.Replace(healthyExposition,
 		`pglens_check_error_total{check="stat_statements"} 0`,
-		`pglens_check_error_total{check="stat_statements"} 5`, 1)
+		`pglens_check_error_total{check="stat_statements"} 1`, 1)
+
+	spy := &spyT{}
+	AssertMetricInvariants(spy, exposition, DefaultMetricBudget())
+	if len(spy.errors) != 0 {
+		t.Errorf("a check that errored during a fault window and recovered failed the scenario: %v", spy.errors)
+	}
+}
+
+// A scenario that deliberately breaks a check for its whole duration — a
+// permission tier below what the check needs, an absent extension — must be
+// able to say so, because there is no success to recover to.
+func TestAssertMetricInvariants_HonoursAllowedCheckErrors(t *testing.T) {
+	exposition := strings.NewReplacer(
+		`pglens_check_error_total{check="stat_statements"} 0`,
+		`pglens_check_error_total{check="stat_statements"} 5`,
+		`pglens_check_ok_total{check="stat_statements"} 14`,
+		`pglens_check_ok_total{check="settings"} 14`,
+	).Replace(healthyExposition)
 
 	budget := DefaultMetricBudget()
 	budget.AllowedCheckErrors = map[string]bool{"stat_statements": true}

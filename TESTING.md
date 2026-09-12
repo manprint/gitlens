@@ -634,15 +634,34 @@ func (h *Harness) AssertInvariants(t *testing.T) {
 	//   I-1  nessun evento cluster_id_changed: il cluster_id non cambia mai
 	h.AssertServerMetricInvariants(t, DefaultMetricBudget())
 	//   I-8  pglens_series_total sotto budget per ogni istanza
-	//        e nessun check_error_total inatteso
+	//        e nessun check rimasto rotto per tutto lo scenario
 }
 ```
 
 I-8 e "nessun errore di check inatteso" sono stati a lungo un buco dichiarato:
 i contatori su cui poggiano non esistevano, e fingerli è stato giudicato
 peggiore del buco onesto. Ora `internal/server/metrics_handler.go` espone
-davvero `pglens_series_total` e `pglens_check_error_total`, quindi
-`AssertServerMetricInvariants` fa uno scrape di `/metrics` e li tiene a budget.
+davvero `pglens_series_total`, `pglens_check_error_total` e
+`pglens_check_ok_total`, quindi `AssertServerMetricInvariants` fa uno scrape di
+`/metrics` e li tiene a budget.
+
+**La regola non è "nessun check ha mai fallito".** Uno scenario che fa failover
+di un primary, partiziona un link o riavvia un container fa riportare **un**
+errore a ogni check contro quell'istanza: è il prodotto che si comporta
+correttamente. Il primo run dopo aver cablato questo invariante l'ha
+dimostrato — `SYS-UI-001` con tutte le asserzioni del browser verdi e undici
+check con un errore a testa. Il conteggio degli errori da solo non distingue
+"rotto" da "disturbato di proposito", e nessuna soglia numerica lo fa: un check
+rotto in uno scenario da 90 secondi produce lo stesso ordine di grandezza di
+errori di una finestra di guasto.
+
+Il segnale che rende la cosa decidibile è il contatore dei successi. La regola
+è: **un check che ha fallito deve anche essere riuscito almeno una volta.** Un
+check che ha fallito ogni singolo scrape non ha prodotto nessun dato — che è
+esattamente la forma del bug di `stat_statements`, invisibile per mesi.
+`AllowedCheckErrors` resta per gli scenari che rompono un check per tutta la
+loro durata (un tier di permessi sotto ciò che serve, un'estensione assente),
+dove non c'è nessun successo a cui tornare.
 Il parsing dell'esposizione e le asserzioni vivono in `test/harness/metrics.go`,
 **senza build tag**: sono quindi coperti da `make test` invece di essere
 esercitati soltanto dentro uno stack compose.

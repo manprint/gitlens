@@ -360,9 +360,41 @@ func TestPipeline_ResultErrorIncrementsCheckErrorTotal(t *testing.T) {
 		},
 	}
 	before := pglensCheckErrorTotal.Get(checkName)
+	beforeOK := pglensCheckOKTotal.Get(checkName)
 	_, err := p.Process(context.Background(), env)
 	require.NoError(t, err)
 	require.Equal(t, before+1, pglensCheckErrorTotal.Get(checkName))
+	require.Equal(t, beforeOK, pglensCheckOKTotal.Get(checkName), "a failed scrape must not count as a success")
+}
+
+// TestPipeline_SuccessfulResultIncrementsCheckOKTotal is the other half of the
+// pair. Counting successes is what lets the E2E harness tell a check that is
+// broken from one whose target was deliberately taken away for a moment: a
+// failover makes every check against that instance report exactly one error,
+// and an assertion of "no check ever errored" fails every fault-injection
+// scenario in the suite. "Errored and never once succeeded" does not.
+func TestPipeline_SuccessfulResultIncrementsCheckOKTotal(t *testing.T) {
+	t.Parallel()
+	p := NewPipeline(nil, clock.NewFake(time.Now()))
+	instID := uuid.NewString()
+	cid := pgtype.ClusterID(124).String()
+	const checkName = "pipeline_test_unique_check_ok"
+	env := wire.Envelope{
+		Instances: []wire.Instance{
+			{
+				InstanceID: instID, ClusterID: cid,
+				Results: []wire.Result{
+					{Check: checkName, TS: time.Now()},
+				},
+			},
+		},
+	}
+	before := pglensCheckOKTotal.Get(checkName)
+	beforeErr := pglensCheckErrorTotal.Get(checkName)
+	_, err := p.Process(context.Background(), env)
+	require.NoError(t, err)
+	require.Equal(t, before+1, pglensCheckOKTotal.Get(checkName))
+	require.Equal(t, beforeErr, pglensCheckErrorTotal.Get(checkName), "a successful scrape must not count as an error")
 }
 
 func TestPipeline_CounterProducesRate(t *testing.T) {

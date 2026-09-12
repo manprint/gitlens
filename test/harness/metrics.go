@@ -28,12 +28,19 @@ type MetricBudget struct {
 	// that actually decides whether the server's memory and the metrics table
 	// stay finite under a churning workload.
 	MaxSeriesPerInstance float64
-	// AllowedCheckErrors names checks that are legitimately allowed to report
-	// errors during a scenario (a target deliberately killed, a permission
-	// tier deliberately reduced). Every other check reporting an error is a
-	// regression: wire.Result.Error was carried from the agent and never read
-	// by anything for the whole life of the project, which is how
-	// stat_statements failed every single scrape, invisibly, for months.
+	// AllowedCheckErrors names checks that may fail every scrape of a
+	// scenario — a permission tier deliberately reduced below what the check
+	// needs, an extension deliberately absent. It is not needed for a check
+	// whose target is only briefly disturbed; see the rule below.
+	//
+	// The rule the budget enforces is not "no check ever errored". A scenario
+	// that fails over a primary, partitions a link or restarts a container
+	// makes every check against that instance report one error, and that is
+	// the product behaving correctly. The rule is that a check which errored
+	// must also have succeeded at least once: a check whose every scrape
+	// failed produced no data at all, which is exactly how stat_statements
+	// failed invisibly for months — wire.Result.Error was carried from the
+	// agent and never read by anything.
 	AllowedCheckErrors map[string]bool
 }
 
@@ -58,11 +65,19 @@ func AssertMetricInvariants(t TestingT, exposition string, budget MetricBudget) 
 		}
 	}
 
+	ok := make(map[string]float64)
+	for _, sample := range parseLabelledMetric(exposition, "pglens_check_ok_total") {
+		ok[sample.label] += sample.value
+	}
 	for _, sample := range parseLabelledMetric(exposition, "pglens_check_error_total") {
 		if sample.value == 0 || budget.AllowedCheckErrors[sample.label] {
 			continue
 		}
-		t.Errorf("check %q reported %.0f scrape error(s); a check that cannot scrape produces no data at all and must fail the scenario that relied on it",
+		if ok[sample.label] > 0 {
+			// Errored and recovered: a fault window, not a broken check.
+			continue
+		}
+		t.Errorf("check %q failed every one of its %.0f scrape(s) and never once succeeded; a check that cannot scrape produces no data at all and must fail the scenario that relied on it",
 			sample.label, sample.value)
 	}
 }

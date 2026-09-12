@@ -62,11 +62,17 @@ jobs:
           tags: |
             type=raw,value=${{ env.VERSION }}
             type=raw,value=alpha
+          # description is set explicitly because metadata-action otherwise
+          # fills it from the GitHub repository description — the repository's
+          # name, not the image's purpose — and the label it writes at push
+          # time overrides the one the Dockerfile sets.
           labels: |
             org.opencontainers.image.title=pglens-agent
             org.opencontainers.image.version=${{ env.VERSION }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.description=pglens agent: PostgreSQL collection and push
 
       - name: Prepare server image metadata
         id: meta-server
@@ -76,11 +82,17 @@ jobs:
           tags: |
             type=raw,value=${{ env.VERSION }}
             type=raw,value=alpha
+          # description is set explicitly because metadata-action otherwise
+          # fills it from the GitHub repository description — the repository's
+          # name, not the image's purpose — and the label it writes at push
+          # time overrides the one the Dockerfile sets.
           labels: |
             org.opencontainers.image.title=pglens-server
             org.opencontainers.image.version=${{ env.VERSION }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.description=pglens server: ingest, HTTP API, and web interface
 
       - name: Build and push agent image
         uses: docker/build-push-action@v6

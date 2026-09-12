@@ -42,6 +42,7 @@ func TestCounterVec_Snapshot(t *testing.T) {
 // staleness.go's own top comment already anticipated.
 func TestMetricsHandler_Format(t *testing.T) {
 	IncCheckError("metrics_handler_test_unique_check")
+	IncCheckOK("metrics_handler_test_unique_ok_check")
 
 	req := httptest.NewRequest("GET", "/metrics", nil)
 	w := httptest.NewRecorder()
@@ -54,6 +55,11 @@ func TestMetricsHandler_Format(t *testing.T) {
 	require.Contains(t, body, "# TYPE pglens_up gauge")
 	require.Contains(t, body, "# TYPE pglens_check_error_total counter")
 	require.Contains(t, body, `pglens_check_error_total{check="metrics_handler_test_unique_check"} 1`)
+	// The success counter is what makes the E2E "no unexpected check errors"
+	// invariant decidable: without it the harness cannot tell a check that is
+	// broken from one whose target was briefly taken away.
+	require.Contains(t, body, "# TYPE pglens_check_ok_total counter")
+	require.Contains(t, body, `pglens_check_ok_total{check="metrics_handler_test_unique_ok_check"} 1`)
 	require.Contains(t, body, "# TYPE pglens_agent_clock_skew_seconds gauge")
 
 	// A vec with zero entries must still emit its HELP/TYPE header (proving

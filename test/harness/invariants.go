@@ -74,9 +74,14 @@ func joinLines(lines []string) string {
 // checked through the server's own /metrics exposition — see
 // AssertServerMetricInvariants. They were previously listed here as
 // permanently unreachable gaps because the counters behind them did not
-// exist; internal/server/metrics_handler.go now exports both
-// pglens_series_total and pglens_check_error_total, so there is nothing left
-// to fake.
+// exist; internal/server/metrics_handler.go now exports pglens_series_total,
+// pglens_check_error_total and pglens_check_ok_total, so there is nothing
+// left to fake.
+//
+// "No unexpected check errors" is deliberately not "no check ever errored":
+// a scenario that fails over a primary or partitions a link makes every check
+// against that instance report one error, correctly. The rule is that a check
+// which errored must also have succeeded at least once — see MetricBudget.
 //
 // Still not checked here: "no goroutine leak", which needs a start-of-run
 // snapshot this single end-of-run call does not have. The in-process

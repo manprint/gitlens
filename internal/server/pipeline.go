@@ -326,6 +326,8 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 			}
 			if r.Error != "" {
 				IncCheckError(r.Check)
+			} else {
+				IncCheckOK(r.Check)
 			}
 			if r.Truncated {
 				evCluster := cidDB
@@ -786,6 +788,8 @@ func (p *Pipeline) processInstanceNoDB(_ context.Context, inst wire.Instance) er
 	for _, r := range inst.Results {
 		if r.Error != "" {
 			IncCheckError(r.Check)
+		} else {
+			IncCheckOK(r.Check)
 		}
 		for _, m := range r.Metrics {
 			dest := destinationTable(r.Check)

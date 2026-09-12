@@ -174,6 +174,7 @@ var (
 	pglensSeriesTotalGauge          = newGaugeVec()
 	pglensCardinalityTruncatedTotal = &counter{}
 	pglensCheckErrorTotal           = &counterVec{vals: make(map[string]float64)}
+	pglensCheckOKTotal              = &counterVec{vals: make(map[string]float64)}
 )
 
 // Exported helpers for other packages (ingest, pipeline) to update self-monitoring
@@ -210,6 +211,21 @@ func IncCardinalityTruncated() {
 // never once read by the server before this.
 func IncCheckError(check string) {
 	pglensCheckErrorTotal.Inc(check)
+}
+
+// IncCheckOK records one successful check scrape, keyed by check name.
+//
+// The error counter alone cannot tell "this check is broken" from "this
+// check's target was deliberately taken away for a moment": a failover, a
+// network partition or a restart makes every check against that instance
+// report one error, and so does a check that has never worked. Counting the
+// successes too makes the difference decidable without a magic threshold — a
+// check that errored and never once succeeded produced no data at all, which
+// is exactly the shape of the stat_statements bug IncCheckError was added
+// for, while a check that errored during a fault window and succeeded on
+// either side of it is behaving correctly.
+func IncCheckOK(check string) {
+	pglensCheckOKTotal.Inc(check)
 }
 
 func boolToFloat(b bool) float64 {

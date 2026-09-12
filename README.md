@@ -1095,6 +1095,7 @@ Prometheus-format metrics exposition (port 8080). Exposes server-side monitoring
 - `pglens_ingest_envelopes_total` — counter, envelopes accepted by `/api/v1/push` (by `result`)
 - `pglens_ingest_rejected_total` — counter, envelopes rejected by `/api/v1/push` (by `reason`)
 - `pglens_check_error_total` — counter, check scrapes that reported an error (by `check` name)
+- `pglens_check_ok_total` — counter, check scrapes that completed without an error (by `check` name). The pair is what makes a broken check distinguishable from a briefly unreachable target: a check that has errored *and never once succeeded* produced no data at all, while a check that errored during a failover and succeeded on either side of it is behaving correctly.
 - `pglens_samples_too_old_total` — counter, samples rejected for exceeding max age (12 hours)
 - `pglens_cardinality_truncated_total` — counter, envelopes where cardinality budgets caused truncation
 - `pglens_agent_clock_skew_seconds` — gauge, most recently observed agent/server clock skew (useful for diagnosing timestamp misalignment)
@@ -1107,7 +1108,7 @@ Prometheus-format metrics exposition (port 8080). Exposes server-side monitoring
 curl -s localhost:8080/metrics | head -20
 ```
 
-Use this endpoint to monitor pglens itself — feed it into Prometheus, Datadog, or your favorite metrics backend. The E2E suite scrapes it too: `pglens_series_total` and `pglens_check_error_total` are what back invariant I-8 (cardinality within budget) and the "no unexpected check errors" invariant at the end of every scenario.
+Use this endpoint to monitor pglens itself — feed it into Prometheus, Datadog, or your favorite metrics backend. The E2E suite scrapes it too: `pglens_series_total` backs invariant I-8 (cardinality within budget), and `pglens_check_error_total` together with `pglens_check_ok_total` backs the "no unexpected check errors" invariant at the end of every scenario.
 
 ### `GET /healthz`, `/readyz`
 
