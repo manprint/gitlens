@@ -221,7 +221,7 @@ re-reading the codebase.
 |-------|-------|
 | **Repo root** | `/mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze` |
 | **Branch at plan time** | `main` |
-| **Go** | 1.26.1 (`go.mod`), `toolchain go1.26.6` |
+| **Go** | 1.27.1 (`go.mod` names the exact patch; no separate `toolchain` directive is needed once the two match) |
 | **Node** | 24 LTS, **pnpm** 11.24.0 (decision D8, exact frontend pin) |
 | **WIP commits** | **on** — enabled by the `--wip-commit` invocation. Close each unit with one local commit; record its sha in §4. |
 
