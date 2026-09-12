@@ -574,7 +574,15 @@ func init() {
 				return fmt.Errorf("write on primary after clearing delay: %w", err)
 			}
 
-			zeroCtx, cancelZero := context.WithTimeout(ctx, 20*time.Second)
+			// 30s, matching every other "wait for a fresh sample to reach
+			// the store" poll in this file, because 20s did not cover the
+			// pipeline's own latency with any margin: the write has to be
+			// picked up by the next replication_streaming scrape (10s
+			// interval), shipped by the next push (5s interval) and written
+			// by the server, which is ~15s before a loaded runner is taken
+			// into account. This is a timing margin, not a weaker assertion —
+			// the poll still requires replay_lag_sec to be exactly 0.
+			zeroCtx, cancelZero := context.WithTimeout(ctx, 30*time.Second)
 			defer cancelZero()
 			if err := poll(zeroCtx, 2*time.Second, func(ctx context.Context) (bool, error) {
 				var lag *float64
