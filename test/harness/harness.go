@@ -806,10 +806,43 @@ func (h *Harness) Compose(argv ...string) error {
 	// under AGENT_MODE=binary: "connection refused" on the stale port,
 	// never recovering). Re-resolve and, if a tracked port moved, restart
 	// the agent subprocess so it reconnects.
+	// The published-port churn above is not a binary-agent problem alone: the
+	// harness's own API clients bake the host port into their base URL at
+	// Start time, so a scenario that stops and starts pglens-server leaves
+	// every one of them pointed at a dead port. Nothing noticed while no
+	// assertion ran against the API after such a restart; the end-of-scenario
+	// /metrics scrape does, and reported "connection refused" against a
+	// server that was up and healthy.
+	if len(argv) >= 2 && argv[0] == "start" && argv[1] == "pglens-server" {
+		h.reconcileServerPorts()
+	}
 	if h.agentMode == AgentModeBinary && len(argv) >= 2 && argv[0] == "start" {
 		return h.reconcileAgentBinaryPort(argv[1])
 	}
 	return nil
+}
+
+// reconcileServerPorts re-resolves every published pglens-server port and
+// repoints the harness's API clients at them. Best effort: a scenario that
+// stopped the server for good has no ports to resolve, and that is not an
+// error here — the caller's own assertions decide what an unreachable server
+// means.
+func (h *Harness) reconcileServerPorts() {
+	ports, err := h.getServicePorts("pglens-server", 8080)
+	if err != nil || len(ports) == 0 {
+		return
+	}
+	h.serverPorts = ports
+	h.serverPort = ports[0]
+	if h.apiClient != nil {
+		h.apiClient.baseURL = fmt.Sprintf("http://localhost:%d", ports[0])
+	}
+	for i, c := range h.apiClients {
+		if i >= len(ports) {
+			break
+		}
+		c.baseURL = fmt.Sprintf("http://localhost:%d", ports[i])
+	}
 }
 
 // reconcileAgentBinaryPort re-resolves the host port for a compose service

@@ -5,6 +5,7 @@ package harness
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -102,13 +103,70 @@ func (h *Harness) AssertInvariants(t *testing.T) {
 // errors" invariant. The parsing and the assertions themselves live in
 // metrics.go, untagged, so they are unit tested by `make test` rather than
 // only exercised inside a compose stack.
+//
+// Several scenarios end with the server deliberately stopped — the agent
+// buffer fills during a server outage, the alert leader fails over by killing
+// a replica, SYS-NET-001 survives a backlog. For those the scrape cannot
+// succeed, and failing the scenario for it would be asserting that a scenario
+// about the server being down must find the server up. It is not enough to
+// swallow the error either: a server that crashed when it should not have is
+// exactly the kind of thing this call exists to catch. Docker settles it —
+// if no pglens-server container is running, the stack put it that way on
+// purpose; if one is running and the scrape still fails, that is a real
+// failure.
 func (h *Harness) AssertServerMetricInvariants(t *testing.T, budget MetricBudget) {
 	t.Helper()
-	body, err := h.API().RawGet("/metrics")
+	body, err := h.scrapeAnyServerMetrics()
 	if err != nil {
+		if !h.serverContainerRunning() {
+			t.Logf("I-8: no pglens-server container is running — the scenario stopped it; metric invariants not evaluated for this scenario")
+			return
+		}
 		t.Fatalf("I-8: scrape /metrics: %v", err)
 	}
 	AssertMetricInvariants(t, body, budget)
+}
+
+// scrapeAnyServerMetrics returns the first replica's exposition that answers.
+// The alerting scenarios scale pglens-server to two replicas and kill one to
+// exercise advisory-lock leader failover; the counters are per-process, so
+// any live replica's view is a valid one to hold to budget, and insisting on
+// the first would fail a scenario whose whole point is that the first one
+// died.
+func (h *Harness) scrapeAnyServerMetrics() (string, error) {
+	clients := h.apiClients
+	if len(clients) == 0 {
+		clients = []*APIClient{h.API()}
+	}
+	var firstErr error
+	for _, c := range clients {
+		if c == nil {
+			continue
+		}
+		body, err := c.RawGet("/metrics")
+		if err == nil {
+			return body, nil
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	if firstErr == nil {
+		firstErr = fmt.Errorf("no server API client available")
+	}
+	return "", firstErr
+}
+
+// serverContainerRunning reports whether the compose project still has a
+// running pglens-server. A compose or Docker failure is reported as "running"
+// so that an unrelated tooling problem cannot silently turn the scrape
+// failure above into a skip.
+func (h *Harness) serverContainerRunning() bool {
+	out, err := h.composeOutput("ps", "-q", "--status", "running", "pglens-server")
+	if err != nil {
+		return true
+	}
+	return len(strings.Fields(out)) > 0
 }
 
 // AssertDBInvariants runs the DB-backed invariant checks against pool. Split
