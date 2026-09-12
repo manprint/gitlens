@@ -30,7 +30,16 @@ services:
       interval: 2s
       timeout: 3s
       retries: 5
-      start_period: 5s
+      # start_period is generous on purpose. It is not a delay: the container
+      # is marked healthy on the first probe that succeeds, so a fast start
+      # costs nothing. What it buys is the one boot where initdb actually runs
+      # — on this image, initdb plus two preloaded extensions plus every
+      # /docker-entrypoint-initdb.d script — which on a loaded machine takes
+      # far longer than the ~15s the old 5s/5-retry budget allowed. Failures
+      # inside start_period do not count against retries, so the check can
+      # honestly refuse to pass during init instead of being tuned loose
+      # enough to pass through it.
+      start_period: 90s
 
   pglens-server:
     image: ghcr.io/manprint/pglens-server:dev
@@ -52,4 +61,7 @@ services:
       interval: 2s
       timeout: 3s
       retries: 5
-      start_period: 5s
+      # The server runs its migrations before /readyz answers, and on a first
+      # boot those migrations meet an empty TimescaleDB. Same reasoning as the
+      # database's own start_period above: no cost when it is fast.
+      start_period: 60s

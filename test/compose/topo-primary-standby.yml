@@ -34,7 +34,7 @@ services:
       interval: 2s
       timeout: 3s
       retries: 5
-      start_period: 5s
+      start_period: 90s
 
   pg-standby:
     image: timescale/timescaledb:2.29.0-pg17
@@ -59,7 +59,7 @@ services:
       interval: 2s
       timeout: 3s
       retries: 5
-      start_period: 10s
+      start_period: 90s
 
 volumes:
   pgdata-primary:

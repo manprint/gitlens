@@ -22,6 +22,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+      # First boot runs initdb; a probe that fails inside start_period does not
+      # count against retries, and a fast boot is not delayed by it.
+      start_period: 90s
 
   pglens-server:
     image: ghcr.io/manprint/pglens-server:dev
