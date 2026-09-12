@@ -31,7 +31,7 @@ func TestINTBLOAT004_TierZeroSkipsForeignOwnedStatistics(t *testing.T) {
 
 		conn, err := t0.Acquire(ctx)
 		require.NoError(t, err)
-		result, err := (&bloatEstimateCheck{selector: cardinalityForIntegration()}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
+		result, err := (&bloatEstimateCheck{selectors: cardinalityForIntegration()}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
 		require.NoError(t, err)
 		seen := false
 		for _, metric := range result.Metrics {

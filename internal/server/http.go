@@ -6,12 +6,20 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 )
 
 // NewRouter builds the full server handler: liveness/readiness, the agent
 // ingest endpoint (wired to inv/pipeline), and the read API (api.RegisterRoutes).
 func NewRouter(uiCfg UIConfig, assets fs.FS, store *SessionStore, auth *Auth, inv *Inventory, pipeline *Pipeline, api *API, topoAPI *TopologyAPI, ashAPI *AshAPI, alertAPIs ...*AlertAPI) http.Handler {
 	r := chi.NewRouter()
+	// Recoverer first, so it also covers the credential gate below. Without
+	// it a panic in any handler propagates to net/http, which logs the trace
+	// and drops the connection with no response at all: the agent sees a bare
+	// network error (indistinguishable from the server being down, and
+	// retried forever with backoff) and a browser sees a failed fetch. With
+	// it the request gets an honest 500 and the process keeps serving.
+	r.Use(middleware.Recoverer)
 	// The credential gate is always installed; uiCfg.Enabled only governs the
 	// static assets below. See RequireCredential's own comment.
 	r.Use(RequireCredential(uiCfg, auth, store))

@@ -50,6 +50,10 @@ type Manager struct {
 	mu     sync.Mutex
 	dbs    map[string]*pgxpool.Pool // per-database pools
 	dbtc   map[string]time.Time     // last access time per database
+
+	endpointOnce sync.Once
+	addr         string
+	port         int
 }
 
 type capabilityConn interface {
@@ -293,16 +297,38 @@ func (m *Manager) Close() {
 // Implement check.Target interface.
 var _ check.Target = (*Manager)(nil)
 
+// cacheReady reports whether the identity cache has been populated. It takes
+// the read lock: reading `initialized` unlocked (as the classic
+// double-checked-locking shape used to) is a data race under Go's memory
+// model, and not a benign one — a reader could observe the flag set while
+// the fields it guards were still invisible to it, handing out a zero
+// InstanceID or a RoleUnknown that the caller has no way to tell apart from
+// a genuine one.
+func (m *Manager) cacheReady() bool {
+	m.target.cache.mu.RLock()
+	defer m.target.cache.mu.RUnlock()
+	return m.target.cache.initialized
+}
+
 // ensureCache populates the cache if not already done.
+//
+// The discovery queries run under initMu and NOT under cache.mu. Holding the
+// write lock across a pool acquisition plus five round trips meant every
+// accessor — Role(), PGVersion(), HasExtension(), each called per scrape from
+// its own goroutine — blocked on RLock for as long as that took. Worse, with
+// a bounded pool (MaxConnsPerInstance: 4) it is a genuine deadlock shape:
+// a check that already holds a pooled connection and then calls PGVersion()
+// (checkpointer.go does exactly this) waits on the lock, while the holder of
+// the lock waits for a connection that only that check can give back.
 func (m *Manager) ensureCache(ctx context.Context) error {
-	if m.target.cache.initialized {
+	if m.cacheReady() {
 		return nil
 	}
 
-	m.target.cache.mu.Lock()
-	defer m.target.cache.mu.Unlock()
+	m.target.cache.initMu.Lock()
+	defer m.target.cache.initMu.Unlock()
 
-	if m.target.cache.initialized {
+	if m.cacheReady() {
 		return nil
 	}
 
@@ -317,29 +343,27 @@ func (m *Manager) ensureCache(ctx context.Context) error {
 	if err := conn.QueryRow(ctx, "SELECT current_setting('server_version_num')::int").Scan(&versionNum); err != nil {
 		return fmt.Errorf("query version: %w", err)
 	}
-	m.target.cache.pgVersion = pgtype.PGVersion(versionNum)
 
 	// Query pg_is_in_recovery
 	var inRecovery bool
 	if err := conn.QueryRow(ctx, "SELECT pg_is_in_recovery()").Scan(&inRecovery); err != nil {
 		return fmt.Errorf("query role: %w", err)
 	}
-	m.target.cache.role = pgtype.RoleFromRecovery(inRecovery)
 
 	// Query for system_identifier to derive ClusterID
+	var clusterID pgtype.ClusterID
 	var systemID uint64
-	err = conn.QueryRow(ctx, "SELECT system_identifier FROM pg_control_system()").Scan(&systemID)
-	if err == nil {
-		m.target.cache.clusterID = pgtype.ClusterID(systemID)
+	if err := conn.QueryRow(ctx, "SELECT system_identifier FROM pg_control_system()").Scan(&systemID); err == nil {
+		clusterID = pgtype.ClusterID(systemID)
 	} else {
 		// Fallback to manual cluster ID from target name
-		m.target.cache.clusterID = pgtype.ManualClusterID(m.target.name)
+		clusterID = pgtype.ManualClusterID(m.target.name)
 	}
 
 	// Query permission tier and extensions. The initial snapshot is refreshed
 	// again by RefreshCapabilities so a DBA grant takes effect on the next
 	// scrape/command without an agent restart.
-	m.target.cache.permTier, m.target.cache.extensions = m.queryCapabilities(ctx, conn)
+	permTier, extensions := m.queryCapabilities(ctx, conn)
 
 	// Get or create InstanceID via identity store
 	identityPath := os.Getenv("PGLENS_IDENTITY_PATH")
@@ -361,10 +385,21 @@ func (m *Manager) ensureCache(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("get instance id: %w", err)
 	}
-	m.target.cache.instanceID = instanceID
-	m.target.cache.agentID = idStore.AgentID()
+	agentID := idStore.AgentID()
 
+	// One critical section, after every query has succeeded: a partially
+	// populated cache is never observable, and `initialized` is published
+	// together with the fields it promises.
+	m.target.cache.mu.Lock()
+	m.target.cache.pgVersion = pgtype.PGVersion(versionNum)
+	m.target.cache.role = pgtype.RoleFromRecovery(inRecovery)
+	m.target.cache.clusterID = clusterID
+	m.target.cache.permTier = permTier
+	m.target.cache.extensions = extensions
+	m.target.cache.instanceID = instanceID
+	m.target.cache.agentID = agentID
 	m.target.cache.initialized = true
+	m.target.cache.mu.Unlock()
 	return nil
 }
 
@@ -575,20 +610,29 @@ func (m *Manager) TargetName() string {
 // (internal/server/inventory.go's checkDuplicateInstance, matched on
 // tenant/cluster/addr/port) comparing empty strings and zeros for every
 // instance instead of the real target address.
+// The DSN never changes for the life of a Manager, so its endpoint is parsed
+// once. pgxpool.ParseConfig walks the environment and the service files on
+// every call; Addr() and Port() are called per instance per push cycle.
+func (m *Manager) endpoint() (string, int) {
+	m.endpointOnce.Do(func() {
+		cfg, err := pgxpool.ParseConfig(m.target.dsn)
+		if err != nil {
+			return
+		}
+		m.addr = cfg.ConnConfig.Host
+		m.port = int(cfg.ConnConfig.Port)
+	})
+	return m.addr, m.port
+}
+
 func (m *Manager) Addr() string {
-	cfg, err := pgxpool.ParseConfig(m.target.dsn)
-	if err != nil {
-		return ""
-	}
-	return cfg.ConnConfig.Host
+	addr, _ := m.endpoint()
+	return addr
 }
 
 func (m *Manager) Port() int {
-	cfg, err := pgxpool.ParseConfig(m.target.dsn)
-	if err != nil {
-		return 0
-	}
-	return int(cfg.ConnConfig.Port)
+	_, port := m.endpoint()
+	return port
 }
 func (m *Manager) Clock() clock.Clock {
 	return m.clock

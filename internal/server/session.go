@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -61,12 +62,47 @@ func (s *SessionStore) Create() (token string, expiresAt time.Time, err error) {
 
 	s.mu.Lock()
 	s.sessions[token] = expiresAt
-	needReap := len(s.sessions) > 1024
+	needReap := len(s.sessions) > sessionReapThreshold
 	s.mu.Unlock()
 	if needReap {
 		s.reap()
+		// reap only removes *expired* sessions. Someone holding the UI
+		// password can mint valid ones faster than they expire (the TTL is 24
+		// hours by default), so reaping alone left the map growing without
+		// bound. Past the hard cap the oldest-expiring sessions are evicted,
+		// which costs those browsers a re-login and costs the server nothing.
+		s.enforceCap()
 	}
 	return token, expiresAt, nil
+}
+
+const (
+	// sessionReapThreshold is when a Create starts paying for a sweep.
+	sessionReapThreshold = 1024
+	// sessionHardCap bounds the store even when every session is still valid.
+	sessionHardCap = 4096
+)
+
+// enforceCap drops the soonest-to-expire sessions until the store is back
+// under sessionHardCap.
+func (s *SessionStore) enforceCap() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.sessions) <= sessionHardCap {
+		return
+	}
+	type entry struct {
+		token     string
+		expiresAt time.Time
+	}
+	entries := make([]entry, 0, len(s.sessions))
+	for token, expiresAt := range s.sessions {
+		entries = append(entries, entry{token, expiresAt})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].expiresAt.Before(entries[j].expiresAt) })
+	for i := 0; i < len(entries)-sessionHardCap; i++ {
+		delete(s.sessions, entries[i].token)
+	}
 }
 
 func (s *SessionStore) Validate(token string) (expiresAt time.Time, ok bool) {

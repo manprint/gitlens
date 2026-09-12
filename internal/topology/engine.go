@@ -261,3 +261,65 @@ func (e *Engine) detectSplitBrain(clusterID pgtype.ClusterID, now time.Time) []E
 
 	return events
 }
+
+// Evict drops per-instance and per-cluster state whose last observation is
+// older than the cutoff, and returns how many instances were removed.
+//
+// Nothing bounded this engine before: instances, lastPrimary,
+// lastFailoverTime, lastSplitBrain and every instanceState's own edgeSeenAt
+// map grew for the life of the server process and were never once pruned.
+// A pglens server is long-lived and its instance set is not static — an
+// instance re-registers with a fresh instance_id whenever its identity file
+// is lost (a recreated container, a restored volume, a re-provisioned
+// replica), so every such event permanently leaked one instanceState plus
+// one edgeSeenAt entry per upstream it ever pointed at. The delta engine
+// beside it has had exactly this method, called from the same place, since
+// it was written; the topology engine simply never got one.
+func (e *Engine) Evict(before time.Time) int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// Clusters are kept alive by any instance still reporting into them, so
+	// they are collected after the instance sweep rather than on their own
+	// timestamps (lastFailoverTime and lastSplitBrain only advance on an
+	// event, which may be far older than the cluster's last observation).
+	liveClusters := make(map[pgtype.ClusterID]struct{}, len(e.instances))
+	removed := 0
+	for id, st := range e.instances {
+		if st.timestamp.Before(before) {
+			delete(e.instances, id)
+			removed++
+			continue
+		}
+		liveClusters[st.clusterID] = struct{}{}
+		for edge, seen := range st.edgeSeenAt {
+			if seen.Before(before) {
+				delete(st.edgeSeenAt, edge)
+			}
+		}
+	}
+	for cid := range e.lastPrimary {
+		if _, live := liveClusters[cid]; !live {
+			delete(e.lastPrimary, cid)
+		}
+	}
+	for cid := range e.lastFailoverTime {
+		if _, live := liveClusters[cid]; !live {
+			delete(e.lastFailoverTime, cid)
+		}
+	}
+	for cid := range e.lastSplitBrain {
+		if _, live := liveClusters[cid]; !live {
+			delete(e.lastSplitBrain, cid)
+		}
+	}
+	return removed
+}
+
+// Len reports how many instances the engine is currently tracking. Exposed so
+// the pipeline's eviction can be asserted on without reaching into internals.
+func (e *Engine) Len() int {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return len(e.instances)
+}

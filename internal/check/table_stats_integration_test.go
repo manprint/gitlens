@@ -30,7 +30,7 @@ func TestINTTBL001_TableStatsDeadTuples(t *testing.T) {
 		require.NoError(t, err)
 		conn, err := pool.Acquire(ctx)
 		require.NoError(t, err)
-		result, err := (&tableStatsCheck{selector: cardinalityForIntegration()}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
+		result, err := (&tableStatsCheck{selectors: cardinalityForIntegration()}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
 		require.NoError(t, err)
 		require.NotEmpty(t, findTableMetric(result, name, "pg_table_n_dead_tup"))
 	})
@@ -50,7 +50,7 @@ func TestINTTBL002_TableStatsVacuumAge(t *testing.T) {
 		require.NoError(t, err)
 		conn, err := pool.Acquire(ctx)
 		require.NoError(t, err)
-		result, err := (&tableStatsCheck{selector: cardinalityForIntegration()}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
+		result, err := (&tableStatsCheck{selectors: cardinalityForIntegration()}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
 		require.NoError(t, err)
 		require.NotEmpty(t, findTableMetric(result, name, "pg_table_last_vacuum_age_seconds"))
 	})
@@ -68,14 +68,14 @@ func TestINTTBL003_TableStatsNeverAutovacuumed(t *testing.T) {
 		t.Cleanup(func() { _, _ = admin.Exec(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", name)) })
 		conn, err := pool.Acquire(ctx)
 		require.NoError(t, err)
-		result, err := (&tableStatsCheck{selector: cardinalityForIntegration()}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
+		result, err := (&tableStatsCheck{selectors: cardinalityForIntegration()}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
 		require.NoError(t, err)
 		require.Empty(t, findTableMetric(result, name, "pg_table_last_autovacuum_age_seconds"))
 	})
 }
 
-func cardinalityForIntegration() *cardinality.Selector {
-	return cardinality.NewSelector(cardinality.Options{TopN: 50})
+func cardinalityForIntegration() *scopedSelectors {
+	return newScopedSelectors(cardinality.Options{TopN: 50})
 }
 
 func findTableMetric(result Result, relation, name string) []pgtype.Metric {

@@ -17,7 +17,7 @@ func TestINTBLOAT001_BoundedEstimateRuns(t *testing.T) {
 		pool := pg.Pool(t, "app", pgtest.RoleT0)
 		conn, e := pool.Acquire(ctx)
 		require.NoError(t, e)
-		_, e = (&bloatEstimateCheck{selector: cardinalityForIntegration()}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
+		_, e = (&bloatEstimateCheck{selectors: cardinalityForIntegration()}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
 		require.NoError(t, e)
 	})
 }
@@ -39,7 +39,7 @@ func TestINTBLOAT003_EmptySchemaDoesNotEmitUnboundedSeries(t *testing.T) {
 		pool := pg.Pool(t, "app", pgtest.RoleT0)
 		conn, e := pool.Acquire(ctx)
 		require.NoError(t, e)
-		r, e := (&bloatEstimateCheck{selector: cardinalityForIntegration()}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
+		r, e := (&bloatEstimateCheck{selectors: cardinalityForIntegration()}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
 		require.NoError(t, e)
 		require.LessOrEqual(t, len(r.Metrics), 1000)
 	})

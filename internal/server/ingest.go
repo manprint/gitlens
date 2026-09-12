@@ -13,6 +13,19 @@ import (
 )
 
 const maxBodyBytes = 32 << 20 // 32 MiB
+
+// maxDecompressedBytes caps the envelope *after* gzip. MaxBytesReader only
+// bounds what arrives on the wire, and gzip's ratio on the repetitive JSON an
+// envelope is made of is easily three orders of magnitude: a 32 MiB body that
+// passes the wire limit can expand to tens of gigabytes, so without this cap
+// a single authenticated request — or a corrupted one — is an out-of-memory
+// kill of the whole server. 256 MiB is 8x the wire limit, comfortably above
+// any real envelope (the agent's own 413 handling drops anything near it).
+// A var, not a const, purely so the bomb regression test can lower it and
+// assert the boundary in milliseconds instead of inflating a real 256 MiB.
+// Nothing in production reassigns it. Same precedent as sessionRandRead.
+var maxDecompressedBytes int64 = 256 << 20
+
 const maxSampleAge = 12 * time.Hour
 const futureSkewThreshold = 30 * time.Second
 
@@ -51,10 +64,19 @@ func IngestHandler(auth *Auth, inv *Inventory, pipeline *Pipeline) http.HandlerF
 				http.Error(w, `{"error":"invalid gzip body"}`, http.StatusBadRequest)
 				return
 			}
-			body, err = io.ReadAll(gz)
+			// LimitReader at maxDecompressedBytes+1 so an envelope that
+			// exactly fills the budget is still accepted and only one that
+			// exceeds it is rejected, with 413 (the status the agent's
+			// pushOne already treats as "drop this, do not retry").
+			body, err = io.ReadAll(io.LimitReader(gz, maxDecompressedBytes+1))
 			_ = gz.Close()
 			if err != nil {
 				http.Error(w, `{"error":"invalid gzip body"}`, http.StatusBadRequest)
+				return
+			}
+			if int64(len(body)) > maxDecompressedBytes {
+				IncIngestRejected("decompressed_too_large")
+				http.Error(w, `{"error":"payload too large"}`, http.StatusRequestEntityTooLarge)
 				return
 			}
 		}

@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/manprint/pglens/internal/cardinality"
@@ -13,13 +12,11 @@ import (
 )
 
 func init() {
-	Register(&indexStatsCheck{selector: cardinality.NewSelector(cardinality.Options{TopN: 50})})
+	Register(&indexStatsCheck{selectors: newScopedSelectors(cardinality.Options{TopN: 50})})
 }
 
 type indexStatsCheck struct {
-	mu       sync.Mutex
-	selector *cardinality.Selector
-	cycle    uint64
+	selectors *scopedSelectors
 }
 
 type indexStatsRow struct {
@@ -36,14 +33,7 @@ func (c *indexStatsCheck) Requires() Requirements {
 }
 func (c *indexStatsCheck) DefaultInterval() time.Duration { return 5 * time.Minute }
 func (c *indexStatsCheck) Timeout() time.Duration         { return 30 * time.Second }
-func (c *indexStatsCheck) SetTopN(n int) {
-	if n > 0 {
-		c.mu.Lock()
-		c.selector = cardinality.NewSelector(cardinality.Options{TopN: n})
-		c.cycle = 0
-		c.mu.Unlock()
-	}
-}
+func (c *indexStatsCheck) SetTopN(n int)                  { c.selectors.SetTopN(n) }
 
 func (c *indexStatsCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 	conn, err := t.ConnFor(ctx, t.Database())
@@ -77,11 +67,7 @@ LEFT JOIN pg_statio_user_indexes io ON io.indexrelid = s.indexrelid`)
 	if err := rows.Err(); err != nil {
 		return Result{}, err
 	}
-	c.mu.Lock()
-	c.cycle++
-	cycle := c.cycle
-	selector := c.selector
-	c.mu.Unlock()
+	selector, cycle := c.selectors.next(t)
 	byKey := make(map[string]indexStatsRow, len(parsed))
 	candidates := make([]cardinality.Candidate, 0, len(parsed))
 	for _, r := range parsed {

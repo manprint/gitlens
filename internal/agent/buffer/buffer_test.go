@@ -3,6 +3,7 @@ package buffer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -684,4 +685,210 @@ func TestBuffer_RetentionDropsAreNotCorruption(t *testing.T) {
 			t.Errorf("retention drops must not count as corruption, got %d", stats.CorruptRecords)
 		}
 	})
+}
+
+// TestBuffer_AppendAfterPartialDrainKeepsEveryRecord is the regression test
+// for the segment descriptor sharing its file offset between reads and
+// writes. Next() used to Seek() the shared *os.File to just past the record
+// it returned; a segment created with os.Create (no O_APPEND) then had its
+// next Append land at that offset, *inside* the file, silently overwriting
+// records that were already durably written.
+//
+// The interleaving below is not exotic — it is exactly what the pusher does
+// on every drain that stops early: read one record, stop (401, or a cancelled
+// push context), rewind, and keep queueing new envelopes.
+func TestBuffer_AppendAfterPartialDrainKeepsEveryRecord(t *testing.T) {
+	dir := t.TempDir()
+	buf, err := Open(dir, Options{Clock: clock.System()})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = buf.Close() }()
+
+	want := []string{"alpha-0000000000", "bravo-1111111111", "charlie-222222222"}
+	for _, rec := range want {
+		if err := buf.Append([]byte(rec)); err != nil {
+			t.Fatalf("Append %q: %v", rec, err)
+		}
+	}
+
+	// Read exactly one record and stop without acking: the read cursor now
+	// sits between record 1 and record 2.
+	data, _, err := buf.Next()
+	if err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+	if string(data) != want[0] {
+		t.Fatalf("first Next = %q, want %q", data, want[0])
+	}
+	buf.Rewind()
+
+	// Queue another envelope, as the agent's collection loop keeps doing
+	// while delivery is stalled.
+	want = append(want, "delta-33333333333")
+	if err := buf.Append([]byte(want[3])); err != nil {
+		t.Fatalf("Append after partial drain: %v", err)
+	}
+
+	var got []string
+	for {
+		data, ack, err := buf.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("drain Next: %v", err)
+		}
+		if data == nil {
+			t.Fatalf("drain returned a corrupt record; the buffer was overwritten in place")
+		}
+		got = append(got, string(data))
+		if err := ack(context.Background()); err != nil {
+			t.Fatalf("ack: %v", err)
+		}
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("drained %d records %q, want %d %q", len(got), got, len(want), want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("record %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// TestBuffer_ConcurrentProducerConsumerPreservesRecords drives a producer and
+// a consumer against one live buffer and asserts on the bytes, not just on
+// "a segment exists". Every record read back must be one that was written,
+// verbatim, and no record may be delivered twice: the previous concurrency
+// test asserted neither, which is how in-place overwriting stayed invisible.
+func TestBuffer_ConcurrentProducerConsumerPreservesRecords(t *testing.T) {
+	dir := t.TempDir()
+	buf, err := Open(dir, Options{Clock: clock.System()})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = buf.Close() }()
+
+	const records = 500
+	want := make(map[string]bool, records)
+	for i := 0; i < records; i++ {
+		want[fmt.Sprintf("record-%06d-payload-padding", i)] = true
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < records; i++ {
+			rec := fmt.Sprintf("record-%06d-payload-padding", i)
+			if err := buf.Append([]byte(rec)); err != nil {
+				t.Errorf("Append: %v", err)
+				return
+			}
+		}
+	}()
+
+	seen := make(map[string]bool, records)
+	var mu sync.Mutex
+	done := make(chan struct{})
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			data, ack, err := buf.Next()
+			if errors.Is(err, io.EOF) {
+				continue
+			}
+			if err != nil {
+				t.Errorf("Next: %v", err)
+				return
+			}
+			if data == nil {
+				t.Errorf("corrupt record read back from a buffer nothing corrupted")
+				return
+			}
+			mu.Lock()
+			rec := string(data)
+			if seen[rec] {
+				t.Errorf("record %q delivered twice", rec)
+			}
+			seen[rec] = true
+			n := len(seen)
+			mu.Unlock()
+			if err := ack(context.Background()); err != nil {
+				t.Errorf("ack: %v", err)
+				return
+			}
+			if n == records {
+				return
+			}
+		}
+	}()
+
+	deadline := time.After(30 * time.Second)
+	drained := make(chan struct{})
+	go func() { wg.Wait(); close(drained) }()
+	select {
+	case <-drained:
+	case <-deadline:
+		close(done)
+		<-drained
+		t.Fatalf("timed out: consumer saw %d of %d records", len(seen), records)
+	}
+
+	for rec := range seen {
+		if !want[rec] {
+			t.Errorf("read back a record that was never written: %q", rec)
+		}
+	}
+	if len(seen) != records {
+		t.Errorf("read %d records, want %d", len(seen), records)
+	}
+}
+
+// TestBuffer_StatsSnapshotIsIndependent — Stats() used to hand out the live
+// SamplesDropped map. Pusher.DroppedSamples ranges over it on the push
+// goroutine while Append writes it on the collection goroutine, which the Go
+// runtime turns into an unrecoverable "concurrent map read and map write"
+// crash of the whole agent.
+func TestBuffer_StatsSnapshotIsIndependent(t *testing.T) {
+	buf, err := Open(t.TempDir(), Options{MaxSize: 64, Clock: clock.System()})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = buf.Close() }()
+
+	for i := 0; i < 20; i++ {
+		if err := buf.Append([]byte("0123456789abcdef0123456789")); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+	snap := buf.Stats()
+	if len(snap.SamplesDropped) == 0 {
+		t.Fatalf("expected retention drops with a 64-byte budget, got none")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			if err := buf.Append([]byte("0123456789abcdef0123456789")); err != nil {
+				t.Errorf("Append: %v", err)
+				return
+			}
+		}
+	}()
+	for i := 0; i < 200; i++ {
+		for k, v := range snap.SamplesDropped { // must not race with Append
+			_, _ = k, v
+		}
+	}
+	<-done
 }

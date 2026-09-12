@@ -47,7 +47,7 @@ func TestTableStats_CounterGaugeClassification(t *testing.T) {
 }
 
 func TestTableStats_RequiresDatabaseScope(t *testing.T) {
-	c := &tableStatsCheck{selector: cardinality.NewSelector(cardinality.Options{TopN: 50})}
+	c := &tableStatsCheck{selectors: newScopedSelectors(cardinality.Options{TopN: 50})}
 	require.Equal(t, ScopeDatabase, c.Requires().Scope)
 	require.Equal(t, pgtype.TierReadOnly, c.Requires().PermTier)
 	require.Equal(t, 5*time.Minute, c.DefaultInterval())

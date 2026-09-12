@@ -17,30 +17,21 @@ import (
 
 func init() {
 	Register(&statStatementsCheck{
-		selector: cardinality.NewSelector(cardinality.Options{TopN: 50}),
-		caches:   make(map[string]*lru.Cache[int64, string]),
+		selectors: newScopedSelectors(cardinality.Options{TopN: 50}),
+		caches:    make(map[string]*lru.Cache[int64, string]),
 	})
 }
 
 type statStatementsCheck struct {
-	mu       sync.Mutex
-	selector *cardinality.Selector
-	caches   map[string]*lru.Cache[int64, string]
-	cycle    uint64
+	mu        sync.Mutex
+	selectors *scopedSelectors
+	caches    map[string]*lru.Cache[int64, string]
 }
 
 func (c *statStatementsCheck) Name() string { return "stat_statements" }
 
 // SetTopN applies the configured cardinality limit before scheduling begins.
-func (c *statStatementsCheck) SetTopN(topN int) {
-	if topN <= 0 {
-		return
-	}
-	c.mu.Lock()
-	c.selector = cardinality.NewSelector(cardinality.Options{TopN: topN})
-	c.cycle = 0
-	c.mu.Unlock()
-}
+func (c *statStatementsCheck) SetTopN(topN int) { c.selectors.SetTopN(topN) }
 
 func (c *statStatementsCheck) Requires() Requirements {
 	return Requirements{
@@ -144,17 +135,18 @@ SELECT s.queryid, s.calls, s.total_exec_time, s.rows,
 		})
 	}
 
-	datname := t.Database()
+	// Keyed by scope, not by bare database name: two targets of the same
+	// agent routinely monitor identically named databases, and a queryid is
+	// only unique within one database of one instance.
+	cacheKey := scopeKey(t)
 	c.mu.Lock()
-	cache, ok := c.caches[datname]
+	cache, ok := c.caches[cacheKey]
 	if !ok {
 		cache, _ = lru.New[int64, string](4096)
-		c.caches[datname] = cache
+		c.caches[cacheKey] = cache
 	}
-	c.cycle++
-	cycle := c.cycle
-	selector := c.selector
 	c.mu.Unlock()
+	selector, cycle := c.selectors.next(t)
 
 	// A real, monotonically increasing cycle is what makes
 	// cardinality.Selector's Hysteresis a genuine N-cycle grace period

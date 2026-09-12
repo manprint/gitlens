@@ -69,6 +69,7 @@ type Engine struct {
 	stopOnce    sync.Once
 	startOnce   sync.Once
 	started     bool
+	stopped     bool
 	stateLoaded bool
 }
 
@@ -104,6 +105,13 @@ func newEngine(pool *pgxpool.Pool, clk clock.Clock, interval time.Duration, st S
 func (e *Engine) Start(ctx context.Context) {
 	e.startOnce.Do(func() {
 		e.mu.Lock()
+		// Stop() before Start() already closed doneCh; starting the loop now
+		// would close it a second time and panic. Nothing to run either way:
+		// stopCh is closed, so the loop would exit on its first select.
+		if e.stopped {
+			e.mu.Unlock()
+			return
+		}
 		e.started = true
 		e.ticker = e.clock.NewTicker(e.interval)
 		ticker := e.ticker
@@ -134,6 +142,7 @@ func (e *Engine) Stop() {
 		close(e.stopCh)
 		e.mu.Lock()
 		started := e.started
+		e.stopped = true
 		e.mu.Unlock()
 		if started {
 			<-e.doneCh
@@ -219,7 +228,14 @@ func (e *Engine) Tick(ctx context.Context) error {
 	if !leader {
 		return nil
 	}
-	if !e.stateLoaded {
+	// stateLoaded was read and written with no lock at all. Tick is exported
+	// and driven directly by the integration suites as well as by the
+	// engine's own ticker, so two callers could both see it false and both
+	// replay every active alert into the evaluator.
+	e.mu.Lock()
+	loaded := e.stateLoaded
+	e.mu.Unlock()
+	if !loaded {
 		if e.store != nil {
 			active, err := e.store.Active(ctx, Filter{})
 			if err != nil {
@@ -229,7 +245,9 @@ func (e *Engine) Tick(ctx context.Context) error {
 				e.eval.Restore(a)
 			}
 		}
+		e.mu.Lock()
 		e.stateLoaded = true
+		e.mu.Unlock()
 	}
 	now := e.clock.Now()
 	rules := Builtin()

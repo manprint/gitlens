@@ -1,6 +1,9 @@
 package alert
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 func Compare(v float64, c Comparator, threshold float64) bool {
 	switch c {
@@ -35,7 +38,16 @@ type evalState struct {
 	firing bool
 	alert  Alert
 }
-type Evaluator struct{ states map[string]evalState }
+
+// Evaluator is safe for concurrent use. It used to rely on "only the engine
+// ticker calls this", which is true of the production wiring and of nothing
+// else: Engine.Tick is exported, the integration suites drive it directly,
+// and a single concurrent call turns the unguarded map into an unrecoverable
+// "concurrent map writes" crash of the server.
+type Evaluator struct {
+	mu     sync.Mutex
+	states map[string]evalState
+}
 
 func NewEvaluator() *Evaluator { return &Evaluator{states: make(map[string]evalState)} }
 
@@ -46,6 +58,8 @@ func (e *Evaluator) Restore(a Alert) {
 	if a.State != StatePending && a.State != StateFiring {
 		return
 	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.states[a.Key] = evalState{
 		first:  a.StartedAt,
 		firing: a.State == StateFiring,
@@ -54,6 +68,8 @@ func (e *Evaluator) Restore(a Alert) {
 }
 
 func (e *Evaluator) Step(r Rule, s Sample, now time.Time) (*Alert, Transition) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	k := Key(r, s)
 	st, ok := e.states[k]
 	trueCond := r.EventType != "" || Compare(s.Value, r.Comparator, r.Threshold)
@@ -111,6 +127,8 @@ func (e *Evaluator) Step(r Rule, s Sample, now time.Time) (*Alert, Transition) {
 // never emitting the resolved transition when it finally cleared, leaving the
 // stored alert firing forever.
 func (e *Evaluator) Forget(before time.Time) int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	n := 0
 	for k, s := range e.states {
 		if s.firing {

@@ -2,7 +2,6 @@ package check
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/manprint/pglens/internal/cardinality"
@@ -10,13 +9,11 @@ import (
 )
 
 func init() {
-	Register(&tableStatsCheck{selector: cardinality.NewSelector(cardinality.Options{TopN: 50})})
+	Register(&tableStatsCheck{selectors: newScopedSelectors(cardinality.Options{TopN: 50})})
 }
 
 type tableStatsCheck struct {
-	mu       sync.Mutex
-	selector *cardinality.Selector
-	cycle    uint64
+	selectors *scopedSelectors
 }
 
 type tableStatsRow struct {
@@ -38,15 +35,7 @@ func (c *tableStatsCheck) Requires() Requirements {
 }
 func (c *tableStatsCheck) DefaultInterval() time.Duration { return 5 * time.Minute }
 func (c *tableStatsCheck) Timeout() time.Duration         { return 30 * time.Second }
-func (c *tableStatsCheck) SetTopN(topN int) {
-	if topN <= 0 {
-		return
-	}
-	c.mu.Lock()
-	c.selector = cardinality.NewSelector(cardinality.Options{TopN: topN})
-	c.cycle = 0
-	c.mu.Unlock()
-}
+func (c *tableStatsCheck) SetTopN(topN int)               { c.selectors.SetTopN(topN) }
 
 func (c *tableStatsCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 	conn, err := t.ConnFor(ctx, t.Database())
@@ -88,11 +77,7 @@ WHERE c.relkind = 'r'`)
 	if err := rows.Err(); err != nil {
 		return Result{}, err
 	}
-	c.mu.Lock()
-	c.cycle++
-	cycle := c.cycle
-	selector := c.selector
-	c.mu.Unlock()
+	selector, cycle := c.selectors.next(t)
 	candidates := make([]cardinality.Candidate, 0, len(parsed))
 	byKey := make(map[string]tableStatsRow, len(parsed))
 	for _, r := range parsed {

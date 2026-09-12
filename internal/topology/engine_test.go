@@ -713,3 +713,114 @@ func TestEngine_OrphanStandbyThrottled(t *testing.T) {
 		t.Errorf("expected duration_seconds to cover the whole orphan episode, got %v", duration)
 	}
 }
+
+// TestEngine_EvictBoundsState — the engine tracked one instanceState (plus
+// its own edgeSeenAt map) per instance_id it had ever seen, for the lifetime
+// of the server process. Instance ids are not stable across a lost identity
+// file, so a re-provisioned replica leaked a whole state object every time.
+func TestEngine_EvictBoundsState(t *testing.T) {
+	clk := clock.NewFake(time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC))
+	e := NewEngine(clk)
+
+	cluster := pgtype.ClusterID(42)
+	gone := pgtype.InstanceID(uuid.New())
+	kept := pgtype.InstanceID(uuid.New())
+
+	e.Apply(Observation{InstanceID: gone, ClusterID: cluster, Role: pgtype.RolePrimary})
+	e.Apply(Observation{InstanceID: kept, ClusterID: cluster, Role: pgtype.RoleStandby})
+	if got := e.Len(); got != 2 {
+		t.Fatalf("tracking %d instances, want 2", got)
+	}
+
+	clk.Advance(2 * time.Hour)
+	// Only `kept` still reports.
+	e.Apply(Observation{InstanceID: kept, ClusterID: cluster, Role: pgtype.RoleStandby})
+
+	removed := e.Evict(clk.Now().Add(-1 * time.Hour))
+	if removed != 1 {
+		t.Errorf("Evict removed %d instances, want 1", removed)
+	}
+	if got := e.Len(); got != 1 {
+		t.Errorf("tracking %d instances after eviction, want 1", got)
+	}
+
+	// The surviving instance keeps the cluster alive, so per-cluster state
+	// must not be collected while it is still reporting.
+	e.mu.RLock()
+	_, primaryKept := e.lastPrimary[cluster]
+	e.mu.RUnlock()
+	if !primaryKept {
+		t.Error("per-cluster state was dropped while an instance of that cluster is still reporting")
+	}
+
+	// Once the last instance goes quiet, the cluster entries go too.
+	clk.Advance(2 * time.Hour)
+	e.Evict(clk.Now().Add(-1 * time.Hour))
+	e.mu.RLock()
+	n := len(e.instances) + len(e.lastPrimary) + len(e.lastFailoverTime) + len(e.lastSplitBrain)
+	e.mu.RUnlock()
+	if n != 0 {
+		t.Errorf("%d entries retained after every instance went stale, want 0", n)
+	}
+}
+
+// TestEngine_EvictPrunesStaleEdges — instanceState.edgeSeenAt grows by one
+// entry per distinct upstream an instance has ever pointed at. A standby that
+// is repeatedly re-attached (cascade reconfiguration, repeated failovers)
+// accumulates them for the process lifetime unless eviction sweeps them too.
+func TestEngine_EvictPrunesStaleEdges(t *testing.T) {
+	clk := clock.NewFake(time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC))
+	e := NewEngine(clk)
+
+	cluster := pgtype.ClusterID(7)
+	standby := pgtype.InstanceID(uuid.New())
+	oldUpstream := pgtype.InstanceID(uuid.New())
+	newUpstream := pgtype.InstanceID(uuid.New())
+
+	e.Apply(Observation{InstanceID: standby, ClusterID: cluster, Role: pgtype.RoleStandby,
+		Edges: []Edge{{From: standby, To: oldUpstream, Type: "streaming", Confidence: "high"}}})
+
+	clk.Advance(2 * time.Hour)
+	e.Apply(Observation{InstanceID: standby, ClusterID: cluster, Role: pgtype.RoleStandby,
+		Edges: []Edge{{From: standby, To: newUpstream, Type: "streaming", Confidence: "high"}}})
+
+	e.Evict(clk.Now().Add(-1 * time.Hour))
+
+	e.mu.RLock()
+	st := e.instances[standby]
+	edges := len(st.edgeSeenAt)
+	_, staleKept := st.edgeSeenAt[oldUpstream.String()]
+	e.mu.RUnlock()
+	if staleKept {
+		t.Errorf("stale edge to the old upstream was retained (%d edges tracked)", edges)
+	}
+	if edges != 1 {
+		t.Errorf("tracking %d edges, want 1", edges)
+	}
+}
+
+// TestStreamingProvider is the documented extension seam (decision D6): the
+// engine consumes edges the provider produces, so Aurora/Patroni/Citus can be
+// added without touching the engine or the schema.
+func TestStreamingProvider(t *testing.T) {
+	p := NewStreamingProvider()
+	if got := p.Name(); got != "streaming" {
+		t.Errorf("Name() = %q, want %q", got, "streaming")
+	}
+	from := pgtype.InstanceID(uuid.New())
+	to := pgtype.InstanceID(uuid.New())
+	obs := Observation{InstanceID: from, Edges: []Edge{{From: from, To: to, Type: "streaming"}}}
+	if !p.Applies(obs) {
+		t.Error("Applies() = false; the streaming provider applies to every observation")
+	}
+	edges := p.Edges(obs)
+	if len(edges) != 1 || edges[0].To != to {
+		t.Errorf("Edges() = %+v, want the observation's own single edge to %s", edges, to)
+	}
+	if p.Applies(Observation{InstanceID: from}) != true {
+		t.Error("Applies() must not depend on an observation carrying edges")
+	}
+	if got := p.Edges(Observation{InstanceID: from}); len(got) != 0 {
+		t.Errorf("Edges() on an edgeless observation = %+v, want none", got)
+	}
+}

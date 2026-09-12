@@ -2,38 +2,6 @@
 
 ## Test levels
 
-## Checks required before submitting
-
-Every change must pass the relevant Go and web gates. The complete local gate
-is:
-
-```sh
-make fmt-check
-make lint
-make build
-make test
-make coverage-gate
-make web-install
-make web-lint
-make web-typecheck
-make web-test
-make web-coverage-gate
-make web-build
-make web-budget
-make test-integration
-make test-e2e
-AGENT_MODE=binary make test-e2e
-make test-ui-e2e
-AGENT_MODE=binary make test-ui-e2e
-```
-
-`make ci-local` runs the Go and web build, lint, unit, coverage, budget, and
-integration gates. The two E2E commands and the two UI acceptance commands are
-listed separately because they use Docker and take longer. Run
-`make test-e2e-full` when a change affects shared harness or cross-service
-behaviour; use `make test-e2e-full-evidence` when a durable result log is
-required.
-
 - **L1 — Unit tests** (`make test`). Pure logic, no I/O, no Docker. Uses fake clock where timing is needed (the `clock.Frozen` fake time and `test.Eventually`/`Consistently` in harness for polling, never `time.Sleep`). Tests pass `-race -shuffle=on` for data-race detection and randomized execution order. Runs in seconds.
   - Belongs here: parsing, validation, calculations, marshaling, single-component behavior.
 
@@ -52,6 +20,57 @@ required.
   scenarios are documented in `TESTING.md`.
 
 **Key principle:** No `time.Sleep` anywhere except background wait loops. Use `Eventually` (poll 200ms, return last error), `Consistently` (assert non-event for a window), or `clock.Frozen` (fake time in tests that need absolute timing).
+
+
+## Checks required before submitting
+
+Every change must pass the relevant Go and web gates. The complete local gate
+is:
+
+```sh
+make fmt-check
+make lint
+make vet-tags
+make build
+make test
+make coverage-gate
+make tidy-check
+make vuln
+make web-install
+make web-lint
+make web-typecheck
+make web-test
+make web-coverage-gate
+make web-build
+make web-budget
+make test-integration
+make test-e2e
+AGENT_MODE=binary make test-e2e
+make test-ui-e2e
+AGENT_MODE=binary make test-ui-e2e
+```
+
+`make ci-local-unit` runs the whole Go and web fast lane (format, lint,
+`vet-tags`, build, unit, coverage, web gates, bundle budget);
+`make ci-local-security` runs `tidy-check` and `vuln`; `make ci-local` runs both
+and then the complete L2 matrix. The two E2E commands and the two UI acceptance
+commands are listed separately because they use Docker and take longer. Run
+`make test-e2e-full` when a change affects shared harness or cross-service
+behaviour; use `make test-e2e-full-evidence` when a durable result log is
+required.
+
+Three of these are easy to skip and expensive to have skipped:
+
+- **`make vet-tags`** — `go build ./...` never compiles the `integration` and
+  `e2e` suites. Without it a refactor can leave them unbuildable while every
+  fast check stays green.
+- **`make vuln`** — the `toolchain` directive in `go.mod` is what pins the
+  standard library out of a long list of advisories reachable from the ingest
+  endpoint and the agent's HTTP client. This is what proves the pin still holds.
+- **`make stress`** — repeats the concurrency-sensitive packages with a fresh
+  shuffle seed per round. Run it whenever a change touches something that owns a
+  goroutine. It is not in the list above because CI runs it on `main` rather
+  than on every pull request, but a local round before pushing is cheap.
 
 ## How to add an E2E scenario
 
@@ -121,11 +140,33 @@ This runs `go test -tags=integration -run Golden -update ./internal/wire`.
 5. **One scenario proves one thing.** When a scenario needs three unrelated
    assertions, it is three scenarios.
 
+## Lifecycle and goroutines
+
+Every type with `Start`/`Stop` owns at least one background goroutine, and the
+contract of `Stop` is that the goroutines are gone when it returns. Assert that
+contract with `internal/leaktest`:
+
+```go
+func TestSampler_StopIsClean(t *testing.T) {
+	defer leaktest.Check(t)()
+	// ... Start(), work, Stop()
+}
+```
+
+A lifecycle test covers at minimum `Stop` without `Start`, `Stop` twice, and
+`Start` after `Stop`. Those three cases have each found a real defect here — a
+double `close(doneCh)`, a connection released twice, a wait on a channel that
+was never created, and a data race between `run()` and a concurrent `Start`.
+Add one for every new type with a background loop.
+
 ## Project layout
 
 ```
-cmd/pglens-agent/  cmd/pglens-server/  internal/{pgtype,clock,identity,delta,cardinality,check,wire,store,server,agent,topology,ash}
-deploy/sql/ deploy/compose/ test/{pgtest,fixtures,harness,compose,scenario,workload}
+cmd/pglens-agent/  cmd/pglens-server/
+internal/{advisor,agent,alert,ash,cardinality,check,clock,command,delta,host,
+          identity,leaktest,pgtype,scripts,server,store,tools,topology,webui,wire}
+deploy/{sql,compose,systemd}/  api/openapi.yaml  web/
+test/{pgtest,fixtures,harness,compose,scenario,workload,e2e}/
 ```
 
 Follow this layout; justify and document any new top-level directory.

@@ -44,7 +44,7 @@ func TestIndexStats_BooleanColumnsAreZeroOrOne(t *testing.T) {
 	require.Equal(t, pgtype.KindGauge, indexStatsResult([]cardinality.Candidate{{Key: "k"}}, map[string]indexStatsRow{"k": {}}).Metrics[5].Kind)
 }
 func TestIndexStats_RequiresDatabaseScope(t *testing.T) {
-	c := &indexStatsCheck{selector: cardinality.NewSelector(cardinality.Options{TopN: 50})}
+	c := &indexStatsCheck{selectors: newScopedSelectors(cardinality.Options{TopN: 50})}
 	require.Equal(t, ScopeDatabase, c.Requires().Scope)
 	require.Equal(t, 5*time.Minute, c.DefaultInterval())
 	require.Equal(t, 30*time.Second, c.Timeout())

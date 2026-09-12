@@ -12,18 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// TestingT is the subset of *testing.T the invariant checks need. Accepting
-// this instead of the concrete type lets a test prove "this check would have
-// failed" via a substitute that records the call instead of aborting the
-// test that is verifying detection works (see test/e2e/invariants_test.go).
-type TestingT interface {
-	Helper()
-	Errorf(format string, args ...any)
-	Fatalf(format string, args ...any)
-}
-
-var _ TestingT = (*testing.T)(nil)
-
 // dumpAndFail fails t if rows has any results, printing every offending row.
 // newDest must return a fresh slice of scan-destination pointers each call.
 func dumpAndFail(t TestingT, label string, rows pgx.Rows, newDest func() []any) {
@@ -82,12 +70,18 @@ func joinLines(lines []string) string {
 // of every scenario (phase_06.md §5.6). Failures name the invariant and dump
 // the offending rows.
 //
-// Not yet checked here, and why: "cardinality within budget" (I-8) and "no
-// unexpected errors" depend on a `pglens_series_total` / `check_error_total`
-// counter the agent does not expose yet (no sub-phase has built it); "no
-// goroutine leak" needs a start-of-run snapshot this single end-of-run call
-// does not have. Faking these would be worse than omitting them — see
-// STATE.md §6 for the tracked gap.
+// I-8 ("cardinality within budget") and "no unexpected check errors" are
+// checked through the server's own /metrics exposition — see
+// AssertServerMetricInvariants. They were previously listed here as
+// permanently unreachable gaps because the counters behind them did not
+// exist; internal/server/metrics_handler.go now exports both
+// pglens_series_total and pglens_check_error_total, so there is nothing left
+// to fake.
+//
+// Still not checked here: "no goroutine leak", which needs a start-of-run
+// snapshot this single end-of-run call does not have. The in-process
+// equivalent lives in internal/leaktest and is asserted directly on every
+// component that owns a background loop.
 func (h *Harness) AssertInvariants(t *testing.T) {
 	t.Helper()
 	pool := h.DB(t)
@@ -95,6 +89,21 @@ func (h *Harness) AssertInvariants(t *testing.T) {
 		t.Fatal("AssertInvariants: no DB pool (call after Start)")
 	}
 	AssertDBInvariants(context.Background(), t, pool)
+	h.AssertServerMetricInvariants(t, DefaultMetricBudget())
+}
+
+// AssertServerMetricInvariants scrapes the server's /metrics and holds it to
+// budget. Backs I-8 (cardinality within budget) and the "no unexpected check
+// errors" invariant. The parsing and the assertions themselves live in
+// metrics.go, untagged, so they are unit tested by `make test` rather than
+// only exercised inside a compose stack.
+func (h *Harness) AssertServerMetricInvariants(t *testing.T, budget MetricBudget) {
+	t.Helper()
+	body, err := h.API().RawGet("/metrics")
+	if err != nil {
+		t.Fatalf("I-8: scrape /metrics: %v", err)
+	}
+	AssertMetricInvariants(t, body, budget)
 }
 
 // AssertDBInvariants runs the DB-backed invariant checks against pool. Split

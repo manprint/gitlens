@@ -123,3 +123,41 @@ func TestIngest_RejectsInvalidGzipBody(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	require.Contains(t, w.Body.String(), "invalid gzip body")
 }
+
+// TestIngest_RejectsDecompressionBomb — MaxBytesReader bounds the compressed
+// body only. Envelope JSON is extremely repetitive, so a body well inside the
+// 32 MiB wire limit decompresses to orders of magnitude more: reading it into
+// memory unbounded is a single-request out-of-memory kill of the server.
+func TestIngest_RejectsDecompressionBomb(t *testing.T) {
+	// Not t.Parallel(): this test temporarily lowers a package-level limit.
+	auth := NewAuth("token")
+	h := IngestHandler(auth, NewInventory(nil), NewPipeline(nil, nil))
+
+	// Lowered so the assertion is about the boundary, not about how fast this
+	// machine can inflate 256 MiB of zeros.
+	original := maxDecompressedBytes
+	maxDecompressedBytes = 1 << 20
+	t.Cleanup(func() { maxDecompressedBytes = original })
+
+	var body bytes.Buffer
+	gz := gzip.NewWriter(&body)
+	// Zeros compress at roughly 1000:1, so a body of a few KiB on the wire
+	// expands past the limit — far below the MaxBytesReader limit that used
+	// to be the only bound.
+	chunk := make([]byte, 1<<16)
+	for written := int64(0); written < maxDecompressedBytes+(1<<16); written += int64(len(chunk)) {
+		if _, err := gz.Write(chunk); err != nil {
+			t.Fatalf("gzip write: %v", err)
+		}
+	}
+	require.NoError(t, gz.Close())
+	require.Less(t, int64(body.Len()), int64(maxBodyBytes), "the bomb must pass the wire-size limit to exercise the decompressed one")
+
+	req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body.Bytes()))
+	req.Header.Set("Authorization", "Bearer token")
+	req.Header.Set("Content-Encoding", "gzip")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
+	require.Contains(t, w.Body.String(), "payload too large")
+}

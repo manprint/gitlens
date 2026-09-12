@@ -161,18 +161,32 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop gracefully shuts down the scheduler, allowing in-flight scrapes to finish within ShutdownTimeout.
+// Stop gracefully shuts down the scheduler, allowing in-flight scrapes to
+// finish within ShutdownTimeout. It is safe to call before Start, and safe to
+// call more than once — cmd/pglens-agent calls it from the push loop when the
+// server revokes the agent and again at shutdown.
 func (s *Scheduler) Stop() {
-	s.cancel()
+	s.mu.Lock()
+	cancel := s.cancel
+	s.mu.Unlock()
+	if cancel == nil {
+		// Never started: nothing is running, and calling a nil cancel would
+		// panic instead of being the no-op every caller expects.
+		return
+	}
+	cancel()
+
 	doneCh := make(chan struct{})
 	go func() {
 		s.wg.Wait()
 		close(doneCh)
 	}()
 
+	timer := time.NewTimer(s.shutdownTimeout)
+	defer timer.Stop()
 	select {
 	case <-doneCh:
-	case <-time.After(s.shutdownTimeout):
+	case <-timer.C:
 	}
 }
 
@@ -230,7 +244,17 @@ func (s *Scheduler) runEntry(ctx context.Context, entry schedEntry) {
 		select {
 		case <-ticker.C():
 			if entry.breaker.Allow() {
-				s.workerSem <- struct{}{}
+				// Acquiring the worker slot must observe cancellation: with
+				// every worker busy on a target that has stopped answering,
+				// a bare send parked this ticker loop until some scrape's
+				// own timeout expired, so Stop() had to wait out that scrape
+				// before this loop could even notice ctx was done — turning
+				// a graceful stop into a ShutdownTimeout-length hang.
+				select {
+				case s.workerSem <- struct{}{}:
+				case <-ctx.Done():
+					return
+				}
 				s.wg.Add(1)
 				s.scrapeWG.Add(1)
 				go func() {

@@ -91,3 +91,51 @@ pglens connects to PostgreSQL instances and does not expose a pooler view. It
 does not report pool sizes, queue depth, transaction-pooling state, or pooler
 health. When PgBouncer or another pooler is in use, inspect and alert on that
 component separately.
+
+## 13. Every in-memory structure is bounded, and a bound that trips drops data
+
+A monitoring system that grows without limit under load fails exactly when it is
+most needed, so every long-lived structure on both sides has a ceiling. Each
+ceiling is a deliberate trade: past it, data is dropped or rejected rather than
+queued forever.
+
+**Server, per request:**
+
+- A push body is capped at **32 MiB on the wire**. Larger is rejected with 413.
+- A gzipped push is capped at **256 MiB after decompression**. `MaxBytesReader`
+  only bounds what arrives on the wire, and gzip's ratio on the repetitive JSON
+  an envelope is made of is easily three orders of magnitude, so without this
+  second cap a single 32 MiB request could expand to tens of gigabytes and take
+  the server out of memory. Exceeding it is a 413 and a
+  `pglens_ingest_rejected_total{reason="decompressed_too_large"}` increment.
+- Request headers are capped at 64 KiB, and the server enforces read, write, and
+  idle timeouts of 2 minutes with a 10-second header timeout. A client that
+  opens a connection and sends nothing holds it for 10 seconds, not forever.
+
+**Server, over time:**
+
+- Delta and topology state for an instance is evicted **one hour** after the last
+  sample for it. An instance that stops reporting stops costing memory; when it
+  comes back, its first sample is a fresh baseline and emits no rate, the same
+  as a cold start.
+- Browser/API sessions are swept on creation past **1024** live sessions and hard
+  capped at **4096**. At the cap, the sessions closest to expiry are evicted
+  first, so the practical effect of hitting it is that the oldest sign-ins are
+  asked to sign in again.
+
+**Agent:**
+
+- Without a disk buffer, at most **1024 envelopes** are held in memory. Past
+  that the oldest are dropped and counted the same way every other drop is —
+  they reach the server as `pglens_samples_dropped_rate`, which is what makes
+  the `agent_buffer_full` alert rule fire — rather than the queue growing until
+  the process is OOM-killed. With a disk buffer configured, this queue is not
+  the durability mechanism; the buffer is.
+- Per-scope cardinality state (one selector per instance × database) is dropped
+  after **6 hours** without use, so a database that is dropped or removed from
+  the target list does not keep its top-N state alive for the lifetime of the
+  process.
+
+These numbers are not configurable. They are chosen to be far above any real
+deployment and to exist purely so that an abnormal one degrades visibly instead
+of dying.

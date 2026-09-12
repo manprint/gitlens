@@ -14,14 +14,21 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Pinned in one place so the lint job's cache key and the install step can
+  # never disagree about which binary is cached.
+  GOLANGCI_LINT_VERSION: v2.1.6
+
 jobs:
   # Keep this fast gate independent; the Docker-backed browser gate lives in e2e.yml.
   web:
     name: Web build and quality
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@v4
         with:
           version: 11.24.0
@@ -34,48 +41,160 @@ jobs:
         run: make web-install web-gen-api && git diff --exit-code -- web/src/api/generated.ts
       - run: make web-lint web-typecheck web-test web-coverage-gate web-build web-budget
       - name: Upload web coverage artefacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: web-coverage
           path: |
             web/coverage/lcov.info
             web/coverage/junit.xml
+          if-no-files-found: ignore
 
   lint:
     name: Format and lint
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
-          cache: true
-      - run: make fmt-check
-      - name: Install golangci-lint
-        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1.6
-      - name: Run golangci-lint
-        run: |
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-          make lint
-
-  unit:
-    name: Unit, lint, build, and coverage
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
       - run: make fmt-check
+      - name: Cache golangci-lint binary
+        id: cache-golangci
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/golangci-lint
+          key: golangci-lint-${{ runner.os }}-${{ env.GOLANGCI_LINT_VERSION }}
       - name: Install golangci-lint
-        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1.6
-      - run: make lint
+        if: steps.cache-golangci.outputs.cache-hit != 'true'
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${{ env.GOLANGCI_LINT_VERSION }}
+      - name: Run golangci-lint
+        run: |
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          make lint
+      # `go build ./...` never compiles the integration and e2e suites, so a
+      # refactor of production code can leave them unbuildable and still pass
+      # every fast job. Vetting under each tag surfaces that here, in seconds,
+      # instead of 40 minutes into the Docker-backed gate.
+      - name: Vet every build tag
+        run: make vet-tags
+
+  security:
+    name: Supply chain and vulnerabilities
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      # go.mod's `toolchain` directive is what pins the standard library out of
+      # a long list of advisories reachable from the ingest endpoint, the
+      # agent's HTTP client and the notification channels. Without this job
+      # nothing proves the pin still holds after a dependency bump.
+      - name: Check module hygiene
+        run: make tidy-check
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Scan for known vulnerabilities
+        run: |
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          make vuln
+
+  unit:
+    name: Unit tests and coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
       - run: make build
       - run: make test
+      # coverage-gate re-runs the suite with instrumentation; it is also the
+      # step that enforces the global floor and the per-package floors in
+      # scripts/coverage_gate.sh.
       - run: make coverage-gate
+      - name: Upload Go coverage profile
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-coverage
+          path: coverage.out
+          if-no-files-found: ignore
+
+  # Concurrency correctness in this codebase is a property of Stop() contracts
+  # and of a disk buffer whose reader and writer share a file, so a single race
+  # run proves less than repeated shuffled ones. Kept off pull requests to hold
+  # PR latency down; it runs on main and before every release.
+  race-stress:
+    name: Race stress (repeated)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - run: make stress STRESS_ROUNDS=10
+
+  # A broken Dockerfile currently only surfaces in the e2e workflow (nightly,
+  # or on PRs to main) or — worse — in the release job after the whole CI gate
+  # has already gone green. Building both images here keeps that failure in the
+  # fast lane, and running --version proves the binary in the image actually
+  # starts.
+  images:
+    name: Container images build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      - name: Build agent image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.agent
+          load: true
+          tags: pglens-agent:ci
+          build-args: VERSION=ci
+          cache-from: type=gha,scope=ci-agent
+          cache-to: type=gha,mode=max,scope=ci-agent
+      - name: Build server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.server
+          load: true
+          tags: pglens-server:ci
+          build-args: VERSION=ci
+          cache-from: type=gha,scope=ci-server
+          cache-to: type=gha,mode=max,scope=ci-server
+      - name: Smoke test both images
+        run: |
+          test "$(docker run --rm pglens-agent:ci --version)" = ci
+          test "$(docker run --rm pglens-server:ci --version)" = ci
 
   integration:
     name: Integration PG${{ matrix.pg }} / ${{ matrix.profile }}
@@ -88,6 +207,8 @@ jobs:
         profile: ["vanilla", "rds-like"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -97,3 +218,25 @@ jobs:
         env:
           PGLENS_PG_VERSIONS: ${{ matrix.pg }}
           PGLENS_PG_PROFILE: ${{ matrix.profile }}
+
+  # One job to require in branch protection, and one place for the release
+  # workflow to depend on. Without it, adding a job to this file silently
+  # leaves it unprotected until someone remembers to update the branch rule.
+  ci-ok:
+    name: CI gate
+    if: always()
+    needs: [web, lint, security, unit, race-stress, images, integration]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail unless every gate succeeded or was deliberately skipped
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS"
+          # `skipped` is allowed because race-stress does not run on pull
+          # requests; `failure` and `cancelled` are not.
+          if echo "$RESULTS" | grep -E '"result": *"(failure|cancelled)"' >/dev/null; then
+            echo "one or more CI jobs did not succeed" >&2
+            exit 1
+          fi

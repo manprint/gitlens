@@ -88,10 +88,18 @@ func startASH(ctx context.Context, mgr *agent.Manager, targetName string, cfg ag
 		}
 	}()
 
+	// sync.Once, not a bare closure: conn.Release() on an already-released
+	// connection panics inside pgxpool, and this stop func has two callers
+	// (the deferred shutdown sweep, and any future caller that stops one
+	// target's collection independently, as the revocation path very nearly
+	// did). Making it idempotent removes the coupling entirely.
+	var stopOnce sync.Once
 	stop = func() {
-		cancel()
-		sampler.Stop()
-		conn.Release()
+		stopOnce.Do(func() {
+			cancel()
+			sampler.Stop()
+			conn.Release()
+		})
 	}
 	return stop, true
 }

@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func maintenanceCardinality() *cardinality.Selector {
-	return cardinality.NewSelector(cardinality.Options{TopN: 50})
+func maintenanceCardinality() *scopedSelectors {
+	return newScopedSelectors(cardinality.Options{TopN: 50})
 }
 
 func maintenanceTarget(conn Conn) *SimpleTarget {
@@ -40,7 +40,7 @@ func TestTableStats_ScrapeCoversRows(t *testing.T) {
 			}}}, nil
 		},
 	}
-	r, err := (&tableStatsCheck{selector: maintenanceCardinality()}).Scrape(context.Background(), maintenanceTarget(conn))
+	r, err := (&tableStatsCheck{selectors: maintenanceCardinality()}).Scrape(context.Background(), maintenanceTarget(conn))
 	require.NoError(t, err)
 	require.NotEmpty(t, r.Metrics)
 }
@@ -55,7 +55,7 @@ func TestIndexStats_ScrapeCoversRows(t *testing.T) {
 			}}}, nil
 		},
 	}
-	r, err := (&indexStatsCheck{selector: maintenanceCardinality()}).Scrape(context.Background(), maintenanceTarget(conn))
+	r, err := (&indexStatsCheck{selectors: maintenanceCardinality()}).Scrape(context.Background(), maintenanceTarget(conn))
 	require.NoError(t, err)
 	require.Len(t, r.Facts, 1)
 }
@@ -93,7 +93,7 @@ func TestBloat_ScrapeCoversRows(t *testing.T) {
 			}}}, nil
 		},
 	}
-	r, err := (&bloatEstimateCheck{selector: maintenanceCardinality()}).Scrape(context.Background(), maintenanceTarget(conn))
+	r, err := (&bloatEstimateCheck{selectors: maintenanceCardinality()}).Scrape(context.Background(), maintenanceTarget(conn))
 	require.NoError(t, err)
 	require.NotEmpty(t, r.Metrics)
 }

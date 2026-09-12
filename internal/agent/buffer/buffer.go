@@ -91,17 +91,30 @@ func Open(dir string, opts Options) (*Buffer, error) {
 	}
 	sort.Strings(segFiles)
 
+	// closeLoaded releases every descriptor opened so far. Open returns a nil
+	// Buffer on error, so nothing else can ever close them: without this an
+	// agent that fails to start (one unreadable segment, one unparsable name)
+	// leaked one file descriptor per segment already loaded, every retry.
+	closeLoaded := func() {
+		for _, seg := range b.segments {
+			_ = seg.Close()
+		}
+	}
+
 	// Load each segment and recover the next segment ID.
 	for _, fname := range segFiles {
 		fpath := filepath.Join(dir, fname)
 		seg, err := openSegment(fpath)
 		if err != nil {
+			closeLoaded()
 			return nil, fmt.Errorf("open segment %s: %w", fname, err)
 		}
 
 		// Extract segment ID and update nextSegID.
 		var segID uint32
 		if _, err := fmt.Sscanf(fname, "%08x.seg", &segID); err != nil {
+			_ = seg.Close()
+			closeLoaded()
 			return nil, fmt.Errorf("parse segment filename %s: %w", fname, err)
 		}
 		seg.id = segID
@@ -120,6 +133,13 @@ func Open(dir string, opts Options) (*Buffer, error) {
 	// Recalculate stats (recovered from disk).
 	b.recalculateStats()
 	b.enforceMaxAge()
+	// A buffer recovered from disk can already exceed the budget — most often
+	// because MaxSize was lowered between restarts, but also after a crash
+	// that skipped the usual post-Append trim. Enforcing only on the next
+	// Append left the volume over budget for as long as the agent had nothing
+	// to queue, which is exactly the situation (a dead target) where it will
+	// have nothing to queue for a long time.
+	b.enforceMaxSize()
 
 	// Load acked position from metadata file.
 	if err := b.loadAckedPosition(); err != nil {
@@ -286,6 +306,25 @@ func (b *Buffer) Stats() Stats {
 
 	stats := b.stats
 	stats.Segments = int64(len(b.segments))
+	// SamplesDropped is a map: copying the struct copies the header, not the
+	// buckets, so the caller ended up holding a live reference to state this
+	// buffer keeps mutating under its own lock. Pusher.DroppedSamples ranges
+	// over it on the push goroutine while Queue -> Append -> enforceMaxSize
+	// writes to it on the collection goroutine: a genuine concurrent map
+	// read/write, which the Go runtime turns into a hard, unrecoverable
+	// "concurrent map read and map write" crash of the whole agent.
+	stats.SamplesDropped = make(map[string]int64, len(b.stats.SamplesDropped))
+	for k, v := range b.stats.SamplesDropped {
+		stats.SamplesDropped[k] = v
+	}
+	if b.stats.LastDropTime != nil {
+		t := *b.stats.LastDropTime
+		stats.LastDropTime = &t
+	}
+	if b.stats.LastCorruptTime != nil {
+		t := *b.stats.LastCorruptTime
+		stats.LastCorruptTime = &t
+	}
 	return stats
 }
 
@@ -294,14 +333,20 @@ func (b *Buffer) Close() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	// Every segment is closed and the checkpoint is persisted even when one
+	// close fails. Returning at the first error skipped saveAckedPosition,
+	// so a single bad descriptor at shutdown discarded the ack checkpoint and
+	// the agent re-delivered its entire retained buffer on the next start.
+	var errs []error
 	for _, seg := range b.segments {
 		if err := seg.Close(); err != nil {
-			return err
+			errs = append(errs, err)
 		}
 	}
-
-	// Persist acked position.
-	return b.saveAckedPosition()
+	if err := b.saveAckedPosition(); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
 }
 
 // --- private helpers ---
@@ -311,7 +356,16 @@ func (b *Buffer) newSegment() (*Segment, error) {
 	fname := filepath.Join(b.dir, fmt.Sprintf("%08x.seg", segID))
 	b.nextSegID++
 
-	f, err := os.Create(fname)
+	// O_APPEND is mandatory, not a convenience: Append and ReadAt share one
+	// *os.File, and a plain os.Create (O_RDWR|O_CREATE|O_TRUNC) leaves writes
+	// bound to the descriptor's shared file offset. Next() -> ReadAt seeks
+	// that offset to just past the record it returned, so the very next
+	// Append landed *inside* the file, overwriting records that were already
+	// durably written — silent buffer corruption, reachable on every drain
+	// that stops early (a 401 rewind, a cancelled push) and then queues again.
+	// With O_APPEND every write goes to the end regardless of the offset, and
+	// ReadAt below uses pread, which does not touch the offset at all.
+	f, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC|os.O_APPEND, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("create segment: %w", err)
 	}
@@ -592,33 +646,32 @@ func (s *Segment) ReadAt(offset uint64) ([]byte, uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	_, err := s.file.Seek(int64(offset), 0)
-	if err != nil {
-		return nil, offset, err
-	}
-
-	var lenBuf [4]byte
-	n, err := s.file.Read(lenBuf[:])
-	if n == 0 || errors.Is(err, io.EOF) {
+	// pread, deliberately: this segment's *os.File is shared with Append, and
+	// a Seek-based read would move the descriptor's offset out from under it.
+	// See newSegment's own comment on O_APPEND.
+	var header [8]byte
+	n, err := s.file.ReadAt(header[:], int64(offset))
+	if n < len(header) {
+		// Fewer than 8 bytes past this offset: either genuine end of file or
+		// a torn header. Both mean "nothing (more) to read here yet".
 		return nil, offset, io.EOF
 	}
-	if err != nil {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, offset, err
 	}
 
-	length := binary.LittleEndian.Uint32(lenBuf[:])
+	length := binary.LittleEndian.Uint32(header[0:4])
+	crcBuf := header[4:8]
 
-	var crcBuf [4]byte
-	n, err = s.file.Read(crcBuf[:])
-	if n == 0 || errors.Is(err, io.EOF) {
-		return nil, offset, io.EOF // Truncated
-	}
-	if err != nil {
-		return nil, offset, err
+	// A corrupt length field must not turn into a multi-gigabyte allocation.
+	// No record can be larger than the segment budget itself, and a record
+	// claiming to run past the current end of file is a torn write.
+	if size := s.fileSize; size > 0 && int64(length) > size-int64(offset)-8 {
+		return nil, offset, io.EOF
 	}
 
 	data := make([]byte, length)
-	n, err = s.file.Read(data)
+	n, err = s.file.ReadAt(data, int64(offset)+8)
 	if int64(n) < int64(length) {
 		// Truncated tail (a torn write, e.g. ENOSPC partway through this
 		// record's data): unlike a corrupt/CRC-mismatched record, the file

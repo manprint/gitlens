@@ -21,7 +21,7 @@ Da qui discendono i principi non negoziabili:
 4. **Le asserzioni si fanno sulle API pubbliche, mai sui log.** I log servono a diagnosticare un test fallito, non a decidere se è passato.
 5. **Zero `sleep`.** Ogni attesa è una condizione con timeout. Uno `sleep` è un flake che deve ancora manifestarsi.
 6. **Un test flaky è un bug aperto, non un fastidio.** Vedi sez. 10.
-7. **Ogni limite dichiarato in `IDEA.md` sez. 11 ha un test che lo dimostra.** Un limite non verificato è una speranza.
+7. **Ogni limite dichiarato in [`docs/LIMITS.md`](./docs/LIMITS.md) ha un test che lo dimostra.** Un limite non verificato è una speranza. `docs/LIMITS.md` è la lista che vale per il prodotto spedito; `IDEA.md` sez. 11 è il documento di design da cui deriva.
 
 **Definizione di "fatto":** una feature è completa quando ha (a) i test del livello appropriato, (b) almeno uno scenario di fallimento, (c) la voce di tracciabilità in sez. 14.
 
@@ -285,17 +285,83 @@ CI: 30s per target su ogni PR; 10 minuti per target nel job nightly. Il corpus c
 
 ### 3.5 Gate di copertura L1+L2
 
-| Package | Gate | Perché |
+Il gate vive in `scripts/coverage_gate.sh` (`make coverage-gate`) e contiene due
+tipi di soglia.
+
+**Obiettivi di progetto** — scelti prima che il codice esistesse, e il codice è
+stato scritto per raggiungerli:
+
+| Package | Gate | Copertura attuale | Perché |
+|---|---|---|---|
+| `internal/delta` | **90%** | 100.0% | se sbaglia, ogni grafico mente |
+| `internal/topology` | **90%** | 94.2% | se sbaglia, il failover non viene visto |
+| `internal/ash` | **90%** | 94.3% | è il differenziatore del prodotto |
+| `internal/cardinality` | **90%** | 92.5% | se sbaglia, il TSDB esplode in produzione |
+| `internal/identity` | **85%** | 89.8% | se sbaglia, un'istanza si sdoppia dopo un restart |
+| Complessivo Go (`./internal/...`) | **75%** | 76.8% | |
+
+**Ratchet** — soglie messe appena sotto la copertura reale di oggi, perché un
+comportamento già testato non possa perdere il suo test in silenzio. Si alzano
+quando la copertura reale le supera con margine; non si abbassano mai per far
+tornare verde una build rossa:
+
+| Package | Ratchet | Copertura attuale |
 |---|---|---|
-| `internal/delta` | **90%** | se sbaglia, ogni grafico mente |
-| `internal/topology` | **90%** | se sbaglia, il failover non viene visto |
-| `internal/ash` | **90%** | è il differenziatore del prodotto |
-| `internal/cardinality` | **90%** | se sbaglia, il TSDB esplode in produzione |
-| `internal/alert` | **90%** | un alert che non parte è un incidente non visto |
-| Complessivo Go | **75%** | |
-| Escluso dal calcolo | `main.go`, codice generato (`sqlc`, protobuf), migrazioni | |
+| `internal/advisor` | 87% | 88.6% |
+| `internal/agent/buffer` | 80% | 81.6% |
+| `internal/alert` | 78% | 79.6% |
+| `internal/check` | 82% | 83.5% |
+| `internal/clock` | 95% | 96.9% |
+| `internal/command` | 94% | 95.7% |
+| `internal/host` | 84% | 85.7% |
+| `internal/leaktest` | 88% | 90.3% |
+| `internal/pgtype` | 99% | 100.0% |
+| `internal/server` | 69% | 70.7% |
+| `internal/wire` | 95% | 96.4% |
+
+Escluso dal calcolo: `main.go`, codice generato, migrazioni. Il floor globale è
+calcolato solo su `./internal/...`.
+
+> **Gap dichiarato.** `internal/alert` ha un obiettivo di progetto del 90% e sta
+> al 79.6%: un alert che non parte è un incidente non visto, quindi il numero
+> resta quello giusto. Il ratchet al 78% registra dove siamo, non dove vogliamo
+> essere, ed esiste per impedire che la distanza cresca.
 
 La copertura è un **pavimento, non un obiettivo**. Nessuno scrive test per alzare una percentuale: si scrivono test per i comportamenti, e il gate impedisce le regressioni silenziose. Una PR che alza la copertura senza aggiungere asserzioni significative viene respinta.
+
+### 3.6 Lifecycle e goroutine leak
+
+Ogni componente a vita lunga del progetto possiede almeno una goroutine di
+sfondo: lo scheduler dell'agent e i suoi loop per-entry, il sampler ASH, il
+drain loop del pusher, e lato server `Staleness`, il motore di alert e
+l'advisor. Il contratto di ogni `Stop()` è "quando ritorno, le goroutine non
+ci sono più", e per molto tempo niente lo verificava: uno `Stop()` che lasciava
+il loop vivo passava comunque tutti i test, perché la goroutine orfana
+continuava a ticchettare contro un clock ormai inutilizzato mentre il test
+riportava successo.
+
+`internal/leaktest` chiude quel buco, senza dipendenze esterne:
+
+```go
+func TestSampler_StopIsClean(t *testing.T) {
+	defer leaktest.Check(t)()
+	// ... Start(), lavoro, Stop()
+}
+```
+
+`Check` fotografa le goroutine vive, registra una `t.Cleanup` e fallisce se a
+fine test ne esiste una che prima non c'era. La chiave di identità è il sito di
+creazione (`created by ...`), non l'id: un pool di worker è corretto quando la
+*popolazione* torna al valore iniziale, non quando tornano le stesse goroutine.
+Alle goroutine in uscita sono concessi 2 secondi per sparire davvero, e il
+runtime, `testing`, e le goroutine intenzionalmente di durata-processo
+(`net/http` idle transport, health checker di pgx) sono ignorate.
+
+Regola: **ogni tipo con `Start`/`Stop` ha un test di lifecycle** che copre
+almeno `Stop` senza `Start`, doppio `Stop`, e `Start` dopo `Stop`. Questi tre
+casi hanno trovato quattro difetti reali — un doppio `close(doneCh)`, un
+`Release()` di connessione eseguito due volte, un `wait` su un canale mai
+creato, e una data race su `s.ticker` fra `run()` e uno `Start` concorrente.
 
 ---
 
@@ -557,18 +623,38 @@ Regole di asserzione E2E:
 - ❌ **mai i log** come condizione di successo
 - ❌ **mai lo stato interno dell'agent** via canali privati
 
-**Invarianti globali**, verificate al termine di *ogni* scenario da un helper comune:
+**Invarianti globali**, verificate al termine di *ogni* scenario da un helper comune (`test/harness/invariants.go`):
 
 ```go
 func (h *Harness) AssertInvariants(t *testing.T) {
-	h.NoDuplicateSamples(t)    // stessa (serie, ts) mai inserita due volte
-	h.NoNegativeRates(t)       // un rate negativo = reset detection rotta
-	h.NoOrphanMetrics(t)       // ogni metrica ha cluster_id/instance_id risolvibili in `instances`
-	h.NoUnexpectedErrors(t)    // check_error_total invariato, salvo quelli attesi dallo scenario
-	h.CardinalityWithinBudget(t)
-	h.NoGoroutineLeak(t)       // conteggio goroutine agent stabile a fine test
+	AssertDBInvariants(context.Background(), t, h.DB(t))
+	//   I-3  stessa (series_id, ts) mai inserita due volte
+	//   I-2  nessun rate negativo (un rate negativo = reset detection rotta)
+	//   I-4  nessun instance_id orfano in metrics/statements/ash/replication
+	//   I-1  nessun evento cluster_id_changed: il cluster_id non cambia mai
+	h.AssertServerMetricInvariants(t, DefaultMetricBudget())
+	//   I-8  pglens_series_total sotto budget per ogni istanza
+	//        e nessun check_error_total inatteso
 }
 ```
+
+I-8 e "nessun errore di check inatteso" sono stati a lungo un buco dichiarato:
+i contatori su cui poggiano non esistevano, e fingerli è stato giudicato
+peggiore del buco onesto. Ora `internal/server/metrics_handler.go` espone
+davvero `pglens_series_total` e `pglens_check_error_total`, quindi
+`AssertServerMetricInvariants` fa uno scrape di `/metrics` e li tiene a budget.
+Il parsing dell'esposizione e le asserzioni vivono in `test/harness/metrics.go`,
+**senza build tag**: sono quindi coperti da `make test` invece di essere
+esercitati soltanto dentro uno stack compose.
+
+`AssertConnectionCeiling` (I-6) resta una chiamata esplicita, perché è uno
+snapshot puntuale di `pg_stat_activity`: ha senso solo mentre il carico è
+attivo, non a teardown.
+
+L'invariante "nessuna goroutine orfana" non è qui: richiede uno snapshot a
+inizio run che questa singola chiamata di fine scenario non possiede.
+L'equivalente in-process è `internal/leaktest` (§3.6), asserito direttamente su
+ogni componente che possiede un loop di sfondo.
 
 Queste invarianti sono la rete di sicurezza più efficace dell'intera suite: catturano bug che nessuno scenario cercava esplicitamente.
 
@@ -979,142 +1065,43 @@ Ogni comando emette su stdout un **report JSON** (quanti deadlock effettivi, qua
 
 ## 11. CI — GitHub Actions
 
-### 11.1 Strategia
+### 11.1 I tre workflow
 
-| Trigger | Esegue | Budget |
+| File | Trigger | Cosa esegue | Budget |
+|---|---|---|---|
+| `.github/workflows/ci.yml` | PR, push su `main`, `workflow_dispatch`, `workflow_call` | web, lint, security, unit, race-stress (non su PR), immagini, integration PG 15→18 × `vanilla`/`rds-like` | ~25 min wall clock, job paralleli |
+| `.github/workflows/e2e.yml` | PR verso `main`, nightly (02:00 UTC), `workflow_dispatch` | suite E2E completa × `AGENT_MODE` `container`/`binary`, più accettazione UI Playwright × `AGENT_MODE` | ~100 min |
+| `.github/workflows/release-alpha.yml` | tag `v*-alpha.*`, `workflow_dispatch` | richiama `ci.yml` per intero, poi build multi-arch (amd64+arm64), push su ghcr.io con SBOM e provenance, smoke `--version` sulle immagini pubblicate, prerelease GitHub | ~2 h |
+
+`ci.yml` è riusabile via `workflow_call`: il workflow di release non duplica un
+solo passo del gate, lo esegue.
+
+### 11.2 I job di `ci.yml`
+
+| Job | Cosa prova | Perché esiste |
 |---|---|---|
-| push su branch | L1 + lint | < 3 min |
-| PR | L1, L2 (PG 15/18), L3 smoke, L4, L5 smoke (chromium, fixture) | **< 15 min wall clock**, job paralleli |
-| merge su `main` | tutto quanto sopra + build e push immagini `:edge` | < 20 min |
-| nightly | matrice completa: PG 15→18 × topologie × `AGENT_MODE`, L5 full su 3 browser, fuzzing esteso, visual regression | ~90 min |
-| tag di release | tutto + build multi-arch + smoke test sugli artefatti pubblicati | ~2 h |
+| `web` | `web-lint`, `web-typecheck`, `web-test`, `web-coverage-gate`, `web-build`, `web-budget`, più il diff su `web/src/api/generated.ts` | i tipi generati dall'OpenAPI devono essere rigenerabili e identici a quelli committati: un contratto che diverge dal generato è un bug che il compilatore non vede |
+| `lint` | `fmt-check`, `golangci-lint`, **`vet-tags`** | `go build ./...` non compila mai le suite `integration` ed `e2e`: senza `vet-tags` un refactor le può lasciare non compilabili e superare comunque tutti i job veloci |
+| `security` | `tidy-check` (`go mod tidy` idempotente + `go mod verify`), `govulncheck ./...` | la direttiva `toolchain` in `go.mod` è ciò che tiene fuori una lista lunga di advisory della standard library raggiungibili dall'endpoint di ingest, dal client HTTP dell'agent e dai canali di notifica; senza questo job niente prova che il pin regga dopo un bump |
+| `unit` | `build`, `test` (`-race -shuffle=on`), `coverage-gate` | L1 più i floor di §3.5 |
+| `race-stress` | `make stress STRESS_ROUNDS=10` — solo fuori dalle PR | la correttezza qui è una proprietà dei contratti `Stop()` e di un buffer su disco dove reader e writer condividono un file: un solo giro con `-race` prova meno di dieci giri con ordini di shuffle diversi |
+| `images` | build di `Dockerfile.agent` e `Dockerfile.server` con cache GHA, poi `--version` dentro ciascuna immagine | un Dockerfile rotto altrimenti emerge solo nel workflow E2E (nightly) o, peggio, nel job di release a gate già verde |
+| `integration` | L2 su 8 combinazioni PG × profilo | §4.3 |
+| `ci-ok` | aggrega i risultati di tutti i job sopra | un solo check da richiedere nella branch protection; senza, aggiungere un job a questo file lo lascia silenziosamente fuori dalla regola finché qualcuno non se ne ricorda |
 
-### 11.2 Workflow PR
-
-```yaml
-# .github/workflows/pr.yml
-name: PR
-on: pull_request
-
-concurrency:
-  group: pr-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
-jobs:
-  changes:
-    runs-on: ubuntu-latest
-    outputs:
-      go:  ${{ steps.f.outputs.go }}
-      web: ${{ steps.f.outputs.web }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: f
-        with:
-          filters: |
-            go:  ['**/*.go', 'go.mod', 'go.sum', 'test/**']
-            web: ['web/**']
-
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with: { go-version: '1.26', cache: true }
-      - uses: golangci/golangci-lint-action@v6
-      - run: make web-lint
-
-  unit-go:                       # L1
-    needs: changes
-    if: needs.changes.outputs.go == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with: { go-version: '1.26', cache: true }
-      - run: go test -race -shuffle=on -coverprofile=cover.out ./...
-      - run: make coverage-gate       # fallisce sotto le soglie di sez. 3.5
-      - run: go test -run=Fuzz -fuzz=. -fuzztime=30s ./internal/pg/...
-
-  integration-go:                # L2
-    needs: changes
-    if: needs.changes.outputs.go == 'true'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        pg: ['15', '18']
-        profile: ['vanilla', 'rds-like']
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with: { go-version: '1.26', cache: true }
-      - run: go test -tags=integration -race ./internal/... 
-        env:
-          PG_VERSION: ${{ matrix.pg }}
-          PG_PROFILE: ${{ matrix.profile }}
-
-  component-web:                 # L4
-    needs: changes
-    if: needs.changes.outputs.web == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: '22', cache: 'pnpm', cache-dependency-path: web/pnpm-lock.yaml }
-      - run: pnpm install --frozen-lockfile
-      - run: make web-test
-      - run: make web-coverage-gate
-
-  e2e-system:                    # L3 smoke
-    needs: [unit-go]
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        agent_mode: ['container', 'binary']
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with: { go-version: '1.26', cache: true }
-      - run: make build-images
-      - run: go test -tags=e2e -timeout=20m ./test/e2e/... -run 'Smoke'
-        env:
-          AGENT_MODE: ${{ matrix.agent_mode }}
-          PG_VERSION: '16'
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: e2e-dump-${{ matrix.agent_mode }}
-          path: test/e2e/_artifacts/
-
-  e2e-web:                       # L5 smoke
-    needs: [unit-go, component-web]
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: '22', cache: 'pnpm', cache-dependency-path: web/pnpm-lock.yaml }
-      - run: make web-install
-      - run: pnpm exec playwright install --with-deps chromium
-        working-directory: web
-      - run: make test-ui-e2e
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: playwright-report
-          path: test/e2e/_artifacts/ui/     # include le trace
-```
+`race-stress` non gira sulle PR per tenere bassa la latenza di revisione: gira
+su ogni push in `main` e prima di ogni release, cioè prima di ogni artefatto che
+qualcuno possa installare.
 
 ### 11.3 Note operative
 
-- **`fail-fast: false`** su tutte le matrici: sapere che 3 versioni PG su 6 falliscono è informazione diagnostica; fermarsi alla prima la butta via.
-- **Artefatti su fallimento sempre** (dump E2E, report Playwright con trace). Un fallimento CI senza artefatti non è azionabile.
-- **`concurrency` con `cancel-in-progress`**: un push nuovo annulla il run vecchio della stessa PR.
-- **Cache**: moduli Go, `node_modules`, layer Docker (buildx con cache GHA). Senza, i job E2E raddoppiano la durata.
-- **Immagini**: costruite una volta in `make build-images` con tag basato sullo SHA, riusate da tutti i job E2E.
+- **`fail-fast: false`** su tutte le matrici: sapere che 3 versioni PG su 8 falliscono è informazione diagnostica; fermarsi alla prima la butta via.
+- **Artefatti su fallimento sempre**: dump E2E, report Playwright con trace, più `docker ps -a`/`docker images`/`df -h` raccolti al volo quando la suite E2E fallisce (spesso il colpevole è il disco del runner, non il codice).
+- **Coverage caricata come artefatto** da entrambi i job di copertura, anche quando il gate fallisce (`if: always()`): il profilo è ciò che serve per capire *perché* è fallito.
+- **`concurrency` con `cancel-in-progress`**: un push nuovo annulla il run vecchio dello stesso ref.
+- **`persist-credentials: false`** su ogni checkout: nessun job spinge con git, quindi nessun job ha bisogno di un credential helper con un token scritto sul runner.
+- **Spazio disco**: i job E2E rimuovono i toolchain preinstallati Android/.NET/Haskell (~25 GB) prima di tirare giù le immagini PostgreSQL, Toxiproxy e le due immagini pglens. Un runner hosted parte con circa 14 GB liberi, che non bastano.
+- **Cache**: moduli Go via `setup-go`, `node_modules` via `pnpm`, binario `golangci-lint` pinnato per versione, layer Docker via cache GHA.
 
 ---
 
@@ -1123,22 +1110,49 @@ jobs:
 Tutto ciò che gira in CI deve girare in locale con **un solo comando**, senza configurazione preliminare. Se un fallimento CI non è riproducibile in locale, è un bug dell'infrastruttura di test.
 
 ```makefile
-make test                # L1 (default: veloce, si usa in loop mentre si sviluppa)
-make test-integration    # L2, PG_VERSION=16 di default
+# gate veloci
+make fmt-check           # gofmt -l deve essere vuoto
+make lint                # golangci-lint
+make vet-tags            # go vet senza tag, -tags=integration, -tags=e2e
+make test                # L1 con -race -shuffle=on
+make coverage-gate       # floor globali e per-package (sez. 3.5)
+make stress              # L1 ripetuto, 5 giri, ogni giro con un nuovo seed di shuffle
+
+# supply chain
+make tidy-check          # go mod tidy idempotente + go mod verify
+make vuln                # govulncheck ./...
+
+# suite più lente
+make test-integration    # L2, matrice via PGLENS_PG_VERSIONS / PGLENS_PG_PROFILE
 make test-e2e            # L3 smoke
 make test-e2e-full       # L3 completo (lungo)
-make ci-local             # gate Go + web rapidi
-make web-install          # installazione frontend riproducibile
-make web-test            # L4/L2 UI con Vitest
-make web-coverage-gate   # L4/L2 UI con floor V8
+make test-e2e-full-evidence # L3 completo con log durevole ed exit status catturato
+make test-e2e-matrix     # L3 smoke su AGENT_MODE container e binary
 make test-ui-e2e         # L5, browser reale contro lo stack locale
 
+# frontend
+make web-install         # installazione riproducibile (--frozen-lockfile)
+make web-lint            # eslint + prettier + rigenerazione dei tipi OpenAPI
+make web-typecheck       # tsc
+make web-test            # L4 con Vitest
+make web-coverage-gate   # floor V8 (sez. 6.3)
+make web-budget          # budget di dimensione del bundle
+
+# aggregati e utilità
+make ci-local            # ci-local-unit + ci-local-security + ci-local-integration
+make ci-local-unit       # tutto il gate veloce Go + web
+make ci-local-security    # tidy-check + vuln
+make ci-local-integration # L2 su tutte le 8 combinazioni PG × profilo
 make golden              # rigenera i golden file
 make coverage            # report HTML
-make lint
+make api-docs            # rigenera docs/api.md da api/openapi.yaml
 ```
 
-**Flusso di sviluppo consigliato:** usa `make ci-local` per il gate rapido; esegui `make test-ui-e2e` quando una modifica coinvolge il percorso browser o alla chiusura di una fase UI. La suite L3 completa resta separata perché è intenzionalmente lunga.
+**Flusso di sviluppo consigliato:** `make ci-local-unit` come gate rapido in
+loop; `make stress` prima di toccare qualcosa che possiede una goroutine;
+`make ci-local-security` dopo ogni bump di dipendenze; `make test-ui-e2e` quando
+una modifica tocca il percorso browser o alla chiusura di una fase UI. La suite
+L3 completa resta separata perché è intenzionalmente lunga.
 
 ---
 
@@ -1146,16 +1160,23 @@ make lint
 
 Una PR è mergiabile solo se:
 
-- [ ] `lint` verde (golangci-lint, eslint, tsc, `gofmt`)
+- [ ] `lint` verde (golangci-lint, eslint, tsc, `gofmt`) e `vet-tags` verde sotto tutti e tre i tag
 - [ ] L1 verde con `-race` e `-shuffle=on`
 - [ ] Gate di copertura rispettati (sez. 3.5, 6.3)
-- [ ] L2 verde su PG 15/18 × profili `vanilla` e `rds-like`
-- [ ] L3 smoke verde su `AGENT_MODE` `container` e `binary`
-- [ ] L4 e L5 smoke verdi
+- [ ] `tidy-check` e `govulncheck` verdi
+- [ ] L2 verde su PG 15→18 × profili `vanilla` e `rds-like`
+- [ ] L3 verde su `AGENT_MODE` `container` e `binary`
+- [ ] L4 e L5 verdi
+- [ ] Immagini agent e server buildano, e rispondono a `--version`
+- [ ] Ogni nuovo tipo con `Start`/`Stop` ha un test di lifecycle con `leaktest.Check` (sez. 3.6)
 - [ ] Nessun test aggiunto in `quarantine/` senza una issue collegata
 - [ ] Ogni golden file modificato è **spiegato nella descrizione della PR**
 - [ ] Nuove feature: voce di tracciabilità aggiunta in sez. 14
-- [ ] Nuovi limiti o degradazioni: aggiunti a `IDEA.md` sez. 11 **con il test che li dimostra**
+- [ ] Nuovi limiti o degradazioni: aggiunti a `docs/LIMITS.md` **con il test che li dimostra**
+
+Il check da richiedere nella branch protection è **`CI gate`** (il job `ci-ok`),
+che aggrega tutti gli altri: aggiungere un job a `ci.yml` lo mette sotto gate
+automaticamente, senza toccare la regola di branch.
 
 **Un fallimento in `main` blocca i merge** finché non è risolto o il commit è revertito. Nessuna eccezione: una suite rossa tollerata per due giorni smette di essere letta, e da lì in poi non protegge più niente.
 

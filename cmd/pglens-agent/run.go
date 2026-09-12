@@ -92,7 +92,18 @@ func runAgentCommand(args []string) {
 	// legitimately take longer than Docker's healthcheck grace period; the
 	// agent is still alive and must expose its health while it retries.
 	healthzAddr := envOr("PGLENS_HEALTHZ_LISTEN", ":9187")
-	healthSrv := &http.Server{Addr: healthzAddr, Handler: pusher.HealthzHandler()}
+	healthSrv := &http.Server{
+		Addr:    healthzAddr,
+		Handler: pusher.HealthzHandler(),
+		// A liveness endpoint with no timeouts is a free slot leak: any peer
+		// that opens a connection and never finishes its request headers
+		// pins a goroutine for the lifetime of the process (Slowloris).
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 16,
+	}
 	go func() {
 		if err := healthSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			fmt.Fprintf(os.Stderr, "healthz server: %v\n", err)
@@ -122,7 +133,13 @@ func runAgentCommand(args []string) {
 		}
 		managers = append(managers, mgr)
 		waitForTarget(ctx, mgr)
-		addScheduleEntries(scheduler, mgr, ctx, cfg, pending)
+		// &mu, not "nothing": startASH below launches a goroutine that writes
+		// `pending` under this mutex, and it does so for target N while this
+		// loop is still setting up target N+1. Writing the same map unlocked
+		// here is a concurrent map write, which the Go runtime turns into an
+		// unrecoverable crash of the agent — reachable on any multi-target
+		// config, invisible on the single-target ones every fixture uses.
+		addScheduleEntries(scheduler, mgr, ctx, cfg, &mu, pending)
 		ashStop, enabled := startASH(ctx, mgr, tc.Name, cfg.Checks["ash"], clk, &mu, pending)
 		ashStops = append(ashStops, ashStop)
 		ashEnabled[tc.Name] = enabled
@@ -185,7 +202,13 @@ func runAgentCommand(args []string) {
 		go dispatcher.Run(ctx)
 	}
 
+	// Closed once every result the scheduler ever produced has been folded
+	// into `pending`. The shutdown flush below waits on it so the final
+	// envelope deterministically contains the last cycle's scrapes instead
+	// of racing the drain.
+	resultsDrained := make(chan struct{})
 	go func() {
+		defer close(resultsDrained)
 		for res := range scheduler.Results() {
 			m := make([]wire.Metric, 0, len(res.Metrics))
 			for _, pm := range res.Metrics {
@@ -286,6 +309,20 @@ func runAgentCommand(args []string) {
 	scheduler.Stop()
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer shutdownCancel()
+
+	select {
+	case <-resultsDrained:
+	case <-shutdownCtx.Done():
+	}
+
+	// Everything collected since the last push tick lives only in `pending`.
+	// Without this flush a SIGTERM silently discarded up to one full
+	// push_interval of already-scraped data — the one window the disk buffer
+	// cannot protect, because the envelope had not been built yet. Queue()
+	// only writes to the local buffer, so this is bounded disk I/O, not a
+	// network round trip, and the records are delivered on the next start.
+	flushEnvelope(shutdownCtx, managers, &mu, pending, lastEdgeState, ashEnabled, pusher) //nolint:contextcheck // flushEnvelope->HasExtension: Manager caches this at connect time, the accessor takes no context
+
 	_ = healthSrv.Shutdown(shutdownCtx)
 	for _, mgr := range managers {
 		mgr.Close()
@@ -574,7 +611,7 @@ func configureChecks(cfg *agent.Config) {
 	}
 }
 
-func addScheduleEntries(scheduler *agent.Scheduler, mgr *agent.Manager, ctx context.Context, cfg *agent.Config, pending map[string][]wire.Result) {
+func addScheduleEntries(scheduler *agent.Scheduler, mgr *agent.Manager, ctx context.Context, cfg *agent.Config, mu *sync.Mutex, pending map[string][]wire.Result) {
 	role := mgr.Role()                                                                    //nolint:contextcheck // Manager caches this at connect time; the accessor takes no context
 	version := mgr.PGVersion()                                                            //nolint:contextcheck // same as above
 	tier := mgr.PermTier()                                                                //nolint:contextcheck // same as above
@@ -599,9 +636,11 @@ func addScheduleEntries(scheduler *agent.Scheduler, mgr *agent.Manager, ctx cont
 		}
 		req := c.Requires()
 		if ok, reason := req.Supports(role, version, tier, exts); !ok {
+			mu.Lock()
 			pending[mgr.Database()] = append(pending[mgr.Database()], wire.Result{
 				Check: c.Name(), TS: time.Now().UTC(), SkipReason: reason,
 			})
+			mu.Unlock()
 			continue
 		}
 		if req.Scope == check.ScopeDatabase {

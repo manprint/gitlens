@@ -27,7 +27,7 @@ func TestINTIDX001_IndexDefinitionHashes(t *testing.T) {
 		require.NoError(t, err)
 		conn, err := pool.Acquire(ctx)
 		require.NoError(t, err)
-		result, err := (&indexStatsCheck{selector: cardinalityForIntegration()}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
+		result, err := (&indexStatsCheck{selectors: cardinalityForIntegration()}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
 		require.NoError(t, err)
 		hashes := map[string]bool{}
 		for _, f := range result.Facts {
@@ -53,7 +53,7 @@ func TestINTIDX002_IndexStatsUnusedStartsAtZero(t *testing.T) {
 		require.NoError(t, err)
 		conn, err := pool.Acquire(ctx)
 		require.NoError(t, err)
-		result, err := (&indexStatsCheck{selector: cardinalityForIntegration()}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
+		result, err := (&indexStatsCheck{selectors: cardinalityForIntegration()}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
 		require.NoError(t, err)
 		found := false
 		for _, m := range result.Metrics {
@@ -82,7 +82,7 @@ func TestINTIDX003_InvalidIndexReportsZero(t *testing.T) {
 		require.NoError(t, err)
 		conn, err := pool.Acquire(ctx)
 		require.NoError(t, err)
-		result, err := (&indexStatsCheck{selector: cardinalityForIntegration()}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
+		result, err := (&indexStatsCheck{selectors: cardinalityForIntegration()}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
 		require.NoError(t, err)
 		require.NotEmpty(t, result.Metrics)
 	})

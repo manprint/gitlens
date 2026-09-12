@@ -6,13 +6,36 @@ PROFILE="${1:-coverage.out}"
 MOD="github.com/manprint/pglens"
 GLOBAL_MIN=75
 
-# Packages whose correctness the whole product depends on.
+# Two kinds of floor live in this table.
+#
+# The first five are *design targets* from TESTING.md §3.5 — packages whose
+# correctness the whole product depends on, where the number was chosen before
+# the code existed and the code was then written to meet it.
+#
+# The rest are *ratchets*: set just under the coverage each package actually
+# has today, so an existing behaviour cannot lose its test without the gate
+# saying so. They are deliberately not round numbers; raise one whenever real
+# coverage moves comfortably past it, never lower one to make a red build go
+# green. internal/alert carries a 90% design target in TESTING.md that it does
+# not yet meet (79.6%); the ratchet records where it is, and the documented gap
+# records where it should be.
 declare -A FLOORS=(
   ["$MOD/internal/delta"]=90
   ["$MOD/internal/cardinality"]=90
   ["$MOD/internal/topology"]=90
   ["$MOD/internal/ash"]=90
   ["$MOD/internal/identity"]=85
+  ["$MOD/internal/advisor"]=87
+  ["$MOD/internal/agent/buffer"]=80
+  ["$MOD/internal/alert"]=78
+  ["$MOD/internal/check"]=82
+  ["$MOD/internal/clock"]=95
+  ["$MOD/internal/command"]=94
+  ["$MOD/internal/host"]=84
+  ["$MOD/internal/leaktest"]=88
+  ["$MOD/internal/pgtype"]=99
+  ["$MOD/internal/server"]=69
+  ["$MOD/internal/wire"]=95
 )
 
 if [ ! -f "$PROFILE" ]; then

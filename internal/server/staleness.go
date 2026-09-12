@@ -257,6 +257,8 @@ type Staleness struct {
 	doneCh    chan struct{}
 	stopOnce  sync.Once
 	startOnce sync.Once
+	started   bool
+	stopped   bool
 }
 
 // NewStaleness creates a Staleness evaluator.
@@ -628,9 +630,17 @@ ORDER BY instance_id, slot_name, ts DESC`)
 // Stop is called.
 func (s *Staleness) Start(ctx context.Context) {
 	s.startOnce.Do(func() {
-		ticker := s.clock.NewTicker(evaluatorInterval)
 		s.mu.Lock()
+		// Already stopped: the loop below would exit on its first select
+		// anyway, and starting it would leave Stop's own bookkeeping (which
+		// has already run) describing a goroutine that outlived it.
+		if s.stopped {
+			s.mu.Unlock()
+			return
+		}
+		ticker := s.clock.NewTicker(evaluatorInterval)
 		s.ticker = ticker
+		s.started = true
 		s.mu.Unlock()
 		go func() {
 			defer close(s.doneCh)
@@ -657,10 +667,19 @@ func (s *Staleness) Start(ctx context.Context) {
 func (s *Staleness) Stop() {
 	s.stopOnce.Do(func() {
 		close(s.stopCh)
-		// Wait briefly for goroutine to exit.
-		select {
-		case <-s.doneCh:
-		case <-time.After(2 * time.Second):
+		s.mu.Lock()
+		started := s.started
+		s.stopped = true
+		s.mu.Unlock()
+		// Wait briefly for the goroutine to exit — but only if there is one.
+		// Stopping an evaluator that was never started used to cost a flat
+		// two-second sleep on every server shutdown that ran without a
+		// database.
+		if started {
+			select {
+			case <-s.doneCh:
+			case <-time.After(2 * time.Second):
+			}
 		}
 		s.mu.Lock()
 		defer s.mu.Unlock()

@@ -395,7 +395,7 @@ func TestStatStatementsCheck_Scrape_Happy(t *testing.T) {
 		DatabaseValue:  "app",
 	}
 
-	check := &statStatementsCheck{selector: cardinality.NewSelector(cardinality.Options{TopN: 50}), caches: make(map[string]*lru.Cache[int64, string])}
+	check := &statStatementsCheck{selectors: newScopedSelectors(cardinality.Options{TopN: 50}), caches: make(map[string]*lru.Cache[int64, string])}
 	result, err := check.Scrape(context.Background(), target)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -426,7 +426,7 @@ func TestStatStatementsCheck_Scrape_NoExtension(t *testing.T) {
 		DatabaseValue:  "app",
 	}
 
-	check := &statStatementsCheck{selector: cardinality.NewSelector(cardinality.Options{TopN: 50}), caches: make(map[string]*lru.Cache[int64, string])}
+	check := &statStatementsCheck{selectors: newScopedSelectors(cardinality.Options{TopN: 50}), caches: make(map[string]*lru.Cache[int64, string])}
 	result, err := check.Scrape(context.Background(), target)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -494,8 +494,8 @@ func TestStatStatementsCheck_Scrape_CycleAdvancesAndForgetsStaleRetained(t *test
 	}
 
 	check := &statStatementsCheck{
-		selector: cardinality.NewSelector(cardinality.Options{TopN: 1, Hysteresis: 1, MaxKeys: 10}),
-		caches:   make(map[string]*lru.Cache[int64, string]),
+		selectors: newScopedSelectors(cardinality.Options{TopN: 1, Hysteresis: 1, MaxKeys: 10}),
+		caches:    make(map[string]*lru.Cache[int64, string]),
 	}
 
 	hasQueryID := func(result Result, id string) bool {
@@ -517,8 +517,10 @@ func TestStatStatementsCheck_Scrape_CycleAdvancesAndForgetsStaleRetained(t *test
 		}
 	}
 
-	if check.cycle != 3 {
-		t.Errorf("expected cycle to reach 3 after 3 Scrape calls, got %d", check.cycle)
+	// The cycle counter is per (instance, database) scope now, not per
+	// check: three scrapes of one target advance that scope's counter to 3.
+	if _, cycle := check.selectors.next(target); cycle != 4 {
+		t.Errorf("expected this scope's cycle to reach 3 after 3 Scrape calls, got %d", cycle-1)
 	}
 }
 

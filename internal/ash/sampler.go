@@ -42,6 +42,7 @@ type Sampler struct {
 	onTick   func(success bool) // invoked exactly once per tick attempt, success or not; nil is valid
 
 	mu                  sync.Mutex
+	running             bool
 	ticksMissed         atomic.Int64
 	computeQueryID      *bool // nil = unknown, true/false = discovered
 	computeQueryIDMu    sync.Mutex
@@ -93,15 +94,25 @@ func (s *Sampler) Start(parentCtx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.ctx != nil {
+	if s.running {
 		return fmt.Errorf("sampler already running")
 	}
+	// Keyed on `running`, not on `s.ctx != nil`: Stop() leaves s.ctx set, so
+	// the old condition made a stopped sampler permanently unrestartable and
+	// reported it as "already running" — the opposite of the truth.
+	s.running = true
 
 	runCtx, cancel := context.WithCancel(parentCtx)
 	s.ctx, s.cancel = runCtx, cancel
-	s.ticker = s.clk.NewTicker(s.interval)
+	ticker := s.clk.NewTicker(s.interval)
+	s.ticker = ticker
 
-	go s.run(runCtx)
+	// The ticker is handed to run() rather than read from the struct: a
+	// restarted sampler has a previous run() goroutine that may not have
+	// returned yet, and its unsynchronised `s.ticker` read raced this write.
+	// Each run owns the ticker it was started with, so a stale loop can never
+	// observe the new one.
+	go s.run(runCtx, ticker)
 	return nil
 }
 
@@ -114,10 +125,14 @@ func (s *Sampler) Stop() {
 	}
 	s.cancel()
 	s.cancel = nil
+	s.ctx = nil
+	s.running = false
+	ticker := s.ticker
+	s.ticker = nil
 	s.mu.Unlock()
 
-	if s.ticker != nil {
-		s.ticker.Stop()
+	if ticker != nil {
+		ticker.Stop()
 	}
 }
 
@@ -147,8 +162,7 @@ func (s *Sampler) ComputeQueryIDEnabled() *bool {
 
 // run is the main sampling loop. It samples every 1 second and processes the results.
 // The sampler must be stopped via Stop(); run does not return until ctx is cancelled.
-func (s *Sampler) run(ctx context.Context) {
-	ticker := s.ticker
+func (s *Sampler) run(ctx context.Context, ticker clock.Ticker) {
 	if ticker == nil {
 		return
 	}
@@ -165,8 +179,11 @@ func (s *Sampler) run(ctx context.Context) {
 				s.ticksMissed.Add(1)
 			}
 			cancel()
-			if s.onTick != nil {
-				s.onTick(err == nil)
+			s.mu.Lock()
+			onTick := s.onTick
+			s.mu.Unlock()
+			if onTick != nil {
+				onTick(err == nil)
 			}
 		}
 	}
@@ -235,7 +252,10 @@ SELECT COALESCE(datname, '')             AS datname,
 	}
 	s.computeQueryIDMu.Unlock()
 
-	if s.computeQueryID != nil && !*s.computeQueryID && s.warnedNoQueryID.CompareAndSwap(false, true) {
+	s.computeQueryIDMu.Lock()
+	knownOff := s.computeQueryID != nil && !*s.computeQueryID
+	s.computeQueryIDMu.Unlock()
+	if knownOff && s.warnedNoQueryID.CompareAndSwap(false, true) {
 		log.Printf("ash: compute_query_id is off — samples will not be attributable to a query")
 	}
 

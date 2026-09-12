@@ -114,8 +114,8 @@ func TestStatStatements_IntegrationCardinalityCap(t *testing.T) {
 		// untested — the mechanism under test, not a relaxation of the check's
 		// own production defaults (registered separately in check.go's init()).
 		check := &statStatementsCheck{
-			selector: cardinality.NewSelector(cardinality.Options{TopN: 50, MaxKeys: 80}),
-			caches:   make(map[string]*lru.Cache[int64, string]),
+			selectors: newScopedSelectors(cardinality.Options{TopN: 50, MaxKeys: 80}),
+			caches:    make(map[string]*lru.Cache[int64, string]),
 		}
 
 		result, err := check.Scrape(context.Background(), mockTgt)
@@ -184,8 +184,8 @@ func TestStatStatements_IntegrationKnownQueries(t *testing.T) {
 
 		// Construct a reusable check instance (same object for both Scrape calls)
 		check := &statStatementsCheck{
-			selector: cardinality.NewSelector(cardinality.Options{TopN: 50}),
-			caches:   make(map[string]*lru.Cache[int64, string]),
+			selectors: newScopedSelectors(cardinality.Options{TopN: 50}),
+			caches:    make(map[string]*lru.Cache[int64, string]),
 		}
 
 		// First scrape: should have query text
@@ -351,8 +351,8 @@ func TestStatStatements_IntegrationUnionOfRankings(t *testing.T) {
 
 		// Use default TopN=50 as in production
 		check := &statStatementsCheck{
-			selector: cardinality.NewSelector(cardinality.Options{TopN: 50}),
-			caches:   make(map[string]*lru.Cache[int64, string]),
+			selectors: newScopedSelectors(cardinality.Options{TopN: 50}),
+			caches:    make(map[string]*lru.Cache[int64, string]),
 		}
 
 		result, err := check.Scrape(ctx, mockTgt)
@@ -429,8 +429,8 @@ func TestStatStatements_IntegrationStatsResetChanges(t *testing.T) {
 		defer pool.Close()
 
 		check := &statStatementsCheck{
-			selector: cardinality.NewSelector(cardinality.Options{TopN: 50}),
-			caches:   make(map[string]*lru.Cache[int64, string]),
+			selectors: newScopedSelectors(cardinality.Options{TopN: 50}),
+			caches:    make(map[string]*lru.Cache[int64, string]),
 		}
 
 		// First scrape to get initial StatsReset
@@ -514,8 +514,8 @@ func TestStatStatements_IntegrationMissingExtension(t *testing.T) {
 
 		// Test the Requirements.Supports method directly
 		check := &statStatementsCheck{
-			selector: cardinality.NewSelector(cardinality.Options{TopN: 50}),
-			caches:   make(map[string]*lru.Cache[int64, string]),
+			selectors: newScopedSelectors(cardinality.Options{TopN: 50}),
+			caches:    make(map[string]*lru.Cache[int64, string]),
 		}
 
 		reqs := check.Requires()
@@ -630,8 +630,8 @@ func TestStatStatements_IntegrationNegativeQueryID(t *testing.T) {
 			}
 
 			check := &statStatementsCheck{
-				selector: cardinality.NewSelector(cardinality.Options{TopN: 50}),
-				caches:   make(map[string]*lru.Cache[int64, string]),
+				selectors: newScopedSelectors(cardinality.Options{TopN: 50}),
+				caches:    make(map[string]*lru.Cache[int64, string]),
 			}
 
 			result, err := check.Scrape(ctx, mockTgt)

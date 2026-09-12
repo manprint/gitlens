@@ -6,8 +6,8 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 UI_E2E_RUN ?= UI
 
-.PHONY: build fmt fmt-check lint test test-integration test-e2e test-e2e-full test-e2e-full-evidence test-e2e-matrix api-docs \
-        ci-local ci-local-unit ci-local-integration coverage coverage-gate generate golden clean build-images build-images-multiarch \
+.PHONY: build fmt fmt-check lint vet-tags vuln tidy-check stress test test-integration test-e2e test-e2e-full test-e2e-full-evidence test-e2e-matrix api-docs \
+        ci-local ci-local-unit ci-local-integration ci-local-security coverage coverage-gate generate golden clean build-images build-images-multiarch \
         web-install web-gen-api web-typecheck web-lint web-build web-budget web-test web-coverage web-coverage-gate test-ui-e2e
 
 build:
@@ -29,8 +29,57 @@ lint:
 		echo "golangci-lint is required (install it or put it on PATH)" >&2; exit 1; \
 	fi
 
+# Tagged code is not compiled by `go build ./...`, so a refactor can break the
+# integration and e2e suites without any fast-lane job noticing — the failure
+# then surfaces 40 minutes later in the Docker-backed gate, or not until a
+# nightly run. Vetting under each tag costs seconds and catches it immediately.
+vet-tags:
+	$(GO) vet ./...
+	$(GO) vet -tags=integration ./...
+	$(GO) vet -tags=e2e ./...
+
+# Standard-library advisories reach this code through the ingest endpoint, the
+# agent's HTTP client and the notification channels; go.mod's `toolchain`
+# directive is what pins them out, and this is what proves the pin still holds.
+vuln:
+	@if command -v govulncheck >/dev/null 2>&1; then \
+		govulncheck ./...; \
+	elif test -x "$$(go env GOPATH)/bin/govulncheck"; then \
+		"$$(go env GOPATH)/bin/govulncheck" ./...; \
+	else \
+		echo "govulncheck is required: go install golang.org/x/vuln/cmd/govulncheck@latest" >&2; exit 1; \
+	fi
+
+tidy-check:
+	@cp go.mod go.mod.tidycheck && cp go.sum go.sum.tidycheck
+	@trap 'mv go.mod.tidycheck go.mod; mv go.sum.tidycheck go.sum' EXIT; \
+		$(GO) mod tidy && diff -u go.mod.tidycheck go.mod && diff -u go.sum.tidycheck go.sum \
+		|| { echo "go.mod/go.sum are not tidy; run: go mod tidy" >&2; exit 1; }
+	$(GO) mod verify
+
 test:
 	$(GO) test -race -shuffle=on $(PKG)
+
+# The packages whose correctness is a concurrency property rather than a pure
+# function: a scheduler that leaks a ticker loop, a buffer whose reader and
+# writer share a file offset, an engine whose Stop races its own Start. One
+# pass of the race detector finds the reliable ones; repeated shuffled passes
+# find the ones that need an unlucky interleaving.
+#
+# Deliberately N separate invocations rather than `-count=N`: -count reruns
+# inside the same process, and several suites here assert on process-wide
+# state (the server's package-level metric counters, the advisor's global rule
+# registry), so a second in-process pass fails for reasons that have nothing
+# to do with concurrency. A fresh process per round also gives each round its
+# own -shuffle seed, which is the point of the exercise.
+STRESS_PKG ?= ./internal/agent/... ./internal/ash/... ./internal/alert/... ./internal/advisor/... ./internal/server/... ./internal/leaktest/...
+STRESS_ROUNDS ?= 5
+stress:
+	@set -eu; \
+	for i in $$(seq 1 $(STRESS_ROUNDS)); do \
+		echo "==> stress round $$i/$(STRESS_ROUNDS)"; \
+		$(GO) test -race -shuffle=on -count=1 -timeout=20m $(STRESS_PKG); \
+	done
 
 test-integration:
 	$(GO) test -tags=integration -race -shuffle=on -timeout=15m $(PKG)
@@ -59,11 +108,17 @@ test-ui-e2e: web-build build-images
 
 ci-local:
 	$(MAKE) ci-local-unit
+	$(MAKE) ci-local-security
 	$(MAKE) ci-local-integration
+
+ci-local-security:
+	$(MAKE) tidy-check
+	$(MAKE) vuln
 
 ci-local-unit:
 	$(MAKE) fmt-check
 	$(MAKE) lint
+	$(MAKE) vet-tags
 	$(MAKE) build
 	$(MAKE) test
 	$(MAKE) coverage-gate

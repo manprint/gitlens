@@ -21,6 +21,12 @@ import (
 	"github.com/manprint/pglens/internal/wire"
 )
 
+// maxPendingEnvelopes bounds the in-memory queue used when no disk buffer is
+// configured. At the default 30s push interval this is just over eight hours
+// of envelopes, comfortably longer than any outage the in-memory path is
+// expected to ride out (the durable path is buffer.Buffer).
+const maxPendingEnvelopes = 1024
+
 // Health represents the pusher's health state.
 type Health string
 
@@ -102,6 +108,20 @@ func (p *Pusher) Queue(env *wire.Envelope) {
 	}
 	p.pendingMu.Lock()
 	defer p.pendingMu.Unlock()
+	// The in-memory queue is the fallback used when no disk buffer is
+	// configured (tests, and the `check` subcommand). It had no bound at all:
+	// a server answering 401 — a rotated token, an agent awaiting
+	// re-approval — makes Push re-queue the head envelope and stop, forever,
+	// while the collection loop keeps appending one envelope per push
+	// interval. That is an unbounded heap growth ending in an OOM kill, on
+	// exactly the outage the buffer exists to survive. Dropping the oldest
+	// matches the disk buffer's own size-limit policy, and is counted the
+	// same way so the drop is visible in pglens_samples_dropped_rate.
+	if len(p.pending) >= maxPendingEnvelopes {
+		drop := len(p.pending) - maxPendingEnvelopes + 1
+		p.pending = append(p.pending[:0], p.pending[drop:]...)
+		atomic.AddInt64(&p.nDropped, int64(drop))
+	}
 	p.pending = append(p.pending, env)
 }
 
@@ -217,7 +237,7 @@ func (p *Pusher) pushOne(ctx context.Context, env *wire.Envelope) (pushOutcome, 
 			}
 		}
 
-		req, err := p.buildRequest(env)
+		req, err := p.buildRequest(ctx, env)
 		if err != nil {
 			// An envelope that cannot be encoded will never encode: keeping
 			// it queued would wedge the queue behind it forever (the disk
@@ -303,7 +323,15 @@ func backoffDelay(attempt int, clk clock.Clock) time.Duration {
 }
 
 // buildRequest constructs an HTTP request for the envelope.
-func (p *Pusher) buildRequest(env *wire.Envelope) (*http.Request, error) {
+//
+// The request carries ctx: http.NewRequest (no context) produced a request
+// that the http.Client would only ever abandon on its own 10s timeout, so a
+// cancelled push context — the agent shutting down, or the scheduler's
+// deadline expiring — did not actually stop the in-flight POST. Shutdown
+// stalled for up to ten seconds per queued envelope, and a cancellation that
+// the caller believed had taken effect kept writing to a server that was
+// about to be told the agent had stopped.
+func (p *Pusher) buildRequest(ctx context.Context, env *wire.Envelope) (*http.Request, error) {
 	body := bytes.NewBuffer(nil)
 	gz := gzip.NewWriter(body)
 	if err := json.NewEncoder(gz).Encode(env); err != nil {
@@ -313,7 +341,7 @@ func (p *Pusher) buildRequest(env *wire.Envelope) (*http.Request, error) {
 		return nil, err
 	}
 
-	req, err := http.NewRequest("POST", p.serverURL+"/api/v1/push", body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.serverURL+"/api/v1/push", body)
 	if err != nil {
 		return nil, err
 	}

@@ -13,12 +13,11 @@ import (
 var bloatEstimateSQL string
 
 func init() {
-	Register(&bloatEstimateCheck{selector: cardinality.NewSelector(cardinality.Options{TopN: 50})})
+	Register(&bloatEstimateCheck{selectors: newScopedSelectors(cardinality.Options{TopN: 50})})
 }
 
 type bloatEstimateCheck struct {
-	selector *cardinality.Selector
-	cycle    uint64
+	selectors *scopedSelectors
 }
 type bloatRow struct {
 	Schema, Relation, Index, Kind        string
@@ -66,9 +65,13 @@ func (c *bloatEstimateCheck) Scrape(ctx context.Context, t Target) (Result, erro
 		by[k] = r
 		cand = append(cand, cardinality.Candidate{Key: k, Primary: r.Bloat, Secondary: r.Bloat})
 	}
-	c.cycle++
-	sel, tr := c.selector.Select(c.cycle, cand)
-	c.selector.Forget(c.cycle)
+	// Previously c.cycle++ on a shared, unsynchronised field: two databases
+	// scraping concurrently through this one registered check instance is a
+	// plain data race on top of the shared-state problem scopedSelectors
+	// documents.
+	selector, cycle := c.selectors.next(t)
+	sel, tr := selector.Select(cycle, cand)
+	selector.Forget(cycle)
 	tr = tr || len(sel) < len(cand)
 	res := bloatResult(sel, by)
 	res.Truncated = tr

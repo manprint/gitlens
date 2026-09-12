@@ -6,12 +6,14 @@ import (
 	"testing"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+
+	"github.com/manprint/pglens/internal/cardinality"
 	"github.com/stretchr/testify/require"
 )
 
 func TestStatStatements_Requires(t *testing.T) {
 	t.Parallel()
-	c := &statStatementsCheck{selector: nil, caches: make(map[string]*lru.Cache[int64, string])}
+	c := &statStatementsCheck{selectors: newScopedSelectors(cardinality.Options{TopN: 50}), caches: make(map[string]*lru.Cache[int64, string])}
 	req := c.Requires()
 	require.Equal(t, ScopeDatabase, req.Scope)
 	require.Contains(t, req.Extensions, "pg_stat_statements")

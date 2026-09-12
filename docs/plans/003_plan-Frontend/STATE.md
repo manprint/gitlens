@@ -221,7 +221,7 @@ re-reading the codebase.
 |-------|-------|
 | **Repo root** | `/mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze` |
 | **Branch at plan time** | `main` |
-| **Go** | 1.25 (`go.mod`) |
+| **Go** | 1.26.1 (`go.mod`), `toolchain go1.26.6` |
 | **Node** | 24 LTS, **pnpm** 11.24.0 (decision D8, exact frontend pin) |
 | **WIP commits** | **on** — enabled by the `--wip-commit` invocation. Close each unit with one local commit; record its sha in §4. |
 
@@ -233,6 +233,10 @@ Run from the repo root.
 |------|---------|--------------|
 | Go format | `make fmt-check` | phase 0 |
 | Go lint | `make lint` | phase 0 |
+| Go vet under every build tag | `make vet-tags` | review R001 |
+| Module hygiene | `make tidy-check` | review R001 |
+| Vulnerability scan | `make vuln` | review R001 |
+| Repeated race stress | `make stress` | review R001 |
 | Go unit + integration-lite | `make test` | phase 0 |
 | Go coverage gate | `make coverage-gate` | phase 0 |
 | Integration (L2) | `make test-integration` | phase 2 |
@@ -383,6 +387,8 @@ records start/end timestamps and elapsed time.
 | 17.6 | sub-phase | 17.6 | 2026-09-02 | Complete the full regression sweep, durable evidence, and both UI acceptance modes | `59ea061` (test fixes); closed in this state update |
 | 17.7 | sub-phase | 17.7 | 2026-09-02 | Authenticate and validate every README API example | `891632b`; closed in this state update |
 | 17.8 | sub-phase | 17.8 | 2026-09-02 | Finalize operator documentation and validate the signed-in browser interface | `9cd2a5f`, `63b425b`; closed in this state update |
+
+| R001 | review | R001 (full-project correctness and staging review; backend halves are plan 001 row 168 and plan 002 row 91) | 2026-09-12 | **Every React Query `queryFn` ignored the `AbortSignal` React Query hands it.** `UseApiQueryOptions.queryFn` took no argument and none of the 32 `client.GET` call sites forwarded one, so a query that unmounted or was superseded — switching cluster, leaving a page mid-poll — kept its HTTP request running to completion and then resolved into a cache entry nobody was waiting for. Changed the signature to `(signal: AbortSignal) => Promise<T>`, wired `useQuery({ queryFn: ({ signal }) => queryFn(signal) })`, and threaded `signal` through all 32 `client.GET` calls plus `fetchClusters`/`fetchInstances`. Regression test `web/src/api/abort.test.tsx` proves it: reverting the forwarding makes it fail. Writing that test also surfaced why no previous test could have caught this — `src/test/setup.ts` installs `vi.useFakeTimers({ shouldAdvanceTime: false })` in a global `beforeEach`, so msw's `delay()` and `waitFor`'s interval never advance; the file opts back into real timers locally | `uncommitted` |
 
 ---
 

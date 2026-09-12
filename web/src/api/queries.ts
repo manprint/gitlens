@@ -93,7 +93,7 @@ interface UseApiQueryOptions<T> {
   enabled?: boolean
   keepPrevious?: boolean
   policy: RefreshPolicy
-  queryFn: () => Promise<T>
+  queryFn: (signal: AbortSignal) => Promise<T>
   queryKey: readonly unknown[]
 }
 
@@ -108,7 +108,15 @@ function useApiQuery<T>({
   const queryClient = useQueryClient()
   const query = useQuery<T, ApiFailure>({
     enabled,
-    queryFn,
+    // Forwarding react-query's own AbortSignal is what makes an abandoned
+    // page actually stop costing the server. Every read here polls on an
+    // interval, and the expensive ones (ASH over a wide range, statements,
+    // metrics/query) hold one of the server's bounded pool connections for
+    // the whole query: without the signal, navigating away or unmounting
+    // left those requests running to completion with nobody to receive
+    // them. net/http cancels the request context when the client
+    // disconnects, so the connection goes back to the pool immediately.
+    queryFn: ({ signal }) => queryFn(signal),
     queryKey,
     refetchInterval: paused || policy.interval === 0 ? false : policy.interval,
     retry: shouldRetry,
@@ -140,15 +148,17 @@ export function useClusters(): ApiQueryResult<Awaited<ReturnType<typeof fetchClu
   })
 }
 
-async function fetchClusters() {
-  return getApi(() => client.GET('/api/v1/clusters'))
+async function fetchClusters(signal: AbortSignal) {
+  return getApi(() => client.GET('/api/v1/clusters', { signal }))
 }
 
 export function useClusterTopology(id: string) {
   return useApiQuery({
     policy: REFRESH.cluster,
-    queryFn: () =>
-      getApi(() => client.GET('/api/v1/clusters/{id}/topology', { params: { path: { id } } })),
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/clusters/{id}/topology', { params: { path: { id } }, signal }),
+      ),
     queryKey: qk.clusterTopology(id),
   })
 }
@@ -160,10 +170,11 @@ export function useClusterReplication(
   return useApiQuery({
     keepPrevious: true,
     policy: REFRESH.cluster,
-    queryFn: () =>
+    queryFn: (signal) =>
       getApi(() =>
         client.GET('/api/v1/clusters/{id}/replication', {
           params: { path: { id }, query: params },
+          signal,
         }),
       ),
     queryKey: qk.clusterReplication(id, params.from, params.to),
@@ -173,9 +184,9 @@ export function useClusterReplication(
 export function useClusterSettingsDrift(id: string) {
   return useApiQuery({
     policy: REFRESH.cluster,
-    queryFn: () =>
+    queryFn: (signal) =>
       getApi(() =>
-        client.GET('/api/v1/clusters/{id}/settings-drift', { params: { path: { id } } }),
+        client.GET('/api/v1/clusters/{id}/settings-drift', { params: { path: { id } }, signal }),
       ),
     queryKey: qk.clusterSettingsDrift(id),
   })
@@ -189,14 +200,15 @@ export function useInstances(): ApiQueryResult<Awaited<ReturnType<typeof fetchIn
   })
 }
 
-async function fetchInstances() {
-  return getApi(() => client.GET('/api/v1/instances'))
+async function fetchInstances(signal: AbortSignal) {
+  return getApi(() => client.GET('/api/v1/instances', { signal }))
 }
 
 export function useInstance(id: string) {
   return useApiQuery({
     policy: REFRESH.instance,
-    queryFn: () => getApi(() => client.GET('/api/v1/instances/{id}', { params: { path: { id } } })),
+    queryFn: (signal) =>
+      getApi(() => client.GET('/api/v1/instances/{id}', { params: { path: { id } }, signal })),
     queryKey: qk.instance(id),
   })
 }
@@ -204,8 +216,10 @@ export function useInstance(id: string) {
 export function useInstanceActivity(id: string) {
   return useApiQuery({
     policy: REFRESH.instance,
-    queryFn: () =>
-      getApi(() => client.GET('/api/v1/instances/{id}/activity', { params: { path: { id } } })),
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/activity', { params: { path: { id } }, signal }),
+      ),
     queryKey: qk.instanceActivity(id),
   })
 }
@@ -213,8 +227,10 @@ export function useInstanceActivity(id: string) {
 export function useInstanceDatabases(id: string) {
   return useApiQuery({
     policy: REFRESH.instance,
-    queryFn: () =>
-      getApi(() => client.GET('/api/v1/instances/{id}/databases', { params: { path: { id } } })),
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/databases', { params: { path: { id } }, signal }),
+      ),
     queryKey: qk.instanceDatabases(id),
   })
 }
@@ -222,8 +238,8 @@ export function useInstanceDatabases(id: string) {
 export function useInstanceHost(id: string) {
   return useApiQuery({
     policy: REFRESH.instance,
-    queryFn: () =>
-      getApi(() => client.GET('/api/v1/instances/{id}/host', { params: { path: { id } } })),
+    queryFn: (signal) =>
+      getApi(() => client.GET('/api/v1/instances/{id}/host', { params: { path: { id } }, signal })),
     queryKey: qk.instanceHost(id),
   })
 }
@@ -234,10 +250,11 @@ export function useInstanceSettings(
 ) {
   return useApiQuery({
     policy: REFRESH.instance,
-    queryFn: () =>
+    queryFn: (signal) =>
       getApi(() =>
         client.GET('/api/v1/instances/{id}/settings', {
           params: { path: { id }, query: params },
+          signal,
         }),
       ),
     queryKey: qk.instanceSettings(id, params.changed_since),
@@ -250,10 +267,11 @@ export function useInstanceTables(
 ) {
   return useApiQuery({
     policy: REFRESH.instance,
-    queryFn: () =>
+    queryFn: (signal) =>
       getApi(() =>
         client.GET('/api/v1/instances/{id}/tables', {
           params: { path: { id }, query: params },
+          signal,
         }),
       ),
     queryKey: qk.instanceTables(id, params.limit),
@@ -266,10 +284,11 @@ export function useInstanceIndexes(
 ) {
   return useApiQuery({
     policy: REFRESH.instance,
-    queryFn: () =>
+    queryFn: (signal) =>
       getApi(() =>
         client.GET('/api/v1/instances/{id}/indexes', {
           params: { path: { id }, query: params },
+          signal,
         }),
       ),
     queryKey: qk.instanceIndexes(id, params.limit),
@@ -282,10 +301,11 @@ export function useInstanceBloat(
 ) {
   return useApiQuery({
     policy: REFRESH.instance,
-    queryFn: () =>
+    queryFn: (signal) =>
       getApi(() =>
         client.GET('/api/v1/instances/{id}/bloat', {
           params: { path: { id }, query: params },
+          signal,
         }),
       ),
     queryKey: qk.instanceBloat(id, params.limit),
@@ -295,9 +315,9 @@ export function useInstanceBloat(
 export function useInstanceCommandAudit(id: string) {
   return useApiQuery({
     policy: REFRESH.instance,
-    queryFn: () =>
+    queryFn: (signal) =>
       getApi(() =>
-        client.GET('/api/v1/instances/{id}/command-audit', { params: { path: { id } } }),
+        client.GET('/api/v1/instances/{id}/command-audit', { params: { path: { id } }, signal }),
       ),
     queryKey: qk.instanceCommandAudit(id),
   })
@@ -306,8 +326,10 @@ export function useInstanceCommandAudit(id: string) {
 export function useLocks(instanceId: string) {
   return useApiQuery({
     policy: REFRESH.locks,
-    queryFn: () =>
-      getApi(() => client.GET('/api/v1/locks', { params: { query: { instance_id: instanceId } } })),
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/locks', { params: { query: { instance_id: instanceId } }, signal }),
+      ),
     queryKey: qk.locks(instanceId),
   })
 }
@@ -316,7 +338,8 @@ export function useQueryMetrics(params: QueryParameters<'/api/v1/metrics/query'>
   return useApiQuery({
     keepPrevious: true,
     policy: REFRESH.activity,
-    queryFn: () => getApi(() => client.GET('/api/v1/metrics/query', { params: { query: params } })),
+    queryFn: (signal) =>
+      getApi(() => client.GET('/api/v1/metrics/query', { params: { query: params }, signal })),
     queryKey: qk.queryMetrics(
       params.metric,
       params.instance_id,
@@ -332,7 +355,8 @@ export function useEvents(params: QueryParameters<'/api/v1/events'> = {}) {
   return useApiQuery({
     keepPrevious: true,
     policy: REFRESH.activity,
-    queryFn: () => getApi(() => client.GET('/api/v1/events', { params: { query: params } })),
+    queryFn: (signal) =>
+      getApi(() => client.GET('/api/v1/events', { params: { query: params }, signal })),
     queryKey: qk.events(params.cluster_id, params.type, params.from, params.to, params.limit),
   })
 }
@@ -341,7 +365,8 @@ export function useStatements(params: QueryParameters<'/api/v1/statements'>) {
   return useApiQuery({
     keepPrevious: true,
     policy: REFRESH.statements,
-    queryFn: () => getApi(() => client.GET('/api/v1/statements', { params: { query: params } })),
+    queryFn: (signal) =>
+      getApi(() => client.GET('/api/v1/statements', { params: { query: params }, signal })),
     queryKey: qk.statements(
       params.instance_id,
       params.database,
@@ -357,7 +382,8 @@ export function useAsh(params: QueryParameters<'/api/v1/ash'>) {
   return useApiQuery({
     keepPrevious: true,
     policy: REFRESH.ash,
-    queryFn: () => getApi(() => client.GET('/api/v1/ash', { params: { query: params } })),
+    queryFn: (signal) =>
+      getApi(() => client.GET('/api/v1/ash', { params: { query: params }, signal })),
     queryKey: qk.ash(
       params.instance_id,
       params.from,
@@ -373,7 +399,8 @@ export function useAshTop(params: QueryParameters<'/api/v1/ash/top'>) {
   return useApiQuery({
     keepPrevious: true,
     policy: REFRESH.ash,
-    queryFn: () => getApi(() => client.GET('/api/v1/ash/top', { params: { query: params } })),
+    queryFn: (signal) =>
+      getApi(() => client.GET('/api/v1/ash/top', { params: { query: params }, signal })),
     queryKey: qk.ashTop(params.instance_id, params.from, params.to, params.database, params.limit),
   })
 }
@@ -381,7 +408,8 @@ export function useAshTop(params: QueryParameters<'/api/v1/ash/top'>) {
 export function usePlans(params: QueryParameters<'/api/v1/plans'>) {
   return useApiQuery({
     policy: REFRESH.statements,
-    queryFn: () => getApi(() => client.GET('/api/v1/plans', { params: { query: params } })),
+    queryFn: (signal) =>
+      getApi(() => client.GET('/api/v1/plans', { params: { query: params }, signal })),
     queryKey: qk.plans(params.queryid, params.instance_id, params.datname, params.limit),
   })
 }
@@ -389,7 +417,8 @@ export function usePlans(params: QueryParameters<'/api/v1/plans'>) {
 export function useAlerts(params: QueryParameters<'/api/v1/alerts'> = {}) {
   return useApiQuery({
     policy: REFRESH.alerts,
-    queryFn: () => getApi(() => client.GET('/api/v1/alerts', { params: { query: params } })),
+    queryFn: (signal) =>
+      getApi(() => client.GET('/api/v1/alerts', { params: { query: params }, signal })),
     queryKey: qk.alerts(
       params.state,
       params.severity,
@@ -404,9 +433,12 @@ export function useAlert(alertKey: string) {
   return useApiQuery({
     enabled: Boolean(alertKey),
     policy: REFRESH.alerts,
-    queryFn: () =>
+    queryFn: (signal) =>
       getApi(() =>
-        client.GET('/api/v1/alerts/{alert_key}', { params: { path: { alert_key: alertKey } } }),
+        client.GET('/api/v1/alerts/{alert_key}', {
+          params: { path: { alert_key: alertKey } },
+          signal,
+        }),
       ),
     queryKey: qk.alert(alertKey),
   })
@@ -415,7 +447,7 @@ export function useAlert(alertKey: string) {
 export function useAlertRules() {
   return useApiQuery<AlertRule[]>({
     policy: REFRESH.findings,
-    queryFn: () => getApi(() => client.GET('/api/v1/alert-rules')),
+    queryFn: (signal) => getApi(() => client.GET('/api/v1/alert-rules', { signal })),
     queryKey: qk.alertRules(),
   })
 }
@@ -423,7 +455,8 @@ export function useAlertRules() {
 export function useSilences(params: QueryParameters<'/api/v1/silences'> = {}) {
   return useApiQuery({
     policy: REFRESH.findings,
-    queryFn: () => getApi(() => client.GET('/api/v1/silences', { params: { query: params } })),
+    queryFn: (signal) =>
+      getApi(() => client.GET('/api/v1/silences', { params: { query: params }, signal })),
     queryKey: qk.silences(params.all),
   })
 }
@@ -431,7 +464,8 @@ export function useSilences(params: QueryParameters<'/api/v1/silences'> = {}) {
 export function useFindings(params: QueryParameters<'/api/v1/findings'> = {}) {
   return useApiQuery({
     policy: REFRESH.findings,
-    queryFn: () => getApi(() => client.GET('/api/v1/findings', { params: { query: params } })),
+    queryFn: (signal) =>
+      getApi(() => client.GET('/api/v1/findings', { params: { query: params }, signal })),
     queryKey: qk.findings(
       params.state,
       params.severity,
@@ -448,10 +482,11 @@ export function useFindings(params: QueryParameters<'/api/v1/findings'> = {}) {
 export function useFinding(findingId: string) {
   return useApiQuery({
     policy: REFRESH.findings,
-    queryFn: () =>
+    queryFn: (signal) =>
       getApi(() =>
         client.GET('/api/v1/findings/{finding-id}', {
           params: { path: { 'finding-id': findingId } },
+          signal,
         }),
       ),
     queryKey: qk.finding(findingId),
@@ -461,7 +496,7 @@ export function useFinding(findingId: string) {
 export function useAdvisorRules() {
   return useApiQuery({
     policy: REFRESH.findings,
-    queryFn: () => getApi(() => client.GET('/api/v1/advisor/rules')),
+    queryFn: (signal) => getApi(() => client.GET('/api/v1/advisor/rules', { signal })),
     queryKey: qk.advisorRules(),
   })
 }
@@ -469,7 +504,7 @@ export function useAdvisorRules() {
 export function useSession() {
   return useApiQuery({
     policy: REFRESH.static,
-    queryFn: () => getApi(() => client.GET('/api/v1/session')),
+    queryFn: (signal) => getApi(() => client.GET('/api/v1/session', { signal })),
     queryKey: qk.session(),
   })
 }
@@ -477,7 +512,7 @@ export function useSession() {
 export function useHealthz() {
   return useApiQuery({
     policy: REFRESH.static,
-    queryFn: () => getApi(() => client.GET('/healthz')),
+    queryFn: (signal) => getApi(() => client.GET('/healthz', { signal })),
     queryKey: qk.healthz(),
   })
 }
@@ -485,7 +520,7 @@ export function useHealthz() {
 export function useReadyz() {
   return useApiQuery({
     policy: REFRESH.static,
-    queryFn: () => getApi(() => client.GET('/readyz')),
+    queryFn: (signal) => getApi(() => client.GET('/readyz', { signal })),
     queryKey: qk.readyz(),
   })
 }
@@ -493,7 +528,7 @@ export function useReadyz() {
 export function useMetrics() {
   return useApiQuery({
     policy: REFRESH.static,
-    queryFn: () => getApi(() => client.GET('/metrics')),
+    queryFn: (signal) => getApi(() => client.GET('/metrics', { signal })),
     queryKey: qk.metrics(),
   })
 }

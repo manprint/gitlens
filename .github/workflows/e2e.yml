@@ -11,6 +11,12 @@ concurrency:
   group: e2e-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    # Without pipefail a failing step inside a pipeline (the suite piped into a
+    # tee, for instance) is masked by the exit status of the last command.
+    shell: bash -euo pipefail {0}
+
 permissions:
   contents: read
 
@@ -27,6 +33,8 @@ jobs:
         agent_mode: [container, binary]
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -40,6 +48,14 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
+      - name: Reclaim runner disk space
+        # The suite pulls several PostgreSQL images, toxiproxy and both pglens
+        # images onto a runner that starts with roughly 14 GB free. The hosted
+        # image's preinstalled Android/.NET/Haskell toolchains are worth ~25 GB
+        # and nothing here uses them.
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
       - name: Install frontend dependencies
         run: make web-install
       - name: Install Playwright Chromium
@@ -50,6 +66,13 @@ jobs:
         run: make test-e2e-full
         env:
           AGENT_MODE: ${{ matrix.agent_mode }}
+      - name: Collect Docker diagnostics
+        if: failure()
+        run: |
+          mkdir -p test/e2e/_artifacts
+          docker ps -a > test/e2e/_artifacts/docker-ps.txt 2>&1 || true
+          docker images > test/e2e/_artifacts/docker-images.txt 2>&1 || true
+          df -h / > test/e2e/_artifacts/disk.txt 2>&1 || true
       - name: Upload E2E diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
@@ -68,6 +91,8 @@ jobs:
         agent_mode: [container, binary]
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod

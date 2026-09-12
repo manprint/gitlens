@@ -2,6 +2,15 @@ module github.com/manprint/pglens
 
 go 1.26.1
 
+// Pinned above the language version on purpose: govulncheck reports 15
+// standard-library advisories against go1.26.1 that reach this code (net/http
+// ReadHeaderTimeout bypass on the HTTP/2 upgrade check, quadratic net/url
+// resolvePath, post-handshake crypto/tls flooding, crypto/x509 chain-building
+// blowups). Every one of them is fixed by 1.26.6, and all of them are on paths
+// this project actually serves: the ingest endpoint, the agent HTTP client and
+// the notification channels.
+toolchain go1.26.6
+
 require (
 	github.com/Shopify/toxiproxy/v2 v2.12.0
 	github.com/go-chi/chi/v5 v5.3.2

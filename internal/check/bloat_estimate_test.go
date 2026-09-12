@@ -27,7 +27,7 @@ func TestBloat_RatioIsZeroWhenNoBloat(t *testing.T) {
 func TestBloat_MethodIsEstimate(t *testing.T) {
 	require.Contains(t, bloatEstimateSQL, "bloat_ratio")
 	require.Contains(t, bloatEstimateSQL, "COALESCE")
-	require.Equal(t, 6*time.Hour, (&bloatEstimateCheck{selector: cardinality.NewSelector(cardinality.Options{TopN: 1})}).DefaultInterval())
+	require.Equal(t, 6*time.Hour, (&bloatEstimateCheck{selectors: newScopedSelectors(cardinality.Options{TopN: 1})}).DefaultInterval())
 }
 func TestBloat_SelectorOrdersByBloatBytes(t *testing.T) {
 	s := cardinality.NewSelector(cardinality.Options{TopN: 1})

@@ -59,6 +59,9 @@ func (p *Pipeline) maybeEvict() {
 	}
 	cutoff := now.Add(-1 * time.Hour)
 	p.delta.Evict(cutoff)
+	// The topology engine accumulates exactly the same way the delta engine
+	// does — one entry per instance, forever — and was never swept.
+	p.topo.Evict(cutoff)
 	p.lastEvict = now
 }
 

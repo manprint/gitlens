@@ -13,10 +13,23 @@ Locks, Advisor, Alerts, and Settings.
 For the product boundary and the behaviour that is intentionally not promised,
 see [Product limits](docs/LIMITS.md).
 
+The releases are alpha prereleases, published as multi-arch images on ghcr.io
+with an SBOM and build provenance. Every one of them goes through the whole of
+`ci.yml` first: format, lint and `go vet` under all three build tags, supply-chain
+verification (`go mod verify` plus `govulncheck`), unit tests under `-race
+-shuffle=on` with per-package coverage floors, ten repeated shuffled race
+rounds over the concurrency-sensitive packages, a container image build with a
+`--version` smoke test, and the integration matrix across PostgreSQL 15 to 18 in
+both `vanilla` and `rds-like` permission profiles. The E2E and Playwright
+acceptance suites run nightly and on every pull request into `main`.
+
 ## Requirements
 
-- Go 1.26 or later to build
-- Node 20.19+ or 22.12+ and pnpm, only to build the web interface from source
+- Go 1.26.1 or later to build. `go.mod` pins `toolchain go1.26.6`, so a
+  compatible toolchain is fetched automatically; the pin is what keeps the
+  standard library clear of the advisories `make vuln` checks for.
+- Node 20.19+ or 22.12+ and pnpm 11.24.0, only to build the web interface from
+  source. CI and the container images build on Node 24.
 - Docker and Docker Compose for the test suites and for the server's storage
 - PostgreSQL 15 to 18 as monitoring targets
 - PostgreSQL 17 with TimescaleDB 2.29 for the server's own storage (see Running the server)
@@ -38,12 +51,31 @@ make web-build
 Running `make build` alone produces a binary with the committed placeholder
 page; run `make web-build` first when the built interface is required.
 
+`make web-build` rewrites `internal/webui/dist/index.html` — the one file of the
+built bundle that is tracked, because a source checkout has to serve *something*
+— to point at that build's content-hashed assets, which are not tracked. That
+leaves the file dirty in `git status`. Restore the placeholder before
+committing:
+
+```sh
+git checkout -- internal/webui/dist/index.html   # or: make clean
+```
+
 ```sh
 make build-images          # builds ghcr.io/manprint/pglens-agent:dev and ...-server:dev
 make build-images-multiarch # linux/amd64 + linux/arm64 via docker buildx
 ```
 
 ## Running the checks
+
+One command runs the whole fast gate — Go and web, formatting through coverage
+floors:
+
+```sh
+make ci-local-unit
+```
+
+Frontend only:
 
 ```sh
 make web-install
@@ -56,7 +88,9 @@ make web-budget
 ```
 
 These commands cover frontend formatting/linting, TypeScript checking, and the
-production asset build.
+production asset build. The complete target list, including the integration and
+E2E suites, is under [Running the checks](#running-the-checks-1) further down;
+the test strategy behind it is in [TESTING.md](TESTING.md).
 
 ## Quick start
 
@@ -1065,11 +1099,15 @@ Prometheus-format metrics exposition (port 8080). Exposes server-side monitoring
 - `pglens_cardinality_truncated_total` — counter, envelopes where cardinality budgets caused truncation
 - `pglens_agent_clock_skew_seconds` — gauge, most recently observed agent/server clock skew (useful for diagnosing timestamp misalignment)
 
+`pglens_ingest_rejected_total` currently emits four reasons:
+`decompressed_too_large` (a gzipped push that expands past 256 MiB),
+`inventory_error`, `pipeline_error`, and `invalid_fact`.
+
 ```sh
 curl -s localhost:8080/metrics | head -20
 ```
 
-Use this endpoint to monitor pglens itself — feed it into Prometheus, Datadog, or your favorite metrics backend.
+Use this endpoint to monitor pglens itself — feed it into Prometheus, Datadog, or your favorite metrics backend. The E2E suite scrapes it too: `pglens_series_total` and `pglens_check_error_total` are what back invariant I-8 (cardinality within budget) and the "no unexpected check errors" invariant at the end of every scenario.
 
 ### `GET /healthz`, `/readyz`
 
@@ -1237,22 +1275,52 @@ Events are the system's way of notifying you of changes in replication topology 
 ```sh
 make fmt-check        # verify formatting (gofmt -l must be empty)
 make lint             # run golangci-lint
+make vet-tags         # go vet with no tags, -tags=integration, and -tags=e2e
 make test             # unit tests with -race -shuffle=on
+make stress           # repeat the concurrency-sensitive packages, new shuffle seed per round
 make coverage-gate    # enforce per-package and global coverage floors
+make tidy-check       # go.mod/go.sum are tidy, and every module verifies
+make vuln             # govulncheck against the pinned toolchain and dependencies
 make api-docs         # regenerate the offline HTTP API reference from OpenAPI
 make test-integration # integration tests against real PostgreSQL (requires Docker)
 make test-e2e         # E2E smoke subset (requires Docker, ~10m)
 make test-e2e-full    # full E2E suite (requires Docker, ~60m)
 make test-e2e-full-evidence # full E2E suite with a durable log and captured exit status (requires Docker, ~60m)
+make test-ui-e2e      # Playwright UI acceptance against a real stack (requires Docker)
+
+make ci-local-unit     # everything CI runs in its fast lane, Go and web
+make ci-local-security # tidy-check + vuln
+make ci-local          # the fast lane, then security, then the full L2 matrix
 ```
+
+`make vuln` needs `govulncheck` on `PATH`
+(`go install golang.org/x/vuln/cmd/govulncheck@latest`); `make lint` needs
+`golangci-lint`. Both targets say so rather than silently passing when the tool
+is missing.
+
+### What CI runs
+
+| Workflow | Trigger | Jobs |
+| --- | --- | --- |
+| `ci.yml` | pull request, push to `main`, manual, and reused by the release workflow | web, format/lint/vet-tags, supply chain (`tidy-check` + `govulncheck`), unit + coverage, repeated race stress (not on pull requests), container image build and `--version` smoke, integration across PostgreSQL 15–18 × `vanilla`/`rds-like`, and a `CI gate` job that aggregates them |
+| `e2e.yml` | pull request to `main`, nightly, manual | the full E2E suite and the Playwright UI acceptance suite, each across `AGENT_MODE` `container` and `binary` |
+| `release-alpha.yml` | a `v*-alpha.*` tag, manual | the whole of `ci.yml`, then multi-arch images pushed to ghcr.io with SBOM and provenance, a `--version` smoke test against the published images, and a GitHub prerelease |
+
+`CI gate` is the single check to require in branch protection: it fails if any
+job failed or was cancelled, so a job added to `ci.yml` is covered without
+touching the branch rule.
 
 ### Test levels
 
 - **L1 — Unit** (`make test`): fast, isolated Go tests for pure logic and component behavior; no Docker or external PostgreSQL is required.
 - **L2 — Integration** (`make test-integration`): agent, wire and storage tests against real PostgreSQL versions; requires Docker and takes roughly 15 minutes.
 - **L3 — E2E system** (`make test-e2e` or `make test-e2e-full`): operator-style multi-container scenarios and failure recovery; requires Docker, with the smoke subset taking roughly 10 minutes and the full suite roughly 60 minutes.
-- **L4 — API/UI contract**: endpoint and consumer-facing checks plus frontend Vitest tests, including contract validation against `api/openapi.yaml`. The backend API remains covered by repository tests, while frontend test details and floors belong in `TESTING.md`.
-- **L5 — Performance and profiling**: workload, benchmark and resource-budget investigation; run these as an explicitly scoped performance exercise rather than as a correctness gate.
+- **L4 — Frontend component** (`make web-test`, `make web-coverage-gate`): Vitest and MSW against the React components and API layer, including contract validation of `api/openapi.yaml` through the generated types. Floors are in `scripts/coverage_gate_ui.sh` and the rationale is in `TESTING.md` §6.
+- **L5 — Frontend E2E** (`make test-ui-e2e`): Playwright driving a real browser against a real stack, sharing L3's scenario library. The `SYS-UI-*` acceptance scenarios live here. See `TESTING.md` §7.
+
+Performance and profiling work — workload benchmarks, resource-budget
+investigation — is an explicitly scoped exercise rather than a numbered level or
+a correctness gate.
 
 **L3 E2E tests**
 
@@ -1264,6 +1332,20 @@ L3 requires Docker and the following host ports:
 `make build-images` must precede any L3 run. Each test uses a unique compose project name and dynamically allocated ports, so concurrent runs and cleanup are safe.
 
 L2 tests inside one container run serially by design (`postgres.Restore()` needs exclusive access); parallelism comes from the version matrix only. `make test-e2e` uses `-count=1` (cached E2E pass is a lie).
+
+**Invariants**
+
+Every L3 scenario ends with `AssertInvariants`, which checks the properties no
+individual scenario was looking for: no duplicate `(series_id, ts)`, no negative
+rates, no orphaned `instance_id`, no `cluster_id_changed` event, per-instance
+series count within budget, and no unexpected `pglens_check_error_total`. The
+last two read the server's own `/metrics`; the parsing and assertions behind
+them live in `test/harness/metrics.go` with no build tag, so `make test` covers
+them.
+
+Goroutine leaks are asserted in-process instead: `internal/leaktest` snapshots
+the live goroutines, and every component with a `Start`/`Stop` pair has a
+lifecycle test that proves `Stop` actually stops it.
 
 ## Troubleshooting
 
@@ -1421,7 +1503,9 @@ the server is rejected, so upgrade the server before upgrading agents.
 - **No token rotation or mTLS** — the bootstrap token is a shared secret; revocation only (no key rotation, no mutual TLS, no approval queue, single-tenant)
 - **An unclean agent shutdown may lose the tail of the current buffer segment** — samples within the current segment are fsynced only at segment roll (every ~8 MiB), not per record. A graceful shutdown (SIGTERM with signal handler) flushes the active segment before exit; forceful termination (SIGKILL) skips that flush. The trade-off is necessary: per-record fsync would make monitoring overhead unacceptable for busy instances.
 - **Maximum 10 databases per instance by default** — if you have more databases, increase `targets[].databases.max` in the config or use the `include` filter. Unmonitored databases are reported with `skip_reason=db_budget` to make this visible (not a silent degradation).
-- **Oversized envelopes (>32 MiB) are dropped** — the agent does not split envelopes; they are counted in `agent_samples_dropped_total{reason=envelope_oversized}` and logged once per minute
+- **Oversized envelopes (>32 MiB) are dropped** — the agent does not split envelopes. The server answers 413, the agent drops that envelope instead of retrying it forever, and the drop is counted into `pglens_samples_dropped_rate`, the metric behind the `agent_buffer_full` alert rule. A gzipped envelope that expands past 256 MiB is rejected the same way, and is additionally visible server-side as `pglens_ingest_rejected_total{reason="decompressed_too_large"}`.
+
+- **Buffer retention drops are labelled, not silent** — records rolled off by the disk buffer's size or age policy are counted per reason (`size_limit`, `age_limit`) in the buffer's own stats and folded into `pglens_samples_dropped_rate`. A buffer that is discarding data always says so.
 
 **Deployment:**
 - **An agent container without a persistent volume duplicates its instances on restart** — `/var/lib/pglens` must be a persistent volume (not ephemeral). Without it, every container restart creates a new instance ID, causing `duplicate_instance_suspected` events and fragmenting instance history. The compose file and systemd unit handle this correctly; Docker `--rm` breaks it.
@@ -1431,6 +1515,7 @@ the server is rejected, so upgrade the server before upgrading agents.
 - PostgreSQL 15 to 18 only; 13 and 14 are not supported (EOL)
 - Only streaming replication is supported; logical, Patroni, and Aurora topologies are not detected
 - Raw retention is 30 days with no rollups; compression after 48h (`buffer 6h < sample_age 12h < compress_after 48h`)
+- **Every in-memory structure has a fixed ceiling and drops data past it** — 32 MiB per push on the wire and 256 MiB after gzip, 64 KiB of request headers, 2-minute read/write/idle timeouts, delta and topology state evicted one hour after an instance's last sample, and at most 4 096 live sessions. None of these are configurable; see [limit 13](docs/LIMITS.md#13-every-in-memory-structure-is-bounded-and-a-bound-that-trips-drops-data) for what each one trades away.
 
 **Contention:**
 - The lock view is sampled every 10 seconds, not live; a contention episode shorter than the interval can be missed entirely

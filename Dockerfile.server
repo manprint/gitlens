@@ -17,8 +17,11 @@ FROM gcr.io/distroless/static-debian12:nonroot
 ARG VERSION=dev
 LABEL org.opencontainers.image.title="pglens-server" \
       org.opencontainers.image.version="$VERSION" \
-      org.opencontainers.image.source="https://github.com/manprint/gitlens"
+      org.opencontainers.image.source="https://github.com/manprint/pglens" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.description="pglens server: ingest, HTTP API, and web interface"
 COPY --from=builder /src/bin/pglens-server /usr/local/bin/pglens-server
-HEALTHCHECK CMD ["/usr/local/bin/pglens-server", "--healthcheck"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD ["/usr/local/bin/pglens-server", "--healthcheck"]
 USER nonroot
 ENTRYPOINT ["/usr/local/bin/pglens-server"]
