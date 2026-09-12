@@ -105,6 +105,13 @@ func scopeKey(t Target) string {
 	return t.InstanceID().String() + "\x00" + t.Database()
 }
 
+// textCacheKey identifies the (cluster, database) a query-text cache belongs
+// to. See the comment at its only use in stat_statements.go for why this is a
+// different scope from scopeKey.
+func textCacheKey(t Target) string {
+	return t.ClusterID().String() + "\x00" + t.Database()
+}
+
 func scopeNow(t Target) time.Time {
 	if clk := t.Clock(); clk != nil {
 		return clk.Now()

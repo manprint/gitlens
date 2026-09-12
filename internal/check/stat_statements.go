@@ -18,14 +18,23 @@ import (
 func init() {
 	Register(&statStatementsCheck{
 		selectors: newScopedSelectors(cardinality.Options{TopN: 50}),
-		caches:    make(map[string]*lru.Cache[int64, string]),
+		caches:    make(map[string]*textCache),
 	})
 }
 
 type statStatementsCheck struct {
 	mu        sync.Mutex
 	selectors *scopedSelectors
-	caches    map[string]*lru.Cache[int64, string]
+	caches    map[string]*textCache
+}
+
+// textCache remembers which query texts have already been shipped for one
+// (cluster, database), so a text the server already stores is not resent on
+// every scrape. lastUsed lets an abandoned scope's 4096-entry LRU be released
+// instead of pinned for the lifetime of the agent process.
+type textCache struct {
+	lru      *lru.Cache[int64, string]
+	lastUsed time.Time
 }
 
 func (c *statStatementsCheck) Name() string { return "stat_statements" }
@@ -135,16 +144,37 @@ SELECT s.queryid, s.calls, s.total_exec_time, s.rows,
 		})
 	}
 
-	// Keyed by scope, not by bare database name: two targets of the same
-	// agent routinely monitor identically named databases, and a queryid is
-	// only unique within one database of one instance.
-	cacheKey := scopeKey(t)
+	// Keyed by (cluster, database) — deliberately a different scope from the
+	// selectors above, which are per (instance, database).
+	//
+	// This cache exists to avoid resending text the server already has, so its
+	// scope has to be the server's own storage key: store.QueryTextRow is
+	// upserted on (tenant, cluster_id, datname, queryid, pg_major), with no
+	// instance in it. Keying by bare database name (what this did before) was
+	// wrong in the direction that loses data: two clusters both monitoring a
+	// database called "app" share one cache, so the second cluster's texts are
+	// suppressed as "already sent" and the server never learns them for that
+	// cluster. Keying by instance instead would be wrong in the harmless
+	// direction — a primary and its standby would each ship the same text once
+	// — but it is still a resend the server does not need.
+	cacheKey := textCacheKey(t)
+	now := scopeNow(t)
 	c.mu.Lock()
-	cache, ok := c.caches[cacheKey]
+	entry, ok := c.caches[cacheKey]
 	if !ok {
-		cache, _ = lru.New[int64, string](4096)
-		c.caches[cacheKey] = cache
+		l, _ := lru.New[int64, string](4096)
+		entry = &textCache{lru: l}
+		c.caches[cacheKey] = entry
 	}
+	entry.lastUsed = now
+	if len(c.caches) > 1 {
+		for k, e := range c.caches {
+			if !e.lastUsed.IsZero() && now.Sub(e.lastUsed) > scopeIdleTTL {
+				delete(c.caches, k)
+			}
+		}
+	}
+	cache := entry.lru
 	c.mu.Unlock()
 	selector, cycle := c.selectors.next(t)
 

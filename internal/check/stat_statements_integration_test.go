@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/manprint/pglens/internal/cardinality"
 	"github.com/manprint/pglens/internal/clock"
@@ -115,7 +114,7 @@ func TestStatStatements_IntegrationCardinalityCap(t *testing.T) {
 		// own production defaults (registered separately in check.go's init()).
 		check := &statStatementsCheck{
 			selectors: newScopedSelectors(cardinality.Options{TopN: 50, MaxKeys: 80}),
-			caches:    make(map[string]*lru.Cache[int64, string]),
+			caches:    make(map[string]*textCache),
 		}
 
 		result, err := check.Scrape(context.Background(), mockTgt)
@@ -185,7 +184,7 @@ func TestStatStatements_IntegrationKnownQueries(t *testing.T) {
 		// Construct a reusable check instance (same object for both Scrape calls)
 		check := &statStatementsCheck{
 			selectors: newScopedSelectors(cardinality.Options{TopN: 50}),
-			caches:    make(map[string]*lru.Cache[int64, string]),
+			caches:    make(map[string]*textCache),
 		}
 
 		// First scrape: should have query text
@@ -352,7 +351,7 @@ func TestStatStatements_IntegrationUnionOfRankings(t *testing.T) {
 		// Use default TopN=50 as in production
 		check := &statStatementsCheck{
 			selectors: newScopedSelectors(cardinality.Options{TopN: 50}),
-			caches:    make(map[string]*lru.Cache[int64, string]),
+			caches:    make(map[string]*textCache),
 		}
 
 		result, err := check.Scrape(ctx, mockTgt)
@@ -430,7 +429,7 @@ func TestStatStatements_IntegrationStatsResetChanges(t *testing.T) {
 
 		check := &statStatementsCheck{
 			selectors: newScopedSelectors(cardinality.Options{TopN: 50}),
-			caches:    make(map[string]*lru.Cache[int64, string]),
+			caches:    make(map[string]*textCache),
 		}
 
 		// First scrape to get initial StatsReset
@@ -515,7 +514,7 @@ func TestStatStatements_IntegrationMissingExtension(t *testing.T) {
 		// Test the Requirements.Supports method directly
 		check := &statStatementsCheck{
 			selectors: newScopedSelectors(cardinality.Options{TopN: 50}),
-			caches:    make(map[string]*lru.Cache[int64, string]),
+			caches:    make(map[string]*textCache),
 		}
 
 		reqs := check.Requires()
@@ -631,7 +630,7 @@ func TestStatStatements_IntegrationNegativeQueryID(t *testing.T) {
 
 			check := &statStatementsCheck{
 				selectors: newScopedSelectors(cardinality.Options{TopN: 50}),
-				caches:    make(map[string]*lru.Cache[int64, string]),
+				caches:    make(map[string]*textCache),
 			}
 
 			result, err := check.Scrape(ctx, mockTgt)

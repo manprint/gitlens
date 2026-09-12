@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/manprint/pglens/internal/cardinality"
@@ -395,7 +394,7 @@ func TestStatStatementsCheck_Scrape_Happy(t *testing.T) {
 		DatabaseValue:  "app",
 	}
 
-	check := &statStatementsCheck{selectors: newScopedSelectors(cardinality.Options{TopN: 50}), caches: make(map[string]*lru.Cache[int64, string])}
+	check := &statStatementsCheck{selectors: newScopedSelectors(cardinality.Options{TopN: 50}), caches: make(map[string]*textCache)}
 	result, err := check.Scrape(context.Background(), target)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -426,7 +425,7 @@ func TestStatStatementsCheck_Scrape_NoExtension(t *testing.T) {
 		DatabaseValue:  "app",
 	}
 
-	check := &statStatementsCheck{selectors: newScopedSelectors(cardinality.Options{TopN: 50}), caches: make(map[string]*lru.Cache[int64, string])}
+	check := &statStatementsCheck{selectors: newScopedSelectors(cardinality.Options{TopN: 50}), caches: make(map[string]*textCache)}
 	result, err := check.Scrape(context.Background(), target)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -495,7 +494,7 @@ func TestStatStatementsCheck_Scrape_CycleAdvancesAndForgetsStaleRetained(t *test
 
 	check := &statStatementsCheck{
 		selectors: newScopedSelectors(cardinality.Options{TopN: 1, Hysteresis: 1, MaxKeys: 10}),
-		caches:    make(map[string]*lru.Cache[int64, string]),
+		caches:    make(map[string]*textCache),
 	}
 
 	hasQueryID := func(result Result, id string) bool {
