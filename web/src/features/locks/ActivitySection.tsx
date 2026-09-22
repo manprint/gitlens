@@ -142,9 +142,7 @@ export function ActivitySection({
     'application_name',
   )
   const maxTransactionAge = latestValue(response.metrics, 'pg_max_xact_age_seconds')
-  const maxIdleTransactionAge =
-    latestValue(response.metrics, 'pg_max_idle_in_transaction_seconds') ??
-    latestValue(response.metrics, 'pg_max_idle_in_txn_seconds')
+  const maxIdleTransactionAge = latestValue(response.metrics, 'pg_max_idle_in_transaction_seconds')
   const maxStateAge = oldestStateAge(response.metrics)
   const preparedTransactions = latestValue(response.metrics, 'pg_prepared_xacts')
   const oldestPreparedTransaction = latestValue(response.metrics, 'pg_oldest_prepared_xact_seconds')
@@ -231,8 +229,8 @@ export function ActivitySection({
       <p className="text-muted-foreground mt-3 text-sm">
         Frozen-XID age is shown with the table.wraparound_risk framing: maintenance is urgent as the
         age approaches {formatCount(WRAPAROUND_RISK_THRESHOLD)} transaction IDs. Deadlock rate is
-        derived from counter samples; identifying involved statements requires PostgreSQL log
-        analysis.
+        the sum of each database's latest rate; identifying involved statements requires PostgreSQL
+        log analysis.
       </p>
 
       <div className="mt-6">

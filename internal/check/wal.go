@@ -60,8 +60,23 @@ FROM (SELECT CASE WHEN pg_is_in_recovery()
 	if len(columns) == 0 {
 		return result, nil
 	}
-	quoted := make([]string, len(columns))
-	for i, column := range columns {
+	// stats_reset is a timestamp, not a statistic. It went through the
+	// numeric loop and was logged as "non-numeric" on every scrape (every
+	// 15s). It is not used as the result's reset hint either: that hint
+	// covers every counter of the result, and pg_wal_lsn_bytes does not
+	// restart when pg_stat_wal is reset. A reset still shows up as the WAL
+	// counters going backwards.
+	var numeric []string
+	for _, column := range columns {
+		if column != "stats_reset" {
+			numeric = append(numeric, column)
+		}
+	}
+	if len(numeric) == 0 {
+		return result, nil
+	}
+	quoted := make([]string, len(numeric))
+	for i, column := range numeric {
 		quoted[i] = quoteIdentifier(column) + "::text"
 	}
 	rows, err := conn.Query(ctx, "SELECT "+strings.Join(quoted, ", ")+" FROM pg_stat_wal")
@@ -70,7 +85,7 @@ FROM (SELECT CASE WHEN pg_is_in_recovery()
 	}
 	defer rows.Close()
 	if rows.Next() {
-		values := make([]*string, len(columns))
+		values := make([]*string, len(numeric))
 		dest := make([]any, len(values))
 		for i := range values {
 			dest[i] = &values[i]
@@ -78,7 +93,7 @@ FROM (SELECT CASE WHEN pg_is_in_recovery()
 		if err := rows.Scan(dest...); err != nil {
 			return Result{}, err
 		}
-		for i, column := range columns {
+		for i, column := range numeric {
 			if values[i] == nil {
 				continue
 			}
@@ -124,8 +139,11 @@ ORDER BY ordinal_position`)
 	return columns, rows.Err()
 }
 
+// walCounterColumn reports the cumulative columns. wal_write_time and
+// wal_sync_time (PostgreSQL 14-17) are cumulative milliseconds too.
 func walCounterColumn(column string) bool {
 	return strings.HasSuffix(column, "_count") || strings.HasSuffix(column, "_bytes") ||
+		strings.HasSuffix(column, "_time") ||
 		column == "wal_records" || column == "wal_fpi" || column == "wal_buffers_full" ||
 		column == "wal_sync" || column == "wal_write"
 }

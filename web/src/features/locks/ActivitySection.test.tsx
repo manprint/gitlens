@@ -83,13 +83,18 @@ describe('ActivitySection', () => {
     render(
       <ActivitySection
         response={response({
-          pg_deadlocks_total: [metric(10, 10), metric(12)],
+          // Stored rates, one series per database: the newest of each adds up.
+          pg_deadlocks_total: [
+            metric(0.5, 10, { database: 'app' }),
+            metric(0.2, 0, { database: 'app' }),
+            metric(0.05, 0, { database: 'jobs' }),
+          ],
         })}
         now={NOW}
       />,
     )
 
-    expect(screen.getByRole('article', { name: 'Deadlock rate' })).toHaveTextContent('0.20')
+    expect(screen.getByRole('article', { name: 'Deadlock rate' })).toHaveTextContent('0.25')
     expect(
       screen.getByText(/identifying involved statements requires PostgreSQL log analysis/i),
     ).toBeInTheDocument()

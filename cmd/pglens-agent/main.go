@@ -7,12 +7,15 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/manprint/pglens/internal/agent"
 	"github.com/manprint/pglens/internal/check"
 	"github.com/manprint/pglens/internal/pgtype"
+	"github.com/manprint/pglens/internal/wire"
 )
 
 var version = "dev" // overridden at build time with -ldflags
@@ -115,6 +118,12 @@ func runCheck(dsn string, identityPath string) {
 		os.Exit(1)
 	}
 	defer func() { _ = conn.Close(ctx) }()
+	// The report only reads, but this connection is opened outside the
+	// Manager, so it gets the same read-only session the agent's own do.
+	if err := agent.ReadOnlySession(ctx, conn); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Get server version
 	var serverVersionNum int
@@ -144,11 +153,21 @@ func runCheck(dsn string, identityPath string) {
 	// Get extensions
 	extensions := getExtensions(ctx, conn)
 
-	// Get databases
-	databases, err := getCheckDatabases(ctx, conn)
+	// Get databases. The check has no target configuration, so it applies the
+	// agent's default selection: the default excludes and a budget of 10.
+	candidates, err := getCheckDatabases(ctx, conn)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: query databases: %v\n", err)
 		os.Exit(1)
+	}
+	databases := agent.SelectDatabases(candidates, agent.DefaultConnOptions())
+	// As the agent does when it schedules its checks, a monitored database's
+	// pg_stat_statements view stands in for a maintenance database without one.
+	statementsVia := ""
+	if !extensions["pg_stat_statements"] {
+		if statementsVia = locateStatementsView(ctx, cfg, databases); statementsVia != "" {
+			extensions["pg_stat_statements"] = true
+		}
 	}
 
 	// Print the report
@@ -164,28 +183,12 @@ func runCheck(dsn string, identityPath string) {
 	fmt.Printf("  permission tier  : %s\n", formatPermTier(tier))
 	fmt.Printf("  extensions       : ")
 	extStr := formatExtensions(extensions)
+	if statementsVia != "" {
+		extStr += fmt.Sprintf(" (in database %s)", statementsVia)
+	}
 	fmt.Printf("%s\n", extStr)
 
-	// Count databases
-	monitored := 0
-	unmonitored := 0
-	reasons := make(map[string]int)
-	for _, db := range databases {
-		if db.Monitored {
-			monitored++
-		} else {
-			unmonitored++
-			if db.SkipReason != "" {
-				reasons[db.SkipReason]++
-			}
-		}
-	}
-	fmt.Printf("  databases        : %d found, %d monitored", len(databases), monitored)
-	if unmonitored > 0 {
-		reasonStr := formatSkipReasons(reasons)
-		fmt.Printf(" (%d skipped: %s)", unmonitored, reasonStr)
-	}
-	fmt.Printf("\n\n")
+	fmt.Printf("  databases        : %s\n\n", formatDatabaseSummary(len(candidates), databases))
 
 	// Print checks status
 	fmt.Printf("checks\n")
@@ -282,14 +285,19 @@ func determinePermTier(ctx context.Context, conn *pgx.Conn) pgtype.PermTier {
 	return tier
 }
 
+// checkExtensions are the extensions the report lists. pg_buffercache used
+// to be listed too, although nothing in pglens reads it.
+var checkExtensions = []string{"pg_stat_statements"}
+
 // getExtensions queries the database for installed extensions.
 func getExtensions(ctx context.Context, conn *pgx.Conn) map[string]bool {
 	exts := make(map[string]bool)
 
-	rows, err := conn.Query(ctx, "SELECT extname FROM pg_extension WHERE extname IN ('pg_stat_statements', 'pg_buffercache')")
+	rows, err := conn.Query(ctx, "SELECT extname FROM pg_extension WHERE extname = ANY($1)", checkExtensions)
 	if err != nil {
-		exts["pg_stat_statements"] = false
-		exts["pg_buffercache"] = false
+		for _, name := range checkExtensions {
+			exts[name] = false
+		}
 		return exts
 	}
 	defer rows.Close()
@@ -303,24 +311,17 @@ func getExtensions(ctx context.Context, conn *pgx.Conn) map[string]bool {
 		installedExts[name] = true
 	}
 
-	// Return status for both extensions (installed or not)
-	for _, name := range []string{"pg_stat_statements", "pg_buffercache"} {
+	for _, name := range checkExtensions {
 		exts[name] = installedExts[name]
 	}
 
 	return exts
 }
 
-// Database is a simple database info struct.
-type Database struct {
-	Name       string
-	Monitored  bool
-	SkipReason string
-}
-
-// getCheckDatabases retrieves the list of databases that would be monitored.
-func getCheckDatabases(ctx context.Context, conn *pgx.Conn) ([]Database, error) {
-	// For now, just query the basic databases list
+// getCheckDatabases lists the connectable databases, as Manager.Discover
+// does, for agent.SelectDatabases to choose from. Every one used to be
+// reported as monitored, whatever the budget or the excludes said.
+func getCheckDatabases(ctx context.Context, conn *pgx.Conn) ([]agent.DatabaseCandidate, error) {
 	rows, err := conn.Query(ctx, `
 		SELECT d.datname, COALESCE(s.xact_commit, 0) AS xact_commit
 		FROM pg_database d
@@ -333,17 +334,40 @@ func getCheckDatabases(ctx context.Context, conn *pgx.Conn) ([]Database, error) 
 	}
 	defer rows.Close()
 
-	var databases []Database
+	var candidates []agent.DatabaseCandidate
 	for rows.Next() {
-		var name string
-		var xactCommit int64
-		if err := rows.Scan(&name, &xactCommit); err != nil {
+		var c agent.DatabaseCandidate
+		if err := rows.Scan(&c.Name, &c.XactCommit); err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, c)
+	}
+	return candidates, rows.Err()
+}
+
+// locateStatementsView returns the first monitored database that has the
+// pg_stat_statements view, or "" when none has it.
+func locateStatementsView(ctx context.Context, cfg *pgx.ConnConfig, databases []wire.Database) string {
+	for _, db := range databases {
+		if !db.Monitored {
 			continue
 		}
-		databases = append(databases, Database{Name: name, Monitored: true})
+		dbCfg := cfg.Copy()
+		dbCfg.Database = db.Name
+		conn, err := pgx.ConnectConfig(ctx, dbCfg)
+		if err != nil {
+			continue
+		}
+		installed := false
+		if agent.ReadOnlySession(ctx, conn) == nil {
+			_ = conn.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements')`).Scan(&installed)
+		}
+		_ = conn.Close(ctx)
+		if installed {
+			return db.Name
+		}
 	}
-
-	return databases, nil
+	return ""
 }
 
 // getCheckWarnings generates warnings for the diagnostics.
@@ -415,7 +439,7 @@ func formatPermTier(tier pgtype.PermTier) string {
 
 func formatExtensions(exts map[string]bool) string {
 	var parts []string
-	for _, name := range []string{"pg_stat_statements", "pg_buffercache"} {
+	for _, name := range checkExtensions {
 		if installed, ok := exts[name]; ok {
 			status := "no"
 			if installed {
@@ -427,10 +451,41 @@ func formatExtensions(exts map[string]bool) string {
 	return strings.Join(parts, "  ")
 }
 
-func formatSkipReasons(reasons map[string]int) string {
+// formatDatabaseSummary describes the selection: found counts every
+// connectable database, and the ones missing from databases were excluded.
+func formatDatabaseSummary(found int, databases []wire.Database) string {
+	monitored := 0
+	reasons := make(map[string]int)
+	for _, db := range databases {
+		if db.Monitored {
+			monitored++
+		} else {
+			reasons[db.SkipReason]++
+		}
+	}
+	summary := fmt.Sprintf("%d found, %d monitored", found, monitored)
 	var parts []string
-	for reason, count := range reasons {
-		parts = append(parts, fmt.Sprintf("%d %s", count, reason))
+	if excluded := found - len(databases); excluded > 0 {
+		parts = append(parts, fmt.Sprintf("%d excluded", excluded))
+	}
+	if skipped := len(databases) - monitored; skipped > 0 {
+		parts = append(parts, fmt.Sprintf("%d skipped: %s", skipped, formatSkipReasons(reasons)))
+	}
+	if len(parts) > 0 {
+		summary += " (" + strings.Join(parts, "; ") + ")"
+	}
+	return summary + ", default selection"
+}
+
+func formatSkipReasons(reasons map[string]int) string {
+	names := make([]string, 0, len(reasons))
+	for reason := range reasons {
+		names = append(names, reason)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, reason := range names {
+		parts = append(parts, fmt.Sprintf("%d %s", reasons[reason], reason))
 	}
 	return strings.Join(parts, ", ")
 }

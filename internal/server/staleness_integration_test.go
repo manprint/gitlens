@@ -229,3 +229,34 @@ func mustAcquire(t *testing.T, pool *pgxpool.Pool) *pgxpool.Conn {
 	t.Cleanup(conn.Release)
 	return conn
 }
+
+// TestStaleness_PurgesEventsPastRetention: events had no retention at all.
+func TestStaleness_PurgesEventsPastRetention(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, `INSERT INTO events (ts, type, payload) VALUES
+		(now() - interval '100 days', 'agent_down', '{}'),
+		(now() - interval '1 day', 'agent_down', '{}')`)
+	require.NoError(t, err)
+
+	s := NewStaleness(pool, clock.NewFake(time.Now()))
+	s.mu.Lock()
+	s.conn = mustAcquire(t, pool)
+	s.hasLock = true
+	s.mu.Unlock()
+	require.NoError(t, s.Evaluate(ctx))
+
+	var remaining []time.Time
+	rows, err := pool.Query(ctx, `SELECT ts FROM events WHERE type='agent_down' ORDER BY ts`)
+	require.NoError(t, err)
+	defer rows.Close()
+	for rows.Next() {
+		var ts time.Time
+		require.NoError(t, rows.Scan(&ts))
+		remaining = append(remaining, ts)
+	}
+	require.NoError(t, rows.Err())
+	require.Len(t, remaining, 1, "only the event inside the retention window survives")
+	require.WithinDuration(t, time.Now().Add(-24*time.Hour), remaining[0], time.Minute)
+}

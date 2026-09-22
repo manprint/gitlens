@@ -12,7 +12,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
 	"github.com/manprint/pglens/internal/advisor"
+	"github.com/manprint/pglens/internal/pgtype"
+	"github.com/manprint/pglens/internal/store"
 )
 
 type findingJSON struct {
@@ -21,7 +24,7 @@ type findingJSON struct {
 	Severity       string          `json:"severity"`
 	State          string          `json:"state"`
 	Scope          string          `json:"scope"`
-	ClusterID      *int64          `json:"cluster_id,omitempty"`
+	ClusterID      *string         `json:"cluster_id,omitempty"`
 	InstanceID     *uuid.UUID      `json:"instance_id,omitempty"`
 	Datname        string          `json:"datname"`
 	ObjectName     string          `json:"object_name"`
@@ -69,7 +72,15 @@ type findingScanner interface{ Scan(...any) error }
 func scanFinding(row findingScanner) (findingJSON, error) {
 	var f findingJSON
 	var evidence []byte
-	err := row.Scan(&f.FindingID, &f.RuleID, &f.Severity, &f.State, &f.Scope, &f.ClusterID, &f.InstanceID, &f.Datname, &f.ObjectName, &f.Title, &f.Detail, &f.Remediation, &evidence, &f.DegradedReason, &f.FirstSeen, &f.LastSeen, &f.ResolvedAt, &f.MutedUntil, &f.MuteReason)
+	var cluster *int64
+	err := row.Scan(&f.FindingID, &f.RuleID, &f.Severity, &f.State, &f.Scope, &cluster, &f.InstanceID, &f.Datname, &f.ObjectName, &f.Title, &f.Detail, &f.Remediation, &evidence, &f.DegradedReason, &f.FirstSeen, &f.LastSeen, &f.ResolvedAt, &f.MutedUntil, &f.MuteReason)
+	// A decimal string, unsigned (ClusterId in the spec). It was a JSON
+	// number: a 19-digit system identifier lost its last digits in the
+	// browser and never matched its cluster.
+	if cluster != nil {
+		s := store.FromDB(*cluster).String()
+		f.ClusterID = &s
+	}
 	f.Evidence = json.RawMessage(evidence)
 	if len(f.Evidence) == 0 {
 		f.Evidence = json.RawMessage(`{}`)
@@ -110,12 +121,12 @@ func (a *API) listFindings(w http.ResponseWriter, r *http.Request) {
 				v = id
 			}
 			if filter.key == "cluster_id" {
-				id, err := strconv.ParseInt(value, 10, 64)
+				id, err := pgtype.ParseClusterID(value)
 				if err != nil {
 					writeError(w, 400, "invalid cluster_id", err.Error())
 					return
 				}
-				v = id
+				v = store.ToDB(id)
 			}
 			args = append(args, v)
 			where = append(where, filter.column+"=$"+strconv.Itoa(len(args)))
@@ -127,7 +138,10 @@ func (a *API) listFindings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	args = append(args, limit)
-	q := "SELECT " + findingSelect + " FROM findings WHERE " + strings.Join(where, " AND ") + " ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, last_seen DESC LIMIT $" + strconv.Itoa(len(args))
+	// Open and degraded findings come first. Ordered by severity alone, a
+	// state=all listing (the findings page asks for one) let 90 days of
+	// resolved critical findings fill the limit ahead of the open warnings.
+	q := "SELECT " + findingSelect + " FROM findings WHERE " + strings.Join(where, " AND ") + " ORDER BY state IN ('muted','resolved'), CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, last_seen DESC LIMIT $" + strconv.Itoa(len(args))
 	rows, err := a.pool.Query(r.Context(), q, args...)
 	if err != nil {
 		writeError(w, 500, "finding query failed", err.Error())

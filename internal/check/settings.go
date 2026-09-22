@@ -3,8 +3,10 @@ package check
 import (
 	"context"
 	"log"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/manprint/pglens/internal/pgtype"
@@ -103,10 +105,7 @@ FROM pg_settings`)
 		if !curated && s.setting == s.bootVal {
 			continue
 		}
-		valueText := s.setting
-		if s.name == "archive_command" {
-			valueText = redactArchiveCommand(s.setting)
-		}
+		valueText := redactSetting(s.name, s.setting)
 		result.Facts = append(result.Facts, Fact{
 			Kind: "setting", Key: s.name, ValueText: valueText,
 			Labels: map[string]string{
@@ -114,7 +113,9 @@ FROM pg_settings`)
 				"context": s.context, "pending_restart": strconv.FormatBool(s.pendingRestart),
 			},
 		})
-		if value, ok := normalizeSetting(s.setting, s.unit); ok {
+		// -1 (and other negatives) means "disabled" or "use another
+		// setting", never a size or a duration.
+		if value, ok := normalizeSetting(s.setting, s.unit); ok && value >= 0 {
 			metricName := ""
 			switch settingUnitKind(s.unit) {
 			case "bytes":
@@ -141,9 +142,9 @@ FROM pg_settings`)
 
 func settingUnitKind(unit string) string {
 	switch unit {
-	case "8kB", "kB", "MB", "GB":
+	case "B", "8kB", "kB", "MB", "GB", "TB":
 		return "bytes"
-	case "ms", "s", "min":
+	case "us", "ms", "s", "min", "h", "d":
 		return "seconds"
 	default:
 		return ""
@@ -156,6 +157,8 @@ func normalizeSetting(setting, unit string) (float64, bool) {
 		return 0, false
 	}
 	switch unit {
+	case "B":
+		return value, true
 	case "8kB":
 		return value * 8 * 1024, true
 	case "kB":
@@ -164,24 +167,79 @@ func normalizeSetting(setting, unit string) (float64, bool) {
 		return value * 1024 * 1024, true
 	case "GB":
 		return value * 1024 * 1024 * 1024, true
+	case "TB":
+		return value * 1024 * 1024 * 1024 * 1024, true
+	case "us":
+		return value / 1e6, true
 	case "ms":
 		return value / 1000, true
 	case "s":
 		return value, true
 	case "min":
 		return value * 60, true
+	case "h":
+		return value * 3600, true
+	case "d":
+		return value * 86400, true
 	default:
 		if unit != "" {
-			log.Printf("settings: skipping unknown unit %q for setting %q", unit, setting)
+			if _, logged := unknownUnitsLogged.LoadOrStore(unit, true); !logged {
+				log.Printf("settings: skipping settings with unknown unit %q (first value seen: %q)", unit, setting)
+			}
 		}
 		return 0, false
 	}
 }
 
-func redactArchiveCommand(command string) string {
-	parts := strings.Fields(command)
-	if len(parts) <= 1 {
-		return command
+// unknownUnitsLogged keeps an unsupported unit from being logged on every
+// hourly scrape for the lifetime of the agent.
+var unknownUnitsLogged sync.Map
+
+// redactSetting strips credentials from the settings that routinely carry
+// them before the value leaves the monitored host. Every non-default setting
+// is shipped, so this covers the whole family rather than an allowlist.
+func redactSetting(name, value string) string {
+	switch {
+	case strings.HasSuffix(name, "_command"):
+		// archive_command, restore_command, archive_cleanup_command,
+		// recovery_end_command, ssl_passphrase_command
+		return redactCommand(value)
+	case strings.HasSuffix(name, "conninfo"):
+		// primary_conninfo
+		return redactConninfo(value)
 	}
-	return parts[0] + " [redacted]"
+	return value
+}
+
+// redactCommand keeps only the program a shell command runs. Its arguments,
+// and VAR=value assignments in front of it, are where object-store keys and
+// passphrases live.
+func redactCommand(command string) string {
+	all := strings.Fields(command)
+	fields := all
+	for len(fields) > 0 && strings.Contains(fields[0], "=") {
+		fields = fields[1:]
+	}
+	switch {
+	case len(all) == 0:
+		return command
+	case len(fields) == 0:
+		return "[redacted]"
+	case len(all) == 1:
+		return command
+	default:
+		return fields[0] + " [redacted]"
+	}
+}
+
+var (
+	conninfoPassword    = regexp.MustCompile(`(?i)\b((?:ssl)?password\s*=\s*)('(?:[^'\\]|\\.)*'|\S+)`)
+	conninfoURIPassword = regexp.MustCompile(`(?i)(postgres(?:ql)?://[^:/@\s]*):[^@\s]*@`)
+)
+
+// redactConninfo hides the password of a libpq connection string, in both
+// the keyword=value and the URI form.
+func redactConninfo(conninfo string) string {
+	conninfo = conninfoPassword.ReplaceAllString(conninfo, "${1}[redacted]")
+	return conninfoURIPassword.ReplaceAllString(conninfo, "${1}:[redacted]@")
 }

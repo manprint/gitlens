@@ -28,7 +28,7 @@ func (c *vacuumProgressCheck) Scrape(ctx context.Context, t Target) (Result, err
 	if err = ApplySessionLimits(ctx, conn, c.Timeout()); err != nil {
 		return Result{}, err
 	}
-	columnRows, err := conn.Query(ctx, `SELECT column_name FROM information_schema.columns WHERE table_name='pg_stat_progress_vacuum'`)
+	columnRows, err := conn.Query(ctx, `SELECT column_name FROM information_schema.columns WHERE table_schema='pg_catalog' AND table_name='pg_stat_progress_vacuum'`)
 	if err != nil {
 		return Result{}, err
 	}
@@ -44,11 +44,16 @@ func (c *vacuumProgressCheck) Scrape(ctx context.Context, t Target) (Result, err
 		}
 	}
 	columnRows.Close()
+	if err := columnRows.Err(); err != nil {
+		return Result{}, err
+	}
 	deadMax, deadNow := "max_dead_tuples", "num_dead_tuples"
 	if hasBytes {
 		deadMax, deadNow = "max_dead_tuple_bytes", "dead_tuple_bytes"
 	}
-	query := fmt.Sprintf(`SELECT p.pid,COALESCE(d.datname,''),COALESCE(c.relname,''),p.phase,p.heap_blks_total,p.heap_blks_scanned,p.heap_blks_vacuumed,p.index_vacuum_count,p.%s,p.%s FROM pg_stat_progress_vacuum p JOIN pg_database d ON d.oid=p.datid LEFT JOIN pg_class c ON c.oid=p.relid`, deadMax, deadNow)
+	// Progress columns are NULL for a command the monitoring role may not
+	// see; one such row used to fail the whole scrape.
+	query := fmt.Sprintf(`SELECT p.pid,COALESCE(d.datname,''),COALESCE(c.relname,''),COALESCE(p.phase,''),COALESCE(p.heap_blks_total,0),COALESCE(p.heap_blks_scanned,0),COALESCE(p.heap_blks_vacuumed,0),COALESCE(p.index_vacuum_count,0),COALESCE(p.%s,0),COALESCE(p.%s,0) FROM pg_stat_progress_vacuum p JOIN pg_database d ON d.oid=p.datid LEFT JOIN pg_class c ON c.oid=p.relid`, deadMax, deadNow)
 	rows, err := conn.Query(ctx, query)
 	if err != nil {
 		return Result{}, err
@@ -78,8 +83,11 @@ func (c *vacuumProgressCheck) Scrape(ctx context.Context, t Target) (Result, err
 			addVacuumMetric(&result, name, float64(deadV), labels)
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return Result{}, err
+	}
 	result.Metrics = append(result.Metrics, pgtype.Metric{Name: "pg_vacuum_jobs_running", Kind: pgtype.KindGauge, Value: float64(jobs)})
-	analyzeRows, err := conn.Query(ctx, `SELECT p.pid,COALESCE(d.datname,''),COALESCE(c.relname,''),p.phase,p.sample_blks_total,p.sample_blks_scanned FROM pg_stat_progress_analyze p JOIN pg_database d ON d.oid=p.datid LEFT JOIN pg_class c ON c.oid=p.relid`)
+	analyzeRows, err := conn.Query(ctx, `SELECT p.pid,COALESCE(d.datname,''),COALESCE(c.relname,''),COALESCE(p.phase,''),COALESCE(p.sample_blks_total,0),COALESCE(p.sample_blks_scanned,0) FROM pg_stat_progress_analyze p JOIN pg_database d ON d.oid=p.datid LEFT JOIN pg_class c ON c.oid=p.relid`)
 	if err != nil {
 		return Result{}, err
 	}
@@ -98,6 +106,9 @@ func (c *vacuumProgressCheck) Scrape(ctx context.Context, t Target) (Result, err
 			addVacuumMetric(&result, "pg_analyze_sample_blks_total", float64(total), labels)
 			addVacuumMetric(&result, "pg_analyze_sample_blks_scanned", float64(scanned), labels)
 		}
+	}
+	if err := analyzeRows.Err(); err != nil {
+		return Result{}, err
 	}
 	result.Metrics = append(result.Metrics, pgtype.Metric{Name: "pg_analyze_jobs_running", Kind: pgtype.KindGauge, Value: float64(analyze)})
 	result.Truncated = jobs > 20 || analyze > 20

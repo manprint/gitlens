@@ -85,4 +85,48 @@ describe('LagSection', () => {
     expect(screen.getByRole('note')).toHaveTextContent('Gaps in this range')
     expect(screen.getByTestId('mock-echarts')).toBeInTheDocument()
   })
+
+  it('names each end of an edge after its instance, or the reported standby name', () => {
+    renderWithProviders(
+      <LagSection
+        edges={[
+          { ...edges[0]!, from: 'reporting replica', standby_name: 'reporting replica' },
+          edges[1]!,
+        ]}
+        instances={[
+          {
+            instance_id: '00000000-0000-0000-0000-000000000001',
+            addr: 'standby.example.test',
+            port: 5433,
+            role: 'standby',
+            pg_version: 160000,
+            perm_tier: 'T1',
+            last_seen: '2026-08-31T10:00:00Z',
+            up: true,
+          },
+          {
+            instance_id: '00000000-0000-0000-0000-000000000002',
+            addr: 'primary.example.test',
+            port: 5432,
+            role: 'primary',
+            pg_version: 160000,
+            perm_tier: 'T1',
+            last_seen: '2026-08-31T10:00:00Z',
+            up: true,
+          },
+        ]}
+      />,
+    )
+
+    expect(
+      screen.getByRole('heading', {
+        name: 'standby.example.test:5433 → primary.example.test:5432 (Unknown)',
+      }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('article', {
+        name: 'reporting replica → primary.example.test:5432 (Unknown)',
+      }),
+    ).toBeInTheDocument()
+  })
 })

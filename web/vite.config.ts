@@ -2,13 +2,35 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath, URL } from 'node:url'
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 
 const openApiDocument = readFileSync(new URL('../api/openapi.yaml', import.meta.url), 'utf8')
 const apiContractVersion = /^ {2}version:\s*(\S+)\s*$/m.exec(openApiDocument)?.[1] ?? 'unknown'
+const readme = new URL('../README.md', import.meta.url)
+
+/**
+ * The interface links its guidance to /README.md, which nothing served: the
+ * server answers unknown paths with the application, so every documentation
+ * link opened the Not found page. The README now ships next to the bundle
+ * (and is served by the dev server), as plain text.
+ */
+function readmeAsset(): Plugin {
+  return {
+    name: 'pglens-readme',
+    configureServer(server) {
+      server.middlewares.use('/README.md', (_request, response) => {
+        response.setHeader('Content-Type', 'text/plain; charset=utf-8')
+        response.end(readFileSync(readme))
+      })
+    },
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'README.md', source: readFileSync(readme, 'utf8') })
+    },
+  }
+}
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), readmeAsset()],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

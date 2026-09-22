@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,26 +30,44 @@ var maxDecompressedBytes int64 = 256 << 20
 const maxSampleAge = 12 * time.Hour
 const futureSkewThreshold = 30 * time.Second
 
+// transmittedAt reads wire.TransmittedAtHeader, falling back to the
+// envelope's SentAt for agents that predate the header.
+func transmittedAt(r *http.Request, sentAt time.Time) time.Time {
+	if h := r.Header.Get(wire.TransmittedAtHeader); h != "" {
+		if t, err := time.Parse(time.RFC3339Nano, h); err == nil {
+			return t
+		}
+	}
+	return sentAt
+}
+
 // IngestHandler decodes and validates the wire envelope, resolves identity
 // through inv, and hands the (possibly filtered) envelope to pipeline for
 // delta conversion and storage. inv and pipeline may be built with a nil pool
 // (see NewInventory/NewPipeline) for tests that only exercise validation.
 func IngestHandler(auth *Auth, inv *Inventory, pipeline *Pipeline) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Every error goes through writeError. The handler used to build its
+		// JSON with Sprintf and send it with http.Error, as text/plain, with
+		// the error text pasted in unescaped: a decode error quotes the bad
+		// character ("invalid character '\"' ..."), which made the body
+		// itself invalid JSON.
+		//
 		// Auth
 		if !auth.Validate(r) {
-			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			writeError(w, http.StatusUnauthorized, "unauthorized", "")
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 		defer func() { _ = r.Body.Close() }()
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
-			if err.Error() == "http: request body too large" {
-				http.Error(w, `{"error":"payload too large"}`, http.StatusRequestEntityTooLarge)
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				writeError(w, http.StatusRequestEntityTooLarge, "payload too large", "")
 				return
 			}
-			http.Error(w, `{"error":"read error"}`, http.StatusBadRequest)
+			writeError(w, http.StatusBadRequest, "read error", err.Error())
 			return
 		}
 		// agent.Pusher always gzips (internal/agent/pusher.go's buildRequest)
@@ -61,7 +80,7 @@ func IngestHandler(auth *Auth, inv *Inventory, pipeline *Pipeline) http.HandlerF
 		if r.Header.Get("Content-Encoding") == "gzip" {
 			gz, gzErr := gzip.NewReader(bytes.NewReader(body))
 			if gzErr != nil {
-				http.Error(w, `{"error":"invalid gzip body"}`, http.StatusBadRequest)
+				writeError(w, http.StatusBadRequest, "invalid gzip body", gzErr.Error())
 				return
 			}
 			// LimitReader at maxDecompressedBytes+1 so an envelope that
@@ -71,12 +90,12 @@ func IngestHandler(auth *Auth, inv *Inventory, pipeline *Pipeline) http.HandlerF
 			body, err = io.ReadAll(io.LimitReader(gz, maxDecompressedBytes+1))
 			_ = gz.Close()
 			if err != nil {
-				http.Error(w, `{"error":"invalid gzip body"}`, http.StatusBadRequest)
+				writeError(w, http.StatusBadRequest, "invalid gzip body", err.Error())
 				return
 			}
 			if int64(len(body)) > maxDecompressedBytes {
 				IncIngestRejected("decompressed_too_large")
-				http.Error(w, `{"error":"payload too large"}`, http.StatusRequestEntityTooLarge)
+				writeError(w, http.StatusRequestEntityTooLarge, "payload too large", "decompressed body exceeds the limit")
 				return
 			}
 		}
@@ -84,22 +103,26 @@ func IngestHandler(auth *Auth, inv *Inventory, pipeline *Pipeline) http.HandlerF
 		dec := json.NewDecoder(bytes.NewReader(body))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&env); err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":"bad json: %v"}`, err), http.StatusBadRequest)
+			writeError(w, http.StatusBadRequest, "bad json", err.Error())
 			return
 		}
 		if env.ProtocolVersion < wire.ProtocolVersionMin || env.ProtocolVersion > wire.ProtocolVersionCurrent {
-			http.Error(w, fmt.Sprintf(`{"error":"unsupported protocol_version %d, supported range %d-%d"}`, env.ProtocolVersion, wire.ProtocolVersionMin, wire.ProtocolVersionCurrent), http.StatusBadRequest)
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("unsupported protocol_version %d, supported range %d-%d", env.ProtocolVersion, wire.ProtocolVersionMin, wire.ProtocolVersionCurrent), "")
 			return
 		}
 		// Check sent_at age
 		if time.Since(env.SentAt) > maxSampleAge {
-			http.Error(w, `{"error":"samples too old"}`, http.StatusBadRequest)
+			writeError(w, http.StatusBadRequest, "samples too old", "")
 			return
 		}
-		// Clock skew detection (log, not reject)
-		skewed := env.SentAt.After(time.Now().Add(futureSkewThreshold))
+		// Clock skew detection (log, not reject). Measured against the
+		// moment the agent transmitted the request, not SentAt: an envelope
+		// replayed from the agent's buffer after an outage was queued hours
+		// ago, and that delay is not skew.
+		env.TransmittedAt = transmittedAt(r, env.SentAt)
+		skewed := env.TransmittedAt.After(time.Now().Add(futureSkewThreshold))
 		if skewed {
-			ObserveAgentClockSkew(time.Since(env.SentAt).Seconds())
+			ObserveAgentClockSkew(time.Since(env.TransmittedAt).Seconds())
 		}
 
 		ctx := r.Context()
@@ -113,18 +136,18 @@ func IngestHandler(auth *Auth, inv *Inventory, pipeline *Pipeline) http.HandlerF
 		// token" (internal/agent/pusher.go's pushOne).
 		revoked, err := inv.IsRevoked(ctx, env.AgentID)
 		if err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":"revocation check failed: %v"}`, err), http.StatusInternalServerError)
+			writeError(w, http.StatusInternalServerError, "revocation check failed", err.Error())
 			return
 		}
 		if revoked {
-			http.Error(w, `{"error":"revoked"}`, http.StatusUnauthorized)
+			writeError(w, http.StatusUnauthorized, "revoked", "")
 			return
 		}
 
 		invRes, err := inv.Upsert(ctx, env)
 		if err != nil {
 			IncIngestRejected("inventory_error")
-			http.Error(w, fmt.Sprintf(`{"error":"inventory error: %v"}`, err), http.StatusInternalServerError)
+			writeError(w, http.StatusInternalServerError, "inventory error", err.Error())
 			return
 		}
 		filtered := env
@@ -140,7 +163,7 @@ func IngestHandler(auth *Auth, inv *Inventory, pipeline *Pipeline) http.HandlerF
 		pipeRes, err := pipeline.Process(ctx, filtered)
 		if err != nil {
 			IncIngestRejected("pipeline_error")
-			http.Error(w, fmt.Sprintf(`{"error":"pipeline error: %v"}`, err), http.StatusInternalServerError)
+			writeError(w, http.StatusInternalServerError, "pipeline error", err.Error())
 			return
 		}
 		accepted := pipeRes.Accepted

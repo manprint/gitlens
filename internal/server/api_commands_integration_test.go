@@ -161,14 +161,31 @@ func TestINTCMD009_PgstattupleResultPersistsBloat(t *testing.T) {
 	pool := getSharedPool(t)
 	instanceID, agentID := seedCommandInstance(t, pool)
 	router := commandsIntegrationRouter(pool)
-	completeCommand(t, router, instanceID, agentID, `{"kind":"pgstattuple","args":{"datname":"postgres","schema":"public","relation":"items"}}`, `{"claim_token":"00000000-0000-0000-0000-000000000000","outcome":"ok","result":{"table_len":100,"tuple_len":60,"free_percent":40}}`)
-	var method, objectKind string
-	var bloat, realBytes int64
-	require.NoError(t, pool.QueryRow(context.Background(), `SELECT method, object_kind, real_bytes, bloat_bytes FROM metrics_bloat WHERE instance_id=$1`, instanceID).Scan(&method, &objectKind, &realBytes, &bloat))
+	completeCommand(t, router, instanceID, agentID, `{"kind":"pgstattuple","args":{"datname":"postgres","schema":"public","relation":"items"}}`, `{"claim_token":"00000000-0000-0000-0000-000000000000","outcome":"ok","result":{"datname":"postgres","table_len":100,"tuple_len":55,"dead_tuple_len":15,"free_space":25,"free_percent":25}}`)
+	var method, objectKind, datname string
+	var bloat, realBytes, expected int64
+	var ratio float64
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT method, object_kind, datname, real_bytes, expected_bytes, bloat_bytes, bloat_ratio FROM metrics_bloat WHERE instance_id=$1`, instanceID).Scan(&method, &objectKind, &datname, &realBytes, &expected, &bloat, &ratio))
 	require.Equal(t, "pgstattuple", method)
 	require.Equal(t, "table", objectKind)
+	require.Equal(t, "postgres", datname)
 	require.Equal(t, int64(100), realBytes)
-	require.Equal(t, int64(40), bloat)
+	require.Equal(t, int64(40), bloat, "dead tuples plus free space")
+	require.Equal(t, int64(60), expected, "real minus bloat, as for the estimate")
+	require.InDelta(t, 0.4, ratio, 1e-9, "bloat over real size, not free space alone")
+}
+
+// TestINTCMD013_PgstattupleWithoutDatnameUsesTheScannedDatabase: a command
+// that names no database runs in the target's own, and its measurement was
+// filed under an empty database name.
+func TestINTCMD013_PgstattupleWithoutDatnameUsesTheScannedDatabase(t *testing.T) {
+	pool := getSharedPool(t)
+	instanceID, agentID := seedCommandInstance(t, pool)
+	router := commandsIntegrationRouter(pool)
+	completeCommand(t, router, instanceID, agentID, `{"kind":"pgstattuple","args":{"schema":"public","relation":"items"}}`, `{"claim_token":"00000000-0000-0000-0000-000000000000","outcome":"ok","result":{"datname":"appdb","table_len":8192,"dead_tuple_len":0,"free_space":0}}`)
+	var datname string
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT datname FROM metrics_bloat WHERE instance_id=$1`, instanceID).Scan(&datname))
+	require.Equal(t, "appdb", datname)
 }
 
 func TestINTPLAN001_SamePlanIsDeduplicated(t *testing.T) {
@@ -206,7 +223,9 @@ func TestINTPLAN002_DifferentPlanCreatesHistoryShape(t *testing.T) {
 	require.False(t, response.Plans[1].Changed)
 }
 
-func TestINTCMD011_AuditHasOneRowPerTerminalOutcome(t *testing.T) {
+// TestINTCMD011_AuditRecordsRequestsAndTerminalOutcomes: one row per request
+// (with the credential that made it) and one per terminal outcome.
+func TestINTCMD011_AuditRecordsRequestsAndTerminalOutcomes(t *testing.T) {
 	pool := getSharedPool(t)
 	instanceID, agentID := seedCommandInstance(t, pool)
 	router := commandsIntegrationRouter(pool)
@@ -233,7 +252,18 @@ func TestINTCMD011_AuditHasOneRowPerTerminalOutcome(t *testing.T) {
 		counts[outcome]++
 	}
 	require.NoError(t, rows.Err())
-	require.Equal(t, map[string]int{"ok": 1, "error": 1, "rejected": 2}, counts)
+	require.Equal(t, map[string]int{"requested": 3, "ok": 1, "error": 1, "rejected": 2}, counts)
+	var requesters []string
+	requesterRows, err := pool.Query(context.Background(), `SELECT DISTINCT requested_by FROM command_audit WHERE instance_id=$1 AND outcome='requested'`, instanceID)
+	require.NoError(t, err)
+	defer requesterRows.Close()
+	for requesterRows.Next() {
+		var who string
+		require.NoError(t, requesterRows.Scan(&who))
+		requesters = append(requesters, who)
+	}
+	require.NoError(t, requesterRows.Err())
+	require.Equal(t, []string{"api-token from 192.0.2.1"}, requesters)
 
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/instances/"+instanceID.String()+"/command-audit?limit=500", nil)
 	req.Header.Set("Authorization", "Bearer test-token")
@@ -242,5 +272,33 @@ func TestINTCMD011_AuditHasOneRowPerTerminalOutcome(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	var audit []auditItem
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &audit))
-	require.Len(t, audit, 4)
+	require.Len(t, audit, 7)
+}
+
+// TestINTCMD012_ReadingAnExpiredCommandExpiresIt: a command whose agent
+// never polled read as pending forever, and left no audit row.
+func TestINTCMD012_ReadingAnExpiredCommandExpiresIt(t *testing.T) {
+	pool := getSharedPool(t)
+	instanceID, _ := seedCommandInstance(t, pool)
+	router := commandsIntegrationRouter(pool)
+	ctx := context.Background()
+	commandID := uuid.New()
+	_, err := pool.Exec(ctx, `INSERT INTO commands (command_id, tenant_id, agent_id, instance_id, cluster_id, kind, args, state, expires_at, requested_by)
+		SELECT $1, tenant_id, agent_id, instance_id, cluster_id, 'terminate', '{"pid":7}', 'pending', now()-interval '1 second', 'ui-session 0badcafe from 10.0.0.9' FROM instances WHERE instance_id=$2`, commandID, instanceID)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/commands/"+commandID.String(), nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var got commandResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Equal(t, "expired", got.State)
+
+	var outcome, who, detail string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT outcome, requested_by, detail FROM command_audit WHERE command_id=$1`, commandID).Scan(&outcome, &who, &detail))
+	require.Equal(t, "expired", outcome)
+	require.Equal(t, "ui-session 0badcafe from 10.0.0.9", who)
+	require.Equal(t, "expired before the agent claimed it", detail)
 }

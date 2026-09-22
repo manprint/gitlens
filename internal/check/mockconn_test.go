@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -373,8 +374,8 @@ func TestStatStatementsCheck_Scrape_Happy(t *testing.T) {
 			q2 := "SELECT 2"
 			return &mockRows{
 				rows: []([]any){
-					{int64(1), int64(100), float64(10.5), int64(1000), int64(5000), int64(500), int64(0), &q1, false},
-					{int64(2), int64(200), float64(20.5), int64(2000), int64(15000), int64(1000), int64(512), &q2, false},
+					{int64(1), int64(100), float64(10.5), int64(1000), int64(5000), int64(500), int64(0), int64(0), &q1, int64(2)},
+					{int64(2), int64(200), float64(20.5), int64(2000), int64(15000), int64(1000), int64(512), int64(7), &q2, int64(2)},
 				},
 			}, nil
 		},
@@ -404,14 +405,12 @@ func TestStatStatementsCheck_Scrape_Happy(t *testing.T) {
 	}
 }
 
-// TestStatStatementsCheck_Scrape_NoExtension handles missing extension gracefully.
-func TestStatStatementsCheck_Scrape_NoExtension(t *testing.T) {
+// TestStatStatementsCheck_Scrape_NoExtensionAnywhere reports the missing view
+// instead of pretending the database ran no statements.
+func TestStatStatementsCheck_Scrape_NoExtensionAnywhere(t *testing.T) {
 	conn := &mockConn{
-		execFunc: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-			return pgconn.CommandTag{}, nil
-		},
 		queryFunc: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
-			return nil, fmt.Errorf("does not exist: pg_stat_statements")
+			return nil, &pgconn.PgError{Code: "42P01", Message: `relation "pg_stat_statements" does not exist`}
 		},
 	}
 
@@ -426,12 +425,9 @@ func TestStatStatementsCheck_Scrape_NoExtension(t *testing.T) {
 	}
 
 	check := &statStatementsCheck{selectors: newScopedSelectors(cardinality.Options{TopN: 50}), caches: make(map[string]*textCache)}
-	result, err := check.Scrape(context.Background(), target)
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-	if len(result.Metrics) != 0 {
-		t.Fatal("expected no metrics when extension missing")
+	_, err := check.Scrape(context.Background(), target)
+	if err == nil || !strings.Contains(err.Error(), "not installed") {
+		t.Fatalf("expected a not-installed error, got %v", err)
 	}
 }
 
@@ -453,16 +449,16 @@ func TestStatStatementsCheck_Scrape_CycleAdvancesAndForgetsStaleRetained(t *test
 	// even though it is still present in `in`.
 	rounds := [][][]any{
 		{
-			{int64(1), int64(100), float64(100), int64(1), int64(0), int64(0), int64(0), (*string)(nil), false},
+			{int64(1), int64(100), float64(100), int64(1), int64(0), int64(0), int64(0), int64(0), (*string)(nil), int64(1)},
 		},
 		{
-			{int64(1), int64(100), float64(100), int64(1), int64(0), int64(0), int64(0), (*string)(nil), false},
-			{int64(2), int64(200), float64(200), int64(1), int64(0), int64(0), int64(0), (*string)(nil), false},
+			{int64(1), int64(100), float64(100), int64(1), int64(0), int64(0), int64(0), int64(0), (*string)(nil), int64(2)},
+			{int64(2), int64(200), float64(200), int64(1), int64(0), int64(0), int64(0), int64(0), (*string)(nil), int64(2)},
 		},
 		{
-			{int64(1), int64(100), float64(100), int64(1), int64(0), int64(0), int64(0), (*string)(nil), false},
-			{int64(2), int64(200), float64(200), int64(1), int64(0), int64(0), int64(0), (*string)(nil), false},
-			{int64(3), int64(300), float64(300), int64(1), int64(0), int64(0), int64(0), (*string)(nil), false},
+			{int64(1), int64(100), float64(100), int64(1), int64(0), int64(0), int64(0), int64(0), (*string)(nil), int64(3)},
+			{int64(2), int64(200), float64(200), int64(1), int64(0), int64(0), int64(0), int64(0), (*string)(nil), int64(3)},
+			{int64(3), int64(300), float64(300), int64(1), int64(0), int64(0), int64(0), int64(0), (*string)(nil), int64(3)},
 		},
 	}
 	call := 0

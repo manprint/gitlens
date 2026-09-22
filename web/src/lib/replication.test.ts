@@ -6,8 +6,10 @@ import {
   buildGraph,
   detectAnomalies,
   hasGaps,
+  instanceLabel,
   layoutGraph,
   summariseSlots,
+  toSlotRows,
 } from './replication'
 
 const PRIMARY: ReplicationInstance = {
@@ -95,7 +97,11 @@ describe('buildGraph', () => {
     const graph = buildGraph(
       [PRIMARY],
       [
-        topology({ confidence: 'low', note: 'Endpoint could not be resolved', to: unknown }),
+        topology({
+          confidence: 'low',
+          note: 'The standby is not streaming from this upstream right now',
+          to: unknown,
+        }),
         topology({ confidence: 'low', to: unknown }),
       ],
     )
@@ -109,7 +115,7 @@ describe('buildGraph', () => {
     expect(graph.edges).toHaveLength(2)
     expect(graph.edges[0]).toMatchObject({
       from: PRIMARY.instance_id,
-      note: 'Endpoint could not be resolved',
+      note: 'The standby is not streaming from this upstream right now',
       to: `unresolved:${unknown}`,
     })
   })
@@ -159,6 +165,16 @@ describe('detectAnomalies', () => {
       noPrimary: [onlyStandby.instance_id],
       orphanStandbys: [onlyStandby.instance_id],
     })
+  })
+
+  it('UI-REPL-014 keeps an unresolved upstream as the parent of the standby that reported it', () => {
+    const reporter = standby('00000000-0000-4000-8000-000000000002', 'standby.example.test')
+    const graph = buildGraph(
+      [PRIMARY, reporter],
+      [topology({ from: reporter.instance_id, to: '00000000-0000-4000-8000-000000000099' })],
+    )
+
+    expect(detectAnomalies(graph).orphanStandbys).toEqual([])
   })
 
   it('UI-REPL-006 reports all primary ids for split brain', () => {
@@ -220,5 +236,56 @@ describe('summariseSlots', () => {
     ])
 
     expect(summary).toEqual({ inactive: 2, retainedBytesTotal: 400, worst: 'worst' })
+  })
+})
+
+describe('instanceLabel', () => {
+  it('UI-REPL-011 names a known instance by address and port and keeps anything else', () => {
+    expect(instanceLabel([PRIMARY], PRIMARY.instance_id)).toBe('primary.example.test:5432')
+    expect(instanceLabel([PRIMARY], 'walreceiver')).toBe('walreceiver')
+  })
+})
+
+describe('toSlotRows', () => {
+  const now = new Date('2026-08-31T12:00:00.000Z')
+  const slot = {
+    instance_id: PRIMARY.instance_id,
+    slot_name: 'standby_1',
+    slot_type: 'physical',
+    active: false,
+    wal_status: 'extended',
+    retained_bytes: 4096,
+    safe_wal_size_bytes: null,
+    last_active_at: '2026-08-31T11:00:00.000Z',
+    ts: '2026-08-31T11:59:50.000Z',
+  }
+
+  it('UI-REPL-012 counts an inactive slot from its last active reading', () => {
+    expect(toSlotRows([slot], [PRIMARY], now)).toEqual([
+      {
+        active: false,
+        inactiveAgeSeconds: 3_600,
+        name: 'standby_1',
+        owningInstance: 'primary.example.test:5432',
+        retainedBytes: 4096,
+        safeWalSizeBytes: null,
+        slotType: 'physical',
+        walStatus: 'extended',
+      },
+    ])
+  })
+
+  it('UI-REPL-013 leaves the age unknown for an active slot or one never seen active', () => {
+    const [active, neverActive] = toSlotRows(
+      [
+        { ...slot, active: true, last_active_at: slot.ts },
+        { ...slot, last_active_at: null },
+      ],
+      [],
+      now,
+    )
+    expect(active?.inactiveAgeSeconds).toBeNull()
+    expect(neverActive?.inactiveAgeSeconds).toBeNull()
+    expect(neverActive?.owningInstance).toBe(PRIMARY.instance_id)
   })
 })

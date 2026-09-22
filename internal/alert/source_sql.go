@@ -10,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/manprint/pglens/internal/store"
 )
 
 type queryer interface {
@@ -104,8 +106,15 @@ func (s *metricSource) Samples(ctx context.Context, r Rule, now time.Time) ([]Sa
 	// last_seen value directly. This keeps alert evaluation shared by all
 	// server replicas and, unlike an event-only rule, supplies the false
 	// sample needed to resolve the alert when the agent returns.
+	//
+	// An instance whose agent was revoked stops pushing by design: it is
+	// inapplicable, not down. It used to stay in the query and page as
+	// agent_down for as long as its row existed.
 	if r.Metric == "up" {
-		rows, err := s.db.Query(ctx, `SELECT cluster_id, instance_id, '' AS datname, CASE WHEN last_seen >= now() - interval '60 seconds' THEN 1.0 ELSE 0.0 END, last_seen FROM instances`)
+		rows, err := s.db.Query(ctx, `SELECT i.cluster_id, i.instance_id, '' AS datname,
+			CASE WHEN i.last_seen >= now() - interval '60 seconds' THEN 1.0 ELSE 0.0 END, i.last_seen,
+			a.revoked_at IS NOT NULL
+			FROM instances i JOIN agents a ON a.agent_id = i.agent_id`)
 		if err != nil {
 			return nil, fmt.Errorf("query staleness: %w", err)
 		}
@@ -117,8 +126,13 @@ func (s *metricSource) Samples(ctx context.Context, r Rule, now time.Time) ([]Sa
 			var datname string
 			var value float64
 			var ts time.Time
-			if err := rows.Scan(&cluster, &instance, &datname, &value, &ts); err != nil {
+			var revoked bool
+			if err := rows.Scan(&cluster, &instance, &datname, &value, &ts, &revoked); err != nil {
 				return nil, err
+			}
+			if revoked {
+				out = append(out, Sample{ClusterID: &cluster, InstanceID: &instance, Datname: datname, Value: value, TS: ts, Inapplicable: true})
+				continue
 			}
 			// last_seen already records when this outage began. Seed the
 			// stale sample at the rule boundary so agent_down's documented
@@ -136,6 +150,9 @@ func (s *metricSource) Samples(ctx context.Context, r Rule, now time.Time) ([]Sa
 		return nil, err
 	}
 	cutoff := now.Add(-lookback(s.interval))
+	if table == "metrics_replication" {
+		return s.replicationSamples(ctx, valueColumn, cutoff)
+	}
 	var query string
 	if table == "metrics" {
 		if r.Metric == "pg_deadlocks_total" {
@@ -146,15 +163,8 @@ func (s *metricSource) Samples(ctx context.Context, r Rule, now time.Time) ([]Sa
 		} else {
 			query = `SELECT DISTINCT ON (cluster_id, instance_id, datname) cluster_id, instance_id, datname, value, ts FROM metrics WHERE metric = $1 AND ts >= $2 ORDER BY cluster_id, instance_id, datname, ts DESC`
 		}
-	} else {
-		query = fmt.Sprintf(`SELECT DISTINCT ON (cluster_id, instance_id) cluster_id, instance_id, '' AS datname, %s, ts FROM %s WHERE ts >= $1 ORDER BY cluster_id, instance_id, ts DESC`, valueColumn, table)
 	}
-	var rows pgx.Rows
-	if table == "metrics" {
-		rows, err = s.db.Query(ctx, query, r.Metric, cutoff)
-	} else {
-		rows, err = s.db.Query(ctx, query, cutoff)
-	}
+	rows, err := s.db.Query(ctx, query, r.Metric, cutoff)
 	if err != nil {
 		return nil, fmt.Errorf("query metric %s: %w", r.Metric, err)
 	}
@@ -174,45 +184,134 @@ func (s *metricSource) Samples(ctx context.Context, r Rule, now time.Time) ([]Sa
 	return out, rows.Err()
 }
 
+// latestStandbys is the newest reading of every standby in the lookback
+// window ($1), one row each. metrics_replication describes a standby twice
+// when both ends are monitored: the primary's pg_stat_replication row
+// (source 'sender', instance_id the primary, slot_name the standby's
+// application_name) and the standby's own receiver row (instance_id the
+// standby, upstream_id the primary). The primary's view is kept, since it is
+// the only one that carries write and flush lag, bytes lag and sync_state;
+// a receiver row counts only when its upstream reports no standby at all
+// (an upstream that is not monitored). Slot rows describe slots, not
+// standbys, and are left out: they carry no lag, and the NULL lag of a slot
+// row that happened to be the newest row of its instance failed the scan of
+// the whole rule.
+func latestStandbys(valueColumn string) string {
+	return `WITH r AS (
+  SELECT cluster_id, instance_id, upstream_id, slot_name, ` + store.ReplicationSourceSQL + ` AS src,
+         ` + valueColumn + `::float8 AS value, sync_state, ts
+    FROM metrics_replication
+   WHERE ts >= $1
+), latest AS (
+  SELECT DISTINCT ON (instance_id, slot_name, src) *
+    FROM r
+   WHERE src IN ('sender', 'receiver') AND value IS NOT NULL
+   ORDER BY instance_id, slot_name, src, ts DESC
+), standbys AS (
+  SELECT * FROM latest l
+   WHERE l.src = 'sender'
+      OR NOT EXISTS (SELECT 1 FROM r s WHERE s.src = 'sender' AND s.instance_id = l.upstream_id)
+)`
+}
+
+// replicationSamples serves the per-instance rules on metrics_replication:
+// one sample per standby, or per slot for slot_retained_bytes. It used to
+// keep one row per instance, whichever was newest, so a primary with several
+// standbys was judged on an arbitrary one of them (the value flipped from one
+// evaluation to the next, and a lagging standby could hide behind a healthy
+// one), and a slot row, whose lag columns are NULL, failed the scan and with
+// it the whole rule. A primary's reading of a standby is labelled with the
+// standby's name; a standby reading itself is its own subject.
+func (s *metricSource) replicationSamples(ctx context.Context, valueColumn string, cutoff time.Time) ([]Sample, error) {
+	query := latestStandbys(valueColumn) + `
+SELECT cluster_id, instance_id, slot_name, src, value, ts FROM standbys`
+	if strings.HasPrefix(valueColumn, "slot_") {
+		query = `SELECT DISTINCT ON (instance_id, slot_name) cluster_id, instance_id, slot_name, 'slot', ` + valueColumn + `::float8, ts
+  FROM metrics_replication
+ WHERE ts >= $1 AND ` + store.ReplicationSourceSQL + ` = 'slot' AND ` + valueColumn + ` IS NOT NULL
+ ORDER BY instance_id, slot_name, ts DESC`
+	}
+	rows, err := s.db.Query(ctx, query, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("query replication %s: %w", valueColumn, err)
+	}
+	defer rows.Close()
+	var out []Sample
+	for rows.Next() {
+		var cluster int64
+		var instance uuid.UUID
+		var name, source string
+		var value float64
+		var ts time.Time
+		if err := rows.Scan(&cluster, &instance, &name, &source, &value, &ts); err != nil {
+			return nil, err
+		}
+		var labels map[string]string
+		switch source {
+		case "sender":
+			labels = map[string]string{"standby": name}
+		case "slot":
+			labels = map[string]string{"slot_name": name}
+		}
+		out = append(out, Sample{ClusterID: &cluster, InstanceID: &instance, Labels: labels, Value: value, TS: ts})
+	}
+	return out, rows.Err()
+}
+
 // clusterSamples aggregates the cluster-scoped replication rules over the
 // latest reading of each standby in each cluster. The samples carry
 // ClusterID only (InstanceID stays nil) so alert.Key keys them per cluster,
 // and a sample is produced for every cluster that has standbys — including
 // when the condition is false, which is what lets the alert resolve.
 func (s *metricSource) clusterSamples(ctx context.Context, r Rule, now time.Time) ([]Sample, error) {
-	// DISTINCT ON keeps the newest row per standby: metrics_replication holds
-	// one row per (primary instance, standby slot) per scrape.
-	const latest = `WITH latest AS (
-  SELECT DISTINCT ON (instance_id, slot_name)
-         cluster_id, replay_lag_sec, sync_state, ts
-    FROM metrics_replication
-   WHERE ts >= $1
-   ORDER BY instance_id, slot_name, ts DESC
-)`
 	var query string
 	switch r.ID {
 	case "replica.all_standbys_lagging":
 		// min() over the cluster's standbys: greater than the threshold means
 		// every one of them is above it.
-		query = latest + `
-SELECT cluster_id, min(replay_lag_sec)::float8 AS value, max(ts) AS ts
-  FROM latest
- WHERE replay_lag_sec IS NOT NULL
+		query = latestStandbys("replay_lag_sec") + `
+SELECT cluster_id, min(value) AS value, max(ts) AS ts, true
+  FROM standbys
  GROUP BY cluster_id`
 	case "replica.no_sync_standby":
 		// The rule's pg_sync_standby_count is not an ingest metric: no check
 		// emits it, and the count is derived here from the sync_state the
 		// primary reports for each of its standbys.
-		query = latest + `
-SELECT cluster_id,
-       count(*) FILTER (WHERE sync_state IN ('sync', 'quorum'))::float8 AS value,
-       max(ts) AS ts
-  FROM latest
- GROUP BY cluster_id`
+		//
+		// The rule applies to a cluster whose primary lists synchronous
+		// standbys (synchronous_standby_names), and to no other. It used to
+		// count every cluster with a replication row, so each asynchronous
+		// cluster paged "no synchronous standby" around the clock; and a
+		// synchronous primary that had lost its every standby has no
+		// pg_stat_replication row left to count, so it was the one case that
+		// never produced a sample. The required clusters now drive the
+		// query; the others still get an inapplicable sample, which resolves
+		// the alert of a cluster switched to asynchronous replication.
+		query = latestStandbys("0") + `,
+required AS (
+  SELECT DISTINCT i.cluster_id
+    FROM instances i
+    JOIN object_facts f ON f.instance_id = i.instance_id AND f.kind = 'setting' AND f.key = 'synchronous_standby_names'
+   WHERE i.role = 'primary' AND i.last_seen >= $1 AND btrim(COALESCE(f.value_text, '')) <> ''
+), counted AS (
+  SELECT cluster_id,
+         count(*) FILTER (WHERE sync_state IN ('sync', 'quorum'))::float8 AS value,
+         max(ts) AS ts
+    FROM standbys
+   WHERE src = 'sender'
+   GROUP BY cluster_id
+)
+SELECT c.cluster_id, COALESCE(n.value, 0), COALESCE(n.ts, $2), c.cluster_id IN (SELECT cluster_id FROM required)
+  FROM (SELECT cluster_id FROM required UNION SELECT cluster_id FROM counted) c
+  LEFT JOIN counted n ON n.cluster_id = c.cluster_id`
 	default:
 		return nil, fmt.Errorf("unsupported cluster alert rule aggregation: %s", r.ID)
 	}
-	rows, err := s.db.Query(ctx, query, now.Add(-lookback(s.interval)))
+	args := []any{now.Add(-lookback(s.interval))}
+	if r.ID == "replica.no_sync_standby" {
+		args = append(args, now)
+	}
+	rows, err := s.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query cluster metric %s: %w", r.Metric, err)
 	}
@@ -222,10 +321,11 @@ SELECT cluster_id,
 		var cluster int64
 		var value float64
 		var ts time.Time
-		if err := rows.Scan(&cluster, &value, &ts); err != nil {
+		var applicable bool
+		if err := rows.Scan(&cluster, &value, &ts, &applicable); err != nil {
 			return nil, err
 		}
-		out = append(out, Sample{ClusterID: &cluster, Value: value, TS: ts})
+		out = append(out, Sample{ClusterID: &cluster, Value: value, TS: ts, Inapplicable: !applicable})
 	}
 	return out, rows.Err()
 }

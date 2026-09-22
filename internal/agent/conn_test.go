@@ -2,8 +2,13 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,6 +16,7 @@ import (
 	"github.com/pashagolub/pgxmock/v4"
 	"github.com/stretchr/testify/require"
 
+	"github.com/manprint/pglens/internal/identity"
 	"github.com/manprint/pglens/internal/pgtype"
 )
 
@@ -105,13 +111,12 @@ func TestManager_AddrPort_InvalidDSN(t *testing.T) {
 	}
 }
 
-// TestManager_AgentID_ZeroValueOnConnectFailure: AgentID() (like the
-// pre-existing InstanceID()) must degrade to the zero value rather than
-// panic or block when ensureCache can't reach the database at all — pgxpool
-// connects lazily, so NewManager itself succeeds against a merely-parseable
-// DSN; the real connection attempt (and its failure) only happens inside
-// ensureCache, which is exactly the path AgentID()/InstanceID() share.
-func TestManager_AgentID_ZeroValueOnConnectFailure(t *testing.T) {
+// TestManager_AgentID_DoesNotBlockOnUnreachableTarget: the agent id comes
+// from the local identity store, so an unreachable database neither delays
+// it nor, since the identity stopped depending on the target, zeroes it
+// (see TestManager_IdentityDoesNotNeedTheTarget).
+func TestManager_AgentID_DoesNotBlockOnUnreachableTarget(t *testing.T) {
+	t.Setenv("PGLENS_IDENTITY_PATH", filepath.Join(t.TempDir(), "identity.json"))
 	ctx := context.Background()
 	mgr, err := NewManager(ctx, "unreachable-target", "postgres://user:pass@127.0.0.1:1/nonexistent?connect_timeout=1", DefaultConnOptions(), nil)
 	require.NoError(t, err)
@@ -121,7 +126,7 @@ func TestManager_AgentID_ZeroValueOnConnectFailure(t *testing.T) {
 	go func() { done <- mgr.AgentID() }()
 	select {
 	case id := <-done:
-		require.Equal(t, uuid.Nil, id)
+		require.NotEqual(t, uuid.Nil, id)
 	case <-time.After(15 * time.Second):
 		t.Fatal("AgentID() did not return within 15s against an unreachable database")
 	}
@@ -243,4 +248,47 @@ func TestSelection_Deterministic(t *testing.T) {
 			t.Errorf("non-deterministic: run 1 had %v, run 2 had %v", order1, order2)
 		}
 	}
+}
+
+// TestManager_IdentityDoesNotNeedTheTarget covers an agent starting while its
+// targets are down: both identities come from the local identity file, and
+// two targets initialising at once must both keep their instance id.
+func TestManager_IdentityDoesNotNeedTheTarget(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "identity.json")
+	t.Setenv("PGLENS_IDENTITY_PATH", path)
+	ctx := context.Background()
+	var managers []*Manager
+	for i, dsn := range []string{
+		"postgres://pglens@127.0.0.1:1/postgres?connect_timeout=1",
+		"postgres://pglens@127.0.0.1:2/postgres?connect_timeout=1",
+	} {
+		m, err := NewManager(ctx, fmt.Sprintf("down-%d", i), dsn, DefaultConnOptions(), nil)
+		require.NoError(t, err)
+		defer m.Close()
+		managers = append(managers, m)
+	}
+
+	ids := make([]pgtype.InstanceID, len(managers))
+	var wg sync.WaitGroup
+	for i, m := range managers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ids[i] = m.InstanceID()
+		}()
+	}
+	wg.Wait()
+
+	require.NotEqual(t, uuid.Nil, managers[0].AgentID(), "the dispatcher needs an agent id even with every target down")
+	require.Equal(t, managers[0].AgentID(), managers[1].AgentID())
+	require.NotEqual(t, uuid.Nil, ids[0])
+	require.NotEqual(t, uuid.Nil, ids[1])
+	require.NotEqual(t, ids[0], ids[1])
+	require.Equal(t, ids[0], managers[0].InstanceID(), "the instance id is stable")
+
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var persisted identity.File
+	require.NoError(t, json.Unmarshal(raw, &persisted))
+	require.Len(t, persisted.Instances, 2, "neither concurrent allocation may erase the other")
 }

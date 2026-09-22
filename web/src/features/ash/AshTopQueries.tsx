@@ -11,6 +11,9 @@ interface AshTopQueriesProps {
   from: Date
   instanceId: string
   to: Date
+  /** The drilled wait event, so the list ranks the queries seen in it. */
+  waitEvent?: string
+  waitEventType?: string
 }
 
 function queryPath(instanceId: string, queryid: string): string {
@@ -38,13 +41,33 @@ function QueryRow({ instanceId, query }: { instanceId: string; query: AshTopQuer
   )
 }
 
-export function AshTopQueries({ database, from, instanceId, to }: AshTopQueriesProps) {
+function scopeDescription(waitEventType?: string, waitEvent?: string): string {
+  if (waitEvent !== undefined) {
+    return waitEventType === undefined
+      ? `Ranked by samples in wait event ${waitEvent}.`
+      : `Ranked by samples in wait event ${waitEventType}/${waitEvent}.`
+  }
+  return waitEventType === undefined
+    ? 'Ranked by samples across every wait event.'
+    : `Ranked by samples in wait event type ${waitEventType}.`
+}
+
+export function AshTopQueries({
+  database,
+  from,
+  instanceId,
+  to,
+  waitEvent,
+  waitEventType,
+}: AshTopQueriesProps) {
   const params = {
     from: from.toISOString(),
     instance_id: instanceId,
     limit: 20,
     to: to.toISOString(),
     ...(database === undefined ? {} : { database }),
+    ...(waitEventType === undefined ? {} : { wait_event_type: waitEventType }),
+    ...(waitEvent === undefined ? {} : { wait_event: waitEvent }),
   }
   const query = useAshTop(params)
 
@@ -71,7 +94,7 @@ export function AshTopQueries({ database, from, instanceId, to }: AshTopQueriesP
   return (
     <Section
       title="Top queries"
-      description="Query text is the normalised text from pg_stat_statements. ASH never collects live query text; it collects only query_id. This deliberate PII decision means literal values are not available here."
+      description={`${scopeDescription(waitEventType, waitEvent)} Query text is the normalised text from pg_stat_statements. ASH never collects live query text; it collects only query_id. This deliberate PII decision means literal values are not available here.`}
     >
       {entries.length > 0 ? (
         <ol className="grid gap-3" aria-label="ASH top queries">

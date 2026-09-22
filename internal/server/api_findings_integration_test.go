@@ -65,3 +65,32 @@ func TestINTADV006_FindingsMuteLifecycle(t *testing.T) {
 		require.Equal(t, "open", state)
 	})
 }
+
+// TestINTADV007_FindingsListActiveBeforeInactive: a limit cuts muted and
+// resolved findings before an open one, whatever their severity.
+func TestINTADV007_FindingsListActiveBeforeInactive(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		pool := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		_, err := pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS findings (finding_id text NOT NULL, tenant_id text NOT NULL DEFAULT 'default', rule_id text NOT NULL, severity text NOT NULL, state text NOT NULL, scope text NOT NULL, cluster_id bigint, instance_id uuid, datname text NOT NULL DEFAULT '', object_name text NOT NULL DEFAULT '', title text NOT NULL, detail text NOT NULL, remediation text NOT NULL DEFAULT '', evidence jsonb NOT NULL DEFAULT '{}'::jsonb, degraded_reason text, first_seen timestamptz NOT NULL, last_seen timestamptz NOT NULL, resolved_at timestamptz, muted_until timestamptz, mute_reason text, PRIMARY KEY (tenant_id, finding_id))`)
+		require.NoError(t, err)
+		rule := fmt.Sprintf("integration.order%d", time.Now().UnixNano())
+		now := time.Now().UTC()
+		for _, f := range []struct{ id, severity, state string }{
+			{rule + "/resolved", "critical", "resolved"},
+			{rule + "/muted", "critical", "muted"},
+			{rule + "/open", "info", "open"},
+		} {
+			_, err = pool.Exec(ctx, `INSERT INTO findings(finding_id,rule_id,severity,state,scope,title,detail,first_seen,last_seen) VALUES ($1,$2,$3,$4,'instance','t','d',$5,$5)`, f.id, rule, f.severity, f.state, now)
+			require.NoError(t, err)
+		}
+		t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM findings WHERE rule_id=$1`, rule) })
+
+		rec := httptest.NewRecorder()
+		chiRouterForFindings(pool).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/findings?state=all&limit=1&rule_id="+rule, nil))
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Contains(t, rec.Body.String(), rule+"/open")
+		require.NotContains(t, rec.Body.String(), rule+"/resolved")
+	})
+}

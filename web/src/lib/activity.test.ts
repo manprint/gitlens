@@ -4,7 +4,6 @@ import {
   CONNECTION_SATURATION_THRESHOLD,
   breakdown,
   connectionSaturation,
-  counterRate,
   deadlockRate,
   hasReported,
   latestSampleAt,
@@ -61,19 +60,18 @@ describe('activity derivation', () => {
     expect(connectionSaturation({}).ratio).toBeNull()
   })
 
-  it('derives counter rates, including a reset, and aggregates deadlock label groups', () => {
-    expect(counterRate([metric(10, first), metric(12, second)])).toBeCloseTo(0.2)
-    expect(counterRate([metric(12, second)])).toBeNull()
+  it('sums the newest stored deadlock rate of every database', () => {
     expect(
       deadlockRate({
         pg_deadlocks_total: [
-          metric(10, first, { database: 'app' }),
-          metric(12, second, { database: 'app' }),
-          metric(4, first, { database: 'jobs' }),
-          metric(5, second, { database: 'jobs' }),
+          metric(0.5, first, { database: 'app' }),
+          metric(0.1, second, { database: 'app' }),
+          metric(0.4, first, { database: 'jobs' }),
+          metric(0.2, second, { database: 'jobs' }),
         ],
       }),
     ).toBeCloseTo(0.3)
+    expect(deadlockRate({ pg_deadlocks_total: [metric(null)] })).toBeNull()
     expect(deadlockRate({})).toBeNull()
   })
 

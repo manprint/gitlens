@@ -18,7 +18,7 @@ func ruleByID(t *testing.T, id string) Rule {
 }
 
 func statementSnapshot(q StatementStat) *Snapshot {
-	return &Snapshot{Statements: []StatementStat{q}, Metrics: map[string]map[string]float64{"work_mem_bytes": {"": 64}}}
+	return &Snapshot{Statements: []StatementStat{q}, Metrics: map[string]map[string]float64{}, Settings: map[string]string{"work_mem_bytes": "64"}}
 }
 
 func TestRule_query_slow_mean_FiresWhenAboveThreshold(t *testing.T) {
@@ -74,10 +74,10 @@ func TestRule_txn_long_running_QuietWhenBelow(t *testing.T) {
 	require.Empty(t, ruleByID(t, "txn.long_running").Evaluate(metricSnapshot("pg_max_xact_age_seconds", 900)))
 }
 func TestRule_txn_idle_in_transaction_FiresWhenAboveThreshold(t *testing.T) {
-	assertRuleContract(t, ruleByID(t, "txn.idle_in_transaction"), metricSnapshot("pg_max_idle_in_txn_seconds", 301))
+	assertRuleContract(t, ruleByID(t, "txn.idle_in_transaction"), metricSnapshot("pg_max_idle_in_transaction_seconds", 301))
 }
 func TestRule_txn_idle_in_transaction_QuietWhenBelow(t *testing.T) {
-	require.Empty(t, ruleByID(t, "txn.idle_in_transaction").Evaluate(metricSnapshot("pg_max_idle_in_txn_seconds", 300)))
+	require.Empty(t, ruleByID(t, "txn.idle_in_transaction").Evaluate(metricSnapshot("pg_max_idle_in_transaction_seconds", 300)))
 }
 func TestRule_txn_prepared_orphan_FiresWhenAboveThreshold(t *testing.T) {
 	assertRuleContract(t, ruleByID(t, "txn.prepared_orphan"), metricSnapshot("pg_oldest_prepared_xact_seconds", 3601))
@@ -96,6 +96,46 @@ func TestRule_txn_wraparound_risk_FiresWhenAboveThreshold(t *testing.T) {
 }
 func TestRule_txn_wraparound_risk_QuietWhenBelow(t *testing.T) {
 	require.Empty(t, ruleByID(t, "txn.wraparound_risk").Evaluate(metricSnapshot("pg_max_datfrozenxid_age", wraparoundAge)))
+}
+
+// TestRule_query_temp_bytes_high_ComparesWithWorkMem: without a work_mem
+// setting the PostgreSQL default applies, and a statement without calls is
+// skipped rather than divided by zero.
+func TestRule_query_temp_bytes_high_ComparesWithWorkMem(t *testing.T) {
+	r := ruleByID(t, "query.temp_bytes_high")
+	unknown := &Snapshot{Statements: []StatementStat{{QueryID: 1, Calls: 10, TempBytes: 10 * 1024 * 1024}}}
+	require.Empty(t, r.Evaluate(unknown), "1 MiB per call fits the default 4 MiB work_mem")
+	unknown.Statements[0].TempBytes = 100 * 1024 * 1024
+	require.Len(t, r.Evaluate(unknown), 1)
+	noCalls := &Snapshot{Statements: []StatementStat{{QueryID: 1, TempBytes: 1 << 30}}}
+	require.Empty(t, r.Evaluate(noCalls))
+}
+
+// TestRule_query_FindingsAreQualifiedByDatabase: one queryid in two
+// databases yields two findings with two identities.
+func TestRule_query_FindingsAreQualifiedByDatabase(t *testing.T) {
+	s := &Snapshot{Statements: []StatementStat{
+		{Datname: "app1", QueryID: 7, Calls: 10, MeanExecTimeMs: 900},
+		{Datname: "app2", QueryID: 7, Calls: 10, MeanExecTimeMs: 900},
+	}}
+	f := ruleByID(t, "query.slow_mean").Evaluate(s)
+	require.Len(t, f, 2)
+	require.NotEqual(t, f[0].ID(), f[1].ID())
+	require.Equal(t, "query.slow_mean/app1/queryid:7", f[0].ID())
+}
+
+// TestRule_txn_high_rollback_ratio_IsPerDatabase: database_stats labels the
+// ratio with its database; the rule read only the unlabelled series.
+func TestRule_txn_high_rollback_ratio_IsPerDatabase(t *testing.T) {
+	s := &Snapshot{Metrics: map[string]map[string]float64{"pg_xact_rollback_ratio": {
+		"database=app": .5,
+		"database=ok":  .01,
+	}}}
+	f := ruleByID(t, "txn.high_rollback_ratio").Evaluate(s)
+	require.Len(t, f, 1)
+	require.Equal(t, "app", f[0].Datname)
+	require.Equal(t, "txn.high_rollback_ratio/app", f[0].ID())
+	require.Equal(t, "app", canonicalLabel("a=1\x1fdatabase=app", "database"))
 }
 
 func TestPackA_AllRulesSatisfyContract(t *testing.T) {

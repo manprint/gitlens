@@ -73,6 +73,20 @@ export interface ServerReplicationSlot {
 
 export type ReplicationSlotInput = ReplicationSlot | ServerReplicationSlot
 
+/** One slot as the cluster page lists it. */
+export interface SlotRow {
+  name: string
+  owningInstance: string
+  slotType: string | null
+  active: boolean | null
+  walStatus: string | null
+  retainedBytes: number | null
+  safeWalSizeBytes: number | null
+  inactiveAgeSeconds: number | null
+}
+
+export type ClusterSlot = Schemas['Slot']
+
 export interface SlotSummary {
   inactive: number
   retainedBytesTotal: number
@@ -156,10 +170,11 @@ function edgeParentChild(
   const to = nodes.get(edge.to)
   if (from?.role === 'primary' && to?.role !== 'primary') return [edge.from, edge.to]
   if (to?.role === 'primary' && from?.role !== 'primary') return [edge.to, edge.from]
-  if (from?.unresolved && !to?.unresolved) return [edge.to, edge.from]
-  if (to?.unresolved && !from?.unresolved) return [edge.from, edge.to]
 
-  // The API stores the reporting standby in `from` and its upstream in `to`.
+  // The API stores the reporting standby in `from` and its upstream in `to`,
+  // and an upstream missing from the instance list is still the upstream:
+  // treating the unresolved end as the child made the standby that reported
+  // the edge look as if it had no upstream at all.
   return [edge.to, edge.from]
 }
 
@@ -330,4 +345,43 @@ export function summariseSlots(slots: readonly ReplicationSlotInput[]): SlotSumm
     retainedBytesTotal,
     worst: worst?.name ?? null,
   }
+}
+
+/**
+ * A readable name for an instance: its address and port when the cluster
+ * lists it, the raw value otherwise. A replication edge's standby can be an
+ * application_name no monitored instance matches, and stays as reported.
+ */
+export function instanceLabel(instances: readonly ReplicationInstance[], id: string): string {
+  const instance = instances.find((candidate) => candidate.instance_id === id)
+  if (!instance?.addr) return id
+  return instance.port ? `${instance.addr}:${instance.port}` : instance.addr
+}
+
+/**
+ * Maps the slots endpoint to table rows. An inactive slot's age is counted
+ * from its last active reading; it is unknown when none is retained.
+ */
+export function toSlotRows(
+  slots: readonly ClusterSlot[],
+  instances: readonly ReplicationInstance[],
+  now: Date,
+): SlotRow[] {
+  return slots.map((slot) => {
+    const lastActive = slot.last_active_at ? Date.parse(slot.last_active_at) : Number.NaN
+    const inactiveAgeSeconds =
+      slot.active === false && Number.isFinite(lastActive)
+        ? Math.max(0, Math.round((now.getTime() - lastActive) / 1_000))
+        : null
+    return {
+      active: slot.active,
+      inactiveAgeSeconds,
+      name: slot.slot_name,
+      owningInstance: instanceLabel(instances, slot.instance_id),
+      retainedBytes: slot.retained_bytes,
+      safeWalSizeBytes: slot.safe_wal_size_bytes,
+      slotType: slot.slot_type,
+      walStatus: slot.wal_status,
+    }
+  })
 }

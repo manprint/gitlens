@@ -228,6 +228,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		var instEvents []store.EventRow
 		var instFacts []store.ObjectFactRow
 		var clearCheckSkips []string
+		partialState := make(map[partialKey]partialObservation)
 		var instLockSnapshot *store.LockSnapshotRow
 		tableMap := make(map[tableStatKey]*store.TableStatRow)
 		indexMap := make(map[indexStatKey]*store.IndexStatRow)
@@ -318,10 +319,21 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 			} else if r.Error == "" {
 				clearCheckSkips = append(clearCheckSkips, r.Check)
 			}
-			if r.Error == "" && !r.Truncated {
+			// Only a complete sample says which relations exist: a partial
+			// one (the agent's top-N) or a truncated one (its hard cap)
+			// leaves out relations that are still there, and a skipped or
+			// failed one says nothing at all.
+			complete := r.Error == "" && r.SkipReason == "" && !r.Truncated && !r.Partial
+			if complete {
 				switch dest := destinationTable(r.Check); dest {
 				case "metrics_tables", "metrics_indexes", "metrics_bloat":
-					instRelationPrunes = append(instRelationPrunes, store.RelationStatsPrune{TableName: dest, TenantID: tenantID, InstanceID: instUUID, Datname: r.Database, Before: r.TS})
+					instRelationPrunes = append(instRelationPrunes, store.RelationStatsPrune{TableName: dest, TenantID: tenantID, InstanceID: instUUID, Datname: r.Database, Before: r.TS, Present: presentRelations(r.Metrics)})
+				}
+			}
+			if r.Error == "" && r.SkipReason == "" {
+				pk := partialKey{check: r.Check, datname: r.Database}
+				if latest, seen := partialState[pk]; !seen || !r.TS.Before(latest.ts) {
+					partialState[pk] = partialObservation{ts: r.TS, partial: r.Partial, truncated: r.Truncated}
 				}
 			}
 			if r.Error != "" {
@@ -364,6 +376,14 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 					raw = append([]byte(nil), f.ValueJSON...)
 				}
 				instFacts = append(instFacts, store.ObjectFactRow{TenantID: tenantID, ClusterID: cidDB, InstanceID: instUUID, Datname: r.Database, Kind: f.Kind, Key: f.Key, Labels: f.Labels, ValueText: text, ValueJSON: raw, FirstSeen: r.TS, LastSeen: r.TS, ChangedAt: r.TS})
+			}
+			// A base backup is visible only while it streams. The last time
+			// one was seen is kept as a fact, so the advisor can tell "no
+			// backup this week" from "no backup right now" without scanning
+			// a month of samples.
+			if jobs := runningBasebackups(r); jobs > 0 {
+				value := strconv.Itoa(jobs)
+				instFacts = append(instFacts, store.ObjectFactRow{TenantID: tenantID, ClusterID: cidDB, InstanceID: instUUID, Kind: "backup", Key: "basebackup_running", ValueText: &value, FirstSeen: r.TS, LastSeen: r.TS, ChangedAt: r.TS})
 			}
 			// QueryTexts upsert
 			for qidStr, text := range r.QueryTexts {
@@ -408,7 +428,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 					continue
 				}
 				kind := pgtype.MetricKind(m.Kind)
-				var value float64
+				var value, sampleSeconds float64
 				var skip bool
 				switch kind {
 				case pgtype.KindGauge:
@@ -450,6 +470,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 						skip = true
 					} else {
 						value = pt.Rate
+						sampleSeconds = pt.Seconds
 					}
 				default:
 					instErr = fmt.Errorf("unknown metric kind %q for metric %q", m.Kind, m.Name)
@@ -522,8 +543,13 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 						stmtMap[sk] = row
 					}
 					applyStatementMetric(row, m.Name, value)
+					if sampleSeconds > 0 && row.SampleSeconds == nil {
+						v := sampleSeconds
+						row.SampleSeconds = &v
+					}
 				case "metrics_replication":
-					rk := replicationKey{ts: r.TS, slot: replicationSlot(m.Labels), datname: r.Database}
+					source := replicationSource(r.Check)
+					rk := replicationKey{ts: r.TS, slot: replicationSlot(m.Labels), datname: r.Database, source: source}
 					row, ok := replMap[rk]
 					if !ok {
 						row = &store.ReplicationRow{
@@ -533,6 +559,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 							InstanceID: instUUID,
 							SlotName:   rk.slot,
 							EdgeType:   "streaming",
+							Source:     source,
 						}
 						// No check has ever set an "upstream_id" label (checked:
 						// replication_receiver.go/replication_streaming.go's
@@ -544,11 +571,17 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 						// the same resolved edge topoEdges already computed
 						// above for this instance (at most one, in every
 						// topology this plan tests).
+						//
+						// Only a receiver row describes this instance's own
+						// upstream. A sender row describes one of its
+						// standbys and a slot row one of its slots: giving
+						// them this instance's upstream (a cascading standby
+						// has one) filed them under the wrong edge.
 						if s, ok := m.Labels["upstream_id"]; ok {
 							if uid, err := uuid.Parse(s); err == nil {
 								row.UpstreamID = &uid
 							}
-						} else if len(topoEdges) > 0 {
+						} else if source == "receiver" && len(topoEdges) > 0 {
 							to := topoEdges[0].To
 							row.UpstreamID = &to
 						}
@@ -628,6 +661,26 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 			if err := store.DeleteCheckSkipFacts(ctx, tx, tenantID, instUUID, checkName); err != nil {
 				return nil, err
 			}
+		}
+		// A check whose latest result left something out keeps a
+		// check_partial fact, which the read APIs turn into their
+		// "truncated" flag; a complete result removes it again.
+		for pk, obs := range partialState {
+			if !obs.partial && !obs.truncated {
+				if err := store.DeleteCheckPartialFact(ctx, tx, tenantID, instUUID, pk.datname, pk.check); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			value := "partial"
+			if obs.truncated {
+				value = "truncated"
+			}
+			objectFactRows = append(objectFactRows, store.ObjectFactRow{
+				TenantID: tenantID, ClusterID: cidDB, InstanceID: instUUID, Datname: pk.datname,
+				Kind: "check_partial", Key: pk.check, ValueText: &value,
+				FirstSeen: obs.ts, LastSeen: obs.ts, ChangedAt: obs.ts,
+			})
 		}
 		if instLockSnapshot != nil {
 			lockSnapshotRows = append(lockSnapshotRows, *instLockSnapshot)
@@ -744,12 +797,18 @@ func selfMetricRows(env wire.Envelope, inst wire.Instance, tenantID string, clus
 		{"pglens_check_error_rate", float64(failed) / total},
 		{"pglens_cardinality_truncated_rate", float64(truncated) / total},
 	}
-	// Skew is measured against the agent's own SentAt: a drifting agent clock
-	// corrupts every ts in the envelope, so it has to be durable and shared,
-	// not only a process-local gauge on whichever server replica happened to
-	// receive this one push.
-	if !env.SentAt.IsZero() {
-		skew := now.Sub(env.SentAt).Seconds()
+	// Skew is measured against the agent's own clock at transmission: a
+	// drifting agent clock corrupts every ts in the envelope, so it has to be
+	// durable and shared, not only a process-local gauge on whichever server
+	// replica happened to receive this one push. SentAt is only the fallback
+	// for agents that do not send the transmission time: it is when the
+	// envelope was queued, so a replay after an outage read as hours of skew.
+	sent := env.TransmittedAt
+	if sent.IsZero() {
+		sent = env.SentAt
+	}
+	if !sent.IsZero() {
+		skew := now.Sub(sent).Seconds()
 		if skew < 0 {
 			skew = -skew
 		}
@@ -837,6 +896,60 @@ type replicationKey struct {
 	ts      time.Time
 	slot    string
 	datname string
+	source  string
+}
+
+// partialKey and partialObservation track, per check and database, whether
+// the newest result in the envelope was complete.
+type partialKey struct {
+	check, datname string
+}
+
+type partialObservation struct {
+	ts                 time.Time
+	partial, truncated bool
+}
+
+// runningBasebackups is the number of base backups a result saw streaming.
+func runningBasebackups(r wire.Result) int {
+	if r.Error != "" || r.SkipReason != "" {
+		return 0
+	}
+	for _, m := range r.Metrics {
+		if m.Name == "pg_basebackup_jobs_running" && len(m.Labels) == 0 {
+			return int(m.Value)
+		}
+	}
+	return 0
+}
+
+// replicationSource names the view of replication a check reports.
+func replicationSource(check string) string {
+	switch check {
+	case "replication_receiver":
+		return "receiver"
+	case "replication_streaming":
+		return "sender"
+	case "replication_slots":
+		return "slot"
+	default:
+		return ""
+	}
+}
+
+// presentRelations lists the relations a relation check's metrics describe.
+func presentRelations(metrics []wire.Metric) []store.RelationKey {
+	seen := make(map[store.RelationKey]struct{})
+	var keys []store.RelationKey
+	for _, m := range metrics {
+		k := store.RelationKey{Schema: m.Labels["schemaname"], Relation: m.Labels["relname"], Index: m.Labels["indexrelname"]}
+		if _, dup := seen[k]; dup {
+			continue
+		}
+		seen[k] = struct{}{}
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 type tableStatKey struct {
@@ -890,6 +1003,18 @@ func applyTableMetric(row *store.TableStatRow, name string, value float64) {
 	case "last_vacuum_age_seconds":
 		x := value
 		row.LastVacuumAgeSeconds = &x
+		row.LastVacuum = ageToTime(row.TS, value)
+	// The agent reports each timestamp as an age at the scrape. Only the
+	// manual vacuum's was kept: last_vacuum, last_autovacuum, last_analyze
+	// and last_autoanalyze stayed NULL on every row, so every large table
+	// read as never vacuumed to the advisor, and a table vacuumed only by
+	// autovacuum showed no vacuum at all.
+	case "last_autovacuum_age_seconds":
+		row.LastAutovacuum = ageToTime(row.TS, value)
+	case "last_analyze_age_seconds":
+		row.LastAnalyze = ageToTime(row.TS, value)
+	case "last_autoanalyze_age_seconds":
+		row.LastAutoanalyze = ageToTime(row.TS, value)
 	case "relpages":
 		x := int64(value)
 		row.Relpages = &x
@@ -908,6 +1033,13 @@ func applyTableMetric(row *store.TableStatRow, name string, value float64) {
 		x := int64(value)
 		row.ToastBytes = &x
 	}
+}
+
+// ageToTime turns an age in seconds at a scrape back into the timestamp it
+// was measured from, at the microsecond precision of timestamptz.
+func ageToTime(ts time.Time, ageSeconds float64) *time.Time {
+	t := ts.Add(-time.Duration(ageSeconds * float64(time.Second))).Truncate(time.Microsecond)
+	return &t
 }
 
 func applyIndexMetric(row *store.IndexStatRow, name string, value float64, labels map[string]string) {
@@ -959,55 +1091,79 @@ func applyBloatMetric(row *store.BloatRow, name string, value float64) {
 	}
 }
 
+// replicationSlot names the row a replication metric belongs to: the slot,
+// or for a primary's view of a standby the standby's name. Agents before
+// protocol v3 sent that name as "standby", which nothing read, so all the
+// standbys of a primary collapsed into one row.
 func replicationSlot(labels map[string]string) string {
-	if v, ok := labels["slot_name"]; ok && v != "" {
-		return v
-	}
-	if v, ok := labels["slot"]; ok && v != "" {
-		return v
-	}
-	if v, ok := labels["application_name"]; ok && v != "" {
-		return v
+	for _, label := range []string{"slot_name", "slot", "application_name", "standby"} {
+		if v := labels[label]; v != "" {
+			return v
+		}
 	}
 	return ""
 }
 
 func applyStatementMetric(row *store.StatementRow, name string, value float64) {
 	lower := strings.ToLower(name)
+	v := value
 	switch {
+	case strings.Contains(lower, "temp_blks_written"):
+		row.TempBlksWrittenRate = &v
 	case strings.Contains(lower, "shared_blks_hit"):
-		v := value
 		row.SharedBlksHitRate = &v
 	case strings.Contains(lower, "shared_blks_read"):
-		v := value
 		row.SharedBlksReadRate = &v
 	case strings.Contains(lower, "wal_bytes"):
-		v := value
 		row.WALBytesRate = &v
 	case strings.Contains(lower, "exec_time") || strings.Contains(lower, "total_exec"):
-		v := value
 		row.ExecTimeRateMs = &v
 	case strings.Contains(lower, "calls"):
-		v := value
 		row.CallsRate = &v
-	case strings.Contains(lower, "rows"):
-		// Ensure not double-counting blks rows already handled
-		if !strings.Contains(lower, "blks") {
-			v := value
-			row.RowsRate = &v
-		}
-	default:
-		// Unknown statement metric: map to calls_rate as fallback so row is not empty
-		if row.CallsRate == nil {
-			v := value
-			row.CallsRate = &v
-		}
+	case strings.Contains(lower, "rows") && !strings.Contains(lower, "blks"):
+		row.RowsRate = &v
 	}
+	// Anything else is not stored. Unknown metrics used to be written as
+	// calls_rate, which then ranked statements by a number that was not
+	// their call rate.
 }
 
+// applyReplicationMetric fills the column a replication metric names. The
+// mapping is explicit: an unrecognised metric used to be stored as write lag
+// (replication_slot_safe_wal_size_bytes and a slot's active_pid both ended up
+// there), and a slot's WAL status, which arrives as the "status" label, was
+// never stored at all.
 func applyReplicationMetric(row *store.ReplicationRow, name string, value float64, labels map[string]string) {
 	lower := strings.ToLower(name)
+	if row.Source == "slot" || strings.Contains(lower, "slot_") {
+		if row.SlotWalStatus == nil {
+			for _, label := range []string{"slot_wal_status", "wal_status", "status"} {
+				if v := labels[label]; v != "" {
+					s := v
+					row.SlotWalStatus = &s
+					break
+				}
+			}
+		}
+		if row.SlotType == nil {
+			if v := labels["slot_type"]; v != "" {
+				s := v
+				row.SlotType = &s
+			}
+		}
+	}
 	switch {
+	case strings.Contains(lower, "slot_active_pid"):
+		// Not stored: a process id is not a measurement.
+	case strings.Contains(lower, "slot_safe_wal_size"):
+		v := int64(value)
+		row.SlotSafeWALSizeBytes = &v
+	case strings.Contains(lower, "slot_active"):
+		b := value != 0
+		row.SlotActive = &b
+	case strings.Contains(lower, "slot_retained") || strings.Contains(lower, "retained_bytes"):
+		v := int64(value)
+		row.SlotRetainedBytes = &v
 	case strings.Contains(lower, "write_lag_bytes"):
 		v := int64(value)
 		row.WriteLagBytes = &v
@@ -1026,39 +1182,13 @@ func applyReplicationMetric(row *store.ReplicationRow, name string, value float6
 	case strings.Contains(lower, "replay_lag") && strings.Contains(lower, "sec"):
 		v := value
 		row.ReplayLagSec = &v
-	case strings.Contains(lower, "slot_active"):
-		b := value != 0
-		row.SlotActive = &b
-	case strings.Contains(lower, "slot_retained") || strings.Contains(lower, "retained_bytes"):
-		v := int64(value)
-		row.SlotRetainedBytes = &v
-	case strings.Contains(lower, "slot_wal_status"):
-		s := fmt.Sprintf("%v", value)
-		if v, ok := labels["slot_wal_status"]; ok {
-			s = v
-		} else if v, ok := labels["wal_status"]; ok {
-			s = v
-		}
-		row.SlotWalStatus = &s
 	case strings.Contains(lower, "sync_state"):
-		s := fmt.Sprintf("%v", value)
 		if v, ok := labels["sync_state"]; ok {
-			s = v
+			s := v
+			row.SyncState = &s
 		} else if v, ok := labels["sync_mode"]; ok {
-			s = v
-		}
-		row.SyncState = &s
-	default:
-		// Fallback: treat unknown replication metric as write_lag_bytes if none set
-		if row.WriteLagBytes == nil && row.WriteLagSec == nil && row.ReplayLagBytes == nil {
-			// Use generic mapping based on whether name suggests bytes vs sec
-			if strings.Contains(lower, "bytes") {
-				v := int64(value)
-				row.WriteLagBytes = &v
-			} else if strings.Contains(lower, "lag") {
-				v := value
-				row.WriteLagSec = &v
-			}
+			s := v
+			row.SyncState = &s
 		}
 	}
 }

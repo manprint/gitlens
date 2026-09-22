@@ -11,6 +11,7 @@ export interface StatementRow {
   shared_blks_hit?: number | null
   shared_blks_read?: number | null
   temp_blks_written?: number | null
+  wal_bytes?: number | null
   cluster_id?: string | null
   pg_version?: number | string | null
   major_version?: number | string | null
@@ -18,7 +19,13 @@ export interface StatementRow {
 }
 
 export type StatementOrderBy =
-  'total_exec_time' | 'mean_exec_time' | 'calls' | 'rows' | 'shared_blks_read' | 'temp_blks_written'
+  | 'total_exec_time'
+  | 'mean_exec_time'
+  | 'calls'
+  | 'rows'
+  | 'shared_blks_read'
+  | 'temp_blks_written'
+  | 'wal_bytes'
 
 export interface StatementSummary {
   mean: number | null
@@ -57,6 +64,8 @@ function metricValue(row: StatementRow, orderBy: StatementOrderBy): number | nul
       return finiteNumber(row.shared_blks_read)
     case 'temp_blks_written':
       return finiteNumber(row.temp_blks_written)
+    case 'wal_bytes':
+      return finiteNumber(row.wal_bytes)
   }
 }
 

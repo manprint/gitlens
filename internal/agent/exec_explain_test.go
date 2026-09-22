@@ -11,23 +11,41 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 
+	"github.com/manprint/pglens/internal/check"
 	"github.com/manprint/pglens/internal/command"
+	"github.com/manprint/pglens/internal/pgtype"
 )
 
 type explainConn struct {
-	statement  string
-	plan       []byte
-	lookupErr  error
-	explainErr error
-	execSQL    []string
+	statement   string
+	plan        []byte
+	lookupErr   error
+	explainErr  error
+	execSQL     []string
+	lookupSQL   string
+	explainArgs []any
+	simpleSQL   []string
+}
+
+// SimpleQuery stands in for the verbatim simple-protocol path that
+// placeholders take.
+func (c *explainConn) SimpleQuery(_ context.Context, sql string) ([]*pgconn.Result, error) {
+	c.execSQL = append(c.execSQL, sql)
+	c.simpleSQL = append(c.simpleSQL, sql)
+	if c.explainErr != nil {
+		return nil, c.explainErr
+	}
+	return []*pgconn.Result{{Rows: [][][]byte{{c.plan}}}}, nil
 }
 
 func (c *explainConn) Query(context.Context, string, ...any) (pgx.Rows, error) { return nil, nil }
-func (c *explainConn) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+func (c *explainConn) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	if strings.HasPrefix(sql, "SELECT query FROM pg_stat_statements") {
+		c.lookupSQL = sql
 		return explainRow{value: c.statement, err: c.lookupErr}
 	}
 	c.execSQL = append(c.execSQL, sql)
+	c.explainArgs = args
 	return explainRow{value: c.plan, err: c.explainErr}
 }
 func (c *explainConn) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
@@ -122,10 +140,161 @@ func TestExplain_PlanHashDiffersOnDifferentShape(t *testing.T) {
 }
 
 func TestExplain_AnalyzeAlwaysRollsBack(t *testing.T) {
-	conn := &explainConn{statement: "UPDATE t SET x=1", explainErr: errors.New("parameter $1 required")}
+	conn := &explainConn{statement: "SELECT * FROM t", explainErr: errors.New("canceling statement due to statement timeout")}
 	_, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{QueryID: int64Ptr(1), Analyze: true})
 	require.Error(t, err)
-	require.Contains(t, conn.execSQL, "BEGIN")
+	require.Contains(t, conn.execSQL, "BEGIN READ ONLY")
 	require.Contains(t, conn.execSQL, "SET LOCAL statement_timeout = '30s'")
 	require.Contains(t, conn.execSQL, "ROLLBACK")
 }
+
+// The monitored database is never modified: every EXPLAIN, plan-only or not,
+// runs in a READ ONLY transaction, never a plain BEGIN.
+func TestExplain_AlwaysUsesReadOnlyTransaction(t *testing.T) {
+	for _, analyze := range []bool{false, true} {
+		conn := &explainConn{statement: "SELECT 1", plan: []byte(`[{"Plan":{}}]`)}
+		_, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{QueryID: int64Ptr(1), Analyze: analyze})
+		require.NoError(t, err)
+		require.Contains(t, conn.execSQL, "BEGIN READ ONLY")
+		require.NotContains(t, conn.execSQL, "BEGIN")
+	}
+}
+
+func TestExplain_AnalyzeRejectsWritingStatements(t *testing.T) {
+	for _, statement := range []string{"UPDATE t SET x=1", "INSERT INTO t VALUES (1)", "DELETE FROM t", "MERGE INTO t USING s ON true WHEN MATCHED THEN DELETE"} {
+		conn := &explainConn{statement: statement, plan: []byte(`[{"Plan":{}}]`)}
+		_, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{QueryID: int64Ptr(1), Analyze: true})
+		var rejected *RejectedError
+		require.True(t, errors.As(err, &rejected), statement)
+		require.Contains(t, rejected.Error(), "read-only", statement)
+		require.Empty(t, conn.execSQL, "nothing may be executed for %s", statement)
+	}
+}
+
+func TestExplain_AnalyzeRejectsPlaceholders(t *testing.T) {
+	conn := &explainConn{statement: "SELECT * FROM t WHERE id = $1", plan: []byte(`[{"Plan":{}}]`)}
+	_, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{QueryID: int64Ptr(1), Analyze: true})
+	var rejected *RejectedError
+	require.True(t, errors.As(err, &rejected))
+	require.Empty(t, conn.execSQL)
+}
+
+// TestExplain_PlaceholdersUseGenericPlanVerbatim: the statement reaches the
+// server with its placeholders intact. pgx's simple-protocol mode would try
+// to substitute them and fail with "insufficient arguments".
+func TestExplain_PlaceholdersUseGenericPlanVerbatim(t *testing.T) {
+	conn := &explainConn{statement: "SELECT * FROM t WHERE id = $1 AND v > $2", plan: []byte(`[{"Plan":{}}]`)}
+	result, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{QueryID: int64Ptr(1)})
+	require.NoError(t, err)
+	require.Len(t, conn.simpleSQL, 1)
+	require.Contains(t, conn.simpleSQL[0], "GENERIC_PLAN")
+	require.Contains(t, conn.simpleSQL[0], "id = $1 AND v > $2")
+	require.Nil(t, conn.explainArgs, "the extended protocol is not used")
+	var payload struct {
+		Plan json.RawMessage `json:"plan"`
+	}
+	require.NoError(t, json.Unmarshal(result, &payload))
+	require.JSONEq(t, `[{"Plan":{}}]`, string(payload.Plan))
+}
+
+func TestExplain_PlaceholdersBeforePG16AreRejected(t *testing.T) {
+	conn := &explainConn{statement: "SELECT * FROM t WHERE id = $1", plan: []byte(`[{"Plan":{}}]`)}
+	target := &versionedTarget{dispatcherTarget: dispatcherTarget{conn: conn}, version: 150004}
+	_, err := NewExplainExecutor().Execute(context.Background(), target, command.Args{QueryID: int64Ptr(1)})
+	var rejected *RejectedError
+	require.True(t, errors.As(err, &rejected))
+	require.Contains(t, rejected.Error(), "PostgreSQL 16")
+	require.Empty(t, conn.execSQL)
+}
+
+func TestExplain_RejectsMultipleStatements(t *testing.T) {
+	for _, statement := range []string{"SELECT 1; SELECT 2", "SELECT 1; COMMIT; SET default_transaction_read_only = off", "SELECT ';'"} {
+		conn := &explainConn{statement: statement, plan: []byte(`[{"Plan":{}}]`)}
+		_, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{QueryID: int64Ptr(1)})
+		var rejected *RejectedError
+		require.True(t, errors.As(err, &rejected), statement)
+		require.Empty(t, conn.execSQL, statement)
+	}
+	stmt, ok := singleStatement("SELECT 1 ;\n")
+	require.True(t, ok)
+	require.Equal(t, "SELECT 1", stmt)
+}
+
+func TestExplain_LookupIsScopedToCurrentDatabase(t *testing.T) {
+	conn := &explainConn{statement: "SELECT 1", plan: []byte(`[{"Plan":{}}]`)}
+	_, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{QueryID: int64Ptr(1), Datname: "app"})
+	require.NoError(t, err)
+	require.Contains(t, conn.lookupSQL, "current_database()")
+}
+
+// maintenanceTarget hands out a separate connection for the maintenance
+// database, where pg_stat_statements may be installed instead.
+type maintenanceTarget struct {
+	dispatcherTarget
+	maint *explainConn
+}
+
+func (t *maintenanceTarget) Conn(context.Context) (check.Conn, error) { return t.maint, nil }
+
+func TestExplain_ReadsTheTextFromTheMaintenanceDatabaseWithoutTheView(t *testing.T) {
+	conn := &explainConn{lookupErr: &pgconn.PgError{Code: "42P01"}, plan: []byte(`[{"Plan":{}}]`)}
+	maint := &explainConn{statement: "SELECT 1"}
+	target := &maintenanceTarget{dispatcherTarget: dispatcherTarget{conn: conn}, maint: maint}
+
+	_, err := NewExplainExecutor().Execute(context.Background(), target, command.Args{QueryID: int64Ptr(1), Datname: "app"})
+
+	require.NoError(t, err)
+	require.Contains(t, maint.lookupSQL, "datname = $2", "the text of this database, read where the view exists")
+	require.Contains(t, strings.Join(conn.execSQL, "\n"), "EXPLAIN (FORMAT JSON, VERBOSE, COSTS) SELECT 1", "the plan is still made in the command's database")
+}
+
+func TestExplain_NamesAMissingViewInBothDatabases(t *testing.T) {
+	missing := &pgconn.PgError{Code: "42P01"}
+	conn := &explainConn{lookupErr: missing}
+	target := &maintenanceTarget{dispatcherTarget: dispatcherTarget{conn: conn}, maint: &explainConn{lookupErr: missing}}
+
+	_, err := NewExplainExecutor().Execute(context.Background(), target, command.Args{QueryID: int64Ptr(1), Datname: "app"})
+
+	var rejected *RejectedError
+	require.ErrorAs(t, err, &rejected)
+	require.Contains(t, err.Error(), "not installed in database \"app\" nor in the maintenance database")
+}
+
+// sourcedTarget found the view in another database than the maintenance
+// one, and hands out that database's connection.
+type sourcedTarget struct {
+	dispatcherTarget
+	source string
+	viaDB  *explainConn
+}
+
+func (t *sourcedTarget) StatementsDatabase() string { return t.source }
+func (t *sourcedTarget) ConnFor(_ context.Context, datname string) (check.Conn, error) {
+	if datname == t.source {
+		return t.viaDB, nil
+	}
+	return t.conn, nil
+}
+
+func TestExplain_ReadsTheTextThroughTheDatabaseWithTheView(t *testing.T) {
+	conn := &explainConn{lookupErr: &pgconn.PgError{Code: "42P01"}, plan: []byte(`[{"Plan":{}}]`)}
+	viaDB := &explainConn{statement: "SELECT 1"}
+	target := &sourcedTarget{dispatcherTarget: dispatcherTarget{conn: conn}, source: "reporting", viaDB: viaDB}
+
+	_, err := NewExplainExecutor().Execute(context.Background(), target, command.Args{QueryID: int64Ptr(1), Datname: "app"})
+
+	require.NoError(t, err)
+	require.Contains(t, viaDB.lookupSQL, "datname = $2")
+	require.Contains(t, strings.Join(conn.execSQL, "\n"), "EXPLAIN (FORMAT JSON, VERBOSE, COSTS) SELECT 1")
+
+	viaDB.lookupErr = &pgconn.PgError{Code: "42P01"}
+	_, err = NewExplainExecutor().Execute(context.Background(), target, command.Args{QueryID: int64Ptr(1), Datname: "app"})
+	require.ErrorContains(t, err, `not installed in database "app" nor in database "reporting"`)
+}
+
+type versionedTarget struct {
+	dispatcherTarget
+	version pgtype.PGVersion
+}
+
+func (t *versionedTarget) PGVersion() pgtype.PGVersion { return t.version }

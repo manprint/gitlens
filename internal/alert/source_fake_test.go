@@ -78,6 +78,8 @@ func (r *fakeRows) Scan(dest ...any) error {
 			*d = src[i].(time.Time)
 		case *uuid.UUID:
 			*d = src[i].(uuid.UUID)
+		case *bool:
+			*d = src[i].(bool)
 		default:
 			return fmt.Errorf("fake scan: unsupported destination %T", dest[i])
 		}

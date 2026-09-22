@@ -57,8 +57,42 @@ func TestSettings_UnknownUnitIsSkipped(t *testing.T) {
 }
 
 func TestSettings_ArchiveCommandIsRedacted(t *testing.T) {
-	require.Equal(t, "copy [redacted]", redactArchiveCommand("copy /var/lib --password=secret"))
-	require.Equal(t, "", redactArchiveCommand(""))
+	require.Equal(t, "copy [redacted]", redactCommand("copy /var/lib --password=secret"))
+	require.Equal(t, "", redactCommand(""))
+	require.Equal(t, "/bin/true", redactCommand("/bin/true"))
+	require.Equal(t, "wal-g [redacted]", redactCommand("AWS_SECRET_ACCESS_KEY=abc wal-g wal-push %p"))
+	require.Equal(t, "[redacted]", redactCommand("PGPASSWORD=abc"))
+}
+
+// TestSettings_CredentialsNeverLeaveTheHost covers every non-default setting
+// that routinely embeds a secret, not only archive_command.
+func TestSettings_CredentialsNeverLeaveTheHost(t *testing.T) {
+	for name, value := range map[string]string{
+		"restore_command":         "AWS_SECRET_ACCESS_KEY=s3cr3t wal-g wal-fetch %f %p",
+		"archive_cleanup_command": "pg_archivecleanup -p s3cr3t /archive %r",
+		"recovery_end_command":    "curl -u admin:s3cr3t https://hooks.example/end",
+		"ssl_passphrase_command":  "echo s3cr3t",
+		"primary_conninfo":        "host=primary user=replicator password='s3cr3t' application_name=standby1",
+	} {
+		got := redactSetting(name, value)
+		require.NotContains(t, got, "s3cr3t", name)
+	}
+	require.Equal(t, "host=p password=[redacted] sslpassword = [redacted] port=5432",
+		redactConninfo("host=p password=abc sslpassword = 'x y' port=5432"))
+	require.Equal(t, "postgresql://rep:[redacted]@primary:5432/postgres",
+		redactConninfo("postgresql://rep:abc@primary:5432/postgres"))
+	require.Equal(t, "on", redactSetting("hot_standby", "on"))
+}
+
+func TestSettings_ByteAndMicrosecondUnits(t *testing.T) {
+	got, ok := normalizeSetting("1024", "B")
+	require.True(t, ok)
+	require.Equal(t, 1024.0, got)
+	got, ok = normalizeSetting("2500", "us")
+	require.True(t, ok)
+	require.InDelta(t, 0.0025, got, 1e-12)
+	require.Equal(t, "bytes", settingUnitKind("B"))
+	require.Equal(t, "seconds", settingUnitKind("us"))
 }
 
 func TestSettings_PendingRestartCount(t *testing.T) {

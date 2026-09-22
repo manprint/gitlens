@@ -35,47 +35,47 @@ export function latestValue(series: readonly MetricSeriesPoint[]): number | null
   return series[series.length - 1]?.value ?? null
 }
 
-/** Convert a monotonically increasing counter into a per-second series. */
-export function counterRateSeries(series: readonly MetricSeriesPoint[]): MetricSeriesPoint[] {
-  return series.map((point, index) => {
-    const previous = series[index - 1]
-    if (!previous || point.value === null || previous.value === null) {
-      return { ...point, value: null }
-    }
-
-    const elapsedSeconds = (Date.parse(point.ts) - Date.parse(previous.ts)) / 1_000
-    const delta = point.value - previous.value
-    if (!Number.isFinite(elapsedSeconds) || elapsedSeconds <= 0 || delta < 0) {
-      return { ...point, value: null }
-    }
-
-    return { ...point, value: delta / elapsedSeconds }
-  })
+/** Multiply every measured bucket by a constant, keeping gaps as gaps. */
+export function scaleSeries(
+  series: readonly MetricSeriesPoint[],
+  factor: number,
+): MetricSeriesPoint[] {
+  return series.map((point) => ({
+    ts: point.ts,
+    value: point.value === null ? null : point.value * factor,
+  }))
 }
 
-/** Sum positive counter deltas, restarting after an API reset bucket. */
-export function rangeDelta(series: readonly MetricSeriesPoint[]): number | null {
-  let previous: number | null = null
+/**
+ * Integrates a per-second rate series into a total over the range.
+ *
+ * The server stores every counter as the per-second rate between two scrapes,
+ * so a bucket's value is the rate over the time since the previous sample. It
+ * is weighted by the time since the previous measured bucket, and the first
+ * one by a single step. The overview used to differentiate these rates again
+ * as if they were raw counters, and to subtract them for range totals: the
+ * results were the change of a rate, not a rate or a total.
+ */
+export function integrateRate(
+  series: readonly MetricSeriesPoint[],
+  stepSeconds: number,
+): number | null {
   let total = 0
-  let hasDelta = false
+  let measured = false
+  let previous: number | null = null
 
   for (const point of series) {
-    if (point.value === null) {
-      previous = null
-      continue
+    const timestamp = Date.parse(point.ts)
+    if (point.value === null || !Number.isFinite(timestamp)) continue
+    const seconds = previous === null ? stepSeconds : (timestamp - previous) / 1_000
+    if (seconds > 0) {
+      total += point.value * seconds
+      measured = true
     }
-
-    if (previous !== null) {
-      const delta = point.value - previous
-      if (delta >= 0) {
-        total += delta
-        hasDelta = true
-      }
-    }
-    previous = point.value
+    previous = timestamp
   }
 
-  return hasDelta ? total : null
+  return measured ? total : null
 }
 
 export function cacheHitRatioValue(hits: number | null, reads: number | null): string | null {

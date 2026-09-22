@@ -3,6 +3,7 @@ import { http, HttpResponse } from 'msw'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useTimeRange } from '@/hooks/useTimeRange'
+import { formatBytes } from '@/lib/format'
 import { INSTANCE_ID } from '@/test/fixture-helpers'
 import { renderWithProviders } from '@/test/render'
 import { server } from '@/test/msw/server'
@@ -92,9 +93,9 @@ describe('OverviewSection', () => {
       'Transactions per second',
       'Cache hit ratio',
       'WAL generated in range',
-      'Checkpoint frequency',
-      'Temporary bytes',
-      'Deadlocks',
+      'Checkpoints in range',
+      'Temporary bytes in range',
+      'Deadlocks in range',
     ]) {
       expect(
         within(screen.getByRole('article', { name: label })).getAllByLabelText('not measured'),
@@ -123,5 +124,63 @@ describe('OverviewSection', () => {
     expect(steps).toContain('15s')
     expect(steps).toContain('15m')
     expect(steps.length).toBeGreaterThan(initialCalls)
+  })
+
+  it('UI-INST-027 asks for instance-wide metrics without a database and totals the stored rates', async () => {
+    const databases = new Map<string, string | null>()
+    server.use(
+      http.get(metricsUrl, ({ request }) => {
+        const url = new URL(request.url)
+        const metric = url.searchParams.get('metric') ?? ''
+        databases.set(metric, url.searchParams.get('database'))
+        const rate =
+          metric === 'pg_wal_lsn_bytes'
+            ? 1024
+            : metric === 'pg_deadlocks_total'
+              ? 0.01
+              : metric === 'pg_xact_commit_total'
+                ? 12.5
+                : null
+        return HttpResponse.json({
+          series: [
+            { ts: '2026-08-27T01:00:00Z', value: rate },
+            { ts: '2026-08-27T01:01:00Z', value: rate },
+          ],
+        })
+      }),
+    )
+
+    renderWithProviders(<OverviewSection database="app" instanceId={INSTANCE_ID} />, {
+      route: `/instances/${INSTANCE_ID}?db=app&range=24h`,
+    })
+    await settle()
+
+    for (const metric of [
+      'pg_connections_used',
+      'pg_connections_limit',
+      'pg_checkpoints_timed_total',
+      'pg_checkpoints_requested_total',
+      'pg_wal_lsn_bytes',
+    ]) {
+      expect(databases.get(metric)).toBeNull()
+    }
+    for (const metric of [
+      'pg_xact_commit_total',
+      'pg_blks_hit_total',
+      'pg_blks_read_total',
+      'pg_temp_bytes_total',
+      'pg_deadlocks_total',
+    ]) {
+      expect(databases.get(metric)).toBe('app')
+    }
+    // The 24h range uses 5-minute steps: the first bucket counts one step,
+    // the second the minute since the first.
+    expect(screen.getByRole('article', { name: 'WAL generated in range' })).toHaveTextContent(
+      formatBytes(1024 * 360),
+    )
+    expect(screen.getByRole('article', { name: 'Deadlocks in range' })).toHaveTextContent('4')
+    expect(screen.getByRole('article', { name: 'Transactions per second' })).toHaveTextContent(
+      '13/s',
+    )
   })
 })

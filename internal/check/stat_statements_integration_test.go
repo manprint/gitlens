@@ -130,10 +130,11 @@ func TestStatStatements_IntegrationCardinalityCap(t *testing.T) {
 		require.NotNil(t, result.StatsReset, "stats_reset should be populated after pg_stat_statements_reset()")
 
 		require.True(t, result.Truncated, "expected truncation with 500 distinct queries")
+		require.True(t, result.Partial, "500 distinct queries cannot all be reported")
 		metricCount := len(result.Metrics)
 		require.Greater(t, metricCount, 0, "should have metrics")
 
-		queriesReported := metricCount / 6
+		queriesReported := metricCount / 7
 		require.LessOrEqual(t, queriesReported, 100, "should not exceed cardinality cap")
 		require.Greater(t, queriesReported, 10, "should report at least some queries")
 	})
@@ -664,5 +665,77 @@ func TestStatStatements_IntegrationNegativeQueryID(t *testing.T) {
 
 			t.Logf("Note: No naturally negative queryid found in %d distinct queries; verified label round-trip with constructed negative value", len(distinctQueries))
 		}
+	})
+}
+
+// INT-STMT-005: the same statement run by two roles is one queryid whose
+// counters are the sum of both roles' pg_stat_statements rows. Reporting one
+// of the rows at random undercounted it and made its counter jump backwards
+// whenever the other row won, which the server reads as a stats reset.
+func TestStatStatements_IntegrationAggregatesAcrossRoles(t *testing.T) {
+	t.Parallel()
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+
+		admin, err := pgxpool.New(ctx, pg.DSN("app", pgtest.RoleSuperuser))
+		require.NoError(t, err)
+		defer admin.Close()
+		_, err = admin.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS pg_stat_statements`)
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, `SELECT pg_stat_statements_reset()`)
+		require.NoError(t, err)
+
+		// A select-list alias is kept in the stored text but is not part of
+		// the queryid, so it tags the statement without changing its identity.
+		const stmt = `SELECT count(*) AS pglens_multi_role_probe FROM pg_class`
+		for i := 0; i < 3; i++ {
+			_, err = admin.Exec(ctx, stmt)
+			require.NoError(t, err)
+		}
+		other, err := pgxpool.New(ctx, pg.DSN("app", pgtest.RoleT1))
+		require.NoError(t, err)
+		defer other.Close()
+		for i := 0; i < 2; i++ {
+			_, err = other.Exec(ctx, stmt)
+			require.NoError(t, err)
+		}
+
+		var queryID int64
+		var perRoleRows int
+		require.NoError(t, admin.QueryRow(ctx, `
+			SELECT queryid, count(*)::int FROM pg_stat_statements
+			 WHERE query LIKE '%pglens_multi_role_probe%' AND query NOT LIKE '%pg_stat_statements%'
+			 GROUP BY queryid`).Scan(&queryID, &perRoleRows))
+		require.Equal(t, 2, perRoleRows, "pg_stat_statements keeps one row per role")
+
+		pool, err := pgxpool.New(ctx, pg.DSN("app", pgtest.RoleT0))
+		require.NoError(t, err)
+		defer pool.Close()
+		conn, err := pool.Acquire(ctx)
+		require.NoError(t, err)
+		defer conn.Release()
+
+		check := &statStatementsCheck{
+			selectors: newScopedSelectors(cardinality.Options{TopN: 50}),
+			caches:    make(map[string]*textCache),
+		}
+		result, err := check.Scrape(ctx, &mockTarget{
+			conn:       conn,
+			version:    pg.Version,
+			database:   "app",
+			instanceID: uuid.New(),
+			clusterID:  pgtype.ManualClusterID("test-cluster"),
+		})
+		require.NoError(t, err)
+
+		label := strconv.FormatInt(queryID, 10)
+		var calls []float64
+		for _, m := range result.Metrics {
+			if m.Name == "pg_stat_statements_calls_total" && m.Labels["queryid"] == label {
+				calls = append(calls, m.Value)
+			}
+		}
+		require.Equal(t, []float64{5}, calls, "one series per queryid, summed over both roles")
 	})
 }

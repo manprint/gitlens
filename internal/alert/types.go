@@ -95,6 +95,13 @@ type Sample struct {
 	Labels     map[string]string
 	Value      float64
 	TS         time.Time
+	// Inapplicable marks a subject the rule does not apply to (now): an
+	// instance whose agent was revoked, a cluster that does not replicate
+	// synchronously. Its condition is false whatever the value, so it
+	// resolves an episode opened before and never opens one. Leaving such a
+	// subject out of the samples instead would leave that episode firing
+	// forever.
+	Inapplicable bool
 }
 type Alert struct {
 	Key        string

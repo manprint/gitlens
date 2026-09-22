@@ -24,11 +24,11 @@ func Allowed(k Kind, a Args, g Gates) (bool, string) {
 		}
 		return true, ""
 	case KindPgstattuple:
+		// The extension is checked by the executor, in the database the
+		// relation lives in: extensions are per database, and the target's
+		// capability list only covers its maintenance database.
 		if g.Tier < pgtype.TierExplain {
 			return false, "permission tier T1 is required"
-		}
-		if !g.HasPgstattuple {
-			return false, "pgstattuple extension gate is closed"
 		}
 		return true, ""
 	default:

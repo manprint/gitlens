@@ -87,12 +87,13 @@ WHERE c.relkind = 'r'`)
 	}
 	selected, truncated := selector.Select(cycle, candidates)
 	selector.Forget(cycle)
-	// TopN is itself a reporting budget.  The selector's truncation bit only
-	// reports the hard MaxKeys cap, so also mark a result truncated whenever
-	// the selected set is smaller than the candidate set.
-	truncated = truncated || len(selected) < len(candidates)
 	result := tableStatsResult(selected, byKey, t.Clock().Now())
+	// Truncated is the hard MaxKeys cap only. Reporting the top-N subset of
+	// a database with more tables than that is the normal case, and flagging
+	// it as truncated kept cardinality_budget_exceeded firing on every real
+	// database and stopped the server from ever pruning dropped tables.
 	result.Truncated = truncated
+	result.Partial = len(selected) < len(candidates)
 	return result, nil
 }
 

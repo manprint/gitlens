@@ -414,6 +414,9 @@ func setupRoles(ctx context.Context, pool *pgxpool.Pool) {
 		`ALTER ROLE pglens SET lock_timeout = '1s'`,
 		`ALTER ROLE pglens SET idle_in_transaction_session_timeout = '30s'`,
 		`ALTER ROLE pglens SET application_name = 'pglens'`,
+		// Mirrors deploy/sql/monitoring_user.sql: the monitoring role is
+		// read-only inside PostgreSQL.
+		`ALTER ROLE pglens SET default_transaction_read_only = on`,
 
 		`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='pglens_nocontrol') THEN CREATE ROLE pglens_nocontrol LOGIN PASSWORD 'test'; END IF; END $$`,
 		`GRANT pg_monitor TO pglens_nocontrol`,

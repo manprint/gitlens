@@ -39,6 +39,16 @@ func TestBloat_TimeoutIs120s(t *testing.T) {
 	require.Equal(t, 120*time.Second, (&bloatEstimateCheck{}).Timeout())
 }
 
+// TestBloat_TopNIsConfigurable: checks.bloat_estimate.top_n reaches the
+// selectors like the other relation checks' budgets do.
+func TestBloat_TopNIsConfigurable(t *testing.T) {
+	var c Check = &bloatEstimateCheck{selectors: newScopedSelectors(cardinality.Options{TopN: 50})}
+	configurable, ok := c.(TopNConfigurable)
+	require.True(t, ok, "bloat_estimate must honour top_n")
+	configurable.SetTopN(7)
+	require.Equal(t, 7, c.(*bloatEstimateCheck).selectors.TopN())
+}
+
 func bloatRowsResult(rows []bloatRow, now time.Time) Result {
 	by := map[string]bloatRow{}
 	c := []cardinality.Candidate{}

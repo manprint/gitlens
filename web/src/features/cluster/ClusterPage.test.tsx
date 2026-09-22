@@ -8,6 +8,7 @@ import { expectNoA11yViolations } from '@/test/a11y'
 import { CLUSTER, CLUSTER_ID, INSTANCE_ID } from '@/test/fixture-helpers'
 import { base as topologyBase } from '@/test/fixtures/getClusterTopology'
 import { base as replicationBase } from '@/test/fixtures/getClusterReplication'
+import { base as slotsBase, inactive as inactiveSlots } from '@/test/fixtures/getClusterSlots'
 import { renderWithProviders } from '@/test/render'
 import { ok, sequence, status } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
@@ -40,6 +41,7 @@ function configurePage() {
     ok('getClusterTopology', topologyBase),
     ok('getClusterReplication', replicationBase),
     ok('getClusterSettingsDrift', []),
+    ok('getClusterSlots', slotsBase),
   )
 }
 
@@ -148,5 +150,29 @@ describe('ClusterPage', () => {
     })
     await settle()
     expect(screen.getByTestId('cluster-topology-graph')).toHaveTextContent('1 replication edge')
+  })
+
+  it('UI-CLUS-046 lists the replication slots the slots endpoint reports', async () => {
+    configurePage()
+    server.use(ok('getClusterSlots', inactiveSlots))
+    renderPage()
+    await settle()
+
+    const table = screen.getByRole('table', { name: 'Replication slots' })
+    expect(table).toHaveTextContent('standby_1')
+    expect(table).toHaveTextContent('postgres.example.test:5432')
+    expect(table).toHaveTextContent('Inactive')
+    expect(table).toHaveTextContent('2.0 GiB')
+    expect(table).toHaveTextContent('1h 0m')
+  })
+
+  it('UI-CLUS-047 keeps the page when the slots endpoint fails', async () => {
+    configurePage()
+    server.use(status('getClusterSlots', 500, { error: 'internal_error', detail: 'no slots' }))
+    renderPage()
+    await settle()
+
+    expect(screen.getByTestId('cluster-topology-graph')).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not load replication slots')
   })
 })

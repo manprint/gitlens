@@ -33,6 +33,10 @@ const stateFilters: readonly StateFilter[] = [
 const severityFilters: readonly SeverityFilter[] = ['all', 'critical', 'warning', 'info']
 const scopeFilters: readonly ScopeFilter[] = ['all', 'cluster', 'instance']
 
+// The server's maximum. It returns open and degraded findings first, so a
+// full page is cut in the muted and resolved ones.
+const FINDINGS_LIMIT = 1000
+
 function readFilter<T extends string>(value: string | null, allowed: readonly T[], fallback: T): T {
   return allowed.includes(value as T) ? (value as T) : fallback
 }
@@ -98,7 +102,7 @@ function SummaryButton({
 }
 
 export function FindingsPage() {
-  const findingsQuery = useFindings({ state: 'all', limit: 1000 })
+  const findingsQuery = useFindings({ state: 'all', limit: FINDINGS_LIMIT })
   const rulesQuery = useAdvisorRules()
   const location = useLocation()
   const navigate = useNavigate()
@@ -241,6 +245,12 @@ export function FindingsPage() {
           <p className="text-muted-foreground mt-3 text-sm">
             By default, {hiddenMuted} muted and {hiddenResolved} resolved findings are hidden. Use
             the state filter to show them.
+          </p>
+        ) : null}
+        {findings.length >= FINDINGS_LIMIT ? (
+          <p className="text-warning mt-3 text-sm" role="status">
+            Only the first {FINDINGS_LIMIT} findings were returned. Open and degraded findings come
+            first, so muted and resolved findings may be missing from the counts and the list.
           </p>
         ) : null}
         {allFindingsDegraded ? (

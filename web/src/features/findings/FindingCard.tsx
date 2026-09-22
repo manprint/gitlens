@@ -1,3 +1,5 @@
+import { useId } from 'react'
+
 import { Degraded } from '@/components/state'
 import { formatTimestamp } from '@/lib/format/timestamp'
 import { muteExpiry, type JoinedFinding } from '@/lib/findings'
@@ -65,6 +67,9 @@ function remainingMuteTime(finding: JoinedFinding): string {
 }
 
 export function FindingCard({ finding }: FindingCardProps) {
+  // Not the finding id: it holds database and object names, which can
+  // contain spaces and would split the aria-labelledby references.
+  const domId = useId().replaceAll(':', '')
   const requirements = requirementText(finding)
   const target = [
     finding.object_name,
@@ -75,17 +80,14 @@ export function FindingCard({ finding }: FindingCardProps) {
   const evidence = Object.entries(finding.evidence ?? {})
 
   return (
-    <article
-      aria-labelledby={`finding-${finding.finding_id}`}
-      className="space-y-4 rounded-lg border p-4"
-    >
+    <article aria-labelledby={`finding-${domId}`} className="space-y-4 rounded-lg border p-4">
       <header className="space-y-2">
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="rounded border px-2 py-1 uppercase">{finding.severity}</span>
           <span className="rounded border px-2 py-1">{finding.state}</span>
           <span className="rounded border px-2 py-1">{finding.scope}</span>
         </div>
-        <h3 className="text-base font-semibold" id={`finding-${finding.finding_id}`}>
+        <h3 className="text-base font-semibold" id={`finding-${domId}`}>
           {finding.title}
         </h3>
         <p className="text-muted-foreground text-sm">Rule {finding.rule_id}</p>
@@ -145,8 +147,8 @@ export function FindingCard({ finding }: FindingCardProps) {
         ) : null}
       </dl>
 
-      <section aria-labelledby={`evidence-${finding.finding_id}`} className="space-y-2">
-        <h4 className="text-sm font-medium" id={`evidence-${finding.finding_id}`}>
+      <section aria-labelledby={`evidence-${domId}`} className="space-y-2">
+        <h4 className="text-sm font-medium" id={`evidence-${domId}`}>
           Evidence
         </h4>
         {evidence.length > 0 ? (

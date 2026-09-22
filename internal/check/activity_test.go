@@ -119,3 +119,20 @@ func TestActivity_ExistingMetricsUnchanged(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// TestActivity_WaitingRatioIgnoresIdleSessions keeps idle pooled connections,
+// which all wait on ClientRead, from reading as contention.
+func TestActivity_WaitingRatioIgnoresIdleSessions(t *testing.T) {
+	str := func(s string) *string { return &s }
+	rows := []activityRow{
+		{State: str("idle"), WaitEventType: str("Client"), Count: 90},
+		{State: str("active"), WaitEventType: str("CPU"), Count: 3},
+		{State: str("active"), WaitEventType: str("Lock"), Count: 1},
+	}
+	if got := waitingRatio(rows); got != 0.25 {
+		t.Fatalf("waitingRatio = %v, want 0.25 (1 of 4 active sessions)", got)
+	}
+	if got := waitingRatio(rows[:1]); got != 0 {
+		t.Fatalf("waitingRatio with only idle sessions = %v, want 0", got)
+	}
+}

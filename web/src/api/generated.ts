@@ -56,6 +56,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clusters/{id}/slots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Return the current state of every replication slot in a cluster.
+         * @description The newest reading of each slot reported in the last five minutes; a slot not reported for longer has been dropped or its instance is gone.
+         */
+        get: operations["getClusterSlots"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clusters/{id}/settings-drift": {
         parameters: {
             query?: never;
@@ -182,7 +202,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Return table relation statistics. */
+        /**
+         * Return table relation statistics.
+         * @description The newest reading of each table reported in the last 15 minutes. seq_scan_rate and idx_scan_rate are scans per second over the last scrape interval; a column the agent could not read is absent. last_vacuum_age_seconds is the age of the last manual VACUUM at the scrape; last_vacuum_at, last_autovacuum_at, last_analyze_at and last_autoanalyze_at are the timestamps pg_stat_user_tables reports, absent when the table was never processed that way.
+         */
         get: operations["getInstanceTables"];
         put?: never;
         post?: never;
@@ -199,7 +222,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Return index relation statistics. */
+        /**
+         * Return index relation statistics.
+         * @description The newest reading of each index reported in the last 15 minutes, largest first. idx_scan_rate is scans per second.
+         */
         get: operations["getInstanceIndexes"];
         put?: never;
         post?: never;
@@ -216,7 +242,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Return relation bloat estimates. */
+        /**
+         * Return relation bloat estimates.
+         * @description The newest reading of each relation and method: estimates from the last 13 hours (the check runs every 6 hours) and pgstattuple measurements from the last 7 days.
+         */
         get: operations["getInstanceBloat"];
         put?: never;
         post?: never;
@@ -233,7 +262,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Return the immutable command audit stream for an instance. */
+        /**
+         * Return the immutable command audit stream for an instance.
+         * @description One entry per event of a command: its request, its result (ok, error or rejected) or its expiry. Newest first, at most 500 entries.
+         */
         get: operations["getInstanceCommandAudit"];
         put?: never;
         post?: never;
@@ -318,7 +350,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Return activity samples grouped by the requested dimensions. */
+        /**
+         * Return activity samples grouped by the requested dimensions.
+         * @description With group_by, the range (default: the last hour) is aggregated into time buckets of resolution_seconds, at most 180 of them, one row per bucket and group. ticks is the instance's sampling ticks in the bucket, whatever the filters, so avg_active_sessions is the group's share of the instance's time. The largest groups are kept (at most 24, fewer when limit rows cannot hold them for every bucket) and the rest are folded into one group named other, so the total is conserved. Without group_by, the stored rows are returned newest first, every dimension included.
+         */
         get: operations["getAsh"];
         put?: never;
         post?: never;
@@ -335,7 +370,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Return top ASH queries joined to their text. */
+        /**
+         * Return top ASH queries joined to their text.
+         * @description Queries are ranked by samples over the range. ticks is the instance's sampling ticks over the range, whatever the filters, the same denominator for every query. The ASH disabled state is reported by GET /api/v1/ash, not here.
+         */
         get: operations["getAshTop"];
         put?: never;
         post?: never;
@@ -734,8 +772,12 @@ export interface components {
             type: string;
             /** @description sync or async; null when not yet known. */
             sync_state?: string | null;
-            /** @enum {string} */
+            /**
+             * @description high while the standby's WAL receiver is streaming or catching up; low when it is not, and the edge points at its last-known upstream.
+             * @enum {string}
+             */
             confidence: "high" | "low";
+            /** @description Present on low-confidence edges. */
             note?: string | null;
         };
         Event: {
@@ -796,12 +838,41 @@ export interface components {
             series: components["schemas"]["MetricPoint"][];
         };
         ReplicationEdge: {
-            from: components["schemas"]["InstanceId"];
+            /** @description The standby. An instance ID when the edge resolves to a monitored instance; otherwise the application_name the primary reports the standby under (also in standby_name). */
+            from: string;
             to: components["schemas"]["InstanceId"];
+            /** @description The application_name the primary reports the standby under; absent on edges read from the standby's own receiver. */
+            standby_name?: string;
             /** @enum {string} */
             metric: "write_lag_sec" | "flush_lag_sec" | "replay_lag_sec";
             sync_state?: string | null;
             series: components["schemas"]["MetricPoint"][];
+        };
+        Slot: {
+            instance_id: components["schemas"]["InstanceId"];
+            slot_name: string;
+            /** @description physical or logical; null on rows written before the agent reported it. */
+            slot_type: string | null;
+            active: boolean | null;
+            /** @description pg_replication_slots.wal_status: reserved, extended, unreserved or lost. */
+            wal_status: string | null;
+            /**
+             * Format: int64
+             * @description WAL the slot holds back from removal.
+             */
+            retained_bytes: number | null;
+            /**
+             * Format: int64
+             * @description WAL that can still be written before the slot is invalidated; null when max_slot_wal_keep_size is unlimited.
+             */
+            safe_wal_size_bytes: number | null;
+            /** @description The newest retained reading with the slot active; null when none is retained. */
+            last_active_at: components["schemas"]["Timestamp"] | null;
+            ts: components["schemas"]["Timestamp"];
+        };
+        SlotsResponse: {
+            cluster_id: components["schemas"]["ClusterId"];
+            slots: components["schemas"]["Slot"][];
         };
         ReplicationResponse: {
             cluster_id: components["schemas"]["ClusterId"];
@@ -817,9 +888,16 @@ export interface components {
             queryid: string;
             datname: string;
             query_text: string;
+            /** @description Calls observed in the window. */
             calls?: number | null;
             total_exec_time_ms?: number | null;
             rows?: number | null;
+            /** @description total_exec_time_ms divided by calls; absent when no call was observed. */
+            mean_exec_time?: number | null;
+            shared_blks_hit?: number | null;
+            shared_blks_read?: number | null;
+            wal_bytes?: number | null;
+            temp_blks_written?: number | null;
             truncated: components["schemas"]["Truncated"];
         };
         StatementsResponse: {
@@ -827,6 +905,10 @@ export interface components {
             truncated: components["schemas"]["Truncated"];
             /** @enum {string} */
             comparable_scope: "cluster";
+            /** @description Present as true while the agent skips the stat_statements check on this instance; statements collected before are still returned. */
+            disabled?: boolean;
+            /** @description The reason the agent gave for skipping the check. */
+            disabled_reason?: string;
         };
         AshBucket: {
             ts: components["schemas"]["Timestamp"];
@@ -843,6 +925,28 @@ export interface components {
             /** @description PostgreSQL query ID as a decimal string. */
             queryid?: string | null;
         };
+        CommandAuditEntry: {
+            /** Format: int64 */
+            audit_id: number;
+            /** Format: uuid */
+            command_id: string;
+            instance_id: components["schemas"]["InstanceId"];
+            kind: string;
+            args: {
+                [key: string]: unknown;
+            };
+            /** @description The credential that requested the command: api-token, or ui-session with a short hash of the session, then from and the client address. Entries written before the request was audited read api. */
+            requested_by: string;
+            /**
+             * Format: date-time
+             * @description When the event was recorded.
+             */
+            executed_at: string;
+            /** @enum {string} */
+            outcome: "requested" | "ok" | "error" | "rejected" | "expired";
+            /** @description The error */
+            detail?: string;
+        };
         AshResponse: {
             buckets: components["schemas"]["AshBucket"][];
             /** Format: int32 */
@@ -858,8 +962,12 @@ export interface components {
             query_text: string;
             /** Format: int32 */
             samples: number;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description The instance's sampling ticks over the range
+             */
             ticks: number;
+            /** @description samples divided by ticks */
             avg_active_sessions: number | null;
         };
         AshTopResponse: {
@@ -1034,7 +1142,7 @@ export interface components {
             needs: string[];
             min_tier: components["schemas"]["PermTier"];
         };
-        /** @description Per-kind arguments: explain requires queryid and may include datname or analyze; cancel and terminate require pid; pgstattuple requires schema and relation. Query text is never sent to this API. */
+        /** @description Per-kind arguments: explain requires queryid and may include datname or analyze; cancel and terminate require pid; pgstattuple requires schema and relation and may include datname. datname is the database the command runs in; without it, the target DSN's own database. Query text is never sent to this API. */
         CommandArgs: {
             queryid?: number | string;
             datname?: string;
@@ -1268,6 +1376,29 @@ export interface operations {
             400: components["responses"]["BadRequest"];
         };
     };
+    getClusterSlots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ClusterId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Replication slots by owning instance. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SlotsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+        };
+    };
     getClusterSettingsDrift: {
         parameters: {
             query?: never;
@@ -1433,6 +1564,7 @@ export interface operations {
     getInstanceTables: {
         parameters: {
             query?: {
+                order_by?: "dead_tup" | "dead_ratio" | "size" | "seq_scan";
                 /** @description Maximum number of relations returned by the instance-level budget. */
                 limit?: number;
             };
@@ -1485,6 +1617,7 @@ export interface operations {
     getInstanceBloat: {
         parameters: {
             query?: {
+                method?: "estimate" | "pgstattuple";
                 /** @description Maximum number of relations returned by the instance-level budget. */
                 limit?: number;
             };
@@ -1510,7 +1643,10 @@ export interface operations {
     };
     getInstanceCommandAudit: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Maximum entries; values above 500 are capped at 500. */
+                limit?: number;
+            };
             header?: never;
             path: {
                 id: components["schemas"]["InstanceId"];
@@ -1525,9 +1661,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["CommandAuditEntry"][];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -1621,7 +1755,7 @@ export interface operations {
                 database?: string;
                 from?: components["schemas"]["Timestamp"];
                 to?: components["schemas"]["Timestamp"];
-                order_by?: "calls" | "calls_rate" | "total_calls" | "total_exec_time" | "total_exec_time_ms" | "exec_time" | "total_time" | "total_rows" | "rows" | "rows_rate" | "shared_blks_hit" | "shared_blks_hit_rate" | "shared_blks_read" | "shared_blks_read_rate" | "wal_bytes" | "wal_bytes_rate" | "mean_exec_time" | "mean_time";
+                order_by?: "calls" | "calls_rate" | "total_calls" | "total_exec_time" | "total_exec_time_ms" | "exec_time" | "total_time" | "total_rows" | "rows" | "rows_rate" | "shared_blks_hit" | "shared_blks_hit_rate" | "shared_blks_read" | "shared_blks_read_rate" | "wal_bytes" | "wal_bytes_rate" | "temp_blks_written" | "temp_blks_written_rate" | "mean_exec_time" | "mean_time";
                 limit?: number;
             };
             header?: never;
@@ -1650,6 +1784,10 @@ export interface operations {
                 to?: components["schemas"]["Timestamp"];
                 group_by?: "wait_event_type" | "wait_event" | "queryid" | "state" | "datname";
                 database?: string;
+                /** @description Only samples of this wait event type; echoed on every returned row. */
+                wait_event_type?: string;
+                /** @description Only samples of this wait event; echoed on every returned row. */
+                wait_event?: string;
                 limit?: number;
             };
             header?: never;
@@ -1677,6 +1815,10 @@ export interface operations {
                 from?: components["schemas"]["Timestamp"];
                 to?: components["schemas"]["Timestamp"];
                 database?: string;
+                /** @description Only samples of this wait event type. */
+                wait_event_type?: string;
+                /** @description Only samples of this wait event. */
+                wait_event?: string;
                 limit?: number;
             };
             header?: never;
@@ -1685,7 +1827,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Top ASH queries; disabled ASH is represented explicitly with enabled false. */
+            /** @description Top ASH queries, largest first. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1868,7 +2010,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Findings ordered by severity and recency. */
+            /** @description Findings ordered open and degraded first, then by severity and recency, so a limit cuts muted and resolved findings first. */
             200: {
                 headers: {
                     [name: string]: unknown;

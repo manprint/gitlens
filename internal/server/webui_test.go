@@ -50,6 +50,18 @@ func TestSPA_FallsBackForClientRoute(t *testing.T) {
 	require.Equal(t, testIndexHTML, rec.Body.String())
 }
 
+// TestSPA_ServesTheReadmeAsText: the interface's documentation links open
+// /README.md, which the build ships next to the bundle.
+func TestSPA_ServesTheReadmeAsText(t *testing.T) {
+	assets := testWebUIAssets()
+	assets["README.md"] = &fstest.MapFile{Data: []byte("# pglens\n")}
+	rec := serveWebUIRequest(t, assets, http.MethodGet, "/README.md")
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "# pglens\n", rec.Body.String())
+	require.Equal(t, "text/plain; charset=utf-8", rec.Header().Get("Content-Type"))
+}
+
 func TestSPA_MissingAssetIs404(t *testing.T) {
 	rec := serveWebUIRequest(t, testWebUIAssets(), http.MethodGet, "/assets/nope.js")
 

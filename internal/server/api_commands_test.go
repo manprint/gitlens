@@ -107,8 +107,25 @@ func TestEnqueue_SetsExpiry(t *testing.T) {
 	rec := httptest.NewRecorder()
 	commandRouter(s).ServeHTTP(rec, req)
 	require.Equal(t, http.StatusAccepted, rec.Code)
-	require.Len(t, p.execArgs, 8)
+	require.Len(t, p.execArgs, 9)
 	require.Equal(t, now.Add(2*time.Minute), p.execArgs[7])
+	require.Equal(t, "ui-session from 192.0.2.1", p.execArgs[8], "the request is audited with who made it")
+}
+
+// TestRequesterOf_NamesTheCredentialNotTheSecret: the audit tells a bearer
+// token from a UI session, and sessions apart by a digest, without ever
+// recording the session token.
+func TestRequesterOf_NamesTheCredentialNotTheSecret(t *testing.T) {
+	auth := NewAuth("secret")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/instances/x/commands", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	require.Equal(t, "api-token from 192.0.2.1", requesterOf(req, auth))
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/instances/x/commands", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "session-token-value"})
+	who := requesterOf(req, auth)
+	require.Regexp(t, `^ui-session [0-9a-f]{8} from 192\.0\.2\.1$`, who)
+	require.NotContains(t, who, "session-token-value")
 }
 
 func TestEnqueue_UnknownInstanceIs404(t *testing.T) {

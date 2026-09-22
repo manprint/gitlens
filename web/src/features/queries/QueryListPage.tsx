@@ -7,7 +7,6 @@ import { DataTable, type DataTableProps } from '@/components/layout/DataTable'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
-import { Disabled } from '@/components/state/Disabled'
 import { EmptyState } from '@/components/state/EmptyState'
 import { ErrorState } from '@/components/state/ErrorState'
 import { Truncated } from '@/components/state/Truncated'
@@ -23,19 +22,21 @@ import {
 import { useTimeRange } from '@/hooks/useTimeRange'
 
 const STATEMENT_LIMIT = 50
-type StatementSort = Extract<
-  StatementOrderBy,
-  'total_exec_time' | 'mean_exec_time' | 'calls' | 'rows' | 'shared_blks_read'
->
+type StatementSort = StatementOrderBy
 
 const DEFAULT_SORT: StatementSort = 'total_exec_time'
 
+// The server has always ranked by temporary blocks and WAL too; the list
+// offered neither, so the statements spilling to disk or writing the most
+// WAL could only be found by paging through another ranking.
 const SORT_OPTIONS: readonly { value: StatementSort; label: string }[] = [
   { value: 'total_exec_time', label: 'Total time' },
   { value: 'mean_exec_time', label: 'Mean time' },
   { value: 'calls', label: 'Calls' },
   { value: 'rows', label: 'Rows' },
   { value: 'shared_blks_read', label: 'Shared blocks read' },
+  { value: 'temp_blks_written', label: 'Temporary blocks written' },
+  { value: 'wal_bytes', label: 'WAL bytes' },
 ]
 
 interface QueryListPageProps {
@@ -48,6 +49,7 @@ interface StatementDisplayRow extends StatementRow {
 
 interface StatementApiResponse {
   disabled?: boolean
+  disabled_reason?: string
   enabled?: boolean
   statements: StatementRow[]
   truncated: boolean
@@ -173,6 +175,21 @@ function statementColumns(instanceId: string): DataTableProps<StatementDisplayRo
       },
     },
     {
+      id: 'wal-bytes',
+      header: 'WAL',
+      enableSorting: false,
+      cell: ({ row }) => {
+        const walBytes = row.original.wal_bytes
+        return (
+          <span className="tabular-nums">
+            {typeof walBytes === 'number' && Number.isFinite(walBytes)
+              ? formatBytes(walBytes)
+              : '—'}
+          </span>
+        )
+      },
+    },
+    {
       id: 'temporary-bytes',
       header: 'Temporary bytes/call',
       enableSorting: false,
@@ -192,15 +209,27 @@ function isDisabledResponse(data: StatementApiResponse): boolean {
   return data.disabled === true || data.enabled === false
 }
 
-function DisabledStatementsState() {
+function skipSentence(reason: string | undefined): string {
+  return reason
+    ? `The agent skips the stat_statements check: ${reason}.`
+    : 'The agent does not collect statements for this instance.'
+}
+
+// There is no configuration key to turn back on: the agent skips the check
+// when, at startup, it finds no pg_stat_statements view it can read.
+function DisabledStatementsState({ reason }: { reason: string | undefined }) {
   return (
     <div className="space-y-4">
       <PageHeader
         title="Query inspector"
         subtitle="Inspect the statements collected for the selected instance."
       />
-      <Disabled feature="pg_stat_statements" configKey="pg_stat_statements" />
+      <div role="status" className="border-muted bg-muted/30 text-sm">
+        <strong>pg_stat_statements disabled.</strong> {skipSentence(reason)}
+      </div>
       <p className="text-muted-foreground text-sm">
+        The agent looks for the view when it starts, in the database its DSN names and then in the
+        monitored databases; the module must also be in <code>shared_preload_libraries</code>.{' '}
         <a className="underline" href="/README.md#agent-configuration">
           See the README extension guidance.
         </a>
@@ -259,7 +288,7 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
   }
 
   if (statementsQuery.error?.kind === 'not_found') {
-    return <DisabledStatementsState />
+    return <DisabledStatementsState reason={undefined} />
   }
 
   if (statementsQuery.error && response === undefined) {
@@ -272,8 +301,10 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
     )
   }
 
-  if (response && isDisabledResponse(response)) {
-    return <DisabledStatementsState />
+  const disabled = response !== undefined && isDisabledResponse(response)
+  // Statements collected before the check was skipped are still shown.
+  if (disabled && rows.length === 0) {
+    return <DisabledStatementsState reason={response.disabled_reason} />
   }
 
   const truncated = response?.truncated === true
@@ -292,6 +323,14 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
         title="Statements"
         description="Statement statistics are scoped to the selected database and time range."
       >
+        {disabled ? (
+          <p
+            role="status"
+            className="border-warning bg-warning/10 mb-4 rounded-lg border p-3 text-sm"
+          >
+            {skipSentence(response.disabled_reason)} The statements below were collected earlier.
+          </p>
+        ) : null}
         <div className="mb-4 flex items-center gap-2">
           <label className="text-sm font-medium" htmlFor="statement-sort">
             Sort statements

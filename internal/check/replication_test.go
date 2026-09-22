@@ -49,7 +49,7 @@ func TestReplicationStreaming_NullLagEmittedAsNull(t *testing.T) {
 			var nilFloat *float64
 			return &mockRows{
 				rows: []([]any){
-					{"standby1", "192.168.1.100", "streaming", "async", nilInt64, nilInt64, nilInt64, nilFloat, nilFloat, nilFloat},
+					{"standby1", "192.168.1.100", 50000, "streaming", "async", nilInt64, nilInt64, nilInt64, nilFloat, nilFloat, nilFloat},
 				},
 			}, nil
 		},
@@ -102,7 +102,7 @@ func TestReplicationStreaming_ValidLagEmitted(t *testing.T) {
 		queryFunc: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 			return &mockRows{
 				rows: []([]any){
-					{"standby1", "192.168.1.100", "streaming", "async", &w, &w, &w, &f, &f, &f},
+					{"standby1", "192.168.1.100", 50000, "streaming", "async", &w, &w, &w, &f, &f, &f},
 				},
 			}, nil
 		},
@@ -145,7 +145,7 @@ func TestReplicationReceiver_DisconnectedEmitsOneRow(t *testing.T) {
 			// pg_stat_wal_receiver is empty, LEFT JOIN gives us one row with NULL values
 			return &mockRows{
 				rows: []([]any){
-					{"disconnected", "", 0, "", "0/0", "0/0", (*float64)(nil)},
+					{"disconnected", "", 0, "", (*float64)(nil)},
 				},
 			}, nil
 		},
@@ -182,7 +182,7 @@ func TestReplicationReceiver_CASEGuard(t *testing.T) {
 			// CASE guard: when receive_lsn == replay_lsn, the CASE gives 0
 			return &mockRows{
 				rows: []([]any){
-					{"streaming", "primary.local", 5432, "slot1", "0/1000000", "0/1000000", &lag},
+					{"streaming", "primary.local", 5432, "slot1", &lag},
 				},
 			}, nil
 		},
@@ -238,6 +238,32 @@ func TestReplicationSlots_WithWALStatusLost(t *testing.T) {
 		}
 	}
 	require.True(t, hasRetained, "should parse wal_status='lost'")
+}
+
+// TestReplicationSlots_UnlimitedSafeWALSizeIsNotZero: safe_wal_size is NULL
+// with max_slot_wal_keep_size = -1. It used to be reported as 0 bytes, the
+// value that means the slot is about to be invalidated.
+func TestReplicationSlots_UnlimitedSafeWALSizeIsNotZero(t *testing.T) {
+	t.Parallel()
+	conn := &mockConn{
+		queryFunc: func(context.Context, string, ...any) (pgx.Rows, error) {
+			return &mockRows{rows: []([]any){
+				{"unlimited", "physical", true, 5432, "reserved", nil, int64(10)},
+				{"limited", "physical", true, 5433, "reserved", int64(4096), int64(10)},
+			}}, nil
+		},
+	}
+	result, err := (&replicationSlotsCheck{}).Scrape(context.Background(), &SimpleTarget{
+		ConnFunc: func(context.Context) (Conn, error) { return conn, nil }, ClockValue: clock.System(),
+	})
+	require.NoError(t, err)
+	safe := map[string]float64{}
+	for _, m := range result.Metrics {
+		if m.Name == "replication_slot_safe_wal_size_bytes" {
+			safe[m.Labels["slot_name"]] = m.Value
+		}
+	}
+	require.Equal(t, map[string]float64{"limited": 4096}, safe)
 }
 
 // TestReplicationSlots_EmptyReturnsNoRows — no slots
@@ -297,4 +323,65 @@ func TestReplicationSlots_BothRoles(t *testing.T) {
 	require.True(t, ok, "should accept Primary")
 	ok, _ = req.Supports(pgtype.RoleStandby, pgtype.PG15, pgtype.TierReadOnly, nil)
 	require.True(t, ok, "should accept Standby")
+}
+
+// TestReplicationStreaming_StandbysStayDistinct covers two standbys that both
+// report the default application_name: each needs its own identity, or the
+// server keeps only one of them.
+func TestReplicationStreaming_StandbysStayDistinct(t *testing.T) {
+	t.Parallel()
+	w := int64(10)
+	var sql string
+	conn := &mockConn{
+		queryFunc: func(ctx context.Context, q string, args ...any) (pgx.Rows, error) {
+			sql = q
+			return &mockRows{rows: [][]any{
+				{"walreceiver", "10.0.0.2", 40001, "streaming", "async", &w, &w, &w, (*float64)(nil), (*float64)(nil), (*float64)(nil)},
+				{"walreceiver", "10.0.0.3", 40002, "streaming", "sync", &w, &w, &w, (*float64)(nil), (*float64)(nil), (*float64)(nil)},
+				{"reporting", "10.0.0.4", 40003, "streaming", "async", &w, &w, &w, (*float64)(nil), (*float64)(nil), (*float64)(nil)},
+			}}, nil
+		},
+	}
+	result, err := (&replicationStreamingCheck{}).Scrape(context.Background(), &SimpleTarget{
+		ConnFunc: func(ctx context.Context) (Conn, error) { return conn, nil }, ClockValue: clock.System(),
+	})
+	require.NoError(t, err)
+	names := map[string]string{}
+	for _, m := range result.Metrics {
+		names[m.Labels["application_name"]] = m.Labels["sync_state"]
+	}
+	require.Equal(t, map[string]string{
+		"walreceiver@10.0.0.2:40001": "async",
+		"walreceiver@10.0.0.3:40002": "sync",
+		"reporting":                  "async",
+	}, names)
+	require.Contains(t, sql, "pg_current_wal_lsn()", "byte lag is measured from the generated WAL, not from sent_lsn")
+	require.NotContains(t, sql, "sent_lsn")
+}
+
+// TestReplicationReceiver_ToleratesArchiveOnlyStandby pins that no nullable
+// LSN is scanned: pg_last_wal_receive_lsn() is NULL without a WAL receiver.
+func TestReplicationReceiver_ToleratesArchiveOnlyStandby(t *testing.T) {
+	t.Parallel()
+	var sql string
+	conn := &mockConn{
+		queryFunc: func(ctx context.Context, q string, args ...any) (pgx.Rows, error) {
+			sql = q
+			lag := float64(42)
+			return &mockRows{rows: [][]any{{"disconnected", "", 0, "", &lag}}}, nil
+		},
+	}
+	result, err := (&replicationReceiverCheck{}).Scrape(context.Background(), &SimpleTarget{
+		ConnFunc: func(ctx context.Context) (Conn, error) { return conn, nil }, ClockValue: clock.System(),
+	})
+	require.NoError(t, err)
+	require.NotContains(t, sql, "::text")
+	found := false
+	for _, m := range result.Metrics {
+		if m.Name == "replication_receiver_replay_lag_seconds" {
+			found = true
+			require.Equal(t, 42.0, m.Value)
+		}
+	}
+	require.True(t, found)
 }

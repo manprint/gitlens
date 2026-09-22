@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -33,11 +32,50 @@ type statStatementsCheck struct {
 // every scrape. lastUsed lets an abandoned scope's 4096-entry LRU be released
 // instead of pinned for the lifetime of the agent process.
 type textCache struct {
-	lru      *lru.Cache[int64, string]
+	lru      *lru.Cache[int64, sentText]
 	lastUsed time.Time
 }
 
+// sentText is one shipped query text and when it was shipped.
+type sentText struct {
+	text   string
+	sentAt time.Time
+}
+
 func (c *statStatementsCheck) Name() string { return "stat_statements" }
+
+// StatementsSource is implemented by a target that knows which database's
+// pg_stat_statements view stands in for a database without one of its own.
+type StatementsSource interface {
+	// StatementsDatabase names that database; empty means the maintenance
+	// database, the one Target.Conn connects to.
+	StatementsDatabase() string
+}
+
+func statementsDatabase(t Target) string {
+	if s, ok := t.(StatementsSource); ok {
+		return s.StatementsDatabase()
+	}
+	return ""
+}
+
+// StatementsConn connects to the database whose pg_stat_statements view is
+// read for a database that has none: the maintenance database unless the
+// target found the view only in another one.
+func StatementsConn(ctx context.Context, t Target) (Conn, error) {
+	if db := statementsDatabase(t); db != "" {
+		return t.ConnFor(ctx, db)
+	}
+	return t.Conn(ctx)
+}
+
+// StatementsSourceName names StatementsConn's database for an error message.
+func StatementsSourceName(t Target) string {
+	if db := statementsDatabase(t); db != "" {
+		return fmt.Sprintf("database %q", db)
+	}
+	return "the maintenance database"
+}
 
 // SetTopN applies the configured cardinality limit before scheduling begins.
 func (c *statStatementsCheck) SetTopN(topN int) { c.selectors.SetTopN(topN) }
@@ -53,86 +91,94 @@ func (c *statStatementsCheck) Requires() Requirements {
 func (c *statStatementsCheck) DefaultInterval() time.Duration { return 60 * time.Second }
 func (c *statStatementsCheck) Timeout() time.Duration         { return 15 * time.Second }
 
+// statementRow is one queryid of the scraped database, already summed over
+// every (userid, toplevel) row pg_stat_statements keeps for it.
+type statementRow struct {
+	QueryID         int64
+	Calls           int64
+	TotalExecTime   float64
+	Rows            int64
+	SharedBlksHit   int64
+	SharedBlksRead  int64
+	WALBytes        int64
+	TempBlksWritten int64
+	Query           *string
+}
+
+// statementsQuery aggregates per queryid before ranking. pg_stat_statements
+// keeps one row per (userid, dbid, queryid, toplevel), so the same statement
+// run by two roles, or both at top level and inside a function, is several
+// rows. Reporting one of them at random (the previous behaviour) undercounted
+// the statement, and whenever a different row won the next scrape the counter
+// appeared to go backwards, which the server's delta engine reads as a reset.
+//
+// The view is referenced once: every reference re-reads the whole external
+// query-text file. %[1]s selects the database whose rows are read and %[2]d is
+// the per-ranking pre-filter.
+const statementsQuery = `
+WITH agg AS (
+    SELECT queryid,
+           sum(calls)::bigint             AS calls,
+           sum(total_exec_time)::float8   AS total_exec_time,
+           sum(rows)::bigint              AS rows,
+           sum(shared_blks_hit)::bigint   AS shared_blks_hit,
+           sum(shared_blks_read)::bigint  AS shared_blks_read,
+           sum(wal_bytes)::bigint         AS wal_bytes,
+           sum(temp_blks_written)::bigint AS temp_blks_written,
+           min(query)                     AS query
+      FROM pg_stat_statements
+     WHERE dbid = (SELECT oid FROM pg_database WHERE datname = %[1]s)
+       AND queryid IS NOT NULL
+     GROUP BY queryid
+),
+ranked AS (
+    (SELECT queryid FROM agg ORDER BY total_exec_time DESC LIMIT %[2]d)
+    UNION
+    (SELECT queryid FROM agg ORDER BY calls DESC LIMIT %[2]d)
+)
+SELECT a.queryid, a.calls, a.total_exec_time, a.rows,
+       a.shared_blks_hit, a.shared_blks_read, a.wal_bytes, a.temp_blks_written,
+       LEFT(a.query, 8192),
+       (SELECT count(*) FROM agg)
+  FROM agg a
+  JOIN ranked USING (queryid)
+ ORDER BY a.queryid`
+
+// textResendInterval bounds how long a shipped query text is trusted to be
+// stored server-side. An envelope can be lost after the text left the cache
+// (buffer overflow, a rejected push), and without a resend the statement
+// would stay textless for the lifetime of the agent process.
+const textResendInterval = time.Hour
+
 func (c *statStatementsCheck) Scrape(ctx context.Context, t Target) (Result, error) {
+	// This SQL-side limit exists only to bound what crosses the wire from
+	// Postgres. It stays above the selector's own per-ranking budget, or the
+	// selector would never see candidates it is supposed to keep.
+	prefilter := max(300, 2*c.selectors.TopN())
+
 	conn, err := t.ConnFor(ctx, t.Database())
 	if err != nil {
 		return Result{}, err
 	}
-	defer conn.Release()
-
-	if err := ApplySessionLimits(ctx, conn, c.Timeout()); err != nil {
-		return Result{}, err
+	parsed, distinct, statsReset, err := readStatements(ctx, conn, c.Timeout(), "current_database()", prefilter)
+	conn.Release()
+	if pgErrorCode(err) == pgUndefinedTable {
+		// CREATE EXTENSION creates the view in one database only, while the
+		// statistics themselves are cluster-wide. The agent found the view
+		// in another database when it scheduled this check, so read this
+		// database's rows through it instead of reporting nothing for it.
+		source, serr := StatementsConn(ctx, t)
+		if serr != nil {
+			return Result{}, serr
+		}
+		parsed, distinct, statsReset, err = readStatements(ctx, source, c.Timeout(), "$1", prefilter, t.Database())
+		source.Release()
+		if pgErrorCode(err) == pgUndefinedTable {
+			return Result{}, fmt.Errorf("pg_stat_statements is not installed in database %q nor in %s: %w", t.Database(), StatementsSourceName(t), err)
+		}
 	}
-
-	// This SQL-side limit exists only to bound what crosses the wire from
-	// Postgres — it must stay well above the Go-side cardinality.Selector's
-	// real cap (TopN/MaxKeys) or the selector never sees enough candidates to
-	// do its own job, and Result.Truncated can never legitimately fire.
-	const sqlPrefilterLimit = 300
-	query := fmt.Sprintf(`
-WITH me AS (SELECT oid FROM pg_database WHERE datname = current_database()),
-ranked AS (
-    (SELECT queryid FROM pg_stat_statements, me
-      WHERE dbid = me.oid AND queryid IS NOT NULL
-      ORDER BY total_exec_time DESC LIMIT %d)
-    UNION
-    (SELECT queryid FROM pg_stat_statements, me
-      WHERE dbid = me.oid AND queryid IS NOT NULL
-      ORDER BY calls DESC LIMIT %d)
-)
-SELECT s.queryid, s.calls, s.total_exec_time, s.rows,
-       s.shared_blks_hit, s.shared_blks_read, s.wal_bytes,
-       LEFT(s.query, 8192) AS query,
-       (SELECT count(*) > %d FROM pg_stat_statements, me
-         WHERE dbid = me.oid AND queryid IS NOT NULL) AS prefilter_truncated
-  FROM pg_stat_statements s
-  JOIN ranked r USING (queryid), me
- WHERE s.dbid = me.oid
- ORDER BY s.queryid
-`, sqlPrefilterLimit, sqlPrefilterLimit, sqlPrefilterLimit)
-
-	rows, err := conn.Query(ctx, query)
 	if err != nil {
-		if strings.Contains(err.Error(), "does not exist") ||
-			strings.Contains(err.Error(), "pg_stat_statements") {
-			return Result{}, nil
-		}
-		return Result{}, err
-	}
-	defer rows.Close()
-
-	type row struct {
-		QueryID            int64
-		Calls              int64
-		TotalExecTime      float64
-		Rows               int64
-		SharedBlksHit      int64
-		SharedBlksRd       int64
-		WALBytes           int64
-		Query              *string
-		PrefilterTruncated bool
-	}
-
-	var parsed []row
-	for rows.Next() {
-		var r row
-		if err := rows.Scan(&r.QueryID, &r.Calls, &r.TotalExecTime, &r.Rows,
-			&r.SharedBlksHit, &r.SharedBlksRd, &r.WALBytes, &r.Query, &r.PrefilterTruncated); err != nil {
-			return Result{}, err
-		}
-		parsed = append(parsed, r)
-	}
-
-	if err := rows.Err(); err != nil {
-		return Result{}, err
-	}
-
-	var statsReset *time.Time
-	err = conn.QueryRow(ctx, `SELECT stats_reset FROM pg_stat_statements_info`).Scan(&statsReset)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		if !strings.Contains(err.Error(), "does not exist") {
-			return Result{}, err
-		}
+		return Result{}, explainStatementsError(err)
 	}
 
 	candidates := make([]cardinality.Candidate, 0, len(parsed))
@@ -162,7 +208,7 @@ SELECT s.queryid, s.calls, s.total_exec_time, s.rows,
 	c.mu.Lock()
 	entry, ok := c.caches[cacheKey]
 	if !ok {
-		l, _ := lru.New[int64, string](4096)
+		l, _ := lru.New[int64, sentText](4096)
 		entry = &textCache{lru: l}
 		c.caches[cacheKey] = entry
 	}
@@ -192,17 +238,10 @@ SELECT s.queryid, s.calls, s.total_exec_time, s.rows,
 	// check's own retention state stays bounded too, not just its output.
 	selected, truncated := selector.Select(cycle, candidates)
 	selector.Forget(cycle)
-	// The SQL pre-filter deliberately bounds the rows sent over the wire, so
-	// the selector cannot observe candidates discarded by that limit. Carry
-	// the count-based signal from SQL through to the public result instead of
-	// presenting a partial view as complete.
-	for _, r := range parsed {
-		truncated = truncated || r.PrefilterTruncated
-	}
 	queryTexts := make(map[int64]string)
 
 	var metrics []pgtype.Metric
-	rowsByID := make(map[int64]row)
+	rowsByID := make(map[int64]statementRow, len(parsed))
 	for _, r := range parsed {
 		rowsByID[r.QueryID] = r
 	}
@@ -244,7 +283,7 @@ SELECT s.queryid, s.calls, s.total_exec_time, s.rows,
 		})
 		metrics = append(metrics, pgtype.Metric{
 			Name:   "pg_stat_statements_shared_blks_read_total",
-			Value:  float64(r.SharedBlksRd),
+			Value:  float64(r.SharedBlksRead),
 			Kind:   pgtype.KindCounter,
 			Labels: labels,
 		})
@@ -254,11 +293,18 @@ SELECT s.queryid, s.calls, s.total_exec_time, s.rows,
 			Kind:   pgtype.KindCounter,
 			Labels: labels,
 		})
+		metrics = append(metrics, pgtype.Metric{
+			Name:   "pg_stat_statements_temp_blks_written_total",
+			Value:  float64(r.TempBlksWritten),
+			Kind:   pgtype.KindCounter,
+			Labels: labels,
+		})
 
 		if r.Query != nil {
-			if _, cached := cache.Get(r.QueryID); !cached {
+			prev, cached := cache.Get(r.QueryID)
+			if !cached || prev.text != *r.Query || now.Sub(prev.sentAt) >= textResendInterval {
 				queryTexts[r.QueryID] = *r.Query
-				cache.Add(r.QueryID, *r.Query)
+				cache.Add(r.QueryID, sentText{text: *r.Query, sentAt: now})
 			}
 		}
 	}
@@ -267,6 +313,57 @@ SELECT s.queryid, s.calls, s.total_exec_time, s.rows,
 		Metrics:    metrics,
 		StatsReset: statsReset,
 		Truncated:  truncated,
+		Partial:    int64(len(selected)) < distinct,
 		QueryTexts: queryTexts,
 	}, nil
+}
+
+// readStatements runs the aggregated statements query on conn and reads the
+// extension's reset time. database is the SQL expression naming the database
+// whose rows are read; args are its parameters.
+func readStatements(ctx context.Context, conn Conn, timeout time.Duration, database string, prefilter int, args ...any) ([]statementRow, int64, *time.Time, error) {
+	if err := ApplySessionLimits(ctx, conn, timeout); err != nil {
+		return nil, 0, nil, err
+	}
+	rows, err := conn.Query(ctx, fmt.Sprintf(statementsQuery, database, prefilter), args...)
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	defer rows.Close()
+
+	var parsed []statementRow
+	var distinct int64
+	for rows.Next() {
+		var r statementRow
+		if err := rows.Scan(&r.QueryID, &r.Calls, &r.TotalExecTime, &r.Rows,
+			&r.SharedBlksHit, &r.SharedBlksRead, &r.WALBytes, &r.TempBlksWritten,
+			&r.Query, &distinct); err != nil {
+			return nil, 0, nil, err
+		}
+		parsed = append(parsed, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, nil, err
+	}
+
+	// pg_stat_statements_info only exists from extension version 1.9 on; an
+	// older extension simply has no reset hint to offer.
+	var statsReset *time.Time
+	err = conn.QueryRow(ctx, `SELECT stats_reset FROM pg_stat_statements_info`).Scan(&statsReset)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) && pgErrorCode(err) != pgUndefinedTable {
+		return nil, 0, nil, err
+	}
+	return parsed, distinct, statsReset, nil
+}
+
+// explainStatementsError turns the two misconfigurations that used to be
+// swallowed as "no data" into errors that say what to fix.
+func explainStatementsError(err error) error {
+	switch pgErrorCode(err) {
+	case pgObjectNotInPrerequisiteState:
+		return fmt.Errorf("pg_stat_statements is installed but not loaded (add it to shared_preload_libraries and restart): %w", err)
+	case pgUndefinedColumn:
+		return fmt.Errorf("the installed pg_stat_statements extension is older than this PostgreSQL release (ALTER EXTENSION pg_stat_statements UPDATE): %w", err)
+	}
+	return err
 }

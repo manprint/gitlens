@@ -15,6 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/manprint/pglens/internal/alert"
+	"github.com/manprint/pglens/internal/pgtype"
+	"github.com/manprint/pglens/internal/store"
 )
 
 func serveAlert(t *testing.T, api *AlertAPI, method, path, body string) *httptest.ResponseRecorder {
@@ -91,6 +93,22 @@ func TestAlerts_ClusterIDIsAString(t *testing.T) {
 	alertRouter(newAlertAPIForTest(nil, st)).ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?state=firing", nil))
 	require.Equal(t, 200, r.Code)
 	require.Contains(t, r.Body.String(), `"cluster_id":"42"`)
+}
+
+// TestAlerts_ClusterIDIsUnsigned: the column holds the uint64 identifier's
+// bit pattern. Rendered signed, an identifier above 2^63 came out negative
+// and matched no cluster; the filter rejected the unsigned form.
+func TestAlerts_ClusterIDIsUnsigned(t *testing.T) {
+	const big = "18000000000000000000"
+	cid, err := pgtype.ParseClusterID(big)
+	require.NoError(t, err)
+	n := store.ToDB(cid)
+	require.Negative(t, n)
+	st := &alertAPITestStore{alerts: []alert.Alert{{Key: "a", State: alert.StateFiring, ClusterID: &n}}}
+	r := httptest.NewRecorder()
+	alertRouter(newAlertAPIForTest(nil, st)).ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?state=firing&cluster_id="+big, nil))
+	require.Equal(t, 200, r.Code, r.Body.String())
+	require.Contains(t, r.Body.String(), `"cluster_id":"`+big+`"`)
 }
 
 func TestAlertAPI_DatabaseBackedBranches(t *testing.T) {

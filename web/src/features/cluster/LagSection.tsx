@@ -8,13 +8,17 @@ import { useTimeRange } from '@/hooks/useTimeRange'
 import {
   alignSeries,
   hasGaps,
+  instanceLabel,
   type AlignedReplicationSeries,
+  type ReplicationInstance,
   type ReplicationMetricEdge,
 } from '@/lib/replication'
 import type { TimeRangeResult } from '@/lib/timerange'
 
 export interface LagSectionProps {
   edges: readonly ReplicationMetricEdge[]
+  /** The cluster's instances, to name the ends of each edge. */
+  instances?: readonly ReplicationInstance[]
   /** A controlled range keeps retention and empty-state behaviour easy to verify. */
   range?: TimeRangeResult
 }
@@ -24,6 +28,8 @@ interface EdgeGroup {
   to: string
   metrics: ReplicationMetricEdge[]
 }
+
+const NO_INSTANCES: readonly ReplicationInstance[] = []
 
 function groupEdges(edges: readonly ReplicationMetricEdge[]): EdgeGroup[] {
   const groups = new Map<string, EdgeGroup>()
@@ -59,12 +65,19 @@ function edgeHasGaps(aligned: AlignedReplicationSeries): boolean {
   )
 }
 
-function edgeHeading(group: EdgeGroup): string {
+// The ends used to be printed as raw instance IDs. The standby end is an
+// instance ID only when it resolves to a monitored instance; otherwise it is
+// the application_name the primary reports, shown as is.
+function edgeHeading(group: EdgeGroup, instances: readonly ReplicationInstance[]): string {
   const sync = group.metrics.find((edge) => edge.sync_state !== undefined)?.sync_state ?? 'Unknown'
-  return `${group.from} → ${group.to} (${sync})`
+  return `${instanceLabel(instances, group.from)} → ${instanceLabel(instances, group.to)} (${sync})`
 }
 
-export function LagSection({ edges, range: controlledRange }: LagSectionProps) {
+export function LagSection({
+  edges,
+  instances = NO_INSTANCES,
+  range: controlledRange,
+}: LagSectionProps) {
   const { range: urlRange } = useTimeRange()
   const range = controlledRange ?? urlRange
   const groups = useMemo(() => groupEdges(edges), [edges])
@@ -84,16 +97,16 @@ export function LagSection({ edges, range: controlledRange }: LagSectionProps) {
         </p>
       ) : (
         <div className="space-y-6">
-          {groups.map((group) => {
+          {groups.map((group, index) => {
             const aligned = alignSeries(group.metrics)
-            const heading = edgeHeading(group)
+            const heading = edgeHeading(group, instances)
             const hasData = aligned.timestamps.length > 0
+            // An application_name can hold spaces, which would split an
+            // id reference in aria-labelledby.
+            const headingId = `lag-edge-${index}`
             return (
-              <article
-                key={`${group.from}-${group.to}`}
-                aria-labelledby={`lag-${group.from}-${group.to}`}
-              >
-                <h3 id={`lag-${group.from}-${group.to}`}>{heading}</h3>
+              <article key={`${group.from}\u0000${group.to}`} aria-labelledby={headingId}>
+                <h3 id={headingId}>{heading}</h3>
                 {hasData ? (
                   <>
                     <TimeSeriesChart

@@ -72,7 +72,7 @@ func (e *Evaluator) Step(r Rule, s Sample, now time.Time) (*Alert, Transition) {
 	defer e.mu.Unlock()
 	k := Key(r, s)
 	st, ok := e.states[k]
-	trueCond := r.EventType != "" || Compare(s.Value, r.Comparator, r.Threshold)
+	trueCond := !s.Inapplicable && (r.EventType != "" || Compare(s.Value, r.Comparator, r.Threshold))
 	if !trueCond {
 		if !ok {
 			return nil, TransitionNone

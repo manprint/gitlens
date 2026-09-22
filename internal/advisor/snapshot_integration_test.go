@@ -40,7 +40,9 @@ func TestINTADV002_LoadSnapshotUsesBoundedQueries(t *testing.T) {
 		tracer.count.Store(0)
 		_, err = LoadSnapshot(context.Background(), pool, instanceID, time.Now())
 		require.NoError(t, err)
-		require.LessOrEqual(t, tracer.count.Load(), int32(12))
+		// Two identity queries and eleven section loaders, whatever the
+		// number of relations, statements or siblings.
+		require.LessOrEqual(t, tracer.count.Load(), int32(13))
 	})
 }
 

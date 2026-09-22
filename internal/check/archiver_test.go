@@ -2,11 +2,13 @@ package check
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/stretchr/testify/require"
 )
@@ -27,10 +29,19 @@ func TestArchiver_OmitsAgesWhenNull(t *testing.T) {
 	require.Equal(t, -1.0, metricValue(r, "pg_archiver_last_failed_age_seconds", nil))
 }
 
-func TestArchiver_ArchiveModeOffEmitsOnlyTheFlag(t *testing.T) {
+func TestArchiver_ArchiveModeOffEmitsNoArchiverCounters(t *testing.T) {
 	r := scrapeArchiverForTest(t, "off", nil, nil)
-	require.Len(t, r.Metrics, 1)
-	require.Equal(t, "pg_archive_mode_enabled", r.Metrics[0].Name)
+	require.Equal(t, 0.0, metricValue(r, "pg_archive_mode_enabled", nil))
+	require.Equal(t, 0.0, metricValue(r, "pg_basebackup_jobs_running", nil))
+	require.Equal(t, -1.0, metricValue(r, "pg_archiver_archived_total", nil))
+}
+
+// TestArchiver_BasebackupReportedWithoutArchiving covers pg_basebackup -X
+// stream, the default: a backup runs whatever archive_mode says.
+func TestArchiver_BasebackupReportedWithoutArchiving(t *testing.T) {
+	r := scrapeArchiverForTest(t, "off", nil, [][]any{{"streaming database files", float64(100), float64(25)}})
+	require.Equal(t, 1.0, metricValue(r, "pg_basebackup_jobs_running", nil))
+	require.Equal(t, 0.25, metricValue(r, "pg_basebackup_progress_ratio", map[string]string{"phase": "streaming database files"}))
 }
 
 func TestArchiver_StatsResetIsPropagated(t *testing.T) {
@@ -40,18 +51,56 @@ func TestArchiver_StatsResetIsPropagated(t *testing.T) {
 }
 
 func TestArchiver_BasebackupRatioOmittedWhenTotalZero(t *testing.T) {
-	r := scrapeArchiverForTest(t, "on", []any{0.0, nil, nil, 0.0, nil, nil, nil}, [][]any{{int32(1), "streaming", float64(0), float64(0), float64(0), float64(0)}})
+	r := scrapeArchiverForTest(t, "on", []any{0.0, nil, nil, 0.0, nil, nil, nil}, [][]any{{"streaming", float64(0), float64(0)}})
 	require.Equal(t, -1.0, metricValue(r, "pg_basebackup_progress_ratio", map[string]string{"phase": "streaming"}))
 	require.Equal(t, 1.0, metricValue(r, "pg_basebackup_jobs_running", nil))
 }
 
+// TestArchiver_ReportsSegmentsWaitingForArchive: the .ready files are what
+// separates a stuck archiver from an idle server.
+func TestArchiver_ReportsSegmentsWaitingForArchive(t *testing.T) {
+	r := scrapeArchiverWithReady(t, "on", []any{1.0, nil, nil, 0.0, nil, nil, nil}, nil, &mockRow{vals: []any{3.0}})
+	require.Equal(t, 3.0, metricValue(r, "pg_archiver_ready_files", nil))
+}
+
+// TestArchiver_ReadyFilesNeedPgMonitor: without the privilege the metric is
+// left out and the rest of the scrape survives; any other error fails it.
+func TestArchiver_ReadyFilesNeedPgMonitor(t *testing.T) {
+	denied := &mockRow{err: &pgconn.PgError{Code: "42501", Message: "permission denied for function pg_ls_archive_statusdir"}}
+	r := scrapeArchiverWithReady(t, "on", []any{1.0, nil, nil, 0.0, nil, nil, nil}, nil, denied)
+	require.Equal(t, -1.0, metricValue(r, "pg_archiver_ready_files", nil))
+	require.Equal(t, 1.0, metricValue(r, "pg_archiver_archived_total", nil))
+
+	conn := archiverMockConn("on", []any{1.0, nil, nil, 0.0, nil, nil, nil}, nil, &mockRow{err: errors.New("connection reset")})
+	_, err := (&archiverCheck{}).Scrape(context.Background(), &SimpleTarget{
+		ConnFunc: func(context.Context) (Conn, error) { return conn, nil }, ClockValue: clock.System(),
+	})
+	require.Error(t, err)
+}
+
 func scrapeArchiverForTest(t *testing.T, mode string, stats []any, progress [][]any) Result {
 	t.Helper()
-	conn := &mockConn{
+	return scrapeArchiverWithReady(t, mode, stats, progress, &mockRow{vals: []any{0.0}})
+}
+
+func scrapeArchiverWithReady(t *testing.T, mode string, stats []any, progress [][]any, ready *mockRow) Result {
+	t.Helper()
+	conn := archiverMockConn(mode, stats, progress, ready)
+	r, err := (&archiverCheck{}).Scrape(context.Background(), &SimpleTarget{
+		ConnFunc: func(context.Context) (Conn, error) { return conn, nil }, ClockValue: clock.System(),
+	})
+	require.NoError(t, err)
+	return r
+}
+
+func archiverMockConn(mode string, stats []any, progress [][]any, ready *mockRow) *mockConn {
+	return &mockConn{
 		queryRowFunc: func(_ context.Context, query string, _ ...any) pgx.Row {
 			switch {
 			case strings.Contains(query, "archive_mode"):
 				return &mockRow{vals: []any{mode}}
+			case strings.Contains(query, "pg_ls_archive_statusdir"):
+				return ready
 			default:
 				return &mockRow{vals: stats}
 			}
@@ -60,9 +109,4 @@ func scrapeArchiverForTest(t *testing.T, mode string, stats []any, progress [][]
 			return &mockRows{rows: progress}, nil
 		},
 	}
-	r, err := (&archiverCheck{}).Scrape(context.Background(), &SimpleTarget{
-		ConnFunc: func(context.Context) (Conn, error) { return conn, nil }, ClockValue: clock.System(),
-	})
-	require.NoError(t, err)
-	return r
 }

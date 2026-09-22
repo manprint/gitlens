@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/manprint/pglens/internal/agent"
 	"github.com/manprint/pglens/internal/ash"
 	"github.com/manprint/pglens/internal/clock"
@@ -32,11 +35,7 @@ func startASH(ctx context.Context, mgr *agent.Manager, targetName string, cfg ag
 		return func() {}, false
 	}
 
-	conn, err := mgr.DedicatedConn(ctx)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: ash: acquire dedicated connection for %s: %v (ASH disabled for this target)\n", targetName, err)
-		return func() {}, false
-	}
+	conn := &ashConn{mgr: mgr, base: ctx, clk: clk}
 
 	agg := ash.New(clk, ashWindow, ashMaxKeys)
 	sampler := ash.NewSampler(conn, clk, func(r ash.SampleRow) {
@@ -59,7 +58,7 @@ func startASH(ctx context.Context, mgr *agent.Manager, targetName string, cfg ag
 
 	if err := sampler.Start(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: ash: start sampler for %s: %v (ASH disabled for this target)\n", targetName, err)
-		conn.Release()
+		conn.Close()
 		return func() {}, false
 	}
 
@@ -88,20 +87,90 @@ func startASH(ctx context.Context, mgr *agent.Manager, targetName string, cfg ag
 		}
 	}()
 
-	// sync.Once, not a bare closure: conn.Release() on an already-released
-	// connection panics inside pgxpool, and this stop func has two callers
-	// (the deferred shutdown sweep, and any future caller that stops one
-	// target's collection independently, as the revocation path very nearly
-	// did). Making it idempotent removes the coupling entirely.
+	// sync.Once, not a bare closure: this stop func has two callers (the
+	// deferred shutdown sweep, and any future caller that stops one target's
+	// collection independently, as the revocation path very nearly did), and
+	// stopping the sampler twice must stay a no-op.
 	var stopOnce sync.Once
 	stop = func() {
 		stopOnce.Do(func() {
 			cancel()
 			sampler.Stop()
-			conn.Release()
+			conn.Close()
 		})
 	}
 	return stop, true
+}
+
+// ashReconnectBackoff spaces reconnection attempts to a target that is down,
+// so a 1-second sampler does not dial it every tick.
+const ashReconnectBackoff = 5 * time.Second
+
+// ashStatementTimeout stays below the sampler's 500ms tick deadline: the
+// server cancels a slow sample itself and the connection survives, whereas an
+// expired client context makes pgx close the connection.
+const ashStatementTimeout = "SET statement_timeout = 400"
+
+var errASHReconnectPending = errors.New("ash: dedicated connection unavailable, waiting to reconnect")
+
+// ashConn is the sampler's dedicated connection, replaced whenever it dies.
+// It used to be acquired once for the life of the process, so after a target
+// restart, a network blip or one tick that overran its deadline every later
+// sample failed and ASH stayed dark until the agent was restarted. A target
+// that was down when the agent started no longer disables ASH for good
+// either: the first successful tick connects.
+type ashConn struct {
+	mgr  *agent.Manager
+	base context.Context
+	clk  clock.Clock
+
+	mu         sync.Mutex
+	conn       *pgxpool.Conn
+	retryAfter time.Time
+}
+
+func (c *ashConn) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.conn != nil && c.conn.Conn().IsClosed() {
+		c.conn.Release() // the pool destroys a closed connection
+		c.conn = nil
+	}
+	if c.conn == nil {
+		if c.clk.Now().Before(c.retryAfter) {
+			return nil, errASHReconnectPending
+		}
+		if err := c.connectLocked(); err != nil { //nolint:contextcheck // dials on the sampler's lifetime context with its own budget: the 500ms tick deadline is too short for a TLS handshake to a distant target
+			c.retryAfter = c.clk.Now().Add(ashReconnectBackoff)
+			return nil, err
+		}
+	}
+	return c.conn.Query(ctx, sql, args...) //nolint:sqlclosecheck // the caller, ash.Sampler, owns and closes the rows
+}
+
+func (c *ashConn) connectLocked() error {
+	ctx, cancel := context.WithTimeout(c.base, 5*time.Second)
+	defer cancel()
+	conn, err := c.mgr.DedicatedConn(ctx)
+	if err != nil {
+		return err
+	}
+	if _, err := conn.Exec(ctx, ashStatementTimeout); err != nil {
+		conn.Release()
+		return err
+	}
+	c.conn = conn
+	return nil
+}
+
+// Close returns the connection to the pool.
+func (c *ashConn) Close() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.conn != nil {
+		c.conn.Release()
+		c.conn = nil
+	}
 }
 
 // ashWindowToMetrics converts one closed ash.Window into the wire.Metric

@@ -21,6 +21,9 @@ type Point struct {
 	Key  pgtype.SeriesKey
 	TS   time.Time
 	Rate float64 // units per second
+	// Seconds is the interval the rate was measured over: Rate * Seconds is
+	// the increase observed in it.
+	Seconds float64
 }
 
 // ResetReason explains why a reset was detected.
@@ -114,7 +117,7 @@ func (e *Engine) Observe(o Observation) (*Point, *ResetEvent) {
 	rate := (o.Value - prev.value) / dt
 	cp := copyStatsReset(o.StatsReset)
 	e.prev[o.Key] = state{ts: o.TS, value: o.Value, statsReset: cp}
-	return &Point{Key: o.Key, TS: o.TS, Rate: rate}, nil
+	return &Point{Key: o.Key, TS: o.TS, Rate: rate, Seconds: dt}, nil
 }
 
 // Evict drops series whose last observation is older than the cutoff and

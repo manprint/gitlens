@@ -224,3 +224,24 @@ func TestDecideSlotInactiveEmissions_ActiveClearsTrackingAndAllowsReEmission(t *
 	require.False(t, tracked, "an active slot must clear its inactivity tracking")
 	require.False(t, emitted[key], "clearing tracking must also clear the emitted flag, so a later spell can emit again")
 }
+
+// TestDecideSlotInactiveEmissions_DroppedSlotForgetsState: a slot that is no
+// longer reported loses its tracking instead of pinning it for the life of
+// the process.
+func TestDecideSlotInactiveEmissions_DroppedSlotForgetsState(t *testing.T) {
+	t.Parallel()
+	iid := uuid.New()
+	dropped := iid.String() + "/gone"
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	since := map[string]time.Time{dropped: base}
+	emitted := map[string]bool{dropped: true}
+
+	out := decideSlotInactiveEmissions(
+		[]slotRow{{InstanceID: iid, ClusterID: 1, SlotName: "kept", Active: false}},
+		base.Add(time.Minute), since, emitted)
+
+	require.Empty(t, out)
+	require.NotContains(t, since, dropped)
+	require.NotContains(t, emitted, dropped)
+	require.Contains(t, since, iid.String()+"/kept")
+}

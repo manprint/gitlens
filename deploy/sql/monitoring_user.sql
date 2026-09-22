@@ -5,6 +5,11 @@
 -- psql flag, for example:
 --   psql -v pglens_password='secret' -v dbname=app -v tier1=1 -f monitoring_user.sql
 -- Tier 2 also needs tier1=1. This file never creates an extension.
+--
+-- Run it only on MONITORED instances. The role it configures is read-only
+-- and time-limited (default_transaction_read_only, statement_timeout below);
+-- if the pglens server's own storage database uses a role with the same name
+-- on the same cluster, that role would lose the ability to write.
 \set ON_ERROR_STOP on
 
 \if :{?pglens_password}
@@ -60,10 +65,21 @@ GRANT pg_signal_backend TO pglens;
 -- Tier 3 — extensions, only when the DBA deliberately enables them.
 -- ========================================================================
 -- pglens NEVER creates an extension itself. Run these statements manually,
--- on each chosen database, because automatic extension creation would break
--- the plan 001 constraint that no monitored instance needs one.
+-- because automatic extension creation would break the plan 001 constraint
+-- that no monitored instance needs one.
+-- pg_stat_statements (also in shared_preload_libraries): in the database the
+-- agent's DSN names or in any monitored database; its statistics cover every
+-- database, and the agent reads them all through one view. It looks when it
+-- starts, so restart the agent after creating it.
 -- CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+-- pgstattuple: in each database whose tables should be measurable.
 -- CREATE EXTENSION IF NOT EXISTS pgstattuple;
+
+-- pglens only ever reads. Make every session of the role read-only inside
+-- PostgreSQL itself, so a write is refused by the server even if a client
+-- ever tried one. The agent also sets this on each connection it opens; the
+-- role default covers any other client that logs in as pglens.
+ALTER ROLE pglens SET default_transaction_read_only = on;
 
 -- Bound the blast radius of the monitoring session itself.
 ALTER ROLE pglens SET statement_timeout = '15s';

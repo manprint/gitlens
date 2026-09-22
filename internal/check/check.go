@@ -70,7 +70,16 @@ type Result struct {
 	Metrics    []pgtype.Metric
 	Facts      []Fact
 	StatsReset *time.Time
-	Truncated  bool
+	// Truncated reports that a hard cardinality cap (cardinality.Options'
+	// MaxKeys) dropped keys the selection wanted to report: the configured
+	// budget is too small for this workload, which is worth an alert.
+	Truncated bool
+	// Partial reports that the check deliberately reported a top-N subset of
+	// the objects it saw. It is the normal state of any real database, so it
+	// only tells the UI that the view is not exhaustive and tells the server
+	// that objects missing from this result were not observed rather than
+	// gone. It never means the budget was exceeded.
+	Partial    bool
 	QueryTexts map[int64]string
 }
 

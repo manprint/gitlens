@@ -13,6 +13,7 @@ import {
   useAshTop,
   useClusterReplication,
   useClusterSettingsDrift,
+  useClusterSlots,
   useClusters,
   useClusterTopology,
   useCommand,
@@ -232,6 +233,7 @@ describe('query hooks', () => {
       'getClusterTopology',
       'getClusterReplication',
       'getClusterSettingsDrift',
+      'getClusterSlots',
       'getInstances',
       'getInstance',
       'getInstanceActivity',
@@ -270,6 +272,7 @@ describe('query hooks', () => {
         <HookProbe label="cluster-topology" useHook={useClusterTopologyForCoverage} />
         <HookProbe label="cluster-replication" useHook={useClusterReplicationForCoverage} />
         <HookProbe label="cluster-drift" useHook={useClusterSettingsDriftForCoverage} />
+        <HookProbe label="cluster-slots" useHook={useClusterSlotsForCoverage} />
         <HookProbe label="instances" useHook={useInstancesForCoverage} />
         <HookProbe label="instance" useHook={useInstanceForCoverage} />
         <HookProbe label="instance-activity" useHook={useInstanceActivityForCoverage} />
@@ -329,6 +332,10 @@ function useClusterReplicationForCoverage() {
 
 function useClusterSettingsDriftForCoverage() {
   return useClusterSettingsDrift('cluster-a')
+}
+
+function useClusterSlotsForCoverage() {
+  return useClusterSlots('cluster-a')
 }
 
 function useInstancesForCoverage() {

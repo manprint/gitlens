@@ -99,7 +99,7 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
       )}
       <HostSection instanceId={instanceId} />
       <SettingsSection instanceId={instanceId} />
-      <RelationsSection instanceId={instanceId} />
+      <RelationsSection instanceId={instanceId} currentTier={instanceQuery.data.perm_tier} />
     </div>
   )
 }

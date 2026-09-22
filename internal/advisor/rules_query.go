@@ -3,6 +3,7 @@ package advisor
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/manprint/pglens/internal/pgtype"
 )
@@ -14,8 +15,9 @@ const (
 	totalShare = 0.30
 	// regressionFactor requires a threefold increase over the seven-day median.
 	regressionFactor = 3
-	// tempBytesPerCall is the minimum temporary-work threshold in bytes per call.
-	tempBytesPerCall = 1
+	// defaultWorkMemBytes is PostgreSQL's default work_mem, used when the
+	// instance's own value is unknown.
+	defaultWorkMemBytes = 4 * 1024 * 1024
 	// cacheMissShare is the shared-buffer read ratio considered high.
 	cacheMissShare = 0.30
 	// longTxnSeconds is the transaction age requiring operator attention.
@@ -45,10 +47,30 @@ func (r queryAdvisorRule) MinTier() pgtype.PermTier       { return pgtype.TierRe
 func (r queryAdvisorRule) Evaluate(s *Snapshot) []Finding { return r.eval(s) }
 
 func queryFinding(r string, sev Severity, q StatementStat, title, detail, remediation string, evidence map[string]any) Finding {
-	return Finding{RuleID: r, Severity: sev, State: StateOpen, Scope: ScopeInstance, ObjectName: fmt.Sprintf("queryid:%d", q.QueryID), Title: title, Detail: detail, Remediation: remediation, Evidence: evidence}
+	return Finding{RuleID: r, Severity: sev, State: StateOpen, Scope: ScopeInstance, Datname: q.Datname, ObjectName: fmt.Sprintf("queryid:%d", q.QueryID), Title: title, Detail: detail, Remediation: remediation, Evidence: evidence}
 }
 
 func metricValue(s *Snapshot, name string) (float64, bool) { return s.Metric(name, nil) }
+
+// sortedLabelSets lists the canonical label sets a metric has, in order.
+func sortedLabelSets(s *Snapshot, name string) []string {
+	out := make([]string, 0, len(s.Metrics[name]))
+	for labels := range s.Metrics[name] {
+		out = append(out, labels)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// canonicalLabel reads one label back out of a pgtype.CanonicalLabels key.
+func canonicalLabel(canonical, key string) string {
+	for _, pair := range strings.Split(canonical, "\x1f") {
+		if k, v, ok := strings.Cut(pair, "="); ok && k == key {
+			return v
+		}
+	}
+	return ""
+}
 
 func metricRule(id string, sev Severity, metric string, threshold float64, title, remediation string) queryAdvisorRule {
 	return queryAdvisorRule{id: id, severity: sev, needs: []string{metric}, eval: func(s *Snapshot) []Finding {
@@ -101,15 +123,21 @@ func init() {
 			}
 			return out
 		}},
-		{id: "query.temp_bytes_high", severity: SeverityWarning, needs: []string{"Statements", "work_mem"}, eval: func(s *Snapshot) []Finding {
-			workMem, ok := metricValue(s, "work_mem_bytes")
-			if !ok {
-				workMem = 0
+		{id: "query.temp_bytes_high", severity: SeverityWarning, needs: []string{"Statements"}, eval: func(s *Snapshot) []Finding {
+			// work_mem is a setting, not a metric: it used to be looked up
+			// among the metrics, never found, and every statement that
+			// spilled a single byte was reported.
+			workMem, ok := settingFloat(s, "work_mem_bytes")
+			if !ok || workMem <= 0 {
+				workMem = defaultWorkMemBytes
 			}
 			var out []Finding
 			for _, q := range s.Statements {
+				if q.Calls <= 0 {
+					continue
+				}
 				avg := q.TempBytes / q.Calls
-				if q.Calls > 0 && avg > tempBytesPerCall && (workMem == 0 || avg > workMem) {
+				if avg > workMem {
 					out = append(out, queryFinding("query.temp_bytes_high", SeverityWarning, q, "High temporary write volume", fmt.Sprintf("average temporary bytes per call is %.0f", avg), fmt.Sprintf("Review the query and current work_mem (%.0f bytes)", workMem), map[string]any{"queryid": q.QueryID, "bytes_per_call": avg, "work_mem_bytes": workMem}))
 				}
 			}
@@ -130,9 +158,22 @@ func init() {
 			return out
 		}},
 		metricRule("txn.long_running", SeverityWarning, "pg_max_xact_age_seconds", longTxnSeconds, "Long-running transaction", "Commit, roll back, or investigate the transaction"),
-		metricRule("txn.idle_in_transaction", SeverityWarning, "pg_max_idle_in_txn_seconds", idleTxnSeconds, "Idle transaction", "Close or commit the idle transaction"),
+		metricRule("txn.idle_in_transaction", SeverityWarning, "pg_max_idle_in_transaction_seconds", idleTxnSeconds, "Idle transaction", "Close or commit the idle transaction"),
 		metricRule("txn.prepared_orphan", SeverityCritical, "pg_oldest_prepared_xact_seconds", preparedSeconds, "Orphaned prepared transaction", "Resolve the prepared transaction so vacuum can proceed"),
-		metricRule("txn.high_rollback_ratio", SeverityInfo, "pg_xact_rollback_ratio", rollbackShare, "High rollback ratio", "Investigate transaction failures and retry behavior"),
+		{id: "txn.high_rollback_ratio", severity: SeverityInfo, needs: []string{"pg_xact_rollback_ratio"}, eval: func(s *Snapshot) []Finding {
+			// database_stats emits the ratio per database. The rule read the
+			// unlabelled series, which does not exist, so it never fired.
+			var out []Finding
+			for _, labels := range sortedLabelSets(s, "pg_xact_rollback_ratio") {
+				v := s.Metrics["pg_xact_rollback_ratio"][labels]
+				if v <= rollbackShare {
+					continue
+				}
+				db := canonicalLabel(labels, "database")
+				out = append(out, Finding{RuleID: "txn.high_rollback_ratio", Severity: SeverityInfo, State: StateOpen, Scope: ScopeDatabase, Datname: db, Title: "High rollback ratio", Detail: fmt.Sprintf("%.1f%% of the transactions of database %q rolled back since its statistics were reset, above %.0f%%", v*100, db, rollbackShare*100), Remediation: "Investigate transaction failures and retry behavior", Evidence: map[string]any{"metric": "pg_xact_rollback_ratio", "database": db, "observed": v, "threshold": rollbackShare}})
+			}
+			return out
+		}},
 		metricRule("txn.wraparound_risk", SeverityCritical, "pg_max_datfrozenxid_age", wraparoundAge, "Transaction ID wraparound risk", "Run maintenance immediately and resolve vacuum starvation"),
 	}
 	for _, r := range rules {

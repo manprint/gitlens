@@ -6,18 +6,12 @@ import { EmptyState } from '@/components/state/EmptyState'
 import { ErrorState } from '@/components/state/ErrorState'
 import { formatBytes } from '@/lib/format/bytes'
 import { formatDuration } from '@/lib/format/duration'
+import type { SlotRow } from '@/lib/replication'
+
+export type { SlotRow } from '@/lib/replication'
 
 export const DEFAULT_RETAINED_BYTES_THRESHOLD = 1024 ** 3
 const RETENTION_WARNING = "A disconnected standby retains WAL and can fill the primary's disk."
-
-export interface SlotRow {
-  name: string
-  owningInstance: string
-  active: boolean | null
-  walStatus: string | null
-  retainedBytes: number | null
-  inactiveAgeSeconds: number | null
-}
 
 export interface SlotsSectionProps {
   slots?: readonly SlotRow[]
@@ -52,6 +46,11 @@ function slotColumns(threshold: number): DataTableProps<SlotRow>['columns'] {
     { accessorKey: 'name', header: 'Slot name' },
     { accessorKey: 'owningInstance', header: 'Owning instance' },
     {
+      accessorKey: 'slotType',
+      header: 'Type',
+      cell: ({ getValue }) => getValue<string | null>() ?? 'Unknown',
+    },
+    {
       accessorKey: 'active',
       header: 'Active state',
       cell: ({ getValue }) => activeLabel(getValue<boolean | null>()),
@@ -78,6 +77,18 @@ function slotColumns(threshold: number): DataTableProps<SlotRow>['columns'] {
             {warning ? ` — ${RETENTION_WARNING}` : null}
           </span>
         )
+      },
+    },
+    {
+      accessorKey: 'safeWalSizeBytes',
+      header: 'WAL before invalidation',
+      // null means max_slot_wal_keep_size is unlimited (the slot is never
+      // invalidated, and can retain WAL until the disk is full), or that the
+      // slot has already lost WAL it needs: PostgreSQL reports NULL for both.
+      cell: ({ row, getValue }) => {
+        const safe = getValue<number | null>()
+        if (safe !== null) return formatBytes(safe)
+        return row.original.walStatus === 'lost' ? 'None: required WAL already lost' : 'Unlimited'
       },
     },
     {

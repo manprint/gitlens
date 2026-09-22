@@ -51,9 +51,14 @@ type Finding struct {
 	DegradedReason string
 }
 
-// ID is stable across evaluations for the same rule and subject.
+// ID is stable across evaluations for the same rule and subject. An object
+// is qualified by its database, since several databases of one instance can
+// hold a relation or a statement of the same name.
 func (f Finding) ID() string {
 	subject := f.ObjectName
+	if subject != "" && f.Datname != "" {
+		subject = f.Datname + "/" + subject
+	}
 	if subject == "" {
 		subject = f.Datname
 	}

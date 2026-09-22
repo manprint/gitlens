@@ -172,7 +172,10 @@ func TestApplyStatementMetric(t *testing.T) {
 		{"calls", "calls", 7, func(r *store.StatementRow) bool { return r.CallsRate != nil && *r.CallsRate == 7 }},
 		{"rows", "rows", 3, func(r *store.StatementRow) bool { return r.RowsRate != nil && *r.RowsRate == 3 }},
 		{"blks rows excluded", "shared_blks_rows", 9, func(r *store.StatementRow) bool { return r.RowsRate == nil }},
-		{"unknown fallback", "unknown_metric_xyz", 42, func(r *store.StatementRow) bool { return r.CallsRate != nil && *r.CallsRate == 42 }},
+		{"temp_blks_written", "pg_stat_statements_temp_blks_written_total", 8, func(r *store.StatementRow) bool {
+			return r.TempBlksWrittenRate != nil && *r.TempBlksWrittenRate == 8 && r.CallsRate == nil
+		}},
+		{"unknown is not stored", "unknown_metric_xyz", 42, func(r *store.StatementRow) bool { return *r == store.StatementRow{} }},
 	}
 	for _, c := range cases {
 		c := c
@@ -237,14 +240,40 @@ func TestApplyReplicationMetric(t *testing.T) {
 	row = &store.ReplicationRow{}
 	applyReplicationMetric(row, "sync_state", 0, map[string]string{"sync_state": "sync"})
 	require.Equal(t, "sync", *row.SyncState)
-	// fallback bytes
+	// Unknown metrics are not stored anywhere, least of all as write lag.
 	row = &store.ReplicationRow{}
 	applyReplicationMetric(row, "some_bytes_metric", 55, nil)
-	require.Equal(t, int64(55), *row.WriteLagBytes)
-	// fallback lag
-	row = &store.ReplicationRow{}
 	applyReplicationMetric(row, "some_lag_metric", 5.5, nil)
-	require.Equal(t, 5.5, *row.WriteLagSec)
+	require.Equal(t, store.ReplicationRow{}, *row)
+}
+
+// TestApplyReplicationMetric_SlotMetrics: the replication_slots check's own
+// metric and label names. safe_wal_size and active_pid used to fall into the
+// write-lag fallback, and the "status" label carrying wal_status was ignored.
+func TestApplyReplicationMetric_SlotMetrics(t *testing.T) {
+	t.Parallel()
+	labels := map[string]string{"slot_name": "standby_a", "slot_type": "physical", "status": "extended"}
+	row := &store.ReplicationRow{Source: "slot"}
+	applyReplicationMetric(row, "replication_slot_active", 1, labels)
+	applyReplicationMetric(row, "replication_slot_active_pid", 4242, labels)
+	applyReplicationMetric(row, "replication_slot_safe_wal_size_bytes", 1<<20, labels)
+	applyReplicationMetric(row, "replication_slot_retained_bytes", 4096, labels)
+	require.NotNil(t, row.SlotActive)
+	require.True(t, *row.SlotActive)
+	require.Equal(t, int64(1<<20), *row.SlotSafeWALSizeBytes)
+	require.Equal(t, int64(4096), *row.SlotRetainedBytes)
+	require.Equal(t, "extended", *row.SlotWalStatus)
+	require.Equal(t, "physical", *row.SlotType)
+	require.Nil(t, row.WriteLagBytes)
+	require.Nil(t, row.WriteLagSec)
+}
+
+func TestReplicationSlot_ReadsEveryIdentityLabel(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "slot_a", replicationSlot(map[string]string{"slot_name": "slot_a", "application_name": "app"}))
+	require.Equal(t, "app", replicationSlot(map[string]string{"application_name": "app"}))
+	require.Equal(t, "legacy", replicationSlot(map[string]string{"standby": "legacy"}), "agents before protocol v3")
+	require.Equal(t, "", replicationSlot(nil))
 }
 
 func TestBuildASHRow(t *testing.T) {

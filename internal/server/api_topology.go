@@ -4,8 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -32,6 +32,7 @@ func NewTopologyAPI(pool *pgxpool.Pool) *TopologyAPI {
 func (t *TopologyAPI) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/clusters/{id}/topology", t.handleTopology)
 	r.Get("/api/v1/clusters/{id}/replication", t.handleReplication)
+	r.Get("/api/v1/clusters/{id}/slots", t.handleSlots)
 }
 
 // ----- /api/v1/clusters/{id}/topology -----
@@ -99,7 +100,11 @@ func (t *TopologyAPI) handleTopology(w http.ResponseWriter, r *http.Request) {
 			edge.SyncState = &syncState.String
 		}
 		if confidence == "low" {
-			note := "Endpoint could not be resolved; check connectivity"
+			// A low-confidence edge is the standby's last-known upstream while
+			// its WAL receiver is not streaming (see wire.Edge.Confidence). The
+			// upstream is still a known instance: the pipeline drops an edge it
+			// cannot resolve.
+			note := "The standby is not streaming from this upstream right now; check connectivity"
 			edge.Note = &note
 		}
 		edges = append(edges, edge)
@@ -110,6 +115,21 @@ func (t *TopologyAPI) handleTopology(w http.ResponseWriter, r *http.Request) {
 	}
 	if edges == nil {
 		edges = []topologyEdgeResp{}
+	}
+	syncStates, _, _, err := currentSyncStates(ctx, t.pool, cidDB)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query sync state failed", err.Error())
+		return
+	}
+	for i := range edges {
+		if edges[i].SyncState != nil {
+			continue
+		}
+		if from, perr := uuid.Parse(edges[i].From); perr == nil {
+			if state, ok := syncStates[from]; ok {
+				edges[i].SyncState = &state
+			}
+		}
 	}
 
 	// Fetch failover events for this cluster
@@ -173,11 +193,14 @@ func (t *TopologyAPI) handleTopology(w http.ResponseWriter, r *http.Request) {
 // ----- /api/v1/clusters/{id}/replication -----
 
 type replicationSeriesResp struct {
-	From      string        `json:"from"`
-	To        string        `json:"to"`
-	Metric    string        `json:"metric"`
-	SyncState *string       `json:"sync_state,omitempty"`
-	Series    []metricPoint `json:"series"`
+	From string `json:"from"`
+	To   string `json:"to"`
+	// StandbyName is the application_name the primary reports the standby
+	// under. When no monitored instance matches it, From carries it too.
+	StandbyName *string       `json:"standby_name,omitempty"`
+	Metric      string        `json:"metric"`
+	SyncState   *string       `json:"sync_state,omitempty"`
+	Series      []metricPoint `json:"series"`
 }
 
 type replicationResp struct {
@@ -236,13 +259,26 @@ func (t *TopologyAPI) handleReplication(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	// Query replication metrics per edge (from -> to)
-	// The schema has: instance_id (the reporting instance), upstream_id (the edge destination)
+	resolver, err := loadStandbyResolver(ctx, t.pool, cidDB)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query instances failed", err.Error())
+		return
+	}
+
+	// metrics_replication holds three views. A standby's receiver rows are
+	// the edge standby -> upstream. A primary's sender rows (one per standby
+	// in pg_stat_replication) are the same edge seen from the other end, and
+	// the only source of write and flush lag and of sync_state: they used to
+	// be dropped because they carry no upstream_id, so write/flush lag were
+	// always empty and the sync state always Unknown. Slot rows are not
+	// edges at all (see the slots endpoint). Rows written before migration
+	// 0014 have no source and are told apart by their columns.
 	rows, err := t.pool.Query(ctx,
-		`SELECT instance_id, upstream_id, sync_state, ts, write_lag_sec, flush_lag_sec, replay_lag_sec
+		`SELECT instance_id, upstream_id, slot_name, `+store.ReplicationSourceSQL+` AS source,
+		        sync_state, ts, write_lag_sec, flush_lag_sec, replay_lag_sec
 		 FROM metrics_replication
 		 WHERE tenant_id='default' AND cluster_id=$1 AND ts >= $2 AND ts < $3
-		 ORDER BY instance_id, upstream_id, ts`,
+		 ORDER BY ts`,
 		cidDB, from, to)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query metrics failed", err.Error())
@@ -250,107 +286,98 @@ func (t *TopologyAPI) handleReplication(w http.ResponseWriter, r *http.Request) 
 	}
 	defer rows.Close()
 
-	// Collect metrics grouped by edge and metric type
 	type edgeMetrics struct {
-		from         uuid.UUID
-		to           uuid.UUID
+		from, to     string
+		standbyName  *string
+		sender       bool
 		syncState    *string
 		writePoints  []metricPoint
 		flushPoints  []metricPoint
 		replayPoints []metricPoint
 	}
-	edgeMap := make(map[string]*edgeMetrics) // key = "from:to"
+	edgeMap := make(map[string]*edgeMetrics) // key = source:from:to
+	var order []string
 
 	for rows.Next() {
 		var instID uuid.UUID
-		var upID sql.NullString
-		var syncState sql.NullString
+		var upID *uuid.UUID
+		var slotName, source string
+		var syncState *string
 		var ts time.Time
-		var wLag, fLag, rLag sql.NullFloat64
-
-		if scanErr := rows.Scan(&instID, &upID, &syncState, &ts, &wLag, &fLag, &rLag); scanErr != nil {
+		var wLag, fLag, rLag *float64
+		if scanErr := rows.Scan(&instID, &upID, &slotName, &source, &syncState, &ts, &wLag, &fLag, &rLag); scanErr != nil {
 			writeError(w, http.StatusInternalServerError, "scan metric failed", scanErr.Error())
 			return
 		}
-
-		if !upID.Valid {
-			continue // Skip entries without upstream
-		}
-
-		upID_uuid, err := uuid.Parse(upID.String)
-		if err != nil {
+		var fromID, toID string
+		var standbyName *string
+		switch source {
+		case "receiver":
+			if upID == nil {
+				continue // the upstream could not be resolved
+			}
+			fromID, toID = instID.String(), upID.String()
+		case "sender":
+			if slotName == "" {
+				continue
+			}
+			name := slotName
+			standbyName = &name
+			toID = instID.String()
+			if standby, ok := resolver.resolve(instID, slotName); ok {
+				fromID = standby.String()
+			} else {
+				fromID = slotName
+			}
+		default:
 			continue
 		}
-
-		key := fmt.Sprintf("%s:%s", instID.String(), upID_uuid.String())
+		key := source + "\x00" + fromID + "\x00" + toID
 		em, exists := edgeMap[key]
 		if !exists {
-			em = &edgeMetrics{
-				from:         instID,
-				to:           upID_uuid,
-				writePoints:  []metricPoint{},
-				flushPoints:  []metricPoint{},
-				replayPoints: []metricPoint{},
-			}
-			if syncState.Valid {
-				em.syncState = &syncState.String
-			}
+			em = &edgeMetrics{from: fromID, to: toID, standbyName: standbyName, sender: source == "sender",
+				writePoints: []metricPoint{}, flushPoints: []metricPoint{}, replayPoints: []metricPoint{}}
 			edgeMap[key] = em
+			order = append(order, key)
 		}
-
-		// Add metric points (with nil for missing values)
-		var wVal *float64
-		if wLag.Valid {
-			wVal = &wLag.Float64
+		if syncState != nil {
+			em.syncState = syncState // the newest reading wins
 		}
-		em.writePoints = append(em.writePoints, metricPoint{TS: ts, Value: wVal})
-
-		var fVal *float64
-		if fLag.Valid {
-			fVal = &fLag.Float64
-		}
-		em.flushPoints = append(em.flushPoints, metricPoint{TS: ts, Value: fVal})
-
-		var rVal *float64
-		if rLag.Valid {
-			rVal = &rLag.Float64
-		}
-		em.replayPoints = append(em.replayPoints, metricPoint{TS: ts, Value: rVal})
+		em.writePoints = append(em.writePoints, metricPoint{TS: ts, Value: wLag})
+		em.flushPoints = append(em.flushPoints, metricPoint{TS: ts, Value: fLag})
+		em.replayPoints = append(em.replayPoints, metricPoint{TS: ts, Value: rLag})
 	}
 	if err := rows.Err(); err != nil {
 		writeError(w, http.StatusInternalServerError, "rows error", err.Error())
 		return
 	}
 
-	// Convert to response format (one edge per series, per metric type)
-	edgeSeries := []replicationSeriesResp{}
+	// An edge both ends report is shown once, from the primary's side: it
+	// measures write, flush and replay lag where the receiver only has an
+	// estimate of replay lag.
+	fromSender := make(map[string]bool)
 	for _, em := range edgeMap {
-		// For each metric type, create a separate entry
-		if len(em.writePoints) > 0 {
-			edgeSeries = append(edgeSeries, replicationSeriesResp{
-				From:      em.from.String(),
-				To:        em.to.String(),
-				Metric:    "write_lag_sec",
-				SyncState: em.syncState,
-				Series:    em.writePoints,
-			})
+		if em.sender {
+			fromSender[em.from+"\x00"+em.to] = true
 		}
-		if len(em.flushPoints) > 0 {
-			edgeSeries = append(edgeSeries, replicationSeriesResp{
-				From:      em.from.String(),
-				To:        em.to.String(),
-				Metric:    "flush_lag_sec",
-				SyncState: em.syncState,
-				Series:    em.flushPoints,
-			})
+	}
+	edgeSeries := []replicationSeriesResp{}
+	for _, key := range order {
+		em := edgeMap[key]
+		if !em.sender && fromSender[em.from+"\x00"+em.to] {
+			continue
 		}
-		if len(em.replayPoints) > 0 {
+		for _, series := range []struct {
+			metric string
+			points []metricPoint
+		}{{"write_lag_sec", em.writePoints}, {"flush_lag_sec", em.flushPoints}, {"replay_lag_sec", em.replayPoints}} {
 			edgeSeries = append(edgeSeries, replicationSeriesResp{
-				From:      em.from.String(),
-				To:        em.to.String(),
-				Metric:    "replay_lag_sec",
-				SyncState: em.syncState,
-				Series:    em.replayPoints,
+				From:        em.from,
+				To:          em.to,
+				StandbyName: em.standbyName,
+				Metric:      series.metric,
+				SyncState:   em.syncState,
+				Series:      series.points,
 			})
 		}
 	}
@@ -358,6 +385,211 @@ func (t *TopologyAPI) handleReplication(w http.ResponseWriter, r *http.Request) 
 	resp := replicationResp{
 		ClusterID: cid.String(),
 		Edges:     edgeSeries,
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// standbyResolver matches the name a primary reports a standby under
+// (pg_stat_replication.application_name) to the monitored standby instance.
+type standbyResolver struct {
+	byTargetName map[string]uuid.UUID
+	// standbysOf lists the standbys whose own topology edge points at each
+	// upstream.
+	standbysOf map[uuid.UUID][]uuid.UUID
+	// namesOf lists the distinct standby names each primary has reported.
+	namesOf map[uuid.UUID]map[string]struct{}
+}
+
+func loadStandbyResolver(ctx context.Context, pool dbPool, cidDB int64) (*standbyResolver, error) {
+	r := &standbyResolver{
+		byTargetName: make(map[string]uuid.UUID),
+		standbysOf:   make(map[uuid.UUID][]uuid.UUID),
+		namesOf:      make(map[uuid.UUID]map[string]struct{}),
+	}
+	rows, err := pool.Query(ctx, `SELECT instance_id, COALESCE(target_name, '') FROM instances WHERE tenant_id='default' AND cluster_id=$1`, cidDB)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id uuid.UUID
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if name != "" {
+			r.byTargetName[name] = id
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows, err = pool.Query(ctx, `SELECT from_instance, to_instance FROM topology_edges WHERE tenant_id='default' AND cluster_id=$1`, cidDB)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var standby, upstream uuid.UUID
+		if err := rows.Scan(&standby, &upstream); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		r.standbysOf[upstream] = append(r.standbysOf[upstream], standby)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows, err = pool.Query(ctx, `SELECT DISTINCT instance_id, slot_name FROM metrics_replication
+		WHERE tenant_id='default' AND cluster_id=$1 AND source='sender' AND ts >= now() - interval '1 hour'`, cidDB)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var primary uuid.UUID
+		var name string
+		if err := rows.Scan(&primary, &name); err != nil {
+			return nil, err
+		}
+		if r.namesOf[primary] == nil {
+			r.namesOf[primary] = make(map[string]struct{})
+		}
+		r.namesOf[primary][name] = struct{}{}
+	}
+	return r, rows.Err()
+}
+
+// currentSyncStates reads each primary's latest pg_stat_replication rows: the
+// sync_state of every standby it serves, keyed by the standby instance when
+// the row resolves to one, and how many standbys are synchronous (sync or
+// quorum). topology_edges.sync_state, which used to be the only source, is
+// never filled: the standby that reports an edge cannot see its own state.
+func currentSyncStates(ctx context.Context, pool dbPool, cidDB int64) (map[uuid.UUID]string, int, bool, error) {
+	resolver, err := loadStandbyResolver(ctx, pool, cidDB)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	rows, err := pool.Query(ctx, `SELECT DISTINCT ON (instance_id, slot_name) instance_id, slot_name, sync_state
+		FROM metrics_replication
+		WHERE tenant_id='default' AND cluster_id=$1 AND sync_state IS NOT NULL AND slot_name <> ''
+		  AND ts > now() - interval '60 seconds'
+		ORDER BY instance_id, slot_name, ts DESC`, cidDB)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	defer rows.Close()
+	states := make(map[uuid.UUID]string)
+	synchronous := 0
+	seen := false
+	for rows.Next() {
+		var primary uuid.UUID
+		var name, state string
+		if err := rows.Scan(&primary, &name, &state); err != nil {
+			return nil, 0, false, err
+		}
+		seen = true
+		if state == "sync" || state == "quorum" {
+			synchronous++
+		}
+		if standby, ok := resolver.resolve(primary, name); ok {
+			states[standby] = state
+		}
+	}
+	return states, synchronous, seen, rows.Err()
+}
+
+// resolve finds the standby a primary's row describes: the instance whose
+// agent target name is the application_name (the agent qualifies a name two
+// standbys share as name@address:port), or else the primary's only standby
+// when it reports exactly one.
+func (r *standbyResolver) resolve(primary uuid.UUID, name string) (uuid.UUID, bool) {
+	base := name
+	if i := strings.IndexByte(name, '@'); i >= 0 {
+		base = name[:i]
+	}
+	if id, ok := r.byTargetName[base]; ok && id != primary {
+		return id, true
+	}
+	if standbys := r.standbysOf[primary]; len(standbys) == 1 && len(r.namesOf[primary]) <= 1 {
+		return standbys[0], true
+	}
+	return uuid.Nil, false
+}
+
+// ----- /api/v1/clusters/{id}/slots -----
+
+type slotResp struct {
+	InstanceID       string     `json:"instance_id"`
+	SlotName         string     `json:"slot_name"`
+	SlotType         *string    `json:"slot_type"`
+	Active           *bool      `json:"active"`
+	WALStatus        *string    `json:"wal_status"`
+	RetainedBytes    *int64     `json:"retained_bytes"`
+	SafeWALSizeBytes *int64     `json:"safe_wal_size_bytes"`
+	LastActiveAt     *time.Time `json:"last_active_at"`
+	TS               time.Time  `json:"ts"`
+}
+
+type slotsResp struct {
+	ClusterID string     `json:"cluster_id"`
+	Slots     []slotResp `json:"slots"`
+}
+
+// handleSlots returns the newest state of every replication slot in the
+// cluster. The cluster page had a slots section and nothing to fill it with:
+// no endpoint served the rows the replication_slots check has always sent.
+func (t *TopologyAPI) handleSlots(w http.ResponseWriter, r *http.Request) {
+	cid, err := pgtype.ParseClusterID(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid cluster_id", err.Error())
+		return
+	}
+	resp := slotsResp{ClusterID: cid.String(), Slots: []slotResp{}}
+	if t.pool == nil {
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	// A slot not reported for five minutes (the check runs every 15s) has
+	// been dropped, or its instance is gone. last_active_at looks back over
+	// the retained history for the slot's last active reading.
+	rows, err := t.pool.Query(ctx, `
+		SELECT l.instance_id, l.slot_name, l.slot_type, l.slot_active, l.slot_wal_status,
+		       l.slot_retained_bytes, l.slot_safe_wal_size_bytes,
+		       CASE WHEN l.slot_active THEN l.ts ELSE (
+		         SELECT max(h.ts) FROM metrics_replication h
+		          WHERE h.tenant_id='default' AND h.instance_id=l.instance_id
+		            AND h.slot_name=l.slot_name AND h.slot_active) END,
+		       l.ts
+		FROM (SELECT DISTINCT ON (instance_id, slot_name) *
+		        FROM metrics_replication
+		       WHERE tenant_id='default' AND cluster_id=$1 AND slot_name <> ''
+		         AND (source='slot' OR (source IS NULL AND slot_active IS NOT NULL))
+		         AND ts >= now() - interval '5 minutes'
+		       ORDER BY instance_id, slot_name, ts DESC) l
+		ORDER BY l.slot_name, l.instance_id`, store.ToDB(cid))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query slots failed", err.Error())
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var slot slotResp
+		var instance uuid.UUID
+		if err := rows.Scan(&instance, &slot.SlotName, &slot.SlotType, &slot.Active, &slot.WALStatus,
+			&slot.RetainedBytes, &slot.SafeWALSizeBytes, &slot.LastActiveAt, &slot.TS); err != nil {
+			writeError(w, http.StatusInternalServerError, "scan slot failed", err.Error())
+			return
+		}
+		slot.InstanceID = instance.String()
+		resp.Slots = append(resp.Slots, slot)
+	}
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "rows error", err.Error())
+		return
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

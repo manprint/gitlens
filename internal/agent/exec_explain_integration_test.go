@@ -49,43 +49,84 @@ func TestINTCMD006_ExplainKnownQueryIDReturnsPlan(t *testing.T) {
 	})
 }
 
-func TestINTCMD007_ExplainAnalyzeUpdateRollsBack(t *testing.T) {
+// TestINTCMD007_ExplainAnalyzeNeverWrites proves the monitored database is
+// never modified through EXPLAIN: ANALYZE of a writing statement is refused
+// before anything runs — even when the monitoring role holds the privilege —
+// while plan-only EXPLAIN of the same statement still returns a plan.
+func TestINTCMD007_ExplainAnalyzeNeverWrites(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
 		pg.Lock(t)
 		ctx := context.Background()
 		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
 		_, err := admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
 		require.NoError(t, err)
+
+		table := fmt.Sprintf("pglens_explain_%d", pg.Major)
+		_, err = admin.Exec(ctx, "DROP TABLE IF EXISTS "+table)
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "CREATE TABLE "+table+" (value int)")
+		require.NoError(t, err)
+		t.Cleanup(func() { _, _ = admin.Exec(context.Background(), "DROP TABLE IF EXISTS "+table) })
+		_, err = admin.Exec(ctx, "INSERT INTO "+table+" VALUES (1)")
+		require.NoError(t, err)
+		// The privilege is granted on purpose: the refusal must come from the
+		// read-only guarantee, not from a missing grant.
+		_, err = admin.Exec(ctx, "GRANT UPDATE ON "+table+" TO pglens_t1")
+		require.NoError(t, err)
+		update := "UPDATE " + table + " SET value = value + value"
+		_, err = admin.Exec(ctx, update)
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "UPDATE "+table+" SET value = 1")
+		require.NoError(t, err)
+		var queryID int64
+		require.NoError(t, admin.QueryRow(ctx, "SELECT queryid FROM pg_stat_statements WHERE query = $1 LIMIT 1", update).Scan(&queryID))
+
 		mgr, err := NewManager(ctx, "explain-update-target", pg.DSN("postgres", pgtest.RoleT1), DefaultConnOptions(), clock.System())
 		require.NoError(t, err)
 		defer mgr.Close()
 
-		table := fmt.Sprintf("pglens_explain_%d", pg.Major)
-		conn, err := mgr.ForDatabase(ctx, "postgres")
-		require.NoError(t, err)
-		defer conn.Release()
-		_, err = conn.Exec(ctx, "CREATE TEMP TABLE "+table+" (value int)")
-		require.NoError(t, err)
-		_, err = conn.Exec(ctx, "INSERT INTO "+table+" VALUES (1)")
-		require.NoError(t, err)
-		update := "UPDATE " + table + " SET value = value + value"
-		_, err = conn.Exec(ctx, update)
-		require.NoError(t, err)
-		_, err = conn.Exec(ctx, "UPDATE "+table+" SET value = 1")
-		require.NoError(t, err)
-		var queryID int64
-		require.NoError(t, conn.QueryRow(ctx, "SELECT queryid FROM pg_stat_statements WHERE query = $1 LIMIT 1", update).Scan(&queryID))
+		_, err = NewExplainExecutor().Execute(ctx, mgr, command.Args{QueryID: &queryID, Datname: "postgres", Analyze: true})
+		var rejected *RejectedError
+		require.ErrorAs(t, err, &rejected)
 
-		// Keep the temporary table on the same dedicated connection used by the
-		// executor; the wrapper prevents the executor's immediate Release from
-		// invalidating the connection before the post-rollback assertion.
-		target := &fixedConnectionTarget{Target: mgr, conn: nonReleasingConn{Conn: conn}}
-		result, err := NewExplainExecutor().Execute(ctx, target, command.Args{QueryID: &queryID, Datname: "postgres", Analyze: true})
+		result, err := NewExplainExecutor().Execute(ctx, mgr, command.Args{QueryID: &queryID, Datname: "postgres"})
 		require.NoError(t, err)
 		require.NotEmpty(t, result)
+
 		var value int
-		require.NoError(t, conn.QueryRow(ctx, "SELECT value FROM "+table).Scan(&value))
+		require.NoError(t, admin.QueryRow(ctx, "SELECT value FROM "+table).Scan(&value))
 		require.Equal(t, 1, value)
+	})
+}
+
+// TestINTCMD008_ExplainParameterisedStatement covers the normal case: almost
+// every pg_stat_statements entry has $n placeholders, which only
+// EXPLAIN (GENERIC_PLAN) can plan (PostgreSQL 16+).
+func TestINTCMD008_ExplainParameterisedStatement(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		_, err := admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "SELECT relname FROM pg_class WHERE relpages > 7 AND relname <> 'pglens'")
+		require.NoError(t, err)
+		var queryID int64
+		require.NoError(t, admin.QueryRow(ctx, `SELECT queryid FROM pg_stat_statements
+			WHERE query LIKE 'SELECT relname FROM pg_class WHERE relpages > $1%' LIMIT 1`).Scan(&queryID))
+
+		mgr, err := NewManager(ctx, "explain-generic-target", pg.DSN("postgres", pgtest.RoleT1), DefaultConnOptions(), clock.System())
+		require.NoError(t, err)
+		defer mgr.Close()
+
+		result, err := NewExplainExecutor().Execute(ctx, mgr, command.Args{QueryID: &queryID, Datname: "postgres"})
+		if pg.Major < 16 {
+			var rejected *RejectedError
+			require.ErrorAs(t, err, &rejected)
+			return
+		}
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
 	})
 }
 

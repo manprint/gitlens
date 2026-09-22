@@ -93,6 +93,25 @@ func TestStep_FalseResolvesFiring(t *testing.T) {
 	require.Equal(t, StateResolved, a.State)
 	require.Equal(t, TransitionResolved, tr)
 }
+
+// TestStep_InapplicableResolvesAndNeverOpens: a subject the rule no longer
+// applies to (a revoked agent, a cluster switched to asynchronous
+// replication) closes its episode even though its value still matches.
+func TestStep_InapplicableResolvesAndNeverOpens(t *testing.T) {
+	e := NewEvaluator()
+	r := evalRule()
+	r.For = 0
+	n := time.Unix(1, 0)
+	e.Step(r, evalSample(n), n)
+	s := evalSample(n)
+	s.Inapplicable = true
+	a, tr := e.Step(r, s, n.Add(time.Second))
+	require.Equal(t, TransitionResolved, tr)
+	require.Equal(t, StateResolved, a.State)
+	a, tr = e.Step(r, s, n.Add(2*time.Second))
+	require.Nil(t, a)
+	require.Equal(t, TransitionNone, tr)
+}
 func TestStep_RefireGetsNewStartedAt(t *testing.T) {
 	e := NewEvaluator()
 	r := evalRule()

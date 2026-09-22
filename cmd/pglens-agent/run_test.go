@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/manprint/pglens/internal/agent"
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/host"
+	"github.com/manprint/pglens/internal/wire"
 )
 
 // TestAgentSelfResult_ShipsTheBufferDropRate — pglens_samples_dropped_rate is
@@ -66,4 +68,40 @@ func TestHostWireResult_NoDiskTotalMeansNoRatio(t *testing.T) {
 	for _, m := range r.Metrics {
 		require.NotEqual(t, "host_disk_free_ratio", m.Name, "a zero total would make the ratio a division by zero")
 	}
+}
+
+// TestCheckDatabaseSummary_AppliesTheAgentSelection — the check command
+// used to call every connectable database monitored, while the agent
+// excludes managed-service databases and keeps only the ten busiest.
+func TestCheckDatabaseSummary_AppliesTheAgentSelection(t *testing.T) {
+	candidates := []agent.DatabaseCandidate{{Name: "rdsadmin", XactCommit: 9000}}
+	for i := range 11 {
+		candidates = append(candidates, agent.DatabaseCandidate{Name: fmt.Sprintf("app%02d", i), XactCommit: int64(1000 - i)})
+	}
+	databases := agent.SelectDatabases(candidates, agent.DefaultConnOptions())
+
+	require.Equal(t, "12 found, 10 monitored (1 excluded; 1 skipped: 1 db_budget), default selection",
+		formatDatabaseSummary(len(candidates), databases))
+	require.Equal(t, "1 found, 1 monitored, default selection",
+		formatDatabaseSummary(1, agent.SelectDatabases(candidates[1:2], agent.DefaultConnOptions())))
+}
+
+// TestReportScheduled_MonitoredMeansCollected — the selection re-runs every
+// envelope, the schedule does not: a database created after startup is not
+// collected, and one pushed out of the budget after startup still is.
+func TestReportScheduled_MonitoredMeansCollected(t *testing.T) {
+	scheduled := map[string]bool{"app": true, "old": true}
+	got := reportScheduled([]wire.Database{
+		{Name: "app", Monitored: true},
+		{Name: "created_later", Monitored: true},
+		{Name: "old", Monitored: false, SkipReason: "db_budget"},
+		{Name: "never", Monitored: false, SkipReason: "db_budget"},
+	}, scheduled)
+
+	require.Equal(t, []wire.Database{
+		{Name: "app", Monitored: true},
+		{Name: "created_later", Monitored: false, SkipReason: "discovered_after_start"},
+		{Name: "old", Monitored: true},
+		{Name: "never", Monitored: false, SkipReason: "db_budget"},
+	}, got)
 }

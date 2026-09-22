@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { cacheHitRatioValue, counterRateSeries, findResets, rangeDelta } from './metrics'
+import { cacheHitRatioValue, findResets, integrateRate, scaleSeries } from './metrics'
 
 const point = (ts: string, value: number | null) => ({ ts, value })
 
@@ -31,22 +31,24 @@ describe('metric helpers', () => {
     expect(cacheHitRatioValue(75, 25)).toBe('75.0%')
   })
 
-  it('derives rates and range totals without turning resets into spikes', () => {
+  it('integrates stored per-second rates over the time each one covers', () => {
     const series = [
       point('2026-01-01T00:00:00Z', 10),
-      point('2026-01-01T00:01:00Z', 16),
+      point('2026-01-01T00:01:00Z', 2),
       point('2026-01-01T00:02:00Z', null),
-      point('2026-01-01T00:03:00Z', 4),
-      point('2026-01-01T00:04:00Z', 9),
+      point('2026-01-01T00:03:00Z', 1),
     ]
 
-    expect(counterRateSeries(series).map(({ value }) => value)).toEqual([
-      null,
-      0.1,
-      null,
-      null,
-      0.08333333333333333,
-    ])
-    expect(rangeDelta(series)).toBe(11)
+    // 10/s over the first step, 2/s over one minute, 1/s over the two
+    // minutes since the previous measured bucket.
+    expect(integrateRate(series, 60)).toBe(600 + 120 + 120)
+    expect(integrateRate([point('2026-01-01T00:00:00Z', null)], 60)).toBeNull()
+    expect(integrateRate([], 60)).toBeNull()
+  })
+
+  it('scales measured buckets and keeps gaps', () => {
+    expect(
+      scaleSeries([point('2026-01-01T00:00:00Z', 0.5), point('2026-01-01T00:01:00Z', null)], 3600),
+    ).toEqual([point('2026-01-01T00:00:00Z', 1800), point('2026-01-01T00:01:00Z', null)])
   })
 })

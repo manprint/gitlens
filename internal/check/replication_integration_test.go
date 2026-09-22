@@ -194,13 +194,13 @@ func TestReplicationStreaming_Integration_PrimaryWithStandby(t *testing.T) {
 			// Group metrics by labels to count unique replicas
 			replicaLabels := make(map[string]bool)
 			for _, m := range result.Metrics {
-				replicaLabels[m.Labels["standby"]] = true
+				replicaLabels[m.Labels["application_name"]] = true
 			}
 			require.Len(t, replicaLabels, 1, "should have exactly one standby")
 
 			// Verify the standby's application_name is pg-standby
 			for _, m := range result.Metrics {
-				require.Equal(t, "pg-standby", m.Labels["standby"], "standby should use pg-standby as application_name")
+				require.Equal(t, "pg-standby", m.Labels["application_name"], "standby should use pg-standby as application_name")
 				// The label name is what the server reads to populate
 				// metrics_replication.sync_state — see the check's own comment.
 				require.Equal(t, "async", m.Labels["sync_state"], "sync_state should be async")

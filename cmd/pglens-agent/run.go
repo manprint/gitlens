@@ -117,16 +117,22 @@ func runAgentCommand(args []string) {
 	// never blocks on the network either way, since Pusher.Push runs on its
 	// own ticker, independent of the scheduler's Results() drain below.
 	var mu sync.Mutex
-	pending := map[string][]wire.Result{}   // target name -> results since last flush
-	lastEdgeState := map[string]edgeState{} // target name -> last actual replication_receiver reading, across cycles with none
-	ashEnabled := map[string]bool{}         // target name -> whether the dedicated ASH sampler actually started for it
+	pending := map[string][]wire.Result{}        // target name -> results since last flush
+	lastEdgeState := map[string]edgeState{}      // target name -> last actual replication_receiver reading, across cycles with none
+	ashEnabled := map[string]bool{}              // target name -> whether the dedicated ASH sampler actually started for it
+	scheduledDBs := map[string]map[string]bool{} // target name -> databases its database-scoped checks run for
 
 	scheduler := agent.NewScheduler(agent.DefaultScheduleOptions())
 	configureChecks(cfg)
 	managers := make([]*agent.Manager, 0, len(cfg.Targets))
 	var ashStops []func()
 	for _, tc := range cfg.Targets {
-		mgr, err := agent.NewManager(ctx, tc.Name, tc.DSN, connOptionsFromConfig(tc), clk)
+		connOpts, err := connOptionsFromConfig(tc)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: target %s: %v\n", tc.Name, err)
+			os.Exit(1)
+		}
+		mgr, err := agent.NewManager(ctx, tc.Name, tc.DSN, connOpts, clk)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: connect target %s: %v\n", tc.Name, err)
 			os.Exit(1)
@@ -139,7 +145,7 @@ func runAgentCommand(args []string) {
 		// here is a concurrent map write, which the Go runtime turns into an
 		// unrecoverable crash of the agent — reachable on any multi-target
 		// config, invisible on the single-target ones every fixture uses.
-		addScheduleEntries(scheduler, mgr, ctx, cfg, &mu, pending)
+		scheduledDBs[tc.Name] = addScheduleEntries(scheduler, mgr, ctx, cfg, &mu, pending)
 		ashStop, enabled := startASH(ctx, mgr, tc.Name, cfg.Checks["ash"], clk, &mu, pending)
 		ashStops = append(ashStops, ashStop)
 		ashEnabled[tc.Name] = enabled
@@ -214,7 +220,7 @@ func runAgentCommand(args []string) {
 			for _, pm := range res.Metrics {
 				m = append(m, wire.Metric{Name: pm.Name, Labels: pm.Labels, Value: pm.Value, Kind: string(pm.Kind)})
 			}
-			wr := wire.Result{Check: res.Entry.CheckName, TS: clk.Now(), Database: res.Entry.Database, Metrics: m, Truncated: res.Truncated}
+			wr := wire.Result{Check: res.Entry.CheckName, TS: clk.Now(), Database: res.Entry.Database, Metrics: m, Truncated: res.Truncated, Partial: res.Partial}
 			for _, f := range res.Facts {
 				wf := wire.Fact{Kind: f.Kind, Key: f.Key, Labels: f.Labels, ValueText: f.ValueText, ValueJSON: f.ValueJSON}
 				if err := wf.Validate(); err != nil {
@@ -261,7 +267,7 @@ func runAgentCommand(args []string) {
 			case <-ctx.Done():
 				return
 			case <-pushTicker.C():
-				flushEnvelope(ctx, managers, &mu, pending, lastEdgeState, ashEnabled, pusher) //nolint:contextcheck // flushEnvelope->HasExtension: Manager caches this at connect time, the accessor takes no context
+				flushEnvelope(ctx, managers, &mu, pending, lastEdgeState, ashEnabled, scheduledDBs, pusher) //nolint:contextcheck // flushEnvelope->HasExtension: Manager caches this at connect time, the accessor takes no context
 			}
 		}
 	}()
@@ -321,7 +327,7 @@ func runAgentCommand(args []string) {
 	// cannot protect, because the envelope had not been built yet. Queue()
 	// only writes to the local buffer, so this is bounded disk I/O, not a
 	// network round trip, and the records are delivered on the next start.
-	flushEnvelope(shutdownCtx, managers, &mu, pending, lastEdgeState, ashEnabled, pusher) //nolint:contextcheck // flushEnvelope->HasExtension: Manager caches this at connect time, the accessor takes no context
+	flushEnvelope(shutdownCtx, managers, &mu, pending, lastEdgeState, ashEnabled, scheduledDBs, pusher) //nolint:contextcheck // flushEnvelope->HasExtension: Manager caches this at connect time, the accessor takes no context
 
 	_ = healthSrv.Shutdown(shutdownCtx)
 	for _, mgr := range managers {
@@ -387,7 +393,7 @@ func hostWireResult(s host.Sample, now time.Time) wire.Result {
 	return r
 }
 
-func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mutex, pending map[string][]wire.Result, lastEdgeState map[string]edgeState, ashEnabled map[string]bool, pusher *agent.Pusher) {
+func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mutex, pending map[string][]wire.Result, lastEdgeState map[string]edgeState, ashEnabled map[string]bool, scheduledDBs map[string]map[string]bool, pusher *agent.Pusher) {
 	mu.Lock()
 	batch := make(map[string][]wire.Result, len(pending))
 	for k, v := range pending {
@@ -443,6 +449,7 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: discover databases for %s: %v\n", mgr.Database(), err)
 		}
+		dbs = reportScheduled(dbs, scheduledDBs[mgr.Database()])
 		// Role() alone would report a permanently stale, cached-at-connect
 		// value — see RefreshRole's own doc comment for why this matters
 		// (SYS-REPL-001). A RefreshRole failure means this target could not
@@ -470,8 +477,8 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 		env.Instances = append(env.Instances, wire.Instance{
 			InstanceID:      mgr.InstanceID().String(), //nolint:contextcheck // Manager caches this at connect time; the accessor takes no context
 			TargetName:      mgr.TargetName(),
-			ClusterID:       mgr.ClusterID().String(), //nolint:contextcheck // same as above
-			ClusterIDSource: "system_identifier",
+			ClusterID:       mgr.ClusterID().String(),      //nolint:contextcheck // same as above
+			ClusterIDSource: string(mgr.ClusterIDSource()), //nolint:contextcheck // same as above
 			Addr:            mgr.Addr(),
 			Port:            mgr.Port(),
 			PGVersion:       int(mgr.PGVersion()),    //nolint:contextcheck // same as above
@@ -611,15 +618,46 @@ func configureChecks(cfg *agent.Config) {
 	}
 }
 
-func addScheduleEntries(scheduler *agent.Scheduler, mgr *agent.Manager, ctx context.Context, cfg *agent.Config, mu *sync.Mutex, pending map[string][]wire.Result) {
-	role := mgr.Role()                                                                    //nolint:contextcheck // Manager caches this at connect time; the accessor takes no context
-	version := mgr.PGVersion()                                                            //nolint:contextcheck // same as above
-	tier := mgr.PermTier()                                                                //nolint:contextcheck // same as above
-	exts := map[string]bool{"pg_stat_statements": mgr.HasExtension("pg_stat_statements")} //nolint:contextcheck // same as above
+// reportScheduled makes "monitored" mean what the agent collects. The
+// scheduler takes its database-scoped entries once, at startup, but every
+// envelope re-ran the selection: a database created later was reported as
+// monitored and never got a table, index, bloat or statement sample until
+// the agent restarted, while one pushed out of the budget later was reported
+// as skipped and still collected.
+func reportScheduled(dbs []wire.Database, scheduled map[string]bool) []wire.Database {
+	for i := range dbs {
+		switch {
+		case scheduled[dbs[i].Name]:
+			dbs[i].Monitored, dbs[i].SkipReason = true, ""
+		case dbs[i].Monitored:
+			dbs[i].Monitored, dbs[i].SkipReason = false, "discovered_after_start"
+		}
+	}
+	return dbs
+}
+
+// addScheduleEntries returns the databases its database-scoped entries run
+// for.
+func addScheduleEntries(scheduler *agent.Scheduler, mgr *agent.Manager, ctx context.Context, cfg *agent.Config, mu *sync.Mutex, pending map[string][]wire.Result) map[string]bool {
+	role := mgr.Role()         //nolint:contextcheck // Manager caches this at connect time; the accessor takes no context
+	version := mgr.PGVersion() //nolint:contextcheck // same as above
+	tier := mgr.PermTier()     //nolint:contextcheck // same as above
 
 	dbs, err := mgr.Discover(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: discover databases for %s: %v\n", mgr.Database(), err)
+	}
+	// pg_stat_statements counts as present when any monitored database has
+	// the view, not only the maintenance database: the check reads the
+	// others through it.
+	locateCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	exts := map[string]bool{"pg_stat_statements": mgr.LocateStatements(locateCtx, dbs)}
+	cancel()
+	scheduled := map[string]bool{}
+	for _, db := range dbs {
+		if db.Monitored {
+			scheduled[db.Name] = true
+		}
 	}
 
 	for _, c := range check.All() {
@@ -653,14 +691,26 @@ func addScheduleEntries(scheduler *agent.Scheduler, mgr *agent.Manager, ctx cont
 		}
 		scheduler.AddEntryWithInterval(mgr, c, "", interval)
 	}
+	return scheduled
 }
 
-func connOptionsFromConfig(tc agent.TargetConfig) agent.ConnOptions {
+// connOptionsFromConfig maps a target's databases block and cluster_name onto
+// the connection manager. Only databases.max used to be applied: include,
+// exclude and cluster_name were accepted by the strict YAML decoder,
+// documented, and then ignored.
+func connOptionsFromConfig(tc agent.TargetConfig) (agent.ConnOptions, error) {
 	opts := agent.DefaultConnOptions()
 	if tc.Databases.Max > 0 {
 		opts.MaxDatabases = tc.Databases.Max
 	}
-	return opts
+	include, exclude, err := tc.DatabaseFilters()
+	if err != nil {
+		return agent.ConnOptions{}, err
+	}
+	opts.Include = include
+	opts.Exclude = exclude
+	opts.ClusterName = tc.ClusterName
+	return opts, nil
 }
 
 func openAgentBuffer(cfg *agent.Config) (*buffer.Buffer, error) {

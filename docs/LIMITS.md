@@ -6,41 +6,66 @@ underlying PostgreSQL condition is healthy.
 
 ## 1. Backups and recovery
 
-pglens observes PostgreSQL archiving: `archived_count`, `failed_count`, and the
-age of the last successful archive. It does not verify that `pg_basebackup`
-succeeded, that a restore works, that an archive destination is readable, or
-that a backup is restorable. No pglens archiver metric is proof of recovery
-readiness.
+pglens observes PostgreSQL archiving: archived and failed WAL segments, the age
+of the last successful and failed archive, and the segments waiting in
+`archive_status`. It sees a base backup only while one runs, in
+`pg_stat_progress_basebackup`, sampled once a minute: a shorter backup, or one
+taken outside the replication protocol (file-level tools, storage snapshots),
+is never seen. It does not verify that a base backup succeeded, that a restore
+works, that an archive destination is readable, or that a backup is
+restorable. No pglens archiver metric is proof of recovery readiness.
 
 ## 2. Bloat is an estimate by default
 
-Scheduled bloat is a statistics-based estimate. It can be wrong in either
-direction, especially for wide rows, heavily TOASTed rows, or stale
-statistics. The exact figure requires the optional `pgstattuple` extension and
-is collected on demand only; that operation performs a full relation scan.
+Scheduled bloat is a statistics-based estimate of table heaps, computed from
+`pg_stats`. It can be wrong in either direction, especially for wide rows,
+heavily TOASTed rows, or stale statistics. It skips relations under 1 MiB,
+tables never analysed, and every table with a column the monitoring role
+cannot read (PostgreSQL hides that column's statistics), which at T0 is usually
+every table. Indexes are not estimated, so the `index.bloat_high` rule has no
+data to evaluate. The exact figure requires the optional `pgstattuple`
+extension, installed by an administrator, and is collected on demand only, at
+T1; that operation performs a full relation scan.
 
 ## 3. Query plans are captured on request
 
 Plans are captured on demand from normalized statement text in
-`pg_stat_statements`. A statement whose placeholders make it unexplainable is
-reported as such. pglens does not invent parameter values, so a returned plan
-describes a statement that PostgreSQL actually recorded, not an imagined query
-with guessed parameters.
+`pg_stat_statements`, which replaces every constant with a placeholder. On
+PostgreSQL 16 and later such a statement is planned with `GENERIC_PLAN`: a plan
+for unknown values, which can differ from the one PostgreSQL picks for
+particular values. On PostgreSQL 15 it cannot be explained and is reported as
+such. pglens does not invent parameter values, so a returned plan describes a
+statement that PostgreSQL actually recorded, not an imagined query with guessed
+parameters.
 
 ## 4. `EXPLAIN ANALYZE` executes the statement
 
-`EXPLAIN ANALYZE` is run inside a transaction and rolled back, but the work
-still happens. Locks are taken, triggers fire, and WAL can be written. Effects
-outside the transaction, such as `NOTIFY`, `COPY TO PROGRAM`, or work done via
-`dblink`, are not undone by that rollback. Keep `allow_explain_analyze: false`
-unless this behavior is acceptable for the target.
+`EXPLAIN ANALYZE` is refused unless the agent sets
+`allow_explain_analyze: true`. Even then it runs only a statement that starts
+with `SELECT`, `VALUES`, `WITH`, or `TABLE` and has no parameter placeholder;
+because `pg_stat_statements` replaces every constant with one, that means a
+statement recorded without constants. It runs in a `READ ONLY` transaction
+under a 30-second statement timeout and is always rolled back, so PostgreSQL
+itself rejects writes, including data-modifying CTEs and `nextval()`, and a
+notification is discarded with the rollback.
+
+The statement still executes. It takes the locks a normal run takes, can wait
+behind a conflicting lock and so queue ahead of later requests, uses CPU,
+memory, temporary files, and I/O until it finishes or times out, and can write
+WAL for hint bits or page pruning. A read-only transaction does not contain
+functions whose effect lies outside it: `pg_cancel_backend()` and
+`pg_terminate_backend()` when the monitoring role holds `pg_signal_backend`
+(the T2 grant), session-level advisory locks, and remote work through `dblink`.
+Keep `allow_explain_analyze: false` unless running the recorded statements is
+acceptable for the target.
 
 ## 5. Relation cardinality is bounded
 
-Above the configured relation budget, relation-level series are truncated by
-rank. The API reports `truncated: true` and the number of relations not
-reported. Truncated relations are not sampled elsewhere and are not backfilled
-later.
+Above each relation check's `top_n` budget (per database), relation-level
+series are truncated by rank. The API reports `truncated: true` with a
+`relations_not_reported` of at least one: the agent does not count what it
+left out, so the figure is a lower bound. Truncated relations are not sampled
+elsewhere and are not backfilled later.
 
 ## 6. Host metrics require a local agent
 

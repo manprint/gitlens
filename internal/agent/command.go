@@ -189,7 +189,6 @@ func (d *Dispatcher) dispatch(ctx context.Context, polled polledCommand) error {
 		Tier:                binding.target.PermTier(),
 		AllowExplainAnalyze: binding.allowExplainAnalyze,
 		AllowSignal:         binding.allowSignal,
-		HasPgstattuple:      binding.target.HasExtension("pgstattuple"),
 	}
 	if allowed, reason := command.Allowed(polled.Kind, polled.Args, gates); !allowed {
 		return d.postResult(ctx, polled.CommandID, commandResult{ClaimToken: polled.ClaimToken, Outcome: "rejected", Error: reason})

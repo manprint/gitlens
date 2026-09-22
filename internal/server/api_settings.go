@@ -3,11 +3,14 @@ package server
 import (
 	"net/http"
 	"sort"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"github.com/manprint/pglens/internal/advisor"
+	"github.com/manprint/pglens/internal/pgtype"
+	"github.com/manprint/pglens/internal/store"
 )
 
 type settingAPIEntry struct {
@@ -49,7 +52,11 @@ func (a *API) handleSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, response)
 		return
 	}
-	query := `SELECT key, value_text, labels->>'unit', labels->>'source', labels->>'context', labels->>'pending_restart', first_seen, last_seen, changed_at FROM object_facts WHERE instance_id=$1 AND kind='setting'`
+	// Only the settings the latest scrape shipped: a setting put back to its
+	// default stops being shipped, and its fact used to be listed with the
+	// old value forever.
+	query := `SELECT key, value_text, COALESCE(labels->>'unit', ''), COALESCE(labels->>'source', ''), COALESCE(labels->>'context', ''), COALESCE(labels->>'pending_restart', ''), first_seen, last_seen, changed_at FROM object_facts WHERE instance_id=$1 AND kind='setting'
+		AND last_seen >= (SELECT max(last_seen) FROM object_facts WHERE instance_id=$1 AND kind='setting') - interval '1 minute'`
 	args := []any{id}
 	if raw := r.URL.Query().Get("changed_since"); raw != "" {
 		since, parseErr := parseTimeParam(raw)
@@ -82,11 +89,6 @@ func (a *API) handleSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-var settingsDriftExcluded = []string{
-	"data_directory", "hot_standby", "listen_addresses", "port",
-	"primary_conninfo", "primary_slot_name", "synchronous_standby_names",
-}
-
 type driftValue struct {
 	InstanceID string `json:"instance_id"`
 	Role       string `json:"role"`
@@ -98,17 +100,34 @@ type driftEntry struct {
 }
 
 func (a *API) handleSettingsDrift(w http.ResponseWriter, r *http.Request) {
-	clusterID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	// The path carries the unsigned decimal the clusters list returns;
+	// ParseInt rejected every identifier above 2^63.
+	cid, err := pgtype.ParseClusterID(chi.URLParam(r, "id"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid cluster_id", err.Error())
 		return
 	}
+	clusterID := store.ToDB(cid)
 	response := []driftEntry{}
 	if a.pool == nil {
 		writeJSON(w, http.StatusOK, response)
 		return
 	}
-	rows, err := a.pool.Query(r.Context(), `SELECT f.key, f.value_text, i.instance_id::text, i.role, f.labels->>'context' FROM object_facts f JOIN instances i ON i.instance_id=f.instance_id WHERE f.cluster_id=$1 AND f.kind='setting' ORDER BY f.key, i.instance_id`, clusterID)
+	// The members that reported in the last hour, each with the settings its
+	// latest scrape shipped: a decommissioned instance, or a setting since
+	// put back to its default, used to show as drift forever. The advisor's
+	// config.drift rule reads the same set.
+	rows, err := a.pool.Query(r.Context(), `WITH latest AS (
+			SELECT instance_id, max(last_seen) AS ts FROM object_facts
+			WHERE cluster_id=$1 AND kind='setting' GROUP BY instance_id
+		)
+		SELECT f.key, f.value_text, i.instance_id::text, i.role, COALESCE(f.labels->>'context', '')
+		FROM object_facts f
+		JOIN latest l ON l.instance_id=f.instance_id
+		JOIN instances i ON i.instance_id=f.instance_id
+		WHERE f.cluster_id=$1 AND f.kind='setting' AND f.last_seen >= l.ts - interval '1 minute'
+			AND i.last_seen >= now() - interval '1 hour'
+		ORDER BY f.key, i.instance_id`, clusterID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "settings drift query failed", err.Error())
 		return
@@ -124,7 +143,7 @@ func (a *API) handleSettingsDrift(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "settings drift scan failed", err.Error())
 			return
 		}
-		if context == "internal" || settingIsDriftExcluded(name) {
+		if advisor.SettingDriftExcluded(name, context) {
 			continue
 		}
 		text := ""
@@ -145,15 +164,6 @@ func (a *API) handleSettingsDrift(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Slice(response, func(i, j int) bool { return response[i].Name < response[j].Name })
 	writeJSON(w, http.StatusOK, response)
-}
-
-func settingIsDriftExcluded(name string) bool {
-	for _, excluded := range settingsDriftExcluded {
-		if name == excluded {
-			return true
-		}
-	}
-	return false
 }
 
 func allDriftValuesEqual(values []driftValue) bool {

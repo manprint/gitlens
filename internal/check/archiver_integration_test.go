@@ -33,7 +33,10 @@ func TestINTARCH002_SuccessfulArchiveCommand(t *testing.T) {
 	require.Equal(t, 0.0, metricValue(r, "pg_archiver_failed_ratio", nil))
 }
 
-func TestINTARCH003_DisabledArchiverEmitsOnlyFlag(t *testing.T) {
+// TestINTARCH003_DisabledArchiverEmitsNoArchiverCounters: with archive_mode
+// off only the flag and the base backup gauge are reported. A base backup
+// does not depend on archiving (pg_basebackup -X stream is the default).
+func TestINTARCH003_DisabledArchiverEmitsNoArchiverCounters(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
 		pg.Lock(t)
 		conn, err := pg.Pool(t, "app", pgtest.RoleT0).Acquire(context.Background())
@@ -41,6 +44,20 @@ func TestINTARCH003_DisabledArchiverEmitsOnlyFlag(t *testing.T) {
 		result, err := (&archiverCheck{}).Scrape(context.Background(), &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: pgtype.TierReadOnly})
 		require.NoError(t, err)
 		require.Equal(t, 0.0, metricValue(result, "pg_archive_mode_enabled", nil))
-		require.Len(t, result.Metrics, 1)
+		require.Equal(t, 0.0, metricValue(result, "pg_basebackup_jobs_running", nil))
+		require.Len(t, result.Metrics, 2)
+	})
+}
+
+// TestINTARCH004_MonitoringRoleCanCountReadySegments: the query behind
+// pg_archiver_ready_files runs as the pg_monitor role on every supported
+// major. pgtest cannot enable archiving, so this proves the privilege and
+// the syntax rather than a live backlog.
+func TestINTARCH004_MonitoringRoleCanCountReadySegments(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		var ready float64
+		err := pg.Pool(t, "app", pgtest.RoleT0).QueryRow(context.Background(), `SELECT count(*)::float8 FROM pg_ls_archive_statusdir() WHERE name LIKE '%.ready'`).Scan(&ready)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, ready, 0.0)
 	})
 }

@@ -31,6 +31,7 @@ describe('CommandAudit', () => {
         instance_id: INSTANCE_ID,
         kind: 'explain',
         args: { pid: 41 },
+        requested_by: 'api-token from 192.0.2.10',
         executed_at: '2026-09-01T01:00:00Z',
         outcome: 'ok',
       },
@@ -40,6 +41,7 @@ describe('CommandAudit', () => {
         instance_id: INSTANCE_ID,
         kind: 'cancel',
         args: { pid: 42 },
+        requested_by: 'api-token from 192.0.2.10',
         executed_at: '2026-09-01T02:00:00Z',
         outcome: 'ok',
       },
@@ -62,6 +64,7 @@ describe('CommandAudit', () => {
         instance_id: INSTANCE_ID,
         kind: 'terminate',
         args: { pid: 43 },
+        requested_by: 'api-token from 192.0.2.10',
         executed_at: '2026-09-01T02:00:00Z',
         outcome: 'rejected',
         detail: 'agent lacks permission',
@@ -73,7 +76,7 @@ describe('CommandAudit', () => {
     expect(screen.getByText('agent lacks permission')).toBeInTheDocument()
   })
 
-  it('UI-SET-022 shows an expired command and its expiry time', async () => {
+  it('UI-SET-022 shows an expired command, when it expired and why', async () => {
     renderAudit([
       {
         audit_id: 4,
@@ -81,30 +84,40 @@ describe('CommandAudit', () => {
         instance_id: INSTANCE_ID,
         kind: 'explain',
         args: {},
-        state: 'expired',
-        executed_at: '2026-09-01T02:00:00Z',
-        expires_at: '2026-09-01T02:01:00Z',
+        requested_by: 'api-token from 192.0.2.10',
+        executed_at: '2026-09-01T02:01:00Z',
+        outcome: 'expired',
+        detail: 'expired before the agent claimed it',
       },
     ])
     await settleAuditQuery()
 
     await waitFor(() => expect(screen.getByText('expired')).toBeInTheDocument())
     expect(screen.getByText('2026-09-01 02:01:00 UTC')).toBeInTheDocument()
+    expect(screen.getByText('expired before the agent claimed it')).toBeInTheDocument()
   })
 
-  it('UI-SET-023 explains that the audit records actions, not identities', async () => {
+  it('UI-SET-023 explains that the audit records the credential, not the person', async () => {
     renderAudit([
       {
         audit_id: 5,
         command_id: '00000000-0000-4000-8000-000000000005',
         instance_id: INSTANCE_ID,
         kind: 'cancel',
-        outcome: 'ok',
+        args: { pid: 44 },
+        requested_by: 'ui-session 9f86d081 from 192.0.2.10',
+        executed_at: '2026-09-01T02:00:00Z',
+        outcome: 'requested',
       },
     ])
     await settleAuditQuery()
 
-    expect(screen.getByText(/records the action, not the person/i)).toBeInTheDocument()
+    expect(await screen.findByText('ui-session 9f86d081 from 192.0.2.10')).toBeInTheDocument()
+    expect(screen.getByText('requested')).toBeInTheDocument()
+    expect(screen.getByText(/Recorded:/)).toBeInTheDocument()
+    expect(screen.queryByText(/Executed:/)).not.toBeInTheDocument()
+    expect(screen.getByText(/credential that requested it/i)).toBeInTheDocument()
+    expect(screen.getByText(/not the person/i)).toBeInTheDocument()
   })
 
   it('UI-SET-024 shows an empty state when no commands were recorded', async () => {

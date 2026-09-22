@@ -14,6 +14,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/manprint/pglens/internal/alert"
+	"github.com/manprint/pglens/internal/pgtype"
+	"github.com/manprint/pglens/internal/store"
 )
 
 // AlertAPI exposes the alert catalogue and the operator-managed alert state.
@@ -90,8 +92,11 @@ func renderAlertRule(v alert.Rule) alertRuleJSON {
 
 func renderAlert(v alert.Alert) alertJSON {
 	o := alertJSON{Key: v.Key, RuleID: v.RuleID, Severity: v.Severity, State: v.State, Datname: v.Datname, Labels: v.Labels, Value: v.Value, Summary: v.Summary, StartedAt: v.StartedAt, LastEvalAt: v.LastEvalAt, ResolvedAt: v.ResolvedAt, Suppressed: v.Suppressed}
+	// The column holds the uint64 system identifier's bit pattern: render it
+	// unsigned, like every other endpoint (ClusterId in the spec). It was
+	// rendered signed, so an identifier above 2^63 did not match its cluster.
 	if v.ClusterID != nil {
-		s := strconv.FormatInt(*v.ClusterID, 10)
+		s := store.FromDB(*v.ClusterID).String()
 		o.ClusterID = &s
 	}
 	if v.InstanceID != nil {
@@ -145,11 +150,12 @@ func (a *AlertAPI) listAlerts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if v := r.URL.Query().Get("cluster_id"); v != "" {
-		n, err := strconv.ParseInt(v, 10, 64)
+		cid, err := pgtype.ParseClusterID(v)
 		if err != nil {
 			writeError(w, 400, "invalid cluster_id", err.Error())
 			return
 		}
+		n := store.ToDB(cid)
 		f.ClusterID = &n
 	}
 	rows, err := a.store.Active(r.Context(), f)

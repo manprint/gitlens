@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -53,18 +54,22 @@ type MetricRow struct {
 
 // StatementRow is one row for metrics_statements.
 type StatementRow struct {
-	TS                 time.Time
-	TenantID           string
-	ClusterID          int64
-	InstanceID         uuid.UUID
-	Datname            string
-	QueryID            int64
-	CallsRate          *float64
-	ExecTimeRateMs     *float64
-	RowsRate           *float64
-	SharedBlksHitRate  *float64
-	SharedBlksReadRate *float64
-	WALBytesRate       *float64
+	TS                  time.Time
+	TenantID            string
+	ClusterID           int64
+	InstanceID          uuid.UUID
+	Datname             string
+	QueryID             int64
+	CallsRate           *float64
+	ExecTimeRateMs      *float64
+	RowsRate            *float64
+	SharedBlksHitRate   *float64
+	SharedBlksReadRate  *float64
+	WALBytesRate        *float64
+	TempBlksWrittenRate *float64
+	// SampleSeconds is the interval the rates cover: rate * SampleSeconds is
+	// the amount observed in that interval.
+	SampleSeconds *float64
 }
 
 // ASHRow is one row for metrics_ash.
@@ -82,6 +87,12 @@ type ASHRow struct {
 	WindowSeconds int
 	WindowTicks   int
 }
+
+// ReplicationSourceSQL classifies a metrics_replication row as 'receiver'
+// (a standby's view of its own upstream), 'sender' (a primary's view of one
+// standby) or 'slot'. Rows written before migration 0014 carry no source and
+// are told apart by the columns only their kind fills.
+const ReplicationSourceSQL = `COALESCE(source, CASE WHEN upstream_id IS NOT NULL THEN 'receiver' WHEN slot_active IS NOT NULL THEN 'slot' ELSE 'sender' END)`
 
 // ReplicationRow is one row for metrics_replication.
 type ReplicationRow struct {
@@ -102,6 +113,11 @@ type ReplicationRow struct {
 	SlotActive        *bool
 	SlotWalStatus     *string
 	SlotRetainedBytes *int64
+	// Source is "receiver", "sender" or "slot": which view of replication
+	// the row holds.
+	Source               string
+	SlotType             *string
+	SlotSafeWALSizeBytes *int64
 }
 
 type TableStatRow struct {
@@ -176,27 +192,61 @@ type LockSnapshotRow struct {
 	Tree       []byte
 }
 
-// RelationStatsPrune describes a successful, complete relation check. Its
-// older rows can be removed before the current sample is written, so dropped
-// relations do not remain visible to the advisor as fresh observations.
+// RelationStatsPrune describes a successful, complete relation check: the
+// relations it did not report no longer exist (or are no longer visible), so
+// their recent rows must not keep showing them as current.
 type RelationStatsPrune struct {
 	TableName  string
 	TenantID   string
 	InstanceID uuid.UUID
 	Datname    string
 	Before     time.Time
+	// Present lists every relation the complete sample reported. Only the
+	// rows of the other relations are removed.
+	Present []RelationKey
 }
 
+// RelationKey names one relation of a relation check: Index is the index
+// name for index rows, empty for table rows.
+type RelationKey struct {
+	Schema, Relation, Index string
+}
+
+// relationPruneWindow bounds how far back a prune reaches. Every reader of
+// "current" relation rows looks at most a few hours back, so older rows are
+// history and are left alone; the bound also keeps the DELETE inside chunks
+// that are not compressed yet (compression starts at 48 hours).
+const relationPruneWindow = 24 * time.Hour
+
+// PruneRelationStats removes the recent rows of the relations a complete
+// sample no longer reports. It used to delete every older row of the
+// database, so the tables, indexes and bloat history of every relation that
+// still existed were wiped on each scrape (which left the index advisor with
+// no history to judge an unused index by), including the pgstattuple bloat
+// measurements, which are not the check's to remove.
 func PruneRelationStats(ctx context.Context, tx pgx.Tx, p RelationStatsPrune) error {
-	var table string
+	var match, scope string
 	switch p.TableName {
-	case "metrics_tables", "metrics_indexes", "metrics_bloat":
-		table = p.TableName
+	case "metrics_tables":
+		match = "k.s = m.schemaname AND k.r = m.relname"
+	case "metrics_indexes":
+		match = "k.s = m.schemaname AND k.i = m.indexrelname"
+	case "metrics_bloat":
+		match = "k.s = m.schemaname AND k.r = m.relname AND k.i = m.indexrelname"
+		scope = " AND m.method = 'estimate'"
 	default:
 		return fmt.Errorf("unknown relation stats table %q", p.TableName)
 	}
-	if _, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE tenant_id=$1 AND instance_id=$2 AND datname=$3 AND ts < $4", p.TenantID, p.InstanceID, p.Datname, p.Before); err != nil {
-		return fmt.Errorf("prune %s: %w", table, err)
+	schemas := make([]string, len(p.Present))
+	relations := make([]string, len(p.Present))
+	indexes := make([]string, len(p.Present))
+	for i, k := range p.Present {
+		schemas[i], relations[i], indexes[i] = k.Schema, k.Relation, k.Index
+	}
+	query := "DELETE FROM " + p.TableName + " m WHERE m.tenant_id=$1 AND m.instance_id=$2 AND m.datname=$3 AND m.ts < $4 AND m.ts >= $5" + scope +
+		" AND NOT EXISTS (SELECT 1 FROM unnest($6::text[], $7::text[], $8::text[]) AS k(s, r, i) WHERE " + match + ")"
+	if _, err := tx.Exec(ctx, query, p.TenantID, p.InstanceID, p.Datname, p.Before, p.Before.Add(-relationPruneWindow), schemas, relations, indexes); err != nil {
+		return fmt.Errorf("prune %s: %w", p.TableName, err)
 	}
 	return nil
 }
@@ -323,17 +373,37 @@ func WriteMetrics(ctx context.Context, tx pgx.Tx, rows []MetricRow) error {
 }
 
 // WriteStatements writes statement rows with ON CONFLICT DO NOTHING.
+var statementColumns = []string{"ts", "tenant_id", "cluster_id", "instance_id", "datname", "queryid", "calls_rate", "exec_time_rate_ms", "rows_rate", "shared_blks_hit_rate", "shared_blks_read_rate", "wal_bytes_rate", "temp_blks_written_rate", "sample_seconds"}
+
+func (r StatementRow) args() []any {
+	return []any{r.TS, r.TenantID, r.ClusterID, r.InstanceID, r.Datname, r.QueryID, r.CallsRate, r.ExecTimeRateMs, r.RowsRate, r.SharedBlksHitRate, r.SharedBlksReadRate, r.WALBytesRate, r.TempBlksWrittenRate, r.SampleSeconds}
+}
+
 func WriteStatements(ctx context.Context, tx pgx.Tx, rows []StatementRow) error {
 	if len(rows) == 0 {
 		return nil
 	}
+	args := make([][]any, 0, len(rows))
+	for _, r := range rows {
+		args = append(args, r.args())
+	}
+	return writeTypedRows(ctx, tx, "metrics_statements", statementColumns, args)
+}
+
+// writeTypedRows inserts rows into a typed metrics table, ignoring duplicate
+// samples: a batch of INSERTs for a small envelope, COPY through a temporary
+// table for a large one.
+func writeTypedRows(ctx context.Context, tx pgx.Tx, table string, columns []string, rows [][]any) error {
+	columnList := strings.Join(columns, ", ")
 	if len(rows) < 500 {
+		placeholders := make([]string, len(columns))
+		for i := range columns {
+			placeholders[i] = fmt.Sprintf("$%d", i+1)
+		}
+		query := "INSERT INTO " + table + " (" + columnList + ") VALUES (" + strings.Join(placeholders, ",") + ") ON CONFLICT DO NOTHING"
 		batch := &pgx.Batch{}
 		for _, r := range rows {
-			batch.Queue(
-				`INSERT INTO metrics_statements (ts, tenant_id, cluster_id, instance_id, datname, queryid, calls_rate, exec_time_rate_ms, rows_rate, shared_blks_hit_rate, shared_blks_read_rate, wal_bytes_rate) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT DO NOTHING`,
-				r.TS, r.TenantID, r.ClusterID, r.InstanceID, r.Datname, r.QueryID, r.CallsRate, r.ExecTimeRateMs, r.RowsRate, r.SharedBlksHitRate, r.SharedBlksReadRate, r.WALBytesRate,
-			)
+			batch.Queue(query, r...)
 		}
 		br := tx.SendBatch(ctx, batch)
 		defer func() {
@@ -342,29 +412,26 @@ func WriteStatements(ctx context.Context, tx pgx.Tx, rows []StatementRow) error 
 		for i := range rows {
 			if _, err := br.Exec(); err != nil {
 				_ = br.Close()
-				return fmt.Errorf("write statements batch row %d: %w", i, err)
+				return fmt.Errorf("write %s batch row %d: %w", table, i, err)
 			}
 		}
 		if err := br.Close(); err != nil {
-			return fmt.Errorf("close statements batch: %w", err)
+			return fmt.Errorf("close %s batch: %w", table, err)
 		}
 		return nil
 	}
-	if _, err := tx.Exec(ctx, `CREATE TEMP TABLE tmp_metrics_statements (LIKE metrics_statements INCLUDING DEFAULTS) ON COMMIT DROP`); err != nil {
-		return fmt.Errorf("create tmp_metrics_statements: %w", err)
+	tmp := "tmp_" + table
+	if _, err := tx.Exec(ctx, "CREATE TEMP TABLE "+tmp+" (LIKE "+table+" INCLUDING DEFAULTS) ON COMMIT DROP"); err != nil {
+		return fmt.Errorf("create %s: %w", tmp, err)
 	}
-	copyRows := make([][]any, 0, len(rows))
-	for _, r := range rows {
-		copyRows = append(copyRows, []any{r.TS, r.TenantID, r.ClusterID, r.InstanceID, r.Datname, r.QueryID, r.CallsRate, r.ExecTimeRateMs, r.RowsRate, r.SharedBlksHitRate, r.SharedBlksReadRate, r.WALBytesRate})
+	if _, err := tx.CopyFrom(ctx, pgx.Identifier{tmp}, columns, pgx.CopyFromRows(rows)); err != nil {
+		return fmt.Errorf("copy %s: %w", table, err)
 	}
-	if _, err := tx.CopyFrom(ctx, pgx.Identifier{"tmp_metrics_statements"}, []string{"ts", "tenant_id", "cluster_id", "instance_id", "datname", "queryid", "calls_rate", "exec_time_rate_ms", "rows_rate", "shared_blks_hit_rate", "shared_blks_read_rate", "wal_bytes_rate"}, pgx.CopyFromRows(copyRows)); err != nil {
-		return fmt.Errorf("copy statements: %w", err)
+	if _, err := tx.Exec(ctx, "INSERT INTO "+table+" ("+columnList+") SELECT "+columnList+" FROM "+tmp+" ON CONFLICT DO NOTHING"); err != nil {
+		return fmt.Errorf("insert from %s: %w", tmp, err)
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO metrics_statements (ts, tenant_id, cluster_id, instance_id, datname, queryid, calls_rate, exec_time_rate_ms, rows_rate, shared_blks_hit_rate, shared_blks_read_rate, wal_bytes_rate) SELECT ts, tenant_id, cluster_id, instance_id, datname, queryid, calls_rate, exec_time_rate_ms, rows_rate, shared_blks_hit_rate, shared_blks_read_rate, wal_bytes_rate FROM tmp_metrics_statements ON CONFLICT DO NOTHING`); err != nil {
-		return fmt.Errorf("insert from tmp_metrics_statements: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `DROP TABLE IF EXISTS tmp_metrics_statements`); err != nil {
-		return fmt.Errorf("drop tmp_metrics_statements: %w", err)
+	if _, err := tx.Exec(ctx, "DROP TABLE IF EXISTS "+tmp); err != nil {
+		return fmt.Errorf("drop %s: %w", tmp, err)
 	}
 	return nil
 }
@@ -445,6 +512,16 @@ func DeleteCheckSkipFacts(ctx context.Context, tx pgx.Tx, tenantID string, insta
 	return nil
 }
 
+// DeleteCheckPartialFact removes the check_partial fact of one check and
+// database once a complete result has arrived for them.
+func DeleteCheckPartialFact(ctx context.Context, tx pgx.Tx, tenantID string, instanceID uuid.UUID, datname, check string) error {
+	_, err := tx.Exec(ctx, `DELETE FROM object_facts WHERE tenant_id=$1 AND instance_id=$2 AND datname=$3 AND kind='check_partial' AND key=$4`, tenantID, instanceID, datname, check)
+	if err != nil {
+		return fmt.Errorf("delete check partial fact: %w", err)
+	}
+	return nil
+}
+
 // WriteLockSnapshots keeps only the newest tree per instance and removes trees
 // older than the fifteen-minute freshness window for each touched instance.
 func WriteLockSnapshots(ctx context.Context, tx pgx.Tx, rows []LockSnapshotRow) error {
@@ -507,58 +584,30 @@ func WriteASH(ctx context.Context, tx pgx.Tx, rows []ASHRow) error {
 }
 
 // WriteReplication writes replication rows with ON CONFLICT DO NOTHING.
+var replicationColumns = []string{"ts", "tenant_id", "cluster_id", "instance_id", "upstream_id", "slot_name", "edge_type", "sync_state", "write_lag_bytes", "flush_lag_bytes", "replay_lag_bytes", "write_lag_sec", "flush_lag_sec", "replay_lag_sec", "slot_active", "slot_wal_status", "slot_retained_bytes", "source", "slot_type", "slot_safe_wal_size_bytes"}
+
+func (r ReplicationRow) args() []any {
+	edgeType := r.EdgeType
+	if edgeType == "" {
+		edgeType = "streaming"
+	}
+	var source *string
+	if r.Source != "" {
+		v := r.Source
+		source = &v
+	}
+	return []any{r.TS, r.TenantID, r.ClusterID, r.InstanceID, r.UpstreamID, r.SlotName, edgeType, r.SyncState, r.WriteLagBytes, r.FlushLagBytes, r.ReplayLagBytes, r.WriteLagSec, r.FlushLagSec, r.ReplayLagSec, r.SlotActive, r.SlotWalStatus, r.SlotRetainedBytes, source, r.SlotType, r.SlotSafeWALSizeBytes}
+}
+
 func WriteReplication(ctx context.Context, tx pgx.Tx, rows []ReplicationRow) error {
 	if len(rows) == 0 {
 		return nil
 	}
-	if len(rows) < 500 {
-		batch := &pgx.Batch{}
-		for _, r := range rows {
-			edgeType := r.EdgeType
-			if edgeType == "" {
-				edgeType = "streaming"
-			}
-			batch.Queue(
-				`INSERT INTO metrics_replication (ts, tenant_id, cluster_id, instance_id, upstream_id, slot_name, edge_type, sync_state, write_lag_bytes, flush_lag_bytes, replay_lag_bytes, write_lag_sec, flush_lag_sec, replay_lag_sec, slot_active, slot_wal_status, slot_retained_bytes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT DO NOTHING`,
-				r.TS, r.TenantID, r.ClusterID, r.InstanceID, r.UpstreamID, r.SlotName, edgeType, r.SyncState, r.WriteLagBytes, r.FlushLagBytes, r.ReplayLagBytes, r.WriteLagSec, r.FlushLagSec, r.ReplayLagSec, r.SlotActive, r.SlotWalStatus, r.SlotRetainedBytes,
-			)
-		}
-		br := tx.SendBatch(ctx, batch)
-		defer func() {
-			_ = br.Close()
-		}()
-		for i := range rows {
-			if _, err := br.Exec(); err != nil {
-				_ = br.Close()
-				return fmt.Errorf("write replication batch row %d: %w", i, err)
-			}
-		}
-		if err := br.Close(); err != nil {
-			return fmt.Errorf("close replication batch: %w", err)
-		}
-		return nil
-	}
-	if _, err := tx.Exec(ctx, `CREATE TEMP TABLE tmp_metrics_replication (LIKE metrics_replication INCLUDING DEFAULTS) ON COMMIT DROP`); err != nil {
-		return fmt.Errorf("create tmp_metrics_replication: %w", err)
-	}
-	copyRows := make([][]any, 0, len(rows))
+	args := make([][]any, 0, len(rows))
 	for _, r := range rows {
-		edgeType := r.EdgeType
-		if edgeType == "" {
-			edgeType = "streaming"
-		}
-		copyRows = append(copyRows, []any{r.TS, r.TenantID, r.ClusterID, r.InstanceID, r.UpstreamID, r.SlotName, edgeType, r.SyncState, r.WriteLagBytes, r.FlushLagBytes, r.ReplayLagBytes, r.WriteLagSec, r.FlushLagSec, r.ReplayLagSec, r.SlotActive, r.SlotWalStatus, r.SlotRetainedBytes})
+		args = append(args, r.args())
 	}
-	if _, err := tx.CopyFrom(ctx, pgx.Identifier{"tmp_metrics_replication"}, []string{"ts", "tenant_id", "cluster_id", "instance_id", "upstream_id", "slot_name", "edge_type", "sync_state", "write_lag_bytes", "flush_lag_bytes", "replay_lag_bytes", "write_lag_sec", "flush_lag_sec", "replay_lag_sec", "slot_active", "slot_wal_status", "slot_retained_bytes"}, pgx.CopyFromRows(copyRows)); err != nil {
-		return fmt.Errorf("copy replication: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `INSERT INTO metrics_replication (ts, tenant_id, cluster_id, instance_id, upstream_id, slot_name, edge_type, sync_state, write_lag_bytes, flush_lag_bytes, replay_lag_bytes, write_lag_sec, flush_lag_sec, replay_lag_sec, slot_active, slot_wal_status, slot_retained_bytes) SELECT ts, tenant_id, cluster_id, instance_id, upstream_id, slot_name, edge_type, sync_state, write_lag_bytes, flush_lag_bytes, replay_lag_bytes, write_lag_sec, flush_lag_sec, replay_lag_sec, slot_active, slot_wal_status, slot_retained_bytes FROM tmp_metrics_replication ON CONFLICT DO NOTHING`); err != nil {
-		return fmt.Errorf("insert from tmp_metrics_replication: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `DROP TABLE IF EXISTS tmp_metrics_replication`); err != nil {
-		return fmt.Errorf("drop tmp_metrics_replication: %w", err)
-	}
-	return nil
+	return writeTypedRows(ctx, tx, "metrics_replication", replicationColumns, args)
 }
 
 // WriteQueryTexts upserts query texts with ON CONFLICT DO UPDATE SET last_seen.

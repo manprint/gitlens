@@ -275,6 +275,9 @@ func (p *Pusher) pushOne(ctx context.Context, env *wire.Envelope) (pushOutcome, 
 			p.health = HealthIncompatible
 			p.lastError = body
 			p.mu.Unlock()
+			// Consumed without being stored: it is a loss, and it has to
+			// show in pglens_samples_dropped_rate like any other.
+			atomic.AddInt64(&p.nDropped, 1)
 			return pushConsumed, nil // stop retry
 
 		case http.StatusUnauthorized: // 401
@@ -303,7 +306,12 @@ func (p *Pusher) pushOne(ctx context.Context, env *wire.Envelope) (pushOutcome, 
 				// 5xx: retry
 				continue
 			}
-			// Unknown status: treat as error, don't retry forever
+			// Unknown status: treat as error, don't retry forever. The
+			// envelope is lost, so it is counted.
+			atomic.AddInt64(&p.nDropped, 1)
+			p.mu.Lock()
+			p.lastError = fmt.Sprintf("push returned %d: %s", status, body)
+			p.mu.Unlock()
 			return pushConsumed, nil
 		}
 	}
@@ -348,6 +356,7 @@ func (p *Pusher) buildRequest(ctx context.Context, env *wire.Envelope) (*http.Re
 	req.Header.Set("Authorization", "Bearer "+p.token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
+	req.Header.Set(wire.TransmittedAtHeader, p.clk.Now().UTC().Format(time.RFC3339Nano))
 	return req, nil
 }
 

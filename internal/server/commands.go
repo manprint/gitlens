@@ -2,9 +2,12 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -176,7 +179,16 @@ func (s *CommandService) enqueue(w http.ResponseWriter, r *http.Request) {
 	}
 	commandID := uuid.New()
 	expiresAt := s.now().UTC().Add(s.ttl)
-	_, err = s.pool.Exec(r.Context(), `INSERT INTO commands (command_id, tenant_id, agent_id, instance_id, cluster_id, kind, args, state, expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',$8)`, commandID, tenantID, agentID, instanceID, clusterID, req.Kind, argsJSON, expiresAt)
+	// The request is audited in the same statement. Only results used to
+	// be: a command that never reached the agent left no trace, and
+	// requested_by was always the column default.
+	_, err = s.pool.Exec(r.Context(), `WITH cmd AS (
+		INSERT INTO commands (command_id, tenant_id, agent_id, instance_id, cluster_id, kind, args, state, expires_at, requested_by)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',$8,$9)
+		RETURNING tenant_id, command_id, instance_id, kind, args, requested_by)
+		INSERT INTO command_audit (tenant_id, command_id, instance_id, kind, args, requested_by, outcome)
+		SELECT tenant_id, command_id, instance_id, kind, args, requested_by, 'requested' FROM cmd`,
+		commandID, tenantID, agentID, instanceID, clusterID, req.Kind, argsJSON, expiresAt, requesterOf(r, s.auth))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "command enqueue failed", err.Error())
 		return
@@ -192,6 +204,12 @@ func (s *CommandService) get(w http.ResponseWriter, r *http.Request) {
 	commandID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid command id", err.Error())
+		return
+	}
+	// Expire first: a command whose agent stopped polling used to read as
+	// pending long after its expiry, because only a poll expired commands.
+	if err := expireCommands(r.Context(), s.pool); err != nil {
+		writeError(w, http.StatusInternalServerError, "command expiry failed", err.Error())
 		return
 	}
 	var out commandResponse
@@ -282,7 +300,7 @@ func (s *CommandService) claim(ctx context.Context, agentID string) (pollRespons
 	if err != nil {
 		return out, err
 	}
-	if _, err := s.pool.Exec(ctx, `UPDATE commands SET state='expired', finished_at=now() WHERE tenant_id=$1 AND state IN ('pending','claimed') AND expires_at <= now()`, commandTenant); err != nil {
+	if err := expireCommands(ctx, s.pool); err != nil {
 		return out, err
 	}
 	err = s.pool.QueryRow(ctx, `UPDATE commands
@@ -296,6 +314,41 @@ func (s *CommandService) claim(ctx context.Context, agentID string) (pollRespons
 		)
 		RETURNING command_id, kind, args, claim_token, instance_id, cluster_id, expires_at`, commandTenant, parsed).Scan(&out.CommandID, &out.Kind, &out.Args, &out.ClaimToken, &out.InstanceID, &out.ClusterID, &out.ExpiresAt)
 	return out, err
+}
+
+// expireCommands moves every command past its expiry to expired and audits
+// each one, saying whether the agent had claimed it. Concurrent calls do not
+// audit a command twice: the second UPDATE finds it expired already.
+func expireCommands(ctx context.Context, db dbPool) error {
+	_, err := db.Exec(ctx, `WITH expired AS (
+		UPDATE commands SET state='expired', finished_at=now()
+		 WHERE tenant_id=$1 AND state IN ('pending','claimed') AND expires_at <= now()
+		RETURNING tenant_id, command_id, instance_id, kind, args, requested_by, claimed_at)
+		INSERT INTO command_audit (tenant_id, command_id, instance_id, kind, args, requested_by, outcome, detail)
+		SELECT tenant_id, command_id, instance_id, kind, args, requested_by, 'expired',
+		       CASE WHEN claimed_at IS NULL THEN 'expired before the agent claimed it'
+		            ELSE 'claimed by the agent, no result before expiry' END
+		  FROM expired`, commandTenant)
+	return err
+}
+
+// requesterOf names who enqueued a command for the audit: the credential
+// kind (the agent bearer token or a UI session, identified by a digest of
+// the session token, never the token itself) and the client address. The
+// server has no user accounts, so this is as far as the identity goes.
+func requesterOf(r *http.Request, auth *Auth) string {
+	who := "api-token"
+	if auth == nil || !auth.Validate(r) {
+		who = "ui-session"
+		if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
+			sum := sha256.Sum256([]byte(cookie.Value))
+			who += " " + hex.EncodeToString(sum[:4])
+		}
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && host != "" {
+		who += " from " + host
+	}
+	return who
 }
 
 func (s *CommandService) result(w http.ResponseWriter, r *http.Request) {
@@ -397,16 +450,30 @@ func persistCommandArtifact(ctx context.Context, tx pgx.Tx, tenantID string, ins
 		return store.WriteQueryPlan(ctx, tx, store.QueryPlanRow{TenantID: tenantID, InstanceID: instanceID, ClusterID: clusterID, Datname: args.Datname, QueryID: *args.QueryID, PlanHash: payload.PlanHash, Analyzed: args.Analyze, CapturedAt: capturedAt.UTC(), Plan: payload.Plan})
 	case command.KindPgstattuple:
 		var payload struct {
-			TableLen    int64   `json:"table_len"`
-			TupleLen    int64   `json:"tuple_len"`
-			FreePercent float64 `json:"free_percent"`
+			Datname      string `json:"datname"`
+			TableLen     int64  `json:"table_len"`
+			DeadTupleLen int64  `json:"dead_tuple_len"`
+			FreeSpace    int64  `json:"free_space"`
 		}
 		if err := json.Unmarshal(result, &payload); err != nil {
 			return fmt.Errorf("decode pgstattuple result: %w", err)
 		}
-		bloat := payload.TableLen - payload.TupleLen
-		ratio := payload.FreePercent / 100
-		return store.WriteBloat(ctx, tx, []store.BloatRow{{TS: capturedAt.UTC(), TenantID: tenantID, ClusterID: clusterID, InstanceID: instanceID, Datname: args.Datname, Schemaname: args.Schema, Relname: args.Relation, ObjectKind: "table", Method: "pgstattuple", RealBytes: &payload.TableLen, ExpectedBytes: &payload.TupleLen, BloatBytes: &bloat, BloatRatio: &ratio}})
+		// Bloat is the reclaimable space, dead tuples plus free space, and
+		// the ratio is its share of the table, as the estimate defines them
+		// both (bloat_ratio = bloat_bytes / real_bytes). The row stored
+		// table_len - tuple_len (page overhead included) next to a ratio of
+		// free space alone, two numbers that did not describe each other.
+		bloat := max(payload.DeadTupleLen+payload.FreeSpace, 0)
+		expected := payload.TableLen - bloat
+		var ratio float64
+		if payload.TableLen > 0 {
+			ratio = float64(bloat) / float64(payload.TableLen)
+		}
+		datname := args.Datname
+		if datname == "" {
+			datname = payload.Datname
+		}
+		return store.WriteBloat(ctx, tx, []store.BloatRow{{TS: capturedAt.UTC(), TenantID: tenantID, ClusterID: clusterID, InstanceID: instanceID, Datname: datname, Schemaname: args.Schema, Relname: args.Relation, ObjectKind: "table", Method: "pgstattuple", RealBytes: &payload.TableLen, ExpectedBytes: &expected, BloatBytes: &bloat, BloatRatio: &ratio}})
 	default:
 		return nil
 	}

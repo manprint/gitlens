@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -135,7 +136,7 @@ func TestAshAPI_AvgActiveSessions_ZeroTicks(t *testing.T) {
 	}
 	api := &AshAPI{pool: pool}
 
-	buckets, _, err := api.queryASHBuckets(context.Background(), instID, nil, nil, "", []string{}, 1000)
+	buckets, _, err := api.queryASHBuckets(context.Background(), instID, nil, nil, "", ashFilters{}, 1000)
 	require.NoError(t, err)
 	require.Len(t, buckets, 1)
 	require.Equal(t, 100, buckets[0].Samples)
@@ -157,7 +158,7 @@ func TestAshAPI_AvgActiveSessions_NonZeroTicks(t *testing.T) {
 	}
 	api := &AshAPI{pool: pool}
 
-	buckets, _, err := api.queryASHBuckets(context.Background(), instID, nil, nil, "", []string{}, 1000)
+	buckets, _, err := api.queryASHBuckets(context.Background(), instID, nil, nil, "", ashFilters{}, 1000)
 	require.NoError(t, err)
 	require.Len(t, buckets, 1)
 	require.Equal(t, 100, buckets[0].Samples)
@@ -190,8 +191,9 @@ func TestAshAPI_SignificanceWarning_59Ticks(t *testing.T) {
 
 	// Create mock rows with total ticks = 59
 	mockRowsData := make([]([]any), 59)
+	base := time.Now().Truncate(time.Second)
 	for i := 0; i < 59; i++ {
-		mockRowsData[i] = []any{time.Now(), 1, 1, "db1", "CPU", "CPU", "active", (*int64)(nil)}
+		mockRowsData[i] = []any{base.Add(time.Duration(i) * 10 * time.Second), 1, 1, "db1", "CPU", "CPU", "active", (*int64)(nil)}
 	}
 
 	pool := &mockPool{
@@ -201,7 +203,7 @@ func TestAshAPI_SignificanceWarning_59Ticks(t *testing.T) {
 	}
 	api := &AshAPI{pool: pool}
 
-	buckets, totalTicks, err := api.queryASHBuckets(context.Background(), instID, nil, nil, "", []string{}, 1000)
+	buckets, totalTicks, err := api.queryASHBuckets(context.Background(), instID, nil, nil, "", ashFilters{}, 1000)
 	require.NoError(t, err)
 	require.Equal(t, 59, totalTicks)
 	require.Len(t, buckets, 59)
@@ -216,8 +218,9 @@ func TestAshAPI_SignificanceWarning_60Ticks(t *testing.T) {
 
 	// Create mock rows with total ticks = 60
 	mockRowsData := make([]([]any), 60)
+	base := time.Now().Truncate(time.Second)
 	for i := 0; i < 60; i++ {
-		mockRowsData[i] = []any{time.Now(), 1, 1, "db1", "CPU", "CPU", "active", (*int64)(nil)}
+		mockRowsData[i] = []any{base.Add(time.Duration(i) * 10 * time.Second), 1, 1, "db1", "CPU", "CPU", "active", (*int64)(nil)}
 	}
 
 	pool := &mockPool{
@@ -227,7 +230,7 @@ func TestAshAPI_SignificanceWarning_60Ticks(t *testing.T) {
 	}
 	api := &AshAPI{pool: pool}
 
-	buckets, totalTicks, err := api.queryASHBuckets(context.Background(), instID, nil, nil, "", []string{}, 1000)
+	buckets, totalTicks, err := api.queryASHBuckets(context.Background(), instID, nil, nil, "", ashFilters{}, 1000)
 	require.NoError(t, err)
 	require.Equal(t, 60, totalTicks)
 	require.Len(t, buckets, 60)
@@ -339,7 +342,7 @@ func TestAshTop_SignificanceWarning_Below60Ticks(t *testing.T) {
 	}
 	api := &AshAPI{pool: pool}
 
-	entries, totalTicks, err := api.queryASHTop(context.Background(), instID, nil, nil, "", 1000)
+	entries, totalTicks, err := api.queryASHTop(context.Background(), instID, nil, nil, "", ashFilters{}, 1000)
 	require.NoError(t, err)
 	require.Equal(t, 59, totalTicks)
 	require.Len(t, entries, 1)
@@ -347,4 +350,85 @@ func TestAshTop_SignificanceWarning_Below60Ticks(t *testing.T) {
 
 	// When totalTicks < 60, warning should be set by handler
 	require.True(t, totalTicks < 60)
+}
+
+// TestAshAPI_WindowTicksCountOnce: the rows of one window share its ticks.
+// Summing them per row counted the window once per key.
+func TestAshAPI_WindowTicksCountOnce(t *testing.T) {
+	t.Parallel()
+	ts := time.Now().Truncate(time.Second)
+	pool := &mockPool{queryResults: []*mockRows{{rows: [][]any{
+		{ts, 5, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
+		{ts, 3, 10, "db1", "Lock", "transactionid", "active", (*int64)(nil)},
+		{ts.Add(-10 * time.Second), 2, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
+	}}}}
+	_, totalTicks, err := (&AshAPI{pool: pool}).queryASHBuckets(context.Background(), uuid.New(), nil, nil, "", ashFilters{}, 1000)
+	require.NoError(t, err)
+	require.Equal(t, 20, totalTicks, "two windows of 10 ticks, not three rows")
+}
+
+func TestAshResolution_FitsTheRangeInMaxPoints(t *testing.T) {
+	t.Parallel()
+	to := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	require.Equal(t, 10, ashResolution(to.Add(-10*time.Minute), to), "never finer than the agent's window")
+	require.Equal(t, 20, ashResolution(to.Add(-time.Hour), to))
+	require.Equal(t, 480, ashResolution(to.Add(-24*time.Hour), to))
+	require.Zero(t, ashResolution(to.Add(-24*time.Hour), to)%ashWindowSeconds)
+}
+
+// TestAshAPI_GroupByAggregatesAndFillsTheGroup: one row per bucket and
+// group, with the group's value filled in. The requested columns used to be
+// copied before the scan filled them, so every row read as CPU.
+func TestAshAPI_GroupByAggregatesAndFillsTheGroup(t *testing.T) {
+	t.Parallel()
+	ts := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	pool := &mockPool{
+		queryResults: []*mockRows{{rows: [][]any{
+			{ts, 30, 20, "LWLock"},
+			{ts, 10, 20, "CPU"},
+		}}},
+	}
+	r := chi.NewRouter()
+	(&AshAPI{pool: pool}).RegisterRoutes(r)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/ash?instance_id="+uuid.NewString()+"&group_by=wait_event_type&from=2026-09-01T11:00:00Z&to=2026-09-01T12:00:00Z", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp ashResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.Equal(t, 20, resp.ResolutionSeconds)
+	require.Len(t, resp.Buckets, 2)
+	require.Equal(t, "LWLock", resp.Buckets[0].WaitEventType)
+	require.Equal(t, 1.5, *resp.Buckets[0].AvgActiveSessions)
+	require.Equal(t, "CPU", resp.Buckets[1].WaitEventType)
+	require.NotNil(t, resp.Warning, "20 ticks are not significant")
+}
+
+// TestFoldASHGroups_ConservesTheTotal: the groups beyond the largest ones
+// become one "other" row per bucket, and a NULL queryid, which the chart
+// already shows as other, is folded with them rather than duplicated.
+func TestFoldASHGroups_ConservesTheTotal(t *testing.T) {
+	t.Parallel()
+	ts := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	var rows []ashBucket
+	for i := 0; i < 5; i++ {
+		qid := strconv.Itoa(i)
+		rows = append(rows, ashBucket{TS: ts, Samples: 10 - i, Ticks: 10, QueryID: &qid})
+	}
+	rows = append(rows, ashBucket{TS: ts, Samples: 50, Ticks: 10})
+	// limit 3 per bucket: two groups kept, plus other.
+	out := foldASHGroups(rows, []string{"queryid"}, 1, 3)
+	require.Len(t, out, 3)
+	total := 0
+	var nilRows int
+	for _, b := range out {
+		total += b.Samples
+		if b.QueryID == nil {
+			nilRows++
+		}
+	}
+	require.Equal(t, 90, total)
+	require.Equal(t, 1, nilRows)
+	require.Equal(t, "0", *out[0].QueryID)
+	require.Equal(t, "1", *out[1].QueryID)
+	require.Equal(t, 50+8+7+6, out[2].Samples)
 }

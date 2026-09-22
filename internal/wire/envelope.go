@@ -6,11 +6,19 @@ import (
 	"time"
 )
 
+// Protocol 3 adds Result.partial. The server decodes envelopes strictly, so a
+// v2 server has to refuse a v3 agent by version, with a message that says to
+// upgrade the server, rather than by an unknown field.
 const (
 	ProtocolVersionMin     = 1
-	ProtocolVersionCurrent = 2
+	ProtocolVersionCurrent = 3
 	ProtocolVersion        = ProtocolVersionCurrent
 )
+
+// TransmittedAtHeader carries the moment the agent actually sent a push
+// request (RFC 3339). SentAt is when the envelope was built and queued, which
+// after an outage is hours earlier than its delivery.
+const TransmittedAtHeader = "X-Pglens-Transmitted-At"
 
 type Envelope struct {
 	ProtocolVersion int        `json:"protocol_version"`
@@ -18,6 +26,10 @@ type Envelope struct {
 	AgentVersion    string     `json:"agent_version"`
 	SentAt          time.Time  `json:"sent_at"`
 	Instances       []Instance `json:"instances"`
+	// TransmittedAt is filled by the server from TransmittedAtHeader. It is
+	// what the agent's clock skew is measured against: measuring it against
+	// SentAt reported every replayed envelope's queueing delay as skew.
+	TransmittedAt time.Time `json:"-"`
 }
 
 type Instance struct {
@@ -56,11 +68,15 @@ type Edge struct {
 }
 
 type Result struct {
-	Check      string            `json:"check"`
-	TS         time.Time         `json:"ts"`
-	Database   string            `json:"database,omitempty"`
-	StatsReset *time.Time        `json:"stats_reset,omitempty"`
-	Truncated  bool              `json:"truncated,omitempty"`
+	Check      string     `json:"check"`
+	TS         time.Time  `json:"ts"`
+	Database   string     `json:"database,omitempty"`
+	StatsReset *time.Time `json:"stats_reset,omitempty"`
+	Truncated  bool       `json:"truncated,omitempty"`
+	// Partial marks a deliberate top-N subset: objects absent from this
+	// result were not observed, which is not the same as gone. Truncated is
+	// reserved for a hard cardinality cap cutting into that subset.
+	Partial    bool              `json:"partial,omitempty"`
 	Error      string            `json:"error,omitempty"`
 	SkipReason string            `json:"skip_reason,omitempty"`
 	Metrics    []Metric          `json:"metrics,omitempty"`

@@ -64,6 +64,9 @@ GROUP BY 1, 2
 		}
 		parsed = append(parsed, activityRow{State: &state, WaitEventType: &waitType, Count: n, MaxXactAge: maxAge, MaxIdleInTxn: idleInTxn})
 	}
+	if err := rows.Err(); err != nil {
+		return Result{}, err
+	}
 	// Get max_connections
 	var maxConnStr string
 	_ = conn.QueryRow(ctx, "SELECT current_setting('max_connections')").Scan(&maxConnStr)
@@ -75,17 +78,29 @@ GROUP BY 1, 2
 	var frozenAge float64
 	_ = conn.QueryRow(ctx, `SELECT COALESCE(max(age(datfrozenxid)), 0)::float8 FROM pg_database`).Scan(&frozenAge)
 	result := activityCheckResult(parsed, maxConnStr, c.byApplication, databaseRows, applicationRows, stateAgeRows, prepared, oldestPrepared, frozenAge)
-	var total, waiting int
-	for _, row := range parsed {
-		total += row.Count
+	result.Metrics = append(result.Metrics, pgtype.Metric{Name: "pg_backends_waiting_ratio", Value: waitingRatio(parsed), Kind: pgtype.KindGauge})
+	return result, nil
+}
+
+// waitingRatio is the share of active sessions that are waiting on something
+// other than the CPU. An idle session also reports a wait event (ClientRead,
+// waiting for its client), so counting every session made the ratio track
+// the size of idle connection pools instead of contention.
+func waitingRatio(rows []activityRow) float64 {
+	var active, waiting int
+	for _, row := range rows {
+		if row.State == nil || *row.State != "active" {
+			continue
+		}
+		active += row.Count
 		if row.WaitEventType != nil && *row.WaitEventType != "CPU" {
 			waiting += row.Count
 		}
 	}
-	if total > 0 {
-		result.Metrics = append(result.Metrics, pgtype.Metric{Name: "pg_backends_waiting_ratio", Value: float64(waiting) / float64(total), Kind: pgtype.KindGauge})
+	if active == 0 {
+		return 0
 	}
-	return result, nil
+	return float64(waiting) / float64(active)
 }
 
 func queryActivityGroups(ctx context.Context, conn Conn, query string) []activityGroup {

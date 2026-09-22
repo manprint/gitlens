@@ -192,6 +192,15 @@ export function useClusterSettingsDrift(id: string) {
   })
 }
 
+export function useClusterSlots(id: string) {
+  return useApiQuery({
+    policy: REFRESH.cluster,
+    queryFn: (signal) =>
+      getApi(() => client.GET('/api/v1/clusters/{id}/slots', { params: { path: { id } }, signal })),
+    queryKey: qk.clusterSlots(id),
+  })
+}
+
 export function useInstances(): ApiQueryResult<Awaited<ReturnType<typeof fetchInstances>>> {
   return useApiQuery({
     policy: REFRESH.fleet,
@@ -391,6 +400,8 @@ export function useAsh(params: QueryParameters<'/api/v1/ash'>) {
       params.group_by,
       params.database,
       params.limit,
+      params.wait_event_type,
+      params.wait_event,
     ),
   })
 }
@@ -401,7 +412,15 @@ export function useAshTop(params: QueryParameters<'/api/v1/ash/top'>) {
     policy: REFRESH.ash,
     queryFn: (signal) =>
       getApi(() => client.GET('/api/v1/ash/top', { params: { query: params }, signal })),
-    queryKey: qk.ashTop(params.instance_id, params.from, params.to, params.database, params.limit),
+    queryKey: qk.ashTop(
+      params.instance_id,
+      params.from,
+      params.to,
+      params.database,
+      params.limit,
+      params.wait_event_type,
+      params.wait_event,
+    ),
   })
 }
 

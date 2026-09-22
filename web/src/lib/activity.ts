@@ -109,45 +109,17 @@ export function connectionSaturation(metrics: ActivityMetrics): ConnectionSatura
   }
 }
 
-export function counterRate(series: readonly ActivityMetricLike[]): number | null {
-  const samples = series
-    .map((metric) => ({ timestamp: timestampValue(metric.ts), value: finiteValue(metric.value) }))
-    .filter(
-      (sample): sample is { timestamp: number; value: number } =>
-        sample.timestamp !== null && sample.value !== null,
-    )
-    .sort((left, right) => left.timestamp - right.timestamp)
-  if (samples.length < 2) return null
-
-  let delta = 0
-  let elapsed = 0
-  for (let index = 1; index < samples.length; index += 1) {
-    const previous = samples[index - 1]!
-    const current = samples[index]!
-    const seconds = (current.timestamp - previous.timestamp) / 1000
-    if (seconds <= 0) continue
-    delta += current.value >= previous.value ? current.value - previous.value : current.value
-    elapsed += seconds
-  }
-  return elapsed > 0 ? delta / elapsed : null
-}
-
+/**
+ * The instance's deadlock rate, in deadlocks per second. pg_deadlocks_total
+ * is stored as a per-second rate (the server converts counters on ingest),
+ * one series per database, so the rate is the sum of each database's newest
+ * reading. It used to be differentiated again as if it were a raw counter,
+ * which measured how the rate changed, not the rate.
+ */
 export function deadlockRate(metrics: ActivityMetrics): number | null {
-  const series = seriesFor(metrics, 'pg_deadlocks_total')
-  if (series.length === 0) return null
-
-  const groups = new Map<string, ActivityMetricLike[]>()
-  for (const metric of series) {
-    const key = labelKey(metric.labels)
-    const group = groups.get(key) ?? []
-    group.push(metric)
-    groups.set(key, group)
-  }
-
-  const rates = [...groups.values()]
-    .map(counterRate)
-    .filter((rate): rate is number => rate !== null)
-  return rates.length > 0 ? rates.reduce((total, rate) => total + rate, 0) : null
+  const perDatabase = breakdown(metrics, 'pg_deadlocks_total', 'database')
+  if (perDatabase.length === 0) return null
+  return perDatabase.reduce((total, row) => total + row.value, 0)
 }
 
 export function hasReported(metrics: ActivityMetrics, name: string): boolean {

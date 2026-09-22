@@ -17,10 +17,10 @@ import (
 func advisorIntegrationSnapshot(id uuid.UUID, now time.Time, age float64) *Snapshot {
 	metrics := map[string]map[string]float64{}
 	for _, name := range []string{
-		"pg_max_xact_age_seconds", "pg_max_idle_in_txn_seconds", "pg_oldest_prepared_xact_seconds",
+		"pg_max_xact_age_seconds", "pg_max_idle_in_transaction_seconds", "pg_oldest_prepared_xact_seconds",
 		"pg_xact_rollback_ratio", "pg_max_datfrozenxid_age", "pg_connections_used_ratio",
-		"pg_checkpoints_requested_ratio", "pg_replication_lag_bytes", "pg_connections_idle_share",
-		"pg_archiver_failed_ratio", "pg_archiver_last_archived_age_seconds", "pg_basebackup_age_days",
+		"pg_checkpoints_requested_ratio", "pg_connections_idle_share", "pg_connections_used",
+		"pg_archiver_failed_ratio", "pg_archiver_last_archived_age_seconds",
 	} {
 		metrics[name] = map[string]float64{"": 0}
 	}
@@ -34,9 +34,9 @@ func advisorIntegrationSnapshot(id uuid.UUID, now time.Time, age float64) *Snaps
 		Settings: map[string]string{
 			"work_mem_bytes": "4194304", "max_connections": "100", "shared_buffers_bytes": "268435456",
 			"effective_cache_size_bytes": "8589934592", "maintenance_work_mem_bytes": "268435456",
-			"pooler_observed": "true", "track_io_timing": "on", "wal_keep_size_bytes": "0",
-			"replication_slot_protects": "true", "fsync": "on", "full_page_writes": "on",
-			"autovacuum": "on", "archive_mode": "on", "archive_timeout_seconds": "0", "basebackup_seen": "true",
+			"track_io_timing": "on", "wal_keep_size_bytes": "0",
+			"fsync": "on", "full_page_writes": "on",
+			"autovacuum": "on", "archive_mode": "on", "archive_timeout_seconds": "0",
 		},
 	}
 }

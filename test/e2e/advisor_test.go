@@ -266,9 +266,8 @@ func advisorSettings() map[string]string {
 	return map[string]string{
 		"archive_mode": "on", "archive_command": "true", "archive_timeout_seconds": "0",
 		"autovacuum": "on", "autovacuum_max_workers": "3", "autovacuum_vacuum_cost_delay": "0ms",
-		"basebackup_seen": "true", "connections_count": "50", "effective_cache_size": "1GB",
-		"effective_cache_size_bytes": "1073741824", "fsync": "on", "full_page_writes": "on",
-		"max_connections": "100", "pooler_observed": "false", "replication_slot_protects": "true",
+		"effective_cache_size": "1GB", "effective_cache_size_bytes": "1073741824",
+		"fsync": "on", "full_page_writes": "on", "max_connections": "100",
 		"shared_buffers": "512MB", "shared_buffers_bytes": "536870912", "track_io_timing": "on",
 		"wal_keep_size_bytes": "1073741824", "work_mem": "64MB", "work_mem_bytes": "67108864",
 	}
@@ -277,12 +276,11 @@ func advisorSettings() map[string]string {
 func advisorSafeMetrics() map[string]float64 {
 	return map[string]float64{
 		"pg_archiver_failed_ratio": 0, "pg_archiver_last_archived_age_seconds": 0,
-		"pg_basebackup_age_days": 1, "pg_checkpoints_requested_ratio": 0,
-		"pg_connections_idle_share": .1, "pg_connections_used_ratio": .1,
-		"pg_max_datfrozenxid_age": 0, "pg_max_idle_in_txn_seconds": 0,
+		"pg_checkpoints_requested_ratio": 0, "pg_connections_idle_share": .1,
+		"pg_connections_used": 10, "pg_connections_used_ratio": .1,
+		"pg_max_datfrozenxid_age": 0, "pg_max_idle_in_transaction_seconds": 0,
 		"pg_max_xact_age_seconds": 0, "pg_oldest_prepared_xact_seconds": 0,
-		"pg_replication_lag_bytes": 0, "pg_vacuum_jobs_running": 0,
-		"pg_xact_rollback_ratio": 0,
+		"pg_vacuum_jobs_running": 0, "pg_xact_rollback_ratio": 0,
 	}
 }
 
@@ -324,6 +322,12 @@ VALUES ('default',$1,$2::uuid,'','setting',$3,'{}'::jsonb,$4,$5,$5,$5)
 ON CONFLICT (tenant_id,instance_id,datname,kind,key) DO UPDATE SET value_text=EXCLUDED.value_text,last_seen=EXCLUDED.last_seen,changed_at=EXCLUDED.changed_at`, clusterID, instanceID, key, value, now); err != nil {
 			return fmt.Errorf("seed setting %s: %w", key, err)
 		}
+	}
+	// A base backup seen streaming today keeps the backup rules quiet.
+	if _, err := e.DB.Exec(ctx, `INSERT INTO object_facts (tenant_id,cluster_id,instance_id,datname,kind,key,labels,value_text,first_seen,last_seen,changed_at)
+VALUES ('default',$1,$2::uuid,'','backup','basebackup_running','{}'::jsonb,'1',$3,$3,$3)
+ON CONFLICT (tenant_id,instance_id,datname,kind,key) DO UPDATE SET last_seen=EXCLUDED.last_seen`, clusterID, instanceID, now); err != nil {
+		return fmt.Errorf("seed base backup: %w", err)
 	}
 	metrics := advisorSafeMetrics()
 	metrics["host_mem_total_bytes"] = 2 * 1024 * 1024 * 1024

@@ -85,7 +85,6 @@ type Gates struct {
 	Tier                pgtype.PermTier
 	AllowExplainAnalyze bool
 	AllowSignal         bool
-	HasPgstattuple      bool
 }
 
 // Validate checks that Args contains only the arguments supported by kind.

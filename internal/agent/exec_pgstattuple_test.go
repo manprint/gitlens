@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -13,15 +14,21 @@ import (
 	"github.com/manprint/pglens/internal/command"
 )
 
+// pgstattupleConn is a connection to the database the relation lives in;
+// installed says whether that database has the extension.
 type pgstattupleConn struct {
-	queries []string
-	args    [][]any
+	installed bool
+	queries   []string
+	args      [][]any
 }
 
 func (c *pgstattupleConn) Query(context.Context, string, ...any) (pgx.Rows, error) { return nil, nil }
 func (c *pgstattupleConn) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	c.queries = append(c.queries, sql)
 	c.args = append(c.args, args)
+	if sql == pgstattupleInstalled {
+		return installedRow(c.installed)
+	}
 	return pgstattupleRow{}
 }
 func (c *pgstattupleConn) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
@@ -30,12 +37,21 @@ func (c *pgstattupleConn) Exec(_ context.Context, sql string, _ ...any) (pgconn.
 }
 func (c *pgstattupleConn) Release() {}
 
+type installedRow bool
+
+func (r installedRow) Scan(dest ...any) error {
+	*dest[0].(*bool) = bool(r)
+	return nil
+}
+
 type pgstattupleRow struct{}
 
 func (pgstattupleRow) Scan(dest ...any) error {
-	values := []any{int64(100), int64(4), int64(80), int64(1), int64(20), int64(40), 4.0}
+	values := []any{"postgres", int64(100), int64(4), int64(80), int64(1), int64(20), int64(40), 4.0}
 	for i, value := range values {
 		switch dst := dest[i].(type) {
+		case *string:
+			*dst = value.(string)
 		case *int64:
 			*dst = value.(int64)
 		case *float64:
@@ -51,35 +67,64 @@ func pgstattupleArgs(schema, relation string) command.Args {
 	return command.Args{Schema: schema, Relation: relation, Datname: "postgres"}
 }
 
-func TestPgstattuple_RejectsWithoutExtension(t *testing.T) {
+// The maintenance database having the extension says nothing about the
+// database the relation lives in.
+func TestPgstattuple_RejectsWithoutExtensionInTheRelationsDatabase(t *testing.T) {
 	conn := &pgstattupleConn{}
-	_, err := NewPgstattupleExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, pgstattupleArgs("public", "items"))
+	target := &dispatcherTarget{conn: conn, pgstattuple: true}
+	_, err := NewPgstattupleExecutor().Execute(context.Background(), target, pgstattupleArgs("public", "items"))
 	var rejected *RejectedError
 	require.True(t, errors.As(err, &rejected))
-	require.Contains(t, rejected.Error(), "pgstattuple")
-	require.Empty(t, conn.queries)
+	require.Contains(t, rejected.Error(), `pgstattuple extension is not installed in database "postgres"`)
+	for _, query := range conn.queries {
+		require.NotContains(t, query, "FROM pgstattuple(")
+	}
+}
+
+func TestPgstattuple_MeasuresWhereTheExtensionIsInstalled(t *testing.T) {
+	conn := &pgstattupleConn{installed: true}
+	target := &dispatcherTarget{conn: conn} // not in the maintenance database
+	_, err := NewPgstattupleExecutor().Execute(context.Background(), target, pgstattupleArgs("public", "items"))
+	require.NoError(t, err)
 }
 
 func TestPgstattuple_SanitizesIdentifier(t *testing.T) {
-	conn := &pgstattupleConn{}
-	target := &dispatcherTarget{conn: conn, pgstattuple: true}
+	conn := &pgstattupleConn{installed: true}
+	target := &dispatcherTarget{conn: conn}
 	_, err := NewPgstattupleExecutor().Execute(context.Background(), target, pgstattupleArgs(`weird"schema`, `table"name`))
 	require.NoError(t, err)
-	require.Len(t, conn.args, 1)
-	require.Equal(t, `"weird""schema"."table""name"`, conn.args[0][0])
-	require.Contains(t, conn.queries[2], "$1::regclass")
+	var scan string
+	for _, query := range conn.queries {
+		if strings.Contains(query, "FROM pgstattuple(") {
+			scan = query
+		}
+	}
+	require.Contains(t, scan, "$1::regclass")
+	// The scan is the last QueryRow, and QueryRow records its arguments.
+	require.Equal(t, []any{`"weird""schema"."table""name"`}, conn.args[len(conn.args)-1])
 }
 
-func TestPgstattuple_TimeoutIs300s(t *testing.T) {
-	conn := &pgstattupleConn{}
-	_, err := NewPgstattupleExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn, pgstattuple: true}, pgstattupleArgs("public", "items"))
+// The server-side timeout must expire before the dispatcher's own execution
+// limit, or the scan keeps running after the agent has given up on it.
+func TestPgstattuple_TimeoutFitsCommandLimit(t *testing.T) {
+	conn := &pgstattupleConn{installed: true}
+	_, err := NewPgstattupleExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, pgstattupleArgs("public", "items"))
 	require.NoError(t, err)
-	require.Contains(t, conn.queries, "SET LOCAL statement_timeout = '300s'")
+	require.Contains(t, conn.queries, "SET LOCAL statement_timeout = '50s'")
+	require.Less(t, 50*time.Second, commandExecutionLimit+time.Nanosecond)
+}
+
+func TestPgstattuple_UsesReadOnlyTransaction(t *testing.T) {
+	conn := &pgstattupleConn{installed: true}
+	_, err := NewPgstattupleExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, pgstattupleArgs("public", "items"))
+	require.NoError(t, err)
+	require.Equal(t, "BEGIN READ ONLY", conn.queries[0])
+	require.NotContains(t, conn.queries, "BEGIN")
 }
 
 func TestPgstattuple_NeverIssuesCreateExtension(t *testing.T) {
-	conn := &pgstattupleConn{}
-	_, err := NewPgstattupleExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn, pgstattuple: true}, pgstattupleArgs("public", "items"))
+	conn := &pgstattupleConn{installed: true}
+	_, err := NewPgstattupleExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, pgstattupleArgs("public", "items"))
 	require.NoError(t, err)
 	for _, query := range conn.queries {
 		require.False(t, strings.Contains(strings.ToLower(query), "create extension"), query)

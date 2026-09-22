@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { useAsh, useInstanceSettings } from '@/api/queries'
@@ -7,7 +7,7 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Degraded, Disabled, ErrorState } from '@/components/state'
 import { useTimeRange } from '@/hooks/useTimeRange'
 import { totalSamples } from '@/lib/ash'
-import type { AshBucket, AshGroupBy } from '@/lib/ash'
+import type { AshGroupBy } from '@/lib/ash'
 
 import { AshBreakdown } from './AshBreakdown'
 import { AshTopQueries } from './AshTopQueries'
@@ -16,12 +16,17 @@ type DrillGroup = Extract<AshGroupBy, 'wait_event_type' | 'wait_event' | 'queryi
 
 const DEFAULT_GROUP: DrillGroup = 'wait_event_type'
 
+// Rows for 24 groups and "other" in each of the server's 180 buckets. At the
+// old 1,000 the server kept only the 4 largest groups of a long range.
+const ASH_ROW_LIMIT = 5_000
+
 function AshFootnote() {
   return (
     <p className="text-text-secondary text-xs" data-testid="ash-sampling-footnote">
       ASH uses 1 s statistical sampling; sub-second queries are under-represented. At most 100 wait
       keys are retained per 10 s window; the remainder is folded into “other” and the total is
-      conserved.
+      conserved. The chart plots the largest groups of the range and folds the rest into “other”
+      too.
     </p>
   )
 }
@@ -35,32 +40,18 @@ function readGroup(value: string | null): DrillGroup {
   return value === 'wait_event' || value === 'queryid' ? value : DEFAULT_GROUP
 }
 
-function groupValue(bucket: AshBucket, groupBy: DrillGroup): string {
-  const value =
-    groupBy === 'wait_event_type'
-      ? bucket.wait_event_type
-      : groupBy === 'wait_event'
-        ? bucket.wait_event
-        : bucket.queryid
-  if (value === undefined || value === null || value === '') {
-    return groupBy === 'queryid' ? 'other' : 'CPU'
-  }
-  return String(value)
-}
-
-function filteredBuckets(
-  buckets: readonly AshBucket[],
+// The drill-down narrows on the server. Grouped rows carry only their group
+// column, so the old client-side filter on the parent column matched no row
+// and every drill-down came back empty.
+function drillFilters(
   groupBy: DrillGroup,
   waitEventType: string | null,
   waitEvent: string | null,
-): AshBucket[] {
-  if (groupBy === 'wait_event' && waitEventType) {
-    return buckets.filter((bucket) => groupValue(bucket, 'wait_event_type') === waitEventType)
+): { wait_event_type?: string; wait_event?: string } {
+  return {
+    ...(groupBy !== DEFAULT_GROUP && waitEventType ? { wait_event_type: waitEventType } : {}),
+    ...(groupBy === 'queryid' && waitEvent ? { wait_event: waitEvent } : {}),
   }
-  if (groupBy === 'queryid' && waitEvent) {
-    return buckets.filter((bucket) => groupValue(bucket, 'wait_event') === waitEvent)
-  }
-  return [...buckets]
 }
 
 interface DrillBreadcrumbProps {
@@ -129,13 +120,15 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
   const waitEventType = searchParams.get('wait_event_type')
   const waitEvent = searchParams.get('wait_event')
   const database = searchParams.get('db') ?? undefined
+  const filters = drillFilters(groupBy, waitEventType, waitEvent)
   const params = {
     from: range.from.toISOString(),
     group_by: groupBy,
     instance_id: instanceId,
-    limit: 1000,
+    limit: ASH_ROW_LIMIT,
     to: range.to.toISOString(),
     ...(database === undefined ? {} : { database }),
+    ...filters,
   }
   const ashQuery = useAsh(params)
   const settingsQuery = useInstanceSettings(instanceId)
@@ -149,11 +142,11 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
     void navigate(`/login?next=${encodeURIComponent(next)}`, { replace: true })
   }, [location.pathname, location.search, navigate, unauthorized])
 
-  const buckets = useMemo(
-    () => filteredBuckets(ashQuery.data?.buckets ?? [], groupBy, waitEventType, waitEvent),
-    [ashQuery.data?.buckets, groupBy, waitEvent, waitEventType],
-  )
-  const topQueryProps = database === undefined ? {} : { database }
+  const topQueryProps = {
+    ...(database === undefined ? {} : { database }),
+    ...(filters.wait_event_type === undefined ? {} : { waitEventType: filters.wait_event_type }),
+    ...(filters.wait_event === undefined ? {} : { waitEvent: filters.wait_event }),
+  }
   const sampleCount = totalSamples(ashQuery.data?.buckets ?? [])
   const queryIdsUnavailable =
     groupBy === 'queryid' &&
@@ -265,7 +258,7 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
             </div>
           ) : (
             <AshBreakdown
-              buckets={buckets}
+              buckets={ashQuery.data.buckets}
               filterLabel={
                 groupBy === 'wait_event'
                   ? (waitEventType ?? null)
@@ -275,6 +268,7 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
               }
               groupBy={groupBy}
               onSeriesSelect={selectSeries}
+              resolutionSeconds={ashQuery.data.resolution_seconds}
             />
           )}
           {groupBy === 'queryid' && !queryIdsUnavailable ? (

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useId, useState, type FormEvent } from 'react'
 
 import { useMuteFinding, useUnmuteFinding } from '@/api/findings'
 import { Button } from '@/components/ui/button'
@@ -53,6 +53,9 @@ function clearFormState(
 }
 
 export function MuteDialog({ finding }: { finding: JoinedFinding }) {
+  // A finding id holds its database and object names, which can contain
+  // spaces: as an element id it split the aria-describedby reference.
+  const domId = useId().replaceAll(':', '')
   const [open, setOpen] = useState(false)
   const [reason, setReason] = useState('')
   const [preset, setPreset] = useState<ExpiryPreset>('24h')
@@ -136,14 +139,14 @@ export function MuteDialog({ finding }: { finding: JoinedFinding }) {
 
           <form className="space-y-4" onSubmit={submit}>
             <div className="space-y-2">
-              <label className="text-sm font-medium" htmlFor={`mute-reason-${finding.finding_id}`}>
+              <label className="text-sm font-medium" htmlFor={`mute-reason-${domId}`}>
                 Reason
               </label>
               <textarea
-                aria-describedby={formError ? `mute-error-${finding.finding_id}` : undefined}
+                aria-describedby={formError ? `mute-error-${domId}` : undefined}
                 aria-required="true"
                 className="border-input bg-background min-h-24 w-full rounded-md border px-3 py-2 text-sm"
-                id={`mute-reason-${finding.finding_id}`}
+                id={`mute-reason-${domId}`}
                 onChange={(event) => setReason(event.target.value)}
                 value={reason}
               />
@@ -156,7 +159,7 @@ export function MuteDialog({ finding }: { finding: JoinedFinding }) {
                   <label className="flex items-center gap-2 text-sm" key={option.value}>
                     <input
                       checked={preset === option.value}
-                      name={`mute-expiry-${finding.finding_id}`}
+                      name={`mute-expiry-${domId}`}
                       onChange={() => setPreset(option.value)}
                       type="radio"
                       value={option.value}
@@ -165,16 +168,13 @@ export function MuteDialog({ finding }: { finding: JoinedFinding }) {
                   </label>
                 ))}
               </div>
-              <label
-                className="flex flex-col gap-1 text-sm"
-                htmlFor={`mute-until-${finding.finding_id}`}
-              >
+              <label className="flex flex-col gap-1 text-sm" htmlFor={`mute-until-${domId}`}>
                 <span>Mute until</span>
                 <input
                   aria-label="Mute until"
                   className="border-input bg-background h-9 rounded-md border px-3"
                   disabled={preset !== 'custom'}
-                  id={`mute-until-${finding.finding_id}`}
+                  id={`mute-until-${domId}`}
                   onChange={(event) => setExplicit(event.target.value)}
                   type="datetime-local"
                   value={explicit}
@@ -183,7 +183,7 @@ export function MuteDialog({ finding }: { finding: JoinedFinding }) {
             </fieldset>
 
             {formError ? (
-              <p id={`mute-error-${finding.finding_id}`} role="alert">
+              <p id={`mute-error-${domId}`} role="alert">
                 {formError}
               </p>
             ) : null}

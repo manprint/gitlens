@@ -25,6 +25,8 @@ interface AshBreakdownProps {
   filterLabel?: string | null
   groupBy: Extract<AshGroupBy, 'wait_event_type' | 'wait_event' | 'queryid'>
   onSeriesSelect?: AshChartProps['onSeriesSelect']
+  /** The server's bucket width, so a missing bucket is drawn as a gap. */
+  resolutionSeconds?: number
 }
 
 function groupValue(bucket: AshBucket, groupBy: AshGroupBy): string {
@@ -52,8 +54,9 @@ function metadataKey(name: string, timestamp: string): string {
 function chartSeries(
   buckets: readonly AshBucket[],
   groupBy: AshBreakdownProps['groupBy'],
+  resolutionSeconds: number | undefined,
 ): { folded: number; series: AshChartSeries[] } {
-  const source = toStackedSeries(buckets, groupBy)
+  const source = toStackedSeries(buckets, groupBy, resolutionSeconds)
   const result = foldOther(source, MAX_VISIBLE_SERIES)
   const ordered = orderGroups(source)
   const overflow = new Set(
@@ -63,11 +66,15 @@ function chartSeries(
   )
   const metadata = new Map<string, { samples: number; ticks: number }>()
 
+  // Several source groups share one "other" point: their samples add up
+  // (the ticks are the instance's, the same for every group of a bucket).
+  // Each used to overwrite the last, so "other" reported one group's samples.
   for (const bucket of buckets) {
     const sourceName = groupValue(bucket, groupBy)
     const displayName = overflow.has(sourceName) ? OTHER : sourceName
-    metadata.set(metadataKey(displayName, bucket.ts), {
-      samples: bucket.samples,
+    const key = metadataKey(displayName, bucket.ts)
+    metadata.set(key, {
+      samples: (metadata.get(key)?.samples ?? 0) + bucket.samples,
       ticks: bucket.ticks,
     })
   }
@@ -84,8 +91,14 @@ function chartSeries(
   }
 }
 
-export function AshBreakdown({ buckets, filterLabel, groupBy, onSeriesSelect }: AshBreakdownProps) {
-  const { folded, series } = chartSeries(buckets, groupBy)
+export function AshBreakdown({
+  buckets,
+  filterLabel,
+  groupBy,
+  onSeriesSelect,
+  resolutionSeconds,
+}: AshBreakdownProps) {
+  const { folded, series } = chartSeries(buckets, groupBy, resolutionSeconds)
   const title = GROUP_LABELS[groupBy]
   const interactionProps = onSeriesSelect === undefined ? {} : { onSeriesSelect }
   const description = filterLabel

@@ -30,6 +30,10 @@ The script does not revoke a previously granted higher tier. To downgrade an
 existing role deliberately, run the relevant `REVOKE` statements as an admin,
 then run the script again. Tier 3 is never a script flag: extensions are
 created manually, in each database where the DBA has approved them.
+`pg_stat_statements` is needed in one database only, the one the agent's DSN
+names or any monitored database, because its statistics cover every database;
+the agent looks for it when it starts. `pgstattuple` is needed in each database
+whose tables should be measurable.
 
 ## Capability matrix
 
@@ -38,7 +42,7 @@ created manually, in each database where the DBA has approved them.
 | T0 | `pg_monitor`, `CONNECT`, and explicit `EXECUTE` on `pg_control_system()` and `pg_control_checkpoint()` | All listed below, subject to role, PostgreSQL-version and extension prerequisites | All rules listed below | No command `EXPLAIN`/`pgstattuple` (requires T1); no cancel/terminate (requires T2) |
 | T1 | T0 + `pg_read_all_data` (the script also lists `pg_read_all_stats` for clarity; it is implied by `pg_monitor`) | No additional scheduled check | No additional rule | Plan-only `EXPLAIN` and `pgstattuple` remain rejected until T1 is visible to the running agent; `allow_explain_analyze` is a separate gate |
 | T2 | T1 + `pg_signal_backend` | No additional scheduled check | No additional rule | `cancel` and `terminate` remain rejected until T2 is visible and `allow_signal` is true |
-| T3 | DBA-created extensions, never created by pglens | `stat_statements` needs `pg_stat_statements`; optional `pgstattuple` is used only by the command executor | Rules needing an unavailable input are reported as `degraded` with the missing extension/input reason | Extension-dependent data is skipped or degraded by name; pglens never silently creates an extension |
+| T3 | DBA-created extensions, never created by pglens | `stat_statements` needs `pg_stat_statements` in the DSN's database or in a monitored one; optional `pgstattuple` is used only by the command executor, in the database that holds the table | Rules needing an unavailable input are reported as `degraded` with the missing extension/input reason | Extension-dependent data is skipped or degraded by name; pglens never silently creates an extension |
 
 ### Scheduled checks
 
@@ -62,10 +66,16 @@ commands, not additional advisor rules. The complete T0 rule set is:
 
 | Pack | Rule IDs |
 |------|----------|
-| Query | `query.slow_mean`, `query.total_time_share`, `query.regression`, `query.temp_bytes_high`, `query.cache_miss_high` |
+| Query and transactions | `query.slow_mean`, `query.total_time_share`, `query.regression`, `query.temp_bytes_high`, `query.cache_miss_high`, `txn.long_running`, `txn.idle_in_transaction`, `txn.prepared_orphan`, `txn.wraparound_risk`, `txn.high_rollback_ratio` |
 | Relations | `index.unused`, `index.duplicate`, `index.redundant_prefix`, `index.invalid`, `index.bloat_high`, `index.divergence`, `table.dead_tuples_high`, `table.never_autovacuumed`, `table.autoanalyze_stale`, `table.wraparound_risk`, `table.bloat_high`, `table.seq_scan_heavy`, `vacuum.starvation`, `vacuum.disabled` |
 | Configuration and connections | `config.work_mem_oversized`, `config.work_mem_low`, `config.shared_buffers_low`, `config.shared_buffers_high`, `config.effective_cache_size_mismatch`, `config.maintenance_work_mem_low`, `config.max_connections_high`, `config.track_io_timing_off`, `config.checkpoints_too_frequent`, `config.wal_keep_size_low`, `config.fsync_off`, `config.full_page_writes_off`, `config.drift`, `conn.saturation`, `conn.idle_share_high` |
 | Archive and backup | `archive.disabled`, `archive.failing`, `archive.stalled`, `backup.no_basebackup_seen`, `backup.no_strategy` |
+
+The archive and backup rules are cluster-wide: a standby archives only with
+`archive_mode=always`, and a base backup counts when it is seen running in
+`pg_stat_progress_basebackup` on any member of the cluster (readable through
+`pg_monitor`). How each rule reads its data is described under
+[Advisor findings](../../README.md#advisor-findings) in the main README.
 
 When an advisor input is unavailable, the API keeps the rule visible with
 `state=degraded` and a non-empty `degraded_reason`, for example

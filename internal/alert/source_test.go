@@ -101,7 +101,7 @@ func TestMetricSource_PerInstanceSamplesCarryIdentity(t *testing.T) {
 func TestMetricSource_ReplicationRuleReadsItsOwnColumn(t *testing.T) {
 	instance := uuid.MustParse("33333333-3333-3333-3333-333333333333")
 	ts := time.Unix(1000, 0).UTC()
-	db := &fakeQueryer{results: []*fakeRows{{rows: [][]any{{int64(1), instance, "", 12.5, ts}}}}}
+	db := &fakeQueryer{results: []*fakeRows{{rows: [][]any{{int64(1), instance, "walreceiver", "sender", 12.5, ts}}}}}
 	s := &metricSource{db: db, interval: time.Minute}
 
 	got, err := s.Samples(t.Context(), Rule{ID: "replica.lag_high", Scope: ScopeInstance, Metric: "pg_replication_write_lag_seconds", Comparator: GT, Threshold: 30}, ts)
@@ -111,6 +111,48 @@ func TestMetricSource_ReplicationRuleReadsItsOwnColumn(t *testing.T) {
 	require.Contains(t, db.calls[0].sql, "write_lag_sec")
 	require.Contains(t, db.calls[0].sql, "FROM metrics_replication")
 	require.NotContains(t, db.calls[0].sql, "replay_lag_sec")
+}
+
+// TestMetricSource_ReplicationSamplesArePerStandby: one sample per standby,
+// the primary's reading labelled with the standby's name, a standby's own
+// reading keyed by the standby. The rule used to keep one row per instance,
+// so a primary's standbys took turns being judged, and slot rows (NULL lag)
+// failed the scan of the whole rule.
+func TestMetricSource_ReplicationSamplesArePerStandby(t *testing.T) {
+	primary := uuid.MustParse("55555555-5555-5555-5555-555555555555")
+	standby := uuid.MustParse("66666666-6666-6666-6666-666666666666")
+	ts := time.Unix(1000, 0).UTC()
+	db := &fakeQueryer{results: []*fakeRows{{rows: [][]any{
+		{int64(1), primary, "replica_a", "sender", 45.0, ts},
+		{int64(1), primary, "replica_b", "sender", 0.1, ts},
+		{int64(1), standby, "", "receiver", 2.0, ts},
+	}}}}
+	got, err := (&metricSource{db: db, interval: time.Minute}).Samples(t.Context(),
+		Rule{ID: "replica.lag_high", Scope: ScopeInstance, Metric: "pg_replication_lag_seconds", Comparator: GT, Threshold: 30}, ts)
+	require.NoError(t, err)
+	require.Len(t, got, 3)
+	require.Equal(t, map[string]string{"standby": "replica_a"}, got[0].Labels)
+	require.Equal(t, map[string]string{"standby": "replica_b"}, got[1].Labels)
+	require.NotEqual(t, Key(Rule{ID: "replica.lag_high"}, got[0]), Key(Rule{ID: "replica.lag_high"}, got[1]), "each standby is its own alert")
+	require.Equal(t, standby, *got[2].InstanceID)
+	require.Nil(t, got[2].Labels)
+	sql := db.calls[0].sql
+	require.Contains(t, sql, "value IS NOT NULL")
+	require.Contains(t, sql, "src IN ('sender', 'receiver')")
+	require.Contains(t, sql, "DISTINCT ON (instance_id, slot_name, src)")
+}
+
+func TestMetricSource_SlotRetentionIsPerSlot(t *testing.T) {
+	instance := uuid.MustParse("77777777-7777-7777-7777-777777777777")
+	ts := time.Unix(1000, 0).UTC()
+	db := &fakeQueryer{results: []*fakeRows{{rows: [][]any{{int64(1), instance, "standby_1", "slot", 1e9, ts}}}}}
+	got, err := (&metricSource{db: db, interval: time.Minute}).Samples(t.Context(),
+		Rule{ID: "custom.slot_retention", Scope: ScopeInstance, Metric: "pg_replication_slot_retained_bytes", Comparator: GT, Threshold: 5e8}, ts)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, map[string]string{"slot_name": "standby_1"}, got[0].Labels)
+	require.Contains(t, db.calls[0].sql, "= 'slot'")
+	require.Contains(t, db.calls[0].sql, "slot_retained_bytes IS NOT NULL")
 }
 
 // TestMetricSource_UnknownReplicationMetricIsReported — the engine reports the
@@ -129,23 +171,31 @@ func TestMetricSource_UpReadsInstanceLastSeen(t *testing.T) {
 	instance := uuid.MustParse("44444444-4444-4444-4444-444444444444")
 	lastSeen := time.Unix(500, 0).UTC()
 	now := time.Unix(1000, 0).UTC()
-	db := &fakeQueryer{results: []*fakeRows{{rows: [][]any{{int64(2), instance, "", 0.0, lastSeen}}}}}
+	revoked := uuid.MustParse("88888888-8888-8888-8888-888888888888")
+	db := &fakeQueryer{results: []*fakeRows{{rows: [][]any{
+		{int64(2), instance, "", 0.0, lastSeen, false},
+		{int64(2), revoked, "", 0.0, lastSeen, true},
+	}}}}
 	s := &metricSource{db: db, interval: time.Minute}
 
 	got, err := s.Samples(t.Context(), Rule{ID: "agent_down", Scope: ScopeInstance, Metric: "up", Comparator: LT, Threshold: 1, For: 90 * time.Second}, now)
 	require.NoError(t, err)
-	require.Len(t, got, 1)
+	require.Len(t, got, 2)
 	require.Contains(t, db.calls[0].sql, "FROM instances")
+	require.Contains(t, db.calls[0].sql, "revoked_at")
 	// A stale instance is seeded at the rule boundary so agent_down does not
 	// wait out its 90s a second time on top of the staleness threshold.
 	require.Equal(t, now.Add(-90*time.Second), got[0].TS)
+	require.False(t, got[0].Inapplicable)
+	// A revoked agent stops pushing on purpose: its instance is not down.
+	require.True(t, got[1].Inapplicable)
 }
 
 func TestMetricSource_ClusterRulesAggregatePerCluster(t *testing.T) {
 	ts := time.Unix(1000, 0).UTC()
 	lagging := &fakeQueryer{results: []*fakeRows{{rows: [][]any{
-		{int64(1), 90.0, ts},
-		{int64(2), 2.0, ts},
+		{int64(1), 90.0, ts, true},
+		{int64(2), 2.0, ts, true},
 	}}}}
 	got, err := (&metricSource{db: lagging, interval: time.Minute}).Samples(t.Context(),
 		Rule{ID: "replica.all_standbys_lagging", Scope: ScopeCluster, Metric: "pg_replication_lag_seconds", Comparator: GT, Threshold: 30}, ts)
@@ -155,15 +205,23 @@ func TestMetricSource_ClusterRulesAggregatePerCluster(t *testing.T) {
 		require.Nil(t, s.InstanceID, "a cluster-scoped sample must not be keyed per instance")
 		require.NotNil(t, s.ClusterID)
 	}
-	require.Contains(t, lagging.calls[0].sql, "min(replay_lag_sec)")
+	require.Contains(t, lagging.calls[0].sql, "replay_lag_sec::float8")
+	require.Contains(t, lagging.calls[0].sql, "min(value)")
 
-	sync := &fakeQueryer{results: []*fakeRows{{rows: [][]any{{int64(1), 0.0, ts}}}}}
+	sync := &fakeQueryer{results: []*fakeRows{{rows: [][]any{
+		{int64(1), 0.0, ts, true},
+		{int64(2), 0.0, ts, false},
+	}}}}
 	got, err = (&metricSource{db: sync, interval: time.Minute}).Samples(t.Context(),
 		Rule{ID: "replica.no_sync_standby", Scope: ScopeCluster, Metric: "pg_sync_standby_count", Comparator: LT, Threshold: 1}, ts)
 	require.NoError(t, err)
-	require.Len(t, got, 1)
+	require.Len(t, got, 2)
 	require.Equal(t, 0.0, got[0].Value)
+	require.False(t, got[0].Inapplicable)
+	require.True(t, got[1].Inapplicable, "an asynchronous cluster is not missing a synchronous standby")
 	require.Contains(t, sync.calls[0].sql, "sync_state IN ('sync', 'quorum')")
+	require.Contains(t, sync.calls[0].sql, "synchronous_standby_names")
+	require.Equal(t, ts, sync.calls[0].args[1])
 }
 
 func TestMetricSource_QueryErrorsAreWrapped(t *testing.T) {

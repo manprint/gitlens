@@ -1,9 +1,10 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 
 import {
   useClusterReplication,
   useClusterSettingsDrift,
+  useClusterSlots,
   useClusterTopology,
   useClusters,
 } from '@/api/queries'
@@ -12,6 +13,7 @@ import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { EmptyState, ErrorState } from '@/components/state'
 import { useTimeRange } from '@/hooks/useTimeRange'
+import { toSlotRows } from '@/lib/replication'
 
 import { DriftSection } from './DriftSection'
 import { EventTimeline } from './EventTimeline'
@@ -59,16 +61,25 @@ export function ClusterPage({ clusterId: clusterIdOverride }: ClusterPageProps =
     to: range.to.toISOString(),
   })
   const driftQuery = useClusterSettingsDrift(clusterId)
+  const slotsQuery = useClusterSlots(clusterId)
   const redirectedForUnauthorized = useRef(false)
 
   const cluster = clustersQuery.data?.find((candidate) => candidate.cluster_id === clusterId)
+  const instances = cluster?.instances ?? EMPTY_CLUSTER_INSTANCES
+  const slotsData = slotsQuery.data
+  const slotsUpdatedAt = slotsQuery.dataUpdatedAt
+  const slots = useMemo(
+    () => (slotsData ? toSlotRows(slotsData.slots, instances, new Date(slotsUpdatedAt)) : []),
+    [instances, slotsData, slotsUpdatedAt],
+  )
   const topology = topologyQuery.data?.topology ?? []
   const events = topologyQuery.data?.events ?? []
   const unauthorized =
     clustersQuery.error?.kind === 'unauthorized' ||
     topologyQuery.error?.kind === 'unauthorized' ||
     replicationQuery.error?.kind === 'unauthorized' ||
-    driftQuery.error?.kind === 'unauthorized'
+    driftQuery.error?.kind === 'unauthorized' ||
+    slotsQuery.error?.kind === 'unauthorized'
 
   useEffect(() => {
     if (!unauthorized || redirectedForUnauthorized.current) return
@@ -121,7 +132,7 @@ export function ClusterPage({ clusterId: clusterIdOverride }: ClusterPageProps =
         </div>
       ) : null}
 
-      <TopologyGraph instances={cluster.instances ?? EMPTY_CLUSTER_INSTANCES} topology={topology} />
+      <TopologyGraph instances={instances} topology={topology} />
       {topology.length === 0 ? (
         <p role="status">No replication observed for this cluster.</p>
       ) : null}
@@ -137,11 +148,15 @@ export function ClusterPage({ clusterId: clusterIdOverride }: ClusterPageProps =
             onRetry={() => void replicationQuery.refetch()}
           />
         ) : (
-          <LagSection edges={replicationQuery.data?.edges ?? []} />
+          <LagSection edges={replicationQuery.data?.edges ?? []} instances={instances} />
         )}
       </section>
 
-      <SlotsSection />
+      <SlotsSection
+        slots={slots}
+        onRetry={() => void slotsQuery.refetch()}
+        {...(slotsQuery.error && !slotsQuery.data ? { failure: slotsQuery.error } : {})}
+      />
 
       <DriftSection
         entries={driftQuery.data ?? []}

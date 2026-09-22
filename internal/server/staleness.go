@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/manprint/pglens/internal/clock"
+	"github.com/manprint/pglens/internal/store"
 )
 
 // Staleness implements the self-monitoring staleness evaluator described in
@@ -30,6 +31,15 @@ const (
 	// one — nothing else in Staleness exposes its thresholds for override
 	// either (SYS-SLOT-001, phase_07.md#6.4).
 	slotInactiveThreshold = 30 * time.Second
+	// slotStateWindow bounds the slot rows evaluateSlots reads.
+	slotStateWindow = 5 * time.Minute
+	// events had no retention: every reset, truncation, skip and staleness
+	// transition stayed forever. The leader purges rows older than
+	// eventRetention once per eventPurgeInterval, eventPurgeBatch rows at a
+	// time, and keeps going on the next evaluation while a backlog remains.
+	eventRetention     = 90 * 24 * time.Hour
+	eventPurgeInterval = time.Hour
+	eventPurgeBatch    = 10000
 )
 
 // ---------------------------------------------------------------------------
@@ -264,6 +274,9 @@ type Staleness struct {
 	// has already been emitted for that spell of inactivity.
 	slotInactiveSince   map[string]time.Time
 	slotInactiveEmitted map[string]bool
+	// lastEventPurge/eventPurgeBacklog pace purgeEvents.
+	lastEventPurge    time.Time
+	eventPurgeBacklog bool
 
 	conn    *pgxpool.Conn
 	hasLock bool
@@ -548,6 +561,23 @@ func (s *Staleness) Evaluate(ctx context.Context) error {
 		return slotErr
 	}
 
+	return s.purgeEvents(ctx, now)
+}
+
+// purgeEvents deletes one batch of events older than eventRetention, at most
+// once per eventPurgeInterval unless the previous batch was full. Called
+// from Evaluate() with s.mu already held.
+func (s *Staleness) purgeEvents(ctx context.Context, now time.Time) error {
+	if !s.eventPurgeBacklog && !s.lastEventPurge.IsZero() && now.Sub(s.lastEventPurge) < eventPurgeInterval {
+		return nil
+	}
+	tag, err := s.pool.Exec(ctx, `DELETE FROM events WHERE event_id IN (
+		SELECT event_id FROM events WHERE ts < $1 LIMIT $2)`, now.Add(-eventRetention), eventPurgeBatch)
+	if err != nil {
+		return fmt.Errorf("purge events: %w", err)
+	}
+	s.lastEventPurge = now
+	s.eventPurgeBacklog = tag.RowsAffected() == eventPurgeBatch
 	return nil
 }
 
@@ -576,8 +606,25 @@ type slotEmission struct {
 // directly at L1 without a database, unlike the rest of this file (Staleness
 // holds a concrete *pgxpool.Pool for its advisory-lock Acquire, which rules
 // out a mock-pool L1 test for the surrounding I/O).
+//
+// A slot missing from rows (dropped, or its instance gone) loses its state:
+// it used to be kept for the life of the process.
 func decideSlotInactiveEmissions(rows []slotRow, now time.Time, since map[string]time.Time, emitted map[string]bool) []slotEmission {
 	var out []slotEmission
+	present := make(map[string]struct{}, len(rows))
+	for _, r := range rows {
+		present[r.InstanceID.String()+"/"+r.SlotName] = struct{}{}
+	}
+	for key := range since {
+		if _, ok := present[key]; !ok {
+			delete(since, key)
+		}
+	}
+	for key := range emitted {
+		if _, ok := present[key]; !ok {
+			delete(emitted, key)
+		}
+	}
 	for _, r := range rows {
 		key := r.InstanceID.String() + "/" + r.SlotName
 		if r.Active {
@@ -605,12 +652,18 @@ func decideSlotInactiveEmissions(rows []slotRow, now time.Time, since map[string
 // internal/check/replication_slots.go already populates every scrape cycle;
 // no new check or wire field was needed, only this periodic scan (SYS-SLOT-001,
 // phase_07.md#6.4). Called from Evaluate() with s.mu already held.
+//
+// Only slots reported in the last five minutes are current (the check runs
+// every 15 seconds). The query had no time bound: every 15 seconds it read
+// the whole retained hypertable, decompressing 30 days of chunks, and kept a
+// dropped slot's last state forever.
 func (s *Staleness) evaluateSlots(ctx context.Context, now time.Time) error {
 	rows, err := s.pool.Query(ctx, `
 SELECT DISTINCT ON (instance_id, slot_name) instance_id, cluster_id, slot_name, slot_active
 FROM metrics_replication
-WHERE slot_name <> '' AND slot_active IS NOT NULL
-ORDER BY instance_id, slot_name, ts DESC`)
+WHERE ts >= $1 AND slot_name <> '' AND slot_active IS NOT NULL
+  AND `+store.ReplicationSourceSQL+` = 'slot'
+ORDER BY instance_id, slot_name, ts DESC`, now.Add(-slotStateWindow))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil

@@ -322,6 +322,8 @@ func missingSnapshotInput(s *Snapshot, need string) bool {
 		return s.Siblings == nil
 	case "Baseline":
 		return s.Baseline == nil
+	case "Replication":
+		return s.Replication == nil
 	case "host":
 		return !s.Host.Available
 	case "settings":

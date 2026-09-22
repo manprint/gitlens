@@ -66,6 +66,18 @@ func (s *scopedSelectors) SetTopN(topN int) {
 	s.scope = make(map[string]*scopeState)
 }
 
+// TopN reports the per-ranking budget every selector of this check uses, so a
+// SQL-side pre-filter can be sized to never hide a candidate the selector
+// would have kept.
+func (s *scopedSelectors) TopN() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.opts.TopN <= 0 {
+		return 50 // cardinality.Options' own default
+	}
+	return s.opts.TopN
+}
+
 // next returns the selector for t's scope together with this scope's own next
 // cycle number.
 func (s *scopedSelectors) next(t Target) (*cardinality.Selector, uint64) {

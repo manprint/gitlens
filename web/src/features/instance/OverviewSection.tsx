@@ -1,14 +1,14 @@
 import { useTimeRange } from '@/hooks/useTimeRange'
-import { chooseStep } from '@/lib/timerange'
+import { chooseStep, stepMilliseconds } from '@/lib/timerange'
 import {
   cacheHitRatioSeries,
   cacheHitRatioValue,
-  counterRateSeries,
+  integrateRate,
   latestValue,
-  rangeDelta,
+  scaleSeries,
   type MetricSeriesPoint,
 } from '@/lib/metrics'
-import { formatBytes, formatCount } from '@/lib/format'
+import { formatBytes, formatCount, formatRate } from '@/lib/format'
 import { useQueryMetrics } from '@/api/queries'
 import { Section } from '@/components/layout/Section'
 import { MetricTile } from '@/components/layout/MetricTile'
@@ -25,13 +25,13 @@ interface OverviewSectionProps {
 function metricParams(
   metric: string,
   instanceId: string,
-  database: string,
+  database: string | undefined,
   from: Date,
   to: Date,
   step: string,
 ) {
   return {
-    database,
+    ...(database === undefined ? {} : { database }),
     from: from.toISOString(),
     instance_id: instanceId,
     metric,
@@ -40,6 +40,12 @@ function metricParams(
   }
 }
 
+/**
+ * Connections, checkpoints and WAL come from instance-wide checks and are
+ * stored without a database. They used to be requested with the selected
+ * database like the pg_stat_database counters, which filtered every one of
+ * their rows out: those tiles and charts were always empty.
+ */
 function useOverviewMetricQueries(
   instanceId: string,
   database: string,
@@ -47,19 +53,21 @@ function useOverviewMetricQueries(
   to: Date,
   step: string,
 ) {
-  const params = (metric: string) => metricParams(metric, instanceId, database, from, to, step)
+  const perDatabase = (metric: string) => metricParams(metric, instanceId, database, from, to, step)
+  const instanceWide = (metric: string) =>
+    metricParams(metric, instanceId, undefined, from, to, step)
 
   return {
-    blksHit: useQueryMetrics(params('pg_blks_hit_total')),
-    blksRead: useQueryMetrics(params('pg_blks_read_total')),
-    checkpointsRequested: useQueryMetrics(params('pg_checkpoints_requested_total')),
-    checkpointsTimed: useQueryMetrics(params('pg_checkpoints_timed_total')),
-    connectionsLimit: useQueryMetrics(params('pg_connections_limit')),
-    connectionsUsed: useQueryMetrics(params('pg_connections_used')),
-    deadlocks: useQueryMetrics(params('pg_deadlocks_total')),
-    tempBytes: useQueryMetrics(params('pg_temp_bytes_total')),
-    transactions: useQueryMetrics(params('pg_xact_commit_total')),
-    walPosition: useQueryMetrics(params('pg_wal_lsn_bytes')),
+    blksHit: useQueryMetrics(perDatabase('pg_blks_hit_total')),
+    blksRead: useQueryMetrics(perDatabase('pg_blks_read_total')),
+    checkpointsRequested: useQueryMetrics(instanceWide('pg_checkpoints_requested_total')),
+    checkpointsTimed: useQueryMetrics(instanceWide('pg_checkpoints_timed_total')),
+    connectionsLimit: useQueryMetrics(instanceWide('pg_connections_limit')),
+    connectionsUsed: useQueryMetrics(instanceWide('pg_connections_used')),
+    deadlocks: useQueryMetrics(perDatabase('pg_deadlocks_total')),
+    tempBytes: useQueryMetrics(perDatabase('pg_temp_bytes_total')),
+    transactions: useQueryMetrics(perDatabase('pg_xact_commit_total')),
+    walRate: useQueryMetrics(instanceWide('pg_wal_lsn_bytes')),
   }
 }
 
@@ -89,6 +97,10 @@ function formattedBytes(value: number | null): string | null {
   return value === null ? null : formatBytes(value)
 }
 
+function formattedRate(value: number | null): string | null {
+  return value === null ? null : formatRate(value)
+}
+
 interface ChartDefinition {
   ariaLabel: string
   dataTableLabel: string
@@ -101,26 +113,30 @@ interface ChartDefinition {
 export function OverviewSection({ database, instanceId }: OverviewSectionProps) {
   const { range } = useTimeRange()
   const step = chooseStep(range.from, range.to)
+  const stepSeconds = stepMilliseconds(step) / 1_000
   const queries = useOverviewMetricQueries(instanceId, database, range.from, range.to, step)
 
+  // Counters arrive as per-second rates: pg_xact_commit_total is commits per
+  // second, pg_wal_lsn_bytes is WAL bytes per second, and so on.
   const connectionsUsed = seriesFrom(queries.connectionsUsed)
   const connectionsLimit = seriesFrom(queries.connectionsLimit)
-  const transactions = seriesFrom(queries.transactions)
+  const transactionRate = seriesFrom(queries.transactions)
   const blksHit = seriesFrom(queries.blksHit)
   const blksRead = seriesFrom(queries.blksRead)
-  const checkpoints = sumSeries(
+  const checkpointRate = sumSeries(
     seriesFrom(queries.checkpointsTimed),
     seriesFrom(queries.checkpointsRequested),
   )
-  const deadlocks = seriesFrom(queries.deadlocks)
-  const tempBytes = seriesFrom(queries.tempBytes)
-  const walPosition = seriesFrom(queries.walPosition)
+  const deadlockRate = seriesFrom(queries.deadlocks)
+  const tempByteRate = seriesFrom(queries.tempBytes)
+  const walRate = seriesFrom(queries.walRate)
 
-  const transactionRate = counterRateSeries(transactions)
-  const checkpointRate = counterRateSeries(checkpoints)
+  const checkpointsPerHour = scaleSeries(checkpointRate, 3_600)
   const cacheHitRatio = cacheHitRatioSeries(blksHit, blksRead)
   const latestConnectionsLimit = latestValue(connectionsLimit)
   const latestCacheHitRatio = cacheHitRatioValue(latestValue(blksHit), latestValue(blksRead))
+  const checkpointsInRange = integrateRate(checkpointRate, stepSeconds)
+  const deadlocksInRange = integrateRate(deadlockRate, stepSeconds)
 
   const charts: readonly ChartDefinition[] = [
     {
@@ -149,39 +165,39 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
       yAxisName: 'ratio',
     },
     {
-      ariaLabel: 'WAL generated in selected range',
-      dataTableLabel: 'WAL position data',
-      name: 'WAL position',
-      series: [{ name: 'WAL position', points: walPosition }],
-      yAxisName: 'bytes',
+      ariaLabel: 'WAL generation rate',
+      dataTableLabel: 'WAL generation rate data',
+      name: 'WAL generation',
+      series: [{ name: 'WAL bytes per second', points: walRate }],
+      yAxisName: 'bytes per second',
     },
     {
       ariaLabel: 'Checkpoint frequency',
       dataTableLabel: 'Checkpoint frequency data',
       name: 'Checkpoint frequency',
-      series: [{ name: 'Checkpoints per second', points: checkpointRate }],
-      yAxisName: 'per second',
+      series: [{ name: 'Checkpoints per hour', points: checkpointsPerHour }],
+      yAxisName: 'per hour',
     },
     {
       ariaLabel: 'Temporary bytes',
       dataTableLabel: 'Temporary bytes data',
       name: 'Temporary bytes',
-      series: [{ name: 'Temporary bytes', points: tempBytes }],
-      yAxisName: 'bytes',
+      series: [{ name: 'Temporary bytes per second', points: tempByteRate }],
+      yAxisName: 'bytes per second',
     },
     {
       ariaLabel: 'Deadlocks',
       dataTableLabel: 'Deadlocks data',
       name: 'Deadlocks',
-      series: [{ name: 'Deadlocks', points: deadlocks }],
-      yAxisName: 'count',
+      series: [{ name: 'Deadlocks per second', points: deadlockRate }],
+      yAxisName: 'per second',
     },
   ]
 
   return (
     <Section
       title="Instance overview"
-      description={`Database ${database} · selected range step ${step}. Null buckets remain gaps; reset markers identify counter resets.`}
+      description={`Transactions, cache hit ratio, temporary bytes and deadlocks are for database ${database}; connections, WAL and checkpoints are instance-wide. Selected range step ${step}. Null buckets remain gaps; reset markers identify counter resets.`}
     >
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricTile
@@ -196,26 +212,25 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
         />
         <MetricTile
           label="Transactions per second"
-          unit="per second"
-          value={latestValue(transactionRate)}
+          value={formattedRate(latestValue(transactionRate))}
         />
         <MetricTile label="Cache hit ratio" value={latestCacheHitRatio} />
         <MetricTile
           label="WAL generated in range"
-          unit="bytes"
-          value={formattedBytes(rangeDelta(walPosition))}
+          value={formattedBytes(integrateRate(walRate, stepSeconds))}
         />
         <MetricTile
-          label="Checkpoint frequency"
-          unit="per second"
-          value={latestValue(checkpointRate)}
+          label="Checkpoints in range"
+          value={checkpointsInRange === null ? null : formatCount(Math.round(checkpointsInRange))}
         />
         <MetricTile
-          label="Temporary bytes"
-          unit="bytes"
-          value={formattedBytes(rangeDelta(tempBytes))}
+          label="Temporary bytes in range"
+          value={formattedBytes(integrateRate(tempByteRate, stepSeconds))}
         />
-        <MetricTile label="Deadlocks" value={formattedCount(rangeDelta(deadlocks))} />
+        <MetricTile
+          label="Deadlocks in range"
+          value={deadlocksInRange === null ? null : formatCount(Math.round(deadlocksInRange))}
+        />
       </div>
 
       <div className="grid gap-8 xl:grid-cols-2">

@@ -27,8 +27,6 @@ type replicationReceiverRow struct {
 	SenderHost   string
 	SenderPort   int
 	SlotName     string
-	ReceiveLSN   string
-	ReplayLSN    string
 	ReplayLagSec *float64
 }
 
@@ -43,13 +41,15 @@ func (c *replicationReceiverCheck) Scrape(ctx context.Context, t Target) (Result
 		return Result{}, err
 	}
 
+	// pg_last_wal_receive_lsn() is NULL on a standby that restores from the
+	// archive only, or before streaming ever started. Its text form used to
+	// be scanned into a string (and never used), which failed every scrape
+	// of exactly the standbys whose lag matters most.
 	rows, err := conn.Query(ctx, `
 SELECT COALESCE(w.status, 'disconnected')      AS status,
        COALESCE(w.sender_host, '')             AS sender_host,
        COALESCE(w.sender_port, 0)              AS sender_port,
        COALESCE(w.slot_name, '')               AS slot_name,
-       pg_last_wal_receive_lsn()::text         AS receive_lsn,
-       pg_last_wal_replay_lsn()::text          AS replay_lsn,
        CASE
          WHEN pg_last_wal_receive_lsn() = pg_last_wal_replay_lsn() THEN 0
          ELSE EXTRACT(epoch FROM now() - pg_last_xact_replay_timestamp())
@@ -70,8 +70,6 @@ LEFT JOIN pg_stat_wal_receiver w ON true
 			&row.SenderHost,
 			&row.SenderPort,
 			&row.SlotName,
-			&row.ReceiveLSN,
-			&row.ReplayLSN,
 			&row.ReplayLagSec,
 		); err != nil {
 			return Result{}, err

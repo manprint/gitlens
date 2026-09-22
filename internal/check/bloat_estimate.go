@@ -30,6 +30,10 @@ func (c *bloatEstimateCheck) Requires() Requirements {
 }
 func (c *bloatEstimateCheck) DefaultInterval() time.Duration { return 6 * time.Hour }
 func (c *bloatEstimateCheck) Timeout() time.Duration         { return 120 * time.Second }
+
+// SetTopN applies checks.bloat_estimate.top_n. The check did not implement
+// TopNConfigurable, so the documented key was accepted and silently ignored.
+func (c *bloatEstimateCheck) SetTopN(topN int) { c.selectors.SetTopN(topN) }
 func (c *bloatEstimateCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 	conn, e := t.ConnFor(ctx, t.Database())
 	if e != nil {
@@ -72,9 +76,9 @@ func (c *bloatEstimateCheck) Scrape(ctx context.Context, t Target) (Result, erro
 	selector, cycle := c.selectors.next(t)
 	sel, tr := selector.Select(cycle, cand)
 	selector.Forget(cycle)
-	tr = tr || len(sel) < len(cand)
 	res := bloatResult(sel, by)
 	res.Truncated = tr
+	res.Partial = len(sel) < len(cand)
 	return res, nil
 }
 func bloatResult(sel []cardinality.Candidate, rows map[string]bloatRow) Result {

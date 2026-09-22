@@ -66,6 +66,45 @@ describe('QueryListPage', () => {
     expect(screen.getByRole('combobox', { name: 'Sort statements' })).toHaveValue('mean_exec_time')
   })
 
+  it('UI-QRY-015 ranks by temporary blocks and WAL and shows the WAL written', async () => {
+    const orderBys: string[] = []
+    server.use(
+      http.get('*/api/v1/statements', ({ request }) => {
+        orderBys.push(new URL(request.url).searchParams.get('order_by') ?? '')
+        return HttpResponse.json(
+          statementResponse({
+            statements: [
+              {
+                calls: 4,
+                datname: 'postgres',
+                query_text: 'INSERT INTO audit SELECT * FROM staging',
+                queryid: 7,
+                wal_bytes: 3 * 1024 * 1024,
+                temp_blks_written: 1024,
+                truncated: false,
+              },
+            ],
+          }),
+        )
+      }),
+    )
+
+    renderPage(`/instances/${INSTANCE_ID}/queries?range=1h&sort=temp_blks_written`)
+    await settle()
+    expect(orderBys).toContain('temp_blks_written')
+    expect(screen.getByRole('combobox', { name: 'Sort statements' })).toHaveValue(
+      'temp_blks_written',
+    )
+    expect(screen.getByText('3.0 MiB')).toBeInTheDocument()
+    expect(screen.getByText('2.0 MiB')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Sort statements' }), {
+      target: { value: 'wal_bytes' },
+    })
+    await settle()
+    expect(orderBys).toContain('wal_bytes')
+  })
+
   it('UI-QRY-011 shows the configured truncation budget', async () => {
     server.use(
       statementsHandler(
@@ -92,6 +131,45 @@ describe('QueryListPage', () => {
     expect(screen.getByRole('link', { name: /README extension guidance/i })).toHaveAttribute(
       'href',
       '/README.md#agent-configuration',
+    )
+  })
+
+  it('UI-QRY-046 says why the agent skips the check when nothing was collected', async () => {
+    server.use(
+      statementsHandler(
+        statementResponse({
+          disabled: true,
+          disabled_reason: 'missing extension pg_stat_statements',
+          statements: [],
+        }),
+      ),
+    )
+
+    renderPage()
+
+    await settle()
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'pg_stat_statements disabled. The agent skips the stat_statements check: missing extension pg_stat_statements.',
+    )
+    expect(screen.queryByText(/configuration key/)).not.toBeInTheDocument()
+  })
+
+  it('UI-QRY-047 keeps statements collected before the check was skipped', async () => {
+    server.use(
+      statementsHandler(
+        statementResponse({
+          disabled: true,
+          disabled_reason: 'missing extension pg_stat_statements',
+        }),
+      ),
+    )
+
+    renderPage()
+
+    await settle()
+    expect(screen.getByRole('link', { name: 'Query 123' })).toBeInTheDocument()
+    expect(screen.getByText(/The statements below were collected earlier/)).toHaveTextContent(
+      'The agent skips the stat_statements check: missing extension pg_stat_statements. The statements below were collected earlier.',
     )
   })
 

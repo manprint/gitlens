@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -63,6 +64,7 @@ type mockCheck struct {
 	scrapedDBs []string         // t.Database() as seen by each Scrape call, in order
 	queryTexts map[int64]string // returned verbatim in check.Result.QueryTexts, if set
 	statsReset *time.Time       // returned verbatim in check.Result.StatsReset, if set
+	partial    bool             // returned verbatim in check.Result.Partial
 	mu         sync.Mutex
 }
 
@@ -83,7 +85,7 @@ func (m *mockCheck) Scrape(ctx context.Context, t check.Target) (check.Result, e
 	defer m.mu.Unlock()
 	m.callCnt++
 	m.scrapedDBs = append(m.scrapedDBs, t.Database())
-	return check.Result{QueryTexts: m.queryTexts, StatsReset: m.statsReset}, nil
+	return check.Result{QueryTexts: m.queryTexts, StatsReset: m.statsReset, Partial: m.partial}, nil
 }
 
 // TestScheduler_RunsAtInterval tests that a check runs at its scheduled interval
@@ -273,6 +275,31 @@ func TestScheduler_PropagatesStatsReset(t *testing.T) {
 		t.Fatal("timeout waiting for a run")
 	}
 	s.Stop()
+}
+
+// TestScheduler_PropagatesPartial keeps a deliberate top-N subset
+// distinguishable from a complete result all the way to the wire.
+func TestScheduler_PropagatesPartial(t *testing.T) {
+	s := NewScheduler(ScheduleOptions{
+		MaxWorkers: 1, NoJitter: true, Clock: clock.System(), ShutdownTimeout: 5 * time.Second,
+	})
+	mc := &mockCheck{name: "table_stats", interval: 50 * time.Millisecond, timeout: 50 * time.Millisecond, partial: true}
+	s.AddEntry(&mockTarget{name: "pg", conn: &mockConn{}}, mc, "postgres")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+	select {
+	case res := <-s.Results():
+		if !res.Partial || res.Truncated {
+			t.Fatalf("partial=%v truncated=%v, want partial only", res.Partial, res.Truncated)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for a run")
+	}
 }
 
 // TestScheduler_JitterWithinBounds tests that jitter and no-jitter modes work
@@ -488,4 +515,64 @@ collect:
 	if runCount < 1 {
 		t.Errorf("expected at least 1 run, got %d", runCount)
 	}
+}
+
+// TestScheduler_BreakerIsPerEntry proves one failing target cannot open the
+// circuit for the same check on a healthy target. The breaker used to be
+// keyed by check name alone, so three failures against an unreachable
+// instance silenced that check fleet-wide for the whole backoff.
+func TestScheduler_BreakerIsPerEntry(t *testing.T) {
+	s := NewScheduler(ScheduleOptions{
+		MaxWorkers: 2, NoJitter: true, Clock: clock.System(), ShutdownTimeout: 5 * time.Second,
+	})
+	failing := &failingCheck{name: "shared_check"}
+	healthy := &mockCheck{name: "shared_check", interval: 10 * time.Millisecond, timeout: time.Second}
+	s.AddEntry(&mockTarget{name: "down", conn: &mockConn{}}, failing, "")
+	s.AddEntry(&mockTarget{name: "up", conn: &mockConn{}}, healthy, "")
+
+	keys := map[breakerKey]bool{}
+	for k := range s.breaker {
+		keys[k] = true
+	}
+	if len(keys) != 2 {
+		t.Fatalf("breakers = %v, want one per entry", keys)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	upResults := 0
+	deadline := time.After(3 * time.Second)
+	for upResults < 10 {
+		select {
+		case r := <-s.Results():
+			if r.Entry.TargetName == "up" {
+				if r.Err != nil {
+					t.Fatalf("healthy target reported %v", r.Err)
+				}
+				upResults++
+			}
+		case <-deadline:
+			t.Fatalf("healthy target produced %d results; its breaker was opened by the failing target", upResults)
+		}
+	}
+	if s.breaker[breakerKey{target: "up", check: "shared_check"}].Allow() != true {
+		t.Fatal("healthy target's breaker is open")
+	}
+}
+
+type failingCheck struct {
+	name string
+}
+
+func (f *failingCheck) Name() string                   { return f.name }
+func (f *failingCheck) Requires() check.Requirements   { return check.Requirements{} }
+func (f *failingCheck) DefaultInterval() time.Duration { return 10 * time.Millisecond }
+func (f *failingCheck) Timeout() time.Duration         { return time.Second }
+func (f *failingCheck) Scrape(context.Context, check.Target) (check.Result, error) {
+	return check.Result{}, errors.New("connection refused")
 }

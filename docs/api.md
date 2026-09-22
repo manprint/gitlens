@@ -9,6 +9,7 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | GET | `/api/v1/clusters` | `getClusters` | List monitored clusters. |
 | GET | `/api/v1/clusters/{id}/replication` | `getClusterReplication` | Return replication lag series for a cluster. |
 | GET | `/api/v1/clusters/{id}/settings-drift` | `getClusterSettingsDrift` | Return settings that differ between instances in a cluster. |
+| GET | `/api/v1/clusters/{id}/slots` | `getClusterSlots` | Return the current state of every replication slot in a cluster. |
 | GET | `/api/v1/clusters/{id}/topology` | `getClusterTopology` | Return the replication topology and failover events for a cluster. |
 
 ## instances

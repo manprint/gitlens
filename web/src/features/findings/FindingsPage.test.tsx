@@ -448,6 +448,32 @@ describe('FindingsPage', () => {
     view.unmount()
   })
 
+  it('UI-FIND-026 names each card by its title when the finding id holds spaces', async () => {
+    await renderFindings([
+      finding({
+        finding_id: 'table.bloat_high/my app/public.order items',
+        title: 'Table bloat on order items',
+      }),
+    ])
+
+    expect(screen.getByRole('article', { name: 'Table bloat on order items' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Evidence' })).toBeInTheDocument()
+  })
+
+  it('UI-FIND-027 warns when the server limit cut the findings', async () => {
+    await renderFindings(
+      Array.from({ length: 1000 }, (_, index) => finding({ finding_id: `finding-${index}` })),
+    )
+
+    expect(screen.getByText(/Only the first 1000 findings were returned/)).toBeInTheDocument()
+  })
+
+  it('does not warn about a limit the findings did not reach', async () => {
+    await renderFindings()
+
+    expect(screen.queryByText(/Only the first 1000 findings were returned/)).not.toBeInTheDocument()
+  })
+
   it('has no serious or critical accessibility violations with a populated list', async () => {
     const view = await renderFindings([
       finding({ finding_id: 'one', title: 'Critical finding', severity: 'critical' }),

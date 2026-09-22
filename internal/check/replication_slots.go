@@ -27,7 +27,7 @@ type replicationSlotsRow struct {
 	Active        bool
 	ActivePID     int
 	WALStatus     string
-	SafeWALSize   int64
+	SafeWALSize   *int64
 	RetainedBytes int64
 }
 
@@ -48,7 +48,7 @@ SELECT slot_name,
        active,
        COALESCE(active_pid, 0)                    AS active_pid,
        COALESCE(wal_status, 'unknown')           AS wal_status,
-       COALESCE(safe_wal_size, 0)                AS safe_wal_size,
+       safe_wal_size,
        COALESCE(pg_wal_lsn_diff(
          CASE WHEN pg_is_in_recovery()
               THEN pg_last_wal_replay_lsn()
@@ -99,12 +99,17 @@ FROM pg_replication_slots
 			Kind:   pgtype.KindGauge,
 			Labels: labels,
 		})
-		metrics = append(metrics, pgtype.Metric{
-			Name:   "replication_slot_safe_wal_size_bytes",
-			Value:  float64(row.SafeWALSize),
-			Kind:   pgtype.KindGauge,
-			Labels: labels,
-		})
+		// safe_wal_size is NULL when max_slot_wal_keep_size is -1 (no
+		// limit) and for a slot already lost. It used to be reported as 0,
+		// which reads as "no margin left" for the healthiest configuration.
+		if row.SafeWALSize != nil {
+			metrics = append(metrics, pgtype.Metric{
+				Name:   "replication_slot_safe_wal_size_bytes",
+				Value:  float64(*row.SafeWALSize),
+				Kind:   pgtype.KindGauge,
+				Labels: labels,
+			})
+		}
 		metrics = append(metrics, pgtype.Metric{
 			Name:   "replication_slot_retained_bytes",
 			Value:  float64(row.RetainedBytes),

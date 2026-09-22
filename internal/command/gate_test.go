@@ -10,7 +10,7 @@ import (
 
 func TestAllowed_ExhaustiveGateMatrix(t *testing.T) {
 	type bools struct {
-		explain, signal, extension bool
+		explain, signal bool
 	}
 	tiers := []pgtype.PermTier{pgtype.TierReadOnly, pgtype.TierExplain, pgtype.TierSignal, pgtype.TierExtension}
 	scenarios := []struct {
@@ -24,14 +24,10 @@ func TestAllowed_ExhaustiveGateMatrix(t *testing.T) {
 	for _, scenario := range scenarios {
 		for _, tier := range tiers {
 			for _, flags := range []bools{
-				{false, false, false}, {false, false, true},
-				{false, true, false}, {false, true, true},
-				{true, false, false}, {true, false, true},
-				{true, true, false}, {true, true, true},
+				{false, false}, {false, true}, {true, false}, {true, true},
 			} {
 				ok, reason := Allowed(scenario.kind, Args{Analyze: scenario.analyze}, Gates{
-					Tier: tier, AllowExplainAnalyze: flags.explain,
-					AllowSignal: flags.signal, HasPgstattuple: flags.extension,
+					Tier: tier, AllowExplainAnalyze: flags.explain, AllowSignal: flags.signal,
 				})
 				if ok {
 					allowed++
@@ -42,9 +38,9 @@ func TestAllowed_ExhaustiveGateMatrix(t *testing.T) {
 			}
 		}
 	}
-	// explain: 24 non-analyze + 12 analyze; cancel and terminate: 8 each;
-	// pgstattuple: 12.
-	require.Equal(t, 64, allowed)
+	// explain: 12 non-analyze + 6 analyze; cancel and terminate: 4 each;
+	// pgstattuple: 12 (its extension is the executor's check).
+	require.Equal(t, 38, allowed)
 }
 
 func TestValidate_ExplainRequiresQueryID(t *testing.T) {
@@ -127,7 +123,7 @@ func TestAllowed_ReasonNamesTheClosedGate(t *testing.T) {
 		{"analyze flag", KindExplain, Args{Analyze: true}, Gates{Tier: pgtype.TierExplain}, "EXPLAIN ANALYZE"},
 		{"tier signal", KindCancel, Args{}, Gates{Tier: pgtype.TierExplain}, "T2"},
 		{"signal flag", KindTerminate, Args{}, Gates{Tier: pgtype.TierSignal}, "signal"},
-		{"extension flag", KindPgstattuple, Args{}, Gates{Tier: pgtype.TierExplain}, "pgstattuple"},
+		{"tier pgstattuple", KindPgstattuple, Args{}, Gates{Tier: pgtype.TierReadOnly}, "T1"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

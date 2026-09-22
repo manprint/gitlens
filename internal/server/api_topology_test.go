@@ -105,6 +105,8 @@ func TestTopologyAPI_HandleTopology_MockPool_EdgesAndEvents(t *testing.T) {
 				{from1.String(), to1.String(), "streaming", "async", "high"},
 				{from2.String(), to2.String(), "streaming", nil, "low"},
 			}},
+			{}, {}, {}, // standby resolver: instances, edges, standby names
+			{}, // current sync states
 			{rows: [][]any{
 				{int64(1), time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), "failover_detected", instID.String(), []byte(`{"reason":"promote"}`)},
 			}},
@@ -125,7 +127,7 @@ func TestTopologyAPI_HandleTopology_MockPool_EdgesAndEvents(t *testing.T) {
 	require.Equal(t, "async", *resp.Topology[0].SyncState)
 	require.Nil(t, resp.Topology[0].Note)
 	require.Nil(t, resp.Topology[1].SyncState)
-	require.NotNil(t, resp.Topology[1].Note, "a low-confidence edge must carry the resolvability note")
+	require.NotNil(t, resp.Topology[1].Note, "a low-confidence edge must carry the not-streaming note")
 
 	require.Len(t, resp.Events, 1)
 	require.Equal(t, "failover_detected", resp.Events[0].Type)
@@ -163,18 +165,23 @@ func TestTopologyAPI_HandleTopology_QueryEventsError(t *testing.T) {
 }
 
 // TestTopologyAPI_HandleReplication_MockPool_ExpandsPerMetric proves one
-// metrics_replication row expands into 3 edges (write/flush/replay), each
-// with a null gap for the lag values that weren't reported, and that a row
-// with no upstream_id is skipped rather than crashing.
+// receiver row expands into 3 edges (write/flush/replay), each with a null gap
+// for the lag values that weren't reported, and that a receiver row with no
+// upstream_id is skipped rather than crashing.
 func TestTopologyAPI_HandleReplication_MockPool_ExpandsPerMetric(t *testing.T) {
 	from, to := uuid.New(), uuid.New()
 	ts := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 
 	pool := &mockPool{
-		queryResults: []*mockRows{{rows: [][]any{
-			{from.String(), to.String(), "async", ts, nil, nil, 50.0},
-			{from.String(), nil, nil, ts, nil, nil, nil}, // no upstream: must be skipped, not crash
-		}}},
+		queryResults: []*mockRows{
+			{}, // instances
+			{}, // topology edges
+			{}, // standby names reported by primaries
+			{rows: [][]any{
+				{from.String(), &to, "", "receiver", nil, ts, nil, nil, 50.0},
+				{from.String(), nil, "", "receiver", nil, ts, nil, nil, nil}, // no upstream: must be skipped, not crash
+			}},
+		},
 	}
 	topo := &TopologyAPI{pool: pool}
 	r := chi.NewRouter()
@@ -184,7 +191,7 @@ func TestTopologyAPI_HandleReplication_MockPool_ExpandsPerMetric(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var resp replicationResp
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Len(t, resp.Edges, 3)
@@ -200,6 +207,55 @@ func TestTopologyAPI_HandleReplication_MockPool_ExpandsPerMetric(t *testing.T) {
 	require.Nil(t, byMetric["write_lag_sec"].Series[0].Value)
 	require.Nil(t, byMetric["flush_lag_sec"].Series[0].Value)
 }
+
+// TestTopologyAPI_HandleReplication_PrimaryRowsAreEdges: the primary's rows
+// (pg_stat_replication) carry no upstream_id and used to be skipped, taking
+// write/flush lag and sync_state with them. They are resolved to the standby
+// by its agent target name, and replace the standby's own estimate of the
+// same edge; an unresolvable standby keeps its application_name.
+func TestTopologyAPI_HandleReplication_PrimaryRowsAreEdges(t *testing.T) {
+	primary, standby := uuid.New(), uuid.New()
+	ts := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	pool := &mockPool{
+		queryResults: []*mockRows{
+			{rows: [][]any{{primary.String(), "pg-primary"}, {standby.String(), "pg-standby-a"}}},
+			{rows: [][]any{{standby.String(), primary.String()}}},
+			{rows: [][]any{{primary.String(), "pg-standby-a"}, {primary.String(), "reporting"}}},
+			{rows: [][]any{
+				{standby.String(), &primary, "", "receiver", nil, ts, nil, nil, 9.0},
+				{primary.String(), nil, "pg-standby-a", "sender", strPtr("sync"), ts, 1.0, 2.0, 3.0},
+				{primary.String(), nil, "reporting", "sender", strPtr("async"), ts, 4.0, 5.0, 6.0},
+				{primary.String(), nil, "slot_a", "slot", nil, ts, nil, nil, nil},
+			}},
+		},
+	}
+	topo := &TopologyAPI{pool: pool}
+	r := chi.NewRouter()
+	topo.RegisterRoutes(r)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet,
+		"/api/v1/clusters/123/replication?from=2026-01-01T00:00:00Z&to=2026-01-02T00:00:00Z", http.NoBody))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp replicationResp
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Edges, 6, "two standbys x three metrics; the receiver duplicate and the slot are not edges")
+	values := map[string]float64{}
+	for _, e := range resp.Edges {
+		require.Equal(t, primary.String(), e.To)
+		require.NotNil(t, e.SyncState)
+		values[e.From+"/"+e.Metric+"/"+*e.SyncState] = *e.Series[0].Value
+	}
+	require.Equal(t, map[string]float64{
+		standby.String() + "/write_lag_sec/sync":  1,
+		standby.String() + "/flush_lag_sec/sync":  2,
+		standby.String() + "/replay_lag_sec/sync": 3,
+		"reporting/write_lag_sec/async":           4,
+		"reporting/flush_lag_sec/async":           5,
+		"reporting/replay_lag_sec/async":          6,
+	}, values)
+}
+
+func strPtr(s string) *string { return &s }
 
 // TestTopologyAPI_HandleReplication_QueryError exercises the metrics-query
 // error branch.

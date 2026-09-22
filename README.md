@@ -146,7 +146,7 @@ Output from `/api/v1/clusters` (first cluster):
 }
 ```
 
-The agent discovers its databases, respects the connection ceiling (default 3 per instance), buffers through outages, and reports on `localhost:8080`. See Running the agent and Agent configuration below.
+The agent discovers its databases, bounds its connections, buffers through outages, and reports on `localhost:8080`. Per instance it opens at most 4 connections to the DSN's own database (the ASH sampler's dedicated one, plus up to 3 for the shared connection and the instance-wide checks) and at most 2 to each monitored database (10 databases by default), which close after 5 idle minutes. Every connection is read-only: see [Security and operational boundaries](#on-demand-operations). See Running the agent and Agent configuration below.
 
 ## Setting up the monitoring role
 
@@ -228,7 +228,14 @@ lag is shown as `Unknown`, never as zero.
 
 Cluster Detail brings together topology, replication lag, slot health,
 configuration drift, and the event timeline. A failover keeps the same
-`cluster_id`, so the cluster remains one continuous story.
+`cluster_id`, so the cluster remains one continuous story. Lag charts name each
+end of an edge by its monitored instance's address, and a standby that is not
+monitored by the `application_name` its primary reports. The slot table lists
+every replication slot the cluster's instances report (latest reading of each):
+its owner, type, activity, WAL status, retained WAL, the WAL it can still
+retain before `max_slot_wal_keep_size` invalidates it (`Unlimited` when no
+limit is set, and none for a slot whose WAL status is already `lost`), and how
+long an inactive slot has been idle.
 
 #### Instance
 
@@ -237,18 +244,45 @@ visible. It labels measured, stale, unavailable, and truncated data; shows
 counter-reset gaps, host-metric availability, pending settings restarts,
 redacted `archive_command` values, and relation-budget notices.
 
+The overview mixes two scopes, and says which is which. Transactions, cache
+hits, temporary bytes and deadlocks are per database (the selected one);
+connections, checkpoints and WAL are instance-wide and ignore the database
+selector. Counters are stored as per-second rates, so a tile such as "WAL
+generated in range" integrates the rate over the range rather than
+differencing raw counters.
+
+The relation tables show, per database, live and dead tuples, size, sequential
+and index scans per second, and the latest vacuum and analyze (whichever of
+the manual or automatic one is newer, labelled as such). Their budgets are the
+`checks.table_stats.top_n`, `checks.index_stats.top_n` and
+`checks.bloat_estimate.top_n` agent keys. Bloat rows are statistical estimates
+of tables; at T1 a table row offers **Measure exactly**, which queues a
+`pgstattuple` command: the agent measures the table inside a read-only
+transaction bounded to 50 seconds, and the result is stored as a bloat row
+with method `pgstattuple`. The `pgstattuple` extension must already be
+installed in that database; pglens never installs it, and the agent rejects
+the command when it is missing.
+
 #### Wait-event analysis
 
 The Wait-event analysis page charts sampled activity and supports drill-down
-from wait-event type to wait event and query. It reports under-sampling, a
-disabled ASH check, missing query attribution, and the `other` aggregate
-explicitly.
+from wait-event type to wait event and query. Each drill-down level is
+filtered by the server, and the top-query list under a wait event ranks the
+queries seen in that wait event only. It reports under-sampling, a disabled
+ASH check, missing query attribution, and the `other` aggregate explicitly; a
+bucket with no sample is drawn as a gap, never as zero.
 
 #### Queries
 
-Query Inspector lists statements collected by `pg_stat_statements`. Operators
-can request a plan-only `EXPLAIN` at T1; `EXPLAIN ANALYZE` requires confirmation,
-T2, and the target's `allow_explain_analyze` policy. Plan history contains only
+Query Inspector lists statements collected by `pg_stat_statements`, ranked by
+total or mean time, calls, rows, shared blocks read, temporary blocks written
+or WAL bytes. When the agent skips the check (no view it can read; see
+[Troubleshooting](#troubleshooting)), the page says so with the agent's
+reason and still lists statements collected earlier. Operators can request a
+plan-only `EXPLAIN` at T1; the interface offers `EXPLAIN ANALYZE` at T2, after
+confirmation, and the agent still requires the target's
+`allow_explain_analyze` policy (see
+[On-demand operations](#on-demand-operations)). Plan history contains only
 explicit requests and comparisons stay within one cluster.
 
 #### Locks and activity
@@ -274,9 +308,12 @@ generic webhooks.
 #### Settings
 
 Settings lists instances and databases, summarizes permission tiers and
-available actions, and exposes the command audit. The audit records requests,
-arguments, outcomes, timing, expiry, or rejection; it does not identify an
-operator.
+available actions, and exposes the command audit. The audit has one entry per
+event of a command — its request, its result (`ok`, `error` or `rejected`) or
+its expiry — with the arguments, the time and any detail. `requested_by` names
+the credential that asked (`api-token`, or `ui-session` with a short hash of
+the session) and the client address; it does not identify a person, since
+pglens has no user accounts.
 
 The selected time range is reflected in the URL, so a view can be shared as a
 link. Keyboard shortcuts are available for the main destinations and filters:
@@ -320,8 +357,9 @@ The bootstrap token is a shared secret; this release has no token rotation, no m
 On-demand commands use a pull channel: the server queues a command and the
 agent polls for work. The server never opens an inbound PostgreSQL connection
 to an agent target. Supported commands are `explain`, `cancel`, `terminate`,
-and `pgstattuple`; every request, claim, result, expiry, rejection, and error
-is recorded in the command audit stream.
+and `pgstattuple`; every request, result, rejection, error and expiry is
+recorded in the command audit stream, with the credential that requested the
+command. A claim is visible in the command's state, not in the audit.
 
 The pull channel is available by default, but each target is deny-by-default
 for mutating or potentially expensive operations:
@@ -345,26 +383,50 @@ curl -s -b cookies.txt "http://localhost:8080/api/v1/plans?instance_id=$INSTANCE
 curl -s -b cookies.txt "http://localhost:8080/api/v1/instances/$INSTANCE_ID/command-audit" | jq .
 ```
 
-`explain` resolves the query through `pg_stat_statements`. Plan-only
-`EXPLAIN` requires permission tier T1; `EXPLAIN ANALYZE` additionally
-requires T2, `allow_explain_analyze: true` for the target, and explicit
-confirmation in the web interface. ANALYZE runs inside a transaction that is
-rolled back afterward, but it still consumes database resources and may
-observe locks or invoke PostgreSQL-permitted side effects.
+`explain` resolves the query through `pg_stat_statements`, in the database
+named by `datname` (the statement recorded there, never another database's
+text with the same `queryid`); when that database has no view, the text is
+read through the database the agent reads statements through, and the plan is
+still made in `datname`. Plan-only `EXPLAIN` requires permission tier
+T1. `pg_stat_statements` replaces constants with `$n` placeholders, so a
+normalised statement is planned with `GENERIC_PLAN`, which needs PostgreSQL 16
+or later; on PostgreSQL 15 such a statement is rejected with that reason.
+`EXPLAIN ANALYZE` executes the statement: the agent accepts it at T1 only
+when the target sets `allow_explain_analyze: true`, only for a read-only
+statement (`SELECT`, `VALUES`, `WITH`, `TABLE`) without placeholders, and runs
+it inside a `READ ONLY` transaction that is rolled back, bounded to 30 seconds
+(15 seconds for plan-only). The web interface additionally offers ANALYZE
+only at T2 and after explicit confirmation.
 `cancel` and `terminate` require T2 and `allow_signal: true`, and only target
-client backends. `pgstattuple` requires the `pgstattuple` extension to already
-be installed and a permitted relation; pglens never installs extensions.
-Command results are immutable, and expired commands reject late results.
+client backends. `pgstattuple` requires T1 and the `pgstattuple` extension
+already installed in the relation's database; it runs inside a `READ ONLY`
+transaction bounded to 50 seconds, and the server files the result as that
+table's bloat measurement (method `pgstattuple`). pglens never installs
+extensions. Command results are immutable, and expired commands reject late
+results.
 
 Security and operational boundaries:
 
-- With `commands.enabled: false` the agent remains strictly read-only; it
-  does not poll or execute on-demand commands.
+- pglens never writes to a monitored database. Every connection the agent
+  opens sets `default_transaction_read_only = on` before first use, so every
+  transaction — from a check, from ASH or from a command — starts read-only
+  and PostgreSQL itself refuses `INSERT`/`UPDATE`/`DELETE`, DDL and
+  `nextval()`. The checks read catalog views and statistics functions covered
+  by `pg_monitor` (for example `pg_ls_archive_statusdir()` for the archiver's
+  backlog); `explain` and `pgstattuple` additionally open an explicit
+  `READ ONLY` transaction and roll it back. The agent sets only session
+  parameters (`application_name`, `statement_timeout`, `lock_timeout`,
+  `idle_in_transaction_session_timeout`).
+- With `commands.enabled: false` the agent does not poll or execute on-demand
+  commands at all.
 - The server validates authentication, envelope shape, command state and expiry;
   the agent is authoritative for capability, target-policy and execution gates.
-- `EXPLAIN ANALYZE` executes the selected statement inside a transaction that
-  is rolled back, but it still consumes database resources and can observe
-  locks or invoke side effects that PostgreSQL permits during execution.
+- `EXPLAIN ANALYZE` executes the selected statement. The read-only transaction
+  stops it from changing data, but it still consumes database resources, takes
+  locks, and runs the functions the statement calls; effects outside the
+  transaction (a `dblink` call, a signal sent by `pg_cancel_backend()` when the
+  role holds `pg_signal_backend`) are not undone. Keep
+  `allow_explain_analyze: false` unless this is acceptable for the target.
 - Query text is never sent in a command payload. Plan history stores only
   explicitly requested plans, using a normalized query hash and JSON plan;
   placeholders may prevent a useful plan for parameter-sensitive statements.
@@ -392,6 +454,15 @@ cluster's standbys, not per standby: `replica.all_standbys_lagging` compares
 the *smallest* replay lag among them (so it fires only when every standby is
 above the threshold), and `replica.no_sync_standby` counts the standbys whose
 `sync_state` is `sync` or `quorum`. Each opens one alert per cluster.
+`replica.no_sync_standby` applies only to a cluster whose primary sets
+`synchronous_standby_names`; an asynchronous cluster is not evaluated, and a
+synchronous primary that has lost every standby fires with a count of zero.
+
+The per-instance replication rules (`replica.lag_high`) are evaluated per
+standby: each standby a primary reports is a separate alert, labelled with its
+name, so one lagging standby cannot hide behind a healthy one. `agent_down`
+skips instances whose agent was revoked: a revoked agent stops pushing by
+design.
 
 Configure Slack or a generic webhook with the variables above. A silence suppresses notification while the alert remains visible and continues to be evaluated.
 
@@ -468,6 +539,47 @@ Findings are based on collected statistics, while index recommendations remain
 candidates for review. The Advisor page described above exposes the same ranked
 results and their freshness state.
 
+A finding's ID is `<rule>/<subject>`: the subject is `<database>/<object>` for
+a finding about an object in a database (for example
+`table.bloat_high/app/public.orders` or `query.slow_mean/app/queryid:42`),
+the database alone, or the instance or cluster the finding is about. Escape
+the slashes (`%2F`) when you put an ID in a URL path. The listing returns open
+and degraded findings first, then by severity and recency, so a `limit` cuts
+muted and resolved findings first; resolved findings are kept for 90 days.
+
+How the rules read the collected data:
+
+- The statement rules (`query.*`) total each statement's calls, time and
+  blocks over the last 15 minutes. `query.regression` compares its mean with
+  the median mean of the previous week.
+- `txn.high_rollback_ratio` is evaluated per database: the share of that
+  database's transactions rolled back since its statistics were reset.
+- `index.unused` waits for seven days of history of the index and uses its
+  peak scan rate over the whole stored history, so an index that was merely
+  idle for a few minutes is not a candidate; primary-key and unique indexes
+  never are.
+- The bloat rules read the latest bloat row of each relation: an exact
+  `pgstattuple` measurement from the last seven days wins over an estimate,
+  and an estimate counts for 13 hours (the estimate runs every six hours).
+  The estimate covers tables only and a `pgstattuple` measurement is filed as
+  a table, so no collector currently produces an index bloat row:
+  `index.bloat_high` cannot fire.
+- `config.drift` opens one finding per setting that differs between cluster
+  members. It ignores the settings expected to differ (`data_directory`,
+  `hot_standby`, `listen_addresses`, `port`, `primary_conninfo`,
+  `primary_slot_name`, `synchronous_standby_names`, and internal settings) —
+  the same list the settings-drift view hides.
+- The archive and backup rules are cluster-wide. A standby archives only with
+  `archive_mode=always`; a standby whose cluster archives is covered; and a
+  cluster-wide finding is raised once, on the primary when the primary is
+  monitored. A base backup is seen while it runs, in
+  `pg_stat_progress_basebackup` on any member of the cluster, by the archiver
+  check (every minute): a backup shorter than that can go unseen, and backups
+  taken outside the replication protocol (file-level tools, storage
+  snapshots) are never seen. Until a base backup has been seen,
+  `backup.no_basebackup_seen` and `backup.no_strategy` stay degraded for the
+  first seven days of monitoring.
+
 ### Advisor rule catalogue
 
 | Rule ID | Severity | Meaning |
@@ -481,7 +593,7 @@ results and their freshness state.
 | `index.duplicate` | warning | Multiple indexes share the same definition on one table. |
 | `index.redundant_prefix` | info | A shorter non-unique index is a prefix of another index. |
 | `index.invalid` | critical | An invalid index is still present and maintained on writes. |
-| `index.bloat_high` | warning | An index exceeds the configured bloat ratio and size thresholds. |
+| `index.bloat_high` | warning | An index exceeds the configured bloat ratio and size thresholds (no index bloat source exists yet; see above). |
 | `index.divergence` | warning | An index definition is absent from a sibling cluster member. |
 | `table.dead_tuples_high` | warning | Dead tuples exceed the ratio and count thresholds. |
 | `table.never_autovacuumed` | warning | A large table has no recorded vacuum or autovacuum. |
@@ -506,10 +618,15 @@ results and their freshness state.
 | `config.drift` | warning | A shared configuration setting differs between cluster members. |
 | `conn.saturation` | warning | Connection usage is above the saturation threshold. |
 | `conn.idle_share_high` | info | More than 70% of connections are idle. |
+| `txn.long_running` | warning | A transaction has been open for more than 15 minutes. |
+| `txn.idle_in_transaction` | warning | A session has been idle in transaction for more than 5 minutes. |
+| `txn.prepared_orphan` | critical | A prepared transaction older than one hour can hold back vacuum. |
+| `txn.wraparound_risk` | critical | A database's frozen transaction ID age is above one billion. |
+| `txn.high_rollback_ratio` | info | More than 10% of a database's transactions roll back. |
 | `archive.disabled` | info | WAL archiving is disabled. |
 | `archive.failing` | critical | Archive failures dominate the observed archive attempts. |
 | `archive.stalled` | critical | The last successful archive is older than the allowed interval. |
-| `backup.no_basebackup_seen` | warning | No recent base backup has been observed in the available history. |
+| `backup.no_basebackup_seen` | warning | The cluster archives WAL, but no base backup has been seen running in the last seven days. |
 | `backup.no_strategy` | critical | Neither archiving nor a visible base-backup strategy is configured. |
 
 ## Running the agent
@@ -617,8 +734,16 @@ and frozen-XID age; per-application counts are opt-in.
 
 Maintenance checks include `table_stats` and `index_stats` (5m, database scope,
 Tier 0), `vacuum_progress` (30s, instance scope, Tier 0), and `bloat_estimate`
-(6h, database scope, Tier 0). Relation reporting is bounded by a top-N budget
-shared per instance across databases; table and index defaults are 50.
+(6h, database scope, Tier 0). Relation reporting is bounded per database by
+each check's `top_n` budget (default 50 for tables, indexes and bloat
+estimates); the API and the interface flag a truncated result.
+
+The bloat estimate is a heap-only statistical estimate of tables, computed
+from `pg_stats`. PostgreSQL shows a column in `pg_stats` only to a role that
+may `SELECT` it, so a table with any column the monitoring role cannot read is
+not estimated at all: at T0 (`pg_monitor` alone) that is usually every table,
+and useful estimates need T1's `pg_read_all_data`. Relations under 1 MiB and
+never-analysed tables are not estimated either.
 
 Durability checks are `settings` (1h, instance/Tier 0), `wal` (15s,
 instance/Tier 0), `checkpointer` (30s, instance/Tier 0), `io` (30s,
@@ -662,14 +787,17 @@ targets:
     dsn: postgres://pglens@pg-app:5432/postgres?sslmode=require
                                      # string: PostgreSQL connection DSN (required; password never logged)
     host_local: true                 # optional; otherwise inferred from localhost/loopback or Unix socket DSNs
-    cluster_name: pg-prod-eu         # string: fallback cluster identity if pg_control_system() unavailable
+    cluster_name: pg-prod-eu         # string: fallback cluster identity if pg_control_system() unavailable (default: the target name)
     allow_explain_analyze: false     # permit EXPLAIN ANALYZE for this target (default false)
     allow_signal: false              # permit cancel/terminate for this target (default false)
     databases:
       include: ["app_.*"]            # string array: regex patterns to include (default empty = all)
       exclude: ["^template\\d$", "^rdsadmin$", "^azure_.*$"]
-                                     # string array: regex patterns to exclude (default excludes templates and managed dbs)
-      max: 10                        # integer: max databases per instance to monitor (default 10; max 10)
+                                     # string array: regex patterns to exclude (default excludes templates and managed dbs;
+                                     # setting it replaces that default list)
+      max: 10                        # integer: max databases per instance to monitor, busiest first (default 10; 0 keeps the default)
+                                     # the choice is made when the agent starts: a database created later is reported
+                                     # with skip_reason=discovered_after_start and collected after the next restart
 
 # Per-check configuration overrides (optional)
 checks:
@@ -704,6 +832,12 @@ checks:
 Relation endpoints are available at `/api/v1/instances/{id}/tables`,
 `/indexes`, and `/bloat`; each response includes `truncated` when the relation
 budget limits the result. For example: `curl -s -b cookies.txt localhost:8080/api/v1/instances/11111111-1111-1111-1111-111111111111/tables | jq .`.
+Tables and indexes return the newest reading of each relation reported in the
+last 15 minutes, with `seq_scan_rate` and `idx_scan_rate` in scans per second
+and, for tables, the `last_vacuum_at`, `last_autovacuum_at`,
+`last_analyze_at` and `last_autoanalyze_at` timestamps (absent when the table
+was never processed that way). Bloat returns estimates from the last 13 hours
+and `pgstattuple` measurements from the last 7 days.
 
 Host metrics for a local target are available at:
 
@@ -750,26 +884,37 @@ Diagnostic command to verify database connectivity and readiness for collection.
 ./bin/pglens-agent check --dsn postgres://pglens:password@host:5432/postgres
 ```
 
-Sample output from a fully configured PostgreSQL 17 instance with `pg_monitor`:
+Sample output from a PostgreSQL 18 primary, as a role with `pg_monitor` and
+the `pg_control_system()` grant:
 
 ```
 pglens agent check
-  server version   : 17.11  (server_version_num 170011) — supported
+  server version   : 18.2  (server_version_num 180002) — supported
   role             : primary
-  system_identifier: 7678730985106710562
+  system_identifier: 7688462038932361259
   permission tier  : T0 (pg_monitor)
-  extensions       : pg_stat_statements=no  pg_buffercache=no
-  databases        : 1 found, 1 monitored
+  extensions       : pg_stat_statements=no
+  databases        : 1 found, 1 monitored, default selection
 
 checks
-  instance_info      enabled
   activity           enabled
+  archiver           enabled
   ash                enabled
+  bloat_estimate     enabled
+  checkpointer       enabled
   database_stats     enabled
+  index_stats        enabled
+  instance_info      enabled
+  io                 enabled
+  locks              enabled
   replication_receiver disabled  — role primary not allowed
   replication_slots  enabled
   replication_streaming enabled
+  settings           enabled
   stat_statements    disabled  — missing extension pg_stat_statements
+  table_stats        enabled
+  vacuum_progress    enabled
+  wal                enabled
 
 warnings
   - identity path /var/lib/pglens/identity.json is not on a persistent mount:
@@ -778,15 +923,16 @@ warnings
 
 **How to read the output:**
 
-- **server version** — PostgreSQL version; `— NOT SUPPORTED` means it's older than 15 (EOL versions 13, 14 not supported)
+- **server version** — PostgreSQL version; `— NOT SUPPORTED` means it is outside 15–18
 - **role** — `primary`, `standby`, or `read-only replica`; determines which replication checks run
 - **system_identifier** — stable cluster identity; if it says `N/A (requires pg_control_system privilege)`, you need the grant from `monitoring_user.sql`
 - **permission tier**:
   - `T0 (pg_monitor)` — minimum, enables all core monitoring
-  - `T1 (pg_monitor + pg_read_all_stats + pg_read_all_data)` — enables plan-only `EXPLAIN` in the UI
-  - `T2 (T1 + pg_signal_backend)` — enables query cancellation and termination
-- **extensions** — `pg_stat_statements=yes` is required for the `stat_statements` check; `pg_buffercache` is optional
-- **databases** — number of databases found and how many will be monitored; if some are skipped due to `db_budget`, the reason is shown
+  - `T1 (pg_monitor + pg_read_all_data)` — enables plan-only `EXPLAIN` and on-demand `pgstattuple` measurement, and lets the bloat estimate see tables whose columns `pg_monitor` alone cannot read; with `allow_explain_analyze`, the agent also accepts `EXPLAIN ANALYZE` (the interface asks for T2)
+  - `T2 (pg_monitor + pg_read_all_data + pg_signal_backend)` — enables query cancellation and termination, with `allow_signal`
+  - The tier counts direct grants of these roles to the monitoring role only; a grant through an intermediate role is not seen
+- **extensions** — `pg_stat_statements=yes` is required for the `stat_statements` check. When the DSN's database has no view, the check looks in the monitored databases, as the agent does, and names the one it found (`pg_stat_statements=yes (in database app)`); databases without the view are read through it. `pgstattuple` is checked when a measurement runs, in the database that holds the table
+- **databases** — connectable databases found, how many the agent monitors, and how many are excluded or skipped (`db_budget`). The check does not read the agent configuration, so it applies the default selection: the default excludes (`template0`–`template9`, `rdsadmin`, `azure_*`) and the ten busiest databases by commit count
 
 **Mandatory checks** (must be enabled for exit code 0):
 - `instance_info` — general metadata
@@ -839,8 +985,8 @@ curl -s -b cookies.txt localhost:8080/api/v1/clusters | jq '.[0]'
   "max_replay_lag_seconds": 0.12,
   "topology": [
     {
-      "from": "11111111-1111-1111-1111-111111111111",
-      "to": "22222222-2222-2222-2222-222222222222",
+      "from": "22222222-2222-2222-2222-222222222222",
+      "to": "11111111-1111-1111-1111-111111111111",
       "type": "streaming",
       "sync_state": "async",
       "confidence": "high"
@@ -880,7 +1026,7 @@ curl -s -b cookies.txt localhost:8080/api/v1/clusters | jq '.[0]'
 - `sync_standby_count` — number of synchronous replicas per `sync_state` (omitted if zero)
 - `max_replay_lag_seconds` — largest replay lag from all active standby replicas; omitted if no lag data or all are caught up
 - `topology` — replication graph edges (omitted if empty); see below
-- Low-confidence edges (those not matched to a known instance) carry `"note": "Endpoint could not be resolved; check connectivity"`
+- Low-confidence edges (the standby is not streaming from that upstream right now) carry `"note": "The standby is not streaming from this upstream right now; check connectivity"`
 
 ### `GET /api/v1/clusters/{id}/topology`
 
@@ -893,8 +1039,8 @@ curl -s -b cookies.txt localhost:8080/api/v1/clusters/7381927364512345678/topolo
   "cluster_id": "7381927364512345678",
   "topology": [
     {
-      "from": "11111111-1111-1111-1111-111111111111",
-      "to": "22222222-2222-2222-2222-222222222222",
+      "from": "22222222-2222-2222-2222-222222222222",
+      "to": "11111111-1111-1111-1111-111111111111",
       "type": "streaming",
       "sync_state": "async",
       "confidence": "high"
@@ -917,10 +1063,10 @@ curl -s -b cookies.txt localhost:8080/api/v1/clusters/7381927364512345678/topolo
 ```
 
 **Topology edges:**
-- `from`, `to` — instance IDs (UUIDs as strings)
+- `from`, `to` — instance IDs (UUIDs as strings); `from` is the standby that reported the edge, `to` its upstream (the primary, or the standby it cascades from). Only standbys report edges, from their WAL receiver; an upstream address that matches no instance of the cluster is dropped, except that a standby whose agent also monitors exactly one primary is linked to that primary
 - `type` — replication type; currently always `streaming` for streaming replication
 - `sync_state` — `sync` (synchronous replica) or `async` (asynchronous); null if not yet known
-- `confidence` — `high` (matched to a known instance) or `low` (upstream IP/port could not be resolved to a known instance); low-confidence edges carry a `note` field
+- `confidence` — `high` while the standby's WAL receiver is streaming or catching up, `low` when it is not and the edge points at the last upstream it reported; low-confidence edges carry a `note` field
 
 **Events:**
 - Listed here are `failover_detected` events only (see Events section for the complete event taxonomy)
@@ -936,8 +1082,9 @@ curl -s -b cookies.txt "localhost:8080/api/v1/clusters/7381927364512345678/repli
   "cluster_id": "7381927364512345678",
   "edges": [
     {
-      "from": "11111111-1111-1111-1111-111111111111",
-      "to": "22222222-2222-2222-2222-222222222222",
+      "from": "22222222-2222-2222-2222-222222222222",
+      "to": "11111111-1111-1111-1111-111111111111",
+      "standby_name": "pg-standby",
       "metric": "replay_lag_sec",
       "sync_state": "async",
       "series": [
@@ -947,8 +1094,9 @@ curl -s -b cookies.txt "localhost:8080/api/v1/clusters/7381927364512345678/repli
       ]
     },
     {
-      "from": "11111111-1111-1111-1111-111111111111",
-      "to": "22222222-2222-2222-2222-222222222222",
+      "from": "22222222-2222-2222-2222-222222222222",
+      "to": "11111111-1111-1111-1111-111111111111",
+      "standby_name": "pg-standby",
       "metric": "write_lag_sec",
       "sync_state": "async",
       "series": [
@@ -962,6 +1110,24 @@ curl -s -b cookies.txt "localhost:8080/api/v1/clusters/7381927364512345678/repli
 ```
 
 **Time range query parameters:** `from` and `to` are required, in RFC3339 format (e.g., `2026-08-27T00:00:00Z`). Missing intervals are `null`, never `0` or interpolated. The response includes three series per edge: `write_lag_sec`, `flush_lag_sec`, and `replay_lag_sec` (bytes counterparts are available in metrics but shown here in seconds for readability).
+
+Like a topology edge, a lag edge runs from the standby to its primary: `to`
+is the primary's instance ID, and `from` is the standby's instance ID when it
+resolves to a monitored instance, or otherwise the `application_name` the
+primary reports it under (also returned as `standby_name`). A primary with
+several standbys returns one edge per standby.
+
+### `GET /api/v1/clusters/{id}/slots`
+
+```sh
+curl -s -b cookies.txt localhost:8080/api/v1/clusters/7381927364512345678/slots | jq .
+```
+
+Returns the latest reading of every replication slot reported by the
+cluster's instances: `instance_id`, `slot_name`, `slot_type`, `active`,
+`wal_status`, `retained_bytes`, `safe_wal_size_bytes` (`null` when
+`max_slot_wal_keep_size` is unlimited, and for a slot whose WAL is already
+`lost`), `last_active_at` and `ts`.
 
 ### `GET /api/v1/instances/{id}`
 
@@ -1007,13 +1173,20 @@ curl -s -b cookies.txt "localhost:8080/api/v1/metrics/query?metric=pg_backends&i
 
 A counter reset yields `null` for that bucket, never a negative or a spike above 10x the pre-reset rate. `step` producing >10000 points returns 422.
 
+Counters (`*_total`, `pg_wal_lsn_bytes`) are stored and returned as per-second
+rates, computed at ingest; multiply by the bucket width to get a count. With
+`database`, only series labelled with that database are returned: per-database
+metrics (transactions, blocks, temporary bytes, deadlocks) carry it, while
+instance-wide metrics (connections, checkpoints, WAL) are stored without a
+database, so query them without the parameter.
+
 ### `GET /api/v1/events`
 
 ```sh
 curl -s -b cookies.txt "localhost:8080/api/v1/events?cluster_id=7381927364512345678&type=failover_detected&limit=10" | jq .
 ```
 
-Newest first, `limit` capped at 1000.
+Newest first, `limit` capped at 1000. Events are kept for 90 days.
 
 ### `GET /api/v1/statements`
 
@@ -1033,7 +1206,7 @@ curl -s -b cookies.txt "localhost:8080/api/v1/ash?instance_id=11111111-1111-1111
 
 ```json
 {
-  "resolution_seconds": 1,
+  "resolution_seconds": 10,
   "statistical": true,
   "buckets": [
     {
@@ -1054,13 +1227,30 @@ curl -s -b cookies.txt "localhost:8080/api/v1/ash?instance_id=11111111-1111-1111
 }
 ```
 
+With `group_by`, the range (the last hour by default) is aggregated into time
+buckets of `resolution_seconds` — a multiple of the agent's 10-second window,
+at most 180 buckets per range — with one row per bucket and group, carrying
+only the group column. `ticks` is the instance's sampling ticks in the bucket,
+whatever the filters, so `avg_active_sessions` is the group's share of the
+instance's time. The largest groups of the range are kept (at most 24, fewer
+when `limit` rows cannot hold them for every bucket: pass `limit=5000` for a
+full answer) and the others are folded into one group named `other`, so the
+total is conserved. `wait_event_type` and `wait_event` narrow the samples for
+a drill-down and are echoed on every row:
+
+```sh
+curl -s -b cookies.txt "localhost:8080/api/v1/ash?instance_id=11111111-1111-1111-1111-111111111111&group_by=wait_event&wait_event_type=Lock&limit=5000" | jq .
+```
+
+Without `group_by`, the stored rows are returned unaggregated, newest first.
+
 Grouped by query (requires `compute_query_id = on`):
 
 ```sh
 curl -s -b cookies.txt "localhost:8080/api/v1/ash?instance_id=11111111-1111-1111-1111-111111111111&from=2026-08-27T00:00:00Z&to=2026-08-27T00:30:00Z&group_by=queryid" | jq .
 ```
 
-Returns `queryid` grouped rows; use `/api/v1/ash/top` for queries joined to their text:
+Returns `queryid` grouped rows; use `/api/v1/ash/top` for queries joined to their text (it takes the same `wait_event_type` and `wait_event` filters, and ranks by samples):
 
 ```sh
 curl -s -b cookies.txt "localhost:8080/api/v1/ash/top?instance_id=11111111-1111-1111-1111-111111111111&from=2026-08-27T00:00:00Z&to=2026-08-27T00:30:00Z" | jq .
@@ -1072,7 +1262,7 @@ curl -s -b cookies.txt "localhost:8080/api/v1/ash/top?instance_id=11111111-1111-
   "statistical": true,
   "entries": [
     {
-      "queryid": 1234567890,
+      "queryid": "1234567890",
       "query_text": "SELECT * FROM users WHERE id = $1",
       "samples": 45,
       "ticks": 10,
@@ -1082,11 +1272,11 @@ curl -s -b cookies.txt "localhost:8080/api/v1/ash/top?instance_id=11111111-1111-
 }
 ```
 
-Notes: `avg_active_sessions = samples / ticks`; when `ticks == 0`, `avg_active_sessions` is `null` (never division by zero). When `ash.enabled: false` (in agent configuration), the response is `{"enabled": false}` rather than an ambiguous empty result. Fewer than 60 total samples in the range returns a `"warning"` field.
+Notes: `avg_active_sessions = samples / ticks`; when `ticks == 0`, `avg_active_sessions` is `null` (never division by zero). `queryid` is a decimal string, since an int64 exceeds the integers JSON consumers keep exact. When the instance's agent reports ASH disabled (`checks.ash.enabled: false`), `/api/v1/ash` answers `"enabled": false` with no buckets rather than an ambiguous empty result. Fewer than 60 total samples in the range returns a `"warning"` field.
 
 ### `POST /api/v1/push`
 
-Agent ingest. `401` when the agent is revoked; `400` for unknown `protocol_version` (body names supported version) or stale `sent_at` (>12h); `413` for body >32 MiB.
+Agent ingest. `401` when the agent is revoked; `400` for a `protocol_version` outside the supported range, 1 to 3 (the body names the range), or stale `sent_at` (>12h); `413` for body >32 MiB.
 
 ### `GET /metrics`
 
@@ -1134,6 +1324,7 @@ GET    /api/v1/clusters
 GET    /api/v1/clusters/{id}/topology
 GET    /api/v1/clusters/{id}/replication
 GET    /api/v1/clusters/{id}/settings-drift
+GET    /api/v1/clusters/{id}/slots
 GET    /api/v1/instances
 GET    /api/v1/instances/{id}
 GET    /api/v1/instances/{id}/activity|databases|host|settings|tables|indexes|bloat|command-audit
@@ -1158,6 +1349,9 @@ GET    /api/v1/findings|findings/{finding-id}
 POST   /api/v1/findings/{finding-id}/mute
 DELETE /api/v1/findings/{finding-id}/mute
 GET    /api/v1/advisor/rules
+GET    /api/v1/session
+POST   /api/v1/session
+DELETE /api/v1/session
 ```
 
 The agent-only command poll and result routes are listed for operators
@@ -1232,6 +1426,10 @@ The `cluster_id` returned by these endpoints is byte-identical before and after 
 ## Wait-event analysis
 
 What it answers: where the database is spending its time, right now and historically. It samples `pg_stat_activity` once per second, aggregates into 10-second windows, and stores the sample counts by wait event. No extension or restart required — it works on managed PostgreSQL including Amazon RDS.
+
+The sampler holds one dedicated connection. When the target is down, at agent
+start or later, it retries that connection every 5 seconds and resumes on its
+own; the seconds it could not sample are gaps, never zeros.
 
 `compute_query_id = on` is strongly recommended. Without it, samples cannot be attributed to a query and ASH loses much of its value. The server logs a warning once if `compute_query_id` is off.
 
@@ -1423,7 +1621,23 @@ targets:
       include: ["^app_.*", "^analytics_.*"]  # only these databases
 ```
 
-Run `pglens-agent check --dsn <dsn>` to see which databases will be monitored and which are skipped.
+Run `pglens-agent check --dsn <dsn>` to see which databases the default selection monitors and which it excludes or skips; a target's `databases` block can change that choice.
+
+The agent chooses its databases when it starts, and the budget ranks them by
+commits at that moment. A database created afterwards is reported with
+`skip_reason=discovered_after_start` and collected after the next agent
+restart; a database that has since dropped out of the busiest ten stays
+monitored until then.
+
+**No statements in Query Inspector**
+
+The `stat_statements` check needs the `pg_stat_statements` module in
+`shared_preload_libraries` and the extension created (`CREATE EXTENSION
+pg_stat_statements`) in at least one database: the one the agent's DSN names,
+or any monitored database. The statistics cover every database, so the agent
+reads a database without the view through one that has it. It looks when it
+starts: create the extension, then restart the agent. While the check is
+skipped, Query Inspector says so and gives the agent's reason.
 
 **Buffer filling / `agent_buffer_bytes` metric keeps growing**
 
@@ -1515,7 +1729,7 @@ the server is rejected, so upgrade the server before upgrading agents.
 - **Host metrics are local-only** — they are attached only to targets declared or inferred as local to the agent. Remote targets report host metrics as unavailable, never as zero. In a container with a memory limit, the reported total is the cgroup limit rather than the machine's memory. Per-device IOPS, disk latency and network metrics are not collected.
 
 **Server and replication:**
-- PostgreSQL 15 to 18 only; 13 and 14 are not supported (EOL)
+- PostgreSQL 15 to 18 only; 13 and 14 are not supported
 - Only streaming replication is supported; logical, Patroni, and Aurora topologies are not detected
 - Raw retention is 30 days with no rollups; compression after 48h (`buffer 6h < sample_age 12h < compress_after 48h`)
 - **Every in-memory structure has a fixed ceiling and drops data past it** — 32 MiB per push on the wire and 256 MiB after gzip, 64 KiB of request headers, 2-minute read/write/idle timeouts, delta and topology state evicted one hour after an instance's last sample, and at most 4 096 live sessions. None of these are configurable; see [limit 13](docs/LIMITS.md#13-every-in-memory-structure-is-bounded-and-a-bound-that-trips-drops-data) for what each one trades away.
@@ -1530,8 +1744,9 @@ the server is rejected, so upgrade the server before upgrading agents.
 - Exact bloat commands require a pre-installed `pgstattuple` extension; pglens never creates it automatically
 - Plan history is captured only when an `explain` command is requested; it is not an automatic query sampler
 - Normalized query placeholders can make a plan less representative for parameter-sensitive workloads; inspect the returned hash and metadata
-- Relations under 1 MiB and never-analysed relations are not estimated
-- Only top-N relations per instance are listed; the rest are counted as truncated
+- Relations under 1 MiB, never-analysed relations, and tables with a column the monitoring role cannot read in `pg_stats` (usually every table at T0) are not estimated; indexes are never estimated
+- Only the top-N relations per database are listed; the rest are counted as truncated
+- The agent chooses its databases and whether `pg_stat_statements` is readable when it starts; a database or extension created later needs an agent restart
 
 **Configuration and durability:**
 - `archive_command` facts retain only the first token and redact remaining arguments because they may contain credentials

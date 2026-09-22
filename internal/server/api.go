@@ -150,14 +150,20 @@ func isUp(lastSeen time.Time, now time.Time) bool {
 	return now.Sub(lastSeen) <= upThreshold
 }
 
+// healthLagThresholdSeconds is the replay lag a cluster tolerates before it
+// is degraded: the threshold of the seeded replica.lag_high alert rule. Any
+// lag above zero used to degrade the cluster, and a busy primary's standbys
+// are always a few milliseconds behind, so busy clusters never read "ok".
+const healthLagThresholdSeconds = 30
+
 // healthForCluster computes ok/degraded/critical per phase_07.md §6.3:
 // critical when there is no primary *or more than one* (split-brain —
 // phase_07.md §6.3 names this explicitly; found missing entirely while
 // running SYS-REPL-002 live: primaryCount was never even computed, only a
 // hasPrimary bool, so two simultaneous primaries reported "ok" like
-// everything was fine), degraded when any instance is down or a replica is
-// lagging (maxReplayLagSeconds > 0 — nil/0 means "no lag reported", never
-// itself a reason to degrade), ok otherwise.
+// everything was fine), degraded when any instance is down or a replica
+// lags more than healthLagThresholdSeconds (nil means "no lag reported",
+// never itself a reason to degrade), ok otherwise.
 func healthForCluster(primaryCount int, anyDown bool, instanceCount int, maxReplayLagSeconds *float64) string {
 	if instanceCount == 0 {
 		return "unknown"
@@ -168,7 +174,7 @@ func healthForCluster(primaryCount int, anyDown bool, instanceCount int, maxRepl
 	if anyDown {
 		return "degraded"
 	}
-	if maxReplayLagSeconds != nil && *maxReplayLagSeconds > 0 {
+	if maxReplayLagSeconds != nil && *maxReplayLagSeconds > healthLagThresholdSeconds {
 		return "degraded"
 	}
 	return "ok"
@@ -195,19 +201,33 @@ type eventResponse struct {
 type statementEntry struct {
 	// PostgreSQL query IDs are int64 values. They must cross the JSON
 	// boundary as strings so browsers cannot round them past Number.MAX_SAFE_INTEGER.
-	QueryID   string   `json:"queryid"`
-	Datname   string   `json:"datname"`
-	QueryText string   `json:"query_text"`
-	Calls     *float64 `json:"calls,omitempty"`
-	TotalExec *float64 `json:"total_exec_time_ms,omitempty"`
-	Rows      *float64 `json:"rows,omitempty"`
-	Truncated bool     `json:"truncated"`
+	QueryID   string `json:"queryid"`
+	Datname   string `json:"datname"`
+	QueryText string `json:"query_text"`
+	// Totals over the requested window. The shared-block, WAL and
+	// temporary-block totals and the mean were computed and then dropped,
+	// which left the UI's cache-hit ratio and temp bytes permanently empty.
+	Calls           *float64 `json:"calls,omitempty"`
+	TotalExec       *float64 `json:"total_exec_time_ms,omitempty"`
+	Rows            *float64 `json:"rows,omitempty"`
+	MeanExec        *float64 `json:"mean_exec_time,omitempty"`
+	SharedBlksHit   *float64 `json:"shared_blks_hit,omitempty"`
+	SharedBlksRead  *float64 `json:"shared_blks_read,omitempty"`
+	WALBytes        *float64 `json:"wal_bytes,omitempty"`
+	TempBlksWritten *float64 `json:"temp_blks_written,omitempty"`
+	Truncated       bool     `json:"truncated"`
 }
 
 type statementsResp struct {
 	Statements      []statementEntry `json:"statements"`
 	Truncated       bool             `json:"truncated"`
 	ComparableScope string           `json:"comparable_scope"`
+	// Disabled and DisabledReason report that the agent skips the
+	// stat_statements check on this instance (no readable pg_stat_statements,
+	// or a tier too low). The interface looked for them and the server never
+	// sent them, so a skipped check read as an instance without statements.
+	Disabled       bool    `json:"disabled,omitempty"`
+	DisabledReason *string `json:"disabled_reason,omitempty"`
 }
 
 // ----- /api/v1/clusters -----
@@ -305,7 +325,7 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 		primaryCount := 0
 		anyDown := false
 		standbyCount := 0
-		syncStandbyCount := 0
+		edgeSyncCount := 0
 		for irows.Next() {
 			var iid uuid.UUID
 			var addr, role, permTier string
@@ -387,11 +407,15 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 			if syncState.Valid {
 				edge.SyncState = &syncState.String
 				if syncState.String == "sync" {
-					syncStandbyCount++
+					edgeSyncCount++
 				}
 			}
 			if confidence == "low" {
-				note := "Endpoint could not be resolved; check connectivity"
+				// A low-confidence edge is the standby's last-known upstream while
+				// its WAL receiver is not streaming (see wire.Edge.Confidence). The
+				// upstream is still a known instance: the pipeline drops an edge it
+				// cannot resolve.
+				note := "The standby is not streaming from this upstream right now; check connectivity"
 				edge.Note = &note
 			}
 			topology = append(topology, edge)
@@ -402,6 +426,26 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		trows.Close()
+
+		syncStates, senderSyncCount, senderSeen, serr := currentSyncStates(ctx, a.pool, c.idDB)
+		if serr != nil {
+			writeError(w, http.StatusInternalServerError, "query sync state failed", serr.Error())
+			return
+		}
+		for i := range topology {
+			if topology[i].SyncState != nil {
+				continue
+			}
+			if from, perr := uuid.Parse(topology[i].From); perr == nil {
+				if state, ok := syncStates[from]; ok {
+					topology[i].SyncState = &state
+				}
+			}
+		}
+		syncStandbyCount := edgeSyncCount
+		if senderSeen {
+			syncStandbyCount = senderSyncCount
+		}
 
 		// Fetch the CURRENT max replay lag across this cluster's instances —
 		// a recent reading per instance, not the all-time max. Found live
@@ -421,11 +465,11 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 		var maxReplayLag *float64
 		err = a.pool.QueryRow(ctx,
 			`SELECT MAX(replay_lag_sec) FROM (
-				SELECT DISTINCT ON (instance_id) replay_lag_sec
+				SELECT DISTINCT ON (instance_id, slot_name) replay_lag_sec
 				FROM metrics_replication
 				WHERE tenant_id='default' AND cluster_id=$1 AND replay_lag_sec IS NOT NULL
 				  AND ts > now() - interval '60 seconds'
-				ORDER BY instance_id, ts DESC
+				ORDER BY instance_id, slot_name, ts DESC
 			) latest`,
 			c.idDB).Scan(&maxReplayLag)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -947,24 +991,28 @@ func (a *API) handleStatements(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid limit", err.Error())
 		return
 	}
-	// Normalize order_by
-	orderClause := "total_exec_time DESC"
+	// Normalize order_by. NULLS LAST: in descending order PostgreSQL puts
+	// NULLs first, so statements with no calls in the window (NULL mean)
+	// headed the "slowest" list.
+	orderClause := "total_exec_time DESC NULLS LAST"
 	if orderBy != "" {
 		switch strings.ToLower(orderBy) {
 		case "calls", "calls_rate", "total_calls":
-			orderClause = "total_calls DESC"
+			orderClause = "total_calls DESC NULLS LAST"
 		case "total_exec_time", "total_exec_time_ms", "exec_time", "total_time":
-			orderClause = "total_exec_time DESC"
-		case "rows", "rows_rate":
-			orderClause = "total_rows DESC"
+			orderClause = "total_exec_time DESC NULLS LAST"
+		case "rows", "rows_rate", "total_rows":
+			orderClause = "total_rows DESC NULLS LAST"
 		case "shared_blks_hit", "shared_blks_hit_rate":
-			orderClause = "total_hit DESC"
+			orderClause = "total_hit DESC NULLS LAST"
 		case "shared_blks_read", "shared_blks_read_rate":
-			orderClause = "total_read DESC"
+			orderClause = "total_read DESC NULLS LAST"
 		case "wal_bytes", "wal_bytes_rate":
-			orderClause = "total_wal DESC"
+			orderClause = "total_wal DESC NULLS LAST"
+		case "temp_blks_written", "temp_blks_written_rate":
+			orderClause = "total_temp DESC NULLS LAST"
 		case "mean_exec_time", "mean_time":
-			orderClause = "mean_exec DESC"
+			orderClause = "mean_exec DESC NULLS LAST"
 		default:
 			writeError(w, http.StatusBadRequest, "invalid order_by", fmt.Sprintf("unknown order_by %q", orderBy))
 			return
@@ -1008,21 +1056,31 @@ func (a *API) handleStatements(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	// Build query aggregating metrics_statements and joining query_texts.
-	// We aggregate rates over the window; for simplicity SUM the rates.
+	// Each row holds per-second rates over sample_seconds, so rate *
+	// sample_seconds is what that interval observed and the window's total
+	// is their sum. The rates used to be summed as they were, which is off
+	// by the scrape interval (60x by default). Rows written before
+	// migration 0014 carry no interval; the default stat_statements
+	// interval stands in for it.
+	//
+	// The query text is looked up after aggregating: query_texts keeps one
+	// row per PostgreSQL major version, and joining it before the GROUP BY
+	// counted every sample once per major version the queryid was ever
+	// seen under.
+	const seconds = "COALESCE(s.sample_seconds, 60)"
 	var sb strings.Builder
 	args := []any{}
 	sb.WriteString(`
-		SELECT s.queryid, s.datname, MAX(qt.query_text) as qtext,
-		       SUM(s.calls_rate) as total_calls,
-		       SUM(s.exec_time_rate_ms) as total_exec_time,
-		       SUM(s.rows_rate) as total_rows,
-		       SUM(s.shared_blks_hit_rate) as total_hit,
-		       SUM(s.shared_blks_read_rate) as total_read,
-		       SUM(s.wal_bytes_rate) as total_wal,
-		       CASE WHEN SUM(s.calls_rate) > 0 THEN SUM(s.exec_time_rate_ms)/SUM(s.calls_rate) ELSE NULL END as mean_exec
+		WITH agg AS (
+		SELECT s.cluster_id, s.queryid, s.datname,
+		       SUM(s.calls_rate * ` + seconds + `) AS total_calls,
+		       SUM(s.exec_time_rate_ms * ` + seconds + `) AS total_exec_time,
+		       SUM(s.rows_rate * ` + seconds + `) AS total_rows,
+		       SUM(s.shared_blks_hit_rate * ` + seconds + `) AS total_hit,
+		       SUM(s.shared_blks_read_rate * ` + seconds + `) AS total_read,
+		       SUM(s.wal_bytes_rate * ` + seconds + `) AS total_wal,
+		       SUM(s.temp_blks_written_rate * ` + seconds + `) AS total_temp
 		FROM metrics_statements s
-		LEFT JOIN query_texts qt ON qt.tenant_id=s.tenant_id AND qt.cluster_id=s.cluster_id AND qt.datname=s.datname AND qt.queryid=s.queryid
 		WHERE s.tenant_id='default' AND s.instance_id=$1`)
 	args = append(args, iid)
 	argIdx := 2
@@ -1041,10 +1099,25 @@ func (a *API) handleStatements(w http.ResponseWriter, r *http.Request) {
 		args = append(args, *toPtr)
 		argIdx++
 	}
-	sb.WriteString(` GROUP BY s.queryid, s.datname`)
-	sb.WriteString(` ORDER BY ` + orderClause)
+	sb.WriteString(` GROUP BY s.cluster_id, s.queryid, s.datname
+		), ranked AS (
+		SELECT agg.*,
+		       CASE WHEN total_calls > 0 THEN total_exec_time / total_calls END AS mean_exec
+		FROM agg
+		ORDER BY ` + orderClause)
 	fmt.Fprintf(&sb, " LIMIT $%d", argIdx)
 	args = append(args, limit)
+	sb.WriteString(`
+		)
+		SELECT r.queryid, r.datname,
+		       (SELECT qt.query_text FROM query_texts qt
+		         WHERE qt.tenant_id='default' AND qt.cluster_id=r.cluster_id
+		           AND qt.datname=r.datname AND qt.queryid=r.queryid
+		         ORDER BY qt.last_seen DESC LIMIT 1) AS qtext,
+		       r.total_calls, r.total_exec_time, r.total_rows, r.total_hit, r.total_read,
+		       r.total_wal, r.total_temp, r.mean_exec
+		FROM ranked r
+		ORDER BY ` + orderClause)
 
 	rows, err := a.pool.Query(ctx, sb.String(), args...)
 	if err != nil {
@@ -1058,9 +1131,8 @@ func (a *API) handleStatements(w http.ResponseWriter, r *http.Request) {
 		var qid int64
 		var datname string
 		var qtext sql.NullString
-		var totalCalls, totalExec, totalRows, totalHit, totalRead, totalWAL sql.NullFloat64
-		var meanExec sql.NullFloat64
-		if scanErr := rows.Scan(&qid, &datname, &qtext, &totalCalls, &totalExec, &totalRows, &totalHit, &totalRead, &totalWAL, &meanExec); scanErr != nil {
+		var totalCalls, totalExec, totalRows, totalHit, totalRead, totalWAL, totalTemp, meanExec *float64
+		if scanErr := rows.Scan(&qid, &datname, &qtext, &totalCalls, &totalExec, &totalRows, &totalHit, &totalRead, &totalWAL, &totalTemp, &meanExec); scanErr != nil {
 			writeError(w, http.StatusInternalServerError, "scan failed", scanErr.Error())
 			return
 		}
@@ -1069,24 +1141,19 @@ func (a *API) handleStatements(w http.ResponseWriter, r *http.Request) {
 			text = qtext.String
 		}
 		e := statementEntry{
-			QueryID:   strconv.FormatInt(qid, 10),
-			Datname:   datname,
-			QueryText: text,
-			Truncated: false,
+			QueryID:         strconv.FormatInt(qid, 10),
+			Datname:         datname,
+			QueryText:       text,
+			Calls:           totalCalls,
+			TotalExec:       totalExec,
+			Rows:            totalRows,
+			MeanExec:        meanExec,
+			SharedBlksHit:   totalHit,
+			SharedBlksRead:  totalRead,
+			WALBytes:        totalWAL,
+			TempBlksWritten: totalTemp,
+			Truncated:       false,
 		}
-		if totalCalls.Valid {
-			v := totalCalls.Float64
-			e.Calls = &v
-		}
-		if totalExec.Valid {
-			v := totalExec.Float64
-			e.TotalExec = &v
-		}
-		if totalRows.Valid {
-			v := totalRows.Float64
-			e.Rows = &v
-		}
-		// Prefer totalExec for ordering; other fields remain optional.
 		entries = append(entries, e)
 	}
 	if err := rows.Err(); err != nil {
@@ -1101,22 +1168,48 @@ func (a *API) handleStatements(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "query failed", err.Error())
 		return
 	}
+	skipReason, err := a.statementsSkipReason(ctx, iid)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query failed", err.Error())
+		return
+	}
 	resp := statementsResp{
 		Statements:      entries,
 		Truncated:       truncated,
 		ComparableScope: "cluster",
+		Disabled:        skipReason != nil,
+		DisabledReason:  skipReason,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// instanceTruncated reports whether the agent's cardinality selector dropped
-// candidates for this instance during the requested window (a
-// "cardinality_truncated" event, emitted by the pipeline whenever a pushed
-// wire.Result carries Truncated=true — see stat_statements.go's Scrape).
+// statementsSkipReason returns why the agent skips the stat_statements check
+// on this instance, or nil when it does not. The agent reports a skip when
+// it schedules its checks, and the first successful result deletes the fact,
+// so a present row is the current state.
+func (a *API) statementsSkipReason(ctx context.Context, instanceID uuid.UUID) (*string, error) {
+	var reason string
+	err := a.pool.QueryRow(ctx, `SELECT COALESCE(value_text, '') FROM object_facts
+		WHERE tenant_id='default' AND instance_id=$1 AND kind='check_skip' AND key='stat_statements'
+		ORDER BY last_seen DESC LIMIT 1`, instanceID).Scan(&reason)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &reason, nil
+}
+
+// instanceTruncated reports whether the statements for this instance may be
+// incomplete: the agent's hard cardinality cap cut the list during the
+// requested window (a "cardinality_truncated" event), or its latest
+// pg_stat_statements result held only the top statements (a check_partial
+// fact, removed again by the next complete result).
 func (a *API) instanceTruncated(ctx context.Context, instanceID uuid.UUID, from, to *time.Time) (bool, error) {
 	var sb strings.Builder
 	args := []any{instanceID}
-	sb.WriteString(`SELECT EXISTS(SELECT 1 FROM events WHERE tenant_id='default' AND instance_id=$1 AND type='cardinality_truncated'`)
+	sb.WriteString(`SELECT EXISTS(SELECT 1 FROM events WHERE tenant_id='default' AND instance_id=$1 AND type='cardinality_truncated' AND payload->>'check'='stat_statements'`)
 	argIdx := 2
 	if from != nil {
 		fmt.Fprintf(&sb, " AND ts >= $%d", argIdx)
@@ -1126,6 +1219,14 @@ func (a *API) instanceTruncated(ctx context.Context, instanceID uuid.UUID, from,
 	if to != nil {
 		fmt.Fprintf(&sb, " AND ts < $%d", argIdx)
 		args = append(args, *to)
+		argIdx++
+	}
+	sb.WriteString(`) OR EXISTS(SELECT 1 FROM object_facts WHERE tenant_id='default' AND instance_id=$1 AND kind='check_partial' AND key='stat_statements'`)
+	if from != nil {
+		fmt.Fprintf(&sb, " AND last_seen >= $%d", argIdx)
+		args = append(args, *from)
+	} else {
+		sb.WriteString(" AND last_seen >= now() - interval '1 day'")
 	}
 	sb.WriteString(")")
 	var truncated bool

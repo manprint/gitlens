@@ -215,7 +215,8 @@ func TestAPI_Topology_INT_API_012_LagDegradedHealth(t *testing.T) {
 	require.Greater(t, *c.MaxReplayLagSeconds, 0.0)
 }
 
-// INT-API-013: An unresolvable edge is returned with confidence: "low" and a note.
+// INT-API-013: A low-confidence edge (the standby is not streaming from its
+// last-known upstream) is returned with confidence: "low" and a note.
 func TestAPI_Topology_INT_API_013_LowConfidenceEdgeWithNote(t *testing.T) {
 	pool := getSharedPool(t)
 	truncateAll(t, pool)
@@ -240,7 +241,7 @@ func TestAPI_Topology_INT_API_013_LowConfidenceEdgeWithNote(t *testing.T) {
 		standbyID, cidDB, agent1)
 	require.NoError(t, err)
 
-	// Insert edge with low confidence (unresolved upstream)
+	// Insert edge with low confidence (receiver not streaming)
 	unknownUpstream := uuid.New()
 	_, err = pool.Exec(context.Background(),
 		`INSERT INTO topology_edges (tenant_id, cluster_id, from_instance, to_instance, edge_type, confidence)
@@ -266,7 +267,7 @@ func TestAPI_Topology_INT_API_013_LowConfidenceEdgeWithNote(t *testing.T) {
 	edge := c.Topology[0]
 	require.Equal(t, "low", edge.Confidence)
 	require.NotNil(t, edge.Note)
-	require.Contains(t, *edge.Note, "could not be resolved")
+	require.Contains(t, *edge.Note, "not streaming")
 }
 
 // TestAPI_Topology_ReplicationSeries_WithMetrics tests the replication

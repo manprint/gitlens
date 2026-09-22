@@ -10,6 +10,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+
+	"github.com/manprint/pglens/internal/advisor"
 )
 
 func settingsRouter(api *API) http.Handler {
@@ -56,10 +58,19 @@ func TestDriftAPI_ReportsOnlyDifferences(t *testing.T) {
 }
 
 func TestDriftAPI_ExcludesPerInstanceSettings(t *testing.T) {
-	for _, name := range settingsDriftExcluded {
-		require.True(t, settingIsDriftExcluded(name), name)
+	first, second := uuid.New(), uuid.New()
+	var rows [][]any
+	for _, name := range advisor.DriftExcludedSettings {
+		rows = append(rows, []any{name, "a", first.String(), "primary", "postmaster"}, []any{name, "b", second.String(), "standby", "postmaster"})
 	}
-	require.False(t, settingIsDriftExcluded("work_mem"))
+	rows = append(rows, []any{"in_hot_standby", "off", first.String(), "primary", "internal"}, []any{"in_hot_standby", "on", second.String(), "standby", "internal"})
+	p := &mockPool{queryResults: []*mockRows{{rows: rows}}}
+	rec := httptest.NewRecorder()
+	settingsRouter(&API{pool: p}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/clusters/7/settings-drift", http.NoBody))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var response []driftEntry
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.Empty(t, response)
 }
 
 func TestDriftAPI_SingleInstanceClusterReturnsEmpty(t *testing.T) {

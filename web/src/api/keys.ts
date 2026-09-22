@@ -9,6 +9,7 @@ export const qk = {
   clusterReplication: (id: string, from: string, to: string) =>
     ['getClusterReplication', id, from, to] as const,
   clusterSettingsDrift: (id: string) => ['getClusterSettingsDrift', id] as const,
+  clusterSlots: (id: string) => ['getClusterSlots', id] as const,
   instances: () => ['getInstances'] as const,
   instance: (id: string) => ['getInstance', id] as const,
   instanceActivity: (id: string) => ['getInstanceActivity', id] as const,
@@ -46,9 +47,19 @@ export const qk = {
     groupBy?: string,
     database?: string,
     limit?: number,
-  ) => ['getAsh', instanceId, from, to, groupBy, database, limit] as const,
-  ashTop: (instanceId: string, from?: string, to?: string, database?: string, limit?: number) =>
-    ['getAshTop', instanceId, from, to, database, limit] as const,
+    waitEventType?: string,
+    waitEvent?: string,
+  ) =>
+    ['getAsh', instanceId, from, to, groupBy, database, limit, waitEventType, waitEvent] as const,
+  ashTop: (
+    instanceId: string,
+    from?: string,
+    to?: string,
+    database?: string,
+    limit?: number,
+    waitEventType?: string,
+    waitEvent?: string,
+  ) => ['getAshTop', instanceId, from, to, database, limit, waitEventType, waitEvent] as const,
   plans: (queryId: string | number, instanceId?: string, datname?: string, limit?: number) =>
     ['getPlans', queryId, instanceId, datname, limit] as const,
   alerts: (

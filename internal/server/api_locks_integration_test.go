@@ -66,3 +66,36 @@ func TestINTACT003_ActivityEndpointReportsDatabase(t *testing.T) {
 	require.Len(t, got.Metrics["pg_deadlocks_total"], 1)
 	require.Equal(t, float64(2), got.Metrics["pg_deadlocks_total"][0].Value)
 }
+
+// TestINTACT004_ActivityServesConnectionTotalsAndAges: the connection totals,
+// the saturation ratio and the transaction ages the Activity section reads
+// were left out of the endpoint's metric list and always showed as missing.
+func TestINTACT004_ActivityServesConnectionTotalsAndAges(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	id := uuid.New()
+	cid := int64(pgtype.ClusterID(90003))
+	ts := time.Now().UTC()
+	names := []string{"pg_connections_used", "pg_connections_limit", "pg_connections_used_ratio", "pg_max_xact_age_seconds", "pg_max_idle_in_transaction_seconds"}
+	for i, name := range names {
+		_, err := pool.Exec(context.Background(), `INSERT INTO metrics (ts,tenant_id,cluster_id,instance_id,datname,metric,labels,series_id,value) VALUES ($1,'default',$2,$3,'',$4,'{}',$5,$6)`, ts, cid, id, name, int64(92000+i), float64(i+1))
+		require.NoError(t, err)
+	}
+	// A deadlock rate written 60 seconds ago is still the latest one: the
+	// database_stats check runs every 30 seconds.
+	_, err := pool.Exec(context.Background(), `INSERT INTO metrics (ts,tenant_id,cluster_id,instance_id,datname,metric,labels,series_id,value) VALUES ($1,'default',$2,$3,'app','pg_deadlocks_total','{"datname":"app"}',$4,0.5)`, ts.Add(-60*time.Second), cid, id, int64(92100))
+	require.NoError(t, err)
+
+	r := chi.NewRouter()
+	NewAPI(pool).RegisterRoutes(r)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/instances/"+id.String()+"/activity", http.NoBody))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var got activityAPIResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	for i, name := range names {
+		require.Len(t, got.Metrics[name], 1, name)
+		require.Equal(t, float64(i+1), got.Metrics[name][0].Value, name)
+	}
+	require.Len(t, got.Metrics["pg_deadlocks_total"], 1)
+}

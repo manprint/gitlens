@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -114,7 +115,7 @@ func TestINTFACT005_V2StoresTypedMetricAndFact(t *testing.T) {
 // supported range in the response.
 func TestINTFACT006_RejectsUnknownProtocol(t *testing.T) {
 	pool := getSharedPool(t)
-	reqEnv := wire.Envelope{ProtocolVersion: 3, AgentID: uuid.NewString(), SentAt: time.Now()}
+	reqEnv := wire.Envelope{ProtocolVersion: wire.ProtocolVersionCurrent + 1, AgentID: uuid.NewString(), SentAt: time.Now()}
 	body, err := json.Marshal(reqEnv)
 	require.NoError(t, err)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/push", bytes.NewReader(body))
@@ -122,7 +123,7 @@ func TestINTFACT006_RejectsUnknownProtocol(t *testing.T) {
 	rec := httptest.NewRecorder()
 	factsRouter(pool).ServeHTTP(rec, req)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
-	require.Contains(t, rec.Body.String(), "supported range 1-2")
+	require.Contains(t, rec.Body.String(), fmt.Sprintf("supported range %d-%d", wire.ProtocolVersionMin, wire.ProtocolVersionCurrent))
 }
 
 func assertPush(t *testing.T, handler http.Handler, env wire.Envelope, status int) {

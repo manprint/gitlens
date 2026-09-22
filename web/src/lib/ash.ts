@@ -72,7 +72,11 @@ interface AxisPoint {
   sampled: boolean
 }
 
-function buildAxis(buckets: readonly AshBucket[]): AxisPoint[] {
+// stepMs is the server's resolution when it is known. Inferred from the
+// smallest gap between observed buckets, the step of a range with an outage
+// could be a multiple of the resolution, and the unsampled buckets inside it
+// were never marked as gaps.
+function buildAxis(buckets: readonly AshBucket[], stepMs?: number): AxisPoint[] {
   const labels = new Map<string, { label: string; ms: number | null }>()
   for (const bucket of buckets) {
     const ms = timestampMs(bucket.ts)
@@ -100,7 +104,10 @@ function buildAxis(buckets: readonly AshBucket[]): AxisPoint[] {
     .slice(1)
     .map((point, index) => point.ms! - observed[index]!.ms!)
     .filter((delta) => delta > 0)
-  const step = Math.min(...positiveDeltas)
+  const step =
+    stepMs !== undefined && Number.isFinite(stepMs) && stepMs > 0
+      ? stepMs
+      : Math.min(...positiveDeltas)
   if (!Number.isFinite(step) || step <= 0) {
     return observed.map(({ label, ms }) => ({ key: String(ms), label, ms, sampled: true }))
   }
@@ -137,10 +144,14 @@ function pointValue(bucket: AshBucket): number | null {
 }
 
 /** Align ASH groups to one axis without turning an unsampled window into zero. */
-export function toStackedSeries(buckets: readonly AshBucket[], groupBy: AshGroupBy): AshSeries[] {
+export function toStackedSeries(
+  buckets: readonly AshBucket[],
+  groupBy: AshGroupBy,
+  stepSeconds?: number,
+): AshSeries[] {
   if (buckets.length === 0) return []
 
-  const axis = buildAxis(buckets)
+  const axis = buildAxis(buckets, stepSeconds === undefined ? undefined : stepSeconds * 1_000)
   const byGroup = new Map<string, Map<string, AshBucket>>()
   const sampledKeys = new Set<string>()
 

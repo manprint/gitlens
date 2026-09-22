@@ -21,12 +21,28 @@ import (
 
 // ConnOptions configures the connection manager.
 type ConnOptions struct {
+	// MaxConnsPerInstance bounds the pool on the DSN's own (maintenance)
+	// database: the shared connection, the ASH sampler's dedicated one and
+	// the instance-scoped checks.
 	MaxConnsPerInstance int
 	MaxDatabases        int
-	IdleTimeout         time.Duration
-	Include             []*regexp.Regexp
-	Exclude             []*regexp.Regexp
+	// IdleTimeout closes per-database connections that have not been used
+	// for this long, so a monitored database costs a connection only while
+	// its checks actually run.
+	IdleTimeout time.Duration
+	Include     []*regexp.Regexp
+	Exclude     []*regexp.Regexp
+	// ClusterName is the fallback cluster identity used when
+	// pg_control_system() is not readable (targets[].cluster_name). Empty
+	// falls back to the target name.
+	ClusterName string
 }
+
+// maxConnsPerDatabase bounds each per-database pool. The database-scoped
+// checks (statements, tables, indexes, bloat) and the occasional on-demand
+// command are the only users, and two lets a long bloat scan run without
+// stalling the others.
+const maxConnsPerDatabase = 2
 
 // DefaultConnOptions returns sensible defaults (D22: 4 conns per instance from phase 7.1, 3 before).
 func DefaultConnOptions() ConnOptions {
@@ -34,12 +50,35 @@ func DefaultConnOptions() ConnOptions {
 		MaxConnsPerInstance: 4,
 		MaxDatabases:        10,
 		IdleTimeout:         5 * time.Minute,
-		Exclude: []*regexp.Regexp{
-			regexp.MustCompile(`^template\d$`),
-			regexp.MustCompile(`^rdsadmin$`),
-			regexp.MustCompile(`^azure_.*$`),
-		},
+		Exclude:             DefaultDatabaseExcludes(),
 	}
+}
+
+// DefaultDatabaseExcludes is the exclude list applied when a target does not
+// configure databases.exclude itself: templates and the managed-service
+// administrative databases, which the monitoring role must not wander into.
+func DefaultDatabaseExcludes() []*regexp.Regexp {
+	return []*regexp.Regexp{
+		regexp.MustCompile(`^template\d$`),
+		regexp.MustCompile(`^rdsadmin$`),
+		regexp.MustCompile(`^azure_.*$`),
+	}
+}
+
+// ReadOnlySession runs on every physical connection the agent opens, before
+// any caller can use it: the Manager's pools and the check command's single
+// connection. pglens only ever reads from a monitored instance, so
+// the server itself is told to refuse writes for the whole session: every
+// transaction — implicit or explicit, from a check, from ASH or from an
+// on-demand command — then starts READ ONLY, and INSERT/UPDATE/DELETE,
+// DDL, nextval() and friends fail inside PostgreSQL rather than depending on
+// the agent never issuing them. The statement is a constant, so the simple
+// protocol pgx uses for an argument-less Exec carries no injection risk.
+func ReadOnlySession(ctx context.Context, conn *pgx.Conn) error {
+	if _, err := conn.Exec(ctx, "SET default_transaction_read_only = on"); err != nil {
+		return fmt.Errorf("enforce read-only session: %w", err)
+	}
+	return nil
 }
 
 // Manager owns a shared connection pool per target + LRU per-database pools.
@@ -50,6 +89,10 @@ type Manager struct {
 	mu     sync.Mutex
 	dbs    map[string]*pgxpool.Pool // per-database pools
 	dbtc   map[string]time.Time     // last access time per database
+	// statementsDB is the database whose pg_stat_statements view stands in
+	// for databases without one; empty means the maintenance database. See
+	// LocateStatements.
+	statementsDB string
 
 	endpointOnce sync.Once
 	addr         string
@@ -72,6 +115,7 @@ func NewManager(ctx context.Context, targetName string, dsn string, opts ConnOpt
 	}
 	cfg.MaxConns = int32(opts.MaxConnsPerInstance)
 	cfg.MinConns = 1
+	cfg.AfterConnect = ReadOnlySession
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("create pool: %w", err)
@@ -92,8 +136,8 @@ func NewManager(ctx context.Context, targetName string, dsn string, opts ConnOpt
 // high-frequency loop never contends with the other checks for the same
 // connection). Unlike Shared(), which callers acquire and release promptly,
 // the caller here holds this connection until the sampler itself stops; the
-// connection budget (DefaultConnOptions: 4) is already sized for this — 1
-// shared, 1 ASH, 2 rotating per-database.
+// maintenance-database budget (DefaultConnOptions: 4) is sized for this — 1
+// ASH plus up to 3 for the shared connection and instance-scoped checks.
 func (m *Manager) DedicatedConn(ctx context.Context) (*pgxpool.Conn, error) {
 	conn, err := m.target.pool.Acquire(ctx)
 	if err != nil {
@@ -124,7 +168,10 @@ func (m *Manager) Shared(ctx context.Context) (*pgxpool.Conn, error) {
 }
 
 // ForDatabase returns a connection to the named database, opening one on demand.
-// Blocks up to context deadline when budget exhausted; never exceeds MaxConnsPerInstance.
+// Each database has its own small pool (maxConnsPerDatabase, never more than
+// MaxConnsPerInstance) that keeps no idle minimum and closes connections
+// after IdleTimeout; Acquire blocks up to the context deadline when that pool
+// is exhausted.
 func (m *Manager) ForDatabase(ctx context.Context, datname string) (*pgxpool.Conn, error) {
 	m.mu.Lock()
 	pool, exists := m.dbs[datname]
@@ -140,9 +187,14 @@ func (m *Manager) ForDatabase(ctx context.Context, datname string) (*pgxpool.Con
 				}
 			}
 			if oldest != "" {
-				m.dbs[oldest].Close()
+				// pgxpool.Close waits for every acquired connection to be
+				// released; doing that under m.mu stalled every other
+				// database lookup behind a check still scanning the evicted
+				// database.
+				evicted := m.dbs[oldest]
 				delete(m.dbs, oldest)
 				delete(m.dbtc, oldest)
+				go evicted.Close()
 			}
 		}
 		// Create new per-database pool.
@@ -152,8 +204,19 @@ func (m *Manager) ForDatabase(ctx context.Context, datname string) (*pgxpool.Con
 			return nil, fmt.Errorf("parse DSN for %s: %w", datname, err)
 		}
 		cfg.ConnConfig.Database = datname
-		cfg.MaxConns = int32(m.opts.MaxConnsPerInstance)
-		cfg.MinConns = 1
+		cfg.MaxConns = int32(perDatabaseMaxConns(m.opts))
+		cfg.MinConns = 0
+		if m.opts.IdleTimeout > 0 {
+			cfg.MaxConnIdleTime = m.opts.IdleTimeout
+		}
+		// The database name comes from pg_database, i.e. from whoever may
+		// CREATE DATABASE on the monitored instance. It used to be spliced
+		// into `SET application_name = '...'` and sent through the simple
+		// protocol, where a name containing a quote closed the literal and
+		// ran whatever followed as the monitoring role. A startup parameter
+		// is a plain key/value pair that is never parsed as SQL.
+		cfg.ConnConfig.RuntimeParams["application_name"] = "pglens/" + datname
+		cfg.AfterConnect = ReadOnlySession
 		pool, err = pgxpool.NewWithConfig(ctx, cfg)
 		if err != nil {
 			m.mu.Unlock()
@@ -168,15 +231,19 @@ func (m *Manager) ForDatabase(ctx context.Context, datname string) (*pgxpool.Con
 	if err != nil {
 		return nil, err
 	}
-	if _, err := conn.Exec(ctx, fmt.Sprintf("SET application_name = 'pglens/%s'", datname)); err != nil {
-		conn.Release()
-		return nil, err
-	}
 	if err := check.ApplySessionLimits(ctx, conn, 30*time.Second); err != nil {
 		conn.Release()
 		return nil, err
 	}
 	return conn, nil
+}
+
+func perDatabaseMaxConns(opts ConnOptions) int {
+	n := maxConnsPerDatabase
+	if opts.MaxConnsPerInstance > 0 && opts.MaxConnsPerInstance < n {
+		n = opts.MaxConnsPerInstance
+	}
+	return n
 }
 
 // Discover queries pg_database and pg_stat_database, applying selection rules.
@@ -221,6 +288,25 @@ func (m *Manager) Discover(ctx context.Context) ([]wire.Database, error) {
 type dbRow struct {
 	name       string
 	xactCommit int64
+}
+
+// DatabaseCandidate is a connectable database with the commit count the
+// database budget ranks by.
+type DatabaseCandidate struct {
+	Name       string
+	XactCommit int64
+}
+
+// SelectDatabases applies Discover's selection rules to candidates found by
+// someone else, so the check command reports the choice the agent makes
+// instead of calling every database monitored. Excluded databases are left
+// out of the result, as Discover leaves them out.
+func SelectDatabases(candidates []DatabaseCandidate, opts ConnOptions) []wire.Database {
+	dbs := make([]dbRow, 0, len(candidates))
+	for _, c := range candidates {
+		dbs = append(dbs, dbRow{c.Name, c.XactCommit})
+	}
+	return selectDatabases(dbs, opts)
 }
 
 // selectDatabases applies the selection rules from phase_05.md §4.1.
@@ -352,12 +438,18 @@ func (m *Manager) ensureCache(ctx context.Context) error {
 
 	// Query for system_identifier to derive ClusterID
 	var clusterID pgtype.ClusterID
+	idSource := pgtype.IDSourceSystemIdentifier
 	var systemID uint64
 	if err := conn.QueryRow(ctx, "SELECT system_identifier FROM pg_control_system()").Scan(&systemID); err == nil {
 		clusterID = pgtype.ClusterID(systemID)
 	} else {
-		// Fallback to manual cluster ID from target name
-		clusterID = pgtype.ManualClusterID(m.target.name)
+		// Fall back to the configured cluster_name (documented), or to the
+		// target name when none is configured. The target name alone used to
+		// be the only fallback, so the cluster_name every instance of a
+		// cluster was told to share was silently ignored and each target
+		// became its own cluster.
+		clusterID = pgtype.ManualClusterID(m.fallbackClusterName())
+		idSource = pgtype.IDSourceManual
 	}
 
 	// Query permission tier and extensions. The initial snapshot is refreshed
@@ -365,27 +457,10 @@ func (m *Manager) ensureCache(ctx context.Context) error {
 	// scrape/command without an agent restart.
 	permTier, extensions := m.queryCapabilities(ctx, conn)
 
-	// Get or create InstanceID via identity store
-	identityPath := os.Getenv("PGLENS_IDENTITY_PATH")
-	if identityPath == "" {
-		identityPath = "/var/lib/pglens/identity.json"
+	// A target is not usable without its identity: every envelope carries it.
+	if _, _, err := m.localIdentity(); err != nil {
+		return err
 	}
-
-	idStore, err := identity.Open(identityPath)
-	if err != nil {
-		return fmt.Errorf("open identity store: %w", err)
-	}
-
-	fingerprint, err := identity.Fingerprint(m.target.dsn)
-	if err != nil {
-		return fmt.Errorf("fingerprint DSN: %w", err)
-	}
-
-	instanceID, _, err := idStore.InstanceID(fingerprint)
-	if err != nil {
-		return fmt.Errorf("get instance id: %w", err)
-	}
-	agentID := idStore.AgentID()
 
 	// One critical section, after every query has succeeded: a partially
 	// populated cache is never observable, and `initialized` is published
@@ -394,10 +469,9 @@ func (m *Manager) ensureCache(ctx context.Context) error {
 	m.target.cache.pgVersion = pgtype.PGVersion(versionNum)
 	m.target.cache.role = pgtype.RoleFromRecovery(inRecovery)
 	m.target.cache.clusterID = clusterID
+	m.target.cache.idSource = idSource
 	m.target.cache.permTier = permTier
 	m.target.cache.extensions = extensions
-	m.target.cache.instanceID = instanceID
-	m.target.cache.agentID = agentID
 	m.target.cache.initialized = true
 	m.target.cache.mu.Unlock()
 	return nil
@@ -474,26 +548,73 @@ func (m *Manager) RefreshCapabilities(ctx context.Context) error {
 // every pushed wire.Envelope should carry so the server can key per-agent
 // state (e.g. revocation, SYS-AGENT-005) by the actual agent process rather
 // than by whichever instance happened to flush first.
+//
+// Neither identity needs the target: both live in the local identity file.
+// They used to be read only after the first successful connection, so an
+// agent whose first target was down at startup handed the command
+// dispatcher a nil agent id (commands disabled until restart) and registered
+// every unreachable target under the zero instance id.
 func (m *Manager) AgentID() uuid.UUID {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := m.ensureCache(ctx); err != nil {
+	_, agentID, err := m.localIdentity()
+	if err != nil {
 		return uuid.Nil
 	}
-	m.target.cache.mu.RLock()
-	defer m.target.cache.mu.RUnlock()
-	return m.target.cache.agentID
+	return agentID
 }
 
 func (m *Manager) InstanceID() pgtype.InstanceID {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := m.ensureCache(ctx); err != nil {
+	instanceID, _, err := m.localIdentity()
+	if err != nil {
 		return pgtype.InstanceID{}
 	}
-	m.target.cache.mu.RLock()
-	defer m.target.cache.mu.RUnlock()
-	return m.target.cache.instanceID
+	return instanceID
+}
+
+// localIdentity reads this target's instance id and the agent id from the
+// process-wide identity store, allocating the instance id on first sight.
+func (m *Manager) localIdentity() (pgtype.InstanceID, uuid.UUID, error) {
+	store, err := identityStore()
+	if err != nil {
+		return pgtype.InstanceID{}, uuid.Nil, fmt.Errorf("open identity store: %w", err)
+	}
+	fingerprint, err := identity.Fingerprint(m.target.dsn)
+	if err != nil {
+		return pgtype.InstanceID{}, uuid.Nil, fmt.Errorf("fingerprint DSN: %w", err)
+	}
+	instanceID, _, err := store.InstanceID(fingerprint)
+	if err != nil {
+		return pgtype.InstanceID{}, uuid.Nil, fmt.Errorf("get instance id: %w", err)
+	}
+	return instanceID, store.AgentID(), nil
+}
+
+var (
+	identityMu     sync.Mutex
+	identityStores = map[string]*identity.Store{}
+)
+
+// identityStore returns the one identity.Store this process uses for
+// PGLENS_IDENTITY_PATH. Each Manager used to open its own copy of the file:
+// two targets initialising at the same time each allocated an instance id in
+// their private copy, the second atomic rename erased the first one's entry,
+// and that instance came back under a new id after the next restart (and on
+// a fresh install both copies could even mint different agent ids).
+func identityStore() (*identity.Store, error) {
+	path := os.Getenv("PGLENS_IDENTITY_PATH")
+	if path == "" {
+		path = "/var/lib/pglens/identity.json"
+	}
+	identityMu.Lock()
+	defer identityMu.Unlock()
+	if store, ok := identityStores[path]; ok {
+		return store, nil
+	}
+	store, err := identity.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	identityStores[path] = store
+	return store, nil
 }
 
 func (m *Manager) ClusterID() pgtype.ClusterID {
@@ -505,6 +626,29 @@ func (m *Manager) ClusterID() pgtype.ClusterID {
 	m.target.cache.mu.RLock()
 	defer m.target.cache.mu.RUnlock()
 	return m.target.cache.clusterID
+}
+
+// ClusterIDSource reports how ClusterID was derived: from the instance's
+// system_identifier, or manually from cluster_name/the target name.
+func (m *Manager) ClusterIDSource() pgtype.IDSource {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := m.ensureCache(ctx); err != nil {
+		return pgtype.IDSourceManual
+	}
+	m.target.cache.mu.RLock()
+	defer m.target.cache.mu.RUnlock()
+	if m.target.cache.idSource == "" {
+		return pgtype.IDSourceSystemIdentifier
+	}
+	return m.target.cache.idSource
+}
+
+func (m *Manager) fallbackClusterName() string {
+	if m.opts.ClusterName != "" {
+		return m.opts.ClusterName
+	}
+	return m.target.name
 }
 
 func (m *Manager) Role() pgtype.Role {
@@ -594,6 +738,49 @@ func (m *Manager) ConnFor(ctx context.Context, datname string) (check.Conn, erro
 }
 func (m *Manager) Database() string {
 	return m.target.name
+}
+
+const statementsInstalled = `SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements')`
+
+// LocateStatements chooses the database whose pg_stat_statements view the
+// stat_statements check and EXPLAIN read for a database without its own,
+// and reports whether any has one. The statistics are cluster-wide, but
+// CREATE EXTENSION creates the view in one database only: the maintenance
+// database is used when it has the view, and otherwise the first monitored
+// database that does. Scheduling used to look at the maintenance database
+// alone, so an extension created only in an application database left the
+// check disabled and every statement unseen.
+func (m *Manager) LocateStatements(ctx context.Context, dbs []wire.Database) bool {
+	found, where := m.HasExtension("pg_stat_statements"), "" //nolint:contextcheck // reads the capability cache, which bounds its own refresh
+	for _, db := range dbs {
+		if found {
+			break
+		}
+		if !db.Monitored {
+			continue
+		}
+		conn, err := m.ForDatabase(ctx, db.Name)
+		if err != nil {
+			continue
+		}
+		var installed bool
+		err = conn.QueryRow(ctx, statementsInstalled).Scan(&installed)
+		conn.Release()
+		if err == nil && installed {
+			found, where = true, db.Name
+		}
+	}
+	m.mu.Lock()
+	m.statementsDB = where
+	m.mu.Unlock()
+	return found
+}
+
+// StatementsDatabase implements check.StatementsSource.
+func (m *Manager) StatementsDatabase() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.statementsDB
 }
 
 // TargetName returns the stable logical name from the agent configuration.

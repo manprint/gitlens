@@ -109,8 +109,14 @@ describe('AshPage', () => {
 
     expect(new URLSearchParams(view.router.state.location.search).get('group')).toBe('wait_event')
     expect(mocks.ash).toHaveBeenLastCalledWith(
-      expect.objectContaining({ group_by: 'wait_event', instance_id: 'instance-1' }),
+      expect.objectContaining({
+        group_by: 'wait_event',
+        instance_id: 'instance-1',
+        limit: 5000,
+        wait_event_type: 'Lock',
+      }),
     )
+    expect(mocks.ash.mock.lastCall?.[0]).not.toHaveProperty('wait_event')
     expect(screen.getByRole('heading', { name: 'Wait events' })).toBeInTheDocument()
   })
 
@@ -126,8 +132,83 @@ describe('AshPage', () => {
     expect(params.get('group')).toBe('wait_event')
     expect(params.get('wait_event_type')).toBe('Lock')
     expect(mocks.ash).toHaveBeenLastCalledWith(
-      expect.objectContaining({ group_by: 'wait_event', instance_id: 'instance-1' }),
+      expect.objectContaining({
+        group_by: 'wait_event',
+        instance_id: 'instance-1',
+        wait_event_type: 'Lock',
+      }),
     )
+  })
+
+  it('UI-ASH-025 asks the top level for every wait event type, without filters', () => {
+    renderAsh('/instances/instance-1/ash?group=wait_event_type&wait_event_type=Lock')
+
+    const params = mocks.ash.mock.lastCall?.[0] as Record<string, unknown>
+    expect(params).toMatchObject({ group_by: 'wait_event_type', limit: 5000 })
+    expect(params).not.toHaveProperty('wait_event_type')
+    expect(params).not.toHaveProperty('wait_event')
+  })
+
+  it('UI-ASH-026 plots the rows of a drill-down, which carry only their group column', () => {
+    // A grouped answer fills in only the group column (here wait_event); the
+    // parent type is echoed by the server when filtered, not guaranteed.
+    renderAsh('/instances/instance-1/ash?group=wait_event&wait_event_type=Lock', {
+      ...ashResponse,
+      buckets: [
+        {
+          avg_active_sessions: 0.5,
+          samples: 5,
+          ticks: 10,
+          ts: '2026-09-01T10:00:00Z',
+          wait_event: 'relation',
+        },
+        {
+          avg_active_sessions: 0.2,
+          samples: 2,
+          ticks: 10,
+          ts: '2026-09-01T10:00:00Z',
+          wait_event: 'tuple',
+        },
+      ],
+    })
+
+    const option = (mocks.chart.mock.calls.at(-1)?.[0] as { option: EChartsOption }).option
+    const names = (option.series as { name: string }[]).map((series) => series.name)
+    expect(names).toEqual(expect.arrayContaining(['relation', 'tuple']))
+    expect(
+      screen.queryByRole('heading', { name: 'No wait events observed' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('UI-ASH-027 marks a missing bucket as a gap at the server resolution', () => {
+    renderAsh('/instances/instance-1/ash', {
+      ...ashResponse,
+      buckets: [
+        {
+          avg_active_sessions: 1,
+          samples: 10,
+          ticks: 10,
+          ts: '2026-09-01T10:00:00Z',
+          wait_event_type: 'CPU',
+        },
+        {
+          avg_active_sessions: 1,
+          samples: 10,
+          ticks: 10,
+          ts: '2026-09-01T10:01:30Z',
+          wait_event_type: 'CPU',
+        },
+      ],
+      resolution_seconds: 30,
+    })
+
+    const option = (mocks.chart.mock.calls.at(-1)?.[0] as { option: EChartsOption }).option
+    const cpu = (option.series as { name: string; data: unknown[] }[]).find(
+      (series) => series.name === 'CPU',
+    )
+    // 10:00:00, 10:00:30 and 10:01:00 unsampled, 10:01:30: two gaps, not
+    // one 90-second step between two points.
+    expect(cpu?.data).toHaveLength(4)
   })
 
   it('UI-ASH-022 breadcrumb navigates back out of the drill path', () => {
@@ -147,6 +228,32 @@ describe('AshPage', () => {
     expect(params.get('wait_event_type')).toBeNull()
   })
 
+  it('UI-ASH-035 reports the summed samples of every group folded into other', () => {
+    const ts = '2026-09-01T10:00:00Z'
+    const groups: [string, number][] = [
+      ['CPU', 20],
+      ...Array.from({ length: 11 }, (_, index): [string, number] => [`W${index + 1}`, 12 - index]),
+    ]
+    renderAsh('/instances/instance-1/ash', {
+      ...ashResponse,
+      buckets: groups.map(([name, samples]) => ({
+        avg_active_sessions: samples / 10,
+        samples,
+        ticks: 10,
+        ts,
+        wait_event_type: name,
+      })),
+    })
+
+    const option = (mocks.chart.mock.calls.at(-1)?.[0] as { option: EChartsOption }).option
+    const formatter = (option.tooltip as { formatter: (params: unknown) => string }).formatter
+    // W10 (3 samples) and W11 (2) are folded: "other" is their sum, not the
+    // last one read.
+    expect(formatter([{ seriesName: 'other (folded)', value: [ts, 0.5] }])).toContain(
+      'samples: 5, ticks: 10',
+    )
+  })
+
   it('UI-ASH-023 links top queries to the inspector with a string queryid', () => {
     renderAsh('/instances/instance-1/ash?group=queryid&wait_event=relation')
 
@@ -154,6 +261,31 @@ describe('AshPage', () => {
       'href',
       '/instances/instance-1/queries/9007199254740993',
     )
+  })
+
+  it('UI-ASH-028 narrows the queries and the top list to the drilled wait event', () => {
+    renderAsh('/instances/instance-1/ash?group=queryid&wait_event_type=Lock&wait_event=relation')
+
+    expect(mocks.ash).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        group_by: 'queryid',
+        wait_event: 'relation',
+        wait_event_type: 'Lock',
+      }),
+    )
+    expect(mocks.ashTop).toHaveBeenLastCalledWith(
+      expect.objectContaining({ wait_event: 'relation', wait_event_type: 'Lock' }),
+    )
+    expect(screen.getByText(/Ranked by samples in wait event Lock\/relation\./)).toBeInTheDocument()
+  })
+
+  it('UI-ASH-029 ranks the unfiltered top list across every wait event', () => {
+    renderAsh('/instances/instance-1/ash?group=queryid')
+
+    const params = mocks.ashTop.mock.lastCall?.[0] as Record<string, unknown>
+    expect(params).not.toHaveProperty('wait_event')
+    expect(params).not.toHaveProperty('wait_event_type')
+    expect(screen.getByText(/Ranked by samples across every wait event\./)).toBeInTheDocument()
   })
 
   it('UI-ASH-024 states the deliberate PII boundary in the query section', () => {

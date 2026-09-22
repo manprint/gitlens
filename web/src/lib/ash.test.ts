@@ -134,4 +134,32 @@ describe('ASH derivation helpers', () => {
 
     expect(orderGroups(input)).toEqual(orderGroups(input))
   })
+
+  it('UI-ASH-010 steps the axis at a known resolution, not the smallest observed gap', () => {
+    const buckets = [
+      bucket('2026-08-31T12:00:00Z', 2, 'CPU'),
+      bucket('2026-08-31T12:02:00Z', 2, 'CPU'),
+      bucket('2026-08-31T12:06:00Z', 2, 'CPU'),
+    ]
+
+    // Inferred, the step is the two-minute gap and the outage in between
+    // hides; at the server's one-minute resolution every missing bucket is a
+    // gap.
+    expect(toStackedSeries(buckets, 'wait_event_type')[0]?.points).toHaveLength(4)
+    expect(
+      toStackedSeries(buckets, 'wait_event_type', 60)[0]?.points.map(({ value }) => value),
+    ).toEqual([2, null, 2, null, null, null, 2])
+  })
+
+  it('UI-ASH-011 ignores an unusable resolution and infers the step', () => {
+    const buckets = [
+      bucket('2026-08-31T12:00:00Z', 2, 'CPU'),
+      bucket('2026-08-31T12:01:00Z', 2, 'CPU'),
+      bucket('2026-08-31T12:03:00Z', 2, 'CPU'),
+    ]
+
+    expect(
+      toStackedSeries(buckets, 'wait_event_type', 0)[0]?.points.map(({ value }) => value),
+    ).toEqual([2, 2, null, 2])
+  })
 })

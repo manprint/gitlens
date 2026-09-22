@@ -18,7 +18,7 @@ func TestIngest_RejectsUnknownProtocolVersion(t *testing.T) {
 	t.Parallel()
 	auth := NewAuth("token")
 	h := IngestHandler(auth, NewInventory(nil), NewPipeline(nil, nil))
-	env := wire.Envelope{ProtocolVersion: 3, AgentID: "a", SentAt: time.Now()}
+	env := wire.Envelope{ProtocolVersion: wire.ProtocolVersionCurrent + 1, AgentID: "a", SentAt: time.Now()}
 	body, _ := json.Marshal(env)
 	req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
@@ -160,4 +160,56 @@ func TestIngest_RejectsDecompressionBomb(t *testing.T) {
 	h.ServeHTTP(w, req)
 	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
 	require.Contains(t, w.Body.String(), "payload too large")
+}
+
+// TestIngest_TransmittedAtHeaderIsTheSkewReference covers an envelope
+// replayed from the agent's buffer: it was queued an hour ago but sent now,
+// so the agent's clock is fine.
+func TestIngest_TransmittedAtHeaderIsTheSkewReference(t *testing.T) {
+	t.Parallel()
+	queued := time.Now().Add(-time.Hour)
+	sent := time.Now()
+	req := httptest.NewRequest("POST", "/api/v1/push", nil)
+	req.Header.Set(wire.TransmittedAtHeader, sent.UTC().Format(time.RFC3339Nano))
+	require.WithinDuration(t, sent, transmittedAt(req, queued), time.Millisecond)
+
+	legacy := httptest.NewRequest("POST", "/api/v1/push", nil)
+	require.Equal(t, queued, transmittedAt(legacy, queued), "agents without the header fall back to sent_at")
+
+	env := wire.Envelope{SentAt: queued, TransmittedAt: sent}
+	inst := wire.Instance{Results: []wire.Result{{Check: "activity", TS: queued}}}
+	rows := selfMetricRows(env, inst, "default", 1, uuid.New(), sent.Add(time.Second))
+	for _, r := range rows {
+		if r.Metric == "pglens_agent_clock_skew_seconds" {
+			require.InDelta(t, 1.0, r.Value, 0.01, "an hour of queueing is not skew")
+			return
+		}
+	}
+	t.Fatal("no clock skew sample")
+}
+
+// TestIngest_ErrorBodiesAreJSON: a decode error quotes the offending
+// character, and pasting it unescaped into a Sprintf'd body made the error
+// response itself invalid JSON (sent as text/plain).
+func TestIngest_ErrorBodiesAreJSON(t *testing.T) {
+	t.Parallel()
+	h := IngestHandler(NewAuth("token"), NewInventory(nil), NewPipeline(nil, nil))
+	for name, body := range map[string]string{
+		"quote":     `{"protocol_version": "1"}`,
+		"garbage":   `"}{`,
+		"truncated": `{"agent_id":`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader([]byte(body)))
+			req.Header.Set("Authorization", "Bearer token")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			require.Equal(t, http.StatusBadRequest, w.Code)
+			require.Equal(t, "application/json", w.Header().Get("Content-Type"))
+			var resp apiError
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp), w.Body.String())
+			require.Equal(t, "bad json", resp.Error)
+			require.NotEmpty(t, resp.Detail)
+		})
+	}
 }

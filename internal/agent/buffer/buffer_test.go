@@ -892,3 +892,107 @@ func TestBuffer_StatsSnapshotIsIndependent(t *testing.T) {
 	}
 	<-done
 }
+
+// TestBuffer_QuietAgentNeverLosesTheFreshRecord covers a low-volume agent
+// whose single segment stays open for longer than MaxAge: every envelope must
+// still be readable right after it is appended, and envelopes that were
+// delivered must never be reported as dropped.
+func TestBuffer_QuietAgentNeverLosesTheFreshRecord(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	buf, err := Open(t.TempDir(), Options{MaxAge: time.Hour, Clock: clk})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = buf.Close() }()
+
+	for i := 0; i < 20; i++ {
+		clk.Advance(10 * time.Minute)
+		record := []byte(fmt.Sprintf("envelope-%d", i))
+		if err := buf.Append(record); err != nil {
+			t.Fatalf("Append %d: %v", i, err)
+		}
+		got, ack, err := buf.Next()
+		if err != nil {
+			t.Fatalf("envelope %d was not readable right after Append: %v", i, err)
+		}
+		if string(got) != string(record) {
+			t.Fatalf("Next = %q, want %q", got, record)
+		}
+		if err := ack(context.Background()); err != nil {
+			t.Fatalf("ack %d: %v", i, err)
+		}
+	}
+	for reason, n := range buf.Stats().SamplesDropped {
+		if n != 0 {
+			t.Errorf("%d delivered envelopes reported as dropped (%s)", n, reason)
+		}
+	}
+}
+
+// TestBuffer_DeliveredRecordsAreNotDrops keeps retention of already-acked
+// data out of pglens_samples_dropped_rate.
+func TestBuffer_DeliveredRecordsAreNotDrops(t *testing.T) {
+	buf, err := Open(t.TempDir(), Options{MaxSize: 64, Clock: clock.System()})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = buf.Close() }()
+
+	for i := 0; i < 2; i++ {
+		if err := buf.Append([]byte("01234567890123456789")); err != nil {
+			t.Fatalf("Append %d: %v", i, err)
+		}
+		_, ack, err := buf.Next()
+		if err != nil {
+			t.Fatalf("Next %d: %v", i, err)
+		}
+		if err := ack(context.Background()); err != nil {
+			t.Fatalf("ack %d: %v", i, err)
+		}
+	}
+	// Rolls the first (fully delivered) segment out under the 64-byte budget.
+	if err := buf.Append([]byte("01234567890123456789")); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if got := buf.Stats().SamplesDropped["size_limit"]; got != 0 {
+		t.Errorf("size_limit drops = %d, want 0: both removed records had been delivered", got)
+	}
+}
+
+// TestBuffer_AckSurvivesAnUncleanExit reopens the buffer without Close, as
+// after a crash or SIGKILL: delivered envelopes must not be replayed.
+func TestBuffer_AckSurvivesAnUncleanExit(t *testing.T) {
+	dir := t.TempDir()
+	buf, err := Open(dir, Options{Clock: clock.System()})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	for _, r := range []string{"delivered-1", "delivered-2", "pending"} {
+		if err := buf.Append([]byte(r)); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+	for i := 0; i < 2; i++ {
+		_, ack, err := buf.Next()
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		if err := ack(context.Background()); err != nil {
+			t.Fatalf("ack: %v", err)
+		}
+	}
+	// No Close: the process dies here. Segment data reaches the page cache on
+	// every write, which is what a reopen in the same kernel observes.
+	reopened, err := Open(dir, Options{Clock: clock.System()})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer func() { _ = reopened.Close() }()
+	got, _, err := reopened.Next()
+	if err != nil {
+		t.Fatalf("Next after reopen: %v", err)
+	}
+	if string(got) != "pending" {
+		t.Fatalf("first record after reopen = %q, want %q (delivered envelopes replayed)", got, "pending")
+	}
+}

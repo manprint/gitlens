@@ -12,6 +12,8 @@ const slots: SlotRow[] = [
     name: 'active_slot',
     owningInstance: 'primary',
     retainedBytes: 512,
+    safeWalSizeBytes: 2_048,
+    slotType: 'physical',
     walStatus: 'Streaming',
   },
   {
@@ -20,6 +22,8 @@ const slots: SlotRow[] = [
     name: 'inactive_slot',
     owningInstance: 'standby-1',
     retainedBytes: 1_536,
+    safeWalSizeBytes: null,
+    slotType: 'logical',
     walStatus: null,
   },
 ]
@@ -52,5 +56,40 @@ describe('SlotsSection', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Could not load replication slots')
     fireEvent.click(screen.getByRole('button', { name: 'Retry replication slots' }))
     expect(onRetry).toHaveBeenCalledOnce()
+  })
+
+  it('UI-CLUS-025 shows the slot type and the WAL left before invalidation', () => {
+    renderWithProviders(<SlotsSection slots={slots} />)
+
+    const rows = within(screen.getByTestId('data-table-rows')).getAllByRole('row')
+    expect(rows[0]).toHaveTextContent('logical')
+    expect(rows[0]).toHaveTextContent('Unlimited')
+    expect(rows[0]).toHaveTextContent('1d')
+    expect(rows[1]).toHaveTextContent('physical')
+    expect(rows[1]).toHaveTextContent('2.0 KiB')
+  })
+
+  it('UI-CLUS-026 does not read a lost slot as having unlimited retention', () => {
+    // PostgreSQL reports a NULL safe_wal_size for a lost slot too.
+    renderWithProviders(
+      <SlotsSection
+        slots={[
+          {
+            active: false,
+            inactiveAgeSeconds: 3_600,
+            name: 'lost_slot',
+            owningInstance: 'primary',
+            retainedBytes: 0,
+            safeWalSizeBytes: null,
+            slotType: 'physical',
+            walStatus: 'lost',
+          },
+        ]}
+      />,
+    )
+
+    const row = within(screen.getByTestId('data-table-rows')).getByRole('row')
+    expect(row).toHaveTextContent('None: required WAL already lost')
+    expect(row).not.toHaveTextContent('Unlimited')
   })
 })

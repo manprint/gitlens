@@ -32,6 +32,13 @@ func (c *archiverCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 		return Result{}, err
 	}
 	result := Result{Metrics: []pgtype.Metric{{Name: "pg_archive_mode_enabled", Value: archiveModeValue(mode), Kind: pgtype.KindGauge}}}
+	// A base backup does not need WAL archiving (pg_basebackup -X stream is
+	// the default), so its progress is reported whatever archive_mode says.
+	backups, err := basebackupMetrics(ctx, conn)
+	if err != nil {
+		return Result{}, err
+	}
+	result.Metrics = append(result.Metrics, backups...)
 	if mode != "on" && mode != "always" {
 		return result, nil
 	}
@@ -55,26 +62,45 @@ func (c *archiverCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 	if lastFailed != nil {
 		result.Metrics = append(result.Metrics, pgtype.Metric{Name: "pg_archiver_last_failed_age_seconds", Value: nonNegativeAge(now, *lastFailed), Kind: pgtype.KindGauge})
 	}
-	rows, err := conn.Query(ctx, `SELECT pid, phase, backup_total, backup_streamed, tablespaces_total, tablespaces_streamed FROM pg_stat_progress_basebackup`)
-	if err != nil {
+	// The segments waiting for archive_command. The age of the last archived
+	// segment cannot tell a stuck archiver from an idle server that has
+	// nothing to archive. The function needs pg_monitor; without it the
+	// metric is left out rather than failing the scrape.
+	var ready float64
+	if err := conn.QueryRow(ctx, `SELECT count(*)::float8 FROM pg_ls_archive_statusdir() WHERE name LIKE '%.ready'`).Scan(&ready); err == nil {
+		result.Metrics = append(result.Metrics, pgtype.Metric{Name: "pg_archiver_ready_files", Value: ready, Kind: pgtype.KindGauge})
+	} else if code := pgErrorCode(err); code != pgInsufficientPrivilege && code != pgUndefinedFunction {
 		return Result{}, err
 	}
+	return result, nil
+}
+
+// basebackupMetrics reports running base backups. backup_total is NULL until
+// the size estimate is done, and for the whole backup with --no-estimate-size:
+// scanning it into a float64 failed the entire archiver scrape.
+func basebackupMetrics(ctx context.Context, conn Conn) ([]pgtype.Metric, error) {
+	rows, err := conn.Query(ctx, `SELECT phase, COALESCE(backup_total, 0)::float8, COALESCE(backup_streamed, 0)::float8 FROM pg_stat_progress_basebackup`)
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
+	var metrics []pgtype.Metric
 	jobs := 0
 	for rows.Next() {
-		var pid int32
 		var phase string
-		var total, streamed, tablespacesTotal, tablespacesStreamed float64
-		if err := rows.Scan(&pid, &phase, &total, &streamed, &tablespacesTotal, &tablespacesStreamed); err != nil {
-			return Result{}, err
+		var total, streamed float64
+		if err := rows.Scan(&phase, &total, &streamed); err != nil {
+			return nil, err
 		}
 		jobs++
 		if total > 0 {
-			result.Metrics = append(result.Metrics, pgtype.Metric{Name: "pg_basebackup_progress_ratio", Value: streamed / total, Kind: pgtype.KindGauge, Labels: map[string]string{"phase": phase}})
+			metrics = append(metrics, pgtype.Metric{Name: "pg_basebackup_progress_ratio", Value: streamed / total, Kind: pgtype.KindGauge, Labels: map[string]string{"phase": phase}})
 		}
 	}
-	result.Metrics = append(result.Metrics, pgtype.Metric{Name: "pg_basebackup_jobs_running", Value: float64(jobs), Kind: pgtype.KindGauge})
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return append(metrics, pgtype.Metric{Name: "pg_basebackup_jobs_running", Value: float64(jobs), Kind: pgtype.KindGauge}), nil
 }
 
 func archiveModeValue(mode string) float64 {

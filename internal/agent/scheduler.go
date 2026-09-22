@@ -26,6 +26,7 @@ type EntryResult struct {
 	Metrics    []pgtype.Metric
 	Facts      []check.Fact
 	Truncated  bool
+	Partial    bool
 	Err        error
 	QueryTexts map[int64]string // queryid -> text; stat_statements.go is the only producer today
 	// StatsReset is when the check itself detected its own counters were
@@ -37,13 +38,14 @@ type EntryResult struct {
 	StatsReset *time.Time
 }
 
-// Scheduler schedules checks on a bounded worker pool with per-check timeouts and circuit breaker.
+// Scheduler schedules checks on a bounded worker pool with per-check timeouts
+// and one circuit breaker per scheduled entry (target, check, database).
 type Scheduler struct {
 	maxWorkers      int
 	noJitter        bool
 	clk             clock.Clock
 	entries         []schedEntry
-	breaker         map[string]*Breaker // per-check
+	breaker         map[breakerKey]*Breaker // per (target, check, database)
 	results         chan EntryResult
 	wg              sync.WaitGroup
 	scrapeWG        sync.WaitGroup // tracks in-flight scrapeEntry goroutines specifically, see run()
@@ -53,6 +55,13 @@ type Scheduler struct {
 	running         bool
 	workerSem       chan struct{} // semaphore for bounded concurrency
 	shutdownTimeout time.Duration
+}
+
+// breakerKey identifies one scheduled entry for the circuit breaker.
+type breakerKey struct {
+	target   string
+	check    string
+	database string
 }
 
 type schedEntry struct {
@@ -95,7 +104,7 @@ func NewScheduler(opts ScheduleOptions) *Scheduler {
 		maxWorkers:      opts.MaxWorkers,
 		noJitter:        opts.NoJitter,
 		clk:             opts.Clock,
-		breaker:         make(map[string]*Breaker),
+		breaker:         make(map[breakerKey]*Breaker),
 		results:         make(chan EntryResult, 100),
 		workerSem:       make(chan struct{}, opts.MaxWorkers),
 		shutdownTimeout: opts.ShutdownTimeout,
@@ -117,10 +126,15 @@ func (s *Scheduler) AddEntryWithInterval(target check.Target, c check.Check, dat
 		panic("AddEntry called after Start()")
 	}
 
-	br, ok := s.breaker[c.Name()]
+	// One breaker per entry. Keyed by check name alone, one unreachable
+	// target (or one database without the extension a check needs) opened
+	// the circuit for that check on every other target and database too, so
+	// healthy instances stopped reporting for the whole backoff.
+	key := breakerKey{target: target.Database(), check: c.Name(), database: database}
+	br, ok := s.breaker[key]
 	if !ok {
 		br = NewBreaker()
-		s.breaker[c.Name()] = br
+		s.breaker[key] = br
 	}
 
 	if interval <= 0 {
@@ -282,8 +296,8 @@ func (s *Scheduler) runEntry(ctx context.Context, entry schedEntry) {
 // database this scheduler already resolved via entry.database — so the
 // check silently tried to connect to a database literally named "pg" (which
 // doesn't exist), failing every single scrape. This had gone completely
-// unnoticed because stat_statements is the only ScopeDatabase check in the
-// whole codebase, so no other check could have exposed the same interface
+// unnoticed because stat_statements was then the only ScopeDatabase check in
+// the codebase, so no other check could have exposed the same interface
 // mismatch, and check-level Scrape errors are never logged to agent stderr
 // (only carried silently in wire.Result.Error — V001-F11's absent
 // check_error_total is exactly the visibility gap that let this hide). Every
@@ -295,6 +309,16 @@ type databaseScopedTarget struct {
 }
 
 func (d databaseScopedTarget) Database() string { return d.database }
+
+// StatementsDatabase forwards the Manager's choice: embedding check.Target
+// promotes only that interface's methods, which would hide it from
+// check.StatementsConn.
+func (d databaseScopedTarget) StatementsDatabase() string {
+	if s, ok := d.Target.(check.StatementsSource); ok {
+		return s.StatementsDatabase()
+	}
+	return ""
+}
 
 func (s *Scheduler) scrapeEntry(parentCtx context.Context, entry schedEntry) {
 	ctx, cancel := context.WithTimeout(parentCtx, entry.check.Timeout())
@@ -325,6 +349,7 @@ func (s *Scheduler) scrapeEntry(parentCtx context.Context, entry schedEntry) {
 		Metrics:    result.Metrics,
 		Facts:      result.Facts,
 		Truncated:  result.Truncated,
+		Partial:    result.Partial,
 		QueryTexts: result.QueryTexts,
 		StatsReset: result.StatsReset,
 		Err:        nil,

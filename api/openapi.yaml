@@ -124,8 +124,15 @@ components:
         sync_state:
           type: [string, 'null']
           description: sync or async; null when not yet known.
-        confidence: { type: string, enum: [high, low] }
-        note: { type: [string, 'null'] }
+        confidence:
+          type: string
+          enum: [high, low]
+          description: >-
+            high while the standby's WAL receiver is streaming or catching up;
+            low when it is not, and the edge points at its last-known upstream.
+        note:
+          type: [string, 'null']
+          description: Present on low-confidence edges.
     Event:
       type: object
       required: [event_id, ts, type, cluster_id, instance_id, payload]
@@ -192,11 +199,45 @@ components:
       type: object
       required: [from, to, metric, series]
       properties:
-        from: { $ref: '#/components/schemas/InstanceId' }
+        from:
+          type: string
+          description: >-
+            The standby. An instance ID when the edge resolves to a monitored
+            instance; otherwise the application_name the primary reports the
+            standby under (also in standby_name).
         to: { $ref: '#/components/schemas/InstanceId' }
+        standby_name:
+          type: string
+          description: The application_name the primary reports the standby under; absent on edges read from the standby's own receiver.
         metric: { type: string, enum: [write_lag_sec, flush_lag_sec, replay_lag_sec] }
         sync_state: { type: [string, 'null'] }
         series: { type: array, items: { $ref: '#/components/schemas/MetricPoint' } }
+    Slot:
+      type: object
+      required: [instance_id, slot_name, slot_type, active, wal_status, retained_bytes, safe_wal_size_bytes, last_active_at, ts]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        slot_name: { type: string }
+        slot_type: { type: [string, 'null'], description: physical or logical; null on rows written before the agent reported it. }
+        active: { type: [boolean, 'null'] }
+        wal_status: { type: [string, 'null'], description: 'pg_replication_slots.wal_status: reserved, extended, unreserved or lost.' }
+        retained_bytes: { type: [integer, 'null'], format: int64, description: WAL the slot holds back from removal. }
+        safe_wal_size_bytes:
+          type: [integer, 'null']
+          format: int64
+          description: WAL that can still be written before the slot is invalidated; null when max_slot_wal_keep_size is unlimited.
+        last_active_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+          description: The newest retained reading with the slot active; null when none is retained.
+        ts: { $ref: '#/components/schemas/Timestamp' }
+    SlotsResponse:
+      type: object
+      required: [cluster_id, slots]
+      properties:
+        cluster_id: { $ref: '#/components/schemas/ClusterId' }
+        slots: { type: array, items: { $ref: '#/components/schemas/Slot' } }
     ReplicationResponse:
       type: object
       required: [cluster_id, edges]
@@ -217,9 +258,14 @@ components:
         queryid: { type: string, pattern: '^-?[0-9]+$', description: PostgreSQL query ID as a decimal string. }
         datname: { type: string }
         query_text: { type: string }
-        calls: { type: [number, 'null'] }
+        calls: { type: [number, 'null'], description: Calls observed in the window. }
         total_exec_time_ms: { type: [number, 'null'] }
         rows: { type: [number, 'null'] }
+        mean_exec_time: { type: [number, 'null'], description: total_exec_time_ms divided by calls; absent when no call was observed. }
+        shared_blks_hit: { type: [number, 'null'] }
+        shared_blks_read: { type: [number, 'null'] }
+        wal_bytes: { type: [number, 'null'] }
+        temp_blks_written: { type: [number, 'null'] }
         truncated: { $ref: '#/components/schemas/Truncated' }
     StatementsResponse:
       type: object
@@ -228,6 +274,14 @@ components:
         statements: { type: array, items: { $ref: '#/components/schemas/Statement' } }
         truncated: { $ref: '#/components/schemas/Truncated' }
         comparable_scope: { type: string, enum: [cluster] }
+        disabled:
+          type: boolean
+          description: >-
+            Present as true while the agent skips the stat_statements check on
+            this instance; statements collected before are still returned.
+        disabled_reason:
+          type: string
+          description: The reason the agent gave for skipping the check.
     AshBucket:
       type: object
       required: [ts, samples, ticks, avg_active_sessions]
@@ -243,6 +297,28 @@ components:
         wait_event: { type: string }
         state: { type: string }
         queryid: { type: [string, 'null'], pattern: '^-?[0-9]+$', description: PostgreSQL query ID as a decimal string. }
+    CommandAuditEntry:
+      type: object
+      required: [audit_id, command_id, instance_id, kind, args, requested_by, executed_at, outcome]
+      properties:
+        audit_id: { type: integer, format: int64 }
+        command_id: { type: string, format: uuid }
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        kind: { type: string }
+        args: { type: object, additionalProperties: true }
+        requested_by:
+          type: string
+          description: >-
+            The credential that requested the command: api-token, or
+            ui-session with a short hash of the session, then from and the
+            client address. Entries written before the request was audited
+            read api.
+        executed_at:
+          type: string
+          format: date-time
+          description: When the event was recorded.
+        outcome: { type: string, enum: [requested, ok, error, rejected, expired] }
+        detail: { type: string, description: The error, rejection reason or expiry circumstance. }
     AshResponse:
       type: object
       required: [buckets, resolution_seconds, statistical]
@@ -259,8 +335,8 @@ components:
         queryid: { type: string, pattern: '^-?[0-9]+$', description: PostgreSQL query ID as a decimal string. }
         query_text: { type: string }
         samples: { type: integer, format: int32 }
-        ticks: { type: integer, format: int32 }
-        avg_active_sessions: { type: [number, 'null'] }
+        ticks: { type: integer, format: int32, description: The instance's sampling ticks over the range, the same for every entry. }
+        avg_active_sessions: { type: [number, 'null'], description: samples divided by ticks, the average number of sessions running the query. }
     AshTopResponse:
       type: object
       required: [entries, resolution_seconds, statistical]
@@ -459,7 +535,9 @@ components:
       description: >-
         Per-kind arguments: explain requires queryid and may include datname or
         analyze; cancel and terminate require pid; pgstattuple requires schema
-        and relation. Query text is never sent to this API.
+        and relation and may include datname. datname is the database the
+        command runs in; without it, the target DSN's own database. Query text
+        is never sent to this API.
     CreateCommandRequest:
       type: object
       required: [kind, args]
@@ -724,6 +802,45 @@ paths:
                           - { ts: '2026-08-27T00:00:00Z', value: 0.001 }
                           - { ts: '2026-08-27T00:01:00Z', value: null }
                           - { ts: '2026-08-27T00:02:00Z', value: 0.002 }
+                      - from: reporting-replica
+                        to: 11111111-1111-1111-1111-111111111111
+                        standby_name: reporting-replica
+                        metric: replay_lag_sec
+                        sync_state: async
+                        series:
+                          - { ts: '2026-08-27T00:00:00Z', value: 0.2 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/clusters/{id}/slots:
+    get:
+      tags: [clusters]
+      operationId: getClusterSlots
+      summary: Return the current state of every replication slot in a cluster.
+      description: >-
+        The newest reading of each slot reported in the last five minutes; a
+        slot not reported for longer has been dropped or its instance is gone.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/ClusterId' } }
+      responses:
+        '200':
+          description: Replication slots by owning instance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SlotsResponse' }
+              examples:
+                default:
+                  value:
+                    cluster_id: '7381927364512345678'
+                    slots:
+                      - instance_id: 11111111-1111-1111-1111-111111111111
+                        slot_name: standby_1
+                        slot_type: physical
+                        active: false
+                        wal_status: extended
+                        retained_bytes: 2147483648
+                        safe_wal_size_bytes: null
+                        last_active_at: '2026-08-27T01:10:00Z'
+                        ts: '2026-08-27T02:00:00Z'
         '400': { $ref: '#/components/responses/BadRequest' }
 
   /api/v1/clusters/{id}/settings-drift:
@@ -907,8 +1024,20 @@ paths:
       tags: [instances]
       operationId: getInstanceTables
       summary: Return table relation statistics.
+      description: >-
+        The newest reading of each table reported in the last 15 minutes.
+        seq_scan_rate and idx_scan_rate are scans per second over the last
+        scrape interval; a column the agent could not read is absent.
+        last_vacuum_age_seconds is the age of the last manual VACUUM at the
+        scrape; last_vacuum_at, last_autovacuum_at, last_analyze_at and
+        last_autoanalyze_at are the timestamps pg_stat_user_tables reports,
+        absent when the table was never processed that way.
       parameters:
         - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - name: order_by
+          in: query
+          required: false
+          schema: { type: string, enum: [dead_tup, dead_ratio, size, seq_scan], default: dead_tup }
         - name: limit
           in: query
           required: false
@@ -924,7 +1053,8 @@ paths:
                 default:
                   value:
                     instance_id: 11111111-1111-1111-1111-111111111111
-                    items: [{ schemaname: public, relname: users, size_bytes: 1048576 }]
+                    items:
+                      - { datname: app, schemaname: public, relname: users, n_live_tup: 1200, n_dead_tup: 30, dead_ratio: 0.025, total_bytes: 1048576, seq_scan_rate: 0.02, idx_scan_rate: 4.5, last_vacuum_age_seconds: 3600, last_vacuum_at: '2026-08-27T01:00:00Z', last_autovacuum_at: '2026-08-27T01:40:00Z', last_autoanalyze_at: '2026-08-27T01:41:00Z', ts: '2026-08-27T02:00:00Z' }
                     truncated: false
                     relations_not_reported: null
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -934,6 +1064,7 @@ paths:
       tags: [instances]
       operationId: getInstanceIndexes
       summary: Return index relation statistics.
+      description: The newest reading of each index reported in the last 15 minutes, largest first. idx_scan_rate is scans per second.
       parameters:
         - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
         - name: limit
@@ -951,7 +1082,8 @@ paths:
                 default:
                   value:
                     instance_id: 11111111-1111-1111-1111-111111111111
-                    items: [{ schemaname: public, relname: users_pkey, size_bytes: 524288 }]
+                    items:
+                      - { datname: app, schemaname: public, relname: users, indexrelname: users_pkey, idx_scan_rate: 4.5, index_bytes: 524288, is_unique: true, is_primary: true, is_valid: true, ts: '2026-08-27T02:00:00Z' }
                     truncated: false
                     relations_not_reported: null
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -961,8 +1093,16 @@ paths:
       tags: [instances]
       operationId: getInstanceBloat
       summary: Return relation bloat estimates.
+      description: >-
+        The newest reading of each relation and method: estimates from the last
+        13 hours (the check runs every 6 hours) and pgstattuple measurements
+        from the last 7 days.
       parameters:
         - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - name: method
+          in: query
+          required: false
+          schema: { type: string, enum: [estimate, pgstattuple] }
         - name: limit
           in: query
           required: false
@@ -978,7 +1118,8 @@ paths:
                 default:
                   value:
                     instance_id: 11111111-1111-1111-1111-111111111111
-                    items: [{ schemaname: public, relname: users, bloat_ratio: 1.2 }]
+                    items:
+                      - { datname: app, schemaname: public, relname: users, indexrelname: '', object_kind: table, method: estimate, real_bytes: 1048576, expected_bytes: 851968, bloat_bytes: 196608, bloat_ratio: 0.19, ts: '2026-08-27T02:00:00Z' }
                     truncated: false
                     relations_not_reported: null
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -988,21 +1129,29 @@ paths:
       tags: [instances]
       operationId: getInstanceCommandAudit
       summary: Return the immutable command audit stream for an instance.
+      description: >-
+        One entry per event of a command: its request, its result (ok, error
+        or rejected) or its expiry. Newest first, at most 500 entries.
       parameters:
         - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - { name: limit, in: query, required: false, schema: { type: integer, format: int32, default: 100, minimum: 1 }, description: Maximum entries; values above 500 are capped at 500. }
       responses:
         '200':
           description: Command audit entries.
           content:
             application/json:
-              schema: { type: array, items: { type: object, additionalProperties: true } }
+              schema: { type: array, items: { $ref: '#/components/schemas/CommandAuditEntry' } }
               examples:
                 default:
                   value:
-                    - command_id: 1
+                    - audit_id: 12
+                      command_id: 3f2b8c9e-6d1a-4e5f-9a7b-2c4d6e8f0a1b
+                      instance_id: 11111111-1111-1111-1111-111111111111
                       kind: explain
-                      state: succeeded
-                      created_at: '2026-08-27T02:00:00Z'
+                      args: { queryid: '1234567890' }
+                      requested_by: ui-session 9f86d081 from 192.0.2.10
+                      executed_at: '2026-08-27T02:00:00Z'
+                      outcome: requested
         '400': { $ref: '#/components/responses/BadRequest' }
 
   /api/v1/locks:
@@ -1109,7 +1258,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [calls, calls_rate, total_calls, total_exec_time, total_exec_time_ms, exec_time, total_time, total_rows, rows, rows_rate, shared_blks_hit, shared_blks_hit_rate, shared_blks_read, shared_blks_read_rate, wal_bytes, wal_bytes_rate, mean_exec_time, mean_time]
+            enum: [calls, calls_rate, total_calls, total_exec_time, total_exec_time_ms, exec_time, total_time, total_rows, rows, rows_rate, shared_blks_hit, shared_blks_hit_rate, shared_blks_read, shared_blks_read_rate, wal_bytes, wal_bytes_rate, temp_blks_written, temp_blks_written_rate, mean_exec_time, mean_time]
             default: total_exec_time
         - name: limit
           in: query
@@ -1125,9 +1274,17 @@ paths:
                 default:
                   value:
                     statements:
-                      - { queryid: '1234', datname: app, query_text: SELECT 1, calls: 10, total_exec_time_ms: 12.5, rows: 10, truncated: false }
+                      - { queryid: '1234', datname: app, query_text: SELECT 1, calls: 10, total_exec_time_ms: 12.5, rows: 10, mean_exec_time: 1.25, shared_blks_hit: 40, shared_blks_read: 2, wal_bytes: 0, temp_blks_written: 0, truncated: false }
                     truncated: false
                     comparable_scope: cluster
+                skipped:
+                  summary: The agent skips the check
+                  value:
+                    statements: []
+                    truncated: false
+                    comparable_scope: cluster
+                    disabled: true
+                    disabled_reason: missing extension pg_stat_statements
         '400': { $ref: '#/components/responses/BadRequest' }
 
   /api/v1/ash:
@@ -1135,6 +1292,16 @@ paths:
       tags: [ash]
       operationId: getAsh
       summary: Return activity samples grouped by the requested dimensions.
+      description: >-
+        With group_by, the range (default: the last hour) is aggregated into
+        time buckets of resolution_seconds, at most 180 of them, one row per
+        bucket and group. ticks is the instance's sampling ticks in the
+        bucket, whatever the filters, so avg_active_sessions is the group's
+        share of the instance's time. The largest groups are kept (at most 24,
+        fewer when limit rows cannot hold them for every bucket) and the rest
+        are folded into one group named other, so the total is conserved.
+        Without group_by, the stored rows are returned newest first, every
+        dimension included.
       parameters:
         - { name: instance_id, in: query, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
         - { name: from, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
@@ -1144,6 +1311,16 @@ paths:
           required: false
           schema: { type: string, enum: [wait_event_type, wait_event, queryid, state, datname] }
         - { name: database, in: query, required: false, schema: { type: string } }
+        - name: wait_event_type
+          in: query
+          required: false
+          schema: { type: string }
+          description: Only samples of this wait event type; echoed on every returned row.
+        - name: wait_event
+          in: query
+          required: false
+          schema: { type: string }
+          description: Only samples of this wait event; echoed on every returned row.
         - { name: limit, in: query, required: false, schema: { type: integer, format: int32, default: 1000, minimum: 1, maximum: 10000 } }
       responses:
         '200':
@@ -1154,11 +1331,11 @@ paths:
               examples:
                 default:
                   value:
-                    resolution_seconds: 1
+                    resolution_seconds: 20
                     statistical: true
                     buckets:
-                      - { ts: '2026-08-27T00:00:00Z', wait_event_type: CPU, samples: 42, ticks: 10, avg_active_sessions: 4.2 }
-                      - { ts: '2026-08-27T00:00:00Z', wait_event_type: Lock, samples: 8, ticks: 10, avg_active_sessions: 0.8 }
+                      - { ts: '2026-08-27T00:00:00Z', wait_event_type: CPU, samples: 84, ticks: 20, avg_active_sessions: 4.2 }
+                      - { ts: '2026-08-27T00:00:00Z', wait_event_type: Lock, samples: 16, ticks: 20, avg_active_sessions: 0.8 }
         '400': { $ref: '#/components/responses/BadRequest' }
 
   /api/v1/ash/top:
@@ -1166,15 +1343,30 @@ paths:
       tags: [ash]
       operationId: getAshTop
       summary: Return top ASH queries joined to their text.
+      description: >-
+        Queries are ranked by samples over the range. ticks is the instance's
+        sampling ticks over the range, whatever the filters, the same
+        denominator for every query. The ASH disabled state is reported by
+        GET /api/v1/ash, not here.
       parameters:
         - { name: instance_id, in: query, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
         - { name: from, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
         - { name: to, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
         - { name: database, in: query, required: false, schema: { type: string } }
-        - { name: limit, in: query, required: false, schema: { type: integer, format: int32, default: 1000, minimum: 1, maximum: 10000 } }
+        - name: wait_event_type
+          in: query
+          required: false
+          schema: { type: string }
+          description: Only samples of this wait event type.
+        - name: wait_event
+          in: query
+          required: false
+          schema: { type: string }
+          description: Only samples of this wait event.
+        - { name: limit, in: query, required: false, schema: { type: integer, format: int32, default: 20, minimum: 1, maximum: 1000 } }
       responses:
         '200':
-          description: Top ASH queries; disabled ASH is represented explicitly with enabled false.
+          description: Top ASH queries, largest first.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AshTopResponse' }
@@ -1384,7 +1576,9 @@ paths:
           description: Maximum findings; default 100 and maximum 1000.
       responses:
         '200':
-          description: Findings ordered by severity and recency.
+          description: >-
+            Findings ordered open and degraded first, then by severity and
+            recency, so a limit cuts muted and resolved findings first.
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/Finding' } }

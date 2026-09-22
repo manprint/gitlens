@@ -21,7 +21,8 @@ func TestINTGOLDEN002_ProtocolV2Facts(t *testing.T) {
 			require.NoError(t, err)
 			var env wire.Envelope
 			require.NoError(t, json.Unmarshal(data, &env))
-			require.Equal(t, wire.ProtocolVersionCurrent, env.ProtocolVersion)
+			require.Equal(t, 2, env.ProtocolVersion)
+			require.LessOrEqual(t, env.ProtocolVersion, wire.ProtocolVersionCurrent, "a v2 payload is still accepted")
 			require.Len(t, env.Instances, 1)
 			expectedVersion := 150014
 			if major == 18 {

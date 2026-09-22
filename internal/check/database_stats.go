@@ -63,10 +63,16 @@ WHERE datname IS NOT NULL
 	var parsed []dbStatRow
 	for rows.Next() {
 		var r dbStatRow
+		// A scan or stream error used to drop rows silently: the missing
+		// databases' counters then looked like a gap, or a reset, rather
+		// than a failed scrape.
 		if err := rows.Scan(&r.Datname, &r.XactCommit, &r.XactRollback, &r.BlksRead, &r.BlksHit, &r.Deadlocks, &r.TempBytes, &r.Conflicts, &r.Numbackends, &r.StatsReset); err != nil {
-			continue
+			return Result{}, err
 		}
 		parsed = append(parsed, r)
+	}
+	if err := rows.Err(); err != nil {
+		return Result{}, err
 	}
 	return buildDatabaseStatsResult(parsed), nil
 }

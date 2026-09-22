@@ -132,6 +132,17 @@ func Open(dir string, opts Options) (*Buffer, error) {
 
 	// Recalculate stats (recovered from disk).
 	b.recalculateStats()
+
+	// Load acked position from metadata file. It is read before the
+	// retention policies run, so that they count as dropped only the records
+	// that were never delivered.
+	if err := b.loadAckedPosition(); err != nil {
+		// If metadata doesn't exist, start from the beginning.
+		b.ackedSegID = 0
+		b.ackedOff = 0
+	}
+
+	b.dropAckedSegments()
 	b.enforceMaxAge()
 	// A buffer recovered from disk can already exceed the budget — most often
 	// because MaxSize was lowered between restarts, but also after a crash
@@ -140,13 +151,6 @@ func Open(dir string, opts Options) (*Buffer, error) {
 	// to queue, which is exactly the situation (a dead target) where it will
 	// have nothing to queue for a long time.
 	b.enforceMaxSize()
-
-	// Load acked position from metadata file.
-	if err := b.loadAckedPosition(); err != nil {
-		// If metadata doesn't exist, start from the beginning.
-		b.ackedSegID = 0
-		b.ackedOff = 0
-	}
 
 	// Start reading from just after the last acked position.
 	b.nextReadSeg = 0
@@ -172,8 +176,12 @@ func (b *Buffer) Append(env []byte) error {
 	}
 
 	// Try to append to the last segment; if it would roll, create a new one.
+	// A segment also rolls once its first record is a quarter of MaxAge old:
+	// age retention works on whole segments, so a segment that stayed open
+	// for hours (a quiet agent fills 8 MiB slowly) could otherwise only be
+	// dropped together with the record just appended to it.
 	lastSeg := b.segments[len(b.segments)-1]
-	if lastSeg.WouldRoll(len(env)) {
+	if lastSeg.WouldRoll(len(env)) || b.segmentAgedOut(lastSeg) {
 		if err := lastSeg.Sync(); err != nil {
 			b.handleWriteError(err)
 			return err
@@ -193,6 +201,7 @@ func (b *Buffer) Append(env []byte) error {
 		b.handleWriteError(err)
 		return err
 	}
+	lastSeg.touch(b.opts.Clock.Now())
 
 	b.stats.BytesUsed += int64(len(env)) + 8 // 4-byte length + 4-byte CRC32C
 
@@ -234,10 +243,14 @@ func (b *Buffer) Next() ([]byte, AckFunc, error) {
 					ackFunc := func(ctx context.Context) error {
 						b.mu.Lock()
 						defer b.mu.Unlock()
-						// Mark this envelope as acked.
+						// Mark this envelope as acked, and persist the
+						// checkpoint now: it used to be written only by
+						// Close, so any unclean exit replayed up to six
+						// hours of already-delivered envelopes.
 						b.ackedSegID = segID
 						b.ackedOff = nextOffCopy
-						return nil
+						b.dropAckedSegments()
+						return b.saveAckedPosition()
 					}
 					// Advance read position for the next call.
 					b.nextReadOff = nextOff
@@ -370,11 +383,13 @@ func (b *Buffer) newSegment() (*Segment, error) {
 		return nil, fmt.Errorf("create segment: %w", err)
 	}
 
+	now := b.opts.Clock.Now()
 	seg := &Segment{
 		file:      f,
 		path:      fname,
 		id:        segID,
-		createdAt: b.opts.Clock.Now(),
+		createdAt: now,
+		lastWrite: now,
 		maxSize:   segmentSize(b.opts.MaxSize),
 	}
 	b.stats.Segments++
@@ -405,53 +420,76 @@ func (b *Buffer) recalculateStats() {
 
 func (b *Buffer) enforceMaxSize() {
 	for b.stats.BytesUsed > b.opts.MaxSize && len(b.segments) > 0 {
-		oldestSeg := b.segments[0]
-		recordCount := oldestSeg.RecordCount()
-		_ = oldestSeg.Close()
-		_ = os.Remove(oldestSeg.path) // best-effort: a leftover file here costs disk, not correctness
-
-		b.segments = b.segments[1:]
-		b.stats.Segments--
-		b.stats.BytesUsed -= oldestSeg.FileSize()
-		b.stats.SamplesDropped["size_limit"] += int64(recordCount)
-		now := b.opts.Clock.Now()
-		b.stats.LastDropTime = &now
-
-		// Adjust read position if we dropped the segment being read.
-		if b.nextReadSeg > 0 {
-			b.nextReadSeg--
-		} else {
-			b.nextReadOff = 0
-		}
+		b.removeOldestSegment("size_limit")
 	}
 }
 
+// enforceMaxAge drops segments whose newest record is older than MaxAge. It
+// used to compare the segment's creation time, so the active segment — still
+// receiving appends — was deleted together with the envelope appended a
+// moment earlier, before it had ever been sent.
 func (b *Buffer) enforceMaxAge() {
 	now := b.opts.Clock.Now()
-	for len(b.segments) > 0 {
-		oldestSeg := b.segments[0]
-		age := now.Sub(oldestSeg.CreatedAt())
-		if age <= b.opts.MaxAge {
-			break
-		}
+	for len(b.segments) > 0 && now.Sub(b.segments[0].LastWrite()) > b.opts.MaxAge {
+		b.removeOldestSegment("age_limit")
+	}
+}
 
-		recordCount := oldestSeg.RecordCount()
-		_ = oldestSeg.Close()
-		_ = os.Remove(oldestSeg.path) // best-effort: a leftover file here costs disk, not correctness
+// segmentAgedOut reports whether the active segment should roll so that age
+// retention can later drop it as a whole.
+func (b *Buffer) segmentAgedOut(seg *Segment) bool {
+	return seg.RecordCount() > 0 && b.opts.Clock.Now().Sub(seg.CreatedAt()) >= b.opts.MaxAge/4
+}
 
-		b.segments = b.segments[1:]
-		b.stats.Segments--
-		b.stats.BytesUsed -= oldestSeg.FileSize()
-		b.stats.SamplesDropped["age_limit"] += int64(recordCount)
+// dropAckedSegments deletes closed segments whose every record has been
+// delivered. They used to stay on disk until the size or age policy removed
+// them, and were then counted as dropped samples although the server had
+// stored every one of them. The active segment is kept: it still receives
+// appends.
+func (b *Buffer) dropAckedSegments() {
+	for len(b.segments) > 1 && b.unackedRecords(b.segments[0]) == 0 {
+		b.removeOldestSegment("")
+	}
+}
+
+// unackedRecords counts the records of seg that were never acknowledged.
+func (b *Buffer) unackedRecords(seg *Segment) int64 {
+	switch {
+	case seg.id < b.ackedSegID:
+		return 0
+	case seg.id > b.ackedSegID:
+		return seg.RecordCount()
+	default:
+		return seg.recordsFrom(b.ackedOff)
+	}
+}
+
+// removeOldestSegment deletes the oldest segment. reason names the retention
+// policy responsible; only records that were never delivered count as
+// dropped, and an empty reason drops nothing but delivered records.
+func (b *Buffer) removeOldestSegment(reason string) {
+	oldestSeg := b.segments[0]
+	var dropped int64
+	if reason != "" {
+		dropped = b.unackedRecords(oldestSeg)
+	}
+	_ = oldestSeg.Close()
+	_ = os.Remove(oldestSeg.path) // best-effort: a leftover file here costs disk, not correctness
+
+	b.segments = b.segments[1:]
+	b.stats.Segments--
+	b.stats.BytesUsed -= oldestSeg.FileSize()
+	if dropped > 0 {
+		b.stats.SamplesDropped[reason] += dropped
 		now := b.opts.Clock.Now()
 		b.stats.LastDropTime = &now
+	}
 
-		// Adjust read position.
-		if b.nextReadSeg > 0 {
-			b.nextReadSeg--
-		} else {
-			b.nextReadOff = 0
-		}
+	// Adjust read position if we dropped the segment being read.
+	if b.nextReadSeg > 0 {
+		b.nextReadSeg--
+	} else {
+		b.nextReadOff = 0
 	}
 }
 
@@ -472,13 +510,20 @@ func (b *Buffer) loadAckedPosition() error {
 	return nil
 }
 
-// saveAckedPosition saves the acked position to metadata file.
+// saveAckedPosition saves the acked position to metadata file. It writes a
+// temporary file and renames it over the checkpoint, so a crash mid-write
+// leaves the previous checkpoint rather than a truncated one (which Open
+// reads as "nothing acked" and replays the whole buffer).
 func (b *Buffer) saveAckedPosition() error {
 	metaPath := filepath.Join(b.dir, ".acked")
 	data := make([]byte, 12)
 	binary.LittleEndian.PutUint32(data[0:4], b.ackedSegID)
 	binary.LittleEndian.PutUint64(data[4:12], b.ackedOff)
-	return os.WriteFile(metaPath, data, 0644)
+	tmp := metaPath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, metaPath)
 }
 
 // findSegmentAfterAcked sets nextReadSeg and nextReadOff to point just after the acked position.
@@ -513,6 +558,7 @@ type Segment struct {
 	path        string
 	id          uint32
 	createdAt   time.Time
+	lastWrite   time.Time
 	maxSize     int64
 	recordCount int64
 	fileSize    int64
@@ -536,6 +582,7 @@ func openSegment(fpath string) (*Segment, error) {
 		file:      f,
 		path:      fpath,
 		createdAt: stat.ModTime(),
+		lastWrite: stat.ModTime(),
 		fileSize:  stat.Size(),
 	}
 
@@ -723,6 +770,39 @@ func (s *Segment) CreatedAt() time.Time {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.createdAt
+}
+
+// LastWrite returns when the newest record was appended.
+func (s *Segment) LastWrite() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastWrite
+}
+
+func (s *Segment) touch(t time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastWrite = t
+}
+
+// recordsFrom counts the complete records at or after offset.
+func (s *Segment) recordsFrom(offset uint64) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var n int64
+	for int64(offset)+8 <= s.fileSize {
+		var header [8]byte
+		if _, err := s.file.ReadAt(header[:], int64(offset)); err != nil {
+			break
+		}
+		next := offset + 8 + uint64(binary.LittleEndian.Uint32(header[0:4]))
+		if int64(next) > s.fileSize {
+			break
+		}
+		n++
+		offset = next
+	}
+	return n
 }
 
 // Close closes the segment file.

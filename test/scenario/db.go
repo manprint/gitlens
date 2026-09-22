@@ -65,10 +65,20 @@ func init() {
 				}
 			}
 
+			// The agent schedules its database-scoped checks at startup, and
+			// reports a database created later as not monitored
+			// (discovered_after_start) because nothing collects it. It used
+			// to report the budget's choice among databases it never
+			// scraped, which is what this scenario then asserted. Restart it
+			// so the budget picks among all fifteen.
+			if err := e.Compose("restart", "pglens-agent"); err != nil {
+				return fmt.Errorf("restart agent: %w", err)
+			}
+
 			// Poll the real API (not the DB directly) — this is the whole
 			// point of the scenario: does db_budget's decision actually
 			// reach GET /api/v1/instances/{id}, not just internal state.
-			budgetCtx, cancel2 := context.WithTimeout(ctx, 60*time.Second)
+			budgetCtx, cancel2 := context.WithTimeout(ctx, 90*time.Second)
 			defer cancel2()
 			var detail map[string]interface{}
 			if err := poll(budgetCtx, 3*time.Second, func(ctx context.Context) (bool, error) {
@@ -78,6 +88,13 @@ func init() {
 					return false, err
 				}
 				dbs, _ := detail["databases"].([]interface{})
+				for _, raw := range dbs {
+					// The previous process's report, until the restarted
+					// one pushes.
+					if db, ok := raw.(map[string]interface{}); ok && db["skip_reason"] == "discovered_after_start" {
+						return false, nil
+					}
+				}
 				return len(dbs) >= n+1, nil // +1 for "postgres"
 			}); err != nil {
 				return fmt.Errorf("instance never reported all %d databases: %w", n+1, err)

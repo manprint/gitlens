@@ -287,6 +287,21 @@ func TestAPI_Statements_WithDB(t *testing.T) {
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
+	require.NotContains(t, w.Body.String(), "disabled")
+
+	// The agent's check_skip fact is the skipped state; the statements kept
+	// from before still come back.
+	_, err = pool.Exec(contextBackground(), `INSERT INTO object_facts (tenant_id, cluster_id, instance_id, datname, kind, key, labels, value_text, first_seen, last_seen, changed_at) VALUES ('default',$1,$2,'','check_skip','stat_statements','{}','missing extension pg_stat_statements',now(),now(),now())`, cid, iid)
+	require.NoError(t, err)
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/statements?instance_id=%s", iid.String()), http.NoBody)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	resp = statementsResp{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.True(t, resp.Disabled)
+	require.Equal(t, "missing extension pg_stat_statements", *resp.DisabledReason)
+	require.Len(t, resp.Statements, 1)
 }
 
 // INT-API-002: `/metrics/query` over a range containing a reset returns `null` for the affected bucket and numbers either side.

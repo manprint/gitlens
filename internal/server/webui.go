@@ -40,6 +40,12 @@ func SPAHandler(assets fs.FS) http.Handler {
 			} else {
 				w.Header().Set("Cache-Control", webUINoCache)
 			}
+			// The README the interface links to is read in the browser. Go
+			// has no type for .md and a host's mime.types may say
+			// text/markdown, which browsers offer as a download.
+			if path.Ext(requestPath) == ".md" {
+				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			}
 			http.ServeFileFS(w, r, assets, requestPath)
 			return
 		}

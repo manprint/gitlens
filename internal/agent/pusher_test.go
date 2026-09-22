@@ -538,3 +538,48 @@ func TestPusher_UnencodableEnvelopeIsDroppedNotRetriedForever(t *testing.T) {
 	require.NoError(t, p.Push(ctx))
 	require.Equal(t, 1, received)
 }
+
+// TestPusher_RejectedEnvelopesAreCountedAsDropped covers every rejection that
+// consumes an envelope without storing it: each one is lost data and has to
+// reach pglens_samples_dropped_rate.
+func TestPusher_RejectedEnvelopesAreCountedAsDropped(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, http.StatusForbidden, http.StatusConflict} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"error":"samples too old"}`))
+			}))
+			defer srv.Close()
+
+			p := NewPusher(srv.URL, "token", clock.System())
+			p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			require.NoError(t, p.Push(ctx))
+			_, dropped := p.BufferStats()
+			require.Equal(t, int64(1), dropped)
+			require.Contains(t, p.LastError(), "samples too old")
+		})
+	}
+}
+
+// TestPusher_SendsTransmissionTime lets the server measure clock skew against
+// the moment of sending rather than the moment of queueing.
+func TestPusher_SendsTransmissionTime(t *testing.T) {
+	now := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	var header string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		header = r.Header.Get(wire.TransmittedAtHeader)
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	p := NewPusher(srv.URL, "token", clock.NewFake(now))
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion, SentAt: now.Add(-3 * time.Hour)})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	require.NoError(t, p.Push(ctx))
+	sent, err := time.Parse(time.RFC3339Nano, header)
+	require.NoError(t, err)
+	require.True(t, sent.Equal(now), "header %q, want the push time", header)
+}

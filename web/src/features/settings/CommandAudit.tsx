@@ -80,11 +80,12 @@ function Timestamp({ label, value }: { label: string; value: string | undefined 
   )
 }
 
+// The time of the entry itself is in the Time column: an audit entry is one
+// event (the request, the result or the expiry), recorded when it happened.
 function timingFields(entry: CommandAuditEntry) {
   return [
     ['Requested', entry.requested_at ?? entry.created_at],
     ['Claimed', entry.claimed_at],
-    ['Executed', entry.executed_at ?? entry.finished_at],
     ['Expires', entry.expires_at],
   ] as const
 }
@@ -130,6 +131,7 @@ function InstanceCommandAudit({ instance }: { instance: InstanceSummary }) {
               <th scope="col">Time</th>
               <th scope="col">Command</th>
               <th scope="col">Arguments</th>
+              <th scope="col">Requested by</th>
               <th scope="col">State</th>
               <th scope="col">Timing and detail</th>
             </tr>
@@ -141,12 +143,13 @@ function InstanceCommandAudit({ instance }: { instance: InstanceSummary }) {
               return (
                 <tr key={String(entry.audit_id ?? entry.command_id ?? index)}>
                   <td>
-                    <Timestamp label="Executed" value={entryTime(entry)} />
+                    <Timestamp label="Recorded" value={entryTime(entry)} />
                   </td>
                   <td>{entry.kind ?? 'unknown'}</td>
                   <td>
                     <code>{displayValue(entry.args)}</code>
                   </td>
+                  <td>{displayValue(entry.requested_by)}</td>
                   <td>{state}</td>
                   <td>
                     {timingFields(entry).map(([timingLabel, timingValue]) => (
@@ -170,7 +173,7 @@ function InstanceCommandAudit({ instance }: { instance: InstanceSummary }) {
 export function CommandAudit({ instances }: CommandAuditProps) {
   return (
     <Section
-      description="This audit records the action, not the person: pglens has no user identity, accounts, or roles."
+      description="This audit records the action and the credential that requested it (an API token or a UI session, and the client address), not the person: pglens has no user identity, accounts, or roles."
       title="Command audit"
     >
       {instances.length === 0 ? (

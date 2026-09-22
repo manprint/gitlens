@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"sort"
 	"time"
+	"unicode/utf8"
 
 	"github.com/manprint/pglens/internal/pgtype"
 )
@@ -56,19 +57,27 @@ type lockNode struct {
 	BlockedBy       []int32 `json:"blocked_by"`
 }
 
+// locksQuery tolerates every nullable column: client_addr is NULL for each
+// Unix-socket client, and datname/usename/state are NULL for a backend still
+// starting up. Scanning one NULL into a string used to fail the whole scrape,
+// so the blocking tree went dark whenever a local client was connected.
+//
+// pg_blocking_pids() walks the lock manager; it is only asked about sessions
+// that are actually waiting on a heavyweight lock instead of every backend
+// every ten seconds.
 const locksQuery = `
 SELECT a.pid,
-       a.datname,
-       a.usename,
-       a.application_name,
-       a.client_addr::text,
-       a.state,
+       COALESCE(a.datname, ''),
+       COALESCE(a.usename, ''),
+       COALESCE(a.application_name, ''),
+       COALESCE(a.client_addr::text, ''),
+       COALESCE(a.state, ''),
        COALESCE(a.wait_event_type, ''),
        COALESCE(a.wait_event, ''),
        COALESCE(EXTRACT(epoch FROM now() - a.xact_start), 0),
        COALESCE(EXTRACT(epoch FROM now() - a.state_change), 0),
        COALESCE(a.query, ''),
-       pg_blocking_pids(a.pid)
+       CASE WHEN a.wait_event_type = 'Lock' THEN pg_blocking_pids(a.pid) ELSE '{}'::int[] END
 FROM pg_stat_activity a
 WHERE a.backend_type = 'client backend'
   AND a.pid <> pg_backend_pid()`
@@ -93,9 +102,7 @@ func (c *locksCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 		if err := rows.Scan(&r.PID, &r.Datname, &r.Username, &r.ApplicationName, &r.ClientAddr, &r.State, &r.WaitEventType, &r.WaitEvent, &r.XactAge, &r.StateAge, &r.Query, &r.BlockedBy); err != nil {
 			return Result{}, err
 		}
-		if len(r.Query) > 2048 {
-			r.Query = r.Query[:2048]
-		}
+		r.Query = truncateUTF8(r.Query, 2048)
 		parsed = append(parsed, r)
 	}
 	return buildLocksResult(parsed, t.Clock().Now()), rows.Err()
@@ -176,4 +183,17 @@ func buildLocksResult(rows []lockRow, sampledAt time.Time) Result {
 		result.Facts = []Fact{{Kind: "lock_tree", Key: "current", ValueJSON: raw}}
 	}
 	return result
+}
+
+// truncateUTF8 cuts s to at most limit bytes without splitting a multi-byte
+// character, which would otherwise reach the server as invalid UTF-8.
+func truncateUTF8(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }

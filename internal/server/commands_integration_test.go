@@ -94,9 +94,7 @@ func TestINTCMD005_ExpiryAndLateResult(t *testing.T) {
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusConflict, rec.Code)
 
-	var outcome string
-	var auditCount int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*), max(outcome) FROM command_audit WHERE command_id=$1`, commandID).Scan(&auditCount, &outcome))
-	require.Equal(t, 1, auditCount)
-	require.Equal(t, "rejected", outcome)
+	var outcomes string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT string_agg(outcome, ',' ORDER BY audit_id) FROM command_audit WHERE command_id=$1`, commandID).Scan(&outcomes))
+	require.Equal(t, "expired,rejected", outcomes, "the expiry is audited, then the late result")
 }

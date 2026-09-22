@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -276,9 +277,47 @@ func (c *Config) validate() error {
 		if t.Databases.Max < 0 {
 			return fmt.Errorf("validation: targets[%d].databases.max must be >= 0", i)
 		}
+		if _, err := compilePatterns(t.Databases.Include); err != nil {
+			return fmt.Errorf("validation: targets[%d].databases.include: %w", i, err)
+		}
+		if _, err := compilePatterns(t.Databases.Exclude); err != nil {
+			return fmt.Errorf("validation: targets[%d].databases.exclude: %w", i, err)
+		}
 	}
 
 	return nil
+}
+
+// DatabaseFilters compiles databases.include/exclude. A target that sets no
+// exclude list keeps the default one (templates and managed-service admin
+// databases); one that sets it replaces the default, as documented. The
+// patterns were validated by LoadConfig, so an error here means the config
+// was built by hand and skipped validation.
+func (t TargetConfig) DatabaseFilters() (include, exclude []*regexp.Regexp, err error) {
+	include, err = compilePatterns(t.Databases.Include)
+	if err != nil {
+		return nil, nil, fmt.Errorf("databases.include: %w", err)
+	}
+	if len(t.Databases.Exclude) == 0 {
+		return include, DefaultDatabaseExcludes(), nil
+	}
+	exclude, err = compilePatterns(t.Databases.Exclude)
+	if err != nil {
+		return nil, nil, fmt.Errorf("databases.exclude: %w", err)
+	}
+	return include, exclude, nil
+}
+
+func compilePatterns(patterns []string) ([]*regexp.Regexp, error) {
+	out := make([]*regexp.Regexp, 0, len(patterns))
+	for _, p := range patterns {
+		re, err := regexp.Compile(p)
+		if err != nil {
+			return nil, fmt.Errorf("invalid pattern %q: %w", p, err)
+		}
+		out = append(out, re)
+	}
+	return out, nil
 }
 
 // GetParsedPushInterval returns the parsed push interval duration.

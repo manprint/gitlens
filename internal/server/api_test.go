@@ -125,6 +125,9 @@ func TestHealthForCluster(t *testing.T) {
 	require.Equal(t, "ok", healthForCluster(1, false, 1, nil))
 	require.Equal(t, "degraded", healthForCluster(1, false, 2, lag(150.5)), "a lagging replica must degrade health even with every instance up")
 	require.Equal(t, "ok", healthForCluster(1, false, 2, lag(0)), "zero lag is not a reason to degrade")
+	require.Equal(t, "ok", healthForCluster(1, false, 2, lag(0.4)), "a busy primary's standbys are always milliseconds behind")
+	require.Equal(t, "ok", healthForCluster(1, false, 2, lag(30)))
+	require.Equal(t, "degraded", healthForCluster(1, false, 2, lag(30.5)), "above the replica.lag_high threshold")
 	require.Equal(t, "critical", healthForCluster(2, false, 2, nil), "split-brain (2 primaries) is critical even with nothing else wrong")
 }
 
@@ -494,7 +497,7 @@ func TestAPI_MockPool_Clusters_TopologyEdgesAndLag(t *testing.T) {
 	require.Equal(t, 1, resp[0].SyncStandbyCount)
 	require.NotNil(t, resp[0].MaxReplayLagSeconds)
 	require.Equal(t, 0.75, *resp[0].MaxReplayLagSeconds)
-	require.Equal(t, "degraded", resp[0].Health)
+	require.Equal(t, "ok", resp[0].Health, "sub-second lag is below the degraded threshold")
 
 	var sawSync, sawLowWithNote bool
 	for _, e := range resp[0].Topology {
@@ -664,7 +667,7 @@ func TestAPI_MockPool_Statements_WithRows(t *testing.T) {
 	pool := &mockPool{
 		queryResults: []*mockRows{
 			{rows: [][]any{
-				{int64(9007199254740993), "app", "SELECT 1", 10.0, 100.0, 5.0, 1.0, 2.0, 3.0, 10.0},
+				{int64(9007199254740993), "app", "SELECT 1", 10.0, 100.0, 5.0, 1.0, 2.0, 3.0, 4.0, 10.0},
 			}},
 		},
 		queryRowVals: []*mockRow{{vals: []any{false}}},
@@ -679,9 +682,30 @@ func TestAPI_MockPool_Statements_WithRows(t *testing.T) {
 	var resp statementsResp
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Len(t, resp.Statements, 1)
-	require.Equal(t, "9007199254740993", resp.Statements[0].QueryID)
-	require.Equal(t, "SELECT 1", resp.Statements[0].QueryText)
+	got := resp.Statements[0]
+	require.Equal(t, "9007199254740993", got.QueryID)
+	require.Equal(t, "SELECT 1", got.QueryText)
+	// The fields the UI's cache-hit ratio and temp bytes are built from.
+	require.Equal(t, 1.0, *got.SharedBlksHit)
+	require.Equal(t, 2.0, *got.SharedBlksRead)
+	require.Equal(t, 3.0, *got.WALBytes)
+	require.Equal(t, 4.0, *got.TempBlksWritten)
+	require.Equal(t, 10.0, *got.MeanExec)
 	require.False(t, resp.Truncated)
+	require.False(t, resp.Disabled)
+	require.NotContains(t, w.Body.String(), "disabled")
+}
+
+func TestAPI_Statements_OrderByTempBlocks(t *testing.T) {
+	t.Parallel()
+	pool := &mockPool{queryResults: []*mockRows{{}}, queryRowVals: []*mockRow{{vals: []any{false}}}}
+	api := &API{pool: pool}
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/statements?order_by=temp_blks_written&instance_id="+uuid.NewString(), http.NoBody)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 }
 
 func TestAPI_MockPool_Statements_TruncatedQueryError(t *testing.T) {
@@ -717,6 +741,43 @@ func TestAPI_MockPool_Statements_Truncated(t *testing.T) {
 	var resp statementsResp
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.True(t, resp.Truncated)
+}
+
+// A skipped stat_statements check used to answer exactly like an instance
+// with no statements: the interface's disabled state was unreachable.
+func TestAPI_MockPool_Statements_ReportsTheSkippedCheck(t *testing.T) {
+	t.Parallel()
+	pool := &mockPool{
+		queryResults: []*mockRows{{rows: [][]any{}}},
+		queryRowVals: []*mockRow{{vals: []any{false}}, {vals: []any{"missing extension pg_stat_statements"}}},
+	}
+	api := &API{pool: pool}
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/statements?instance_id="+uuid.NewString(), http.NoBody)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp statementsResp
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.True(t, resp.Disabled)
+	require.NotNil(t, resp.DisabledReason)
+	require.Equal(t, "missing extension pg_stat_statements", *resp.DisabledReason)
+}
+
+func TestAPI_MockPool_Statements_SkipLookupError(t *testing.T) {
+	t.Parallel()
+	pool := &mockPool{
+		queryResults: []*mockRows{{rows: [][]any{}}},
+		queryRowVals: []*mockRow{{vals: []any{false}}, {err: errors.New("boom")}},
+	}
+	api := &API{pool: pool}
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/statements?instance_id="+uuid.NewString(), http.NoBody)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
 func TestAPI_InstanceTruncated_QueryVariants(t *testing.T) {

@@ -86,7 +86,7 @@ func TestIntASH010_AvgActiveSessionsCalculation(t *testing.T) {
 
 	// Query the API
 	ashAPI := &AshAPI{pool: asDBPool(pool)}
-	buckets, totalTicks, err := ashAPI.queryASHBuckets(ctx, instID, nil, nil, "", []string{}, 1000)
+	buckets, totalTicks, err := ashAPI.queryASHBuckets(ctx, instID, nil, nil, "", ashFilters{}, 1000)
 	require.NoError(t, err)
 
 	// Verify results
@@ -158,7 +158,7 @@ func TestIntASH011_SignificanceWarning(t *testing.T) {
 
 	// Query with 59 ticks - should have warning
 	ashAPI := &AshAPI{pool: asDBPool(pool)}
-	_, totalTicks, err := ashAPI.queryASHBuckets(ctx, instID, nil, nil, "", []string{}, 1000)
+	_, totalTicks, err := ashAPI.queryASHBuckets(ctx, instID, nil, nil, "", ashFilters{}, 1000)
 	require.NoError(t, err)
 	require.Equal(t, 59, totalTicks)
 
@@ -212,7 +212,7 @@ func TestIntASH011_SignificanceWarning(t *testing.T) {
 	require.NoError(t, err)
 
 	// Query with 60 ticks - should NOT have warning
-	_, totalTicks, err = ashAPI.queryASHBuckets(ctx, instID, nil, nil, "", []string{}, 1000)
+	_, totalTicks, err = ashAPI.queryASHBuckets(ctx, instID, nil, nil, "", ashFilters{}, 1000)
 	require.NoError(t, err)
 	require.Equal(t, 60, totalTicks)
 
@@ -288,7 +288,7 @@ func TestIntASH012_QueryIDJoinToQueryTexts(t *testing.T) {
 
 	// Query via /api/v1/ash/top
 	ashAPI := &AshAPI{pool: asDBPool(pool)}
-	entries, _, err := ashAPI.queryASHTop(ctx, instID, nil, nil, "", 1000)
+	entries, _, err := ashAPI.queryASHTop(ctx, instID, nil, nil, "", ashFilters{}, 1000)
 	require.NoError(t, err)
 
 	require.Len(t, entries, 1)
@@ -438,4 +438,80 @@ func TestASHDisabledInstance_ReturnsExplicitFalse(t *testing.T) {
 	require.NotNil(t, resp.Enabled)
 	require.False(t, *resp.Enabled)
 	require.Equal(t, []ashBucket{}, resp.Buckets)
+}
+
+// TestIntASH015_GroupByAggregatesPerBucket: group_by returns one row per
+// time bucket and group, with the group filled in and the ticks of every
+// window counted once; the drill-down filter is echoed on each row; ASH top
+// does not count a queryid twice when its text is stored for two majors.
+func TestIntASH015_GroupByAggregatesPerBucket(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := contextBackground()
+	instID := uuid.New()
+	cid := pgtype.ClusterID(4343)
+	base := time.Now().UTC().Truncate(time.Hour).Add(-2 * time.Hour)
+	for i := 0; i < 2; i++ {
+		ts := base.Add(time.Duration(i*10) * time.Second)
+		for _, key := range []struct {
+			wet, we string
+			samples int
+		}{{"LWLock", "WALWrite", 6}, {"LWLock", "BufferMapping", 4}, {"CPU", "CPU", 10}} {
+			_, err := pool.Exec(ctx, `INSERT INTO metrics_ash (ts, cluster_id, instance_id, datname, wait_event_type, wait_event, state, queryid, samples, window_seconds, window_ticks)
+				VALUES ($1, $2, $3, 'app', $4, $5, 'active', 7, $6, 10, 10)`, ts, store.ToDB(cid), instID, key.wet, key.we, key.samples)
+			require.NoError(t, err)
+		}
+	}
+	for _, major := range []int{16, 17} {
+		_, err := pool.Exec(ctx, `INSERT INTO query_texts (tenant_id, cluster_id, datname, queryid, pg_major, query_text) VALUES ('default', $1, 'app', 7, $2, 'SELECT 7')`, store.ToDB(cid), major)
+		require.NoError(t, err)
+	}
+
+	r := chi.NewRouter()
+	NewAshAPI(pool).RegisterRoutes(r)
+	get := func(query string) ashResponse {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/ash?instance_id="+instID.String()+"&from="+base.Format(time.RFC3339)+"&to="+base.Add(time.Hour).Format(time.RFC3339)+query, nil))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var resp ashResponse
+		require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+		return resp
+	}
+
+	types := get("&group_by=wait_event_type")
+	require.Equal(t, 20, types.ResolutionSeconds)
+	require.Len(t, types.Buckets, 2, "both windows fall in one 20-second bucket: one row per type")
+	byType := map[string]ashBucket{}
+	for _, b := range types.Buckets {
+		byType[b.WaitEventType] = b
+	}
+	require.Equal(t, 20, byType["LWLock"].Samples)
+	require.Equal(t, 20, byType["LWLock"].Ticks, "two windows of 10 ticks, each counted once")
+	require.Equal(t, 1.0, *byType["LWLock"].AvgActiveSessions)
+	require.Equal(t, 20, byType["CPU"].Samples)
+
+	events := get("&group_by=wait_event&wait_event_type=LWLock")
+	require.Len(t, events.Buckets, 2)
+	for _, b := range events.Buckets {
+		require.Equal(t, "LWLock", b.WaitEventType, "the drill-down filter is echoed")
+		require.Equal(t, 20, b.Ticks, "the filter narrows the samples, not the instance's ticks")
+	}
+
+	entries, ticks, err := NewAshAPI(pool).queryASHTop(ctx, instID, &base, nil, "", ashFilters{}, 10)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, 40, entries[0].Samples, "one text per queryid, not one per major")
+	require.Equal(t, "SELECT 7", entries[0].QueryText)
+	require.Equal(t, 20, ticks)
+
+	entries, ticks, err = NewAshAPI(pool).queryASHTop(ctx, instID, &base, nil, "", ashFilters{waitEventType: "LWLock", waitEvent: "WALWrite"}, 10)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, 12, entries[0].Samples, "only the samples seen in the drilled wait event")
+	require.Equal(t, 20, ticks, "the filter narrows the samples, not the instance's ticks")
+
+	entries, _, err = NewAshAPI(pool).queryASHTop(ctx, instID, &base, nil, "", ashFilters{waitEvent: "DataFileRead"}, 10)
+	require.NoError(t, err)
+	require.Empty(t, entries, "no query was seen in a wait event outside the range's samples")
 }

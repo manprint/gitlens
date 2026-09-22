@@ -44,24 +44,34 @@ func (a *API) handleHost(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := hostAPIResponse{InstanceID: id.String(), Metrics: map[string]float64{}}
 	if a.pool != nil {
-		rows, queryErr := a.pool.Query(r.Context(), `SELECT ts, metric, value FROM metrics WHERE tenant_id='default' AND instance_id=$1 AND metric LIKE 'host_%' ORDER BY ts DESC`, id)
-		if queryErr == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var ts time.Time
-				var name string
-				var value float64
-				if rows.Scan(&ts, &name, &value) != nil {
-					continue
-				}
-				if _, exists := resp.Metrics[name]; exists {
-					continue
-				}
-				resp.Metrics[name] = value
-				if resp.SampledAt.IsZero() {
-					resp.SampledAt = ts
-				}
+		// The newest value of each host metric from the last day. The query
+		// used to read every host sample of the instance over the whole
+		// retention, newest first, to keep the first of each name, and a
+		// failed query or scan read as "not local to any agent".
+		rows, err := a.pool.Query(r.Context(), `SELECT DISTINCT ON (metric) ts, metric, value FROM metrics
+			WHERE tenant_id='default' AND instance_id=$1 AND metric LIKE 'host\_%' AND ts >= now() - interval '1 day'
+			ORDER BY metric, ts DESC`, id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "query failed", err.Error())
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var ts time.Time
+			var name string
+			var value float64
+			if err := rows.Scan(&ts, &name, &value); err != nil {
+				writeError(w, http.StatusInternalServerError, "scan failed", err.Error())
+				return
 			}
+			resp.Metrics[name] = value
+			if ts.After(resp.SampledAt) {
+				resp.SampledAt = ts
+			}
+		}
+		if err := rows.Err(); err != nil {
+			writeError(w, http.StatusInternalServerError, "rows error", err.Error())
+			return
 		}
 	}
 	if resp.SampledAt.IsZero() {

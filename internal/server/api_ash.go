@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -86,6 +88,7 @@ func (a *AshAPI) handleASH(w http.ResponseWriter, r *http.Request) {
 	groupByStr := q.Get("group_by")
 	database := q.Get("database")
 	limitStr := q.Get("limit")
+	filters := ashFilters{waitEventType: q.Get("wait_event_type"), waitEvent: q.Get("wait_event")}
 
 	if instanceIDStr == "" {
 		writeError(w, http.StatusBadRequest, "missing instance_id", "query param instance_id is required")
@@ -183,17 +186,28 @@ func (a *AshAPI) handleASH(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Query database
-	buckets, totalTicks, err := a.queryASHBuckets(ctx, iid, fromPtr, toPtr, database, groupByCols, limit)
+	resp := ashResponse{ResolutionSeconds: 1, Statistical: true}
+	var totalTicks int
+	if len(groupByCols) == 0 {
+		resp.Buckets, totalTicks, err = a.queryASHBuckets(ctx, iid, fromPtr, toPtr, database, filters, limit)
+	} else {
+		to := time.Now().UTC()
+		if toPtr != nil {
+			to = *toPtr
+		}
+		from := to.Add(-time.Hour)
+		if fromPtr != nil {
+			from = *fromPtr
+		}
+		resp.ResolutionSeconds = ashResolution(from, to)
+		resp.Buckets, totalTicks, err = a.queryASHGrouped(ctx, iid, from, to, resp.ResolutionSeconds, database, filters, groupByCols, limit)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query failed", err.Error())
 		return
 	}
-
-	resp := ashResponse{
-		Buckets:           buckets,
-		ResolutionSeconds: 1,
-		Statistical:       true,
+	if resp.Buckets == nil {
+		resp.Buckets = []ashBucket{}
 	}
 
 	// Significance guard
@@ -205,42 +219,12 @@ func (a *AshAPI) handleASH(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (a *AshAPI) queryASHBuckets(ctx context.Context, instanceID uuid.UUID, from, to *time.Time, database string, groupByCols []string, limit int) ([]ashBucket, int, error) {
-	// Build SELECT clause
-	selectCols := []string{"ts", "samples", "window_ticks"}
-	if len(groupByCols) == 0 {
-		selectCols = append(selectCols, "datname", "wait_event_type", "wait_event", "state", "queryid")
-	} else {
-		selectCols = append(selectCols, groupByCols...)
-	}
-	selectStr := strings.Join(selectCols, ", ")
-
-	// Build WHERE clause
-	var whereFrags []string
-	var args []any
-	argIdx := 1
-
-	whereFrags = append(whereFrags, fmt.Sprintf("instance_id = $%d", argIdx))
-	args = append(args, instanceID)
-	argIdx++
-
-	if from != nil {
-		whereFrags = append(whereFrags, fmt.Sprintf("ts >= $%d", argIdx))
-		args = append(args, *from)
-		argIdx++
-	}
-	if to != nil {
-		whereFrags = append(whereFrags, fmt.Sprintf("ts < $%d", argIdx))
-		args = append(args, *to)
-		argIdx++
-	}
-	if database != "" {
-		whereFrags = append(whereFrags, fmt.Sprintf("datname = $%d", argIdx))
-		args = append(args, database)
-	}
-
-	whereStr := strings.Join(whereFrags, " AND ")
-	query := fmt.Sprintf(`SELECT %s FROM metrics_ash WHERE %s ORDER BY ts DESC LIMIT %d`, selectStr, whereStr, limit)
+// queryASHBuckets returns the stored rows unaggregated, newest first: every
+// dimension, one row per window and key.
+func (a *AshAPI) queryASHBuckets(ctx context.Context, instanceID uuid.UUID, from, to *time.Time, database string, filters ashFilters, limit int) ([]ashBucket, int, error) {
+	where, args := ashWhere(instanceID, from, to, database, filters)
+	query := fmt.Sprintf(`SELECT ts, samples, window_ticks, datname, wait_event_type, wait_event, state, queryid
+		FROM metrics_ash WHERE %s ORDER BY ts DESC LIMIT %d`, where, limit)
 
 	rows, err := a.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -249,73 +233,260 @@ func (a *AshAPI) queryASHBuckets(ctx context.Context, instanceID uuid.UUID, from
 	defer rows.Close()
 
 	var buckets []ashBucket
-	totalTicks := 0
+	windowTicks := make(map[time.Time]int)
 	for rows.Next() {
-		bucket := ashBucket{}
-		var ticks int
-
-		// Scan common columns
-		scanDests := []any{&bucket.TS, &bucket.Samples, &ticks}
-
-		if len(groupByCols) == 0 {
-			var datname, wet, we, state string
-			var qid *int64
-			scanDests = append(scanDests, &datname, &wet, &we, &state, &qid)
-			if err := rows.Scan(scanDests...); err != nil {
-				return nil, 0, err
-			}
-			bucket.Datname = datname
-			bucket.WaitEventType = wet
-			bucket.WaitEvent = we
-			bucket.State = state
-			bucket.QueryID = formatQueryID(qid)
-		} else {
-			// Only scan requested columns
-			for _, col := range groupByCols {
-				switch col {
-				case "datname":
-					var v string
-					scanDests = append(scanDests, &v)
-					bucket.Datname = v
-				case "wait_event_type":
-					var v string
-					scanDests = append(scanDests, &v)
-					bucket.WaitEventType = v
-				case "wait_event":
-					var v string
-					scanDests = append(scanDests, &v)
-					bucket.WaitEvent = v
-				case "state":
-					var v string
-					scanDests = append(scanDests, &v)
-					bucket.State = v
-				case "queryid":
-					var v *int64
-					scanDests = append(scanDests, &v)
-					bucket.QueryID = formatQueryID(v)
-				}
-			}
-			if err := rows.Scan(scanDests...); err != nil {
-				return nil, 0, err
-			}
+		var bucket ashBucket
+		var qid *int64
+		if err := rows.Scan(&bucket.TS, &bucket.Samples, &bucket.Ticks, &bucket.Datname, &bucket.WaitEventType, &bucket.WaitEvent, &bucket.State, &qid); err != nil {
+			return nil, 0, err
 		}
-
-		// Calculate avg_active_sessions
-		bucket.Ticks = ticks
-		if ticks > 0 {
-			avg := float64(bucket.Samples) / float64(ticks)
-			bucket.AvgActiveSessions = &avg
-		}
-
-		totalTicks += ticks
+		bucket.QueryID = formatQueryID(qid)
+		bucket.AvgActiveSessions = avgActive(bucket.Samples, bucket.Ticks)
+		windowTicks[bucket.TS] = bucket.Ticks
 		buckets = append(buckets, bucket)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return buckets, sumTicks(windowTicks), nil
+}
 
+// ashFilters narrows the rows to one wait event type or wait event: the
+// drill-down from a type to its events and from an event to its queries.
+type ashFilters struct {
+	waitEventType, waitEvent string
+}
+
+func ashWhere(instanceID uuid.UUID, from, to *time.Time, database string, filters ashFilters) (string, []any) {
+	frags := []string{"instance_id = $1"}
+	args := []any{instanceID}
+	add := func(frag string, arg any) {
+		args = append(args, arg)
+		frags = append(frags, fmt.Sprintf(frag, len(args)))
+	}
+	if from != nil {
+		add("ts >= $%d", *from)
+	}
+	if to != nil {
+		add("ts < $%d", *to)
+	}
+	if database != "" {
+		add("datname = $%d", database)
+	}
+	if filters.waitEventType != "" {
+		add("wait_event_type = $%d", filters.waitEventType)
+	}
+	if filters.waitEvent != "" {
+		add("wait_event = $%d", filters.waitEvent)
+	}
+	return strings.Join(frags, " AND "), args
+}
+
+const (
+	// ashWindowSeconds is the agent's aggregation window, the finest
+	// resolution the stored rows have.
+	ashWindowSeconds = 10
+	// ashMaxPoints bounds the time buckets of a grouped answer, whatever the
+	// range.
+	ashMaxPoints = 180
+	// ashMaxGroups bounds the distinct groups of a grouped answer; the
+	// smaller ones are folded into one "other" group, so the total is kept.
+	ashMaxGroups = 24
+	ashOther     = "other"
+)
+
+// ashResolution is the time bucket, a multiple of the agent's window, that
+// fits the range into ashMaxPoints buckets.
+func ashResolution(from, to time.Time) int {
+	span := int(math.Ceil(to.Sub(from).Seconds() / ashMaxPoints))
+	if span <= ashWindowSeconds {
+		return ashWindowSeconds
+	}
+	return (span + ashWindowSeconds - 1) / ashWindowSeconds * ashWindowSeconds
+}
+
+// queryASHGrouped aggregates the range into time buckets of resolution
+// seconds, one row per bucket and group.
+//
+// group_by used to aggregate nothing: it selected the requested columns from
+// the raw rows, newest first, cut at limit. Each window came back once per
+// stored key, the chart kept whichever of them it read last, and the limit
+// cut the range to its newest minutes. The requested columns were not even
+// filled in: each was copied out of its scan variable before the scan ran,
+// so every row read as CPU. And ticks were summed per row, so every key
+// counted its window's ticks again, understating the average active sessions
+// and hiding the significance warning.
+//
+// ticks is now the instance's sampling ticks in the bucket: every window
+// counted once, from every row of the instance, whatever the filters, so the
+// average active sessions of a group is its share of the instance's time.
+// Groups beyond the largest ones are folded into "other" so the stacked
+// total is conserved; filter values are echoed on every row, so a drill-down
+// can tell which type or event it is looking at.
+func (a *AshAPI) queryASHGrouped(ctx context.Context, instanceID uuid.UUID, from, to time.Time, resolution int, database string, filters ashFilters, groupByCols []string, limit int) ([]ashBucket, int, error) {
+	where, args := ashWhere(instanceID, &from, &to, database, filters)
+	res := time.Duration(resolution) * time.Second
+	args = append(args, res, from, to)
+	resArg, fromArg, toArg := len(args)-2, len(args)-1, len(args)
+	cols := strings.Join(groupByCols, ", ")
+	gcols := "g." + strings.Join(groupByCols, ", g.")
+	query := fmt.Sprintf(`
+WITH ticks AS (
+  SELECT bucket, SUM(t)::int AS ticks
+    FROM (SELECT time_bucket($%[1]d::interval, ts) AS bucket, ts, MAX(window_ticks) AS t
+            FROM metrics_ash
+           WHERE instance_id = $1 AND ts >= $%[2]d AND ts < $%[3]d
+           GROUP BY 1, 2) w
+   GROUP BY bucket
+)
+SELECT g.bucket, g.samples, t.ticks, %[4]s
+  FROM (SELECT time_bucket($%[1]d::interval, ts) AS bucket, %[5]s, SUM(samples)::int AS samples
+          FROM metrics_ash
+         WHERE %[6]s
+         GROUP BY 1, %[5]s) g
+  JOIN ticks t ON t.bucket = g.bucket
+ ORDER BY g.bucket`, resArg, fromArg, toArg, gcols, cols, where)
+
+	rows, err := a.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var raw []ashBucket
+	bucketTicks := make(map[time.Time]int)
+	for rows.Next() {
+		var b ashBucket
+		dests := []any{&b.TS, &b.Samples, &b.Ticks}
+		var qid *int64
+		for _, col := range groupByCols {
+			switch col {
+			case "datname":
+				dests = append(dests, &b.Datname)
+			case "wait_event_type":
+				dests = append(dests, &b.WaitEventType)
+			case "wait_event":
+				dests = append(dests, &b.WaitEvent)
+			case "state":
+				dests = append(dests, &b.State)
+			case "queryid":
+				dests = append(dests, &qid)
+			}
+		}
+		if err := rows.Scan(dests...); err != nil {
+			return nil, 0, err
+		}
+		b.QueryID = formatQueryID(qid)
+		bucketTicks[b.TS] = b.Ticks
+		raw = append(raw, b)
+	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, err
 	}
 
-	return buckets, totalTicks, nil
+	buckets := foldASHGroups(raw, groupByCols, len(bucketTicks), limit)
+	for i := range buckets {
+		if filters.waitEventType != "" {
+			buckets[i].WaitEventType = filters.waitEventType
+		}
+		if filters.waitEvent != "" {
+			buckets[i].WaitEvent = filters.waitEvent
+		}
+		buckets[i].AvgActiveSessions = avgActive(buckets[i].Samples, buckets[i].Ticks)
+	}
+	return buckets, sumTicks(bucketTicks), nil
+}
+
+// foldASHGroups keeps the largest groups (by samples over the range) and
+// folds the others into one "other" group per bucket. The number kept is
+// ashMaxGroups, fewer when limit rows could not hold them for every bucket.
+// A group that already reads as "other" (a NULL queryid, a value named
+// other) is folded too, so no bucket carries "other" twice.
+func foldASHGroups(rows []ashBucket, groupByCols []string, nBuckets, limit int) []ashBucket {
+	keyOf := func(b ashBucket) string {
+		qid := ""
+		if b.QueryID != nil {
+			qid = *b.QueryID
+		}
+		return strings.Join([]string{b.Datname, b.WaitEventType, b.WaitEvent, b.State, qid}, "\x00")
+	}
+	var template ashBucket
+	for _, col := range groupByCols {
+		switch col {
+		case "datname":
+			template.Datname = ashOther
+		case "wait_event_type":
+			template.WaitEventType = ashOther
+		case "wait_event":
+			template.WaitEvent = ashOther
+		case "state":
+			template.State = ashOther
+		}
+	}
+	otherKey := keyOf(template)
+
+	totals := make(map[string]int)
+	for _, b := range rows {
+		totals[keyOf(b)] += b.Samples
+	}
+	keep := ashMaxGroups
+	if nBuckets > 0 {
+		if fit := limit/nBuckets - 1; fit < keep {
+			keep = max(fit, 1)
+		}
+	}
+	if len(totals) <= keep+1 {
+		return rows
+	}
+	keys := make([]string, 0, len(totals))
+	for k := range totals {
+		if k != otherKey {
+			keys = append(keys, k)
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if totals[keys[i]] != totals[keys[j]] {
+			return totals[keys[i]] > totals[keys[j]]
+		}
+		return keys[i] < keys[j]
+	})
+	kept := make(map[string]struct{}, keep)
+	for _, k := range keys[:min(keep, len(keys))] {
+		kept[k] = struct{}{}
+	}
+	var out []ashBucket
+	other := make(map[time.Time]int) // bucket -> index of its "other" row in out
+	for _, b := range rows {
+		if _, ok := kept[keyOf(b)]; ok {
+			out = append(out, b)
+			continue
+		}
+		if i, ok := other[b.TS]; ok {
+			out[i].Samples += b.Samples
+			continue
+		}
+		folded := template
+		folded.TS, folded.Samples, folded.Ticks = b.TS, b.Samples, b.Ticks
+		other[b.TS] = len(out)
+		out = append(out, folded)
+	}
+	return out
+}
+
+func avgActive(samples, ticks int) *float64 {
+	if ticks <= 0 {
+		return nil
+	}
+	avg := float64(samples) / float64(ticks)
+	return &avg
+}
+
+func sumTicks(byWindow map[time.Time]int) int {
+	total := 0
+	for _, t := range byWindow {
+		total += t
+	}
+	return total
 }
 
 // ----- /api/v1/ash/top -----
@@ -327,6 +498,10 @@ func (a *AshAPI) handleASHTop(w http.ResponseWriter, r *http.Request) {
 	toStr := q.Get("to")
 	database := q.Get("database")
 	limitStr := q.Get("limit")
+	// The drill-down filters, so the queries listed under a wait event are
+	// the ones seen in it: the list used to rank every query of the range
+	// whatever wait event the chart above had narrowed to.
+	filters := ashFilters{waitEventType: q.Get("wait_event_type"), waitEvent: q.Get("wait_event")}
 
 	if instanceIDStr == "" {
 		writeError(w, http.StatusBadRequest, "missing instance_id", "query param instance_id is required")
@@ -381,7 +556,7 @@ func (a *AshAPI) handleASHTop(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	entries, totalTicks, err := a.queryASHTop(ctx, iid, fromPtr, toPtr, database, limit)
+	entries, totalTicks, err := a.queryASHTop(ctx, iid, fromPtr, toPtr, database, filters, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query failed", err.Error())
 		return
@@ -401,49 +576,38 @@ func (a *AshAPI) handleASHTop(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (a *AshAPI) queryASHTop(ctx context.Context, instanceID uuid.UUID, from, to *time.Time, database string, limit int) ([]ashTopEntry, int, error) {
-	// Build WHERE clause
-	var whereFrags []string
-	var args []any
-	argIdx := 1
-
-	whereFrags = append(whereFrags, fmt.Sprintf("a.instance_id = $%d", argIdx))
-	args = append(args, instanceID)
-	argIdx++
-
-	whereFrags = append(whereFrags, "a.queryid IS NOT NULL")
-
-	if from != nil {
-		whereFrags = append(whereFrags, fmt.Sprintf("a.ts >= $%d", argIdx))
-		args = append(args, *from)
-		argIdx++
-	}
-	if to != nil {
-		whereFrags = append(whereFrags, fmt.Sprintf("a.ts < $%d", argIdx))
-		args = append(args, *to)
-		argIdx++
-	}
-	if database != "" {
-		whereFrags = append(whereFrags, fmt.Sprintf("a.datname = $%d", argIdx))
-		args = append(args, database)
-		argIdx++
-	}
-
-	whereStr := strings.Join(whereFrags, " AND ")
-
-	query := fmt.Sprintf(`
-		SELECT a.queryid, COALESCE(q.query_text, ''),
-		       SUM(a.samples)::int, SUM(a.window_ticks)::int
-		FROM metrics_ash a
-		LEFT JOIN query_texts q ON a.queryid = q.queryid
-			AND a.datname = q.datname
-			AND a.cluster_id = q.cluster_id
-		WHERE %s
-		GROUP BY a.queryid, q.query_text
-		ORDER BY SUM(a.samples) DESC
-		LIMIT $%d
-	`, whereStr, argIdx)
+// queryASHTop ranks the queries by samples over the range.
+//
+// The text used to be joined from query_texts row by row: that table keeps
+// one row per PostgreSQL major, so a queryid seen before and after an upgrade
+// counted its samples twice. ticks was summed over each query's rows, once
+// per wait event and state the query was seen in, which understated its
+// average active sessions; it is the instance's sampling ticks over the
+// range, every window counted once, the same denominator for every query.
+// The filters narrow the samples, not the ticks, as they do for group_by.
+func (a *AshAPI) queryASHTop(ctx context.Context, instanceID uuid.UUID, from, to *time.Time, database string, filters ashFilters, limit int) ([]ashTopEntry, int, error) {
+	where, args := ashWhere(instanceID, from, to, database, filters)
+	tickWhere, _ := ashWhere(instanceID, from, to, "", ashFilters{})
 	args = append(args, limit)
+	query := fmt.Sprintf(`
+WITH ticks AS (
+  SELECT COALESCE(SUM(t), 0)::int AS ticks
+    FROM (SELECT ts, MAX(window_ticks) AS t FROM metrics_ash WHERE %s GROUP BY ts) w
+), top AS (
+  SELECT queryid, MIN(cluster_id) AS cluster_id, SUM(samples)::int AS samples
+    FROM metrics_ash
+   WHERE %s AND queryid IS NOT NULL
+   GROUP BY queryid
+   ORDER BY SUM(samples) DESC, queryid
+   LIMIT $%d
+)
+SELECT top.queryid,
+       COALESCE((SELECT q.query_text FROM query_texts q
+                  WHERE q.tenant_id = 'default' AND q.cluster_id = top.cluster_id AND q.queryid = top.queryid
+                  ORDER BY q.last_seen DESC LIMIT 1), ''),
+       top.samples, ticks.ticks
+  FROM top CROSS JOIN ticks
+ ORDER BY top.samples DESC, top.queryid`, tickWhere, where, len(args))
 
 	rows, err := a.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -451,38 +615,22 @@ func (a *AshAPI) queryASHTop(ctx context.Context, instanceID uuid.UUID, from, to
 	}
 	defer rows.Close()
 
-	var entries []ashTopEntry
+	entries := []ashTopEntry{}
 	totalTicks := 0
 	for rows.Next() {
-		var qid *int64
-		var text string
-		var samples, ticks int
-
-		if err := rows.Scan(&qid, &text, &samples, &ticks); err != nil {
+		var qid int64
+		var entry ashTopEntry
+		if err := rows.Scan(&qid, &entry.QueryText, &entry.Samples, &entry.Ticks); err != nil {
 			return nil, 0, err
 		}
-
-		entry := ashTopEntry{
-			QueryText: text,
-			Samples:   samples,
-			Ticks:     ticks,
-		}
-		if qid != nil {
-			entry.QueryID = strconv.FormatInt(*qid, 10)
-		}
-		if ticks > 0 {
-			avg := float64(samples) / float64(ticks)
-			entry.AvgActive = &avg
-		}
-
+		entry.QueryID = strconv.FormatInt(qid, 10)
+		entry.AvgActive = avgActive(entry.Samples, entry.Ticks)
+		totalTicks = entry.Ticks
 		entries = append(entries, entry)
-		totalTicks += ticks
 	}
-
 	if err := rows.Err(); err != nil {
 		return nil, 0, err
 	}
-
 	return entries, totalTicks, nil
 }
 
