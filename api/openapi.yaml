@@ -1456,7 +1456,11 @@ paths:
       operationId: getAlert
       summary: Return one alert by alert key.
       parameters:
-        - { name: alert_key, in: path, required: true, schema: { type: string } }
+        - name: alert_key
+          in: path
+          required: true
+          description: Percent-encoded alert key. Keys contain '/' separators, so they must be sent as %2F.
+          schema: { type: string }
       responses:
         '200':
           description: Alert detail.

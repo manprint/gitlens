@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -358,6 +359,19 @@ func (a *AlertAPI) alertDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := chi.URLParam(r, "alert_key")
+	// Keys contain '/' separators, so the client sends one percent-encoded path
+	// segment. chi routes on the escaped path and hands the segment back still
+	// encoded, which matched no row and 404ed every alert. Decode it once, and
+	// only when the escaped path was routed: without RawPath chi already used
+	// the decoded path, and decoding again would corrupt a key with a literal '%'.
+	if r.URL.RawPath != "" {
+		decoded, err := url.PathUnescape(key)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid alert key", err.Error())
+			return
+		}
+		key = decoded
+	}
 	var v alert.Alert
 	var raw []byte
 	var cluster *int64

@@ -1897,6 +1897,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description Percent-encoded alert key. Keys contain '/' separators, so they must be sent as %2F. */
                 alert_key: string;
             };
             cookie?: never;

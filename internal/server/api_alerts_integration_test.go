@@ -48,3 +48,19 @@ func TestAlertAPI_INT_ALERTAPI_002_Tier0Immutable(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/api/v1/alert-rules/agent_down", strings.NewReader(`{"enabled":false}`)))
 	require.Equal(t, http.StatusConflict, w.Code)
 }
+
+// TestAlertAPI_INT_ALERTAPI_003_DetailFindsSlashedKey: the detail route must
+// return a stored alert whose key holds '/' separators, the way the UI asks for it.
+func TestAlertAPI_INT_ALERTAPI_003_DetailFindsSlashedKey(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	st := alert.NewPgStore(pool)
+	now := time.Now().UTC()
+	key := "agent_down/11111111-1111-1111-1111-111111111111/"
+	require.NoError(t, st.Upsert(contextBackground(), alert.Alert{Key: key, RuleID: "agent_down", Severity: alert.SeverityCritical, State: alert.StateFiring, Summary: "agent silent", StartedAt: now, LastEvalAt: now, Labels: map[string]string{}}))
+	r := alertRouter(NewAlertAPI(pool, st))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/alerts/"+encodeURIComponent(key), nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), `"alert_key":"`+key+`"`)
+}

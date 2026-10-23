@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -143,6 +144,55 @@ func TestAlertAPI_DatabaseBackedBranches(t *testing.T) {
 	pool.queryRowVals = make([]*mockRow, pool.queryRowCalls+1)
 	pool.queryRowVals[pool.queryRowCalls] = &mockRow{err: pgx.ErrNoRows}
 	require.Equal(t, 404, serveAlert(t, api, http.MethodGet, "/api/v1/alerts/missing", "").Code)
+}
+
+// alertKeyPool records the key each detail query runs with. The shared mockPool
+// ignores query arguments, so it cannot show what the handler sent.
+type alertKeyPool struct {
+	*mockPool
+	keys []string
+}
+
+func (p *alertKeyPool) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	p.keys = append(p.keys, args[0].(string))
+	return p.mockPool.QueryRow(ctx, sql, args...)
+}
+
+// encodeURIComponent escapes a path parameter the way the web client does, so
+// the tests send the same bytes the UI sends.
+func encodeURIComponent(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if ('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z') || ('0' <= c && c <= '9') || strings.IndexByte("-_.!~*'()", c) >= 0 {
+			b.WriteByte(c)
+			continue
+		}
+		fmt.Fprintf(&b, "%%%02X", c)
+	}
+	return b.String()
+}
+
+func TestAlertAPI_DetailDecodesKeyOnce(t *testing.T) {
+	t.Parallel()
+	iid := uuid.New()
+	// The evaluator's key shapes: a '/' separator, a database subject holding a
+	// literal '%', labels joined by \x1f with '=' inside, and a key with no
+	// escaping at all, whose request path chi routes on the decoded form.
+	keys := []string{
+		"agent_down/" + iid.String() + "/",
+		"replica_lag/" + iid.String() + ":app%41/team=dba\x1fcluster=7",
+		"plain%41",
+		"plainkey",
+	}
+	for _, key := range keys {
+		now := time.Now()
+		row := &mockRow{vals: []any{key, "custom", alert.SeverityWarning, alert.StateFiring, nil, nil, "db", []byte(`{}`), 1.0, "s", now, now, nil}}
+		pool := &alertKeyPool{mockPool: &mockPool{queryRowVals: []*mockRow{row}}}
+		w := serveAlert(t, newAlertAPIForTest(pool, &alertAPITestStore{}), http.MethodGet, "/api/v1/alerts/"+encodeURIComponent(key), "")
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.Equal(t, []string{key}, pool.keys)
+	}
 }
 
 func TestAlertAPI_UnavailableBranches(t *testing.T) {
