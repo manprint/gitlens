@@ -131,12 +131,13 @@ type Target interface {
 	Clock() clock.Clock
 }
 
-// ApplySessionLimits sets per-check timeouts via SET LOCAL.
+// ApplySessionLimits sets per-check timeouts on the session with plain SET
+// statements. A check's Conn exposes no transaction, and SET LOCAL outside one
+// only draws a WARNING and changes nothing. The limits therefore stay on a
+// pooled connection after the check returns, and the agent reapplies them
+// when it hands a pooled connection out again.
 func ApplySessionLimits(ctx context.Context, conn Conn, timeout time.Duration) error {
 	ms := int(timeout / time.Millisecond)
-	// Conn does not expose a transaction to the check, so SET LOCAL would be
-	// rejected by PostgreSQL before the actual check query runs. These session
-	// settings are reapplied for every check connection before it is used.
 	if _, err := conn.Exec(ctx, fmt.Sprintf("SET statement_timeout = %d", ms)); err != nil {
 		return err
 	}
