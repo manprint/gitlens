@@ -177,9 +177,25 @@ func (c *ashConn) Close() {
 // shape internal/server/pipeline.go's buildASHRow already parses: one
 // "ash_samples" gauge per bucket, labeled with the bucket's key plus the
 // window's own ticks/seconds for the honest samples/ticks average.
+//
+// A window that ticked with no sampled session still yields one zero-count
+// record carrying its ticks. The server counts those ticks in the denominator,
+// so an idle stretch reads as zero active sessions rather than as no data. A
+// window where every tick failed yields nothing: it stays a gap.
 func ashWindowToMetrics(w ash.Window) []wire.Metric {
 	if len(w.Buckets) == 0 {
-		return nil
+		if w.Ticks == 0 {
+			return nil
+		}
+		return []wire.Metric{{
+			Name:  "ash_samples",
+			Value: 0,
+			Kind:  string(pgtype.KindGauge),
+			Labels: map[string]string{
+				"window_seconds": strconv.Itoa(int(ashWindow / time.Second)),
+				"window_ticks":   strconv.Itoa(w.Ticks),
+			},
+		}}
 	}
 	metrics := make([]wire.Metric, 0, len(w.Buckets))
 	for _, b := range w.Buckets {

@@ -220,7 +220,9 @@ func (a *AshAPI) handleASH(w http.ResponseWriter, r *http.Request) {
 }
 
 // queryASHBuckets returns the stored rows unaggregated, newest first: every
-// dimension, one row per window and key.
+// dimension, one row per window and key. A window that ticked with no sampled
+// session is stored as a zero-count row carrying its ticks: it is not listed,
+// but its ticks still count toward the range.
 func (a *AshAPI) queryASHBuckets(ctx context.Context, instanceID uuid.UUID, from, to *time.Time, database string, filters ashFilters, limit int) ([]ashBucket, int, error) {
 	where, args := ashWhere(instanceID, from, to, database, filters)
 	query := fmt.Sprintf(`SELECT ts, samples, window_ticks, datname, wait_event_type, wait_event, state, queryid
@@ -240,9 +242,12 @@ func (a *AshAPI) queryASHBuckets(ctx context.Context, instanceID uuid.UUID, from
 		if err := rows.Scan(&bucket.TS, &bucket.Samples, &bucket.Ticks, &bucket.Datname, &bucket.WaitEventType, &bucket.WaitEvent, &bucket.State, &qid); err != nil {
 			return nil, 0, err
 		}
+		windowTicks[bucket.TS] = bucket.Ticks
+		if bucket.Samples == 0 {
+			continue
+		}
 		bucket.QueryID = formatQueryID(qid)
 		bucket.AvgActiveSessions = avgActive(bucket.Samples, bucket.Ticks)
-		windowTicks[bucket.TS] = bucket.Ticks
 		buckets = append(buckets, bucket)
 	}
 	if err := rows.Err(); err != nil {
@@ -319,10 +324,12 @@ func ashResolution(from, to time.Time) int {
 //
 // ticks is now the instance's sampling ticks in the bucket: every window
 // counted once, from every row of the instance, whatever the filters, so the
-// average active sessions of a group is its share of the instance's time.
-// Groups beyond the largest ones are folded into "other" so the stacked
-// total is conserved; filter values are echoed on every row, so a drill-down
-// can tell which type or event it is looking at.
+// average active sessions of a group is its share of the instance's time. An
+// idle window has a zero-count row with no group to show: its ticks join the
+// bucket, but the row is not a group. Groups beyond the largest ones are
+// folded into "other" so the stacked total is conserved; filter values are
+// echoed on every row, so a drill-down can tell which type or event it is
+// looking at.
 func (a *AshAPI) queryASHGrouped(ctx context.Context, instanceID uuid.UUID, from, to time.Time, resolution int, database string, filters ashFilters, groupByCols []string, limit int) ([]ashBucket, int, error) {
 	where, args := ashWhere(instanceID, &from, &to, database, filters)
 	res := time.Duration(resolution) * time.Second
@@ -378,6 +385,9 @@ SELECT g.bucket, g.samples, t.ticks, %[4]s
 		}
 		b.QueryID = formatQueryID(qid)
 		bucketTicks[b.TS] = b.Ticks
+		if b.Samples == 0 {
+			continue
+		}
 		raw = append(raw, b)
 	}
 	if err := rows.Err(); err != nil {
