@@ -600,7 +600,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Mute a finding until a future timestamp. */
+        /** Mute a finding until a future timestamp, at most 90 days ahead. */
         post: operations["muteFinding"];
         /** Remove a finding mute. */
         delete: operations["unmuteFinding"];
@@ -1230,6 +1230,7 @@ export interface components {
             starts_at: components["schemas"]["Timestamp"];
             ends_at: components["schemas"]["Timestamp"];
         };
+        /** @description until must be in the future and at most 90 days ahead; a later one is refused with 400, so a mute always ends. */
         MuteFindingRequest: {
             reason: string;
             until: components["schemas"]["Timestamp"];

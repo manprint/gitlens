@@ -626,6 +626,9 @@ components:
         ends_at: { $ref: '#/components/schemas/Timestamp' }
     MuteFindingRequest:
       type: object
+      description: >-
+        until must be in the future and at most 90 days ahead; a later one is
+        refused with 400, so a mute always ends.
       required: [reason, until]
       properties:
         reason: { type: string }
@@ -1769,7 +1772,7 @@ paths:
     post:
       tags: [findings]
       operationId: muteFinding
-      summary: Mute a finding until a future timestamp.
+      summary: Mute a finding until a future timestamp, at most 90 days ahead.
       parameters:
         - { name: finding-id, in: path, required: true, schema: { type: string } }
       requestBody:

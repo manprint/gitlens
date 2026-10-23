@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,4 +106,30 @@ func TestScanFinding_ClusterIDIsAnUnsignedString(t *testing.T) {
 	body, err := json.Marshal(f)
 	require.NoError(t, err)
 	require.Contains(t, string(body), `"cluster_id":"18000000000000000000"`)
+}
+
+// A mute may not outlast maxFindingMuteDuration: an unbounded mute silences a
+// critical finding for as long as the timestamp says, with no one prompted.
+func TestFindingsAPI_MuteRefusesAnUntilBeyondTheCap(t *testing.T) {
+	post := func(pool *mockPool, until string) *httptest.ResponseRecorder {
+		r := chi.NewRouter()
+		(&API{pool: pool}).registerFindingsRoutes(r)
+		body := `{"reason":"accepted","until":"` + until + `"}`
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/findings/query.slow_mean/mute", strings.NewReader(body)))
+		return rec
+	}
+	inside := time.Now().UTC().Add(maxFindingMuteDuration - time.Hour).Format(time.RFC3339)
+	beyond := time.Now().UTC().Add(maxFindingMuteDuration + time.Hour).Format(time.RFC3339)
+
+	pool := &mockPool{execRows: []int64{1}}
+	require.Equal(t, http.StatusOK, post(pool, inside).Code)
+
+	pool = &mockPool{execRows: []int64{1}}
+	rec := post(pool, beyond)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	require.Equal(t, 0, pool.execCalls, "a refused mute must not reach the database")
+
+	rec = post(&mockPool{execRows: []int64{1}}, "9999-12-31T23:59:59Z")
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 }

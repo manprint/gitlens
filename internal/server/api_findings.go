@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -188,6 +190,9 @@ func (a *API) getFinding(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, f)
 }
 
+// maxFindingMuteDuration bounds how far ahead a finding may be muted.
+const maxFindingMuteDuration = 90 * 24 * time.Hour
+
 func (a *API) muteFinding(w http.ResponseWriter, r *http.Request) {
 	if a.pool == nil {
 		writeError(w, 503, "findings unavailable", "database pool is not configured")
@@ -204,9 +209,14 @@ func (a *API) muteFinding(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid mute", "reason and until are required")
 		return
 	}
+	now := time.Now()
 	until, err := time.Parse(time.RFC3339, in.Until)
-	if err != nil || !until.After(time.Now()) {
+	if err != nil || !until.After(now) {
 		writeError(w, 400, "invalid mute", "until must be a future RFC3339 timestamp")
+		return
+	}
+	if until.After(now.Add(maxFindingMuteDuration)) {
+		writeError(w, 400, "invalid mute", fmt.Sprintf("until must be at most %d days ahead", int(maxFindingMuteDuration/(24*time.Hour))))
 		return
 	}
 	id := findingPathID(r, "mute")
@@ -219,6 +229,9 @@ func (a *API) muteFinding(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "finding not found", id)
 		return
 	}
+	// A mute leaves no audit row, so the log is the only record of the
+	// silence: the finding, how long it lasts, the client and the reason.
+	log.Printf("finding %s muted until %s from %s: %q", id, until.Format(time.RFC3339), sessionClientAddress(r), in.Reason)
 	writeJSON(w, 200, map[string]any{"finding_id": id, "state": "muted", "muted_until": until, "mute_reason": in.Reason})
 }
 
