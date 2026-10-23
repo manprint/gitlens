@@ -39,7 +39,7 @@ func TestINTCLI001_CheckTierKeepsMixedCaseRole(t *testing.T) {
 		u.User = url.UserPassword(role, "test")
 		conn, err := pgx.Connect(ctx, u.String())
 		require.NoError(t, err)
-		defer conn.Close(ctx)
+		defer func() { _ = conn.Close(ctx) }()
 
 		require.Equal(t, pgtype.TierExplain, determinePermTier(ctx, conn))
 	})
