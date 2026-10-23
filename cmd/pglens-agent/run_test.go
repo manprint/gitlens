@@ -130,24 +130,52 @@ func TestCheckDatabaseSummary_AppliesTheAgentSelection(t *testing.T) {
 		formatDatabaseSummary(1, agent.SelectDatabases(candidates[1:2], agent.DefaultConnOptions())))
 }
 
-// TestReportScheduled_MonitoredMeansCollected — the selection re-runs every
-// envelope, the schedule does not: a database created after startup is not
-// collected, and one pushed out of the budget after startup still is.
+// TestReportScheduled_MonitoredMeansCollected: the selection re-runs every
+// envelope, the schedule keeps only the databases it holds. A database the
+// budget monitors waits for a free slot: it is reported as skipped until the
+// next reconcile fills one, or as db_budget while the held databases take every
+// slot. A database the budget has pushed out but the schedule still holds is
+// collected.
 func TestReportScheduled_MonitoredMeansCollected(t *testing.T) {
-	scheduled := map[string]bool{"app": true, "old": true}
-	got := reportScheduled([]wire.Database{
-		{Name: "app", Monitored: true},
-		{Name: "created_later", Monitored: true},
-		{Name: "old", Monitored: false, SkipReason: "db_budget"},
-		{Name: "never", Monitored: false, SkipReason: "db_budget"},
-	}, scheduled)
-
-	require.Equal(t, []wire.Database{
-		{Name: "app", Monitored: true},
-		{Name: "created_later", Monitored: false, SkipReason: "discovered_after_start"},
-		{Name: "old", Monitored: true},
-		{Name: "never", Monitored: false, SkipReason: "db_budget"},
-	}, got)
+	discovered := func() []wire.Database {
+		return []wire.Database{
+			{Name: "app", Monitored: true},
+			{Name: "created_later", Monitored: true},
+			{Name: "old", Monitored: false, SkipReason: "db_budget"},
+			{Name: "never", Monitored: false, SkipReason: "db_budget"},
+		}
+	}
+	tests := []struct {
+		name      string
+		scheduled map[string]bool
+		want      []wire.Database
+	}{
+		{
+			name:      "a free slot is filled by the next reconcile",
+			scheduled: map[string]bool{"app": true},
+			want: []wire.Database{
+				{Name: "app", Monitored: true},
+				{Name: "created_later", Monitored: false, SkipReason: "discovered_after_start"},
+				{Name: "old", Monitored: false, SkipReason: "db_budget"},
+				{Name: "never", Monitored: false, SkipReason: "db_budget"},
+			},
+		},
+		{
+			name:      "the held databases take every slot",
+			scheduled: map[string]bool{"app": true, "old": true},
+			want: []wire.Database{
+				{Name: "app", Monitored: true},
+				{Name: "created_later", Monitored: false, SkipReason: "db_budget"},
+				{Name: "old", Monitored: true},
+				{Name: "never", Monitored: false, SkipReason: "db_budget"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, reportScheduled(discovered(), tt.scheduled))
+		})
+	}
 }
 
 // TestFlushEnvelopeBoundsAnUnreachableTarget: a flush must not hold an

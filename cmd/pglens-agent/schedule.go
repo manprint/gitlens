@@ -34,6 +34,9 @@ type targetGate struct {
 	tier      pgtype.PermTier
 	exts      map[string]bool
 	databases map[string]bool
+	// discovered is what discovery returned, busiest first, each with the
+	// budget's verdict. nextGate keeps a scheduled database while it is listed.
+	discovered []wire.Database
 	// statementsUnknown reports that pg_stat_statements could not be looked for
 	// in every monitored database, so an absent view means nothing. nextGate
 	// keeps the last answer then. It is not part of key.
@@ -41,15 +44,17 @@ type targetGate struct {
 }
 
 // key is the part of a gate that a change rebuilds the schedule for. The
-// database set is compared separately, because it only grows.
+// database set is compared separately, because nextGate keeps it from one read
+// to the next.
 func (g targetGate) key() string {
 	return fmt.Sprintf("%s/%d/%s/%v", g.role, g.version, g.tier, g.exts)
 }
 
-// readTargetGate reads a target's gate values and its database discovery. ok is
+// readTargetGate reads a target's gate values and its database discovery.
+// scheduled is the database set the schedule currently runs checks for. ok is
 // false when the target cannot be read in full this time: discovery failed, or
 // its version or role is still unknown.
-func readTargetGate(ctx context.Context, mgr *agent.Manager) (targetGate, bool) {
+func readTargetGate(ctx context.Context, mgr *agent.Manager, scheduled map[string]bool) (targetGate, bool) {
 	ctx, cancel := context.WithTimeout(ctx, scheduleReadTimeout)
 	defer cancel()
 
@@ -69,11 +74,12 @@ func readTargetGate(ctx context.Context, mgr *agent.Manager) (targetGate, bool) 
 	// once it has succeeded.
 	version := mgr.PGVersion() //nolint:contextcheck // Manager caches this; the accessor takes no context
 	g := targetGate{
-		role:      pgtype.RoleUnknown,
-		version:   version,
-		tier:      pgtype.TierReadOnly,
-		exts:      map[string]bool{},
-		databases: map[string]bool{},
+		role:       pgtype.RoleUnknown,
+		version:    version,
+		tier:       pgtype.TierReadOnly,
+		exts:       map[string]bool{},
+		databases:  map[string]bool{},
+		discovered: dbs,
 	}
 	if version != 0 {
 		g.role = mgr.Role()     //nolint:contextcheck // same as above
@@ -85,7 +91,14 @@ func readTargetGate(ctx context.Context, mgr *agent.Manager) (targetGate, bool) 
 	// through, so it only runs on a complete discovery.
 	g.exts["pg_stat_statements"] = false
 	if err == nil {
-		found, statementsErr := mgr.LocateStatements(ctx, dbs)
+		// A database the budget has pushed out but the schedule still runs checks
+		// for keeps its view in use, so it is looked at too.
+		lookup := make([]wire.Database, len(dbs))
+		copy(lookup, dbs)
+		for i := range lookup {
+			lookup[i].Monitored = lookup[i].Monitored || scheduled[lookup[i].Name]
+		}
+		found, statementsErr := mgr.LocateStatements(ctx, lookup)
 		g.exts["pg_stat_statements"] = found
 		g.statementsUnknown = statementsErr != nil
 	}
@@ -101,10 +114,9 @@ func readTargetGate(ctx context.Context, mgr *agent.Manager) (targetGate, bool) 
 // reports whether the schedule has to be rebuilt for it.
 //
 // A target that cannot be read keeps the gate it was last scheduled against, so
-// a dropped connection does not tear down its checks. The database set only
-// grows: the budget ranks databases by commit count, so it can push a database
-// out and bring it back, and rebuilding for every such swap would reset the
-// circuit breakers and the jitter on each pass.
+// a dropped connection does not tear down its checks. The database set is kept
+// by keepDatabases, which is what stops a swap in the budget's ranking from
+// rebuilding the schedule.
 func nextGate(last targetGate, seen bool, read targetGate, readOK bool) (targetGate, bool) {
 	switch {
 	case !seen:
@@ -124,19 +136,54 @@ func nextGate(last targetGate, seen bool, read targetGate, readOK bool) (targetG
 		exts["pg_stat_statements"] = last.exts["pg_stat_statements"]
 		read.exts = exts
 	}
-	read.databases = unionDatabases(last.databases, read.databases)
-	return read, read.key() != last.key() || len(read.databases) != len(last.databases)
+	read.databases = keepDatabases(last.databases, read.discovered)
+	return read, read.key() != last.key() || !sameDatabases(read.databases, last.databases)
 }
 
-func unionDatabases(a, b map[string]bool) map[string]bool {
-	out := make(map[string]bool, len(a)+len(b))
+// keepDatabases picks the databases a target's database-scoped checks run for
+// after one read. The budget ranks databases by commit count, so the busiest
+// ones swap places often, and rebuilding the schedule for every swap would reset
+// its breakers and jitter each time. A scheduled database therefore stays while
+// discovery still lists it, even when the budget has pushed it out. Free slots
+// are filled from the busiest monitored databases. The slots are the databases
+// the budget monitors, which is the databases.max cap or fewer when fewer are
+// eligible, so the set never grows past it.
+func keepDatabases(last map[string]bool, discovered []wire.Database) map[string]bool {
+	listed := make(map[string]bool, len(discovered))
+	slots := 0
+	for _, db := range discovered {
+		listed[db.Name] = true
+		if db.Monitored {
+			slots++
+		}
+	}
+	next := make(map[string]bool, slots)
+	for name := range last {
+		if listed[name] {
+			next[name] = true
+		}
+	}
+	for _, db := range discovered {
+		if len(next) >= slots {
+			break
+		}
+		if db.Monitored {
+			next[db.Name] = true
+		}
+	}
+	return next
+}
+
+func sameDatabases(a, b map[string]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
 	for name := range a {
-		out[name] = true
+		if !b[name] {
+			return false
+		}
 	}
-	for name := range b {
-		out[name] = true
-	}
-	return out
+	return true
 }
 
 // scheduleSet owns the check scheduler and keeps it in step with the targets.
@@ -277,7 +324,7 @@ func (s *scheduleSet) readGates(ctx context.Context, prev map[string]targetGate)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			reads[i], oks[i] = readTargetGate(ctx, mgr)
+			reads[i], oks[i] = readTargetGate(ctx, mgr, prev[mgr.Database()].databases)
 		}()
 	}
 	wg.Wait()

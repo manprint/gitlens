@@ -282,3 +282,104 @@ func TestINTSCH004_UncheckableDatabaseKeepsTheStatementsAnswer(t *testing.T) {
 		require.NotContains(t, takeSkips(&mu, pending, target), "stat_statements", "the check must not be skipped as missing")
 	})
 }
+
+// TestINTSCH005_ScheduledDatabaseOutsideTheBudgetKeepsItsStatementsView: the
+// budget ranks databases by commit count and monitors one of them. When another
+// database becomes the busier one, the schedule keeps the first, and its
+// pg_stat_statements view still counts. The reconcile must look at the databases
+// the schedule runs checks for, not only at the ones the budget monitors, or it
+// rebuilds the schedule without the check.
+func TestINTSCH005_ScheduledDatabaseOutsideTheBudgetKeepsItsStatementsView(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// The view is in viewDB. The role connects to plainDB, which has none, so
+		// the view is found only when the schedule still looks at viewDB.
+		const viewDB, plainDB = "sch005_view", "sch005_plain"
+		const target = "budget-target"
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		for _, db := range []string{viewDB, plainDB} {
+			_, err := admin.Exec(ctx, "CREATE DATABASE "+db)
+			require.NoError(t, err)
+		}
+		t.Cleanup(func() {
+			for _, db := range []string{viewDB, plainDB} {
+				_, _ = admin.Exec(context.Background(), "DROP DATABASE IF EXISTS "+db+" WITH (FORCE)")
+			}
+		})
+		installer, err := pgxpool.New(ctx, pg.DSN(viewDB, pgtest.RoleSuperuser))
+		require.NoError(t, err)
+		t.Cleanup(installer.Close)
+		_, err = installer.Exec(ctx, "CREATE EXTENSION pg_stat_statements")
+		require.NoError(t, err)
+
+		opts := agent.DefaultConnOptions()
+		opts.MaxDatabases = 1
+		opts.Include = []*regexp.Regexp{regexp.MustCompile("^(" + viewDB + "|" + plainDB + ")$")}
+		mgr, err := agent.NewManager(ctx, target, pg.DSN(plainDB, pgtest.RoleT0), opts, clock.System())
+		require.NoError(t, err)
+		t.Cleanup(mgr.Close)
+
+		// commit runs n statements in db. Each one is its own commit, which is
+		// what the budget counts.
+		commit := func(db string, n int) {
+			pool, err := pgxpool.New(ctx, pg.DSN(db, pgtest.RoleT0))
+			require.NoError(t, err)
+			defer pool.Close()
+			for range n {
+				_, err := pool.Exec(ctx, "SELECT 1")
+				require.NoError(t, err)
+			}
+		}
+		// budgetMonitors reports which databases the budget monitors now. A
+		// failed discovery reads as none, so Eventually keeps polling.
+		budgetMonitors := func() map[string]bool {
+			dbs, err := mgr.Discover(ctx)
+			monitored := map[string]bool{}
+			if err != nil {
+				return monitored
+			}
+			for _, db := range dbs {
+				if db.Monitored {
+					monitored[db.Name] = true
+				}
+			}
+			return monitored
+		}
+
+		commit(viewDB, 200)
+		require.Eventually(t, func() bool { return budgetMonitors()[viewDB] }, 20*time.Second, 200*time.Millisecond,
+			"the budget should monitor the busier database first")
+
+		var mu sync.Mutex
+		pending := map[string][]wire.Result{}
+		scheduledDBs := map[string]map[string]bool{}
+		schedules := newScheduleSet(ctx, &agent.Config{}, clock.System(), []*agent.Manager{mgr}, &mu, pending, scheduledDBs)
+		require.NoError(t, schedules.start(ctx))
+		t.Cleanup(schedules.stop)
+		require.True(t, schedules.gates[target].exts["pg_stat_statements"], "the view is found in the monitored database")
+		require.True(t, schedules.gates[target].databases[viewDB])
+
+		// plainDB now ranks above the view, so the budget moves on.
+		commit(plainDB, 600)
+		require.Eventually(t, func() bool {
+			monitored := budgetMonitors()
+			return monitored[plainDB] && !monitored[viewDB]
+		}, 20*time.Second, 200*time.Millisecond, "the budget should move to the other database")
+
+		currentScheduler := func() *agent.Scheduler {
+			schedules.schedMu.Lock()
+			defer schedules.schedMu.Unlock()
+			return schedules.current
+		}
+		before := currentScheduler()
+		schedules.reconcile()
+
+		require.Same(t, before, currentScheduler(), "a database the budget pushed out but the schedule holds must not rebuild it")
+		require.True(t, schedules.gates[target].databases[viewDB], "the database the schedule still runs checks for stays")
+		require.True(t, schedules.gates[target].exts["pg_stat_statements"], "its view still counts")
+		require.NotContains(t, takeSkips(&mu, pending, target), "stat_statements")
+	})
+}

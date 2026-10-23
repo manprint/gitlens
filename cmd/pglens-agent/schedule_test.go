@@ -18,24 +18,40 @@ import (
 	"github.com/manprint/pglens/internal/wire"
 )
 
-// TestNextGate pins the rules that decide when the schedule is rebuilt: a
-// change to a gate rebuilds it, an unreadable target keeps the gate it had, and
-// the database set only grows.
+// TestNextGate pins the rules that decide when the schedule is rebuilt: a change
+// to a gate rebuilds it, an unreadable target keeps the gate it had, and the
+// databases are kept while discovery lists them. A free slot is filled from the
+// busiest monitored databases, and no more than the budget allows is scheduled.
 func TestNextGate(t *testing.T) {
-	primary := targetGate{
-		role:      pgtype.RolePrimary,
-		version:   pgtype.PGVersion(190000),
-		tier:      pgtype.TierReadOnly,
-		exts:      map[string]bool{"pg_stat_statements": true},
-		databases: map[string]bool{"app": true},
+	mon := func(name string) wire.Database { return wire.Database{Name: name, Monitored: true} }
+	pushedOut := func(name string) wire.Database { return wire.Database{Name: name, SkipReason: "db_budget"} }
+	// withDBs is a read whose discovery returned dbs, busiest first.
+	withDBs := func(g targetGate, dbs ...wire.Database) targetGate {
+		g.discovered = dbs
+		g.databases = map[string]bool{}
+		for _, db := range dbs {
+			if db.Monitored {
+				g.databases[db.Name] = true
+			}
+		}
+		return g
 	}
-	withDBs := func(g targetGate, names ...string) targetGate {
+	// scheduled is a last gate that runs checks for names.
+	scheduled := func(g targetGate, names ...string) targetGate {
 		g.databases = map[string]bool{}
 		for _, n := range names {
 			g.databases[n] = true
 		}
 		return g
 	}
+	primary := withDBs(targetGate{
+		role:    pgtype.RolePrimary,
+		version: pgtype.PGVersion(190000),
+		tier:    pgtype.TierReadOnly,
+		exts:    map[string]bool{"pg_stat_statements": true},
+	}, mon("app"))
+	standby := primary
+	standby.role = pgtype.RoleStandby
 
 	tests := []struct {
 		name        string
@@ -58,7 +74,7 @@ func TestNextGate(t *testing.T) {
 			name:        "unreadable target keeps the gate it was scheduled against",
 			last:        primary,
 			seen:        true,
-			read:        withDBs(primary, "other"),
+			read:        withDBs(primary, mon("other")),
 			readOK:      false,
 			wantChanged: false,
 			wantDBs:     []string{"app"},
@@ -73,40 +89,68 @@ func TestNextGate(t *testing.T) {
 			wantDBs:     []string{"app"},
 		},
 		{
+			name:        "a rejoin as a standby changes the role",
+			last:        primary,
+			seen:        true,
+			read:        standby,
+			readOK:      true,
+			wantChanged: true,
+			wantDBs:     []string{"app"},
+		},
+		{
 			name:        "a promotion changes the role",
-			last:        primary,
+			last:        standby,
 			seen:        true,
-			read:        func() targetGate { g := primary; g.role = pgtype.RoleStandby; return g }(),
+			read:        primary,
 			readOK:      true,
 			wantChanged: true,
 			wantDBs:     []string{"app"},
 		},
 		{
-			name:        "an extension installed later changes the gate",
-			last:        primary,
-			seen:        true,
-			read:        func() targetGate { g := primary; g.exts = map[string]bool{"pg_stat_statements": false}; return g }(),
-			readOK:      true,
+			name:   "an extension installed later changes the gate",
+			last:   primary,
+			seen:   true,
+			read:   func() targetGate { g := primary; g.exts = map[string]bool{"pg_stat_statements": false}; return g }(),
+			readOK: true,
+			// the set is still app, so only the extension changed
 			wantChanged: true,
 			wantDBs:     []string{"app"},
 		},
 		{
-			name:        "a new database is a change and is kept",
-			last:        primary,
+			name:        "a free slot takes a new database",
+			last:        scheduled(primary, "app"),
 			seen:        true,
-			read:        withDBs(primary, "app", "created_later"),
+			read:        withDBs(primary, mon("app"), mon("created_later")),
 			readOK:      true,
 			wantChanged: true,
 			wantDBs:     []string{"app", "created_later"},
 		},
 		{
-			name:        "a database the budget pushed out is still collected and is no change",
-			last:        withDBs(primary, "app", "old"),
+			name:        "a database the budget pushed out stays while discovery lists it",
+			last:        scheduled(primary, "app", "old"),
 			seen:        true,
-			read:        primary,
+			read:        withDBs(primary, mon("app"), mon("created_later"), pushedOut("old")),
 			readOK:      true,
 			wantChanged: false,
 			wantDBs:     []string{"app", "old"},
+		},
+		{
+			name:        "newcomers wait while every scheduled database is still listed",
+			last:        scheduled(primary, "app", "old"),
+			seen:        true,
+			read:        withDBs(primary, mon("created_later"), mon("other"), pushedOut("app"), pushedOut("old")),
+			readOK:      true,
+			wantChanged: false,
+			wantDBs:     []string{"app", "old"},
+		},
+		{
+			name:        "a dropped database leaves and its slot is refilled",
+			last:        scheduled(primary, "app", "old"),
+			seen:        true,
+			read:        withDBs(primary, mon("app"), mon("created_later")),
+			readOK:      true,
+			wantChanged: true,
+			wantDBs:     []string{"app", "created_later"},
 		},
 	}
 
@@ -123,6 +167,52 @@ func TestNextGate(t *testing.T) {
 	}
 }
 
+// TestNextGate_NeverSchedulesMoreThanTheBudget: under churn in the budget's
+// ranking, and databases that come and go, the scheduled set stays within the
+// budget and only holds databases discovery lists.
+func TestNextGate_NeverSchedulesMoreThanTheBudget(t *testing.T) {
+	const budget = 2
+	mon := func(name string) wire.Database { return wire.Database{Name: name, Monitored: true} }
+	pushedOut := func(name string) wire.Database { return wire.Database{Name: name, SkipReason: "db_budget"} }
+	// Each read is discovery, busiest first; the first budget entries are monitored.
+	reads := [][]wire.Database{
+		{mon("a"), mon("b"), pushedOut("c")},
+		{mon("c"), mon("b"), pushedOut("a")},
+		{mon("c"), pushedOut("b"), pushedOut("a")},
+		{mon("b"), mon("c"), pushedOut("d")},
+		{mon("d"), mon("a"), pushedOut("b"), pushedOut("c")},
+		{mon("d"), mon("e"), pushedOut("a")},
+		{mon("e"), mon("d"), pushedOut("a")},
+		{mon("a"), mon("e")},
+		{mon("e")},
+		{mon("c"), mon("b"), pushedOut("a"), pushedOut("d"), pushedOut("e")},
+	}
+
+	gate := targetGate{role: pgtype.RolePrimary, version: pgtype.PGVersion(190000), tier: pgtype.TierReadOnly, exts: map[string]bool{}}
+	var last targetGate
+	seen := false
+	for i, discovered := range reads {
+		read := gate
+		read.discovered = discovered
+		read.databases = map[string]bool{}
+		for _, db := range discovered {
+			if db.Monitored && len(read.databases) < budget {
+				read.databases[db.Name] = true
+			}
+		}
+		got, _ := nextGate(last, seen, read, true)
+		require.LessOrEqual(t, len(got.databases), budget, "read %d scheduled more than the budget", i)
+		listed := map[string]bool{}
+		for _, db := range discovered {
+			listed[db.Name] = true
+		}
+		for name := range got.databases {
+			require.True(t, listed[name], "read %d scheduled %q, which discovery does not list", i, name)
+		}
+		last, seen = got, true
+	}
+}
+
 // TestNextGate_UnknownStatementsKeepTheAnswer: a database that cannot be checked
 // for pg_stat_statements must not read as "absent" and rebuild the schedule. The
 // other gate values still follow the read.
@@ -135,6 +225,7 @@ func TestNextGate_UnknownStatementsKeepTheAnswer(t *testing.T) {
 		databases: map[string]bool{"app": true},
 	}
 	read := last
+	read.discovered = []wire.Database{{Name: "app", Monitored: true}}
 	read.exts = map[string]bool{"pg_stat_statements": false}
 	read.statementsUnknown = true
 

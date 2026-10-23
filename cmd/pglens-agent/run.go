@@ -631,15 +631,29 @@ func configureChecks(cfg *agent.Config) {
 
 // reportScheduled makes "monitored" mean what the agent collects. Every
 // envelope re-runs the database selection, but the schedule only takes the
-// databases it was built for, which scheduleSet grows as databases are found.
-// A database created after the schedule was built is reported as skipped with
-// discovered_after_start until the next reconcile adds it, and one pushed out
-// of the budget later is still reported as collected.
+// databases it keeps, which scheduleSet reconciles every 30 seconds. A database
+// the budget monitors that is not scheduled is waiting for a free slot: it is
+// reported as discovered_after_start until the next reconcile fills one, or as
+// db_budget when the scheduled databases already hold every slot. A database
+// the budget has pushed out but the schedule still keeps is reported as
+// collected.
 func reportScheduled(dbs []wire.Database, scheduled map[string]bool) []wire.Database {
+	held, monitored := 0, 0
+	for _, db := range dbs {
+		if scheduled[db.Name] {
+			held++
+		}
+		if db.Monitored {
+			monitored++
+		}
+	}
+	full := held >= monitored
 	for i := range dbs {
 		switch {
 		case scheduled[dbs[i].Name]:
 			dbs[i].Monitored, dbs[i].SkipReason = true, ""
+		case dbs[i].Monitored && full:
+			dbs[i].Monitored, dbs[i].SkipReason = false, "db_budget"
 		case dbs[i].Monitored:
 			dbs[i].Monitored, dbs[i].SkipReason = false, "discovered_after_start"
 		}
