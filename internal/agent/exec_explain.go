@@ -129,6 +129,11 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 		scanErr = conn.QueryRow(ctx, explainSQL).Scan(&plan)
 	}
 	if scanErr != nil {
+		if !readOnlyExplainKeyword(keyword) && isInsufficientPrivilege(scanErr) {
+			// PostgreSQL checks the privileges a statement needs even when
+			// it only plans it, and the monitoring role holds none that write.
+			return nil, rejectedf("explaining a %s statement needs the privilege to run it, which the read-only monitoring role does not hold: %v", keyword, scanErr)
+		}
 		if !args.Analyze {
 			return nil, rejectedf("normalised statement cannot be explained: %v", scanErr)
 		}
@@ -267,6 +272,11 @@ func readStatementText(ctx context.Context, conn check.Conn, database string, ar
 func isUndefinedTable(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "42P01"
+}
+
+func isInsufficientPrivilege(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "42501"
 }
 
 func allowedExplainKeyword(keyword string) bool {

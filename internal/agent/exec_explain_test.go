@@ -133,6 +133,22 @@ func TestExplain_AcceptsDMLAndWith(t *testing.T) {
 	}
 }
 
+// PostgreSQL checks a statement's privileges even when it only plans it, so
+// explaining a write fails for the read-only monitoring role; the refusal
+// says why instead of only relaying "permission denied".
+func TestExplain_WriteWithoutPrivilegeIsRejectedClearly(t *testing.T) {
+	denied := &pgconn.PgError{Code: "42501", Message: "permission denied for table t"}
+	conn := &explainConn{statement: "UPDATE t SET x = 1", explainErr: denied}
+	_, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{QueryID: int64Ptr(1)})
+	require.ErrorContains(t, err, "explaining a UPDATE statement needs the privilege to run it, which the read-only monitoring role does not hold")
+	var rejected *RejectedError
+	require.ErrorAs(t, err, &rejected)
+
+	conn = &explainConn{statement: "SELECT x FROM t", explainErr: denied}
+	_, err = NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{QueryID: int64Ptr(1)})
+	require.ErrorContains(t, err, "normalised statement cannot be explained")
+}
+
 func TestExplain_StripsLeadingCommentsBeforeKeyword(t *testing.T) {
 	statement := " /* block */ -- line\n /* second */\n SELECT 1"
 	require.Equal(t, "SELECT", firstSQLKeyword(statement))
