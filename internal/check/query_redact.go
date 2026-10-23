@@ -7,10 +7,12 @@ import "regexp"
 // of a subscription's CONNECTION. pg_stat_statements keeps utility statements
 // as they were typed, so these are read back exactly as the DBA wrote them.
 var (
-	// The literal may be unterminated: the text is cut at 8192 bytes, and a
-	// password that straddles the cut must not survive. A dollar-quoted
-	// literal runs to the end of the text for the same reason.
-	sqlPasswordLiteral = regexp.MustCompile(`(?is)(\bpassword\s+)(?:[eE]'(?:[^'\\]|\\.|'')*'?|'(?:[^']|'')*'?|\$[A-Za-z_0-9]*\$.*)`)
+	// PostgreSQL reads PASSWORD, its blanks and its comments the same however
+	// they are spaced, and the literal may follow with no blank at all, or with
+	// a U& or E prefix. The literal may be unterminated: the text is cut at 8192
+	// bytes, and a password that straddles the cut must not survive. A
+	// dollar-quoted literal runs to the end of the text for the same reason.
+	sqlPasswordLiteral = regexp.MustCompile(`(?is)(\bpassword(?:\s|/\*.*?\*/)*)(?:[eE]'(?:[^'\\]|\\.|'')*'?|(?:U&)?'(?:[^']|'')*'?|\$[A-Za-z_0-9]*\$.*)`)
 	// A libpq value quoted inside a SQL literal doubles its quotes, so
 	// ''a b'' is one value even though it holds a space.
 	libpqPassword = regexp.MustCompile(`(?i)(\b(?:ssl)?password\s*=\s*)(?:''(?:[^']|'')*''|'(?:[^']|'')*'?|[^\s']+)`)
