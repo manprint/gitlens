@@ -54,6 +54,9 @@ func (c *tableStatsCheck) Scrape(ctx context.Context, t Target) (Result, error) 
 	if err := ApplySessionLimits(ctx, conn, c.Timeout()); err != nil {
 		return Result{}, err
 	}
+	// pg_stat_user_tables lists the temporary tables of every session under
+	// their pg_temp_N schemas. They are gone with their session, so they are
+	// left out, as bloat_estimate leaves them out.
 	rows, err := conn.Query(ctx, `
 SELECT s.schemaname, s.relname,
        COALESCE(s.seq_scan, 0), COALESCE(s.seq_tup_read, 0), COALESCE(s.idx_scan, 0), COALESCE(s.idx_tup_fetch, 0),
@@ -67,7 +70,8 @@ SELECT s.schemaname, s.relname,
 FROM pg_stat_user_tables s
 JOIN pg_class c ON c.oid = s.relid
 LEFT JOIN pg_class tc ON tc.oid = c.reltoastrelid
-WHERE c.relkind = 'r'`)
+WHERE c.relkind = 'r'
+  AND c.relpersistence <> 't'`)
 	if err != nil {
 		return Result{}, err
 	}
