@@ -50,7 +50,7 @@ function compareText(left: string, right: string): number {
 }
 
 function clusterKey(alert: Alert): string {
-  return alert.cluster_id === undefined ? '' : String(alert.cluster_id)
+  return alert.cluster_id ?? ''
 }
 
 function compareAlerts(left: Alert, right: Alert): number {
