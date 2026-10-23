@@ -127,3 +127,49 @@ func TestINTHOST004_CgroupV1Fixture(t *testing.T) { TestCgroup_DetectsV1ByLimitF
 func TestINTHOST005_CgroupV2Fixture(t *testing.T) { TestCgroup_DetectsV2ByControllersFile(t) }
 
 func applyCgroupForTest(sys string, s *Sample) { NewCollector("", sys).applyCgroup(s) }
+
+// With a host cgroup namespace the limits sit under the cgroup the process
+// belongs to, not at the mount root, which holds only the host's root cgroup.
+func TestCgroup_ReadsLimitsOfOwnCgroupWhenNamespaceIsHost(t *testing.T) {
+	c := NewCollector("testdata/cgroup_v2_nested/proc", "testdata/cgroup_v2_nested/sys")
+	s := Sample{Source: "host"}
+	c.applyCgroup(&s)
+	require.Equal(t, "cgroup_v2", s.Source)
+	require.Equal(t, uint64(536870912), *s.MemTotalBytes)
+	require.Equal(t, uint64(536870912-134217728), *s.MemAvailableBytes)
+	require.Equal(t, 2, *s.CPUCount)
+}
+
+// A private cgroup namespace reports the process's cgroup as "/", which is the
+// mount root itself.
+func TestCgroup_OwnCgroupRootIsMountRoot(t *testing.T) {
+	procDir, sysDir := t.TempDir(), t.TempDir()
+	writeCgroupFiles(t, procDir, map[string]string{"self/cgroup": "0::/\n"})
+	writeCgroupFiles(t, filepath.Join(sysDir, "fs", "cgroup"), map[string]string{
+		"cgroup.controllers": "memory\n",
+		"memory.max":         "1024\n",
+		"memory.current":     "256\n",
+	})
+	s := Sample{Source: "host"}
+	NewCollector(procDir, sysDir).applyCgroup(&s)
+	require.Equal(t, "cgroup_v2", s.Source)
+	require.Equal(t, uint64(1024), *s.MemTotalBytes)
+}
+
+// A path that leaves the mount, or names no directory under it, is not
+// followed: the mount root is read instead.
+func TestCgroup_OwnCgroupPathOutsideMountFallsBackToRoot(t *testing.T) {
+	for _, line := range []string{"0::/../../etc\n", "0::/no-such.scope\n"} {
+		procDir, sysDir := t.TempDir(), t.TempDir()
+		writeCgroupFiles(t, procDir, map[string]string{"self/cgroup": line})
+		root := filepath.Join(sysDir, "fs", "cgroup")
+		writeCgroupFiles(t, root, map[string]string{
+			"cgroup.controllers": "memory\n",
+			"memory.max":         "1024\n",
+			"memory.current":     "256\n",
+		})
+		s := Sample{Source: "host"}
+		NewCollector(procDir, sysDir).applyCgroup(&s)
+		require.Equal(t, uint64(1024), *s.MemTotalBytes, line)
+	}
+}

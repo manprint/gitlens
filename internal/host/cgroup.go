@@ -14,7 +14,7 @@ const cgroupV1Unlimited = uint64(1 << 62)
 func (c *Collector) applyCgroup(s *Sample) {
 	root := filepath.Join(c.sysPath, "fs", "cgroup")
 	if _, err := os.Stat(filepath.Join(root, "cgroup.controllers")); err == nil {
-		applyV2(root, s)
+		applyV2(c.ownCgroupDir(root), s)
 		return
 	}
 	if _, err := os.Stat(filepath.Join(root, "memory", "memory.limit_in_bytes")); err == nil {
@@ -29,6 +29,36 @@ func readUint(path string) (uint64, bool) {
 	}
 	v, err := strconv.ParseUint(strings.TrimSpace(string(b)), 10, 64)
 	return v, err == nil
+}
+
+// ownCgroupDir is the directory, under root, of the cgroup this process belongs
+// to. A container started with --cgroupns=host sees the host's root cgroup at
+// its mount point, where its own limit files are absent: they sit in the
+// directory /proc/self/cgroup names. Without that file, or when it names no
+// directory below root, root is used, which is the answer for a private
+// cgroup namespace.
+func (c *Collector) ownCgroupDir(root string) string {
+	b, err := os.ReadFile(filepath.Join(c.procPath, "self", "cgroup"))
+	if err != nil {
+		return root
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		// The unified hierarchy is the single line "0::<path>".
+		fields := strings.SplitN(line, ":", 3)
+		if len(fields) != 3 || fields[0] != "0" || fields[1] != "" {
+			continue
+		}
+		rel := strings.TrimSpace(fields[2])
+		if strings.Contains(rel, "..") {
+			return root
+		}
+		dir := filepath.Join(root, filepath.FromSlash(rel))
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			return dir
+		}
+		return root
+	}
+	return root
 }
 
 // readStatField reads the value of one "key value" line of a cgroup stat file.
