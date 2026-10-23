@@ -108,13 +108,15 @@ psql "$PGLENS_DSN" -v pglens_password="$PGLENS_MONITORING_PASSWORD" \
 # 2. Set the example's secrets, enable the web interface, and build the local images
 # The example has no default secrets and refuses to start without them. Choose
 # each value and reuse it on later runs: an existing database keeps the
-# passwords it was first started with. PGLENS_MONITORING_PASSWORD from step 1 is
-# also the password of the monitoring role the example creates on its own
-# database. To monitor your own instance instead, edit deploy/agent.example.yaml
-# with your target DSN.
+# passwords it was first started with. PGLENS_MONITORING_PASSWORD, exported in
+# step 1 in this same shell, is also the password of the monitoring role the
+# example creates in every database of its cluster. PGLENS_DB_PASSWORD goes into
+# the server's DSN as it is, so it must not contain URL-reserved characters
+# (@ : / ? # %). To monitor your own instance instead, edit
+# deploy/agent.example.yaml with your target DSN.
 export PGLENS_DB_PASSWORD='<superuser-password>'
 export PGLENS_BOOTSTRAP_TOKEN='<token>'
-export PGLENS_UI_PASSWORD=dev-password
+export PGLENS_UI_PASSWORD='<ui-password>'
 make build-images
 docker compose -f deploy/docker-compose.yml up -d
 
@@ -187,7 +189,8 @@ for the complete matrix and downgrade procedure.
 # The example stacks take their secrets from the environment and refuse to
 # start without them. Reuse the values of an earlier run: an existing database
 # keeps the passwords it was first started with. The minimal TimescaleDB
-# service needs only PGLENS_DB_PASSWORD.
+# service needs only PGLENS_DB_PASSWORD. That password goes into the server's
+# DSN as it is, so it must not contain URL-reserved characters (@ : / ? # %).
 export PGLENS_DB_PASSWORD='<superuser-password>'
 export PGLENS_MONITORING_PASSWORD='<monitoring-password>'
 export PGLENS_BOOTSTRAP_TOKEN='<token>'
@@ -212,9 +215,11 @@ interface into that binary.
 
 **Binary:**
 
+Export `PGLENS_DB_PASSWORD` and `PGLENS_BOOTSTRAP_TOKEN` first, as in the Docker Compose commands above. The password goes into the DSN as it is, so the same rule applies: no URL-reserved characters.
+
 ```sh
 PGLENS_DSN=postgres://pglens:$PGLENS_DB_PASSWORD@localhost:5432/pglens?sslmode=disable \
-PGLENS_BOOTSTRAP_TOKEN=dev-token \
+PGLENS_BOOTSTRAP_TOKEN=$PGLENS_BOOTSTRAP_TOKEN \
 PGLENS_LISTEN=:8080 \
 ./bin/pglens-server
 ```
