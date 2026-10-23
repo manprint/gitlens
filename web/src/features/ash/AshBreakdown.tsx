@@ -109,8 +109,8 @@ export function AshBreakdown({
     <Section title={title} description={description}>
       {series.length > 0 ? (
         <AshChart
-          ariaLabel={`${title} average active sessions`}
-          dataTableLabel={`${title} average active sessions data`}
+          ariaLabel={`${title} average active backends`}
+          dataTableLabel={`${title} average active backends data`}
           foldedCount={folded}
           {...interactionProps}
           series={series}

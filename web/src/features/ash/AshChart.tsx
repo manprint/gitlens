@@ -16,7 +16,7 @@ export interface AshChartProps {
 
 /** Accessible ASH chart wrapper; brush events are delegated to TimeSeriesChart. */
 export function AshChart({
-  ariaLabel = 'Average active sessions by wait event',
+  ariaLabel = 'Average active backends by wait event',
   cpuCount,
   dataTableLabel,
   foldedCount = 0,
@@ -37,7 +37,7 @@ export function AshChart({
       {...interactionProps}
       option={option}
       series={series}
-      valueLabel="Average active sessions"
+      valueLabel="Average active backends"
     />
   )
 }

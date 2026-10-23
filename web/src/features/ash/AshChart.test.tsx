@@ -38,14 +38,14 @@ describe('AshChart', () => {
 
     const rendered = echartsMock.render.mock.calls[0]?.[0] as { option?: EChartsOption }
     expect(rendered.option).toEqual(
-      expect.objectContaining({ yAxis: { type: 'value', min: 0, name: 'avg active sessions' } }),
+      expect.objectContaining({ yAxis: { type: 'value', min: 0, name: 'avg active backends' } }),
     )
     expect(
-      screen.getByRole('img', { name: 'Average active sessions by wait event' }),
+      screen.getByRole('img', { name: 'Average active backends by wait event' }),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole('table', { name: 'Average active sessions by wait event data' }),
-    ).toHaveTextContent('Average active sessions')
+      screen.getByRole('table', { name: 'Average active backends by wait event data' }),
+    ).toHaveTextContent('Average active backends')
   })
 
   it('UI-ASH-016 writes an absolute range after brushing', () => {
