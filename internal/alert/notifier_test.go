@@ -426,6 +426,30 @@ func TestTick_ARefireDoesNotSendAPendingResolveAfterIt(t *testing.T) {
 	require.Equal(t, []string{"fire", "fire"}, rec.got, "the pending RESOLVED of the first episode is dropped, not sent after the second FIRING")
 }
 
+// TestTick_ASilencedResolveDoesNotSendAFiringItsChannelRefused — a FIRING that the
+// channel refused is not sent once a silence covers the alert and the alert
+// resolves. The silence keeps the RESOLVED from the channels, so nothing but Settle
+// drops the refused FIRING: the alert is no longer firing, so the FIRING is obsolete.
+func TestTick_ASilencedResolveDoesNotSendAFiringItsChannelRefused(t *testing.T) {
+	t0 := time.Unix(100, 0)
+	store := &engineStore{rules: []Rule{customRule()}}
+	rec := &phaseRecorder{down: true}
+	src := &stepSource{samples: []Sample{{Value: 2, TS: t0}}}
+	e := NewEngine(nil, clock.NewFake(t0), store, NewChannelNotifier(store, recordingChannel{rec}), []Source{src})
+	require.Error(t, e.Tick(context.Background()))
+
+	rec.down = false
+	store.silences = []Silence{{Matchers: []Matcher{{Name: "rule_id", Value: "custom"}}, StartsAt: t0.Add(-time.Second), EndsAt: t0.Add(time.Hour)}}
+	src.samples = []Sample{{Value: 0, TS: t0.Add(time.Second)}}
+	require.NoError(t, e.Tick(context.Background()))
+	last := store.alerts[len(store.alerts)-1]
+	require.Equal(t, StateResolved, last.State)
+	require.True(t, last.Suppressed, "the silence covers the RESOLVED, so no channel is told of it")
+	require.Empty(t, rec.got, "the refused FIRING is obsolete once the alert has resolved")
+	require.NoError(t, e.Tick(context.Background()))
+	require.Empty(t, rec.got, "the refused FIRING is not sent on a later pass")
+}
+
 // tableStore is the alerts table as the engine reads it across a change of
 // leader. An upsert replaces the row of its episode, the start is kept to the
 // microsecond as the table keeps it, and Active lists the episodes not resolved.
@@ -514,6 +538,39 @@ func TestTick_ALeaderChangeSendsAFiringThatIsStillOwed(t *testing.T) {
 	regainLeadership(a)
 	require.NoError(t, a.Tick(context.Background()))
 	require.Equal(t, []string{"fire"}, rec.got)
+}
+
+// TestTick_ALeaderChangeDoesNotSendAResolveOverruledByANewerFiring — replica A
+// fails to send the RESOLVED of an episode and stops leading. Replica B fires a
+// newer episode of the same alert, and the channel accepts it. When A leads again
+// its queue still holds the RESOLVED of the older episode. The table no longer
+// owes that RESOLVED, so Settle drops it before a late send would leave the
+// channel showing the alert resolved while it is firing.
+func TestTick_ALeaderChangeDoesNotSendAResolveOverruledByANewerFiring(t *testing.T) {
+	t0 := time.Unix(100, 123456789) // nanoseconds, as a live clock gives them
+	clk := clock.NewFake(t0)
+	store := newTableStore(customRule())
+	rec := &phaseRecorder{}
+	srcA := &stepSource{samples: []Sample{{Value: 2, TS: t0}}}
+	srcB := &stepSource{samples: []Sample{{Value: 2, TS: t0}}}
+	a := NewEngine(nil, clk, store, NewChannelNotifier(store, recordingChannel{rec}), []Source{srcA})
+	b := NewEngine(nil, clk, store, NewChannelNotifier(store, recordingChannel{rec}), []Source{srcB})
+	require.NoError(t, a.Tick(context.Background()))
+	require.Equal(t, []string{"fire"}, rec.got)
+
+	rec.down = true
+	srcA.samples = []Sample{{Value: 0, TS: t0.Add(time.Second)}}
+	require.Error(t, a.Tick(context.Background()))
+
+	rec.down = false
+	srcB.samples = []Sample{{Value: 2, TS: t0.Add(2 * time.Second)}}
+	require.NoError(t, b.Tick(context.Background()))
+	require.Equal(t, []string{"fire", "fire"}, rec.got)
+
+	regainLeadership(a)
+	srcA.samples = []Sample{{Value: 2, TS: t0.Add(2 * time.Second)}}
+	require.NoError(t, a.Tick(context.Background()))
+	require.Equal(t, []string{"fire", "fire"}, rec.got, "the RESOLVED of the first episode is not sent after the FIRING of the newer one")
 }
 
 // blockingClaimStore never answers a claim: it waits until the claim's context is
