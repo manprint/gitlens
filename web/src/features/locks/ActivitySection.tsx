@@ -126,12 +126,16 @@ function BreakdownList({
 export function ActivitySection({
   response,
   sessions,
+  sessionsStale = false,
   currentTier = 'T0',
   instanceId,
   now = new Date(),
 }: {
   response: ActivityResponseLike
   sessions?: readonly LockNode[]
+  // The sessions come from the lock sample, which can be stale while the
+  // activity sample is fresh.
+  sessionsStale?: boolean
   currentTier?: PermTier
   instanceId?: string
   now?: Date
@@ -262,7 +266,7 @@ export function ActivitySection({
         <ActiveSessions
           currentTier={currentTier}
           instanceId={instanceId}
-          sampleStale={sampleStale}
+          sampleStale={sampleStale || sessionsStale}
           sessions={sessions}
         />
       ) : null}

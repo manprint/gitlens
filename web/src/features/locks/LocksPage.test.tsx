@@ -96,3 +96,22 @@ describe('LocksPage degraded and error paths', () => {
     expect(REFRESH.locks.staleAfter).toBeGreaterThanOrEqual(REFRESH.locks.interval * 3)
   })
 })
+
+describe('LocksPage session signal actions', () => {
+  const sessions = [{ pid: 42, backend_type: 'client backend' }]
+
+  it('UI-LOCK-052 disables session signal actions when the lock sample is stale and the activity sample is fresh', () => {
+    renderLocks(
+      '/instances/instance-1/locks?range=1h',
+      success({ ...locksResponse, stale: true, sessions }),
+    )
+
+    expect(screen.getByRole('button', { name: 'Terminate backend' })).toBeDisabled()
+  })
+
+  it('UI-LOCK-053 keeps session signal actions enabled when both samples are fresh', () => {
+    renderLocks('/instances/instance-1/locks?range=1h', success({ ...locksResponse, sessions }))
+
+    expect(screen.getByRole('button', { name: 'Terminate backend' })).toBeEnabled()
+  })
+})

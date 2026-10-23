@@ -86,6 +86,13 @@ function sampleAge(sampledAt: string | null, now: Date): number | null {
   return Math.max(0, (now.getTime() - timestamp) / 1000)
 }
 
+// A lock sample is stale when the server flags it or it is older than the
+// threshold. Signal actions depend on it, since the PID may have been reused.
+function sampleIsStale(response: LocksResponseLike, now: Date): boolean {
+  const age = sampleAge(response.sampled_at, now)
+  return response.stale || (age !== null && age > STALE_THRESHOLD_SECONDS)
+}
+
 function itemKey(parentKey: string | undefined, tree: BlockingTreeNode, index: number): string {
   return `${parentKey ?? 'root'}/${String(tree.node.pid)}-${index}`
 }
@@ -311,7 +318,7 @@ export function BlockingTree({
   }
 
   const age = sampleAge(response.sampled_at, now)
-  const sampleStale = response.stale || (age !== null && age > STALE_THRESHOLD_SECONDS)
+  const sampleStale = sampleIsStale(response, now)
   const entries = visibleEntries(forest, expandedKeys)
 
   if (forest.length === 0) {
@@ -492,6 +499,7 @@ export function LocksPage({ instanceId: explicitInstanceId }: LocksPageProps = {
                   ?.map(normalizeNode)
                   .filter((node): node is LockNode => node !== null) ?? []
               }
+              sessionsStale={sampleIsStale(response, new Date())}
             />
           ) : (
             <p role="status">Loading activity sample…</p>
