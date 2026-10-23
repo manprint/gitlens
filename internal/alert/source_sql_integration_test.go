@@ -23,7 +23,7 @@ func createAlertTables(t *testing.T, pool *pgxpool.Pool) {
 			ts timestamptz NOT NULL, cluster_id bigint NOT NULL, instance_id uuid NOT NULL,
 			upstream_id uuid, slot_name text NOT NULL DEFAULT '', source text, sync_state text,
 			replay_lag_sec double precision, write_lag_sec double precision,
-			slot_active boolean, slot_retained_bytes bigint)`,
+			slot_active boolean, slot_wal_status text, slot_retained_bytes bigint)`,
 		`CREATE TABLE agents (agent_id uuid PRIMARY KEY, revoked_at timestamptz)`,
 		`CREATE TABLE instances (instance_id uuid PRIMARY KEY, cluster_id bigint NOT NULL, agent_id uuid NOT NULL REFERENCES agents,
 			role text NOT NULL, last_seen timestamptz NOT NULL)`,
@@ -312,5 +312,42 @@ func TestINTALERT014_SpellEventsClearOnTheirOwnState(t *testing.T) {
 		require.True(t, cleared(slotRule, Alert{InstanceID: &fast}), "a slot active again clears the episode")
 		require.True(t, cleared(unreachable, Alert{InstanceID: &gone}), "a revoked agent cannot report back, so its outage has ended")
 		require.False(t, cleared(unreachable, Alert{}), "an episode without a subject has not cleared")
+	})
+}
+
+// TestINTALERT022_SlotLostClearsWhenNoSlotIsLost: a slot_lost episode stays
+// open while a slot of its instance has a lost WAL as its latest report. It
+// clears once none does: the slot reports another status, or it has stopped
+// reporting.
+func TestINTALERT022_SlotLostClearsWhenNoSlotIsLost(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		pool := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		ctx := context.Background()
+		_, err := pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS events (event_id bigserial, ts timestamptz NOT NULL, type text NOT NULL, cluster_id bigint, instance_id uuid); TRUNCATE events`)
+		require.NoError(t, err)
+		createAlertTables(t, pool)
+		now := time.Now().UTC()
+		lost, recovered, dropped, mixed := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+		_, err = pool.Exec(ctx, `INSERT INTO metrics_replication (ts, cluster_id, instance_id, slot_name, source, slot_active, slot_wal_status) VALUES
+			($1, 1, $2, 'a', 'slot', false, 'lost'),
+			($3, 1, $4, 'b', 'slot', true, 'lost'),
+			($1, 1, $4, 'b', 'slot', true, 'reserved'),
+			($5, 1, $6, 'c', 'slot', false, 'lost'),
+			($1, 1, $7, 'e', 'slot', false, 'lost'),
+			($1, 1, $7, 'f', 'slot', true, 'reserved')`,
+			now, lost, now.Add(-3*time.Minute), recovered, now.Add(-10*time.Minute), dropped, mixed)
+		require.NoError(t, err)
+
+		src := &eventSource{db: pool, interval: time.Minute}
+		cleared := func(a Alert) bool {
+			got, err := src.Cleared(ctx, Rule{ID: "slot_lost", EventType: "slot_lost"}, []Alert{a})
+			require.NoError(t, err)
+			return len(got) == 1
+		}
+		require.False(t, cleared(Alert{InstanceID: &lost}), "a slot whose latest report is lost keeps the episode open")
+		require.True(t, cleared(Alert{InstanceID: &recovered}), "a slot that reports another status now has recovered")
+		require.True(t, cleared(Alert{InstanceID: &dropped}), "a slot that stopped reporting has left the window")
+		require.False(t, cleared(Alert{InstanceID: &mixed}), "one lost slot keeps the episode open beside a healthy one")
 	})
 }

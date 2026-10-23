@@ -423,6 +423,16 @@ func (s *eventSource) isCleared(ctx context.Context, r Rule, a Alert) (bool, err
 		}
 		query = `SELECT NOT EXISTS (SELECT 1 FROM (SELECT DISTINCT ON (slot_name) slot_active FROM metrics_replication WHERE instance_id = $1 AND slot_name <> '' AND slot_active IS NOT NULL AND ts >= now() - interval '5 minutes' AND ` + store.ReplicationSourceSQL + ` = 'slot' ORDER BY slot_name, ts DESC) latest WHERE NOT latest.slot_active)`
 		args = []any{*a.InstanceID}
+	case "slot_lost":
+		// The episode is per instance. It has cleared when none of the
+		// instance's slots has a lost WAL as its latest report in the last five
+		// minutes, the window the server's slot state reads. A dropped slot
+		// stops reporting, so its episode clears too.
+		if a.InstanceID == nil {
+			return false, nil
+		}
+		query = `SELECT NOT EXISTS (SELECT 1 FROM (SELECT DISTINCT ON (slot_name) COALESCE(slot_wal_status, '') AS wal_status FROM metrics_replication WHERE instance_id = $1 AND slot_name <> '' AND slot_active IS NOT NULL AND ts >= now() - interval '5 minutes' AND ` + store.ReplicationSourceSQL + ` = 'slot' ORDER BY slot_name, ts DESC) latest WHERE latest.wal_status = 'lost')`
+		args = []any{*a.InstanceID}
 	default:
 		return false, nil
 	}

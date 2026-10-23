@@ -789,3 +789,57 @@ func TestINTSTALE019_QueryTextsPastRetentionArePurged(t *testing.T) {
 	require.NoError(t, rows.Err())
 	require.Equal(t, []int64{2}, remaining, "only the text seen inside the retention window survives")
 }
+
+// TestINTSTALE020_LostSlotEmitsOncePerSpell: a slot whose latest report says
+// its WAL is lost emits slot_lost at once, without the inactivity window. It
+// is not reported again while the loss lasts, and a new spell is reported.
+func TestINTSTALE020_LostSlotEmitsOncePerSpell(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	cid := store.ToDB(pgtype.ClusterID(5))
+	iid := uuid.New()
+	agent := uuid.New()
+	_, err := pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual')`, cid)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen) VALUES ($1,'default',$2,$3,'10.0.0.5',5432,170000,'primary','T0', now())`, iid, cid, agent)
+	require.NoError(t, err)
+
+	report := func(active bool, walStatus string) {
+		t.Helper()
+		_, err := pool.Exec(ctx,
+			`INSERT INTO metrics_replication (ts, tenant_id, cluster_id, instance_id, slot_name, edge_type, slot_active, slot_wal_status) VALUES (now(), 'default', $1, $2, 'lostslot', 'streaming', $3, $4)`,
+			cid, iid, active, walStatus)
+		require.NoError(t, err)
+	}
+	lostEvents := func() int {
+		t.Helper()
+		var n int
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='slot_lost' AND instance_id=$1`, iid).Scan(&n))
+		return n
+	}
+
+	s := NewStaleness(pool, clock.NewFake(time.Now()))
+	s.mu.Lock()
+	s.conn = mustAcquire(t, pool)
+	s.hasLock = true
+	s.mu.Unlock()
+
+	report(false, "lost")
+	require.NoError(t, s.Evaluate(ctx))
+	require.Equal(t, 1, lostEvents(), "a lost slot is reported at once, without the inactivity window")
+
+	report(false, "lost")
+	require.NoError(t, s.Evaluate(ctx))
+	require.Equal(t, 1, lostEvents(), "the same spell of loss is not reported again")
+
+	report(true, "reserved")
+	require.NoError(t, s.Evaluate(ctx))
+	require.Equal(t, 1, lostEvents(), "a slot that reports another status is not reported")
+
+	report(false, "lost")
+	require.NoError(t, s.Evaluate(ctx))
+	require.Equal(t, 2, lostEvents(), "a new spell of loss is reported")
+}

@@ -382,6 +382,9 @@ type Staleness struct {
 	// has already been emitted for that spell of inactivity.
 	slotInactiveSince   map[string]time.Time
 	slotInactiveEmitted map[string]bool
+	// slotLostEmitted tracks, per "instance_id/slot_name" key, whether slot_lost
+	// has already been emitted for a slot whose latest report says its WAL is lost.
+	slotLostEmitted map[string]bool
 	// lastEventPurge/eventPurgeBacklog pace purgeEvents.
 	lastEventPurge    time.Time
 	eventPurgeBacklog bool
@@ -415,6 +418,7 @@ func NewStaleness(pool *pgxpool.Pool, clk clock.Clock) *Staleness {
 		clusterNoPrimaryEmitted: make(map[string]bool),
 		slotInactiveSince:       make(map[string]time.Time),
 		slotInactiveEmitted:     make(map[string]bool),
+		slotLostEmitted:         make(map[string]bool),
 		stopCh:                  make(chan struct{}),
 		doneCh:                  make(chan struct{}),
 	}
@@ -850,10 +854,16 @@ type slotRow struct {
 	ClusterID  int64
 	SlotName   string
 	Active     bool
+	// WALStatus is the slot's wal_status as the agent reported it, empty when
+	// the report has none.
+	WALStatus string
 }
 
-// slotEmission is one slot_inactive event decideSlotInactiveEmissions has
-// decided to emit.
+// slotLostStatus is the wal_status of a slot whose WAL was removed before its
+// standby read it. The slot cannot recover from it.
+const slotLostStatus = "lost"
+
+// slotEmission is one slot_inactive or slot_lost event decided for emission.
 type slotEmission struct {
 	ClusterID  int64
 	InstanceID uuid.UUID
@@ -863,6 +873,36 @@ type slotEmission struct {
 // slotKey identifies one slot of one instance in the slot state maps.
 func slotKey(instanceID uuid.UUID, slotName string) string {
 	return instanceID.String() + "/" + slotName
+}
+
+// decideSlotLostEmissions emits slot_lost once for each slot whose latest
+// report says its WAL is lost, as the slot_inactive spell does for an inactive
+// slot. A lost slot does not come back, and its standby has to be rebuilt, so
+// the state holds for as long as the latest report stays lost. It clears when
+// the slot reports another status or leaves the rows.
+func decideSlotLostEmissions(rows []slotRow, emitted map[string]bool) []slotEmission {
+	var out []slotEmission
+	present := make(map[string]struct{}, len(rows))
+	for _, r := range rows {
+		present[slotKey(r.InstanceID, r.SlotName)] = struct{}{}
+	}
+	for key := range emitted {
+		if _, ok := present[key]; !ok {
+			delete(emitted, key)
+		}
+	}
+	for _, r := range rows {
+		key := slotKey(r.InstanceID, r.SlotName)
+		if r.WALStatus != slotLostStatus {
+			delete(emitted, key)
+			continue
+		}
+		if !emitted[key] {
+			out = append(out, slotEmission{ClusterID: r.ClusterID, InstanceID: r.InstanceID, SlotName: r.SlotName})
+			emitted[key] = true
+		}
+	}
+	return out
 }
 
 // decideSlotInactiveEmissions applies the slot_inactive state machine to one
@@ -924,9 +964,12 @@ func decideSlotInactiveEmissions(rows []slotRow, now time.Time, since map[string
 // every 15 seconds). The query had no time bound: every 15 seconds it read
 // the whole retained hypertable, decompressing 30 days of chunks, and kept a
 // dropped slot's last state forever.
+//
+// slot_lost follows the same latest report: once per spell in which the slot's
+// wal_status is lost.
 func (s *Staleness) evaluateSlots(ctx context.Context, now time.Time) error {
 	rows, err := s.pool.Query(ctx, `
-SELECT DISTINCT ON (instance_id, slot_name) instance_id, cluster_id, slot_name, slot_active
+SELECT DISTINCT ON (instance_id, slot_name) instance_id, cluster_id, slot_name, slot_active, COALESCE(slot_wal_status, '')
 FROM metrics_replication
 WHERE ts >= $1 AND slot_name <> '' AND slot_active IS NOT NULL
   AND `+store.ReplicationSourceSQL+` = 'slot'
@@ -942,7 +985,7 @@ ORDER BY instance_id, slot_name, ts DESC`, now.Add(-slotStateWindow))
 	var slotRows []slotRow
 	for rows.Next() {
 		var r slotRow
-		if scanErr := rows.Scan(&r.InstanceID, &r.ClusterID, &r.SlotName, &r.Active); scanErr != nil {
+		if scanErr := rows.Scan(&r.InstanceID, &r.ClusterID, &r.SlotName, &r.Active, &r.WALStatus); scanErr != nil {
 			return fmt.Errorf("scan slot state: %w", scanErr)
 		}
 		slotRows = append(slotRows, r)
@@ -951,15 +994,24 @@ ORDER BY instance_id, slot_name, ts DESC`, now.Add(-slotStateWindow))
 		return err
 	}
 
-	emissions := decideSlotInactiveEmissions(slotRows, now, s.slotInactiveSince, s.slotInactiveEmitted)
+	inactive := decideSlotInactiveEmissions(slotRows, now, s.slotInactiveSince, s.slotInactiveEmitted)
+	if err := s.emitSlotEvents(ctx, "slot_inactive", inactive, s.slotInactiveEmitted); err != nil {
+		return err
+	}
+	return s.emitSlotEvents(ctx, "slot_lost", decideSlotLostEmissions(slotRows, s.slotLostEmitted), s.slotLostEmitted)
+}
+
+// emitSlotEvents writes one slot event per emission. The decide function has
+// already marked each emission as reported in emitted. An emission that is not
+// written, and the ones after it, are unmarked, so the next evaluation writes
+// them.
+func (s *Staleness) emitSlotEvents(ctx context.Context, eventType string, emissions []slotEmission, emitted map[string]bool) error {
 	for i, em := range emissions {
 		cidCopy := em.ClusterID
 		iidCopy := em.InstanceID
-		if emitErr := s.emitEvent(ctx, "slot_inactive", &cidCopy, &iidCopy, map[string]any{"slot_name": em.SlotName}); emitErr != nil {
-			// decide marked this emission and the ones after it as reported, but
-			// they were not written. Unmark them, so the next evaluation emits them.
+		if emitErr := s.emitEvent(ctx, eventType, &cidCopy, &iidCopy, map[string]any{"slot_name": em.SlotName}); emitErr != nil {
 			for _, rest := range emissions[i:] {
-				delete(s.slotInactiveEmitted, slotKey(rest.InstanceID, rest.SlotName))
+				delete(emitted, slotKey(rest.InstanceID, rest.SlotName))
 			}
 			return emitErr
 		}

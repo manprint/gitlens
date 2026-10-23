@@ -64,6 +64,7 @@ var spellEvents = map[string]bool{
 	"instance_unreachable":  true,
 	"no_primary_in_cluster": true,
 	"slot_inactive":         true,
+	"slot_lost":             true,
 }
 
 // endGrace is how long an episode may go unsampled before a pass closes it.

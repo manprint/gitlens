@@ -14,5 +14,6 @@ func Builtin() []Rule {
 		{ID: "failover_detected", Tier: Tier0, Enabled: true, Severity: SeverityCritical, Scope: ScopeCluster, EventType: "failover_detected", Summary: "A failover was observed"},
 		{ID: "split_brain_detected", Tier: Tier0, Enabled: true, Severity: SeverityCritical, Scope: ScopeCluster, EventType: "split_brain_detected", Summary: "More than one primary in the cluster"},
 		{ID: "slot_inactive", Tier: Tier0, Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, EventType: "slot_inactive", Summary: "A replication slot has been inactive and is retaining WAL"},
+		{ID: "slot_lost", Tier: Tier0, Enabled: true, Severity: SeverityCritical, Scope: ScopeInstance, EventType: "slot_lost", Summary: "A replication slot has lost WAL its standby still needed; the standby cannot resume from it and must be rebuilt"},
 	}
 }

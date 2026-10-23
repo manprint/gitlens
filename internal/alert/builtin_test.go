@@ -36,7 +36,7 @@ func TestBuiltin_ReturnsFreshSlice(t *testing.T) {
 	require.NotEqual(t, "x", Builtin()[0].ID)
 }
 func TestBuiltin_CoversDocumentedCatalogue(t *testing.T) {
-	want := []string{"agent_down", "instance_unreachable", "check_failing", "no_primary_in_cluster", "agent_buffer_full", "clock_skew", "cardinality_budget_exceeded", "failover_detected", "split_brain_detected", "slot_inactive"}
+	want := []string{"agent_down", "instance_unreachable", "check_failing", "no_primary_in_cluster", "agent_buffer_full", "clock_skew", "cardinality_budget_exceeded", "failover_detected", "split_brain_detected", "slot_inactive", "slot_lost"}
 	got := []string{}
 	for _, r := range Builtin() {
 		got = append(got, r.ID)
@@ -81,6 +81,7 @@ func TestBuiltin_EveryEventRuleHasAnEmitter(t *testing.T) {
 		"instance_unreachable":  "internal/server/staleness.go",
 		"no_primary_in_cluster": "internal/server/staleness.go",
 		"slot_inactive":         "internal/server/staleness.go",
+		"slot_lost":             "internal/server/staleness.go",
 		"failover_detected":     "internal/topology/engine.go",
 		"split_brain_detected":  "internal/topology/engine.go",
 	}
