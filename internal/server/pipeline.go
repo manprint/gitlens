@@ -112,6 +112,19 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	defer func() {
 		_ = tx.Rollback(ctx)
 	}()
+	// The delta and topology engines change as the envelope is processed, before
+	// its rows are committed. undos puts their state back if the envelope fails,
+	// so the same envelope retried is processed as the first attempt was.
+	var undos []func()
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		for i := len(undos) - 1; i >= 0; i-- {
+			undos[i]()
+		}
+	}()
 
 	var genericRows []store.MetricRow
 	var statementRows []store.StatementRow
@@ -253,6 +266,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		// scenario), which needs a real `failover_detected` event and
 		// found none, ever, no matter how correctly a real promote
 		// happened.
+		undoMark := len(undos)
 		var topoEdges []topology.Edge
 		for _, we := range inst.TopologyEdges {
 			toID, ok := resolveAddr(ctx, cidDB, we.To, we.Port)
@@ -275,37 +289,14 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 				Confidence: we.Confidence,
 			})
 		}
-		{
-			edgeRows := make([]store.TopologyEdgeRow, 0, len(topoEdges))
-			for _, te := range topoEdges {
-				// SyncState is left unset: it comes from the primary's own
-				// replication_streaming check (pg_stat_replication), not
-				// from the standby-side edge this loop resolves.
-				edgeRows = append(edgeRows, store.TopologyEdgeRow{
-					TenantID:     tenantID,
-					ClusterID:    cidDB,
-					FromInstance: instUUID,
-					ToInstance:   te.To,
-					EdgeType:     te.Type,
-					Confidence:   te.Confidence,
-				})
-			}
-			// A DB write failure here is the same class of problem as
-			// store.WriteMetrics/WriteReplication/etc failing below — a
-			// real transaction-level error (e.g. disk full), not a
-			// per-instance data problem — so it aborts and rolls back the
-			// whole envelope the same way, rather than silently rejecting
-			// just this one instance.
-			if err := store.WriteTopologyEdges(ctx, tx, tenantID, cidDB, instUUID, edgeRows); err != nil {
-				return nil, fmt.Errorf("write topology edges: %w", err)
-			}
-		}
-		for _, ev := range p.topo.Apply(topology.Observation{
+		topoEvents, undoTopo := p.topo.ApplyUndoable(topology.Observation{
 			InstanceID: instUUID,
 			ClusterID:  cid,
 			Role:       pgtype.Role(inst.Role),
 			Edges:      topoEdges,
-		}) {
+		})
+		undos = append(undos, undoTopo)
+		for _, ev := range topoEvents {
 			evCluster := cidDB
 			evInst := instUUID
 			instEvents = append(instEvents, store.EventRow{
@@ -461,7 +452,8 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 						Value:      m.Value,
 						StatsReset: r.StatsReset,
 					}
-					pt, ev := p.delta.Observe(obs)
+					pt, ev, undoDelta := p.delta.ObserveUndoable(obs)
+					undos = append(undos, undoDelta)
 					if ev != nil {
 						payload := map[string]any{
 							"metric": m.Name,
@@ -642,9 +634,39 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 			}
 		}
 		if instErr != nil {
+			for i := len(undos) - 1; i >= undoMark; i-- {
+				undos[i]()
+			}
+			undos = undos[:undoMark]
 			res.Rejected++
 			res.Errors[inst.InstanceID] = instErr
 			continue
+		}
+		// Written only for an accepted instance: a rejected one writes no edge.
+		// A DB write failure here is the same class of problem as
+		// store.WriteMetrics/WriteReplication/etc failing below — a
+		// real transaction-level error (e.g. disk full), not a
+		// per-instance data problem — so it aborts and rolls back the
+		// whole envelope the same way, rather than silently rejecting
+		// just this one instance.
+		{
+			edgeRows := make([]store.TopologyEdgeRow, 0, len(topoEdges))
+			for _, te := range topoEdges {
+				// SyncState is left unset: it comes from the primary's own
+				// replication_streaming check (pg_stat_replication), not
+				// from the standby-side edge this loop resolves.
+				edgeRows = append(edgeRows, store.TopologyEdgeRow{
+					TenantID:     tenantID,
+					ClusterID:    cidDB,
+					FromInstance: instUUID,
+					ToInstance:   te.To,
+					EdgeType:     te.Type,
+					Confidence:   te.Confidence,
+				})
+			}
+			if err := store.WriteTopologyEdges(ctx, tx, tenantID, cidDB, instUUID, edgeRows); err != nil {
+				return nil, fmt.Errorf("write topology edges: %w", err)
+			}
 		}
 		instGeneric = append(instGeneric, selfMetricRows(env, inst, tenantID, cidDB, instUUID, p.clock.Now())...)
 		currentSeries[instUUID] = instSeries
@@ -750,6 +772,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit tx: %w", err)
 	}
+	committed = true
 	// I-8's own real number: how many distinct counter series each instance is
 	// reporting in this envelope. The delta engine intentionally retains older
 	// observations for rate continuity, so its full state is not the current

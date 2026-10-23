@@ -1,6 +1,7 @@
 package topology
 
 import (
+	"maps"
 	"sync"
 	"time"
 
@@ -98,7 +99,106 @@ func NewEngine(clk clock.Clock) *Engine {
 func (e *Engine) Apply(obs Observation) []Event {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	return e.apply(obs)
+}
 
+// ApplyUndoable is Apply, and also returns the function that reverts the state
+// it changed. The revert changes only the state that still holds what Apply
+// wrote, so it never discards a later observation of the instance or cluster.
+func (e *Engine) ApplyUndoable(obs Observation) ([]Event, func()) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	before := e.mark(obs.InstanceID, obs.ClusterID)
+	events := e.apply(obs)
+	written := e.mark(obs.InstanceID, obs.ClusterID)
+	return events, func() {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		e.revert(obs.InstanceID, obs.ClusterID, before, written)
+	}
+}
+
+// topoMark is the state Apply can change for one instance and its cluster.
+type topoMark struct {
+	inst       *instanceState // nil when the instance is not tracked
+	state      instanceState  // a copy of *inst
+	lastPrim   *lastPrimaryInfo
+	failover   timeMark
+	splitBrain timeMark
+}
+
+// timeMark is a per-cluster time and whether the cluster has one.
+type timeMark struct {
+	t  time.Time
+	ok bool
+}
+
+// mark reads the state Apply can change for an instance and its cluster. The
+// caller holds e.mu.
+func (e *Engine) mark(instanceID pgtype.InstanceID, clusterID pgtype.ClusterID) topoMark {
+	var m topoMark
+	if inst, ok := e.instances[instanceID]; ok {
+		m.inst = inst
+		m.state = cloneInstanceState(*inst)
+	}
+	m.lastPrim = e.lastPrimary[clusterID]
+	if t, ok := e.lastFailoverTime[clusterID]; ok {
+		m.failover = timeMark{t: t, ok: true}
+	}
+	if t, ok := e.lastSplitBrain[clusterID]; ok {
+		m.splitBrain = timeMark{t: t, ok: true}
+	}
+	return m
+}
+
+// revert puts back the state Apply changed, piece by piece, where each piece
+// still holds what Apply wrote. The caller holds e.mu.
+func (e *Engine) revert(instanceID pgtype.InstanceID, clusterID pgtype.ClusterID, before, written topoMark) {
+	if live, ok := e.instances[instanceID]; ok && live == written.inst && sameInstanceState(*live, written.state) {
+		if before.inst == nil {
+			delete(e.instances, instanceID)
+		} else {
+			*live = before.state
+		}
+	}
+	if e.lastPrimary[clusterID] == written.lastPrim {
+		if before.lastPrim == nil {
+			delete(e.lastPrimary, clusterID)
+		} else {
+			e.lastPrimary[clusterID] = before.lastPrim
+		}
+	}
+	revertTime(e.lastFailoverTime, clusterID, before.failover, written.failover)
+	revertTime(e.lastSplitBrain, clusterID, before.splitBrain, written.splitBrain)
+}
+
+// revertTime puts back a per-cluster time unless it no longer holds what was
+// written.
+func revertTime(m map[pgtype.ClusterID]time.Time, clusterID pgtype.ClusterID, before, written timeMark) {
+	cur, ok := m[clusterID]
+	if ok != written.ok || (ok && !cur.Equal(written.t)) {
+		return
+	}
+	if before.ok {
+		m[clusterID] = before.t
+	} else {
+		delete(m, clusterID)
+	}
+}
+
+func cloneInstanceState(s instanceState) instanceState {
+	s.edgeSeenAt = maps.Clone(s.edgeSeenAt)
+	return s
+}
+
+func sameInstanceState(a, b instanceState) bool {
+	return a.role == b.role && a.clusterID == b.clusterID &&
+		a.timestamp.Equal(b.timestamp) && a.orphanAt.Equal(b.orphanAt) && a.orphanedAt.Equal(b.orphanedAt) &&
+		maps.EqualFunc(a.edgeSeenAt, b.edgeSeenAt, func(x, y time.Time) bool { return x.Equal(y) })
+}
+
+// apply is Apply for a caller that holds e.mu.
+func (e *Engine) apply(obs Observation) []Event {
 	var events []Event
 	now := e.clock.Now()
 

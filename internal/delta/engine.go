@@ -77,7 +77,34 @@ func New(opts Options) *Engine {
 func (e *Engine) Observe(o Observation) (*Point, *ResetEvent) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	return e.observe(o)
+}
 
+// ObserveUndoable is Observe, and also returns the function that reverts the
+// baseline it wrote. The revert changes only a baseline that still holds what
+// Observe wrote, so it never discards a later observation of the same series.
+func (e *Engine) ObserveUndoable(o Observation) (*Point, *ResetEvent, func()) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	before, hadBefore := e.prev[o.Key]
+	pt, ev := e.observe(o)
+	written := e.prev[o.Key]
+	return pt, ev, func() {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		if cur, ok := e.prev[o.Key]; !ok || cur != written {
+			return
+		}
+		if hadBefore {
+			e.prev[o.Key] = before
+		} else {
+			delete(e.prev, o.Key)
+		}
+	}
+}
+
+// observe is Observe for a caller that holds e.mu.
+func (e *Engine) observe(o Observation) (*Point, *ResetEvent) {
 	prev, ok := e.prev[o.Key]
 	if !ok {
 		// Rule 1: no previous observation
