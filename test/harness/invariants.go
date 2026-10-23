@@ -125,6 +125,11 @@ func (h *Harness) AssertServerMetricInvariants(t *testing.T, budget MetricBudget
 		}
 		t.Fatalf("I-8: scrape /metrics: %v", err)
 	}
+	// The verdict alone does not say how close a green run came to the
+	// ceiling. Logging each instance's count keeps that number in the run log.
+	for _, sample := range parseLabelledMetric(body, "pglens_series_total") {
+		t.Logf("I-8: instance %s reports %.0f series (budget %.0f)", sample.label, sample.value, budget.MaxSeriesPerInstance)
+	}
 	AssertMetricInvariants(t, body, budget)
 }
 
