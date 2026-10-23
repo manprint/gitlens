@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/manprint/pglens/internal/agent"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
@@ -153,21 +154,22 @@ func TestExampleStack_ServerStoresIntoItsOwnDatabase(t *testing.T) {
 		stack.Services["pglens-server"].Environment["PGLENS_DSN"])
 }
 
+// composeReference is a ${...} reference in a compose file. Compose fills it in
+// before the server reads its DSN, so the tests put a placeholder in its place.
+var composeReference = regexp.MustCompile(`\$\{[^}]*\}`)
+
 // The server writes its migrations and its samples into the database its
 // PGLENS_DSN names, so the example agent must not monitor that database: pglens
-// never alters a monitored database. The agent checks the database of its own
-// DSN as well as the include list, so both are held to it.
+// never writes to a monitored database. The check takes the database each DSN
+// connects to, and every include pattern, so both are held to it.
 func TestExampleStack_AgentDoesNotMonitorTheStorageDatabase(t *testing.T) {
 	var stack composeFile
 	require.NoError(t, yaml.Unmarshal(readFile(t, "docker-compose.yml"), &stack))
-	storage := stack.Services["pglens-server"].Environment["PGLENS_DSN"]
-	_, afterHost, found := strings.Cut(storage, "@timescaledb:5432/")
-	require.True(t, found, storage)
-	storageDB, _, _ := strings.Cut(afterHost, "?")
-	require.NotEmpty(t, storageDB)
+	storageDB := effectiveDatabase(t, composeReference.ReplaceAllString(stack.Services["pglens-server"].Environment["PGLENS_DSN"], "placeholder"))
 
 	var example struct {
 		Targets []struct {
+			Name      string `yaml:"name"`
 			DSN       string `yaml:"dsn"`
 			Databases struct {
 				Include []string `yaml:"include"`
@@ -177,14 +179,81 @@ func TestExampleStack_AgentDoesNotMonitorTheStorageDatabase(t *testing.T) {
 	require.NoError(t, yaml.Unmarshal(readFile(t, "agent.example.yaml"), &example))
 	require.NotEmpty(t, example.Targets)
 	for _, target := range example.Targets {
-		dsn, err := url.Parse(target.DSN)
+		ways := storageMonitoring(t, target.DSN, target.Databases.Include, storageDB)
+		require.Empty(t, ways, "target %s monitors %s, the database the server writes to: %v", target.Name, storageDB, ways)
+	}
+}
+
+// effectiveDatabase is the database pgx connects to for dsn. A dbname or
+// database query key overrides the path, and a DSN that names no database
+// connects to the database named after its user. The PG variables that could
+// supply either are cleared for the call, so the test's environment cannot
+// change the answer.
+func effectiveDatabase(t *testing.T, dsn string) string {
+	t.Helper()
+	for _, name := range []string{"PGDATABASE", "PGUSER", "PGSERVICE", "PGSERVICEFILE"} {
+		t.Setenv(name, "")
+	}
+	cfg, err := pgx.ParseConfig(dsn)
+	require.NoError(t, err)
+	if cfg.Database == "" {
+		return cfg.User
+	}
+	return cfg.Database
+}
+
+// storageMonitoring lists the ways a target with this DSN and include list
+// monitors storageDB: it connects to it, or the include list selects it. As in
+// the agent, an empty include list selects every database, and a pattern
+// matches any part of a name. Exclude patterns are not consulted, which can
+// only over-report. An empty result means the target does not monitor storageDB.
+func storageMonitoring(t *testing.T, dsn string, include []string, storageDB string) []string {
+	t.Helper()
+	var ways []string
+	if effectiveDatabase(t, dsn) == storageDB {
+		ways = append(ways, "connects to it")
+	}
+	if len(include) == 0 {
+		ways = append(ways, "has no include list, so it monitors every database")
+	}
+	for _, pattern := range include {
+		matched, err := regexp.MatchString(pattern, storageDB)
 		require.NoError(t, err)
-		require.NotEqual(t, "/"+storageDB, dsn.Path, "the example agent connects to the storage database %s", storageDB)
-		for _, pattern := range target.Databases.Include {
-			matched, err := regexp.MatchString(pattern, storageDB)
-			require.NoError(t, err)
-			require.False(t, matched, "the example agent monitors %s, the database the server writes to", storageDB)
+		if matched {
+			ways = append(ways, "include pattern "+pattern+" matches it")
 		}
+	}
+	return ways
+}
+
+// The check is held to each way a target can reach the storage database, so a
+// mutation of the example file fails it, and so does a DSN shape it has not
+// seen before.
+func TestExampleStack_StorageMonitoringFlagsEveryWayToMonitorIt(t *testing.T) {
+	const storage = "pglens"
+	const example = "postgres://pglens_monitor@timescaledb:5432/postgres?sslmode=disable"
+	cases := []struct {
+		name    string
+		dsn     string
+		include []string
+		want    bool
+	}{
+		{"example target", example, []string{"^postgres$"}, false},
+		{"include removed", example, nil, true},
+		{"include empty", example, []string{}, true},
+		{"include names storage", example, []string{"^postgres$", "^pglens$"}, true},
+		{"include matches inside a name", example, []string{"glen"}, true},
+		{"storage in the DSN path", "postgres://pglens_monitor@timescaledb:5432/pglens?sslmode=disable", []string{"^postgres$"}, true},
+		{"storage in dbname", example + "&dbname=pglens", []string{"^postgres$"}, true},
+		{"storage in database", example + "&database=pglens", []string{"^postgres$"}, true},
+		{"dbname overrides a storage path", "postgres://pglens_monitor@timescaledb:5432/pglens?sslmode=disable&dbname=postgres", []string{"^postgres$"}, false},
+		{"no database, user is storage", "postgres://pglens@timescaledb:5432?sslmode=disable", []string{"^postgres$"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ways := storageMonitoring(t, tc.dsn, tc.include, storage)
+			require.Equal(t, tc.want, len(ways) > 0, "%v", ways)
+		})
 	}
 }
 
