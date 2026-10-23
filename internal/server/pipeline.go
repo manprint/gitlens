@@ -336,14 +336,22 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		})
 		undos = append(undos, undoTopo)
 		for _, ev := range topoEvents {
+			// A cluster-scoped event (split_brain_detected) names no instance: it
+			// involves several primaries, and the pusher is only the one that
+			// happened to observe it. Stored under the pusher, it would show on
+			// that instance's alert as its Instance.
 			evCluster := cidDB
-			evInst := instUUID
+			var evInst *uuid.UUID
+			if ev.InstanceID != uuid.Nil {
+				id := ev.InstanceID
+				evInst = &id
+			}
 			instEvents = append(instEvents, store.EventRow{
 				TenantID:   tenantID,
 				TS:         ev.Timestamp,
 				Type:       string(ev.Type),
 				ClusterID:  &evCluster,
-				InstanceID: &evInst,
+				InstanceID: evInst,
 				Payload:    ev.Payload,
 			})
 		}

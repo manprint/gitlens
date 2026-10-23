@@ -961,3 +961,32 @@ func TestPipeline_TopologyFallbackStaysInCluster(t *testing.T) {
 	require.NotContains(t, edges, otherClusterStandby, "a standby must not be linked to a primary of another cluster")
 	require.Equal(t, primary, edges[sameClusterStandby], "the fallback still links a standby to the primary of its cluster")
 }
+
+// TestPipeline_SplitBrainEventHasNoInstance: split_brain_detected is a fact about
+// the cluster, not about the instance that pushed the envelope in which two
+// primaries were seen. It is stored without an instance_id, so no alert or
+// timeline attributes it to a single instance.
+func TestPipeline_SplitBrainEventHasNoInstance(t *testing.T) {
+	t.Parallel()
+	tx := &recordingTx{}
+	p := NewPipeline(nil, nil)
+	p.pool = &mockPool{beginTx: tx}
+
+	cid := pgtype.ClusterID(1).String()
+	env := wire.Envelope{Instances: []wire.Instance{
+		{InstanceID: uuid.NewString(), ClusterID: cid, Role: "primary", Addr: "10.0.0.1", Port: 5432},
+		{InstanceID: uuid.NewString(), ClusterID: cid, Role: "primary", Addr: "10.0.0.2", Port: 5432},
+	}}
+	_, err := p.Process(context.Background(), env)
+	require.NoError(t, err)
+
+	var found int
+	for _, e := range tx.execs {
+		// Event writes are (tenant, ts, type, cluster_id, instance_id, payload).
+		if strings.Contains(e.sql, "INSERT INTO events (") && e.args[2] == "split_brain_detected" {
+			found++
+			require.Nil(t, e.args[4], "a cluster-scoped event must not carry an instance_id")
+		}
+	}
+	require.Equal(t, 1, found, "two primaries in one cluster write one split_brain_detected event")
+}
