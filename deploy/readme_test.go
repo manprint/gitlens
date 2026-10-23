@@ -24,6 +24,11 @@ func TestReadme_ComposeCommandsRunWithTheSecretsTheyExport(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is required: compose config checks the documented commands")
 	}
+	// A missing or broken compose plugin is a tooling problem. Reporting it here
+	// keeps it from looking like a README that lacks an export.
+	if out, err := exec.Command("docker", "compose", "version").CombinedOutput(); err != nil {
+		t.Fatalf("docker compose version failed: this is a tooling failure, not a README one: %v\n%s", err, out)
+	}
 	fence := "```"
 	shellBlock := regexp.MustCompile("(?s)" + fence + "sh\n(.*?)" + fence)
 	// A command may continue on the next line after a trailing backslash.
@@ -64,4 +69,19 @@ func TestReadme_ComposeCommandsRunWithTheSecretsTheyExport(t *testing.T) {
 		"deploy/compose/timescaledb.yml up",
 		"deploy/docker-compose.yml exec",
 	}, checked, "the documented compose commands changed: update this list")
+}
+
+// A docker without a working compose plugin must fail the check as a tooling
+// problem, not as a README one. The test runs the check in a child process whose
+// docker is a stub that always fails, and expects the tooling message.
+func TestReadme_MissingComposePluginIsATToolingFailure(t *testing.T) {
+	stub := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(stub, "docker"), []byte("#!/bin/sh\nexit 1\n"), 0o755))
+	child := exec.Command(os.Args[0], "-test.run=^TestReadme_ComposeCommandsRunWithTheSecretsTheyExport$")
+	// exec keeps the last value of a duplicated variable, so the stub wins.
+	child.Env = append(os.Environ(), "PATH="+stub+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := child.CombinedOutput()
+	require.Error(t, err, "the check must fail when docker has no compose plugin: %s", out)
+	require.Contains(t, string(out), "tooling failure", "a missing compose plugin must be reported as a tooling failure")
+	require.NotContains(t, string(out), "does not export every secret")
 }
