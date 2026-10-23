@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/manprint/pglens/internal/cardinality"
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/stretchr/testify/require"
@@ -237,5 +238,155 @@ func TestRelationSizes_VanishedRelationIsLeftOut(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, -1.0, metricValue(r, "pg_bloat_bytes", map[string]string{"schemaname": "public", "relname": "t", "indexrelname": "", "object_kind": "table", "method": "estimate"}))
 		require.True(t, r.Partial)
+	})
+}
+
+// sizeProbe answers the size probe of the relation checks for the relation
+// with oid locked: that probe fails with failure. Every other relation reads
+// sizes, and the other queries answer zero.
+func sizeProbe(sizeQuery string, locked uint32, failure error, sizes []any) func(context.Context, string, ...any) pgx.Row {
+	return func(_ context.Context, sql string, args ...any) pgx.Row {
+		switch {
+		case sql == "SELECT now()":
+			return &mockRow{vals: []any{time.Now()}}
+		case sql == sizeQuery && args[0] == locked:
+			return &mockRow{err: failure}
+		case sql == sizeQuery:
+			return &mockRow{vals: sizes}
+		}
+		return &mockRow{vals: []any{int64(0)}}
+	}
+}
+
+func tableStatsFixture(relname string, oid uint32) []any {
+	now := time.Now()
+	return []any{
+		"public", relname,
+		int64(1), int64(2), int64(3), int64(4),
+		int64(5), int64(6), int64(7), int64(8),
+		int64(9), int64(10), int64(11),
+		&now, nil, &now, nil,
+		float64(1), float64(2), int64(3), float64(4),
+		int64(5), int64(6), oid,
+	}
+}
+
+func indexStatsFixture(indexname string, oid uint32) []any {
+	return []any{
+		"public", "t", indexname, int64(1), int64(2), int64(3), int64(4),
+		int64(5), int64(4096), true, false, true, oid,
+	}
+}
+
+func bloatFixture(relname string, oid uint32) []any {
+	return []any{
+		"public", relname, "", "table", float64(2 << 20), float64(1 << 20),
+		float64(1 << 20), 0.5, float64(100), oid,
+	}
+}
+
+// TestRelationSizes_LockedRelationIsLeftOut: a size probe that waits out
+// lock_timeout (SQLSTATE 55P03) leaves its relation out, as a vanished relation
+// is left out, and the other relations are still reported. Each relation check
+// reads its sizes through readRelation, so each one is covered.
+func TestRelationSizes_LockedRelationIsLeftOut(t *testing.T) {
+	t.Parallel()
+	locked := &pgconn.PgError{Code: pgLockNotAvailable}
+	t.Run("table_stats", func(t *testing.T) {
+		conn := &mockConn{
+			queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+				if !strings.Contains(sql, "pg_stat_user_tables") {
+					return &mockRows{}, nil
+				}
+				return &mockRows{rows: [][]any{tableStatsFixture("locked", 1), tableStatsFixture("open", 2)}}, nil
+			},
+			queryRowFunc: sizeProbe(tableSizesQuery, 1, locked, []any{int64(100), int64(80), int64(20)}),
+		}
+		r, err := (&tableStatsCheck{selectors: maintenanceCardinality()}).Scrape(context.Background(), maintenanceTarget(conn))
+		require.NoError(t, err)
+		require.Equal(t, -1.0, metricValue(r, "pg_table_total_bytes", map[string]string{"schemaname": "public", "relname": "locked"}))
+		require.Equal(t, 100.0, metricValue(r, "pg_table_total_bytes", map[string]string{"schemaname": "public", "relname": "open"}))
+		require.True(t, r.Partial)
+	})
+	t.Run("index_stats", func(t *testing.T) {
+		conn := &mockConn{
+			queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+				if !strings.Contains(sql, "pg_stat_user_indexes") {
+					return &mockRows{}, nil
+				}
+				return &mockRows{rows: [][]any{indexStatsFixture("locked", 1), indexStatsFixture("open", 2)}}, nil
+			},
+			queryRowFunc: sizeProbe(indexDefinitionQuery, 1, locked, []any{int64(4096), "CREATE INDEX open ON t (a)"}),
+		}
+		r, err := (&indexStatsCheck{selectors: maintenanceCardinality()}).Scrape(context.Background(), maintenanceTarget(conn))
+		require.NoError(t, err)
+		require.Equal(t, -1.0, metricValue(r, "pg_index_index_bytes", map[string]string{"schemaname": "public", "relname": "t", "indexrelname": "locked"}))
+		require.Equal(t, 4096.0, metricValue(r, "pg_index_index_bytes", map[string]string{"schemaname": "public", "relname": "t", "indexrelname": "open"}))
+		require.Len(t, r.Facts, 1)
+		require.True(t, r.Partial)
+	})
+	t.Run("bloat_estimate", func(t *testing.T) {
+		conn := &mockConn{
+			queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+				if !strings.Contains(sql, "pg_stats") {
+					return &mockRows{}, nil
+				}
+				return &mockRows{rows: [][]any{bloatFixture("locked", 1), bloatFixture("open", 2)}}, nil
+			},
+			queryRowFunc: sizeProbe(bloatSizeQuery, 1, locked, []any{int64(2 << 20)}),
+		}
+		r, err := (&bloatEstimateCheck{selectors: maintenanceCardinality()}).Scrape(context.Background(), maintenanceTarget(conn))
+		require.NoError(t, err)
+		require.Equal(t, -1.0, metricValue(r, "pg_bloat_bytes", map[string]string{"schemaname": "public", "relname": "locked", "indexrelname": "", "object_kind": "table", "method": "estimate"}))
+		require.Equal(t, float64(1<<20), metricValue(r, "pg_bloat_bytes", map[string]string{"schemaname": "public", "relname": "open", "indexrelname": "", "object_kind": "table", "method": "estimate"}))
+		require.True(t, r.Partial)
+	})
+}
+
+// TestRelationSizes_OtherProbeErrorFailsScrape: only a lock timeout leaves a
+// relation out. Any other error from a size probe fails the scrape, so a
+// failed read is never published as a complete result. Query cancellation
+// (57014) stands for those errors.
+func TestRelationSizes_OtherProbeErrorFailsScrape(t *testing.T) {
+	t.Parallel()
+	failure := &pgconn.PgError{Code: "57014"}
+	t.Run("table_stats", func(t *testing.T) {
+		conn := &mockConn{
+			queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+				if !strings.Contains(sql, "pg_stat_user_tables") {
+					return &mockRows{}, nil
+				}
+				return &mockRows{rows: [][]any{tableStatsFixture("t", 1)}}, nil
+			},
+			queryRowFunc: sizeProbe(tableSizesQuery, 1, failure, nil),
+		}
+		_, err := (&tableStatsCheck{selectors: maintenanceCardinality()}).Scrape(context.Background(), maintenanceTarget(conn))
+		require.ErrorIs(t, err, failure)
+	})
+	t.Run("index_stats", func(t *testing.T) {
+		conn := &mockConn{
+			queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+				if !strings.Contains(sql, "pg_stat_user_indexes") {
+					return &mockRows{}, nil
+				}
+				return &mockRows{rows: [][]any{indexStatsFixture("i", 1)}}, nil
+			},
+			queryRowFunc: sizeProbe(indexDefinitionQuery, 1, failure, nil),
+		}
+		_, err := (&indexStatsCheck{selectors: maintenanceCardinality()}).Scrape(context.Background(), maintenanceTarget(conn))
+		require.ErrorIs(t, err, failure)
+	})
+	t.Run("bloat_estimate", func(t *testing.T) {
+		conn := &mockConn{
+			queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+				if !strings.Contains(sql, "pg_stats") {
+					return &mockRows{}, nil
+				}
+				return &mockRows{rows: [][]any{bloatFixture("t", 1)}}, nil
+			},
+			queryRowFunc: sizeProbe(bloatSizeQuery, 1, failure, nil),
+		}
+		_, err := (&bloatEstimateCheck{selectors: maintenanceCardinality()}).Scrape(context.Background(), maintenanceTarget(conn))
+		require.ErrorIs(t, err, failure)
 	})
 }
