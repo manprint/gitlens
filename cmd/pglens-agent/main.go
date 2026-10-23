@@ -67,11 +67,14 @@ func runAgentHealthcheck() int {
 		return 1
 	}
 	defer func() { _ = resp.Body.Close() }()
-	// /healthz answers 503 for revoked, unauthorized or incompatible, and the
-	// agent is not shipping data in any of them. The probe must fail so that
-	// Docker shows the container unhealthy and the body says which state it is
-	// in. Docker does not restart a container for being unhealthy, so the agent
-	// stays up and keeps retrying, as it did before.
+	// /healthz answers 503 while the server has revoked or unauthorized the
+	// agent, or has answered a push with 400, which the agent reads as
+	// incompatible. The probe fails so that Docker shows the container
+	// unhealthy, and the body says which state it is in. A 400 can reject a
+	// single envelope, so incompatible clears with the next accepted push.
+	// Plain Docker and Compose do not restart an unhealthy container; Swarm and
+	// autoheal-style tooling can, and the agent process keeps running either
+	// way.
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 		fmt.Fprintf(os.Stderr, "healthcheck: %s: %s %s\n", url, resp.Status, body)
@@ -84,6 +87,9 @@ func runAgentHealthcheck() int {
 // address the process listens on. A specific host is probed as it is, because
 // a bind to one address does not accept on loopback. Only an unspecified host
 // (empty, 0.0.0.0 or ::) falls back to 127.0.0.1, which such a bind accepts on.
+//
+// cmd/pglens-server/main.go has the same function and tests. The two binaries
+// do not share a package, so the copies change together.
 func healthcheckURL(listen, path string) string {
 	host, port, err := net.SplitHostPort(listen)
 	if err != nil {
