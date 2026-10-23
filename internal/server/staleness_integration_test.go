@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/manprint/pglens/internal/alert"
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/manprint/pglens/internal/store"
@@ -716,4 +717,43 @@ func TestINTSTALE017_PurgedOutageIsNotAnnouncedAgain(t *testing.T) {
 	require.True(t, s.hasLock)
 	require.Zero(t, countEventsFor(t, pool, "agent_down", iid))
 	require.Zero(t, countEventsFor(t, pool, "instance_unreachable", iid))
+}
+
+// INTSTALE018: the staleness gauge and the agent_down alert read one threshold,
+// so an instance is down in the alert exactly when pglens_up reads 0. The alert
+// used to cut off at 60 seconds while the gauge waited 90, so every outage was
+// reported as down by the alert first.
+func TestINTSTALE018_GaugeAndAlertAgreeOnDown(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	iid := uuid.New()
+	insertStaleInstance(t, pool, store.ToDB(pgtype.ClusterID(18)), iid, "75 seconds")
+
+	s := NewStaleness(pool, clock.NewFake(time.Now()))
+	t.Cleanup(s.Stop)
+	src := alert.NewMetricSource(pool, time.Minute)
+	rule := alert.Rule{ID: "agent_down", Scope: alert.ScopeInstance, Metric: "up"}
+	alertValue := func() float64 {
+		t.Helper()
+		samples, err := src.Samples(ctx, rule, time.Now())
+		require.NoError(t, err)
+		for _, sample := range samples {
+			if sample.InstanceID != nil && *sample.InstanceID == iid {
+				return sample.Value
+			}
+		}
+		require.FailNow(t, "the alert source returned no sample for the instance")
+		return 0
+	}
+
+	require.NoError(t, s.Evaluate(ctx))
+	require.Equal(t, 1.0, pglensUpGauge.Get(iid.String()), "75 seconds of silence is within the threshold")
+	require.Equal(t, 1.0, alertValue(), "the alert agrees with the gauge")
+
+	_, err := pool.Exec(ctx, `UPDATE instances SET last_seen = now() - interval '95 seconds' WHERE instance_id=$1`, iid)
+	require.NoError(t, err)
+	require.NoError(t, s.Evaluate(ctx))
+	require.Equal(t, 0.0, pglensUpGauge.Get(iid.String()), "95 seconds of silence is past the threshold")
+	require.Equal(t, 0.0, alertValue(), "the alert agrees with the gauge")
 }

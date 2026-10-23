@@ -24,9 +24,8 @@ import (
 // replicas never emit duplicate events.
 
 const (
-	defaultExpectedInterval = 30 * time.Second
-	evaluatorInterval       = 15 * time.Second
-	noPrimaryThreshold      = 60 * time.Second
+	evaluatorInterval  = 15 * time.Second
+	noPrimaryThreshold = 60 * time.Second
 	// slotInactiveThreshold matches noPrimaryThreshold's own precedent in
 	// this file: a short, hardcoded default rather than an env-configurable
 	// one — nothing else in Staleness exposes its thresholds for override
@@ -342,9 +341,8 @@ func isStaleUp(lastSeen, now time.Time, threshold time.Duration) bool {
 // Staleness evaluates instance staleness and emits transition events under an
 // advisory lock.
 type Staleness struct {
-	pool     *pgxpool.Pool
-	clock    clock.Clock
-	interval time.Duration
+	pool  *pgxpool.Pool
+	clock clock.Clock
 
 	mu sync.Mutex
 	// instanceUp tracks last emitted up state per instance_id string.
@@ -379,8 +377,7 @@ type Staleness struct {
 }
 
 // NewStaleness creates a Staleness evaluator.
-// Pool and clock may be nil in tests; clock defaults to system clock and
-// interval defaults to 30s (threshold 90s).
+// Pool and clock may be nil in tests; clock defaults to system clock.
 func NewStaleness(pool *pgxpool.Pool, clk clock.Clock) *Staleness {
 	if clk == nil {
 		clk = clock.System()
@@ -388,7 +385,6 @@ func NewStaleness(pool *pgxpool.Pool, clk clock.Clock) *Staleness {
 	return &Staleness{
 		pool:                    pool,
 		clock:                   clk,
-		interval:                defaultExpectedInterval,
 		instanceUp:              make(map[string]bool),
 		clusterPrimarySeen:      make(map[string]time.Time),
 		clusterNoPrimaryEmitted: make(map[string]bool),
@@ -399,13 +395,10 @@ func NewStaleness(pool *pgxpool.Pool, clk clock.Clock) *Staleness {
 	}
 }
 
-// threshold returns 3*expected_interval, defaulting to 90s.
+// threshold is how long an instance may stay silent before it counts as down.
+// It is the value the alert rules read too, so the two cannot disagree.
 func (s *Staleness) threshold() time.Duration {
-	iv := s.interval
-	if iv == 0 {
-		iv = defaultExpectedInterval
-	}
-	return 3 * iv
+	return store.InstanceStaleAfter
 }
 
 // ensureLeader acquires a dedicated session-scoped connection and tries to
