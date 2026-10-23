@@ -1,4 +1,5 @@
 import { act, screen, waitFor, within } from '@testing-library/react'
+import { http, HttpResponse } from 'msw/http'
 import { describe, expect, it, vi } from 'vitest'
 
 import { ok } from '@/test/msw/handlers'
@@ -23,6 +24,27 @@ function renderAudit(entries: AuditEntry[]) {
 }
 
 describe('CommandAudit', () => {
+  it('UI-SET-024 shows a queryid above 2^53 with every digit', async () => {
+    // The body is written as text: a JavaScript number literal would round the
+    // queryid before the request is made, hiding the fault this test covers.
+    const body =
+      '[{"audit_id":1,"command_id":"00000000-0000-4000-8000-000000000001","instance_id":"' +
+      INSTANCE_ID +
+      '","kind":"explain","args":{"analyze":false,"queryid":1234567890123456789},"requested_by":"api-token from 192.0.2.10","executed_at":"2026-09-01T01:00:00Z","outcome":"ok"}]'
+    server.use(
+      http.get('*/api/v1/instances/:id/command-audit', () =>
+        HttpResponse.text(body, { headers: { 'Content-Type': 'application/json' } }),
+      ),
+    )
+    renderWithProviders(<CommandAudit instances={[INSTANCE_SUMMARY]} />)
+    await settleAuditQuery()
+
+    const table = await waitFor(() =>
+      screen.getByRole('table', { name: 'Command audit for postgres.example.test:5432' }),
+    )
+    expect(within(table).getByText(/"queryid":"1234567890123456789"/)).toBeInTheDocument()
+  })
+
   it('UI-SET-020 displays entries newest first', async () => {
     renderAudit([
       {
@@ -125,5 +147,23 @@ describe('CommandAudit', () => {
     await settleAuditQuery()
 
     await waitFor(() => expect(screen.getByText('No command activity')).toBeInTheDocument())
+  })
+
+  it('UI-SET-035 reports a 200 body that is not JSON as an invalid response', async () => {
+    // A proxy can answer 200 with an HTML page. The read must fail as a
+    // malformed API response, not as a bare SyntaxError the alert cannot render.
+    server.use(
+      http.get('*/api/v1/instances/:id/command-audit', () =>
+        HttpResponse.text('<html><body>Gateway</body></html>', {
+          headers: { 'Content-Type': 'text/html' },
+        }),
+      ),
+    )
+    renderWithProviders(<CommandAudit instances={[INSTANCE_SUMMARY]} />)
+    await settleAuditQuery()
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Could not load command audit')
+    expect(alert).toHaveTextContent('The server returned an invalid response')
   })
 })

@@ -65,3 +65,11 @@ export function selectedDatabase(
     defaultDatabase(monitored)
   )
 }
+
+/**
+ * Whether the instance monitors the named database. A URL can name any
+ * database, and a statement command must not reach one the agent does not watch.
+ */
+export function isMonitoredDatabase(list: readonly DatabaseEntry[], datname: string): boolean {
+  return partitionDatabases(list).monitored.some((database) => database.datname === datname)
+}

@@ -5,7 +5,9 @@ export function formatDuration(seconds: number | null, locale = 'en-US'): string
   if (seconds === 0) return '0s'
 
   const sign = seconds < 0 ? '-' : ''
-  let remaining = Math.abs(seconds)
+  // Round to the printed precision before splitting, so a remainder of 59.999 s
+  // carries into the minutes instead of printing as 60s after them.
+  let remaining = Math.round(Math.abs(seconds) * 100) / 100
   const days = Math.floor(remaining / 86_400)
   remaining -= days * 86_400
   const hours = Math.floor(remaining / 3_600)

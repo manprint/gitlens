@@ -33,11 +33,14 @@ function numericValue(value: string | null): number | null {
 export function normalizeSettingValue(value: string | null, unit: string): string | null {
   if (value === null) return null
 
+  // PostgreSQL uses a negative value, usually -1, for "no limit" or "disabled"
+  // in size and time settings. Scaling it would render a negative size or
+  // duration, so a negative value is shown as stored, with its unit.
   const parsed = numericValue(value)
-  if (parsed !== null && BYTE_MULTIPLIERS[unit]) {
+  if (parsed !== null && parsed >= 0 && BYTE_MULTIPLIERS[unit]) {
     return formatBytes(parsed * BYTE_MULTIPLIERS[unit])
   }
-  if (parsed !== null && DURATION_MULTIPLIERS[unit]) {
+  if (parsed !== null && parsed >= 0 && DURATION_MULTIPLIERS[unit]) {
     return formatDuration(parsed * DURATION_MULTIPLIERS[unit])
   }
 
@@ -74,6 +77,24 @@ export function durabilitySeverity(setting: Schemas['Setting']): DurabilitySever
   return null
 }
 
+// Only these settings read -1 as "no limit". Elsewhere -1 is a different
+// sentinel, such as autovacuum_work_mem, where it means "use the other setting",
+// so those settings keep the stored value without a label.
+const NO_LIMIT_WHEN_NEGATIVE: ReadonlySet<string> = new Set([
+  'max_slot_wal_keep_size',
+  'temp_file_limit',
+])
+
 export function settingDisplayValue(setting: Schemas['Setting']): string | null {
-  return normalizeSettingValue(setting.value, setting.unit)
+  const display = normalizeSettingValue(setting.value, setting.unit)
+  const parsed = numericValue(setting.value)
+  if (
+    display !== null &&
+    parsed !== null &&
+    parsed < 0 &&
+    NO_LIMIT_WHEN_NEGATIVE.has(setting.name)
+  ) {
+    return `${display} (no limit)`
+  }
+  return display
 }

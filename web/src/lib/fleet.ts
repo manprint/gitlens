@@ -93,23 +93,26 @@ export function deriveAgentHealth(
 
 /**
  * These explanations mirror README.md's GET /api/v1/clusters “Fields
- * explained” rules: ok means a primary exists, every instance is up, and no
- * replication lag is measurable; degraded means a primary exists but an
- * instance is down or a replica has measurable replay lag; critical means no
- * primary or more than one primary (split brain). The health field itself is
- * always supplied by the server and is never recomputed here.
+ * explained” rules: ok means a primary exists, every instance is up, and
+ * replay lag is within the 30 s threshold; degraded means a primary exists but
+ * an instance is down or a replica's replay lag is above the threshold;
+ * critical means no primary or more than one primary (split brain). The health
+ * field itself is always supplied by the server and is never recomputed here.
  */
 // Server source of truth: README.md, `GET /api/v1/clusters` health field.
-// `ok` means a primary exists, all instances are up, and there is no replay lag;
-// `degraded` means a primary exists but an instance is down or replay lag exists;
-// `critical` means there is no primary or there is more than one (split brain).
-// Keep these explanatory sentences aligned with the server's documented rules.
+// `ok` means a primary exists, all instances are up, and replay lag is within
+// the threshold; `degraded` means a primary exists but an instance is down or
+// replay lag is above the threshold; `critical` means there is no primary or
+// there is more than one (split brain). The 30 s threshold is
+// healthLagThresholdSeconds in internal/server/api.go, and the copy below must
+// stay in step with it. Keep these explanatory sentences aligned with the
+// server's documented rules.
 export function describeHealth(cluster: Cluster): string {
   const primaryCount = cluster.instances.filter((instance) => instance.role === 'primary').length
 
   switch (cluster.health) {
     case 'ok':
-      return 'Healthy: a primary is present, all instances are up, and no replication lag is measurable.'
+      return 'Healthy: a primary is present, all instances are up, and replay lag is within the 30 s threshold.'
     case 'degraded': {
       const downInstance = cluster.instances.find((instance) => !instance.up)
       if (downInstance) return `Degraded: instance ${downInstance.addr} is down.`

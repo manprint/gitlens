@@ -118,6 +118,27 @@ describe('authentication middleware', () => {
     expect(screen.getByTestId('mutation-probe')).toHaveTextContent('network')
   })
 
+  it('WU-20 keeps the operator in the app when the server may still hold the session', async () => {
+    server.use(http.delete('*/api/v1/session', () => HttpResponse.error()))
+    const view = renderWithProviders(<SignOutErrorProbe />, { route: '/instances/i1' })
+    view.queryClient.setQueryData(['WU-20-marker'], 'kept')
+    fireEvent.click(screen.getByRole('button', { name: 'sign out' }))
+    await settle()
+
+    expect(screen.getByTestId('mutation-probe')).toHaveTextContent('network')
+    expect(view.router.state.location.pathname).toBe('/instances/i1')
+    expect(view.queryClient.getQueryData(['WU-20-marker'])).toBe('kept')
+  })
+
+  it('WU-20 follows a session the server already rejected to the sign-in page', async () => {
+    server.use(status('deleteSession', 401, { detail: 'expired', error: 'unauthorized' }))
+    const view = renderWithProviders(<SignOutErrorProbe />, { route: '/instances/i1' })
+    fireEvent.click(screen.getByRole('button', { name: 'sign out' }))
+    await settle()
+
+    expect(view.router.state.location.pathname).toBe('/login')
+  })
+
   it('RequireSession redirects an unauthenticated response and reports other errors', async () => {
     server.use(status('getSession', 401, unauthenticated))
     const unauthenticatedView = renderRoute('/private')

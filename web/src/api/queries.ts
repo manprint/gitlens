@@ -6,9 +6,10 @@ import {
 } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 
-import { client, type ApiFailure, toApiFailure } from './client'
+import { client, parseLargeIntStrings, type ApiFailure, toApiFailure } from './client'
 import type { AlertRule } from './alerts'
 import type { paths } from './generated'
+import type { Schemas } from './types'
 import { qk } from './keys'
 import { REFRESH, type RefreshPolicy } from './policy'
 
@@ -324,10 +325,22 @@ export function useInstanceBloat(
 export function useInstanceCommandAudit(id: string) {
   return useApiQuery({
     policy: REFRESH.instance,
+    // The args of an audit entry carry queryid as a JSON number. Reading the
+    // body as text lets parseLargeIntStrings keep its digits, which response
+    // JSON parsing would round. The parse runs inside getApi so that a 200 body
+    // which is not JSON is reported as a malformed response, not a bare SyntaxError.
     queryFn: (signal) =>
-      getApi(() =>
-        client.GET('/api/v1/instances/{id}/command-audit', { params: { path: { id } }, signal }),
-      ),
+      getApi<Schemas['CommandAuditEntry'][]>(async () => {
+        const { data, error, response } = await client.GET('/api/v1/instances/{id}/command-audit', {
+          params: { path: { id } },
+          parseAs: 'text',
+          signal,
+        })
+        if (data === undefined) {
+          return { error, response }
+        }
+        return { data: parseLargeIntStrings(data) as Schemas['CommandAuditEntry'][], response }
+      }),
     queryKey: qk.instanceCommandAudit(id),
   })
 }

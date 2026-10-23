@@ -22,7 +22,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     if (!this.state.error) return this.props.children
 
     const failure: ApiFailure = {
-      kind: 'malformed',
+      kind: 'client',
       message: this.state.error.message,
     }
 

@@ -6,6 +6,7 @@ import {
   isPendingRestart,
   isRedactedArchiveCommand,
   normalizeSettingValue,
+  settingDisplayValue,
 } from './settings'
 
 const setting = (overrides: Partial<Schemas['Setting']> = {}): Schemas['Setting'] => ({
@@ -28,6 +29,24 @@ describe('settings helpers', () => {
     expect(normalizeSettingValue('5', 'min')).toBe('5m')
     expect(normalizeSettingValue('on', '')).toBe('on')
   })
+
+  it('WD-06 shows the -1 sentinel as stored, not as a negative size or duration', () => {
+    expect(normalizeSettingValue('-1', 'kB')).toBe('-1 kB')
+    expect(normalizeSettingValue('-1', 'MB')).toBe('-1 MB')
+    expect(normalizeSettingValue('-1', 'ms')).toBe('-1 ms')
+  })
+
+  it.each([
+    ['temp_file_limit', '-1', 'kB', '-1 kB (no limit)'],
+    ['max_slot_wal_keep_size', '-1', 'MB', '-1 MB (no limit)'],
+    ['temp_file_limit', '1024', 'kB', '1.0 MiB'],
+    ['autovacuum_work_mem', '-1', 'kB', '-1 kB'],
+  ])(
+    'WU-12 labels -1 as no limit only where it means that: %s = %s %s',
+    (name, value, unit, expected) => {
+      expect(settingDisplayValue(setting({ name, unit, value }))).toBe(expected)
+    },
+  )
 
   it('UI-INST-041 flags pending restart settings', () => {
     expect(isPendingRestart(setting({ pending_restart: 'true' }))).toBe(true)

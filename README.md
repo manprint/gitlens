@@ -1073,8 +1073,8 @@ curl -s -b cookies.txt localhost:8080/api/v1/clusters | jq '.[0]'
 
 **Fields explained:**
 - `health` is one of:
-  - `ok` — primary exists, all instances up, no replication lag
-  - `degraded` — primary exists but at least one instance is down OR any replica has measurable replay lag (`max_replay_lag_seconds > 0`)
+  - `ok` — primary exists, all instances up, and replay lag is within 30 seconds (`max_replay_lag_seconds <= 30`, or no lag reported)
+  - `degraded` — primary exists but at least one instance is down OR a replica's replay lag is above 30 seconds (`max_replay_lag_seconds > 30`)
   - `critical` — no primary found in the cluster, **or more than one** (split-brain)
 - `standby_count` — number of instances in standby role (omitted if zero)
 - `sync_standby_count` — number of synchronous replicas per `sync_state` (omitted if zero)
@@ -1516,14 +1516,12 @@ Events are the system's way of notifying you of changes in replication topology 
 | `role_change` | any instance changed role (except failovers, which emit `failover_detected` instead) | Expected during planned promotion or recovery. Check the instance's new role via `/api/v1/clusters`. |
 | **Replication slots** | |
 | `slot_inactive` | a replication slot has been inactive (not actively feeding a standby) for more than 30 seconds; the window is fixed and is not read from the configuration | Standby is down or disconnected. Check if the standby needs to be restarted or reconnected. |
-| `slot_retained_bytes` | a replication slot is retaining an unusual amount of WAL | Standby is lagging or disconnected; WAL is accumulating. Monitor disk usage; if it grows unbounded, the primary can run out of disk. |
 | **Cluster health** | |
 | `no_primary_in_cluster` | no instance in the cluster has reported the primary role for about 135 to 165 seconds: a primary counts for 90 seconds after its last push, then the event follows 60 seconds later | Critical: the cluster has no leader. Investigate why all instances went down or why none are reporting as primary. Promote a standby if needed. |
 | **Other** | |
 | `counter_reset_detected` | a counter (e.g., transaction or connection count) went backwards or `pg_stat_reset()` was called | Expected after `pg_stat_reset()` or an unexpected instance restart; not usually a sign of a problem. |
 | `agent_down` | the agent has not reported for more than 90 seconds; the threshold is three times the fixed 30-second expected interval and does not follow the configured check interval | Agent container crashed, network unreachable, or server unreachable. Check agent logs and connectivity. |
 | `agent_up` | the agent resumed reporting after being down | Recovery; check that the instance is operating normally. |
-| `check_circuit_open` | 3 consecutive failures of a single check (e.g., permission denied on a replication query) | Permission issue, query timeout, or transient database problem. Check agent logs and the instance's error log. |
 | `duplicate_instance_suspected` | the agent is generating a different `instance_id` for the same `addr:port` on restart | The agent lost its persistent identity. Verify the container has a persistent volume at `/var/lib/pglens` (in Docker) or the systemd service's `StateDirectory` (in systemd). Without persistence, the agent regenerates its identity on restart and instances are duplicated. |
 | `cluster_id_changed` | an envelope from an agent claimed a different `cluster_id` for the same `system_identifier` | This should never happen under normal circumstances. It indicates a violation of invariant I-1 (cluster identity must never change). The system rejects such envelopes. If you see this, review the agent logs and the instance's `system_identifier`. |
 

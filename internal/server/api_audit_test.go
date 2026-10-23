@@ -60,3 +60,15 @@ func TestAuditAPI_DecodesRows(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.Contains(t, rec.Body.String(), `"outcome":"ok"`)
 }
+
+func TestAuditAPI_KeepsLargeQueryIDDigits(t *testing.T) {
+	instanceID, commandID := uuid.New(), uuid.New()
+	args := []byte(`{"analyze":false,"queryid":1234567890123456789}`)
+	p := &auditPool{rows: &mockRows{rows: [][]any{{int64(1), []byte(commandID.String()), []byte(instanceID.String()), "explain", args, "api", time.Now(), "ok", nil}}}}
+	r := chi.NewRouter()
+	(&API{pool: p}).RegisterRoutes(r)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/instances/"+instanceID.String()+"/command-audit", http.NoBody))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), `"queryid":1234567890123456789`)
+}

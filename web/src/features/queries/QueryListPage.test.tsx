@@ -208,7 +208,36 @@ describe('QueryListPage', () => {
 
     await settle()
     const link = screen.getByRole('link', { name: 'Query 9223372036854775807' })
-    expect(link).toHaveAttribute('href', `/instances/${INSTANCE_ID}/queries/9223372036854775807`)
+    expect(link).toHaveAttribute(
+      'href',
+      `/instances/${INSTANCE_ID}/queries/9223372036854775807?db=postgres`,
+    )
+  })
+
+  it('UI-QRY-016 labels the share column as a share of the listed rows', async () => {
+    server.use(
+      statementsHandler(
+        statementResponse({
+          statements: [
+            {
+              calls: 1,
+              datname: 'postgres',
+              query_text: 'SELECT 1',
+              queryid: '1',
+              rows: 1,
+              total_exec_time_ms: 2,
+              truncated: false,
+            },
+          ],
+        }),
+      ),
+    )
+
+    renderPage()
+
+    await settle()
+    expect(screen.getByRole('columnheader', { name: 'Share of listed rows' })).toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: 'Share of total' })).toBeNull()
   })
 
   it('renders the populated statement list without accessibility violations', async () => {

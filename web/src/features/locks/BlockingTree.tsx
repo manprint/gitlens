@@ -122,6 +122,9 @@ function visibleEntries(forest: BlockingForest, expandedKeys: ReadonlySet<string
 
 function LockDetails({ node, sampledAt }: { node: LockNode; sampledAt: string | null }) {
   const query = typeof node.query === 'string' ? node.query : ''
+  // The tree places a waiter under one blocker, so every direct blocker is listed here,
+  // each pid once even if the snapshot repeats it.
+  const blockedBy = [...new Set((node.blocked_by ?? []).map(String))].join(', ') || '—'
   const bytes = queryBytes(query)
   const shownQuery = truncateQuery(query, QUERY_BYTE_BUDGET)
   const backendMarkedTruncated = node.query_truncated === true || node.truncated === true
@@ -140,6 +143,10 @@ function LockDetails({ node, sampledAt }: { node: LockNode; sampledAt: string | 
       <div>
         <span className="text-muted-foreground">Database</span>
         <span className="block">{nodeText(node.datname ?? node.database)}</span>
+      </div>
+      <div>
+        <span className="text-muted-foreground">Blocked by</span>
+        <span className="block">{blockedBy}</span>
       </div>
       <div>
         <span className="text-muted-foreground">State</span>
@@ -230,6 +237,11 @@ function TreeItem({
           {tree.cycle ? (
             <p className="text-muted-foreground mt-1 text-sm">
               The blocking relationship forms a cycle; expansion stops at this marker.
+            </p>
+          ) : tree.reference ? (
+            <p className="text-muted-foreground mt-1 text-sm">
+              Also waits on this blocker. Its details are shown under the first blocker that reaches
+              it.
             </p>
           ) : (
             <>

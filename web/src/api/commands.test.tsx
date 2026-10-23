@@ -2,12 +2,16 @@ import { act, fireEvent, screen } from '@testing-library/react'
 import { http, HttpResponse } from 'msw/http'
 import { describe, expect, it, vi } from 'vitest'
 
+import { describeCommandState } from '@/lib/commands'
 import { useCommand, useCreateCommand } from './commands'
 import { REFRESH } from './policy'
 import { renderWithProviders } from '@/test/render'
 import { server } from '@/test/msw/server'
 
 const commandId = '00000000-0000-4000-8000-000000000002'
+// Just past the default five-minute server TTL. The client must not decide
+// expiry before the server does, so a command still pending here stays pending.
+const PAST_DEFAULT_TTL_MS = 5 * 60_000 + 5_000
 
 function settle() {
   return act(async () => {
@@ -24,6 +28,15 @@ function flushQueryNotification() {
 function CommandProbe({ id = commandId }: { id?: string }) {
   const query = useCommand(id)
   return <output data-testid="command-state">{query.data?.state ?? 'loading'}</output>
+}
+
+function CommandCopyProbe() {
+  const query = useCommand(commandId)
+  return (
+    <output data-testid="command-copy">
+      {query.data ? describeCommandState(query.data.state, query.data.error) : 'loading'}
+    </output>
+  )
 }
 
 describe('command lifecycle query', () => {
@@ -85,19 +98,27 @@ describe('command lifecycle query', () => {
     },
   )
 
-  it('UI-CMD-004 expires locally after TTL plus grace when the server remains pending', async () => {
+  it('UI-CMD-004 keeps a pending command pending past the TTL until the server expires it', async () => {
+    let state = 'pending'
     let calls = 0
     server.use(
       http.get('*/api/v1/commands/:id', () => {
         calls += 1
-        return HttpResponse.json({ command_id: commandId, state: 'pending' })
+        return HttpResponse.json({ command_id: commandId, state })
       }),
     )
 
     renderWithProviders(<CommandProbe />)
     await settle()
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(5 * 60_000 + 5_000)
+      await vi.advanceTimersByTimeAsync(PAST_DEFAULT_TTL_MS)
+    })
+    await flushQueryNotification()
+    expect(screen.getByTestId('command-state')).toHaveTextContent('pending')
+
+    state = 'expired'
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH.command.interval)
     })
     await flushQueryNotification()
     expect(screen.getByTestId('command-state')).toHaveTextContent('expired')
@@ -106,6 +127,118 @@ describe('command lifecycle query', () => {
       await vi.advanceTimersByTimeAsync(REFRESH.command.interval * 3)
     })
     expect(calls).toBe(expiredCalls)
+  })
+  it('UI-CMD-007 keeps polling a claimed command past the client timeout', async () => {
+    let state = 'claimed'
+    let calls = 0
+    server.use(
+      http.get('*/api/v1/commands/:id', () => {
+        calls += 1
+        return HttpResponse.json({ command_id: commandId, state })
+      }),
+    )
+
+    renderWithProviders(<CommandProbe />)
+    await settle()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PAST_DEFAULT_TTL_MS + REFRESH.command.interval)
+    })
+    await flushQueryNotification()
+    expect(screen.getByTestId('command-state')).toHaveTextContent('claimed')
+
+    const callsBeforeDone = calls
+    state = 'done'
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH.command.interval)
+    })
+    await flushQueryNotification()
+    expect(calls).toBeGreaterThan(callsBeforeDone)
+    expect(screen.getByTestId('command-state')).toHaveTextContent('done')
+  })
+
+  it('UI-CMD-009 keeps a command the server still reports pending past the TTL, then follows a claim', async () => {
+    let state = 'pending'
+    server.use(
+      http.get('*/api/v1/commands/:id', () => HttpResponse.json({ command_id: commandId, state })),
+    )
+
+    renderWithProviders(<CommandCopyProbe />)
+    await settle()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PAST_DEFAULT_TTL_MS)
+    })
+    await flushQueryNotification()
+    expect(screen.getByTestId('command-copy')).toHaveTextContent(
+      'Command is queued and waiting for an agent.',
+    )
+
+    state = 'claimed'
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH.command.interval)
+    })
+    await flushQueryNotification()
+    expect(screen.getByTestId('command-copy')).toHaveTextContent(
+      'Command was claimed by an agent and is running.',
+    )
+  })
+
+  it('UI-CMD-010 keeps a command claimed after it was pending in the claimed state past the TTL', async () => {
+    let state = 'pending'
+    let calls = 0
+    server.use(
+      http.get('*/api/v1/commands/:id', () => {
+        calls += 1
+        return HttpResponse.json({ command_id: commandId, state })
+      }),
+    )
+
+    renderWithProviders(<CommandProbe />)
+    await settle()
+    expect(screen.getByTestId('command-state')).toHaveTextContent('pending')
+
+    state = 'claimed'
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH.command.interval)
+    })
+    await flushQueryNotification()
+    expect(screen.getByTestId('command-state')).toHaveTextContent('claimed')
+
+    const callsBeforeTimeout = calls
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PAST_DEFAULT_TTL_MS)
+    })
+    await flushQueryNotification()
+    expect(screen.getByTestId('command-state')).toHaveTextContent('claimed')
+    expect(calls).toBeGreaterThan(callsBeforeTimeout)
+  })
+
+  it('UI-CMD-008 does not say no agent claimed a command that was claimed before it expired', async () => {
+    const responses = [
+      { command_id: commandId, state: 'claimed' },
+      { command_id: commandId, state: 'expired' },
+    ]
+    let calls = 0
+    server.use(
+      http.get('*/api/v1/commands/:id', () => {
+        const response = responses[Math.min(calls, responses.length - 1)]
+        calls += 1
+        return HttpResponse.json(response)
+      }),
+    )
+
+    renderWithProviders(<CommandCopyProbe />)
+    await settle()
+    expect(screen.getByTestId('command-copy')).toHaveTextContent('claimed by an agent')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH.command.interval)
+    })
+    await flushQueryNotification()
+
+    const copy = screen.getByTestId('command-copy').textContent ?? ''
+    expect(copy).toMatch(/expired/i)
+    expect(copy).toMatch(/claimed it/i)
+    expect(copy).toMatch(/may still be running/i)
+    expect(copy).not.toMatch(/no agent claimed/i)
   })
 })
 

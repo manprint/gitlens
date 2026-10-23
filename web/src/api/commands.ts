@@ -4,18 +4,13 @@ import {
   useQueryClient,
   type UseMutationResult,
 } from '@tanstack/react-query'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 
 import { client, toApiFailure, type ApiFailure } from './client'
 import type { components } from './generated'
 import { qk } from './keys'
 import { REFRESH } from './policy'
-import {
-  COMMAND_CLIENT_TIMEOUT_MS,
-  describeCommandState,
-  isTerminalCommandState,
-  type CommandState,
-} from '@/lib/commands'
+import { isTerminalCommandState, type CommandState } from '@/lib/commands'
 
 export type CommandKind = components['schemas']['CreateCommandRequest']['kind']
 export type CommandArgs = Omit<components['schemas']['CommandArgs'], 'queryid'> & {
@@ -25,6 +20,13 @@ export type CommandArgs = Omit<components['schemas']['CommandArgs'], 'queryid'> 
 export type GeneratedCommandResponse = components['schemas']['CommandResponse']
 export type CommandResponse = Omit<GeneratedCommandResponse, 'state'> & { state: CommandState }
 export type CreateCommandResponse = components['schemas']['CreateCommandResponse']
+
+// The server reports the same expired state whether or not an agent took the
+// command. Once the client has seen a claim, it says so, because the agent may
+// still be running the statement and a second run would repeat its work. The
+// TTL is set by the server (PGLENS_COMMAND_TTL), so the copy does not name it.
+const CLAIMED_THEN_EXPIRED =
+  'the agent claimed it, but its TTL ended before a result arrived. It may still be running, so wait before running it again.'
 
 export interface CreateCommandVariables {
   kind: CommandKind
@@ -85,22 +87,30 @@ function normaliseCommand(data: GeneratedCommandResponse): CommandResponse {
 }
 
 export function useCommand(commandId: string) {
-  const [expiry, setExpiry] = useState(() => ({ commandId, expired: false }))
-  const clientExpired = expiry.commandId === commandId && expiry.expired
-  const startedAt = useRef<number | null>(null)
-  const startedFor = useRef<string | null>(null)
+  const claimedFor = useRef<string | null>(null)
 
   const query = useQuery<CommandResponse, ApiFailure>({
-    enabled: Boolean(commandId) && !clientExpired,
-    queryFn: async () =>
-      normaliseCommand(
+    enabled: Boolean(commandId),
+    queryFn: async () => {
+      const command = normaliseCommand(
         await requestApi(() =>
           client.GET('/api/v1/commands/{id}', { params: { path: { id: commandId } } }),
         ),
-      ),
+      )
+      if (command.state === 'claimed') claimedFor.current = commandId
+      if (command.state === 'expired' && claimedFor.current === commandId) {
+        return { ...command, error: CLAIMED_THEN_EXPIRED }
+      }
+      return command
+    },
     queryKey: qk.command(commandId),
     refetchInterval: (current) => {
-      if (clientExpired || isTerminalCommandState(current.state.data?.state)) {
+      // Only the server ends a command. It expires a pending or claimed command
+      // once the TTL has passed, and every GET runs that expiry first, so polling
+      // stops on the server's terminal state. The client does not time a command
+      // out itself: its TTL can differ from the client's guess, and a command still
+      // pending on the server must keep its Run controls disabled.
+      if (isTerminalCommandState(current.state.data?.state)) {
         return false
       }
       return REFRESH.command.interval
@@ -109,34 +119,7 @@ export function useCommand(commandId: string) {
     retryDelay: 0,
   })
 
-  useEffect(() => {
-    if (!commandId || isTerminalCommandState(query.data?.state)) {
-      return
-    }
-    if (startedFor.current !== commandId) {
-      startedFor.current = commandId
-      startedAt.current = Date.now()
-    }
-    const began = startedAt.current ?? Date.now()
-    const remaining = COMMAND_CLIENT_TIMEOUT_MS - (Date.now() - began)
-    if (remaining <= 0) {
-      setExpiry({ commandId, expired: true })
-      return
-    }
-    const timer = window.setTimeout(() => setExpiry({ commandId, expired: true }), remaining)
-    return () => window.clearTimeout(timer)
-  }, [commandId, query.data?.state])
-
-  const data =
-    clientExpired && query.data !== undefined && !isTerminalCommandState(query.data.state)
-      ? {
-          ...query.data,
-          state: 'expired' as const,
-          error: describeCommandState('expired'),
-        }
-      : query.data
-
-  return { ...query, data, clientExpired }
+  return query
 }
 
 export function useCreateCommand(defaultInstanceId?: string): UseMutationResult<

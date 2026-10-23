@@ -57,6 +57,25 @@ describe('EventTimeline', () => {
     expect(screen.getByRole('article')).toHaveAttribute('data-severity', 'critical')
   })
 
+  it('UI-CLUS-034 renders an unreadable event time as unknown rather than an empty clock', () => {
+    renderWithProviders(
+      <EventTimeline
+        events={[
+          {
+            cluster_id: '1',
+            event_id: 4,
+            instance_id: null,
+            payload: {},
+            ts: 'not-a-date',
+            type: 'future_event',
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByRole('article')).toHaveTextContent('Unknown day Unknown time')
+  })
+
   it('UI-CLUS-033 an unrecognised type renders its raw string rather than being dropped', () => {
     renderWithProviders(
       <EventTimeline

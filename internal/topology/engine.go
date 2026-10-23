@@ -45,7 +45,6 @@ const (
 	EventRoleChange         EventType = "role_change"
 	EventSplitBrainDetected EventType = "split_brain_detected"
 	EventOrphanStandby      EventType = "orphan_standby"
-	EventCascadeChanged     EventType = "cascade_changed"
 )
 
 // Event is emitted when a topology transition occurs.
