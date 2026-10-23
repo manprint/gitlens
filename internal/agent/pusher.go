@@ -405,17 +405,21 @@ func (p *Pusher) pushOne(ctx context.Context, env *wire.Envelope) (pushOutcome, 
 	}
 }
 
-// backoffDelay returns exponential backoff + jitter, capped at 60s.
+// backoffDelay returns exponential backoff + jitter, capped at 60s: the wait
+// is drawn from the upper half of its ceiling, so no wait exceeds 60s, and the
+// spread keeps agents that failed together from retrying together.
 func backoffDelay(attempt int, clk clock.Clock) time.Duration {
 	if attempt <= 0 {
 		return 0
 	}
-	// Exponential: 1, 2, 4, 8, 16, 32, 60, 60, 60, ...
-	base := time.Duration(math.Min(math.Pow(2, float64(attempt-1)), 60)) * time.Second
-	// Jitter: add random [0, base]
-	jitterMax := int64(base)
-	jitter := time.Duration(rand.Int63n(jitterMax + 1))
-	return base + jitter
+	// Exponential ceiling: 2, 4, 8, 16, 32, 60, 60, ... seconds. The wait falls
+	// between half of it and all of it, so the first retries wait 1 to 2s and
+	// the capped ones 30 to 60s.
+	ceiling := time.Duration(math.Min(math.Pow(2, float64(attempt)), 60)) * time.Second
+	half := ceiling / 2
+	// Jitter: add random [0, half]
+	jitter := time.Duration(rand.Int63n(int64(half) + 1))
+	return half + jitter
 }
 
 // buildRequest constructs an HTTP request for the envelope.

@@ -28,8 +28,25 @@ func TestPusher_BackoffCapped(t *testing.T) {
 
 	for attempt := 1; attempt <= 20; attempt++ {
 		delay := backoffDelay(attempt, clk)
-		require.LessOrEqual(t, delay, 120*time.Second, "attempt %d exceeded cap", attempt)
+		require.LessOrEqual(t, delay, 60*time.Second, "attempt %d exceeded cap", attempt)
 	}
+}
+
+// TestPusher_BackoffJitterAtTheCap: at the cap every wait falls between 30s
+// and 60s, and the waits vary, so agents that failed together do not retry
+// together.
+func TestPusher_BackoffJitterAtTheCap(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+
+	lo, hi := time.Hour, time.Duration(0)
+	for i := 0; i < 500; i++ {
+		delay := backoffDelay(20, clk)
+		lo = min(lo, delay)
+		hi = max(hi, delay)
+	}
+	require.GreaterOrEqual(t, lo, 30*time.Second)
+	require.LessOrEqual(t, hi, 60*time.Second)
+	require.Greater(t, hi, lo)
 }
 
 func TestPusher_NeverBlocksCollection(t *testing.T) {
