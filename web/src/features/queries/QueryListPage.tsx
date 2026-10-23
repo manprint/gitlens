@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 
+import { REFRESH } from '@/api/policy'
 import { useStatements } from '@/api/queries'
 import { DataTable, type DataTableProps } from '@/components/layout/DataTable'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
@@ -241,28 +242,16 @@ function DisabledStatementsState({ reason }: { reason: string | undefined }) {
 export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageProps = {}) {
   const { instanceId: routeInstanceId } = useParams<{ instanceId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { range } = useTimeRange()
+  const { range } = useTimeRange(REFRESH.statements.interval)
   const instanceId = instanceIdOverride ?? routeInstanceId ?? ''
   const sort = readSort(searchParams.get('sort'))
   const database = searchParams.get('db') ?? undefined
-  const rangeSearchKey = [
-    searchParams.get('range'),
-    searchParams.get('from'),
-    searchParams.get('to'),
-  ].join('|')
-  // Relative ranges are resolved from the clock; keep their request window
-  // stable between renders so a completed query does not change its key.
-  const requestRange = useMemo(
-    () => ({ from: range.from.toISOString(), to: range.to.toISOString() }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rangeSearchKey],
-  )
   const params = {
-    from: requestRange.from,
+    from: range.from.toISOString(),
     instance_id: instanceId,
     limit: STATEMENT_LIMIT,
     order_by: sort,
-    to: requestRange.to,
+    to: range.to.toISOString(),
     ...(database === undefined ? {} : { database }),
   }
   const statementsQuery = useStatements(params)

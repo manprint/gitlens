@@ -171,4 +171,33 @@ describe('EventsPage', () => {
 
     expect(screen.getByText('Firing alerts: 1')).toBeInTheDocument()
   })
+
+  it('UI-ALERT-057 moves a relative window with the clock on each poll', async () => {
+    const eventWindows: { from: string | null; to: string | null }[] = []
+    server.events.on('request:start', ({ request }) => {
+      const url = new URL(request.url)
+      if (url.pathname.endsWith('/api/v1/events')) {
+        eventWindows.push({ from: url.searchParams.get('from'), to: url.searchParams.get('to') })
+      }
+    })
+    try {
+      await renderPage('/events?range=15m')
+      vi.setSystemTime(new Date(NOW.getTime() + 10 * 60 * 1_000))
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(REFRESH.activity.interval + 1)
+      })
+      await settle()
+
+      const first = eventWindows[0]
+      const latest = eventWindows.at(-1)
+      expect(eventWindows.length).toBeGreaterThanOrEqual(2)
+      expect(latest?.to).not.toBe(first?.to)
+      expect(latest?.from).not.toBe(first?.from)
+      expect(new Date(latest?.to ?? 0).getTime()).toBeGreaterThanOrEqual(
+        NOW.getTime() + 10 * 60 * 1_000,
+      )
+    } finally {
+      server.events.removeAllListeners()
+    }
+  })
 })

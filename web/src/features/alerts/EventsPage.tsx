@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
+import { REFRESH } from '@/api/policy'
 import { useAlerts, useEvents, useSilences } from '@/api/queries'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -10,7 +11,7 @@ import { Input } from '@/components/ui/input'
 import type { Alert } from '@/lib/alerts'
 import { EventTimeline } from '@/features/cluster/EventTimeline'
 import type { ClusterEvent } from '@/lib/events'
-import { parseRange } from '@/lib/timerange'
+import { parseRange, snapToInterval } from '@/lib/timerange'
 
 const DEFAULT_EVENT_LIMIT = 100
 const MAX_EVENT_LIMIT = 1_000
@@ -101,8 +102,9 @@ export function EventsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const location = useLocation()
   const navigate = useNavigate()
-  const searchKey = searchParams.toString()
-  const range = useMemo(() => parseRange(new URLSearchParams(searchKey), new Date()), [searchKey])
+  // Snapped to the poll interval: a relative window moves on each poll rather
+  // than staying at the value it had at page load.
+  const range = parseRange(searchParams, snapToInterval(new Date(), REFRESH.activity.interval))
   const redirectedForUnauthorized = useRef(false)
   const clusterId = searchParams.get('cluster_id') ?? ''
   const selectedType = searchParams.get('type') ?? ''
