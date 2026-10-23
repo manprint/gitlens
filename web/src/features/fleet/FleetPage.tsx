@@ -236,8 +236,12 @@ export function FleetPage() {
                   {...(agentStaleAgeSeconds === undefined ? {} : { agentStaleAgeSeconds })}
                   key={cluster.cluster_id}
                   alertCount={
-                    alertCounts.get(cluster.cluster_id) ??
-                    firingAlerts.filter((alert) => alertMatchesCluster(alert, cluster)).length
+                    // react-query keeps the last good alerts after a failed refetch, so the
+                    // counts are gated on the current query state, not on whether data exists.
+                    alertsAvailable
+                      ? (alertCounts.get(cluster.cluster_id) ??
+                        firingAlerts.filter((alert) => alertMatchesCluster(alert, cluster)).length)
+                      : null
                   }
                   cluster={cluster}
                 />

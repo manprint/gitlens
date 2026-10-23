@@ -242,6 +242,31 @@ describe('FleetPage', () => {
     expect(alertFilter).toHaveTextContent('Unavailable')
     expect(alertFilter).not.toHaveTextContent('0')
     expect(screen.getByRole('button', { name: 'Retry alerts' })).toBeInTheDocument()
+    const cards = screen.getByRole('list', { name: 'Cluster cards' })
+    expect(within(cards).getByText('Alerts unavailable')).toBeInTheDocument()
+    expect(within(cards).queryByText(/firing alert/)).not.toBeInTheDocument()
+  })
+
+  it('UI-FLEET-046 stops showing alert counts on cards once a refetch fails', async () => {
+    server.use(
+      ok('getClusters', [CLUSTER as unknown as Cluster]),
+      sequence('getAlerts', [alertBase], {
+        status: 500,
+        body: { error: 'internal_error', detail: 'alerts unavailable' },
+      }),
+    )
+    renderWithProviders(<FleetPage />)
+    await settleInitialQuery()
+    expect(screen.getByText(/1 firing alert/)).toBeInTheDocument()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH.alerts.interval)
+      await vi.runOnlyPendingTimersAsync()
+    })
+
+    expect(screen.getByText('Alert counts unavailable.')).toBeInTheDocument()
+    expect(screen.queryByText(/1 firing alert/)).not.toBeInTheDocument()
+    expect(screen.getByText('Alerts unavailable')).toBeInTheDocument()
   })
 
   it('UI-FLEET-045 polls the fleet interval', async () => {

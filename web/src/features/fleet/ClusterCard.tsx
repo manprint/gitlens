@@ -9,7 +9,9 @@ import { AGENT_STALE_AFTER_SECONDS, describeHealth } from '@/lib/fleet'
 
 interface ClusterCardProps {
   agentStaleAgeSeconds?: number
-  alertCount?: number
+  // null means the firing-alert feed is unavailable. The card must not show
+  // zero alerts then, because that would read as a clean cluster.
+  alertCount?: number | null
   cluster: Cluster
 }
 
@@ -97,7 +99,9 @@ export function ClusterCard({ agentStaleAgeSeconds, alertCount = 0, cluster }: C
                 below.
               </p>
             ) : null}
-            {alertCount > 0 ? (
+            {alertCount === null ? (
+              <Badge variant="outline">Alerts unavailable</Badge>
+            ) : alertCount > 0 ? (
               <Badge variant="destructive" aria-label={`${alertCount} firing alerts`}>
                 {alertCount} firing alert{alertCount === 1 ? '' : 's'}
               </Badge>
