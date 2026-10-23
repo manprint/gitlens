@@ -1710,7 +1710,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Fixed-step series; missing intervals are null, never zero or interpolated. */
+            /** @description Fixed-step series; missing intervals are null, never zero or interpolated. A bucket holding several samples of the series carries their mean. */
             200: {
                 headers: {
                     [name: string]: unknown;

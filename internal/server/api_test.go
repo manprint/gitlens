@@ -661,16 +661,18 @@ func TestAPI_MockPool_MetricsQuery_RefusesSeveralSeries(t *testing.T) {
 	require.Contains(t, w.Body.String(), "several series")
 }
 
-func TestAPI_MockPool_MetricsQuery_LastValueWithinOneSeries(t *testing.T) {
+func TestAPI_MockPool_MetricsQuery_MeanWithinOneSeries(t *testing.T) {
 	t.Parallel()
 	iid := uuid.New()
 	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	to := from.Add(time.Minute)
-	// One series with two samples in the same bucket keeps the last value.
+	// One series with three samples in the same bucket answers with their mean,
+	// not with the last scrape (2.0), which would count one interval for the bucket.
 	pool := &mockPool{
 		queryResults: []*mockRows{
 			{rows: [][]any{
 				{from.Add(10 * time.Second), 1.0, int64(7)},
+				{from.Add(25 * time.Second), 0.0, int64(7)},
 				{from.Add(40 * time.Second), 2.0, int64(7)},
 			}},
 		},
@@ -688,7 +690,7 @@ func TestAPI_MockPool_MetricsQuery_LastValueWithinOneSeries(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Len(t, resp.Series, 1)
 	require.NotNil(t, resp.Series[0].Value)
-	require.Equal(t, 2.0, *resp.Series[0].Value)
+	require.Equal(t, 1.0, *resp.Series[0].Value)
 }
 
 func TestAPI_MockPool_Events_WithRows(t *testing.T) {

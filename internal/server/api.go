@@ -801,12 +801,15 @@ func (a *API) handleMetricsQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	// Map bucket index -> value (last value wins if multiple per bucket)
-	bucketValues := make(map[int]float64)
-	bucketHas := make(map[int]bool)
-	// Last-wins is only meaningful within one series. Rows of different label
+	// Map bucket index -> sum and count of its samples. A stored value is the
+	// rate since the previous scrape, so a bucket answers with the mean of its
+	// samples: the overview multiplies that mean by the bucket width, and keeping
+	// only the last scrape counted one interval for the whole bucket.
+	bucketSums := make(map[int]float64)
+	bucketCounts := make(map[int]int)
+	// A mean is only meaningful within one series. Rows of different label
 	// sets (pg_io_* by object, context and backend_type, pg_backends by state)
-	// share timestamps, so keeping the last row returned an arbitrary series.
+	// share timestamps, so averaging them returned an arbitrary series.
 	// This endpoint cannot select a series yet, so a range holding several is
 	// refused rather than answered with one of them.
 	var firstSeries int64
@@ -833,8 +836,8 @@ func (a *API) handleMetricsQuery(w http.ResponseWriter, r *http.Request) {
 		if idx < 0 || idx >= len(buckets) {
 			continue
 		}
-		bucketValues[idx] = val
-		bucketHas[idx] = true
+		bucketSums[idx] += val
+		bucketCounts[idx]++
 	}
 	if err := rows.Err(); err != nil {
 		writeError(w, http.StatusInternalServerError, "rows error", err.Error())
@@ -843,8 +846,8 @@ func (a *API) handleMetricsQuery(w http.ResponseWriter, r *http.Request) {
 
 	series := make([]metricPoint, 0, len(buckets))
 	for i, ts := range buckets {
-		if bucketHas[i] {
-			v := bucketValues[i]
+		if bucketCounts[i] > 0 {
+			v := bucketSums[i] / float64(bucketCounts[i])
 			series = append(series, metricPoint{TS: ts, Value: &v})
 		} else {
 			series = append(series, metricPoint{TS: ts, Value: nil})
