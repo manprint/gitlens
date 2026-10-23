@@ -23,7 +23,7 @@ func scrapeLocks(t *testing.T, rows []([]any)) Result {
 }
 
 func lockValues(pid int32, wait string, blocked []int32, age float64, query string) []any {
-	return []any{pid, "app", "app", "client", "127.0.0.1", "active", "Lock", wait, 1.0, age, query, blocked}
+	return []any{pid, "app", "app", "client", "127.0.0.1", "active", "Lock", wait, 1.0, age, query, blocked, false}
 }
 
 func TestLocks_NoBlockedSessionsEmitsEmptyFact(t *testing.T) {
@@ -98,7 +98,7 @@ func TestLocks_QueryIsTruncated(t *testing.T) {
 func TestLocks_SessionListIsCappedOldestFirst(t *testing.T) {
 	rows := make([][]any, 0, 105)
 	for i := 1; i <= 105; i++ {
-		rows = append(rows, []any{int32(i), "app", "app", "client", "127.0.0.1", "idle", "", "", float64(i), 0.0, "select 1", []int32(nil)})
+		rows = append(rows, []any{int32(i), "app", "app", "client", "127.0.0.1", "idle", "", "", float64(i), 0.0, "select 1", []int32(nil), false})
 	}
 	result := scrapeLocks(t, rows)
 	var tree lockTree
@@ -171,6 +171,26 @@ func TestLocks_CredentialNamedEarlierInALongBodyIsRedacted(t *testing.T) {
 	var tree lockTree
 	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
 	require.Equal(t, "DO '[redacted]'", tree.Nodes[0].Query)
+}
+
+// A session text the server cut is withheld whole in the blocking tree and in
+// the session list. It is not redacted, because the keyword that makes its
+// value a credential may lie past the cut.
+func TestLocks_TextTheServerCutIsWithheld(t *testing.T) {
+	cutLocked := lockValues(1, "transactionid", []int32{9}, 2, "DO $$ DECLARE p text := 'hunter2'; BEGIN /*")
+	cutLocked[len(cutLocked)-1] = true
+	cutIdle := lockValues(2, "", nil, 0, "DO $$ DECLARE p text := 'hunter2'; BEGIN /*")
+	cutIdle[len(cutIdle)-1] = true
+	result := scrapeLocks(t, []([]any){cutLocked, cutIdle, lockValues(9, "", nil, 0, "holder")})
+	require.NotContains(t, string(result.Facts[0].ValueJSON), "hunter")
+	var tree lockTree
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
+	require.Equal(t, withheldQuery, tree.Nodes[0].Query)
+	queries := map[int32]string{}
+	for _, s := range tree.Sessions {
+		queries[s.PID] = s.Query
+	}
+	require.Equal(t, withheldQuery, queries[2])
 }
 
 func TestLocks_IdleSessionQueryIsShortened(t *testing.T) {

@@ -75,6 +75,12 @@ type lockNode struct {
 // pg_blocking_pids() walks the lock manager; it is only asked about sessions
 // that are actually waiting on a heavyweight lock instead of every backend
 // every ten seconds.
+//
+// The last column says whether the text reached the size PostgreSQL cuts a
+// session's text to. The byte count is taken on the server, where the cut
+// happens. A cut text is clipped at a character boundary, so it can be up to
+// three bytes short of the size; the four-byte margin covers that, and a
+// probe on PostgreSQL 18 cut a text to the size less two.
 const locksQuery = `
 SELECT a.pid,
        COALESCE(a.datname, ''),
@@ -87,10 +93,16 @@ SELECT a.pid,
        COALESCE(EXTRACT(epoch FROM now() - a.xact_start), 0),
        COALESCE(EXTRACT(epoch FROM now() - a.state_change), 0),
        COALESCE(a.query, ''),
-       CASE WHEN a.wait_event_type = 'Lock' THEN pg_blocking_pids(a.pid) ELSE '{}'::int[] END
+       CASE WHEN a.wait_event_type = 'Lock' THEN pg_blocking_pids(a.pid) ELSE '{}'::int[] END,
+       COALESCE(octet_length(a.query), 0) >= (SELECT setting::int FROM pg_settings WHERE name = 'track_activity_query_size') - 4
 FROM pg_stat_activity a
 WHERE a.backend_type = 'client backend'
   AND a.pid <> pg_backend_pid()`
+
+// withheldQuery stands for a session text the server cut. The cut text may
+// hide the keyword that makes a credential, so it is not redacted, only
+// withheld.
+const withheldQuery = "[redacted]"
 
 func (c *locksCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 	conn, err := t.Conn(ctx)
@@ -109,12 +121,20 @@ func (c *locksCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 	var parsed []lockRow
 	for rows.Next() {
 		var r lockRow
-		if err := rows.Scan(&r.PID, &r.Datname, &r.Username, &r.ApplicationName, &r.ClientAddr, &r.State, &r.WaitEventType, &r.WaitEvent, &r.XactAge, &r.StateAge, &r.Query, &r.BlockedBy); err != nil {
+		var cut bool
+		if err := rows.Scan(&r.PID, &r.Datname, &r.Username, &r.ApplicationName, &r.ClientAddr, &r.State, &r.WaitEventType, &r.WaitEvent, &r.XactAge, &r.StateAge, &r.Query, &r.BlockedBy, &cut); err != nil {
 			return Result{}, err
 		}
 		// A statement can carry a role password, and the tree is shipped to
 		// the server and shown in the UI, so the credentials go before the cut.
-		r.Query = truncateUTF8(redactQueryText(r.Query), 2048)
+		// A text the server already cut cannot be redacted safely, because the
+		// keyword that makes its value a credential may lie past the cut.
+		if cut {
+			r.Query = withheldQuery
+		} else {
+			r.Query = redactQueryText(r.Query)
+		}
+		r.Query = truncateUTF8(r.Query, 2048)
 		parsed = append(parsed, r)
 	}
 	return buildLocksResult(parsed, t.Clock().Now()), rows.Err()

@@ -6,10 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/manprint/pglens/test/pgtest"
 	"github.com/stretchr/testify/require"
@@ -185,6 +187,66 @@ func TestINTLOCK006_LockShapeAcrossVersions(t *testing.T) {
 		}
 		require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
 		require.Empty(t, tree.Nodes)
+	})
+}
+
+// A session whose text is longer than track_activity_query_size reaches the
+// server with only a prefix, so a credential named before the cut must not be
+// shown, and a text that is cut at a character boundary is withheld too.
+// Sessions whose text fits keep it.
+func TestINTLOCK007_SessionTextTheServerCutIsWithheld(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		// IF false keeps the EXECUTE from running, so no role is needed. The
+		// keyword sits past the default 1024-byte cut.
+		credential := "DO $$ DECLARE p text := 'hunter2'; BEGIN /*" + strings.Repeat("x", 2000) + "*/ IF false THEN EXECUTE 'ALTER ROLE u PASSWORD ' || quote_literal(p); END IF; END $$"
+		// The text is 1027 bytes and the multi-byte character starts at byte
+		// 1022, so the server clips it to 1022 bytes, short of the cut size.
+		boundary := "SELECT '" + strings.Repeat("x", 1014) + "€'"
+		plain := "SELECT 'plain text marker'"
+		// The holders stay checked out, so each statement keeps its own session,
+		// and the PID is read before the statement runs, since reading it after
+		// would replace the session's last statement.
+		var pids []int32
+		var holders []*pgxpool.Conn
+		defer func() {
+			for _, holder := range holders {
+				holder.Release()
+			}
+		}()
+		for _, query := range []string{credential, boundary, plain} {
+			holder, err := admin.Acquire(ctx)
+			require.NoError(t, err)
+			holders = append(holders, holder)
+			var pid int32
+			require.NoError(t, holder.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&pid))
+			_, err = holder.Exec(ctx, query)
+			require.NoError(t, err)
+			pids = append(pids, pid)
+		}
+		conn, err := pg.Pool(t, "app", pgtest.RoleT0).Acquire(ctx)
+		require.NoError(t, err)
+		defer conn.Release()
+		target := &registryTestTarget{conn: conn, version: pg.Version, database: "app", instanceID: uuid.New(), clusterID: 1, role: pgtype.RolePrimary, permTier: pgtype.TierReadOnly}
+		result, err := (&locksCheck{}).Scrape(ctx, target)
+		require.NoError(t, err)
+		require.NotContains(t, string(result.Facts[0].ValueJSON), "hunter2")
+		var tree struct {
+			Sessions []struct {
+				PID   int32  `json:"pid"`
+				Query string `json:"query"`
+			} `json:"sessions"`
+		}
+		require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
+		queries := map[int32]string{}
+		for _, s := range tree.Sessions {
+			queries[s.PID] = s.Query
+		}
+		require.Equal(t, withheldQuery, queries[pids[0]])
+		require.Equal(t, withheldQuery, queries[pids[1]])
+		require.Equal(t, "SELECT 'plain text marker'", queries[pids[2]])
 	})
 }
 
