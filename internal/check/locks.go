@@ -76,9 +76,10 @@ type lockNode struct {
 // that are actually waiting on a heavyweight lock instead of every backend
 // every ten seconds.
 //
-// The last column says whether the text reached the size PostgreSQL cuts a
-// session's text to. The byte count is taken on the server, where the cut
-// happens. The cut keeps at most the size less one byte and stops at a
+// The last column says whether the text is size minus four or more bytes long,
+// the test the query below applies, and so whether it may have been cut. The
+// byte count is taken on the server, where the cut happens. The cut keeps at
+// most the size less one byte and stops at a
 // character boundary, so a cut text can be as short as the size less four;
 // the four-byte margin covers every cut, and a probe on PostgreSQL 18 cut a
 // text to the size less two.
