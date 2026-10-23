@@ -97,6 +97,9 @@ WHERE ic.relpersistence <> 't'`)
 	// still reported.
 	reported := make([]cardinality.Candidate, 0, len(selected))
 	for _, candidate := range selected {
+		if !relationTimeLeft(ctx) {
+			break
+		}
 		r := byKey[candidate.Key]
 		var bytes *int64
 		var definition *string

@@ -4,7 +4,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/manprint/pglens/internal/pgtype"
 )
 
@@ -213,22 +212,6 @@ func (e *Engine) Evict(before time.Time) int {
 		}
 	}
 	return n
-}
-
-// CountByInstance returns, per instance, how many series the engine still
-// holds a baseline for: every (metric, database, labels) combination Observe
-// has seen and Evict has not yet dropped. That is the engine's own memory, not
-// the cardinality budget (I-8). The budget is the per-instance count of series
-// in the latest envelope, which the pipeline reports as pglens_series_total.
-// Nothing in production calls this method.
-func (e *Engine) CountByInstance() map[uuid.UUID]int {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	counts := make(map[uuid.UUID]int)
-	for k := range e.prev {
-		counts[k.Instance]++
-	}
-	return counts
 }
 
 func copyStatsReset(t *time.Time) *time.Time {

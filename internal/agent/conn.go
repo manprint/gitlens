@@ -761,9 +761,8 @@ func (m *Manager) Role() pgtype.Role {
 // found live building SYS-REPL-001 (the plan's own acceptance test): a real
 // `pg_ctl promote` never showed up anywhere, because Role() only ever
 // queries the database once, on the very first call, then serves the same
-// cached value forever. This does not re-evaluate which checks are
-// scheduled (addScheduleEntries still runs once at startup — a real,
-// separate, larger gap, not fixed this session), but it does keep the
+// cached value forever. The checks are re-evaluated by the schedule reconcile
+// (cmd/pglens-agent/schedule.go, reconcile), not by this call. This keeps the
 // pushed wire.Instance.Role current, which is what the server's topology
 // engine (internal/server/pipeline.go) needs to ever detect a failover.
 func (m *Manager) RefreshRole(ctx context.Context) error {
@@ -782,6 +781,22 @@ func (m *Manager) RefreshRole(ctx context.Context) error {
 	defer m.target.cache.mu.Unlock()
 	m.target.cache.role = pgtype.RoleFromRecovery(inRecovery)
 	return nil
+}
+
+// SessionIsSuperuser reports whether the monitoring role of this target is a
+// superuser. The agent does not refuse one: it logs a warning at start, and the
+// security advisor reports the role as critical.
+func (m *Manager) SessionIsSuperuser(ctx context.Context) (bool, error) {
+	conn, err := m.Shared(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer conn.Release()
+	var superuser bool
+	if err := conn.QueryRow(ctx, "SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user").Scan(&superuser); err != nil {
+		return false, fmt.Errorf("query rolsuper: %w", err)
+	}
+	return superuser, nil
 }
 
 func (m *Manager) PGVersion() pgtype.PGVersion {

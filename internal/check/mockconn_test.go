@@ -14,7 +14,6 @@ import (
 	pgxtype "github.com/jackc/pgx/v5/pgtype"
 	"github.com/manprint/pglens/internal/cardinality"
 	"github.com/manprint/pglens/internal/clock"
-	"github.com/manprint/pglens/internal/pgtype"
 )
 
 // scanInto mimics pgx scanning: positional values to dest pointers, honoring sql.Scanner.
@@ -554,72 +553,6 @@ func TestStatStatementsCheck_Scrape_CycleAdvancesAndForgetsStaleRetained(t *test
 	// check: three scrapes of one target advance that scope's counter to 3.
 	if _, cycle := check.selectors.next(target); cycle != 4 {
 		t.Errorf("expected this scope's cycle to reach 3 after 3 Scrape calls, got %d", cycle-1)
-	}
-}
-
-// TestAshCheck_Scrape_Happy exercises ash check.
-func TestAshCheck_Scrape_Happy(t *testing.T) {
-	conn := &mockConn{
-		execFunc: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-			return pgconn.CommandTag{}, nil
-		},
-		queryFunc: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
-			var qid int64 = 12345
-			return &mockRows{
-				rows: []([]any){
-					{"postgres", "active", "CPU", "CPU", &qid},
-					{"app_db", "waiting", "Lock", "relation", nil},
-				},
-			}, nil
-		},
-	}
-
-	target := &SimpleTarget{
-		ConnFunc:   func(ctx context.Context) (Conn, error) { return conn, nil },
-		ClockValue: clock.System(),
-	}
-
-	check := &ashCheck{}
-	result, err := check.Scrape(context.Background(), target)
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-	if len(result.Metrics) == 0 {
-		t.Fatal("expected metrics, got none")
-	}
-	// Every metric needs a real Kind: an unset Kind ("") makes
-	// internal/server/pipeline.go's metric-kind switch reject the ENTIRE
-	// instance's push for that cycle, not just this metric — ash_samples
-	// shipped with Kind unset for the whole session until this was caught
-	// live (STATE.md §8 records it), and this was the exact gap: no test
-	// checked Kind at all, only that some metrics came back.
-	for _, m := range result.Metrics {
-		if m.Kind != pgtype.KindGauge && m.Kind != pgtype.KindCounter {
-			t.Errorf("metric %q has invalid Kind %q", m.Name, m.Kind)
-		}
-	}
-}
-
-// TestAshCheck_Scrape_QueryError handles query failures.
-func TestAshCheck_Scrape_QueryError(t *testing.T) {
-	conn := &mockConn{
-		execFunc: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-			return pgconn.CommandTag{}, nil
-		},
-		queryFunc: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
-			return nil, fmt.Errorf("query error")
-		},
-	}
-
-	target := &SimpleTarget{
-		ConnFunc:   func(ctx context.Context) (Conn, error) { return conn, nil },
-		ClockValue: clock.System(),
-	}
-
-	check := &ashCheck{}
-	_, err := check.Scrape(context.Background(), target)
-	if err == nil {
-		t.Fatal("expected error, got nil")
 	}
 }
 

@@ -103,6 +103,9 @@ WHERE c.relkind = 'r'
 	// dropped) is left out; the others are still reported.
 	reported := make([]cardinality.Candidate, 0, len(selected))
 	for _, candidate := range selected {
+		if !relationTimeLeft(ctx) {
+			break
+		}
 		r := byKey[candidate.Key]
 		var total, table, toast *int64
 		ok, err := readRelation(ctx, conn, tableSizesQuery, r.OID, &total, &table, &toast)

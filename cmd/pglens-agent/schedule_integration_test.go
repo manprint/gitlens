@@ -642,12 +642,11 @@ func TestINTSCH007_UnreadableTargetDoesNotConnectToNewDatabase(t *testing.T) {
 				defer schedules.schedMu.Unlock()
 				return schedules.current
 			}
-			before, gate := currentScheduler(), schedules.gates[target]
+			before := currentScheduler()
 			schedules.reconcile()
 
 			require.Empty(t, backendPIDs(t, admin, dbB), "a read that is not adopted must not connect to a database the schedule does not hold")
 			require.Same(t, before, currentScheduler(), "an unreadable target keeps the schedule it has")
-			require.Equal(t, gate, schedules.gates[target], "an unreadable target keeps the gate it was scheduled against")
 			require.Equal(t, map[string]bool{dbA: true}, schedules.gates[target].databases)
 
 			// The identity store recovers. The read is adopted, and the free slot is

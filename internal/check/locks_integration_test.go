@@ -202,7 +202,7 @@ func TestINTLOCK007_SessionTextTheServerCutIsWithheld(t *testing.T) {
 		// IF false keeps the EXECUTE from running, so no role is needed. The
 		// keyword sits past the default 1024-byte cut.
 		credential := "DO $$ DECLARE p text := 'hunter2'; BEGIN /*" + strings.Repeat("x", 2000) + "*/ IF false THEN EXECUTE 'ALTER ROLE u PASSWORD ' || quote_literal(p); END IF; END $$"
-		// The text is 1027 bytes and the multi-byte character starts at byte
+		// The text is 1026 bytes and the multi-byte character starts at byte
 		// 1022, so the server clips it to 1022 bytes, short of the cut size.
 		boundary := "SELECT '" + strings.Repeat("x", 1014) + "€'"
 		plain := "SELECT 'plain text marker'"

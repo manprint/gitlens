@@ -424,16 +424,6 @@ func (s *scheduleSet) stopCurrentLocked() {
 func addScheduleEntries(scheduler *agent.Scheduler, mgr *agent.Manager, cfg *agent.Config, mu *sync.Mutex, pending map[string][]wire.Result, g targetGate) {
 	for _, c := range check.All() {
 		interval := cfg.GetCheckInterval(c.Name())
-		if c.Name() == "ash" {
-			// Driven by a dedicated sampler+aggregator (startASH, ash.go),
-			// not the scheduler's once-per-interval Scrape() model — a
-			// continuously-running 1-second loop doesn't fit that shape.
-			// The registered check itself stays for its own unit tests, but
-			// must never actually be scheduled, or its own superficial
-			// count-only scrape would double-report under the same "ash"
-			// check name.
-			continue
-		}
 		req := c.Requires()
 		if ok, reason := req.Supports(g.role, g.version, g.tier, g.exts); !ok {
 			mu.Lock()
