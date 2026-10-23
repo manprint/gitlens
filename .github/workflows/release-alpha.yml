@@ -175,7 +175,6 @@ jobs:
             echo "Release $VERSION already exists; images were refreshed."
           else
             gh release create "$VERSION" \
-              --repo "$GITHUB_REPOSITORY" \
               --prerelease \
               --title "pglens $VERSION" \
               --generate-notes

@@ -117,3 +117,12 @@ func TestWorkflows_GovulncheckIsPinnedToTheMakefileVersion(t *testing.T) {
 	require.NotContains(t, ci, "@latest")
 	require.NotContains(t, makefile, "@latest")
 }
+
+// The release job has no checkout, so gh finds the repository through GH_REPO
+// alone. Naming the repository on the command line as well gives the step two
+// sources that could disagree.
+func TestWorkflows_ReleaseNamesTheRepositoryOnce(t *testing.T) {
+	text := string(readFile(t, filepath.Join("..", ".github", "workflows", "release-alpha.yml")))
+	require.Contains(t, text, "GH_REPO: ${{ github.repository }}")
+	require.False(t, strings.Contains(text, "--repo"), "gh takes the repository from GH_REPO")
+}
