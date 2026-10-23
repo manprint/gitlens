@@ -1,5 +1,5 @@
 import { act, fireEvent, screen, waitFor } from '@testing-library/react'
-import { http, HttpResponse } from 'msw'
+import { http, HttpResponse } from 'msw/http'
 import { describe, expect, it, vi } from 'vitest'
 
 import PlanHistory from './PlanHistory'

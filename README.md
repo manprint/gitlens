@@ -25,12 +25,12 @@ acceptance suites run nightly and on every pull request into `main`.
 
 ## Requirements
 
-- Go 1.27.1 or later to build. `go.mod` declares the exact patch, `go 1.27.1`,
+- Go 1.27.3 or later to build. `go.mod` declares the exact patch, `go 1.27.3`,
   so an older toolchain fetches a compatible one instead of building; the pin is
   what keeps the standard library clear of the advisories `make vuln` checks
-  for. Linting needs golangci-lint v2.13.2 or later, built with that same
+  for. Linting needs golangci-lint v2.15.0 or later, built with that same
   toolchain — an older one cannot decode Go 1.27 export data.
-- Node 20.19+ or 22.12+ and pnpm 11.24.0, only to build the web interface from
+- Node 22.12+ and pnpm 12.15.0, only to build the web interface from
   source. CI and the container images build on Node 24.
 - Docker and Docker Compose for the test suites and for the server's storage
 - PostgreSQL 15 to 18 as monitoring targets
@@ -1475,7 +1475,7 @@ Events are the system's way of notifying you of changes in replication topology 
 
 ```sh
 make fmt-check        # verify formatting (gofmt -l must be empty)
-make lint             # run golangci-lint (v2.13.2+, built with the toolchain go.mod names)
+make lint             # run golangci-lint (v2.15.0+, built with the toolchain go.mod names)
 make vet-tags         # go vet with no tags, -tags=integration, and -tags=e2e
 make test             # unit tests with -race -shuffle=on
 make stress           # repeat the concurrency-sensitive packages, new shuffle seed per round

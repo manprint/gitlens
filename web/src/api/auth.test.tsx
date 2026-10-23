@@ -2,7 +2,7 @@ import { act, fireEvent, screen } from '@testing-library/react'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { NavigateFunction } from 'react-router-dom'
-import { http, HttpResponse } from 'msw'
+import { http, HttpResponse } from 'msw/http'
 import { useQueryClient } from '@tanstack/react-query'
 
 import { client } from './client'

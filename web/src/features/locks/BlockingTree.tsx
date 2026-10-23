@@ -13,7 +13,7 @@ import {
   buildBlockingTree,
   rankRoots,
   waitDuration,
-  type BlockingTree,
+  type BlockingTree as BlockingForest,
   type BlockingTreeNode,
   type LockNode,
   type LockPID,
@@ -89,7 +89,7 @@ function itemKey(parentKey: string | undefined, tree: BlockingTreeNode, index: n
   return `${parentKey ?? 'root'}/${String(tree.node.pid)}-${index}`
 }
 
-function expandableKeys(forest: BlockingTree): Set<string> {
+function expandableKeys(forest: BlockingForest): Set<string> {
   const keys = new Set<string>()
   const visit = (tree: BlockingTreeNode, parentKey: string | undefined, index: number) => {
     const key = itemKey(parentKey, tree, index)
@@ -102,7 +102,7 @@ function expandableKeys(forest: BlockingTree): Set<string> {
   return keys
 }
 
-function visibleEntries(forest: BlockingTree, expandedKeys: ReadonlySet<string>): TreeEntry[] {
+function visibleEntries(forest: BlockingForest, expandedKeys: ReadonlySet<string>): TreeEntry[] {
   const entries: TreeEntry[] = []
   const visit = (
     tree: BlockingTreeNode,

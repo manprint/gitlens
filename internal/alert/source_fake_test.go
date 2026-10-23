@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	pgxtype "github.com/jackc/pgx/v5/pgtype"
 )
 
 // fakeQueryer scripts one result set per Query call and records the SQL and
@@ -49,6 +50,7 @@ func (r *fakeRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
 func (r *fakeRows) Values() ([]any, error)                       { return nil, nil }
 func (r *fakeRows) RawValues() [][]byte                          { return nil }
 func (r *fakeRows) Conn() *pgx.Conn                              { return nil }
+func (r *fakeRows) TypeMap() *pgxtype.Map                        { return pgxtype.NewMap() }
 
 func (r *fakeRows) Next() bool {
 	if r.idx >= len(r.rows) {

@@ -50,9 +50,12 @@ describe('test harness defenses', () => {
 
     renderWithProviders(<UnhandledRequestProbe onRejected={rejectRequest} />)
 
-    // The error strategy stops request processing with this InternalError. A
-    // warn/bypass regression either resolves or rejects with a network error.
-    await expect(rejection).rejects.toThrow('Cannot bypass a request')
+    // The error strategy stops request processing with this InternalError,
+    // which fetch surfaces as the cause of its own TypeError. A warn/bypass
+    // regression either resolves or rejects with a plain network error.
+    const reason = await rejection.catch((error: unknown) => error)
+    expect(reason).toBeInstanceOf(Error)
+    expect(String((reason as Error).cause)).toContain('Cannot bypass a request')
     expect(consoleError).toHaveBeenCalled()
     expect(consoleWarn).not.toHaveBeenCalled()
   })

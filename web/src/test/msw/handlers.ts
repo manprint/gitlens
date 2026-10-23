@@ -1,4 +1,5 @@
-import { delay, http, HttpResponse, type HttpHandler } from 'msw'
+import { http, HttpResponse, type HttpHandler } from 'msw/http'
+import { delay } from 'msw/utils/delay'
 
 import {
   assertMatchesContract,

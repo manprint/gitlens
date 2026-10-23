@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	pgxtype "github.com/jackc/pgx/v5/pgtype"
 )
 
 // scanInto is a minimal, reflection-based stand-in for what pgx does when
@@ -85,6 +86,7 @@ func (r *mockRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
 func (r *mockRows) Values() ([]any, error)                       { return nil, nil }
 func (r *mockRows) RawValues() [][]byte                          { return nil }
 func (r *mockRows) Conn() *pgx.Conn                              { return nil }
+func (r *mockRows) TypeMap() *pgxtype.Map                        { return pgxtype.NewMap() }
 
 func (r *mockRows) Next() bool {
 	if r.idx >= len(r.rows) {

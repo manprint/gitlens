@@ -1,6 +1,6 @@
-import { act, fireEvent, screen } from '@testing-library/react'
+import { fireEvent, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { http, HttpResponse } from 'msw'
+import { http, HttpResponse } from 'msw/http'
 
 import { SilenceMutationError } from '@/api/silences'
 import type { Alert, Silence } from '@/lib/alerts'
@@ -9,6 +9,7 @@ import { assertMatchesContract } from '@/test/contract'
 import { NOW } from '@/test/fixture-helpers'
 import { renderWithProviders } from '@/test/render'
 import { ok, sequence, status } from '@/test/msw/handlers'
+import { flushNetwork } from '@/test/network'
 import { server } from '@/test/msw/server'
 
 import { SilencesPage } from './SilencesPage'
@@ -43,9 +44,7 @@ function makeSilence(overrides: Partial<Silence> = {}): Silence {
 }
 
 async function settle() {
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(0)
-  })
+  await flushNetwork()
 }
 
 async function renderSilences(silences: Silence[] = [], alerts: Alert[] = []) {

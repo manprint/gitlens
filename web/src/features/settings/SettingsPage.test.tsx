@@ -1,5 +1,5 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
-import type { HttpHandler } from 'msw'
+import type { HttpHandler } from 'msw/http'
 import { describe, expect, it, vi } from 'vitest'
 
 import { qk } from '@/api/keys'

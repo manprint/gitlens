@@ -1,12 +1,13 @@
-import { act, fireEvent, screen } from '@testing-library/react'
+import { fireEvent, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { http, HttpResponse } from 'msw'
+import { http, HttpResponse } from 'msw/http'
 
 import { AlertRuleMutationError, type AlertRule } from '@/api/alerts'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { assertMatchesContract } from '@/test/contract'
 import { renderWithProviders } from '@/test/render'
 import { ok, sequence, status } from '@/test/msw/handlers'
+import { flushNetwork } from '@/test/network'
 import { server } from '@/test/msw/server'
 
 import { RulesPage } from './RulesPage'
@@ -26,9 +27,7 @@ function makeRule(overrides: Partial<AlertRule> = {}): AlertRule {
 }
 
 async function settle() {
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(0)
-  })
+  await flushNetwork()
 }
 
 async function renderRules(rules: AlertRule[]) {

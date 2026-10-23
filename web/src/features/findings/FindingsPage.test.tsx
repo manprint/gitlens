@@ -1,5 +1,5 @@
 import { act, fireEvent, screen, within } from '@testing-library/react'
-import { http, HttpResponse } from 'msw'
+import { http, HttpResponse } from 'msw/http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { qk } from '@/api/keys'
@@ -8,6 +8,7 @@ import { NOW } from '@/test/time'
 import { ok, sequence, status } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 import { expectNoA11yViolations } from '@/test/a11y'
+import { flushNetwork } from '@/test/network'
 import { renderWithProviders } from '@/test/render'
 import type { AdvisorRule, FindingRecord } from '@/lib/findings'
 
@@ -63,12 +64,7 @@ async function renderFindings(
 }
 
 async function settleMutation() {
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(0)
-  })
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(0)
-  })
+  await flushNetwork()
 }
 
 describe('FindingsPage', () => {

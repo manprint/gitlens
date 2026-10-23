@@ -291,7 +291,7 @@ tipi di soglia. Misura **solo L1**: `make coverage-gate` gira
 `integration` ed `e2e` non contribuiscono a nessuna delle percentuali sotto. È
 voluto — un floor che si alza perché è partito Docker non è un floor.
 Le percentuali "attuali" sono quelle riportate dal gate il 2026-09-12 sotto
-go1.27.1.
+go1.27.1 (la toolchain è poi passata a go1.27.3).
 
 **Obiettivi di progetto** — scelti prima che il codice esistesse, e il codice è
 stato scritto per raggiungerli:
@@ -1119,7 +1119,7 @@ solo passo del gate, lo esegue.
 |---|---|---|
 | `web` | `web-lint`, `web-typecheck`, `web-test`, `web-coverage-gate`, `web-build`, `web-budget`, più il diff su `web/src/api/generated.ts` | i tipi generati dall'OpenAPI devono essere rigenerabili e identici a quelli committati: un contratto che diverge dal generato è un bug che il compilatore non vede |
 | `lint` | `fmt-check`, `golangci-lint`, **`vet-tags`** | `go build ./...` non compila mai le suite `integration` ed `e2e`: senza `vet-tags` un refactor le può lasciare non compilabili e superare comunque tutti i job veloci |
-| `security` | `tidy-check` (`go mod tidy` idempotente + `go mod verify`), `govulncheck ./...` | `go.mod` dichiara la patch esatta (`go 1.27.1`, non `go 1.27`), ed è quel pin a tenere fuori una lista lunga di advisory della standard library raggiungibili dall'endpoint di ingest, dal client HTTP dell'agent e dai canali di notifica; senza questo job niente prova che il pin regga dopo un bump |
+| `security` | `tidy-check` (`go mod tidy` idempotente + `go mod verify`), `govulncheck ./...` | `go.mod` dichiara la patch esatta (`go 1.27.3`, non `go 1.27`), ed è quel pin a tenere fuori una lista lunga di advisory della standard library raggiungibili dall'endpoint di ingest, dal client HTTP dell'agent e dai canali di notifica; senza questo job niente prova che il pin regga dopo un bump |
 | `unit` | `build`, `test` (`-race -shuffle=on`), `coverage-gate` | L1 più i floor di §3.5 |
 | `race-stress` | `make stress STRESS_ROUNDS=10` — solo fuori dalle PR | la correttezza qui è una proprietà dei contratti `Stop()` e di un buffer su disco dove reader e writer condividono un file: un solo giro con `-race` prova meno di dieci giri con ordini di shuffle diversi |
 | `images` | build di `Dockerfile.agent` e `Dockerfile.server` con cache GHA, poi `--version` dentro ciascuna immagine | un Dockerfile rotto altrimenti emerge solo nel workflow E2E (nightly) o, peggio, nel job di release a gate già verde |
@@ -1149,7 +1149,7 @@ Tutto ciò che gira in CI deve girare in locale con **un solo comando**, senza c
 ```makefile
 # gate veloci
 make fmt-check           # gofmt -l deve essere vuoto
-make lint                # golangci-lint (>= v2.13.2, compilato con la stessa toolchain di go.mod)
+make lint                # golangci-lint (>= v2.15.0, compilato con la stessa toolchain di go.mod)
 make vet-tags            # go vet senza tag, -tags=integration, -tags=e2e
 make test                # L1 con -race -shuffle=on
 make coverage-gate       # floor globali e per-package (sez. 3.5)
@@ -1168,7 +1168,7 @@ make vuln                # govulncheck ./...
 > `golang.org/x/tools` più vecchia segnala ogni import dell'albero come errore
 > `typecheck` (`export data version 4 is greater than maximum supported version
 > 2`). Installalo sempre con la toolchain del modulo:
-> `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2`.
+> `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0`.
 > In CI la cache key include `hashFiles('go.mod')` proprio per non ripescare un
 > binario costruito con la toolchain precedente dopo un bump di Go.
 

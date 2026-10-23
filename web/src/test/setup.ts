@@ -13,7 +13,7 @@ import { NOW } from './time'
 export const BENIGN_CONSOLE_MESSAGES: string[] = []
 
 beforeAll(() => {
-  server.listen({ onUnhandledRequest: 'error' })
+  server.listen({ onUnhandledFrame: 'error' })
 })
 
 afterEach(() => {
@@ -29,7 +29,16 @@ afterEach(() => {
 })
 
 beforeEach(() => {
-  vi.useFakeTimers({ shouldAdvanceTime: false, now: NOW })
+  // setImmediate stays real: MSW 3 no longer works around fake timers, and
+  // part of its mocked-response delivery runs on setImmediate. Faking it parks
+  // every mocked response until a test happens to advance the clock.
+  // Application code never uses setImmediate, so nothing the suites assert on
+  // depends on it being controlled. See flushNetwork() in network.ts.
+  vi.useFakeTimers({
+    shouldAdvanceTime: false,
+    now: NOW,
+    toNotFake: ['setImmediate', 'clearImmediate'],
+  })
 
   for (const method of ['error', 'warn'] as const) {
     vi.spyOn(console, method).mockImplementation((...args) => {

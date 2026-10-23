@@ -1,5 +1,5 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { http, HttpResponse } from 'msw'
+import { http, HttpResponse } from 'msw/http'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { PermTier, Schemas } from '@/api/types'
@@ -316,8 +316,9 @@ describe('RelationsSection', () => {
   })
 
   it('UI-INST-057 renders a retryable error when table relations fail', async () => {
-    renderRelations()
     server.use(
+      ok('getInstanceIndexes', response()),
+      ok('getInstanceBloat', response()),
       http.get('/api/v1/instances/:id/tables', () =>
         HttpResponse.json({ message: 'table relations unavailable' }, { status: 500 }),
       ),
