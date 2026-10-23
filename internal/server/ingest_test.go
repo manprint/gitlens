@@ -290,6 +290,9 @@ func TestIngest_DecompressedBudgetIsExact(t *testing.T) {
 	}{
 		{"exact", raw, http.StatusAccepted},
 		{"one byte over", append(append([]byte{}, raw...), ' '), http.StatusRequestEntityTooLarge},
+		// The value itself is one byte past the budget and nothing follows it: the
+		// decoder, not the drain, reads the byte that is over the budget.
+		{"value one byte over", append([]byte{'{', ' '}, raw[1:]...), http.StatusRequestEntityTooLarge},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer

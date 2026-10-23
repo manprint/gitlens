@@ -149,7 +149,10 @@ func ingestHandler(auth *Auth, inv *Inventory, pipeline *Pipeline, slots chan st
 		// valid or not, as it was before the body was decoded as a stream. The
 		// agent treats 413 as "drop this, do not retry".
 		_, drainErr := io.Copy(io.Discard, src)
-		if errors.Is(drainErr, errBodyTooLarge) {
+		// The decoder can be the one that hits the budget: a value that ends one
+		// byte past it needs that byte, and the budget reader's probe has already
+		// consumed it, so the drain then finds nothing left to measure.
+		if errors.Is(decodeErr, errBodyTooLarge) || errors.Is(drainErr, errBodyTooLarge) {
 			IncIngestRejected("decompressed_too_large")
 			writeError(w, http.StatusRequestEntityTooLarge, "payload too large", "decompressed body exceeds the limit")
 			return
