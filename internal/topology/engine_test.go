@@ -714,6 +714,108 @@ func TestEngine_OrphanStandbyThrottled(t *testing.T) {
 	}
 }
 
+// orphanObserver feeds one standby's observations to the engine and returns
+// the orphan_standby events each one emits. The standby is the only instance,
+// so its edges and role are all the orphan logic sees.
+func orphanObserver(e *Engine, clk *clock.Fake, standby uuid.UUID, cID pgtype.ClusterID) func([]Edge, pgtype.Role) []Event {
+	return func(edges []Edge, role pgtype.Role) []Event {
+		var orphans []Event
+		for _, evt := range e.Apply(Observation{InstanceID: standby, ClusterID: cID, Role: role, Timestamp: clk.Now(), Edges: edges}) {
+			if evt.Type == EventOrphanStandby {
+				orphans = append(orphans, evt)
+			}
+		}
+		return orphans
+	}
+}
+
+// TestEngine_OrphanEpisodeEndsAfterGap — an observation with no edge for a
+// whole orphan window ends the episode, so the next orphan is dated from its
+// own start. The duration used to run from the old start: a standby orphaned
+// for four minutes, then edgeless for ten, reported fourteen on its next orphan.
+func TestEngine_OrphanEpisodeEndsAfterGap(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+	standby := uuid.New()
+	cID := pgtype.ManualClusterID("cluster1")
+	observe := orphanObserver(e, clk, standby, cID)
+	lowEdge := []Edge{{From: standby, To: uuid.New(), Confidence: "low"}}
+
+	observe(lowEdge, pgtype.RoleStandby) // starts the episode at t=0
+	clk.Advance(61 * time.Second)
+	first := observe(lowEdge, pgtype.RoleStandby)
+	if len(first) != 1 {
+		t.Fatalf("expected one orphan_standby at t=61, got %d", len(first))
+	}
+	if got := first[0].Payload["duration_seconds"]; got != 61.0 {
+		t.Fatalf("first orphan duration = %v, want 61", got)
+	}
+
+	// Ten minutes with no edge at all: the episode is over.
+	clk.Advance(600 * time.Second)
+	if got := observe(nil, pgtype.RoleStandby); len(got) != 0 {
+		t.Fatalf("an edgeless observation emitted %d orphan_standby", len(got))
+	}
+
+	// Orphaned again at t=662: a new episode, silent until a window has passed.
+	clk.Advance(time.Second)
+	if got := observe(lowEdge, pgtype.RoleStandby); len(got) != 0 {
+		t.Fatalf("a new orphan emitted at its own start, duration %v", got[0].Payload["duration_seconds"])
+	}
+	clk.Advance(60 * time.Second)
+	second := observe(lowEdge, pgtype.RoleStandby)
+	if len(second) != 1 {
+		t.Fatalf("expected one orphan_standby at t=722, got %d", len(second))
+	}
+	if got := second[0].Payload["duration_seconds"]; got != 60.0 {
+		t.Fatalf("second orphan duration = %v, want 60 (its own episode), not the time since the first", got)
+	}
+}
+
+// TestEngine_OrphanEpisodeSurvivesShortGap — the server drops an edge whose
+// address stops resolving for a cycle, so a standby can flap between an edge
+// and none. A gap shorter than the window must not restart the clock, or the
+// orphan would never page.
+func TestEngine_OrphanEpisodeSurvivesShortGap(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+	standby := uuid.New()
+	cID := pgtype.ManualClusterID("cluster1")
+	observe := orphanObserver(e, clk, standby, cID)
+	lowEdge := []Edge{{From: standby, To: uuid.New(), Confidence: "low"}}
+
+	observe(lowEdge, pgtype.RoleStandby) // t=0
+	clk.Advance(30 * time.Second)
+	observe(nil, pgtype.RoleStandby) // a single edgeless cycle at t=30
+	clk.Advance(31 * time.Second)
+	got := observe(lowEdge, pgtype.RoleStandby) // t=61
+	if len(got) != 1 {
+		t.Fatalf("expected orphan_standby at t=61 across a short gap, got %d", len(got))
+	}
+	if d := got[0].Payload["duration_seconds"]; d != 61.0 {
+		t.Fatalf("duration across a short gap = %v, want 61", d)
+	}
+}
+
+// TestEngine_OrphanEpisodeEndsWhenNotStandby — a standby that is promoted and
+// later rejoins as a standby is not orphaned by its earlier episode.
+func TestEngine_OrphanEpisodeEndsWhenNotStandby(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+	standby := uuid.New()
+	cID := pgtype.ManualClusterID("cluster1")
+	observe := orphanObserver(e, clk, standby, cID)
+	lowEdge := []Edge{{From: standby, To: uuid.New(), Confidence: "low"}}
+
+	observe(lowEdge, pgtype.RoleStandby) // t=0
+	clk.Advance(30 * time.Second)
+	observe(nil, pgtype.RolePrimary) // promoted at t=30
+	clk.Advance(31 * time.Second)
+	if got := observe(lowEdge, pgtype.RoleStandby); len(got) != 0 {
+		t.Fatalf("a standby that rejoined at t=61 was reported orphan with duration %v", got[0].Payload["duration_seconds"])
+	}
+}
+
 // TestEngine_EvictBoundsState — the engine tracked one instanceState (plus
 // its own edgeSeenAt map) per instance_id it had ever seen, for the lifetime
 // of the server process. Instance ids are not stable across a lost identity

@@ -48,12 +48,13 @@ type Event struct {
 
 // instanceState tracks the last seen state of an instance.
 type instanceState struct {
-	role       pgtype.Role
-	clusterID  pgtype.ClusterID
-	timestamp  time.Time
-	orphanAt   time.Time            // when the standby's upstream became unresolvable
-	orphanedAt time.Time            // when orphan_standby was last emitted for this standby
-	edgeSeenAt map[string]time.Time // per-edge last-seen time (key = "to_instance_id")
+	role         pgtype.Role
+	clusterID    pgtype.ClusterID
+	timestamp    time.Time
+	orphanAt     time.Time            // when the standby's upstream became unresolvable
+	orphanSeenAt time.Time            // last observation that found the upstream unresolvable
+	orphanedAt   time.Time            // when orphan_standby was last emitted for this standby
+	edgeSeenAt   map[string]time.Time // per-edge last-seen time (key = "to_instance_id")
 }
 
 // Engine detects topology changes in a cluster and emits events.
@@ -191,7 +192,9 @@ func (e *Engine) Apply(obs Observation) []Event {
 		if !hasResolvedEdge && len(obs.Edges) > 0 {
 			if inst.orphanAt.IsZero() {
 				inst.orphanAt = now
-			} else if now.Sub(inst.orphanAt) >= e.orphanWindow && now.Sub(inst.orphanedAt) >= e.orphanWindow {
+			}
+			inst.orphanSeenAt = now
+			if now.Sub(inst.orphanAt) >= e.orphanWindow && now.Sub(inst.orphanedAt) >= e.orphanWindow {
 				// Emit orphan_standby at most once per orphanWindow, and keep
 				// reporting the age of the *whole* orphan episode.
 				//
@@ -212,7 +215,20 @@ func (e *Engine) Apply(obs Observation) []Event {
 					Payload:    map[string]any{"duration_seconds": now.Sub(inst.orphanAt).Seconds()},
 				})
 			}
+		} else if now.Sub(inst.orphanSeenAt) >= e.orphanWindow {
+			// An observation without that evidence ends the episode once a whole
+			// window has passed since the last of it. The server drops an edge
+			// whose address stops resolving for a cycle or two, and that gap must
+			// not restart the clock. A window of it means the orphan is over, so
+			// the next one is dated from its own start and not from this one.
+			inst.orphanAt = time.Time{}
+			inst.orphanedAt = time.Time{}
 		}
+	} else {
+		// Only a standby can be orphaned, so any other role ends an episode that
+		// began while the instance was a standby.
+		inst.orphanAt = time.Time{}
+		inst.orphanedAt = time.Time{}
 	}
 
 	// Detect split-brain: 2+ primaries in one cluster, each observed since the
