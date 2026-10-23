@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -62,7 +63,7 @@ func TestExampleStack_AgentConnectsAsMonitoringRole(t *testing.T) {
 // default: a published superuser port or a shipped token reachable from the
 // network is an open door.
 func TestExampleStack_PublishesLoopbackOnlyAndRequiresSecrets(t *testing.T) {
-	for _, name := range []string{"docker-compose.yml", filepath.Join("compose", "timescaledb.yml")} {
+	for _, name := range composeFiles(t) {
 		var stack composeFile
 		require.NoError(t, yaml.Unmarshal(readFile(t, name), &stack))
 		for service, s := range stack.Services {
@@ -80,5 +81,46 @@ func TestExampleStack_PublishesLoopbackOnlyAndRequiresSecrets(t *testing.T) {
 		"pglens-agent":  "PGLENS_BOOTSTRAP_TOKEN",
 	} {
 		require.Contains(t, stack.Services[service].Environment[key], ":?", "%s %s has a default", service, key)
+	}
+}
+
+// composeFiles lists every YAML file under deploy/. A compose file added
+// later is held to the same rules as the shipped ones.
+func composeFiles(t *testing.T) []string {
+	t.Helper()
+	var names []string
+	require.NoError(t, filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && strings.HasSuffix(path, ".yml") {
+			names = append(names, path)
+		}
+		return nil
+	}))
+	require.NotEmpty(t, names)
+	return names
+}
+
+// A service that starts before the database it needs accepts connections
+// exits, so every dependency on a service of the stack waits for that service
+// to be healthy. The shipped stack has one such dependency per service; a
+// stack that lists them as a bare name starts in the wrong order.
+func TestExampleStack_DependenciesWaitForHealthyServices(t *testing.T) {
+	type dependsOn struct {
+		Services map[string]struct {
+			DependsOn map[string]struct {
+				Condition string `yaml:"condition"`
+			} `yaml:"depends_on"`
+		} `yaml:"services"`
+	}
+	for _, name := range composeFiles(t) {
+		var stack dependsOn
+		require.NoError(t, yaml.Unmarshal(readFile(t, name), &stack), name)
+		for service, s := range stack.Services {
+			for dependency, d := range s.DependsOn {
+				require.Equal(t, "service_healthy", d.Condition, "%s: %s depends on %s without waiting for it to be healthy", name, service, dependency)
+			}
+		}
 	}
 }
