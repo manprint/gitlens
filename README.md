@@ -121,7 +121,12 @@ curl -fsS -H "Authorization: Bearer $PGLENS_BOOTSTRAP_TOKEN" \
 
 The server health endpoints return the plain-text body `ok`; the agent's
 separate health endpoint at `:9187/healthz` returns JSON status and buffer
-details.
+details. In `buffer_stats`, `acked` counts the envelopes the server has
+acknowledged, and `dropped` counts the samples the agent has lost: the ones it
+could not queue, and the records the disk buffer rolled off under its size or
+age limit. `dropped` is the total behind `pglens_samples_dropped_rate`, so a
+value above zero means data was lost, not only delayed. Records the buffer
+cannot read back are not counted.
 
 Output from `/api/v1/clusters` (first cluster):
 ```json
@@ -161,7 +166,7 @@ psql "$PGLENS_DSN" -v pglens_password="$PGLENS_MONITORING_PASSWORD" \
   -v dbname=postgres -f deploy/sql/monitoring_user.sql
 ```
 
-PostgreSQL lets every role execute `pg_control_system()` and `pg_control_checkpoint()` by default, but hardened installations revoke that from `PUBLIC`, so the script grants both explicitly. Without them the cluster identity falls back to the configured `cluster_name` and a failover can split one cluster into two (see Monitoring a replicated cluster).
+PostgreSQL lets every role execute `pg_control_system()` and `pg_control_checkpoint()` by default. Hardened installations revoke that from `PUBLIC`, so the script grants both to the monitoring role explicitly. Where that default is revoked and the grant is missing, the cluster identity falls back to the configured `cluster_name` and a failover can split one cluster into two (see Monitoring a replicated cluster).
 
 The script supports explicit higher tiers:
 
@@ -413,15 +418,23 @@ results.
 
 Security and operational boundaries:
 
-- pglens never writes to a monitored database. Every connection the agent
-  opens sets `default_transaction_read_only = on` before first use, so every
-  transaction — from a check, from ASH or from a command — starts read-only
-  and PostgreSQL itself refuses `INSERT`/`UPDATE`/`DELETE`, DDL and
-  `nextval()`. The checks read catalog views and statistics functions covered
-  by `pg_monitor` (for example `pg_ls_archive_statusdir()` for the archiver's
-  backlog); `explain` and `pgstattuple` additionally open an explicit
-  `READ ONLY` transaction and roll it back. The agent sets only session
-  parameters (`application_name`, `statement_timeout`, `lock_timeout`,
+- pglens's own statements do not write to a monitored database. Every
+  connection the agent opens sets `default_transaction_read_only = on` before
+  first use, so every transaction — from a check, from ASH or from a command —
+  starts read-only and PostgreSQL itself refuses `INSERT`/`UPDATE`/`DELETE`,
+  DDL and `nextval()`. Some effects lie outside a transaction: a rollback does
+  not undo them and the read-only setting does not refuse them. They are a
+  `dblink` call, a session advisory lock, a WAL message, a signal to another
+  backend, and a transaction ID. The checks never make them. Only the opt-in
+  commands can: `EXPLAIN ANALYZE` refuses a statement whose plan reaches one
+  before it runs, and cancel and terminate are the signals themselves, which
+  need the T2 grant and `allow_signal`.
+  [docs/LIMITS.md](docs/LIMITS.md#4-explain-analyze-executes-the-statement)
+  lists the effects that remain. The checks read catalog views and statistics
+  functions covered by `pg_monitor` (for example `pg_ls_archive_statusdir()`
+  for the archiver's backlog); `explain` and `pgstattuple` additionally open
+  an explicit `READ ONLY` transaction and roll it back. The agent sets only
+  session parameters (`application_name`, `statement_timeout`, `lock_timeout`,
   `idle_in_transaction_session_timeout`, `search_path`).
 - Every agent session searches `pg_catalog` alone, whatever `search_path` the
   database or the role sets, and names the objects of `pg_stat_statements` and
@@ -445,19 +458,19 @@ Security and operational boundaries:
 - The server validates authentication, envelope shape, command state and expiry;
   the agent is authoritative for capability, target-policy and execution gates.
 - `EXPLAIN ANALYZE` executes the selected statement. The read-only transaction
-  stops it from changing data; effects outside the transaction (a `dblink`
-  call, a signal, a session advisory lock) are not undone by it, so the agent
-  first inspects the statement, the database and the `EXPLAIN (VERBOSE)` plan
-  and refuses ANALYZE when anything could have such an effect: a user-defined
-  function, a function of an extension that is not known to only compute, a
-  volatile built-in that is not known to only read, a foreign or custom scan,
-  or a user-defined operator, cast, domain or aggregate whose calls a plan can
-  hide. A session holding `pg_signal_backend` plans as `pg_read_all_data`, and
-  every `EXPLAIN` connection is closed after use. The statement still consumes
-  database resources and takes locks; see
-  [docs/LIMITS.md](docs/LIMITS.md#4-explain-analyze-executes-the-statement) for
-  what remains outside these checks. Keep `allow_explain_analyze: false` unless
-  this is acceptable for the target.
+  stops it from changing this database's data; effects outside the transaction
+  (a `dblink` call, a signal, a session advisory lock) are not undone by it,
+  so the agent first inspects the statement, the database and the `EXPLAIN
+  (VERBOSE)` plan and refuses ANALYZE when anything could have such an effect:
+  a user-defined function, a function of an extension that is not known to
+  only compute, a volatile built-in that is not known to only read, a foreign
+  or custom scan, or a user-defined operator, cast, domain or aggregate whose
+  calls a plan can hide. A session holding `pg_signal_backend` plans as
+  `pg_read_all_data`, and every `EXPLAIN` connection is closed after use. The
+  statement still consumes database resources and takes locks; see
+  [docs/LIMITS.md](docs/LIMITS.md#4-explain-analyze-executes-the-statement)
+  for what remains outside these checks. Keep `allow_explain_analyze: false`
+  unless this is acceptable for the target.
 - Query text is never sent in a command payload. Plan history stores only
   explicitly requested plans, using a normalized query hash and JSON plan;
   placeholders may prevent a useful plan for parameter-sensitive statements.
@@ -965,7 +978,7 @@ warnings
 
 - **server version** — PostgreSQL version; `— NOT SUPPORTED` means it is outside 15–19
 - **role** — `primary`, `standby`, or `read-only replica`; determines which replication checks run
-- **system_identifier** — stable cluster identity; if it says `N/A (requires pg_control_system privilege)`, you need the grant from `monitoring_user.sql`
+- **system_identifier** — stable cluster identity; if it says `N/A (requires pg_control_system privilege)`, the agent's read of `pg_control_system()` failed, which in practice means `EXECUTE` on it has been revoked from `PUBLIC` for this role; the grant from `monitoring_user.sql` fixes it
 - **permission tier**:
   - `T0 (pg_monitor)` — minimum, enables all core monitoring
   - `T1 (pg_monitor + pg_read_all_data)` — enables plan-only `EXPLAIN` and on-demand `pgstattuple` measurement, and lets the bloat estimate see tables whose columns `pg_monitor` alone cannot read; with `allow_explain_analyze`, the agent also accepts `EXPLAIN ANALYZE` (the interface asks for T2)
@@ -1415,15 +1428,17 @@ This stable identifier is how pglens proves that a promoted standby is the same 
 
 ### The `pg_control_system()` grant
 
-The `system_identifier` is not covered by `pg_monitor` and requires an explicit grant:
+Membership in `pg_monitor` does not grant `pg_control_system()`, but on PostgreSQL 15 to 19 `PUBLIC` holds `EXECUTE` on it by default, so every role can read `system_identifier`. The grant is needed only where that default has been revoked:
 
 ```sql
 GRANT EXECUTE ON FUNCTION pg_control_system() TO pglens;
 ```
 
-This is applied by `deploy/sql/monitoring_user.sql`. **Without it, the agent cannot read `system_identifier` and falls back to the configured `cluster_name` as the identity.** If you then promote a standby, the primary and standby will report different `cluster_name` values, causing the system to see them as two separate clusters — `cluster_id` will appear to change.
+This is applied by `deploy/sql/monitoring_user.sql`. **Where `PUBLIC` has lost `EXECUTE` and the monitoring role has no grant, the agent cannot read `system_identifier` and falls back to the configured `cluster_name` as the identity.** If you then promote a standby, the primary and standby will report different `cluster_name` values, causing the system to see them as two separate clusters — `cluster_id` will appear to change.
 
-**Best practice:** always include the `pg_control_system()` grant. If you cannot grant it (e.g., on some managed PostgreSQL services), explicitly set `cluster_name` to the same value on all instances in the cluster and ensure it survives failover.
+**Best practice:** keep the grant that `monitoring_user.sql` applies, so the identity does not depend on the `PUBLIC` default. If you cannot grant it (e.g., on some managed PostgreSQL services), explicitly set `cluster_name` to the same value on all instances in the cluster and ensure it survives failover.
+
+The fallback raises no event. To see that it happened, read `id_source` on the cluster in `GET /api/v1/clusters`, or look at the cluster card on the Fleet page: a value other than `system_identifier` (in practice `manual`) means the identity came from `cluster_name`, and the card links to the grant instructions.
 
 ### What the agent does
 
@@ -1500,13 +1515,13 @@ Events are the system's way of notifying you of changes in replication topology 
 | `orphan_standby` | a standby's upstream cannot be resolved for more than 60 seconds | Primary is down but the standby has not been promoted. Either the primary is recovering, or you need to promote the standby and reconnect it. |
 | `role_change` | any instance changed role (except failovers, which emit `failover_detected` instead) | Expected during planned promotion or recovery. Check the instance's new role via `/api/v1/clusters`. |
 | **Replication slots** | |
-| `slot_inactive` | a replication slot has been inactive (not actively feeding a standby) for the configured window | Standby is down or disconnected. Check if the standby needs to be restarted or reconnected. |
+| `slot_inactive` | a replication slot has been inactive (not actively feeding a standby) for more than 30 seconds; the window is fixed and is not read from the configuration | Standby is down or disconnected. Check if the standby needs to be restarted or reconnected. |
 | `slot_retained_bytes` | a replication slot is retaining an unusual amount of WAL | Standby is lagging or disconnected; WAL is accumulating. Monitor disk usage; if it grows unbounded, the primary can run out of disk. |
 | **Cluster health** | |
-| `no_primary_in_cluster` | no instance in the cluster is reporting primary role for more than 60 seconds | Critical: the cluster has no leader. Investigate why all instances went down or why none are reporting as primary. Promote a standby if needed. |
+| `no_primary_in_cluster` | no instance in the cluster has reported the primary role for about 135 to 165 seconds: a primary counts for 90 seconds after its last push, then the event follows 60 seconds later | Critical: the cluster has no leader. Investigate why all instances went down or why none are reporting as primary. Promote a standby if needed. |
 | **Other** | |
 | `counter_reset_detected` | a counter (e.g., transaction or connection count) went backwards or `pg_stat_reset()` was called | Expected after `pg_stat_reset()` or an unexpected instance restart; not usually a sign of a problem. |
-| `agent_down` | the agent has not reported for more than 3× its check interval | Agent container crashed, network unreachable, or server unreachable. Check agent logs and connectivity. |
+| `agent_down` | the agent has not reported for more than 90 seconds; the threshold is three times the fixed 30-second expected interval and does not follow the configured check interval | Agent container crashed, network unreachable, or server unreachable. Check agent logs and connectivity. |
 | `agent_up` | the agent resumed reporting after being down | Recovery; check that the instance is operating normally. |
 | `check_circuit_open` | 3 consecutive failures of a single check (e.g., permission denied on a replication query) | Permission issue, query timeout, or transient database problem. Check agent logs and the instance's error log. |
 | `duplicate_instance_suspected` | the agent is generating a different `instance_id` for the same `addr:port` on restart | The agent lost its persistent identity. Verify the container has a persistent volume at `/var/lib/pglens` (in Docker) or the systemd service's `StateDirectory` (in systemd). Without persistence, the agent regenerates its identity on restart and instances are duplicated. |
@@ -1525,9 +1540,10 @@ make tidy-check       # go.mod/go.sum are tidy, and every module verifies
 make vuln             # govulncheck against the pinned toolchain and dependencies
 make api-docs         # regenerate the offline HTTP API reference from OpenAPI
 make test-integration # integration tests against real PostgreSQL (requires Docker)
-make test-e2e         # E2E smoke subset (requires Docker, ~10m)
-make test-e2e-full    # full E2E suite (requires Docker, ~60m)
-make test-e2e-full-evidence # full E2E suite with a durable log and captured exit status (requires Docker, ~60m)
+make test-e2e-unit    # unit tests of the E2E harness and scenarios, plus the TimescaleDB invariant checks (requires Docker)
+make test-e2e         # E2E smoke subset (requires Docker, ~20m)
+make test-e2e-full    # full E2E suite (requires Docker, ~66-79m when it passes; longer if a scenario hits its poll deadline)
+make test-e2e-full-evidence # full E2E suite with a durable log and captured exit status (requires Docker, ~66-79m when it passes)
 make test-ui-e2e      # Playwright UI acceptance against a real stack (requires Docker)
 
 make ci-local-unit     # everything CI runs in its fast lane, Go and web
@@ -1556,7 +1572,7 @@ touching the branch rule.
 
 - **L1 — Unit** (`make test`): fast, isolated Go tests for pure logic and component behavior; no Docker or external PostgreSQL is required.
 - **L2 — Integration** (`make test-integration`): agent, wire and storage tests against real PostgreSQL versions; requires Docker and takes roughly 15 minutes.
-- **L3 — E2E system** (`make test-e2e` or `make test-e2e-full`): operator-style multi-container scenarios and failure recovery; requires Docker, with the smoke subset taking roughly 10 minutes and the full suite roughly 60 minutes.
+- **L3 — E2E system** (`make test-e2e` or `make test-e2e-full`): operator-style multi-container scenarios and failure recovery; requires Docker, with the smoke subset taking roughly 18 to 19 minutes and the full suite 66 to 79 minutes when it passes; a scenario that hits its poll deadline makes the run longer.
 - **L4 — Frontend component** (`make web-test`, `make web-coverage-gate`): Vitest and MSW against the React components and API layer, including contract validation of `api/openapi.yaml` through the generated types. Floors are in `scripts/coverage_gate_ui.sh` and the rationale is in `TESTING.md` §6.
 - **L5 — Frontend E2E** (`make test-ui-e2e`): Playwright driving a real browser against a real stack, sharing L3's scenario library. The `SYS-UI-*` acceptance scenarios live here. See `TESTING.md` §7.
 
@@ -1606,7 +1622,7 @@ If the check exits 0 and all mandatory checks show `enabled`, the target is conf
 
 **`permission denied` on `pg_control_system()`**
 
-The monitoring role needs an explicit grant that `pg_monitor` does not cover. As superuser on the target:
+This error means `EXECUTE` on the function has been revoked from `PUBLIC` and not granted to the monitoring role. `pg_monitor` does not cover it, so grant it explicitly. As superuser on the target:
 
 ```sql
 GRANT EXECUTE ON FUNCTION pg_control_system() TO pglens;
@@ -1621,9 +1637,9 @@ psql "$PGLENS_DSN" -v pglens_password="$PGLENS_MONITORING_PASSWORD" \
   -v dbname=postgres -f deploy/sql/monitoring_user.sql
 ```
 
-Without this grant, the agent falls back to `cluster_name` for cluster identity, and a failover can split the cluster into two in the UI.
+Until the grant is in place, the agent falls back to `cluster_name` for cluster identity, and a failover can split the cluster into two in the UI.
 
-**Agent reports `revoked` and stops collecting**
+**Agent reports `revoked` and stops scheduled collection**
 
 The agent has been explicitly revoked in the server. Check the database:
 
@@ -1636,11 +1652,11 @@ To re-enroll:
 UPDATE agents SET revoked_at = NULL WHERE agent_id = '...';
 ```
 
-The agent will resume after the next health check (default every push interval, ~15 seconds). Do not exit the agent container/service — the `revoked` state is visible in logs and health checks; restarting just delays visibility.
+After the update, the agent's next accepted push (about one push interval, ~15 seconds) sets its health back to `ok` and sends the records it still holds. Its scheduled checks (activity, locks, `pg_stat_statements` and the rest) do not come back with it: the scheduler stops once, when the agent sees the revocation, and nothing starts it again in the same process. Restart the agent with an accepted token to resume them. Keep the agent running until then, because its logs and health check show the `revoked` state. ASH sampling and host collection are not stopped by a revocation.
 
 **Ingest returns HTTP 400 for an unsupported protocol**
 
-A response such as `{"error":"unsupported protocol_version 3, supported range 1-2"}` means the agent is newer than the server. Upgrade the server first, then retry the agent.
+A response such as `{"error":"unsupported protocol_version 3, supported range 1-2"}` comes from a server that predates protocol version 3 and means the agent is newer than that server. Upgrade the server first, then retry the agent.
 
 **Databases missing or showing `skip_reason=db_budget`**
 
@@ -1702,7 +1718,7 @@ The agent's disk buffer grows when samples cannot be delivered to the server. Ch
    - Agent container: check DNS resolution and network connectivity to server
    - Binary deployment: check firewall rules and routing
 
-After the server becomes reachable, the buffer is replayed automatically (in order, with duplicates absorbed by the server's dedup index). Samples are never lost; buffer overflow after 512 MiB only deletes the oldest (least recent) segments.
+After the server becomes reachable, the buffer is replayed automatically, in order. Delivery is at least once: a record sent twice is absorbed by the server's dedup index. Buffer overflow after 512 MiB deletes the oldest (least recent) segments, and those samples are counted as dropped. Some losses are not counted; Known limits describes the ones documented so far.
 
 **Agent container restarting or marked as down**
 
@@ -1747,23 +1763,23 @@ The agent did not persist its identity across a restart. Verify:
    # Should show: "identity path /var/lib/pglens is not on a persistent mount"
    ```
 
-To fix: mount the persistent volume and restart. Old duplicate instances will age out (last_seen >3× interval) and trigger `agent_down` events.
+To fix: mount the persistent volume and restart. Old duplicate instances will age out (last_seen more than 90 seconds old) and trigger `agent_down` events.
 
 ## Known limits
 
 The authoritative, numbered list is [docs/LIMITS.md](docs/LIMITS.md). The
 following is a short operational summary.
 
-The server accepts agents speaking protocol version 1 or 2. An agent newer than
+The server accepts agents speaking protocol versions 1 to 3. An agent newer than
 the server is rejected, so upgrade the server before upgrading agents.
 
 **Agent:**
 - **No token rotation or mTLS** — the bootstrap token is a shared secret; revocation only (no key rotation, no mutual TLS, no approval queue, single-tenant)
-- **An unclean agent shutdown may lose the tail of the current buffer segment** — samples within the current segment are fsynced only at segment roll (every ~8 MiB), not per record. A graceful shutdown (SIGTERM with signal handler) flushes the active segment before exit; forceful termination (SIGKILL) skips that flush. The trade-off is necessary: per-record fsync would make monitoring overhead unacceptable for busy instances.
+- **A process kill can tear the record being written, and an OS crash can lose recent samples** — a kill (SIGTERM or SIGKILL) does not discard records already written, because the kernel keeps them, but a kill during a write can leave a torn record at the tail of the current segment. That record is not delivered and is not counted as dropped. Samples are fsynced only at segment roll (every ~8 MiB), not per record, so an operating-system crash or power loss can lose everything written since the last roll. The trade-off is necessary: per-record fsync would make monitoring overhead unacceptable for busy instances.
 - **Maximum 10 databases per instance by default** — if you have more databases, increase `targets[].databases.max` in the config or use the `include` filter. Unmonitored databases are reported with `skip_reason=db_budget` to make this visible (not a silent degradation).
 - **Oversized envelopes (>32 MiB) are dropped** — the agent does not split envelopes. The server answers 413, the agent drops that envelope instead of retrying it forever, and the drop is counted into `pglens_samples_dropped_rate`, the metric behind the `agent_buffer_full` alert rule. A gzipped envelope that expands past 256 MiB is rejected the same way, and is additionally visible server-side as `pglens_ingest_rejected_total{reason="decompressed_too_large"}`.
 
-- **Buffer retention drops are labelled, not silent** — records rolled off by the disk buffer's size or age policy are counted per reason (`size_limit`, `age_limit`) in the buffer's own stats and folded into `pglens_samples_dropped_rate`. A buffer that is discarding data always says so.
+- **Buffer retention drops are labelled, not silent** — records rolled off by the disk buffer's size or age policy are counted per reason (`size_limit`, `age_limit`) in the buffer's own stats, reported as `buffer_stats.dropped` on `/healthz`, and folded into `pglens_samples_dropped_rate`. Records the buffer cannot read back, such as a torn write from a crash, are not in these counts; see the unclean shutdown limit above.
 
 **Deployment:**
 - **An agent container without a persistent volume duplicates its instances on restart** — `/var/lib/pglens` must be a persistent volume (not ephemeral). Without it, every container restart creates a new instance ID, causing `duplicate_instance_suspected` events and fragmenting instance history. The compose file and systemd unit handle this correctly; Docker `--rm` breaks it.

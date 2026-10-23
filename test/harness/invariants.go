@@ -94,6 +94,7 @@ func (h *Harness) AssertInvariants(t *testing.T) {
 	if pool == nil {
 		t.Fatal("AssertInvariants: no DB pool (call after Start)")
 	}
+	AwaitFirstMetricsRow(context.Background(), pool, metricsIngestWait)
 	AssertDBInvariants(context.Background(), t, pool)
 	h.AssertServerMetricInvariants(t, DefaultMetricBudget())
 }
@@ -123,6 +124,11 @@ func (h *Harness) AssertServerMetricInvariants(t *testing.T, budget MetricBudget
 			return
 		}
 		t.Fatalf("I-8: scrape /metrics: %v", err)
+	}
+	// The verdict alone does not say how close a green run came to the
+	// ceiling. Logging each instance's count keeps that number in the run log.
+	for _, sample := range parseLabelledMetric(body, "pglens_series_total") {
+		t.Logf("I-8: instance %s reports %.0f series (budget %.0f)", sample.label, sample.value, budget.MaxSeriesPerInstance)
 	}
 	AssertMetricInvariants(t, body, budget)
 }
@@ -174,10 +180,52 @@ func (h *Harness) serverContainerRunning() bool {
 // pgtest fixture instead of a full docker-compose stack.
 func AssertDBInvariants(ctx context.Context, t TestingT, pool *pgxpool.Pool) {
 	t.Helper()
+	assertMetricsWritten(ctx, t, pool)
 	assertNoDuplicateSamples(ctx, t, pool)
 	assertNoNegativeRates(ctx, t, pool)
 	assertNoOrphanMetrics(ctx, t, pool)
 	assertClusterIDStable(ctx, t, pool)
+}
+
+// metricsIngestWait bounds how long a scenario's end waits for the first
+// metrics row. A scenario can end right after a fault clears: SYS-NET-003
+// removes its black-hole toxic and asserts at once, and the agent's next check
+// and push take up to about 30 seconds to land. The wait absorbs that. It does
+// not mask a store that never ingests; after the wait the invariant fails.
+const metricsIngestWait = 60 * time.Second
+
+// AwaitFirstMetricsRow polls until the metrics table holds a row or wait
+// elapses, and reports whether it does.
+func AwaitFirstMetricsRow(ctx context.Context, pool *pgxpool.Pool, wait time.Duration) bool {
+	deadline := time.Now().Add(wait)
+	for {
+		var written bool
+		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM metrics)`).Scan(&written); err == nil && written {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+// assertMetricsWritten is the positive control for the checks below. Each of
+// them reports only rows that violate it, so a store that ingested nothing
+// satisfies all of them; requiring one metrics row proves the pipeline wrote.
+func assertMetricsWritten(ctx context.Context, t TestingT, pool *pgxpool.Pool) {
+	t.Helper()
+	var written bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM metrics)`).Scan(&written); err != nil {
+		t.Fatalf("metrics written (metrics): query failed: %v", err)
+	}
+	if !written {
+		t.Errorf("metrics table is empty: the invariants would pass vacuously on a store that ingested nothing")
+	}
 }
 
 // assertNoDuplicateSamples backs I-3: the same (series, ts) is never written

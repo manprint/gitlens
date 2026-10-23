@@ -198,6 +198,32 @@ func All() []Scenario {
 	return scenarios
 }
 
+// MissingEvents returns the declared event types for which count reports no
+// event in the run's window. count is asked once per declared type. Every
+// declared type must appear, because Expect.Events is an all-of list: a
+// scenario that accepts either of two event names declares neither.
+func (s Scenario) MissingEvents(count func(eventType string) (int, error)) ([]string, error) {
+	var missing []string
+	for _, eventType := range s.Expect.Events {
+		n, err := count(eventType)
+		if err != nil {
+			return nil, fmt.Errorf("count %s events: %w", eventType, err)
+		}
+		if n == 0 {
+			missing = append(missing, eventType)
+		}
+	}
+	return missing, nil
+}
+
+// UnverifiedInvariants reports whether a run of s declares invariants but
+// returned without calling AssertInvariants. Invariant IDs cannot be checked by
+// name, so that call is the only evidence the run checked them. checked records
+// whether the call was made.
+func (s Scenario) UnverifiedInvariants(checked bool) bool {
+	return len(s.Expect.Invariants) > 0 && !checked
+}
+
 // Smoke returns all scenarios marked as smoke test scenarios, sorted by ID.
 func Smoke() []Scenario {
 	registryMu.RLock()

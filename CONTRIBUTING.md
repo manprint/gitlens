@@ -44,6 +44,7 @@ make web-coverage-gate
 make web-build
 make web-budget
 make test-integration
+make test-e2e-unit
 make test-e2e
 AGENT_MODE=binary make test-e2e
 make test-ui-e2e
@@ -78,11 +79,9 @@ Three of these are easy to skip and expensive to have skipped:
 
 ## How to add an E2E scenario
 
-1. Put the acceptance test in `test/e2e/<area>_test.go` and its scenario metadata in `test/e2e/scenarios/<area>.yml`. Reuse the compose and fixture files under `test/compose/` and `test/fixtures/`; add a new stack only when the existing topologies cannot express the failure.
-2. Give the scenario a stable id in the form `SYS-<AREA>-<NNN>` and use that exact id in the Go test, metadata and assertions.
-3. Register the id in the scenario catalogue and metadata before closing the
-   change. An id in code but not the catalogue, or in the catalogue but not
-   code, is incomplete.
+1. Put the acceptance test in `test/e2e/<area>_test.go` and register its scenario there with `scenario.Register`. The registration is the only metadata: the id, title, topology, `Covers`, and the events the run must produce (`Expect.Events`) or the invariants it checks (`Expect.Invariants`). `Register` rejects a scenario without `Covers` or without an expectation, and a run that declares invariants must call `e.AssertInvariants`. Reuse the compose and fixture files under `test/compose/` and `test/fixtures/`; add a new stack only when the existing topologies cannot express the failure.
+2. Give the scenario a stable id in the form `SYS-<AREA>-<NNN>` and use that exact id in the Go test, the registration and assertions.
+3. Add the id to the catalogue in `TESTING.md` section 8.1 before closing the change: one row with the title, topology, smoke flag and references copied from the registration. An id in code but not the catalogue, or in the catalogue but not code, is incomplete.
 4. Exercise the scenario with the E2E command, for example:
 
 ```sh
@@ -98,11 +97,11 @@ go test -tags=e2e -timeout=8m ./test/e2e -run '^TestFull_Archiving$' -count=1 -v
 ## Reading a CI failure
 
 A red L3 run uploads `test/e2e/_artifacts/<test_name>/` to CI. Download the artifact bundle; it contains:
-- Service logs (`docker compose logs` per container — agent, server, PostgreSQL, Toxiproxy if used).
-- `pglens-agent check` output (readiness probe, permission tier, extension availability).
-- API state dumps (`/api/v1/clusters`, `/api/v1/events`, `/api/v1/instances`).
-- Database diagnostics (row counts and samples from each metric table and invariant check table).
-- Health status (`/healthz`, `/readyz`, goroutine count).
+- Service logs (`docker-compose.log`, the `docker compose logs` output for every service of the stack; binary mode also keeps the agent's own `agent-binary.log`).
+- Container state (`docker-inspect.json`, the `docker inspect` output for every container, stopped ones included).
+- `pglens-agent` check output (`agent-check.log`, binary mode only: readiness probe, permission tier, extension availability).
+- API state (`api-clusters.json`, `api-events.json`) and the agent's own health (`agent-health.json`).
+- Database diagnostics (`metrics-tables.json`: the row count and the 100 newest rows of each TimescaleDB hypertable).
 
 The `Dump` is automatically triggered on test failure via `t.Cleanup` and is the first place to look for root cause.
 

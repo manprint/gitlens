@@ -178,6 +178,51 @@ func TestParseCheckMetric(t *testing.T) {
 	}
 }
 
+// The positive control for the I-8 check: a /metrics body without the series
+// family proves nothing about the budget, so it must fail rather than pass by
+// having nothing to judge. A proxy answering 200 with an HTML page looks like
+// this.
+func TestAssertMetricInvariants_FailsWithoutTheSeriesFamily(t *testing.T) {
+	var withoutFamily []string
+	for _, line := range strings.Split(healthyExposition, "\n") {
+		if !strings.Contains(line, "pglens_series_total") {
+			withoutFamily = append(withoutFamily, line)
+		}
+	}
+	cases := map[string]string{
+		"empty body":          "",
+		"html page":           "<html><body>ok</body></html>",
+		"no family in output": strings.Join(withoutFamily, "\n"),
+	}
+	for name, exposition := range cases {
+		spy := &spyT{}
+		AssertMetricInvariants(spy, exposition, DefaultMetricBudget())
+		if len(spy.errors) != 1 || !strings.Contains(spy.errors[0], "pglens_series_total") {
+			t.Errorf("%s: an exposition without the series family passed the I-8 check: %v", name, spy.errors)
+		}
+	}
+}
+
+// A replica that has just restarted, or has never pushed, declares the family
+// and reports no samples. That is a true state, and it must not fail the
+// budget: the header is what shows the body is the pglens exposition.
+func TestAssertMetricInvariants_PassesOnAnInstanceWithNoSeriesYet(t *testing.T) {
+	var headersOnly []string
+	for _, line := range strings.Split(healthyExposition, "\n") {
+		if !strings.HasPrefix(line, "pglens_series_total{") {
+			headersOnly = append(headersOnly, line)
+		}
+	}
+	spy := &spyT{}
+	AssertMetricInvariants(spy, strings.Join(headersOnly, "\n"), DefaultMetricBudget())
+	if len(spy.errors) != 0 {
+		t.Errorf("a restarted instance with the family declared but no samples failed the I-8 check: %v", spy.errors)
+	}
+	if len(spy.logs) != 1 || !strings.Contains(spy.logs[0], "no series yet") {
+		t.Errorf("the instance judged on no samples without saying so: %v", spy.logs)
+	}
+}
+
 func TestParseLabelledMetric(t *testing.T) {
 	got := parseLabelledMetric(healthyExposition, "pglens_series_total")
 	if len(got) != 2 {

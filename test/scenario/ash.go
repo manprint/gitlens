@@ -76,14 +76,24 @@ func init() {
 			}
 			allActiveTS := time.Now().UTC()
 
-			// Let the sleeps finish, then give the last window a chance to
-			// close and reach the server (window 10s + push_interval 5s +
-			// margin).
+			// Let the sleeps finish, then wait for the window that closes right
+			// after the measurement window below to reach the server. The
+			// measurement window ends 5s before the sessions do, so sessions are
+			// still active in the next window and it has rows. Every earlier
+			// window was pushed before it (windows close every 10s and are
+			// pushed within push_interval 5s).
 			wg.Wait()
-			select {
-			case <-time.After(20 * time.Second):
-			case <-ctx.Done():
-				return ctx.Err()
+			windowEnd := startTS.Add(time.Duration(sleepSeconds)*time.Second - 5*time.Second)
+			flushCtx, cancelFlush := context.WithTimeout(ctx, 60*time.Second)
+			defer cancelFlush()
+			if err := poll(flushCtx, 2*time.Second, func(ctx context.Context) (bool, error) {
+				var n int
+				err := e.DB.QueryRow(ctx,
+					`SELECT count(*) FROM metrics_ash WHERE instance_id=$1::uuid AND ts > $2`,
+					instanceID, windowEnd).Scan(&n)
+				return err == nil && n > 0, err
+			}); err != nil {
+				return fmt.Errorf("the ASH window after the measurement window never reached the store: %w", err)
 			}
 
 			// Only trust the middle of the sleep period, not its edges: the
@@ -98,7 +108,6 @@ func init() {
 			// completion (sessions sleep the same duration from their own
 			// individually-staggered start, so the first one finishes at
 			// startTS+sleepSeconds at the earliest).
-			windowEnd := startTS.Add(time.Duration(sleepSeconds)*time.Second - 5*time.Second)
 			if !allActiveTS.Add(10 * time.Second).Before(windowEnd) {
 				return fmt.Errorf("no safe measurement window: sessions became active too close to their own end (allActiveTS=%s, deadline=%s)", allActiveTS, windowEnd)
 			}
@@ -173,12 +182,22 @@ func init() {
 				return fmt.Errorf("resolve instance: %w", err)
 			}
 
-			// Give the agent several push cycles' worth of time to have
-			// pushed *something* ASH-related if it were going to.
-			select {
-			case <-time.After(20 * time.Second):
-			case <-ctx.Done():
-				return ctx.Err()
+			// An empty metrics_ash proves ASH is off only if the pipeline is
+			// delivering. Wait until ordinary metrics sampled 20s after the start
+			// have reached the store: by then any ASH window from the first 20s
+			// has been pushed too (windows close every 10s, pushed within
+			// push_interval 5s).
+			deliveredTS := time.Now().UTC().Add(20 * time.Second)
+			deliveredCtx, cancelDelivered := context.WithTimeout(ctx, 120*time.Second)
+			defer cancelDelivered()
+			if err := poll(deliveredCtx, 2*time.Second, func(ctx context.Context) (bool, error) {
+				var n int
+				err := e.DB.QueryRow(ctx,
+					`SELECT count(*) FROM metrics WHERE instance_id=$1::uuid AND ts >= $2`,
+					instanceID, deliveredTS).Scan(&n)
+				return err == nil && n > 0, err
+			}); err != nil {
+				return fmt.Errorf("ordinary metrics sampled after the start never reached the store, so the empty metrics_ash proves nothing: %w", err)
 			}
 
 			var ashRows int
@@ -449,11 +468,20 @@ func init() {
 
 			// Same lesson as SYS-LOAD-003: wait for ASH's 10s aggregation +
 			// push_interval latency to actually deliver the run's windows
-			// before querying, not just for the workload process to exit.
-			select {
-			case <-time.After(15 * time.Second):
-			case <-ctx.Done():
-				return ctx.Err()
+			// before querying, not just for the workload process to exit. The
+			// window open when the workload exited is the last one with rows,
+			// so its row, stamped after the exit, is what the wait is for.
+			raceDoneTS := time.Now().UTC()
+			raceFlushCtx, cancelRaceFlush := context.WithTimeout(ctx, 60*time.Second)
+			defer cancelRaceFlush()
+			if err := poll(raceFlushCtx, 2*time.Second, func(ctx context.Context) (bool, error) {
+				var n int
+				err := e.DB.QueryRow(ctx,
+					`SELECT count(*) FROM metrics_ash WHERE instance_id=$1::uuid AND ts > $2`,
+					instanceID, raceDoneTS).Scan(&n)
+				return err == nil && n > 0, err
+			}); err != nil {
+				return fmt.Errorf("the ASH window open when the race ended never reached the store: %w", err)
 			}
 			windowEnd := time.Now().UTC()
 

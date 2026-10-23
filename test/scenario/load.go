@@ -33,8 +33,12 @@ func init() {
 			const stormDuration = 25 * time.Second
 			stormErr := make(chan error, 1)
 			stormStart := time.Now().UTC()
+			// stormExit is written before the error is sent, so it can be read
+			// once the poll below has received from stormErr.
+			var stormExit time.Time
 			go func() {
 				_, err := e.Workload("lock-storm", "--dsn", dsn, "--sessions", "50", "--duration", stormDuration.String())
+				stormExit = time.Now().UTC()
 				stormErr <- err
 			}()
 
@@ -42,8 +46,10 @@ func init() {
 			// sessions piled up on SELECT...FOR UPDATE must not block the
 			// activity check's own timeout-bounded scrape. Poll THROUGH the
 			// storm (not just after it) for fresh pg_backends samples, and
-			// require at least one pg_max_xact_age_seconds reading that
-			// reflects the storm's long-held transactions.
+			// require at least one pg_max_xact_age_seconds reading above zero.
+			// That floor only shows that some open transaction was visible:
+			// any client transaction satisfies it, so the storm itself is
+			// proved by the ASH Lock waits asserted below.
 			var sawBlockedXact bool
 			var lastFreshCount int
 			checkCtx, cancelCheck := context.WithTimeout(ctx, stormDuration+15*time.Second)
@@ -88,10 +94,8 @@ func init() {
 				return fmt.Errorf("no pg_backends samples landed with ts during the storm — the activity check may have stalled behind the 50 blocked sessions")
 			}
 			if !sawBlockedXact {
-				return fmt.Errorf("pg_max_xact_age_seconds never reflected the storm's held transactions (>1s)")
+				return fmt.Errorf("pg_max_xact_age_seconds never rose above 0 during the storm")
 			}
-			stormEnd := time.Now().UTC()
-
 			// phase 7.4's own re-assertion of this SAME scenario ID
 			// (phase_08.md#7.4): the storm must be visible as Lock waits,
 			// and — the concrete proof that a 500ms check timeout survives
@@ -100,12 +104,23 @@ func init() {
 			// per-second ticks in any window during the storm. Wait for
 			// ASH's 10s aggregation + push_interval latency to actually
 			// deliver the storm's windows before querying (SYS-LOAD-003
-			// already found querying too early finds nothing).
-			select {
-			case <-time.After(15 * time.Second):
-			case <-ctx.Done():
-				return ctx.Err()
+			// already found querying too early finds nothing). The window open
+			// when the storm exited is the last one with rows, so its row,
+			// stamped after the exit, is what the wait is for.
+			stormFlushCtx, cancelStormFlush := context.WithTimeout(ctx, 60*time.Second)
+			defer cancelStormFlush()
+			if err := poll(stormFlushCtx, 2*time.Second, func(ctx context.Context) (bool, error) {
+				var n int
+				err := e.DB.QueryRow(ctx,
+					`SELECT count(*) FROM metrics_ash WHERE instance_id=$1::uuid AND ts > $2`,
+					instanceID, stormExit).Scan(&n)
+				return err == nil && n > 0, err
+			}); err != nil {
+				return fmt.Errorf("the ASH window open when the storm ended never reached the store: %w", err)
 			}
+			// Taken again after the wait, so the storm's last window, stamped
+			// after the first reading, falls inside the query bounds.
+			stormEnd := time.Now().UTC()
 
 			var sawLockWait bool
 			if err := e.DB.QueryRow(ctx,

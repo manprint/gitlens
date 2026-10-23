@@ -24,7 +24,7 @@ Revisione critica del doc v0.1. Cosa è cambiato:
 | 12 | **Sampling adattivo** | Rimosso (anti-pattern: riduce risoluzione durante l'incidente). Sostituito con budget fisso + circuit breaker. |
 | 13 | **Server HA** | Corretto: Alert Engine e Scheduler NON sono stateless. Leader election via advisory lock. |
 | 14 | **Enrollment** | Nuova sez. 7.4 (era assente: nessun flusso di bootstrap/revoca token). |
-| 15 | **Versioni** | Dichiarate PG 15-18 + matrice viste per versione. |
+| 15 | **Versioni** | Dichiarate PG 15-19 + matrice viste per versione. |
 | 16 | **Testing** | Nuova sez. 12, spostato in Phase 0 (era assente dalla roadmap). |
 | 17 | **Limiti noti** | Nuova sez. 11. |
 | 18 | **Domande residue** | Da 10 a 3 bloccanti + resto rimandabile. |
@@ -41,7 +41,7 @@ Sistema leggero, open, self-hostable per monitorare fleet Postgres eterogenea:
 
 Requisito trasversale: **sia Server che Agent devono girare nativi o in Docker senza perdita di funzionalità** (host monitoring e discovery inclusi).
 
-**Versioni Postgres supportate: 15 -> 18.** PG 12 è EOL (nov 2024), fuori scope. Ogni check dichiara `MinPG`/`MaxPG` (vedi matrice sez. 3.6).
+**Versioni Postgres supportate: 15 -> 19.** PG 12 è EOL (nov 2024), fuori scope. Ogni check dichiara `MinPG`/`MaxPG` (vedi matrice sez. 3.6).
 
 Obiettivi:
 - Zero overhead su DB prod (query leggere, budget fisso, circuit breaker)
@@ -101,7 +101,7 @@ Tutti i nodi di uno streaming replication cluster condividono lo stesso `system_
 SELECT system_identifier FROM pg_control_system();
 ```
 
-**Attenzione operativa:** `pg_control_system()` è **ristretta a superuser di default e NON è coperta da `pg_monitor`**. Serve grant esplicito:
+**Attenzione operativa:** `pg_control_system()` **NON è coperta da `pg_monitor`**. Su PostgreSQL 15-19 però `PUBLIC` ha `EXECUTE` di default, quindi il grant serve solo dove quel default è stato revocato (installazioni indurite o servizi gestiti):
 
 ```sql
 GRANT EXECUTE ON FUNCTION pg_control_system() TO monitoring;
@@ -248,7 +248,7 @@ WHERE backend_type = 'client backend'
 - **Frequenza 1s**, query leggerissima (vista in memoria, nessun lock, nessun IO)
 - **Aggregazione lato agent** su finestra di 10s: conteggio campioni per `(wait_event_type, wait_event, state, query_id, datname)`
 - Push del solo **aggregato**, mai i campioni raw -> cardinalità controllata (vedi 4.6)
-- `query_id` disponibile in `pg_stat_activity` da PG14 — su tutte le versioni supportate (15→18) è disponibile incondizionatamente con `compute_query_id = on|auto` e collega direttamente l'ASH a `pg_stat_statements`.
+- `query_id` disponibile in `pg_stat_activity` da PG14 — su tutte le versioni supportate (15→19) è disponibile incondizionatamente con `compute_query_id = on|auto` e collega direttamente l'ASH a `pg_stat_statements`.
 
 **Perché è il nostro angle:**
 - `pg_wait_sampling` (l'alternativa esistente) richiede `shared_preload_libraries` -> **non installabile su RDS, né su nessun managed**, e richiede restart altrove
@@ -261,11 +261,11 @@ WHERE backend_type = 'client backend'
 
 ### 3.6 Matrice viste per versione PG
 
-Ogni check dichiara `MinPG`/`MaxPG`. Le differenze che contano nel range 15-18:
+Ogni check dichiara `MinPG`/`MaxPG`. Le differenze che contano nel range 15-19:
 
 | Vista / feature | Disponibile da | Nota |
 |---|---|---|
-| `pg_stat_statements.total_exec_time` | 13 (disponibile su tutte le versioni supportate 15→18) | in PG12 era `total_time` - fuori scope |
+| `pg_stat_statements.total_exec_time` | 13 (disponibile su tutte le versioni supportate 15→19) | in PG12 era `total_time` - fuori scope |
 | `pg_stat_wal` | 14 | WAL generation stats |
 | `query_id` in `pg_stat_activity` / `pg_stat_statements` in core | 14 | richiede `compute_query_id = on\|auto`; prima era solo nell'extension |
 | `pg_stat_statements_info.stats_reset` | 14 | **necessario per reset detection (4.5)** |
@@ -493,7 +493,7 @@ v0.1 dichiarava utente `monitoring` con `pg_monitor`, **solo lettura**, e poi pr
 
 | Tier | Grant | Sblocca | Default |
 |---|---|---|---|
-| **T0 - read-only** | `pg_monitor` + `GRANT EXECUTE ON FUNCTION pg_control_system()` | tutte le metriche, ASH, topologia, replica, advisor statistico | **on** |
+| **T0 - read-only** | `pg_monitor` (+ `GRANT EXECUTE ON FUNCTION pg_control_system()` dove `PUBLIC` l'ha revocato) | tutte le metriche, ASH, topologia, replica, advisor statistico | **on** |
 | **T1 - explain** | `pg_read_all_data` (PG14+) *oppure* `GRANT SELECT` mirati sugli schemi | `EXPLAIN` (senza ANALYZE) on-demand | off |
 | **T2 - signal** | `pg_signal_backend` | cancel / terminate query dalla UI | off |
 | **T3 - extension** | `CREATE EXTENSION hypopg`, `pg_buffercache`, `pg_stat_kcache` | advisor con simulazione indici, cache analysis | off |
@@ -678,7 +678,7 @@ Metriche di supporto: `up{cluster_id,instance_id}` (0/1), `agent_last_seen_secon
 **Tier 1 - alert Postgres, con scope `instance` vs `cluster`:**
 - per-replica: `lag > 30s for 2m`
 - aggregati di cluster: `count(standby with lag>30s) == count(standby)` (tutte laggano), `sync_standby_count == 0` (nessuna sync replica disponibile - rischio di blocco delle scritture)
-- eventi replica come alert impliciti: `failover_detected`, `split_brain_detected`, `orphan_standby`, `slot_inactive > 10m`, `wal_status = lost`, `timeline_divergence`
+- eventi replica come alert impliciti: `failover_detected`, `split_brain_detected`, `orphan_standby`, `slot_inactive > 30s` (soglia fissa), `wal_status = lost`, `timeline_divergence`
 - pooler: `pgbouncer_maxwait > 5s`, `cl_waiting > 0 for 1m`
 - classici: `connections > 80% max_connections`, `idle_in_transaction > 5m`, `xid_age > 1e9` (wraparound), `disk_free < 15%`, `deadlocks rate`
 
@@ -779,7 +779,7 @@ Lock di sessione: se il processo muore la connessione cade e il lock si libera a
 È il primo attrito reale del "setup < 5 minuti". Script versionato fornito nel repo, con variante per RDS.
 
 ```sql
--- setup/monitoring_user.sql  (PG 15-18)
+-- setup/monitoring_user.sql  (PG 15-19)
 CREATE ROLE monitoring LOGIN PASSWORD :'pw';
 GRANT pg_monitor TO monitoring;
 
@@ -884,7 +884,7 @@ Agent: auto-update opzionale da Server (binary) o rolling image (Docker). Il Ser
 - Query Inspector + Locks view
 - **pgbouncer** (3.4)
 - Tier permessi T1/T2 con UI coerente (4.7)
-- Matrice versioni PG 15-18 testata (sez. 12)
+- Matrice versioni PG 15-19 testata (sez. 12)
 - Helm/Compose packaging finalizzato
 
 **Phase 2 - Advisor + Cloud (6-8 settimane)**
@@ -943,7 +943,7 @@ Da scrivere in README e in UI. Un limite dichiarato è una scelta di design; un 
 
 **12.1 Matrice compose**
 
-Versioni × topologie, generata da template:
+Versioni × topologie, generata da template. È la matrice del piano Phase 0, che elenca PG 15-18; lo stato corrente è nel paragrafo sotto la tabella (L2 su PG 15-19, L3 solo su PG 17).
 
 | | standalone | primary + 1 standby | cascading (P -> S1 -> S2) | logical pub/sub | + pgbouncer |
 |---|---|---|---|---|---|
@@ -952,7 +952,7 @@ Versioni × topologie, generata da template:
 | PG 17 | ✓ | ✓ | ✓ | ✓ | ✓ |
 | PG 18 | ✓ | ✓ | ✓ | ✓ | ✓ |
 
-CI: matrice ridotta (15, 18) su ogni PR; matrice completa nightly (15→18).
+CI: matrice L2 15→19 × profilo vanilla/rds-like su ogni PR; L3 su PostgreSQL 17 (TimescaleDB 2.31).
 
 **12.2 Scenari da simulare (non solo "funziona a regime")**
 
@@ -997,7 +997,7 @@ Non simulabile. Job nightly opzionale su istanze reali `db.t4g.micro` (RDS) e Au
 - ✅ **Identità cluster = `system_identifier`**, non hash di `primary_conninfo` (2.2)
 - ✅ **`instance_id` = UUID persistito** -> volume obbligatorio per agent containerizzato
 - ✅ **Label `database` obbligatoria** nello schema TSDB
-- ✅ **Versioni supportate: PG 15-18**
+- ✅ **Versioni supportate: PG 15-19**
 - ✅ **Top-N lato agent obbligatorio** su `pg_stat_statements`/table/index stats
 - ✅ **Reset detection** nel modello dati day-one
 - ✅ **Tier di permessi T0-T3**, default read-only; EXPLAIN e kill opt-in

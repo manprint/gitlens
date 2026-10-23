@@ -112,13 +112,16 @@ func getOrCreate(t *testing.T, major int) *PG {
 	pool, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err)
 	// Setup roles and apply rds-like profile if needed
-	setupRoles(ctx, pool)
+	require.NoError(t, setupRoles(ctx, pool))
 	if profile := os.Getenv("PGLENS_PG_PROFILE"); profile == "rds-like" {
 		_, fname, _, _ := runtime.Caller(0)
 		script := filepath.Join(filepath.Dir(fname), "../fixtures/sql/02_rds_like.sql")
-		if data, err := os.ReadFile(script); err == nil {
-			_, _ = pool.Exec(ctx, string(data))
-		}
+		data, err := os.ReadFile(script)
+		require.NoError(t, err)
+		// A profile that half-applies would let the permission tests pass
+		// against privileges the rds-like run never claimed to have.
+		_, err = pool.Exec(ctx, string(data))
+		require.NoError(t, err, "rds-like profile")
 	}
 	var versionNum int
 	err = pool.QueryRow(ctx, "SELECT current_setting('server_version_num')::int").Scan(&versionNum)
@@ -257,7 +260,7 @@ echo "Primary replication setup complete"
 	// Set up roles on primary
 	primaryPool, err := pgxpool.New(ctx, primaryDSN)
 	require.NoError(t, err)
-	setupRoles(ctx, primaryPool)
+	require.NoError(t, setupRoles(ctx, primaryPool))
 	primaryPool.Close()
 
 	// ============ STANDBY CONTAINER ============
@@ -344,11 +347,10 @@ exec gosu postgres postgres
 	require.NoError(t, err)
 	standbyDSN := fmt.Sprintf("postgres://postgres:test@%s:%s/app?sslmode=disable", standbyHost, standbyPort.Port())
 
-	// Set up roles on standby
-	standbyPool, err := pgxpool.New(ctx, standbyDSN)
-	require.NoError(t, err)
-	setupRoles(ctx, standbyPool)
-	standbyPool.Close()
+	// The standby gets no roles of its own. It is a physical copy of the
+	// primary, so the roles and grants made above arrive with the base backup,
+	// and a hot standby refuses the GRANT, REVOKE and ALTER ROLE that
+	// setupRoles runs.
 
 	// Get version info for both
 	primaryPool, err = pgxpool.New(ctx, primaryDSN)
@@ -358,7 +360,7 @@ exec gosu postgres postgres
 	require.NoError(t, err)
 	primaryPool.Close()
 
-	standbyPool, err = pgxpool.New(ctx, standbyDSN)
+	standbyPool, err := pgxpool.New(ctx, standbyDSN)
 	require.NoError(t, err)
 	var standbyVersionNum int
 	err = standbyPool.QueryRow(ctx, "SELECT current_setting('server_version_num')::int").Scan(&standbyVersionNum)
@@ -384,7 +386,10 @@ exec gosu postgres postgres
 	return primaryPG, standbyPG
 }
 
-func setupRoles(ctx context.Context, pool *pgxpool.Pool) {
+// setupRoles creates the permission tiers the integration tests connect as.
+// It stops at the first statement that fails: a half-applied setup would have
+// the permission tests check a privilege set other than the one they name.
+func setupRoles(ctx context.Context, pool *pgxpool.Pool) error {
 	// Create test roles for permission tiers.
 	// All passwords are 'test'.
 	stmts := []string{
@@ -434,8 +439,11 @@ func setupRoles(ctx context.Context, pool *pgxpool.Pool) {
 		)
 	}
 	for _, s := range stmts {
-		_, _ = pool.Exec(ctx, s)
+		if _, err := pool.Exec(ctx, s); err != nil {
+			return fmt.Errorf("%s: %w", s, err)
+		}
 	}
+	return nil
 }
 
 // Lock takes exclusive use of this container for the duration of the test

@@ -45,19 +45,15 @@ func init() {
 				return fmt.Errorf("stop pglens-server: %w", err)
 			}
 
-			// The plan's own text (phase_06.md) calls for checking
-			// `agent_buffer_bytes`/`agent_samples_dropped_total`. Neither
-			// exists: internal/agent/pusher.go's Pusher.Queue keeps
-			// undelivered envelopes in an unbounded in-memory slice, not
-			// the disk-backed internal/agent/buffer.Buffer that
-			// cmd/pglens-agent/run.go opens but never actually writes to
-			// (a known, already-documented gap — STATE.md §6). What IS
-			// real and checkable: the agent's own /healthz buffer_stats
-			// (acked/dropped counts) and, once the server comes back, that
-			// every sample the agent generated during the outage actually
-			// arrived — I-3 (no duplicate (series_id,ts), enforced by the
-			// schema's own unique index) is the strongest form of "exactly
-			// once" this session can verify.
+			// The plan's own text (phase_06.md) names
+			// `agent_buffer_bytes` and `agent_samples_dropped_total`, which
+			// the agent does not export. What is checkable: the agent's
+			// /healthz buffer_stats (acked and dropped envelopes, where
+			// dropped includes the disk buffer's own retention drops), and,
+			// once the server returns, that the samples the agent kept
+			// producing during the outage reach the server with their
+			// original timestamps. I-3 (no duplicate (series_id,ts)) is
+			// enforced by the schema's own unique index.
 			outageDeadline := time.Now().Add(60 * time.Second)
 			for time.Now().Before(outageDeadline) {
 				health, err := e.AgentHealthz()
@@ -75,22 +71,15 @@ func init() {
 				return fmt.Errorf("start pglens-server: %w", err)
 			}
 
-			// Wait for the backlog to actually drain: a fresh sample lands
-			// with ts after the server came back up. This needs far more
-			// than the outage itself: internal/agent/pusher.go's Push()
-			// drains its whole in-memory queue in ONE blocking call, and
-			// every single envelope — even ones sent once the server is
-			// healthy again — pays backoffDelay(1) (1-2s) before its FIRST
-			// attempt, not just on retries. With a ~60s outage queuing
-			// roughly a dozen envelopes at push_interval=5s, draining the
-			// backlog sequentially at ~1-2s/envelope, on top of whatever's
-			// left of the stuck envelope's own exponential backoff when
-			// the server came back, comfortably exceeded a 60s budget in
-			// live testing (observed twice). Not a bug worth fixing in
-			// pusher.go for this session — a real, if suboptimal,
-			// characteristic of the current design — so the scenario
-			// waits it out instead of asserting a speed the system was
-			// never designed to guarantee.
+			// Wait for the backlog to drain. The agent queues envelopes in
+			// its disk buffer and pushFromBuffer sends them in order, so a
+			// sample with a post-recovery timestamp can only be delivered
+			// after the backlog ahead of it. The drain is not instant: the
+			// envelope in flight when the server went down keeps retrying
+			// in pushOne with exponential backoff, which grows to about a
+			// minute, so the backlog can take longer than the outage. The
+			// scenario waits for that rather than asserting a drain speed
+			// the design does not promise.
 			recoverCtx, cancel2 := context.WithTimeout(ctx, 4*time.Minute)
 			defer cancel2()
 			recoveryTime := time.Now().UTC()
@@ -116,6 +105,48 @@ func init() {
 			}
 			if duringOutage == 0 {
 				return fmt.Errorf("no pg_backends samples carry a timestamp from during the outage — the backlog was not delivered, or its original timestamps were lost")
+			}
+
+			// Continuity across the outage. The activity check emits
+			// pg_backends_waiting_ratio on every tick, whatever the backends
+			// are doing, at the 5s interval the harness configures
+			// (test/harness/harness.go, test/fixtures/agent-standalone.yaml).
+			// A replay that skips a segment leaves a hole in these timestamps,
+			// which the count above cannot see. Consecutive ticks must stay
+			// within two intervals, and the ticks must reach both edges of
+			// the outage window.
+			const tick = 5 * time.Second
+			tickRows, err := e.DB.Query(ctx,
+				`SELECT DISTINCT ts FROM metrics WHERE instance_id=$1::uuid AND metric='pg_backends_waiting_ratio' AND ts >= $2 AND ts < $3 ORDER BY ts`,
+				instanceID, outageStart, recoveryTime)
+			if err != nil {
+				return fmt.Errorf("query outage-window ticks: %w", err)
+			}
+			defer tickRows.Close()
+			var ticks []time.Time
+			for tickRows.Next() {
+				var ts time.Time
+				if err := tickRows.Scan(&ts); err != nil {
+					return fmt.Errorf("scan outage-window tick: %w", err)
+				}
+				ticks = append(ticks, ts)
+			}
+			if err := tickRows.Err(); err != nil {
+				return fmt.Errorf("read outage-window ticks: %w", err)
+			}
+			if len(ticks) == 0 {
+				return fmt.Errorf("no activity tick falls inside the outage window")
+			}
+			if first := ticks[0].Sub(outageStart); first > 2*tick {
+				return fmt.Errorf("the first activity tick of the outage is %v after it began: the backlog's first samples are missing", first)
+			}
+			for i := 1; i < len(ticks); i++ {
+				if gap := ticks[i].Sub(ticks[i-1]); gap > 2*tick {
+					return fmt.Errorf("no activity tick for %v between %s and %s: a span of the backlog was not delivered", gap, ticks[i-1].Format(time.RFC3339Nano), ticks[i].Format(time.RFC3339Nano))
+				}
+			}
+			if last := recoveryTime.Sub(ticks[len(ticks)-1]); last > 2*tick {
+				return fmt.Errorf("the last activity tick of the outage is %v before recovery: the backlog's final samples are missing", last)
 			}
 
 			e.AssertInvariants(e.T)
@@ -209,7 +240,10 @@ func init() {
 		Title:    "docker pause on PostgreSQL, then unpause: treated as unreachable, recovers cleanly, no duplicate rows",
 		Topology: TopologyStandalone,
 		Covers:   []string{"phase_06.md#5.7", "I-3"},
-		Expect:   Expectations{Events: []string{"agent_down", "agent_up"}, Invariants: []string{"I-1", "I-2", "I-3", "I-4"}},
+		// Run accepts either instance_unreachable or agent_down, and either
+		// instance_reachable or agent_up, depending on which the server emits.
+		// Expect.Events is all-of, so no event name is declared here.
+		Expect: Expectations{Invariants: []string{"I-1", "I-2", "I-3", "I-4"}},
 		Run: func(ctx context.Context, e *Env) error {
 			var instanceID string
 			resolveCtx, cancel := context.WithTimeout(ctx, 30*time.Second)

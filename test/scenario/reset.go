@@ -123,8 +123,21 @@ func init() {
 				return fmt.Errorf("counter_reset_detected event never appeared: %w", err)
 			}
 
-			// Give the series one more interval to resume normally.
-			time.Sleep(10 * time.Second)
+			// Wait for the series to resume: a pg_xact_commit_total sample after
+			// the reset event. The checks below only mean something once
+			// post-reset samples exist, which a fixed sleep did not guarantee.
+			resumeCtx, cancelResume := context.WithTimeout(ctx, 90*time.Second)
+			defer cancelResume()
+			if err := poll(resumeCtx, 2*time.Second, func(ctx context.Context) (bool, error) {
+				var n int
+				err := e.DB.QueryRow(ctx,
+					`SELECT count(*) FROM metrics WHERE instance_id=$1::uuid AND metric='pg_xact_commit_total'
+					   AND ts > (SELECT max(ts) FROM events WHERE instance_id=$1::uuid AND type='counter_reset_detected')`,
+					instanceID).Scan(&n)
+				return err == nil && n > 0, err
+			}); err != nil {
+				return fmt.Errorf("no pg_xact_commit_total sample after the counter reset event: %w", err)
+			}
 
 			// The generic metrics table also contains raw setting gauges. PostgreSQL
 			// uses -1 for "unlimited" byte/time settings; that sentinel is not a

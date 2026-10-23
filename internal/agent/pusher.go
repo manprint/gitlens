@@ -633,7 +633,10 @@ func (p *Pusher) HealthzHandler() http.HandlerFunc {
 		}
 
 		lastErrJSON, _ := json.Marshal(lastErr)
-		acked, dropped := p.BufferStats()
+		acked, _ := p.BufferStats()
+		// The disk buffer's retention drops are lost samples too, so they are
+		// reported here as they are in the drop-rate metric (DroppedSamples).
+		dropped := p.DroppedSamples()
 		_, _ = fmt.Fprintf(w, `{"state":"%s","last_successful_push":%s,"last_error":%s,"buffer_stats":{"acked":%d,"dropped":%d},"clock_skew_seconds":%d}`,
 			health, lastPushStr, lastErrJSON, acked, dropped, int64(skew.Seconds()))
 	}

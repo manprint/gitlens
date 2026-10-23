@@ -124,7 +124,11 @@ func runAdvisorDegraded(ctx context.Context, e *scenario.Env) error {
 	if err := seedAdvisorSkip(ctx, e, id, "stat_statements", "missing extension pg_stat_statements"); err != nil {
 		return err
 	}
-	return waitAdvisorDegraded(ctx, e, id)
+	if err := waitAdvisorDegraded(ctx, e, id); err != nil {
+		return err
+	}
+	e.AssertInvariants(e.T)
+	return nil
 }
 
 func runAdvisorFix(ctx context.Context, e *scenario.Env) error {

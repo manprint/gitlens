@@ -234,13 +234,32 @@ jobs:
           PGLENS_PG_VERSIONS: ${{ matrix.pg }}
           PGLENS_PG_PROFILE: ${{ matrix.profile }}
 
+  # The harness and the scenario registry compile only under the e2e tag, so
+  # no job above runs their unit tests. Their TimescaleDB-backed invariant
+  # checks need a container runtime, which this runner has. One job covers
+  # them; the matrix above would start the same containers ten times.
+  harness:
+    name: E2E harness unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - run: make test-e2e-unit
+
   # One job to require in branch protection, and one place for the release
   # workflow to depend on. Without it, adding a job to this file silently
   # leaves it unprotected until someone remembers to update the branch rule.
   ci-ok:
     name: CI gate
     if: always()
-    needs: [web, lint, security, unit, race-stress, images, integration]
+    needs: [web, lint, security, unit, race-stress, images, integration, harness]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

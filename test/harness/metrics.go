@@ -60,6 +60,20 @@ func DefaultMetricBudget() MetricBudget {
 func AssertMetricInvariants(t TestingT, exposition string, budget MetricBudget) {
 	t.Helper()
 
+	// The loops below judge only the samples they find, so an exposition
+	// without the family would pass them all. That is what an empty body, or
+	// an HTML page answered with 200, looks like; it is not evidence that the
+	// budget holds. The family's TYPE line is the evidence: metrics_handler.go
+	// writes it whether or not any instance reports yet. Requiring a sample
+	// instead would fail every replica that has just restarted or has never
+	// pushed, which is a true state of the system, not a broken budget.
+	if !hasMetricFamily(exposition, "pglens_series_total", "gauge") {
+		t.Errorf("I-8: /metrics has no pglens_series_total family, so the cardinality budget was not evaluated")
+	} else if len(parseLabelledMetric(exposition, "pglens_series_total")) == 0 {
+		// Passing here is true of an instance that has just restarted, but it
+		// judged nothing. Say so, so a green run does not read as a measured one.
+		t.Logf("I-8: the exposition declares pglens_series_total but reports no series yet; the budget held on no samples")
+	}
 	for _, sample := range parseLabelledMetric(exposition, "pglens_series_total") {
 		if budget.MaxSeriesPerInstance > 0 && sample.value > budget.MaxSeriesPerInstance {
 			t.Errorf("I-8: cardinality budget exceeded: instance %s reports %.0f series, budget is %.0f",
@@ -100,6 +114,18 @@ func AssertMetricInvariants(t TestingT, exposition string, budget MetricBudget) 
 // minErrorsToJudgeACheck is how many failed scrapes, with no successful one,
 // it takes before a check is called broken. See the comment at its use.
 const minErrorsToJudgeACheck = 2
+
+// hasMetricFamily reports whether the exposition declares the family with the
+// given TYPE line, e.g. `# TYPE pglens_series_total gauge`.
+func hasMetricFamily(exposition, name, kind string) bool {
+	want := "# TYPE " + name + " " + kind
+	for _, line := range strings.Split(exposition, "\n") {
+		if strings.TrimSpace(line) == want {
+			return true
+		}
+	}
+	return false
+}
 
 // labelledSample is one `name{label="value"} number` line.
 type labelledSample struct {

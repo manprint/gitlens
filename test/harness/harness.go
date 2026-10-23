@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/manprint/pglens/test/scenario"
@@ -730,7 +731,25 @@ func (h *Harness) pgPool(t *testing.T, service, user, password, dbname string) *
 	}
 
 	dsn := fmt.Sprintf("postgres://%s:%s@localhost:%d/%s?sslmode=disable", user, password, port, dbname)
-	pool, err := pgxpool.New(context.Background(), dsn)
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse %s dsn: %v", service, err)
+		return nil
+	}
+	// The pool outlives the port it was built with. docker compose publishes
+	// a new host port on every start of a container, so a cached pool would
+	// keep dialing a dead port after a restart. Re-resolving on every new
+	// connection lets the pool reconnect by itself, including for a holder
+	// that keeps using the same pool across the restart.
+	cfg.BeforeConnect = func(ctx context.Context, cc *pgx.ConnConfig) error {
+		port, err := h.getServicePort(service, 5432)
+		if err != nil {
+			return fmt.Errorf("resolve %s port: %w", service, err)
+		}
+		cc.Port = uint16(port)
+		return nil
+	}
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("connect to %s: %v", service, err)
 		return nil
@@ -944,11 +963,14 @@ func (h *Harness) Logs(service string) (string, error) {
 	return h.composeOutput("logs", "--no-color", service)
 }
 
-// KillServerReplica terminates exactly one pglens-server container from a
-// scaled alerting stack. A service-level compose kill would terminate both
-// replicas, so resolve one container id and use Docker directly.
-func (h *Harness) KillServerReplica() error {
-	out, err := h.composeOutput("ps", "-q", "pglens-server")
+// KillServerReplica terminates the pglens-server replica that holds the alert
+// engine's advisory lock, then waits until another replica has taken the lock.
+// Killing an arbitrary replica would be a failover only half the time, and a
+// service-level compose kill would terminate both replicas, so one container
+// id is resolved and killed with Docker directly.
+func (h *Harness) KillServerReplica(t *testing.T) error {
+	t.Helper()
+	out, err := h.composeOutput("ps", "-q", "--status", "running", "pglens-server")
 	if err != nil {
 		return err
 	}
@@ -956,11 +978,76 @@ func (h *Harness) KillServerReplica() error {
 	if len(ids) == 0 {
 		return fmt.Errorf("no pglens-server replica is running")
 	}
-	cmd := exec.Command("docker", "kill", ids[0])
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("docker kill %s: %w, output: %s", ids[0], err, output)
+	leader, err := h.alertLeaderReplica(t, ids)
+	if err != nil {
+		return err
 	}
-	return nil
+	if leader == "" {
+		return fmt.Errorf("no running pglens-server replica holds the alert engine lock")
+	}
+	cmd := exec.Command("docker", "kill", leader)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("docker kill %s: %w, output: %s", leader, err, output)
+	}
+	return h.awaitAlertFailover(t, leader, ids)
+}
+
+// alertLeaderReplica returns the id, among ids, of the replica whose address
+// holds the alert engine's lock, or "" when none does. The lock lives on the
+// store database, so the holder's client address is a replica's address.
+func (h *Harness) alertLeaderReplica(t *testing.T, ids []string) (string, error) {
+	t.Helper()
+	_, addr, err := AdvisoryLockHolder(context.Background(), h.DB(t), AlertLockName)
+	if err != nil {
+		return "", err
+	}
+	if addr == "" {
+		return "", nil
+	}
+	for _, id := range ids {
+		ips, err := containerIPs(id)
+		if err != nil {
+			return "", err
+		}
+		for _, ip := range ips {
+			if ip == addr {
+				return id, nil
+			}
+		}
+	}
+	return "", nil
+}
+
+// awaitAlertFailover waits, for a bounded time, until a replica other than
+// killed holds the alert engine's lock. The engine ticks every 2 seconds and
+// the lock is released when the killed replica's connection closes, so a
+// failover completes within a few ticks. The bound is a clock deadline, not the
+// scenario context, so a stuck failover fails here rather than after minutes.
+func (h *Harness) awaitAlertFailover(t *testing.T, killed string, ids []string) error {
+	t.Helper()
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		holder, err := h.alertLeaderReplica(t, ids)
+		if err == nil && holder != "" && holder != killed {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				return fmt.Errorf("no failover within 60s: %w", err)
+			}
+			return fmt.Errorf("no failover within 60s: alert engine lock holder is %q", holder)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// containerIPs returns the addresses a container has on its networks.
+func containerIPs(id string) ([]string, error) {
+	out, err := exec.Command("docker", "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}", id).Output()
+	if err != nil {
+		return nil, fmt.Errorf("docker inspect %s: %w", id, err)
+	}
+	return strings.Fields(string(out)), nil
 }
 
 // Workload runs test/workload (workloadctl) as a host subprocess with the
@@ -1033,6 +1120,10 @@ func (h *Harness) Scenario(t *testing.T, id string) {
 		t.Fatalf("scenario %q is not registered", id)
 	}
 
+	// Invariant IDs cannot be checked by name, so the only way a scenario can
+	// meet its declared invariants is to reach AssertInvariants. Recording the
+	// call lets a passing Run that never made it fail instead.
+	invariantsChecked := false
 	env := &scenario.Env{
 		T:    t,
 		DB:   h.DB(t),
@@ -1062,8 +1153,11 @@ func (h *Harness) Scenario(t *testing.T, id string) {
 			}
 			return scenario.RemoveFunc(remove), nil
 		},
-		AssertInvariants:  h.AssertInvariants,
-		KillServerReplica: h.KillServerReplica,
+		AssertInvariants: func(t *testing.T) {
+			invariantsChecked = true
+			h.AssertInvariants(t)
+		},
+		KillServerReplica: func() error { return h.KillServerReplica(t) },
 	}
 	for _, api := range h.apiClients {
 		env.APIs = append(env.APIs, api)
@@ -1074,9 +1168,56 @@ func (h *Harness) Scenario(t *testing.T, id string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
+	// The window for declared events opens on the store's clock before Run
+	// starts. checkDeclaredEvents says why that clock bounds every event the
+	// scenarios declare.
+	var runStart time.Time
+	if err := env.DB.QueryRow(ctx, `SELECT now()`).Scan(&runStart); err != nil {
+		t.Fatalf("scenario %s: read the store clock: %v", id, err)
+	}
 	if err := s.Run(ctx, env); err != nil {
 		t.Fatalf("scenario %s (%s) failed: %v", id, s.Title, err)
 	}
+	if s.UnverifiedInvariants(invariantsChecked) {
+		t.Errorf("scenario %s declares invariants %v but never called AssertInvariants", id, s.Expect.Invariants)
+	}
+	checkDeclaredEvents(t, s, env.DB, runStart)
+}
+
+// checkDeclaredEvents fails the test for each event type the scenario declares
+// that the store holds no event of since the run began. The server writes
+// events asynchronously, so the window is polled for a minute before it fails.
+// Run has normally waited for them already.
+//
+// The window is safe because the store's now() and the time every declared
+// event is stamped with come from one clock. The compose containers share the
+// host kernel clock. The writers stamp with that clock: staleness.go:407
+// (agent_down, no_primary_in_cluster, slot_inactive), topology/engine.go:103
+// (failover_detected, split_brain_detected, orphan_standby) and inventory.go:272
+// (duplicate_instance_suspected). counter_reset_detected carries the agent's
+// sample time (pipeline.go:467), and no scenario that declares an event skews
+// the agent: the clock-skew topology declares none. An event is therefore
+// stamped when the condition that Run produced takes effect, after the window
+// opened.
+func checkDeclaredEvents(t *testing.T, s scenario.Scenario, pool *pgxpool.Pool, since time.Time) {
+	t.Helper()
+	count := func(eventType string) (int, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		var n int
+		err := pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type=$1 AND ts >= $2`, eventType, since).Scan(&n)
+		return n, err
+	}
+	Eventually(t, time.Minute, func() error {
+		missing, err := s.MissingEvents(count)
+		if err != nil {
+			return err
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("scenario %s declares events %v but the run produced no %v", s.ID, s.Expect.Events, missing)
+		}
+		return nil
+	})
 }
 
 // cleanup removes the stack and releases resources.

@@ -5,7 +5,6 @@ package scenario
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -295,18 +294,9 @@ func init() {
 			}); err != nil {
 				return fmt.Errorf("clock_skew_seconds never settled around 300 (last observed: %v): %w", lastSkew, err)
 			}
-
-			warnCtx, cancel3 := context.WithTimeout(ctx, 30*time.Second)
-			defer cancel3()
-			if err := poll(warnCtx, 2*time.Second, func(ctx context.Context) (bool, error) {
-				logs, err := e.Logs("pglens-agent")
-				if err != nil {
-					return false, err
-				}
-				return strings.Contains(logs, "clock skew detected"), nil
-			}); err != nil {
-				return fmt.Errorf("no clock skew warning ever appeared in the agent's logs: %w", err)
-			}
+			// The agent also prints a clock-skew warning to stderr. It is not
+			// asserted: log text is not a public observable, and the skew it
+			// reports is the clock_skew_seconds value checked above.
 
 			// Samples are still accepted: the 12h maxSampleAge threshold
 			// (internal/server/ingest.go) is nowhere near 5 minutes of skew,
@@ -350,9 +340,18 @@ func init() {
 				return fmt.Errorf("resolve monitored instance's agent_id: %w", err)
 			}
 
+			// Hold the baseline until the agent has delivered at least one
+			// sample. Revoking before the first one proves nothing: the count
+			// stays at zero whether or not the agent kept collecting, so the
+			// "no growth after revocation" check below would pass vacuously.
+			warmCtx, cancelWarm := context.WithTimeout(ctx, 60*time.Second)
+			defer cancelWarm()
 			var baseline int
-			if err := e.DB.QueryRow(ctx, `SELECT count(*) FROM metrics`).Scan(&baseline); err != nil {
-				return fmt.Errorf("query baseline metrics count: %w", err)
+			if err := poll(warmCtx, 2*time.Second, func(ctx context.Context) (bool, error) {
+				err := e.DB.QueryRow(ctx, `SELECT count(*) FROM metrics`).Scan(&baseline)
+				return err == nil && baseline > 0, err
+			}); err != nil {
+				return fmt.Errorf("no metric sample before the revocation, so there is no baseline to hold the agent to: %w", err)
 			}
 
 			if _, err := e.DB.Exec(ctx, `UPDATE agents SET revoked_at = now() WHERE agent_id = $1::uuid`, agentID); err != nil {
@@ -377,6 +376,17 @@ func init() {
 				return state == "revoked", nil
 			}); err != nil {
 				return fmt.Errorf("agent /healthz never reported state=revoked: %w", err)
+			}
+
+			// The warm-up count above proves data exists, but it was read
+			// before the revoke, and a push in flight at that moment can still
+			// land after it and look like growth. The agent pushes one envelope
+			// at a time, so it cannot receive the 401 until every earlier push
+			// has been acknowledged, and an acknowledged push is already
+			// committed. Re-reading the count now starts the window after all
+			// accepted pushes.
+			if err := e.DB.QueryRow(ctx, `SELECT count(*) FROM metrics`).Scan(&baseline); err != nil {
+				return fmt.Errorf("re-read metrics baseline after revocation: %w", err)
 			}
 
 			// The agent stops collecting: cmd/pglens-agent/run.go's push

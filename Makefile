@@ -7,7 +7,7 @@ LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 UI_E2E_RUN ?= UI
 
 .PHONY: build fmt fmt-check lint vet-tags vuln tidy-check stress test test-integration test-e2e test-e2e-full test-e2e-full-evidence test-e2e-matrix api-docs \
-        ci-local ci-local-unit ci-local-integration ci-local-security coverage coverage-gate generate golden clean build-images build-images-multiarch \
+        ci-local ci-local-unit ci-local-integration ci-local-security coverage coverage-gate generate golden clean build-images build-images-multiarch test-e2e-unit \
         web-install web-gen-api web-typecheck web-lint web-build web-budget web-test web-coverage web-coverage-gate test-ui-e2e
 
 build:
@@ -84,6 +84,15 @@ stress:
 test-integration:
 	$(GO) test -tags=integration -race -shuffle=on -timeout=15m $(PKG)
 
+# The harness and the scenario registry compile only under the e2e tag, so
+# `make test` and `make test-integration` never run their unit tests. The two
+# invariant suites also need the integration tag, and start a TimescaleDB
+# container for their checks. The -run anchor keeps the Docker-backed compose
+# scenarios (TestSmoke_, TestFull_) out of this target.
+test-e2e-unit:
+	$(GO) test -tags=e2e -race -shuffle=on -count=1 -timeout=15m ./test/harness/... ./test/scenario/...
+	$(GO) test -tags='integration e2e' -race -shuffle=on -count=1 -timeout=15m ./test/e2e/ -run '^(TestInvariant_|TestAlertLeaderLock_)'
+
 test-e2e:
 	$(GO) test -tags=e2e -timeout=35m -count=1 ./test/e2e/... -run 'Smoke'
 
@@ -131,12 +140,13 @@ ci-local-unit:
 
 ci-local-integration:
 	@set -eu; \
-	for pg in 15 16 17 18; do \
+	for pg in 15 16 17 18 19; do \
 		for profile in vanilla rds-like; do \
 			echo "==> integration PG$$pg / $$profile"; \
 			PGLENS_PG_VERSIONS=$$pg PGLENS_PG_PROFILE=$$profile $(MAKE) test-integration; \
 		done; \
 	done
+	$(MAKE) test-e2e-unit
 
 coverage:
 	$(GO) test -race -coverprofile=coverage.out -covermode=atomic $(PKG)
