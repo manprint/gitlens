@@ -475,6 +475,11 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 // requeueSkips puts back the skip results of a batch that could not be sent, so
 // the next cycle that reaches target sends them. A skip that pending already
 // holds for the same check is newer than the batch's, so it is kept instead.
+//
+// A batch taken before a rebuild can still carry skips of the schedule the
+// rebuild replaced, and they are put back here. The server clears a skip only in
+// an envelope that carries a real result for its check, so such a skip stays
+// until the next real result for that check arrives.
 func requeueSkips(mu *sync.Mutex, pending map[string][]wire.Result, target string, batch []wire.Result) {
 	mu.Lock()
 	defer mu.Unlock()

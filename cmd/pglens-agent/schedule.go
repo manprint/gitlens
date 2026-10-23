@@ -358,6 +358,11 @@ func (s *scheduleSet) buildLocked() error {
 	for _, mgr := range s.managers {
 		s.scheduledDBs[mgr.Database()] = s.gates[mgr.Database()].databases
 	}
+	// The skips still pending were queued by the schedule this one replaces, for
+	// the gates it was built from. Every target's skips are queued again below
+	// from the new gates, so the old ones go first. Otherwise a check that the new
+	// gates run would still be reported as skipped in the next push.
+	dropSkips(s.pending)
 	s.mu.Unlock()
 	for _, mgr := range s.managers {
 		addScheduleEntries(sched, mgr, s.cfg, s.mu, s.pending, s.gates[mgr.Database()])
@@ -372,6 +377,25 @@ func (s *scheduleSet) buildLocked() error {
 		forwardResults(sched.Results(), s.clk, s.mu, s.pending)
 	}()
 	return nil
+}
+
+// dropSkips removes the skip results from pending and keeps the rest. A target
+// left with nothing is removed as well, because the flush sends an instance for
+// every target that has an entry, and that instance would carry no results.
+func dropSkips(pending map[string][]wire.Result) {
+	for target, results := range pending {
+		kept := results[:0]
+		for _, r := range results {
+			if r.SkipReason == "" {
+				kept = append(kept, r)
+			}
+		}
+		if len(kept) == 0 {
+			delete(pending, target)
+		} else {
+			pending[target] = kept
+		}
+	}
 }
 
 // stopCurrentLocked stops the running scheduler, if there is one. The caller

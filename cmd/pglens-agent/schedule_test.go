@@ -360,3 +360,57 @@ func TestScheduleStartReadsTargetsTogether(t *testing.T) {
 	}
 	t.Cleanup(schedules.stop)
 }
+
+// TestScheduleRebuildDropsTheSkipsOfTheLastBuild: a check the schedule skips is
+// queued as a skip result when the schedule is built, and it waits there for the
+// next push. A rebuild on gates that run the check must replace that skip, or the
+// push would still report the check as skipped after the schedule runs it.
+func TestScheduleRebuildDropsTheSkipsOfTheLastBuild(t *testing.T) {
+	t.Setenv("PGLENS_IDENTITY_PATH", filepath.Join(t.TempDir(), "identity.json"))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Nothing listens on port 1, so every scrape fails at once.
+	const target = "rebuild-target"
+	mgr, err := agent.NewManager(ctx, target, "postgres://pglens@127.0.0.1:1/postgres?sslmode=disable", agent.DefaultConnOptions(), clock.System())
+	require.NoError(t, err)
+	t.Cleanup(mgr.Close)
+
+	gate := func(role pgtype.Role) targetGate {
+		return targetGate{role: role, version: 190000, tier: pgtype.TierReadOnly, exts: map[string]bool{}, databases: map[string]bool{}}
+	}
+	var mu sync.Mutex
+	pending := map[string][]wire.Result{}
+	schedules := newScheduleSet(ctx, &agent.Config{}, clock.System(), []*agent.Manager{mgr}, &mu, pending, map[string]map[string]bool{})
+	t.Cleanup(schedules.stop)
+
+	// pendingSkips reads the skip reasons pending holds for the target without
+	// taking them, so the next push would still send them.
+	pendingSkips := func() map[string]string {
+		mu.Lock()
+		defer mu.Unlock()
+		skips := map[string]string{}
+		for _, r := range pending[target] {
+			if r.SkipReason != "" {
+				skips[r.Check] = r.SkipReason
+			}
+		}
+		return skips
+	}
+
+	schedules.schedMu.Lock()
+	schedules.gates = map[string]targetGate{target: gate(pgtype.RoleStandby)}
+	require.NoError(t, schedules.buildLocked())
+	schedules.schedMu.Unlock()
+	require.Equal(t, "role standby not allowed", pendingSkips()["replication_streaming"], "the first build queues its skip")
+
+	// The target is promoted and the schedule is rebuilt for the primary.
+	schedules.schedMu.Lock()
+	schedules.stopCurrentLocked()
+	schedules.gates = map[string]targetGate{target: gate(pgtype.RolePrimary)}
+	require.NoError(t, schedules.buildLocked())
+	schedules.schedMu.Unlock()
+
+	skips := pendingSkips()
+	require.Equal(t, "role primary not allowed", skips["replication_receiver"])
+	require.NotContains(t, skips, "replication_streaming", "the rebuild must replace the standby's skip, not leave it pending")
+}
