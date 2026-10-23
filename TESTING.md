@@ -523,7 +523,7 @@ Ogni topologia è un `docker compose` componibile da `test/compose/`:
 | `toxiproxy` | proxy tra agent e PG, e tra agent e server | latenza, timeout, partizione |
 | `rds-like` | PG con vincoli RDS (sez. 4.4) | permessi degradati |
 
-Il PostgreSQL monitorato in ogni topologia è `timescale/timescaledb:2.31.0-pg17` (vedi `test/compose/topo-*.yml`), e lo storage del server usa la stessa versione. La suite L3 copre quindi solo PostgreSQL 17. PostgreSQL 15, 16, 18 e 19 sono verificati a L2 (`pgtest`, matrice in sez. 4.3). Portare PG 19 a L3 richiede un'immagine TimescaleDB per PG 19, che la matrice non ha.
+Il PostgreSQL monitorato in ogni topologia è `timescale/timescaledb:2.31.0-pg17` (vedi `test/compose/topo-*.yml`), e lo storage del server usa la stessa versione. La suite L3 copre quindi solo PostgreSQL 17. PostgreSQL da 15 a 19 sono verificati a L2 (`pgtest`, matrice in sez. 4.3). Portare PG 19 a L3 richiede un'immagine TimescaleDB per PG 19, che la matrice non ha.
 
 Composizione:
 ```bash
