@@ -13,6 +13,12 @@ import (
 
 // INT-GOLDEN-002: protocol-v2 fixtures are frozen independently from the
 // legacy v1 payloads used by INT-GOLDEN-001.
+//
+// payload_v2_pg19.json is synthetic. It is payload_v2_pg18.json with only
+// pg_version changed to 190000, not a capture from a PostgreSQL 19 agent, so
+// the pg19 case proves the server accepts that shape at PG19's version number.
+// It does not prove what a real PG19 agent sends. Replace it with a captured
+// envelope once one exists.
 func TestINTGOLDEN002_ProtocolV2Facts(t *testing.T) {
 	for _, major := range []int{15, 18, 19} {
 		t.Run(fmt.Sprintf("pg%d", major), func(t *testing.T) {
