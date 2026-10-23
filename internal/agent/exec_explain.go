@@ -150,10 +150,18 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 	if err != nil {
 		return nil, fmt.Errorf("hash explain plan: %w", err)
 	}
+	// The plan is filed under the database it was made in. A command that
+	// names no database runs in the target's own, and the server has no other
+	// way to learn that name.
+	var datname string
+	if err := conn.QueryRow(ctx, "SELECT current_database()").Scan(&datname); err != nil {
+		return nil, err
+	}
 	result, err := json.Marshal(struct {
 		Plan     json.RawMessage `json:"plan"`
 		PlanHash string          `json:"plan_hash"`
-	}{Plan: plan, PlanHash: hash})
+		Datname  string          `json:"datname"`
+	}{Plan: plan, PlanHash: hash, Datname: datname})
 	if err != nil {
 		return nil, err
 	}

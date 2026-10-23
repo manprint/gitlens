@@ -505,6 +505,7 @@ func persistCommandArtifact(ctx context.Context, tx pgx.Tx, tenantID string, ins
 		var payload struct {
 			Plan     json.RawMessage `json:"plan"`
 			PlanHash string          `json:"plan_hash"`
+			Datname  string          `json:"datname"`
 		}
 		if err := json.Unmarshal(result, &payload); err != nil {
 			return fmt.Errorf("decode explain result: %w", err)
@@ -512,7 +513,18 @@ func persistCommandArtifact(ctx context.Context, tx pgx.Tx, tenantID string, ins
 		if len(payload.Plan) == 0 || payload.PlanHash == "" || args.QueryID == nil {
 			return nil
 		}
-		return store.WriteQueryPlan(ctx, tx, store.QueryPlanRow{TenantID: tenantID, InstanceID: instanceID, ClusterID: clusterID, Datname: args.Datname, QueryID: *args.QueryID, PlanHash: payload.PlanHash, Analyzed: args.Analyze, CapturedAt: capturedAt.UTC(), Plan: payload.Plan})
+		// A plan is only meaningful under its database, and the command often
+		// names none. The agent reports the database it ran in, which is the one
+		// to file under. A plan with no name at all is not stored, since a row
+		// under an empty name is found by no database filter in the plan history.
+		datname := args.Datname
+		if datname == "" {
+			datname = payload.Datname
+		}
+		if datname == "" {
+			return nil
+		}
+		return store.WriteQueryPlan(ctx, tx, store.QueryPlanRow{TenantID: tenantID, InstanceID: instanceID, ClusterID: clusterID, Datname: datname, QueryID: *args.QueryID, PlanHash: payload.PlanHash, Analyzed: args.Analyze, CapturedAt: capturedAt.UTC(), Plan: payload.Plan})
 	case command.KindPgstattuple:
 		var payload struct {
 			Datname      string `json:"datname"`

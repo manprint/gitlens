@@ -84,6 +84,9 @@ func (c *explainConn) QueryRow(_ context.Context, sql string, args ...any) pgx.R
 		c.guardSQL = append(c.guardSQL, sql)
 		return explainRow{value: []byte(c.guardAnswer(sql))}
 	}
+	if sql == "SELECT current_database()" {
+		return explainRow{value: explainDatname}
+	}
 	if strings.HasPrefix(sql, "EXPLAIN (VERBOSE, FORMAT JSON, COSTS OFF)") {
 		c.execSQL = append(c.execSQL, sql)
 		plan := c.verbosePlan
@@ -101,6 +104,9 @@ func (c *explainConn) Exec(_ context.Context, sql string, _ ...any) (pgconn.Comm
 	return pgconn.CommandTag{}, nil
 }
 func (c *explainConn) Release() { c.released = true }
+
+// explainDatname is the database the fake connection reports as current.
+const explainDatname = "appdb"
 
 type explainRow struct {
 	value any
@@ -181,6 +187,19 @@ func TestExplain_AnalyzeRefusesDMLBehindANestedComment(t *testing.T) {
 	require.ErrorAs(t, err, &rejected)
 	require.ErrorContains(t, err, "would execute a DELETE statement")
 	require.Empty(t, conn.execSQL)
+}
+
+// The server files a plan under the database the agent reports, so the result
+// names the database the explain ran in, even when the command named none.
+func TestExplain_ResultNamesTheDatabaseThePlanWasMadeIn(t *testing.T) {
+	conn := &explainConn{statement: "SELECT 1", plan: []byte(`[{"Plan":{"Node Type":"Result"}}]`)}
+	result, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{QueryID: int64Ptr(1)})
+	require.NoError(t, err)
+	var decoded struct {
+		Datname string `json:"datname"`
+	}
+	require.NoError(t, json.Unmarshal(result, &decoded))
+	require.Equal(t, explainDatname, decoded.Datname)
 }
 
 func TestExplain_UnknownQueryIDIsRejected(t *testing.T) {

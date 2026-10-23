@@ -328,3 +328,28 @@ func TestINTCMD012_ReadingAnExpiredCommandExpiresIt(t *testing.T) {
 	require.Equal(t, "ui-session 0badcafe from 10.0.0.9", who)
 	require.Equal(t, "expired before the agent claimed it", detail)
 }
+
+// TestINTPLAN003_PlanWithoutDatnameIsFiledUnderTheDatabaseItRanIn: a command
+// that names no database explains in the target's own. The plan is filed under
+// the database the agent reports, not under an empty name.
+func TestINTPLAN003_PlanWithoutDatnameIsFiledUnderTheDatabaseItRanIn(t *testing.T) {
+	pool := getSharedPool(t)
+	instanceID, agentID := seedCommandInstance(t, pool)
+	router := commandsIntegrationRouter(pool)
+	completeCommand(t, router, instanceID, agentID, `{"kind":"explain","args":{"queryid":9}}`, `{"claim_token":"00000000-0000-0000-0000-000000000000","outcome":"ok","result":{"plan":[{"Plan":{"Node Type":"Seq Scan"}}],"plan_hash":"named-by-agent","datname":"appdb"}}`)
+	var datname string
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT datname FROM query_plans WHERE instance_id=$1 AND queryid=9`, instanceID).Scan(&datname))
+	require.Equal(t, "appdb", datname)
+}
+
+// TestINTPLAN004_PlanWithNoDatnameIsNotStored: a result that names no database,
+// from an agent that predates the name, is not filed under an empty one.
+func TestINTPLAN004_PlanWithNoDatnameIsNotStored(t *testing.T) {
+	pool := getSharedPool(t)
+	instanceID, agentID := seedCommandInstance(t, pool)
+	router := commandsIntegrationRouter(pool)
+	completeCommand(t, router, instanceID, agentID, `{"kind":"explain","args":{"queryid":10}}`, `{"claim_token":"00000000-0000-0000-0000-000000000000","outcome":"ok","result":{"plan":[{"Plan":{"Node Type":"Seq Scan"}}],"plan_hash":"unnamed"}}`)
+	var count int
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*) FROM query_plans WHERE instance_id=$1 AND queryid=10`, instanceID).Scan(&count))
+	require.Zero(t, count)
+}
