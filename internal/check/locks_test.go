@@ -93,6 +93,52 @@ func TestLocks_QueryIsTruncated(t *testing.T) {
 	require.Len(t, tree.Nodes[0].Query, 2048)
 }
 
+// Sessions is the list the activity view shows: capped, oldest transaction
+// first, and the cut is flagged so a reader knows the list is not complete.
+func TestLocks_SessionListIsCappedOldestFirst(t *testing.T) {
+	rows := make([][]any, 0, 105)
+	for i := 1; i <= 105; i++ {
+		rows = append(rows, []any{int32(i), "app", "app", "client", "127.0.0.1", "idle", "", "", float64(i), 0.0, "select 1", []int32(nil)})
+	}
+	result := scrapeLocks(t, rows)
+	var tree lockTree
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
+	require.Len(t, tree.Sessions, 100)
+	require.True(t, tree.SessionsTruncated)
+	require.Equal(t, int32(105), tree.Sessions[0].PID)
+	require.Empty(t, tree.Nodes)
+}
+
+func TestLocks_SessionListNotFlaggedWhenComplete(t *testing.T) {
+	result := scrapeLocks(t, []([]any){lockValues(1, "", nil, 0, "select 1"), lockValues(2, "", nil, 0, "select 2")})
+	var tree lockTree
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
+	require.Len(t, tree.Sessions, 2)
+	require.False(t, tree.SessionsTruncated)
+}
+
+// A session outside the blocking tree keeps only a short prefix of its query;
+// a session in the tree keeps the full text, since the tree is what the UI
+// shows for a wait.
+func TestLocks_IdleSessionQueryIsShortened(t *testing.T) {
+	long := strings.Repeat("x", 3000)
+	result := scrapeLocks(t, []([]any){
+		lockValues(1, "", nil, 0, long),
+		lockValues(2, "transactionid", []int32{9}, 2, long),
+		lockValues(9, "", nil, 0, "holder"),
+	})
+	var tree lockTree
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
+	queryLen := map[int32]int{}
+	for _, s := range tree.Sessions {
+		queryLen[s.PID] = len(s.Query)
+	}
+	require.Equal(t, lockIdleQueryLimit, queryLen[1])
+	require.Equal(t, 2048, queryLen[2])
+	require.Len(t, tree.Nodes, 2)
+	require.Equal(t, 2048, len(tree.Nodes[0].Query))
+}
+
 func TestLocks_RequiresTierT0(t *testing.T) {
 	require.Equal(t, Requirements{Scope: ScopeInstance, PermTier: pgtype.TierReadOnly}, (&locksCheck{}).Requires())
 	require.Equal(t, 10*time.Second, (&locksCheck{}).DefaultInterval())

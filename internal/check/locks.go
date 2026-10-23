@@ -36,10 +36,20 @@ type lockRow struct {
 	BlockedBy       []int32
 }
 
+// lockSessionsLimit caps the session list, which the activity view shows
+// oldest transaction first. lockIdleQueryLimit is the query text kept for a
+// session that is not in the blocking tree; those keep the full text.
+const (
+	lockSessionsLimit  = 100
+	lockIdleQueryLimit = 256
+)
+
 type lockTree struct {
 	SampledAt time.Time  `json:"sampled_at"`
 	Nodes     []lockNode `json:"nodes"`
 	Sessions  []lockNode `json:"sessions"`
+	// SessionsTruncated is set when Sessions was cut to lockSessionsLimit.
+	SessionsTruncated bool `json:"sessions_truncated,omitempty"`
 }
 
 type lockNode struct {
@@ -114,10 +124,8 @@ func buildLocksResult(rows []lockRow, sampledAt time.Time) Result {
 	waits := make(map[string]int)
 	maxAge := 0.0
 	nodes := make([]lockNode, 0, len(rows))
-	sessions := make([]lockNode, 0, len(rows))
 	nodePIDs := make(map[int32]struct{}, len(rows))
 	for _, r := range rows {
-		sessions = append(sessions, lockNode(r))
 		if len(r.BlockedBy) == 0 {
 			continue
 		}
@@ -143,6 +151,25 @@ func buildLocksResult(rows []lockRow, sampledAt time.Time) Result {
 				nodePIDs[r.PID] = struct{}{}
 			}
 		}
+	}
+	// Every backend used to be shipped with its full query on each sample,
+	// blocked or not, which grows with the number of connections. Only the
+	// sessions in the tree keep their full text; the list is capped instead.
+	byAge := make([]lockRow, len(rows))
+	copy(byAge, rows)
+	sort.SliceStable(byAge, func(i, j int) bool { return byAge[i].XactAge > byAge[j].XactAge })
+	sessions := make([]lockNode, 0, min(len(byAge), lockSessionsLimit))
+	sessionsTruncated := false
+	for i, r := range byAge {
+		if i == lockSessionsLimit {
+			sessionsTruncated = true
+			break
+		}
+		session := lockNode(r)
+		if _, inTree := nodePIDs[r.PID]; !inTree {
+			session.Query = truncateUTF8(session.Query, lockIdleQueryLimit)
+		}
+		sessions = append(sessions, session)
 	}
 	metrics := []pgtype.Metric{
 		{Name: "pg_blocked_sessions", Value: float64(blocked), Kind: pgtype.KindGauge},
@@ -179,7 +206,7 @@ func buildLocksResult(rows []lockRow, sampledAt time.Time) Result {
 	// snapshot, a released blocker remains visible in the API until the
 	// fifteen-minute retention cleanup, rather than disappearing on the next
 	// locks scrape.
-	if raw, err := json.Marshal(lockTree{SampledAt: sampledAt, Nodes: nodes, Sessions: sessions}); err == nil {
+	if raw, err := json.Marshal(lockTree{SampledAt: sampledAt, Nodes: nodes, Sessions: sessions, SessionsTruncated: sessionsTruncated}); err == nil {
 		result.Facts = []Fact{{Kind: "lock_tree", Key: "current", ValueJSON: raw}}
 	}
 	return result
