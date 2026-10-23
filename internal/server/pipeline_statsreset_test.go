@@ -111,3 +111,47 @@ func TestSeriesStatsReset_OnlyLabelledDatabasesDropTheResult(t *testing.T) {
 	require.Equal(t, &reset, seriesStatsReset(wire.Result{Database: "app", StatsReset: &reset}, labelled))
 	require.Nil(t, seriesStatsReset(wire.Result{StatsReset: &reset}, labelled))
 }
+
+// TestPipeline_ResetWritesOneEventPerDatabase: a restart resets every counter of
+// a database together. The push writes one counter_reset_detected event for each
+// database that was reset, counting its series, and not one for each series.
+func TestPipeline_ResetWritesOneEventPerDatabase(t *testing.T) {
+	t.Parallel()
+	fc := clock.NewFake(rollbackT0)
+	p := NewPipeline(nil, fc)
+	instID := uuid.New()
+	cid := pgtype.ClusterID(1).String()
+	names := []string{"pg_xact_commit_total", "pg_xact_rollback_total", "pg_blks_read_total"}
+	envelope := func(ts time.Time, value float64) wire.Envelope {
+		var metrics []wire.Metric
+		for _, db := range []string{"app", "postgres"} {
+			for _, name := range names {
+				metrics = append(metrics, wire.Metric{Name: name, Value: value, Kind: "counter", Labels: map[string]string{"database": db}})
+			}
+		}
+		return wire.Envelope{Instances: []wire.Instance{{
+			InstanceID: instID.String(), ClusterID: cid, Role: "primary",
+			Results: []wire.Result{{Check: "database_stats", TS: ts, Metrics: metrics}},
+		}}}
+	}
+
+	_, err := processOn(t, p, envelope(rollbackT0, 1000), nil)
+	require.NoError(t, err)
+	tx, err := processOn(t, p, envelope(rollbackT0.Add(60*time.Second), 10), nil)
+	require.NoError(t, err)
+
+	counts := map[string][]int{}
+	for _, e := range tx.execs {
+		if !strings.Contains(e.sql, "INSERT INTO events (") || e.args[2] != "counter_reset_detected" {
+			continue
+		}
+		var payload struct {
+			Count  int               `json:"count"`
+			Labels map[string]string `json:"labels"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(e.args[5].(string)), &payload))
+		counts[payload.Labels["database"]] = append(counts[payload.Labels["database"]], payload.Count)
+	}
+	require.Equal(t, map[string][]int{"app": {3}, "postgres": {3}}, counts,
+		"one event per reset database, counting its three series")
+}

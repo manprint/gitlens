@@ -311,3 +311,42 @@ func TestPipeline_ReplicationSyncStateIsStored(t *testing.T) {
 		})
 	}
 }
+
+// TestPipeline_TruncationMarkerCoversItsWindow: a cap that holds is marked once per
+// window on the instance, not on every push, and a statements read whose window
+// starts after the marker still sees the cap it recorded.
+func TestPipeline_TruncationMarkerCoversItsWindow(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	p := NewPipeline(pool, clock.NewFake(time.Now()))
+	instID := uuid.New()
+	cid := pgtype.ClusterID(1).String()
+	base := time.Now().Add(-time.Hour).Truncate(time.Second)
+	push := func(ts time.Time) {
+		_, err := p.Process(ctx, wire.Envelope{Instances: []wire.Instance{{
+			InstanceID: instID.String(), ClusterID: cid, Role: "primary",
+			Results: []wire.Result{{Check: "stat_statements", TS: ts, Database: "app", Truncated: true}},
+		}}})
+		require.NoError(t, err)
+	}
+	markers := func() int {
+		var n int
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE instance_id=$1 AND type='cardinality_truncated'`, instID).Scan(&n))
+		return n
+	}
+
+	push(base)
+	push(base.Add(15 * time.Second))
+	push(base.Add(30 * time.Second))
+	require.Equal(t, 1, markers(), "pushes inside one window write one marker")
+	// The check_partial fact of these pushes ends at the last one, before this
+	// window, so only the marker can make the window truncated.
+	from, to := base.Add(5*time.Minute), base.Add(6*time.Minute)
+	truncated, err := NewAPI(pool).instanceTruncated(ctx, instID, &from, &to)
+	require.NoError(t, err)
+	require.True(t, truncated, "a window starting five minutes after the marker is still truncated")
+
+	push(base.Add(11 * time.Minute))
+	require.Equal(t, 2, markers(), "the next window writes the next marker")
+}

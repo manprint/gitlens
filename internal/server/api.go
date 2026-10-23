@@ -1212,8 +1212,11 @@ func (a *API) instanceTruncated(ctx context.Context, instanceID uuid.UUID, from,
 	sb.WriteString(`SELECT EXISTS(SELECT 1 FROM events WHERE tenant_id='default' AND instance_id=$1 AND type='cardinality_truncated' AND payload->>'check'='stat_statements'`)
 	argIdx := 2
 	if from != nil {
+		// A marker stands for the cap until the next one, which is written up to
+		// truncationEventWindow later, so a window that starts after a marker
+		// still reads the cap from it.
 		fmt.Fprintf(&sb, " AND ts >= $%d", argIdx)
-		args = append(args, *from)
+		args = append(args, from.Add(-truncationEventWindow))
 		argIdx++
 	}
 	if to != nil {

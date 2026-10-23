@@ -280,6 +280,9 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		var instFacts []store.ObjectFactRow
 		var clearCheckSkips []string
 		partialState := make(map[partialKey]partialObservation)
+		// When each check's cardinality_truncated event was last written for this
+		// instance in this envelope.
+		truncatedAt := make(map[string]time.Time)
 		var instLockSnapshot *store.LockSnapshotRow
 		tableMap := make(map[tableStatKey]*store.TableStatRow)
 		indexMap := make(map[indexStatKey]*store.IndexStatRow)
@@ -394,17 +397,26 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 			} else if r.SkipReason == "" {
 				IncCheckOK(instUUID.String(), r.Check)
 			}
+			// A cap that holds writes a marker per window, not per push: the readers
+			// only need one inside their look-back.
 			if r.Truncated {
-				evCluster := cidDB
-				evInst := instUUID
-				instEvents = append(instEvents, store.EventRow{
-					TenantID:   tenantID,
-					TS:         r.TS,
-					Type:       "cardinality_truncated",
-					ClusterID:  &evCluster,
-					InstanceID: &evInst,
-					Payload:    map[string]any{"check": r.Check, "database": r.Database},
-				})
+				due, dueErr := truncationEventDue(ctx, tx, tenantID, cidDB, instUUID, r.Check, r.TS, truncatedAt)
+				if dueErr != nil {
+					return nil, dueErr
+				}
+				if due {
+					truncatedAt[r.Check] = r.TS
+					evCluster := cidDB
+					evInst := instUUID
+					instEvents = append(instEvents, store.EventRow{
+						TenantID:   tenantID,
+						TS:         r.TS,
+						Type:       "cardinality_truncated",
+						ClusterID:  &evCluster,
+						InstanceID: &evInst,
+						Payload:    map[string]any{"check": r.Check, "database": r.Database},
+					})
+				}
 			}
 			for _, f := range r.Facts {
 				if err := f.Validate(); err != nil {
@@ -459,6 +471,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 					LastSeen:  r.TS,
 				})
 			}
+			var resets []counterReset
 			for _, m := range r.Metrics {
 				// Database-scoped checks such as database_stats emit one result
 				// containing labelled rows. Preserve that database identity in the
@@ -501,21 +514,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 					pt, ev, undoDelta := p.delta.ObserveUndoable(obs)
 					undos = append(undos, undoDelta)
 					if ev != nil {
-						payload := map[string]any{
-							"metric": m.Name,
-							"reason": string(ev.Reason),
-							"labels": m.Labels,
-						}
-						evCluster := cidDB
-						evInst := instUUID
-						instEvents = append(instEvents, store.EventRow{
-							TenantID:   tenantID,
-							TS:         ev.TS,
-							Type:       "counter_reset_detected",
-							ClusterID:  &evCluster,
-							InstanceID: &evInst,
-							Payload:    payload,
-						})
+						resets = append(resets, counterReset{datname: metricDatname, ts: ev.TS, metric: m.Name, reason: string(ev.Reason), labels: m.Labels})
 						skip = true
 					} else if pt == nil {
 						skip = true
@@ -675,6 +674,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 					applyBloatMetric(row, strings.TrimPrefix(m.Name, "pg_bloat_"), value)
 				}
 			}
+			instEvents = append(instEvents, counterResetEvents(resets, tenantID, cidDB, instUUID)...)
 			if instErr != nil {
 				break
 			}
@@ -1401,4 +1401,85 @@ func storedRole(ctx context.Context, tx pgx.Tx, instanceID uuid.UUID) (string, e
 		return "", fmt.Errorf("read role of instance %s: %w", instanceID, err)
 	}
 	return role, nil
+}
+
+// counterResetSample bounds how many series of one database a
+// counter_reset_detected event lists.
+const counterResetSample = 10
+
+// counterReset is one counter series that a result reset.
+type counterReset struct {
+	datname string
+	ts      time.Time
+	metric  string
+	reason  string
+	labels  map[string]string
+}
+
+// counterResetEvents writes one counter_reset_detected event per database of a
+// result, not one per series. A restart resets every counter together, and a row
+// for each would put a whole restart into the timeline and push older events out
+// of the 1000 it shows. The first series' metric, reason and labels stay at the
+// top of the payload, where readers look for them; the count and a sample of the
+// series follow.
+func counterResetEvents(resets []counterReset, tenantID string, clusterID int64, instanceID uuid.UUID) []store.EventRow {
+	var order []string
+	byDatname := make(map[string][]counterReset)
+	for _, r := range resets {
+		if _, seen := byDatname[r.datname]; !seen {
+			order = append(order, r.datname)
+		}
+		byDatname[r.datname] = append(byDatname[r.datname], r)
+	}
+	events := make([]store.EventRow, 0, len(order))
+	for _, datname := range order {
+		group := byDatname[datname]
+		first := group[0]
+		sample := make([]map[string]any, 0, min(len(group), counterResetSample))
+		for _, r := range group[:min(len(group), counterResetSample)] {
+			sample = append(sample, map[string]any{"metric": r.metric, "reason": r.reason, "labels": r.labels})
+		}
+		cid := clusterID
+		iid := instanceID
+		events = append(events, store.EventRow{
+			TenantID:   tenantID,
+			TS:         first.ts,
+			Type:       "counter_reset_detected",
+			ClusterID:  &cid,
+			InstanceID: &iid,
+			Payload: map[string]any{
+				"metric": first.metric,
+				"reason": first.reason,
+				"labels": first.labels,
+				"count":  len(group),
+				"series": sample,
+			},
+		})
+	}
+	return events
+}
+
+// truncationEventWindow spaces the cardinality_truncated events of one check on
+// one instance. The readers look back at most 15 minutes for the marker, so a
+// row every ten keeps one inside each look-back for as long as the cap holds.
+const truncationEventWindow = 10 * time.Minute
+
+// truncationEventDue reports whether a cardinality_truncated event for check is
+// due at ts: none is recorded for the check on the instance within the window,
+// neither earlier in this envelope (written) nor in the store. The store is read
+// inside the transaction, so a retried envelope sees only what was committed.
+func truncationEventDue(ctx context.Context, tx pgx.Tx, tenantID string, clusterID int64, instanceID uuid.UUID, check string, ts time.Time, written map[string]time.Time) (bool, error) {
+	if last, ok := written[check]; ok && ts.Sub(last) < truncationEventWindow {
+		return false, nil
+	}
+	var recent bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE tenant_id=$1 AND cluster_id=$2 AND instance_id=$3 AND type='cardinality_truncated' AND payload->>'check'=$4 AND ts > $5)`,
+		tenantID, clusterID, instanceID, check, ts.Add(-truncationEventWindow)).Scan(&recent)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("look up cardinality_truncated: %w", err)
+	}
+	return !recent, nil
 }

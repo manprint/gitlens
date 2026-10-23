@@ -990,3 +990,33 @@ func TestPipeline_SplitBrainEventHasNoInstance(t *testing.T) {
 	}
 	require.Equal(t, 1, found, "two primaries in one cluster write one split_brain_detected event")
 }
+
+// TestPipeline_TruncationMarkerOncePerCheckPerEnvelope: a cap that cut two
+// databases' results of one check in the same push writes one
+// cardinality_truncated marker for the check on the instance, not one per result.
+func TestPipeline_TruncationMarkerOncePerCheckPerEnvelope(t *testing.T) {
+	t.Parallel()
+	tx := &recordingTx{}
+	p := NewPipeline(nil, nil)
+	p.pool = &mockPool{beginTx: tx}
+
+	ts := time.Now()
+	instID := uuid.New()
+	env := wire.Envelope{Instances: []wire.Instance{{
+		InstanceID: instID.String(), ClusterID: pgtype.ClusterID(1).String(), Role: "primary",
+		Results: []wire.Result{
+			{Check: "stat_statements", TS: ts, Database: "app", Truncated: true},
+			{Check: "stat_statements", TS: ts, Database: "postgres", Truncated: true},
+		},
+	}}}
+	_, err := p.Process(context.Background(), env)
+	require.NoError(t, err)
+
+	var markers int
+	for _, e := range tx.execs {
+		if strings.Contains(e.sql, "INSERT INTO events (") && e.args[2] == "cardinality_truncated" {
+			markers++
+		}
+	}
+	require.Equal(t, 1, markers)
+}
