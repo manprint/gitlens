@@ -118,3 +118,46 @@ func TestINTADV005_TwoEnginesProduceOneFindingSet(t *testing.T) {
 		e2.Stop()
 	})
 }
+
+// TestINTADV006_SameDatabaseFindingOnTwoInstancesStaysSeparate — two replicas
+// of one database both report a high rollback ratio. Their findings used to
+// share one ID, so the second write replaced the first row and the second
+// instance's healthy pass resolved the first instance's open finding.
+func TestINTADV006_SameDatabaseFindingOnTwoInstancesStaysSeparate(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		pool := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		_, err := pool.Exec(ctx, advisorIntegrationSchema)
+		require.NoError(t, err)
+		now := time.Now().UTC()
+		first := setupAdvisorInstance(t, pool, now)
+		second := uuid.New()
+		_, err = pool.Exec(ctx, `INSERT INTO instances(instance_id,cluster_id,addr,port,pg_version,role,perm_tier,last_seen) VALUES ($1,$2,'advisor-test-2',5432,180000,'standby','T0',$3)`, second, int64(7001), now)
+		require.NoError(t, err)
+		secondRollingBack := true
+		e := NewEngine(pool, nil, time.Minute)
+		e.load = func(_ context.Context, id uuid.UUID, _ time.Time) (*Snapshot, error) {
+			s := advisorIntegrationSnapshot(id, now, 0)
+			ratio := 0.5
+			if id == second && !secondRollingBack {
+				ratio = 0.01
+			}
+			s.Metrics["pg_xact_rollback_ratio"] = map[string]float64{"database=app": ratio}
+			return s, nil
+		}
+		require.NoError(t, e.Run(ctx))
+		var open int
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM findings WHERE rule_id='txn.high_rollback_ratio' AND state='open'`).Scan(&open))
+		require.Equal(t, 2, open, "each instance keeps its own finding")
+
+		secondRollingBack = false
+		require.NoError(t, e.Run(ctx))
+		var firstOpen, secondResolved int
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM findings WHERE instance_id=$1 AND rule_id='txn.high_rollback_ratio' AND state='open'`, first).Scan(&firstOpen))
+		require.Equal(t, 1, firstOpen, "a healthy replica must not resolve the other replica's finding")
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM findings WHERE instance_id=$1 AND rule_id='txn.high_rollback_ratio' AND state='resolved'`, second).Scan(&secondResolved))
+		require.Equal(t, 1, secondResolved)
+		e.Stop()
+	})
+}

@@ -254,6 +254,24 @@ func TestFindingID_UsesStableSubjectFallbacks(t *testing.T) {
 	require.Equal(t, "r/", (Finding{RuleID: "r"}).ID())
 }
 
+// TestFindingID_QualifiesEverySubjectByInstance: the findings table is keyed
+// by finding ID alone, so the same object reported by two instances must get
+// two IDs, and a cluster-scoped finding must not collapse across instances.
+func TestFindingID_QualifiesEverySubjectByInstance(t *testing.T) {
+	a, b := uuid.New(), uuid.New()
+	cluster := int64(42)
+	require.Equal(t, "r/"+a.String()+"/object", (Finding{RuleID: "r", ObjectName: "object", InstanceID: &a}).ID())
+	require.Equal(t, "r/"+a.String()+"/db/object", (Finding{RuleID: "r", Datname: "db", ObjectName: "object", InstanceID: &a}).ID())
+	require.Equal(t, "r/"+a.String()+"/db", (Finding{RuleID: "r", Datname: "db", InstanceID: &a}).ID())
+	require.Equal(t, "r/"+a.String(), (Finding{RuleID: "r", ClusterID: &cluster, InstanceID: &a}).ID())
+	require.NotEqual(t,
+		(Finding{RuleID: "r", ObjectName: "object", InstanceID: &a}).ID(),
+		(Finding{RuleID: "r", ObjectName: "object", InstanceID: &b}).ID())
+	require.NotEqual(t,
+		(Finding{RuleID: "r", ClusterID: &cluster, InstanceID: &a}).ID(),
+		(Finding{RuleID: "r", ClusterID: &cluster, InstanceID: &b}).ID())
+}
+
 func TestSnapshotMetricLookup(t *testing.T) {
 	s := &Snapshot{Metrics: map[string]map[string]float64{"x": {"": 1.5}}}
 	v, ok := s.Metric("x", nil)
