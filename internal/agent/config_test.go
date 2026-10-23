@@ -358,3 +358,33 @@ func writeConfigFile(t *testing.T, yaml string) string {
 
 	return tmpfile.Name()
 }
+
+// TestConfig_ServerURLLosesTrailingSlash: the push path is appended to
+// server.url, so a trailing slash from the file or from PGLENS_SERVER_URL is
+// removed before anything builds a request from it.
+func TestConfig_ServerURLLosesTrailingSlash(t *testing.T) {
+	yaml := `
+server:
+  url: http://localhost:8080/
+  token: file-token
+identity_path: /var/lib/pglens/identity.json
+buffer:
+  path: /var/lib/pglens/buffer
+targets:
+  - name: pg-app
+    dsn: postgres://pglens@localhost/postgres
+checks:
+  activity: {}
+`
+	tmpfile := writeConfigFile(t, yaml)
+	defer func() { _ = os.Remove(tmpfile) }()
+
+	cfg, err := LoadConfig(tmpfile)
+	require.NoError(t, err)
+	require.Equal(t, "http://localhost:8080", cfg.Server.URL)
+
+	t.Setenv("PGLENS_SERVER_URL", "http://override:9999//")
+	cfg, err = LoadConfig(tmpfile)
+	require.NoError(t, err)
+	require.Equal(t, "http://override:9999", cfg.Server.URL)
+}

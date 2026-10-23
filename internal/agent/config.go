@@ -183,6 +183,9 @@ func (c *Config) validate() error {
 	if c.Server.URL == "" {
 		return fmt.Errorf("validation: server.url is required")
 	}
+	// The push path is appended to this URL, so a trailing slash would make
+	// the request //api/v1/push, which the server does not route.
+	c.Server.URL = strings.TrimRight(c.Server.URL, "/")
 	if c.Server.Token == "" && c.Server.TokenFile == "" {
 		return fmt.Errorf("validation: server.token or server.token_file is required")
 	}

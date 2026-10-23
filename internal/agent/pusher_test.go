@@ -583,3 +583,29 @@ func TestPusher_SendsTransmissionTime(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, sent.Equal(now), "header %q, want the push time", header)
 }
+
+// TestPusher_TrailingSlashInServerURLStillPushes: server.url written with a
+// trailing slash must reach the push endpoint, not //api/v1/push, which the
+// server answers with 404 and every envelope was then dropped.
+func TestPusher_TrailingSlashInServerURLStillPushes(t *testing.T) {
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		if path != "/api/v1/push" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	p := NewPusher(srv.URL+"/", "token", clock.System())
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	require.NoError(t, p.Push(ctx))
+	require.Equal(t, "/api/v1/push", path)
+	acked, dropped := p.BufferStats()
+	require.Equal(t, int64(1), acked)
+	require.Equal(t, int64(0), dropped)
+}

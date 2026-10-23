@@ -80,8 +80,10 @@ func NewPusher(serverURL, token string, clk clock.Clock) *Pusher {
 		clk = clock.System()
 	}
 	return &Pusher{
-		token:     token,
-		serverURL: serverURL,
+		token: token,
+		// Trimmed as the command dispatcher trims the same setting: the path
+		// is appended to it, so a trailing slash must not reach the request.
+		serverURL: strings.TrimRight(serverURL, "/"),
 		clk:       clk,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
