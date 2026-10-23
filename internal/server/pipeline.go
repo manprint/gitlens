@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/delta"
@@ -165,6 +167,8 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	var factPrunes []store.ObjectFactPrune
 	currentSeries := make(map[uuid.UUID]map[pgtype.SeriesKey]struct{}, len(env.Instances))
 	var storedInstances []uuid.UUID
+	// The role each stored instance reports, written at the end of the transaction.
+	storedRoles := make(map[uuid.UUID]string, len(env.Instances))
 
 	// Resolves a wire.Edge.To (an upstream's addr, e.g. "pg-primary") to an
 	// instance_id. Tries the current envelope first (fast path, no query).
@@ -285,6 +289,15 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		var instErr error
 		instSeries := make(map[pgtype.SeriesKey]struct{})
 
+		// The role the store holds is read here, in this transaction, and the reported
+		// role is written at its end for stored instances only. A rolled-back envelope
+		// then leaves the stored role as it was, and its retry reports the same
+		// transition again.
+		role := normalizeRole(inst.Role)
+		priorRole, err := storedRole(ctx, tx, instUUID)
+		if err != nil {
+			return nil, err
+		}
 		// internal/topology.Engine (6.2, unit-tested at 90.9% coverage) was
 		// never actually called from anywhere in the real server — found
 		// live while building SYS-REPL-001 (the plan's own acceptance
@@ -317,7 +330,8 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		topoEvents, undoTopo := p.topo.ApplyUndoable(topology.Observation{
 			InstanceID: instUUID,
 			ClusterID:  cid,
-			Role:       pgtype.Role(inst.Role),
+			Role:       pgtype.Role(role),
+			PriorRole:  pgtype.Role(priorRole),
 			Edges:      topoEdges,
 		})
 		undos = append(undos, undoTopo)
@@ -747,9 +761,18 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		relationPrunes = append(relationPrunes, instRelationPrunes...)
 		factPrunes = append(factPrunes, instFactPrunes...)
 		storedInstances = append(storedInstances, instUUID)
+		storedRoles[instUUID] = role
 		res.Accepted++
 	}
 
+	// The role of each stored instance is written in this transaction, with the
+	// topology step that read the role it replaces. An instance whose samples are
+	// refused keeps its stored role, as its topology state is rolled back.
+	for _, id := range storedInstances {
+		if _, err := tx.Exec(ctx, `UPDATE instances SET role=$1 WHERE instance_id=$2`, storedRoles[id], id); err != nil {
+			return nil, fmt.Errorf("store role of instance %s: %w", id, err)
+		}
+	}
 	// An instance is up for the server only while its samples are being stored.
 	// The refresh is in this transaction, so an instance whose samples are
 	// refused goes stale instead of reading as up on every push with no data.
@@ -1352,4 +1375,19 @@ func buildASHRow(ts time.Time, tenantID string, clusterID int64, instanceID uuid
 		WindowSeconds: windowSec,
 		WindowTicks:   windowTicks,
 	}
+}
+
+// storedRole returns the role the store holds for an instance, or "" when it
+// holds none. The row is locked until the transaction ends, so a second envelope
+// for the same instance reads the stored role only after this one is decided.
+func storedRole(ctx context.Context, tx pgx.Tx, instanceID uuid.UUID) (string, error) {
+	var role string
+	err := tx.QueryRow(ctx, `SELECT role FROM instances WHERE instance_id=$1 FOR UPDATE`, instanceID).Scan(&role)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read role of instance %s: %w", instanceID, err)
+	}
+	return role, nil
 }

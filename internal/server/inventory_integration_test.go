@@ -66,6 +66,9 @@ func TestInventory_Upsert_RoleNormalization(t *testing.T) {
 	res, err := inv.Upsert(context.Background(), env)
 	require.NoError(t, err)
 	require.Equal(t, 1, res.Accepted)
+	// The pipeline stores the role, normalized, in the envelope transaction.
+	_, err = NewPipeline(pool, clock.NewFake(time.Now())).Process(context.Background(), env)
+	require.NoError(t, err)
 	// verify role normalized to unknown in DB
 	var role string
 	err = pool.QueryRow(context.Background(), `SELECT role FROM instances WHERE instance_id=$1`, uuid.MustParse(iid)).Scan(&role)
@@ -83,6 +86,8 @@ func TestInventory_Upsert_RoleNormalization(t *testing.T) {
 	res, err = inv.Upsert(context.Background(), env2)
 	require.NoError(t, err)
 	require.Equal(t, 1, res.Accepted)
+	_, err = NewPipeline(pool, clock.NewFake(time.Now())).Process(context.Background(), env2)
+	require.NoError(t, err)
 	err = pool.QueryRow(context.Background(), `SELECT role FROM instances WHERE instance_id=$1`, uuid.MustParse(iid2)).Scan(&role)
 	require.NoError(t, err)
 	require.Equal(t, "primary", role)
@@ -354,9 +359,10 @@ func TestINTSI03_LastSeenFollowsStoredData(t *testing.T) {
 	require.True(t, lastSeen().After(old.Add(30*time.Minute)), "stored samples refresh last_seen")
 }
 
-// The inventory writes no role_change itself: the pipeline's topology step writes
-// it once per transition, in the transaction that stores the envelope. See
-// TestINTXE06_RoleChangeWrittenOnce for the two writers together.
+// The inventory writes neither the role nor a role_change: the pipeline stores
+// the role and its topology step writes the event, in the transaction that
+// stores the envelope. See TestINTXE06_RoleChangeWrittenOnce for the two
+// together.
 func TestInventory_RoleChange_NotWrittenByInventory(t *testing.T) {
 	pool := getTestPool(t)
 	truncateAll(t, pool)
@@ -383,7 +389,7 @@ func TestInventory_RoleChange_NotWrittenByInventory(t *testing.T) {
 
 	var role string
 	require.NoError(t, pool.QueryRow(ctx, `SELECT role FROM instances WHERE instance_id=$1`, iid).Scan(&role))
-	require.Equal(t, "standby", role, "the inventory keeps the instance's role current")
+	require.Equal(t, "unknown", role, "the inventory leaves the role to the pipeline, which stores it in the envelope transaction")
 	var ev int
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='role_change'`).Scan(&ev))
 	require.Zero(t, ev, "the inventory writes no role_change, the topology step does")
@@ -431,6 +437,67 @@ func TestINTXE06_RoleChangeWrittenOnce(t *testing.T) {
 	push(instance(oldPrimary, "standby", "10.0.0.1"), instance(standby, "primary", "10.0.0.2"))
 	require.Equal(t, failovers+1, count("failover_detected"), "a promotion after a recent primary is a failover")
 	require.Equal(t, roleChanges, count("role_change"), "a failover is failover_detected and not role_change")
+}
+
+// TestINTXE06_RestartKeepsStoredRole: a restart empties the topology engine, so
+// the first sighting after it finds no state to compare with. The role the store
+// already holds decides instead: the same role is no event, and a role that
+// changed while the server was down is one role_change from the stored role. It
+// is never a failover, since nothing in memory names a prior primary.
+func TestINTXE06_RestartKeepsStoredRole(t *testing.T) {
+	pool := getTestPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	clk := clock.NewFake(time.Now())
+	inv := NewInventory(pool)
+	cid := pgtype.ClusterID(60707).String()
+	iid, agent := uuid.NewString(), uuid.NewString()
+	instance := func(role string) wire.Instance {
+		return wire.Instance{InstanceID: iid, ClusterID: cid, ClusterIDSource: string(pgtype.IDSourceManual), Addr: "10.0.0.3", Port: 5432, Role: role, PGVersion: 170000, PermTier: "T0"}
+	}
+	// push sends one envelope through p. A fresh Pipeline is a restarted server.
+	push := func(p *Pipeline, role string) {
+		env := wire.Envelope{AgentID: agent, Instances: []wire.Instance{instance(role)}}
+		_, err := inv.Upsert(ctx, env)
+		require.NoError(t, err)
+		_, err = p.Process(ctx, env)
+		require.NoError(t, err)
+	}
+	count := func(typ string) int {
+		var n int
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type=$1`, typ).Scan(&n))
+		return n
+	}
+	storedRole := func() string {
+		var role string
+		require.NoError(t, pool.QueryRow(ctx, `SELECT role FROM instances WHERE instance_id=$1`, iid).Scan(&role))
+		return role
+	}
+
+	push(NewPipeline(pool, clk), "primary")
+	require.Equal(t, 1, count("role_change"), "a new instance's first sighting is reported as before")
+	require.Equal(t, "primary", storedRole())
+
+	clk.Advance(5 * time.Second)
+	push(NewPipeline(pool, clk), "primary")
+	require.Equal(t, 1, count("role_change"), "a restart that finds the stored role unchanged writes no event")
+	require.Equal(t, "primary", storedRole())
+
+	clk.Advance(5 * time.Second)
+	push(NewPipeline(pool, clk), "standby")
+	require.Equal(t, 2, count("role_change"), "a role that changed while the server was down is one role_change")
+	require.Zero(t, count("failover_detected"), "a restart never reads a change as a failover")
+	require.Equal(t, "standby", storedRole())
+
+	var oldRole, newRole string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT payload->>'old_role', payload->>'new_role' FROM events WHERE type='role_change' ORDER BY ts DESC LIMIT 1`).Scan(&oldRole, &newRole))
+	require.Equal(t, "primary", oldRole)
+	require.Equal(t, "standby", newRole)
+
+	clk.Advance(5 * time.Second)
+	push(NewPipeline(pool, clk), "standby")
+	require.Equal(t, 2, count("role_change"), "a later restart with the same role is silent")
 }
 
 func TestInventory_EmitEvent_JSON(t *testing.T) {

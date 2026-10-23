@@ -224,3 +224,33 @@ func TestPipeline_LastSeenOnlyForStoredInstances(t *testing.T) {
 	}
 	require.Equal(t, []uuid.UUID{stored}, touched)
 }
+
+// TestPipeline_RoleStoredOnlyForStoredInstances: the role an instance reports is
+// stored in the envelope's transaction, with its last_seen, and only for an
+// instance whose samples are stored. A refused instance keeps the role it had,
+// as its topology state is rolled back with it.
+func TestPipeline_RoleStoredOnlyForStoredInstances(t *testing.T) {
+	t.Parallel()
+	fc := clock.NewFake(rollbackT0)
+	p := NewPipeline(nil, fc)
+	cid := pgtype.ClusterID(1).String()
+	stored, refused := uuid.New(), uuid.New()
+	gauge := func(kind string) []wire.Result {
+		return []wire.Result{{Check: "bgwriter", TS: rollbackT0, Metrics: []wire.Metric{
+			{Name: "pg_checkpoints_timed", Value: 1, Kind: kind, Labels: map[string]string{}},
+		}}}
+	}
+	tx, err := processOn(t, p, wire.Envelope{Instances: []wire.Instance{
+		{InstanceID: stored.String(), ClusterID: cid, Role: "standby", Results: gauge("gauge")},
+		{InstanceID: refused.String(), ClusterID: cid, Role: "primary", Results: gauge("unknown-kind")},
+	}}, nil)
+	require.NoError(t, err)
+
+	roles := map[uuid.UUID]any{}
+	for _, e := range tx.execs {
+		if strings.Contains(e.sql, "UPDATE instances SET role") {
+			roles[e.args[1].(uuid.UUID)] = e.args[0]
+		}
+	}
+	require.Equal(t, map[uuid.UUID]any{stored: "standby"}, roles)
+}

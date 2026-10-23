@@ -174,14 +174,6 @@ func (inv *Inventory) upsertOne(ctx context.Context, tenantID string, agentID uu
 		return instanceRejected{fmt.Errorf("invalid instance_id %q: %w", inst.InstanceID, err)}
 	}
 
-	// Validate role – keep as-is but normalize unknown values to "unknown".
-	role := inst.Role
-	switch role {
-	case "primary", "standby", "unknown":
-	default:
-		role = "unknown"
-	}
-
 	// 1. Look up the instance before anything is written for it. A push that
 	// names another cluster than the instance's own is refused before that
 	// cluster is created or its identity source is changed, so the refused push
@@ -210,15 +202,16 @@ func (inv *Inventory) upsertOne(ctx context.Context, tenantID string, agentID uu
 	}
 
 	if err == nil {
-		// Update mutable fields. The role change of an existing instance is not
-		// recorded here: the pipeline's topology step records it once, and tells a
-		// failover apart, in the transaction that stores the envelope. last_seen is
-		// not among them: it is the liveness the server reports, and the pipeline
-		// sets it in the transaction that stores this instance's samples (see
-		// Pipeline.Process).
+		// Update mutable fields. The role is not among them: the pipeline stores it
+		// in the transaction that stores the envelope, next to the topology step
+		// that reads the role it replaces (see Pipeline.Process). Written here it
+		// would be committed before the envelope, so a retried envelope would read
+		// its own role as the prior one and lose the transition. last_seen is not
+		// among them either: it is the liveness the server reports, and the pipeline
+		// sets it in the same transaction.
 		if _, execErr := inv.pool.Exec(ctx,
-			`UPDATE instances SET role=$1, pg_version=$2, perm_tier=$3, addr=$4, port=$5, target_name=$6, ash_enabled=$7 WHERE instance_id=$8`,
-			role, inst.PGVersion, inst.PermTier, inst.Addr, inst.Port, inst.TargetName, inst.ASHEnabled, instUUID); execErr != nil {
+			`UPDATE instances SET pg_version=$1, perm_tier=$2, addr=$3, port=$4, target_name=$5, ash_enabled=$6 WHERE instance_id=$7`,
+			inst.PGVersion, inst.PermTier, inst.Addr, inst.Port, inst.TargetName, inst.ASHEnabled, instUUID); execErr != nil {
 			return fmt.Errorf("update instance %s: %w", inst.InstanceID, execErr)
 		}
 	} else {
@@ -237,11 +230,15 @@ func (inv *Inventory) upsertOne(ctx context.Context, tenantID string, agentID uu
 		if _, err := inv.pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1) ON CONFLICT DO NOTHING`, agentParam); err != nil {
 			return fmt.Errorf("ensure agent %s: %w", agentParam, err)
 		}
+		// The role starts as "unknown". The pipeline stores the reported role in the
+		// envelope transaction, and reports a first sighting against the stored role:
+		// a new instance must not already hold the role it is about to report, or
+		// its first sighting would look unchanged.
 		if _, err := inv.pool.Exec(ctx,
 			`INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, target_name, last_seen, ash_enabled)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now(),$11)
-			 ON CONFLICT (instance_id) DO UPDATE SET role=EXCLUDED.role, pg_version=EXCLUDED.pg_version, perm_tier=EXCLUDED.perm_tier, addr=EXCLUDED.addr, port=EXCLUDED.port, target_name=EXCLUDED.target_name, ash_enabled=EXCLUDED.ash_enabled`,
-			instUUID, tenantID, cidDB, agentParam, inst.Addr, inst.Port, inst.PGVersion, role, inst.PermTier, inst.TargetName, inst.ASHEnabled); err != nil {
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,'unknown',$8,$9,now(),$10)
+			 ON CONFLICT (instance_id) DO UPDATE SET pg_version=EXCLUDED.pg_version, perm_tier=EXCLUDED.perm_tier, addr=EXCLUDED.addr, port=EXCLUDED.port, target_name=EXCLUDED.target_name, ash_enabled=EXCLUDED.ash_enabled`,
+			instUUID, tenantID, cidDB, agentParam, inst.Addr, inst.Port, inst.PGVersion, inst.PermTier, inst.TargetName, inst.ASHEnabled); err != nil {
 			return fmt.Errorf("insert instance %s: %w", inst.InstanceID, err)
 		}
 	}
@@ -257,6 +254,17 @@ func (inv *Inventory) upsertOne(ctx context.Context, tenantID string, agentID uu
 		}
 	}
 	return nil
+}
+
+// normalizeRole maps a role the agent reports to one the store holds. Any other
+// value is stored as "unknown".
+func normalizeRole(role string) string {
+	switch role {
+	case "primary", "standby", "unknown":
+		return role
+	default:
+		return "unknown"
+	}
 }
 
 // upsertCluster handles the cluster row with identifier-over-manual priority.

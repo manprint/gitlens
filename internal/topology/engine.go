@@ -14,8 +14,18 @@ type Observation struct {
 	InstanceID pgtype.InstanceID
 	ClusterID  pgtype.ClusterID
 	Role       pgtype.Role
-	Timestamp  time.Time
-	Edges      []Edge
+	// PriorRole is the role the store holds for the instance before this
+	// observation: empty, or "unknown", when it holds none. The engine reads it
+	// only on a first sighting, the one case where its own state has nothing to
+	// compare with (after a server restart, or an eviction).
+	PriorRole pgtype.Role
+	Timestamp time.Time
+	Edges     []Edge
+}
+
+// knownRole reports whether a stored role says anything about the instance.
+func knownRole(r pgtype.Role) bool {
+	return r != "" && r != pgtype.RoleUnknown
 }
 
 // Edge describes a replication connection from one instance to another.
@@ -247,8 +257,22 @@ func (e *Engine) apply(obs Observation) []Event {
 				ClusterID:  obs.ClusterID,
 				Payload:    map[string]any{"old_role": inst.role, "new_role": obs.Role},
 			})
+		} else if knownRole(obs.PriorRole) {
+			// First sighting, but the store remembers the role the instance had
+			// before the restart or eviction that emptied this engine. A sighting
+			// that matches it changed nothing; any other role is a change from it.
+			// It is never a failover: there is no recent primary to fail over from.
+			if obs.PriorRole != obs.Role {
+				events = append(events, Event{
+					Type:       EventRoleChange,
+					Timestamp:  now,
+					InstanceID: obs.InstanceID,
+					ClusterID:  obs.ClusterID,
+					Payload:    map[string]any{"old_role": obs.PriorRole, "new_role": obs.Role},
+				})
+			}
 		} else {
-			// First sighting
+			// First sighting of an instance the store has no role for: a new one.
 			events = append(events, Event{
 				Type:       EventRoleChange,
 				Timestamp:  now,
