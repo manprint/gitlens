@@ -65,12 +65,11 @@ func init() {
 				}
 			}
 
-			// The agent schedules its database-scoped checks at startup, and
-			// reports a database created later as not monitored
-			// (discovered_after_start) because nothing collects it. It used
-			// to report the budget's choice among databases it never
-			// scraped, which is what this scenario then asserted. Restart it
-			// so the budget picks among all fifteen.
+			// The agent schedules its database-scoped checks at startup and
+			// re-reads the databases every 30 seconds. A database created later
+			// is collected only in a free slot, because a database the agent
+			// already runs checks for keeps its slot while it is listed. Restart
+			// it so the budget picks among all fifteen.
 			if err := e.Compose("restart", "pglens-agent"); err != nil {
 				return fmt.Errorf("restart agent: %w", err)
 			}
