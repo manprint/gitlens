@@ -122,29 +122,29 @@ pglens/
 │   ├── ash/                     # ASH aggregation          -> L1 (gate 90%)
 ├── web/                         # Vite + React frontend
 │   ├── src/ components/ lib/ test/
+│   ├── e2e/                     # L5 (Playwright)
 │   └── **/*.test.tsx            # L4
 ├── deploy/
 │   └── compose/                 # compose di produzione
 ├── test/
 │   ├── fixtures/
-│   │   ├── sql/                 # schemi, seed, workload SQL
-│   │   ├── golden/              # payload golden per versione PG
-│   │   └── dataset/             # dump TimescaleDB deterministico per L5 fixture mode
+│   │   ├── agent-*.yaml         # configurazioni agent per gli scenari L3
+│   │   └── sql/                 # schemi, seed, workload SQL
 │   ├── compose/                 # topologie di test (sez. 5.1)
 │   │   ├── base.yml
 │   │   ├── topo-standalone.yml
 │   │   ├── topo-primary-standby.yml
 │   │   ├── topo-cascading.yml
-│   │   ├── topo-logical.yml
-│   │   ├── agent-container.yml
+│   │   ├── agent-container*.yml # modalità container e varianti (sez. 5.2)
 │   │   ├── agent-binary.yml
-│   │   ├── pgbouncer.yml
+│   │   ├── scenario-alerting.yml
+│   │   ├── server-ui.yml
 │   │   └── toxiproxy.yml
 │   ├── harness/                 # libreria Go: compose up/down, wait, client API
-│   ├── scenario/                # LIBRERIA SCENARI (sez. 8) + scenariod
+│   ├── pgtest/                  # matrice L2 per versione PostgreSQL (sez. 4)
+│   ├── scenario/                # LIBRERIA SCENARI (sez. 8)
 │   ├── workload/                # generatore di carico e guasti (sez. 9)
-│   ├── e2e/                     # L3
-│   └── web-e2e/                 # L5 (Playwright)
+│   └── e2e/                     # L3: test Go che eseguono gli scenari
 ├── .github/workflows/
 ├── Makefile
 ├── IDEA.md
@@ -520,10 +520,9 @@ Ogni topologia è un `docker compose` componibile da `test/compose/`:
 | `standalone` | 1 PG | baseline, cardinalità, reset, carico |
 | `primary-standby` | PG primary + 1 standby (streaming) | replica, lag, slot, failover |
 | `cascading` | P → S1 → S2 | topologia ad albero, orphan detection |
-| `logical` | 2 cluster + publication/subscription | `system_identifier` diversi = cluster distinti |
-| `pgbouncer` | + pooler davanti a PG | `cl_waiting`, transaction pooling |
 | `toxiproxy` | proxy tra agent e PG, e tra agent e server | latenza, timeout, partizione |
-| `rds-like` | PG con vincoli RDS (sez. 4.4) | permessi degradati |
+
+Le topologie `logical` e `pgbouncer` non hanno una composizione L3 in `test/compose/`. `rds-like` è un profilo dei test L2 (sez. 4.4), non una topologia L3: `SYS-PERM-001` usa la topologia standalone con lo script di permessi di produzione.
 
 Il PostgreSQL monitorato in ogni topologia è `timescale/timescaledb:2.31.0-pg17` (vedi `test/compose/topo-*.yml`), e lo storage del server usa la stessa versione. La suite L3 copre quindi solo PostgreSQL 17. PostgreSQL da 15 a 19 sono verificati a L2 (`pgtest`, matrice in sez. 4.3). Portare PG 19 a L3 richiede un'immagine TimescaleDB per PG 19, che la matrice non ha.
 
@@ -760,6 +759,8 @@ Browser: **Chromium** su ogni PR; **Chromium + Firefox + WebKit** nightly. Headl
 
 ### 7.2 Due modalità di esecuzione
 
+> **Stato:** `web/e2e/` contiene oggi `smoke.spec.ts` e `ui_acceptance.spec.ts`. La modalità fixture e il dump `test/fixtures/dataset/` non sono ancora nel repository.
+
 Distinzione centrale, che tiene la suite veloce **e** vera:
 
 | Modalità | Suffisso | Dati | Quando | Verifica |
@@ -772,6 +773,8 @@ Il **fixture dataset** (`test/fixtures/dataset/`) è generato da una esecuzione 
 Questo dà il meglio dei due mondi: la maggior parte dei test è deterministica e finisce in secondi; una minoranza dimostra che la catena reale funziona davvero.
 
 ### 7.3 Il ponte con L3: `scenariod`
+
+> **Stato:** non implementato. Il ponte attuale è il test Go `SYS-UI-*` in `test/e2e/ui_test.go`, che lancia la spec Playwright con `pnpm exec playwright test --grep <ID>` dentro `h.Scenario`. Il servizio descritto sotto non esiste nel repository.
 
 La richiesta — *"script che generano eventi e che poi vanno verificati a livello di click sul frontend"* — è risolta da un servizio di controllo nello stack di test.
 
@@ -945,83 +948,115 @@ un traguardo dell'interfaccia, non dopo ogni modifica isolata.
 
 ## 8. Libreria degli scenari (il ponte L3 ↔ L5)
 
-Ogni scenario ha un **ID stabile**, è implementato una sola volta in `test/scenario/`, ed è invocabile da Go (L3) e via HTTP (L5).
+Ogni scenario ha un **ID stabile**, è implementato una sola volta in `test/scenario/` (o in un file di `test/e2e/` che lo registra), ed è invocabile dai test Go (L3). La suite L5 lo invoca attraverso lo stesso test Go.
 
 ```go
-// test/scenario/repl_failover.go
-var _ = Register(Scenario{
-    ID:          "SYS-REPL-001",
-    Title:       "Promote dello standby",
-    Topology:    PrimaryStandby,
-    EstDuration: 25 * time.Second,
-    Covers:      []string{"IDEA.md#5.1", "IDEA.md#12.2"},
-    Run: func(ctx context.Context, e *Env) error {
-        if err := e.Exec("pg-standby", "pg_ctl", "promote", "-D", "/var/lib/postgresql/data"); err != nil {
-            return err
-        }
-        return e.WaitSQL(ctx, "pg-standby", "SELECT NOT pg_is_in_recovery()", 30*time.Second)
-    },
-    Expect: Expectations{
-        Events:     []string{"failover_detected"},
-        Invariants: []string{"cluster_id_stable", "no_negative_rates"},
-    },
-})
+// test/scenario/replication.go (estratto)
+func init() {
+	Register(Scenario{
+		ID:       "SYS-REPL-001",
+		Title:    "pg_ctl promote: the plan's acceptance test",
+		Topology: TopologyPrimaryStandby,
+		Covers:   []string{"phase_07.md#6.4", "I-1"},
+		Smoke:    true,
+		Expect: Expectations{
+			Events:     []string{"failover_detected"},
+			Invariants: []string{"I-1", "I-2", "I-3", "I-4"},
+		},
+		Run: func(ctx context.Context, e *Env) error {
+			// promuove lo standby con e.ExecAs, attende con poll(...) e legge
+			// la tabella events con e.DB; non dorme mai a tempo fisso.
+			// ...
+			e.AssertInvariants(e.T)
+			return nil
+		},
+	})
+}
 ```
+
+`Register` rifiuta uno scenario senza `Covers` o senza eventi o invarianti attesi. Dopo `Run`, `Harness.Scenario` fa due controlli:
+
+- ogni evento in `Expect.Events` deve comparire nella tabella `events` con `ts` dall'inizio dell'esecuzione (attesa limitata a un minuto);
+- lo scenario deve aver chiamato `e.AssertInvariants` se dichiara invarianti. Gli ID degli invarianti non si possono verificare per nome, quindi la chiamata è l'unica prova.
 
 ### 8.1 Catalogo
 
-| ID | Scenario | Topologia | Cosa deve accadere | Verifica UI |
-|---|---|---|---|---|
-| **Replica** | | | | |
-| `SYS-REPL-001` | Promote standby | primary-standby | `failover_detected`, ruoli invertiti < 20s, **`cluster_id` invariato** | `WEB-TOPO-001` |
-| `SYS-REPL-002` | Split-brain (promote senza fencing) | primary-standby | `split_brain_detected`, entrambi i nodi marcati primary | `WEB-ALERT-002` |
-| `SYS-REPL-003` | Standby orfano (primary fermato) | cascading | `orphan_standby`, edge marcato `confidence: low` | `WEB-TOPO-002` |
-| `SYS-REPL-004` | Lag indotto (`recovery_min_apply_delay`) | primary-standby | lag cresce monotono, alert `lag > 30s` dopo 2m | `WEB-CLUSTER-003` |
-| `SYS-REPL-005` | Replica in cascata a 3 livelli | cascading | grafo ad albero corretto, S1 sia sorgente sia destinazione | `WEB-TOPO-003` |
-| `SYS-REPL-006` | Logical replication tra due cluster | logical | **due `cluster_id` distinti**, edge `type=logical` | `WEB-TOPO-004` |
-| **Slot e WAL** | | | | |
-| `SYS-SLOT-001` | Slot inattivo (standby fermo, slot conservato) | primary-standby | `slot_inactive` dopo 10m (compresso a 30s in test), WAL in crescita | `WEB-CLUSTER-004` |
-| `SYS-SLOT-002` | Slot che raggiunge `wal_status=lost` | primary-standby | alert critico, standby non recuperabile | `WEB-ALERT-003` |
-| `SYS-WAL-001` | Alto tasso di generazione WAL | standalone | `wal_bytes` rate coerente con il carico ±10% | — |
-| **Reset counter** | | | | |
-| `SYS-RESET-001` | Restart di Postgres | standalone | `counter_reset_detected`, **nessun rate negativo, nessun picco** | `WEB-EVENT-001` |
-| `SYS-RESET-002` | `pg_stat_statements_reset()` esterno | standalone | delta scartato, serie riprende dal nuovo baseline | — |
-| `SYS-RESET-003` | Eviction da `pg_stat_statements.max` | standalone | query che sparisce e riappare non produce rate assurdi | — |
-| **Rete e resilienza** | | | | |
-| `SYS-NET-001` | Server irraggiungibile 10 min | standalone | agent bufferizza, poi replay **senza duplicati né gap** | `WEB-FLEET-002` |
-| `SYS-NET-002` | Latenza 2s agent→PG | standalone | check con timeout coerente, `check_error_total` per i soli check a timeout basso |  — |
-| `SYS-NET-003` | Black hole agent→PG (Toxiproxy timeout) | standalone | `instance_unreachable` < 2m, l'agent **non si appende** | `WEB-FLEET-001` |
-| `SYS-NET-004` | Partizione e ricongiungimento | primary-standby | nessuna serie duplicata dopo il ricongiungimento | — |
-| `SYS-NET-005` | `docker pause` del container PG | standalone | trattato come irraggiungibile, ripresa pulita | — |
-| **Carico e patologie DB** | | | | |
-| `SYS-LOAD-001` | Deadlock ripetuti | standalone | `deadlocks` rate > 0, coppia di query visibile in Locks | `WEB-LOCK-001` |
-| `SYS-LOAD-002` | Lock storm (50 sessioni sulla stessa riga) | standalone | il check `locks` **completa** (timeout 10s), albero dei lock corretto | `WEB-LOCK-002` |
-| `SYS-LOAD-003` | Slow query (`pg_sleep(30)`) | standalone | compare in ASH e in Query Inspector, wait event corretto | `WEB-ASH-001` |
-| `SYS-LOAD-004` | `idle in transaction` per 10 min | standalone | alert `idle_in_transaction`, età della transazione corretta | `WEB-ACT-001` |
-| `SYS-LOAD-005` | Race: 20 worker in UPDATE concorrente | standalone | wait event `Lock:transactionid` dominante in ASH | `WEB-ASH-002` |
-| `SYS-LOAD-006` | Bloat indotto (UPDATE massivi, autovacuum off) | standalone | `n_dead_tup` cresce, stima bloat coerente, advisor segnala | `WEB-ADV-001` |
-| `SYS-LOAD-007` | Seq scan su tabella grande senza indice | standalone | advisor propone l'indice mancante | `WEB-ADV-002` |
-| `SYS-LOAD-008` | 5000 query strutturalmente distinte | standalone | **top-N attivo**, `Truncated: true`, cardinalità sotto budget | `WEB-QUERY-002` |
-| **Agent** | | | | |
-| `SYS-AGENT-001` | Restart agent **con** volume | tutte | stessa `instance_id`, serie continua | — |
-| `SYS-AGENT-002` | Restart agent **senza** volume | container-no-volume | **istanza duplicata** — regressione nota documentata | — |
-| `SYS-AGENT-003` | Disco buffer pieno (tmpfs 16MB) | standalone | `samples_dropped_total` cresce, agent vivo, DB non impattato | `WEB-FLEET-003` |
-| `SYS-AGENT-004` | Clock skew di 5 minuti | standalone | `clock_skew` alzato, sample non rifiutati sotto la soglia | — |
-| `SYS-AGENT-005` | Revoca dell'agent dal server | standalone | 401 al push successivo, l'agent si ferma e lo dichiara | `WEB-SET-002` |
-| `SYS-AGENT-006` | Agent con versione di protocollo obsoleta | standalone | rifiuto esplicito con versione minima richiesta | — |
-| **Permessi** | | | | |
-| `SYS-PERM-001` | Solo T0 | rds-like | tutti i check T0 verdi, funzioni T1/T2 disattivate a monte | `WEB-PERM-001` |
-| `SYS-PERM-002` | T0 senza `pg_control_system()` | rds-like | fallback a `cluster_id` manuale, warning dichiarato | `WEB-PERM-002` |
-| `SYS-PERM-003` | T2 concesso | standalone | kill query funziona davvero | `WEB-LOCK-003` |
-| **Pooler** | | | | |
-| `SYS-POOL-001` | Saturazione pgbouncer (`pool_size` superato) | pgbouncer | `cl_waiting` > 0, `maxwait` cresce, alert | `WEB-POOL-001` |
-| `SYS-POOL-002` | Transaction pooling attivo | pgbouncer | `pg_stat_activity` mostra il pooler; la UI lo segnala | `WEB-POOL-002` |
-| **Multi-DB** | | | | |
-| `SYS-DB-001` | 15 database, budget 10 | standalone | i 10 più attivi monitorati, "5 non monitorati" esposto | `WEB-DB-001` |
-| `SYS-DB-002` | Database creato a caldo | standalone | rilevato entro un ciclo di discovery | — |
-| `SYS-DB-003` | Database eliminato a caldo | standalone | nessun errore, serie terminate pulitamente | — |
+Il catalogo è generato dai `Register` in `test/scenario/` e dalle registrazioni locali di `test/e2e/` (60 scenari). Il titolo e la copertura sono quelli dichiarati nel codice. La colonna *Smoke* segna gli scenari eseguiti dai `TestSmoke_*`.
 
-**Smoke set per PR** (~10 min): `SYS-REPL-001`, `SYS-RESET-001`, `SYS-NET-001`, `SYS-NET-003`, `SYS-LOAD-002`, `SYS-LOAD-008`, `SYS-PERM-001`, `SYS-AGENT-001`.
+| ID | Scenario | Topologia | Smoke | Riferimenti |
+|---|---|---|---|---|
+| **Replica, slot e topologia** | | | | |
+| `SYS-REPL-001` | pg_ctl promote: the plan's acceptance test | primary-standby | sì | phase_07.md#6.4, I-1 |
+| `SYS-REPL-002` | pg_ctl promote without stopping the primary: split-brain | primary-standby |  | phase_07.md#6.4, I-1 |
+| `SYS-REPL-003` | primary stopped, standby left unpromoted: orphan standby | primary-standby |  | phase_07.md#6.4, I-1 |
+| `SYS-REPL-004` | recovery_min_apply_delay: replay lag rises then returns to 0 | primary-standby |  | phase_07.md#6.1, phase_07.md#6.4 |
+| `SYS-REPL-005` | double role reversal: identity survives promote then rejoin | primary-standby |  | phase_07.md#6.4, I-1 |
+| `SYS-REPL-006` | cascading standby keeps its upstream after the parent stops | cascading |  | phase_10.md#9.1, I-1 |
+| `SYS-SLOT-001` | inactive slot retains WAL, event fires | primary-standby |  | phase_07.md#6.4 |
+| `SYS-TOPO-001` | primary and standby share one system_identifier | primary-standby | sì | phase_07.md#4.1 |
+| **Reset dei contatori** | | | | |
+| `SYS-RESET-001` | restart: no negative rate, no spike | standalone | sì | phase_06.md#5.7, I-2 |
+| `SYS-RESET-002` | pg_stat_statements_reset(): discarded delta, named reset event, recovers | standalone |  | phase_06.md#5.7, I-2 |
+| **Rete, agent e permessi** | | | | |
+| `SYS-AGENT-001` | agent restart with its volume keeps the instance id | standalone | sì | phase_06.md#5.7, I-1 |
+| `SYS-AGENT-002` | agent restart WITHOUT its volume: a new instance_id appears (documented failure) | standalone |  | phase_06.md#5.7, IDEA.md#2.2 |
+| `SYS-AGENT-003` | buffer directory on a tiny tmpfs, server stopped until it fills | standalone |  | phase_06.md#5.7, I-7 |
+| `SYS-AGENT-004` | agent container started with a 5-minute clock offset | standalone |  | phase_06.md#5.7 |
+| `SYS-AGENT-005` | UPDATE agents SET revoked_at = now(): next push returns 401, agent stops collecting | standalone |  | phase_06.md#5.7 |
+| `SYS-NET-001` | server outage: buffered samples survive, none dropped, none duplicated | standalone | sì | phase_06.md#5.7, I-3 |
+| `SYS-NET-003` | black hole between agent and PostgreSQL: agent stays responsive | standalone | sì | phase_06.md#5.7 |
+| `SYS-NET-005` | docker pause on PostgreSQL, then unpause: treated as unreachable, recovers cleanly, no duplicate rows | standalone |  | phase_06.md#5.7, I-3 |
+| `SYS-PERM-001` | whole stack green on tier T0 only | standalone | sì | phase_06.md#5.7 |
+| `SYS-PERM-002` | permission tier grants take effect without an agent restart | standalone | sì | phase_11.md#10.3 |
+| **Carico, ASH e lock** | | | | |
+| `SYS-ASH-001` | ASH conservation end to end: idle instance, then 10 known sessions | standalone |  | phase_08.md#7.2, phase_08.md#7.4 |
+| `SYS-ASH-002` | ASH disabled in configuration | standalone |  | phase_08.md#7.4 |
+| `SYS-DEADLOCK-001` | PostgreSQL deadlock increments the database counter once | standalone |  | phase_10.md#9.3, IDEA.md#5 |
+| `SYS-LOAD-002` | workloadctl lock-storm --sessions 50 | standalone |  | phase_06.md#5.7, phase_08.md#7.4, IDEA.md#4.4 |
+| `SYS-LOAD-003` | workloadctl slow-query --sleep 30s --count 3: ASH and pg_stat_statements agree | standalone | sì | phase_08.md#7.4 |
+| `SYS-LOAD-005` | workloadctl race --workers 20 --rows 100: transactionid contention | standalone |  | phase_08.md#7.4 |
+| `SYS-LOAD-008` | workloadctl distinct-queries --count 5000: cardinality budget holds | standalone | sì | phase_06.md#5.7, I-8 |
+| `SYS-LOCK-001` | SELECT FOR UPDATE blocker is visible and clears | standalone |  | phase_10.md#9.3, IDEA.md#5 |
+| **Alerting, advisor e manutenzione** | | | | |
+| `SYS-ADV-001` | advisor reports the exact relation and memory set | standalone |  | phase_10.md#9.5, IDEA.md#7 |
+| `SYS-ADV-002` | advisor degrades query rules when pg_stat_statements is unavailable | primary-standby |  | phase_10.md#9.5, IDEA.md#7 |
+| `SYS-ADV-003` | advisor resolves fixed findings without reopening them | standalone |  | phase_10.md#9.5, IDEA.md#7 |
+| `SYS-ADV-004` | advisor reports the exact durability and memory misconfiguration set | standalone |  | phase_10.md#9.5, IDEA.md#7 |
+| `SYS-ALERT-001` | agent-down alert fires and resolves exactly once | standalone |  | phase_10.md#9.2, I-4 |
+| `SYS-ALERT-002` | webhook retries still deliver one notification | standalone |  | phase_10.md#9.2, I-4 |
+| `SYS-ALERT-003` | alert deduplication survives server leader failover | standalone |  | phase_10.md#9.2, I-4 |
+| `SYS-ALERT-004` | silence suppresses delivery without hiding the firing alert | standalone |  | phase_10.md#9.2, I-4 |
+| `SYS-ARCH-001` | archiver failure is visible and resolves after repair | standalone |  | phase_10.md#9.7, IDEA.md#11 |
+| `SYS-BLOAT-001` | estimated bloat is exposed and exact bloat is optional | standalone |  | phase_10.md#9.4, IDEA.md#5 |
+| `SYS-IDX-001` | unused index finding names the exact index | standalone |  | phase_10.md#9.4, IDEA.md#5 |
+| `SYS-IDX-002` | relation cardinality stays within the reporting budget | standalone |  | phase_10.md#9.4, IDEA.md#5 |
+| `SYS-IDX-003` | duplicate index finding resolves after one index is dropped | standalone |  | phase_10.md#9.4, IDEA.md#5 |
+| `SYS-VAC-001` | autovacuum-off dead tuples fall after VACUUM | standalone |  | phase_10.md#9.4, IDEA.md#5 |
+| **Comandi** | | | | |
+| `SYS-CMD-001` | command plans are accepted and deduplicated | primary-standby |  | phase_10.md#9.6, I-5 |
+| `SYS-CMD-002` | command restrictions are audited without unsafe side effects | primary-standby |  | phase_10.md#9.6, I-5 |
+| `SYS-CMD-003` | claimed commands are at-most-once across restart | primary-standby |  | phase_10.md#9.6, I-5 |
+| `SYS-CMD-004` | expired commands are never executed | primary-standby |  | phase_10.md#9.6, I-5 |
+| **Harness e stack** | | | | |
+| `SYS-DB-001` | database budget: 15 databases, max 10, the most active ones win | standalone |  | phase_06.md#5.7 |
+| `SYS-HARNESS-001` | stack starts healthy, teardown leaves nothing behind | standalone | sì | phase_06.md#5.7 |
+| **Accettazione UI (L5, eseguita dal test Go)** | | | | |
+| `SYS-UI-000` | server serves the authenticated application shell | primary-standby |  | phase_18.md#17.1 |
+| `SYS-UI-001` | failover preserves identity and raises an alert | primary-standby |  | phase_18.md#17.2 |
+| `SYS-UI-002` | unauthenticated navigation cannot restore fleet data | standalone |  | phase_18.md#17.2 |
+| `SYS-UI-003` | agent outage is visible as stale fleet data | standalone |  | phase_18.md#17.2 |
+| `SYS-UI-004` | standalone replay lag stays unknown | standalone |  | phase_18.md#17.2 |
+| `SYS-UI-005` | disabled ASH explains its configuration | standalone |  | phase_18.md#17.2 |
+| `SYS-UI-006` | plan-only execution is audited without query text | primary-standby |  | phase_18.md#17.2 |
+| `SYS-UI-007` | replication and ASH charts render data | primary-standby |  | phase_18.md#17.2 |
+| `SYS-UI-008` | blocking tree shows the lock root and child | standalone |  | phase_18.md#17.2 |
+| `SYS-UI-009` | signal controls enforce tier and confirmation | standalone |  | phase_18.md#17.2 |
+| `SYS-UI-010` | finding mute and unmute update state | standalone |  | phase_18.md#17.2 |
+| `SYS-UI-011` | phase seven routes pass accessibility checks | standalone |  | phase_18.md#17.2 |
+
+Questi ID compaiono nei piani ma non hanno ancora un `Register`, quindi non sono nel catalogo: `SYS-AGENT-006`, `SYS-DB-002`, `SYS-DB-003`, `SYS-HA-001`, `SYS-LOAD-001`, `SYS-LOAD-004`, `SYS-LOAD-006`, `SYS-LOAD-007`, `SYS-NET-002`, `SYS-NET-004`, `SYS-PERM-003`, `SYS-POOL-001`, `SYS-POOL-002`, `SYS-RESET-003`, `SYS-SLOT-002`, `SYS-WAL-001`. Un ID entra nel catalogo quando ha una registrazione.
+
+**Smoke set per PR** (`make test-e2e`, cioè `-run Smoke`, ~20 min): i `TestSmoke_*` di `test/e2e/smoke_test.go`, cioè `SYS-HARNESS-001`, `SYS-TOPO-001`, `SYS-RESET-001`, `SYS-AGENT-001`, `SYS-PERM-001`, `SYS-PERM-002`, `SYS-REPL-001`, `SYS-NET-003`, `SYS-NET-001`, `SYS-LOAD-003`, `SYS-LOAD-008`.
 **Full set**: nightly, tutte le topologie × `AGENT_MODE` × versioni PG.
 
 ---
