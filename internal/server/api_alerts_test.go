@@ -45,6 +45,10 @@ func (s *alertAPITestStore) MarkNotification(context.Context, string, string, st
 }
 func (s *alertAPITestStore) Active(_ context.Context, f alert.Filter) ([]alert.Alert, error) {
 	s.filter = f
+	// Like the store, it returns no more rows than the query limit.
+	if f.Limit > 0 && len(s.alerts) > f.Limit {
+		return s.alerts[:f.Limit], nil
+	}
 	return s.alerts, nil
 }
 
