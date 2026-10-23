@@ -4,6 +4,7 @@ package check
 
 import (
 	"context"
+	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -23,7 +24,8 @@ func scrapeAsT0(t *testing.T, pg *pgtest.PG, c Check, role pgtype.Role) Result {
 }
 
 // INT-INT-001: at T0 on a primary, slru reports the eight caches under the
-// names of 17 and later on every version, wal_directory sizes pg_wal,
+// names of 17 and later on every version, wal_directory sizes pg_wal (and
+// reports nothing under rds-like, which withholds pg_ls_waldir),
 // database_size sizes each database but the templates, database_stats
 // counts temporary files, and recovery reports nothing.
 func TestINTINT001_InternalsOnPrimary(t *testing.T) {
@@ -43,9 +45,16 @@ func TestINTINT001_InternalsOnPrimary(t *testing.T) {
 			"serializable": true, "subtransaction": true, "transaction": true, "other": true,
 		}, caches)
 
+		// The rds-like profile revokes pg_ls_waldir() from pg_monitor, as a
+		// managed service may, and the check then reports nothing rather than
+		// failing every minute. Vanilla keeps the default grant.
 		dir := scrapeAsT0(t, pg, &walDirectoryCheck{}, pgtype.RolePrimary)
-		require.GreaterOrEqual(t, metricValue(dir, "pg_wal_dir_files", nil), 1.0)
-		require.GreaterOrEqual(t, metricValue(dir, "pg_wal_dir_bytes", nil), float64(1<<20))
+		if os.Getenv("PGLENS_PG_PROFILE") == "rds-like" {
+			require.Empty(t, dir.Metrics)
+		} else {
+			require.GreaterOrEqual(t, metricValue(dir, "pg_wal_dir_files", nil), 1.0)
+			require.GreaterOrEqual(t, metricValue(dir, "pg_wal_dir_bytes", nil), float64(1<<20))
+		}
 
 		require.Empty(t, scrapeAsT0(t, pg, &recoveryCheck{}, pgtype.RolePrimary).Metrics)
 
