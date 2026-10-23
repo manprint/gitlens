@@ -278,7 +278,9 @@ func runCommandRestart(ctx context.Context, e *scenario.Env) error {
 	if _, err := lockConn.Exec(ctx, "ROLLBACK"); err != nil {
 		return fmt.Errorf("release restart lock: %w", err)
 	}
-	time.Sleep(6 * time.Second)
+	if err := waitCommandExpired(ctx, e, commandID); err != nil {
+		return err
+	}
 	if err := e.Compose("up", "-d", "pglens-agent"); err != nil {
 		return fmt.Errorf("restart agent: %w", err)
 	}
@@ -324,7 +326,9 @@ func runCommandExpiry(ctx context.Context, e *scenario.Env) error {
 	if err != nil {
 		return err
 	}
-	time.Sleep(6 * time.Second)
+	if err := waitCommandExpired(ctx, e, commandID); err != nil {
+		return err
+	}
 	if err := e.Compose("start", "pglens-agent"); err != nil {
 		return fmt.Errorf("start agent after expiry: %w", err)
 	}
@@ -483,6 +487,27 @@ func waitPlans(ctx context.Context, e *scenario.Env, instanceID string, queryID 
 		time.Sleep(500 * time.Millisecond)
 	}
 	return nil, fmt.Errorf("timed out waiting for %d plan shapes", want)
+}
+
+// waitCommandExpired polls until the command's expires_at has passed on the
+// database clock. The lease scenarios used to sleep a fixed 6 seconds, which
+// expired the command only if the server's TTL was shorter than that.
+func waitCommandExpired(ctx context.Context, e *scenario.Env, commandID string) error {
+	deadline := time.Now().Add(2 * time.Minute)
+	for time.Now().Before(deadline) {
+		var expired bool
+		err := e.DB.QueryRow(ctx,
+			`SELECT expires_at <= now() FROM commands WHERE command_id::text = $1`, commandID).Scan(&expired)
+		if err == nil && expired {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	return fmt.Errorf("command %s never reached its expires_at", commandID)
 }
 
 func waitClaimToken(ctx context.Context, e *scenario.Env, commandID string) (string, error) {

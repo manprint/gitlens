@@ -33,8 +33,12 @@ func init() {
 			const stormDuration = 25 * time.Second
 			stormErr := make(chan error, 1)
 			stormStart := time.Now().UTC()
+			// stormExit is written before the error is sent, so it can be read
+			// once the poll below has received from stormErr.
+			var stormExit time.Time
 			go func() {
 				_, err := e.Workload("lock-storm", "--dsn", dsn, "--sessions", "50", "--duration", stormDuration.String())
+				stormExit = time.Now().UTC()
 				stormErr <- err
 			}()
 
@@ -100,12 +104,23 @@ func init() {
 			// per-second ticks in any window during the storm. Wait for
 			// ASH's 10s aggregation + push_interval latency to actually
 			// deliver the storm's windows before querying (SYS-LOAD-003
-			// already found querying too early finds nothing).
-			select {
-			case <-time.After(15 * time.Second):
-			case <-ctx.Done():
-				return ctx.Err()
+			// already found querying too early finds nothing). The window open
+			// when the storm exited is the last one with rows, so its row,
+			// stamped after the exit, is what the wait is for.
+			stormFlushCtx, cancelStormFlush := context.WithTimeout(ctx, 60*time.Second)
+			defer cancelStormFlush()
+			if err := poll(stormFlushCtx, 2*time.Second, func(ctx context.Context) (bool, error) {
+				var n int
+				err := e.DB.QueryRow(ctx,
+					`SELECT count(*) FROM metrics_ash WHERE instance_id=$1::uuid AND ts > $2`,
+					instanceID, stormExit).Scan(&n)
+				return err == nil && n > 0, err
+			}); err != nil {
+				return fmt.Errorf("the ASH window open when the storm ended never reached the store: %w", err)
 			}
+			// Taken again after the wait, so the storm's last window, stamped
+			// after the first reading, falls inside the query bounds.
+			stormEnd = time.Now().UTC()
 
 			var sawLockWait bool
 			if err := e.DB.QueryRow(ctx,

@@ -5,6 +5,7 @@ package scenario
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -560,14 +561,22 @@ func init() {
 				"-c", "SELECT pg_reload_conf()"); err != nil {
 				return fmt.Errorf("clear recovery_min_apply_delay: %w", err)
 			}
-			// Give the still-pending delayed transaction (up to the
-			// remainder of its original 30s) a chance to apply before the
-			// next write, so the "returns to 0" check reflects the delay
-			// actually being off, not a coincidental gap between samples.
-			select {
-			case <-time.After(30 * time.Second):
-			case <-ctx.Done():
-				return ctx.Err()
+			// Wait until the standby has replayed everything it received, which
+			// includes the still-pending delayed transaction, so the "returns to
+			// 0" check reflects the delay actually being off and not a gap
+			// between samples. The transaction applies within the remainder of
+			// its original 30s; a standby that never catches up fails here.
+			applyCtx, cancelApply := context.WithTimeout(ctx, 60*time.Second)
+			defer cancelApply()
+			if err := poll(applyCtx, 2*time.Second, func(ctx context.Context) (bool, error) {
+				out, err := e.Exec("pg-standby", "psql", "-U", "postgres", "-tAc",
+					"SELECT pg_last_wal_replay_lsn() >= pg_last_wal_receive_lsn()")
+				if err != nil {
+					return false, fmt.Errorf("query standby replay position: %w (output: %s)", err, out)
+				}
+				return strings.TrimSpace(out) == "t", nil
+			}); err != nil {
+				return fmt.Errorf("standby never replayed the delayed transaction: %w", err)
 			}
 			if _, err := e.Exec("pg-primary", "psql", "-U", "postgres", "-c",
 				"INSERT INTO repl004_probe DEFAULT VALUES;"); err != nil {
