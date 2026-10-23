@@ -86,6 +86,11 @@ func (a *API) handlePlans(w http.ResponseWriter, r *http.Request) {
 	for i := range out.Plans {
 		out.Plans[i].Changed = i+1 < len(out.Plans) && out.Plans[i].PlanHash != out.Plans[i+1].PlanHash
 	}
-	out.TotalShapes = len(out.Plans)
+	// A shape is a plan hash; plain and ANALYZE captures of one shape share it.
+	shapes := make(map[string]bool, len(out.Plans))
+	for _, item := range out.Plans {
+		shapes[item.PlanHash] = true
+	}
+	out.TotalShapes = len(shapes)
 	writeJSON(w, http.StatusOK, out)
 }
