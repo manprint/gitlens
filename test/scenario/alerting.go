@@ -250,12 +250,7 @@ func runAlertEpisode(ctx context.Context, e *Env) error {
 	// The server also emits instance_unreachable for the same silence, and the
 	// webhook channel delivers that rule too. The scenario is about agent_down,
 	// so only its deliveries are counted here.
-	var agentDown []receivedNotification
-	for _, body := range bodies {
-		if body.RuleID == "agent_down" {
-			agentDown = append(agentDown, body)
-		}
-	}
+	agentDown := ruleBodies(bodies, "agent_down")
 	if len(agentDown) != 2 || agentDown[0].Phase != "fire" || agentDown[1].Phase != "resolve" {
 		return fmt.Errorf("want exactly agent_down fire+resolve notifications, got %#v (all deliveries: %#v)", agentDown, bodies)
 	}
