@@ -30,6 +30,7 @@ type Stats struct {
 	Segments        int64
 	SamplesDropped  map[string]int64
 	CorruptRecords  int64
+	CutBytes        int64 // bytes removed from segment tails on open: torn writes and unplaceable headers
 	BufferFull      bool
 	LastDropTime    *time.Time
 	LastCorruptTime *time.Time
@@ -93,6 +94,7 @@ func Open(dir string, opts Options) (*Buffer, error) {
 
 	// Load the acked position before the segments are walked: the walk of the
 	// segment that holds the checkpoint starts there.
+	haveCheckpoint := true
 	if err := b.loadAckedPosition(); err != nil {
 		// Without a checkpoint nothing is known to be acked, so start from the
 		// beginning. A checkpoint that exists but cannot be read gets the same
@@ -101,6 +103,7 @@ func Open(dir string, opts Options) (*Buffer, error) {
 		if !errors.Is(err, os.ErrNotExist) {
 			fmt.Fprintf(os.Stderr, "warning: buffer: unreadable acked checkpoint in %s, replaying the retained buffer: %v\n", dir, err)
 		}
+		haveCheckpoint = false
 		b.ackedSegID = 0
 		b.ackedOff = 0
 	}
@@ -149,6 +152,7 @@ func Open(dir string, opts Options) (*Buffer, error) {
 			// placed cannot be counted from the bytes, so the warning names the
 			// size as well.
 			b.stats.CorruptRecords++
+			b.stats.CutBytes += cut
 			tornAt := opts.Clock.Now()
 			b.stats.LastCorruptTime = &tornAt
 			fmt.Fprintf(os.Stderr, "warning: buffer: cut %d unreadable bytes from %s in %s\n", cut, fname, dir)
@@ -175,6 +179,12 @@ func Open(dir string, opts Options) (*Buffer, error) {
 	// disk is acknowledged in that case, so the checkpoint restarts at the
 	// first segment that exists.
 	checkpointSegID, checkpointOff := b.ackedSegID, b.ackedOff
+	// The checkpoint is a segment ID too. The files alone do not show the IDs
+	// the checkpoint has used, so new segments are numbered above it: even when
+	// the corrected checkpoint below cannot be written, nothing reuses its ID.
+	if haveCheckpoint && b.ackedSegID >= b.nextSegID {
+		b.nextSegID = b.ackedSegID + 1
+	}
 	if n := len(b.segments); n == 0 || b.ackedSegID > b.segments[n-1].id {
 		b.ackedSegID = 0
 		b.ackedOff = 0
@@ -195,13 +205,13 @@ func Open(dir string, opts Options) (*Buffer, error) {
 		}
 	}
 
-	// A corrected checkpoint is written before the buffer takes any append. Kept
-	// only in memory, it would come back on the next Open after an unclean exit,
-	// and the new records would be cut or hidden by the stale position.
+	// A corrected checkpoint is written now, before the buffer takes an append:
+	// kept only in memory, it would come back after an unclean exit. If the write
+	// fails, the warning says so and the next ack writes it again. Until then a
+	// position past the end of its segment can hide the appends made in between.
 	if b.ackedSegID != checkpointSegID || b.ackedOff != checkpointOff {
 		if err := b.saveAckedPosition(); err != nil {
-			closeLoaded()
-			return nil, fmt.Errorf("save corrected checkpoint: %w", err)
+			fmt.Fprintf(os.Stderr, "warning: buffer: cannot save the corrected acked checkpoint in %s, keeping it in memory: %v\n", dir, err)
 		}
 	}
 

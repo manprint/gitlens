@@ -1231,6 +1231,9 @@ func TestBuffer_CorruptAckedPrefixKeepsUnackedRecords(t *testing.T) {
 		if n := buf.Stats().CorruptRecords; n != 1 {
 			t.Errorf("CorruptRecords = %d, want 1 for the torn rec-4", n)
 		}
+		if n := buf.Stats().CutBytes; n != 13 {
+			t.Errorf("CutBytes = %d, want 13: rec-4 keeps 13 of its 16 bytes", n)
+		}
 		if err := buf.Append([]byte("rec-5---")); err != nil {
 			t.Fatalf("Append rec-5: %v", err)
 		}
@@ -1502,6 +1505,84 @@ func frameRecord(payload string) []byte {
 	binary.LittleEndian.PutUint32(buf[4:8], computeCRC32C([]byte(payload)))
 	copy(buf[8:], payload)
 	return buf
+}
+
+// TestBuffer_StaleCheckpointSurvivesFailedSave — AB-03: the corrected checkpoint
+// cannot be written, so the stale one stays on disk. New segments must still be
+// numbered above its ID, or an unclean exit would make them look acknowledged.
+func TestBuffer_StaleCheckpointSurvivesFailedSave(t *testing.T) {
+	dir := t.TempDir()
+	buf, err := Open(dir, Options{Clock: clock.System()})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	// 400 records of this size span four segments; draining them all leaves
+	// the checkpoint in the last one.
+	const recSize = 64 * 1024
+	for i := 0; i < 400; i++ {
+		rec := make([]byte, recSize)
+		copy(rec, fmt.Sprintf("old-%03d:", i))
+		if err := buf.Append(rec); err != nil {
+			t.Fatalf("Append %d: %v", i, err)
+		}
+	}
+	if got := len(drainAndAck(t, buf)); got != 400 {
+		t.Fatalf("drained %d old records, want 400", got)
+	}
+	if err := buf.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	segs, err := filepath.Glob(filepath.Join(dir, "*.seg"))
+	if err != nil || len(segs) == 0 {
+		t.Fatalf("no segment files to remove: %v", err)
+	}
+	for _, s := range segs {
+		if err := os.Remove(s); err != nil {
+			t.Fatalf("remove %s: %v", s, err)
+		}
+	}
+
+	// A directory where the checkpoint's temporary file goes makes the write fail.
+	blocker := filepath.Join(dir, ".acked.tmp")
+	if err := os.Mkdir(blocker, 0o755); err != nil {
+		t.Fatalf("block checkpoint write: %v", err)
+	}
+	var reopened *Buffer
+	stderr := captureStderr(t, func() {
+		reopened, err = Open(dir, Options{Clock: clock.System()})
+	})
+	if err != nil {
+		t.Fatalf("Open after cleanup: %v", err)
+	}
+	if !strings.Contains(stderr, "cannot save the corrected acked checkpoint") {
+		t.Errorf("Open printed %q, want a warning about the failed save", stderr)
+	}
+	// 400 fresh records reach the checkpoint's own segment ID and past it.
+	for i := 0; i < 400; i++ {
+		rec := make([]byte, recSize)
+		copy(rec, fmt.Sprintf("new-%03d:", i))
+		if err := reopened.Append(rec); err != nil {
+			t.Fatalf("Append new %d: %v", i, err)
+		}
+	}
+	// No Close: the stale checkpoint is what the next Open finds.
+	if err := os.Remove(blocker); err != nil {
+		t.Fatalf("unblock checkpoint write: %v", err)
+	}
+	buf, err = Open(dir, Options{Clock: clock.System()})
+	if err != nil {
+		t.Fatalf("second Open: %v", err)
+	}
+	defer func() { _ = buf.Close() }()
+	got := drainAndAck(t, buf)
+	if len(got) != 400 {
+		t.Fatalf("delivered %d records written after the cleanup, want 400", len(got))
+	}
+	for i := range got {
+		if prefix := fmt.Sprintf("new-%03d:", i); !strings.HasPrefix(got[i], prefix) {
+			t.Fatalf("record %d starts %q, want %q", i, got[i][:min(len(got[i]), len(prefix))], prefix)
+		}
+	}
 }
 
 // TestBuffer_ZeroFilledTailIsNotDelivered — AB-13: a zero-filled tail, which
