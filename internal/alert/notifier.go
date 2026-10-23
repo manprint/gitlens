@@ -24,9 +24,11 @@ import (
 // record it, so keepUnclaimed reports it instead.
 const maxNotifyAttempts = 5
 
-// claimTimeout bounds one claim of the store. A claim gets its own deadline and
-// not the cycle's: a claim that the cycle cut short would not be counted, so a
-// store that never answers would keep its delivery pending on every pass.
+// claimTimeout bounds one claim of the store. A claim is not tied to the cycle's
+// context: a claim the store has started may already have written its row, and
+// it must be allowed to finish, or the delivery it won would be reported
+// undelivered instead of sent. The claim's own deadline keeps a store that never
+// answers from holding up the pass.
 var claimTimeout = 2 * time.Second
 
 // undelivered counts the unclaimed deliveries this process gave up on. It is

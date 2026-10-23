@@ -668,11 +668,13 @@ func TestChannelNotifier_AHungClaimUsesUpItsAttempts(t *testing.T) {
 	require.Zero(t, slack.sent)
 }
 
-// TestChannelNotifier_AClaimCutByTheCycleStillCounts pins that the cycle's end
-// does not decide a claim. Every pass's cycle ends before the claim's own
-// deadline, so each claim runs past the cycle, and its failure still counts. A
-// rule that counted a claim only while the cycle was live would count none of
-// them, and the delivery would never be given up.
+// TestChannelNotifier_AClaimCutByTheCycleStillCounts pins that a claim which
+// fails after the cycle has ended still counts. Every pass's cycle ends before
+// the claim's own deadline, so each claim runs past the cycle, and its failure
+// still counts. A rule that counted a claim only while the cycle was live would
+// count none of them, and the delivery would never be given up. A claim that the
+// store accepts after the cycle has ended is pinned by
+// TestChannelNotifier_AClaimTheStoreAcceptedAfterTheCycleEndsIsDelivered.
 func TestChannelNotifier_AClaimCutByTheCycleStillCounts(t *testing.T) {
 	restore := claimTimeout
 	claimTimeout = 60 * time.Millisecond
@@ -698,6 +700,56 @@ func TestChannelNotifier_AClaimCutByTheCycleStillCounts(t *testing.T) {
 	require.Equal(t, before+1, UndeliveredNotifications())
 	require.Equal(t, maxNotifyAttempts, store.calls)
 	require.Zero(t, slack.sent)
+}
+
+// lateClaimStore records the claim row and ends the cycle while it does so, as a
+// cycle that runs out during a store call does. It answers with the context it
+// was given, so a store bound to the cycle reports that context's end although
+// the row is already on record.
+type lateClaimStore struct {
+	markStore
+	endCycle context.CancelFunc
+	calls    int
+	row      bool
+}
+
+func (s *lateClaimStore) ClaimNotification(ctx context.Context, _, _, _ string, _ Alert) (bool, error) {
+	s.calls++
+	if s.row {
+		return false, nil
+	}
+	s.row = true
+	s.endCycle()
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// TestChannelNotifier_AClaimTheStoreAcceptedAfterTheCycleEndsIsDelivered — a claim
+// that the store accepts is not cut by the end of the cycle that asked for it, so
+// its delivery is sent on the next pass. Cut, the claim would fail with its row on
+// record, and the next pass would report the delivery undelivered.
+func TestChannelNotifier_AClaimTheStoreAcceptedAfterTheCycleEndsIsDelivered(t *testing.T) {
+	a := Alert{Key: "k", RuleID: "r", Severity: SeverityWarning, State: StateFiring, StartedAt: time.Unix(1, 0), LastEvalAt: time.Unix(1, 0)}
+	cycle, endCycle := context.WithCancel(context.Background())
+	defer endCycle()
+	store := &lateClaimStore{endCycle: endCycle}
+	slack := &testChannel{name: "slack"}
+	n := NewChannelNotifier(store, slack)
+	retrier := n.(interface{ Retry(context.Context) error })
+	before := UndeliveredNotifications()
+
+	require.ErrorIs(t, n.Notify(cycle, a), context.Canceled, "the send did not begin before the cycle ended")
+	require.Zero(t, slack.sent)
+	require.NoError(t, retrier.Retry(context.Background()), "a delivery is not sent again in the pass that failed it")
+	require.Zero(t, slack.sent)
+	require.NoError(t, retrier.Retry(context.Background()))
+	require.Equal(t, 1, slack.sent)
+	require.NoError(t, retrier.Retry(context.Background()))
+	require.Equal(t, 1, slack.sent, "a delivery is sent once")
+	require.Equal(t, 1, store.calls, "the claim is asked once")
+	require.Equal(t, before, UndeliveredNotifications())
 }
 
 // TestChannelNotifier_ANewerTransitionDropsItsPendingDelivery — without an engine,
