@@ -14,16 +14,40 @@ import (
 // removed before hashing and the result never contains any part of the DSN,
 // so a fingerprint is safe to log; a DSN never is.
 //
-// Normalization, in order: parse the DSN; drop the password; move a host and
-// port given in the query into the authority when the authority has none
-// (Unix socket and host-in-query DSNs); lowercase host unless it is a socket
+// Normalization, in order: parse the DSN; drop the password, whether it is in
+// the userinfo or in the query, where pgx reads it too; move a host and port
+// given in the query into the authority when the authority has none (Unix
+// socket and host-in-query DSNs); lowercase host unless it is a socket
 // directory; apply the default port 5432 when absent; sort query parameters by
 // key and drop those that do not affect target identity (application_name,
-// connect_timeout, statement_timeout, sslmode); re-render; SHA-256; hex.
+// connect_timeout, statement_timeout, sslmode, password, sslpassword); re-render;
+// SHA-256; hex.
 //
 // A DSN that names no host at all connects to the local default socket, so
 // its identity is that of the local server: the empty host, as pgx reads it.
 func Fingerprint(dsn string) (string, error) {
+	return fingerprint(dsn, false)
+}
+
+// legacyFingerprint is the fingerprint the rule before Fingerprint gave the DSN,
+// when a password written in its query still counted toward the identity. It
+// is the empty string when that rule gives the same value as Fingerprint, which
+// is every DSN without such a password.
+func legacyFingerprint(dsn string) string {
+	current, err := fingerprint(dsn, false)
+	if err != nil {
+		return ""
+	}
+	legacy, err := fingerprint(dsn, true)
+	if err != nil || legacy == current {
+		return ""
+	}
+	return legacy
+}
+
+// fingerprint implements Fingerprint. keepQuerySecrets selects the rule before
+// the query password was dropped from the identity, for legacyFingerprint only.
+func fingerprint(dsn string, keepQuerySecrets bool) (string, error) {
 	if dsn == "" {
 		return "", fmt.Errorf("empty dsn")
 	}
@@ -70,11 +94,17 @@ func Fingerprint(dsn string) (string, error) {
 	// Database (path without leading slash)
 	dbname := strings.TrimPrefix(u.Path, "/")
 
+	// A password in the query is a secret: it must not reach the hash, or a
+	// rotated one would register the server as a new instance.
 	ignore := map[string]bool{
 		"application_name":  true,
 		"connect_timeout":   true,
 		"statement_timeout": true,
 		"sslmode":           true,
+	}
+	if !keepQuerySecrets {
+		ignore["password"] = true
+		ignore["sslpassword"] = true
 	}
 	var keys []string
 	for k := range values {

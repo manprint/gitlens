@@ -589,11 +589,7 @@ func (m *Manager) localIdentity() (pgtype.InstanceID, uuid.UUID, error) {
 	if err != nil {
 		return pgtype.InstanceID{}, uuid.Nil, fmt.Errorf("open identity store: %w", err)
 	}
-	fingerprint, err := identity.Fingerprint(m.target.dsn)
-	if err != nil {
-		return pgtype.InstanceID{}, uuid.Nil, fmt.Errorf("fingerprint DSN: %w", err)
-	}
-	instanceID, _, err := store.InstanceID(fingerprint)
+	instanceID, _, err := store.InstanceIDForDSN(m.target.dsn)
 	if err != nil {
 		return pgtype.InstanceID{}, uuid.Nil, fmt.Errorf("get instance id: %w", err)
 	}
