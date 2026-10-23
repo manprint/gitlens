@@ -99,7 +99,7 @@ func (s *pgStore) MarkNotification(ctx context.Context, dedupID, channel, phase 
 	if sendErr != nil {
 		msg = sendErr.Error()
 	}
-	_, err := s.pool.Exec(ctx, `UPDATE notifications SET ok=$1, attempts=$2, error=$3, sent_at=now() WHERE alert_key=$4 AND channel=$5 AND phase=$6`, ok, attempts, msg, dedupID, channel, phase)
+	_, err := s.pool.Exec(ctx, `UPDATE notifications SET ok=$1, attempts=$2, error=$3, sent_at=now() WHERE tenant_id='default' AND alert_key=$4 AND channel=$5 AND phase=$6`, ok, attempts, msg, dedupID, channel, phase)
 	return err
 }
 

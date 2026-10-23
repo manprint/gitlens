@@ -114,11 +114,16 @@ func renderAlert(v alert.Alert) alertJSON {
 	return o
 }
 
+// activeSilencesSQL leads with the tenant because silences_window_idx does: the
+// tenant is constant, but without it the window index cannot seek before
+// PostgreSQL 18, and every list and detail call read the whole table.
+const activeSilencesSQL = `SELECT silence_id,matchers,reason,starts_at,ends_at FROM silences WHERE tenant_id='default' AND starts_at <= now() AND ends_at > now()`
+
 func (a *AlertAPI) activeSilences(ctx context.Context) ([]alert.Silence, error) {
 	if a.pool == nil {
 		return nil, nil
 	}
-	rows, err := a.pool.Query(ctx, `SELECT silence_id,matchers,reason,starts_at,ends_at FROM silences WHERE starts_at <= now() AND ends_at > now()`)
+	rows, err := a.pool.Query(ctx, activeSilencesSQL)
 	if err != nil {
 		return nil, err
 	}
@@ -365,6 +370,11 @@ func (a *AlertAPI) deleteSilence(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// alertDetailSQL leads with the tenant so the primary key (tenant_id, alert_key,
+// started_at) serves the lookup on every PostgreSQL major. Without it, PostgreSQL
+// 15 to 17 cannot seek on alert_key alone and read the whole alerts table.
+const alertDetailSQL = `SELECT alert_key,rule_id,severity,state,cluster_id,instance_id,datname,labels,value,summary,started_at,last_eval_at,resolved_at FROM alerts WHERE tenant_id='default' AND alert_key=$1 ORDER BY started_at DESC LIMIT 1`
+
 func (a *AlertAPI) alertDetail(w http.ResponseWriter, r *http.Request) {
 	if a.pool == nil {
 		writeError(w, 503, "alert store unavailable", "")
@@ -388,7 +398,7 @@ func (a *AlertAPI) alertDetail(w http.ResponseWriter, r *http.Request) {
 	var raw []byte
 	var cluster *int64
 	var iid *uuid.UUID
-	err := a.pool.QueryRow(r.Context(), `SELECT alert_key,rule_id,severity,state,cluster_id,instance_id,datname,labels,value,summary,started_at,last_eval_at,resolved_at FROM alerts WHERE alert_key=$1 ORDER BY started_at DESC LIMIT 1`, key).Scan(&v.Key, &v.RuleID, &v.Severity, &v.State, &cluster, &iid, &v.Datname, &raw, &v.Value, &v.Summary, &v.StartedAt, &v.LastEvalAt, &v.ResolvedAt)
+	err := a.pool.QueryRow(r.Context(), alertDetailSQL, key).Scan(&v.Key, &v.RuleID, &v.Severity, &v.State, &cluster, &iid, &v.Datname, &raw, &v.Value, &v.Summary, &v.StartedAt, &v.LastEvalAt, &v.ResolvedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, 404, "alert not found", key)
 		return
