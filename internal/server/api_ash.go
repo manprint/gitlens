@@ -225,8 +225,10 @@ func (a *AshAPI) handleASH(w http.ResponseWriter, r *http.Request) {
 // dimension, one row per window and key.
 func (a *AshAPI) queryASHBuckets(ctx context.Context, instanceID uuid.UUID, from, to *time.Time, database string, filters ashFilters, limit int) ([]ashBucket, int, error) {
 	where, args := ashWhere(instanceID, from, to, database, filters)
+	// One row past the limit is read, because only a row beyond it shows that
+	// the answer was cut. A complete answer of exactly limit rows has none.
 	query := fmt.Sprintf(`SELECT ts, samples, window_ticks, datname, wait_event_type, wait_event, state, queryid
-		FROM metrics_ash WHERE %s ORDER BY ts DESC LIMIT %d`, where, limit)
+		FROM metrics_ash WHERE %s ORDER BY ts DESC LIMIT %d`, where, limit+1)
 
 	rows, err := a.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -249,13 +251,20 @@ func (a *AshAPI) queryASHBuckets(ctx context.Context, instanceID uuid.UUID, from
 		return nil, 0, err
 	}
 	// A truncated answer counts the ticks of the windows it shows. The rows come
-	// newest first, so its last row is the oldest, and the tick scan stops there
-	// rather than reading the whole retained history on every request. A
-	// complete answer already read everything it matched, so it counts the
-	// range it was asked for.
+	// newest first, so its last shown row is the oldest, and the tick scan starts
+	// there rather than at the start of the range, which keeps a dense filter
+	// from reading the whole retained history on every request. The scan still
+	// runs to the range end and drops the filters, so a filter that matches
+	// sparsely over a long history scans the windows from that row to the end of
+	// the range. A complete answer already read everything it matched, so it
+	// counts the range it was asked for.
+	truncated := len(buckets) > limit
+	if truncated {
+		buckets = buckets[:limit]
+	}
 	tickFrom := from
-	if n := len(buckets); n > 0 && n >= limit {
-		oldest := buckets[n-1].TS
+	if truncated {
+		oldest := buckets[limit-1].TS
 		tickFrom = &oldest
 	}
 	totalTicks, err := a.queryASHTicks(ctx, instanceID, tickFrom, to)

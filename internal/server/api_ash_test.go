@@ -495,11 +495,18 @@ func TestAshAPI_UngroupedRowsReportTheAgentWindow(t *testing.T) {
 	require.Equal(t, ashWindowSeconds, resp.ResolutionSeconds)
 }
 
-// ashArgsPool records the arguments of each QueryRow, so a test can check the
-// bounds the tick count was given.
+// ashArgsPool records the query text and the arguments of each read, so a test
+// can check the row limit that was asked for and the bounds the tick count was
+// given.
 type ashArgsPool struct {
 	*mockPool
-	rowArgs [][]any
+	querySQL []string
+	rowArgs  [][]any
+}
+
+func (p *ashArgsPool) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	p.querySQL = append(p.querySQL, sql)
+	return p.mockPool.Query(ctx, sql, args...)
 }
 
 func (p *ashArgsPool) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
@@ -508,15 +515,18 @@ func (p *ashArgsPool) QueryRow(ctx context.Context, sql string, args ...any) pgx
 }
 
 // A truncated ungrouped answer counts the ticks of the windows it shows, so the
-// tick scan stops at its oldest row instead of reading the whole retained
-// history. A complete answer counts the range it was asked for, here none.
+// tick scan stops at its oldest shown row instead of reading the whole retained
+// history. A complete answer counts the range it was asked for, here none. The
+// read asks for one row past the limit, and that row is not returned.
 func TestAshAPI_UngroupedTicksStopAtTheAnswersOldestRow(t *testing.T) {
 	t.Parallel()
 	ts := time.Now().Truncate(time.Second)
-	oldest := ts.Add(-10 * time.Second)
+	middle := ts.Add(-10 * time.Second)
+	oldest := ts.Add(-20 * time.Second)
 	rows := func() *mockRows {
 		return &mockRows{rows: [][]any{
 			{ts, 5, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
+			{middle, 2, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
 			{oldest, 2, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
 		}}
 	}
@@ -525,11 +535,13 @@ func TestAshAPI_UngroupedTicksStopAtTheAnswersOldestRow(t *testing.T) {
 		queryResults: []*mockRows{rows()},
 		queryRowVals: []*mockRow{{vals: []any{600}}},
 	}}
-	_, _, err := (&AshAPI{pool: truncated}).queryASHBuckets(context.Background(), uuid.New(), nil, nil, "", ashFilters{}, 2)
+	buckets, _, err := (&AshAPI{pool: truncated}).queryASHBuckets(context.Background(), uuid.New(), nil, nil, "", ashFilters{}, 2)
 	require.NoError(t, err)
+	require.Len(t, buckets, 2, "the row read past the limit is not returned")
+	require.Contains(t, truncated.querySQL[0], "ORDER BY ts DESC LIMIT 3")
 	require.Len(t, truncated.rowArgs, 1)
 	require.Len(t, truncated.rowArgs[0], 2, "instance and a lower bound")
-	require.True(t, truncated.rowArgs[0][1].(time.Time).Equal(oldest), "the bound is the oldest shown window")
+	require.True(t, truncated.rowArgs[0][1].(time.Time).Equal(middle), "the bound is the oldest shown window")
 
 	complete := &ashArgsPool{mockPool: &mockPool{
 		queryResults: []*mockRows{rows()},
@@ -539,6 +551,28 @@ func TestAshAPI_UngroupedTicksStopAtTheAnswersOldestRow(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, complete.rowArgs, 1)
 	require.Len(t, complete.rowArgs[0], 1, "a complete answer has no lower bound when none was asked")
+}
+
+// A complete answer of exactly limit rows is not a truncated one. The read asks
+// for one row past the limit and gets none back, so the tick count keeps the
+// range's bounds and no lower bound is set.
+func TestAshAPI_ExactlyLimitRowsIsACompleteAnswer(t *testing.T) {
+	t.Parallel()
+	ts := time.Now().Truncate(time.Second)
+	pool := &ashArgsPool{mockPool: &mockPool{
+		queryResults: []*mockRows{{rows: [][]any{
+			{ts, 5, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
+			{ts.Add(-10 * time.Second), 2, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
+		}}},
+		queryRowVals: []*mockRow{{vals: []any{600}}},
+	}}
+	buckets, ticks, err := (&AshAPI{pool: pool}).queryASHBuckets(context.Background(), uuid.New(), nil, nil, "", ashFilters{}, 2)
+	require.NoError(t, err)
+	require.Len(t, buckets, 2)
+	require.Equal(t, 600, ticks)
+	require.Contains(t, pool.querySQL[0], "ORDER BY ts DESC LIMIT 3")
+	require.Len(t, pool.rowArgs, 1)
+	require.Len(t, pool.rowArgs[0], 1, "a complete answer of exactly limit rows has no lower bound")
 }
 
 // The top list's ticks CTE is the range's total and every entry carries it, so
