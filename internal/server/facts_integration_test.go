@@ -146,7 +146,9 @@ func TestINTFACT008_CompleteResultReplacesItsFacts(t *testing.T) {
 		env := wire.Envelope{ProtocolVersion: wire.ProtocolVersionCurrent, AgentID: uuid.NewString(), SentAt: results[0].TS, Instances: []wire.Instance{{InstanceID: instance, ClusterID: "28", Role: "primary", Results: results}}}
 		assertPush(t, factsRouter(pool), env, http.StatusAccepted)
 	}
-	def := func(key string) wire.Fact { return wire.Fact{Kind: "index_def", Key: key, ValueText: "CREATE INDEX " + key} }
+	def := func(key string) wire.Fact {
+		return wire.Fact{Kind: "index_def", Key: key, ValueText: "CREATE INDEX " + key}
+	}
 	facts := func() []string {
 		rows, err := pool.Query(ctx, `SELECT datname || ':' || kind || ':' || key FROM object_facts WHERE instance_id=$1 AND kind IN ('index_def', 'setting') ORDER BY 1`, instance)
 		require.NoError(t, err)
