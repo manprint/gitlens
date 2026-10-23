@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/shirou/gopsutil/v4/common"
 	"github.com/shirou/gopsutil/v4/cpu"
@@ -30,12 +31,14 @@ type Sample struct {
 // Collector reads host metrics using gopsutil's context-scoped path overrides.
 type Collector struct {
 	procPath, sysPath string
+	now               func() time.Time // overridable in tests
 	mu                sync.Mutex
 	previous          *cpu.TimesStat
+	cgroupCPU         *cgroupCPUReading // last container CPU reading, nil before the first
 }
 
 func NewCollector(procPath, sysPath string) *Collector {
-	return &Collector{procPath: procPath, sysPath: sysPath}
+	return &Collector{procPath: procPath, sysPath: sysPath, now: time.Now}
 }
 
 func (c *Collector) context(ctx context.Context) context.Context {

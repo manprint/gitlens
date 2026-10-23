@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const cgroupV1Unlimited = uint64(1 << 62)
@@ -14,7 +15,9 @@ const cgroupV1Unlimited = uint64(1 << 62)
 func (c *Collector) applyCgroup(s *Sample) {
 	root := filepath.Join(c.sysPath, "fs", "cgroup")
 	if _, err := os.Stat(filepath.Join(root, "cgroup.controllers")); err == nil {
-		applyV2(c.ownCgroupDir(root), s)
+		dir := c.ownCgroupDir(root)
+		applyV2(dir, s)
+		c.applyV2CPURatio(dir, s)
 		return
 	}
 	if _, err := os.Stat(filepath.Join(root, "memory", "memory.limit_in_bytes")); err == nil {
@@ -59,6 +62,61 @@ func (c *Collector) ownCgroupDir(root string) string {
 		return root
 	}
 	return root
+}
+
+// cgroupCPUReading is a cgroup's cumulative CPU time at one moment.
+type cgroupCPUReading struct {
+	usageUsec uint64
+	at        time.Time
+}
+
+// applyV2CPURatio makes the CPU ratio the share of the cgroup's own quota used
+// since the previous sample. The host ratio is host-wide, so next to a quota
+// that describes the container it reads as an idle container: a container at
+// its 2-CPU quota on a 16-core host showed 12.5%. Without a quota the host is
+// the resource, and the host ratio stands.
+func (c *Collector) applyV2CPURatio(dir string, s *Sample) {
+	quotaCores, hasQuota := readCPUQuota(dir)
+	usage, hasUsage := readStatField(filepath.Join(dir, "cpu.stat"), "usage_usec")
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !hasQuota || !hasUsage {
+		c.cgroupCPU = nil
+		return
+	}
+	now := c.now()
+	prev := c.cgroupCPU
+	c.cgroupCPU = &cgroupCPUReading{usageUsec: usage, at: now}
+	if prev == nil {
+		s.CPUUsedRatio = nil
+		return
+	}
+	ratio := 0.0
+	if elapsed := now.Sub(prev.at); elapsed > 0 && usage > prev.usageUsec {
+		used := float64(usage - prev.usageUsec)
+		available := elapsed.Seconds() * 1e6 * quotaCores
+		ratio = math.Min(used/available, 1)
+	}
+	s.CPUUsedRatio = &ratio
+}
+
+// readCPUQuota is the cgroup v2 CPU quota in cores, unrounded. ok is false when
+// the cgroup has no quota.
+func readCPUQuota(dir string) (float64, bool) {
+	b, err := os.ReadFile(filepath.Join(dir, "cpu.max"))
+	if err != nil {
+		return 0, false
+	}
+	parts := strings.Fields(string(b))
+	if len(parts) != 2 || parts[0] == "max" {
+		return 0, false
+	}
+	q, e1 := strconv.ParseUint(parts[0], 10, 64)
+	p, e2 := strconv.ParseUint(parts[1], 10, 64)
+	if e1 != nil || e2 != nil || p == 0 || q == 0 {
+		return 0, false
+	}
+	return float64(q) / float64(p), true
 }
 
 // readStatField reads the value of one "key value" line of a cgroup stat file.

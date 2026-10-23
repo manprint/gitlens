@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -172,4 +173,57 @@ func TestCgroup_OwnCgroupPathOutsideMountFallsBackToRoot(t *testing.T) {
 		NewCollector(procDir, sysDir).applyCgroup(&s)
 		require.Equal(t, uint64(1024), *s.MemTotalBytes, line)
 	}
+}
+
+// Under a CPU quota the ratio is the share of that quota the container used
+// since the last sample. The first reading has nothing to compare with, and
+// usage above the quota is clamped to a full quota.
+func TestCgroup_CPURatioIsShareOfOwnQuota(t *testing.T) {
+	procDir, sysDir := t.TempDir(), t.TempDir()
+	writeCgroupFiles(t, procDir, map[string]string{"self/cgroup": "0::/\n"})
+	root := filepath.Join(sysDir, "fs", "cgroup")
+	writeCgroupFiles(t, root, map[string]string{
+		"cgroup.controllers": "cpu memory\n",
+		"cpu.max":            "200000 100000\n", // 2 cores
+		"cpu.stat":           "usage_usec 1000000\n",
+	})
+	c := NewCollector(procDir, sysDir)
+	now := time.Unix(1000, 0)
+	c.now = func() time.Time { return now }
+
+	host := 0.125
+	s := Sample{Source: "host", CPUUsedRatio: &host}
+	c.applyCgroup(&s)
+	require.Nil(t, s.CPUUsedRatio)
+
+	// One CPU-second in one second is half of a 2-core quota.
+	now = now.Add(time.Second)
+	writeCgroupFiles(t, root, map[string]string{"cpu.stat": "usage_usec 2000000\n"})
+	s = Sample{Source: "host", CPUUsedRatio: &host}
+	c.applyCgroup(&s)
+	require.InDelta(t, 0.5, *s.CPUUsedRatio, 1e-9)
+
+	// Four CPU-seconds in one second is more than the quota: clamped to one.
+	now = now.Add(time.Second)
+	writeCgroupFiles(t, root, map[string]string{"cpu.stat": "usage_usec 6000000\n"})
+	s = Sample{Source: "host", CPUUsedRatio: &host}
+	c.applyCgroup(&s)
+	require.InDelta(t, 1.0, *s.CPUUsedRatio, 1e-9)
+}
+
+// Without a quota the host is the resource, so the host ratio stands.
+func TestCgroup_CPURatioKeepsHostWithoutQuota(t *testing.T) {
+	procDir, sysDir := t.TempDir(), t.TempDir()
+	writeCgroupFiles(t, procDir, map[string]string{"self/cgroup": "0::/\n"})
+	root := filepath.Join(sysDir, "fs", "cgroup")
+	writeCgroupFiles(t, root, map[string]string{
+		"cgroup.controllers": "cpu memory\n",
+		"cpu.max":            "max 100000\n",
+		"cpu.stat":           "usage_usec 1000000\n",
+	})
+	c := NewCollector(procDir, sysDir)
+	host := 0.125
+	s := Sample{Source: "host", CPUUsedRatio: &host}
+	c.applyCgroup(&s)
+	require.Equal(t, 0.125, *s.CPUUsedRatio)
 }
