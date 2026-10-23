@@ -481,7 +481,7 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 		edgeSyncCount := 0
 		// The newest sighting at each endpoint. A silent row that a later row
 		// has taken over is a predecessor of that instance: it is still listed,
-		// but its silence does not count against the cluster.
+		// but it counts neither as down nor as the primary or a standby.
 		newestSeen := map[clusterEndpoint]time.Time{}
 		for _, row := range instanceRows[c.idDB] {
 			ep := clusterEndpoint{row.addr, row.port}
@@ -495,7 +495,7 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 			if !up && !superseded {
 				anyDown = true
 			}
-			if row.role == "standby" {
+			if row.role == "standby" && !superseded {
 				standbyCount++
 			}
 			if row.role == "primary" && !superseded {
@@ -514,7 +514,7 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 			// instances.role row, so both rows legitimately say "primary"
 			// for a while after a real failover, and the old one kept
 			// winning).
-			if row.role == "primary" && (!hasPrimary || row.lastSeen.After(primaryLastSeen)) {
+			if row.role == "primary" && !superseded && (!hasPrimary || row.lastSeen.After(primaryLastSeen)) {
 				s := row.id.String()
 				primaryID = &s
 				primaryLastSeen = row.lastSeen

@@ -669,6 +669,46 @@ func TestAPI_MockPool_Clusters_TwoLivePrimariesAtOneEndpointAreCritical(t *testi
 	require.Equal(t, "critical", resp[0].Health)
 }
 
+// A superseded row is a predecessor, so it is neither the cluster's primary nor
+// one of its standbys: the primary shown is the newest row that is not one,
+// and the standby count covers the rows that are. Every row here is silent, so
+// the cluster is degraded, not critical, and the primary shown is the one row
+// that still counts as a primary.
+func TestAPI_MockPool_Clusters_SupersededRowsAreNotPrimaryOrStandby(t *testing.T) {
+	t.Parallel()
+	cid := pgtype.ClusterID(9005)
+	cidDB := store.ToDB(cid)
+	primaryID := uuid.NewString()
+	pool := &mockPool{
+		queryResults: []*mockRows{
+			{rows: [][]any{{cidDB, nil, "manual"}}},
+			{rows: [][]any{
+				// The former primary at 10.0.6.1 was rebuilt as a standby there.
+				{cidDB, uuid.NewString(), "10.0.6.1", 5432, "primary", 170000, "T0", time.Now().Add(-10 * time.Minute)},
+				{cidDB, uuid.NewString(), "10.0.6.1", 5432, "standby", 170000, "T0", time.Now().Add(-5 * time.Minute)},
+				{cidDB, primaryID, "10.0.6.2", 5432, "primary", 170000, "T0", time.Now().Add(-20 * time.Minute)},
+				// A standby at 10.0.6.3 was rebuilt in place.
+				{cidDB, uuid.NewString(), "10.0.6.3", 5432, "standby", 170000, "T0", time.Now().Add(-30 * time.Minute)},
+				{cidDB, uuid.NewString(), "10.0.6.3", 5432, "standby", 170000, "T0", time.Now().Add(-2 * time.Minute)},
+			}},
+		},
+	}
+	api := &API{pool: pool}
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/clusters", http.NoBody)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp []clusterResp
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp, 1)
+	require.NotNil(t, resp[0].Primary)
+	require.Equal(t, primaryID, *resp[0].Primary, "a superseded former primary is not the primary shown")
+	require.Equal(t, 2, resp[0].StandbyCount, "superseded standby rows are not counted as standbys")
+	require.Equal(t, "degraded", resp[0].Health)
+}
+
 func TestAPI_MockPool_Clusters_QueryError(t *testing.T) {
 	t.Parallel()
 	pool := &mockPool{queryErrs: []error{errors.New("db down")}}
