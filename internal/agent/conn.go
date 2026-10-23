@@ -926,6 +926,12 @@ func (m *Manager) MonitorsDatabase(datname string) bool {
 
 var _ check.DatabaseMonitor = (*Manager)(nil)
 
+// The vacuum check gates on MonitorsDatabase and connects through
+// ScheduledConnFor. The check package only falls back to ConnFor when this
+// interface is not met, so the assertion keeps a signature change from doing so
+// unnoticed.
+var _ check.ScheduledConnector = (*Manager)(nil)
+
 const statementsInstalled = `SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements')`
 
 // LocateStatements chooses the database whose pg_stat_statements view the

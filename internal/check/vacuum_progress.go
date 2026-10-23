@@ -175,8 +175,10 @@ func currentDatabase(ctx context.Context, conn Conn) (string, error) {
 // database its connection is attached to. The row's own database is read
 // through its own connection, and only when the agent collects from it: the
 // connection manager would otherwise open a pool to a database the agent does
-// not monitor. When the name cannot be read it stays empty, and the relid still
-// identifies the relation.
+// not monitor. The gate and the connection both use the running schedule's set,
+// so a database the discovery has since ranked out is still read, and a
+// discovery is not repeated for every row. When the name cannot be read it
+// stays empty, and the relid still identifies the relation.
 func vacuumRelname(ctx context.Context, t Target, timeout time.Duration, shared Conn, maintenance, datname string, relid uint32) string {
 	if relid == 0 {
 		return ""
@@ -186,7 +188,7 @@ func vacuumRelname(ctx context.Context, t Target, timeout time.Duration, shared 
 		if !monitorsDatabase(t, datname) {
 			return ""
 		}
-		other, err := t.ConnFor(ctx, datname)
+		other, err := connectScheduled(ctx, t, datname)
 		if err != nil {
 			return ""
 		}
