@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 
 import { useCreateCommand } from '@/api/commands'
 import type { PermTier } from '@/api/types'
@@ -68,7 +69,7 @@ function actionButton(kind: SignalKind, onClick: () => void, disabled = false) {
   )
 }
 
-function commandStatus(handle: CommandHandle, instanceId?: string) {
+function commandStatus(handle: CommandHandle) {
   const command = handle.command.data
   if (!command) return null
   const terminal = isTerminalCommandState(command.state)
@@ -76,15 +77,13 @@ function commandStatus(handle: CommandHandle, instanceId?: string) {
   return (
     <p role="status" className="mt-2 text-sm">
       {describeCommandState(command.state, command.error)}
-      {terminal && instanceId ? (
+      {terminal ? (
         <>
           {' '}
-          <a
-            className="text-primary underline underline-offset-2"
-            href={`/api/v1/instances/${encodeURIComponent(instanceId)}/command-audit`}
-          >
+          {/* The audit is a section of Settings; its API endpoint returns raw JSON. */}
+          <Link className="text-primary underline underline-offset-2" to="/settings">
             View command audit
-          </a>
+          </Link>
         </>
       ) : null}
     </p>
@@ -172,8 +171,8 @@ export function SignalActions({
           {actionButton('terminate', () => setOpenKind('terminate'), true)}
         </>
       ) : null}
-      {commandStatus(cancelCommand, instanceId)}
-      {commandStatus(terminateCommand, instanceId)}
+      {commandStatus(cancelCommand)}
+      {commandStatus(terminateCommand)}
       {cancelCommand.error ? (
         <ErrorState
           endpoint="cancel command"

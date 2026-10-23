@@ -129,7 +129,7 @@ describe('SignalActions', () => {
     )
     expect(screen.getByRole('link', { name: 'View command audit' })).toHaveAttribute(
       'href',
-      `/api/v1/instances/${INSTANCE_ID}/command-audit`,
+      '/settings',
     )
   })
 
