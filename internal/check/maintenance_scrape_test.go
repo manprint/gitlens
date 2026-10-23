@@ -102,6 +102,7 @@ func TestIndexStats_ScrapeCoversRows(t *testing.T) {
 			return &mockRows{rows: [][]any{{
 				"public", "t", "i", int64(1), int64(2), int64(3), int64(4),
 				int64(5), int64(4096), true, false, true, uint32(16384),
+				nil, nil, nil,
 			}}}, nil
 		},
 		queryRowFunc: func(context.Context, string, ...any) pgx.Row {
@@ -213,6 +214,7 @@ func TestRelationSizes_VanishedRelationIsLeftOut(t *testing.T) {
 				return &mockRows{rows: [][]any{{
 					"public", "t", "i", int64(1), int64(2), int64(3), int64(4),
 					int64(5), int64(4096), true, false, true, uint32(16384),
+					nil, nil, nil,
 				}}}, nil
 			},
 			queryRowFunc: vanished,
@@ -277,6 +279,7 @@ func indexStatsFixture(indexname string, oid uint32) []any {
 	return []any{
 		"public", "t", indexname, int64(1), int64(2), int64(3), int64(4),
 		int64(5), int64(4096), true, false, true, oid,
+		nil, nil, nil,
 	}
 }
 
