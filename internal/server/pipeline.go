@@ -188,6 +188,14 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		}
 		return addr
 	}
+	// An address with no port names an instance only within its cluster, and only
+	// when one instance of the envelope reports it. addrOnly holds that instance,
+	// and ambiguousAddr marks an address that two instances report: it names none.
+	clusterAddr := func(cluster int64, addr string) string {
+		return strconv.FormatInt(cluster, 10) + "/" + addr
+	}
+	addrOnly := make(map[string]uuid.UUID, len(env.Instances))
+	ambiguousAddr := make(map[string]bool)
 	// The single-primary fallback below is scoped to a cluster: an envelope can
 	// carry instances of several clusters, and the primary of one is no upstream
 	// of a standby in another.
@@ -199,9 +207,15 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	for _, inst := range env.Instances {
 		if inst.Addr == "" {
 		} else if id, err := uuid.Parse(inst.InstanceID); err == nil {
-			addrToInstance[inst.Addr] = id
 			if inst.Port > 0 {
 				addrToInstance[endpointKey(inst.Addr, inst.Port)] = id
+			}
+			if cid, cidErr := pgtype.ParseClusterID(inst.ClusterID); cidErr == nil {
+				key := clusterAddr(store.ToDB(cid), inst.Addr)
+				if prev, seen := addrOnly[key]; seen && prev != id {
+					ambiguousAddr[key] = true
+				}
+				addrOnly[key] = id
 			}
 		}
 		if inst.TargetName != "" {
@@ -232,27 +246,53 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		if id, ok := addrToInstance[key]; ok {
 			return id, true
 		}
-		if id, ok := dbAddrCache[key]; ok {
+		if port == 0 {
+			ck := clusterAddr(cidDB, addr)
+			if ambiguousAddr[ck] {
+				return uuid.UUID{}, false
+			}
+			if id, ok := addrOnly[ck]; ok {
+				return id, true
+			}
+		}
+		// The cache is kept per cluster: one address names different instances in
+		// different clusters.
+		cacheKey := clusterAddr(cidDB, key)
+		if id, ok := dbAddrCache[cacheKey]; ok {
 			return id, true
 		}
 		var id uuid.UUID
 		if addr != "" {
 			if err := tx.QueryRow(ctx, `SELECT instance_id FROM instances WHERE cluster_id=$1 AND target_name=$2 LIMIT 1`, cidDB, addr).Scan(&id); err == nil {
-				dbAddrCache[key] = id
+				dbAddrCache[cacheKey] = id
 				return id, true
 			}
 		}
-		query := `SELECT instance_id FROM instances WHERE cluster_id=$1 AND addr=$2 LIMIT 1`
+		query := `SELECT instance_id FROM instances WHERE cluster_id=$1 AND addr=$2 LIMIT 2`
 		args := []any{cidDB, addr}
 		if port > 0 {
-			query = `SELECT instance_id FROM instances WHERE cluster_id=$1 AND addr=$2 AND port=$3 LIMIT 1`
+			query = `SELECT instance_id FROM instances WHERE cluster_id=$1 AND addr=$2 AND port=$3 LIMIT 2`
 			args = append(args, port)
 		}
-		if err := tx.QueryRow(ctx, query, args...).Scan(&id); err != nil {
+		// Two rows name no single instance. The edge is left unresolved rather than
+		// attached to whichever row the database returns first.
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
 			return uuid.UUID{}, false
 		}
-		dbAddrCache[key] = id
-		return id, true
+		defer rows.Close()
+		var matches []uuid.UUID
+		for rows.Next() {
+			if err := rows.Scan(&id); err != nil {
+				return uuid.UUID{}, false
+			}
+			matches = append(matches, id)
+		}
+		if rows.Err() != nil || len(matches) != 1 {
+			return uuid.UUID{}, false
+		}
+		dbAddrCache[cacheKey] = matches[0]
+		return matches[0], true
 	}
 
 	for _, inst := range env.Instances {

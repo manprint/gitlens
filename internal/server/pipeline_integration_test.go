@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/pgtype"
+	"github.com/manprint/pglens/internal/store"
 	"github.com/manprint/pglens/internal/wire"
 	"github.com/stretchr/testify/require"
 )
@@ -349,4 +350,75 @@ func TestPipeline_TruncationMarkerCoversItsWindow(t *testing.T) {
 
 	push(base.Add(11 * time.Minute))
 	require.Equal(t, 2, markers(), "the next window writes the next marker")
+}
+
+// INT-PIPE-004: an edge that names an address with no port resolves only to an
+// instance nothing else of the cluster shares the address with. An address two
+// instances of one cluster report names no upstream, whether the two are in the
+// database or in the envelope, so no edge is stored for it. A unique address
+// still resolves. Before, the database and the envelope each attached the edge
+// to whichever instance they met first.
+func TestPipeline_INT_PIPE_004_AmbiguousAddressNamesNoUpstream(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, `TRUNCATE topology_edges`)
+	require.NoError(t, err)
+	cid := pgtype.ClusterID(404)
+	agent := uuid.New()
+	_, err = pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual') ON CONFLICT DO NOTHING`, store.ToDB(cid))
+	require.NoError(t, err)
+
+	shared1, shared2, unique := uuid.New(), uuid.New(), uuid.New()
+	for _, row := range []struct {
+		id   uuid.UUID
+		addr string
+	}{{shared1, "10.0.4.5"}, {shared2, "10.0.4.5"}, {unique, "10.0.4.7"}} {
+		_, err = pool.Exec(ctx, `INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen) VALUES ($1,'default',$2,$3,$4,0,170000,'primary','T0', now())`, row.id, store.ToDB(cid), agent, row.addr)
+		require.NoError(t, err)
+	}
+
+	// The standby's edges name the shared address, which resolves to no one, and
+	// the unique one, which resolves to its instance.
+	standby := uuid.New()
+	p := NewPipeline(pool, clock.NewFake(time.Now()))
+	res, err := p.Process(ctx, wire.Envelope{Instances: []wire.Instance{{
+		InstanceID: standby.String(), ClusterID: cid.String(), Addr: "10.0.4.9", Port: 5432, PGVersion: 170000, Role: "standby",
+		TopologyEdges: []wire.Edge{
+			{From: standby.String(), To: "10.0.4.5", Type: "streaming", Confidence: "high"},
+			{From: standby.String(), To: "10.0.4.7", Type: "streaming", Confidence: "high"},
+		},
+	}}})
+	require.NoError(t, err)
+	require.Zero(t, res.Rejected)
+	var upstreams []uuid.UUID
+	rows, err := pool.Query(ctx, `SELECT to_instance FROM topology_edges WHERE from_instance=$1`, standby)
+	require.NoError(t, err)
+	defer rows.Close()
+	for rows.Next() {
+		var to uuid.UUID
+		require.NoError(t, rows.Scan(&to))
+		upstreams = append(upstreams, to)
+	}
+	require.NoError(t, rows.Err())
+	require.Equal(t, []uuid.UUID{unique}, upstreams, "only the unambiguous address names an upstream")
+
+	// The same ambiguity inside one envelope: two instances report the address
+	// and none of them is in the database yet.
+	_, err = pool.Exec(ctx, `TRUNCATE topology_edges`)
+	require.NoError(t, err)
+	standby2 := uuid.New()
+	res, err = p.Process(ctx, wire.Envelope{Instances: []wire.Instance{
+		{InstanceID: uuid.NewString(), ClusterID: cid.String(), Addr: "10.0.4.8", Port: 0, PGVersion: 170000, Role: "primary"},
+		{InstanceID: uuid.NewString(), ClusterID: cid.String(), Addr: "10.0.4.8", Port: 0, PGVersion: 170000, Role: "primary"},
+		{InstanceID: standby2.String(), ClusterID: cid.String(), Addr: "10.0.4.9", Port: 5432, PGVersion: 170000, Role: "standby",
+			TopologyEdges: []wire.Edge{{From: standby2.String(), To: "10.0.4.8", Type: "streaming", Confidence: "high"}}},
+	}})
+	require.NoError(t, err)
+	require.Zero(t, res.Rejected)
+	var edges int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM topology_edges WHERE from_instance=$1`, standby2).Scan(&edges))
+	require.Zero(t, edges, "two instances of the envelope report the address, so it names no upstream")
 }
