@@ -208,5 +208,14 @@ func TestINTADV010_MutedAndSilentFindingsResolve(t *testing.T) {
 		require.Equal(t, "resolved", state(goneMuted), "the muted finding of an instance gone quiet is resolved")
 		require.Equal(t, "resolved", state(goneOpen), "the open finding of an instance gone quiet is resolved")
 		require.Equal(t, "open", state(active), "an instance seen within the grace period is not swept")
+
+		// A mute outlives a flap: the condition clears, then returns before
+		// muted_until, and the finding must come back muted, not open.
+		flapping := finding(id, "flapping")
+		upsertMuted(flapping)
+		require.NoError(t, st.ResolveAbsent(ctx, id, []string{"txn.long_running"}, []string{held.ID(), active.ID()}, now))
+		require.Equal(t, "resolved", state(flapping), "the condition cleared")
+		require.NoError(t, st.UpsertFinding(ctx, flapping, now.Add(time.Minute)))
+		require.Equal(t, "muted", state(flapping), "a finding that returns before its mute ends is muted again")
 	})
 }
