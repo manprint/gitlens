@@ -562,7 +562,9 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 		if syncStandbyCount > 0 {
 			cr.SyncStandbyCount = syncStandbyCount
 		}
-		if maxReplayLag != nil && *maxReplayLag > 0 {
+		// A measured zero is kept: a caught-up standby reports exactly 0, and
+		// the spec reads a missing value as "not measured", never as zero.
+		if maxReplayLag != nil {
 			cr.MaxReplayLagSeconds = maxReplayLag
 		}
 		if len(topology) > 0 {

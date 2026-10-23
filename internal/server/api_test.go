@@ -515,6 +515,40 @@ func TestAPI_MockPool_Clusters_TopologyEdgesAndLag(t *testing.T) {
 	require.True(t, sawLowWithNote)
 }
 
+// TestAPI_MockPool_Clusters_MeasuredZeroLag: a caught-up standby measures a
+// replay lag of exactly 0. That is a measurement, so the cluster must carry
+// it. The UI reads a missing key as "not measured", which would show a
+// fully caught-up cluster as unknown lag.
+func TestAPI_MockPool_Clusters_MeasuredZeroLag(t *testing.T) {
+	t.Parallel()
+	cidDB := store.ToDB(pgtype.ClusterID(9004))
+	pool := &mockPool{
+		queryResults: []*mockRows{
+			{rows: [][]any{{cidDB, nil, "manual"}}},
+			{rows: [][]any{
+				{cidDB, uuid.NewString(), "10.0.0.1", 5432, "primary", 170000, "T0", time.Now()},
+				{cidDB, uuid.NewString(), "10.0.0.2", 5432, "standby", 170000, "T0", time.Now()},
+			}},
+			nil, nil, nil, nil, nil,
+			{rows: [][]any{{cidDB, 0.0}}}, // max replay lag
+		},
+	}
+	api := &API{pool: pool}
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/clusters", http.NoBody)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp []clusterResp
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp, 1)
+	require.NotNil(t, resp[0].MaxReplayLagSeconds, "a measured zero is still a measurement")
+	require.Equal(t, 0.0, *resp[0].MaxReplayLagSeconds)
+	require.Equal(t, "ok", resp[0].Health)
+	require.Contains(t, w.Body.String(), `"max_replay_lag_seconds":0`)
+}
+
 // TestAPI_MockPool_Clusters_MostRecentPrimaryWins covers a real bug found
 // live running SYS-REPL-001: after a real failover, the old (now-dead)
 // primary's own instances.role row still says "primary" for a while (a
