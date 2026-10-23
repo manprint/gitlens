@@ -196,3 +196,17 @@ func TestRedactQueryText_IsLinearInTextLength(t *testing.T) {
 	require.Equal(t, in, redactQueryText(in))
 	require.Less(t, time.Since(start), 2*time.Second)
 }
+
+// Dollar tags and unicode constants joined by line breaks are read in time
+// linear in the text, as a session text can be as long as the server allows.
+func TestRedactQueryText_IsLinearForDollarTagsAndUnicodeChains(t *testing.T) {
+	t.Parallel()
+	for _, in := range []string{
+		strings.Repeat("$a$x", 150000),
+		strings.Repeat("U&'x'\n", 100000),
+	} {
+		start := time.Now()
+		require.True(t, redactQueryText(in) == in, "text without a credential is kept")
+		require.Less(t, time.Since(start), 2*time.Second)
+	}
+}
