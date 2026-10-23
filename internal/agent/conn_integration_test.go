@@ -143,40 +143,44 @@ func TestManager_DedicatedConn(t *testing.T) {
 	})
 }
 
-// INT-CONN-004: new databases created after startup are discovered; dropped ones stop being scraped.
+// INT-CONN-004: new databases created after startup are discovered; dropped
+// ones stop being listed. The database is created by the superuser: the
+// monitoring role can create nothing, and this test used to create it
+// through the agent's own connection, fail, and assert nothing at all.
 func TestINTCONN004_DynamicDiscovery(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
 		ctx := context.Background()
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
 		mgr, err := NewManager(ctx, "test-target", pg.DSN("postgres", pgtest.RoleT0), DefaultConnOptions(), clock.System())
 		require.NoError(t, err)
 		defer mgr.Close()
 
-		shared, err := mgr.Shared(ctx)
-		require.NoError(t, err)
-		defer shared.Release()
-
-		// Create a test database.
-		_, err = shared.Exec(ctx, "CREATE DATABASE test_conn_discovery")
-		if err == nil {
-			defer func() {
-				conn2, _ := mgr.Shared(ctx)
-				conn2.Exec(ctx, "DROP DATABASE IF EXISTS test_conn_discovery")
-				conn2.Release()
-			}()
-
-			// Discover should find it.
+		listed := func() bool {
+			t.Helper()
 			dbs, err := mgr.Discover(ctx)
 			require.NoError(t, err)
-			found := false
 			for _, db := range dbs {
 				if db.Name == "test_conn_discovery" {
-					found = true
 					require.True(t, db.Monitored)
-					break
+					return true
 				}
 			}
-			require.True(t, found, "test_conn_discovery not found in discovery result")
+			return false
 		}
+		_, err = admin.Exec(ctx, "DROP DATABASE IF EXISTS test_conn_discovery")
+		require.NoError(t, err)
+		require.False(t, listed())
+
+		_, err = admin.Exec(ctx, "CREATE DATABASE test_conn_discovery")
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = admin.Exec(context.Background(), "DROP DATABASE IF EXISTS test_conn_discovery WITH (FORCE)")
+		})
+		require.True(t, listed(), "test_conn_discovery not found in discovery result")
+
+		_, err = admin.Exec(ctx, "DROP DATABASE test_conn_discovery WITH (FORCE)")
+		require.NoError(t, err)
+		require.False(t, listed(), "a dropped database must stop being listed")
 	})
 }
 

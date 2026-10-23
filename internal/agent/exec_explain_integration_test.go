@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/manprint/pglens/internal/check"
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/command"
 	"github.com/manprint/pglens/test/pgtest"
@@ -129,16 +128,3 @@ func TestINTCMD008_ExplainParameterisedStatement(t *testing.T) {
 		require.NotEmpty(t, result)
 	})
 }
-
-type fixedConnectionTarget struct {
-	check.Target
-	conn check.Conn
-}
-
-func (t *fixedConnectionTarget) ConnFor(context.Context, string) (check.Conn, error) {
-	return t.conn, nil
-}
-
-type nonReleasingConn struct{ check.Conn }
-
-func (nonReleasingConn) Release() {}
