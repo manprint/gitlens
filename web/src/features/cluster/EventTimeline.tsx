@@ -42,6 +42,13 @@ function payloadInstance(event: ClusterEvent, key: string): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null
 }
 
+// A counter_reset_detected event is written per database and carries the number
+// of counters that reset, so the card can say how many.
+function counterResetCount(event: ClusterEvent): number | null {
+  const value = event.payload.count
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null
+}
+
 function instanceLink(id: string | null) {
   return id ? <a href={`/instances/${encodeURIComponent(id)}`}>{id}</a> : 'Unknown'
 }
@@ -59,6 +66,7 @@ function EventCard({ event }: { event: ClusterEvent }) {
   const description = describeEvent(event.type)
   const unknown = description.title === 'Unknown event type'
   const invariantViolation = event.type === 'cluster_id_changed'
+  const resetCount = event.type === 'counter_reset_detected' ? counterResetCount(event) : null
 
   return (
     <article
@@ -83,6 +91,11 @@ function EventCard({ event }: { event: ClusterEvent }) {
         </p>
       ) : null}
       <p>{description.whatToCheck}</p>
+      {resetCount !== null ? (
+        <p>
+          {resetCount} {resetCount === 1 ? 'counter' : 'counters'} reset in this database.
+        </p>
+      ) : null}
       {event.type === 'failover_detected' ? <FailoverDetails event={event} /> : null}
       {invariantViolation ? (
         <p role="alert" className="font-semibold">

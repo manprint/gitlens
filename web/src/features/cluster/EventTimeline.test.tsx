@@ -113,6 +113,25 @@ describe('EventTimeline', () => {
     expect(screen.getByText('Agent recovered')).toBeInTheDocument()
   })
 
+  it('UI-CLUS-051 says how many counters reset when the event carries the count', () => {
+    renderWithProviders(
+      <EventTimeline
+        events={[
+          {
+            cluster_id: '1',
+            event_id: 4,
+            instance_id: null,
+            payload: { count: 3, series: [] },
+            ts: '2026-08-31T10:00:00Z',
+            type: 'counter_reset_detected',
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByText('3 counters reset in this database.')).toBeInTheDocument()
+  })
+
   it('UI-CLUS-050 titles the four emitted types the taxonomy lacked instead of the unknown fallback', () => {
     // The literals the server writes to the events table: staleness.go,
     // inventory.go and pipeline.go.
