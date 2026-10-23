@@ -99,3 +99,44 @@ func TestINTACT004_ActivityServesConnectionTotalsAndAges(t *testing.T) {
 	}
 	require.Len(t, got.Metrics["pg_deadlocks_total"], 1)
 }
+
+// TestINTXMIN004_ActivityServesOldestXminHolderOnlyWhenFresh: the activity
+// endpoint names the oldest xmin holder of a recent sample. The fact is replaced
+// by each sample, so one written more than the activity window ago is not
+// served as the holder now.
+func TestINTXMIN004_ActivityServesOldestXminHolderOnlyWhenFresh(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	id := uuid.New()
+	cid := int64(pgtype.ClusterID(90004))
+	now := time.Now().UTC()
+	_, err := pool.Exec(context.Background(), `INSERT INTO metrics (ts,tenant_id,cluster_id,instance_id,datname,metric,labels,series_id,value) VALUES ($1,'default',$2,$3,'','pg_xmin_horizon_age_xids','{"holder_kind":"session"}',$4,910)`, now, cid, id, int64(93001))
+	require.NoError(t, err)
+	_, err = pool.Exec(context.Background(), `INSERT INTO object_facts (tenant_id,cluster_id,instance_id,datname,kind,key,labels,value_text,value_json,first_seen,last_seen,changed_at)
+		VALUES ('default',$1,$2,'','xmin_horizon','oldest','{}',NULL,$3::jsonb,$4,$4,$4)`, cid, id, `{"holder_kind":"session","identity":"4242","age_xids":910,"age_seconds":33.5}`, now)
+	require.NoError(t, err)
+
+	r := chi.NewRouter()
+	NewAPI(pool).RegisterRoutes(r)
+	get := func() activityAPIResponse {
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/instances/"+id.String()+"/activity", http.NoBody))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var got activityAPIResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+		return got
+	}
+
+	got := get()
+	require.NotNil(t, got.XminHorizon)
+	require.Equal(t, "session", got.XminHorizon.HolderKind)
+	require.Equal(t, "4242", got.XminHorizon.Identity)
+	require.Equal(t, int64(910), got.XminHorizon.AgeXIDs)
+	require.NotNil(t, got.XminHorizon.AgeSeconds)
+	require.Equal(t, 33.5, *got.XminHorizon.AgeSeconds)
+	require.Len(t, got.Metrics["pg_xmin_horizon_age_xids"], 1)
+
+	_, err = pool.Exec(context.Background(), `UPDATE object_facts SET last_seen=$2 WHERE instance_id=$1 AND kind='xmin_horizon'`, id, now.Add(-time.Minute))
+	require.NoError(t, err)
+	require.Nil(t, get().XminHorizon, "a holder older than the activity window is still served")
+}
