@@ -199,6 +199,15 @@ func (e *Engine) Apply(obs Observation) []Event {
 
 		// If no high-confidence edge and we have low-confidence edges, check orphan.
 		if !hasResolvedEdge && len(obs.Edges) > 0 {
+			// Evidence that returns a whole window after the last of it starts a
+			// new episode. The gap may hold unknown observations or none at all,
+			// which end nothing on their own, so the check is made here and not
+			// where those observations arrive. Without it the new episode kept
+			// the old start and reported the age of the whole gap.
+			if now.Sub(inst.orphanSeenAt) >= e.orphanWindow {
+				inst.orphanAt = time.Time{}
+				inst.orphanedAt = time.Time{}
+			}
 			if inst.orphanAt.IsZero() {
 				inst.orphanAt = now
 			}
