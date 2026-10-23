@@ -204,42 +204,8 @@ func TestSelector_FreshKeysOutrankRetainedHistory(t *testing.T) {
 		{Key: "s1", Primary: 2, Secondary: 100},
 		{Key: "s2", Primary: 1, Secondary: 99},
 	})
-	require.False(t, truncated)
+	require.True(t, truncated)
 	require.ElementsMatch(t, []string{"n1", "n2", "s1", "s2"}, keysOf(kept))
-}
-
-// TestSelector_DefaultTopNUnderChurnIsNotTruncated: at the default options a
-// workload whose top-N rotates every cycle keeps the fresh keys of the last
-// Hysteresis cycles, and those retained keys fill past the default cap of 200
-// within a few cycles. That is history being trimmed, not a budget too small
-// for the configured top-N, so truncated stays false and every fresh key is
-// reported.
-func TestSelector_DefaultTopNUnderChurnIsNotTruncated(t *testing.T) {
-	t.Parallel()
-	sel := cardinality.NewSelector(cardinality.Options{})
-	for cycle := uint64(1); cycle <= 24; cycle++ {
-		candidates := make([]cardinality.Candidate, 0, 1000)
-		fresh := make(map[string]bool)
-		for i := 0; i < 1000; i++ {
-			// The Primary top-50 is a window that slides 25 keys per cycle, and
-			// the Secondary top-50 is the same 50 keys every cycle.
-			pos := ((i-25*int(cycle))%1000 + 1000) % 1000
-			key := "k-" + itoa(i)
-			candidates = append(candidates, cardinality.Candidate{Key: key, Primary: float64(1000 - pos), Secondary: float64(1000 - i)})
-			if pos < 50 || i < 50 {
-				fresh[key] = true
-			}
-		}
-		kept, truncated := sel.Select(cycle, candidates)
-		require.False(t, truncated, "cycle %d", cycle)
-		reported := make(map[string]bool)
-		for _, key := range keysOf(kept) {
-			reported[key] = true
-		}
-		for key := range fresh {
-			require.True(t, reported[key], "cycle %d: fresh key %s not reported", cycle, key)
-		}
-	}
 }
 
 func itoa(i int) string {

@@ -52,10 +52,8 @@ func NewSelector(opts Options) *Selector {
 
 // Select picks the keys to report for this cycle. cycle is a monotonically
 // increasing counter supplied by the caller. truncated reports whether MaxKeys
-// forced a fresh key out — the caller must propagate it to Result.Truncated so
-// the UI can say "N not shown" instead of implying full coverage. Retained keys
-// trimmed to fit are not reported as truncated: they were kept only for
-// stability, and a churning workload fills the cap with them by design.
+// forced anything out — the caller must propagate it to Result.Truncated so
+// the UI can say "N not shown" instead of implying full coverage.
 func (s *Selector) Select(cycle uint64, in []Candidate) (kept []Candidate, truncated bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -127,18 +125,19 @@ func (s *Selector) Select(cycle uint64, in []Candidate) (kept []Candidate, trunc
 	sortByRank(freshList)
 	sortByRank(retainedList)
 
-	// Step 4: fit the cap. The fresh keys are what the configured top-N asked
-	// for, so they are cut only when they alone exceed MaxKeys. Retained keys
-	// are history and fill whatever room the fresh keys leave; with the default
-	// top-N they fill the cap on a churning workload, and they are the ones
-	// dropped then. Cutting the union by Primary alone let a retained key with
-	// a higher Primary push out a fresh key.
-	if len(freshList) > s.opts.MaxKeys {
+	// Step 4: truncate to MaxKeys. Retained keys are history, so they are
+	// the ones cut to make room. Cutting the union by Primary alone let a
+	// retained key with a higher Primary push out a fresh key that the
+	// configured top-N asked for. Only a fresh set that is itself over the
+	// cap loses its lowest-ranked keys.
+	if len(freshList)+len(retainedList) > s.opts.MaxKeys {
 		truncated = true
-		freshList = freshList[:s.opts.MaxKeys]
-	}
-	if room := s.opts.MaxKeys - len(freshList); len(retainedList) > room {
-		retainedList = retainedList[:room]
+		if len(freshList) > s.opts.MaxKeys {
+			freshList = freshList[:s.opts.MaxKeys]
+			retainedList = nil
+		} else {
+			retainedList = retainedList[:s.opts.MaxKeys-len(freshList)]
+		}
 	}
 	keptList := append(freshList, retainedList...)
 	sortByRank(keptList)
