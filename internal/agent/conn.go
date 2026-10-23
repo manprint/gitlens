@@ -783,6 +783,22 @@ func (m *Manager) RefreshRole(ctx context.Context) error {
 	return nil
 }
 
+// SessionIsSuperuser reports whether the monitoring role of this target is a
+// superuser. The agent does not refuse one: it logs a warning at start, and the
+// security advisor reports the role as critical.
+func (m *Manager) SessionIsSuperuser(ctx context.Context) (bool, error) {
+	conn, err := m.Shared(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer conn.Release()
+	var superuser bool
+	if err := conn.QueryRow(ctx, "SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user").Scan(&superuser); err != nil {
+		return false, fmt.Errorf("query rolsuper: %w", err)
+	}
+	return superuser, nil
+}
+
 func (m *Manager) PGVersion() pgtype.PGVersion {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

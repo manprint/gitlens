@@ -4,11 +4,15 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -755,4 +759,58 @@ func monitored(dbs []wire.Database, name string) bool {
 		}
 	}
 	return false
+}
+
+// TestINTCONN019_SessionIsSuperuserFollowsTheRole: the superuser warning at
+// start reads the role of the target's DSN. A superuser DSN reports true, and
+// the monitoring role reports false.
+func TestINTCONN019_SessionIsSuperuserFollowsTheRole(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		su, err := NewManager(ctx, "su-target", pg.DSN("postgres", pgtest.RoleSuperuser), DefaultConnOptions(), clock.System())
+		require.NoError(t, err)
+		t.Cleanup(su.Close)
+		t0, err := NewManager(ctx, "t0-target", pg.DSN("postgres", pgtest.RoleT0), DefaultConnOptions(), clock.System())
+		require.NoError(t, err)
+		t.Cleanup(t0.Close)
+
+		superuser, err := su.SessionIsSuperuser(ctx)
+		require.NoError(t, err)
+		require.True(t, superuser)
+
+		superuser, err = t0.SessionIsSuperuser(ctx)
+		require.NoError(t, err)
+		require.False(t, superuser)
+	})
+}
+
+// TestINTCONN020_IdentityFailureIsNotLatched: while the identity store cannot
+// be read, the target has no version, role or cluster id, and it must not keep
+// that state. Once the store reads again, the next accessor call completes the
+// cache, so a target recovers without a restart. The identity path is set with
+// t.Setenv, which only a test that is not parallel may do, so this test is not
+// run under pgtest.ForEach.
+func TestINTCONN020_IdentityFailureIsNotLatched(t *testing.T) {
+	for _, major := range pgtest.Versions() {
+		major := major
+		t.Run(fmt.Sprintf("pg%d", major), func(t *testing.T) {
+			primary, _ := pgtest.PrimaryStandby(t, major)
+			ctx := context.Background()
+			corrupt := filepath.Join(t.TempDir(), "corrupt.json")
+			require.NoError(t, os.WriteFile(corrupt, []byte("{not json"), 0o600))
+			t.Setenv("PGLENS_IDENTITY_PATH", corrupt)
+
+			mgr, err := NewManager(ctx, "identity-target", primary.DSN("postgres", pgtest.RoleT0), DefaultConnOptions(), clock.System())
+			require.NoError(t, err)
+			t.Cleanup(mgr.Close)
+			require.Zero(t, mgr.PGVersion(), "the version must stay unknown while the identity store is corrupt")
+			require.Zero(t, mgr.ClusterID())
+
+			t.Setenv("PGLENS_IDENTITY_PATH", filepath.Join(t.TempDir(), "identity.json"))
+			require.NotZero(t, mgr.PGVersion(), "the cache must complete once the identity store reads again")
+			require.NotZero(t, mgr.ClusterID())
+			require.NotEqual(t, uuid.Nil, mgr.InstanceID())
+		})
+	}
 }
