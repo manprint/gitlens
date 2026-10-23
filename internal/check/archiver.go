@@ -44,9 +44,13 @@ func (c *archiverCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 	}
 	var archived, failed float64
 	var lastArchived, lastFailed, statsReset *time.Time
-	row := conn.QueryRow(ctx, `SELECT archived_count, last_archived_wal, last_archived_time, failed_count, last_failed_wal, last_failed_time, stats_reset FROM pg_stat_archiver`)
+	// The ages are measured on the server clock, read in the same statement
+	// as the timestamps they are measured from. The agent's clock may be
+	// skewed from the server's, which would move every age by the skew.
+	var now time.Time
+	row := conn.QueryRow(ctx, `SELECT archived_count, last_archived_wal, last_archived_time, failed_count, last_failed_wal, last_failed_time, stats_reset, now() FROM pg_stat_archiver`)
 	var lastArchivedWAL, lastFailedWAL *string
-	if err := row.Scan(&archived, &lastArchivedWAL, &lastArchived, &failed, &lastFailedWAL, &lastFailed, &statsReset); err != nil {
+	if err := row.Scan(&archived, &lastArchivedWAL, &lastArchived, &failed, &lastFailedWAL, &lastFailed, &statsReset, &now); err != nil {
 		return Result{}, err
 	}
 	result.StatsReset = statsReset
@@ -55,7 +59,6 @@ func (c *archiverCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 		pgtype.Metric{Name: "pg_archiver_failed_total", Value: failed, Kind: pgtype.KindCounter},
 		pgtype.Metric{Name: "pg_archiver_failed_ratio", Value: archiverFailedRatio(lastArchived, lastFailed), Kind: pgtype.KindGauge},
 	)
-	now := t.Clock().Now()
 	if lastArchived != nil {
 		result.Metrics = append(result.Metrics, pgtype.Metric{Name: "pg_archiver_last_archived_age_seconds", Value: nonNegativeAge(now, *lastArchived), Kind: pgtype.KindGauge})
 	}
@@ -64,13 +67,36 @@ func (c *archiverCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 	}
 	// The segments waiting for archive_command. The age of the last archived
 	// segment cannot tell a stuck archiver from an idle server that has
-	// nothing to archive. The function needs pg_monitor; without it the
-	// metric is left out rather than failing the scrape.
+	// nothing to archive. The function needs pg_monitor; without it, or when
+	// the server answers with an error such as a statement timeout on a long
+	// archive directory, the metric is left out rather than failing the scrape
+	// and dropping the counters above. Only a failure to reach the server
+	// fails the scrape.
 	var ready float64
+	readyKnown := false
 	if err := conn.QueryRow(ctx, `SELECT count(*)::float8 FROM pg_ls_archive_statusdir() WHERE name LIKE '%.ready'`).Scan(&ready); err == nil {
+		readyKnown = true
 		result.Metrics = append(result.Metrics, pgtype.Metric{Name: "pg_archiver_ready_files", Value: ready, Kind: pgtype.KindGauge})
-	} else if code := pgErrorCode(err); code != pgInsufficientPrivilege && code != pgUndefinedFunction {
+	} else if connectionFailed(err) {
 		return Result{}, err
+	}
+	// A server that has never archived has no last archived time, so the age
+	// above is missing and the stall rule has nothing to judge. Archiving has
+	// been expected since the server started (archive_mode changes only at a
+	// restart), or since the statistics were reset when that is later, so the
+	// age is at least the time since then. It is reported only when the count of
+	// waiting segments could be read, since the stall rule reads a count of zero
+	// as no stall: an idle server that never archived has nothing stuck, and the
+	// age alone would read as a stall once it had been up for an hour.
+	if lastArchived == nil && readyKnown {
+		var since time.Time
+		if err := conn.QueryRow(ctx, `SELECT pg_postmaster_start_time()`).Scan(&since); err != nil {
+			return Result{}, err
+		}
+		if statsReset != nil && statsReset.After(since) {
+			since = *statsReset
+		}
+		result.Metrics = append(result.Metrics, pgtype.Metric{Name: "pg_archiver_last_archived_age_seconds", Value: nonNegativeAge(now, since), Kind: pgtype.KindGauge})
 	}
 	return result, nil
 }

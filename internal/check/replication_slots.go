@@ -48,7 +48,7 @@ SELECT slot_name,
        active,
        COALESCE(active_pid, 0)                    AS active_pid,
        COALESCE(wal_status, 'unknown')           AS wal_status,
-       safe_wal_size,
+       CASE WHEN restart_lsn IS NOT NULL THEN safe_wal_size END AS safe_wal_size,
        COALESCE(pg_wal_lsn_diff(
          CASE WHEN pg_is_in_recovery()
               THEN pg_last_wal_replay_lsn()
@@ -102,6 +102,10 @@ FROM pg_replication_slots
 		// safe_wal_size is NULL when max_slot_wal_keep_size is -1 (no
 		// limit) and for a slot already lost. It used to be reported as 0,
 		// which reads as "no margin left" for the healthiest configuration.
+		// A slot that has not reserved WAL yet has no restart_lsn, and the
+		// server still computes a size for it against a position the slot
+		// does not hold. That size goes negative as WAL is written, so the
+		// query blanks it for such a slot too.
 		if row.SafeWALSize != nil {
 			metrics = append(metrics, pgtype.Metric{
 				Name:   "replication_slot_safe_wal_size_bytes",

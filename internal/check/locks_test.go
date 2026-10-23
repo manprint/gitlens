@@ -23,7 +23,7 @@ func scrapeLocks(t *testing.T, rows []([]any)) Result {
 }
 
 func lockValues(pid int32, wait string, blocked []int32, age float64, query string) []any {
-	return []any{pid, "app", "app", "client", "127.0.0.1", "active", "Lock", wait, 1.0, age, query, blocked}
+	return []any{pid, "app", "app", "client", "127.0.0.1", "active", "Lock", wait, 1.0, age, query, blocked, false}
 }
 
 func TestLocks_NoBlockedSessionsEmitsEmptyFact(t *testing.T) {
@@ -91,6 +91,127 @@ func TestLocks_QueryIsTruncated(t *testing.T) {
 	var tree lockTree
 	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
 	require.Len(t, tree.Nodes[0].Query, 2048)
+}
+
+// Sessions is the list the activity view shows: capped, oldest transaction
+// first, and the cut is flagged so a reader knows the list is not complete.
+func TestLocks_SessionListIsCappedOldestFirst(t *testing.T) {
+	rows := make([][]any, 0, 105)
+	for i := 1; i <= 105; i++ {
+		rows = append(rows, []any{int32(i), "app", "app", "client", "127.0.0.1", "idle", "", "", float64(i), 0.0, "select 1", []int32(nil), false})
+	}
+	result := scrapeLocks(t, rows)
+	var tree lockTree
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
+	require.Len(t, tree.Sessions, 100)
+	require.True(t, tree.SessionsTruncated)
+	require.Equal(t, int32(105), tree.Sessions[0].PID)
+	require.Empty(t, tree.Nodes)
+	// The cut list is a partial view, so the result says so to the server.
+	require.True(t, result.Partial)
+}
+
+func TestLocks_SessionListNotFlaggedWhenComplete(t *testing.T) {
+	result := scrapeLocks(t, []([]any){lockValues(1, "", nil, 0, "select 1"), lockValues(2, "", nil, 0, "select 2")})
+	var tree lockTree
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
+	require.Len(t, tree.Sessions, 2)
+	require.False(t, tree.SessionsTruncated)
+	require.False(t, result.Partial)
+}
+
+// A session outside the blocking tree keeps only a short prefix of its query;
+// a session in the tree keeps the full text, since the tree is what the UI
+// shows for a wait.
+// A statement the locks check reads that carries a password is withheld in the
+// blocking tree and in the session list alike, and the text the UI shows never
+// holds it.
+func TestLocks_RedactsCredentialsInEveryQuery(t *testing.T) {
+	result := scrapeLocks(t, []([]any){
+		lockValues(1, "transactionid", []int32{9}, 2, "ALTER ROLE tmp_secret PASSWORD 'hunter2'"),
+		lockValues(9, "", nil, 0, "CREATE ROLE holder LOGIN PASSWORD 'hunter3'"),
+		lockValues(2, "", nil, 0, "ALTER ROLE idle PASSWORD 'hunter4'"),
+	})
+	require.NotContains(t, string(result.Facts[0].ValueJSON), "hunter")
+	var tree lockTree
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
+	require.Equal(t, withheldQuery, tree.Nodes[0].Query)
+	require.Equal(t, withheldQuery, tree.Nodes[1].Query)
+	queries := map[int32]string{}
+	for _, s := range tree.Sessions {
+		queries[s.PID] = s.Query
+	}
+	require.Equal(t, withheldQuery, queries[2])
+}
+
+// A long session text full of PASSWORD keywords inside one comment is read in
+// bounded time: the redactor reads the text a fixed number of times, so the
+// cost is linear.
+func TestLocks_LongSessionTextIsRedactedInBoundedTime(t *testing.T) {
+	long := "ALTER ROLE u PASSWORD /*" + strings.Repeat("password/*", 60000) + strings.Repeat("*/", 60001)
+	start := time.Now()
+	result := scrapeLocks(t, []([]any){
+		lockValues(1, "transactionid", []int32{9}, 2, long),
+		lockValues(9, "", nil, 0, "holder"),
+	})
+	require.Less(t, time.Since(start), 2*time.Second)
+	var tree lockTree
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
+	require.Equal(t, withheldQuery, tree.Nodes[0].Query)
+}
+
+// A credential named early in a long DO body is withheld even though the
+// keyword that makes it a credential lies past the first 8192 bytes. Cutting
+// the text before redaction would drop that keyword and leave the value.
+func TestLocks_CredentialNamedEarlierInALongBodyIsRedacted(t *testing.T) {
+	long := "DO $$ DECLARE p text := 'hunter2'; BEGIN /*" + strings.Repeat("x", 9000) + "*/ EXECUTE 'ALTER ROLE u PASSWORD ' || quote_literal(p); END $$"
+	result := scrapeLocks(t, []([]any){
+		lockValues(1, "transactionid", []int32{9}, 2, long),
+		lockValues(9, "", nil, 0, "holder"),
+	})
+	require.NotContains(t, string(result.Facts[0].ValueJSON), "hunter")
+	var tree lockTree
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
+	require.Equal(t, withheldQuery, tree.Nodes[0].Query)
+}
+
+// A session text the server cut is withheld whole in the blocking tree and in
+// the session list. It is not redacted, because the keyword that makes its
+// value a credential may lie past the cut.
+func TestLocks_TextTheServerCutIsWithheld(t *testing.T) {
+	cutLocked := lockValues(1, "transactionid", []int32{9}, 2, "DO $$ DECLARE p text := 'hunter2'; BEGIN /*")
+	cutLocked[len(cutLocked)-1] = true
+	cutIdle := lockValues(2, "", nil, 0, "DO $$ DECLARE p text := 'hunter2'; BEGIN /*")
+	cutIdle[len(cutIdle)-1] = true
+	result := scrapeLocks(t, []([]any){cutLocked, cutIdle, lockValues(9, "", nil, 0, "holder")})
+	require.NotContains(t, string(result.Facts[0].ValueJSON), "hunter")
+	var tree lockTree
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
+	require.Equal(t, withheldQuery, tree.Nodes[0].Query)
+	queries := map[int32]string{}
+	for _, s := range tree.Sessions {
+		queries[s.PID] = s.Query
+	}
+	require.Equal(t, withheldQuery, queries[2])
+}
+
+func TestLocks_IdleSessionQueryIsShortened(t *testing.T) {
+	long := strings.Repeat("x", 3000)
+	result := scrapeLocks(t, []([]any){
+		lockValues(1, "", nil, 0, long),
+		lockValues(2, "transactionid", []int32{9}, 2, long),
+		lockValues(9, "", nil, 0, "holder"),
+	})
+	var tree lockTree
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
+	queryLen := map[int32]int{}
+	for _, s := range tree.Sessions {
+		queryLen[s.PID] = len(s.Query)
+	}
+	require.Equal(t, lockIdleQueryLimit, queryLen[1])
+	require.Equal(t, 2048, queryLen[2])
+	require.Len(t, tree.Nodes, 2)
+	require.Equal(t, 2048, len(tree.Nodes[0].Query))
 }
 
 func TestLocks_RequiresTierT0(t *testing.T) {

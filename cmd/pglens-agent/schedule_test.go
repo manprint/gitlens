@@ -398,19 +398,65 @@ func TestScheduleRebuildDropsTheSkipsOfTheLastBuild(t *testing.T) {
 	}
 
 	schedules.schedMu.Lock()
-	schedules.gates = map[string]targetGate{target: gate(pgtype.RoleStandby)}
-	require.NoError(t, schedules.buildLocked())
-	schedules.schedMu.Unlock()
-	require.Equal(t, "role standby not allowed", pendingSkips()["replication_streaming"], "the first build queues its skip")
-
-	// The target is promoted and the schedule is rebuilt for the primary.
-	schedules.schedMu.Lock()
-	schedules.stopCurrentLocked()
 	schedules.gates = map[string]targetGate{target: gate(pgtype.RolePrimary)}
 	require.NoError(t, schedules.buildLocked())
 	schedules.schedMu.Unlock()
+	require.Equal(t, "role primary not allowed", pendingSkips()["replication_receiver"], "the first build queues its skip")
 
-	skips := pendingSkips()
-	require.Equal(t, "role primary not allowed", skips["replication_receiver"])
-	require.NotContains(t, skips, "replication_streaming", "the rebuild must replace the standby's skip, not leave it pending")
+	// The target turns out to be a standby and the schedule is rebuilt for it.
+	schedules.schedMu.Lock()
+	schedules.stopCurrentLocked()
+	schedules.gates = map[string]targetGate{target: gate(pgtype.RoleStandby)}
+	require.NoError(t, schedules.buildLocked())
+	schedules.schedMu.Unlock()
+
+	require.NotContains(t, pendingSkips(), "replication_receiver", "the rebuild must replace the primary's skip, not leave it pending")
+}
+
+// TestScheduleBuildHandsTheManagerItsDatabases: the checks a schedule runs reach
+// their databases through ScheduledConnFor, which answers from the set the
+// Manager holds. Each build must hand the Manager its own set, or a database a
+// reconcile adds after startup would be refused to the checks scheduled for it,
+// and one it drops would stay reachable.
+func TestScheduleBuildHandsTheManagerItsDatabases(t *testing.T) {
+	t.Setenv("PGLENS_IDENTITY_PATH", filepath.Join(t.TempDir(), "identity.json"))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Nothing listens on port 1, so every scrape fails at once.
+	const target = "handover-target"
+	mgr, err := agent.NewManager(ctx, target, "postgres://pglens@127.0.0.1:1/postgres?sslmode=disable", agent.DefaultConnOptions(), clock.System())
+	require.NoError(t, err)
+	t.Cleanup(mgr.Close)
+
+	gate := func(databases ...string) targetGate {
+		set := map[string]bool{}
+		for _, name := range databases {
+			set[name] = true
+		}
+		return targetGate{role: pgtype.RolePrimary, version: 190000, tier: pgtype.TierReadOnly, exts: map[string]bool{}, databases: set}
+	}
+	var mu sync.Mutex
+	schedules := newScheduleSet(ctx, &agent.Config{}, clock.System(), []*agent.Manager{mgr}, &mu, map[string][]wire.Result{}, map[string]map[string]bool{})
+	t.Cleanup(schedules.stop)
+	build := func(g targetGate) {
+		schedules.schedMu.Lock()
+		defer schedules.schedMu.Unlock()
+		schedules.stopCurrentLocked()
+		schedules.gates = map[string]targetGate{target: g}
+		require.NoError(t, schedules.buildLocked())
+	}
+
+	build(gate("app"))
+	require.True(t, mgr.MonitorsDatabase("app"))
+	require.False(t, mgr.MonitorsDatabase("late"))
+	_, err = mgr.ScheduledConnFor(ctx, "late")
+	require.ErrorContains(t, err, `database "late" is not scheduled`)
+
+	// A reconcile finds a database created after startup and rebuilds.
+	build(gate("app", "late"))
+	require.True(t, mgr.MonitorsDatabase("late"), "a database the rebuild schedules must be reachable to its checks")
+
+	// The budget ranks app out and the next rebuild drops it.
+	build(gate("late"))
+	require.False(t, mgr.MonitorsDatabase("app"), "a database the rebuild drops must no longer be reachable")
 }

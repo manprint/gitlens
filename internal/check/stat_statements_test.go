@@ -87,6 +87,9 @@ func TestStatStatements_QueryTextCacheIsScopedToClusterAndDatabase(t *testing.T)
 				}}, nil
 			},
 			queryRowFunc: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				if strings.Contains(sql, "compute_query_id") {
+					return &mockRow{vals: []any{"on"}}
+				}
 				var ts *time.Time
 				return &mockRow{vals: []any{ts}}
 			},
@@ -136,6 +139,9 @@ type statementsFixture struct {
 	sqls         []string
 	args         [][]any
 	clk          clock.Clock
+	// computeQueryID is what current_setting('compute_query_id') answers;
+	// empty means on.
+	computeQueryID string
 }
 
 func (f *statementsFixture) conn(query func(sql string, args []any) (pgx.Rows, error)) *mockConn {
@@ -146,6 +152,13 @@ func (f *statementsFixture) conn(query func(sql string, args []any) (pgx.Rows, e
 			return query(sql, args)
 		},
 		queryRowFunc: func(ctx context.Context, sql string, args ...any) pgx.Row {
+			if strings.Contains(sql, "compute_query_id") {
+				setting := f.computeQueryID
+				if setting == "" {
+					setting = "on"
+				}
+				return &mockRow{vals: []any{setting}}
+			}
 			var ts *time.Time
 			return &mockRow{vals: []any{ts}}
 		},
@@ -282,6 +295,33 @@ func TestStatStatements_MisconfigurationIsAnError(t *testing.T) {
 	}
 }
 
+// TestStatStatements_ComputeQueryIDOffIsAnError: with compute_query_id off the
+// view records no statement that runs from then on, so the scrape names the
+// setting rather than reporting the old counters as current.
+func TestStatStatements_ComputeQueryIDOffIsAnError(t *testing.T) {
+	t.Parallel()
+	text := "SELECT $1"
+	for _, tc := range []struct {
+		setting string
+		wantErr bool
+	}{{"off", true}, {"auto", false}, {"on", false}} {
+		t.Run(tc.setting, func(t *testing.T) {
+			t.Parallel()
+			f := &statementsFixture{
+				perDB:          statementRows([]any{int64(7), int64(3), float64(1.5), int64(3), int64(1), int64(2), int64(0), int64(0), &text, int64(1)}),
+				computeQueryID: tc.setting,
+			}
+			res, err := newStatementsCheck(cardinality.Options{TopN: 50}).Scrape(context.Background(), f.target())
+			if tc.wantErr {
+				require.ErrorContains(t, err, "compute_query_id is off")
+				return
+			}
+			require.NoError(t, err)
+			require.NotEmpty(t, res.Metrics)
+		})
+	}
+}
+
 // TestStatStatements_PartialIsNotTruncation keeps the ordinary top-N view
 // from reading as a blown cardinality budget.
 func TestStatStatements_PartialIsNotTruncation(t *testing.T) {
@@ -366,4 +406,48 @@ func TestStatStatements_TextIsResent(t *testing.T) {
 	res, err = c.Scrape(context.Background(), target)
 	require.NoError(t, err)
 	require.Equal(t, "SELECT 2", res.QueryTexts[5], "a changed text is shipped immediately")
+}
+
+// A credential named early in a long DO block whose keyword lies past the
+// display length is withheld: the whole text is read before it is cut, so the
+// keyword that makes the value a credential is still there to find.
+func TestStatStatements_RedactsTheWholeTextBeforeCutting(t *testing.T) {
+	t.Parallel()
+	ddl := "DO $$ DECLARE p text := 'hunter2'; BEGIN /*" + strings.Repeat("x", 9000) + "*/ EXECUTE 'ALTER ROLE u PASSWORD ' || quote_literal(p); END $$"
+	f := &statementsFixture{}
+	f.perDB = statementRows([]any{int64(9), int64(1), float64(1), int64(1), int64(0), int64(0), int64(0), int64(0), &ddl, int64(1)})
+	c := newStatementsCheck(cardinality.Options{TopN: 50})
+
+	res, err := c.Scrape(context.Background(), f.target())
+	require.NoError(t, err)
+	require.Equal(t, withheldQuery, res.QueryTexts[9])
+}
+
+// A text longer than the display length is cut to it.
+func TestStatStatements_ShipsAtMostTheDisplayLength(t *testing.T) {
+	t.Parallel()
+	ddl := "SELECT 1 /*" + strings.Repeat("x", 10000) + "*/"
+	f := &statementsFixture{}
+	f.perDB = statementRows([]any{int64(9), int64(1), float64(1), int64(1), int64(0), int64(0), int64(0), int64(0), &ddl, int64(1)})
+	c := newStatementsCheck(cardinality.Options{TopN: 50})
+
+	res, err := c.Scrape(context.Background(), f.target())
+	require.NoError(t, err)
+	require.Len(t, res.QueryTexts[9], 8192)
+	require.True(t, strings.HasPrefix(res.QueryTexts[9], "SELECT 1 /*xxx"))
+}
+
+// A credential typed into a utility statement is not shipped: the statement
+// is shipped with its text withheld.
+func TestStatStatements_ShipsNoCredentialFromUtilityDDL(t *testing.T) {
+	t.Parallel()
+	ddl := "ALTER ROLE tmp_secret_probe PASSWORD 'hunter2-probe-2'"
+	f := &statementsFixture{}
+	f.perDB = statementRows([]any{int64(9), int64(1), float64(1), int64(1), int64(0), int64(0), int64(0), int64(0), &ddl, int64(1)})
+	c := newStatementsCheck(cardinality.Options{TopN: 50})
+
+	res, err := c.Scrape(context.Background(), f.target())
+	require.NoError(t, err)
+	require.Equal(t, withheldQuery, res.QueryTexts[9])
+	require.NotContains(t, res.QueryTexts[9], "hunter2")
 }

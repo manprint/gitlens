@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -40,6 +41,65 @@ func (m *mockTarget) ConnFor(ctx context.Context, datname string) (Conn, error) 
 func (m *mockTarget) Database() string { return m.database }
 func (m *mockTarget) Clock() clock.Clock {
 	return clock.System()
+}
+
+// PostgreSQL keeps a utility statement's text whole in pg_stat_statements. A
+// credential named early in a block longer than the display length is withheld,
+// and a block longer than statementTextLimit is not shipped, since its text
+// could not be read whole.
+func TestStatStatements_IntegrationLongUtilityTextIsRedacted(t *testing.T) {
+	t.Parallel()
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+
+		adminPool, err := pgxpool.New(ctx, pg.DSN("app", pgtest.RoleSuperuser))
+		require.NoError(t, err)
+		defer adminPool.Close()
+		_, err = adminPool.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS pg_stat_statements`)
+		require.NoError(t, err)
+		_, err = adminPool.Exec(ctx, `SELECT pg_stat_statements_reset()`)
+		require.NoError(t, err)
+
+		// The keyword sits past the display length, so a cut before redaction
+		// would leave the value named at the start of the block.
+		credential := "DO $$ DECLARE p text := 'hunter2'; BEGIN /*" + strings.Repeat("x", 9000) + "*/ IF false THEN EXECUTE 'ALTER ROLE u PASSWORD ' || quote_literal(p); END IF; END $$"
+		oversized := "DO $$ BEGIN /*" + strings.Repeat("x", statementTextLimit) + "*/ END $$"
+		for _, query := range []string{credential, oversized} {
+			_, err := adminPool.Exec(ctx, query)
+			require.NoError(t, err)
+		}
+		var credentialID, oversizedID int64
+		require.NoError(t, adminPool.QueryRow(ctx, `SELECT queryid FROM pg_stat_statements WHERE query LIKE 'DO $$ DECLARE p text%'`).Scan(&credentialID))
+		require.NoError(t, adminPool.QueryRow(ctx, `SELECT queryid FROM pg_stat_statements WHERE query LIKE 'DO $$ BEGIN /*xxx%'`).Scan(&oversizedID))
+
+		pool, err := pgxpool.New(ctx, pg.DSN("app", pgtest.RoleT0))
+		require.NoError(t, err)
+		defer pool.Close()
+		conn, err := pool.Acquire(ctx)
+		require.NoError(t, err)
+		defer conn.Release()
+		check := &statStatementsCheck{
+			selectors: newScopedSelectors(cardinality.Options{TopN: 50}),
+			caches:    make(map[string]*textCache),
+		}
+		target := &mockTarget{
+			conn:       conn,
+			version:    pg.Version,
+			database:   "app",
+			instanceID: uuid.New(),
+			clusterID:  pgtype.ManualClusterID("test-cluster"),
+		}
+		result, err := check.Scrape(ctx, target)
+		require.NoError(t, err)
+
+		require.Equal(t, withheldQuery, result.QueryTexts[credentialID])
+		for _, text := range result.QueryTexts {
+			require.NotContains(t, text, "hunter2")
+		}
+		_, shipped := result.QueryTexts[oversizedID]
+		require.False(t, shipped, "a text longer than statementTextLimit is not shipped")
+	})
 }
 
 // INT-STMT-002: cardinality cap holds against 500 distinct queries
@@ -737,5 +797,29 @@ func TestStatStatements_IntegrationAggregatesAcrossRoles(t *testing.T) {
 			}
 		}
 		require.Equal(t, []float64{5}, calls, "one series per queryid, summed over both roles")
+	})
+}
+
+// TestStatStatements_IntegrationComputeQueryIDOff: with compute_query_id off
+// PostgreSQL records no statement that runs from then on, so the view only
+// holds the past. The scrape names the setting instead of reporting it as
+// current. The session is set on the superuser's own pool, which the test
+// closes at cleanup.
+func TestStatStatements_IntegrationComputeQueryIDOff(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		conn, err := admin.Acquire(ctx)
+		require.NoError(t, err)
+		_, err = conn.Exec(ctx, "SET compute_query_id = off")
+		require.NoError(t, err)
+
+		check := &statStatementsCheck{
+			selectors: cardinalityForIntegration(),
+			caches:    make(map[string]*textCache),
+		}
+		_, err = check.Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
+		require.ErrorContains(t, err, "compute_query_id is off")
 	})
 }

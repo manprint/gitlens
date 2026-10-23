@@ -7,6 +7,22 @@ import (
 	"github.com/manprint/pglens/internal/pgtype"
 )
 
+// DatabaseMonitor is implemented by a target that knows which databases the
+// agent collects from. A check that opens a connection to another database by
+// name must ask first: the connection manager opens a pool for any name it is
+// given, and a database the agent does not collect from must not be read.
+type DatabaseMonitor interface {
+	MonitorsDatabase(datname string) bool
+}
+
+// monitorsDatabase reports whether t collects from datname. A target that does
+// not say so is taken to collect from none, so a check reads no database it
+// cannot confirm.
+func monitorsDatabase(t Target, datname string) bool {
+	m, ok := t.(DatabaseMonitor)
+	return ok && m.MonitorsDatabase(datname)
+}
+
 // SimpleTarget is a testable implementation of Target.
 type SimpleTarget struct {
 	InstanceIDValue pgtype.InstanceID
@@ -17,8 +33,10 @@ type SimpleTarget struct {
 	Extensions      map[string]bool
 	ConnFunc        func(ctx context.Context) (Conn, error)
 	ConnForFunc     func(ctx context.Context, datname string) (Conn, error)
-	DatabaseValue   string
-	ClockValue      clock.Clock
+	// Monitored lists the databases MonitorsDatabase accepts. Nil accepts none.
+	Monitored     map[string]bool
+	DatabaseValue string
+	ClockValue    clock.Clock
 }
 
 func (t *SimpleTarget) InstanceID() pgtype.InstanceID { return t.InstanceIDValue }
@@ -44,5 +62,6 @@ func (t *SimpleTarget) ConnFor(ctx context.Context, datname string) (Conn, error
 	}
 	return t.Conn(ctx)
 }
-func (t *SimpleTarget) Database() string   { return t.DatabaseValue }
-func (t *SimpleTarget) Clock() clock.Clock { return t.ClockValue }
+func (t *SimpleTarget) MonitorsDatabase(datname string) bool { return t.Monitored[datname] }
+func (t *SimpleTarget) Database() string                     { return t.DatabaseValue }
+func (t *SimpleTarget) Clock() clock.Clock                   { return t.ClockValue }

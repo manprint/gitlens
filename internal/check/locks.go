@@ -36,10 +36,20 @@ type lockRow struct {
 	BlockedBy       []int32
 }
 
+// lockSessionsLimit caps the session list, which the activity view shows
+// oldest transaction first. lockIdleQueryLimit is the query text kept for a
+// session that is not in the blocking tree; those keep the full text.
+const (
+	lockSessionsLimit  = 100
+	lockIdleQueryLimit = 256
+)
+
 type lockTree struct {
 	SampledAt time.Time  `json:"sampled_at"`
 	Nodes     []lockNode `json:"nodes"`
 	Sessions  []lockNode `json:"sessions"`
+	// SessionsTruncated is set when Sessions was cut to lockSessionsLimit.
+	SessionsTruncated bool `json:"sessions_truncated,omitempty"`
 }
 
 type lockNode struct {
@@ -65,6 +75,13 @@ type lockNode struct {
 // pg_blocking_pids() walks the lock manager; it is only asked about sessions
 // that are actually waiting on a heavyweight lock instead of every backend
 // every ten seconds.
+//
+// The last column says whether the text reached the size PostgreSQL cuts a
+// session's text to. The byte count is taken on the server, where the cut
+// happens. The cut keeps at most the size less one byte and stops at a
+// character boundary, so a cut text can be as short as the size less four;
+// the four-byte margin covers every cut, and a probe on PostgreSQL 18 cut a
+// text to the size less two.
 const locksQuery = `
 SELECT a.pid,
        COALESCE(a.datname, ''),
@@ -77,7 +94,8 @@ SELECT a.pid,
        COALESCE(EXTRACT(epoch FROM now() - a.xact_start), 0),
        COALESCE(EXTRACT(epoch FROM now() - a.state_change), 0),
        COALESCE(a.query, ''),
-       CASE WHEN a.wait_event_type = 'Lock' THEN pg_blocking_pids(a.pid) ELSE '{}'::int[] END
+       CASE WHEN a.wait_event_type = 'Lock' THEN pg_blocking_pids(a.pid) ELSE '{}'::int[] END,
+       COALESCE(octet_length(a.query), 0) >= (SELECT setting::int FROM pg_settings WHERE name = 'track_activity_query_size') - 4
 FROM pg_stat_activity a
 WHERE a.backend_type = 'client backend'
   AND a.pid <> pg_backend_pid()`
@@ -99,8 +117,18 @@ func (c *locksCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 	var parsed []lockRow
 	for rows.Next() {
 		var r lockRow
-		if err := rows.Scan(&r.PID, &r.Datname, &r.Username, &r.ApplicationName, &r.ClientAddr, &r.State, &r.WaitEventType, &r.WaitEvent, &r.XactAge, &r.StateAge, &r.Query, &r.BlockedBy); err != nil {
+		var cut bool
+		if err := rows.Scan(&r.PID, &r.Datname, &r.Username, &r.ApplicationName, &r.ClientAddr, &r.State, &r.WaitEventType, &r.WaitEvent, &r.XactAge, &r.StateAge, &r.Query, &r.BlockedBy, &cut); err != nil {
 			return Result{}, err
+		}
+		// A statement can carry a role password, and the tree is shipped to
+		// the server and shown in the UI, so a text that may hold one is
+		// withheld before the cut. A text the server already cut is withheld
+		// too, because the sign of a credential may lie past the cut.
+		if cut {
+			r.Query = withheldQuery
+		} else {
+			r.Query = redactQueryText(r.Query)
 		}
 		r.Query = truncateUTF8(r.Query, 2048)
 		parsed = append(parsed, r)
@@ -114,10 +142,8 @@ func buildLocksResult(rows []lockRow, sampledAt time.Time) Result {
 	waits := make(map[string]int)
 	maxAge := 0.0
 	nodes := make([]lockNode, 0, len(rows))
-	sessions := make([]lockNode, 0, len(rows))
 	nodePIDs := make(map[int32]struct{}, len(rows))
 	for _, r := range rows {
-		sessions = append(sessions, lockNode(r))
 		if len(r.BlockedBy) == 0 {
 			continue
 		}
@@ -143,6 +169,25 @@ func buildLocksResult(rows []lockRow, sampledAt time.Time) Result {
 				nodePIDs[r.PID] = struct{}{}
 			}
 		}
+	}
+	// Every backend used to be shipped with its full query on each sample,
+	// blocked or not, which grows with the number of connections. Only the
+	// sessions in the tree keep their full text; the list is capped instead.
+	byAge := make([]lockRow, len(rows))
+	copy(byAge, rows)
+	sort.SliceStable(byAge, func(i, j int) bool { return byAge[i].XactAge > byAge[j].XactAge })
+	sessions := make([]lockNode, 0, min(len(byAge), lockSessionsLimit))
+	sessionsTruncated := false
+	for i, r := range byAge {
+		if i == lockSessionsLimit {
+			sessionsTruncated = true
+			break
+		}
+		session := lockNode(r)
+		if _, inTree := nodePIDs[r.PID]; !inTree {
+			session.Query = truncateUTF8(session.Query, lockIdleQueryLimit)
+		}
+		sessions = append(sessions, session)
 	}
 	metrics := []pgtype.Metric{
 		{Name: "pg_blocked_sessions", Value: float64(blocked), Kind: pgtype.KindGauge},
@@ -174,12 +219,15 @@ func buildLocksResult(rows []lockRow, sampledAt time.Time) Result {
 	if other > 0 {
 		metrics = append(metrics, pgtype.Metric{Name: "pg_lock_waits", Value: float64(other), Kind: pgtype.KindGauge, Labels: map[string]string{"wait_event": "other"}})
 	}
-	result := Result{Metrics: metrics}
+	// A session cut by the cap was observed, not gone, but the list the UI shows
+	// is not exhaustive, so the result is Partial. The metrics and the blocking
+	// tree are complete either way.
+	result := Result{Metrics: metrics, Partial: sessionsTruncated}
 	// Persist an empty tree as well as a populated one. Without the empty
 	// snapshot, a released blocker remains visible in the API until the
 	// fifteen-minute retention cleanup, rather than disappearing on the next
 	// locks scrape.
-	if raw, err := json.Marshal(lockTree{SampledAt: sampledAt, Nodes: nodes, Sessions: sessions}); err == nil {
+	if raw, err := json.Marshal(lockTree{SampledAt: sampledAt, Nodes: nodes, Sessions: sessions, SessionsTruncated: sessionsTruncated}); err == nil {
 		result.Facts = []Fact{{Kind: "lock_tree", Key: "current", ValueJSON: raw}}
 	}
 	return result

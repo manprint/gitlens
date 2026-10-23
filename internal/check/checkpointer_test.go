@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/manprint/pglens/internal/pgtype"
@@ -43,12 +44,36 @@ func TestCheckpointer_AllCountersAreCounterKind(t *testing.T) {
 	}
 }
 
+// A reset of pg_stat_bgwriter is reported as the result's reset time up to
+// PostgreSQL 16. From 17 no reset time is reported, since the checkpoint
+// counters reset separately from the bgwriter ones.
+func TestCheckpointer_ReportsBgwriterResetBefore17(t *testing.T) {
+	reset := time.Now().Add(-time.Hour)
+	r := scrapeCheckpointerWithReset(t, pgtype.PG16, &reset)
+	require.NotNil(t, r.StatsReset)
+	require.True(t, reset.Equal(*r.StatsReset))
+}
+
+func TestCheckpointer_NoResetTimeFrom17(t *testing.T) {
+	reset := time.Now().Add(-time.Hour)
+	r := scrapeCheckpointerWithReset(t, pgtype.PG17, &reset)
+	require.Nil(t, r.StatsReset)
+}
+
 func scrapeCheckpointerForTest(t *testing.T, version pgtype.PGVersion) Result {
+	t.Helper()
+	return scrapeCheckpointerWithReset(t, version, nil)
+}
+
+func scrapeCheckpointerWithReset(t *testing.T, version pgtype.PGVersion, reset *time.Time) Result {
 	t.Helper()
 	conn := &mockConn{
 		queryRowFunc: func(_ context.Context, query string, _ ...any) pgx.Row {
-			if strings.Contains(query, "pg_stat_checkpointer") || strings.Contains(query, "checkpoints_timed") {
+			if strings.Contains(query, "pg_stat_checkpointer") {
 				return &mockRow{vals: []any{float64(1), float64(2), float64(3), float64(4)}}
+			}
+			if strings.Contains(query, "checkpoints_timed") {
+				return &mockRow{vals: []any{float64(1), float64(2), float64(3), float64(4), reset}}
 			}
 			return &mockRow{vals: []any{float64(5), float64(6), float64(7)}}
 		},

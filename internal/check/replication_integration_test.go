@@ -75,9 +75,9 @@ func TestReplicationReceiver_Integration_NotApplicableOnPrimary(t *testing.T) {
 	})
 }
 
-// TestReplicationStreaming_Integration_NotApplicableOnStandby — replication_streaming Requires() rejects standby
-// (Note: testing on a primary-only instance, so we verify the check logic via Requires())
-func TestReplicationStreaming_Integration_NotApplicableOnStandby(t *testing.T) {
+// TestReplicationStreaming_Integration_ApplicableOnStandby — replication_streaming Requires() accepts a standby,
+// which reports the standbys cascading from it (Note: verified via Requires() on a primary-only instance)
+func TestReplicationStreaming_Integration_ApplicableOnStandby(t *testing.T) {
 	t.Parallel()
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
 		pg.Lock(t)
@@ -89,7 +89,7 @@ func TestReplicationStreaming_Integration_NotApplicableOnStandby(t *testing.T) {
 		check := &replicationStreamingCheck{}
 		req := check.Requires()
 		ok, reason := req.Supports(pgtype.RoleStandby, pg.Version, pgtype.TierReadOnly, nil)
-		require.False(t, ok, "replication_streaming should reject standby role: %s", reason)
+		require.True(t, ok, "replication_streaming should run on a standby: %s", reason)
 	})
 }
 
@@ -363,7 +363,9 @@ func TestReplicationReceiver_Integration_Disconnected(t *testing.T) {
 			}, 15*time.Second, 200*time.Millisecond, "WAL receiver should disconnect after primary_conninfo is cleared")
 
 			// The LEFT JOIN guarantee: exactly one row, even though pg_stat_wal_receiver is empty
-			require.Len(t, result.Metrics, 3, "should have exactly 3 metrics even when no receiver")
+			// The row is still there, but a disconnected receiver reports no replay
+			// lag: its receive LSN is frozen, so status and sender port are all.
+			require.Len(t, result.Metrics, 2, "should have exactly 2 metrics even when no receiver")
 
 			foundDisconnected := false
 			for _, m := range result.Metrics {
@@ -632,4 +634,116 @@ func TestReplicationSlots_Integration_SlotManipulation(t *testing.T) {
 		}
 		require.True(t, hasTestSlot, "should report test_slot in metrics")
 	})
+}
+
+// An unreserved slot has no restart LSN, so it reserves no WAL. The server
+// still computes a safe WAL size for it, against a position it does not hold,
+// and that size goes negative as WAL is written. The gauge must be left out
+// for such a slot, while its retained bytes are still reported.
+func TestReplicationSlots_Integration_UnreservedSlotHasNoSafeWALSize(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		// safe_wal_size is NULL while max_slot_wal_keep_size is -1, so the
+		// limit has to be set for the gauge to exist at all.
+		_, err := admin.Exec(ctx, "ALTER SYSTEM SET max_slot_wal_keep_size = '32MB'")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "SELECT pg_reload_conf()")
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = admin.Exec(ctx, "ALTER SYSTEM RESET max_slot_wal_keep_size")
+			_, _ = admin.Exec(ctx, "SELECT pg_reload_conf()")
+		})
+		_, err = admin.Exec(ctx, "SELECT pg_create_physical_replication_slot('sl_unreserved', false)")
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = admin.Exec(ctx, "SELECT pg_drop_replication_slot('sl_unreserved')")
+		})
+
+		// The reload is asynchronous: wait until a new session sees the limit.
+		pool := pg.Pool(t, "app", pgtest.RoleT0)
+		require.Eventually(t, func() bool {
+			var limit string
+			return pool.QueryRow(ctx, "SELECT current_setting('max_slot_wal_keep_size')").Scan(&limit) == nil && limit != "-1"
+		}, 30*time.Second, 100*time.Millisecond)
+
+		conn, err := pool.Acquire(ctx)
+		require.NoError(t, err)
+		defer conn.Release()
+		result, err := (&replicationSlotsCheck{}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: pgtype.TierReadOnly})
+		require.NoError(t, err)
+
+		var reported bool
+		for _, m := range result.Metrics {
+			if m.Labels["slot_name"] != "sl_unreserved" {
+				continue
+			}
+			require.NotEqual(t, "replication_slot_safe_wal_size_bytes", m.Name)
+			if m.Name == "replication_slot_retained_bytes" {
+				reported = true
+			}
+		}
+		require.True(t, reported, "retained bytes are still reported for the unreserved slot")
+	})
+}
+
+// TestReplicationStreaming_Integration_IdleReplyAgeWithinBound checks the reply
+// bound staleReplyBound assumes. The walsender asks a silent standby for a
+// reply once wal_sender_timeout/2 has passed, so an idle standby never shows a
+// reply older than that plus the margin, even when it is told to report its
+// status far less often than the default. Here the standby reports every 60 s
+// and the primary's timeout is 10 s, so the bound is 10 s.
+func TestReplicationStreaming_Integration_IdleReplyAgeWithinBound(t *testing.T) {
+	t.Parallel()
+	for _, major := range pgtest.Versions() {
+		major := major
+		t.Run(fmt.Sprintf("pg%d", major), func(t *testing.T) {
+			ctx := context.Background()
+			primary, standby := pgtest.PrimaryStandby(t, major)
+
+			primaryAdmin, err := pgxpool.New(ctx, primary.DSN("app", pgtest.RoleSuperuser))
+			require.NoError(t, err)
+			defer primaryAdmin.Close()
+			standbyAdmin, err := pgxpool.New(ctx, standby.DSN("app", pgtest.RoleSuperuser))
+			require.NoError(t, err)
+			defer standbyAdmin.Close()
+			for _, stmt := range []string{
+				`ALTER SYSTEM SET wal_sender_timeout = '10s'`,
+				`SELECT pg_reload_conf()`,
+			} {
+				_, err = primaryAdmin.Exec(ctx, stmt)
+				require.NoError(t, err, stmt)
+			}
+			for _, stmt := range []string{
+				`ALTER SYSTEM SET wal_receiver_status_interval = '60s'`,
+				`SELECT pg_reload_conf()`,
+			} {
+				_, err = standbyAdmin.Exec(ctx, stmt)
+				require.NoError(t, err, stmt)
+			}
+
+			bound := staleReplyBound(10)
+			var worst float64
+			sampled := 0
+			deadline := time.Now().Add(25 * time.Second)
+			for time.Now().Before(deadline) {
+				rows, err := primaryAdmin.Query(ctx, `SELECT EXTRACT(epoch FROM now() - reply_time) FROM pg_stat_replication`)
+				require.NoError(t, err)
+				for rows.Next() {
+					var age *float64
+					require.NoError(t, rows.Scan(&age))
+					if age != nil {
+						sampled++
+						worst = math.Max(worst, *age)
+					}
+				}
+				require.NoError(t, rows.Err())
+				rows.Close()
+				time.Sleep(500 * time.Millisecond)
+			}
+			require.Positive(t, sampled, "the standby should be streaming during the sample")
+			require.LessOrEqual(t, worst, bound, "an idle standby's reply age must stay within the stall bound")
+		})
+	}
 }

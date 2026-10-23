@@ -24,9 +24,67 @@ func TestArchiver_FailedRatioZeroWhenLastArchivedIsNewer(t *testing.T) {
 }
 
 func TestArchiver_OmitsAgesWhenNull(t *testing.T) {
-	r := scrapeArchiverForTest(t, "on", []any{1.0, nil, nil, 0.0, nil, nil, nil}, nil)
+	denied := &mockRow{err: &pgconn.PgError{Code: "42501", Message: "permission denied for function pg_ls_archive_statusdir"}}
+	r := scrapeArchiverWithReady(t, "on", []any{1.0, nil, nil, 0.0, nil, nil, nil}, nil, denied)
 	require.Equal(t, -1.0, metricValue(r, "pg_archiver_last_archived_age_seconds", nil))
 	require.Equal(t, -1.0, metricValue(r, "pg_archiver_last_failed_age_seconds", nil))
+}
+
+// TestArchiver_NeverArchivedAgeStartsAtPostmaster: an archiver that has never
+// archived still reports an age, from the server start, so that archive.stalled
+// can judge the segments waiting behind it. Without it the stall was invisible.
+func TestArchiver_NeverArchivedAgeStartsAtPostmaster(t *testing.T) {
+	never := []any{0.0, nil, nil, 0.0, nil, nil, nil}
+	r := scrapeArchiverWithReady(t, "on", never, nil, &mockRow{vals: []any{3.0}})
+	require.Greater(t, metricValue(r, "pg_archiver_last_archived_age_seconds", nil), 3600.0)
+	require.Equal(t, 3.0, metricValue(r, "pg_archiver_ready_files", nil))
+}
+
+// TestArchiver_NeverArchivedAgeStartsAtStatsReset: when the statistics were
+// reset after the server started, the age runs from the reset, the later time.
+func TestArchiver_NeverArchivedAgeStartsAtStatsReset(t *testing.T) {
+	reset := time.Now().Add(-10 * time.Minute)
+	r := scrapeArchiverWithReady(t, "on", []any{0.0, nil, nil, 0.0, nil, nil, &reset}, nil, &mockRow{vals: []any{3.0}})
+	age := metricValue(r, "pg_archiver_last_archived_age_seconds", nil)
+	require.GreaterOrEqual(t, age, 600.0)
+	require.Less(t, age, 3600.0)
+}
+
+// TestArchiver_NeverArchivedAgeNeedsReadyFiles: without the waiting-segment
+// count an idle server that never archived would read as stalled once it had
+// been up for an hour, so no age is reported.
+func TestArchiver_NeverArchivedAgeNeedsReadyFiles(t *testing.T) {
+	never := []any{0.0, nil, nil, 0.0, nil, nil, nil}
+	denied := &mockRow{err: &pgconn.PgError{Code: "42501", Message: "permission denied for function pg_ls_archive_statusdir"}}
+	r := scrapeArchiverWithReady(t, "on", never, nil, denied)
+	require.Equal(t, -1.0, metricValue(r, "pg_archiver_last_archived_age_seconds", nil))
+}
+
+// A statement timeout on the archive directory listing is an answer from the
+// server, not a broken connection: the archiver counters still report.
+func TestArchiver_ReadyFilesTimeoutKeepsCounters(t *testing.T) {
+	timeout := &mockRow{err: &pgconn.PgError{Code: "57014", Message: "canceling statement due to statement timeout"}}
+	r := scrapeArchiverWithReady(t, "on", []any{5.0, nil, nil, 1.0, nil, nil, nil}, nil, timeout)
+	require.Equal(t, -1.0, metricValue(r, "pg_archiver_ready_files", nil))
+	require.Equal(t, 5.0, metricValue(r, "pg_archiver_archived_total", nil))
+	require.Equal(t, 1.0, metricValue(r, "pg_archiver_failed_total", nil))
+}
+
+// A connection the server ends while the scrape runs is not a missing probe:
+// the counters read after it would come from a dead session, and the scrape
+// must fail rather than report them as healthy. Only a statement error on a
+// live connection leaves the readiness probe out.
+func TestArchiver_ConnectionEndedFailsScrape(t *testing.T) {
+	for _, code := range []string{"57P01", "08006"} {
+		t.Run(code, func(t *testing.T) {
+			ended := &mockRow{err: &pgconn.PgError{Code: code, Message: "terminating connection due to administrator command"}}
+			conn := archiverMockConn("on", []any{5.0, nil, nil, 1.0, nil, nil, nil}, nil, ended)
+			_, err := (&archiverCheck{}).Scrape(context.Background(), &SimpleTarget{
+				ConnFunc: func(context.Context) (Conn, error) { return conn, nil }, ClockValue: clock.System(),
+			})
+			require.Error(t, err)
+		})
+	}
 }
 
 func TestArchiver_ArchiveModeOffEmitsNoArchiverCounters(t *testing.T) {
@@ -78,6 +136,19 @@ func TestArchiver_ReadyFilesNeedPgMonitor(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestArchiver_AgeIsMeasuredOnTheServerClock: the agent clock runs five minutes
+// ahead of the server. The age of the last archived segment must still be the
+// server's, or a healthy archiver would look stalled.
+func TestArchiver_AgeIsMeasuredOnTheServerClock(t *testing.T) {
+	archived := time.Now().Add(-10 * time.Second)
+	conn := archiverMockConn("on", []any{1.0, nil, &archived, 0.0, nil, nil, nil}, nil, &mockRow{vals: []any{0.0}})
+	r, err := (&archiverCheck{}).Scrape(context.Background(), &SimpleTarget{
+		ConnFunc: func(context.Context) (Conn, error) { return conn, nil }, ClockValue: clock.NewFake(time.Now().Add(5 * time.Minute)),
+	})
+	require.NoError(t, err)
+	require.InDelta(t, 10.0, metricValue(r, "pg_archiver_last_archived_age_seconds", nil), 1.0)
+}
+
 func scrapeArchiverForTest(t *testing.T, mode string, stats []any, progress [][]any) Result {
 	t.Helper()
 	return scrapeArchiverWithReady(t, mode, stats, progress, &mockRow{vals: []any{0.0}})
@@ -101,8 +172,11 @@ func archiverMockConn(mode string, stats []any, progress [][]any, ready *mockRow
 				return &mockRow{vals: []any{mode}}
 			case strings.Contains(query, "pg_ls_archive_statusdir"):
 				return ready
+			case strings.Contains(query, "pg_postmaster_start_time"):
+				return &mockRow{vals: []any{time.Now().Add(-2 * time.Hour)}}
 			default:
-				return &mockRow{vals: stats}
+				// The statistics row ends with the server's now(), read with them.
+				return &mockRow{vals: append(append([]any{}, stats...), time.Now())}
 			}
 		},
 		queryFunc: func(context.Context, string, ...any) (pgx.Rows, error) {

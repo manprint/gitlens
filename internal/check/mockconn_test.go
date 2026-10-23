@@ -196,12 +196,26 @@ func TestActivityCheck_Scrape_Happy(t *testing.T) {
 			return pgconn.CommandTag{}, nil
 		},
 		queryFunc: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+			if !strings.Contains(sql, "max_xact_age") {
+				// The per-database, per-application and per-state groups are
+				// not part of this sample.
+				return &mockRows{}, nil
+			}
 			return &mockRows{
 				rows: []([]any){
 					{"active", "CPU", 5, 10.5, 0.0},
 					{"idle in transaction", "Lock", 2, 30.2, 25.5},
 				},
 			}, nil
+		},
+		queryRowFunc: func(ctx context.Context, sql string, args ...any) pgx.Row {
+			switch {
+			case strings.Contains(sql, "current_setting"):
+				return &mockRow{vals: []any{"100"}}
+			case strings.Contains(sql, "pg_prepared_xacts"):
+				return &mockRow{vals: []any{float64(0), float64(0)}}
+			}
+			return &mockRow{vals: []any{float64(0)}}
 		},
 	}
 
@@ -335,7 +349,7 @@ func TestInstanceInfoCheck_Scrape_Happy(t *testing.T) {
 		},
 		queryRowFunc: func(ctx context.Context, sql string, args ...any) pgx.Row {
 			return &mockRow{
-				vals: []any{&sysID, false, 150000, time.Now(), &addr, &port},
+				vals: []any{&sysID, false, 150000, time.Now(), &addr, &port, time.Now()},
 			}
 		},
 	}
@@ -395,6 +409,9 @@ func TestStatStatementsCheck_Scrape_Happy(t *testing.T) {
 			}, nil
 		},
 		queryRowFunc: func(ctx context.Context, sql string, args ...any) pgx.Row {
+			if strings.Contains(sql, "compute_query_id") {
+				return &mockRow{vals: []any{"on"}}
+			}
 			var t *time.Time
 			return &mockRow{vals: []any{t}}
 		},
@@ -426,6 +443,9 @@ func TestStatStatementsCheck_Scrape_NoExtensionAnywhere(t *testing.T) {
 	conn := &mockConn{
 		queryFunc: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 			return nil, &pgconn.PgError{Code: "42P01", Message: `relation "pg_stat_statements" does not exist`}
+		},
+		queryRowFunc: func(ctx context.Context, sql string, args ...any) pgx.Row {
+			return &mockRow{vals: []any{"on"}}
 		},
 	}
 
@@ -488,6 +508,9 @@ func TestStatStatementsCheck_Scrape_CycleAdvancesAndForgetsStaleRetained(t *test
 			return &mockRows{rows: rows}, nil
 		},
 		queryRowFunc: func(ctx context.Context, sql string, args ...any) pgx.Row {
+			if strings.Contains(sql, "compute_query_id") {
+				return &mockRow{vals: []any{"on"}}
+			}
 			var t *time.Time
 			return &mockRow{vals: []any{t}}
 		},

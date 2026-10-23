@@ -2,7 +2,6 @@ package check
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"github.com/manprint/pglens/internal/pgtype"
@@ -36,7 +35,8 @@ SELECT (SELECT system_identifier::text FROM pg_control_system()) AS system_ident
        current_setting('server_version_num')::int AS version_num,
        pg_postmaster_start_time() AS start_time,
        inet_server_addr()::text AS addr,
-       inet_server_port() AS port
+       inet_server_port() AS port,
+       now() AS now
 `)
 	var sysID *string
 	var inRecovery bool
@@ -44,7 +44,10 @@ SELECT (SELECT system_identifier::text FROM pg_control_system()) AS system_ident
 	var startTime time.Time
 	var addr *string
 	var port *int
-	err = row.Scan(&sysID, &inRecovery, &versionNum, &startTime, &addr, &port)
+	// The uptime is measured on the server clock, read with the start time, so
+	// a skew between the agent's clock and the server's does not move it.
+	var now time.Time
+	err = row.Scan(&sysID, &inRecovery, &versionNum, &startTime, &addr, &port, &now)
 	if err != nil {
 		if isPermissionDenied(err) {
 			row2 := conn.QueryRow(ctx, `
@@ -52,21 +55,23 @@ SELECT pg_is_in_recovery() AS in_recovery,
        current_setting('server_version_num')::int AS version_num,
        pg_postmaster_start_time() AS start_time,
        inet_server_addr()::text AS addr,
-       inet_server_port() AS port
+       inet_server_port() AS port,
+       now() AS now
 `)
 			var inRec2 bool
 			var ver2 int
 			var st2 time.Time
 			var addr2 *string
 			var port2 *int
-			if err2 := row2.Scan(&inRec2, &ver2, &st2, &addr2, &port2); err2 != nil {
+			var now2 time.Time
+			if err2 := row2.Scan(&inRec2, &ver2, &st2, &addr2, &port2, &now2); err2 != nil {
 				return Result{}, err2
 			}
-			return buildInstanceInfoResult(nil, inRec2, ver2, st2, addr2, port2, t.Clock().Now()), nil
+			return buildInstanceInfoResult(nil, inRec2, ver2, st2, addr2, port2, now2), nil
 		}
 		return Result{}, err
 	}
-	return buildInstanceInfoResult(sysID, inRecovery, versionNum, startTime, addr, port, t.Clock().Now()), nil
+	return buildInstanceInfoResult(sysID, inRecovery, versionNum, startTime, addr, port, now), nil
 }
 
 func buildInstanceInfoResult(sysID *string, inRecovery bool, versionNum int, startTime time.Time, addr *string, port *int, now time.Time) Result {
@@ -104,10 +109,10 @@ func boolToFloat(b bool) float64 {
 	return 0
 }
 
+// isPermissionDenied matches the SQLSTATE, not the message text: a failure that
+// merely mentions 42501 or "permission denied" is not a missing privilege, and
+// taking it for one would silently switch the cluster identity to the manual
+// source.
 func isPermissionDenied(err error) bool {
-	if err == nil {
-		return false
-	}
-	s := err.Error()
-	return strings.Contains(s, "42501") || strings.Contains(s, "permission denied") || strings.Contains(s, "must be superuser")
+	return pgErrorCode(err) == pgInsufficientPrivilege
 }

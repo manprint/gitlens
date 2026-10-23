@@ -22,7 +22,19 @@ type bloatEstimateCheck struct {
 type bloatRow struct {
 	Schema, Relation, Index, Kind        string
 	Real, Expected, Bloat, Ratio, Tuples float64
+	OID                                  uint32
 }
+
+// bloatSizeQuery reads one table's exact size. The size function locks the
+// table, so it runs only for the tables that are reported.
+const bloatSizeQuery = `SELECT pg_relation_size(c.oid) FROM pg_class c WHERE c.oid = $1`
+
+// bloatUnreadableQuery counts the tables pg_stats hides from this role: one
+// with a column the role cannot SELECT, or one whose row security applies to
+// the role. Such a table gets no estimate, and an empty result would read as
+// no bloat, so the scrape reports itself partial. Only tables above the size
+// floor of Scrape count, since the others are never reported anyway.
+const bloatUnreadableQuery = `SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind = 'r' AND c.relpersistence <> 't' AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND GREATEST(c.relpages, 0)::bigint * current_setting('block_size')::bigint >= 1024 * 1024 AND ((c.relrowsecurity AND row_security_active(c.oid)) OR EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped AND NOT has_column_privilege(c.oid, a.attnum, 'SELECT')))`
 
 func (c *bloatEstimateCheck) Name() string { return "bloat_estimate" }
 func (c *bloatEstimateCheck) Requires() Requirements {
@@ -51,7 +63,7 @@ func (c *bloatEstimateCheck) Scrape(ctx context.Context, t Target) (Result, erro
 	parsed := []bloatRow{}
 	for rows.Next() {
 		var r bloatRow
-		if e = rows.Scan(&r.Schema, &r.Relation, &r.Index, &r.Kind, &r.Real, &r.Expected, &r.Bloat, &r.Ratio, &r.Tuples); e != nil {
+		if e = rows.Scan(&r.Schema, &r.Relation, &r.Index, &r.Kind, &r.Real, &r.Expected, &r.Bloat, &r.Ratio, &r.Tuples, &r.OID); e != nil {
 			return Result{}, e
 		}
 		if r.Real < 1024*1024 || r.Tuples < 0 {
@@ -60,6 +72,12 @@ func (c *bloatEstimateCheck) Scrape(ctx context.Context, t Target) (Result, erro
 		parsed = append(parsed, r)
 	}
 	if e = rows.Err(); e != nil {
+		return Result{}, e
+	}
+	// Tables the role cannot see are absent from rows, so they are counted
+	// apart and make the result partial (see bloatUnreadableQuery).
+	var unreadable int64
+	if e = conn.QueryRow(ctx, bloatUnreadableQuery).Scan(&unreadable); e != nil {
 		return Result{}, e
 	}
 	by := map[string]bloatRow{}
@@ -76,9 +94,35 @@ func (c *bloatEstimateCheck) Scrape(ctx context.Context, t Target) (Result, erro
 	selector, cycle := c.selectors.next(t)
 	sel, tr := selector.Select(cycle, cand)
 	selector.Forget(cycle)
-	res := bloatResult(sel, by)
+	// A table whose size cannot be read now (locked past lock_timeout, or
+	// dropped) is left out; the others are still reported. The bloat is
+	// recomputed from the exact size with the formula of bloat_estimate.sql.
+	reported := make([]cardinality.Candidate, 0, len(sel))
+	for _, candidate := range sel {
+		r := by[candidate.Key]
+		var size *int64
+		ok, e := readRelation(ctx, conn, bloatSizeQuery, r.OID, &size)
+		if e != nil {
+			return Result{}, e
+		}
+		if !ok || size == nil {
+			continue
+		}
+		r.Real = float64(*size)
+		r.Bloat = 0
+		if r.Real > r.Expected {
+			r.Bloat = r.Real - r.Expected
+		}
+		r.Ratio = 0
+		if r.Real > 0 {
+			r.Ratio = r.Bloat / r.Real
+		}
+		by[candidate.Key] = r
+		reported = append(reported, candidate)
+	}
+	res := bloatResult(reported, by)
 	res.Truncated = tr
-	res.Partial = len(sel) < len(cand)
+	res.Partial = unreadable > 0 || len(reported) < len(cand)
 	return res, nil
 }
 func bloatResult(sel []cardinality.Candidate, rows map[string]bloatRow) Result {

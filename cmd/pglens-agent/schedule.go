@@ -375,6 +375,9 @@ func (s *scheduleSet) buildLocked() error {
 	dropSkips(s.pending)
 	s.mu.Unlock()
 	for _, mgr := range s.managers {
+		// The checks reach their databases through ScheduledConnFor, which
+		// must already hold this schedule's set when the first one runs.
+		mgr.SetScheduledDatabases(s.gates[mgr.Database()].databases)
 		addScheduleEntries(sched, mgr, s.cfg, s.mu, s.pending, s.gates[mgr.Database()])
 	}
 	if err := sched.Start(s.ctx); err != nil {

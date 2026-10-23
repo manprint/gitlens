@@ -83,10 +83,59 @@ func TestINTSCH001_DatabaseDiscoveredAfterStartIsScheduled(t *testing.T) {
 	})
 }
 
+// TestINTSCH007_DatabaseCreatedAfterStartIsReachable: the first discovery
+// finds the maintenance database only. A database created afterwards is
+// scheduled by the next reconcile, and its checks must then reach it through
+// ScheduledConnFor instead of being refused for the life of the process.
+func TestINTSCH007_DatabaseCreatedAfterStartIsReachable(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		const dbname = "sch007_late_database"
+		const target = "late-database-target"
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		_, _ = admin.Exec(ctx, "DROP DATABASE IF EXISTS "+dbname+" WITH (FORCE)")
+
+		opts := agent.DefaultConnOptions()
+		opts.Include = []*regexp.Regexp{regexp.MustCompile("^(postgres|" + dbname + ")$")}
+		mgr, err := agent.NewManager(ctx, target, pg.DSN("postgres", pgtest.RoleT0), opts, clock.System())
+		require.NoError(t, err)
+		t.Cleanup(mgr.Close)
+
+		var mu sync.Mutex
+		pending := map[string][]wire.Result{}
+		scheduledDBs := map[string]map[string]bool{}
+		schedules := newScheduleSet(ctx, &agent.Config{}, clock.System(), []*agent.Manager{mgr}, &mu, pending, scheduledDBs)
+		require.NoError(t, schedules.start(ctx))
+		t.Cleanup(schedules.stop)
+
+		_, err = admin.Exec(ctx, "CREATE DATABASE "+dbname)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = admin.Exec(context.Background(), "DROP DATABASE IF EXISTS "+dbname+" WITH (FORCE)")
+		})
+		_, err = mgr.ScheduledConnFor(ctx, dbname)
+		require.Error(t, err, "the schedule built at startup does not hold the new database")
+
+		schedules.reconcile()
+
+		require.True(t, scheduledDatabasesOf(&mu, scheduledDBs, target)[dbname], "the reconcile must schedule the new database")
+		conn, err := mgr.ScheduledConnFor(ctx, dbname)
+		require.NoError(t, err, "the checks scheduled for the new database must reach it")
+		var current string
+		require.NoError(t, conn.QueryRow(ctx, "SELECT current_database()").Scan(&current))
+		require.Equal(t, dbname, current)
+		conn.Release()
+	})
+}
+
 // TestINTSCH002_ScheduleFollowsTheTargetRole: a target that cannot be read when
 // the schedule is first built gets its checks once it can be read, and its
-// role-gated checks follow the role: a standby runs replication_receiver, and
-// after a promotion the former standby runs replication_streaming instead.
+// role-gated check follows the role: a standby runs replication_receiver, and
+// after a promotion the former standby no longer does. replication_streaming
+// runs on every role, since a cascading standby has walsenders of its own.
 func TestINTSCH002_ScheduleFollowsTheTargetRole(t *testing.T) {
 	for _, major := range pgtest.Versions() {
 		major := major
@@ -116,8 +165,8 @@ func TestINTSCH002_ScheduleFollowsTheTargetRole(t *testing.T) {
 			t.Cleanup(schedules.stop)
 
 			skips := takeSkips(&mu, pending, target)
-			require.Equal(t, "role unknown not allowed", skips["replication_streaming"])
 			require.Equal(t, "role unknown not allowed", skips["replication_receiver"])
+			require.NotContains(t, skips, "replication_streaming")
 
 			// The identity store recovers. The next reconcile reads the standby
 			// in full and schedules its receiver check.
@@ -125,8 +174,8 @@ func TestINTSCH002_ScheduleFollowsTheTargetRole(t *testing.T) {
 			schedules.reconcile()
 
 			skips = takeSkips(&mu, pending, target)
-			require.Equal(t, "role standby not allowed", skips["replication_streaming"])
 			require.NotContains(t, skips, "replication_receiver")
+			require.NotContains(t, skips, "replication_streaming")
 
 			// Promote the standby. The push cycle refreshes the role before the
 			// reconcile reads it, so do the same here.

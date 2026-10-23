@@ -1,11 +1,38 @@
 package check
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/manprint/pglens/internal/clock"
 	"github.com/stretchr/testify/require"
 )
+
+// TestInstanceInfo_UptimeIsMeasuredOnTheServerClock: the agent clock runs an
+// hour ahead of the server, and the uptime must still be the server's.
+func TestInstanceInfo_UptimeIsMeasuredOnTheServerClock(t *testing.T) {
+	serverNow := time.Now()
+	start := serverNow.Add(-time.Hour)
+	conn := &mockConn{
+		queryRowFunc: func(context.Context, string, ...any) pgx.Row {
+			return &mockRow{vals: []any{"7381927364512345678", false, 160004, start, nil, nil, serverNow}}
+		},
+	}
+	r, err := (&instanceInfoCheck{}).Scrape(context.Background(), &SimpleTarget{
+		ConnFunc: func(context.Context) (Conn, error) { return conn, nil }, ClockValue: clock.NewFake(serverNow.Add(time.Hour)),
+	})
+	require.NoError(t, err)
+	for _, m := range r.Metrics {
+		if m.Name == "pg_uptime_seconds" {
+			require.InDelta(t, 3600.0, m.Value, 1.0)
+			return
+		}
+	}
+	require.Fail(t, "pg_uptime_seconds is missing")
+}
 
 func TestBuildInstanceInfoResult(t *testing.T) {
 	t.Parallel()
@@ -51,9 +78,62 @@ func TestBuildInstanceInfoResult(t *testing.T) {
 
 func TestIsPermissionDenied(t *testing.T) {
 	t.Parallel()
-	require.True(t, isPermissionDenied(errWithCode("42501")))
-	require.True(t, isPermissionDenied(errWithMsg("permission denied")))
+	require.True(t, isPermissionDenied(&pgconn.PgError{Code: "42501"}))
+	require.False(t, isPermissionDenied(&pgconn.PgError{Code: "42P01"}))
 	require.False(t, isPermissionDenied(nil))
+	// Text is not a SQLSTATE: a failure that only mentions the code or the
+	// phrase is not a missing privilege.
+	require.False(t, isPermissionDenied(errWithCode("42501")))
+	require.False(t, isPermissionDenied(errWithMsg("permission denied")))
+}
+
+// TestInstanceInfo_PermissionErrorFallsBackToManualIdentity: a missing
+// privilege on the system identifier still reports the instance, under the
+// manual cluster source.
+func TestInstanceInfo_PermissionErrorFallsBackToManualIdentity(t *testing.T) {
+	t.Parallel()
+	serverNow := time.Now()
+	calls := 0
+	conn := &mockConn{
+		queryRowFunc: func(context.Context, string, ...any) pgx.Row {
+			calls++
+			if calls == 1 {
+				return &mockRow{err: &pgconn.PgError{Code: "42501", Message: "permission denied for function pg_control_system"}}
+			}
+			return &mockRow{vals: []any{false, 160004, serverNow.Add(-time.Hour), nil, nil, serverNow}}
+		},
+	}
+	r, err := (&instanceInfoCheck{}).Scrape(context.Background(), &SimpleTarget{
+		ConnFunc: func(context.Context) (Conn, error) { return conn, nil }, ClockValue: clock.System(),
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, calls)
+	for _, m := range r.Metrics {
+		if m.Name == "pg_up" {
+			require.Equal(t, "manual", m.Labels["cluster_id_source"])
+			return
+		}
+	}
+	require.Fail(t, "pg_up is missing")
+}
+
+// TestInstanceInfo_TextMatching42501FailsTheScrape: a failure whose message
+// mentions 42501 is not a missing privilege, so the scrape fails instead of
+// running the fallback and reporting the cluster under the manual identity.
+func TestInstanceInfo_TextMatching42501FailsTheScrape(t *testing.T) {
+	t.Parallel()
+	calls := 0
+	conn := &mockConn{
+		queryRowFunc: func(context.Context, string, ...any) pgx.Row {
+			calls++
+			return &mockRow{err: errWithMsg("unexpected row shape, column code 42501 out of range")}
+		},
+	}
+	_, err := (&instanceInfoCheck{}).Scrape(context.Background(), &SimpleTarget{
+		ConnFunc: func(context.Context) (Conn, error) { return conn, nil }, ClockValue: clock.System(),
+	})
+	require.Error(t, err)
+	require.Equal(t, 1, calls)
 }
 
 func errWithCode(code string) error {

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/manprint/pglens/internal/cardinality"
 	"github.com/manprint/pglens/internal/pgtype"
@@ -25,7 +26,15 @@ type indexStatsRow struct {
 	Bytes                                                     int64
 	Unique, Primary, Valid                                    bool
 	Definition                                                string
+	// EstBytes ranks the index before its exact size is read: the pages of
+	// the index as of the last VACUUM or ANALYZE.
+	EstBytes int64
+	OID      uint32
 }
+
+// indexDefinitionQuery reads one index's exact size and definition. Both
+// lock the index's table, so they run only for the indexes that are reported.
+const indexDefinitionQuery = `SELECT pg_relation_size(c.oid), pg_get_indexdef(c.oid) FROM pg_class c WHERE c.oid = $1`
 
 func (c *indexStatsCheck) Name() string { return "index_stats" }
 func (c *indexStatsCheck) Requires() Requirements {
@@ -44,14 +53,20 @@ func (c *indexStatsCheck) Scrape(ctx context.Context, t Target) (Result, error) 
 	if err := ApplySessionLimits(ctx, conn, c.Timeout()); err != nil {
 		return Result{}, err
 	}
+	// pg_stat_user_indexes lists the indexes of every session's temporary tables
+	// under their pg_temp_N schemas. They are gone with their session, so they
+	// are left out, as table_stats leaves its temporary tables out.
 	rows, err := conn.Query(ctx, `
 SELECT s.schemaname, s.relname, s.indexrelname,
        COALESCE(s.idx_scan,0), COALESCE(s.idx_tup_read,0), COALESCE(s.idx_tup_fetch,0),
-       COALESCE(io.idx_blks_read,0), COALESCE(io.idx_blks_hit,0), pg_relation_size(s.indexrelid),
-       ix.indisunique, ix.indisprimary, ix.indisvalid, pg_get_indexdef(s.indexrelid)
+       COALESCE(io.idx_blks_read,0), COALESCE(io.idx_blks_hit,0),
+       (GREATEST(ic.relpages, 0)::bigint * current_setting('block_size')::bigint),
+       ix.indisunique, ix.indisprimary, ix.indisvalid, s.indexrelid
 FROM pg_stat_user_indexes s
 JOIN pg_index ix ON ix.indexrelid = s.indexrelid
-LEFT JOIN pg_statio_user_indexes io ON io.indexrelid = s.indexrelid`)
+JOIN pg_class ic ON ic.oid = s.indexrelid
+LEFT JOIN pg_statio_user_indexes io ON io.indexrelid = s.indexrelid
+WHERE ic.relpersistence <> 't'`)
 	if err != nil {
 		return Result{}, err
 	}
@@ -59,7 +74,7 @@ LEFT JOIN pg_statio_user_indexes io ON io.indexrelid = s.indexrelid`)
 	parsed := make([]indexStatsRow, 0)
 	for rows.Next() {
 		var r indexStatsRow
-		if err := rows.Scan(&r.Schema, &r.Relation, &r.Index, &r.IdxScan, &r.IdxTupRead, &r.IdxTupFetch, &r.IdxBlksRead, &r.IdxBlksHit, &r.Bytes, &r.Unique, &r.Primary, &r.Valid, &r.Definition); err != nil {
+		if err := rows.Scan(&r.Schema, &r.Relation, &r.Index, &r.IdxScan, &r.IdxTupRead, &r.IdxTupFetch, &r.IdxBlksRead, &r.IdxBlksHit, &r.EstBytes, &r.Unique, &r.Primary, &r.Valid, &r.OID); err != nil {
 			return Result{}, err
 		}
 		parsed = append(parsed, r)
@@ -73,13 +88,32 @@ LEFT JOIN pg_statio_user_indexes io ON io.indexrelid = s.indexrelid`)
 	for _, r := range parsed {
 		key := r.Schema + "." + r.Index
 		byKey[key] = r
-		candidates = append(candidates, cardinality.Candidate{Key: key, Primary: float64(r.Bytes) - float64(r.IdxScan), Secondary: float64(r.Bytes)})
+		candidates = append(candidates, cardinality.Candidate{Key: key, Primary: float64(r.EstBytes) - float64(r.IdxScan), Secondary: float64(r.EstBytes)})
 	}
 	selected, truncated := selector.Select(cycle, candidates)
 	selector.Forget(cycle)
-	result := indexStatsResult(selected, byKey)
+	// An index whose size or definition cannot be read now (its table is
+	// locked past lock_timeout, or it was dropped) is left out; the others are
+	// still reported.
+	reported := make([]cardinality.Candidate, 0, len(selected))
+	for _, candidate := range selected {
+		r := byKey[candidate.Key]
+		var bytes *int64
+		var definition *string
+		ok, err := readRelation(ctx, conn, indexDefinitionQuery, r.OID, &bytes, &definition)
+		if err != nil {
+			return Result{}, err
+		}
+		if !ok || bytes == nil || definition == nil {
+			continue
+		}
+		r.Bytes, r.Definition = *bytes, *definition
+		byKey[candidate.Key] = r
+		reported = append(reported, candidate)
+	}
+	result := indexStatsResult(reported, byKey)
 	result.Truncated = truncated
-	result.Partial = len(selected) < len(candidates)
+	result.Partial = len(reported) < len(candidates)
 	return result, nil
 }
 
@@ -122,10 +156,50 @@ func hashNormalizedDefinition(def string) string {
 	start := strings.Index(def, "(")
 	end := strings.LastIndex(def, ")")
 	if start < 0 || end < start {
-		sum := sha256.Sum256([]byte(strings.Join(strings.Fields(strings.ToLower(def)), " ")))
+		sum := sha256.Sum256([]byte(normalizeDefinition(def)))
 		return hex.EncodeToString(sum[:])
 	}
-	normalized := strings.Join(strings.Fields(strings.ToLower(def[start:end+1])), " ")
+	normalized := normalizeDefinition(def[start : end+1])
 	sum := sha256.Sum256([]byte(normalized))
 	return hex.EncodeToString(sum[:])
+}
+
+// normalizeDefinition lowercases the definition and collapses its whitespace,
+// but only outside quoted text. A string literal and a quoted identifier are
+// case-sensitive: 'ACTIVE' and 'active' select different rows, and "Name" and
+// "NAME" are different columns. A doubled quote inside a span closes and
+// reopens it, so the text is kept either way.
+//
+// The input is always pg_get_indexdef output, which never writes a backslash
+// escape: it doubles a quote, and it writes a backslash as it is or doubled
+// depending on standard_conforming_strings (checked on PostgreSQL 15 and 18).
+// It never writes an E-prefixed literal either. A backslash is therefore not an
+// escape here, and a quote always closes a span. Text that is not from that
+// function may not be normalised this way.
+func normalizeDefinition(def string) string {
+	var b strings.Builder
+	var quote rune
+	pendingSpace := false
+	for _, r := range def {
+		if quote == 0 && unicode.IsSpace(r) {
+			pendingSpace = b.Len() > 0
+			continue
+		}
+		if pendingSpace {
+			b.WriteByte(' ')
+			pendingSpace = false
+		}
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			}
+		case r == '\'' || r == '"':
+			quote = r
+		default:
+			r = unicode.ToLower(r)
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }

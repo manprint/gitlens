@@ -75,6 +75,13 @@ LEFT JOIN pg_stat_wal_receiver w ON true
 			return Result{}, err
 		}
 
+		// The receive LSN stops moving when the walreceiver exits, so the
+		// comparison in the query reads a standby that has lost its primary as
+		// caught up. Lag is reported only while the stream is up.
+		if !receiverStreaming(row.Status) {
+			row.ReplayLagSec = nil
+		}
+
 		labels := map[string]string{
 			"status":      row.Status,
 			"sender_host": row.SenderHost,
@@ -110,16 +117,23 @@ LEFT JOIN pg_stat_wal_receiver w ON true
 	return Result{Metrics: metrics}, nil
 }
 
+// receiverStreaming reports whether the walreceiver is up and receiving WAL.
+// Only then does a receive LSN equal to the replay LSN mean the standby has
+// nothing left to replay.
+func receiverStreaming(status string) bool {
+	return status == "streaming"
+}
+
 // statusToFloat maps pg_stat_wal_receiver.status; the status label keeps
-// the text. A receiver that is starting, waiting, connecting (PostgreSQL
-// 19), restarting or stopping is not receiving WAL yet, like any status a
-// later release adds.
+// the text. 0 is 'disconnected', which is what a standby with no receiver
+// row reports. -1 is a receiver that is up but not streaming yet: starting,
+// waiting, connecting (PostgreSQL 19), restarting or stopping, and any status
+// a later release adds. 'catchup' is a pg_stat_replication state, which a
+// receiver never reports, so it has no value of its own.
 func statusToFloat(status string) float64 {
 	switch status {
 	case "streaming":
 		return 1
-	case "catchup":
-		return 2
 	case "disconnected":
 		return 0
 	default:

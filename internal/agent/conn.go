@@ -113,9 +113,9 @@ type Manager struct {
 	statementsDB string
 	// monitored holds the databases the latest discovery selected, and ownDB is
 	// the one the DSN names. ConnFor, which commands use, opens a pool only for
-	// these; see requireMonitored. scheduled holds the databases the first
-	// discovery selected, which the checks scheduled at startup were built from;
-	// see ScheduledConnFor.
+	// these; see requireMonitored. scheduled holds the databases the running
+	// check schedule was built for; see SetScheduledDatabases and
+	// ScheduledConnFor.
 	monitored map[string]bool
 	scheduled map[string]bool
 	ownDB     string
@@ -332,10 +332,10 @@ func (m *Manager) Discover(ctx context.Context) ([]wire.Database, error) {
 		}
 	}
 	// Each discovery replaces the set a command may open, so a database the
-	// budget ranks out is refused to commands. The first discovery also fixes
-	// the set the startup schedule runs against: addScheduleEntries makes it
-	// before any command is served, and a scheduled check keeps its database
-	// when the budget later ranks it out. Neither map is written after this.
+	// budget ranks out is refused to commands. The first discovery also seeds
+	// the scheduled set, which SetScheduledDatabases replaces with the set of
+	// each schedule built; a scheduled check keeps its database when the budget
+	// later ranks it out.
 	m.mu.Lock()
 	m.monitored = latest
 	if m.scheduled == nil {
@@ -885,6 +885,31 @@ func (m *Manager) isScheduled(datname string) bool {
 func (m *Manager) Database() string {
 	return m.target.name
 }
+
+// SetScheduledDatabases records the databases a check schedule runs for. The
+// schedule set calls it each time it builds a schedule, before that schedule
+// starts, so a database a reconcile adds after startup is reachable to the
+// checks scheduled for it, and one it drops is not.
+func (m *Manager) SetScheduledDatabases(names map[string]bool) {
+	set := make(map[string]bool, len(names))
+	for name, ok := range names {
+		if ok {
+			set[name] = true
+		}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.scheduled = set
+}
+
+// MonitorsDatabase implements check.DatabaseMonitor: a check may read the
+// databases the running schedule collects from, and the two the agent
+// connects to anyway.
+func (m *Manager) MonitorsDatabase(datname string) bool {
+	return m.isScheduled(datname)
+}
+
+var _ check.DatabaseMonitor = (*Manager)(nil)
 
 const statementsInstalled = `SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements')`
 

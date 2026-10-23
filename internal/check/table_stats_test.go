@@ -36,15 +36,21 @@ func TestTableStats_EmptyTableEmitsZeroDeadTupleRatio(t *testing.T) {
 	require.Equal(t, 0.0, metricValue(result, "pg_table_dead_tuple_ratio", map[string]string{"schemaname": "public", "relname": "empty"}))
 }
 
+// The cumulative counts are counters, and the per-relation state is gauges.
+// The vacuum and analyze counts are cumulative since the stats reset as well.
 func TestTableStats_CounterGaugeClassification(t *testing.T) {
-	r := tableStatsRow{Schema: "public", Relation: "orders", SeqScan: 1, NLiveTup: 2}
+	r := tableStatsRow{Schema: "public", Relation: "orders", SeqScan: 1, NLiveTup: 2, AutovacuumCount: 3, AutoanalyzeCount: 4}
 	result := tableStatsResult([]cardinality.Candidate{{Key: "public.orders"}}, map[string]tableStatsRow{"public.orders": r}, time.Now())
 	kinds := map[string]pgtype.MetricKind{}
 	for _, m := range result.Metrics {
 		kinds[m.Name] = m.Kind
 	}
-	require.Equal(t, pgtype.KindCounter, kinds["pg_table_seq_scan"])
-	require.Equal(t, pgtype.KindGauge, kinds["pg_table_n_live_tup"])
+	for _, name := range []string{"seq_scan", "seq_tup_read", "idx_scan", "idx_tup_fetch", "n_tup_ins", "n_tup_upd", "n_tup_del", "n_tup_hot_upd", "autovacuum_count", "autoanalyze_count"} {
+		require.Equal(t, pgtype.KindCounter, kinds["pg_table_"+name], name)
+	}
+	for _, name := range []string{"n_live_tup", "n_dead_tup", "n_mod_since_analyze", "relpages", "reltuples", "relfrozenxid_age", "total_bytes", "table_bytes", "toast_bytes", "dead_tuple_ratio"} {
+		require.Equal(t, pgtype.KindGauge, kinds["pg_table_"+name], name)
+	}
 }
 
 func TestTableStats_RequiresDatabaseScope(t *testing.T) {
