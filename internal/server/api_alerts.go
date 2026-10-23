@@ -291,9 +291,9 @@ func (a *AlertAPI) listSilences(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	all := r.URL.Query().Get("all") == "true"
-	q := `SELECT silence_id,matchers,reason,starts_at,ends_at FROM silences`
+	q := `SELECT silence_id,matchers,reason,starts_at,ends_at FROM silences WHERE tenant_id='default'`
 	if !all {
-		q += ` WHERE starts_at <= now() AND ends_at > now()`
+		q += ` AND starts_at <= now() AND ends_at > now()`
 	}
 	// The history of silences has no bound either, so the full listing is capped
 	// as the alert listing is: one row past the cap tells whether it was cut.
