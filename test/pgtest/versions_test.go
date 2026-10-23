@@ -17,7 +17,7 @@ func panicMessage(fn func()) (msg string) {
 	return ""
 }
 
-func TestVersions_DefaultsToTheOldestAndNewestWhenUnset(t *testing.T) {
+func TestVersions_DefaultsTo15And18WhenUnset(t *testing.T) {
 	t.Setenv("PGLENS_PG_VERSIONS", "")
 	if got := Versions(); !reflect.DeepEqual(got, []int{15, 18}) {
 		t.Fatalf("Versions() = %v, want [15 18]", got)

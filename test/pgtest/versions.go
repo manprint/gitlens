@@ -19,11 +19,12 @@ var images = map[int]string{
 	19: "postgres:19rc1-alpine",
 }
 
-// Versions returns the majors to exercise. PGLENS_PG_VERSIONS overrides it;
-// the default is the PR matrix (the oldest and the newest supported), and
-// CI sets the full range for the nightly run. A major without an image is a
-// panic, not a skip: a run that quietly drops it reports green while testing
-// a different matrix than the one that was asked for.
+// Versions returns the majors to exercise. PGLENS_PG_VERSIONS overrides it.
+// Unset, it is the local fast pair, 15 and 18, so a run on a laptop does not
+// start every major; the integration job in ci.yml sets the full 15 to 19
+// range on every PR. A major without an image is a panic, not a skip: a run
+// that quietly drops it reports green while testing a different matrix than
+// the one that was asked for.
 func Versions() []int {
 	if v := os.Getenv("PGLENS_PG_VERSIONS"); v != "" {
 		var out []int
