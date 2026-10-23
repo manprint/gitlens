@@ -94,8 +94,6 @@ func init() {
 			if !sawBlockedXact {
 				return fmt.Errorf("pg_max_xact_age_seconds never reflected the storm's held transactions (>1s)")
 			}
-			stormEnd := time.Now().UTC()
-
 			// phase 7.4's own re-assertion of this SAME scenario ID
 			// (phase_08.md#7.4): the storm must be visible as Lock waits,
 			// and — the concrete proof that a 500ms check timeout survives
@@ -120,7 +118,7 @@ func init() {
 			}
 			// Taken again after the wait, so the storm's last window, stamped
 			// after the first reading, falls inside the query bounds.
-			stormEnd = time.Now().UTC()
+			stormEnd := time.Now().UTC()
 
 			var sawLockWait bool
 			if err := e.DB.QueryRow(ctx,

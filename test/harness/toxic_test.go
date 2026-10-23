@@ -95,7 +95,7 @@ func fakeToxiproxyAPI(t *testing.T, failStream string) (*httptest.Server, func()
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == toxiproxyEndpoint:
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, proxyJSON)
+			_, _ = fmt.Fprint(w, proxyJSON)
 		case r.Method == http.MethodPost && r.URL.Path == toxiproxyEndpoint+"/toxics":
 			var body struct {
 				Stream string `json:"stream"`
@@ -109,7 +109,7 @@ func fakeToxiproxyAPI(t *testing.T, failStream string) (*httptest.Server, func()
 				return
 			}
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, `{}`)
+			_, _ = fmt.Fprint(w, `{}`)
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, toxiproxyEndpoint+"/toxics/"):
 			mu.Lock()
 			deleted = append(deleted, strings.TrimPrefix(r.URL.Path, toxiproxyEndpoint+"/toxics/"))
@@ -186,7 +186,7 @@ func TestToxic_StalledAPIFailsAtTheClientTimeout(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == toxiproxyEndpoint {
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, proxyJSON)
+			_, _ = fmt.Fprint(w, proxyJSON)
 			return
 		}
 		<-release // never answer the toxic POST

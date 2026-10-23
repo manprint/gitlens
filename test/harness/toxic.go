@@ -387,7 +387,7 @@ func toxicFailure(state *ToxicState, proxyName string, created []string, cause e
 		return cause
 	}
 	if err := state.deleteToxics(proxyName, created); err != nil {
-		return fmt.Errorf("%w; cleanup of %v also failed: %v", cause, created, err)
+		return fmt.Errorf("%w; cleanup of %v also failed: %w", cause, created, err)
 	}
 	return cause
 }

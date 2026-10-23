@@ -5,6 +5,7 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -185,7 +186,7 @@ func waitForPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 		}
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("%w (last error: %v)", ctx.Err(), err)
+			return nil, errors.Join(ctx.Err(), err)
 		case <-time.After(time.Second):
 		}
 	}
