@@ -31,15 +31,46 @@ func readUint(path string) (uint64, bool) {
 	return v, err == nil
 }
 
+// readStatField reads the value of one "key value" line of a cgroup stat file.
+func readStatField(path, key string) (uint64, bool) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0, false
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[0] == key {
+			v, err := strconv.ParseUint(fields[1], 10, 64)
+			return v, err == nil
+		}
+	}
+	return 0, false
+}
+
+// cgroupAvailable is the memory a cgroup can still take: its limit less what it
+// uses. Used is the current usage less the inactive file cache, which the
+// kernel reclaims under pressure, as MemAvailable counts it. Without that stat
+// the whole usage counts as used.
+func cgroupAvailable(limit, current uint64, statPath, inactiveKey string) uint64 {
+	used := current
+	if inactive, ok := readStatField(statPath, inactiveKey); ok {
+		used = 0
+		if inactive < current {
+			used = current - inactive
+		}
+	}
+	if used >= limit {
+		return 0
+	}
+	return limit - used
+}
+
 func applyV2(root string, s *Sample) {
 	limited := false
 	if limit, ok := readUint(filepath.Join(root, "memory.max")); ok && limit < cgroupV1Unlimited {
 		if current, ok := readUint(filepath.Join(root, "memory.current")); ok {
 			s.MemTotalBytes = &limit
-			available := uint64(0)
-			if current < limit {
-				available = limit - current
-			}
+			available := cgroupAvailable(limit, current, filepath.Join(root, "memory.stat"), "inactive_file")
 			s.MemAvailableBytes = &available
 			limited = true
 		}
@@ -66,10 +97,7 @@ func applyV1(root string, s *Sample) {
 	if limit, ok := readUint(filepath.Join(root, "memory", "memory.limit_in_bytes")); ok && limit < cgroupV1Unlimited {
 		if current, ok := readUint(filepath.Join(root, "memory", "memory.usage_in_bytes")); ok {
 			s.MemTotalBytes = &limit
-			available := uint64(0)
-			if current < limit {
-				available = limit - current
-			}
+			available := cgroupAvailable(limit, current, filepath.Join(root, "memory", "memory.stat"), "total_inactive_file")
 			s.MemAvailableBytes = &available
 			limited = true
 		}
