@@ -77,6 +77,21 @@ describe('alerts derivation', () => {
     ).toBe(false)
   })
 
+  it('UI-ALERT-059 matchSilence treats a null label map and null ids as absent', () => {
+    const raw = {
+      ...alert(),
+      labels: null,
+      cluster_id: null,
+      instance_id: null,
+    } as unknown as Alert
+    expect(matchSilence(raw, silence({ matchers: [{ name: 'instance_id', value: 'null' }] }))).toBe(
+      false,
+    )
+    expect(matchSilence(raw, silence({ matchers: [{ name: 'team', value: 'database' }] }))).toBe(
+      false,
+    )
+  })
+
   it('UI-ALERT-005 silenceWindow classifies pending, active and expired against the frozen clock', () => {
     const current = new Date(instant)
     const window = silence({

@@ -92,9 +92,11 @@ function reservedValue(name: string, alert: Alert): string | undefined {
     case 'severity':
       return alert.severity
     case 'cluster_id':
-      return alert.cluster_id === undefined ? undefined : String(alert.cluster_id)
+      // The server sends null for an alert with no cluster or instance, and
+      // null would otherwise match the text "null".
+      return alert.cluster_id ?? undefined
     case 'instance_id':
-      return alert.instance_id === undefined ? undefined : String(alert.instance_id)
+      return alert.instance_id ?? undefined
     case 'datname':
       return alert.datname
     default:
@@ -106,7 +108,8 @@ function matcherValue(matcher: SilenceMatcher, alert: Alert): string {
   const reserved = reservedValue(matcher.name, alert)
   if (reserved !== undefined && reserved !== '') return reserved
 
-  const label = alert.labels[matcher.name]
+  // A nil label map reaches the page as null, which has no labels.
+  const label = alert.labels?.[matcher.name]
   return typeof label === 'string' ? label : ''
 }
 

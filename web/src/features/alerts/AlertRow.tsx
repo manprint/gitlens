@@ -29,8 +29,9 @@ function objectLink(path: string, value: string | undefined, label: string) {
 }
 
 export function AlertRow({ alert, matchingSilence, onSelect }: AlertRowProps) {
-  const clusterId = alert.cluster_id === undefined ? undefined : String(alert.cluster_id)
-  const instanceId = alert.instance_id === undefined ? undefined : String(alert.instance_id)
+  // The server sends null for a missing cluster or instance; both read as unknown.
+  const clusterId = alert.cluster_id ?? undefined
+  const instanceId = alert.instance_id ?? undefined
   const troubleLink =
     alert.rule_id === 'agent_down' || alert.rule_id === 'instance_unreachable' ? (
       <a className="underline" href="/README.md#troubleshooting">
