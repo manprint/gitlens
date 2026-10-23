@@ -711,11 +711,7 @@ func TestEngine_OrphanStandbyThrottled(t *testing.T) {
 	}
 
 	observe() // starts the orphan clock
-	// Evidence keeps arriving inside the window, as the agent reports every
-	// cycle; a window with none would be a new episode.
-	clk.Advance(30 * time.Second)
-	observe()
-	clk.Advance(31 * time.Second)
+	clk.Advance(61 * time.Second)
 	if got := observe(); len(got) != 1 {
 		t.Fatalf("expected one orphan_standby past the window, got %d", len(got))
 	}
@@ -877,9 +873,10 @@ func TestEngine_OrphanEpisodeHeldWhenRoleUnknown(t *testing.T) {
 	}
 }
 
-// TestEngine_OrphanEpisodeRestartsAfterUnknownGap — unknown observations end
-// nothing, so a standby that stays unreadable for ten minutes and then shows
-// its orphan again starts a new episode. The reappearance is not reported with
+// TestEngine_OrphanEpisodeRestartsAfterUnknownGap — an unknown observation holds
+// an episode for a window after the last evidence, and ends it after that, so a
+// standby that stays unreadable for ten minutes and then shows its orphan again
+// starts a new episode. The reappearance is not reported with
 // the age of the whole gap, and the next orphan is reported a window later,
 // dated from its own start.
 func TestEngine_OrphanEpisodeRestartsAfterUnknownGap(t *testing.T) {
@@ -914,28 +911,46 @@ func TestEngine_OrphanEpisodeRestartsAfterUnknownGap(t *testing.T) {
 // TestEngine_OrphanEpisodeRestartsAfterSilentGap — an instance that reports
 // nothing for ten minutes has no evidence for any of them, so its next orphan
 // starts a new episode in the same way as after an unknown gap.
-func TestEngine_OrphanEpisodeRestartsAfterSilentGap(t *testing.T) {
-	clk := clock.NewFake(time.Unix(0, 0))
-	e := NewEngine(clk)
-	standby := uuid.New()
-	cID := pgtype.ManualClusterID("cluster1")
-	observe := orphanObserver(e, clk, standby, cID)
-	lowEdge := []Edge{{From: standby, To: uuid.New(), Confidence: "low"}}
+// TestEngine_OrphanEpisodeKeepsFiringAtAnyCadence — evidence that arrives every
+// cycle keeps one episode, whatever the cycle. An agent that pushes every 60, 90
+// or 120 seconds leaves a whole orphan window between two of its observations,
+// and that gap must not be read as the orphan being over. orphan_standby fires
+// once a window has passed since the episode began or since its last event, and
+// its duration always runs from the start of the episode.
+func TestEngine_OrphanEpisodeKeepsFiringAtAnyCadence(t *testing.T) {
+	for _, cadence := range []time.Duration{30, 60, 90, 120} {
+		cadence *= time.Second
+		t.Run(cadence.String(), func(t *testing.T) {
+			clk := clock.NewFake(time.Unix(0, 0))
+			e := NewEngine(clk)
+			standby := uuid.New()
+			cID := pgtype.ManualClusterID("cluster1")
+			observe := orphanObserver(e, clk, standby, cID)
+			lowEdge := []Edge{{From: standby, To: uuid.New(), Confidence: "low"}}
 
-	observe(lowEdge, pgtype.RoleStandby)                            // t=0
-	clk.Advance(600 * time.Second)                                  // silent for ten minutes
-	if got := observe(lowEdge, pgtype.RoleStandby); len(got) != 0 { // t=600
-		t.Fatalf("orphan reported at its reappearance with duration %v, want a new episode", got[0].Payload["duration_seconds"])
-	}
-	clk.Advance(30 * time.Second)
-	observe(lowEdge, pgtype.RoleStandby) // t=630
-	clk.Advance(30 * time.Second)
-	got := observe(lowEdge, pgtype.RoleStandby) // t=660
-	if len(got) != 1 {
-		t.Fatalf("expected one orphan_standby a window after the reappearance, got %d", len(got))
-	}
-	if d, _ := got[0].Payload["duration_seconds"].(float64); d != 60 {
-		t.Fatalf("orphan duration %v, want 60: the episode is dated from t=600", got[0].Payload["duration_seconds"])
+			start := clk.Now()
+			lastEvent := start
+			observe(lowEdge, pgtype.RoleStandby) // starts the episode
+			fired := 0
+			for i := 0; i < 20; i++ {
+				clk.Advance(cadence)
+				got := observe(lowEdge, pgtype.RoleStandby)
+				due := clk.Now().Sub(lastEvent) >= e.orphanWindow
+				if due != (len(got) == 1) {
+					t.Fatalf("at t=%v: orphan_standby emitted %d times, want due=%v", clk.Now().Sub(start), len(got), due)
+				}
+				if len(got) == 1 {
+					fired++
+					lastEvent = clk.Now()
+					if d := got[0].Payload["duration_seconds"]; d != clk.Now().Sub(start).Seconds() {
+						t.Fatalf("at t=%v: duration %v, want the whole episode from its start", clk.Now().Sub(start), d)
+					}
+				}
+			}
+			if fired == 0 {
+				t.Fatal("orphan_standby never fired")
+			}
+		})
 	}
 }
 

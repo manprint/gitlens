@@ -208,15 +208,6 @@ func (e *Engine) Apply(obs Observation) []Event {
 
 		// If no high-confidence edge and we have low-confidence edges, check orphan.
 		if !hasResolvedEdge && len(obs.Edges) > 0 {
-			// Evidence that returns a whole window after the last of it starts a
-			// new episode. The gap may hold unknown observations or none at all,
-			// which end nothing on their own, so the check is made here and not
-			// where those observations arrive. Without it the new episode kept
-			// the old start and reported the age of the whole gap.
-			if now.Sub(inst.orphanSeenAt) >= e.orphanWindow {
-				inst.orphanAt = time.Time{}
-				inst.orphanedAt = time.Time{}
-			}
 			if inst.orphanAt.IsZero() {
 				inst.orphanAt = now
 			}
@@ -253,11 +244,19 @@ func (e *Engine) Apply(obs Observation) []Event {
 		}
 	}
 
+	if obs.Role == pgtype.RoleUnknown && now.Sub(inst.orphanSeenAt) >= e.orphanWindow {
+		// Unknown is no evidence either way: the agent reports it when its role
+		// cannot be read this cycle. It holds an episode for a window after the
+		// last evidence, as an edgeless cycle does, and ends it after that. Silence
+		// ends nothing, since the engine cannot tell a quiet instance from a slow
+		// push interval.
+		inst.orphanAt = time.Time{}
+		inst.orphanedAt = time.Time{}
+	}
+
 	if obs.Role == pgtype.RolePrimary {
 		// Only a standby can be orphaned, so a primary ends an episode that
-		// began while the instance was a standby. Unknown is no evidence either
-		// way: the agent reports it when its role cannot be read this cycle, and
-		// that must not restart the clock.
+		// began while the instance was a standby.
 		inst.orphanAt = time.Time{}
 		inst.orphanedAt = time.Time{}
 	}
