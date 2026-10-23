@@ -83,7 +83,7 @@ func TestVacuumProgress_ScrapeCoversProbeAndViews(t *testing.T) {
 			case strings.Contains(q, "progress_vacuum"):
 				return &mockRows{rows: [][]any{{
 					int32(1), "app", uint32(0), "scanning", int64(10), int64(2),
-					int64(1), int64(0), int64(2), int64(1),
+					int64(1), int64(0), int64(2), int64(1), nil,
 				}}}, nil
 			default:
 				return &mockRows{}, nil

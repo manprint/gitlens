@@ -54,7 +54,7 @@ func TestVacuumProgress_NamesRelationFromItsOwnDatabase(t *testing.T) {
 	t.Parallel()
 	maint := &mockConn{queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
 		if strings.Contains(sql, "pg_stat_progress_vacuum") && !strings.Contains(sql, "information_schema") {
-			return &mockRows{rows: [][]any{{int32(7), "app", uint32(16384), "scanning heap", int64(100), int64(50), int64(0), int64(0), int64(0), int64(0)}}}, nil
+			return &mockRows{rows: [][]any{{int32(7), "app", uint32(16384), "scanning heap", int64(100), int64(50), int64(0), int64(0), int64(0), int64(0), nil}}}, nil
 		}
 		return &mockRows{}, nil
 	}}
@@ -95,7 +95,7 @@ func TestVacuumProgress_CapIsPartialNotTruncated(t *testing.T) {
 	}{{20, false}, {21, true}} {
 		rows := make([][]any, 0, tc.jobs)
 		for i := 0; i < tc.jobs; i++ {
-			rows = append(rows, []any{int32(i + 1), "app", uint32(0), "scanning heap", int64(10), int64(2), int64(1), int64(0), int64(2), int64(1)})
+			rows = append(rows, []any{int32(i + 1), "app", uint32(0), "scanning heap", int64(10), int64(2), int64(1), int64(0), int64(2), int64(1), nil})
 		}
 		conn := &mockConn{queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
 			if strings.Contains(sql, "pg_stat_progress_vacuum") && !strings.Contains(sql, "information_schema") {
@@ -108,4 +108,35 @@ func TestVacuumProgress_CapIsPartialNotTruncated(t *testing.T) {
 		require.Equal(t, tc.partial, r.Partial, "%d running vacuums", tc.jobs)
 		require.False(t, r.Truncated, "%d running vacuums", tc.jobs)
 	}
+}
+
+// The 20 series go to the longest-running jobs, not the first 20 rows of the
+// view: here the oldest job is the last row, and it must keep its series.
+func TestVacuumProgress_KeepsLongestRunningJobs(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 10, 23, 10, 0, 0, 0, time.UTC)
+	rows := make([][]any, 0, 25)
+	for i := 1; i <= 25; i++ {
+		// Row i started (26-i) minutes after base: row 25 is the oldest.
+		started := base.Add(time.Duration(26-i) * time.Minute)
+		rows = append(rows, []any{int32(i), "app", uint32(0), "scanning heap", int64(i * 1000), int64(0), int64(0), int64(0), int64(0), int64(0), &started})
+	}
+	conn := &mockConn{queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+		if strings.Contains(sql, "pg_stat_progress_vacuum") && !strings.Contains(sql, "information_schema") {
+			return &mockRows{rows: rows}, nil
+		}
+		return &mockRows{}, nil
+	}}
+	r, err := (&vacuumProgressCheck{}).Scrape(context.Background(), maintenanceTarget(conn))
+	require.NoError(t, err)
+	require.Equal(t, 25.0, metricValue(r, "pg_vacuum_jobs_running", nil))
+	var kept []float64
+	for _, m := range r.Metrics {
+		if m.Name == "pg_vacuum_heap_blks_total" {
+			kept = append(kept, m.Value)
+		}
+	}
+	require.Len(t, kept, 20)
+	require.Contains(t, kept, 25000.0)
+	require.True(t, r.Partial)
 }
