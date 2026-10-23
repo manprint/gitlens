@@ -137,14 +137,16 @@ func runAgentCommand(args []string) {
 			os.Exit(1)
 		}
 		managers = append(managers, mgr)
-		waitForTarget(ctx, mgr)
+	}
+	waitForTargets(ctx, managers, targetReadyTimeout)
+	for i, tc := range cfg.Targets {
 		// &mu, not "nothing": startASH below launches a goroutine that writes
 		// `pending` under this mutex, and it does so for target N while this
 		// loop is still setting up target N+1. Writing the same map unlocked
 		// here is a concurrent map write, which the Go runtime turns into an
 		// unrecoverable crash of the agent — reachable on any multi-target
 		// config, invisible on the single-target ones every fixture uses.
-		ashStop, enabled := startASH(ctx, mgr, tc.Name, cfg.Checks["ash"], clk, &mu, pending)
+		ashStop, enabled := startASH(ctx, managers[i], tc.Name, cfg.Checks["ash"], clk, &mu, pending)
 		ashStops = append(ashStops, ashStop)
 		ashEnabled[tc.Name] = enabled
 	}
@@ -557,25 +559,51 @@ func (e *edgeStates) build(name, from string, role pgtype.Role, results []wire.R
 	return []wire.Edge{{From: from, To: state.host, Port: state.port, Type: "streaming", Confidence: confidence}}
 }
 
-// waitForTarget blocks (up to 60s) until mgr's identity cache initializes
-// successfully, retrying every second. This matters concretely: compose can't
-// declare a static `depends_on: pg` in agent-container.yml (it's shared by both
-// the standalone and primary-standby topologies, which name their PostgreSQL
-// services differently), so the agent routinely starts before its target is
-// ready to accept connections. A target still unreachable after the wait is not
-// left without checks: scheduleSet reads its role, version and databases again
-// on every reconcile pass, and rebuilds the schedule once it can read them.
-func waitForTarget(ctx context.Context, mgr *agent.Manager) {
-	deadline := time.Now().Add(60 * time.Second)
+// targetReadyTimeout is how long startup waits for a target to become readable
+// before it moves on without it.
+const targetReadyTimeout = 60 * time.Second
+
+// waitForTargets waits for every target at once. Waited for one after another,
+// each unreachable target added its full window to startup, and a healthy target
+// behind them was not started until every one before it had run out. The
+// identity store the targets share is locked, so their first reads may run
+// concurrently.
+func waitForTargets(ctx context.Context, managers []*agent.Manager, timeout time.Duration) {
+	var wg sync.WaitGroup
+	for _, mgr := range managers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			waitForTarget(ctx, mgr, timeout)
+		}()
+	}
+	wg.Wait()
+}
+
+// waitForTarget blocks (up to timeout, or until ctx ends) until mgr's identity
+// cache initializes successfully, retrying every second. This matters
+// concretely: compose can't declare a static `depends_on: pg` in
+// agent-container.yml (it's shared by both the standalone and primary-standby
+// topologies, which name their PostgreSQL services differently), so the agent
+// routinely starts before its target is ready to accept connections. A target
+// still unreachable after the wait is not left without checks: scheduleSet
+// reads its role, version and databases again on every reconcile pass, and
+// rebuilds the schedule once it can read them.
+func waitForTarget(ctx context.Context, mgr *agent.Manager, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
 	for {
 		if mgr.PGVersion() != 0 { //nolint:contextcheck // Manager caches this at connect time; the accessor takes no context
 			return
 		}
 		if time.Now().After(deadline) {
-			fmt.Fprintf(os.Stderr, "warning: target %s not reachable after 60s, its checks are scheduled once it is\n", mgr.Database())
+			fmt.Fprintf(os.Stderr, "warning: target %s not reachable after %v, its checks are scheduled once it is\n", mgr.Database(), timeout)
 			return
 		}
-		time.Sleep(1 * time.Second)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(1 * time.Second):
+		}
 	}
 }
 

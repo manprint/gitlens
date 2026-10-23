@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -12,6 +13,46 @@ import (
 	"github.com/manprint/pglens/internal/host"
 	"github.com/manprint/pglens/internal/wire"
 )
+
+// unreachableManager is a target whose server refuses every connection, so a
+// readiness wait on it runs until its window ends.
+func unreachableManager(t *testing.T, name string) *agent.Manager {
+	t.Helper()
+	dsn := "postgres://pglens@127.0.0.1:1/postgres?sslmode=disable"
+	mgr, err := agent.NewManager(context.Background(), name, dsn, agent.DefaultConnOptions(), clock.System())
+	require.NoError(t, err)
+	t.Cleanup(mgr.Close)
+	return mgr
+}
+
+// TestWaitForTargets_UnreachableTargetsWaitTogether: three targets that never
+// become readable take one readiness window, not one window each. Waited for in
+// turn, a 1s window takes at least 3s.
+func TestWaitForTargets_UnreachableTargetsWaitTogether(t *testing.T) {
+	managers := []*agent.Manager{
+		unreachableManager(t, "down-a"),
+		unreachableManager(t, "down-b"),
+		unreachableManager(t, "down-c"),
+	}
+
+	start := time.Now()
+	waitForTargets(context.Background(), managers, time.Second)
+
+	require.Less(t, time.Since(start), 2*time.Second)
+}
+
+// TestWaitForTarget_EndsWhenContextIsCancelled: a wait ends as soon as its
+// context is cancelled, rather than running out its whole window.
+func TestWaitForTarget_EndsWhenContextIsCancelled(t *testing.T) {
+	mgr := unreachableManager(t, "down")
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(50*time.Millisecond, cancel)
+
+	start := time.Now()
+	waitForTarget(ctx, mgr, 30*time.Second)
+
+	require.Less(t, time.Since(start), 5*time.Second)
+}
 
 // TestAgentSelfResult_ShipsTheBufferDropRate — pglens_samples_dropped_rate is
 // the metric the agent_buffer_full Tier 0 rule compares, and before this
