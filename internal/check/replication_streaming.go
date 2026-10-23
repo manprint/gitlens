@@ -13,9 +13,13 @@ func init() { Register(&replicationStreamingCheck{}) }
 type replicationStreamingCheck struct{}
 
 func (c *replicationStreamingCheck) Name() string { return "replication_streaming" }
+
+// A cascading standby has walsenders of its own, and the lag of the standbys
+// behind it is reported here too, so the check runs on a standby as well as
+// on a primary. The query's recovery branch measures from the position the
+// standby has received.
 func (c *replicationStreamingCheck) Requires() Requirements {
 	return Requirements{
-		Roles:    []pgtype.Role{pgtype.RolePrimary},
 		Scope:    ScopeInstance,
 		PermTier: pgtype.TierReadOnly,
 	}

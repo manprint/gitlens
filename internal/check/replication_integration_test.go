@@ -75,9 +75,9 @@ func TestReplicationReceiver_Integration_NotApplicableOnPrimary(t *testing.T) {
 	})
 }
 
-// TestReplicationStreaming_Integration_NotApplicableOnStandby — replication_streaming Requires() rejects standby
-// (Note: testing on a primary-only instance, so we verify the check logic via Requires())
-func TestReplicationStreaming_Integration_NotApplicableOnStandby(t *testing.T) {
+// TestReplicationStreaming_Integration_ApplicableOnStandby — replication_streaming Requires() accepts a standby,
+// which reports the standbys cascading from it (Note: verified via Requires() on a primary-only instance)
+func TestReplicationStreaming_Integration_ApplicableOnStandby(t *testing.T) {
 	t.Parallel()
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
 		pg.Lock(t)
@@ -89,7 +89,7 @@ func TestReplicationStreaming_Integration_NotApplicableOnStandby(t *testing.T) {
 		check := &replicationStreamingCheck{}
 		req := check.Requires()
 		ok, reason := req.Supports(pgtype.RoleStandby, pg.Version, pgtype.TierReadOnly, nil)
-		require.False(t, ok, "replication_streaming should reject standby role: %s", reason)
+		require.True(t, ok, "replication_streaming should run on a standby: %s", reason)
 	})
 }
 

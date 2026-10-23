@@ -290,15 +290,16 @@ func TestReplicationSlots_EmptyReturnsNoRows(t *testing.T) {
 }
 
 // TestReplicationStreaming_RequiresPrimary — Requires() only accepts Primary role
-func TestReplicationStreaming_RequiresPrimary(t *testing.T) {
+// A cascading standby reports the lag of the standbys behind it from its own
+// walsenders, so the check must be applicable on a standby as well as on a
+// primary. The role gate used to keep it off every standby.
+func TestReplicationStreaming_AppliesOnStandbyAndPrimary(t *testing.T) {
 	t.Parallel()
-	check := &replicationStreamingCheck{}
-	req := check.Requires()
-	require.Equal(t, []pgtype.Role{pgtype.RolePrimary}, req.Roles)
-	ok, msg := req.Supports(pgtype.RoleStandby, pgtype.PG15, pgtype.TierReadOnly, nil)
-	require.False(t, ok, "should reject Standby: %s", msg)
-	ok, _ = req.Supports(pgtype.RolePrimary, pgtype.PG15, pgtype.TierReadOnly, nil)
-	require.True(t, ok)
+	req := (&replicationStreamingCheck{}).Requires()
+	for _, role := range []pgtype.Role{pgtype.RolePrimary, pgtype.RoleStandby} {
+		ok, reason := req.Supports(role, pgtype.PG15, pgtype.TierReadOnly, nil)
+		require.True(t, ok, "replication_streaming should run on %s: %s", role, reason)
+	}
 }
 
 // TestReplicationReceiver_RequiresStandby — Requires() only accepts Standby role
