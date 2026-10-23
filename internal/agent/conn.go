@@ -105,6 +105,11 @@ type Manager struct {
 	// for databases without one; empty means the maintenance database. See
 	// LocateStatements.
 	statementsDB string
+	// monitored holds the databases the last discovery selected, and ownDB
+	// is the one the DSN names. ConnFor opens a pool only for these; see
+	// requireMonitored. monitored is nil until the first discovery.
+	monitored map[string]bool
+	ownDB     string
 
 	endpointOnce sync.Once
 	addr         string
@@ -138,6 +143,7 @@ func NewManager(ctx context.Context, targetName string, dsn string, opts ConnOpt
 		clock:  clk,
 		dbs:    make(map[string]*pgxpool.Pool),
 		dbtc:   make(map[string]time.Time),
+		ownDB:  cfg.ConnConfig.Database,
 	}
 	return m, nil
 }
@@ -293,6 +299,15 @@ func (m *Manager) Discover(ctx context.Context) ([]wire.Database, error) {
 	}
 
 	selected := selectDatabases(dbs, m.opts)
+	monitored := make(map[string]bool, len(selected))
+	for _, db := range selected {
+		if db.Monitored {
+			monitored[db.Name] = true
+		}
+	}
+	m.mu.Lock()
+	m.monitored = monitored
+	m.mu.Unlock()
 	return selected, nil
 }
 
@@ -746,7 +761,36 @@ func (m *Manager) ConnFor(ctx context.Context, datname string) (check.Conn, erro
 	if datname == "" {
 		return m.Shared(ctx)
 	}
+	if err := m.requireMonitored(ctx, datname); err != nil {
+		return nil, err
+	}
 	return m.ForDatabase(ctx, datname)
+}
+
+// requireMonitored refuses a database that discovery did not select. ForDatabase
+// opens a pool for whatever name it is given: a command naming rdsadmin would
+// connect the monitoring role there, and every unknown name would take one of
+// the LRU slots that hold the real pools. A name the cache does not hold gets
+// one discovery first, which picks up a database created since the last one.
+func (m *Manager) requireMonitored(ctx context.Context, datname string) error {
+	if m.isMonitored(datname) {
+		return nil
+	}
+	if _, err := m.Discover(ctx); err != nil {
+		return fmt.Errorf("discover databases: %w", err)
+	}
+	if m.isMonitored(datname) {
+		return nil
+	}
+	return rejectedf("database %q is not monitored on this target", datname)
+}
+
+// isMonitored reports whether datname may be opened: a database discovery
+// selected, or the one the DSN names, which the agent connects to anyway.
+func (m *Manager) isMonitored(datname string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return datname == m.ownDB || m.monitored[datname]
 }
 func (m *Manager) Database() string {
 	return m.target.name

@@ -355,3 +355,45 @@ ALTER DATABASE `+database+` SET search_path = hijack, pg_catalog`)
 		require.Contains(t, string(plan), `"Relation Name":"t","Schema":"hijack"`)
 	})
 }
+
+// INT-CONN-009: ConnFor opens a pool only for a database discovery selected.
+// An excluded admin database and an unknown name are refused before any pool
+// is opened for them, and a database that discovery lists still works.
+func TestINTCONN009_ConnForRefusesUnselectedDatabases(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		_, err := admin.Exec(ctx, "DROP DATABASE IF EXISTS rdsadmin WITH (FORCE)")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "CREATE DATABASE rdsadmin")
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = admin.Exec(context.Background(), "DROP DATABASE IF EXISTS rdsadmin WITH (FORCE)")
+		})
+
+		mgr, err := NewManager(ctx, "guard-target", pg.DSN("postgres", pgtest.RoleT0), DefaultConnOptions(), clock.System())
+		require.NoError(t, err)
+		defer mgr.Close()
+
+		// A connection handed out for a refused name is released at once, so a
+		// failing assertion ends the test instead of hanging the pool close.
+		var rejected *RejectedError
+		for _, name := range []string{"rdsadmin", "no_such_database", "template1"} {
+			conn, err := mgr.ConnFor(ctx, name)
+			if conn != nil {
+				conn.Release()
+			}
+			require.ErrorAs(t, err, &rejected, "ConnFor(%q) must be refused", name)
+		}
+
+		mgr.mu.Lock()
+		require.NotContains(t, mgr.dbs, "rdsadmin")
+		require.NotContains(t, mgr.dbs, "no_such_database")
+		mgr.mu.Unlock()
+
+		conn, err := mgr.ConnFor(ctx, "postgres")
+		require.NoError(t, err, "the database the DSN names stays reachable")
+		conn.Release()
+	})
+}
