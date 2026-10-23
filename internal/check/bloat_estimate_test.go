@@ -1,9 +1,11 @@
 package check
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/manprint/pglens/internal/cardinality"
 	"github.com/stretchr/testify/require"
 )
@@ -61,4 +63,23 @@ func bloatRowsResult(rows []bloatRow, now time.Time) Result {
 		c = append(c, cardinality.Candidate{Key: k, Primary: r.Bloat})
 	}
 	return bloatResult(c, by)
+}
+
+// TestBloat_UnreadableStatisticsArePartial: pg_stats hides a table from a role
+// that cannot read its columns, so the estimate has no row for it. An empty
+// result must not read as no bloat, so it is partial.
+func TestBloat_UnreadableStatisticsArePartial(t *testing.T) {
+	t.Parallel()
+	for _, unreadable := range []int64{0, 2} {
+		conn := &mockConn{
+			queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+				require.Equal(t, bloatUnreadableQuery, sql)
+				return &mockRow{vals: []any{unreadable}}
+			},
+		}
+		r, err := (&bloatEstimateCheck{selectors: maintenanceCardinality()}).Scrape(context.Background(), maintenanceTarget(conn))
+		require.NoError(t, err)
+		require.Empty(t, r.Metrics)
+		require.Equal(t, unreadable > 0, r.Partial, "%d unreadable tables", unreadable)
+	}
 }
