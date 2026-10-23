@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"testing"
@@ -49,4 +50,52 @@ func TestServerExitsNonZeroWhenListenFails(t *testing.T) {
 	// failure: the listen error must be the reason.
 	require.Contains(t, stderr.String(), "listen:")
 	require.Contains(t, stderr.String(), "address already in use")
+}
+
+// TestShutdownCancelsRequestsAfterItsBudget: a request still running when the
+// shutdown budget ends must see its context cancelled, so that it releases the
+// connection it holds. Shutdown alone does not cancel it, and the pool close
+// that follows used to wait for it. The client keeps its connection open, so a
+// disconnect cannot cancel the request and hide the fault.
+func TestShutdownCancelsRequestsAfterItsBudget(t *testing.T) {
+	requestCtx, cancelRequests := context.WithCancel(context.Background())
+	defer cancelRequests()
+	entered := make(chan struct{})
+	released := make(chan struct{})
+	handler := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		close(entered)
+		<-r.Context().Done()
+		close(released)
+	})
+	srv := newHTTPServer("127.0.0.1:0", handler, requestCtx)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	go func() { _ = srv.Serve(ln) }()
+
+	clientDone := make(chan struct{})
+	go func() {
+		defer close(clientDone)
+		resp, getErr := http.Get("http://" + ln.Addr().String() + "/")
+		if getErr == nil {
+			_ = resp.Body.Close()
+		}
+	}()
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the request never reached the handler")
+	}
+
+	err = shutdownServer(srv, cancelRequests, 200*time.Millisecond)
+	require.ErrorIs(t, err, context.DeadlineExceeded, "the request is still running when the budget ends")
+	select {
+	case <-released:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the request was not cancelled after the shutdown budget")
+	}
+	select {
+	case <-clientDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the client never got the response to its cancelled request")
+	}
 }

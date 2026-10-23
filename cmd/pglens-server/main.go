@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -148,21 +149,11 @@ func run() int {
 		log.Fatalf("web UI assets: %v", err)
 	}
 	router := server.NewRouter(uiCfg, assets, sessionStore, auth, inv, pipeline, api, topoAPI, ashAPI, alertAPI)
-	srv := &http.Server{
-		Addr:    listen,
-		Handler: router,
-		// Without these a peer that opens a connection and dribbles (or never
-		// finishes) its request headers pins a server goroutine and a
-		// connection slot indefinitely — the classic Slowloris shape, and the
-		// reason gosec flags a bare http.Server. ReadTimeout has to cover a
-		// full 32 MiB ingest body over a slow link, hence the asymmetry with
-		// ReadHeaderTimeout.
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       2 * time.Minute,
-		WriteTimeout:      2 * time.Minute,
-		IdleTimeout:       2 * time.Minute,
-		MaxHeaderBytes:    1 << 16,
-	}
+	// Requests inherit requestCtx. Shutdown waits for the requests in flight
+	// but does not cancel them, so one stuck on a lock would keep its pooled
+	// connection, and the deferred pool.Close would wait for it past the budget.
+	requestCtx, cancelRequests := context.WithCancel(context.Background())
+	srv := newHTTPServer(listen, router, requestCtx)
 	listenErr := make(chan error, 1)
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -183,10 +174,44 @@ func run() int {
 		log.Printf("listen: %v", err)
 		exitCode = 1
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	_ = srv.Shutdown(ctx)
+	if err := shutdownServer(srv, cancelRequests, 15*time.Second); err != nil {
+		log.Printf("shutdown: %v", err)
+	}
 	return exitCode
+}
+
+// newHTTPServer builds the HTTP server for router. Its requests inherit
+// requestCtx, which shutdownServer cancels.
+func newHTTPServer(listen string, router http.Handler, requestCtx context.Context) *http.Server {
+	return &http.Server{
+		Addr:    listen,
+		Handler: router,
+		BaseContext: func(net.Listener) context.Context {
+			return requestCtx
+		},
+		// Without these a peer that opens a connection and dribbles (or never
+		// finishes) its request headers pins a server goroutine and a
+		// connection slot indefinitely — the classic Slowloris shape, and the
+		// reason gosec flags a bare http.Server. ReadTimeout has to cover a
+		// full 32 MiB ingest body over a slow link, hence the asymmetry with
+		// ReadHeaderTimeout.
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       2 * time.Minute,
+		WriteTimeout:      2 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    1 << 16,
+	}
+}
+
+// shutdownServer stops srv and gives its requests budget to finish. Requests
+// still running when the budget is spent are cancelled, so they release their
+// database connections before the caller closes the pool.
+func shutdownServer(srv *http.Server, cancelRequests context.CancelFunc, budget time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
+	err := srv.Shutdown(ctx)
+	cancelRequests()
+	return err
 }
 
 // runHealthcheck is invoked as `pglens-server --healthcheck` from the
