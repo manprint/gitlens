@@ -528,3 +528,40 @@ func TestPipeline_RejectedInstanceCountsNoCheck(t *testing.T) {
 	require.Equal(t, badOK, pglensCheckOKTotal.Get(checkKey{instance: bad.String(), check: "activity"}), "a refused instance counts no check")
 	require.Equal(t, goodOK+1, pglensCheckOKTotal.Get(checkKey{instance: good.String(), check: "activity"}))
 }
+
+// INT-PIPE-005: a skipped result is stored as a skip fact, and once its envelope
+// commits it counts neither as a success nor as an error. The plain result in
+// the same envelope shows the instance was stored and the counters did move, so
+// the test cannot pass because nothing was counted at all.
+func TestPipeline_INT_PIPE_005_SkippedResultCountsNoCheck(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	p := NewPipeline(pool, clock.NewFake(time.Now()))
+	instID := uuid.New()
+	cid := pgtype.ClusterID(408).String()
+	ts := time.Now().Add(-time.Minute).Truncate(time.Second)
+	skipped := checkKey{instance: instID.String(), check: "wal"}
+	plain := checkKey{instance: instID.String(), check: "activity"}
+	okBefore := pglensCheckOKTotal.Get(skipped)
+	errBefore := pglensCheckErrorTotal.Get(skipped)
+	plainBefore := pglensCheckOKTotal.Get(plain)
+
+	res, err := p.Process(ctx, wire.Envelope{Instances: []wire.Instance{{
+		InstanceID: instID.String(), ClusterID: cid, Role: "primary",
+		Results: []wire.Result{
+			{Check: "wal", TS: ts, Database: "app", SkipReason: "needs pg_read_all_stats"},
+			{Check: "activity", TS: ts, Database: "app"},
+		},
+	}}})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Accepted)
+	require.Zero(t, res.Rejected)
+	require.Equal(t, plainBefore+1, pglensCheckOKTotal.Get(plain), "the stored plain result counts")
+
+	var skips int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM object_facts WHERE instance_id=$1 AND kind='check_skip' AND key='wal'`, instID).Scan(&skips))
+	require.Equal(t, 1, skips, "the skip is stored as a fact")
+	require.Equal(t, okBefore, pglensCheckOKTotal.Get(skipped), "a skipped result is not a success")
+	require.Equal(t, errBefore, pglensCheckErrorTotal.Get(skipped), "a skipped result is not an error")
+}
