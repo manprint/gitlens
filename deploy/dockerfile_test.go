@@ -37,3 +37,29 @@ func TestDockerfiles_BaseImagesArePinnedToDigests(t *testing.T) {
 		}
 	}
 }
+
+// servedDocuments names the repository paths the web bundle serves, as the
+// vite config lists them. The bundle reads each one from the root while it
+// builds, so every image build that compiles the bundle needs all of them.
+func servedDocuments(t *testing.T) []string {
+	t.Helper()
+	served := regexp.MustCompile(`(?m)^\s*'[^']+': new URL\('\.\./([^']+)', import\.meta\.url\),?$`)
+	var paths []string
+	for _, match := range served.FindAllStringSubmatch(string(readFile(t, filepath.Join("..", "web", "vite.config.ts"))), -1) {
+		paths = append(paths, match[1])
+	}
+	require.NotEmpty(t, paths, "web/vite.config.ts must name the documents it serves")
+	return paths
+}
+
+// The server image's web stage compiles the bundle, and the bundle reads the
+// documents it serves from the repository root. A document the stage does not
+// copy to the same path fails the whole image build, as it did once for
+// docs/LIMITS.md and docs/api.md.
+func TestDockerfileServer_WebStageCopiesEveryDocumentTheBundleServes(t *testing.T) {
+	dockerfile := string(readFile(t, filepath.Join("..", "Dockerfile.server")))
+	for _, path := range servedDocuments(t) {
+		copy := regexp.MustCompile(`(?m)^COPY ` + regexp.QuoteMeta(path) + ` /src/` + regexp.QuoteMeta(path) + `$`)
+		require.Regexp(t, copy, dockerfile, "Dockerfile.server: the web stage must COPY %s to the same path", path)
+	}
+}
