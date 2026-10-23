@@ -95,6 +95,13 @@ func runBloatMaintenance(ctx context.Context, e *scenario.Env) error {
 	if err := deleteMaintenanceRows(ctx, pg); err != nil {
 		return err
 	}
+	// The estimate sizes the table from reltuples, which only ANALYZE or VACUUM
+	// refreshes. The seed's ANALYZE still counts the deleted rows, so the table
+	// reads as full and shows no bloat until it is analysed again. The dead-tuple
+	// counters are not read by this scenario, so the ANALYZE does not affect it.
+	if _, err := pg.Exec(ctx, "ANALYZE "+maintenanceTable); err != nil {
+		return fmt.Errorf("analyze after delete: %w", err)
+	}
 	// The estimate reads pg_stats, which shows only the columns the monitoring
 	// role may SELECT, and a table with hidden columns gets no estimate at all
 	// (bloat_estimate.sql). The Tier 0 role reads no user data, so the probe is
@@ -294,7 +301,10 @@ func tableRatioPhase(wantHigh bool) string {
 }
 
 func waitForBloat(ctx context.Context, e *scenario.Env, instanceID string) error {
-	return pollMaintenance(ctx, time.Second, func(ctx context.Context) (bool, error) {
+	// last keeps the newest reading, so a timeout says whether the estimate row
+	// never arrived or arrived below the threshold.
+	last := "no estimate row"
+	err := pollMaintenance(ctx, time.Second, func(ctx context.Context) (bool, error) {
 		var ratio float64
 		err := e.DB.QueryRow(ctx, `SELECT bloat_ratio FROM metrics_bloat
 			WHERE instance_id=$1 AND schemaname='public' AND relname=$2 AND method='estimate'
@@ -312,8 +322,13 @@ func waitForBloat(ctx context.Context, e *scenario.Env, instanceID string) error
 		}
 		item, ok := relationItem(payload, maintenanceTable)
 		apiRatio, apiOK := item["bloat_ratio"].(float64)
+		last = fmt.Sprintf("store ratio %.3f, api ratio %v (listed %t)", ratio, item["bloat_ratio"], ok)
 		return ok && ratio > .2 && apiOK && apiRatio > .2, nil
 	})
+	if err != nil {
+		return fmt.Errorf("%w (last reading: %s)", err, last)
+	}
+	return nil
 }
 
 func runExactBloatCommand(ctx context.Context, e *scenario.Env, instanceID string) error {
