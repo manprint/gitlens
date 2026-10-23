@@ -1130,7 +1130,7 @@ func TestPipeline_TruncationMarkerOncePerCheckPerEnvelope(t *testing.T) {
 // to withhold is stored byte for byte.
 func TestWithholdLockTreeQueries(t *testing.T) {
 	t.Parallel()
-	tree := `{"sampled_at":"2026-10-23T20:00:00Z","nodes":[{"pid":7,"query":"ALTER ROLE app PASSWORD 'hunter2'","blocked_by":[8],"xact_age":1.5,"backend_start":"2026-10-23T19:00:00Z"}],` +
+	tree := `{"sampled_at":"2026-10-23T20:00:00Z","nodes":[{"pid":7,"query":"ALTER ROLE app PASSWORD 'hunter2'","blocked_by":[8],"xact_age":1.5,"backend_start":"2026-10-23T19:00:00Z","session_id":"65e7e3480a401.7","wait_started_at":"2026-10-23T19:59:00Z","wait_duration":60}],` +
 		`"sessions":[{"pid":8,"query":"SELECT 1"},{"pid":9,"query":"SELECT dblink_connect('postgresql://u:p@h/db')"}],"later_field":{"query":"x"}}`
 	got := withholdLockTreeQueries([]byte(tree))
 	var decoded struct {
@@ -1143,6 +1143,9 @@ func TestWithholdLockTreeQueries(t *testing.T) {
 	require.Equal(t, []any{float64(8)}, decoded.Nodes[0]["blocked_by"])
 	require.Equal(t, 1.5, decoded.Nodes[0]["xact_age"])
 	require.Equal(t, "2026-10-23T19:00:00Z", decoded.Nodes[0]["backend_start"])
+	require.Equal(t, "65e7e3480a401.7", decoded.Nodes[0]["session_id"])
+	require.Equal(t, "2026-10-23T19:59:00Z", decoded.Nodes[0]["wait_started_at"])
+	require.Equal(t, float64(60), decoded.Nodes[0]["wait_duration"])
 	require.Equal(t, "SELECT 1", decoded.Sessions[0]["query"])
 	require.Equal(t, "[redacted]", decoded.Sessions[1]["query"])
 	require.Equal(t, "x", decoded.Later["query"])
