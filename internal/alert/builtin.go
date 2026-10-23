@@ -5,7 +5,7 @@ import "time"
 func Builtin() []Rule {
 	return []Rule{
 		{ID: "agent_down", Tier: Tier0, Enabled: true, Severity: SeverityCritical, Scope: ScopeInstance, Metric: "up", Comparator: LT, Threshold: 1, For: 90 * time.Second, Summary: "No payload received from the agent"},
-		{ID: "instance_unreachable", Tier: Tier0, Enabled: true, Severity: SeverityCritical, Scope: ScopeInstance, EventType: "instance_unreachable", Summary: "The agent is alive but cannot reach the instance"},
+		{ID: "instance_unreachable", Tier: Tier0, Enabled: true, Severity: SeverityCritical, Scope: ScopeInstance, EventType: "instance_unreachable", Summary: "The server has received no report from the instance agent within the staleness window; agent_down is raised with it"},
 		{ID: "check_failing", Tier: Tier0, Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "pglens_check_error_rate", Comparator: GT, Threshold: 0, For: 5 * time.Minute, Summary: "A check has been failing for over five minutes"},
 		{ID: "no_primary_in_cluster", Tier: Tier0, Enabled: true, Severity: SeverityCritical, Scope: ScopeCluster, EventType: "no_primary_in_cluster", Summary: "No instance in the cluster reports the primary role"},
 		{ID: "agent_buffer_full", Tier: Tier0, Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "pglens_samples_dropped_rate", Comparator: GT, Threshold: 0, For: time.Minute, Summary: "The agent is dropping samples"},

@@ -96,3 +96,17 @@ func TestBuiltin_EveryEventRuleHasAnEmitter(t *testing.T) {
 			"%s no longer emits %s (rule %s would silently stop firing)", emitter, r.EventType, r.ID)
 	}
 }
+
+// The summary states what the emitter writes: the instance went silent, which
+// is the same event as agent_down, not an agent that is alive but cut off.
+func TestBuiltin_InstanceUnreachableSummaryMatchesEmitter(t *testing.T) {
+	for _, r := range Builtin() {
+		if r.ID != "instance_unreachable" {
+			continue
+		}
+		require.Contains(t, r.Summary, "no report from the instance agent")
+		require.Contains(t, r.Summary, "agent_down")
+		return
+	}
+	t.Fatal("instance_unreachable is not a built-in rule")
+}
