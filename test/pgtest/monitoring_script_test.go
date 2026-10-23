@@ -93,6 +93,20 @@ CREATE SEQUENCE perm_script_s`)
 		// not stop it, so the role must not hold EXECUTE on the function.
 		_, err = conn.Exec(ctx, "SELECT pg_catalog.pg_logical_emit_message(true, 'pglens', 'probe')")
 		require.True(t, isSQLState(err, "42501"), "%v", err)
+		// Large objects under the default. Only 42501, the privilege refusal,
+		// shows the revoke: without it PostgreSQL 15 writes, and 16 and later
+		// refuse with 25006 from the read-only default. Each call is rolled
+		// back, so the failing case leaves no large object behind.
+		for _, statement := range []string{
+			"SELECT pg_catalog.lo_create(0)",
+			"SELECT pg_catalog.lo_from_bytea(0, '\\x00')",
+		} {
+			tx, err := conn.Begin(ctx)
+			require.NoError(t, err)
+			_, err = tx.Exec(ctx, statement)
+			require.NoError(t, tx.Rollback(ctx))
+			require.True(t, isSQLState(err, "42501"), "%s: %v", statement, err)
+		}
 
 		_, err = conn.Exec(ctx, "SET default_transaction_read_only = off")
 		require.NoError(t, err)
@@ -260,6 +274,41 @@ CREATE FUNCTION perm_script_definer() RETURNS int LANGUAGE sql SECURITY DEFINER 
 			_, err := conn.Exec(ctx, statement)
 			require.True(t, isSQLState(err, "42501"), "%s: %v", statement, err)
 		}
+	})
+}
+
+// INT-PERM-015: a run warns about every other database the role can connect
+// to, because PUBLIC may let it create large objects or emit WAL messages
+// there, and the warning stops once the connection is revoked. The revokes are
+// per database, so this warning is what names where the script runs next.
+func TestPerm_INT_PERM_015_ScriptWarnsAboutOtherDatabases(t *testing.T) {
+	ForEach(t, func(t *testing.T, pg *PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "app", RoleSuperuser)
+		dropScriptRoles(t, admin)
+		t.Cleanup(func() { dropScriptRoles(t, admin) })
+		_, err := admin.Exec(ctx, "DROP DATABASE IF EXISTS perm_script_other")
+		require.NoError(t, err)
+		// CREATE DATABASE cannot run in a transaction block, so it is sent alone.
+		// A new database grants CONNECT to PUBLIC, so the role can connect to it.
+		_, err = admin.Exec(ctx, "CREATE DATABASE perm_script_other")
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, err := admin.Exec(context.Background(), "DROP DATABASE IF EXISTS perm_script_other")
+			require.NoError(t, err)
+		})
+		warning := scriptRole + " can connect to perm_script_other, where PUBLIC may still let it create large objects or emit WAL messages"
+
+		code, out := runMonitoringScript(t, pg)
+		require.Equal(t, 0, code, out)
+		require.Contains(t, out, warning)
+
+		_, err = admin.Exec(ctx, "REVOKE CONNECT ON DATABASE perm_script_other FROM PUBLIC")
+		require.NoError(t, err)
+		code, out = runMonitoringScript(t, pg)
+		require.Equal(t, 0, code, out)
+		require.NotContains(t, out, "can connect to perm_script_other")
 	})
 }
 
