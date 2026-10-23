@@ -7,6 +7,7 @@ import { ErrorState } from '@/components/state/ErrorState'
 import type { components } from '@/api/generated'
 
 type DriftEntry = components['schemas']['DriftEntry']
+type DriftValue = components['schemas']['DriftValue']
 
 interface DriftTableRow {
   name: string
@@ -26,17 +27,40 @@ function instanceIds(entries: readonly DriftEntry[]): string[] {
   ].sort((left, right) => left.localeCompare(right))
 }
 
+/**
+ * The reference is the value most instances report, so the outlier is the one
+ * flagged. A tie goes to the primary's value, which is what replicas are
+ * compared against. Without a primary, the lowest instance_id decides, so the
+ * flags never depend on the order the response happens to list instances in.
+ */
+function referenceValue(values: readonly DriftValue[]): string | undefined {
+  const counts = new Map<string, number>()
+  for (const value of values) {
+    counts.set(value.value, (counts.get(value.value) ?? 0) + 1)
+  }
+  const byInstance = [...values].sort((left, right) =>
+    left.instance_id.localeCompare(right.instance_id),
+  )
+  let reference = values.find((value) => value.role === 'primary')?.value ?? byInstance[0]?.value
+  let referenceCount = reference === undefined ? 0 : (counts.get(reference) ?? 0)
+  for (const [value, count] of counts) {
+    if (count > referenceCount) {
+      reference = value
+      referenceCount = count
+    }
+  }
+  return reference
+}
+
 function makeRow(entry: DriftEntry): DriftTableRow {
   const values = Object.fromEntries(
     entry.values.map((value) => [value.instance_id, value.value]),
   ) as Record<string, string | null>
   const distinctValues = new Set(entry.values.map((value) => value.value))
-  const referenceValue = entry.values[0]?.value
+  const reference = referenceValue(entry.values)
   const differingInstances = new Set(
     distinctValues.size > 1
-      ? entry.values
-          .filter((value) => value.value !== referenceValue)
-          .map((value) => value.instance_id)
+      ? entry.values.filter((value) => value.value !== reference).map((value) => value.instance_id)
       : [],
   )
   return { differingInstances, name: entry.name, values }

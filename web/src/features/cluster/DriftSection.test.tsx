@@ -35,4 +35,27 @@ describe('DriftSection', () => {
     )
     expect(screen.getByText('100')).not.toHaveAttribute('data-drift-different')
   })
+
+  it('UI-CLUS-027 flags the outlier whatever order the instances arrive in', () => {
+    const primary = { instance_id: 'primary-01', role: 'primary', value: '100' }
+    const replicas = ['replica-01', 'replica-02', 'replica-03'].map((instance_id) => ({
+      instance_id,
+      role: 'standby',
+      value: '200',
+    }))
+    const entry = (values: typeof replicas) => ({ name: 'max_connections', values })
+    const flaggedInstances = () =>
+      screen
+        .queryAllByLabelText(/differs from the reference/)
+        .map((cell) => cell.getAttribute('aria-label'))
+
+    const primaryFirst = renderWithProviders(
+      <DriftSection entries={[entry([primary, ...replicas])]} />,
+    )
+    expect(flaggedInstances()).toEqual(['primary-01 differs from the reference'])
+    primaryFirst.unmount()
+
+    renderWithProviders(<DriftSection entries={[entry([...replicas, primary])]} />)
+    expect(flaggedInstances()).toEqual(['primary-01 differs from the reference'])
+  })
 })
