@@ -80,7 +80,7 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | GET | `/api/v1/advisor/rules` | `getAdvisorRules` | List the advisor rule catalogue. |
 | GET | `/api/v1/findings` | `getFindings` | List advisor findings. |
 | GET | `/api/v1/findings/{finding-id}` | `getFinding` | Return one advisor finding. |
-| POST | `/api/v1/findings/{finding-id}/mute` | `muteFinding` | Mute a finding until a future timestamp. |
+| POST | `/api/v1/findings/{finding-id}/mute` | `muteFinding` | Mute a finding until a future timestamp, at most 90 days ahead. |
 | DELETE | `/api/v1/findings/{finding-id}/mute` | `unmuteFinding` | Remove a finding mute. |
 
 ## agent
