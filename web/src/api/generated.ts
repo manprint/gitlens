@@ -319,7 +319,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List events newest first. */
+        /**
+         * List events newest first.
+         * @description Without from, the newest events are returned, up to limit. Events older than the 90-day retention are not kept, so a range is bounded by it.
+         */
         get: operations["getEvents"];
         put?: never;
         post?: never;
@@ -336,7 +339,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Return top statements joined to query text. */
+        /**
+         * Return top statements joined to query text.
+         * @description Without from, the hour before to (or before now) is aggregated. A range is bounded by the retained statement history.
+         */
         get: operations["getStatements"];
         put?: never;
         post?: never;

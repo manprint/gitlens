@@ -1046,3 +1046,53 @@ func TestAPI_WriteJSON_EncodesWithTrailingNewline(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Equal(t, "{\"v\":1.5}\n", w.Body.String())
 }
+
+// argsPool records the arguments of each query, so a test can read the window
+// a handler sent.
+type argsPool struct {
+	*mockPool
+	queried [][]any
+}
+
+func (p *argsPool) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	p.queried = append(p.queried, args)
+	return p.mockPool.Query(ctx, sql, args...)
+}
+
+func (p *argsPool) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	p.queried = append(p.queried, args)
+	return p.mockPool.QueryRow(ctx, sql, args...)
+}
+
+// Without from, statements cover the hour before to, or before now, not the
+// whole retained history that every such request used to scan.
+func TestAPI_MockPool_Statements_DefaultWindowIsTheLastHour(t *testing.T) {
+	t.Parallel()
+	windowStart := func(query string) time.Time {
+		t.Helper()
+		pool := &argsPool{mockPool: &mockPool{
+			queryResults: []*mockRows{{rows: [][]any{}}},
+			queryRowVals: []*mockRow{{vals: []any{false}}, {err: pgx.ErrNoRows}},
+		}}
+		r := chi.NewRouter()
+		(&API{pool: pool}).RegisterRoutes(r)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/statements?instance_id="+uuid.NewString()+query, http.NoBody)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.NotEmpty(t, pool.queried)
+		for _, arg := range pool.queried[0] {
+			if ts, ok := arg.(time.Time); ok {
+				return ts
+			}
+		}
+		t.Fatal("the aggregate query carries no window start")
+		return time.Time{}
+	}
+
+	before := time.Now()
+	require.WithinDuration(t, before.Add(-time.Hour), windowStart(""), time.Minute)
+
+	to := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	require.Equal(t, to.Add(-time.Hour), windowStart("&to="+to.Format(time.RFC3339)))
+}

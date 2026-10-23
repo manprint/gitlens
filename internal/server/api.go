@@ -1185,7 +1185,18 @@ func (a *API) handleStatements(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If from/to missing, use defaults that still allow query (last 1h) for unit tests without DB.
+	// Without from, the answer covers the hour before to, or before now: the
+	// window the UI asks for by default. Summing the statements over the whole
+	// retained history cost every such request a scan of all of it.
+	if fromPtr == nil {
+		start := time.Now()
+		if toPtr != nil {
+			start = *toPtr
+		}
+		start = start.Add(-time.Hour)
+		fromPtr = &start
+	}
+
 	if a.pool == nil {
 		resp := statementsResp{
 			Statements:      []statementEntry{},

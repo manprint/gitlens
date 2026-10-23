@@ -1228,6 +1228,9 @@ paths:
       tags: [events]
       operationId: getEvents
       summary: List events newest first.
+      description: >-
+        Without from, the newest events are returned, up to limit. Events older
+        than the 90-day retention are not kept, so a range is bounded by it.
       parameters:
         - { name: cluster_id, in: query, required: false, schema: { $ref: '#/components/schemas/ClusterId' } }
         - { name: type, in: query, required: false, schema: { type: string } }
@@ -1260,6 +1263,9 @@ paths:
       tags: [statements]
       operationId: getStatements
       summary: Return top statements joined to query text.
+      description: >-
+        Without from, the hour before to (or before now) is aggregated. A
+        range is bounded by the retained statement history.
       parameters:
         - { name: instance_id, in: query, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
         - { name: database, in: query, required: false, schema: { type: string } }
