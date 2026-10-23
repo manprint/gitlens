@@ -49,7 +49,7 @@ func TestReplicationStreaming_NullLagEmittedAsNull(t *testing.T) {
 			var nilFloat *float64
 			return &mockRows{
 				rows: []([]any){
-					{"standby1", "192.168.1.100", 50000, "streaming", "async", nilInt64, nilInt64, nilInt64, nilFloat, nilFloat, nilFloat},
+					{"standby1", "192.168.1.100", 50000, "streaming", "async", nilInt64, nilInt64, nilInt64, nilFloat, nilFloat, nilFloat, nilFloat},
 				},
 			}, nil
 		},
@@ -102,7 +102,7 @@ func TestReplicationStreaming_ValidLagEmitted(t *testing.T) {
 		queryFunc: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 			return &mockRows{
 				rows: []([]any){
-					{"standby1", "192.168.1.100", 50000, "streaming", "async", &w, &w, &w, &f, &f, &f},
+					{"standby1", "192.168.1.100", 50000, "streaming", "async", &w, &w, &w, &f, &f, &f, (*float64)(nil)},
 				},
 			}, nil
 		},
@@ -336,9 +336,9 @@ func TestReplicationStreaming_StandbysStayDistinct(t *testing.T) {
 		queryFunc: func(ctx context.Context, q string, args ...any) (pgx.Rows, error) {
 			sql = q
 			return &mockRows{rows: [][]any{
-				{"walreceiver", "10.0.0.2", 40001, "streaming", "async", &w, &w, &w, (*float64)(nil), (*float64)(nil), (*float64)(nil)},
-				{"walreceiver", "10.0.0.3", 40002, "streaming", "sync", &w, &w, &w, (*float64)(nil), (*float64)(nil), (*float64)(nil)},
-				{"reporting", "10.0.0.4", 40003, "streaming", "async", &w, &w, &w, (*float64)(nil), (*float64)(nil), (*float64)(nil)},
+				{"walreceiver", "10.0.0.2", 40001, "streaming", "async", &w, &w, &w, (*float64)(nil), (*float64)(nil), (*float64)(nil), (*float64)(nil)},
+				{"walreceiver", "10.0.0.3", 40002, "streaming", "sync", &w, &w, &w, (*float64)(nil), (*float64)(nil), (*float64)(nil), (*float64)(nil)},
+				{"reporting", "10.0.0.4", 40003, "streaming", "async", &w, &w, &w, (*float64)(nil), (*float64)(nil), (*float64)(nil), (*float64)(nil)},
 			}}, nil
 		},
 	}
@@ -376,14 +376,9 @@ func TestReplicationReceiver_ToleratesArchiveOnlyStandby(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NotContains(t, sql, "::text")
-	found := false
-	for _, m := range result.Metrics {
-		if m.Name == "replication_receiver_replay_lag_seconds" {
-			found = true
-			require.Equal(t, 42.0, m.Value)
-		}
-	}
-	require.True(t, found)
+	// The lag column scans, but a disconnected receiver reports no lag even
+	// when the query returned one: its receive LSN is frozen, not caught up.
+	require.False(t, hasMetric(result, "replication_receiver_replay_lag_seconds"))
 }
 
 // A receiver that is not streaming yet keeps its status label and counts as
@@ -395,4 +390,96 @@ func TestReplicationReceiver_StatusValues(t *testing.T) {
 	} {
 		require.Equal(t, want, statusToFloat(status), status)
 	}
+}
+
+// TestReplicationStreaming_StalledStandbyLagFollowsReplyAge: the walsender
+// refreshes write, flush and replay lag only when the standby replies, so a
+// standby that stops replying keeps its last small value while its backlog
+// grows. While the standby is behind in bytes, its time lag follows the age of
+// its last reply. A caught-up standby is left alone when it goes quiet.
+func TestReplicationStreaming_StalledStandbyLagFollowsReplyAge(t *testing.T) {
+	t.Parallel()
+	small := float64(0.01075)
+	age := float64(30)
+	behind := int64(17105200)
+	none := int64(0)
+	negative := float64(-0.5)
+	shortAge := float64(2)
+	bigLag := float64(5)
+	for _, tc := range []struct {
+		name     string
+		lag      *float64
+		behind   *int64
+		replyAge *float64
+		want     float64
+	}{
+		{"behind and stalled", &small, &behind, &age, 30},
+		{"caught up and quiet", &small, &none, &age, 0.01075},
+		{"reply age clamped at zero", &small, &behind, &negative, 0.01075},
+		{"recent reply keeps the larger lag", &bigLag, &behind, &shortAge, 5},
+		{"no reply age reported", &small, &behind, nil, 0.01075},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			conn := &mockConn{
+				queryFunc: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+					return &mockRows{rows: [][]any{
+						{"standby1", "10.0.0.2", 40001, "streaming", "async", tc.behind, tc.behind, tc.behind, tc.lag, tc.lag, tc.lag, tc.replyAge},
+					}}, nil
+				},
+			}
+			result, err := (&replicationStreamingCheck{}).Scrape(context.Background(), &SimpleTarget{
+				ConnFunc: func(ctx context.Context) (Conn, error) { return conn, nil }, ClockValue: clock.System(),
+			})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, metricValue(result, "replication_replay_lag_seconds", map[string]string{
+				"application_name": "standby1", "client": "10.0.0.2", "state": "streaming", "sync_state": "async",
+			}))
+		})
+	}
+}
+
+// TestReplicationReceiver_LagOnlyWhileStreaming: the receive LSN stops moving
+// when the walreceiver exits, so the LSN comparison reads a standby that has
+// lost its primary as caught up. Replay lag is reported only while the stream
+// is up, and a disconnected standby reports no lag rather than a false zero.
+func TestReplicationReceiver_LagOnlyWhileStreaming(t *testing.T) {
+	t.Parallel()
+	zero := float64(0)
+	for _, tc := range []struct {
+		status  string
+		wantLag bool
+	}{
+		{"streaming", true},
+		{"catchup", true},
+		{"disconnected", false},
+		{"starting", false},
+		{"connecting", false},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			t.Parallel()
+			conn := &mockConn{
+				queryFunc: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+					return &mockRows{rows: [][]any{{tc.status, "primary.local", 5432, "slot1", &zero}}}, nil
+				},
+			}
+			result, err := (&replicationReceiverCheck{}).Scrape(context.Background(), &SimpleTarget{
+				ConnFunc: func(ctx context.Context) (Conn, error) { return conn, nil }, ClockValue: clock.System(),
+			})
+			require.NoError(t, err)
+			require.Equal(t, tc.wantLag, hasMetric(result, "replication_receiver_replay_lag_seconds"))
+			require.Equal(t, statusToFloat(tc.status), metricValue(result, "replication_receiver_status", map[string]string{
+				"status": tc.status, "sender_host": "primary.local", "slot_name": "slot1",
+			}))
+		})
+	}
+}
+
+func hasMetric(result Result, name string) bool {
+	for _, m := range result.Metrics {
+		if m.Name == name {
+			return true
+		}
+	}
+	return false
 }

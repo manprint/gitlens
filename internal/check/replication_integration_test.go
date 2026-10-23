@@ -363,7 +363,9 @@ func TestReplicationReceiver_Integration_Disconnected(t *testing.T) {
 			}, 15*time.Second, 200*time.Millisecond, "WAL receiver should disconnect after primary_conninfo is cleared")
 
 			// The LEFT JOIN guarantee: exactly one row, even though pg_stat_wal_receiver is empty
-			require.Len(t, result.Metrics, 3, "should have exactly 3 metrics even when no receiver")
+			// The row is still there, but a disconnected receiver reports no replay
+			// lag: its receive LSN is frozen, so status and sender port are all.
+			require.Len(t, result.Metrics, 2, "should have exactly 2 metrics even when no receiver")
 
 			foundDisconnected := false
 			for _, m := range result.Metrics {

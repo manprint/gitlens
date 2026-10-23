@@ -75,6 +75,13 @@ LEFT JOIN pg_stat_wal_receiver w ON true
 			return Result{}, err
 		}
 
+		// The receive LSN stops moving when the walreceiver exits, so the
+		// comparison in the query reads a standby that has lost its primary as
+		// caught up. Lag is reported only while the stream is up.
+		if !receiverStreaming(row.Status) {
+			row.ReplayLagSec = nil
+		}
+
 		labels := map[string]string{
 			"status":      row.Status,
 			"sender_host": row.SenderHost,
@@ -108,6 +115,13 @@ LEFT JOIN pg_stat_wal_receiver w ON true
 	}
 
 	return Result{Metrics: metrics}, nil
+}
+
+// receiverStreaming reports whether the walreceiver is up and receiving WAL.
+// Only then does a receive LSN equal to the replay LSN mean the standby has
+// nothing left to replay.
+func receiverStreaming(status string) bool {
+	return status == "streaming" || status == "catchup"
 }
 
 // statusToFloat maps pg_stat_wal_receiver.status; the status label keeps

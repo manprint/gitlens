@@ -35,6 +35,7 @@ type replicationStreamingRow struct {
 	WriteLagSec     *float64
 	FlushLagSec     *float64
 	ReplayLagSec    *float64
+	ReplyAgeSec     *float64
 }
 
 func (c *replicationStreamingCheck) Scrape(ctx context.Context, t Target) (Result, error) {
@@ -52,6 +53,8 @@ func (c *replicationStreamingCheck) Scrape(ctx context.Context, t Target) (Resul
 	// sent_lsn: WAL that the walsender has not even sent yet is lag too, and
 	// measuring from sent_lsn hid exactly the case of a sender falling
 	// behind. A cascading standby's own position is what it has received.
+	// reply_time is when the standby last answered; the time lags are
+	// refreshed only on such an answer, so their age is kept as well.
 	rows, err := conn.Query(ctx, `
 SELECT COALESCE(r.application_name, '')        AS application_name,
        COALESCE(r.client_addr::text, '')       AS client_addr,
@@ -63,7 +66,8 @@ SELECT COALESCE(r.application_name, '')        AS application_name,
        pg_wal_lsn_diff(p.pos, r.replay_lsn)::bigint AS replay_lag_bytes,
        EXTRACT(epoch FROM r.write_lag)          AS write_lag_sec,
        EXTRACT(epoch FROM r.flush_lag)          AS flush_lag_sec,
-       EXTRACT(epoch FROM r.replay_lag)         AS replay_lag_sec
+       EXTRACT(epoch FROM r.replay_lag)         AS replay_lag_sec,
+       EXTRACT(epoch FROM now() - r.reply_time) AS reply_age_sec
 FROM pg_stat_replication r,
      (SELECT CASE WHEN pg_is_in_recovery() THEN pg_last_wal_receive_lsn()
                   ELSE pg_current_wal_lsn() END AS pos) p
@@ -88,6 +92,7 @@ FROM pg_stat_replication r,
 			&row.WriteLagSec,
 			&row.FlushLagSec,
 			&row.ReplayLagSec,
+			&row.ReplyAgeSec,
 		); err != nil {
 			return Result{}, err
 		}
@@ -97,6 +102,28 @@ FROM pg_stat_replication r,
 		return Result{}, err
 	}
 	return Result{Metrics: replicationStreamingMetrics(parsed)}, nil
+}
+
+// staleLag raises a time lag to the age of the standby's last reply while the
+// standby is behind in bytes. The walsender recomputes write, flush and replay
+// lag only when a reply arrives, so a standby that stops replying (hung,
+// paused or partitioned) kept its last small value through a growing backlog.
+// A caught-up standby is not lagging because it has gone quiet, so its lag is
+// left as reported.
+func staleLag(lag, replyAge *float64, behindBytes *int64) *float64 {
+	if replyAge == nil || behindBytes == nil || *behindBytes <= 0 {
+		return lag
+	}
+	age := *replyAge
+	// now() is the statement's start, so a reply that arrived after it reads
+	// as a negative age, which is no lag at all.
+	if age < 0 {
+		age = 0
+	}
+	if lag != nil && *lag >= age {
+		return lag
+	}
+	return &age
 }
 
 // standbyIdentity names each walsender row. The server keys a standby's lag
@@ -122,6 +149,10 @@ func replicationStreamingMetrics(rows []replicationStreamingRow) []pgtype.Metric
 	var metrics []pgtype.Metric
 	ids := standbyIdentity(rows)
 	for i, row := range rows {
+		row.WriteLagSec = staleLag(row.WriteLagSec, row.ReplyAgeSec, row.WriteLagBytes)
+		row.FlushLagSec = staleLag(row.FlushLagSec, row.ReplyAgeSec, row.FlushLagBytes)
+		row.ReplayLagSec = staleLag(row.ReplayLagSec, row.ReplyAgeSec, row.ReplayLagBytes)
+
 		// The label MUST be called sync_state: that is the name
 		// internal/server/pipeline.go reads to fill
 		// metrics_replication.sync_state. It was emitted as "sync_mode", so
