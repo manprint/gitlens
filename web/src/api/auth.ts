@@ -164,12 +164,19 @@ export function useSignIn(): UseMutationResult<void, AuthRequestError, string> {
 export function useSignOut(): UseMutationResult<void, AuthRequestError, void> {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  function leaveApplication() {
+    queryClient.clear()
+    void navigate?.('/login', { replace: true })
+  }
   return useMutation({
     mutationFn: deleteSession,
-    onSettled: () => {
-      queryClient.clear()
-      void navigate?.('/login', { replace: true })
+    // A request that failed on the network may have left the server session
+    // active, so the operator stays here and can retry. A session the server
+    // already rejected is over, so the interface follows it to sign-in.
+    onError: (error) => {
+      if (error.kind === 'unauthorized') leaveApplication()
     },
+    onSuccess: leaveApplication,
     retry: false,
   })
 }

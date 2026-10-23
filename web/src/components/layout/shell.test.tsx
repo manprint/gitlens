@@ -63,6 +63,18 @@ describe('application shell', () => {
     expect(screen.getByRole('status', { name: 'Connection: reachable' })).toBeInTheDocument()
   })
 
+  it('WU-20 says the session may still be active when sign-out fails', async () => {
+    server.use(http.delete('*/api/v1/session', () => HttpResponse.error()))
+    renderWithProviders(<Header />, { route: '/' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }))
+
+    await vi.waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('the server session may still be active'),
+    )
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeEnabled()
+  })
+
   it('UI-SHELL-021 distinguishes browser offline from an unreachable server', () => {
     renderWithProviders(
       <Header connection={{ lastPollFailed: true, lastSuccessAt: Date.now() - 120_000 }} />,

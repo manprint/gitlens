@@ -145,6 +145,11 @@ export function Header({ connection = defaultConnection, dataUpdatedAt = 0 }: He
           Sign out
         </Button>
       </div>
+      {signOut.isError ? (
+        <p className="text-destructive basis-full text-sm" role="alert">
+          Sign-out failed: the server session may still be active. Try signing out again.
+        </p>
+      ) : null}
       {shortcutSheetOpen ? (
         <section
           aria-label="Keyboard shortcuts"
