@@ -1648,7 +1648,7 @@ After the update, the agent's next accepted push (about one push interval, ~15 s
 
 **Ingest returns HTTP 400 for an unsupported protocol**
 
-A response such as `{"error":"unsupported protocol_version 3, supported range 1-2"}` means the agent is newer than the server. Upgrade the server first, then retry the agent.
+A response such as `{"error":"unsupported protocol_version 3, supported range 1-2"}` comes from a server that predates protocol version 3 and means the agent is newer than that server. Upgrade the server first, then retry the agent.
 
 **Databases missing or showing `skip_reason=db_budget`**
 
@@ -1762,7 +1762,7 @@ To fix: mount the persistent volume and restart. Old duplicate instances will ag
 The authoritative, numbered list is [docs/LIMITS.md](docs/LIMITS.md). The
 following is a short operational summary.
 
-The server accepts agents speaking protocol version 1 or 2. An agent newer than
+The server accepts agents speaking protocol versions 1 to 3. An agent newer than
 the server is rejected, so upgrade the server before upgrading agents.
 
 **Agent:**
