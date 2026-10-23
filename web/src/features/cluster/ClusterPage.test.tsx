@@ -1,5 +1,5 @@
 import { act, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { Cluster } from '@/api/types'
 import { REFRESH } from '@/api/policy'
@@ -59,6 +59,10 @@ function renderPage() {
     route: `/clusters/${CLUSTER_ID}`,
   })
 }
+
+afterEach(() => {
+  server.events.removeAllListeners()
+})
 
 describe('ClusterPage', () => {
   it('UI-CLUS-040 renders not found with a link back for an unknown cluster id', async () => {
@@ -193,5 +197,29 @@ describe('ClusterPage', () => {
 
     expect(screen.getByTestId('cluster-topology-graph')).toBeInTheDocument()
     expect(screen.getByRole('alert')).toHaveTextContent('Could not load replication slots')
+  })
+
+  // A relative window read from the render clock gave every poll a second request.
+  it('UI-CLUS-049 sends one replication request per poll for a relative range', async () => {
+    const replicationRequests: string[] = []
+    server.events.on('request:start', ({ request }) => {
+      if (new URL(request.url).pathname.endsWith(`/clusters/${CLUSTER_ID}/replication`)) {
+        replicationRequests.push(request.url)
+      }
+    })
+    configurePage()
+    renderPage()
+    await settle()
+
+    const polls = 3
+    for (let poll = 0; poll < polls; poll += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(REFRESH.cluster.interval)
+      })
+      await settle()
+    }
+
+    // The mount fetch, then one per poll.
+    expect(replicationRequests).toHaveLength(polls + 1)
   })
 })
