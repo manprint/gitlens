@@ -366,6 +366,33 @@ func TestTick_APartlyFailedKindClosesNothing(t *testing.T) {
 	require.Len(t, notifier.alerts, 1, "an episode only the failed source samples must not resolve while another source answers")
 }
 
+// TestTick_APartlyFailedPulseClosesNothing — a pulse served by two event sources
+// closes only on a pass that every source answered. Here the source that holds
+// the occurrence fails and the other answers with nothing. Only the guard on
+// failed sources keeps the pulse open, since the answering source alone would
+// otherwise close it.
+func TestTick_APartlyFailedPulseClosesNothing(t *testing.T) {
+	start := time.Unix(1000, 0)
+	clk := clock.NewFake(start)
+	cluster := int64(7)
+	occurrences := []time.Time{start}
+	owner := &lifecycleSource{kind: "event", samples: windowedFailovers(clk, &cluster, &occurrences)}
+	other := &lifecycleSource{kind: "event"}
+	store, notifier := &engineStore{}, &engineNotifier{}
+	e := NewEngineWithInterval(nil, clk, 30*time.Second, store, notifier, []Source{owner, other})
+	ctx := context.Background()
+
+	require.NoError(t, e.Tick(ctx))
+	require.Len(t, notifier.alerts, 1)
+
+	owner.err = errors.New("statement timeout")
+	for i := 0; i < 5; i++ { // two and a half minutes: the occurrence leaves the window
+		clk.Advance(30 * time.Second)
+		require.Error(t, e.Tick(ctx))
+	}
+	require.Len(t, notifier.alerts, 1, "a pulse must not resolve on a pass that one of its sources failed")
+}
+
 // TestTick_SpellEpisodeStaysOpenUntilItsSubjectClears — instance_unreachable is
 // emitted once per outage. When its event ages out the outage may well still
 // be going, so the episode closes only when the source confirms that the
