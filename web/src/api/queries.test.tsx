@@ -129,6 +129,11 @@ function AshWindowProbe() {
   return null
 }
 
+function AshTopWindowProbe() {
+  useAshTop({ instance_id: 'instance-a' }, RELATIVE_HOUR)
+  return null
+}
+
 function ReplicationWindowProbe() {
   useClusterReplication('cluster-a', RELATIVE_HOUR)
   return null
@@ -154,6 +159,12 @@ describe('relative windows', () => {
       Probe: AshWindowProbe,
     },
     {
+      interval: REFRESH.ash.interval,
+      name: 'ASH top list',
+      path: '/api/v1/ash/top',
+      Probe: AshTopWindowProbe,
+    },
+    {
       interval: REFRESH.cluster.interval,
       name: 'cluster replication',
       path: '/api/v1/clusters/cluster-a/replication',
@@ -175,6 +186,7 @@ describe('relative windows', () => {
       })
       server.use(
         ok('getAsh', { buckets: [], enabled: true, resolution_seconds: 30, statistical: false }),
+        ok('getAshTop', { entries: [], resolution_seconds: 30, statistical: false }),
         ok('getClusterReplication', { cluster_id: '1', edges: [] }),
         ok('queryMetrics', { series: [] }),
       )
