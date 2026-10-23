@@ -739,3 +739,27 @@ func TestStatStatements_IntegrationAggregatesAcrossRoles(t *testing.T) {
 		require.Equal(t, []float64{5}, calls, "one series per queryid, summed over both roles")
 	})
 }
+
+// TestStatStatements_IntegrationComputeQueryIDOff: with compute_query_id off
+// PostgreSQL records no statement that runs from then on, so the view only
+// holds the past. The scrape names the setting instead of reporting it as
+// current. The session is set on the superuser's own pool, which the test
+// closes at cleanup.
+func TestStatStatements_IntegrationComputeQueryIDOff(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		conn, err := admin.Acquire(ctx)
+		require.NoError(t, err)
+		_, err = conn.Exec(ctx, "SET compute_query_id = off")
+		require.NoError(t, err)
+
+		check := &statStatementsCheck{
+			selectors: cardinalityForIntegration(),
+			caches:    make(map[string]*textCache),
+		}
+		_, err = check.Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
+		require.ErrorContains(t, err, "compute_query_id is off")
+	})
+}

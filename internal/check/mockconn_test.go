@@ -409,6 +409,9 @@ func TestStatStatementsCheck_Scrape_Happy(t *testing.T) {
 			}, nil
 		},
 		queryRowFunc: func(ctx context.Context, sql string, args ...any) pgx.Row {
+			if strings.Contains(sql, "compute_query_id") {
+				return &mockRow{vals: []any{"on"}}
+			}
 			var t *time.Time
 			return &mockRow{vals: []any{t}}
 		},
@@ -440,6 +443,9 @@ func TestStatStatementsCheck_Scrape_NoExtensionAnywhere(t *testing.T) {
 	conn := &mockConn{
 		queryFunc: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 			return nil, &pgconn.PgError{Code: "42P01", Message: `relation "pg_stat_statements" does not exist`}
+		},
+		queryRowFunc: func(ctx context.Context, sql string, args ...any) pgx.Row {
+			return &mockRow{vals: []any{"on"}}
 		},
 	}
 
@@ -502,6 +508,9 @@ func TestStatStatementsCheck_Scrape_CycleAdvancesAndForgetsStaleRetained(t *test
 			return &mockRows{rows: rows}, nil
 		},
 		queryRowFunc: func(ctx context.Context, sql string, args ...any) pgx.Row {
+			if strings.Contains(sql, "compute_query_id") {
+				return &mockRow{vals: []any{"on"}}
+			}
 			var t *time.Time
 			return &mockRow{vals: []any{t}}
 		},

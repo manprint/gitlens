@@ -332,6 +332,18 @@ func readStatements(ctx context.Context, conn Conn, timeout time.Duration, datab
 	if err != nil {
 		return nil, 0, nil, err
 	}
+	// With compute_query_id off PostgreSQL computes no query ID, so the view
+	// records no statement that runs from then on and keeps the rows it had.
+	// Reading those rows would present frozen counters as current, so the
+	// check names the setting instead.
+	var queryIDSetting string
+	err = conn.QueryRow(ctx, "SELECT current_setting('compute_query_id')").Scan(&queryIDSetting)
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	if queryIDSetting == "off" {
+		return nil, 0, nil, errors.New("compute_query_id is off, so pg_stat_statements records no new statements (set compute_query_id to auto or on)")
+	}
 	view := pgx.Identifier{schema, "pg_stat_statements"}.Sanitize()
 	rows, err := conn.Query(ctx, fmt.Sprintf(statementsQuery, database, prefilter, view), args...)
 	if err != nil {
