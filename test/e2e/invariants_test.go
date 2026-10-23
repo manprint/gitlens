@@ -170,6 +170,18 @@ func TestInvariant_CleanFixturePasses(t *testing.T) {
 	harness.AssertDBInvariants(ctx, t, pool) // must not fail
 }
 
+// TestInvariant_EmptyStoreIsNotClean proves the checks refuse a store that
+// ingested nothing. Every check reports only violating rows, so an empty
+// metrics table would otherwise satisfy all of them.
+func TestInvariant_EmptyStoreIsNotClean(t *testing.T) {
+	pool, _, _ := invariantsFixture(t)
+	ctx := context.Background()
+
+	spy := &spyT{T: t}
+	harness.AssertDBInvariants(ctx, spy, pool)
+	require.True(t, spy.failed, "expected the invariants to refuse a store with no metrics rows")
+}
+
 // TestInvariant_I4_OrphanMetricDetected plants a metrics row for an
 // instance_id that does not exist in instances (no FK stops this — a
 // deliberate schema choice for hypertable write throughput) and proves

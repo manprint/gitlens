@@ -59,7 +59,15 @@ func DefaultMetricBudget() MetricBudget {
 func AssertMetricInvariants(t TestingT, exposition string, budget MetricBudget) {
 	t.Helper()
 
-	for _, sample := range parseLabelledMetric(exposition, "pglens_series_total") {
+	// The loops below judge only the samples they find, so an exposition
+	// without any series would pass them all. That is what an empty body, or
+	// an HTML page answered with 200, looks like; it is not evidence that the
+	// budget holds.
+	series := parseLabelledMetric(exposition, "pglens_series_total")
+	if len(series) == 0 {
+		t.Errorf("I-8: /metrics carries no pglens_series_total sample, so the cardinality budget was not evaluated")
+	}
+	for _, sample := range series {
 		if budget.MaxSeriesPerInstance > 0 && sample.value > budget.MaxSeriesPerInstance {
 			t.Errorf("I-8: cardinality budget exceeded: instance %s reports %.0f series, budget is %.0f",
 				sample.label, sample.value, budget.MaxSeriesPerInstance)

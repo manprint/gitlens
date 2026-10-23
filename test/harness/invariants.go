@@ -174,10 +174,25 @@ func (h *Harness) serverContainerRunning() bool {
 // pgtest fixture instead of a full docker-compose stack.
 func AssertDBInvariants(ctx context.Context, t TestingT, pool *pgxpool.Pool) {
 	t.Helper()
+	assertMetricsWritten(ctx, t, pool)
 	assertNoDuplicateSamples(ctx, t, pool)
 	assertNoNegativeRates(ctx, t, pool)
 	assertNoOrphanMetrics(ctx, t, pool)
 	assertClusterIDStable(ctx, t, pool)
+}
+
+// assertMetricsWritten is the positive control for the checks below. Each of
+// them reports only rows that violate it, so a store that ingested nothing
+// satisfies all of them; requiring one metrics row proves the pipeline wrote.
+func assertMetricsWritten(ctx context.Context, t TestingT, pool *pgxpool.Pool) {
+	t.Helper()
+	var written bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM metrics)`).Scan(&written); err != nil {
+		t.Fatalf("metrics written (metrics): query failed: %v", err)
+	}
+	if !written {
+		t.Errorf("metrics table is empty: the invariants would pass vacuously on a store that ingested nothing")
+	}
 }
 
 // assertNoDuplicateSamples backs I-3: the same (series, ts) is never written

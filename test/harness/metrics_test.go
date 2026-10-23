@@ -143,6 +143,30 @@ func TestAssertMetricInvariants_HonoursAllowedCheckErrors(t *testing.T) {
 	}
 }
 
+// The positive control for the I-8 check: a /metrics body with no series
+// proves nothing about the budget, so it must fail rather than pass by having
+// nothing to judge. A proxy answering 200 with an HTML page looks like this.
+func TestAssertMetricInvariants_FailsWithoutAnySeries(t *testing.T) {
+	var withoutSeries []string
+	for _, line := range strings.Split(healthyExposition, "\n") {
+		if !strings.Contains(line, "pglens_series_total") {
+			withoutSeries = append(withoutSeries, line)
+		}
+	}
+	cases := map[string]string{
+		"empty body":          "",
+		"html page":           "<html><body>ok</body></html>",
+		"no series in output": strings.Join(withoutSeries, "\n"),
+	}
+	for name, exposition := range cases {
+		spy := &spyT{}
+		AssertMetricInvariants(spy, exposition, DefaultMetricBudget())
+		if len(spy.errors) != 1 || !strings.Contains(spy.errors[0], "pglens_series_total") {
+			t.Errorf("%s: an exposition without series passed the I-8 check: %v", name, spy.errors)
+		}
+	}
+}
+
 func TestParseLabelledMetric(t *testing.T) {
 	got := parseLabelledMetric(healthyExposition, "pglens_series_total")
 	if len(got) != 2 {
