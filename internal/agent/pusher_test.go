@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"math"
 	"net/http"
@@ -608,4 +609,67 @@ func TestPusher_TrailingSlashInServerURLStillPushes(t *testing.T) {
 	acked, dropped := p.BufferStats()
 	require.Equal(t, int64(1), acked)
 	require.Equal(t, int64(0), dropped)
+}
+
+// roundTripFunc lets a test script the transport under the pusher's client.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// TestPusher_NetworkFailureReportsUnreachable: a push that fails at the
+// network level must show in healthz while it is retried, and the first
+// accepted push must clear it.
+func TestPusher_NetworkFailureReportsUnreachable(t *testing.T) {
+	p := NewPusher("http://pglens.invalid", "token", clock.System())
+	calls := 0
+	var observed Health
+	var observedBody string
+	p.httpClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 1 {
+			return nil, errors.New("dial tcp: connection refused")
+		}
+		if calls == 2 {
+			observed = p.HealthState()
+			rec := httptest.NewRecorder()
+			p.HealthzHandler()(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+			observedBody = rec.Body.String()
+			require.Equal(t, http.StatusOK, rec.Code)
+		}
+		return &http.Response{
+			StatusCode: http.StatusAccepted,
+			Body:       io.NopCloser(bytes.NewReader(nil)),
+			Header:     http.Header{},
+			Request:    r,
+		}, nil
+	})
+
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	require.NoError(t, p.Push(ctx))
+
+	require.Equal(t, HealthUnreachable, observed)
+	require.Contains(t, observedBody, `"state":"unreachable"`)
+	require.Contains(t, observedBody, "connection refused")
+	require.Equal(t, HealthOK, p.HealthState(), "an accepted push clears the unreachable state")
+}
+
+// TestPusher_NetworkFailureKeepsRejection: an agent the server has revoked
+// stays revoked while the network is also down.
+func TestPusher_NetworkFailureKeepsRejection(t *testing.T) {
+	p := NewPusher("http://pglens.invalid", "token", clock.System())
+	p.mu.Lock()
+	p.health = HealthRevoked
+	p.mu.Unlock()
+	p.httpClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return nil, errors.New("dial tcp: connection refused")
+	})
+
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	require.Error(t, p.Push(ctx))
+
+	require.Equal(t, HealthRevoked, p.HealthState())
 }

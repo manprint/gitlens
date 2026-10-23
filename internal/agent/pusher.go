@@ -35,6 +35,11 @@ const (
 	HealthIncompatible Health = "incompatible"
 	HealthRevoked      Health = "revoked"
 	HealthUnauthorized Health = "unauthorized"
+	// HealthUnreachable means the last push failed at the network level and
+	// no push has succeeded since. healthz still answers 200 for it: the
+	// server being down is not a reason for a liveness probe to restart the
+	// agent.
+	HealthUnreachable Health = "unreachable"
 )
 
 // Pusher sends wire.Envelopes to the server with retry backoff.
@@ -251,8 +256,17 @@ func (p *Pusher) pushOne(ctx context.Context, env *wire.Envelope) (pushOutcome, 
 
 		status, skew, body, err := p.doRequest(req)
 		if err != nil {
-			// Transient: network error, connection refused, timeout
-			// Continue retry loop
+			// Transient: network error, connection refused, timeout. The
+			// retry loop continues, but the state must not stay ok while
+			// nothing is delivered and the disk buffer grows. A server that
+			// rejected the agent keeps its own state: a dead network does not
+			// make a revoked agent any less revoked.
+			p.mu.Lock()
+			if p.health == HealthOK || p.health == HealthUnreachable {
+				p.health = HealthUnreachable
+				p.lastError = fmt.Sprintf("push failed: %v", err)
+			}
+			p.mu.Unlock()
 			continue
 		}
 
