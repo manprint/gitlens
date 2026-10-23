@@ -23,6 +23,25 @@ func monitorsDatabase(t Target, datname string) bool {
 	return ok && m.MonitorsDatabase(datname)
 }
 
+// ScheduledConnector is implemented by a target that keeps the database set its
+// running schedule was built for. MonitorsDatabase answers from that set, and
+// ScheduledConnFor opens exactly those databases. ConnFor on the same target
+// serves commands, and it answers from the latest discovery, which may have
+// ranked out a database the schedule still collects from.
+type ScheduledConnector interface {
+	ScheduledConnFor(ctx context.Context, datname string) (Conn, error)
+}
+
+// connectScheduled opens datname for a check. A check asks MonitorsDatabase
+// first, so it connects through the same set when the target keeps one, or the
+// connection would be refused a database the gate just allowed.
+func connectScheduled(ctx context.Context, t Target, datname string) (Conn, error) {
+	if s, ok := t.(ScheduledConnector); ok {
+		return s.ScheduledConnFor(ctx, datname)
+	}
+	return t.ConnFor(ctx, datname)
+}
+
 // SimpleTarget is a testable implementation of Target.
 type SimpleTarget struct {
 	InstanceIDValue pgtype.InstanceID

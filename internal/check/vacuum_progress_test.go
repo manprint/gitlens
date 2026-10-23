@@ -2,6 +2,7 @@ package check
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -201,4 +202,59 @@ func TestVacuumProgress_NeverConnectsToUnmonitoredDatabase(t *testing.T) {
 		}
 	}
 	require.Equal(t, map[string]string{"postgres": "maint_t", "app": "zz_vac_probe", "secret": ""}, names)
+}
+
+// scheduledVacuumTarget keeps a schedule's database set the way the agent's
+// manager does. The gate and the schedule's connection allow the database, and
+// the command path refuses it, as it does once a discovery has ranked it out.
+type scheduledVacuumTarget struct {
+	*SimpleTarget
+	scheduled Conn
+}
+
+func (s scheduledVacuumTarget) ScheduledConnFor(_ context.Context, datname string) (Conn, error) {
+	if datname != "app" {
+		return nil, errors.New("not scheduled")
+	}
+	return s.scheduled, nil
+}
+
+// A database the schedule still collects from keeps its relname after the latest
+// discovery has ranked it out. The relation is read through the schedule's
+// connection, and the command path is never asked for it.
+func TestVacuumProgress_NamesRelationThroughScheduledConnection(t *testing.T) {
+	t.Parallel()
+	maint := &mockConn{queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+		if strings.Contains(sql, "pg_stat_progress_vacuum") && !strings.Contains(sql, "information_schema") {
+			return &mockRows{rows: [][]any{{int32(7), "app", uint32(16384), "scanning heap", int64(100), int64(50), int64(0), int64(0), int64(0), int64(0), nil}}}, nil
+		}
+		return &mockRows{}, nil
+	}, queryRowFunc: maintenanceAnswers}
+	app := &mockConn{queryRowFunc: func(_ context.Context, sql string, args ...any) pgx.Row {
+		require.Contains(t, sql, "pg_class")
+		require.Equal(t, []any{uint32(16384)}, args)
+		return &mockRow{vals: []any{"zz_vac_probe"}}
+	}}
+	target := scheduledVacuumTarget{
+		SimpleTarget: &SimpleTarget{
+			ConnFunc: func(context.Context) (Conn, error) { return maint, nil },
+			ConnForFunc: func(context.Context, string) (Conn, error) {
+				return nil, errors.New("refused by the command path")
+			},
+			Monitored:  map[string]bool{"app": true},
+			ClockValue: clock.System(),
+		},
+		scheduled: app,
+	}
+	r, err := (&vacuumProgressCheck{}).Scrape(context.Background(), target)
+	require.NoError(t, err)
+	found := false
+	for _, m := range r.Metrics {
+		if m.Name == "pg_vacuum_heap_blks_total" && m.Labels["datname"] == "app" {
+			found = true
+			require.Equal(t, "zz_vac_probe", m.Labels["relname"])
+		}
+	}
+	require.True(t, found)
+	require.Equal(t, 1, app.releaseCalls)
 }
