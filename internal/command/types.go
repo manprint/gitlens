@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/manprint/pglens/internal/pgtype"
 )
@@ -38,6 +39,10 @@ type Args struct {
 	PID      *int   `json:"pid,omitempty"`
 	Schema   string `json:"schema,omitempty"`
 	Relation string `json:"relation,omitempty"`
+	// BackendStart is the start time of the session the caller saw at PID. It
+	// is optional; when it is set, the agent signals only a session that
+	// started at this time, and refuses any other session that holds the PID.
+	BackendStart *time.Time `json:"backend_start,omitempty"`
 }
 
 // UnmarshalJSON accepts both legacy JSON numbers and string query IDs. The
@@ -45,12 +50,13 @@ type Args struct {
 // precision when they cross the JavaScript boundary.
 func (a *Args) UnmarshalJSON(data []byte) error {
 	type wireArgs struct {
-		QueryID  json.RawMessage `json:"queryid"`
-		Datname  string          `json:"datname,omitempty"`
-		Analyze  bool            `json:"analyze,omitempty"`
-		PID      *int            `json:"pid,omitempty"`
-		Schema   string          `json:"schema,omitempty"`
-		Relation string          `json:"relation,omitempty"`
+		QueryID      json.RawMessage `json:"queryid"`
+		Datname      string          `json:"datname,omitempty"`
+		Analyze      bool            `json:"analyze,omitempty"`
+		PID          *int            `json:"pid,omitempty"`
+		Schema       string          `json:"schema,omitempty"`
+		Relation     string          `json:"relation,omitempty"`
+		BackendStart *time.Time      `json:"backend_start,omitempty"`
 	}
 
 	var wire wireArgs
@@ -61,11 +67,12 @@ func (a *Args) UnmarshalJSON(data []byte) error {
 	}
 
 	*a = Args{
-		Datname:  wire.Datname,
-		Analyze:  wire.Analyze,
-		PID:      wire.PID,
-		Schema:   wire.Schema,
-		Relation: wire.Relation,
+		Datname:      wire.Datname,
+		Analyze:      wire.Analyze,
+		PID:          wire.PID,
+		Schema:       wire.Schema,
+		Relation:     wire.Relation,
+		BackendStart: wire.BackendStart,
 	}
 	if len(wire.QueryID) == 0 || bytes.Equal(wire.QueryID, []byte("null")) {
 		return nil
@@ -115,6 +122,9 @@ func (a Args) Validate(k Kind) error {
 		if a.Schema != "" || a.Relation != "" {
 			return fmt.Errorf("explain rejects schema and relation")
 		}
+		if a.BackendStart != nil {
+			return fmt.Errorf("explain rejects backend_start")
+		}
 	case KindCancel, KindTerminate:
 		if a.PID == nil {
 			return fmt.Errorf("%s requires pid", k)
@@ -132,7 +142,7 @@ func (a Args) Validate(k Kind) error {
 		if a.Schema == "" || a.Relation == "" {
 			return fmt.Errorf("pgstattuple requires schema and relation")
 		}
-		if a.QueryID != nil || a.PID != nil || a.Analyze {
+		if a.QueryID != nil || a.PID != nil || a.Analyze || a.BackendStart != nil {
 			return fmt.Errorf("pgstattuple rejects unrelated arguments")
 		}
 	}
