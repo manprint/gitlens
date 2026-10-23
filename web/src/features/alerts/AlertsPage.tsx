@@ -5,7 +5,7 @@ import { useAlert, useAlerts, useSilences } from '@/api/queries'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
-import { EmptyState, ErrorState } from '@/components/state'
+import { AlertListTruncated, EmptyState, ErrorState } from '@/components/state'
 import { Input } from '@/components/ui/input'
 import { matchSilence, rankAlerts, summariseAlerts, type Alert, type Silence } from '@/lib/alerts'
 
@@ -218,6 +218,7 @@ export function AlertsPage() {
         </div>
       ) : null}
 
+      <AlertListTruncated truncated={alertsQuery.truncated} />
       <Section
         title="Summary"
         description="Firing alerts are counted by severity; suppressed alerts are shown separately."

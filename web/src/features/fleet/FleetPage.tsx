@@ -6,7 +6,7 @@ import type { Cluster, Schemas } from '@/api/types'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
-import { EmptyState, ErrorState } from '@/components/state'
+import { AlertListTruncated, EmptyState, ErrorState } from '@/components/state'
 import { Input } from '@/components/ui/input'
 import { AGENT_STALE_AFTER_SECONDS, deriveAgentHealth } from '@/lib/fleet'
 
@@ -187,6 +187,7 @@ export function FleetPage() {
         </div>
       ) : null}
 
+      <AlertListTruncated truncated={alertsQuery.truncated} />
       <AgentHealthStrip issues={agentHealthIssues} />
 
       <FleetSummaryBar

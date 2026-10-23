@@ -1,6 +1,12 @@
 import type { Schemas } from '@/api/types'
 
 export type Alert = Schemas['Alert']
+
+/**
+ * The server lists at most this many alerts, the most recently evaluated first.
+ * A longer set is cut here and the response sets X-Result-Truncated.
+ */
+export const ALERT_LIST_LIMIT = 500
 export type Silence = Schemas['Silence']
 
 type AlertSeverity = Alert['severity']

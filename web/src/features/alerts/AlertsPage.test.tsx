@@ -191,6 +191,20 @@ describe('AlertsPage', () => {
     expect(screen.getByRole('note')).toHaveTextContent('alerts are persisted but not delivered')
   })
 
+  it('UI-ALERT-061 says the list is a lower bound when the server cut it at the limit', async () => {
+    server.use(ok('getSilences', []))
+    server.use(ok('getAlerts', [alert()], { headers: { 'X-Result-Truncated': 'true' } }))
+    renderWithProviders(<AlertsPage />, { route: '/alerts' })
+    await settle()
+
+    expect(
+      screen.getByText('Only the 500 most recently evaluated alerts are loaded.'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/any count or list built from alerts is a lower bound/),
+    ).toBeInTheDocument()
+  })
+
   it('UI-ALERT-042 does not offer a webhook URL editor', async () => {
     await renderAlerts()
 

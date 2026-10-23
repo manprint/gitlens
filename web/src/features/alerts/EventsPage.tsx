@@ -5,7 +5,7 @@ import { useAlerts, useEvents, useSilences } from '@/api/queries'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
-import { EmptyState, ErrorState } from '@/components/state'
+import { AlertListTruncated, EmptyState, ErrorState } from '@/components/state'
 import { Input } from '@/components/ui/input'
 import { summariseAlerts, type Alert } from '@/lib/alerts'
 import { EventTimeline } from '@/features/cluster/EventTimeline'
@@ -239,6 +239,7 @@ export function EventsPage() {
         </p>
       ) : null}
 
+      <AlertListTruncated truncated={alertsQuery.truncated} />
       <AlertStatus alerts={alerts} suppressionUnknown={Boolean(silencesQuery.error)} />
 
       {events.length === 0 ? (

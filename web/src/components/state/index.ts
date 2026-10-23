@@ -7,6 +7,7 @@
 export { Degraded } from './Degraded'
 export { Disabled } from './Disabled'
 export { EmptyState } from './EmptyState'
+export { AlertListTruncated } from './AlertListTruncated'
 export { CommandSubmitError } from './CommandSubmitError'
 export { ErrorState } from './ErrorState'
 export { NotPermitted } from './NotPermitted'
