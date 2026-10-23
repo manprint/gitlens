@@ -137,14 +137,16 @@ func (n *channelNotifier) Retry(ctx context.Context) error {
 // deliver makes one attempt at a delivery and records it. A failed attempt is
 // kept for a later pass while attempts remain.
 func (n *channelNotifier) deliver(ctx context.Context, d pendingDelivery) error {
-	sendErr := d.channel.Send(ctx, d.message)
-	if sendErr != nil && ctx.Err() != nil {
-		// The cycle ran out of time before the channel answered, so the attempt
-		// says nothing about the channel. It is kept for a later pass without
-		// being counted, or the time the rules took would use up the attempts.
+	if err := ctx.Err(); err != nil {
+		// The cycle ran out of time before the send began, so the channel was
+		// never asked and the attempt says nothing about it. It is kept for a
+		// later pass without being counted, or the time the rules took would use
+		// up the attempts. A send that did begin counts, even when the cycle ends
+		// while it waits: a channel that never answers is failing.
 		n.keep(d)
-		return fmt.Errorf("channel %s: %w", d.channel.Name(), sendErr)
+		return fmt.Errorf("channel %s: %w", d.channel.Name(), err)
 	}
+	sendErr := d.channel.Send(ctx, d.message)
 	d.attempts++
 	markErr := n.store.MarkNotification(ctx, d.dedupID, d.channel.Name(), d.phase, sendErr == nil, d.attempts, sendErr)
 	if sendErr != nil {

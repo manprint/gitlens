@@ -203,3 +203,47 @@ func TestChannelNotifier_AnExpiredCycleDoesNotUseUpAnAttempt(t *testing.T) {
 	require.Equal(t, 1, slack.sent, "the delivery is still pending after the expired passes")
 	require.Equal(t, []notificationMark{{phase: "fire", ok: false, attempts: 1}, {phase: "fire", ok: true, attempts: 2}}, store.marks)
 }
+
+// hangingChannel accepts a send and then never answers it, until the context of
+// the send is done, as a webhook behind a stalled proxy does.
+type hangingChannel struct {
+	name  string
+	hang  bool
+	calls int
+}
+
+func (c *hangingChannel) Name() string { return c.name }
+func (c *hangingChannel) Send(ctx context.Context, _ notify.Message) error {
+	c.calls++
+	if !c.hang {
+		return errors.New("HTTP 503")
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// TestChannelNotifier_AHungChannelUsesUpItsAttempts — a send that starts and
+// then runs into the end of the cycle counts as an attempt. Otherwise a channel
+// that never answers would be kept for every later pass and never marked failed.
+func TestChannelNotifier_AHungChannelUsesUpItsAttempts(t *testing.T) {
+	a := Alert{Key: "k", RuleID: "r", Severity: SeverityWarning, State: StateFiring, StartedAt: time.Unix(1, 0), LastEvalAt: time.Unix(1, 0)}
+	store := &markStore{}
+	hung := &hangingChannel{name: "webhook"}
+	n := NewChannelNotifier(store, hung)
+	retrier := n.(interface{ Retry(context.Context) error })
+	require.Error(t, n.Notify(context.Background(), a))
+
+	hung.hang = true
+	for i := 0; i < maxNotifyAttempts+1; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+		_ = retrier.Retry(ctx)
+		cancel()
+	}
+	require.Equal(t, maxNotifyAttempts, hung.calls, "the sends stop once the attempts are used up")
+	last := store.marks[len(store.marks)-1]
+	require.False(t, last.ok)
+	require.Equal(t, maxNotifyAttempts, last.attempts)
+
+	require.NoError(t, retrier.Retry(context.Background()))
+	require.Equal(t, maxNotifyAttempts, hung.calls, "a delivery out of attempts is not sent again")
+}
