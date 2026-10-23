@@ -27,7 +27,7 @@ function QueryRow({
   instanceId,
   query,
 }: {
-  database?: string
+  database: string | undefined
   instanceId: string
   query: AshTopQuery
 }) {
