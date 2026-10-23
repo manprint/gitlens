@@ -50,6 +50,7 @@ type instanceState struct {
 	role         pgtype.Role
 	clusterID    pgtype.ClusterID
 	timestamp    time.Time
+	spacing      time.Duration        // gap between the last two observations; 0 until there are two
 	orphanAt     time.Time            // when the standby's upstream became unresolvable
 	orphanSeenAt time.Time            // last observation that found the upstream unresolvable
 	orphanedAt   time.Time            // when orphan_standby was last emitted for this standby
@@ -174,6 +175,7 @@ func (e *Engine) Apply(obs Observation) []Event {
 
 	// Update instance state. The cluster index follows the instance's cluster,
 	// which a re-registered instance can change.
+	prevSeen := inst.timestamp
 	if inst.clusterID != obs.ClusterID {
 		delete(e.clusterInstances[inst.clusterID], obs.InstanceID)
 	}
@@ -233,23 +235,23 @@ func (e *Engine) Apply(obs Observation) []Event {
 					Payload:    map[string]any{"duration_seconds": now.Sub(inst.orphanAt).Seconds()},
 				})
 			}
-		} else if now.Sub(inst.orphanSeenAt) >= e.orphanWindow {
-			// An observation without that evidence ends the episode once a whole
-			// window has passed since the last of it. The server drops an edge
-			// whose address stops resolving for a cycle or two, and that gap must
-			// not restart the clock. A window of it means the orphan is over, so
-			// the next one is dated from its own start and not from this one.
+		} else if e.orphanGapEnds(inst, now) {
+			// An observation without that evidence ends the episode once the gap
+			// since the last of it outlasts the instance's own cadence. The server
+			// drops an edge whose address stops resolving for a cycle or two, and
+			// that gap must not restart the clock. A longer gap means the orphan is
+			// over, so the next one is dated from its own start and not from this one.
 			inst.orphanAt = time.Time{}
 			inst.orphanedAt = time.Time{}
 		}
 	}
 
-	if obs.Role == pgtype.RoleUnknown && now.Sub(inst.orphanSeenAt) >= e.orphanWindow {
+	if obs.Role == pgtype.RoleUnknown && e.orphanGapEnds(inst, now) {
 		// Unknown is no evidence either way: the agent reports it when its role
-		// cannot be read this cycle. It holds an episode for a window after the
-		// last evidence, as an edgeless cycle does, and ends it after that. Silence
-		// ends nothing, since the engine cannot tell a quiet instance from a slow
-		// push interval.
+		// cannot be read this cycle. It holds an episode across the cycles without
+		// evidence, as an edgeless cycle does, and ends it after a longer gap.
+		// Silence ends nothing, since the engine cannot tell a quiet instance from
+		// a slow push interval.
 		inst.orphanAt = time.Time{}
 		inst.orphanedAt = time.Time{}
 	}
@@ -261,11 +263,31 @@ func (e *Engine) Apply(obs Observation) []Event {
 		inst.orphanedAt = time.Time{}
 	}
 
+	// The gap that ends with this observation becomes the spacing for the next
+	// one. It is stored only now, so the checks above judged this gap by the
+	// spacing that came before it.
+	if !prevSeen.IsZero() {
+		inst.spacing = now.Sub(prevSeen)
+	}
+
 	// Detect split-brain: 2+ primaries in one cluster, each observed since the
 	// last failover, and no failover within the last 30s.
 	events = append(events, e.detectSplitBrain(obs.ClusterID, now)...)
 
 	return events
+}
+
+// orphanGapEnds reports whether a gap without evidence ends the orphan episode
+// of a standby. The gap since the last evidence must reach both one orphan
+// window and twice the instance's spacing. Twice, because one cycle without evidence
+// spans one spacing: an agent that pushes every 60 to 120 seconds leaves one
+// such cycle between two evidence cycles, and that must not end the episode.
+// The spacing is the one from before the observation being judged. The gap
+// that ends with that observation may be a silence, and a silence must not
+// stretch the very window that judges it. Until an instance has two
+// observations there is no spacing to judge by, so nothing ends its episode.
+func (e *Engine) orphanGapEnds(inst *instanceState, now time.Time) bool {
+	return inst.spacing > 0 && now.Sub(inst.orphanSeenAt) >= max(e.orphanWindow, 2*inst.spacing)
 }
 
 // detectSplitBrain checks for multiple primary instances in one cluster.

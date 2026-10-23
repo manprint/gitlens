@@ -908,9 +908,31 @@ func TestEngine_OrphanEpisodeRestartsAfterUnknownGap(t *testing.T) {
 	}
 }
 
-// TestEngine_OrphanEpisodeRestartsAfterSilentGap — an instance that reports
-// nothing for ten minutes has no evidence for any of them, so its next orphan
-// starts a new episode in the same way as after an unknown gap.
+// TestEngine_OrphanEpisodeSpansSilence — an instance that reports nothing for
+// ten minutes and then shows its orphan again is still the same episode. Silence
+// is not observed, so there is no observation to end the episode on, and the
+// reappearance reports the whole silence in its duration. This is the accepted
+// limit of the orphan rule. A silent gap followed by an edgeless or unknown
+// observation does end the episode, as TestEngine_OrphanEpisodeEndsAfterGap pins.
+func TestEngine_OrphanEpisodeSpansSilence(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+	standby := uuid.New()
+	cID := pgtype.ManualClusterID("cluster1")
+	observe := orphanObserver(e, clk, standby, cID)
+	lowEdge := []Edge{{From: standby, To: uuid.New(), Confidence: "low"}}
+
+	observe(lowEdge, pgtype.RoleStandby) // t=0
+	clk.Advance(600 * time.Second)       // silent for ten minutes
+	got := observe(lowEdge, pgtype.RoleStandby)
+	if len(got) != 1 {
+		t.Fatalf("expected orphan_standby at the reappearance, got %d", len(got))
+	}
+	if d, _ := got[0].Payload["duration_seconds"].(float64); d != 600 {
+		t.Fatalf("orphan duration %v, want 600: silence does not end the episode", got[0].Payload["duration_seconds"])
+	}
+}
+
 // TestEngine_OrphanEpisodeKeepsFiringAtAnyCadence — evidence that arrives every
 // cycle keeps one episode, whatever the cycle. An agent that pushes every 60, 90
 // or 120 seconds leaves a whole orphan window between two of its observations,
@@ -951,6 +973,57 @@ func TestEngine_OrphanEpisodeKeepsFiringAtAnyCadence(t *testing.T) {
 				t.Fatal("orphan_standby never fired")
 			}
 		})
+	}
+}
+
+// TestEngine_OrphanEpisodeKeepsFiringWhenEveryOtherCycleIsSilent — a standby
+// whose edge is dropped on every other cycle, or whose role is unreadable on
+// every other cycle, stays one episode at a 30, 60, 90 or 120 second push
+// interval. Each cycle with evidence fires once a window has passed since the
+// last event, and its duration runs from the start of the episode. The cycles
+// without evidence emit nothing and end nothing.
+func TestEngine_OrphanEpisodeKeepsFiringWhenEveryOtherCycleIsSilent(t *testing.T) {
+	silent := []struct {
+		name string
+		role pgtype.Role
+	}{
+		{"edgeless", pgtype.RoleStandby},
+		{"unknown", pgtype.RoleUnknown},
+	}
+	for _, s := range silent {
+		for _, cadence := range []time.Duration{30, 60, 90, 120} {
+			cadence *= time.Second
+			t.Run(s.name+"/"+cadence.String(), func(t *testing.T) {
+				clk := clock.NewFake(time.Unix(0, 0))
+				e := NewEngine(clk)
+				standby := uuid.New()
+				cID := pgtype.ManualClusterID("cluster1")
+				observe := orphanObserver(e, clk, standby, cID)
+				lowEdge := []Edge{{From: standby, To: uuid.New(), Confidence: "low"}}
+
+				start := clk.Now()
+				lastEvent := start
+				observe(lowEdge, pgtype.RoleStandby) // starts the episode
+				for i := 0; i < 20; i++ {
+					clk.Advance(cadence)
+					if got := observe(nil, s.role); len(got) != 0 {
+						t.Fatalf("at t=%v: a cycle without evidence emitted %d orphan_standby", clk.Now().Sub(start), len(got))
+					}
+					clk.Advance(cadence)
+					got := observe(lowEdge, pgtype.RoleStandby)
+					due := clk.Now().Sub(lastEvent) >= e.orphanWindow
+					if due != (len(got) == 1) {
+						t.Fatalf("at t=%v: orphan_standby emitted %d times, want due=%v", clk.Now().Sub(start), len(got), due)
+					}
+					if len(got) == 1 {
+						lastEvent = clk.Now()
+						if d := got[0].Payload["duration_seconds"]; d != clk.Now().Sub(start).Seconds() {
+							t.Fatalf("at t=%v: duration %v, want the whole episode from its start", clk.Now().Sub(start), d)
+						}
+					}
+				}
+			})
+		}
 	}
 }
 
