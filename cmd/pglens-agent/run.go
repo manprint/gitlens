@@ -117,10 +117,10 @@ func runAgentCommand(args []string) {
 	// never blocks on the network either way, since Pusher.Push runs on its
 	// own ticker, independent of the scheduler's Results() drain below.
 	var mu sync.Mutex
-	pending := map[string][]wire.Result{}        // target name -> results since last flush
-	lastEdgeState := map[string]edgeState{}      // target name -> last actual replication_receiver reading, across cycles with none
-	ashEnabled := map[string]bool{}              // target name -> whether the dedicated ASH sampler actually started for it
-	scheduledDBs := map[string]map[string]bool{} // target name -> databases its database-scoped checks run for
+	pending := map[string][]wire.Result{}                        // target name -> results since last flush
+	lastEdgeState := &edgeStates{byName: map[string]edgeState{}} // target name -> last actual replication_receiver reading, across cycles with none
+	ashEnabled := map[string]bool{}                              // target name -> whether the dedicated ASH sampler actually started for it
+	scheduledDBs := map[string]map[string]bool{}                 // target name -> databases its database-scoped checks run for
 
 	scheduler := agent.NewScheduler(agent.DefaultScheduleOptions())
 	configureChecks(cfg)
@@ -405,7 +405,7 @@ func hostWireResult(s host.Sample, now time.Time) wire.Result {
 	return r
 }
 
-func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mutex, pending map[string][]wire.Result, lastEdgeState map[string]edgeState, ashEnabled map[string]bool, scheduledDBs map[string]map[string]bool, pusher *agent.Pusher) {
+func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mutex, pending map[string][]wire.Result, lastEdgeState *edgeStates, ashEnabled map[string]bool, scheduledDBs map[string]map[string]bool, pusher *agent.Pusher) {
 	mu.Lock()
 	batch := make(map[string][]wire.Result, len(pending))
 	for k, v := range pending {
@@ -482,7 +482,7 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 			cancel()
 			continue
 		}
-		edges := buildTopologyEdges(mgr, results, lastEdgeState) //nolint:contextcheck // buildTopologyEdges->InstanceID: Manager caches this at connect time; the accessor takes no context
+		edges := lastEdgeState.build(mgr.Database(), mgr.InstanceID().String(), results) //nolint:contextcheck // InstanceID: Manager caches this at connect time; the accessor takes no context
 		// Appended after the edges are built so the synthetic result cannot
 		// influence topology derivation.
 		results = append(results, selfResult)
@@ -519,10 +519,18 @@ type edgeState struct {
 	connected bool
 }
 
-// buildTopologyEdges derives this cycle's replication edge for a standby
-// target from the replication_receiver check's own result (sender_host,
-// status), which is the only place that data already exists — no extra
-// query. A currently-streaming/catching-up receiver is a high-confidence
+// edgeStates holds edgeState for every target. The push ticker and the
+// shutdown flush both build edges from it, and they can overlap, so the map is
+// only touched under mu.
+type edgeStates struct {
+	mu     sync.Mutex
+	byName map[string]edgeState
+}
+
+// build derives this cycle's replication edge for a standby target from the
+// replication_receiver check's own result (sender_host, status), which is the
+// only place that data already exists — no extra query. A
+// currently-streaming/catching-up receiver is a high-confidence
 // edge to its sender host; the server resolves that host to an instance_id
 // (internal/server/pipeline.go). Once disconnected, the edge becomes
 // low-confidence but keeps pointing at the last known host — required for
@@ -544,11 +552,11 @@ type edgeState struct {
 // version of this function replaced the whole struct wholesale on any
 // reading, including a genuine disconnect whose empty sender_host wiped out
 // the very host the low-confidence edge needs to point at.
-func buildTopologyEdges(mgr *agent.Manager, results []wire.Result, lastEdgeState map[string]edgeState) []wire.Edge {
-	name := mgr.Database() //nolint:contextcheck // Manager caches this at connect time; the accessor takes no context
-	from := mgr.InstanceID().String()
+func (e *edgeStates) build(name, from string, results []wire.Result) []wire.Edge {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 
-	state := lastEdgeState[name] // zero value {"", false} if never seen before
+	state := e.byName[name] // zero value {"", false} if never seen before
 	for _, r := range results {
 		if r.Check != "replication_receiver" {
 			continue
@@ -572,7 +580,7 @@ func buildTopologyEdges(mgr *agent.Manager, results []wire.Result, lastEdgeState
 			}
 		}
 	}
-	lastEdgeState[name] = state
+	e.byName[name] = state
 
 	if state.host == "" {
 		return nil
