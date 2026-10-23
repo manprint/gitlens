@@ -127,6 +127,9 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	var relationPrunes []store.RelationStatsPrune
 	var factPrunes []store.ObjectFactPrune
 	currentSeries := make(map[uuid.UUID]map[pgtype.SeriesKey]struct{}, len(env.Instances))
+	// Counter baselines move only once the rows that use them have committed
+	// (delta.Batch). One batch per instance, so a rejected instance drops its own.
+	var deltaBatches []*delta.Batch
 
 	// Resolves a wire.Edge.To (an upstream's addr, e.g. "pg-primary") to an
 	// instance_id. Tries the current envelope first (fast path, no query).
@@ -238,6 +241,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		var instFactPrunes []store.ObjectFactPrune
 		var instErr error
 		instSeries := make(map[pgtype.SeriesKey]struct{})
+		instDelta := p.delta.Begin()
 
 		// internal/topology.Engine (6.2, unit-tested at 90.9% coverage) was
 		// never actually called from anywhere in the real server — found
@@ -453,7 +457,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 						Value:      m.Value,
 						StatsReset: r.StatsReset,
 					}
-					pt, ev := p.delta.Observe(obs)
+					pt, ev := instDelta.Observe(obs)
 					if ev != nil {
 						payload := map[string]any{
 							"metric": m.Name,
@@ -640,6 +644,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		}
 		instGeneric = append(instGeneric, selfMetricRows(env, inst, tenantID, cidDB, instUUID, p.clock.Now())...)
 		currentSeries[instUUID] = instSeries
+		deltaBatches = append(deltaBatches, instDelta)
 		// Append per-instance buffers to envelope buffers
 		genericRows = append(genericRows, instGeneric...)
 		ashRows = append(ashRows, instASH...)
@@ -741,6 +746,9 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit tx: %w", err)
+	}
+	for _, batch := range deltaBatches {
+		batch.Commit()
 	}
 	// I-8's own real number: how many distinct counter series each instance is
 	// reporting in this envelope. The delta engine intentionally retains older

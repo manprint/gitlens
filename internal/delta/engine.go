@@ -77,12 +77,17 @@ func New(opts Options) *Engine {
 func (e *Engine) Observe(o Observation) (*Point, *ResetEvent) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	return observe(e.prev, e.maxGap, o)
+}
 
-	prev, ok := e.prev[o.Key]
+// observe applies the rules to one observation, moving the baseline in
+// baselines when a rule says the observation becomes the new baseline.
+func observe(baselines map[pgtype.SeriesKey]state, maxGap time.Duration, o Observation) (*Point, *ResetEvent) {
+	prev, ok := baselines[o.Key]
 	if !ok {
 		// Rule 1: no previous observation
 		cp := copyStatsReset(o.StatsReset)
-		e.prev[o.Key] = state{ts: o.TS, value: o.Value, statsReset: cp}
+		baselines[o.Key] = state{ts: o.TS, value: o.Value, statsReset: cp}
 		return nil, nil
 	}
 
@@ -94,21 +99,21 @@ func (e *Engine) Observe(o Observation) (*Point, *ResetEvent) {
 	// Rule 3: stats_reset changed
 	if o.StatsReset != nil && prev.statsReset != nil && !o.StatsReset.Equal(*prev.statsReset) {
 		cp := copyStatsReset(o.StatsReset)
-		e.prev[o.Key] = state{ts: o.TS, value: o.Value, statsReset: cp}
+		baselines[o.Key] = state{ts: o.TS, value: o.Value, statsReset: cp}
 		return nil, &ResetEvent{Key: o.Key, TS: o.TS, Reason: ResetStatsChanged}
 	}
 
 	// Rule 4: counter went backwards
 	if o.Value < prev.value {
 		cp := copyStatsReset(o.StatsReset)
-		e.prev[o.Key] = state{ts: o.TS, value: o.Value, statsReset: cp}
+		baselines[o.Key] = state{ts: o.TS, value: o.Value, statsReset: cp}
 		return nil, &ResetEvent{Key: o.Key, TS: o.TS, Reason: ResetCounterWentBackwards}
 	}
 
 	// Rule 5: gap exceeds MaxGap
-	if o.TS.Sub(prev.ts) > e.maxGap {
+	if o.TS.Sub(prev.ts) > maxGap {
 		cp := copyStatsReset(o.StatsReset)
-		e.prev[o.Key] = state{ts: o.TS, value: o.Value, statsReset: cp}
+		baselines[o.Key] = state{ts: o.TS, value: o.Value, statsReset: cp}
 		return nil, nil
 	}
 
@@ -116,8 +121,51 @@ func (e *Engine) Observe(o Observation) (*Point, *ResetEvent) {
 	dt := o.TS.Sub(prev.ts).Seconds()
 	rate := (o.Value - prev.value) / dt
 	cp := copyStatsReset(o.StatsReset)
-	e.prev[o.Key] = state{ts: o.TS, value: o.Value, statsReset: cp}
+	baselines[o.Key] = state{ts: o.TS, value: o.Value, statsReset: cp}
 	return &Point{Key: o.Key, TS: o.TS, Rate: rate, Seconds: dt}, nil
+}
+
+// Batch stages the baselines that one envelope moves. Its observations are
+// computed against the engine's state, overlaid with the batch's own earlier
+// observations, but the engine itself changes only on Commit. The caller
+// commits once the transaction that stores the points has committed. An
+// envelope whose transaction rolls back therefore leaves the baselines where
+// they were: its retry is observed as the interval it really is, and is not
+// dropped as a replay of a sample that was never stored.
+type Batch struct {
+	e      *Engine
+	staged map[pgtype.SeriesKey]state
+}
+
+// Begin starts a batch for one envelope.
+func (e *Engine) Begin() *Batch {
+	return &Batch{e: e, staged: make(map[pgtype.SeriesKey]state)}
+}
+
+// Observe is Engine.Observe with the baseline staged in the batch.
+func (b *Batch) Observe(o Observation) (*Point, *ResetEvent) {
+	b.e.mu.Lock()
+	defer b.e.mu.Unlock()
+	if _, ok := b.staged[o.Key]; !ok {
+		if s, ok := b.e.prev[o.Key]; ok {
+			b.staged[o.Key] = s
+		}
+	}
+	return observe(b.staged, b.e.maxGap, o)
+}
+
+// Commit moves the staged baselines into the engine. A key that a later
+// envelope has already moved past the staged sample keeps its newer baseline,
+// so a late commit never steps a baseline backwards.
+func (b *Batch) Commit() {
+	b.e.mu.Lock()
+	defer b.e.mu.Unlock()
+	for k, s := range b.staged {
+		if cur, ok := b.e.prev[k]; ok && !s.ts.After(cur.ts) {
+			continue
+		}
+		b.e.prev[k] = s
+	}
 }
 
 // Evict drops series whose last observation is older than the cutoff and

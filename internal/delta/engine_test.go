@@ -317,3 +317,66 @@ func FuzzEngine_NoNegativeRateNoPanic(f *testing.F) {
 		_ = math.MaxFloat64 // ensure import used
 	})
 }
+
+// A batch whose transaction rolled back must not use up its interval: the
+// retry of the same envelope is observed against the baseline the rollback
+// left in place, so the interval's rate is still stored (XR-08).
+func TestBatch_RolledBackEnvelopeIsObservedAgainOnRetry(t *testing.T) {
+	t.Parallel()
+	e := delta.New(delta.Options{})
+	key := mkKey("pg_xact_commit_total")
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	t1 := t0.Add(60 * time.Second)
+
+	seed := e.Begin()
+	_, _ = seed.Observe(delta.Observation{Key: key, TS: t0, Value: 100})
+	seed.Commit()
+
+	// First attempt: the transaction fails after Observe, so nothing commits.
+	first := e.Begin()
+	pt, _ := first.Observe(delta.Observation{Key: key, TS: t1, Value: 160})
+	require.NotNil(t, pt)
+
+	// The agent re-sends the same envelope.
+	retry := e.Begin()
+	pt, ev := retry.Observe(delta.Observation{Key: key, TS: t1, Value: 160})
+	require.Nil(t, ev)
+	require.NotNil(t, pt, "the retry of a rolled-back envelope must still yield its rate")
+	require.InDelta(t, 1.0, pt.Rate, 1e-9)
+	require.Equal(t, 60.0, pt.Seconds)
+	retry.Commit()
+
+	// Once committed, the same envelope is a replay and is dropped.
+	replay := e.Begin()
+	pt, ev = replay.Observe(delta.Observation{Key: key, TS: t1, Value: 160})
+	require.Nil(t, pt)
+	require.Nil(t, ev)
+}
+
+// A batch that commits after a newer sample of the same key has been committed
+// must not move that key's baseline backwards (XR-08).
+func TestBatch_LateCommitNeverStepsBackwards(t *testing.T) {
+	t.Parallel()
+	e := delta.New(delta.Options{})
+	key := mkKey("pg_xact_commit_total")
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	seed := e.Begin()
+	_, _ = seed.Observe(delta.Observation{Key: key, TS: t0, Value: 100})
+	seed.Commit()
+
+	older := e.Begin()
+	_, _ = older.Observe(delta.Observation{Key: key, TS: t0.Add(60 * time.Second), Value: 160})
+	newer := e.Begin()
+	_, _ = newer.Observe(delta.Observation{Key: key, TS: t0.Add(120 * time.Second), Value: 220})
+	newer.Commit()
+	older.Commit()
+
+	// Measured from the newer baseline: (300-220)/60. From the older one it
+	// would be (300-160)/120 over 120 seconds.
+	probe := e.Begin()
+	pt, _ := probe.Observe(delta.Observation{Key: key, TS: t0.Add(180 * time.Second), Value: 300})
+	require.NotNil(t, pt)
+	require.Equal(t, 60.0, pt.Seconds)
+	require.InDelta(t, 80.0/60.0, pt.Rate, 1e-9)
+}
