@@ -839,16 +839,24 @@ func (a *API) handleMetricsQuery(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid step", err.Error())
 		return
 	}
-	// Point count cap: >10000 points => 422
+	// Point count cap: >10000 points => 422. to.Sub saturates at about 292
+	// years, so a longer range is refused rather than cut short. The count is
+	// compared as a float: at a 1ns step it is past int range, and converting
+	// it first wrapped to a value under the cap.
 	duration := to.Sub(from)
+	if !from.Add(duration).Equal(to) {
+		writeError(w, http.StatusUnprocessableEntity, "range too long", "a range over 292 years cannot be expressed")
+		return
+	}
 	// Use ceil to be conservative: if duration not divisible, need extra bucket.
-	points := int(math.Ceil(float64(duration) / float64(step)))
+	pointCount := math.Ceil(float64(duration) / float64(step))
+	if pointCount > maxMetricPoints {
+		writeError(w, http.StatusUnprocessableEntity, "step too small", fmt.Sprintf("would produce %.0f points, max %d", pointCount, maxMetricPoints))
+		return
+	}
+	points := int(pointCount)
 	if points <= 0 {
 		points = 1
-	}
-	if points > maxMetricPoints {
-		writeError(w, http.StatusUnprocessableEntity, "step too small", fmt.Sprintf("would produce %d points, max %d", points, maxMetricPoints))
-		return
 	}
 
 	// Build bucket timestamps [from, from+step, ... ) < to

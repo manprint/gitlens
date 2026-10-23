@@ -251,6 +251,27 @@ func TestAPI_Metrics_StepTooSmall(t *testing.T) {
 	require.NotEmpty(t, errResp.Error)
 }
 
+// TestAPI_Metrics_OverflowingPointCountIsRefused: a 1ns step over a span near
+// the duration limit is past int range, and the converted count wrapped to a
+// value under the cap, so the query ran unbounded. A one-year step over a
+// span longer than a duration can hold was answered from its first 292 years.
+func TestAPI_Metrics_OverflowingPointCountIsRefused(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, step string }{
+		{"1ns step over the whole span", "1ns"},
+		{"one year step over a span longer than a duration", "8760h"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := chi.NewRouter()
+			NewAPI(nil).RegisterRoutes(r)
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/query?metric=x&instance_id=11111111-1111-1111-1111-111111111111&from=0001-01-01T00:00:00Z&to=9999-12-31T23:59:59Z&step="+tc.step, http.NoBody)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			require.Equal(t, http.StatusUnprocessableEntity, w.Code, w.Body.String())
+		})
+	}
+}
+
 func TestAPI_Metrics_NullForGap(t *testing.T) {
 	t.Parallel()
 	api := NewAPI(nil)
