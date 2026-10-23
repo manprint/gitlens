@@ -173,3 +173,67 @@ func TestForget_NeverDropsFiringState(t *testing.T) {
 	require.Equal(t, TransitionResolved, tr)
 	require.Equal(t, StateResolved, a.State)
 }
+
+// TestUnsampled_SelectsByRuleAndCutoffInKeyOrder — a pass reports the episodes
+// it did not sample, per rule and by how long ago they were last sampled. The
+// result is in key order so that closing them is deterministic.
+func TestUnsampled_SelectsByRuleAndCutoffInKeyOrder(t *testing.T) {
+	e := NewEvaluator()
+	base := time.Unix(10, 0)
+	r := evalRule()
+	other := evalRule()
+	other.ID = "other"
+	e.Step(r, evalSample(base), base)
+	e.Step(other, evalSample(base), base.Add(5*time.Second))
+
+	got := e.Unsampled(func(id string) bool { return id == "r" }, base.Add(time.Second))
+	require.Len(t, got, 1)
+	require.Equal(t, "r", got[0].RuleID)
+	require.Empty(t, e.Unsampled(func(id string) bool { return id == "other" }, base.Add(time.Second)))
+
+	all := e.Unsampled(func(string) bool { return true }, base.Add(10*time.Second))
+	require.Len(t, all, 2)
+	require.Equal(t, "other", all[0].RuleID)
+	require.Equal(t, "r", all[1].RuleID)
+}
+
+// TestEnd_ResolvesAFiringEpisodeAndCancelsAPendingOne — End closes an episode
+// without a sample. A firing episode resolves and returns the resolved alert, a
+// pending one is cancelled silently, and an unknown key is a no-op.
+func TestEnd_ResolvesAFiringEpisodeAndCancelsAPendingOne(t *testing.T) {
+	e := NewEvaluator()
+	n := time.Unix(1, 0)
+	fired := n.Add(2 * time.Minute)
+	r := evalRule()
+	e.Step(r, evalSample(n), n)
+	_, tr := e.Step(r, evalSample(fired), fired)
+	require.Equal(t, TransitionFired, tr)
+
+	closed, tr := e.End(r.ID+"/11111111-1111-1111-1111-111111111111/", fired.Add(time.Second))
+	require.Equal(t, TransitionResolved, tr)
+	require.Equal(t, StateResolved, closed.State)
+	require.NotNil(t, closed.ResolvedAt)
+
+	_, tr = e.End(r.ID+"/11111111-1111-1111-1111-111111111111/", fired.Add(2*time.Second))
+	require.Equal(t, TransitionNone, tr, "an episode that is already closed is a no-op")
+
+	p := evalRule()
+	p.ID = "pending"
+	pending, _ := e.Step(p, evalSample(n), n)
+	closed, tr = e.End(pending.Key, n)
+	require.Nil(t, closed)
+	require.Equal(t, TransitionCancelled, tr)
+}
+
+// TestForget_KeepsAPendingEpisodeThatIsStillSampled — staleness is judged by
+// the last pass that sampled an episode, not by when it started.
+func TestForget_KeepsAPendingEpisodeThatIsStillSampled(t *testing.T) {
+	e := NewEvaluator()
+	r := evalRule()
+	r.For = 3 * time.Hour
+	start := time.Unix(1, 0)
+	e.Step(r, evalSample(start), start)
+	later := start.Add(2 * time.Hour)
+	e.Step(r, evalSample(later), later)
+	require.Equal(t, 0, e.Forget(later.Add(-time.Hour)))
+}

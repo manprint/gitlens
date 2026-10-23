@@ -366,3 +366,82 @@ func (s *eventSource) Samples(ctx context.Context, r Rule, now time.Time) ([]Sam
 	}
 	return out, rows.Err()
 }
+
+// instanceStaleAfter is how long an instance may go without reporting before
+// the server counts it as down. It is the staleness threshold of
+// internal/server (three expected intervals of 30 seconds). The two must agree,
+// because a spell clears on the same test the staleness check uses to open it.
+const instanceStaleAfter = 90 * time.Second
+
+// Cleared reports which of the episodes of a spell event rule have cleared. A
+// spell's own event says nothing once it has aged out, so the answer comes from
+// the state the event describes. Each episode is checked on its own. An
+// episode whose subject cannot be identified has not cleared.
+func (s *eventSource) Cleared(ctx context.Context, r Rule, episodes []Alert) ([]Alert, error) {
+	if s.db == nil {
+		return nil, nil
+	}
+	var out []Alert
+	for _, a := range episodes {
+		cleared, err := s.isCleared(ctx, r, a)
+		if err != nil {
+			return nil, err
+		}
+		if cleared {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func (s *eventSource) isCleared(ctx context.Context, r Rule, a Alert) (bool, error) {
+	var query string
+	var args []any
+	switch r.EventType {
+	case "instance_unreachable":
+		// The instance is reachable again when it reports within the staleness
+		// window. This reads the instance's own state rather than the
+		// instance_reachable event, which the server writes only on a transition
+		// it sees: an instance that comes back while the server restarts gets no
+		// such event, and its spell would otherwise stay open. A revoked agent
+		// never answers again, so its instance is cleared too: it is no longer
+		// monitored, as the agent_down rule treats it.
+		if a.InstanceID == nil {
+			return false, nil
+		}
+		query = `SELECT EXISTS (SELECT 1 FROM instances i WHERE i.instance_id = $1 AND (i.last_seen >= now() - make_interval(secs => $2) OR EXISTS (SELECT 1 FROM agents a WHERE a.agent_id = i.agent_id AND a.revoked_at IS NOT NULL)))`
+		args = []any{*a.InstanceID, instanceStaleAfter.Seconds()}
+	case "no_primary_in_cluster":
+		// The same test the server's staleness check applies: a cluster has a
+		// primary while one of its primaries reports within the staleness
+		// window.
+		if a.ClusterID == nil {
+			return false, nil
+		}
+		query = `SELECT EXISTS (SELECT 1 FROM instances WHERE cluster_id = $1 AND role = 'primary' AND last_seen >= now() - make_interval(secs => $2))`
+		args = []any{*a.ClusterID, instanceStaleAfter.Seconds()}
+	case "slot_inactive":
+		// The episode is per instance. It has cleared when none of the
+		// instance's slots reported inactive in the last five minutes, the
+		// window the server's slot state reads.
+		if a.InstanceID == nil {
+			return false, nil
+		}
+		query = `SELECT NOT EXISTS (SELECT 1 FROM (SELECT DISTINCT ON (slot_name) slot_active FROM metrics_replication WHERE instance_id = $1 AND slot_name <> '' AND slot_active IS NOT NULL AND ts >= now() - interval '5 minutes' AND ` + store.ReplicationSourceSQL + ` = 'slot' ORDER BY slot_name, ts DESC) latest WHERE NOT latest.slot_active)`
+		args = []any{*a.InstanceID}
+	default:
+		return false, nil
+	}
+	rows, err := s.db.Query(ctx, query, args...)
+	if err != nil {
+		return false, fmt.Errorf("query cleared %s: %w", r.EventType, err)
+	}
+	defer rows.Close()
+	var cleared bool
+	if rows.Next() {
+		if err := rows.Scan(&cleared); err != nil {
+			return false, err
+		}
+	}
+	return cleared, rows.Err()
+}

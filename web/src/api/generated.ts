@@ -1919,6 +1919,8 @@ export interface operations {
             /** @description Alerts, capped by the server at 500 entries. */
             200: {
                 headers: {
+                    /** @description Set to true when more than 500 alerts matched and the list was cut to the first 500. */
+                    "X-Result-Truncated"?: "true";
                     [name: string]: unknown;
                 };
                 content: {

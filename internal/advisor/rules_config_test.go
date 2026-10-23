@@ -94,6 +94,7 @@ func TestPackC_FiringAndQuietMatrix(t *testing.T) {
 		{"archive.stalled", func() *Snapshot {
 			s := configBase()
 			s.Metrics["pg_archiver_last_archived_age_seconds"] = map[string]float64{"": 3601}
+			s.Metrics["pg_archiver_ready_files"] = map[string]float64{"": 2}
 			return s
 		}(), configBase()},
 		{"backup.no_basebackup_seen", func() *Snapshot {
@@ -239,6 +240,20 @@ func TestPackC_ArchiveStalledNeedsWaitingSegments(t *testing.T) {
 	f := ruleByID(t, "archive.stalled").Evaluate(s)
 	require.Len(t, f, 1)
 	require.Equal(t, 3.0, f[0].Evidence["ready_files"])
+}
+
+// TestPackC_ArchiveStalledWithoutReadyFilesIsDegraded: an idle archiver with
+// no pg_monitor, so no count of waiting segments, is not a critical stall.
+// The rule says it cannot tell, and it does not resolve an open stall either.
+func TestPackC_ArchiveStalledWithoutReadyFilesIsDegraded(t *testing.T) {
+	s := configBase()
+	s.Metrics["pg_archiver_last_archived_age_seconds"] = map[string]float64{"": 86400}
+	f := ruleByID(t, "archive.stalled").Evaluate(s)
+	require.Len(t, f, 1)
+	require.Equal(t, StateDegraded, f[0].State)
+	require.Equal(t, "missing input: pg_archiver_ready_files", f[0].DegradedReason)
+	require.True(t, degradedAsWhole(f), "the engine keeps the rule's open findings instead of resolving them")
+	assertRuleContract(t, ruleByID(t, "archive.stalled"), s)
 }
 
 // TestPackC_WalKeepSizeTrustsSlotsAndSmallLag: a standby with a slot, or a

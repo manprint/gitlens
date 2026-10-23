@@ -4,6 +4,8 @@ package alert
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,14 +14,6 @@ import (
 	"github.com/manprint/pglens/test/pgtest"
 	"github.com/stretchr/testify/require"
 )
-
-func setupAlertStoreTables(t *testing.T, ctx context.Context, pool interface {
-	Exec(context.Context, string, ...any) (any, error)
-}) {
-	// Kept as a separate test-local schema so the persistence contract is tested
-	// against PostgreSQL without depending on unrelated Timescale fixtures.
-	t.Helper()
-}
 
 func TestINTALERT003_Through007_AlertStorePersistence(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
@@ -90,5 +84,185 @@ TRUNCATE alert_rules, alerts, notifications, silences RESTART IDENTITY`)
 		require.NoError(t, err)
 		require.Len(t, silences, 1)
 		require.Equal(t, activeID, silences[0].ID)
+	})
+}
+
+// TestINTALERT013_ActiveStateFilters — the default listing keeps resolved
+// alerts out, while an explicit resolved state and the all-states flag return
+// them. The default used to be combined with every explicit state, so
+// state=resolved always came back empty and state=all never showed history.
+func TestINTALERT013_ActiveStateFilters(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		pool := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		ctx := context.Background()
+		_, err := pool.Exec(ctx, `
+CREATE TABLE IF NOT EXISTS alerts (alert_key text NOT NULL, tenant_id text NOT NULL DEFAULT 'default', rule_id text NOT NULL, severity text NOT NULL, state text NOT NULL, cluster_id bigint, instance_id uuid, datname text, labels jsonb NOT NULL, value double precision, summary text NOT NULL, started_at timestamptz NOT NULL, last_eval_at timestamptz NOT NULL, resolved_at timestamptz, PRIMARY KEY (tenant_id, alert_key, started_at));
+TRUNCATE alerts RESTART IDENTITY`)
+		require.NoError(t, err)
+
+		st := NewPgStore(pool)
+		now := time.Now().UTC().Truncate(time.Microsecond)
+		resolvedAt := now
+		for i, state := range []State{StatePending, StateFiring, StateResolved} {
+			a := Alert{Key: "k/" + string(state), RuleID: "r", Severity: SeverityWarning, State: state, Summary: "s", StartedAt: now.Add(time.Duration(i) * time.Minute), LastEvalAt: now.Add(time.Duration(i) * time.Minute), Labels: map[string]string{}}
+			if state == StateResolved {
+				a.ResolvedAt = &resolvedAt
+			}
+			require.NoError(t, st.Upsert(ctx, a))
+		}
+		keys := func(rows []Alert) []string {
+			out := make([]string, 0, len(rows))
+			for _, r := range rows {
+				out = append(out, r.Key)
+			}
+			return out
+		}
+
+		got, err := st.Active(ctx, Filter{})
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{"k/pending", "k/firing"}, keys(got))
+
+		got, err = st.Active(ctx, Filter{State: StateResolved})
+		require.NoError(t, err)
+		require.Equal(t, []string{"k/resolved"}, keys(got))
+
+		got, err = st.Active(ctx, Filter{State: StateFiring})
+		require.NoError(t, err)
+		require.Equal(t, []string{"k/firing"}, keys(got))
+
+		got, err = st.Active(ctx, Filter{IncludeResolved: true})
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{"k/pending", "k/firing", "k/resolved"}, keys(got))
+
+		// The cap keeps the newest rows, so a long history is bounded in SQL.
+		got, err = st.Active(ctx, Filter{IncludeResolved: true, Limit: 2})
+		require.NoError(t, err)
+		require.Equal(t, []string{"k/resolved", "k/firing"}, keys(got))
+	})
+}
+
+// historyPurgeSchema is the alert schema of the migration, as the purge
+// tests need it, emptied before each test.
+const historyPurgeSchema = `
+CREATE TABLE IF NOT EXISTS alerts (alert_key text NOT NULL, tenant_id text NOT NULL DEFAULT 'default', rule_id text NOT NULL, severity text NOT NULL, state text NOT NULL, cluster_id bigint, instance_id uuid, datname text, labels jsonb NOT NULL, value double precision, summary text NOT NULL, started_at timestamptz NOT NULL, last_eval_at timestamptz NOT NULL, resolved_at timestamptz, PRIMARY KEY (tenant_id, alert_key, started_at));
+CREATE TABLE IF NOT EXISTS notifications (notification_id bigserial PRIMARY KEY, tenant_id text NOT NULL DEFAULT 'default', alert_key text NOT NULL, started_at timestamptz NOT NULL, channel text NOT NULL, phase text NOT NULL, sent_at timestamptz NOT NULL DEFAULT now(), ok boolean NOT NULL, attempts integer NOT NULL, error text);
+CREATE UNIQUE INDEX IF NOT EXISTS alert_store_notifications_once ON notifications (tenant_id, alert_key, started_at, channel, phase);
+CREATE TABLE IF NOT EXISTS silences (silence_id uuid PRIMARY KEY, tenant_id text NOT NULL DEFAULT 'default', matchers jsonb NOT NULL, reason text NOT NULL, starts_at timestamptz NOT NULL, ends_at timestamptz NOT NULL);
+TRUNCATE alerts, notifications, silences RESTART IDENTITY`
+
+// TestINTALERT016_HistoryPurgeKeepsOpenEpisodes: the purge removes resolved
+// alerts, deliveries and silences older than the cutoff, and keeps a firing
+// episode with its deliveries however old it is, since its dedup depends on them.
+func TestINTALERT016_HistoryPurgeKeepsOpenEpisodes(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		pool := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		ctx := context.Background()
+		_, err := pool.Exec(ctx, historyPurgeSchema)
+		require.NoError(t, err)
+
+		now := time.Now().UTC().Truncate(time.Microsecond)
+		old := now.Add(-100 * 24 * time.Hour)
+		recent := now.Add(-24 * time.Hour)
+		ancient := now.Add(-200 * 24 * time.Hour)
+		cutoff := now.Add(-historyRetention)
+		// Each episode has a start, a state and, when resolved, the time it resolved.
+		episodes := []struct {
+			key       string
+			started   time.Time
+			resolved  *time.Time
+			sentAt    time.Time
+			wantAlert bool
+		}{
+			{"old", old.Add(-time.Hour), &old, old, false},
+			{"recent", recent.Add(-time.Hour), &recent, recent, true},
+			{"open", ancient, nil, ancient, true},
+		}
+		st := NewPgStore(pool)
+		for _, ep := range episodes {
+			state := StateResolved
+			if ep.resolved == nil {
+				state = StateFiring
+			}
+			a := Alert{Key: ep.key, RuleID: "r", Severity: SeverityWarning, State: state, Summary: "s", StartedAt: ep.started, LastEvalAt: ep.started, ResolvedAt: ep.resolved, Labels: map[string]string{}}
+			require.NoError(t, st.Upsert(ctx, a))
+			_, err := pool.Exec(ctx, `INSERT INTO notifications (alert_key, started_at, channel, phase, sent_at, ok, attempts) VALUES ($1,$2,'slack','fire',$3,true,1)`, ep.key+"/"+ep.started.Format(time.RFC3339Nano), ep.started, ep.sentAt)
+			require.NoError(t, err)
+		}
+		_, err = pool.Exec(ctx, `INSERT INTO silences (silence_id, matchers, reason, starts_at, ends_at) VALUES
+			(gen_random_uuid(), '[]', 'expired long ago', $1, $2),
+			(gen_random_uuid(), '[]', 'expired recently', $3, $4),
+			(gen_random_uuid(), '[]', 'still active', $3, $5)`, old.Add(-time.Hour), old, recent.Add(-time.Hour), recent, now.Add(time.Hour))
+		require.NoError(t, err)
+
+		require.NoError(t, st.(purger).Purge(ctx, cutoff))
+
+		var keys []string
+		rows, err := pool.Query(ctx, `SELECT alert_key FROM alerts ORDER BY alert_key`)
+		require.NoError(t, err)
+		for rows.Next() {
+			var k string
+			require.NoError(t, rows.Scan(&k))
+			keys = append(keys, k)
+		}
+		require.NoError(t, rows.Err())
+		rows.Close()
+		require.Equal(t, []string{"open", "recent"}, keys, "the resolved alert past the cutoff goes; the firing one never does")
+
+		var deliveries []string
+		rows, err = pool.Query(ctx, `SELECT alert_key FROM notifications ORDER BY alert_key`)
+		require.NoError(t, err)
+		for rows.Next() {
+			var k string
+			require.NoError(t, rows.Scan(&k))
+			deliveries = append(deliveries, k)
+		}
+		require.NoError(t, rows.Err())
+		rows.Close()
+		require.Len(t, deliveries, 2, "the delivery of the open episode and of the recent one stay")
+		require.True(t, strings.HasPrefix(deliveries[0], "open/") && strings.HasPrefix(deliveries[1], "recent/"), deliveries)
+
+		var silences int
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM silences`).Scan(&silences))
+		require.Equal(t, 2, silences, "the silence that expired long ago goes; the recent and the active one stay")
+	})
+}
+
+// TestINTALERT017_PurgeRunsInBatches: a backlog larger than one batch is removed
+// in full, and the batches leave the open episode and its delivery alone.
+func TestINTALERT017_PurgeRunsInBatches(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		pool := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		ctx := context.Background()
+		_, err := pool.Exec(ctx, historyPurgeSchema)
+		require.NoError(t, err)
+
+		now := time.Now().UTC().Truncate(time.Microsecond)
+		old := now.Add(-100 * 24 * time.Hour)
+		st := &pgStore{pool: pool, purgeBatch: 2}
+		const backlog = 5
+		for i := range backlog {
+			// Not old itself: the open episode below starts at old, and the guard matches on the start.
+			at := old.Add(-time.Hour + time.Duration(i)*time.Minute)
+			key := fmt.Sprintf("done-%d", i)
+			a := Alert{Key: key, RuleID: "r", Severity: SeverityWarning, State: StateResolved, Summary: "s", StartedAt: at, LastEvalAt: at, ResolvedAt: &at, Labels: map[string]string{}}
+			require.NoError(t, st.Upsert(ctx, a))
+			_, err := pool.Exec(ctx, `INSERT INTO notifications (alert_key, started_at, channel, phase, sent_at, ok, attempts) VALUES ($1,$2,'slack','fire',$3,true,1)`, key+"/"+at.Format(time.RFC3339Nano), at, at)
+			require.NoError(t, err)
+		}
+		open := Alert{Key: "open", RuleID: "r", Severity: SeverityWarning, State: StateFiring, Summary: "s", StartedAt: old, LastEvalAt: old, Labels: map[string]string{}}
+		require.NoError(t, st.Upsert(ctx, open))
+		_, err = pool.Exec(ctx, `INSERT INTO notifications (alert_key, started_at, channel, phase, sent_at, ok, attempts) VALUES ('open/x',$1,'slack','fire',$1,true,1)`, old)
+		require.NoError(t, err)
+
+		require.NoError(t, st.Purge(ctx, now.Add(-historyRetention)))
+
+		var alerts, deliveries int
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM alerts`).Scan(&alerts))
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM notifications`).Scan(&deliveries))
+		require.Equal(t, 1, alerts, "every resolved alert of the backlog goes, in batches of two")
+		require.Equal(t, 1, deliveries, "every delivery of the backlog goes, and the open episode's stays")
 	})
 }

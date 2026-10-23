@@ -53,7 +53,10 @@ type Finding struct {
 
 // ID is stable across evaluations for the same rule and subject. An object
 // is qualified by its database, since several databases of one instance can
-// hold a relation or a statement of the same name.
+// hold a relation or a statement of the same name. The instance leads the
+// subject: the findings table is keyed by this ID alone, and two replicas of
+// one database can report the same index. Without the instance the second
+// replica's finding would overwrite the first one's row, instance included.
 func (f Finding) ID() string {
 	subject := f.ObjectName
 	if subject != "" && f.Datname != "" {
@@ -62,8 +65,12 @@ func (f Finding) ID() string {
 	if subject == "" {
 		subject = f.Datname
 	}
-	if subject == "" && f.InstanceID != nil {
-		subject = f.InstanceID.String()
+	if f.InstanceID != nil {
+		if subject == "" {
+			subject = f.InstanceID.String()
+		} else {
+			subject = f.InstanceID.String() + "/" + subject
+		}
 	}
 	if subject == "" && f.ClusterID != nil {
 		subject = "cluster:" + formatInt(*f.ClusterID)

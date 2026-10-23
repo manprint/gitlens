@@ -34,7 +34,7 @@ func (s Silence) Validate() error {
 			return fmt.Errorf("matcher name is empty")
 		}
 		if m.IsRegex {
-			if _, e := regexp.Compile("^(?:" + m.Value + ")$"); e != nil {
+			if _, e := anchored(m.Value); e != nil {
 				return fmt.Errorf("invalid matcher regex: %w", e)
 			}
 		}
@@ -53,7 +53,7 @@ func (s Silence) Matches(a Alert) bool {
 		}
 		ok := v == m.Value
 		if m.IsRegex {
-			re, e := regexp.Compile("^(?:" + m.Value + ")$")
+			re, e := anchored(m.Value)
 			ok = e == nil && re.MatchString(v)
 		}
 		if m.Negate {
@@ -64,6 +64,18 @@ func (s Silence) Matches(a Alert) bool {
 		}
 	}
 	return true
+}
+
+// anchored compiles a matcher value so that it must match the whole label.
+// The value is compiled on its own first: an unbalanced parenthesis would
+// close the anchoring group early, so 'nope)|(.*' used to become an
+// alternation that matched every label. Silences stored before that check
+// existed go through here too, so a value that breaks out matches nothing.
+func anchored(v string) (*regexp.Regexp, error) {
+	if _, err := regexp.Compile(v); err != nil {
+		return nil, err
+	}
+	return regexp.Compile("^(?:" + v + ")$")
 }
 func reserved(k string, a Alert) string {
 	switch k {

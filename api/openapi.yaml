@@ -1490,6 +1490,10 @@ paths:
       responses:
         '200':
           description: Alerts, capped by the server at 500 entries.
+          headers:
+            X-Result-Truncated:
+              description: Set to true when more than 500 alerts matched and the list was cut to the first 500.
+              schema: { type: string, enum: ['true'] }
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/Alert' } }

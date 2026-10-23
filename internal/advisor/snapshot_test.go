@@ -65,7 +65,8 @@ func TestLoadSnapshot_PopulatesBoundedSections(t *testing.T) {
 			AddRow("setting", "archive_timeout", []byte(`{"unit":"s","context":"sighup"}`), "60", now, "", nil).
 			AddRow("setting", "reset_to_default", []byte(`{}`), "stale", now.Add(-2*time.Hour), "", nil).
 			AddRow("backup", "basebackup_running", []byte(`{}`), "1", backupAt, "", nil).
-			AddRow("index_def", "public.orders_customer_idx", []byte(`{"def_hash":"hash-new"}`), "CREATE INDEX", now, "app", nil).
+			AddRow("index_def", "public.orders_customer_idx", []byte(`{"def_hash":"hash-other"}`), "CREATE INDEX orders_customer_idx ON public.orders(other_id)", now, "other", nil).
+			AddRow("index_def", "public.orders_customer_idx", []byte(`{"def_hash":"hash-new"}`), "CREATE INDEX orders_customer_idx ON public.orders(customer_id)", now, "app", nil).
 			AddRow("check_skip", "stat_statements", []byte(`{}`), "permission denied", now, "", nil).
 			AddRow("trigger", "public.orders.audit", []byte(`{"state":"disabled"}`), "", now, "app", []byte(`{"function":"public.audit"}`)).
 			AddRow("trigger", "public.orders.audit", []byte(`{"state":"enabled"}`), "", now, "other", nil).
@@ -78,10 +79,6 @@ func TestLoadSnapshot_PopulatesBoundedSections(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT DISTINCT ON (datname, schemaname, indexrelname)")).WithArgs(instanceID, now.Add(-15*time.Minute)).
 		WillReturnRows(pgxmock.NewRows([]string{"datname", "schemaname", "relname", "indexrelname", "peak_scan_rate", "index_bytes", "is_primary", "is_unique", "is_valid", "def_hash", "history_days"}).
 			AddRow("app", "public", "orders", "orders_customer_idx", 0.25, 2048.0, false, true, true, "hash-old", 2.5))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT datname, key, COALESCE(value_text")).WithArgs(instanceID).
-		WillReturnRows(pgxmock.NewRows([]string{"datname", "key", "value_text", "def_hash"}).
-			AddRow("other", "public.orders_customer_idx", "CREATE INDEX orders_customer_idx ON public.orders(other_id)", "hash-other").
-			AddRow("app", "public.orders_customer_idx", "CREATE INDEX orders_customer_idx ON public.orders(customer_id)", "hash-new"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT datname, schemaname, relname, indexrelname, object_kind, real_bytes")).WithArgs(instanceID, now.Add(-7*24*time.Hour), now.Add(-13*time.Hour)).
 		WillReturnRows(pgxmock.NewRows([]string{"datname", "schemaname", "relname", "indexrelname", "object_kind", "real_bytes", "bloat_ratio", "method"}).
 			AddRow("app", "public", "orders", "", "table", 4096.0, 0.25, "estimate").

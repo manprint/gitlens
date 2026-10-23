@@ -36,6 +36,7 @@ type alertAPITestStore struct {
 	alerts  []alert.Alert
 	rules   []alert.Rule
 	filters []alert.Filter
+	filter  alert.Filter // the filter of the last listing
 }
 
 func (s *alertAPITestStore) Rules(context.Context) ([]alert.Rule, error) { return s.rules, nil }
@@ -51,6 +52,11 @@ func (s *alertAPITestStore) MarkNotification(context.Context, string, string, st
 }
 func (s *alertAPITestStore) Active(_ context.Context, f alert.Filter) ([]alert.Alert, error) {
 	s.filters = append(s.filters, f)
+	s.filter = f
+	// Like the store, it returns no more rows than the query limit.
+	if f.Limit > 0 && len(s.alerts) > f.Limit {
+		return s.alerts[:f.Limit], nil
+	}
 	return s.alerts, nil
 }
 
@@ -66,7 +72,7 @@ func TestAlerts_DefaultFilterIsPendingAndFiring(t *testing.T) {
 	require.Len(t, got, 2)
 	// The default must send no state filter: a pending filter asked the store for
 	// pending rows only, and the engine never persists those, so it returned [].
-	require.Equal(t, []alert.Filter{{}}, st.filters)
+	require.Equal(t, []alert.Filter{{Limit: 501}}, st.filters)
 }
 
 // TestAlerts_InstanceIDMustBeAUUID: a malformed instance_id is the client's
@@ -86,13 +92,36 @@ func TestAlerts_InstanceIDMustBeAUUID(t *testing.T) {
 	r = httptest.NewRecorder()
 	alertRouter(newAlertAPIForTest(nil, st)).ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?instance_id="+iid, nil))
 	require.Equal(t, http.StatusOK, r.Code, r.Body.String())
-	require.Equal(t, []alert.Filter{{InstanceID: iid}}, st.filters)
+	require.Equal(t, []alert.Filter{{InstanceID: iid, Limit: 501}}, st.filters)
 }
 
 func TestAlerts_RejectsUnknownState(t *testing.T) {
 	r := httptest.NewRecorder()
 	alertRouter(newAlertAPIForTest(nil, &alertAPITestStore{})).ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?state=bogus", nil))
 	require.Equal(t, 400, r.Code)
+}
+
+// TestAlerts_FilterLiftsResolvedOnlyWhenAsked: the store leaves resolved alerts
+// out unless the listing names them, and every listing is capped in the query.
+func TestAlerts_FilterLiftsResolvedOnlyWhenAsked(t *testing.T) {
+	for _, tc := range []struct {
+		query    string
+		state    alert.State
+		resolved bool
+	}{
+		{"", "", false},
+		{"?state=firing", alert.StateFiring, false},
+		{"?state=resolved", alert.StateResolved, false},
+		{"?state=all", "", true},
+	} {
+		st := &alertAPITestStore{}
+		r := httptest.NewRecorder()
+		alertRouter(newAlertAPIForTest(nil, st)).ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/api/v1/alerts"+tc.query, nil))
+		require.Equal(t, 200, r.Code, tc.query)
+		require.Equal(t, tc.state, st.filter.State, tc.query)
+		require.Equal(t, tc.resolved, st.filter.IncludeResolved, tc.query)
+		require.Equal(t, 501, st.filter.Limit, tc.query)
+	}
 }
 
 func TestAlertRules_Tier0IsRejectedWithConflict(t *testing.T) {
@@ -280,4 +309,28 @@ func TestAlerts_DuplicateSilenceIDIs409(t *testing.T) {
 	api := newAlertAPIForTest(pool, nil)
 	w := serveAlert(t, api, http.MethodPost, "/api/v1/silences", `{"silence_id":"`+uuid.NewString()+`","matchers":[{"name":"rule_id","value":"custom"}],"reason":"maintenance","starts_at":"2026-08-29T00:00:00Z","ends_at":"2026-08-30T00:00:00Z"}`)
 	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+}
+
+// TestAlerts_ListingSaysWhenRowsAreLeftOut — a listing is cut at 500 rows, and
+// the response says so, so that a full page is not taken for the whole set.
+func TestAlerts_ListingSaysWhenRowsAreLeftOut(t *testing.T) {
+	for _, tc := range []struct {
+		rows      int
+		truncated bool
+	}{
+		{rows: 500, truncated: false},
+		{rows: 501, truncated: true},
+	} {
+		st := &alertAPITestStore{}
+		for i := 0; i < tc.rows; i++ {
+			st.alerts = append(st.alerts, alert.Alert{Key: uuid.NewString(), RuleID: "r", State: alert.StateFiring, StartedAt: time.Unix(1, 0), LastEvalAt: time.Unix(1, 0)})
+		}
+		r := httptest.NewRecorder()
+		alertRouter(newAlertAPIForTest(nil, st)).ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?state=firing", nil))
+		require.Equal(t, 200, r.Code)
+		var got []alertJSON
+		require.NoError(t, json.Unmarshal(r.Body.Bytes(), &got))
+		require.Len(t, got, min(tc.rows, 500))
+		require.Equal(t, tc.truncated, r.Header().Get("X-Result-Truncated") == "true", "%d rows", tc.rows)
+	}
 }

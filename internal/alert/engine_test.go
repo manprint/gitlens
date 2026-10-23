@@ -65,6 +65,55 @@ func TestTick_NotifiesOnFire(t *testing.T) {
 	require.Len(t, notifier.alerts, 1)
 }
 
+// purgeStore is an engineStore that also keeps history, and records the
+// cutoffs that history was purged to. A non-nil err makes the purge fail.
+type purgeStore struct {
+	*engineStore
+	cutoffs []time.Time
+	err     error
+}
+
+func (s *purgeStore) Purge(_ context.Context, before time.Time) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.cutoffs = append(s.cutoffs, before)
+	return nil
+}
+
+// TestTick_PurgesHistoryOncePerInterval: the first pass purges the history
+// past its retention, the passes before purgeInterval has elapsed do not, and
+// a purge that fails is not tried again before the interval has elapsed.
+func TestTick_PurgesHistoryOncePerInterval(t *testing.T) {
+	t0 := time.Unix(1_000_000, 0)
+	clk := clock.NewFake(t0)
+	store := &purgeStore{engineStore: &engineStore{}}
+	e := NewEngine(nil, clk, store, &engineNotifier{}, []Source{engineSource{kind: "metric"}})
+	ctx := context.Background()
+
+	require.NoError(t, e.Tick(ctx))
+	require.Equal(t, []time.Time{t0.Add(-historyRetention)}, store.cutoffs)
+
+	clk.Advance(30 * time.Second)
+	require.NoError(t, e.Tick(ctx))
+	require.Len(t, store.cutoffs, 1, "a pass inside the interval does not purge")
+
+	clk.Advance(purgeInterval)
+	require.NoError(t, e.Tick(ctx))
+	require.Equal(t, t0.Add(30*time.Second+purgeInterval).Add(-historyRetention), store.cutoffs[1])
+
+	store.err = errors.New("database is down")
+	clk.Advance(purgeInterval)
+	require.ErrorContains(t, e.Tick(ctx), "purge alert history")
+	store.err = nil
+	clk.Advance(time.Second)
+	require.NoError(t, e.Tick(ctx))
+	require.Len(t, store.cutoffs, 2, "a failed purge is not retried before the interval has elapsed")
+	clk.Advance(purgeInterval)
+	require.NoError(t, e.Tick(ctx))
+	require.Len(t, store.cutoffs, 3, "and it is retried once the interval has elapsed")
+}
+
 func TestTick_RestoresPersistedFiringAlert(t *testing.T) {
 	now := time.Unix(100, 0)
 	id := uuid.New()
@@ -123,13 +172,421 @@ func TestTick_ForgetsStaleEvaluatorState(t *testing.T) {
 // episode. It used to: an alert that had been firing for over an hour lost
 // its state on every tick, so it was re-discovered as a new episode (re-fired
 // and re-notified, StartedAt reset) and never emitted a resolved transition.
+// The rule is still configured but no source observes it, so the pass has
+// nothing to say about the episode and it must survive. The pass that does
+// observe the rule closes an episode it did not sample only after the grace
+// period (TestTick_ClosesAMetricEpisodeOnlyAfterItsSubjectIsGone).
 func TestTick_KeepsFiringEvaluatorState(t *testing.T) {
-	e := NewEngine(nil, clock.NewFake(time.Unix(0, 0)), nil, nil, nil)
-	r := Rule{ID: "r", Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1}
+	r := Rule{ID: "r", Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1}
+	e := NewEngine(nil, clock.NewFake(time.Unix(0, 0)), &engineStore{rules: []Rule{r}}, nil, nil)
 	_, tr := e.eval.Step(r, Sample{Value: 2, TS: time.Unix(-7200, 0)}, time.Unix(-7200, 0))
 	require.Equal(t, TransitionFired, tr)
 	require.NoError(t, e.Tick(context.Background()))
 	require.Len(t, e.eval.states, 1)
+}
+
+// lifecycleSource serves samples for the rules a test names and can fail, so a
+// single rule's episodes can be driven through several passes. cleared answers
+// the spell check; with no answer function, nothing has cleared.
+type lifecycleSource struct {
+	kind    string
+	samples func(Rule) []Sample
+	err     error
+	cleared func(Rule, []Alert) ([]Alert, error)
+	asked   []Alert
+}
+
+func (s *lifecycleSource) Kind() string { return s.kind }
+
+func (s *lifecycleSource) Samples(_ context.Context, r Rule, _ time.Time) ([]Sample, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.samples == nil {
+		return nil, nil
+	}
+	return s.samples(r), nil
+}
+
+func (s *lifecycleSource) Cleared(_ context.Context, r Rule, episodes []Alert) ([]Alert, error) {
+	s.asked = append([]Alert(nil), episodes...)
+	if s.cleared == nil {
+		return nil, nil
+	}
+	return s.cleared(r, episodes)
+}
+
+// TestTick_ClosesAMetricEpisodeOnlyAfterItsSubjectIsGone — a metric episode
+// whose subject stops being sampled resolves once the lookback has passed since
+// the last sample, not sooner. A collector pause shorter than the window must
+// not close a real incident.
+func TestTick_ClosesAMetricEpisodeOnlyAfterItsSubjectIsGone(t *testing.T) {
+	start := time.Unix(1000, 0)
+	clk := clock.NewFake(start)
+	rule := Rule{ID: "custom", Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1, Summary: "x"}
+	present := true
+	src := &lifecycleSource{kind: "metric", samples: func(r Rule) []Sample {
+		if r.ID != rule.ID || !present {
+			return nil
+		}
+		return []Sample{{Value: 2, TS: start}}
+	}}
+	store, notifier := &engineStore{rules: []Rule{rule}}, &engineNotifier{}
+	e := NewEngineWithInterval(nil, clk, 30*time.Second, store, notifier, []Source{src})
+	ctx := context.Background()
+
+	require.NoError(t, e.Tick(ctx))
+	require.Len(t, notifier.alerts, 1)
+
+	present = false
+	for i := 0; i < 20; i++ { // up to ten minutes after the last sample: inside metricGrace
+		clk.Advance(30 * time.Second)
+		require.NoError(t, e.Tick(ctx))
+	}
+	require.Len(t, notifier.alerts, 1, "a subject inside the grace period must not close")
+
+	clk.Advance(30 * time.Second) // ten and a half minutes after the last sample
+	require.NoError(t, e.Tick(ctx))
+	require.Len(t, notifier.alerts, 2)
+	require.Equal(t, StateResolved, notifier.alerts[1].State)
+	require.NotNil(t, notifier.alerts[1].ResolvedAt)
+}
+
+// TestTick_ClosesTheEpisodeOfARemovedRuleAtOnce — a disabled or deleted rule
+// has no later sample to close its episodes, so they close on the next pass.
+func TestTick_ClosesTheEpisodeOfARemovedRuleAtOnce(t *testing.T) {
+	start := time.Unix(1000, 0)
+	clk := clock.NewFake(start)
+	rule := Rule{ID: "custom", Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1, Summary: "x"}
+	src := &lifecycleSource{kind: "metric", samples: func(r Rule) []Sample {
+		if r.ID != rule.ID {
+			return nil
+		}
+		return []Sample{{Value: 2, TS: start}}
+	}}
+	store, notifier := &engineStore{rules: []Rule{rule}}, &engineNotifier{}
+	e := NewEngineWithInterval(nil, clk, 30*time.Second, store, notifier, []Source{src})
+	ctx := context.Background()
+
+	require.NoError(t, e.Tick(ctx))
+	require.Len(t, notifier.alerts, 1)
+
+	store.rules = nil // the rule is disabled
+	clk.Advance(30 * time.Second)
+	require.NoError(t, e.Tick(ctx))
+	require.Len(t, notifier.alerts, 2)
+	require.Equal(t, StateResolved, notifier.alerts[1].State)
+}
+
+// TestTick_AFailedSourceClosesNothing — a source that errors has not observed
+// its subjects, so silence from it says nothing. A database blip must not close
+// every open episode of the rule.
+func TestTick_AFailedSourceClosesNothing(t *testing.T) {
+	start := time.Unix(1000, 0)
+	clk := clock.NewFake(start)
+	rule := Rule{ID: "custom", Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1, Summary: "x"}
+	src := &lifecycleSource{kind: "metric", samples: func(r Rule) []Sample {
+		if r.ID != rule.ID {
+			return nil
+		}
+		return []Sample{{Value: 2, TS: start}}
+	}}
+	store, notifier := &engineStore{rules: []Rule{rule}}, &engineNotifier{}
+	e := NewEngineWithInterval(nil, clk, 30*time.Second, store, notifier, []Source{src})
+	ctx := context.Background()
+
+	require.NoError(t, e.Tick(ctx))
+	require.Len(t, notifier.alerts, 1)
+
+	src.err = errors.New("statement timeout")
+	for i := 0; i < 5; i++ {
+		clk.Advance(30 * time.Second)
+		require.Error(t, e.Tick(ctx))
+	}
+	require.Len(t, notifier.alerts, 1, "an unobserved rule must not resolve its episodes")
+}
+
+// TestTick_AFailedSourceKeepsAPulseOpen — a pulse closes on the first complete
+// pass that finds no occurrence of it, so a pass whose source failed must not
+// be taken for one. Otherwise a single failed query resolves the episode, and
+// the next pass that samples it fires the same failover again.
+func TestTick_AFailedSourceKeepsAPulseOpen(t *testing.T) {
+	start := time.Unix(1000, 0)
+	clk := clock.NewFake(start)
+	cluster := int64(7)
+	occurrences := []time.Time{start}
+	src := &lifecycleSource{kind: "event", samples: windowedFailovers(clk, &cluster, &occurrences)}
+	store, notifier := &engineStore{}, &engineNotifier{}
+	e := NewEngineWithInterval(nil, clk, 30*time.Second, store, notifier, []Source{src})
+	ctx := context.Background()
+
+	require.NoError(t, e.Tick(ctx))
+	require.Len(t, notifier.alerts, 1)
+
+	src.err = errors.New("statement timeout")
+	for i := 0; i < 5; i++ { // two and a half minutes: the occurrence leaves the window
+		clk.Advance(30 * time.Second)
+		require.Error(t, e.Tick(ctx))
+	}
+	require.Len(t, notifier.alerts, 1, "a failed sample must not resolve the pulse")
+
+	src.err = nil
+	require.NoError(t, e.Tick(ctx))
+	require.Len(t, notifier.alerts, 2, "the first observed pass without the occurrence resolves it")
+	require.Equal(t, StateResolved, notifier.alerts[1].State)
+}
+
+// TestTick_APartlyFailedKindClosesNothing — a rule served by two sources of one
+// kind is observed only when every source answered. The episode here was
+// sampled by the source that now fails; the other source answers with nothing,
+// and that alone must not close the episode.
+func TestTick_APartlyFailedKindClosesNothing(t *testing.T) {
+	start := time.Unix(1000, 0)
+	clk := clock.NewFake(start)
+	rule := Rule{ID: "custom", Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1, Summary: "x"}
+	owner := &lifecycleSource{kind: "metric", samples: func(r Rule) []Sample {
+		if r.ID != rule.ID {
+			return nil
+		}
+		return []Sample{{Value: 2, TS: start}}
+	}}
+	other := &lifecycleSource{kind: "metric"}
+	store, notifier := &engineStore{rules: []Rule{rule}}, &engineNotifier{}
+	e := NewEngineWithInterval(nil, clk, 30*time.Second, store, notifier, []Source{owner, other})
+	ctx := context.Background()
+
+	require.NoError(t, e.Tick(ctx))
+	require.Len(t, notifier.alerts, 1)
+
+	owner.err = errors.New("statement timeout")
+	for i := 0; i < 5; i++ {
+		clk.Advance(30 * time.Second)
+		require.Error(t, e.Tick(ctx))
+	}
+	require.Len(t, notifier.alerts, 1, "an episode only the failed source samples must not resolve while another source answers")
+}
+
+// TestTick_APartlyFailedPulseClosesNothing — a pulse served by two event sources
+// closes only on a pass that every source answered. Here the source that holds
+// the occurrence fails and the other answers with nothing. Only the guard on
+// failed sources keeps the pulse open, since the answering source alone would
+// otherwise close it.
+func TestTick_APartlyFailedPulseClosesNothing(t *testing.T) {
+	start := time.Unix(1000, 0)
+	clk := clock.NewFake(start)
+	cluster := int64(7)
+	occurrences := []time.Time{start}
+	owner := &lifecycleSource{kind: "event", samples: windowedFailovers(clk, &cluster, &occurrences)}
+	other := &lifecycleSource{kind: "event"}
+	store, notifier := &engineStore{}, &engineNotifier{}
+	e := NewEngineWithInterval(nil, clk, 30*time.Second, store, notifier, []Source{owner, other})
+	ctx := context.Background()
+
+	require.NoError(t, e.Tick(ctx))
+	require.Len(t, notifier.alerts, 1)
+
+	owner.err = errors.New("statement timeout")
+	for i := 0; i < 5; i++ { // two and a half minutes: the occurrence leaves the window
+		clk.Advance(30 * time.Second)
+		require.Error(t, e.Tick(ctx))
+	}
+	require.Len(t, notifier.alerts, 1, "a pulse must not resolve on a pass that one of its sources failed")
+}
+
+// TestTick_SpellEpisodeStaysOpenUntilItsSubjectClears — instance_unreachable is
+// emitted once per outage. When its event ages out the outage may well still
+// be going, so the episode closes only when the source confirms that the
+// instance answers again.
+func TestTick_SpellEpisodeStaysOpenUntilItsSubjectClears(t *testing.T) {
+	start := time.Unix(1000, 0)
+	clk := clock.NewFake(start)
+	id := uuid.New()
+	present, cleared := true, false
+	src := &lifecycleSource{kind: "event", samples: func(r Rule) []Sample {
+		if r.ID != "instance_unreachable" || !present {
+			return nil
+		}
+		return []Sample{{InstanceID: &id, TS: start}}
+	}, cleared: func(_ Rule, episodes []Alert) ([]Alert, error) {
+		if !cleared {
+			return nil, nil
+		}
+		return episodes, nil
+	}}
+	store, notifier := &engineStore{}, &engineNotifier{}
+	e := NewEngineWithInterval(nil, clk, 30*time.Second, store, notifier, []Source{src})
+	ctx := context.Background()
+
+	require.NoError(t, e.Tick(ctx)) // instance_unreachable has no For: it fires at once
+	require.Len(t, notifier.alerts, 1)
+
+	present = false
+	for i := 0; i < 6; i++ { // three minutes: the event is long out of the window
+		clk.Advance(30 * time.Second)
+		require.NoError(t, e.Tick(ctx))
+	}
+	require.Len(t, notifier.alerts, 1, "the outage is still going")
+	require.Len(t, src.asked, 1)
+	require.Equal(t, id, *src.asked[0].InstanceID)
+
+	cleared = true
+	clk.Advance(30 * time.Second)
+	require.NoError(t, e.Tick(ctx))
+	require.Len(t, notifier.alerts, 2)
+	require.Equal(t, StateResolved, notifier.alerts[1].State)
+}
+
+// TestTick_ASpellCheckThatFailsClosesNothing — when the source cannot say
+// whether the condition cleared, the episode stays open rather than closing on
+// a guess.
+func TestTick_ASpellCheckThatFailsClosesNothing(t *testing.T) {
+	start := time.Unix(1000, 0)
+	clk := clock.NewFake(start)
+	id := uuid.New()
+	present := true
+	src := &lifecycleSource{kind: "event", samples: func(r Rule) []Sample {
+		if r.ID != "instance_unreachable" || !present {
+			return nil
+		}
+		return []Sample{{InstanceID: &id, TS: start}}
+	}, cleared: func(Rule, []Alert) ([]Alert, error) {
+		return nil, errors.New("events unavailable")
+	}}
+	store, notifier := &engineStore{}, &engineNotifier{}
+	e := NewEngineWithInterval(nil, clk, 30*time.Second, store, notifier, []Source{src})
+	ctx := context.Background()
+
+	require.NoError(t, e.Tick(ctx))
+	present = false
+	for i := 0; i < 6; i++ {
+		clk.Advance(30 * time.Second)
+		err := e.Tick(ctx)
+		if i >= 4 { // two and a half minutes after the last sample, once it has left the lookback
+			require.Error(t, err)
+		}
+	}
+	require.Len(t, notifier.alerts, 1, "an unconfirmed spell must stay open")
+}
+
+// TestTick_APulseEpisodeClosesAfterQuietWindowAndNotifiesAgain — failover_detected
+// is a pulse: its episode closes once no failover has been seen for the
+// lookback window, so a later failover is a new episode and notifies again.
+// windowedFailovers serves each occurrence the way the event table does: an
+// occurrence is returned while the lookback still holds it.
+func windowedFailovers(clk clock.Clock, cluster *int64, occurrences *[]time.Time) func(Rule) []Sample {
+	return func(r Rule) []Sample {
+		if r.ID != "failover_detected" {
+			return nil
+		}
+		var out []Sample
+		from := clk.Now().Add(-lookback(30 * time.Second))
+		for _, ts := range *occurrences {
+			if !ts.Before(from) && !ts.After(clk.Now()) {
+				out = append(out, Sample{ClusterID: cluster, TS: ts})
+			}
+		}
+		return out
+	}
+}
+
+// TestTick_APulseNotifiesEachOccurrenceOutsideTheLookback pins the merge window
+// of a pulse. An episode closes on the first pass whose window holds no
+// occurrence of its key, so two occurrences share one episode while the gap
+// between them is at most the lookback plus one pass, and an occurrence after
+// that opens an episode and notifies again.
+func TestTick_APulseNotifiesEachOccurrenceOutsideTheLookback(t *testing.T) {
+	cases := []struct {
+		gap  time.Duration
+		want int // fire and resolve per episode
+	}{
+		{gap: 150 * time.Second, want: 2},
+		{gap: 180 * time.Second, want: 4},
+	}
+	for _, tc := range cases {
+		t.Run(tc.gap.String(), func(t *testing.T) {
+			start := time.Unix(1000, 0)
+			clk := clock.NewFake(start)
+			cluster := int64(7)
+			occurrences := []time.Time{start, start.Add(tc.gap)}
+			src := &lifecycleSource{kind: "event", samples: windowedFailovers(clk, &cluster, &occurrences)}
+			store, notifier := &engineStore{}, &engineNotifier{}
+			e := NewEngineWithInterval(nil, clk, 30*time.Second, store, notifier, []Source{src})
+			ctx := context.Background()
+
+			for i := 0; i < 20; i++ { // ten minutes, one pass each
+				require.NoError(t, e.Tick(ctx))
+				clk.Advance(30 * time.Second)
+			}
+			require.Len(t, notifier.alerts, tc.want)
+			for i, a := range notifier.alerts {
+				wantState := StateFiring
+				if i%2 == 1 {
+					wantState = StateResolved
+				}
+				require.Equal(t, wantState, a.State, "transition %d", i)
+			}
+		})
+	}
+}
+
+// TestTick_AMetricPauseShorterThanTheGraceKeepsItsEpisodes is a collector pause
+// of five minutes. The former two-minute grace closed both episodes during it:
+// the firing one resolved and fired again, and the pending one was cancelled
+// and started over. With the grace, the firing episode stays open and the
+// pending one completes its For on time.
+func TestTick_AMetricPauseShorterThanTheGraceKeepsItsEpisodes(t *testing.T) {
+	start := time.Unix(1000, 0)
+	clk := clock.NewFake(start)
+	firing := Rule{ID: "firing", Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1, Summary: "x"}
+	pending := firing
+	pending.ID, pending.For = "pending", 8*time.Minute
+	src := &lifecycleSource{kind: "metric", samples: func(r Rule) []Sample {
+		paused := !clk.Now().Before(start.Add(2*time.Minute)) && clk.Now().Before(start.Add(7*time.Minute))
+		if paused || (r.ID != firing.ID && r.ID != pending.ID) {
+			return nil
+		}
+		return []Sample{{Value: 2, TS: clk.Now()}}
+	}}
+	store, notifier := &engineStore{rules: []Rule{firing, pending}}, &engineNotifier{}
+	e := NewEngineWithInterval(nil, clk, 30*time.Second, store, notifier, []Source{src})
+	ctx := context.Background()
+
+	for i := 0; i < 19; i++ { // nine minutes
+		require.NoError(t, e.Tick(ctx))
+		clk.Advance(30 * time.Second)
+	}
+	require.Len(t, notifier.alerts, 2)
+	for _, a := range notifier.alerts {
+		require.Equal(t, StateFiring, a.State, "no episode may resolve during the pause: %s", a.RuleID)
+	}
+	require.Equal(t, "firing", notifier.alerts[0].RuleID)
+	require.Equal(t, "pending", notifier.alerts[1].RuleID)
+	require.Equal(t, start, notifier.alerts[1].StartedAt, "the pending episode kept its first sample, so it fired at eight minutes")
+}
+
+// TestTick_ARestoredEpisodeGetsAFullGracePeriod — a newly elected engine
+// restores the episodes it has not yet seen sampled. They get the same grace
+// period as any other, measured from the restore.
+func TestTick_ARestoredEpisodeGetsAFullGracePeriod(t *testing.T) {
+	start := time.Unix(1000, 0)
+	clk := clock.NewFake(start)
+	rule := Rule{ID: "custom", Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1, Summary: "x"}
+	stored := Alert{Key: "custom//", RuleID: rule.ID, Severity: rule.Severity, State: StateFiring, StartedAt: start.Add(-time.Minute), LastEvalAt: start.Add(-time.Second), Summary: rule.Summary}
+	store, notifier := &engineStore{rules: []Rule{rule}, alerts: []Alert{stored}}, &engineNotifier{}
+	e := NewEngineWithInterval(nil, clk, 30*time.Second, store, notifier, []Source{&lifecycleSource{kind: "metric"}})
+	ctx := context.Background()
+
+	require.NoError(t, e.Tick(ctx))
+	require.Empty(t, notifier.alerts, "a restored episode must not close on the first pass")
+
+	clk.Advance(10 * time.Minute)
+	require.NoError(t, e.Tick(ctx))
+	require.Empty(t, notifier.alerts, "a restored episode gets the full metric grace")
+
+	clk.Advance(30 * time.Second)
+	require.NoError(t, e.Tick(ctx))
+	require.Len(t, notifier.alerts, 1)
+	require.Equal(t, StateResolved, notifier.alerts[0].State)
 }
 
 func TestStop_IsIdempotent(t *testing.T) {
@@ -187,23 +644,227 @@ func TestTick_OneBrokenRuleDoesNotStopTheCycle(t *testing.T) {
 	require.Contains(t, fired, healthy.ID, "the healthy rule must still be able to fire")
 }
 
-// failingStore fails every Upsert.
-type failingStore struct{ engineStore }
+// flakyStore fails its next failures writes and then behaves like engineStore.
+type flakyStore struct {
+	engineStore
+	failures int
+}
 
-func (s *failingStore) Upsert(context.Context, Alert) error { return errors.New("write failed") }
+func (s *flakyStore) Upsert(ctx context.Context, a Alert) error {
+	if s.failures > 0 {
+		s.failures--
+		return errors.New("write failed")
+	}
+	return s.engineStore.Upsert(ctx, a)
+}
 
-// TestTick_PersistFailureIsReportedAndCycleContinues — a single alert failing
-// to persist must not stop the remaining alerts from being evaluated and
-// notified.
-func TestTick_PersistFailureIsReportedAndCycleContinues(t *testing.T) {
+func notifiedCount(alerts []Alert, ruleID string) int {
+	n := 0
+	for _, a := range alerts {
+		if a.RuleID == ruleID {
+			n++
+		}
+	}
+	return n
+}
+
+// TestTick_AFailedFireWriteIsNotifiedOnceOnceItIsPersisted — a fire whose write
+// fails must not be notified, since nothing on record says it happened. It is
+// derived again on the next pass, written and notified exactly once. The other
+// alert of the same pass is not held back by it.
+func TestTick_AFailedFireWriteIsNotifiedOnceOnceItIsPersisted(t *testing.T) {
 	now := time.Unix(100, 0)
-	rule := Rule{ID: "custom", Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1, Summary: "x"}
-	store := &failingStore{}
-	store.rules = []Rule{rule}
+	first := Rule{ID: "first", Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1, Summary: "x"}
+	second := first
+	second.ID = "second"
+	store := &flakyStore{failures: 1}
+	store.rules = []Rule{first, second}
 	notifier := &engineNotifier{}
 	e := NewEngine(nil, clock.NewFake(now), store, notifier, []Source{engineSource{kind: "metric", samples: []Sample{{Value: 2, TS: now}}}})
 
 	err := e.Tick(context.Background())
-	require.ErrorContains(t, err, "persist alert")
-	require.Len(t, notifier.alerts, 1, "a persistence failure must not swallow the notification")
+	require.ErrorContains(t, err, "persist alert first")
+	require.Equal(t, 0, notifiedCount(notifier.alerts, "first"), "an unpersisted fire must not be notified")
+	require.Equal(t, 1, notifiedCount(notifier.alerts, "second"), "the other alert must still be notified")
+
+	require.NoError(t, e.Tick(context.Background()))
+	require.Equal(t, 1, notifiedCount(notifier.alerts, "first"))
+	require.Equal(t, 1, notifiedCount(notifier.alerts, "second"))
+	require.Equal(t, 1, notifiedCount(store.alerts, "first"), "the fire must be on record once")
+}
+
+// TestTick_AFailedResolveWriteIsNotifiedOnceOnceItIsPersisted — a resolve whose
+// write fails must not be notified, and the episode stays open in the evaluator
+// so that the next pass resolves it again.
+func TestTick_AFailedResolveWriteIsNotifiedOnceOnceItIsPersisted(t *testing.T) {
+	now := time.Unix(100, 0)
+	rule := Rule{ID: "custom", Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1, Summary: "x"}
+	store := &flakyStore{}
+	store.rules = []Rule{rule}
+	notifier := &engineNotifier{}
+	e := NewEngine(nil, clock.NewFake(now), store, notifier, []Source{engineSource{kind: "metric", samples: []Sample{{Value: 2, TS: now}}}})
+	require.NoError(t, e.Tick(context.Background()))
+	require.Len(t, notifier.alerts, 1)
+
+	e.sources = []Source{engineSource{kind: "metric", samples: []Sample{{Value: 0, TS: now.Add(time.Second)}}}}
+	store.failures = 1
+	require.ErrorContains(t, e.Tick(context.Background()), "persist alert custom")
+	require.Len(t, notifier.alerts, 1, "an unpersisted resolve must not be notified")
+
+	require.NoError(t, e.Tick(context.Background()))
+	require.Len(t, notifier.alerts, 2)
+	require.Equal(t, StateResolved, notifier.alerts[1].State)
+	require.Equal(t, StateResolved, store.alerts[len(store.alerts)-1].State)
+}
+
+// clockSource observes the rule "custom" on every pass, as a live source does:
+// each sample carries the pass time the engine asked for.
+type clockSource struct {
+	kind  string
+	value float64
+}
+
+func (s clockSource) Kind() string { return s.kind }
+func (s clockSource) Samples(_ context.Context, r Rule, now time.Time) ([]Sample, error) {
+	if r.ID != "custom" {
+		return nil, nil
+	}
+	return []Sample{{Value: s.value, TS: now}}, nil
+}
+
+// TestTick_ALongPendingEpisodeFiresAfterItsFor — a condition that has to hold
+// for longer than an hour must still fire. The pending state used to be
+// forgotten an hour after its first sample while the condition was still
+// being observed, so the For timer restarted every hour and never completed.
+func TestTick_ALongPendingEpisodeFiresAfterItsFor(t *testing.T) {
+	clk := clock.NewFake(time.Unix(100, 0))
+	rule := Rule{ID: "custom", Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1, For: 2 * time.Hour, Summary: "x"}
+	store, notifier := &engineStore{rules: []Rule{rule}}, &engineNotifier{}
+	e := NewEngineWithInterval(nil, clk, 30*time.Second, store, notifier, []Source{clockSource{kind: "metric", value: 2}})
+	for i := 0; i < 5*120; i++ {
+		require.NoError(t, e.Tick(context.Background()))
+		clk.Advance(30 * time.Second)
+	}
+	require.Len(t, notifier.alerts, 1)
+	require.Equal(t, StateFiring, notifier.alerts[0].State)
+}
+
+// TestTick_AFiringEpisodeRefreshesItsStoredRow — while an alert fires, its row
+// shows the value and the time of the last pass. Both used to stay at the
+// values of the pass that fired it, so an alert still firing hours later looked
+// unevaluated. Refreshing the row must not notify again.
+func TestTick_AFiringEpisodeRefreshesItsStoredRow(t *testing.T) {
+	start := time.Unix(100, 0)
+	clk := clock.NewFake(start)
+	rule := Rule{ID: "custom", Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1, Summary: "x"}
+	store, notifier := &engineStore{rules: []Rule{rule}}, &engineNotifier{}
+	e := NewEngine(nil, clk, store, notifier, []Source{clockSource{kind: "metric", value: 2}})
+	require.NoError(t, e.Tick(context.Background()))
+
+	clk.Advance(time.Hour)
+	e.sources = []Source{clockSource{kind: "metric", value: 5}}
+	require.NoError(t, e.Tick(context.Background()))
+
+	last := store.alerts[len(store.alerts)-1]
+	require.Equal(t, StateFiring, last.State)
+	require.Equal(t, 5.0, last.Value)
+	require.True(t, last.LastEvalAt.Equal(start.Add(time.Hour)), "the stored row must carry the last pass, got %s", last.LastEvalAt)
+	require.Len(t, notifier.alerts, 1)
+}
+
+// passSource reports the samples of each pass, computed from the pass time.
+type passSource func(now time.Time) []Sample
+
+func (s passSource) Kind() string { return "metric" }
+func (s passSource) Samples(_ context.Context, r Rule, now time.Time) ([]Sample, error) {
+	if r.ID != "custom" {
+		return nil, nil
+	}
+	return s(now), nil
+}
+
+// TestTick_DatabasesOfOneInstanceKeepTheirOwnEpisodes — an instance-scoped rule
+// on a per-database metric, such as db.deadlock_rate, gets one sample per
+// database. They used to share one episode, so a database below the threshold
+// cancelled the episode of the database above it, whatever the order of the
+// samples.
+func TestTick_DatabasesOfOneInstanceKeepTheirOwnEpisodes(t *testing.T) {
+	rates := map[string]float64{"app": 0.5, "batch": 0.05}
+	for _, tc := range []struct {
+		name  string
+		order []string
+	}{
+		{"hot database first", []string{"app", "batch"}},
+		{"cool database first", []string{"batch", "app"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			id := uuid.New()
+			clk := clock.NewFake(time.Unix(100, 0))
+			rule := Rule{ID: "custom", Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "pg_deadlocks_total", Comparator: GT, Threshold: 0.1, For: 5 * time.Minute, Summary: "x"}
+			store, notifier := &engineStore{rules: []Rule{rule}}, &engineNotifier{}
+			source := passSource(func(now time.Time) []Sample {
+				var out []Sample
+				for _, db := range tc.order {
+					out = append(out, Sample{InstanceID: &id, Datname: db, Value: rates[db], TS: now})
+				}
+				return out
+			})
+			e := NewEngineWithInterval(nil, clk, 30*time.Second, store, notifier, []Source{source})
+			for i := 0; i < 12; i++ {
+				require.NoError(t, e.Tick(context.Background()))
+				clk.Advance(30 * time.Second)
+			}
+			require.Len(t, notifier.alerts, 1)
+			require.Equal(t, "app", notifier.alerts[0].Datname)
+			require.Equal(t, StateFiring, notifier.alerts[0].State)
+		})
+	}
+}
+
+// failingUpsert refuses the first write of one alert key and accepts the rest.
+type failingUpsert struct {
+	*engineStore
+	key    string
+	failed bool
+}
+
+func (s *failingUpsert) Upsert(ctx context.Context, a Alert) error {
+	if a.Key == s.key && !s.failed {
+		s.failed = true
+		return errors.New("write failed")
+	}
+	return s.engineStore.Upsert(ctx, a)
+}
+
+// TestTick_APersistFailureDoesNotStopTheOtherAlerts — when one of two alerts
+// fails to persist, the other is still evaluated, persisted and notified in the
+// same pass, and the failed one is written and notified on the next pass.
+func TestTick_APersistFailureDoesNotStopTheOtherAlerts(t *testing.T) {
+	now := time.Unix(1000, 0)
+	clk := clock.NewFake(now)
+	alpha := Rule{ID: "alpha", Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1, Summary: "x"}
+	bravo := alpha
+	bravo.ID = "bravo"
+	src := &lifecycleSource{kind: "metric", samples: func(r Rule) []Sample {
+		if r.ID != alpha.ID && r.ID != bravo.ID {
+			return nil
+		}
+		return []Sample{{Value: 2, TS: now}}
+	}}
+	base := &engineStore{rules: []Rule{alpha, bravo}}
+	store := &failingUpsert{engineStore: base, key: Key(alpha, Sample{Value: 2, TS: now})}
+	notifier := &engineNotifier{}
+	e := NewEngineWithInterval(nil, clk, 30*time.Second, store, notifier, []Source{src})
+	ctx := context.Background()
+
+	require.Error(t, e.Tick(ctx), "the failed write is reported")
+	require.Len(t, notifier.alerts, 1)
+	require.Equal(t, "bravo", notifier.alerts[0].RuleID)
+	require.Len(t, base.alerts, 1, "only the other alert reached the table")
+
+	clk.Advance(30 * time.Second)
+	require.NoError(t, e.Tick(ctx))
+	require.Len(t, notifier.alerts, 2)
+	require.Equal(t, "alpha", notifier.alerts[1].RuleID)
+	require.Equal(t, StateFiring, notifier.alerts[1].State)
 }

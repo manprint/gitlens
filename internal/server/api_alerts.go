@@ -154,7 +154,11 @@ func (a *AlertAPI) listAlerts(w http.ResponseWriter, r *http.Request) {
 	// pending episodes yet.
 	if state := r.URL.Query().Get("state"); state == "all" {
 		f.State = ""
+		f.IncludeResolved = true
 	}
+	// The history of resolved alerts grows without bound, so the row cap is
+	// applied in the query rather than after reading every row.
+	f.Limit = 501
 	if f.State != "" && f.State != alert.StatePending && f.State != alert.StateFiring && f.State != alert.StateResolved {
 		writeError(w, http.StatusBadRequest, "invalid state", "state must be pending, firing, resolved, or all")
 		return
@@ -189,6 +193,9 @@ func (a *AlertAPI) listAlerts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(rows) > 500 {
+		// A client that reads a full page as the whole set would miss the rows
+		// past it, so the header says the listing was cut short.
+		w.Header().Set("X-Result-Truncated", "true")
 		rows = rows[:500]
 	}
 	out := make([]alertJSON, 0, len(rows))

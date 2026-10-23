@@ -20,6 +20,17 @@ import (
 
 const defaultAdvisorInterval = 15 * time.Minute
 
+// advisorStepBudget bounds one step of a pass: the leader check, the list of
+// instances, the evaluation of one instance, or the purge. The pass as a
+// whole has no deadline, see Run.
+const advisorStepBudget = 30 * time.Second
+
+// unseenInstanceGrace is how long an instance may go unseen before its
+// findings are resolved. It is well beyond the hour an instance must be seen
+// within to be evaluated at all: an agent that pauses keeps its findings, and
+// a decommissioned instance does not keep them for ever.
+const unseenInstanceGrace = 24 * time.Hour
+
 type snapshotLoader func(context.Context, uuid.UUID, time.Time) (*Snapshot, error)
 
 // Engine evaluates registered advisor rules and persists current findings.
@@ -41,6 +52,8 @@ type Engine struct {
 	// leaderOverride keeps leader/follower behavior deterministic in unit tests.
 	// Production always uses the PostgreSQL advisory lock below.
 	leaderOverride func(context.Context) (bool, error)
+	// stepBudget is advisorStepBudget unless a test shrinks it.
+	stepBudget time.Duration
 }
 
 func NewEngine(pool *pgxpool.Pool, clk clock.Clock, interval time.Duration) *Engine {
@@ -68,7 +81,7 @@ func NewEngineWithStore(pool *pgxpool.Pool, clk clock.Clock, interval time.Durat
 }
 
 func newEngine(pool *pgxpool.Pool, clk clock.Clock, interval time.Duration, st Store, loader snapshotLoader) *Engine {
-	e := &Engine{pool: pool, clock: clk, interval: interval, store: st, load: loader, stopCh: make(chan struct{}), doneCh: make(chan struct{})}
+	e := &Engine{pool: pool, clock: clk, interval: interval, store: st, load: loader, stepBudget: advisorStepBudget, stopCh: make(chan struct{}), doneCh: make(chan struct{})}
 	if e.load == nil {
 		e.load = func(ctx context.Context, id uuid.UUID, now time.Time) (*Snapshot, error) {
 			return LoadSnapshot(ctx, pool, id, now)
@@ -94,11 +107,9 @@ func (e *Engine) Start(ctx context.Context) {
 				case <-e.stopCh:
 					return
 				case <-t.C():
-					runCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-					if err := e.Run(runCtx); err != nil {
+					if err := e.Run(ctx); err != nil {
 						log.Printf("advisor engine: %v", err)
 					}
-					cancel()
 				}
 			}
 		}()
@@ -189,11 +200,19 @@ func (e *Engine) releaseLeaderConn() {
 }
 
 // Run executes one complete pass. A follower returns without touching findings.
+//
+// Every step has its own budget and the pass has none. A deadline over the
+// whole pass used to expire during the first instances of a slow fleet, and
+// the pass then stopped there: the instances after them and the purge were
+// skipped, on every run, since the list is in a fixed order.
 func (e *Engine) Run(ctx context.Context) error {
 	if e.store == nil {
 		return nil
 	}
-	if err := e.ensureLeader(ctx); err != nil {
+	stepCtx, cancel := e.step(ctx)
+	err := e.ensureLeader(stepCtx)
+	cancel()
+	if err != nil {
 		return err
 	}
 	e.mu.Lock()
@@ -203,7 +222,9 @@ func (e *Engine) Run(ctx context.Context) error {
 		return nil
 	}
 	now := e.clock.Now()
-	ids, err := e.store.ActiveInstances(ctx, now.Add(-time.Hour))
+	stepCtx, cancel = e.step(ctx)
+	ids, err := e.store.ActiveInstances(stepCtx, now.Add(-time.Hour))
+	cancel()
 	if err != nil {
 		return err
 	}
@@ -215,17 +236,49 @@ func (e *Engine) Run(ctx context.Context) error {
 	// stable.
 	var errs []error
 	for _, id := range ids {
-		if err := e.runInstance(ctx, id, now); err != nil {
+		if err := e.runInstanceWithin(ctx, id, now); err != nil {
 			errs = append(errs, err)
 		}
-		if ctx.Err() != nil {
+		// A shutdown ends the pass between instances. Stop waits for the pass
+		// in progress, so it must not wait for every instance of the fleet.
+		if ctx.Err() != nil || e.stopRequested() {
 			return errors.Join(append(errs, ctx.Err())...)
 		}
 	}
-	if err := e.store.PurgeResolved(ctx, now.Add(-90*24*time.Hour)); err != nil {
+	stepCtx, cancel = e.step(ctx)
+	if err := e.store.ResolveUnseen(stepCtx, now.Add(-unseenInstanceGrace), now); err != nil {
 		errs = append(errs, err)
 	}
+	cancel()
+	stepCtx, cancel = e.step(ctx)
+	if err := e.store.PurgeResolved(stepCtx, now.Add(-90*24*time.Hour)); err != nil {
+		errs = append(errs, err)
+	}
+	cancel()
 	return errors.Join(errs...)
+}
+
+// stopRequested reports whether Stop has been called.
+func (e *Engine) stopRequested() bool {
+	select {
+	case <-e.stopCh:
+		return true
+	default:
+		return false
+	}
+}
+
+// step returns ctx limited to one step's budget, see Run.
+func (e *Engine) step(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, e.stepBudget)
+}
+
+// runInstanceWithin runs one instance under its own budget, so an instance
+// that exceeds it fails alone and the pass goes on to the next.
+func (e *Engine) runInstanceWithin(ctx context.Context, id uuid.UUID, now time.Time) error {
+	stepCtx, cancel := e.step(ctx)
+	defer cancel()
+	return e.runInstance(stepCtx, id, now)
 }
 
 func (e *Engine) runInstance(ctx context.Context, id uuid.UUID, now time.Time) error {
@@ -240,7 +293,10 @@ func (e *Engine) runInstance(ctx context.Context, id uuid.UUID, now time.Time) e
 	for _, r := range rules {
 		ran = append(ran, r.ID())
 		findings, panicked := e.evaluateRule(r, s)
-		if panicked {
+		// A rule that could not evaluate as a whole gives no answer for this
+		// pass. Its open findings are unknown rather than gone, so it must not
+		// count as having run, or ResolveAbsent would resolve them.
+		if panicked || degradedAsWhole(findings) {
 			ran = ran[:len(ran)-1]
 		}
 		for i := range findings {
@@ -303,6 +359,20 @@ func (e *Engine) evaluateRule(r Rule, s *Snapshot) (out []Finding, panicked bool
 		}
 	}
 	return r.Evaluate(s), false
+}
+
+// degradedAsWhole reports whether a rule answered with a finding about the
+// whole instance rather than about one of its objects. A rule that cannot read
+// its inputs says so this way, whether the engine stopped it or the rule
+// itself found the input missing. A per-object degraded finding leaves the
+// rest of the rule's answer intact, so it does not count.
+func degradedAsWhole(findings []Finding) bool {
+	for _, f := range findings {
+		if f.State == StateDegraded && f.Datname == "" && f.ObjectName == "" {
+			return true
+		}
+	}
+	return false
 }
 
 func missingSnapshotInput(s *Snapshot, need string) bool {

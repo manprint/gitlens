@@ -22,6 +22,7 @@ type Store interface {
 	ActiveInstances(context.Context, time.Time) ([]uuid.UUID, error)
 	UpsertFinding(context.Context, Finding, time.Time) error
 	ResolveAbsent(context.Context, uuid.UUID, []string, []string, time.Time) error
+	ResolveUnseen(context.Context, time.Time, time.Time) error
 	PurgeResolved(context.Context, time.Time) error
 }
 
@@ -66,7 +67,21 @@ func (s *PgStore) ResolveAbsent(ctx context.Context, instanceID uuid.UUID, ranRu
 	if len(ranRules) == 0 {
 		return nil
 	}
-	_, err := s.db.Exec(ctx, `UPDATE findings SET state='resolved',resolved_at=$1 WHERE tenant_id='default' AND instance_id=$2 AND state IN ('open','degraded') AND rule_id = ANY($3) AND NOT (finding_id = ANY($4))`, now, instanceID, ranRules, seen)
+	// A muted finding whose condition has cleared is resolved as well: the
+	// mute only silences it while the condition holds, and nothing else would
+	// ever close the row.
+	_, err := s.db.Exec(ctx, `UPDATE findings SET state='resolved',resolved_at=$1 WHERE tenant_id='default' AND instance_id=$2 AND state IN ('open','degraded','muted') AND rule_id = ANY($3) AND NOT (finding_id = ANY($4))`, now, instanceID, ranRules, seen)
+	return err
+}
+
+// ResolveUnseen resolves the findings of instances not seen since before. The
+// engine evaluates only the instances seen within the hour, so the findings
+// of an instance that went quiet would otherwise stay open for ever, and so
+// would its muted ones, which ResolveAbsent never reaches. Their state is no
+// longer known, so they close; a muted finding of such an instance is closed
+// too, and an unmute then leaves it resolved.
+func (s *PgStore) ResolveUnseen(ctx context.Context, before, now time.Time) error {
+	_, err := s.db.Exec(ctx, `UPDATE findings SET state='resolved',resolved_at=$1 WHERE tenant_id='default' AND state IN ('open','degraded','muted') AND instance_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM instances i WHERE i.tenant_id='default' AND i.instance_id=findings.instance_id AND i.last_seen >= $2)`, now, before)
 	return err
 }
 

@@ -208,3 +208,34 @@ func TestAlertAPI_INT_ALERTAPI_007_SilenceIDAndDeleteOrder(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, `SELECT ends_at FROM silences WHERE silence_id=$1`, expired).Scan(&endsAt))
 	require.WithinDuration(t, now.Add(-time.Hour), endsAt, time.Second, "an expired silence keeps the end it had")
 }
+
+// TestAlertAPI_INT_ALERTAPI_008_DeleteKeepsTheSchedule — deleting a silence ends
+// an active one now. An expired silence keeps the end it had, and a future one
+// ends at its start, so no silence is given a window it was never scheduled.
+func TestAlertAPI_INT_ALERTAPI_008_DeleteKeepsTheSchedule(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	r := alertRouter(NewAlertAPI(pool, alert.NewPgStore(pool)))
+	ctx := context.Background()
+	now := time.Now().UTC()
+	active, expired, future := uuid.New(), uuid.New(), uuid.New()
+	starts := map[uuid.UUID]time.Time{active: now.Add(-time.Hour), expired: now.Add(-3 * time.Hour), future: now.Add(2 * time.Hour)}
+	ends := map[uuid.UUID]time.Time{active: now.Add(time.Hour), expired: now.Add(-2 * time.Hour), future: now.Add(3 * time.Hour)}
+	for id := range starts {
+		_, err := pool.Exec(ctx, `INSERT INTO silences (silence_id, matchers, reason, starts_at, ends_at) VALUES ($1, '[]'::jsonb, 'test', $2, $3)`, id, starts[id], ends[id])
+		require.NoError(t, err)
+	}
+	for _, id := range []uuid.UUID{active, expired, future} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/api/v1/silences/"+id.String(), nil))
+		require.Equal(t, http.StatusNoContent, w.Code)
+	}
+	endOf := func(id uuid.UUID) time.Time {
+		var got time.Time
+		require.NoError(t, pool.QueryRow(ctx, `SELECT ends_at FROM silences WHERE silence_id=$1`, id).Scan(&got))
+		return got
+	}
+	require.WithinDuration(t, time.Now(), endOf(active), 5*time.Second, "an active silence ends now")
+	require.WithinDuration(t, ends[expired], endOf(expired), time.Millisecond, "an expired silence keeps its end")
+	require.WithinDuration(t, starts[future], endOf(future), time.Millisecond, "a future silence ends at its start")
+}
