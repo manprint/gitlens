@@ -9,10 +9,14 @@ import { formatLag, formatPostgresVersion, formatTimestamp } from '@/lib/format'
 
 type Instance = Schemas['Instance']
 
+/** What the header can say about a standby's replay lag, and why when it cannot say a number. */
+export type ReplayLag =
+  { state: 'loading' } | { state: 'unavailable' } | { state: 'reading'; seconds: number | null }
+
 interface InstanceHeaderProps {
   dataUpdatedAt: number
   instance: Instance
-  replayLagSeconds?: number | null | undefined
+  replayLag: ReplayLag
 }
 
 const tabs = [
@@ -30,15 +34,19 @@ function roleLabel(role: string): string {
   return role || 'unknown'
 }
 
-export function InstanceHeader({ dataUpdatedAt, instance, replayLagSeconds }: InstanceHeaderProps) {
+function replayLagText(lag: ReplayLag) {
+  if (lag.state === 'loading') return 'loading'
+  if (lag.state === 'unavailable') return 'unavailable'
+  return lag.seconds === null ? (
+    <Unknown reason="Replay lag was not measured." />
+  ) : (
+    formatLag(lag.seconds)
+  )
+}
+
+export function InstanceHeader({ dataUpdatedAt, instance, replayLag }: InstanceHeaderProps) {
   const role = roleLabel(instance.role)
   const lastSeen = formatTimestamp(instance.last_seen, 'UTC', 'en-GB')
-  const replayLag =
-    replayLagSeconds == null ? (
-      <Unknown reason="Replay lag was not measured." />
-    ) : (
-      formatLag(replayLagSeconds)
-    )
 
   return (
     <div className="space-y-4">
@@ -101,7 +109,7 @@ export function InstanceHeader({ dataUpdatedAt, instance, replayLagSeconds }: In
       {instance.role === 'standby' ? (
         <div role="status" className="border-warning/40 bg-warning/10 text-sm">
           <strong>standby (read-only)</strong>
-          <span className="ml-2">Replay lag: {replayLag}</span>
+          <span className="ml-2">Replay lag: {replayLagText(replayLag)}</span>
         </div>
       ) : null}
 

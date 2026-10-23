@@ -1,4 +1,6 @@
 import { act, fireEvent, screen } from '@testing-library/react'
+import { http, HttpResponse } from 'msw/http'
+import { delay } from 'msw/utils/delay'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { Cluster, Schemas } from '@/api/types'
@@ -52,11 +54,15 @@ function renderPage(
   instance: Schemas['Instance'] = baseInstance,
   databases: Schemas['DatabasesResponse'] = makeGetInstanceDatabases(),
   replicationEdges: Schemas['ReplicationEdge'][] = [],
+  replicationHandler: ReturnType<typeof ok> = ok('getClusterReplication', {
+    cluster_id: CLUSTER_ID,
+    edges: replicationEdges,
+  }),
 ) {
   server.use(
     ok('getInstance', instance),
     ok('getClusters', [cluster]),
-    ok('getClusterReplication', { cluster_id: CLUSTER_ID, edges: replicationEdges }),
+    replicationHandler,
     ok('getInstanceDatabases', databases),
     ok('getInstanceHost', {
       instance_id: INSTANCE_ID,
@@ -211,5 +217,46 @@ describe('InstancePage', () => {
     expect(screen.queryByText('Replay lag: 0.5 s')).not.toBeInTheDocument()
     expect(screen.queryByText('Replay lag: 1.25 s')).not.toBeInTheDocument()
     expect(screen.getByTitle('Replay lag was not measured.')).toBeInTheDocument()
+  })
+
+  it('UI-INST-062 does not show a standby reading older than the server freshness bound', async () => {
+    renderPage(makeInstance({ role: 'standby' }), undefined, [
+      replayEdge(INSTANCE_ID, [{ ts: '2026-08-27T01:56:00Z', value: 0.5 }]),
+    ])
+    await flushNetwork()
+
+    expect(screen.queryByText('Replay lag: 0.5 s')).not.toBeInTheDocument()
+    expect(screen.getByTitle('Replay lag was not measured.')).toBeInTheDocument()
+  })
+
+  it('UI-INST-063 shows the replay lag as loading, not as not measured, while its series is pending', async () => {
+    renderPage(
+      makeInstance({ role: 'standby' }),
+      undefined,
+      [],
+      http.get('/api/v1/clusters/:clusterId/replication', async () => {
+        await delay('infinite')
+        return HttpResponse.json({})
+      }),
+    )
+    await flushNetwork()
+
+    expect(screen.getByText('Replay lag: loading')).toBeInTheDocument()
+    expect(screen.queryByTitle('Replay lag was not measured.')).not.toBeInTheDocument()
+  })
+
+  it('UI-INST-064 shows the replay lag as unavailable, not as not measured, when its series fails', async () => {
+    renderPage(
+      makeInstance({ role: 'standby' }),
+      undefined,
+      [],
+      http.get('/api/v1/clusters/:clusterId/replication', () =>
+        HttpResponse.json({ detail: 'replication unavailable' }, { status: 500 }),
+      ),
+    )
+    await flushNetwork()
+
+    expect(screen.getByText('Replay lag: unavailable')).toBeInTheDocument()
+    expect(screen.queryByTitle('Replay lag was not measured.')).not.toBeInTheDocument()
   })
 })
