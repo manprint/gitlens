@@ -237,3 +237,110 @@ func TestPostGISColumnRules(t *testing.T) {
 	require.Equal(t, "app", got[0].Datname)
 	require.Contains(t, got[0].Detail, "SRID 3857 (1 column), SRID 4326 (2 columns), SRID 990000 (1 column)")
 }
+
+// sequenceFact is an ascending integer sequence owned by an integer column,
+// with the labels changed by extra.
+func sequenceFact(datname, name, state string, observed time.Time, extra map[string]string) Fact {
+	labels := map[string]string{
+		"schemaname": "public", "sequence": name, "data_type": "integer",
+		"start": "1", "increment": "1", "min": "1", "max": "2147483647", "cycle": "false",
+		"table_schema": "public", "table": "orders", "column": "id", "column_type": "integer",
+		"link": "owned", "columns": "1", "limit": "2147483647", "limit_source": "sequence", "exhausts": "true",
+		"last_value": "", "used_ratio": "", "remaining": "",
+	}
+	for k, v := range extra {
+		labels[k] = v
+	}
+	return Fact{Key: "public." + name, Datname: datname, ValueText: state, Labels: labels, ObservedAt: observed}
+}
+
+// A sequence is a warning from 75% of its range and critical from 90%; a
+// cycling sequence its own bound limits never runs out. The remediation
+// widens whichever side sets the limit.
+func TestSequenceExhaustionRule(t *testing.T) {
+	now := time.Now()
+	rule := ruleByID(t, "sequence.exhaustion_risk")
+	s := catalogSnapshot(now, "sequence",
+		sequenceFact("app", "orders_id_seq", "used", now, map[string]string{"last_value": "1800000000", "used_ratio": "0.838190", "remaining": "347483647"}),
+		sequenceFact("app", "wide", "used", now, map[string]string{"data_type": "bigint", "max": "9223372036854775807", "limit_source": "column", "table": "Narrow", "last_value": "2000000000", "used_ratio": "0.931323", "remaining": "147483647"}),
+		sequenceFact("app", "loose", "used", now, map[string]string{"column": "", "table": "", "column_type": "", "link": "", "used_ratio": "0.8", "last_value": "1717986918"}),
+		sequenceFact("app", "ring", "used", now, map[string]string{"cycle": "true", "exhausts": "false", "used_ratio": "0.99"}),
+		sequenceFact("app", "calm", "used", now, map[string]string{"used_ratio": "0.5"}),
+		sequenceFact("app", "secret", "hidden", now, nil),
+	)
+	assertRuleContract(t, rule, s)
+	assertRuleContract(t, rule, catalogSnapshot(now, "sequence"))
+	got := rule.Evaluate(s)
+	require.Len(t, got, 3)
+	byName := map[string]Finding{}
+	for _, f := range got {
+		byName[f.ObjectName] = f
+	}
+
+	orders := byName["public.orders_id_seq"]
+	require.Equal(t, SeverityWarning, orders.Severity)
+	require.Equal(t, "Sequence public.orders_id_seq has used 84% of its range", orders.Title)
+	require.Contains(t, orders.Detail, "347483647 values remain before 2147483647")
+	// The integer column and its integer sequence both stop at the integer
+	// bound: the column must be widened first.
+	require.Contains(t, orders.Remediation, `ALTER TABLE "public"."orders" ALTER COLUMN "id" TYPE bigint`)
+	require.Contains(t, orders.Remediation, `Then ALTER SEQUENCE "public"."orders_id_seq" AS bigint`)
+
+	wide := byName["public.wide"]
+	require.Equal(t, SeverityCritical, wide.Severity)
+	require.Contains(t, wide.Remediation, `ALTER TABLE "public"."Narrow" ALTER COLUMN "id" TYPE bigint`)
+	require.NotContains(t, wide.Remediation, "ALTER SEQUENCE")
+
+	loose := byName["public.loose"]
+	require.Contains(t, loose.Detail, "inserts that draw from it fail")
+	require.Contains(t, loose.Remediation, `ALTER SEQUENCE "public"."loose" AS bigint raises it without rewriting any table`)
+
+	s.SkippedChecks["sequences"] = "permission denied"
+	findings, _ := (&Engine{}).evaluateRule(rule, s)
+	require.Len(t, findings, 1)
+	require.Equal(t, StateDegraded, findings[0].State)
+}
+
+func TestSequenceRemediation_BigintBounds(t *testing.T) {
+	up := sequenceFact("app", "s", "used", time.Now(), map[string]string{"data_type": "bigint", "column_type": "bigint", "max": "1000", "limit": "1000"})
+	require.Contains(t, sequenceRemediation(up), `ALTER SEQUENCE "public"."s" NO MAXVALUE`)
+	down := sequenceFact("app", "s", "used", time.Now(), map[string]string{"data_type": "bigint", "column_type": "bigint", "increment": "-1", "min": "-1000", "limit": "-1000"})
+	require.Contains(t, sequenceRemediation(down), `ALTER SEQUENCE "public"."s" NO MINVALUE`)
+}
+
+// A column narrower than its sequence is reported from the types alone,
+// even when the sequence's value is hidden.
+func TestSequenceColumnNarrowerRule(t *testing.T) {
+	now := time.Now()
+	rule := ruleByID(t, "sequence.column_narrower")
+	s := catalogSnapshot(now, "sequence",
+		sequenceFact("app", "wide", "hidden", now, map[string]string{"data_type": "bigint", "max": "9223372036854775807", "limit_source": "column"}),
+		sequenceFact("app", "orders_id_seq", "hidden", now, nil),
+	)
+	assertRuleContract(t, rule, s)
+	got := rule.Evaluate(s)
+	require.Len(t, got, 1)
+	require.Equal(t, "Column public.orders.id (integer) overflows before sequence public.wide runs out", got[0].Title)
+	require.Contains(t, got[0].Remediation, `ALTER SEQUENCE "public"."wide" AS integer`)
+}
+
+// Hidden values are one finding per database, never a finding per sequence,
+// and the remediation never suggests USAGE as a grant.
+func TestSequenceValueHiddenRule(t *testing.T) {
+	now := time.Now()
+	rule := ruleByID(t, "sequence.value_hidden")
+	var facts []Fact
+	for _, name := range []string{"a", "b", "c", "d", "e", "f", "g"} {
+		facts = append(facts, sequenceFact("app", name, "hidden", now, nil))
+	}
+	facts = append(facts, sequenceFact("crm", "x", "hidden", now, nil), sequenceFact("crm", "y", "used", now, nil))
+	s := catalogSnapshot(now, "sequence", facts...)
+	assertRuleContract(t, rule, s)
+	got := rule.Evaluate(s)
+	require.Len(t, got, 2)
+	require.Equal(t, "pglens cannot read the values of 7 sequences in database app", got[0].Title)
+	require.Equal(t, []string{"public.a", "public.b", "public.c", "public.d", "public.e"}, got[0].Evidence["examples"])
+	require.Equal(t, "pglens cannot read the values of 1 sequence in database crm", got[1].Title)
+	require.Contains(t, got[0].Remediation, "Never grant USAGE")
+	require.NotContains(t, got[0].Remediation, "GRANT USAGE")
+}

@@ -25,6 +25,7 @@ func (a *API) registerCatalogRoutes(r chi.Router) {
 	r.Get("/api/v1/instances/{id}/unindexed-foreign-keys", a.handleUnindexedForeignKeys)
 	r.Get("/api/v1/instances/{id}/extensions", a.handleExtensions)
 	r.Get("/api/v1/instances/{id}/spatial-columns", a.handleSpatialColumns)
+	r.Get("/api/v1/instances/{id}/sequences", a.handleSequences)
 }
 
 // catalogFact is one object_facts row of a catalog kind.
@@ -318,6 +319,92 @@ func (a *API) handleSpatialColumns(w http.ResponseWriter, r *http.Request) {
 	}
 	if response.TruncatedDatabases, err = catalogTruncatedDatabases(r.Context(), a.pool, id, "postgis_columns", datname); err != nil {
 		writeError(w, http.StatusInternalServerError, "spatial columns query failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+// sequenceAPIEntry is one sequence. The bounds and values are decimal
+// strings: a bigint sequence's range does not fit a JSON number a browser
+// reads exactly.
+type sequenceAPIEntry struct {
+	Datname    string `json:"datname"`
+	Schemaname string `json:"schemaname"`
+	Name       string `json:"name"`
+	DataType   string `json:"data_type"`
+	State      string `json:"state"`
+	Start      string `json:"start"`
+	Increment  string `json:"increment"`
+	Min        string `json:"min"`
+	Max        string `json:"max"`
+	Cycle      bool   `json:"cycle"`
+	// LastValue is nil when the sequence was never called or its value is
+	// not readable (State says which).
+	LastValue   *string `json:"last_value"`
+	Limit       string  `json:"limit"`
+	LimitSource string  `json:"limit_source"`
+	Exhausts    bool    `json:"exhausts"`
+	// UsedRatio and Remaining are nil when the value is not readable.
+	UsedRatio   *float64  `json:"used_ratio"`
+	Remaining   *string   `json:"remaining"`
+	TableSchema string    `json:"table_schema"`
+	Table       string    `json:"table"`
+	Column      string    `json:"column"`
+	ColumnType  string    `json:"column_type"`
+	Link        string    `json:"link"`
+	Columns     int       `json:"columns"`
+	FirstSeen   time.Time `json:"first_seen"`
+	LastSeen    time.Time `json:"last_seen"`
+	ChangedAt   time.Time `json:"changed_at"`
+}
+
+type sequencesAPIResponse struct {
+	InstanceID         string             `json:"instance_id"`
+	Sequences          []sequenceAPIEntry `json:"sequences"`
+	TruncatedDatabases []string           `json:"truncated_databases"`
+}
+
+func (a *API) handleSequences(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid instance_id", err.Error())
+		return
+	}
+	datname := r.URL.Query().Get("datname")
+	response := sequencesAPIResponse{InstanceID: id.String(), Sequences: []sequenceAPIEntry{}, TruncatedDatabases: []string{}}
+	if a.pool == nil {
+		writeJSON(w, http.StatusOK, response)
+		return
+	}
+	facts, err := latestCatalogFacts(r.Context(), a.pool, id, "sequence", datname)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "sequences query failed", err.Error())
+		return
+	}
+	optional := func(v string) *string {
+		if v == "" {
+			return nil
+		}
+		return &v
+	}
+	for _, f := range facts {
+		l := f.Labels
+		entry := sequenceAPIEntry{
+			Datname: f.Datname, Schemaname: l["schemaname"], Name: l["sequence"], DataType: l["data_type"], State: f.ValueText,
+			Start: l["start"], Increment: l["increment"], Min: l["min"], Max: l["max"], Cycle: l["cycle"] == "true",
+			LastValue: optional(l["last_value"]), Limit: l["limit"], LimitSource: l["limit_source"], Exhausts: l["exhausts"] == "true",
+			Remaining:   optional(l["remaining"]),
+			TableSchema: l["table_schema"], Table: l["table"], Column: l["column"], ColumnType: l["column_type"], Link: l["link"],
+			FirstSeen: f.FirstSeen, LastSeen: f.LastSeen, ChangedAt: f.ChangedAt,
+		}
+		if ratio, err := strconv.ParseFloat(l["used_ratio"], 64); err == nil {
+			entry.UsedRatio = &ratio
+		}
+		entry.Columns, _ = strconv.Atoi(l["columns"])
+		response.Sequences = append(response.Sequences, entry)
+	}
+	if response.TruncatedDatabases, err = catalogTruncatedDatabases(r.Context(), a.pool, id, "sequences", datname); err != nil {
+		writeError(w, http.StatusInternalServerError, "sequences query failed", err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, response)

@@ -326,6 +326,20 @@ export function useInstanceSpatialColumns(id: string) {
   })
 }
 
+export function useInstanceSequences(id: string) {
+  return useApiQuery({
+    policy: REFRESH.catalog,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/sequences', {
+          params: { path: { id } },
+          signal,
+        }),
+      ),
+    queryKey: qk.instanceSequences(id),
+  })
+}
+
 export function useInstanceTables(
   id: string,
   params: QueryParameters<'/api/v1/instances/{id}/tables'> = {},

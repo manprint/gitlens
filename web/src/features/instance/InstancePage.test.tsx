@@ -60,6 +60,11 @@ function renderPage(
       columns: [],
       truncated_databases: [],
     }),
+    ok('getInstanceSequences', {
+      instance_id: INSTANCE_ID,
+      sequences: [],
+      truncated_databases: [],
+    }),
     ok('getInstanceUnindexedForeignKeys', {
       instance_id: INSTANCE_ID,
       foreign_keys: [],

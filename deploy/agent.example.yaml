@@ -40,6 +40,7 @@ checks:
   fk_indexes: { interval: 15m } # Foreign keys no index serves.
   extensions: { interval: 1h } # Installed extensions and available updates.
   postgis_columns: { interval: 1h } # PostGIS columns, SRIDs and spatial indexes.
+  sequences: { interval: 10m } # How much of its range each sequence used.
   table_stats: { interval: 5m, top_n: 50 } # Table access, tuple and vacuum statistics.
   index_stats: { interval: 5m, top_n: 50 } # Index usage and size statistics.
   vacuum_progress: { interval: 30s } # In-progress VACUUM counters.

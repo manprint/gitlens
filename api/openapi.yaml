@@ -560,6 +560,60 @@ components:
         rows: { type: number, format: double, description: Estimated rows of the table (pg_class.reltuples). }
         first_seen: { $ref: '#/components/schemas/Timestamp' }
         last_seen: { $ref: '#/components/schemas/Timestamp' }
+    SequencesResponse:
+      type: object
+      required: [instance_id, sequences, truncated_databases]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        sequences: { type: array, items: { $ref: '#/components/schemas/Sequence' } }
+        truncated_databases:
+          type: array
+          items: { type: string }
+          description: Databases with more sequences than the agent reports (500); the sequences closest to their limit come first.
+    Sequence:
+      type: object
+      description: >-
+        One sequence. Bounds and values are decimal strings, as a bigint
+        sequence's range does not fit a JSON number exactly.
+      required: [datname, schemaname, name, data_type, state, start, increment, min, max, cycle, last_value, limit, limit_source, exhausts, used_ratio, remaining, table_schema, table, column, column_type, link, columns, first_seen, last_seen, changed_at]
+      properties:
+        datname: { type: string }
+        schemaname: { type: string }
+        name: { type: string }
+        data_type: { type: string, description: 'Declared type of the sequence: smallint, integer or bigint.' }
+        state:
+          type: string
+          enum: [used, unused, hidden, unread]
+          description: >-
+            used: the value is known; unused: never called; hidden: the
+            monitoring role has neither SELECT nor USAGE on the sequence;
+            unread: reading it waited too long for a lock.
+        start: { type: string }
+        increment: { type: string }
+        min: { type: string }
+        max: { type: string }
+        cycle: { type: boolean }
+        last_value: { type: [string, 'null'], description: 'Null when never called or not readable.' }
+        limit: { type: string, description: 'Last value the sequence can hand out that its column accepts.' }
+        limit_source:
+          type: string
+          enum: [sequence, column]
+          description: column when the integer type of the column the sequence feeds is narrower than the sequence.
+        exhausts: { type: boolean, description: 'False for a cycling sequence whose own bound sets the limit: it wraps instead of failing.' }
+        used_ratio: { type: [number, 'null'], format: double, description: 'Used fraction of the range from start to limit; null when not readable.' }
+        remaining: { type: [string, 'null'], description: 'Values left before the limit; null when not readable.' }
+        table_schema: { type: string }
+        table: { type: string, description: 'Table of the column the sequence feeds; empty when it feeds none.' }
+        column: { type: string }
+        column_type: { type: string }
+        link:
+          type: string
+          enum: ['', identity, owned, default]
+          description: How the sequence is tied to the column; empty when it feeds none.
+        columns: { type: integer, format: int32, description: 'Number of columns the sequence feeds; the narrowest is reported.' }
+        first_seen: { $ref: '#/components/schemas/Timestamp' }
+        last_seen: { $ref: '#/components/schemas/Timestamp' }
+        changed_at: { $ref: '#/components/schemas/Timestamp' }
     DriftValue:
       type: object
       required: [instance_id, role, value]
@@ -1271,6 +1325,39 @@ paths:
                     instance_id: 11111111-1111-1111-1111-111111111111
                     columns:
                       - { datname: app, schemaname: public, relname: parcels, column: geom, type: geometry, subtype: MultiPolygon, srid: 3857, srid_known: true, index_method: '', rows: 250000, first_seen: '2026-08-27T01:00:00Z', last_seen: '2026-08-27T02:00:00Z' }
+                    truncated_databases: []
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/sequences:
+    get:
+      tags: [instances]
+      operationId: getInstanceSequences
+      summary: Return the sequences and how much of their range each has used.
+      description: >-
+        The latest sequences scrape of each database, reported in the last
+        three hours. A sequence's range ends at the nearer of its own bound
+        and the bound of the integer column it feeds. Values are read only
+        where the monitoring role has SELECT on the sequence (tier 1 has it
+        on all); the agent never advances a sequence.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - name: datname
+          in: query
+          required: false
+          schema: { type: string }
+          description: Return the sequences of this database only.
+      responses:
+        '200':
+          description: Sequences by database, schema and name.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SequencesResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    sequences:
+                      - { datname: app, schemaname: public, name: orders_id_seq, data_type: bigint, state: used, start: '1', increment: '1', min: '1', max: '9223372036854775807', cycle: false, last_value: '2000000000', limit: '2147483647', limit_source: column, exhausts: true, used_ratio: 0.931323, remaining: '147483647', table_schema: public, table: orders, column: id, column_type: integer, link: owned, columns: 1, first_seen: '2026-08-27T01:00:00Z', last_seen: '2026-08-27T02:00:00Z', changed_at: '2026-08-27T01:00:00Z' }
                     truncated_databases: []
         '400': { $ref: '#/components/responses/BadRequest' }
 

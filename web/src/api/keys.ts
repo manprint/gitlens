@@ -22,6 +22,7 @@ export const qk = {
   instanceUnindexedForeignKeys: (id: string) => ['getInstanceUnindexedForeignKeys', id] as const,
   instanceExtensions: (id: string) => ['getInstanceExtensions', id] as const,
   instanceSpatialColumns: (id: string) => ['getInstanceSpatialColumns', id] as const,
+  instanceSequences: (id: string) => ['getInstanceSequences', id] as const,
   instanceIndexes: (id: string, limit?: number) => ['getInstanceIndexes', id, limit] as const,
   instanceBloat: (id: string, limit?: number) => ['getInstanceBloat', id, limit] as const,
   instanceCommandAudit: (id: string) => ['getInstanceCommandAudit', id] as const,

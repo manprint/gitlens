@@ -452,11 +452,20 @@ Security and operational boundaries:
   calling a PostGIS function), whether `spatial_ref_sys` defines the SRID,
   and the GiST, SP-GiST or BRIN index that serves spatial searches. pglens
   never runs `ALTER EXTENSION` or `postgis_extensions_upgrade()`; the advisor
-  only suggests them. The instance page lists all four under "Schema
-  objects"; the `trigger.*` rules raise disabled triggers,
-  `index.fk_unindexed` the foreign keys, and the `extension.*` and
-  `postgis.*` rules outdated extensions, unindexed spatial columns and
-  undefined or mixed SRIDs.
+  only suggests them. `sequences` reports, every ten minutes, each
+  sequence with the column it feeds (OWNED BY, identity or a default) and
+  how much of its range it has used, counted up to the nearer of its own
+  bound and the bound of that column's integer type. It reads a sequence's
+  value with `pg_sequence_last_value()` only where the role has SELECT on
+  it (tier 1 has it on every sequence), a hundred sequences per statement
+  so the locks a read takes stay few; it never calls `nextval()`. Grant
+  SELECT on a sequence, never USAGE: USAGE allows `nextval()`, which
+  advances it. The instance page lists them all under "Schema objects";
+  the `trigger.*` rules raise disabled triggers, `index.fk_unindexed` the
+  foreign keys, the `extension.*` and `postgis.*` rules outdated
+  extensions, unindexed spatial columns and undefined or mixed SRIDs, and
+  the `sequence.*` rules sequences near their limit and columns narrower
+  than their sequence.
 - The integration suite proves the boundary: INT-RO-001 runs every check and
   command at T2 and asserts that the database and the shared catalogs are
   unchanged and that every statement the role sent, as `pg_stat_statements`
@@ -682,13 +691,16 @@ How the rules read the collected data:
 | `backup.no_basebackup_seen` | warning | The cluster archives WAL, but no base backup has been seen running in the last seven days. |
 | `backup.no_strategy` | critical | Neither archiving nor a visible base-backup strategy is configured. |
 | `security.monitoring_role_can_write` | critical | The role pglens connects as could write if a session of it left read-only mode: an attribute, a membership or owned objects (the `monitoring_role` check). |
+| `sequence.exhaustion_risk` | critical | A sequence has used 90% of its range, counted up to the nearer of its own bound and its column's integer type; a warning from 75%. A cycling sequence whose own bound applies is left out (the `sequences` check). |
 | `trigger.constraint_disabled` | critical | The internal triggers that enforce a foreign key (or another constraint) are disabled, so rows that violate it can be written (the `trigger_inventory` check). |
 | `index.fk_unindexed` | warning | No index leads with a foreign key's columns, so deleting or re-keying a referenced row scans the referencing table; information below 10 MiB (the `fk_indexes` check). |
 | `postgis.upgrade_available` | warning | The installed PostGIS packages carry a newer version of postgis or one of its companion extensions than the database runs; `SELECT postgis_extensions_upgrade();` updates them together (the `extensions` check). |
 | `postgis.spatial_unindexed` | warning | No valid, non-partial GiST, SP-GiST or BRIN index leads with a geometry or geography column, so spatial predicates scan the table; information below 10,000 estimated rows (the `postgis_columns` check). |
 | `postgis.srid_unknown` | warning | A spatial column is constrained to an SRID that `spatial_ref_sys` does not define (or to SRID 0), so transforms and geography casts on it fail. |
+| `sequence.column_narrower` | warning | An integer column is fed by a sequence whose range is wider than the column's type, so inserts fail when the sequence passes the column's bound; found from the types alone, without reading the sequence. |
 | `trigger.user_disabled` | warning | A user trigger is disabled: writes to its table no longer run it. |
 | `extension.upgrade_available` | info | The installed packages carry a newer default version of an extension than the database runs (`ALTER EXTENSION ... UPDATE`); PostGIS extensions are left to `postgis.upgrade_available`. |
+| `sequence.value_hidden` | info | The monitoring role cannot read the values of a database's sequences (no SELECT on them), so their exhaustion is not monitored; one finding per database. |
 | `postgis.srid_mixed` | info | The constrained geometry columns of one database use more than one non-zero SRID, so joins between them need `ST_Transform`. |
 | `security.monitoring_role_read_only_off` | warning | The role pglens connects as does not default to read-only transactions in the database it connects to. |
 
@@ -872,6 +884,7 @@ checks:
   fk_indexes:      { interval: 15m }        # Foreign keys no index serves (index.fk_unindexed)
   extensions:      { interval: 1h }         # Installed extensions and available updates (extension.*, postgis.upgrade_available)
   postgis_columns: { interval: 1h }         # PostGIS columns, SRIDs and spatial indexes (postgis.*)
+  sequences:       { interval: 10m }        # How much of its range each sequence used (sequence.*)
   table_stats:     { interval: 5m, top_n: 50 }
   index_stats:     { interval: 5m, top_n: 50 }
   vacuum_progress: { interval: 30s }
@@ -987,6 +1000,7 @@ checks
   replication_receiver disabled  — role primary not allowed
   replication_slots  enabled
   replication_streaming enabled
+  sequences          enabled
   settings           enabled
   stat_statements    disabled  — missing extension pg_stat_statements
   table_stats        enabled

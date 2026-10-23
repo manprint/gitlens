@@ -2,6 +2,7 @@ package advisor
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -331,4 +332,132 @@ func plural(n int, noun string) string {
 		return "1 " + noun
 	}
 	return fmt.Sprintf("%d %ss", n, noun)
+}
+
+const (
+	sequenceFactKind = "sequence"
+	// sequenceWarnRatio and sequenceCriticalRatio are the used fractions of
+	// a sequence's range from which its exhaustion is a warning and critical.
+	sequenceWarnRatio     = 0.75
+	sequenceCriticalRatio = 0.90
+)
+
+// sequenceName returns a sequence fact's name as shown and as SQL.
+func sequenceName(f Fact) (shown, sql string) {
+	schema, name := f.Labels["schemaname"], f.Labels["sequence"]
+	return schema + "." + name, pgx.Identifier{schema, name}.Sanitize()
+}
+
+// sequenceColumn returns the column a sequence fact feeds as shown, the SQL
+// that widens it to bigint, and whether there is one.
+func sequenceColumn(f Fact) (shown, widen string, ok bool) {
+	if f.Labels["column"] == "" {
+		return "", "", false
+	}
+	schema, table, column := f.Labels["table_schema"], f.Labels["table"], f.Labels["column"]
+	shown = fmt.Sprintf("%s.%s.%s (%s)", schema, table, column, f.Labels["column_type"])
+	widen = fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s TYPE bigint", pgx.Identifier{schema, table}.Sanitize(), pgx.Identifier{column}.Sanitize())
+	return shown, widen, true
+}
+
+// integerTypeBound is the largest value of the integer type a sequence or
+// column is declared with, by its format_type name.
+var integerTypeBound = map[string]string{
+	"smallint": strconv.Itoa(math.MaxInt16), "integer": strconv.Itoa(math.MaxInt32), "bigint": strconv.FormatInt(math.MaxInt64, 10),
+}
+
+// sequenceRemediation says how to raise the limit that binds a sequence:
+// widening the column rewrites its table, while changing the sequence is a
+// catalog update.
+func sequenceRemediation(f Fact) string {
+	_, seqSQL := sequenceName(f)
+	column, widen, linked := sequenceColumn(f)
+	const rewrite = " This rewrites the table under an ACCESS EXCLUSIVE lock, and the columns that reference it through foreign keys need the same change; on a large table, add a bigint column, fill it in batches and swap it in instead."
+	ascending := !strings.HasPrefix(f.Labels["increment"], "-")
+	if f.Labels["limit_source"] == "column" || (linked && f.Labels["limit"] == integerTypeBound[f.Labels["column_type"]] && f.Labels["column_type"] != "bigint") {
+		text := fmt.Sprintf("The type of column %s sets the limit: %s.", column, widen) + rewrite
+		if f.Labels["data_type"] != "bigint" {
+			text += fmt.Sprintf(" Then ALTER SEQUENCE %s AS bigint.", seqSQL)
+		}
+		return text
+	}
+	if f.Labels["data_type"] != "bigint" {
+		return fmt.Sprintf("The sequence's own type sets the limit. ALTER SEQUENCE %s AS bigint raises it without rewriting any table.", seqSQL)
+	}
+	if ascending {
+		return fmt.Sprintf("The sequence's MAXVALUE sets the limit. ALTER SEQUENCE %s NO MAXVALUE raises it to the bigint limit without rewriting any table.", seqSQL)
+	}
+	return fmt.Sprintf("The sequence's MINVALUE sets the limit. ALTER SEQUENCE %s NO MINVALUE lowers it to the bigint limit without rewriting any table.", seqSQL)
+}
+
+func init() {
+	Register(relationRule{id: "sequence.exhaustion_risk", severity: SeverityCritical, needs: []string{"sequences"}, eval: func(s *Snapshot) []Finding {
+		const id = "sequence.exhaustion_risk"
+		var out []Finding
+		for _, f := range currentFacts(s, sequenceFactKind) {
+			ratio, err := strconv.ParseFloat(f.Labels["used_ratio"], 64)
+			if err != nil || f.Labels["exhausts"] != "true" || ratio < sequenceWarnRatio {
+				continue
+			}
+			severity := SeverityWarning
+			if ratio >= sequenceCriticalRatio {
+				severity = SeverityCritical
+			}
+			name, _ := sequenceName(f)
+			target := "inserts that draw from it"
+			if column, _, ok := sequenceColumn(f); ok {
+				target = "inserts into " + column
+			}
+			out = append(out, relationFinding(id, severity, f.Datname, name,
+				fmt.Sprintf("Sequence %s has used %.0f%% of its range", name, ratio*100),
+				fmt.Sprintf("Sequence %s in database %s (%s, increment %s) is at %s; %s values remain before %s. Once they run out, %s fail.", name, f.Datname, f.Labels["data_type"], f.Labels["increment"], f.Labels["last_value"], f.Labels["remaining"], f.Labels["limit"], target),
+				sequenceRemediation(f),
+				map[string]any{"sequence": name, "last_value": f.Labels["last_value"], "limit": f.Labels["limit"], "limit_source": f.Labels["limit_source"], "used_ratio": ratio, "remaining": f.Labels["remaining"]}))
+		}
+		return out
+	}})
+	Register(relationRule{id: "sequence.column_narrower", severity: SeverityWarning, needs: []string{"sequences"}, eval: func(s *Snapshot) []Finding {
+		const id = "sequence.column_narrower"
+		var out []Finding
+		for _, f := range currentFacts(s, sequenceFactKind) {
+			if f.Labels["limit_source"] != "column" {
+				continue
+			}
+			name, seqSQL := sequenceName(f)
+			column, widen, _ := sequenceColumn(f)
+			out = append(out, relationFinding(id, SeverityWarning, f.Datname, name,
+				fmt.Sprintf("Column %s overflows before sequence %s runs out", column, name),
+				fmt.Sprintf("Sequence %s in database %s is %s (bounds %s to %s) but feeds column %s: inserts fail once it passes %s, whatever its own limit says.", name, f.Datname, f.Labels["data_type"], f.Labels["min"], f.Labels["max"], column, f.Labels["limit"]),
+				fmt.Sprintf("%s (this rewrites the table under an ACCESS EXCLUSIVE lock), or, if the column is meant to stay as it is, give the sequence the column's bound (ALTER SEQUENCE %s AS %s) so the limit is stated where it applies.", widen, seqSQL, f.Labels["column_type"]),
+				map[string]any{"sequence": name, "data_type": f.Labels["data_type"], "column": column, "limit": f.Labels["limit"]}))
+		}
+		return out
+	}})
+	Register(databaseRule{relationRule{id: "sequence.value_hidden", severity: SeverityInfo, needs: []string{"sequences"}, eval: func(s *Snapshot) []Finding {
+		const id = "sequence.value_hidden"
+		hidden := map[string][]string{}
+		var order []string
+		for _, f := range currentFacts(s, sequenceFactKind) {
+			if f.ValueText != "hidden" {
+				continue
+			}
+			if hidden[f.Datname] == nil {
+				order = append(order, f.Datname)
+			}
+			name, _ := sequenceName(f)
+			hidden[f.Datname] = append(hidden[f.Datname], name)
+		}
+		var out []Finding
+		for _, datname := range order {
+			names := hidden[datname]
+			examples := names[:min(len(names), 5)]
+			out = append(out, Finding{RuleID: id, Severity: SeverityInfo, State: StateOpen, Scope: ScopeDatabase, Datname: datname, ObjectName: "sequences",
+				Title:       fmt.Sprintf("pglens cannot read the values of %s in database %s", plural(len(names), "sequence"), datname),
+				Detail:      fmt.Sprintf("The monitoring role has neither SELECT nor USAGE on %s of database %s (%s), so how close they are to their limit is unknown; only a column narrower than its sequence is still detected.", plural(len(names), "sequence"), datname, strings.Join(examples, ", ")),
+				Remediation: "Run the agent at tier 1 (pg_read_all_data), or GRANT SELECT ON SEQUENCE ... TO the monitoring role for the sequences to watch. Never grant USAGE: it allows nextval(), which advances the sequence.",
+				Evidence:    map[string]any{"hidden": len(names), "examples": examples},
+			})
+		}
+		return out
+	}}})
 }

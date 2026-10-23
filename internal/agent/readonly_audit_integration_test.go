@@ -84,7 +84,7 @@ ORDER BY 1`)
 // monitoring role sent is one that reads.
 func TestINTRO001_AgentOnlyReads(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
-		auditAgentOnlyReads(t, pg, "", []string{"trigger", "fk_unindexed", "extension"}, "")
+		auditAgentOnlyReads(t, pg, "", []string{"trigger", "fk_unindexed", "extension", "sequence"}, "")
 	})
 }
 
@@ -99,7 +99,7 @@ func TestINTRO002_AgentOnlyReadsPostGIS(t *testing.T) {
 CREATE TABLE ro_audit_places (id int PRIMARY KEY, pt geometry(Point, 4326), area geometry(Polygon));
 CREATE INDEX ON ro_audit_places USING gist (pt);
 INSERT INTO ro_audit_places SELECT g, ST_SetSRID(ST_MakePoint(g, g), 4326) FROM generate_series(1, 100) g`,
-			[]string{"trigger", "fk_unindexed", "extension", "spatial_column"},
+			[]string{"trigger", "fk_unindexed", "extension", "spatial_column", "sequence"},
 			"belongs to extension postgis_topology")
 	})
 }
@@ -116,7 +116,7 @@ func auditAgentOnlyReads(t *testing.T, pg *pgtest.PG, extraFixture string, kinds
 		ctx := context.Background()
 		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
 		t.Cleanup(func() {
-			_, _ = admin.Exec(context.Background(), "DROP TABLE IF EXISTS ro_audit_child, ro_audit, ro_audit_places; DROP FUNCTION IF EXISTS ro_audit_touch()")
+			_, _ = admin.Exec(context.Background(), "DROP TABLE IF EXISTS ro_audit_child, ro_audit, ro_audit_places; DROP FUNCTION IF EXISTS ro_audit_touch(); DROP SEQUENCE IF EXISTS ro_audit_fresh, ro_audit_down")
 		})
 		_, err := admin.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 CREATE EXTENSION IF NOT EXISTS pgstattuple;
@@ -131,6 +131,11 @@ CREATE FUNCTION ro_audit_touch() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETU
 CREATE TABLE ro_audit_child (id int PRIMARY KEY, audit_id bigint REFERENCES ro_audit (id));
 CREATE TRIGGER ro_audit_touch BEFORE INSERT ON ro_audit_child FOR EACH ROW EXECUTE FUNCTION ro_audit_touch();
 ALTER TABLE ro_audit_child DISABLE TRIGGER ALL;
+DROP SEQUENCE IF EXISTS ro_audit_fresh, ro_audit_down;
+CREATE SEQUENCE ro_audit_fresh;
+CREATE SEQUENCE ro_audit_down AS integer INCREMENT -1 MAXVALUE -1 CYCLE;
+SELECT setval('ro_audit_down', -5);
+ALTER TABLE ro_audit_child ALTER COLUMN id SET DEFAULT nextval('ro_audit_id_seq');
 DROP TABLE IF EXISTS ro_audit_places;`+extraFixture)
 		require.NoError(t, err)
 

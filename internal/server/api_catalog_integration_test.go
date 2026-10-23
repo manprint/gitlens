@@ -159,3 +159,41 @@ func normalizeExtensionTimes(e extensionAPIEntry) extensionAPIEntry {
 	e.FirstSeen, e.LastSeen, e.ChangedAt = e.FirstSeen.UTC(), e.LastSeen.UTC(), e.ChangedAt.UTC()
 	return e
 }
+
+// INT-CAT-004: the sequences API keeps bigint bounds exact as strings and
+// leaves the value fields null for a sequence whose value is hidden.
+func TestINTCAT004_Sequences(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	instanceID := uuid.New()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	for _, fact := range []struct{ key, state, labels string }{
+		{"public.wide", "used", `{"schemaname":"public","sequence":"wide","data_type":"bigint","start":"1","increment":"1","min":"1","max":"9223372036854775807","cycle":"false","table_schema":"public","table":"narrow","column":"id","column_type":"integer","link":"default","columns":"1","limit":"2147483647","limit_source":"column","exhausts":"true","last_value":"2000000000","used_ratio":"0.931323","remaining":"147483647"}`},
+		{"public.secret", "hidden", `{"schemaname":"public","sequence":"secret","data_type":"bigint","start":"1","increment":"1","min":"1","max":"9223372036854775807","cycle":"false","table_schema":"","table":"","column":"","column_type":"","link":"","columns":"0","limit":"9223372036854775807","limit_source":"sequence","exhausts":"true","last_value":"","used_ratio":"","remaining":""}`},
+	} {
+		_, err := pool.Exec(ctx, `INSERT INTO object_facts (tenant_id, cluster_id, instance_id, datname, kind, key, labels, value_text, first_seen, last_seen, changed_at) VALUES ('default',1,$1,'app','sequence',$2,$3,$4,$5,$5,$5)`, instanceID, fact.key, fact.labels, fact.state, now)
+		require.NoError(t, err)
+	}
+	r := chi.NewRouter()
+	NewAPI(pool).RegisterRoutes(r)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/instances/"+instanceID.String()+"/sequences", http.NoBody))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &raw))
+	sequences := raw["sequences"].([]any)
+	require.Len(t, sequences, 2)
+	secret, wide := sequences[0].(map[string]any), sequences[1].(map[string]any)
+	require.Equal(t, "hidden", secret["state"])
+	require.Nil(t, secret["last_value"])
+	require.Nil(t, secret["used_ratio"])
+	require.Nil(t, secret["remaining"])
+	require.Equal(t, "9223372036854775807", secret["max"])
+	require.Equal(t, "2000000000", wide["last_value"])
+	require.Equal(t, 0.931323, wide["used_ratio"])
+	require.Equal(t, "column", wide["limit_source"])
+	require.Equal(t, true, wide["exhausts"])
+	require.Equal(t, float64(1), wide["columns"])
+	require.Empty(t, raw["truncated_databases"])
+}

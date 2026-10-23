@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 
 import {
   useInstanceExtensions,
+  useInstanceSequences,
   useInstanceSpatialColumns,
   useInstanceTriggers,
   useInstanceUnindexedForeignKeys,
@@ -13,7 +14,13 @@ import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState, Unknown } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { formatBytes, formatCount, formatTimestamp } from '@/lib/format'
+import {
+  formatBytes,
+  formatCount,
+  formatIntegerString,
+  formatPercent,
+  formatTimestamp,
+} from '@/lib/format'
 
 interface CatalogSectionProps {
   instanceId: string
@@ -21,6 +28,7 @@ interface CatalogSectionProps {
 
 type Trigger = Schemas['Trigger']
 type SpatialColumn = Schemas['SpatialColumn']
+type Sequence = Schemas['Sequence']
 
 const selectClassName = 'border-input bg-background h-9 w-full rounded-md border px-3'
 
@@ -441,6 +449,167 @@ function PostGISTab({
   )
 }
 
+/** Used fractions from which a sequence is a warning and critical, as in the advisor. */
+const SEQUENCE_WARN_RATIO = 0.75
+const SEQUENCE_CRITICAL_RATIO = 0.9
+
+function sequenceAtRisk(sequence: Sequence): boolean {
+  return sequence.exhausts && (sequence.used_ratio ?? 0) >= SEQUENCE_WARN_RATIO
+}
+
+function sequenceUsedCell(sequence: Sequence): ReactNode {
+  switch (sequence.state) {
+    case 'hidden':
+      return (
+        <Unknown reason="The monitoring role has no SELECT on this sequence: grant it, or run the agent at tier 1." />
+      )
+    case 'unread':
+      return <Unknown reason="Reading the sequence waited too long for a lock." />
+    case 'unused':
+    case 'used':
+      break
+  }
+  const ratio = sequence.used_ratio ?? 0
+  const percent = formatPercent(ratio, 1) ?? ''
+  if (!sequenceAtRisk(sequence)) return percent
+  return (
+    <Badge variant={ratio >= SEQUENCE_CRITICAL_RATIO ? 'destructive' : 'secondary'}>
+      {percent}
+    </Badge>
+  )
+}
+
+function sequenceColumns(): DataTableProps<Sequence>['columns'] {
+  return [
+    { accessorKey: 'datname', header: 'Database' },
+    {
+      id: 'sequence',
+      header: 'Sequence',
+      accessorFn: (sequence) => `${sequence.schemaname}.${sequence.name}`,
+      cell: ({ row }) => (
+        <span className="inline-flex items-center gap-1">
+          {row.original.schemaname}.{row.original.name}
+          {row.original.cycle ? <Badge variant="outline">cycles</Badge> : null}
+        </span>
+      ),
+    },
+    { accessorKey: 'data_type', header: 'Type' },
+    {
+      id: 'column',
+      header: 'Feeds',
+      accessorFn: (sequence) =>
+        sequence.column
+          ? `${sequence.table_schema}.${sequence.table}.${sequence.column} (${sequence.column_type})`
+          : '',
+      cell: ({ getValue, row }) => {
+        const shown = getValue<string>()
+        if (!shown) return <span className="text-muted-foreground">no column</span>
+        const more = row.original.columns > 1 ? ` +${row.original.columns - 1}` : ''
+        return `${shown}${more}`
+      },
+    },
+    {
+      id: 'last_value',
+      header: 'Last value',
+      accessorFn: (sequence) => sequence.last_value ?? '',
+      cell: ({ row }) =>
+        row.original.last_value !== null ? (
+          formatIntegerString(row.original.last_value)
+        ) : row.original.state === 'unused' ? (
+          <span className="text-muted-foreground">never called</span>
+        ) : (
+          <Unknown reason="Not readable." />
+        ),
+    },
+    {
+      accessorKey: 'limit',
+      header: 'Limit',
+      cell: ({ row }) => (
+        <span className="inline-flex items-center gap-1">
+          {formatIntegerString(row.original.limit)}
+          {row.original.limit_source === 'column' ? (
+            <Badge variant="secondary">column type</Badge>
+          ) : null}
+        </span>
+      ),
+    },
+    {
+      id: 'used',
+      header: 'Used',
+      accessorFn: (sequence) => sequence.used_ratio ?? -1,
+      cell: ({ row }) => sequenceUsedCell(row.original),
+    },
+    {
+      id: 'remaining',
+      header: 'Remaining',
+      accessorFn: (sequence) => sequence.remaining ?? '',
+      cell: ({ row }) =>
+        row.original.remaining !== null ? formatIntegerString(row.original.remaining) : null,
+    },
+  ]
+}
+
+/** The closest to their limit first, then the columns narrower than their sequence. */
+function compareSequences(left: Sequence, right: Sequence): number {
+  const ratio = (right.used_ratio ?? -1) - (left.used_ratio ?? -1)
+  if (ratio !== 0) return ratio
+  if (left.limit_source !== right.limit_source) return left.limit_source === 'column' ? -1 : 1
+  return (
+    left.datname.localeCompare(right.datname) ||
+    `${left.schemaname}.${left.name}`.localeCompare(`${right.schemaname}.${right.name}`)
+  )
+}
+
+function SequencesTab({ response }: { response: Schemas['SequencesResponse'] }) {
+  const sorted = useMemo(() => [...response.sequences].sort(compareSequences), [response])
+  const filter = useDatabaseFilter(sorted)
+  const columns = useMemo(() => sequenceColumns(), [])
+  const hidden = filter.rows.filter((sequence) => sequence.state === 'hidden').length
+
+  return (
+    <div className="space-y-4">
+      <p className="text-muted-foreground text-sm">
+        A sequence runs out at the nearer of its own bound and the bound of the integer column it
+        feeds. pglens only reads sequences; it never advances them.
+      </p>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <DatabaseFilter
+          id="catalog-sequence-database"
+          databases={filter.databases}
+          value={filter.database}
+          onChange={filter.setDatabase}
+        />
+      </div>
+      {hidden > 0 ? (
+        <p role="status" className="text-muted-foreground text-sm">
+          The values of {hidden} {hidden === 1 ? 'sequence are' : 'sequences are'} not readable by
+          the monitoring role: grant it SELECT on them (never USAGE, which allows nextval), or run
+          the agent at tier 1.
+        </p>
+      ) : null}
+      <TruncatedNotice
+        truncated={response.truncated_databases}
+        database={filter.database}
+        what="sequences"
+        kept="those closest to their limit are listed"
+      />
+      <DataTable
+        ariaLabel="Sequences"
+        columns={columns}
+        data={filter.rows}
+        emptyState={
+          <EmptyState
+            title="No sequences reported"
+            description="The sequence check has not reported a sequence for any database yet."
+          />
+        }
+        scope="sequences"
+        total={response.sequences.length}
+      />
+    </div>
+  )
+}
+
 interface CatalogTabStateProps<T> {
   query: ApiQueryResult<T>
   label: string
@@ -481,6 +650,7 @@ export function CatalogSection({ instanceId }: CatalogSectionProps) {
   const foreignKeysQuery = useInstanceUnindexedForeignKeys(instanceId)
   const extensionsQuery = useInstanceExtensions(instanceId)
   const spatialQuery = useInstanceSpatialColumns(instanceId)
+  const sequencesQuery = useInstanceSequences(instanceId)
   const disabledTriggers =
     triggersQuery.data?.triggers.filter((trigger) => trigger.state === 'disabled').length ?? 0
   const upgradableExtensions =
@@ -488,6 +658,7 @@ export function CatalogSection({ instanceId }: CatalogSectionProps) {
       .length ?? 0
   const unindexedSpatial =
     spatialQuery.data?.columns.filter((column) => column.index_method === '').length ?? 0
+  const sequencesAtRisk = sequencesQuery.data?.sequences.filter(sequenceAtRisk).length ?? 0
 
   return (
     <Section
@@ -499,6 +670,9 @@ export function CatalogSection({ instanceId }: CatalogSectionProps) {
         <TabsList aria-label="Schema object kinds">
           <TabsTrigger value="triggers">
             Triggers <TabCount count={disabledTriggers} label="disabled" />
+          </TabsTrigger>
+          <TabsTrigger value="sequences">
+            Sequences <TabCount count={sequencesAtRisk} label="near their limit" />
           </TabsTrigger>
           <TabsTrigger value="foreign-keys">
             Unindexed foreign keys{' '}
@@ -514,6 +688,11 @@ export function CatalogSection({ instanceId }: CatalogSectionProps) {
         <TabsContent value="triggers">
           <CatalogTabState query={triggersQuery} label="triggers">
             {(data) => <TriggersTab response={data} />}
+          </CatalogTabState>
+        </TabsContent>
+        <TabsContent value="sequences">
+          <CatalogTabState query={sequencesQuery} label="sequences">
+            {(data) => <SequencesTab response={data} />}
           </CatalogTabState>
         </TabsContent>
         <TabsContent value="foreign-keys">

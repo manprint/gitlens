@@ -275,6 +275,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/instances/{id}/sequences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Return the sequences and how much of their range each has used.
+         * @description The latest sequences scrape of each database, reported in the last three hours. A sequence's range ends at the nearer of its own bound and the bound of the integer column it feeds. Values are read only where the monitoring role has SELECT on the sequence (tier 1 has it on all); the agent never advances a sequence.
+         */
+        get: operations["getInstanceSequences"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instances/{id}/tables": {
         parameters: {
             query?: never;
@@ -1254,6 +1274,66 @@ export interface components {
             first_seen: components["schemas"]["Timestamp"];
             last_seen: components["schemas"]["Timestamp"];
         };
+        SequencesResponse: {
+            instance_id: components["schemas"]["InstanceId"];
+            sequences: components["schemas"]["Sequence"][];
+            /** @description Databases with more sequences than the agent reports (500); the sequences closest to their limit come first. */
+            truncated_databases: string[];
+        };
+        /** @description One sequence. Bounds and values are decimal strings, as a bigint sequence's range does not fit a JSON number exactly. */
+        Sequence: {
+            datname: string;
+            schemaname: string;
+            name: string;
+            /** @description Declared type of the sequence: smallint, integer or bigint. */
+            data_type: string;
+            /**
+             * @description used: the value is known; unused: never called; hidden: the monitoring role has neither SELECT nor USAGE on the sequence; unread: reading it waited too long for a lock.
+             * @enum {string}
+             */
+            state: "used" | "unused" | "hidden" | "unread";
+            start: string;
+            increment: string;
+            min: string;
+            max: string;
+            cycle: boolean;
+            /** @description Null when never called or not readable. */
+            last_value: string | null;
+            /** @description Last value the sequence can hand out that its column accepts. */
+            limit: string;
+            /**
+             * @description column when the integer type of the column the sequence feeds is narrower than the sequence.
+             * @enum {string}
+             */
+            limit_source: "sequence" | "column";
+            /** @description False for a cycling sequence whose own bound sets the limit: it wraps instead of failing. */
+            exhausts: boolean;
+            /**
+             * Format: double
+             * @description Used fraction of the range from start to limit; null when not readable.
+             */
+            used_ratio: number | null;
+            /** @description Values left before the limit; null when not readable. */
+            remaining: string | null;
+            table_schema: string;
+            /** @description Table of the column the sequence feeds; empty when it feeds none. */
+            table: string;
+            column: string;
+            column_type: string;
+            /**
+             * @description How the sequence is tied to the column; empty when it feeds none.
+             * @enum {string}
+             */
+            link: "" | "identity" | "owned" | "default";
+            /**
+             * Format: int32
+             * @description Number of columns the sequence feeds; the narrowest is reported.
+             */
+            columns: number;
+            first_seen: components["schemas"]["Timestamp"];
+            last_seen: components["schemas"]["Timestamp"];
+            changed_at: components["schemas"]["Timestamp"];
+        };
         DriftValue: {
             instance_id: components["schemas"]["InstanceId"];
             role: string;
@@ -1858,6 +1938,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SpatialColumnsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+        };
+    };
+    getInstanceSequences: {
+        parameters: {
+            query?: {
+                /** @description Return the sequences of this database only. */
+                datname?: string;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["InstanceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sequences by database, schema and name. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SequencesResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];

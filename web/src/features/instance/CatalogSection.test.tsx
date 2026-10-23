@@ -47,6 +47,7 @@ function renderCatalog(
   foreignKeys: Schemas['UnindexedForeignKey'][] = [],
   extensions: Schemas['Extension'][] = [],
   spatial: Schemas['SpatialColumn'][] = [],
+  sequences: Schemas['Sequence'][] = [],
 ) {
   server.use(
     ok('getInstanceTriggers', {
@@ -69,10 +70,46 @@ function renderCatalog(
       columns: spatial,
       truncated_databases: [],
     }),
+    ok('getInstanceSequences', {
+      instance_id: INSTANCE_ID,
+      sequences,
+      truncated_databases: [],
+    }),
   )
   return renderWithProviders(<CatalogSection instanceId={INSTANCE_ID} />, {
     route: `/instances/${INSTANCE_ID}`,
   })
+}
+
+function sequence(overrides: Partial<Schemas['Sequence']> = {}): Schemas['Sequence'] {
+  return {
+    datname: 'app',
+    schemaname: 'public',
+    name: 'orders_id_seq',
+    data_type: 'integer',
+    state: 'used',
+    start: '1',
+    increment: '1',
+    min: '1',
+    max: '2147483647',
+    cycle: false,
+    last_value: '1000',
+    limit: '2147483647',
+    limit_source: 'sequence',
+    exhausts: true,
+    used_ratio: 0.000001,
+    remaining: '2147482647',
+    table_schema: 'public',
+    table: 'orders',
+    column: 'id',
+    column_type: 'integer',
+    link: 'owned',
+    columns: 1,
+    first_seen: SEEN,
+    last_seen: SEEN,
+    changed_at: SEEN,
+    ...overrides,
+  }
 }
 
 function tableRows() {
@@ -251,5 +288,81 @@ describe('CatalogSection', () => {
     expect(screen.getByText('250,000')).toBeInTheDocument()
     expect(screen.getByText('missing')).toBeInTheDocument()
     expect(screen.getByText('unknown')).toBeInTheDocument()
+  })
+
+  // UI-CAT-006: sequences are listed closest to their limit first, bigint
+  // bounds are shown exactly, a column narrower than its sequence is marked,
+  // and hidden values say how to make them readable.
+  it('lists sequences by how much of their range they used', async () => {
+    renderCatalog(
+      [],
+      [],
+      [],
+      [],
+      [],
+      [
+        sequence(),
+        sequence({
+          name: 'wide',
+          data_type: 'bigint',
+          max: '9223372036854775807',
+          last_value: '2000000000',
+          limit: '2147483647',
+          limit_source: 'column',
+          used_ratio: 0.931323,
+          remaining: '147483647',
+          table: 'narrow',
+          link: 'default',
+        }),
+        sequence({
+          name: 'ring',
+          cycle: true,
+          exhausts: false,
+          used_ratio: 0.99,
+          last_value: '99',
+          max: '100',
+          limit: '100',
+          remaining: '1',
+          column: '',
+          table: '',
+          table_schema: '',
+          column_type: '',
+          link: '',
+          columns: 0,
+        }),
+        sequence({
+          name: 'secret',
+          state: 'hidden',
+          last_value: null,
+          used_ratio: null,
+          remaining: null,
+        }),
+        sequence({ name: 'fresh', state: 'unused', last_value: null, used_ratio: 0 }),
+      ],
+    )
+    await settle()
+
+    const tab = screen.getByRole('tab', { name: /Sequences/ })
+    expect(tab).toHaveAccessibleName('Sequences 1 near their limit')
+    fireEvent.mouseDown(tab)
+    fireEvent.click(tab)
+    await settle()
+    const rows = tableRows()
+    expect(rows.map((row) => within(row).getAllByRole('cell')[1]?.textContent)).toEqual([
+      'public.ringcycles',
+      'public.wide',
+      'public.orders_id_seq',
+      'public.fresh',
+      'public.secret',
+    ])
+    expect(within(rows[1]!).getByText('93.1%')).toBeInTheDocument()
+    expect(within(rows[1]!).getByText('column type')).toBeInTheDocument()
+    expect(within(rows[1]!).getByText('2,147,483,647')).toBeInTheDocument()
+    expect(within(rows[0]!).getByText('99.0%')).toBeInTheDocument()
+    expect(within(rows[0]!).getByText('no column')).toBeInTheDocument()
+    expect(within(rows[3]!).getByText('never called')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'The values of 1 sequence are not readable by the monitoring role',
+    )
   })
 })

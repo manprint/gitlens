@@ -30,6 +30,7 @@ var factKinds = map[string]FactKind{
 	"fk_unindexed":    {Check: "fk_indexes", Replace: true},
 	"extension":       {Check: "extensions", Replace: true},
 	"spatial_column":  {Check: "postgis_columns", Replace: true},
+	"sequence":        {Check: "sequences", Replace: true},
 }
 
 // LookupFactKind returns the description of a fact kind, and whether the
