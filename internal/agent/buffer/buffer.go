@@ -185,8 +185,8 @@ func Open(dir string, opts Options) (*Buffer, error) {
 	// first segment that exists.
 	checkpointSegID, checkpointOff := b.ackedSegID, b.ackedOff
 	// The checkpoint is a segment ID too. The files alone do not show the IDs
-	// the checkpoint has used, so new segments are numbered above it: even when
-	// the corrected checkpoint below cannot be written, nothing reuses its ID.
+	// the checkpoint has used, so new segments are numbered above it and never
+	// take its ID.
 	if haveCheckpoint && b.ackedSegID >= b.nextSegID {
 		b.nextSegID = b.ackedSegID + 1
 	}
@@ -212,11 +212,19 @@ func Open(dir string, opts Options) (*Buffer, error) {
 
 	// A corrected checkpoint is written now, before the buffer takes an append:
 	// kept only in memory, it would come back after an unclean exit. If the write
-	// fails, the warning says so and the next ack writes it again. Until then a
-	// position past the end of its segment can hide the appends made in between.
+	// fails, the stale checkpoint on disk must not stay. Left in place, the next
+	// Open would take the segments below it for acknowledged and delete them
+	// unread, once new segments exist above it. It is removed instead, so the next
+	// Open replays the buffer from its first segment. That repeats delivered
+	// records, which at-least-once delivery allows, but deletes nothing. If the
+	// removal fails too, Open fails rather than leave the stale checkpoint behind.
 	if b.ackedSegID != checkpointSegID || b.ackedOff != checkpointOff {
 		if err := b.saveAckedPosition(); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: buffer: cannot save the corrected acked checkpoint in %s, keeping it in memory: %v\n", dir, err)
+			if rmErr := os.Remove(filepath.Join(dir, ".acked")); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+				closeLoaded()
+				return nil, fmt.Errorf("remove stale acked checkpoint in %s after failed save (%w): %w", dir, err, rmErr)
+			}
+			fmt.Fprintf(os.Stderr, "warning: buffer: cannot save the corrected acked checkpoint in %s, removed the stale one: %v\n", dir, err)
 		}
 	}
 
@@ -555,9 +563,13 @@ func (b *Buffer) unackedRecords(seg *Segment) int64 {
 
 // removeOldestSegment deletes the oldest segment. reason names the retention
 // policy responsible; only records that were never delivered count as
-// dropped. An empty reason is for the segments the checkpoint passes. A fixed
-// binary removes only delivered records that way, but a checkpoint written by
-// a pre-fix binary can pass unacked records, and those go uncounted.
+// dropped. An empty reason is for the segments the checkpoint passes. Open
+// settles the checkpoint before any segment is dropped: a checkpoint past the
+// files moves back to the first one, and a stale checkpoint that cannot be
+// saved is removed, or Open fails. So those segments hold only delivered
+// records, with two residuals. A checkpoint from a pre-fix binary can pass
+// unacked records, which Open cannot detect, and .acked has no checksum
+// (AB-11), so a corrupted checkpoint of the right size is trusted.
 func (b *Buffer) removeOldestSegment(reason string) {
 	oldestSeg := b.segments[0]
 	var dropped int64

@@ -1418,10 +1418,12 @@ func TestBuffer_StaleCheckpointKeepsNewSegments(t *testing.T) {
 
 // TestBuffer_CheckpointPastUnackedSegmentsKeepsThem — AB-03: the checkpoint names
 // a segment past every segment on disk, while the segments below it hold records
-// that were never delivered. Only a pre-fix binary or a manual edit leaves such a
-// checkpoint behind. The records must still be delivered, and the restart that
-// moves the checkpoint back must be persisted: otherwise an unclean exit after new
-// appends would find the old checkpoint again and delete the old records unread.
+// that were never delivered. A pre-fix binary or a manual edit can leave such a
+// checkpoint behind, and the fixed binary must not make that state worse. The
+// records must still be delivered. The restart that moves the checkpoint back
+// must be persisted: otherwise an unclean exit after new appends would find the
+// old checkpoint again and delete the old records unread. When that write is
+// blocked, the stale checkpoint is removed instead, with the same outcome.
 func TestBuffer_CheckpointPastUnackedSegmentsKeepsThem(t *testing.T) {
 	const recSize = 64 * 1024
 	// setup leaves 200 records of recSize bytes in segments 0 and 1, none acked,
@@ -1510,6 +1512,79 @@ func TestBuffer_CheckpointPastUnackedSegmentsKeepsThem(t *testing.T) {
 			t.Errorf("SamplesDropped = %v, want none", dropped)
 		}
 	})
+
+	t.Run("old records survive a blocked checkpoint correction and an unclean exit", func(t *testing.T) {
+		dir := setup(t)
+		// A directory where the checkpoint's temporary file goes blocks the write
+		// that corrects the checkpoint at Open.
+		blocker := filepath.Join(dir, ".acked.tmp")
+		if err := os.Mkdir(blocker, 0o755); err != nil {
+			t.Fatalf("block checkpoint write: %v", err)
+		}
+		var buf *Buffer
+		var err error
+		stderr := captureStderr(t, func() {
+			buf, err = Open(dir, Options{Clock: clock.System()})
+		})
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		if !strings.Contains(stderr, "cannot save the corrected acked checkpoint") {
+			t.Errorf("Open printed %q, want a warning about the failed save", stderr)
+		}
+		// The new records fill the rest of segment 1 and roll into segments numbered
+		// past the checkpoint.
+		for i := 0; i < 200; i++ {
+			rec := make([]byte, recSize)
+			copy(rec, fmt.Sprintf("new-%03d:", i))
+			if err := buf.Append(rec); err != nil {
+				t.Fatalf("Append new %d: %v", i, err)
+			}
+		}
+		// No Close: the next Open finds whatever Open left on disk.
+		if err := os.Remove(blocker); err != nil {
+			t.Fatalf("unblock checkpoint write: %v", err)
+		}
+		reopened, err := Open(dir, Options{Clock: clock.System()})
+		if err != nil {
+			t.Fatalf("second Open: %v", err)
+		}
+		defer func() { _ = reopened.Close() }()
+		got := drainAndAck(t, reopened)
+		if len(got) != 400 {
+			t.Fatalf("delivered %d records, want 400 (200 old, then 200 new)", len(got))
+		}
+		for i := range got {
+			prefix := fmt.Sprintf("old-%03d:", i)
+			if i >= 200 {
+				prefix = fmt.Sprintf("new-%03d:", i-200)
+			}
+			if !strings.HasPrefix(got[i], prefix) {
+				t.Fatalf("record %d starts %q, want %q", i, got[i][:min(len(got[i]), len(prefix))], prefix)
+			}
+		}
+		if dropped := reopened.Stats().SamplesDropped; len(dropped) != 0 {
+			t.Errorf("SamplesDropped = %v, want none", dropped)
+		}
+	})
+
+	t.Run("open refuses when the stale checkpoint can be neither saved nor removed", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("a read-only directory does not stop root")
+		}
+		dir := setup(t)
+		// A read-only directory refuses both the write of the corrected checkpoint
+		// and the removal of the stale one. Open must refuse rather than keep the
+		// stale checkpoint and delete the old records unread on the next start.
+		if err := os.Chmod(dir, 0o555); err != nil {
+			t.Fatalf("chmod: %v", err)
+		}
+		defer func() { _ = os.Chmod(dir, 0o755) }() // let t.TempDir() clean up
+		if buf, err := Open(dir, Options{Clock: clock.System()}); err == nil {
+			_ = buf.Close()
+			t.Fatal("Open succeeded, want an error: the stale checkpoint is still on disk")
+		}
+	})
 }
 
 // TestBuffer_CheckpointPastSegmentEndRestartsAtFileEnd — AB-16: a power loss can
@@ -1591,6 +1666,44 @@ func TestBuffer_CheckpointPastSegmentEndRestartsAtFileEnd(t *testing.T) {
 			t.Fatalf("delivered %q, want [record-3]", got)
 		}
 	})
+
+	t.Run("appends survive an unclean exit when the correction cannot be saved", func(t *testing.T) {
+		dir := setup(t)
+		blocker := filepath.Join(dir, ".acked.tmp")
+		if err := os.Mkdir(blocker, 0o755); err != nil {
+			t.Fatalf("block checkpoint write: %v", err)
+		}
+		var buf *Buffer
+		var err error
+		stderr := captureStderr(t, func() {
+			buf, err = Open(dir, Options{Clock: clock.System()})
+		})
+		if err != nil {
+			t.Fatalf("reopen: %v", err)
+		}
+		if !strings.Contains(stderr, "cannot save the corrected acked checkpoint") {
+			t.Errorf("reopen printed %q, want a warning about the failed save", stderr)
+		}
+		if err := buf.Append([]byte("record-3")); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+		// No Close: the next Open finds whatever Open left on disk.
+		if err := os.Remove(blocker); err != nil {
+			t.Fatalf("unblock checkpoint write: %v", err)
+		}
+		buf, err = Open(dir, Options{Clock: clock.System()})
+		if err != nil {
+			t.Fatalf("second Open: %v", err)
+		}
+		defer func() { _ = buf.Close() }()
+		// record-0 was acked before the cut. The stale checkpoint is removed rather
+		// than kept, so the next Open replays from the first segment and offers it
+		// again. That repeats a delivered record, which at-least-once allows; the
+		// record-3 appended after the cut must not be lost.
+		if got := drainAndAck(t, buf); len(got) != 2 || got[0] != "record-0" || got[1] != "record-3" {
+			t.Fatalf("delivered %q, want [record-0 record-3]", got)
+		}
+	})
 }
 
 // frameRecord returns payload framed the way Segment.Append writes it: the
@@ -1604,8 +1717,9 @@ func frameRecord(payload string) []byte {
 }
 
 // TestBuffer_StaleCheckpointSurvivesFailedSave — AB-03: the corrected checkpoint
-// cannot be written, so the stale one stays on disk. New segments must still be
-// numbered above its ID, or an unclean exit would make them look acknowledged.
+// cannot be written, so the stale one is removed rather than left to make the
+// records written after the cleanup look acknowledged. The next Open finds no
+// checkpoint and must deliver all of them.
 func TestBuffer_StaleCheckpointSurvivesFailedSave(t *testing.T) {
 	dir := t.TempDir()
 	buf, err := Open(dir, Options{Clock: clock.System()})
