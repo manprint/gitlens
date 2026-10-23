@@ -100,6 +100,18 @@ func TestExampleStack_PublishesLoopbackOnlyAndRequiresSecrets(t *testing.T) {
 	}
 }
 
+// The server runs its migrations against PGLENS_DSN on startup. The example
+// stack takes that DSN from its own TimescaleDB service and never from the
+// host environment, so a PGLENS_DSN exported in the shell that starts the
+// stack cannot point the migrations at a monitored database.
+func TestExampleStack_ServerStoresIntoItsOwnDatabase(t *testing.T) {
+	var stack composeFile
+	require.NoError(t, yaml.Unmarshal(readFile(t, "docker-compose.yml"), &stack))
+	require.Equal(t,
+		"postgres://pglens:${PGLENS_DB_PASSWORD:?set PGLENS_DB_PASSWORD}@timescaledb:5432/pglens?sslmode=disable",
+		stack.Services["pglens-server"].Environment["PGLENS_DSN"])
+}
+
 // composeFiles lists every YAML file under deploy/. A compose file added
 // later is held to the same rules as the shipped ones.
 func composeFiles(t *testing.T) []string {
