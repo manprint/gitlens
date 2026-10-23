@@ -128,6 +128,20 @@ func TestDispatcher_UnknownInstanceIsRejected(t *testing.T) {
 	require.Contains(t, got.Error, "does not monitor")
 }
 
+// TestDispatcher_AddTargetIgnoresTheNilInstance: a target whose identity was not
+// readable has the nil instance id. Registering it would poll commands for no
+// instance, so the dispatcher keeps only the real ones.
+func TestDispatcher_AddTargetIgnoresTheNilInstance(t *testing.T) {
+	d := NewDispatcher("http://127.0.0.1:1/", "token", uuid.New(), true)
+	d.AddTarget(uuid.Nil, &dispatcherTarget{}, false, false)
+	require.Empty(t, d.targets)
+
+	real := uuid.New()
+	d.AddTarget(real, &dispatcherTarget{}, false, false)
+	require.Len(t, d.targets, 1)
+	require.Contains(t, d.targets, real)
+}
+
 // refreshFailingTarget reports a capability refresh that cannot read the
 // database, the way a connection that cannot be acquired does.
 type refreshFailingTarget struct {

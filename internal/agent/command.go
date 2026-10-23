@@ -87,8 +87,13 @@ func sleepCommand(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// AddTarget registers a monitored instance and its command permissions.
+// AddTarget registers a monitored instance and its command permissions. The nil
+// instance id names no instance, so it is not registered: a target whose
+// identity could not be read has nothing to poll commands for.
 func (d *Dispatcher) AddTarget(instanceID uuid.UUID, target check.Target, allowExplainAnalyze, allowSignal bool) {
+	if instanceID == uuid.Nil {
+		return
+	}
 	d.targets[instanceID] = commandTarget{target: target, allowExplainAnalyze: allowExplainAnalyze, allowSignal: allowSignal}
 }
 
