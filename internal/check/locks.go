@@ -78,9 +78,10 @@ type lockNode struct {
 //
 // The last column says whether the text reached the size PostgreSQL cuts a
 // session's text to. The byte count is taken on the server, where the cut
-// happens. A cut text is clipped at a character boundary, so it can be up to
-// three bytes short of the size; the four-byte margin covers that, and a
-// probe on PostgreSQL 18 cut a text to the size less two.
+// happens. The cut keeps at most the size less one byte and stops at a
+// character boundary, so a cut text can be as short as the size less four;
+// the four-byte margin covers every cut, and a probe on PostgreSQL 18 cut a
+// text to the size less two.
 const locksQuery = `
 SELECT a.pid,
        COALESCE(a.datname, ''),

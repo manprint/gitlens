@@ -148,10 +148,10 @@ SELECT a.queryid, a.calls, a.total_exec_time, a.rows,
 // statementTextLimit is the longest query text the statements query reads. A
 // longer text is read as NULL and not shipped: only a text read whole can be
 // redacted, since a credential's keyword may lie past any cut. PostgreSQL keeps
-// utility statements whole, so a long DO or CREATE FUNCTION is common. The
-// bound caps the bytes read per ranked row, so the worst case per scrape is the
-// ranked rows times this limit, which is about 9.8 MB at the prefilter's
-// minimum of 300.
+// utility statements whole, so a long DO block or CREATE FUNCTION keeps its
+// full text and is affected by the limit. The ranking reads at most twice the
+// prefilter rows, so the worst case per scrape is that count times this limit,
+// about 9.8 MB at the prefilter's minimum of 300.
 const statementTextLimit = 16384
 
 // textResendInterval bounds how long a shipped query text is trusted to be
