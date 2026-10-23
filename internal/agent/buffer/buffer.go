@@ -104,7 +104,7 @@ func Open(dir string, opts Options) (*Buffer, error) {
 	// Load each segment and recover the next segment ID.
 	for _, fname := range segFiles {
 		fpath := filepath.Join(dir, fname)
-		seg, err := openSegment(fpath)
+		seg, cut, err := openSegment(fpath)
 		if err != nil {
 			closeLoaded()
 			return nil, fmt.Errorf("open segment %s: %w", fname, err)
@@ -121,6 +121,13 @@ func Open(dir string, opts Options) (*Buffer, error) {
 		seg.maxSize = segmentSize(opts.MaxSize)
 		if segID >= b.nextSegID {
 			b.nextSegID = segID + 1
+		}
+		if cut > 0 {
+			// The cut record was never complete, so it was never deliverable.
+			// Counting it keeps the loss visible instead of silent.
+			b.stats.CorruptRecords++
+			tornAt := opts.Clock.Now()
+			b.stats.LastCorruptTime = &tornAt
 		}
 
 		b.segments = append(b.segments, seg)
@@ -565,17 +572,18 @@ type Segment struct {
 	mu          sync.Mutex
 }
 
-// openSegment opens an existing segment file.
-func openSegment(fpath string) (*Segment, error) {
+// openSegment opens an existing segment file. It returns the number of bytes
+// it cut from the end of the file, which is non-zero only after a torn write.
+func openSegment(fpath string) (*Segment, int64, error) {
 	f, err := os.OpenFile(fpath, os.O_RDWR|os.O_APPEND, 0644)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	stat, err := f.Stat()
 	if err != nil {
 		_ = f.Close()
-		return nil, err
+		return nil, 0, err
 	}
 
 	seg := &Segment{
@@ -583,51 +591,41 @@ func openSegment(fpath string) (*Segment, error) {
 		path:      fpath,
 		createdAt: stat.ModTime(),
 		lastWrite: stat.ModTime(),
-		fileSize:  stat.Size(),
 	}
 
-	// Count records in the file by scanning. A truncated or corrupt trailing
-	// record is expected (a crash mid-write) and stops the scan without being
-	// an error the caller should see — Open() still succeeds with whatever
-	// intact records were found, per the buffer's crash-tolerance contract.
-	if _, err := f.Seek(0, 0); err != nil {
-		_ = f.Close()
-		return nil, err
-	}
-
-scan:
-	for {
-		var lenBuf [4]byte
-		n, readErr := f.Read(lenBuf[:])
-		if n == 0 || errors.Is(readErr, io.EOF) {
+	// Walk the records by their length headers, as recordsFrom does. A record
+	// that runs past the end of the file is a torn write, and nothing can follow
+	// it. The file is cut back to the end of the last complete record: an append
+	// landing after the torn bytes would be read as part of their payload, and
+	// the reader would never realign. A complete record with a bad CRC is kept.
+	// Its length is sound, so the reader skips it and the records after it stay
+	// reachable.
+	size := stat.Size()
+	var offset int64
+	for offset+8 <= size {
+		var header [8]byte
+		if _, err := f.ReadAt(header[:], offset); err != nil {
+			_ = f.Close()
+			return nil, 0, err
+		}
+		next := offset + 8 + int64(binary.LittleEndian.Uint32(header[0:4]))
+		if next > size {
 			break
 		}
-		if readErr != nil {
-			_ = f.Close()
-			return nil, readErr
-		}
-
-		length := binary.LittleEndian.Uint32(lenBuf[:])
-		crcBuf := make([]byte, 4)
-		if _, readErr := f.Read(crcBuf); readErr != nil {
-			break scan // truncated trailing record; stop counting, not fatal
-		}
-
-		// Skip the actual data.
-		if _, readErr := f.Seek(int64(length), 1); readErr != nil {
-			break scan // truncated trailing record; stop counting, not fatal
-		}
-
+		offset = next
 		seg.recordCount++
 	}
 
-	// Seek to end for appending.
-	if _, err := f.Seek(0, 2); err != nil {
-		_ = f.Close()
-		return nil, err
+	cut := size - offset
+	if cut > 0 {
+		if err := f.Truncate(offset); err != nil {
+			_ = f.Close()
+			return nil, 0, err
+		}
 	}
+	seg.fileSize = offset
 
-	return seg, nil
+	return seg, cut, nil
 }
 
 // Append appends a record to this segment.
@@ -635,29 +633,34 @@ func (s *Segment) Append(data []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	length := uint32(len(data))
-	crc := computeCRC32C(data)
-
-	lenBuf := make([]byte, 4)
-	binary.LittleEndian.PutUint32(lenBuf, length)
-
-	if _, err := s.file.Write(lenBuf); err != nil {
+	// Bytes past fileSize are left by a write that failed part-way. They are not
+	// a record, and a record written after them would be read as part of their
+	// payload. They are cut off before anything is written.
+	info, err := s.file.Stat()
+	if err != nil {
 		return err
 	}
-
-	creBuf := make([]byte, 4)
-	binary.LittleEndian.PutUint32(creBuf, crc)
-
-	if _, err := s.file.Write(creBuf); err != nil {
-		return err
+	if info.Size() != s.fileSize {
+		if err := s.file.Truncate(s.fileSize); err != nil {
+			return err
+		}
 	}
 
-	if _, err := s.file.Write(data); err != nil {
+	// The header and the payload go out in one write, so a failure leaves at
+	// most one partial record, and that is cut off by the next append.
+	buf := make([]byte, 8+len(data))
+	binary.LittleEndian.PutUint32(buf[0:4], uint32(len(data)))
+	binary.LittleEndian.PutUint32(buf[4:8], computeCRC32C(data))
+	copy(buf[8:], data)
+
+	if _, err := s.file.Write(buf); err != nil {
+		// Best effort: the next append cuts the same bytes off if this fails.
+		_ = s.file.Truncate(s.fileSize)
 		return err
 	}
 
 	s.recordCount++
-	s.fileSize += int64(len(lenBuf) + len(creBuf) + len(data))
+	s.fileSize += int64(len(buf))
 
 	return nil
 }

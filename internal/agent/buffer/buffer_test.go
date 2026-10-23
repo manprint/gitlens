@@ -2,6 +2,7 @@ package buffer
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -994,5 +995,143 @@ func TestBuffer_AckSurvivesAnUncleanExit(t *testing.T) {
 	}
 	if string(got) != "pending" {
 		t.Fatalf("first record after reopen = %q, want %q (delivered envelopes replayed)", got, "pending")
+	}
+}
+
+// drainAndAck reads every record the buffer will offer, acking each one, and
+// returns their payloads in order.
+func drainAndAck(t *testing.T, buf *Buffer) []string {
+	t.Helper()
+	var got []string
+	for {
+		data, ack, err := buf.Next()
+		if errors.Is(err, io.EOF) {
+			return got
+		}
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		if data == nil {
+			t.Fatalf("Next returned a corrupt record after %q", got)
+		}
+		got = append(got, string(data))
+		if err := ack(context.Background()); err != nil {
+			t.Fatalf("ack: %v", err)
+		}
+	}
+}
+
+// TestBuffer_AppendAfterTornTailKeepsLaterRecords — AB-02: a crash that left a
+// torn record at the end of the active segment must not hide the records
+// appended after the restart. The reader used to take their bytes for the torn
+// record's payload, fail the CRC and never realign.
+func TestBuffer_AppendAfterTornTailKeepsLaterRecords(t *testing.T) {
+	dir := t.TempDir()
+	buf, err := Open(dir, Options{Clock: clock.System()})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		if err := buf.Append([]byte(strings.Repeat(string(rune('a'+i)), 40))); err != nil {
+			t.Fatalf("Append %d: %v", i, err)
+		}
+	}
+	if err := buf.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Cut the last record short, as a crash mid-write does.
+	segPath := firstSegmentFile(t, dir)
+	stat, err := os.Stat(segPath)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if err := os.Truncate(segPath, stat.Size()-5); err != nil {
+		t.Fatalf("Truncate: %v", err)
+	}
+
+	buf, err = Open(dir, Options{Clock: clock.System()})
+	if err != nil {
+		t.Fatalf("Reopen after torn tail: %v", err)
+	}
+	for i := 3; i < 5; i++ {
+		if err := buf.Append([]byte(strings.Repeat(string(rune('a'+i)), 40))); err != nil {
+			t.Fatalf("Append %d: %v", i, err)
+		}
+	}
+	if got := buf.Stats().CorruptRecords; got != 1 {
+		t.Errorf("CorruptRecords after torn tail = %d, want 1", got)
+	}
+	if err := buf.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	want := []string{
+		strings.Repeat("a", 40),
+		strings.Repeat("b", 40),
+		strings.Repeat("d", 40),
+		strings.Repeat("e", 40),
+	}
+	buf, err = Open(dir, Options{Clock: clock.System()})
+	if err != nil {
+		t.Fatalf("second reopen: %v", err)
+	}
+	defer func() { _ = buf.Close() }()
+	got := drainAndAck(t, buf)
+	if len(got) != len(want) {
+		t.Fatalf("delivered %d records, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("record %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// TestBuffer_AppendAfterPartialWriteKeepsLaterRecords — AB-02 and RO-09: bytes
+// that a write left past the last complete record, the header of a record whose
+// payload never arrived, must not sit between the records before and after them.
+// The in-process shape: no restart, so only Append can cut the garbage off.
+func TestBuffer_AppendAfterPartialWriteKeepsLaterRecords(t *testing.T) {
+	dir := t.TempDir()
+	buf, err := Open(dir, Options{Clock: clock.System()})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = buf.Close() }()
+
+	if err := buf.Append([]byte("rec-A")); err != nil {
+		t.Fatalf("Append rec-A: %v", err)
+	}
+
+	// A header claiming 1000 payload bytes, followed by 100 of them.
+	torn := make([]byte, 8+100)
+	binary.LittleEndian.PutUint32(torn[0:4], 1000)
+	f, err := os.OpenFile(firstSegmentFile(t, dir), os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		t.Fatalf("open segment: %v", err)
+	}
+	if _, err := f.Write(torn); err != nil {
+		t.Fatalf("write torn record: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	for _, rec := range []string{"rec-B", "rec-C"} {
+		if err := buf.Append([]byte(rec)); err != nil {
+			t.Fatalf("Append %s: %v", rec, err)
+		}
+	}
+
+	got := drainAndAck(t, buf)
+	want := []string{"rec-A", "rec-B", "rec-C"}
+	if len(got) != len(want) {
+		t.Fatalf("delivered %q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("record %d = %q, want %q", i, got[i], want[i])
+		}
 	}
 }
