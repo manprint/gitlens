@@ -81,7 +81,18 @@ func (s *scopedSelectors) TopN() int {
 // next returns the selector for t's scope together with this scope's own next
 // cycle number.
 func (s *scopedSelectors) next(t Target) (*cardinality.Selector, uint64) {
+	return s.nextKind(t, "")
+}
+
+// nextKind is next for one budget of a scope. A check that reports two kinds
+// of object under one scope (bloat_estimate: tables and indexes) keeps a
+// selector per kind, so each kind has its own budget and its own hysteresis.
+// Both kinds share the scope's state retention and the top-N setting.
+func (s *scopedSelectors) nextKind(t Target, kind string) (*cardinality.Selector, uint64) {
 	key := scopeKey(t)
+	if kind != "" {
+		key += "\x00" + kind
+	}
 	now := scopeNow(t)
 
 	s.mu.Lock()

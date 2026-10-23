@@ -1170,3 +1170,25 @@ func TestCounterResetEventsNameTheDatabase(t *testing.T) {
 	require.Equal(t, "", events[1].Payload["database"])
 	require.Equal(t, 1, events[1].Payload["count"])
 }
+
+// TestMetricDestination_SkippedTablesIsAGauge: the skipped-table count of
+// bloat_estimate is one value per database. Routed to metrics_bloat it would
+// need an object_kind and a method it does not have, and the envelope would be
+// refused by the table's CHECK constraints.
+func TestMetricDestination_SkippedTablesIsAGauge(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "metrics", metricDestination("bloat_estimate", wire.BloatSkippedTablesMetric))
+	require.Equal(t, "metrics_bloat", metricDestination("bloat_estimate", "pg_bloat_real_bytes"))
+	require.Equal(t, "metrics_bloat", metricDestination("bloat_estimate", "pg_bloat_ratio"))
+}
+
+// TestPresentRelations_SkippedTablesIsNotARelation: the gauge carries no
+// relation, so it must not add an empty relation key to the prune.
+func TestPresentRelations_SkippedTablesIsNotARelation(t *testing.T) {
+	t.Parallel()
+	keys := presentRelations([]wire.Metric{
+		{Name: wire.BloatSkippedTablesMetric, Value: 2, Kind: "gauge", Labels: map[string]string{}},
+		{Name: "pg_bloat_real_bytes", Value: 1, Kind: "gauge", Labels: map[string]string{"schemaname": "public", "relname": "t", "indexrelname": "t_idx"}},
+	})
+	require.Equal(t, []store.RelationKey{{Schema: "public", Relation: "t", Index: "t_idx"}}, keys)
+}
