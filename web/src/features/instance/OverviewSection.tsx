@@ -64,6 +64,7 @@ function useOverviewMetricQueries(
     deadlocks: useQueryMetrics(perDatabase('pg_deadlocks_total'), timeWindow),
     rollbacks: useQueryMetrics(perDatabase('pg_xact_rollback_total'), timeWindow),
     tempBytes: useQueryMetrics(perDatabase('pg_temp_bytes_total'), timeWindow),
+    tempFiles: useQueryMetrics(perDatabase('pg_temp_files_total'), timeWindow),
     transactions: useQueryMetrics(perDatabase('pg_xact_commit_total'), timeWindow),
     walRate: useQueryMetrics(instanceWide('pg_wal_lsn_bytes'), timeWindow),
   }
@@ -129,6 +130,7 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
   )
   const deadlockRate = seriesFrom(queries.deadlocks)
   const tempByteRate = seriesFrom(queries.tempBytes)
+  const tempFileRate = seriesFrom(queries.tempFiles)
   const walRate = seriesFrom(queries.walRate)
 
   const checkpointsPerHour = scaleSeries(checkpointRate, 3_600)
@@ -137,6 +139,7 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
   const latestCacheHitRatio = cacheHitRatioValue(latestValue(blksHit), latestValue(blksRead))
   const checkpointsInRange = integrateRate(checkpointRate, stepSeconds)
   const deadlocksInRange = integrateRate(deadlockRate, stepSeconds)
+  const tempFilesInRange = integrateRate(tempFileRate, stepSeconds)
 
   const charts: readonly ChartDefinition[] = [
     {
@@ -197,7 +200,7 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
   return (
     <Section
       title="Instance overview"
-      description={`Transactions, cache hit ratio, temporary bytes and deadlocks are for database ${database}; connections, WAL and checkpoints are instance-wide. Selected range step ${step}. Null buckets remain gaps; reset markers identify counter resets.`}
+      description={`Transactions, cache hit ratio, temporary files and bytes, and deadlocks are for database ${database}; connections, WAL and checkpoints are instance-wide. Selected range step ${step}. Null buckets remain gaps; reset markers identify counter resets.`}
     >
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricTile
@@ -226,6 +229,10 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
         <MetricTile
           label="Temporary bytes in range"
           value={formattedBytes(integrateRate(tempByteRate, stepSeconds))}
+        />
+        <MetricTile
+          label="Temporary files in range"
+          value={tempFilesInRange === null ? null : formatCount(Math.round(tempFilesInRange))}
         />
         <MetricTile
           label="Deadlocks in range"

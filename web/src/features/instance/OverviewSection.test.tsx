@@ -100,6 +100,7 @@ describe('OverviewSection', () => {
       'WAL generated in range',
       'Checkpoints in range',
       'Temporary bytes in range',
+      'Temporary files in range',
       'Deadlocks in range',
     ]) {
       expect(
@@ -163,11 +164,13 @@ describe('OverviewSection', () => {
             ? 1024
             : metric === 'pg_deadlocks_total'
               ? 0.01
-              : metric === 'pg_xact_commit_total'
-                ? 12.5
-                : metric === 'pg_xact_rollback_total'
-                  ? 0.5
-                  : null
+              : metric === 'pg_temp_files_total'
+                ? 0.5
+                : metric === 'pg_xact_commit_total'
+                  ? 12.5
+                  : metric === 'pg_xact_rollback_total'
+                    ? 0.5
+                    : null
         return HttpResponse.json({
           series: [
             { ts: '2026-08-27T01:00:00Z', value: rate },
@@ -197,6 +200,7 @@ describe('OverviewSection', () => {
       'pg_blks_hit_total',
       'pg_blks_read_total',
       'pg_temp_bytes_total',
+      'pg_temp_files_total',
       'pg_deadlocks_total',
     ]) {
       expect(databases.get(metric)).toBe('app')
@@ -207,6 +211,10 @@ describe('OverviewSection', () => {
       formatBytes(1024 * 360),
     )
     expect(screen.getByRole('article', { name: 'Deadlocks in range' })).toHaveTextContent('4')
+    // Half a file a second over the same 360 seconds as the deadlocks tile.
+    expect(screen.getByRole('article', { name: 'Temporary files in range' })).toHaveTextContent(
+      '180',
+    )
     expect(screen.getByRole('article', { name: 'Transactions per second' })).toHaveTextContent(
       '13/s',
     )
