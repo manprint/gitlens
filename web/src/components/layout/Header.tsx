@@ -121,6 +121,14 @@ export function Header({ connection = defaultConnection, dataUpdatedAt = 0 }: He
     setTheme(next)
   }
 
+  // The label names the current theme, and each click moves to the next one in
+  // the cycle dark, light, system.
+  const themeLabel =
+    theme === 'system'
+      ? `System (${resolvedTheme})`
+      : theme === 'dark'
+        ? 'Dark theme'
+        : 'Light theme'
   return (
     <header className="bg-background/95 sticky top-0 z-10 flex min-h-16 flex-wrap items-center justify-between gap-4 border-b px-4 py-3 backdrop-blur">
       <Breadcrumbs />
@@ -128,12 +136,15 @@ export function Header({ connection = defaultConnection, dataUpdatedAt = 0 }: He
         <TimeRangePicker />
         <FreshnessBadge dataUpdatedAt={dataUpdatedAt} policy="fleet" />
         <ConnectionIndicator {...connection} online={online} />
-        <Button aria-label="Toggle theme" onClick={toggleTheme} size="sm" variant="ghost">
-          {theme === 'system'
-            ? `System (${resolvedTheme})`
-            : theme === 'dark'
-              ? 'Light theme'
-              : 'Dark theme'}
+        {/* The accessible name keeps the visible label (WCAG 2.5.3), so the
+            screen reader hears the current theme along with the control. */}
+        <Button
+          aria-label={`Toggle theme: ${themeLabel}`}
+          onClick={toggleTheme}
+          size="sm"
+          variant="ghost"
+        >
+          {themeLabel}
         </Button>
         <Button
           aria-label="Sign out"
