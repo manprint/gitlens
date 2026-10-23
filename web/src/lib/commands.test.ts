@@ -22,6 +22,13 @@ describe('command lifecycle descriptions', () => {
     expect(COMMAND_CLIENT_TIMEOUT_MS).toBe(5 * 60_000 + COMMAND_GRACE_MS)
   })
 
+  it('WD-10 does not say no agent claimed a command when the server expired it', () => {
+    expect(describeCommandState('expired')).not.toMatch(/no agent claimed/i)
+    expect(describeCommandState('expired', 'the agent claimed it')).toBe(
+      'Command expired: the agent claimed it',
+    )
+  })
+
   it('UI-CMD-005 describes every command state in the union', () => {
     const states: CommandState[] = [
       'pending',

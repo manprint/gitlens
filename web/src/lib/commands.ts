@@ -36,7 +36,9 @@ export function describeCommandState(state: CommandState, error?: string | null)
     case 'failed':
       return error ? `Command failed: ${error}` : 'Command failed without an agent result.'
     case 'expired':
-      return `Command expired: no agent claimed it within the ${COMMAND_TTL_LABEL} TTL.`
+      return error
+        ? `Command expired: ${error}`
+        : `Command expired: no result was recorded within the ${COMMAND_TTL_LABEL} TTL.`
     case 'rejected':
       return error ? `Command rejected by the agent: ${error}` : 'Command rejected by the agent.'
     default:

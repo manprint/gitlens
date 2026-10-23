@@ -12,7 +12,7 @@ import { qk } from './keys'
 import { REFRESH } from './policy'
 import {
   COMMAND_CLIENT_TIMEOUT_MS,
-  describeCommandState,
+  COMMAND_TTL_LABEL,
   isTerminalCommandState,
   type CommandState,
 } from '@/lib/commands'
@@ -25,6 +25,11 @@ export type CommandArgs = Omit<components['schemas']['CommandArgs'], 'queryid'> 
 export type GeneratedCommandResponse = components['schemas']['CommandResponse']
 export type CommandResponse = Omit<GeneratedCommandResponse, 'state'> & { state: CommandState }
 export type CreateCommandResponse = components['schemas']['CreateCommandResponse']
+
+// The server reports the same expired state whether or not an agent took the
+// command. Once the client has seen a claim, it says so, because the agent may
+// still be running the statement and a second run would repeat its work.
+const CLAIMED_THEN_EXPIRED = `the agent claimed it, but no result arrived within the ${COMMAND_TTL_LABEL} TTL. It may still be running, so wait before running it again.`
 
 export interface CreateCommandVariables {
   kind: CommandKind
@@ -89,18 +94,28 @@ export function useCommand(commandId: string) {
   const clientExpired = expiry.commandId === commandId && expiry.expired
   const startedAt = useRef<number | null>(null)
   const startedFor = useRef<string | null>(null)
+  const claimedFor = useRef<string | null>(null)
 
   const query = useQuery<CommandResponse, ApiFailure>({
-    enabled: Boolean(commandId) && !clientExpired,
-    queryFn: async () =>
-      normaliseCommand(
+    enabled: Boolean(commandId),
+    queryFn: async () => {
+      const command = normaliseCommand(
         await requestApi(() =>
           client.GET('/api/v1/commands/{id}', { params: { path: { id: commandId } } }),
         ),
-      ),
+      )
+      if (command.state === 'claimed') claimedFor.current = commandId
+      if (command.state === 'expired' && claimedFor.current === commandId) {
+        return { ...command, error: CLAIMED_THEN_EXPIRED }
+      }
+      return command
+    },
     queryKey: qk.command(commandId),
     refetchInterval: (current) => {
-      if (clientExpired || isTerminalCommandState(current.state.data?.state)) {
+      const state = current.state.data?.state
+      // A claimed command keeps polling after the client timeout, because the
+      // server still owns its outcome and the agent may still be running it.
+      if (isTerminalCommandState(state) || (clientExpired && state !== 'claimed')) {
         return false
       }
       return REFRESH.command.interval
@@ -110,7 +125,12 @@ export function useCommand(commandId: string) {
   })
 
   useEffect(() => {
-    if (!commandId || isTerminalCommandState(query.data?.state)) {
+    // Only a command that no agent has claimed can time out on the client.
+    if (
+      !commandId ||
+      isTerminalCommandState(query.data?.state) ||
+      (query.data !== undefined && query.data.state !== 'pending')
+    ) {
       return
     }
     if (startedFor.current !== commandId) {
@@ -128,12 +148,8 @@ export function useCommand(commandId: string) {
   }, [commandId, query.data?.state])
 
   const data =
-    clientExpired && query.data !== undefined && !isTerminalCommandState(query.data.state)
-      ? {
-          ...query.data,
-          state: 'expired' as const,
-          error: describeCommandState('expired'),
-        }
+    clientExpired && query.data?.state === 'pending'
+      ? { ...query.data, state: 'expired' as const, error: undefined }
       : query.data
 
   return { ...query, data, clientExpired }
