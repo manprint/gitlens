@@ -457,8 +457,10 @@ func TestINTCMD024_ExplainAnalyzeRefusesEffectsBehindViews(t *testing.T) {
 			requireRefused(t, err, "dblink_exec()")
 			require.Equal(t, 3, rows(), role.String())
 		}
+		// Plan-only EXPLAIN runs nothing, but its plan shows the connection
+		// string of the view, password included, so the plan is withheld.
 		_, err = explainAs(t, pg, pgtest.RoleT1, remoteID, false)
-		require.NoError(t, err)
+		requireRefused(t, err, "may hold a credential")
 		require.Equal(t, 3, rows())
 	})
 }
