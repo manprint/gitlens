@@ -295,3 +295,27 @@ func waitEventName(i int) string {
 	}
 	return "we_" + string(s)
 }
+
+// Failed ticks are counted on their own: they stay out of Ticks, the
+// denominator, but a window where every tick failed must be distinguishable.
+func TestAggregator_FailedTicksCounted(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	a := New(clk, 10*time.Second, 100)
+
+	a.TickFailed()
+	a.TickFailed()
+	a.TickFailed()
+
+	w := a.Flush(clk.Now())
+	if w.Ticks != 0 {
+		t.Fatalf("expected Ticks == 0, got %d", w.Ticks)
+	}
+	if w.FailedTicks != 3 {
+		t.Fatalf("expected FailedTicks == 3, got %d", w.FailedTicks)
+	}
+
+	w = a.Flush(clk.Now().Add(10 * time.Second))
+	if w.FailedTicks != 0 {
+		t.Fatalf("expected FailedTicks reset by Flush, got %d", w.FailedTicks)
+	}
+}

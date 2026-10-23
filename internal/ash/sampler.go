@@ -48,6 +48,7 @@ type Sampler struct {
 	computeQueryIDMu    sync.Mutex
 	nullOnlySampleCount int // consecutive samples with >=1 row and every row's query_id null
 	warnedNoQueryID     atomic.Bool
+	lastErr             error // error of the most recent tick, nil if it succeeded
 }
 
 // computeQueryIDOffSamples is how many CONSECUTIVE samples must show every
@@ -141,6 +142,14 @@ func (s *Sampler) TicksMissed() int64 {
 	return s.ticksMissed.Load()
 }
 
+// LastError returns the error of the most recent tick, or nil when that tick
+// succeeded. It is what says why a window's ticks all failed.
+func (s *Sampler) LastError() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastErr
+}
+
 // SetTickCallback registers a callback invoked exactly once per tick attempt
 // (success or failure), regardless of how many rows that tick returned —
 // unlike onSample, which never fires for a genuinely idle, zero-row tick.
@@ -180,6 +189,7 @@ func (s *Sampler) run(ctx context.Context, ticker clock.Ticker) {
 			}
 			cancel()
 			s.mu.Lock()
+			s.lastErr = err
 			onTick := s.onTick
 			s.mu.Unlock()
 			if onTick != nil {

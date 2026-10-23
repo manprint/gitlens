@@ -66,22 +66,31 @@ func startASH(ctx context.Context, mgr *agent.Manager, targetName string, cfg ag
 	flushTicker := clk.NewTicker(ashWindow)
 	go func() {
 		defer flushTicker.Stop()
+		// failing is only for logging: a line when sampling stops succeeding
+		// and another when it resumes, not one per failed tick.
+		failing := false
 		for {
 			select {
 			case <-flushCtx.Done():
 				return
 			case <-flushTicker.C():
-				w := agg.Flush(clk.Now())
-				metrics := ashWindowToMetrics(w)
-				if len(metrics) == 0 {
+				now := clk.Now()
+				w := agg.Flush(now)
+				if w.Ticks == 0 && w.FailedTicks > 0 {
+					if !failing {
+						fmt.Fprintf(os.Stderr, "warning: ash: sampling failed for %s: %v\n", targetName, sampler.LastError())
+					}
+					failing = true
+				} else if w.Ticks > 0 && failing {
+					fmt.Fprintf(os.Stderr, "ash: sampling recovered for %s\n", targetName)
+					failing = false
+				}
+				res, ok := ashWindowResult(w, now, sampler.LastError())
+				if !ok {
 					continue
 				}
 				mu.Lock()
-				pending[targetName] = append(pending[targetName], wire.Result{
-					Check:   "ash",
-					TS:      clk.Now(),
-					Metrics: metrics,
-				})
+				pending[targetName] = append(pending[targetName], res)
 				mu.Unlock()
 			}
 		}
@@ -171,6 +180,25 @@ func (c *ashConn) Close() {
 		c.conn.Release()
 		c.conn = nil
 	}
+}
+
+// ashWindowResult turns one closed window into the wire.Result it adds to the
+// envelope; ok is false when the window has nothing to report. A window where
+// every tick failed has neither samples nor ticks. Left out, it would look like
+// an idle instance, or like no agent at all, so it is reported as a check error
+// that carries the error of the last tick.
+func ashWindowResult(w ash.Window, now time.Time, lastErr error) (res wire.Result, ok bool) {
+	if metrics := ashWindowToMetrics(w); len(metrics) > 0 {
+		return wire.Result{Check: "ash", TS: now, Metrics: metrics}, true
+	}
+	if w.FailedTicks == 0 {
+		return wire.Result{}, false
+	}
+	msg := fmt.Sprintf("ash: none of the %d sampling ticks in the window succeeded", w.FailedTicks)
+	if lastErr != nil {
+		msg += ": " + lastErr.Error()
+	}
+	return wire.Result{Check: "ash", TS: now, Error: msg}, true
 }
 
 // ashWindowToMetrics converts one closed ash.Window into the wire.Metric

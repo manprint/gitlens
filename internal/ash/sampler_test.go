@@ -534,3 +534,31 @@ func TestSampler_TickCallback_FiresOnFailedTick(t *testing.T) {
 		t.Fatal("expected onTick to report success=false for a failed query")
 	}
 }
+
+// TestSampler_LastError_ReportsFailedTick proves LastError carries the error of
+// the most recent tick, so a window of failed ticks can say why it failed.
+func TestSampler_LastError_ReportsFailedTick(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	q := &mockQuerierZeroRows{err: errors.New("connection reset")}
+	s := NewSampler(q, clk, nil)
+	var calls atomic.Int32
+	s.SetTickCallback(func(bool) { calls.Add(1) })
+
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for calls.Load() < 1 && time.Now().Before(deadline) {
+		clk.Advance(1 * time.Second)
+		time.Sleep(time.Millisecond)
+	}
+
+	if calls.Load() < 1 {
+		t.Fatal("expected onTick to fire at least once")
+	}
+	if err := s.LastError(); err == nil || err.Error() != "connection reset" {
+		t.Fatalf("expected LastError to be the tick's error, got %v", err)
+	}
+}
