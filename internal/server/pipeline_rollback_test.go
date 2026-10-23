@@ -172,3 +172,33 @@ func TestPipeline_RejectedInstanceChangesNoTopologyState(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, eventTypesFor(accepted, standby), "role_change", "the first accepted sighting is a first sighting")
 }
+
+// TestPipeline_LastSeenOnlyForStoredInstances: the server reads last_seen as
+// the instance being up. It is refreshed in the envelope's transaction for an
+// instance whose samples are stored, and not for one the pipeline refuses,
+// which must go stale rather than read as up on every push with no data.
+func TestPipeline_LastSeenOnlyForStoredInstances(t *testing.T) {
+	t.Parallel()
+	fc := clock.NewFake(rollbackT0)
+	p := NewPipeline(nil, fc)
+	cid := pgtype.ClusterID(1).String()
+	stored, refused := uuid.New(), uuid.New()
+	gauge := func(kind string) []wire.Result {
+		return []wire.Result{{Check: "bgwriter", TS: rollbackT0, Metrics: []wire.Metric{
+			{Name: "pg_checkpoints_timed", Value: 1, Kind: kind, Labels: map[string]string{}},
+		}}}
+	}
+	tx, err := processOn(t, p, wire.Envelope{Instances: []wire.Instance{
+		{InstanceID: stored.String(), ClusterID: cid, Role: "primary", Results: gauge("gauge")},
+		{InstanceID: refused.String(), ClusterID: cid, Role: "primary", Results: gauge("unknown-kind")},
+	}}, nil)
+	require.NoError(t, err)
+
+	var touched []uuid.UUID
+	for _, e := range tx.execs {
+		if strings.Contains(e.sql, "UPDATE instances SET last_seen") {
+			touched = e.args[0].([]uuid.UUID)
+		}
+	}
+	require.Equal(t, []uuid.UUID{stored}, touched)
+}

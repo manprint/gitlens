@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/manprint/pglens/internal/wire"
 	"github.com/stretchr/testify/require"
@@ -301,6 +302,56 @@ func TestInventory_ClusterIDChanged_LeavesNoClusterAndRepeatsOncePerDay(t *testi
 	var phantom int
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM clusters WHERE cluster_id=$1`, int64(cid2)).Scan(&phantom))
 	require.Zero(t, phantom, "a refused push must not create the cluster it names")
+}
+
+// TestINTSI03_LastSeenFollowsStoredData: the inventory does not refresh an
+// instance's last_seen. Only an instance whose samples the pipeline stores does
+// so, which keeps an instance the pipeline refuses on every push from reading
+// as up.
+func TestINTSI03_LastSeenFollowsStoredData(t *testing.T) {
+	pool := getTestPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	inv := NewInventory(pool)
+	p := NewPipeline(pool, clock.NewFake(time.Now()))
+	iid := uuid.New()
+	cid := pgtype.ClusterID(88888).String()
+	result := func(kind string) []wire.Result {
+		return []wire.Result{{Check: "bgwriter", TS: time.Now().UTC(), Metrics: []wire.Metric{
+			{Name: "pg_checkpoints_timed", Value: 1, Kind: kind, Labels: map[string]string{}},
+		}}}
+	}
+	instance := func(kind string) wire.Instance {
+		return wire.Instance{InstanceID: iid.String(), ClusterID: cid, ClusterIDSource: string(pgtype.IDSourceManual),
+			Addr: "10.0.0.8", Port: 5432, Role: "primary", PGVersion: 170000, PermTier: "T0", Results: result(kind)}
+	}
+	lastSeen := func() time.Time {
+		var ts time.Time
+		require.NoError(t, pool.QueryRow(ctx, `SELECT last_seen FROM instances WHERE instance_id=$1`, iid).Scan(&ts))
+		return ts
+	}
+
+	res, err := inv.Upsert(ctx, wire.Envelope{AgentID: uuid.NewString(), Instances: []wire.Instance{instance("gauge")}})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Accepted)
+	old := time.Now().Add(-time.Hour).UTC()
+	_, err = pool.Exec(ctx, `UPDATE instances SET last_seen=$2 WHERE instance_id=$1`, iid, old)
+	require.NoError(t, err)
+
+	res, err = inv.Upsert(ctx, wire.Envelope{AgentID: uuid.NewString(), Instances: []wire.Instance{instance("gauge")}})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Accepted)
+	require.WithinDuration(t, old, lastSeen(), time.Second, "the inventory alone must not refresh last_seen")
+
+	refused, err := p.Process(ctx, wire.Envelope{Instances: []wire.Instance{instance("unknown-kind")}})
+	require.NoError(t, err)
+	require.Equal(t, 1, refused.Rejected)
+	require.WithinDuration(t, old, lastSeen(), time.Second, "an instance whose samples are refused must go stale")
+
+	stored, err := p.Process(ctx, wire.Envelope{Instances: []wire.Instance{instance("gauge")}})
+	require.NoError(t, err)
+	require.Equal(t, 1, stored.Accepted)
+	require.True(t, lastSeen().After(old.Add(30*time.Minute)), "stored samples refresh last_seen")
 }
 
 func TestInventory_RoleChange_EmitsEvent(t *testing.T) {

@@ -164,6 +164,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	var relationPrunes []store.RelationStatsPrune
 	var factPrunes []store.ObjectFactPrune
 	currentSeries := make(map[uuid.UUID]map[pgtype.SeriesKey]struct{}, len(env.Instances))
+	var storedInstances []uuid.UUID
 
 	// Resolves a wire.Edge.To (an upstream's addr, e.g. "pg-primary") to an
 	// instance_id. Tries the current envelope first (fast path, no query).
@@ -743,9 +744,18 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		}
 		relationPrunes = append(relationPrunes, instRelationPrunes...)
 		factPrunes = append(factPrunes, instFactPrunes...)
+		storedInstances = append(storedInstances, instUUID)
 		res.Accepted++
 	}
 
+	// An instance is up for the server only while its samples are being stored.
+	// The refresh is in this transaction, so an instance whose samples are
+	// refused goes stale instead of reading as up on every push with no data.
+	if len(storedInstances) > 0 {
+		if _, err := tx.Exec(ctx, `UPDATE instances SET last_seen=now() WHERE instance_id = ANY($1)`, storedInstances); err != nil {
+			return nil, fmt.Errorf("touch instances: %w", err)
+		}
+	}
 	if err := store.WriteMetrics(ctx, tx, genericRows); err != nil {
 		return nil, fmt.Errorf("write metrics: %w", err)
 	}

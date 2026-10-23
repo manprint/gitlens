@@ -222,9 +222,11 @@ func (inv *Inventory) upsertOne(ctx context.Context, tenantID string, agentID uu
 				return fmt.Errorf("emit role_change: %w", emitErr)
 			}
 		}
-		// Update mutable fields.
+		// Update mutable fields. last_seen is not among them: it is the liveness
+		// the server reports, and the pipeline sets it in the transaction that
+		// stores this instance's samples (see Pipeline.Process).
 		if _, execErr := inv.pool.Exec(ctx,
-			`UPDATE instances SET role=$1, pg_version=$2, perm_tier=$3, addr=$4, port=$5, target_name=$6, last_seen=now(), ash_enabled=$7 WHERE instance_id=$8`,
+			`UPDATE instances SET role=$1, pg_version=$2, perm_tier=$3, addr=$4, port=$5, target_name=$6, ash_enabled=$7 WHERE instance_id=$8`,
 			role, inst.PGVersion, inst.PermTier, inst.Addr, inst.Port, inst.TargetName, inst.ASHEnabled, instUUID); execErr != nil {
 			return fmt.Errorf("update instance %s: %w", inst.InstanceID, execErr)
 		}
@@ -247,7 +249,7 @@ func (inv *Inventory) upsertOne(ctx context.Context, tenantID string, agentID uu
 		if _, err := inv.pool.Exec(ctx,
 			`INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, target_name, last_seen, ash_enabled)
 			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now(),$11)
-			 ON CONFLICT (instance_id) DO UPDATE SET role=EXCLUDED.role, pg_version=EXCLUDED.pg_version, perm_tier=EXCLUDED.perm_tier, addr=EXCLUDED.addr, port=EXCLUDED.port, target_name=EXCLUDED.target_name, last_seen=now(), ash_enabled=EXCLUDED.ash_enabled`,
+			 ON CONFLICT (instance_id) DO UPDATE SET role=EXCLUDED.role, pg_version=EXCLUDED.pg_version, perm_tier=EXCLUDED.perm_tier, addr=EXCLUDED.addr, port=EXCLUDED.port, target_name=EXCLUDED.target_name, ash_enabled=EXCLUDED.ash_enabled`,
 			instUUID, tenantID, cidDB, agentParam, inst.Addr, inst.Port, inst.PGVersion, role, inst.PermTier, inst.TargetName, inst.ASHEnabled); err != nil {
 			return fmt.Errorf("insert instance %s: %w", inst.InstanceID, err)
 		}
