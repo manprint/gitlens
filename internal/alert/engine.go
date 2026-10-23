@@ -64,6 +64,7 @@ var spellEvents = map[string]bool{
 	"instance_unreachable":  true,
 	"no_primary_in_cluster": true,
 	"slot_inactive":         true,
+	"slot_lost":             true,
 }
 
 // endGrace is how long an episode may go unsampled before a pass closes it.
@@ -254,8 +255,17 @@ func (e *Engine) Stop() {
 
 // releaseLeaderConn drops the lock-holding connection and the leadership it
 // carried. Caller must hold e.mu.
-func (e *Engine) releaseLeaderConn() {
+//
+// The session is closed, not returned to the pool: a session that may still
+// hold the advisory lock would keep it for whoever borrowed the connection
+// next, and this engine has given the lock up.
+func (e *Engine) releaseLeaderConn(ctx context.Context) {
 	if e.conn != nil {
+		// The close runs even when ctx is done: a dead session is the reason for
+		// closing it, and its close must not be skipped for that.
+		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		_ = e.conn.Conn().Close(closeCtx)
+		cancel()
 		e.conn.Release()
 		e.conn = nil
 	}
@@ -277,10 +287,16 @@ func (e *Engine) ensureLeader(ctx context.Context) error {
 	// was the leader, while another server legitimately took the freed lock.
 	// Two leaders means duplicate notifications for every alert.
 	if e.conn != nil && e.conn.Conn().IsClosed() {
-		e.releaseLeaderConn()
+		e.releaseLeaderConn(ctx)
 	}
+	// A session the server has terminated is not seen as closed until it is next
+	// used, so the session is pinged every cycle. One that does not answer no
+	// longer holds the lock, and the leadership goes with it.
 	if e.hasLock && e.conn != nil {
-		return nil
+		if err := e.conn.Ping(ctx); err == nil {
+			return nil
+		}
+		e.releaseLeaderConn(ctx)
 	}
 	if e.conn == nil {
 		conn, err := e.pool.Acquire(ctx)
@@ -298,7 +314,7 @@ func (e *Engine) ensureLeader(ctx context.Context) error {
 		// Give the connection back instead of holding a broken one: keeping
 		// it pinned meant every later tick retried on the same dead session
 		// and the engine could never regain leadership without a restart.
-		e.releaseLeaderConn()
+		e.releaseLeaderConn(ctx)
 		return fmt.Errorf("try alert advisory lock: %w", err)
 	}
 	e.hasLock = locked

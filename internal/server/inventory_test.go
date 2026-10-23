@@ -362,3 +362,19 @@ func TestInventory_MockPool_NewInstanceWithoutAgent_Refused(t *testing.T) {
 	require.Contains(t, res.Errors[env.Instances[0].InstanceID].Error(), "missing agent_id")
 	require.Equal(t, 0, pool.execCalls, "a refused instance writes no cluster, agent or instance row")
 }
+
+// TestInventory_NilInstanceIDIsRefused: the nil UUID parses, so it used to pass
+// as an instance and be registered as one. It is refused before any query runs,
+// so the pool needs no rows for the refusal.
+func TestInventory_NilInstanceIDIsRefused(t *testing.T) {
+	t.Parallel()
+	inv := &Inventory{pool: &mockPool{}}
+	res, err := inv.Upsert(context.Background(), wire.Envelope{AgentID: uuid.NewString(), Instances: []wire.Instance{
+		{InstanceID: uuid.Nil.String(), ClusterID: pgtype.ClusterID(7).String()},
+	}})
+	require.NoError(t, err)
+	require.Equal(t, 0, res.Accepted)
+	require.Equal(t, 1, res.Rejected)
+	var rejected instanceRejected
+	require.ErrorAs(t, res.Errors[uuid.Nil.String()], &rejected)
+}

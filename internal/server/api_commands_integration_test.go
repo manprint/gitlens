@@ -421,3 +421,47 @@ func TestINTCMD033_ResultRevocationLookupUsesThePrimaryKey(t *testing.T) {
 	require.NoError(t, rows.Err())
 	require.Contains(t, plan.String(), "agents_pkey", plan.String())
 }
+
+// TestINTCMD037_CredentialSignInResultIsWithheld: an agent built before the
+// redaction fix can send a plan or an error text that holds a credential. The
+// server records an ok result with a sign as an error, and stores no plan for
+// it. An error text with a sign is replaced. A result without a sign is kept.
+func TestINTCMD037_CredentialSignInResultIsWithheld(t *testing.T) {
+	const claim = `"claim_token":"00000000-0000-0000-0000-000000000000"`
+	explain := `{"kind":"explain","args":{"queryid":7,"datname":"postgres"}}`
+	type outcome struct {
+		state, auditOutcome, detail string
+		hasResult                   bool
+		plans                       int
+	}
+	cases := []struct {
+		name, result string
+		want         outcome
+	}{
+		{"plan with a sign", `{` + claim + `,"outcome":"ok","result":{"plan":[{"Plan":{"Node Type":"Seq Scan","Filter":"(password = 'x'::text)"}}],"plan_hash":"withsign"}}`,
+			outcome{state: "failed", auditOutcome: "error", detail: withheldResultText}},
+		{"error text with a sign", `{` + claim + `,"outcome":"error","error":"column \"password\" does not exist"}`,
+			outcome{state: "failed", auditOutcome: "error", detail: withheldErrorText}},
+		{"plan without a sign", `{` + claim + `,"outcome":"ok","result":{"plan":[{"Plan":{"Node Type":"Seq Scan"}}],"plan_hash":"clean"}}`,
+			outcome{state: "done", auditOutcome: "ok", hasResult: true, plans: 1}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			pool := getSharedPool(t)
+			instanceID, agentID := seedCommandInstance(t, pool)
+			router := commandsIntegrationRouter(pool)
+			completeCommand(t, router, instanceID, agentID, explain, c.result)
+
+			ctx := context.Background()
+			var got outcome
+			require.NoError(t, pool.QueryRow(ctx, `SELECT state, result IS NOT NULL FROM commands WHERE instance_id=$1 AND kind='explain'`, instanceID).Scan(&got.state, &got.hasResult))
+			require.Equal(t, c.want.state, got.state)
+			require.Equal(t, c.want.hasResult, got.hasResult, "a withheld result is not stored")
+			require.NoError(t, pool.QueryRow(ctx, `SELECT outcome, COALESCE(detail, '') FROM command_audit WHERE instance_id=$1 ORDER BY audit_id DESC LIMIT 1`, instanceID).Scan(&got.auditOutcome, &got.detail))
+			require.Equal(t, c.want.auditOutcome, got.auditOutcome)
+			require.Equal(t, c.want.detail, got.detail)
+			require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM query_plans WHERE instance_id=$1`, instanceID).Scan(&got.plans))
+			require.Equal(t, c.want.plans, got.plans, "a withheld plan is not filed")
+		})
+	}
+}

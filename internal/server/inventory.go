@@ -101,7 +101,7 @@ func (inv *Inventory) Upsert(ctx context.Context, env wire.Envelope) (*UpsertRes
 	}
 
 	for _, inst := range env.Instances {
-		if err := inv.upsertOne(ctx, tenantID, agentUUID, inst); err != nil {
+		if err := inv.upsertInstance(ctx, tenantID, agentUUID, inst); err != nil {
 			if storeFailure(err) {
 				return nil, err
 			}
@@ -164,6 +164,30 @@ func (inv *Inventory) OwnerRevoked(ctx context.Context, instances []wire.Instanc
 	return revoked, nil
 }
 
+// upsertInstance writes one wire Instance in a transaction of its own. The
+// cluster row is written before the instance row that references it, so an
+// instance that fails after its cluster was written would leave that cluster
+// behind. A refusal commits what it wrote, which is the event that reports it;
+// any other error rolls the instance back.
+func (inv *Inventory) upsertInstance(ctx context.Context, tenantID string, agentID uuid.UUID, inst wire.Instance) error {
+	tx, err := inv.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin instance %s: %w", inst.InstanceID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	// The helpers write through inv.pool, so the transaction is what they get.
+	in := &Inventory{pool: tx}
+	err = in.upsertOne(ctx, tenantID, agentID, inst)
+	var rejected instanceRejected
+	if err != nil && !errors.As(err, &rejected) {
+		return err
+	}
+	if commitErr := tx.Commit(ctx); commitErr != nil {
+		return fmt.Errorf("commit instance %s: %w", inst.InstanceID, commitErr)
+	}
+	return err
+}
+
 // upsertOne handles a single wire Instance.
 func (inv *Inventory) upsertOne(ctx context.Context, tenantID string, agentID uuid.UUID, inst wire.Instance) error {
 	// Parse and validate cluster_id.
@@ -177,6 +201,11 @@ func (inv *Inventory) upsertOne(ctx context.Context, tenantID string, agentID uu
 	instUUID, err := uuid.Parse(inst.InstanceID)
 	if err != nil {
 		return instanceRejected{fmt.Errorf("invalid instance_id %q: %w", inst.InstanceID, err)}
+	}
+	// The nil UUID parses, but it names no instance. An agent that has no
+	// identity yet sends it, and it must not be registered as one.
+	if instUUID == uuid.Nil {
+		return instanceRejected{fmt.Errorf("invalid instance_id %q: the nil UUID names no instance", inst.InstanceID)}
 	}
 
 	// 1. Look up the instance before anything is written for it. A push that

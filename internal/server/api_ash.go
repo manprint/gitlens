@@ -191,6 +191,9 @@ func (a *AshAPI) handleASH(w http.ResponseWriter, r *http.Request) {
 	resp := ashResponse{ResolutionSeconds: ashWindowSeconds, Statistical: true}
 	var totalTicks int
 	if len(groupByCols) == 0 {
+		if fromPtr == nil {
+			fromPtr = ashDefaultFrom(toPtr)
+		}
 		resp.Buckets, totalTicks, err = a.queryASHBuckets(ctx, iid, fromPtr, toPtr, database, filters, limit)
 	} else {
 		to := time.Now().UTC()
@@ -219,6 +222,19 @@ func (a *AshAPI) handleASH(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ashDefaultFrom is the start of the last hour before a raw or top request's
+// to, or before now when the request gives no to. Only the start is filled
+// in: a request with no to stays open at the top, so a window stamped just
+// ahead of this server's clock still counts.
+func ashDefaultFrom(to *time.Time) *time.Time {
+	end := time.Now().UTC()
+	if to != nil {
+		end = *to
+	}
+	from := end.Add(-time.Hour)
+	return &from
 }
 
 // queryASHBuckets returns the stored rows unaggregated, newest first: every
@@ -595,6 +611,9 @@ func (a *AshAPI) handleASHTop(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
+	if fromPtr == nil {
+		fromPtr = ashDefaultFrom(toPtr)
+	}
 	entries, totalTicks, err := a.queryASHTop(ctx, iid, fromPtr, toPtr, database, filters, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query failed", err.Error())

@@ -156,7 +156,28 @@ func (m *mockPool) Begin(_ context.Context) (pgx.Tx, error) {
 	if m.beginErr != nil {
 		return nil, m.beginErr
 	}
+	if m.beginTx == nil {
+		return &passTx{pool: m}, nil
+	}
 	return m.beginTx, nil
+}
+
+// passTx is the transaction a mockPool begins when a test sets none. Its
+// statements run on the pool, so the pool's queued results and counts apply,
+// and it commits and rolls back nothing.
+type passTx struct {
+	mockTx
+	pool *mockPool
+}
+
+func (t *passTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	return t.pool.Exec(ctx, sql, args...)
+}
+func (t *passTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	return t.pool.Query(ctx, sql, args...)
+}
+func (t *passTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return t.pool.QueryRow(ctx, sql, args...)
 }
 
 // mockTx implements pgx.Tx for exercising Pipeline.Process's real-pool branch

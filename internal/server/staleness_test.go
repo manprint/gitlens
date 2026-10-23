@@ -245,3 +245,26 @@ func TestDecideSlotInactiveEmissions_DroppedSlotForgetsState(t *testing.T) {
 	require.NotContains(t, emitted, dropped)
 	require.Contains(t, since, iid.String()+"/kept")
 }
+
+func TestDecideSlotLostEmissions_OncePerSpellAndClearsOnRecovery(t *testing.T) {
+	t.Parallel()
+	iid := uuid.New()
+	key := iid.String() + "/s1"
+	lost := func(status string) []slotRow {
+		return []slotRow{{InstanceID: iid, ClusterID: 42, SlotName: "s1", WALStatus: status}}
+	}
+	emitted := map[string]bool{}
+
+	out := decideSlotLostEmissions(lost("lost"), emitted)
+	require.Equal(t, []slotEmission{{ClusterID: 42, InstanceID: iid, SlotName: "s1"}}, out)
+
+	require.Empty(t, decideSlotLostEmissions(lost("lost"), emitted), "a lost slot is reported once per spell")
+
+	require.Empty(t, decideSlotLostEmissions(lost("reserved"), emitted))
+	require.False(t, emitted[key], "a slot that reports another status ends its spell")
+
+	require.Len(t, decideSlotLostEmissions(lost("lost"), emitted), 1, "a new spell of loss is reported again")
+
+	require.Empty(t, decideSlotLostEmissions(nil, emitted))
+	require.False(t, emitted[key], "a slot that leaves the rows forgets its spell")
+}

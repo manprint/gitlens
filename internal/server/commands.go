@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/manprint/pglens/internal/command"
+	"github.com/manprint/pglens/internal/redact"
 	"github.com/manprint/pglens/internal/store"
 )
 
@@ -420,6 +421,14 @@ func requesterOf(r *http.Request, auth *Auth) string {
 	return who
 }
 
+// Texts an agent built before the redaction fix may send in place of a result
+// or an error that holds a credential. The server stores neither: the text
+// stands for it, as the agent's own withheld error does.
+const (
+	withheldResultText = "the plan is withheld because it may hold a credential"
+	withheldErrorText  = "the error text is withheld because it may hold a credential"
+)
+
 func (s *CommandService) result(w http.ResponseWriter, r *http.Request) {
 	if s.auth == nil || !s.auth.Validate(r) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "agent authentication failed")
@@ -441,6 +450,13 @@ func (s *CommandService) result(w http.ResponseWriter, r *http.Request) {
 	if err := validateResult(req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid command result", err.Error())
 		return
+	}
+	// An ok result that may hold a credential is recorded as an error, so its
+	// plan is neither stored nor filed. An error text with a sign is replaced.
+	if req.Outcome == "ok" && redact.MayHoldCredential(string(req.Result)) {
+		req.Outcome, req.Result, req.Error = "error", nil, withheldResultText
+	} else if req.Error != "" && redact.MayHoldCredential(req.Error) {
+		req.Error = withheldErrorText
 	}
 	tx, err := s.pool.Begin(r.Context())
 	if err != nil {

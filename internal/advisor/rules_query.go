@@ -52,6 +52,21 @@ func queryFinding(r string, sev Severity, q StatementStat, title, detail, remedi
 
 func metricValue(s *Snapshot, name string) (float64, bool) { return s.Metric(name, nil) }
 
+// tempFiles is the number of temporary files the instance has written, summed
+// over its databases from the latest sample of each. Temporary bytes alone
+// cannot tell many small spills from a few large ones, and the file count can.
+func tempFiles(s *Snapshot) (float64, bool) {
+	values, ok := s.Metrics["pg_temp_files_total"]
+	if !ok {
+		return 0, false
+	}
+	var sum float64
+	for _, v := range values {
+		sum += v
+	}
+	return sum, true
+}
+
 // sortedLabelSets lists the canonical label sets a metric has, in order.
 func sortedLabelSets(s *Snapshot, name string) []string {
 	out := make([]string, 0, len(s.Metrics[name]))
@@ -131,6 +146,7 @@ func init() {
 			if !ok || workMem <= 0 {
 				workMem = defaultWorkMemBytes
 			}
+			files, hasFiles := tempFiles(s)
 			var out []Finding
 			for _, q := range s.Statements {
 				if q.Calls <= 0 {
@@ -138,7 +154,11 @@ func init() {
 				}
 				avg := q.TempBytes / q.Calls
 				if avg > workMem {
-					out = append(out, queryFinding("query.temp_bytes_high", SeverityWarning, q, "High temporary write volume", fmt.Sprintf("average temporary bytes per call is %.0f", avg), fmt.Sprintf("Review the query and current work_mem (%.0f bytes)", workMem), map[string]any{"queryid": q.QueryID, "bytes_per_call": avg, "work_mem_bytes": workMem}))
+					evidence := map[string]any{"queryid": q.QueryID, "bytes_per_call": avg, "work_mem_bytes": workMem}
+					if hasFiles {
+						evidence["pg_temp_files_total"] = files
+					}
+					out = append(out, queryFinding("query.temp_bytes_high", SeverityWarning, q, "High temporary write volume", fmt.Sprintf("average temporary bytes per call is %.0f", avg), fmt.Sprintf("Review the query and current work_mem (%.0f bytes)", workMem), evidence))
 				}
 			}
 			return out

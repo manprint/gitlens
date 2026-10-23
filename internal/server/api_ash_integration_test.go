@@ -586,3 +586,58 @@ func TestIntASH016_TicksCountEachWindowOnceAndSurviveAnEmptyFilter(t *testing.T)
 		require.NotContains(t, resp, "warning", path)
 	}
 }
+
+// INT-ASH-021: the raw and top answers read the last hour when the request
+// gives no from. A window an hour old is left out of the default answer, and
+// an explicit from still reaches it.
+func TestIntASH021_RawAndTopDefaultToTheLastHour(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := contextBackground()
+	instID := uuid.New()
+	cid := pgtype.ClusterID(4444)
+	now := time.Now().UTC()
+	for _, ts := range []time.Time{now.Add(-3 * time.Hour), now.Add(-5 * time.Minute)} {
+		_, err := pool.Exec(ctx, `INSERT INTO metrics_ash (ts, cluster_id, instance_id, datname, wait_event_type, wait_event, state, queryid, samples, window_seconds, window_ticks)
+			VALUES ($1, $2, $3, 'app', 'LWLock', 'WALWrite', 'active', 7, 6, 10, 10)`, ts, store.ToDB(cid), instID)
+		require.NoError(t, err)
+	}
+	_, err := pool.Exec(ctx, `INSERT INTO query_texts (tenant_id, cluster_id, datname, queryid, pg_major, query_text) VALUES ('default', $1, 'app', 7, 16, 'SELECT 7')`, store.ToDB(cid))
+	require.NoError(t, err)
+
+	r := chi.NewRouter()
+	NewAshAPI(pool).RegisterRoutes(r)
+	get := func(path string) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		return w
+	}
+	id := instID.String()
+	explicit := now.Add(-4 * time.Hour).Format(time.RFC3339)
+
+	var raw ashResponse
+	require.NoError(t, json.NewDecoder(get("/api/v1/ash?instance_id="+id).Body).Decode(&raw))
+	require.Len(t, raw.Buckets, 1, "the window an hour old is outside the default last hour")
+	require.Equal(t, 6, raw.Buckets[0].Samples)
+	require.WithinDuration(t, now.Add(-5*time.Minute), raw.Buckets[0].TS, time.Second)
+
+	raw = ashResponse{}
+	require.NoError(t, json.NewDecoder(get("/api/v1/ash?instance_id="+id+"&from="+explicit).Body).Decode(&raw))
+	require.Len(t, raw.Buckets, 2, "an explicit from reaches the older window")
+
+	var top ashTopResponse
+	require.NoError(t, json.NewDecoder(get("/api/v1/ash/top?instance_id="+id).Body).Decode(&top))
+	require.Len(t, top.Entries, 1)
+	require.Equal(t, 6, top.Entries[0].Samples, "the top answer reads the same last hour")
+
+	top = ashTopResponse{}
+	require.NoError(t, json.NewDecoder(get("/api/v1/ash/top?instance_id="+id+"&from="+explicit).Body).Decode(&top))
+	require.Len(t, top.Entries, 1)
+	require.Equal(t, 12, top.Entries[0].Samples)
+}

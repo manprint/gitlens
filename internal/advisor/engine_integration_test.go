@@ -219,3 +219,47 @@ func TestINTADV010_MutedAndSilentFindingsResolve(t *testing.T) {
 		require.Equal(t, "muted", state(flapping), "a finding that returns before its mute ends is muted again")
 	})
 }
+
+// TestINTADV011_LeaderWithADeadSessionGivesUpTheLock: the server ends the
+// leader's session without pgx seeing it close. Once another session holds the
+// engine's lock, the dead leader must not keep writing findings as the leader.
+func TestINTADV011_LeaderWithADeadSessionGivesUpTheLock(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		pool := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		_, err := pool.Exec(ctx, advisorIntegrationSchema)
+		require.NoError(t, err)
+		now := time.Now().UTC()
+		id := setupAdvisorInstance(t, pool, now)
+		loader := func(context.Context, uuid.UUID, time.Time) (*Snapshot, error) {
+			return advisorIntegrationSnapshot(id, now, 1000), nil
+		}
+		e := NewEngine(pool, nil, time.Minute)
+		e.load = loader
+		t.Cleanup(e.Stop)
+		require.NoError(t, e.Run(ctx))
+		e.mu.Lock()
+		led, pid := e.hasLock, e.conn.Conn().PgConn().PID()
+		e.mu.Unlock()
+		require.True(t, led, "the engine leads on its first pass")
+
+		_, err = pool.Exec(ctx, `SELECT pg_terminate_backend($1)`, pid)
+		require.NoError(t, err)
+		other, err := pool.Acquire(ctx)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = other.Exec(context.Background(), `SELECT pg_advisory_unlock(hashtext('pglens:advisor'))`)
+			other.Release()
+		})
+		// Blocks until the terminated session has let go of the lock.
+		_, err = other.Exec(ctx, `SELECT pg_advisory_lock(hashtext('pglens:advisor'))`)
+		require.NoError(t, err)
+
+		require.NoError(t, e.Run(ctx))
+		e.mu.Lock()
+		led = e.hasLock
+		e.mu.Unlock()
+		require.False(t, led, "a leader whose session is gone does not lead while another session holds the lock")
+	})
+}

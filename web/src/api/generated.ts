@@ -561,7 +561,7 @@ export interface paths {
         };
         /**
          * Return activity samples grouped by the requested dimensions.
-         * @description With group_by, the range (default: the last hour) is aggregated into time buckets of resolution_seconds, at most 180 of them, one row per bucket and group. ticks is the instance's sampling ticks in the bucket, whatever the filters, so avg_active_sessions is the group's share of the instance's time. The largest groups are kept (at most 24, fewer when limit rows cannot hold them for every bucket) and the rest are folded into one group named other, so the total is conserved. Without group_by, the stored rows are returned newest first, every dimension included.
+         * @description With group_by, the range (default: the last hour) is aggregated into time buckets of resolution_seconds, at most 180 of them, one row per bucket and group. ticks is the instance's sampling ticks in the bucket, whatever the filters, so avg_active_sessions is the group's share of the instance's time. The largest groups are kept (at most 24, fewer when limit rows cannot hold them for every bucket) and the rest are folded into one group named other, so the total is conserved. Without group_by, the stored rows are returned newest first, every dimension included, and a request with no from reads the last hour before to, or before now when to is omitted too.
          */
         get: operations["getAsh"];
         put?: never;
@@ -581,7 +581,7 @@ export interface paths {
         };
         /**
          * Return top ASH queries joined to their text.
-         * @description Queries are ranked by samples over the range. ticks is the instance's sampling ticks over the range, whatever the filters, the same denominator for every query. The ASH disabled state is reported by GET /api/v1/ash, not here.
+         * @description Queries are ranked by samples over the range. ticks is the instance's sampling ticks over the range, whatever the filters, the same denominator for every query. A request with no from ranks the last hour before to, or before now when to is omitted too. The ASH disabled state is reported by GET /api/v1/ash, not here.
          */
         get: operations["getAshTop"];
         put?: never;
@@ -971,7 +971,10 @@ export interface components {
         };
         /** @enum {string} */
         PermTier: "T0" | "T1" | "T2";
-        /** @enum {string} */
+        /**
+         * @description Computed per cluster on each read. critical when the cluster has no primary, or more than one. degraded when an instance that has not been superseded has not reported within 60 seconds, or the largest replay lag reported within the last 60 seconds is above 30 seconds. ok otherwise. The 30 second threshold is fixed on the server and no response field carries it, so a client that shows it must copy the value from this text.
+         * @enum {string}
+         */
         Health: "ok" | "degraded" | "critical";
         /** @description True means the relation or cardinality budget cut the result. */
         Truncated: boolean;
@@ -993,7 +996,7 @@ export interface components {
             /** Format: int64 */
             event_id: number;
             ts: components["schemas"]["Timestamp"];
-            /** @description The event type. The server emits failover_detected, role_change, orphan_standby, split_brain_detected, agent_down, agent_up, instance_unreachable, instance_reachable, no_primary_in_cluster, slot_inactive, cluster_id_changed, cluster_identity_conflict, duplicate_instance_suspected, cardinality_truncated and counter_reset_detected. The set is open, so a client must show a type it does not know. */
+            /** @description The event type. The server emits failover_detected, role_change, orphan_standby, split_brain_detected, agent_down, agent_up, instance_unreachable, instance_reachable, no_primary_in_cluster, slot_inactive, slot_lost, cluster_id_changed, cluster_identity_conflict, duplicate_instance_suspected, cardinality_truncated and counter_reset_detected. The set is open, so a client must show a type it does not know. */
             type: string;
             cluster_id: string | null;
             /** Format: uuid */
@@ -1945,12 +1948,80 @@ export interface components {
         PushEnvelope: {
             /** Format: int32 */
             protocol_version: number;
+            /** @description The agent's UUID. Required from protocol 3 on. */
             agent_id: string;
             agent_version: string;
             sent_at: components["schemas"]["Timestamp"];
-            instances: {
-                [key: string]: unknown;
-            }[];
+            instances: components["schemas"]["PushInstance"][];
+        };
+        PushInstance: {
+            instance_id?: string;
+            target_name?: string;
+            /** @description Decimal string. */
+            cluster_id?: string;
+            cluster_id_source?: string;
+            addr?: string;
+            /** Format: int32 */
+            port?: number;
+            /** Format: int32 */
+            pg_version?: number;
+            role?: string;
+            perm_tier?: string;
+            capabilities?: string[];
+            databases?: components["schemas"]["PushDatabase"][];
+            results?: components["schemas"]["PushResult"][];
+            topology_edges?: components["schemas"]["PushEdge"][];
+            /** @description Absent from agents that predate the field. */
+            ash_enabled?: boolean;
+        };
+        PushDatabase: {
+            name?: string;
+            monitored?: boolean;
+            skip_reason?: string;
+        };
+        PushEdge: {
+            from?: string;
+            /** @description The upstream's address. */
+            to?: string;
+            /** Format: int32 */
+            port?: number;
+            type?: string;
+            /** @enum {string} */
+            confidence?: "high" | "low";
+        };
+        PushResult: {
+            check?: string;
+            ts?: components["schemas"]["Timestamp"];
+            database?: string;
+            stats_reset?: components["schemas"]["Timestamp"];
+            truncated?: boolean;
+            partial?: boolean;
+            error?: string;
+            skip_reason?: string;
+            metrics?: components["schemas"]["PushMetric"][];
+            facts?: components["schemas"]["PushFact"][];
+            /** @description Maps a queryid to its text. */
+            query_texts?: {
+                [key: string]: string;
+            };
+        };
+        PushMetric: {
+            name?: string;
+            labels?: {
+                [key: string]: string;
+            };
+            value?: number;
+            kind?: string;
+        };
+        PushFact: {
+            kind?: string;
+            key?: string;
+            labels?: {
+                [key: string]: string;
+            };
+            value_text?: string;
+            /** @description Any JSON value. */
+            value_json?: unknown;
         };
         PushResponse: {
             /** Format: int32 */
@@ -2749,6 +2820,7 @@ export interface operations {
         parameters: {
             query: {
                 instance_id: components["schemas"]["InstanceId"];
+                /** @description Start of the range. Omitted, it is an hour before to, or before now when to is omitted too. */
                 from?: components["schemas"]["Timestamp"];
                 to?: components["schemas"]["Timestamp"];
                 group_by?: "wait_event_type" | "wait_event" | "queryid" | "state" | "datname";
@@ -2781,6 +2853,7 @@ export interface operations {
         parameters: {
             query: {
                 instance_id: components["schemas"]["InstanceId"];
+                /** @description Start of the range. Omitted, it is an hour before to, or before now when to is omitted too. */
                 from?: components["schemas"]["Timestamp"];
                 to?: components["schemas"]["Timestamp"];
                 database?: string;
@@ -3402,7 +3475,15 @@ export interface operations {
                     "application/json": components["schemas"]["PushResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            /** @description The body is not JSON or declares a field the envelope does not have, protocol_version is outside the supported range, sent_at is too old to store, agent_id is not a UUID or is missing from a protocol 3 envelope, or the store refused the envelope. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
             413: components["responses"]["PayloadTooLarge"];
             /** @description Ingest failed while checking or storing the envelope. */

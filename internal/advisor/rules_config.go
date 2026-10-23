@@ -190,7 +190,11 @@ func init() {
 	Register(configRule{id: "config.work_mem_low", severity: SeverityInfo, needs: []string{"settings", "query.temp_bytes_high"}, eval: func(s *Snapshot) []Finding {
 		w, ok := settingFloat(s, "work_mem_bytes")
 		if ok && w < minWorkMemBytes && len(ruleByPrefix(s, "query.temp_bytes_high")) > 0 {
-			return []Finding{configFinding("config.work_mem_low", SeverityInfo, "work_mem is low", "work_mem is below 4 MiB while temporary writes are high", "Review work_mem with concurrent memory usage", nil)}
+			var evidence map[string]any
+			if files, hasFiles := tempFiles(s); hasFiles {
+				evidence = map[string]any{"pg_temp_files_total": files}
+			}
+			return []Finding{configFinding("config.work_mem_low", SeverityInfo, "work_mem is low", "work_mem is below 4 MiB while temporary writes are high", "Review work_mem with concurrent memory usage", evidence)}
 		}
 		return nil
 	}})

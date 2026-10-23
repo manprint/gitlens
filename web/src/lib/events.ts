@@ -9,6 +9,7 @@ export const DOCUMENTED_EVENT_TYPES = [
   'orphan_standby',
   'role_change',
   'slot_inactive',
+  'slot_lost',
   'no_primary_in_cluster',
   'counter_reset_detected',
   'agent_down',
@@ -74,6 +75,13 @@ export function describeDocumentedEvent(type: DocumentedEventType): EventDescrip
         severity: 'warning',
         title: 'Replication slot inactive',
         whatToCheck: 'Check whether the standby is down or disconnected and needs reconnecting.',
+      }
+    case 'slot_lost':
+      return {
+        severity: 'critical',
+        title: 'Replication slot lost WAL',
+        whatToCheck:
+          'The standby using this slot cannot resume from it. Rebuild the standby, then size max_slot_wal_keep_size so the slot is not lost again.',
       }
     case 'no_primary_in_cluster':
       return {

@@ -155,3 +155,22 @@ func TestPackA_AllRulesSatisfyContract(t *testing.T) {
 		assertRuleContract(t, r, s)
 	}
 }
+
+// TestRule_query_temp_bytes_high_EvidenceCarriesTempFiles: the instance's count
+// of temporary files rides with each statement's finding when the metric is
+// present, and is left out when it is not.
+func TestRule_query_temp_bytes_high_EvidenceCarriesTempFiles(t *testing.T) {
+	r := ruleByID(t, "query.temp_bytes_high")
+	s := statementSnapshot(StatementStat{QueryID: 1, Calls: 10, TempBytes: 1000})
+	s.Metrics["pg_temp_files_total"] = map[string]float64{
+		pgtype.CanonicalLabels(map[string]string{"database": "app1"}): 4,
+	}
+	got := r.Evaluate(s)
+	require.Len(t, got, 1)
+	require.Equal(t, 4.0, got[0].Evidence["pg_temp_files_total"])
+
+	s.Metrics = map[string]map[string]float64{}
+	got = r.Evaluate(s)
+	require.Len(t, got, 1)
+	require.NotContains(t, got[0].Evidence, "pg_temp_files_total")
+}

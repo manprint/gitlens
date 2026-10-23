@@ -266,3 +266,43 @@ func TestINTALERT017_PurgeRunsInBatches(t *testing.T) {
 		require.Equal(t, 1, deliveries, "every delivery of the backlog goes, and the open episode's stays")
 	})
 }
+
+// TestINTALERT020_StoreWritesEmptyLabelsAndReadsOneTenant: a nil label map is
+// stored as the empty object the column defaults to, never as JSON null. The
+// silence and active reads take the default tenant only, so a row written
+// under another tenant stays out of both.
+func TestINTALERT020_StoreWritesEmptyLabelsAndReadsOneTenant(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		pool := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		ctx := context.Background()
+		_, err := pool.Exec(ctx, `
+CREATE TABLE IF NOT EXISTS alerts (alert_key text NOT NULL, tenant_id text NOT NULL DEFAULT 'default', rule_id text NOT NULL, severity text NOT NULL, state text NOT NULL, cluster_id bigint, instance_id uuid, datname text, labels jsonb NOT NULL, value double precision, summary text NOT NULL, started_at timestamptz NOT NULL, last_eval_at timestamptz NOT NULL, resolved_at timestamptz, PRIMARY KEY (tenant_id, alert_key, started_at));
+CREATE TABLE IF NOT EXISTS silences (silence_id uuid PRIMARY KEY, tenant_id text NOT NULL DEFAULT 'default', matchers jsonb NOT NULL, reason text NOT NULL, starts_at timestamptz NOT NULL, ends_at timestamptz NOT NULL);
+TRUNCATE alerts, silences RESTART IDENTITY`)
+		require.NoError(t, err)
+
+		st := NewPgStore(pool)
+		now := time.Now().UTC().Truncate(time.Microsecond)
+		require.NoError(t, st.Upsert(ctx, Alert{Key: "nil-labels", RuleID: "r", Severity: SeverityWarning, State: StateFiring, Summary: "s", StartedAt: now, LastEvalAt: now}))
+		var stored string
+		require.NoError(t, pool.QueryRow(ctx, `SELECT labels::text FROM alerts WHERE alert_key='nil-labels'`).Scan(&stored))
+		require.Equal(t, "{}", stored)
+
+		_, err = pool.Exec(ctx, `INSERT INTO alerts (alert_key, tenant_id, rule_id, severity, state, datname, value, labels, summary, started_at, last_eval_at) VALUES ('other-tenant','other','r','warning','firing','db',0,'{}','s',$1,$1)`, now)
+		require.NoError(t, err)
+		active, err := st.Active(ctx, Filter{})
+		require.NoError(t, err)
+		require.Len(t, active, 1, "the default tenant's alert only")
+		require.Equal(t, "nil-labels", active[0].Key)
+
+		defaultSilence, otherSilence := uuid.New(), uuid.New()
+		_, err = pool.Exec(ctx, `INSERT INTO silences (silence_id, tenant_id, matchers, reason, starts_at, ends_at) VALUES ($1,'default','[]','d',$3,$4), ($2,'other','[]','o',$3,$4)`,
+			defaultSilence, otherSilence, now.Add(-time.Hour), now.Add(time.Hour))
+		require.NoError(t, err)
+		silences, err := st.Silences(ctx, now)
+		require.NoError(t, err)
+		require.Len(t, silences, 1, "the default tenant's silence only")
+		require.Equal(t, defaultSilence, silences[0].ID)
+	})
+}

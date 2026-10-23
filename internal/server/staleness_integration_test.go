@@ -14,6 +14,7 @@ import (
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/manprint/pglens/internal/store"
+	"github.com/manprint/pglens/internal/wire"
 	"github.com/stretchr/testify/require"
 )
 
@@ -756,4 +757,137 @@ func TestINTSTALE018_GaugeAndAlertAgreeOnDown(t *testing.T) {
 	require.NoError(t, s.Evaluate(ctx))
 	require.Equal(t, 0.0, pglensUpGauge.Get(iid.String()), "95 seconds of silence is past the threshold")
 	require.Equal(t, 0.0, alertValue(), "the alert agrees with the gauge")
+}
+
+// INT-STALE-019: the query texts of a statement not seen for the retention
+// window are purged by the leader, and a text seen recently stays. The purge
+// runs on the evaluator's pass, as the event purge does.
+func TestINTSTALE019_QueryTextsPastRetentionArePurged(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, `INSERT INTO query_texts (cluster_id, datname, queryid, pg_major, query_text, first_seen, last_seen) VALUES
+		(1, 'app', 1, 17, 'SELECT 1', now() - interval '200 days', now() - interval '100 days'),
+		(1, 'app', 2, 17, 'SELECT 2', now() - interval '200 days', now() - interval '1 day')`)
+	require.NoError(t, err)
+
+	s := NewStaleness(pool, clock.NewFake(time.Now()))
+	s.mu.Lock()
+	s.conn = mustAcquire(t, pool)
+	s.hasLock = true
+	s.mu.Unlock()
+	require.NoError(t, s.Evaluate(ctx))
+
+	var remaining []int64
+	rows, err := pool.Query(ctx, `SELECT queryid FROM query_texts ORDER BY queryid`)
+	require.NoError(t, err)
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		require.NoError(t, rows.Scan(&id))
+		remaining = append(remaining, id)
+	}
+	require.NoError(t, rows.Err())
+	require.Equal(t, []int64{2}, remaining, "only the text seen inside the retention window survives")
+}
+
+// TestINTSTALE020_LostSlotEmitsOncePerSpell: a slot whose latest report says
+// its WAL is lost emits slot_lost at once, without the inactivity window. It
+// is not reported again while the loss lasts, and a new spell is reported.
+func TestINTSTALE020_LostSlotEmitsOncePerSpell(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	cid := store.ToDB(pgtype.ClusterID(5))
+	iid := uuid.New()
+	agent := uuid.New()
+	_, err := pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual')`, cid)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen) VALUES ($1,'default',$2,$3,'10.0.0.5',5432,170000,'primary','T0', now())`, iid, cid, agent)
+	require.NoError(t, err)
+
+	report := func(active bool, walStatus string) {
+		t.Helper()
+		_, err := pool.Exec(ctx,
+			`INSERT INTO metrics_replication (ts, tenant_id, cluster_id, instance_id, slot_name, edge_type, slot_active, slot_wal_status) VALUES (now(), 'default', $1, $2, 'lostslot', 'streaming', $3, $4)`,
+			cid, iid, active, walStatus)
+		require.NoError(t, err)
+	}
+	lostEvents := func() int {
+		t.Helper()
+		var n int
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='slot_lost' AND instance_id=$1`, iid).Scan(&n))
+		return n
+	}
+
+	s := NewStaleness(pool, clock.NewFake(time.Now()))
+	s.mu.Lock()
+	s.conn = mustAcquire(t, pool)
+	s.hasLock = true
+	s.mu.Unlock()
+
+	report(false, "lost")
+	require.NoError(t, s.Evaluate(ctx))
+	require.Equal(t, 1, lostEvents(), "a lost slot is reported at once, without the inactivity window")
+
+	report(false, "lost")
+	require.NoError(t, s.Evaluate(ctx))
+	require.Equal(t, 1, lostEvents(), "the same spell of loss is not reported again")
+
+	report(true, "reserved")
+	require.NoError(t, s.Evaluate(ctx))
+	require.Equal(t, 1, lostEvents(), "a slot that reports another status is not reported")
+
+	report(false, "lost")
+	require.NoError(t, s.Evaluate(ctx))
+	require.Equal(t, 2, lostEvents(), "a new spell of loss is reported")
+}
+
+// TestINTSTALE021_IngestedLostSlotIsReported: a lost slot sent by an agent
+// reaches the evaluator as slot_lost. The agent sends the status as the status
+// label of the slot's metrics, and the pipeline must store it on the row that
+// carries the slot's activity, which is the row the evaluator reads.
+func TestINTSTALE021_IngestedLostSlotIsReported(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	start := time.Now().UTC().Truncate(time.Second)
+	iid := uuid.New()
+	labels := map[string]string{"slot_name": "lostslot", "slot_type": "physical", "status": "lost"}
+	env := wire.Envelope{ProtocolVersion: 3, AgentID: uuid.NewString(), SentAt: start, Instances: []wire.Instance{{
+		InstanceID:      iid.String(),
+		ClusterID:       pgtype.ClusterID(7).String(),
+		ClusterIDSource: "manual",
+		Addr:            "10.0.0.7",
+		Port:            5432,
+		PGVersion:       170000,
+		Role:            "primary",
+		PermTier:        "T0",
+		Results: []wire.Result{{Check: "replication_slots", TS: start, Metrics: []wire.Metric{
+			{Name: "replication_slot_active", Value: 0, Kind: "gauge", Labels: labels},
+			{Name: "replication_slot_retained_bytes", Value: 4096, Kind: "gauge", Labels: labels},
+		}}},
+	}}}
+	_, err := NewPipeline(pool, nil).Process(ctx, env)
+	require.NoError(t, err)
+
+	var walStatus string
+	var active bool
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT slot_wal_status, slot_active FROM metrics_replication WHERE instance_id=$1 AND slot_name='lostslot'`, iid).Scan(&walStatus, &active))
+	require.Equal(t, "lost", walStatus, "the status label is stored on the row of the slot's activity")
+	require.False(t, active)
+
+	s := NewStaleness(pool, clock.NewFake(start))
+	s.mu.Lock()
+	s.conn = mustAcquire(t, pool)
+	s.hasLock = true
+	s.mu.Unlock()
+	require.NoError(t, s.Evaluate(ctx))
+
+	var n int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='slot_lost' AND instance_id=$1`, iid).Scan(&n))
+	require.Equal(t, 1, n, "a lost slot sent through ingest is reported")
 }
