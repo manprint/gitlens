@@ -102,6 +102,8 @@ func TestLoadSnapshot_PopulatesBoundedSections(t *testing.T) {
 			AddRow(siblingID, "app", "public", "orders_metrics_idx"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT DISTINCT ON (slot_name, src)")).WithArgs(instanceID, now.Add(-5*time.Minute)).
 		WillReturnRows(pgxmock.NewRows([]string{"standbys", "max_lag", "slots"}).AddRow(2, 1024.0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM lock_snapshots")).WithArgs(instanceID).
+		WillReturnRows(pgxmock.NewRows([]string{"ts", "tree"}))
 
 	s, err := LoadSnapshot(ctx, mock, instanceID, now)
 	require.NoError(t, err)
@@ -166,6 +168,7 @@ func TestLoadSnapshot_PopulatesBoundedSections(t *testing.T) {
 	require.True(t, sibling.IndexScanned[indexHashKey("app", "public.orders_label_idx")])
 	require.NotContains(t, sibling.IndexScanned, indexHashKey("app", "public.orders_customer_idx"))
 	require.Equal(t, &ReplicationInfo{Standbys: 2, MaxLagBytes: 1024, ActivePhysicalSlots: 1}, s.Replication)
+	require.NotNil(t, s.LockTree, "no stored lock tree is an empty sample")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

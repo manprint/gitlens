@@ -22,8 +22,16 @@ func scrapeLocks(t *testing.T, rows []([]any)) Result {
 	return result
 }
 
+// lockValues is one row of the locks query, in its column order. A session
+// that is blocked waits since one second after its start and has waited for
+// age seconds; a session that is not blocked waits on no lock.
 func lockValues(pid int32, wait string, blocked []int32, age float64, query string) []any {
-	return []any{pid, "app", "app", "client", "127.0.0.1", "active", "Lock", wait, 1.0, age, query, blocked, lockBackendStart(pid), false}
+	var waitStart, waitDuration any
+	if len(blocked) > 0 {
+		waitStart = lockBackendStart(pid).Add(time.Second)
+		waitDuration = age
+	}
+	return []any{pid, "app", "app", "client", "127.0.0.1", "active", "Lock", wait, 1.0, age, query, blocked, lockBackendStart(pid), waitStart, waitDuration, false}
 }
 
 func lockBackendStart(pid int32) time.Time {
@@ -84,7 +92,9 @@ func TestLocks_TreeJSONShape(t *testing.T) {
 // session whose start time the role may not see has none.
 func TestLocks_TreeCarriesBackendStart(t *testing.T) {
 	unseen := lockValues(3, "", nil, 0, "select 3")
-	unseen[len(unseen)-2] = nil
+	// backend_start is the fourth column from the end: the wait start, the
+	// wait duration and the cut flag follow it.
+	unseen[len(unseen)-4] = nil
 	result := scrapeLocks(t, []([]any){lockValues(9, "", nil, 0, "holder"), lockValues(1, "transactionid", []int32{9}, 2, "update"), unseen})
 	raw := string(result.Facts[0].ValueJSON)
 	require.Contains(t, raw, `"backend_start":"2026-10-23T09:00:00.000001Z"`)
@@ -129,7 +139,7 @@ func TestLocks_QueryIsTruncated(t *testing.T) {
 func TestLocks_SessionListIsCappedOldestFirst(t *testing.T) {
 	rows := make([][]any, 0, 105)
 	for i := 1; i <= 105; i++ {
-		rows = append(rows, []any{int32(i), "app", "app", "client", "127.0.0.1", "idle", "", "", float64(i), 0.0, "select 1", []int32(nil), nil, false})
+		rows = append(rows, []any{int32(i), "app", "app", "client", "127.0.0.1", "idle", "", "", float64(i), 0.0, "select 1", []int32(nil), nil, nil, nil, false})
 	}
 	result := scrapeLocks(t, rows)
 	var tree lockTree
@@ -151,12 +161,9 @@ func TestLocks_SessionListNotFlaggedWhenComplete(t *testing.T) {
 	require.False(t, result.Partial)
 }
 
-// A session outside the blocking tree keeps only a short prefix of its query;
-// a session in the tree keeps the full text, since the tree is what the UI
-// shows for a wait.
 // A statement the locks check reads that carries a password is withheld in the
-// blocking tree and in the session list alike, and the text the UI shows never
-// holds it.
+// blocking tree, and no text of any session reaches the payload with a
+// password in it.
 func TestLocks_RedactsCredentialsInEveryQuery(t *testing.T) {
 	result := scrapeLocks(t, []([]any){
 		lockValues(1, "transactionid", []int32{9}, 2, "ALTER ROLE tmp_secret PASSWORD 'hunter2'"),
@@ -168,11 +175,6 @@ func TestLocks_RedactsCredentialsInEveryQuery(t *testing.T) {
 	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
 	require.Equal(t, withheldQuery, tree.Nodes[0].Query)
 	require.Equal(t, withheldQuery, tree.Nodes[1].Query)
-	queries := map[int32]string{}
-	for _, s := range tree.Sessions {
-		queries[s.PID] = s.Query
-	}
-	require.Equal(t, withheldQuery, queries[2])
 }
 
 // A long session text full of PASSWORD keywords inside one comment is read in
@@ -219,14 +221,12 @@ func TestLocks_TextTheServerCutIsWithheld(t *testing.T) {
 	var tree lockTree
 	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
 	require.Equal(t, withheldQuery, tree.Nodes[0].Query)
-	queries := map[int32]string{}
-	for _, s := range tree.Sessions {
-		queries[s.PID] = s.Query
-	}
-	require.Equal(t, withheldQuery, queries[2])
 }
 
-func TestLocks_IdleSessionQueryIsShortened(t *testing.T) {
+// The session list carries no query text, for a session in the tree or out of
+// it, and the JSON of a session has no query key at all. A node keeps its
+// text, shortened to the cap only when it is longer than the cap.
+func TestLocks_QueryTextOnlyInNodes(t *testing.T) {
 	long := strings.Repeat("x", 3000)
 	result := scrapeLocks(t, []([]any){
 		lockValues(1, "", nil, 0, long),
@@ -235,15 +235,82 @@ func TestLocks_IdleSessionQueryIsShortened(t *testing.T) {
 	})
 	var tree lockTree
 	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
-	queryLen := map[int32]int{}
+	require.Len(t, tree.Sessions, 3)
 	for _, s := range tree.Sessions {
-		queryLen[s.PID] = len(s.Query)
+		require.Empty(t, s.Query, "session %d", s.PID)
+		require.NotEmpty(t, s.State, "session %d keeps its other fields", s.PID)
 	}
-	require.Equal(t, lockIdleQueryLimit, queryLen[1])
-	require.Equal(t, 2048, queryLen[2])
+	var raw struct {
+		Sessions []map[string]any `json:"sessions"`
+	}
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &raw))
+	for _, s := range raw.Sessions {
+		require.NotContains(t, s, "query")
+	}
 	require.Len(t, tree.Nodes, 2)
 	require.Equal(t, 2048, len(tree.Nodes[0].Query))
 }
+
+// The session identity is the start time in microseconds since the epoch, in
+// lower-case hex, a dot and the PID, so a PID reused by a later session gets
+// another identity. A session whose start is not visible has none.
+func TestLocks_SessionIDFormat(t *testing.T) {
+	unseen := lockValues(3, "", nil, 0, "select 3")
+	unseen[len(unseen)-4] = nil
+	result := scrapeLocks(t, []([]any){lockValues(1, "transactionid", []int32{9}, 2, "update"), lockValues(9, "", nil, 0, "holder"), unseen})
+	var tree lockTree
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
+	ids := map[int32]string{}
+	for _, s := range tree.Sessions {
+		ids[s.PID] = s.SessionID
+	}
+	// 2026-10-23T09:00:00.000001Z is 1792746000000001 microseconds since the epoch.
+	require.Equal(t, "65e7e3480a401.1", ids[1])
+	require.Equal(t, "", ids[3])
+	require.NotEqual(t, ids[1], lockSessionID(1, ptrTime(lockBackendStart(1).Add(time.Hour))), "a reused PID has another identity")
+	require.Equal(t, ids[1], tree.Nodes[0].SessionID, "a node carries the identity of its session")
+}
+
+// A blocked session carries when its wait began and how long it has lasted,
+// both from the server. A session that waits on no lock carries neither.
+func TestLocks_WaitFieldsOnWaitingSessions(t *testing.T) {
+	result := scrapeLocks(t, []([]any){lockValues(1, "transactionid", []int32{9}, 2, "update"), lockValues(9, "", nil, 0, "holder")})
+	raw := string(result.Facts[0].ValueJSON)
+	require.Contains(t, raw, `"wait_started_at":"2026-10-23T09:00:01.000001Z"`)
+	require.Contains(t, raw, `"wait_duration":2`)
+	var tree lockTree
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
+	require.Len(t, tree.Nodes, 2)
+	waiter, holder := tree.Nodes[0], tree.Nodes[1]
+	require.Equal(t, int32(1), waiter.PID)
+	require.NotNil(t, waiter.WaitStartedAt)
+	require.True(t, lockBackendStart(1).Add(time.Second).Equal(*waiter.WaitStartedAt))
+	require.NotNil(t, waiter.WaitDuration)
+	require.Equal(t, 2.0, *waiter.WaitDuration)
+	require.Nil(t, holder.WaitStartedAt)
+	require.Nil(t, holder.WaitDuration)
+	require.NotContains(t, rawSession(t, result, 9), "wait_duration")
+	require.NotNil(t, tree.Sessions[0].WaitStartedAt, "the session list keeps the wait fields")
+}
+
+func rawSession(t *testing.T, result Result, pid int32) string {
+	t.Helper()
+	var raw struct {
+		Nodes []map[string]any `json:"nodes"`
+	}
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &raw))
+	for _, n := range raw.Nodes {
+		if n["pid"] == float64(pid) {
+			b, err := json.Marshal(n)
+			require.NoError(t, err)
+			return string(b)
+		}
+	}
+	t.Fatalf("no node %d", pid)
+	return ""
+}
+
+func ptrTime(t time.Time) *time.Time { return &t }
 
 func TestLocks_RequiresTierT0(t *testing.T) {
 	require.Equal(t, Requirements{Scope: ScopeInstance, PermTier: pgtype.TierReadOnly}, (&locksCheck{}).Requires())

@@ -1221,6 +1221,43 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** @description A client session of the latest lock sample. It carries no query text; the text of a session in a blocking tree is on its node in nodes. */
+        LockSession: {
+            pid?: number;
+            /** @description Identity that survives PID reuse, the lower-case hex of backend_start in microseconds since the Unix epoch, a dot, and the PID. Absent when the role may not see backend_start. */
+            session_id?: string;
+            /**
+             * Format: date-time
+             * @description Start of the session. Absent when the role may not see it.
+             */
+            backend_start?: string;
+            /**
+             * Format: date-time
+             * @description When the session began waiting for the lock it waits on now, from the server. Absent for a session that waits on no lock.
+             */
+            wait_started_at?: string;
+            /** @description Seconds the session has waited for that lock, measured on the server at the sample. Absent for a session that waits on no lock. */
+            wait_duration?: number;
+            blocked_by?: number[];
+            usename?: string;
+            datname?: string;
+            application_name?: string;
+            client_addr?: string;
+            state?: string;
+            wait_event_type?: string;
+            wait_event?: string;
+            /** @description Seconds since the transaction started. */
+            xact_age?: number;
+            /** @description Seconds since the state last changed. */
+            state_age?: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /** @description A session of the blocking tree, either blocked or a blocker. Nodes are the only sessions that carry query text. */
+        LockNode: components["schemas"]["LockSession"] & {
+            /** @description Statement text, cut to 2048 bytes. Withheld as "[redacted]" when it may hold a credential or the server cut it short. */
+            query?: string;
+        };
         LocksResponse: {
             instance_id: components["schemas"]["InstanceId"];
             /**
@@ -1229,13 +1266,10 @@ export interface components {
              */
             sampled_at: string | null;
             stale: boolean;
-            nodes: {
-                [key: string]: unknown;
-            }[];
-            /** @description All client sessions in the latest lock/activity sample. */
-            sessions: {
-                [key: string]: unknown;
-            }[];
+            /** @description The blocked sessions and their blockers in the latest lock sample, the only sessions with query text. */
+            nodes: components["schemas"]["LockNode"][];
+            /** @description Every client session in the latest lock sample, capped and oldest transaction first, without query text. */
+            sessions: components["schemas"]["LockSession"][];
         };
         ActivityResponse: {
             instance_id: components["schemas"]["InstanceId"];

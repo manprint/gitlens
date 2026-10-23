@@ -34,6 +34,9 @@ const (
 	replicationWindow   = 5 * time.Minute
 	baselineWindow      = 8 * 24 * time.Hour
 	siblingActiveWindow = time.Hour
+	// lockSampleFresh is how old the latest lock sample may be for the lock
+	// rules to read it. The locks check samples every ten seconds.
+	lockSampleFresh = 2 * time.Minute
 	// settingBatchSlack separates the settings of the latest scrape, which
 	// all carry that scrape's timestamp, from facts no scrape has refreshed
 	// since: a setting put back to its default stops being shipped, and its
@@ -156,6 +159,22 @@ type Baseline struct {
 	MeanExecTimeByQueryID map[int64]float64
 }
 
+// LockTreeSample is the latest lock tree the locks check stored for the
+// instance. It holds only what the lock rules read: no query text.
+type LockTreeSample struct {
+	SampledAt time.Time
+	Nodes     []LockTreeNode
+}
+
+// LockTreeNode is one session of a lock sample. WaitDuration is the seconds
+// the session has waited for the lock it waits on, measured on the server at
+// the sample; it is zero for a session that waits on none.
+type LockTreeNode struct {
+	PID          int32
+	BlockedBy    []int32
+	WaitDuration float64
+}
+
 type Snapshot struct {
 	Now        time.Time
 	ClusterID  int64
@@ -164,16 +183,19 @@ type Snapshot struct {
 	PGVersion  pgtype.PGVersion
 	PermTier   pgtype.PermTier
 	// FirstSeen is when monitoring of the instance began; zero if unknown.
-	FirstSeen     time.Time
-	Metrics       map[string]map[string]float64
-	Facts         map[string]map[string]Fact
-	Tables        []TableStat
-	Indexes       []IndexStat
-	Bloat         []BloatStat
-	Statements    []StatementStat
-	Host          HostInfo
-	Siblings      []SiblingInfo
-	Replication   *ReplicationInfo
+	FirstSeen   time.Time
+	Metrics     map[string]map[string]float64
+	Facts       map[string]map[string]Fact
+	Tables      []TableStat
+	Indexes     []IndexStat
+	Bloat       []BloatStat
+	Statements  []StatementStat
+	Host        HostInfo
+	Siblings    []SiblingInfo
+	Replication *ReplicationInfo
+	// LockTree is the latest lock sample; nil when the lock tree could not be
+	// read, and empty (zero SampledAt) when no sample was ever stored.
+	LockTree      *LockTreeSample
 	SkippedChecks map[string]string
 	Baseline      *Baseline
 	Settings      map[string]string
@@ -243,7 +265,56 @@ func LoadSnapshot(ctx context.Context, pool snapshotDB, instanceID uuid.UUID, no
 	if err := loadReplication(ctx, pool, s, now); err != nil && !isOptionalSnapshotError(err) {
 		return nil, err
 	}
+	if err := loadLockTree(ctx, pool, s); err != nil && !isOptionalSnapshotError(err) {
+		return nil, err
+	}
 	return s, nil
+}
+
+// loadLockTree reads the newest lock tree stored for the instance. A tree that
+// does not decode is not an empty sample: it is recorded as skipped, so the
+// lock rules degrade rather than read no wait where there may be one.
+func loadLockTree(ctx context.Context, pool snapshotDB, s *Snapshot) error {
+	var ts time.Time
+	var raw []byte
+	err := pool.QueryRow(ctx, `SELECT ts, tree FROM lock_snapshots WHERE instance_id=$1 ORDER BY ts DESC LIMIT 1`, s.InstanceID).Scan(&ts, &raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		s.LockTree = &LockTreeSample{}
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	sample, parseErr := parseLockTree(ts, raw)
+	if parseErr != nil {
+		s.SkippedChecks["LockTree"] = "lock tree unreadable: " + parseErr.Error()
+	} else {
+		s.LockTree = sample
+	}
+	return nil
+}
+
+// parseLockTree reads the fields the lock rules use from a stored tree.
+func parseLockTree(ts time.Time, raw []byte) (*LockTreeSample, error) {
+	var tree struct {
+		Nodes []struct {
+			PID          int32    `json:"pid"`
+			BlockedBy    []int32  `json:"blocked_by"`
+			WaitDuration *float64 `json:"wait_duration"`
+		} `json:"nodes"`
+	}
+	if err := json.Unmarshal(raw, &tree); err != nil {
+		return nil, err
+	}
+	sample := &LockTreeSample{SampledAt: ts, Nodes: make([]LockTreeNode, 0, len(tree.Nodes))}
+	for _, n := range tree.Nodes {
+		node := LockTreeNode{PID: n.PID, BlockedBy: n.BlockedBy}
+		if n.WaitDuration != nil {
+			node.WaitDuration = *n.WaitDuration
+		}
+		sample.Nodes = append(sample.Nodes, node)
+	}
+	return sample, nil
 }
 
 // loadRelationSnapshot is deliberately a small, fixed-query loader. Relation

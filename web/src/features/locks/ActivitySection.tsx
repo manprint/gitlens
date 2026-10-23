@@ -16,7 +16,7 @@ import {
   type ActivityMetrics,
 } from '@/lib/activity'
 import { formatCount, formatDuration, formatPercent, formatRelative } from '@/lib/format'
-import type { LockNode } from '@/lib/locks'
+import { sessionKey, type LockNode } from '@/lib/locks'
 import { SignalActions } from './SignalActions'
 
 export interface ActivityResponseLike {
@@ -30,9 +30,9 @@ function sessionValue(value: unknown): string {
   return '—'
 }
 
-function sessionQuery(value: unknown): string {
-  if (typeof value !== 'string' || value.trim() === '') return '—'
-  return value.split(/\r?\n/u, 1)[0]?.trim() ?? '—'
+function sessionQuery(value: unknown): string | null {
+  if (typeof value !== 'string' || value.trim() === '') return null
+  return value.split(/\r?\n/u, 1)[0]?.trim() ?? null
 }
 
 // Two decimals would show a steady trickle of deadlocks as 0.00. Below 0.01
@@ -65,7 +65,7 @@ function ActiveSessions({
       ) : (
         <ul aria-label="Active sessions" className="mt-3 space-y-3">
           {sessions.map((session) => (
-            <li key={String(session.pid)} className="rounded-md border p-3">
+            <li key={sessionKey(session)} className="rounded-md border p-3">
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
                 <strong>PID {sessionValue(session.pid)}</strong>
                 <span>{sessionValue(session.state)}</span>
@@ -75,7 +75,8 @@ function ActiveSessions({
                 </span>
               </div>
               <p className="text-muted-foreground mt-1 truncate text-sm">
-                {sessionQuery(session.query)}
+                {sessionQuery(session.query) ??
+                  'Query text shown only for sessions in a blocking tree.'}
               </p>
               <SignalActions
                 currentTier={currentTier}
