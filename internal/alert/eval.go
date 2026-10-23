@@ -1,6 +1,7 @@
 package alert
 
 import (
+	"sort"
 	"sync"
 	"time"
 )
@@ -35,6 +36,7 @@ const (
 
 type evalState struct {
 	first  time.Time
+	seen   time.Time // the pass that last sampled this subject
 	firing bool
 	alert  Alert
 }
@@ -53,8 +55,10 @@ func NewEvaluator() *Evaluator { return &Evaluator{states: make(map[string]evalS
 
 // Restore seeds the in-memory evaluator from a persisted non-terminal alert.
 // A newly elected engine must resume the existing episode instead of deriving
-// a new StartedAt from its first post-failover sample.
-func (e *Evaluator) Restore(a Alert) {
+// a new StartedAt from its first post-failover sample. The restored episode
+// counts as sampled now, so it gets a full grace period before it can be
+// closed for want of a sample.
+func (e *Evaluator) Restore(a Alert, now time.Time) {
 	if a.State != StatePending && a.State != StateFiring {
 		return
 	}
@@ -62,6 +66,7 @@ func (e *Evaluator) Restore(a Alert) {
 	defer e.mu.Unlock()
 	e.states[a.Key] = evalState{
 		first:  a.StartedAt,
+		seen:   now,
 		firing: a.State == StateFiring,
 		alert:  a,
 	}
@@ -74,21 +79,10 @@ func (e *Evaluator) Step(r Rule, s Sample, now time.Time) (*Alert, Transition) {
 	st, ok := e.states[k]
 	trueCond := !s.Inapplicable && (r.EventType != "" || Compare(s.Value, r.Comparator, r.Threshold))
 	if !trueCond {
-		if !ok {
-			return nil, TransitionNone
-		}
-		delete(e.states, k)
-		if st.firing {
-			a := st.alert
-			a.State = StateResolved
-			a.LastEvalAt = now
-			a.ResolvedAt = &now
-			return &a, TransitionResolved
-		}
-		return nil, TransitionCancelled
+		return e.endLocked(k, now)
 	}
 	if !ok {
-		st = evalState{first: s.TS}
+		st = evalState{first: s.TS, seen: now}
 		if st.first.IsZero() {
 			st.first = now
 		}
@@ -102,6 +96,7 @@ func (e *Evaluator) Step(r Rule, s Sample, now time.Time) (*Alert, Transition) {
 		e.states[k] = st
 		return &st.alert, TransitionOpened
 	}
+	st.seen = now
 	st.alert.LastEvalAt = now
 	st.alert.Value = s.Value
 	if !st.firing && now.Sub(st.first) >= r.For {
@@ -112,6 +107,50 @@ func (e *Evaluator) Step(r Rule, s Sample, now time.Time) (*Alert, Transition) {
 	}
 	e.states[k] = st
 	return &st.alert, TransitionNone
+}
+
+// End closes the episode of key although no sample arrived for it. The caller
+// has decided the episode is over: its subject left the lookback window and
+// nothing confirmed it still holds. A firing episode resolves and is returned;
+// a pending one is cancelled.
+func (e *Evaluator) End(key string, now time.Time) (*Alert, Transition) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.endLocked(key, now)
+}
+
+// endLocked is End for a caller that already holds e.mu.
+func (e *Evaluator) endLocked(key string, now time.Time) (*Alert, Transition) {
+	st, ok := e.states[key]
+	if !ok {
+		return nil, TransitionNone
+	}
+	delete(e.states, key)
+	if st.firing {
+		a := st.alert
+		a.State = StateResolved
+		a.LastEvalAt = now
+		a.ResolvedAt = &now
+		return &a, TransitionResolved
+	}
+	return nil, TransitionCancelled
+}
+
+// Unsampled returns the episodes of the rules that include selects whose
+// subject was last sampled at or before cutoff, so the pass that ended at
+// cutoff did not see them. The alerts are copies in key order: nothing is
+// closed until End is called for a key.
+func (e *Evaluator) Unsampled(include func(ruleID string) bool, cutoff time.Time) []Alert {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var out []Alert
+	for _, st := range e.states {
+		if include(st.alert.RuleID) && !st.seen.After(cutoff) {
+			out = append(out, st.alert)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	return out
 }
 
 // Forget drops evaluator state for pending episodes that started before the

@@ -25,6 +25,26 @@ type Source interface {
 	Samples(context.Context, Rule, time.Time) ([]Sample, error)
 }
 
+// Clearer is implemented by an event source. Cleared returns the episodes of
+// rule whose condition no longer holds, for the rules whose event alone does
+// not say (see spellEvents). An error means none of them can be confirmed.
+type Clearer interface {
+	Cleared(context.Context, Rule, []Alert) ([]Alert, error)
+}
+
+// spellEvents are the event types whose condition outlives the event that
+// opened it. Each is emitted once, when the condition begins, so once the
+// event leaves the lookback window nothing shows whether the condition still
+// holds. Their episodes close only when a Clearer confirms it. Every other
+// event type is a pulse, and its episode closes after the lookback passes
+// with no new occurrence; split_brain_detected is re-emitted while it persists,
+// well within that window.
+var spellEvents = map[string]bool{
+	"instance_unreachable":  true,
+	"no_primary_in_cluster": true,
+	"slot_inactive":         true,
+}
+
 // Notifier receives an alert transition. Delivery de-duplication belongs to
 // the persistence-backed notifier implementation.
 type Notifier interface {
@@ -242,6 +262,7 @@ func (e *Engine) Tick(ctx context.Context) error {
 	e.mu.Lock()
 	loaded := e.stateLoaded
 	e.mu.Unlock()
+	now := e.clock.Now()
 	if !loaded {
 		if e.store != nil {
 			active, err := e.store.Active(ctx, Filter{})
@@ -249,14 +270,13 @@ func (e *Engine) Tick(ctx context.Context) error {
 				return fmt.Errorf("restore active alerts: %w", err)
 			}
 			for _, a := range active {
-				e.eval.Restore(a)
+				e.eval.Restore(a, now)
 			}
 		}
 		e.mu.Lock()
 		e.stateLoaded = true
 		e.mu.Unlock()
 	}
-	now := e.clock.Now()
 	rules := Builtin()
 	if e.store != nil {
 		stored, err := e.store.Rules(ctx)
@@ -290,8 +310,14 @@ func (e *Engine) Tick(ctx context.Context) error {
 	// critical one — silently stopped being evaluated for as long as the bad
 	// rule stayed enabled. The same goes for a single alert failing to
 	// persist or to notify.
+	// live is the rule set of this pass. An episode whose rule is not in it
+	// was configured earlier, and no later sample will ever close it.
+	live := make(map[string]struct{}, len(rules))
+	grace := lookback(e.interval)
 	var errs []error
 	for _, rule := range rules {
+		live[rule.ID] = struct{}{}
+		observed, failed := 0, false
 		for _, source := range e.sources {
 			if (rule.EventType != "" && source.Kind() != "event") || (rule.EventType == "" && source.Kind() != "metric") {
 				continue
@@ -299,33 +325,91 @@ func (e *Engine) Tick(ctx context.Context) error {
 			samples, err := source.Samples(ctx, rule, now)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("sample rule %s: %w", rule.ID, err))
+				failed = true
 				if ctx.Err() != nil {
 					return errors.Join(errs...)
 				}
 				continue
 			}
+			observed++
 			for _, sample := range samples {
 				alertValue, transition := e.eval.Step(rule, sample, now)
 				if alertValue == nil || transition == TransitionNone || transition == TransitionOpened || transition == TransitionCancelled {
 					continue
 				}
-				alertValue.Suppressed = FirstMatch(silences, *alertValue, now) != nil
-				if e.store != nil {
-					if err := e.store.Upsert(ctx, *alertValue); err != nil {
-						errs = append(errs, fmt.Errorf("persist alert %s: %w", alertValue.Key, err))
-					}
-				}
-				if !alertValue.Suppressed && e.notifier != nil {
-					if err := e.notifier.Notify(ctx, *alertValue); err != nil {
-						errs = append(errs, fmt.Errorf("notify alert %s: %w", alertValue.Key, err))
-					}
-				}
+				errs = append(errs, e.publish(ctx, *alertValue, silences, now)...)
 				if ctx.Err() != nil {
 					return errors.Join(append(errs, ctx.Err())...)
 				}
 			}
 		}
+		// A subject that a complete pass did not sample has left the rule's
+		// data. A source that failed, or a rule no source served, says nothing
+		// about its subjects, so only a fully observed rule may close them.
+		if observed > 0 && !failed {
+			errs = append(errs, e.endUnsampled(ctx, &rule, silences, now, e.eval.Unsampled(func(id string) bool { return id == rule.ID }, now.Add(-grace)))...)
+		}
 	}
+	errs = append(errs, e.endUnsampled(ctx, nil, silences, now, e.eval.Unsampled(func(id string) bool {
+		_, ok := live[id]
+		return !ok
+	}, now))...)
 	e.eval.Forget(now.Add(-time.Hour))
 	return errors.Join(errs...)
+}
+
+// endUnsampled closes the episodes that a pass did not confirm. rule is the
+// configured rule of those episodes, or nil when the rule is gone, and then
+// they close at once. A spell episode closes only when its source confirms
+// that the condition cleared: its event aged out of the window, but the
+// condition may well still hold. If the check fails, nothing closes.
+func (e *Engine) endUnsampled(ctx context.Context, rule *Rule, silences []Silence, now time.Time, unsampled []Alert) []error {
+	if len(unsampled) == 0 {
+		return nil
+	}
+	closing := unsampled
+	if rule != nil && spellEvents[rule.EventType] {
+		cleared, err := e.clearedBy(ctx, *rule, unsampled)
+		if err != nil {
+			return []error{fmt.Errorf("check cleared %s: %w", rule.ID, err)}
+		}
+		closing = cleared
+	}
+	var errs []error
+	for _, a := range closing {
+		if resolved, transition := e.eval.End(a.Key, now); transition == TransitionResolved && resolved != nil {
+			errs = append(errs, e.publish(ctx, *resolved, silences, now)...)
+		}
+	}
+	return errs
+}
+
+// clearedBy asks the event source whether any of the episodes has cleared.
+// With no source able to confirm, nothing has cleared.
+func (e *Engine) clearedBy(ctx context.Context, rule Rule, episodes []Alert) ([]Alert, error) {
+	for _, s := range e.sources {
+		if c, ok := s.(Clearer); ok && s.Kind() == "event" {
+			return c.Cleared(ctx, rule, episodes)
+		}
+	}
+	return nil, nil
+}
+
+// publish persists one transition and notifies it unless a silence covers the
+// alert. Failures are returned, not raised, so one alert cannot stop the rest
+// of the pass.
+func (e *Engine) publish(ctx context.Context, a Alert, silences []Silence, now time.Time) []error {
+	var errs []error
+	a.Suppressed = FirstMatch(silences, a, now) != nil
+	if e.store != nil {
+		if err := e.store.Upsert(ctx, a); err != nil {
+			errs = append(errs, fmt.Errorf("persist alert %s: %w", a.Key, err))
+		}
+	}
+	if !a.Suppressed && e.notifier != nil {
+		if err := e.notifier.Notify(ctx, a); err != nil {
+			errs = append(errs, fmt.Errorf("notify alert %s: %w", a.Key, err))
+		}
+	}
+	return errs
 }

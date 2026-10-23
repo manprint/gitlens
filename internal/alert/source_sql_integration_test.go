@@ -241,3 +241,74 @@ func TestINTALERT006_RevokedAgentIsNotDown(t *testing.T) {
 		}
 	})
 }
+
+// TestINTALERT014_SpellEventsClearOnTheirOwnState — a spell episode closes on
+// the state its event describes, never on the event's absence: an outage is
+// still an outage after its event has aged out of the window.
+func TestINTALERT014_SpellEventsClearOnTheirOwnState(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		pool := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		ctx := context.Background()
+		_, err := pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS events (event_id bigserial, ts timestamptz NOT NULL, type text NOT NULL, cluster_id bigint, instance_id uuid); TRUNCATE events`)
+		require.NoError(t, err)
+		createAlertTables(t, pool)
+		agent := uuid.New()
+		_, err = pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+		require.NoError(t, err)
+		now := time.Now().UTC()
+		down, back := uuid.New(), uuid.New()
+		slow, fast := uuid.New(), uuid.New()
+		noPrimary, withPrimary := int64(101), int64(102)
+
+		// instance_unreachable: down has no later reachable event; back answered
+		// after its outage began.
+		for _, stmt := range []struct {
+			sql  string
+			args []any
+		}{
+			{`INSERT INTO events (ts, type, instance_id) VALUES ($1, 'instance_unreachable', $2), ($3, 'instance_unreachable', $4), ($5, 'instance_reachable', $4)`,
+				[]any{now.Add(-10 * time.Minute), down, now.Add(-10 * time.Minute), back, now.Add(-5 * time.Minute)}},
+			// no_primary_in_cluster: only a standby reports in cluster 101; a
+			// fresh primary reports in cluster 102.
+			{`INSERT INTO instances (instance_id, cluster_id, agent_id, role, last_seen) VALUES ($1, $2, $3, 'standby', now()), ($4, $5, $3, 'primary', now())`,
+				[]any{uuid.New(), noPrimary, agent, uuid.New(), withPrimary}},
+			// slot_inactive: slow's slot is inactive now; fast's slot was
+			// inactive long ago and is active again.
+			{`INSERT INTO metrics_replication (ts, cluster_id, instance_id, slot_name, source, slot_active) VALUES ($1, 1, $2, 'a', 'slot', false), ($3, 1, $2, 'a', 'slot', true), ($4, 1, $5, 'b', 'slot', false), ($6, 1, $5, 'b', 'slot', true)`,
+				[]any{now.Add(-time.Minute), slow, now.Add(-3 * time.Minute), now.Add(-20 * time.Minute), fast, now.Add(-time.Minute)}},
+		} {
+			_, err := pool.Exec(ctx, stmt.sql, stmt.args...)
+			require.NoError(t, err)
+		}
+
+		// A revoked agent never reports again, so no reachable event can end the
+		// outage of its instance. Revoking the agent ends the monitoring instead.
+		revokedAgent, gone := uuid.New(), uuid.New()
+		_, err = pool.Exec(ctx, `INSERT INTO agents (agent_id, revoked_at) VALUES ($1, now())`, revokedAgent)
+		require.NoError(t, err)
+		_, err = pool.Exec(ctx, `INSERT INTO instances (instance_id, cluster_id, agent_id, role, last_seen) VALUES ($1, 103, $2, 'standby', now() - interval '1 hour')`, gone, revokedAgent)
+		require.NoError(t, err)
+		_, err = pool.Exec(ctx, `INSERT INTO events (ts, type, instance_id) VALUES ($1, 'instance_unreachable', $2)`, now.Add(-time.Hour), gone)
+		require.NoError(t, err)
+
+		src := &eventSource{db: pool, interval: time.Minute}
+		cleared := func(rule Rule, a Alert) bool {
+			got, err := src.Cleared(ctx, rule, []Alert{a})
+			require.NoError(t, err)
+			return len(got) == 1
+		}
+		unreachable := Rule{ID: "instance_unreachable", EventType: "instance_unreachable"}
+		noPrimaryRule := Rule{ID: "no_primary_in_cluster", EventType: "no_primary_in_cluster"}
+		slotRule := Rule{ID: "slot_inactive", EventType: "slot_inactive"}
+
+		require.False(t, cleared(unreachable, Alert{InstanceID: &down}), "no reachable event: the outage continues")
+		require.True(t, cleared(unreachable, Alert{InstanceID: &back}), "a reachable event after the outage clears it")
+		require.False(t, cleared(noPrimaryRule, Alert{ClusterID: &noPrimary}), "no fresh primary: the cluster still has none")
+		require.True(t, cleared(noPrimaryRule, Alert{ClusterID: &withPrimary}), "a fresh primary clears the episode")
+		require.False(t, cleared(slotRule, Alert{InstanceID: &slow}), "an inactive slot keeps the episode open")
+		require.True(t, cleared(slotRule, Alert{InstanceID: &fast}), "a slot active again clears the episode")
+		require.True(t, cleared(unreachable, Alert{InstanceID: &gone}), "a revoked agent cannot report back, so its outage has ended")
+		require.False(t, cleared(unreachable, Alert{}), "an episode without a subject has not cleared")
+	})
+}
