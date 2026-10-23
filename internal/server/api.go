@@ -430,6 +430,13 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	resp := make([]clusterResp, 0, len(clusters))
 	for _, c := range clusters {
+		// A cluster with no instance behind it is left by a registration that
+		// failed after its cluster row was written. healthForCluster reads it
+		// as "unknown", which the spec does not allow, and the fleet summary
+		// cannot count it, so it is left out of the list.
+		if len(instanceRows[c.idDB]) == 0 {
+			continue
+		}
 		cidStr := store.FromDB(c.idDB).String()
 
 		var namePtr *string

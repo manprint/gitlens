@@ -549,6 +549,36 @@ func TestAPI_MockPool_Clusters_MeasuredZeroLag(t *testing.T) {
 	require.Contains(t, w.Body.String(), `"max_replay_lag_seconds":0`)
 }
 
+// TestAPI_MockPool_Clusters_SkipsClusterWithoutInstances: a cluster row with
+// no instance behind it is left by a registration that failed. Its health is
+// "unknown", which the spec does not allow, and the fleet summary cannot
+// count it. The list leaves it out, so the total matches the clusters shown.
+func TestAPI_MockPool_Clusters_SkipsClusterWithoutInstances(t *testing.T) {
+	t.Parallel()
+	orphan := store.ToDB(pgtype.ClusterID(9005))
+	withInstances := store.ToDB(pgtype.ClusterID(9006))
+	pool := &mockPool{
+		queryResults: []*mockRows{
+			{rows: [][]any{{orphan, nil, "manual"}, {withInstances, nil, "manual"}}},
+			{rows: [][]any{
+				{withInstances, uuid.NewString(), "10.0.0.5", 5432, "primary", 170000, "T0", time.Now()},
+			}},
+		},
+	}
+	api := &API{pool: pool}
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/clusters", http.NoBody)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp []clusterResp
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp, 1)
+	require.Equal(t, pgtype.ClusterID(9006).String(), resp[0].ClusterID)
+	require.Equal(t, "ok", resp[0].Health)
+}
+
 // TestAPI_MockPool_Clusters_MostRecentPrimaryWins covers a real bug found
 // live running SYS-REPL-001: after a real failover, the old (now-dead)
 // primary's own instances.role row still says "primary" for a while (a
