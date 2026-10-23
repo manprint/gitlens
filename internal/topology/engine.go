@@ -151,6 +151,15 @@ func (e *Engine) Apply(obs Observation) []Event {
 				ClusterID:  obs.ClusterID,
 				Payload:    map[string]any{"old_role": inst.role, "new_role": obs.Role},
 			})
+			// An unknown role hides a standby's promotion from the failover check
+			// above, which needs the standby seen as standby. The promotion still
+			// hands over from the recent primary, and the failover time is what
+			// keeps that primary, now silent, from counting in split brain.
+			if inst.role == pgtype.RoleUnknown && obs.Role == pgtype.RolePrimary {
+				if lastPrim, ok := e.lastPrimary[obs.ClusterID]; ok && now.Sub(lastPrim.timestamp) < e.failoverWindow && lastPrim.instanceID != obs.InstanceID {
+					e.lastFailoverTime[obs.ClusterID] = now
+				}
+			}
 		} else {
 			// First sighting
 			events = append(events, Event{
