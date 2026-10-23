@@ -15,14 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func setupAlertStoreTables(t *testing.T, ctx context.Context, pool interface {
-	Exec(context.Context, string, ...any) (any, error)
-}) {
-	// Kept as a separate test-local schema so the persistence contract is tested
-	// against PostgreSQL without depending on unrelated Timescale fixtures.
-	t.Helper()
-}
-
 func TestINTALERT003_Through007_AlertStorePersistence(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
 		pg.Lock(t)
