@@ -60,3 +60,17 @@ func TestAuditAPI_DecodesRows(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.Contains(t, rec.Body.String(), `"outcome":"ok"`)
 }
+
+// TestAuditAPI_QueryIDIsAString: a queryid is an int64 hash, which a JSON
+// number cannot carry through a browser. The audit writes it as a string, the
+// way the other endpoints do, and keeps the other arguments as they are.
+func TestAuditAPI_QueryIDIsAString(t *testing.T) {
+	instanceID, commandID := uuid.New(), uuid.New()
+	p := &auditPool{rows: &mockRows{rows: [][]any{{int64(1), []byte(commandID.String()), []byte(instanceID.String()), "explain", []byte(`{"queryid":9223372036854775807,"datname":"app","analyze":true}`), "api", time.Now(), "requested", nil}}}}
+	r := chi.NewRouter()
+	(&API{pool: p}).RegisterRoutes(r)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/instances/"+instanceID.String()+"/command-audit", http.NoBody))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), `"args":{"analyze":true,"datname":"app","queryid":"9223372036854775807"}`)
+}
