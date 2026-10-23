@@ -388,3 +388,136 @@ func TestINTSCH005_ScheduledDatabaseOutsideTheBudgetKeepsItsStatementsView(t *te
 		require.NotContains(t, takeSkips(&mu, pending, target), "stat_statements")
 	})
 }
+
+// backendPIDs lists the sessions the agent holds on db. Its pools name their
+// sessions after the database they connect to.
+func backendPIDs(t *testing.T, admin *pgxpool.Pool, db string) []int32 {
+	t.Helper()
+	rows, err := admin.Query(context.Background(), "SELECT pid FROM pg_stat_activity WHERE application_name = $1 ORDER BY pid", "pglens/"+db)
+	require.NoError(t, err)
+	defer rows.Close()
+	var pids []int32
+	for rows.Next() {
+		var pid int32
+		require.NoError(t, rows.Scan(&pid))
+		pids = append(pids, pid)
+	}
+	require.NoError(t, rows.Err())
+	return pids
+}
+
+// TestINTSCH006_WaitingDatabaseIsNotConnected: the budget monitors two databases
+// when the schedule is built, and the schedule runs checks for both. Two busier
+// databases then take the budget. The schedule keeps the first two while they
+// are listed, so the new ones wait and pglens reports them as not monitored. The
+// reconcile must not connect to them to look for pg_stat_statements: such a
+// connection takes a slot under the manager's cap and closes a pool the schedule
+// runs its checks through.
+func TestINTSCH006_WaitingDatabaseIsNotConnected(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// The maintenance database is outside the include list and has no view,
+		// so the statements lookup looks only at the monitored databases.
+		const maintDB = "sch006_maint"
+		const heldA, heldB, waitingA, waitingB = "sch006_held_a", "sch006_held_b", "sch006_waiting_a", "sch006_waiting_b"
+		const target = "waiting-target"
+		dbs := []string{maintDB, heldA, heldB, waitingA, waitingB}
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		for _, db := range dbs {
+			_, err := admin.Exec(ctx, "CREATE DATABASE "+db)
+			require.NoError(t, err)
+		}
+		t.Cleanup(func() {
+			for _, db := range dbs {
+				_, _ = admin.Exec(context.Background(), "DROP DATABASE IF EXISTS "+db+" WITH (FORCE)")
+			}
+		})
+
+		opts := agent.DefaultConnOptions()
+		opts.MaxDatabases = 2
+		opts.Include = []*regexp.Regexp{regexp.MustCompile("^sch006_(held|waiting)_")}
+		mgr, err := agent.NewManager(ctx, target, pg.DSN(maintDB, pgtest.RoleT0), opts, clock.System())
+		require.NoError(t, err)
+		t.Cleanup(mgr.Close)
+
+		// commit runs n statements in db. Each one is its own commit, which is
+		// what the budget counts.
+		commit := func(db string, n int) {
+			pool, err := pgxpool.New(ctx, pg.DSN(db, pgtest.RoleT0))
+			require.NoError(t, err)
+			defer pool.Close()
+			for range n {
+				_, err := pool.Exec(ctx, "SELECT 1")
+				require.NoError(t, err)
+			}
+		}
+		// budgetMonitors reports which databases the budget monitors now. A
+		// failed discovery reads as none, so Eventually keeps polling.
+		budgetMonitors := func() map[string]bool {
+			dbs, err := mgr.Discover(ctx)
+			monitored := map[string]bool{}
+			if err != nil {
+				return monitored
+			}
+			for _, db := range dbs {
+				if db.Monitored {
+					monitored[db.Name] = true
+				}
+			}
+			return monitored
+		}
+
+		commit(heldA, 200)
+		commit(heldB, 200)
+		require.Eventually(t, func() bool {
+			monitored := budgetMonitors()
+			return monitored[heldA] && monitored[heldB]
+		}, 20*time.Second, 200*time.Millisecond, "the budget should monitor the two busiest databases at start")
+
+		var mu sync.Mutex
+		pending := map[string][]wire.Result{}
+		scheduledDBs := map[string]map[string]bool{}
+		schedules := newScheduleSet(ctx, &agent.Config{}, clock.System(), []*agent.Manager{mgr}, &mu, pending, scheduledDBs)
+		require.NoError(t, schedules.start(ctx))
+		t.Cleanup(schedules.stop)
+		require.Equal(t, map[string]bool{heldA: true, heldB: true}, schedules.gates[target].databases)
+		require.NotEmpty(t, backendPIDs(t, admin, heldA), "the schedule runs through a pool for each database it holds")
+		require.NotEmpty(t, backendPIDs(t, admin, heldB))
+
+		// The two busier databases take the budget. The schedule keeps the first
+		// two, since they are still listed.
+		commit(waitingA, 800)
+		commit(waitingB, 800)
+		require.Eventually(t, func() bool {
+			monitored := budgetMonitors()
+			return monitored[waitingA] && monitored[waitingB] && !monitored[heldA] && !monitored[heldB]
+		}, 20*time.Second, 200*time.Millisecond, "the budget should move to the busier databases")
+		require.Empty(t, backendPIDs(t, admin, waitingA), "nothing has connected to a database the schedule does not hold")
+		require.Empty(t, backendPIDs(t, admin, waitingB))
+
+		pidsA, pidsB := backendPIDs(t, admin, heldA), backendPIDs(t, admin, heldB)
+		require.NotEmpty(t, pidsA)
+		require.NotEmpty(t, pidsB)
+
+		currentScheduler := func() *agent.Scheduler {
+			schedules.schedMu.Lock()
+			defer schedules.schedMu.Unlock()
+			return schedules.current
+		}
+		before := currentScheduler()
+		schedules.reconcile()
+
+		require.Same(t, before, currentScheduler(), "a database the budget pushed out but the schedule holds must not rebuild it")
+		require.Empty(t, backendPIDs(t, admin, waitingA), "the reconcile must not connect to a database the schedule does not hold")
+		require.Empty(t, backendPIDs(t, admin, waitingB))
+		// With the cap at two, a lookup that did reach the waiting databases
+		// would evict them again before the reconcile returns. The survival of
+		// the scheduled pools below is what shows that it did.
+		require.Subset(t, backendPIDs(t, admin, heldA), pidsA, "the pool of a scheduled database must survive the reconcile")
+		require.Subset(t, backendPIDs(t, admin, heldB), pidsB, "the pool of a scheduled database must survive the reconcile")
+		require.Equal(t, map[string]bool{heldA: true, heldB: true}, schedules.gates[target].databases)
+	})
+}

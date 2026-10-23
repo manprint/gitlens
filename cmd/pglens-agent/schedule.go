@@ -38,8 +38,8 @@ type targetGate struct {
 	// budget's verdict. nextGate keeps a scheduled database while it is listed.
 	discovered []wire.Database
 	// statementsUnknown reports that pg_stat_statements could not be looked for
-	// in every monitored database, so an absent view means nothing. nextGate
-	// keeps the last answer then. It is not part of key.
+	// in every database the schedule runs checks for, so an absent view means
+	// nothing. nextGate keeps the last answer then. It is not part of key.
 	statementsUnknown bool
 }
 
@@ -51,9 +51,9 @@ func (g targetGate) key() string {
 }
 
 // readTargetGate reads a target's gate values and its database discovery.
-// scheduled is the database set the schedule currently runs checks for. ok is
-// false when the target cannot be read in full this time: discovery failed, or
-// its version or role is still unknown.
+// scheduled is the database set the schedule currently runs checks for, and nil
+// before the first schedule is built. ok is false when the target cannot be read
+// in full this time: discovery failed, or its version or role is still unknown.
 func readTargetGate(ctx context.Context, mgr *agent.Manager, scheduled map[string]bool) (targetGate, bool) {
 	ctx, cancel := context.WithTimeout(ctx, scheduleReadTimeout)
 	defer cancel()
@@ -85,18 +85,22 @@ func readTargetGate(ctx context.Context, mgr *agent.Manager, scheduled map[strin
 		g.role = mgr.Role()     //nolint:contextcheck // same as above
 		g.tier = mgr.PermTier() //nolint:contextcheck // same as above
 	}
-	// pg_stat_statements counts as present when any monitored database has the
-	// view, not only the maintenance database: the check reads the others
-	// through it. LocateStatements also records the database the check reads
-	// through, so it only runs on a complete discovery.
+	// pg_stat_statements counts as present when any database the schedule runs
+	// checks for has the view, not only the maintenance database: the check reads
+	// the others through it. LocateStatements also records the database the check
+	// reads through, so it only runs on a complete discovery.
 	g.exts["pg_stat_statements"] = false
 	if err == nil {
-		// A database the budget has pushed out but the schedule still runs checks
-		// for keeps its view in use, so it is looked at too.
+		// The databases looked at are the ones the schedule holds after this read,
+		// as keepDatabases picks them from the same discovery nextGate uses. A
+		// database the budget monitors but the schedule does not hold is reported
+		// as not monitored, so pglens must not connect to it. Before the first
+		// schedule that set is the budget's choice.
+		held := keepDatabases(scheduled, dbs)
 		lookup := make([]wire.Database, len(dbs))
 		copy(lookup, dbs)
 		for i := range lookup {
-			lookup[i].Monitored = lookup[i].Monitored || scheduled[lookup[i].Name]
+			lookup[i].Monitored = held[lookup[i].Name]
 		}
 		found, statementsErr := mgr.LocateStatements(ctx, lookup)
 		g.exts["pg_stat_statements"] = found
@@ -120,6 +124,9 @@ func readTargetGate(ctx context.Context, mgr *agent.Manager, scheduled map[strin
 func nextGate(last targetGate, seen bool, read targetGate, readOK bool) (targetGate, bool) {
 	switch {
 	case !seen:
+		// There is no earlier answer to keep on the first read, so an answer that
+		// is unknown then is taken as absent. The schedule is built without the
+		// check, and the first reconcile that can look for the view corrects it.
 		return read, true
 	case !readOK:
 		return last, false
