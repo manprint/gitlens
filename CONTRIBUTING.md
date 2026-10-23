@@ -78,11 +78,9 @@ Three of these are easy to skip and expensive to have skipped:
 
 ## How to add an E2E scenario
 
-1. Put the acceptance test in `test/e2e/<area>_test.go` and its scenario metadata in `test/e2e/scenarios/<area>.yml`. Reuse the compose and fixture files under `test/compose/` and `test/fixtures/`; add a new stack only when the existing topologies cannot express the failure.
-2. Give the scenario a stable id in the form `SYS-<AREA>-<NNN>` and use that exact id in the Go test, metadata and assertions.
-3. Register the id in the scenario catalogue and metadata before closing the
-   change. An id in code but not the catalogue, or in the catalogue but not
-   code, is incomplete.
+1. Put the acceptance test in `test/e2e/<area>_test.go` and register its scenario there with `scenario.Register`. The registration is the only metadata: the id, title, topology, `Covers`, and the events the run must produce (`Expect.Events`) or the invariants it checks (`Expect.Invariants`). `Register` rejects a scenario without `Covers` or without an expectation, and a run that declares invariants must call `e.AssertInvariants`. Reuse the compose and fixture files under `test/compose/` and `test/fixtures/`; add a new stack only when the existing topologies cannot express the failure.
+2. Give the scenario a stable id in the form `SYS-<AREA>-<NNN>` and use that exact id in the Go test, the registration and assertions.
+3. Add the id to the catalogue in `TESTING.md` section 8.1 before closing the change: one row with the title, topology, smoke flag and references copied from the registration. An id in code but not the catalogue, or in the catalogue but not code, is incomplete.
 4. Exercise the scenario with the E2E command, for example:
 
 ```sh
