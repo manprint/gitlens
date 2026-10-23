@@ -422,3 +422,47 @@ func TestPipeline_INT_PIPE_004_AmbiguousAddressNamesNoUpstream(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM topology_edges WHERE from_instance=$1`, standby2).Scan(&edges))
 	require.Zero(t, edges, "two instances of the envelope report the address, so it names no upstream")
 }
+
+// TestPipeline_RetriedEnvelopeCountsEachCheckOnce: the agent resends an
+// envelope whose response it lost, so a committed envelope can arrive twice.
+// Both deliveries store the same rows, and the check counters must count the
+// scrape once. They used to be incremented before the commit, once per
+// delivery.
+func TestPipeline_RetriedEnvelopeCountsEachCheckOnce(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	p := NewPipeline(pool, clock.NewFake(time.Now()))
+	instID := uuid.New()
+	cid := pgtype.ClusterID(1).String()
+	ts := time.Now().Add(-time.Minute).Truncate(time.Second)
+	env := wire.Envelope{Instances: []wire.Instance{{
+		InstanceID: instID.String(), ClusterID: cid, Role: "primary",
+		Results: []wire.Result{
+			{Check: "activity", TS: ts, Database: "app"},
+			{Check: "stat_statements", TS: ts, Database: "app", Truncated: true},
+		},
+	}}}
+	okBefore := pglensCheckOKTotal.Get(checkKey{instance: instID.String(), check: "activity"})
+
+	for range 2 {
+		res, err := p.Process(ctx, env)
+		require.NoError(t, err)
+		require.Equal(t, 1, res.Accepted)
+	}
+
+	require.Equal(t, okBefore+1, pglensCheckOKTotal.Get(checkKey{instance: instID.String(), check: "activity"}),
+		"a scrape delivered twice is counted once")
+	var markers int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE instance_id=$1 AND type='cardinality_truncated'`, instID).Scan(&markers))
+	require.Equal(t, 1, markers, "the window marker is not written again on the retry")
+
+	// The next scrape is new, and it counts.
+	res, err := p.Process(ctx, wire.Envelope{Instances: []wire.Instance{{
+		InstanceID: instID.String(), ClusterID: cid, Role: "primary",
+		Results: []wire.Result{{Check: "activity", TS: ts.Add(time.Minute), Database: "app"}},
+	}}})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Accepted)
+	require.Equal(t, okBefore+2, pglensCheckOKTotal.Get(checkKey{instance: instID.String(), check: "activity"}))
+}

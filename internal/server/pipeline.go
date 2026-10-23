@@ -28,6 +28,9 @@ type Pipeline struct {
 	clock     clock.Clock
 	mu        sync.Mutex
 	lastEvict time.Time
+	// checkCounted is the timestamp of the newest result counted for each check,
+	// database and instance. Guarded by mu.
+	checkCounted map[checkCountKey]time.Time
 }
 
 // PipelineResult reports per-instance acceptance.
@@ -44,11 +47,12 @@ func NewPipeline(pool *pgxpool.Pool, clk clock.Clock) *Pipeline {
 		clk = clock.System()
 	}
 	return &Pipeline{
-		pool:      asDBPool(pool),
-		delta:     delta.New(delta.Options{}),
-		topo:      topology.NewEngine(clk),
-		clock:     clk,
-		lastEvict: clk.Now(),
+		pool:         asDBPool(pool),
+		delta:        delta.New(delta.Options{}),
+		topo:         topology.NewEngine(clk),
+		clock:        clk,
+		lastEvict:    clk.Now(),
+		checkCounted: make(map[checkCountKey]time.Time),
 	}
 }
 
@@ -64,6 +68,11 @@ func (p *Pipeline) maybeEvict() {
 	// The topology engine accumulates exactly the same way the delta engine
 	// does — one entry per instance, forever — and was never swept.
 	p.topo.Evict(cutoff)
+	for key, ts := range p.checkCounted {
+		if ts.Before(cutoff) {
+			delete(p.checkCounted, key)
+		}
+	}
 	p.lastEvict = now
 }
 
@@ -165,6 +174,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	var lockSnapshotRows []store.LockSnapshotRow
 	var relationPrunes []store.RelationStatsPrune
 	var factPrunes []store.ObjectFactPrune
+	var checkOutcomes []checkOutcome
 	currentSeries := make(map[uuid.UUID]map[pgtype.SeriesKey]struct{}, len(env.Instances))
 	var storedInstances []uuid.UUID
 	// The role each stored instance reports, written at the end of the transaction.
@@ -431,11 +441,14 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 				}
 			}
 			// A skipped scrape completed neither way. Counting it as OK would let
-			// it hide the errors the same check reports on that instance.
-			if r.Error != "" {
-				IncCheckError(instUUID.String(), r.Check)
-			} else if r.SkipReason == "" {
-				IncCheckOK(instUUID.String(), r.Check)
+			// it hide the errors the same check reports on that instance. The
+			// counters move after the commit, see countChecks.
+			if r.Error != "" || r.SkipReason == "" {
+				checkOutcomes = append(checkOutcomes, checkOutcome{
+					checkCountKey: checkCountKey{instance: instUUID, check: r.Check, database: r.Database},
+					ts:            r.TS,
+					failed:        r.Error != "",
+				})
 			}
 			// A cap that holds writes a marker per window, not per push: the readers
 			// only need one inside their look-back.
@@ -877,6 +890,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		return nil, fmt.Errorf("commit tx: %w", err)
 	}
 	committed = true
+	p.countChecks(checkOutcomes)
 	// I-8's own real number: how many distinct counter series each instance is
 	// reporting in this envelope. The delta engine intentionally retains older
 	// observations for rate continuity, so its full state is not the current
@@ -1027,6 +1041,43 @@ func (p *Pipeline) processInstanceNoDB(_ context.Context, inst wire.Instance) er
 		}
 	}
 	return nil
+}
+
+// checkCountKey names the results one check reports for one database of one
+// instance. The check counters count each of those results once.
+type checkCountKey struct {
+	instance uuid.UUID
+	check    string
+	database string
+}
+
+// checkOutcome is one counted result of an envelope, held until the envelope
+// commits.
+type checkOutcome struct {
+	checkCountKey
+	ts     time.Time
+	failed bool
+}
+
+// countChecks moves the check counters for a committed envelope. The agent
+// resends an envelope whose response it did not get, so the same results can
+// arrive again; a result counts only when it is newer than the last one
+// counted for its check, database and instance. Counting before the commit
+// counted a rolled-back envelope, and every resend of a committed one.
+func (p *Pipeline) countChecks(outcomes []checkOutcome) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, o := range outcomes {
+		if last, ok := p.checkCounted[o.checkCountKey]; ok && !o.ts.After(last) {
+			continue
+		}
+		p.checkCounted[o.checkCountKey] = o.ts
+		if o.failed {
+			IncCheckError(o.instance.String(), o.check)
+		} else {
+			IncCheckOK(o.instance.String(), o.check)
+		}
+	}
 }
 
 type statementKey struct {
