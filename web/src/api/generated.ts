@@ -971,7 +971,10 @@ export interface components {
         };
         /** @enum {string} */
         PermTier: "T0" | "T1" | "T2";
-        /** @enum {string} */
+        /**
+         * @description Computed per cluster on each read. critical when the cluster has no primary, or more than one. degraded when an instance that has not been superseded has not reported within 60 seconds, or the largest replay lag reported within the last 60 seconds is above 30 seconds. ok otherwise. The 30 second threshold is fixed on the server and no response field carries it, so a client that shows it must copy the value from this text.
+         * @enum {string}
+         */
         Health: "ok" | "degraded" | "critical";
         /** @description True means the relation or cardinality budget cut the result. */
         Truncated: boolean;
