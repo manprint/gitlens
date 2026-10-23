@@ -208,7 +208,10 @@ describe('QueryListPage', () => {
 
     await settle()
     const link = screen.getByRole('link', { name: 'Query 9223372036854775807' })
-    expect(link).toHaveAttribute('href', `/instances/${INSTANCE_ID}/queries/9223372036854775807`)
+    expect(link).toHaveAttribute(
+      'href',
+      `/instances/${INSTANCE_ID}/queries/9223372036854775807?db=postgres`,
+    )
   })
 
   it('renders the populated statement list without accessibility violations', async () => {

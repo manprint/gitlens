@@ -13,7 +13,7 @@ import { EventsPage as EventsPageComponent } from '@/features/alerts/EventsPage'
 import { RulesPage as RulesPageComponent } from '@/features/alerts/RulesPage'
 import { SilencesPage as SilencesPageComponent } from '@/features/alerts/SilencesPage'
 import { SettingsPage as SettingsPageComponent } from '@/features/settings/SettingsPage'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 
 interface PlaceholderPageProps {
   surface: string
@@ -50,7 +50,11 @@ export function QueryInspectorPage() {
 
 export function QueryDetailPage() {
   const { instanceId, queryid } = useParams<{ instanceId: string; queryid: string }>()
+  const [searchParams] = useSearchParams()
   const instanceQuery = useInstance(instanceId ?? '')
+  // Set by the list link to the statement's database. Without it EXPLAIN runs
+  // in the agent's own DSN database and plan history lists every database.
+  const datname = searchParams.get('db') ?? undefined
 
   if (!instanceId || !queryid) {
     return <PlaceholderPage surface="Query detail and plan history" />
@@ -60,10 +64,15 @@ export function QueryDetailPage() {
     <div className="space-y-8">
       <ExplainPanel
         currentTier={instanceQuery.data?.perm_tier ?? 'T0'}
+        {...(datname === undefined ? {} : { datname })}
         instanceId={instanceId}
         queryid={queryid}
       />
-      <PlanHistory instanceId={instanceId} queryid={queryid} />
+      <PlanHistory
+        {...(datname === undefined ? {} : { datname })}
+        instanceId={instanceId}
+        queryid={queryid}
+      />
     </div>
   )
 }

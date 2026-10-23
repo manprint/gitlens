@@ -61,8 +61,11 @@ function readSort(value: string | null): StatementSort {
     : DEFAULT_SORT
 }
 
-function queryPath(instanceId: string, queryid: number | string): string {
-  return `/instances/${encodeURIComponent(instanceId)}/queries/${encodeURIComponent(String(queryid))}`
+// The same queryid can name different statements in different databases, and
+// EXPLAIN runs in the database it is given, so the link carries the database.
+function queryPath(instanceId: string, queryid: number | string, datname?: string | null): string {
+  const path = `/instances/${encodeURIComponent(instanceId)}/queries/${encodeURIComponent(String(queryid))}`
+  return datname ? `${path}?db=${encodeURIComponent(datname)}` : path
 }
 
 function formatNumber(value: number | null | undefined): string {
@@ -83,7 +86,7 @@ function queryTextCell(row: StatementDisplayRow, instanceId: string) {
     <div className="min-w-64 space-y-1">
       <Link
         className="text-primary text-xs underline-offset-4 hover:underline"
-        to={queryPath(instanceId, row.queryid)}
+        to={queryPath(instanceId, row.queryid, row.datname)}
       >
         Query {String(row.queryid)}
       </Link>
