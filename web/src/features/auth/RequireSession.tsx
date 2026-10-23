@@ -19,8 +19,17 @@ export default function RequireSession({ children }: RequireSessionProps) {
     return <Navigate replace to="/login" />
   }
 
+  // Window focus and reconnect refetch a failed check, but an operator who stays
+  // on this screen otherwise has no way to ask again from the page.
   if (session.error) {
-    return <main role="alert">Impossibile verificare la sessione.</main>
+    return (
+      <main role="alert">
+        <p>Impossibile verificare la sessione.</p>
+        <button onClick={() => void session.refetch()} type="button">
+          Riprova
+        </button>
+      </main>
+    )
   }
 
   if (session.isPending || !session.data) {
