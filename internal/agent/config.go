@@ -123,6 +123,11 @@ type DatabasesConfig struct {
 	Max     int      `yaml:"max"`
 }
 
+// maxTopN is the largest checks.<name>.top_n that validation accepts. The
+// shipped configs use 50, and the cap keeps a typo from sizing a check's
+// series budget to millions.
+const maxTopN = 1000
+
 // ChecksConfig configures per-check overrides.
 type ChecksConfig map[string]CheckConfig
 
@@ -274,8 +279,10 @@ func (c *Config) validate() error {
 			}
 			c.parsedCheckIntervals[name] = interval
 		}
-		if check.TopN < 0 {
-			return fmt.Errorf("validation: checks.%s.top_n must be >= 0", name)
+		// The cardinality selector keeps up to 2*top_n keys per scope, so an
+		// unbounded value would let one check hold as many series as it asks.
+		if check.TopN < 0 || check.TopN > maxTopN {
+			return fmt.Errorf("validation: checks.%s.top_n must be between 0 and %d", name, maxTopN)
 		}
 	}
 

@@ -427,3 +427,43 @@ checks:
 	require.Contains(t, logged.String(), "host pglens.example.com is reached")
 	require.NotContains(t, logged.String(), "8080")
 }
+
+// TestConfig_TopNIsBounded: top_n sizes the cardinality cap, so a value outside
+// 0 to maxTopN is refused at load and the bound itself is accepted.
+func TestConfig_TopNIsBounded(t *testing.T) {
+	tests := []struct {
+		name    string
+		topN    int
+		wantErr bool
+	}{
+		{name: "default", topN: 0},
+		{name: "shipped_value", topN: 50},
+		{name: "bound", topN: maxTopN},
+		{name: "above_bound", topN: maxTopN + 1, wantErr: true},
+		{name: "negative", topN: -1, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			yaml := fmt.Sprintf(`
+server:
+  url: https://pglens.example.com
+  token: file-token
+identity_path: /var/lib/pglens/identity.json
+buffer:
+  path: /var/lib/pglens/buffer
+targets:
+  - name: pg-app
+    dsn: postgres://pglens@localhost/postgres
+checks:
+  table_stats: { top_n: %d }
+`, tt.topN)
+
+			_, err := LoadConfig(writeConfigFile(t, yaml))
+			if tt.wantErr {
+				require.ErrorContains(t, err, "table_stats.top_n must be between 0 and 1000")
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
