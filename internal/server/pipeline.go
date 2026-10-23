@@ -372,6 +372,12 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		undoMark := len(undos)
 		var topoEdges []topology.Edge
 		for _, we := range inst.TopologyEdges {
+			// Only a standby has an upstream. An edge from any other role comes
+			// from an agent older than a382022, and is dropped here. Leaving
+			// topoEdges empty still clears the rows this instance had stored.
+			if inst.Role != "standby" {
+				break
+			}
 			// The store admits only these two confidences. An edge with another one,
 			// from a newer agent, would fail the whole envelope on every attempt, so
 			// it is refused alone, as an invalid fact is.
