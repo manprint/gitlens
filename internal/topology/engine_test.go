@@ -824,3 +824,44 @@ func TestStreamingProvider(t *testing.T) {
 		t.Errorf("Edges() on an edgeless observation = %+v, want none", got)
 	}
 }
+
+// A primary that is demoted and promoted again inside the failover window is
+// not a failover from itself: it is a role change, and no failover is recorded.
+func TestEngine_SelfRepromotionIsRoleChangeNotFailover(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+
+	self := uuid.New()
+	other := uuid.New()
+	cID := pgtype.ManualClusterID("cluster1")
+
+	e.Apply(Observation{InstanceID: self, ClusterID: cID, Role: pgtype.RolePrimary, Timestamp: clk.Now()})
+	clk.Advance(10 * time.Second)
+	e.Apply(Observation{InstanceID: self, ClusterID: cID, Role: pgtype.RoleStandby, Timestamp: clk.Now()})
+	clk.Advance(40 * time.Second)
+	events := e.Apply(Observation{InstanceID: self, ClusterID: cID, Role: pgtype.RolePrimary, Timestamp: clk.Now()})
+	for _, evt := range events {
+		if evt.Type == EventFailoverDetected {
+			t.Fatalf("self re-promotion must not be a failover, got %+v", evt)
+		}
+	}
+	if len(events) != 1 || events[0].Type != EventRoleChange {
+		t.Fatalf("expected exactly one role_change, got %+v", events)
+	}
+	if _, failedOver := e.lastFailoverTime[cID]; failedOver {
+		t.Fatal("self re-promotion must not set lastFailoverTime")
+	}
+
+	// Control: a different standby promoted inside the window is a real failover
+	// from the instance that was primary.
+	clk.Advance(5 * time.Second)
+	e.Apply(Observation{InstanceID: other, ClusterID: cID, Role: pgtype.RoleStandby, Timestamp: clk.Now()})
+	clk.Advance(5 * time.Second)
+	events = e.Apply(Observation{InstanceID: other, ClusterID: cID, Role: pgtype.RolePrimary, Timestamp: clk.Now()})
+	if len(events) == 0 || events[0].Type != EventFailoverDetected {
+		t.Fatalf("expected a failover from the previous primary, got %+v", events)
+	}
+	if got := events[0].Payload["old_primary"]; got != self {
+		t.Fatalf("expected old_primary %v, got %v", self, got)
+	}
+}

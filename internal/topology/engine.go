@@ -115,7 +115,9 @@ func (e *Engine) Apply(obs Observation) []Event {
 	if inst.role != obs.Role {
 		// Check if this is a failover.
 		if obs.Role == pgtype.RolePrimary && inst.role == pgtype.RoleStandby {
-			if lastPrim, ok := e.lastPrimary[obs.ClusterID]; ok && now.Sub(lastPrim.timestamp) < e.failoverWindow {
+			// An instance demoted and promoted again within the window is not a
+			// failover: the recent primary it would hand over from is itself.
+			if lastPrim, ok := e.lastPrimary[obs.ClusterID]; ok && now.Sub(lastPrim.timestamp) < e.failoverWindow && lastPrim.instanceID != obs.InstanceID {
 				// This is a failover: standby -> primary with recent prior primary
 				events = append(events, Event{
 					Type:       EventFailoverDetected,
