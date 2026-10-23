@@ -397,6 +397,45 @@ components:
         ts: { $ref: '#/components/schemas/Timestamp' }
         value: { type: number }
         labels: { type: object, additionalProperties: { type: string } }
+    LockSession:
+      type: object
+      description: A client session of the latest lock sample. It carries no query text; the text of a session in a blocking tree is on its node in nodes.
+      properties:
+        pid: { type: integer }
+        session_id:
+          type: string
+          description: Identity that survives PID reuse, the lower-case hex of backend_start in microseconds since the Unix epoch, a dot, and the PID. Absent when the role may not see backend_start.
+        backend_start:
+          type: string
+          format: date-time
+          description: Start of the session. Absent when the role may not see it.
+        wait_started_at:
+          type: string
+          format: date-time
+          description: When the session began waiting for the lock it waits on now, from the server. Absent for a session that waits on no lock.
+        wait_duration:
+          type: number
+          description: Seconds the session has waited for that lock, measured on the server at the sample. Absent for a session that waits on no lock.
+        blocked_by: { type: array, items: { type: integer } }
+        usename: { type: string }
+        datname: { type: string }
+        application_name: { type: string }
+        client_addr: { type: string }
+        state: { type: string }
+        wait_event_type: { type: string }
+        wait_event: { type: string }
+        xact_age: { type: number, description: Seconds since the transaction started. }
+        state_age: { type: number, description: Seconds since the state last changed. }
+      additionalProperties: true
+    LockNode:
+      description: A session of the blocking tree, either blocked or a blocker. Nodes are the only sessions that carry query text.
+      allOf:
+        - $ref: '#/components/schemas/LockSession'
+        - type: object
+          properties:
+            query:
+              type: string
+              description: Statement text, cut to 2048 bytes. Withheld as "[redacted]" when it may hold a credential or the server cut it short.
     LocksResponse:
       type: object
       required: [instance_id, sampled_at, stale, nodes, sessions]
@@ -407,11 +446,14 @@ components:
           format: date-time
           description: Null when no lock tree has ever been sampled, not an empty timestamp.
         stale: { type: boolean }
-        nodes: { type: array, items: { type: object, additionalProperties: true } }
+        nodes:
+          type: array
+          items: { $ref: '#/components/schemas/LockNode' }
+          description: The blocked sessions and their blockers in the latest lock sample, the only sessions with query text.
         sessions:
           type: array
-          items: { type: object, additionalProperties: true }
-          description: All client sessions in the latest lock/activity sample.
+          items: { $ref: '#/components/schemas/LockSession' }
+          description: Every client session in the latest lock sample, capped and oldest transaction first, without query text.
     ActivityResponse:
       type: object
       required: [instance_id, stale, metrics]
