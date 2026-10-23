@@ -98,11 +98,11 @@ go test -tags=e2e -timeout=8m ./test/e2e -run '^TestFull_Archiving$' -count=1 -v
 ## Reading a CI failure
 
 A red L3 run uploads `test/e2e/_artifacts/<test_name>/` to CI. Download the artifact bundle; it contains:
-- Service logs (`docker compose logs` per container — agent, server, PostgreSQL, Toxiproxy if used).
-- `pglens-agent check` output (readiness probe, permission tier, extension availability).
-- API state dumps (`/api/v1/clusters`, `/api/v1/events`, `/api/v1/instances`).
-- Database diagnostics (row counts and samples from each metric table and invariant check table).
-- Health status (`/healthz`, `/readyz`, goroutine count).
+- Service logs (`docker-compose.log`, the `docker compose logs` output for every service of the stack; binary mode also keeps the agent's own `agent-binary.log`).
+- Container state (`docker-inspect.json`, the `docker inspect` output for every container, stopped ones included).
+- `pglens-agent` check output (`agent-check.log`, binary mode only: readiness probe, permission tier, extension availability).
+- API state (`api-clusters.json`, `api-events.json`) and the agent's own health (`agent-health.json`).
+- Database diagnostics (`metrics-tables.json`: the row count and the 100 newest rows of each TimescaleDB hypertable).
 
 The `Dump` is automatically triggered on test failure via `t.Cleanup` and is the first place to look for root cause.
 
