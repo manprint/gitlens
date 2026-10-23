@@ -80,8 +80,9 @@ func TestExampleStack_PublishesLoopbackOnlyAndRequiresSecrets(t *testing.T) {
 			}
 			// A superuser password with a default is one that anyone who can
 			// reach the published port knows, so every database service of
-			// every stack requires one. The image names the database services.
-			if strings.Contains(s.Image, "postgres") || strings.Contains(s.Image, "timescale") {
+			// every stack requires one. runsDatabase finds those services by
+			// heuristic, so a database it does not recognise needs its own check.
+			if runsDatabase(s.Image, s.Environment, s.Volumes) {
 				password, ok := s.Environment["POSTGRES_PASSWORD"]
 				require.True(t, ok, "%s: %s runs a database without POSTGRES_PASSWORD", name, service)
 				require.Contains(t, password, ":?", "%s: %s has a default superuser password", name, service)
@@ -98,6 +99,45 @@ func TestExampleStack_PublishesLoopbackOnlyAndRequiresSecrets(t *testing.T) {
 	} {
 		require.Contains(t, stack.Services[service].Environment[key], ":?", "%s %s has a default", service, key)
 	}
+}
+
+// runsDatabase is a heuristic for the services that run PostgreSQL or one of
+// its derivatives: the image name matches one of the common builds, or the
+// service sets a POSTGRES_ variable, or it mounts the data directory.
+func runsDatabase(image string, environment map[string]string, volumes []string) bool {
+	for _, name := range []string{"postgres", "timescale", "postgis", "pgvector"} {
+		if strings.Contains(image, name) {
+			return true
+		}
+	}
+	for key := range environment {
+		if strings.HasPrefix(key, "POSTGRES_") {
+			return true
+		}
+	}
+	for _, volume := range volumes {
+		if strings.Contains(volume, "/var/lib/postgresql") {
+			return true
+		}
+	}
+	return false
+}
+
+// Each signal of runsDatabase must find a database on its own, so a database
+// image outside the first list, or one with no PostgreSQL name in its image,
+// still requires a superuser password.
+func TestExampleStack_RecognisesEveryPostgreSQLDerivative(t *testing.T) {
+	for _, image := range []string{
+		"timescale/timescaledb:2.31.0-pg17",
+		"postgres:17",
+		"postgis/postgis:17-3.5",
+		"pgvector/pgvector:pg17",
+	} {
+		require.True(t, runsDatabase(image, nil, nil), image)
+	}
+	require.True(t, runsDatabase("example/database:1", map[string]string{"POSTGRES_DB": "pglens"}, nil))
+	require.True(t, runsDatabase("example/database:1", nil, []string{"data:/var/lib/postgresql/data"}))
+	require.False(t, runsDatabase("ghcr.io/manprint/pglens-server:dev", map[string]string{"PGLENS_LISTEN": ":8080"}, []string{"/tmp"}))
 }
 
 // The server runs its migrations against PGLENS_DSN on startup. The example
