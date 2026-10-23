@@ -84,11 +84,39 @@ ORDER BY 1`)
 // monitoring role sent is one that reads.
 func TestINTRO001_AgentOnlyReads(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		auditAgentOnlyReads(t, pg, "", []string{"trigger", "fk_unindexed", "extension"}, "")
+	})
+}
+
+// INT-RO-002: INT-RO-001 on PostGIS, with spatial columns for the PostGIS
+// checks to read. The PostGIS images install postgis_topology, whose
+// aggregates call functions of an extension the EXPLAIN ANALYZE guard does
+// not know to be free of effects, so the guard refuses EXPLAIN ANALYZE in
+// that database: a refusal, never a write.
+func TestINTRO002_AgentOnlyReadsPostGIS(t *testing.T) {
+	pgtest.ForEachPostGIS(t, func(t *testing.T, pg *pgtest.PG) {
+		auditAgentOnlyReads(t, pg, `
+CREATE TABLE ro_audit_places (id int PRIMARY KEY, pt geometry(Point, 4326), area geometry(Polygon));
+CREATE INDEX ON ro_audit_places USING gist (pt);
+INSERT INTO ro_audit_places SELECT g, ST_SetSRID(ST_MakePoint(g, g), 4326) FROM generate_series(1, 100) g`,
+			[]string{"trigger", "fk_unindexed", "extension", "spatial_column"},
+			"belongs to extension postgis_topology")
+	})
+}
+
+// auditAgentOnlyReads runs every check and command against the app database
+// with the fixture plus extraFixture, and asserts nothing changed, every
+// statement read, and each of the catalog kinds was reported. A non-empty
+// analyzeRefusal is the reason the explain guard must give for refusing
+// EXPLAIN ANALYZE of a read; an empty one means it must run.
+func auditAgentOnlyReads(t *testing.T, pg *pgtest.PG, extraFixture string, kinds []string, analyzeRefusal string) {
+	t.Helper()
+	{
 		pg.Lock(t)
 		ctx := context.Background()
 		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
 		t.Cleanup(func() {
-			_, _ = admin.Exec(context.Background(), "DROP TABLE IF EXISTS ro_audit_child, ro_audit; DROP FUNCTION IF EXISTS ro_audit_touch()")
+			_, _ = admin.Exec(context.Background(), "DROP TABLE IF EXISTS ro_audit_child, ro_audit, ro_audit_places; DROP FUNCTION IF EXISTS ro_audit_touch()")
 		})
 		_, err := admin.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 CREATE EXTENSION IF NOT EXISTS pgstattuple;
@@ -102,7 +130,8 @@ ANALYZE ro_audit;
 CREATE FUNCTION ro_audit_touch() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END';
 CREATE TABLE ro_audit_child (id int PRIMARY KEY, audit_id bigint REFERENCES ro_audit (id));
 CREATE TRIGGER ro_audit_touch BEFORE INSERT ON ro_audit_child FOR EACH ROW EXECUTE FUNCTION ro_audit_touch();
-ALTER TABLE ro_audit_child DISABLE TRIGGER ALL`)
+ALTER TABLE ro_audit_child DISABLE TRIGGER ALL;
+DROP TABLE IF EXISTS ro_audit_places;`+extraFixture)
 		require.NoError(t, err)
 
 		// From here, every statement the monitoring role sends is recorded.
@@ -163,14 +192,20 @@ ALTER TABLE ro_audit_child DISABLE TRIGGER ALL`)
 		require.Greater(t, ran, 15)
 		// The fixture holds an object of each catalog kind, so each catalog
 		// check ran its queries on something.
-		for _, kind := range []string{"trigger", "fk_unindexed"} {
+		for _, kind := range kinds {
 			require.Positive(t, factsByKind[kind], "no %s fact", kind)
 		}
 
 		_, err = NewExplainExecutor().Execute(ctx, mgr, command.Args{QueryID: readID, Datname: "app"})
 		require.NoError(t, err)
 		_, err = NewExplainExecutor().Execute(ctx, mgr, command.Args{QueryID: readID, Datname: "app", Analyze: true})
-		require.NoError(t, err)
+		if analyzeRefusal == "" {
+			require.NoError(t, err)
+		} else {
+			var rejected *RejectedError
+			require.ErrorAs(t, err, &rejected)
+			require.ErrorContains(t, err, analyzeRefusal)
+		}
 		// Planning an UPDATE needs the UPDATE privilege, which the role
 		// does not hold: the refusal says so.
 		_, err = NewExplainExecutor().Execute(ctx, mgr, command.Args{QueryID: writeID, Datname: "app"})
@@ -200,5 +235,5 @@ ALTER TABLE ro_audit_child DISABLE TRIGGER ALL`)
 			}
 			require.False(t, dataModifying.MatchString(statement), "pglens sent a write: %s", statement)
 		}
-	})
+	}
 }

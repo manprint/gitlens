@@ -158,3 +158,82 @@ func TestFormatCatalogBytes(t *testing.T) {
 		require.Equal(t, want, formatCatalogBytes(n))
 	}
 }
+
+func extensionFact(datname, name, version, available, upgrade string, observed time.Time) Fact {
+	return Fact{Key: name, Datname: datname, ValueText: version, ObservedAt: observed,
+		Labels: map[string]string{"schema": "public", "default_version": available, "upgrade": upgrade}}
+}
+
+// PostGIS extensions are reported together, per database, with the PostGIS
+// upgrade function; any other extension on its own.
+func TestExtensionRules(t *testing.T) {
+	now := time.Now()
+	s := catalogSnapshot(now, "extension",
+		extensionFact("app", "postgis", "3.5.2", "3.6.4", "available", now),
+		extensionFact("app", "postgis_topology", "3.5.2", "3.6.4", "available", now),
+		extensionFact("app", "pg_trgm", "1.5", "1.6", "available", now),
+		extensionFact("app", "plpgsql", "1.0", "1.0", "none", now),
+		extensionFact("gis", "postgis", "3.6.4", "3.6.4", "none", now),
+	)
+	generic := ruleByID(t, "extension.upgrade_available")
+	postgis := ruleByID(t, "postgis.upgrade_available")
+	require.Equal(t, ScopeDatabase, generic.Scope())
+	assertRuleContract(t, generic, s)
+	assertRuleContract(t, postgis, s)
+
+	got := generic.Evaluate(s)
+	require.Len(t, got, 1)
+	require.Equal(t, "pg_trgm", got[0].ObjectName)
+	require.Equal(t, SeverityInfo, got[0].Severity)
+	require.Contains(t, got[0].Remediation, `ALTER EXTENSION "pg_trgm" UPDATE`)
+
+	got = postgis.Evaluate(s)
+	require.Len(t, got, 1)
+	require.Equal(t, "app", got[0].Datname)
+	require.Equal(t, SeverityWarning, got[0].Severity)
+	require.Contains(t, got[0].Detail, "postgis 3.5.2 → 3.6.4, postgis_topology 3.5.2 → 3.6.4")
+	require.Contains(t, got[0].Remediation, "postgis_extensions_upgrade()")
+}
+
+func spatialFact(datname, table, column, typ, subtype, srid, known, method, rows string, observed time.Time) Fact {
+	return Fact{Key: "public." + table + "." + column, Datname: datname, ValueText: typ, ObservedAt: observed,
+		Labels: map[string]string{"schemaname": "public", "relname": table, "column": column, "subtype": subtype,
+			"srid": srid, "srid_known": known, "index_method": method, "rows": rows}}
+}
+
+func TestPostGISColumnRules(t *testing.T) {
+	now := time.Now()
+	s := catalogSnapshot(now, "spatial_column",
+		spatialFact("app", "parcels", "geom", "geometry", "MultiPolygon", "3857", "true", "", "250000", now),
+		spatialFact("app", "pois", "pt", "geometry", "Point", "4326", "true", "gist", "100", now),
+		spatialFact("app", "notes", "pt", "geometry", "Point", "4326", "true", "", "12", now),
+		spatialFact("app", "legacy", "shape", "geometry", "Polygon", "0", "false", "brin", "500", now),
+		spatialFact("app", "odd", "pt", "geometry", "Point", "990000", "false", "gist", "5", now),
+		spatialFact("app", "free", "g", "geometry", "Geometry", "", "unknown", "gist", "5", now),
+		spatialFact("gis", "roads", "line", "geometry", "LineString", "4326", "true", "gist", "5", now),
+	)
+	unindexed := ruleByID(t, "postgis.spatial_unindexed")
+	unknown := ruleByID(t, "postgis.srid_unknown")
+	mixed := ruleByID(t, "postgis.srid_mixed")
+	for _, r := range []Rule{unindexed, unknown, mixed} {
+		assertRuleContract(t, r, s)
+	}
+
+	got := unindexed.Evaluate(s)
+	require.Len(t, got, 2)
+	require.Equal(t, "public.notes.pt", got[0].ObjectName)
+	require.Equal(t, SeverityInfo, got[0].Severity)
+	require.Equal(t, "public.parcels.geom", got[1].ObjectName)
+	require.Equal(t, SeverityWarning, got[1].Severity)
+	require.Contains(t, got[1].Remediation, `CREATE INDEX CONCURRENTLY ON "public"."parcels" USING gist ("geom")`)
+
+	got = unknown.Evaluate(s)
+	require.Len(t, got, 2)
+	require.Contains(t, got[0].Detail, "is declared without an SRID (0)")
+	require.Contains(t, got[1].Detail, "SRID 990000, which spatial_ref_sys does not define")
+
+	got = mixed.Evaluate(s)
+	require.Len(t, got, 1)
+	require.Equal(t, "app", got[0].Datname)
+	require.Contains(t, got[0].Detail, "SRID 3857 (1 column), SRID 4326 (2 columns), SRID 990000 (1 column)")
+}

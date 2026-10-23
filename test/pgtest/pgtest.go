@@ -74,15 +74,21 @@ func ForEach(t *testing.T, fn func(t *testing.T, pg *PG)) {
 
 func getOrCreate(t *testing.T, major int) *PG {
 	t.Helper()
+	return getOrCreateImage(t, major, images[major], pgByMajor)
+}
+
+// getOrCreateImage returns the container of a major version started from
+// img, cached in cache (guarded by globalMu).
+func getOrCreateImage(t *testing.T, major int, img string, cache map[int]*PG) *PG {
+	t.Helper()
 	globalMu.Lock()
-	if pg, ok := pgByMajor[major]; ok {
+	if pg, ok := cache[major]; ok {
 		globalMu.Unlock()
 		return pg
 	}
 	globalMu.Unlock()
 
 	ctx := context.Background()
-	img := images[major]
 	_, filename, _, _ := runtime.Caller(0)
 	baseDir := filepath.Dir(filename)
 	script1 := filepath.Join(baseDir, "../fixtures/sql/00_extensions.sql")
@@ -135,12 +141,12 @@ func getOrCreate(t *testing.T, major int) *PG {
 	}
 
 	globalMu.Lock()
-	if existing, ok := pgByMajor[major]; ok {
+	if existing, ok := cache[major]; ok {
 		_ = c.Terminate(ctx)
 		globalMu.Unlock()
 		return existing
 	}
-	pgByMajor[major] = pg
+	cache[major] = pg
 	globalMu.Unlock()
 
 	return pg

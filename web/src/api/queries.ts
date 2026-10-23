@@ -298,6 +298,34 @@ export function useInstanceUnindexedForeignKeys(id: string) {
   })
 }
 
+export function useInstanceExtensions(id: string) {
+  return useApiQuery({
+    policy: REFRESH.catalog,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/extensions', {
+          params: { path: { id } },
+          signal,
+        }),
+      ),
+    queryKey: qk.instanceExtensions(id),
+  })
+}
+
+export function useInstanceSpatialColumns(id: string) {
+  return useApiQuery({
+    policy: REFRESH.catalog,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/spatial-columns', {
+          params: { path: { id } },
+          signal,
+        }),
+      ),
+    queryKey: qk.instanceSpatialColumns(id),
+  })
+}
+
 export function useInstanceTables(
   id: string,
   params: QueryParameters<'/api/v1/instances/{id}/tables'> = {},

@@ -22,9 +22,11 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | GET | `/api/v1/instances/{id}/bloat` | `getInstanceBloat` | Return relation bloat estimates. |
 | GET | `/api/v1/instances/{id}/command-audit` | `getInstanceCommandAudit` | Return the immutable command audit stream for an instance. |
 | GET | `/api/v1/instances/{id}/databases` | `getInstanceDatabases` | List databases and monitoring status for an instance. |
+| GET | `/api/v1/instances/{id}/extensions` | `getInstanceExtensions` | Return the extensions installed in each database. |
 | GET | `/api/v1/instances/{id}/host` | `getInstanceHost` | Return measurable host metrics for an instance. |
 | GET | `/api/v1/instances/{id}/indexes` | `getInstanceIndexes` | Return index relation statistics. |
 | GET | `/api/v1/instances/{id}/settings` | `getInstanceSettings` | Return observed PostgreSQL settings. |
+| GET | `/api/v1/instances/{id}/spatial-columns` | `getInstanceSpatialColumns` | Return the PostGIS geometry and geography columns. |
 | GET | `/api/v1/instances/{id}/tables` | `getInstanceTables` | Return table relation statistics. |
 | GET | `/api/v1/instances/{id}/triggers` | `getInstanceTriggers` | Return the triggers of the instance's databases. |
 | GET | `/api/v1/instances/{id}/unindexed-foreign-keys` | `getInstanceUnindexedForeignKeys` | Return the foreign keys no index serves. |

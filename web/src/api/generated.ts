@@ -235,6 +235,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/instances/{id}/extensions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Return the extensions installed in each database.
+         * @description The latest extensions scrape of each database reported in the last three hours, with the version the installed packages would update each extension to.
+         */
+        get: operations["getInstanceExtensions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/instances/{id}/spatial-columns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Return the PostGIS geometry and geography columns.
+         * @description The latest postgis_columns scrape of each database with PostGIS, reported in the last three hours. Only the catalogs are read: the subtype and SRID come from each column's declared typmod.
+         */
+        get: operations["getInstanceSpatialColumns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instances/{id}/tables": {
         parameters: {
             query?: never;
@@ -1157,6 +1197,63 @@ export interface components {
             first_seen: components["schemas"]["Timestamp"];
             last_seen: components["schemas"]["Timestamp"];
         };
+        ExtensionsResponse: {
+            instance_id: components["schemas"]["InstanceId"];
+            extensions: components["schemas"]["Extension"][];
+            truncated_databases: string[];
+        };
+        Extension: {
+            datname: string;
+            name: string;
+            schema: string;
+            /** @description Installed version. */
+            version: string;
+            /** @description Version the server's installed packages carry; empty when they no longer carry the extension. */
+            default_version: string;
+            /**
+             * @description unknown when the packages lack the extension or a version is not dotted numbers.
+             * @enum {string}
+             */
+            upgrade: "available" | "none" | "unknown";
+            first_seen: components["schemas"]["Timestamp"];
+            last_seen: components["schemas"]["Timestamp"];
+            changed_at: components["schemas"]["Timestamp"];
+        };
+        SpatialColumnsResponse: {
+            instance_id: components["schemas"]["InstanceId"];
+            columns: components["schemas"]["SpatialColumn"][];
+            /** @description Databases with more spatial columns than the agent reports (500); unindexed columns of the largest tables come first. */
+            truncated_databases: string[];
+        };
+        SpatialColumn: {
+            datname: string;
+            schemaname: string;
+            relname: string;
+            column: string;
+            /** @enum {string} */
+            type: "geometry" | "geography";
+            /** @description Declared geometry type with its dimensions, e.g. PointZ; Geometry for any. */
+            subtype: string;
+            /**
+             * Format: int32
+             * @description Declared SRID; null for a column declared without a typmod, whose values carry their own.
+             */
+            srid: number | null;
+            /** @description Whether spatial_ref_sys defines the SRID (false for 0); null when unreadable or not declared. */
+            srid_known: boolean | null;
+            /**
+             * @description Access method of the valid, non-partial index whose first key is the column; empty when none.
+             * @enum {string}
+             */
+            index_method: "" | "gist" | "spgist" | "brin";
+            /**
+             * Format: double
+             * @description Estimated rows of the table (pg_class.reltuples).
+             */
+            rows: number;
+            first_seen: components["schemas"]["Timestamp"];
+            last_seen: components["schemas"]["Timestamp"];
+        };
         DriftValue: {
             instance_id: components["schemas"]["InstanceId"];
             role: string;
@@ -1709,6 +1806,58 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UnindexedForeignKeysResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+        };
+    };
+    getInstanceExtensions: {
+        parameters: {
+            query?: {
+                /** @description Return the extensions of this database only. */
+                datname?: string;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["InstanceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Extensions by database and name. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExtensionsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+        };
+    };
+    getInstanceSpatialColumns: {
+        parameters: {
+            query?: {
+                /** @description Return the spatial columns of this database only. */
+                datname?: string;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["InstanceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Spatial columns by database, schema, table and column. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpatialColumnsResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];

@@ -50,6 +50,16 @@ function renderPage(
     }),
     ok('getInstanceSettings', { instance_id: INSTANCE_ID, settings: [] }),
     ok('getInstanceTriggers', { instance_id: INSTANCE_ID, triggers: [], truncated_databases: [] }),
+    ok('getInstanceExtensions', {
+      instance_id: INSTANCE_ID,
+      extensions: [],
+      truncated_databases: [],
+    }),
+    ok('getInstanceSpatialColumns', {
+      instance_id: INSTANCE_ID,
+      columns: [],
+      truncated_databases: [],
+    }),
     ok('getInstanceUnindexedForeignKeys', {
       instance_id: INSTANCE_ID,
       foreign_keys: [],

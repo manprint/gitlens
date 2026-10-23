@@ -444,13 +444,24 @@ Security and operational boundaries:
   inherited trigger is reported only when its state differs from its
   parent's. `fk_indexes` reports, every fifteen minutes, the foreign keys no
   valid, non-partial index leads with, so that deleting a referenced row
-  scans the referencing table. The instance page lists both under "Schema
-  objects"; the `trigger.*` rules raise disabled triggers and
-  `index.fk_unindexed` the foreign keys.
+  scans the referencing table. `extensions` reports, hourly, each
+  database's extensions with their version and the version the server's
+  installed packages would update them to; `postgis_columns` reports, hourly,
+  the geometry and geography columns of each database that has PostGIS, with
+  their subtype and SRID (decoded from the column's type modifier, without
+  calling a PostGIS function), whether `spatial_ref_sys` defines the SRID,
+  and the GiST, SP-GiST or BRIN index that serves spatial searches. pglens
+  never runs `ALTER EXTENSION` or `postgis_extensions_upgrade()`; the advisor
+  only suggests them. The instance page lists all four under "Schema
+  objects"; the `trigger.*` rules raise disabled triggers,
+  `index.fk_unindexed` the foreign keys, and the `extension.*` and
+  `postgis.*` rules outdated extensions, unindexed spatial columns and
+  undefined or mixed SRIDs.
 - The integration suite proves the boundary: INT-RO-001 runs every check and
   command at T2 and asserts that the database and the shared catalogs are
   unchanged and that every statement the role sent, as `pg_stat_statements`
-  recorded it, reads.
+  recorded it, reads. INT-RO-002 does the same on the PostGIS images, with
+  spatial columns in the fixture.
 - With `commands.enabled: false` the agent does not poll or execute on-demand
   commands at all.
 - The server validates authentication, envelope shape, command state and expiry;
@@ -673,7 +684,12 @@ How the rules read the collected data:
 | `security.monitoring_role_can_write` | critical | The role pglens connects as could write if a session of it left read-only mode: an attribute, a membership or owned objects (the `monitoring_role` check). |
 | `trigger.constraint_disabled` | critical | The internal triggers that enforce a foreign key (or another constraint) are disabled, so rows that violate it can be written (the `trigger_inventory` check). |
 | `index.fk_unindexed` | warning | No index leads with a foreign key's columns, so deleting or re-keying a referenced row scans the referencing table; information below 10 MiB (the `fk_indexes` check). |
+| `postgis.upgrade_available` | warning | The installed PostGIS packages carry a newer version of postgis or one of its companion extensions than the database runs; `SELECT postgis_extensions_upgrade();` updates them together (the `extensions` check). |
+| `postgis.spatial_unindexed` | warning | No valid, non-partial GiST, SP-GiST or BRIN index leads with a geometry or geography column, so spatial predicates scan the table; information below 10,000 estimated rows (the `postgis_columns` check). |
+| `postgis.srid_unknown` | warning | A spatial column is constrained to an SRID that `spatial_ref_sys` does not define (or to SRID 0), so transforms and geography casts on it fail. |
 | `trigger.user_disabled` | warning | A user trigger is disabled: writes to its table no longer run it. |
+| `extension.upgrade_available` | info | The installed packages carry a newer default version of an extension than the database runs (`ALTER EXTENSION ... UPDATE`); PostGIS extensions are left to `postgis.upgrade_available`. |
+| `postgis.srid_mixed` | info | The constrained geometry columns of one database use more than one non-zero SRID, so joins between them need `ST_Transform`. |
 | `security.monitoring_role_read_only_off` | warning | The role pglens connects as does not default to read-only transactions in the database it connects to. |
 
 ## Running the agent
@@ -854,6 +870,8 @@ checks:
   monitoring_role: { interval: 10m }        # What would let the monitoring role write (security.* rules)
   trigger_inventory: { interval: 5m }       # Triggers of each database and which are disabled (trigger.* rules)
   fk_indexes:      { interval: 15m }        # Foreign keys no index serves (index.fk_unindexed)
+  extensions:      { interval: 1h }         # Installed extensions and available updates (extension.*, postgis.upgrade_available)
+  postgis_columns: { interval: 1h }         # PostGIS columns, SRIDs and spatial indexes (postgis.*)
   table_stats:     { interval: 5m, top_n: 50 }
   index_stats:     { interval: 5m, top_n: 50 }
   vacuum_progress: { interval: 30s }
@@ -958,12 +976,14 @@ checks
   bloat_estimate     enabled
   checkpointer       enabled
   database_stats     enabled
+  extensions         enabled
   fk_indexes         enabled
   index_stats        enabled
   instance_info      enabled
   io                 enabled
   locks              enabled
   monitoring_role    enabled
+  postgis_columns    enabled
   replication_receiver disabled  — role primary not allowed
   replication_slots  enabled
   replication_streaming enabled

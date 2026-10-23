@@ -45,6 +45,8 @@ function renderCatalog(
   triggers: Schemas['Trigger'][],
   truncated: string[] = [],
   foreignKeys: Schemas['UnindexedForeignKey'][] = [],
+  extensions: Schemas['Extension'][] = [],
+  spatial: Schemas['SpatialColumn'][] = [],
 ) {
   server.use(
     ok('getInstanceTriggers', {
@@ -55,6 +57,16 @@ function renderCatalog(
     ok('getInstanceUnindexedForeignKeys', {
       instance_id: INSTANCE_ID,
       foreign_keys: foreignKeys,
+      truncated_databases: [],
+    }),
+    ok('getInstanceExtensions', {
+      instance_id: INSTANCE_ID,
+      extensions,
+      truncated_databases: [],
+    }),
+    ok('getInstanceSpatialColumns', {
+      instance_id: INSTANCE_ID,
+      columns: spatial,
       truncated_databases: [],
     }),
   )
@@ -155,5 +167,89 @@ describe('CatalogSection', () => {
     expect(screen.getByText('orders_customer_fkey')).toBeInTheDocument()
     expect(screen.getByText('public.customers')).toBeInTheDocument()
     expect(screen.getByText('50.0 MiB')).toBeInTheDocument()
+  })
+
+  it('UI-CAT-005 shows extension updates and PostGIS columns with their SRID and index', async () => {
+    renderCatalog(
+      [],
+      [],
+      [],
+      [
+        {
+          datname: 'gis',
+          name: 'postgis',
+          schema: 'public',
+          version: '3.5.2',
+          default_version: '3.6.4',
+          upgrade: 'available',
+          first_seen: SEEN,
+          last_seen: SEEN,
+          changed_at: SEEN,
+        },
+        {
+          datname: 'gis',
+          name: 'plpgsql',
+          schema: 'pg_catalog',
+          version: '1.0',
+          default_version: '1.0',
+          upgrade: 'none',
+          first_seen: SEEN,
+          last_seen: SEEN,
+          changed_at: SEEN,
+        },
+      ],
+      [
+        {
+          datname: 'gis',
+          schemaname: 'public',
+          relname: 'parcels',
+          column: 'geom',
+          type: 'geometry',
+          subtype: 'MultiPolygon',
+          srid: 3857,
+          srid_known: true,
+          index_method: '',
+          rows: 250000,
+          first_seen: SEEN,
+          last_seen: SEEN,
+        },
+        {
+          datname: 'gis',
+          schemaname: 'public',
+          relname: 'legacy',
+          column: 'shape',
+          type: 'geometry',
+          subtype: 'Polygon',
+          srid: 0,
+          srid_known: false,
+          index_method: 'gist',
+          rows: 12,
+          first_seen: SEEN,
+          last_seen: SEEN,
+        },
+      ],
+    )
+    await settle()
+
+    const extensionsTab = screen.getByRole('tab', { name: /Extensions/ })
+    expect(extensionsTab).toHaveAccessibleName('Extensions 1 with an update')
+    fireEvent.mouseDown(extensionsTab)
+    fireEvent.click(extensionsTab)
+    await settle()
+    expect(tableRows()).toHaveLength(2)
+    expect(screen.getByText('available')).toBeInTheDocument()
+    expect(screen.getByText('up to date')).toBeInTheDocument()
+
+    const postgisTab = screen.getByRole('tab', { name: /PostGIS/ })
+    expect(postgisTab).toHaveAccessibleName('PostGIS 1 unindexed')
+    fireEvent.mouseDown(postgisTab)
+    fireEvent.click(postgisTab)
+    await settle()
+    expect(screen.getByText('gis: PostGIS 3.5.2 (packages carry 3.6.4)')).toBeInTheDocument()
+    expect(tableRows()).toHaveLength(2)
+    expect(screen.getByText('geometry(MultiPolygon)')).toBeInTheDocument()
+    expect(screen.getByText('250,000')).toBeInTheDocument()
+    expect(screen.getByText('missing')).toBeInTheDocument()
+    expect(screen.getByText('unknown')).toBeInTheDocument()
   })
 })

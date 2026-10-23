@@ -501,6 +501,65 @@ components:
           description: Size of the referencing table (its leaf partitions for a partitioned table).
         first_seen: { $ref: '#/components/schemas/Timestamp' }
         last_seen: { $ref: '#/components/schemas/Timestamp' }
+    ExtensionsResponse:
+      type: object
+      required: [instance_id, extensions, truncated_databases]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        extensions: { type: array, items: { $ref: '#/components/schemas/Extension' } }
+        truncated_databases: { type: array, items: { type: string } }
+    Extension:
+      type: object
+      required: [datname, name, schema, version, default_version, upgrade, first_seen, last_seen, changed_at]
+      properties:
+        datname: { type: string }
+        name: { type: string }
+        schema: { type: string }
+        version: { type: string, description: Installed version. }
+        default_version:
+          type: string
+          description: Version the server's installed packages carry; empty when they no longer carry the extension.
+        upgrade:
+          type: string
+          enum: [available, none, unknown]
+          description: unknown when the packages lack the extension or a version is not dotted numbers.
+        first_seen: { $ref: '#/components/schemas/Timestamp' }
+        last_seen: { $ref: '#/components/schemas/Timestamp' }
+        changed_at: { $ref: '#/components/schemas/Timestamp' }
+    SpatialColumnsResponse:
+      type: object
+      required: [instance_id, columns, truncated_databases]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        columns: { type: array, items: { $ref: '#/components/schemas/SpatialColumn' } }
+        truncated_databases:
+          type: array
+          items: { type: string }
+          description: Databases with more spatial columns than the agent reports (500); unindexed columns of the largest tables come first.
+    SpatialColumn:
+      type: object
+      required: [datname, schemaname, relname, column, type, subtype, srid, srid_known, index_method, rows, first_seen, last_seen]
+      properties:
+        datname: { type: string }
+        schemaname: { type: string }
+        relname: { type: string }
+        column: { type: string }
+        type: { type: string, enum: [geometry, geography] }
+        subtype: { type: string, description: 'Declared geometry type with its dimensions, e.g. PointZ; Geometry for any.' }
+        srid:
+          type: [integer, 'null']
+          format: int32
+          description: Declared SRID; null for a column declared without a typmod, whose values carry their own.
+        srid_known:
+          type: [boolean, 'null']
+          description: Whether spatial_ref_sys defines the SRID (false for 0); null when unreadable or not declared.
+        index_method:
+          type: string
+          enum: ['', gist, spgist, brin]
+          description: Access method of the valid, non-partial index whose first key is the column; empty when none.
+        rows: { type: number, format: double, description: Estimated rows of the table (pg_class.reltuples). }
+        first_seen: { $ref: '#/components/schemas/Timestamp' }
+        last_seen: { $ref: '#/components/schemas/Timestamp' }
     DriftValue:
       type: object
       required: [instance_id, role, value]
@@ -1150,6 +1209,68 @@ paths:
                     instance_id: 11111111-1111-1111-1111-111111111111
                     foreign_keys:
                       - { datname: app, schemaname: public, relname: orders, constraint: orders_customer_id_fkey, columns: customer_id, referenced: public.customers, table_bytes: 52428800, first_seen: '2026-08-27T01:00:00Z', last_seen: '2026-08-27T02:00:00Z' }
+                    truncated_databases: []
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/extensions:
+    get:
+      tags: [instances]
+      operationId: getInstanceExtensions
+      summary: Return the extensions installed in each database.
+      description: >-
+        The latest extensions scrape of each database reported in the last
+        three hours, with the version the installed packages would update
+        each extension to.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - name: datname
+          in: query
+          required: false
+          schema: { type: string }
+          description: Return the extensions of this database only.
+      responses:
+        '200':
+          description: Extensions by database and name.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExtensionsResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    extensions:
+                      - { datname: app, name: postgis, schema: public, version: 3.5.2, default_version: 3.6.4, upgrade: available, first_seen: '2026-08-27T01:00:00Z', last_seen: '2026-08-27T02:00:00Z', changed_at: '2026-08-27T01:00:00Z' }
+                    truncated_databases: []
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/spatial-columns:
+    get:
+      tags: [instances]
+      operationId: getInstanceSpatialColumns
+      summary: Return the PostGIS geometry and geography columns.
+      description: >-
+        The latest postgis_columns scrape of each database with PostGIS,
+        reported in the last three hours. Only the catalogs are read: the
+        subtype and SRID come from each column's declared typmod.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - name: datname
+          in: query
+          required: false
+          schema: { type: string }
+          description: Return the spatial columns of this database only.
+      responses:
+        '200':
+          description: Spatial columns by database, schema, table and column.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpatialColumnsResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    columns:
+                      - { datname: app, schemaname: public, relname: parcels, column: geom, type: geometry, subtype: MultiPolygon, srid: 3857, srid_known: true, index_method: '', rows: 250000, first_seen: '2026-08-27T01:00:00Z', last_seen: '2026-08-27T02:00:00Z' }
                     truncated_databases: []
         '400': { $ref: '#/components/responses/BadRequest' }
 

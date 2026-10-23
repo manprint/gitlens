@@ -23,6 +23,8 @@ const catalogFreshHours = 3
 func (a *API) registerCatalogRoutes(r chi.Router) {
 	r.Get("/api/v1/instances/{id}/triggers", a.handleTriggers)
 	r.Get("/api/v1/instances/{id}/unindexed-foreign-keys", a.handleUnindexedForeignKeys)
+	r.Get("/api/v1/instances/{id}/extensions", a.handleExtensions)
+	r.Get("/api/v1/instances/{id}/spatial-columns", a.handleSpatialColumns)
 }
 
 // catalogFact is one object_facts row of a catalog kind.
@@ -203,6 +205,119 @@ func (a *API) handleUnindexedForeignKeys(w http.ResponseWriter, r *http.Request)
 	}
 	if response.TruncatedDatabases, err = catalogTruncatedDatabases(r.Context(), a.pool, id, "fk_indexes", datname); err != nil {
 		writeError(w, http.StatusInternalServerError, "foreign keys query failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+type extensionAPIEntry struct {
+	Datname        string    `json:"datname"`
+	Name           string    `json:"name"`
+	Schema         string    `json:"schema"`
+	Version        string    `json:"version"`
+	DefaultVersion string    `json:"default_version"`
+	Upgrade        string    `json:"upgrade"`
+	FirstSeen      time.Time `json:"first_seen"`
+	LastSeen       time.Time `json:"last_seen"`
+	ChangedAt      time.Time `json:"changed_at"`
+}
+
+type extensionsAPIResponse struct {
+	InstanceID         string              `json:"instance_id"`
+	Extensions         []extensionAPIEntry `json:"extensions"`
+	TruncatedDatabases []string            `json:"truncated_databases"`
+}
+
+func (a *API) handleExtensions(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid instance_id", err.Error())
+		return
+	}
+	datname := r.URL.Query().Get("datname")
+	response := extensionsAPIResponse{InstanceID: id.String(), Extensions: []extensionAPIEntry{}, TruncatedDatabases: []string{}}
+	if a.pool == nil {
+		writeJSON(w, http.StatusOK, response)
+		return
+	}
+	facts, err := latestCatalogFacts(r.Context(), a.pool, id, "extension", datname)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "extensions query failed", err.Error())
+		return
+	}
+	for _, f := range facts {
+		response.Extensions = append(response.Extensions, extensionAPIEntry{
+			Datname: f.Datname, Name: f.Key, Schema: f.Labels["schema"], Version: f.ValueText,
+			DefaultVersion: f.Labels["default_version"], Upgrade: f.Labels["upgrade"],
+			FirstSeen: f.FirstSeen, LastSeen: f.LastSeen, ChangedAt: f.ChangedAt,
+		})
+	}
+	if response.TruncatedDatabases, err = catalogTruncatedDatabases(r.Context(), a.pool, id, "extensions", datname); err != nil {
+		writeError(w, http.StatusInternalServerError, "extensions query failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+type spatialColumnAPIEntry struct {
+	Datname    string `json:"datname"`
+	Schemaname string `json:"schemaname"`
+	Relname    string `json:"relname"`
+	Column     string `json:"column"`
+	Type       string `json:"type"`
+	Subtype    string `json:"subtype"`
+	// SRID is nil for a column declared without a typmod, whose values
+	// each carry their own SRID.
+	SRID *int `json:"srid"`
+	// SRIDKnown is nil when spatial_ref_sys was not readable or the column
+	// declares no SRID.
+	SRIDKnown   *bool     `json:"srid_known"`
+	IndexMethod string    `json:"index_method"`
+	Rows        float64   `json:"rows"`
+	FirstSeen   time.Time `json:"first_seen"`
+	LastSeen    time.Time `json:"last_seen"`
+}
+
+type spatialColumnsAPIResponse struct {
+	InstanceID         string                  `json:"instance_id"`
+	Columns            []spatialColumnAPIEntry `json:"columns"`
+	TruncatedDatabases []string                `json:"truncated_databases"`
+}
+
+func (a *API) handleSpatialColumns(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid instance_id", err.Error())
+		return
+	}
+	datname := r.URL.Query().Get("datname")
+	response := spatialColumnsAPIResponse{InstanceID: id.String(), Columns: []spatialColumnAPIEntry{}, TruncatedDatabases: []string{}}
+	if a.pool == nil {
+		writeJSON(w, http.StatusOK, response)
+		return
+	}
+	facts, err := latestCatalogFacts(r.Context(), a.pool, id, "spatial_column", datname)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "spatial columns query failed", err.Error())
+		return
+	}
+	for _, f := range facts {
+		entry := spatialColumnAPIEntry{
+			Datname: f.Datname, Schemaname: f.Labels["schemaname"], Relname: f.Labels["relname"],
+			Column: f.Labels["column"], Type: f.ValueText, Subtype: f.Labels["subtype"],
+			IndexMethod: f.Labels["index_method"], FirstSeen: f.FirstSeen, LastSeen: f.LastSeen,
+		}
+		if srid, err := strconv.Atoi(f.Labels["srid"]); err == nil {
+			entry.SRID = &srid
+		}
+		if known, err := strconv.ParseBool(f.Labels["srid_known"]); err == nil {
+			entry.SRIDKnown = &known
+		}
+		entry.Rows, _ = strconv.ParseFloat(f.Labels["rows"], 64)
+		response.Columns = append(response.Columns, entry)
+	}
+	if response.TruncatedDatabases, err = catalogTruncatedDatabases(r.Context(), a.pool, id, "postgis_columns", datname); err != nil {
+		writeError(w, http.StatusInternalServerError, "spatial columns query failed", err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, response)

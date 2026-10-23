@@ -105,3 +105,57 @@ func TestINTCAT002_UnindexedForeignKeys(t *testing.T) {
 	require.Equal(t, int64(52428800), fk.TableBytes)
 	require.Empty(t, response.TruncatedDatabases)
 }
+
+// INT-CAT-003: the extensions and spatial columns APIs type their facts: a
+// column declared without an SRID has a null srid, and an unreadable
+// spatial_ref_sys a null srid_known.
+func TestINTCAT003_ExtensionsAndSpatialColumns(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	instanceID := uuid.New()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	insert := func(kind, key, value, labels string) {
+		t.Helper()
+		_, err := pool.Exec(ctx, `INSERT INTO object_facts (tenant_id, cluster_id, instance_id, datname, kind, key, labels, value_text, first_seen, last_seen, changed_at) VALUES ('default',1,$1,'gis',$2,$3,$4,$5,$6,$6,$6)`, instanceID, kind, key, labels, value, now)
+		require.NoError(t, err)
+	}
+	insert("extension", "postgis", "3.5.2", `{"schema":"public","default_version":"3.6.4","upgrade":"available"}`)
+	insert("spatial_column", "public.parcels.geom", "geometry", `{"schemaname":"public","relname":"parcels","column":"geom","subtype":"MultiPolygon","srid":"3857","srid_known":"true","index_method":"gist","rows":"250000"}`)
+	insert("spatial_column", "public.notes.g", "geometry", `{"schemaname":"public","relname":"notes","column":"g","subtype":"Geometry","srid":"","srid_known":"unknown","index_method":"","rows":"0"}`)
+
+	r := chi.NewRouter()
+	NewAPI(pool).RegisterRoutes(r)
+	get := func(path string, out any) {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/instances/"+instanceID.String()+path, http.NoBody))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), out))
+	}
+
+	var extensions extensionsAPIResponse
+	get("/extensions", &extensions)
+	require.Len(t, extensions.Extensions, 1)
+	require.Equal(t, extensionAPIEntry{
+		Datname: "gis", Name: "postgis", Schema: "public", Version: "3.5.2", DefaultVersion: "3.6.4", Upgrade: "available",
+		FirstSeen: now, LastSeen: now, ChangedAt: now,
+	}, normalizeExtensionTimes(extensions.Extensions[0]))
+
+	var raw map[string]any
+	get("/spatial-columns", &raw)
+	columns := raw["columns"].([]any)
+	require.Len(t, columns, 2)
+	notes, parcels := columns[0].(map[string]any), columns[1].(map[string]any)
+	require.Nil(t, notes["srid"])
+	require.Nil(t, notes["srid_known"])
+	require.Equal(t, "", notes["index_method"])
+	require.Equal(t, float64(3857), parcels["srid"])
+	require.Equal(t, true, parcels["srid_known"])
+	require.Equal(t, float64(250000), parcels["rows"])
+}
+
+func normalizeExtensionTimes(e extensionAPIEntry) extensionAPIEntry {
+	e.FirstSeen, e.LastSeen, e.ChangedAt = e.FirstSeen.UTC(), e.LastSeen.UTC(), e.ChangedAt.UTC()
+	return e
+}

@@ -57,6 +57,12 @@ func currentFacts(s *Snapshot, kind string) []Fact {
 
 const triggerFactKind = "trigger"
 
+// databaseRule is a catalog rule whose findings name a database, not one of
+// its relations.
+type databaseRule struct{ relationRule }
+
+func (r databaseRule) Scope() Scope { return ScopeDatabase }
+
 // catalogTable returns a fact's table as shown (schema.table) and as SQL
 // (each part quoted).
 func catalogTable(f Fact) (shown, sql string) {
@@ -169,4 +175,160 @@ func formatCatalogBytes(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", value, "KMGTP"[exp])
+}
+
+const (
+	extensionFactKind     = "extension"
+	spatialColumnFactKind = "spatial_column"
+	// spatialRowsWarn is the table size, in estimated rows, from which an
+	// unindexed spatial column is a warning.
+	spatialRowsWarn = 10000
+)
+
+// postgisExtensions are the extensions PostGIS ships and updates together
+// with postgis_extensions_upgrade().
+var postgisExtensions = map[string]bool{
+	"postgis": true, "postgis_raster": true, "postgis_topology": true, "postgis_sfcgal": true,
+	"postgis_tiger_geocoder": true, "address_standardizer": true, "address_standardizer_data_us": true,
+}
+
+func init() {
+	Register(databaseRule{relationRule{id: "extension.upgrade_available", severity: SeverityInfo, needs: []string{"extensions"}, eval: func(s *Snapshot) []Finding {
+		const id = "extension.upgrade_available"
+		var out []Finding
+		for _, f := range currentFacts(s, extensionFactKind) {
+			if f.Labels["upgrade"] != "available" || postgisExtensions[f.Key] {
+				continue
+			}
+			out = append(out, Finding{RuleID: id, Severity: SeverityInfo, State: StateOpen, Scope: ScopeDatabase, Datname: f.Datname, ObjectName: f.Key,
+				Title:       fmt.Sprintf("Extension %s can be updated to %s", f.Key, f.Labels["default_version"]),
+				Detail:      fmt.Sprintf("Database %s runs extension %s %s; the installed packages carry %s. Until the extension is updated, the database keeps the objects of the older version.", f.Datname, f.Key, f.ValueText, f.Labels["default_version"]),
+				Remediation: fmt.Sprintf("Read the extension's release notes, then, connected to %s as its owner, ALTER EXTENSION %s UPDATE.", f.Datname, pgx.Identifier{f.Key}.Sanitize()),
+				Evidence:    map[string]any{"extension": f.Key, "installed_version": f.ValueText, "default_version": f.Labels["default_version"]},
+			})
+		}
+		return out
+	}}})
+	Register(databaseRule{relationRule{id: "postgis.upgrade_available", severity: SeverityWarning, needs: []string{"extensions"}, eval: func(s *Snapshot) []Finding {
+		const id = "postgis.upgrade_available"
+		type pending struct {
+			datname  string
+			versions []string
+		}
+		byDatabase := map[string]*pending{}
+		var order []string
+		for _, f := range currentFacts(s, extensionFactKind) {
+			if f.Labels["upgrade"] != "available" || !postgisExtensions[f.Key] {
+				continue
+			}
+			p, ok := byDatabase[f.Datname]
+			if !ok {
+				p = &pending{datname: f.Datname}
+				byDatabase[f.Datname] = p
+				order = append(order, f.Datname)
+			}
+			p.versions = append(p.versions, fmt.Sprintf("%s %s → %s", f.Key, f.ValueText, f.Labels["default_version"]))
+		}
+		var out []Finding
+		for _, datname := range order {
+			p := byDatabase[datname]
+			out = append(out, Finding{RuleID: id, Severity: SeverityWarning, State: StateOpen, Scope: ScopeDatabase, Datname: datname, ObjectName: "postgis",
+				Title:       fmt.Sprintf("PostGIS in database %s is older than its library", datname),
+				Detail:      fmt.Sprintf("The PostGIS packages were updated but the extensions of database %s were not (%s). Its SQL functions still come from the older release while the library is the newer one.", datname, strings.Join(p.versions, ", ")),
+				Remediation: fmt.Sprintf("Connected to %s as a superuser, SELECT postgis_extensions_upgrade(); after reading the PostGIS upgrade notes.", datname),
+				Evidence:    map[string]any{"extensions": p.versions},
+			})
+		}
+		return out
+	}}})
+	Register(relationRule{id: "postgis.spatial_unindexed", severity: SeverityWarning, needs: []string{"postgis_columns"}, eval: func(s *Snapshot) []Finding {
+		const id = "postgis.spatial_unindexed"
+		var out []Finding
+		for _, f := range currentFacts(s, spatialColumnFactKind) {
+			if f.Labels["index_method"] != "" {
+				continue
+			}
+			table, tableSQL := catalogTable(f)
+			column := f.Labels["column"]
+			rows, _ := strconv.ParseFloat(f.Labels["rows"], 64)
+			severity := SeverityInfo
+			if rows > spatialRowsWarn {
+				severity = SeverityWarning
+			}
+			out = append(out, relationFinding(id, severity, f.Datname, table+"."+column,
+				fmt.Sprintf("Spatial column %s.%s has no spatial index", table, column),
+				fmt.Sprintf("No valid GiST, SP-GiST or BRIN index on %s in database %s starts with %s column %s (about %.0f rows). Bounding-box searches (&&, ST_Intersects, ST_DWithin) on it read the whole table.", table, f.Datname, f.ValueText, column, rows),
+				fmt.Sprintf("If the column is searched spatially, CREATE INDEX CONCURRENTLY ON %s USING gist (%s).", tableSQL, pgx.Identifier{column}.Sanitize()),
+				map[string]any{"table": table, "column": column, "type": f.ValueText, "rows": rows}))
+		}
+		return out
+	}})
+	Register(relationRule{id: "postgis.srid_unknown", severity: SeverityWarning, needs: []string{"postgis_columns"}, eval: func(s *Snapshot) []Finding {
+		const id = "postgis.srid_unknown"
+		var out []Finding
+		for _, f := range currentFacts(s, spatialColumnFactKind) {
+			if f.Labels["srid_known"] != "false" {
+				continue
+			}
+			table, _ := catalogTable(f)
+			column := f.Labels["column"]
+			reason := fmt.Sprintf("is declared with SRID %s, which spatial_ref_sys does not define", f.Labels["srid"])
+			if f.Labels["srid"] == "0" {
+				reason = "is declared without an SRID (0)"
+			}
+			out = append(out, relationFinding(id, SeverityWarning, f.Datname, table+"."+column,
+				fmt.Sprintf("Spatial column %s.%s has no known coordinate system", table, column),
+				fmt.Sprintf("Column %s of %s in database %s (%s(%s)) %s, so PostGIS cannot transform its values or measure them in real units.", column, table, f.Datname, f.ValueText, f.Labels["subtype"], reason),
+				"Find the coordinate system the data was captured in and declare it: ALTER TABLE ... ALTER COLUMN ... TYPE "+f.ValueText+"("+f.Labels["subtype"]+", <srid>) USING ST_SetSRID(column, <srid>), or add the missing definition to spatial_ref_sys.",
+				map[string]any{"table": table, "column": column, "srid": f.Labels["srid"]}))
+		}
+		return out
+	}})
+	Register(databaseRule{relationRule{id: "postgis.srid_mixed", severity: SeverityInfo, needs: []string{"postgis_columns"}, eval: func(s *Snapshot) []Finding {
+		const id = "postgis.srid_mixed"
+		sridsByDatabase := map[string]map[string]int{}
+		var order []string
+		for _, f := range currentFacts(s, spatialColumnFactKind) {
+			srid := f.Labels["srid"]
+			if f.ValueText != "geometry" || srid == "" || srid == "0" {
+				continue
+			}
+			if sridsByDatabase[f.Datname] == nil {
+				sridsByDatabase[f.Datname] = map[string]int{}
+				order = append(order, f.Datname)
+			}
+			sridsByDatabase[f.Datname][srid]++
+		}
+		var out []Finding
+		for _, datname := range order {
+			counts := sridsByDatabase[datname]
+			if len(counts) < 2 {
+				continue
+			}
+			srids := make([]string, 0, len(counts))
+			for srid := range counts {
+				srids = append(srids, srid)
+			}
+			sort.Strings(srids)
+			parts := make([]string, len(srids))
+			for i, srid := range srids {
+				parts[i] = fmt.Sprintf("SRID %s (%s)", srid, plural(counts[srid], "column"))
+			}
+			out = append(out, Finding{RuleID: id, Severity: SeverityInfo, State: StateOpen, Scope: ScopeDatabase, Datname: datname, ObjectName: "postgis",
+				Title:       fmt.Sprintf("Geometry columns in database %s use %d coordinate systems", datname, len(srids)),
+				Detail:      fmt.Sprintf("The geometry columns of database %s are declared in %s. A spatial join or comparison between columns of different SRIDs fails, or needs ST_Transform on every row.", datname, strings.Join(parts, ", ")),
+				Remediation: "If the columns are compared with each other, store them in one SRID, or keep a transformed, indexed copy of the ones that are joined.",
+				Evidence:    map[string]any{"srids": counts},
+			})
+		}
+		return out
+	}}})
+}
+
+// plural renders a count with its noun, "1 column" or "2 columns".
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
