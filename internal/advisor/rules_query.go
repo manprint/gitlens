@@ -65,8 +65,8 @@ func sortedLabelSets(s *Snapshot, name string) []string {
 // canonicalLabel reads one label back out of a pgtype.CanonicalLabels key.
 func canonicalLabel(canonical, key string) string {
 	for _, pair := range strings.Split(canonical, "\x1f") {
-		if k, v, ok := strings.Cut(pair, "="); ok && k == key {
-			return v
+		if k, v, ok := strings.Cut(pair, "="); ok && pgtype.UnescapeLabel(k) == key {
+			return pgtype.UnescapeLabel(v)
 		}
 	}
 	return ""

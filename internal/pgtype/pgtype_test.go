@@ -2,6 +2,7 @@ package pgtype_test
 
 import (
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -121,6 +122,24 @@ func TestPermTier_StringRoundTrip(t *testing.T) {
 func TestParseClusterID_Invalid(t *testing.T) {
 	_, err := pgtype.ParseClusterID("not-a-cluster-id")
 	require.Error(t, err)
+}
+
+// UnescapeLabel gives back the key and the value that CanonicalLabels escaped,
+// including the escape byte and the separator, so a reader sees the text the
+// label was written with.
+func TestUnescapeLabel_InvertsCanonicalLabels(t *testing.T) {
+	for _, value := range []string{"plain", "x\x1fy", "x\x1ey", "\x1e1", "a=b"} {
+		canonical := pgtype.CanonicalLabels(map[string]string{"k": value})
+		_, escaped, ok := strings.Cut(canonical, "=")
+		require.True(t, ok)
+		require.Equal(t, value, pgtype.UnescapeLabel(escaped))
+	}
+	for _, key := range []string{"a=b", "x\x1fy", "x\x1ey"} {
+		canonical := pgtype.CanonicalLabels(map[string]string{key: "v"})
+		escaped, _, ok := strings.Cut(canonical, "=")
+		require.True(t, ok)
+		require.Equal(t, key, pgtype.UnescapeLabel(escaped))
+	}
 }
 
 func FuzzCanonicalLabels(f *testing.F) {

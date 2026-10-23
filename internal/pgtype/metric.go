@@ -69,3 +69,14 @@ var (
 	labelValueEscaper = strings.NewReplacer("\x1e", "\x1e0", "\x1f", "\x1e1")
 	labelKeyEscaper   = strings.NewReplacer("\x1e", "\x1e0", "\x1f", "\x1e1", "=", "\x1e2")
 )
+
+// UnescapeLabel reverses the escaping in CanonicalLabels. A reader that takes
+// one key or value back out of a canonical string must pass it through here,
+// or a value holding an escaped byte comes back in its escaped form.
+// Every escape byte is written as "\x1e" followed by a digit, so reading left
+// to right is unambiguous.
+func UnescapeLabel(s string) string {
+	return labelUnescaper.Replace(s)
+}
+
+var labelUnescaper = strings.NewReplacer("\x1e0", "\x1e", "\x1e1", "\x1f", "\x1e2", "=")
