@@ -146,11 +146,13 @@ BEGIN
   END LOOP;
 
   -- Ownership is recorded for objects in every database, so this check sees
-  -- them all.
+  -- them all. An object of a database is counted under that database. A
+  -- shared object (a database or a tablespace) belongs to no database, so it
+  -- is named on its own.
   FOR item IN
-    SELECT coalesce(d.datname, '(the cluster)') AS datname, count(*) AS owned
+    SELECT d.datname, count(*) AS owned
     FROM pg_catalog.pg_shdepend s
-    LEFT JOIN pg_catalog.pg_database d ON d.oid = s.dbid
+    JOIN pg_catalog.pg_database d ON d.oid = s.dbid
     WHERE s.refclassid = 'pg_catalog.pg_authid'::pg_catalog.regclass
       AND s.refobjid = monitor AND s.deptype = 'o'
     GROUP BY 1
@@ -158,6 +160,16 @@ BEGIN
   LOOP
     problems := problems || format('%1$s owns %2$s object(s) in %3$s: REASSIGN OWNED BY %1$s TO <owner>; (connected to that database)',
                                    who, item.owned, item.datname);
+  END LOOP;
+  FOR item IN
+    SELECT pg_catalog.pg_describe_object(s.classid, s.objid, s.objsubid) AS object
+    FROM pg_catalog.pg_shdepend s
+    WHERE s.refclassid = 'pg_catalog.pg_authid'::pg_catalog.regclass
+      AND s.refobjid = monitor AND s.deptype = 'o' AND s.dbid = 0
+    ORDER BY 1
+  LOOP
+    problems := problems || format('%1$s owns %2$s, a shared object: REASSIGN OWNED BY %1$s TO <owner>;',
+                                   who, item.object);
   END LOOP;
 
   -- Privileges granted to the role itself. Only reads are allowed, plus

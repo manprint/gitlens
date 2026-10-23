@@ -46,3 +46,35 @@ func TestPerm_INT_PERM_012_ScriptRefusesRunsThatCannotConfigure(t *testing.T) {
 		require.False(t, roleExists(), "a run that fails halfway must leave no role behind")
 	})
 }
+
+// INT-PERM-014: a database the role owns is a shared object, which no database
+// holds, so the refusal names it as that object. It used to name the location
+// "(the cluster)", which does not say what owns what, or where to run the
+// REASSIGN OWNED that removes it.
+func TestPerm_INT_PERM_014_ScriptNamesTheSharedObjectItRefuses(t *testing.T) {
+	ForEach(t, func(t *testing.T, pg *PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "app", RoleSuperuser)
+		_, err := admin.Exec(ctx, "DROP DATABASE IF EXISTS perm_script_owned")
+		require.NoError(t, err)
+		dropScriptRoles(t, admin)
+		// A database outlives DROP OWNED, so it is dropped before its owner.
+		t.Cleanup(func() { dropScriptRoles(t, admin) })
+		t.Cleanup(func() {
+			_, err := admin.Exec(context.Background(), "DROP DATABASE IF EXISTS perm_script_owned")
+			require.NoError(t, err)
+		})
+		_, err = admin.Exec(ctx, "CREATE ROLE "+scriptRole)
+		require.NoError(t, err)
+		// CREATE DATABASE cannot run in a transaction block, so it is not
+		// sent together with the statement that creates its owner.
+		_, err = admin.Exec(ctx, "CREATE DATABASE perm_script_owned OWNER "+scriptRole)
+		require.NoError(t, err)
+
+		code, out := runMonitoringScript(t, pg, "tier1=1", "tier2=1")
+		require.Equal(t, 3, code, out)
+		require.Contains(t, out, "owns database perm_script_owned, a shared object: REASSIGN OWNED BY "+scriptRole+" TO <owner>;")
+		require.NotContains(t, out, "(the cluster)")
+	})
+}
