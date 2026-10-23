@@ -87,7 +87,9 @@ func securityHeaders(csp string) func(http.Handler) http.Handler {
 
 // refuseCrossOriginWrites refuses an unsafe method that the browser reports as
 // coming from another origin. The standard library reads Sec-Fetch-Site and,
-// when that is absent, compares Origin with Host.
+// when that is absent, compares Origin with Host. A reverse proxy that rewrites
+// Host therefore does not affect browsers that send Sec-Fetch-Site; a browser
+// that sends only Origin needs the proxy to keep Host.
 func refuseCrossOriginWrites() func(http.Handler) http.Handler {
 	protection := http.NewCrossOriginProtection()
 	protection.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

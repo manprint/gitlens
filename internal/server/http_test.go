@@ -99,3 +99,27 @@ func TestRouter_RefusesCrossSiteWrites(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, mute(map[string]string{"Origin": "https://example.com"}))
 	require.Equal(t, http.StatusServiceUnavailable, mute(nil))
 }
+
+// A reverse proxy that rewrites Host reaches the server under another name. A
+// browser that sends Sec-Fetch-Site is judged by that header, so its writes
+// still pass. Only a request that carries Origin and no Sec-Fetch-Site is
+// compared with Host, so that browser needs the proxy to keep Host.
+func TestRouter_ProxyHostRewriteOnlyAffectsOriginOnlyWrites(t *testing.T) {
+	router, token := securityRouter(t)
+	until := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	mute := func(headers map[string]string) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/findings/query.slow_mean/mute", strings.NewReader(`{"reason":"x","until":"`+until+`"}`))
+		req.Host = "backend.internal:8080"
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+		for name, value := range headers {
+			req.Header.Set(name, value)
+		}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	require.Equal(t, http.StatusServiceUnavailable, mute(map[string]string{"Sec-Fetch-Site": "same-origin", "Origin": "https://pglens.example"}))
+	require.Equal(t, http.StatusForbidden, mute(map[string]string{"Origin": "https://pglens.example"}))
+}
