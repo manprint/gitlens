@@ -14,6 +14,7 @@ import (
 	"github.com/manprint/pglens/internal/check"
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/command"
+	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/manprint/pglens/test/pgtest"
 	"github.com/stretchr/testify/require"
 )
@@ -395,5 +396,34 @@ func TestINTCONN009_ConnForRefusesUnselectedDatabases(t *testing.T) {
 		conn, err := mgr.ConnFor(ctx, "postgres")
 		require.NoError(t, err, "the database the DSN names stays reachable")
 		conn.Release()
+	})
+}
+
+// INT-CONN-011: the cluster identity falls back to the configured name only
+// when the server denies pg_control_system(), and a role that may read it
+// reports the real system_identifier. The grants setupRoles makes live in the
+// app database (pg_proc is per database), so the roles connect there. A
+// transient failure has no integration test here: the unit test pins that
+// branch.
+func TestINTCONN011_IdentityFallsBackOnlyOnDenial(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		ctx := context.Background()
+		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		var systemID uint64
+		require.NoError(t, admin.QueryRow(ctx, "SELECT system_identifier FROM pg_control_system()").Scan(&systemID))
+
+		opts := DefaultConnOptions()
+		opts.ClusterName = "shared-cluster"
+		denied, err := NewManager(ctx, "denied-target", pg.DSN("app", pgtest.RoleT0NoControl), opts, clock.System())
+		require.NoError(t, err)
+		defer denied.Close()
+		require.Equal(t, pgtype.IDSourceManual, denied.ClusterIDSource())
+		require.Equal(t, pgtype.ManualClusterID("shared-cluster"), denied.ClusterID())
+
+		granted, err := NewManager(ctx, "granted-target", pg.DSN("app", pgtest.RoleT0), opts, clock.System())
+		require.NoError(t, err)
+		defer granted.Close()
+		require.Equal(t, pgtype.IDSourceSystemIdentifier, granted.ClusterIDSource())
+		require.Equal(t, pgtype.ClusterID(systemID), granted.ClusterID())
 	})
 }

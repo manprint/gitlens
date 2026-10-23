@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pashagolub/pgxmock/v5"
 	"github.com/stretchr/testify/require"
 
@@ -72,6 +73,56 @@ func TestManager_QueryCapabilities(t *testing.T) {
 			for _, ext := range tt.exts {
 				require.True(t, gotExts[ext])
 			}
+		})
+	}
+}
+
+// TestQueryClusterIdentity pins the three outcomes of the identity read: the
+// system_identifier, the manual id for a denied read, and an error for any
+// other failure. A transient failure must never turn into a manual id, since
+// the manual id is then kept for the life of the process.
+func TestQueryClusterIdentity(t *testing.T) {
+	const systemID uint64 = 7381927364512345678
+	tests := []struct {
+		name       string
+		err        error
+		wantID     pgtype.ClusterID
+		wantSource pgtype.IDSource
+		wantErr    bool
+	}{
+		{name: "system identifier", wantID: pgtype.ClusterID(systemID), wantSource: pgtype.IDSourceSystemIdentifier},
+		{name: "permission denied falls back to the manual id", err: &pgconn.PgError{Code: "42501"}, wantID: pgtype.ManualClusterID("shared-cluster"), wantSource: pgtype.IDSourceManual},
+		{name: "connection reset is returned, not cached", err: errors.New("connection reset by peer"), wantErr: true},
+		{name: "statement timeout is returned, not cached", err: &pgconn.PgError{Code: "57014"}, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock, err := pgxmock.NewConn()
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				require.NoError(t, mock.Close(context.Background()))
+				require.NoError(t, mock.ExpectationsWereMet())
+			})
+
+			expectation := mock.ExpectQuery("pg_control_system")
+			if tt.err != nil {
+				expectation.WillReturnError(tt.err)
+			} else {
+				expectation.WillReturnRows(pgxmock.NewRows([]string{"system_identifier"}).AddRow(systemID))
+			}
+			mock.ExpectClose()
+
+			gotID, gotSource, err := queryClusterIdentity(context.Background(), mock, "shared-cluster")
+			if tt.wantErr {
+				require.Error(t, err)
+				require.Equal(t, pgtype.ClusterID(0), gotID)
+				require.Empty(t, gotSource)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.wantID, gotID)
+			require.Equal(t, tt.wantSource, gotSource)
 		})
 	}
 }

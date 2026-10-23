@@ -464,24 +464,15 @@ func (m *Manager) ensureCache(ctx context.Context) error {
 	}
 
 	// Query for system_identifier to derive ClusterID
-	var clusterID pgtype.ClusterID
-	idSource := pgtype.IDSourceSystemIdentifier
-	var systemID uint64
-	if err := conn.QueryRow(ctx, "SELECT system_identifier FROM pg_control_system()").Scan(&systemID); err == nil {
-		clusterID = pgtype.ClusterID(systemID)
-	} else {
-		// Fall back to the configured cluster_name (documented), or to the
-		// target name when none is configured. The target name alone used to
-		// be the only fallback, so the cluster_name every instance of a
-		// cluster was told to share was silently ignored and each target
-		// became its own cluster.
-		clusterID = pgtype.ManualClusterID(m.fallbackClusterName())
-		idSource = pgtype.IDSourceManual
+	clusterID, idSource, err := queryClusterIdentity(ctx, conn, m.fallbackClusterName())
+	if err != nil {
+		return err
 	}
 
-	// Query permission tier and extensions. The initial snapshot is refreshed
-	// again by RefreshCapabilities so a DBA grant takes effect on the next
-	// scrape/command without an agent restart.
+	// Query permission tier and extensions. RefreshCapabilities re-reads them
+	// on every scrape/command, so a DBA grant takes effect without an agent
+	// restart. The cluster identity above is not re-read: it is decided once
+	// per process.
 	permTier, extensions := m.queryCapabilities(ctx, conn)
 
 	// A target is not usable without its identity: every envelope carries it.
@@ -502,6 +493,31 @@ func (m *Manager) ensureCache(ctx context.Context) error {
 	m.target.cache.initialized = true
 	m.target.cache.mu.Unlock()
 	return nil
+}
+
+// queryClusterIdentity reads the cluster's system_identifier. Only a
+// permission denial falls back to the manual id. A denial is kept for the
+// life of the process, so a manual id is never replaced by a later read: the
+// id a cluster was reported under cannot change (invariant I-1), and a grant
+// takes effect after a restart. Any other failure, such as a timeout or a
+// reset connection, is returned and nothing is cached, so the next call asks
+// again: latching the manual id on a transient error would split one cluster
+// into several ids.
+func queryClusterIdentity(ctx context.Context, conn capabilityConn, fallbackName string) (pgtype.ClusterID, pgtype.IDSource, error) {
+	var systemID uint64
+	err := conn.QueryRow(ctx, "SELECT system_identifier FROM pg_control_system()").Scan(&systemID)
+	if err == nil {
+		return pgtype.ClusterID(systemID), pgtype.IDSourceSystemIdentifier, nil
+	}
+	if !isInsufficientPrivilege(err) {
+		return 0, "", fmt.Errorf("query system identifier: %w", err)
+	}
+	// Fall back to the configured cluster_name (documented), or to the
+	// target name when none is configured. The target name alone used to
+	// be the only fallback, so the cluster_name every instance of a
+	// cluster was told to share was silently ignored and each target
+	// became its own cluster.
+	return pgtype.ManualClusterID(fallbackName), pgtype.IDSourceManual, nil
 }
 
 // queryCapabilities reads the privileges and extensions relevant to checks
