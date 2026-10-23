@@ -37,6 +37,11 @@ scripts/
 web/node_modules/
 bin/
 dist/
+# The web build in the host tree is not context, except the placeholder page:
+# the agent image embeds the directory and needs an index.html, and the
+# server image's web stage replaces the bundle.
+internal/webui/dist/*
+!internal/webui/dist/index.html
 coverage.out
 coverage.html
 *.prof
