@@ -50,7 +50,23 @@ describe('BlockingTree', () => {
     expect(screen.getByText(/no blocked sessions were present/i)).toBeInTheDocument()
   })
 
-  it('UI-LOCK-043 lists every direct blocker and marks a waiter repeated under another holder', () => {
+  it('UI-LOCK-049 lists a repeated blocker pid once in Blocked by', () => {
+    render(
+      <BlockingTree
+        response={response([
+          { pid: 1, blocked_by: [] },
+          { pid: 2, blocked_by: [] },
+          { pid: 3, blocked_by: [1, 2, 2] },
+        ])}
+        now={NOW}
+      />,
+    )
+
+    expect(screen.getByText('1, 2')).toBeInTheDocument()
+    expect(screen.queryByText('1, 2, 2')).not.toBeInTheDocument()
+  })
+
+  it('UI-LOCK-048 lists every direct blocker and marks a waiter repeated under another holder', () => {
     render(
       <BlockingTree
         response={response([

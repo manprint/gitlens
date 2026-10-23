@@ -156,8 +156,10 @@ export function rankRoots(
   forest: readonly BlockingTreeNode[],
   sampledAt?: string | Date,
 ): BlockingTree {
+  // blockedCount walks a whole subtree, so count each root once instead of on every comparison.
+  const blocked = new Map(forest.map((root) => [root, blockedCount(root)] as const))
   return [...forest].sort((left, right) => {
-    const blockedDifference = blockedCount(right) - blockedCount(left)
+    const blockedDifference = (blocked.get(right) ?? 0) - (blocked.get(left) ?? 0)
     if (blockedDifference !== 0) return blockedDifference
 
     const leftWait = waitDuration(left.node, sampledAt ?? left.node.sampled_at ?? null)

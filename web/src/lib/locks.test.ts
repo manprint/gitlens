@@ -60,7 +60,7 @@ describe('lock-tree derivation', () => {
     expect(blockedCount(forest)).toBe(2)
   })
 
-  it('UI-LOCK-008 keeps a waiter visible under every independent holder that blocks it', () => {
+  it('UI-LOCK-046 keeps a waiter visible under every independent holder that blocks it', () => {
     const forest = buildBlockingTree([lock(1), lock(2), lock(3, [1, 2])])
 
     expect(forest.map((tree) => tree.node.pid)).toEqual([1, 2])
@@ -71,7 +71,7 @@ describe('lock-tree derivation', () => {
     expect(blockedCount(secondRoot ?? [])).toBe(1)
   })
 
-  it('UI-LOCK-008 counts the sessions below a referenced waiter under the other holder', () => {
+  it('UI-LOCK-047 counts the sessions below a referenced waiter under the other holder', () => {
     const forest = buildBlockingTree([lock(1), lock(2), lock(3, [1, 2]), lock(4, [3])])
 
     expect(countEntries(forest)).toBe(5)

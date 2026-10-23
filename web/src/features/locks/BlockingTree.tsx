@@ -122,8 +122,9 @@ function visibleEntries(forest: BlockingForest, expandedKeys: ReadonlySet<string
 
 function LockDetails({ node, sampledAt }: { node: LockNode; sampledAt: string | null }) {
   const query = typeof node.query === 'string' ? node.query : ''
-  // The tree places a waiter under one blocker, so every direct blocker is listed here.
-  const blockedBy = (node.blocked_by ?? []).map(String).join(', ') || '—'
+  // The tree places a waiter under one blocker, so every direct blocker is listed here,
+  // each pid once even if the snapshot repeats it.
+  const blockedBy = [...new Set((node.blocked_by ?? []).map(String))].join(', ') || '—'
   const bytes = queryBytes(query)
   const shownQuery = truncateQuery(query, QUERY_BYTE_BUDGET)
   const backendMarkedTruncated = node.query_truncated === true || node.truncated === true
