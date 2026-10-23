@@ -134,7 +134,14 @@ type ToxicState struct {
 	toxiproxyURL string
 	proxyNames   map[string]string // maps link key to proxy name
 	toxicCounter int               // for generating unique toxic names
+	// httpClient carries the raw POST and DELETE calls. http.DefaultClient
+	// has no timeout, so a stalled toxiproxy API would block the test forever.
+	httpClient *http.Client
 }
+
+// toxiproxyCallTimeout matches the timeout the toxiproxy client itself uses
+// for its GET calls.
+const toxiproxyCallTimeout = 30 * time.Second
 
 // ToxicRegistry holds toxiproxy state per harness
 var toxicRegistry = sync.Map{}
@@ -158,6 +165,7 @@ func (h *Harness) InitToxiproxy() error {
 	state := &ToxicState{
 		enabled:    true,
 		proxyNames: make(map[string]string),
+		httpClient: &http.Client{Timeout: toxiproxyCallTimeout},
 	}
 
 	// Get the toxiproxy admin port from docker compose
@@ -332,6 +340,8 @@ func (h *Harness) Toxic(link Link, t Toxic) (RemoveFunc, error) {
 	// rejects outright with 400 "stream was invalid, can be either upstream
 	// or downstream". Undetected because no scenario had ever called this
 	// live before SYS-NET-003 (test/scenario/net.go).
+	// state.mu stays held across these calls so toxic names and removals stay
+	// in order; the client timeout bounds how long that can block.
 	state.toxicCounter++
 	var toxicNames []string
 	for _, stream := range []string{"upstream", "downstream"} {
@@ -340,9 +350,11 @@ func (h *Harness) Toxic(link Link, t Toxic) (RemoveFunc, error) {
 			toxicName, t.toxicType(), stream, string(attrsJSON))
 
 		url := fmt.Sprintf("%s/proxies/%s/toxics", state.toxiproxyURL, proxyName)
-		resp, err := http.Post(url, "application/json", strings.NewReader(reqBody))
+		resp, err := state.httpClient.Post(url, "application/json", strings.NewReader(reqBody))
 		if err != nil {
-			return nil, fmt.Errorf("failed to create %s toxic: %w", stream, err)
+			// The toxics already created would otherwise stay on the shared
+			// proxy, because the caller never receives a RemoveFunc.
+			return nil, toxicFailure(state, proxyName, toxicNames, fmt.Errorf("failed to create %s toxic: %w", stream, err))
 		}
 		func() {
 			defer resp.Body.Close()
@@ -352,7 +364,7 @@ func (h *Harness) Toxic(link Link, t Toxic) (RemoveFunc, error) {
 			}
 		}()
 		if err != nil {
-			return nil, err
+			return nil, toxicFailure(state, proxyName, toxicNames, err)
 		}
 		toxicNames = append(toxicNames, toxicName)
 	}
@@ -361,35 +373,53 @@ func (h *Harness) Toxic(link Link, t Toxic) (RemoveFunc, error) {
 	removeFunc := func() error {
 		state.mu.Lock()
 		defer state.mu.Unlock()
-
-		var errs []string
-		for _, toxicName := range toxicNames {
-			url := fmt.Sprintf("%s/proxies/%s/toxics/%s", state.toxiproxyURL, proxyName, toxicName)
-			req, err := http.NewRequest("DELETE", url, nil)
-			if err != nil {
-				errs = append(errs, err.Error())
-				continue
-			}
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				errs = append(errs, err.Error())
-				continue
-			}
-			func() {
-				defer resp.Body.Close()
-				if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
-					body, _ := io.ReadAll(resp.Body)
-					errs = append(errs, fmt.Sprintf("toxiproxy API returned %d: %s", resp.StatusCode, body))
-				}
-			}()
-		}
-		if len(errs) > 0 {
-			return fmt.Errorf("failed to delete toxic(s): %s", strings.Join(errs, "; "))
-		}
-		return nil
+		return state.deleteToxics(proxyName, toxicNames)
 	}
 
 	return removeFunc, nil
+}
+
+// toxicFailure reports a Toxic call that failed after some toxics were already
+// created. It removes those toxics first and folds any cleanup error into the
+// returned one. The caller must hold state.mu.
+func toxicFailure(state *ToxicState, proxyName string, created []string, cause error) error {
+	if len(created) == 0 {
+		return cause
+	}
+	if err := state.deleteToxics(proxyName, created); err != nil {
+		return fmt.Errorf("%w; cleanup of %v also failed: %v", cause, created, err)
+	}
+	return cause
+}
+
+// deleteToxics removes the named toxics from proxyName. The caller must hold
+// state.mu.
+func (state *ToxicState) deleteToxics(proxyName string, toxicNames []string) error {
+	var errs []string
+	for _, toxicName := range toxicNames {
+		url := fmt.Sprintf("%s/proxies/%s/toxics/%s", state.toxiproxyURL, proxyName, toxicName)
+		req, err := http.NewRequest("DELETE", url, nil)
+		if err != nil {
+			errs = append(errs, err.Error())
+			continue
+		}
+		resp, err := state.httpClient.Do(req)
+		if err != nil {
+			errs = append(errs, err.Error())
+			continue
+		}
+		func() {
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+				body, _ := io.ReadAll(resp.Body)
+				errs = append(errs, fmt.Sprintf("toxiproxy API returned %d: %s", resp.StatusCode, body))
+			}
+		}()
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("failed to delete toxic(s): %s", strings.Join(errs, "; "))
+	}
+	return nil
 }
 
 // Compile checks to ensure Toxic interface is implemented
