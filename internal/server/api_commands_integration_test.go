@@ -34,11 +34,37 @@ func TestINTCMD001_MigrationCreatesCommandTablesAndIndexes(t *testing.T) {
 		require.NoError(t, pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name=$1)`, table).Scan(&exists))
 		require.True(t, exists, table)
 	}
-	for _, index := range []string{"commands_queue_idx", "commands_instance_idx", "command_audit_instance_idx", "query_plans_dedup_idx", "query_plans_lookup_idx"} {
+	for _, index := range []string{"commands_queue_idx", "commands_instance_idx", "commands_expiry_idx", "command_audit_instance_idx", "query_plans_dedup_idx", "query_plans_lookup_idx"} {
 		var exists bool
 		require.NoError(t, pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname=$1)`, index).Scan(&exists))
 		require.True(t, exists, index)
 	}
+}
+
+// TestINTCMD016_ExpirySweepCanUseAnIndex: the sweep runs on every claim and
+// every GET, and filters on tenant, state and expiry. commands_queue_idx covers
+// only pending rows, so without an index on the sweep the whole table was read
+// on each run. With sequential scans off, the planner must be able to use the
+// index for the sweep's predicate.
+func TestINTCMD016_ExpirySweepCanUseAnIndex(t *testing.T) {
+	pool := getSharedPool(t)
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+	_, err = tx.Exec(ctx, `SET LOCAL enable_seqscan = off`)
+	require.NoError(t, err)
+	rows, err := tx.Query(ctx, `EXPLAIN SELECT command_id FROM commands WHERE tenant_id=$1 AND state IN ('pending','claimed') AND expires_at <= now()`, commandTenant)
+	require.NoError(t, err)
+	defer rows.Close()
+	var plan strings.Builder
+	for rows.Next() {
+		var line string
+		require.NoError(t, rows.Scan(&line))
+		plan.WriteString(line + "\n")
+	}
+	require.NoError(t, rows.Err())
+	require.Contains(t, plan.String(), "commands_expiry_idx", plan.String())
 }
 
 func seedCommandInstance(t *testing.T, pool *pgxpool.Pool) (uuid.UUID, uuid.UUID) {
