@@ -1843,6 +1843,16 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '429': { description: Too many sign-in attempts from this client or too many sign-ins in progress; the Retry-After header gives the wait in seconds. }
+        '500':
+          description: The browser session could not be created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: No session store is configured on this server.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
     get:
       tags: [session]
@@ -1948,7 +1958,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403':
-          description: The authenticated agent does not own the requested queue.
+          description: The authenticated agent does not own the requested queue, or the agent token was sent without the X-PGLENS-Agent-ID header.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

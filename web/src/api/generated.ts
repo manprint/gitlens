@@ -2372,6 +2372,24 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description The browser session could not be created. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No session store is configured on this server. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     deleteSession: {
@@ -2461,7 +2479,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            /** @description The authenticated agent does not own the requested queue. */
+            /** @description The authenticated agent does not own the requested queue, or the agent token was sent without the X-PGLENS-Agent-ID header. */
             403: {
                 headers: {
                     [name: string]: unknown;

@@ -294,6 +294,27 @@ func TestOpenAPIAgentRoutesAreBearerOnly(t *testing.T) {
 	}
 }
 
+// Generated clients handle only the statuses the document lists. The login
+// route can also answer 500 and 503, and the poll route's 403 has a second
+// cause: a valid agent token sent without the identity header.
+func TestOpenAPIDocumentsSessionAndPollResponses(t *testing.T) {
+	paths := loadOpenAPIDocument(t)["paths"].(map[string]any)
+
+	login := paths["/api/v1/session"].(map[string]any)["post"].(map[string]any)
+	responses := login["responses"].(map[string]any)
+	for _, status := range []string{"204", "400", "401", "429", "500", "503"} {
+		if _, ok := responses[status]; !ok {
+			t.Errorf("POST /api/v1/session: response %s is not documented", status)
+		}
+	}
+
+	poll := paths["/api/v1/agents/{agent_id}/commands"].(map[string]any)["get"].(map[string]any)
+	forbidden := poll["responses"].(map[string]any)["403"].(map[string]any)
+	if description, _ := forbidden["description"].(string); !strings.Contains(description, "X-PGLENS-Agent-ID") {
+		t.Errorf("GET agent commands: 403 must name the identity header, got %q", description)
+	}
+}
+
 func loadOpenAPIDocument(t *testing.T) map[string]any {
 	t.Helper()
 	_, filename, _, ok := runtime.Caller(0)
