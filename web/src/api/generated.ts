@@ -424,7 +424,7 @@ export interface paths {
         };
         /**
          * Return index relation statistics.
-         * @description The newest reading of each index reported in the last 15 minutes, largest first. idx_scan_rate is scans per second.
+         * @description The newest reading of each index reported in the last 15 minutes, largest first. idx_scan_rate is scans per second. last_scan_at is the last time the index was scanned since the statistics reset, from pg_stat_user_indexes.last_idx_scan, and is null unless last_scan_status is scanned. last_scan_status is scanned; never_since_reset (PostgreSQL 16 and later, no scan since the reset); or not_available (PostgreSQL 15, or the agent has not reported a last scan for the index).
          */
         get: operations["getInstanceIndexes"];
         put?: never;
@@ -444,7 +444,7 @@ export interface paths {
         };
         /**
          * Return relation bloat estimates.
-         * @description The newest reading of each relation and method: estimates from the last 13 hours (the check runs every 6 hours) and pgstattuple measurements from the last 7 days.
+         * @description The newest reading of each relation and method: table and index estimates from the last 13 hours (the check runs every 6 hours) and pgstattuple measurements of tables from the last 7 days. An index row carries its table's name in relname and its own name in indexrelname. skipped_tables counts the tables the estimate cannot read, because the monitoring role cannot see their column statistics; skipped_relations names up to ten of the largest per database. Their bloat is unknown, not zero.
          */
         get: operations["getInstanceBloat"];
         put?: never;
@@ -1221,6 +1221,43 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** @description A client session of the latest lock sample. It carries no query text; the text of a session in a blocking tree is on its node in nodes. */
+        LockSession: {
+            pid?: number;
+            /** @description Identity that survives PID reuse, the lower-case hex of backend_start in microseconds since the Unix epoch, a dot, and the PID. Absent when the role may not see backend_start. */
+            session_id?: string;
+            /**
+             * Format: date-time
+             * @description Start of the session. Absent when the role may not see it.
+             */
+            backend_start?: string;
+            /**
+             * Format: date-time
+             * @description When the session began waiting for the lock it waits on now, from the server. Absent for a session that waits on no lock.
+             */
+            wait_started_at?: string;
+            /** @description Seconds the session has waited for that lock, measured on the server at the sample. Absent for a session that waits on no lock. */
+            wait_duration?: number;
+            blocked_by?: number[];
+            usename?: string;
+            datname?: string;
+            application_name?: string;
+            client_addr?: string;
+            state?: string;
+            wait_event_type?: string;
+            wait_event?: string;
+            /** @description Seconds since the transaction started. */
+            xact_age?: number;
+            /** @description Seconds since the state last changed. */
+            state_age?: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /** @description A session of the blocking tree, either blocked or a blocker. Nodes are the only sessions that carry query text. */
+        LockNode: components["schemas"]["LockSession"] & {
+            /** @description Statement text, cut to 2048 bytes. Withheld as "[redacted]" when it may hold a credential or the server cut it short. */
+            query?: string;
+        };
         LocksResponse: {
             instance_id: components["schemas"]["InstanceId"];
             /**
@@ -1229,13 +1266,10 @@ export interface components {
              */
             sampled_at: string | null;
             stale: boolean;
-            nodes: {
-                [key: string]: unknown;
-            }[];
-            /** @description All client sessions in the latest lock/activity sample. */
-            sessions: {
-                [key: string]: unknown;
-            }[];
+            /** @description The blocked sessions and their blockers in the latest lock sample, the only sessions with query text. */
+            nodes: components["schemas"]["LockNode"][];
+            /** @description Every client session in the latest lock sample, capped and oldest transaction first, without query text. */
+            sessions: components["schemas"]["LockSession"][];
         };
         ActivityResponse: {
             instance_id: components["schemas"]["InstanceId"];
@@ -1243,6 +1277,16 @@ export interface components {
             metrics: {
                 [key: string]: components["schemas"]["ApiMetric"][];
             };
+            /** @description The oldest holder of the xmin horizon in the latest activity sample, or null when no holder is known from a sample of the last 30 seconds. holder_kind is session (a client backend's snapshot or transaction), slot (a replication slot's xmin or catalog_xmin), standby (a standby's hot_standby_feedback xmin) or prepared (a prepared transaction). identity is the session's pid, the slot name, the standby's application_name or the prepared transaction's gid. A free-text identity is cut to 64 bytes and reads as [redacted] when it may hold a credential. No query text is sent. age_xids is the transaction ID age of the holder; age_seconds is set only for a session and a prepared transaction, and is null otherwise. */
+            xmin_horizon: {
+                /** @enum {string} */
+                holder_kind: "session" | "slot" | "standby" | "prepared";
+                identity: string;
+                /** Format: int64 */
+                age_xids: number;
+                age_seconds: number | null;
+                sampled_at: components["schemas"]["Timestamp"];
+            } | null;
         };
         DatabasesResponse: {
             instance_id: components["schemas"]["InstanceId"];
@@ -1775,6 +1819,27 @@ export interface components {
             truncated: components["schemas"]["Truncated"];
             /** Format: int32 */
             relations_not_reported: number | null;
+        };
+        BloatResponse: {
+            instance_id: components["schemas"]["InstanceId"];
+            items: {
+                [key: string]: unknown;
+            }[];
+            truncated: components["schemas"]["Truncated"];
+            /** Format: int32 */
+            relations_not_reported: number | null;
+            /**
+             * Format: int64
+             * @description Tables, summed over the databases of the instance, whose column statistics the monitoring role cannot read. No bloat is estimated for them.
+             */
+            skipped_tables: number;
+            /** @description The largest skipped tables, up to ten per database. */
+            skipped_relations: components["schemas"]["SkippedRelation"][];
+        };
+        SkippedRelation: {
+            datname: string;
+            schemaname: string;
+            relname: string;
         };
         Alert: {
             alert_key: string;
@@ -2659,6 +2724,8 @@ export interface operations {
         parameters: {
             query?: {
                 method?: "estimate" | "pgstattuple";
+                /** @description Only rows of this kind. Tables and indexes have separate budgets, each checks.bloat_estimate.top_n, so a filtered list shows the whole budget of its kind. */
+                object_kind?: "table" | "index";
                 /** @description Maximum number of relations returned by the instance-level budget. */
                 limit?: number;
             };
@@ -2670,13 +2737,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Bloat rows and cardinality-budget metadata. */
+            /** @description Bloat rows, the count of tables whose bloat is not estimated, and cardinality-budget metadata. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RelationResponse"];
+                    "application/json": components["schemas"]["BloatResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];

@@ -101,7 +101,7 @@ func runAdvisorExact(ctx context.Context, e *scenario.Env) error {
 	want := []string{"config.work_mem_oversized", "index.unused", "table.dead_tuples_high"}
 	// The autovacuum-off condition is a table reloption, not the global GUC;
 	// it intentionally does not add vacuum.disabled to this exact set.
-	if err := waitAdvisorExact(ctx, e, id, want); err != nil {
+	if err := waitAdvisorExact(ctx, e, id, want, "index.unused"); err != nil {
 		return err
 	}
 	e.AssertInvariants(e.T)
@@ -146,7 +146,7 @@ func runAdvisorFix(ctx context.Context, e *scenario.Env) error {
 		return err
 	}
 	want := []string{"config.work_mem_oversized", "index.unused", "table.dead_tuples_high"}
-	if err := waitAdvisorExact(ctx, e, id, want); err != nil {
+	if err := waitAdvisorExact(ctx, e, id, want, "index.unused"); err != nil {
 		return err
 	}
 	pg := e.PG("pg")
@@ -421,9 +421,17 @@ func advisorFindings(ctx context.Context, e *scenario.Env, instanceID, state str
 	return out, nil
 }
 
-func waitAdvisorExact(ctx context.Context, e *scenario.Env, instanceID string, want []string) error {
+// waitAdvisorExact waits until the findings are exactly the rules in want and
+// each is open. A rule named in degraded may instead be degraded: index.unused
+// on a standalone primary has no sibling snapshot that shows a standby does not
+// scan the index, so the finding stays degraded.
+func waitAdvisorExact(ctx context.Context, e *scenario.Env, instanceID string, want []string, degraded ...string) error {
 	want = append([]string(nil), want...)
 	sort.Strings(want)
+	mayBeDegraded := map[string]bool{}
+	for _, rule := range degraded {
+		mayBeDegraded[rule] = true
+	}
 	deadline := time.NewTimer(advisorWait)
 	defer deadline.Stop()
 	ticker := time.NewTicker(time.Second)
@@ -438,10 +446,12 @@ func waitAdvisorExact(ctx context.Context, e *scenario.Env, instanceID string, w
 			lastFindings = findings
 			open := true
 			for _, finding := range findings {
-				if stringValue(finding["state"]) != "open" {
-					open = false
-					break
+				state := stringValue(finding["state"])
+				if state == "open" || (state == "degraded" && mayBeDegraded[stringValue(finding["rule_id"])]) {
+					continue
 				}
+				open = false
+				break
 			}
 			if open && equalStrings(last, want) {
 				return nil

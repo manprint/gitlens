@@ -4,9 +4,12 @@ package check
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 
+	"github.com/manprint/pglens/internal/pgtype"
+	"github.com/manprint/pglens/internal/wire"
 	"github.com/manprint/pglens/test/pgtest"
 	"github.com/stretchr/testify/require"
 )
@@ -112,5 +115,58 @@ func TestINTBLOAT006_UnreadableStatisticsArePartial(t *testing.T) {
 		labels := map[string]string{"schemaname": "public", "relname": name, "indexrelname": "", "object_kind": "table", "method": "estimate"}
 		require.Equal(t, float64(-1), metricValue(result, "pg_bloat_real_bytes", labels))
 		require.True(t, result.Partial)
+		// The hidden table is counted and named, never dropped silently.
+		require.GreaterOrEqual(t, metricValue(result, wire.BloatSkippedTablesMetric, map[string]string{}), float64(1))
+		require.Len(t, result.Facts, 1)
+		var value wire.BloatSkippedValue
+		require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &value))
+		require.Contains(t, value.Tables, wire.BloatSkippedTable{SchemaName: "public", RelName: name})
+	})
+}
+
+// TestINTBLOAT007_IndexBloatIsEstimated: a btree index on a table that lost
+// most of its rows keeps its pages, so its estimate is bloated, while the same
+// index freshly built is not. The table is kept from autovacuum so that only
+// the DELETE and the ANALYZE shape the numbers.
+func TestINTBLOAT007_IndexBloatIsEstimated(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		reader := pg.Pool(t, "app", pgtest.RoleT1)
+		suffix := testSuffix()
+		table := fmt.Sprintf("pglens_bloat_idx_%d", suffix)
+		index := fmt.Sprintf("pglens_bloat_idx_id_%d", suffix)
+		_, err := admin.Exec(ctx, fmt.Sprintf("CREATE TABLE %s (id integer, payload text) WITH (autovacuum_enabled = false)", table))
+		require.NoError(t, err)
+		t.Cleanup(func() { _, _ = admin.Exec(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", table)) })
+		// About 2 MiB of btree leaves: above the estimate's 1 MiB floor.
+		_, err = admin.Exec(ctx, fmt.Sprintf("INSERT INTO %s SELECT g, repeat('x', 100) FROM generate_series(1, 100000) g", table))
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, fmt.Sprintf("CREATE INDEX %s ON %s (id)", index, table))
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, fmt.Sprintf("ANALYZE %s", table))
+		require.NoError(t, err)
+
+		indexRatio := func() float64 {
+			conn, err := reader.Acquire(ctx)
+			require.NoError(t, err)
+			defer conn.Release()
+			result, err := (&bloatEstimateCheck{selectors: cardinalityForIntegration()}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: pgtype.TierExplain})
+			require.NoError(t, err)
+			labels := map[string]string{"schemaname": "public", "relname": table, "indexrelname": index, "object_kind": "index", "method": "estimate"}
+			require.NotEqual(t, float64(-1), metricValue(result, "pg_bloat_real_bytes", labels), "the fresh index must get an estimate")
+			return metricValue(result, "pg_bloat_ratio", labels)
+		}
+
+		require.Less(t, indexRatio(), 0.15, "a freshly built index is not bloated")
+
+		// Deleting nine rows in ten leaves the index's pages in place: VACUUM
+		// does not return them, and only the table's live count shrinks.
+		_, err = admin.Exec(ctx, fmt.Sprintf("DELETE FROM %s WHERE id %% 10 <> 0", table))
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, fmt.Sprintf("ANALYZE %s", table))
+		require.NoError(t, err)
+		require.Greater(t, indexRatio(), 0.5, "most of the index is dead space")
 	})
 }

@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/manprint/pglens/internal/pgtype"
 )
@@ -121,6 +122,37 @@ func isPrefix(a, b []string) bool {
 	}
 	return true
 }
+
+// unusedWindow is how long an index must go unscanned to be a candidate: in
+// the instance's own history, or since the statistics reset.
+const unusedWindow = 7 * 24 * time.Hour
+
+// neverScannedSinceReset reports whether the index has no scan since the
+// statistics reset and that reset is at least a window old, or is unknown. Such
+// an index is a candidate at once, without the instance's own history. It is
+// never true before PostgreSQL 16, where the scan is untracked.
+func neverScannedSinceReset(now time.Time, i IndexStat) bool {
+	if !i.ScanTracked || i.LastScan != nil {
+		return false
+	}
+	return i.StatsReset == nil || now.Sub(*i.StatsReset) >= unusedWindow
+}
+
+// standbyScans reports whether a sibling scanned the index, and whether any
+// sibling reported it at all. Without a report from a sibling the standby scans
+// are unknown, not zero.
+func standbyScans(s *Snapshot, key string) (scanned, reported bool) {
+	for _, sib := range s.Siblings {
+		if _, ok := sib.IndexHashes[key]; ok {
+			reported = true
+		}
+		if sib.IndexScanned[key] {
+			scanned, reported = true, true
+		}
+	}
+	return scanned, reported
+}
+
 func init() {
 	Register(relationRule{id: "index.unused", severity: SeverityWarning, needs: []string{"Indexes"}, eval: func(s *Snapshot) []Finding {
 		// A standby counts only the scans it serves itself, so an index the
@@ -131,16 +163,42 @@ func init() {
 		}
 		var out []Finding
 		for _, i := range s.Indexes {
-			if i.HistoryDays < 7 {
-				out = append(out, degradedRelation("index.unused", SeverityWarning, i.Datname, i.Name, "index usage history is shorter than 7 days"))
+			sinceReset := neverScannedSinceReset(s.Now, i)
+			if !sinceReset {
+				if i.HistoryDays < 7 {
+					out = append(out, degradedRelation("index.unused", SeverityWarning, i.Datname, i.Name, "index usage history is shorter than 7 days"))
+					continue
+				}
+				// IdxScan is the peak scan rate over the whole history; the
+				// latest rate alone called any index idle for five minutes
+				// unused.
+				if i.IdxScan != 0 {
+					continue
+				}
+			}
+			if i.SizeBytes <= unusedIndexBytes || i.IsPrimary || i.IsUnique {
 				continue
 			}
-			// IdxScan is the peak scan rate over the whole history; the
-			// latest rate alone called any index idle for five minutes
-			// unused.
-			if i.IdxScan == 0 && i.SizeBytes > unusedIndexBytes && !i.IsPrimary && !i.IsUnique {
-				out = append(out, relationFinding("index.unused", SeverityWarning, i.Datname, i.Name, "Unused index", fmt.Sprintf("no scan of this index was recorded in %.1f days", i.HistoryDays), "Confirm workload intent, including queries served by standbys, before dropping this candidate", map[string]any{"peak_scan_rate": i.IdxScan, "history_days": i.HistoryDays, "size_bytes": i.SizeBytes}))
+			detail := fmt.Sprintf("no scan of this index was recorded in %.1f days", i.HistoryDays)
+			evidence := map[string]any{"peak_scan_rate": i.IdxScan, "history_days": i.HistoryDays, "size_bytes": i.SizeBytes}
+			if sinceReset {
+				detail = "no scan of this index since the statistics were reset, at an unknown time"
+				evidence["window"] = "since statistics reset"
+				if i.StatsReset != nil {
+					detail = "no scan of this index since the statistics were reset on " + i.StatsReset.UTC().Format("2006-01-02")
+					evidence["stats_reset"] = i.StatsReset.UTC().Format(time.RFC3339)
+				}
 			}
+			f := relationFinding("index.unused", SeverityWarning, i.Datname, i.Name, "Unused index", detail, "Confirm workload intent, including queries served by standbys, before dropping this candidate", evidence)
+			scanned, reported := standbyScans(s, databaseFactKey(i.Datname, i.Name))
+			switch {
+			case scanned:
+				continue
+			case !reported:
+				f.State = StateDegraded
+				f.DegradedReason = "standby scans unknown: no sibling snapshot"
+			}
+			out = append(out, f)
 		}
 		return out
 	}})
@@ -315,7 +373,15 @@ func init() {
 			}
 		}
 		if count > 10 && workers > 0 && busy >= workers {
-			return []Finding{relationFinding("vacuum.starvation", SeverityCritical, "", "vacuum", "Vacuum starvation", fmt.Sprintf("%d tables exceed the dead tuple threshold while all workers are busy", count), "Investigate blocked or undersized autovacuum workers", map[string]any{"tables": count, "jobs": busy, "workers": workers})}
+			detail := fmt.Sprintf("%d tables exceed the dead tuple threshold while all workers are busy", count)
+			evidence := map[string]any{"tables": count, "jobs": busy, "workers": workers}
+			// A held xmin horizon is what stops the workers from removing the
+			// dead rows, so the finding names the holder when one is known.
+			if holder := xminHolderEvidence(s); holder != nil {
+				detail = withHolderDetail(detail, holder)
+				evidence["xmin_holder"] = holder
+			}
+			return []Finding{relationFinding("vacuum.starvation", SeverityCritical, "", "vacuum", "Vacuum starvation", detail, "Investigate blocked or undersized autovacuum workers", evidence)}
 		}
 		return nil
 	}})

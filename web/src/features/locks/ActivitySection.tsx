@@ -16,12 +16,22 @@ import {
   type ActivityMetrics,
 } from '@/lib/activity'
 import { formatCount, formatDuration, formatPercent, formatRelative } from '@/lib/format'
-import type { LockNode } from '@/lib/locks'
+import { sessionKey, type LockNode } from '@/lib/locks'
+import {
+  XMIN_HOLDER_KIND_LABELS,
+  XMIN_IDENTITY_LABELS,
+  XMIN_NONE_TEXT,
+  XMIN_PENDING_TEXT,
+  xminHorizonState,
+  xminIdentityText,
+  type XminHorizon,
+} from '@/lib/xmin'
 import { SignalActions } from './SignalActions'
 
 export interface ActivityResponseLike {
   stale: boolean
   metrics: ActivityMetrics
+  xmin_horizon?: XminHorizon | null
 }
 
 function sessionValue(value: unknown): string {
@@ -30,9 +40,9 @@ function sessionValue(value: unknown): string {
   return '—'
 }
 
-function sessionQuery(value: unknown): string {
-  if (typeof value !== 'string' || value.trim() === '') return '—'
-  return value.split(/\r?\n/u, 1)[0]?.trim() ?? '—'
+function sessionQuery(value: unknown): string | null {
+  if (typeof value !== 'string' || value.trim() === '') return null
+  return value.split(/\r?\n/u, 1)[0]?.trim() ?? null
 }
 
 // Two decimals would show a steady trickle of deadlocks as 0.00. Below 0.01
@@ -65,7 +75,7 @@ function ActiveSessions({
       ) : (
         <ul aria-label="Active sessions" className="mt-3 space-y-3">
           {sessions.map((session) => (
-            <li key={String(session.pid)} className="rounded-md border p-3">
+            <li key={sessionKey(session)} className="rounded-md border p-3">
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
                 <strong>PID {sessionValue(session.pid)}</strong>
                 <span>{sessionValue(session.state)}</span>
@@ -75,7 +85,8 @@ function ActiveSessions({
                 </span>
               </div>
               <p className="text-muted-foreground mt-1 truncate text-sm">
-                {sessionQuery(session.query)}
+                {sessionQuery(session.query) ??
+                  'Query text shown only for sessions in a blocking tree.'}
               </p>
               <SignalActions
                 currentTier={currentTier}
@@ -107,6 +118,48 @@ function valueOrUnknown(value: number | null) {
 
 function durationOrUnknown(value: number | null) {
   return value === null ? <Unknown /> : formatDuration(value)
+}
+
+// The oldest xmin holder names what keeps VACUUM from removing dead rows. Its
+// age is in transaction IDs; the time since its start is shown only when the
+// holder has one. Query text is never part of it.
+function XminHorizonBlock({
+  metrics,
+  holder,
+}: {
+  metrics: ActivityMetrics
+  holder: XminHorizon | null | undefined
+}) {
+  const xmin = xminHorizonState(metrics, holder)
+  return (
+    <div className="mt-6">
+      <h3 className="font-medium">Oldest xmin holder</h3>
+      {xmin.state === 'holder' ? (
+        <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[max-content_1fr]">
+          <dt className="text-muted-foreground">Holder kind</dt>
+          <dd>{XMIN_HOLDER_KIND_LABELS[xmin.holder.holder_kind]}</dd>
+          <dt className="text-muted-foreground">{XMIN_IDENTITY_LABELS[xmin.holder.holder_kind]}</dt>
+          <dd className="break-all">{xminIdentityText(xmin.holder)}</dd>
+          <dt className="text-muted-foreground">Age in transaction IDs</dt>
+          <dd className="tabular-nums">{formatCount(xmin.holder.age_xids)}</dd>
+          <dt className="text-muted-foreground">Time since start</dt>
+          <dd>
+            {xmin.holder.age_seconds === null
+              ? 'not measured for this holder kind'
+              : formatDuration(xmin.holder.age_seconds)}
+          </dd>
+        </dl>
+      ) : xmin.state === 'none' ? (
+        <p className="text-muted-foreground mt-2 text-sm">{XMIN_NONE_TEXT}</p>
+      ) : (
+        <p className="text-muted-foreground mt-2 text-sm">{XMIN_PENDING_TEXT}</p>
+      )}
+      <p className="text-muted-foreground mt-2 text-sm">
+        The xmin horizon is the oldest transaction ID VACUUM must keep. Time since start is the
+        start of the session's transaction, or the prepare time of a prepared transaction.
+      </p>
+    </div>
+  )
 }
 
 function BreakdownList({
@@ -253,6 +306,8 @@ export function ActivitySection({
         the sum of each database's latest rate; identifying involved statements requires PostgreSQL
         log analysis.
       </p>
+
+      <XminHorizonBlock holder={response.xmin_horizon} metrics={response.metrics} />
 
       <div className="mt-6">
         <h3 className="font-medium">Connections by application</h3>

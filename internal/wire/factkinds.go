@@ -2,6 +2,29 @@ package wire
 
 import "sort"
 
+// BloatSkippedTablesMetric is the gauge of the tables bloat_estimate cannot
+// estimate because the monitoring role cannot read their column statistics.
+// The server stores it as a generic metric of the database, not as a row of
+// metrics_bloat.
+const BloatSkippedTablesMetric = "pg_bloat_skipped_tables"
+
+// BloatUnreadableFact is the fact kind that names those tables. A scrape
+// rewrites the one fact of each database, so readers judge it by its age.
+const BloatUnreadableFact = "bloat_unreadable"
+
+// BloatSkippedValue is the value of a BloatUnreadableFact: how many tables of
+// the database the bloat estimate cannot read, and the largest of them.
+type BloatSkippedValue struct {
+	Count  int64               `json:"count"`
+	Tables []BloatSkippedTable `json:"tables"`
+}
+
+// BloatSkippedTable names one table of a BloatSkippedValue.
+type BloatSkippedTable struct {
+	SchemaName string `json:"schemaname"`
+	RelName    string `json:"relname"`
+}
+
 // FactKind describes one kind of fact the server accepts.
 type FactKind struct {
 	// Check names the check that reports the kind; empty when the kind does
@@ -35,6 +58,8 @@ var factKinds = map[string]FactKind{
 	"function_tracking":         {Check: "function_stats", Replace: true},
 	"security_definer_function": {Check: "function_security", Replace: true},
 	"subscription":              {Check: "logical_replication", Replace: true},
+	BloatUnreadableFact:         {Check: "bloat_estimate"},
+	"xmin_horizon":              {Check: "activity", Replace: true},
 }
 
 // LookupFactKind returns the description of a fact kind, and whether the

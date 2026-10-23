@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest'
 import {
   blockedCount,
   buildBlockingTree,
+  isRootBlocker,
   rankRoots,
+  sessionKey,
+  sessionsWithTreeQuery,
   treeDepth,
   waitDuration,
   type BlockingTree,
@@ -17,6 +20,15 @@ function lock(pid: number, blocked_by: number[] = [], overrides: Partial<LockNod
 
 function countEntries(forest: readonly BlockingTreeNode[]): number {
   return forest.reduce((count, tree) => count + 1 + countEntries(tree.children), 0)
+}
+
+function must<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error('expected an entry')
+  return value
+}
+
+function allEntries(forest: readonly BlockingTreeNode[]): BlockingTreeNode[] {
+  return forest.flatMap((tree) => [tree, ...allEntries(tree.children)])
 }
 
 // Each placed parent-child pair as a string, so two trees compare as sets of edges
@@ -118,13 +130,76 @@ describe('lock-tree derivation', () => {
     expect(rankRoots(forest).map((tree) => tree.node.pid)).toEqual([20, 30, 10])
   })
 
-  it('UI-LOCK-004 derives waitDuration from sampled_at, not the current clock', () => {
-    const node = lock(42, [], {
+  it('UI-LOCK-004 uses the server-measured wait_duration, and derives from sampled_at only without it', () => {
+    const measured = lock(42, [1], {
       wait_started_at: '2026-09-01T00:00:00Z',
       wait_duration: 1,
     })
+    const derived = lock(43, [1], { wait_started_at: '2026-09-01T00:00:00Z' })
 
-    expect(waitDuration(node, '2026-09-01T00:00:17Z')).toBe(17)
+    expect(waitDuration(measured, '2026-09-01T00:00:17Z')).toBe(1)
+    expect(waitDuration(derived, '2026-09-01T00:00:17Z')).toBe(17)
+  })
+
+  it('UI-LOCK-067 marks a blocker that is not itself blocked as the root of its tree', () => {
+    const forest = buildBlockingTree([lock(1), lock(2, [1]), lock(3, [2])])
+
+    expect(isRootBlocker(must(forest[0]))).toBe(true)
+    expect(isRootBlocker(must(must(forest[0]).children[0]))).toBe(false)
+    const waiter = buildBlockingTree([lock(5), lock(6, [5])])
+    expect(isRootBlocker(must(must(waiter[0]).children[0]))).toBe(false)
+    expect(isRootBlocker(must(waiter[0]))).toBe(true)
+  })
+
+  it('UI-LOCK-068 is never a root blocker for a cycle marker, a reference, or a session that waits', () => {
+    const cycle = buildBlockingTree([lock(1, [2]), lock(2, [1])])
+    const markers = allEntries(cycle).filter((entry) => entry.cycle)
+    expect(markers.length).toBeGreaterThan(0)
+    for (const marker of markers) expect(isRootBlocker(marker)).toBe(false)
+
+    const reference: BlockingTreeNode = {
+      node: lock(9),
+      children: [],
+      reference: { node: lock(8), children: [] },
+    }
+    expect(isRootBlocker(reference)).toBe(false)
+
+    const waitingBlocker: BlockingTreeNode = {
+      node: lock(7, [6]),
+      children: [{ node: lock(8, [7]), children: [] }],
+    }
+    expect(isRootBlocker(waitingBlocker)).toBe(false)
+  })
+
+  it('UI-LOCK-069 gives a session its identity from session_id, else its pid', () => {
+    expect(sessionKey(lock(10, [], { session_id: '65e7e3480a401.10' }))).toBe('65e7e3480a401.10')
+    expect(sessionKey(lock(10, [], { session_id: null }))).toBe('10')
+  })
+
+  it('UI-LOCK-070 gives a session list entry the text of its tree node only, by session identity', () => {
+    const nodes = [
+      lock(10, [], { session_id: 'a.10', query: 'UPDATE t SET x = 1' }),
+      lock(11, [10], { session_id: 'b.11', query: 'SELECT 2' }),
+    ]
+    const sessions = [
+      lock(10, [], {
+        session_id: 'a.10',
+        state: 'idle in transaction',
+        query: 'stale text from an older agent',
+      }),
+      // The PID was reused by a later session, so it is not the node's session.
+      lock(11, [], { session_id: 'c.11', query: 'SELECT 3' }),
+      lock(12, [], { session_id: 'd.12', query: 'SELECT 4' }),
+    ]
+
+    const view = sessionsWithTreeQuery(sessions, nodes)
+
+    expect(view.map((session) => session.query)).toEqual([
+      'UPDATE t SET x = 1',
+      undefined,
+      undefined,
+    ])
+    expect(view[0]?.state).toBe('idle in transaction')
   })
 
   it('UI-LOCK-005 returns an empty forest for an empty node list', () => {

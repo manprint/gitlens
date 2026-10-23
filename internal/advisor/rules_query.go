@@ -177,7 +177,7 @@ func init() {
 			}
 			return out
 		}},
-		metricRule("txn.long_running", SeverityWarning, "pg_max_xact_age_seconds", longTxnSeconds, "Long-running transaction", "Commit, roll back, or investigate the transaction"),
+		withXminHolder(metricRule("txn.long_running", SeverityWarning, "pg_max_xact_age_seconds", longTxnSeconds, "Long-running transaction", "Commit, roll back, or investigate the transaction")),
 		metricRule("txn.idle_in_transaction", SeverityWarning, "pg_max_idle_in_transaction_seconds", idleTxnSeconds, "Idle transaction", "Close or commit the idle transaction"),
 		metricRule("txn.prepared_orphan", SeverityCritical, "pg_oldest_prepared_xact_seconds", preparedSeconds, "Orphaned prepared transaction", "Resolve the prepared transaction so vacuum can proceed"),
 		{id: "txn.high_rollback_ratio", severity: SeverityInfo, needs: []string{"pg_xact_rollback_ratio"}, eval: func(s *Snapshot) []Finding {

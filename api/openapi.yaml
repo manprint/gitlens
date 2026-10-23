@@ -397,6 +397,45 @@ components:
         ts: { $ref: '#/components/schemas/Timestamp' }
         value: { type: number }
         labels: { type: object, additionalProperties: { type: string } }
+    LockSession:
+      type: object
+      description: A client session of the latest lock sample. It carries no query text; the text of a session in a blocking tree is on its node in nodes.
+      properties:
+        pid: { type: integer }
+        session_id:
+          type: string
+          description: Identity that survives PID reuse, the lower-case hex of backend_start in microseconds since the Unix epoch, a dot, and the PID. Absent when the role may not see backend_start.
+        backend_start:
+          type: string
+          format: date-time
+          description: Start of the session. Absent when the role may not see it.
+        wait_started_at:
+          type: string
+          format: date-time
+          description: When the session began waiting for the lock it waits on now, from the server. Absent for a session that waits on no lock.
+        wait_duration:
+          type: number
+          description: Seconds the session has waited for that lock, measured on the server at the sample. Absent for a session that waits on no lock.
+        blocked_by: { type: array, items: { type: integer } }
+        usename: { type: string }
+        datname: { type: string }
+        application_name: { type: string }
+        client_addr: { type: string }
+        state: { type: string }
+        wait_event_type: { type: string }
+        wait_event: { type: string }
+        xact_age: { type: number, description: Seconds since the transaction started. }
+        state_age: { type: number, description: Seconds since the state last changed. }
+      additionalProperties: true
+    LockNode:
+      description: A session of the blocking tree, either blocked or a blocker. Nodes are the only sessions that carry query text.
+      allOf:
+        - $ref: '#/components/schemas/LockSession'
+        - type: object
+          properties:
+            query:
+              type: string
+              description: Statement text, cut to 2048 bytes. Withheld as "[redacted]" when it may hold a credential or the server cut it short.
     LocksResponse:
       type: object
       required: [instance_id, sampled_at, stale, nodes, sessions]
@@ -407,14 +446,17 @@ components:
           format: date-time
           description: Null when no lock tree has ever been sampled, not an empty timestamp.
         stale: { type: boolean }
-        nodes: { type: array, items: { type: object, additionalProperties: true } }
+        nodes:
+          type: array
+          items: { $ref: '#/components/schemas/LockNode' }
+          description: The blocked sessions and their blockers in the latest lock sample, the only sessions with query text.
         sessions:
           type: array
-          items: { type: object, additionalProperties: true }
-          description: All client sessions in the latest lock/activity sample.
+          items: { $ref: '#/components/schemas/LockSession' }
+          description: Every client session in the latest lock sample, capped and oldest transaction first, without query text.
     ActivityResponse:
       type: object
-      required: [instance_id, stale, metrics]
+      required: [instance_id, stale, metrics, xmin_horizon]
       properties:
         instance_id: { $ref: '#/components/schemas/InstanceId' }
         stale: { type: boolean }
@@ -423,6 +465,26 @@ components:
           additionalProperties:
             type: array
             items: { $ref: '#/components/schemas/ApiMetric' }
+        xmin_horizon:
+          type: [object, 'null']
+          description: >-
+            The oldest holder of the xmin horizon in the latest activity sample, or null
+            when no holder is known from a sample of the last 30 seconds. holder_kind is
+            session (a client backend's snapshot or transaction), slot (a replication
+            slot's xmin or catalog_xmin), standby (a standby's hot_standby_feedback xmin)
+            or prepared (a prepared transaction). identity is the session's pid, the slot
+            name, the standby's application_name or the prepared transaction's gid. A
+            free-text identity is cut to 64 bytes and reads as [redacted] when it may hold
+            a credential. No query text is sent. age_xids is the transaction ID age of the
+            holder; age_seconds is set only for a session and a prepared transaction, and
+            is null otherwise.
+          required: [holder_kind, identity, age_xids, age_seconds, sampled_at]
+          properties:
+            holder_kind: { type: string, enum: [session, slot, standby, prepared] }
+            identity: { type: string }
+            age_xids: { type: integer, format: int64 }
+            age_seconds: { type: [number, 'null'] }
+            sampled_at: { $ref: '#/components/schemas/Timestamp' }
     DatabasesResponse:
       type: object
       required: [instance_id, databases, not_monitored_count]
@@ -918,6 +980,30 @@ components:
         items: { type: array, items: { type: object, additionalProperties: true } }
         truncated: { $ref: '#/components/schemas/Truncated' }
         relations_not_reported: { type: [integer, 'null'], format: int32 }
+    BloatResponse:
+      type: object
+      required: [instance_id, items, truncated, relations_not_reported, skipped_tables, skipped_relations]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        items: { type: array, items: { type: object, additionalProperties: true } }
+        truncated: { $ref: '#/components/schemas/Truncated' }
+        relations_not_reported: { type: [integer, 'null'], format: int32 }
+        skipped_tables:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Tables, summed over the databases of the instance, whose column statistics the monitoring role cannot read. No bloat is estimated for them.
+        skipped_relations:
+          type: array
+          description: The largest skipped tables, up to ten per database.
+          items: { $ref: '#/components/schemas/SkippedRelation' }
+    SkippedRelation:
+      type: object
+      required: [datname, schemaname, relname]
+      properties:
+        datname: { type: string }
+        schemaname: { type: string }
+        relname: { type: string }
     Alert:
       type: object
       required: [alert_key, rule_id, severity, state, datname, labels, value, summary, started_at, last_eval_at, resolved_at, suppressed]
@@ -1502,6 +1588,12 @@ paths:
                     metrics:
                       pg_connections_by_database:
                         - { ts: '2026-08-27T02:00:00Z', value: 3, labels: { datname: app } }
+                    xmin_horizon:
+                      holder_kind: session
+                      identity: '4242'
+                      age_xids: 1500
+                      age_seconds: 912.5
+                      sampled_at: '2026-08-27T02:00:00Z'
         '400': { $ref: '#/components/responses/BadRequest' }
 
   /api/v1/instances/{id}/databases:
@@ -1943,7 +2035,11 @@ paths:
       tags: [instances]
       operationId: getInstanceIndexes
       summary: Return index relation statistics.
-      description: The newest reading of each index reported in the last 15 minutes, largest first. idx_scan_rate is scans per second.
+      description: >-
+        The newest reading of each index reported in the last 15 minutes, largest first. idx_scan_rate is scans per second.
+        last_scan_at is the last time the index was scanned since the statistics reset, from pg_stat_user_indexes.last_idx_scan,
+        and is null unless last_scan_status is scanned. last_scan_status is scanned; never_since_reset (PostgreSQL 16 and later,
+        no scan since the reset); or not_available (PostgreSQL 15, or the agent has not reported a last scan for the index).
       parameters:
         - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
         - name: limit
@@ -1962,7 +2058,7 @@ paths:
                   value:
                     instance_id: 11111111-1111-1111-1111-111111111111
                     items:
-                      - { datname: app, schemaname: public, relname: users, indexrelname: users_pkey, idx_scan_rate: 4.5, index_bytes: 524288, is_unique: true, is_primary: true, is_valid: true, ts: '2026-08-27T02:00:00Z' }
+                      - { datname: app, schemaname: public, relname: users, indexrelname: users_pkey, idx_scan_rate: 4.5, index_bytes: 524288, is_unique: true, is_primary: true, is_valid: true, ts: '2026-08-27T02:00:00Z', last_scan_at: '2026-08-27T01:58:00Z', last_scan_status: scanned }
                     truncated: false
                     relations_not_reported: null
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -1973,15 +2069,25 @@ paths:
       operationId: getInstanceBloat
       summary: Return relation bloat estimates.
       description: >-
-        The newest reading of each relation and method: estimates from the last
-        13 hours (the check runs every 6 hours) and pgstattuple measurements
-        from the last 7 days.
+        The newest reading of each relation and method: table and index
+        estimates from the last 13 hours (the check runs every 6 hours) and
+        pgstattuple measurements of tables from the last 7 days. An index row
+        carries its table's name in relname and its own name in indexrelname.
+        skipped_tables counts the tables the estimate cannot read, because the
+        monitoring role cannot see their column statistics; skipped_relations
+        names up to ten of the largest per database. Their bloat is unknown,
+        not zero.
       parameters:
         - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
         - name: method
           in: query
           required: false
           schema: { type: string, enum: [estimate, pgstattuple] }
+        - name: object_kind
+          in: query
+          required: false
+          schema: { type: string, enum: [table, index] }
+          description: Only rows of this kind. Tables and indexes have separate budgets, each checks.bloat_estimate.top_n, so a filtered list shows the whole budget of its kind.
         - name: limit
           in: query
           required: false
@@ -1989,18 +2095,21 @@ paths:
           description: Maximum number of relations returned by the instance-level budget.
       responses:
         '200':
-          description: Bloat rows and cardinality-budget metadata.
+          description: Bloat rows, the count of tables whose bloat is not estimated, and cardinality-budget metadata.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/RelationResponse' }
+              schema: { $ref: '#/components/schemas/BloatResponse' }
               examples:
                 default:
                   value:
                     instance_id: 11111111-1111-1111-1111-111111111111
                     items:
                       - { datname: app, schemaname: public, relname: users, indexrelname: '', object_kind: table, method: estimate, real_bytes: 1048576, expected_bytes: 851968, bloat_bytes: 196608, bloat_ratio: 0.19, ts: '2026-08-27T02:00:00Z' }
+                      - { datname: app, schemaname: public, relname: users, indexrelname: users_email_idx, object_kind: index, method: estimate, real_bytes: 2097152, expected_bytes: 262144, bloat_bytes: 1835008, bloat_ratio: 0.88, ts: '2026-08-27T02:00:00Z' }
                     truncated: false
                     relations_not_reported: null
+                    skipped_tables: 1
+                    skipped_relations: [{ datname: app, schemaname: public, relname: secret_payloads }]
         '400': { $ref: '#/components/responses/BadRequest' }
 
   /api/v1/instances/{id}/command-audit:

@@ -130,7 +130,9 @@ func runUnusedIndexMaintenance(ctx context.Context, e *scenario.Env) error {
 	if err := seedIndexHistory(ctx, e.DB, instanceID, maintenanceUnusedIndex); err != nil {
 		return err
 	}
-	if err := waitForFinding(ctx, e, instanceID, "index.unused", "public."+maintenanceUnusedIndex, "open"); err != nil {
+	// The standalone primary has no sibling snapshot to show a standby does not
+	// scan the index, so the finding is degraded rather than open.
+	if err := waitForFinding(ctx, e, instanceID, "index.unused", "public."+maintenanceUnusedIndex, "degraded"); err != nil {
 		return fmt.Errorf("unused index finding: %w", err)
 	}
 	e.AssertInvariants(e.T)
@@ -296,6 +298,7 @@ func waitForBloat(ctx context.Context, e *scenario.Env, instanceID string) error
 		var ratio float64
 		err := e.DB.QueryRow(ctx, `SELECT bloat_ratio FROM metrics_bloat
 			WHERE instance_id=$1 AND schemaname='public' AND relname=$2 AND method='estimate'
+			AND object_kind='table'
 			ORDER BY ts DESC LIMIT 1`, instanceID, maintenanceTable).Scan(&ratio)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, nil
@@ -303,7 +306,7 @@ func waitForBloat(ctx context.Context, e *scenario.Env, instanceID string) error
 		if err != nil {
 			return false, err
 		}
-		payload, err := e.API.Get("/api/v1/instances/" + instanceID + "/bloat?method=estimate&limit=50")
+		payload, err := e.API.Get("/api/v1/instances/" + instanceID + "/bloat?method=estimate&object_kind=table&limit=50")
 		if err != nil {
 			return false, err
 		}

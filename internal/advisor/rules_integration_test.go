@@ -37,6 +37,9 @@ func TestINTADV007_SeededRulePackHasExactSet(t *testing.T) {
 			{Name: "advisor_prefix_a", TableName: "advisor_prefix", IsValid: true, IndexDef: "CREATE INDEX advisor_prefix_a ON advisor_prefix (a)"},
 			{Name: "advisor_prefix_ab", TableName: "advisor_prefix", IsValid: true, IndexDef: "CREATE INDEX advisor_prefix_ab ON advisor_prefix (a, b)"},
 		}
+		// A standby that reports the unused index without a scan: without a sibling
+		// report the finding would be degraded, not open.
+		s.Siblings = []SiblingInfo{{InstanceID: uuid.New(), IndexHashes: map[string]string{indexHashKey("", "advisor_unused_large_idx"): "h"}, IndexScanned: map[string]bool{}}}
 		s.Bloat = []BloatStat{
 			{Name: "advisor_bloated", RelationName: "advisor_bloated", Kind: "table", Ratio: .5, SizeBytes: 101 * 1024 * 1024},
 			{Name: "advisor_bloated_idx", RelationName: "advisor_bloated", Kind: "index", Ratio: .5, SizeBytes: 51 * 1024 * 1024},

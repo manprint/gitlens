@@ -1130,7 +1130,7 @@ func TestPipeline_TruncationMarkerOncePerCheckPerEnvelope(t *testing.T) {
 // to withhold is stored byte for byte.
 func TestWithholdLockTreeQueries(t *testing.T) {
 	t.Parallel()
-	tree := `{"sampled_at":"2026-10-23T20:00:00Z","nodes":[{"pid":7,"query":"ALTER ROLE app PASSWORD 'hunter2'","blocked_by":[8],"xact_age":1.5,"backend_start":"2026-10-23T19:00:00Z"}],` +
+	tree := `{"sampled_at":"2026-10-23T20:00:00Z","nodes":[{"pid":7,"query":"ALTER ROLE app PASSWORD 'hunter2'","blocked_by":[8],"xact_age":1.5,"backend_start":"2026-10-23T19:00:00Z","session_id":"65e7e3480a401.7","wait_started_at":"2026-10-23T19:59:00Z","wait_duration":60}],` +
 		`"sessions":[{"pid":8,"query":"SELECT 1"},{"pid":9,"query":"SELECT dblink_connect('postgresql://u:p@h/db')"}],"later_field":{"query":"x"}}`
 	got := withholdLockTreeQueries([]byte(tree))
 	var decoded struct {
@@ -1143,6 +1143,9 @@ func TestWithholdLockTreeQueries(t *testing.T) {
 	require.Equal(t, []any{float64(8)}, decoded.Nodes[0]["blocked_by"])
 	require.Equal(t, 1.5, decoded.Nodes[0]["xact_age"])
 	require.Equal(t, "2026-10-23T19:00:00Z", decoded.Nodes[0]["backend_start"])
+	require.Equal(t, "65e7e3480a401.7", decoded.Nodes[0]["session_id"])
+	require.Equal(t, "2026-10-23T19:59:00Z", decoded.Nodes[0]["wait_started_at"])
+	require.Equal(t, float64(60), decoded.Nodes[0]["wait_duration"])
 	require.Equal(t, "SELECT 1", decoded.Sessions[0]["query"])
 	require.Equal(t, "[redacted]", decoded.Sessions[1]["query"])
 	require.Equal(t, "x", decoded.Later["query"])
@@ -1169,4 +1172,26 @@ func TestCounterResetEventsNameTheDatabase(t *testing.T) {
 	require.Equal(t, 2, events[0].Payload["count"])
 	require.Equal(t, "", events[1].Payload["database"])
 	require.Equal(t, 1, events[1].Payload["count"])
+}
+
+// TestMetricDestination_SkippedTablesIsAGauge: the skipped-table count of
+// bloat_estimate is one value per database. Routed to metrics_bloat it would
+// need an object_kind and a method it does not have, and the envelope would be
+// refused by the table's CHECK constraints.
+func TestMetricDestination_SkippedTablesIsAGauge(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "metrics", metricDestination("bloat_estimate", wire.BloatSkippedTablesMetric))
+	require.Equal(t, "metrics_bloat", metricDestination("bloat_estimate", "pg_bloat_real_bytes"))
+	require.Equal(t, "metrics_bloat", metricDestination("bloat_estimate", "pg_bloat_ratio"))
+}
+
+// TestPresentRelations_SkippedTablesIsNotARelation: the gauge carries no
+// relation, so it must not add an empty relation key to the prune.
+func TestPresentRelations_SkippedTablesIsNotARelation(t *testing.T) {
+	t.Parallel()
+	keys := presentRelations([]wire.Metric{
+		{Name: wire.BloatSkippedTablesMetric, Value: 2, Kind: "gauge", Labels: map[string]string{}},
+		{Name: "pg_bloat_real_bytes", Value: 1, Kind: "gauge", Labels: map[string]string{"schemaname": "public", "relname": "t", "indexrelname": "t_idx"}},
+	})
+	require.Equal(t, []store.RelationKey{{Schema: "public", Relation: "t", Index: "t_idx"}}, keys)
 }

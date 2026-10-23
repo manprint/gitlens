@@ -1,4 +1,4 @@
-import { act, fireEvent, screen } from '@testing-library/react'
+import { act, fireEvent, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { REFRESH } from '@/api/policy'
@@ -124,5 +124,51 @@ describe('LocksPage session signal actions', () => {
     )
 
     expect(screen.getByRole('button', { name: 'Terminate backend' })).toBeDisabled()
+  })
+})
+
+describe('LocksPage session text', () => {
+  it('UI-LOCK-073 shows a session its tree text only where the tree holds it', () => {
+    renderLocks(
+      '/instances/instance-1/locks?range=1h',
+      success({
+        sampled_at: '2026-09-01T10:00:00Z',
+        stale: false,
+        nodes: [
+          {
+            pid: 10,
+            blocked_by: [],
+            session_id: 'a.10',
+            query: 'UPDATE accounts SET balance = 0',
+            wait_duration: null,
+          },
+          {
+            pid: 11,
+            blocked_by: [10],
+            session_id: 'b.11',
+            query: 'SELECT 2',
+            wait_duration: 3,
+            wait_started_at: '2026-09-01T09:59:57Z',
+          },
+        ],
+        sessions: [
+          { pid: 10, session_id: 'a.10', state: 'active', datname: 'app', usename: 'app' },
+          {
+            pid: 12,
+            session_id: 'c.12',
+            state: 'idle',
+            datname: 'app',
+            usename: 'app',
+            query: 'SELECT 9',
+          },
+        ],
+      }),
+    )
+
+    const list = screen.getByRole('list', { name: 'Active sessions' })
+    const entries = within(list).getAllByRole('listitem')
+    expect(entries[0]).toHaveTextContent('UPDATE accounts SET balance = 0')
+    expect(entries[1]).toHaveTextContent('Query text shown only for sessions in a blocking tree.')
+    expect(entries[1]).not.toHaveTextContent('SELECT 9')
   })
 })

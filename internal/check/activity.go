@@ -20,7 +20,7 @@ func (c *activityCheck) Requires() Requirements {
 }
 func (c *activityCheck) DefaultInterval() time.Duration { return 10 * time.Second }
 
-// Timeout bounds the whole scrape, which runs its six probes one after another.
+// Timeout bounds the whole scrape, which runs its probes one after another.
 // That budget was already in place when the probes ignored their errors. Now a
 // probe that fails or times out fails the scrape, so the activity metrics of
 // that interval are dropped instead of being published as zeros. The probes are
@@ -101,8 +101,21 @@ GROUP BY 1, 2
 	if err := conn.QueryRow(ctx, `SELECT COALESCE(max(age(datfrozenxid)), 0)::float8 FROM pg_database`).Scan(&frozenAge); err != nil {
 		return Result{}, err
 	}
+	// The xmin holders read four views the other checks also read. They come
+	// from this check, not from theirs, so the one fact that names the oldest
+	// holder has a single producer and its Replace covers the whole sample.
+	holders, err := queryXminHolders(ctx, conn)
+	if err != nil {
+		return Result{}, err
+	}
+	facts, err := xminHorizonFacts(holders)
+	if err != nil {
+		return Result{}, err
+	}
 	result := activityCheckResult(parsed, maxConnStr, c.byApplication, databaseRows, applicationRows, stateAgeRows, prepared, oldestPrepared, frozenAge)
 	result.Metrics = append(result.Metrics, pgtype.Metric{Name: "pg_backends_waiting_ratio", Value: waitingRatio(parsed), Kind: pgtype.KindGauge})
+	result.Metrics = append(result.Metrics, xminHorizonMetrics(holders)...)
+	result.Facts = append(result.Facts, facts...)
 	return result, nil
 }
 

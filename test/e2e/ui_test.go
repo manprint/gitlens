@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +22,8 @@ import (
 const (
 	uiE2EPassword    = "pglens-ui-e2e"
 	uiBootstrapToken = "dev-token"
+	// uiCancelAppName names the sleeping session of the cancel scenario.
+	uiCancelAppName = "pglens-ui-cancel"
 )
 
 type testingLogWriter struct {
@@ -100,7 +103,7 @@ func prepareUIScenario(e *scenario.Env, id string) (chan error, error) {
 		if os.Getenv("PGLENS_UI_CANCEL_MODE") == "t0" {
 			target = "pg"
 		}
-		return startUIWorkload(e, target, "slow-query", "--sleep", "45s", "--count", "1"), nil
+		return startUIWorkloadAs(e, target, uiCancelAppName, "slow-query", "--sleep", "45s", "--count", "1"), nil
 	case "SYS-UI-010":
 		_, err := e.DB.Exec(context.Background(), `
 INSERT INTO findings (
@@ -122,8 +125,19 @@ ON CONFLICT (tenant_id, finding_id) DO UPDATE SET
 }
 
 func startUIWorkload(e *scenario.Env, target string, command string, args ...string) chan error {
+	return startUIWorkloadAs(e, target, "", command, args...)
+}
+
+// startUIWorkloadAs runs a workload whose connection names itself appName in
+// pg_stat_activity, when appName is not empty. A session outside every blocking
+// tree carries no query text in the locks payload, so a browser test finds it
+// by its application name instead.
+func startUIWorkloadAs(e *scenario.Env, target, appName string, command string, args ...string) chan error {
 	cfg := e.PG(target).Config().ConnConfig
 	dsn := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable", cfg.User, cfg.Password, cfg.Host, cfg.Port, cfg.Database)
+	if appName != "" {
+		dsn += "&application_name=" + url.QueryEscape(appName)
+	}
 	workloadArgs := append([]string{command, "--dsn", dsn}, args...)
 	done := make(chan error, 1)
 	go func() {

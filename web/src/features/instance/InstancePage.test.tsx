@@ -139,6 +139,8 @@ function renderPage(
       items: [],
       truncated: false,
       relations_not_reported: null,
+      skipped_tables: 0,
+      skipped_relations: [],
     }),
     ok('queryMetrics', { series: [] }),
   )

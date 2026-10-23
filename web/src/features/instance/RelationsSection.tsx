@@ -18,6 +18,7 @@ import { formatBytes, formatCount, formatPercent, formatRate, formatTimestamp } 
 const RELATION_LIMIT = 50
 
 type RelationResponse = Schemas['RelationResponse']
+type BloatResponse = Schemas['BloatResponse']
 type RelationItem = RelationResponse['items'][number]
 
 interface RelationColumn {
@@ -342,6 +343,37 @@ const TABLE_COLUMNS: RelationColumn[] = [
   OBSERVED_COLUMN,
 ]
 
+/**
+ * The index's last scan since the statistics reset, from the API's last_scan_status.
+ * "never since reset" is an index with no scan since the reset (PostgreSQL 16 and
+ * later); "not available" means the server has no last scan for it (PostgreSQL 15).
+ */
+const LAST_SCAN_STATUS_TEXT: Record<string, { text: string; title: string }> = {
+  never_since_reset: {
+    text: 'never since reset',
+    title: 'No scan of this index since the statistics were reset.',
+  },
+  not_available: {
+    text: 'not available',
+    title:
+      'PostgreSQL 15 does not report the last scan of an index (pg_stat_user_indexes.last_idx_scan).',
+  },
+}
+
+function lastScanCell(item: RelationItem): ReactNode {
+  const at = timeValue(item, 'last_scan_at')
+  if (at) {
+    return (
+      <span title="Last scan of this index since the statistics were reset.">
+        {formatTimestamp(at.iso, 'UTC')}
+      </span>
+    )
+  }
+  const status = stringValue(item, 'last_scan_status')
+  const known = status ? LAST_SCAN_STATUS_TEXT[status] : undefined
+  return known ? <span title={known.title}>{known.text}</span> : <Unknown />
+}
+
 const INDEX_COLUMNS: RelationColumn[] = [
   RELATION_COLUMN,
   DATABASE_COLUMN,
@@ -358,6 +390,12 @@ const INDEX_COLUMNS: RelationColumn[] = [
     sortValue: (item) => numberValue(item, 'idx_scan_rate'),
   },
   {
+    key: 'last_scan',
+    label: 'Last scan',
+    render: lastScanCell,
+    sortValue: (item) => timeValue(item, 'last_scan_at')?.ms ?? null,
+  },
+  {
     key: 'size',
     label: 'Size',
     render: (item) => bytesCell(item, 'index_bytes'),
@@ -369,16 +407,18 @@ const INDEX_COLUMNS: RelationColumn[] = [
   OBSERVED_COLUMN,
 ]
 
-const BLOAT_COLUMNS: RelationColumn[] = [
-  RELATION_COLUMN,
-  DATABASE_COLUMN,
-  {
-    key: 'object',
-    label: 'Object',
-    // A table row has no index name; it used to render as not measured.
-    render: (item) => stringValue(item, 'indexrelname') ?? textCell(item, 'object_kind'),
-    sortValue: (item) => stringValue(item, 'indexrelname') ?? stringValue(item, 'object_kind'),
-  },
+// A bloat row is a table or an index of a table. The relation column names the
+// table in both cases; the index column names the index of an index row.
+const BLOAT_TABLE_COLUMN: RelationColumn = { ...RELATION_COLUMN, label: 'Table' }
+
+const BLOAT_INDEX_COLUMN: RelationColumn = {
+  key: 'index',
+  label: 'Index',
+  render: (item) => textCell(item, 'indexrelname'),
+  sortValue: (item) => stringValue(item, 'indexrelname'),
+}
+
+const BLOAT_MEASURE_COLUMNS: RelationColumn[] = [
   {
     key: 'real_bytes',
     label: 'Real size',
@@ -410,6 +450,19 @@ const BLOAT_COLUMNS: RelationColumn[] = [
     sortValue: (item) => stringValue(item, 'method'),
   },
   OBSERVED_COLUMN,
+]
+
+const TABLE_BLOAT_COLUMNS: RelationColumn[] = [
+  BLOAT_TABLE_COLUMN,
+  DATABASE_COLUMN,
+  ...BLOAT_MEASURE_COLUMNS,
+]
+
+const INDEX_BLOAT_COLUMNS: RelationColumn[] = [
+  BLOAT_TABLE_COLUMN,
+  BLOAT_INDEX_COLUMN,
+  DATABASE_COLUMN,
+  ...BLOAT_MEASURE_COLUMNS,
 ]
 
 function BudgetNotice({
@@ -498,7 +551,9 @@ function ExactMeasurement({
 
   useEffect(() => {
     if (state === 'done') {
-      void queryClient.invalidateQueries({ queryKey: qk.instanceBloat(instanceId, RELATION_LIMIT) })
+      void queryClient.invalidateQueries({
+        queryKey: qk.instanceBloat(instanceId, RELATION_LIMIT, 'table'),
+      })
     }
   }, [instanceId, queryClient, state])
 
@@ -538,9 +593,9 @@ function ExactMeasurement({
   )
 }
 
-function bloatColumns(instanceId: string, permitted: boolean): RelationColumn[] {
+function tableBloatColumns(instanceId: string, permitted: boolean): RelationColumn[] {
   return [
-    ...BLOAT_COLUMNS,
+    ...TABLE_BLOAT_COLUMNS,
     {
       key: 'exact',
       label: 'Exact measurement',
@@ -549,6 +604,33 @@ function bloatColumns(instanceId: string, permitted: boolean): RelationColumn[] 
       ),
     },
   ]
+}
+
+/**
+ * The tables the estimate could not read. Their bloat is unknown, not zero:
+ * the monitoring role cannot see their column statistics in pg_stats, either
+ * because a column is not readable by it or because row security hides rows.
+ */
+function SkippedTablesNotice({ response }: { response: BloatResponse | undefined }) {
+  if (!response || response.skipped_tables < 1) return null
+  const named = response.skipped_relations
+  const more = response.skipped_tables - named.length
+  return (
+    <div className="text-muted-foreground space-y-1 text-sm">
+      <p>
+        {formatCount(response.skipped_tables)}{' '}
+        {response.skipped_tables === 1 ? 'table has' : 'tables have'} no bloat estimate: the
+        monitoring role cannot read a column of them, or row security hides rows from it. Their
+        bloat is unknown, not zero.
+      </p>
+      {named.length > 0 ? (
+        <p>
+          Largest: {named.map((t) => `${t.datname}: ${t.schemaname}.${t.relname}`).join(', ')}
+          {more > 0 ? ` and ${formatCount(more)} more` : ''}.
+        </p>
+      ) : null}
+    </div>
+  )
 }
 
 function ExactBloatNotice({ currentTier }: { currentTier: PermTier }) {
@@ -574,10 +656,17 @@ export function RelationsSection({
 }) {
   const tablesQuery = useInstanceTables(instanceId, { limit: RELATION_LIMIT })
   const indexesQuery = useInstanceIndexes(instanceId, { limit: RELATION_LIMIT })
-  const bloatQuery = useInstanceBloat(instanceId, { limit: RELATION_LIMIT })
+  const bloatTablesQuery = useInstanceBloat(instanceId, {
+    limit: RELATION_LIMIT,
+    object_kind: 'table',
+  })
+  const bloatIndexesQuery = useInstanceBloat(instanceId, {
+    limit: RELATION_LIMIT,
+    object_kind: 'index',
+  })
   const permitted = currentTier !== 'T0'
   const bloatTableColumns = useMemo(
-    () => bloatColumns(instanceId, permitted),
+    () => tableBloatColumns(instanceId, permitted),
     [instanceId, permitted],
   )
 
@@ -585,7 +674,7 @@ export function RelationsSection({
     <Section
       title="Relations, bloat and truncation"
       description={
-        'Tables, indexes and bloat estimates each use a top-N budget per database. A bloat estimate is a statistical estimate, not a measurement: it covers tables only, and relations under 1 MiB, never-analysed relations and tables with columns the monitoring role cannot see in pg_stats are not estimated. Rows with method pgstattuple are exact measurements.'
+        'Tables, indexes and bloat estimates each use a top-N budget per database. A bloat estimate is a statistical estimate, not a measurement: it covers tables and btree indexes. Relations under 1 MiB, never-analysed relations, and partial and expression indexes are not estimated. Tables the monitoring role cannot read in full are not estimated either; they are counted above the table estimates. Rows with method pgstattuple are exact measurements of tables.'
       }
       id="instance-relations"
     >
@@ -616,15 +705,25 @@ export function RelationsSection({
           />
         </div>
 
-        <div className="space-y-3">
+        <div className="space-y-6">
           <h3 className="text-base font-medium">Bloat estimates</h3>
+          <SkippedTablesNotice response={bloatTablesQuery.data} />
           <RelationPanel
-            title="Bloat estimates"
-            endpoint="bloat estimates"
-            query={bloatQuery}
+            title="Table bloat estimates"
+            endpoint="table bloat estimates"
+            query={bloatTablesQuery}
             columns={bloatTableColumns}
-            emptyDescription="No bloat estimates are currently reported."
-            scope="bloat estimates shared per instance across databases"
+            emptyDescription="No table bloat estimates are currently reported."
+            scope="table bloat estimates shared per instance across databases"
+            configKey="checks.bloat_estimate.top_n"
+          />
+          <RelationPanel
+            title="Index bloat estimates"
+            endpoint="index bloat estimates"
+            query={bloatIndexesQuery}
+            columns={INDEX_BLOAT_COLUMNS}
+            emptyDescription="No index bloat estimates are currently reported."
+            scope="index bloat estimates shared per instance across databases"
             configKey="checks.bloat_estimate.top_n"
           />
           <ExactBloatNotice currentTier={currentTier} />

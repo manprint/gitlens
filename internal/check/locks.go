@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"strconv"
 	"time"
 	"unicode/utf8"
 
@@ -35,15 +36,15 @@ type lockRow struct {
 	Query           string
 	BlockedBy       []int32
 	BackendStart    *time.Time
+	// WaitStartedAt and WaitDuration describe the lock this session waits on,
+	// read from pg_locks; both are nil when it waits on none.
+	WaitStartedAt *time.Time
+	WaitDuration  *float64
 }
 
 // lockSessionsLimit caps the session list, which the activity view shows
-// oldest transaction first. lockIdleQueryLimit is the query text kept for a
-// session that is not in the blocking tree; those keep the full text.
-const (
-	lockSessionsLimit  = 100
-	lockIdleQueryLimit = 256
-)
+// oldest transaction first.
+const lockSessionsLimit = 100
 
 type lockTree struct {
 	SampledAt time.Time  `json:"sampled_at"`
@@ -64,12 +65,25 @@ type lockNode struct {
 	WaitEvent       string  `json:"wait_event"`
 	XactAge         float64 `json:"xact_age"`
 	StateAge        float64 `json:"state_age"`
-	Query           string  `json:"query"`
-	BlockedBy       []int32 `json:"blocked_by"`
+	// Query is set only on a node, a session of the blocking tree. The session
+	// list leaves it empty, so it is omitted there.
+	Query     string  `json:"query,omitempty"`
+	BlockedBy []int32 `json:"blocked_by"`
 	// BackendStart tells this session from a later one given the same PID;
 	// the UI sends it back with a cancel or terminate. It is NULL when the
 	// role may not see the session.
 	BackendStart *time.Time `json:"backend_start,omitempty"`
+	// SessionID names the session across PID reuse: the lower-hex of
+	// BackendStart in microseconds since the Unix epoch, a dot, and the PID.
+	// A session that started at 2026-10-23 09:00:00.000001 UTC with PID 1234
+	// is "65e7e3480a401.1234". It is empty when BackendStart is NULL.
+	SessionID string `json:"session_id,omitempty"`
+	// WaitStartedAt is when the session began waiting for the lock it waits on
+	// now, from pg_locks.waitstart on the server. WaitDuration is the seconds
+	// from that moment to now() on the server, taken at the sample, so both
+	// clocks are the server's and the agent's clock does not enter it.
+	WaitStartedAt *time.Time `json:"wait_started_at,omitempty"`
+	WaitDuration  *float64   `json:"wait_duration,omitempty"`
 }
 
 // locksQuery tolerates every nullable column: client_addr is NULL for each
@@ -80,6 +94,11 @@ type lockNode struct {
 // pg_blocking_pids() walks the lock manager; it is only asked about sessions
 // that are actually waiting on a heavyweight lock instead of every backend
 // every ten seconds.
+//
+// The wait columns come from the waiting lock of each session: pg_locks.waitstart
+// is PostgreSQL 14 and later, so every supported version has it. The wait
+// duration is measured on the server with now(), as is the transaction age, so
+// the two clocks agree. A session that waits on no lock has NULL in both.
 //
 // The last column says whether the text is size minus four or more bytes long,
 // the test the query below applies, and so whether it may have been cut. The
@@ -102,8 +121,11 @@ SELECT a.pid,
        COALESCE(a.query, ''),
        CASE WHEN a.wait_event_type = 'Lock' THEN pg_blocking_pids(a.pid) ELSE '{}'::int[] END,
        a.backend_start,
+       w.waitstart,
+       EXTRACT(epoch FROM now() - w.waitstart),
        COALESCE(octet_length(a.query), 0) >= (SELECT setting::int FROM pg_settings WHERE name = 'track_activity_query_size') - 4
 FROM pg_stat_activity a
+LEFT JOIN (SELECT pid, min(waitstart) AS waitstart FROM pg_locks WHERE NOT granted GROUP BY pid) w ON w.pid = a.pid
 WHERE a.backend_type = 'client backend'
   AND a.pid <> pg_backend_pid()`
 
@@ -125,7 +147,7 @@ func (c *locksCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 	for rows.Next() {
 		var r lockRow
 		var cut bool
-		if err := rows.Scan(&r.PID, &r.Datname, &r.Username, &r.ApplicationName, &r.ClientAddr, &r.State, &r.WaitEventType, &r.WaitEvent, &r.XactAge, &r.StateAge, &r.Query, &r.BlockedBy, &r.BackendStart, &cut); err != nil {
+		if err := rows.Scan(&r.PID, &r.Datname, &r.Username, &r.ApplicationName, &r.ClientAddr, &r.State, &r.WaitEventType, &r.WaitEvent, &r.XactAge, &r.StateAge, &r.Query, &r.BlockedBy, &r.BackendStart, &r.WaitStartedAt, &r.WaitDuration, &cut); err != nil {
 			return Result{}, err
 		}
 		// A statement can carry a role password, and the tree is shipped to
@@ -162,7 +184,7 @@ func buildLocksResult(rows []lockRow, sampledAt time.Time) Result {
 		if r.StateAge > maxAge {
 			maxAge = r.StateAge
 		}
-		nodes = append(nodes, lockNode(r))
+		nodes = append(nodes, lockNodeOf(r))
 		nodePIDs[r.PID] = struct{}{}
 	}
 	// The blocking session has no blocked_by values of its own, so the first
@@ -172,14 +194,15 @@ func buildLocksResult(rows []lockRow, sampledAt time.Time) Result {
 	for _, r := range rows {
 		if _, isBlocking := blocking[r.PID]; isBlocking {
 			if _, alreadyIncluded := nodePIDs[r.PID]; !alreadyIncluded {
-				nodes = append(nodes, lockNode(r))
+				nodes = append(nodes, lockNodeOf(r))
 				nodePIDs[r.PID] = struct{}{}
 			}
 		}
 	}
-	// Every backend used to be shipped with its full query on each sample,
-	// blocked or not, which grows with the number of connections. Only the
-	// sessions in the tree keep their full text; the list is capped instead.
+	// Every backend used to be shipped with its query text on each sample,
+	// blocked or not, which grows with the number of connections. The text is
+	// shipped for the sessions in the tree only, in nodes; the session list
+	// carries every other field but no text, and is capped instead.
 	byAge := make([]lockRow, len(rows))
 	copy(byAge, rows)
 	sort.SliceStable(byAge, func(i, j int) bool { return byAge[i].XactAge > byAge[j].XactAge })
@@ -190,10 +213,8 @@ func buildLocksResult(rows []lockRow, sampledAt time.Time) Result {
 			sessionsTruncated = true
 			break
 		}
-		session := lockNode(r)
-		if _, inTree := nodePIDs[r.PID]; !inTree {
-			session.Query = truncateUTF8(session.Query, lockIdleQueryLimit)
-		}
+		session := lockNodeOf(r)
+		session.Query = ""
 		sessions = append(sessions, session)
 	}
 	metrics := []pgtype.Metric{
@@ -238,6 +259,40 @@ func buildLocksResult(rows []lockRow, sampledAt time.Time) Result {
 		result.Facts = []Fact{{Kind: "lock_tree", Key: "current", ValueJSON: raw}}
 	}
 	return result
+}
+
+// lockNodeOf converts a row to the node shape. The query text is kept here;
+// the caller decides whether the node is shipped with it.
+func lockNodeOf(r lockRow) lockNode {
+	return lockNode{
+		PID:             r.PID,
+		Datname:         r.Datname,
+		Username:        r.Username,
+		ApplicationName: r.ApplicationName,
+		ClientAddr:      r.ClientAddr,
+		State:           r.State,
+		WaitEventType:   r.WaitEventType,
+		WaitEvent:       r.WaitEvent,
+		XactAge:         r.XactAge,
+		StateAge:        r.StateAge,
+		Query:           r.Query,
+		BlockedBy:       r.BlockedBy,
+		BackendStart:    r.BackendStart,
+		SessionID:       lockSessionID(r.PID, r.BackendStart),
+		WaitStartedAt:   r.WaitStartedAt,
+		WaitDuration:    r.WaitDuration,
+	}
+}
+
+// lockSessionID is the identity of a session that survives PID reuse: the
+// start time in microseconds since the Unix epoch, in lower-case hex, then a
+// dot and the PID. A reused PID starts later, so it gets a new identity. An
+// empty result means the start time is not visible to the role.
+func lockSessionID(pid int32, started *time.Time) string {
+	if started == nil {
+		return ""
+	}
+	return strconv.FormatInt(started.UnixMicro(), 16) + "." + strconv.FormatInt(int64(pid), 10)
 }
 
 // truncateUTF8 cuts s to at most limit bytes without splitting a multi-byte

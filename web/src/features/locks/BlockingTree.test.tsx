@@ -231,6 +231,35 @@ describe('BlockingTree', () => {
     expect(screen.getByRole('button', { name: 'Terminate backend' })).toBeDisabled()
   })
 
+  it('UI-LOCK-071 marks the root blocker and shows the wait of each waiter, or that it is not waiting', () => {
+    render(
+      <BlockingTree
+        response={response([
+          { pid: 10, blocked_by: [], session_id: 'a.10' },
+          {
+            pid: 11,
+            blocked_by: [10],
+            wait_duration: 75,
+            wait_started_at: '2026-10-23T09:58:45Z',
+            session_id: 'b.11',
+          },
+        ])}
+        now={NOW}
+      />,
+    )
+
+    // The waiter is nested under the holder, so the holder's item also holds its details.
+    const [holder, waiter] = screen.getAllByRole('treeitem')
+    expect(holder).toHaveTextContent('PID 10')
+    expect(holder).toHaveTextContent('Root blocker')
+    expect(holder).toHaveTextContent('Not waiting')
+    expect(waiter).toHaveTextContent('PID 11')
+    expect(waiter).not.toHaveTextContent('Root blocker')
+    expect(waiter).toHaveTextContent('1m 15s')
+    expect(waiter).toHaveTextContent('Waiting since')
+    expect(waiter).toHaveTextContent('09:58:45')
+  })
+
   it('UI-LOCK-050 keeps signal actions enabled on a fresh lock sample', () => {
     renderWithProviders(
       <BlockingTree

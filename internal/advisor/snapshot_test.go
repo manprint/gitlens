@@ -90,14 +90,20 @@ func TestLoadSnapshot_PopulatesBoundedSections(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows([]string{"queryid", "mean"}).AddRow(int64(7), 4.5))
 	siblingSeen := now.Add(-time.Minute)
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT i.instance_id, i.role, f.kind, f.key")).WithArgs(int64(42), instanceID, now.Add(-time.Hour)).
-		WillReturnRows(pgxmock.NewRows([]string{"instance_id", "role", "kind", "key", "value_text", "def_hash", "context", "datname", "last_seen"}).
-			AddRow(siblingID, snapshotStringPtr("standby"), snapshotStringPtr("setting"), snapshotStringPtr("work_mem"), snapshotStringPtr("8192"), snapshotStringPtr(""), snapshotStringPtr("user"), snapshotStringPtr(""), &siblingSeen).
-			AddRow(siblingID, snapshotStringPtr("standby"), snapshotStringPtr("setting"), snapshotStringPtr("stale_setting"), snapshotStringPtr("x"), snapshotStringPtr(""), snapshotStringPtr("user"), snapshotStringPtr(""), snapshotTimePtr(now.Add(-3*time.Hour))).
-			AddRow(siblingID, snapshotStringPtr("standby"), snapshotStringPtr("index_def"), snapshotStringPtr("public.orders_customer_idx"), snapshotStringPtr(""), snapshotStringPtr("hash-sibling"), snapshotStringPtr(""), snapshotStringPtr("app"), &siblingSeen).
-			AddRow(siblingID, snapshotStringPtr("standby"), snapshotStringPtr("backup"), snapshotStringPtr("basebackup_running"), snapshotStringPtr("1"), snapshotStringPtr(""), snapshotStringPtr(""), snapshotStringPtr(""), &siblingSeen).
-			AddRow(uuid.New(), snapshotStringPtr("standby"), nil, nil, snapshotStringPtr(""), snapshotStringPtr(""), snapshotStringPtr(""), nil, nil))
+		WillReturnRows(pgxmock.NewRows([]string{"instance_id", "role", "kind", "key", "value_text", "def_hash", "context", "last_idx_scan", "datname", "last_seen"}).
+			AddRow(siblingID, snapshotStringPtr("standby"), snapshotStringPtr("setting"), snapshotStringPtr("work_mem"), snapshotStringPtr("8192"), snapshotStringPtr(""), snapshotStringPtr("user"), snapshotStringPtr(""), snapshotStringPtr(""), &siblingSeen).
+			AddRow(siblingID, snapshotStringPtr("standby"), snapshotStringPtr("setting"), snapshotStringPtr("stale_setting"), snapshotStringPtr("x"), snapshotStringPtr(""), snapshotStringPtr("user"), snapshotStringPtr(""), snapshotStringPtr(""), snapshotTimePtr(now.Add(-3*time.Hour))).
+			AddRow(siblingID, snapshotStringPtr("standby"), snapshotStringPtr("index_def"), snapshotStringPtr("public.orders_customer_idx"), snapshotStringPtr(""), snapshotStringPtr("hash-sibling"), snapshotStringPtr(""), snapshotStringPtr(""), snapshotStringPtr("app"), &siblingSeen).
+			AddRow(siblingID, snapshotStringPtr("standby"), snapshotStringPtr("index_def"), snapshotStringPtr("public.orders_label_idx"), snapshotStringPtr(""), snapshotStringPtr("hash-label"), snapshotStringPtr(""), snapshotStringPtr("2026-08-29T09:00:00Z"), snapshotStringPtr("app"), &siblingSeen).
+			AddRow(siblingID, snapshotStringPtr("standby"), snapshotStringPtr("backup"), snapshotStringPtr("basebackup_running"), snapshotStringPtr("1"), snapshotStringPtr(""), snapshotStringPtr(""), snapshotStringPtr(""), snapshotStringPtr(""), &siblingSeen).
+			AddRow(uuid.New(), snapshotStringPtr("standby"), nil, nil, snapshotStringPtr(""), snapshotStringPtr(""), snapshotStringPtr(""), snapshotStringPtr(""), nil, nil))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM metrics_indexes m")).WithArgs(int64(42), instanceID, now.Add(-time.Hour)).
+		WillReturnRows(pgxmock.NewRows([]string{"instance_id", "datname", "schemaname", "indexrelname"}).
+			AddRow(siblingID, "app", "public", "orders_metrics_idx"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT DISTINCT ON (slot_name, src)")).WithArgs(instanceID, now.Add(-5*time.Minute)).
 		WillReturnRows(pgxmock.NewRows([]string{"standbys", "max_lag", "slots"}).AddRow(2, 1024.0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM lock_snapshots")).WithArgs(instanceID).
+		WillReturnRows(pgxmock.NewRows([]string{"ts", "tree"}))
 
 	s, err := LoadSnapshot(ctx, mock, instanceID, now)
 	require.NoError(t, err)
@@ -156,7 +162,13 @@ func TestLoadSnapshot_PopulatesBoundedSections(t *testing.T) {
 	require.Equal(t, "user", sibling.SettingContexts["work_mem"])
 	require.Equal(t, "hash-sibling", sibling.IndexHashes[indexHashKey("app", "public.orders_customer_idx")])
 	require.Equal(t, &siblingSeen, sibling.BasebackupSeenAt)
+	// A scan in the sibling's metrics history and a last scan label both count;
+	// an index reported with an empty label and no scan does not.
+	require.True(t, sibling.IndexScanned[indexHashKey("app", "public.orders_metrics_idx")])
+	require.True(t, sibling.IndexScanned[indexHashKey("app", "public.orders_label_idx")])
+	require.NotContains(t, sibling.IndexScanned, indexHashKey("app", "public.orders_customer_idx"))
 	require.Equal(t, &ReplicationInfo{Standbys: 2, MaxLagBytes: 1024, ActivePhysicalSlots: 1}, s.Replication)
+	require.NotNil(t, s.LockTree, "no stored lock tree is an empty sample")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

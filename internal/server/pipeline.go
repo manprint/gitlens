@@ -128,6 +128,17 @@ func destinationTable(check string) string {
 	}
 }
 
+// metricDestination routes one metric of a check. Its check's rows go to the
+// table destinationTable names, except the skipped-table gauge of
+// bloat_estimate: that is one count per database, not a row of metrics_bloat,
+// whose object_kind and method it could not fill.
+func metricDestination(check, metric string) string {
+	if metric == wire.BloatSkippedTablesMetric {
+		return "metrics"
+	}
+	return destinationTable(check)
+}
+
 // Process converts the envelope's counters to rates, routes metrics to their
 // tables, and writes them in one transaction per envelope. Instances are
 // processed independently; a per-instance failure increments Rejected without
@@ -513,6 +524,9 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 					// phase 8: plans are routed to their dedicated history table.
 					continue
 				}
+				if f.Kind == "xmin_horizon" {
+					f.ValueJSON = withholdXminIdentity(f.ValueJSON)
+				}
 				var text *string
 				if f.ValueText != "" || f.EmptySetting() {
 					v := f.ValueText
@@ -566,7 +580,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 				// generic metric row when the envelope result itself has no
 				// Database field, so database-scoped alert samples retain datname.
 				metricDatname := seriesDatname(r, m)
-				dest := destinationTable(r.Check)
+				dest := metricDestination(r.Check, m.Name)
 				// ASH buckets are counts, never through delta, regardless of Kind.
 				if dest == "metrics_ash" {
 					kind := pgtype.MetricKind(m.Kind)
@@ -1177,6 +1191,35 @@ func withholdLockTreeQueries(raw []byte) []byte {
 	return out
 }
 
+// withholdXminIdentity applies the identity rule of the agent to the oldest xmin
+// holder again. A standby's application_name and a prepared transaction's gid
+// are free text, so they are cut and withheld as redact.Identity gives them. A
+// session's pid and a slot's name are shipped as they are. The agent already
+// gives the same answer, so this changes only a value from a sender that did not
+// apply the rule.
+func withholdXminIdentity(raw []byte) []byte {
+	var holder map[string]any
+	if err := json.Unmarshal(raw, &holder); err != nil {
+		// A value that is not an object cannot be checked, so it is not kept.
+		return []byte("{}")
+	}
+	kind, _ := holder["holder_kind"].(string)
+	identity, _ := holder["identity"].(string)
+	if kind != "standby" && kind != "prepared" {
+		return append([]byte(nil), raw...)
+	}
+	safe := redact.Identity(identity)
+	if safe == identity {
+		return append([]byte(nil), raw...)
+	}
+	holder["identity"] = safe
+	out, err := json.Marshal(holder)
+	if err != nil {
+		return []byte("{}")
+	}
+	return out
+}
+
 // withholdQueries replaces, anywhere in v, the string value of a "query" key
 // that may hold a credential, and reports whether it replaced one.
 func withholdQueries(v any) bool {
@@ -1235,6 +1278,10 @@ func presentRelations(metrics []wire.Metric) []store.RelationKey {
 	seen := make(map[store.RelationKey]struct{})
 	var keys []store.RelationKey
 	for _, m := range metrics {
+		if m.Name == wire.BloatSkippedTablesMetric {
+			// A count of the database, not a relation.
+			continue
+		}
 		k := store.RelationKey{Schema: m.Labels["schemaname"], Relation: m.Labels["relname"], Index: m.Labels["indexrelname"]}
 		if _, dup := seen[k]; dup {
 			continue

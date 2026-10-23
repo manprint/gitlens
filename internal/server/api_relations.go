@@ -2,12 +2,14 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/manprint/pglens/internal/wire"
 )
 
 type relationAPIResponse struct {
@@ -139,13 +141,18 @@ func (a *API) handleIndexes(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, resp)
 		return
 	}
-	rows, e := a.pool.Query(r.Context(), `SELECT datname, schemaname, relname, indexrelname, idx_scan, index_bytes,
-			is_unique, is_primary, is_valid, ts
+	// The last scan comes from the definition fact the index_stats check writes
+	// for the same index: its last_idx_scan label.
+	rows, e := a.pool.Query(r.Context(), `SELECT latest.datname, latest.schemaname, latest.relname, latest.indexrelname,
+			latest.idx_scan, latest.index_bytes, latest.is_unique, latest.is_primary, latest.is_valid, latest.ts,
+			f.labels->>'last_idx_scan'
 		FROM (SELECT DISTINCT ON (datname, schemaname, indexrelname) *
 		        FROM metrics_indexes
 		       WHERE tenant_id='default' AND instance_id=$1 AND ts >= now() - interval '15 minutes'
 		       ORDER BY datname, schemaname, indexrelname, ts DESC) latest
-		ORDER BY index_bytes DESC NULLS LAST LIMIT $2`, id, relationLimit(r))
+		LEFT JOIN object_facts f ON f.tenant_id='default' AND f.instance_id=$1 AND f.kind='index_def'
+		     AND f.datname=latest.datname AND f.key=latest.schemaname || '.' || latest.indexrelname
+		ORDER BY latest.index_bytes DESC NULLS LAST LIMIT $2`, id, relationLimit(r))
 	if e != nil {
 		writeError(w, http.StatusInternalServerError, "query failed", e.Error())
 		return
@@ -157,7 +164,8 @@ func (a *API) handleIndexes(w http.ResponseWriter, r *http.Request) {
 		var bytes *int64
 		var unique, primary, valid *bool
 		var ts time.Time
-		if e := rows.Scan(&datname, &schema, &name, &index, &scans, &bytes, &unique, &primary, &valid, &ts); e != nil {
+		var lastScan *string
+		if e := rows.Scan(&datname, &schema, &name, &index, &scans, &bytes, &unique, &primary, &valid, &ts, &lastScan); e != nil {
 			writeError(w, http.StatusInternalServerError, "scan failed", e.Error())
 			return
 		}
@@ -167,6 +175,9 @@ func (a *API) handleIndexes(w http.ResponseWriter, r *http.Request) {
 		putBool(item, "is_unique", unique)
 		putBool(item, "is_primary", primary)
 		putBool(item, "is_valid", valid)
+		at, status := indexLastScan(lastScan)
+		item["last_scan_at"] = at
+		item["last_scan_status"] = status
 		resp.Items = append(resp.Items, item)
 	}
 	if e := rows.Err(); e != nil {
@@ -180,6 +191,42 @@ func (a *API) handleIndexes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, resp)
 }
 
+// bloatAPIResponse is the bloat endpoint's answer. skipped_tables counts the
+// tables whose column statistics the monitoring role cannot read, so the
+// estimate has no row for them; skipped_relations names the largest of them,
+// up to a few per database. Both are read from the latest scrape of each
+// database, within the estimate's window.
+type bloatAPIResponse struct {
+	relationAPIResponse
+	SkippedTables    int64             `json:"skipped_tables"`
+	SkippedRelations []skippedRelation `json:"skipped_relations"`
+}
+
+type skippedRelation struct {
+	Datname    string `json:"datname"`
+	Schemaname string `json:"schemaname"`
+	Relname    string `json:"relname"`
+}
+
+// indexLastScan reads the last_idx_scan label of an index's definition fact.
+// An absent label means the server has no last scan for the index: the agent
+// runs on PostgreSQL 15, which cannot report it, or has not reported it yet.
+// An empty label means the index was not scanned since the statistics reset.
+// The time is nil unless the index was scanned.
+func indexLastScan(label *string) (at *time.Time, status string) {
+	switch {
+	case label == nil:
+		return nil, "not_available"
+	case *label == "":
+		return nil, "never_since_reset"
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, *label)
+	if err != nil {
+		return nil, "not_available"
+	}
+	return &parsed, "scanned"
+}
+
 func (a *API) handleBloat(w http.ResponseWriter, r *http.Request) {
 	id, e := relationID(r)
 	if e != nil {
@@ -191,7 +238,12 @@ func (a *API) handleBloat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid method", "allowed values: estimate, pgstattuple")
 		return
 	}
-	resp := relationAPIResponse{InstanceID: id.String(), Items: []map[string]any{}}
+	kindFilter := r.URL.Query().Get("object_kind")
+	if kindFilter != "" && kindFilter != "table" && kindFilter != "index" {
+		writeError(w, http.StatusBadRequest, "invalid object_kind", "allowed values: table, index")
+		return
+	}
+	resp := bloatAPIResponse{relationAPIResponse: relationAPIResponse{InstanceID: id.String(), Items: []map[string]any{}}, SkippedRelations: []skippedRelation{}}
 	if a.pool == nil {
 		writeJSON(w, 200, resp)
 		return
@@ -206,8 +258,12 @@ func (a *API) handleBloat(w http.ResponseWriter, r *http.Request) {
 		         AND (ts >= now() - interval '13 hours' OR (method = 'pgstattuple' AND ts >= now() - interval '7 days'))`
 	args := []any{id}
 	if method != "" {
-		query += " AND method=$2"
+		query += " AND method=$" + strconv.Itoa(len(args)+1)
 		args = append(args, method)
+	}
+	if kindFilter != "" {
+		query += " AND object_kind=$" + strconv.Itoa(len(args)+1)
+		args = append(args, kindFilter)
 	}
 	query += ` ORDER BY datname, schemaname, relname, indexrelname, method, ts DESC) latest
 		ORDER BY bloat_bytes DESC NULLS LAST LIMIT $` + strconv.Itoa(len(args)+1)
@@ -238,11 +294,44 @@ func (a *API) handleBloat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "rows error", e.Error())
 		return
 	}
-	if e := setRelationMetadata(r.Context(), a.pool, &resp, id, "bloat_estimate"); e != nil {
+	if e := setRelationMetadata(r.Context(), a.pool, &resp.relationAPIResponse, id, "bloat_estimate"); e != nil {
+		writeError(w, http.StatusInternalServerError, "query failed", e.Error())
+		return
+	}
+	if e := setSkippedTables(r.Context(), a.pool, &resp, id); e != nil {
 		writeError(w, http.StatusInternalServerError, "query failed", e.Error())
 		return
 	}
 	writeJSON(w, 200, resp)
+}
+
+// setSkippedTables reads the skipped-table fact of each database the instance
+// reported in the estimate's window. A malformed fact is left out rather than
+// failing the whole answer.
+func setSkippedTables(ctx context.Context, pool dbPool, resp *bloatAPIResponse, id uuid.UUID) error {
+	rows, err := pool.Query(ctx, `SELECT datname, value_json FROM object_facts
+		WHERE tenant_id='default' AND instance_id=$1 AND kind=$2 AND last_seen >= now() - interval '13 hours'
+		ORDER BY datname`, id, wire.BloatUnreadableFact)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var datname string
+		var raw []byte
+		if err := rows.Scan(&datname, &raw); err != nil {
+			return err
+		}
+		var value wire.BloatSkippedValue
+		if json.Unmarshal(raw, &value) != nil {
+			continue
+		}
+		resp.SkippedTables += value.Count
+		for _, t := range value.Tables {
+			resp.SkippedRelations = append(resp.SkippedRelations, skippedRelation{Datname: datname, Schemaname: t.SchemaName, Relname: t.RelName})
+		}
+	}
+	return rows.Err()
 }
 
 func putNumber[T int64 | float64](item map[string]any, key string, value *T) {

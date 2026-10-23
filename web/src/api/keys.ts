@@ -32,7 +32,8 @@ export const qk = {
   instanceSecurityDefinerFunctions: (id: string) =>
     ['getInstanceSecurityDefinerFunctions', id] as const,
   instanceIndexes: (id: string, limit?: number) => ['getInstanceIndexes', id, limit] as const,
-  instanceBloat: (id: string, limit?: number) => ['getInstanceBloat', id, limit] as const,
+  instanceBloat: (id: string, limit?: number, objectKind?: string) =>
+    ['getInstanceBloat', id, limit, objectKind] as const,
   instanceCommandAudit: (id: string) => ['getInstanceCommandAudit', id] as const,
   locks: (instanceId: string) => ['getLocks', instanceId] as const,
   queryMetrics: (

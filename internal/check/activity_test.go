@@ -151,6 +151,7 @@ func TestActivity_FailedSubQueryFailsTheScrape(t *testing.T) {
 		{"control", "", ""},
 		{"database counts", "SELECT COALESCE(datname, '')", ""},
 		{"application counts", "SELECT COALESCE(application_name, '')", ""},
+		{"xmin holders", "row_number() OVER", ""},
 		{"state ages", "COALESCE(state, 'unknown'), COALESCE(max(", ""},
 		{"max_connections", "", "current_setting('max_connections')"},
 		{"prepared transactions", "", "FROM pg_prepared_xacts"},

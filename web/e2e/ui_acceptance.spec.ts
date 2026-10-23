@@ -654,7 +654,7 @@ test('SYS-UI-008: blocking tree shows the lock root and child', async ({
     })
     .toBeGreaterThan(1)
   const root = page.getByRole('treeitem').first()
-  await expect(root).toContainText(/blocking session/i)
+  await expect(root).toContainText(/root blocker/i)
   await expect(root.getByRole('group')).toBeVisible()
   const lockPayload = JSON.parse(lastLocksResponse) as JsonObject
   const lockNodes = Array.isArray(lockPayload.nodes) ? lockPayload.nodes : []
@@ -698,8 +698,10 @@ test('SYS-UI-009: signal controls enforce tier and confirmation', async ({ signe
         if (!response.ok()) return false
         const payload = await response.json()
         const sessions = Array.isArray(payload?.sessions) ? payload.sessions : []
-        const session = sessions.find((item: JsonObject) =>
-          /pg_sleep/i.test(String(item.query ?? '')),
+        // The sessions list carries no query text, so the sleeping session is
+        // named by the application name its workload connects with.
+        const session = sessions.find(
+          (item: JsonObject) => item.application_name === 'pglens-ui-cancel',
         )
         if (!session) return false
         sessionPID = String(session.pid ?? '')
