@@ -391,3 +391,75 @@ func TestCgroup_TighterOwnLimitBindsOwnCgroup(t *testing.T) {
 	require.Equal(t, uint64(536870912-134217728), *s.MemAvailableBytes)
 	require.Equal(t, 1, *s.CPUCount)
 }
+
+// Under a cgroup v1 CPU quota the ratio is the share of that quota used since
+// the last sample, measured from cpuacct.usage, which counts nanoseconds. The
+// CPU count and the ratio come from the same cgroup, so they agree.
+func TestCgroup_V1CPURatioIsShareOfQuota(t *testing.T) {
+	procDir, sysDir := t.TempDir(), t.TempDir()
+	root := filepath.Join(sysDir, "fs", "cgroup")
+	writeCgroupFiles(t, root, map[string]string{
+		"memory/memory.limit_in_bytes": "9223372036854771712\n", // unlimited
+		"cpu/cpu.cfs_quota_us":         "200000\n",              // 2 cores
+		"cpu/cpu.cfs_period_us":        "100000\n",
+		"cpu/cpuacct.usage":            "1000000000\n",
+	})
+	c := NewCollector(procDir, sysDir)
+	now := time.Unix(1000, 0)
+	c.now = func() time.Time { return now }
+
+	host := 0.125
+	s := Sample{Source: "host", CPUUsedRatio: &host}
+	c.applyCgroup(&s)
+	require.Equal(t, "cgroup_v1", s.Source)
+	require.Equal(t, 2, *s.CPUCount)
+	require.Nil(t, s.CPUUsedRatio)
+
+	// One CPU-second in one second is half of a 2-core quota.
+	now = now.Add(time.Second)
+	writeCgroupFiles(t, root, map[string]string{"cpu/cpuacct.usage": "2000000000\n"})
+	s = Sample{Source: "host", CPUUsedRatio: &host}
+	c.applyCgroup(&s)
+	require.InDelta(t, 0.5, *s.CPUUsedRatio, 1e-9)
+
+	// Four CPU-seconds in one second is more than the quota: clamped to one.
+	now = now.Add(time.Second)
+	writeCgroupFiles(t, root, map[string]string{"cpu/cpuacct.usage": "6000000000\n"})
+	s = Sample{Source: "host", CPUUsedRatio: &host}
+	c.applyCgroup(&s)
+	require.InDelta(t, 1.0, *s.CPUUsedRatio, 1e-9)
+}
+
+// Without a v1 quota the host is the resource, so the host ratio stands.
+func TestCgroup_V1CPURatioKeepsHostWithoutQuota(t *testing.T) {
+	procDir, sysDir := t.TempDir(), t.TempDir()
+	root := filepath.Join(sysDir, "fs", "cgroup")
+	writeCgroupFiles(t, root, map[string]string{
+		"memory/memory.limit_in_bytes": "9223372036854771712\n",
+		"cpu/cpu.cfs_quota_us":         "-1\n",
+		"cpu/cpu.cfs_period_us":        "100000\n",
+		"cpu/cpuacct.usage":            "1000000000\n",
+	})
+	host := 0.125
+	s := Sample{Source: "host", CPUUsedRatio: &host}
+	NewCollector(procDir, sysDir).applyCgroup(&s)
+	require.Equal(t, "host", s.Source)
+	require.Equal(t, 0.125, *s.CPUUsedRatio)
+}
+
+// A v1 quota whose usage cannot be read has no ratio of its own. The host ratio
+// would describe the host while the CPU count describes the quota.
+func TestCgroup_V1QuotaWithoutUsageHasNoRatio(t *testing.T) {
+	procDir, sysDir := t.TempDir(), t.TempDir()
+	root := filepath.Join(sysDir, "fs", "cgroup")
+	writeCgroupFiles(t, root, map[string]string{
+		"memory/memory.limit_in_bytes": "9223372036854771712\n",
+		"cpu/cpu.cfs_quota_us":         "200000\n",
+		"cpu/cpu.cfs_period_us":        "100000\n",
+	})
+	host := 0.125
+	s := Sample{Source: "host", CPUUsedRatio: &host}
+	NewCollector(procDir, sysDir).applyCgroup(&s)
+	require.Equal(t, 2, *s.CPUCount)
+	require.Nil(t, s.CPUUsedRatio)
+}

@@ -25,6 +25,7 @@ func (c *Collector) applyCgroup(s *Sample) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "memory", "memory.limit_in_bytes")); err == nil {
 		applyV1(root, s)
+		c.applyV1CPURatio(root, s)
 	}
 }
 
@@ -141,10 +142,39 @@ func (c *Collector) applyV2CPURatio(dir string, s *Sample) {
 	if hasQuota {
 		usage, hasUsage = readStatField(filepath.Join(dir, "cpu.stat"), "usage_usec")
 	}
+	c.applyCPURatio(quotaCores, hasQuota, usage, hasUsage, s)
+}
+
+// applyV1CPURatio is applyV2CPURatio for cgroup v1. The quota and the usage are
+// read from the mount root, as applyV1 reads the CPU count, so the ratio and the
+// count always describe the same cgroup. The usage counter is in nanoseconds.
+func (c *Collector) applyV1CPURatio(root string, s *Sample) {
+	dir := filepath.Join(root, "cpu")
+	quotaCores, hasQuota := readCPUQuotaV1(dir)
+	var usage uint64
+	hasUsage := false
+	if hasQuota {
+		var ns uint64
+		ns, hasUsage = readUint(filepath.Join(dir, "cpuacct.usage"))
+		usage = ns / 1000
+	}
+	c.applyCPURatio(quotaCores, hasQuota, usage, hasUsage, s)
+}
+
+// applyCPURatio is the ratio of a cgroup's quota used since the previous
+// sample, in microseconds of usage. Without a quota the host is the resource,
+// and the host ratio stands. A quota whose usage cannot be read has no ratio:
+// the host ratio would describe the host, not the quota the CPU count reflects.
+func (c *Collector) applyCPURatio(quotaCores float64, hasQuota bool, usage uint64, hasUsage bool, s *Sample) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !hasQuota || !hasUsage {
+	if !hasQuota {
 		c.cgroupCPU = nil
+		return
+	}
+	if !hasUsage {
+		c.cgroupCPU = nil
+		s.CPUUsedRatio = nil
 		return
 	}
 	now := c.now()
@@ -259,16 +289,25 @@ func applyV1(root string, s *Sample) {
 			limited = true
 		}
 	}
-	quota, qok := readInt(filepath.Join(root, "cpu", "cpu.cfs_quota_us"))
-	period, pok := readInt(filepath.Join(root, "cpu", "cpu.cfs_period_us"))
-	if qok && pok && quota >= 0 && period > 0 {
-		n := int(math.Ceil(float64(quota) / float64(period)))
+	if cores, ok := readCPUQuotaV1(filepath.Join(root, "cpu")); ok {
+		n := int(math.Ceil(cores))
 		s.CPUCount = &n
 		limited = true
 	}
 	if limited {
 		s.Source = "cgroup_v1"
 	}
+}
+
+// readCPUQuotaV1 is the cgroup v1 CPU quota in cores, unrounded. ok is false when
+// the cgroup has no quota, which v1 writes as a negative cfs_quota_us.
+func readCPUQuotaV1(dir string) (float64, bool) {
+	quota, qok := readInt(filepath.Join(dir, "cpu.cfs_quota_us"))
+	period, pok := readInt(filepath.Join(dir, "cpu.cfs_period_us"))
+	if !qok || !pok || quota <= 0 || period <= 0 {
+		return 0, false
+	}
+	return float64(quota) / float64(period), true
 }
 
 func readInt(path string) (int64, bool) {
