@@ -2985,6 +2985,7 @@ export interface operations {
     getSilences: {
         parameters: {
             query?: {
+                /** @description True lists every silence, expired ones included, capped at the 500 that end last. */
                 all?: boolean;
             };
             header?: never;
@@ -2996,6 +2997,8 @@ export interface operations {
             /** @description Silences ordered by end time. */
             200: {
                 headers: {
+                    /** @description Set to true when all is true and more than 500 silences exist; the silences that ended first were left out. */
+                    "X-Result-Truncated"?: "true";
                     [name: string]: unknown;
                 };
                 content: {

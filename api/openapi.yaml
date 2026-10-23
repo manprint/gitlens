@@ -2417,10 +2417,22 @@ paths:
       operationId: getSilences
       summary: List active silences, or all silences when requested.
       parameters:
-        - { name: all, in: query, required: false, schema: { type: boolean, default: false } }
+        - name: all
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+          description: >-
+            True lists every silence, expired ones included, capped at the 500
+            that end last.
       responses:
         '200':
           description: Silences ordered by end time.
+          headers:
+            X-Result-Truncated:
+              description: >-
+                Set to true when all is true and more than 500 silences exist;
+                the silences that ended first were left out.
+              schema: { type: string, enum: ['true'] }
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/Silence' } }
