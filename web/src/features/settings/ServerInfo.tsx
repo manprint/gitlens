@@ -9,7 +9,7 @@ const LIMITS_URL = '/docs/LIMITS.md'
 
 const limits = [
   ['Raw retention', 'Raw data is retained for 30 days; there are no rollups.'],
-  ['PostgreSQL versions', 'PostgreSQL 15 through 18 are supported.'],
+  ['PostgreSQL versions', 'PostgreSQL 15 through 19 are supported.'],
   ['Replication', 'Streaming replication is supported; other replication modes are not.'],
   ['Databases per instance', 'At most 10 databases per instance are monitored by default.'],
   ['Relation data', 'Relation views are constrained by top-N budgets.'],

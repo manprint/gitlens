@@ -43,23 +43,24 @@ func (e *PgstattupleExecutor) Execute(ctx context.Context, target check.Target, 
 	// the relation lives. target.HasExtension reads the maintenance database
 	// only: it refused a measurement in a database that has the extension,
 	// and let one through to fail in a database that lacks it.
-	var installed bool
-	if err := conn.QueryRow(ctx, pgstattupleInstalled).Scan(&installed); err != nil {
-		return nil, err
-	}
-	if !installed {
+	schema, err := check.ExtensionSchema(ctx, conn, "pgstattuple")
+	if isUndefinedTable(err) {
 		where := "the target's database"
 		if args.Datname != "" {
 			where = fmt.Sprintf("database %q", args.Datname)
 		}
 		return nil, rejectedf("pgstattuple extension is not installed in %s; pglens does not install it", where)
 	}
+	if err != nil {
+		return nil, err
+	}
 
 	relation := (pgx.Identifier{args.Schema, args.Relation}).Sanitize()
 	// current_database() names the database the scan ran in: a command
 	// without datname runs in the target's own database, and the server
 	// filed its measurement under an empty database name.
-	const query = `SELECT current_database(), table_len, tuple_count, tuple_len, dead_tuple_count, dead_tuple_len, free_space, free_percent FROM pgstattuple($1::regclass)`
+	query := `SELECT current_database(), table_len, tuple_count, tuple_len, dead_tuple_count, dead_tuple_len, free_space, free_percent FROM ` +
+		pgx.Identifier{schema, "pgstattuple"}.Sanitize() + `($1::pg_catalog.regclass)`
 	var result pgstattupleResult
 	if err := conn.QueryRow(ctx, query, relation).Scan(
 		&result.Datname,
@@ -77,8 +78,6 @@ func (e *PgstattupleExecutor) Execute(ctx context.Context, target check.Target, 
 	result.Relation = args.Relation
 	return json.Marshal(result)
 }
-
-const pgstattupleInstalled = `SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pgstattuple')`
 
 // pgstattupleStatementTimeout is kept below commandExecutionLimit so the
 // server abandons the scan before the dispatcher abandons the command.

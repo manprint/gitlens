@@ -72,11 +72,23 @@ func DefaultDatabaseExcludes() []*regexp.Regexp {
 // transaction — implicit or explicit, from a check, from ASH or from an
 // on-demand command — then starts READ ONLY, and INSERT/UPDATE/DELETE,
 // DDL, nextval() and friends fail inside PostgreSQL rather than depending on
-// the agent never issuing them. The statement is a constant, so the simple
+// the agent never issuing them. The statements are constants, so the simple
 // protocol pgx uses for an argument-less Exec carries no injection risk.
+//
+// The session also searches pg_catalog alone. A search_path set for the
+// database or the role (ALTER DATABASE ... SET search_path, which a database
+// owner may run) that lists a schema before pg_catalog would otherwise let
+// that schema's functions and operators stand in for the built-ins the
+// agent's queries call, and run as the monitoring role, with its signal and
+// read privileges. Objects an extension created are named with their schema
+// instead (check.ExtensionSchema); EXPLAIN alone plans the user's statement
+// with the database's own search_path, behind its guard.
 func ReadOnlySession(ctx context.Context, conn *pgx.Conn) error {
 	if _, err := conn.Exec(ctx, "SET default_transaction_read_only = on"); err != nil {
 		return fmt.Errorf("enforce read-only session: %w", err)
+	}
+	if _, err := conn.Exec(ctx, "SET search_path = pg_catalog, pg_temp"); err != nil {
+		return fmt.Errorf("restrict session search_path: %w", err)
 	}
 	return nil
 }

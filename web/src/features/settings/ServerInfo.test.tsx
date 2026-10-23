@@ -38,7 +38,7 @@ describe('ServerInfo', () => {
 
     expect(screen.getByRole('heading', { name: 'Product limits' })).toBeInTheDocument()
     expect(screen.getByText(/retained for 30 days/i)).toBeInTheDocument()
-    expect(screen.getByText(/PostgreSQL 15 through 18/i)).toBeInTheDocument()
+    expect(screen.getByText(/PostgreSQL 15 through 19/i)).toBeInTheDocument()
   })
 
   it('UI-SET-012 states that no pooler view exists', async () => {

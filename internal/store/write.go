@@ -500,6 +500,44 @@ func WriteObjectFacts(ctx context.Context, tx pgx.Tx, rows []ObjectFactRow) erro
 	return writeRows(ctx, tx, `INSERT INTO object_facts (tenant_id,cluster_id,instance_id,datname,kind,key,labels,value_text,value_json,first_seen,last_seen,changed_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (tenant_id,instance_id,datname,kind,key) DO UPDATE SET last_seen=EXCLUDED.last_seen,labels=EXCLUDED.labels,value_text=EXCLUDED.value_text,value_json=EXCLUDED.value_json,changed_at=CASE WHEN object_facts.value_text IS DISTINCT FROM EXCLUDED.value_text OR object_facts.value_json IS DISTINCT FROM EXCLUDED.value_json THEN EXCLUDED.last_seen ELSE object_facts.changed_at END`, args)
 }
 
+// ObjectFactPrune describes a complete result of a check whose fact kinds it
+// replaces (wire.ReplacedFactKinds): the facts of those kinds it did not
+// report for its database are gone.
+type ObjectFactPrune struct {
+	TenantID   string
+	InstanceID uuid.UUID
+	Datname    string
+	Kinds      []string
+	Before     time.Time
+	// Present lists every fact of Kinds the result reported. They stay even
+	// when a result of the same envelope with an older timestamp was
+	// written after them and set last_seen back.
+	Present []FactKey
+}
+
+// FactKey names one fact of a database.
+type FactKey struct {
+	Kind, Key string
+}
+
+// PruneObjectFacts removes the facts a complete result no longer reports.
+// Facts seen after the result (a newer result written earlier) stay.
+func PruneObjectFacts(ctx context.Context, tx pgx.Tx, p ObjectFactPrune) error {
+	kinds := make([]string, len(p.Present))
+	keys := make([]string, len(p.Present))
+	for i, k := range p.Present {
+		kinds[i], keys[i] = k.Kind, k.Key
+	}
+	_, err := tx.Exec(ctx, `DELETE FROM object_facts f
+		WHERE f.tenant_id=$1 AND f.instance_id=$2 AND f.datname=$3 AND f.kind = ANY($4::text[]) AND f.last_seen < $5
+		  AND NOT EXISTS (SELECT 1 FROM unnest($6::text[], $7::text[]) AS p(kind, key) WHERE p.kind = f.kind AND p.key = f.key)`,
+		p.TenantID, p.InstanceID, p.Datname, p.Kinds, p.Before, kinds, keys)
+	if err != nil {
+		return fmt.Errorf("prune object facts: %w", err)
+	}
+	return nil
+}
+
 // DeleteCheckSkipFacts removes capability-skip observations after a check has
 // become runnable again. Skip facts are instance-scoped even when the check's
 // normal results are database-scoped, so one successful result clears the

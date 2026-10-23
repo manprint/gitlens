@@ -41,6 +41,21 @@ func TestINTCFG001_CheckDiagnostics(t *testing.T) {
 
 		// Verify role is reported correctly (primary for T0 role)
 		require.Contains(t, outStr, "role             : primary")
+		require.Contains(t, outStr, "monitoring role  : pglens — read-only")
+		require.NotContains(t, outStr, "default_transaction_read_only is")
+	})
+}
+
+// INT-CFG-002: pglens-agent check names what lets a role write and exits 1,
+// so a deployment script does not start an agent as a superuser.
+func TestINTCFG002_CheckRefusesWritableRole(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		agentPath := buildAgent(t)
+		cmd := exec.Command(agentPath, "check", "--dsn", pg.DSN("postgres", pgtest.RoleSuperuser))
+		output, err := cmd.CombinedOutput()
+		require.Error(t, err, string(output))
+		require.Equal(t, 1, cmd.ProcessState.ExitCode(), string(output))
+		require.Contains(t, string(output), "monitoring role  : postgres — COULD WRITE: has SUPERUSER")
 	})
 }
 

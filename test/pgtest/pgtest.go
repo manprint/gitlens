@@ -5,6 +5,7 @@ package pgtest
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -17,6 +18,7 @@ import (
 	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
+	tcexec "github.com/testcontainers/testcontainers-go/exec"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/network"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -53,24 +55,7 @@ func (p *PG) Stop(t *testing.T) {
 var (
 	globalMu  sync.Mutex
 	pgByMajor = map[int]*PG{}
-
-	// pgPrimaryStandbyMu and pgPrimaryStandbyByMajor cache primary-standby pairs
-	// per major version. Unlike single instances, we do NOT snapshot/restore
-	// these between tests, since restoring the primary alone would desync it from
-	// the standby. Instead, we tear down and recreate the pair for each test that
-	// calls PrimaryStandby. This is slower but avoids complex cleanup logic.
-	pgPrimaryStandbyMu      sync.Mutex
-	pgPrimaryStandbyByMajor = map[int]*PrimaryStandbyPair{}
 )
-
-// PrimaryStandbyPair holds both a primary and standby PostgreSQL instance.
-type PrimaryStandbyPair struct {
-	Primary          *PG
-	Standby          *PG
-	network          testcontainers.Network
-	primaryContainer *postgres.PostgresContainer
-	standbyContainer testcontainers.Container
-}
 
 // ForEach runs fn once per version in Versions(), as a subtest named
 // "pg15", "pg18", ... Subtests for different versions may run in parallel;
@@ -421,17 +406,32 @@ func setupRoles(ctx context.Context, pool *pgxpool.Pool) {
 		`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='pglens_nocontrol') THEN CREATE ROLE pglens_nocontrol LOGIN PASSWORD 'test'; END IF; END $$`,
 		`GRANT pg_monitor TO pglens_nocontrol`,
 
+		// Tier 1 and tier 2 mirror monitoring_user.sql with tier1=1 and
+		// tier1=1 tier2=1: each tier adds to the one below it.
 		`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='pglens_t1') THEN CREATE ROLE pglens_t1 LOGIN PASSWORD 'test'; END IF; END $$`,
 		`GRANT pg_monitor TO pglens_t1`,
 		`GRANT EXECUTE ON FUNCTION pg_control_system() TO pglens_t1`,
 		`GRANT EXECUTE ON FUNCTION pg_control_checkpoint() TO pglens_t1`,
+		`GRANT pg_read_all_stats TO pglens_t1`,
 		`GRANT pg_read_all_data TO pglens_t1`,
 
 		`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='pglens_t2') THEN CREATE ROLE pglens_t2 LOGIN PASSWORD 'test'; END IF; END $$`,
 		`GRANT pg_monitor TO pglens_t2`,
 		`GRANT EXECUTE ON FUNCTION pg_control_system() TO pglens_t2`,
 		`GRANT EXECUTE ON FUNCTION pg_control_checkpoint() TO pglens_t2`,
+		`GRANT pg_read_all_stats TO pglens_t2`,
+		`GRANT pg_read_all_data TO pglens_t2`,
 		`GRANT pg_signal_backend TO pglens_t2`,
+	}
+	// Every monitoring role is read-only inside PostgreSQL, as the deploy
+	// script makes pglens.
+	for _, role := range []string{"pglens_nocontrol", "pglens_t1", "pglens_t2"} {
+		stmts = append(stmts,
+			`ALTER ROLE `+role+` SET default_transaction_read_only = on`,
+			`ALTER ROLE `+role+` SET statement_timeout = '15s'`,
+			`ALTER ROLE `+role+` SET lock_timeout = '1s'`,
+			`ALTER ROLE `+role+` SET idle_in_transaction_session_timeout = '30s'`,
+		)
 	}
 	for _, s := range stmts {
 		_, _ = pool.Exec(ctx, s)
@@ -526,4 +526,27 @@ func (p *PG) Exec(t *testing.T, sql string, args ...any) {
 // DSN returns a DSN for datname.
 func (p *PG) DSN(datname string, role Role) string {
 	return p.dsnForRole(role, datname)
+}
+
+// Psql copies the SQL file at hostPath into the container and runs it with
+// psql as the superuser, connected to datname, defining each name=value in
+// vars with -v. It returns psql's exit status and its combined output.
+func (p *PG) Psql(t *testing.T, hostPath, datname string, vars ...string) (int, string) {
+	t.Helper()
+	c := p.genericContainer
+	if p.container != nil {
+		c = p.container
+	}
+	ctx := context.Background()
+	const target = "/tmp/pgtest-script.sql"
+	require.NoError(t, c.CopyFileToContainer(ctx, hostPath, target, 0o644))
+	cmd := []string{"psql", "-X", "-q", "-U", "postgres", "-d", datname}
+	for _, v := range vars {
+		cmd = append(cmd, "-v", v)
+	}
+	code, out, err := c.Exec(ctx, append(cmd, "-f", target), tcexec.Multiplexed())
+	require.NoError(t, err)
+	output, err := io.ReadAll(out)
+	require.NoError(t, err)
+	return code, string(output)
 }

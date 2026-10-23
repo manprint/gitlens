@@ -105,12 +105,16 @@ func (r *mockRows) Scan(dest ...any) error {
 	return scanInto(dest, r.rows[r.idx-1])
 }
 
-// mockConn implements Conn interface for unit testing.
+// mockConn implements Conn interface for unit testing. It answers
+// ExtensionSchema itself: every extension is installed in extensionSchema
+// ("public" when empty) unless noExtensions is set.
 type mockConn struct {
-	queryFunc    func(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
-	queryRowFunc func(ctx context.Context, sql string, args ...any) pgx.Row
-	execFunc     func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
-	releaseCalls int
+	queryFunc       func(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	queryRowFunc    func(ctx context.Context, sql string, args ...any) pgx.Row
+	execFunc        func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	releaseCalls    int
+	extensionSchema string
+	noExtensions    bool
 }
 
 func (m *mockConn) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
@@ -121,6 +125,15 @@ func (m *mockConn) Query(ctx context.Context, sql string, args ...any) (pgx.Rows
 }
 
 func (m *mockConn) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if sql == extensionSchemaQuery {
+		if m.noExtensions {
+			return &mockRow{err: pgx.ErrNoRows}
+		}
+		if m.extensionSchema != "" {
+			return &mockRow{vals: []any{m.extensionSchema}}
+		}
+		return &mockRow{vals: []any{"public"}}
+	}
 	if m.queryRowFunc != nil {
 		return m.queryRowFunc(ctx, sql, args...)
 	}

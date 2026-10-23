@@ -9,8 +9,8 @@ const (
 	RoleSuperuser   Role = iota // setup only, never used by a check
 	RoleT0                      // pg_monitor + the two pg_control_* grants
 	RoleT0NoControl             // pg_monitor only — used to prove R5
-	RoleT1                      // T0 + pg_read_all_data
-	RoleT2                      // T0 + pg_signal_backend
+	RoleT1                      // T0 + pg_read_all_stats + pg_read_all_data
+	RoleT2                      // T1 + pg_signal_backend
 	RoleVictim                  // unprivileged victim for termination tests
 )
 

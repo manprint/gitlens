@@ -52,6 +52,16 @@ type settingText struct {
 	vartype, context, shortDesc                    string
 }
 
+// connectionSource reports whether a pg_settings source is specific to the
+// connection that reads it.
+func connectionSource(source string) bool {
+	switch source {
+	case "client", "session", "user":
+		return true
+	}
+	return false
+}
+
 func settingTextValue(raw settingRow) settingText {
 	value := func(s *string) string {
 		if s == nil {
@@ -103,6 +113,16 @@ FROM pg_settings`)
 		}
 		_, curated := allowlisted[s.name]
 		if !curated && s.setting == s.bootVal {
+			continue
+		}
+		// A value from the client, the session or a setting of the role
+		// itself describes pglens's own connection, not the instance: the
+		// agent sets statement_timeout, search_path and
+		// default_transaction_read_only for every session, and the role
+		// script sets them for the role. They used to be reported as the
+		// instance's settings; what the instance uses for its other roles
+		// cannot be read from here.
+		if connectionSource(s.source) {
 			continue
 		}
 		valueText := redactSetting(s.name, s.setting)

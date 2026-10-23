@@ -385,3 +385,14 @@ func TestReplicationReceiver_ToleratesArchiveOnlyStandby(t *testing.T) {
 	}
 	require.True(t, found)
 }
+
+// A receiver that is not streaming yet keeps its status label and counts as
+// not connected, including PostgreSQL 19's connecting.
+func TestReplicationReceiver_StatusValues(t *testing.T) {
+	for status, want := range map[string]float64{
+		"streaming": 1, "disconnected": 0, "starting": -1, "waiting": -1,
+		"connecting": -1, "restarting": -1, "stopping": -1, "stopped": -1,
+	} {
+		require.Equal(t, want, statusToFloat(status), status)
+	}
+}

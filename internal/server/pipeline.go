@@ -125,6 +125,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	var bloatRows []store.BloatRow
 	var lockSnapshotRows []store.LockSnapshotRow
 	var relationPrunes []store.RelationStatsPrune
+	var factPrunes []store.ObjectFactPrune
 	currentSeries := make(map[uuid.UUID]map[pgtype.SeriesKey]struct{}, len(env.Instances))
 
 	// Resolves a wire.Edge.To (an upstream's addr, e.g. "pg-primary") to an
@@ -234,6 +235,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		indexMap := make(map[indexStatKey]*store.IndexStatRow)
 		bloatMap := make(map[bloatKey]*store.BloatRow)
 		var instRelationPrunes []store.RelationStatsPrune
+		var instFactPrunes []store.ObjectFactPrune
 		var instErr error
 		instSeries := make(map[pgtype.SeriesKey]struct{})
 
@@ -329,6 +331,9 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 				case "metrics_tables", "metrics_indexes", "metrics_bloat":
 					instRelationPrunes = append(instRelationPrunes, store.RelationStatsPrune{TableName: dest, TenantID: tenantID, InstanceID: instUUID, Datname: r.Database, Before: r.TS, Present: presentRelations(r.Metrics)})
 				}
+				if kinds := wire.ReplacedFactKinds(r.Check); len(kinds) > 0 {
+					instFactPrunes = append(instFactPrunes, store.ObjectFactPrune{TenantID: tenantID, InstanceID: instUUID, Datname: r.Database, Kinds: kinds, Before: r.TS, Present: presentFacts(r.Facts)})
+				}
 			}
 			if r.Error == "" && r.SkipReason == "" {
 				pk := partialKey{check: r.Check, datname: r.Database}
@@ -367,7 +372,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 					continue
 				}
 				var text *string
-				if f.ValueText != "" {
+				if f.ValueText != "" || f.EmptySetting() {
 					v := f.ValueText
 					text = &v
 				}
@@ -686,6 +691,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 			lockSnapshotRows = append(lockSnapshotRows, *instLockSnapshot)
 		}
 		relationPrunes = append(relationPrunes, instRelationPrunes...)
+		factPrunes = append(factPrunes, instFactPrunes...)
 		res.Accepted++
 	}
 
@@ -709,6 +715,12 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	}
 	if err := store.WriteObjectFacts(ctx, tx, objectFactRows); err != nil {
 		return nil, fmt.Errorf("write object facts: %w", err)
+	}
+	// After the write: a fact the result reported keeps its first_seen.
+	for _, prune := range factPrunes {
+		if err := store.PruneObjectFacts(ctx, tx, prune); err != nil {
+			return nil, err
+		}
 	}
 	if err := store.WriteLockSnapshots(ctx, tx, lockSnapshotRows); err != nil {
 		return nil, fmt.Errorf("write lock snapshots: %w", err)
@@ -948,6 +960,15 @@ func presentRelations(metrics []wire.Metric) []store.RelationKey {
 		}
 		seen[k] = struct{}{}
 		keys = append(keys, k)
+	}
+	return keys
+}
+
+// presentFacts lists the facts a result reported.
+func presentFacts(facts []wire.Fact) []store.FactKey {
+	keys := make([]store.FactKey, 0, len(facts))
+	for _, f := range facts {
+		keys = append(keys, store.FactKey{Kind: f.Kind, Key: f.Key})
 	}
 	return keys
 }

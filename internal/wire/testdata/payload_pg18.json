@@ -10,7 +10,7 @@
       "cluster_id_source": "manual",
       "addr": "",
       "port": 0,
-      "pg_version": 180002,
+      "pg_version": 180000,
       "role": "primary",
       "perm_tier": "T0",
       "capabilities": [],

@@ -59,17 +59,19 @@ func TestLoadSnapshot_PopulatesBoundedSections(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("COALESCE(SUM(value) FILTER (WHERE metric='pg_checkpoints_requested_total'), 0)")).WithArgs(instanceID, now.Add(-24*time.Hour)).
 		WillReturnRows(pgxmock.NewRows([]string{"requested", "timed", "count"}).AddRow(1.0, 3.0, int64(10)))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT kind, key, labels")).WithArgs(instanceID).
-		WillReturnRows(pgxmock.NewRows([]string{"kind", "key", "labels", "value_text", "last_seen", "datname"}).
-			AddRow("setting", "max_connections", []byte(`{"context":"postmaster"}`), "100", now, "").
-			AddRow("setting", "work_mem", []byte(`{"unit":"kB","context":"user"}`), "8192", now, "").
-			AddRow("setting", "archive_timeout", []byte(`{"unit":"s","context":"sighup"}`), "60", now, "").
-			AddRow("setting", "reset_to_default", []byte(`{}`), "stale", now.Add(-2*time.Hour), "").
-			AddRow("backup", "basebackup_running", []byte(`{}`), "1", backupAt, "").
-			AddRow("index_def", "public.orders_customer_idx", []byte(`{"def_hash":"hash-new"}`), "CREATE INDEX", now, "app").
-			AddRow("check_skip", "stat_statements", []byte(`{}`), "permission denied", now, "").
-			AddRow("check_skip", "table_stats", []byte(`{}`), "not collected", now, "").
-			AddRow("check_skip", "index_stats", []byte(`{}`), "not collected", now, "").
-			AddRow("check_skip", "bloat_estimate", []byte(`{}`), "not collected", now, ""))
+		WillReturnRows(pgxmock.NewRows([]string{"kind", "key", "labels", "value_text", "last_seen", "datname", "value_json"}).
+			AddRow("setting", "max_connections", []byte(`{"context":"postmaster"}`), "100", now, "", nil).
+			AddRow("setting", "work_mem", []byte(`{"unit":"kB","context":"user"}`), "8192", now, "", nil).
+			AddRow("setting", "archive_timeout", []byte(`{"unit":"s","context":"sighup"}`), "60", now, "", nil).
+			AddRow("setting", "reset_to_default", []byte(`{}`), "stale", now.Add(-2*time.Hour), "", nil).
+			AddRow("backup", "basebackup_running", []byte(`{}`), "1", backupAt, "", nil).
+			AddRow("index_def", "public.orders_customer_idx", []byte(`{"def_hash":"hash-new"}`), "CREATE INDEX", now, "app", nil).
+			AddRow("check_skip", "stat_statements", []byte(`{}`), "permission denied", now, "", nil).
+			AddRow("trigger", "public.orders.audit", []byte(`{"state":"disabled"}`), "", now, "app", []byte(`{"function":"public.audit"}`)).
+			AddRow("trigger", "public.orders.audit", []byte(`{"state":"enabled"}`), "", now, "other", nil).
+			AddRow("check_skip", "table_stats", []byte(`{}`), "not collected", now, "", nil).
+			AddRow("check_skip", "index_stats", []byte(`{}`), "not collected", now, "", nil).
+			AddRow("check_skip", "bloat_estimate", []byte(`{}`), "not collected", now, "", nil))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT datname, schemaname, relname, n_live_tup")).WithArgs(instanceID, now.Add(-15*time.Minute)).
 		WillReturnRows(pgxmock.NewRows([]string{"datname", "schemaname", "relname", "n_live_tup", "n_dead_tup", "n_mod_since_analyze", "last_autovacuum", "last_vacuum", "relfrozenxid_age", "seq_scan", "idx_scan"}).
 			AddRow("app", "public", "orders", 100.0, 4.0, 2.0, nil, nil, 10.0, 3.0, 1.0))
@@ -118,6 +120,13 @@ func TestLoadSnapshot_PopulatesBoundedSections(t *testing.T) {
 	require.Equal(t, 0.25, s.Metrics["pg_checkpoints_requested_ratio"][""])
 	require.Equal(t, backupAt, s.Facts["backup"]["basebackup_running"].ObservedAt)
 	require.Equal(t, "hash-new", s.Facts["index_def"][indexHashKey("app", "public.orders_customer_idx")].Labels["def_hash"])
+	// The same object name in two databases stays two facts.
+	require.Len(t, s.Facts["trigger"], 2)
+	appTrigger := s.Facts["trigger"][databaseFactKey("app", "public.orders.audit")]
+	require.Equal(t, "app", appTrigger.Datname)
+	require.Equal(t, "disabled", appTrigger.Labels["state"])
+	require.Equal(t, "public.audit", appTrigger.Value["function"])
+	require.Equal(t, "enabled", s.Facts["trigger"][databaseFactKey("other", "public.orders.audit")].Labels["state"])
 	require.Equal(t, "permission denied", s.SkippedChecks["Statements"])
 	require.Equal(t, "not collected", s.SkippedChecks["Tables"])
 	require.Equal(t, "not collected", s.SkippedChecks["Indexes"])

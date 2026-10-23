@@ -46,7 +46,12 @@ func TestINTWAL000_WALStatisticsColumnShape(t *testing.T) {
 			require.ElementsMatch(t, []string{"backend_type", "context", "evictions", "extend_time", "extends", "fsync_time", "fsyncs", "hits", "object", "op_bytes", "read_time", "reads", "reuses", "stats_reset", "write_time", "writeback_time", "writebacks", "writes"}, io)
 			return
 		}
-		require.ElementsMatch(t, []string{"stats_reset", "wal_buffers_full", "wal_bytes", "wal_fpi", "wal_records"}, wal)
+		walColumns := []string{"stats_reset", "wal_buffers_full", "wal_bytes", "wal_fpi", "wal_records"}
+		if pg.Version >= 190000 {
+			// PostgreSQL 19 adds the bytes of full-page images.
+			walColumns = append(walColumns, "wal_fpi_bytes")
+		}
+		require.ElementsMatch(t, walColumns, wal)
 		require.ElementsMatch(t, []string{"backend_type", "context", "evictions", "extend_bytes", "extend_time", "extends", "fsync_time", "fsyncs", "hits", "object", "read_bytes", "read_time", "reads", "reuses", "stats_reset", "write_bytes", "write_time", "writeback_time", "writebacks", "writes"}, io)
 	})
 }

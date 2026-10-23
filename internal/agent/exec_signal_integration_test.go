@@ -64,6 +64,11 @@ func TestINTCMD008_SignalCancelAndTerminate(t *testing.T) {
 		}, 5*time.Second, 50*time.Millisecond)
 		result, err = NewTerminateExecutor().Execute(ctx, mgr, command.Args{PID: &pid})
 		require.NoError(t, err)
+		var terminated struct {
+			Signalled bool `json:"signalled"`
+		}
+		require.NoError(t, json.Unmarshal(result, &terminated))
+		require.True(t, terminated.Signalled)
 		require.Error(t, <-queryDone)
 		_, err = victimConn.Exec(ctx, "SELECT 1")
 		require.Error(t, err, "terminated victim connection must no longer accept queries")

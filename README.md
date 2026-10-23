@@ -19,7 +19,7 @@ with an SBOM and build provenance. Every one of them goes through the whole of
 verification (`go mod verify` plus `govulncheck`), unit tests under `-race
 -shuffle=on` with per-package coverage floors, ten repeated shuffled race
 rounds over the concurrency-sensitive packages, a container image build with a
-`--version` smoke test, and the integration matrix across PostgreSQL 15 to 18 in
+`--version` smoke test, and the integration matrix across PostgreSQL 15 to 19 in
 both `vanilla` and `rds-like` permission profiles. The E2E and Playwright
 acceptance suites run nightly and on every pull request into `main`.
 
@@ -33,7 +33,7 @@ acceptance suites run nightly and on every pull request into `main`.
 - Node 22.12+ and pnpm 12.15.0, only to build the web interface from
   source. CI and the container images build on Node 24.
 - Docker and Docker Compose for the test suites and for the server's storage
-- PostgreSQL 15 to 18 as monitoring targets
+- PostgreSQL 15 to 19 as monitoring targets (19 verified on its release candidate)
 - PostgreSQL 17 with TimescaleDB 2.31 for the server's own storage (see Running the server)
 
 ## Building
@@ -161,12 +161,15 @@ psql "$PGLENS_DSN" -v pglens_password="$PGLENS_MONITORING_PASSWORD" \
   -v dbname=postgres -f deploy/sql/monitoring_user.sql
 ```
 
-The two `GRANT EXECUTE ON FUNCTION pg_control_system()` and `pg_control_checkpoint()` are required because these functions are not covered by `pg_monitor`. Without them the cluster identity falls back to the configured `cluster_name` and a failover can split one cluster into two (see Monitoring a replicated cluster).
+PostgreSQL lets every role execute `pg_control_system()` and `pg_control_checkpoint()` by default, but hardened installations revoke that from `PUBLIC`, so the script grants both explicitly. Without them the cluster identity falls back to the configured `cluster_name` and a failover can split one cluster into two (see Monitoring a replicated cluster).
 
 The script supports explicit higher tiers:
 
 - `-v tier1=1` — adds `pg_read_all_data` and enables plan-only `EXPLAIN` (T1)
 - `-v tier2=1` — adds `pg_signal_backend` and enables cancel/terminate (T2; also pass `tier1=1`)
+- `-v role=<name>` — configures a role with another name than `pglens`
+
+The role can only read, and the script makes sure of it before it grants anything. It refuses an existing role that could write: a superuser, a role with `CREATEDB`, `CREATEROLE`, `REPLICATION` or `BYPASSRLS`, a member of any role other than the read-only predefined ones, a role that owns objects, or one holding a write privilege in the database `psql` is connected to. It then lists the statement that removes each problem and changes nothing, because the whole script runs in one transaction. The storage role of the shipped compose files is a superuser named `pglens`, so running the script against the storage instance by mistake stops there too. The script also removes a database-specific `default_transaction_read_only` setting of the role, which would override the role-wide read-only default, and reports the `PUBLIC` grants (temporary tables, new schemas, large objects, `CREATE` on a schema, writes on a table or a sequence, functions that run as their owner) that let every role write outside a read-only transaction. pglens never leaves one. Revoking those grants changes what every other role can do, so the script does it only with `-v harden_public=1`, in the database it is connected to (see [deploy/sql/README.md](deploy/sql/README.md)).
 
 The script never creates extensions. See [the permission-tier guide](deploy/sql/README.md)
 for the complete matrix and downgrade procedure.
@@ -393,9 +396,12 @@ normalised statement is planned with `GENERIC_PLAN`, which needs PostgreSQL 16
 or later; on PostgreSQL 15 such a statement is rejected with that reason.
 `EXPLAIN ANALYZE` executes the statement: the agent accepts it at T1 only
 when the target sets `allow_explain_analyze: true`, only for a read-only
-statement (`SELECT`, `VALUES`, `WITH`, `TABLE`) without placeholders, and runs
-it inside a `READ ONLY` transaction that is rolled back, bounded to 30 seconds
-(15 seconds for plan-only). The web interface additionally offers ANALYZE
+statement (`SELECT`, `VALUES`, `WITH`, `TABLE`) without placeholders whose
+plan passes the guard described below, and runs it inside a `READ ONLY`
+transaction that is rolled back, bounded to 30 seconds (15 seconds for
+plan-only). Plan-only `EXPLAIN` of `INSERT`, `UPDATE`, `DELETE` or `MERGE`
+needs the write privilege on the table, which a read-only monitoring role does
+not hold, so PostgreSQL refuses it. The web interface additionally offers ANALYZE
 only at T2 and after explicit confirmation.
 `cancel` and `terminate` require T2 and `allow_signal: true`, and only target
 client backends. `pgstattuple` requires T1 and the `pgstattuple` extension
@@ -416,17 +422,42 @@ Security and operational boundaries:
   backlog); `explain` and `pgstattuple` additionally open an explicit
   `READ ONLY` transaction and roll it back. The agent sets only session
   parameters (`application_name`, `statement_timeout`, `lock_timeout`,
-  `idle_in_transaction_session_timeout`).
+  `idle_in_transaction_session_timeout`, `search_path`).
+- Every agent session searches `pg_catalog` alone, whatever `search_path` the
+  database or the role sets, and names the objects of `pg_stat_statements` and
+  `pgstattuple` with the schema the extension was installed in. A database
+  owner can therefore not put a function of their own in place of a built-in
+  the agent calls and have it run with the monitoring role's privileges.
+  `EXPLAIN` alone plans the user's statement with the database's own
+  `search_path`, so that its tables resolve as they did for the application,
+  behind the guard described below.
+- The `monitoring_role` check reports, every ten minutes, what would let the
+  role the agent connects as write if a session of it left read-only mode
+  (an attribute, a membership, owned objects) and whether the role defaults
+  to read-only transactions; the `security.*` advisor rules raise it.
+  `pglens-agent check` prints the same and exits 1 for a role that could write.
+- The integration suite proves the boundary: INT-RO-001 runs every check and
+  command at T2 and asserts that the database and the shared catalogs are
+  unchanged and that every statement the role sent, as `pg_stat_statements`
+  recorded it, reads.
 - With `commands.enabled: false` the agent does not poll or execute on-demand
   commands at all.
 - The server validates authentication, envelope shape, command state and expiry;
   the agent is authoritative for capability, target-policy and execution gates.
 - `EXPLAIN ANALYZE` executes the selected statement. The read-only transaction
-  stops it from changing data, but it still consumes database resources, takes
-  locks, and runs the functions the statement calls; effects outside the
-  transaction (a `dblink` call, a signal sent by `pg_cancel_backend()` when the
-  role holds `pg_signal_backend`) are not undone. Keep
-  `allow_explain_analyze: false` unless this is acceptable for the target.
+  stops it from changing data; effects outside the transaction (a `dblink`
+  call, a signal, a session advisory lock) are not undone by it, so the agent
+  first inspects the statement, the database and the `EXPLAIN (VERBOSE)` plan
+  and refuses ANALYZE when anything could have such an effect: a user-defined
+  function, a function of an extension that is not known to only compute, a
+  volatile built-in that is not known to only read, a foreign or custom scan,
+  or a user-defined operator, cast, domain or aggregate whose calls a plan can
+  hide. A session holding `pg_signal_backend` plans as `pg_read_all_data`, and
+  every `EXPLAIN` connection is closed after use. The statement still consumes
+  database resources and takes locks; see
+  [docs/LIMITS.md](docs/LIMITS.md#4-explain-analyze-executes-the-statement) for
+  what remains outside these checks. Keep `allow_explain_analyze: false` unless
+  this is acceptable for the target.
 - Query text is never sent in a command payload. Plan history stores only
   explicitly requested plans, using a normalized query hash and JSON plan;
   placeholders may prevent a useful plan for parameter-sensitive statements.
@@ -628,6 +659,8 @@ How the rules read the collected data:
 | `archive.stalled` | critical | The last successful archive is older than the allowed interval. |
 | `backup.no_basebackup_seen` | warning | The cluster archives WAL, but no base backup has been seen running in the last seven days. |
 | `backup.no_strategy` | critical | Neither archiving nor a visible base-backup strategy is configured. |
+| `security.monitoring_role_can_write` | critical | The role pglens connects as could write if a session of it left read-only mode: an attribute, a membership or owned objects (the `monitoring_role` check). |
+| `security.monitoring_role_read_only_off` | warning | The role pglens connects as does not default to read-only transactions in the database it connects to. |
 
 ## Running the agent
 
@@ -804,6 +837,7 @@ checks:
   instance_info:    { interval: 60s }        # General instance metadata (mandatory)
   activity:        { interval: 10s, by_application: false } # Session activity
   locks:           { interval: 10s }        # Blocking tree (instance scope, T0)
+  monitoring_role: { interval: 10m }        # What would let the monitoring role write (security.* rules)
   table_stats:     { interval: 5m, top_n: 50 }
   index_stats:     { interval: 5m, top_n: 50 }
   vacuum_progress: { interval: 30s }
@@ -860,7 +894,11 @@ curl -s -b cookies.txt 'localhost:8080/api/v1/clusters/<cluster-id>/settings-dri
 
 The settings response contains `name`, `value`, source, context, pending-restart
 and observation timestamps. Drift returns only differing settings with their
-instance IDs, roles and values.
+instance IDs, roles and values. A value whose source is the client, the session
+or a setting of the monitoring role itself describes the agent's connection
+(its `statement_timeout`, `search_path`, read-only default), not the instance,
+so it is not reported; what the instance uses for other roles cannot be read
+from that connection.
 
 **Environment overrides** (take precedence over the config file's own value):
 - `PGLENS_SERVER_URL=http://...` — overrides `server.url`
@@ -893,6 +931,7 @@ pglens agent check
   role             : primary
   system_identifier: 7688462038932361259
   permission tier  : T0 (pg_monitor)
+  monitoring role  : pglens — read-only
   extensions       : pg_stat_statements=no
   databases        : 1 found, 1 monitored, default selection
 
@@ -907,6 +946,7 @@ checks
   instance_info      enabled
   io                 enabled
   locks              enabled
+  monitoring_role    enabled
   replication_receiver disabled  — role primary not allowed
   replication_slots  enabled
   replication_streaming enabled
@@ -923,7 +963,7 @@ warnings
 
 **How to read the output:**
 
-- **server version** — PostgreSQL version; `— NOT SUPPORTED` means it is outside 15–18
+- **server version** — PostgreSQL version; `— NOT SUPPORTED` means it is outside 15–19
 - **role** — `primary`, `standby`, or `read-only replica`; determines which replication checks run
 - **system_identifier** — stable cluster identity; if it says `N/A (requires pg_control_system privilege)`, you need the grant from `monitoring_user.sql`
 - **permission tier**:
@@ -931,6 +971,7 @@ warnings
   - `T1 (pg_monitor + pg_read_all_data)` — enables plan-only `EXPLAIN` and on-demand `pgstattuple` measurement, and lets the bloat estimate see tables whose columns `pg_monitor` alone cannot read; with `allow_explain_analyze`, the agent also accepts `EXPLAIN ANALYZE` (the interface asks for T2)
   - `T2 (pg_monitor + pg_read_all_data + pg_signal_backend)` — enables query cancellation and termination, with `allow_signal`
   - The tier counts direct grants of these roles to the monitoring role only; a grant through an intermediate role is not seen
+- **monitoring role** — `read-only`, or `COULD WRITE:` followed by what would let the role change data if a session of it left read-only mode: an attribute (`SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION`, `BYPASSRLS`), a membership, direct or through another role, in any role but the read-only predefined ones, or objects it owns in any database. pglens never leaves read-only mode, but anyone holding its credentials could. `deploy/sql/monitoring_user.sql` lists the statement that removes each problem. A warning also names a role whose `default_transaction_read_only` is not `on` in this database
 - **extensions** — `pg_stat_statements=yes` is required for the `stat_statements` check. When the DSN's database has no view, the check looks in the monitored databases, as the agent does, and names the one it found (`pg_stat_statements=yes (in database app)`); databases without the view are read through it. `pgstattuple` is checked when a measurement runs, in the database that holds the table
 - **databases** — connectable databases found, how many the agent monitors, and how many are excluded or skipped (`db_budget`). The check does not read the agent configuration, so it applies the default selection: the default excludes (`template0`–`template9`, `rdsadmin`, `azure_*`) and the ten busiest databases by commit count
 
@@ -940,8 +981,8 @@ warnings
 - `database_stats` — per-database counters
 
 **Exit codes:**
-- `0` — all mandatory checks enabled; safe to deploy this target
-- `1` — one or more mandatory checks disabled; fix the permission tier or configuration before deploying
+- `0` — all mandatory checks enabled and the monitoring role read-only; safe to deploy this target
+- `1` — one or more mandatory checks disabled, or the monitoring role could write; fix the permission tier, the role or the configuration before deploying
 
 **Warnings:**
 - The persistent-mount warning indicates that `/var/lib/pglens` is not on a persistent volume. This is the #1 container misconfiguration and causes instance duplication on restart. Always mount the identity directory on a persistent volume (e.g., `docker run -v agent-data:/var/lib/pglens ...` or in compose: `volumes: ["agent-data:/var/lib/pglens"]`).
@@ -1503,7 +1544,7 @@ is missing.
 
 | Workflow | Trigger | Jobs |
 | --- | --- | --- |
-| `ci.yml` | pull request, push to `main`, manual, and reused by the release workflow | web, format/lint/vet-tags, supply chain (`tidy-check` + `govulncheck`), unit + coverage, repeated race stress (not on pull requests), container image build and `--version` smoke, integration across PostgreSQL 15–18 × `vanilla`/`rds-like`, and a `CI gate` job that aggregates them |
+| `ci.yml` | pull request, push to `main`, manual, and reused by the release workflow | web, format/lint/vet-tags, supply chain (`tidy-check` + `govulncheck`), unit + coverage, repeated race stress (not on pull requests), container image build and `--version` smoke, integration across PostgreSQL 15–19 × `vanilla`/`rds-like`, and a `CI gate` job that aggregates them |
 | `e2e.yml` | pull request to `main`, nightly, manual | the full E2E suite and the Playwright UI acceptance suite, each across `AGENT_MODE` `container` and `binary` |
 | `release-alpha.yml` | a `v*-alpha.*` tag, manual | the whole of `ci.yml`, then multi-arch images pushed to ghcr.io with SBOM and provenance, a `--version` smoke test against the published images, and a GitHub prerelease |
 
@@ -1729,7 +1770,7 @@ the server is rejected, so upgrade the server before upgrading agents.
 - **Host metrics are local-only** — they are attached only to targets declared or inferred as local to the agent. Remote targets report host metrics as unavailable, never as zero. In a container with a memory limit, the reported total is the cgroup limit rather than the machine's memory. Per-device IOPS, disk latency and network metrics are not collected.
 
 **Server and replication:**
-- PostgreSQL 15 to 18 only; 13 and 14 are not supported
+- PostgreSQL 15 to 19 only; 13 and 14 are not supported, and 19 is verified on its release candidate
 - Only streaming replication is supported; logical, Patroni, and Aurora topologies are not detected
 - Raw retention is 30 days with no rollups; compression after 48h (`buffer 6h < sample_age 12h < compress_after 48h`)
 - **Every in-memory structure has a fixed ceiling and drops data past it** — 32 MiB per push on the wire and 256 MiB after gzip, 64 KiB of request headers, 2-minute read/write/idle timeouts, delta and topology state evicted one hour after an instance's last sample, and at most 4 096 live sessions. None of these are configurable; see [limit 13](docs/LIMITS.md#13-every-in-memory-structure-is-bounded-and-a-bound-that-trips-drops-data) for what each one trades away.

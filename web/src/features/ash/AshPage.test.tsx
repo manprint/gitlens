@@ -232,7 +232,7 @@ describe('AshPage', () => {
     const ts = '2026-09-01T10:00:00Z'
     const groups: [string, number][] = [
       ['CPU', 20],
-      ...Array.from({ length: 11 }, (_, index): [string, number] => [`W${index + 1}`, 12 - index]),
+      ...Array.from({ length: 12 }, (_, index): [string, number] => [`W${index + 1}`, 13 - index]),
     ]
     renderAsh('/instances/instance-1/ash', {
       ...ashResponse,
@@ -247,8 +247,8 @@ describe('AshPage', () => {
 
     const option = (mocks.chart.mock.calls.at(-1)?.[0] as { option: EChartsOption }).option
     const formatter = (option.tooltip as { formatter: (params: unknown) => string }).formatter
-    // W10 (3 samples) and W11 (2) are folded: "other" is their sum, not the
-    // last one read.
+    // Eleven groups stay visible next to "other": W11 (3 samples) and W12
+    // (2) are folded, and "other" is their sum, not the last one read.
     expect(formatter([{ seriesName: 'other (folded)', value: [ts, 0.5] }])).toContain(
       'samples: 5, ticks: 10',
     )

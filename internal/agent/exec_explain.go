@@ -33,7 +33,8 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Release()
+	// The session ends with the command: see discardConn.
+	defer discardConn(ctx, conn)
 
 	statement, err := lookupStatement(ctx, target, conn, args.Datname, *args.QueryID)
 	if errorsIsNoRows(err) {
@@ -85,7 +86,9 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 	// one place that executes text written by database users. A read-only
 	// transaction makes PostgreSQL itself reject INSERT/UPDATE/DELETE/MERGE
 	// under ANALYZE, data-modifying CTEs, nextval() and writes from volatile
-	// functions, while plan-only EXPLAIN of any statement keeps working.
+	// functions. Plan-only EXPLAIN executes nothing; PostgreSQL still checks
+	// the statement's privileges, so a write cannot even be planned by a
+	// role that only reads.
 	if _, err := conn.Exec(ctx, "BEGIN READ ONLY"); err != nil {
 		return nil, err
 	}
@@ -96,6 +99,23 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 	}
 	if _, err := conn.Exec(ctx, timeout); err != nil {
 		return nil, err
+	}
+	// The statement names its objects the way its application did, through
+	// the database's own search_path rather than the pg_catalog-only one of
+	// the agent's sessions. The guard resolves names through the same path.
+	if _, err := conn.Exec(ctx, "SET LOCAL search_path TO DEFAULT"); err != nil {
+		return nil, err
+	}
+	// Planning alone can run user code (see explain_guard.go), so privileges
+	// are dropped before anything is planned, and ANALYZE runs only once the
+	// guard has inspected the statement, the database and the plan.
+	if err := dropExplainPrivileges(ctx, conn, target.PGVersion().Major(), args.Analyze); err != nil {
+		return nil, err
+	}
+	if args.Analyze {
+		if err := guardAnalyze(ctx, conn, statement); err != nil {
+			return nil, err
+		}
 	}
 
 	explainSQL := fmt.Sprintf("EXPLAIN (%s) %s", options, statement)
@@ -111,6 +131,11 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 		scanErr = conn.QueryRow(ctx, explainSQL).Scan(&plan)
 	}
 	if scanErr != nil {
+		if !readOnlyExplainKeyword(keyword) && isInsufficientPrivilege(scanErr) {
+			// PostgreSQL checks the privileges a statement needs even when
+			// it only plans it, and the monitoring role holds none that write.
+			return nil, rejectedf("explaining a %s statement needs the privilege to run it, which the read-only monitoring role does not hold: %v", keyword, scanErr)
+		}
 		if !args.Analyze {
 			return nil, rejectedf("normalised statement cannot be explained: %v", scanErr)
 		}
@@ -205,8 +230,9 @@ func errorsIsNoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
 // one database. Without the dbid filter a queryid shared by two databases
 // (catalog queries, the same schema deployed twice) could return the other
 // database's text, which then failed — or explained something else — in this
-// one. The %s names that database.
-const statementLookup = `SELECT query FROM pg_stat_statements
+// one. The first %s is the view's schema-qualified name, the second names
+// that database.
+const statementLookup = `SELECT query FROM %s
 		WHERE queryid = $1
 		  AND dbid = (SELECT oid FROM pg_database WHERE datname = %s)
 		  AND query !~ '^[[:space:]]*EXPLAIN'
@@ -220,8 +246,7 @@ const statementLookup = `SELECT query FROM pg_stat_statements
 // them used to fail on the missing view. The text is read the same way here;
 // the plan is still made on conn, in the command's own database.
 func lookupStatement(ctx context.Context, target check.Target, conn check.Conn, datname string, queryID int64) (string, error) {
-	var statement string
-	err := conn.QueryRow(ctx, fmt.Sprintf(statementLookup, "current_database()"), queryID).Scan(&statement)
+	statement, err := readStatementText(ctx, conn, "current_database()", queryID)
 	if datname == "" || !isUndefinedTable(err) {
 		return statement, err
 	}
@@ -230,13 +255,30 @@ func lookupStatement(ctx context.Context, target check.Target, conn check.Conn, 
 		return "", err
 	}
 	defer source.Release()
-	err = source.QueryRow(ctx, fmt.Sprintf(statementLookup, "$2"), queryID, datname).Scan(&statement)
+	return readStatementText(ctx, source, "$2", queryID, datname)
+}
+
+// readStatementText runs statementLookup on conn; database is the SQL
+// expression naming the database, args its parameters after the queryid.
+func readStatementText(ctx context.Context, conn check.Conn, database string, args ...any) (string, error) {
+	schema, err := check.ExtensionSchema(ctx, conn, "pg_stat_statements")
+	if err != nil {
+		return "", err
+	}
+	view := pgx.Identifier{schema, "pg_stat_statements"}.Sanitize()
+	var statement string
+	err = conn.QueryRow(ctx, fmt.Sprintf(statementLookup, view, database), args...).Scan(&statement)
 	return statement, err
 }
 
 func isUndefinedTable(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "42P01"
+}
+
+func isInsufficientPrivilege(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "42501"
 }
 
 func allowedExplainKeyword(keyword string) bool {

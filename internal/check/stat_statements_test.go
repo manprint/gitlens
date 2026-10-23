@@ -197,7 +197,7 @@ func TestStatStatements_AggregatesPerQueryID(t *testing.T) {
 	require.Contains(t, sql, "sum(calls)")
 	require.Contains(t, sql, "sum(temp_blks_written)")
 	require.Contains(t, sql, "datname = current_database()")
-	require.Equal(t, 1, strings.Count(sql, "FROM pg_stat_statements"), "every reference to the view re-reads the query-text file")
+	require.Equal(t, 1, strings.Count(sql, `FROM "public"."pg_stat_statements"`), "every reference to the view re-reads the query-text file")
 }
 
 // TestStatStatements_FallsBackToMaintenanceDatabase covers the common setup
