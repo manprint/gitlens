@@ -193,3 +193,40 @@ func TestScheduleStopDoesNotWaitForAReadInFlight(t *testing.T) {
 	}
 	require.Nil(t, schedules.current, "no schedule may be built after stop")
 }
+
+// TestScheduleStartReadsTargetsTogether: each unreachable target holds its read
+// for the whole discovery timeout. Start must read the targets together, so the
+// second target is dialled while the first is still being read, instead of only
+// after the first read has used its timeout.
+func TestScheduleStartReadsTargetsTogether(t *testing.T) {
+	t.Setenv("PGLENS_IDENTITY_PATH", filepath.Join(t.TempDir(), "identity.json"))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	targets := []*hungTarget{newHungTarget(t), newHungTarget(t)}
+	var mgrs []*agent.Manager
+	for i, target := range targets {
+		mgr, err := agent.NewManager(ctx, fmt.Sprintf("hung-%d", i), target.dsn, agent.DefaultConnOptions(), clock.System())
+		require.NoError(t, err)
+		t.Cleanup(mgr.Close)
+		mgrs = append(mgrs, mgr)
+	}
+
+	var mu sync.Mutex
+	schedules := newScheduleSet(ctx, &agent.Config{}, clock.System(), mgrs, &mu, map[string][]wire.Result{}, map[string]map[string]bool{})
+	started := make(chan error, 1)
+	go func() {
+		started <- schedules.start(ctx)
+	}()
+	// The second attempt on the second target is its read's discovery.
+	require.Eventually(t, func() bool { return targets[1].attempts.Load() >= 2 }, 3*time.Second, 10*time.Millisecond,
+		"the second target was not read until the first one had finished")
+
+	cancel()
+	select {
+	case err := <-started:
+		require.NoError(t, err)
+	case <-time.After(30 * time.Second):
+		t.Fatal("start did not return once its context ended")
+	}
+	t.Cleanup(schedules.stop)
+}

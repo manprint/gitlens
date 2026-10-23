@@ -246,15 +246,28 @@ func (s *scheduleSet) drained() <-chan struct{} {
 
 // readGates reads every target against prev, the gates the running schedule was
 // built from, and returns the new gates with the names of the targets whose
-// gate changed.
+// gate changed. The targets are read together: an unreachable one holds its
+// read for the whole timeout, and read one after another, every target after it
+// would wait that timeout too.
 func (s *scheduleSet) readGates(ctx context.Context, prev map[string]targetGate) (map[string]targetGate, []string) {
+	reads := make([]targetGate, len(s.managers))
+	oks := make([]bool, len(s.managers))
+	var wg sync.WaitGroup
+	for i, mgr := range s.managers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			reads[i], oks[i] = readTargetGate(ctx, mgr)
+		}()
+	}
+	wg.Wait()
+
 	next := make(map[string]targetGate, len(s.managers))
 	var changed []string
-	for _, mgr := range s.managers {
+	for i, mgr := range s.managers {
 		name := mgr.Database()
-		read, ok := readTargetGate(ctx, mgr)
 		last, seen := prev[name]
-		g, differs := nextGate(last, seen, read, ok)
+		g, differs := nextGate(last, seen, reads[i], oks[i])
 		next[name] = g
 		if differs {
 			changed = append(changed, name)
