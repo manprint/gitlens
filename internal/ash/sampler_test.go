@@ -468,3 +468,96 @@ func TestSampler_LastError_ReportsFailedTick(t *testing.T) {
 		t.Fatalf("expected LastError to be the tick's error, got %v", err)
 	}
 }
+
+// scalarRows is a one-column, at-most-one-row pgx.Rows for the setting probes.
+type scalarRows struct {
+	mockRows
+	value   any // nil means the result set is empty
+	done    bool
+	scanErr error
+}
+
+func (r *scalarRows) Next() bool {
+	if r.done || r.value == nil {
+		return false
+	}
+	r.done = true
+	return true
+}
+
+func (r *scalarRows) Scan(dest ...any) error {
+	if r.scanErr != nil {
+		return r.scanErr
+	}
+	switch d := dest[0].(type) {
+	case *bool:
+		*d = r.value.(bool)
+	case *string:
+		*d = r.value.(string)
+	}
+	return nil
+}
+
+type scalarQuerier struct {
+	rows    *scalarRows
+	err     error
+	lastSQL string
+}
+
+func (q *scalarQuerier) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+	q.lastSQL = sql
+	if q.err != nil {
+		return nil, q.err
+	}
+	return q.rows, nil
+}
+
+// TestSessionsVisible covers the pg_read_all_stats probe: the answer is passed
+// through, and a failed query, an empty result or a bad scan is an error or a
+// false, never a guessed true.
+func TestSessionsVisible(t *testing.T) {
+	ctx := context.Background()
+
+	q := &scalarQuerier{rows: &scalarRows{value: true}}
+	if visible, err := SessionsVisible(ctx, q); err != nil || !visible {
+		t.Fatalf("granted role: got (%v, %v), want (true, nil)", visible, err)
+	}
+	if !strings.Contains(q.lastSQL, "pg_read_all_stats") {
+		t.Fatalf("probe does not ask about pg_read_all_stats: %s", q.lastSQL)
+	}
+	if visible, err := SessionsVisible(ctx, &scalarQuerier{rows: &scalarRows{value: false}}); err != nil || visible {
+		t.Fatalf("role without the grant: got (%v, %v), want (false, nil)", visible, err)
+	}
+	if _, err := SessionsVisible(ctx, &scalarQuerier{err: errors.New("permission denied")}); err == nil {
+		t.Fatal("query error: want an error")
+	}
+	rowsErr := errors.New("connection reset")
+	if visible, err := SessionsVisible(ctx, &scalarQuerier{rows: &scalarRows{mockRows: mockRows{err: rowsErr}}}); visible || !errors.Is(err, rowsErr) {
+		t.Fatalf("empty result: got (%v, %v), want (false, %v)", visible, err, rowsErr)
+	}
+	if visible, err := SessionsVisible(ctx, &scalarQuerier{rows: &scalarRows{value: true, scanErr: errors.New("bad scan")}}); visible || err == nil {
+		t.Fatalf("scan error: got (%v, %v), want (false, error)", visible, err)
+	}
+}
+
+// TestComputeQueryIDSetting covers the compute_query_id probe the same way.
+func TestComputeQueryIDSetting(t *testing.T) {
+	ctx := context.Background()
+
+	q := &scalarQuerier{rows: &scalarRows{value: "auto"}}
+	if setting, err := ComputeQueryIDSetting(ctx, q); err != nil || setting != "auto" {
+		t.Fatalf("got (%q, %v), want (\"auto\", nil)", setting, err)
+	}
+	if !strings.Contains(q.lastSQL, "compute_query_id") {
+		t.Fatalf("probe does not read compute_query_id: %s", q.lastSQL)
+	}
+	if _, err := ComputeQueryIDSetting(ctx, &scalarQuerier{err: errors.New("permission denied")}); err == nil {
+		t.Fatal("query error: want an error")
+	}
+	if setting, err := ComputeQueryIDSetting(ctx, &scalarQuerier{rows: &scalarRows{}}); setting != "" || err != nil {
+		t.Fatalf("empty result: got (%q, %v), want (\"\", nil)", setting, err)
+	}
+	if setting, err := ComputeQueryIDSetting(ctx, &scalarQuerier{rows: &scalarRows{value: "on", scanErr: errors.New("bad scan")}}); setting != "" || err == nil {
+		t.Fatalf("scan error: got (%q, %v), want (\"\", error)", setting, err)
+	}
+}
