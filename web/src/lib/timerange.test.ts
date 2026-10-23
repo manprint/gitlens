@@ -5,6 +5,7 @@ import {
   RANGE_PRESETS,
   chooseStep,
   parseRange,
+  snapToInterval,
   stepMilliseconds,
   toParams,
   type RangePreset,
@@ -103,5 +104,23 @@ describe('chooseStep', () => {
     const step = chooseStep(new Date(0), new Date(span))
 
     expect(span / stepMilliseconds(step)).toBeLessThanOrEqual(10_000)
+  })
+})
+
+describe('snapToInterval', () => {
+  it('UI-TIME-012 holds the clock across an interval and moves it at the next poll', () => {
+    const interval = 30_000
+    const start = snapToInterval(NOW, interval)
+
+    expect(snapToInterval(new Date(NOW.getTime() + 1), interval)).toEqual(start)
+    expect(snapToInterval(new Date(NOW.getTime() + 29_999), interval)).toEqual(start)
+    expect(snapToInterval(new Date(NOW.getTime() + interval), interval).getTime()).toBe(
+      start.getTime() + interval,
+    )
+    expect(start.getTime() % interval).toBe(0)
+  })
+
+  it('UI-TIME-013 leaves the clock alone for a zero interval', () => {
+    expect(snapToInterval(NOW, 0)).toEqual(NOW)
   })
 })

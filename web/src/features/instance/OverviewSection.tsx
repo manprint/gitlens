@@ -1,3 +1,4 @@
+import { REFRESH } from '@/api/policy'
 import { useTimeRange } from '@/hooks/useTimeRange'
 import { chooseStep, stepMilliseconds } from '@/lib/timerange'
 import {
@@ -111,7 +112,7 @@ interface ChartDefinition {
 }
 
 export function OverviewSection({ database, instanceId }: OverviewSectionProps) {
-  const { range } = useTimeRange()
+  const { range } = useTimeRange(REFRESH.activity.interval)
   const step = chooseStep(range.from, range.to)
   const stepSeconds = stepMilliseconds(step) / 1_000
   const queries = useOverviewMetricQueries(instanceId, database, range.from, range.to, step)

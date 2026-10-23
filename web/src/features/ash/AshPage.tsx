@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
+import { REFRESH } from '@/api/policy'
 import { useAsh, useInstanceSettings } from '@/api/queries'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -114,7 +115,7 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
   const { instanceId: routeInstanceId } = useParams<{ instanceId: string }>()
   const redirectedForUnauthorized = useRef(false)
   const [searchParams, setSearchParams] = useSearchParams()
-  const { range } = useTimeRange()
+  const { range } = useTimeRange(REFRESH.ash.interval)
   const instanceId = instanceIdOverride ?? routeInstanceId ?? ''
   const groupBy = readGroup(searchParams.get('group'))
   const waitEventType = searchParams.get('wait_event_type')

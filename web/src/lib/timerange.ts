@@ -78,6 +78,18 @@ function checkedNow(now: Date): Date {
   return cloneDate(now)
 }
 
+/**
+ * Snap the clock down to the start of its refresh interval. A relative range
+ * ends at the clock, so a raw clock read on every render gives each query key
+ * a new window, and each completed request re-renders the page into the next
+ * request. Snapped, the window moves once per poll and the key holds between.
+ */
+export function snapToInterval(now: Date, intervalMs: number): Date {
+  const snapped = checkedNow(now)
+  if (intervalMs <= 0) return snapped
+  return new Date(Math.floor(snapped.getTime() / intervalMs) * intervalMs)
+}
+
 function relativeRange(preset: RangePreset, now: Date): ValidRelativeTimeRange {
   const end = checkedNow(now)
   const { durationMs, label } = RANGE_PRESETS[preset]

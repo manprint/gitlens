@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 
+import { REFRESH } from '@/api/policy'
 import {
   useClusterReplication,
   useClusterSettingsDrift,
@@ -53,7 +54,7 @@ export function ClusterPage({ clusterId: clusterIdOverride }: ClusterPageProps =
   const clusterId = clusterIdOverride ?? routeClusterId ?? ''
   const location = useLocation()
   const navigate = useNavigate()
-  const { range } = useTimeRange()
+  const { range } = useTimeRange(REFRESH.cluster.interval)
   const clustersQuery = useClusters()
   const topologyQuery = useClusterTopology(clusterId)
   const replicationQuery = useClusterReplication(clusterId, {
