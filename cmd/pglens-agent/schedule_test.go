@@ -171,14 +171,16 @@ func TestScheduleStopDoesNotWaitForAReadInFlight(t *testing.T) {
 
 	var mu sync.Mutex
 	schedules := newScheduleSet(ctx, &agent.Config{}, clock.System(), []*agent.Manager{mgr}, &mu, map[string][]wire.Result{}, map[string]map[string]bool{})
+	// NewManager dials the pool's first connection itself. Count the attempts
+	// from after that one, so the read's own dial is the one that shows it in flight.
+	require.Eventually(t, func() bool { return target.attempts.Load() >= 1 }, 5*time.Second, 10*time.Millisecond, "NewManager should dial the pool's first connection")
+	dialed := target.attempts.Load()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		schedules.reconcile()
 	}()
-	// NewManager dials the pool's first connection itself. The read's discovery
-	// dials a second one, so a second attempt means the read is in flight.
-	require.Eventually(t, func() bool { return target.attempts.Load() >= 2 }, 5*time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool { return target.attempts.Load() > dialed }, 5*time.Second, 10*time.Millisecond, "the read should dial the target")
 
 	began := time.Now()
 	schedules.stop()
@@ -213,12 +215,17 @@ func TestScheduleStartReadsTargetsTogether(t *testing.T) {
 
 	var mu sync.Mutex
 	schedules := newScheduleSet(ctx, &agent.Config{}, clock.System(), mgrs, &mu, map[string][]wire.Result{}, map[string]map[string]bool{})
+	// NewManager dials each pool's first connection itself. Count from after it.
+	for _, target := range targets {
+		require.Eventually(t, func() bool { return target.attempts.Load() >= 1 }, 5*time.Second, 10*time.Millisecond, "NewManager should dial the pool's first connection")
+	}
+	dialed := targets[1].attempts.Load()
 	started := make(chan error, 1)
 	go func() {
 		started <- schedules.start(ctx)
 	}()
-	// The second attempt on the second target is its read's discovery.
-	require.Eventually(t, func() bool { return targets[1].attempts.Load() >= 2 }, 3*time.Second, 10*time.Millisecond,
+	// The second target's own read dials it again: that is the next attempt.
+	require.Eventually(t, func() bool { return targets[1].attempts.Load() > dialed }, 3*time.Second, 10*time.Millisecond,
 		"the second target was not read until the first one had finished")
 
 	cancel()
