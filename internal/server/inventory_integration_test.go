@@ -607,3 +607,24 @@ func TestInventory_DroppedDatabaseLeavesTheInstance(t *testing.T) {
 	push()
 	require.Equal(t, []string{"app", "legacy"}, names(), "an envelope without a database list removes nothing")
 }
+
+// TestInventory_FailedInstanceLeavesNoClusterRow: the cluster row is written
+// before the instance row that names it. A port the column cannot hold fails
+// the instance's write after its cluster was written, so the failed push must
+// leave no cluster behind.
+func TestInventory_FailedInstanceLeavesNoClusterRow(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	cid := pgtype.ClusterID(4242424)
+	inv := NewInventory(pool)
+	env := wire.Envelope{AgentID: uuid.NewString(), Instances: []wire.Instance{{
+		InstanceID: uuid.NewString(), ClusterID: cid.String(), ClusterIDSource: string(pgtype.IDSourceManual),
+		Addr: "10.0.0.9", Port: 1 << 40, Role: "primary", PGVersion: 170000, PermTier: "T0",
+	}}}
+	_, err := inv.Upsert(ctx, env)
+	require.Error(t, err, "a port the column cannot hold fails the write, as a store failure")
+	var clusters int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM clusters WHERE cluster_id=$1`, int64(cid)).Scan(&clusters))
+	require.Zero(t, clusters, "the cluster written before the failure is rolled back")
+}
