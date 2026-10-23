@@ -290,7 +290,7 @@ func TestPipeline_ReplicationSyncStateIsStored(t *testing.T) {
 
 	for _, label := range []string{"sync_state", "sync_mode"} {
 		t.Run(label, func(t *testing.T) {
-			truncateAll(t, pool)
+			truncateAll(t, pool) //nolint:contextcheck // the helper clears the tables with its own context, as every test does; this test's ctx is only for the pipeline call
 			env := wire.Envelope{Instances: []wire.Instance{{
 				InstanceID: uuid.NewString(),
 				ClusterID:  pgtype.ClusterID(777).String(),
