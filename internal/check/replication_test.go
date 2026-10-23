@@ -49,7 +49,7 @@ func TestReplicationStreaming_NullLagEmittedAsNull(t *testing.T) {
 			var nilFloat *float64
 			return &mockRows{
 				rows: []([]any){
-					{"standby1", "192.168.1.100", 50000, "streaming", "async", nilInt64, nilInt64, nilInt64, nilFloat, nilFloat, nilFloat, nilFloat},
+					{"standby1", "192.168.1.100", 50000, "streaming", "async", nilInt64, nilInt64, nilInt64, nilFloat, nilFloat, nilFloat, nilFloat, 60.0},
 				},
 			}, nil
 		},
@@ -102,7 +102,7 @@ func TestReplicationStreaming_ValidLagEmitted(t *testing.T) {
 		queryFunc: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 			return &mockRows{
 				rows: []([]any){
-					{"standby1", "192.168.1.100", 50000, "streaming", "async", &w, &w, &w, &f, &f, &f, (*float64)(nil)},
+					{"standby1", "192.168.1.100", 50000, "streaming", "async", &w, &w, &w, &f, &f, &f, (*float64)(nil), 60.0},
 				},
 			}, nil
 		},
@@ -337,9 +337,9 @@ func TestReplicationStreaming_StandbysStayDistinct(t *testing.T) {
 		queryFunc: func(ctx context.Context, q string, args ...any) (pgx.Rows, error) {
 			sql = q
 			return &mockRows{rows: [][]any{
-				{"walreceiver", "10.0.0.2", 40001, "streaming", "async", &w, &w, &w, (*float64)(nil), (*float64)(nil), (*float64)(nil), (*float64)(nil)},
-				{"walreceiver", "10.0.0.3", 40002, "streaming", "sync", &w, &w, &w, (*float64)(nil), (*float64)(nil), (*float64)(nil), (*float64)(nil)},
-				{"reporting", "10.0.0.4", 40003, "streaming", "async", &w, &w, &w, (*float64)(nil), (*float64)(nil), (*float64)(nil), (*float64)(nil)},
+				{"walreceiver", "10.0.0.2", 40001, "streaming", "async", &w, &w, &w, (*float64)(nil), (*float64)(nil), (*float64)(nil), (*float64)(nil), 60.0},
+				{"walreceiver", "10.0.0.3", 40002, "streaming", "sync", &w, &w, &w, (*float64)(nil), (*float64)(nil), (*float64)(nil), (*float64)(nil), 60.0},
+				{"reporting", "10.0.0.4", 40003, "streaming", "async", &w, &w, &w, (*float64)(nil), (*float64)(nil), (*float64)(nil), (*float64)(nil), 60.0},
 			}}, nil
 		},
 	}
@@ -432,36 +432,47 @@ func TestReplicationReceiver_CatchupIsNotAReceiverStatus(t *testing.T) {
 // TestReplicationStreaming_StalledStandbyLagFollowsReplyAge: the walsender
 // refreshes write, flush and replay lag only when the standby replies, so a
 // standby that stops replying keeps its last small value while its backlog
-// grows. While the standby is behind in bytes, its time lag follows the age of
-// its last reply. A caught-up standby is left alone when it goes quiet.
+// grows. Once its reply is older than the walsender's bound (half of
+// wal_sender_timeout plus a margin: 35 s at the default 60 s) and it is behind
+// in bytes, its time lag follows the age of its last reply. A busy standby
+// whose reply is recent keeps the lag it reports, and so does a caught-up one.
 func TestReplicationStreaming_StalledStandbyLagFollowsReplyAge(t *testing.T) {
 	t.Parallel()
 	small := float64(0.01075)
-	age := float64(30)
 	behind := int64(17105200)
 	none := int64(0)
+	busy := int64(1000)
 	negative := float64(-0.5)
 	shortAge := float64(2)
 	bigLag := float64(5)
+	stalledAge := float64(60)
+	justPast := float64(36)
+	atBound := float64(35)
 	for _, tc := range []struct {
 		name     string
 		lag      *float64
 		behind   *int64
 		replyAge *float64
+		timeout  float64
 		want     float64
 	}{
-		{"behind and stalled", &small, &behind, &age, 30},
-		{"caught up and quiet", &small, &none, &age, 0.01075},
-		{"reply age clamped at zero", &small, &behind, &negative, 0.01075},
-		{"recent reply keeps the larger lag", &bigLag, &behind, &shortAge, 5},
-		{"no reply age reported", &small, &behind, nil, 0.01075},
+		{"behind and stalled", &small, &behind, &stalledAge, 60, 60},
+		{"stalled just past the bound", &small, &behind, &justPast, 60, 36},
+		{"stalled keeps a larger lag", &bigLag, &behind, &justPast, 60, 36},
+		{"busy healthy standby keeps its reported lag", &small, &busy, &shortAge, 60, 0.01075},
+		{"reply exactly at the bound is not stalled", &small, &behind, &atBound, 60, 0.01075},
+		{"caught up and quiet", &small, &none, &stalledAge, 60, 0.01075},
+		{"reply age clamped at zero", &small, &behind, &negative, 60, 0.01075},
+		{"recent reply keeps the larger lag", &bigLag, &behind, &shortAge, 60, 5},
+		{"no reply age reported", &small, &behind, nil, 60, 0.01075},
+		{"wal_sender_timeout disabled sets no bound", &small, &behind, &stalledAge, 0, 0.01075},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			conn := &mockConn{
 				queryFunc: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 					return &mockRows{rows: [][]any{
-						{"standby1", "10.0.0.2", 40001, "streaming", "async", tc.behind, tc.behind, tc.behind, tc.lag, tc.lag, tc.lag, tc.replyAge},
+						{"standby1", "10.0.0.2", 40001, "streaming", "async", tc.behind, tc.behind, tc.behind, tc.lag, tc.lag, tc.lag, tc.replyAge, tc.timeout},
 					}}, nil
 				},
 			}

@@ -687,3 +687,63 @@ func TestReplicationSlots_Integration_UnreservedSlotHasNoSafeWALSize(t *testing.
 		require.True(t, reported, "retained bytes are still reported for the unreserved slot")
 	})
 }
+
+// TestReplicationStreaming_Integration_IdleReplyAgeWithinBound checks the reply
+// bound staleReplyBound assumes. The walsender asks a silent standby for a
+// reply once wal_sender_timeout/2 has passed, so an idle standby never shows a
+// reply older than that plus the margin, even when it is told to report its
+// status far less often than the default. Here the standby reports every 60 s
+// and the primary's timeout is 10 s, so the bound is 10 s.
+func TestReplicationStreaming_Integration_IdleReplyAgeWithinBound(t *testing.T) {
+	t.Parallel()
+	for _, major := range pgtest.Versions() {
+		major := major
+		t.Run(fmt.Sprintf("pg%d", major), func(t *testing.T) {
+			ctx := context.Background()
+			primary, standby := pgtest.PrimaryStandby(t, major)
+
+			primaryAdmin, err := pgxpool.New(ctx, primary.DSN("app", pgtest.RoleSuperuser))
+			require.NoError(t, err)
+			defer primaryAdmin.Close()
+			standbyAdmin, err := pgxpool.New(ctx, standby.DSN("app", pgtest.RoleSuperuser))
+			require.NoError(t, err)
+			defer standbyAdmin.Close()
+			for _, stmt := range []string{
+				`ALTER SYSTEM SET wal_sender_timeout = '10s'`,
+				`SELECT pg_reload_conf()`,
+			} {
+				_, err = primaryAdmin.Exec(ctx, stmt)
+				require.NoError(t, err, stmt)
+			}
+			for _, stmt := range []string{
+				`ALTER SYSTEM SET wal_receiver_status_interval = '60s'`,
+				`SELECT pg_reload_conf()`,
+			} {
+				_, err = standbyAdmin.Exec(ctx, stmt)
+				require.NoError(t, err, stmt)
+			}
+
+			bound := staleReplyBound(10)
+			var worst float64
+			sampled := 0
+			deadline := time.Now().Add(25 * time.Second)
+			for time.Now().Before(deadline) {
+				rows, err := primaryAdmin.Query(ctx, `SELECT EXTRACT(epoch FROM now() - reply_time) FROM pg_stat_replication`)
+				require.NoError(t, err)
+				for rows.Next() {
+					var age *float64
+					require.NoError(t, rows.Scan(&age))
+					if age != nil {
+						sampled++
+						worst = math.Max(worst, *age)
+					}
+				}
+				require.NoError(t, rows.Err())
+				rows.Close()
+				time.Sleep(500 * time.Millisecond)
+			}
+			require.Positive(t, sampled, "the standby should be streaming during the sample")
+			require.LessOrEqual(t, worst, bound, "an idle standby's reply age must stay within the stall bound")
+		})
+	}
+}

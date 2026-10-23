@@ -41,6 +41,9 @@ type replicationStreamingRow struct {
 	FlushLagSec     *float64
 	ReplayLagSec    *float64
 	ReplyAgeSec     *float64
+	// WalSenderTimeoutSec is the server's wal_sender_timeout, which bounds how
+	// old a standby's reply may get; 0 disables that bound.
+	WalSenderTimeoutSec float64
 }
 
 func (c *replicationStreamingCheck) Scrape(ctx context.Context, t Target) (Result, error) {
@@ -72,7 +75,8 @@ SELECT COALESCE(r.application_name, '')        AS application_name,
        EXTRACT(epoch FROM r.write_lag)          AS write_lag_sec,
        EXTRACT(epoch FROM r.flush_lag)          AS flush_lag_sec,
        EXTRACT(epoch FROM r.replay_lag)         AS replay_lag_sec,
-       EXTRACT(epoch FROM now() - r.reply_time) AS reply_age_sec
+       EXTRACT(epoch FROM now() - r.reply_time) AS reply_age_sec,
+       EXTRACT(epoch FROM current_setting('wal_sender_timeout')::interval) AS wal_sender_timeout_sec
 FROM pg_stat_replication r,
      (SELECT CASE WHEN pg_is_in_recovery() THEN pg_last_wal_receive_lsn()
                   ELSE pg_current_wal_lsn() END AS pos) p
@@ -98,6 +102,7 @@ FROM pg_stat_replication r,
 			&row.FlushLagSec,
 			&row.ReplayLagSec,
 			&row.ReplyAgeSec,
+			&row.WalSenderTimeoutSec,
 		); err != nil {
 			return Result{}, err
 		}
@@ -109,14 +114,34 @@ FROM pg_stat_replication r,
 	return Result{Metrics: replicationStreamingMetrics(parsed)}, nil
 }
 
-// staleLag raises a time lag to the age of the standby's last reply while the
-// standby is behind in bytes. The walsender recomputes write, flush and replay
-// lag only when a reply arrives, so a standby that stops replying (hung,
-// paused or partitioned) kept its last small value through a growing backlog.
-// A caught-up standby is not lagging because it has gone quiet, so its lag is
-// left as reported.
-func staleLag(lag, replyAge *float64, behindBytes *int64) *float64 {
-	if replyAge == nil || behindBytes == nil || *behindBytes <= 0 {
+// staleReplyMargin is the slack past the walsender's reply request. The request
+// and its reply take a round trip, and reply_time carries the standby's own
+// clock, so a host clock that runs ahead or behind moves the age.
+const staleReplyMargin = 5.0
+
+// staleReplyBound is the reply age past which a standby reads as stalled, or 0
+// when the walsender sets no bound. The walsender asks a silent standby for a
+// reply once wal_sender_timeout/2 has passed, and a live standby answers, so a
+// reply older than that is missing. A standby that sends its own status less
+// often than that does not change the bound.
+func staleReplyBound(walSenderTimeout float64) float64 {
+	if walSenderTimeout <= 0 {
+		return 0
+	}
+	return walSenderTimeout/2 + staleReplyMargin
+}
+
+// staleLag raises a time lag to the age of the standby's last reply once that
+// reply is older than staleReplyBound. The walsender recomputes write, flush
+// and replay lag only when a reply arrives, so a standby that stops replying
+// (hung, paused or partitioned) kept its last small value through a growing
+// backlog. A busy standby that is a few bytes behind keeps the lag it reports,
+// and so does a caught-up standby that has gone quiet, which is not lagging.
+// The trade-off is that a stall shorter than the bound is not raised: with the
+// default wal_sender_timeout of 60 s that is about 35 s, and the walsender drops
+// the connection at 60 s, after which the standby leaves the sender view.
+func staleLag(lag, replyAge *float64, behindBytes *int64, bound float64) *float64 {
+	if replyAge == nil || behindBytes == nil || *behindBytes <= 0 || bound <= 0 {
 		return lag
 	}
 	age := *replyAge
@@ -124,6 +149,9 @@ func staleLag(lag, replyAge *float64, behindBytes *int64) *float64 {
 	// as a negative age, which is no lag at all.
 	if age < 0 {
 		age = 0
+	}
+	if age <= bound {
+		return lag
 	}
 	if lag != nil && *lag >= age {
 		return lag
@@ -173,9 +201,10 @@ func replicationStreamingMetrics(rows []replicationStreamingRow) []pgtype.Metric
 	var metrics []pgtype.Metric
 	ids := standbyIdentity(rows)
 	for i, row := range rows {
-		row.WriteLagSec = staleLag(row.WriteLagSec, row.ReplyAgeSec, row.WriteLagBytes)
-		row.FlushLagSec = staleLag(row.FlushLagSec, row.ReplyAgeSec, row.FlushLagBytes)
-		row.ReplayLagSec = staleLag(row.ReplayLagSec, row.ReplyAgeSec, row.ReplayLagBytes)
+		bound := staleReplyBound(row.WalSenderTimeoutSec)
+		row.WriteLagSec = staleLag(row.WriteLagSec, row.ReplyAgeSec, row.WriteLagBytes, bound)
+		row.FlushLagSec = staleLag(row.FlushLagSec, row.ReplyAgeSec, row.FlushLagBytes, bound)
+		row.ReplayLagSec = staleLag(row.ReplayLagSec, row.ReplyAgeSec, row.ReplayLagBytes, bound)
 
 		// The label MUST be called sync_state: that is the name
 		// internal/server/pipeline.go reads to fill
