@@ -207,7 +207,12 @@ SELECT COALESCE(datname, '')             AS datname,
 	}
 	defer rows.Close()
 
+	// The rows of a tick are held back until the whole tick has read cleanly.
+	// A tick that fails midway is a failed tick and does not count toward its
+	// window's ticks, so the rows it had already returned must not count
+	// toward the window's samples either.
 	var sawRow, sawNonNullQueryID bool
+	var batch []SampleRow
 	for rows.Next() {
 		var datname, state, waitEventType, waitEvent string
 		var queryID *int64
@@ -220,18 +225,21 @@ SELECT COALESCE(datname, '')             AS datname,
 			sawNonNullQueryID = true
 		}
 
-		if s.onSample != nil {
-			s.onSample(SampleRow{
-				Datname:       datname,
-				State:         state,
-				WaitEventType: waitEventType,
-				WaitEvent:     waitEvent,
-				QueryID:       queryID,
-			})
-		}
+		batch = append(batch, SampleRow{
+			Datname:       datname,
+			State:         state,
+			WaitEventType: waitEventType,
+			WaitEvent:     waitEvent,
+			QueryID:       queryID,
+		})
 	}
 	if err := rows.Err(); err != nil {
 		return err
+	}
+	if s.onSample != nil {
+		for _, row := range batch {
+			s.onSample(row)
+		}
 	}
 
 	s.computeQueryIDMu.Lock()

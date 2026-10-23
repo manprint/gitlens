@@ -19,11 +19,13 @@ import (
 type mockRows struct {
 	rows    [][5]any // datname, state, waitEventType, waitEvent, *int64
 	idx     int
-	scanErr error
+	scanErr error // returned by Scan once scanOK rows have scanned
+	scanOK  int
+	err     error // returned by Err after the last row
 }
 
 func (m *mockRows) Close()                                       {}
-func (m *mockRows) Err() error                                   { return nil }
+func (m *mockRows) Err() error                                   { return m.err }
 func (m *mockRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
 func (m *mockRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
 func (m *mockRows) Values() ([]any, error)                       { return nil, nil }
@@ -36,7 +38,7 @@ func (m *mockRows) Next() bool {
 }
 
 func (m *mockRows) Scan(dest ...any) error {
-	if m.scanErr != nil {
+	if m.scanErr != nil && m.idx >= m.scanOK {
 		return m.scanErr
 	}
 	row := m.rows[m.idx]
@@ -228,16 +230,41 @@ func TestSampler_DoSample_QueryError(t *testing.T) {
 }
 
 // TestSampler_DoSample_ScanError propagates a scan error and does not panic.
+// A failed tick delivers none of its rows, even the ones read before the error.
 func TestSampler_DoSample_ScanError(t *testing.T) {
 	rows := &mockRows{
-		rows:    [][5]any{{"app", "active", "CPU", "CPU", (*int64)(nil)}},
+		rows:    [][5]any{{"app", "active", "CPU", "CPU", (*int64)(nil)}, {"app", "active", "Lock", "tuple", (*int64)(nil)}},
 		scanErr: errors.New("scan failed"),
+		scanOK:  1,
 	}
 	q := &mockQuerier{rows: rows}
-	s := NewSampler(q, clock.System(), nil)
+	delivered := 0
+	s := NewSampler(q, clock.System(), func(SampleRow) { delivered++ })
 
 	if err := s.doSample(context.Background()); err == nil {
 		t.Fatal("expected a scan error")
+	}
+	if delivered != 0 {
+		t.Fatalf("a failed tick delivered %d rows to onSample", delivered)
+	}
+}
+
+// TestSampler_DoSample_ErrAfterRowsDeliversNone proves the rows of a tick that
+// the stream then fails are not counted: the error comes after every row.
+func TestSampler_DoSample_ErrAfterRowsDeliversNone(t *testing.T) {
+	rows := &mockRows{
+		rows: [][5]any{{"app", "active", "CPU", "CPU", (*int64)(nil)}},
+		err:  errors.New("connection reset"),
+	}
+	q := &mockQuerier{rows: rows}
+	delivered := 0
+	s := NewSampler(q, clock.System(), func(SampleRow) { delivered++ })
+
+	if err := s.doSample(context.Background()); err == nil {
+		t.Fatal("expected the stream error")
+	}
+	if delivered != 0 {
+		t.Fatalf("a failed tick delivered %d rows to onSample", delivered)
 	}
 }
 
