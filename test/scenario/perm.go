@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,9 +65,8 @@ func init() {
 			// Every mandatory check (instance_info, activity, database_stats)
 			// must actually be producing fresh samples under T0 — a silent
 			// per-check failure would starve one of these series instead of
-			// surfacing anywhere else. check_error_total does not exist yet
-			// (STATE.md §6/§9 V001-F04, same gap already noted for I-8 in
-			// sub-phase 5.6) so this is the honest proxy available today.
+			// surfacing anywhere else. The samples prove each check worked
+			// once; the counter block after the polls proves it stayed clean.
 			// Polled, not a one-shot count: each check runs on its own
 			// hardcoded DefaultInterval() (activity 10s, database_stats
 			// 30s — the agent config's per-check `interval:` override is
@@ -92,6 +93,42 @@ func init() {
 				return fmt.Errorf("no pg_xact_commit_total samples — database_stats check is not producing data under T0: %w", err)
 			}
 
+			// AssertInvariants forgives a check error whenever the same check
+			// also succeeded earlier in the run (the ok>0 rule in
+			// harness/metrics.go), so this scenario reads the counters itself.
+			// The baseline is taken once the first samples have landed, which
+			// keeps startup noise outside the window. The window closes when
+			// each mandatory check has completed one more scrape, so it covers
+			// at least one scrape of each: activity and instance_info run every
+			// 10s and database_stats every 30s.
+			okBefore, errsBefore, err := scrapeCheckCounters(e)
+			if err != nil {
+				return fmt.Errorf("baseline check counters: %w", err)
+			}
+			var grown []string
+			freshCtx, cancel4 := context.WithTimeout(ctx, 90*time.Second)
+			defer cancel4()
+			if err := poll(freshCtx, 3*time.Second, func(ctx context.Context) (bool, error) {
+				ok, errs, err := scrapeCheckCounters(e)
+				if err != nil {
+					return false, err
+				}
+				if grown = checkCounterGrowth(errsBefore, errs); len(grown) > 0 {
+					return true, nil
+				}
+				for _, name := range permMandatoryChecks {
+					if ok[name] <= okBefore[name] {
+						return false, nil
+					}
+				}
+				return true, nil
+			}); err != nil {
+				return fmt.Errorf("mandatory checks did not complete a fresh scrape under T0: %w", err)
+			}
+			if len(grown) > 0 {
+				return fmt.Errorf("check errors rose under T0 for %v: a check on the T0 grants should degrade, not fail", grown)
+			}
+
 			e.AssertInvariants(e.T)
 			return nil
 		},
@@ -109,6 +146,10 @@ func init() {
 }
 
 const permissionProbeTable = "pglens_e2e_perm_probe"
+
+// permMandatoryChecks are the checks SYS-PERM-001 requires to keep producing
+// data under T0 alone.
+var permMandatoryChecks = []string{"instance_info", "activity", "database_stats"}
 
 func runPermissionTierGrant(ctx context.Context, e *Env) error {
 	pg := e.PG("pg")
@@ -209,6 +250,54 @@ func runPermissionTierGrant(ctx context.Context, e *Env) error {
 	}
 	e.AssertInvariants(e.T)
 	return nil
+}
+
+// scrapeCheckCounters reads the server's per-check ok and error counters from
+// /metrics, each keyed by check name.
+func scrapeCheckCounters(e *Env) (ok, errs map[string]float64, err error) {
+	text, err := e.API.RawGet("/metrics")
+	if err != nil {
+		return nil, nil, fmt.Errorf("scrape /metrics: %w", err)
+	}
+	return parseCheckCounter(text, "pglens_check_ok_total"), parseCheckCounter(text, "pglens_check_error_total"), nil
+}
+
+// parseCheckCounter returns each check's sample from one labelled counter
+// family in a Prometheus text exposition. A check with no sample yet is
+// absent from the map, which callers read as zero.
+func parseCheckCounter(exposition, family string) map[string]float64 {
+	out := make(map[string]float64)
+	prefix := family + `{check="`
+	for _, line := range strings.Split(exposition, "\n") {
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		rest := line[len(prefix):]
+		end := strings.Index(rest, `"}`)
+		if end < 0 {
+			continue
+		}
+		v, err := strconv.ParseFloat(strings.TrimSpace(rest[end+len(`"}`):]), 64)
+		if err != nil {
+			continue
+		}
+		out[rest[:end]] = v
+	}
+	return out
+}
+
+// checkCounterGrowth names, in sorted order, the checks whose counter rose
+// between two scrapes. A check missing from the earlier scrape counts from
+// zero.
+func checkCounterGrowth(before, after map[string]float64) []string {
+	var grown []string
+	for name, v := range after {
+		if v > before[name] {
+			grown = append(grown, name)
+		}
+	}
+	sort.Strings(grown)
+	return grown
 }
 
 func applyMonitoringTier(e *Env, tier string) error {
