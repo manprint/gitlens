@@ -68,6 +68,10 @@ func AssertMetricInvariants(t TestingT, exposition string, budget MetricBudget) 
 	// pushed, which is a true state of the system, not a broken budget.
 	if !hasMetricFamily(exposition, "pglens_series_total", "gauge") {
 		t.Errorf("I-8: /metrics has no pglens_series_total family, so the cardinality budget was not evaluated")
+	} else if len(parseLabelledMetric(exposition, "pglens_series_total")) == 0 {
+		// Passing here is true of an instance that has just restarted, but it
+		// judged nothing. Say so, so a green run does not read as a measured one.
+		t.Logf("I-8: the exposition declares pglens_series_total but reports no series yet; the budget held on no samples")
 	}
 	for _, sample := range parseLabelledMetric(exposition, "pglens_series_total") {
 		if budget.MaxSeriesPerInstance > 0 && sample.value > budget.MaxSeriesPerInstance {

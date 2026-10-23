@@ -183,6 +183,9 @@ func TestAssertMetricInvariants_PassesOnAnInstanceWithNoSeriesYet(t *testing.T) 
 	if len(spy.errors) != 0 {
 		t.Errorf("a restarted instance with the family declared but no samples failed the I-8 check: %v", spy.errors)
 	}
+	if len(spy.logs) != 1 || !strings.Contains(spy.logs[0], "no series yet") {
+		t.Errorf("the instance judged on no samples without saying so: %v", spy.logs)
+	}
 }
 
 func TestParseLabelledMetric(t *testing.T) {
