@@ -8,9 +8,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -229,7 +231,8 @@ func TestBuffer_TruncatedTailSkipped(t *testing.T) {
 	}
 	defer func() { _ = buf.Close() }()
 
-	// Read back the intact records (should be 2 or 3, depending on when truncation hit).
+	// Truncating 5 bytes tears the third record, so the first two are the only
+	// intact ones and both must come back.
 	count := 0
 	for {
 		data, ackFunc, err := buf.Next()
@@ -249,8 +252,8 @@ func TestBuffer_TruncatedTailSkipped(t *testing.T) {
 		}
 	}
 
-	if count < 2 {
-		t.Errorf("expected at least 2 intact records, got %d", count)
+	if count != 2 {
+		t.Errorf("expected exactly 2 intact records, got %d", count)
 	}
 }
 
@@ -330,14 +333,10 @@ func TestBuffer_CorruptCRCSkipped(t *testing.T) {
 		}
 	}
 
-	// We should read at least the first and third records.
-	// (The second record may or may not be corrupted depending on exact file layout;
-	// the important thing is that we don't panic and can read some records.)
-	if len(readRecords) == 0 {
-		t.Errorf("expected at least some readable records, got 0")
-	}
-	if readRecords[0] != "first-record" {
-		t.Errorf("first record mismatch: %q", readRecords[0])
+	// Only the flipped record is lost: the first and the third are delivered, in
+	// order. A reader that stops at the corrupt record would return just the first.
+	if want := []string{"first-record", "third-record"}; !reflect.DeepEqual(readRecords, want) {
+		t.Errorf("delivered %q, want %q", readRecords, want)
 	}
 	// The skipped record is what CorruptRecords is for. The counter used to
 	// be driven by the retention policies instead, so a real bad CRC left it
@@ -418,31 +417,37 @@ func TestBuffer_MaxAgeDropsOldest(t *testing.T) {
 	}
 }
 
-// TestBuffer_DiskFull — with a write error, Append returns error,
-// does not panic, sets buffer_full, and a later successful write clears it.
+// TestBuffer_DiskFull — a write that fails with ENOSPC makes Append return
+// the error and sets buffer_full, and a later successful write clears it.
 func TestBuffer_DiskFull(t *testing.T) {
-	dir := t.TempDir()
-	buf, err := Open(dir, Options{Clock: clock.System()})
+	// /dev/full fails every write with ENOSPC, the error a full volume returns.
+	full, err := os.OpenFile("/dev/full", os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		t.Skipf("no /dev/full to inject ENOSPC: %v", err)
+	}
+	defer func() { _ = full.Close() }()
+
+	buf, err := Open(t.TempDir(), Options{Clock: clock.System()})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	defer func() { _ = buf.Close() }()
 
-	// Append a normal record.
-	if err := buf.Append([]byte("normal")); err != nil {
-		t.Fatalf("Append normal: %v", err)
+	buf.mu.Lock()
+	buf.segments = []*Segment{{file: full, path: full.Name()}}
+	buf.mu.Unlock()
+	if err := buf.Append([]byte("full")); !errors.Is(err, syscall.ENOSPC) {
+		t.Fatalf("Append on a full disk = %v, want ENOSPC", err)
+	}
+	if !buf.Stats().BufferFull {
+		t.Error("expected buffer_full after ENOSPC")
 	}
 
-	// Simulate a disk full error by directly setting buffer_full
-	// (since we can't easily mock the file system to return ENOSPC).
-	// The handleWriteError function is tested indirectly by ensuring
-	// that if buffer_full is set, subsequent Appends fail.
+	// Space comes back. The next write goes to a new segment on the real disk,
+	// and it clears the flag: a prior ENOSPC must not latch the buffer.
 	buf.mu.Lock()
-	buf.stats.BufferFull = true
+	buf.segments = nil
 	buf.mu.Unlock()
-
-	// A prior ENOSPC must not permanently latch the buffer. The next write
-	// retries the filesystem and clears the health flag if it succeeds.
 	if err := buf.Append([]byte("success")); err != nil {
 		t.Fatalf("Append after recovery: %v", err)
 	}
