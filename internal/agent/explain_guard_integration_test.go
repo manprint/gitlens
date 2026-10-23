@@ -648,12 +648,16 @@ ALTER EXTENSION pg_trgm ADD FUNCTION public.pglens_guard_vol();`)
 		}
 
 		// A VOLATILE operator function, added to the extension with its
-		// operator. Plain EXPLAIN does not run it; ANALYZE must refuse it, as
-		// it refuses the same operator outside the extension.
+		// operator and as a member of it, as an owner adds the function an
+		// operator calls. Plain EXPLAIN does not run it; ANALYZE must refuse
+		// it, as it refuses the same operator outside the extension. The
+		// function must be a member for the owner rule to decide anything: a
+		// function outside every extension is refused whoever owns it.
 		asOwner(`CREATE FUNCTION public.pglens_guard_op(integer, integer) RETURNS boolean LANGUAGE plpgsql VOLATILE
 	AS $$ BEGIN PERFORM pg_advisory_lock(4248); RETURN true; END $$;
 CREATE OPERATOR public.#!# (LEFTARG = integer, RIGHTARG = integer, PROCEDURE = public.pglens_guard_op);
-ALTER EXTENSION pg_trgm ADD OPERATOR public.#!# (integer, integer);`)
+ALTER EXTENSION pg_trgm ADD OPERATOR public.#!# (integer, integer);
+ALTER EXTENSION pg_trgm ADD FUNCTION public.pglens_guard_op(integer, integer);`)
 		const viaOperator = "SELECT t.a #!# t.a FROM pglens_guard.t"
 		ids = registerStatements(t, pg, viaOperator)
 		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
