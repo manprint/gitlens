@@ -12,9 +12,19 @@ function safeNext(value: string | null): string {
 
 // Only a rejected password is fixed by typing it again. A network or server
 // failure says nothing about the password, so it gets its own message.
+function tooManyAttempts(seconds: number | null): string {
+  if (seconds === null || seconds === 0) {
+    return 'Troppi tentativi di accesso. Attendi qualche minuto e riprova.'
+  }
+  return `Troppi tentativi di accesso. Riprova tra ${seconds} ${seconds === 1 ? 'secondo' : 'secondi'}.`
+}
+
 function signInFailure(error: unknown): string {
   if (error instanceof AuthRequestError) {
     if (error.kind === 'unauthorized') return 'Password non valida.'
+    if (error.failure.kind === 'server' && error.failure.status === 429) {
+      return tooManyAttempts(error.retryAfterSeconds)
+    }
     if (error.kind === 'network') {
       return 'Impossibile contattare il server. Controlla la connessione e riprova.'
     }
