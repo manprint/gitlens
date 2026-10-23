@@ -261,14 +261,16 @@ func TestINTALERT014_SpellEventsClearOnTheirOwnState(t *testing.T) {
 		slow, fast := uuid.New(), uuid.New()
 		noPrimary, withPrimary := int64(101), int64(102)
 
-		// instance_unreachable: down has no later reachable event; back answered
-		// after its outage began.
+		// instance_unreachable: down has not reported since its outage began;
+		// back has, and no instance_reachable event was ever written for it.
 		for _, stmt := range []struct {
 			sql  string
 			args []any
 		}{
-			{`INSERT INTO events (ts, type, instance_id) VALUES ($1, 'instance_unreachable', $2), ($3, 'instance_unreachable', $4), ($5, 'instance_reachable', $4)`,
-				[]any{now.Add(-10 * time.Minute), down, now.Add(-10 * time.Minute), back, now.Add(-5 * time.Minute)}},
+			{`INSERT INTO events (ts, type, instance_id) VALUES ($1, 'instance_unreachable', $2), ($3, 'instance_unreachable', $4)`,
+				[]any{now.Add(-10 * time.Minute), down, now.Add(-10 * time.Minute), back}},
+			{`INSERT INTO instances (instance_id, cluster_id, agent_id, role, last_seen) VALUES ($1, 104, $2, 'standby', now() - interval '10 minutes'), ($3, 104, $2, 'standby', now())`,
+				[]any{down, agent, back}},
 			// no_primary_in_cluster: only a standby reports in cluster 101; a
 			// fresh primary reports in cluster 102.
 			{`INSERT INTO instances (instance_id, cluster_id, agent_id, role, last_seen) VALUES ($1, $2, $3, 'standby', now()), ($4, $5, $3, 'primary', now())`,
@@ -302,8 +304,8 @@ func TestINTALERT014_SpellEventsClearOnTheirOwnState(t *testing.T) {
 		noPrimaryRule := Rule{ID: "no_primary_in_cluster", EventType: "no_primary_in_cluster"}
 		slotRule := Rule{ID: "slot_inactive", EventType: "slot_inactive"}
 
-		require.False(t, cleared(unreachable, Alert{InstanceID: &down}), "no reachable event: the outage continues")
-		require.True(t, cleared(unreachable, Alert{InstanceID: &back}), "a reachable event after the outage clears it")
+		require.False(t, cleared(unreachable, Alert{InstanceID: &down}), "no report since the outage began: the outage continues")
+		require.True(t, cleared(unreachable, Alert{InstanceID: &back}), "a report since the outage began clears it")
 		require.False(t, cleared(noPrimaryRule, Alert{ClusterID: &noPrimary}), "no fresh primary: the cluster still has none")
 		require.True(t, cleared(noPrimaryRule, Alert{ClusterID: &withPrimary}), "a fresh primary clears the episode")
 		require.False(t, cleared(slotRule, Alert{InstanceID: &slow}), "an inactive slot keeps the episode open")

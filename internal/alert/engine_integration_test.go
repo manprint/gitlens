@@ -173,3 +173,52 @@ func TestINTALERT015_NewTermStartsFromTheTable(t *testing.T) {
 		require.Equal(t, 2, countRows(t, ctx, pool, fires), "the new episode must notify")
 	})
 }
+
+// TestINTALERT018_SpellClosesAfterARestartDuringTheOutage — the engine that
+// opened an instance_unreachable spell is replaced while the instance is still
+// down. The instance then reports again, and no instance_reachable event is
+// ever written: the server that would have written it restarted too. The spell
+// still closes, on the instance's own state.
+func TestINTALERT018_SpellClosesAfterARestartDuringTheOutage(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		ctx, pool, _, _, _, _, _ := setupEngineIntegration(t, pg)
+		_, err := pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS events (event_id bigserial, ts timestamptz NOT NULL, type text NOT NULL, cluster_id bigint, instance_id uuid); TRUNCATE events`)
+		require.NoError(t, err)
+		createAlertTables(t, pool)
+		agent, instance := uuid.New(), uuid.New()
+		_, err = pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+		require.NoError(t, err)
+		_, err = pool.Exec(ctx, `INSERT INTO instances (instance_id, cluster_id, agent_id, role, last_seen) VALUES ($1, 105, $2, 'standby', now() - interval '10 minutes')`, instance, agent)
+		require.NoError(t, err)
+		_, err = pool.Exec(ctx, `INSERT INTO events (ts, type, cluster_id, instance_id) VALUES (now(), 'instance_unreachable', 105, $1)`, instance)
+		require.NoError(t, err)
+
+		clk := clock.NewFake(time.Now())
+		sources := []Source{NewEventSource(pool, 30*time.Second)}
+		first := &engineNotifier{}
+		e1 := NewEngineWithInterval(pool, clk, 30*time.Second, NewPgStore(pool), first, sources)
+		t.Cleanup(e1.Stop)
+		require.NoError(t, e1.Tick(ctx))
+		require.Len(t, first.alerts, 1)
+		require.Equal(t, StateFiring, first.alerts[0].State)
+		e1.Stop()
+
+		// The event leaves the lookback while the outage goes on. Then the
+		// instance reports again.
+		_, err = pool.Exec(ctx, `UPDATE events SET ts = now() - interval '5 minutes'`)
+		require.NoError(t, err)
+		_, err = pool.Exec(ctx, `UPDATE instances SET last_seen = now() WHERE instance_id = $1`, instance)
+		require.NoError(t, err)
+
+		second := &engineNotifier{}
+		e2 := NewEngineWithInterval(pool, clk, 30*time.Second, NewPgStore(pool), second, sources)
+		t.Cleanup(e2.Stop)
+		for i := 0; i < 8; i++ { // four minutes: the restored episode gets its grace first
+			clk.Advance(30 * time.Second)
+			require.NoError(t, e2.Tick(ctx))
+		}
+		require.Len(t, second.alerts, 1)
+		require.Equal(t, StateResolved, second.alerts[0].State)
+		require.Zero(t, countRows(t, ctx, pool, `SELECT count(*) FROM events WHERE type = 'instance_reachable'`), "no reachable event was written, so the spell cleared on state")
+	})
+}
