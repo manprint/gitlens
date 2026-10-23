@@ -266,7 +266,8 @@ func victimsRunning(t *testing.T, admin *pgxpool.Pool) int {
 }
 
 // startVictim opens a session of the monitoring role that sleeps under the
-// name the view-based tests look for.
+// name the view-based tests look for. The session is ended when the test
+// finishes, so the goroutine that runs its sleep does not outlive the test.
 func startVictim(t *testing.T, pg *pgtest.PG) {
 	t.Helper()
 	cfg, err := pgx.ParseConfig(pg.DSN("postgres", pgtest.RoleT1))
@@ -274,7 +275,17 @@ func startVictim(t *testing.T, pg *pgtest.PG) {
 	cfg.RuntimeParams["application_name"] = "pglens-guard-victim"
 	conn, err := pgx.ConnectConfig(context.Background(), cfg)
 	require.NoError(t, err)
-	go func() { _, _ = conn.Exec(context.Background(), "SELECT pg_sleep(30)") }()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = conn.Exec(ctx, "SELECT pg_sleep(30)")
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+		_ = conn.Close(context.Background())
+	})
 }
 
 // listenFor listens on channel as the superuser and returns a function that
