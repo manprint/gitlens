@@ -503,7 +503,9 @@ describe('AshPage', () => {
     expect(
       screen
         .getAllByRole('status')
-        .some((element) => /pg_stat_statements is loaded/i.test(element.textContent ?? '')),
+        .some((element) =>
+          /a module such as pg_stat_statements is loaded/i.test(element.textContent ?? ''),
+        ),
     ).toBe(true)
     expect(screen.queryByTestId('mock-echarts')).not.toBeInTheDocument()
   })

@@ -258,7 +258,7 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
                 reason={
                   queryIdSetting === 'off'
                     ? 'No non-null query_id was observed in this ASH range, and the instance setting compute_query_id is off.'
-                    : 'No non-null query_id was observed in this ASH range. Under compute_query_id = auto, query IDs are computed only when pg_stat_statements is loaded.'
+                    : 'No non-null query_id was observed in this ASH range. Under compute_query_id = auto, query IDs are computed only when a module such as pg_stat_statements is loaded.'
                 }
                 requires="compute_query_id=on"
               />
