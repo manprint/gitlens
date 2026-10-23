@@ -683,7 +683,7 @@ func init() {
 				return fmt.Errorf("slot_retained_bytes never grew (last=%d): %w", lastRetained, err)
 			}
 
-			// slot_inactive fires after the configured window
+			// slot_inactive fires once the slot has been inactive for the fixed window
 			// (internal/server/staleness.go: slotInactiveThreshold, 30s).
 			eventCtx, cancelEvent := context.WithTimeout(ctx, 45*time.Second)
 			defer cancelEvent()
