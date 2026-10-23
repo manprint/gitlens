@@ -6,8 +6,8 @@ requested memberships, reapplies the session limits and never creates an
 extension. A run is not free of side effects, though. Each run revokes
 `EXECUTE` on the large-object and WAL-message functions from `PUBLIC` in the
 database it is connected to, so any other role of that database that creates
-large objects or emits WAL messages through `PUBLIC` loses that access on the
-next run and needs an explicit grant to keep it.
+large objects or emits WAL messages through `PUBLIC` loses that access from the
+first run on and needs an explicit grant to keep it.
 
 The role can only read. Before granting anything, the script checks that an
 existing role of that name could not write, and refuses one that:
