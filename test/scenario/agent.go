@@ -350,9 +350,18 @@ func init() {
 				return fmt.Errorf("resolve monitored instance's agent_id: %w", err)
 			}
 
+			// Hold the baseline until the agent has delivered at least one
+			// sample. Revoking before the first one proves nothing: the count
+			// stays at zero whether or not the agent kept collecting, so the
+			// "no growth after revocation" check below would pass vacuously.
+			warmCtx, cancelWarm := context.WithTimeout(ctx, 60*time.Second)
+			defer cancelWarm()
 			var baseline int
-			if err := e.DB.QueryRow(ctx, `SELECT count(*) FROM metrics`).Scan(&baseline); err != nil {
-				return fmt.Errorf("query baseline metrics count: %w", err)
+			if err := poll(warmCtx, 2*time.Second, func(ctx context.Context) (bool, error) {
+				err := e.DB.QueryRow(ctx, `SELECT count(*) FROM metrics`).Scan(&baseline)
+				return err == nil && baseline > 0, err
+			}); err != nil {
+				return fmt.Errorf("no metric sample before the revocation, so there is no baseline to hold the agent to: %w", err)
 			}
 
 			if _, err := e.DB.Exec(ctx, `UPDATE agents SET revoked_at = now() WHERE agent_id = $1::uuid`, agentID); err != nil {

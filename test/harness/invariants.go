@@ -94,6 +94,7 @@ func (h *Harness) AssertInvariants(t *testing.T) {
 	if pool == nil {
 		t.Fatal("AssertInvariants: no DB pool (call after Start)")
 	}
+	AwaitFirstMetricsRow(context.Background(), pool, metricsIngestWait)
 	AssertDBInvariants(context.Background(), t, pool)
 	h.AssertServerMetricInvariants(t, DefaultMetricBudget())
 }
@@ -179,6 +180,33 @@ func AssertDBInvariants(ctx context.Context, t TestingT, pool *pgxpool.Pool) {
 	assertNoNegativeRates(ctx, t, pool)
 	assertNoOrphanMetrics(ctx, t, pool)
 	assertClusterIDStable(ctx, t, pool)
+}
+
+// metricsIngestWait bounds how long a scenario's end waits for the first
+// metrics row. A scenario can end right after a fault clears: SYS-NET-003
+// removes its black-hole toxic and asserts at once, and the agent's next check
+// and push take up to about 30 seconds to land. The wait absorbs that. It does
+// not mask a store that never ingests; after the wait the invariant fails.
+const metricsIngestWait = 60 * time.Second
+
+// AwaitFirstMetricsRow polls until the metrics table holds a row or wait
+// elapses, and reports whether it does.
+func AwaitFirstMetricsRow(ctx context.Context, pool *pgxpool.Pool, wait time.Duration) bool {
+	deadline := time.Now().Add(wait)
+	for {
+		var written bool
+		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM metrics)`).Scan(&written); err == nil && written {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
 
 // assertMetricsWritten is the positive control for the checks below. Each of

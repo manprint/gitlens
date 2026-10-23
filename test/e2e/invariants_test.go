@@ -182,6 +182,30 @@ func TestInvariant_EmptyStoreIsNotClean(t *testing.T) {
 	require.True(t, spy.failed, "expected the invariants to refuse a store with no metrics rows")
 }
 
+// TestInvariant_AwaitFirstMetricsRow proves a scenario's end waits for a row
+// that is still on its way, as SYS-NET-003 needs when it asserts straight
+// after removing its toxic, and that the wait gives up on a store that never
+// ingests, so the invariant still fails there.
+func TestInvariant_AwaitFirstMetricsRow(t *testing.T) {
+	pool, instID, clusterID := invariantsFixture(t)
+	ctx := context.Background()
+
+	require.False(t, harness.AwaitFirstMetricsRow(ctx, pool, time.Second), "an empty store reported a row")
+
+	go func() {
+		time.Sleep(2 * time.Second)
+		_, err := pool.Exec(context.Background(), `
+			INSERT INTO metrics (ts, cluster_id, instance_id, metric, series_id, value)
+			VALUES (now(), $1, $2, 'late_metric', 1003, 1.0)`, clusterID, instID)
+		if err != nil {
+			t.Errorf("plant the late row: %v", err)
+		}
+	}()
+	started := time.Now()
+	require.True(t, harness.AwaitFirstMetricsRow(ctx, pool, 30*time.Second), "the row that landed after 2s was not seen")
+	require.Less(t, time.Since(started), 20*time.Second, "the wait ran on past the row that had already landed")
+}
+
 // TestInvariant_I4_OrphanMetricDetected plants a metrics row for an
 // instance_id that does not exist in instances (no FK stops this — a
 // deliberate schema choice for hypertable write throughput) and proves
