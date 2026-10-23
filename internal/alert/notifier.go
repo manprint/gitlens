@@ -29,8 +29,8 @@ var undelivered atomic.Int64
 // errUndelivered wraps the error of each delivery given up on.
 var errUndelivered = errors.New("notification not delivered")
 
-// UndeliveredNotifications reports how many deliveries this process gave up on
-// without a claim on record. Such a delivery is never sent, and no row shows it.
+// UndeliveredNotifications reports how many unclaimed deliveries this process
+// gave up on. It never sent them, and no row records the loss.
 func UndeliveredNotifications() int64 { return undelivered.Load() }
 
 type channelNotifier struct {
