@@ -494,7 +494,7 @@ func init() {
 			// in ONE implicit transaction (the exact gotcha row 111 hit
 			// writing SYS-DB-001) — two separate -c flags, not one.
 			if _, err := e.Exec("pg-standby", "psql", "-U", "postgres",
-				"-c", "ALTER SYSTEM SET recovery_min_apply_delay = '30s'",
+				"-c", "ALTER SYSTEM SET recovery_min_apply_delay = '90s'",
 				"-c", "SELECT pg_reload_conf()"); err != nil {
 				return fmt.Errorf("set recovery_min_apply_delay: %w", err)
 			}
@@ -533,8 +533,13 @@ func init() {
 				return fmt.Errorf("replay_lag_sec never rose to a meaningful value (last=%v): %w", lastLag, err)
 			}
 
-			// health degrades while the replica is lagging.
-			healthCtx, cancelHealth := context.WithTimeout(ctx, 15*time.Second)
+			// Health degrades only when replay lag exceeds 30s
+			// (healthLagThresholdSeconds). The lag is measured from the last
+			// replayed commit, so it passes 30s about 30s after the write, not
+			// when it first rises, and it resets when the delayed transaction
+			// applies. A 30s delay leaves no window to observe, which is why the
+			// delay is 90s and the window below reaches well into the hold.
+			healthCtx, cancelHealth := context.WithTimeout(ctx, 75*time.Second)
 			defer cancelHealth()
 			if err := poll(healthCtx, 2*time.Second, func(ctx context.Context) (bool, error) {
 				clusters, err := e.API.Clusters()
@@ -564,8 +569,9 @@ func init() {
 			// Wait until the standby has replayed everything it received, which
 			// includes the still-pending delayed transaction, so the "returns to
 			// 0" check reflects the delay actually being off and not a gap
-			// between samples. The transaction applies within the remainder of
-			// its original 30s; a standby that never catches up fails here.
+			// between samples. With the delay off the held transaction applies
+			// at once, so this wait does not depend on the original 90s hold;
+			// a standby that never catches up fails here.
 			applyCtx, cancelApply := context.WithTimeout(ctx, 60*time.Second)
 			defer cancelApply()
 			if err := poll(applyCtx, 2*time.Second, func(ctx context.Context) (bool, error) {
