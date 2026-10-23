@@ -203,20 +203,29 @@ func (n *channelNotifier) Retry(ctx context.Context) error {
 }
 
 // Settle drops the pending deliveries that their alerts have moved past. firing
-// holds the episodes that are firing now. A FIRING is still owed only while its
-// own episode is firing, and a firing episode of the same alert that started
-// later makes an older delivery of it obsolete. This covers a RESOLVED that
-// this process sent, a RESOLVED that another replica sent while this one was
-// not leader, and a RESOLVED that a silence kept from the channels. The
-// evaluator follows all of them, because it is restored from the table when a
-// term begins.
-func (n *channelNotifier) Settle(firing []Alert) {
+// returns the episodes that are firing now, and it is called only when a
+// delivery is queued. A FIRING is still owed only while its own episode is
+// firing, and a firing episode of the same alert that started later makes an
+// older delivery of it obsolete. This covers a RESOLVED that this process sent,
+// a RESOLVED that another replica sent while this one was not leader, and a
+// RESOLVED that a silence kept from the channels. The evaluator follows all of
+// them, because it is restored from the table when a term begins.
+func (n *channelNotifier) Settle(firing func() []Alert) {
+	n.mu.Lock()
+	queued := len(n.pending) > 0
+	n.mu.Unlock()
+	if !queued {
+		return
+	}
+	// The episodes are grouped by key once, so that each delivery is checked
+	// against the episodes of its own alert and not against all of them.
+	byKey := make(map[string][]Alert)
+	for _, a := range firing() {
+		byKey[a.Key] = append(byKey[a.Key], a)
+	}
 	n.dropPending(func(d pendingDelivery) bool {
 		owed := false
-		for _, a := range firing {
-			if a.Key != d.alert.Key {
-				continue
-			}
+		for _, a := range byKey[d.alert.Key] {
 			if startOf(a).After(startOf(d.alert)) {
 				return true
 			}

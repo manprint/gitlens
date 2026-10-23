@@ -771,3 +771,25 @@ func TestChannelNotifier_ANewerTransitionDropsItsPendingDelivery(t *testing.T) {
 	require.NoError(t, retrier.Retry(context.Background()))
 	require.Equal(t, []string{"resolve"}, rec.got, "the refused FIRING is not sent after the RESOLVED")
 }
+
+// TestChannelNotifier_SettleReadsTheEpisodesOnlyWhenADeliveryIsQueued — a pass
+// with nothing queued has nothing to settle, so it does not read the firing
+// episodes at all.
+func TestChannelNotifier_SettleReadsTheEpisodesOnlyWhenADeliveryIsQueued(t *testing.T) {
+	fire := Alert{Key: "k", RuleID: "r", Severity: SeverityWarning, State: StateFiring, StartedAt: time.Unix(1, 0), LastEvalAt: time.Unix(1, 0)}
+	rec := &phaseRecorder{}
+	n := NewChannelNotifier(&markStore{}, recordingChannel{rec})
+	settle := n.(settler)
+	reads := 0
+	firing := func() []Alert {
+		reads++
+		return nil
+	}
+	settle.Settle(firing)
+	require.Zero(t, reads, "an empty queue reads no episodes")
+
+	rec.down = true
+	require.Error(t, n.Notify(context.Background(), fire))
+	settle.Settle(firing)
+	require.Equal(t, 1, reads, "a queued delivery is settled against the episodes")
+}
