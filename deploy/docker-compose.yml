@@ -67,6 +67,15 @@ services:
       PGLENS_COMMAND_TTL: ${PGLENS_COMMAND_TTL:-5m}
     ports:
       - "127.0.0.1:${PGLENS_HTTP_PORT:-8080}:8080"
+    # The services need no capability, write only to their volume and to a
+    # memory /tmp, and may not gain privileges through a setuid binary.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD", "/usr/local/bin/pglens-server", "--healthcheck"]
       interval: 5s
@@ -98,6 +107,15 @@ services:
     ports:
       # Loopback only: the healthz JSON includes the agent last error.
       - "127.0.0.1:${PGLENS_AGENT_HEALTHZ_PORT:-9187}:9187"
+    # The services need no capability, write only to their volume and to a
+    # memory /tmp, and may not gain privileges through a setuid binary.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD", "/usr/local/bin/pglens-agent", "--healthcheck"]
       interval: 5s

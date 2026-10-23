@@ -18,6 +18,10 @@ type composeFile struct {
 		Environment map[string]string `yaml:"environment"`
 		Ports       []string          `yaml:"ports"`
 		Volumes     []string          `yaml:"volumes"`
+		ReadOnly    bool              `yaml:"read_only"`
+		Tmpfs       []string          `yaml:"tmpfs"`
+		CapDrop     []string          `yaml:"cap_drop"`
+		SecurityOpt []string          `yaml:"security_opt"`
 	} `yaml:"services"`
 }
 
@@ -144,6 +148,40 @@ func TestSystemdUnits_DoNotShareADynamicStateDirectory(t *testing.T) {
 				require.NotContains(t, owner, dir, "%s and %s both name the state directory %s", owner[dir], unit, dir)
 				owner[dir] = unit
 			}
+		}
+	}
+}
+
+// The pglens containers keep their root filesystem read-only and drop every
+// capability, and no setuid binary may give one back. Their state is in a
+// volume and /tmp is memory, so nothing in them needs more.
+func TestExampleStack_PglensContainersDropPrivileges(t *testing.T) {
+	var stack composeFile
+	require.NoError(t, yaml.Unmarshal(readFile(t, "docker-compose.yml"), &stack))
+	for _, service := range []string{"pglens-server", "pglens-agent"} {
+		s := stack.Services[service]
+		require.True(t, s.ReadOnly, "%s has a writable root filesystem", service)
+		require.Contains(t, s.Tmpfs, "/tmp", service)
+		require.Equal(t, []string{"ALL"}, s.CapDrop, "%s keeps capabilities", service)
+		require.Contains(t, s.SecurityOpt, "no-new-privileges:true", service)
+	}
+}
+
+// The units give their process no capability, no socket family beyond TCP
+// and Unix sockets, and only the standard service system calls. Neither the
+// agent nor the server needs the rest, so a compromised process has none of it.
+func TestSystemdUnits_DropCapabilitiesSocketFamiliesAndSyscalls(t *testing.T) {
+	units, err := filepath.Glob(filepath.Join("systemd", "*.service"))
+	require.NoError(t, err)
+	require.NotEmpty(t, units)
+	for _, unit := range units {
+		lines := strings.Split(string(readFile(t, unit)), "\n")
+		for _, directive := range []string{
+			"CapabilityBoundingSet=",
+			"RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6",
+			"SystemCallFilter=@system-service",
+		} {
+			require.Contains(t, lines, directive, unit)
 		}
 	}
 }

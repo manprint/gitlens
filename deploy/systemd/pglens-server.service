@@ -12,6 +12,11 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
+# Neither service needs a capability or a socket family beyond TCP and Unix
+# sockets, nor a system call outside the standard service set.
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallFilter=@system-service
 Restart=on-failure
 RestartSec=5
 
