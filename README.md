@@ -1778,6 +1778,7 @@ the server is rejected, so upgrade the server before upgrading agents.
 **Contention:**
 - The lock view is sampled every 10 seconds, not live; a contention episode shorter than the interval can be missed entirely
 - Query text in a lock tree is truncated to 2 048 bytes
+- Query text from `pg_stat_statements` and the lock view has its credentials redacted in the agent, before it is sent. The value after `PASSWORD` or `SSLPASSWORD` (including `password = 'x'` and `password => 'x'`), a libpq `password=` or `sslpassword=` value, and the password in a `postgresql://user:password@host` URI become `[redacted]`. When a value cannot be told apart from the text around it, the text from its constant to the end of the statement is withheld instead. That happens when a string or body holds the word password, since `EXECUTE` could run it, and when a value is joined with `||`, filled by `format()`, or passed as one of several arguments. A session text that reached `track_activity_query_size` is withheld whole, because the server's cut may have dropped the keyword. A statement text over 16 KiB is not sent. A credential written apart from its keyword is not recognised, such as a function argument (`crypt('x', ...)`) or a value matched to a password column by position (`INSERT ... VALUES`)
 - Deadlocks are reported as a counter and a rate; identifying the statements involved in a specific deadlock requires PostgreSQL log analysis, which pglens does not do
 
 **Space and maintenance:**

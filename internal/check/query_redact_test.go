@@ -1,6 +1,7 @@
 package check
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -144,6 +145,60 @@ func TestRedactQueryText_RemovesCredentials(t *testing.T) {
 			"ALTER SUBSCRIPTION s CONNECTION 'postgresql://rep:[redacted]@primary:5432/app'"},
 		{"primary_conninfo", "ALTER SYSTEM SET primary_conninfo = 'host=p sslpassword = ''x y'''",
 			"ALTER SYSTEM SET primary_conninfo = 'host=p sslpassword = [redacted]'"},
+		// A password column or parameter set with an operator takes the whole
+		// constant after it, which is SQL, not a libpq string.
+		{"column set with a doubled quote", "UPDATE users SET password = 'ab''cd' WHERE id = 1",
+			"UPDATE users SET password = '[redacted]' WHERE id = 1"},
+		{"column set", "UPDATE users SET password = 'abcd' WHERE id = 1",
+			"UPDATE users SET password = '[redacted]' WHERE id = 1"},
+		{"setting with a doubled quote", "SET app.password = 'ab''cd'",
+			"SET app.password = '[redacted]'"},
+		{"named argument", "SELECT f(password => 'hunter2')",
+			"SELECT f(password => '[redacted]')"},
+		{"old named argument", "SELECT f(password := 'hunter2')",
+			"SELECT f(password := '[redacted]')"},
+		{"column set from a backslash literal", `UPDATE users SET password = 'pa\'ss' WHERE id = 1`,
+			"UPDATE users SET password = '[redacted]'"},
+		{"column set from a concatenation", "UPDATE users SET password = 'hunt' || 'er2' WHERE id = 1",
+			"UPDATE users SET password = '[redacted]'"},
+		{"sslpassword option of a user mapping", "CREATE USER MAPPING FOR u SERVER s OPTIONS (user 'bob', sslpassword 'sekret')",
+			"CREATE USER MAPPING FOR u SERVER s OPTIONS (user 'bob', sslpassword '[redacted]')"},
+		{"quoted sslpassword option", `CREATE USER MAPPING FOR u SERVER s OPTIONS ("sslpassword" 'sekret')`,
+			`CREATE USER MAPPING FOR u SERVER s OPTIONS ("sslpassword" '[redacted]')`},
+		{"sslpassword option in a constant", "EXECUTE 'CREATE USER MAPPING FOR u SERVER s OPTIONS (sslpassword ''x'')'",
+			"EXECUTE '[redacted]'"},
+		{"quoted name set in a body", `DO $$ BEGIN UPDATE t SET "password" = 'x'; END $$`,
+			"DO '[redacted]'"},
+		// A libpq value the constant does not hold in full redacts the text from
+		// that constant to the end.
+		{"libpq value joined by ||", "SELECT dblink_connect('myconn', 'host=h dbname=app user=app password=' || 'pw123')",
+			"SELECT dblink_connect('myconn', '[redacted]'"},
+		{"libpq value continued by ||", "SELECT dblink_connect('host=h password=pw' || '123')",
+			"SELECT dblink_connect('[redacted]'"},
+		{"libpq value filled by format", "SELECT dblink_connect(format('host=h password=%s', 'pw123'))",
+			"SELECT dblink_connect(format('[redacted]'"},
+		{"libpq value partly filled by format", "SELECT dblink_connect(format('host=h password=pw%s dbname=x', '123'))",
+			"SELECT dblink_connect(format('[redacted]'"},
+		// The value reads as a closed quoted value, but it is a variable set
+		// earlier in the body.
+		{"libpq value from a variable of the body", "DO $$ DECLARE pw text := 'hunter2'; BEGIN PERFORM dblink_connect('host=h password=' || pw || ' dbname=x'); END $$",
+			"DO '[redacted]'"},
+		{"libpq quoted value followed by more than a blank", "CREATE SUBSCRIPTION s CONNECTION 'host=h password=''ab''cd' PUBLICATION pub",
+			"CREATE SUBSCRIPTION s CONNECTION '[redacted]'"},
+		{"libpq value with an unclosed quote", "CREATE SUBSCRIPTION s CONNECTION 'host=h password=''ab cd' PUBLICATION pub",
+			"CREATE SUBSCRIPTION s CONNECTION '[redacted]'"},
+		{"libpq value as one argument of several", "SELECT dblink('host=h password=pw', 'SELECT 1')",
+			"SELECT dblink('[redacted]'"},
+		{"libpq value in a body passed to a function", "DO $$ BEGIN PERFORM dblink_connect('host=h password=' || 'pw123'); END $$",
+			"DO '[redacted]'"},
+		{"column set with a doubled quote in a body", "DO $$ BEGIN UPDATE t SET password = 'ab''cd'; END $$",
+			"DO '[redacted]'"},
+		{"named argument in a body", "DO $$ BEGIN PERFORM f(password => E'pw'); END $$",
+			"DO '[redacted]'"},
+		{"column set in a body", "DO $$ BEGIN UPDATE t SET password = 'abcd' WHERE id = 1; END $$",
+			"DO $$ BEGIN UPDATE t SET password = [redacted] WHERE id = 1; END $$"},
+		{"libpq value with a backslash before a quote", `SELECT dblink_connect('host=h password=ab\'cd dbname=x')`,
+			"SELECT dblink_connect('[redacted]'"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, redactQueryText(tc.in))
@@ -168,6 +223,9 @@ func TestRedactQueryText_KeepsTextWithoutCredentials(t *testing.T) {
 		"CREATE ROLE u LOGIN VALID UNTIL 'infinity'",
 		"CREATE SUBSCRIPTION s CONNECTION 'host=p dbname=x' PUBLICATION pub",
 		"SELECT 'nothing secret' FROM t WHERE note = 'x'",
+		"UPDATE users SET password = $1 WHERE id = $2",
+		"SELECT id FROM users WHERE password IS NULL AND note = 'x'",
+		"SELECT dblink('host=h dbname=x', 'SELECT 1')",
 	} {
 		require.Equal(t, in, redactQueryText(in))
 	}
@@ -209,4 +267,114 @@ func TestRedactQueryText_IsLinearForDollarTagsAndUnicodeChains(t *testing.T) {
 		require.True(t, redactQueryText(in) == in, "text without a credential is kept")
 		require.Less(t, time.Since(start), 2*time.Second)
 	}
+}
+
+// Many libpq keys in one body are read in time linear in the text. The keys
+// inside a value are part of it, and each of them would read a value that
+// runs to the end of the body, so reading a value from every key would be
+// quadratic.
+func TestRedactQueryText_IsLinearForLibpqKeys(t *testing.T) {
+	t.Parallel()
+	for _, in := range []string{
+		"SELECT $$" + strings.Repeat("password=", 30000) + "x$$",
+		"SELECT $$" + strings.Repeat("password='x ", 100000) + "$$",
+		"SELECT $$" + strings.Repeat("password=x ", 100000) + "$$ AS c",
+	} {
+		start := time.Now()
+		require.NotContains(t, redactQueryText(in), "x ")
+		require.Less(t, time.Since(start), 2*time.Second)
+	}
+}
+
+// The text a constant stands for is read with its doubled quotes, escapes and
+// joined constants, and each of its bytes maps back to the statement bytes it
+// was read from.
+func TestConstantText_MapsEachByteToTheStatement(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ in, want string }{
+		{"'a''b'", "a'b"},
+		{`E'a\'b\\c\nd'`, `a'b\c\nd`},
+		{"'ab'\n'cd'", "abcd"},
+		{"'ab' -- c\r\n  'cd'", "abcd"},
+		{"$t$a'b$t$", "a'b"},
+		{"$t$open", "open"},
+		{"'open", "open"},
+		{"U&'a''b'", "a'b"},
+	} {
+		tok := scanToken(tc.in, 0)
+		text, from, to := constantText(tc.in, tok, true)
+		require.Equal(t, tc.want, text, tc.in)
+		require.Len(t, from, len(text))
+		require.Len(t, to, len(text))
+		for i := range len(text) {
+			raw := tc.in[from[i]:to[i]]
+			require.True(t, raw == text[i:i+1] || len(raw) == 2 && raw[1] == text[i],
+				"%q: byte %d read from %q", tc.in, i, raw)
+		}
+	}
+}
+
+// A secret written as SEKA and SEKB in two halves must not survive, in any
+// spelling of the key, operator, encoding of the value or wrapper around the
+// statement that the redactor reads. Some of these shapes cut the rest of the
+// statement; the test asks only that no half of the secret is left.
+func TestRedactQueryText_NoHalfOfTheSecretSurvives(t *testing.T) {
+	t.Parallel()
+	keys := []string{"password", "PASSWORD", "sslpassword", `"password"`, `U&"\0070assword"`}
+	operators := []string{" ", "=", " = ", " => ", " := "}
+	values := []string{
+		"'SEKASEKB'",
+		"'SEKA''SEKB'",
+		`E'SEKA\'SEKB'`,
+		`'SEKA\'SEKB'`,
+		"$v$SEKASEKB$v$",
+		"U&'SEKASEKB'",
+		"'SEKA'\n'SEKB'",
+		"'SEKA' || 'SEKB'",
+	}
+	conninfos := []string{
+		"'host=h password=SEKASEKB dbname=x'",
+		"'host=h password=''SEKA SEKB'' dbname=x'",
+		"'host=h password=SEKA''SEKB dbname=x'",
+		`E'host=h password=SEKA\'SEKB dbname=x'`,
+		`'host=h password=SEKA\'SEKB dbname=x'`,
+		"$c$host=h password=SEKA'SEKB dbname=x$c$",
+		"'host=h password=SEKA'\n'SEKB dbname=x'",
+		"'host=h password=SEKA' || 'SEKB dbname=x'",
+		"'host=h password=' || 'SEKASEKB'",
+		"format('host=h password=%s dbname=x', 'SEKASEKB')",
+		"concat('host=h password=', 'SEKASEKB')",
+		"'host=h dbname=x password=SEKASEKB'",
+		"'host=h sslpassword = SEKASEKB'",
+		"'postgresql://u:SEKASEKB@h/x'",
+	}
+	var statements []string
+	for _, key := range keys {
+		for _, op := range operators {
+			for _, value := range values {
+				statements = append(statements, "X "+key+op+value+" Y")
+			}
+		}
+	}
+	for _, conninfo := range conninfos {
+		statements = append(statements,
+			"SELECT dblink_connect("+conninfo+")",
+			"SELECT dblink("+conninfo+", 'SELECT 1')",
+			"CREATE SUBSCRIPTION s CONNECTION "+conninfo+" PUBLICATION p",
+			"ALTER SYSTEM SET primary_conninfo = "+conninfo,
+		)
+	}
+	var leaks []string
+	for _, statement := range statements {
+		for _, in := range []string{
+			statement,
+			"DO $f$ BEGIN " + statement + "; END $f$",
+			"DO $f$ BEGIN EXECUTE '" + strings.ReplaceAll(statement, "'", "''") + "'; END $f$",
+		} {
+			if out := redactQueryText(in); strings.Contains(out, "SEKA") || strings.Contains(out, "SEKB") {
+				leaks = append(leaks, fmt.Sprintf("%q -> %q", in, out))
+			}
+		}
+	}
+	require.Empty(t, leaks)
 }

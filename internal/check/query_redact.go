@@ -7,34 +7,39 @@ import (
 )
 
 // Credentials reach a statement's text as SQL literals: the PASSWORD of a
-// role, the password option of a server or user mapping, or the libpq string
-// of a subscription's CONNECTION. pg_stat_statements keeps utility statements
-// as they were typed, so these are read back exactly as the DBA wrote them.
+// role, the password or sslpassword option of a server or user mapping, a
+// value assigned or passed to a password column or parameter, or the libpq
+// string of a subscription's CONNECTION or a dblink call. pg_stat_statements
+// keeps utility statements as they were typed, and pg_stat_activity keeps
+// every statement as it was sent, so these are read back as written.
 //
 // The statement is read the way PostgreSQL reads its top level: blanks,
 // comments, identifiers, string constants and dollar-quoted bodies in turn.
-// A keyword takes the string constant that follows it. A keyword inside a
-// string constant or a dollar-quoted body is not read as a keyword, because
-// that text may be run later by EXECUTE, so the text from that constant to the
-// end of the statement is redacted. The value may then be built from several
-// constants, which a local rule could not follow.
+// A keyword takes the string constant that follows it, after an operator such
+// as = or => if there is one. A keyword inside a string constant or a
+// dollar-quoted body is not read as a keyword, because that text may be run
+// later by EXECUTE, so the text from that constant to the end of the
+// statement is redacted. The value may then be built from several constants,
+// which a local rule could not follow.
 var (
-	// The keyword is PASSWORD in any case, a quoted "password", or a U& name,
-	// since the option list of a server or user mapping may name the option in
-	// any of these spellings. Inside a constant or a body it is matched as text.
-	// A bare PASSWORD must be a whole word, so a name such as password_hash does
-	// not cut the text. Go's \b reads a $ or a byte above ASCII as a boundary,
-	// where PostgreSQL reads a name character, so it can only over-redact.
-	passwordKeyword = regexp.MustCompile(`(?i)\bpassword\b|"password"|U&"(?:[^"]|"")*"(?:\s*uescape\s*'(?:[^']|'')*')?`)
-	// The value of a libpq key. libpq reads the string after the SQL literal
-	// around it is unescaped, so a doubled quote inside a literal stands for one
-	// quote, and a value in a dollar body holds its quotes as they are. An
-	// unquoted value runs to a blank, so it may hold quotes, and a backslash
-	// escapes the byte after it. A single-quoted value ends at an unescaped
-	// quote. A value continued by a constant on the next line is one value, as
-	// PostgreSQL joins the constants.
-	libpqPassword = regexp.MustCompile(`(?is)(\b(?:ssl)?password\s*=\s*)(?:''(?:[^']|'')*''|'(?:\\.|[^'\\])*'?|(?:'\s*[\r\n]\s*'|\\.|[^\s\\])+)`)
+	// The keyword is PASSWORD or SSLPASSWORD in any case, either name quoted,
+	// or a U& name, since the option list of a server or user mapping may name
+	// the option in any of these spellings. Inside a constant or a body it is
+	// matched as text. A bare keyword must be a whole word, so a name such as
+	// password_hash does not cut the text. Go's \b reads a $ or a byte above
+	// ASCII as a boundary, where PostgreSQL reads a name character, so it can
+	// only over-redact.
+	passwordKeyword = regexp.MustCompile(`(?i)\b(?:ssl)?password\b|"(?:ssl)?password"|U&"(?:[^"]|"")*"(?:\s*uescape\s*'(?:[^']|'')*')?`)
+	// A libpq password key and the equals sign after it. libpq allows blanks
+	// around the equals sign, and its value starts after them.
+	libpqKey = regexp.MustCompile(`(?i)\b(?:ssl)?password[ \t\n\v\f\r]*=[ \t\n\v\f\r]*`)
 )
+
+// valueBreakers are the bytes that, after a libpq value, show that the value
+// may go on in text the constant does not hold: a || operator or another
+// operator, the comma before the next argument of a function such as concat,
+// or a quote that opens another constant.
+const valueBreakers = "|,'+-*/<>=~!@#%^&?:`"
 
 // redactQueryText hides the credentials a statement carries before its text
 // is cached or shipped. The rest of the text is kept, so the statement stays
@@ -45,36 +50,183 @@ func redactQueryText(query string) string {
 	return conninfoURIPassword.ReplaceAllString(query, "${1}:[redacted]@")
 }
 
-// redactLibpqValues replaces the value of each libpq password key. A value
-// that runs to the end of a constant or a body is cut before the quote or tag
-// that closes it, since that delimiter is SQL, not part of the value.
+// redactLibpqValues replaces the value of each libpq password key in a string
+// constant or a dollar body. A key outside them is SQL, which the PASSWORD
+// rule reads. When the value cannot be told apart from the text around it,
+// the text from the constant that holds it to the end of the statement is
+// redacted.
 func redactLibpqValues(query string) string {
-	closers := closingDelimiters(query)
 	var spans []textSpan
-	for _, loc := range libpqPassword.FindAllStringSubmatchIndex(query, -1) {
-		start, end := loc[3], loc[1]
-		if n, ok := closers[end]; ok && end-n >= start {
-			end -= n
+	for i := 0; i < len(query); {
+		t := scanToken(query, i)
+		i = t.end
+		if t.kind != tokString && t.kind != tokBody {
+			continue
 		}
-		if end > start {
-			spans = append(spans, textSpan{start, end})
+		values, whole := libpqValueSpans(query, t)
+		if whole {
+			return applySpans(query[:t.start], spans, "[redacted]") + "'[redacted]'"
 		}
+		spans = append(spans, values...)
 	}
 	return applySpans(query, spans, "[redacted]")
 }
 
-// closingDelimiters maps the end of each closed string constant and dollar
-// body to the length of its closing delimiter.
-func closingDelimiters(query string) map[int]int {
-	closers := make(map[int]int)
-	for i := 0; i < len(query); {
-		t := scanToken(query, i)
-		i = t.end
-		if t.closing > 0 {
-			closers[t.end] = t.closing
+// libpqValueSpans returns the spans of the statement that hold the values of
+// the libpq password keys in the constant or body t. The keys and values are
+// read from the text t stands for, the way libpq reads them. A value is
+// replaced where it stands only when t holds all of it. Otherwise whole is
+// set, and t and the text after it are redacted. That is the case when:
+//   - the value is empty, starts with an operator byte such as the > of
+//     password => 'x', or holds a % that a format call fills;
+//   - a quoted value is not closed, or is followed by more than a blank;
+//   - a breaker follows the value, in t or after it, as when || joins more
+//     text to the value or the value is one argument of several;
+//   - the key lies in a constant of the text read as SQL, as in a body that
+//     passes the string to a function, where the value may be built from a
+//     variable set earlier in the body;
+//   - t is a plain constant with a backslash before a quote, which PostgreSQL
+//     ends elsewhere when standard_conforming_strings is off.
+func libpqValueSpans(query string, t token) (spans []textSpan, whole bool) {
+	text, _, _ := constantText(query, t, false)
+	keys := libpqKey.FindAllStringIndex(text, -1)
+	if len(keys) == 0 {
+		return nil, false
+	}
+	if t.kind == tokString && t.mode == plainString && strings.Contains(query[t.start:t.end], `\'`) {
+		return nil, true
+	}
+	text, from, to := constantText(query, t, true)
+	nested := nestedConstants(text)
+	n, done := 0, 0
+	for _, key := range keys {
+		if key[0] < done {
+			// The key is part of the value before it.
+			continue
+		}
+		for n < len(nested) && nested[n].end <= key[0] {
+			n++
+		}
+		if n < len(nested) && nested[n].start <= key[0] {
+			return nil, true
+		}
+		start := key[1]
+		end, quoted, closed := libpqValueEnd(text, start)
+		if end == start || !quoted && strings.IndexByte(valueBreakers, text[start]) >= 0 ||
+			strings.IndexByte(text[start:end], '%') >= 0 || quoted && !closed {
+			return nil, true
+		}
+		if quoted && end < len(text) && !isLibpqBlank(text[end]) {
+			return nil, true
+		}
+		next := end
+		for next < len(text) && isLibpqBlank(text[next]) {
+			next++
+		}
+		if next < len(text) {
+			if strings.IndexByte(valueBreakers, text[next]) >= 0 {
+				return nil, true
+			}
+		} else if after := skipSeparators(query, t.end); t.closing > 0 && after < len(query) &&
+			strings.IndexByte(valueBreakers, query[after]) >= 0 {
+			return nil, true
+		}
+		spans = append(spans, textSpan{from[start], to[end-1]})
+		done = end
+	}
+	return spans, false
+}
+
+// libpqValueEnd returns the index just past the libpq value that starts at
+// text[i], whether the value is quoted, and whether a quoted value is closed.
+// A quoted value ends at an unescaped quote and an unquoted one at a blank,
+// and a backslash escapes the byte after it, as libpq reads them.
+func libpqValueEnd(text string, i int) (end int, quoted, closed bool) {
+	if i < len(text) && text[i] == '\'' {
+		for j := i + 1; j < len(text); j++ {
+			switch text[j] {
+			case '\\':
+				j++
+			case '\'':
+				return j + 1, true, true
+			}
+		}
+		return len(text), true, false
+	}
+	for end = i; end < len(text) && !isLibpqBlank(text[end]); end++ {
+		if text[end] == '\\' {
+			end++
 		}
 	}
-	return closers
+	return min(end, len(text)), false, false
+}
+
+// isLibpqBlank reports whether c ends an unquoted libpq value.
+func isLibpqBlank(c byte) bool {
+	return strings.IndexByte(" \t\n\v\f\r", c) >= 0
+}
+
+// constantText returns the text that the string constant or dollar body t
+// stands for: the bytes between its quotes or tags, with the constants it
+// joins across line breaks. A doubled quote stands for one quote, and in an
+// E-string an escaped quote or backslash stands for itself; other escapes are
+// kept as written. With offsets, from[i] and to[i] bound the bytes of the
+// statement that byte i of the text was read from.
+func constantText(query string, t token, offsets bool) (text string, from, to []int) {
+	var b strings.Builder
+	add := func(c byte, start, end int) {
+		b.WriteByte(c)
+		if offsets {
+			from = append(from, start)
+			to = append(to, end)
+		}
+	}
+	if t.kind == tokBody {
+		for i := t.open; i < t.end-t.closing; i++ {
+			add(query[i], i, i+1)
+		}
+		return b.String(), from, to
+	}
+	for i := t.open; i < t.end; {
+		switch c := query[i]; {
+		case c == '\\' && t.mode == escapeString && i+1 < t.end:
+			if next := query[i+1]; next == '\'' || next == '\\' {
+				add(next, i, i+2)
+			} else {
+				add(c, i, i+1)
+				add(next, i+1, i+2)
+			}
+			i += 2
+		case c == '\'' && i+1 < t.end && query[i+1] == '\'':
+			add(c, i, i+2)
+			i += 2
+		case c == '\'' && i+1 == t.end:
+			i = t.end
+		case c == '\'':
+			// The quote closes one constant, and the constant that continues
+			// it opens after the blanks and the line break that follow.
+			next, _ := skipBlanks(query, i+1)
+			i = next + 1
+		default:
+			add(c, i, i+1)
+			i++
+		}
+	}
+	return b.String(), from, to
+}
+
+// nestedConstants returns the string constants and dollar bodies that text
+// holds when it is read as SQL, in order.
+func nestedConstants(text string) []textSpan {
+	var spans []textSpan
+	for i := 0; i < len(text); {
+		t := scanToken(text, i)
+		i = t.end
+		if t.kind == tokString || t.kind == tokBody {
+			spans = append(spans, textSpan{t.start, t.end})
+		}
+	}
+	return spans
 }
 
 // textSpan is a run of the statement text that is replaced by a redaction.
@@ -82,8 +234,9 @@ type textSpan struct{ start, end int }
 
 // redactPasswordValues replaces the value of each PASSWORD keyword and the
 // text from a constant or body that holds a keyword to the end of the
-// statement. The text is read once, from the start, so the cost grows with
-// its length.
+// statement. A value that a || operator joins to more text is redacted with
+// the rest of the statement. The text is read once, from the start, so the
+// cost grows with its length.
 func redactPasswordValues(query string) string {
 	var spans []textSpan
 	// cut is where the text is redacted to its end, or -1.
@@ -107,7 +260,7 @@ func redactPasswordValues(query string) string {
 		case tokString, tokBody:
 			if pending {
 				spans = append(spans, textSpan{t.start, t.end})
-				if t.backslash {
+				if t.backslash || strings.HasPrefix(query[skipSeparators(query, t.end):], "||") {
 					cut = earlier(cut, t.start)
 				}
 			}
@@ -119,7 +272,9 @@ func redactPasswordValues(query string) string {
 				backslash = t.start
 			}
 		default:
-			pending = false
+			// An operator after a keyword, as in password = 'x',
+			// f(password => 'x') or password := 'x', leaves its value to come.
+			pending = pending && t.end == t.start+1 && strings.IndexByte(":=<>!", query[t.start]) >= 0
 		}
 	}
 	if backslash >= 0 && hasPasswordKeyword(query[backslash:]) {
@@ -140,11 +295,13 @@ func earlier(cut, at int) int {
 }
 
 // hasPasswordKeyword reports whether the text of a constant or a body holds a
-// PASSWORD keyword that is not a libpq key. A key is followed by =, and no
-// PASSWORD keyword of a statement is, so that case is left to the libpq rule.
+// PASSWORD keyword that is not a libpq key. A key is a bare word followed by
+// =, and that case is left to the libpq rule, which also reads a password
+// column set with = in a body. A quoted or U& name is never a libpq key.
 func hasPasswordKeyword(text string) bool {
 	for _, loc := range passwordKeyword.FindAllStringIndex(text, -1) {
-		if !strings.HasPrefix(strings.TrimLeft(text[loc[1]:], " \t\r\n\f\v"), "=") {
+		named := text[loc[0]] == '"' || text[loc[0]+1] == '&'
+		if named || !strings.HasPrefix(strings.TrimLeft(text[loc[1]:], " \t\r\n\f\v"), "=") {
 			return true
 		}
 	}
@@ -191,13 +348,19 @@ type token struct {
 	kind  tokenKind
 	start int
 	end   int
-	// keyword is set for PASSWORD, a quoted "password", or a U& name.
+	// keyword is set for PASSWORD or SSLPASSWORD, either name quoted, or a U&
+	// name.
 	keyword bool
 	// backslash is set for a plain string constant that holds a backslash.
 	backslash bool
 	// closing is the length of the delimiter that closes a string constant or
 	// a dollar body, or 0 when the text ends before it.
 	closing int
+	// open is the index just past the quote or tag that opens a string
+	// constant or a dollar body.
+	open int
+	// mode is how a string constant reads a backslash.
+	mode stringMode
 }
 
 // stringMode is how a string constant reads a backslash.
@@ -226,7 +389,7 @@ func scanToken(s string, i int) token {
 		return stringToken(s, i, i, plainString)
 	case c == '"':
 		end := quotedEnd(s, i)
-		return token{kind: tokName, start: i, end: end, keyword: strings.EqualFold(s[i:end], `"password"`)}
+		return token{kind: tokName, start: i, end: end, keyword: end-i >= 2 && s[end-1] == '"' && isPasswordName(s[i+1:end-1])}
 	case c == '$':
 		if tagEnd := dollarTagEnd(s, i); tagEnd >= 0 {
 			return dollarToken(s, i, tagEnd)
@@ -254,7 +417,7 @@ func scanToken(s string, i int) token {
 		if end < len(s) && s[end] == '\'' && strings.EqualFold(word, "e") {
 			return stringToken(s, i, end, escapeString)
 		}
-		return token{kind: tokWord, start: i, end: end, keyword: strings.EqualFold(word, "password")}
+		return token{kind: tokWord, start: i, end: end, keyword: isPasswordName(word)}
 	}
 	return token{kind: tokOther, start: i, end: i + 1}
 }
@@ -268,6 +431,8 @@ func stringToken(s string, start, q int, mode stringMode) token {
 		start:     start,
 		end:       end,
 		backslash: mode == plainString && strings.IndexByte(s[start:end], '\\') >= 0,
+		open:      q + 1,
+		mode:      mode,
 	}
 	if closed {
 		t.closing = 1
@@ -299,7 +464,7 @@ func dollarToken(s string, start, tagEnd int) token {
 		end = tagEnd + i + len(tag)
 		closing = len(tag)
 	}
-	return token{kind: tokBody, start: start, end: end, closing: closing}
+	return token{kind: tokBody, start: start, end: end, closing: closing, open: tagEnd}
 }
 
 // dollarTagEnd returns the index just past the opening tag of a dollar-quoted
@@ -439,6 +604,11 @@ func blockCommentEnd(s string, i int) int {
 		}
 	}
 	return -1
+}
+
+// isPasswordName reports whether name is PASSWORD or SSLPASSWORD in any case.
+func isPasswordName(name string) bool {
+	return strings.EqualFold(name, "password") || strings.EqualFold(name, "sslpassword")
 }
 
 // isIdentStart reports whether c can start an unquoted identifier.
