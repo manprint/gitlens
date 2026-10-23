@@ -212,6 +212,41 @@ func TestCgroup_CPURatioIsShareOfOwnQuota(t *testing.T) {
 	require.InDelta(t, 1.0, *s.CPUUsedRatio, 1e-9)
 }
 
+// A reading that measured no time, or a usage counter that went backwards
+// because the cgroup was recreated, leaves the container ratio unknown. The
+// next reading is measured from it.
+func TestCgroup_CPURatioUnknownWhenNothingMeasured(t *testing.T) {
+	procDir, sysDir := t.TempDir(), t.TempDir()
+	writeCgroupFiles(t, procDir, map[string]string{"self/cgroup": "0::/\n"})
+	root := filepath.Join(sysDir, "fs", "cgroup")
+	writeCgroupFiles(t, root, map[string]string{
+		"cgroup.controllers": "cpu memory\n",
+		"cpu.max":            "200000 100000\n", // 2 cores
+		"cpu.stat":           "usage_usec 1000000\n",
+	})
+	c := NewCollector(procDir, sysDir)
+	now := time.Unix(1000, 0)
+	c.now = func() time.Time { return now }
+	sample := func() *float64 {
+		host := 0.125
+		s := Sample{Source: "host", CPUUsedRatio: &host}
+		c.applyCgroup(&s)
+		return s.CPUUsedRatio
+	}
+
+	require.Nil(t, sample(), "no previous reading")
+	require.Nil(t, sample(), "no time elapsed")
+
+	now = now.Add(time.Second)
+	writeCgroupFiles(t, root, map[string]string{"cpu.stat": "usage_usec 500000\n"})
+	require.Nil(t, sample(), "usage went backwards")
+
+	// One CPU-second in one second is half of a 2-core quota.
+	now = now.Add(time.Second)
+	writeCgroupFiles(t, root, map[string]string{"cpu.stat": "usage_usec 1500000\n"})
+	require.InDelta(t, 0.5, *sample(), 1e-9)
+}
+
 // Without a quota the host is the resource, so the host ratio stands.
 func TestCgroup_CPURatioKeepsHostWithoutQuota(t *testing.T) {
 	procDir, sysDir := t.TempDir(), t.TempDir()

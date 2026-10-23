@@ -153,12 +153,18 @@ func (c *Collector) applyV2CPURatio(dir string, s *Sample) {
 		s.CPUUsedRatio = nil
 		return
 	}
-	ratio := 0.0
-	if elapsed := now.Sub(prev.at); elapsed > 0 && usage > prev.usageUsec {
-		used := float64(usage - prev.usageUsec)
-		available := elapsed.Seconds() * 1e6 * quotaCores
-		ratio = math.Min(used/available, 1)
+	// No time elapsed, or a counter that went backwards (the cgroup was
+	// recreated), measures nothing. The ratio stays unknown rather than reading
+	// as an idle container. A counter that did not move over a real interval is
+	// idle and falls through to 0.
+	elapsed := now.Sub(prev.at)
+	if elapsed <= 0 || usage < prev.usageUsec {
+		s.CPUUsedRatio = nil
+		return
 	}
+	used := float64(usage - prev.usageUsec)
+	available := elapsed.Seconds() * 1e6 * quotaCores
+	ratio := math.Min(used/available, 1)
 	s.CPUUsedRatio = &ratio
 }
 
