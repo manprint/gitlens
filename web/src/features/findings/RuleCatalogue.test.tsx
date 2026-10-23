@@ -68,6 +68,30 @@ describe('RuleCatalogue', () => {
     expect(row).toHaveTextContent('1')
   })
 
+  it('UI-FIND-034 a muted finding is not counted as firing', () => {
+    renderCatalogue(
+      [{ id: 'rule-muted', severity: 'warning', scope: 'cluster', needs: [], min_tier: 'T0' }],
+      [
+        {
+          finding_id: 'finding-muted',
+          rule_id: 'rule-muted',
+          severity: 'warning',
+          state: 'muted',
+          scope: 'cluster',
+          cluster_id: 'cluster-1',
+          title: 'Muted finding',
+        },
+      ],
+    )
+
+    const row = within(screen.getByRole('table')).getByRole('row', { name: /rule-muted/ })
+    expect(
+      within(row)
+        .getAllByRole('cell')
+        .map((cell) => cell.textContent),
+    ).toEqual(['rule-muted', 'warning', 'cluster', 'None', 'T0', '0', '0'])
+  })
+
   it('UI-FIND-032 filtering by min_tier shows what a grant would unlock', () => {
     renderCatalogue()
 

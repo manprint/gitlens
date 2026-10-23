@@ -50,11 +50,7 @@ function makeRow(rule: AdvisorRule, findings: readonly FindingRecord[]): RuleCat
     scope: rule.scope,
     needs: rule.needs.length > 0 ? rule.needs.join(', ') : 'None',
     minTier: rule.min_tier,
-    firingInstances: countTargets(
-      findings,
-      rule.id,
-      (finding) => finding.state === 'open' || finding.state === 'muted',
-    ),
+    firingInstances: countTargets(findings, rule.id, (finding) => finding.state === 'open'),
     nonEvaluableInstances: countTargets(
       findings,
       rule.id,
