@@ -421,17 +421,32 @@ func setupRoles(ctx context.Context, pool *pgxpool.Pool) {
 		`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='pglens_nocontrol') THEN CREATE ROLE pglens_nocontrol LOGIN PASSWORD 'test'; END IF; END $$`,
 		`GRANT pg_monitor TO pglens_nocontrol`,
 
+		// Tier 1 and tier 2 mirror monitoring_user.sql with tier1=1 and
+		// tier1=1 tier2=1: each tier adds to the one below it.
 		`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='pglens_t1') THEN CREATE ROLE pglens_t1 LOGIN PASSWORD 'test'; END IF; END $$`,
 		`GRANT pg_monitor TO pglens_t1`,
 		`GRANT EXECUTE ON FUNCTION pg_control_system() TO pglens_t1`,
 		`GRANT EXECUTE ON FUNCTION pg_control_checkpoint() TO pglens_t1`,
+		`GRANT pg_read_all_stats TO pglens_t1`,
 		`GRANT pg_read_all_data TO pglens_t1`,
 
 		`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='pglens_t2') THEN CREATE ROLE pglens_t2 LOGIN PASSWORD 'test'; END IF; END $$`,
 		`GRANT pg_monitor TO pglens_t2`,
 		`GRANT EXECUTE ON FUNCTION pg_control_system() TO pglens_t2`,
 		`GRANT EXECUTE ON FUNCTION pg_control_checkpoint() TO pglens_t2`,
+		`GRANT pg_read_all_stats TO pglens_t2`,
+		`GRANT pg_read_all_data TO pglens_t2`,
 		`GRANT pg_signal_backend TO pglens_t2`,
+	}
+	// Every monitoring role is read-only inside PostgreSQL, as the deploy
+	// script makes pglens.
+	for _, role := range []string{"pglens_nocontrol", "pglens_t1", "pglens_t2"} {
+		stmts = append(stmts,
+			`ALTER ROLE `+role+` SET default_transaction_read_only = on`,
+			`ALTER ROLE `+role+` SET statement_timeout = '15s'`,
+			`ALTER ROLE `+role+` SET lock_timeout = '1s'`,
+			`ALTER ROLE `+role+` SET idle_in_transaction_session_timeout = '30s'`,
+		)
 	}
 	for _, s := range stmts {
 		_, _ = pool.Exec(ctx, s)

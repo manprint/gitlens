@@ -393,9 +393,12 @@ normalised statement is planned with `GENERIC_PLAN`, which needs PostgreSQL 16
 or later; on PostgreSQL 15 such a statement is rejected with that reason.
 `EXPLAIN ANALYZE` executes the statement: the agent accepts it at T1 only
 when the target sets `allow_explain_analyze: true`, only for a read-only
-statement (`SELECT`, `VALUES`, `WITH`, `TABLE`) without placeholders, and runs
-it inside a `READ ONLY` transaction that is rolled back, bounded to 30 seconds
-(15 seconds for plan-only). The web interface additionally offers ANALYZE
+statement (`SELECT`, `VALUES`, `WITH`, `TABLE`) without placeholders whose
+plan passes the guard described below, and runs it inside a `READ ONLY`
+transaction that is rolled back, bounded to 30 seconds (15 seconds for
+plan-only). Plan-only `EXPLAIN` of `INSERT`, `UPDATE`, `DELETE` or `MERGE`
+needs the write privilege on the table, which a read-only monitoring role does
+not hold, so PostgreSQL refuses it. The web interface additionally offers ANALYZE
 only at T2 and after explicit confirmation.
 `cancel` and `terminate` require T2 and `allow_signal: true`, and only target
 client backends. `pgstattuple` requires T1 and the `pgstattuple` extension
@@ -422,11 +425,19 @@ Security and operational boundaries:
 - The server validates authentication, envelope shape, command state and expiry;
   the agent is authoritative for capability, target-policy and execution gates.
 - `EXPLAIN ANALYZE` executes the selected statement. The read-only transaction
-  stops it from changing data, but it still consumes database resources, takes
-  locks, and runs the functions the statement calls; effects outside the
-  transaction (a `dblink` call, a signal sent by `pg_cancel_backend()` when the
-  role holds `pg_signal_backend`) are not undone. Keep
-  `allow_explain_analyze: false` unless this is acceptable for the target.
+  stops it from changing data; effects outside the transaction (a `dblink`
+  call, a signal, a session advisory lock) are not undone by it, so the agent
+  first inspects the statement, the database and the `EXPLAIN (VERBOSE)` plan
+  and refuses ANALYZE when anything could have such an effect: a user-defined
+  function, a function of an extension that is not known to only compute, a
+  volatile built-in that is not known to only read, a foreign or custom scan,
+  or a user-defined operator, cast, domain or aggregate whose calls a plan can
+  hide. A session holding `pg_signal_backend` plans as `pg_read_all_data`, and
+  every `EXPLAIN` connection is closed after use. The statement still consumes
+  database resources and takes locks; see
+  [docs/LIMITS.md](docs/LIMITS.md#4-explain-analyze-executes-the-statement) for
+  what remains outside these checks. Keep `allow_explain_analyze: false` unless
+  this is acceptable for the target.
 - Query text is never sent in a command payload. Plan history stores only
   explicitly requested plans, using a normalized query hash and JSON plan;
   placeholders may prevent a useful plan for parameter-sensitive statements.

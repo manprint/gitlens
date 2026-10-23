@@ -33,7 +33,8 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Release()
+	// The session ends with the command: see discardConn.
+	defer discardConn(ctx, conn)
 
 	statement, err := lookupStatement(ctx, target, conn, args.Datname, *args.QueryID)
 	if errorsIsNoRows(err) {
@@ -96,6 +97,17 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 	}
 	if _, err := conn.Exec(ctx, timeout); err != nil {
 		return nil, err
+	}
+	// Planning alone can run user code (see explain_guard.go), so privileges
+	// are dropped before anything is planned, and ANALYZE runs only once the
+	// guard has inspected the statement, the database and the plan.
+	if err := dropExplainPrivileges(ctx, conn, target.PGVersion().Major(), args.Analyze); err != nil {
+		return nil, err
+	}
+	if args.Analyze {
+		if err := guardAnalyze(ctx, conn, statement); err != nil {
+			return nil, err
+		}
 	}
 
 	explainSQL := fmt.Sprintf("EXPLAIN (%s) %s", options, statement)

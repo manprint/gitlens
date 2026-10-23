@@ -25,6 +25,33 @@ type explainConn struct {
 	lookupSQL   string
 	explainArgs []any
 	simpleSQL   []string
+
+	// The explain guard's answers: the session's privileges, the pg_proc
+	// rows for the names it looks up, the calls hidden in user-defined
+	// objects, and the VERBOSE plan it inspects (plan when nil).
+	session     string
+	functions   string
+	hidden      string
+	verbosePlan []byte
+	verboseErr  error
+	guardSQL    []string
+	released    bool
+}
+
+func (c *explainConn) guardAnswer(sql string) string {
+	answer, fallback := "", "[]"
+	switch {
+	case strings.Contains(sql, "explain guard, session"):
+		answer, fallback = c.session, `{"superuser":false,"signal":false,"read_all_data":true}`
+	case strings.Contains(sql, "explain guard, functions"):
+		answer = c.functions
+	case strings.Contains(sql, "explain guard, hidden calls"):
+		answer = c.hidden
+	}
+	if answer == "" {
+		return fallback
+	}
+	return answer
 }
 
 // SimpleQuery stands in for the verbatim simple-protocol path that
@@ -44,6 +71,18 @@ func (c *explainConn) QueryRow(_ context.Context, sql string, args ...any) pgx.R
 		c.lookupSQL = sql
 		return explainRow{value: c.statement, err: c.lookupErr}
 	}
+	if strings.HasPrefix(sql, "/* pglens: explain guard") {
+		c.guardSQL = append(c.guardSQL, sql)
+		return explainRow{value: []byte(c.guardAnswer(sql))}
+	}
+	if strings.HasPrefix(sql, "EXPLAIN (VERBOSE, FORMAT JSON, COSTS OFF)") {
+		c.execSQL = append(c.execSQL, sql)
+		plan := c.verbosePlan
+		if plan == nil {
+			plan = c.plan
+		}
+		return explainRow{value: plan, err: c.verboseErr}
+	}
 	c.execSQL = append(c.execSQL, sql)
 	c.explainArgs = args
 	return explainRow{value: c.plan, err: c.explainErr}
@@ -52,7 +91,7 @@ func (c *explainConn) Exec(_ context.Context, sql string, _ ...any) (pgconn.Comm
 	c.execSQL = append(c.execSQL, sql)
 	return pgconn.CommandTag{}, nil
 }
-func (c *explainConn) Release() {}
+func (c *explainConn) Release() { c.released = true }
 
 type explainRow struct {
 	value any

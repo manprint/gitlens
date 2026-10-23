@@ -49,15 +49,46 @@ under a 30-second statement timeout and is always rolled back, so PostgreSQL
 itself rejects writes, including data-modifying CTEs and `nextval()`, and a
 notification is discarded with the rollback.
 
+A read-only transaction does not contain a function whose effect lies outside
+it: `pg_cancel_backend()` and `pg_terminate_backend()` when the monitoring role
+holds `pg_signal_backend` (the T2 grant), session-level advisory locks (which
+survive `ROLLBACK`), `pg_logical_emit_message()`, `txid_current()`, remote work
+through `dblink`, and anything an untrusted procedural language can do. Before
+executing, the agent therefore inspects the statement, the database and the
+`EXPLAIN (VERBOSE)` plan — where views are expanded and SQL functions inlined —
+and refuses `EXPLAIN ANALYZE`, naming the reason, when:
+
+- the plan calls a user-defined function (its body is not part of the plan, and
+  the volatility it declares is not enforced by PostgreSQL), a function of an
+  extension outside a short list of extensions that only compute (PostGIS,
+  `pg_trgm`, `pgcrypto`, `hstore`, `citext`, ...), a volatile built-in function
+  outside a list of built-ins that only read or compute, or a function it
+  cannot identify;
+- the plan contains a `Foreign Scan` or a `Custom Scan`;
+- the database has a user-defined operator, cast, domain constraint or
+  aggregate that calls such a function, because a plan does not always show
+  those calls (`CASE x WHEN y` and `NULLIF` hide the equality operator, an
+  implicit cast shows as its argument);
+- the monitoring session is a superuser.
+
+Two defences do not depend on reading a plan. Planning can itself run code —
+PostgreSQL folds calls to `IMMUTABLE` functions with constant arguments and
+evaluates `STABLE` ones for estimates — so a session that holds
+`pg_signal_backend` plans as `pg_read_all_data` (and is refused if it cannot
+switch), and the connection an `EXPLAIN`, with or without `ANALYZE`, used is
+closed afterwards instead of returning to the pool, so a lock or setting left in
+the session ends with it. What remains outside every check is a function its
+owner declared `IMMUTABLE` or `STABLE` although it has effects outside the
+transaction (it runs while the statement is planned, before anything can be
+inspected, and can switch the role back with `set_config('role', ...)`), and a
+function or view replaced concurrently between the inspected plan and the
+executed one.
+
 The statement still executes. It takes the locks a normal run takes, can wait
 behind a conflicting lock and so queue ahead of later requests, uses CPU,
 memory, temporary files, and I/O until it finishes or times out, and can write
-WAL for hint bits or page pruning. A read-only transaction does not contain
-functions whose effect lies outside it: `pg_cancel_backend()` and
-`pg_terminate_backend()` when the monitoring role holds `pg_signal_backend`
-(the T2 grant), session-level advisory locks, and remote work through `dblink`.
-Keep `allow_explain_analyze: false` unless running the recorded statements is
-acceptable for the target.
+WAL for hint bits or page pruning. Keep `allow_explain_analyze: false` unless
+running the recorded statements is acceptable for the target.
 
 ## 5. Relation cardinality is bounded
 
