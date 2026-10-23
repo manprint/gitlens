@@ -126,6 +126,26 @@ describe('OverviewSection', () => {
     expect(steps.length).toBeGreaterThan(initialCalls)
   })
 
+  it('UI-INST-028 counts rolled-back transactions in the transactions tile', async () => {
+    server.use(
+      http.get(metricsUrl, ({ request }) => {
+        const metric = new URL(request.url).searchParams.get('metric') ?? ''
+        const rate =
+          metric === 'pg_xact_commit_total' ? 4 : metric === 'pg_xact_rollback_total' ? 2 : null
+        return HttpResponse.json({ series: [{ ts: '2026-08-27T01:00:00Z', value: rate }] })
+      }),
+    )
+
+    renderWithProviders(<OverviewSection database="app" instanceId={INSTANCE_ID} />, {
+      route: `/instances/${INSTANCE_ID}?db=app&range=24h`,
+    })
+    await settle()
+
+    expect(screen.getByRole('article', { name: 'Transactions per second' })).toHaveTextContent(
+      '6/s',
+    )
+  })
+
   it('UI-INST-027 asks for instance-wide metrics without a database and totals the stored rates', async () => {
     const databases = new Map<string, string | null>()
     server.use(
@@ -140,7 +160,9 @@ describe('OverviewSection', () => {
               ? 0.01
               : metric === 'pg_xact_commit_total'
                 ? 12.5
-                : null
+                : metric === 'pg_xact_rollback_total'
+                  ? 0.5
+                  : null
         return HttpResponse.json({
           series: [
             { ts: '2026-08-27T01:00:00Z', value: rate },
@@ -166,6 +188,7 @@ describe('OverviewSection', () => {
     }
     for (const metric of [
       'pg_xact_commit_total',
+      'pg_xact_rollback_total',
       'pg_blks_hit_total',
       'pg_blks_read_total',
       'pg_temp_bytes_total',

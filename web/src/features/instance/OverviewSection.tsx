@@ -66,6 +66,7 @@ function useOverviewMetricQueries(
     connectionsLimit: useQueryMetrics(instanceWide('pg_connections_limit')),
     connectionsUsed: useQueryMetrics(instanceWide('pg_connections_used')),
     deadlocks: useQueryMetrics(perDatabase('pg_deadlocks_total')),
+    rollbacks: useQueryMetrics(perDatabase('pg_xact_rollback_total')),
     tempBytes: useQueryMetrics(perDatabase('pg_temp_bytes_total')),
     transactions: useQueryMetrics(perDatabase('pg_xact_commit_total')),
     walRate: useQueryMetrics(instanceWide('pg_wal_lsn_bytes')),
@@ -121,7 +122,8 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
   // second, pg_wal_lsn_bytes is WAL bytes per second, and so on.
   const connectionsUsed = seriesFrom(queries.connectionsUsed)
   const connectionsLimit = seriesFrom(queries.connectionsLimit)
-  const transactionRate = seriesFrom(queries.transactions)
+  // Every transaction either commits or rolls back, so the tile counts both.
+  const transactionRate = sumSeries(seriesFrom(queries.transactions), seriesFrom(queries.rollbacks))
   const blksHit = seriesFrom(queries.blksHit)
   const blksRead = seriesFrom(queries.blksRead)
   const checkpointRate = sumSeries(
