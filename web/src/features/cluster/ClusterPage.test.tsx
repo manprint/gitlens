@@ -1,5 +1,5 @@
 import { act, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { Cluster } from '@/api/types'
 import { REFRESH } from '@/api/policy'
@@ -10,7 +10,7 @@ import { base as topologyBase } from '@/test/fixtures/getClusterTopology'
 import { base as replicationBase } from '@/test/fixtures/getClusterReplication'
 import { base as slotsBase, inactive as inactiveSlots } from '@/test/fixtures/getClusterSlots'
 import { renderWithProviders } from '@/test/render'
-import { ok, sequence, status } from '@/test/msw/handlers'
+import { never, ok, sequence, status } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 
 import { ClusterPage } from './ClusterPage'
@@ -60,6 +60,10 @@ function renderPage() {
   })
 }
 
+afterEach(() => {
+  server.events.removeAllListeners()
+})
+
 describe('ClusterPage', () => {
   it('UI-CLUS-040 renders not found with a link back for an unknown cluster id', async () => {
     configurePage()
@@ -85,6 +89,25 @@ describe('ClusterPage', () => {
     expect(screen.getByText('No replication observed for this cluster.')).toBeInTheDocument()
     vi.useRealTimers()
     await expectNoA11yViolations(document.body)
+  })
+
+  it('UI-CLUS-048 shows loading, not clean empty states, while lag, slots and drift are pending', async () => {
+    server.use(
+      ok('getClusters', [cluster]),
+      ok('getClusterTopology', topologyBase),
+      never('getClusterReplication'),
+      never('getClusterSettingsDrift'),
+      never('getClusterSlots'),
+    )
+    renderPage()
+    await settle()
+
+    expect(screen.queryByText('No drift detected')).not.toBeInTheDocument()
+    expect(screen.queryByText('No replication slots')).not.toBeInTheDocument()
+    expect(screen.queryByText('No replication lag data in this range')).not.toBeInTheDocument()
+    expect(screen.getByText('Loading replication lag')).toBeInTheDocument()
+    expect(screen.getByText('Loading replication slots')).toBeInTheDocument()
+    expect(screen.getByText('Loading configuration drift')).toBeInTheDocument()
   })
 
   it('UI-CLUS-042 keeps the graph and marks lag charts unavailable after a replication failure', async () => {
@@ -174,5 +197,29 @@ describe('ClusterPage', () => {
 
     expect(screen.getByTestId('cluster-topology-graph')).toBeInTheDocument()
     expect(screen.getByRole('alert')).toHaveTextContent('Could not load replication slots')
+  })
+
+  // A relative window read from the render clock gave every poll a second request.
+  it('UI-CLUS-049 sends one replication request per poll for a relative range', async () => {
+    const replicationRequests: string[] = []
+    server.events.on('request:start', ({ request }) => {
+      if (new URL(request.url).pathname.endsWith(`/clusters/${CLUSTER_ID}/replication`)) {
+        replicationRequests.push(request.url)
+      }
+    })
+    configurePage()
+    renderPage()
+    await settle()
+
+    const polls = 3
+    for (let poll = 0; poll < polls; poll += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(REFRESH.cluster.interval)
+      })
+      await settle()
+    }
+
+    // The mount fetch, then one per poll.
+    expect(replicationRequests).toHaveLength(polls + 1)
   })
 })

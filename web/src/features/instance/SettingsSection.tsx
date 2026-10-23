@@ -143,11 +143,15 @@ export function SettingsSection({ instanceId }: SettingsSectionProps) {
   const [search, setSearch] = useState('')
   const range = useMemo(() => parseRange(searchParams, new Date()), [searchParams])
   const changedSince = searchParams.get('changed_since') ?? range.from.toISOString()
-  const query = useInstanceSettings(instanceId, { changed_since: changedSince })
-  const settings = useMemo(
-    () => (query.data?.settings ?? []).filter((setting) => settingMatches(setting, search)),
-    [query.data?.settings, search],
-  )
+  // The latest scrape is fetched once, unfiltered. The change table is narrowed
+  // here, so the durability posture is never hidden by the selected range.
+  const query = useInstanceSettings(instanceId)
+  const changedSettings = useMemo(() => {
+    const since = Date.parse(changedSince)
+    return (query.data?.settings ?? []).filter(
+      (setting) => Date.parse(setting.changed_at) >= since && settingMatches(setting, search),
+    )
+  }, [changedSince, query.data?.settings, search])
 
   function updateChangedSince(value: string) {
     setSearchParams((previous) => {
@@ -173,7 +177,7 @@ export function SettingsSection({ instanceId }: SettingsSectionProps) {
     <Section
       id="settings"
       title="Settings and durability"
-      description="Observed PostgreSQL settings, restart state, and the durability posture derived from the selected time range."
+      description="Observed PostgreSQL settings and restart state. The durability posture is the latest scrape; the change table is narrowed to the selected time range."
     >
       {query.error && !query.data ? (
         <ErrorState
@@ -210,16 +214,14 @@ export function SettingsSection({ instanceId }: SettingsSectionProps) {
               Use selected range
             </button>
           </div>
-          {settings.length === 0 ? (
+          <DurabilitySummary settings={query.data.settings} />
+          {changedSettings.length === 0 ? (
             <EmptyState
               title="No setting changes"
               description="No observed setting changes match the selected time range and search."
             />
           ) : (
-            <>
-              <DurabilitySummary settings={settings} />
-              <SettingTable settings={settings} />
-            </>
+            <SettingTable settings={changedSettings} />
           )}
         </div>
       )}

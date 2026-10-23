@@ -17,8 +17,16 @@ interface SilenceEditorProps {
   onCreated: () => void
 }
 
+// A datetime-local input holds wall-clock text in the browser's own zone, and
+// isoTimestamp reads it back in that zone. The text therefore has to come from
+// the local getters: formatting UTC shifted every default window by the offset.
 function dateTimeLocal(timestamp: number): string {
-  return new Date(timestamp).toISOString().slice(0, 16)
+  const date = new Date(timestamp)
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return [
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+    `${pad(date.getHours())}:${pad(date.getMinutes())}`,
+  ].join('T')
 }
 
 function isoTimestamp(value: string): string | null {

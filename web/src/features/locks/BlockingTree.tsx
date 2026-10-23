@@ -42,6 +42,7 @@ interface TreeItemProps {
   currentTier: PermTier
   instanceId: string | undefined
   sampledAt: string | null
+  sampleStale: boolean
   expanded: boolean
   onKeyDown: (event: KeyboardEvent<HTMLLIElement>, entry: TreeEntry) => void
   onToggle: (key: string) => void
@@ -83,6 +84,13 @@ function sampleAge(sampledAt: string | null, now: Date): number | null {
   const timestamp = new Date(sampledAt).getTime()
   if (!Number.isFinite(timestamp)) return null
   return Math.max(0, (now.getTime() - timestamp) / 1000)
+}
+
+// A lock sample is stale when the server flags it or it is older than the
+// threshold. Signal actions depend on it, since the PID may have been reused.
+function sampleIsStale(response: LocksResponseLike, now: Date): boolean {
+  const age = sampleAge(response.sampled_at, now)
+  return response.stale || (age !== null && age > STALE_THRESHOLD_SECONDS)
 }
 
 function itemKey(parentKey: string | undefined, tree: BlockingTreeNode, index: number): string {
@@ -188,6 +196,7 @@ function TreeItem({
   currentTier,
   instanceId,
   sampledAt,
+  sampleStale,
   expanded,
   onKeyDown,
   onToggle,
@@ -247,7 +256,12 @@ function TreeItem({
             <>
               <LockDetails node={tree.node} sampledAt={sampledAt} />
               {instanceId ? (
-                <SignalActions node={tree.node} currentTier={currentTier} instanceId={instanceId} />
+                <SignalActions
+                  node={tree.node}
+                  currentTier={currentTier}
+                  instanceId={instanceId}
+                  sampleStale={sampleStale}
+                />
               ) : null}
             </>
           )}
@@ -269,6 +283,7 @@ function TreeItem({
                 currentTier={currentTier}
                 instanceId={instanceId}
                 sampledAt={sampledAt}
+                sampleStale={sampleStale}
                 expanded={expandedKeys.has(childEntry.key)}
                 onKeyDown={onKeyDown}
                 onToggle={onToggle}
@@ -315,6 +330,7 @@ export function BlockingTree({
   }
 
   const age = sampleAge(response.sampled_at, now)
+  const sampleStale = sampleIsStale(response, now)
   const entries = visibleEntries(forest, expandedKeys)
 
   if (forest.length === 0) {
@@ -408,6 +424,7 @@ export function BlockingTree({
               currentTier={currentTier}
               instanceId={instanceId}
               sampledAt={response.sampled_at}
+              sampleStale={sampleStale}
               expanded={expandedKeys.has(entry.key)}
               onKeyDown={handleKeyDown}
               onToggle={handleToggle}
@@ -494,6 +511,7 @@ export function LocksPage({ instanceId: explicitInstanceId }: LocksPageProps = {
                   ?.map(normalizeNode)
                   .filter((node): node is LockNode => node !== null) ?? []
               }
+              sessionsStale={sampleIsStale(response, new Date())}
             />
           ) : (
             <p role="status">Loading activity sample…</p>

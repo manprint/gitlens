@@ -118,15 +118,32 @@ export function AlertsPage() {
   const severity = readFilter(searchParams.get('severity'), severityFilters, 'all')
   const clusterId = searchParams.get('cluster_id') ?? ''
   const suppressed = readFilter(searchParams.get('suppressed'), suppressionFilters, 'all')
+  // The silence links from AlertRow name the silence they were built from. The
+  // list then shows the alerts that silence matches. A silence that is not in
+  // the list shows nothing rather than every alert, and the page says so.
+  const silenceId = searchParams.get('silence_id') ?? ''
   const alerts = alertsQuery.data ?? EMPTY_ALERTS
   const silences = silencesQuery.data ?? EMPTY_SILENCES
+  const silenceFilter = silenceId
+    ? silences.find((silence) => silence.silence_id === silenceId)
+    : undefined
+  // A silence that could not be loaded is not known to be absent, so the page
+  // must not say it is missing from the list.
+  const silenceNote = silencesQuery.error
+    ? 'The silence named in this link could not be checked, so no alerts are shown.'
+    : 'The silence named in this link is not in the current silences list.'
   const summary = useMemo(() => summariseAlerts(alerts), [alerts])
   const visibleAlerts = useMemo(
     () =>
       rankAlerts(
-        alerts.filter((alert) => matchesFilter(alert, state, severity, clusterId, suppressed)),
+        alerts.filter(
+          (alert) =>
+            matchesFilter(alert, state, severity, clusterId, suppressed) &&
+            (silenceId === '' ||
+              (silenceFilter !== undefined && matchSilence(alert, silenceFilter))),
+        ),
       ),
-    [alerts, clusterId, severity, state, suppressed],
+    [alerts, clusterId, severity, silenceFilter, silenceId, state, suppressed],
   )
   const activeSilences = useMemo(
     () =>
@@ -283,6 +300,23 @@ export function AlertsPage() {
           </button>
           <Detail alertKey={selectedAlertKey} />
         </Section>
+      ) : null}
+
+      {silenceId ? (
+        <div className="flex flex-wrap items-center gap-3 text-sm" role="status">
+          <span>
+            {silenceFilter
+              ? `Showing alerts matched by silence “${silenceFilter.reason}”.`
+              : silenceNote}
+          </span>
+          <button
+            className="underline"
+            onClick={() => updateFilter('silence_id', '')}
+            type="button"
+          >
+            Show all alerts
+          </button>
+        </div>
       ) : null}
 
       <Section

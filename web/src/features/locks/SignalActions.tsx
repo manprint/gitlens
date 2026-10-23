@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 
 import { useCreateCommand } from '@/api/commands'
 import type { PermTier } from '@/api/types'
@@ -21,6 +22,9 @@ interface SignalActionsProps {
   node: LockNode
   instanceId?: string
   currentTier: PermTier
+  // Set when the lock sample is stale. The session may have ended and its PID
+  // been reused since the sample, and the command carries only the PID.
+  sampleStale?: boolean
 }
 
 interface CommandHandle {
@@ -65,7 +69,7 @@ function actionButton(kind: SignalKind, onClick: () => void, disabled = false) {
   )
 }
 
-function commandStatus(handle: CommandHandle, instanceId?: string) {
+function commandStatus(handle: CommandHandle) {
   const command = handle.command.data
   if (!command) return null
   const terminal = isTerminalCommandState(command.state)
@@ -73,22 +77,25 @@ function commandStatus(handle: CommandHandle, instanceId?: string) {
   return (
     <p role="status" className="mt-2 text-sm">
       {describeCommandState(command.state, command.error)}
-      {terminal && instanceId ? (
+      {terminal ? (
         <>
           {' '}
-          <a
-            className="text-primary underline underline-offset-2"
-            href={`/api/v1/instances/${encodeURIComponent(instanceId)}/command-audit`}
-          >
+          {/* The audit is a section of Settings; its API endpoint returns raw JSON. */}
+          <Link className="text-primary underline underline-offset-2" to="/settings">
             View command audit
-          </a>
+          </Link>
         </>
       ) : null}
     </p>
   )
 }
 
-export function SignalActions({ node, instanceId, currentTier }: SignalActionsProps) {
+export function SignalActions({
+  node,
+  instanceId,
+  currentTier,
+  sampleStale = false,
+}: SignalActionsProps) {
   const cancelCommand = useCreateCommand(instanceId)
   const terminateCommand = useCreateCommand(instanceId)
   const [openKind, setOpenKind] = useState<SignalKind | null>(null)
@@ -104,7 +111,6 @@ export function SignalActions({ node, instanceId, currentTier }: SignalActionsPr
     terminate: terminateCommand,
   }
   const selectedHandle = openKind ? handles[openKind] : null
-  const policyClosed = node.allow_signal === false
   const belowT2 = currentTier !== 'T2'
   const unavailable = !isClientBackend(node)
 
@@ -117,7 +123,7 @@ export function SignalActions({ node, instanceId, currentTier }: SignalActionsPr
   }
 
   const submit = () => {
-    if (!openKind || pid === null) return
+    if (!openKind || pid === null || sampleStale) return
     handles[openKind].mutate({
       args: { pid },
       kind: openKind,
@@ -127,11 +133,11 @@ export function SignalActions({ node, instanceId, currentTier }: SignalActionsPr
 
   const buttons = (
     <div className="mt-3 flex flex-wrap gap-2" aria-label={`Signal actions for PID ${pidLabel}`}>
-      {actionButton('cancel', () => setOpenKind('cancel'), belowT2 || policyClosed || pid === null)}
+      {actionButton('cancel', () => setOpenKind('cancel'), belowT2 || pid === null || sampleStale)}
       {actionButton(
         'terminate',
         () => setOpenKind('terminate'),
-        belowT2 || policyClosed || pid === null,
+        belowT2 || pid === null || sampleStale,
       )}
     </div>
   )
@@ -142,13 +148,20 @@ export function SignalActions({ node, instanceId, currentTier }: SignalActionsPr
         <NotPermitted required="T2" current={currentTier}>
           {actionButton('cancel', () => setOpenKind('cancel'), true)}
         </NotPermitted>
-      ) : policyClosed ? (
-        <div role="status" className="border-muted bg-muted/30 mt-3 p-3 text-sm">
-          <p>Signal actions are disabled because the target reports allow_signal=false.</p>
-          {buttons}
-        </div>
       ) : (
-        buttons
+        <>
+          {buttons}
+          {/* The locks response does not carry the target's allow_signal setting, so
+              the agent's refusal arrives as the command result, not as a disabled button. */}
+          <p className="text-muted-foreground mt-1 text-xs">
+            Signals remain subject to allow_signal on the target.
+          </p>
+          {sampleStale ? (
+            <p className="text-muted-foreground mt-1 text-xs">
+              Signal actions are disabled until a fresh lock sample arrives.
+            </p>
+          ) : null}
+        </>
       )}
       {belowT2 ? (
         <>
@@ -158,8 +171,8 @@ export function SignalActions({ node, instanceId, currentTier }: SignalActionsPr
           {actionButton('terminate', () => setOpenKind('terminate'), true)}
         </>
       ) : null}
-      {commandStatus(cancelCommand, instanceId)}
-      {commandStatus(terminateCommand, instanceId)}
+      {commandStatus(cancelCommand)}
+      {commandStatus(terminateCommand)}
       {cancelCommand.error ? (
         <ErrorState
           endpoint="cancel command"
@@ -206,6 +219,7 @@ export function SignalActions({ node, instanceId, currentTier }: SignalActionsPr
             <Button
               type="button"
               variant={openKind === 'terminate' ? 'destructive' : 'default'}
+              disabled={sampleStale}
               onClick={submit}
             >
               {openKind === 'terminate' ? 'Terminate backend' : 'Cancel query'}

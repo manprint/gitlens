@@ -19,9 +19,11 @@ function eventDay(ts: string): string {
   return Number.isNaN(date.getTime()) ? 'Unknown day' : date.toISOString().slice(0, 10)
 }
 
-function eventTime(ts: string): string {
+// A malformed timestamp has no day or time, so the element says that once
+// instead of showing the day's placeholder next to an empty time.
+function eventWhen(ts: string): string {
   const formatted = formatTimestamp(ts, 'UTC', 'en-GB')
-  return formatted === UNKNOWN ? 'Unknown time' : formatted.slice(11, 19)
+  return formatted === UNKNOWN ? 'Unknown time' : `${eventDay(ts)} ${formatted.slice(11, 19)}`
 }
 
 function groupEvents(events: readonly ClusterEvent[]): EventDay[] {
@@ -73,9 +75,7 @@ function EventCard({ event }: { event: ClusterEvent }) {
       <header className="flex flex-wrap items-baseline gap-2">
         <strong>{description.title}</strong>
         <span className="text-muted-foreground text-xs uppercase">{description.severity}</span>
-        <time dateTime={event.ts}>
-          {eventDay(event.ts)} {eventTime(event.ts)}
-        </time>
+        <time dateTime={event.ts}>{eventWhen(event.ts)}</time>
       </header>
       {unknown ? (
         <p>

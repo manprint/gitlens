@@ -57,25 +57,6 @@ describe('EventTimeline', () => {
     expect(screen.getByRole('article')).toHaveAttribute('data-severity', 'critical')
   })
 
-  it('UI-CLUS-034 renders an unreadable event time as unknown rather than an empty clock', () => {
-    renderWithProviders(
-      <EventTimeline
-        events={[
-          {
-            cluster_id: '1',
-            event_id: 4,
-            instance_id: null,
-            payload: {},
-            ts: 'not-a-date',
-            type: 'future_event',
-          },
-        ]}
-      />,
-    )
-
-    expect(screen.getByRole('article')).toHaveTextContent('Unknown day Unknown time')
-  })
-
   it('UI-CLUS-033 an unrecognised type renders its raw string rather than being dropped', () => {
     renderWithProviders(
       <EventTimeline
@@ -130,5 +111,56 @@ describe('EventTimeline', () => {
     })
     expect(router.state.location.search).toBe('?type=agent_up')
     expect(screen.getByText('Agent recovered')).toBeInTheDocument()
+  })
+
+  it('UI-CLUS-050 titles the four emitted types the taxonomy lacked instead of the unknown fallback', () => {
+    // The literals the server writes to the events table: staleness.go,
+    // inventory.go and pipeline.go.
+    const emitted = [
+      'instance_unreachable',
+      'instance_reachable',
+      'cardinality_truncated',
+      'cluster_identity_conflict',
+    ]
+    renderWithProviders(
+      <EventTimeline
+        events={emitted.map((type, index) => ({
+          cluster_id: '1',
+          event_id: index + 1,
+          instance_id: null,
+          payload: {},
+          ts: '2026-08-31T10:00:00Z',
+          type,
+        }))}
+      />,
+    )
+
+    expect(screen.queryByText('Unknown event type')).not.toBeInTheDocument()
+    expect(screen.getByText('Instance unreachable')).toBeInTheDocument()
+    expect(screen.getByText('Instance reachable')).toBeInTheDocument()
+    expect(screen.getByText('Series truncated by cardinality budget')).toBeInTheDocument()
+    const identityConflict = screen
+      .getAllByRole('article')
+      .find((article) => within(article).queryByText('Cluster identity conflict') !== null)
+    expect(identityConflict).toHaveAttribute('data-severity', 'warning')
+  })
+
+  it('UI-CLUS-037 an event with a malformed timestamp shows Unknown time, not a blank time', () => {
+    renderWithProviders(
+      <EventTimeline
+        events={[
+          {
+            cluster_id: '1',
+            event_id: 1,
+            instance_id: null,
+            payload: {},
+            ts: 'not-a-date',
+            type: 'agent_up',
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByText('Unknown time')).toBeInTheDocument()
   })
 })

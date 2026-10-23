@@ -103,13 +103,7 @@ describe('EventsPage', () => {
   it('UI-ALERT-053 marks an old event snapshot as Stale', async () => {
     const view = await renderPage()
     view.queryClient.setQueryData(
-      qk.events(
-        undefined,
-        undefined,
-        new Date(NOW.getTime() - 60 * 60 * 1_000).toISOString(),
-        NOW.toISOString(),
-        100,
-      ),
+      qk.events(undefined, undefined, { durationMs: 60 * 60 * 1_000 }, 100),
       [baseEvent],
       { updatedAt: Date.now() - REFRESH.activity.staleAfter },
     )
@@ -170,5 +164,46 @@ describe('EventsPage', () => {
     await settle()
 
     expect(screen.getByText('Firing alerts: 1')).toBeInTheDocument()
+  })
+
+  it('UI-ALERT-057 moves a relative window with the clock on each poll', async () => {
+    const eventWindows: { from: string | null; to: string | null }[] = []
+    server.events.on('request:start', ({ request }) => {
+      const url = new URL(request.url)
+      if (url.pathname.endsWith('/api/v1/events')) {
+        eventWindows.push({ from: url.searchParams.get('from'), to: url.searchParams.get('to') })
+      }
+    })
+    try {
+      await renderPage('/events?range=15m')
+      vi.setSystemTime(new Date(NOW.getTime() + 10 * 60 * 1_000))
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(REFRESH.activity.interval + 1)
+      })
+      await settle()
+
+      const first = eventWindows[0]
+      const latest = eventWindows.at(-1)
+      expect(eventWindows.length).toBeGreaterThanOrEqual(2)
+      expect(latest?.to).not.toBe(first?.to)
+      expect(latest?.from).not.toBe(first?.from)
+      expect(new Date(latest?.to ?? 0).getTime()).toBeGreaterThanOrEqual(
+        NOW.getTime() + 10 * 60 * 1_000,
+      )
+    } finally {
+      server.events.removeAllListeners()
+    }
+  })
+
+  it('UI-ALERT-058 counts a suppressed firing alert as suppressed, not firing, as the alerts page does', async () => {
+    await renderPage(
+      '/events?range=1h',
+      [baseEvent],
+      [alert({ state: 'firing', suppressed: true })],
+    )
+
+    expect(screen.queryByText('Firing alerts: 1')).not.toBeInTheDocument()
+    expect(screen.getByText(/No alerts firing/)).toBeInTheDocument()
+    expect(screen.getByText('Suppression: Suppressed')).toBeInTheDocument()
   })
 })

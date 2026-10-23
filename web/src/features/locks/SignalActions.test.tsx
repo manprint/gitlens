@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw/http'
+import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { expectNoA11yViolations } from '@/test/a11y'
@@ -33,6 +34,23 @@ function commandHandlers(response: object) {
       HttpResponse.json({ command_id: COMMAND_ID }, { status: 202 }),
     ),
     http.get('*/api/v1/commands/:id', () => HttpResponse.json(response)),
+  )
+}
+
+function StaleAfterOpen() {
+  const [sampleStale, setSampleStale] = useState(false)
+  return (
+    <>
+      <button type="button" onClick={() => setSampleStale(true)}>
+        Sample goes stale
+      </button>
+      <SignalActions
+        node={node}
+        instanceId={INSTANCE_ID}
+        currentTier="T2"
+        sampleStale={sampleStale}
+      />
+    </>
   )
 }
 
@@ -111,7 +129,7 @@ describe('SignalActions', () => {
     )
     expect(screen.getByRole('link', { name: 'View command audit' })).toHaveAttribute(
       'href',
-      `/api/v1/instances/${INSTANCE_ID}/command-audit`,
+      '/settings',
     )
   })
 
@@ -119,6 +137,15 @@ describe('SignalActions', () => {
     renderActions()
 
     expect(screen.queryByRole('button', { name: /terminate all/i })).not.toBeInTheDocument()
+  })
+
+  it('UI-LOCK-054 says signals remain subject to allow_signal on the target', () => {
+    renderActions()
+
+    expect(
+      screen.getByText('Signals remain subject to allow_signal on the target.'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Terminate backend/ })).toBeEnabled()
   })
 
   it('keeps both confirmation dialogs accessible', async () => {
@@ -133,5 +160,24 @@ describe('SignalActions', () => {
     const terminateDialog = openDialog('terminate')
     expect(terminateDialog).toBeInTheDocument()
     await expectNoA11yViolations(terminateDialog)
+  })
+
+  it('UI-LOCK-047 disables both actions while the lock sample is stale', () => {
+    renderActions({ sampleStale: true })
+
+    expect(screen.getByRole('button', { name: /Cancel query/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /Terminate backend/ })).toBeDisabled()
+    expect(screen.getByText(/disabled until a fresh lock sample arrives/)).toBeInTheDocument()
+  })
+
+  it('UI-LOCK-048 a confirmation opened on a fresh sample cannot submit once it goes stale', () => {
+    renderWithProviders(<StaleAfterOpen />)
+    openDialog('terminate')
+
+    fireEvent.click(screen.getByText('Sample goes stale'))
+
+    expect(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Terminate backend' }),
+    ).toBeDisabled()
   })
 })

@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
 import { useInstanceDatabases, useInstanceHost } from '@/api/queries'
+import { REFRESH } from '@/api/policy'
 import type { Schemas } from '@/api/types'
 import { DataTable } from '@/components/layout/DataTable'
 import { Section } from '@/components/layout/Section'
@@ -70,7 +71,7 @@ function instanceMatchesFilter(instance: InstanceRow, filter: string): boolean {
 }
 
 function HostMetricsCell({ instanceId }: { instanceId: string }) {
-  const query = useInstanceHost(instanceId)
+  const query = useInstanceHost(instanceId, REFRESH.inventory)
 
   if (query.error && !query.data) {
     return <span title="The host metrics endpoint could not be loaded">Unavailable</span>
@@ -159,7 +160,7 @@ function databaseColumns() {
 }
 
 function DatabaseInventory({ instance }: { instance: InstanceRow }) {
-  const query = useInstanceDatabases(instance.instance_id)
+  const query = useInstanceDatabases(instance.instance_id, REFRESH.inventory)
   const title = `Databases — ${instance.addr}:${instance.port}`
 
   if (query.error && !query.data) {
@@ -232,7 +233,7 @@ function TierSummary({ instances, rules }: Pick<InventoryTablesProps, 'instances
               : tier === 'T1'
                 ? [
                     'Run plan-only EXPLAIN on eligible targets.',
-                    'ANALYZE remains subject to allow_explain_analyze on the target.',
+                    'EXPLAIN ANALYZE is accepted when the target sets allow_explain_analyze; the interface offers it at T2 only.',
                   ]
                 : [
                     'Cancel or terminate client backends on eligible targets.',
@@ -329,6 +330,9 @@ function AgentInventory({ instances, alerts }: Pick<InventoryTablesProps, 'insta
 export function InventoryTables({ alerts, clusters, instances, rules }: InventoryTablesProps) {
   const [searchParams, setSearchParams] = useSearchParams()
   const filter = searchParams.get('q') ?? ''
+  // Built once. Fresh column definitions on each render give the host cell a
+  // new component type, so every render remounts it and refetches its metrics.
+  const instanceTableColumns = useMemo(() => instanceColumns(), [])
   const clusterByInstance = useMemo(() => {
     const result = new Map<string, Cluster>()
     for (const cluster of clusters) {
@@ -378,7 +382,7 @@ export function InventoryTables({ alerts, clusters, instances, rules }: Inventor
         </label>
         <DataTable
           ariaLabel="Monitored instances"
-          columns={instanceColumns()}
+          columns={instanceTableColumns}
           data={rows}
           emptyState={
             instances.length === 0 ? (

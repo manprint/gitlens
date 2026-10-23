@@ -15,6 +15,10 @@ export const DOCUMENTED_EVENT_TYPES = [
   'agent_up',
   'duplicate_instance_suspected',
   'cluster_id_changed',
+  'instance_unreachable',
+  'instance_reachable',
+  'cardinality_truncated',
+  'cluster_identity_conflict',
 ] as const
 
 export type DocumentedEventType = (typeof DOCUMENTED_EVENT_TYPES)[number]
@@ -106,6 +110,33 @@ export function describeDocumentedEvent(type: DocumentedEventType): EventDescrip
         severity: 'critical',
         title: 'Cluster identity changed',
         whatToCheck: 'Investigate invariant I-1 and review the agent system_identifier and logs.',
+      }
+    case 'instance_unreachable':
+      return {
+        severity: 'warning',
+        title: 'Instance unreachable',
+        whatToCheck:
+          'The server stopped receiving reports from the instance. Check its agent and network path.',
+      }
+    case 'instance_reachable':
+      return {
+        severity: 'info',
+        title: 'Instance reachable',
+        whatToCheck: 'Confirm the instance is operating normally after the reporting gap.',
+      }
+    case 'cardinality_truncated':
+      return {
+        severity: 'warning',
+        title: 'Series truncated by cardinality budget',
+        whatToCheck:
+          'The payload names the check and database. Reduce the objects it reports, or review its budget.',
+      }
+    case 'cluster_identity_conflict':
+      return {
+        severity: 'warning',
+        title: 'Cluster identity conflict',
+        whatToCheck:
+          'The instance reported its configured cluster_name, not its system identifier. Apply monitoring_user.sql, then align cluster_name.',
       }
     default: {
       const exhaustive: never = type

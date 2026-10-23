@@ -197,6 +197,19 @@ describe('FindingsPage', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Could not load advisor rules')
   })
 
+  it('UI-FIND-047 does not call a degraded finding a missing rule when the catalogue fails to load', async () => {
+    server.use(
+      ok('getFindings', [finding({ state: 'degraded', title: 'Evaluation unavailable' })]),
+      status('getAdvisorRules', 500, { error: 'internal_error', detail: 'catalogue unavailable' }),
+    )
+    await renderPage()
+
+    const card = screen.getByRole('article', { name: 'Evaluation unavailable' })
+    expect(within(card).queryByText(/collect the missing inputs/)).not.toBeInTheDocument()
+    expect(within(card).queryByText('Rule metadata unavailable')).not.toBeInTheDocument()
+    expect(screen.getByText(/explanations are unavailable/i)).toBeInTheDocument()
+  })
+
   it('UI-FIND-043 renders Stale after the last findings snapshot ages past its threshold', async () => {
     const view = await renderFindings()
 

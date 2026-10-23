@@ -3,14 +3,14 @@ import { Link } from 'react-router-dom'
 import { useAshTop } from '@/api/queries'
 import type { AshTopQuery } from '@/lib/ash'
 import { topQueries } from '@/lib/ash'
+import type { QueryWindow } from '@/lib/timerange'
 import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState } from '@/components/state'
 
 interface AshTopQueriesProps {
   database?: string
-  from: Date
   instanceId: string
-  to: Date
+  timeWindow: QueryWindow
   /** The drilled wait event, so the list ranks the queries seen in it. */
   waitEvent?: string
   waitEventType?: string
@@ -64,22 +64,19 @@ function scopeDescription(waitEventType?: string, waitEvent?: string): string {
 
 export function AshTopQueries({
   database,
-  from,
   instanceId,
-  to,
+  timeWindow,
   waitEvent,
   waitEventType,
 }: AshTopQueriesProps) {
   const params = {
-    from: from.toISOString(),
     instance_id: instanceId,
     limit: 20,
-    to: to.toISOString(),
     ...(database === undefined ? {} : { database }),
     ...(waitEventType === undefined ? {} : { wait_event_type: waitEventType }),
     ...(waitEvent === undefined ? {} : { wait_event: waitEvent }),
   }
-  const query = useAshTop(params)
+  const query = useAshTop(params, timeWindow)
 
   if (query.error && !query.data) {
     return (

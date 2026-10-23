@@ -8,7 +8,10 @@ import { renderWithProviders } from '@/test/render'
 import { server } from '@/test/msw/server'
 
 function StatementsProbe() {
-  const query = useStatements({ instance_id: 'i-1', from: '2026-01-01T00:00:00Z' })
+  const query = useStatements(
+    { instance_id: 'i-1' },
+    { from: '2026-01-01T00:00:00Z', to: '2026-01-01T01:00:00Z' },
+  )
   return <output data-testid="probe">{query.isLoading ? 'loading' : 'settled'}</output>
 }
 

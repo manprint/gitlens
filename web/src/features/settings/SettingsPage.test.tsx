@@ -54,6 +54,15 @@ async function settleInitialQueries() {
   })
 }
 
+async function settleFakeTimers() {
+  await act(async () => {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await vi.advanceTimersByTimeAsync(0)
+      await Promise.resolve()
+    }
+  })
+}
+
 interface RenderSettingsOptions {
   alerts?: Alert[]
   clusters?: Schemas['Cluster'][]
@@ -237,6 +246,17 @@ describe('SettingsPage', () => {
     ).toBeInTheDocument()
   })
 
+  it('UI-SET-036 the T1 card says the interface offers EXPLAIN ANALYZE only at T2', async () => {
+    renderSettings()
+    await settleInitialQueries()
+
+    expect(
+      screen.getByText(
+        'EXPLAIN ANALYZE is accepted when the target sets allow_explain_analyze; the interface offers it at T2 only.',
+      ),
+    ).toBeInTheDocument()
+  })
+
   it('UI-SET-004 the agent view is derived from last_seen and alerts', async () => {
     renderSettings({
       alerts: [baseAlert],
@@ -286,4 +306,30 @@ describe('SettingsPage', () => {
 
     await expectNoA11yViolations(view.container)
   }, 15000)
+
+  it('UI-SET-035 polls the per-instance inventory less often than the instance policy', async () => {
+    const inventoryPaths: string[] = []
+    const countInventory = ({ request }: { request: Request }) => {
+      const { pathname } = new URL(request.url)
+      if (/\/api\/v1\/instances\/[^/]+\/(host|databases|command-audit)$/.test(pathname)) {
+        inventoryPaths.push(pathname)
+      }
+    }
+    server.events.on('request:start', countInventory)
+    try {
+      renderSettings({ clusters: [] })
+      await settleFakeTimers()
+      expect(inventoryPaths.length).toBeGreaterThan(0)
+
+      inventoryPaths.length = 0
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(REFRESH.instance.interval + 1_000)
+      })
+      await settleFakeTimers()
+
+      expect(inventoryPaths).toEqual([])
+    } finally {
+      server.events.removeListener('request:start', countInventory)
+    }
+  })
 })

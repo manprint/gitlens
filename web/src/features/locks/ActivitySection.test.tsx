@@ -100,6 +100,20 @@ describe('ActivitySection', () => {
     ).toBeInTheDocument()
   })
 
+  it('UI-LOCK-025 keeps a small deadlock rate visible instead of rounding it to zero', () => {
+    render(
+      <ActivitySection
+        response={response({
+          // About 14 deadlocks an hour: two decimals would read 0.00 per second.
+          pg_deadlocks_total: [metric(0.0039, 0, { database: 'app' })],
+        })}
+        now={NOW}
+      />,
+    )
+
+    expect(screen.getByRole('article', { name: 'Deadlock rate' })).toHaveTextContent('0.0039')
+  })
+
   it('renders reported application counts and remains accessible', async () => {
     vi.useRealTimers()
     const { container } = render(
@@ -158,5 +172,33 @@ describe('ActivitySection', () => {
       'Signal actions unavailable: PID — is not a client backend.',
     )
     expect(screen.getByRole('button', { name: 'Cancel query' })).toBeInTheDocument()
+  })
+
+  it('UI-LOCK-051 disables session signal actions while the activity sample is stale', () => {
+    renderWithProviders(
+      <ActivitySection
+        currentTier="T2"
+        instanceId="11111111-1111-4111-8111-111111111111"
+        now={NOW}
+        response={{ stale: true, metrics: {} }}
+        sessions={[{ pid: 42, backend_type: 'client backend' }]}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Terminate backend' })).toBeDisabled()
+  })
+
+  it('UI-LOCK-056 disables session signal actions when the activity sample is older than the threshold without a stale flag', () => {
+    renderWithProviders(
+      <ActivitySection
+        currentTier="T2"
+        instanceId="11111111-1111-4111-8111-111111111111"
+        now={NOW}
+        response={response({ pg_connections_used: [metric(10, 60)] })}
+        sessions={[{ pid: 42, backend_type: 'client backend' }]}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Terminate backend' })).toBeDisabled()
   })
 })

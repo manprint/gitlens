@@ -6,6 +6,7 @@ import {
   rankRoots,
   treeDepth,
   waitDuration,
+  type BlockingTree,
   type BlockingTreeNode,
   type LockNode,
 } from './locks'
@@ -16,6 +17,30 @@ function lock(pid: number, blocked_by: number[] = [], overrides: Partial<LockNod
 
 function countEntries(forest: readonly BlockingTreeNode[]): number {
   return forest.reduce((count, tree) => count + 1 + countEntries(tree.children), 0)
+}
+
+// Each placed parent-child pair as a string, so two trees compare as sets of edges
+// whatever order their children were listed in. A cycle marker ends in * and a
+// reference to a session placed in another root's tree ends in &.
+function edgesOf(forest: BlockingTree): string[] {
+  const edges: string[] = []
+  const visit = (parent: string, tree: BlockingTreeNode) => {
+    const child = `${parent}>${tree.node.pid}${tree.cycle ? '*' : ''}${tree.reference ? '&' : ''}`
+    edges.push(child)
+    for (const grandchild of tree.children) visit(String(tree.node.pid), grandchild)
+  }
+  for (const root of forest) visit('root', root)
+  return edges.sort()
+}
+
+function permutations<T>(items: readonly T[]): T[][] {
+  if (items.length <= 1) return [[...items]]
+  return items.flatMap((item, index) =>
+    permutations([...items.slice(0, index), ...items.slice(index + 1)]).map((rest) => [
+      item,
+      ...rest,
+    ]),
+  )
 }
 
 describe('lock-tree derivation', () => {
@@ -106,5 +131,41 @@ describe('lock-tree derivation', () => {
     expect(buildBlockingTree([])).toEqual([])
     expect(treeDepth([])).toBe(0)
     expect(blockedCount([])).toBe(0)
+  })
+
+  it('UI-LOCK-057 places a queue that every waiter lists in full once, under the holder', () => {
+    const waiters = Array.from({ length: 20 }, (_, index) =>
+      lock(index + 2, [1, ...Array.from({ length: index }, (_, earlier) => earlier + 2)]),
+    )
+
+    const forest = buildBlockingTree([lock(1), ...waiters])
+    const reversed = buildBlockingTree([...waiters].reverse().concat(lock(1)))
+
+    expect(forest).toHaveLength(1)
+    expect(forest[0]?.children).toHaveLength(20)
+    expect(blockedCount(forest)).toBe(20)
+    expect(treeDepth(forest)).toBe(2)
+    expect(blockedCount(reversed)).toBe(20)
+    expect(treeDepth(reversed)).toBe(2)
+  })
+
+  it('UI-LOCK-058 places a session under the blocker nearest a root, whatever order the nodes arrive in', () => {
+    // 4 is reachable from root 9 in one step and from root 1 in two, so it belongs
+    // under 9, and 3 in root 1's tree keeps a reference to it.
+    const nearest = [lock(1), lock(3, [1]), lock(4, [3, 9]), lock(9)]
+    // 4 is two steps from each of the roots 1 and 9, so the tie goes to the lower
+    // pid, 3, and 5 in root 9's tree keeps a reference to it.
+    const tied = [lock(1), lock(9), lock(3, [1]), lock(5, [9]), lock(4, [3, 5])]
+
+    for (const order of permutations(nearest)) {
+      expect(edgesOf(buildBlockingTree(order))).toEqual(
+        ['root>1', 'root>9', '1>3', '9>4', '3>4&'].sort(),
+      )
+    }
+    for (const order of permutations(tied)) {
+      expect(edgesOf(buildBlockingTree(order))).toEqual(
+        ['root>1', 'root>9', '1>3', '9>5', '3>4', '5>4&'].sort(),
+      )
+    }
   })
 })

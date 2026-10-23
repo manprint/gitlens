@@ -5,6 +5,9 @@ import {
   RANGE_PRESETS,
   chooseStep,
   parseRange,
+  queryWindowKey,
+  queryWindowOf,
+  resolveQueryWindow,
   stepMilliseconds,
   toParams,
   type RangePreset,
@@ -103,5 +106,43 @@ describe('chooseStep', () => {
     const step = chooseStep(new Date(0), new Date(span))
 
     expect(span / stepMilliseconds(step)).toBeLessThanOrEqual(10_000)
+  })
+})
+
+describe('query windows', () => {
+  it('UI-TIME-012 keys a relative window by its span, so the key holds as the clock moves', () => {
+    const atRender = queryWindowOf(parseRange(new URLSearchParams('range=1h'), NOW))
+    const later = queryWindowOf(
+      parseRange(new URLSearchParams('range=1h'), new Date(NOW.getTime() + 30_000)),
+    )
+
+    expect(atRender).toEqual({ durationMs: 60 * 60 * 1_000 })
+    expect(queryWindowKey(later)).toBe(queryWindowKey(atRender))
+  })
+
+  it('UI-TIME-013 resolves a relative window against the clock when the request is sent', () => {
+    const window = { durationMs: 15 * 60 * 1_000 }
+
+    expect(resolveQueryWindow(window, NOW)).toEqual({
+      from: '2026-08-31T11:45:00.000Z',
+      to: '2026-08-31T12:00:00.000Z',
+    })
+    expect(resolveQueryWindow(window, new Date(NOW.getTime() + 30_000))).toEqual({
+      from: '2026-08-31T11:45:30.000Z',
+      to: '2026-08-31T12:00:30.000Z',
+    })
+  })
+
+  it('UI-TIME-014 keys an absolute window by its bounds and returns them unchanged', () => {
+    const window = queryWindowOf(
+      parseRange(
+        new URLSearchParams({ from: '2026-08-31T10:00:00Z', to: '2026-08-31T11:00:00Z' }),
+        NOW,
+      ),
+    )
+
+    expect(window).toEqual({ from: '2026-08-31T10:00:00.000Z', to: '2026-08-31T11:00:00.000Z' })
+    expect(queryWindowKey(window)).toBe('2026-08-31T10:00:00.000Z/2026-08-31T11:00:00.000Z')
+    expect(resolveQueryWindow(window, NOW)).toBe(window)
   })
 })

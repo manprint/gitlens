@@ -1,4 +1,6 @@
 import { act, fireEvent, screen } from '@testing-library/react'
+import { http, HttpResponse } from 'msw/http'
+import { delay } from 'msw/utils/delay'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { Cluster, Schemas } from '@/api/types'
@@ -6,6 +8,7 @@ import { expectNoA11yViolations } from '@/test/a11y'
 import { CLUSTER, CLUSTER_ID, INSTANCE_ID } from '@/test/fixture-helpers'
 import { makeGetInstance } from '@/test/fixtures/getInstance'
 import { makeGetInstanceDatabases } from '@/test/fixtures/getInstanceDatabases'
+import { flushNetwork } from '@/test/network'
 import { renderWithProviders } from '@/test/render'
 import { ok } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
@@ -35,13 +38,31 @@ async function settle() {
   })
 }
 
+const PRIMARY_ID = '00000000-0000-4000-8000-000000000002'
+const OTHER_STANDBY_ID = '00000000-0000-4000-8000-000000000003'
+
+function replayEdge(from: string, series: { ts: string; value: number | null }[]) {
+  return {
+    from,
+    to: PRIMARY_ID,
+    metric: 'replay_lag_sec',
+    series,
+  } satisfies Schemas['ReplicationEdge']
+}
+
 function renderPage(
   instance: Schemas['Instance'] = baseInstance,
   databases: Schemas['DatabasesResponse'] = makeGetInstanceDatabases(),
+  replicationEdges: Schemas['ReplicationEdge'][] = [],
+  replicationHandler: ReturnType<typeof ok> = ok('getClusterReplication', {
+    cluster_id: CLUSTER_ID,
+    edges: replicationEdges,
+  }),
 ) {
   server.use(
     ok('getInstance', instance),
     ok('getClusters', [cluster]),
+    replicationHandler,
     ok('getInstanceDatabases', databases),
     ok('getInstanceHost', {
       instance_id: INSTANCE_ID,
@@ -75,12 +96,19 @@ function renderPage(
 }
 
 describe('InstancePage', () => {
-  it('UI-INST-002 renders a standby read-only banner with its replay lag', async () => {
-    renderPage(makeInstance({ pg_version: 170011, role: 'standby' }))
-    await settle()
+  it('UI-INST-002 renders a standby read-only banner with its own replay lag', async () => {
+    renderPage(makeInstance({ pg_version: 170011, role: 'standby' }), undefined, [
+      replayEdge(INSTANCE_ID, [
+        { ts: '2026-08-27T01:59:30Z', value: 0.2 },
+        { ts: '2026-08-27T02:00:00Z', value: 0.12 },
+      ]),
+      replayEdge(OTHER_STANDBY_ID, [{ ts: '2026-08-27T02:00:00Z', value: 1.25 }]),
+    ])
+    await flushNetwork()
 
     expect(screen.getByText('standby (read-only)')).toBeInTheDocument()
-    expect(screen.getByText('Replay lag: 1.25 s')).toBeInTheDocument()
+    expect(screen.getByText('Replay lag: 0.12 s')).toBeInTheDocument()
+    expect(screen.queryByText('Replay lag: 1.25 s')).not.toBeInTheDocument()
     expect(screen.getByText('17.11')).toBeInTheDocument()
     vi.useRealTimers()
     await expectNoA11yViolations(document.body)
@@ -164,5 +192,71 @@ describe('InstancePage', () => {
     expect(screen.getByText('No monitored databases')).toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: 'Database' })).not.toBeInTheDocument()
     expect(screen.getByText('1 database not monitored.')).toBeInTheDocument()
+  })
+
+  it('UI-INST-060 shows a standby lag as not measured when only the cluster maximum is known', async () => {
+    renderPage(makeInstance({ role: 'standby' }), undefined, [
+      replayEdge(OTHER_STANDBY_ID, [{ ts: '2026-08-27T02:00:00Z', value: 1.25 }]),
+    ])
+    await flushNetwork()
+
+    expect(screen.getByText('standby (read-only)')).toBeInTheDocument()
+    expect(screen.queryByText('Replay lag: 1.25 s')).not.toBeInTheDocument()
+    expect(screen.getByTitle('Replay lag was not measured.')).toBeInTheDocument()
+  })
+
+  it('UI-INST-061 shows not measured when the newest standby reading is null', async () => {
+    renderPage(makeInstance({ role: 'standby' }), undefined, [
+      replayEdge(INSTANCE_ID, [
+        { ts: '2026-08-27T01:59:30Z', value: 0.5 },
+        { ts: '2026-08-27T02:00:00Z', value: null },
+      ]),
+    ])
+    await flushNetwork()
+
+    expect(screen.queryByText('Replay lag: 0.5 s')).not.toBeInTheDocument()
+    expect(screen.queryByText('Replay lag: 1.25 s')).not.toBeInTheDocument()
+    expect(screen.getByTitle('Replay lag was not measured.')).toBeInTheDocument()
+  })
+
+  it('UI-INST-062 does not show a standby reading older than the server freshness bound', async () => {
+    renderPage(makeInstance({ role: 'standby' }), undefined, [
+      replayEdge(INSTANCE_ID, [{ ts: '2026-08-27T01:56:00Z', value: 0.5 }]),
+    ])
+    await flushNetwork()
+
+    expect(screen.queryByText('Replay lag: 0.5 s')).not.toBeInTheDocument()
+    expect(screen.getByTitle('Replay lag was not measured.')).toBeInTheDocument()
+  })
+
+  it('UI-INST-063 shows the replay lag as loading, not as not measured, while its series is pending', async () => {
+    renderPage(
+      makeInstance({ role: 'standby' }),
+      undefined,
+      [],
+      http.get('/api/v1/clusters/:clusterId/replication', async () => {
+        await delay('infinite')
+        return HttpResponse.json({})
+      }),
+    )
+    await flushNetwork()
+
+    expect(screen.getByText('Replay lag: loading')).toBeInTheDocument()
+    expect(screen.queryByTitle('Replay lag was not measured.')).not.toBeInTheDocument()
+  })
+
+  it('UI-INST-064 shows the replay lag as unavailable, not as not measured, when its series fails', async () => {
+    renderPage(
+      makeInstance({ role: 'standby' }),
+      undefined,
+      [],
+      http.get('/api/v1/clusters/:clusterId/replication', () =>
+        HttpResponse.json({ detail: 'replication unavailable' }, { status: 500 }),
+      ),
+    )
+    await flushNetwork()
+
+    expect(screen.getByText('Replay lag: unavailable')).toBeInTheDocument()
+    expect(screen.queryByTitle('Replay lag was not measured.')).not.toBeInTheDocument()
   })
 })

@@ -1,15 +1,53 @@
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 
-import { useClusters, useInstance, useInstanceDatabases } from '@/api/queries'
+import { useClusterReplication, useInstance, useInstanceDatabases } from '@/api/queries'
+import type { Schemas } from '@/api/types'
 import { ErrorState } from '@/components/state'
 import { selectedDatabase } from '@/lib/databases'
 
-import { InstanceHeader } from './InstanceHeader'
+import { InstanceHeader, type ReplayLag } from './InstanceHeader'
 import { DatabaseSelector } from './DatabaseSelector'
 import { HostSection } from './HostSection'
 import { OverviewSection } from './OverviewSection'
 import { RelationsSection } from './RelationsSection'
 import { SettingsSection } from './SettingsSection'
+
+// The header shows the newest replay-lag reading, so a short window holds it.
+const REPLAY_LAG_WINDOW: { durationMs: number } = { durationMs: 5 * 60 * 1_000 }
+// The server bounds a cluster's replay lag to the last 60 seconds, so an older
+// reading is a blip that has aged out, not the lag now.
+const REPLAY_LAG_FRESH_MS = 60 * 1_000
+
+// A standby's own lag is the replay series of the edge it reports from. Only
+// the newest point counts: a null newest point is not measured, and an older
+// reading is not a measurement now. The cluster maximum is never used here,
+// because it can belong to another standby.
+function ownReplayLag(
+  edges: readonly Schemas['ReplicationEdge'][],
+  instanceId: string,
+  now: number,
+): number | null {
+  let newest: Schemas['SeriesPoint'] | undefined
+  for (const edge of edges) {
+    if (edge.from !== instanceId || edge.metric !== 'replay_lag_sec') continue
+    for (const point of edge.series) {
+      if (newest === undefined || Date.parse(point.ts) > Date.parse(newest.ts)) newest = point
+    }
+  }
+  if (newest === undefined || newest.value === null) return null
+  return now - Date.parse(newest.ts) > REPLAY_LAG_FRESH_MS ? null : newest.value
+}
+
+function replayLagOf(
+  query: ReturnType<typeof useClusterReplication>,
+  instanceId: string,
+): ReplayLag {
+  if (query.data) {
+    return { state: 'reading', seconds: ownReplayLag(query.data.edges, instanceId, Date.now()) }
+  }
+  if (query.error) return { state: 'unavailable' }
+  return { state: 'loading' }
+}
 
 interface InstancePageProps {
   /** Optional override keeps the page easy to exercise without the lazy route. */
@@ -41,8 +79,12 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
   const [searchParams] = useSearchParams()
   const instanceId = instanceIdOverride ?? routeInstanceId ?? ''
   const instanceQuery = useInstance(instanceId)
-  const clustersQuery = useClusters()
   const databasesQuery = useInstanceDatabases(instanceId)
+  const replicationQuery = useClusterReplication(
+    instanceQuery.data?.cluster_id ?? '',
+    REPLAY_LAG_WINDOW,
+    { enabled: instanceQuery.data?.role === 'standby' },
+  )
 
   if (instanceQuery.error?.kind === 'not_found') {
     return <InstanceNotFound instanceId={instanceId} />
@@ -62,16 +104,12 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
     return <LoadingInstance />
   }
 
-  const cluster = clustersQuery.data?.find(
-    (candidate) => candidate.cluster_id === instanceQuery.data.cluster_id,
-  )
-
   return (
     <div className="space-y-8">
       <InstanceHeader
         dataUpdatedAt={instanceQuery.dataUpdatedAt}
         instance={instanceQuery.data}
-        replayLagSeconds={cluster?.max_replay_lag_seconds}
+        replayLag={replayLagOf(replicationQuery, instanceId)}
       />
       {databasesQuery.error && !databasesQuery.data ? (
         <ErrorState

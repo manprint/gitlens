@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { expectNoA11yViolations } from '@/test/a11y'
+import { renderWithProviders } from '@/test/render'
 import { NOW } from '@/test/time'
 
 import { BlockingTree, type LocksResponseLike } from './BlockingTree'
@@ -183,5 +184,63 @@ describe('BlockingTree', () => {
     )
 
     await expect(expectNoA11yViolations(container)).resolves.toBeUndefined()
+  })
+
+  it('UI-LOCK-046 shows a queue that every waiter lists in full as one level under the holder', () => {
+    const queued = Array.from({ length: 8 }, (_, index) => ({
+      pid: 200 + index,
+      blocked_by: [100, ...Array.from({ length: index }, (_, earlier) => 200 + earlier)],
+      wait_duration: 3,
+    }))
+    render(
+      <BlockingTree
+        response={response([{ pid: 100, blocked_by: [], wait_duration: 30 }, ...queued])}
+        now={NOW}
+      />,
+    )
+
+    expect(screen.getAllByRole('treeitem')).toHaveLength(9)
+    expect(screen.getAllByRole('treeitem')[0]).toHaveTextContent('PID 100')
+  })
+
+  it('UI-LOCK-049 disables signal actions on a lock sample that is flagged stale or older than the threshold', () => {
+    const instanceId = '11111111-1111-4111-8111-111111111111'
+    const sixtySecondsAgo = new Date(NOW.getTime() - 60_000).toISOString()
+    const { unmount } = renderWithProviders(
+      <BlockingTree
+        currentTier="T2"
+        instanceId={instanceId}
+        now={NOW}
+        response={response([{ pid: 42, blocked_by: [] }], {
+          stale: true,
+          sampled_at: sixtySecondsAgo,
+        })}
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Terminate backend' })).toBeDisabled()
+    unmount()
+
+    renderWithProviders(
+      <BlockingTree
+        currentTier="T2"
+        instanceId={instanceId}
+        now={NOW}
+        response={response([{ pid: 42, blocked_by: [] }], { sampled_at: sixtySecondsAgo })}
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Terminate backend' })).toBeDisabled()
+  })
+
+  it('UI-LOCK-050 keeps signal actions enabled on a fresh lock sample', () => {
+    renderWithProviders(
+      <BlockingTree
+        currentTier="T2"
+        instanceId="11111111-1111-4111-8111-111111111111"
+        now={NOW}
+        response={response([{ pid: 42, blocked_by: [] }])}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Terminate backend' })).toBeEnabled()
   })
 })

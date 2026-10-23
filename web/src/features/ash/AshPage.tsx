@@ -8,6 +8,7 @@ import { Degraded, Disabled, ErrorState } from '@/components/state'
 import { useTimeRange } from '@/hooks/useTimeRange'
 import { totalSamples } from '@/lib/ash'
 import type { AshGroupBy } from '@/lib/ash'
+import { queryWindowOf } from '@/lib/timerange'
 
 import { AshBreakdown } from './AshBreakdown'
 import { AshTopQueries } from './AshTopQueries'
@@ -31,9 +32,12 @@ function AshFootnote() {
   )
 }
 
-function isComputeQueryIdOff(settings: readonly { name: string; value: string | null }[]) {
+// The settings endpoint omits a setting at its default, and the default is auto.
+// Auto computes query IDs only when a module such as pg_stat_statements is
+// loaded, so a missing setting is not evidence that query IDs are on.
+function computeQueryIdSetting(settings: readonly { name: string; value: string | null }[]) {
   const setting = settings.find(({ name }) => name === 'compute_query_id')
-  return ['off', 'false', '0'].includes(setting?.value?.trim().toLocaleLowerCase('en-US') ?? '')
+  return setting?.value?.trim().toLocaleLowerCase('en-US') ?? 'auto'
 }
 
 function readGroup(value: string | null): DrillGroup {
@@ -115,6 +119,7 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
   const redirectedForUnauthorized = useRef(false)
   const [searchParams, setSearchParams] = useSearchParams()
   const { range } = useTimeRange()
+  const timeWindow = queryWindowOf(range)
   const instanceId = instanceIdOverride ?? routeInstanceId ?? ''
   const groupBy = readGroup(searchParams.get('group'))
   const waitEventType = searchParams.get('wait_event_type')
@@ -122,15 +127,13 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
   const database = searchParams.get('db') ?? undefined
   const filters = drillFilters(groupBy, waitEventType, waitEvent)
   const params = {
-    from: range.from.toISOString(),
     group_by: groupBy,
     instance_id: instanceId,
     limit: ASH_ROW_LIMIT,
-    to: range.to.toISOString(),
     ...(database === undefined ? {} : { database }),
     ...filters,
   }
-  const ashQuery = useAsh(params)
+  const ashQuery = useAsh(params, timeWindow)
   const settingsQuery = useInstanceSettings(instanceId)
   const unauthorized =
     ashQuery.error?.kind === 'unauthorized' || settingsQuery.error?.kind === 'unauthorized'
@@ -148,12 +151,19 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
     ...(filters.wait_event === undefined ? {} : { waitEvent: filters.wait_event }),
   }
   const sampleCount = totalSamples(ashQuery.data?.buckets ?? [])
+  // Key the note on the sampled data as well as the setting. Auto, the default,
+  // leaves the setting out of the settings endpoint. With the setting on, a
+  // range of idle sessions can legitimately carry no query IDs, so the chart
+  // stays. An empty range has no samples to judge.
+  const queryIdSetting = computeQueryIdSetting(settingsQuery.data?.settings ?? [])
   const queryIdsUnavailable =
     groupBy === 'queryid' &&
+    settingsQuery.data !== undefined &&
+    !['on', 'regress'].includes(queryIdSetting) &&
+    (ashQuery.data?.buckets.length ?? 0) > 0 &&
     ashQuery.data?.buckets.every(
       (bucket) => bucket.queryid === null || bucket.queryid === undefined,
-    ) &&
-    isComputeQueryIdOff(settingsQuery.data?.settings ?? [])
+    )
 
   function navigateTo(nextGroup: DrillGroup) {
     const next = new URLSearchParams(searchParams)
@@ -245,7 +255,11 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
           {queryIdsUnavailable ? (
             <div className="space-y-2">
               <Degraded
-                reason="No non-null query_id was observed in this ASH range, and the instance setting compute_query_id is off."
+                reason={
+                  queryIdSetting === 'off'
+                    ? 'No non-null query_id was observed in this ASH range, and the instance setting compute_query_id is off.'
+                    : 'No non-null query_id was observed in this ASH range. Under compute_query_id = auto, query IDs are computed only when a module such as pg_stat_statements is loaded.'
+                }
                 requires="compute_query_id=on"
               />
               <p className="text-text-secondary text-sm">
@@ -272,12 +286,7 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
             />
           )}
           {groupBy === 'queryid' && !queryIdsUnavailable ? (
-            <AshTopQueries
-              {...topQueryProps}
-              from={range.from}
-              instanceId={instanceId}
-              to={range.to}
-            />
+            <AshTopQueries {...topQueryProps} timeWindow={timeWindow} instanceId={instanceId} />
           ) : null}
         </>
       )}

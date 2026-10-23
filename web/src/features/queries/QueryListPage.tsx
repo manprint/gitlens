@@ -20,6 +20,7 @@ import {
   type StatementRow,
 } from '@/lib/statements'
 import { useTimeRange } from '@/hooks/useTimeRange'
+import { queryWindowOf } from '@/lib/timerange'
 
 const STATEMENT_LIMIT = 50
 type StatementSort = StatementOrderBy
@@ -248,27 +249,13 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
   const instanceId = instanceIdOverride ?? routeInstanceId ?? ''
   const sort = readSort(searchParams.get('sort'))
   const database = searchParams.get('db') ?? undefined
-  const rangeSearchKey = [
-    searchParams.get('range'),
-    searchParams.get('from'),
-    searchParams.get('to'),
-  ].join('|')
-  // Relative ranges are resolved from the clock; keep their request window
-  // stable between renders so a completed query does not change its key.
-  const requestRange = useMemo(
-    () => ({ from: range.from.toISOString(), to: range.to.toISOString() }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rangeSearchKey],
-  )
   const params = {
-    from: requestRange.from,
     instance_id: instanceId,
     limit: STATEMENT_LIMIT,
     order_by: sort,
-    to: requestRange.to,
     ...(database === undefined ? {} : { database }),
   }
-  const statementsQuery = useStatements(params)
+  const statementsQuery = useStatements(params, queryWindowOf(range))
 
   const response = statementsQuery.data as StatementApiResponse | undefined
   const rows = useMemo<StatementDisplayRow[]>(() => {

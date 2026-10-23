@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { Schemas } from '@/api/types'
 import { expectNoA11yViolations } from '@/test/a11y'
-import { ok } from '@/test/msw/handlers'
+import { ok, status } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 import { renderWithProviders } from '@/test/render'
 
@@ -122,6 +122,45 @@ describe('AlertsPage', () => {
       'href',
       '/README.md#troubleshooting',
     )
+  })
+
+  it('UI-ALERT-015 a silence link narrows the list to the alerts that silence matches', async () => {
+    await renderAlerts(
+      [alert({ suppressed: true }), alert({ alert_key: 'disk-full', rule_id: 'disk-full' })],
+      [silence()],
+      `/alerts?silence_id=${silence().silence_id}`,
+    )
+
+    expect(screen.getByRole('button', { name: 'replication-lag' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'disk-full' })).not.toBeInTheDocument()
+    expect(screen.getByText(/Showing alerts matched by silence/)).toBeInTheDocument()
+  })
+
+  it('UI-ALERT-016 a silence link to a silence that is not listed shows no alerts', async () => {
+    await renderAlerts(
+      [alert({ suppressed: true })],
+      [],
+      '/alerts?silence_id=00000000-0000-4000-8000-0000000000ff',
+    )
+
+    expect(screen.queryByRole('button', { name: 'replication-lag' })).not.toBeInTheDocument()
+    expect(screen.getByText(/is not in the current silences list/)).toBeInTheDocument()
+  })
+
+  it('UI-ALERT-017 a silence link whose silences failed to load does not claim the silence is missing', async () => {
+    server.use(
+      ok('getAlerts', [alert({ suppressed: true })]),
+      status('getSilences', 500, { error: 'internal_error', detail: 'silences unavailable' }),
+    )
+    renderWithProviders(<AlertsPage />, {
+      route: '/alerts?silence_id=00000000-0000-4000-8000-0000000000ff',
+    })
+    await settle()
+
+    expect(screen.queryByRole('button', { name: 'replication-lag' })).not.toBeInTheDocument()
+    expect(screen.getByText(/could not be checked, so no alerts are shown/)).toBeInTheDocument()
+    expect(screen.queryByText(/is not in the current silences list/)).not.toBeInTheDocument()
+    expect(screen.getByText(/Suppression details are unavailable/)).toBeInTheDocument()
   })
 
   it('opens selected alert detail through getAlert', async () => {

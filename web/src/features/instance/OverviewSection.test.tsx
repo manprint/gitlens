@@ -1,7 +1,8 @@
 import { act, fireEvent, screen, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw/http'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { REFRESH } from '@/api/policy'
 import { useTimeRange } from '@/hooks/useTimeRange'
 import { formatBytes } from '@/lib/format'
 import { INSTANCE_ID } from '@/test/fixture-helpers'
@@ -27,6 +28,10 @@ const resetSeries = {
     { ts: '2026-01-01T00:02:00Z', value: 12 },
   ],
 }
+
+afterEach(() => {
+  server.events.removeAllListeners()
+})
 
 async function settle() {
   await act(async () => {
@@ -126,6 +131,26 @@ describe('OverviewSection', () => {
     expect(steps.length).toBeGreaterThan(initialCalls)
   })
 
+  it('UI-INST-028 counts rolled-back transactions in the transactions tile', async () => {
+    server.use(
+      http.get(metricsUrl, ({ request }) => {
+        const metric = new URL(request.url).searchParams.get('metric') ?? ''
+        const rate =
+          metric === 'pg_xact_commit_total' ? 4 : metric === 'pg_xact_rollback_total' ? 2 : null
+        return HttpResponse.json({ series: [{ ts: '2026-08-27T01:00:00Z', value: rate }] })
+      }),
+    )
+
+    renderWithProviders(<OverviewSection database="app" instanceId={INSTANCE_ID} />, {
+      route: `/instances/${INSTANCE_ID}?db=app&range=24h`,
+    })
+    await settle()
+
+    expect(screen.getByRole('article', { name: 'Transactions per second' })).toHaveTextContent(
+      '6/s',
+    )
+  })
+
   it('UI-INST-027 asks for instance-wide metrics without a database and totals the stored rates', async () => {
     const databases = new Map<string, string | null>()
     server.use(
@@ -140,7 +165,9 @@ describe('OverviewSection', () => {
               ? 0.01
               : metric === 'pg_xact_commit_total'
                 ? 12.5
-                : null
+                : metric === 'pg_xact_rollback_total'
+                  ? 0.5
+                  : null
         return HttpResponse.json({
           series: [
             { ts: '2026-08-27T01:00:00Z', value: rate },
@@ -166,6 +193,7 @@ describe('OverviewSection', () => {
     }
     for (const metric of [
       'pg_xact_commit_total',
+      'pg_xact_rollback_total',
       'pg_blks_hit_total',
       'pg_blks_read_total',
       'pg_temp_bytes_total',
@@ -182,5 +210,36 @@ describe('OverviewSection', () => {
     expect(screen.getByRole('article', { name: 'Transactions per second' })).toHaveTextContent(
       '13/s',
     )
+  })
+
+  // A relative window read from the render clock gave every poll a second request
+  // for each metric tile.
+  it('UI-INST-029 sends one request per poll for each relative metric window', async () => {
+    const checkpointRequests: string[] = []
+    server.events.on('request:start', ({ request }) => {
+      const url = new URL(request.url)
+      if (
+        url.pathname.endsWith('/api/v1/metrics/query') &&
+        url.searchParams.get('metric') === 'pg_checkpoints_timed_total'
+      ) {
+        checkpointRequests.push(request.url)
+      }
+    })
+    server.use(metricsHandler(resetSeries))
+    renderWithProviders(<OverviewSection database="app" instanceId={INSTANCE_ID} />, {
+      route: `/instances/${INSTANCE_ID}?db=app&range=1h`,
+    })
+    await settle()
+
+    const polls = 3
+    for (let poll = 0; poll < polls; poll += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(REFRESH.activity.interval)
+      })
+      await settle()
+    }
+
+    // The mount fetch, then one per poll.
+    expect(checkpointRequests).toHaveLength(polls + 1)
   })
 })

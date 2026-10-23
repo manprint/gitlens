@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
-import { useSignIn } from '@/api/auth'
+import { AuthRequestError, useSignIn } from '@/api/auth'
 
 function safeNext(value: string | null): string {
   if (value === null || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) {
@@ -10,24 +10,39 @@ function safeNext(value: string | null): string {
   return value
 }
 
+// Only a rejected password is fixed by typing it again. A network or server
+// failure says nothing about the password, so it gets its own message.
+function signInFailure(error: unknown): string {
+  if (error instanceof AuthRequestError) {
+    if (error.kind === 'unauthorized') return 'Password non valida.'
+    if (error.kind === 'network') {
+      return 'Impossibile contattare il server. Controlla la connessione e riprova.'
+    }
+    if (error.kind === 'server') {
+      return 'Il server non riesce a completare la richiesta. Riprova tra poco.'
+    }
+  }
+  return 'Accesso non riuscito. Riprova.'
+}
+
 export default function LoginPage() {
   const location = useLocation()
   const navigate = useNavigate()
   const signIn = useSignIn()
   const [password, setPassword] = useState('')
-  const [failed, setFailed] = useState(false)
+  const [failure, setFailure] = useState<string | null>(null)
   const passwordRef = useRef<HTMLInputElement>(null)
   const next = new URLSearchParams(location.search).get('next')
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setFailed(false)
+    setFailure(null)
 
     try {
       await signIn.mutateAsync(password)
       void navigate(safeNext(next), { replace: true })
-    } catch {
-      setFailed(true)
+    } catch (error) {
+      setFailure(signInFailure(error))
       passwordRef.current?.focus()
     }
   }
@@ -51,9 +66,9 @@ export default function LoginPage() {
             type="password"
             value={password}
           />
-          {failed ? (
+          {failure ? (
             <p id="password-error" role="alert">
-              Password non valida.
+              {failure}
             </p>
           ) : null}
           <button disabled={signIn.isPending} type="submit">

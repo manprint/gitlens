@@ -150,6 +150,40 @@ export function parseRange(params: RangeParams, now: Date): TimeRangeResult {
   return relativeRange(DEFAULT_RANGE, now)
 }
 
+/**
+ * The window a query covers. A relative window is a span that ends at the
+ * clock, so it is resolved when the request is sent rather than when the page
+ * renders. A window taken from the render clock gave every render a new query
+ * key, and each completed request started the next one, so the page polled
+ * back to back. Keyed as a span, the key holds across polls and the refresh
+ * interval is the only thing that moves the window.
+ */
+export type QueryWindow = { from: string; to: string } | { durationMs: number }
+
+export function queryWindowOf(range: TimeRange): QueryWindow {
+  if (range.kind === 'absolute') {
+    return { from: range.from.toISOString(), to: range.to.toISOString() }
+  }
+  return { durationMs: range.to.getTime() - range.from.getTime() }
+}
+
+/** The query-key form of a window: the span for a relative one, the bounds otherwise. */
+export function queryWindowKey(window: QueryWindow): string {
+  return 'durationMs' in window ? `last:${window.durationMs}` : `${window.from}/${window.to}`
+}
+
+/** The bounds sent to the API. A relative window ends at the clock given here. */
+export function resolveQueryWindow(
+  window: QueryWindow,
+  now = new Date(),
+): { from: string; to: string } {
+  if (!('durationMs' in window)) return window
+  return {
+    from: new Date(now.getTime() - window.durationMs).toISOString(),
+    to: checkedNow(now).toISOString(),
+  }
+}
+
 export function toParams(range: TimeRangeResult | TimeRange): URLSearchParams {
   if (range.kind === 'relative') return new URLSearchParams({ range: range.preset })
   return new URLSearchParams({ from: range.from.toISOString(), to: range.to.toISOString() })

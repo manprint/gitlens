@@ -4,9 +4,11 @@ import { describe, expect, it, vi } from 'vitest'
 
 import QueryListPage from './QueryListPage'
 
+import { REFRESH } from '@/api/policy'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { renderWithProviders } from '@/test/render'
 import { server } from '@/test/msw/server'
+import { NOW } from '@/test/time'
 
 const INSTANCE_ID = '11111111-1111-4111-8111-111111111111'
 
@@ -250,5 +252,30 @@ describe('QueryListPage', () => {
     vi.useRealTimers()
     await expectNoA11yViolations(container)
     expect(container).toBeTruthy()
+  })
+
+  it('UI-QRY-048 moves the statement window with the clock on each poll', async () => {
+    const statementWindows: (string | null)[] = []
+    server.events.on('request:start', ({ request }) => {
+      const url = new URL(request.url)
+      if (url.pathname.endsWith('/api/v1/statements')) {
+        statementWindows.push(url.searchParams.get('to'))
+      }
+    })
+    try {
+      server.use(statementsHandler(statementResponse()))
+      renderPage()
+      await settle()
+      vi.setSystemTime(new Date(NOW.getTime() + 2 * 60 * 1_000))
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(REFRESH.statements.interval + 1)
+      })
+      await settle()
+
+      expect(statementWindows.length).toBeGreaterThanOrEqual(2)
+      expect(statementWindows.at(-1)).not.toBe(statementWindows[0])
+    } finally {
+      server.events.removeAllListeners()
+    }
   })
 })

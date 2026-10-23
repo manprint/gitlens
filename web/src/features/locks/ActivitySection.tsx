@@ -35,14 +35,25 @@ function sessionQuery(value: unknown): string {
   return value.split(/\r?\n/u, 1)[0]?.trim() ?? '—'
 }
 
+// Two decimals would show a steady trickle of deadlocks as 0.00. Below 0.01
+// per second the rate keeps two significant digits so it stays visible.
+function deadlockRateText(rate: number): string {
+  if (rate > 0 && rate < 0.01) {
+    return new Intl.NumberFormat('en-US', { maximumSignificantDigits: 2 }).format(rate)
+  }
+  return rate.toFixed(2)
+}
+
 function ActiveSessions({
   sessions,
   currentTier,
   instanceId,
+  sampleStale,
 }: {
   sessions: readonly LockNode[]
   currentTier: PermTier
   instanceId: string
+  sampleStale: boolean
 }) {
   return (
     <div className="mt-6">
@@ -66,7 +77,12 @@ function ActiveSessions({
               <p className="text-muted-foreground mt-1 truncate text-sm">
                 {sessionQuery(session.query)}
               </p>
-              <SignalActions currentTier={currentTier} instanceId={instanceId} node={session} />
+              <SignalActions
+                currentTier={currentTier}
+                instanceId={instanceId}
+                node={session}
+                sampleStale={sampleStale}
+              />
             </li>
           ))}
         </ul>
@@ -119,18 +135,23 @@ function BreakdownList({
 export function ActivitySection({
   response,
   sessions,
+  sessionsStale = false,
   currentTier = 'T0',
   instanceId,
   now = new Date(),
 }: {
   response: ActivityResponseLike
   sessions?: readonly LockNode[]
+  // The sessions come from the lock sample, which can be stale while the
+  // activity sample is fresh.
+  sessionsStale?: boolean
   currentTier?: PermTier
   instanceId?: string
   now?: Date
 }) {
   const sampledAt = useMemo(() => latestSampleAt(response.metrics), [response.metrics])
   const age = ageSince(sampledAt, now)
+  const sampleStale = response.stale || (age !== null && age > STALE_THRESHOLD_SECONDS)
   const used = latestValue(response.metrics, 'pg_connections_used')
   const limit = latestValue(response.metrics, 'pg_connections_limit')
   const saturation = connectionSaturation(response.metrics)
@@ -222,7 +243,7 @@ export function ActivitySection({
         <MetricTile label="Frozen-XID age" value={valueOrUnknown(frozenXidAge)} />
         <MetricTile
           label="Deadlock rate"
-          value={rate === null ? <Unknown /> : rate.toFixed(2)}
+          value={rate === null ? <Unknown /> : deadlockRateText(rate)}
           unit="per second"
         />
       </div>
@@ -251,7 +272,12 @@ export function ActivitySection({
       </div>
 
       {sessions && instanceId ? (
-        <ActiveSessions currentTier={currentTier} instanceId={instanceId} sessions={sessions} />
+        <ActiveSessions
+          currentTier={currentTier}
+          instanceId={instanceId}
+          sampleStale={sampleStale || sessionsStale}
+          sessions={sessions}
+        />
       ) : null}
     </Section>
   )

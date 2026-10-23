@@ -12,6 +12,7 @@ import type { paths } from './generated'
 import type { Schemas } from './types'
 import { qk } from './keys'
 import { REFRESH, type RefreshPolicy } from './policy'
+import { resolveQueryWindow, type QueryWindow } from '@/lib/timerange'
 
 export { useCommand } from './commands'
 
@@ -19,6 +20,8 @@ type GetPath = keyof paths
 type GetOperation<Path extends GetPath> = NonNullable<paths[Path]['get']>
 type OperationParameters<Path extends GetPath> = GetOperation<Path>['parameters']
 type QueryParameters<Path extends GetPath> = NonNullable<OperationParameters<Path>['query']>
+// The window comes from the caller as a QueryWindow and is resolved at request time.
+type WindowlessParameters<Path extends GetPath> = Omit<QueryParameters<Path>, 'from' | 'to'>
 
 interface ClientResponse<T> {
   data?: T
@@ -166,19 +169,21 @@ export function useClusterTopology(id: string) {
 
 export function useClusterReplication(
   id: string,
-  params: QueryParameters<'/api/v1/clusters/{id}/replication'>,
+  window: QueryWindow,
+  options: { enabled?: boolean } = {},
 ) {
   return useApiQuery({
+    enabled: options.enabled ?? true,
     keepPrevious: true,
     policy: REFRESH.cluster,
     queryFn: (signal) =>
       getApi(() =>
         client.GET('/api/v1/clusters/{id}/replication', {
-          params: { path: { id }, query: params },
+          params: { path: { id }, query: resolveQueryWindow(window) },
           signal,
         }),
       ),
-    queryKey: qk.clusterReplication(id, params.from, params.to),
+    queryKey: qk.clusterReplication(id, window),
   })
 }
 
@@ -234,9 +239,9 @@ export function useInstanceActivity(id: string) {
   })
 }
 
-export function useInstanceDatabases(id: string) {
+export function useInstanceDatabases(id: string, policy: RefreshPolicy = REFRESH.instance) {
   return useApiQuery({
-    policy: REFRESH.instance,
+    policy,
     queryFn: (signal) =>
       getApi(() =>
         client.GET('/api/v1/instances/{id}/databases', { params: { path: { id } }, signal }),
@@ -245,9 +250,9 @@ export function useInstanceDatabases(id: string) {
   })
 }
 
-export function useInstanceHost(id: string) {
+export function useInstanceHost(id: string, policy: RefreshPolicy = REFRESH.instance) {
   return useApiQuery({
-    policy: REFRESH.instance,
+    policy,
     queryFn: (signal) =>
       getApi(() => client.GET('/api/v1/instances/{id}/host', { params: { path: { id } }, signal })),
     queryKey: qk.instanceHost(id),
@@ -322,9 +327,9 @@ export function useInstanceBloat(
   })
 }
 
-export function useInstanceCommandAudit(id: string) {
+export function useInstanceCommandAudit(id: string, policy: RefreshPolicy = REFRESH.instance) {
   return useApiQuery({
-    policy: REFRESH.instance,
+    policy,
     // The args of an audit entry carry queryid as a JSON number. Reading the
     // body as text lets parseLargeIntStrings keep its digits, which response
     // JSON parsing would round. The parse runs inside getApi so that a 200 body
@@ -356,60 +361,83 @@ export function useLocks(instanceId: string) {
   })
 }
 
-export function useQueryMetrics(params: QueryParameters<'/api/v1/metrics/query'>) {
+export function useQueryMetrics(
+  params: WindowlessParameters<'/api/v1/metrics/query'>,
+  window: QueryWindow,
+) {
   return useApiQuery({
     keepPrevious: true,
     policy: REFRESH.activity,
     queryFn: (signal) =>
-      getApi(() => client.GET('/api/v1/metrics/query', { params: { query: params }, signal })),
+      getApi(() =>
+        client.GET('/api/v1/metrics/query', {
+          params: { query: { ...params, ...resolveQueryWindow(window) } },
+          signal,
+        }),
+      ),
     queryKey: qk.queryMetrics(
       params.metric,
       params.instance_id,
-      params.from,
-      params.to,
+      window,
       params.step,
       params.database,
     ),
   })
 }
 
-export function useEvents(params: QueryParameters<'/api/v1/events'> = {}) {
+export function useEvents(params: WindowlessParameters<'/api/v1/events'>, window: QueryWindow) {
   return useApiQuery({
     keepPrevious: true,
     policy: REFRESH.activity,
     queryFn: (signal) =>
-      getApi(() => client.GET('/api/v1/events', { params: { query: params }, signal })),
-    queryKey: qk.events(params.cluster_id, params.type, params.from, params.to, params.limit),
+      getApi(() =>
+        client.GET('/api/v1/events', {
+          params: { query: { ...params, ...resolveQueryWindow(window) } },
+          signal,
+        }),
+      ),
+    queryKey: qk.events(params.cluster_id, params.type, window, params.limit),
   })
 }
 
-export function useStatements(params: QueryParameters<'/api/v1/statements'>) {
+export function useStatements(
+  params: WindowlessParameters<'/api/v1/statements'>,
+  window: QueryWindow,
+) {
   return useApiQuery({
     keepPrevious: true,
     policy: REFRESH.statements,
     queryFn: (signal) =>
-      getApi(() => client.GET('/api/v1/statements', { params: { query: params }, signal })),
+      getApi(() =>
+        client.GET('/api/v1/statements', {
+          params: { query: { ...params, ...resolveQueryWindow(window) } },
+          signal,
+        }),
+      ),
     queryKey: qk.statements(
       params.instance_id,
       params.database,
-      params.from,
-      params.to,
+      window,
       params.order_by,
       params.limit,
     ),
   })
 }
 
-export function useAsh(params: QueryParameters<'/api/v1/ash'>) {
+export function useAsh(params: WindowlessParameters<'/api/v1/ash'>, window: QueryWindow) {
   return useApiQuery({
     keepPrevious: true,
     policy: REFRESH.ash,
     queryFn: (signal) =>
-      getApi(() => client.GET('/api/v1/ash', { params: { query: params }, signal })),
+      getApi(() =>
+        client.GET('/api/v1/ash', {
+          params: { query: { ...params, ...resolveQueryWindow(window) } },
+          signal,
+        }),
+      ),
     queryKey: qk.ash(
       params.instance_id,
-      params.from,
-      params.to,
+      window,
       params.group_by,
       params.database,
       params.limit,
@@ -419,16 +447,20 @@ export function useAsh(params: QueryParameters<'/api/v1/ash'>) {
   })
 }
 
-export function useAshTop(params: QueryParameters<'/api/v1/ash/top'>) {
+export function useAshTop(params: WindowlessParameters<'/api/v1/ash/top'>, window: QueryWindow) {
   return useApiQuery({
     keepPrevious: true,
     policy: REFRESH.ash,
     queryFn: (signal) =>
-      getApi(() => client.GET('/api/v1/ash/top', { params: { query: params }, signal })),
+      getApi(() =>
+        client.GET('/api/v1/ash/top', {
+          params: { query: { ...params, ...resolveQueryWindow(window) } },
+          signal,
+        }),
+      ),
     queryKey: qk.ashTop(
       params.instance_id,
-      params.from,
-      params.to,
+      window,
       params.database,
       params.limit,
       params.wait_event_type,

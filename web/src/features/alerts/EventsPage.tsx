@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { useAlerts, useEvents, useSilences } from '@/api/queries'
@@ -7,10 +7,10 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Input } from '@/components/ui/input'
-import type { Alert } from '@/lib/alerts'
+import { summariseAlerts, type Alert } from '@/lib/alerts'
 import { EventTimeline } from '@/features/cluster/EventTimeline'
 import type { ClusterEvent } from '@/lib/events'
-import { parseRange } from '@/lib/timerange'
+import { parseRange, queryWindowOf } from '@/lib/timerange'
 
 const DEFAULT_EVENT_LIMIT = 100
 const MAX_EVENT_LIMIT = 1_000
@@ -56,7 +56,10 @@ function AlertStatus({
   alerts: readonly Alert[]
   suppressionUnknown: boolean
 }) {
-  const firingAlerts = alerts.filter((alert) => alert.state === 'firing')
+  // Suppressed alerts count under Suppressed, as on the alerts page, so the two
+  // pages never report different firing totals for the same alerts.
+  const { firing } = summariseAlerts(alerts)
+  const firingCount = firing.critical + firing.warning + firing.info
   const evaluation = latestEvaluation(alerts)
 
   return (
@@ -64,12 +67,12 @@ function AlertStatus({
       title="Alert status"
       description="Alert health is evaluated independently from the event history."
     >
-      {firingAlerts.length === 0 ? (
+      {firingCount === 0 ? (
         <p role="status">
           No alerts firing. Last evaluated: {evaluation ?? 'no alert evaluation has been recorded'}.
         </p>
       ) : (
-        <p role="status">Firing alerts: {firingAlerts.length}</p>
+        <p role="status">Firing alerts: {firingCount}</p>
       )}
 
       {alerts.length > 0 ? (
@@ -101,21 +104,18 @@ export function EventsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const location = useLocation()
   const navigate = useNavigate()
-  const searchKey = searchParams.toString()
-  const range = useMemo(() => parseRange(new URLSearchParams(searchKey), new Date()), [searchKey])
+  const range = parseRange(searchParams, new Date())
   const redirectedForUnauthorized = useRef(false)
   const clusterId = searchParams.get('cluster_id') ?? ''
   const selectedType = searchParams.get('type') ?? ''
   const eventLimit = readLimit(searchParams.get('limit'))
 
   const eventsParams = {
-    from: range.from.toISOString(),
     limit: eventLimit.effective,
-    to: range.to.toISOString(),
     ...(clusterId ? { cluster_id: clusterId } : {}),
     ...(selectedType ? { type: selectedType } : {}),
   }
-  const eventsQuery = useEvents(eventsParams)
+  const eventsQuery = useEvents(eventsParams, queryWindowOf(range))
   const alertsQuery = useAlerts({ state: 'all' })
   const silencesQuery = useSilences({ all: true })
 
