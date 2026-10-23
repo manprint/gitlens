@@ -161,7 +161,7 @@ psql "$PGLENS_DSN" -v pglens_password="$PGLENS_MONITORING_PASSWORD" \
   -v dbname=postgres -f deploy/sql/monitoring_user.sql
 ```
 
-PostgreSQL lets every role execute `pg_control_system()` and `pg_control_checkpoint()` by default, but hardened installations revoke that from `PUBLIC`, so the script grants both explicitly. Without them the cluster identity falls back to the configured `cluster_name` and a failover can split one cluster into two (see Monitoring a replicated cluster).
+PostgreSQL lets every role execute `pg_control_system()` and `pg_control_checkpoint()` by default. Hardened installations revoke that from `PUBLIC`, so the script grants both to the monitoring role explicitly. Where that default is revoked and the grant is missing, the cluster identity falls back to the configured `cluster_name` and a failover can split one cluster into two (see Monitoring a replicated cluster).
 
 The script supports explicit higher tiers:
 
@@ -1423,15 +1423,15 @@ This stable identifier is how pglens proves that a promoted standby is the same 
 
 ### The `pg_control_system()` grant
 
-The `system_identifier` is not covered by `pg_monitor` and requires an explicit grant:
+Membership in `pg_monitor` does not grant `pg_control_system()`, but on PostgreSQL 15 to 19 `PUBLIC` holds `EXECUTE` on it by default, so every role can read `system_identifier`. The grant is needed only where that default has been revoked:
 
 ```sql
 GRANT EXECUTE ON FUNCTION pg_control_system() TO pglens;
 ```
 
-This is applied by `deploy/sql/monitoring_user.sql`. **Without it, the agent cannot read `system_identifier` and falls back to the configured `cluster_name` as the identity.** If you then promote a standby, the primary and standby will report different `cluster_name` values, causing the system to see them as two separate clusters — `cluster_id` will appear to change.
+This is applied by `deploy/sql/monitoring_user.sql`. **Where `PUBLIC` has lost `EXECUTE` and the monitoring role has no grant, the agent cannot read `system_identifier` and falls back to the configured `cluster_name` as the identity.** If you then promote a standby, the primary and standby will report different `cluster_name` values, causing the system to see them as two separate clusters — `cluster_id` will appear to change.
 
-**Best practice:** always include the `pg_control_system()` grant. If you cannot grant it (e.g., on some managed PostgreSQL services), explicitly set `cluster_name` to the same value on all instances in the cluster and ensure it survives failover.
+**Best practice:** keep the grant that `monitoring_user.sql` applies, so the identity does not depend on the `PUBLIC` default. If you cannot grant it (e.g., on some managed PostgreSQL services), explicitly set `cluster_name` to the same value on all instances in the cluster and ensure it survives failover.
 
 ### What the agent does
 
@@ -1614,7 +1614,7 @@ If the check exits 0 and all mandatory checks show `enabled`, the target is conf
 
 **`permission denied` on `pg_control_system()`**
 
-The monitoring role needs an explicit grant that `pg_monitor` does not cover. As superuser on the target:
+This error means `EXECUTE` on the function has been revoked from `PUBLIC` and not granted to the monitoring role. `pg_monitor` does not cover it, so grant it explicitly. As superuser on the target:
 
 ```sql
 GRANT EXECUTE ON FUNCTION pg_control_system() TO pglens;
@@ -1629,7 +1629,7 @@ psql "$PGLENS_DSN" -v pglens_password="$PGLENS_MONITORING_PASSWORD" \
   -v dbname=postgres -f deploy/sql/monitoring_user.sql
 ```
 
-Without this grant, the agent falls back to `cluster_name` for cluster identity, and a failover can split the cluster into two in the UI.
+Until the grant is in place, the agent falls back to `cluster_name` for cluster identity, and a failover can split the cluster into two in the UI.
 
 **Agent reports `revoked` and stops scheduled collection**
 
