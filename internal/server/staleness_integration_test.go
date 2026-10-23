@@ -260,3 +260,44 @@ func TestStaleness_PurgesEventsPastRetention(t *testing.T) {
 	require.Len(t, remaining, 1, "only the event inside the retention window survives")
 	require.WithinDuration(t, time.Now().Add(-24*time.Hour), remaining[0], time.Minute)
 }
+
+// INT-STALE-004: an instance whose agent is revoked and goes silent emits no
+// agent_down and no instance_unreachable, while a healthy agent's silent
+// instance emits both. The revoked instance's gauge still reports it down.
+func TestStaleness_INT_STALE_004_RevokedAgentEmitsNoOutage(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	cid := store.ToDB(pgtype.ClusterID(1))
+	_, err := pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual')`, cid)
+	require.NoError(t, err)
+
+	revokedAgent, healthyAgent := uuid.New(), uuid.New()
+	revokedInst, healthyInst := uuid.New(), uuid.New()
+	for _, agent := range []uuid.UUID{revokedAgent, healthyAgent} {
+		_, err = pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+		require.NoError(t, err)
+	}
+	_, err = pool.Exec(ctx, `UPDATE agents SET revoked_at = now() WHERE agent_id = $1`, revokedAgent)
+	require.NoError(t, err)
+	for inst, agent := range map[uuid.UUID]uuid.UUID{revokedInst: revokedAgent, healthyInst: healthyAgent} {
+		_, err = pool.Exec(ctx, `INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen) VALUES ($1,'default',$2,$3,'10.0.0.1',5432,170000,'standby','T0', now() - interval '5 minutes')`, inst, cid, agent)
+		require.NoError(t, err)
+	}
+
+	s := NewStaleness(pool, clock.NewFake(time.Now()))
+	s.mu.Lock()
+	s.conn = mustAcquire(t, pool)
+	s.hasLock = true
+	s.mu.Unlock()
+	require.NoError(t, s.Evaluate(ctx))
+
+	require.Equal(t, 0.0, pglensUpGauge.Get(revokedInst.String()))
+	for _, typ := range []string{"agent_down", "instance_unreachable"} {
+		var n int
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type=$1 AND instance_id=$2`, typ, revokedInst).Scan(&n))
+		require.Zero(t, n, "revoked instance must not emit %s", typ)
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type=$1 AND instance_id=$2`, typ, healthyInst).Scan(&n))
+		require.Equal(t, 1, n, "healthy silent instance must emit %s", typ)
+	}
+}

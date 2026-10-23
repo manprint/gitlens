@@ -433,7 +433,7 @@ func (s *Staleness) Evaluate(ctx context.Context) error {
 	now := s.clock.Now()
 	threshold := s.threshold()
 
-	rows, err := s.pool.Query(ctx, `SELECT instance_id, cluster_id, last_seen, role, agent_id FROM instances`)
+	rows, err := s.pool.Query(ctx, `SELECT i.instance_id, i.cluster_id, i.last_seen, i.role, i.agent_id, a.revoked_at IS NOT NULL FROM instances i LEFT JOIN agents a ON a.agent_id = i.agent_id`)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
@@ -448,6 +448,7 @@ func (s *Staleness) Evaluate(ctx context.Context) error {
 		lastSeen  time.Time
 		role      string
 		agentID   uuid.UUID
+		revoked   bool
 	}
 	var instances []instInfo
 	clusterHasPrimary := make(map[int64]bool)
@@ -459,10 +460,11 @@ func (s *Staleness) Evaluate(ctx context.Context) error {
 		var lastSeen time.Time
 		var role string
 		var agentID uuid.UUID
-		if scanErr := rows.Scan(&iid, &cid, &lastSeen, &role, &agentID); scanErr != nil {
+		var revoked bool
+		if scanErr := rows.Scan(&iid, &cid, &lastSeen, &role, &agentID, &revoked); scanErr != nil {
 			return fmt.Errorf("scan instance: %w", scanErr)
 		}
-		instances = append(instances, instInfo{id: iid, clusterID: cid, lastSeen: lastSeen, role: role, agentID: agentID})
+		instances = append(instances, instInfo{id: iid, clusterID: cid, lastSeen: lastSeen, role: role, agentID: agentID, revoked: revoked})
 		clusterIDs[cid] = struct{}{}
 		// A stale primary (its agent has gone silent — no update ever
 		// retroactively changes `role` once that happens) must not count as
@@ -491,6 +493,15 @@ func (s *Staleness) Evaluate(ctx context.Context) error {
 
 		pglensUpGauge.Set(iidStr, boolToFloat(up))
 		pglensAgentLastSeenGauge.Set(iidStr, float64(inst.lastSeen.Unix()))
+
+		// A revoked agent stops pushing by design, so its silence is not an
+		// outage: it emits no agent_down or instance_unreachable, as the metric
+		// path in alert/source_sql.go already treats it. The state is still kept
+		// so that a later transition is measured from the true state.
+		if inst.revoked {
+			s.instanceUp[iidStr] = up
+			continue
+		}
 
 		prevUp, seenBefore := s.instanceUp[iidStr]
 		if !seenBefore {
