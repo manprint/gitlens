@@ -29,6 +29,12 @@ describe('settings helpers', () => {
     expect(normalizeSettingValue('on', '')).toBe('on')
   })
 
+  it('WD-06 shows the -1 sentinel as stored, not as a negative size or duration', () => {
+    expect(normalizeSettingValue('-1', 'kB')).toBe('-1 kB')
+    expect(normalizeSettingValue('-1', 'MB')).toBe('-1 MB')
+    expect(normalizeSettingValue('-1', 'ms')).toBe('-1 ms')
+  })
+
   it('UI-INST-041 flags pending restart settings', () => {
     expect(isPendingRestart(setting({ pending_restart: 'true' }))).toBe(true)
     expect(isPendingRestart(setting({ pending_restart: 'false' }))).toBe(false)

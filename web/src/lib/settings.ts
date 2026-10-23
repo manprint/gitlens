@@ -33,11 +33,14 @@ function numericValue(value: string | null): number | null {
 export function normalizeSettingValue(value: string | null, unit: string): string | null {
   if (value === null) return null
 
+  // PostgreSQL uses a negative value, usually -1, for "no limit" or "disabled"
+  // in size and time settings. Scaling it would render a negative size or
+  // duration, so a negative value is shown as stored, with its unit.
   const parsed = numericValue(value)
-  if (parsed !== null && BYTE_MULTIPLIERS[unit]) {
+  if (parsed !== null && parsed >= 0 && BYTE_MULTIPLIERS[unit]) {
     return formatBytes(parsed * BYTE_MULTIPLIERS[unit])
   }
-  if (parsed !== null && DURATION_MULTIPLIERS[unit]) {
+  if (parsed !== null && parsed >= 0 && DURATION_MULTIPLIERS[unit]) {
     return formatDuration(parsed * DURATION_MULTIPLIERS[unit])
   }
 
