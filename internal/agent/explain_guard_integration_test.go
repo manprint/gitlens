@@ -566,3 +566,158 @@ CREATE FOREIGN TABLE pglens_guard.f_estimate (a int, b text) SERVER pglens_estim
 		require.NoError(t, err)
 	})
 }
+
+// TestINTCMD034_ExplainRefusesFunctionsAnOwnerAddsToAnExtension: the owner of a
+// database may install a trusted extension such as pg_trgm, and then add
+// objects of their own to it. Those objects became extension members, which the
+// guard skipped as side-effect-free: the planner ran an IMMUTABLE function of
+// the owner's, and ANALYZE ran a VOLATILE function of the owner's, both when a
+// statement named it and when it was reached through an operator added to the
+// extension. Only an extension member a superuser owns counts as the
+// extension's.
+func TestINTCMD034_ExplainRefusesFunctionsAnOwnerAddsToAnExtension(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		_, err := admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, guardFixture)
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, `CREATE ROLE pglens_guard_owner NOLOGIN;
+GRANT CREATE ON DATABASE postgres TO pglens_guard_owner;
+GRANT CREATE ON SCHEMA public TO pglens_guard_owner;`)
+		require.NoError(t, err)
+		// One statement per Exec: a multi-statement string runs as one
+		// transaction, and a DROP ROLE refused for the grants still held would
+		// roll back the drops before it.
+		t.Cleanup(func() {
+			for _, statement := range []string{
+				"DROP EXTENSION IF EXISTS pg_trgm CASCADE",
+				"DROP FUNCTION IF EXISTS public.pglens_guard_op(integer, integer)",
+				"REVOKE CREATE ON SCHEMA public FROM pglens_guard_owner",
+				"REVOKE CREATE ON DATABASE postgres FROM pglens_guard_owner",
+				"DROP ROLE IF EXISTS pglens_guard_owner",
+			} {
+				_, _ = admin.Exec(context.Background(), statement)
+			}
+		})
+
+		// asOwner runs sql as the database owner on its own session, so the
+		// extension and the objects are owned by that role, as they would be
+		// for a user who installed pg_trgm in their own database.
+		asOwner := func(sql string) {
+			conn, err := pgx.Connect(ctx, pg.DSN("postgres", pgtest.RoleSuperuser))
+			require.NoError(t, err)
+			defer func() { _ = conn.Close(ctx) }()
+			_, err = conn.Exec(ctx, "SET ROLE pglens_guard_owner")
+			require.NoError(t, err)
+			_, err = conn.Exec(ctx, sql)
+			require.NoError(t, err, sql)
+		}
+
+		// Installing pg_trgm alone changes nothing: its own functions are
+		// superuser-owned and still pass.
+		asOwner("CREATE EXTENSION pg_trgm")
+		const similar = "SELECT similarity(t.b, t.b) FROM pglens_guard.t"
+		ids := registerStatements(t, pg, similar)
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			for _, analyze := range []bool{false, true} {
+				_, err = explainAs(t, pg, role, ids[similar], analyze)
+				require.NoError(t, err, role.String())
+			}
+		}
+
+		// A VOLATILE function the owner adds to the extension, which the
+		// statement names directly. It comes before the operator below: the
+		// hidden-call lookup covers the whole database, so once an operator
+		// that calls a refused function exists, it would refuse every ANALYZE
+		// here, whatever the statement names. The statement-level check reads
+		// the extension membership through functionLookup, so it must refuse
+		// the function before anything is planned.
+		asOwner(`CREATE FUNCTION public.pglens_guard_vol() RETURNS boolean LANGUAGE plpgsql VOLATILE
+	AS $$ BEGIN PERFORM pg_advisory_lock(4251); RETURN true; END $$;
+ALTER EXTENSION pg_trgm ADD FUNCTION public.pglens_guard_vol();`)
+		const named = "SELECT public.pglens_guard_vol()"
+		ids = registerStatements(t, pg, named)
+		requireNoAdvisoryLocks(t, admin)
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			_, err = explainAs(t, pg, role, ids[named], true)
+			requireRefused(t, err, "the statement calls public.pglens_guard_vol()")
+			requireNoAdvisoryLocks(t, admin)
+		}
+
+		// A VOLATILE operator function, added to the extension with its
+		// operator. Plain EXPLAIN does not run it; ANALYZE must refuse it, as
+		// it refuses the same operator outside the extension.
+		asOwner(`CREATE FUNCTION public.pglens_guard_op(integer, integer) RETURNS boolean LANGUAGE plpgsql VOLATILE
+	AS $$ BEGIN PERFORM pg_advisory_lock(4248); RETURN true; END $$;
+CREATE OPERATOR public.#!# (LEFTARG = integer, RIGHTARG = integer, PROCEDURE = public.pglens_guard_op);
+ALTER EXTENSION pg_trgm ADD OPERATOR public.#!# (integer, integer);`)
+		const viaOperator = "SELECT t.a #!# t.a FROM pglens_guard.t"
+		ids = registerStatements(t, pg, viaOperator)
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			_, err = explainAs(t, pg, role, ids[viaOperator], true)
+			requireRefused(t, err, "calls public.pglens_guard_op()")
+			requireNoAdvisoryLocks(t, admin)
+		}
+
+		// An IMMUTABLE function the owner adds to the extension is run while
+		// the statement is planned, so the database refuses EXPLAIN, plain or
+		// ANALYZE, as it refuses one outside any extension.
+		asOwner(`CREATE FUNCTION public.pglens_guard_plan() RETURNS int LANGUAGE plpgsql IMMUTABLE
+	AS $$ BEGIN PERFORM pg_advisory_lock(4249); RETURN 1; END $$;
+ALTER EXTENSION pg_trgm ADD FUNCTION public.pglens_guard_plan();`)
+		const planned = "SELECT public.pglens_guard_plan()"
+		ids = registerStatements(t, pg, planned)
+		requireNoAdvisoryLocks(t, admin)
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			for _, analyze := range []bool{false, true} {
+				_, err = explainAs(t, pg, role, ids[planned], analyze)
+				requireRefused(t, err, "the database defines public.pglens_guard_plan()")
+				requireNoAdvisoryLocks(t, admin)
+			}
+		}
+	})
+}
+
+// TestINTCMD035_ExplainAdmitsTheStockContribExtensions: the extensions in
+// sideEffectFreeExtensions ship with PostgreSQL. Their operators, casts and
+// aggregates are checked by the hidden-call lookup, which covers the whole
+// database and not only the statement, so one of them reaching a function the
+// guard refuses would refuse ANALYZE everywhere. A database that installs
+// them must still be analyzed and planned.
+func TestINTCMD035_ExplainAdmitsTheStockContribExtensions(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		_, err := admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, guardFixture)
+		require.NoError(t, err)
+
+		// postgis is left out: the stock image does not ship it.
+		contrib := []string{"btree_gin", "btree_gist", "citext", "cube", "earthdistance", "fuzzystrmatch",
+			"hstore", "intarray", "isn", "ltree", "pg_trgm", "pgcrypto", "seg", "unaccent", "uuid-ossp"}
+		t.Cleanup(func() {
+			for _, name := range contrib {
+				_, _ = admin.Exec(context.Background(), "DROP EXTENSION IF EXISTS "+pgx.Identifier{name}.Sanitize()+" CASCADE")
+			}
+			_, _ = admin.Exec(context.Background(), "DROP SCHEMA IF EXISTS pglens_guard CASCADE")
+		})
+		for _, name := range contrib {
+			_, err = admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS "+pgx.Identifier{name}.Sanitize()+" CASCADE")
+			require.NoError(t, err, name)
+		}
+
+		const trivial = "SELECT count(*) FROM pglens_guard.t"
+		ids := registerStatements(t, pg, trivial)
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			for _, analyze := range []bool{false, true} {
+				_, err = explainAs(t, pg, role, ids[trivial], analyze)
+				require.NoError(t, err, role.String())
+			}
+		}
+	})
+}

@@ -34,10 +34,11 @@ import (
 // concurrently between the check and the plan; code that runs while planning
 // but is not a function in the database, such as a planner hook loaded with
 // shared_preload_libraries; the IMMUTABLE and STABLE functions of installed
-// extensions, which guardPlanning does not list, so plain EXPLAIN folds them
-// unchecked (ANALYZE refuses the ones outside sideEffectFreeExtensions that a
-// statement reaches); and the remote planning of foreign-data wrappers other
-// than postgres_fdw, whose use_remote_estimate guardPlanning refuses.
+// extensions that a superuser owns, which guardPlanning does not list, so plain
+// EXPLAIN folds them unchecked (ANALYZE refuses the ones outside
+// sideEffectFreeExtensions that a statement reaches); and the remote planning
+// of foreign-data wrappers other than postgres_fdw, whose use_remote_estimate
+// guardPlanning refuses.
 
 // sideEffectFreeExtensions only compute: no I/O outside the database, no SQL
 // text executed on the caller's behalf, no state that outlives a transaction.
@@ -219,7 +220,9 @@ func builtinVolatileAllowedName(name string) bool {
 
 // functionLookup lists every function named in $1, in any schema. visible
 // marks the schemas an unqualified name can resolve to; both the plan and
-// this lookup run in the same session, so they share the search_path.
+// this lookup run in the same session, so they share the search_path. Only a
+// function a superuser owns can count as an extension's, for the reason given
+// at plannableFunctionLookup.
 const functionLookup = `/* pglens: explain guard, functions */
 SELECT COALESCE(pg_catalog.json_agg(pg_catalog.json_build_object(
 		'schema', n.nspname,
@@ -229,18 +232,22 @@ SELECT COALESCE(pg_catalog.json_agg(pg_catalog.json_build_object(
 		'visible', n.nspname = ANY (pg_catalog.current_schemas(true)))), '[]')
 FROM pg_catalog.pg_proc p
 JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+JOIN pg_catalog.pg_roles ow ON ow.oid = p.proowner
 LEFT JOIN pg_catalog.pg_depend d
 	ON d.classid = 'pg_catalog.pg_proc'::pg_catalog.regclass AND d.objid = p.oid AND d.deptype = 'e'
-LEFT JOIN pg_catalog.pg_extension e ON e.oid = d.refobjid
+LEFT JOIN pg_catalog.pg_extension e ON e.oid = d.refobjid AND ow.rolsuper
 WHERE p.proname = ANY ($1::pg_catalog.name[])`
 
 // hiddenCallLookup lists the functions that user-defined operators, casts,
 // domain constraints and aggregates call. A plan does not always show these
 // calls: CASE x WHEN y and NULLIF hide the equality operator, an implicit cast
 // shows as its argument, a domain check runs inside record input, and an
-// aggregate shows only its own name. Objects of the side-effect-free
-// extensions ($1) are skipped; built-in objects (OIDs below
-// FirstNormalObjectId, 16384) only reference built-in functions.
+// aggregate shows only its own name. Built-in objects (OIDs below
+// FirstNormalObjectId, 16384) only reference built-in functions, so they are
+// skipped. An object of a side-effect-free extension is not skipped: a
+// non-superuser who can install such an extension can add an operator of
+// their own to it (ALTER EXTENSION ... ADD OPERATOR), and the object is then
+// checked by the function it calls like any other.
 const hiddenCallLookup = `/* pglens: explain guard, hidden calls */
 WITH refs(object, objclass, objid, fn) AS (
 	SELECT 'operator ' || o.oid::pg_catalog.regoperator::pg_catalog.text,
@@ -279,13 +286,11 @@ SELECT COALESCE(pg_catalog.json_agg(pg_catalog.json_build_object(
 FROM refs r
 JOIN pg_catalog.pg_proc p ON p.oid = r.fn
 JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+JOIN pg_catalog.pg_roles ow ON ow.oid = p.proowner
 LEFT JOIN pg_catalog.pg_depend d
 	ON d.classid = 'pg_catalog.pg_proc'::pg_catalog.regclass AND d.objid = p.oid AND d.deptype = 'e'
-LEFT JOIN pg_catalog.pg_extension e ON e.oid = d.refobjid
-LEFT JOIN pg_catalog.pg_depend od ON od.classid = r.objclass AND od.objid = r.objid AND od.deptype = 'e'
-LEFT JOIN pg_catalog.pg_extension oe ON oe.oid = od.refobjid
-WHERE r.fn <> 0
-  AND NOT (COALESCE(oe.extname, '') = ANY ($1::pg_catalog.text[]))`
+LEFT JOIN pg_catalog.pg_extension e ON e.oid = d.refobjid AND ow.rolsuper
+WHERE r.fn <> 0`
 
 // hiddenCall is one function a user-defined object calls.
 type hiddenCall struct {
@@ -353,10 +358,14 @@ func dropExplainPrivileges(ctx context.Context, conn check.Conn, major int, anal
 // VOLATILE function runs only when it executes, so it is not listed. Built-in
 // functions are left out, since PostgreSQL declares their volatility itself.
 // The functions of extensions are left out: an installed extension is the
-// trust boundary here, and ANALYZE checks the ones a statement reaches. The
-// C functions a superuser defined are not left out, and neither are the cost
-// and selectivity estimators of operators, which are C functions: an IMMUTABLE
-// or STABLE one of them is listed and refuses EXPLAIN like any other.
+// trust boundary here, and ANALYZE checks the ones a statement reaches. Only
+// a function a superuser owns is an extension's, though. A non-superuser who
+// can install a trusted extension, such as pg_trgm, can add a function of
+// their own to it with ALTER EXTENSION ... ADD FUNCTION, and the planner would
+// run that function like any other user function. The C functions a superuser
+// defined are not left out, and neither are the cost and selectivity
+// estimators of operators, which are C functions: an IMMUTABLE or STABLE one
+// of them is listed and refuses EXPLAIN like any other.
 const plannableFunctionLookup = `/* pglens: explain guard, plannable functions */
 SELECT COALESCE(pg_catalog.json_agg(pg_catalog.json_build_object(
 		'schema', n.nspname,
@@ -367,7 +376,9 @@ JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
 WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
   AND p.provolatile IN ('i', 's')
   AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d
-                  WHERE d.classid = 'pg_catalog.pg_proc'::pg_catalog.regclass AND d.objid = p.oid AND d.deptype = 'e')`
+                  JOIN pg_catalog.pg_roles ow ON ow.oid = p.proowner
+                  WHERE d.classid = 'pg_catalog.pg_proc'::pg_catalog.regclass AND d.objid = p.oid AND d.deptype = 'e'
+                    AND ow.rolsuper)`
 
 // guardPlanning refuses every EXPLAIN, plan-only or ANALYZE, while the database
 // defines a function the planner may run, or a foreign table whose planning
@@ -531,13 +542,8 @@ func lookupFunctions(ctx context.Context, conn check.Conn, refs []funcRef) ([]ca
 }
 
 func lookupHiddenCalls(ctx context.Context, conn check.Conn) ([]hiddenCall, error) {
-	allowed := make([]string, 0, len(sideEffectFreeExtensions))
-	for name := range sideEffectFreeExtensions {
-		allowed = append(allowed, name)
-	}
-	sort.Strings(allowed)
 	var raw json.RawMessage
-	if err := conn.QueryRow(ctx, hiddenCallLookup, allowed).Scan(&raw); err != nil {
+	if err := conn.QueryRow(ctx, hiddenCallLookup).Scan(&raw); err != nil {
 		return nil, fmt.Errorf("look up operators, casts, domains and aggregates for the explain guard: %w", err)
 	}
 	var calls []hiddenCall
