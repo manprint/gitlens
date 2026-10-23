@@ -377,6 +377,29 @@ func TestReplicationStreaming_ReconnectKeepsStandbyIdentity(t *testing.T) {
 	require.Equal(t, []string{"walreceiver@10.0.0.2", "walreceiver@10.0.0.3"}, after)
 }
 
+// TestReplicationStreaming_ReconnectKeepsSingleStandbyIdentity: a standby that
+// is alone under its name keeps the same identity when it reconnects on a new
+// port, with or without a name of its own. The port is never part of it.
+func TestReplicationStreaming_ReconnectKeepsSingleStandbyIdentity(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, application, want string }{
+		{"named standby", "standby1", "standby1"},
+		{"standby without a name", "", "@10.0.0.2"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			before := standbyIdentity([]replicationStreamingRow{
+				{ApplicationName: tc.application, ClientAddr: "10.0.0.2", ClientPort: 50001},
+			})
+			after := standbyIdentity([]replicationStreamingRow{
+				{ApplicationName: tc.application, ClientAddr: "10.0.0.2", ClientPort: 50117},
+			})
+			require.Equal(t, before, after)
+			require.Equal(t, []string{tc.want}, after)
+		})
+	}
+}
+
 // TestReplicationStreaming_SameAddressStandbysStayDistinct: standbys that share
 // a name and an address are numbered, so one does not overwrite the other.
 func TestReplicationStreaming_SameAddressStandbysStayDistinct(t *testing.T) {
