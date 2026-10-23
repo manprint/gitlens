@@ -441,7 +441,11 @@ func checkMountWarning(identityPath string) string {
 // isMountWarning reports whether path is not on a persistent mount. The mount
 // that holds path is the one with the longest mountpoint containing it: a
 // volume under the root holds its own paths, and a tmpfs nested in a volume
-// holds the paths under it. For testing, mountinfoPath can be overridden.
+// holds the paths under it. The root mount always counts as not persistent,
+// whatever its filesystem type: a container's root can report any type,
+// depending on the storage driver, and mountinfo cannot tell it from a host
+// disk. A missed warning for a container is the worse error, so the root warns.
+// For testing, mountinfoPath can be overridden.
 func isMountWarning(path string, mountinfoPath string) (bool, error) {
 	data, err := os.ReadFile(mountinfoPath)
 	if err != nil {
@@ -460,7 +464,7 @@ func isMountWarning(path string, mountinfoPath string) (bool, error) {
 		// mountpoint is the one on top, and the one that holds path.
 		if len(mountpoint) >= holder {
 			holder = len(mountpoint)
-			persistent = !volatileFSTypes[fstype]
+			persistent = mountpoint != "/" && !volatileFSTypes[fstype]
 		}
 	}
 	// No mount containing path means nothing shows it is persistent.
@@ -468,9 +472,8 @@ func isMountWarning(path string, mountinfoPath string) (bool, error) {
 }
 
 // volatileFSTypes are the filesystems that do not keep their contents across a
-// restart: memory filesystems, the container's overlay root, and the kernel's
-// initial rootfs, which is a ramfs.
-var volatileFSTypes = map[string]bool{"tmpfs": true, "ramfs": true, "rootfs": true, "overlay": true}
+// restart when mounted below the root: memory filesystems and overlay.
+var volatileFSTypes = map[string]bool{"tmpfs": true, "ramfs": true, "overlay": true}
 
 // mountinfoEscapes undoes the octal escapes mountinfo uses for the characters
 // that would otherwise break its whitespace-separated fields.

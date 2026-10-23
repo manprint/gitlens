@@ -163,10 +163,22 @@ func TestIsMountWarning(t *testing.T) {
 			want:      true,
 		},
 		{
-			name:      "persistent root filesystem in binary mode",
+			// Docker's btrfs and zfs drivers, and devicemapper, report the
+			// container root with their own filesystem type. It must warn all
+			// the same: a container with no identity volume loses it on recreate.
+			name:      "container root on a driver that is not overlay",
+			mountinfo: "36 35 0:31 / / rw,relatime - btrfs /dev/sda1 rw\n",
+			path:      identity,
+			want:      true,
+		},
+		{
+			// Known limitation: mountinfo cannot tell a host's disk from a
+			// container root, so binary mode on a persistent host root warns
+			// too. A missed warning for a container is the worse error.
+			name:      "host ext4 root in binary mode still warns",
 			mountinfo: hostRoot,
 			path:      identity,
-			want:      false,
+			want:      true,
 		},
 		{
 			name:      "separate ext4 volume at the identity directory",
