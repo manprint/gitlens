@@ -19,14 +19,15 @@ func (c *activityCheck) Requires() Requirements {
 	return Requirements{Scope: ScopeInstance, PermTier: pgtype.TierReadOnly}
 }
 func (c *activityCheck) DefaultInterval() time.Duration { return 10 * time.Second }
+
 // Timeout bounds the whole scrape, which runs its six probes one after another.
 // That budget was already in place when the probes ignored their errors. Now a
 // probe that fails or times out fails the scrape, so the activity metrics of
 // that interval are dropped instead of being published as zeros. The probes are
 // catalog aggregates of a few milliseconds each, so two seconds leaves room, and
 // a server too slow for that shows as a scrape error.
-func (c *activityCheck) Timeout() time.Duration         { return 2 * time.Second }
-func (c *activityCheck) SetByApplication(enabled bool)  { c.byApplication = enabled }
+func (c *activityCheck) Timeout() time.Duration        { return 2 * time.Second }
+func (c *activityCheck) SetByApplication(enabled bool) { c.byApplication = enabled }
 
 type activityRow struct {
 	State         *string
