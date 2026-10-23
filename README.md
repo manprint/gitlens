@@ -1710,7 +1710,7 @@ The agent's disk buffer grows when samples cannot be delivered to the server. Ch
    - Agent container: check DNS resolution and network connectivity to server
    - Binary deployment: check firewall rules and routing
 
-After the server becomes reachable, the buffer is replayed automatically (in order, with duplicates absorbed by the server's dedup index). Samples are never lost; buffer overflow after 512 MiB only deletes the oldest (least recent) segments.
+After the server becomes reachable, the buffer is replayed automatically, in order. Delivery is at least once: a record sent twice is absorbed by the server's dedup index. Buffer overflow after 512 MiB deletes the oldest (least recent) segments, and those samples are counted as dropped. Losses that are not counted are listed under Known limits.
 
 **Agent container restarting or marked as down**
 
@@ -1767,11 +1767,11 @@ the server is rejected, so upgrade the server before upgrading agents.
 
 **Agent:**
 - **No token rotation or mTLS** — the bootstrap token is a shared secret; revocation only (no key rotation, no mutual TLS, no approval queue, single-tenant)
-- **An unclean agent shutdown may lose the tail of the current buffer segment** — samples within the current segment are fsynced only at segment roll (every ~8 MiB), not per record. A graceful shutdown (SIGTERM with signal handler) flushes the active segment before exit; forceful termination (SIGKILL) skips that flush. The trade-off is necessary: per-record fsync would make monitoring overhead unacceptable for busy instances.
+- **A process kill can tear the record being written, and an OS crash can lose recent samples** — a kill (SIGTERM or SIGKILL) does not discard records already written, because the kernel keeps them, but a kill during a write can leave a torn record at the tail of the current segment. That record is not delivered and is not counted as dropped. Samples are fsynced only at segment roll (every ~8 MiB), not per record, so an operating-system crash or power loss can lose everything written since the last roll. The trade-off is necessary: per-record fsync would make monitoring overhead unacceptable for busy instances.
 - **Maximum 10 databases per instance by default** — if you have more databases, increase `targets[].databases.max` in the config or use the `include` filter. Unmonitored databases are reported with `skip_reason=db_budget` to make this visible (not a silent degradation).
 - **Oversized envelopes (>32 MiB) are dropped** — the agent does not split envelopes. The server answers 413, the agent drops that envelope instead of retrying it forever, and the drop is counted into `pglens_samples_dropped_rate`, the metric behind the `agent_buffer_full` alert rule. A gzipped envelope that expands past 256 MiB is rejected the same way, and is additionally visible server-side as `pglens_ingest_rejected_total{reason="decompressed_too_large"}`.
 
-- **Buffer retention drops are labelled, not silent** — records rolled off by the disk buffer's size or age policy are counted per reason (`size_limit`, `age_limit`) in the buffer's own stats and folded into `pglens_samples_dropped_rate`. A buffer that is discarding data always says so.
+- **Buffer retention drops are labelled, not silent** — records rolled off by the disk buffer's size or age policy are counted per reason (`size_limit`, `age_limit`) in the buffer's own stats, reported as `buffer_stats.dropped` on `/healthz`, and folded into `pglens_samples_dropped_rate`. Records the buffer cannot read back, such as a torn write from a crash, are not in these counts; see the unclean shutdown limit above.
 
 **Deployment:**
 - **An agent container without a persistent volume duplicates its instances on restart** — `/var/lib/pglens` must be a persistent volume (not ephemeral). Without it, every container restart creates a new instance ID, causing `duplicate_instance_suspected` events and fragmenting instance history. The compose file and systemd unit handle this correctly; Docker `--rm` breaks it.
