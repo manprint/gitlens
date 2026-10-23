@@ -468,7 +468,7 @@ export function useInstanceBloat(
           signal,
         }),
       ),
-    queryKey: qk.instanceBloat(id, params.limit),
+    queryKey: qk.instanceBloat(id, params.limit, params.object_kind),
   })
 }
 

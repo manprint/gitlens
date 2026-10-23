@@ -7,6 +7,8 @@ export const base = {
   items: [],
   truncated: false,
   relations_not_reported: 0,
+  skipped_tables: 0,
+  skipped_relations: [],
 }
 export const truncated = { ...base, truncated: true, relations_not_reported: 3 }
 export function makeGetInstanceBloat(overrides: DeepPartial<typeof base> = {}) {

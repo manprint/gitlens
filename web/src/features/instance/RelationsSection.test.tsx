@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { PermTier, Schemas } from '@/api/types'
 import { expectNoA11yViolations } from '@/test/a11y'
+import { assertMatchesContract } from '@/test/contract'
 import { INSTANCE_ID } from '@/test/fixture-helpers'
 import { ok } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
@@ -13,6 +14,7 @@ import { RelationsSection } from './RelationsSection'
 
 type RelationResponse = Schemas['RelationResponse']
 type RelationItem = RelationResponse['items'][number]
+type BloatResponse = Schemas['BloatResponse']
 
 const OBSERVED_AT = '2026-08-28T12:00:00Z'
 const COMMAND_ID = '22222222-2222-4222-8222-222222222222'
@@ -39,6 +41,35 @@ function response(
   }
 }
 
+function bloatResponse(
+  items: RelationItem[] = [],
+  overrides: Partial<BloatResponse> = {},
+): BloatResponse {
+  return {
+    ...response(items),
+    skipped_tables: 0,
+    skipped_relations: [],
+    ...overrides,
+  }
+}
+
+/**
+ * The bloat endpoint serves tables and indexes in one list, and each panel
+ * asks for its own object_kind. The mock answers each request with its kind,
+ * as the server does; onRequest sees every request.
+ */
+function bloatByKind(body: BloatResponse, onRequest?: () => void) {
+  assertMatchesContract('getInstanceBloat', 200, body)
+  return http.get('*/api/v1/instances/:id/bloat', ({ request }) => {
+    onRequest?.()
+    const kind = new URL(request.url).searchParams.get('object_kind')
+    return HttpResponse.json({
+      ...body,
+      items: body.items.filter((row) => row.object_kind === kind),
+    })
+  })
+}
+
 async function settle() {
   await act(async () => {
     for (let attempt = 0; attempt < 10; attempt += 1) {
@@ -51,19 +82,15 @@ async function settle() {
 function renderRelations({
   tables = response(),
   indexes = response(),
-  bloat = response(),
+  bloat = bloatResponse(),
   currentTier = 'T1',
 }: {
   tables?: RelationResponse
   indexes?: RelationResponse
-  bloat?: RelationResponse
+  bloat?: BloatResponse
   currentTier?: PermTier
 } = {}) {
-  server.use(
-    ok('getInstanceTables', tables),
-    ok('getInstanceIndexes', indexes),
-    ok('getInstanceBloat', bloat),
-  )
+  server.use(ok('getInstanceTables', tables), ok('getInstanceIndexes', indexes), bloatByKind(bloat))
   return renderWithProviders(
     <RelationsSection instanceId={INSTANCE_ID} currentTier={currentTier} />,
     { route: `/instances/${INSTANCE_ID}` },
@@ -77,7 +104,18 @@ describe('RelationsSection', () => {
       indexes: response([item({ indexrelname: 'orders_pkey', idx_scan_rate: 3 })], {
         truncated: true,
       }),
-      bloat: response([item({ bloat_bytes: 2048, method: 'estimate' })], { truncated: true }),
+      bloat: bloatResponse(
+        [
+          item({ object_kind: 'table', bloat_bytes: 2048, method: 'estimate' }),
+          item({
+            object_kind: 'index',
+            indexrelname: 'orders_pkey',
+            bloat_bytes: 512,
+            method: 'estimate',
+          }),
+        ],
+        { truncated: true },
+      ),
     })
     await settle()
 
@@ -88,7 +126,7 @@ describe('RelationsSection', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('checks.table_stats.top_n')).toBeInTheDocument()
     expect(screen.getByText('checks.index_stats.top_n')).toBeInTheDocument()
-    expect(screen.getByText('checks.bloat_estimate.top_n')).toBeInTheDocument()
+    expect(screen.getAllByText('checks.bloat_estimate.top_n')).toHaveLength(2)
     expect(
       screen.getByText(
         'Showing 1 of 50 indexes shared per instance across databases (truncated; budget 50).',
@@ -96,7 +134,12 @@ describe('RelationsSection', () => {
     ).toBeInTheDocument()
     expect(
       screen.getByText(
-        'Showing 1 of 50 bloat estimates shared per instance across databases (truncated; budget 50).',
+        'Showing 1 of 50 table bloat estimates shared per instance across databases (truncated; budget 50).',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'Showing 1 of 50 index bloat estimates shared per instance across databases (truncated; budget 50).',
       ),
     ).toBeInTheDocument()
   })
@@ -105,7 +148,7 @@ describe('RelationsSection', () => {
     renderRelations({
       tables: response([item({ n_live_tup: 100 })]),
       indexes: response([item({ indexrelname: 'orders_pkey' })]),
-      bloat: response([item({ bloat_bytes: 2048, method: 'estimate' })]),
+      bloat: bloatResponse([item({ object_kind: 'table', bloat_bytes: 2048, method: 'estimate' })]),
     })
     await settle()
 
@@ -114,7 +157,7 @@ describe('RelationsSection', () => {
 
   it('UI-INST-052 states the bloat estimate caveat once', async () => {
     renderRelations({
-      bloat: response([item({ bloat_bytes: 2048, method: 'estimate' })]),
+      bloat: bloatResponse([item({ object_kind: 'table', bloat_bytes: 2048, method: 'estimate' })]),
     })
     await settle()
 
@@ -124,11 +167,12 @@ describe('RelationsSection', () => {
   it('UI-INST-053 omits never-analysed relations instead of showing zero bloat', async () => {
     renderRelations({
       tables: response([item({ n_live_tup: 100 })]),
-      bloat: response([]),
+      bloat: bloatResponse([]),
     })
     await settle()
 
-    expect(screen.getByRole('heading', { name: 'No bloat estimates' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'No table bloat estimates' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'No index bloat estimates' })).toBeInTheDocument()
     expect(screen.queryByText('never_analysed')).not.toBeInTheDocument()
     expect(screen.queryByText('0 B')).not.toBeInTheDocument()
   })
@@ -137,7 +181,7 @@ describe('RelationsSection', () => {
     const { container } = renderRelations({
       tables: response([item({ n_live_tup: 100 })]),
       indexes: response([item({ indexrelname: 'orders_pkey' })]),
-      bloat: response([item({ bloat_bytes: 2048, method: 'estimate', object_kind: 'table' })]),
+      bloat: bloatResponse([item({ bloat_bytes: 2048, method: 'estimate', object_kind: 'table' })]),
       currentTier: 'T0',
     })
     await settle()
@@ -160,21 +204,21 @@ describe('RelationsSection', () => {
     server.use(
       ok('getInstanceTables', response([item({ n_live_tup: 100 })])),
       ok('getInstanceIndexes', response([item({ indexrelname: 'orders_pkey' })])),
-      http.get('*/api/v1/instances/:id/bloat', () => {
-        bloatRequests += 1
-        return HttpResponse.json(
-          response([
-            item({ datname: 'app', bloat_bytes: 2048, method: 'estimate', object_kind: 'table' }),
-            item({
-              datname: 'app',
-              relname: 'orders_archive',
-              indexrelname: 'orders_archive_pkey',
-              object_kind: 'index',
-              method: 'estimate',
-            }),
-          ]),
-        )
-      }),
+      bloatByKind(
+        bloatResponse([
+          item({ datname: 'app', bloat_bytes: 2048, method: 'estimate', object_kind: 'table' }),
+          item({
+            datname: 'app',
+            relname: 'orders_archive',
+            indexrelname: 'orders_archive_pkey',
+            object_kind: 'index',
+            method: 'estimate',
+          }),
+        ]),
+        () => {
+          bloatRequests += 1
+        },
+      ),
       http.post('*/api/v1/instances/:id/commands', async ({ request }) => {
         bodies.push(await request.json())
         return HttpResponse.json({ command_id: COMMAND_ID }, { status: 202 })
@@ -210,7 +254,7 @@ describe('RelationsSection', () => {
 
   it('UI-INST-059 surfaces the agent rejection when pgstattuple is missing', async () => {
     renderRelations({
-      bloat: response([item({ bloat_bytes: 2048, method: 'estimate', object_kind: 'table' })]),
+      bloat: bloatResponse([item({ bloat_bytes: 2048, method: 'estimate', object_kind: 'table' })]),
     })
     server.use(
       http.post('*/api/v1/instances/:id/commands', () =>
@@ -288,11 +332,12 @@ describe('RelationsSection', () => {
           ts: '',
         }),
       ]),
-      bloat: response([
+      bloat: bloatResponse([
         item({
           schemaname: null,
           relname: 'orders',
           indexrelname: null,
+          object_kind: 'table',
           real_bytes: null,
           expected_bytes: null,
           bloat_bytes: null,
@@ -318,7 +363,7 @@ describe('RelationsSection', () => {
   it('UI-INST-057 renders a retryable error when table relations fail', async () => {
     server.use(
       ok('getInstanceIndexes', response()),
-      ok('getInstanceBloat', response()),
+      ok('getInstanceBloat', bloatResponse()),
       http.get('/api/v1/instances/:id/tables', () =>
         HttpResponse.json({ message: 'table relations unavailable' }, { status: 500 }),
       ),
@@ -373,5 +418,46 @@ describe('RelationsSection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Sort Tables by Last vacuum' }))
     fireEvent.click(screen.getByRole('button', { name: 'Sort Tables by Last analyze' }))
     expect(within(tables).getAllByRole('row')).toHaveLength(3)
+  })
+
+  it('UI-INST-067 names the skipped tables and says their bloat is unknown, even with no estimate', async () => {
+    renderRelations({
+      bloat: bloatResponse([], {
+        skipped_tables: 3,
+        skipped_relations: [{ datname: 'app', schemaname: 'public', relname: 'secrets' }],
+      }),
+    })
+    await settle()
+
+    expect(screen.getByText(/3 tables have no bloat estimate/)).toBeInTheDocument()
+    expect(screen.getByText(/Largest: app: public\.secrets and 2 more\./)).toBeInTheDocument()
+    expect(screen.getByText(/Their bloat is unknown, not zero\./)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'No table bloat estimates' })).toBeInTheDocument()
+  })
+
+  it('UI-INST-068 splits bloat into a table panel and an index panel, each with its own rows', async () => {
+    renderRelations({
+      bloat: bloatResponse([
+        item({ datname: 'app', object_kind: 'table', bloat_bytes: 2048, method: 'estimate' }),
+        item({
+          datname: 'app',
+          object_kind: 'index',
+          indexrelname: 'orders_pkey',
+          bloat_bytes: 512,
+          method: 'estimate',
+        }),
+      ]),
+    })
+    await settle()
+
+    const tables = screen.getByRole('table', { name: 'Table bloat estimates' })
+    const indexes = screen.getByRole('table', { name: 'Index bloat estimates' })
+    expect(within(tables).getByRole('row', { name: /public\.orders/ })).toBeInTheDocument()
+    expect(within(tables).queryByText('orders_pkey')).not.toBeInTheDocument()
+    expect(within(indexes).getByRole('row', { name: /orders_pkey/ })).toBeInTheDocument()
+    expect(
+      within(indexes).getByRole('button', { name: 'Sort Index bloat estimates by Index' }),
+    ).toBeInTheDocument()
+    expect(within(indexes).queryByRole('button', { name: /exactly with pgstattuple/ })).toBeNull()
   })
 })
