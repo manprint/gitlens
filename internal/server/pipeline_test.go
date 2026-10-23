@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -346,6 +347,86 @@ func TestPipeline_MaybeEvict(t *testing.T) {
 	// concurrent safety check with multiple calls
 }
 
+// TestPipeline_FutureStampedResultDoesNotHideLaterResults: an agent whose clock
+// was stepped forward stamps its results ahead of the server. The mark those
+// results leave must not hide the real results that follow, or every check of
+// that instance reads as frozen until the server clock catches up.
+func TestPipeline_FutureStampedResultDoesNotHideLaterResults(t *testing.T) {
+	t.Parallel()
+	fc := clock.NewFake(time.Now())
+	p := NewPipeline(nil, fc)
+	instID := uuid.New()
+	key := checkKey{instance: instID.String(), check: "activity"}
+	ck := checkCountKey{instance: instID, check: "activity"}
+	before := pglensCheckOKTotal.Get(key)
+
+	p.countChecks([]checkOutcome{{checkCountKey: ck, ts: fc.Now().Add(3 * time.Hour)}})
+	for range 5 {
+		fc.Advance(time.Second)
+		p.countChecks([]checkOutcome{{checkCountKey: ck, ts: fc.Now()}})
+	}
+	require.Equal(t, before+6, pglensCheckOKTotal.Get(key), "the future-stamped result and the five real ones all count")
+}
+
+// TestPipeline_ResendOfAheadStampedResultCountsOnce: a result stamped a little
+// ahead of the server is counted, and its resend is recognised once the server
+// clock has passed its stamp. Clamping the mark to the clock would count the
+// resend a second time.
+func TestPipeline_ResendOfAheadStampedResultCountsOnce(t *testing.T) {
+	t.Parallel()
+	fc := clock.NewFake(time.Now())
+	p := NewPipeline(nil, fc)
+	instID := uuid.New()
+	key := checkKey{instance: instID.String(), check: "activity"}
+	ck := checkCountKey{instance: instID, check: "activity"}
+	ts := fc.Now().Add(300 * time.Millisecond)
+	before := pglensCheckOKTotal.Get(key)
+
+	p.countChecks([]checkOutcome{{checkCountKey: ck, ts: ts}})
+	fc.Advance(2 * time.Second)
+	p.countChecks([]checkOutcome{{checkCountKey: ck, ts: ts}})
+	require.Equal(t, before+1, pglensCheckOKTotal.Get(key), "a resend of a result counted once is not counted again")
+}
+
+// TestPipeline_ResendOfAheadStampedResultSurvivesEviction: an eviction pass
+// while a result's stamp is still ahead of the clock must keep its mark. The
+// resend that arrives once the clock has passed the stamp is then recognised;
+// a dropped mark would count that resend a second time.
+func TestPipeline_ResendOfAheadStampedResultSurvivesEviction(t *testing.T) {
+	t.Parallel()
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	fc := clock.NewFake(start)
+	p := NewPipeline(nil, fc)
+	instID := uuid.New()
+	key := checkKey{instance: instID.String(), check: "activity"}
+	ck := checkCountKey{instance: instID, check: "activity"}
+	ts := start.Add(time.Hour)
+	before := pglensCheckOKTotal.Get(key)
+
+	p.countChecks([]checkOutcome{{checkCountKey: ck, ts: ts}})
+	fc.Advance(10 * time.Minute)
+	p.maybeEvict()
+	fc.Advance(51 * time.Minute)
+	p.countChecks([]checkOutcome{{checkCountKey: ck, ts: ts}})
+	require.Equal(t, before+1, pglensCheckOKTotal.Get(key), "a resend after the clock passed the stamp is not counted again")
+}
+
+// TestPipeline_MaybeEvictDropsMarksFarAheadOfTheClock: a mark more than an hour
+// ahead of the clock is dropped with the old ones, so a clock set far in the
+// future does not keep its marks alive for years. A mark within the hour is
+// kept, see TestPipeline_ResendOfAheadStampedResultSurvivesEviction.
+func TestPipeline_MaybeEvictDropsMarksFarAheadOfTheClock(t *testing.T) {
+	t.Parallel()
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	fc := clock.NewFake(start)
+	p := NewPipeline(nil, fc)
+	ck := checkCountKey{instance: uuid.New(), check: "activity"}
+	p.checkCounted[ck] = start.Add(3 * time.Hour)
+	fc.Advance(11 * time.Minute)
+	p.maybeEvict()
+	require.NotContains(t, p.checkCounted, ck)
+}
+
 func TestPipeline_GaugeBypassesDelta(t *testing.T) {
 	t.Parallel()
 	p := NewPipeline(nil, clock.NewFake(time.Now()))
@@ -370,14 +451,15 @@ func TestPipeline_GaugeBypassesDelta(t *testing.T) {
 // TestPipeline_ResultErrorIncrementsCheckErrorTotal proves wire.Result.Error
 // is actually read now — found live via SYS-LOAD-003 prep that it never was
 // (row 141-142's stat_statements bug hid invisibly for exactly this
-// reason). Uses a unique check name since pglens_check_error_total is a
-// shared package-level counter other tests may also touch.
+// reason). The counters are shared package-level state, so the test reads the
+// series of its own instance only.
 func TestPipeline_ResultErrorIncrementsCheckErrorTotal(t *testing.T) {
 	t.Parallel()
 	p := NewPipeline(nil, clock.NewFake(time.Now()))
 	instID := uuid.NewString()
 	cid := pgtype.ClusterID(123).String()
-	const checkName = "pipeline_test_unique_check_error"
+	const checkName = "activity"
+	key := checkKey{instance: instID, check: checkName}
 	env := wire.Envelope{
 		Instances: []wire.Instance{
 			{
@@ -388,12 +470,12 @@ func TestPipeline_ResultErrorIncrementsCheckErrorTotal(t *testing.T) {
 			},
 		},
 	}
-	before := pglensCheckErrorTotal.Get(checkName)
-	beforeOK := pglensCheckOKTotal.Get(checkName)
+	before := pglensCheckErrorTotal.Get(key)
+	beforeOK := pglensCheckOKTotal.Get(key)
 	_, err := p.Process(context.Background(), env)
 	require.NoError(t, err)
-	require.Equal(t, before+1, pglensCheckErrorTotal.Get(checkName))
-	require.Equal(t, beforeOK, pglensCheckOKTotal.Get(checkName), "a failed scrape must not count as a success")
+	require.Equal(t, before+1, pglensCheckErrorTotal.Get(key))
+	require.Equal(t, beforeOK, pglensCheckOKTotal.Get(key), "a failed scrape must not count as a success")
 }
 
 // TestPipeline_SuccessfulResultIncrementsCheckOKTotal is the other half of the
@@ -407,7 +489,8 @@ func TestPipeline_SuccessfulResultIncrementsCheckOKTotal(t *testing.T) {
 	p := NewPipeline(nil, clock.NewFake(time.Now()))
 	instID := uuid.NewString()
 	cid := pgtype.ClusterID(124).String()
-	const checkName = "pipeline_test_unique_check_ok"
+	const checkName = "activity"
+	key := checkKey{instance: instID, check: checkName}
 	env := wire.Envelope{
 		Instances: []wire.Instance{
 			{
@@ -418,12 +501,37 @@ func TestPipeline_SuccessfulResultIncrementsCheckOKTotal(t *testing.T) {
 			},
 		},
 	}
-	before := pglensCheckOKTotal.Get(checkName)
-	beforeErr := pglensCheckErrorTotal.Get(checkName)
+	before := pglensCheckOKTotal.Get(key)
+	beforeErr := pglensCheckErrorTotal.Get(key)
 	_, err := p.Process(context.Background(), env)
 	require.NoError(t, err)
-	require.Equal(t, before+1, pglensCheckOKTotal.Get(checkName))
-	require.Equal(t, beforeErr, pglensCheckErrorTotal.Get(checkName), "a successful scrape must not count as an error")
+	require.Equal(t, before+1, pglensCheckOKTotal.Get(key))
+	require.Equal(t, beforeErr, pglensCheckErrorTotal.Get(key), "a successful scrape must not count as an error")
+}
+
+// A skipped scrape completed neither way. Counting it as OK would let it hide
+// the errors the same check reports on that instance.
+func TestPipeline_SkippedResultCountsAsNeither(t *testing.T) {
+	t.Parallel()
+	p := NewPipeline(nil, clock.NewFake(time.Now()))
+	instID := uuid.NewString()
+	cid := pgtype.ClusterID(125).String()
+	const checkName = "activity"
+	key := checkKey{instance: instID, check: checkName}
+	env := wire.Envelope{
+		Instances: []wire.Instance{
+			{
+				InstanceID: instID, ClusterID: cid,
+				Results: []wire.Result{
+					{Check: checkName, TS: time.Now(), SkipReason: "needs pg_read_all_stats"},
+				},
+			},
+		},
+	}
+	_, err := p.Process(context.Background(), env)
+	require.NoError(t, err)
+	require.Zero(t, pglensCheckOKTotal.Get(key), "a skipped scrape must not count as a success")
+	require.Zero(t, pglensCheckErrorTotal.Get(key), "a skipped scrape must not count as an error")
 }
 
 func TestPipeline_CounterProducesRate(t *testing.T) {
@@ -899,4 +1007,96 @@ func TestSelfMetricRows_SkewIsUnsignedAndOptional(t *testing.T) {
 func TestSelfMetricRows_NoResultsNoRows(t *testing.T) {
 	t.Parallel()
 	require.Empty(t, selfMetricRows(wire.Envelope{SentAt: time.Now()}, wire.Instance{}, "default", 1, uuid.New(), time.Now()))
+}
+
+// TestPipeline_TopologyFallbackStaysInCluster: the single-primary fallback links
+// a standby with an unresolved upstream to the primary of its own cluster only.
+// The primary of another cluster in the same envelope is no upstream of it.
+func TestPipeline_TopologyFallbackStaysInCluster(t *testing.T) {
+	t.Parallel()
+	tx := &recordingTx{}
+	p := NewPipeline(nil, nil)
+	p.pool = &mockPool{beginTx: tx}
+
+	primary := uuid.New()
+	otherClusterStandby := uuid.New()
+	sameClusterStandby := uuid.New()
+	env := wire.Envelope{Instances: []wire.Instance{
+		{InstanceID: primary.String(), ClusterID: pgtype.ClusterID(1).String(), Role: "primary", Addr: "10.0.0.1", Port: 5432},
+		{InstanceID: otherClusterStandby.String(), ClusterID: pgtype.ClusterID(2).String(), Role: "standby", Addr: "10.0.0.2", Port: 5432,
+			TopologyEdges: []wire.Edge{{From: otherClusterStandby.String(), To: "pg-unresolved", Type: "streaming", Confidence: "high"}}},
+		{InstanceID: sameClusterStandby.String(), ClusterID: pgtype.ClusterID(1).String(), Role: "standby", Addr: "10.0.0.3", Port: 5432,
+			TopologyEdges: []wire.Edge{{From: sameClusterStandby.String(), To: "pg-unresolved", Type: "streaming", Confidence: "high"}}},
+	}}
+	_, err := p.Process(context.Background(), env)
+	require.NoError(t, err)
+
+	// Each edge write is (tenant, cluster, from, to, ...).
+	edges := map[uuid.UUID]uuid.UUID{}
+	for _, e := range tx.execs {
+		if strings.Contains(e.sql, "INSERT INTO topology_edges") {
+			edges[e.args[2].(uuid.UUID)] = e.args[3].(uuid.UUID)
+		}
+	}
+	require.NotContains(t, edges, otherClusterStandby, "a standby must not be linked to a primary of another cluster")
+	require.Equal(t, primary, edges[sameClusterStandby], "the fallback still links a standby to the primary of its cluster")
+}
+
+// TestPipeline_SplitBrainEventHasNoInstance: split_brain_detected is a fact about
+// the cluster, not about the instance that pushed the envelope in which two
+// primaries were seen. It is stored without an instance_id, so no alert or
+// timeline attributes it to a single instance.
+func TestPipeline_SplitBrainEventHasNoInstance(t *testing.T) {
+	t.Parallel()
+	tx := &recordingTx{}
+	p := NewPipeline(nil, nil)
+	p.pool = &mockPool{beginTx: tx}
+
+	cid := pgtype.ClusterID(1).String()
+	env := wire.Envelope{Instances: []wire.Instance{
+		{InstanceID: uuid.NewString(), ClusterID: cid, Role: "primary", Addr: "10.0.0.1", Port: 5432},
+		{InstanceID: uuid.NewString(), ClusterID: cid, Role: "primary", Addr: "10.0.0.2", Port: 5432},
+	}}
+	_, err := p.Process(context.Background(), env)
+	require.NoError(t, err)
+
+	var found int
+	for _, e := range tx.execs {
+		// Event writes are (tenant, ts, type, cluster_id, instance_id, payload).
+		if strings.Contains(e.sql, "INSERT INTO events (") && e.args[2] == "split_brain_detected" {
+			found++
+			require.Nil(t, e.args[4], "a cluster-scoped event must not carry an instance_id")
+		}
+	}
+	require.Equal(t, 1, found, "two primaries in one cluster write one split_brain_detected event")
+}
+
+// TestPipeline_TruncationMarkerOncePerCheckPerEnvelope: a cap that cut two
+// databases' results of one check in the same push writes one
+// cardinality_truncated marker for the check on the instance, not one per result.
+func TestPipeline_TruncationMarkerOncePerCheckPerEnvelope(t *testing.T) {
+	t.Parallel()
+	tx := &recordingTx{}
+	p := NewPipeline(nil, nil)
+	p.pool = &mockPool{beginTx: tx}
+
+	ts := time.Now()
+	instID := uuid.New()
+	env := wire.Envelope{Instances: []wire.Instance{{
+		InstanceID: instID.String(), ClusterID: pgtype.ClusterID(1).String(), Role: "primary",
+		Results: []wire.Result{
+			{Check: "stat_statements", TS: ts, Database: "app", Truncated: true},
+			{Check: "stat_statements", TS: ts, Database: "postgres", Truncated: true},
+		},
+	}}}
+	_, err := p.Process(context.Background(), env)
+	require.NoError(t, err)
+
+	var markers int
+	for _, e := range tx.execs {
+		if strings.Contains(e.sql, "INSERT INTO events (") && e.args[2] == "cardinality_truncated" {
+			markers++
+		}
+	}
+	require.Equal(t, 1, markers)
 }

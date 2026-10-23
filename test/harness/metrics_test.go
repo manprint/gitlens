@@ -28,12 +28,12 @@ const healthyExposition = `# HELP pglens_series_total distinct metric series cur
 # TYPE pglens_series_total gauge
 pglens_series_total{instance_id="11111111-1111-1111-1111-111111111111"} 412
 pglens_series_total{instance_id="22222222-2222-2222-2222-222222222222"} 88
-# HELP pglens_check_error_total check scrapes that reported an error, by check name
+# HELP pglens_check_error_total check scrapes that reported an error, by instance and check name
 # TYPE pglens_check_error_total counter
-pglens_check_error_total{check="stat_statements"} 0
-# HELP pglens_check_ok_total check scrapes that completed without an error, by check name
+pglens_check_error_total{instance_id="11111111-1111-1111-1111-111111111111",check="stat_statements"} 0
+# HELP pglens_check_ok_total check scrapes that completed without an error, by instance and check name
 # TYPE pglens_check_ok_total counter
-pglens_check_ok_total{check="stat_statements"} 14
+pglens_check_ok_total{instance_id="11111111-1111-1111-1111-111111111111",check="stat_statements"} 14
 # HELP pglens_agent_clock_skew_seconds most recently observed agent/server clock skew
 # TYPE pglens_agent_clock_skew_seconds gauge
 pglens_agent_clock_skew_seconds 0
@@ -67,10 +67,10 @@ func TestAssertMetricInvariants_FailsOnCardinalityBlowup(t *testing.T) {
 // The shape that proves it is "errored, and never once succeeded".
 func TestAssertMetricInvariants_FailsOnACheckThatNeverSucceeds(t *testing.T) {
 	exposition := strings.NewReplacer(
-		`pglens_check_error_total{check="stat_statements"} 0`,
-		`pglens_check_error_total{check="stat_statements"} 37`,
-		`pglens_check_ok_total{check="stat_statements"} 14`,
-		`pglens_check_ok_total{check="settings"} 14`,
+		`pglens_check_error_total{instance_id="11111111-1111-1111-1111-111111111111",check="stat_statements"} 0`,
+		`pglens_check_error_total{instance_id="11111111-1111-1111-1111-111111111111",check="stat_statements"} 37`,
+		`pglens_check_ok_total{instance_id="11111111-1111-1111-1111-111111111111",check="stat_statements"} 14`,
+		`pglens_check_ok_total{instance_id="11111111-1111-1111-1111-111111111111",check="settings"} 14`,
 	).Replace(healthyExposition)
 
 	spy := &spyT{}
@@ -95,10 +95,10 @@ func TestAssertMetricInvariants_FailsOnACheckThatNeverSucceeds(t *testing.T) {
 // worked. One error is not evidence; a broken check fails repeatedly.
 func TestAssertMetricInvariants_DoesNotJudgeACheckOnASingleError(t *testing.T) {
 	exposition := strings.NewReplacer(
-		`pglens_check_error_total{check="stat_statements"} 0`,
-		`pglens_check_error_total{check="io"} 1`,
-		`pglens_check_ok_total{check="stat_statements"} 14`,
-		`pglens_check_ok_total{check="settings"} 14`,
+		`pglens_check_error_total{instance_id="11111111-1111-1111-1111-111111111111",check="stat_statements"} 0`,
+		`pglens_check_error_total{instance_id="11111111-1111-1111-1111-111111111111",check="io"} 1`,
+		`pglens_check_ok_total{instance_id="11111111-1111-1111-1111-111111111111",check="stat_statements"} 14`,
+		`pglens_check_ok_total{instance_id="11111111-1111-1111-1111-111111111111",check="settings"} 14`,
 	).Replace(healthyExposition)
 
 	spy := &spyT{}
@@ -111,10 +111,31 @@ func TestAssertMetricInvariants_DoesNotJudgeACheckOnASingleError(t *testing.T) {
 	}
 }
 
+// A check that works on one instance and fails on every scrape of another is
+// broken on that instance. The working instance must not hide it.
+func TestAssertMetricInvariants_FailsWhenOneInstanceNeverSucceeds(t *testing.T) {
+	const other = "22222222-2222-2222-2222-222222222222"
+	exposition := strings.NewReplacer(
+		`pglens_check_error_total{instance_id="11111111-1111-1111-1111-111111111111",check="stat_statements"} 0`,
+		`pglens_check_error_total{instance_id="11111111-1111-1111-1111-111111111111",check="stat_statements"} 0
+pglens_check_error_total{instance_id="`+other+`",check="stat_statements"} 37
+pglens_check_ok_total{instance_id="`+other+`",check="stat_statements"} 0`,
+	).Replace(healthyExposition)
+
+	spy := &spyT{}
+	AssertMetricInvariants(spy, exposition, DefaultMetricBudget())
+	if len(spy.errors) != 1 {
+		t.Fatalf("a check failing on one instance was hidden by another instance succeeding: %v", spy.errors)
+	}
+	if !strings.Contains(spy.errors[0], other) || !strings.Contains(spy.errors[0], "37") {
+		t.Errorf("failure does not name the instance and the count: %s", spy.errors[0])
+	}
+}
+
 func TestAssertMetricInvariants_ToleratesACheckThatErroredAndRecovered(t *testing.T) {
 	exposition := strings.Replace(healthyExposition,
-		`pglens_check_error_total{check="stat_statements"} 0`,
-		`pglens_check_error_total{check="stat_statements"} 1`, 1)
+		`pglens_check_error_total{instance_id="11111111-1111-1111-1111-111111111111",check="stat_statements"} 0`,
+		`pglens_check_error_total{instance_id="11111111-1111-1111-1111-111111111111",check="stat_statements"} 1`, 1)
 
 	spy := &spyT{}
 	AssertMetricInvariants(spy, exposition, DefaultMetricBudget())
@@ -128,10 +149,10 @@ func TestAssertMetricInvariants_ToleratesACheckThatErroredAndRecovered(t *testin
 // able to say so, because there is no success to recover to.
 func TestAssertMetricInvariants_HonoursAllowedCheckErrors(t *testing.T) {
 	exposition := strings.NewReplacer(
-		`pglens_check_error_total{check="stat_statements"} 0`,
-		`pglens_check_error_total{check="stat_statements"} 5`,
-		`pglens_check_ok_total{check="stat_statements"} 14`,
-		`pglens_check_ok_total{check="settings"} 14`,
+		`pglens_check_error_total{instance_id="11111111-1111-1111-1111-111111111111",check="stat_statements"} 0`,
+		`pglens_check_error_total{instance_id="11111111-1111-1111-1111-111111111111",check="stat_statements"} 5`,
+		`pglens_check_ok_total{instance_id="11111111-1111-1111-1111-111111111111",check="stat_statements"} 14`,
+		`pglens_check_ok_total{instance_id="11111111-1111-1111-1111-111111111111",check="settings"} 14`,
 	).Replace(healthyExposition)
 
 	budget := DefaultMetricBudget()
@@ -140,6 +161,20 @@ func TestAssertMetricInvariants_HonoursAllowedCheckErrors(t *testing.T) {
 	AssertMetricInvariants(spy, exposition, budget)
 	if len(spy.errors) != 0 {
 		t.Errorf("an explicitly allowed check error failed the scenario: %v", spy.errors)
+	}
+}
+
+func TestParseCheckMetric(t *testing.T) {
+	got := parseCheckMetric(healthyExposition, "pglens_check_ok_total")
+	if len(got) != 1 {
+		t.Fatalf("parsed %d samples, want 1: %+v", len(got), got)
+	}
+	if got[0].instance != "11111111-1111-1111-1111-111111111111" || got[0].check != "stat_statements" || got[0].value != 14 {
+		t.Errorf("sample = %+v", got[0])
+	}
+	// A line without the instance label is not a sample of this shape.
+	if n := len(parseCheckMetric(`pglens_check_ok_total{check="settings"} 14`, "pglens_check_ok_total")); n != 0 {
+		t.Errorf("a single-label line parsed %d samples, want 0", n)
 	}
 }
 

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/delta"
@@ -26,6 +28,9 @@ type Pipeline struct {
 	clock     clock.Clock
 	mu        sync.Mutex
 	lastEvict time.Time
+	// checkCounted is the timestamp of the newest result counted for each check,
+	// database and instance. Guarded by mu.
+	checkCounted map[checkCountKey]time.Time
 }
 
 // PipelineResult reports per-instance acceptance.
@@ -42,11 +47,12 @@ func NewPipeline(pool *pgxpool.Pool, clk clock.Clock) *Pipeline {
 		clk = clock.System()
 	}
 	return &Pipeline{
-		pool:      asDBPool(pool),
-		delta:     delta.New(delta.Options{}),
-		topo:      topology.NewEngine(clk),
-		clock:     clk,
-		lastEvict: clk.Now(),
+		pool:         asDBPool(pool),
+		delta:        delta.New(delta.Options{}),
+		topo:         topology.NewEngine(clk),
+		clock:        clk,
+		lastEvict:    clk.Now(),
+		checkCounted: make(map[checkCountKey]time.Time),
 	}
 }
 
@@ -62,7 +68,41 @@ func (p *Pipeline) maybeEvict() {
 	// The topology engine accumulates exactly the same way the delta engine
 	// does — one entry per instance, forever — and was never swept.
 	p.topo.Evict(cutoff)
+	// A mark ahead of the clock is kept until the clock passes it: a resend of
+	// that result is recognised only from then on, so dropping the mark earlier
+	// would count it twice. A stamp more than an hour ahead is dropped too, so a
+	// clock set far in the future cannot keep its marks for years.
+	ahead := now.Add(time.Hour)
+	for key, ts := range p.checkCounted {
+		if ts.Before(cutoff) || ts.After(ahead) {
+			delete(p.checkCounted, key)
+		}
+	}
 	p.lastEvict = now
+}
+
+// seriesDatname is the database a metric series belongs to. A result that names
+// no database of its own, such as database_stats, carries one row per database,
+// and the row's label names the database.
+func seriesDatname(r wire.Result, m wire.Metric) string {
+	if r.Database != "" {
+		return r.Database
+	}
+	return m.Labels["database"]
+}
+
+// seriesStatsReset is the stats_reset a counter series is observed with. A
+// result covering several databases has one StatsReset for all of them, the
+// newest of their resets. Given to a database that was not reset, it reads as a
+// reset of that database (delta Rule 3): the rate point is dropped and a
+// counter_reset_detected event is raised for a database that never changed.
+// Such a series gets no reset marker instead. When its counter really goes
+// back, Rule 4 still reports the reset.
+func seriesStatsReset(r wire.Result, m wire.Metric) *time.Time {
+	if r.Database == "" && m.Labels["database"] != "" {
+		return nil
+	}
+	return r.StatsReset
 }
 
 // destinationTable routes a check name to its storage table.
@@ -112,6 +152,20 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	defer func() {
 		_ = tx.Rollback(ctx)
 	}()
+	// The topology engine changes as the envelope is processed, before its rows
+	// are committed. undos puts its state back if the envelope fails, so the same
+	// envelope retried is processed as the first attempt was. Counter baselines
+	// are staged in a delta.Batch instead and committed below.
+	var undos []func()
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		for i := len(undos) - 1; i >= 0; i-- {
+			undos[i]()
+		}
+	}()
 
 	var genericRows []store.MetricRow
 	var statementRows []store.StatementRow
@@ -126,10 +180,14 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	var lockSnapshotRows []store.LockSnapshotRow
 	var relationPrunes []store.RelationStatsPrune
 	var factPrunes []store.ObjectFactPrune
+	var checkOutcomes []checkOutcome
 	currentSeries := make(map[uuid.UUID]map[pgtype.SeriesKey]struct{}, len(env.Instances))
 	// Counter baselines move only once the rows that use them have committed
 	// (delta.Batch). One batch per instance, so a rejected instance drops its own.
 	var deltaBatches []*delta.Batch
+	var storedInstances []uuid.UUID
+	// The role each stored instance reports, written at the end of the transaction.
+	storedRoles := make(map[uuid.UUID]string, len(env.Instances))
 
 	// Resolves a wire.Edge.To (an upstream's addr, e.g. "pg-primary") to an
 	// instance_id. Tries the current envelope first (fast path, no query).
@@ -149,14 +207,34 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		}
 		return addr
 	}
-	var primaryID uuid.UUID
-	primaryCount := 0
+	// An address with no port names an instance only within its cluster, and only
+	// when one instance of the envelope reports it. addrOnly holds that instance,
+	// and ambiguousAddr marks an address that two instances report: it names none.
+	clusterAddr := func(cluster int64, addr string) string {
+		return strconv.FormatInt(cluster, 10) + "/" + addr
+	}
+	addrOnly := make(map[string]uuid.UUID, len(env.Instances))
+	ambiguousAddr := make(map[string]bool)
+	// The single-primary fallback below is scoped to a cluster: an envelope can
+	// carry instances of several clusters, and the primary of one is no upstream
+	// of a standby in another.
+	type clusterPrimary struct {
+		id    uuid.UUID
+		count int
+	}
+	clusterPrimaries := make(map[pgtype.ClusterID]clusterPrimary)
 	for _, inst := range env.Instances {
 		if inst.Addr == "" {
 		} else if id, err := uuid.Parse(inst.InstanceID); err == nil {
-			addrToInstance[inst.Addr] = id
 			if inst.Port > 0 {
 				addrToInstance[endpointKey(inst.Addr, inst.Port)] = id
+			}
+			if cid, cidErr := pgtype.ParseClusterID(inst.ClusterID); cidErr == nil {
+				key := clusterAddr(store.ToDB(cid), inst.Addr)
+				if prev, seen := addrOnly[key]; seen && prev != id {
+					ambiguousAddr[key] = true
+				}
+				addrOnly[key] = id
 			}
 		}
 		if inst.TargetName != "" {
@@ -165,9 +243,11 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 			}
 		}
 		if inst.Role == "primary" {
-			if id, err := uuid.Parse(inst.InstanceID); err == nil {
-				primaryID = id
-				primaryCount++
+			cid, cidErr := pgtype.ParseClusterID(inst.ClusterID)
+			id, idErr := uuid.Parse(inst.InstanceID)
+			if cidErr == nil && idErr == nil {
+				p := clusterPrimaries[cid]
+				clusterPrimaries[cid] = clusterPrimary{id: id, count: p.count + 1}
 			}
 		}
 	}
@@ -185,27 +265,53 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		if id, ok := addrToInstance[key]; ok {
 			return id, true
 		}
-		if id, ok := dbAddrCache[key]; ok {
+		if port == 0 {
+			ck := clusterAddr(cidDB, addr)
+			if ambiguousAddr[ck] {
+				return uuid.UUID{}, false
+			}
+			if id, ok := addrOnly[ck]; ok {
+				return id, true
+			}
+		}
+		// The cache is kept per cluster: one address names different instances in
+		// different clusters.
+		cacheKey := clusterAddr(cidDB, key)
+		if id, ok := dbAddrCache[cacheKey]; ok {
 			return id, true
 		}
 		var id uuid.UUID
 		if addr != "" {
 			if err := tx.QueryRow(ctx, `SELECT instance_id FROM instances WHERE cluster_id=$1 AND target_name=$2 LIMIT 1`, cidDB, addr).Scan(&id); err == nil {
-				dbAddrCache[key] = id
+				dbAddrCache[cacheKey] = id
 				return id, true
 			}
 		}
-		query := `SELECT instance_id FROM instances WHERE cluster_id=$1 AND addr=$2 LIMIT 1`
+		query := `SELECT instance_id FROM instances WHERE cluster_id=$1 AND addr=$2 LIMIT 2`
 		args := []any{cidDB, addr}
 		if port > 0 {
-			query = `SELECT instance_id FROM instances WHERE cluster_id=$1 AND addr=$2 AND port=$3 LIMIT 1`
+			query = `SELECT instance_id FROM instances WHERE cluster_id=$1 AND addr=$2 AND port=$3 LIMIT 2`
 			args = append(args, port)
 		}
-		if err := tx.QueryRow(ctx, query, args...).Scan(&id); err != nil {
+		// Two rows name no single instance. The edge is left unresolved rather than
+		// attached to whichever row the database returns first.
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
 			return uuid.UUID{}, false
 		}
-		dbAddrCache[key] = id
-		return id, true
+		defer rows.Close()
+		var matches []uuid.UUID
+		for rows.Next() {
+			if err := rows.Scan(&id); err != nil {
+				return uuid.UUID{}, false
+			}
+			matches = append(matches, id)
+		}
+		if rows.Err() != nil || len(matches) != 1 {
+			return uuid.UUID{}, false
+		}
+		dbAddrCache[cacheKey] = matches[0]
+		return matches[0], true
 	}
 
 	for _, inst := range env.Instances {
@@ -233,6 +339,9 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		var instFacts []store.ObjectFactRow
 		var clearCheckSkips []string
 		partialState := make(map[partialKey]partialObservation)
+		// When each check's cardinality_truncated event was last written for this
+		// instance in this envelope.
+		truncatedAt := make(map[string]time.Time)
 		var instLockSnapshot *store.LockSnapshotRow
 		tableMap := make(map[tableStatKey]*store.TableStatRow)
 		indexMap := make(map[indexStatKey]*store.IndexStatRow)
@@ -240,26 +349,45 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		var instRelationPrunes []store.RelationStatsPrune
 		var instFactPrunes []store.ObjectFactPrune
 		var instErr error
+		// The results this instance counts, kept back until it is stored.
+		var instOutcomes []checkOutcome
 		instSeries := make(map[pgtype.SeriesKey]struct{})
 		instDelta := p.delta.Begin()
 
+		// The role the store holds is read here, in this transaction, and the reported
+		// role is written at its end for stored instances only. A rolled-back envelope
+		// then leaves the stored role as it was, and its retry reports the same
+		// transition again.
+		role := normalizeRole(inst.Role)
+		priorRole, err := storedRole(ctx, tx, instUUID)
+		if err != nil {
+			return nil, err
+		}
 		// internal/topology.Engine (6.2, unit-tested at 90.9% coverage) was
 		// never actually called from anywhere in the real server — found
 		// live while building SYS-REPL-001 (the plan's own acceptance
 		// scenario), which needs a real `failover_detected` event and
 		// found none, ever, no matter how correctly a real promote
 		// happened.
+		undoMark := len(undos)
 		var topoEdges []topology.Edge
 		for _, we := range inst.TopologyEdges {
+			// The store admits only these two confidences. An edge with another one,
+			// from a newer agent, would fail the whole envelope on every attempt, so
+			// it is refused alone, as an invalid fact is.
+			if we.Confidence != "high" && we.Confidence != "low" {
+				IncIngestRejected("invalid_edge")
+				continue
+			}
 			toID, ok := resolveAddr(ctx, cidDB, we.To, we.Port)
-			if !ok && inst.Role == "standby" && primaryCount == 1 {
+			if p := clusterPrimaries[cid]; !ok && inst.Role == "standby" && p.count == 1 {
 				// A receiver may report the upstream's logical/container hostname
 				// while the agent reaches both databases through a shared address
 				// (for example localhost plus distinct published ports). In that
 				// case the address lookup is intentionally incomplete, but a single
-				// primary in this envelope is an unambiguous upstream for a
-				// standby. Keep the edge instead of silently dropping topology.
-				toID, ok = primaryID, true
+				// primary in this cluster is an unambiguous upstream for a standby.
+				// Keep the edge instead of silently dropping topology.
+				toID, ok = p.id, true
 			}
 			if !ok {
 				continue // unresolvable — no instance in this cluster has ever reported this addr
@@ -271,45 +399,31 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 				Confidence: we.Confidence,
 			})
 		}
-		{
-			edgeRows := make([]store.TopologyEdgeRow, 0, len(topoEdges))
-			for _, te := range topoEdges {
-				// SyncState is left unset: it comes from the primary's own
-				// replication_streaming check (pg_stat_replication), not
-				// from the standby-side edge this loop resolves.
-				edgeRows = append(edgeRows, store.TopologyEdgeRow{
-					TenantID:     tenantID,
-					ClusterID:    cidDB,
-					FromInstance: instUUID,
-					ToInstance:   te.To,
-					EdgeType:     te.Type,
-					Confidence:   te.Confidence,
-				})
-			}
-			// A DB write failure here is the same class of problem as
-			// store.WriteMetrics/WriteReplication/etc failing below — a
-			// real transaction-level error (e.g. disk full), not a
-			// per-instance data problem — so it aborts and rolls back the
-			// whole envelope the same way, rather than silently rejecting
-			// just this one instance.
-			if err := store.WriteTopologyEdges(ctx, tx, tenantID, cidDB, instUUID, edgeRows); err != nil {
-				return nil, fmt.Errorf("write topology edges: %w", err)
-			}
-		}
-		for _, ev := range p.topo.Apply(topology.Observation{
+		topoEvents, undoTopo := p.topo.ApplyUndoable(topology.Observation{
 			InstanceID: instUUID,
 			ClusterID:  cid,
-			Role:       pgtype.Role(inst.Role),
+			Role:       pgtype.Role(role),
+			PriorRole:  pgtype.Role(priorRole),
 			Edges:      topoEdges,
-		}) {
+		})
+		undos = append(undos, undoTopo)
+		for _, ev := range topoEvents {
+			// A cluster-scoped event (split_brain_detected) names no instance: it
+			// involves several primaries, and the pusher is only the one that
+			// happened to observe it. Stored under the pusher, it would show on
+			// that instance's alert as its Instance.
 			evCluster := cidDB
-			evInst := instUUID
+			var evInst *uuid.UUID
+			if ev.InstanceID != uuid.Nil {
+				id := ev.InstanceID
+				evInst = &id
+			}
 			instEvents = append(instEvents, store.EventRow{
 				TenantID:   tenantID,
 				TS:         ev.Timestamp,
 				Type:       string(ev.Type),
 				ClusterID:  &evCluster,
-				InstanceID: &evInst,
+				InstanceID: evInst,
 				Payload:    ev.Payload,
 			})
 		}
@@ -345,22 +459,36 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 					partialState[pk] = partialObservation{ts: r.TS, partial: r.Partial, truncated: r.Truncated}
 				}
 			}
-			if r.Error != "" {
-				IncCheckError(r.Check)
-			} else {
-				IncCheckOK(r.Check)
-			}
-			if r.Truncated {
-				evCluster := cidDB
-				evInst := instUUID
-				instEvents = append(instEvents, store.EventRow{
-					TenantID:   tenantID,
-					TS:         r.TS,
-					Type:       "cardinality_truncated",
-					ClusterID:  &evCluster,
-					InstanceID: &evInst,
-					Payload:    map[string]any{"check": r.Check, "database": r.Database},
+			// A skipped scrape completed neither way. Counting it as OK would let
+			// it hide the errors the same check reports on that instance. The
+			// counters move after the commit, see countChecks.
+			if r.Error != "" || r.SkipReason == "" {
+				instOutcomes = append(instOutcomes, checkOutcome{
+					checkCountKey: checkCountKey{instance: instUUID, check: r.Check, database: r.Database},
+					ts:            r.TS,
+					failed:        r.Error != "",
 				})
+			}
+			// A cap that holds writes a marker per window, not per push: the readers
+			// only need one inside their look-back.
+			if r.Truncated {
+				due, dueErr := truncationEventDue(ctx, tx, tenantID, cidDB, instUUID, r.Check, r.TS, truncatedAt)
+				if dueErr != nil {
+					return nil, dueErr
+				}
+				if due {
+					truncatedAt[r.Check] = r.TS
+					evCluster := cidDB
+					evInst := instUUID
+					instEvents = append(instEvents, store.EventRow{
+						TenantID:   tenantID,
+						TS:         r.TS,
+						Type:       "cardinality_truncated",
+						ClusterID:  &evCluster,
+						InstanceID: &evInst,
+						Payload:    map[string]any{"check": r.Check, "database": r.Database},
+					})
+				}
 			}
 			for _, f := range r.Facts {
 				if err := f.Validate(); err != nil {
@@ -415,15 +543,13 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 					LastSeen:  r.TS,
 				})
 			}
+			var resets []counterReset
 			for _, m := range r.Metrics {
-				metricDatname := r.Database
 				// Database-scoped checks such as database_stats emit one result
 				// containing labelled rows. Preserve that database identity in the
 				// generic metric row when the envelope result itself has no
 				// Database field, so database-scoped alert samples retain datname.
-				if metricDatname == "" {
-					metricDatname = m.Labels["database"]
-				}
+				metricDatname := seriesDatname(r, m)
 				dest := destinationTable(r.Check)
 				// ASH buckets are counts, never through delta, regardless of Kind.
 				if dest == "metrics_ash" {
@@ -455,25 +581,11 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 						Key:        key,
 						TS:         r.TS,
 						Value:      m.Value,
-						StatsReset: r.StatsReset,
+						StatsReset: seriesStatsReset(r, m),
 					}
 					pt, ev := instDelta.Observe(obs)
 					if ev != nil {
-						payload := map[string]any{
-							"metric": m.Name,
-							"reason": string(ev.Reason),
-							"labels": m.Labels,
-						}
-						evCluster := cidDB
-						evInst := instUUID
-						instEvents = append(instEvents, store.EventRow{
-							TenantID:   tenantID,
-							TS:         ev.TS,
-							Type:       "counter_reset_detected",
-							ClusterID:  &evCluster,
-							InstanceID: &evInst,
-							Payload:    payload,
-						})
+						resets = append(resets, counterReset{datname: metricDatname, ts: ev.TS, metric: m.Name, reason: string(ev.Reason), labels: m.Labels})
 						skip = true
 					} else if pt == nil {
 						skip = true
@@ -633,14 +745,45 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 					applyBloatMetric(row, strings.TrimPrefix(m.Name, "pg_bloat_"), value)
 				}
 			}
+			instEvents = append(instEvents, counterResetEvents(resets, tenantID, cidDB, instUUID)...)
 			if instErr != nil {
 				break
 			}
 		}
 		if instErr != nil {
+			for i := len(undos) - 1; i >= undoMark; i-- {
+				undos[i]()
+			}
+			undos = undos[:undoMark]
 			res.Rejected++
 			res.Errors[inst.InstanceID] = instErr
 			continue
+		}
+		// Written only for an accepted instance: a rejected one writes no edge.
+		// A DB write failure here is the same class of problem as
+		// store.WriteMetrics/WriteReplication/etc failing below — a
+		// real transaction-level error (e.g. disk full), not a
+		// per-instance data problem — so it aborts and rolls back the
+		// whole envelope the same way, rather than silently rejecting
+		// just this one instance.
+		{
+			edgeRows := make([]store.TopologyEdgeRow, 0, len(topoEdges))
+			for _, te := range topoEdges {
+				// SyncState is left unset: it comes from the primary's own
+				// replication_streaming check (pg_stat_replication), not
+				// from the standby-side edge this loop resolves.
+				edgeRows = append(edgeRows, store.TopologyEdgeRow{
+					TenantID:     tenantID,
+					ClusterID:    cidDB,
+					FromInstance: instUUID,
+					ToInstance:   te.To,
+					EdgeType:     te.Type,
+					Confidence:   te.Confidence,
+				})
+			}
+			if err := store.WriteTopologyEdges(ctx, tx, tenantID, cidDB, instUUID, edgeRows); err != nil {
+				return nil, fmt.Errorf("write topology edges: %w", err)
+			}
 		}
 		instGeneric = append(instGeneric, selfMetricRows(env, inst, tenantID, cidDB, instUUID, p.clock.Now())...)
 		currentSeries[instUUID] = instSeries
@@ -697,9 +840,28 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		}
 		relationPrunes = append(relationPrunes, instRelationPrunes...)
 		factPrunes = append(factPrunes, instFactPrunes...)
+		storedInstances = append(storedInstances, instUUID)
+		checkOutcomes = append(checkOutcomes, instOutcomes...)
+		storedRoles[instUUID] = role
 		res.Accepted++
 	}
 
+	// The role of each stored instance is written in this transaction, with the
+	// topology step that read the role it replaces. An instance whose samples are
+	// refused keeps its stored role, as its topology state is rolled back.
+	for _, id := range storedInstances {
+		if _, err := tx.Exec(ctx, `UPDATE instances SET role=$1 WHERE instance_id=$2`, storedRoles[id], id); err != nil {
+			return nil, fmt.Errorf("store role of instance %s: %w", id, err)
+		}
+	}
+	// An instance is up for the server only while its samples are being stored.
+	// The refresh is in this transaction, so an instance whose samples are
+	// refused goes stale instead of reading as up on every push with no data.
+	if len(storedInstances) > 0 {
+		if _, err := tx.Exec(ctx, `UPDATE instances SET last_seen=now() WHERE instance_id = ANY($1)`, storedInstances); err != nil {
+			return nil, fmt.Errorf("touch instances: %w", err)
+		}
+	}
 	if err := store.WriteMetrics(ctx, tx, genericRows); err != nil {
 		return nil, fmt.Errorf("write metrics: %w", err)
 	}
@@ -747,9 +909,11 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit tx: %w", err)
 	}
+	committed = true
 	for _, batch := range deltaBatches {
 		batch.Commit()
 	}
+	p.countChecks(checkOutcomes)
 	// I-8's own real number: how many distinct counter series each instance is
 	// reporting in this envelope. The delta engine intentionally retains older
 	// observations for rate continuity, so its full state is not the current
@@ -828,14 +992,10 @@ func selfMetricRows(env wire.Envelope, inst wire.Instance, tenantID string, clus
 		sent = env.SentAt
 	}
 	if !sent.IsZero() {
-		skew := now.Sub(sent).Seconds()
-		if skew < 0 {
-			skew = -skew
-		}
 		values = append(values, struct {
 			name  string
 			value float64
-		}{"pglens_agent_clock_skew_seconds", skew})
+		}{"pglens_agent_clock_skew_seconds", clockSkewSeconds(now, sent)})
 	}
 	rows := make([]store.MetricRow, 0, len(values))
 	for _, v := range values {
@@ -866,9 +1026,9 @@ func (p *Pipeline) processInstanceNoDB(_ context.Context, inst wire.Instance) er
 	instUUID, _ := uuid.Parse(inst.InstanceID)
 	for _, r := range inst.Results {
 		if r.Error != "" {
-			IncCheckError(r.Check)
-		} else {
-			IncCheckOK(r.Check)
+			IncCheckError(instUUID.String(), r.Check)
+		} else if r.SkipReason == "" {
+			IncCheckOK(instUUID.String(), r.Check)
 		}
 		for _, m := range r.Metrics {
 			dest := destinationTable(r.Check)
@@ -888,14 +1048,14 @@ func (p *Pipeline) processInstanceNoDB(_ context.Context, inst wire.Instance) er
 				key := pgtype.SeriesKey{
 					Metric:   m.Name,
 					Instance: instUUID,
-					Database: r.Database,
+					Database: seriesDatname(r, m),
 					Labels:   canonical,
 				}
 				obs := delta.Observation{
 					Key:        key,
 					TS:         r.TS,
 					Value:      m.Value,
-					StatsReset: r.StatsReset,
+					StatsReset: seriesStatsReset(r, m),
 				}
 				_, _ = p.delta.Observe(obs)
 			default:
@@ -904,6 +1064,51 @@ func (p *Pipeline) processInstanceNoDB(_ context.Context, inst wire.Instance) er
 		}
 	}
 	return nil
+}
+
+// checkCountKey names the results one check reports for one database of one
+// instance. The check counters count each of those results once.
+type checkCountKey struct {
+	instance uuid.UUID
+	check    string
+	database string
+}
+
+// checkOutcome is one counted result of an envelope, held until the envelope
+// commits.
+type checkOutcome struct {
+	checkCountKey
+	ts     time.Time
+	failed bool
+}
+
+// countChecks moves the check counters for a committed envelope. The agent
+// resends an envelope whose response it did not get, so the same results can
+// arrive again; a result counts only when it is newer than the last one
+// counted for its check, database and instance. Counting before the commit
+// counted a rolled-back envelope, and every resend of a committed one.
+//
+// A mark stamped ahead of the server clock comes from an agent whose clock is
+// ahead. Honouring it would hide every real result until the server clock
+// caught up with it, so it is ignored while it is ahead: a resend of that
+// result is counted again until the clock passes its stamp. Once the clock has
+// passed it, a resend is recognised, as long as maybeEvict kept the mark, which
+// it does for a stamp at most an hour ahead.
+func (p *Pipeline) countChecks(outcomes []checkOutcome) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	now := p.clock.Now()
+	for _, o := range outcomes {
+		if last, ok := p.checkCounted[o.checkCountKey]; ok && !last.After(now) && !o.ts.After(last) {
+			continue
+		}
+		p.checkCounted[o.checkCountKey] = o.ts
+		if o.failed {
+			IncCheckError(o.instance.String(), o.check)
+		} else {
+			IncCheckOK(o.instance.String(), o.check)
+		}
+	}
 }
 
 type statementKey struct {
@@ -1296,4 +1501,103 @@ func buildASHRow(ts time.Time, tenantID string, clusterID int64, instanceID uuid
 		WindowSeconds: windowSec,
 		WindowTicks:   windowTicks,
 	}
+}
+
+// storedRole returns the role the store holds for an instance, or "" when it
+// holds none. The row is locked until the transaction ends, so a second envelope
+// for the same instance reads the stored role only after this one is decided.
+// The lock is FOR NO KEY UPDATE, the strength of the role and last_seen updates
+// that follow: it does not conflict with the KEY SHARE locks that foreign-key
+// checks take on the instance's databases rows, so those inserts never wait on it.
+func storedRole(ctx context.Context, tx pgx.Tx, instanceID uuid.UUID) (string, error) {
+	var role string
+	err := tx.QueryRow(ctx, `SELECT role FROM instances WHERE instance_id=$1 FOR NO KEY UPDATE`, instanceID).Scan(&role)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read role of instance %s: %w", instanceID, err)
+	}
+	return role, nil
+}
+
+// counterResetSample bounds how many series of one database a
+// counter_reset_detected event lists.
+const counterResetSample = 10
+
+// counterReset is one counter series that a result reset.
+type counterReset struct {
+	datname string
+	ts      time.Time
+	metric  string
+	reason  string
+	labels  map[string]string
+}
+
+// counterResetEvents writes one counter_reset_detected event per database of a
+// result, not one per series. A restart resets every counter together, and a row
+// for each would put a whole restart into the timeline and push older events out
+// of the 1000 it shows. The first series' metric, reason and labels stay at the
+// top of the payload, where readers look for them; the count and a sample of the
+// series follow.
+func counterResetEvents(resets []counterReset, tenantID string, clusterID int64, instanceID uuid.UUID) []store.EventRow {
+	var order []string
+	byDatname := make(map[string][]counterReset)
+	for _, r := range resets {
+		if _, seen := byDatname[r.datname]; !seen {
+			order = append(order, r.datname)
+		}
+		byDatname[r.datname] = append(byDatname[r.datname], r)
+	}
+	events := make([]store.EventRow, 0, len(order))
+	for _, datname := range order {
+		group := byDatname[datname]
+		first := group[0]
+		sample := make([]map[string]any, 0, min(len(group), counterResetSample))
+		for _, r := range group[:min(len(group), counterResetSample)] {
+			sample = append(sample, map[string]any{"metric": r.metric, "reason": r.reason, "labels": r.labels})
+		}
+		cid := clusterID
+		iid := instanceID
+		events = append(events, store.EventRow{
+			TenantID:   tenantID,
+			TS:         first.ts,
+			Type:       "counter_reset_detected",
+			ClusterID:  &cid,
+			InstanceID: &iid,
+			Payload: map[string]any{
+				"metric": first.metric,
+				"reason": first.reason,
+				"labels": first.labels,
+				"count":  len(group),
+				"series": sample,
+			},
+		})
+	}
+	return events
+}
+
+// truncationEventWindow spaces the cardinality_truncated events of one check on
+// one instance. The readers look back at most 15 minutes for the marker, so a
+// row every ten keeps one inside each look-back for as long as the cap holds.
+const truncationEventWindow = 10 * time.Minute
+
+// truncationEventDue reports whether a cardinality_truncated event for check is
+// due at ts: none is recorded for the check on the instance within the window,
+// neither earlier in this envelope (written) nor in the store. The store is read
+// inside the transaction, so a retried envelope sees only what was committed.
+func truncationEventDue(ctx context.Context, tx pgx.Tx, tenantID string, clusterID int64, instanceID uuid.UUID, check string, ts time.Time, written map[string]time.Time) (bool, error) {
+	if last, ok := written[check]; ok && ts.Sub(last) < truncationEventWindow {
+		return false, nil
+	}
+	var recent bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE tenant_id=$1 AND cluster_id=$2 AND instance_id=$3 AND type='cardinality_truncated' AND payload->>'check'=$4 AND ts > $5)`,
+		tenantID, clusterID, instanceID, check, ts.Add(-truncationEventWindow)).Scan(&recent)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("look up cardinality_truncated: %w", err)
+	}
+	return !recent, nil
 }

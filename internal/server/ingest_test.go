@@ -4,12 +4,17 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/manprint/pglens/internal/wire"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +23,7 @@ func TestIngest_RejectsUnknownProtocolVersion(t *testing.T) {
 	t.Parallel()
 	auth := NewAuth("token")
 	h := IngestHandler(auth, NewInventory(nil), NewPipeline(nil, nil))
-	env := wire.Envelope{ProtocolVersion: wire.ProtocolVersionCurrent + 1, AgentID: "a", SentAt: time.Now()}
+	env := wire.Envelope{ProtocolVersion: wire.ProtocolVersionCurrent + 1, AgentID: uuid.NewString(), SentAt: time.Now()}
 	body, _ := json.Marshal(env)
 	req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
@@ -58,11 +63,117 @@ func TestIngest_RejectsRevokedAgent(t *testing.T) {
 	require.Contains(t, w.Body.String(), "revoked")
 }
 
+// TestIngest_RejectsRevokedInstanceOwner: the agent_id is self-reported, so a
+// revoked host that leaves it out, or names another agent, is still refused
+// when the instance it pushes is owned by a revoked agent.
+func TestIngest_RejectsRevokedInstanceOwner(t *testing.T) {
+	t.Parallel()
+	for name, agentID := range map[string]string{"omitted": "", "other agent": uuid.NewString()} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			auth := NewAuth("token")
+			// The envelope's own agent, when it names one, is unknown, so not
+			// revoked; the owner of the instance is revoked.
+			pool := &mockPool{queryRowVals: []*mockRow{{err: pgx.ErrNoRows}, {vals: []any{true}}}}
+			if agentID == "" {
+				pool.queryRowVals = pool.queryRowVals[1:]
+			}
+			inv := &Inventory{pool: pool}
+			h := IngestHandler(auth, inv, NewPipeline(nil, nil))
+			env := wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: agentID, SentAt: time.Now(),
+				Instances: []wire.Instance{{InstanceID: uuid.NewString()}}}
+			body, _ := json.Marshal(env)
+			req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
+			req.Header.Set("Authorization", "Bearer token")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			require.Equal(t, http.StatusUnauthorized, w.Code)
+			require.Contains(t, w.Body.String(), "revoked")
+		})
+	}
+}
+
+// TestIngest_InventoryStoreFailureIsNotAccepted: the inventory cannot read the
+// database, so the envelope is answered 500 and the agent sends it again. A
+// 202 here would drop the envelope, because the agent takes it as stored.
+func TestIngest_InventoryStoreFailureIsNotAccepted(t *testing.T) {
+	t.Parallel()
+	auth := NewAuth("token")
+	// The agent's revoked_at comes first, then the owner check of the instance,
+	// then the first lookup of the upsert, which fails.
+	pool := &mockPool{queryRowVals: []*mockRow{{vals: []any{nil}}, {vals: []any{false}}, {err: errors.New("connection refused")}}}
+	inv := &Inventory{pool: pool}
+	h := IngestHandler(auth, inv, NewPipeline(nil, nil))
+	env := wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: uuid.NewString(), SentAt: time.Now(),
+		Instances: []wire.Instance{{InstanceID: uuid.NewString(), ClusterID: pgtype.ClusterID(1).String(), Role: "primary"}}}
+	body, _ := json.Marshal(env)
+	req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer token")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	require.Contains(t, w.Body.String(), "inventory error")
+}
+
+// TestIngest_StoreErrorOfAnyCodeIsNotAccepted: the codes the inventory does not
+// name as a refusal are a store failure too, so each is answered 500. They used
+// to be answered 202, and the agent consumed the envelope.
+func TestIngest_StoreErrorOfAnyCodeIsNotAccepted(t *testing.T) {
+	t.Parallel()
+	for _, code := range []string{"42501", "42P01", "42P10", "55P03", "58030", "XX000"} {
+		t.Run(code, func(t *testing.T) {
+			t.Parallel()
+			auth := NewAuth("token")
+			// The same order as TestIngest_InventoryStoreFailureIsNotAccepted.
+			pool := &mockPool{queryRowVals: []*mockRow{{vals: []any{nil}}, {vals: []any{false}}, {err: &pgconn.PgError{Code: code}}}}
+			inv := &Inventory{pool: pool}
+			h := IngestHandler(auth, inv, NewPipeline(nil, nil))
+			env := wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: uuid.NewString(), SentAt: time.Now(),
+				Instances: []wire.Instance{{InstanceID: uuid.NewString(), ClusterID: pgtype.ClusterID(1).String(), Role: "primary"}}}
+			body, _ := json.Marshal(env)
+			req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
+			req.Header.Set("Authorization", "Bearer token")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			require.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
+			require.Contains(t, w.Body.String(), "inventory error")
+		})
+	}
+}
+
+// TestIngest_RefusesWhenSaturated: an envelope that finds every slot taken is
+// answered 503 with Retry-After, which the agent retries, and goes through
+// once a slot is free.
+func TestIngest_RefusesWhenSaturated(t *testing.T) {
+	t.Parallel()
+	auth := NewAuth("token")
+	slots := make(chan struct{}, 1)
+	h := ingestHandler(auth, NewInventory(nil), NewPipeline(nil, nil), slots)
+	env := wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: uuid.NewString(), SentAt: time.Now()}
+	body, _ := json.Marshal(env)
+	push := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer token")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		return w
+	}
+
+	slots <- struct{}{}
+	w := push()
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	require.NotEmpty(t, w.Header().Get("Retry-After"))
+
+	<-slots
+	require.Equal(t, http.StatusAccepted, push().Code)
+	require.Empty(t, slots, "the slot is released once the envelope is handled")
+}
+
 func TestIngest_RejectsStaleEnvelope(t *testing.T) {
 	t.Parallel()
 	auth := NewAuth("token")
 	h := IngestHandler(auth, NewInventory(nil), NewPipeline(nil, nil))
-	env := wire.Envelope{ProtocolVersion: 1, AgentID: "a", SentAt: time.Now().Add(-13 * time.Hour)}
+	env := wire.Envelope{ProtocolVersion: 1, AgentID: uuid.NewString(), SentAt: time.Now().Add(-13 * time.Hour)}
 	body, _ := json.Marshal(env)
 	req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
@@ -75,7 +186,7 @@ func TestIngest_AcceptsFutureSkew(t *testing.T) {
 	t.Parallel()
 	auth := NewAuth("token")
 	h := IngestHandler(auth, NewInventory(nil), NewPipeline(nil, nil))
-	env := wire.Envelope{ProtocolVersion: 1, AgentID: "a", SentAt: time.Now().Add(5 * time.Minute)}
+	env := wire.Envelope{ProtocolVersion: 1, AgentID: uuid.NewString(), SentAt: time.Now().Add(5 * time.Minute)}
 	body, _ := json.Marshal(env)
 	req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
@@ -94,7 +205,7 @@ func TestIngest_AcceptsGzipBody(t *testing.T) {
 	t.Parallel()
 	auth := NewAuth("token")
 	h := IngestHandler(auth, NewInventory(nil), NewPipeline(nil, nil))
-	env := wire.Envelope{ProtocolVersion: 1, AgentID: "a", SentAt: time.Now()}
+	env := wire.Envelope{ProtocolVersion: 1, AgentID: uuid.NewString(), SentAt: time.Now()}
 	raw, _ := json.Marshal(env)
 
 	var buf bytes.Buffer
@@ -188,6 +299,35 @@ func TestIngest_TransmittedAtHeaderIsTheSkewReference(t *testing.T) {
 	t.Fatal("no clock skew sample")
 }
 
+// TestIngest_ClockSkewGaugeIsAbsoluteAndCurrent covers SI-22: /metrics and the
+// stored pglens_agent_clock_skew_seconds series report the same magnitude, and
+// the gauge follows every accepted push instead of keeping the last large skew.
+// It is not parallel: the gauge is package-wide, and the parallel tests above
+// push envelopes that set it too.
+func TestIngest_ClockSkewGaugeIsAbsoluteAndCurrent(t *testing.T) {
+	h := IngestHandler(NewAuth("token"), NewInventory(nil), NewPipeline(nil, nil))
+	push := func(transmitted time.Time) {
+		t.Helper()
+		env := wire.Envelope{ProtocolVersion: 1, AgentID: uuid.NewString(), SentAt: transmitted}
+		body, _ := json.Marshal(env)
+		req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer token")
+		req.Header.Set(wire.TransmittedAtHeader, transmitted.UTC().Format(time.RFC3339Nano))
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	}
+
+	push(time.Now().Add(40 * time.Second))
+	require.InDelta(t, 40, pglensAgentClockSkewSeconds.Get(), 1, "an agent 40s ahead reads +40, as the stored series does")
+
+	push(time.Now().Add(-20 * time.Second))
+	require.InDelta(t, 20, pglensAgentClockSkewSeconds.Get(), 1, "an agent behind by 20s reads +20")
+
+	push(time.Now())
+	require.InDelta(t, 0, pglensAgentClockSkewSeconds.Get(), 1, "an in-sync push clears the earlier skew")
+}
+
 // TestIngest_ErrorBodiesAreJSON: a decode error quotes the offending
 // character, and pasting it unescaped into a Sprintf'd body made the error
 // response itself invalid JSON (sent as text/plain).
@@ -212,4 +352,110 @@ func TestIngest_ErrorBodiesAreJSON(t *testing.T) {
 			require.NotEmpty(t, resp.Detail)
 		})
 	}
+}
+
+// TestIngest_DecompressedBudgetIsExact: an envelope that exactly fills the
+// decompressed budget is accepted, and one byte more is refused with 413 even
+// though its JSON is valid.
+func TestIngest_DecompressedBudgetIsExact(t *testing.T) {
+	// Not t.Parallel(): this test temporarily lowers a package-level limit.
+	raw, _ := json.Marshal(wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: uuid.NewString(), SentAt: time.Now()})
+	original := maxDecompressedBytes
+	t.Cleanup(func() { maxDecompressedBytes = original })
+	maxDecompressedBytes = int64(len(raw))
+
+	for _, tc := range []struct {
+		name string
+		body []byte
+		code int
+	}{
+		{"exact", raw, http.StatusAccepted},
+		{"one byte over", append(append([]byte{}, raw...), ' '), http.StatusRequestEntityTooLarge},
+		// The value itself is one byte past the budget and nothing follows it: the
+		// decoder, not the drain, reads the byte that is over the budget.
+		{"value one byte over", append([]byte{'{', ' '}, raw[1:]...), http.StatusRequestEntityTooLarge},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			gz := gzip.NewWriter(&buf)
+			_, err := gz.Write(tc.body)
+			require.NoError(t, err)
+			require.NoError(t, gz.Close())
+
+			h := IngestHandler(NewAuth("token"), NewInventory(nil), NewPipeline(nil, nil))
+			req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(buf.Bytes()))
+			req.Header.Set("Authorization", "Bearer token")
+			req.Header.Set("Content-Encoding", "gzip")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			require.Equal(t, tc.code, w.Code, w.Body.String())
+		})
+	}
+}
+
+// TestIngest_RefusesEnvelopeWithoutAgentID: a protocol 3 envelope must name its
+// agent. One without a valid id is refused with 400 before the inventory sees
+// it, so no instance is booked to a stand-in owner. A present id that does not
+// parse is refused at every version.
+func TestIngest_RefusesEnvelopeWithoutAgentID(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		version int
+		agentID string
+	}{
+		{agentIDRequiredFrom, ""},
+		{agentIDRequiredFrom, "a"},
+		{agentIDRequiredFrom, uuid.Nil.String()},
+		{agentIDRequiredFrom - 1, "a"},
+		{agentIDRequiredFrom - 1, uuid.Nil.String()},
+	} {
+		t.Run(fmt.Sprintf("v%d/%q", tc.version, tc.agentID), func(t *testing.T) {
+			h := IngestHandler(NewAuth("token"), NewInventory(nil), NewPipeline(nil, nil))
+			env := wire.Envelope{ProtocolVersion: tc.version, AgentID: tc.agentID, SentAt: time.Now(),
+				Instances: []wire.Instance{{InstanceID: uuid.NewString(), ClusterID: pgtype.ClusterID(1).String(), Role: "primary"}}}
+			body, _ := json.Marshal(env)
+			req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
+			req.Header.Set("Authorization", "Bearer token")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			require.Equal(t, http.StatusBadRequest, w.Code)
+			require.Contains(t, w.Body.String(), "missing agent_id")
+		})
+	}
+}
+
+// TestIngest_LegacyEnvelopeWithoutAgentIDIsOwnerChecked: an agent that predates
+// the agent_id field sends none. Its envelope is not refused for that. A new
+// instance has no owner, so it is refused alone and nothing is written for it.
+func TestIngest_LegacyEnvelopeWithoutAgentIDIsOwnerChecked(t *testing.T) {
+	t.Parallel()
+	// OwnerRevoked finds no revoked owner, then the instance lookup finds no row.
+	pool := &mockPool{queryRowVals: []*mockRow{{vals: []any{false}}, {err: pgx.ErrNoRows}}}
+	h := IngestHandler(NewAuth("token"), &Inventory{pool: pool}, NewPipeline(nil, nil))
+	env := wire.Envelope{ProtocolVersion: agentIDRequiredFrom - 1, SentAt: time.Now(),
+		Instances: []wire.Instance{{InstanceID: uuid.NewString(), ClusterID: pgtype.ClusterID(1).String(), Role: "primary"}}}
+	body, _ := json.Marshal(env)
+	req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer token")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	require.JSONEq(t, `{"accepted":0,"rejected":1}`, w.Body.String())
+	require.Zero(t, pool.execCalls, "the refused instance writes no cluster, agent or instance row")
+}
+
+// TestStoreRefused_OnlyTheEnvelopesOwnValues: a NOT NULL or CHECK violation is
+// the envelope's own fault and is answered 400. A unique or foreign key
+// violation can come from a writer racing this one, and the retry succeeds.
+func TestStoreRefused_OnlyTheEnvelopesOwnValues(t *testing.T) {
+	t.Parallel()
+	wrapped := func(code string) error {
+		return fmt.Errorf("write topology edges: insert topology edge: %w", &pgconn.PgError{Code: code})
+	}
+	require.True(t, storeRefused(wrapped("23514")))
+	require.True(t, storeRefused(wrapped("23502")))
+	require.False(t, storeRefused(wrapped("23505")))
+	require.False(t, storeRefused(wrapped("23503")))
+	require.False(t, storeRefused(wrapped("40001")))
+	require.False(t, storeRefused(errors.New("connection reset")))
 }

@@ -824,3 +824,80 @@ func TestStreamingProvider(t *testing.T) {
 		t.Errorf("Edges() on an edgeless observation = %+v, want none", got)
 	}
 }
+
+// A restart empties the engine, so the first sighting after one is not a
+// transition on its own. The stored role decides: an instance that still has
+// the role the store recorded produces no event at all.
+func TestEngine_FirstSightingWithStoredRoleIsSilentWhenUnchanged(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+	instID := uuid.New()
+	cID := pgtype.ManualClusterID("cluster1")
+
+	events := e.Apply(Observation{
+		InstanceID: instID,
+		ClusterID:  cID,
+		Role:       pgtype.RolePrimary,
+		PriorRole:  pgtype.RolePrimary,
+		Timestamp:  clk.Now(),
+	})
+	if len(events) != 0 {
+		t.Fatalf("unchanged role after a restart: expected no event, got %d (%v)", len(events), events[0].Type)
+	}
+
+	// The engine still records the role, so a later real change is an ordinary one.
+	clk.Advance(time.Second)
+	events = e.Apply(Observation{InstanceID: instID, ClusterID: cID, Role: pgtype.RoleStandby, Timestamp: clk.Now()})
+	if len(events) != 1 || events[0].Type != EventRoleChange || events[0].Payload["old_role"] != pgtype.RolePrimary {
+		t.Fatalf("demotion after the restart: expected one role_change from primary, got %v", events)
+	}
+}
+
+// A role that changed while the server was down is reported from the stored
+// role. It is a role change, not a failover: nothing in memory names a prior
+// primary to fail over from.
+func TestEngine_FirstSightingWithStoredRoleReportsChangeFromIt(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+	instID := uuid.New()
+	cID := pgtype.ManualClusterID("cluster1")
+
+	events := e.Apply(Observation{
+		InstanceID: instID,
+		ClusterID:  cID,
+		Role:       pgtype.RolePrimary,
+		PriorRole:  pgtype.RoleStandby,
+		Timestamp:  clk.Now(),
+	})
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Type != EventRoleChange {
+		t.Fatalf("expected role_change, got %v (failover must not be inferred after a restart)", events[0].Type)
+	}
+	if events[0].Payload["old_role"] != pgtype.RoleStandby || events[0].Payload["new_role"] != pgtype.RolePrimary {
+		t.Fatalf("payload = %v, want old_role standby and new_role primary", events[0].Payload)
+	}
+}
+
+// Without a stored role, or with the placeholder "unknown" a new instance is
+// stored under, the sighting is reported as it always was: new_role only.
+func TestEngine_FirstSightingWithoutStoredRoleKeepsNewRolePayload(t *testing.T) {
+	for _, prior := range []pgtype.Role{"", pgtype.RoleUnknown} {
+		clk := clock.NewFake(time.Unix(0, 0))
+		e := NewEngine(clk)
+		events := e.Apply(Observation{
+			InstanceID: uuid.New(),
+			ClusterID:  pgtype.ManualClusterID("cluster1"),
+			Role:       pgtype.RolePrimary,
+			PriorRole:  prior,
+			Timestamp:  clk.Now(),
+		})
+		if len(events) != 1 || events[0].Type != EventRoleChange {
+			t.Fatalf("prior %q: expected one role_change, got %v", prior, events)
+		}
+		if _, hasOld := events[0].Payload["old_role"]; hasOld || events[0].Payload["new_role"] != pgtype.RolePrimary {
+			t.Fatalf("prior %q: payload = %v, want new_role only", prior, events[0].Payload)
+		}
+	}
+}

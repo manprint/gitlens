@@ -134,6 +134,42 @@ func TestMigrations_SeededRuleMetricsAreProduced(t *testing.T) {
 	}
 }
 
+// A migration whose name the runner cannot read used to be skipped without a
+// word: 0016-events-index.sql never reached the database and the server ran on.
+func TestParseMigrations_RefusesNamesItCannotApply(t *testing.T) {
+	for _, name := range []string{"0016-events-index.sql", "0016 events.sql", "16_events.sql", "0016_.sql", "0016_events.txt"} {
+		_, err := parseMigrations([]string{"0015_meta.sql", name})
+		require.ErrorContains(t, err, name)
+	}
+}
+
+func TestParseMigrations_RefusesDuplicateVersion(t *testing.T) {
+	_, err := parseMigrations([]string{"0016_a.sql", "0016_b.sql"})
+	require.ErrorContains(t, err, "both have version 16")
+}
+
+func TestParseMigrations_OrdersByVersion(t *testing.T) {
+	got, err := parseMigrations([]string{"0010_c.sql", "0002_b.sql", "0001_a.sql"})
+	require.NoError(t, err)
+	require.Equal(t, []migration{{1, "0001_a.sql"}, {2, "0002_b.sql"}, {10, "0010_c.sql"}}, got)
+}
+
+// The embedded set is what Migrate applies, so it must pass the same rules.
+func TestParseMigrations_EmbeddedSetIsValid(t *testing.T) {
+	entries, err := migrationFS.ReadDir("migrations")
+	require.NoError(t, err)
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
+			names = append(names, e.Name())
+		}
+	}
+	got, err := parseMigrations(names)
+	require.NoError(t, err)
+	require.Len(t, got, len(names))
+	require.Equal(t, 1, got[0].version)
+}
+
 // metricEmittedByAnyCheck reports whether the metric name appears in any
 // non-test source file under internal/check.
 func metricEmittedByAnyCheck(t *testing.T, dir, metric string) bool {

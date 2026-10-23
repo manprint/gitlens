@@ -198,8 +198,13 @@ func (t *mockTx) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag,
 func (t *mockTx) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
 	return &mockRows{}, nil
 }
-func (t *mockTx) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row { return &mockRow{} }
-func (t *mockTx) Conn() *pgx.Conn                                        { return nil }
+
+// QueryRow reports no row, as the store has none for a lookup in a unit test: the
+// stored role of an instance, and the peer lookup, both read as not found.
+func (t *mockTx) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row {
+	return &mockRow{err: pgx.ErrNoRows}
+}
+func (t *mockTx) Conn() *pgx.Conn { return nil }
 
 type mockTxBatchResults struct {
 	n       int

@@ -111,10 +111,12 @@ func (s *metricSource) Samples(ctx context.Context, r Rule, now time.Time) ([]Sa
 	// inapplicable, not down. It used to stay in the query and page as
 	// agent_down for as long as its row existed.
 	if r.Metric == "up" {
+		// The cut-off is the staleness threshold the server's gauge uses, so an
+		// instance is down in the alert exactly when pglens_up reads 0.
 		rows, err := s.db.Query(ctx, `SELECT i.cluster_id, i.instance_id, '' AS datname,
-			CASE WHEN i.last_seen >= now() - interval '60 seconds' THEN 1.0 ELSE 0.0 END, i.last_seen,
+			CASE WHEN i.last_seen >= now() - make_interval(secs => $1) THEN 1.0 ELSE 0.0 END, i.last_seen,
 			a.revoked_at IS NOT NULL
-			FROM instances i JOIN agents a ON a.agent_id = i.agent_id`)
+			FROM instances i JOIN agents a ON a.agent_id = i.agent_id`, store.InstanceStaleAfter.Seconds())
 		if err != nil {
 			return nil, fmt.Errorf("query staleness: %w", err)
 		}
@@ -134,10 +136,10 @@ func (s *metricSource) Samples(ctx context.Context, r Rule, now time.Time) ([]Sa
 				out = append(out, Sample{ClusterID: &cluster, InstanceID: &instance, Datname: datname, Value: value, TS: ts, Inapplicable: true})
 				continue
 			}
-			// last_seen already records when this outage began. Seed the
-			// stale sample at the rule boundary so agent_down's documented
-			// 90-second duration is not added after the 60-second staleness
-			// threshold a second time.
+			// The stale sample is dated For before now, not at last_seen. Its
+			// pending episode then has served For as soon as the instance first
+			// reads as stale, so agent_down fires on the next evaluation. Dated at
+			// last_seen, it would fire For after the last push instead.
 			if value < 1 && r.For > 0 {
 				ts = now.Add(-r.For)
 			}

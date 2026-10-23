@@ -119,3 +119,36 @@ func TestWriteMetrics_INT_STORE_003_UniquenessEnforced(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, count, "ON CONFLICT DO NOTHING should keep row count at 1")
 }
+
+// INT-STORE-005: the sender row and the slot row of one standby can carry the
+// same timestamp and differ only in source. Both are stored, and a repeat of
+// one of them is still dropped. The dedup index used to leave source out of its
+// key, so the slot row was dropped as a duplicate of the sender row.
+func TestWriteReplication_INT_STORE_005_SourceIsPartOfTheDedupKey(t *testing.T) {
+	pool := getStoreTestPool(t)
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, "TRUNCATE metrics_replication")
+	require.NoError(t, err)
+
+	ts := time.Now().UTC().Truncate(time.Microsecond)
+	iid := uuid.New()
+	row := func(source string) ReplicationRow {
+		return ReplicationRow{TS: ts, TenantID: "default", ClusterID: 1, InstanceID: iid, SlotName: "standby1", Source: source}
+	}
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	require.NoError(t, WriteReplication(ctx, tx, []ReplicationRow{row("sender"), row("slot"), row("sender")}))
+	require.NoError(t, tx.Commit(ctx))
+
+	var sources []string
+	got, err := pool.Query(ctx, `SELECT source FROM metrics_replication WHERE instance_id=$1 ORDER BY source`, iid)
+	require.NoError(t, err)
+	defer got.Close()
+	for got.Next() {
+		var source string
+		require.NoError(t, got.Scan(&source))
+		sources = append(sources, source)
+	}
+	require.NoError(t, got.Err())
+	require.Equal(t, []string{"sender", "slot"}, sources)
+}

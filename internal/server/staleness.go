@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -23,9 +24,8 @@ import (
 // replicas never emit duplicate events.
 
 const (
-	defaultExpectedInterval = 30 * time.Second
-	evaluatorInterval       = 15 * time.Second
-	noPrimaryThreshold      = 60 * time.Second
+	evaluatorInterval  = 15 * time.Second
+	noPrimaryThreshold = 60 * time.Second
 	// slotInactiveThreshold matches noPrimaryThreshold's own precedent in
 	// this file: a short, hardcoded default rather than an env-configurable
 	// one — nothing else in Staleness exposes its thresholds for override
@@ -40,6 +40,12 @@ const (
 	eventRetention     = 90 * 24 * time.Hour
 	eventPurgeInterval = time.Hour
 	eventPurgeBatch    = 10000
+	// topologyEdgeLiveness is how long an instance may stay silent before the
+	// topology edges it reports are dropped. A standby that stops reporting keeps
+	// its edge to its upstream otherwise, and the topology readers and the
+	// sync-state resolver would count that edge for good. It is the same liveness
+	// the other readers of an instance's rows use.
+	topologyEdgeLiveness = time.Hour
 )
 
 // ---------------------------------------------------------------------------
@@ -125,6 +131,82 @@ func (c *counterVec) Snapshot() map[string]float64 {
 	return out
 }
 
+// checkKey names one check's counter series: the instance the check ran against
+// and the check, with a name outside knownChecks already bucketed by checkLabel.
+type checkKey struct {
+	instance string
+	check    string
+}
+
+// checkCounterVec is counterVec keyed by an instance and a check.
+type checkCounterVec struct {
+	mu   sync.Mutex
+	vals map[checkKey]float64
+}
+
+func (c *checkCounterVec) Inc(key checkKey) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.vals[key]++
+}
+
+func (c *checkCounterVec) Get(key checkKey) float64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.vals[key]
+}
+
+// Snapshot is counterVec.Snapshot for a checkCounterVec.
+func (c *checkCounterVec) Snapshot() map[checkKey]float64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make(map[checkKey]float64, len(c.vals))
+	for k, v := range c.vals {
+		out[k] = v
+	}
+	return out
+}
+
+// knownChecks are the check names an agent reports: the checks it registers and
+// the two results it builds itself. The agent supplies the name, under a token
+// every agent shares, so an unknown name is bucketed rather than kept: otherwise
+// each distinct name would hold a series in memory and in /metrics for the life
+// of the process, and a name that is not valid text would break the scrape.
+var knownChecks = map[string]bool{
+	"activity":              true,
+	"agent_self":            true,
+	"archiver":              true,
+	"ash":                   true,
+	"bloat_estimate":        true,
+	"checkpointer":          true,
+	"database_stats":        true,
+	"host":                  true,
+	"index_stats":           true,
+	"instance_info":         true,
+	"io":                    true,
+	"locks":                 true,
+	"monitoring_role":       true,
+	"replication_receiver":  true,
+	"replication_slots":     true,
+	"replication_streaming": true,
+	"settings":              true,
+	"stat_statements":       true,
+	"table_stats":           true,
+	"vacuum_progress":       true,
+	"wal":                   true,
+}
+
+// checkOther is the check label of every name outside knownChecks.
+const checkOther = "other"
+
+// checkLabel is the check label a reported check name is counted under.
+func checkLabel(check string) string {
+	if knownChecks[check] {
+		return check
+	}
+	return checkOther
+}
+
 type counter struct {
 	mu sync.Mutex
 	v  float64
@@ -183,8 +265,8 @@ var (
 	pglensAgentClockSkewSeconds     = &gauge{}
 	pglensSeriesTotalGauge          = newGaugeVec()
 	pglensCardinalityTruncatedTotal = &counter{}
-	pglensCheckErrorTotal           = &counterVec{vals: make(map[string]float64)}
-	pglensCheckOKTotal              = &counterVec{vals: make(map[string]float64)}
+	pglensCheckErrorTotal           = &checkCounterVec{vals: make(map[checkKey]float64)}
+	pglensCheckOKTotal              = &checkCounterVec{vals: make(map[checkKey]float64)}
 )
 
 // Exported helpers for other packages (ingest, pipeline) to update self-monitoring
@@ -214,16 +296,17 @@ func IncCardinalityTruncated() {
 	pglensCardinalityTruncatedTotal.Inc()
 }
 
-// IncCheckError records one failed check scrape, keyed by check name — the
-// visibility gap that let stat_statements fail every single scrape,
-// invisibly, until it was found by chance re-verifying a README (STATE.md
-// §4 rows 141-142). wire.Result.Error was always sent by the agent but
-// never once read by the server before this.
-func IncCheckError(check string) {
-	pglensCheckErrorTotal.Inc(check)
+// IncCheckError records one failed check scrape of an instance, keyed by the
+// instance and the check name — the visibility gap that let stat_statements
+// fail every single scrape, invisibly, until it was found by chance
+// re-verifying a README (STATE.md §4 rows 141-142). wire.Result.Error was
+// always sent by the agent but never once read by the server before this.
+func IncCheckError(instanceID, check string) {
+	pglensCheckErrorTotal.Inc(checkKey{instance: instanceID, check: checkLabel(check)})
 }
 
-// IncCheckOK records one successful check scrape, keyed by check name.
+// IncCheckOK records one successful check scrape of an instance, keyed by the
+// instance and the check name. The pipeline counts a skipped scrape as neither.
 //
 // The error counter alone cannot tell "this check is broken" from "this
 // check's target was deliberately taken away for a moment": a failover, a
@@ -234,8 +317,8 @@ func IncCheckError(check string) {
 // is exactly the shape of the stat_statements bug IncCheckError was added
 // for, while a check that errored during a fault window and succeeded on
 // either side of it is behaving correctly.
-func IncCheckOK(check string) {
-	pglensCheckOKTotal.Inc(check)
+func IncCheckOK(instanceID, check string) {
+	pglensCheckOKTotal.Inc(checkKey{instance: instanceID, check: checkLabel(check)})
 }
 
 func boolToFloat(b bool) float64 {
@@ -258,13 +341,16 @@ func isStaleUp(lastSeen, now time.Time, threshold time.Duration) bool {
 // Staleness evaluates instance staleness and emits transition events under an
 // advisory lock.
 type Staleness struct {
-	pool     *pgxpool.Pool
-	clock    clock.Clock
-	interval time.Duration
+	pool  *pgxpool.Pool
+	clock clock.Clock
 
 	mu sync.Mutex
 	// instanceUp tracks last emitted up state per instance_id string.
 	instanceUp map[string]bool
+	// announcedLoaded is set once instanceUp has been rebuilt from the events of
+	// the current leadership term. A replica that takes the lock starts from what
+	// the events show as announced, not from whatever it held before.
+	announcedLoaded bool
 	// clusterPrimarySeen tracks last time a primary was seen per cluster.
 	clusterPrimarySeen map[string]time.Time
 	// clusterNoPrimaryEmitted tracks whether no_primary_in_cluster already emitted.
@@ -291,8 +377,7 @@ type Staleness struct {
 }
 
 // NewStaleness creates a Staleness evaluator.
-// Pool and clock may be nil in tests; clock defaults to system clock and
-// interval defaults to 30s (threshold 90s).
+// Pool and clock may be nil in tests; clock defaults to system clock.
 func NewStaleness(pool *pgxpool.Pool, clk clock.Clock) *Staleness {
 	if clk == nil {
 		clk = clock.System()
@@ -300,7 +385,6 @@ func NewStaleness(pool *pgxpool.Pool, clk clock.Clock) *Staleness {
 	return &Staleness{
 		pool:                    pool,
 		clock:                   clk,
-		interval:                defaultExpectedInterval,
 		instanceUp:              make(map[string]bool),
 		clusterPrimarySeen:      make(map[string]time.Time),
 		clusterNoPrimaryEmitted: make(map[string]bool),
@@ -311,13 +395,10 @@ func NewStaleness(pool *pgxpool.Pool, clk clock.Clock) *Staleness {
 	}
 }
 
-// threshold returns 3*expected_interval, defaulting to 90s.
+// threshold is how long an instance may stay silent before it counts as down.
+// It is the value the alert rules read too, so the two cannot disagree.
 func (s *Staleness) threshold() time.Duration {
-	iv := s.interval
-	if iv == 0 {
-		iv = defaultExpectedInterval
-	}
-	return 3 * iv
+	return store.InstanceStaleAfter
 }
 
 // ensureLeader acquires a dedicated session-scoped connection and tries to
@@ -337,11 +418,19 @@ func (s *Staleness) ensureLeader(ctx context.Context) error {
 	// kept emitting staleness events believing it was the leader, while
 	// another server legitimately took the freed lock. Two leaders means
 	// duplicate agent_down/instance_unreachable events.
+	//
+	// IsClosed turns true only after something has failed on the session, and a
+	// leader does no I/O on its pinned session while it holds the lock. So the
+	// session is pinged every cycle: one that does not answer no longer holds the
+	// lock, and the leadership goes with it.
 	if s.conn != nil && s.conn.Conn().IsClosed() {
-		s.releaseLeaderConn()
+		s.releaseLeaderConn(ctx)
 	}
 	if s.hasLock && s.conn != nil {
-		return nil
+		if err := s.conn.Ping(ctx); err == nil {
+			return nil
+		}
+		s.releaseLeaderConn(ctx)
 	}
 	if s.conn == nil {
 		conn, err := s.pool.Acquire(ctx)
@@ -360,8 +449,11 @@ func (s *Staleness) ensureLeader(ctx context.Context) error {
 		// Give the connection back instead of pinning a broken one: every
 		// later cycle would otherwise retry on the same dead session, and
 		// this evaluator could never regain leadership without a restart.
-		s.releaseLeaderConn()
+		s.releaseLeaderConn(ctx)
 		return fmt.Errorf("try advisory lock: %w", err)
+	}
+	if locked && !s.hasLock {
+		s.announcedLoaded = false
 	}
 	s.hasLock = locked
 	return nil
@@ -369,12 +461,27 @@ func (s *Staleness) ensureLeader(ctx context.Context) error {
 
 // releaseLeaderConn drops the lock-holding connection and the leadership it
 // carried. Caller must hold s.mu.
-func (s *Staleness) releaseLeaderConn() {
+//
+// The session is closed, not returned to the pool: a session that may still
+// hold the advisory lock would keep it for whoever borrowed the connection
+// next, and this replica has given up the lock.
+func (s *Staleness) releaseLeaderConn(ctx context.Context) {
 	if s.conn != nil {
+		closeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		_ = s.conn.Conn().Close(closeCtx)
+		cancel()
 		s.conn.Release()
 		s.conn = nil
 	}
 	s.hasLock = false
+}
+
+// staleEvent is one event an evaluation writes.
+type staleEvent struct {
+	typ        string
+	clusterID  *int64
+	instanceID *uuid.UUID
+	payload    map[string]any
 }
 
 // emitEvent inserts a single event row. Caller must hold s.mu if it needs the
@@ -382,13 +489,40 @@ func (s *Staleness) releaseLeaderConn() {
 // the DB operation to avoid holding it across network I/O; callers should
 // manage locking as needed. It always checks errors.
 func (s *Staleness) emitEvent(ctx context.Context, typ string, clusterID *int64, instanceID *uuid.UUID, payload map[string]any) error {
+	return s.emitEvents(ctx, staleEvent{typ: typ, clusterID: clusterID, instanceID: instanceID, payload: payload})
+}
+
+// emitEvents writes events together or not at all. A transition is such a
+// group, and its state is recorded as done only once every event of it is
+// stored: a write that fails part way leaves the state as it was, so the next
+// evaluation writes the whole transition again.
+func (s *Staleness) emitEvents(ctx context.Context, events ...staleEvent) error {
 	if s.pool == nil {
 		return nil
 	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin events tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	ts := s.clock.Now()
+	for _, ev := range events {
+		if err := insertStaleEvent(ctx, tx, ts, ev); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit events: %w", err)
+	}
+	return nil
+}
+
+// insertStaleEvent writes one event row inside tx.
+func insertStaleEvent(ctx context.Context, tx pgx.Tx, ts time.Time, ev staleEvent) error {
 	var payloadJSON []byte
 	var err error
-	if payload != nil {
-		payloadJSON, err = json.Marshal(payload)
+	if ev.payload != nil {
+		payloadJSON, err = json.Marshal(ev.payload)
 		if err != nil {
 			return fmt.Errorf("marshal event payload: %w", err)
 		}
@@ -396,22 +530,60 @@ func (s *Staleness) emitEvent(ctx context.Context, typ string, clusterID *int64,
 		payloadJSON = []byte(`{}`)
 	}
 	var cidParam any
-	if clusterID != nil {
-		cidParam = *clusterID
+	if ev.clusterID != nil {
+		cidParam = *ev.clusterID
 	}
 	var iidParam any
-	if instanceID != nil {
-		iidParam = *instanceID
+	if ev.instanceID != nil {
+		iidParam = *ev.instanceID
 	}
 	tenantID := "default"
-	ts := s.clock.Now()
-	_, execErr := s.pool.Exec(ctx,
+	_, execErr := tx.Exec(ctx,
 		`INSERT INTO events (tenant_id, ts, type, cluster_id, instance_id, payload) VALUES ($1,$2,$3,$4,$5,$6::jsonb)`,
-		tenantID, ts, typ, cidParam, iidParam, string(payloadJSON))
+		tenantID, ts, ev.typ, cidParam, iidParam, string(payloadJSON))
 	if execErr != nil {
-		return fmt.Errorf("insert event %s: %w", typ, execErr)
+		return fmt.Errorf("insert event %s: %w", ev.typ, execErr)
 	}
 	return nil
+}
+
+// transitionEvents are the events an instance's move to up or to down writes:
+// the agent event and the instance event that the alert rules read.
+func transitionEvents(clusterID int64, instanceID uuid.UUID, up bool, lastSeen time.Time) []staleEvent {
+	cid := clusterID
+	iid := instanceID
+	iidStr := instanceID.String()
+	if up {
+		return []staleEvent{
+			{typ: "agent_up", clusterID: &cid, instanceID: &iid, payload: map[string]any{"instance_id": iidStr}},
+			{typ: "instance_reachable", clusterID: &cid, instanceID: &iid, payload: map[string]any{"instance_id": iidStr}},
+		}
+	}
+	return []staleEvent{
+		{typ: "agent_down", clusterID: &cid, instanceID: &iid, payload: map[string]any{"instance_id": iidStr, "last_seen": lastSeen}},
+		{typ: "instance_unreachable", clusterID: &cid, instanceID: &iid, payload: map[string]any{"instance_id": iidStr}},
+	}
+}
+
+// announcedStates returns, for each instance with an agent event on record,
+// whether its latest agent transition was up. The events are what has been
+// announced, whichever replica wrote them.
+func (s *Staleness) announcedStates(ctx context.Context) (map[string]bool, error) {
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT ON (instance_id) instance_id, type FROM events WHERE type IN ('agent_up', 'agent_down') AND instance_id IS NOT NULL ORDER BY instance_id, ts DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("query agent events: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]bool)
+	for rows.Next() {
+		var iid uuid.UUID
+		var typ string
+		if scanErr := rows.Scan(&iid, &typ); scanErr != nil {
+			return nil, fmt.Errorf("scan agent event: %w", scanErr)
+		}
+		out[iid.String()] = typ == "agent_up"
+	}
+	return out, rows.Err()
 }
 
 // Evaluate performs a single staleness evaluation. It is safe to call
@@ -426,14 +598,11 @@ func (s *Staleness) Evaluate(ctx context.Context) error {
 	s.mu.Lock()
 	hasLock := s.hasLock
 	s.mu.Unlock()
-	if !hasLock {
-		return nil
-	}
 
 	now := s.clock.Now()
 	threshold := s.threshold()
 
-	rows, err := s.pool.Query(ctx, `SELECT instance_id, cluster_id, last_seen, role, agent_id FROM instances`)
+	rows, err := s.pool.Query(ctx, `SELECT i.instance_id, i.cluster_id, i.last_seen, i.role, i.agent_id, a.revoked_at IS NOT NULL FROM instances i LEFT JOIN agents a ON a.agent_id = i.agent_id`)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
@@ -448,6 +617,7 @@ func (s *Staleness) Evaluate(ctx context.Context) error {
 		lastSeen  time.Time
 		role      string
 		agentID   uuid.UUID
+		revoked   bool
 	}
 	var instances []instInfo
 	clusterHasPrimary := make(map[int64]bool)
@@ -459,10 +629,17 @@ func (s *Staleness) Evaluate(ctx context.Context) error {
 		var lastSeen time.Time
 		var role string
 		var agentID uuid.UUID
-		if scanErr := rows.Scan(&iid, &cid, &lastSeen, &role, &agentID); scanErr != nil {
+		var revoked bool
+		if scanErr := rows.Scan(&iid, &cid, &lastSeen, &role, &agentID, &revoked); scanErr != nil {
 			return fmt.Errorf("scan instance: %w", scanErr)
 		}
-		instances = append(instances, instInfo{id: iid, clusterID: cid, lastSeen: lastSeen, role: role, agentID: agentID})
+		instances = append(instances, instInfo{id: iid, clusterID: cid, lastSeen: lastSeen, role: role, agentID: agentID, revoked: revoked})
+		// A revoked agent's instances are out of monitoring by design. The primary
+		// one reported is not a primary its cluster has lost, so it neither makes
+		// the cluster a subject of the no-primary check nor counts as its primary.
+		if revoked {
+			continue
+		}
 		clusterIDs[cid] = struct{}{}
 		// A stale primary (its agent has gone silent — no update ever
 		// retroactively changes `role` once that happens) must not count as
@@ -481,53 +658,74 @@ func (s *Staleness) Evaluate(ctx context.Context) error {
 		return fmt.Errorf("iterate instances: %w", rowsErr)
 	}
 
-	// Update gauges and emit transitions under lock to ensure once-per-transition.
+	// Every replica reports the gauges from the database, not only the leader. A
+	// former leader would otherwise keep the values of its last turn for
+	// instances that have gone down since, and a replica that never led would
+	// expose none. Only the leader emits events below.
+	for _, inst := range instances {
+		iidStr := inst.id.String()
+		up := isStaleUp(inst.lastSeen, now, threshold)
+		pglensUpGauge.Set(iidStr, boolToFloat(up))
+		pglensAgentLastSeenGauge.Set(iidStr, float64(inst.lastSeen.Unix()))
+	}
+	if !hasLock {
+		return nil
+	}
+
+	// Emit transitions under lock to ensure once-per-transition.
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if !s.announcedLoaded {
+		announced, err := s.announcedStates(ctx)
+		if err != nil {
+			// An empty map here would announce every instance that is down again.
+			return fmt.Errorf("load announced instance states: %w", err)
+		}
+		// Rebuilt, not merged: the map of an earlier term may be older than the events.
+		s.instanceUp = make(map[string]bool, len(instances))
+		for _, inst := range instances {
+			iidStr := inst.id.String()
+			if up, ok := announced[iidStr]; ok {
+				s.instanceUp[iidStr] = up
+			} else if inst.lastSeen.Before(now.Add(-eventRetention)) {
+				// Silent for longer than the events are kept, so the agent_down it
+				// was announced with has been purged. It is down, and was announced.
+				s.instanceUp[iidStr] = false
+			}
+		}
+		s.announcedLoaded = true
+	}
 
 	for _, inst := range instances {
 		iidStr := inst.id.String()
 		up := isStaleUp(inst.lastSeen, now, threshold)
 
-		pglensUpGauge.Set(iidStr, boolToFloat(up))
-		pglensAgentLastSeenGauge.Set(iidStr, float64(inst.lastSeen.Unix()))
-
-		prevUp, seenBefore := s.instanceUp[iidStr]
-		if !seenBefore {
+		// A revoked agent stops pushing by design, so its silence is not an
+		// outage: it emits no agent_down or instance_unreachable, as the metric
+		// path in alert/source_sql.go already treats it. The state is still kept
+		// so that a later transition is measured from the true state.
+		if inst.revoked {
 			s.instanceUp[iidStr] = up
-			if !up {
-				// First observation already stale: emit down once.
-				cid := inst.clusterID
-				iidCopy := inst.id
-				if emitErr := s.emitEvent(ctx, "agent_down", &cid, &iidCopy, map[string]any{"instance_id": iidStr, "last_seen": inst.lastSeen}); emitErr != nil {
-					return emitErr
-				}
-				if emitErr := s.emitEvent(ctx, "instance_unreachable", &cid, &iidCopy, map[string]any{"instance_id": iidStr}); emitErr != nil {
-					return emitErr
-				}
-			}
 			continue
 		}
-		if prevUp != up {
-			s.instanceUp[iidStr] = up
-			cid := inst.clusterID
-			iidCopy := inst.id
-			if up {
-				if emitErr := s.emitEvent(ctx, "agent_up", &cid, &iidCopy, map[string]any{"instance_id": iidStr}); emitErr != nil {
-					return emitErr
-				}
-				if emitErr := s.emitEvent(ctx, "instance_reachable", &cid, &iidCopy, map[string]any{"instance_id": iidStr}); emitErr != nil {
-					return emitErr
-				}
-			} else {
-				if emitErr := s.emitEvent(ctx, "agent_down", &cid, &iidCopy, map[string]any{"instance_id": iidStr, "last_seen": inst.lastSeen}); emitErr != nil {
-					return emitErr
-				}
-				if emitErr := s.emitEvent(ctx, "instance_unreachable", &cid, &iidCopy, map[string]any{"instance_id": iidStr}); emitErr != nil {
-					return emitErr
-				}
-			}
+
+		// The state of an instance moves only once the events of the move are
+		// stored. Recorded first, a failed write would be taken for done, and
+		// its events would never be written.
+		prevUp, seenBefore := s.instanceUp[iidStr]
+		if seenBefore && prevUp == up {
+			continue
 		}
+		// An instance seen for the first time emits only when it is already down.
+		if !seenBefore && up {
+			s.instanceUp[iidStr] = up
+			continue
+		}
+		if emitErr := s.emitEvents(ctx, transitionEvents(inst.clusterID, inst.id, up, inst.lastSeen)...); emitErr != nil {
+			return emitErr
+		}
+		s.instanceUp[iidStr] = up
 	}
 
 	// no_primary_in_cluster handling
@@ -561,7 +759,25 @@ func (s *Staleness) Evaluate(ctx context.Context) error {
 		return slotErr
 	}
 
+	if topoErr := s.purgeTopologyEdges(ctx, now); topoErr != nil {
+		return topoErr
+	}
+
 	return s.purgeEvents(ctx, now)
+}
+
+// purgeTopologyEdges deletes the edges reported by an instance that has been
+// silent for topologyEdgeLiveness. Only the edges an instance reports are
+// dropped, not the edges that point at it: a live standby's edge to a silent
+// primary is still its upstream. An instance that comes back writes its edges
+// again with its next envelope. Called from Evaluate with s.mu held, by the
+// leader only.
+func (s *Staleness) purgeTopologyEdges(ctx context.Context, now time.Time) error {
+	if _, err := s.pool.Exec(ctx, `DELETE FROM topology_edges e USING instances i
+		WHERE i.instance_id = e.from_instance AND i.last_seen < $1`, now.Add(-topologyEdgeLiveness)); err != nil {
+		return fmt.Errorf("purge topology edges: %w", err)
+	}
+	return nil
 }
 
 // purgeEvents deletes one batch of events older than eventRetention, at most
@@ -598,6 +814,11 @@ type slotEmission struct {
 	SlotName   string
 }
 
+// slotKey identifies one slot of one instance in the slot state maps.
+func slotKey(instanceID uuid.UUID, slotName string) string {
+	return instanceID.String() + "/" + slotName
+}
+
 // decideSlotInactiveEmissions applies the slot_inactive state machine to one
 // evaluation's rows, mutating since/emitted in place (the same maps
 // evaluateSlots persists across calls as Staleness.slotInactiveSince/
@@ -613,7 +834,7 @@ func decideSlotInactiveEmissions(rows []slotRow, now time.Time, since map[string
 	var out []slotEmission
 	present := make(map[string]struct{}, len(rows))
 	for _, r := range rows {
-		present[r.InstanceID.String()+"/"+r.SlotName] = struct{}{}
+		present[slotKey(r.InstanceID, r.SlotName)] = struct{}{}
 	}
 	for key := range since {
 		if _, ok := present[key]; !ok {
@@ -626,7 +847,7 @@ func decideSlotInactiveEmissions(rows []slotRow, now time.Time, since map[string
 		}
 	}
 	for _, r := range rows {
-		key := r.InstanceID.String() + "/" + r.SlotName
+		key := slotKey(r.InstanceID, r.SlotName)
 		if r.Active {
 			delete(since, key)
 			delete(emitted, key)
@@ -684,10 +905,16 @@ ORDER BY instance_id, slot_name, ts DESC`, now.Add(-slotStateWindow))
 		return err
 	}
 
-	for _, em := range decideSlotInactiveEmissions(slotRows, now, s.slotInactiveSince, s.slotInactiveEmitted) {
+	emissions := decideSlotInactiveEmissions(slotRows, now, s.slotInactiveSince, s.slotInactiveEmitted)
+	for i, em := range emissions {
 		cidCopy := em.ClusterID
 		iidCopy := em.InstanceID
 		if emitErr := s.emitEvent(ctx, "slot_inactive", &cidCopy, &iidCopy, map[string]any{"slot_name": em.SlotName}); emitErr != nil {
+			// decide marked this emission and the ones after it as reported, but
+			// they were not written. Unmark them, so the next evaluation emits them.
+			for _, rest := range emissions[i:] {
+				delete(s.slotInactiveEmitted, slotKey(rest.InstanceID, rest.SlotName))
+			}
 			return emitErr
 		}
 	}
@@ -723,7 +950,9 @@ func (s *Staleness) Start(ctx context.Context) {
 				case t := <-ticker.C():
 					_ = t
 					evalCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-					_ = s.Evaluate(evalCtx)
+					if err := s.Evaluate(evalCtx); err != nil {
+						log.Printf("staleness: evaluate: %v", err)
+					}
 					cancel()
 				}
 			}
@@ -754,10 +983,15 @@ func (s *Staleness) Stop() {
 		defer s.mu.Unlock()
 		if s.conn != nil {
 			unlockCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			_, _ = s.conn.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtext('pglens:staleness'))`)
+			if _, err := s.conn.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtext('pglens:staleness'))`); err != nil {
+				// The lock may still be held by this session, which must not
+				// go back to the pool: close it, so the server frees the lock.
+				s.releaseLeaderConn(unlockCtx)
+			} else {
+				s.conn.Release()
+				s.conn = nil
+			}
 			cancel()
-			s.conn.Release()
-			s.conn = nil
 		}
 		s.hasLock = false
 		if s.ticker != nil {

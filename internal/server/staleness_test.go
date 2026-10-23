@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/manprint/pglens/internal/clock"
+	"github.com/manprint/pglens/internal/store"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,7 +28,6 @@ func TestNewStaleness_Defaults(t *testing.T) {
 	s := NewStaleness(nil, nil)
 	require.NotNil(t, s)
 	require.NotNil(t, s.clock)
-	require.Equal(t, 30*time.Second, s.interval)
 	require.NotNil(t, s.instanceUp)
 	require.NotNil(t, s.clusterPrimarySeen)
 	require.NotNil(t, s.clusterNoPrimaryEmitted)
@@ -36,14 +36,13 @@ func TestNewStaleness_Defaults(t *testing.T) {
 	require.Equal(t, fc, s2.clock)
 }
 
+// The threshold is three expected pushes. The alert rule on the up metric
+// derives its own cut-off from the same value, so this pins the number both use.
 func TestStaleness_Threshold(t *testing.T) {
 	t.Parallel()
 	s := NewStaleness(nil, nil)
 	require.Equal(t, 90*time.Second, s.threshold())
-	s.interval = 10 * time.Second
-	require.Equal(t, 30*time.Second, s.threshold())
-	s.interval = 0
-	require.Equal(t, 90*time.Second, s.threshold())
+	require.Equal(t, store.InstanceStaleAfter, s.threshold())
 }
 
 func TestBoolToFloat(t *testing.T) {
@@ -95,8 +94,9 @@ func TestGauge(t *testing.T) {
 	require.Equal(t, 0.0, g.Get())
 }
 
+// TestIncHelpers is not parallel: it asserts the exact value of the clock skew
+// gauge, which every push in the parallel ingest tests now sets.
 func TestIncHelpers(t *testing.T) {
-	t.Parallel()
 	IncIngestEnvelopes("ok")
 	require.GreaterOrEqual(t, pglensIngestEnvelopesTotal.Get("ok"), 1.0)
 	IncIngestRejected("bad")

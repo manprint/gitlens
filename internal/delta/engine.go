@@ -93,6 +93,16 @@ func observe(baselines map[pgtype.SeriesKey]state, maxGap time.Duration, o Obser
 
 	// Rule 2: duplicate or out-of-order sample must not corrupt baseline
 	if !o.TS.After(prev.ts) {
+		// A sample more than maxGap behind the baseline is not out of order: the
+		// clock that stamped the baseline has stepped since, and a forward step
+		// that was corrected leaves the baseline ahead of every real sample. Left
+		// alone, the baseline would drop each real sample until the clock caught up
+		// with it, so the baseline moves to this sample, with no rate point. A
+		// duplicate, or a sample only slightly late, keeps the baseline as it is.
+		if prev.ts.Sub(o.TS) > maxGap {
+			cp := copyStatsReset(o.StatsReset)
+			baselines[o.Key] = state{ts: o.TS, value: o.Value, statsReset: cp}
+		}
 		return nil, nil
 	}
 
@@ -141,19 +151,30 @@ func observe(baselines map[pgtype.SeriesKey]state, maxGap time.Duration, o Obser
 type Batch struct {
 	e      *Engine
 	staged map[pgtype.SeriesKey]state
+	// read is the engine baseline each staged key started from (ok false when
+	// there was none), so Commit can tell a baseline this batch moved back on
+	// purpose from one a later envelope has moved past since.
+	read map[pgtype.SeriesKey]readBaseline
+}
+
+type readBaseline struct {
+	s  state
+	ok bool
 }
 
 // Begin starts a batch for one envelope.
 func (e *Engine) Begin() *Batch {
-	return &Batch{e: e, staged: make(map[pgtype.SeriesKey]state)}
+	return &Batch{e: e, staged: make(map[pgtype.SeriesKey]state), read: make(map[pgtype.SeriesKey]readBaseline)}
 }
 
 // Observe is Engine.Observe with the baseline staged in the batch.
 func (b *Batch) Observe(o Observation) (*Point, *ResetEvent) {
 	b.e.mu.Lock()
 	defer b.e.mu.Unlock()
-	if _, ok := b.staged[o.Key]; !ok {
-		if s, ok := b.e.prev[o.Key]; ok {
+	if _, ok := b.read[o.Key]; !ok {
+		s, ok := b.e.prev[o.Key]
+		b.read[o.Key] = readBaseline{s: s, ok: ok}
+		if ok {
 			b.staged[o.Key] = s
 		}
 	}
@@ -162,13 +183,18 @@ func (b *Batch) Observe(o Observation) (*Point, *ResetEvent) {
 
 // Commit moves the staged baselines into the engine. A key that a later
 // envelope has already moved past the staged sample keeps its newer baseline,
-// so a late commit never steps a baseline backwards.
+// so a late commit never steps a baseline backwards over another envelope's.
+// A baseline still holding what this batch read is replaced even when the
+// staged one is older: that is Rule 2 rebasing after a clock step.
 func (b *Batch) Commit() {
 	b.e.mu.Lock()
 	defer b.e.mu.Unlock()
 	for k, s := range b.staged {
-		if cur, ok := b.e.prev[k]; ok && !s.ts.After(cur.ts) {
-			continue
+		cur, ok := b.e.prev[k]
+		if ok && !s.ts.After(cur.ts) {
+			if r := b.read[k]; !r.ok || r.s != cur {
+				continue
+			}
 		}
 		b.e.prev[k] = s
 	}

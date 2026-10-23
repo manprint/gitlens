@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/manprint/pglens/internal/wire"
 	"github.com/stretchr/testify/require"
@@ -65,6 +66,9 @@ func TestInventory_Upsert_RoleNormalization(t *testing.T) {
 	res, err := inv.Upsert(context.Background(), env)
 	require.NoError(t, err)
 	require.Equal(t, 1, res.Accepted)
+	// The pipeline stores the role, normalized, in the envelope transaction.
+	_, err = NewPipeline(pool, clock.NewFake(time.Now())).Process(context.Background(), env)
+	require.NoError(t, err)
 	// verify role normalized to unknown in DB
 	var role string
 	err = pool.QueryRow(context.Background(), `SELECT role FROM instances WHERE instance_id=$1`, uuid.MustParse(iid)).Scan(&role)
@@ -82,6 +86,8 @@ func TestInventory_Upsert_RoleNormalization(t *testing.T) {
 	res, err = inv.Upsert(context.Background(), env2)
 	require.NoError(t, err)
 	require.Equal(t, 1, res.Accepted)
+	_, err = NewPipeline(pool, clock.NewFake(time.Now())).Process(context.Background(), env2)
+	require.NoError(t, err)
 	err = pool.QueryRow(context.Background(), `SELECT role FROM instances WHERE instance_id=$1`, uuid.MustParse(iid2)).Scan(&role)
 	require.NoError(t, err)
 	require.Equal(t, "primary", role)
@@ -269,7 +275,95 @@ func TestInventory_ClusterIDChanged_EmitsEvent(t *testing.T) {
 	require.Equal(t, int64(pgtype.ClusterID(44444)), storedCID)
 }
 
-func TestInventory_RoleChange_EmitsEvent(t *testing.T) {
+// TestInventory_ClusterIDChanged_LeavesNoClusterAndRepeatsOncePerDay: a push
+// that names another cluster than the instance's own creates no cluster row for
+// it, and the same mismatch pushed again writes its event once, not on every
+// push.
+func TestInventory_ClusterIDChanged_LeavesNoClusterAndRepeatsOncePerDay(t *testing.T) {
+	pool := getTestPool(t)
+	truncateAll(t, pool)
+	inv := NewInventory(pool)
+	ctx := context.Background()
+	iid := uuid.NewString()
+	cid1 := pgtype.ClusterID(66666)
+	cid2 := pgtype.ClusterID(77777)
+	push := func(cid pgtype.ClusterID) *UpsertResult {
+		res, err := inv.Upsert(ctx, wire.Envelope{
+			AgentID: uuid.NewString(),
+			Instances: []wire.Instance{
+				{InstanceID: iid, ClusterID: cid.String(), ClusterIDSource: string(pgtype.IDSourceManual), Addr: "10.0.0.7", Port: 5432, Role: "primary", PGVersion: 170000, PermTier: "T0"},
+			},
+		})
+		require.NoError(t, err)
+		return res
+	}
+	require.Equal(t, 1, push(cid1).Accepted)
+	for range 3 {
+		require.Equal(t, 1, push(cid2).Rejected)
+	}
+	var events int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='cluster_id_changed' AND instance_id=$1`, uuid.MustParse(iid)).Scan(&events))
+	require.Equal(t, 1, events, "a push that repeats the same mismatch writes its event once")
+	var phantom int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM clusters WHERE cluster_id=$1`, int64(cid2)).Scan(&phantom))
+	require.Zero(t, phantom, "a refused push must not create the cluster it names")
+}
+
+// TestINTSI03_LastSeenFollowsStoredData: the inventory does not refresh an
+// instance's last_seen. Only an instance whose samples the pipeline stores does
+// so, which keeps an instance the pipeline refuses on every push from reading
+// as up.
+func TestINTSI03_LastSeenFollowsStoredData(t *testing.T) {
+	pool := getTestPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	inv := NewInventory(pool)
+	p := NewPipeline(pool, clock.NewFake(time.Now()))
+	iid := uuid.New()
+	cid := pgtype.ClusterID(88888).String()
+	result := func(kind string) []wire.Result {
+		return []wire.Result{{Check: "bgwriter", TS: time.Now().UTC(), Metrics: []wire.Metric{
+			{Name: "pg_checkpoints_timed", Value: 1, Kind: kind, Labels: map[string]string{}},
+		}}}
+	}
+	instance := func(kind string) wire.Instance {
+		return wire.Instance{InstanceID: iid.String(), ClusterID: cid, ClusterIDSource: string(pgtype.IDSourceManual),
+			Addr: "10.0.0.8", Port: 5432, Role: "primary", PGVersion: 170000, PermTier: "T0", Results: result(kind)}
+	}
+	lastSeen := func() time.Time {
+		var ts time.Time
+		require.NoError(t, pool.QueryRow(ctx, `SELECT last_seen FROM instances WHERE instance_id=$1`, iid).Scan(&ts))
+		return ts
+	}
+
+	res, err := inv.Upsert(ctx, wire.Envelope{AgentID: uuid.NewString(), Instances: []wire.Instance{instance("gauge")}})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Accepted)
+	old := time.Now().Add(-time.Hour).UTC()
+	_, err = pool.Exec(ctx, `UPDATE instances SET last_seen=$2 WHERE instance_id=$1`, iid, old)
+	require.NoError(t, err)
+
+	res, err = inv.Upsert(ctx, wire.Envelope{AgentID: uuid.NewString(), Instances: []wire.Instance{instance("gauge")}})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Accepted)
+	require.WithinDuration(t, old, lastSeen(), time.Second, "the inventory alone must not refresh last_seen")
+
+	refused, err := p.Process(ctx, wire.Envelope{Instances: []wire.Instance{instance("unknown-kind")}})
+	require.NoError(t, err)
+	require.Equal(t, 1, refused.Rejected)
+	require.WithinDuration(t, old, lastSeen(), time.Second, "an instance whose samples are refused must go stale")
+
+	stored, err := p.Process(ctx, wire.Envelope{Instances: []wire.Instance{instance("gauge")}})
+	require.NoError(t, err)
+	require.Equal(t, 1, stored.Accepted)
+	require.True(t, lastSeen().After(old.Add(30*time.Minute)), "stored samples refresh last_seen")
+}
+
+// The inventory writes neither the role nor a role_change: the pipeline stores
+// the role and its topology step writes the event, in the transaction that
+// stores the envelope. See TestINTXE06_RoleChangeWrittenOnce for the two
+// together.
+func TestInventory_RoleChange_NotWrittenByInventory(t *testing.T) {
 	pool := getTestPool(t)
 	truncateAll(t, pool)
 	inv := NewInventory(pool)
@@ -292,31 +386,118 @@ func TestInventory_RoleChange_EmitsEvent(t *testing.T) {
 	}
 	_, err = inv.Upsert(ctx, env2)
 	require.NoError(t, err)
+
+	var role string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT role FROM instances WHERE instance_id=$1`, iid).Scan(&role))
+	require.Equal(t, "unknown", role, "the inventory leaves the role to the pipeline, which stores it in the envelope transaction")
 	var ev int
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='role_change'`).Scan(&ev))
-	require.Equal(t, 1, ev)
-	// unknown -> primary should not emit? Only primary<->standby
-	iid2 := uuid.NewString()
-	cid2 := pgtype.ClusterID(77777).String()
-	env3 := wire.Envelope{
-		AgentID: uuid.NewString(),
-		Instances: []wire.Instance{
-			{InstanceID: iid2, ClusterID: cid2, ClusterIDSource: string(pgtype.IDSourceManual), Addr: "10.0.0.8", Port: 5432, Role: "unknown", PGVersion: 170000, PermTier: "T0"},
-		},
+	require.Zero(t, ev, "the inventory writes no role_change, the topology step does")
+}
+
+// TestINTXE06_RoleChangeWrittenOnce: a demotion is one role_change row, and a
+// promotion the topology engine reads as a failover is failover_detected with no
+// role_change. The inventory and the pipeline both see every envelope, and
+// neither may write a transition a second time.
+func TestINTXE06_RoleChangeWrittenOnce(t *testing.T) {
+	pool := getTestPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	clk := clock.NewFake(time.Now())
+	inv := NewInventory(pool)
+	p := NewPipeline(pool, clk)
+	cid := pgtype.ClusterID(60606).String()
+	oldPrimary, standby, agent := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	instance := func(id, role, addr string) wire.Instance {
+		return wire.Instance{InstanceID: id, ClusterID: cid, ClusterIDSource: string(pgtype.IDSourceManual), Addr: addr, Port: 5432, Role: role, PGVersion: 170000, PermTier: "T0"}
 	}
-	_, err = inv.Upsert(ctx, env3)
-	require.NoError(t, err)
-	env4 := wire.Envelope{
-		AgentID: uuid.NewString(),
-		Instances: []wire.Instance{
-			{InstanceID: iid2, ClusterID: cid2, ClusterIDSource: string(pgtype.IDSourceManual), Addr: "10.0.0.8", Port: 5432, Role: "primary", PGVersion: 170000, PermTier: "T0"},
-		},
+	push := func(insts ...wire.Instance) {
+		env := wire.Envelope{AgentID: agent, Instances: insts}
+		_, err := inv.Upsert(ctx, env)
+		require.NoError(t, err)
+		_, err = p.Process(ctx, env)
+		require.NoError(t, err)
 	}
-	_, err = inv.Upsert(ctx, env4)
-	require.NoError(t, err)
-	// should still be 1 total role_change (previous one), not 2, because unknown->primary not counted
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='role_change'`).Scan(&ev))
-	require.Equal(t, 1, ev)
+	count := func(typ string) int {
+		var n int
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type=$1`, typ).Scan(&n))
+		return n
+	}
+
+	push(instance(oldPrimary, "primary", "10.0.0.1"), instance(standby, "standby", "10.0.0.2"))
+	roleChanges := count("role_change")
+
+	clk.Advance(5 * time.Second)
+	push(instance(oldPrimary, "standby", "10.0.0.1"), instance(standby, "standby", "10.0.0.2"))
+	require.Equal(t, roleChanges+1, count("role_change"), "a demotion is one role_change")
+	roleChanges = count("role_change")
+
+	clk.Advance(5 * time.Second)
+	failovers := count("failover_detected")
+	push(instance(oldPrimary, "standby", "10.0.0.1"), instance(standby, "primary", "10.0.0.2"))
+	require.Equal(t, failovers+1, count("failover_detected"), "a promotion after a recent primary is a failover")
+	require.Equal(t, roleChanges, count("role_change"), "a failover is failover_detected and not role_change")
+}
+
+// TestINTXE06_RestartKeepsStoredRole: a restart empties the topology engine, so
+// the first sighting after it finds no state to compare with. The role the store
+// already holds decides instead: the same role is no event, and a role that
+// changed while the server was down is one role_change from the stored role. It
+// is never a failover, since nothing in memory names a prior primary.
+func TestINTXE06_RestartKeepsStoredRole(t *testing.T) {
+	pool := getTestPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	clk := clock.NewFake(time.Now())
+	inv := NewInventory(pool)
+	cid := pgtype.ClusterID(60707).String()
+	iid, agent := uuid.NewString(), uuid.NewString()
+	instance := func(role string) wire.Instance {
+		return wire.Instance{InstanceID: iid, ClusterID: cid, ClusterIDSource: string(pgtype.IDSourceManual), Addr: "10.0.0.3", Port: 5432, Role: role, PGVersion: 170000, PermTier: "T0"}
+	}
+	// push sends one envelope through p. A fresh Pipeline is a restarted server.
+	push := func(p *Pipeline, role string) {
+		env := wire.Envelope{AgentID: agent, Instances: []wire.Instance{instance(role)}}
+		_, err := inv.Upsert(ctx, env)
+		require.NoError(t, err)
+		_, err = p.Process(ctx, env)
+		require.NoError(t, err)
+	}
+	count := func(typ string) int {
+		var n int
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type=$1`, typ).Scan(&n))
+		return n
+	}
+	storedRole := func() string {
+		var role string
+		require.NoError(t, pool.QueryRow(ctx, `SELECT role FROM instances WHERE instance_id=$1`, iid).Scan(&role))
+		return role
+	}
+
+	push(NewPipeline(pool, clk), "primary")
+	require.Equal(t, 1, count("role_change"), "a new instance's first sighting is reported as before")
+	require.Equal(t, "primary", storedRole())
+
+	clk.Advance(5 * time.Second)
+	push(NewPipeline(pool, clk), "primary")
+	require.Equal(t, 1, count("role_change"), "a restart that finds the stored role unchanged writes no event")
+	require.Equal(t, "primary", storedRole())
+
+	clk.Advance(5 * time.Second)
+	push(NewPipeline(pool, clk), "standby")
+	require.Equal(t, 2, count("role_change"), "a role that changed while the server was down is one role_change")
+	require.Zero(t, count("failover_detected"), "a restart never reads a change as a failover")
+	require.Equal(t, "standby", storedRole())
+
+	var oldRole, newRole string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT payload->>'old_role', payload->>'new_role' FROM events WHERE type='role_change' ORDER BY ts DESC LIMIT 1`).Scan(&oldRole, &newRole))
+	require.Equal(t, "primary", oldRole)
+	require.Equal(t, "standby", newRole)
+
+	clk.Advance(5 * time.Second)
+	push(NewPipeline(pool, clk), "standby")
+	require.Equal(t, 2, count("role_change"), "a later restart with the same role is silent")
 }
 
 func TestInventory_EmitEvent_JSON(t *testing.T) {
@@ -377,3 +558,52 @@ func truncateAll(t *testing.T, pool *pgxpool.Pool) {
 }
 
 var _ = fmt.Sprintf
+
+// TestInventory_DroppedDatabaseLeavesTheInstance: a database the agent stops
+// listing was dropped, and its row used to stay monitored with a frozen
+// last_seen, so the instance page kept showing it. A database still listed
+// stays, a budget skip included. An envelope with no database list, which an
+// agent sends when discovery failed, removes nothing.
+func TestInventory_DroppedDatabaseLeavesTheInstance(t *testing.T) {
+	pool := getTestPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	inv := NewInventory(pool)
+	iid := uuid.New()
+	agentID := uuid.NewString()
+	push := func(dbs ...wire.Database) {
+		t.Helper()
+		res, err := inv.Upsert(ctx, wire.Envelope{
+			AgentID: agentID,
+			Instances: []wire.Instance{{
+				InstanceID: iid.String(), ClusterID: pgtype.ClusterID(7778).String(), ClusterIDSource: string(pgtype.IDSourceManual),
+				Addr: "10.0.0.5", Port: 5432, Role: "primary", PGVersion: 170000, PermTier: "T0", Databases: dbs,
+			}},
+		})
+		require.NoError(t, err)
+		require.Equal(t, 1, res.Accepted)
+	}
+	names := func() []string {
+		t.Helper()
+		rows, err := pool.Query(ctx, `SELECT datname FROM databases WHERE instance_id=$1 ORDER BY datname`, iid)
+		require.NoError(t, err)
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var name string
+			require.NoError(t, rows.Scan(&name))
+			out = append(out, name)
+		}
+		require.NoError(t, rows.Err())
+		return out
+	}
+
+	push(wire.Database{Name: "app", Monitored: true}, wire.Database{Name: "scratch", Monitored: true}, wire.Database{Name: "legacy", SkipReason: "db_budget"})
+	require.Equal(t, []string{"app", "legacy", "scratch"}, names())
+
+	push(wire.Database{Name: "app", Monitored: true}, wire.Database{Name: "legacy", SkipReason: "db_budget"})
+	require.Equal(t, []string{"app", "legacy"}, names(), "a dropped database is gone; a budget skip is still listed")
+
+	push()
+	require.Equal(t, []string{"app", "legacy"}, names(), "an envelope without a database list removes nothing")
+}

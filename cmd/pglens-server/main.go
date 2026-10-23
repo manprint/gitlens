@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -25,15 +26,21 @@ import (
 var version = "dev" // overridden at build time with -ldflags
 
 func main() {
+	os.Exit(run())
+}
+
+// run is main with its exit status returned rather than passed to os.Exit,
+// so that the deferred stops and the pool close run before the process ends.
+func run() int {
 	showVersion := flag.Bool("version", false, "print version and exit")
 	healthcheck := flag.Bool("healthcheck", false, "GET /readyz on the configured listen address, exit 0 if it returns 200 else 1 (for Docker HEALTHCHECK — the distroless image has no shell or curl to do this any other way)")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println(version)
-		return
+		return 0
 	}
 	if *healthcheck {
-		os.Exit(runHealthcheck())
+		return runHealthcheck()
 	}
 	token, err := server.LoadBootstrapToken(nil, nil)
 	if err != nil {
@@ -142,9 +149,46 @@ func main() {
 		log.Fatalf("web UI assets: %v", err)
 	}
 	router := server.NewRouter(uiCfg, assets, sessionStore, auth, inv, pipeline, api, topoAPI, ashAPI, alertAPI)
-	srv := &http.Server{
+	// Requests inherit requestCtx. Shutdown waits for the requests in flight
+	// but does not cancel them, so one stuck on a lock would keep its pooled
+	// connection, and the deferred pool.Close would wait for it past the budget.
+	requestCtx, cancelRequests := context.WithCancel(context.Background())
+	srv := newHTTPServer(listen, router, requestCtx)
+	listenErr := make(chan error, 1)
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			// Reported, not log.Fatal'd from inside a goroutine: os.Exit skips
+			// every deferred Stop() and the pool close, leaving the advisory
+			// locks held until PostgreSQL times the sessions out.
+			listenErr <- err
+		}
+	}()
+	// Wait for a signal, or for the listener to fail. A listener that fails
+	// is an error exit, so a supervisor that restarts on failure does.
+	exitCode := 0
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT)
+	select {
+	case <-ch:
+	case err := <-listenErr:
+		log.Printf("listen: %v", err)
+		exitCode = 1
+	}
+	if err := shutdownServer(srv, cancelRequests, 15*time.Second); err != nil {
+		log.Printf("shutdown: %v", err)
+	}
+	return exitCode
+}
+
+// newHTTPServer builds the HTTP server for router. Its requests inherit
+// requestCtx, which shutdownServer cancels.
+func newHTTPServer(listen string, router http.Handler, requestCtx context.Context) *http.Server {
+	return &http.Server{
 		Addr:    listen,
 		Handler: router,
+		BaseContext: func(net.Listener) context.Context {
+			return requestCtx
+		},
 		// Without these a peer that opens a connection and dribbles (or never
 		// finishes) its request headers pins a server goroutine and a
 		// connection slot indefinitely — the classic Slowloris shape, and the
@@ -157,26 +201,17 @@ func main() {
 		IdleTimeout:       2 * time.Minute,
 		MaxHeaderBytes:    1 << 16,
 	}
-	listenErr := make(chan error, 1)
-	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			// Reported, not log.Fatal'd from inside a goroutine: os.Exit skips
-			// every deferred Stop() and the pool close, leaving the advisory
-			// locks held until PostgreSQL times the sessions out.
-			listenErr <- err
-		}
-	}()
-	// Wait for a signal, or for the listener to fail.
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT)
-	select {
-	case <-ch:
-	case err := <-listenErr:
-		log.Printf("listen: %v", err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+}
+
+// shutdownServer stops srv and gives its requests budget to finish. Requests
+// still running when the budget is spent are cancelled, so they release their
+// database connections before the caller closes the pool.
+func shutdownServer(srv *http.Server, cancelRequests context.CancelFunc, budget time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
-	_ = srv.Shutdown(ctx)
+	err := srv.Shutdown(ctx)
+	cancelRequests()
+	return err
 }
 
 // runHealthcheck is invoked as `pglens-server --healthcheck` from the

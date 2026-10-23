@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/pgtype"
+	"github.com/manprint/pglens/internal/store"
 	"github.com/manprint/pglens/internal/wire"
 	"github.com/stretchr/testify/require"
 )
@@ -289,7 +290,7 @@ func TestPipeline_ReplicationSyncStateIsStored(t *testing.T) {
 
 	for _, label := range []string{"sync_state", "sync_mode"} {
 		t.Run(label, func(t *testing.T) {
-			truncateAll(t, pool)
+			truncateAll(t, pool) //nolint:contextcheck // the helper clears the tables with its own context, as every test does; this test's ctx is only for the pipeline call
 			env := wire.Envelope{Instances: []wire.Instance{{
 				InstanceID: uuid.NewString(),
 				ClusterID:  pgtype.ClusterID(777).String(),
@@ -392,4 +393,257 @@ func TestPipeline_RetryAfterRolledBackEnvelopeKeepsRate(t *testing.T) {
 		`SELECT count(*), coalesce(max(value), 0) FROM metrics WHERE metric='pg_xact_commit' AND ts=$1`, ts2).Scan(&stored, &rate))
 	require.Equal(t, 1, stored, "the retry must store the rate of the interval the failed attempt observed")
 	require.InDelta(t, 100.0/60.0, rate, 1e-9)
+}
+
+// TestPipeline_TruncationMarkerCoversItsWindow: a cap that holds is marked once per
+// window on the instance, not on every push, and a statements read whose window
+// starts after the marker still sees the cap it recorded.
+func TestPipeline_TruncationMarkerCoversItsWindow(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	p := NewPipeline(pool, clock.NewFake(time.Now()))
+	instID := uuid.New()
+	cid := pgtype.ClusterID(1).String()
+	base := time.Now().Add(-time.Hour).Truncate(time.Second)
+	push := func(ts time.Time) {
+		_, err := p.Process(ctx, wire.Envelope{Instances: []wire.Instance{{
+			InstanceID: instID.String(), ClusterID: cid, Role: "primary",
+			Results: []wire.Result{{Check: "stat_statements", TS: ts, Database: "app", Truncated: true}},
+		}}})
+		require.NoError(t, err)
+	}
+	markers := func() int {
+		var n int
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE instance_id=$1 AND type='cardinality_truncated'`, instID).Scan(&n))
+		return n
+	}
+
+	push(base)
+	push(base.Add(15 * time.Second))
+	push(base.Add(30 * time.Second))
+	require.Equal(t, 1, markers(), "pushes inside one window write one marker")
+	// The check_partial fact of these pushes ends at the last one, before this
+	// window, so only the marker can make the window truncated.
+	from, to := base.Add(5*time.Minute), base.Add(6*time.Minute)
+	truncated, err := NewAPI(pool).instanceTruncated(ctx, instID, &from, &to)
+	require.NoError(t, err)
+	require.True(t, truncated, "a window starting five minutes after the marker is still truncated")
+
+	push(base.Add(11 * time.Minute))
+	require.Equal(t, 2, markers(), "the next window writes the next marker")
+}
+
+// INT-PIPE-004: an edge that names an address with no port resolves only to an
+// instance nothing else of the cluster shares the address with. An address two
+// instances of one cluster report names no upstream, whether the two are in the
+// database or in the envelope, so no edge is stored for it. A unique address
+// still resolves. Before, the database and the envelope each attached the edge
+// to whichever instance they met first.
+func TestPipeline_INT_PIPE_004_AmbiguousAddressNamesNoUpstream(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, `TRUNCATE topology_edges`)
+	require.NoError(t, err)
+	cid := pgtype.ClusterID(404)
+	agent := uuid.New()
+	_, err = pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual') ON CONFLICT DO NOTHING`, store.ToDB(cid))
+	require.NoError(t, err)
+
+	shared1, shared2, unique := uuid.New(), uuid.New(), uuid.New()
+	for _, row := range []struct {
+		id   uuid.UUID
+		addr string
+	}{{shared1, "10.0.4.5"}, {shared2, "10.0.4.5"}, {unique, "10.0.4.7"}} {
+		_, err = pool.Exec(ctx, `INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen) VALUES ($1,'default',$2,$3,$4,0,170000,'primary','T0', now())`, row.id, store.ToDB(cid), agent, row.addr)
+		require.NoError(t, err)
+	}
+
+	// The standby's edges name the shared address, which resolves to no one, and
+	// the unique one, which resolves to its instance.
+	standby := uuid.New()
+	p := NewPipeline(pool, clock.NewFake(time.Now()))
+	res, err := p.Process(ctx, wire.Envelope{Instances: []wire.Instance{{
+		InstanceID: standby.String(), ClusterID: cid.String(), Addr: "10.0.4.9", Port: 5432, PGVersion: 170000, Role: "standby",
+		TopologyEdges: []wire.Edge{
+			{From: standby.String(), To: "10.0.4.5", Type: "streaming", Confidence: "high"},
+			{From: standby.String(), To: "10.0.4.7", Type: "streaming", Confidence: "high"},
+		},
+	}}})
+	require.NoError(t, err)
+	require.Zero(t, res.Rejected)
+	var upstreams []uuid.UUID
+	rows, err := pool.Query(ctx, `SELECT to_instance FROM topology_edges WHERE from_instance=$1`, standby)
+	require.NoError(t, err)
+	defer rows.Close()
+	for rows.Next() {
+		var to uuid.UUID
+		require.NoError(t, rows.Scan(&to))
+		upstreams = append(upstreams, to)
+	}
+	require.NoError(t, rows.Err())
+	require.Equal(t, []uuid.UUID{unique}, upstreams, "only the unambiguous address names an upstream")
+
+	// The same ambiguity inside one envelope: two instances report the address
+	// and none of them is in the database yet.
+	_, err = pool.Exec(ctx, `TRUNCATE topology_edges`)
+	require.NoError(t, err)
+	standby2 := uuid.New()
+	res, err = p.Process(ctx, wire.Envelope{Instances: []wire.Instance{
+		{InstanceID: uuid.NewString(), ClusterID: cid.String(), Addr: "10.0.4.8", Port: 0, PGVersion: 170000, Role: "primary"},
+		{InstanceID: uuid.NewString(), ClusterID: cid.String(), Addr: "10.0.4.8", Port: 0, PGVersion: 170000, Role: "primary"},
+		{InstanceID: standby2.String(), ClusterID: cid.String(), Addr: "10.0.4.9", Port: 5432, PGVersion: 170000, Role: "standby",
+			TopologyEdges: []wire.Edge{{From: standby2.String(), To: "10.0.4.8", Type: "streaming", Confidence: "high"}}},
+	}})
+	require.NoError(t, err)
+	require.Zero(t, res.Rejected)
+	var edges int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM topology_edges WHERE from_instance=$1`, standby2).Scan(&edges))
+	require.Zero(t, edges, "two instances of the envelope report the address, so it names no upstream")
+}
+
+// TestPipeline_RetriedEnvelopeCountsEachCheckOnce: the agent resends an
+// envelope whose response it lost, so a committed envelope can arrive twice.
+// Both deliveries store the same rows, and the check counters must count the
+// scrape once. They used to be incremented before the commit, once per
+// delivery.
+func TestPipeline_RetriedEnvelopeCountsEachCheckOnce(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	p := NewPipeline(pool, clock.NewFake(time.Now()))
+	instID := uuid.New()
+	cid := pgtype.ClusterID(1).String()
+	ts := time.Now().Add(-time.Minute).Truncate(time.Second)
+	env := wire.Envelope{Instances: []wire.Instance{{
+		InstanceID: instID.String(), ClusterID: cid, Role: "primary",
+		Results: []wire.Result{
+			{Check: "activity", TS: ts, Database: "app"},
+			{Check: "stat_statements", TS: ts, Database: "app", Truncated: true},
+		},
+	}}}
+	okBefore := pglensCheckOKTotal.Get(checkKey{instance: instID.String(), check: "activity"})
+
+	for range 2 {
+		res, err := p.Process(ctx, env)
+		require.NoError(t, err)
+		require.Equal(t, 1, res.Accepted)
+	}
+
+	require.Equal(t, okBefore+1, pglensCheckOKTotal.Get(checkKey{instance: instID.String(), check: "activity"}),
+		"a scrape delivered twice is counted once")
+	var markers int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE instance_id=$1 AND type='cardinality_truncated'`, instID).Scan(&markers))
+	require.Equal(t, 1, markers, "the window marker is not written again on the retry")
+
+	// The next scrape is new, and it counts.
+	res, err := p.Process(ctx, wire.Envelope{Instances: []wire.Instance{{
+		InstanceID: instID.String(), ClusterID: cid, Role: "primary",
+		Results: []wire.Result{{Check: "activity", TS: ts.Add(time.Minute), Database: "app"}},
+	}}})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Accepted)
+	require.Equal(t, okBefore+2, pglensCheckOKTotal.Get(checkKey{instance: instID.String(), check: "activity"}))
+}
+
+// TestPipeline_InvalidEdgeConfidenceIsRefusedAlone: a newer agent may send an
+// edge confidence the store does not admit. The edge is refused and counted,
+// and the rest of the envelope is stored. The CHECK used to fail the whole
+// envelope, which an agent then resends forever.
+func TestPipeline_InvalidEdgeConfidenceIsRefusedAlone(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	cid := pgtype.ClusterID(405).String()
+	standby := uuid.New()
+	before := pglensIngestRejectedTotal.Get("invalid_edge")
+
+	// The edge names the primary, which is in the envelope, so it resolves and
+	// reaches the store.
+	primary := uuid.New()
+	p := NewPipeline(pool, clock.NewFake(time.Now()))
+	res, err := p.Process(ctx, wire.Envelope{Instances: []wire.Instance{{
+		InstanceID: primary.String(), ClusterID: cid, Addr: "10.0.5.1", Port: 5432, PGVersion: 170000, Role: "primary",
+	}, {
+		InstanceID: standby.String(), ClusterID: cid, Addr: "10.0.5.9", Port: 5432, PGVersion: 170000, Role: "standby",
+		Results: []wire.Result{{Check: "activity", TS: time.Now().Add(-time.Minute), Database: "app"}},
+		TopologyEdges: []wire.Edge{
+			{From: standby.String(), To: "10.0.5.1", Port: 5432, Type: "streaming", Confidence: "medium"},
+		},
+	}}})
+	require.NoError(t, err)
+	require.Equal(t, 2, res.Accepted, "both instances are stored")
+	require.Zero(t, res.Rejected)
+	require.Equal(t, before+1, pglensIngestRejectedTotal.Get("invalid_edge"))
+	var edges int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM topology_edges WHERE from_instance=$1`, standby).Scan(&edges))
+	require.Zero(t, edges, "an edge the store would refuse is not written")
+}
+
+// TestPipeline_RejectedInstanceCountsNoCheck: an instance the pipeline refuses
+// stores none of its results, so its checks must not count as run. The
+// counters used to count them before the refusal.
+func TestPipeline_RejectedInstanceCountsNoCheck(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	p := NewPipeline(pool, clock.NewFake(time.Now()))
+	bad, good := uuid.New(), uuid.New()
+	cid := pgtype.ClusterID(406).String()
+	ts := time.Now().Add(-time.Minute).Truncate(time.Second)
+	badOK := pglensCheckOKTotal.Get(checkKey{instance: bad.String(), check: "activity"})
+	goodOK := pglensCheckOKTotal.Get(checkKey{instance: good.String(), check: "activity"})
+
+	res, err := p.Process(ctx, wire.Envelope{Instances: []wire.Instance{
+		{InstanceID: bad.String(), ClusterID: cid, Role: "primary", Results: []wire.Result{{
+			Check: "activity", TS: ts, Database: "app",
+			Metrics: []wire.Metric{{Name: "pg_stat_activity_count", Value: 1, Kind: "not-a-kind"}},
+		}}},
+		{InstanceID: good.String(), ClusterID: cid, Role: "primary", Results: []wire.Result{{Check: "activity", TS: ts, Database: "app"}}},
+	}})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Accepted)
+	require.Equal(t, 1, res.Rejected)
+	require.Equal(t, badOK, pglensCheckOKTotal.Get(checkKey{instance: bad.String(), check: "activity"}), "a refused instance counts no check")
+	require.Equal(t, goodOK+1, pglensCheckOKTotal.Get(checkKey{instance: good.String(), check: "activity"}))
+}
+
+// INT-PIPE-005: a skipped result is stored as a skip fact, and once its envelope
+// commits it counts neither as a success nor as an error. The plain result in
+// the same envelope shows the instance was stored and the counters did move, so
+// the test cannot pass because nothing was counted at all.
+func TestPipeline_INT_PIPE_005_SkippedResultCountsNoCheck(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	p := NewPipeline(pool, clock.NewFake(time.Now()))
+	instID := uuid.New()
+	cid := pgtype.ClusterID(408).String()
+	ts := time.Now().Add(-time.Minute).Truncate(time.Second)
+	skipped := checkKey{instance: instID.String(), check: "wal"}
+	plain := checkKey{instance: instID.String(), check: "activity"}
+	okBefore := pglensCheckOKTotal.Get(skipped)
+	errBefore := pglensCheckErrorTotal.Get(skipped)
+	plainBefore := pglensCheckOKTotal.Get(plain)
+
+	res, err := p.Process(ctx, wire.Envelope{Instances: []wire.Instance{{
+		InstanceID: instID.String(), ClusterID: cid, Role: "primary",
+		Results: []wire.Result{
+			{Check: "wal", TS: ts, Database: "app", SkipReason: "needs pg_read_all_stats"},
+			{Check: "activity", TS: ts, Database: "app"},
+		},
+	}}})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Accepted)
+	require.Zero(t, res.Rejected)
+	require.Equal(t, plainBefore+1, pglensCheckOKTotal.Get(plain), "the stored plain result counts")
+
+	var skips int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM object_facts WHERE instance_id=$1 AND kind='check_skip' AND key='wal'`, instID).Scan(&skips))
+	require.Equal(t, 1, skips, "the skip is stored as a fact")
+	require.Equal(t, okBefore, pglensCheckOKTotal.Get(skipped), "a skipped result is not a success")
+	require.Equal(t, errBefore, pglensCheckErrorTotal.Get(skipped), "a skipped result is not an error")
 }

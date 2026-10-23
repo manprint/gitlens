@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/manprint/pglens/internal/store"
 	"github.com/manprint/pglens/internal/wire"
@@ -153,18 +154,21 @@ func TestInventory_MockPool_NewInstance_WithDatabases(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, res.Accepted)
 	require.Equal(t, 0, res.Rejected)
-	// insert cluster, ensure agent, insert instance, 2x upsert database
-	require.Equal(t, 5, pool.execCalls)
+	// insert cluster, ensure agent, insert instance, 2x upsert database, and the
+	// removal of the databases the list no longer names
+	require.Equal(t, 6, pool.execCalls)
 }
 
-func TestInventory_MockPool_ExistingInstance_RoleChange(t *testing.T) {
+// A role change of an existing instance is written by the pipeline's topology
+// step, once, and not by the inventory: the inventory only updates the instance.
+func TestInventory_MockPool_ExistingInstance_WritesNoRoleChange(t *testing.T) {
 	t.Parallel()
 	cid := pgtype.ClusterID(777)
 	cidDB := store.ToDB(cid)
 	pool := &mockPool{
 		queryRowVals: []*mockRow{
-			{vals: []any{"manual"}},         // upsertCluster: existing row, same source
-			{vals: []any{cidDB, "primary"}}, // upsertOne: existing instance, was primary
+			{vals: []any{cidDB}},    // upsertOne: existing instance
+			{vals: []any{"manual"}}, // upsertCluster: existing row, same source
 		},
 	}
 	inv := &Inventory{pool: pool}
@@ -172,15 +176,15 @@ func TestInventory_MockPool_ExistingInstance_RoleChange(t *testing.T) {
 		Instances: []wire.Instance{{
 			InstanceID: uuid.NewString(),
 			ClusterID:  cid.String(),
-			Role:       "standby", // primary -> standby triggers role_change event
+			Role:       "standby", // a primary that became a standby
 		}},
 	}
 	res, err := inv.Upsert(context.Background(), env)
 	require.NoError(t, err)
 	require.Equal(t, 1, res.Accepted)
 	require.Equal(t, 0, res.Rejected)
-	// role_change event insert, then the mutable-fields UPDATE
-	require.Equal(t, 2, pool.execCalls)
+	// The mutable-fields UPDATE is the only write.
+	require.Equal(t, 1, pool.execCalls)
 }
 
 func TestInventory_MockPool_ClusterIDChanged_Rejected(t *testing.T) {
@@ -189,8 +193,7 @@ func TestInventory_MockPool_ClusterIDChanged_Rejected(t *testing.T) {
 	otherCID := int64(999999)
 	pool := &mockPool{
 		queryRowVals: []*mockRow{
-			nil,                                // upsertCluster: no existing row -> insert
-			{vals: []any{otherCID, "primary"}}, // upsertOne: existing instance has a DIFFERENT cluster_id
+			{vals: []any{otherCID}}, // upsertOne: existing instance has a DIFFERENT cluster_id
 		},
 	}
 	inv := &Inventory{pool: pool}
@@ -207,6 +210,8 @@ func TestInventory_MockPool_ClusterIDChanged_Rejected(t *testing.T) {
 	require.Equal(t, 0, res.Accepted)
 	require.Equal(t, 1, res.Rejected)
 	require.Contains(t, res.Errors[instID].Error(), "cluster_id_changed")
+	// Only the event: the attempted cluster is neither created nor touched.
+	require.Equal(t, 1, pool.execCalls)
 }
 
 func TestInventory_MockPool_DuplicateInstanceSuspected(t *testing.T) {
@@ -220,6 +225,7 @@ func TestInventory_MockPool_DuplicateInstanceSuspected(t *testing.T) {
 	}
 	inv := &Inventory{pool: pool}
 	env := wire.Envelope{
+		AgentID: uuid.NewString(),
 		Instances: []wire.Instance{{
 			InstanceID: uuid.NewString(),
 			ClusterID:  cid.String(),
@@ -236,12 +242,35 @@ func TestInventory_MockPool_DuplicateInstanceSuspected(t *testing.T) {
 	require.Equal(t, 4, pool.execCalls)
 }
 
-func TestInventory_MockPool_UpsertCluster_LookupError_Rejected(t *testing.T) {
+// A database that cannot be read says nothing about the instance. The envelope
+// is not stored and not acknowledged, so the agent sends it again, and nothing
+// is written for it in the meantime.
+func TestInventory_MockPool_StoreFailure_FailsEnvelope(t *testing.T) {
 	t.Parallel()
 	cid := pgtype.ClusterID(1)
 	pool := &mockPool{
 		queryRowVals: []*mockRow{
 			{err: errors.New("db down")},
+		},
+	}
+	inv := &Inventory{pool: pool}
+	env := wire.Envelope{
+		Instances: []wire.Instance{{InstanceID: uuid.NewString(), ClusterID: cid.String(), Role: "primary"}},
+	}
+	res, err := inv.Upsert(context.Background(), env)
+	require.ErrorContains(t, err, "db down")
+	require.Nil(t, res)
+	require.Equal(t, 0, pool.execCalls)
+}
+
+// A data error from the database would come back on every push, so the
+// instance it concerns is refused and the rest of the envelope is stored.
+func TestInventory_MockPool_DataError_RejectsInstance(t *testing.T) {
+	t.Parallel()
+	cid := pgtype.ClusterID(1)
+	pool := &mockPool{
+		queryRowVals: []*mockRow{
+			{err: &pgconn.PgError{Code: "22001", Message: "value too long for type"}},
 		},
 	}
 	inv := &Inventory{pool: pool}
@@ -251,9 +280,24 @@ func TestInventory_MockPool_UpsertCluster_LookupError_Rejected(t *testing.T) {
 	}
 	res, err := inv.Upsert(context.Background(), env)
 	require.NoError(t, err)
+	require.Equal(t, 0, res.Accepted)
 	require.Equal(t, 1, res.Rejected)
-	require.Contains(t, res.Errors[instID].Error(), "lookup cluster")
-	require.Equal(t, 0, pool.execCalls)
+	require.Contains(t, res.Errors[instID].Error(), "value too long for type")
+}
+
+// TestStoreFailure_OnlyDataAndConstraintErrorsRefuseTheInstance: a database error
+// is a refusal of the instance only when it is a data or constraint error. Any
+// other class, including one this list does not name, fails the envelope.
+func TestStoreFailure_OnlyDataAndConstraintErrorsRefuseTheInstance(t *testing.T) {
+	t.Parallel()
+	for _, code := range []string{"08006", "40001", "42501", "42P01", "42P10", "53100", "55P03", "57014", "58030", "XX000"} {
+		require.True(t, storeFailure(&pgconn.PgError{Code: code}), "SQLSTATE %s is a store failure", code)
+	}
+	for _, code := range []string{"22001", "23502", "23503", "23505"} {
+		require.False(t, storeFailure(&pgconn.PgError{Code: code}), "SQLSTATE %s refuses the instance", code)
+	}
+	require.True(t, storeFailure(errors.New("connection refused")))
+	require.False(t, storeFailure(instanceRejected{errors.New("invalid cluster_id")}))
 }
 
 func TestInventory_MockPool_IdentityConflict_ManualLosesToSystemIdentifier(t *testing.T) {
@@ -261,12 +305,13 @@ func TestInventory_MockPool_IdentityConflict_ManualLosesToSystemIdentifier(t *te
 	cid := pgtype.ClusterID(31337)
 	pool := &mockPool{
 		queryRowVals: []*mockRow{
-			{vals: []any{"system_identifier"}}, // existing row was identifier-sourced
 			nil,                                // upsertOne: new instance
+			{vals: []any{"system_identifier"}}, // upsertCluster: existing row was identifier-sourced
 		},
 	}
 	inv := &Inventory{pool: pool}
 	env := wire.Envelope{
+		AgentID: uuid.NewString(),
 		Instances: []wire.Instance{{
 			InstanceID:      uuid.NewString(),
 			ClusterID:       cid.String(),
@@ -294,4 +339,26 @@ func TestInventory_EmitEvent_NilPoolNoDB(t *testing.T) {
 	var out map[string]any
 	require.NoError(t, json.Unmarshal(b, &out))
 	require.Equal(t, "b", out["a"])
+}
+
+// TestInventory_MockPool_NewInstanceWithoutAgent_Refused: a new instance is booked
+// to the agent that reports it. Without an agent_id it is refused before its
+// cluster is written, so the refused push leaves nothing behind.
+func TestInventory_MockPool_NewInstanceWithoutAgent_Refused(t *testing.T) {
+	t.Parallel()
+	pool := &mockPool{queryRowVals: []*mockRow{{err: pgx.ErrNoRows}}}
+	inv := &Inventory{pool: pool}
+	env := wire.Envelope{
+		Instances: []wire.Instance{{
+			InstanceID: uuid.NewString(),
+			ClusterID:  pgtype.ClusterID(555556).String(),
+			Role:       "primary",
+		}},
+	}
+	res, err := inv.Upsert(context.Background(), env)
+	require.NoError(t, err)
+	require.Equal(t, 0, res.Accepted)
+	require.Equal(t, 1, res.Rejected)
+	require.Contains(t, res.Errors[env.Instances[0].InstanceID].Error(), "missing agent_id")
+	require.Equal(t, 0, pool.execCalls, "a refused instance writes no cluster, agent or instance row")
 }
