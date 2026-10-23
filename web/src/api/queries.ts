@@ -235,9 +235,9 @@ export function useInstanceActivity(id: string) {
   })
 }
 
-export function useInstanceDatabases(id: string) {
+export function useInstanceDatabases(id: string, policy: RefreshPolicy = REFRESH.instance) {
   return useApiQuery({
-    policy: REFRESH.instance,
+    policy,
     queryFn: (signal) =>
       getApi(() =>
         client.GET('/api/v1/instances/{id}/databases', { params: { path: { id } }, signal }),
@@ -246,9 +246,9 @@ export function useInstanceDatabases(id: string) {
   })
 }
 
-export function useInstanceHost(id: string) {
+export function useInstanceHost(id: string, policy: RefreshPolicy = REFRESH.instance) {
   return useApiQuery({
-    policy: REFRESH.instance,
+    policy,
     queryFn: (signal) =>
       getApi(() => client.GET('/api/v1/instances/{id}/host', { params: { path: { id } }, signal })),
     queryKey: qk.instanceHost(id),
@@ -323,9 +323,9 @@ export function useInstanceBloat(
   })
 }
 
-export function useInstanceCommandAudit(id: string) {
+export function useInstanceCommandAudit(id: string, policy: RefreshPolicy = REFRESH.instance) {
   return useApiQuery({
-    policy: REFRESH.instance,
+    policy,
     queryFn: (signal) =>
       getApi(() =>
         client.GET('/api/v1/instances/{id}/command-audit', { params: { path: { id } }, signal }),

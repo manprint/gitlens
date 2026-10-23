@@ -1,4 +1,5 @@
 import type { Schemas } from '@/api/types'
+import { REFRESH } from '@/api/policy'
 import { useInstanceCommandAudit } from '@/api/queries'
 import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState } from '@/components/state'
@@ -91,7 +92,7 @@ function timingFields(entry: CommandAuditEntry) {
 }
 
 function InstanceCommandAudit({ instance }: { instance: InstanceSummary }) {
-  const query = useInstanceCommandAudit(instance.instance_id)
+  const query = useInstanceCommandAudit(instance.instance_id, REFRESH.inventory)
   const label = `${instance.addr}:${instance.port}`
 
   if (query.isPending) {
