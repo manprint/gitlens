@@ -104,7 +104,12 @@ func (s *pgStore) MarkNotification(ctx context.Context, dedupID, channel, phase 
 }
 
 func (s *pgStore) Active(ctx context.Context, f Filter) ([]Alert, error) {
-	query := `SELECT alert_key, rule_id, severity, state, cluster_id, instance_id, datname, labels, value, summary, started_at, last_eval_at, resolved_at FROM alerts WHERE state <> 'resolved'`
+	query := `SELECT alert_key, rule_id, severity, state, cluster_id, instance_id, datname, labels, value, summary, started_at, last_eval_at, resolved_at FROM alerts WHERE TRUE`
+	// An explicit resolved state must not be combined with the default
+	// exclusion, which would empty the result.
+	if !f.IncludeResolved && f.State != StateResolved {
+		query += " AND state <> 'resolved'"
+	}
 	args := []any{}
 	n := 1
 	if f.RuleID != "" {
@@ -130,8 +135,13 @@ func (s *pgStore) Active(ctx context.Context, f Filter) ([]Alert, error) {
 	if f.InstanceID != "" {
 		query += fmt.Sprintf(" AND instance_id=$%d", n)
 		args = append(args, f.InstanceID)
+		n++
 	}
 	query += " ORDER BY last_eval_at DESC"
+	if f.Limit > 0 {
+		query += fmt.Sprintf(" LIMIT $%d", n)
+		args = append(args, f.Limit)
+	}
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err

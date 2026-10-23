@@ -92,3 +92,58 @@ TRUNCATE alert_rules, alerts, notifications, silences RESTART IDENTITY`)
 		require.Equal(t, activeID, silences[0].ID)
 	})
 }
+
+// TestINTALERT013_ActiveStateFilters — the default listing keeps resolved
+// alerts out, while an explicit resolved state and the all-states flag return
+// them. The default used to be combined with every explicit state, so
+// state=resolved always came back empty and state=all never showed history.
+func TestINTALERT013_ActiveStateFilters(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		pool := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		ctx := context.Background()
+		_, err := pool.Exec(ctx, `
+CREATE TABLE IF NOT EXISTS alerts (alert_key text NOT NULL, tenant_id text NOT NULL DEFAULT 'default', rule_id text NOT NULL, severity text NOT NULL, state text NOT NULL, cluster_id bigint, instance_id uuid, datname text, labels jsonb NOT NULL, value double precision, summary text NOT NULL, started_at timestamptz NOT NULL, last_eval_at timestamptz NOT NULL, resolved_at timestamptz, PRIMARY KEY (tenant_id, alert_key, started_at));
+TRUNCATE alerts RESTART IDENTITY`)
+		require.NoError(t, err)
+
+		st := NewPgStore(pool)
+		now := time.Now().UTC().Truncate(time.Microsecond)
+		resolvedAt := now
+		for i, state := range []State{StatePending, StateFiring, StateResolved} {
+			a := Alert{Key: "k/" + string(state), RuleID: "r", Severity: SeverityWarning, State: state, Summary: "s", StartedAt: now.Add(time.Duration(i) * time.Minute), LastEvalAt: now.Add(time.Duration(i) * time.Minute), Labels: map[string]string{}}
+			if state == StateResolved {
+				a.ResolvedAt = &resolvedAt
+			}
+			require.NoError(t, st.Upsert(ctx, a))
+		}
+		keys := func(rows []Alert) []string {
+			out := make([]string, 0, len(rows))
+			for _, r := range rows {
+				out = append(out, r.Key)
+			}
+			return out
+		}
+
+		got, err := st.Active(ctx, Filter{})
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{"k/pending", "k/firing"}, keys(got))
+
+		got, err = st.Active(ctx, Filter{State: StateResolved})
+		require.NoError(t, err)
+		require.Equal(t, []string{"k/resolved"}, keys(got))
+
+		got, err = st.Active(ctx, Filter{State: StateFiring})
+		require.NoError(t, err)
+		require.Equal(t, []string{"k/firing"}, keys(got))
+
+		got, err = st.Active(ctx, Filter{IncludeResolved: true})
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{"k/pending", "k/firing", "k/resolved"}, keys(got))
+
+		// The cap keeps the newest rows, so a long history is bounded in SQL.
+		got, err = st.Active(ctx, Filter{IncludeResolved: true, Limit: 2})
+		require.NoError(t, err)
+		require.Equal(t, []string{"k/resolved", "k/firing"}, keys(got))
+	})
+}

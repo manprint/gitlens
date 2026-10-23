@@ -144,7 +144,11 @@ func (a *AlertAPI) listAlerts(w http.ResponseWriter, r *http.Request) {
 	}
 	if state := r.URL.Query().Get("state"); state == "all" {
 		f.State = ""
+		f.IncludeResolved = true
 	}
+	// The history of resolved alerts grows without bound, so the row cap is
+	// applied in the query rather than after reading every row.
+	f.Limit = 500
 	if f.State != "" && f.State != alert.StatePending && f.State != alert.StateFiring && f.State != alert.StateResolved {
 		writeError(w, http.StatusBadRequest, "invalid state", "state must be pending, firing, resolved, or all")
 		return

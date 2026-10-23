@@ -32,12 +32,19 @@ type Notifier interface {
 }
 
 // Filter is the query selector used by the alert store.
+//
+// Resolved alerts are left out unless the filter asks for them, either by
+// naming the resolved state or by setting IncludeResolved. The engine's
+// restore relies on the empty filter excluding them.
 type Filter struct {
-	RuleID     string
-	State      State
-	Severity   Severity
-	ClusterID  *int64
-	InstanceID string
+	RuleID          string
+	State           State
+	Severity        Severity
+	ClusterID       *int64
+	InstanceID      string
+	IncludeResolved bool
+	// Limit caps the rows returned, newest first. Zero means no cap.
+	Limit int
 }
 
 // Store is the persistence boundary for the alert engine.
