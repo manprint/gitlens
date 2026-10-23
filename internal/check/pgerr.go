@@ -2,6 +2,7 @@ package check
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -25,4 +26,13 @@ func pgErrorCode(err error) string {
 		return pgErr.Code
 	}
 	return ""
+}
+
+// connectionFailed reports whether err ends the connection rather than one
+// statement on it: the connection itself failed, or the server closed it (class
+// 08, and the 57P operator-intervention codes such as admin_shutdown). A
+// statement error on a live connection, such as a timeout (57014), is not one.
+func connectionFailed(err error) bool {
+	code := pgErrorCode(err)
+	return code == "" || strings.HasPrefix(code, "08") || strings.HasPrefix(code, "57P")
 }

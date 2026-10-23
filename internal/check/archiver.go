@@ -77,7 +77,7 @@ func (c *archiverCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 	if err := conn.QueryRow(ctx, `SELECT count(*)::float8 FROM pg_ls_archive_statusdir() WHERE name LIKE '%.ready'`).Scan(&ready); err == nil {
 		readyKnown = true
 		result.Metrics = append(result.Metrics, pgtype.Metric{Name: "pg_archiver_ready_files", Value: ready, Kind: pgtype.KindGauge})
-	} else if pgErrorCode(err) == "" {
+	} else if connectionFailed(err) {
 		return Result{}, err
 	}
 	// A server that has never archived has no last archived time, so the age

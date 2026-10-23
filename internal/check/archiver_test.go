@@ -70,6 +70,23 @@ func TestArchiver_ReadyFilesTimeoutKeepsCounters(t *testing.T) {
 	require.Equal(t, 1.0, metricValue(r, "pg_archiver_failed_total", nil))
 }
 
+// A connection the server ends while the scrape runs is not a missing probe:
+// the counters read after it would come from a dead session, and the scrape
+// must fail rather than report them as healthy. Only a statement error on a
+// live connection leaves the readiness probe out.
+func TestArchiver_ConnectionEndedFailsScrape(t *testing.T) {
+	for _, code := range []string{"57P01", "08006"} {
+		t.Run(code, func(t *testing.T) {
+			ended := &mockRow{err: &pgconn.PgError{Code: code, Message: "terminating connection due to administrator command"}}
+			conn := archiverMockConn("on", []any{5.0, nil, nil, 1.0, nil, nil, nil}, nil, ended)
+			_, err := (&archiverCheck{}).Scrape(context.Background(), &SimpleTarget{
+				ConnFunc: func(context.Context) (Conn, error) { return conn, nil }, ClockValue: clock.System(),
+			})
+			require.Error(t, err)
+		})
+	}
+}
+
 func TestArchiver_ArchiveModeOffEmitsNoArchiverCounters(t *testing.T) {
 	r := scrapeArchiverForTest(t, "off", nil, nil)
 	require.Equal(t, 0.0, metricValue(r, "pg_archive_mode_enabled", nil))
