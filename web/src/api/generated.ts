@@ -793,6 +793,7 @@ export interface components {
             /** Format: int64 */
             event_id: number;
             ts: components["schemas"]["Timestamp"];
+            /** @description The event type. The server emits failover_detected, role_change, orphan_standby, split_brain_detected, agent_down, agent_up, instance_unreachable, instance_reachable, no_primary_in_cluster, slot_inactive, cluster_id_changed, cluster_identity_conflict, duplicate_instance_suspected, cardinality_truncated and counter_reset_detected. The set is open, so a client must show a type it does not know. */
             type: string;
             cluster_id: string | null;
             /** Format: uuid */

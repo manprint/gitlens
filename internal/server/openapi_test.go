@@ -1,15 +1,20 @@
 package server_test
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/manprint/pglens/internal/alert"
 	"github.com/manprint/pglens/internal/server"
 	"go.yaml.in/yaml/v3"
 )
@@ -313,6 +318,60 @@ func TestOpenAPIDocumentsSessionAndPollResponses(t *testing.T) {
 	forbidden := poll["responses"].(map[string]any)["403"].(map[string]any)
 	if description, _ := forbidden["description"].(string); !strings.Contains(description, "X-PGLENS-Agent-ID") {
 		t.Errorf("GET agent commands: 403 must name the identity header, got %q", description)
+	}
+}
+
+// ruleListStore answers the rule listing, the only store call the catalogue
+// route makes. Any other call panics on the nil embedded store.
+type ruleListStore struct{ alert.Store }
+
+func (ruleListStore) Rules(context.Context) ([]alert.Rule, error) { return nil, nil }
+
+// A reader copies the catalogue example, so each example rule must be the rule
+// the server returns. The example once named a heartbeat metric that no rule
+// uses and left out the fields the rule carries.
+func TestOpenAPIAlertRuleExampleMatchesTheServer(t *testing.T) {
+	router := chi.NewRouter()
+	server.NewAlertAPI(nil, ruleListStore{}).RegisterRoutes(router)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/alert-rules", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v1/alert-rules = %d, want 200", rec.Code)
+	}
+	var served []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &served); err != nil {
+		t.Fatalf("decode served alert rules: %v", err)
+	}
+
+	paths := loadOpenAPIDocument(t)["paths"].(map[string]any)
+	get := paths["/api/v1/alert-rules"].(map[string]any)["get"].(map[string]any)
+	content := get["responses"].(map[string]any)["200"].(map[string]any)["content"].(map[string]any)
+	examples := content["application/json"].(map[string]any)["examples"].(map[string]any)
+	for _, rawRule := range examples["default"].(map[string]any)["value"].([]any) {
+		// The example is decoded from YAML and the response from JSON, so both
+		// are normalized through JSON before they are compared.
+		raw, err := json.Marshal(rawRule)
+		if err != nil {
+			t.Fatalf("encode example rule: %v", err)
+		}
+		var want map[string]any
+		if err := json.Unmarshal(raw, &want); err != nil {
+			t.Fatalf("decode example rule: %v", err)
+		}
+		id, _ := want["id"].(string)
+		var got map[string]any
+		for _, rule := range served {
+			if rule["id"] == id {
+				got = rule
+			}
+		}
+		if got == nil {
+			t.Errorf("example rule %q is not served", id)
+			continue
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("example rule %q = %v, the server returns %v", id, want, got)
+		}
 	}
 }
 
