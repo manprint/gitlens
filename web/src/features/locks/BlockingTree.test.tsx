@@ -51,7 +51,7 @@ describe('BlockingTree', () => {
     expect(screen.getByText(/no blocked sessions were present/i)).toBeInTheDocument()
   })
 
-  it('UI-LOCK-049 lists a repeated blocker pid once in Blocked by', () => {
+  it('UI-LOCK-060 lists a repeated blocker pid once in Blocked by', () => {
     render(
       <BlockingTree
         response={response([
@@ -67,7 +67,7 @@ describe('BlockingTree', () => {
     expect(screen.queryByText('1, 2, 2')).not.toBeInTheDocument()
   })
 
-  it('UI-LOCK-048 lists every direct blocker and marks a waiter repeated under another holder', () => {
+  it('UI-LOCK-059 lists every direct blocker and marks a waiter repeated under another holder', () => {
     render(
       <BlockingTree
         response={response([

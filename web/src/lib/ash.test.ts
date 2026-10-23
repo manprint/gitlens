@@ -135,7 +135,7 @@ describe('ASH derivation helpers', () => {
     expect(orderGroups(input)).toEqual(orderGroups(input))
   })
 
-  it('UI-ASH-010 steps the axis at a known resolution, not the smallest observed gap', () => {
+  it('UI-ASH-051 steps the axis at a known resolution, not the smallest observed gap', () => {
     const buckets = [
       bucket('2026-08-31T12:00:00Z', 2, 'CPU'),
       bucket('2026-08-31T12:02:00Z', 2, 'CPU'),
@@ -151,7 +151,7 @@ describe('ASH derivation helpers', () => {
     ).toEqual([2, null, 2, null, null, null, 2])
   })
 
-  it('UI-ASH-011 ignores an unusable resolution and infers the step', () => {
+  it('UI-ASH-052 ignores an unusable resolution and infers the step', () => {
     const buckets = [
       bucket('2026-08-31T12:00:00Z', 2, 'CPU'),
       bucket('2026-08-31T12:01:00Z', 2, 'CPU'),

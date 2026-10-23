@@ -9,7 +9,7 @@ describe('command lifecycle descriptions', () => {
     )
   })
 
-  it('UI-CMD-004 describes a server expiry without naming a TTL the client cannot know', () => {
+  it('UI-CMD-011 describes a server expiry without naming a TTL the client cannot know', () => {
     // PGLENS_COMMAND_TTL sets the TTL on the server, so the copy must not state five minutes.
     expect(describeCommandState('expired')).toBe(
       'Command expired: its TTL ended before a result was recorded.',

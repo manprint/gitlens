@@ -32,7 +32,7 @@ describe('database helpers', () => {
     expect(selected?.datname).toBe('busy')
   })
 
-  it('UI-INST-013 isMonitoredDatabase accepts only a database the instance monitors', () => {
+  it('UI-INST-065 isMonitoredDatabase accepts only a database the instance monitors', () => {
     const list = [
       { datname: 'app', monitored: true },
       { datname: 'analytics', monitored: false, skip_reason: 'db_budget' },

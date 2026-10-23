@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { useOnline } from './useOnline'
 
 describe('useOnline', () => {
-  it('UI-SHELL-021 tracks browser offline and online events', async () => {
+  it('UI-SHELL-022 tracks browser offline and online events', async () => {
     const { result } = renderHook(() => useOnline())
 
     expect(result.current).toBe(navigator.onLine)

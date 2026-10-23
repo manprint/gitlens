@@ -102,7 +102,7 @@ describe('ExplainPanel', () => {
     ['pending', 'Command is queued and waiting for an agent.'],
     ['claimed', 'Command was claimed by an agent and is running.'],
   ] as const)(
-    'UI-QRY-046 keeps both Run controls disabled while the command is %s',
+    'UI-QRY-050 keeps both Run controls disabled while the command is %s',
     async (state, copy) => {
       commandHandlers({ command_id: COMMAND_ID, state })
 
@@ -116,7 +116,7 @@ describe('ExplainPanel', () => {
     },
   )
 
-  it('UI-QRY-048 keeps both Run controls disabled past the TTL while the server reports pending', async () => {
+  it('UI-QRY-049 keeps both Run controls disabled past the TTL while the server reports pending', async () => {
     // A server TTL above five minutes must not re-enable the controls for a command
     // that an agent may still claim, so the client waits for the server's verdict.
     commandHandlers({ command_id: COMMAND_ID, state: 'pending' })
