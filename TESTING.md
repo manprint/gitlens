@@ -36,9 +36,11 @@ Da qui discendono i principi non negoziabili:
 |---|------|---------------|------|-------|-----------------|---------|--------|
 | **L1** | Unit Go | Logica pura: aggregazione ASH, calcolo delta, reset detection, parsing LSN, selezione top-N, valutazione regole alert, matching topologia | `**/*_test.go` accanto al codice | `testing` + `testify/require` | ❌ no IO | ogni push | **< 60s** |
 | **L2** | Integration Go | Le query SQL fanno davvero quello che crediamo, su ogni versione PG. Permessi. Differenze di vista per versione. Reset reali | `internal/**/it_*_test.go`, tag `integration` | `testcontainers-go` | ✅ container effimero | ogni PR | **< 5 min** |
-| **L3** | E2E sistema | Il sistema completo (agent + server + TSDB) sotto guasti reali: failover, partizioni, deadlock, lock storm, slow query, cardinalità, buffer, skew | `test/e2e/` | Go + `docker compose` + Toxiproxy | ✅ topologie multi-nodo | PR (smoke) / nightly (full) | **10 min / 45 min** |
+| **L3** | E2E sistema | Il sistema completo (agent + server + TSDB) sotto guasti reali: failover, partizioni, deadlock, lock storm, slow query, cardinalità, buffer, skew | `test/e2e/` | Go + `docker compose` + Toxiproxy | ✅ topologie multi-nodo | PR (smoke) / nightly (full) | **~20 min / ~80 min** |
 | **L4** | Component frontend | Componenti React con logica: formattazione, stati vuoto/errore/gap, form validation, riduttori di filtro | `web/src/**/*.test.{ts,tsx}` | Vitest + Testing Library + MSW | ❌ API mockata | ogni PR | **< 90s** |
 | **L5** | E2E frontend | Il browser vede la verità: click, form, drill-down, grafici, permessi UI, stati degradati | `web/e2e/` | Playwright | ✅ contro stack L3 | PR (smoke) / nightly (full) | **8 min / 20 min** |
+
+I budget L3 vengono dalle esecuzioni registrate nei log locali di `test/e2e/_artifacts` (non versionati): `make test-e2e` tra 18 e 19 min, `make test-e2e-full` tra 66 e 81 min. Il `-timeout=90m` di `make test-e2e-full` resta sopra la misura più lenta registrata, e il job `e2e.yml` ha un limite di 100 min.
 
 ### Frontend
 

@@ -1535,9 +1535,9 @@ make tidy-check       # go.mod/go.sum are tidy, and every module verifies
 make vuln             # govulncheck against the pinned toolchain and dependencies
 make api-docs         # regenerate the offline HTTP API reference from OpenAPI
 make test-integration # integration tests against real PostgreSQL (requires Docker)
-make test-e2e         # E2E smoke subset (requires Docker, ~10m)
-make test-e2e-full    # full E2E suite (requires Docker, ~60m)
-make test-e2e-full-evidence # full E2E suite with a durable log and captured exit status (requires Docker, ~60m)
+make test-e2e         # E2E smoke subset (requires Docker, ~20m)
+make test-e2e-full    # full E2E suite (requires Docker, ~80m)
+make test-e2e-full-evidence # full E2E suite with a durable log and captured exit status (requires Docker, ~80m)
 make test-ui-e2e      # Playwright UI acceptance against a real stack (requires Docker)
 
 make ci-local-unit     # everything CI runs in its fast lane, Go and web
@@ -1566,7 +1566,7 @@ touching the branch rule.
 
 - **L1 — Unit** (`make test`): fast, isolated Go tests for pure logic and component behavior; no Docker or external PostgreSQL is required.
 - **L2 — Integration** (`make test-integration`): agent, wire and storage tests against real PostgreSQL versions; requires Docker and takes roughly 15 minutes.
-- **L3 — E2E system** (`make test-e2e` or `make test-e2e-full`): operator-style multi-container scenarios and failure recovery; requires Docker, with the smoke subset taking roughly 10 minutes and the full suite roughly 60 minutes.
+- **L3 — E2E system** (`make test-e2e` or `make test-e2e-full`): operator-style multi-container scenarios and failure recovery; requires Docker, with the smoke subset taking roughly 20 minutes and the full suite roughly 80 minutes.
 - **L4 — Frontend component** (`make web-test`, `make web-coverage-gate`): Vitest and MSW against the React components and API layer, including contract validation of `api/openapi.yaml` through the generated types. Floors are in `scripts/coverage_gate_ui.sh` and the rationale is in `TESTING.md` §6.
 - **L5 — Frontend E2E** (`make test-ui-e2e`): Playwright driving a real browser against a real stack, sharing L3's scenario library. The `SYS-UI-*` acceptance scenarios live here. See `TESTING.md` §7.
 
