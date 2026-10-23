@@ -215,6 +215,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/instances/{id}/unindexed-foreign-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Return the foreign keys no index serves.
+         * @description The latest fk_indexes scrape of each database reported in the last three hours. A foreign key is served by a valid, non-partial btree index whose leading key columns are its columns in any order, or by a hash index on its one column. Deleting a referenced row, or updating its key, scans the referencing table when none does.
+         */
+        get: operations["getInstanceUnindexedForeignKeys"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instances/{id}/tables": {
         parameters: {
             query?: never;
@@ -1113,6 +1133,30 @@ export interface components {
             last_seen: components["schemas"]["Timestamp"];
             changed_at: components["schemas"]["Timestamp"];
         };
+        UnindexedForeignKeysResponse: {
+            instance_id: components["schemas"]["InstanceId"];
+            foreign_keys: components["schemas"]["UnindexedForeignKey"][];
+            /** @description Databases with more unindexed foreign keys than the agent reports (200); their list holds the largest referencing tables. */
+            truncated_databases: string[];
+        };
+        UnindexedForeignKey: {
+            datname: string;
+            schemaname: string;
+            /** @description The referencing table. */
+            relname: string;
+            constraint: string;
+            /** @description Referencing columns in key order, joined by ", ". */
+            columns: string;
+            /** @description Schema-qualified referenced table. */
+            referenced: string;
+            /**
+             * Format: int64
+             * @description Size of the referencing table (its leaf partitions for a partitioned table).
+             */
+            table_bytes: number;
+            first_seen: components["schemas"]["Timestamp"];
+            last_seen: components["schemas"]["Timestamp"];
+        };
         DriftValue: {
             instance_id: components["schemas"]["InstanceId"];
             role: string;
@@ -1639,6 +1683,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TriggersResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+        };
+    };
+    getInstanceUnindexedForeignKeys: {
+        parameters: {
+            query?: {
+                /** @description Return the foreign keys of this database only. */
+                datname?: string;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["InstanceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Unindexed foreign keys by database, schema, table and constraint. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnindexedForeignKeysResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];

@@ -50,6 +50,11 @@ function renderPage(
     }),
     ok('getInstanceSettings', { instance_id: INSTANCE_ID, settings: [] }),
     ok('getInstanceTriggers', { instance_id: INSTANCE_ID, triggers: [], truncated_databases: [] }),
+    ok('getInstanceUnindexedForeignKeys', {
+      instance_id: INSTANCE_ID,
+      foreign_keys: [],
+      truncated_databases: [],
+    }),
     ok('getInstanceTables', {
       instance_id: INSTANCE_ID,
       items: [],

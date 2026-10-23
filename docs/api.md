@@ -27,6 +27,7 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | GET | `/api/v1/instances/{id}/settings` | `getInstanceSettings` | Return observed PostgreSQL settings. |
 | GET | `/api/v1/instances/{id}/tables` | `getInstanceTables` | Return table relation statistics. |
 | GET | `/api/v1/instances/{id}/triggers` | `getInstanceTriggers` | Return the triggers of the instance's databases. |
+| GET | `/api/v1/instances/{id}/unindexed-foreign-keys` | `getInstanceUnindexedForeignKeys` | Return the foreign keys no index serves. |
 | GET | `/api/v1/locks` | `getLocks` | Return the latest sampled blocking tree. |
 
 ## metrics

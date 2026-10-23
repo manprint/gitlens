@@ -115,3 +115,46 @@ func TestTriggerRules_SkippedInventoryDegrades(t *testing.T) {
 		require.Equal(t, StateDegraded, findings[0].State, id)
 	}
 }
+
+func fkFact(datname, table, constraint string, bytes string, observed time.Time) Fact {
+	return Fact{
+		Key: "public." + table + "." + constraint, Datname: datname, ValueText: "customer_id, region",
+		Labels: map[string]string{
+			"schemaname": "public", "relname": table, "constraint": constraint,
+			"referenced": "public.customers", "columns_sql": `customer_id, "Region"`, "table_bytes": bytes,
+		},
+		ObservedAt: observed,
+	}
+}
+
+// A foreign key on a large table is a warning, on a small one information;
+// the remediation names the columns as SQL.
+func TestFKUnindexedRule(t *testing.T) {
+	now := time.Now()
+	rule := ruleByID(t, "index.fk_unindexed")
+	s := catalogSnapshot(now, "fk_unindexed",
+		fkFact("app", "Orders", "orders_customer_fkey", "52428800", now),
+		fkFact("app", "notes", "notes_customer_fkey", "8192", now),
+	)
+	assertRuleContract(t, rule, s)
+	assertRuleContract(t, rule, catalogSnapshot(now, "fk_unindexed"))
+	got := rule.Evaluate(s)
+	require.Len(t, got, 2)
+	require.Equal(t, "public.Orders.orders_customer_fkey", got[0].ObjectName)
+	require.Equal(t, SeverityWarning, got[0].Severity)
+	require.Contains(t, got[0].Detail, "(50.0 MiB)")
+	require.Contains(t, got[0].Remediation, `CREATE INDEX CONCURRENTLY ON "public"."Orders" (customer_id, "Region")`)
+	require.Equal(t, SeverityInfo, got[1].Severity)
+	require.Contains(t, got[1].Detail, "(8.0 KiB)")
+
+	s.SkippedChecks["fk_indexes"] = "permission denied"
+	findings, _ := (&Engine{}).evaluateRule(rule, s)
+	require.Len(t, findings, 1)
+	require.Equal(t, StateDegraded, findings[0].State)
+}
+
+func TestFormatCatalogBytes(t *testing.T) {
+	for n, want := range map[int64]string{0: "0 B", 1023: "1023 B", 1024: "1.0 KiB", 10 << 20: "10.0 MiB", 3 << 30: "3.0 GiB"} {
+		require.Equal(t, want, formatCatalogBytes(n))
+	}
+}

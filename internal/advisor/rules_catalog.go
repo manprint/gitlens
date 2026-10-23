@@ -3,6 +3,7 @@ package advisor
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -122,4 +123,50 @@ func init() {
 		}
 		return out
 	}})
+}
+
+const fkUnindexedFactKind = "fk_unindexed"
+
+// fkUnindexedWarnBytes is the referencing-table size from which an unindexed
+// foreign key is a warning: below it a scan per referenced row stays cheap.
+const fkUnindexedWarnBytes = 10 << 20
+
+func init() {
+	Register(relationRule{id: "index.fk_unindexed", severity: SeverityWarning, needs: []string{"fk_indexes"}, eval: func(s *Snapshot) []Finding {
+		const id = "index.fk_unindexed"
+		var out []Finding
+		for _, f := range currentFacts(s, fkUnindexedFactKind) {
+			table, tableSQL := catalogTable(f)
+			constraint := f.Labels["constraint"]
+			bytes, _ := strconv.ParseInt(f.Labels["table_bytes"], 10, 64)
+			severity := SeverityInfo
+			if bytes >= fkUnindexedWarnBytes {
+				severity = SeverityWarning
+			}
+			columnsSQL := f.Labels["columns_sql"]
+			if columnsSQL == "" {
+				columnsSQL = f.ValueText
+			}
+			out = append(out, relationFinding(id, severity, f.Datname, table+"."+constraint,
+				fmt.Sprintf("Foreign key %s on %s has no index", constraint, table),
+				fmt.Sprintf("No index on %s in database %s leads with (%s), the columns of foreign key %s referencing %s. Every DELETE of a row of %s, and every UPDATE of its key, scans %s (%s) for referencing rows while holding its locks.", table, f.Datname, f.ValueText, constraint, f.Labels["referenced"], f.Labels["referenced"], table, formatCatalogBytes(bytes)),
+				fmt.Sprintf("If rows of %s are deleted or their keys updated, CREATE INDEX CONCURRENTLY ON %s (%s). If they never are, the index is not needed.", f.Labels["referenced"], tableSQL, columnsSQL),
+				map[string]any{"table": table, "constraint": constraint, "columns": f.ValueText, "referenced": f.Labels["referenced"], "table_bytes": bytes}))
+		}
+		return out
+	}})
+}
+
+// formatCatalogBytes renders a size in binary units.
+func formatCatalogBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	value, exp := float64(n)/unit, 0
+	for value >= unit && exp < 4 {
+		value /= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", value, "KMGTP"[exp])
 }

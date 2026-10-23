@@ -1,13 +1,17 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 
-import { useInstanceTriggers } from '@/api/queries'
+import {
+  useInstanceTriggers,
+  useInstanceUnindexedForeignKeys,
+  type ApiQueryResult,
+} from '@/api/queries'
 import type { Schemas } from '@/api/types'
 import { DataTable, type DataTableProps } from '@/components/layout/DataTable'
 import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { formatTimestamp } from '@/lib/format'
+import { formatBytes, formatTimestamp } from '@/lib/format'
 
 interface CatalogSectionProps {
   instanceId: string
@@ -146,8 +150,129 @@ function TriggersTab({ response }: { response: Schemas['TriggersResponse'] }) {
   )
 }
 
+function UnindexedForeignKeysTab({
+  response,
+}: {
+  response: Schemas['UnindexedForeignKeysResponse']
+}) {
+  const [database, setDatabase] = useState('all')
+  const databases = useMemo(
+    () => databaseOptions(response.foreign_keys.map((fk) => fk.datname)),
+    [response.foreign_keys],
+  )
+  const rows = useMemo(
+    () => response.foreign_keys.filter((fk) => database === 'all' || fk.datname === database),
+    [database, response.foreign_keys],
+  )
+  const columns = useMemo(() => foreignKeyColumns(), [])
+  const truncated = response.truncated_databases.filter(
+    (name) => database === 'all' || name === database,
+  )
+
+  return (
+    <div className="space-y-4">
+      <p className="text-muted-foreground text-sm">
+        Deleting a referenced row, or updating its key, scans the whole referencing table when no
+        index leads with the foreign key&apos;s columns.
+      </p>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <label className="space-y-1 text-sm" htmlFor="catalog-fk-database">
+          <span className="font-medium">Database</span>
+          <select
+            className={selectClassName}
+            id="catalog-fk-database"
+            onChange={(event) => setDatabase(event.target.value)}
+            value={database}
+          >
+            <option value="all">All databases</option>
+            {databases.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {truncated.length > 0 ? (
+        <p role="status" className="text-muted-foreground text-sm">
+          {truncated.join(', ')} {truncated.length === 1 ? 'has' : 'have'} more unindexed foreign
+          keys than the agent reports: the largest tables are listed.
+        </p>
+      ) : null}
+      <DataTable
+        ariaLabel="Unindexed foreign keys"
+        columns={columns}
+        data={rows}
+        emptyState={
+          <EmptyState
+            title="Every foreign key has an index"
+            description="No foreign key without an index leading with its columns was reported."
+          />
+        }
+        scope="foreign keys"
+        total={response.foreign_keys.length}
+      />
+    </div>
+  )
+}
+
+function foreignKeyColumns(): DataTableProps<Schemas['UnindexedForeignKey']>['columns'] {
+  return [
+    { accessorKey: 'datname', header: 'Database' },
+    {
+      id: 'table',
+      header: 'Table',
+      accessorFn: (fk) => `${fk.schemaname}.${fk.relname}`,
+    },
+    { accessorKey: 'constraint', header: 'Constraint' },
+    { accessorKey: 'columns', header: 'Columns' },
+    { accessorKey: 'referenced', header: 'References' },
+    {
+      accessorKey: 'table_bytes',
+      header: 'Table size',
+      cell: ({ row }) => formatBytes(row.original.table_bytes),
+    },
+  ]
+}
+
+interface CatalogTabStateProps<T> {
+  query: ApiQueryResult<T>
+  label: string
+  children: (data: T) => ReactNode
+}
+
+function CatalogTabState<T>({ query, label, children }: CatalogTabStateProps<T>) {
+  if (query.error && !query.data) {
+    return (
+      <ErrorState
+        endpoint={`instance ${label}`}
+        failure={query.error}
+        onRetry={() => void query.refetch()}
+      />
+    )
+  }
+  if (query.isPending || query.data === undefined) {
+    return (
+      <section aria-busy="true" aria-label={`Loading ${label}`} role="status">
+        Loading {label}…
+      </section>
+    )
+  }
+  return children(query.data)
+}
+
+function TabCount({ count, label }: { count: number; label: string }) {
+  if (count === 0) return null
+  return (
+    <Badge variant="secondary" aria-label={`${count} ${label}`}>
+      {count}
+    </Badge>
+  )
+}
+
 export function CatalogSection({ instanceId }: CatalogSectionProps) {
   const triggersQuery = useInstanceTriggers(instanceId)
+  const foreignKeysQuery = useInstanceUnindexedForeignKeys(instanceId)
   const disabledTriggers =
     triggersQuery.data?.triggers.filter((trigger) => trigger.state === 'disabled').length ?? 0
 
@@ -160,28 +285,22 @@ export function CatalogSection({ instanceId }: CatalogSectionProps) {
       <Tabs defaultValue="triggers">
         <TabsList aria-label="Schema object kinds">
           <TabsTrigger value="triggers">
-            Triggers{' '}
-            {disabledTriggers > 0 ? (
-              <Badge variant="secondary" aria-label={`${disabledTriggers} disabled`}>
-                {disabledTriggers}
-              </Badge>
-            ) : null}
+            Triggers <TabCount count={disabledTriggers} label="disabled" />
+          </TabsTrigger>
+          <TabsTrigger value="foreign-keys">
+            Unindexed foreign keys{' '}
+            <TabCount count={foreignKeysQuery.data?.foreign_keys.length ?? 0} label="reported" />
           </TabsTrigger>
         </TabsList>
         <TabsContent value="triggers">
-          {triggersQuery.error && !triggersQuery.data ? (
-            <ErrorState
-              endpoint="instance triggers"
-              failure={triggersQuery.error}
-              onRetry={() => void triggersQuery.refetch()}
-            />
-          ) : triggersQuery.isPending || triggersQuery.data === undefined ? (
-            <section aria-busy="true" aria-label="Loading triggers" role="status">
-              Loading triggers…
-            </section>
-          ) : (
-            <TriggersTab response={triggersQuery.data} />
-          )}
+          <CatalogTabState query={triggersQuery} label="triggers">
+            {(data) => <TriggersTab response={data} />}
+          </CatalogTabState>
+        </TabsContent>
+        <TabsContent value="foreign-keys">
+          <CatalogTabState query={foreignKeysQuery} label="unindexed foreign keys">
+            {(data) => <UnindexedForeignKeysTab response={data} />}
+          </CatalogTabState>
         </TabsContent>
       </Tabs>
     </Section>

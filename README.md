@@ -442,8 +442,11 @@ Security and operational boundaries:
   trigger a constraint relies on once it is disabled (`ALTER TABLE ...
   DISABLE TRIGGER ALL` stops enforcing foreign keys). A partition's
   inherited trigger is reported only when its state differs from its
-  parent's. The instance page lists them under "Schema objects", and the
-  `trigger.*` advisor rules raise the disabled ones.
+  parent's. `fk_indexes` reports, every fifteen minutes, the foreign keys no
+  valid, non-partial index leads with, so that deleting a referenced row
+  scans the referencing table. The instance page lists both under "Schema
+  objects"; the `trigger.*` rules raise disabled triggers and
+  `index.fk_unindexed` the foreign keys.
 - The integration suite proves the boundary: INT-RO-001 runs every check and
   command at T2 and asserts that the database and the shared catalogs are
   unchanged and that every statement the role sent, as `pg_stat_statements`
@@ -669,6 +672,7 @@ How the rules read the collected data:
 | `backup.no_strategy` | critical | Neither archiving nor a visible base-backup strategy is configured. |
 | `security.monitoring_role_can_write` | critical | The role pglens connects as could write if a session of it left read-only mode: an attribute, a membership or owned objects (the `monitoring_role` check). |
 | `trigger.constraint_disabled` | critical | The internal triggers that enforce a foreign key (or another constraint) are disabled, so rows that violate it can be written (the `trigger_inventory` check). |
+| `index.fk_unindexed` | warning | No index leads with a foreign key's columns, so deleting or re-keying a referenced row scans the referencing table; information below 10 MiB (the `fk_indexes` check). |
 | `trigger.user_disabled` | warning | A user trigger is disabled: writes to its table no longer run it. |
 | `security.monitoring_role_read_only_off` | warning | The role pglens connects as does not default to read-only transactions in the database it connects to. |
 
@@ -849,6 +853,7 @@ checks:
   locks:           { interval: 10s }        # Blocking tree (instance scope, T0)
   monitoring_role: { interval: 10m }        # What would let the monitoring role write (security.* rules)
   trigger_inventory: { interval: 5m }       # Triggers of each database and which are disabled (trigger.* rules)
+  fk_indexes:      { interval: 15m }        # Foreign keys no index serves (index.fk_unindexed)
   table_stats:     { interval: 5m, top_n: 50 }
   index_stats:     { interval: 5m, top_n: 50 }
   vacuum_progress: { interval: 30s }
@@ -953,6 +958,7 @@ checks
   bloat_estimate     enabled
   checkpointer       enabled
   database_stats     enabled
+  fk_indexes         enabled
   index_stats        enabled
   instance_info      enabled
   io                 enabled

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -21,6 +22,7 @@ const catalogFreshHours = 3
 
 func (a *API) registerCatalogRoutes(r chi.Router) {
 	r.Get("/api/v1/instances/{id}/triggers", a.handleTriggers)
+	r.Get("/api/v1/instances/{id}/unindexed-foreign-keys", a.handleUnindexedForeignKeys)
 }
 
 // catalogFact is one object_facts row of a catalog kind.
@@ -149,6 +151,58 @@ func (a *API) handleTriggers(w http.ResponseWriter, r *http.Request) {
 	}
 	if response.TruncatedDatabases, err = catalogTruncatedDatabases(r.Context(), a.pool, id, "trigger_inventory", datname); err != nil {
 		writeError(w, http.StatusInternalServerError, "triggers query failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+type unindexedForeignKeyAPIEntry struct {
+	Datname    string    `json:"datname"`
+	Schemaname string    `json:"schemaname"`
+	Relname    string    `json:"relname"`
+	Constraint string    `json:"constraint"`
+	Columns    string    `json:"columns"`
+	Referenced string    `json:"referenced"`
+	TableBytes int64     `json:"table_bytes"`
+	FirstSeen  time.Time `json:"first_seen"`
+	LastSeen   time.Time `json:"last_seen"`
+}
+
+type unindexedForeignKeysAPIResponse struct {
+	InstanceID  string                        `json:"instance_id"`
+	ForeignKeys []unindexedForeignKeyAPIEntry `json:"foreign_keys"`
+	// TruncatedDatabases lists the databases with more unindexed foreign
+	// keys than the agent reports; their largest tables come first.
+	TruncatedDatabases []string `json:"truncated_databases"`
+}
+
+func (a *API) handleUnindexedForeignKeys(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid instance_id", err.Error())
+		return
+	}
+	datname := r.URL.Query().Get("datname")
+	response := unindexedForeignKeysAPIResponse{InstanceID: id.String(), ForeignKeys: []unindexedForeignKeyAPIEntry{}, TruncatedDatabases: []string{}}
+	if a.pool == nil {
+		writeJSON(w, http.StatusOK, response)
+		return
+	}
+	facts, err := latestCatalogFacts(r.Context(), a.pool, id, "fk_unindexed", datname)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "foreign keys query failed", err.Error())
+		return
+	}
+	for _, f := range facts {
+		bytes, _ := strconv.ParseInt(f.Labels["table_bytes"], 10, 64)
+		response.ForeignKeys = append(response.ForeignKeys, unindexedForeignKeyAPIEntry{
+			Datname: f.Datname, Schemaname: f.Labels["schemaname"], Relname: f.Labels["relname"],
+			Constraint: f.Labels["constraint"], Columns: f.ValueText, Referenced: f.Labels["referenced"],
+			TableBytes: bytes, FirstSeen: f.FirstSeen, LastSeen: f.LastSeen,
+		})
+	}
+	if response.TruncatedDatabases, err = catalogTruncatedDatabases(r.Context(), a.pool, id, "fk_indexes", datname); err != nil {
+		writeError(w, http.StatusInternalServerError, "foreign keys query failed", err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, response)

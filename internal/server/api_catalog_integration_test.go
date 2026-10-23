@@ -71,3 +71,37 @@ func TestINTCAT001_TriggersLatestBatch(t *testing.T) {
 	require.Empty(t, response.Triggers)
 	require.NotNil(t, response.Triggers)
 }
+
+// INT-CAT-002: the unindexed foreign keys API lists the latest batch with
+// the referencing table's size as a number.
+func TestINTCAT002_UnindexedForeignKeys(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	instanceID := uuid.New()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	for _, fact := range []struct {
+		key, columns, labels string
+		seen                 time.Time
+	}{
+		{"public.orders.orders_customer_fkey", "customer_id", `{"schemaname":"public","relname":"orders","constraint":"orders_customer_fkey","referenced":"public.customers","columns_sql":"customer_id","table_bytes":"52428800"}`, now},
+		{"public.notes.notes_order_fkey", "order_id", `{"schemaname":"public","relname":"notes","constraint":"notes_order_fkey","referenced":"public.orders","table_bytes":"8192"}`, now.Add(-time.Hour)},
+	} {
+		_, err := pool.Exec(ctx, `INSERT INTO object_facts (tenant_id, cluster_id, instance_id, datname, kind, key, labels, value_text, first_seen, last_seen, changed_at) VALUES ('default',1,$1,'app','fk_unindexed',$2,$3,$4,$5,$5,$5)`, instanceID, fact.key, fact.labels, fact.columns, fact.seen)
+		require.NoError(t, err)
+	}
+	r := chi.NewRouter()
+	NewAPI(pool).RegisterRoutes(r)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/instances/"+instanceID.String()+"/unindexed-foreign-keys", http.NoBody))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var response unindexedForeignKeysAPIResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.Len(t, response.ForeignKeys, 1)
+	fk := response.ForeignKeys[0]
+	require.Equal(t, "orders_customer_fkey", fk.Constraint)
+	require.Equal(t, "customer_id", fk.Columns)
+	require.Equal(t, "public.customers", fk.Referenced)
+	require.Equal(t, int64(52428800), fk.TableBytes)
+	require.Empty(t, response.TruncatedDatabases)
+}

@@ -37,6 +37,7 @@ checks:
   locks: { interval: 10s } # Blocking/blocked lock tree at Tier 0.
   monitoring_role: { interval: 10m } # What would let the monitoring role write.
   trigger_inventory: { interval: 5m } # Triggers of each database and which are disabled.
+  fk_indexes: { interval: 15m } # Foreign keys no index serves.
   table_stats: { interval: 5m, top_n: 50 } # Table access, tuple and vacuum statistics.
   index_stats: { interval: 5m, top_n: 50 } # Index usage and size statistics.
   vacuum_progress: { interval: 30s } # In-progress VACUUM counters.

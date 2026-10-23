@@ -163,7 +163,7 @@ ALTER TABLE ro_audit_child DISABLE TRIGGER ALL`)
 		require.Greater(t, ran, 15)
 		// The fixture holds an object of each catalog kind, so each catalog
 		// check ran its queries on something.
-		for _, kind := range []string{"trigger"} {
+		for _, kind := range []string{"trigger", "fk_unindexed"} {
 			require.Positive(t, factsByKind[kind], "no %s fact", kind)
 		}
 

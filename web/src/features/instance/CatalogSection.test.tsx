@@ -41,12 +41,21 @@ async function settle() {
   })
 }
 
-function renderCatalog(triggers: Schemas['Trigger'][], truncated: string[] = []) {
+function renderCatalog(
+  triggers: Schemas['Trigger'][],
+  truncated: string[] = [],
+  foreignKeys: Schemas['UnindexedForeignKey'][] = [],
+) {
   server.use(
     ok('getInstanceTriggers', {
       instance_id: INSTANCE_ID,
       triggers,
       truncated_databases: truncated,
+    }),
+    ok('getInstanceUnindexedForeignKeys', {
+      instance_id: INSTANCE_ID,
+      foreign_keys: foreignKeys,
+      truncated_databases: [],
     }),
   )
   return renderWithProviders(<CatalogSection instanceId={INSTANCE_ID} />, {
@@ -115,5 +124,36 @@ describe('CatalogSection', () => {
     renderCatalog([])
     await settle()
     expect(screen.getByText('No triggers reported')).toBeInTheDocument()
+  })
+
+  it('UI-CAT-004 lists unindexed foreign keys with the referencing table size', async () => {
+    renderCatalog(
+      [],
+      [],
+      [
+        {
+          datname: 'app',
+          schemaname: 'public',
+          relname: 'orders',
+          constraint: 'orders_customer_fkey',
+          columns: 'customer_id',
+          referenced: 'public.customers',
+          table_bytes: 52428800,
+          first_seen: SEEN,
+          last_seen: SEEN,
+        },
+      ],
+    )
+    await settle()
+
+    const tab = screen.getByRole('tab', { name: /Unindexed foreign keys/ })
+    expect(tab).toHaveAccessibleName('Unindexed foreign keys 1 reported')
+    fireEvent.mouseDown(tab)
+    fireEvent.click(tab)
+    await settle()
+    expect(tableRows()).toHaveLength(1)
+    expect(screen.getByText('orders_customer_fkey')).toBeInTheDocument()
+    expect(screen.getByText('public.customers')).toBeInTheDocument()
+    expect(screen.getByText('50.0 MiB')).toBeInTheDocument()
   })
 })

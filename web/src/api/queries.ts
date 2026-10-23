@@ -284,6 +284,20 @@ export function useInstanceTriggers(id: string) {
   })
 }
 
+export function useInstanceUnindexedForeignKeys(id: string) {
+  return useApiQuery({
+    policy: REFRESH.catalog,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/unindexed-foreign-keys', {
+          params: { path: { id } },
+          signal,
+        }),
+      ),
+    queryKey: qk.instanceUnindexedForeignKeys(id),
+  })
+}
+
 export function useInstanceTables(
   id: string,
   params: QueryParameters<'/api/v1/instances/{id}/tables'> = {},
