@@ -56,7 +56,7 @@ func init() {
 					if err != nil {
 						return
 					}
-					defer conn.Close(ctx)
+					defer func() { _ = conn.Close(ctx) }()
 					_, _ = conn.Exec(ctx, fmt.Sprintf("SELECT pg_sleep(%d)", sleepSeconds))
 				}()
 			}

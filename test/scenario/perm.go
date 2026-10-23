@@ -177,7 +177,7 @@ func runPermissionTierGrant(ctx context.Context, e *Env) error {
 	if _, err := pg.Exec(ctx, "CREATE TABLE "+permissionProbeTable+" (id integer NOT NULL)"); err != nil {
 		return fmt.Errorf("create permission probe: %w", err)
 	}
-	defer func() { _, _ = pg.Exec(context.Background(), "DROP TABLE IF EXISTS "+permissionProbeTable) }()
+	defer func() { _, _ = pg.Exec(context.WithoutCancel(ctx), "DROP TABLE IF EXISTS "+permissionProbeTable) }()
 	if _, err := pg.Exec(ctx, "INSERT INTO "+permissionProbeTable+" VALUES (1), (2)"); err != nil {
 		return fmt.Errorf("seed permission probe: %w", err)
 	}

@@ -114,8 +114,7 @@ func runCommandPlans(ctx context.Context, e *scenario.Env) error {
 	if _, err := waitCommandTerminal(ctx, e, duplicateID, "done"); err != nil {
 		return err
 	}
-	plans, err = waitPlans(ctx, e, instanceID, queryID, 1)
-	if err != nil {
+	if _, err := waitPlans(ctx, e, instanceID, queryID, 1); err != nil {
 		return err
 	}
 
@@ -170,7 +169,7 @@ func runCommandGates(ctx context.Context, e *scenario.Env) error {
 		conn.Release()
 		return fmt.Errorf("get sleeper pid: %w", err)
 	}
-	sleepCtx, cancelSleep := context.WithTimeout(context.Background(), 30*time.Second)
+	sleepCtx, cancelSleep := context.WithTimeout(ctx, 30*time.Second)
 	sleepDone := make(chan error, 1)
 	go func() {
 		_, execErr := conn.Exec(sleepCtx, "SELECT pg_sleep(20)")
@@ -258,7 +257,7 @@ func runCommandRestart(ctx context.Context, e *scenario.Env) error {
 	if _, err := lockConn.Exec(ctx, "BEGIN"); err != nil {
 		return fmt.Errorf("begin restart lock: %w", err)
 	}
-	defer func() { _, _ = lockConn.Exec(context.Background(), "ROLLBACK") }()
+	defer func() { _, _ = lockConn.Exec(context.WithoutCancel(ctx), "ROLLBACK") }()
 	if _, err := lockConn.Exec(ctx, "LOCK TABLE "+commandProbeTable+" IN ACCESS EXCLUSIVE MODE"); err != nil {
 		return fmt.Errorf("lock restart probe: %w", err)
 	}

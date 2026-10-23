@@ -74,7 +74,6 @@ type Harness struct {
 	extraFile         string // optional scenario-specific compose fragment
 	ui                bool   // true when the UI overlay is active
 	composeDir        string
-	containerName     string
 	serverPort        int
 	serverPorts       []int
 	agentPort         int
@@ -118,11 +117,12 @@ func Start(t *testing.T, cfg Config) *Harness {
 
 	// Determine topology and agent compose files
 	var topologyFile string
-	if cfg.Topology == TopologyPrimaryStandby {
+	switch cfg.Topology {
+	case TopologyPrimaryStandby:
 		topologyFile = filepath.Join(composeDir, "topo-primary-standby.yml")
-	} else if cfg.Topology == TopologyCascading {
+	case TopologyCascading:
 		topologyFile = filepath.Join(composeDir, "topo-cascading.yml")
-	} else {
+	default:
 		topologyFile = filepath.Join(composeDir, "topo-standalone.yml")
 	}
 	var extraFile string
@@ -478,7 +478,7 @@ func freeTCPPort() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	return l.Addr().(*net.TCPAddr).Port, nil
 }
 
@@ -687,7 +687,7 @@ func (h *Harness) AgentHealthz() (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusServiceUnavailable {
 		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("GET %s: %d, body: %s", url, resp.StatusCode, body)
