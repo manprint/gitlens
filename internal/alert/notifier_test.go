@@ -573,6 +573,58 @@ func TestTick_ALeaderChangeDoesNotSendAResolveOverruledByANewerFiring(t *testing
 	require.Equal(t, []string{"fire", "fire"}, rec.got, "the RESOLVED of the first episode is not sent after the FIRING of the newer one")
 }
 
+// messageRecorder keeps every message its channel accepted.
+type messageRecorder struct{ got []notify.Message }
+
+func (c *messageRecorder) Name() string { return "slack" }
+func (c *messageRecorder) Send(_ context.Context, m notify.Message) error {
+	c.got = append(c.got, m)
+	return nil
+}
+
+// requireOneEpisode checks that got is the FIRING and then the RESOLVED of one
+// episode, under one dedup_id: a consumer that closes incidents by dedup_id must
+// be able to close the incident the FIRING opened.
+func requireOneEpisode(t *testing.T, got []notify.Message) {
+	require.Len(t, got, 2)
+	require.Equal(t, "fire", got[0].Phase)
+	require.Equal(t, "resolve", got[1].Phase)
+	require.Equal(t, got[0].DedupID, got[1].DedupID, "the RESOLVED names the episode its FIRING named")
+}
+
+// TestTick_ARegainedLeadershipResolvesUnderTheDedupIDOfItsFiring — the leader's
+// session drops and comes back in the same process. The episode is read back from
+// the table for the new term, and its RESOLVED keeps the dedup_id of the FIRING.
+func TestTick_ARegainedLeadershipResolvesUnderTheDedupIDOfItsFiring(t *testing.T) {
+	t0 := time.Unix(100, 123456789) // nanoseconds, as a live clock gives them
+	store := newTableStore(customRule())
+	rec := &messageRecorder{}
+	src := &stepSource{samples: []Sample{{Value: 2, TS: t0}}}
+	e := NewEngine(nil, clock.NewFake(t0), store, NewChannelNotifier(store, rec), []Source{src})
+	require.NoError(t, e.Tick(context.Background()))
+	regainLeadership(e)
+	src.samples = []Sample{{Value: 0, TS: t0.Add(time.Second)}}
+	require.NoError(t, e.Tick(context.Background()))
+	requireOneEpisode(t, rec.got)
+}
+
+// TestTick_AHandoverResolvesUnderTheDedupIDOfItsFiring — the FIRING is sent by one
+// replica and the RESOLVED by another, which starts its term from the table. The
+// RESOLVED keeps the dedup_id of the FIRING.
+func TestTick_AHandoverResolvesUnderTheDedupIDOfItsFiring(t *testing.T) {
+	t0 := time.Unix(100, 123456789) // nanoseconds, as a live clock gives them
+	clk := clock.NewFake(t0)
+	store := newTableStore(customRule())
+	rec := &messageRecorder{}
+	srcA := &stepSource{samples: []Sample{{Value: 2, TS: t0}}}
+	srcB := &stepSource{samples: []Sample{{Value: 0, TS: t0.Add(time.Second)}}}
+	a := NewEngine(nil, clk, store, NewChannelNotifier(store, rec), []Source{srcA})
+	b := NewEngine(nil, clk, store, NewChannelNotifier(store, rec), []Source{srcB})
+	require.NoError(t, a.Tick(context.Background()))
+	require.NoError(t, b.Tick(context.Background()))
+	requireOneEpisode(t, rec.got)
+}
+
 // blockingClaimStore never answers a claim: it waits until the claim's context is
 // done, as a hung connection pool does.
 type blockingClaimStore struct {

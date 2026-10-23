@@ -38,8 +38,16 @@ func TestKey_EmptyLabelsProducesTrailingSlash(t *testing.T) {
 	require.Equal(t, '/', rune(Key(validRule(), Sample{InstanceID: keyID("11111111-1111-1111-1111-111111111111")})[len(Key(validRule(), Sample{InstanceID: keyID("11111111-1111-1111-1111-111111111111")}))-1]))
 }
 func TestDedupID_IncludesStartedAt(t *testing.T) {
-	a := Alert{Key: "k", StartedAt: time.Unix(1, 2)}
-	require.Contains(t, DedupID(a), "1970-01-01T00:00:01.000000002Z")
+	a := Alert{Key: "k", StartedAt: time.Unix(1, 2000)}
+	require.Contains(t, DedupID(a), "1970-01-01T00:00:01.000002Z")
+}
+
+// TestDedupID_IsTheSameWhenTheTableKeepsTheStart — an episode started with
+// nanoseconds names the same episode as its copy read back from the table.
+func TestDedupID_IsTheSameWhenTheTableKeepsTheStart(t *testing.T) {
+	queued := Alert{Key: "k", StartedAt: time.Unix(1, 2002)}
+	stored := Alert{Key: "k", StartedAt: time.Unix(1, 2000)}
+	require.Equal(t, DedupID(stored), DedupID(queued))
 }
 func TestDedupID_DiffersAfterRefire(t *testing.T) {
 	a := Alert{Key: "k", StartedAt: time.Unix(1, 0)}
