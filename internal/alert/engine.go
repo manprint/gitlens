@@ -64,10 +64,10 @@ var spellEvents = map[string]bool{
 
 // endGrace is how long an episode may go unsampled before a pass closes it.
 // A spell has no clock of its own: its window only says when to ask its
-// Clearer. A pulse closes once its occurrence has left the window, so a later
-// occurrence opens an episode of its own and notifies again. Two occurrences
-// closer together than the lookback fall into one episode. A metric closes
-// only after metricGrace.
+// Clearer. A pulse closes on the first pass whose window holds no occurrence
+// of its key, so a later occurrence opens an episode of its own and notifies
+// again. Two occurrences share an episode only while the gap between them is
+// at most the lookback plus one pass. A metric closes only after metricGrace.
 func endGrace(r Rule, interval time.Duration) time.Duration {
 	switch {
 	case spellEvents[r.EventType]:
