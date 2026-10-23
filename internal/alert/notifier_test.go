@@ -136,9 +136,11 @@ func TestTick_RetriesAFailedNotificationOnALaterPass(t *testing.T) {
 type claimStore struct {
 	markStore
 	failClaims int
+	calls      int
 }
 
 func (s *claimStore) ClaimNotification(ctx context.Context, _, _, _ string, _ Alert) (bool, error) {
+	s.calls++
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
@@ -226,9 +228,11 @@ func TestChannelNotifier_ReportsAClaimWhoseReplyWasLost(t *testing.T) {
 	require.Empty(t, store.marks)
 }
 
-// TestChannelNotifier_AnExpiredClaimDoesNotUseUpAnAttempt — a claim that the
-// expired cycle cut short is not blamed on the store. The delivery keeps all of
-// its attempts, and it goes out on the first pass whose cycle is live.
+// TestChannelNotifier_AnExpiredClaimDoesNotUseUpAnAttempt pins the cycle check
+// that comes before the store is asked: a claim that an expired cycle would start
+// makes no store call, so it uses no attempt. The delivery keeps all of its
+// attempts and goes out on the first pass whose cycle is live. Without that check
+// the claim would reach the store, count as an attempt, and use them up.
 func TestChannelNotifier_AnExpiredClaimDoesNotUseUpAnAttempt(t *testing.T) {
 	a := Alert{Key: "k", RuleID: "r", Severity: SeverityWarning, State: StateFiring, StartedAt: time.Unix(1, 0), LastEvalAt: time.Unix(1, 0)}
 	store := &claimStore{failClaims: 1}
@@ -236,12 +240,14 @@ func TestChannelNotifier_AnExpiredClaimDoesNotUseUpAnAttempt(t *testing.T) {
 	n := NewChannelNotifier(store, slack)
 	retrier := n.(interface{ Retry(context.Context) error })
 	require.Error(t, n.Notify(context.Background(), a))
+	calls := store.calls
 
 	expired, cancel := context.WithCancel(context.Background())
 	cancel()
 	for i := 0; i < maxNotifyAttempts+2; i++ {
 		_ = retrier.Retry(expired)
 	}
+	require.Equal(t, calls, store.calls, "an expired cycle asks the store for no claim")
 	require.Zero(t, slack.sent)
 
 	require.NoError(t, retrier.Retry(context.Background()))
@@ -508,4 +514,79 @@ func TestTick_ALeaderChangeSendsAFiringThatIsStillOwed(t *testing.T) {
 	regainLeadership(a)
 	require.NoError(t, a.Tick(context.Background()))
 	require.Equal(t, []string{"fire"}, rec.got)
+}
+
+// blockingClaimStore never answers a claim: it waits until the claim's context is
+// done, as a hung connection pool does.
+type blockingClaimStore struct {
+	markStore
+	calls int
+}
+
+func (s *blockingClaimStore) ClaimNotification(ctx context.Context, _, _, _ string, _ Alert) (bool, error) {
+	s.calls++
+	<-ctx.Done()
+	return false, ctx.Err()
+}
+
+// TestChannelNotifier_AHungClaimUsesUpItsAttempts pins the claim's own deadline
+// as an attempt. The cycle stays live, so each claim ends on its own deadline,
+// and every such failure counts. After the attempts are used up the delivery is
+// given up and reported, and nothing is sent. A rule that counted a claim only
+// while the cycle was live would never count these, and the delivery would stay
+// pending on every pass.
+func TestChannelNotifier_AHungClaimUsesUpItsAttempts(t *testing.T) {
+	restore := claimTimeout
+	claimTimeout = 10 * time.Millisecond
+	t.Cleanup(func() { claimTimeout = restore })
+	a := Alert{Key: "k", RuleID: "r", Severity: SeverityWarning, State: StateFiring, StartedAt: time.Unix(1, 0), LastEvalAt: time.Unix(1, 0)}
+	store := &blockingClaimStore{}
+	slack := &testChannel{name: "slack"}
+	n := NewChannelNotifier(store, slack)
+	retrier := n.(interface{ Retry(context.Context) error })
+	before := UndeliveredNotifications()
+
+	cycle, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, n.Notify(cycle, a), context.DeadlineExceeded)
+	require.NoError(t, retrier.Retry(cycle), "a claim is not made again in the pass that failed it")
+	for i := 2; i < maxNotifyAttempts; i++ {
+		require.ErrorIs(t, retrier.Retry(cycle), context.DeadlineExceeded)
+	}
+	require.ErrorIs(t, retrier.Retry(cycle), errUndelivered)
+	require.Equal(t, before+1, UndeliveredNotifications())
+	require.Equal(t, maxNotifyAttempts, store.calls)
+	require.Zero(t, slack.sent)
+}
+
+// TestChannelNotifier_AClaimCutByTheCycleStillCounts pins that the cycle's end
+// does not decide a claim. Every pass's cycle ends before the claim's own
+// deadline, so each claim runs past the cycle, and its failure still counts. A
+// rule that counted a claim only while the cycle was live would count none of
+// them, and the delivery would never be given up.
+func TestChannelNotifier_AClaimCutByTheCycleStillCounts(t *testing.T) {
+	restore := claimTimeout
+	claimTimeout = 60 * time.Millisecond
+	t.Cleanup(func() { claimTimeout = restore })
+	a := Alert{Key: "k", RuleID: "r", Severity: SeverityWarning, State: StateFiring, StartedAt: time.Unix(1, 0), LastEvalAt: time.Unix(1, 0)}
+	store := &blockingClaimStore{}
+	slack := &testChannel{name: "slack"}
+	n := NewChannelNotifier(store, slack)
+	retrier := n.(interface{ Retry(context.Context) error })
+	before := UndeliveredNotifications()
+
+	pass := func(run func(context.Context) error) error {
+		cycle, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		defer cancel()
+		return run(cycle)
+	}
+	require.ErrorIs(t, pass(func(ctx context.Context) error { return n.Notify(ctx, a) }), context.DeadlineExceeded)
+	require.NoError(t, pass(retrier.Retry), "a claim is not made again in the pass that failed it")
+	for i := 2; i < maxNotifyAttempts; i++ {
+		require.ErrorIs(t, pass(retrier.Retry), context.DeadlineExceeded)
+	}
+	require.ErrorIs(t, pass(retrier.Retry), errUndelivered)
+	require.Equal(t, before+1, UndeliveredNotifications())
+	require.Equal(t, maxNotifyAttempts, store.calls)
+	require.Zero(t, slack.sent)
 }

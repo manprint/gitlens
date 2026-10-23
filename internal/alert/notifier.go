@@ -14,13 +14,20 @@ import (
 	"github.com/manprint/pglens/internal/alert/notify"
 )
 
-// maxNotifyAttempts bounds the sends of one delivery, the first included. A
-// channel that is down for a while still gets the transition once it is back,
-// and one that stays down does not keep its messages queued forever: after the
-// last send the claim row records the failure. A failed claim uses up the same
-// attempts, and a delivery that runs out of them while unclaimed has no row to
+// maxNotifyAttempts bounds the sends and the claims of one delivery that the
+// store was asked for, the first included. A channel that is down for a while
+// still gets the transition once it is back, and one that stays down does not
+// keep its messages queued forever: after the last send the claim row records
+// the failure. A claim that fails, its own deadline included, uses up the same
+// attempts. A claim that never started, because the cycle had already ended,
+// uses none. A delivery that runs out of attempts while unclaimed has no row to
 // record it, so keepUnclaimed reports it instead.
 const maxNotifyAttempts = 5
+
+// claimTimeout bounds one claim of the store. A claim gets its own deadline and
+// not the cycle's: a claim that the cycle cut short would not be counted, so a
+// store that never answers would keep its delivery pending on every pass.
+var claimTimeout = 2 * time.Second
 
 // undelivered counts the unclaimed deliveries this process gave up on. It is
 // read through UndeliveredNotifications.
@@ -98,18 +105,22 @@ func (n *channelNotifier) Notify(ctx context.Context, a Alert) error {
 	return errors.Join(errs...)
 }
 
-// claim makes the claim row of d and reports whether this pass won it. A claim
-// that the cycle's deadline cut short is not counted as an attempt: the store
-// was never given the chance to answer, as with a send that did not begin.
+// claim makes the claim row of d and reports whether this pass won it. The
+// cycle's deadline is checked before the store is asked, and a claim that never
+// starts is not counted. Once the store has been asked, every failure counts,
+// since the store had its chance to answer, and the cycle ending during the call
+// does not change that. The claim is not given the cycle's context, so it can
+// run past the cycle's end. That overrun is bounded by claimTimeout, and by the
+// check above, which lets no second claim start after the cycle has ended.
 func (n *channelNotifier) claim(ctx context.Context, d *pendingDelivery) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
-	won, err := n.store.ClaimNotification(ctx, d.dedupID, d.channel.Name(), d.phase, d.alert)
+	claimCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), claimTimeout)
+	defer cancel()
+	won, err := n.store.ClaimNotification(claimCtx, d.dedupID, d.channel.Name(), d.phase, d.alert)
 	if err != nil {
-		if ctx.Err() == nil {
-			d.attempts++
-		}
+		d.attempts++
 		return false, err
 	}
 	return won, nil
