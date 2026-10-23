@@ -500,7 +500,7 @@ La suite gira due volte: `PROFILE=vanilla` e `PROFILE=rds-like`. Ogni check deve
 Per ogni versione PG viene salvato lo snapshot del payload dell'agent:
 
 ```
-test/fixtures/golden/payload_pg16.json
+internal/wire/testdata/payload_pg16.json
 ```
 
 Un cambio di parsing che altera il payload rompe il test e **rende il drift tra versioni visibile in review**. Senza questo, una colonna rinominata in una major version passa inosservata finché un utente non apre una issue.
@@ -1056,7 +1056,7 @@ Il catalogo è generato dai `Register` in `test/scenario/` e dalle registrazioni
 
 Questi ID compaiono nei piani ma non hanno ancora un `Register`, quindi non sono nel catalogo: `SYS-AGENT-006`, `SYS-DB-002`, `SYS-DB-003`, `SYS-HA-001`, `SYS-LOAD-001`, `SYS-LOAD-004`, `SYS-LOAD-006`, `SYS-LOAD-007`, `SYS-NET-002`, `SYS-NET-004`, `SYS-PERM-003`, `SYS-POOL-001`, `SYS-POOL-002`, `SYS-RESET-003`, `SYS-SLOT-002`, `SYS-WAL-001`. Un ID entra nel catalogo quando ha una registrazione.
 
-**Smoke set per PR** (`make test-e2e`, cioè `-run Smoke`, ~20 min): i `TestSmoke_*` di `test/e2e/smoke_test.go`, cioè `SYS-HARNESS-001`, `SYS-TOPO-001`, `SYS-RESET-001`, `SYS-AGENT-001`, `SYS-PERM-001`, `SYS-PERM-002`, `SYS-REPL-001`, `SYS-NET-003`, `SYS-NET-001`, `SYS-LOAD-003`, `SYS-LOAD-008`.
+**Smoke set per PR** (`make test-e2e`, cioè `-run Smoke`, ~20 min): gli undici `TestSmoke_*` di `test/e2e/smoke_test.go`, cioè `SYS-HARNESS-001`, `SYS-TOPO-001`, `SYS-RESET-001`, `SYS-AGENT-001`, `SYS-PERM-001`, `SYS-PERM-002`, `SYS-REPL-001`, `SYS-NET-003`, `SYS-NET-001`, `SYS-LOAD-003`, `SYS-LOAD-008`, più `TestUI_Smoke` (`SYS-UI-000`), che il pattern `-run Smoke` seleziona anche. `SYS-UI-000` non ha il flag *Smoke* nella registrazione, quindi la colonna della tabella non lo segna.
 **Full set**: nightly, tutte le topologie × `AGENT_MODE` × versioni PG.
 
 ---
