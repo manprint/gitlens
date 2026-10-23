@@ -121,7 +121,12 @@ curl -fsS -H "Authorization: Bearer $PGLENS_BOOTSTRAP_TOKEN" \
 
 The server health endpoints return the plain-text body `ok`; the agent's
 separate health endpoint at `:9187/healthz` returns JSON status and buffer
-details.
+details. In `buffer_stats`, `acked` counts the envelopes the server has
+acknowledged, and `dropped` counts the samples the agent has lost: the ones it
+could not queue, and the records the disk buffer rolled off under its size or
+age limit. `dropped` is the total behind `pglens_samples_dropped_rate`, so a
+value above zero means data was lost, not only delayed. Records the buffer
+cannot read back are not counted.
 
 Output from `/api/v1/clusters` (first cluster):
 ```json
@@ -426,10 +431,10 @@ Security and operational boundaries:
   need the T2 grant and `allow_signal`.
   [docs/LIMITS.md](docs/LIMITS.md#4-explain-analyze-executes-the-statement)
   lists the effects that remain. The checks read catalog views and statistics
-  functions covered by `pg_monitor` (for example `pg_ls_archive_statusdir()` for the archiver's
-  backlog); `explain` and `pgstattuple` additionally open an explicit
-  `READ ONLY` transaction and roll it back. The agent sets only session
-  parameters (`application_name`, `statement_timeout`, `lock_timeout`,
+  functions covered by `pg_monitor` (for example `pg_ls_archive_statusdir()`
+  for the archiver's backlog); `explain` and `pgstattuple` additionally open
+  an explicit `READ ONLY` transaction and roll it back. The agent sets only
+  session parameters (`application_name`, `statement_timeout`, `lock_timeout`,
   `idle_in_transaction_session_timeout`, `search_path`).
 - Every agent session searches `pg_catalog` alone, whatever `search_path` the
   database or the role sets, and names the objects of `pg_stat_statements` and
@@ -454,18 +459,18 @@ Security and operational boundaries:
   the agent is authoritative for capability, target-policy and execution gates.
 - `EXPLAIN ANALYZE` executes the selected statement. The read-only transaction
   stops it from changing this database's data; effects outside the transaction
-  (a `dblink` call, a signal, a session advisory lock) are not undone by it, so the agent
-  first inspects the statement, the database and the `EXPLAIN (VERBOSE)` plan
-  and refuses ANALYZE when anything could have such an effect: a user-defined
-  function, a function of an extension that is not known to only compute, a
-  volatile built-in that is not known to only read, a foreign or custom scan,
-  or a user-defined operator, cast, domain or aggregate whose calls a plan can
-  hide. A session holding `pg_signal_backend` plans as `pg_read_all_data`, and
-  every `EXPLAIN` connection is closed after use. The statement still consumes
-  database resources and takes locks; see
-  [docs/LIMITS.md](docs/LIMITS.md#4-explain-analyze-executes-the-statement) for
-  what remains outside these checks. Keep `allow_explain_analyze: false` unless
-  this is acceptable for the target.
+  (a `dblink` call, a signal, a session advisory lock) are not undone by it,
+  so the agent first inspects the statement, the database and the `EXPLAIN
+  (VERBOSE)` plan and refuses ANALYZE when anything could have such an effect:
+  a user-defined function, a function of an extension that is not known to
+  only compute, a volatile built-in that is not known to only read, a foreign
+  or custom scan, or a user-defined operator, cast, domain or aggregate whose
+  calls a plan can hide. A session holding `pg_signal_backend` plans as
+  `pg_read_all_data`, and every `EXPLAIN` connection is closed after use. The
+  statement still consumes database resources and takes locks; see
+  [docs/LIMITS.md](docs/LIMITS.md#4-explain-analyze-executes-the-statement)
+  for what remains outside these checks. Keep `allow_explain_analyze: false`
+  unless this is acceptable for the target.
 - Query text is never sent in a command payload. Plan history stores only
   explicitly requested plans, using a normalized query hash and JSON plan;
   placeholders may prevent a useful plan for parameter-sensitive statements.
