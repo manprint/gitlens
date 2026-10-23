@@ -10,6 +10,7 @@ import (
 // to turn unrelated failures (a permission error, an extension that is
 // installed but not preloaded) into silently empty results.
 const (
+	pgInsufficientPrivilege        = "42501"
 	pgUndefinedTable               = "42P01"
 	pgUndefinedColumn              = "42703"
 	pgObjectNotInPrerequisiteState = "55000"

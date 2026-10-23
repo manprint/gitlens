@@ -2,7 +2,6 @@ package check
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"github.com/manprint/pglens/internal/pgtype"
@@ -110,10 +109,10 @@ func boolToFloat(b bool) float64 {
 	return 0
 }
 
+// isPermissionDenied matches the SQLSTATE, not the message text: a failure that
+// merely mentions 42501 or "permission denied" is not a missing privilege, and
+// taking it for one would silently switch the cluster identity to the manual
+// source.
 func isPermissionDenied(err error) bool {
-	if err == nil {
-		return false
-	}
-	s := err.Error()
-	return strings.Contains(s, "42501") || strings.Contains(s, "permission denied") || strings.Contains(s, "must be superuser")
+	return pgErrorCode(err) == pgInsufficientPrivilege
 }
