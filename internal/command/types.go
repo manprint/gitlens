@@ -20,6 +20,13 @@ const (
 	KindPgstattuple Kind = "pgstattuple"
 )
 
+// MaxResultBytes bounds one result as an agent posts it, counting the whole
+// JSON body. An EXPLAIN plan of a wide view runs to megabytes, so the limit is
+// well above the 1 MiB a command request may take. The agent replaces a larger
+// result with an error that says why, and the server refuses one that arrives
+// anyway.
+const MaxResultBytes = 8 << 20
+
 // Args is the union of every command's arguments. Only the fields relevant to
 // the kind may be set; Validate rejects the rest, so a caller cannot smuggle a
 // field past the executor.

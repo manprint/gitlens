@@ -3,8 +3,10 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -81,6 +83,14 @@ func (e *dispatcherExecutor) Execute(ctx context.Context, target check.Target, a
 		conn.Release()
 	}
 	return json.RawMessage(`{"ok":true}`), nil
+}
+
+// oversizeExecutor returns a result larger than the server accepts.
+type oversizeExecutor struct{}
+
+func (oversizeExecutor) Kind() command.Kind { return command.KindExplain }
+func (oversizeExecutor) Execute(context.Context, check.Target, command.Args) (json.RawMessage, error) {
+	return json.RawMessage(`{"plan":"` + strings.Repeat("x", command.MaxResultBytes) + `","plan_hash":"h"}`), nil
 }
 
 func polledFor(instanceID uuid.UUID, kind command.Kind, args command.Args) polledCommand {
@@ -175,6 +185,33 @@ func TestDispatcher_UsesDedicatedConnection(t *testing.T) {
 	err := d.dispatch(context.Background(), polledFor(instanceID, command.KindExplain, command.Args{QueryID: int64Ptr(7)}))
 	require.NoError(t, err)
 	require.Equal(t, 1, target.connForCalls)
+}
+
+// The server refuses a body over command.MaxResultBytes, which reads as a
+// result that never arrived. The agent posts such a result as an error that
+// names the size, under the same claim token, so the audit records the cause.
+func TestDispatcher_PostsAnOversizeResultAsAnError(t *testing.T) {
+	agentID, instanceID, claimToken := uuid.New(), uuid.New(), uuid.New()
+	var got commandResult
+	var size int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		size = len(body)
+		require.NoError(t, json.Unmarshal(body, &got))
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	d := NewDispatcher(server.URL, "token", agentID, true)
+	d.AddTarget(instanceID, &dispatcherTarget{tier: pgtype.TierExplain}, false, false)
+	d.AddExecutor(oversizeExecutor{})
+	err := d.dispatch(context.Background(), polledCommand{CommandID: uuid.New(), ClaimToken: claimToken, InstanceID: instanceID, Kind: command.KindExplain, Args: command.Args{QueryID: int64Ptr(7)}})
+	require.NoError(t, err)
+	require.LessOrEqual(t, size, command.MaxResultBytes)
+	require.Equal(t, claimToken, got.ClaimToken)
+	require.Equal(t, "error", got.Outcome)
+	require.Contains(t, got.Error, "byte limit")
+	require.Empty(t, got.Result)
 }
 
 func TestDispatcher_DisabledDoesNotPoll(t *testing.T) {

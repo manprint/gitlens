@@ -32,6 +32,9 @@ const (
 	// the rest covers the capability refresh and the result post. The TTL
 	// bounds the wait for a claim; it must not expire a command being run.
 	commandClaimLease = 2 * time.Minute
+	// maxCommandBody bounds a command request. A result is larger, since it
+	// carries a plan, and is bounded by command.MaxResultBytes instead.
+	maxCommandBody int64 = 1 << 20
 )
 
 // CommandService owns the server side of the command queue.
@@ -130,10 +133,18 @@ type resultRequest struct {
 	Error      string          `json:"error,omitempty"`
 }
 
-func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+// decodeJSON decodes a request body of at most maxBytes. A body over the
+// limit is reported as such, not as invalid JSON: a result too large to store
+// must read as a size problem, not as a malformed request.
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any, maxBytes int64) bool {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBytes))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "payload too large", fmt.Sprintf("request body exceeds %d bytes", maxBytes))
+			return false
+		}
 		writeError(w, http.StatusBadRequest, "invalid JSON", err.Error())
 		return false
 	}
@@ -151,7 +162,7 @@ func (s *CommandService) enqueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req enqueueRequest
-	if !decodeJSON(w, r, &req) {
+	if !decodeJSON(w, r, &req, maxCommandBody) {
 		return
 	}
 	var args command.Args
@@ -373,7 +384,7 @@ func (s *CommandService) result(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req resultRequest
-	if !decodeJSON(w, r, &req) {
+	if !decodeJSON(w, r, &req, command.MaxResultBytes) {
 		return
 	}
 	if err := validateResult(req); err != nil {

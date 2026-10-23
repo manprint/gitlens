@@ -218,6 +218,15 @@ func (d *Dispatcher) postResult(ctx context.Context, commandID uuid.UUID, result
 	if err != nil {
 		return err
 	}
+	// The server refuses a body over command.MaxResultBytes, and a refused
+	// request reads as a result that never arrived. A result that large is
+	// posted as an error that says so, so the audit records the real cause.
+	if len(body) > command.MaxResultBytes {
+		body, err = json.Marshal(commandResult{ClaimToken: result.ClaimToken, Outcome: "error", Error: fmt.Sprintf("result is %d bytes, over the %d byte limit", len(body), command.MaxResultBytes)})
+		if err != nil {
+			return err
+		}
+	}
 	endpoint := fmt.Sprintf("%s/api/v1/commands/%s/result", d.serverURL, commandID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(body)))
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -195,6 +196,52 @@ func TestPoll_ReturnsNoContentOnTimeout(t *testing.T) {
 	rec := httptest.NewRecorder()
 	commandRouter(s).ServeHTTP(rec, req)
 	require.Equal(t, http.StatusNoContent, rec.Code)
+}
+
+// A plan of a wide view runs to megabytes. The result endpoint used to share
+// the 1 MiB limit of command requests, so such a result was refused as invalid
+// JSON and the command expired with no answer on record.
+func TestResult_AcceptsAPlanLargerThanARequestBody(t *testing.T) {
+	commandID, instanceID, claimToken := uuid.New(), uuid.New(), uuid.New()
+	tx := &commandFakeTx{row: &mockRow{vals: []any{"default", []byte(instanceID.String()), int64(0), command.KindExplain, []byte(`{"queryid":7}`), "api"}}}
+	s := NewCommandService(&commandFakePool{tx: tx}, NewAuth("secret"))
+	body := map[string]any{"claim_token": claimToken, "outcome": "ok", "result": map[string]any{"plan": map[string]any{"Node Type": strings.Repeat("x", 1_500_000)}, "plan_hash": "0123456789abcdef"}}
+	data, err := json.Marshal(body)
+	require.NoError(t, err)
+	require.Greater(t, len(data), 1<<20)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/"+commandID.String()+"/result", bytes.NewReader(data))
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	commandRouter(s).ServeHTTP(rec, req)
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	require.True(t, tx.committed)
+}
+
+// A result over command.MaxResultBytes is refused as a size problem, not as
+// malformed JSON, so the cause is visible to whoever reads the response.
+func TestResult_RefusesAResultOverTheLimitAsTooLarge(t *testing.T) {
+	commandID := uuid.New()
+	tx := &commandFakeTx{row: &mockRow{err: pgx.ErrNoRows}}
+	s := NewCommandService(&commandFakePool{tx: tx}, NewAuth("secret"))
+	body := `{"claim_token":"` + uuid.NewString() + `","outcome":"ok","result":"` + strings.Repeat("x", command.MaxResultBytes) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/"+commandID.String()+"/result", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	commandRouter(s).ServeHTTP(rec, req)
+	require.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+	require.Contains(t, rec.Body.String(), "payload too large")
+	require.Equal(t, 0, tx.execCalls)
+}
+
+// Command requests keep the 1 MiB limit: only results may be larger.
+func TestEnqueue_RefusesARequestOverOneMiB(t *testing.T) {
+	s := NewCommandService(&commandFakePool{}, NewAuth("secret"))
+	body := `{"kind":"cancel","args":{"pid":42,"datname":"` + strings.Repeat("x", 1<<20) + `"}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/instances/"+uuid.NewString()+"/commands", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	commandRouter(s).ServeHTTP(rec, req)
+	require.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
 }
 
 func TestResult_MismatchedClaimTokenIsConflict(t *testing.T) {
