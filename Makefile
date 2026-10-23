@@ -161,7 +161,7 @@ web-lint: web-gen-api
 
 web-build:
 	cd $(WEB) && PGLENS_VERSION=$(VERSION) $(PNPM) run build
-	@printf 'built_at=%s\nvite=8.2.2\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" > internal/webui/dist/.built
+	@printf 'built_at=%s\nvite=%s\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$(cd $(WEB) && node -p 'require("./node_modules/vite/package.json").version')" > internal/webui/dist/.built
 
 web-budget: web-build
 	cd $(WEB) && $(PNPM) exec tsx scripts/bundle-budget.ts
