@@ -50,7 +50,7 @@ type instanceState struct {
 	role         pgtype.Role
 	clusterID    pgtype.ClusterID
 	timestamp    time.Time
-	spacing      time.Duration        // gap between the last two observations; 0 until there are two
+	quietCycles  int                  // observations without orphan evidence since the last of it
 	orphanAt     time.Time            // when the standby's upstream became unresolvable
 	orphanSeenAt time.Time            // last observation that found the upstream unresolvable
 	orphanedAt   time.Time            // when orphan_standby was last emitted for this standby
@@ -175,7 +175,6 @@ func (e *Engine) Apply(obs Observation) []Event {
 
 	// Update instance state. The cluster index follows the instance's cluster,
 	// which a re-registered instance can change.
-	prevSeen := inst.timestamp
 	if inst.clusterID != obs.ClusterID {
 		delete(e.clusterInstances[inst.clusterID], obs.InstanceID)
 	}
@@ -210,6 +209,7 @@ func (e *Engine) Apply(obs Observation) []Event {
 
 		// If no high-confidence edge and we have low-confidence edges, check orphan.
 		if !hasResolvedEdge && len(obs.Edges) > 0 {
+			inst.quietCycles = 0
 			if inst.orphanAt.IsZero() {
 				inst.orphanAt = now
 			}
@@ -235,25 +235,30 @@ func (e *Engine) Apply(obs Observation) []Event {
 					Payload:    map[string]any{"duration_seconds": now.Sub(inst.orphanAt).Seconds()},
 				})
 			}
-		} else if e.orphanGapEnds(inst, now) {
-			// An observation without that evidence ends the episode once the gap
-			// since the last of it outlasts the instance's own cadence. The server
-			// drops an edge whose address stops resolving for a cycle or two, and
-			// that gap must not restart the clock. A longer gap means the orphan is
-			// over, so the next one is dated from its own start and not from this one.
-			inst.orphanAt = time.Time{}
-			inst.orphanedAt = time.Time{}
+		} else {
+			// An observation without that evidence is one cycle without it. The
+			// server drops an edge whose address stops resolving for a cycle or
+			// two, and a single such cycle must not restart the clock. Two in a row,
+			// with a whole window gone since the last evidence, mean the orphan is
+			// over, so the next one is dated from its own start and not from this.
+			inst.quietCycles++
+			if e.orphanGapEnds(inst, now) {
+				inst.orphanAt = time.Time{}
+				inst.orphanedAt = time.Time{}
+			}
 		}
 	}
 
-	if obs.Role == pgtype.RoleUnknown && e.orphanGapEnds(inst, now) {
+	if obs.Role == pgtype.RoleUnknown {
 		// Unknown is no evidence either way: the agent reports it when its role
-		// cannot be read this cycle. It holds an episode across the cycles without
-		// evidence, as an edgeless cycle does, and ends it after a longer gap.
-		// Silence ends nothing, since the engine cannot tell a quiet instance from
-		// a slow push interval.
-		inst.orphanAt = time.Time{}
-		inst.orphanedAt = time.Time{}
+		// cannot be read this cycle, so it is one cycle without evidence, as an
+		// edgeless observation is. Silence ends nothing: the engine cannot count
+		// cycles it never observed, and a long gap may be one slow push interval.
+		inst.quietCycles++
+		if e.orphanGapEnds(inst, now) {
+			inst.orphanAt = time.Time{}
+			inst.orphanedAt = time.Time{}
+		}
 	}
 
 	if obs.Role == pgtype.RolePrimary {
@@ -263,13 +268,6 @@ func (e *Engine) Apply(obs Observation) []Event {
 		inst.orphanedAt = time.Time{}
 	}
 
-	// The gap that ends with this observation becomes the spacing for the next
-	// one. It is stored only now, so the checks above judged this gap by the
-	// spacing that came before it.
-	if !prevSeen.IsZero() {
-		inst.spacing = now.Sub(prevSeen)
-	}
-
 	// Detect split-brain: 2+ primaries in one cluster, each observed since the
 	// last failover, and no failover within the last 30s.
 	events = append(events, e.detectSplitBrain(obs.ClusterID, now)...)
@@ -277,17 +275,17 @@ func (e *Engine) Apply(obs Observation) []Event {
 	return events
 }
 
-// orphanGapEnds reports whether a gap without evidence ends the orphan episode
-// of a standby. The gap since the last evidence must reach both one orphan
-// window and twice the instance's spacing. Twice, because one cycle without evidence
-// spans one spacing: an agent that pushes every 60 to 120 seconds leaves one
-// such cycle between two evidence cycles, and that must not end the episode.
-// The spacing is the one from before the observation being judged. The gap
-// that ends with that observation may be a silence, and a silence must not
-// stretch the very window that judges it. Until an instance has two
-// observations there is no spacing to judge by, so nothing ends its episode.
+// orphanGapEnds reports whether an observation without evidence ends the orphan
+// episode of a standby. It takes two such observations in a row, and a whole
+// orphan window since the last evidence. One cycle without evidence never ends
+// the episode, at any push interval: an agent that alternates evidence and
+// silence leaves exactly one such cycle between two evidence cycles, however
+// far apart they are. The count is of observations, not of the gaps between
+// them, so a short gap or a burst of replayed envelopes cannot stand for the
+// push interval. A replayed envelope is one cycle the agent ran, so a backlog
+// without evidence counts one cycle per envelope.
 func (e *Engine) orphanGapEnds(inst *instanceState, now time.Time) bool {
-	return inst.spacing > 0 && now.Sub(inst.orphanSeenAt) >= max(e.orphanWindow, 2*inst.spacing)
+	return inst.quietCycles >= 2 && now.Sub(inst.orphanSeenAt) >= e.orphanWindow
 }
 
 // detectSplitBrain checks for multiple primary instances in one cluster.
