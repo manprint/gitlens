@@ -51,6 +51,12 @@ type Notifier interface {
 	Notify(context.Context, Alert) error
 }
 
+// retrier is implemented by a notifier that keeps the deliveries that failed
+// and makes them again on later passes of the engine.
+type retrier interface {
+	Retry(context.Context) error
+}
+
 // Filter is the query selector used by the alert store.
 //
 // Resolved alerts are left out unless the filter asks for them, either by
@@ -367,6 +373,13 @@ func (e *Engine) Tick(ctx context.Context) error {
 		return !ok
 	}, now))...)
 	e.eval.Forget(now.Add(-time.Hour))
+	// The retries come last, so that a channel which hangs cannot take the
+	// time the rules need.
+	if r, ok := e.notifier.(retrier); ok {
+		if err := r.Retry(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	return errors.Join(errs...)
 }
 
