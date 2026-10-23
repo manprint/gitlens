@@ -330,6 +330,13 @@ func runAgentCommand(args []string) {
 	flushEnvelope(shutdownCtx, managers, &mu, pending, lastEdgeState, ashEnabled, scheduledDBs, pusher) //nolint:contextcheck // flushEnvelope->HasExtension: Manager caches this at connect time, the accessor takes no context
 
 	_ = healthSrv.Shutdown(shutdownCtx)
+	// The ASH samplers hold a pool connection for their whole life, and
+	// Manager.Close waits for every acquired connection to come back. The
+	// deferred stops above run only after Close, so stopping them here is
+	// what lets the shutdown finish instead of hanging until SIGKILL.
+	for _, stop := range ashStops {
+		stop()
+	}
 	for _, mgr := range managers {
 		mgr.Close()
 	}

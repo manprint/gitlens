@@ -73,3 +73,43 @@ func TestINTASH010_DedicatedConnectionReconnects(t *testing.T) {
 		require.Equal(t, "400ms", timeout, "a slow sample is cancelled by the server, not by closing the connection")
 	})
 }
+
+// TestINTASH011_ClosedConnectionIsNotReopened covers a sampler tick that is
+// still running when the connection is closed: its late query must fail
+// without dialling again, so no pool slot is left held for Close to wait on.
+func TestINTASH011_ClosedConnectionIsNotReopened(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		mgr, err := agent.NewManager(ctx, "ash-target", pg.DSN("postgres", pgtest.RoleT0), agent.DefaultConnOptions(), nil)
+		require.NoError(t, err)
+
+		clk := clock.NewFake(time.Now())
+		conn := &ashConn{mgr: mgr, base: ctx, clk: clk}
+
+		rows, err := conn.Query(ctx, "SELECT 1")
+		require.NoError(t, err)
+		rows.Close()
+		conn.Close()
+
+		// The base context stays alive, so only the closed flag can refuse
+		// the dial. The rows are closed again when the query is not refused,
+		// so the failure is reported instead of hanging the pool close below.
+		late, err := conn.Query(ctx, "SELECT 1")
+		if late != nil {
+			late.Close()
+		}
+		require.ErrorIs(t, err, errASHClosed)
+
+		closed := make(chan struct{})
+		go func() {
+			mgr.Close()
+			close(closed)
+		}()
+		select {
+		case <-closed:
+		case <-time.After(10 * time.Second):
+			t.Fatal("manager close waits for a connection the closed sampler reacquired")
+		}
+	})
+}

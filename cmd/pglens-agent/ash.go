@@ -111,7 +111,10 @@ const ashReconnectBackoff = 5 * time.Second
 // expired client context makes pgx close the connection.
 const ashStatementTimeout = "SET statement_timeout = 400"
 
-var errASHReconnectPending = errors.New("ash: dedicated connection unavailable, waiting to reconnect")
+var (
+	errASHReconnectPending = errors.New("ash: dedicated connection unavailable, waiting to reconnect")
+	errASHClosed           = errors.New("ash: dedicated connection closed")
+)
 
 // ashConn is the sampler's dedicated connection, replaced whenever it dies.
 // It used to be acquired once for the life of the process, so after a target
@@ -127,11 +130,19 @@ type ashConn struct {
 	mu         sync.Mutex
 	conn       *pgxpool.Conn
 	retryAfter time.Time
+	// closed is set by Close. The sampler's last tick can still be running
+	// when Close runs (Sampler.Stop does not wait for it), and such a tick
+	// must not dial again: the connection it takes would never be released,
+	// and the manager's pool cannot close while it is held.
+	closed bool
 }
 
 func (c *ashConn) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.closed {
+		return nil, errASHClosed
+	}
 	if c.conn != nil && c.conn.Conn().IsClosed() {
 		c.conn.Release() // the pool destroys a closed connection
 		c.conn = nil
@@ -163,10 +174,11 @@ func (c *ashConn) connectLocked() error {
 	return nil
 }
 
-// Close returns the connection to the pool.
+// Close returns the connection to the pool and refuses every later Query.
 func (c *ashConn) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.closed = true
 	if c.conn != nil {
 		c.conn.Release()
 		c.conn = nil
