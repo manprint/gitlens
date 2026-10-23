@@ -143,6 +143,21 @@ func TestLocks_RedactsCredentialsInEveryQuery(t *testing.T) {
 	require.Equal(t, "ALTER ROLE idle PASSWORD '[redacted]'", queries[2])
 }
 
+// A session text longer than the cut is cut before it is redacted, so a long
+// text full of PASSWORD keywords inside one comment is read in bounded time.
+func TestLocks_LongSessionTextIsCutBeforeRedaction(t *testing.T) {
+	long := "ALTER ROLE u PASSWORD /*" + strings.Repeat("password/*", 60000) + strings.Repeat("*/", 60001)
+	start := time.Now()
+	result := scrapeLocks(t, []([]any){
+		lockValues(1, "transactionid", []int32{9}, 2, long),
+		lockValues(9, "", nil, 0, "holder"),
+	})
+	require.Less(t, time.Since(start), 2*time.Second)
+	var tree lockTree
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
+	require.Len(t, tree.Nodes[0].Query, 2048)
+}
+
 func TestLocks_IdleSessionQueryIsShortened(t *testing.T) {
 	long := strings.Repeat("x", 3000)
 	result := scrapeLocks(t, []([]any){

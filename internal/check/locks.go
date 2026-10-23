@@ -114,7 +114,11 @@ func (c *locksCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 		}
 		// A statement can carry a role password, and the tree is shipped to
 		// the server and shown in the UI, so the credentials go before the cut.
-		r.Query = truncateUTF8(redactQueryText(r.Query), 2048)
+		// The text is first cut at 8192 bytes, the bound that stat_statements
+		// applies to its query text with LEFT(query, 8192). A literal the cut
+		// splits is redacted to the end, so no credential survives the cut, and
+		// the cost of redaction is bounded by the cut, not by the session text.
+		r.Query = truncateUTF8(redactQueryText(truncateUTF8(r.Query, 8192)), 2048)
 		parsed = append(parsed, r)
 	}
 	return buildLocksResult(parsed, t.Clock().Now()), rows.Err()
