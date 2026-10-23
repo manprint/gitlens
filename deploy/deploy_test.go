@@ -116,19 +116,66 @@ func composeFiles(t *testing.T) []string {
 func TestExampleStack_DependenciesWaitForHealthyServices(t *testing.T) {
 	type dependsOn struct {
 		Services map[string]struct {
-			DependsOn map[string]struct {
-				Condition string `yaml:"condition"`
-			} `yaml:"depends_on"`
+			DependsOn yaml.Node `yaml:"depends_on"`
 		} `yaml:"services"`
 	}
 	for _, name := range composeFiles(t) {
 		var stack dependsOn
 		require.NoError(t, yaml.Unmarshal(readFile(t, name), &stack), name)
 		for service, s := range stack.Services {
-			for dependency, d := range s.DependsOn {
-				require.Equal(t, "service_healthy", d.Condition, "%s: %s depends on %s without waiting for it to be healthy", name, service, dependency)
+			unhealthy := unhealthyDependencies(t, s.DependsOn)
+			require.Empty(t, unhealthy, "%s: %s depends on %v without waiting for it to be healthy", name, service, unhealthy)
+		}
+	}
+}
+
+// unhealthyDependencies names the dependencies that do not wait for a healthy
+// service. depends_on is a map from service to options, whose condition has
+// to be service_healthy, or a bare list of names, which waits for nothing.
+func unhealthyDependencies(t *testing.T, depends yaml.Node) []string {
+	t.Helper()
+	var names []string
+	switch depends.Kind {
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(depends.Content); i += 2 {
+			var options struct {
+				Condition string `yaml:"condition"`
+			}
+			require.NoError(t, depends.Content[i+1].Decode(&options))
+			if options.Condition != "service_healthy" {
+				names = append(names, depends.Content[i].Value)
 			}
 		}
+	case yaml.SequenceNode:
+		for _, item := range depends.Content {
+			names = append(names, item.Value)
+		}
+	}
+	return names
+}
+
+// The rule is checked on fixtures too, so that it is known to flag each shape
+// of a dependency that does not wait for a healthy service.
+func TestExampleStack_DependencyRuleFlagsEveryUnhealthyWait(t *testing.T) {
+	cases := []struct {
+		name    string
+		compose string
+		want    []string
+	}{
+		{"healthy", "depends_on:\n  db:\n    condition: service_healthy\n", nil},
+		{"bare list", "depends_on:\n  - db\n", []string{"db"}},
+		{"no condition", "depends_on:\n  db: {}\n", []string{"db"}},
+		{"service started", "depends_on:\n  db:\n    condition: service_started\n", []string{"db"}},
+		{"no dependency", "image: example\n", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var service struct {
+				DependsOn yaml.Node `yaml:"depends_on"`
+			}
+			require.NoError(t, yaml.Unmarshal([]byte(tc.compose), &service))
+			require.Equal(t, tc.want, unhealthyDependencies(t, service.DependsOn))
+		})
 	}
 }
 
