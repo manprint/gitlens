@@ -208,7 +208,7 @@ SELECT COALESCE(datname, '')             AS datname,
        COALESCE(wait_event, 'CPU')       AS wait_event,
        query_id
   FROM pg_stat_activity
- WHERE backend_type = 'client backend'
+ WHERE backend_type IN ('client backend', 'parallel worker')
    AND state <> 'idle'
    AND pid <> pg_backend_pid()
 	`)
@@ -278,4 +278,25 @@ SELECT COALESCE(datname, '')             AS datname,
 	}
 
 	return nil
+}
+
+// SessionsVisible reports whether the role behind q sees every session in
+// pg_stat_activity, which takes pg_read_all_stats (pg_monitor includes it) or
+// superuser. Without it the other users' sessions come back as hidden rows,
+// with NULL state and backend_type, and the sampler does not count them, so
+// the samples would read as an idle instance.
+func SessionsVisible(ctx context.Context, q querier) (bool, error) {
+	rows, err := q.Query(ctx, `SELECT pg_catalog.pg_has_role(current_user, 'pg_read_all_stats', 'USAGE')`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return false, rows.Err()
+	}
+	var visible bool
+	if err := rows.Scan(&visible); err != nil {
+		return false, err
+	}
+	return visible, nil
 }

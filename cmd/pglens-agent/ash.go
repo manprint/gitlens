@@ -133,9 +133,10 @@ type ashConn struct {
 	base context.Context
 	clk  clock.Clock
 
-	mu         sync.Mutex
-	conn       *pgxpool.Conn
-	retryAfter time.Time
+	mu           sync.Mutex
+	conn         *pgxpool.Conn
+	retryAfter   time.Time
+	warnedHidden bool // the hidden-sessions warning has been printed for this target
 }
 
 func (c *ashConn) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
@@ -168,8 +169,24 @@ func (c *ashConn) connectLocked() error {
 		conn.Release()
 		return err
 	}
+	c.warnIfSessionsHidden(ctx, conn)
 	c.conn = conn
 	return nil
+}
+
+// warnIfSessionsHidden says once per target when its role cannot see other
+// users' sessions. Their load is then missing from every sample, and the
+// samples read as an idle instance; nothing else would report it.
+func (c *ashConn) warnIfSessionsHidden(ctx context.Context, conn *pgxpool.Conn) {
+	if c.warnedHidden {
+		return
+	}
+	visible, err := ash.SessionsVisible(ctx, conn)
+	if err != nil || visible {
+		return
+	}
+	c.warnedHidden = true
+	fmt.Fprintf(os.Stderr, "warning: ash: the role of %s cannot see other users' sessions (grant pg_monitor or pg_read_all_stats); their activity is not sampled\n", c.mgr.TargetName())
 }
 
 // Close returns the connection to the pool.

@@ -224,3 +224,117 @@ func TestINTASH004_NoQueryIDWhenDisabled(t *testing.T) {
 		require.True(t, foundNilQueryID, "expected the compute_query_id=off session to sample with a nil query_id")
 	})
 }
+
+// INT-ASH-005: the workers of a parallel query are sampled along with their
+// leader, since each one is a backend doing work. Sampling the leader alone
+// showed such a query as one session.
+func TestINTASH005_SampleIncludesParallelWorkers(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+
+		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		_, err := admin.Exec(ctx, `CREATE TABLE IF NOT EXISTS ash_parallel_t AS SELECT g FROM generate_series(1, 4000) g`)
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, `ANALYZE ash_parallel_t`)
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, `CREATE OR REPLACE FUNCTION ash_parallel_slow(g int) RETURNS bool LANGUAGE plpgsql PARALLEL SAFE AS $$ BEGIN PERFORM pg_sleep(0.002); RETURN true; END $$`)
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, `GRANT SELECT ON ash_parallel_t TO PUBLIC`)
+		require.NoError(t, err)
+
+		pool := newTestPool(t, ctx, pg)
+		queryConn, err := pool.Acquire(ctx)
+		require.NoError(t, err)
+		_, err = queryConn.Exec(ctx, `SET max_parallel_workers_per_gather = 2; SET parallel_setup_cost = 0; SET parallel_tuple_cost = 0; SET min_parallel_table_scan_size = 0`)
+		require.NoError(t, err)
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer queryConn.Release()
+			var n int
+			// Cancelled by the test's end: the query only has to keep workers busy.
+			_ = queryConn.QueryRow(ctx, `SELECT count(*) FROM ash_parallel_t WHERE ash_parallel_slow(g)`).Scan(&n)
+		}()
+		t.Cleanup(wg.Wait)
+
+		require.Eventually(t, func() bool {
+			var workers int
+			err := admin.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'parallel worker' AND state = 'active'`).Scan(&workers)
+			return err == nil && workers > 0
+		}, 20*time.Second, 50*time.Millisecond, "the parallel query never started a worker")
+
+		samplerConn, err := pool.Acquire(ctx)
+		require.NoError(t, err)
+		defer samplerConn.Release()
+
+		var rows []SampleRow
+		s := NewSampler(samplerConn, clock.System(), func(r SampleRow) { rows = append(rows, r) })
+		require.NoError(t, s.doSample(ctx))
+		require.GreaterOrEqual(t, len(rows), 2, "expected the leader and at least one worker, got %+v", rows)
+		// A worker reports its leader's query id and database, so the leader and
+		// its workers fall into one bucket and add to its samples.
+		require.NotNil(t, rows[0].QueryID)
+		for _, r := range rows {
+			require.Equal(t, "app", r.Datname)
+			require.NotNil(t, r.QueryID, "a worker must carry its leader's query id")
+			require.Equal(t, *rows[0].QueryID, *r.QueryID)
+		}
+	})
+}
+
+// INT-ASH-006: a role without pg_read_all_stats sees another user's session
+// only as a hidden row, which the sampler cannot count, so SessionsVisible
+// reports it. The monitoring roles of the test matrix and a superuser see the
+// session, and their sampler counts it.
+func TestINTASH006_HiddenSessionsDetected(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+
+		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		_, err := admin.Exec(ctx, `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ash_plain') THEN CREATE ROLE ash_plain LOGIN PASSWORD 'test'; END IF; END $$`)
+		require.NoError(t, err)
+
+		// The session that is hidden from ash_plain: another user's, active.
+		sleepingSession(t, ctx, pg.Pool(t, "app", pgtest.RoleT0), 5*time.Second)
+		time.Sleep(300 * time.Millisecond) // let the sleeper start
+
+		plainCfg, err := pgxpool.ParseConfig(pg.DSN("app", pgtest.RoleSuperuser))
+		require.NoError(t, err)
+		plainCfg.ConnConfig.User = "ash_plain"
+		plainCfg.ConnConfig.Password = "test"
+		plainPool, err := pgxpool.NewWithConfig(ctx, plainCfg)
+		require.NoError(t, err)
+		t.Cleanup(plainPool.Close)
+		plainConn, err := plainPool.Acquire(ctx)
+		require.NoError(t, err)
+		defer plainConn.Release()
+
+		visible, err := SessionsVisible(ctx, plainConn)
+		require.NoError(t, err)
+		require.False(t, visible, "a role without pg_read_all_stats must not see other users' sessions")
+
+		var plainRows []SampleRow
+		plain := NewSampler(plainConn, clock.System(), func(r SampleRow) { plainRows = append(plainRows, r) })
+		require.NoError(t, plain.doSample(ctx))
+		require.Empty(t, plainRows, "the hidden session must not be sampled")
+
+		for _, role := range []pgtest.Role{pgtest.RoleT0, pgtest.RoleT1, pgtest.RoleSuperuser} {
+			seeing := pg.Pool(t, "app", role)
+			conn, err := seeing.Acquire(ctx)
+			require.NoError(t, err)
+			ok, err := SessionsVisible(ctx, conn)
+			require.NoError(t, err)
+			require.True(t, ok, "role %s must see every session", role)
+			var rows []SampleRow
+			s := NewSampler(conn, clock.System(), func(r SampleRow) { rows = append(rows, r) })
+			require.NoError(t, s.doSample(ctx))
+			require.NotEmpty(t, rows, "role %s must sample the active session", role)
+			conn.Release()
+		}
+	})
+}
