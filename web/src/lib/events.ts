@@ -9,12 +9,10 @@ export const DOCUMENTED_EVENT_TYPES = [
   'orphan_standby',
   'role_change',
   'slot_inactive',
-  'slot_retained_bytes',
   'no_primary_in_cluster',
   'counter_reset_detected',
   'agent_down',
   'agent_up',
-  'check_circuit_open',
   'duplicate_instance_suspected',
   'cluster_id_changed',
 ] as const
@@ -73,12 +71,6 @@ export function describeDocumentedEvent(type: DocumentedEventType): EventDescrip
         title: 'Replication slot inactive',
         whatToCheck: 'Check whether the standby is down or disconnected and needs reconnecting.',
       }
-    case 'slot_retained_bytes':
-      return {
-        severity: 'warning',
-        title: 'Replication slot retaining WAL',
-        whatToCheck: 'Monitor disk usage and reconnect the lagging standby before WAL fills disk.',
-      }
     case 'no_primary_in_cluster':
       return {
         severity: 'critical',
@@ -102,12 +94,6 @@ export function describeDocumentedEvent(type: DocumentedEventType): EventDescrip
         severity: 'info',
         title: 'Agent recovered',
         whatToCheck: 'Confirm the instance is operating normally after the reporting gap.',
-      }
-    case 'check_circuit_open':
-      return {
-        severity: 'warning',
-        title: 'Check circuit open',
-        whatToCheck: 'Check permissions, query timeouts and the instance error log.',
       }
     case 'duplicate_instance_suspected':
       return {

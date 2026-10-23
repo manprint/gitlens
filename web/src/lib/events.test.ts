@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -7,6 +10,20 @@ import {
   sortEventsNewestFirst,
   type ClusterEvent,
 } from './events'
+
+const GO_SOURCE_ROOT = join(import.meta.dirname, '..', '..', '..', 'internal')
+// An event type reaches the store where it is passed to emitEvent, set as the
+// Type of an event, or declared as an EventType constant.
+const GO_EVENT_SITE = /emitEvent\(|Type:|EventType/
+
+function goSourceLines(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name)
+    if (entry.isDirectory()) return goSourceLines(path)
+    if (!entry.name.endsWith('.go') || entry.name.endsWith('_test.go')) return []
+    return readFileSync(path, 'utf8').split('\n')
+  })
+}
 
 const event = (overrides: Partial<ClusterEvent>): ClusterEvent => ({
   cluster_id: '7381927364512345678',
@@ -24,6 +41,17 @@ describe('event taxonomy', () => {
       const description = describeDocumentedEvent(type)
       expect(description.title).not.toBe('')
       expect(description.whatToCheck).not.toBe('')
+    }
+  })
+
+  it('UI-CLUS-036 every documented event type is emitted by a Go source file', () => {
+    const eventSites = goSourceLines(GO_SOURCE_ROOT).filter((line) => GO_EVENT_SITE.test(line))
+
+    for (const type of DOCUMENTED_EVENT_TYPES) {
+      expect(
+        eventSites.some((line) => line.includes(`"${type}"`)),
+        `${type} has no emitter, so the taxonomy would describe an event that never occurs`,
+      ).toBe(true)
     }
   })
 
