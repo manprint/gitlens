@@ -265,8 +265,13 @@ func TestINTSCH004_UncheckableDatabaseKeepsTheStatementsAnswer(t *testing.T) {
 		_, err = admin.Exec(ctx, "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()", extDB)
 		require.NoError(t, err)
 
-		// The lockout must be real, or the test proves nothing.
-		_, err = mgr.LocateStatements(ctx, []wire.Database{{Name: extDB, Monitored: true}})
+		// The lockout must be real, or the test proves nothing. It is checked
+		// through ForDatabase, not LocateStatements, so the precondition does not
+		// depend on the function under test.
+		conn, err := mgr.ForDatabase(ctx, extDB)
+		if err == nil {
+			conn.Release()
+		}
 		require.Error(t, err, "the role must be locked out of the extension database")
 
 		currentScheduler := func() *agent.Scheduler {
