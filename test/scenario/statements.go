@@ -96,13 +96,15 @@ func init() {
 			// I-8 (harness.DefaultMetricBudget), the one budget the suite has;
 			// a bound kept in this scenario would only disagree with it.
 			//
-			// stat_statements.go's MaxKeys of 200 per check, times the six
-			// series each kept queryid emits, reaches 1200 before any other
-			// instance-level series or the Selector's hysteresis overlap. The
-			// full-suite values observed so far, 1857 to 2552, are above I-8's
-			// 2000, so this scenario can fail I-8. Whether the budget or the
-			// fan-out is wrong needs measured data; this scenario should not
-			// settle it with a number of its own.
+			// The stat_statements check keeps at most MaxKeys (200) queryids per
+			// (instance, database) scope, and each kept queryid emits seven
+			// counter series, so that check alone is bounded at 1400 series per
+			// monitored database. This scenario's stack creates no database of
+			// its own, so one database scope is expected. The live run of this
+			// scenario on fix/tests-docs measured 1256 series at the end of the
+			// workload, 63% of I-8's 2000. Earlier figures of 1857 to 2552 in
+			// this comment were not reproduced by that run, and no recorded run
+			// backs them, so they are withdrawn.
 			e.AssertInvariants(e.T)
 			return nil
 		},

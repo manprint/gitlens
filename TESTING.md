@@ -674,6 +674,15 @@ Il parsing dell'esposizione e le asserzioni vivono in `test/harness/metrics.go`,
 **senza build tag**: sono quindi coperti da `make test` invece di essere
 esercitati soltanto dentro uno stack compose.
 
+**Il budget I-8 è 2000 serie per istanza.** Conta le serie counter distinte che
+l'istanza riporta a fine scenario. Il check `stat_statements` tiene al massimo
+200 queryid per scope (istanza × database) e ogni queryid emette sette serie
+counter: 1400 serie per database monitorato, che è il termine dominante di
+`SYS-LOAD-008`. Il run live registrato di quello scenario ha misurato 1256 serie,
+il 63% del budget. Il budget resta a 2000 perché il termine dominante è limitato
+per costruzione; la misura è di un solo run, e un run che superi il budget
+fallisce I-8 come deve.
+
 `AssertConnectionCeiling` (I-6) resta una chiamata esplicita, perché è uno
 snapshot puntuale di `pg_stat_activity`: ha senso solo mentre il carico è
 attivo, non a teardown.
