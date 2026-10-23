@@ -99,6 +99,10 @@ services:
       # pgx read it from here.
       PGPASSWORD: ${PGLENS_MONITORING_PASSWORD:?set PGLENS_MONITORING_PASSWORD}
       PGLENS_HEALTHZ_LISTEN: ${PGLENS_HEALTHZ_LISTEN:-:9187}
+      # Host metrics come from the read-only host mounts below. Without these
+      # the agent reads the container's own /proc and /sys.
+      HOST_PROC: /host/proc
+      HOST_SYS: /host/sys
     volumes:
       - pglens-agent-data:/var/lib/pglens
       - ./agent.example.yaml:/etc/pglens/agent.yaml:ro

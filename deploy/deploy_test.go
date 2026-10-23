@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"bytes"
 	"io/fs"
 	"net/url"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/manprint/pglens/internal/agent"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
 )
@@ -184,4 +186,33 @@ func TestSystemdUnits_DropCapabilitiesSocketFamiliesAndSyscalls(t *testing.T) {
 			require.Contains(t, lines, directive, unit)
 		}
 	}
+}
+
+// The agent reads host metrics through the paths the compose stack mounts the
+// host's /proc and /sys on. The example leaves those paths to HOST_PROC and
+// HOST_SYS: a path pinned in the file overrides them, and the agent would then
+// read the container's own /proc.
+func TestExampleStack_AgentReadsTheHostMounts(t *testing.T) {
+	var stack composeFile
+	require.NoError(t, yaml.Unmarshal(readFile(t, "docker-compose.yml"), &stack))
+	agentService := stack.Services["pglens-agent"]
+	mounts := map[string]string{}
+	for _, volume := range agentService.Volumes {
+		if parts := strings.Split(volume, ":"); len(parts) >= 2 {
+			mounts[parts[0]] = parts[1]
+		}
+	}
+	for host, key := range map[string]string{"/proc": "HOST_PROC", "/sys": "HOST_SYS"} {
+		target, ok := mounts[host]
+		require.True(t, ok, "the agent does not mount the host %s", host)
+		require.Equal(t, target, agentService.Environment[key], "%s must name the mount of the host %s", key, host)
+		t.Setenv(key, agentService.Environment[key])
+	}
+
+	var cfg agent.Config
+	decoder := yaml.NewDecoder(bytes.NewReader(readFile(t, "agent.example.yaml")))
+	decoder.KnownFields(true)
+	require.NoError(t, decoder.Decode(&cfg))
+	require.Equal(t, mounts["/proc"], cfg.HostProcPath())
+	require.Equal(t, mounts["/sys"], cfg.HostSysPath())
 }
