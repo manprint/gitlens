@@ -4,6 +4,7 @@ package alert
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -149,6 +150,15 @@ TRUNCATE alerts RESTART IDENTITY`)
 	})
 }
 
+// historyPurgeSchema is the alert schema of the migration, as the purge
+// tests need it, emptied before each test.
+const historyPurgeSchema = `
+CREATE TABLE IF NOT EXISTS alerts (alert_key text NOT NULL, tenant_id text NOT NULL DEFAULT 'default', rule_id text NOT NULL, severity text NOT NULL, state text NOT NULL, cluster_id bigint, instance_id uuid, datname text, labels jsonb NOT NULL, value double precision, summary text NOT NULL, started_at timestamptz NOT NULL, last_eval_at timestamptz NOT NULL, resolved_at timestamptz, PRIMARY KEY (tenant_id, alert_key, started_at));
+CREATE TABLE IF NOT EXISTS notifications (notification_id bigserial PRIMARY KEY, tenant_id text NOT NULL DEFAULT 'default', alert_key text NOT NULL, started_at timestamptz NOT NULL, channel text NOT NULL, phase text NOT NULL, sent_at timestamptz NOT NULL DEFAULT now(), ok boolean NOT NULL, attempts integer NOT NULL, error text);
+CREATE UNIQUE INDEX IF NOT EXISTS alert_store_notifications_once ON notifications (tenant_id, alert_key, started_at, channel, phase);
+CREATE TABLE IF NOT EXISTS silences (silence_id uuid PRIMARY KEY, tenant_id text NOT NULL DEFAULT 'default', matchers jsonb NOT NULL, reason text NOT NULL, starts_at timestamptz NOT NULL, ends_at timestamptz NOT NULL);
+TRUNCATE alerts, notifications, silences RESTART IDENTITY`
+
 // TestINTALERT016_HistoryPurgeKeepsOpenEpisodes: the purge removes resolved
 // alerts, deliveries and silences older than the cutoff, and keeps a firing
 // episode with its deliveries however old it is, since its dedup depends on them.
@@ -157,12 +167,7 @@ func TestINTALERT016_HistoryPurgeKeepsOpenEpisodes(t *testing.T) {
 		pg.Lock(t)
 		pool := pg.Pool(t, "app", pgtest.RoleSuperuser)
 		ctx := context.Background()
-		_, err := pool.Exec(ctx, `
-CREATE TABLE IF NOT EXISTS alerts (alert_key text NOT NULL, tenant_id text NOT NULL DEFAULT 'default', rule_id text NOT NULL, severity text NOT NULL, state text NOT NULL, cluster_id bigint, instance_id uuid, datname text, labels jsonb NOT NULL, value double precision, summary text NOT NULL, started_at timestamptz NOT NULL, last_eval_at timestamptz NOT NULL, resolved_at timestamptz, PRIMARY KEY (tenant_id, alert_key, started_at));
-CREATE TABLE IF NOT EXISTS notifications (notification_id bigserial PRIMARY KEY, tenant_id text NOT NULL DEFAULT 'default', alert_key text NOT NULL, started_at timestamptz NOT NULL, channel text NOT NULL, phase text NOT NULL, sent_at timestamptz NOT NULL DEFAULT now(), ok boolean NOT NULL, attempts integer NOT NULL, error text);
-CREATE UNIQUE INDEX IF NOT EXISTS alert_store_notifications_once ON notifications (tenant_id, alert_key, started_at, channel, phase);
-CREATE TABLE IF NOT EXISTS silences (silence_id uuid PRIMARY KEY, tenant_id text NOT NULL DEFAULT 'default', matchers jsonb NOT NULL, reason text NOT NULL, starts_at timestamptz NOT NULL, ends_at timestamptz NOT NULL);
-TRUNCATE alerts, notifications, silences RESTART IDENTITY`)
+		_, err := pool.Exec(ctx, historyPurgeSchema)
 		require.NoError(t, err)
 
 		now := time.Now().UTC().Truncate(time.Microsecond)
@@ -229,5 +234,43 @@ TRUNCATE alerts, notifications, silences RESTART IDENTITY`)
 		var silences int
 		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM silences`).Scan(&silences))
 		require.Equal(t, 2, silences, "the silence that expired long ago goes; the recent and the active one stay")
+	})
+}
+
+// TestINTALERT017_PurgeRunsInBatches: a backlog larger than one batch is removed
+// in full, and the batches leave the open episode and its delivery alone.
+func TestINTALERT017_PurgeRunsInBatches(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		pool := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		ctx := context.Background()
+		_, err := pool.Exec(ctx, historyPurgeSchema)
+		require.NoError(t, err)
+
+		now := time.Now().UTC().Truncate(time.Microsecond)
+		old := now.Add(-100 * 24 * time.Hour)
+		st := &pgStore{pool: pool, purgeBatch: 2}
+		const backlog = 5
+		for i := range backlog {
+			// Not old itself: the open episode below starts at old, and the guard matches on the start.
+			at := old.Add(-time.Hour + time.Duration(i)*time.Minute)
+			key := fmt.Sprintf("done-%d", i)
+			a := Alert{Key: key, RuleID: "r", Severity: SeverityWarning, State: StateResolved, Summary: "s", StartedAt: at, LastEvalAt: at, ResolvedAt: &at, Labels: map[string]string{}}
+			require.NoError(t, st.Upsert(ctx, a))
+			_, err := pool.Exec(ctx, `INSERT INTO notifications (alert_key, started_at, channel, phase, sent_at, ok, attempts) VALUES ($1,$2,'slack','fire',$3,true,1)`, key+"/"+at.Format(time.RFC3339Nano), at, at)
+			require.NoError(t, err)
+		}
+		open := Alert{Key: "open", RuleID: "r", Severity: SeverityWarning, State: StateFiring, Summary: "s", StartedAt: old, LastEvalAt: old, Labels: map[string]string{}}
+		require.NoError(t, st.Upsert(ctx, open))
+		_, err = pool.Exec(ctx, `INSERT INTO notifications (alert_key, started_at, channel, phase, sent_at, ok, attempts) VALUES ('open/x',$1,'slack','fire',$1,true,1)`, old)
+		require.NoError(t, err)
+
+		require.NoError(t, st.Purge(ctx, now.Add(-historyRetention)))
+
+		var alerts, deliveries int
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM alerts`).Scan(&alerts))
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM notifications`).Scan(&deliveries))
+		require.Equal(t, 1, alerts, "every resolved alert of the backlog goes, in batches of two")
+		require.Equal(t, 1, deliveries, "every delivery of the backlog goes, and the open episode's stays")
 	})
 }

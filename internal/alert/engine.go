@@ -121,7 +121,7 @@ type Engine struct {
 	started     bool
 	stopped     bool
 	stateLoaded bool
-	// purgedAt is when the history was last purged; zero until the first.
+	// purgedAt is when a purge of the history was last attempted; zero until the first.
 	purgedAt time.Time
 }
 
@@ -406,8 +406,9 @@ func (e *Engine) Tick(ctx context.Context) error {
 }
 
 // purgeHistory removes the history past historyRetention, at most once per
-// purgeInterval. The time of the last purge is kept only when it succeeds, so
-// a failed one is tried again on the next pass.
+// purgeInterval. An attempt counts even when it fails: a database that is down,
+// or a backlog that does not finish within the pass, is then tried again after
+// the interval, not on every pass.
 func (e *Engine) purgeHistory(ctx context.Context, now time.Time) error {
 	p, ok := e.store.(purger)
 	if !ok {
@@ -415,6 +416,9 @@ func (e *Engine) purgeHistory(ctx context.Context, now time.Time) error {
 	}
 	e.mu.Lock()
 	due := e.purgedAt.IsZero() || now.Sub(e.purgedAt) >= purgeInterval
+	if due {
+		e.purgedAt = now
+	}
 	e.mu.Unlock()
 	if !due {
 		return nil
@@ -422,9 +426,6 @@ func (e *Engine) purgeHistory(ctx context.Context, now time.Time) error {
 	if err := p.Purge(ctx, now.Add(-historyRetention)); err != nil {
 		return fmt.Errorf("purge alert history: %w", err)
 	}
-	e.mu.Lock()
-	e.purgedAt = now
-	e.mu.Unlock()
 	return nil
 }
 

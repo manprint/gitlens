@@ -83,7 +83,7 @@ func (s *purgeStore) Purge(_ context.Context, before time.Time) error {
 
 // TestTick_PurgesHistoryOncePerInterval: the first pass purges the history
 // past its retention, the passes before purgeInterval has elapsed do not, and
-// a purge that fails is tried again on the next pass.
+// a purge that fails is not tried again before the interval has elapsed.
 func TestTick_PurgesHistoryOncePerInterval(t *testing.T) {
 	t0 := time.Unix(1_000_000, 0)
 	clk := clock.NewFake(t0)
@@ -108,7 +108,10 @@ func TestTick_PurgesHistoryOncePerInterval(t *testing.T) {
 	store.err = nil
 	clk.Advance(time.Second)
 	require.NoError(t, e.Tick(ctx))
-	require.Len(t, store.cutoffs, 3, "a failed purge is retried on the next pass")
+	require.Len(t, store.cutoffs, 2, "a failed purge is not retried before the interval has elapsed")
+	clk.Advance(purgeInterval)
+	require.NoError(t, e.Tick(ctx))
+	require.Len(t, store.cutoffs, 3, "and it is retried once the interval has elapsed")
 }
 
 func TestTick_RestoresPersistedFiringAlert(t *testing.T) {

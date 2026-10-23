@@ -18,9 +18,15 @@ type storeDB interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }
-type pgStore struct{ pool storeDB }
+type pgStore struct {
+	pool       storeDB
+	purgeBatch int // rows per DELETE of a purge; defaultPurgeBatch when zero
+}
 
-func NewPgStore(pool *pgxpool.Pool) Store { return &pgStore{pool: pool} }
+// defaultPurgeBatch bounds the rows that one DELETE of a purge removes.
+const defaultPurgeBatch = 1000
+
+func NewPgStore(pool *pgxpool.Pool) Store { return &pgStore{pool: pool, purgeBatch: defaultPurgeBatch} }
 
 func (s *pgStore) Rules(ctx context.Context) ([]Rule, error) {
 	rows, err := s.pool.Query(ctx, `SELECT rule_id, enabled, severity, scope, metric, comparator, threshold, for_seconds, event_type, summary FROM alert_rules WHERE enabled ORDER BY rule_id`)
@@ -107,16 +113,35 @@ func (s *pgStore) MarkNotification(ctx context.Context, dedupID, channel, phase 
 // deliveries of episodes that no longer have an open alert, and silences that
 // ended before it. A pending or firing alert keeps its row, and so does every
 // delivery of an episode still open, because the dedup of that episode is
-// the claim those rows hold.
+// the claim those rows hold. The rows go in batches, each committed by itself,
+// so a purge that the pass's deadline cuts short keeps what it removed and the
+// next attempt carries on.
 func (s *pgStore) Purge(ctx context.Context, before time.Time) error {
-	if _, err := s.pool.Exec(ctx, `DELETE FROM alerts WHERE state='resolved' AND resolved_at < $1`, before); err != nil {
+	batch := s.purgeBatch
+	if batch <= 0 {
+		batch = defaultPurgeBatch
+	}
+	if err := purgeBatches(ctx, s.pool, batch, `DELETE FROM alerts WHERE (tenant_id, alert_key, started_at) IN (SELECT tenant_id, alert_key, started_at FROM alerts WHERE state='resolved' AND resolved_at < $1 LIMIT $2)`, before); err != nil {
 		return err
 	}
-	if _, err := s.pool.Exec(ctx, `DELETE FROM notifications n WHERE n.sent_at < $1 AND NOT EXISTS (SELECT 1 FROM alerts a WHERE a.started_at = n.started_at AND a.state <> 'resolved')`, before); err != nil {
+	if err := purgeBatches(ctx, s.pool, batch, `DELETE FROM notifications WHERE notification_id IN (SELECT n.notification_id FROM notifications n WHERE n.sent_at < $1 AND NOT EXISTS (SELECT 1 FROM alerts a WHERE a.started_at = n.started_at AND a.state <> 'resolved') LIMIT $2)`, before); err != nil {
 		return err
 	}
-	_, err := s.pool.Exec(ctx, `DELETE FROM silences WHERE ends_at < $1`, before)
-	return err
+	return purgeBatches(ctx, s.pool, batch, `DELETE FROM silences WHERE silence_id IN (SELECT silence_id FROM silences WHERE ends_at < $1 LIMIT $2)`, before)
+}
+
+// purgeBatches runs query, a DELETE of at most batch rows that takes the cutoff
+// and the batch size, until a run removes fewer rows than the batch.
+func purgeBatches(ctx context.Context, db storeDB, batch int, query string, before time.Time) error {
+	for {
+		tag, err := db.Exec(ctx, query, before, batch)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() < int64(batch) {
+			return nil
+		}
+	}
 }
 
 func (s *pgStore) Active(ctx context.Context, f Filter) ([]Alert, error) {
