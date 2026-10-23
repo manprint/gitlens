@@ -5,6 +5,7 @@ package check
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/manprint/pglens/internal/pgtype"
@@ -66,5 +67,36 @@ func TestINTACT004_ActivityMetricNamesAcrossVersions(t *testing.T) {
 			}
 			require.True(t, found, name)
 		}
+	})
+}
+
+// TestINTACT005_IdleInTransactionCountsAbortedSessions: a session whose
+// transaction failed and that was left idle keeps the transaction open, so it
+// is reported as 'idle in transaction (aborted)'. It is an idle-in-transaction
+// session for the maximum that the advisor and the UI read.
+func TestINTACT005_IdleInTransactionCountsAbortedSessions(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		pool := pg.Pool(t, "app", pgtest.RoleT0)
+		aborted, err := pool.Acquire(ctx)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = aborted.Exec(context.Background(), "ROLLBACK")
+			aborted.Release()
+		})
+		_, err = aborted.Exec(ctx, "BEGIN")
+		require.NoError(t, err)
+		_, err = aborted.Exec(ctx, "SELECT 1/0")
+		require.Error(t, err)
+		time.Sleep(1500 * time.Millisecond)
+
+		conn, err := pool.Acquire(ctx)
+		require.NoError(t, err)
+		defer conn.Release()
+		target := &registryTestTarget{conn: conn, version: pg.Version, database: "app", instanceID: uuid.New(), clusterID: 1, role: pgtype.RolePrimary, permTier: pgtype.TierReadOnly}
+		result, err := (&activityCheck{}).Scrape(ctx, target)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, metricValue(result, "pg_max_idle_in_transaction_seconds", nil), 1.0)
 	})
 }

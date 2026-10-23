@@ -44,7 +44,7 @@ SELECT COALESCE(state, 'unknown') AS state,
        COALESCE(wait_event_type, 'CPU') AS wait_event_type,
        count(*) AS n,
        COALESCE(max(EXTRACT(epoch FROM now() - xact_start)), 0) AS max_xact_age,
-       COALESCE(max(EXTRACT(epoch FROM now() - state_change)) FILTER (WHERE state = 'idle in transaction'), 0) AS max_idle_in_txn
+       COALESCE(max(EXTRACT(epoch FROM now() - state_change)) FILTER (WHERE state IN ('idle in transaction', 'idle in transaction (aborted)')), 0) AS max_idle_in_txn
 FROM pg_stat_activity
 WHERE backend_type = 'client backend'
   AND pid <> pg_backend_pid()
