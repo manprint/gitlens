@@ -59,6 +59,7 @@ var factKinds = map[string]FactKind{
 	"security_definer_function": {Check: "function_security", Replace: true},
 	"subscription":              {Check: "logical_replication", Replace: true},
 	BloatUnreadableFact:         {Check: "bloat_estimate"},
+	"xmin_horizon":              {Check: "activity", Replace: true},
 }
 
 // LookupFactKind returns the description of a fact kind, and whether the

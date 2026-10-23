@@ -373,7 +373,15 @@ func init() {
 			}
 		}
 		if count > 10 && workers > 0 && busy >= workers {
-			return []Finding{relationFinding("vacuum.starvation", SeverityCritical, "", "vacuum", "Vacuum starvation", fmt.Sprintf("%d tables exceed the dead tuple threshold while all workers are busy", count), "Investigate blocked or undersized autovacuum workers", map[string]any{"tables": count, "jobs": busy, "workers": workers})}
+			detail := fmt.Sprintf("%d tables exceed the dead tuple threshold while all workers are busy", count)
+			evidence := map[string]any{"tables": count, "jobs": busy, "workers": workers}
+			// A held xmin horizon is what stops the workers from removing the
+			// dead rows, so the finding names the holder when one is known.
+			if holder := xminHolderEvidence(s); holder != nil {
+				detail = withHolderDetail(detail, holder)
+				evidence["xmin_holder"] = holder
+			}
+			return []Finding{relationFinding("vacuum.starvation", SeverityCritical, "", "vacuum", "Vacuum starvation", detail, "Investigate blocked or undersized autovacuum workers", evidence)}
 		}
 		return nil
 	}})

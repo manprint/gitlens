@@ -17,11 +17,21 @@ import {
 } from '@/lib/activity'
 import { formatCount, formatDuration, formatPercent, formatRelative } from '@/lib/format'
 import { sessionKey, type LockNode } from '@/lib/locks'
+import {
+  XMIN_HOLDER_KIND_LABELS,
+  XMIN_IDENTITY_LABELS,
+  XMIN_NONE_TEXT,
+  XMIN_PENDING_TEXT,
+  xminHorizonState,
+  xminIdentityText,
+  type XminHorizon,
+} from '@/lib/xmin'
 import { SignalActions } from './SignalActions'
 
 export interface ActivityResponseLike {
   stale: boolean
   metrics: ActivityMetrics
+  xmin_horizon?: XminHorizon | null
 }
 
 function sessionValue(value: unknown): string {
@@ -108,6 +118,48 @@ function valueOrUnknown(value: number | null) {
 
 function durationOrUnknown(value: number | null) {
   return value === null ? <Unknown /> : formatDuration(value)
+}
+
+// The oldest xmin holder names what keeps VACUUM from removing dead rows. Its
+// age is in transaction IDs; the time since its start is shown only when the
+// holder has one. Query text is never part of it.
+function XminHorizonBlock({
+  metrics,
+  holder,
+}: {
+  metrics: ActivityMetrics
+  holder: XminHorizon | null | undefined
+}) {
+  const xmin = xminHorizonState(metrics, holder)
+  return (
+    <div className="mt-6">
+      <h3 className="font-medium">Oldest xmin holder</h3>
+      {xmin.state === 'holder' ? (
+        <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[max-content_1fr]">
+          <dt className="text-muted-foreground">Holder kind</dt>
+          <dd>{XMIN_HOLDER_KIND_LABELS[xmin.holder.holder_kind]}</dd>
+          <dt className="text-muted-foreground">{XMIN_IDENTITY_LABELS[xmin.holder.holder_kind]}</dt>
+          <dd className="break-all">{xminIdentityText(xmin.holder)}</dd>
+          <dt className="text-muted-foreground">Age in transaction IDs</dt>
+          <dd className="tabular-nums">{formatCount(xmin.holder.age_xids)}</dd>
+          <dt className="text-muted-foreground">Time since start</dt>
+          <dd>
+            {xmin.holder.age_seconds === null
+              ? 'not measured for this holder kind'
+              : formatDuration(xmin.holder.age_seconds)}
+          </dd>
+        </dl>
+      ) : xmin.state === 'none' ? (
+        <p className="text-muted-foreground mt-2 text-sm">{XMIN_NONE_TEXT}</p>
+      ) : (
+        <p className="text-muted-foreground mt-2 text-sm">{XMIN_PENDING_TEXT}</p>
+      )}
+      <p className="text-muted-foreground mt-2 text-sm">
+        The xmin horizon is the oldest transaction ID VACUUM must keep. Time since start is the
+        start of the session's transaction, or the prepare time of a prepared transaction.
+      </p>
+    </div>
+  )
 }
 
 function BreakdownList({
@@ -254,6 +306,8 @@ export function ActivitySection({
         the sum of each database's latest rate; identifying involved statements requires PostgreSQL
         log analysis.
       </p>
+
+      <XminHorizonBlock holder={response.xmin_horizon} metrics={response.metrics} />
 
       <div className="mt-6">
         <h3 className="font-medium">Connections by application</h3>

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -24,6 +25,20 @@ type activityAPIResponse struct {
 	InstanceID string                 `json:"instance_id"`
 	Stale      bool                   `json:"stale"`
 	Metrics    map[string][]apiMetric `json:"metrics"`
+	// XminHorizon is the oldest holder of the xmin horizon in the latest
+	// activity sample. It is null when no holder is known from a recent sample.
+	XminHorizon *xminHorizonAPI `json:"xmin_horizon"`
+}
+
+// xminHorizonAPI is the oldest xmin holder. The identity is a pid, a slot
+// name, a standby's application_name or a prepared transaction's gid. It is
+// never query text.
+type xminHorizonAPI struct {
+	HolderKind string    `json:"holder_kind"`
+	Identity   string    `json:"identity"`
+	AgeXIDs    int64     `json:"age_xids"`
+	AgeSeconds *float64  `json:"age_seconds"`
+	SampledAt  time.Time `json:"sampled_at"`
 }
 
 type apiMetric struct {
@@ -124,7 +139,8 @@ func (a *API) handleActivity(w http.ResponseWriter, r *http.Request) {
 		         'pg_connections_used','pg_connections_limit','pg_connections_used_ratio',
 		         'pg_connections_by_database','pg_connections_by_application','pg_backends',
 		         'pg_max_xact_age_seconds','pg_max_idle_in_transaction_seconds','pg_max_state_age_seconds',
-		         'pg_prepared_xacts','pg_oldest_prepared_xact_seconds','pg_max_datfrozenxid_age'))
+		         'pg_prepared_xacts','pg_oldest_prepared_xact_seconds','pg_max_datfrozenxid_age',
+		         'pg_xmin_horizon_age_xids'))
 		    OR (ts >= now() - interval '90 seconds' AND metric = 'pg_deadlocks_total'))
 		ORDER BY ts DESC`, id)
 	if err != nil {
@@ -150,7 +166,39 @@ func (a *API) handleActivity(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "rows error", err.Error())
 		return
 	}
+	holder, err := a.oldestXminHolder(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query failed", err.Error())
+		return
+	}
+	resp.XminHorizon = holder
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// oldestXminHolder reads the xmin_horizon fact that the activity check writes
+// with every sample. It answers nil when no holder fact is fresh: the fact is
+// replaced by each sample, so one older than the activity window is no longer
+// the instance's holder. A fact that does not decode is logged and left out of
+// the answer, which the stored value of a fact the server wrote cannot cause.
+func (a *API) oldestXminHolder(ctx context.Context, id uuid.UUID) (*xminHorizonAPI, error) {
+	var raw []byte
+	var seen time.Time
+	err := a.pool.QueryRow(ctx, `SELECT value_json, last_seen FROM object_facts
+		WHERE tenant_id='default' AND instance_id=$1 AND kind='xmin_horizon' AND key='oldest'
+		  AND last_seen >= now() - interval '30 seconds'`, id).Scan(&raw, &seen)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var holder xminHorizonAPI
+	if err := json.Unmarshal(raw, &holder); err != nil {
+		log.Printf("decode xmin horizon of instance %s: %v", id, err)
+		return nil, nil
+	}
+	holder.SampledAt = seen
+	return &holder, nil
 }
 
 func (a *API) handleDatabases(w http.ResponseWriter, r *http.Request) {

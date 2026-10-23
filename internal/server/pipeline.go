@@ -524,6 +524,9 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 					// phase 8: plans are routed to their dedicated history table.
 					continue
 				}
+				if f.Kind == "xmin_horizon" {
+					f.ValueJSON = withholdXminIdentity(f.ValueJSON)
+				}
 				var text *string
 				if f.ValueText != "" || f.EmptySetting() {
 					v := f.ValueText
@@ -1182,6 +1185,35 @@ func withholdLockTreeQueries(raw []byte) []byte {
 		return append([]byte(nil), raw...)
 	}
 	out, err := json.Marshal(tree)
+	if err != nil {
+		return []byte("{}")
+	}
+	return out
+}
+
+// withholdXminIdentity applies the identity rule of the agent to the oldest xmin
+// holder again. A standby's application_name and a prepared transaction's gid
+// are free text, so they are cut and withheld as redact.Identity gives them. A
+// session's pid and a slot's name are shipped as they are. The agent already
+// gives the same answer, so this changes only a value from a sender that did not
+// apply the rule.
+func withholdXminIdentity(raw []byte) []byte {
+	var holder map[string]any
+	if err := json.Unmarshal(raw, &holder); err != nil {
+		// A value that is not an object cannot be checked, so it is not kept.
+		return []byte("{}")
+	}
+	kind, _ := holder["holder_kind"].(string)
+	identity, _ := holder["identity"].(string)
+	if kind != "standby" && kind != "prepared" {
+		return append([]byte(nil), raw...)
+	}
+	safe := redact.Identity(identity)
+	if safe == identity {
+		return append([]byte(nil), raw...)
+	}
+	holder["identity"] = safe
+	out, err := json.Marshal(holder)
 	if err != nil {
 		return []byte("{}")
 	}
