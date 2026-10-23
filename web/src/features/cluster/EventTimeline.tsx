@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import { describeEvent, sortEventsNewestFirst, type ClusterEvent } from '@/lib/events'
+import { UNKNOWN } from '@/lib/format/shared'
 import { formatTimestamp } from '@/lib/format/timestamp'
 
 export interface EventTimelineProps {
@@ -20,7 +21,7 @@ function eventDay(ts: string): string {
 
 function eventTime(ts: string): string {
   const formatted = formatTimestamp(ts, 'UTC', 'en-GB')
-  return formatted === 'Unknown' ? 'Unknown time' : formatted.slice(11, 19)
+  return formatted === UNKNOWN ? 'Unknown time' : formatted.slice(11, 19)
 }
 
 function groupEvents(events: readonly ClusterEvent[]): EventDay[] {
