@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -141,4 +142,16 @@ func TestMakefile_BuildImagesPullTheBaseImages(t *testing.T) {
 		}
 	}
 	require.Len(t, builds, 2)
+}
+
+// go.mod pins the standard library with its go line and has no toolchain
+// directive, and the comments that explain the pin must say so. A comment that
+// names a toolchain directive as the pin sends a maintainer to add one.
+func TestPinComments_NameTheGoLineNotAToolchainDirective(t *testing.T) {
+	claim := regexp.MustCompile("`toolchain`\\s+(?:#\\s*)?directive")
+	for _, file := range []string{filepath.Join("..", "Makefile"), filepath.Join("..", ".github", "workflows", "ci.yml")} {
+		text := string(readFile(t, file))
+		require.NotRegexp(t, claim, text, "%s names a toolchain directive as the pin", file)
+		require.Contains(t, text, "`go` line in go.mod", file)
+	}
 }

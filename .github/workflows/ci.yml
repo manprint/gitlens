@@ -117,10 +117,11 @@ jobs:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
-      # go.mod's `toolchain` directive is what pins the standard library out of
-      # a long list of advisories reachable from the ingest endpoint, the
-      # agent's HTTP client and the notification channels. Without this job
-      # nothing proves the pin still holds after a dependency bump.
+      # The `go` line in go.mod is what pins the standard library out of a long
+      # list of advisories reachable from the ingest endpoint, the agent's HTTP
+      # client and the notification channels; go.mod has no separate toolchain
+      # directive. Without this job nothing proves the pin still holds after a
+      # dependency bump.
       - name: Check module hygiene
         run: make tidy-check
       - name: Install govulncheck

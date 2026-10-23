@@ -43,8 +43,8 @@ vet-tags:
 	$(GO) vet -tags=e2e ./...
 
 # Standard-library advisories reach this code through the ingest endpoint, the
-# agent's HTTP client and the notification channels; go.mod's `toolchain`
-# directive is what pins them out, and this is what proves the pin still holds.
+# agent's HTTP client and the notification channels; the `go` line in go.mod
+# is what pins them out, and this is what proves the pin still holds.
 vuln:
 	@if command -v govulncheck >/dev/null 2>&1; then \
 		govulncheck ./...; \
