@@ -68,10 +68,13 @@ func (p *Pipeline) maybeEvict() {
 	// The topology engine accumulates exactly the same way the delta engine
 	// does — one entry per instance, forever — and was never swept.
 	p.topo.Evict(cutoff)
-	// A mark ahead of the clock is ignored by countChecks, so it is dropped here
-	// too rather than kept until the clock reaches it.
+	// A mark ahead of the clock is kept until the clock passes it: a resend of
+	// that result is recognised only from then on, so dropping the mark earlier
+	// would count it twice. A stamp more than an hour ahead is dropped too, so a
+	// clock set far in the future cannot keep its marks for years.
+	ahead := now.Add(time.Hour)
 	for key, ts := range p.checkCounted {
-		if ts.Before(cutoff) || ts.After(now) {
+		if ts.Before(cutoff) || ts.After(ahead) {
 			delete(p.checkCounted, key)
 		}
 	}
@@ -1079,8 +1082,10 @@ type checkOutcome struct {
 //
 // A mark stamped ahead of the server clock comes from an agent whose clock is
 // ahead. Honouring it would hide every real result until the server clock
-// caught up with it, so it is ignored while it is ahead. Once the clock passes
-// it, a resend of the same result is recognised again.
+// caught up with it, so it is ignored while it is ahead: a resend of that
+// result is counted again until the clock passes its stamp. Once the clock has
+// passed it, a resend is recognised, as long as maybeEvict kept the mark, which
+// it does for a stamp at most an hour ahead.
 func (p *Pipeline) countChecks(outcomes []checkOutcome) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

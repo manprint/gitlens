@@ -388,10 +388,34 @@ func TestPipeline_ResendOfAheadStampedResultCountsOnce(t *testing.T) {
 	require.Equal(t, before+1, pglensCheckOKTotal.Get(key), "a resend of a result counted once is not counted again")
 }
 
-// TestPipeline_MaybeEvictDropsMarksAheadOfTheClock: a mark ahead of the clock
-// does nothing, so it is removed with the old ones instead of being kept until
-// the clock reaches it.
-func TestPipeline_MaybeEvictDropsMarksAheadOfTheClock(t *testing.T) {
+// TestPipeline_ResendOfAheadStampedResultSurvivesEviction: an eviction pass
+// while a result's stamp is still ahead of the clock must keep its mark. The
+// resend that arrives once the clock has passed the stamp is then recognised;
+// a dropped mark would count that resend a second time.
+func TestPipeline_ResendOfAheadStampedResultSurvivesEviction(t *testing.T) {
+	t.Parallel()
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	fc := clock.NewFake(start)
+	p := NewPipeline(nil, fc)
+	instID := uuid.New()
+	key := checkKey{instance: instID.String(), check: "activity"}
+	ck := checkCountKey{instance: instID, check: "activity"}
+	ts := start.Add(time.Hour)
+	before := pglensCheckOKTotal.Get(key)
+
+	p.countChecks([]checkOutcome{{checkCountKey: ck, ts: ts}})
+	fc.Advance(10 * time.Minute)
+	p.maybeEvict()
+	fc.Advance(51 * time.Minute)
+	p.countChecks([]checkOutcome{{checkCountKey: ck, ts: ts}})
+	require.Equal(t, before+1, pglensCheckOKTotal.Get(key), "a resend after the clock passed the stamp is not counted again")
+}
+
+// TestPipeline_MaybeEvictDropsMarksFarAheadOfTheClock: a mark more than an hour
+// ahead of the clock is dropped with the old ones, so a clock set far in the
+// future does not keep its marks alive for years. A mark within the hour is
+// kept, see TestPipeline_ResendOfAheadStampedResultSurvivesEviction.
+func TestPipeline_MaybeEvictDropsMarksFarAheadOfTheClock(t *testing.T) {
 	t.Parallel()
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	fc := clock.NewFake(start)
