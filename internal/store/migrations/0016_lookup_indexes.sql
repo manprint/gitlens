@@ -1,6 +1,10 @@
 -- Two lookups scanned far more rows than they needed, and neither had an index
 -- led by the columns it binds. Both use plain CREATE INDEX, as 0015 does for
 -- events_ts_idx, because the migration runs inside one transaction.
+--
+-- A plain CREATE INDEX takes a SHARE lock for the build, so inserts into
+-- metrics_replication and query_texts wait until it finishes. Run the upgrade
+-- in a quiet window when those tables are large.
 
 -- The slots list reports, for each inactive slot, its last active reading. The
 -- lookup binds the tenant, the instance, the slot and the activity, and orders
