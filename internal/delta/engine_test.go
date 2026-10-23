@@ -59,6 +59,31 @@ func TestEngine_Rule2_OutOfOrderIgnored(t *testing.T) {
 	require.InDelta(t, 1.0, pt.Rate, 1e-9)
 }
 
+// TestEngine_Rule2_ClockStepBackRebasesBaseline: an agent clock that stepped
+// forward and was corrected leaves every later sample far behind the baseline
+// it stamped. Dropping them would blank the series until the clock caught up,
+// so a sample more than maxGap behind the baseline moves the baseline instead.
+func TestEngine_Rule2_ClockStepBackRebasesBaseline(t *testing.T) {
+	t.Parallel()
+	e := delta.New(delta.Options{MaxGap: 10 * time.Minute})
+	key := mkKey("m")
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	_, _ = e.Observe(delta.Observation{Key: key, TS: t0, Value: 100})
+	// The clock stepped forward two hours for one sample.
+	pt, ev := e.Observe(delta.Observation{Key: key, TS: t0.Add(2 * time.Hour), Value: 110})
+	require.Nil(t, pt)
+	require.Nil(t, ev)
+	// The clock is corrected: this sample is two hours behind the baseline.
+	pt, ev = e.Observe(delta.Observation{Key: key, TS: t0.Add(2 * time.Minute), Value: 120})
+	require.Nil(t, pt, "the sample that restores the clock gives no rate, it only moves the baseline")
+	require.Nil(t, ev)
+	// The next sample has a rate again.
+	pt, ev = e.Observe(delta.Observation{Key: key, TS: t0.Add(3 * time.Minute), Value: 180})
+	require.NotNil(t, pt, "rates must resume after the clock is corrected")
+	require.Nil(t, ev)
+	require.InDelta(t, 1.0, pt.Rate, 1e-9)
+}
+
 func TestEngine_Rule3_StatsResetChanged(t *testing.T) {
 	t.Parallel()
 	e := delta.New(delta.Options{})

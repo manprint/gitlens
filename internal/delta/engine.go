@@ -115,6 +115,16 @@ func (e *Engine) observe(o Observation) (*Point, *ResetEvent) {
 
 	// Rule 2: duplicate or out-of-order sample must not corrupt baseline
 	if !o.TS.After(prev.ts) {
+		// A sample more than maxGap behind the baseline is not out of order: the
+		// clock that stamped the baseline has stepped since, and a forward step
+		// that was corrected leaves the baseline ahead of every real sample. Left
+		// alone, the baseline would drop each real sample until the clock caught up
+		// with it, so the baseline moves to this sample, with no rate point. A
+		// duplicate, or a sample only slightly late, keeps the baseline as it is.
+		if prev.ts.Sub(o.TS) > e.maxGap {
+			cp := copyStatsReset(o.StatsReset)
+			e.prev[o.Key] = state{ts: o.TS, value: o.Value, statsReset: cp}
+		}
 		return nil, nil
 	}
 
