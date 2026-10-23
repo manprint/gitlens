@@ -18,6 +18,13 @@ func Key(r Rule, s Sample) string {
 		subject = uuidText(s.InstanceID) + ":" + s.Datname
 	default:
 		subject = uuidText(s.InstanceID)
+		// A sample that names a database is that database's episode, even when
+		// its rule is instance-scoped. The databases of one instance used to
+		// share an episode, so a database below the threshold closed the
+		// episode of the one above it.
+		if s.Datname != "" {
+			subject += ":" + s.Datname
+		}
 	}
 	return r.ID + "/" + subject + "/" + pgtype.CanonicalLabels(s.Labels)
 }

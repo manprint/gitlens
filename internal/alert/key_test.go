@@ -47,3 +47,10 @@ func TestDedupID_DiffersAfterRefire(t *testing.T) {
 	b.StartedAt = b.StartedAt.Add(time.Second)
 	require.NotEqual(t, DedupID(a), DedupID(b))
 }
+func TestKey_InstanceScopeKeepsTheDatabaseOfASample(t *testing.T) {
+	r := validRule()
+	r.Scope = ScopeInstance
+	id := keyID("11111111-1111-1111-1111-111111111111")
+	require.NotEqual(t, Key(r, Sample{InstanceID: id, Datname: "app"}), Key(r, Sample{InstanceID: id, Datname: "batch"}))
+	require.Equal(t, Key(r, Sample{InstanceID: id}), Key(r, Sample{InstanceID: id}))
+}

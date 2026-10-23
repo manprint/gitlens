@@ -602,3 +602,52 @@ func TestTick_AFiringEpisodeRefreshesItsStoredRow(t *testing.T) {
 	require.True(t, last.LastEvalAt.Equal(start.Add(time.Hour)), "the stored row must carry the last pass, got %s", last.LastEvalAt)
 	require.Len(t, notifier.alerts, 1)
 }
+
+// passSource reports the samples of each pass, computed from the pass time.
+type passSource func(now time.Time) []Sample
+
+func (s passSource) Kind() string { return "metric" }
+func (s passSource) Samples(_ context.Context, r Rule, now time.Time) ([]Sample, error) {
+	if r.ID != "custom" {
+		return nil, nil
+	}
+	return s(now), nil
+}
+
+// TestTick_DatabasesOfOneInstanceKeepTheirOwnEpisodes — an instance-scoped rule
+// on a per-database metric, such as db.deadlock_rate, gets one sample per
+// database. They used to share one episode, so a database below the threshold
+// cancelled the episode of the database above it, whatever the order of the
+// samples.
+func TestTick_DatabasesOfOneInstanceKeepTheirOwnEpisodes(t *testing.T) {
+	rates := map[string]float64{"app": 0.5, "batch": 0.05}
+	for _, tc := range []struct {
+		name  string
+		order []string
+	}{
+		{"hot database first", []string{"app", "batch"}},
+		{"cool database first", []string{"batch", "app"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			id := uuid.New()
+			clk := clock.NewFake(time.Unix(100, 0))
+			rule := Rule{ID: "custom", Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "pg_deadlocks_total", Comparator: GT, Threshold: 0.1, For: 5 * time.Minute, Summary: "x"}
+			store, notifier := &engineStore{rules: []Rule{rule}}, &engineNotifier{}
+			source := passSource(func(now time.Time) []Sample {
+				var out []Sample
+				for _, db := range tc.order {
+					out = append(out, Sample{InstanceID: &id, Datname: db, Value: rates[db], TS: now})
+				}
+				return out
+			})
+			e := NewEngineWithInterval(nil, clk, 30*time.Second, store, notifier, []Source{source})
+			for i := 0; i < 12; i++ {
+				require.NoError(t, e.Tick(context.Background()))
+				clk.Advance(30 * time.Second)
+			}
+			require.Len(t, notifier.alerts, 1)
+			require.Equal(t, "app", notifier.alerts[0].Datname)
+			require.Equal(t, StateFiring, notifier.alerts[0].State)
+		})
+	}
+}
