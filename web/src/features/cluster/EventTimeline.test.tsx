@@ -144,4 +144,23 @@ describe('EventTimeline', () => {
       .find((article) => within(article).queryByText('Cluster identity conflict') !== null)
     expect(identityConflict).toHaveAttribute('data-severity', 'warning')
   })
+
+  it('UI-CLUS-037 an event with a malformed timestamp shows Unknown time, not a blank time', () => {
+    renderWithProviders(
+      <EventTimeline
+        events={[
+          {
+            cluster_id: '1',
+            event_id: 1,
+            instance_id: null,
+            payload: {},
+            ts: 'not-a-date',
+            type: 'agent_up',
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByText('Unknown time')).toBeInTheDocument()
+  })
 })
