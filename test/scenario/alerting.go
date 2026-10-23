@@ -337,12 +337,20 @@ func runAlertSilence(ctx context.Context, e *Env) error {
 	if suppressed, _ := rows[0]["suppressed"].(bool); !suppressed {
 		return fmt.Errorf("firing alert was not marked suppressed: %v", rows[0])
 	}
-	bodies, err := receiverCall(ctx, e.MockReceiverURL, http.MethodGet, "/_received", nil)
-	if err != nil {
-		return err
-	}
-	if len(bodies) != 0 {
-		return fmt.Errorf("silenced firing alert delivered %d notifications", len(bodies))
+	// Seeing the firing state does not prove the notifier has finished its
+	// tick. A delivery that the silence failed to stop can land a tick later,
+	// so the receiver is read across three 2s engine ticks, and the first
+	// delivery fails the scenario.
+	settle := time.Now().Add(6 * time.Second)
+	for time.Now().Before(settle) {
+		bodies, err := receiverCall(ctx, e.MockReceiverURL, http.MethodGet, "/_received", nil)
+		if err != nil {
+			return err
+		}
+		if len(bodies) != 0 {
+			return fmt.Errorf("silenced firing alert delivered %d notifications", len(bodies))
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
 	e.AssertInvariants(e.T)
 	return nil
