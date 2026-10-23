@@ -32,9 +32,12 @@ function AshFootnote() {
   )
 }
 
-function isComputeQueryIdOff(settings: readonly { name: string; value: string | null }[]) {
+// The settings endpoint omits a setting at its default, and the default is auto.
+// Auto computes query IDs only when a module such as pg_stat_statements is
+// loaded, so a missing setting is not evidence that query IDs are on.
+function computeQueryIdSetting(settings: readonly { name: string; value: string | null }[]) {
   const setting = settings.find(({ name }) => name === 'compute_query_id')
-  return ['off', 'false', '0'].includes(setting?.value?.trim().toLocaleLowerCase('en-US') ?? '')
+  return setting?.value?.trim().toLocaleLowerCase('en-US') ?? 'auto'
 }
 
 function readGroup(value: string | null): DrillGroup {
@@ -149,12 +152,19 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
     ...(filters.wait_event === undefined ? {} : { waitEvent: filters.wait_event }),
   }
   const sampleCount = totalSamples(ashQuery.data?.buckets ?? [])
+  // Key the note on the sampled data as well as the setting. Auto, the default,
+  // leaves the setting out of the settings endpoint. With the setting on, a
+  // range of idle sessions can legitimately carry no query IDs, so the chart
+  // stays. An empty range has no samples to judge.
+  const queryIdSetting = computeQueryIdSetting(settingsQuery.data?.settings ?? [])
   const queryIdsUnavailable =
     groupBy === 'queryid' &&
+    settingsQuery.data !== undefined &&
+    !['on', 'regress'].includes(queryIdSetting) &&
+    (ashQuery.data?.buckets.length ?? 0) > 0 &&
     ashQuery.data?.buckets.every(
       (bucket) => bucket.queryid === null || bucket.queryid === undefined,
-    ) &&
-    isComputeQueryIdOff(settingsQuery.data?.settings ?? [])
+    )
 
   function navigateTo(nextGroup: DrillGroup) {
     const next = new URLSearchParams(searchParams)
@@ -246,7 +256,11 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
           {queryIdsUnavailable ? (
             <div className="space-y-2">
               <Degraded
-                reason="No non-null query_id was observed in this ASH range, and the instance setting compute_query_id is off."
+                reason={
+                  queryIdSetting === 'off'
+                    ? 'No non-null query_id was observed in this ASH range, and the instance setting compute_query_id is off.'
+                    : 'No non-null query_id was observed in this ASH range. Under compute_query_id = auto, query IDs are computed only when pg_stat_statements is loaded.'
+                }
                 requires="compute_query_id=on"
               />
               <p className="text-text-secondary text-sm">

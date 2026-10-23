@@ -71,6 +71,13 @@ const ashTopResponse = {
   statistical: false,
 }
 
+// Top queries come from samples that carry query IDs. ashResponse has none,
+// so the tests that expect the top list use these buckets instead.
+const ashQueryIdResponse = {
+  ...ashResponse,
+  buckets: ashResponse.buckets.map((bucket) => ({ ...bucket, queryid: '9007199254740993' })),
+}
+
 function success<T>(data: T, overrides: Record<string, unknown> = {}) {
   return {
     data,
@@ -255,7 +262,7 @@ describe('AshPage', () => {
   })
 
   it('UI-ASH-023 links top queries to the inspector with a string queryid', () => {
-    renderAsh('/instances/instance-1/ash?group=queryid&wait_event=relation')
+    renderAsh('/instances/instance-1/ash?group=queryid&wait_event=relation', ashQueryIdResponse)
 
     expect(screen.getByRole('link', { name: 'Query 9007199254740993' })).toHaveAttribute(
       'href',
@@ -264,7 +271,10 @@ describe('AshPage', () => {
   })
 
   it('UI-ASH-028 narrows the queries and the top list to the drilled wait event', () => {
-    renderAsh('/instances/instance-1/ash?group=queryid&wait_event_type=Lock&wait_event=relation')
+    renderAsh(
+      '/instances/instance-1/ash?group=queryid&wait_event_type=Lock&wait_event=relation',
+      ashQueryIdResponse,
+    )
 
     expect(mocks.ash).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -280,7 +290,7 @@ describe('AshPage', () => {
   })
 
   it('UI-ASH-029 ranks the unfiltered top list across every wait event', () => {
-    renderAsh('/instances/instance-1/ash?group=queryid')
+    renderAsh('/instances/instance-1/ash?group=queryid', ashQueryIdResponse)
 
     const params = mocks.ashTop.mock.lastCall?.[0] as Record<string, unknown>
     expect(params).not.toHaveProperty('wait_event')
@@ -289,7 +299,7 @@ describe('AshPage', () => {
   })
 
   it('UI-ASH-024 states the deliberate PII boundary in the query section', () => {
-    renderAsh('/instances/instance-1/ash?group=queryid')
+    renderAsh('/instances/instance-1/ash?group=queryid', ashQueryIdResponse)
 
     expect(screen.getByText(/ASH never collects live query text/i)).toBeInTheDocument()
     expect(screen.getByText(/normalised text from pg_stat_statements/i)).toBeInTheDocument()
@@ -401,7 +411,7 @@ describe('AshPage', () => {
   })
 
   it('passes the database scope to ASH and top-query requests', () => {
-    renderAsh('/instances/instance-1/ash?group=queryid&db=analytics')
+    renderAsh('/instances/instance-1/ash?group=queryid&db=analytics', ashQueryIdResponse)
 
     expect(mocks.ash).toHaveBeenLastCalledWith(expect.objectContaining({ database: 'analytics' }))
     expect(mocks.ashTop).toHaveBeenLastCalledWith(
@@ -474,6 +484,40 @@ describe('AshPage', () => {
       screen.getByRole('link', { name: /agent configuration in the README/i }),
     ).toHaveAttribute('href', '/README.md#agent-configuration')
     expect(screen.queryByRole('heading', { name: 'Top queries' })).not.toBeInTheDocument()
+  })
+
+  it('UI-ASH-046 explains missing query attribution when compute_query_id is left at auto', () => {
+    renderAsh('/instances/instance-1/ash?group=queryid', {
+      ...ashResponse,
+      buckets: ashResponse.buckets.map((bucket) => ({ ...bucket, queryid: null })),
+    })
+
+    expect(
+      screen
+        .getAllByRole('status')
+        .some((element) => /pg_stat_statements is loaded/i.test(element.textContent ?? '')),
+    ).toBe(true)
+    expect(screen.queryByTestId('mock-echarts')).not.toBeInTheDocument()
+  })
+
+  it('UI-ASH-047 keeps the breakdown when compute_query_id is on, even with no query IDs', () => {
+    renderAsh(
+      '/instances/instance-1/ash?group=queryid',
+      {
+        ...ashResponse,
+        buckets: ashResponse.buckets.map((bucket) => ({ ...bucket, queryid: null })),
+      },
+      [{ name: 'compute_query_id', value: 'on' }],
+    )
+
+    expect(screen.getByTestId('mock-echarts')).toBeInTheDocument()
+    expect(screen.queryByText(/pg_stat_statements is loaded/i)).not.toBeInTheDocument()
+  })
+
+  it('UI-ASH-048 does not call an empty queryid range missing query attribution', () => {
+    renderAsh('/instances/instance-1/ash?group=queryid', { ...ashResponse, buckets: [] })
+
+    expect(screen.queryByText(/pg_stat_statements is loaded/i)).not.toBeInTheDocument()
   })
 
   it('UI-ASH-034 always explains the sampling limits', () => {
