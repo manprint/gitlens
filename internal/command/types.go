@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/manprint/pglens/internal/pgtype"
 )
@@ -99,8 +100,8 @@ func (a Args) Validate(k Kind) error {
 	if !knownKind(k) {
 		return fmt.Errorf("unknown command kind %q", k)
 	}
-	if !validDatname(a.Datname) {
-		return fmt.Errorf("datname contains an unsafe identifier character")
+	if err := validateDatname(a.Datname); err != nil {
+		return err
 	}
 
 	switch k {
@@ -147,12 +148,21 @@ func knownKind(k Kind) bool {
 	}
 }
 
-func validDatname(datname string) bool {
-	for _, r := range datname {
-		if (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') &&
-			(r < '0' || r > '9') && r != '_' && r != '$' {
-			return false
-		}
+// maxDatnameBytes is PostgreSQL's limit on an identifier (NAMEDATALEN-1).
+const maxDatnameBytes = 63
+
+// validateDatname accepts any name PostgreSQL can hold for a database. The
+// name is never spliced into SQL text: it reaches the server as a connection
+// or startup parameter, or as a bound argument, so its characters do not make
+// a command unsafe. What is checked is what the command store and the
+// connection need: a NUL byte, which jsonb cannot store, and a length that
+// PostgreSQL cannot give a database.
+func validateDatname(datname string) error {
+	if len(datname) > maxDatnameBytes {
+		return fmt.Errorf("datname is longer than %d bytes", maxDatnameBytes)
 	}
-	return true
+	if strings.ContainsRune(datname, 0) {
+		return fmt.Errorf("datname contains a NUL byte")
+	}
+	return nil
 }

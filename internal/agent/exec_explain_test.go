@@ -23,6 +23,7 @@ type explainConn struct {
 	explainErr  error
 	execSQL     []string
 	lookupSQL   string
+	lookupArgs  []any
 	explainArgs []any
 	simpleSQL   []string
 
@@ -76,6 +77,7 @@ func (c *explainConn) QueryRow(_ context.Context, sql string, args ...any) pgx.R
 	}
 	if strings.HasPrefix(sql, `SELECT query FROM "public"."pg_stat_statements"`) {
 		c.lookupSQL = sql
+		c.lookupArgs = args
 		return explainRow{value: c.statement, err: c.lookupErr}
 	}
 	if strings.HasPrefix(sql, "/* pglens: explain guard") {
@@ -335,6 +337,23 @@ func TestExplain_ReadsTheTextFromTheMaintenanceDatabaseWithoutTheView(t *testing
 	require.NoError(t, err)
 	require.Contains(t, maint.lookupSQL, "datname = $2", "the text of this database, read where the view exists")
 	require.Contains(t, strings.Join(conn.execSQL, "\n"), "EXPLAIN (FORMAT JSON, VERBOSE, COSTS) SELECT 1", "the plan is still made in the command's database")
+}
+
+// The database name is free text, so the lookup binds it as an argument and
+// never splices it into the statement. That is what lets a name that looks
+// like SQL pass validation.
+func TestExplain_DatnameStaysOutOfTheLookupSQL(t *testing.T) {
+	const hostile = `app"; DROP TABLE t; --`
+	conn := &explainConn{lookupErr: &pgconn.PgError{Code: "42P01"}, plan: []byte(`[{"Plan":{}}]`)}
+	maint := &explainConn{statement: "SELECT 1"}
+	target := &maintenanceTarget{dispatcherTarget: dispatcherTarget{conn: conn}, maint: maint}
+
+	_, err := NewExplainExecutor().Execute(context.Background(), target, command.Args{QueryID: int64Ptr(1), Datname: hostile})
+
+	require.NoError(t, err)
+	require.NotContains(t, maint.lookupSQL, "DROP")
+	require.NotContains(t, maint.lookupSQL, "app")
+	require.Equal(t, []any{int64(1), hostile}, maint.lookupArgs)
 }
 
 func TestExplain_NamesAMissingViewInBothDatabases(t *testing.T) {

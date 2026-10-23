@@ -7,10 +7,13 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/stretchr/testify/require"
+
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/command"
 	"github.com/manprint/pglens/test/pgtest"
-	"github.com/stretchr/testify/require"
 )
 
 func TestINTCMD009_PgstattupleReturnsExactResult(t *testing.T) {
@@ -121,5 +124,44 @@ func TestINTCMD027_PgstattupleRefusesIndexes(t *testing.T) {
 		var decoded pgstattupleResult
 		require.NoError(t, json.Unmarshal(result, &decoded))
 		require.Equal(t, "pglens_pgstattuple_kind", decoded.Relation)
+	})
+}
+
+// INT-CMD-028: a database name may hold a space, a dot or a hyphen, and the
+// command must reach that database. The name is a connection parameter and
+// never SQL text, so the arguments are valid as they are sent.
+func TestINTCMD028_PgstattupleReachesADatabaseWithAnyName(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		const datname = "pglens int-cmd.028"
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		defer admin.Close()
+		_, err := admin.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{datname}.Sanitize())
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = admin.Exec(context.Background(), "DROP DATABASE IF EXISTS "+pgx.Identifier{datname}.Sanitize()+" WITH (FORCE)")
+		})
+		cfg, err := pgxpool.ParseConfig(pg.DSN("postgres", pgtest.RoleSuperuser))
+		require.NoError(t, err)
+		cfg.ConnConfig.Database = datname
+		other, err := pgxpool.NewWithConfig(ctx, cfg)
+		require.NoError(t, err)
+		defer other.Close()
+		_, err = other.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pgstattuple")
+		require.NoError(t, err)
+		_, err = other.Exec(ctx, "CREATE TABLE public.measured (id integer)")
+		require.NoError(t, err)
+
+		args := command.Args{Schema: "public", Relation: "measured", Datname: datname}
+		require.NoError(t, args.Validate(command.KindPgstattuple))
+		mgr, err := NewManager(ctx, "pgstattuple-punctuated-name", pg.DSN("postgres", pgtest.RoleT1), DefaultConnOptions(), clock.System())
+		require.NoError(t, err)
+		defer mgr.Close()
+		result, err := NewPgstattupleExecutor().Execute(ctx, mgr, args)
+		require.NoError(t, err)
+		var decoded pgstattupleResult
+		require.NoError(t, json.Unmarshal(result, &decoded))
+		require.Equal(t, datname, decoded.Datname)
 	})
 }
