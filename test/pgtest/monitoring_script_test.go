@@ -66,6 +66,7 @@ func TestPerm_INT_PERM_007_ScriptRoleCannotWrite(t *testing.T) {
 		admin := pg.Pool(t, "app", RoleSuperuser)
 		dropScriptRoles(t, admin)
 		t.Cleanup(func() { dropScriptRoles(t, admin) })
+		t.Cleanup(func() { regrantLargeObjects(t, admin) })
 		_, err := admin.Exec(ctx, `CREATE TABLE perm_script_t (a int);
 INSERT INTO perm_script_t VALUES (1);
 CREATE SEQUENCE perm_script_s`)
@@ -105,6 +106,8 @@ CREATE SEQUENCE perm_script_s`)
 			"CREATE DATABASE perm_script_db",
 			"CREATE ROLE perm_script_role",
 			"ALTER SYSTEM SET work_mem = '1MB'",
+			"SELECT pg_catalog.lo_create(0)",
+			"SELECT pg_catalog.lo_from_bytea(0, '\\x00')",
 		} {
 			_, err := conn.Exec(ctx, statement)
 			require.True(t, isSQLState(err, "42501"), "%s: %v", statement, err)
@@ -215,10 +218,10 @@ CREATE FUNCTION perm_script_definer() RETURNS int LANGUAGE sql SECURITY DEFINER 
 		code, out := runMonitoringScript(t, pg)
 		require.Equal(t, 0, code, out)
 		require.Contains(t, out, scriptRole+", like every role, can write outside a read-only transaction")
+		require.Contains(t, out, "revoked EXECUTE on pg_catalog.lo_create(oid) from PUBLIC")
 		for _, fix := range []string{
 			"REVOKE TEMPORARY ON DATABASE app FROM PUBLIC;",
 			"REVOKE CREATE ON DATABASE app FROM PUBLIC;",
-			"REVOKE EXECUTE ON FUNCTION pg_catalog.lo_create(oid)",
 			"REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.perm_script_public FROM PUBLIC;",
 			"REVOKE USAGE, UPDATE ON SEQUENCE public.perm_script_public_s FROM PUBLIC;",
 			"REVOKE EXECUTE ON FUNCTION public.perm_script_definer() FROM PUBLIC;",
@@ -301,6 +304,7 @@ func TestPerm_INT_PERM_011_ScriptTierFlagsNeedValueOne(t *testing.T) {
 		admin := pg.Pool(t, "app", RoleSuperuser)
 		dropScriptRoles(t, admin)
 		t.Cleanup(func() { dropScriptRoles(t, admin) })
+		t.Cleanup(func() { regrantLargeObjects(t, admin) })
 
 		for _, flags := range [][]string{{"tier1=0"}, {"tier1=false", "tier2=0"}} {
 			dropScriptRoles(t, admin)
@@ -326,4 +330,13 @@ func TestPerm_INT_PERM_011_ScriptTierFlagsNeedValueOne(t *testing.T) {
 		require.NoError(t, admin.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)", scriptRole).Scan(&exists))
 		require.False(t, exists, "a refused run must not create the role")
 	})
+}
+
+// regrantLargeObjects gives PUBLIC back the large-object creators that a run
+// of the script without harden_public revokes.
+func regrantLargeObjects(t *testing.T, admin *pgxpool.Pool) {
+	t.Helper()
+	_, err := admin.Exec(context.Background(), `GRANT EXECUTE ON FUNCTION pg_catalog.lo_create(oid), pg_catalog.lo_creat(integer),
+  pg_catalog.lo_from_bytea(oid, bytea) TO PUBLIC`)
+	require.NoError(t, err)
 }

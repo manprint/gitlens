@@ -6,8 +6,9 @@
 --   psql -v pglens_password='secret' -v dbname=app -v tier1=1 -f monitoring_user.sql
 -- Tier 2 also needs tier1=1. This file never creates an extension.
 -- The role is named pglens unless -v role=<name> names another one.
--- -v harden_public=1 also revokes from PUBLIC the grants that let every
--- role write outside a read-only transaction (see the end of this file).
+-- Large-object creation is revoked from PUBLIC in every run. -v
+-- harden_public=1 also revokes the other grants that let every role write
+-- outside a read-only transaction (see the end of this file).
 --
 -- The role it configures can only read. Before granting anything the script
 -- checks that an existing role of that name could not write either: it
@@ -230,6 +231,20 @@ BEGIN
       USING HINT = format('Run this script connected to %I as well.', item.datname);
   END LOOP;
 
+  -- The role can connect to these as well, and PUBLIC may still let it create
+  -- large objects there: the grant revoked above is per database.
+  FOR item IN
+    SELECT d.datname
+    FROM pg_catalog.pg_database d
+    WHERE d.datallowconn AND d.datname <> current_database()
+      AND has_database_privilege(monitor, d.datname, 'CONNECT')
+    ORDER BY 1
+  LOOP
+    RAISE WARNING '% can connect to %, where PUBLIC may still let it create large objects',
+      who, item.datname
+      USING HINT = format('Run this script connected to %I as well.', item.datname);
+  END LOOP;
+
   -- A database-specific setting for the role would override the role-wide
   -- read-only default set below.
   FOR item IN
@@ -295,9 +310,10 @@ GRANT pg_signal_backend TO :"role";
 -- pglens only ever reads. The role default makes every session read-only,
 -- which catches a write from a client that did not ask for a read-only
 -- transaction. It is a guard against mistakes, not a boundary: the role can
--- turn the setting off, so what stops a write is the privileges granted above
--- and the PUBLIC grants reported below. The agent also sets this on each
--- connection it opens.
+-- turn the setting off, so a write is stopped by privileges. The script grants
+-- none that allow one, and revokes from PUBLIC the grant that lets any role
+-- create large objects. The other PUBLIC grants that allow a write are
+-- reported below. The agent also sets this on each connection it opens.
 ALTER ROLE :"role" SET default_transaction_read_only = on;
 
 -- Bound the blast radius of the monitoring session itself.
@@ -306,13 +322,42 @@ ALTER ROLE :"role" SET lock_timeout = '1s';
 ALTER ROLE :"role" SET idle_in_transaction_session_timeout = '30s';
 ALTER ROLE :"role" SET application_name = 'pglens';
 
+-- Creating a large object writes pg_largeobject. The read-only default does
+-- not stop that on PostgreSQL 15, and on every version once a session turns
+-- the default off, so no default can keep it from the role. Nothing else the
+-- role holds lets it create one, so the grant goes in every run. PUBLIC's
+-- grant is per database: run the script connected to each database the role
+-- can reach (the script warns about them).
+DO $$
+DECLARE
+  monitor oid := (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = current_setting('pglens.role'));
+  who text := quote_ident(current_setting('pglens.role'));
+  creator text;
+BEGIN
+  FOREACH creator IN ARRAY ARRAY['pg_catalog.lo_create(oid)', 'pg_catalog.lo_creat(integer)',
+                                 'pg_catalog.lo_from_bytea(oid, bytea)'] LOOP
+    IF has_function_privilege(monitor, creator, 'EXECUTE') THEN
+      EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC', creator);
+      -- A REVOKE by a role that neither owns the function nor holds the grant
+      -- only warns, as on a managed service, so look again.
+      IF has_function_privilege(monitor, creator, 'EXECUTE') THEN
+        RAISE WARNING '% can still create large objects through %: REVOKE EXECUTE ON FUNCTION % FROM PUBLIC needs the owner of the function',
+          who, creator, creator;
+      ELSE
+        RAISE NOTICE 'revoked EXECUTE on % from PUBLIC: % could create large objects', creator, who;
+      END IF;
+    END IF;
+  END LOOP;
+END
+$$;
+
 -- What PUBLIC holds, the role holds too. These grants let any role write
--- outside a read-only transaction; pglens never leaves one. They are
+-- outside a read-only transaction; pglens never leaves one. The rest are
 -- reported, and revoked from PUBLIC only with -v harden_public=1, because
 -- revoking them changes what every other role of the database can do: an
--- application that uses temporary tables or large objects then needs its
--- own grants. Functions that run as their owner and lo_compat_privileges
--- are only reported: what to do about them depends on the application.
+-- application that uses temporary tables then needs its own grants. Functions
+-- that run as their owner and lo_compat_privileges are only reported: what to
+-- do about them depends on the application.
 \if :{?harden_public}
 SET LOCAL pglens.harden_public = on;
 \else
