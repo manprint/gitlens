@@ -153,9 +153,10 @@ func newMessage(a Alert, phase string) notify.Message {
 // not hit twice in the same pass. A pass that starts after the cycle has ended
 // makes no claim and no send, since the cycle's context is already done. Those
 // deliveries are kept without being counted, so a delivery can stay pending
-// while such passes repeat, for example when the rules or the purge use up the
-// rest of the cycle. Settle still runs on those passes, since it needs no store,
-// so an obsolete delivery is dropped even then.
+// while such passes repeat, for example when the refreshes of the rules,
+// endUnsampled or purgeHistory use up the rest of the cycle. Settle still runs
+// on those passes, since it needs no store, so an obsolete delivery is dropped
+// even then.
 func (n *channelNotifier) Retry(ctx context.Context) error {
 	n.mu.Lock()
 	var due []pendingDelivery
