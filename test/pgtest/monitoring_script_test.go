@@ -281,3 +281,49 @@ ALTER DATABASE app SET search_path = perm_hijack, pg_catalog, public`)
 		require.NotContains(t, out, "hijacked")
 	})
 }
+
+// scriptTierGrants reports whether the script role holds the tier 1 read
+// privilege and the tier 2 signal privilege.
+func scriptTierGrants(t *testing.T, admin *pgxpool.Pool) (readAll, signal bool) {
+	t.Helper()
+	require.NoError(t, admin.QueryRow(context.Background(), `SELECT pg_has_role($1::name, 'pg_read_all_data', 'MEMBER'),
+       pg_has_role($1::name, 'pg_signal_backend', 'MEMBER')`, scriptRole).Scan(&readAll, &signal))
+	return readAll, signal
+}
+
+// INT-PERM-011: the script grants a tier only for the value 1. tier1=0 and
+// tier1=false grant nothing, and tier2=1 without tier1=1 is refused before
+// the script changes anything.
+func TestPerm_INT_PERM_011_ScriptTierFlagsNeedValueOne(t *testing.T) {
+	ForEach(t, func(t *testing.T, pg *PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "app", RoleSuperuser)
+		dropScriptRoles(t, admin)
+		t.Cleanup(func() { dropScriptRoles(t, admin) })
+
+		for _, flags := range [][]string{{"tier1=0"}, {"tier1=false", "tier2=0"}} {
+			dropScriptRoles(t, admin)
+			code, out := runMonitoringScript(t, pg, flags...)
+			require.Equal(t, 0, code, "%v: %s", flags, out)
+			readAll, signal := scriptTierGrants(t, admin)
+			require.False(t, readAll, "%v", flags)
+			require.False(t, signal, "%v", flags)
+		}
+
+		dropScriptRoles(t, admin)
+		code, out := runMonitoringScript(t, pg, "tier1=1")
+		require.Equal(t, 0, code, out)
+		readAll, signal := scriptTierGrants(t, admin)
+		require.True(t, readAll)
+		require.False(t, signal)
+
+		dropScriptRoles(t, admin)
+		code, out = runMonitoringScript(t, pg, "tier2=1")
+		require.Equal(t, 3, code, out)
+		require.Contains(t, out, "tier2=1 needs tier1=1")
+		var exists bool
+		require.NoError(t, admin.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)", scriptRole).Scan(&exists))
+		require.False(t, exists, "a refused run must not create the role")
+	})
+}

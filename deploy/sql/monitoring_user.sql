@@ -39,6 +39,27 @@
 \set role pglens
 \endif
 
+-- A tier is granted by the value 1 only. Testing the variable for existence,
+-- as \if :{?tier1} does, would also grant it for tier1=0 or tier1=false.
+-- Tier 2 is tier 1 plus signal, so tier2=1 without tier1=1 is refused before
+-- anything changes.
+\if :{?tier1}
+SELECT (:'tier1' = '1') AS tier1_on \gset
+\else
+\set tier1_on false
+\endif
+\if :{?tier2}
+SELECT (:'tier2' = '1') AS tier2_on \gset
+\else
+\set tier2_on false
+\endif
+\if :tier2_on
+\if :tier1_on
+\else
+DO $$ BEGIN RAISE EXCEPTION 'tier2=1 needs tier1=1: tier 2 is tier 1 plus signal'; END $$;
+\endif
+\endif
+
 BEGIN;
 
 -- The script runs as a superuser, in a database another role may own.
@@ -245,7 +266,7 @@ GRANT EXECUTE ON FUNCTION pg_control_checkpoint() TO :"role";
 -- pg_read_all_stats is already implied by pg_monitor; it is listed for
 -- clarity. pg_read_all_data is the actual table-read privilege required by
 -- PostgreSQL for EXPLAIN on relations and is the agent's T1 capability gate.
-\if :{?tier1}
+\if :tier1_on
 GRANT pg_read_all_stats TO :"role";
 GRANT pg_read_all_data TO :"role";
 \endif
@@ -253,7 +274,7 @@ GRANT pg_read_all_data TO :"role";
 -- ========================================================================
 -- Tier 2 — cancel and terminate, only with allow_signal enabled.
 -- ========================================================================
-\if :{?tier2}
+\if :tier2_on
 GRANT pg_signal_backend TO :"role";
 \endif
 
