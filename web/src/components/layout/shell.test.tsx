@@ -1,12 +1,21 @@
 import { fireEvent, screen, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { http, HttpResponse } from 'msw/http'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AppShell } from './AppShell'
 import { Header } from './Header'
+import { base as clusters } from '@/test/fixtures/getClusters'
+import { ok } from '@/test/msw/handlers'
+import { server } from '@/test/msw/server'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { renderWithProviders } from '@/test/render'
 
 describe('application shell', () => {
+  beforeEach(() => {
+    // The shell polls the fleet on every page, so each render needs an answer.
+    server.use(ok('getClusters', clusters))
+  })
+
   it('UI-SHELL-010 keeps the active primary destination marked', () => {
     renderWithProviders(<AppShell />, { route: '/findings' })
 
@@ -31,6 +40,27 @@ describe('application shell', () => {
 
     expect(screen.getByRole('status', { name: 'Connection: not reachable' })).toBeInTheDocument()
     expect(screen.getByTestId('connection-indicator')).toHaveTextContent('2 minutes ago')
+  })
+
+  it('WU-05 reports the shell connection as not reachable when the fleet poll fails', async () => {
+    server.use(http.get('*/api/v1/clusters', () => HttpResponse.error()))
+    renderWithProviders(<AppShell />, { route: '/' })
+
+    await vi.waitFor(() =>
+      expect(screen.getByRole('status', { name: 'Connection: not reachable' })).toBeInTheDocument(),
+    )
+    expect(screen.getByTestId('connection-indicator')).toHaveTextContent(
+      'No successful response yet.',
+    )
+  })
+
+  it('WU-05 reports the shell connection as reachable with the data age after a poll', async () => {
+    renderWithProviders(<AppShell />, { route: '/' })
+
+    await vi.waitFor(() =>
+      expect(screen.getByRole('status', { name: /Data freshness: Updated/ })).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('status', { name: 'Connection: reachable' })).toBeInTheDocument()
   })
 
   it('UI-SHELL-021 distinguishes browser offline from an unreachable server', () => {
