@@ -27,7 +27,15 @@ type tableStatsRow struct {
 	RelTuples                                                float64
 	RelfrozenXIDAge                                          int64
 	TotalBytes, TableBytes, ToastBytes                       int64
+	// EstBytes ranks the table before its exact sizes are read: the pages of
+	// the table and its TOAST table as of the last VACUUM or ANALYZE.
+	EstBytes int64
+	OID      uint32
 }
+
+// tableSizesQuery reads one table's exact sizes. The size functions lock the
+// table, so they run only for the tables that are reported.
+const tableSizesQuery = `SELECT pg_total_relation_size(c.oid), pg_table_size(c.oid), COALESCE(pg_total_relation_size(c.reltoastrelid), 0) FROM pg_class c WHERE c.oid = $1`
 
 func (c *tableStatsCheck) Name() string { return "table_stats" }
 func (c *tableStatsCheck) Requires() Requirements {
@@ -54,10 +62,11 @@ SELECT s.schemaname, s.relname,
        s.last_vacuum, s.last_autovacuum, s.last_analyze, s.last_autoanalyze,
        COALESCE(s.autovacuum_count, 0), COALESCE(s.autoanalyze_count, 0),
        COALESCE(c.relpages, 0), COALESCE(c.reltuples, 0), age(c.relfrozenxid),
-       pg_total_relation_size(c.oid), pg_table_size(c.oid),
-       COALESCE(pg_total_relation_size(c.reltoastrelid), 0)
+       (GREATEST(c.relpages, 0)::bigint + GREATEST(COALESCE(tc.relpages, 0), 0)::bigint) * current_setting('block_size')::bigint,
+       c.oid
 FROM pg_stat_user_tables s
 JOIN pg_class c ON c.oid = s.relid
+LEFT JOIN pg_class tc ON tc.oid = c.reltoastrelid
 WHERE c.relkind = 'r'`)
 	if err != nil {
 		return Result{}, err
@@ -69,7 +78,7 @@ WHERE c.relkind = 'r'`)
 		if err := rows.Scan(&r.Schema, &r.Relation, &r.SeqScan, &r.SeqTupRead, &r.IdxScan, &r.IdxTupFetch,
 			&r.NTupIns, &r.NTupUpd, &r.NTupDel, &r.NTupHotUpd, &r.NLiveTup, &r.NDeadTup, &r.NModSinceAnalyze,
 			&r.LastVacuum, &r.LastAutovacuum, &r.LastAnalyze, &r.LastAutoanalyze, &r.AutovacuumCount,
-			&r.AutoanalyzeCount, &r.Relpages, &r.RelTuples, &r.RelfrozenXIDAge, &r.TotalBytes, &r.TableBytes, &r.ToastBytes); err != nil {
+			&r.AutoanalyzeCount, &r.Relpages, &r.RelTuples, &r.RelfrozenXIDAge, &r.EstBytes, &r.OID); err != nil {
 			return Result{}, err
 		}
 		parsed = append(parsed, r)
@@ -83,17 +92,34 @@ WHERE c.relkind = 'r'`)
 	for _, r := range parsed {
 		key := r.Schema + "." + r.Relation
 		byKey[key] = r
-		candidates = append(candidates, cardinality.Candidate{Key: key, Primary: float64(r.NDeadTup), Secondary: float64(r.TotalBytes)})
+		candidates = append(candidates, cardinality.Candidate{Key: key, Primary: float64(r.NDeadTup), Secondary: float64(r.EstBytes)})
 	}
 	selected, truncated := selector.Select(cycle, candidates)
 	selector.Forget(cycle)
-	result := tableStatsResult(selected, byKey, t.Clock().Now())
+	// A table whose sizes cannot be read now (locked past lock_timeout, or
+	// dropped) is left out; the others are still reported.
+	reported := make([]cardinality.Candidate, 0, len(selected))
+	for _, candidate := range selected {
+		r := byKey[candidate.Key]
+		var total, table, toast *int64
+		ok, err := readRelation(ctx, conn, tableSizesQuery, r.OID, &total, &table, &toast)
+		if err != nil {
+			return Result{}, err
+		}
+		if !ok || total == nil || table == nil || toast == nil {
+			continue
+		}
+		r.TotalBytes, r.TableBytes, r.ToastBytes = *total, *table, *toast
+		byKey[candidate.Key] = r
+		reported = append(reported, candidate)
+	}
+	result := tableStatsResult(reported, byKey, t.Clock().Now())
 	// Truncated is the hard MaxKeys cap only. Reporting the top-N subset of
 	// a database with more tables than that is the normal case, and flagging
 	// it as truncated kept cardinality_budget_exceeded firing on every real
 	// database and stopped the server from ever pruning dropped tables.
 	result.Truncated = truncated
-	result.Partial = len(selected) < len(candidates)
+	result.Partial = len(reported) < len(candidates)
 	return result, nil
 }
 

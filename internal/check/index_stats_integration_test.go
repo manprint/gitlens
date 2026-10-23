@@ -87,3 +87,45 @@ func TestINTIDX003_InvalidIndexReportsZero(t *testing.T) {
 		require.NotEmpty(t, result.Metrics)
 	})
 }
+
+// TestINTIDX004_IndexStatsSkipsLockedIndex: an index another session holds
+// under ACCESS EXCLUSIVE cannot have its size read. The scrape must not fail
+// for it; the other index is still reported and the result is partial.
+func TestINTIDX004_IndexStatsSkipsLockedIndex(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		pool := pg.Pool(t, "app", pgtest.RoleT0)
+		suffix := testSuffix()
+		table := fmt.Sprintf("pglens_idx_t_%d", suffix)
+		locked := fmt.Sprintf("pglens_idx_locked_%d", suffix)
+		open := fmt.Sprintf("pglens_idx_open_%d", suffix)
+		_, err := admin.Exec(ctx, fmt.Sprintf("CREATE TABLE %s (a integer)", table))
+		require.NoError(t, err)
+		t.Cleanup(func() { _, _ = admin.Exec(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", table)) })
+		_, err = admin.Exec(ctx, fmt.Sprintf("INSERT INTO %s SELECT generate_series(1,1000)", table))
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, fmt.Sprintf("CREATE INDEX %s ON %s(a)", locked, table))
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, fmt.Sprintf("CREATE INDEX %s ON %s(a)", open, table))
+		require.NoError(t, err)
+		// Locking the table does not lock its indexes; REINDEX INDEX inside a
+		// transaction holds ACCESS EXCLUSIVE on the index until the rollback.
+		holdLock(t, admin, fmt.Sprintf("REINDEX INDEX %s", locked))
+		conn, err := pool.Acquire(ctx)
+		require.NoError(t, err)
+		defer conn.Release()
+		result, err := (&indexStatsCheck{selectors: cardinalityForIntegration()}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
+		require.NoError(t, err)
+		indexes := map[string]bool{}
+		for _, f := range result.Facts {
+			if f.Labels["relname"] == table {
+				indexes[f.Labels["indexrelname"]] = true
+			}
+		}
+		require.True(t, indexes[open])
+		require.False(t, indexes[locked])
+		require.True(t, result.Partial)
+	})
+}

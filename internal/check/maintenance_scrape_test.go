@@ -28,7 +28,10 @@ func maintenanceTarget(conn Conn) *SimpleTarget {
 func TestTableStats_ScrapeCoversRows(t *testing.T) {
 	now := time.Now()
 	conn := &mockConn{
-		queryFunc: func(context.Context, string, ...any) (pgx.Rows, error) {
+		queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			if !strings.Contains(sql, "pg_stat_user_tables") {
+				return &mockRows{}, nil
+			}
 			return &mockRows{rows: [][]any{{
 				"public", "t",
 				int64(1), int64(2), int64(3), int64(4),
@@ -36,23 +39,32 @@ func TestTableStats_ScrapeCoversRows(t *testing.T) {
 				int64(9), int64(10), int64(11),
 				&now, nil, &now, nil,
 				float64(1), float64(2), int64(3), float64(4),
-				int64(5), int64(6), int64(7), int64(8),
+				int64(5), int64(6), uint32(7),
 			}}}, nil
+		},
+		queryRowFunc: func(context.Context, string, ...any) pgx.Row {
+			return &mockRow{vals: []any{int64(100), int64(80), int64(20)}}
 		},
 	}
 	r, err := (&tableStatsCheck{selectors: maintenanceCardinality()}).Scrape(context.Background(), maintenanceTarget(conn))
 	require.NoError(t, err)
 	require.NotEmpty(t, r.Metrics)
+	require.Equal(t, 100.0, metricValue(r, "pg_table_total_bytes", map[string]string{"schemaname": "public", "relname": "t"}))
 }
 
 func TestIndexStats_ScrapeCoversRows(t *testing.T) {
 	conn := &mockConn{
-		queryFunc: func(context.Context, string, ...any) (pgx.Rows, error) {
+		queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			if !strings.Contains(sql, "pg_stat_user_indexes") {
+				return &mockRows{}, nil
+			}
 			return &mockRows{rows: [][]any{{
 				"public", "t", "i", int64(1), int64(2), int64(3), int64(4),
-				int64(5), int64(4096), true, false, true,
-				"CREATE INDEX i ON t (a)",
+				int64(5), int64(4096), true, false, true, uint32(16384),
 			}}}, nil
+		},
+		queryRowFunc: func(context.Context, string, ...any) pgx.Row {
+			return &mockRow{vals: []any{int64(4096), "CREATE INDEX i ON t (a)"}}
 		},
 	}
 	r, err := (&indexStatsCheck{selectors: maintenanceCardinality()}).Scrape(context.Background(), maintenanceTarget(conn))
@@ -86,14 +98,23 @@ func TestVacuumProgress_ScrapeCoversProbeAndViews(t *testing.T) {
 
 func TestBloat_ScrapeCoversRows(t *testing.T) {
 	conn := &mockConn{
-		queryFunc: func(context.Context, string, ...any) (pgx.Rows, error) {
+		queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			if !strings.Contains(sql, "pg_stats") {
+				return &mockRows{}, nil
+			}
 			return &mockRows{rows: [][]any{{
 				"public", "t", "", "table", float64(2 << 20), float64(1 << 20),
-				float64(1 << 20), 0.5, float64(100),
+				float64(1 << 20), 0.5, float64(100), uint32(16384),
 			}}}, nil
+		},
+		queryRowFunc: func(context.Context, string, ...any) pgx.Row {
+			return &mockRow{vals: []any{int64(2 << 20)}}
 		},
 	}
 	r, err := (&bloatEstimateCheck{selectors: maintenanceCardinality()}).Scrape(context.Background(), maintenanceTarget(conn))
 	require.NoError(t, err)
 	require.NotEmpty(t, r.Metrics)
+	require.Equal(t, float64(1<<20), metricValue(r, "pg_bloat_bytes", map[string]string{
+		"schemaname": "public", "relname": "t", "indexrelname": "", "object_kind": "table", "method": "estimate",
+	}))
 }

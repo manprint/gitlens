@@ -16,8 +16,10 @@ WITH widths AS (
    WHERE NOT inherited
    GROUP BY schemaname, tablename
 ), relations AS (
-  SELECT n.nspname AS schemaname, c.relname, c.reltuples,
-         pg_relation_size(c.oid)::float8 AS real_bytes,
+  -- real_bytes is the size the last VACUUM or ANALYZE recorded. The exact size
+  -- locks the table, so the check reads it for the reported tables only.
+  SELECT n.nspname AS schemaname, c.relname, c.oid, c.reltuples,
+         (GREATEST(c.relpages, 0)::float8 * current_setting('block_size')::float8) AS real_bytes,
          current_setting('block_size')::float8 AS block_size,
          COALESCE((SELECT substring(o FROM '^fillfactor=([0-9]+)$')::float8
                      FROM unnest(c.reloptions) o WHERE o LIKE 'fillfactor=%'), 100) AS fillfactor,
@@ -40,7 +42,7 @@ WITH widths AS (
     FROM relations
    WHERE stat_columns >= columns
 ), estimates AS (
-  SELECT schemaname, relname, reltuples, real_bytes,
+  SELECT schemaname, relname, oid, reltuples, real_bytes,
          (ceil(GREATEST(reltuples, 0) / tuples_per_page) * block_size)::float8 AS expected_bytes
     FROM tuples
 )
@@ -48,5 +50,5 @@ SELECT schemaname, relname, '' AS indexrelname, 'table' AS object_kind, real_byt
        expected_bytes,
        GREATEST(real_bytes - expected_bytes, 0)::float8 AS bloat_bytes,
        COALESCE(GREATEST(real_bytes - expected_bytes, 0) / NULLIF(real_bytes, 0), 0)::float8 AS bloat_ratio,
-       reltuples::float8
+       reltuples::float8, oid
   FROM estimates

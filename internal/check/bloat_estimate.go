@@ -22,7 +22,12 @@ type bloatEstimateCheck struct {
 type bloatRow struct {
 	Schema, Relation, Index, Kind        string
 	Real, Expected, Bloat, Ratio, Tuples float64
+	OID                                  uint32
 }
+
+// bloatSizeQuery reads one table's exact size. The size function locks the
+// table, so it runs only for the tables that are reported.
+const bloatSizeQuery = `SELECT pg_relation_size(c.oid) FROM pg_class c WHERE c.oid = $1`
 
 func (c *bloatEstimateCheck) Name() string { return "bloat_estimate" }
 func (c *bloatEstimateCheck) Requires() Requirements {
@@ -51,7 +56,7 @@ func (c *bloatEstimateCheck) Scrape(ctx context.Context, t Target) (Result, erro
 	parsed := []bloatRow{}
 	for rows.Next() {
 		var r bloatRow
-		if e = rows.Scan(&r.Schema, &r.Relation, &r.Index, &r.Kind, &r.Real, &r.Expected, &r.Bloat, &r.Ratio, &r.Tuples); e != nil {
+		if e = rows.Scan(&r.Schema, &r.Relation, &r.Index, &r.Kind, &r.Real, &r.Expected, &r.Bloat, &r.Ratio, &r.Tuples, &r.OID); e != nil {
 			return Result{}, e
 		}
 		if r.Real < 1024*1024 || r.Tuples < 0 {
@@ -76,9 +81,35 @@ func (c *bloatEstimateCheck) Scrape(ctx context.Context, t Target) (Result, erro
 	selector, cycle := c.selectors.next(t)
 	sel, tr := selector.Select(cycle, cand)
 	selector.Forget(cycle)
-	res := bloatResult(sel, by)
+	// A table whose size cannot be read now (locked past lock_timeout, or
+	// dropped) is left out; the others are still reported. The bloat is
+	// recomputed from the exact size with the formula of bloat_estimate.sql.
+	reported := make([]cardinality.Candidate, 0, len(sel))
+	for _, candidate := range sel {
+		r := by[candidate.Key]
+		var size *int64
+		ok, e := readRelation(ctx, conn, bloatSizeQuery, r.OID, &size)
+		if e != nil {
+			return Result{}, e
+		}
+		if !ok || size == nil {
+			continue
+		}
+		r.Real = float64(*size)
+		r.Bloat = 0
+		if r.Real > r.Expected {
+			r.Bloat = r.Real - r.Expected
+		}
+		r.Ratio = 0
+		if r.Real > 0 {
+			r.Ratio = r.Bloat / r.Real
+		}
+		by[candidate.Key] = r
+		reported = append(reported, candidate)
+	}
+	res := bloatResult(reported, by)
 	res.Truncated = tr
-	res.Partial = len(sel) < len(cand)
+	res.Partial = len(reported) < len(cand)
 	return res, nil
 }
 func bloatResult(sel []cardinality.Candidate, rows map[string]bloatRow) Result {
