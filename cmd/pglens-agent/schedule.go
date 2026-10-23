@@ -85,6 +85,7 @@ func readTargetGate(ctx context.Context, mgr *agent.Manager, scheduled map[strin
 		g.role = mgr.Role()     //nolint:contextcheck // same as above
 		g.tier = mgr.PermTier() //nolint:contextcheck // same as above
 	}
+	usable := err == nil && version != 0 && g.role != pgtype.RoleUnknown
 	// pg_stat_statements counts as present when any database the schedule runs
 	// checks for has the view, not only the maintenance database: the check reads
 	// the others through it. LocateStatements also records the database the check
@@ -96,7 +97,16 @@ func readTargetGate(ctx context.Context, mgr *agent.Manager, scheduled map[strin
 		// database the budget monitors but the schedule does not hold is reported
 		// as not monitored, so pglens must not connect to it. Before the first
 		// schedule that set is the budget's choice.
+		//
+		// A read that is not usable is not adopted: nextGate keeps the databases
+		// the schedule already holds. Its lookup then covers those alone. A free
+		// slot filled here would connect to a database the schedule does not hold,
+		// for an answer that is discarded. A nil scheduled set means no schedule
+		// exists yet, and that read is adopted whatever it found.
 		held := keepDatabases(scheduled, dbs)
+		if scheduled != nil && !usable {
+			held = scheduled
+		}
 		lookup := make([]wire.Database, len(dbs))
 		copy(lookup, dbs)
 		for i := range lookup {
@@ -111,7 +121,7 @@ func readTargetGate(ctx context.Context, mgr *agent.Manager, scheduled map[strin
 			g.databases[db.Name] = true
 		}
 	}
-	return g, err == nil && g.version != 0 && g.role != pgtype.RoleUnknown
+	return g, usable
 }
 
 // nextGate picks the gate a target is scheduled against after one read, and

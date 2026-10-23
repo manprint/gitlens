@@ -531,3 +531,81 @@ func TestINTSCH006_WaitingDatabaseIsNotConnected(t *testing.T) {
 		require.False(t, schedules.gates[target].exts["pg_stat_statements"], "a view in a database the schedule does not hold must not count")
 	})
 }
+
+// TestINTSCH007_UnreadableTargetDoesNotConnectToNewDatabase: the identity store is
+// corrupt, so the target's version and role stay unknown, although discovery
+// still works. That read is not adopted, and the schedule keeps the databases it
+// holds. A database created afterwards fits the budget and takes the free slot
+// on discovery, but pglens must not connect to it while the target is unreadable.
+// Once the identity store recovers, the read is adopted and the database is
+// scheduled, as it was before.
+func TestINTSCH007_UnreadableTargetDoesNotConnectToNewDatabase(t *testing.T) {
+	for _, major := range pgtest.Versions() {
+		major := major
+		t.Run(fmt.Sprintf("pg%d", major), func(t *testing.T) {
+			primary, _ := pgtest.PrimaryStandby(t, major)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			// The corrupt file is set before the first read: the cache of a version
+			// that was read once is kept, so it could not become unknown later.
+			// Discovery does not use the identity store, so it still works.
+			dir := t.TempDir()
+			corrupt := filepath.Join(dir, "corrupt.json")
+			require.NoError(t, os.WriteFile(corrupt, []byte("{not json"), 0o600))
+			t.Setenv("PGLENS_IDENTITY_PATH", corrupt)
+
+			const target = "unreadable-target"
+			const dbA, dbB = "sch007_a", "sch007_b"
+			admin := primary.Pool(t, "postgres", pgtest.RoleSuperuser)
+			_, err := admin.Exec(ctx, "CREATE DATABASE "+dbA)
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				for _, db := range []string{dbA, dbB} {
+					_, _ = admin.Exec(context.Background(), "DROP DATABASE IF EXISTS "+db+" WITH (FORCE)")
+				}
+			})
+
+			// The budget takes two databases. The include list leaves the
+			// maintenance database out, so only the sch007 databases are listed.
+			opts := agent.DefaultConnOptions()
+			opts.MaxDatabases = 2
+			opts.Include = []*regexp.Regexp{regexp.MustCompile("^sch007_")}
+			mgr, err := agent.NewManager(ctx, target, primary.DSN("postgres", pgtest.RoleT0), opts, clock.System())
+			require.NoError(t, err)
+			t.Cleanup(mgr.Close)
+
+			var mu sync.Mutex
+			pending := map[string][]wire.Result{}
+			scheduledDBs := map[string]map[string]bool{}
+			schedules := newScheduleSet(ctx, &agent.Config{}, clock.System(), []*agent.Manager{mgr}, &mu, pending, scheduledDBs)
+			require.NoError(t, schedules.start(ctx))
+			t.Cleanup(schedules.stop)
+			require.Zero(t, mgr.PGVersion(), "the version must stay unknown while the identity store is corrupt")
+			require.Equal(t, map[string]bool{dbA: true}, schedules.gates[target].databases)
+
+			// The new database fits the budget, so discovery would fill the free slot
+			// with it. The read is not adopted, so nothing may connect to it.
+			_, err = admin.Exec(ctx, "CREATE DATABASE "+dbB)
+			require.NoError(t, err)
+			currentScheduler := func() *agent.Scheduler {
+				schedules.schedMu.Lock()
+				defer schedules.schedMu.Unlock()
+				return schedules.current
+			}
+			before := currentScheduler()
+			schedules.reconcile()
+
+			require.Empty(t, backendPIDs(t, admin, dbB), "a read that is not adopted must not connect to a database the schedule does not hold")
+			require.Same(t, before, currentScheduler(), "an unreadable target keeps the schedule it has")
+			require.Equal(t, map[string]bool{dbA: true}, schedules.gates[target].databases)
+
+			// The identity store recovers. The read is adopted, and the free slot is
+			// filled as it was before the target became unreadable.
+			t.Setenv("PGLENS_IDENTITY_PATH", filepath.Join(dir, "identity.json"))
+			schedules.reconcile()
+
+			require.Equal(t, map[string]bool{dbA: true, dbB: true}, schedules.gates[target].databases)
+		})
+	}
+}
