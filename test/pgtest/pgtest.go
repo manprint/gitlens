@@ -5,6 +5,7 @@ package pgtest
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -17,6 +18,7 @@ import (
 	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
+	tcexec "github.com/testcontainers/testcontainers-go/exec"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/network"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -541,4 +543,27 @@ func (p *PG) Exec(t *testing.T, sql string, args ...any) {
 // DSN returns a DSN for datname.
 func (p *PG) DSN(datname string, role Role) string {
 	return p.dsnForRole(role, datname)
+}
+
+// Psql copies the SQL file at hostPath into the container and runs it with
+// psql as the superuser, connected to datname, defining each name=value in
+// vars with -v. It returns psql's exit status and its combined output.
+func (p *PG) Psql(t *testing.T, hostPath, datname string, vars ...string) (int, string) {
+	t.Helper()
+	c := p.genericContainer
+	if p.container != nil {
+		c = p.container
+	}
+	ctx := context.Background()
+	const target = "/tmp/pgtest-script.sql"
+	require.NoError(t, c.CopyFileToContainer(ctx, hostPath, target, 0o644))
+	cmd := []string{"psql", "-X", "-q", "-U", "postgres", "-d", datname}
+	for _, v := range vars {
+		cmd = append(cmd, "-v", v)
+	}
+	code, out, err := c.Exec(ctx, append(cmd, "-f", target), tcexec.Multiplexed())
+	require.NoError(t, err)
+	output, err := io.ReadAll(out)
+	require.NoError(t, err)
+	return code, string(output)
 }

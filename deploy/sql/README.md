@@ -1,8 +1,39 @@
 # Monitoring-user permission tiers
 
-`monitoring_user.sql` creates or reconciles the `pglens` login role. It is
-safe to run again: it adds the requested memberships and reapplies the session
-limits without creating an extension or changing database objects.
+`monitoring_user.sql` creates or reconciles the `pglens` login role
+(`-v role=<name>` names another one). It is safe to run again: it adds the
+requested memberships and reapplies the session limits without creating an
+extension or changing database objects.
+
+The role can only read. Before granting anything, the script checks that an
+existing role of that name could not write, and refuses one that:
+
+- is a superuser or has `CREATEDB`, `CREATEROLE`, `REPLICATION` or `BYPASSRLS`;
+- is a member, directly or through another role, of any role other than
+  `pg_monitor`, `pg_read_all_settings`, `pg_read_all_stats`,
+  `pg_stat_scan_tables`, `pg_read_all_data` and `pg_signal_backend`;
+- owns objects in any database;
+- holds, in the database `psql` is connected to or on a cluster-wide object,
+  any privilege but `CONNECT` on databases, `USAGE` on schemas, `SELECT` on
+  relations, columns and large objects, and `EXECUTE` on the two control
+  functions; this covers parameters (`SET`, `ALTER SYSTEM`) and default
+  privileges for future objects as well.
+
+A refusal lists the statement that removes each problem. The script runs in a
+single transaction, so a refusal changes nothing. Privileges on objects of
+other databases cannot be read from the connected one: the script warns about
+each database where the role holds some, so it can be run connected there.
+
+Two further steps keep the role read-only. A database-specific
+`default_transaction_read_only` setting of the role (`ALTER ROLE ... IN
+DATABASE ... SET`) overrides the role-wide default, so the script resets it.
+And whatever `PUBLIC` holds, the role holds too: by default every role can
+create temporary tables and large objects, and on databases upgraded from
+before PostgreSQL 15 also objects in the `public` schema, outside a read-only
+transaction. The script reports these grants with the `REVOKE ... FROM PUBLIC`
+statements that close them, but does not run those statements, because they
+change what every other role can do. pglens itself never leaves a read-only
+transaction.
 
 Run it as a PostgreSQL superuser (or the equivalent managed-service admin):
 

@@ -161,12 +161,15 @@ psql "$PGLENS_DSN" -v pglens_password="$PGLENS_MONITORING_PASSWORD" \
   -v dbname=postgres -f deploy/sql/monitoring_user.sql
 ```
 
-The two `GRANT EXECUTE ON FUNCTION pg_control_system()` and `pg_control_checkpoint()` are required because these functions are not covered by `pg_monitor`. Without them the cluster identity falls back to the configured `cluster_name` and a failover can split one cluster into two (see Monitoring a replicated cluster).
+PostgreSQL lets every role execute `pg_control_system()` and `pg_control_checkpoint()` by default, but hardened installations revoke that from `PUBLIC`, so the script grants both explicitly. Without them the cluster identity falls back to the configured `cluster_name` and a failover can split one cluster into two (see Monitoring a replicated cluster).
 
 The script supports explicit higher tiers:
 
 - `-v tier1=1` — adds `pg_read_all_data` and enables plan-only `EXPLAIN` (T1)
 - `-v tier2=1` — adds `pg_signal_backend` and enables cancel/terminate (T2; also pass `tier1=1`)
+- `-v role=<name>` — configures a role with another name than `pglens`
+
+The role can only read, and the script makes sure of it before it grants anything. It refuses an existing role that could write: a superuser, a role with `CREATEDB`, `CREATEROLE`, `REPLICATION` or `BYPASSRLS`, a member of any role other than the read-only predefined ones, a role that owns objects, or one holding a write privilege in the database `psql` is connected to. It then lists the statement that removes each problem and changes nothing, because the whole script runs in one transaction. The storage role of the shipped compose files is a superuser named `pglens`, so running the script against the storage instance by mistake stops there too. The script also removes a database-specific `default_transaction_read_only` setting of the role, which would override the role-wide read-only default, and reports without changing them the `PUBLIC` grants (temporary tables, large objects, `CREATE` on a schema) that let every role write outside a read-only transaction. pglens never leaves one.
 
 The script never creates extensions. See [the permission-tier guide](deploy/sql/README.md)
 for the complete matrix and downgrade procedure.

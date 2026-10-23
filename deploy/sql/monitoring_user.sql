@@ -1,15 +1,26 @@
--- pglens monitoring role for PostgreSQL 15-18.
+-- pglens monitoring role for PostgreSQL 15-19.
 -- Run as a superuser, or as rds_superuser on Amazon RDS.
 --
 -- Defaults to Tier 0. Apply a higher tier by defining the corresponding
 -- psql flag, for example:
 --   psql -v pglens_password='secret' -v dbname=app -v tier1=1 -f monitoring_user.sql
 -- Tier 2 also needs tier1=1. This file never creates an extension.
+-- The role is named pglens unless -v role=<name> names another one.
 --
--- Run it only on MONITORED instances. The role it configures is read-only
--- and time-limited (default_transaction_read_only, statement_timeout below);
--- if the pglens server's own storage database uses a role with the same name
--- on the same cluster, that role would lose the ability to write.
+-- The role it configures can only read. Before granting anything the script
+-- checks that an existing role of that name could not write either: it
+-- refuses a superuser, a role with CREATEDB, CREATEROLE, REPLICATION or
+-- BYPASSRLS, a member of any role other than the read-only predefined ones,
+-- a role that owns objects, and a role holding a write privilege in the
+-- database psql is connected to. It then names what to revoke and changes
+-- nothing, since the whole script runs in one transaction. The pglens
+-- server's own storage role is a superuser named pglens in the shipped
+-- compose files, so running the script against the storage instance by
+-- mistake stops here.
+--
+-- Privileges on objects are recorded per database. Run the script connected
+-- to each database where privileges were ever granted to the role; it warns
+-- about the databases it cannot inspect from the current one.
 \set ON_ERROR_STOP on
 
 \if :{?pglens_password}
@@ -21,27 +32,203 @@
 \else
 \set dbname postgres
 \endif
+\if :{?role}
+\else
+\set role pglens
+\endif
 
--- Create or reconcile the role so rerunning the script is safe.
+BEGIN;
+
+-- psql variables do not reach into the DO blocks below; this setting does.
+SET LOCAL pglens.role = :'role';
+
+-- Create the role, or reconcile an existing one so rerunning the script is
+-- safe.
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'pglens') THEN
-    CREATE ROLE pglens LOGIN;
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = current_setting('pglens.role')) THEN
+    EXECUTE format('CREATE ROLE %I LOGIN', current_setting('pglens.role'));
   END IF;
 END
 $$;
-ALTER ROLE pglens LOGIN PASSWORD :'pglens_password';
+
+-- Refuse a role that could write. Each problem comes with the statement
+-- that removes it; nothing is changed while any remains.
+DO $$
+DECLARE
+  monitor oid := (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = current_setting('pglens.role'));
+  who text := quote_ident(current_setting('pglens.role'));
+  problems text[] := '{}';
+  item record;
+BEGIN
+  FOR item IN
+    SELECT attribute
+    FROM pg_catalog.pg_roles r,
+         LATERAL (VALUES ('SUPERUSER', r.rolsuper), ('CREATEDB', r.rolcreatedb),
+                         ('CREATEROLE', r.rolcreaterole), ('REPLICATION', r.rolreplication),
+                         ('BYPASSRLS', r.rolbypassrls)) AS a(attribute, granted)
+    WHERE r.oid = monitor AND a.granted
+  LOOP
+    problems := problems || format('%1$s has the %2$s attribute: ALTER ROLE %1$s NO%2$s;',
+                                   who, item.attribute);
+  END LOOP;
+
+  -- Membership in any role but these lends that role's privileges.
+  -- pg_has_role(..., 'MEMBER') follows indirect memberships too, and holds
+  -- for every role when the role is a superuser, which is reported above.
+  FOR item IN
+    SELECT g.rolname,
+           EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members m
+                   WHERE m.roleid = g.oid AND m.member = monitor) AS direct
+    FROM pg_catalog.pg_roles g
+    WHERE g.oid <> monitor
+      AND NOT (SELECT rolsuper FROM pg_catalog.pg_roles WHERE oid = monitor)
+      -- Owning the database makes the role a member; the ownership check
+      -- below reports it.
+      AND g.rolname <> 'pg_database_owner'
+      AND g.rolname NOT IN ('pg_monitor', 'pg_read_all_settings', 'pg_read_all_stats',
+                            'pg_stat_scan_tables', 'pg_read_all_data', 'pg_signal_backend')
+      AND pg_catalog.pg_has_role(monitor, g.oid, 'MEMBER')
+    ORDER BY g.rolname
+  LOOP
+    problems := problems || CASE
+      WHEN item.direct THEN format('%1$s is a member of %2$I: REVOKE %2$I FROM %1$s;',
+                                   who, item.rolname)
+      ELSE format('%s is a member of %I through another role: revoke the membership that leads to it',
+                  who, item.rolname)
+    END;
+  END LOOP;
+
+  -- Ownership is recorded for objects in every database, so this check sees
+  -- them all.
+  FOR item IN
+    SELECT coalesce(d.datname, '(the cluster)') AS datname, count(*) AS owned
+    FROM pg_catalog.pg_shdepend s
+    LEFT JOIN pg_catalog.pg_database d ON d.oid = s.dbid
+    WHERE s.refclassid = 'pg_catalog.pg_authid'::pg_catalog.regclass
+      AND s.refobjid = monitor AND s.deptype = 'o'
+    GROUP BY 1
+    ORDER BY 1
+  LOOP
+    problems := problems || format('%1$s owns %2$s object(s) in %3$s: REASSIGN OWNED BY %1$s TO <owner>; (connected to that database)',
+                                   who, item.owned, item.datname);
+  END LOOP;
+
+  -- Privileges granted to the role itself. Only reads are allowed, plus
+  -- CONNECT, USAGE on schemas, and EXECUTE on the two control functions
+  -- granted below. What the role holds as an owner is reported above.
+  FOR item IN
+    SELECT format('%s ON DATABASE %I', a.privilege_type, d.datname) AS what
+    FROM pg_catalog.pg_database d, pg_catalog.aclexplode(d.datacl) a
+    WHERE a.grantee = monitor AND a.privilege_type <> 'CONNECT' AND d.datdba <> monitor
+    UNION ALL
+    SELECT format('%s ON TABLESPACE %I', a.privilege_type, t.spcname)
+    FROM pg_catalog.pg_tablespace t, pg_catalog.aclexplode(t.spcacl) a
+    WHERE a.grantee = monitor AND t.spcowner <> monitor
+    UNION ALL
+    SELECT format('%s ON SCHEMA %I', a.privilege_type, n.nspname)
+    FROM pg_catalog.pg_namespace n, pg_catalog.aclexplode(n.nspacl) a
+    WHERE a.grantee = monitor AND a.privilege_type <> 'USAGE' AND n.nspowner <> monitor
+    UNION ALL
+    SELECT format('%s ON %s', a.privilege_type, c.oid::pg_catalog.regclass)
+    FROM pg_catalog.pg_class c, pg_catalog.aclexplode(c.relacl) a
+    WHERE a.grantee = monitor AND a.privilege_type <> 'SELECT' AND c.relowner <> monitor
+    UNION ALL
+    SELECT format('%s (%I) ON %s', a.privilege_type, att.attname, att.attrelid::pg_catalog.regclass)
+    FROM pg_catalog.pg_attribute att
+    JOIN pg_catalog.pg_class c ON c.oid = att.attrelid,
+         pg_catalog.aclexplode(att.attacl) a
+    WHERE a.grantee = monitor AND a.privilege_type <> 'SELECT' AND c.relowner <> monitor
+    UNION ALL
+    SELECT format('%s ON FUNCTION %s', a.privilege_type, p.oid::pg_catalog.regprocedure)
+    FROM pg_catalog.pg_proc p, pg_catalog.aclexplode(p.proacl) a
+    WHERE a.grantee = monitor AND p.proowner <> monitor
+      AND p.oid NOT IN ('pg_catalog.pg_control_system()'::pg_catalog.regprocedure,
+                        'pg_catalog.pg_control_checkpoint()'::pg_catalog.regprocedure)
+    UNION ALL
+    SELECT format('%s ON LARGE OBJECT %s', a.privilege_type, l.oid)
+    FROM pg_catalog.pg_largeobject_metadata l, pg_catalog.aclexplode(l.lomacl) a
+    WHERE a.grantee = monitor AND a.privilege_type <> 'SELECT' AND l.lomowner <> monitor
+    UNION ALL
+    SELECT format('%s ON PARAMETER %s', a.privilege_type, p.parname)
+    FROM pg_catalog.pg_parameter_acl p, pg_catalog.aclexplode(p.paracl) a
+    WHERE a.grantee = monitor
+    ORDER BY 1
+  LOOP
+    problems := problems || format('%1$s holds %2$s: REVOKE %2$s FROM %1$s;', who, item.what);
+  END LOOP;
+
+  -- Default privileges hand the role the privilege on every future object.
+  FOR item IN
+    SELECT o.rolname AS creator, a.privilege_type,
+           CASE WHEN d.defaclnamespace <> 0
+                THEN format(' IN SCHEMA %s', d.defaclnamespace::pg_catalog.regnamespace) ELSE '' END AS scope,
+           CASE d.defaclobjtype WHEN 'r' THEN 'TABLES' WHEN 'S' THEN 'SEQUENCES'
+                WHEN 'f' THEN 'FUNCTIONS' WHEN 'T' THEN 'TYPES' WHEN 'n' THEN 'SCHEMAS'
+                WHEN 'L' THEN 'LARGE OBJECTS' ELSE d.defaclobjtype::text END AS objects
+    FROM pg_catalog.pg_default_acl d
+    JOIN pg_catalog.pg_roles o ON o.oid = d.defaclrole,
+         pg_catalog.aclexplode(d.defaclacl) a
+    WHERE a.grantee = monitor
+      AND (d.defaclobjtype, a.privilege_type) NOT IN (('r', 'SELECT'), ('S', 'SELECT'),
+                                                      ('T', 'USAGE'), ('n', 'USAGE'), ('L', 'SELECT'))
+    ORDER BY 1, 4, 2
+  LOOP
+    problems := problems || format('%1$s gets %3$s on new %5$s by default: ALTER DEFAULT PRIVILEGES FOR ROLE %2$I%4$s REVOKE %3$s ON %5$s FROM %1$s;',
+                                   who, item.creator, item.privilege_type, item.scope, item.objects);
+  END LOOP;
+
+  IF cardinality(problems) > 0 THEN
+    RAISE EXCEPTION 'refusing to configure %: the role could write to the database', who
+      USING DETAIL = array_to_string(problems, E'\n'),
+            HINT = 'Run the statements above as an administrator, then run this script again.';
+  END IF;
+
+  -- Privileges in the other databases are invisible from this one.
+  FOR item IN
+    SELECT d.datname, count(*) AS granted
+    FROM pg_catalog.pg_shdepend s
+    JOIN pg_catalog.pg_database d ON d.oid = s.dbid
+    WHERE s.refclassid = 'pg_catalog.pg_authid'::pg_catalog.regclass
+      AND s.refobjid = monitor AND s.deptype = 'a'
+      AND d.datname <> current_database()
+    GROUP BY 1
+    ORDER BY 1
+  LOOP
+    RAISE WARNING '% holds privileges on % object(s) in database %, which this run cannot check',
+      who, item.granted, item.datname
+      USING HINT = format('Run this script connected to %I as well.', item.datname);
+  END LOOP;
+
+  -- A database-specific setting for the role would override the role-wide
+  -- read-only default set below.
+  FOR item IN
+    SELECT d.datname
+    FROM pg_catalog.pg_db_role_setting s
+    JOIN pg_catalog.pg_database d ON d.oid = s.setdatabase
+    WHERE s.setrole = monitor
+      AND EXISTS (SELECT 1 FROM unnest(s.setconfig) c
+                  WHERE c LIKE 'default\_transaction\_read\_only=%')
+  LOOP
+    EXECUTE format('ALTER ROLE %s IN DATABASE %I RESET default_transaction_read_only', who, item.datname);
+    RAISE NOTICE 'reset the default_transaction_read_only setting of % in database %', who, item.datname;
+  END LOOP;
+END
+$$;
+
+ALTER ROLE :"role" LOGIN PASSWORD :'pglens_password';
 
 -- ========================================================================
 -- Tier 0 — read-only, no query execution, no extensions. The default.
 -- ========================================================================
-GRANT pg_monitor TO pglens;
-GRANT CONNECT ON DATABASE :"dbname" TO pglens;
+GRANT pg_monitor TO :"role";
+GRANT CONNECT ON DATABASE :"dbname" TO :"role";
 
--- Required for a stable cluster_id. These control functions are restricted
--- to superusers by default and need explicit EXECUTE grants.
-GRANT EXECUTE ON FUNCTION pg_control_system()     TO pglens;
-GRANT EXECUTE ON FUNCTION pg_control_checkpoint() TO pglens;
+-- Required for a stable cluster_id. PostgreSQL lets every role execute these
+-- control functions by default, but hardened installations revoke that from
+-- PUBLIC, so grant them explicitly.
+GRANT EXECUTE ON FUNCTION pg_control_system()     TO :"role";
+GRANT EXECUTE ON FUNCTION pg_control_checkpoint() TO :"role";
 
 -- ========================================================================
 -- Tier 1 — query text and EXPLAIN without ANALYZE.
@@ -50,15 +237,15 @@ GRANT EXECUTE ON FUNCTION pg_control_checkpoint() TO pglens;
 -- clarity. pg_read_all_data is the actual table-read privilege required by
 -- PostgreSQL for EXPLAIN on relations and is the agent's T1 capability gate.
 \if :{?tier1}
-GRANT pg_read_all_stats TO pglens;
-GRANT pg_read_all_data TO pglens;
+GRANT pg_read_all_stats TO :"role";
+GRANT pg_read_all_data TO :"role";
 \endif
 
 -- ========================================================================
 -- Tier 2 — cancel and terminate, only with allow_signal enabled.
 -- ========================================================================
 \if :{?tier2}
-GRANT pg_signal_backend TO pglens;
+GRANT pg_signal_backend TO :"role";
 \endif
 
 -- ========================================================================
@@ -78,11 +265,51 @@ GRANT pg_signal_backend TO pglens;
 -- pglens only ever reads. Make every session of the role read-only inside
 -- PostgreSQL itself, so a write is refused by the server even if a client
 -- ever tried one. The agent also sets this on each connection it opens; the
--- role default covers any other client that logs in as pglens.
-ALTER ROLE pglens SET default_transaction_read_only = on;
+-- role default covers any other client that logs in with the role.
+ALTER ROLE :"role" SET default_transaction_read_only = on;
 
 -- Bound the blast radius of the monitoring session itself.
-ALTER ROLE pglens SET statement_timeout = '15s';
-ALTER ROLE pglens SET lock_timeout = '1s';
-ALTER ROLE pglens SET idle_in_transaction_session_timeout = '30s';
-ALTER ROLE pglens SET application_name = 'pglens';
+ALTER ROLE :"role" SET statement_timeout = '15s';
+ALTER ROLE :"role" SET lock_timeout = '1s';
+ALTER ROLE :"role" SET idle_in_transaction_session_timeout = '30s';
+ALTER ROLE :"role" SET application_name = 'pglens';
+
+-- What PUBLIC holds, the role holds too. These grants let any role write
+-- outside a read-only transaction; pglens never leaves one, so they are
+-- reported, not revoked: revoking them changes what every other role can do.
+DO $$
+DECLARE
+  monitor oid := (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = current_setting('pglens.role'));
+  paths text[] := '{}';
+BEGIN
+  IF pg_catalog.has_database_privilege(monitor, current_database(), 'TEMPORARY') THEN
+    paths := paths || format('temporary tables (REVOKE TEMPORARY ON DATABASE %I FROM PUBLIC;)', current_database());
+  END IF;
+  IF pg_catalog.has_function_privilege(monitor, 'pg_catalog.lo_create(oid)', 'EXECUTE')
+     OR pg_catalog.has_function_privilege(monitor, 'pg_catalog.lo_creat(integer)', 'EXECUTE')
+     OR pg_catalog.has_function_privilege(monitor, 'pg_catalog.lo_from_bytea(oid, bytea)', 'EXECUTE') THEN
+    paths := paths || 'large objects (REVOKE EXECUTE ON FUNCTION lo_create(oid), lo_creat(integer), lo_from_bytea(oid, bytea) FROM PUBLIC;)'::text;
+  END IF;
+  paths := paths || ARRAY(
+    SELECT format('new objects in schema %1$I (REVOKE CREATE ON SCHEMA %1$I FROM PUBLIC;)', n.nspname)
+    FROM pg_catalog.pg_namespace n
+    WHERE pg_catalog.has_schema_privilege(monitor, n.oid, 'CREATE')
+      AND n.nspname !~ '^pg_(temp|toast_temp)_'
+    ORDER BY n.nspname);
+  paths := paths || ARRAY(
+    SELECT format('rows of %1$s (REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON %1$s FROM PUBLIC;)', c.oid::pg_catalog.regclass)
+    FROM pg_catalog.pg_class c
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relkind IN ('r', 'p', 'v', 'f', 'm')
+      AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+      AND pg_catalog.has_table_privilege(monitor, c.oid, 'INSERT, UPDATE, DELETE, TRUNCATE')
+    ORDER BY 1);
+  IF cardinality(paths) > 0 THEN
+    RAISE NOTICE 'PUBLIC grants let %, like every role, write outside a read-only transaction: %',
+      quote_ident(current_setting('pglens.role')), array_to_string(paths, ', ')
+      USING HINT = 'pglens never leaves one: every session it opens is read-only. Run the statements in parentheses to close them for every role.';
+  END IF;
+END
+$$;
+
+COMMIT;
