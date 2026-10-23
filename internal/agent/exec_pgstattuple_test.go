@@ -21,12 +21,16 @@ type pgstattupleConn struct {
 	installed bool
 	relkind   string
 	queries   []string
-	args      [][]any
+	// rowSQL and args hold the QueryRow statements and their arguments, in
+	// step with each other; queries also holds the Exec statements.
+	rowSQL []string
+	args   [][]any
 }
 
 func (c *pgstattupleConn) Query(context.Context, string, ...any) (pgx.Rows, error) { return nil, nil }
 func (c *pgstattupleConn) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	c.queries = append(c.queries, sql)
+	c.rowSQL = append(c.rowSQL, sql)
 	c.args = append(c.args, args)
 	if strings.HasPrefix(sql, "SELECT n.nspname") { // check.ExtensionSchema
 		return schemaRow(c.installed)
@@ -36,7 +40,7 @@ func (c *pgstattupleConn) QueryRow(_ context.Context, sql string, args ...any) p
 		if kind == "" {
 			kind = "r"
 		}
-		return stringRow(kind)
+		return relationRow{oid: pgstattupleTestOID, kind: kind}
 	}
 	return pgstattupleRow{}
 }
@@ -58,11 +62,18 @@ func (r schemaRow) Scan(dest ...any) error {
 	return nil
 }
 
-// stringRow answers a single text column, such as the relation kind.
-type stringRow string
+// pgstattupleTestOID is the OID the relation lookup answers with.
+const pgstattupleTestOID uint32 = 16384
 
-func (r stringRow) Scan(dest ...any) error {
-	*dest[0].(*string) = string(r)
+// relationRow answers the relation lookup: the relation's OID and its kind.
+type relationRow struct {
+	oid  uint32
+	kind string
+}
+
+func (r relationRow) Scan(dest ...any) error {
+	*dest[0].(*uint32) = r.oid
+	*dest[1].(*string) = r.kind
 	return nil
 }
 
@@ -121,9 +132,30 @@ func TestPgstattuple_SanitizesIdentifier(t *testing.T) {
 			scan = query
 		}
 	}
-	require.Contains(t, scan, "$1::pg_catalog.regclass")
+	require.Contains(t, scan, "$1::pg_catalog.oid::pg_catalog.regclass")
 	// The scan is the last QueryRow, and QueryRow records its arguments.
-	require.Equal(t, []any{`"weird""schema"."table""name"`}, conn.args[len(conn.args)-1])
+	require.Equal(t, []any{pgstattupleTestOID}, conn.args[len(conn.args)-1])
+}
+
+// The check and the scan must name the same object. The relation is resolved
+// once, and the scan gets the OID the check read, not the name again: a rename
+// or a replacement between the two statements would otherwise let the scan
+// read an index the check refused.
+func TestPgstattuple_ScansTheOIDTheCheckRead(t *testing.T) {
+	conn := &pgstattupleConn{installed: true}
+	_, err := NewPgstattupleExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, pgstattupleArgs("public", "items"))
+	require.NoError(t, err)
+	var check, scan []any
+	for i, query := range conn.rowSQL {
+		if strings.Contains(query, "pg_catalog.pg_class") {
+			check = conn.args[i]
+		}
+		if strings.Contains(query, `"public"."pgstattuple"(`) {
+			scan = conn.args[i]
+		}
+	}
+	require.Equal(t, []any{`"public"."items"`}, check)
+	require.Equal(t, []any{pgstattupleTestOID}, scan)
 }
 
 // The server-side timeout must expire before the dispatcher's own execution

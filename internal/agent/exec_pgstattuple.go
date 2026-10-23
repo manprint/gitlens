@@ -59,8 +59,14 @@ func (e *PgstattupleExecutor) Execute(ctx context.Context, target check.Target, 
 	// pgstattuple also reads indexes, sequences and materialized views, and the
 	// server files every result as a table's bloat. Only an ordinary table is
 	// measured here, and the check runs before the scan so an index is never read.
+	// Index bloat is measured nowhere: the bloat estimate (bloat_estimate.sql)
+	// emits table rows only.
+	// The name is resolved once, to the OID that the check read, and the scan is
+	// given that OID. Resolving the name again for the scan would let a rename
+	// or a replacement between the two statements put an index under the scan.
+	var oid uint32
 	var relkind string
-	if err := conn.QueryRow(ctx, `SELECT c.relkind::text FROM pg_catalog.pg_class c WHERE c.oid = $1::pg_catalog.regclass`, relation).Scan(&relkind); err != nil {
+	if err := conn.QueryRow(ctx, `SELECT c.oid, c.relkind::text FROM pg_catalog.pg_class c WHERE c.oid = $1::pg_catalog.regclass`, relation).Scan(&oid, &relkind); err != nil {
 		return nil, fmt.Errorf("pgstattuple %s: %w", relation, err)
 	}
 	if relkind != "r" {
@@ -70,9 +76,9 @@ func (e *PgstattupleExecutor) Execute(ctx context.Context, target check.Target, 
 	// without datname runs in the target's own database, and the server
 	// filed its measurement under an empty database name.
 	query := `SELECT current_database(), table_len, tuple_count, tuple_len, dead_tuple_count, dead_tuple_len, free_space, free_percent FROM ` +
-		pgx.Identifier{schema, "pgstattuple"}.Sanitize() + `($1::pg_catalog.regclass)`
+		pgx.Identifier{schema, "pgstattuple"}.Sanitize() + `($1::pg_catalog.oid::pg_catalog.regclass)`
 	var result pgstattupleResult
-	if err := conn.QueryRow(ctx, query, relation).Scan(
+	if err := conn.QueryRow(ctx, query, oid).Scan(
 		&result.Datname,
 		&result.TableLen,
 		&result.TupleCount,
