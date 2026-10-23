@@ -1967,7 +1967,11 @@ paths:
       tags: [instances]
       operationId: getInstanceIndexes
       summary: Return index relation statistics.
-      description: The newest reading of each index reported in the last 15 minutes, largest first. idx_scan_rate is scans per second.
+      description: >-
+        The newest reading of each index reported in the last 15 minutes, largest first. idx_scan_rate is scans per second.
+        last_scan_at is the last time the index was scanned since the statistics reset, from pg_stat_user_indexes.last_idx_scan,
+        and is null unless last_scan_status is scanned. last_scan_status is scanned; never_since_reset (PostgreSQL 16 and later,
+        no scan since the reset); or not_available (PostgreSQL 15, or the agent has not reported a last scan for the index).
       parameters:
         - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
         - name: limit
@@ -1986,7 +1990,7 @@ paths:
                   value:
                     instance_id: 11111111-1111-1111-1111-111111111111
                     items:
-                      - { datname: app, schemaname: public, relname: users, indexrelname: users_pkey, idx_scan_rate: 4.5, index_bytes: 524288, is_unique: true, is_primary: true, is_valid: true, ts: '2026-08-27T02:00:00Z' }
+                      - { datname: app, schemaname: public, relname: users, indexrelname: users_pkey, idx_scan_rate: 4.5, index_bytes: 524288, is_unique: true, is_primary: true, is_valid: true, ts: '2026-08-27T02:00:00Z', last_scan_at: '2026-08-27T01:58:00Z', last_scan_status: scanned }
                     truncated: false
                     relations_not_reported: null
         '400': { $ref: '#/components/responses/BadRequest' }

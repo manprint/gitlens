@@ -123,7 +123,9 @@ func runUnusedIndexMaintenance(ctx context.Context, e *scenario.Env) error {
 	if err := seedIndexHistory(ctx, e.DB, instanceID, maintenanceUnusedIndex); err != nil {
 		return err
 	}
-	if err := waitForFinding(ctx, e, instanceID, "index.unused", "public."+maintenanceUnusedIndex, "open"); err != nil {
+	// The standalone primary has no sibling snapshot to show a standby does not
+	// scan the index, so the finding is degraded rather than open.
+	if err := waitForFinding(ctx, e, instanceID, "index.unused", "public."+maintenanceUnusedIndex, "degraded"); err != nil {
 		return fmt.Errorf("unused index finding: %w", err)
 	}
 	e.AssertInvariants(e.T)

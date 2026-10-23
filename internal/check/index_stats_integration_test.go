@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/manprint/pglens/test/pgtest"
 	"github.com/stretchr/testify/require"
 )
@@ -180,4 +181,95 @@ func TestINTIDX005_IndexStatsSkipsOtherSessionsTempIndexes(t *testing.T) {
 			require.False(t, strings.HasPrefix(f.Labels["schemaname"], "pg_temp"), "temporary index %s of another session was reported", f.Labels["indexrelname"])
 		}
 	})
+}
+
+// TestINTIDX006_LastScanAndResetLabels: from PostgreSQL 16 the index_def fact
+// says when each index was last scanned since the statistics reset. An index
+// scanned after the reset carries that time, an index never scanned carries an
+// empty label, and both carry the reset time. On 19 an index's own reset
+// (pg_stat_user_indexes.stats_reset) replaces the database's when it is later.
+// On 15 the labels are absent.
+func TestINTIDX006_LastScanAndResetLabels(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		pool := pg.Pool(t, "app", pgtest.RoleT0)
+		table := fmt.Sprintf("pglens_lastscan_%d", testSuffix())
+		used := table + "_used"
+		unused := table + "_unused"
+		_, err := admin.Exec(ctx, fmt.Sprintf("CREATE TABLE %s (a integer, b integer)", table))
+		require.NoError(t, err)
+		t.Cleanup(func() { _, _ = admin.Exec(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", table)) })
+		_, err = admin.Exec(ctx, fmt.Sprintf("INSERT INTO %s SELECT g, g FROM generate_series(1,1000) g", table))
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, fmt.Sprintf("CREATE INDEX %s ON %s(a)", used, table))
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, fmt.Sprintf("CREATE INDEX %s ON %s(b)", unused, table))
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "ANALYZE "+table)
+		require.NoError(t, err)
+
+		// The database's statistics are reset first, then only the used index is
+		// scanned. The scan and its flush run on one session, so the flush covers it.
+		_, err = admin.Exec(ctx, "SELECT pg_stat_reset()")
+		require.NoError(t, err)
+		resetAt := time.Now()
+		session, err := admin.Acquire(ctx)
+		require.NoError(t, err)
+		_, err = session.Exec(ctx, "SET enable_seqscan = off")
+		require.NoError(t, err)
+		_, err = session.Exec(ctx, fmt.Sprintf("SELECT count(*) FROM %s WHERE a = 1", table))
+		require.NoError(t, err)
+		_, err = session.Exec(ctx, "SELECT pg_stat_force_next_flush()")
+		require.NoError(t, err)
+		session.Release()
+
+		conn, err := pool.Acquire(ctx)
+		require.NoError(t, err)
+		defer conn.Release()
+		if pg.Version >= pgtype.PG19 {
+			// An index's own reset is later than the database's: the label must follow it.
+			_, err = admin.Exec(ctx, fmt.Sprintf("SELECT pg_stat_reset_single_table_counters('%s'::regclass)", unused))
+			require.NoError(t, err)
+		}
+		indexResetAt := time.Now()
+		result, err := (&indexStatsCheck{selectors: cardinalityForIntegration()}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
+		require.NoError(t, err)
+		labels := map[string]map[string]string{}
+		for _, f := range result.Facts {
+			if f.Labels["relname"] == table {
+				labels[f.Labels["indexrelname"]] = f.Labels
+			}
+		}
+		require.Contains(t, labels, used)
+		require.Contains(t, labels, unused)
+		if pg.Version < pgtype.PG16 {
+			require.NotContains(t, labels[used], "last_idx_scan")
+			require.NotContains(t, labels[used], "stats_reset")
+			return
+		}
+		const slack = 5 * time.Second
+		usedAt := parseLabelTime(t, labels[used]["last_idx_scan"])
+		require.False(t, usedAt.IsZero(), "the scanned index has no last scan")
+		require.WithinDuration(t, resetAt, usedAt, slack)
+		require.Empty(t, labels[unused]["last_idx_scan"], "an index never scanned since the reset must have an empty last scan")
+		require.WithinDuration(t, resetAt, parseLabelTime(t, labels[used]["stats_reset"]), slack)
+		if pg.Version >= pgtype.PG19 {
+			require.WithinDuration(t, indexResetAt, parseLabelTime(t, labels[unused]["stats_reset"]), slack)
+		} else {
+			require.WithinDuration(t, resetAt, parseLabelTime(t, labels[unused]["stats_reset"]), slack)
+		}
+	})
+}
+
+// parseLabelTime reads a timestamp label; an empty label is the zero time.
+func parseLabelTime(t *testing.T, value string) time.Time {
+	t.Helper()
+	if value == "" {
+		return time.Time{}
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	require.NoError(t, err)
+	return parsed
 }

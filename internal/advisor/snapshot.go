@@ -86,6 +86,13 @@ type IndexStat struct {
 	IsPrimary   bool
 	IsUnique    bool
 	IsValid     bool
+	// ScanTracked reports that the agent read last_idx_scan for this index
+	// (PostgreSQL 16 and later), so LastScan and StatsReset are meaningful.
+	ScanTracked bool
+	// LastScan is the last scan since StatsReset, nil when the index was not
+	// scanned since then. StatsReset is nil when the reset time is unknown.
+	LastScan   *time.Time
+	StatsReset *time.Time
 }
 
 type BloatStat struct {
@@ -126,6 +133,11 @@ type SiblingInfo struct {
 	Settings        map[string]string
 	SettingContexts map[string]string
 	IndexHashes     map[string]string
+	// IndexScanned names the indexes this sibling has scanned: those with a
+	// last scan since its statistics reset, and those with a scan anywhere in
+	// its metrics history. A standby's reads count only on the standby, so
+	// the primary needs this before it calls an index unused.
+	IndexScanned map[string]bool
 	// BasebackupSeenAt is the last time a base backup was seen streaming
 	// from this sibling; nil when none ever was.
 	BasebackupSeenAt *time.Time
@@ -590,6 +602,7 @@ func databaseFactKey(datname, key string) string { return datname + "\x00" + key
 type siblingFactRow struct {
 	id                                 uuid.UUID
 	role, kind, key, value, hash, ctxt *string
+	lastScan                           *string
 	datname                            *string
 	observed                           *time.Time
 }
@@ -600,7 +613,7 @@ type siblingFactRow struct {
 func loadSiblings(ctx context.Context, pool snapshotDB, s *Snapshot, now time.Time) error {
 	rows, err := pool.Query(ctx, `SELECT i.instance_id, i.role, f.kind, f.key,
 		COALESCE(f.value_text, ''), COALESCE(f.labels->>'def_hash', ''), COALESCE(f.labels->>'context', ''),
-		f.datname, f.last_seen
+		COALESCE(f.labels->>'last_idx_scan', ''), f.datname, f.last_seen
 		FROM instances i
 		LEFT JOIN object_facts f ON f.instance_id=i.instance_id AND f.tenant_id='default'
 			AND f.kind IN ('setting', 'index_def', 'backup')
@@ -614,7 +627,7 @@ func loadSiblings(ctx context.Context, pool snapshotDB, s *Snapshot, now time.Ti
 	newestSetting := map[uuid.UUID]time.Time{}
 	for rows.Next() {
 		var f siblingFactRow
-		if err := rows.Scan(&f.id, &f.role, &f.kind, &f.key, &f.value, &f.hash, &f.ctxt, &f.datname, &f.observed); err != nil {
+		if err := rows.Scan(&f.id, &f.role, &f.kind, &f.key, &f.value, &f.hash, &f.ctxt, &f.lastScan, &f.datname, &f.observed); err != nil {
 			return err
 		}
 		if f.kind != nil && *f.kind == "setting" && f.observed != nil && f.observed.After(newestSetting[f.id]) {
@@ -629,7 +642,7 @@ func loadSiblings(ctx context.Context, pool snapshotDB, s *Snapshot, now time.Ti
 	for _, f := range facts {
 		sib := byID[f.id]
 		if sib == nil {
-			sib = &SiblingInfo{InstanceID: f.id, Settings: map[string]string{}, SettingContexts: map[string]string{}, IndexHashes: map[string]string{}}
+			sib = &SiblingInfo{InstanceID: f.id, Settings: map[string]string{}, SettingContexts: map[string]string{}, IndexHashes: map[string]string{}, IndexScanned: map[string]bool{}}
 			if f.role != nil {
 				sib.Role = pgtype.Role(*f.role)
 			}
@@ -648,12 +661,16 @@ func loadSiblings(ctx context.Context, pool snapshotDB, s *Snapshot, now time.Ti
 				sib.SettingContexts[*f.key] = *f.ctxt
 			}
 		case "index_def":
+			datname := ""
+			if f.datname != nil {
+				datname = *f.datname
+			}
 			if f.hash != nil {
-				datname := ""
-				if f.datname != nil {
-					datname = *f.datname
-				}
 				sib.IndexHashes[indexHashKey(datname, *f.key)] = *f.hash
+			}
+			// An empty label is no scan since the reset, not an unknown one.
+			if f.lastScan != nil && *f.lastScan != "" {
+				sib.IndexScanned[indexHashKey(datname, *f.key)] = true
 			}
 		case "backup":
 			if f.observed != nil && (sib.BasebackupSeenAt == nil || f.observed.After(*sib.BasebackupSeenAt)) {
@@ -662,6 +679,9 @@ func loadSiblings(ctx context.Context, pool snapshotDB, s *Snapshot, now time.Ti
 			}
 		}
 	}
+	if err := loadSiblingScans(ctx, pool, s, now, byID); err != nil {
+		return err
+	}
 	s.Siblings = make([]SiblingInfo, 0, len(byID))
 	for _, sibling := range byID {
 		s.Siblings = append(s.Siblings, *sibling)
@@ -669,6 +689,37 @@ func loadSiblings(ctx context.Context, pool snapshotDB, s *Snapshot, now time.Ti
 	// A stable order keeps the rules that walk the siblings deterministic.
 	sort.Slice(s.Siblings, func(i, j int) bool { return s.Siblings[i].InstanceID.String() < s.Siblings[j].InstanceID.String() })
 	return nil
+}
+
+// loadSiblingScans marks the indexes each active sibling scanned at any point
+// in its retained metrics history. It is the only evidence for a sibling on
+// PostgreSQL 15, which cannot report last_idx_scan, and it still counts a scan
+// that predates the statistics reset the fact reports.
+func loadSiblingScans(ctx context.Context, pool snapshotDB, s *Snapshot, now time.Time, byID map[uuid.UUID]*SiblingInfo) error {
+	if len(byID) == 0 {
+		return nil
+	}
+	rows, err := pool.Query(ctx, `SELECT m.instance_id, m.datname, m.schemaname, m.indexrelname
+		FROM metrics_indexes m
+		WHERE m.tenant_id='default' AND m.idx_scan > 0
+		  AND m.instance_id IN (SELECT i.instance_id FROM instances i
+		        WHERE i.cluster_id=$1 AND i.instance_id<>$2 AND i.last_seen >= $3)
+		GROUP BY m.instance_id, m.datname, m.schemaname, m.indexrelname`, s.ClusterID, s.InstanceID, now.Add(-siblingActiveWindow))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id uuid.UUID
+		var datname, schema, index string
+		if err := rows.Scan(&id, &datname, &schema, &index); err != nil {
+			return err
+		}
+		if sib := byID[id]; sib != nil {
+			sib.IndexScanned[indexHashKey(datname, schema+"."+index)] = true
+		}
+	}
+	return rows.Err()
 }
 
 // loadReplication summarises the standbys streaming from this instance and
@@ -790,8 +841,38 @@ func attachIndexDefs(s *Snapshot) {
 		if def, ok := defs[indexHashKey(s.Indexes[i].Datname, s.Indexes[i].Name)]; ok {
 			s.Indexes[i].IndexDef = def.ValueText
 			s.Indexes[i].DefHash = def.Labels["def_hash"]
+			s.Indexes[i].ScanTracked, s.Indexes[i].LastScan, s.Indexes[i].StatsReset = scanLabels(def.Labels)
 		}
 	}
+}
+
+// scanLabels reads the last scan and the statistics reset the agent puts on an
+// index_def fact. An absent last_idx_scan label means the agent cannot read
+// the column (PostgreSQL 15), so the scan is untracked. An empty label means
+// none: no scan since the reset, or no reset known. A label that does not
+// parse is treated as untracked rather than as a never-scanned index.
+func scanLabels(labels map[string]string) (tracked bool, lastScan, reset *time.Time) {
+	last, ok := labels["last_idx_scan"]
+	if !ok {
+		return false, nil, nil
+	}
+	lastScan, lastOK := parseScanLabel(last)
+	reset, resetOK := parseScanLabel(labels["stats_reset"])
+	if !lastOK || !resetOK {
+		return false, nil, nil
+	}
+	return true, lastScan, reset
+}
+
+func parseScanLabel(value string) (*time.Time, bool) {
+	if value == "" {
+		return nil, true
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return nil, false
+	}
+	return &parsed, true
 }
 
 // loadBloat keeps the latest measurement of each relation, preferring an
