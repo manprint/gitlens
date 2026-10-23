@@ -4,6 +4,8 @@ export interface LockNode {
   pid: LockPID
   blocked_by?: readonly LockPID[] | null
   sampled_at?: string | null
+  /** Start time of the session, sent back unchanged with a cancel or terminate. When it is absent, the signal names the PID alone. */
+  backend_start?: string | null
   wait_started_at?: string | null
   wait_duration?: number | null
   xact_age?: number | null

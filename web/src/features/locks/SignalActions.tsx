@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
-import { useCreateCommand } from '@/api/commands'
+import { useCreateCommand, type CommandArgs } from '@/api/commands'
 import type { PermTier } from '@/api/types'
 import { ErrorState, NotPermitted } from '@/components/state'
 import {
@@ -17,6 +17,12 @@ import { describeCommandState, isTerminalCommandState } from '@/lib/commands'
 import type { LockNode } from '@/lib/locks'
 
 type SignalKind = 'cancel' | 'terminate'
+
+interface PendingSignal {
+  kind: SignalKind
+  // The session as the operator saw it when the confirmation opened.
+  target: LockNode
+}
 
 interface SignalActionsProps {
   node: LockNode
@@ -48,6 +54,26 @@ function queryFirstLine(value: unknown): string {
 
 function commandPID(node: LockNode): number | null {
   return typeof node.pid === 'number' && Number.isSafeInteger(node.pid) ? node.pid : null
+}
+
+// The start time goes back exactly as the API reported it. A Date would keep
+// milliseconds only, while the agent compares microseconds.
+function commandArgs(node: LockNode, pid: number): CommandArgs {
+  const args: CommandArgs = { pid }
+  if (typeof node.backend_start === 'string' && node.backend_start !== '') {
+    args.backend_start = node.backend_start
+  }
+  return args
+}
+
+function sessionSummary(node: LockNode) {
+  return {
+    pidLabel: textValue(node.pid),
+    database: textValue(node.datname ?? node.database),
+    user: textValue(node.usename ?? node.username ?? node.user),
+    application: textValue(node.application_name ?? node.application),
+    query: queryFirstLine(node.query),
+  }
 }
 
 function isClientBackend(node: LockNode): boolean {
@@ -98,14 +124,15 @@ export function SignalActions({
 }: SignalActionsProps) {
   const cancelCommand = useCreateCommand(instanceId)
   const terminateCommand = useCreateCommand(instanceId)
-  const [openKind, setOpenKind] = useState<SignalKind | null>(null)
+  // The confirmation keeps the session it was opened for. A lock sample can
+  // refresh while the dialog is open, and the PID may belong to another session
+  // by then, so the dialog and its command use the node as it was opened.
+  const [pending, setPending] = useState<PendingSignal | null>(null)
+  const openKind = pending?.kind ?? null
   const cancelRef = useRef<HTMLButtonElement>(null)
   const pid = commandPID(node)
   const pidLabel = textValue(node.pid)
-  const database = textValue(node.datname ?? node.database)
-  const user = textValue(node.usename ?? node.username ?? node.user)
-  const application = textValue(node.application_name ?? node.application)
-  const query = queryFirstLine(node.query)
+  const confirmed = sessionSummary(pending?.target ?? node)
   const handles: Record<SignalKind, CommandHandle> = {
     cancel: cancelCommand,
     terminate: terminateCommand,
@@ -123,20 +150,26 @@ export function SignalActions({
   }
 
   const submit = () => {
-    if (!openKind || pid === null || sampleStale) return
-    handles[openKind].mutate({
-      args: { pid },
-      kind: openKind,
+    if (!pending || sampleStale) return
+    const targetPID = commandPID(pending.target)
+    if (targetPID === null) return
+    handles[pending.kind].mutate({
+      args: commandArgs(pending.target, targetPID),
+      kind: pending.kind,
     })
-    setOpenKind(null)
+    setPending(null)
   }
 
   const buttons = (
     <div className="mt-3 flex flex-wrap gap-2" aria-label={`Signal actions for PID ${pidLabel}`}>
-      {actionButton('cancel', () => setOpenKind('cancel'), belowT2 || pid === null || sampleStale)}
+      {actionButton(
+        'cancel',
+        () => setPending({ kind: 'cancel', target: node }),
+        belowT2 || pid === null || sampleStale,
+      )}
       {actionButton(
         'terminate',
-        () => setOpenKind('terminate'),
+        () => setPending({ kind: 'terminate', target: node }),
         belowT2 || pid === null || sampleStale,
       )}
     </div>
@@ -146,7 +179,7 @@ export function SignalActions({
     <div>
       {belowT2 ? (
         <NotPermitted required="T2" current={currentTier}>
-          {actionButton('cancel', () => setOpenKind('cancel'), true)}
+          {actionButton('cancel', () => setPending({ kind: 'cancel', target: node }), true)}
         </NotPermitted>
       ) : (
         <>
@@ -168,7 +201,7 @@ export function SignalActions({
           <p className="text-muted-foreground mt-1 text-xs">
             Grant T2 with <code>monitoring_user.sql -v tier1=1 -v tier2=1</code>.
           </p>
-          {actionButton('terminate', () => setOpenKind('terminate'), true)}
+          {actionButton('terminate', () => setPending({ kind: 'terminate', target: node }), true)}
         </>
       ) : null}
       {commandStatus(cancelCommand)}
@@ -188,7 +221,7 @@ export function SignalActions({
         />
       ) : null}
 
-      <Dialog open={openKind !== null} onOpenChange={(open) => !open && setOpenKind(null)}>
+      <Dialog open={openKind !== null} onOpenChange={(open) => !open && setPending(null)}>
         <DialogContent
           onOpenAutoFocus={(event) => {
             event.preventDefault()
@@ -200,8 +233,8 @@ export function SignalActions({
               {openKind === 'terminate' ? 'Terminate backend?' : 'Cancel query?'}
             </DialogTitle>
             <DialogDescription>
-              PID {pidLabel}; database {database}; user {user}; application {application}; query:{' '}
-              {query}.
+              PID {confirmed.pidLabel}; database {confirmed.database}; user {confirmed.user};
+              application {confirmed.application}; query: {confirmed.query}.
               {openKind === 'terminate'
                 ? " The client's connection will be closed and its open transaction will be rolled back."
                 : ' This asks PostgreSQL to cancel the current query.'}
@@ -212,7 +245,7 @@ export function SignalActions({
               ref={cancelRef}
               type="button"
               className="rounded-md border px-3 py-2 text-sm font-medium"
-              onClick={() => setOpenKind(null)}
+              onClick={() => setPending(null)}
             >
               Keep running
             </button>

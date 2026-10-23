@@ -28,7 +28,9 @@ type signalConn struct {
 	// signal runs. They differ when the PID was reused in between.
 	checkedStart time.Time
 	currentStart time.Time
-	queries      []string
+	// nullStart makes the identity check read a NULL backend_start.
+	nullStart bool
+	queries   []string
 }
 
 func (c *signalConn) Query(context.Context, string, ...any) (pgx.Rows, error) { return nil, nil }
@@ -47,7 +49,11 @@ func (c *signalConn) QueryRow(_ context.Context, sql string, args ...any) pgx.Ro
 			return signalRow{err: pgx.ErrNoRows}
 		}
 		checked := c.checkedStart
-		return signalRow{values: []any{c.backendType, c.appName, c.username, c.ownRole, c.ownBackend, &checked}}
+		var start *time.Time
+		if !c.nullStart {
+			start = &checked
+		}
+		return signalRow{values: []any{c.backendType, c.appName, c.username, c.ownRole, c.ownBackend, start}}
 	}
 	return signalRow{values: []any{c.signalled}}
 }
@@ -123,6 +129,62 @@ func TestSignal_LeavesAPIDReusedAfterTheCheckAlone(t *testing.T) {
 	require.True(t, errors.As(err, &rejected))
 	require.Contains(t, rejected.Error(), "no longer the session that was checked")
 	require.Len(t, conn.queries, 2)
+}
+
+// A caller that names the session it saw signals only that session. The start
+// time the caller sends is compared with the one the identity check reads, and
+// a different start is refused before any signal is sent.
+func TestSignal_RefusesASessionOtherThanTheOneRequested(t *testing.T) {
+	started := time.Date(2026, 10, 20, 9, 0, 0, 123456000, time.UTC)
+	conn := &signalConn{backendType: "client backend", appName: "psql", username: "alice", checkedStart: started, currentStart: started, signalled: true}
+	requested := started.Add(time.Second)
+	_, err := NewTerminateExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{PID: intPtr(42), BackendStart: &requested})
+	var rejected *RejectedError
+	require.True(t, errors.As(err, &rejected))
+	require.Contains(t, rejected.Error(), "different session")
+	require.Len(t, conn.queries, 1)
+}
+
+// The start times are compared at microsecond precision, the precision
+// PostgreSQL keeps: a difference below a microsecond is the same session, and
+// a difference of one microsecond is another one.
+func TestSignal_ComparesTheRequestedStartAtMicrosecondPrecision(t *testing.T) {
+	started := time.Date(2026, 10, 20, 9, 0, 0, 123456000, time.UTC)
+	tests := []struct {
+		name      string
+		requested time.Time
+		signalled bool
+	}{
+		{name: "same start", requested: started, signalled: true},
+		{name: "finer than a microsecond", requested: started.Add(789 * time.Nanosecond), signalled: true},
+		{name: "one microsecond later", requested: started.Add(time.Microsecond), signalled: false},
+	}
+	for _, tc := range tests {
+		conn := &signalConn{backendType: "client backend", appName: "psql", username: "alice", checkedStart: started, currentStart: started, signalled: true}
+		requested := tc.requested
+		result, err := NewCancelExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{PID: intPtr(42), BackendStart: &requested})
+		if !tc.signalled {
+			var rejected *RejectedError
+			require.True(t, errors.As(err, &rejected), tc.name)
+			require.Contains(t, rejected.Error(), "different session", tc.name)
+			require.Len(t, conn.queries, 1, tc.name)
+			continue
+		}
+		require.NoError(t, err, tc.name)
+		require.Contains(t, string(result), `"signalled":true`, tc.name)
+		require.Len(t, conn.queries, 2, tc.name)
+	}
+}
+
+// A session with no start time cannot be the one the caller saw.
+func TestSignal_RefusesARequestedStartWhenTheSessionHasNone(t *testing.T) {
+	conn := &signalConn{backendType: "client backend", appName: "psql", username: "alice", nullStart: true, signalled: true}
+	requested := time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)
+	_, err := NewCancelExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{PID: intPtr(42), BackendStart: &requested})
+	var rejected *RejectedError
+	require.True(t, errors.As(err, &rejected))
+	require.Contains(t, rejected.Error(), "different session")
+	require.Len(t, conn.queries, 1)
 }
 
 func TestSignal_RefusesMonitoringRoleAndOwnPID(t *testing.T) {

@@ -1002,12 +1002,17 @@ components:
         pid: { type: integer, format: int32 }
         schema: { type: string }
         relation: { type: string }
+        backend_start: { $ref: '#/components/schemas/Timestamp' }
       description: >-
         Per-kind arguments: explain requires queryid and may include datname or
-        analyze; cancel and terminate require pid; pgstattuple requires schema
-        and relation and may include datname. datname is the database the
-        command runs in; without it, the target DSN's own database. Query text
-        is never sent to this API.
+        analyze; cancel and terminate require pid and may include backend_start;
+        pgstattuple requires schema and relation and may include datname.
+        backend_start is the start time of the session the caller saw at pid.
+        Send it back exactly as the API reported it. When it is given and the
+        session at pid started at another time, the agent refuses the command
+        and signals nothing. datname is the database the command runs in;
+        without it, the target DSN's own database. Query text is never sent to
+        this API.
     CreateCommandRequest:
       type: object
       required: [kind, args]

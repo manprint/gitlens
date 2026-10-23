@@ -1849,7 +1849,7 @@ export interface components {
             needs: string[];
             min_tier: components["schemas"]["PermTier"];
         };
-        /** @description Per-kind arguments: explain requires queryid and may include datname or analyze; cancel and terminate require pid; pgstattuple requires schema and relation and may include datname. datname is the database the command runs in; without it, the target DSN's own database. Query text is never sent to this API. */
+        /** @description Per-kind arguments: explain requires queryid and may include datname or analyze; cancel and terminate require pid and may include backend_start; pgstattuple requires schema and relation and may include datname. backend_start is the start time of the session the caller saw at pid. Send it back exactly as the API reported it. When it is given and the session at pid started at another time, the agent refuses the command and signals nothing. datname is the database the command runs in; without it, the target DSN's own database. Query text is never sent to this API. */
         CommandArgs: {
             queryid?: number | string;
             datname?: string;
@@ -1858,6 +1858,7 @@ export interface components {
             pid?: number;
             schema?: string;
             relation?: string;
+            backend_start?: components["schemas"]["Timestamp"];
         };
         /** @description A command request contains identifiers and options only; query text is never sent. */
         CreateCommandRequest: {
