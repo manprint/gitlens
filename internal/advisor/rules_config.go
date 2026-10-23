@@ -358,12 +358,16 @@ func init() {
 			limit = timeout * 10
 		}
 		if age > limit {
-			detail := fmt.Sprintf("last archive is %.0f seconds old", age)
-			evidence := map[string]any{"last_archived_age_seconds": age, "limit_seconds": limit}
-			if readyKnown {
-				detail += fmt.Sprintf(" and %.0f WAL segments are waiting", ready)
-				evidence["ready_files"] = ready
+			// Without the count of waiting segments an idle archiver and a
+			// stuck one look the same. Reporting critical then would flag
+			// every idle server whose agent lacks pg_monitor, so the rule
+			// says it cannot tell, as archive.failing does when its input is
+			// missing.
+			if !readyKnown {
+				return []Finding{{RuleID: "archive.stalled", Severity: SeverityCritical, State: StateDegraded, Scope: ScopeInstance, Title: "Archive stall cannot be confirmed", Detail: fmt.Sprintf("last archive is %.0f seconds old, but the WAL segments waiting for archive_command are unknown", age), DegradedReason: "missing input: pg_archiver_ready_files"}}
 			}
+			detail := fmt.Sprintf("last archive is %.0f seconds old and %.0f WAL segments are waiting", age, ready)
+			evidence := map[string]any{"last_archived_age_seconds": age, "limit_seconds": limit, "ready_files": ready}
 			return []Finding{configFinding("archive.stalled", SeverityCritical, "Archiving is stalled", detail, "Repair archiving before WAL retention is exhausted", evidence)}
 		}
 		return nil
