@@ -50,12 +50,13 @@ type channelNotifier struct {
 }
 
 // pendingDelivery is a message that a channel did not accept. It is sent again
-// on the first pass after the one in which it failed, unless Settle drops it
-// first because its alert has moved past it. The queue lives in memory: a
-// restart drops it, while a change of leader in the same process keeps the
-// entries that the table still owes, and those are sent late. A failed send
-// stays on record in the claim row; an unclaimed delivery has no row, so its
-// drop is reported instead.
+// on the first pass after the one in which it failed, unless Notify or Settle
+// drops it first because its alert has moved on. A drop is logged, not counted,
+// and not reported as undelivered. The queue lives in memory: a restart drops
+// it, while a change of leader in the same process keeps the entries that the
+// table still owes, and those are sent late. A failed send stays on record in
+// the claim row; an unclaimed delivery has no row, so when it runs out of
+// attempts giveUp reports it.
 type pendingDelivery struct {
 	dedupID string
 	channel notify.Channel
@@ -80,7 +81,10 @@ func (n *channelNotifier) Notify(ctx context.Context, a Alert) error {
 	}
 	// A transition is newer than every delivery still pending for its alert, so
 	// those are dropped before this one goes out. Otherwise a channel that was
-	// refused a FIRING would get it after the RESOLVED that follows it.
+	// refused a FIRING would get it after the RESOLVED that follows it. The cost
+	// is that a dropped RESOLVED of an older episode is never sent. The dedup_id
+	// of each message is per episode, so a consumer that tracks incidents by it
+	// keeps that older incident open.
 	n.dropPending(func(d pendingDelivery) bool { return d.alert.Key == a.Key })
 	// Every channel gets its attempt. One channel that is down must not keep
 	// the others from delivering the same transition.
@@ -144,7 +148,12 @@ func newMessage(a Alert, phase string) notify.Message {
 
 // Retry makes again the deliveries that failed on an earlier pass. A delivery
 // that failed in the current pass waits for the next one, so that a channel is
-// not hit twice in the same pass.
+// not hit twice in the same pass. A pass that starts after the cycle has ended
+// makes no claim and no send, since the cycle's context is already done. Those
+// deliveries are kept without being counted, so a delivery can stay pending
+// while such passes repeat, for example when the rules or the purge use up the
+// rest of the cycle. Settle still runs on those passes, since it needs no store,
+// so an obsolete delivery is dropped even then.
 func (n *channelNotifier) Retry(ctx context.Context) error {
 	n.mu.Lock()
 	var due []pendingDelivery
