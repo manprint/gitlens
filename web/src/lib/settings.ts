@@ -77,6 +77,24 @@ export function durabilitySeverity(setting: Schemas['Setting']): DurabilitySever
   return null
 }
 
+// Only these settings read -1 as "no limit". Elsewhere -1 is a different
+// sentinel, such as autovacuum_work_mem, where it means "use the other setting",
+// so those settings keep the stored value without a label.
+const NO_LIMIT_WHEN_NEGATIVE: ReadonlySet<string> = new Set([
+  'max_slot_wal_keep_size',
+  'temp_file_limit',
+])
+
 export function settingDisplayValue(setting: Schemas['Setting']): string | null {
-  return normalizeSettingValue(setting.value, setting.unit)
+  const display = normalizeSettingValue(setting.value, setting.unit)
+  const parsed = numericValue(setting.value)
+  if (
+    display !== null &&
+    parsed !== null &&
+    parsed < 0 &&
+    NO_LIMIT_WHEN_NEGATIVE.has(setting.name)
+  ) {
+    return `${display} (no limit)`
+  }
+  return display
 }
