@@ -29,7 +29,7 @@ type Stats struct {
 	BytesUsed       int64
 	Segments        int64
 	SamplesDropped  map[string]int64
-	CorruptRecords  int64
+	CorruptRecords  int64 // skipped on read: bad CRCs and zero headers (a zero-filled run counts once per header); one per cut on open
 	CutBytes        int64 // bytes removed from segment tails on open: torn writes and unplaceable headers
 	BufferFull      bool
 	LastDropTime    *time.Time
@@ -54,6 +54,10 @@ type Buffer struct {
 }
 
 // Open opens or creates a buffer in the given directory.
+//
+// A directory has exactly one writer. Nothing locks it, and Append cuts the
+// active segment back to the size this buffer tracks, which would cut the
+// records of a second writer.
 func Open(dir string, opts Options) (*Buffer, error) {
 	if opts.Clock == nil {
 		opts.Clock = clock.System()
@@ -147,10 +151,11 @@ func Open(dir string, opts Options) (*Buffer, error) {
 		}
 		if cut > 0 {
 			// The cut bytes were never readable, so they were never deliverable.
-			// Counting them keeps the loss visible instead of silent. One record
-			// is counted per cut: the records behind a header that cannot be
-			// placed cannot be counted from the bytes, so the warning names the
-			// size as well.
+			// Counting them, with the warning, keeps the loss visible in Stats and
+			// on stderr, though nothing exports the counters yet. One record is
+			// counted per cut: the records behind a header that cannot be placed
+			// cannot be counted from the bytes, so the warning names the size as
+			// well.
 			b.stats.CorruptRecords++
 			b.stats.CutBytes += cut
 			tornAt := opts.Clock.Now()
@@ -550,7 +555,9 @@ func (b *Buffer) unackedRecords(seg *Segment) int64 {
 
 // removeOldestSegment deletes the oldest segment. reason names the retention
 // policy responsible; only records that were never delivered count as
-// dropped, and an empty reason drops nothing but delivered records.
+// dropped. An empty reason is for the segments the checkpoint passes. A fixed
+// binary removes only delivered records that way, but a checkpoint written by
+// a pre-fix binary can pass unacked records, and those go uncounted.
 func (b *Buffer) removeOldestSegment(reason string) {
 	oldestSeg := b.segments[0]
 	var dropped int64
@@ -681,6 +688,14 @@ func openSegment(fpath string, keep uint64) (*Segment, int64, error) {
 	// reads them again, so a corrupt length header there must not stop the walk
 	// and cut the records after it. A checkpoint past the end of the file leaves
 	// nothing to walk, and Open moves it back to the end of the file.
+	//
+	// This holds for the checkpoint's own segment only. A segment wholly below the
+	// checkpoint is walked from byte 0, and Open then deletes it unread, so a
+	// corrupt header there can add a cut and a warning but loses nothing. The
+	// checkpoint itself is trusted as a record boundary, since .acked has no
+	// checksum. A corrupt offset there starts the walk mid-record, and the cut
+	// then removes the unacked bytes behind it. That residual is accepted until
+	// .acked is checksummed.
 	//
 	// A record that runs past the end of the file is a torn write, and the reader
 	// cannot get past it: an append landing after the torn bytes would be read as
