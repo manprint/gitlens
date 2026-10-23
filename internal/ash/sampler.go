@@ -200,6 +200,12 @@ func (s *Sampler) run(ctx context.Context, ticker clock.Ticker) {
 }
 
 // doSample executes one ASH sample query.
+//
+// The agent's own sessions are named pglens/shared, pglens/ash and
+// pglens/<datname>, and their checks are load pglens puts on the instance, not
+// the workload it is meant to show. They are left out by name. The bare name
+// pglens is not, because the monitoring role's default application_name is
+// pglens and the target's own sessions can carry it too.
 func (s *Sampler) doSample(ctx context.Context) error {
 	rows, err := s.conn.Query(ctx, `
 SELECT COALESCE(datname, '')             AS datname,
@@ -211,6 +217,7 @@ SELECT COALESCE(datname, '')             AS datname,
  WHERE backend_type IN ('client backend', 'parallel worker')
    AND state <> 'idle'
    AND pid <> pg_backend_pid()
+   AND COALESCE(application_name, '') NOT LIKE 'pglens/%'
 	`)
 	if err != nil {
 		return err

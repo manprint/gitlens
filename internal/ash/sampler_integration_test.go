@@ -338,3 +338,54 @@ func TestINTASH006_HiddenSessionsDetected(t *testing.T) {
 		}
 	})
 }
+
+// namedSleepingSession is sleepingSession for a session that first names itself
+// application, as the agent does for its own connections.
+func namedSleepingSession(t *testing.T, ctx context.Context, pool *pgxpool.Pool, application string, dur time.Duration) {
+	t.Helper()
+	conn, err := pool.Acquire(ctx)
+	require.NoError(t, err)
+	_, err = conn.Exec(ctx, "SELECT set_config('application_name', $1, false)", application)
+	require.NoError(t, err)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer conn.Release()
+		_, _ = conn.Exec(ctx, "SELECT pg_sleep($1)", dur.Seconds())
+	}()
+	t.Cleanup(wg.Wait)
+}
+
+// INT-ASH-007: an active session the agent names pglens/shared is the agent's
+// own load and is not sampled, while an active session of an application is.
+// Both sleep in pg_sleep, so the count of PgSleep rows tells them apart.
+func TestINTASH007_AgentSessionsNotSampled(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		pool := newTestPool(t, ctx, pg)
+		namedSleepingSession(t, ctx, pool, "pglens/shared", 3*time.Second)
+		namedSleepingSession(t, ctx, pool, "pglens/ash", 3*time.Second)
+		namedSleepingSession(t, ctx, pool, "reporting-app", 3*time.Second)
+		time.Sleep(300 * time.Millisecond) // let the sleepers start
+
+		samplerConn, err := pool.Acquire(ctx)
+		require.NoError(t, err)
+		defer samplerConn.Release()
+
+		var rows []SampleRow
+		s := NewSampler(samplerConn, clock.System(), func(r SampleRow) { rows = append(rows, r) })
+		require.NoError(t, s.doSample(ctx))
+
+		var sleeping int
+		for _, r := range rows {
+			if r.WaitEvent == "PgSleep" {
+				sleeping++
+			}
+		}
+		require.Equal(t, 1, sleeping, "only the application session must be sampled, the agent's pglens/ sessions are not workload; got %+v", rows)
+	})
+}
