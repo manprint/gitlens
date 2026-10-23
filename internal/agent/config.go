@@ -195,7 +195,10 @@ func (c *Config) validate() error {
 		c.parsedPushInterval = 15 * time.Second
 	} else {
 		d, err := time.ParseDuration(c.PushInterval)
-		if err != nil {
+		if err != nil || d <= 0 {
+			if err == nil {
+				err = fmt.Errorf("must be greater than zero")
+			}
 			return fmt.Errorf("validation: push_interval: %w", err)
 		}
 		c.parsedPushInterval = d
