@@ -21,6 +21,9 @@ interface SignalActionsProps {
   node: LockNode
   instanceId?: string
   currentTier: PermTier
+  // Set when the lock sample is stale. The session may have ended and its PID
+  // been reused since the sample, and the command carries only the PID.
+  sampleStale?: boolean
 }
 
 interface CommandHandle {
@@ -88,7 +91,12 @@ function commandStatus(handle: CommandHandle, instanceId?: string) {
   )
 }
 
-export function SignalActions({ node, instanceId, currentTier }: SignalActionsProps) {
+export function SignalActions({
+  node,
+  instanceId,
+  currentTier,
+  sampleStale = false,
+}: SignalActionsProps) {
   const cancelCommand = useCreateCommand(instanceId)
   const terminateCommand = useCreateCommand(instanceId)
   const [openKind, setOpenKind] = useState<SignalKind | null>(null)
@@ -117,7 +125,7 @@ export function SignalActions({ node, instanceId, currentTier }: SignalActionsPr
   }
 
   const submit = () => {
-    if (!openKind || pid === null) return
+    if (!openKind || pid === null || sampleStale) return
     handles[openKind].mutate({
       args: { pid },
       kind: openKind,
@@ -127,11 +135,15 @@ export function SignalActions({ node, instanceId, currentTier }: SignalActionsPr
 
   const buttons = (
     <div className="mt-3 flex flex-wrap gap-2" aria-label={`Signal actions for PID ${pidLabel}`}>
-      {actionButton('cancel', () => setOpenKind('cancel'), belowT2 || policyClosed || pid === null)}
+      {actionButton(
+        'cancel',
+        () => setOpenKind('cancel'),
+        belowT2 || policyClosed || pid === null || sampleStale,
+      )}
       {actionButton(
         'terminate',
         () => setOpenKind('terminate'),
-        belowT2 || policyClosed || pid === null,
+        belowT2 || policyClosed || pid === null || sampleStale,
       )}
     </div>
   )
@@ -148,7 +160,14 @@ export function SignalActions({ node, instanceId, currentTier }: SignalActionsPr
           {buttons}
         </div>
       ) : (
-        buttons
+        <>
+          {buttons}
+          {sampleStale ? (
+            <p className="text-muted-foreground mt-1 text-xs">
+              Signal actions are disabled until a fresh lock sample arrives.
+            </p>
+          ) : null}
+        </>
       )}
       {belowT2 ? (
         <>
@@ -206,6 +225,7 @@ export function SignalActions({ node, instanceId, currentTier }: SignalActionsPr
             <Button
               type="button"
               variant={openKind === 'terminate' ? 'destructive' : 'default'}
+              disabled={sampleStale}
               onClick={submit}
             >
               {openKind === 'terminate' ? 'Terminate backend' : 'Cancel query'}

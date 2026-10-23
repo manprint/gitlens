@@ -39,10 +39,12 @@ function ActiveSessions({
   sessions,
   currentTier,
   instanceId,
+  sampleStale,
 }: {
   sessions: readonly LockNode[]
   currentTier: PermTier
   instanceId: string
+  sampleStale: boolean
 }) {
   return (
     <div className="mt-6">
@@ -66,7 +68,12 @@ function ActiveSessions({
               <p className="text-muted-foreground mt-1 truncate text-sm">
                 {sessionQuery(session.query)}
               </p>
-              <SignalActions currentTier={currentTier} instanceId={instanceId} node={session} />
+              <SignalActions
+                currentTier={currentTier}
+                instanceId={instanceId}
+                node={session}
+                sampleStale={sampleStale}
+              />
             </li>
           ))}
         </ul>
@@ -131,6 +138,7 @@ export function ActivitySection({
 }) {
   const sampledAt = useMemo(() => latestSampleAt(response.metrics), [response.metrics])
   const age = ageSince(sampledAt, now)
+  const sampleStale = response.stale || (age !== null && age > STALE_THRESHOLD_SECONDS)
   const used = latestValue(response.metrics, 'pg_connections_used')
   const limit = latestValue(response.metrics, 'pg_connections_limit')
   const saturation = connectionSaturation(response.metrics)
@@ -251,7 +259,12 @@ export function ActivitySection({
       </div>
 
       {sessions && instanceId ? (
-        <ActiveSessions currentTier={currentTier} instanceId={instanceId} sessions={sessions} />
+        <ActiveSessions
+          currentTier={currentTier}
+          instanceId={instanceId}
+          sampleStale={sampleStale}
+          sessions={sessions}
+        />
       ) : null}
     </Section>
   )

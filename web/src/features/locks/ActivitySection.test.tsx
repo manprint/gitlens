@@ -159,4 +159,18 @@ describe('ActivitySection', () => {
     )
     expect(screen.getByRole('button', { name: 'Cancel query' })).toBeInTheDocument()
   })
+
+  it('UI-LOCK-051 disables session signal actions while the activity sample is stale', () => {
+    renderWithProviders(
+      <ActivitySection
+        currentTier="T2"
+        instanceId="11111111-1111-4111-8111-111111111111"
+        now={NOW}
+        response={{ stale: true, metrics: {} }}
+        sessions={[{ pid: 42, backend_type: 'client backend' }]}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Terminate backend' })).toBeDisabled()
+  })
 })

@@ -42,6 +42,7 @@ interface TreeItemProps {
   currentTier: PermTier
   instanceId: string | undefined
   sampledAt: string | null
+  sampleStale: boolean
   expanded: boolean
   onKeyDown: (event: KeyboardEvent<HTMLLIElement>, entry: TreeEntry) => void
   onToggle: (key: string) => void
@@ -181,6 +182,7 @@ function TreeItem({
   currentTier,
   instanceId,
   sampledAt,
+  sampleStale,
   expanded,
   onKeyDown,
   onToggle,
@@ -235,7 +237,12 @@ function TreeItem({
             <>
               <LockDetails node={tree.node} sampledAt={sampledAt} />
               {instanceId ? (
-                <SignalActions node={tree.node} currentTier={currentTier} instanceId={instanceId} />
+                <SignalActions
+                  node={tree.node}
+                  currentTier={currentTier}
+                  instanceId={instanceId}
+                  sampleStale={sampleStale}
+                />
               ) : null}
             </>
           )}
@@ -257,6 +264,7 @@ function TreeItem({
                 currentTier={currentTier}
                 instanceId={instanceId}
                 sampledAt={sampledAt}
+                sampleStale={sampleStale}
                 expanded={expandedKeys.has(childEntry.key)}
                 onKeyDown={onKeyDown}
                 onToggle={onToggle}
@@ -303,6 +311,7 @@ export function BlockingTree({
   }
 
   const age = sampleAge(response.sampled_at, now)
+  const sampleStale = response.stale || (age !== null && age > STALE_THRESHOLD_SECONDS)
   const entries = visibleEntries(forest, expandedKeys)
 
   if (forest.length === 0) {
@@ -396,6 +405,7 @@ export function BlockingTree({
               currentTier={currentTier}
               instanceId={instanceId}
               sampledAt={response.sampled_at}
+              sampleStale={sampleStale}
               expanded={expandedKeys.has(entry.key)}
               onKeyDown={handleKeyDown}
               onToggle={handleToggle}

@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { expectNoA11yViolations } from '@/test/a11y'
+import { renderWithProviders } from '@/test/render'
 import { NOW } from '@/test/time'
 
 import { BlockingTree, type LocksResponseLike } from './BlockingTree'
@@ -163,5 +164,46 @@ describe('BlockingTree', () => {
 
     expect(screen.getAllByRole('treeitem')).toHaveLength(9)
     expect(screen.getAllByRole('treeitem')[0]).toHaveTextContent('PID 100')
+  })
+
+  it('UI-LOCK-049 disables signal actions on a stale lock sample and keeps them on a fresh one', () => {
+    const instanceId = '11111111-1111-4111-8111-111111111111'
+    const sixtySecondsAgo = new Date(NOW.getTime() - 60_000).toISOString()
+    const { unmount } = renderWithProviders(
+      <BlockingTree
+        currentTier="T2"
+        instanceId={instanceId}
+        now={NOW}
+        response={response([{ pid: 42, blocked_by: [] }], {
+          stale: true,
+          sampled_at: sixtySecondsAgo,
+        })}
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Terminate backend' })).toBeDisabled()
+    unmount()
+
+    renderWithProviders(
+      <BlockingTree
+        currentTier="T2"
+        instanceId={instanceId}
+        now={NOW}
+        response={response([{ pid: 42, blocked_by: [] }], { sampled_at: sixtySecondsAgo })}
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Terminate backend' })).toBeDisabled()
+  })
+
+  it('UI-LOCK-050 keeps signal actions enabled on a fresh lock sample', () => {
+    renderWithProviders(
+      <BlockingTree
+        currentTier="T2"
+        instanceId="11111111-1111-4111-8111-111111111111"
+        now={NOW}
+        response={response([{ pid: 42, blocked_by: [] }])}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Terminate backend' })).toBeEnabled()
   })
 })
