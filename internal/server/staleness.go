@@ -126,6 +126,82 @@ func (c *counterVec) Snapshot() map[string]float64 {
 	return out
 }
 
+// checkKey names one check's counter series: the instance the check ran against
+// and the check, with a name outside knownChecks already bucketed by checkLabel.
+type checkKey struct {
+	instance string
+	check    string
+}
+
+// checkCounterVec is counterVec keyed by an instance and a check.
+type checkCounterVec struct {
+	mu   sync.Mutex
+	vals map[checkKey]float64
+}
+
+func (c *checkCounterVec) Inc(key checkKey) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.vals[key]++
+}
+
+func (c *checkCounterVec) Get(key checkKey) float64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.vals[key]
+}
+
+// Snapshot is counterVec.Snapshot for a checkCounterVec.
+func (c *checkCounterVec) Snapshot() map[checkKey]float64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make(map[checkKey]float64, len(c.vals))
+	for k, v := range c.vals {
+		out[k] = v
+	}
+	return out
+}
+
+// knownChecks are the check names an agent reports: the checks it registers and
+// the two results it builds itself. The agent supplies the name, under a token
+// every agent shares, so an unknown name is bucketed rather than kept: otherwise
+// each distinct name would hold a series in memory and in /metrics for the life
+// of the process, and a name that is not valid text would break the scrape.
+var knownChecks = map[string]bool{
+	"activity":              true,
+	"agent_self":            true,
+	"archiver":              true,
+	"ash":                   true,
+	"bloat_estimate":        true,
+	"checkpointer":          true,
+	"database_stats":        true,
+	"host":                  true,
+	"index_stats":           true,
+	"instance_info":         true,
+	"io":                    true,
+	"locks":                 true,
+	"monitoring_role":       true,
+	"replication_receiver":  true,
+	"replication_slots":     true,
+	"replication_streaming": true,
+	"settings":              true,
+	"stat_statements":       true,
+	"table_stats":           true,
+	"vacuum_progress":       true,
+	"wal":                   true,
+}
+
+// checkOther is the check label of every name outside knownChecks.
+const checkOther = "other"
+
+// checkLabel is the check label a reported check name is counted under.
+func checkLabel(check string) string {
+	if knownChecks[check] {
+		return check
+	}
+	return checkOther
+}
+
 type counter struct {
 	mu sync.Mutex
 	v  float64
@@ -184,8 +260,8 @@ var (
 	pglensAgentClockSkewSeconds     = &gauge{}
 	pglensSeriesTotalGauge          = newGaugeVec()
 	pglensCardinalityTruncatedTotal = &counter{}
-	pglensCheckErrorTotal           = &counterVec{vals: make(map[string]float64)}
-	pglensCheckOKTotal              = &counterVec{vals: make(map[string]float64)}
+	pglensCheckErrorTotal           = &checkCounterVec{vals: make(map[checkKey]float64)}
+	pglensCheckOKTotal              = &checkCounterVec{vals: make(map[checkKey]float64)}
 )
 
 // Exported helpers for other packages (ingest, pipeline) to update self-monitoring
@@ -215,16 +291,17 @@ func IncCardinalityTruncated() {
 	pglensCardinalityTruncatedTotal.Inc()
 }
 
-// IncCheckError records one failed check scrape, keyed by check name — the
-// visibility gap that let stat_statements fail every single scrape,
-// invisibly, until it was found by chance re-verifying a README (STATE.md
-// §4 rows 141-142). wire.Result.Error was always sent by the agent but
-// never once read by the server before this.
-func IncCheckError(check string) {
-	pglensCheckErrorTotal.Inc(check)
+// IncCheckError records one failed check scrape of an instance, keyed by the
+// instance and the check name — the visibility gap that let stat_statements
+// fail every single scrape, invisibly, until it was found by chance
+// re-verifying a README (STATE.md §4 rows 141-142). wire.Result.Error was
+// always sent by the agent but never once read by the server before this.
+func IncCheckError(instanceID, check string) {
+	pglensCheckErrorTotal.Inc(checkKey{instance: instanceID, check: checkLabel(check)})
 }
 
-// IncCheckOK records one successful check scrape, keyed by check name.
+// IncCheckOK records one successful check scrape of an instance, keyed by the
+// instance and the check name. The pipeline counts a skipped scrape as neither.
 //
 // The error counter alone cannot tell "this check is broken" from "this
 // check's target was deliberately taken away for a moment": a failover, a
@@ -235,8 +312,8 @@ func IncCheckError(check string) {
 // is exactly the shape of the stat_statements bug IncCheckError was added
 // for, while a check that errored during a fault window and succeeded on
 // either side of it is behaving correctly.
-func IncCheckOK(check string) {
-	pglensCheckOKTotal.Inc(check)
+func IncCheckOK(instanceID, check string) {
+	pglensCheckOKTotal.Inc(checkKey{instance: instanceID, check: checkLabel(check)})
 }
 
 func boolToFloat(b bool) float64 {

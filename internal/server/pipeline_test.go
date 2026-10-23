@@ -371,14 +371,15 @@ func TestPipeline_GaugeBypassesDelta(t *testing.T) {
 // TestPipeline_ResultErrorIncrementsCheckErrorTotal proves wire.Result.Error
 // is actually read now — found live via SYS-LOAD-003 prep that it never was
 // (row 141-142's stat_statements bug hid invisibly for exactly this
-// reason). Uses a unique check name since pglens_check_error_total is a
-// shared package-level counter other tests may also touch.
+// reason). The counters are shared package-level state, so the test reads the
+// series of its own instance only.
 func TestPipeline_ResultErrorIncrementsCheckErrorTotal(t *testing.T) {
 	t.Parallel()
 	p := NewPipeline(nil, clock.NewFake(time.Now()))
 	instID := uuid.NewString()
 	cid := pgtype.ClusterID(123).String()
-	const checkName = "pipeline_test_unique_check_error"
+	const checkName = "activity"
+	key := checkKey{instance: instID, check: checkName}
 	env := wire.Envelope{
 		Instances: []wire.Instance{
 			{
@@ -389,12 +390,12 @@ func TestPipeline_ResultErrorIncrementsCheckErrorTotal(t *testing.T) {
 			},
 		},
 	}
-	before := pglensCheckErrorTotal.Get(checkName)
-	beforeOK := pglensCheckOKTotal.Get(checkName)
+	before := pglensCheckErrorTotal.Get(key)
+	beforeOK := pglensCheckOKTotal.Get(key)
 	_, err := p.Process(context.Background(), env)
 	require.NoError(t, err)
-	require.Equal(t, before+1, pglensCheckErrorTotal.Get(checkName))
-	require.Equal(t, beforeOK, pglensCheckOKTotal.Get(checkName), "a failed scrape must not count as a success")
+	require.Equal(t, before+1, pglensCheckErrorTotal.Get(key))
+	require.Equal(t, beforeOK, pglensCheckOKTotal.Get(key), "a failed scrape must not count as a success")
 }
 
 // TestPipeline_SuccessfulResultIncrementsCheckOKTotal is the other half of the
@@ -408,7 +409,8 @@ func TestPipeline_SuccessfulResultIncrementsCheckOKTotal(t *testing.T) {
 	p := NewPipeline(nil, clock.NewFake(time.Now()))
 	instID := uuid.NewString()
 	cid := pgtype.ClusterID(124).String()
-	const checkName = "pipeline_test_unique_check_ok"
+	const checkName = "activity"
+	key := checkKey{instance: instID, check: checkName}
 	env := wire.Envelope{
 		Instances: []wire.Instance{
 			{
@@ -419,12 +421,37 @@ func TestPipeline_SuccessfulResultIncrementsCheckOKTotal(t *testing.T) {
 			},
 		},
 	}
-	before := pglensCheckOKTotal.Get(checkName)
-	beforeErr := pglensCheckErrorTotal.Get(checkName)
+	before := pglensCheckOKTotal.Get(key)
+	beforeErr := pglensCheckErrorTotal.Get(key)
 	_, err := p.Process(context.Background(), env)
 	require.NoError(t, err)
-	require.Equal(t, before+1, pglensCheckOKTotal.Get(checkName))
-	require.Equal(t, beforeErr, pglensCheckErrorTotal.Get(checkName), "a successful scrape must not count as an error")
+	require.Equal(t, before+1, pglensCheckOKTotal.Get(key))
+	require.Equal(t, beforeErr, pglensCheckErrorTotal.Get(key), "a successful scrape must not count as an error")
+}
+
+// A skipped scrape completed neither way. Counting it as OK would let it hide
+// the errors the same check reports on that instance.
+func TestPipeline_SkippedResultCountsAsNeither(t *testing.T) {
+	t.Parallel()
+	p := NewPipeline(nil, clock.NewFake(time.Now()))
+	instID := uuid.NewString()
+	cid := pgtype.ClusterID(125).String()
+	const checkName = "activity"
+	key := checkKey{instance: instID, check: checkName}
+	env := wire.Envelope{
+		Instances: []wire.Instance{
+			{
+				InstanceID: instID, ClusterID: cid,
+				Results: []wire.Result{
+					{Check: checkName, TS: time.Now(), SkipReason: "needs pg_read_all_stats"},
+				},
+			},
+		},
+	}
+	_, err := p.Process(context.Background(), env)
+	require.NoError(t, err)
+	require.Zero(t, pglensCheckOKTotal.Get(key), "a skipped scrape must not count as a success")
+	require.Zero(t, pglensCheckErrorTotal.Get(key), "a skipped scrape must not count as an error")
 }
 
 func TestPipeline_CounterProducesRate(t *testing.T) {

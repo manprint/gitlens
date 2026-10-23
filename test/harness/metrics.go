@@ -2,6 +2,7 @@ package harness
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -66,15 +67,17 @@ func AssertMetricInvariants(t TestingT, exposition string, budget MetricBudget) 
 		}
 	}
 
-	ok := make(map[string]float64)
-	for _, sample := range parseLabelledMetric(exposition, "pglens_check_ok_total") {
-		ok[sample.label] += sample.value
+	// The counters are kept per instance: a check that works on one instance and
+	// fails on every scrape of another is broken there, whatever the first does.
+	ok := make(map[checkSeries]float64)
+	for _, sample := range parseCheckMetric(exposition, "pglens_check_ok_total") {
+		ok[sample.series()] += sample.value
 	}
-	for _, sample := range parseLabelledMetric(exposition, "pglens_check_error_total") {
-		if sample.value == 0 || budget.AllowedCheckErrors[sample.label] {
+	for _, sample := range parseCheckMetric(exposition, "pglens_check_error_total") {
+		if sample.value == 0 || budget.AllowedCheckErrors[sample.check] {
 			continue
 		}
-		if ok[sample.label] > 0 {
+		if ok[sample.series()] > 0 {
 			// Errored and recovered: a fault window, not a broken check.
 			continue
 		}
@@ -86,11 +89,11 @@ func AssertMetricInvariants(t TestingT, exposition string, budget MetricBudget) 
 			// "io" errored once, never scraped again, and the same scenario
 			// had passed on the run before. A check that is genuinely broken
 			// fails repeatedly — that is the case this invariant is for.
-			t.Logf("check %q errored once and never succeeded; too little evidence to judge, not failing the scenario", sample.label)
+			t.Logf("check %q on instance %s errored once and never succeeded; too little evidence to judge, not failing the scenario", sample.check, sample.instance)
 			continue
 		}
-		t.Errorf("check %q failed every one of its %.0f scrape(s) and never once succeeded; a check that cannot scrape produces no data at all and must fail the scenario that relied on it",
-			sample.label, sample.value)
+		t.Errorf("check %q on instance %s failed every one of its %.0f scrape(s) and never once succeeded; a check that cannot scrape produces no data at all and must fail the scenario that relied on it",
+			sample.check, sample.instance, sample.value)
 	}
 }
 
@@ -102,6 +105,44 @@ const minErrorsToJudgeACheck = 2
 type labelledSample struct {
 	label string
 	value float64
+}
+
+// checkSeries is the (instance, check) pair a check counter is kept for.
+type checkSeries struct {
+	instance string
+	check    string
+}
+
+// checkSample is one `name{instance_id="...",check="..."} number` line.
+type checkSample struct {
+	instance string
+	check    string
+	value    float64
+}
+
+func (s checkSample) series() checkSeries {
+	return checkSeries{instance: s.instance, check: s.check}
+}
+
+// parseCheckMetric pulls every sample of one per-instance check counter family
+// out of a Prometheus text exposition. Like parseLabelledMetric it is minimal:
+// the exposition has this one fixed shape, and a line that does not match it is
+// skipped rather than guessed at.
+func parseCheckMetric(exposition, name string) []checkSample {
+	line := regexp.MustCompile(`^` + regexp.QuoteMeta(name) + `\{instance_id="([^"]*)",check="([^"]*)"\} (\S+)$`)
+	var out []checkSample
+	for _, text := range strings.Split(exposition, "\n") {
+		m := line.FindStringSubmatch(strings.TrimSpace(text))
+		if m == nil {
+			continue
+		}
+		value, err := strconv.ParseFloat(m[3], 64)
+		if err != nil {
+			continue
+		}
+		out = append(out, checkSample{instance: m[1], check: m[2], value: value})
+	}
+	return out
 }
 
 // parseLabelledMetric pulls every sample of one single-label metric family out

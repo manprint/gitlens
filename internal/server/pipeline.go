@@ -365,10 +365,12 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 					partialState[pk] = partialObservation{ts: r.TS, partial: r.Partial, truncated: r.Truncated}
 				}
 			}
+			// A skipped scrape completed neither way. Counting it as OK would let
+			// it hide the errors the same check reports on that instance.
 			if r.Error != "" {
-				IncCheckError(r.Check)
-			} else {
-				IncCheckOK(r.Check)
+				IncCheckError(instUUID.String(), r.Check)
+			} else if r.SkipReason == "" {
+				IncCheckOK(instUUID.String(), r.Check)
 			}
 			if r.Truncated {
 				evCluster := cidDB
@@ -920,9 +922,9 @@ func (p *Pipeline) processInstanceNoDB(_ context.Context, inst wire.Instance) er
 	instUUID, _ := uuid.Parse(inst.InstanceID)
 	for _, r := range inst.Results {
 		if r.Error != "" {
-			IncCheckError(r.Check)
-		} else {
-			IncCheckOK(r.Check)
+			IncCheckError(instUUID.String(), r.Check)
+		} else if r.SkipReason == "" {
+			IncCheckOK(instUUID.String(), r.Check)
 		}
 		for _, m := range r.Metrics {
 			dest := destinationTable(r.Check)
