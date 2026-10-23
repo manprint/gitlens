@@ -217,7 +217,7 @@ describe('SignalActions', () => {
     ).toBeDisabled()
   })
 
-  it('UI-LOCK-061 sends the start time the operator saw, unchanged to the microsecond', async () => {
+  it('UI-LOCK-064 sends the start time the operator saw, unchanged to the microsecond', async () => {
     const bodies = captureCommands()
     renderActions({ node: { ...node, backend_start: '2026-10-23T09:00:00.123456Z' } })
     const dialog = openDialog('cancel')
@@ -231,7 +231,7 @@ describe('SignalActions', () => {
     })
   })
 
-  it('UI-LOCK-062 sends the PID alone when the sample carries no start time', async () => {
+  it('UI-LOCK-065 sends the PID alone when the sample carries no start time', async () => {
     const bodies = captureCommands()
     renderActions()
     const dialog = openDialog('terminate')
