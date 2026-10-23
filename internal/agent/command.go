@@ -15,6 +15,7 @@ import (
 
 	"github.com/manprint/pglens/internal/check"
 	"github.com/manprint/pglens/internal/command"
+	"github.com/manprint/pglens/internal/redact"
 )
 
 const (
@@ -228,7 +229,7 @@ const withheldError = "the error text is withheld because it may hold a credenti
 // of a credential is withheld by the rule the statement texts follow.
 func commandError(err error) string {
 	text := err.Error()
-	if check.MayHoldCredential(text) {
+	if redact.MayHoldCredential(text) {
 		return withheldError
 	}
 	return text

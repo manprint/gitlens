@@ -15,6 +15,7 @@ import (
 
 	"github.com/manprint/pglens/internal/check"
 	"github.com/manprint/pglens/internal/command"
+	"github.com/manprint/pglens/internal/redact"
 )
 
 // ExplainExecutor explains the statement text associated with a queryid. It
@@ -52,7 +53,7 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 	}
 	// The plan shows the constants of the statement, so a statement whose text
 	// the stat_statements check withholds is not explained either.
-	if check.MayHoldCredential(statement) {
+	if redact.MayHoldCredential(statement) {
 		return nil, rejectedf("statement for queryid %d may hold a credential; pglens does not explain it", *args.QueryID)
 	}
 	keyword := firstSQLKeyword(statement)
@@ -154,7 +155,7 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 	// The plan also shows the constants of the views and functions the planner
 	// expanded, which the statement text does not: a view over dblink shows
 	// its connection string. A plan with any sign of a credential is withheld.
-	if check.MayHoldCredential(string(plan)) {
+	if redact.MayHoldCredential(string(plan)) {
 		return nil, rejectedf("the plan for queryid %d may hold a credential; pglens does not ship it", *args.QueryID)
 	}
 	hash, err := planHash(plan)
