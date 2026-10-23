@@ -163,15 +163,16 @@ func (e *Evaluator) Checkpoint(key string) (undo func()) {
 }
 
 // Unsampled returns the episodes of the rules that include selects whose
-// subject was last sampled at or before cutoff, so the pass that ended at
-// cutoff did not see them. The alerts are copies in key order: nothing is
-// closed until End is called for a key.
+// subject was last sampled before cutoff. A subject sampled in the pass that
+// runs at cutoff is not selected, so a cutoff equal to that pass's own time
+// closes nothing it saw. The alerts are copies in key order: nothing is closed
+// until End is called for a key.
 func (e *Evaluator) Unsampled(include func(ruleID string) bool, cutoff time.Time) []Alert {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	var out []Alert
 	for _, st := range e.states {
-		if include(st.alert.RuleID) && !st.seen.After(cutoff) {
+		if include(st.alert.RuleID) && st.seen.Before(cutoff) {
 			out = append(out, st.alert)
 		}
 	}

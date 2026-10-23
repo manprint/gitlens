@@ -28,6 +28,12 @@ const (
 	// purgeInterval spaces the purge out: a tick every few seconds has no
 	// use for a sweep of the history tables.
 	purgeInterval = time.Hour
+	// metricGrace is how long a metric episode may go unsampled before it
+	// closes. The collectors feeding the builtin metric rules sample every
+	// minute at the slowest, and an agent may pause for several minutes. A
+	// grace shorter than that closes a live incident on every pause and
+	// notifies its resolution and its return.
+	metricGrace = 10 * time.Minute
 )
 
 // Source produces samples for rules of one kind.
@@ -47,13 +53,30 @@ type Clearer interface {
 // opened it. Each is emitted once, when the condition begins, so once the
 // event leaves the lookback window nothing shows whether the condition still
 // holds. Their episodes close only when a Clearer confirms it. Every other
-// event type is a pulse, and its episode closes after the lookback passes
-// with no new occurrence; split_brain_detected is re-emitted while it persists,
-// well within that window.
+// event type is a pulse: its episode closes as soon as its occurrence leaves
+// the lookback window (see endGrace). split_brain_detected is re-emitted every
+// minute while it persists, so its episode stays open for as long as it lasts.
 var spellEvents = map[string]bool{
 	"instance_unreachable":  true,
 	"no_primary_in_cluster": true,
 	"slot_inactive":         true,
+}
+
+// endGrace is how long an episode may go unsampled before a pass closes it.
+// A spell has no clock of its own: its window only says when to ask its
+// Clearer. A pulse closes once its occurrence has left the window, so a later
+// occurrence opens an episode of its own and notifies again. Two occurrences
+// closer together than the lookback fall into one episode. A metric closes
+// only after metricGrace.
+func endGrace(r Rule, interval time.Duration) time.Duration {
+	switch {
+	case spellEvents[r.EventType]:
+		return lookback(interval)
+	case r.EventType != "":
+		return 0
+	default:
+		return metricGrace
+	}
 }
 
 // Notifier receives an alert transition. Delivery de-duplication belongs to
@@ -345,7 +368,6 @@ func (e *Engine) Tick(ctx context.Context) error {
 	// live is the rule set of this pass. An episode whose rule is not in it
 	// was configured earlier, and no later sample will ever close it.
 	live := make(map[string]struct{}, len(rules))
-	grace := lookback(e.interval)
 	var errs []error
 	for _, rule := range rules {
 		live[rule.ID] = struct{}{}
@@ -384,7 +406,7 @@ func (e *Engine) Tick(ctx context.Context) error {
 		// data. A source that failed, or a rule no source served, says nothing
 		// about its subjects, so only a fully observed rule may close them.
 		if observed > 0 && !failed {
-			errs = append(errs, e.endUnsampled(ctx, &rule, silences, now, e.eval.Unsampled(func(id string) bool { return id == rule.ID }, now.Add(-grace)))...)
+			errs = append(errs, e.endUnsampled(ctx, &rule, silences, now, e.eval.Unsampled(func(id string) bool { return id == rule.ID }, now.Add(-endGrace(rule, e.interval))))...)
 		}
 	}
 	errs = append(errs, e.endUnsampled(ctx, nil, silences, now, e.eval.Unsampled(func(id string) bool {
