@@ -316,6 +316,63 @@ func TestRun_OneFailingInstanceDoesNotStopTheOthers(t *testing.T) {
 	require.True(t, store.purged, "the retention purge must still run")
 }
 
+// TestRun_SlowInstanceDoesNotStopThePass: an instance that exceeds its step
+// budget fails alone. The instances after it are still evaluated and the purge
+// still runs. A deadline over the whole pass used to expire on the slow
+// instance and stop the pass there, every run.
+func TestRun_SlowInstanceDoesNotStopThePass(t *testing.T) {
+	rule := engineTestRule{id: "ok", severity: SeverityInfo, scope: ScopeInstance, eval: func(s *Snapshot) []Finding {
+		return []Finding{{RuleID: "ok", State: StateOpen, Scope: ScopeInstance, Title: "ok", ObjectName: s.InstanceID.String()}}
+	}}
+	e, store, slow := runWithRules(t, rule)
+	healthy := uuid.New()
+	store.ids = []uuid.UUID{slow, healthy}
+	e.stepBudget = 50 * time.Millisecond
+	now := time.Unix(100, 0)
+	e.load = func(ctx context.Context, id uuid.UUID, _ time.Time) (*Snapshot, error) {
+		if id == slow {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+		return &Snapshot{Now: now, InstanceID: id, PermTier: pgtype.TierReadOnly, Metrics: map[string]map[string]float64{}, Settings: map[string]string{}}, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	require.ErrorContains(t, e.Run(ctx), slow.String())
+	require.Len(t, store.findings, 1, "the healthy instance after the slow one must be evaluated")
+	require.Equal(t, healthy.String(), store.findings[0].ObjectName)
+	require.True(t, store.purged, "the retention purge must still run")
+}
+
+// TestRun_PassTimeIsNotBoundedByOneStep: the instances of a pass may take
+// together far longer than one step's budget, since each has its own. Every
+// instance is evaluated in the pass that lists it.
+func TestRun_PassTimeIsNotBoundedByOneStep(t *testing.T) {
+	rule := engineTestRule{id: "ok", severity: SeverityInfo, scope: ScopeInstance, eval: func(s *Snapshot) []Finding {
+		return []Finding{{RuleID: "ok", State: StateOpen, Scope: ScopeInstance, Title: "ok", ObjectName: s.InstanceID.String()}}
+	}}
+	e, store, _ := runWithRules(t, rule)
+	store.ids = nil
+	for i := 0; i < 10; i++ {
+		store.ids = append(store.ids, uuid.New())
+	}
+	e.stepBudget = 50 * time.Millisecond
+	now := time.Unix(100, 0)
+	e.load = func(ctx context.Context, id uuid.UUID, _ time.Time) (*Snapshot, error) {
+		select {
+		case <-time.After(20 * time.Millisecond):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return &Snapshot{Now: now, InstanceID: id, PermTier: pgtype.TierReadOnly, Metrics: map[string]map[string]float64{}, Settings: map[string]string{}}, nil
+	}
+
+	require.NoError(t, e.Run(context.Background()))
+	require.Len(t, store.findings, 10)
+	require.True(t, store.purged)
+}
+
 // TestRun_UpsertFailureStillResolvesAbsentFindings — aborting on a failed
 // write skipped ResolveAbsent, so findings that had gone away were never
 // resolved and stayed on the dashboard forever.

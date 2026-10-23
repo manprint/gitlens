@@ -20,6 +20,11 @@ import (
 
 const defaultAdvisorInterval = 15 * time.Minute
 
+// advisorStepBudget bounds one step of a pass: the leader check, the list of
+// instances, the evaluation of one instance, or the purge. The pass as a
+// whole has no deadline, see Run.
+const advisorStepBudget = 30 * time.Second
+
 type snapshotLoader func(context.Context, uuid.UUID, time.Time) (*Snapshot, error)
 
 // Engine evaluates registered advisor rules and persists current findings.
@@ -41,6 +46,8 @@ type Engine struct {
 	// leaderOverride keeps leader/follower behavior deterministic in unit tests.
 	// Production always uses the PostgreSQL advisory lock below.
 	leaderOverride func(context.Context) (bool, error)
+	// stepBudget is advisorStepBudget unless a test shrinks it.
+	stepBudget time.Duration
 }
 
 func NewEngine(pool *pgxpool.Pool, clk clock.Clock, interval time.Duration) *Engine {
@@ -68,7 +75,7 @@ func NewEngineWithStore(pool *pgxpool.Pool, clk clock.Clock, interval time.Durat
 }
 
 func newEngine(pool *pgxpool.Pool, clk clock.Clock, interval time.Duration, st Store, loader snapshotLoader) *Engine {
-	e := &Engine{pool: pool, clock: clk, interval: interval, store: st, load: loader, stopCh: make(chan struct{}), doneCh: make(chan struct{})}
+	e := &Engine{pool: pool, clock: clk, interval: interval, store: st, load: loader, stepBudget: advisorStepBudget, stopCh: make(chan struct{}), doneCh: make(chan struct{})}
 	if e.load == nil {
 		e.load = func(ctx context.Context, id uuid.UUID, now time.Time) (*Snapshot, error) {
 			return LoadSnapshot(ctx, pool, id, now)
@@ -94,11 +101,9 @@ func (e *Engine) Start(ctx context.Context) {
 				case <-e.stopCh:
 					return
 				case <-t.C():
-					runCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-					if err := e.Run(runCtx); err != nil {
+					if err := e.Run(ctx); err != nil {
 						log.Printf("advisor engine: %v", err)
 					}
-					cancel()
 				}
 			}
 		}()
@@ -189,11 +194,19 @@ func (e *Engine) releaseLeaderConn() {
 }
 
 // Run executes one complete pass. A follower returns without touching findings.
+//
+// Every step has its own budget and the pass has none. A deadline over the
+// whole pass used to expire during the first instances of a slow fleet, and
+// the pass then stopped there: the instances after them and the purge were
+// skipped, on every run, since the list is in a fixed order.
 func (e *Engine) Run(ctx context.Context) error {
 	if e.store == nil {
 		return nil
 	}
-	if err := e.ensureLeader(ctx); err != nil {
+	stepCtx, cancel := e.step(ctx)
+	err := e.ensureLeader(stepCtx)
+	cancel()
+	if err != nil {
 		return err
 	}
 	e.mu.Lock()
@@ -203,7 +216,9 @@ func (e *Engine) Run(ctx context.Context) error {
 		return nil
 	}
 	now := e.clock.Now()
-	ids, err := e.store.ActiveInstances(ctx, now.Add(-time.Hour))
+	stepCtx, cancel = e.step(ctx)
+	ids, err := e.store.ActiveInstances(stepCtx, now.Add(-time.Hour))
+	cancel()
 	if err != nil {
 		return err
 	}
@@ -215,17 +230,33 @@ func (e *Engine) Run(ctx context.Context) error {
 	// stable.
 	var errs []error
 	for _, id := range ids {
-		if err := e.runInstance(ctx, id, now); err != nil {
+		if err := e.runInstanceWithin(ctx, id, now); err != nil {
 			errs = append(errs, err)
 		}
+		// Only the parent's cancellation stops the pass, which is a shutdown.
 		if ctx.Err() != nil {
 			return errors.Join(append(errs, ctx.Err())...)
 		}
 	}
-	if err := e.store.PurgeResolved(ctx, now.Add(-90*24*time.Hour)); err != nil {
+	stepCtx, cancel = e.step(ctx)
+	if err := e.store.PurgeResolved(stepCtx, now.Add(-90*24*time.Hour)); err != nil {
 		errs = append(errs, err)
 	}
+	cancel()
 	return errors.Join(errs...)
+}
+
+// step returns ctx limited to one step's budget, see Run.
+func (e *Engine) step(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, e.stepBudget)
+}
+
+// runInstanceWithin runs one instance under its own budget, so an instance
+// that exceeds it fails alone and the pass goes on to the next.
+func (e *Engine) runInstanceWithin(ctx context.Context, id uuid.UUID, now time.Time) error {
+	stepCtx, cancel := e.step(ctx)
+	defer cancel()
+	return e.runInstance(stepCtx, id, now)
 }
 
 func (e *Engine) runInstance(ctx context.Context, id uuid.UUID, now time.Time) error {
