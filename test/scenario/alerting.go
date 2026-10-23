@@ -173,6 +173,20 @@ func runAlertEpisode(ctx context.Context, e *Env) error {
 	}); err != nil {
 		return fmt.Errorf("fire notification count: %w", err)
 	}
+	// The alert engine reads last_seen directly and can fire before the
+	// staleness evaluator's 90-second window closes. Restarting on the alert
+	// alone would bring the agent back before the agent_down event exists,
+	// and the scenario declares that event. Hold the agent down until the
+	// server has written it.
+	eventCtx, cancelEvent := context.WithTimeout(ctx, 150*time.Second)
+	defer cancelEvent()
+	if err := poll(eventCtx, 500*time.Millisecond, func(ctx context.Context) (bool, error) {
+		var n int
+		err := e.DB.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='agent_down' AND instance_id=$1::uuid`, instanceID).Scan(&n)
+		return err == nil && n >= 1, err
+	}); err != nil {
+		return fmt.Errorf("agent_down event not written while the agent was down: %w", err)
+	}
 	if err := e.Compose("start", "pglens-agent"); err != nil {
 		return fmt.Errorf("restart agent: %w", err)
 	}
@@ -195,8 +209,17 @@ func runAlertEpisode(ctx context.Context, e *Env) error {
 	if err != nil {
 		return err
 	}
-	if len(bodies) != 2 || bodies[0].RuleID != "agent_down" || bodies[0].Phase != "fire" || bodies[1].Phase != "resolve" {
-		return fmt.Errorf("want exactly fire+resolve notifications, got %#v", bodies)
+	// The server also emits instance_unreachable for the same silence, and the
+	// webhook channel delivers that rule too. The scenario is about agent_down,
+	// so only its deliveries are counted here.
+	var agentDown []receivedNotification
+	for _, body := range bodies {
+		if body.RuleID == "agent_down" {
+			agentDown = append(agentDown, body)
+		}
+	}
+	if len(agentDown) != 2 || agentDown[0].Phase != "fire" || agentDown[1].Phase != "resolve" {
+		return fmt.Errorf("want exactly agent_down fire+resolve notifications, got %#v (all deliveries: %#v)", agentDown, bodies)
 	}
 	e.AssertInvariants(e.T)
 	return nil

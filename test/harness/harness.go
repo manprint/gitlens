@@ -1120,6 +1120,10 @@ func (h *Harness) Scenario(t *testing.T, id string) {
 		t.Fatalf("scenario %q is not registered", id)
 	}
 
+	// Invariant IDs cannot be checked by name, so the only way a scenario can
+	// meet its declared invariants is to reach AssertInvariants. Recording the
+	// call lets a passing Run that never made it fail instead.
+	invariantsChecked := false
 	env := &scenario.Env{
 		T:    t,
 		DB:   h.DB(t),
@@ -1149,7 +1153,10 @@ func (h *Harness) Scenario(t *testing.T, id string) {
 			}
 			return scenario.RemoveFunc(remove), nil
 		},
-		AssertInvariants:  h.AssertInvariants,
+		AssertInvariants: func(t *testing.T) {
+			invariantsChecked = true
+			h.AssertInvariants(t)
+		},
 		KillServerReplica: func() error { return h.KillServerReplica(t) },
 	}
 	for _, api := range h.apiClients {
@@ -1161,9 +1168,44 @@ func (h *Harness) Scenario(t *testing.T, id string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
+	// The window for declared events opens on the store's clock, the same
+	// clock the events are stamped with, before Run starts.
+	var runStart time.Time
+	if err := env.DB.QueryRow(ctx, `SELECT now()`).Scan(&runStart); err != nil {
+		t.Fatalf("scenario %s: read the store clock: %v", id, err)
+	}
 	if err := s.Run(ctx, env); err != nil {
 		t.Fatalf("scenario %s (%s) failed: %v", id, s.Title, err)
 	}
+	if len(s.Expect.Invariants) > 0 && !invariantsChecked {
+		t.Errorf("scenario %s declares invariants %v but never called AssertInvariants", id, s.Expect.Invariants)
+	}
+	checkDeclaredEvents(t, s, env.DB, runStart)
+}
+
+// checkDeclaredEvents fails the test for each event type the scenario declares
+// that the store holds no event of since the run began. The server writes
+// events asynchronously, so the window is polled for a minute before it fails.
+// Run has normally waited for them already.
+func checkDeclaredEvents(t *testing.T, s scenario.Scenario, pool *pgxpool.Pool, since time.Time) {
+	t.Helper()
+	count := func(eventType string) (int, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		var n int
+		err := pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type=$1 AND ts >= $2`, eventType, since).Scan(&n)
+		return n, err
+	}
+	Eventually(t, time.Minute, func() error {
+		missing, err := s.MissingEvents(count)
+		if err != nil {
+			return err
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("scenario %s declares events %v but the run produced no %v", s.ID, s.Expect.Events, missing)
+		}
+		return nil
+	})
 }
 
 // cleanup removes the stack and releases resources.

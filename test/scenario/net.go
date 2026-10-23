@@ -240,7 +240,10 @@ func init() {
 		Title:    "docker pause on PostgreSQL, then unpause: treated as unreachable, recovers cleanly, no duplicate rows",
 		Topology: TopologyStandalone,
 		Covers:   []string{"phase_06.md#5.7", "I-3"},
-		Expect:   Expectations{Events: []string{"agent_down", "agent_up"}, Invariants: []string{"I-1", "I-2", "I-3", "I-4"}},
+		// Run accepts either instance_unreachable or agent_down, and either
+		// instance_reachable or agent_up, depending on which the server emits.
+		// Expect.Events is all-of, so no event name is declared here.
+		Expect: Expectations{Invariants: []string{"I-1", "I-2", "I-3", "I-4"}},
 		Run: func(ctx context.Context, e *Env) error {
 			var instanceID string
 			resolveCtx, cancel := context.WithTimeout(ctx, 30*time.Second)

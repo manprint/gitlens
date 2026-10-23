@@ -4,6 +4,8 @@ package scenario
 
 import (
 	"context"
+	"errors"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -488,5 +490,46 @@ func TestRegistry_EstDurationPreserved(t *testing.T) {
 	found, _ := Get("TEST-012")
 	if found.EstDuration != 2*time.Minute {
 		t.Errorf("expected EstDuration 2m, got %v", found.EstDuration)
+	}
+}
+
+func TestRegistry_MissingEventsNamesUnseenTypes(t *testing.T) {
+	s := Scenario{
+		ID:     "SYS-TEST-EV",
+		Expect: Expectations{Events: []string{"failover_detected", "split_brain_detected", "slot_inactive"}},
+	}
+	counts := map[string]int{"failover_detected": 2, "slot_inactive": 0}
+	got, err := s.MissingEvents(func(eventType string) (int, error) { return counts[eventType], nil })
+	if err != nil {
+		t.Fatalf("MissingEvents: %v", err)
+	}
+	if want := []string{"split_brain_detected", "slot_inactive"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("MissingEvents = %v, want %v", got, want)
+	}
+}
+
+func TestRegistry_MissingEventsIgnoresInvariantOnlyScenarios(t *testing.T) {
+	s := Scenario{
+		ID:     "SYS-TEST-INV",
+		Expect: Expectations{Invariants: []string{"I-1"}},
+	}
+	asked := false
+	got, err := s.MissingEvents(func(string) (int, error) { asked = true; return 0, nil })
+	if err != nil {
+		t.Fatalf("MissingEvents: %v", err)
+	}
+	if len(got) != 0 || asked {
+		t.Fatalf("MissingEvents with no declared events = %v (count asked: %v), want nothing", got, asked)
+	}
+}
+
+func TestRegistry_MissingEventsPropagatesCountError(t *testing.T) {
+	s := Scenario{
+		ID:     "SYS-TEST-ERR",
+		Expect: Expectations{Events: []string{"agent_down"}},
+	}
+	boom := errors.New("store unreachable")
+	if _, err := s.MissingEvents(func(string) (int, error) { return 0, boom }); !errors.Is(err, boom) {
+		t.Fatalf("MissingEvents error = %v, want it to wrap %v", err, boom)
 	}
 }
