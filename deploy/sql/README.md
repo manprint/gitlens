@@ -101,8 +101,22 @@ The example stack in `deploy/docker-compose.yml` creates `pglens_monitor` on
 the first boot of an empty volume, by running this script through
 `init_monitoring_user.sh`, and its agent connects as that role with the
 password from `PGLENS_MONITORING_PASSWORD`. Init scripts do not run again on an
-existing volume: there, run the script yourself with `-v role=pglens_monitor`
-before starting the agent.
+existing volume. There, run the same wrapper in the running container. It
+takes the password from the container's environment, runs this script with
+`pglens_password`, `dbname` and `role=pglens_monitor` once in each database
+that accepts connections, and `harden_public=1`, as on first boot:
+
+```sh
+docker compose -f deploy/docker-compose.yml exec timescaledb \
+  sh /docker-entrypoint-initdb.d/01-monitoring.sh
+```
+
+It exits non-zero when the database list cannot be read, when no database
+accepts connections, or when `PGLENS_MONITORING_PASSWORD` is unset or empty, and
+then nothing has been created. Outside the example
+stack, run this script yourself once per database that accepts connections (the
+warnings of a run name the others) with `-v pglens_password=...`,
+`-v dbname=<database>` and `-v role=pglens_monitor`, connected to that database.
 
 ## Capability matrix
 

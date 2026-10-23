@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -215,4 +216,60 @@ func TestExampleStack_AgentReadsTheHostMounts(t *testing.T) {
 	require.NoError(t, decoder.Decode(&cfg))
 	require.Equal(t, mounts["/proc"], cfg.HostProcPath())
 	require.Equal(t, mounts["/sys"], cfg.HostSysPath())
+}
+
+// The init script runs the monitoring script in every database the cluster
+// lists. A listing that fails must stop the run: a loop over nothing exits 0
+// and leaves the cluster without the monitoring role, and an unquoted name is
+// split at its spaces. The psql on PATH is a stub that answers the listing
+// from FAKE_DATABASES, or fails when FAKE_PSQL_FAIL is set, and records the
+// database of each run of the monitoring script.
+func TestInitMonitoringUser_RunsEveryDatabaseOrFails(t *testing.T) {
+	bin := t.TempDir()
+	stub := `#!/bin/sh
+for arg do
+  if [ "$arg" = "-c" ]; then
+    if [ -n "$FAKE_PSQL_FAIL" ]; then echo "psql: connection refused" >&2; exit 2; fi
+    printf '%s\n' "$FAKE_DATABASES"
+    exit 0
+  fi
+done
+prev=
+for arg do
+  if [ "$prev" = "--dbname" ]; then printf '%s\n' "$arg" >> "$FAKE_PSQL_LOG"; fi
+  prev=$arg
+done
+exit 0
+`
+	require.NoError(t, os.WriteFile(filepath.Join(bin, "psql"), []byte(stub), 0o755))
+	script, err := filepath.Abs(filepath.Join("sql", "init_monitoring_user.sh"))
+	require.NoError(t, err)
+
+	run := func(databases string, fail bool) ([]string, string, error) {
+		logFile := filepath.Join(t.TempDir(), "runs")
+		cmd := exec.Command("sh", script)
+		cmd.Env = append(os.Environ(),
+			"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
+			"POSTGRES_USER=postgres",
+			"PGLENS_MONITORING_PASSWORD=secret",
+			"FAKE_DATABASES="+databases,
+			"FAKE_PSQL_LOG="+logFile,
+		)
+		if fail {
+			cmd.Env = append(cmd.Env, "FAKE_PSQL_FAIL=1")
+		}
+		out, err := cmd.CombinedOutput()
+		data, _ := os.ReadFile(logFile)
+		return strings.Split(strings.TrimSpace(string(data)), "\n"), string(out), err
+	}
+
+	_, out, err := run("app", true)
+	require.Error(t, err, "a failed listing must fail the run: %s", out)
+
+	_, out, err = run("", false)
+	require.Error(t, err, "an empty listing must fail the run: %s", out)
+
+	runs, out, err := run("app\nmy app", false)
+	require.NoError(t, err, out)
+	require.Equal(t, []string{"app", "my app"}, runs, "every database runs once, with its name whole")
 }
