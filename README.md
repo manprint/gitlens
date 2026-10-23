@@ -213,7 +213,7 @@ interface into that binary.
 **Binary:**
 
 ```sh
-PGLENS_DSN=postgres://pglens:pglens@localhost:5432/pglens?sslmode=disable \
+PGLENS_DSN=postgres://pglens:$PGLENS_DB_PASSWORD@localhost:5432/pglens?sslmode=disable \
 PGLENS_BOOTSTRAP_TOKEN=dev-token \
 PGLENS_LISTEN=:8080 \
 ./bin/pglens-server
