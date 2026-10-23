@@ -18,6 +18,7 @@ import (
 	"github.com/manprint/pglens/internal/check"
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/host"
+	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/manprint/pglens/internal/wire"
 )
 
@@ -482,7 +483,7 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 			cancel()
 			continue
 		}
-		edges := lastEdgeState.build(mgr.Database(), mgr.InstanceID().String(), results) //nolint:contextcheck // InstanceID: Manager caches this at connect time; the accessor takes no context
+		edges := lastEdgeState.build(mgr.Database(), mgr.InstanceID().String(), mgr.Role(), results) //nolint:contextcheck // InstanceID and Role: Manager caches these at connect time; the accessors take no context
 		// Appended after the edges are built so the synthetic result cannot
 		// influence topology derivation.
 		results = append(results, selfResult)
@@ -552,9 +553,18 @@ type edgeStates struct {
 // version of this function replaced the whole struct wholesale on any
 // reading, including a genuine disconnect whose empty sender_host wiped out
 // the very host the low-confidence edge needs to point at.
-func (e *edgeStates) build(name, from string, results []wire.Result) []wire.Edge {
+func (e *edgeStates) build(name, from string, role pgtype.Role, results []wire.Result) []wire.Edge {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
+	// Only a standby has an upstream. A node promoted since its last reading
+	// would otherwise keep streaming from its old upstream in the remembered
+	// state and report an edge from the new primary to a dead node, so the
+	// state goes with the role.
+	if role != pgtype.RoleStandby {
+		delete(e.byName, name)
+		return nil
+	}
 
 	state := e.byName[name] // zero value {"", false} if never seen before
 	for _, r := range results {
