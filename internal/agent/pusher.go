@@ -220,7 +220,9 @@ func (p *Pusher) pushFromBuffer(ctx context.Context) error {
 		}
 		var env wire.Envelope
 		if jsonErr := json.Unmarshal(data, &env); jsonErr != nil {
-			// Corrupt/undecodable record: nothing to retry, skip it.
+			// Corrupt/undecodable record: nothing to retry, skip it. It is lost
+			// data all the same, so it counts as one dropped record.
+			atomic.AddInt64(&p.nDropped, 1)
 			_ = ack(ctx)
 			continue
 		}

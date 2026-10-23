@@ -363,6 +363,31 @@ func TestPusher_SetBuffer_SkipsUndecodableRecord(t *testing.T) {
 	require.Equal(t, 1, received, "the corrupt record must be skipped, not block the valid one behind it")
 }
 
+// TestPusher_SetBuffer_CountsUndecodableRecordAsDropped: a record whose CRC is
+// intact but whose payload is not an envelope is lost data, so the drain must
+// count it as dropped rather than skip it silently.
+func TestPusher_SetBuffer_CountsUndecodableRecordAsDropped(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	buf, err := buffer.Open(t.TempDir(), buffer.Options{})
+	require.NoError(t, err)
+	defer func() { _ = buf.Close() }()
+
+	require.NoError(t, buf.Append([]byte("not valid json")))
+
+	p := NewPusher(srv.URL, "token", clock.System())
+	p.SetBuffer(buf)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, p.Push(ctx))
+
+	require.Equal(t, int64(1), p.DroppedSamples(), "one unreadable record is one dropped record")
+}
+
 // TestPusher_FirstAttemptIsNotDelayed pins the fix for a backoff that was
 // applied *before* the first attempt: every push, against a healthy server,
 // waited backoffDelay(1) = 1-2s before even opening the connection.
