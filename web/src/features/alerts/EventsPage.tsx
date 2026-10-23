@@ -8,7 +8,7 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Input } from '@/components/ui/input'
-import type { Alert } from '@/lib/alerts'
+import { summariseAlerts, type Alert } from '@/lib/alerts'
 import { EventTimeline } from '@/features/cluster/EventTimeline'
 import type { ClusterEvent } from '@/lib/events'
 import { parseRange, snapToInterval } from '@/lib/timerange'
@@ -57,7 +57,10 @@ function AlertStatus({
   alerts: readonly Alert[]
   suppressionUnknown: boolean
 }) {
-  const firingAlerts = alerts.filter((alert) => alert.state === 'firing')
+  // Suppressed alerts count under Suppressed, as on the alerts page, so the two
+  // pages never report different firing totals for the same alerts.
+  const { firing } = summariseAlerts(alerts)
+  const firingCount = firing.critical + firing.warning + firing.info
   const evaluation = latestEvaluation(alerts)
 
   return (
@@ -65,12 +68,12 @@ function AlertStatus({
       title="Alert status"
       description="Alert health is evaluated independently from the event history."
     >
-      {firingAlerts.length === 0 ? (
+      {firingCount === 0 ? (
         <p role="status">
           No alerts firing. Last evaluated: {evaluation ?? 'no alert evaluation has been recorded'}.
         </p>
       ) : (
-        <p role="status">Firing alerts: {firingAlerts.length}</p>
+        <p role="status">Firing alerts: {firingCount}</p>
       )}
 
       {alerts.length > 0 ? (

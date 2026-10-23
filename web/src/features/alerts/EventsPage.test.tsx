@@ -200,4 +200,16 @@ describe('EventsPage', () => {
       server.events.removeAllListeners()
     }
   })
+
+  it('UI-ALERT-058 counts a suppressed firing alert as suppressed, not firing, as the alerts page does', async () => {
+    await renderPage(
+      '/events?range=1h',
+      [baseEvent],
+      [alert({ state: 'firing', suppressed: true })],
+    )
+
+    expect(screen.queryByText('Firing alerts: 1')).not.toBeInTheDocument()
+    expect(screen.getByText(/No alerts firing/)).toBeInTheDocument()
+    expect(screen.getByText('Suppression: Suppressed')).toBeInTheDocument()
+  })
 })
