@@ -148,7 +148,7 @@ func (a *AlertAPI) listAlerts(w http.ResponseWriter, r *http.Request) {
 	}
 	// The history of resolved alerts grows without bound, so the row cap is
 	// applied in the query rather than after reading every row.
-	f.Limit = 500
+	f.Limit = 501
 	if f.State != "" && f.State != alert.StatePending && f.State != alert.StateFiring && f.State != alert.StateResolved {
 		writeError(w, http.StatusBadRequest, "invalid state", "state must be pending, firing, resolved, or all")
 		return
@@ -173,6 +173,9 @@ func (a *AlertAPI) listAlerts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(rows) > 500 {
+		// A client that reads a full page as the whole set would miss the rows
+		// past it, so the header says the listing was cut short.
+		w.Header().Set("X-Result-Truncated", "true")
 		rows = rows[:500]
 	}
 	out := make([]alertJSON, 0, len(rows))
@@ -344,7 +347,7 @@ func (a *AlertAPI) deleteSilence(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid silence id", err.Error())
 		return
 	}
-	tag, err := a.pool.Exec(r.Context(), `UPDATE silences SET ends_at=now() WHERE silence_id=$1`, id)
+	tag, err := a.pool.Exec(r.Context(), `UPDATE silences SET ends_at = LEAST(ends_at, GREATEST(starts_at, now())) WHERE silence_id=$1`, id)
 	if err != nil {
 		writeError(w, 500, "silence delete failed", err.Error())
 		return

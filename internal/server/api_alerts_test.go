@@ -85,7 +85,7 @@ func TestAlerts_FilterLiftsResolvedOnlyWhenAsked(t *testing.T) {
 		require.Equal(t, 200, r.Code, tc.query)
 		require.Equal(t, tc.state, st.filter.State, tc.query)
 		require.Equal(t, tc.resolved, st.filter.IncludeResolved, tc.query)
-		require.Equal(t, 500, st.filter.Limit, tc.query)
+		require.Equal(t, 501, st.filter.Limit, tc.query)
 	}
 }
 
@@ -187,5 +187,29 @@ func TestAlertAPI_UnavailableBranches(t *testing.T) {
 	api := newAlertAPIForTest(nil, nil)
 	for _, tc := range routes {
 		require.Equal(t, tc.status, serveAlert(t, api, tc.method, tc.path, tc.body).Code, tc.path)
+	}
+}
+
+// TestAlerts_ListingSaysWhenRowsAreLeftOut — a listing is cut at 500 rows, and
+// the response says so, so that a full page is not taken for the whole set.
+func TestAlerts_ListingSaysWhenRowsAreLeftOut(t *testing.T) {
+	for _, tc := range []struct {
+		rows      int
+		truncated bool
+	}{
+		{rows: 500, truncated: false},
+		{rows: 501, truncated: true},
+	} {
+		st := &alertAPITestStore{}
+		for i := 0; i < tc.rows; i++ {
+			st.alerts = append(st.alerts, alert.Alert{Key: uuid.NewString(), RuleID: "r", State: alert.StateFiring, StartedAt: time.Unix(1, 0), LastEvalAt: time.Unix(1, 0)})
+		}
+		r := httptest.NewRecorder()
+		alertRouter(newAlertAPIForTest(nil, st)).ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?state=firing", nil))
+		require.Equal(t, 200, r.Code)
+		var got []alertJSON
+		require.NoError(t, json.Unmarshal(r.Body.Bytes(), &got))
+		require.Len(t, got, min(tc.rows, 500))
+		require.Equal(t, tc.truncated, r.Header().Get("X-Result-Truncated") == "true", "%d rows", tc.rows)
 	}
 }
