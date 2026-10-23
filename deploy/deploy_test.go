@@ -56,3 +56,29 @@ func TestExampleStack_AgentConnectsAsMonitoringRole(t *testing.T) {
 	require.NotEmpty(t, stack.Services["pglens-agent"].Environment["PGPASSWORD"])
 	require.True(t, strings.HasPrefix(stack.Services["pglens-agent"].Environment["PGPASSWORD"], "${PGLENS_MONITORING_PASSWORD"))
 }
+
+// The example stacks publish their ports on loopback only, and take the
+// superuser password and the bearer token from the environment with no
+// default: a published superuser port or a shipped token reachable from the
+// network is an open door.
+func TestExampleStack_PublishesLoopbackOnlyAndRequiresSecrets(t *testing.T) {
+	for _, name := range []string{"docker-compose.yml", filepath.Join("compose", "timescaledb.yml")} {
+		var stack composeFile
+		require.NoError(t, yaml.Unmarshal(readFile(t, name), &stack))
+		for service, s := range stack.Services {
+			for _, port := range s.Ports {
+				require.True(t, strings.HasPrefix(port, "127.0.0.1:"), "%s: %s publishes %q on every interface", name, service, port)
+			}
+		}
+	}
+
+	var stack composeFile
+	require.NoError(t, yaml.Unmarshal(readFile(t, "docker-compose.yml"), &stack))
+	for service, key := range map[string]string{
+		"timescaledb":   "POSTGRES_PASSWORD",
+		"pglens-server": "PGLENS_BOOTSTRAP_TOKEN",
+		"pglens-agent":  "PGLENS_BOOTSTRAP_TOKEN",
+	} {
+		require.Contains(t, stack.Services[service].Environment[key], ":?", "%s %s has a default", service, key)
+	}
+}
