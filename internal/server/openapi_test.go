@@ -223,8 +223,9 @@ func canonicalizeRegisteredRoute(method, route string) string {
 		return normalized
 	}
 	// Finding IDs may contain slashes, so the production router uses a
-	// catch-all. Canonicalize its public operations to the OpenAPI templates;
-	// the generic normalizer above still strips only chi's route suffix.
+	// catch-all. GET serves the finding; the write methods serve only the mute
+	// action, because their handlers answer a bare id with 404. The generic
+	// normalizer above still strips only chi's route suffix.
 	if method == "GET" {
 		return "/api/v1/findings/{finding-id}"
 	}

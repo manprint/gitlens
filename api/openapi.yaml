@@ -518,6 +518,11 @@ components:
         remediation: { type: string }
         evidence: { type: object, additionalProperties: true }
         degraded_reason: { type: string }
+        first_seen: { $ref: '#/components/schemas/Timestamp' }
+        last_seen: { $ref: '#/components/schemas/Timestamp' }
+        resolved_at: { $ref: '#/components/schemas/Timestamp' }
+        muted_until: { $ref: '#/components/schemas/Timestamp' }
+        mute_reason: { type: string }
     AdvisorRule:
       type: object
       required: [id, severity, scope, needs, min_tier]

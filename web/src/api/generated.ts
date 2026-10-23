@@ -1151,6 +1151,11 @@ export interface components {
                 [key: string]: unknown;
             };
             degraded_reason?: string;
+            first_seen?: components["schemas"]["Timestamp"];
+            last_seen?: components["schemas"]["Timestamp"];
+            resolved_at?: components["schemas"]["Timestamp"];
+            muted_until?: components["schemas"]["Timestamp"];
+            mute_reason?: string;
         };
         AdvisorRule: {
             id: string;

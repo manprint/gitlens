@@ -135,3 +135,35 @@ func TestFindingsAPI_MuteRefusesAnUntilBeyondTheCap(t *testing.T) {
 	rec = post(&mockPool{execRows: []int64{1}}, "9999-12-31T23:59:59Z")
 	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 }
+
+// The catch-all POST and DELETE routes also match a bare finding id, and a bare
+// id must not change its finding. Only the mute action writes; an escaped slash
+// in place of the action is a bare id too.
+func TestFindingsAPI_WritesOnlyUnderTheMuteAction(t *testing.T) {
+	until := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
+	body := `{"reason":"accepted","until":"` + until + `"}`
+	for _, tc := range []struct {
+		method, path string
+		status       int
+		writes       int
+	}{
+		{http.MethodPost, "/api/v1/findings/query.slow_mean/11111111", http.StatusNotFound, 0},
+		{http.MethodDelete, "/api/v1/findings/query.slow_mean/11111111", http.StatusNotFound, 0},
+		{http.MethodPost, "/api/v1/findings/query.slow_mean%2Fmute", http.StatusNotFound, 0},
+		{http.MethodDelete, "/api/v1/findings/query.slow_mean%2Fmute", http.StatusNotFound, 0},
+		{http.MethodPost, "/api/v1/findings/query.slow_mean/11111111/mute", http.StatusOK, 1},
+		{http.MethodDelete, "/api/v1/findings/query.slow_mean/11111111/mute", http.StatusNoContent, 1},
+	} {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			pool := &mockPool{execRows: []int64{1}}
+			r := chi.NewRouter()
+			(&API{pool: pool}).registerFindingsRoutes(r)
+			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+			require.Equal(t, tc.status, rec.Code, rec.Body.String())
+			require.Equal(t, tc.writes, pool.execCalls)
+		})
+	}
+}

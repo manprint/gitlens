@@ -46,11 +46,20 @@ func (a *API) registerFindingsRoutes(r chi.Router) {
 	r.Get("/api/v1/findings", a.listFindings)
 	// Finding IDs are rule_id/subject and therefore may contain slashes. Chi's
 	// catch-all route preserves that stable ID while allowing the mute action
-	// to remain a suffix of the same resource path.
+	// to remain a suffix of the same resource path. The writes refuse a bare id,
+	// which the catch-all matches as well.
 	r.Post("/api/v1/findings/*", a.muteFinding)
 	r.Delete("/api/v1/findings/*", a.unmuteFinding)
 	r.Get("/api/v1/findings/*", a.getFinding)
 	r.Get("/api/v1/advisor/rules", a.listAdvisorRules)
+}
+
+// findingIsMuteAction reports whether a mute write addresses the mute action.
+// The catch-all also matches a bare finding id, and findingPathID trims the
+// suffix only when it is present, so a POST or DELETE to the id itself would
+// otherwise change that finding.
+func findingIsMuteAction(r *http.Request) bool {
+	return strings.HasSuffix(chi.URLParam(r, "*"), "/mute")
 }
 
 func findingPathID(r *http.Request, action string) string {
@@ -194,6 +203,10 @@ func (a *API) getFinding(w http.ResponseWriter, r *http.Request) {
 const maxFindingMuteDuration = 90 * 24 * time.Hour
 
 func (a *API) muteFinding(w http.ResponseWriter, r *http.Request) {
+	if !findingIsMuteAction(r) {
+		writeError(w, http.StatusNotFound, "not_found", "no such endpoint")
+		return
+	}
 	if a.pool == nil {
 		writeError(w, 503, "findings unavailable", "database pool is not configured")
 		return
@@ -236,6 +249,10 @@ func (a *API) muteFinding(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) unmuteFinding(w http.ResponseWriter, r *http.Request) {
+	if !findingIsMuteAction(r) {
+		writeError(w, http.StatusNotFound, "not_found", "no such endpoint")
+		return
+	}
 	if a.pool == nil {
 		writeError(w, 503, "findings unavailable", "database pool is not configured")
 		return
