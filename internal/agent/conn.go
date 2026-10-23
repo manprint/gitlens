@@ -67,13 +67,16 @@ func DefaultDatabaseExcludes() []*regexp.Regexp {
 
 // ReadOnlySession runs on every physical connection the agent opens, before
 // any caller can use it: the Manager's pools and the check command's single
-// connection. pglens only ever reads from a monitored instance, so
-// the server itself is told to refuse writes for the whole session: every
-// transaction — implicit or explicit, from a check, from ASH or from an
-// on-demand command — then starts READ ONLY, and INSERT/UPDATE/DELETE,
-// DDL, nextval() and friends fail inside PostgreSQL rather than depending on
-// the agent never issuing them. The statements are constants, so the simple
-// protocol pgx uses for an argument-less Exec carries no injection risk.
+// connection. pglens only ever reads from a monitored instance, so the session
+// sets default_transaction_read_only: every transaction, implicit or explicit,
+// from a check, from ASH or from an on-demand command, then starts READ ONLY,
+// and a write the agent issued by mistake fails inside PostgreSQL. That
+// parameter is a setting any session can change back, so it guards against a
+// bug in the agent and is not the boundary. The boundary is the monitoring
+// role: deploy/sql/monitoring_user.sql grants it reads only and refuses a role
+// that could write, and the EXPLAIN path adds its own READ ONLY transaction
+// (exec_explain.go). The statements are constants, so the simple protocol pgx
+// uses for an argument-less Exec carries no injection risk.
 //
 // The session also searches pg_catalog alone. A search_path set for the
 // database or the role (ALTER DATABASE ... SET search_path, which a database
