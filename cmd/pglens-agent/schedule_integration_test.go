@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"testing"
 	"time"
@@ -153,4 +154,55 @@ func TestINTSCH002_ScheduleFollowsTheTargetRole(t *testing.T) {
 			require.NotContains(t, skips, "replication_streaming")
 		})
 	}
+}
+
+// TestINTSCH003_ExtensionInstalledAfterStartIsScheduled: pg_stat_statements is
+// not installed when the schedule is first built, so the check is skipped with
+// the extension as the reason. Installing it afterwards must reach the schedule
+// on the next reconcile, instead of leaving the check off until a restart.
+func TestINTSCH003_ExtensionInstalledAfterStartIsScheduled(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// A database of its own, monitored alone, where the extension is absent:
+		// the skip then comes from the extension and not from the role or tier.
+		const dbname = "sch003_late_extension"
+		const target = "late-extension-target"
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		_, err := admin.Exec(ctx, "CREATE DATABASE "+dbname)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = admin.Exec(context.Background(), "DROP DATABASE IF EXISTS "+dbname+" WITH (FORCE)")
+		})
+
+		opts := agent.DefaultConnOptions()
+		opts.Include = []*regexp.Regexp{regexp.MustCompile("^" + dbname + "$")}
+		mgr, err := agent.NewManager(ctx, target, pg.DSN(dbname, pgtest.RoleT0), opts, clock.System())
+		require.NoError(t, err)
+		t.Cleanup(mgr.Close)
+
+		var mu sync.Mutex
+		pending := map[string][]wire.Result{}
+		scheduledDBs := map[string]map[string]bool{}
+		schedules := newScheduleSet(ctx, &agent.Config{}, clock.System(), []*agent.Manager{mgr}, &mu, pending, scheduledDBs)
+		require.NoError(t, schedules.start(ctx))
+		t.Cleanup(schedules.stop)
+
+		skips := takeSkips(&mu, pending, target)
+		require.Equal(t, "missing extension pg_stat_statements", skips["stat_statements"])
+
+		installer, err := pgxpool.New(ctx, pg.DSN(dbname, pgtest.RoleSuperuser))
+		require.NoError(t, err)
+		t.Cleanup(installer.Close)
+		_, err = installer.Exec(ctx, "CREATE EXTENSION pg_stat_statements")
+		require.NoError(t, err)
+
+		schedules.reconcile()
+
+		require.True(t, schedules.gates[target].exts["pg_stat_statements"], "the reconcile must read the extension the check needs")
+		skips = takeSkips(&mu, pending, target)
+		require.NotContains(t, skips, "stat_statements", "the check must no longer be skipped once the extension is installed")
+	})
 }
