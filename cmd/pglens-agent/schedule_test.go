@@ -1,11 +1,21 @@
 package main
 
 import (
+	"context"
+	"fmt"
+	"net"
+	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/manprint/pglens/internal/agent"
+	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/pgtype"
+	"github.com/manprint/pglens/internal/wire"
 )
 
 // TestNextGate pins the rules that decide when the schedule is rebuilt: a
@@ -111,4 +121,75 @@ func TestNextGate(t *testing.T) {
 			require.ElementsMatch(t, tt.wantDBs, dbs)
 		})
 	}
+}
+
+// hungTarget is a listener that accepts every connection and never answers one:
+// a target the agent cannot reach, behind a route that drops its replies.
+// attempts counts the connections it has accepted.
+type hungTarget struct {
+	dsn      string
+	attempts atomic.Int32
+}
+
+func newHungTarget(t *testing.T) *hungTarget {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
+	h := &hungTarget{dsn: fmt.Sprintf("postgres://pglens@%s/postgres?sslmode=disable", ln.Addr())}
+	go func() {
+		var held []net.Conn
+		defer func() {
+			for _, c := range held {
+				_ = c.Close()
+			}
+		}()
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			held = append(held, c)
+			h.attempts.Add(1)
+		}
+	}()
+	return h
+}
+
+// TestScheduleStopDoesNotWaitForAReadInFlight: a read of an unreachable target
+// takes its whole timeout. A stop that comes while it is in flight, as the
+// revoke path does, must not wait for it, and the read must not build a
+// schedule once the stop has run.
+func TestScheduleStopDoesNotWaitForAReadInFlight(t *testing.T) {
+	t.Setenv("PGLENS_IDENTITY_PATH", filepath.Join(t.TempDir(), "identity.json"))
+	target := newHungTarget(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr, err := agent.NewManager(ctx, "hung", target.dsn, agent.DefaultConnOptions(), clock.System())
+	require.NoError(t, err)
+	t.Cleanup(mgr.Close)
+
+	var mu sync.Mutex
+	schedules := newScheduleSet(ctx, &agent.Config{}, clock.System(), []*agent.Manager{mgr}, &mu, map[string][]wire.Result{}, map[string]map[string]bool{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		schedules.reconcile()
+	}()
+	// NewManager dials the pool's first connection itself. The read's discovery
+	// dials a second one, so a second attempt means the read is in flight.
+	require.Eventually(t, func() bool { return target.attempts.Load() >= 2 }, 5*time.Second, 10*time.Millisecond)
+
+	began := time.Now()
+	schedules.stop()
+	require.Less(t, time.Since(began), 5*time.Second, "stop waited for a read of an unreachable target")
+
+	// The read ends with its context, as it does at shutdown.
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("reconcile did not return once its context ended")
+	}
+	require.Nil(t, schedules.current, "no schedule may be built after stop")
 }

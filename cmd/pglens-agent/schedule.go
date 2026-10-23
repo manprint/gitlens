@@ -53,18 +53,34 @@ func readTargetGate(ctx context.Context, mgr *agent.Manager) (targetGate, bool) 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: discover databases for %s: %v\n", mgr.Database(), err)
 	}
+	// A read that ran out of time, or whose context ended at shutdown, stops
+	// here. The accessors below take no context and each wait out their own
+	// timeout on an unreachable target, so calling them would hold the read up
+	// for the timeouts again after the caller had already given up.
+	if ctx.Err() != nil {
+		return targetGate{role: pgtype.RoleUnknown, tier: pgtype.TierReadOnly, exts: map[string]bool{}, databases: map[string]bool{}}, false
+	}
+	// PGVersion fills the cache that Role and PermTier read from. When it cannot
+	// be filled, they report RoleUnknown and TierReadOnly, so they are only read
+	// once it has succeeded.
+	version := mgr.PGVersion() //nolint:contextcheck // Manager caches this; the accessor takes no context
+	g := targetGate{
+		role:      pgtype.RoleUnknown,
+		version:   version,
+		tier:      pgtype.TierReadOnly,
+		exts:      map[string]bool{},
+		databases: map[string]bool{},
+	}
+	if version != 0 {
+		g.role = mgr.Role()     //nolint:contextcheck // same as above
+		g.tier = mgr.PermTier() //nolint:contextcheck // same as above
+	}
 	// pg_stat_statements counts as present when any monitored database has the
 	// view, not only the maintenance database: the check reads the others
 	// through it. LocateStatements also records the database the check reads
 	// through, so it only runs on a complete discovery; a failed one keeps the
 	// last choice.
-	g := targetGate{
-		role:      mgr.Role(),      //nolint:contextcheck // Manager caches this; the accessor takes no context
-		version:   mgr.PGVersion(), //nolint:contextcheck // same as above
-		tier:      mgr.PermTier(),  //nolint:contextcheck // same as above
-		exts:      map[string]bool{"pg_stat_statements": err == nil && mgr.LocateStatements(ctx, dbs)},
-		databases: map[string]bool{},
-	}
+	g.exts["pg_stat_statements"] = err == nil && mgr.LocateStatements(ctx, dbs)
 	for _, db := range dbs {
 		if db.Monitored {
 			g.databases[db.Name] = true
@@ -118,7 +134,13 @@ type scheduleSet struct {
 	pending      map[string][]wire.Result
 	scheduledDBs map[string]map[string]bool // target -> databases its database-scoped checks run for
 
-	schedMu sync.Mutex // serialises builds and stops, and guards the fields below
+	// reconcileMu serialises start and reconcile, so two passes never build from
+	// the same gates. It is held across the reads, which wait on the targets, so
+	// stop does not take it.
+	reconcileMu sync.Mutex
+	// schedMu guards the fields below and serialises builds and stops. It is
+	// never held across a read, so stop does not wait behind one.
+	schedMu sync.Mutex
 	current *agent.Scheduler
 	gates   map[string]targetGate // target -> gate the current scheduler was built from
 	stopped bool
@@ -137,13 +159,16 @@ func newScheduleSet(ctx context.Context, cfg *agent.Config, clk clock.Clock, man
 	}
 }
 
-// start reads every target and starts the first schedule. readCtx bounds those
-// reads. A target that cannot be read yet gets its checks from the first
+// start reads every target and starts the first schedule. readCtx is the context
+// the discovery and statement lookups run under; the gate accessors bound their
+// own waits. A target that cannot be read yet gets its checks from the first
 // reconcile that reads it in full.
 func (s *scheduleSet) start(readCtx context.Context) error {
+	s.reconcileMu.Lock()
+	defer s.reconcileMu.Unlock()
+	gates, _ := s.readGates(readCtx, nil)
 	s.schedMu.Lock()
 	defer s.schedMu.Unlock()
-	gates, _ := s.readGates(readCtx, nil)
 	s.gates = gates
 	return s.buildLocked()
 }
@@ -151,13 +176,28 @@ func (s *scheduleSet) start(readCtx context.Context) error {
 // reconcile reads every target again and rebuilds the schedule when a gate
 // changed. It does nothing once stop has run.
 func (s *scheduleSet) reconcile() {
+	s.reconcileMu.Lock()
+	defer s.reconcileMu.Unlock()
+
+	s.schedMu.Lock()
+	if s.stopped {
+		s.schedMu.Unlock()
+		return
+	}
+	prev := s.gates
+	s.schedMu.Unlock()
+
+	// An unreachable target holds its read for the whole timeout, so the read
+	// runs without schedMu. The revoke path and the shutdown can stop the
+	// schedule while it is in flight.
+	gates, changed := s.readGates(s.ctx, prev)
+	if len(changed) == 0 {
+		return
+	}
+
 	s.schedMu.Lock()
 	defer s.schedMu.Unlock()
 	if s.stopped {
-		return
-	}
-	gates, changed := s.readGates(s.ctx, s.gates)
-	if len(changed) == 0 {
 		return
 	}
 	for _, name := range changed {
