@@ -162,12 +162,27 @@ func TestRedactQueryText_KeepsTextWithoutCredentials(t *testing.T) {
 		`SELECT "password" FROM t`,
 		`CREATE TABLE t ("password" text DEFAULT 'x')`,
 		"SELECT id, password_hash FROM users WHERE id = $1",
+		"SELECT id FROM tokens WHERE kind = 'password_reset' AND used = false",
+		`SELECT 'a\b', password_hash FROM users WHERE id = 1`,
 		"SELECT pg_stat_statements_reset()",
 		"CREATE ROLE u LOGIN VALID UNTIL 'infinity'",
 		"CREATE SUBSCRIPTION s CONNECTION 'host=p dbname=x' PUBLICATION pub",
 		"SELECT 'nothing secret' FROM t WHERE note = 'x'",
 	} {
 		require.Equal(t, in, redactQueryText(in))
+	}
+}
+
+// A constant or a body that holds the word password cuts the rest of the
+// statement, because the text may be run later by EXECUTE. This is a known
+// cost: the statement loses its tail, and the redaction stays on the safe side.
+func TestRedactQueryText_PasswordWordInAConstantCutsTheRest(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ in, want string }{
+		{"SELECT 'password reset' FROM t WHERE id = 1", "SELECT '[redacted]'"},
+		{"INSERT INTO log(msg) VALUES ('password changed')", "INSERT INTO log(msg) VALUES ('[redacted]'"},
+	} {
+		require.Equal(t, tc.want, redactQueryText(tc.in), tc.in)
 	}
 }
 

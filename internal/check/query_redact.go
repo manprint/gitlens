@@ -22,7 +22,10 @@ var (
 	// The keyword is PASSWORD in any case, a quoted "password", or a U& name,
 	// since the option list of a server or user mapping may name the option in
 	// any of these spellings. Inside a constant or a body it is matched as text.
-	passwordKeyword = regexp.MustCompile(`(?i)\bpassword|"password"|U&"(?:[^"]|"")*"(?:\s*uescape\s*'(?:[^']|'')*')?`)
+	// A bare PASSWORD must be a whole word, so a name such as password_hash does
+	// not cut the text. Go's \b reads a $ or a byte above ASCII as a boundary,
+	// where PostgreSQL reads a name character, so it can only over-redact.
+	passwordKeyword = regexp.MustCompile(`(?i)\bpassword\b|"password"|U&"(?:[^"]|"")*"(?:\s*uescape\s*'(?:[^']|'')*')?`)
 	// The value of a libpq key. libpq reads the string after the SQL literal
 	// around it is unescaped, so a doubled quote inside a literal stands for one
 	// quote, and a value in a dollar body holds its quotes as they are. An
