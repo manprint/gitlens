@@ -214,9 +214,24 @@ func (d *Dispatcher) dispatch(ctx context.Context, polled polledCommand) error {
 			response.Outcome = "rejected"
 		}
 		response.Result = nil
-		response.Error = execErr.Error()
+		response.Error = commandError(execErr)
 	}
 	return d.postResult(ctx, polled.CommandID, response)
+}
+
+// withheldError stands for the text of an error that may hold a credential.
+const withheldError = "the error text is withheld because it may hold a credential"
+
+// commandError is the text an executor's error is reported with. An error
+// raised by the monitored database can quote the statement it ran, or a value
+// of the views and functions that statement reached, so a text with any sign
+// of a credential is withheld by the rule the statement texts follow.
+func commandError(err error) string {
+	text := err.Error()
+	if check.MayHoldCredential(text) {
+		return withheldError
+	}
+	return text
 }
 
 func (d *Dispatcher) postResult(ctx context.Context, commandID uuid.UUID, result commandResult) error {

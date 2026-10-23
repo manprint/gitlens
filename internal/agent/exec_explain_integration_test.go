@@ -48,6 +48,50 @@ func TestINTCMD006_ExplainKnownQueryIDReturnsPlan(t *testing.T) {
 	})
 }
 
+// TestINTCMD036_ExplainWithholdsCredentials: a plan shows the constants of its
+// statement and of the views the planner expanded. A statement whose text has a
+// sign of a credential is not explained, and a plan that has one is not
+// shipped, even when the statement text itself shows none.
+func TestINTCMD036_ExplainWithholdsCredentials(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		_, err := admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+		require.NoError(t, err)
+
+		view := fmt.Sprintf("pglens_remote_%d", pg.Major)
+		_, err = admin.Exec(ctx, "CREATE OR REPLACE VIEW "+view+" AS SELECT 'postgresql://app:hunter2@db/app'::text AS dsn")
+		require.NoError(t, err)
+		t.Cleanup(func() { _, _ = admin.Exec(context.Background(), "DROP VIEW IF EXISTS "+view) })
+		_, err = admin.Exec(ctx, "GRANT SELECT ON "+view+" TO pglens_t1")
+		require.NoError(t, err)
+
+		viewRead := "SELECT dsn FROM " + view
+		_, err = admin.Exec(ctx, viewRead)
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "SELECT relname AS secret_name FROM pg_class WHERE relpages > 1000000")
+		require.NoError(t, err)
+		var viewQueryID, namedQueryID int64
+		require.NoError(t, admin.QueryRow(ctx, "SELECT queryid FROM pg_stat_statements WHERE query = $1 LIMIT 1", viewRead).Scan(&viewQueryID))
+		require.NoError(t, admin.QueryRow(ctx, "SELECT queryid FROM pg_stat_statements WHERE query LIKE 'SELECT relname AS secret_name FROM pg_class%' LIMIT 1").Scan(&namedQueryID))
+
+		mgr, err := NewManager(ctx, "explain-credential-target", pg.DSN("postgres", pgtest.RoleT1), DefaultConnOptions(), clock.System())
+		require.NoError(t, err)
+		defer mgr.Close()
+
+		var rejected *RejectedError
+		_, err = NewExplainExecutor().Execute(ctx, mgr, command.Args{QueryID: &viewQueryID, Datname: "postgres"})
+		require.ErrorAs(t, err, &rejected, "the plan of a view holding a connection URI must not be shipped")
+		require.Contains(t, err.Error(), "the plan for queryid")
+		require.NotContains(t, err.Error(), "hunter2")
+
+		_, err = NewExplainExecutor().Execute(ctx, mgr, command.Args{QueryID: &namedQueryID, Datname: "postgres"})
+		require.ErrorAs(t, err, &rejected, "a statement whose text would be withheld must not be explained")
+		require.Contains(t, err.Error(), "may hold a credential; pglens does not explain it")
+	})
+}
+
 // TestINTCMD007_ExplainAnalyzeNeverWrites proves the monitored database is
 // never modified through EXPLAIN: ANALYZE of a writing statement is refused
 // before anything runs — even when the monitoring role holds the privilege —

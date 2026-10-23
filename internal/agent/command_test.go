@@ -96,6 +96,14 @@ func (oversizeExecutor) Execute(context.Context, check.Target, command.Args) (js
 	return json.RawMessage(`{"plan":"` + strings.Repeat("x", command.MaxResultBytes) + `","plan_hash":"h"}`), nil
 }
 
+// failingExecutor fails with the error it holds, as the database raised it.
+type failingExecutor struct{ err error }
+
+func (failingExecutor) Kind() command.Kind { return command.KindExplain }
+func (e failingExecutor) Execute(context.Context, check.Target, command.Args) (json.RawMessage, error) {
+	return nil, e.err
+}
+
 func polledFor(instanceID uuid.UUID, kind command.Kind, args command.Args) polledCommand {
 	return polledCommand{CommandID: uuid.New(), Kind: kind, Args: args, InstanceID: instanceID, ClaimToken: uuid.New()}
 }
@@ -322,3 +330,43 @@ func resultCaptureServer(t *testing.T, agentID uuid.UUID, pollBody any) *httptes
 
 func int64Ptr(v int64) *int64 { return &v }
 func intPtr(v int) *int       { return &v }
+
+// An error the monitored database raises can quote the statement it ran, or a
+// value of a view that statement reached. The dispatcher posts an error with a
+// sign of a credential as a fixed text, by the rule the statement texts follow,
+// and any other error as it was raised.
+func TestDispatcher_WithholdsAnErrorWithACredentialSign(t *testing.T) {
+	for _, tc := range []struct {
+		name, raised, posted string
+		rejected             bool
+	}{
+		{"connection string in a database error", `ERROR: could not connect to "postgresql://app:hunter2@db/app" (SQLSTATE 08001)`, withheldError, false},
+		{"quoted statement in a syntax error", `ERROR: syntax error at or near "PASSWORD" (SQLSTATE 42601)`, withheldError, false},
+		{"refusal naming a secret", "pid 7 runs a secret job", withheldError, true},
+		{"plain database error", `ERROR: canceling statement due to statement timeout (SQLSTATE 57014)`, `ERROR: canceling statement due to statement timeout (SQLSTATE 57014)`, false},
+		{"plain refusal", "queryid 7 is unknown on this instance", "queryid 7 is unknown on this instance", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agentID, instanceID := uuid.New(), uuid.New()
+			var got commandResult
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer server.Close()
+			d := NewDispatcher(server.URL, "token", agentID, true)
+			d.AddTarget(instanceID, &dispatcherTarget{tier: pgtype.TierExplain}, false, false)
+			err := errors.New(tc.raised)
+			outcome := "error"
+			if tc.rejected {
+				err = rejectedf("%s", tc.raised)
+				outcome = "rejected"
+			}
+			d.AddExecutor(failingExecutor{err: err})
+			require.NoError(t, d.dispatch(context.Background(), polledFor(instanceID, command.KindExplain, command.Args{QueryID: int64Ptr(7)})))
+			require.Equal(t, outcome, got.Outcome)
+			require.Equal(t, tc.posted, got.Error)
+			require.NotContains(t, got.Error, "hunter2")
+		})
+	}
+}

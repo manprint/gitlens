@@ -49,6 +49,14 @@ func redactQueryText(query string) string {
 	return query
 }
 
+// MayHoldCredential reports whether a text read from a monitored database
+// shows a sign of a credential, by the rule redactQueryText applies. The other
+// paths that ship such text, an explain plan and the error a command returns,
+// withhold it by the same rule.
+func MayHoldCredential(text string) bool {
+	return mayHoldCredential(text)
+}
+
 // mayHoldCredential reports whether a text shows a sign of a credential. The
 // text is read as written, with the escapes of an escape string (E prefix)
 // decoded, which every string has when standard_conforming_strings is off,

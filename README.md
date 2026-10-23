@@ -427,7 +427,14 @@ transaction that is rolled back, bounded to 30 seconds (15 seconds for
 plan-only). Plan-only `EXPLAIN` of `INSERT`, `UPDATE`, `DELETE` or `MERGE`
 needs the write privilege on the table, which a read-only monitoring role does
 not hold, so PostgreSQL refuses it. The web interface additionally offers ANALYZE
-only at T2 and after explicit confirmation.
+only at T2 and after explicit confirmation. A plan shows the constants of the
+statement and of the views and functions the planner expanded (a view over
+`dblink` shows its connection string), so the agent applies the credential
+rule of the statement texts (see [Known limits](#known-limits)) to
+both: a statement whose text would be withheld is not explained, and a plan
+with a sign of a credential is not sent. The error a command returns is sent
+as a fixed text when it has such a sign, since a database error can quote the
+statement it ran.
 `cancel` and `terminate` require T2 and `allow_signal: true`, and only target
 client backends. `pgstattuple` requires T1 and the `pgstattuple` extension
 already installed in the relation's database; it runs inside a `READ ONLY`
@@ -1943,7 +1950,7 @@ the server is rejected, so upgrade the server before upgrading agents.
 **Contention:**
 - The lock view is sampled every 10 seconds, not live; a contention episode shorter than the interval can be missed entirely
 - Query text in a lock tree is truncated to 2 048 bytes
-- Query text from `pg_stat_statements` and the lock view is withheld in the agent, before it is sent, when it shows any sign of a credential: the word `password` (which covers `PASSWORD`, `sslpassword` and a `password` column), `passwd`, `secret` (which covers `oauth_client_secret`) or `UESCAPE` anywhere in the text, comments included, even split by quotes, `||` or blanks; a `postgres://` or `postgresql://` URI, even built from pieces; or either spelled with the backslash escapes of an `E''` or `U&''` string. The text is replaced whole by `[redacted]`; the statement's metrics are kept. The text is not parsed for the value alone, because every reading of PostgreSQL's quoting rules short of the server's own left part of a secret in some shape. The cost is that a statement that only names a password, such as `UPDATE users SET password = $1`, loses its text too. A session text that reached `track_activity_query_size` is withheld whole, because the server's cut may have dropped the sign. A statement text over 16 KiB in `pg_stat_statements` is not sent; a lock-view text is cut to 2 048 bytes after this check. A credential with no sign in the text is not recognised, such as a function argument (`crypt('x', ...)`), a value matched to a password column by position (`INSERT ... VALUES`), or a value computed at run time (`decode(...)`, `chr(...)`).
+- Query text from `pg_stat_statements` and the lock view is withheld in the agent, before it is sent, when it shows any sign of a credential: the word `password` (which covers `PASSWORD`, `sslpassword` and a `password` column), `passwd`, `secret` (which covers `oauth_client_secret`) or `UESCAPE` anywhere in the text, comments included, even split by quotes, `||` or blanks; a `postgres://` or `postgresql://` URI, even built from pieces; or either spelled with the backslash escapes of an `E''` or `U&''` string. The text is replaced whole by `[redacted]`; the statement's metrics are kept. The text is not parsed for the value alone, because every reading of PostgreSQL's quoting rules short of the server's own left part of a secret in some shape. The cost is that a statement that only names a password, such as `UPDATE users SET password = $1`, loses its text too. A session text that reached `track_activity_query_size` is withheld whole, because the server's cut may have dropped the sign. A statement text over 16 KiB in `pg_stat_statements` is not sent; a lock-view text is cut to 2 048 bytes after this check. A credential with no sign in the text is not recognised, such as a function argument (`crypt('x', ...)`), a value matched to a password column by position (`INSERT ... VALUES`), or a value computed at run time (`decode(...)`, `chr(...)`). Store migrations 0020 and 0021 remove the texts, plans and command errors stored with such a sign before these rules.
 - Deadlocks are reported as a counter and a rate; identifying the statements involved in a specific deadlock requires PostgreSQL log analysis, which pglens does not do
 
 **Space and maintenance:**

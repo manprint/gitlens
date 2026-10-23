@@ -50,6 +50,11 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 	if !ok {
 		return nil, rejectedf("statement for queryid %d is not a single statement", *args.QueryID)
 	}
+	// The plan shows the constants of the statement, so a statement whose text
+	// the stat_statements check withholds is not explained either.
+	if check.MayHoldCredential(statement) {
+		return nil, rejectedf("statement for queryid %d may hold a credential; pglens does not explain it", *args.QueryID)
+	}
 	keyword := firstSQLKeyword(statement)
 	if !allowedExplainKeyword(keyword) {
 		return nil, rejectedf("statement keyword %q is not safe to explain", keyword)
@@ -145,6 +150,12 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 			return nil, rejectedf("normalised statement cannot be explained: %v", scanErr)
 		}
 		return nil, scanErr
+	}
+	// The plan also shows the constants of the views and functions the planner
+	// expanded, which the statement text does not: a view over dblink shows
+	// its connection string. A plan with any sign of a credential is withheld.
+	if check.MayHoldCredential(string(plan)) {
+		return nil, rejectedf("the plan for queryid %d may hold a credential; pglens does not ship it", *args.QueryID)
 	}
 	hash, err := planHash(plan)
 	if err != nil {

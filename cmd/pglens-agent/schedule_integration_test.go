@@ -83,11 +83,11 @@ func TestINTSCH001_DatabaseDiscoveredAfterStartIsScheduled(t *testing.T) {
 	})
 }
 
-// TestINTSCH007_DatabaseCreatedAfterStartIsReachable: the first discovery
+// TestINTSCH008_DatabaseCreatedAfterStartIsReachable: the first discovery
 // finds the maintenance database only. A database created afterwards is
 // scheduled by the next reconcile, and its checks must then reach it through
 // ScheduledConnFor instead of being refused for the life of the process.
-func TestINTSCH007_DatabaseCreatedAfterStartIsReachable(t *testing.T) {
+func TestINTSCH008_DatabaseCreatedAfterStartIsReachable(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
 		pg.Lock(t)
 		ctx, cancel := context.WithCancel(context.Background())
