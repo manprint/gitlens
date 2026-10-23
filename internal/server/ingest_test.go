@@ -393,15 +393,25 @@ func TestIngest_DecompressedBudgetIsExact(t *testing.T) {
 	}
 }
 
-// TestIngest_RefusesEnvelopeWithoutAgentID: the contract requires the agent_id of
-// the envelope. One without a valid id is refused with 400 before the inventory
-// sees it, so no instance is booked to a stand-in owner.
+// TestIngest_RefusesEnvelopeWithoutAgentID: a protocol 3 envelope must name its
+// agent. One without a valid id is refused with 400 before the inventory sees
+// it, so no instance is booked to a stand-in owner. A present id that does not
+// parse is refused at every version.
 func TestIngest_RefusesEnvelopeWithoutAgentID(t *testing.T) {
 	t.Parallel()
-	for _, agentID := range []string{"", "a", uuid.Nil.String()} {
-		t.Run(agentID, func(t *testing.T) {
+	for _, tc := range []struct {
+		version int
+		agentID string
+	}{
+		{agentIDRequiredFrom, ""},
+		{agentIDRequiredFrom, "a"},
+		{agentIDRequiredFrom, uuid.Nil.String()},
+		{agentIDRequiredFrom - 1, "a"},
+		{agentIDRequiredFrom - 1, uuid.Nil.String()},
+	} {
+		t.Run(fmt.Sprintf("v%d/%q", tc.version, tc.agentID), func(t *testing.T) {
 			h := IngestHandler(NewAuth("token"), NewInventory(nil), NewPipeline(nil, nil))
-			env := wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: agentID, SentAt: time.Now(),
+			env := wire.Envelope{ProtocolVersion: tc.version, AgentID: tc.agentID, SentAt: time.Now(),
 				Instances: []wire.Instance{{InstanceID: uuid.NewString(), ClusterID: pgtype.ClusterID(1).String(), Role: "primary"}}}
 			body, _ := json.Marshal(env)
 			req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
@@ -412,6 +422,26 @@ func TestIngest_RefusesEnvelopeWithoutAgentID(t *testing.T) {
 			require.Contains(t, w.Body.String(), "missing agent_id")
 		})
 	}
+}
+
+// TestIngest_LegacyEnvelopeWithoutAgentIDIsOwnerChecked: an agent that predates
+// the agent_id field sends none. Its envelope is not refused for that. A new
+// instance has no owner, so it is refused alone and nothing is written for it.
+func TestIngest_LegacyEnvelopeWithoutAgentIDIsOwnerChecked(t *testing.T) {
+	t.Parallel()
+	// OwnerRevoked finds no revoked owner, then the instance lookup finds no row.
+	pool := &mockPool{queryRowVals: []*mockRow{{vals: []any{false}}, {err: pgx.ErrNoRows}}}
+	h := IngestHandler(NewAuth("token"), &Inventory{pool: pool}, NewPipeline(nil, nil))
+	env := wire.Envelope{ProtocolVersion: agentIDRequiredFrom - 1, SentAt: time.Now(),
+		Instances: []wire.Instance{{InstanceID: uuid.NewString(), ClusterID: pgtype.ClusterID(1).String(), Role: "primary"}}}
+	body, _ := json.Marshal(env)
+	req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer token")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	require.JSONEq(t, `{"accepted":0,"rejected":1}`, w.Body.String())
+	require.Zero(t, pool.execCalls, "the refused instance writes no cluster, agent or instance row")
 }
 
 // TestStoreRefused_OnlyTheEnvelopesOwnValues: a NOT NULL or CHECK violation is

@@ -37,6 +37,11 @@ var maxDecompressedBytes int64 = 256 << 20
 // retries as a server error (internal/agent/pusher.go).
 const maxConcurrentIngest = 4
 
+// agentIDRequiredFrom is the first protocol version whose envelopes must name
+// their agent. It is later than the agent release that began sending agent_id,
+// so from it on an envelope without one means an unreadable identity.
+const agentIDRequiredFrom = 3
+
 // errBodyTooLarge is returned by budgetReader once the decompressed body is
 // past its budget.
 var errBodyTooLarge = errors.New("decompressed body exceeds the limit")
@@ -229,14 +234,20 @@ func ingestHandler(auth *Auth, inv *Inventory, pipeline *Pipeline, slots chan st
 		// that moved only then kept its last large value for good.
 		ObserveAgentClockSkew(clockSkewSeconds(time.Now(), env.TransmittedAt))
 
-		// The contract requires the envelope's agent_id: it is the agent a new
-		// instance is booked to, and revocation matches agents by it. An
-		// envelope without one is refused, not booked to a placeholder owner
-		// that no revocation could reach. It is checked after revocation, so a
-		// revoked agent still gets the revoked answer.
-		if agentID, parseErr := uuid.Parse(env.AgentID); parseErr != nil || agentID == uuid.Nil {
-			writeError(w, http.StatusBadRequest, "missing agent_id", "the envelope must name the agent that sent it")
-			return
+		// The agent_id is the agent a new instance is booked to, and revocation
+		// matches agents by it. A protocol 3 envelope without one comes from an
+		// agent that could not read its identity, and it is refused, not booked
+		// to a placeholder owner that no revocation could reach. An older agent
+		// may omit the field: its known instances keep the owner recorded for
+		// them, which the revocation check covers, and a new instance without an
+		// owner is refused alone by the inventory. A present agent_id must parse
+		// at every version. This is checked after revocation, so a revoked agent
+		// still gets the revoked answer.
+		if env.AgentID != "" || env.ProtocolVersion >= agentIDRequiredFrom {
+			if agentID, parseErr := uuid.Parse(env.AgentID); parseErr != nil || agentID == uuid.Nil {
+				writeError(w, http.StatusBadRequest, "missing agent_id", "the envelope must name the agent that sent it")
+				return
+			}
 		}
 
 		invRes, err := inv.Upsert(ctx, env)

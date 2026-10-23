@@ -268,3 +268,50 @@ func TestIngest_StoreRefusalIsNotRetried(t *testing.T) {
 	h.ServeHTTP(w, req)
 	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 }
+
+// INT-INGEST-004: an agent that predates the agent_id field sends its envelopes
+// without one. Its known instances are stored, under the owner recorded for
+// them, and a new instance is refused alone. Once that owner is revoked, the
+// same envelope is refused as revoked, so the owner check still applies to it.
+func TestIngest_INT_INGEST_004_LegacyEnvelopeWithoutAgentID(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+
+	auth := NewAuth("test-token")
+	h := IngestHandler(auth, NewInventory(pool), NewPipeline(pool, nil))
+	owner := uuid.NewString()
+	push := func(version int, instances ...wire.Instance) *httptest.ResponseRecorder {
+		env := wire.Envelope{ProtocolVersion: version, SentAt: time.Now(), Instances: instances}
+		if version == wire.ProtocolVersion {
+			env.AgentID = owner
+		}
+		body, err := json.Marshal(env)
+		require.NoError(t, err)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/push", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer test-token")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	known, fresh := uuid.NewString(), uuid.NewString()
+	instance := func(id string) wire.Instance {
+		return wire.Instance{InstanceID: id, ClusterID: pgtype.ClusterID(555666777).String(), Role: "primary"}
+	}
+	require.Equal(t, http.StatusAccepted, push(wire.ProtocolVersion, instance(known)).Code)
+
+	rec := push(agentIDRequiredFrom-1, instance(known), instance(fresh))
+	require.Equal(t, http.StatusAccepted, rec.Code, rec.Body.String())
+	require.JSONEq(t, `{"accepted":1,"rejected":1}`, rec.Body.String())
+	var recorded uuid.UUID
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT agent_id FROM instances WHERE instance_id=$1`, known).Scan(&recorded))
+	require.Equal(t, uuid.MustParse(owner), recorded, "a known instance keeps its owner")
+	var freshRows int
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*) FROM instances WHERE instance_id=$1`, fresh).Scan(&freshRows))
+	require.Zero(t, freshRows, "a new instance without an owner is not stored")
+
+	_, err := pool.Exec(context.Background(), `UPDATE agents SET revoked_at = now() WHERE agent_id = $1`, owner)
+	require.NoError(t, err)
+	rec = push(agentIDRequiredFrom-1, instance(known))
+	require.Equal(t, http.StatusUnauthorized, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), "revoked")
+}
