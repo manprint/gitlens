@@ -64,3 +64,24 @@ func TestAlertAPI_INT_ALERTAPI_003_DetailFindsSlashedKey(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), `"alert_key":"`+key+`"`)
 }
+
+// TestAlertAPI_INT_ALERTAPI_004_StoredNullLabelsRenderAsObject: a row stored
+// with a nil label map holds JSON null, and the API must still answer labels
+// as an object and resolved_at as null.
+func TestAlertAPI_INT_ALERTAPI_004_StoredNullLabelsRenderAsObject(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	st := alert.NewPgStore(pool)
+	now := time.Now().UTC()
+	key := "agent_down/22222222-2222-2222-2222-222222222222/"
+	require.NoError(t, st.Upsert(contextBackground(), alert.Alert{Key: key, RuleID: "agent_down", Severity: alert.SeverityCritical, State: alert.StateFiring, Summary: "agent silent", StartedAt: now, LastEvalAt: now}))
+	r := alertRouter(NewAlertAPI(pool, st))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/alerts/"+encodeURIComponent(key), nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	require.Equal(t, map[string]any{}, got["labels"])
+	require.Contains(t, got, "resolved_at")
+	require.Nil(t, got["resolved_at"])
+}

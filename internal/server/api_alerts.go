@@ -56,7 +56,7 @@ type alertJSON struct {
 	Summary    string            `json:"summary"`
 	StartedAt  time.Time         `json:"started_at"`
 	LastEvalAt time.Time         `json:"last_eval_at"`
-	ResolvedAt *time.Time        `json:"resolved_at,omitempty"`
+	ResolvedAt *time.Time        `json:"resolved_at"`
 	Suppressed bool              `json:"suppressed"`
 }
 
@@ -93,6 +93,12 @@ func renderAlertRule(v alert.Rule) alertRuleJSON {
 
 func renderAlert(v alert.Alert) alertJSON {
 	o := alertJSON{Key: v.Key, RuleID: v.RuleID, Severity: v.Severity, State: v.State, Datname: v.Datname, Labels: v.Labels, Value: v.Value, Summary: v.Summary, StartedAt: v.StartedAt, LastEvalAt: v.LastEvalAt, ResolvedAt: v.ResolvedAt, Suppressed: v.Suppressed}
+	// The spec makes labels a required object, and a nil map encodes as null.
+	// Rows written while the store still stored a nil map come back as nil, so
+	// the empty object is filled in here rather than only on write.
+	if o.Labels == nil {
+		o.Labels = map[string]string{}
+	}
 	// The column holds the uint64 system identifier's bit pattern: render it
 	// unsigned, like every other endpoint (ClusterId in the spec). It was
 	// rendered signed, so an identifier above 2^63 did not match its cluster.

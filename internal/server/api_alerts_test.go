@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/manprint/pglens/internal/alert"
 	"github.com/manprint/pglens/internal/pgtype"
@@ -193,6 +195,30 @@ func TestAlertAPI_DetailDecodesKeyOnce(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		require.Equal(t, []string{key}, pool.keys)
 	}
+}
+
+// TestAlertJSON_ActiveAlertCarriesEverySpecField renders an active alert and
+// checks it against the openapi Alert schema: every required field is present,
+// resolved_at is null rather than absent, and labels is an object, not null.
+func TestAlertJSON_ActiveAlertCarriesEverySpecField(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	body, err := json.Marshal(renderAlert(alert.Alert{Key: "agent_down/x/", RuleID: "agent_down", Severity: alert.SeverityCritical, State: alert.StateFiring, Summary: "s", StartedAt: now, LastEvalAt: now}))
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(body, &got))
+
+	raw, err := os.ReadFile("../../api/openapi.yaml")
+	require.NoError(t, err)
+	var document map[string]any
+	require.NoError(t, yaml.Unmarshal(raw, &document))
+	schema := document["components"].(map[string]any)["schemas"].(map[string]any)["Alert"].(map[string]any)
+	for _, field := range schema["required"].([]any) {
+		require.Contains(t, got, field, "rendered alert lacks a field the spec requires")
+	}
+	require.Contains(t, got, "resolved_at")
+	require.Nil(t, got["resolved_at"])
+	require.Equal(t, map[string]any{}, got["labels"])
 }
 
 func TestAlertAPI_UnavailableBranches(t *testing.T) {
