@@ -140,6 +140,12 @@ export function SignalActions({
   const selectedHandle = openKind ? handles[openKind] : null
   const belowT2 = currentTier !== 'T2'
   const unavailable = !isClientBackend(node)
+  // A sample that shows the PID as another kind of backend ends the
+  // confirmation, so a later sample with a client backend at that PID cannot
+  // reopen it for the session the operator saw before.
+  if (unavailable && pending !== null) {
+    setPending(null)
+  }
 
   if (unavailable) {
     return (

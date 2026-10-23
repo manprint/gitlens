@@ -90,6 +90,27 @@ function RefreshingSample() {
   )
 }
 
+// The PID shows as another kind of backend for one sample, then as a client
+// backend again.
+function BackendTypeFlips() {
+  const [backendType, setBackendType] = useState('client backend')
+  return (
+    <>
+      <button type="button" onClick={() => setBackendType('autovacuum worker')}>
+        Sample shows a worker
+      </button>
+      <button type="button" onClick={() => setBackendType('client backend')}>
+        Sample shows a client
+      </button>
+      <SignalActions
+        node={{ ...node, backend_type: backendType }}
+        instanceId={INSTANCE_ID}
+        currentTier="T2"
+      />
+    </>
+  )
+}
+
 function openDialog(kind: 'cancel' | 'terminate') {
   fireEvent.click(
     screen.getByRole('button', {
@@ -258,5 +279,16 @@ describe('SignalActions', () => {
       kind: 'terminate',
       args: { pid: 42, backend_start: '2026-10-23T09:00:00.123456Z' },
     })
+  })
+
+  it('UI-LOCK-066 closes the confirmation for good when the PID stops being a client backend', () => {
+    renderWithProviders(<BackendTypeFlips />)
+    openDialog('terminate')
+
+    fireEvent.click(screen.getByText('Sample shows a worker'))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText('Sample shows a client'))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Terminate backend' })).toBeEnabled()
   })
 })
