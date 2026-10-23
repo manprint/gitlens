@@ -25,6 +25,7 @@ func (*queryCounter) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEnd
 
 func TestINTADV002_LoadSnapshotUsesBoundedQueries(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
 		cfg, err := pgxpool.ParseConfig(pg.DSN("app", pgtest.RoleSuperuser))
 		require.NoError(t, err)
 		tracer := &queryCounter{}

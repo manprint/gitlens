@@ -884,7 +884,7 @@ func (timeoutErr) Temporary() bool { return true }
 // envelope is delivered once it answers. Nothing is dropped.
 func TestPusher_StalledServerIsRetriedWithLongerWait(t *testing.T) {
 	t.Parallel()
-	var requests atomic.Int32
+	var requests, answered atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
 		// The body is read first: net/http reports a disconnect on the
@@ -894,6 +894,7 @@ func TestPusher_StalledServerIsRetriedWithLongerWait(t *testing.T) {
 		// 200ms wait is the first one the answer fits in.
 		select {
 		case <-time.After(120 * time.Millisecond):
+			answered.Add(1)
 			w.WriteHeader(http.StatusAccepted)
 		case <-r.Context().Done():
 		}
@@ -912,7 +913,11 @@ func TestPusher_StalledServerIsRetriedWithLongerWait(t *testing.T) {
 	defer cancel()
 	require.NoError(t, p.Push(ctx))
 
-	require.Equal(t, int32(3), requests.Load())
+	// Each wait covers the dial as well, so on a slow machine the 50ms attempt
+	// can expire before the server sees it. Either way at least one attempt
+	// reached the server and was given up, and one longer wait got the answer.
+	require.GreaterOrEqual(t, requests.Load(), int32(2))
+	require.Equal(t, int32(1), answered.Load())
 	acked, dropped := p.BufferStats()
 	require.Equal(t, int64(1), acked)
 	require.Equal(t, int64(0), dropped)
@@ -944,8 +949,11 @@ func TestPusher_ServerThatNeverAnswersDropsEnvelope(t *testing.T) {
 	defer cancel()
 	require.NoError(t, p.Push(ctx))
 
-	// 50ms, 100ms, then the 200ms ceiling, which expires and drops the envelope.
-	require.Equal(t, int32(3), requests.Load())
+	// 50ms, 100ms, then the 200ms ceiling, which expires and drops the
+	// envelope. The 50ms attempt can expire in the dial on a slow machine, so
+	// the server sees two or three of them.
+	require.GreaterOrEqual(t, requests.Load(), int32(2))
+	require.LessOrEqual(t, requests.Load(), int32(3))
 	acked, dropped := p.BufferStats()
 	require.Equal(t, int64(0), acked)
 	require.Equal(t, int64(1), dropped)
