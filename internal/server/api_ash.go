@@ -576,6 +576,12 @@ func (a *AshAPI) handleASHTop(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// ashTopTextSQL is the newest text of a top entry's queryid in its cluster. The
+// primary key leads with datname, which the join never binds, so each entry
+// scanned the cluster's whole text table. query_texts_cluster_queryid_idx
+// serves the join on the cluster and the queryid.
+const ashTopTextSQL = `(SELECT q.query_text FROM query_texts q WHERE q.tenant_id = 'default' AND q.cluster_id = top.cluster_id AND q.queryid = top.queryid ORDER BY q.last_seen DESC LIMIT 1)`
+
 // queryASHTop ranks the queries by samples over the range.
 //
 // The text used to be joined from query_texts row by row: that table keeps
@@ -602,12 +608,10 @@ WITH ticks AS (
    LIMIT $%d
 )
 SELECT top.queryid,
-       COALESCE((SELECT q.query_text FROM query_texts q
-                  WHERE q.tenant_id = 'default' AND q.cluster_id = top.cluster_id AND q.queryid = top.queryid
-                  ORDER BY q.last_seen DESC LIMIT 1), ''),
+       COALESCE(%s, ''),
        top.samples, ticks.ticks
   FROM top CROSS JOIN ticks
- ORDER BY top.samples DESC, top.queryid`, tickWhere, where, len(args))
+ ORDER BY top.samples DESC, top.queryid`, tickWhere, where, len(args), ashTopTextSQL)
 
 	rows, err := a.pool.Query(ctx, query, args...)
 	if err != nil {

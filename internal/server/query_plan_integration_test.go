@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 )
@@ -44,4 +45,32 @@ func TestAlertAPI_INT_ALERTAPI_008_LookupsBindTheTenant(t *testing.T) {
 	require.Contains(t, plan, "Index Cond: ((tenant_id = 'default'::text)", plan)
 	plan = explainIndexed(t, pool, activeSilencesSQL)
 	require.Contains(t, plan, "Index Cond: ((tenant_id = 'default'::text)", plan)
+}
+
+// TestQueryPlan_INT_PLAN_001_SlotsLastActiveUsesActivityIndex: the last active
+// reading of an inactive slot must come from metrics_replication_slot_active_idx,
+// the index that binds the instance, the slot and the activity.
+func TestQueryPlan_INT_PLAN_001_SlotsLastActiveUsesActivityIndex(t *testing.T) {
+	pool := getSharedPool(t)
+	ctx := contextBackground()
+	// The planner prunes a hypertable with no chunk to a constant false, which
+	// shows no index at all. One row gives it a chunk to plan against.
+	instance := uuid.New()
+	_, err := pool.Exec(ctx, `INSERT INTO metrics_replication (ts, cluster_id, instance_id, slot_name, source, slot_active) VALUES (now(), 1, $1, 'slot_a', 'slot', false)`, instance)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM metrics_replication WHERE instance_id=$1`, instance)
+	})
+	plan := explainIndexed(t, pool, slotsSQL, int64(1))
+	require.Contains(t, plan, "metrics_replication_slot_active_idx", plan)
+}
+
+// TestQueryPlan_INT_PLAN_002_ASHTopTextUsesClusterIndex: each top entry's text
+// must come from query_texts_cluster_queryid_idx. The primary key leads with
+// datname, which the join never binds.
+func TestQueryPlan_INT_PLAN_002_ASHTopTextUsesClusterIndex(t *testing.T) {
+	pool := getSharedPool(t)
+	query := "SELECT " + ashTopTextSQL + " FROM (SELECT $1::bigint AS queryid, $2::bigint AS cluster_id) top"
+	plan := explainIndexed(t, pool, query, int64(42), int64(1))
+	require.Contains(t, plan, "query_texts_cluster_queryid_idx", plan)
 }

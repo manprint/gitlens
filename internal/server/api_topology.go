@@ -578,6 +578,26 @@ type slotsResp struct {
 	Slots     []slotResp `json:"slots"`
 }
 
+// slotsSQL is the newest reading of each slot, with the last active reading of
+// an inactive one. That lookup binds the instance, the slot and the activity,
+// ordered by time, which metrics_replication_slot_active_idx serves. Without
+// it, each inactive slot walked its history back to the last active row.
+const slotsSQL = `
+		SELECT l.instance_id, l.slot_name, l.slot_type, l.slot_active, l.slot_wal_status,
+		       l.slot_retained_bytes, l.slot_safe_wal_size_bytes,
+		       CASE WHEN l.slot_active THEN l.ts ELSE (
+		         SELECT max(h.ts) FROM metrics_replication h
+		          WHERE h.tenant_id='default' AND h.instance_id=l.instance_id
+		            AND h.slot_name=l.slot_name AND h.slot_active) END,
+		       l.ts
+		FROM (SELECT DISTINCT ON (instance_id, slot_name) *
+		        FROM metrics_replication
+		       WHERE tenant_id='default' AND cluster_id=$1 AND slot_name <> ''
+		         AND (source='slot' OR (source IS NULL AND slot_active IS NOT NULL))
+		         AND ts >= now() - interval '5 minutes'
+		       ORDER BY instance_id, slot_name, ts DESC) l
+		ORDER BY l.slot_name, l.instance_id`
+
 // handleSlots returns the newest state of every replication slot in the
 // cluster. The cluster page had a slots section and nothing to fill it with:
 // no endpoint served the rows the replication_slots check has always sent.
@@ -597,21 +617,7 @@ func (t *TopologyAPI) handleSlots(w http.ResponseWriter, r *http.Request) {
 	// A slot not reported for five minutes (the check runs every 15s) has
 	// been dropped, or its instance is gone. last_active_at looks back over
 	// the retained history for the slot's last active reading.
-	rows, err := t.pool.Query(ctx, `
-		SELECT l.instance_id, l.slot_name, l.slot_type, l.slot_active, l.slot_wal_status,
-		       l.slot_retained_bytes, l.slot_safe_wal_size_bytes,
-		       CASE WHEN l.slot_active THEN l.ts ELSE (
-		         SELECT max(h.ts) FROM metrics_replication h
-		          WHERE h.tenant_id='default' AND h.instance_id=l.instance_id
-		            AND h.slot_name=l.slot_name AND h.slot_active) END,
-		       l.ts
-		FROM (SELECT DISTINCT ON (instance_id, slot_name) *
-		        FROM metrics_replication
-		       WHERE tenant_id='default' AND cluster_id=$1 AND slot_name <> ''
-		         AND (source='slot' OR (source IS NULL AND slot_active IS NOT NULL))
-		         AND ts >= now() - interval '5 minutes'
-		       ORDER BY instance_id, slot_name, ts DESC) l
-		ORDER BY l.slot_name, l.instance_id`, store.ToDB(cid))
+	rows, err := t.pool.Query(ctx, slotsSQL, store.ToDB(cid))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query slots failed", err.Error())
 		return
