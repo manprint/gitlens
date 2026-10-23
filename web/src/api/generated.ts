@@ -912,7 +912,7 @@ export interface components {
         };
         StatementsResponse: {
             statements: components["schemas"]["Statement"][];
-            /** @description True when a statements check was partial during the window. The flag covers the whole instance, not one database. Only a partial that is still in progress is kept, so a partial that has ended is not reported, even when it fell inside the window. */
+            /** @description True when the statements of the window may be incomplete. The flag covers the whole instance, not one database. Two records set it. A cardinality_truncated event of the statements check, with its time in the window, sets it, so a cut that happened inside the window is reported. A partial statements check, which kept only the top statements, sets it while its episode overlaps the window. That record is removed by the next complete result for its database, so a partial that ended inside the window and was followed by a complete result is not reported. */
             truncated: components["schemas"]["Truncated"];
             /** @enum {string} */
             comparable_scope: "cluster";

@@ -440,3 +440,18 @@ func TestOpenAPIAlertRuleUpdateResponseThresholdIsNullable(t *testing.T) {
 		t.Errorf("AlertRuleUpdateResponse.threshold type = %v, want %v", threshold["type"], want)
 	}
 }
+
+// The statements truncated flag is set by two records, and a client reads a
+// clear flag as a complete window. The description must name the event that
+// keeps a historical cut, and say that the partial record is cleared by the
+// next complete result, so a partial that ended is not reported.
+func TestOpenAPIStatementsTruncatedNamesItsSources(t *testing.T) {
+	schemas := loadOpenAPIDocument(t)["components"].(map[string]any)["schemas"].(map[string]any)
+	properties := schemas["StatementsResponse"].(map[string]any)["properties"].(map[string]any)
+	description, _ := properties["truncated"].(map[string]any)["description"].(string)
+	for _, want := range []string{"cardinality_truncated", "next complete result"} {
+		if !strings.Contains(description, want) {
+			t.Errorf("StatementsResponse.truncated description must mention %q, got %q", want, description)
+		}
+	}
+}
