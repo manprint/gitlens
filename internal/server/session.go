@@ -2,7 +2,6 @@ package server
 
 import (
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -242,7 +241,7 @@ func registerSessionRoutes(r chi.Router, cfg UIConfig, store *SessionStore, limi
 			writeError(w, http.StatusTooManyRequests, "too_many_attempts", "too many sign-in attempts; wait before trying again")
 			return
 		}
-		passwordMatches := cfg.Password != "" && constantTimePasswordMatch(payload.Password, cfg.Password)
+		passwordMatches := cfg.Password != "" && secretsEqual(payload.Password, cfg.Password)
 		if !passwordMatches {
 			time.Sleep(sessionLoginFailureWait)
 			done(false)
@@ -402,14 +401,6 @@ func sessionTTL(cfg UIConfig, store *SessionStore) time.Duration {
 		return store.ttl
 	}
 	return 24 * time.Hour
-}
-
-func constantTimePasswordMatch(got, want string) bool {
-	if len(got) != len(want) {
-		_ = subtle.ConstantTimeCompare([]byte(got), []byte(want))
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
 func sessionCookie(cfg UIConfig, req *http.Request, value string, maxAge int) *http.Cookie {

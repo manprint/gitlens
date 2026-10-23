@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
 	"net/http"
 )
@@ -27,10 +28,15 @@ func (a *Auth) Validate(r *http.Request) bool {
 	if h := r.Header.Get("Authorization"); len(h) > 7 && h[:7] == "Bearer " {
 		got = h[7:]
 	}
-	if len(got) != len(a.token) {
-		// Still do constant-time compare to avoid timing leak on length
-		_ = subtle.ConstantTimeCompare([]byte(got), []byte(a.token))
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(got), []byte(a.token)) == 1
+	return secretsEqual(got, a.token)
+}
+
+// secretsEqual compares two secrets without revealing their lengths.
+// ConstantTimeCompare returns at once when the lengths differ, so comparing
+// the secrets directly would tell a caller how long the configured one is.
+// The digests of both are always the same size.
+func secretsEqual(got, want string) bool {
+	gotDigest := sha256.Sum256([]byte(got))
+	wantDigest := sha256.Sum256([]byte(want))
+	return subtle.ConstantTimeCompare(gotDigest[:], wantDigest[:]) == 1
 }
