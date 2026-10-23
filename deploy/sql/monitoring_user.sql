@@ -329,8 +329,8 @@ GRANT pg_signal_backend TO :"role";
 -- that no monitored instance needs one.
 -- pg_stat_statements (also in shared_preload_libraries): in the database the
 -- agent's DSN names or in any monitored database; its statistics cover every
--- database, and the agent reads them all through one view. It looks when it
--- starts, so restart the agent after creating it.
+-- database, and the agent reads them all through one view. It looks again
+-- every 30 seconds, so no agent restart is needed after creating it.
 -- CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 -- pgstattuple: in each database whose tables should be measurable.
 -- CREATE EXTENSION IF NOT EXISTS pgstattuple;

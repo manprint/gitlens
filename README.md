@@ -862,8 +862,9 @@ targets:
                                      # string array: regex patterns to exclude (default excludes templates and managed dbs;
                                      # setting it replaces that default list)
       max: 10                        # integer: max databases per instance to monitor, busiest first (default 10; 0 keeps the default)
-                                     # the choice is made when the agent starts: a database created later is reported
-                                     # with skip_reason=discovered_after_start and collected after the next restart
+                                     # the choice is re-read every 30 s: a database created later is reported with
+                                     # skip_reason=discovered_after_start until a free slot takes it, or db_budget
+                                     # when every slot is held
 
 # Per-check configuration overrides (optional)
 checks:
@@ -1698,11 +1699,13 @@ targets:
 
 Run `pglens-agent check --dsn <dsn>` to see which databases the default selection monitors and which it excludes or skips; a target's `databases` block can change that choice.
 
-The agent chooses its databases when it starts, and the budget ranks them by
-commits at that moment. A database created afterwards is reported with
-`skip_reason=discovered_after_start` and collected after the next agent
-restart; a database that has since dropped out of the busiest ten stays
-monitored until then.
+The agent reads its databases again every 30 seconds, and the budget ranks
+them by commits at each read. A database it collects stays collected while it
+exists, even when it drops out of the busiest ten, so a swap in the ranking
+does not restart its checks. A database created afterwards is collected at the
+next read that finds a free slot, within `databases.max`; until then it is
+reported with `skip_reason=discovered_after_start`, or `db_budget` once every
+slot is held.
 
 **No statements in Query Inspector**
 
@@ -1710,9 +1713,10 @@ The `stat_statements` check needs the `pg_stat_statements` module in
 `shared_preload_libraries` and the extension created (`CREATE EXTENSION
 pg_stat_statements`) in at least one database: the one the agent's DSN names,
 or any monitored database. The statistics cover every database, so the agent
-reads a database without the view through one that has it. It looks when it
-starts: create the extension, then restart the agent. While the check is
-skipped, Query Inspector says so and gives the agent's reason.
+reads a database without the view through one that has it. It looks again
+every 30 seconds, so an extension created later is picked up without a
+restart. While the check is skipped, Query Inspector says so and gives the
+agent's reason.
 
 **Buffer filling / `agent_buffer_bytes` metric keeps growing**
 
@@ -1821,7 +1825,7 @@ the server is rejected, so upgrade the server before upgrading agents.
 - Normalized query placeholders can make a plan less representative for parameter-sensitive workloads; inspect the returned hash and metadata
 - Relations under 1 MiB, never-analysed relations, and tables with a column the monitoring role cannot read in `pg_stats` (usually every table at T0) are not estimated; indexes are never estimated
 - Only the top-N relations per database are listed; the rest are counted as truncated
-- The agent chooses its databases and whether `pg_stat_statements` is readable when it starts; a database or extension created later needs an agent restart
+- The agent re-reads its databases and whether `pg_stat_statements` is readable every 30 seconds; a database or extension created later is picked up at the next read, and a new database waits for a free slot within `databases.max`
 
 **Configuration and durability:**
 - `archive_command` facts retain only the first token and redact remaining arguments because they may contain credentials
