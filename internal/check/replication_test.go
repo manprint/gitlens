@@ -421,6 +421,14 @@ func TestReplicationReceiver_StatusValues(t *testing.T) {
 	}
 }
 
+// 'catchup' is a pg_stat_replication state. The receiver never reports it, so
+// it is not streaming and has no value of its own.
+func TestReplicationReceiver_CatchupIsNotAReceiverStatus(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, -1.0, statusToFloat("catchup"))
+	require.False(t, receiverStreaming("catchup"))
+}
+
 // TestReplicationStreaming_StalledStandbyLagFollowsReplyAge: the walsender
 // refreshes write, flush and replay lag only when the standby replies, so a
 // standby that stops replying keeps its last small value while its backlog
@@ -480,7 +488,7 @@ func TestReplicationReceiver_LagOnlyWhileStreaming(t *testing.T) {
 		wantLag bool
 	}{
 		{"streaming", true},
-		{"catchup", true},
+		{"catchup", false},
 		{"disconnected", false},
 		{"starting", false},
 		{"connecting", false},
