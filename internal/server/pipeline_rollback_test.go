@@ -177,6 +177,28 @@ func TestPipeline_RejectedInstanceChangesNoTopologyState(t *testing.T) {
 // the instance being up. It is refreshed in the envelope's transaction for an
 // instance whose samples are stored, and not for one the pipeline refuses,
 // which must go stale rather than read as up on every push with no data.
+// An instance that reports no results in an envelope is still accepted, and
+// its last_seen is refreshed: the refresh is per accepted instance, not per
+// sample, so a quiet but healthy instance stays up.
+func TestPipeline_LastSeenRefreshedForInstanceWithoutResults(t *testing.T) {
+	t.Parallel()
+	fc := clock.NewFake(rollbackT0)
+	p := NewPipeline(nil, fc)
+	quiet := uuid.New()
+	tx, err := processOn(t, p, wire.Envelope{Instances: []wire.Instance{
+		{InstanceID: quiet.String(), ClusterID: pgtype.ClusterID(1).String(), Role: "primary"},
+	}}, nil)
+	require.NoError(t, err)
+
+	var touched []uuid.UUID
+	for _, e := range tx.execs {
+		if strings.Contains(e.sql, "UPDATE instances SET last_seen") {
+			touched = e.args[0].([]uuid.UUID)
+		}
+	}
+	require.Equal(t, []uuid.UUID{quiet}, touched)
+}
+
 func TestPipeline_LastSeenOnlyForStoredInstances(t *testing.T) {
 	t.Parallel()
 	fc := clock.NewFake(rollbackT0)
