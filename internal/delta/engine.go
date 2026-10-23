@@ -183,11 +183,12 @@ func (e *Engine) Evict(before time.Time) int {
 	return n
 }
 
-// CountByInstance returns the number of distinct series currently tracked
-// per instance — every (metric, database, labels) combination this engine
-// has ever Observe()'d and not yet Evict()'d. This is the cardinality
-// budget's own real number (I-8): how many distinct series an instance is
-// actually reporting right now.
+// CountByInstance returns, per instance, how many series the engine still
+// holds a baseline for: every (metric, database, labels) combination Observe
+// has seen and Evict has not yet dropped. That is the engine's own memory, not
+// the cardinality budget (I-8). The budget is the per-instance count of series
+// in the latest envelope, which the pipeline reports as pglens_series_total.
+// Nothing in production calls this method.
 func (e *Engine) CountByInstance() map[uuid.UUID]int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
