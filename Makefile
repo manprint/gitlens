@@ -184,11 +184,16 @@ api-docs:
 golden:
 	$(GO) test -tags=integration -run Golden ./internal/wire -update
 
+# The committed placeholder page is restored only where a build replaced it,
+# which is the case when the directory holds anything besides index.html. A
+# hand edit to an untouched placeholder is kept.
 clean:
 	rm -rf bin dist coverage.out coverage.html web/node_modules web/dist
 	@if test -d internal/webui/dist; then \
+		if test -n "$$(find internal/webui/dist -mindepth 1 -maxdepth 1 ! -name index.html)"; then \
+			git checkout -- internal/webui/dist/index.html; \
+		fi; \
 		find internal/webui/dist -mindepth 1 -maxdepth 1 ! -name index.html -exec rm -rf {} +; \
-		git checkout -- internal/webui/dist/index.html; \
 	fi
 
 build-images:
