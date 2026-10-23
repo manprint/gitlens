@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/manprint/pglens/test/scenario"
@@ -730,7 +731,25 @@ func (h *Harness) pgPool(t *testing.T, service, user, password, dbname string) *
 	}
 
 	dsn := fmt.Sprintf("postgres://%s:%s@localhost:%d/%s?sslmode=disable", user, password, port, dbname)
-	pool, err := pgxpool.New(context.Background(), dsn)
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse %s dsn: %v", service, err)
+		return nil
+	}
+	// The pool outlives the port it was built with. docker compose publishes
+	// a new host port on every start of a container, so a cached pool would
+	// keep dialing a dead port after a restart. Re-resolving on every new
+	// connection lets the pool reconnect by itself, including for a holder
+	// that keeps using the same pool across the restart.
+	cfg.BeforeConnect = func(ctx context.Context, cc *pgx.ConnConfig) error {
+		port, err := h.getServicePort(service, 5432)
+		if err != nil {
+			return fmt.Errorf("resolve %s port: %w", service, err)
+		}
+		cc.Port = uint16(port)
+		return nil
+	}
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("connect to %s: %v", service, err)
 		return nil
