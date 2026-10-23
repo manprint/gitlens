@@ -1380,9 +1380,12 @@ func buildASHRow(ts time.Time, tenantID string, clusterID int64, instanceID uuid
 // storedRole returns the role the store holds for an instance, or "" when it
 // holds none. The row is locked until the transaction ends, so a second envelope
 // for the same instance reads the stored role only after this one is decided.
+// The lock is FOR NO KEY UPDATE, the strength of the role and last_seen updates
+// that follow: it does not conflict with the KEY SHARE locks that foreign-key
+// checks take on the instance's databases rows, so those inserts never wait on it.
 func storedRole(ctx context.Context, tx pgx.Tx, instanceID uuid.UUID) (string, error) {
 	var role string
-	err := tx.QueryRow(ctx, `SELECT role FROM instances WHERE instance_id=$1 FOR UPDATE`, instanceID).Scan(&role)
+	err := tx.QueryRow(ctx, `SELECT role FROM instances WHERE instance_id=$1 FOR NO KEY UPDATE`, instanceID).Scan(&role)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}
