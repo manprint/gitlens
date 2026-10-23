@@ -1,6 +1,7 @@
 # Both Dockerfiles COPY the whole build context and run `make build`, which
 # only needs go.mod/go.sum, cmd/, and internal/; the server image's web stage
-# also needs web/, api/openapi.yaml, and README.md, which the bundle ships.
+# also needs web/, api/openapi.yaml, README.md, docs/LIMITS.md, and docs/api.md,
+# which the bundle reads from the repository root.
 # Everything below is irrelevant to those builds and only slows down (or, for
 # .git/.serena, potentially leaks into) the build context sent to the
 # daemon.
