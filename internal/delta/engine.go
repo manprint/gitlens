@@ -132,6 +132,12 @@ func observe(baselines map[pgtype.SeriesKey]state, maxGap time.Duration, o Obser
 // envelope whose transaction rolls back therefore leaves the baselines where
 // they were: its retry is observed as the interval it really is, and is not
 // dropped as a replay of a sample that was never stored.
+//
+// Two attempts of one envelope can overlap when a client gives up on a slow
+// request and sends it again. Neither has committed when the other observes, so
+// both see the same baseline and both report the same reset. The rate points
+// are stored with ON CONFLICT DO NOTHING and come out once. The reset events
+// are not, so the caller's event insert can store that reset twice.
 type Batch struct {
 	e      *Engine
 	staged map[pgtype.SeriesKey]state
