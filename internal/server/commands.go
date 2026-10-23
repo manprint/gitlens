@@ -27,6 +27,11 @@ const (
 	commandWaitInterval  = 500 * time.Millisecond
 	maxCommandWait       = 30 * time.Second
 	commandTenant        = "default"
+	// commandClaimLease is how long the agent that claimed a command has to
+	// report its result. The agent runs a command for at most 60 seconds, and
+	// the rest covers the capability refresh and the result post. The TTL
+	// bounds the wait for a claim; it must not expire a command being run.
+	commandClaimLease = 2 * time.Minute
 )
 
 // CommandService owns the server side of the command queue.
@@ -303,8 +308,10 @@ func (s *CommandService) claim(ctx context.Context, agentID string) (pollRespons
 	if err := expireCommands(ctx, s.pool); err != nil {
 		return out, err
 	}
+	// The claim takes its lease in the same statement, so the TTL the command
+	// was queued with no longer expires it. GREATEST keeps a longer expiry.
 	err = s.pool.QueryRow(ctx, `UPDATE commands
-		SET state='claimed', claimed_at=now(), claim_token=gen_random_uuid()
+		SET state='claimed', claimed_at=now(), claim_token=gen_random_uuid(), expires_at=GREATEST(expires_at, $3)
 		WHERE command_id = (
 			SELECT command_id FROM commands
 			WHERE tenant_id=$1 AND agent_id=$2 AND state='pending' AND expires_at > now()
@@ -312,7 +319,7 @@ func (s *CommandService) claim(ctx context.Context, agentID string) (pollRespons
 			FOR UPDATE SKIP LOCKED
 			LIMIT 1
 		)
-		RETURNING command_id, kind, args, claim_token, instance_id, cluster_id, expires_at`, commandTenant, parsed).Scan(&out.CommandID, &out.Kind, &out.Args, &out.ClaimToken, &out.InstanceID, &out.ClusterID, &out.ExpiresAt)
+		RETURNING command_id, kind, args, claim_token, instance_id, cluster_id, expires_at`, commandTenant, parsed, s.now().UTC().Add(commandClaimLease)).Scan(&out.CommandID, &out.Kind, &out.Args, &out.ClaimToken, &out.InstanceID, &out.ClusterID, &out.ExpiresAt)
 	return out, err
 }
 
@@ -393,9 +400,18 @@ func (s *CommandService) result(w http.ResponseWriter, r *http.Request) {
 	err = tx.QueryRow(ctx, `UPDATE commands SET state=$3, result=$4, error=$5, finished_at=now() WHERE command_id=$1 AND state='claimed' AND claim_token=$2 RETURNING tenant_id, instance_id, cluster_id, kind, args, requested_by`, commandID, req.ClaimToken, state, nullableJSON(req.Result), nullableText(req.Error)).Scan(&tenantID, &instanceID, &clusterID, &kind, &args, &requestedBy)
 	if errors.Is(err, pgx.ErrNoRows) {
 		var tenantID, commandState string
-		err = tx.QueryRow(ctx, `SELECT tenant_id, instance_id, kind, args, requested_by, state FROM commands WHERE command_id=$1 FOR UPDATE`, commandID).Scan(&tenantID, &instanceID, &kind, &args, &requestedBy, &commandState)
+		var claimToken *uuid.UUID
+		err = tx.QueryRow(ctx, `SELECT tenant_id, instance_id, kind, args, requested_by, state, claim_token FROM commands WHERE command_id=$1 FOR UPDATE`, commandID).Scan(&tenantID, &instanceID, &kind, &args, &requestedBy, &commandState, &claimToken)
 		if err == nil && commandState == "expired" {
-			if _, auditErr := tx.Exec(ctx, `INSERT INTO command_audit (tenant_id, command_id, instance_id, kind, args, requested_by, outcome, detail) VALUES ($1,$2,$3,$4,$5,$6,'rejected',$7)`, tenantID, commandID, instanceID, kind, args, requestedBy, nullableText(req.Error)); auditErr != nil {
+			// The sweep keeps the claim token of a claim it expires, so a
+			// matching token shows the result came from the agent that claimed
+			// the command. The result is still refused, but the audit records
+			// what that agent reported, not a rejection it never sent.
+			outcome := "rejected"
+			if claimToken != nil && *claimToken == req.ClaimToken {
+				outcome = req.Outcome
+			}
+			if _, auditErr := tx.Exec(ctx, `INSERT INTO command_audit (tenant_id, command_id, instance_id, kind, args, requested_by, outcome, detail) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, tenantID, commandID, instanceID, kind, args, requestedBy, outcome, nullableText(req.Error)); auditErr != nil {
 				writeError(w, http.StatusInternalServerError, "command audit failed", auditErr.Error())
 				return
 			}
