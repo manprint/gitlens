@@ -15,6 +15,7 @@ const (
 	pgObjectNotInPrerequisiteState = "55000"
 	pgInsufficientPrivilege        = "42501"
 	pgUndefinedFunction            = "42883"
+	pgLockNotAvailable             = "55P03"
 )
 
 // pgErrorCode returns err's SQLSTATE, or "" when err is nil or did not come

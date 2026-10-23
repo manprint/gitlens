@@ -1,5 +1,5 @@
 export { formatBytes } from './bytes'
-export { formatCount } from './count'
+export { formatCount, formatIntegerString } from './count'
 export { formatDuration } from './duration'
 export { formatLag } from './lag'
 export { formatPercent } from './percent'

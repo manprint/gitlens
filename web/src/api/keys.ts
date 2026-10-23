@@ -20,6 +20,17 @@ export const qk = {
   instanceSettings: (id: string, changedSince?: string) =>
     ['getInstanceSettings', id, changedSince] as const,
   instanceTables: (id: string, limit?: number) => ['getInstanceTables', id, limit] as const,
+  instanceTriggers: (id: string) => ['getInstanceTriggers', id] as const,
+  instanceUnindexedForeignKeys: (id: string) => ['getInstanceUnindexedForeignKeys', id] as const,
+  instanceExtensions: (id: string) => ['getInstanceExtensions', id] as const,
+  instanceSpatialColumns: (id: string) => ['getInstanceSpatialColumns', id] as const,
+  instanceSequences: (id: string) => ['getInstanceSequences', id] as const,
+  instancePartitionedTables: (id: string) => ['getInstancePartitionedTables', id] as const,
+  instanceFunctions: (id: string) => ['getInstanceFunctions', id] as const,
+  instanceLogicalReplication: (id: string) => ['getInstanceLogicalReplication', id] as const,
+  instanceInternals: (id: string) => ['getInstanceInternals', id] as const,
+  instanceSecurityDefinerFunctions: (id: string) =>
+    ['getInstanceSecurityDefinerFunctions', id] as const,
   instanceIndexes: (id: string, limit?: number) => ['getInstanceIndexes', id, limit] as const,
   instanceBloat: (id: string, limit?: number) => ['getInstanceBloat', id, limit] as const,
   instanceCommandAudit: (id: string) => ['getInstanceCommandAudit', id] as const,

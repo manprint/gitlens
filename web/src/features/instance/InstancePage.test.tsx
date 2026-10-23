@@ -70,6 +70,58 @@ function renderPage(
       reason: 'agent unreachable',
     }),
     ok('getInstanceSettings', { instance_id: INSTANCE_ID, settings: [] }),
+    ok('getInstanceTriggers', { instance_id: INSTANCE_ID, triggers: [], truncated_databases: [] }),
+    ok('getInstanceExtensions', {
+      instance_id: INSTANCE_ID,
+      extensions: [],
+      truncated_databases: [],
+    }),
+    ok('getInstanceSpatialColumns', {
+      instance_id: INSTANCE_ID,
+      columns: [],
+      truncated_databases: [],
+    }),
+    ok('getInstanceSequences', {
+      instance_id: INSTANCE_ID,
+      sequences: [],
+      truncated_databases: [],
+    }),
+    ok('getInstancePartitionedTables', {
+      instance_id: INSTANCE_ID,
+      tables: [],
+      truncated_databases: [],
+    }),
+    ok('getInstanceFunctions', {
+      instance_id: INSTANCE_ID,
+      window_seconds: 3600,
+      databases: [],
+      functions: [],
+    }),
+    ok('getInstanceSecurityDefinerFunctions', {
+      instance_id: INSTANCE_ID,
+      functions: [],
+      truncated_databases: [],
+    }),
+    ok('getInstanceLogicalReplication', {
+      instance_id: INSTANCE_ID,
+      window_seconds: 3600,
+      subscriptions: [],
+      slots: [],
+    }),
+    ok('getInstanceInternals', {
+      instance_id: INSTANCE_ID,
+      window_seconds: 3600,
+      wal_directory: null,
+      databases: [],
+      slru: [],
+      temp_files: [],
+      standby: null,
+    }),
+    ok('getInstanceUnindexedForeignKeys', {
+      instance_id: INSTANCE_ID,
+      foreign_keys: [],
+      truncated_databases: [],
+    }),
     ok('getInstanceTables', {
       instance_id: INSTANCE_ID,
       items: [],

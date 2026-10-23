@@ -275,6 +275,146 @@ export function useInstanceSettings(
   })
 }
 
+export function useInstanceTriggers(id: string) {
+  return useApiQuery({
+    policy: REFRESH.catalog,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/triggers', {
+          params: { path: { id } },
+          signal,
+        }),
+      ),
+    queryKey: qk.instanceTriggers(id),
+  })
+}
+
+export function useInstanceUnindexedForeignKeys(id: string) {
+  return useApiQuery({
+    policy: REFRESH.catalog,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/unindexed-foreign-keys', {
+          params: { path: { id } },
+          signal,
+        }),
+      ),
+    queryKey: qk.instanceUnindexedForeignKeys(id),
+  })
+}
+
+export function useInstanceExtensions(id: string) {
+  return useApiQuery({
+    policy: REFRESH.catalog,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/extensions', {
+          params: { path: { id } },
+          signal,
+        }),
+      ),
+    queryKey: qk.instanceExtensions(id),
+  })
+}
+
+export function useInstanceSpatialColumns(id: string) {
+  return useApiQuery({
+    policy: REFRESH.catalog,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/spatial-columns', {
+          params: { path: { id } },
+          signal,
+        }),
+      ),
+    queryKey: qk.instanceSpatialColumns(id),
+  })
+}
+
+export function useInstanceSequences(id: string) {
+  return useApiQuery({
+    policy: REFRESH.catalog,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/sequences', {
+          params: { path: { id } },
+          signal,
+        }),
+      ),
+    queryKey: qk.instanceSequences(id),
+  })
+}
+
+export function useInstanceLogicalReplication(id: string) {
+  return useApiQuery({
+    policy: REFRESH.catalog,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/logical-replication', {
+          params: { path: { id } },
+          signal,
+        }),
+      ),
+    queryKey: qk.instanceLogicalReplication(id),
+  })
+}
+
+export function useInstanceInternals(id: string) {
+  return useApiQuery({
+    policy: REFRESH.catalog,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/internals', {
+          params: { path: { id } },
+          signal,
+        }),
+      ),
+    queryKey: qk.instanceInternals(id),
+  })
+}
+
+export function useInstanceFunctions(id: string) {
+  return useApiQuery({
+    policy: REFRESH.catalog,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/functions', {
+          params: { path: { id } },
+          signal,
+        }),
+      ),
+    queryKey: qk.instanceFunctions(id),
+  })
+}
+
+export function useInstanceSecurityDefinerFunctions(id: string) {
+  return useApiQuery({
+    policy: REFRESH.catalog,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/security-definer-functions', {
+          params: { path: { id } },
+          signal,
+        }),
+      ),
+    queryKey: qk.instanceSecurityDefinerFunctions(id),
+  })
+}
+
+export function useInstancePartitionedTables(id: string) {
+  return useApiQuery({
+    policy: REFRESH.catalog,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/partitioned-tables', {
+          params: { path: { id } },
+          signal,
+        }),
+      ),
+    queryKey: qk.instancePartitionedTables(id),
+  })
+}
+
 export function useInstanceTables(
   id: string,
   params: QueryParameters<'/api/v1/instances/{id}/tables'> = {},

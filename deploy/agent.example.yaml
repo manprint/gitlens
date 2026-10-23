@@ -37,6 +37,19 @@ checks:
   activity: { interval: 10s, by_application: false } # Session state and wait groups.
   locks: { interval: 10s } # Blocking/blocked lock tree at Tier 0.
   monitoring_role: { interval: 10m } # What would let the monitoring role write.
+  trigger_inventory: { interval: 5m } # Triggers of each database and which are disabled.
+  fk_indexes: { interval: 15m } # Foreign keys no index serves.
+  extensions: { interval: 1h } # Installed extensions and available updates.
+  postgis_columns: { interval: 1h } # PostGIS columns, SRIDs and spatial indexes.
+  sequences: { interval: 10m } # How much of its range each sequence used.
+  partitions: { interval: 10m } # Partition trees, default partitions and how far they reach.
+  function_stats: { interval: 5m, top_n: 50 } # Calls and time of the busiest tracked functions.
+  function_security: { interval: 15m } # SECURITY DEFINER functions and their search_path.
+  logical_replication: { interval: 1m } # Subscriptions and logical decoding.
+  wal_directory: { interval: 1m } # Size of pg_wal (needs EXECUTE on pg_ls_waldir, granted by pg_monitor).
+  database_size: { interval: 15m } # Size of each database, without reading its files.
+  slru: { interval: 1m } # SLRU cache counters.
+  recovery: { interval: 30s } # Standby recovery conflicts, replay pause and WAL prefetch; nothing on a primary.
   table_stats: { interval: 5m, top_n: 50 } # Table access, tuple and vacuum statistics.
   index_stats: { interval: 5m, top_n: 50 } # Index usage and size statistics.
   vacuum_progress: { interval: 30s } # In-progress VACUUM counters.

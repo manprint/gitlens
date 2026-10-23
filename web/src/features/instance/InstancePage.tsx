@@ -6,8 +6,11 @@ import { ErrorState } from '@/components/state'
 import { selectedDatabase } from '@/lib/databases'
 
 import { InstanceHeader, type ReplayLag } from './InstanceHeader'
+import { CatalogSection } from './CatalogSection'
 import { DatabaseSelector } from './DatabaseSelector'
 import { HostSection } from './HostSection'
+import { InternalsSection } from './InternalsSection'
+import { LogicalReplicationSection } from './LogicalReplicationSection'
 import { OverviewSection } from './OverviewSection'
 import { RelationsSection } from './RelationsSection'
 import { SettingsSection } from './SettingsSection'
@@ -138,6 +141,9 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
       <HostSection instanceId={instanceId} />
       <SettingsSection instanceId={instanceId} />
       <RelationsSection instanceId={instanceId} currentTier={instanceQuery.data.perm_tier} />
+      <CatalogSection instanceId={instanceId} />
+      <LogicalReplicationSection instanceId={instanceId} />
+      <InternalsSection instanceId={instanceId} />
     </div>
   )
 }

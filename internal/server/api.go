@@ -60,6 +60,7 @@ func (a *API) RegisterRoutes(r chi.Router) {
 	a.registerContentionRoutes(r)
 	a.registerRelationRoutes(r)
 	a.registerSettingsRoutes(r)
+	a.registerCatalogRoutes(r)
 	a.registerHostRoutes(r)
 	a.registerFindingsRoutes(r)
 	a.registerPlanRoutes(r)

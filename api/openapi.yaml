@@ -460,6 +460,435 @@ components:
       properties:
         instance_id: { $ref: '#/components/schemas/InstanceId' }
         settings: { type: array, items: { $ref: '#/components/schemas/Setting' } }
+    TriggersResponse:
+      type: object
+      required: [instance_id, triggers, truncated_databases]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        triggers: { type: array, items: { $ref: '#/components/schemas/Trigger' } }
+        truncated_databases:
+          type: array
+          items: { type: string }
+          description: >-
+            Databases with more triggers than the agent reports (1000); their
+            list holds the disabled triggers first.
+    Trigger:
+      type: object
+      required: [datname, schemaname, relname, name, kind, state, function, timing, events, level, constraint, constraint_type, first_seen, last_seen, changed_at]
+      properties:
+        datname: { type: string }
+        schemaname: { type: string }
+        relname: { type: string }
+        name: { type: string }
+        kind:
+          type: string
+          enum: [user, internal]
+          description: >-
+            internal is a trigger PostgreSQL creates to enforce a constraint
+            (foreign key, deferrable unique); it is listed only when disabled.
+        state:
+          type: string
+          enum: [enabled, disabled, replica, always, unknown]
+          description: >-
+            replica fires only in sessions with session_replication_role =
+            replica, always in every session.
+        function: { type: string, description: Schema-qualified trigger function. }
+        timing: { type: string, enum: [BEFORE, AFTER, INSTEAD OF] }
+        events: { type: string, description: 'Events joined by OR, e.g. INSERT OR UPDATE.' }
+        level: { type: string, enum: [ROW, STATEMENT] }
+        constraint: { type: string, description: Constraint an internal trigger enforces; empty otherwise. }
+        constraint_type: { type: string, enum: ['', foreign key, unique, primary key, exclusion, constraint trigger, other] }
+        first_seen: { $ref: '#/components/schemas/Timestamp' }
+        last_seen: { $ref: '#/components/schemas/Timestamp' }
+        changed_at: { $ref: '#/components/schemas/Timestamp' }
+    UnindexedForeignKeysResponse:
+      type: object
+      required: [instance_id, foreign_keys, truncated_databases]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        foreign_keys: { type: array, items: { $ref: '#/components/schemas/UnindexedForeignKey' } }
+        truncated_databases:
+          type: array
+          items: { type: string }
+          description: >-
+            Databases with more unindexed foreign keys than the agent reports
+            (200); their list holds the largest referencing tables.
+    UnindexedForeignKey:
+      type: object
+      required: [datname, schemaname, relname, constraint, columns, referenced, table_bytes, first_seen, last_seen]
+      properties:
+        datname: { type: string }
+        schemaname: { type: string }
+        relname: { type: string, description: The referencing table. }
+        constraint: { type: string }
+        columns: { type: string, description: 'Referencing columns in key order, joined by ", ".' }
+        referenced: { type: string, description: Schema-qualified referenced table. }
+        table_bytes:
+          type: integer
+          format: int64
+          description: Size of the referencing table (its leaf partitions for a partitioned table).
+        first_seen: { $ref: '#/components/schemas/Timestamp' }
+        last_seen: { $ref: '#/components/schemas/Timestamp' }
+    ExtensionsResponse:
+      type: object
+      required: [instance_id, extensions, truncated_databases]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        extensions: { type: array, items: { $ref: '#/components/schemas/Extension' } }
+        truncated_databases: { type: array, items: { type: string } }
+    Extension:
+      type: object
+      required: [datname, name, schema, version, default_version, upgrade, first_seen, last_seen, changed_at]
+      properties:
+        datname: { type: string }
+        name: { type: string }
+        schema: { type: string }
+        version: { type: string, description: Installed version. }
+        default_version:
+          type: string
+          description: Version the server's installed packages carry; empty when they no longer carry the extension.
+        upgrade:
+          type: string
+          enum: [available, none, unknown]
+          description: unknown when the packages lack the extension or a version is not dotted numbers.
+        first_seen: { $ref: '#/components/schemas/Timestamp' }
+        last_seen: { $ref: '#/components/schemas/Timestamp' }
+        changed_at: { $ref: '#/components/schemas/Timestamp' }
+    SpatialColumnsResponse:
+      type: object
+      required: [instance_id, columns, truncated_databases]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        columns: { type: array, items: { $ref: '#/components/schemas/SpatialColumn' } }
+        truncated_databases:
+          type: array
+          items: { type: string }
+          description: Databases with more spatial columns than the agent reports (500); unindexed columns of the largest tables come first.
+    SpatialColumn:
+      type: object
+      required: [datname, schemaname, relname, column, type, subtype, srid, srid_known, index_method, rows, first_seen, last_seen]
+      properties:
+        datname: { type: string }
+        schemaname: { type: string }
+        relname: { type: string }
+        column: { type: string }
+        type: { type: string, enum: [geometry, geography] }
+        subtype: { type: string, description: 'Declared geometry type with its dimensions, e.g. PointZ; Geometry for any.' }
+        srid:
+          type: [integer, 'null']
+          format: int32
+          description: Declared SRID; null for a column declared without a typmod, whose values carry their own.
+        srid_known:
+          type: [boolean, 'null']
+          description: Whether spatial_ref_sys defines the SRID (false for 0); null when unreadable or not declared.
+        index_method:
+          type: string
+          enum: ['', gist, spgist, brin]
+          description: Access method of the valid, non-partial index whose first key is the column; empty when none.
+        rows: { type: number, format: double, description: Estimated rows of the table (pg_class.reltuples). }
+        first_seen: { $ref: '#/components/schemas/Timestamp' }
+        last_seen: { $ref: '#/components/schemas/Timestamp' }
+    SequencesResponse:
+      type: object
+      required: [instance_id, sequences, truncated_databases]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        sequences: { type: array, items: { $ref: '#/components/schemas/Sequence' } }
+        truncated_databases:
+          type: array
+          items: { type: string }
+          description: Databases with more sequences than the agent reports (500); the sequences closest to their limit come first.
+    Sequence:
+      type: object
+      description: >-
+        One sequence. Bounds and values are decimal strings, as a bigint
+        sequence's range does not fit a JSON number exactly.
+      required: [datname, schemaname, name, data_type, state, start, increment, min, max, cycle, last_value, limit, limit_source, exhausts, used_ratio, remaining, table_schema, table, column, column_type, link, columns, first_seen, last_seen, changed_at]
+      properties:
+        datname: { type: string }
+        schemaname: { type: string }
+        name: { type: string }
+        data_type: { type: string, description: 'Declared type of the sequence: smallint, integer or bigint.' }
+        state:
+          type: string
+          enum: [used, unused, hidden, unread]
+          description: >-
+            used: the value is known; unused: never called; hidden: the
+            monitoring role has neither SELECT nor USAGE on the sequence;
+            unread: reading it waited too long for a lock.
+        start: { type: string }
+        increment: { type: string }
+        min: { type: string }
+        max: { type: string }
+        cycle: { type: boolean }
+        last_value: { type: [string, 'null'], description: 'Null when never called or not readable.' }
+        limit: { type: string, description: 'Last value the sequence can hand out that its column accepts.' }
+        limit_source:
+          type: string
+          enum: [sequence, column]
+          description: column when the integer type of the column the sequence feeds is narrower than the sequence.
+        exhausts: { type: boolean, description: 'False for a cycling sequence whose own bound sets the limit: it wraps instead of failing.' }
+        used_ratio: { type: [number, 'null'], format: double, description: 'Used fraction of the range from start to limit; null when not readable.' }
+        remaining: { type: [string, 'null'], description: 'Values left before the limit; null when not readable.' }
+        table_schema: { type: string }
+        table: { type: string, description: 'Table of the column the sequence feeds; empty when it feeds none.' }
+        column: { type: string }
+        column_type: { type: string }
+        link:
+          type: string
+          enum: ['', identity, owned, default]
+          description: How the sequence is tied to the column; empty when it feeds none.
+        columns: { type: integer, format: int32, description: 'Number of columns the sequence feeds; the narrowest is reported.' }
+        first_seen: { $ref: '#/components/schemas/Timestamp' }
+        last_seen: { $ref: '#/components/schemas/Timestamp' }
+        changed_at: { $ref: '#/components/schemas/Timestamp' }
+    PartitionedTablesResponse:
+      type: object
+      required: [instance_id, tables, truncated_databases]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        tables: { type: array, items: { $ref: '#/components/schemas/PartitionedTable' } }
+        truncated_databases:
+          type: array
+          items: { type: string }
+          description: Databases with more partitioned tables than the agent reports (200); the largest come first.
+    PartitionedTable:
+      type: object
+      description: A partition tree rolled up to its top partitioned table.
+      required: [datname, schemaname, relname, strategy, partition_key, partitions, direct_partitions, depth, bytes, rows, default_partition, default_rows, invalid_indexes, analyzed_at, covered_until, first_seen, last_seen]
+      properties:
+        datname: { type: string }
+        schemaname: { type: string }
+        relname: { type: string }
+        strategy: { type: string, enum: [range, list, hash] }
+        partition_key: { type: string, description: 'Strategy and key columns, e.g. RANGE (created_at); an expression in the key reads "expression".' }
+        partitions: { type: integer, format: int32, description: Leaf partitions in the whole tree. }
+        direct_partitions: { type: integer, format: int32 }
+        depth: { type: integer, format: int32, description: 'Levels below the top table: 1 without sub-partitions.' }
+        bytes: { type: integer, format: int64, description: 'Leaves with their indexes and TOAST, estimated from relpages as of the last VACUUM or ANALYZE.' }
+        rows: { type: number, format: double, description: Estimated rows of the leaves (reltuples). }
+        default_partition: { type: [string, 'null'], description: 'schema.table of the default partition; null without one.' }
+        default_rows: { type: [number, 'null'], format: double, description: 'Estimated rows in the default partition; null without one.' }
+        invalid_indexes: { type: array, items: { type: string }, description: Partitioned indexes not valid because a partition lacks the index. }
+        analyzed_at:
+          oneOf:
+            - { $ref: '#/components/schemas/Timestamp' }
+            - { type: 'null' }
+          description: When the partitioned table itself was last analyzed; null if never (autovacuum never analyzes it).
+        covered_until:
+          type: [string, 'null']
+          description: >-
+            For a table range-partitioned on one date or timestamp column,
+            the highest upper bound of its partitions (RFC 3339), or
+            "unbounded" when one reaches MAXVALUE; null for any other table.
+        first_seen: { $ref: '#/components/schemas/Timestamp' }
+        last_seen: { $ref: '#/components/schemas/Timestamp' }
+    FunctionsResponse:
+      type: object
+      required: [instance_id, window_seconds, databases, functions]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        window_seconds: { type: integer, format: int32, description: The span the rates are averaged over. }
+        databases: { type: array, items: { $ref: '#/components/schemas/FunctionTracking' } }
+        functions: { type: array, items: { $ref: '#/components/schemas/FunctionStat' } }
+    FunctionTracking:
+      type: object
+      description: Whether a database's function calls are tracked.
+      required: [datname, track_functions, tracked_functions, pl_functions, last_seen]
+      properties:
+        datname: { type: string }
+        track_functions: { type: string, description: 'track_functions as the sessions of the database see it: none, pl or all.' }
+        tracked_functions: { type: integer, format: int32, description: Functions pg_stat_user_functions holds statistics for. }
+        pl_functions: { type: integer, format: int32, description: 'Functions written in a procedural language, outside extensions: those track_functions = pl tracks.' }
+        last_seen: { $ref: '#/components/schemas/Timestamp' }
+    FunctionStat:
+      type: object
+      description: >-
+        A tracked function's calls and time over the window. Only the
+        functions with the most time in their own body and the most calls
+        are reported.
+      required: [datname, schemaname, name, arguments, language, calls_per_second, total_ms_per_second, self_ms_per_second, mean_ms, last_seen]
+      properties:
+        datname: { type: string }
+        schemaname: { type: string }
+        name: { type: string }
+        arguments: { type: string, description: The identity arguments, which tell overloads apart. }
+        language: { type: string }
+        calls_per_second: { type: number, format: double }
+        total_ms_per_second: { type: number, format: double, description: Milliseconds spent in the function per second, the functions it calls included. }
+        self_ms_per_second: { type: number, format: double, description: Milliseconds spent in the function's own body per second. }
+        mean_ms:
+          type: [number, 'null']
+          format: double
+          description: Mean time per call over the window; null when the function was not called in it.
+        last_seen: { $ref: '#/components/schemas/Timestamp' }
+    InternalsResponse:
+      type: object
+      required: [instance_id, window_seconds, wal_directory, databases, slru, temp_files, standby]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        window_seconds: { type: integer, format: int32, description: The span the rates are averaged over. }
+        wal_directory:
+          oneOf:
+            - { $ref: '#/components/schemas/WALDirectory' }
+            - { type: 'null' }
+          description: The latest listing of pg_wal in the window; null without one (no EXECUTE on pg_ls_waldir, or not scraped).
+        databases:
+          type: array
+          items: { $ref: '#/components/schemas/DatabaseSize' }
+          description: Each database's latest size, largest first; a database not sized in the last two hours is left out.
+        slru: { type: array, items: { $ref: '#/components/schemas/SLRUCache' } }
+        temp_files: { type: array, items: { $ref: '#/components/schemas/TempFileRate' } }
+        standby:
+          oneOf:
+            - { $ref: '#/components/schemas/StandbyReplay' }
+            - { type: 'null' }
+          description: Null unless the instance replayed WAL in the window.
+    WALDirectory:
+      type: object
+      required: [bytes, files, observed_at]
+      properties:
+        bytes: { type: number, format: double }
+        files: { type: number, format: double }
+        observed_at: { $ref: '#/components/schemas/Timestamp' }
+    DatabaseSize:
+      type: object
+      required: [database, size_bytes, observed_at, growth_24h_bytes, growth_7d_bytes]
+      properties:
+        database: { type: string }
+        size_bytes: { type: number, format: double }
+        observed_at: { $ref: '#/components/schemas/Timestamp' }
+        growth_24h_bytes:
+          type: [number, 'null']
+          format: double
+          description: Size change since the size measured about 24 hours before; null without one.
+        growth_7d_bytes:
+          type: [number, 'null']
+          format: double
+          description: Size change since the size measured about 7 days before; null without one.
+    SLRUCache:
+      type: object
+      description: One SLRU cache, named as PostgreSQL 17 and later name it on every version.
+      required: [name, hit_ratio, hits_per_second, reads_per_second, writes_per_second, zeroed_per_second, flushes_per_second, truncates_per_second, exists_per_second, last_seen]
+      properties:
+        name: { type: string, example: multixact_offset }
+        hit_ratio:
+          type: [number, 'null']
+          format: double
+          description: Hits over hits and reads; null when the cache was not read in the window.
+        hits_per_second: { type: number, format: double }
+        reads_per_second: { type: number, format: double, description: Pages read from disk, under the cache's lock. }
+        writes_per_second: { type: number, format: double }
+        zeroed_per_second: { type: number, format: double }
+        flushes_per_second: { type: number, format: double }
+        truncates_per_second: { type: number, format: double }
+        exists_per_second: { type: number, format: double }
+        last_seen: { $ref: '#/components/schemas/Timestamp' }
+    TempFileRate:
+      type: object
+      required: [database, files_per_second, bytes_per_second]
+      properties:
+        database: { type: string }
+        files_per_second: { type: number, format: double, description: Temporary files written by queries that outgrew work_mem. }
+        bytes_per_second: { type: number, format: double }
+    StandbyReplay:
+      type: object
+      required: [replay_paused, observed_at, conflicts, prefetch_blocks_per_second]
+      properties:
+        replay_paused: { type: boolean, description: Whether WAL replay was paused at the latest scrape. }
+        observed_at: { $ref: '#/components/schemas/Timestamp' }
+        conflicts: { type: array, items: { $ref: '#/components/schemas/RecoveryConflictRate' } }
+        prefetch_blocks_per_second:
+          type: object
+          additionalProperties: { type: number, format: double }
+          description: The WAL prefetcher's blocks per second by outcome (prefetch, hit, skip_init, skip_new, skip_fpw, skip_rep).
+    RecoveryConflictRate:
+      type: object
+      description: Standby queries of a database cancelled by recovery conflicts of one reason; only reasons with a rate above zero.
+      required: [database, reason, per_second]
+      properties:
+        database: { type: string }
+        reason: { type: string, example: snapshot }
+        per_second: { type: number, format: double }
+    LogicalReplicationResponse:
+      type: object
+      required: [instance_id, window_seconds, subscriptions, slots]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        window_seconds: { type: integer, format: int32, description: The span the slot rates are averaged over. }
+        subscriptions: { type: array, items: { $ref: '#/components/schemas/Subscription' } }
+        slots: { type: array, items: { $ref: '#/components/schemas/LogicalSlotStats' } }
+    Subscription:
+      type: object
+      description: A subscription of the instance. Its connection string is never read.
+      required: [name, database, owner, enabled, slot_name, publications, apply_worker, sync_workers, last_message_at, apply_errors, sync_errors, conflicts, first_seen, last_seen]
+      properties:
+        name: { type: string }
+        database: { type: string, description: The database the subscription applies changes to. }
+        owner: { type: string }
+        enabled: { type: boolean }
+        slot_name:
+          type: [string, 'null']
+          description: The slot on the publisher; null when slot_name is NONE.
+        publications: { type: array, items: { type: string } }
+        apply_worker: { type: boolean, description: Whether an apply worker runs for it. }
+        sync_workers: { type: integer, format: int32, description: Table synchronization workers running. }
+        last_message_at:
+          oneOf:
+            - { $ref: '#/components/schemas/Timestamp' }
+            - { type: 'null' }
+          description: When the apply worker last heard from the publisher; null without a running worker.
+        apply_errors: { type: integer, format: int64, description: Errors while applying changes, since the statistics were reset. }
+        sync_errors: { type: integer, format: int64, description: Errors while synchronizing tables or sequences, since the statistics were reset. }
+        conflicts:
+          type: [integer, 'null']
+          format: int64
+          description: Conflicts met while applying changes (PostgreSQL 18 and later); null before.
+        first_seen: { $ref: '#/components/schemas/Timestamp' }
+        last_seen: { $ref: '#/components/schemas/Timestamp' }
+    LogicalSlotStats:
+      type: object
+      description: The decoding rates of a logical slot over the window.
+      required: [slot_name, bytes_per_second, txns_per_second, spill_bytes_per_second, spill_txns_per_second, stream_bytes_per_second, last_seen]
+      properties:
+        slot_name: { type: string }
+        bytes_per_second: { type: number, format: double, description: Decoded transaction data sent to the slot's consumer. }
+        txns_per_second: { type: number, format: double }
+        spill_bytes_per_second: { type: number, format: double, description: Decoded data written to disk because it outgrew logical_decoding_work_mem. }
+        spill_txns_per_second: { type: number, format: double }
+        stream_bytes_per_second: { type: number, format: double, description: Decoded data streamed to the consumer before commit. }
+        last_seen: { $ref: '#/components/schemas/Timestamp' }
+    SecurityDefinerFunctionsResponse:
+      type: object
+      required: [instance_id, functions, truncated_databases]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        functions: { type: array, items: { $ref: '#/components/schemas/SecurityDefinerFunction' } }
+        truncated_databases:
+          type: array
+          items: { type: string }
+          description: Databases with more SECURITY DEFINER functions than the agent reports (200); those without a pinned search_path come first.
+    SecurityDefinerFunction:
+      type: object
+      description: A SECURITY DEFINER function or procedure outside extensions.
+      required: [datname, schemaname, name, arguments, signature, kind, language, owner, owner_superuser, public_execute, search_path, pg_temp_last, first_seen, last_seen]
+      properties:
+        datname: { type: string }
+        schemaname: { type: string }
+        name: { type: string }
+        arguments: { type: string }
+        signature: { type: string, description: 'Schema-qualified, quoted name with its identity arguments, as ALTER FUNCTION takes it.' }
+        kind: { type: string, enum: [function, procedure] }
+        language: { type: string }
+        owner: { type: string, description: The role whose privileges the function runs with. }
+        owner_superuser: { type: boolean }
+        public_execute: { type: boolean, description: Whether every role may execute it (the default for a function). }
+        search_path:
+          type: [string, 'null']
+          description: The search_path the function pins; null when it pins none and uses the caller's.
+        pg_temp_last: { type: boolean, description: Whether the pinned search_path names pg_temp last; otherwise the temporary schema is searched first for tables. }
+        first_seen: { $ref: '#/components/schemas/Timestamp' }
+        last_seen: { $ref: '#/components/schemas/Timestamp' }
     DriftValue:
       type: object
       required: [instance_id, role, value]
@@ -1063,6 +1492,324 @@ paths:
                         first_seen: '2026-08-27T01:00:00Z'
                         last_seen: '2026-08-27T02:00:00Z'
                         changed_at: '2026-08-27T01:00:00Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/triggers:
+    get:
+      tags: [instances]
+      operationId: getInstanceTriggers
+      summary: Return the triggers of the instance's databases.
+      description: >-
+        The latest trigger_inventory scrape of each database reported in the
+        last three hours: every user trigger, internal (constraint) triggers
+        only when disabled, and a partition's inherited trigger only when its
+        state differs from its parent's.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - name: datname
+          in: query
+          required: false
+          schema: { type: string }
+          description: Return the triggers of this database only.
+      responses:
+        '200':
+          description: Triggers by database, schema, table and name.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TriggersResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    triggers:
+                      - { datname: app, schemaname: public, relname: orders, name: audit, kind: user, state: disabled, function: public.audit_orders, timing: AFTER, events: INSERT OR UPDATE, level: ROW, constraint: '', constraint_type: '', first_seen: '2026-08-27T01:00:00Z', last_seen: '2026-08-27T02:00:00Z', changed_at: '2026-08-27T01:30:00Z' }
+                    truncated_databases: []
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/unindexed-foreign-keys:
+    get:
+      tags: [instances]
+      operationId: getInstanceUnindexedForeignKeys
+      summary: Return the foreign keys no index serves.
+      description: >-
+        The latest fk_indexes scrape of each database reported in the last
+        three hours. A foreign key is served by a valid, non-partial btree
+        index whose leading key columns are its columns in any order, or by
+        a hash index on its one column. Deleting a referenced row, or
+        updating its key, scans the referencing table when none does.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - name: datname
+          in: query
+          required: false
+          schema: { type: string }
+          description: Return the foreign keys of this database only.
+      responses:
+        '200':
+          description: Unindexed foreign keys by database, schema, table and constraint.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UnindexedForeignKeysResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    foreign_keys:
+                      - { datname: app, schemaname: public, relname: orders, constraint: orders_customer_id_fkey, columns: customer_id, referenced: public.customers, table_bytes: 52428800, first_seen: '2026-08-27T01:00:00Z', last_seen: '2026-08-27T02:00:00Z' }
+                    truncated_databases: []
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/extensions:
+    get:
+      tags: [instances]
+      operationId: getInstanceExtensions
+      summary: Return the extensions installed in each database.
+      description: >-
+        The latest extensions scrape of each database reported in the last
+        three hours, with the version the installed packages would update
+        each extension to.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - name: datname
+          in: query
+          required: false
+          schema: { type: string }
+          description: Return the extensions of this database only.
+      responses:
+        '200':
+          description: Extensions by database and name.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExtensionsResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    extensions:
+                      - { datname: app, name: postgis, schema: public, version: 3.5.2, default_version: 3.6.4, upgrade: available, first_seen: '2026-08-27T01:00:00Z', last_seen: '2026-08-27T02:00:00Z', changed_at: '2026-08-27T01:00:00Z' }
+                    truncated_databases: []
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/spatial-columns:
+    get:
+      tags: [instances]
+      operationId: getInstanceSpatialColumns
+      summary: Return the PostGIS geometry and geography columns.
+      description: >-
+        The latest postgis_columns scrape of each database with PostGIS,
+        reported in the last three hours. Only the catalogs are read: the
+        subtype and SRID come from each column's declared typmod.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - name: datname
+          in: query
+          required: false
+          schema: { type: string }
+          description: Return the spatial columns of this database only.
+      responses:
+        '200':
+          description: Spatial columns by database, schema, table and column.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpatialColumnsResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    columns:
+                      - { datname: app, schemaname: public, relname: parcels, column: geom, type: geometry, subtype: MultiPolygon, srid: 3857, srid_known: true, index_method: '', rows: 250000, first_seen: '2026-08-27T01:00:00Z', last_seen: '2026-08-27T02:00:00Z' }
+                    truncated_databases: []
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/sequences:
+    get:
+      tags: [instances]
+      operationId: getInstanceSequences
+      summary: Return the sequences and how much of their range each has used.
+      description: >-
+        The latest sequences scrape of each database, reported in the last
+        three hours. A sequence's range ends at the nearer of its own bound
+        and the bound of the integer column it feeds. Values are read only
+        where the monitoring role has SELECT on the sequence (tier 1 has it
+        on all); the agent never advances a sequence.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - name: datname
+          in: query
+          required: false
+          schema: { type: string }
+          description: Return the sequences of this database only.
+      responses:
+        '200':
+          description: Sequences by database, schema and name.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SequencesResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    sequences:
+                      - { datname: app, schemaname: public, name: orders_id_seq, data_type: bigint, state: used, start: '1', increment: '1', min: '1', max: '9223372036854775807', cycle: false, last_value: '2000000000', limit: '2147483647', limit_source: column, exhausts: true, used_ratio: 0.931323, remaining: '147483647', table_schema: public, table: orders, column: id, column_type: integer, link: owned, columns: 1, first_seen: '2026-08-27T01:00:00Z', last_seen: '2026-08-27T02:00:00Z', changed_at: '2026-08-27T01:00:00Z' }
+                    truncated_databases: []
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/functions:
+    get:
+      tags: [instances]
+      operationId: getInstanceFunctions
+      summary: Return the busiest tracked functions and each database's function tracking.
+      description: >-
+        Rates averaged over the last hour of function_stats scrapes. Without
+        track_functions = pl or all, a database's functions are not tracked
+        and none are listed for it; its tracking says so.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - name: datname
+          in: query
+          required: false
+          schema: { type: string }
+          description: Return the functions of this database only.
+      responses:
+        '200':
+          description: Functions by self time, then calls.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FunctionsResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    window_seconds: 3600
+                    databases:
+                      - { datname: app, track_functions: pl, tracked_functions: 14, pl_functions: 20, last_seen: '2026-08-27T02:00:00Z' }
+                    functions:
+                      - { datname: app, schemaname: public, name: audit_row, arguments: '', language: plpgsql, calls_per_second: 40.5, total_ms_per_second: 12.2, self_ms_per_second: 11.9, mean_ms: 0.3, last_seen: '2026-08-27T02:00:00Z' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/logical-replication:
+    get:
+      tags: [instances]
+      operationId: getInstanceLogicalReplication
+      summary: Return the subscriptions and the logical slots' decoding rates.
+      description: >-
+        The subscriptions of the latest logical_replication scrape, reported
+        in the last three hours, and each logical slot's decoding rates
+        averaged over the last hour. A subscription's connection string is
+        never read.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+      responses:
+        '200':
+          description: Subscriptions by name; slots by spill rate, then decoding rate.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LogicalReplicationResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    window_seconds: 3600
+                    subscriptions:
+                      - { name: orders_sub, database: app, owner: postgres, enabled: true, slot_name: orders_sub, publications: [orders], apply_worker: true, sync_workers: 0, last_message_at: '2026-08-27T01:59:40Z', apply_errors: 0, sync_errors: 0, conflicts: null, first_seen: '2026-08-27T01:00:00Z', last_seen: '2026-08-27T02:00:00Z' }
+                    slots:
+                      - { slot_name: orders_sub, bytes_per_second: 20480, txns_per_second: 12.5, spill_bytes_per_second: 0, spill_txns_per_second: 0, stream_bytes_per_second: 0, last_seen: '2026-08-27T02:00:00Z' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/internals:
+    get:
+      tags: [instances]
+      operationId: getInstanceInternals
+      summary: Return the WAL directory, database sizes, SLRU caches, temporary files and standby replay.
+      description: >-
+        The latest size of pg_wal; each database's size and its growth over
+        24 hours and 7 days; each SLRU cache's rates and hit ratio, each
+        database's temporary-file rates, and, for an instance that replayed
+        WAL in the window, whether replay is paused, the queries recovery
+        conflicts cancelled by database and reason, and the WAL prefetcher's
+        rates. Rates are averaged over the last hour.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+      responses:
+        '200':
+          description: SLRU caches by hit rate; databases by temporary bytes; conflicts by rate.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InternalsResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    window_seconds: 3600
+                    wal_directory: { bytes: 1073741824, files: 64, observed_at: '2026-08-27T02:00:00Z' }
+                    databases:
+                      - { database: app, size_bytes: 53687091200, observed_at: '2026-08-27T02:00:00Z', growth_24h_bytes: 1073741824, growth_7d_bytes: null }
+                    slru:
+                      - { name: transaction, hit_ratio: 0.999, hits_per_second: 1200, reads_per_second: 1.2, writes_per_second: 0.5, zeroed_per_second: 0.01, flushes_per_second: 0.02, truncates_per_second: 0, exists_per_second: 0, last_seen: '2026-08-27T02:00:00Z' }
+                    temp_files:
+                      - { database: app, files_per_second: 0.2, bytes_per_second: 1048576 }
+                    standby: null
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/security-definer-functions:
+    get:
+      tags: [instances]
+      operationId: getInstanceSecurityDefinerFunctions
+      summary: Return the SECURITY DEFINER functions and procedures.
+      description: >-
+        The latest function_security scrape of each database, reported in
+        the last three hours. Functions of extensions are left out.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - name: datname
+          in: query
+          required: false
+          schema: { type: string }
+          description: Return the functions of this database only.
+      responses:
+        '200':
+          description: SECURITY DEFINER functions by database and signature.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SecurityDefinerFunctionsResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    functions:
+                      - { datname: app, schemaname: public, name: grant_role, arguments: 'r text', signature: 'public.grant_role(r text)', kind: function, language: plpgsql, owner: postgres, owner_superuser: true, public_execute: true, search_path: null, pg_temp_last: false, first_seen: '2026-08-27T01:00:00Z', last_seen: '2026-08-27T02:00:00Z' }
+                    truncated_databases: []
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/partitioned-tables:
+    get:
+      tags: [instances]
+      operationId: getInstancePartitionedTables
+      summary: Return the partitioned tables, each rolled up over its partitions.
+      description: >-
+        The latest partitions scrape of each database, reported in the last
+        three hours. Only the catalogs and pg_stat_user_tables are read, so
+        no table is locked: sizes and rows are the planner's estimates.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - name: datname
+          in: query
+          required: false
+          schema: { type: string }
+          description: Return the partitioned tables of this database only.
+      responses:
+        '200':
+          description: Partitioned tables by database, schema and name.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PartitionedTablesResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    tables:
+                      - { datname: app, schemaname: public, relname: events, strategy: range, partition_key: RANGE (at), partitions: 13, direct_partitions: 13, depth: 1, bytes: 104857600, rows: 2500000, default_partition: public.events_default, default_rows: 1200, invalid_indexes: [], analyzed_at: null, covered_until: '2026-11-01T00:00:00Z', first_seen: '2026-08-27T01:00:00Z', last_seen: '2026-08-27T02:00:00Z' }
+                    truncated_databases: []
         '400': { $ref: '#/components/responses/BadRequest' }
 
   /api/v1/instances/{id}/tables:

@@ -141,10 +141,16 @@ warnings of a run name the others) with `-v pglens_password=...`,
 
 At T0 the agent schedules: `instance_info`, `monitoring_role`, `activity`, `locks`,
 `database_stats`, `settings`, `wal`, `checkpointer`, `archiver`,
-`vacuum_progress`, `replication_slots`, `replication_streaming` on primaries,
-`replication_receiver` on standbys, `table_stats`, `index_stats`, and
-`bloat_estimate`. `io` is scheduled on PostgreSQL 16 and newer. The dedicated
-ASH sampler is available when enabled. `stat_statements` is scheduled when
+`vacuum_progress`, `replication_slots`, `logical_replication`, `replication_streaming` on primaries,
+`replication_receiver` on standbys, `table_stats`, `index_stats`,
+`bloat_estimate`, `trigger_inventory`, `fk_indexes`, `extensions`,
+`postgis_columns`, `sequences`, `partitions`, `function_stats`,
+`function_security`, `wal_directory`, `database_size`, `slru`, and `recovery` (which reports
+only on a standby). At T0 `sequences` sees each sequence's
+type and bounds but reads its value only where the role was granted SELECT
+on it (`GRANT SELECT ON SEQUENCE ... TO pglens`); T1 reads every value.
+Never grant USAGE on a sequence: USAGE allows `nextval()`, which advances it.
+`io` is scheduled on PostgreSQL 16 and newer. The dedicated ASH sampler is available when enabled. `stat_statements` is scheduled when
 `pg_stat_statements` is installed and preloaded; installing that extension is
 an explicit DBA action, not a pglens action.
 

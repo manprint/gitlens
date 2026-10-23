@@ -279,8 +279,8 @@ func TestDatabaseStatsCheck_Scrape_Happy(t *testing.T) {
 		queryFunc: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 			return &mockRows{
 				rows: []([]any){
-					{"postgres", int64(100), int64(5), int64(1000), int64(50000), int64(0), int64(1024), int64(0), int64(3), time.Now()},
-					{"app_db", int64(500), int64(10), int64(2000), int64(100000), int64(1), int64(2048), int64(5), int64(1), time.Now()},
+					{"postgres", int64(100), int64(5), int64(1000), int64(50000), int64(0), int64(1024), int64(2), int64(0), int64(3), time.Now()},
+					{"app_db", int64(500), int64(10), int64(2000), int64(100000), int64(1), int64(2048), int64(4), int64(5), int64(1), time.Now()},
 				},
 			}, nil
 		},

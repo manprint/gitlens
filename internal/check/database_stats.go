@@ -28,6 +28,7 @@ type dbStatRow struct {
 	BlksHit      int64
 	Deadlocks    int64
 	TempBytes    int64
+	TempFiles    int64
 	Conflicts    int64
 	Numbackends  int64
 	StatsReset   *time.Time
@@ -50,6 +51,7 @@ SELECT datname,
        COALESCE(blks_hit,0) AS blks_hit,
        COALESCE(deadlocks,0) AS deadlocks,
        COALESCE(temp_bytes,0) AS temp_bytes,
+       COALESCE(temp_files,0) AS temp_files,
        COALESCE(conflicts,0) AS conflicts,
        COALESCE(numbackends,0) AS numbackends,
        stats_reset
@@ -66,7 +68,7 @@ WHERE datname IS NOT NULL
 		// A scan or stream error used to drop rows silently: the missing
 		// databases' counters then looked like a gap, or a reset, rather
 		// than a failed scrape.
-		if err := rows.Scan(&r.Datname, &r.XactCommit, &r.XactRollback, &r.BlksRead, &r.BlksHit, &r.Deadlocks, &r.TempBytes, &r.Conflicts, &r.Numbackends, &r.StatsReset); err != nil {
+		if err := rows.Scan(&r.Datname, &r.XactCommit, &r.XactRollback, &r.BlksRead, &r.BlksHit, &r.Deadlocks, &r.TempBytes, &r.TempFiles, &r.Conflicts, &r.Numbackends, &r.StatsReset); err != nil {
 			return Result{}, err
 		}
 		parsed = append(parsed, r)
@@ -88,6 +90,9 @@ func buildDatabaseStatsResult(rows []dbStatRow) Result {
 		metrics = append(metrics, pgtype.Metric{Name: "pg_blks_hit_total", Value: float64(r.BlksHit), Kind: pgtype.KindCounter, Labels: labels})
 		metrics = append(metrics, pgtype.Metric{Name: "pg_deadlocks_total", Value: float64(r.Deadlocks), Kind: pgtype.KindCounter, Labels: labels})
 		metrics = append(metrics, pgtype.Metric{Name: "pg_temp_bytes_total", Value: float64(r.TempBytes), Kind: pgtype.KindCounter, Labels: labels})
+		// The number of spills tells many small sorts and hashes that outgrow
+		// work_mem apart from a few large ones writing the same bytes.
+		metrics = append(metrics, pgtype.Metric{Name: "pg_temp_files_total", Value: float64(r.TempFiles), Kind: pgtype.KindCounter, Labels: labels})
 		metrics = append(metrics, pgtype.Metric{Name: "pg_conflicts_total", Value: float64(r.Conflicts), Kind: pgtype.KindCounter, Labels: labels})
 		metrics = append(metrics, pgtype.Metric{Name: "pg_numbackends", Value: float64(r.Numbackends), Kind: pgtype.KindGauge, Labels: labels})
 		if total := r.XactCommit + r.XactRollback; total > 0 {
