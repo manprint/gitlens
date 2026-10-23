@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -899,4 +900,37 @@ func TestSelfMetricRows_SkewIsUnsignedAndOptional(t *testing.T) {
 func TestSelfMetricRows_NoResultsNoRows(t *testing.T) {
 	t.Parallel()
 	require.Empty(t, selfMetricRows(wire.Envelope{SentAt: time.Now()}, wire.Instance{}, "default", 1, uuid.New(), time.Now()))
+}
+
+// TestPipeline_TopologyFallbackStaysInCluster: the single-primary fallback links
+// a standby with an unresolved upstream to the primary of its own cluster only.
+// The primary of another cluster in the same envelope is no upstream of it.
+func TestPipeline_TopologyFallbackStaysInCluster(t *testing.T) {
+	t.Parallel()
+	tx := &recordingTx{}
+	p := NewPipeline(nil, nil)
+	p.pool = &mockPool{beginTx: tx}
+
+	primary := uuid.New()
+	otherClusterStandby := uuid.New()
+	sameClusterStandby := uuid.New()
+	env := wire.Envelope{Instances: []wire.Instance{
+		{InstanceID: primary.String(), ClusterID: pgtype.ClusterID(1).String(), Role: "primary", Addr: "10.0.0.1", Port: 5432},
+		{InstanceID: otherClusterStandby.String(), ClusterID: pgtype.ClusterID(2).String(), Role: "standby", Addr: "10.0.0.2", Port: 5432,
+			TopologyEdges: []wire.Edge{{From: otherClusterStandby.String(), To: "pg-unresolved", Type: "streaming", Confidence: "high"}}},
+		{InstanceID: sameClusterStandby.String(), ClusterID: pgtype.ClusterID(1).String(), Role: "standby", Addr: "10.0.0.3", Port: 5432,
+			TopologyEdges: []wire.Edge{{From: sameClusterStandby.String(), To: "pg-unresolved", Type: "streaming", Confidence: "high"}}},
+	}}
+	_, err := p.Process(context.Background(), env)
+	require.NoError(t, err)
+
+	// Each edge write is (tenant, cluster, from, to, ...).
+	edges := map[uuid.UUID]uuid.UUID{}
+	for _, e := range tx.execs {
+		if strings.Contains(e.sql, "INSERT INTO topology_edges") {
+			edges[e.args[2].(uuid.UUID)] = e.args[3].(uuid.UUID)
+		}
+	}
+	require.NotContains(t, edges, otherClusterStandby, "a standby must not be linked to a primary of another cluster")
+	require.Equal(t, primary, edges[sameClusterStandby], "the fallback still links a standby to the primary of its cluster")
 }

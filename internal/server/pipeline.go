@@ -146,8 +146,14 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		}
 		return addr
 	}
-	var primaryID uuid.UUID
-	primaryCount := 0
+	// The single-primary fallback below is scoped to a cluster: an envelope can
+	// carry instances of several clusters, and the primary of one is no upstream
+	// of a standby in another.
+	type clusterPrimary struct {
+		id    uuid.UUID
+		count int
+	}
+	clusterPrimaries := make(map[pgtype.ClusterID]clusterPrimary)
 	for _, inst := range env.Instances {
 		if inst.Addr == "" {
 		} else if id, err := uuid.Parse(inst.InstanceID); err == nil {
@@ -162,9 +168,11 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 			}
 		}
 		if inst.Role == "primary" {
-			if id, err := uuid.Parse(inst.InstanceID); err == nil {
-				primaryID = id
-				primaryCount++
+			cid, cidErr := pgtype.ParseClusterID(inst.ClusterID)
+			id, idErr := uuid.Parse(inst.InstanceID)
+			if cidErr == nil && idErr == nil {
+				p := clusterPrimaries[cid]
+				clusterPrimaries[cid] = clusterPrimary{id: id, count: p.count + 1}
 			}
 		}
 	}
@@ -248,14 +256,14 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		var topoEdges []topology.Edge
 		for _, we := range inst.TopologyEdges {
 			toID, ok := resolveAddr(ctx, cidDB, we.To, we.Port)
-			if !ok && inst.Role == "standby" && primaryCount == 1 {
+			if p := clusterPrimaries[cid]; !ok && inst.Role == "standby" && p.count == 1 {
 				// A receiver may report the upstream's logical/container hostname
 				// while the agent reaches both databases through a shared address
 				// (for example localhost plus distinct published ports). In that
 				// case the address lookup is intentionally incomplete, but a single
-				// primary in this envelope is an unambiguous upstream for a
-				// standby. Keep the edge instead of silently dropping topology.
-				toID, ok = primaryID, true
+				// primary in this cluster is an unambiguous upstream for a standby.
+				// Keep the edge instead of silently dropping topology.
+				toID, ok = p.id, true
 			}
 			if !ok {
 				continue // unresolvable — no instance in this cluster has ever reported this addr
