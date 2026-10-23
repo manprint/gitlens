@@ -3,6 +3,7 @@ package check
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -22,4 +23,19 @@ func readRelation(ctx context.Context, conn Conn, query string, oid uint32, dest
 		return false, nil
 	}
 	return err == nil, err
+}
+
+// relationProbeReserve is the time one relation probe needs after its lock
+// wait: lock_timeout caps that wait at one second (ApplySessionLimits), and the
+// rest is the round trip.
+const relationProbeReserve = 2 * time.Second
+
+// relationTimeLeft reports whether ctx has room for one more relation probe. A
+// probe that starts with less than that can run into the check's own deadline,
+// and the context error it then returns fails the whole scrape. A check that
+// stops here leaves the relations it did not reach out, and the scrape reports
+// them as partial, as it does for a locked relation.
+func relationTimeLeft(ctx context.Context) bool {
+	deadline, ok := ctx.Deadline()
+	return !ok || time.Until(deadline) > relationProbeReserve
 }

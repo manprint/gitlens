@@ -99,6 +99,9 @@ func (c *bloatEstimateCheck) Scrape(ctx context.Context, t Target) (Result, erro
 	// recomputed from the exact size with the formula of bloat_estimate.sql.
 	reported := make([]cardinality.Candidate, 0, len(sel))
 	for _, candidate := range sel {
+		if !relationTimeLeft(ctx) {
+			break
+		}
 		r := by[candidate.Key]
 		var size *int64
 		ok, e := readRelation(ctx, conn, bloatSizeQuery, r.OID, &size)

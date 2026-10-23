@@ -2,7 +2,9 @@ package check
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -340,6 +342,99 @@ func TestRelationSizes_LockedRelationIsLeftOut(t *testing.T) {
 		require.Equal(t, -1.0, metricValue(r, "pg_bloat_bytes", map[string]string{"schemaname": "public", "relname": "locked", "indexrelname": "", "object_kind": "table", "method": "estimate"}))
 		require.Equal(t, float64(1<<20), metricValue(r, "pg_bloat_bytes", map[string]string{"schemaname": "public", "relname": "open", "indexrelname": "", "object_kind": "table", "method": "estimate"}))
 		require.True(t, r.Partial)
+	})
+}
+
+// TestRelationSizes_StopsBeforeTheDeadline: every size probe waits out its lock,
+// and the relations do not all fit in the check's deadline. The scrape must stop
+// reaching for relations before the deadline and report the rest as partial. A
+// probe that runs into the deadline fails the whole scrape instead.
+func TestRelationSizes_StopsBeforeTheDeadline(t *testing.T) {
+	t.Parallel()
+	const relations = 30
+	const lockWait = 200 * time.Millisecond
+	// probe waits out the lock on every size probe, and counts them.
+	probe := func(sizeQuery string, probes *atomic.Int64) func(context.Context, string, ...any) pgx.Row {
+		return func(ctx context.Context, sql string, _ ...any) pgx.Row {
+			switch {
+			case sql == "SELECT now()":
+				return &mockRow{vals: []any{time.Now()}}
+			case sql == sizeQuery:
+				probes.Add(1)
+				select {
+				case <-ctx.Done():
+					return &mockRow{err: ctx.Err()}
+				case <-time.After(lockWait):
+					return &mockRow{err: &pgconn.PgError{Code: pgLockNotAvailable}}
+				}
+			}
+			return &mockRow{vals: []any{int64(0)}}
+		}
+	}
+	deadline := func(t *testing.T) context.Context {
+		ctx, cancel := context.WithTimeout(context.Background(), relationProbeReserve+500*time.Millisecond)
+		t.Cleanup(cancel)
+		return ctx
+	}
+	t.Run("table_stats", func(t *testing.T) {
+		var probes atomic.Int64
+		conn := &mockConn{
+			queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+				if !strings.Contains(sql, "pg_stat_user_tables") {
+					return &mockRows{}, nil
+				}
+				rows := make([][]any, 0, relations)
+				for i := range relations {
+					rows = append(rows, tableStatsFixture(fmt.Sprintf("t%d", i), uint32(i+1)))
+				}
+				return &mockRows{rows: rows}, nil
+			},
+			queryRowFunc: probe(tableSizesQuery, &probes),
+		}
+		r, err := (&tableStatsCheck{selectors: maintenanceCardinality()}).Scrape(deadline(t), maintenanceTarget(conn))
+		require.NoError(t, err)
+		require.True(t, r.Partial)
+		require.Less(t, probes.Load(), int64(relations), "the scrape must stop before the deadline")
+	})
+	t.Run("index_stats", func(t *testing.T) {
+		var probes atomic.Int64
+		conn := &mockConn{
+			queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+				if !strings.Contains(sql, "pg_stat_user_indexes") {
+					return &mockRows{}, nil
+				}
+				rows := make([][]any, 0, relations)
+				for i := range relations {
+					rows = append(rows, indexStatsFixture(fmt.Sprintf("i%d", i), uint32(i+1)))
+				}
+				return &mockRows{rows: rows}, nil
+			},
+			queryRowFunc: probe(indexDefinitionQuery, &probes),
+		}
+		r, err := (&indexStatsCheck{selectors: maintenanceCardinality()}).Scrape(deadline(t), maintenanceTarget(conn))
+		require.NoError(t, err)
+		require.True(t, r.Partial)
+		require.Less(t, probes.Load(), int64(relations), "the scrape must stop before the deadline")
+	})
+	t.Run("bloat_estimate", func(t *testing.T) {
+		var probes atomic.Int64
+		conn := &mockConn{
+			queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+				if !strings.Contains(sql, "pg_stats") {
+					return &mockRows{}, nil
+				}
+				rows := make([][]any, 0, relations)
+				for i := range relations {
+					rows = append(rows, bloatFixture(fmt.Sprintf("t%d", i), uint32(i+1)))
+				}
+				return &mockRows{rows: rows}, nil
+			},
+			queryRowFunc: probe(bloatSizeQuery, &probes),
+		}
+		r, err := (&bloatEstimateCheck{selectors: maintenanceCardinality()}).Scrape(deadline(t), maintenanceTarget(conn))
+		require.NoError(t, err)
+		require.True(t, r.Partial)
+		require.Less(t, probes.Load(), int64(relations), "the scrape must stop before the deadline")
 	})
 }
 
