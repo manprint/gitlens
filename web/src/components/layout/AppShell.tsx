@@ -7,9 +7,10 @@ import { Sidebar } from './Sidebar'
 
 export function AppShell() {
   const mainRef = useRef<HTMLElement>(null)
-  // The fleet poll runs on every page, so the header can report reachability
-  // and data age wherever the operator is. The query is shared with the fleet
-  // page, so this adds no requests of its own.
+  // The header reports reachability and data age wherever the operator is. The
+  // fleet, cluster, instance and settings pages already poll this query, so they
+  // share it. On the other pages the shell adds its own poll of GET
+  // /api/v1/clusters every 15 seconds.
   const fleet = useClusters()
   const connection = {
     lastPollFailed: fleet.isError,
