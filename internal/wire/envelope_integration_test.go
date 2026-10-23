@@ -71,6 +71,9 @@ func normalizeEnvelope(env *wire.Envelope) *wire.Envelope {
 		// Zero address/port (these come from test container config)
 		normInst.Addr = ""
 		normInst.Port = 0
+		// Keep the major only: an image bump changes the minor, not the
+		// payload's shape.
+		normInst.PGVersion = inst.PGVersion / 10000 * 10000
 
 		// Normalize results
 		normInst.Results = make([]wire.Result, len(inst.Results))
