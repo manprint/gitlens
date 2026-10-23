@@ -424,10 +424,13 @@ func waitAdvisorExact(ctx context.Context, e *scenario.Env, instanceID string, w
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	var last []string
+	var lastFindings []map[string]interface{}
 	for {
 		findings, err := advisorFindings(ctx, e, instanceID, "")
 		if err == nil {
+			findings = withoutAwaitingMonitoringRole(findings)
 			last = advisorIDs(findings)
+			lastFindings = findings
 			open := true
 			for _, finding := range findings {
 				if stringValue(finding["state"]) != "open" {
@@ -443,7 +446,7 @@ func waitAdvisorExact(ctx context.Context, e *scenario.Env, instanceID string, w
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-deadline.C:
-			return fmt.Errorf("advisor exact set mismatch: got %v want %v (last error: %v)", last, want, err)
+			return fmt.Errorf("advisor exact set mismatch: got %v want %v (unexpected: %s; last error: %v)", last, want, advisorUnexpected(lastFindings, want), err)
 		case <-ticker.C:
 		}
 	}
@@ -523,6 +526,51 @@ func waitAdvisorResolved(ctx context.Context, e *scenario.Env, instanceID string
 		case <-ticker.C:
 		}
 	}
+}
+
+// monitoringRoleNeverReported is the degraded reason the advisor gives a
+// security.monitoring_role_* finding while no monitoring_role fact exists
+// (internal/advisor/rules_security.go). The stale-fact reason appends a
+// duration to it and is not filtered.
+const monitoringRoleNeverReported = "the monitoring_role check has not reported"
+
+// withoutAwaitingMonitoringRole drops the security findings that are degraded
+// only because the monitoring_role check has never reported yet. The agent runs
+// that check every ten minutes from a random offset within the interval, so a
+// stack that is minutes old may not have its fact. A read-only role raises no
+// security finding once the check reports, so a security finding that is open,
+// or degraded for another reason, still reaches the exact-set comparison.
+func withoutAwaitingMonitoringRole(findings []map[string]interface{}) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(findings))
+	for _, finding := range findings {
+		id := stringValue(finding["rule_id"])
+		awaiting := strings.HasPrefix(id, "security.monitoring_role_") &&
+			stringValue(finding["state"]) == "degraded" &&
+			stringValue(finding["degraded_reason"]) == monitoringRoleNeverReported
+		if awaiting {
+			continue
+		}
+		out = append(out, finding)
+	}
+	return out
+}
+
+// advisorUnexpected describes each finding outside want, with its state, its
+// detail and its evidence, so a mismatch names what the advisor reported.
+func advisorUnexpected(findings []map[string]interface{}, want []string) string {
+	wanted := make(map[string]bool, len(want))
+	for _, id := range want {
+		wanted[id] = true
+	}
+	var parts []string
+	for _, finding := range findings {
+		id := stringValue(finding["rule_id"])
+		if wanted[id] {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s [%s] %s evidence=%v", id, stringValue(finding["state"]), stringValue(finding["detail"]), finding["evidence"]))
+	}
+	return strings.Join(parts, "; ")
 }
 
 func advisorIDs(findings []map[string]interface{}) []string {

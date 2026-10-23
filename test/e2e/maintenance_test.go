@@ -95,6 +95,13 @@ func runBloatMaintenance(ctx context.Context, e *scenario.Env) error {
 	if err := deleteMaintenanceRows(ctx, pg); err != nil {
 		return err
 	}
+	// The estimate reads pg_stats, which shows only the columns the monitoring
+	// role may SELECT, and a table with hidden columns gets no estimate at all
+	// (bloat_estimate.sql). The Tier 0 role reads no user data, so the probe is
+	// granted to it here: the scenario tests the estimate, not the read tier.
+	if _, err := pg.Exec(ctx, "GRANT SELECT ON "+maintenanceTable+" TO pglens"); err != nil {
+		return fmt.Errorf("grant monitoring role read on probe: %w", err)
+	}
 	if err := waitForBloat(ctx, e, instanceID); err != nil {
 		return fmt.Errorf("estimated bloat: %w", err)
 	}
@@ -243,7 +250,10 @@ func waitForTableRatio(ctx context.Context, e *scenario.Env, instanceID string, 
 		if err != nil {
 			return false, err
 		}
-		payload, err := e.API.Get("/api/v1/instances/" + instanceID + "/tables?order=dead_ratio&limit=5")
+		// The API returns the top rows by dead ratio. Once VACUUM brings the
+		// probe to zero it ties with most relations, so a small limit drops it
+		// from the page for good; ask for the server's cap instead.
+		payload, err := e.API.Get("/api/v1/instances/" + instanceID + "/tables?order=dead_ratio&limit=500")
 		if err != nil {
 			return false, err
 		}

@@ -220,15 +220,24 @@ func runCommandGates(ctx context.Context, e *scenario.Env) error {
 	if err != nil {
 		return err
 	}
-	if len(audit) != 3 {
-		return fmt.Errorf("restrictive instance audit rows=%d, want 3", len(audit))
-	}
+	requested, outcomes := splitCommandAudit(audit)
 	wantOutcomes := map[string]string{
 		"explain":     "rejected",
 		"cancel":      "error",
 		"pgstattuple": "error",
 	}
-	for _, item := range audit {
+	if len(requested) != len(wantOutcomes) {
+		return fmt.Errorf("restrictive instance requested rows=%d, want %d (one per enqueued command)", len(requested), len(wantOutcomes))
+	}
+	for _, item := range requested {
+		if _, ok := wantOutcomes[commandStringValue(item["kind"])]; !ok {
+			return fmt.Errorf("restrictive requested row=%v names an unexpected kind", item)
+		}
+	}
+	if len(outcomes) != len(wantOutcomes) {
+		return fmt.Errorf("restrictive instance outcome rows=%d, want %d", len(outcomes), len(wantOutcomes))
+	}
+	for _, item := range outcomes {
 		kind := commandStringValue(item["kind"])
 		if want, ok := wantOutcomes[kind]; !ok || commandStringValue(item["outcome"]) != want {
 			return fmt.Errorf("restrictive audit row=%v, want %s outcome=%s", item, kind, wantOutcomes[kind])
@@ -305,8 +314,16 @@ func runCommandRestart(ctx context.Context, e *scenario.Env) error {
 	if err != nil {
 		return err
 	}
-	if len(audit) != 1 || commandStringValue(audit[0]["outcome"]) != "rejected" {
-		return fmt.Errorf("restart command audit=%v, want one rejected stale-result row", audit)
+	// The claim token survives expiry, so a late result carrying it is audited
+	// with the outcome the agent reported, after the expiry row. The request is
+	// refused above all the same.
+	_, outcomes := splitCommandAudit(audit)
+	counts := map[string]int{}
+	for _, item := range outcomes {
+		counts[commandStringValue(item["outcome"])]++
+	}
+	if len(outcomes) != 2 || counts["expired"] != 1 || counts["ok"] != 1 {
+		return fmt.Errorf("restart command outcome rows=%v, want one expired row and one ok row for the late result", outcomes)
 	}
 	return nil
 }
@@ -342,10 +359,27 @@ func runCommandExpiry(ctx context.Context, e *scenario.Env) error {
 	if err != nil {
 		return err
 	}
-	if len(audit) != 0 {
-		return fmt.Errorf("never-delivered expired command created audit rows: %d", len(audit))
+	requested, outcomes := splitCommandAudit(audit)
+	if len(requested) != 1 || len(outcomes) != 1 || commandStringValue(outcomes[0]["outcome"]) != "expired" {
+		return fmt.Errorf("never-delivered expired command audit requested=%d outcomes=%v, want one requested row and one expired row", len(requested), outcomes)
+	}
+	if !strings.Contains(commandStringValue(outcomes[0]["detail"]), "before the agent claimed") {
+		return fmt.Errorf("never-delivered expiry detail=%v, want it to say the agent never claimed the command", outcomes[0]["detail"])
 	}
 	return nil
+}
+
+// splitCommandAudit separates the requested rows, written when a command is
+// enqueued, from the rows that record what happened to it afterwards.
+func splitCommandAudit(audit []map[string]any) (requested, outcomes []map[string]any) {
+	for _, item := range audit {
+		if commandStringValue(item["outcome"]) == "requested" {
+			requested = append(requested, item)
+			continue
+		}
+		outcomes = append(outcomes, item)
+	}
+	return requested, outcomes
 }
 
 func commandInstance(ctx context.Context, e *scenario.Env, addr string) (string, error) {
