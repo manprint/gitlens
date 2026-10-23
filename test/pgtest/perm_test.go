@@ -5,6 +5,7 @@ package pgtest
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -110,14 +111,17 @@ func TestPerm_INT_PERM_005(t *testing.T) {
 }
 
 func TestPerm_INT_PERM_006(t *testing.T) {
-	// Only meaningful under rds-like profile, but we test that failure is clean when revoked
 	ForEach(t, func(t *testing.T, pg *PG) {
 		pg.Lock(t)
 		pool := pg.Pool(t, "app", RoleT0)
 		_, err := pool.Exec(context.Background(), "SELECT pg_ls_waldir()")
-		if err != nil {
-			// Should be clean SQLSTATE, not panic
-			require.True(t, isSQLState(err, "42501") || strings.Contains(err.Error(), "permission") || strings.Contains(err.Error(), "function"), "expected permission error, got %v", err)
+		// The rds-like profile revokes pg_ls_waldir() from pg_monitor, the role
+		// T0 holds it through, so the call must fail with a clean SQLSTATE
+		// there. Vanilla keeps the default grant, and the call must succeed.
+		if os.Getenv("PGLENS_PG_PROFILE") == "rds-like" {
+			require.True(t, isSQLState(err, "42501"), "expected 42501 under rds-like, got %v", err)
+		} else {
+			require.NoError(t, err)
 		}
 	})
 }
