@@ -1362,7 +1362,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Topology graph and failover events. */
+            /** @description Topology graph and the 100 newest failover events, newest first. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1731,7 +1731,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Fixed-step series; missing intervals are null, never zero or interpolated. A bucket holding several samples of the series carries their mean. */
+            /** @description Fixed-step series; missing intervals are null, never zero or interpolated. A bucket holding several samples of the series carries their mean. A counter metric, such as pg_xact_commit_total, is stored under its own name as a per-second rate, so its values are rates and not the cumulative count. */
             200: {
                 headers: {
                     [name: string]: unknown;

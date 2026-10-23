@@ -1223,7 +1223,12 @@ paths:
           description: Go duration string; a step producing more than 10000 points returns 422.
       responses:
         '200':
-          description: Fixed-step series; missing intervals are null, never zero or interpolated. A bucket holding several samples of the series carries their mean.
+          description: >-
+            Fixed-step series; missing intervals are null, never zero or
+            interpolated. A bucket holding several samples of the series carries
+            their mean. A counter metric, such as pg_xact_commit_total, is
+            stored under its own name as a per-second rate, so its values are
+            rates and not the cumulative count.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/MetricsResponse' }

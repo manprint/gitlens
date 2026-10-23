@@ -375,6 +375,18 @@ func TestOpenAPIAlertRuleExampleMatchesTheServer(t *testing.T) {
 	}
 }
 
+// A counter is stored under its own name as a per-second rate, and the query
+// returns the stored value. A client that reads it as the cumulative count
+// would chart the rate as a total, so the document must say it is a rate.
+func TestOpenAPIMetricsQueryDocumentsCounterRates(t *testing.T) {
+	paths := loadOpenAPIDocument(t)["paths"].(map[string]any)
+	get := paths["/api/v1/metrics/query"].(map[string]any)["get"].(map[string]any)
+	ok := get["responses"].(map[string]any)["200"].(map[string]any)
+	if description, _ := ok["description"].(string); !strings.Contains(description, "per-second rate") {
+		t.Errorf("GET /api/v1/metrics/query 200 must say counters are per-second rates, got %q", description)
+	}
+}
+
 func loadOpenAPIDocument(t *testing.T) map[string]any {
 	t.Helper()
 	_, filename, _, ok := runtime.Caller(0)
