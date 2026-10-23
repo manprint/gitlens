@@ -92,6 +92,33 @@ func (inv *Inventory) IsRevoked(ctx context.Context, agentID string) (bool, erro
 	return revokedAt != nil, nil
 }
 
+// OwnerRevoked reports whether the agent recorded as the owner of any of the
+// instances has a non-null agents.revoked_at. The envelope's agent_id is
+// self-reported under the shared bootstrap token, so a revoked host can leave
+// it out or name another agent; the owner recorded for an instance is what a
+// revocation applies to. Instances that are not yet known have no owner to
+// check. A nil pool never reports revoked, like IsRevoked.
+func (inv *Inventory) OwnerRevoked(ctx context.Context, instances []wire.Instance) (bool, error) {
+	if inv.pool == nil {
+		return false, nil
+	}
+	ids := make([]uuid.UUID, 0, len(instances))
+	for _, inst := range instances {
+		if id, err := uuid.Parse(inst.InstanceID); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return false, nil
+	}
+	var revoked bool
+	err := inv.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM instances i JOIN agents a ON a.agent_id=i.agent_id WHERE i.instance_id = ANY($1) AND a.revoked_at IS NOT NULL)`, ids).Scan(&revoked)
+	if err != nil {
+		return false, fmt.Errorf("query instance owner revoked_at: %w", err)
+	}
+	return revoked, nil
+}
+
 // upsertOne handles a single wire Instance.
 func (inv *Inventory) upsertOne(ctx context.Context, tenantID string, agentID uuid.UUID, inst wire.Instance) error {
 	// Parse and validate cluster_id.

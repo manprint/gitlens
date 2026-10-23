@@ -131,10 +131,15 @@ func IngestHandler(auth *Auth, inv *Inventory, pipeline *Pipeline) http.HandlerF
 		// token above: that token authenticates "this is a pglens
 		// agent," not which one — per-agent revocation (`agents.
 		// revoked_at`) needs the envelope's own agent_id, only known
-		// once the body is decoded. A distinct body (rather than a
-		// generic 401) lets the agent tell "revoked" apart from "bad
-		// token" (internal/agent/pusher.go's pushOne).
+		// once the body is decoded, and the owner of each pushed
+		// instance, because the agent_id can be left out or changed. A
+		// distinct body (rather than a generic 401) lets the agent tell
+		// "revoked" apart from "bad token" (internal/agent/pusher.go's
+		// pushOne).
 		revoked, err := inv.IsRevoked(ctx, env.AgentID)
+		if err == nil && !revoked {
+			revoked, err = inv.OwnerRevoked(ctx, env.Instances)
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "revocation check failed", err.Error())
 			return

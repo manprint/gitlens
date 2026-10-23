@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/manprint/pglens/internal/wire"
 	"github.com/stretchr/testify/require"
 )
@@ -56,6 +57,36 @@ func TestIngest_RejectsRevokedAgent(t *testing.T) {
 	h.ServeHTTP(w, req)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 	require.Contains(t, w.Body.String(), "revoked")
+}
+
+// TestIngest_RejectsRevokedInstanceOwner: the agent_id is self-reported, so a
+// revoked host that leaves it out, or names another agent, is still refused
+// when the instance it pushes is owned by a revoked agent.
+func TestIngest_RejectsRevokedInstanceOwner(t *testing.T) {
+	t.Parallel()
+	for name, agentID := range map[string]string{"omitted": "", "other agent": uuid.NewString()} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			auth := NewAuth("token")
+			// The envelope's own agent, when it names one, is unknown, so not
+			// revoked; the owner of the instance is revoked.
+			pool := &mockPool{queryRowVals: []*mockRow{{err: pgx.ErrNoRows}, {vals: []any{true}}}}
+			if agentID == "" {
+				pool.queryRowVals = pool.queryRowVals[1:]
+			}
+			inv := &Inventory{pool: pool}
+			h := IngestHandler(auth, inv, NewPipeline(nil, nil))
+			env := wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: agentID, SentAt: time.Now(),
+				Instances: []wire.Instance{{InstanceID: uuid.NewString()}}}
+			body, _ := json.Marshal(env)
+			req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
+			req.Header.Set("Authorization", "Bearer token")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			require.Equal(t, http.StatusUnauthorized, w.Code)
+			require.Contains(t, w.Body.String(), "revoked")
+		})
+	}
 }
 
 func TestIngest_RejectsStaleEnvelope(t *testing.T) {

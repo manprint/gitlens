@@ -180,3 +180,54 @@ func TestIngest_INT_INGEST_002_IdempotentPush(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, metricsCount1, metricsCount2, "metrics row count must remain the same after resubmitting an identical envelope (I-3)")
 }
+
+// INT-INGEST-003: once the agent that owns an instance is revoked, a push for
+// that instance is refused with 401 whatever agent_id it carries (none, or
+// another agent's), while an instance owned by an agent that is not revoked
+// is still accepted.
+func TestIngest_INT_INGEST_003_RevokedOwnerRefusesPush(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+
+	auth := NewAuth("test-token")
+	inv := NewInventory(pool)
+	pipeline := NewPipeline(pool, nil)
+	api := NewAPI(pool)
+	topoAPI := NewTopologyAPI(pool)
+	ashAPI := NewAshAPI(pool)
+	router := NewRouter(UIConfig{}, nil, nil, auth, inv, pipeline, api, topoAPI, ashAPI)
+
+	push := func(agentID, instanceID string) *httptest.ResponseRecorder {
+		env := wire.Envelope{
+			ProtocolVersion: wire.ProtocolVersion,
+			AgentID:         agentID,
+			SentAt:          time.Now(),
+			Instances: []wire.Instance{{
+				InstanceID: instanceID,
+				ClusterID:  pgtype.ClusterID(444555666).String(),
+				Role:       "primary",
+			}},
+		}
+		body, err := json.Marshal(env)
+		require.NoError(t, err)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/push", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer test-token")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	owner := uuid.NewString()
+	instID := uuid.NewString()
+	require.Equal(t, http.StatusAccepted, push(owner, instID).Code)
+	_, err := pool.Exec(context.Background(), `UPDATE agents SET revoked_at = now() WHERE agent_id = $1`, owner)
+	require.NoError(t, err)
+
+	for name, agentID := range map[string]string{"omitted": "", "other agent": uuid.NewString()} {
+		rec := push(agentID, instID)
+		require.Equal(t, http.StatusUnauthorized, rec.Code, name)
+		require.Contains(t, rec.Body.String(), "revoked", name)
+	}
+
+	require.Equal(t, http.StatusAccepted, push(uuid.NewString(), uuid.NewString()).Code, "an unrevoked owner is not refused")
+}
