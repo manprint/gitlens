@@ -174,6 +174,76 @@ func TestINTALERT015_NewTermStartsFromTheTable(t *testing.T) {
 	})
 }
 
+// ruleChannel reports the messages of one rule to a phaseRecorder. The integration
+// source samples every metric rule, so the builtin rules fire too, and they are
+// not what this test is about.
+type ruleChannel struct {
+	rule string
+	rec  *phaseRecorder
+}
+
+func (c ruleChannel) Name() string { return "slack" }
+func (c ruleChannel) Send(ctx context.Context, m notify.Message) error {
+	if m.RuleID != c.rule {
+		return nil
+	}
+	return recordingChannel{rec: c.rec}.Send(ctx, m)
+}
+
+// TestINTALERT019_ALeaderChangeDoesNotSendAnOverruledFiring — the first engine
+// fails to send a FIRING and loses the lock. The second engine, with its own
+// notifier, resolves the alert once the channel is back. When the first engine
+// leads again its queue still holds the FIRING, but the table shows the alert
+// resolved, so the FIRING is dropped and the channel's last message is RESOLVED.
+func TestINTALERT019_ALeaderChangeDoesNotSendAnOverruledFiring(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		ctx, pool, src, clk, _, _, _ := setupEngineIntegration(t, pg)
+		st := NewPgStore(pool)
+		rec := &phaseRecorder{down: true}
+		first := NewEngineWithInterval(pool, clk, 30*time.Second, st, NewChannelNotifier(st, ruleChannel{rule: "integration.rule", rec: rec}), []Source{src})
+		second := NewEngineWithInterval(pool, clk, 30*time.Second, st, NewChannelNotifier(st, ruleChannel{rule: "integration.rule", rec: rec}), []Source{src})
+		t.Cleanup(first.Stop)
+		t.Cleanup(second.Stop)
+		require.NoError(t, first.Tick(ctx))
+		src.set(20, clk.Now())
+		require.NoError(t, first.Tick(ctx))
+		clk.Advance(31 * time.Second)
+		require.Error(t, first.Tick(ctx), "the channel is down, so the FIRING is refused")
+		require.Empty(t, rec.got)
+
+		// The first engine's session ends, which releases the advisory lock with it.
+		first.mu.Lock()
+		session := first.conn.Conn()
+		first.mu.Unlock()
+		require.NoError(t, session.Close(ctx))
+
+		// The channel is back. The second engine leads, sees the condition clear
+		// and resolves the episode.
+		rec.down = false
+		src.set(5, clk.Now())
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			require.NoError(t, second.Tick(ctx))
+			second.mu.Lock()
+			led := second.hasLock
+			second.mu.Unlock()
+			if led {
+				break
+			}
+			require.True(t, time.Now().Before(deadline), "the second engine never acquired the lock")
+			time.Sleep(10 * time.Millisecond)
+		}
+		second.Stop()
+		require.Equal(t, []string{"resolve"}, rec.got)
+
+		// The first engine leads again. Its queue still holds the FIRING.
+		clk.Advance(time.Minute)
+		src.set(5, clk.Now())
+		require.NoError(t, first.Tick(ctx))
+		require.Equal(t, []string{"resolve"}, rec.got, "the FIRING the first engine failed to send is obsolete")
+	})
+}
+
 // TestINTALERT018_SpellClosesAfterARestartDuringTheOutage — the engine that
 // opened an instance_unreachable spell is replaced while the instance is still
 // down. The instance then reports again, and no instance_reachable event is

@@ -162,6 +162,21 @@ func (e *Evaluator) Checkpoint(key string) (undo func()) {
 	}
 }
 
+// Firing returns the episodes that are firing now, as copies. After a Restore
+// they are what the table held firing when the term began, and after a pass
+// they follow every transition this process made.
+func (e *Evaluator) Firing() []Alert {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var out []Alert
+	for _, st := range e.states {
+		if st.firing {
+			out = append(out, st.alert)
+		}
+	}
+	return out
+}
+
 // Unsampled returns the episodes of the rules that include selects whose
 // subject was last sampled before cutoff. A subject sampled in the pass that
 // runs at cutoff is not selected, so a cutoff equal to that pass's own time

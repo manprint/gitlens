@@ -43,10 +43,12 @@ type channelNotifier struct {
 }
 
 // pendingDelivery is a message that a channel did not accept. It is sent again
-// on the first pass after the one in which it failed. The queue lives in
-// memory: a restart or a change of leader drops it. A failed send stays on
-// record in the claim row; an unclaimed delivery has no row, so its drop is
-// reported instead.
+// on the first pass after the one in which it failed, unless Settle drops it
+// first because its alert has moved past it. The queue lives in memory: a
+// restart drops it, while a change of leader in the same process keeps the
+// entries that the table still owes, and those are sent late. A failed send
+// stays on record in the claim row; an unclaimed delivery has no row, so its
+// drop is reported instead.
 type pendingDelivery struct {
 	dedupID string
 	channel notify.Channel
@@ -171,6 +173,52 @@ func (n *channelNotifier) Retry(ctx context.Context) error {
 	n.passes++
 	n.mu.Unlock()
 	return errors.Join(errs...)
+}
+
+// Settle drops the pending deliveries that their alerts have moved past. firing
+// holds the episodes that are firing now. A FIRING is still owed only while its
+// own episode is firing, and a firing episode of the same alert that started
+// later makes an older delivery of it obsolete. This covers a RESOLVED that
+// this process sent, a RESOLVED that another replica sent while this one was
+// not leader, and a RESOLVED that a silence kept from the channels. The
+// evaluator follows all of them, because it is restored from the table when a
+// term begins.
+func (n *channelNotifier) Settle(firing []Alert) {
+	n.dropPending(func(d pendingDelivery) bool {
+		owed := false
+		for _, a := range firing {
+			if a.Key != d.alert.Key {
+				continue
+			}
+			if startOf(a).After(startOf(d.alert)) {
+				return true
+			}
+			owed = owed || startOf(a).Equal(startOf(d.alert))
+		}
+		return d.phase == "fire" && !owed
+	})
+}
+
+// startOf is the start of an alert's episode at the precision the table keeps.
+// The table stores microseconds, so an episode read back from it starts up to
+// a microsecond before the copy this process queued.
+func startOf(a Alert) time.Time { return a.StartedAt.Truncate(time.Microsecond) }
+
+// dropPending removes the pending deliveries that drop selects. A dropped
+// delivery is logged, not counted as an attempt and not reported as
+// undelivered, since nothing failed: it is obsolete.
+func (n *channelNotifier) dropPending(drop func(pendingDelivery) bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	kept := n.pending[:0]
+	for _, d := range n.pending {
+		if drop(d) {
+			log.Printf("alert notifier: %s on %s (%s) dropped: its alert has moved on", d.dedupID, d.channel.Name(), d.phase)
+			continue
+		}
+		kept = append(kept, d)
+	}
+	n.pending = kept
 }
 
 // deliver makes one attempt at a delivery and records it. A failed attempt is

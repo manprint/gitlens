@@ -95,6 +95,13 @@ type retrier interface {
 	Retry(context.Context) error
 }
 
+// settler is implemented by a notifier that keeps failed deliveries. Settle is
+// given the episodes firing now, so that a delivery the alerts have moved past
+// is dropped before Retry makes it again.
+type settler interface {
+	Settle(firing []Alert)
+}
+
 // purger is implemented by a store that can remove the history older than a
 // cutoff. A store that cannot keeps its history.
 type purger interface {
@@ -422,8 +429,13 @@ func (e *Engine) Tick(ctx context.Context) error {
 		errs = append(errs, err)
 	}
 	// The retries come last, so that a channel which hangs cannot take the
-	// time the rules need.
+	// time the rules need. Before they run, the deliveries that this pass or
+	// the table has overtaken are dropped, so no channel is sent a state that
+	// its alert has already left.
 	if r, ok := e.notifier.(retrier); ok {
+		if s, ok := e.notifier.(settler); ok {
+			s.Settle(e.eval.Firing())
+		}
 		if err := r.Retry(ctx); err != nil {
 			errs = append(errs, err)
 		}
