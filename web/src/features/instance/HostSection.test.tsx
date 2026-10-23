@@ -22,7 +22,11 @@ async function settle() {
   })
 }
 
-function renderHost(data: Schemas['HostResponse']) {
+// The server answers with each host metric as a top-level key, which the
+// generated schema does not list.
+type HostFixture = Schemas['HostResponse'] & Record<string, unknown>
+
+function renderHost(data: HostFixture) {
   server.use(ok('getInstanceHost', data))
   return renderWithProviders(<HostSection instanceId={INSTANCE_ID} />, {
     route: `/instances/${INSTANCE_ID}`,
@@ -37,13 +41,11 @@ describe('HostSection', () => {
       source: 'cgroup_v2',
       sampled_at: NOW,
       stale: false,
-      metrics: {
-        host_cpu_used_ratio: 0.25,
-        host_cpu_count: 4,
-        host_mem_total_bytes: 8 * 1024 ** 3,
-        host_load1: 0.42,
-        host_disk_free_bytes: 5 * 1024 ** 3,
-      },
+      host_cpu_used_ratio: 0.25,
+      host_cpu_count: 4,
+      host_mem_total_bytes: 8 * 1024 ** 3,
+      host_load1: 0.42,
+      host_disk_free_bytes: 5 * 1024 ** 3,
     })
     await settle()
 
@@ -58,12 +60,12 @@ describe('HostSection', () => {
       instance_id: INSTANCE_ID,
       available: true,
       source: 'host',
-      metrics: { host_mem_total_bytes: 1024 },
+      host_mem_total_bytes: 1024,
     })
     await settle()
 
     expect(screen.getByRole('article', { name: 'Memory available' })).toHaveTextContent('—')
-    expect(screen.getByRole('article', { name: 'CPU used' })).toHaveTextContent('—')
+    expect(screen.getByRole('article', { name: 'CPU used (host-wide)' })).toHaveTextContent('—')
   })
 
   it('UI-INST-032 renders an unavailable response as degraded with the exact reason', async () => {
@@ -88,12 +90,28 @@ describe('HostSection', () => {
       instance_id: INSTANCE_ID,
       available: true,
       source: 'cgroup_v2',
-      metrics: { host_mem_total_bytes: 4 * 1024 ** 3 },
+      host_mem_total_bytes: 4 * 1024 ** 3,
     })
     await settle()
 
     expect(screen.getByText('cgroup_v2')).toBeInTheDocument()
     expect(screen.getByText('4.0 GiB')).toBeInTheDocument()
+  })
+
+  it('UI-INST-066 names the container limit in the CPU label only for a cgroup source', async () => {
+    renderHost({
+      instance_id: INSTANCE_ID,
+      available: true,
+      source: 'cgroup_v1',
+      host_cpu_used_ratio: 0.3,
+    })
+    await settle()
+
+    expect(
+      screen.getByRole('article', {
+        name: 'CPU used (of container CPU limit, or host if none set)',
+      }),
+    ).toHaveTextContent('30.0%')
   })
 
   it('UI-INST-034 keeps the host section visible when metrics are unavailable', async () => {
@@ -114,7 +132,7 @@ describe('HostSection', () => {
       available: true,
       source: 'host',
       host_cpu_used_ratio: 0.5,
-    } as Schemas['HostResponse'] & { host_cpu_used_ratio: number })
+    })
     await settle()
 
     expect(screen.getByText('50.0%')).toBeInTheDocument()
