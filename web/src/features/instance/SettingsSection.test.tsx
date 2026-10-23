@@ -110,4 +110,28 @@ describe('SettingsSection', () => {
       screen.getByText('No observed setting changes match the selected time range and search.'),
     ).toBeInTheDocument()
   })
+
+  it('UI-INST-047 keeps the durability posture when nothing changed in the range', async () => {
+    const fsyncOff = setting({ name: 'fsync', value: 'off', changed_at: '2026-08-07T12:00:00Z' })
+    server.use(
+      http.get('/api/v1/instances/:id/settings', ({ request }) => {
+        // Like the server, drop the settings changed before changed_since.
+        const changedSince = new URL(request.url).searchParams.get('changed_since')
+        const settings = [fsyncOff].filter(
+          (candidate) =>
+            !changedSince || Date.parse(candidate.changed_at) >= Date.parse(changedSince),
+        )
+        return HttpResponse.json({ instance_id: INSTANCE_ID, settings })
+      }),
+    )
+    renderWithProviders(<SettingsSection instanceId={INSTANCE_ID} />, {
+      route: `/instances/${INSTANCE_ID}?range=1h`,
+    })
+    await settle()
+
+    expect(screen.getByRole('heading', { name: 'No setting changes' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Durability summary' })).toBeInTheDocument()
+    expect(screen.getByText('fsync')).toBeInTheDocument()
+    expect(screen.getByLabelText('Durability severity: critical')).toBeInTheDocument()
+  })
 })
