@@ -26,6 +26,7 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | GET | `/api/v1/instances/{id}/functions` | `getInstanceFunctions` | Return the busiest tracked functions and each database's function tracking. |
 | GET | `/api/v1/instances/{id}/host` | `getInstanceHost` | Return measurable host metrics for an instance. |
 | GET | `/api/v1/instances/{id}/indexes` | `getInstanceIndexes` | Return index relation statistics. |
+| GET | `/api/v1/instances/{id}/logical-replication` | `getInstanceLogicalReplication` | Return the subscriptions and the logical slots' decoding rates. |
 | GET | `/api/v1/instances/{id}/partitioned-tables` | `getInstancePartitionedTables` | Return the partitioned tables, each rolled up over its partitions. |
 | GET | `/api/v1/instances/{id}/security-definer-functions` | `getInstanceSecurityDefinerFunctions` | Return the SECURITY DEFINER functions and procedures. |
 | GET | `/api/v1/instances/{id}/sequences` | `getInstanceSequences` | Return the sequences and how much of their range each has used. |

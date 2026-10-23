@@ -102,7 +102,7 @@ whose tables should be measurable.
 
 At T0 the agent schedules: `instance_info`, `monitoring_role`, `activity`, `locks`,
 `database_stats`, `settings`, `wal`, `checkpointer`, `archiver`,
-`vacuum_progress`, `replication_slots`, `replication_streaming` on primaries,
+`vacuum_progress`, `replication_slots`, `logical_replication`, `replication_streaming` on primaries,
 `replication_receiver` on standbys, `table_stats`, `index_stats`,
 `bloat_estimate`, `trigger_inventory`, `fk_indexes`, `extensions`,
 `postgis_columns`, `sequences`, `partitions`, `function_stats`, and

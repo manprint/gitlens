@@ -314,3 +314,55 @@ func TestINTCAT006_Functions(t *testing.T) {
 	require.Equal(t, "procedure", safe["kind"])
 	require.Equal(t, true, safe["pg_temp_last"])
 }
+
+// INT-CAT-007: the logical replication API serves the subscriptions of the
+// latest batch, with null for an absent slot, worker message or conflict
+// count, and each logical slot's decoding rates over the last hour.
+func TestINTCAT007_LogicalReplication(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	instanceID := uuid.New()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	_, err := pool.Exec(ctx, `INSERT INTO object_facts (tenant_id, cluster_id, instance_id, datname, kind, key, labels, value_text, first_seen, last_seen, changed_at) VALUES
+		('default',1,$1,'','subscription','orders','{"database":"app","owner":"postgres","slot_name":"orders","publications":"p1,p2","apply_worker":"true","sync_workers":"1","last_msg_receipt_at":"2026-10-01T12:00:00Z","apply_errors":"2","sync_errors":"0","conflicts":"5"}','enabled',$2,$2,$2),
+		('default',1,$1,'','subscription','parked','{"database":"crm","owner":"app","slot_name":"","publications":"p","apply_worker":"false","sync_workers":"0","last_msg_receipt_at":"","apply_errors":"0","sync_errors":"0","conflicts":""}','disabled',$2,$2,$2)`, instanceID, now)
+	require.NoError(t, err)
+	series := int64(1)
+	for _, m := range []struct {
+		metric string
+		value  float64
+	}{{"pg_logical_slot_bytes_total", 2048}, {"pg_logical_slot_spill_bytes_total", 512}, {"pg_logical_slot_txns_total", 4}} {
+		for _, at := range []time.Time{now.Add(-10 * time.Minute), now.Add(-5 * time.Minute)} {
+			_, err := pool.Exec(ctx, `INSERT INTO metrics (ts, tenant_id, cluster_id, instance_id, datname, metric, labels, series_id, value) VALUES ($1,'default',1,$2,'',$3,'{"slot_name":"orders"}',$4,$5)`,
+				at, instanceID, m.metric, series, m.value)
+			require.NoError(t, err)
+			series++
+		}
+	}
+	r := chi.NewRouter()
+	NewAPI(pool).RegisterRoutes(r)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/instances/"+instanceID.String()+"/logical-replication", http.NoBody))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &raw))
+	subs := raw["subscriptions"].([]any)
+	require.Len(t, subs, 2)
+	orders, parked := subs[0].(map[string]any), subs[1].(map[string]any)
+	require.Equal(t, true, orders["enabled"])
+	require.Equal(t, []any{"p1", "p2"}, orders["publications"])
+	require.Equal(t, "2026-10-01T12:00:00Z", orders["last_message_at"])
+	require.Equal(t, float64(5), orders["conflicts"])
+	require.Equal(t, false, parked["enabled"])
+	require.Nil(t, parked["slot_name"])
+	require.Nil(t, parked["last_message_at"])
+	require.Nil(t, parked["conflicts"])
+	slots := raw["slots"].([]any)
+	require.Len(t, slots, 1)
+	slot := slots[0].(map[string]any)
+	require.Equal(t, "orders", slot["slot_name"])
+	require.Equal(t, float64(512), slot["spill_bytes_per_second"])
+	require.Equal(t, float64(2048), slot["bytes_per_second"])
+	require.Equal(t, float64(0), slot["stream_bytes_per_second"])
+}

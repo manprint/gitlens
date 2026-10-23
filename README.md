@@ -480,16 +480,24 @@ Security and operational boundaries:
   never resets statistics. `function_security` reports, every fifteen
   minutes, each SECURITY DEFINER function or procedure outside extensions,
   with the role it runs as, the `search_path` it pins and whether PUBLIC may
-  execute it. The instance page lists them all under "Schema objects"; the `trigger.*` rules
+  execute it. `logical_replication` reports, every minute, each subscription
+  of the instance with its database, slot, publications, whether its apply
+  worker runs and when it last heard from its publisher, and its error and
+  conflict counters, and the decoding counters of each logical slot (spilled
+  and streamed transactions). It reads `pg_subscription` column by column
+  and never `subconninfo`, which holds the connection string and its
+  password. The instance page lists them under "Logical replication", and
+  the catalog objects under "Schema objects"; the `trigger.*` rules
   raise disabled triggers, `index.fk_unindexed` the foreign keys, the
   `extension.*` and `postgis.*` rules outdated extensions, unindexed spatial
   columns and undefined or mixed SRIDs, the `sequence.*` rules sequences
   near their limit and columns narrower than their sequence, and the
   `partition.*` rules partitions about to run out, rows in default
   partitions, invalid partitioned indexes and partitioned tables never
-  analyzed, and the `function.*` rules SECURITY DEFINER functions that do
+  analyzed, the `function.*` rules SECURITY DEFINER functions that do
   not pin `search_path` and databases whose function calls are not
-  tracked.
+  tracked, and the `subscription.*` and `logical_slot.*` rules disabled,
+  stalled or failing subscriptions and slots that spill decoding to disk.
 - The integration suite proves the boundary: INT-RO-001 runs every check and
   command at T2 and asserts that the database and the shared catalogs are
   unchanged and that every statement the role sent, as `pg_stat_statements`
@@ -726,11 +734,15 @@ How the rules read the collected data:
 | `sequence.column_narrower` | warning | An integer column is fed by a sequence whose range is wider than the column's type, so inserts fail when the sequence passes the column's bound; found from the types alone, without reading the sequence. |
 | `partition.default_has_rows` | warning | A partitioned table's default partition holds rows, so creating a partition for their range fails until they are moved, and attaching any partition scans the default one. |
 | `partition.index_invalid` | warning | A partitioned index is not valid because a partition lacks it (`CREATE INDEX ... ON ONLY` never followed by `ALTER INDEX ... ATTACH PARTITION`); a unique one does not enforce uniqueness on those partitions. |
+| `subscription.disabled` | warning | A subscription is disabled: it applies nothing, and its slot on the publisher keeps the WAL of the changes it has not confirmed (the `logical_replication` check). |
+| `subscription.not_receiving` | warning | An enabled subscription has no apply worker running, or its worker has heard nothing from the publisher for five minutes, although the publisher sends keepalives. |
+| `subscription.errors` | warning | A subscription's apply or synchronization workers failed since the previous scrape. |
 | `trigger.user_disabled` | warning | A user trigger is disabled: writes to its table no longer run it. |
 | `extension.upgrade_available` | info | The installed packages carry a newer default version of an extension than the database runs (`ALTER EXTENSION ... UPDATE`); PostGIS extensions are left to `postgis.upgrade_available`. |
 | `sequence.value_hidden` | info | The monitoring role cannot read the values of a database's sequences (no SELECT on them), so their exhaustion is not monitored; one finding per database. |
 | `partition.parent_not_analyzed` | info | A partitioned table with 10,000 or more estimated rows has never been analyzed; autovacuum never analyzes a partitioned table, so the planner has no statistics for the whole tree. |
 | `function.untracked` | info | `track_functions` is `none` for a database's sessions and no function has statistics, although the database defines functions in a procedural language; one finding per database (the `function_stats` check). |
+| `logical_slot.spill_high` | info | Decoding for a logical slot spills 1 MiB/s or more to disk, because transactions outgrow `logical_decoding_work_mem`. |
 | `postgis.srid_mixed` | info | The constrained geometry columns of one database use more than one non-zero SRID, so joins between them need `ST_Transform`. |
 | `security.monitoring_role_read_only_off` | warning | The role pglens connects as does not default to read-only transactions in the database it connects to. |
 
@@ -933,6 +945,7 @@ checks:
   replication_streaming:   { interval: 10s }  # Replication lag from primary
   replication_receiver:    { interval: 10s }  # Replication status on standby
   replication_slots:       { interval: 15s }  # Replication slot status
+  logical_replication:     { interval: 1m }   # Subscriptions and logical decoding (subscription.*, logical_slot.*)
 ```
 
 **Configuration rules:**
@@ -1030,6 +1043,7 @@ checks
   instance_info      enabled
   io                 enabled
   locks              enabled
+  logical_replication enabled
   monitoring_role    enabled
   partitions         enabled
   postgis_columns    enabled

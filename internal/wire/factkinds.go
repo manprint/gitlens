@@ -34,6 +34,7 @@ var factKinds = map[string]FactKind{
 	"partitioned_table":         {Check: "partitions", Replace: true},
 	"function_tracking":         {Check: "function_stats", Replace: true},
 	"security_definer_function": {Check: "function_security", Replace: true},
+	"subscription":              {Check: "logical_replication", Replace: true},
 }
 
 // LookupFactKind returns the description of a fact kind, and whether the

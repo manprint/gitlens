@@ -84,7 +84,7 @@ ORDER BY 1`)
 // monitoring role sent is one that reads.
 func TestINTRO001_AgentOnlyReads(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
-		auditAgentOnlyReads(t, pg, "", []string{"trigger", "fk_unindexed", "extension", "sequence", "partitioned_table", "function_tracking", "security_definer_function"}, "")
+		auditAgentOnlyReads(t, pg, "", []string{"trigger", "fk_unindexed", "extension", "sequence", "partitioned_table", "function_tracking", "security_definer_function", "subscription"}, "")
 	})
 }
 
@@ -99,7 +99,7 @@ func TestINTRO002_AgentOnlyReadsPostGIS(t *testing.T) {
 CREATE TABLE ro_audit_places (id int PRIMARY KEY, pt geometry(Point, 4326), area geometry(Polygon));
 CREATE INDEX ON ro_audit_places USING gist (pt);
 INSERT INTO ro_audit_places SELECT g, ST_SetSRID(ST_MakePoint(g, g), 4326) FROM generate_series(1, 100) g`,
-			[]string{"trigger", "fk_unindexed", "extension", "spatial_column", "sequence", "partitioned_table", "function_tracking", "security_definer_function"},
+			[]string{"trigger", "fk_unindexed", "extension", "spatial_column", "sequence", "partitioned_table", "function_tracking", "security_definer_function", "subscription"},
 			"belongs to extension postgis_topology")
 	})
 }
@@ -115,6 +115,13 @@ func auditAgentOnlyReads(t *testing.T, pg *pgtest.PG, extraFixture string, kinds
 		pg.Lock(t)
 		ctx := context.Background()
 		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		// A subscription that never connects: no publisher, no slot.
+		dropSubscription := func() {
+			_, _ = admin.Exec(context.Background(), "ALTER SUBSCRIPTION ro_audit_sub SET (slot_name = NONE)")
+			_, _ = admin.Exec(context.Background(), "DROP SUBSCRIPTION IF EXISTS ro_audit_sub")
+		}
+		dropSubscription()
+		t.Cleanup(dropSubscription)
 		t.Cleanup(func() {
 			_, _ = admin.Exec(context.Background(), "DROP TABLE IF EXISTS ro_audit_child, ro_audit, ro_audit_places, ro_audit_parts; DROP FUNCTION IF EXISTS ro_audit_touch(), ro_audit_definer(); DROP SEQUENCE IF EXISTS ro_audit_fresh, ro_audit_down")
 		})
@@ -145,6 +152,8 @@ CREATE SEQUENCE ro_audit_down AS integer INCREMENT -1 MAXVALUE -1 CYCLE;
 SELECT setval('ro_audit_down', -5);
 ALTER TABLE ro_audit_child ALTER COLUMN id SET DEFAULT nextval('ro_audit_id_seq');
 DROP TABLE IF EXISTS ro_audit_places;`+extraFixture)
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "CREATE SUBSCRIPTION ro_audit_sub CONNECTION 'dbname=app' PUBLICATION ro_audit_pub WITH (connect = false)")
 		require.NoError(t, err)
 
 		// From here, every statement the monitoring role sends is recorded.

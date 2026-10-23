@@ -340,6 +340,20 @@ export function useInstanceSequences(id: string) {
   })
 }
 
+export function useInstanceLogicalReplication(id: string) {
+  return useApiQuery({
+    policy: REFRESH.catalog,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/logical-replication', {
+          params: { path: { id } },
+          signal,
+        }),
+      ),
+    queryKey: qk.instanceLogicalReplication(id),
+  })
+}
+
 export function useInstanceFunctions(id: string) {
   return useApiQuery({
     policy: REFRESH.catalog,

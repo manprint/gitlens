@@ -44,6 +44,7 @@ checks:
   partitions: { interval: 10m } # Partition trees, default partitions and how far they reach.
   function_stats: { interval: 5m, top_n: 50 } # Calls and time of the busiest tracked functions.
   function_security: { interval: 15m } # SECURITY DEFINER functions and their search_path.
+  logical_replication: { interval: 1m } # Subscriptions and logical decoding.
   table_stats: { interval: 5m, top_n: 50 } # Table access, tuple and vacuum statistics.
   index_stats: { interval: 5m, top_n: 50 } # Index usage and size statistics.
   vacuum_progress: { interval: 30s } # In-progress VACUUM counters.

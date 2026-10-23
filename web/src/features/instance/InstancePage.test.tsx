@@ -81,6 +81,12 @@ function renderPage(
       functions: [],
       truncated_databases: [],
     }),
+    ok('getInstanceLogicalReplication', {
+      instance_id: INSTANCE_ID,
+      window_seconds: 3600,
+      subscriptions: [],
+      slots: [],
+    }),
     ok('getInstanceUnindexedForeignKeys', {
       instance_id: INSTANCE_ID,
       foreign_keys: [],

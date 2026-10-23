@@ -315,6 +315,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/instances/{id}/logical-replication": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Return the subscriptions and the logical slots' decoding rates.
+         * @description The subscriptions of the latest logical_replication scrape, reported in the last three hours, and each logical slot's decoding rates averaged over the last hour. A subscription's connection string is never read.
+         */
+        get: operations["getInstanceLogicalReplication"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instances/{id}/security-definer-functions": {
         parameters: {
             query?: never;
@@ -1501,6 +1521,77 @@ export interface components {
             mean_ms: number | null;
             last_seen: components["schemas"]["Timestamp"];
         };
+        LogicalReplicationResponse: {
+            instance_id: components["schemas"]["InstanceId"];
+            /**
+             * Format: int32
+             * @description The span the slot rates are averaged over.
+             */
+            window_seconds: number;
+            subscriptions: components["schemas"]["Subscription"][];
+            slots: components["schemas"]["LogicalSlotStats"][];
+        };
+        /** @description A subscription of the instance. Its connection string is never read. */
+        Subscription: {
+            name: string;
+            /** @description The database the subscription applies changes to. */
+            database: string;
+            owner: string;
+            enabled: boolean;
+            /** @description The slot on the publisher; null when slot_name is NONE. */
+            slot_name: string | null;
+            publications: string[];
+            /** @description Whether an apply worker runs for it. */
+            apply_worker: boolean;
+            /**
+             * Format: int32
+             * @description Table synchronization workers running.
+             */
+            sync_workers: number;
+            /** @description When the apply worker last heard from the publisher; null without a running worker. */
+            last_message_at: components["schemas"]["Timestamp"] | null;
+            /**
+             * Format: int64
+             * @description Errors while applying changes
+             */
+            apply_errors: number;
+            /**
+             * Format: int64
+             * @description Errors while synchronizing tables or sequences
+             */
+            sync_errors: number;
+            /**
+             * Format: int64
+             * @description Conflicts met while applying changes (PostgreSQL 18 and later); null before.
+             */
+            conflicts: number | null;
+            first_seen: components["schemas"]["Timestamp"];
+            last_seen: components["schemas"]["Timestamp"];
+        };
+        /** @description The decoding rates of a logical slot over the window. */
+        LogicalSlotStats: {
+            slot_name: string;
+            /**
+             * Format: double
+             * @description Decoded transaction data sent to the slot's consumer.
+             */
+            bytes_per_second: number;
+            /** Format: double */
+            txns_per_second: number;
+            /**
+             * Format: double
+             * @description Decoded data written to disk because it outgrew logical_decoding_work_mem.
+             */
+            spill_bytes_per_second: number;
+            /** Format: double */
+            spill_txns_per_second: number;
+            /**
+             * Format: double
+             * @description Decoded data streamed to the consumer before commit.
+             */
+            stream_bytes_per_second: number;
+            last_seen: components["schemas"]["Timestamp"];
+        };
         SecurityDefinerFunctionsResponse: {
             instance_id: components["schemas"]["InstanceId"];
             functions: components["schemas"]["SecurityDefinerFunction"][];
@@ -2186,6 +2277,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FunctionsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+        };
+    };
+    getInstanceLogicalReplication: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["InstanceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Subscriptions by name; slots by spill rate, then decoding rate. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogicalReplicationResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];

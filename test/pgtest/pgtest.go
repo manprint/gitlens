@@ -108,6 +108,9 @@ func getOrCreateImage(t *testing.T, major int, img string, cache map[int]*PG) *P
 			"-c", "fsync=off",
 			"-c", "full_page_writes=off",
 			"-c", "synchronous_commit=off",
+			// Logical slots and subscriptions, for the logical_replication
+			// check; it costs a little more WAL and nothing else.
+			"-c", "wal_level=logical",
 		),
 	)
 	require.NoError(t, err)
