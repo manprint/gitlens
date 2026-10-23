@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { defaultDatabase, partitionDatabases } from './databases'
+import { defaultDatabase, isMonitoredDatabase, partitionDatabases } from './databases'
 
 describe('database helpers', () => {
   it('UI-INST-010 partitions monitored databases and groups skipped reasons', () => {
@@ -30,6 +30,18 @@ describe('database helpers', () => {
     ])
 
     expect(selected?.datname).toBe('busy')
+  })
+
+  it('UI-INST-013 isMonitoredDatabase accepts only a database the instance monitors', () => {
+    const list = [
+      { datname: 'app', monitored: true },
+      { datname: 'analytics', monitored: false, skip_reason: 'db_budget' },
+    ]
+
+    expect(isMonitoredDatabase(list, 'app')).toBe(true)
+    expect(isMonitoredDatabase(list, 'analytics')).toBe(false)
+    expect(isMonitoredDatabase(list, 'other')).toBe(false)
+    expect(isMonitoredDatabase(list, '')).toBe(false)
   })
 
   it('UI-INST-012 defaultDatabase returns null when none are monitored', () => {

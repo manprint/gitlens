@@ -1,4 +1,4 @@
-import { act, fireEvent, screen } from '@testing-library/react'
+import { fireEvent, screen } from '@testing-library/react'
 import { http, HttpResponse } from 'msw/http'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -21,7 +21,7 @@ describe('query detail route', () => {
     server.use(
       ok('getSession', session),
       ok('getClusters', clusters),
-      ok('getInstance', makeGetInstance({ perm_tier: 'T1' })),
+      ok('getInstance', monitoredInstance(['app'])),
       ok('getCommand', command),
       http.post('*/api/v1/instances/:id/commands', async ({ request }) => {
         explainBody = await request.json()
@@ -36,9 +36,6 @@ describe('query detail route', () => {
     renderRoute(`/instances/${INSTANCE_ID}/queries/123?db=app`)
     // Routes are lazy and the instance response sets the tier, so wait until
     // the plan button is enabled by T1 rather than labelled as not permitted.
-    await act(async () => {
-      await import('./pages')
-    })
     await vi.waitFor(() =>
       expect(screen.getByRole('button', { name: 'Run plan only' })).toBeEnabled(),
     )
@@ -52,4 +49,37 @@ describe('query detail route', () => {
     await vi.waitFor(() => expect(plansUrl).toBeDefined())
     expect(plansUrl?.searchParams.get('datname')).toBe('app')
   })
+
+  it('AC-08 refuses a database the instance does not monitor and sends nothing for it', async () => {
+    let commandRequests = 0
+    let plansRequests = 0
+    server.use(
+      ok('getSession', session),
+      ok('getClusters', clusters),
+      ok('getInstance', monitoredInstance(['app'])),
+      http.post('*/api/v1/instances/:id/commands', () => {
+        commandRequests += 1
+        return HttpResponse.json({ command_id: COMMAND_ID })
+      }),
+      http.get('*/api/v1/plans', () => {
+        plansRequests += 1
+        return HttpResponse.json(plans)
+      }),
+    )
+
+    renderRoute(`/instances/${INSTANCE_ID}/queries/123?db=other`)
+    await vi.waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('other is not monitored'),
+    )
+    expect(screen.queryByRole('button', { name: 'Run plan only' })).not.toBeInTheDocument()
+    expect(commandRequests).toBe(0)
+    expect(plansRequests).toBe(0)
+  })
 })
+
+function monitoredInstance(monitored: readonly string[]) {
+  return {
+    ...makeGetInstance({ perm_tier: 'T1' }),
+    databases: monitored.map((datname) => ({ datname, monitored: true, skip_reason: null })),
+  }
+}

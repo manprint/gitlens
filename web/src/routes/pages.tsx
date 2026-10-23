@@ -3,6 +3,8 @@ import { ClusterPage } from '@/features/cluster/ClusterPage'
 import AshPageComponent from '@/features/ash/AshPage'
 import InstancePage from '@/features/instance/InstancePage'
 import { useInstance } from '@/api/queries'
+import { ErrorState } from '@/components/state'
+import { isMonitoredDatabase } from '@/lib/databases'
 import ExplainPanel from '@/features/queries/ExplainPanel'
 import PlanHistory from '@/features/queries/PlanHistory'
 import QueryListPageComponent from '@/features/queries/QueryListPage'
@@ -54,12 +56,39 @@ export function QueryDetailPage() {
   const instanceQuery = useInstance(instanceId ?? '')
   // Set by the list link to the statement's database. Without it EXPLAIN runs
   // in the agent's own DSN database and plan history lists every database.
-  const datname = searchParams.get('db') ?? undefined
+  const requestedDatabase = searchParams.get('db')
 
   if (!instanceId || !queryid) {
     return <PlaceholderPage surface="Query detail and plan history" />
   }
 
+  // The URL is editable, so the database is checked against the instance's
+  // monitored list before any command or plan request names it.
+  if (requestedDatabase !== null) {
+    if (instanceQuery.data === undefined) {
+      return instanceQuery.error ? (
+        <ErrorState
+          endpoint="instance"
+          failure={instanceQuery.error}
+          onRetry={() => void instanceQuery.refetch()}
+        />
+      ) : (
+        <section aria-busy="true" aria-label="Loading instance" role="status">
+          Loading instance…
+        </section>
+      )
+    }
+    if (!isMonitoredDatabase(instanceQuery.data.databases, requestedDatabase)) {
+      return (
+        <section role="alert" className="border-destructive/40 bg-destructive/10 text-sm">
+          <strong>Database not monitored.</strong> {requestedDatabase} is not monitored on this
+          instance, so this statement is not explained or planned here.
+        </section>
+      )
+    }
+  }
+
+  const datname = requestedDatabase ?? undefined
   return (
     <div className="space-y-8">
       <ExplainPanel
