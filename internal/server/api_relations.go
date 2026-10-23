@@ -139,13 +139,18 @@ func (a *API) handleIndexes(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, resp)
 		return
 	}
-	rows, e := a.pool.Query(r.Context(), `SELECT datname, schemaname, relname, indexrelname, idx_scan, index_bytes,
-			is_unique, is_primary, is_valid, ts
+	// The last scan comes from the definition fact the index_stats check writes
+	// for the same index: its last_idx_scan label.
+	rows, e := a.pool.Query(r.Context(), `SELECT latest.datname, latest.schemaname, latest.relname, latest.indexrelname,
+			latest.idx_scan, latest.index_bytes, latest.is_unique, latest.is_primary, latest.is_valid, latest.ts,
+			f.labels->>'last_idx_scan'
 		FROM (SELECT DISTINCT ON (datname, schemaname, indexrelname) *
 		        FROM metrics_indexes
 		       WHERE tenant_id='default' AND instance_id=$1 AND ts >= now() - interval '15 minutes'
 		       ORDER BY datname, schemaname, indexrelname, ts DESC) latest
-		ORDER BY index_bytes DESC NULLS LAST LIMIT $2`, id, relationLimit(r))
+		LEFT JOIN object_facts f ON f.tenant_id='default' AND f.instance_id=$1 AND f.kind='index_def'
+		     AND f.datname=latest.datname AND f.key=latest.schemaname || '.' || latest.indexrelname
+		ORDER BY latest.index_bytes DESC NULLS LAST LIMIT $2`, id, relationLimit(r))
 	if e != nil {
 		writeError(w, http.StatusInternalServerError, "query failed", e.Error())
 		return
@@ -157,7 +162,8 @@ func (a *API) handleIndexes(w http.ResponseWriter, r *http.Request) {
 		var bytes *int64
 		var unique, primary, valid *bool
 		var ts time.Time
-		if e := rows.Scan(&datname, &schema, &name, &index, &scans, &bytes, &unique, &primary, &valid, &ts); e != nil {
+		var lastScan *string
+		if e := rows.Scan(&datname, &schema, &name, &index, &scans, &bytes, &unique, &primary, &valid, &ts, &lastScan); e != nil {
 			writeError(w, http.StatusInternalServerError, "scan failed", e.Error())
 			return
 		}
@@ -167,6 +173,9 @@ func (a *API) handleIndexes(w http.ResponseWriter, r *http.Request) {
 		putBool(item, "is_unique", unique)
 		putBool(item, "is_primary", primary)
 		putBool(item, "is_valid", valid)
+		at, status := indexLastScan(lastScan)
+		item["last_scan_at"] = at
+		item["last_scan_status"] = status
 		resp.Items = append(resp.Items, item)
 	}
 	if e := rows.Err(); e != nil {
@@ -178,6 +187,25 @@ func (a *API) handleIndexes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, resp)
+}
+
+// indexLastScan reads the last_idx_scan label of an index's definition fact.
+// An absent label means the server has no last scan for the index: the agent
+// runs on PostgreSQL 15, which cannot report it, or has not reported it yet.
+// An empty label means the index was not scanned since the statistics reset.
+// The time is nil unless the index was scanned.
+func indexLastScan(label *string) (at *time.Time, status string) {
+	switch {
+	case label == nil:
+		return nil, "not_available"
+	case *label == "":
+		return nil, "never_since_reset"
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, *label)
+	if err != nil {
+		return nil, "not_available"
+	}
+	return &parsed, "scanned"
 }
 
 func (a *API) handleBloat(w http.ResponseWriter, r *http.Request) {

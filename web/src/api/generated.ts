@@ -424,7 +424,7 @@ export interface paths {
         };
         /**
          * Return index relation statistics.
-         * @description The newest reading of each index reported in the last 15 minutes, largest first. idx_scan_rate is scans per second.
+         * @description The newest reading of each index reported in the last 15 minutes, largest first. idx_scan_rate is scans per second. last_scan_at is the last time the index was scanned since the statistics reset, from pg_stat_user_indexes.last_idx_scan, and is null unless last_scan_status is scanned. last_scan_status is scanned; never_since_reset (PostgreSQL 16 and later, no scan since the reset); or not_available (PostgreSQL 15, or the agent has not reported a last scan for the index).
          */
         get: operations["getInstanceIndexes"];
         put?: never;
