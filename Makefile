@@ -91,8 +91,11 @@ test-integration:
 test-e2e:
 	$(GO) test -tags=e2e -timeout=35m -count=1 ./test/e2e/... -run 'Smoke'
 
+# -v prints a line for every scenario, passed or skipped. Without it the evidence
+# log of a passing run is a bare package ok line, and a scenario that did not
+# run cannot be told from one that did.
 test-e2e-full:
-	$(GO) test -tags=e2e -timeout=90m -count=1 ./test/e2e/...
+	$(GO) test -tags=e2e -v -timeout=90m -count=1 ./test/e2e/...
 
 test-e2e-full-evidence:
 	./scripts/e2e_evidence.sh $(MAKE) test-e2e-full

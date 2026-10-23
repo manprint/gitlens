@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -108,4 +109,17 @@ func TestMakefile_CleanKeepsAHandEditAndRestoresBuildOutput(t *testing.T) {
 			require.Len(t, entries, 1, "only index.html may remain")
 		})
 	}
+}
+
+// The evidence log is the only record of which e2e scenarios ran. go test
+// prints a line per test only with -v, so without it a passing run leaves a
+// bare package ok line, and a scenario that did not run cannot be told from one
+// that did.
+func TestMakefile_E2EFullPrintsEachScenario(t *testing.T) {
+	if _, err := exec.LookPath("make"); err != nil {
+		t.Skip("make is required")
+	}
+	out, err := exec.Command("make", "-n", "-f", filepath.Join("..", "Makefile"), "test-e2e-full").CombinedOutput()
+	require.NoError(t, err, "%s", out)
+	require.Contains(t, strings.Fields(string(out)), "-v", "test-e2e-full must pass -v: %s", out)
 }
