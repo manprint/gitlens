@@ -26,6 +26,12 @@ func TestPerm_INT_PERM_001(t *testing.T) {
 func TestPerm_INT_PERM_002(t *testing.T) {
 	ForEach(t, func(t *testing.T, pg *PG) {
 		pg.Lock(t)
+		// The default grants both control functions to PUBLIC (INT-PERM-013),
+		// so a cluster hardened against it is modelled here by revoking them.
+		pg.Exec(t, `REVOKE EXECUTE ON FUNCTION pg_control_system() FROM PUBLIC`)
+		t.Cleanup(func() {
+			pg.Exec(t, `GRANT EXECUTE ON FUNCTION pg_control_system() TO PUBLIC`)
+		})
 		pool := pg.Pool(t, "app", RoleT0NoControl)
 		var id string
 		err := pool.QueryRow(context.Background(), "SELECT system_identifier::text FROM pg_control_system()").Scan(&id)

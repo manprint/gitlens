@@ -388,8 +388,6 @@ func setupRoles(ctx context.Context, pool *pgxpool.Pool) {
 	// Create test roles for permission tiers.
 	// All passwords are 'test'.
 	stmts := []string{
-		`REVOKE EXECUTE ON FUNCTION pg_control_system() FROM PUBLIC`,
-		`REVOKE EXECUTE ON FUNCTION pg_control_checkpoint() FROM PUBLIC`,
 		`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='perm_victim') THEN CREATE ROLE perm_victim LOGIN PASSWORD 'test'; END IF; END $$`,
 		`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='pglens') THEN CREATE ROLE pglens LOGIN PASSWORD 'test'; END IF; END $$`,
 		`GRANT pg_monitor TO pglens`,
