@@ -28,7 +28,9 @@ type tableStatsRow struct {
 	RelfrozenXIDAge                                          int64
 	TotalBytes, TableBytes, ToastBytes                       int64
 	// EstBytes ranks the table before its exact sizes are read: the pages of
-	// the table and its TOAST table as of the last VACUUM or ANALYZE.
+	// the table and its TOAST table as of the last VACUUM or ANALYZE. A table
+	// that has never been vacuumed or analysed has no pages recorded, so it
+	// ranks last until its first one, however large it is.
 	EstBytes int64
 	OID      uint32
 }
