@@ -147,7 +147,7 @@ function statementColumns(instanceId: string): DataTableProps<StatementDisplayRo
     },
     {
       id: 'share-total',
-      header: 'Share of total',
+      header: 'Share of listed rows',
       enableSorting: false,
       cell: ({ row }) => {
         const share = row.original.totalShare
