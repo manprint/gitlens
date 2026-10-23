@@ -131,7 +131,7 @@ ci-local-unit:
 
 ci-local-integration:
 	@set -eu; \
-	for pg in 15 16 17 18; do \
+	for pg in 15 16 17 18 19; do \
 		for profile in vanilla rds-like; do \
 			echo "==> integration PG$$pg / $$profile"; \
 			PGLENS_PG_VERSIONS=$$pg PGLENS_PG_PROFILE=$$profile $(MAKE) test-integration; \

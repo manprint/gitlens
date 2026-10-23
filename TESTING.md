@@ -421,7 +421,7 @@ func newPG(t *testing.T, version string) *pgxpool.Pool {
 1. Un container per (versione PG × profilo permessi) per package, condiviso via `TestMain`. I test ottengono un **database isolato** (`CREATE DATABASE test_<n>`), non un container isolato.
 2. `testcontainers` **Reuse** in locale (`TESTCONTAINERS_REUSE_ENABLE=true`) per non ripagare l'avvio a ogni `go test`. Mai in CI: il riuso nasconde le dipendenze dall'ordine.
 3. `fsync=off`, `full_page_writes=off`, `synchronous_commit=off`, volume su tmpfs. Sono container usa-e-getta: la durabilità non serve e costa.
-4. Matrice PG **ridotta su PR** (15, 18), **completa nightly** (15→18). Le tre versioni scelte coprono i tre regimi: minimo supportato, mediano, ultimo.
+4. Matrice PG **ridotta su PR** (15, 18), **completa nightly** (15→19). Le tre versioni scelte coprono i tre regimi: minimo supportato, mediano, ultimo.
 
 ### 4.3 Matrice versioni
 
@@ -1106,7 +1106,7 @@ Ogni comando emette su stdout un **report JSON** (quanti deadlock effettivi, qua
 
 | File | Trigger | Cosa esegue | Budget |
 |---|---|---|---|
-| `.github/workflows/ci.yml` | PR, push su `main`, `workflow_dispatch`, `workflow_call` | web, lint, security, unit, race-stress (non su PR), immagini, integration PG 15→18 × `vanilla`/`rds-like` | ~25 min wall clock, job paralleli |
+| `.github/workflows/ci.yml` | PR, push su `main`, `workflow_dispatch`, `workflow_call` | web, lint, security, unit, race-stress (non su PR), immagini, integration PG 15→19 × `vanilla`/`rds-like` | ~25 min wall clock, job paralleli |
 | `.github/workflows/e2e.yml` | PR verso `main`, nightly (02:00 UTC), `workflow_dispatch` | suite E2E completa × `AGENT_MODE` `container`/`binary`, più accettazione UI Playwright × `AGENT_MODE` | ~100 min |
 | `.github/workflows/release-alpha.yml` | tag `v*-alpha.*`, `workflow_dispatch` | richiama `ci.yml` per intero, poi build multi-arch (amd64+arm64), push su ghcr.io con SBOM e provenance, smoke `--version` sulle immagini pubblicate, prerelease GitHub | ~2 h |
 
@@ -1215,7 +1215,7 @@ Una PR è mergiabile solo se:
 - [ ] L1 verde con `-race` e `-shuffle=on`
 - [ ] Gate di copertura rispettati (sez. 3.5, 6.3)
 - [ ] `tidy-check` e `govulncheck` verdi
-- [ ] L2 verde su PG 15→18 × profili `vanilla` e `rds-like`
+- [ ] L2 verde su PG 15→19 × profili `vanilla` e `rds-like`
 - [ ] L3 verde su `AGENT_MODE` `container` e `binary`
 - [ ] L4 e L5 verdi
 - [ ] Immagini agent e server buildano, e rispondono a `--version`
