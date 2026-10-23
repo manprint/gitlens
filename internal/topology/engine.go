@@ -61,10 +61,11 @@ type instanceState struct {
 type Engine struct {
 	mu               sync.RWMutex
 	clock            clock.Clock
-	instances        map[pgtype.InstanceID]*instanceState  // per instance
-	lastPrimary      map[pgtype.ClusterID]*lastPrimaryInfo // track recent primary per cluster
-	lastFailoverTime map[pgtype.ClusterID]time.Time        // track last failover time per cluster
-	lastSplitBrain   map[pgtype.ClusterID]time.Time        // last split_brain_detected emission per cluster
+	instances        map[pgtype.InstanceID]*instanceState                // per instance
+	clusterInstances map[pgtype.ClusterID]map[pgtype.InstanceID]struct{} // instances per cluster, so the split-brain check scans one cluster
+	lastPrimary      map[pgtype.ClusterID]*lastPrimaryInfo               // track recent primary per cluster
+	lastFailoverTime map[pgtype.ClusterID]time.Time                      // track last failover time per cluster
+	lastSplitBrain   map[pgtype.ClusterID]time.Time                      // last split_brain_detected emission per cluster
 	failoverWindow   time.Duration
 	orphanWindow     time.Duration
 	splitBrainWindow time.Duration
@@ -85,6 +86,7 @@ func NewEngine(clk clock.Clock) *Engine {
 	return &Engine{
 		clock:            clk,
 		instances:        make(map[pgtype.InstanceID]*instanceState),
+		clusterInstances: make(map[pgtype.ClusterID]map[pgtype.InstanceID]struct{}),
 		lastPrimary:      make(map[pgtype.ClusterID]*lastPrimaryInfo),
 		lastFailoverTime: make(map[pgtype.ClusterID]time.Time),
 		lastSplitBrain:   make(map[pgtype.ClusterID]time.Time),
@@ -162,10 +164,18 @@ func (e *Engine) Apply(obs Observation) []Event {
 		}
 	}
 
-	// Update instance state.
+	// Update instance state. The cluster index follows the instance's cluster,
+	// which a re-registered instance can change.
+	if inst.clusterID != obs.ClusterID {
+		delete(e.clusterInstances[inst.clusterID], obs.InstanceID)
+	}
 	inst.role = obs.Role
 	inst.clusterID = obs.ClusterID
 	inst.timestamp = now
+	if e.clusterInstances[obs.ClusterID] == nil {
+		e.clusterInstances[obs.ClusterID] = make(map[pgtype.InstanceID]struct{})
+	}
+	e.clusterInstances[obs.ClusterID][obs.InstanceID] = struct{}{}
 
 	// Track most recent primary per cluster.
 	if obs.Role == pgtype.RolePrimary {
@@ -250,8 +260,8 @@ func (e *Engine) detectSplitBrain(clusterID pgtype.ClusterID, now time.Time) []E
 	// zero lastFailover admits every primary, and the promoted standby is
 	// observed at the failover instant, so it always counts.
 	lastFailover := e.lastFailoverTime[clusterID]
-	for instID, inst := range e.instances {
-		if inst.clusterID == clusterID && inst.role == pgtype.RolePrimary {
+	for instID := range e.clusterInstances[clusterID] {
+		if inst := e.instances[instID]; inst.role == pgtype.RolePrimary {
 			// Only count primaries seen recently (within failover window)
 			if now.Sub(inst.timestamp) < e.failoverWindow && !inst.timestamp.Before(lastFailover) {
 				primaries = append(primaries, instID)
@@ -312,6 +322,7 @@ func (e *Engine) Evict(before time.Time) int {
 	for id, st := range e.instances {
 		if st.timestamp.Before(before) {
 			delete(e.instances, id)
+			delete(e.clusterInstances[st.clusterID], id)
 			removed++
 			continue
 		}
@@ -335,6 +346,11 @@ func (e *Engine) Evict(before time.Time) int {
 	for cid := range e.lastSplitBrain {
 		if _, live := liveClusters[cid]; !live {
 			delete(e.lastSplitBrain, cid)
+		}
+	}
+	for cid := range e.clusterInstances {
+		if _, live := liveClusters[cid]; !live {
+			delete(e.clusterInstances, cid)
 		}
 	}
 	return removed
