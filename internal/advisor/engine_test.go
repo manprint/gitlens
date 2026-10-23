@@ -361,8 +361,11 @@ func TestRun_StopEndsThePassBetweenInstances(t *testing.T) {
 	e, store, _ := runWithRules(t, rule)
 	store.ids = []uuid.UUID{uuid.New(), uuid.New(), uuid.New()}
 	now := time.Unix(100, 0)
+	// stop is a plain func value, so the load closure, which takes a context,
+	// does not make the call to Stop a static one that must carry that context.
+	stop := func() { e.Stop() }
 	e.load = func(_ context.Context, id uuid.UUID, _ time.Time) (*Snapshot, error) {
-		e.Stop()
+		stop()
 		return &Snapshot{Now: now, InstanceID: id, PermTier: pgtype.TierReadOnly, Metrics: map[string]map[string]float64{}, Settings: map[string]string{}}, nil
 	}
 
