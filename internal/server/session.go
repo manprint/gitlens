@@ -7,8 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
+	"net"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -40,6 +43,17 @@ const (
 	sessionCookieName       = "pglens_session"
 	sessionLoginMaxBody     = 4 << 10
 	sessionLoginFailureWait = 250 * time.Millisecond
+	// sessionLoginMaxAttempts is how many sign-ins one client address may make
+	// within sessionLoginWindow before it is refused. A successful sign-in
+	// clears its count.
+	sessionLoginMaxAttempts = 5
+	sessionLoginWindow      = 15 * time.Minute
+	// sessionLoginMaxInFlight caps the sign-ins being checked at once. A failed
+	// check holds its slot through sessionLoginFailureWait, so this bounds the
+	// goroutines a flood of guesses can pin.
+	sessionLoginMaxInFlight = 8
+	// sessionLoginMaxClients bounds the table of per-address sign-in counts.
+	sessionLoginMaxClients = 4096
 )
 
 func NewSessionStore(ttl time.Duration) *SessionStore {
@@ -197,6 +211,10 @@ func sessionRequestExempt(r *http.Request) bool {
 // endpoints. The GET and POST endpoints remain middleware exemptions so an
 // unauthenticated browser can establish and inspect its session state.
 func RegisterSessionRoutes(r chi.Router, cfg UIConfig, store *SessionStore) {
+	registerSessionRoutes(r, cfg, store, newLoginLimiter(time.Now))
+}
+
+func registerSessionRoutes(r chi.Router, cfg UIConfig, store *SessionStore, limiter *loginLimiter) {
 	r.Post("/api/v1/session", func(w http.ResponseWriter, req *http.Request) {
 		var payload struct {
 			Password string `json:"password"`
@@ -214,12 +232,25 @@ func RegisterSessionRoutes(r chi.Router, cfg UIConfig, store *SessionStore) {
 			return
 		}
 
+		// The attempt is charged before the password is compared. A refusal
+		// that came after the comparison would show the caller whether a guess
+		// was right, because a success answers 204.
+		client := sessionClientAddress(req)
+		done, retryAfter, allowed := limiter.begin(client)
+		if !allowed {
+			w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds(retryAfter)))
+			writeError(w, http.StatusTooManyRequests, "too_many_attempts", "too many sign-in attempts; wait before trying again")
+			return
+		}
 		passwordMatches := cfg.Password != "" && constantTimePasswordMatch(payload.Password, cfg.Password)
 		if !passwordMatches {
 			time.Sleep(sessionLoginFailureWait)
+			done(false)
+			log.Printf("ui sign-in failed from %s", client)
 			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid password")
 			return
 		}
+		done(true)
 		if store == nil {
 			writeError(w, http.StatusServiceUnavailable, "session_unavailable", "session store is not configured")
 			return
@@ -262,6 +293,105 @@ func RegisterSessionRoutes(r chi.Router, cfg UIConfig, store *SessionStore) {
 		http.SetCookie(w, sessionCookie(cfg, req, "", -1))
 		w.WriteHeader(http.StatusNoContent)
 	})
+}
+
+// loginLimiter refuses sign-ins that exceed a client address's attempt budget
+// or the number of checks in flight. A password guess was otherwise limited
+// only by its 250ms sleep, and requests run in parallel, so the sleep did not
+// slow a flood at all.
+type loginLimiter struct {
+	mu       sync.Mutex
+	attempts map[string]loginBudget
+	slots    chan struct{}
+	now      func() time.Time
+}
+
+type loginBudget struct {
+	windowStart time.Time
+	count       int
+}
+
+func newLoginLimiter(now func() time.Time) *loginLimiter {
+	return &loginLimiter{
+		attempts: make(map[string]loginBudget),
+		slots:    make(chan struct{}, sessionLoginMaxInFlight),
+		now:      now,
+	}
+}
+
+// begin charges one sign-in attempt to client. When the attempt is refused it
+// returns how long the client must wait. When it is allowed, the caller must
+// call done exactly once, reporting whether the password matched.
+func (l *loginLimiter) begin(client string) (done func(succeeded bool), retryAfter time.Duration, allowed bool) {
+	select {
+	case l.slots <- struct{}{}:
+	default:
+		return nil, time.Second, false
+	}
+	l.mu.Lock()
+	now := l.now()
+	budget := l.attempts[client]
+	if now.Sub(budget.windowStart) >= sessionLoginWindow {
+		budget = loginBudget{windowStart: now}
+	}
+	if budget.count >= sessionLoginMaxAttempts {
+		l.mu.Unlock()
+		<-l.slots
+		return nil, budget.windowStart.Add(sessionLoginWindow).Sub(now), false
+	}
+	budget.count++
+	l.attempts[client] = budget
+	l.trimLocked(now, client)
+	l.mu.Unlock()
+	return func(succeeded bool) {
+		if succeeded {
+			l.mu.Lock()
+			delete(l.attempts, client)
+			l.mu.Unlock()
+		}
+		<-l.slots
+	}, 0, true
+}
+
+// trimLocked keeps the table within sessionLoginMaxClients. Windows that have
+// ended are dropped first, then the oldest, as SessionStore does. The client
+// being charged is never dropped, so its budget cannot be reset by the trim.
+func (l *loginLimiter) trimLocked(now time.Time, keep string) {
+	if len(l.attempts) <= sessionLoginMaxClients {
+		return
+	}
+	for client, budget := range l.attempts {
+		if client != keep && now.Sub(budget.windowStart) >= sessionLoginWindow {
+			delete(l.attempts, client)
+		}
+	}
+	for len(l.attempts) > sessionLoginMaxClients {
+		var oldest string
+		var oldestStart time.Time
+		found := false
+		for client, budget := range l.attempts {
+			if client != keep && (!found || budget.windowStart.Before(oldestStart)) {
+				oldest, oldestStart, found = client, budget.windowStart, true
+			}
+		}
+		delete(l.attempts, oldest)
+	}
+}
+
+// sessionClientAddress keys sign-in attempts on the TCP peer. Forwarded headers
+// are not read, because a client can set them to any value.
+func sessionClientAddress(req *http.Request) string {
+	host, _, err := net.SplitHostPort(req.RemoteAddr)
+	if err != nil {
+		return req.RemoteAddr
+	}
+	return host
+}
+
+// retryAfterSeconds rounds a wait up to whole seconds, the unit Retry-After uses,
+// and never reports less than one.
+func retryAfterSeconds(wait time.Duration) int {
+	return max(int((wait+time.Second-1)/time.Second), 1)
 }
 
 func sessionTTL(cfg UIConfig, store *SessionStore) time.Duration {

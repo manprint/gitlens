@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -465,6 +466,113 @@ func TestSecureCookie_Resolution(t *testing.T) {
 			require.Equal(t, tt.expected, secureCookie(UIConfig{CookieSecure: tt.setting}, request))
 		})
 	}
+}
+
+// newSessionRoutesWithClock is newSessionRoutes with a controllable clock, so the
+// sign-in budget window can be crossed without waiting for it.
+func newSessionRoutesWithClock(cfg UIConfig, store *SessionStore, now func() time.Time) http.Handler {
+	router := chi.NewRouter()
+	registerSessionRoutes(router, cfg, store, newLoginLimiter(now))
+	return router
+}
+
+// signInFrom posts one password as if sent from remoteAddr.
+func signInFrom(handler http.Handler, remoteAddr, password string) *httptest.ResponseRecorder {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/session", strings.NewReader(`{"password":"`+password+`"}`))
+	request.RemoteAddr = remoteAddr
+	handler.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func TestSessionLogin_LocksOutClientAfterTooManyAttempts(t *testing.T) {
+	cfg := UIConfig{Enabled: true, Password: "correct", SessionTTL: time.Hour, CookieSecure: "false"}
+	now := time.Date(2026, 10, 23, 9, 0, 0, 0, time.UTC)
+	handler := newSessionRoutesWithClock(cfg, NewSessionStore(time.Hour), func() time.Time { return now })
+	const attacker = "203.0.113.9:5000"
+
+	for i := 0; i < sessionLoginMaxAttempts; i++ {
+		require.Equal(t, http.StatusUnauthorized, signInFrom(handler, attacker, "wrong").Code)
+	}
+	refused := signInFrom(handler, attacker, "correct")
+	require.Equal(t, http.StatusTooManyRequests, refused.Code, "the right password is refused during the lockout too")
+	require.NotEmpty(t, refused.Header().Get("Retry-After"))
+	require.Empty(t, refused.Header().Values("Set-Cookie"))
+
+	require.Equal(t, http.StatusNoContent, signInFrom(handler, "198.51.100.4:6000", "correct").Code, "another client address is not locked out")
+
+	now = now.Add(sessionLoginWindow)
+	require.Equal(t, http.StatusNoContent, signInFrom(handler, attacker, "correct").Code, "the budget returns when the window ends")
+}
+
+func TestSessionLogin_SuccessClearsTheClientBudget(t *testing.T) {
+	cfg := UIConfig{Enabled: true, Password: "correct", SessionTTL: time.Hour, CookieSecure: "false"}
+	now := time.Date(2026, 10, 23, 9, 0, 0, 0, time.UTC)
+	handler := newSessionRoutesWithClock(cfg, NewSessionStore(time.Hour), func() time.Time { return now })
+	const client = "203.0.113.10:5000"
+
+	for i := 0; i < sessionLoginMaxAttempts-1; i++ {
+		require.Equal(t, http.StatusUnauthorized, signInFrom(handler, client, "wrong").Code)
+	}
+	require.Equal(t, http.StatusNoContent, signInFrom(handler, client, "correct").Code)
+	for i := 0; i < sessionLoginMaxAttempts; i++ {
+		require.Equal(t, http.StatusUnauthorized, signInFrom(handler, client, "wrong").Code, "guess %d after a success", i+1)
+	}
+}
+
+func TestSessionLogin_ConcurrentGuessesStayWithinBudget(t *testing.T) {
+	cfg := UIConfig{Enabled: true, Password: "correct", SessionTTL: time.Hour, CookieSecure: "false"}
+	handler := newSessionRoutes(cfg, NewSessionStore(time.Hour))
+	const guesses = 40
+	codes := make(chan int, guesses)
+	var wg sync.WaitGroup
+	for i := 0; i < guesses; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			codes <- signInFrom(handler, "203.0.113.20:7000", "wrong").Code
+		}()
+	}
+	wg.Wait()
+	close(codes)
+
+	unauthorized := 0
+	for code := range codes {
+		require.Contains(t, []int{http.StatusUnauthorized, http.StatusTooManyRequests}, code)
+		if code == http.StatusUnauthorized {
+			unauthorized++
+		}
+	}
+	require.LessOrEqual(t, unauthorized, sessionLoginMaxAttempts, "parallel guesses from one address must not exceed its budget")
+}
+
+func TestLoginLimiter_BoundsInFlightChecksAndTable(t *testing.T) {
+	now := time.Date(2026, 10, 23, 9, 0, 0, 0, time.UTC)
+	limiter := newLoginLimiter(func() time.Time { return now })
+
+	dones := make([]func(bool), 0, sessionLoginMaxInFlight)
+	for i := 0; i < sessionLoginMaxInFlight; i++ {
+		done, _, allowed := limiter.begin(fmt.Sprintf("10.0.0.%d", i))
+		require.True(t, allowed)
+		dones = append(dones, done)
+	}
+	_, retryAfter, allowed := limiter.begin("192.0.2.1")
+	require.False(t, allowed, "a full set of checks in flight refuses the next sign-in")
+	require.Positive(t, retryAfter)
+	dones[0](false)
+	done, _, allowed := limiter.begin("192.0.2.1")
+	require.True(t, allowed, "a finished check frees its slot")
+	done(false)
+	for _, release := range dones[1:] {
+		release(false)
+	}
+
+	for i := 0; i < sessionLoginMaxClients+100; i++ {
+		done, _, allowed := limiter.begin(fmt.Sprintf("client-%d", i))
+		require.True(t, allowed)
+		done(false)
+	}
+	require.LessOrEqual(t, len(limiter.attempts), sessionLoginMaxClients)
 }
 
 func newSessionRoutes(cfg UIConfig, store *SessionStore) http.Handler {

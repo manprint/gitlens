@@ -1815,6 +1815,7 @@ paths:
         '204': { description: Session created; the response sets the pglens_session cookie. }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { description: Too many sign-in attempts from this client or too many sign-ins in progress; the Retry-After header gives the wait in seconds. }
 
     get:
       tags: [session]
