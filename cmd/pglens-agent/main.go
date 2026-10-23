@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -194,15 +195,32 @@ func runCheck(dsn string, identityPath string) {
 
 	// Print checks status
 	fmt.Printf("checks\n")
-	allChecks := check.All()
-	mandatoryEnabled := 0
-	mandatoryCount := 0
+	mandatoryCount, mandatoryEnabled := printChecks(os.Stdout, check.All(), role, pgVersion, tier, extensions)
 
-	for _, c := range allChecks {
+	// Print warnings
+	warnings := getCheckWarnings(identityPath)
+	if postureErr == nil && !strings.EqualFold(posture.ReadOnlyDefault, "on") {
+		warnings = append(warnings, fmt.Sprintf("default_transaction_read_only is %q for role %s: pglens sets it in every session, but the role default is the second safeguard (run deploy/sql/monitoring_user.sql)", posture.ReadOnlyDefault, posture.Role))
+	}
+	if len(warnings) > 0 {
+		fmt.Printf("\nwarnings\n")
+		for _, w := range warnings {
+			fmt.Printf("  - %s\n", w)
+		}
+	}
+
+	os.Exit(checkExitCode(mandatoryCount, mandatoryEnabled, pgVersion, postureErr, posture))
+}
+
+// printChecks prints the status of every check for this server and returns how
+// many mandatory checks there are and how many of them are enabled.
+func printChecks(w io.Writer, checks []check.Check, role pgtype.Role, pgVersion pgtype.PGVersion, tier pgtype.PermTier, extensions map[string]bool) (mandatoryCount, mandatoryEnabled int) {
+	for _, c := range checks {
 		req := c.Requires()
 		supported, reason := req.Supports(role, pgVersion, tier, extensions)
 
 		var status string
+		enabled := false
 		if !supported {
 			status = fmt.Sprintf("disabled  — %s", reason)
 		} else if len(req.Roles) > 0 {
@@ -218,45 +236,38 @@ func runCheck(dsn string, identityPath string) {
 				status = "disabled  — requires role=primary or standby with a upstream"
 			} else {
 				status = "enabled"
-				if isMandatory(c.Name()) {
-					mandatoryCount++
-					mandatoryEnabled++
-				}
+				enabled = true
 			}
 		} else {
 			status = "enabled"
-			if isMandatory(c.Name()) {
-				mandatoryCount++
+			enabled = true
+		}
+		// A mandatory check counts whether or not it is enabled. Counting only
+		// the enabled ones made the exit code unable to see a disabled check.
+		if isMandatory(c.Name()) {
+			mandatoryCount++
+			if enabled {
 				mandatoryEnabled++
 			}
 		}
 
-		fmt.Printf("  %-18s %s\n", c.Name(), status)
+		fmt.Fprintf(w, "  %-18s %s\n", c.Name(), status)
 	}
+	return mandatoryCount, mandatoryEnabled
+}
 
-	// Print warnings
-	warnings := getCheckWarnings(identityPath)
-	if postureErr == nil && !strings.EqualFold(posture.ReadOnlyDefault, "on") {
-		warnings = append(warnings, fmt.Sprintf("default_transaction_read_only is %q for role %s: pglens sets it in every session, but the role default is the second safeguard (run deploy/sql/monitoring_user.sql)", posture.ReadOnlyDefault, posture.Role))
-	}
-	if len(warnings) > 0 {
-		fmt.Printf("\nwarnings\n")
-		for _, w := range warnings {
-			fmt.Printf("  - %s\n", w)
-		}
-	}
-
-	// Determine exit code: 0 if all mandatory checks are enabled and the
-	// role cannot write, 1 otherwise
-	exitCode := 0
-	if mandatoryCount > 0 && mandatoryEnabled < mandatoryCount {
-		exitCode = 1
+// checkExitCode is the exit status of `pglens-agent check`, as the README
+// documents it: 0 when every mandatory check is enabled, the server version is
+// supported and the monitoring role cannot write, 1 otherwise. The report says
+// NOT SUPPORTED for a version outside 15-19, so the status must not be 0 for it.
+func checkExitCode(mandatoryCount, mandatoryEnabled int, pgVersion pgtype.PGVersion, postureErr error, posture check.RolePosture) int {
+	if mandatoryEnabled < mandatoryCount || !pgVersion.Supported() {
+		return 1
 	}
 	if postureErr != nil || len(posture.Problems) > 0 {
-		exitCode = 1
+		return 1
 	}
-
-	os.Exit(exitCode)
+	return 0
 }
 
 // formatRolePosture reports whether the role the DSN logs in as could write.
