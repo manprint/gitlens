@@ -567,11 +567,11 @@ func (m *Manager) RefreshCapabilities(ctx context.Context) error {
 // dispatcher a nil agent id (commands disabled until restart) and registered
 // every unreachable target under the zero instance id.
 func (m *Manager) AgentID() uuid.UUID {
-	_, agentID, err := m.localIdentity()
+	store, err := identityStore()
 	if err != nil {
 		return uuid.Nil
 	}
-	return agentID
+	return store.AgentID()
 }
 
 func (m *Manager) InstanceID() pgtype.InstanceID {
