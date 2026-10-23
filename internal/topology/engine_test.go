@@ -1644,3 +1644,67 @@ func TestEngine_SelfRepromotionIsRoleChangeNotFailover(t *testing.T) {
 		t.Fatalf("expected old_primary %v, got %v", self, got)
 	}
 }
+
+// TestEngine_OrphanGapSentTimeStepBackwards — the sent-time test of a gap runs
+// both ways. A sent time that steps backwards from the evidence is less than a
+// window after it, so it holds the episode open, as a short gap does. Only a
+// sent time a whole window past the evidence ends it. A test that accepted a
+// negative difference would end the episode on the first backward step.
+func TestEngine_OrphanGapSentTimeStepBackwards(t *testing.T) {
+	type sendFn func(edges []Edge, role pgtype.Role, sent time.Time) []Event
+	setup := func(t *testing.T) (*clock.Fake, sendFn, []Edge, time.Time) {
+		clk := clock.NewFake(time.Unix(0, 0))
+		e := NewEngine(clk)
+		standby := uuid.New()
+		cID := pgtype.ManualClusterID("cluster1")
+		send := func(edges []Edge, role pgtype.Role, sent time.Time) []Event {
+			var orphans []Event
+			for _, evt := range e.Apply(Observation{InstanceID: standby, ClusterID: cID, Role: role, Timestamp: sent, Edges: edges}) {
+				if evt.Type == EventOrphanStandby {
+					orphans = append(orphans, evt)
+				}
+			}
+			return orphans
+		}
+		return clk, send, []Edge{{From: standby, To: uuid.New(), Confidence: "low"}}, clk.Now()
+	}
+
+	t.Run("backward steps hold the episode", func(t *testing.T) {
+		clk, send, lowEdge, start := setup(t)
+		send(lowEdge, pgtype.RoleStandby, start) // evidence sent at T starts the episode
+		clk.Advance(100 * time.Second)
+		send(nil, pgtype.RoleStandby, start.Add(-120*time.Second)) // quiet, sent before the evidence
+		clk.Advance(time.Millisecond)
+		send(nil, pgtype.RoleStandby, start.Add(-90*time.Second)) // quiet, still before the evidence
+		clk.Advance(time.Millisecond)
+		got := send(lowEdge, pgtype.RoleStandby, start.Add(-80*time.Second))
+		if len(got) != 1 {
+			t.Fatalf("expected the episode to still fire, got %d orphan_standby: the backward steps ended it", len(got))
+		}
+		if d, _ := got[0].Payload["duration_seconds"].(float64); d != clk.Now().Sub(start).Seconds() {
+			t.Fatalf("orphan duration %v, want %v: the episode from its start", got[0].Payload["duration_seconds"], clk.Now().Sub(start).Seconds())
+		}
+	})
+
+	t.Run("a sent time a window past the evidence ends it", func(t *testing.T) {
+		clk, send, lowEdge, start := setup(t)
+		send(lowEdge, pgtype.RoleStandby, start)
+		clk.Advance(100 * time.Second)
+		send(nil, pgtype.RoleStandby, start.Add(-120*time.Second))
+		clk.Advance(time.Millisecond)
+		send(nil, pgtype.RoleStandby, start.Add(60*time.Second)) // a window after the evidence: the episode is over
+		clk.Advance(time.Millisecond)
+		restart := clk.Now()
+		if got := send(lowEdge, pgtype.RoleStandby, start.Add(61*time.Second)); len(got) != 0 {
+			t.Fatalf("a new orphan emitted at its own start, duration %v: the old episode was not ended", got[0].Payload["duration_seconds"])
+		}
+		clk.Advance(60 * time.Second)
+		got := send(lowEdge, pgtype.RoleStandby, start.Add(121*time.Second))
+		if len(got) != 1 {
+			t.Fatalf("expected one orphan_standby a window after the restart, got %d", len(got))
+		}
+		if d, _ := got[0].Payload["duration_seconds"].(float64); d != clk.Now().Sub(restart).Seconds() {
+			t.Fatalf("orphan duration %v, want %v: the new episode from its own start", got[0].Payload["duration_seconds"], clk.Now().Sub(restart).Seconds())
+		}
+	})
+}
