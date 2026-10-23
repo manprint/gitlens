@@ -35,6 +35,15 @@ function sessionQuery(value: unknown): string {
   return value.split(/\r?\n/u, 1)[0]?.trim() ?? '—'
 }
 
+// Two decimals would show a steady trickle of deadlocks as 0.00. Below 0.01
+// per second the rate keeps two significant digits so it stays visible.
+function deadlockRateText(rate: number): string {
+  if (rate > 0 && rate < 0.01) {
+    return new Intl.NumberFormat('en-US', { maximumSignificantDigits: 2 }).format(rate)
+  }
+  return rate.toFixed(2)
+}
+
 function ActiveSessions({
   sessions,
   currentTier,
@@ -234,7 +243,7 @@ export function ActivitySection({
         <MetricTile label="Frozen-XID age" value={valueOrUnknown(frozenXidAge)} />
         <MetricTile
           label="Deadlock rate"
-          value={rate === null ? <Unknown /> : rate.toFixed(2)}
+          value={rate === null ? <Unknown /> : deadlockRateText(rate)}
           unit="per second"
         />
       </div>

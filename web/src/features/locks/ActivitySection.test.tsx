@@ -100,6 +100,20 @@ describe('ActivitySection', () => {
     ).toBeInTheDocument()
   })
 
+  it('UI-LOCK-025 keeps a small deadlock rate visible instead of rounding it to zero', () => {
+    render(
+      <ActivitySection
+        response={response({
+          // About 14 deadlocks an hour: two decimals would read 0.00 per second.
+          pg_deadlocks_total: [metric(0.0039, 0, { database: 'app' })],
+        })}
+        now={NOW}
+      />,
+    )
+
+    expect(screen.getByRole('article', { name: 'Deadlock rate' })).toHaveTextContent('0.0039')
+  })
+
   it('renders reported application counts and remains accessible', async () => {
     vi.useRealTimers()
     const { container } = render(
