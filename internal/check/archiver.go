@@ -44,9 +44,13 @@ func (c *archiverCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 	}
 	var archived, failed float64
 	var lastArchived, lastFailed, statsReset *time.Time
-	row := conn.QueryRow(ctx, `SELECT archived_count, last_archived_wal, last_archived_time, failed_count, last_failed_wal, last_failed_time, stats_reset FROM pg_stat_archiver`)
+	// The ages are measured on the server clock, read in the same statement
+	// as the timestamps they are measured from. The agent's clock may be
+	// skewed from the server's, which would move every age by the skew.
+	var now time.Time
+	row := conn.QueryRow(ctx, `SELECT archived_count, last_archived_wal, last_archived_time, failed_count, last_failed_wal, last_failed_time, stats_reset, now() FROM pg_stat_archiver`)
 	var lastArchivedWAL, lastFailedWAL *string
-	if err := row.Scan(&archived, &lastArchivedWAL, &lastArchived, &failed, &lastFailedWAL, &lastFailed, &statsReset); err != nil {
+	if err := row.Scan(&archived, &lastArchivedWAL, &lastArchived, &failed, &lastFailedWAL, &lastFailed, &statsReset, &now); err != nil {
 		return Result{}, err
 	}
 	result.StatsReset = statsReset
@@ -55,7 +59,6 @@ func (c *archiverCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 		pgtype.Metric{Name: "pg_archiver_failed_total", Value: failed, Kind: pgtype.KindCounter},
 		pgtype.Metric{Name: "pg_archiver_failed_ratio", Value: archiverFailedRatio(lastArchived, lastFailed), Kind: pgtype.KindGauge},
 	)
-	now := t.Clock().Now()
 	if lastArchived != nil {
 		result.Metrics = append(result.Metrics, pgtype.Metric{Name: "pg_archiver_last_archived_age_seconds", Value: nonNegativeAge(now, *lastArchived), Kind: pgtype.KindGauge})
 	}

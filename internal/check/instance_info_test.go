@@ -1,11 +1,37 @@
 package check
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/manprint/pglens/internal/clock"
 	"github.com/stretchr/testify/require"
 )
+
+// TestInstanceInfo_UptimeIsMeasuredOnTheServerClock: the agent clock runs an
+// hour ahead of the server, and the uptime must still be the server's.
+func TestInstanceInfo_UptimeIsMeasuredOnTheServerClock(t *testing.T) {
+	serverNow := time.Now()
+	start := serverNow.Add(-time.Hour)
+	conn := &mockConn{
+		queryRowFunc: func(context.Context, string, ...any) pgx.Row {
+			return &mockRow{vals: []any{"7381927364512345678", false, 160004, start, nil, nil, serverNow}}
+		},
+	}
+	r, err := (&instanceInfoCheck{}).Scrape(context.Background(), &SimpleTarget{
+		ConnFunc: func(context.Context) (Conn, error) { return conn, nil }, ClockValue: clock.NewFake(serverNow.Add(time.Hour)),
+	})
+	require.NoError(t, err)
+	for _, m := range r.Metrics {
+		if m.Name == "pg_uptime_seconds" {
+			require.InDelta(t, 3600.0, m.Value, 1.0)
+			return
+		}
+	}
+	require.Fail(t, "pg_uptime_seconds is missing")
+}
 
 func TestBuildInstanceInfoResult(t *testing.T) {
 	t.Parallel()

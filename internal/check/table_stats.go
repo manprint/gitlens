@@ -113,7 +113,13 @@ WHERE c.relkind = 'r'`)
 		byKey[candidate.Key] = r
 		reported = append(reported, candidate)
 	}
-	result := tableStatsResult(reported, byKey, t.Clock().Now())
+	// The ages are measured on the server clock: the agent's clock may be
+	// skewed from the server's, which would move every age by the skew.
+	var now time.Time
+	if err := conn.QueryRow(ctx, "SELECT now()").Scan(&now); err != nil {
+		return Result{}, err
+	}
+	result := tableStatsResult(reported, byKey, now)
 	// Truncated is the hard MaxKeys cap only. Reporting the top-N subset of
 	// a database with more tables than that is the normal case, and flagging
 	// it as truncated kept cardinality_budget_exceeded firing on every real

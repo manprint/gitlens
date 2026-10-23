@@ -349,7 +349,7 @@ func TestInstanceInfoCheck_Scrape_Happy(t *testing.T) {
 		},
 		queryRowFunc: func(ctx context.Context, sql string, args ...any) pgx.Row {
 			return &mockRow{
-				vals: []any{&sysID, false, 150000, time.Now(), &addr, &port},
+				vals: []any{&sysID, false, 150000, time.Now(), &addr, &port, time.Now()},
 			}
 		},
 	}

@@ -119,6 +119,19 @@ func TestArchiver_ReadyFilesNeedPgMonitor(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestArchiver_AgeIsMeasuredOnTheServerClock: the agent clock runs five minutes
+// ahead of the server. The age of the last archived segment must still be the
+// server's, or a healthy archiver would look stalled.
+func TestArchiver_AgeIsMeasuredOnTheServerClock(t *testing.T) {
+	archived := time.Now().Add(-10 * time.Second)
+	conn := archiverMockConn("on", []any{1.0, nil, &archived, 0.0, nil, nil, nil}, nil, &mockRow{vals: []any{0.0}})
+	r, err := (&archiverCheck{}).Scrape(context.Background(), &SimpleTarget{
+		ConnFunc: func(context.Context) (Conn, error) { return conn, nil }, ClockValue: clock.NewFake(time.Now().Add(5 * time.Minute)),
+	})
+	require.NoError(t, err)
+	require.InDelta(t, 10.0, metricValue(r, "pg_archiver_last_archived_age_seconds", nil), 1.0)
+}
+
 func scrapeArchiverForTest(t *testing.T, mode string, stats []any, progress [][]any) Result {
 	t.Helper()
 	return scrapeArchiverWithReady(t, mode, stats, progress, &mockRow{vals: []any{0.0}})
@@ -145,7 +158,8 @@ func archiverMockConn(mode string, stats []any, progress [][]any, ready *mockRow
 			case strings.Contains(query, "pg_postmaster_start_time"):
 				return &mockRow{vals: []any{time.Now().Add(-2 * time.Hour)}}
 			default:
-				return &mockRow{vals: stats}
+				// The statistics row ends with the server's now(), read with them.
+				return &mockRow{vals: append(append([]any{}, stats...), time.Now())}
 			}
 		},
 		queryFunc: func(context.Context, string, ...any) (pgx.Rows, error) {

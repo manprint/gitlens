@@ -42,7 +42,10 @@ func TestTableStats_ScrapeCoversRows(t *testing.T) {
 				int64(5), int64(6), uint32(7),
 			}}}, nil
 		},
-		queryRowFunc: func(context.Context, string, ...any) pgx.Row {
+		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			if sql == "SELECT now()" {
+				return &mockRow{vals: []any{time.Now()}}
+			}
 			return &mockRow{vals: []any{int64(100), int64(80), int64(20)}}
 		},
 	}
@@ -50,6 +53,41 @@ func TestTableStats_ScrapeCoversRows(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, r.Metrics)
 	require.Equal(t, 100.0, metricValue(r, "pg_table_total_bytes", map[string]string{"schemaname": "public", "relname": "t"}))
+}
+
+// TestTableStats_AgeIsMeasuredOnTheServerClock: the agent clock runs an hour
+// ahead of the server. A table analyzed ten seconds ago must still read as ten
+// seconds, not as an hour and ten seconds.
+func TestTableStats_AgeIsMeasuredOnTheServerClock(t *testing.T) {
+	serverNow := time.Now()
+	analyzed := serverNow.Add(-10 * time.Second)
+	conn := &mockConn{
+		queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			if !strings.Contains(sql, "pg_stat_user_tables") {
+				return &mockRows{}, nil
+			}
+			return &mockRows{rows: [][]any{{
+				"public", "t",
+				int64(1), int64(2), int64(3), int64(4),
+				int64(5), int64(6), int64(7), int64(8),
+				int64(9), int64(10), int64(11),
+				nil, nil, &analyzed, nil,
+				float64(1), float64(2), int64(3), float64(4),
+				int64(5), int64(6), uint32(7),
+			}}}, nil
+		},
+		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			if sql == "SELECT now()" {
+				return &mockRow{vals: []any{serverNow}}
+			}
+			return &mockRow{vals: []any{int64(100), int64(80), int64(20)}}
+		},
+	}
+	target := maintenanceTarget(conn)
+	target.ClockValue = clock.NewFake(serverNow.Add(time.Hour))
+	r, err := (&tableStatsCheck{selectors: maintenanceCardinality()}).Scrape(context.Background(), target)
+	require.NoError(t, err)
+	require.InDelta(t, 10.0, metricValue(r, "pg_table_last_analyze_age_seconds", map[string]string{"schemaname": "public", "relname": "t"}), 1.0)
 }
 
 func TestIndexStats_ScrapeCoversRows(t *testing.T) {
@@ -133,6 +171,8 @@ func TestRelationSizes_VanishedRelationIsLeftOut(t *testing.T) {
 			return &mockRow{vals: []any{nil, nil}}
 		case bloatSizeQuery:
 			return &mockRow{vals: []any{nil}}
+		case "SELECT now()":
+			return &mockRow{vals: []any{time.Now()}}
 		}
 		return &mockRow{vals: []any{int64(0)}}
 	}
