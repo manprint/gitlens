@@ -14,9 +14,11 @@ import (
 // removed before hashing and the result never contains any part of the DSN,
 // so a fingerprint is safe to log; a DSN never is.
 //
-// Normalization, in order: parse the DSN; drop the password; lowercase host;
-// apply the default port 5432 when absent; sort query parameters by key and
-// drop those that do not affect target identity (application_name,
+// Normalization, in order: parse the DSN; drop the password; move a host and
+// port given in the query into the authority when the authority has none
+// (Unix socket and host-in-query DSNs); lowercase host unless it is a socket
+// directory; apply the default port 5432 when absent; sort query parameters by
+// key and drop those that do not affect target identity (application_name,
 // connect_timeout, statement_timeout, sslmode); re-render; SHA-256; hex.
 func Fingerprint(dsn string) (string, error) {
 	if dsn == "" {
@@ -29,9 +31,6 @@ func Fingerprint(dsn string) (string, error) {
 	if u.Scheme != "postgres" && u.Scheme != "postgresql" {
 		return "", fmt.Errorf("fingerprint: unsupported scheme %q", u.Scheme)
 	}
-	if u.Host == "" {
-		return "", fmt.Errorf("fingerprint: missing host")
-	}
 
 	// User: keep username, drop password
 	var user string
@@ -39,12 +38,30 @@ func Fingerprint(dsn string) (string, error) {
 		user = u.User.Username()
 	}
 
-	hostname := u.Hostname()
-	if hostname == "" {
-		return "", fmt.Errorf("fingerprint: missing hostname")
+	// Query params: sort keys, drop non-identity params
+	values := u.Query()
+
+	// pgx takes the host and port from the query when the authority has no
+	// host, as TargetIsLocal reads them: postgres:///db?host=/var/run/postgresql
+	// names a socket directory. They are moved into the authority here, so
+	// the same server fingerprints the same however the DSN spells it.
+	var hostname, port string
+	if u.Host != "" {
+		hostname = u.Hostname()
+		port = u.Port()
+	} else {
+		hostname = values.Get("host")
+		port = values.Get("port")
+		values.Del("host")
+		values.Del("port")
 	}
-	hostname = strings.ToLower(hostname)
-	port := u.Port()
+	if hostname == "" {
+		return "", fmt.Errorf("fingerprint: missing host")
+	}
+	// A socket directory is a case-sensitive path, not a DNS name.
+	if !strings.HasPrefix(hostname, "/") {
+		hostname = strings.ToLower(hostname)
+	}
 	if port == "" {
 		port = "5432"
 	}
@@ -53,14 +70,12 @@ func Fingerprint(dsn string) (string, error) {
 	// Database (path without leading slash)
 	dbname := strings.TrimPrefix(u.Path, "/")
 
-	// Query params: sort keys, drop non-identity params
 	ignore := map[string]bool{
 		"application_name":  true,
 		"connect_timeout":   true,
 		"statement_timeout": true,
 		"sslmode":           true,
 	}
-	values := u.Query()
 	var keys []string
 	for k := range values {
 		if ignore[strings.ToLower(k)] {
