@@ -188,7 +188,7 @@ export function DataTable<TData extends RowData>({
       </div>
 
       <footer className="text-muted-foreground text-sm">
-        {budget !== undefined ? (
+        {budget !== undefined && total > data.length ? (
           <Truncated shown={data.length} budget={budget} scope={scope} />
         ) : (
           <span>

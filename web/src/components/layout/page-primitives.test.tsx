@@ -96,6 +96,22 @@ describe('page scaffolding primitives', () => {
     expect(screen.getByText(/Showing 2 of 2 findings/)).toHaveTextContent('truncated; budget 2')
   })
 
+  it('WU-27 keeps the plain footer when the rows are the whole result', () => {
+    renderWithProviders(
+      <DataTable
+        columns={columns}
+        data={rows}
+        total={rows.length}
+        budget={2}
+        scope="findings"
+        emptyState={<p>No findings</p>}
+      />,
+    )
+
+    expect(screen.getByText(/Showing 2 of 2 findings/)).not.toHaveTextContent('truncated')
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
   it('UI-LAYOUT-006 virtualizes tables above 200 rows', () => {
     const manyRows = Array.from({ length: 250 }, (_, index) => ({
       name: `Row ${index}`,
