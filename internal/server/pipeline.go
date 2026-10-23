@@ -955,14 +955,10 @@ func selfMetricRows(env wire.Envelope, inst wire.Instance, tenantID string, clus
 		sent = env.SentAt
 	}
 	if !sent.IsZero() {
-		skew := now.Sub(sent).Seconds()
-		if skew < 0 {
-			skew = -skew
-		}
 		values = append(values, struct {
 			name  string
 			value float64
-		}{"pglens_agent_clock_skew_seconds", skew})
+		}{"pglens_agent_clock_skew_seconds", clockSkewSeconds(now, sent)})
 	}
 	rows := make([]store.MetricRow, 0, len(values))
 	for _, v := range values {

@@ -94,8 +94,9 @@ func TestGauge(t *testing.T) {
 	require.Equal(t, 0.0, g.Get())
 }
 
+// TestIncHelpers is not parallel: it asserts the exact value of the clock skew
+// gauge, which every push in the parallel ingest tests now sets.
 func TestIncHelpers(t *testing.T) {
-	t.Parallel()
 	IncIngestEnvelopes("ok")
 	require.GreaterOrEqual(t, pglensIngestEnvelopesTotal.Get("ok"), 1.0)
 	IncIngestRejected("bad")

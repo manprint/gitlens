@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"time"
 
@@ -65,7 +66,6 @@ func (b *budgetReader) Read(p []byte) (int, error) {
 }
 
 const maxSampleAge = 12 * time.Hour
-const futureSkewThreshold = 30 * time.Second
 
 // transmittedAt reads wire.TransmittedAtHeader, falling back to the
 // envelope's SentAt for agents that predate the header.
@@ -76,6 +76,14 @@ func transmittedAt(r *http.Request, sentAt time.Time) time.Time {
 		}
 	}
 	return sentAt
+}
+
+// clockSkewSeconds is the agent's clock offset from the server, without a
+// sign: an agent behind by a minute is as broken as one ahead of it, and the
+// clock_skew alert reads the magnitude. Both the self-metric series and the
+// /metrics gauge are fed from here, so they cannot disagree.
+func clockSkewSeconds(now, sent time.Time) float64 {
+	return math.Abs(now.Sub(sent).Seconds())
 }
 
 // IngestHandler decodes and validates the wire envelope, resolves identity
@@ -175,15 +183,10 @@ func ingestHandler(auth *Auth, inv *Inventory, pipeline *Pipeline, slots chan st
 			writeError(w, http.StatusBadRequest, "samples too old", "")
 			return
 		}
-		// Clock skew detection (log, not reject). Measured against the
-		// moment the agent transmitted the request, not SentAt: an envelope
-		// replayed from the agent's buffer after an outage was queued hours
-		// ago, and that delay is not skew.
+		// Clock skew is measured against the moment the agent transmitted the
+		// request, not SentAt: an envelope replayed from the agent's buffer
+		// after an outage was queued hours ago, and that delay is not skew.
 		env.TransmittedAt = transmittedAt(r, env.SentAt)
-		skewed := env.TransmittedAt.After(time.Now().Add(futureSkewThreshold))
-		if skewed {
-			ObserveAgentClockSkew(time.Since(env.TransmittedAt).Seconds())
-		}
 
 		ctx := r.Context()
 
@@ -208,6 +211,9 @@ func ingestHandler(auth *Auth, inv *Inventory, pipeline *Pipeline, slots chan st
 			writeError(w, http.StatusUnauthorized, "revoked", "")
 			return
 		}
+		// Set on every accepted push, not only when the agent is far off: a gauge
+		// that moved only then kept its last large value for good.
+		ObserveAgentClockSkew(clockSkewSeconds(time.Now(), env.TransmittedAt))
 
 		// The contract requires the envelope's agent_id: it is the agent a new
 		// instance is booked to, and revocation matches agents by it. An

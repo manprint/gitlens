@@ -271,6 +271,35 @@ func TestIngest_TransmittedAtHeaderIsTheSkewReference(t *testing.T) {
 	t.Fatal("no clock skew sample")
 }
 
+// TestIngest_ClockSkewGaugeIsAbsoluteAndCurrent covers SI-22: /metrics and the
+// stored pglens_agent_clock_skew_seconds series report the same magnitude, and
+// the gauge follows every accepted push instead of keeping the last large skew.
+// It is not parallel: the gauge is package-wide, and the parallel tests above
+// push envelopes that set it too.
+func TestIngest_ClockSkewGaugeIsAbsoluteAndCurrent(t *testing.T) {
+	h := IngestHandler(NewAuth("token"), NewInventory(nil), NewPipeline(nil, nil))
+	push := func(transmitted time.Time) {
+		t.Helper()
+		env := wire.Envelope{ProtocolVersion: 1, AgentID: uuid.NewString(), SentAt: transmitted}
+		body, _ := json.Marshal(env)
+		req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer token")
+		req.Header.Set(wire.TransmittedAtHeader, transmitted.UTC().Format(time.RFC3339Nano))
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	}
+
+	push(time.Now().Add(40 * time.Second))
+	require.InDelta(t, 40, pglensAgentClockSkewSeconds.Get(), 1, "an agent 40s ahead reads +40, as the stored series does")
+
+	push(time.Now().Add(-20 * time.Second))
+	require.InDelta(t, 20, pglensAgentClockSkewSeconds.Get(), 1, "an agent behind by 20s reads +20")
+
+	push(time.Now())
+	require.InDelta(t, 0, pglensAgentClockSkewSeconds.Get(), 1, "an in-sync push clears the earlier skew")
+}
+
 // TestIngest_ErrorBodiesAreJSON: a decode error quotes the offending
 // character, and pasting it unescaped into a Sprintf'd body made the error
 // response itself invalid JSON (sent as text/plain).
