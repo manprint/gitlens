@@ -505,3 +505,46 @@ func TestStaleness_INT_STALE_004_RevokedAgentEmitsNoOutage(t *testing.T) {
 		require.Equal(t, 1, n, "healthy silent instance must emit %s", typ)
 	}
 }
+
+// TestINTSTALE012_RevokedPrimaryRaisesNoNoPrimary: a revoked agent is out of
+// monitoring by design, so the primary it reported is not a primary its cluster
+// lost. A cluster whose only primary is revoked raises no no_primary_in_cluster,
+// while a cluster whose primary is not revoked still does.
+func TestINTSTALE012_RevokedPrimaryRaisesNoNoPrimary(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	revokedCID, liveCID := store.ToDB(pgtype.ClusterID(12)), store.ToDB(pgtype.ClusterID(13))
+	revokedAgent, liveAgent := uuid.New(), uuid.New()
+	for _, agent := range []uuid.UUID{revokedAgent, liveAgent} {
+		_, err := pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+		require.NoError(t, err)
+	}
+	_, err := pool.Exec(ctx, `UPDATE agents SET revoked_at = now() WHERE agent_id = $1`, revokedAgent)
+	require.NoError(t, err)
+	for cid, agent := range map[int64]uuid.UUID{revokedCID: revokedAgent, liveCID: liveAgent} {
+		_, err = pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual')`, cid)
+		require.NoError(t, err)
+		_, err = pool.Exec(ctx, `INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen) VALUES ($1,'default',$2,$3,'10.0.0.12',5432,170000,'primary','T0', now() - interval '5 minutes')`, uuid.New(), cid, agent)
+		require.NoError(t, err)
+	}
+
+	fc := clock.NewFake(time.Now())
+	s := NewStaleness(pool, fc)
+	s.mu.Lock()
+	s.conn = mustAcquire(t, pool)
+	s.hasLock = true
+	// Both clusters had a primary, seen two minutes ago: past noPrimaryThreshold.
+	s.clusterPrimarySeen[fmt.Sprintf("%d", revokedCID)] = fc.Now().Add(-2 * time.Minute)
+	s.clusterPrimarySeen[fmt.Sprintf("%d", liveCID)] = fc.Now().Add(-2 * time.Minute)
+	s.mu.Unlock()
+	require.NoError(t, s.Evaluate(ctx))
+
+	noPrimary := func(cid int64) int {
+		var n int
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='no_primary_in_cluster' AND cluster_id=$1`, cid).Scan(&n))
+		return n
+	}
+	require.Zero(t, noPrimary(revokedCID), "a cluster whose only primary is revoked must raise no no_primary_in_cluster")
+	require.Equal(t, 1, noPrimary(liveCID), "a cluster whose primary went silent must still raise no_primary_in_cluster")
+}

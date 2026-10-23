@@ -530,6 +530,12 @@ func (s *Staleness) Evaluate(ctx context.Context) error {
 			return fmt.Errorf("scan instance: %w", scanErr)
 		}
 		instances = append(instances, instInfo{id: iid, clusterID: cid, lastSeen: lastSeen, role: role, agentID: agentID, revoked: revoked})
+		// A revoked agent's instances are out of monitoring by design. The primary
+		// one reported is not a primary its cluster has lost, so it neither makes
+		// the cluster a subject of the no-primary check nor counts as its primary.
+		if revoked {
+			continue
+		}
 		clusterIDs[cid] = struct{}{}
 		// A stale primary (its agent has gone silent — no update ever
 		// retroactively changes `role` once that happens) must not count as
