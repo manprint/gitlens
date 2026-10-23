@@ -68,8 +68,10 @@ func (p *Pipeline) maybeEvict() {
 	// The topology engine accumulates exactly the same way the delta engine
 	// does — one entry per instance, forever — and was never swept.
 	p.topo.Evict(cutoff)
+	// A mark ahead of the clock is ignored by countChecks, so it is dropped here
+	// too rather than kept until the clock reaches it.
 	for key, ts := range p.checkCounted {
-		if ts.Before(cutoff) {
+		if ts.Before(cutoff) || ts.After(now) {
 			delete(p.checkCounted, key)
 		}
 	}
@@ -1074,11 +1076,17 @@ type checkOutcome struct {
 // arrive again; a result counts only when it is newer than the last one
 // counted for its check, database and instance. Counting before the commit
 // counted a rolled-back envelope, and every resend of a committed one.
+//
+// A mark stamped ahead of the server clock comes from an agent whose clock is
+// ahead. Honouring it would hide every real result until the server clock
+// caught up with it, so it is ignored while it is ahead. Once the clock passes
+// it, a resend of the same result is recognised again.
 func (p *Pipeline) countChecks(outcomes []checkOutcome) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	now := p.clock.Now()
 	for _, o := range outcomes {
-		if last, ok := p.checkCounted[o.checkCountKey]; ok && !o.ts.After(last) {
+		if last, ok := p.checkCounted[o.checkCountKey]; ok && !last.After(now) && !o.ts.After(last) {
 			continue
 		}
 		p.checkCounted[o.checkCountKey] = o.ts

@@ -347,6 +347,62 @@ func TestPipeline_MaybeEvict(t *testing.T) {
 	// concurrent safety check with multiple calls
 }
 
+// TestPipeline_FutureStampedResultDoesNotHideLaterResults: an agent whose clock
+// was stepped forward stamps its results ahead of the server. The mark those
+// results leave must not hide the real results that follow, or every check of
+// that instance reads as frozen until the server clock catches up.
+func TestPipeline_FutureStampedResultDoesNotHideLaterResults(t *testing.T) {
+	t.Parallel()
+	fc := clock.NewFake(time.Now())
+	p := NewPipeline(nil, fc)
+	instID := uuid.New()
+	key := checkKey{instance: instID.String(), check: "activity"}
+	ck := checkCountKey{instance: instID, check: "activity"}
+	before := pglensCheckOKTotal.Get(key)
+
+	p.countChecks([]checkOutcome{{checkCountKey: ck, ts: fc.Now().Add(3 * time.Hour)}})
+	for range 5 {
+		fc.Advance(time.Second)
+		p.countChecks([]checkOutcome{{checkCountKey: ck, ts: fc.Now()}})
+	}
+	require.Equal(t, before+6, pglensCheckOKTotal.Get(key), "the future-stamped result and the five real ones all count")
+}
+
+// TestPipeline_ResendOfAheadStampedResultCountsOnce: a result stamped a little
+// ahead of the server is counted, and its resend is recognised once the server
+// clock has passed its stamp. Clamping the mark to the clock would count the
+// resend a second time.
+func TestPipeline_ResendOfAheadStampedResultCountsOnce(t *testing.T) {
+	t.Parallel()
+	fc := clock.NewFake(time.Now())
+	p := NewPipeline(nil, fc)
+	instID := uuid.New()
+	key := checkKey{instance: instID.String(), check: "activity"}
+	ck := checkCountKey{instance: instID, check: "activity"}
+	ts := fc.Now().Add(300 * time.Millisecond)
+	before := pglensCheckOKTotal.Get(key)
+
+	p.countChecks([]checkOutcome{{checkCountKey: ck, ts: ts}})
+	fc.Advance(2 * time.Second)
+	p.countChecks([]checkOutcome{{checkCountKey: ck, ts: ts}})
+	require.Equal(t, before+1, pglensCheckOKTotal.Get(key), "a resend of a result counted once is not counted again")
+}
+
+// TestPipeline_MaybeEvictDropsMarksAheadOfTheClock: a mark ahead of the clock
+// does nothing, so it is removed with the old ones instead of being kept until
+// the clock reaches it.
+func TestPipeline_MaybeEvictDropsMarksAheadOfTheClock(t *testing.T) {
+	t.Parallel()
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	fc := clock.NewFake(start)
+	p := NewPipeline(nil, fc)
+	ck := checkCountKey{instance: uuid.New(), check: "activity"}
+	p.checkCounted[ck] = start.Add(3 * time.Hour)
+	fc.Advance(11 * time.Minute)
+	p.maybeEvict()
+	require.NotContains(t, p.checkCounted, ck)
+}
+
 func TestPipeline_GaugeBypassesDelta(t *testing.T) {
 	t.Parallel()
 	p := NewPipeline(nil, clock.NewFake(time.Now()))
