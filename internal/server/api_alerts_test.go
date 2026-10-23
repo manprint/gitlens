@@ -30,8 +30,9 @@ func serveAlert(t *testing.T, api *AlertAPI, method, path, body string) *httptes
 }
 
 type alertAPITestStore struct {
-	alerts []alert.Alert
-	rules  []alert.Rule
+	alerts  []alert.Alert
+	rules   []alert.Rule
+	filters []alert.Filter
 }
 
 func (s *alertAPITestStore) Rules(context.Context) ([]alert.Rule, error) { return s.rules, nil }
@@ -45,7 +46,8 @@ func (s *alertAPITestStore) ClaimNotification(context.Context, string, string, s
 func (s *alertAPITestStore) MarkNotification(context.Context, string, string, string, bool, int, error) error {
 	return nil
 }
-func (s *alertAPITestStore) Active(context.Context, alert.Filter) ([]alert.Alert, error) {
+func (s *alertAPITestStore) Active(_ context.Context, f alert.Filter) ([]alert.Alert, error) {
+	s.filters = append(s.filters, f)
 	return s.alerts, nil
 }
 
@@ -59,6 +61,9 @@ func TestAlerts_DefaultFilterIsPendingAndFiring(t *testing.T) {
 	var got []alertJSON
 	require.NoError(t, json.Unmarshal(r.Body.Bytes(), &got))
 	require.Len(t, got, 2)
+	// The default must send no state filter: a pending filter asked the store for
+	// pending rows only, and the engine never persists those, so it returned [].
+	require.Equal(t, []alert.Filter{{}}, st.filters)
 }
 
 func TestAlerts_RejectsUnknownState(t *testing.T) {

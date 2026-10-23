@@ -143,12 +143,9 @@ func (a *AlertAPI) listAlerts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f := alert.Filter{State: alert.State(r.URL.Query().Get("state")), Severity: alert.Severity(r.URL.Query().Get("severity")), RuleID: r.URL.Query().Get("rule_id"), InstanceID: r.URL.Query().Get("instance_id")}
-	if f.State == "" {
-		f.State = alert.StatePending
-	}
-	if state := r.URL.Query().Get("state"); state == "" {
-		f.State = alert.StatePending
-	}
+	// Without a state the store answers every active alert, pending and firing.
+	// A pending filter matched nothing, because the engine does not persist
+	// pending episodes yet.
 	if state := r.URL.Query().Get("state"); state == "all" {
 		f.State = ""
 	}

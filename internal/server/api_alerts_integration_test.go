@@ -65,6 +65,35 @@ func TestAlertAPI_INT_ALERTAPI_003_DetailFindsSlashedKey(t *testing.T) {
 	require.Contains(t, w.Body.String(), `"alert_key":"`+key+`"`)
 }
 
+// TestAlertAPI_INT_ALERTAPI_005_DefaultListsActiveAlerts: with no state the
+// list must answer the active alerts from the real store, not an empty set.
+// A stored resolved alert stays out of the default.
+func TestAlertAPI_INT_ALERTAPI_005_DefaultListsActiveAlerts(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	// truncateAll leaves the alerts table alone, so earlier tests' rows must go.
+	_, err := pool.Exec(contextBackground(), `DELETE FROM alerts`)
+	require.NoError(t, err)
+	st := alert.NewPgStore(pool)
+	ctx := contextBackground()
+	now := time.Now().UTC()
+	resolvedAt := now
+	for _, a := range []alert.Alert{
+		{Key: "replica_lag/firing/", RuleID: "replica_lag", Severity: alert.SeverityWarning, State: alert.StateFiring, Summary: "lag", StartedAt: now, LastEvalAt: now, Labels: map[string]string{}},
+		{Key: "replica_lag/resolved/", RuleID: "replica_lag", Severity: alert.SeverityWarning, State: alert.StateResolved, Summary: "lag", StartedAt: now, LastEvalAt: now, ResolvedAt: &resolvedAt, Labels: map[string]string{}},
+	} {
+		require.NoError(t, st.Upsert(ctx, a))
+	}
+	r := alertRouter(NewAlertAPI(pool, st))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/alerts", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var got []alertJSON
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	require.Len(t, got, 1, w.Body.String())
+	require.Equal(t, "replica_lag/firing/", got[0].Key)
+}
+
 // TestAlertAPI_INT_ALERTAPI_004_StoredNullLabelsRenderAsObject: a row stored
 // with a nil label map holds JSON null, and the API must still answer labels
 // as an object and resolved_at as null.

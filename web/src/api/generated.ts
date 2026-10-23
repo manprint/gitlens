@@ -1871,6 +1871,7 @@ export interface operations {
     getAlerts: {
         parameters: {
             query?: {
+                /** @description Omitted returns the pending and firing alerts. */
                 state?: "pending" | "firing" | "resolved" | "all";
                 severity?: string;
                 rule_id?: string;

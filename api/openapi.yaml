@@ -1421,7 +1421,11 @@ paths:
       operationId: getAlerts
       summary: List alerts and their suppression state.
       parameters:
-        - { name: state, in: query, required: false, schema: { type: string, enum: [pending, firing, resolved, all], default: pending } }
+        - name: state
+          in: query
+          required: false
+          schema: { type: string, enum: [pending, firing, resolved, all] }
+          description: Omitted returns the pending and firing alerts.
         - { name: severity, in: query, required: false, schema: { type: string } }
         - { name: rule_id, in: query, required: false, schema: { type: string } }
         - { name: instance_id, in: query, required: false, schema: { $ref: '#/components/schemas/InstanceId' } }
