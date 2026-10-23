@@ -1,8 +1,10 @@
 # Standalone example deployment. Build the images first with `make build-images`.
 # The agent monitors the postgres database of the same TimescaleDB service that
 # the server stores into, so this file is self-contained. The server's storage
-# database, pglens, is never monitored: pglens does not alter a monitored
-# database. Replace the agent's target DSN for a production database.
+# database, pglens, is never monitored. The agent and the server never write to
+# a monitored database, but the one-time init (sql/init_monitoring_user.sh)
+# changes PUBLIC grants in every database of the service, the monitored one
+# included. Replace the agent's target DSN for a production database.
 services:
   timescaledb:
     image: timescale/timescaledb:2.31.0-pg17
