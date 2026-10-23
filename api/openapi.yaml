@@ -414,7 +414,7 @@ components:
           description: All client sessions in the latest lock/activity sample.
     ActivityResponse:
       type: object
-      required: [instance_id, stale, metrics]
+      required: [instance_id, stale, metrics, xmin_horizon]
       properties:
         instance_id: { $ref: '#/components/schemas/InstanceId' }
         stale: { type: boolean }
@@ -423,6 +423,26 @@ components:
           additionalProperties:
             type: array
             items: { $ref: '#/components/schemas/ApiMetric' }
+        xmin_horizon:
+          type: [object, 'null']
+          description: >-
+            The oldest holder of the xmin horizon in the latest activity sample, or null
+            when no holder is known from a sample of the last 30 seconds. holder_kind is
+            session (a client backend's snapshot or transaction), slot (a replication
+            slot's xmin or catalog_xmin), standby (a standby's hot_standby_feedback xmin)
+            or prepared (a prepared transaction). identity is the session's pid, the slot
+            name, the standby's application_name or the prepared transaction's gid. A
+            free-text identity is cut to 64 bytes and reads as [redacted] when it may hold
+            a credential. No query text is sent. age_xids is the transaction ID age of the
+            holder; age_seconds is set only for a session and a prepared transaction, and
+            is null otherwise.
+          required: [holder_kind, identity, age_xids, age_seconds, sampled_at]
+          properties:
+            holder_kind: { type: string, enum: [session, slot, standby, prepared] }
+            identity: { type: string }
+            age_xids: { type: integer, format: int64 }
+            age_seconds: { type: [number, 'null'] }
+            sampled_at: { $ref: '#/components/schemas/Timestamp' }
     DatabasesResponse:
       type: object
       required: [instance_id, databases, not_monitored_count]
@@ -1502,6 +1522,12 @@ paths:
                     metrics:
                       pg_connections_by_database:
                         - { ts: '2026-08-27T02:00:00Z', value: 3, labels: { datname: app } }
+                    xmin_horizon:
+                      holder_kind: session
+                      identity: '4242'
+                      age_xids: 1500
+                      age_seconds: 912.5
+                      sampled_at: '2026-08-27T02:00:00Z'
         '400': { $ref: '#/components/responses/BadRequest' }
 
   /api/v1/instances/{id}/databases:

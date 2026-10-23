@@ -1243,6 +1243,16 @@ export interface components {
             metrics: {
                 [key: string]: components["schemas"]["ApiMetric"][];
             };
+            /** @description The oldest holder of the xmin horizon in the latest activity sample, or null when no holder is known from a sample of the last 30 seconds. holder_kind is session (a client backend's snapshot or transaction), slot (a replication slot's xmin or catalog_xmin), standby (a standby's hot_standby_feedback xmin) or prepared (a prepared transaction). identity is the session's pid, the slot name, the standby's application_name or the prepared transaction's gid. A free-text identity is cut to 64 bytes and reads as [redacted] when it may hold a credential. No query text is sent. age_xids is the transaction ID age of the holder; age_seconds is set only for a session and a prepared transaction, and is null otherwise. */
+            xmin_horizon: {
+                /** @enum {string} */
+                holder_kind: "session" | "slot" | "standby" | "prepared";
+                identity: string;
+                /** Format: int64 */
+                age_xids: number;
+                age_seconds: number | null;
+                sampled_at: components["schemas"]["Timestamp"];
+            } | null;
         };
         DatabasesResponse: {
             instance_id: components["schemas"]["InstanceId"];
