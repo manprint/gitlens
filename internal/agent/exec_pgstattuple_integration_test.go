@@ -92,3 +92,34 @@ func TestINTCMD011_PgstattupleChecksTheRelationsDatabase(t *testing.T) {
 		require.Contains(t, rejected.Error(), `not installed in database "postgres"`)
 	})
 }
+
+// INT-CMD-027: the server files every pgstattuple result as a table's bloat,
+// and pgstattuple also reads an index. The index is refused against the real
+// catalog before it is scanned, and the table beside it is still measured.
+func TestINTCMD027_PgstattupleRefusesIndexes(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		defer admin.Close()
+		_, err := admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pgstattuple")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "CREATE TABLE IF NOT EXISTS public.pglens_pgstattuple_kind (id integer PRIMARY KEY)")
+		require.NoError(t, err)
+		defer func() { _, _ = admin.Exec(ctx, "DROP TABLE IF EXISTS public.pglens_pgstattuple_kind") }()
+
+		mgr, err := NewManager(ctx, "pgstattuple-kind-target", pg.DSN("postgres", pgtest.RoleT1), DefaultConnOptions(), clock.System())
+		require.NoError(t, err)
+		defer mgr.Close()
+		_, err = NewPgstattupleExecutor().Execute(ctx, mgr, pgstattupleArgs("public", "pglens_pgstattuple_kind_pkey"))
+		var rejected *RejectedError
+		require.ErrorAs(t, err, &rejected)
+		require.Contains(t, rejected.Error(), `relkind "i"`)
+
+		result, err := NewPgstattupleExecutor().Execute(ctx, mgr, pgstattupleArgs("public", "pglens_pgstattuple_kind"))
+		require.NoError(t, err)
+		var decoded pgstattupleResult
+		require.NoError(t, json.Unmarshal(result, &decoded))
+		require.Equal(t, "pglens_pgstattuple_kind", decoded.Relation)
+	})
+}

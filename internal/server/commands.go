@@ -500,6 +500,8 @@ func persistCommandArtifact(ctx context.Context, tx pgx.Tx, tenantID string, ins
 		if datname == "" {
 			datname = payload.Datname
 		}
+		// The agent measures ordinary tables only (see PgstattupleExecutor), so the
+		// kind is always table.
 		return store.WriteBloat(ctx, tx, []store.BloatRow{{TS: capturedAt.UTC(), TenantID: tenantID, ClusterID: clusterID, InstanceID: instanceID, Datname: datname, Schemaname: args.Schema, Relname: args.Relation, ObjectKind: "table", Method: "pgstattuple", RealBytes: &payload.TableLen, ExpectedBytes: &expected, BloatBytes: &bloat, BloatRatio: &ratio}})
 	default:
 		return nil

@@ -15,9 +15,11 @@ import (
 )
 
 // pgstattupleConn is a connection to the database the relation lives in;
-// installed says whether that database has the extension.
+// installed says whether that database has the extension, and relkind is the
+// relation's kind ("r" when empty, an ordinary table).
 type pgstattupleConn struct {
 	installed bool
+	relkind   string
 	queries   []string
 	args      [][]any
 }
@@ -28,6 +30,13 @@ func (c *pgstattupleConn) QueryRow(_ context.Context, sql string, args ...any) p
 	c.args = append(c.args, args)
 	if strings.HasPrefix(sql, "SELECT n.nspname") { // check.ExtensionSchema
 		return schemaRow(c.installed)
+	}
+	if strings.Contains(sql, "pg_catalog.pg_class") {
+		kind := c.relkind
+		if kind == "" {
+			kind = "r"
+		}
+		return stringRow(kind)
 	}
 	return pgstattupleRow{}
 }
@@ -46,6 +55,14 @@ func (r schemaRow) Scan(dest ...any) error {
 		return pgx.ErrNoRows
 	}
 	*dest[0].(*string) = "public"
+	return nil
+}
+
+// stringRow answers a single text column, such as the relation kind.
+type stringRow string
+
+func (r stringRow) Scan(dest ...any) error {
+	*dest[0].(*string) = string(r)
 	return nil
 }
 
@@ -133,5 +150,23 @@ func TestPgstattuple_NeverIssuesCreateExtension(t *testing.T) {
 	require.NoError(t, err)
 	for _, query := range conn.queries {
 		require.False(t, strings.Contains(strings.ToLower(query), "create extension"), query)
+	}
+}
+
+// The server files every pgstattuple result as a table's bloat, so the scan
+// measures only an ordinary table. An index, sequence, materialized view or
+// partitioned table is refused before anything is scanned.
+func TestPgstattuple_RefusesRelationsThatAreNotOrdinaryTables(t *testing.T) {
+	for _, kind := range []string{"i", "S", "m", "p", "v"} {
+		t.Run(kind, func(t *testing.T) {
+			conn := &pgstattupleConn{installed: true, relkind: kind}
+			_, err := NewPgstattupleExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, pgstattupleArgs("public", "items"))
+			var rejected *RejectedError
+			require.True(t, errors.As(err, &rejected), "relkind %s must be rejected, got %v", kind, err)
+			require.Contains(t, rejected.Error(), `relkind "`+kind+`"`)
+			for _, query := range conn.queries {
+				require.NotContains(t, query, "pgstattuple\"(", "no scan may run on relkind %s", kind)
+			}
+		})
 	}
 }

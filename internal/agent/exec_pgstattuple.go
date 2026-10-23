@@ -56,6 +56,16 @@ func (e *PgstattupleExecutor) Execute(ctx context.Context, target check.Target, 
 	}
 
 	relation := (pgx.Identifier{args.Schema, args.Relation}).Sanitize()
+	// pgstattuple also reads indexes, sequences and materialized views, and the
+	// server files every result as a table's bloat. Only an ordinary table is
+	// measured here, and the check runs before the scan so an index is never read.
+	var relkind string
+	if err := conn.QueryRow(ctx, `SELECT c.relkind::text FROM pg_catalog.pg_class c WHERE c.oid = $1::pg_catalog.regclass`, relation).Scan(&relkind); err != nil {
+		return nil, fmt.Errorf("pgstattuple %s: %w", relation, err)
+	}
+	if relkind != "r" {
+		return nil, rejectedf("pgstattuple measures ordinary tables; %s has relkind %q", relation, relkind)
+	}
 	// current_database() names the database the scan ran in: a command
 	// without datname runs in the target's own database, and the server
 	// filed its measurement under an empty database name.
