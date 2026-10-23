@@ -16,15 +16,25 @@ interface AshTopQueriesProps {
   waitEventType?: string
 }
 
-function queryPath(instanceId: string, queryid: string): string {
-  return `/instances/${encodeURIComponent(instanceId)}/queries/${encodeURIComponent(queryid)}`
+function queryPath(instanceId: string, queryid: string, database?: string): string {
+  const path = `/instances/${encodeURIComponent(instanceId)}/queries/${encodeURIComponent(queryid)}`
+  // EXPLAIN runs in the database named here, so a filtered view must name it too.
+  return database ? `${path}?db=${encodeURIComponent(database)}` : path
 }
 
-function QueryRow({ instanceId, query }: { instanceId: string; query: AshTopQuery }) {
+function QueryRow({
+  database,
+  instanceId,
+  query,
+}: {
+  database?: string
+  instanceId: string
+  query: AshTopQuery
+}) {
   return (
     <li className="bg-card rounded-lg border p-4 shadow-sm">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <Link className="font-medium underline" to={queryPath(instanceId, query.queryid)}>
+        <Link className="font-medium underline" to={queryPath(instanceId, query.queryid, database)}>
           Query {query.queryid}
         </Link>
         <span className="text-text-secondary text-sm">
@@ -99,7 +109,12 @@ export function AshTopQueries({
       {entries.length > 0 ? (
         <ol className="grid gap-3" aria-label="ASH top queries">
           {entries.map((entry) => (
-            <QueryRow instanceId={instanceId} key={entry.queryid} query={entry} />
+            <QueryRow
+              database={database}
+              instanceId={instanceId}
+              key={entry.queryid}
+              query={entry}
+            />
           ))}
         </ol>
       ) : (

@@ -263,6 +263,15 @@ describe('AshPage', () => {
     )
   })
 
+  it('UI-ASH-045 opens a top query in the database the ASH view is filtered to', () => {
+    renderAsh('/instances/instance-1/ash?group=queryid&wait_event=relation&db=analytics')
+
+    expect(screen.getByRole('link', { name: 'Query 9007199254740993' })).toHaveAttribute(
+      'href',
+      '/instances/instance-1/queries/9007199254740993?db=analytics',
+    )
+  })
+
   it('UI-ASH-028 narrows the queries and the top list to the drilled wait event', () => {
     renderAsh('/instances/instance-1/ash?group=queryid&wait_event_type=Lock&wait_event=relation')
 
