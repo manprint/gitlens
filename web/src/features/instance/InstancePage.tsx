@@ -1,11 +1,9 @@
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 
-import { REFRESH } from '@/api/policy'
 import { useClusterReplication, useInstance, useInstanceDatabases } from '@/api/queries'
 import type { Schemas } from '@/api/types'
 import { ErrorState } from '@/components/state'
 import { selectedDatabase } from '@/lib/databases'
-import { snapToInterval } from '@/lib/timerange'
 
 import { InstanceHeader } from './InstanceHeader'
 import { DatabaseSelector } from './DatabaseSelector'
@@ -15,15 +13,7 @@ import { RelationsSection } from './RelationsSection'
 import { SettingsSection } from './SettingsSection'
 
 // The header shows the newest replay-lag reading, so a short window holds it.
-const REPLAY_LAG_WINDOW_MS = 5 * 60 * 1_000
-
-function replayLagWindow(now: Date) {
-  const to = snapToInterval(now, REFRESH.cluster.interval)
-  return {
-    from: new Date(to.getTime() - REPLAY_LAG_WINDOW_MS).toISOString(),
-    to: to.toISOString(),
-  }
-}
+const REPLAY_LAG_WINDOW: { durationMs: number } = { durationMs: 5 * 60 * 1_000 }
 
 // A standby's own lag is the replay series of the edge it reports from. Only
 // the newest point counts: an older reading is not a measurement now. The
@@ -72,7 +62,7 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
   const databasesQuery = useInstanceDatabases(instanceId)
   const replicationQuery = useClusterReplication(
     instanceQuery.data?.cluster_id ?? '',
-    replayLagWindow(new Date()),
+    REPLAY_LAG_WINDOW,
     { enabled: instanceQuery.data?.role === 'standby' },
   )
 

@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
-import { REFRESH } from '@/api/policy'
 import { useAsh, useInstanceSettings } from '@/api/queries'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -9,6 +8,7 @@ import { Degraded, Disabled, ErrorState } from '@/components/state'
 import { useTimeRange } from '@/hooks/useTimeRange'
 import { totalSamples } from '@/lib/ash'
 import type { AshGroupBy } from '@/lib/ash'
+import { queryWindowOf } from '@/lib/timerange'
 
 import { AshBreakdown } from './AshBreakdown'
 import { AshTopQueries } from './AshTopQueries'
@@ -118,7 +118,8 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
   const { instanceId: routeInstanceId } = useParams<{ instanceId: string }>()
   const redirectedForUnauthorized = useRef(false)
   const [searchParams, setSearchParams] = useSearchParams()
-  const { range } = useTimeRange(REFRESH.ash.interval)
+  const { range } = useTimeRange()
+  const timeWindow = queryWindowOf(range)
   const instanceId = instanceIdOverride ?? routeInstanceId ?? ''
   const groupBy = readGroup(searchParams.get('group'))
   const waitEventType = searchParams.get('wait_event_type')
@@ -126,15 +127,13 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
   const database = searchParams.get('db') ?? undefined
   const filters = drillFilters(groupBy, waitEventType, waitEvent)
   const params = {
-    from: range.from.toISOString(),
     group_by: groupBy,
     instance_id: instanceId,
     limit: ASH_ROW_LIMIT,
-    to: range.to.toISOString(),
     ...(database === undefined ? {} : { database }),
     ...filters,
   }
-  const ashQuery = useAsh(params)
+  const ashQuery = useAsh(params, timeWindow)
   const settingsQuery = useInstanceSettings(instanceId)
   const unauthorized =
     ashQuery.error?.kind === 'unauthorized' || settingsQuery.error?.kind === 'unauthorized'
@@ -287,12 +286,7 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
             />
           )}
           {groupBy === 'queryid' && !queryIdsUnavailable ? (
-            <AshTopQueries
-              {...topQueryProps}
-              from={range.from}
-              instanceId={instanceId}
-              to={range.to}
-            />
+            <AshTopQueries {...topQueryProps} timeWindow={timeWindow} instanceId={instanceId} />
           ) : null}
         </>
       )}

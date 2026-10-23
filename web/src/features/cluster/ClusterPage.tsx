@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 
-import { REFRESH } from '@/api/policy'
 import {
   useClusterReplication,
   useClusterSettingsDrift,
@@ -15,6 +14,7 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { EmptyState, ErrorState } from '@/components/state'
 import { useTimeRange } from '@/hooks/useTimeRange'
 import { toSlotRows } from '@/lib/replication'
+import { queryWindowOf } from '@/lib/timerange'
 
 import { DriftSection } from './DriftSection'
 import { EventTimeline } from './EventTimeline'
@@ -54,13 +54,10 @@ export function ClusterPage({ clusterId: clusterIdOverride }: ClusterPageProps =
   const clusterId = clusterIdOverride ?? routeClusterId ?? ''
   const location = useLocation()
   const navigate = useNavigate()
-  const { range } = useTimeRange(REFRESH.cluster.interval)
+  const { range } = useTimeRange()
   const clustersQuery = useClusters()
   const topologyQuery = useClusterTopology(clusterId)
-  const replicationQuery = useClusterReplication(clusterId, {
-    from: range.from.toISOString(),
-    to: range.to.toISOString(),
-  })
+  const replicationQuery = useClusterReplication(clusterId, queryWindowOf(range))
   const driftQuery = useClusterSettingsDrift(clusterId)
   const slotsQuery = useClusterSlots(clusterId)
   const redirectedForUnauthorized = useRef(false)

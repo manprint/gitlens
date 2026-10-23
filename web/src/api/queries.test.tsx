@@ -2,7 +2,7 @@ import { act, fireEvent, screen } from '@testing-library/react'
 import { http, HttpResponse } from 'msw/http'
 import { delay } from 'msw/utils/delay'
 import { useState } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { REFRESH } from './policy'
 import {
@@ -44,8 +44,10 @@ import {
 import { renderWithProviders } from '@/test/render'
 import { base as clusters, empty as emptyClusters } from '@/test/fixtures/getClusters'
 import { base as topology } from '@/test/fixtures/getClusterTopology'
+import { flushNetwork } from '@/test/network'
+import { NOW } from '@/test/time'
 import { server } from '@/test/msw/server'
-import { sequence, status } from '@/test/msw/handlers'
+import { ok, sequence, status } from '@/test/msw/handlers'
 
 function ClustersProbe() {
   const query = useClusters()
@@ -118,6 +120,81 @@ describe('refresh policies', () => {
       }
     }
   })
+})
+
+const RELATIVE_HOUR = { durationMs: 60 * 60 * 1_000 }
+
+function AshWindowProbe() {
+  useAsh({ instance_id: 'instance-a' }, RELATIVE_HOUR)
+  return null
+}
+
+function ReplicationWindowProbe() {
+  useClusterReplication('cluster-a', RELATIVE_HOUR)
+  return null
+}
+
+function MetricWindowProbe() {
+  useQueryMetrics({ metric: 'cpu_usage', instance_id: 'instance-a', step: '1m' }, RELATIVE_HOUR)
+  return null
+}
+
+describe('relative windows', () => {
+  afterEach(() => {
+    server.events.removeAllListeners()
+  })
+
+  // A window read from the render clock gave every completed request a new key,
+  // so each poll also started a second request for the next window.
+  it.each([
+    {
+      interval: REFRESH.ash.interval,
+      name: 'ASH',
+      path: '/api/v1/ash',
+      Probe: AshWindowProbe,
+    },
+    {
+      interval: REFRESH.cluster.interval,
+      name: 'cluster replication',
+      path: '/api/v1/clusters/cluster-a/replication',
+      Probe: ReplicationWindowProbe,
+    },
+    {
+      interval: REFRESH.activity.interval,
+      name: 'overview metric',
+      path: '/api/v1/metrics/query',
+      Probe: MetricWindowProbe,
+    },
+  ])(
+    'UI-API-016 polls the $name window once per interval, sending the window at each request',
+    async ({ interval, path, Probe }) => {
+      const requested: URL[] = []
+      server.events.on('request:start', ({ request }) => {
+        const url = new URL(request.url)
+        if (url.pathname.endsWith(path)) requested.push(url)
+      })
+      server.use(
+        ok('getAsh', { buckets: [], enabled: true, resolution_seconds: 30, statistical: false }),
+        ok('getClusterReplication', { cluster_id: '1', edges: [] }),
+        ok('queryMetrics', { series: [] }),
+      )
+      renderWithProviders(<Probe />)
+      await flushNetwork()
+
+      const polls = 3
+      for (let poll = 0; poll < polls; poll += 1) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(interval)
+        })
+        await flushNetwork()
+      }
+
+      // The mount fetch, then one per poll: no second request rides along.
+      expect(requested).toHaveLength(polls + 1)
+      const lastTo = Date.parse(requested.at(-1)?.searchParams.get('to') ?? '')
+      expect(Math.abs(lastTo - (NOW.getTime() + polls * interval))).toBeLessThan(1_000)
+    },
+  )
 })
 
 describe('query hooks', () => {
@@ -384,29 +461,30 @@ function useLocksForCoverage() {
 }
 
 function useQueryMetricsForCoverage() {
-  return useQueryMetrics({
-    metric: 'cpu_usage',
-    instance_id: 'instance-a',
-    from: '2026-08-27T00:00:00Z',
-    to: '2026-08-27T01:00:00Z',
-    step: '1m',
-  })
+  return useQueryMetrics(
+    {
+      metric: 'cpu_usage',
+      instance_id: 'instance-a',
+      step: '1m',
+    },
+    { from: '2026-08-27T00:00:00Z', to: '2026-08-27T01:00:00Z' },
+  )
 }
 
 function useEventsForCoverage() {
-  return useEvents()
+  return useEvents({}, { durationMs: 60 * 60 * 1_000 })
 }
 
 function useStatementsForCoverage() {
-  return useStatements({ instance_id: 'instance-a' })
+  return useStatements({ instance_id: 'instance-a' }, { durationMs: 60 * 60 * 1_000 })
 }
 
 function useAshForCoverage() {
-  return useAsh({ instance_id: 'instance-a' })
+  return useAsh({ instance_id: 'instance-a' }, { durationMs: 60 * 60 * 1_000 })
 }
 
 function useAshTopForCoverage() {
-  return useAshTop({ instance_id: 'instance-a' })
+  return useAshTop({ instance_id: 'instance-a' }, { durationMs: 60 * 60 * 1_000 })
 }
 
 function usePlansForCoverage() {

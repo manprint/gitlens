@@ -103,13 +103,7 @@ describe('EventsPage', () => {
   it('UI-ALERT-053 marks an old event snapshot as Stale', async () => {
     const view = await renderPage()
     view.queryClient.setQueryData(
-      qk.events(
-        undefined,
-        undefined,
-        new Date(NOW.getTime() - 60 * 60 * 1_000).toISOString(),
-        NOW.toISOString(),
-        100,
-      ),
+      qk.events(undefined, undefined, { durationMs: 60 * 60 * 1_000 }, 100),
       [baseEvent],
       { updatedAt: Date.now() - REFRESH.activity.staleAfter },
     )

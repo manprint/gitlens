@@ -1,3 +1,5 @@
+import { queryWindowKey, type QueryWindow } from '@/lib/timerange'
+
 /**
  * The only source of query keys in the web client. Keep arguments in the same
  * order as the corresponding operation's parameters so cache identity is
@@ -6,8 +8,8 @@
 export const qk = {
   clusters: () => ['getClusters'] as const,
   clusterTopology: (id: string) => ['getClusterTopology', id] as const,
-  clusterReplication: (id: string, from: string, to: string) =>
-    ['getClusterReplication', id, from, to] as const,
+  clusterReplication: (id: string, window: QueryWindow) =>
+    ['getClusterReplication', id, queryWindowKey(window)] as const,
   clusterSettingsDrift: (id: string) => ['getClusterSettingsDrift', id] as const,
   clusterSlots: (id: string) => ['getClusterSlots', id] as const,
   instances: () => ['getInstances'] as const,
@@ -25,41 +27,59 @@ export const qk = {
   queryMetrics: (
     metric: string,
     instanceId: string,
-    from: string,
-    to: string,
+    window: QueryWindow,
     step: string,
     database?: string,
-  ) => ['queryMetrics', metric, instanceId, database, from, to, step] as const,
-  events: (clusterId?: string, type?: string, from?: string, to?: string, limit?: number) =>
-    ['getEvents', clusterId, type, from, to, limit] as const,
+  ) => ['queryMetrics', metric, instanceId, database, queryWindowKey(window), step] as const,
+  events: (
+    clusterId: string | undefined,
+    type: string | undefined,
+    window: QueryWindow,
+    limit?: number,
+  ) => ['getEvents', clusterId, type, queryWindowKey(window), limit] as const,
   statements: (
     instanceId: string,
-    database?: string,
-    from?: string,
-    to?: string,
+    database: string | undefined,
+    window: QueryWindow,
     orderBy?: string,
     limit?: number,
-  ) => ['getStatements', instanceId, database, from, to, orderBy, limit] as const,
+  ) => ['getStatements', instanceId, database, queryWindowKey(window), orderBy, limit] as const,
   ash: (
     instanceId: string,
-    from?: string,
-    to?: string,
+    window: QueryWindow,
     groupBy?: string,
     database?: string,
     limit?: number,
     waitEventType?: string,
     waitEvent?: string,
   ) =>
-    ['getAsh', instanceId, from, to, groupBy, database, limit, waitEventType, waitEvent] as const,
+    [
+      'getAsh',
+      instanceId,
+      queryWindowKey(window),
+      groupBy,
+      database,
+      limit,
+      waitEventType,
+      waitEvent,
+    ] as const,
   ashTop: (
     instanceId: string,
-    from?: string,
-    to?: string,
+    window: QueryWindow,
     database?: string,
     limit?: number,
     waitEventType?: string,
     waitEvent?: string,
-  ) => ['getAshTop', instanceId, from, to, database, limit, waitEventType, waitEvent] as const,
+  ) =>
+    [
+      'getAshTop',
+      instanceId,
+      queryWindowKey(window),
+      database,
+      limit,
+      waitEventType,
+      waitEvent,
+    ] as const,
   plans: (queryId: string | number, instanceId?: string, datname?: string, limit?: number) =>
     ['getPlans', queryId, instanceId, datname, limit] as const,
   alerts: (

@@ -2,7 +2,6 @@ import { useMemo } from 'react'
 
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 
-import { REFRESH } from '@/api/policy'
 import { useStatements } from '@/api/queries'
 import { DataTable, type DataTableProps } from '@/components/layout/DataTable'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
@@ -21,6 +20,7 @@ import {
   type StatementRow,
 } from '@/lib/statements'
 import { useTimeRange } from '@/hooks/useTimeRange'
+import { queryWindowOf } from '@/lib/timerange'
 
 const STATEMENT_LIMIT = 50
 type StatementSort = StatementOrderBy
@@ -242,19 +242,17 @@ function DisabledStatementsState({ reason }: { reason: string | undefined }) {
 export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageProps = {}) {
   const { instanceId: routeInstanceId } = useParams<{ instanceId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { range } = useTimeRange(REFRESH.statements.interval)
+  const { range } = useTimeRange()
   const instanceId = instanceIdOverride ?? routeInstanceId ?? ''
   const sort = readSort(searchParams.get('sort'))
   const database = searchParams.get('db') ?? undefined
   const params = {
-    from: range.from.toISOString(),
     instance_id: instanceId,
     limit: STATEMENT_LIMIT,
     order_by: sort,
-    to: range.to.toISOString(),
     ...(database === undefined ? {} : { database }),
   }
-  const statementsQuery = useStatements(params)
+  const statementsQuery = useStatements(params, queryWindowOf(range))
 
   const response = statementsQuery.data as StatementApiResponse | undefined
   const rows = useMemo<StatementDisplayRow[]>(() => {

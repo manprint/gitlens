@@ -1,6 +1,5 @@
-import { REFRESH } from '@/api/policy'
 import { useTimeRange } from '@/hooks/useTimeRange'
-import { chooseStep, stepMilliseconds } from '@/lib/timerange'
+import { chooseStep, queryWindowOf, stepMilliseconds, type QueryWindow } from '@/lib/timerange'
 import {
   cacheHitRatioSeries,
   cacheHitRatioValue,
@@ -27,17 +26,13 @@ function metricParams(
   metric: string,
   instanceId: string,
   database: string | undefined,
-  from: Date,
-  to: Date,
   step: string,
 ) {
   return {
     ...(database === undefined ? {} : { database }),
-    from: from.toISOString(),
     instance_id: instanceId,
     metric,
     step,
-    to: to.toISOString(),
   }
 }
 
@@ -50,26 +45,27 @@ function metricParams(
 function useOverviewMetricQueries(
   instanceId: string,
   database: string,
-  from: Date,
-  to: Date,
+  timeWindow: QueryWindow,
   step: string,
 ) {
-  const perDatabase = (metric: string) => metricParams(metric, instanceId, database, from, to, step)
-  const instanceWide = (metric: string) =>
-    metricParams(metric, instanceId, undefined, from, to, step)
+  const perDatabase = (metric: string) => metricParams(metric, instanceId, database, step)
+  const instanceWide = (metric: string) => metricParams(metric, instanceId, undefined, step)
 
   return {
-    blksHit: useQueryMetrics(perDatabase('pg_blks_hit_total')),
-    blksRead: useQueryMetrics(perDatabase('pg_blks_read_total')),
-    checkpointsRequested: useQueryMetrics(instanceWide('pg_checkpoints_requested_total')),
-    checkpointsTimed: useQueryMetrics(instanceWide('pg_checkpoints_timed_total')),
-    connectionsLimit: useQueryMetrics(instanceWide('pg_connections_limit')),
-    connectionsUsed: useQueryMetrics(instanceWide('pg_connections_used')),
-    deadlocks: useQueryMetrics(perDatabase('pg_deadlocks_total')),
-    rollbacks: useQueryMetrics(perDatabase('pg_xact_rollback_total')),
-    tempBytes: useQueryMetrics(perDatabase('pg_temp_bytes_total')),
-    transactions: useQueryMetrics(perDatabase('pg_xact_commit_total')),
-    walRate: useQueryMetrics(instanceWide('pg_wal_lsn_bytes')),
+    blksHit: useQueryMetrics(perDatabase('pg_blks_hit_total'), timeWindow),
+    blksRead: useQueryMetrics(perDatabase('pg_blks_read_total'), timeWindow),
+    checkpointsRequested: useQueryMetrics(
+      instanceWide('pg_checkpoints_requested_total'),
+      timeWindow,
+    ),
+    checkpointsTimed: useQueryMetrics(instanceWide('pg_checkpoints_timed_total'), timeWindow),
+    connectionsLimit: useQueryMetrics(instanceWide('pg_connections_limit'), timeWindow),
+    connectionsUsed: useQueryMetrics(instanceWide('pg_connections_used'), timeWindow),
+    deadlocks: useQueryMetrics(perDatabase('pg_deadlocks_total'), timeWindow),
+    rollbacks: useQueryMetrics(perDatabase('pg_xact_rollback_total'), timeWindow),
+    tempBytes: useQueryMetrics(perDatabase('pg_temp_bytes_total'), timeWindow),
+    transactions: useQueryMetrics(perDatabase('pg_xact_commit_total'), timeWindow),
+    walRate: useQueryMetrics(instanceWide('pg_wal_lsn_bytes'), timeWindow),
   }
 }
 
@@ -113,10 +109,11 @@ interface ChartDefinition {
 }
 
 export function OverviewSection({ database, instanceId }: OverviewSectionProps) {
-  const { range } = useTimeRange(REFRESH.activity.interval)
+  const { range } = useTimeRange()
+  const timeWindow = queryWindowOf(range)
   const step = chooseStep(range.from, range.to)
   const stepSeconds = stepMilliseconds(step) / 1_000
-  const queries = useOverviewMetricQueries(instanceId, database, range.from, range.to, step)
+  const queries = useOverviewMetricQueries(instanceId, database, timeWindow, step)
 
   // Counters arrive as per-second rates: pg_xact_commit_total is commits per
   // second, pg_wal_lsn_bytes is WAL bytes per second, and so on.

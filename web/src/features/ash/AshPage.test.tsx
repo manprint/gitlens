@@ -122,6 +122,7 @@ describe('AshPage', () => {
         limit: 5000,
         wait_event_type: 'Lock',
       }),
+      expect.objectContaining({ durationMs: 60 * 60 * 1_000 }),
     )
     expect(mocks.ash.mock.lastCall?.[0]).not.toHaveProperty('wait_event')
     expect(screen.getByRole('heading', { name: 'Wait events' })).toBeInTheDocument()
@@ -144,6 +145,7 @@ describe('AshPage', () => {
         instance_id: 'instance-1',
         wait_event_type: 'Lock',
       }),
+      expect.objectContaining({ durationMs: 60 * 60 * 1_000 }),
     )
   })
 
@@ -282,9 +284,11 @@ describe('AshPage', () => {
         wait_event: 'relation',
         wait_event_type: 'Lock',
       }),
+      expect.objectContaining({ durationMs: 60 * 60 * 1_000 }),
     )
     expect(mocks.ashTop).toHaveBeenLastCalledWith(
       expect.objectContaining({ wait_event: 'relation', wait_event_type: 'Lock' }),
+      expect.objectContaining({ durationMs: 60 * 60 * 1_000 }),
     )
     expect(screen.getByText(/Ranked by samples in wait event Lock\/relation\./)).toBeInTheDocument()
   })
@@ -413,9 +417,13 @@ describe('AshPage', () => {
   it('passes the database scope to ASH and top-query requests', () => {
     renderAsh('/instances/instance-1/ash?group=queryid&db=analytics', ashQueryIdResponse)
 
-    expect(mocks.ash).toHaveBeenLastCalledWith(expect.objectContaining({ database: 'analytics' }))
+    expect(mocks.ash).toHaveBeenLastCalledWith(
+      expect.objectContaining({ database: 'analytics' }),
+      expect.objectContaining({ durationMs: 60 * 60 * 1_000 }),
+    )
     expect(mocks.ashTop).toHaveBeenLastCalledWith(
       expect.objectContaining({ database: 'analytics' }),
+      expect.objectContaining({ durationMs: 60 * 60 * 1_000 }),
     )
   })
 
