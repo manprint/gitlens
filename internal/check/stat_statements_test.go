@@ -408,6 +408,37 @@ func TestStatStatements_TextIsResent(t *testing.T) {
 	require.Equal(t, "SELECT 2", res.QueryTexts[5], "a changed text is shipped immediately")
 }
 
+// A credential named early in a long DO block whose keyword lies past the
+// display length is redacted: the whole text is redacted before it is cut, so
+// the keyword that makes the value a credential is still there to find.
+func TestStatStatements_RedactsTheWholeTextBeforeCutting(t *testing.T) {
+	t.Parallel()
+	ddl := "DO $$ DECLARE p text := 'hunter2'; BEGIN /*" + strings.Repeat("x", 9000) + "*/ EXECUTE 'ALTER ROLE u PASSWORD ' || quote_literal(p); END $$"
+	f := &statementsFixture{}
+	f.perDB = statementRows([]any{int64(9), int64(1), float64(1), int64(1), int64(0), int64(0), int64(0), int64(0), &ddl, int64(1)})
+	c := newStatementsCheck(cardinality.Options{TopN: 50})
+
+	res, err := c.Scrape(context.Background(), f.target())
+	require.NoError(t, err)
+	require.Equal(t, "DO '[redacted]'", res.QueryTexts[9])
+}
+
+// A text that is still longer than the display length after redaction is cut
+// to it, and the credential is gone from the shipped part.
+func TestStatStatements_ShipsAtMostTheDisplayLength(t *testing.T) {
+	t.Parallel()
+	ddl := "ALTER ROLE u PASSWORD 'hunter2' /*" + strings.Repeat("x", 10000) + "*/"
+	f := &statementsFixture{}
+	f.perDB = statementRows([]any{int64(9), int64(1), float64(1), int64(1), int64(0), int64(0), int64(0), int64(0), &ddl, int64(1)})
+	c := newStatementsCheck(cardinality.Options{TopN: 50})
+
+	res, err := c.Scrape(context.Background(), f.target())
+	require.NoError(t, err)
+	require.Len(t, res.QueryTexts[9], 8192)
+	require.True(t, strings.HasPrefix(res.QueryTexts[9], "ALTER ROLE u PASSWORD '[redacted]' /*"))
+	require.NotContains(t, res.QueryTexts[9], "hunter2")
+}
+
 // A credential typed into a utility statement is not shipped, and the text
 // that is shipped keeps the statement readable.
 func TestStatStatements_ShipsNoCredentialFromUtilityDDL(t *testing.T) {

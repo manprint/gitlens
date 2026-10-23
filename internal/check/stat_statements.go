@@ -114,7 +114,8 @@ type statementRow struct {
 //
 // The view is referenced once: every reference re-reads the whole external
 // query-text file. %[1]s selects the database whose rows are read, %[2]d is
-// the per-ranking pre-filter and %[3]s is the view's schema-qualified name.
+// the per-ranking pre-filter, %[3]s is the view's schema-qualified name and
+// %[4]d is statementTextLimit.
 const statementsQuery = `
 WITH agg AS (
     SELECT queryid,
@@ -138,11 +139,20 @@ ranked AS (
 )
 SELECT a.queryid, a.calls, a.total_exec_time, a.rows,
        a.shared_blks_hit, a.shared_blks_read, a.wal_bytes, a.temp_blks_written,
-       LEFT(a.query, 8192),
+       CASE WHEN octet_length(a.query) <= %[4]d THEN a.query END,
        (SELECT count(*) FROM agg)
   FROM agg a
   JOIN ranked USING (queryid)
  ORDER BY a.queryid`
+
+// statementTextLimit is the longest query text the statements query reads. A
+// longer text is read as NULL and not shipped: only a text read whole can be
+// redacted, since a credential's keyword may lie past any cut. PostgreSQL keeps
+// utility statements whole, so a long DO or CREATE FUNCTION is common. The
+// bound caps the bytes read per ranked row, so the worst case per scrape is the
+// ranked rows times this limit, which is about 9.8 MB at the prefilter's
+// minimum of 300.
+const statementTextLimit = 16384
 
 // textResendInterval bounds how long a shipped query text is trusted to be
 // stored server-side. An envelope can be lost after the text left the cache
@@ -302,8 +312,10 @@ func (c *statStatementsCheck) Scrape(ctx context.Context, t Target) (Result, err
 
 		if r.Query != nil {
 			// Redacted before the cache sees it, so a credential is neither
-			// shipped nor kept in memory.
-			text := redactQueryText(*r.Query)
+			// shipped nor kept in memory. The text is cut to its display size
+			// only after redaction, because a cut before it can drop the keyword
+			// that makes a value a credential.
+			text := truncateUTF8(redactQueryText(*r.Query), 8192)
 			prev, cached := cache.Get(r.QueryID)
 			if !cached || prev.text != text || now.Sub(prev.sentAt) >= textResendInterval {
 				queryTexts[r.QueryID] = text
@@ -345,7 +357,7 @@ func readStatements(ctx context.Context, conn Conn, timeout time.Duration, datab
 		return nil, 0, nil, errors.New("compute_query_id is off, so pg_stat_statements records no new statements (set compute_query_id to auto or on)")
 	}
 	view := pgx.Identifier{schema, "pg_stat_statements"}.Sanitize()
-	rows, err := conn.Query(ctx, fmt.Sprintf(statementsQuery, database, prefilter, view), args...)
+	rows, err := conn.Query(ctx, fmt.Sprintf(statementsQuery, database, prefilter, view, statementTextLimit), args...)
 	if err != nil {
 		return nil, 0, nil, err
 	}
