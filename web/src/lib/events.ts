@@ -81,7 +81,7 @@ export function describeDocumentedEvent(type: DocumentedEventType): EventDescrip
         severity: 'critical',
         title: 'Replication slot lost WAL',
         whatToCheck:
-          'The standby using this slot cannot resume from it. Rebuild the standby, then size max_slot_wal_keep_size so the slot is not lost again.',
+          'The consumer of this slot cannot resume from it. Rebuild a physical standby, or recreate a logical slot and resynchronise its subscriber, then size max_slot_wal_keep_size so the slot is not lost again.',
       }
     case 'no_primary_in_cluster':
       return {
