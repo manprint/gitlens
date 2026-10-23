@@ -434,8 +434,8 @@ func TestAPI_MockPool_Clusters_TwoInstances(t *testing.T) {
 		queryResults: []*mockRows{
 			{rows: [][]any{{cidDB, nil, "manual"}}}, // clusters: one cluster, no name
 			{rows: [][]any{ // instances for that cluster
-				{uuid.NewString(), "10.0.0.1", 5432, "primary", 170000, "T0", time.Now()},
-				{uuid.NewString(), "10.0.0.2", 5432, "standby", 170000, "T0", time.Now().Add(-10 * time.Minute)}, // stale => down
+				{cidDB, uuid.NewString(), "10.0.0.1", 5432, "primary", 170000, "T0", time.Now()},
+				{cidDB, uuid.NewString(), "10.0.0.2", 5432, "standby", 170000, "T0", time.Now().Add(-10 * time.Minute)}, // stale => down
 			}},
 		},
 	}
@@ -473,15 +473,17 @@ func TestAPI_MockPool_Clusters_TopologyEdgesAndLag(t *testing.T) {
 		queryResults: []*mockRows{
 			{rows: [][]any{{cidDB, nil, "manual"}}},
 			{rows: [][]any{
-				{from.String(), "10.0.0.1", 5432, "primary", 170000, "T0", time.Now()},
-				{toSync.String(), "10.0.0.2", 5432, "standby", 170000, "T0", time.Now()},
+				{cidDB, from.String(), "10.0.0.1", 5432, "primary", 170000, "T0", time.Now()},
+				{cidDB, toSync.String(), "10.0.0.2", 5432, "standby", 170000, "T0", time.Now()},
 			}},
 			{rows: [][]any{
-				{from.String(), toSync.String(), "streaming", "sync", "high"},
-				{from.String(), toLow.String(), "streaming", nil, "low"},
+				{cidDB, from.String(), toSync.String(), "streaming", "sync", "high"},
+				{cidDB, from.String(), toLow.String(), "streaming", nil, "low"},
 			}},
+			// standby names, standby edges and sender names, then sync states
+			nil, nil, nil, nil,
+			{rows: [][]any{{cidDB, 0.75}}}, // max replay lag
 		},
-		queryRowVals: []*mockRow{{vals: []any{0.75}}},
 	}
 	api := &API{pool: pool}
 	r := chi.NewRouter()
@@ -533,8 +535,8 @@ func TestAPI_MockPool_Clusters_MostRecentPrimaryWins(t *testing.T) {
 				// "pg-primary" sorts before "pg-standby" by addr, but it's
 				// the stale, dead one; the freshly-promoted instance must
 				// still win.
-				{staleID, "pg-primary", 5432, "primary", 170000, "T0", time.Now().Add(-2 * time.Minute)},
-				{freshID, "pg-standby", 5432, "primary", 170000, "T0", time.Now()},
+				{cidDB, staleID, "pg-primary", 5432, "primary", 170000, "T0", time.Now().Add(-2 * time.Minute)},
+				{cidDB, freshID, "pg-standby", 5432, "primary", 170000, "T0", time.Now()},
 			}},
 		},
 	}
@@ -914,4 +916,26 @@ func TestAPI_JSONWrites_RefuseOversizedBody(t *testing.T) {
 		tc.handler.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, strings.NewReader(body)))
 		require.Equal(t, http.StatusRequestEntityTooLarge, w.Code, "%s: %s", tc.name, w.Body.String())
 	}
+}
+
+// TestAPI_MockPool_Clusters_QueriesDoNotGrowWithClusters: the cluster list reads
+// every cluster's instances, edges, sync states and lag in one query each, so
+// it issues the same number of queries for one cluster as for twenty.
+func TestAPI_MockPool_Clusters_QueriesDoNotGrowWithClusters(t *testing.T) {
+	t.Parallel()
+	countQueries := func(n int) int {
+		clusters := make([][]any, 0, n)
+		for i := 0; i < n; i++ {
+			clusters = append(clusters, []any{int64(9100 + i), nil, "manual"})
+		}
+		pool := &mockPool{queryResults: []*mockRows{{rows: clusters}}}
+		api := &API{pool: pool}
+		r := chi.NewRouter()
+		api.RegisterRoutes(r)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/clusters", http.NoBody))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		return pool.queryCalls
+	}
+	require.Equal(t, countQueries(1), countQueries(20))
 }

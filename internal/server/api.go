@@ -287,12 +287,32 @@ type clusterResp struct {
 	Topology            []topologyEdgeResp `json:"topology,omitempty"`
 }
 
+// clusterInstanceRow is one instances row of the cluster list.
+type clusterInstanceRow struct {
+	id        uuid.UUID
+	addr      string
+	port      int
+	role      string
+	pgVersion int
+	permTier  string
+	lastSeen  time.Time
+}
+
+// clusterEdgeRow is one topology_edges row of the cluster list.
+type clusterEdgeRow struct {
+	from, to   uuid.UUID
+	edgeType   string
+	syncState  sql.NullString
+	confidence string
+}
+
 func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	if a.pool == nil {
 		writeJSON(w, http.StatusOK, []clusterResp{})
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
 	rows, err := a.pool.Query(ctx, `SELECT cluster_id, name, id_source FROM clusters WHERE tenant_id='default' ORDER BY cluster_id`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query failed", err.Error())
@@ -318,6 +338,94 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "rows error", err.Error())
 		return
 	}
+	if len(clusters) == 0 {
+		writeJSON(w, http.StatusOK, []clusterResp{})
+		return
+	}
+
+	// Each per-cluster read is issued once for all the clusters and grouped
+	// here, so the list costs the same round trips however many clusters
+	// there are. It used to be a query per cluster, on the endpoint the
+	// dashboard polls most.
+	cids := make([]int64, 0, len(clusters))
+	for _, c := range clusters {
+		cids = append(cids, c.idDB)
+	}
+
+	irows, qerr := a.pool.Query(ctx,
+		`SELECT cluster_id, instance_id, addr, port, role, pg_version, perm_tier, last_seen FROM instances WHERE tenant_id='default' AND cluster_id = ANY($1) ORDER BY cluster_id, addr, port`,
+		cids)
+	if qerr != nil {
+		writeError(w, http.StatusInternalServerError, "query instances failed", qerr.Error())
+		return
+	}
+	instanceRows := make(map[int64][]clusterInstanceRow)
+	for irows.Next() {
+		var cid int64
+		var row clusterInstanceRow
+		if scanErr := irows.Scan(&cid, &row.id, &row.addr, &row.port, &row.role, &row.pgVersion, &row.permTier, &row.lastSeen); scanErr != nil {
+			irows.Close()
+			writeError(w, http.StatusInternalServerError, "scan instance failed", scanErr.Error())
+			return
+		}
+		instanceRows[cid] = append(instanceRows[cid], row)
+	}
+	if err := irows.Err(); err != nil {
+		irows.Close()
+		writeError(w, http.StatusInternalServerError, "instances rows error", err.Error())
+		return
+	}
+	irows.Close()
+
+	trows, terr := a.pool.Query(ctx,
+		`SELECT cluster_id, from_instance, to_instance, edge_type, sync_state, confidence FROM topology_edges WHERE tenant_id='default' AND cluster_id = ANY($1) ORDER BY cluster_id, from_instance, to_instance`,
+		cids)
+	if terr != nil {
+		writeError(w, http.StatusInternalServerError, "query topology edges failed", terr.Error())
+		return
+	}
+	edgeRows := make(map[int64][]clusterEdgeRow)
+	for trows.Next() {
+		var cid int64
+		var edge clusterEdgeRow
+		if scanErr := trows.Scan(&cid, &edge.from, &edge.to, &edge.edgeType, &edge.syncState, &edge.confidence); scanErr != nil {
+			trows.Close()
+			writeError(w, http.StatusInternalServerError, "scan edge failed", scanErr.Error())
+			return
+		}
+		edgeRows[cid] = append(edgeRows[cid], edge)
+	}
+	if err := trows.Err(); err != nil {
+		trows.Close()
+		writeError(w, http.StatusInternalServerError, "topology rows error", err.Error())
+		return
+	}
+	trows.Close()
+
+	resolvers, err := loadStandbyResolvers(ctx, a.pool, cids)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query instances failed", err.Error())
+		return
+	}
+	syncStates, err := loadSyncStates(ctx, a.pool, cids, resolvers)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query sync state failed", err.Error())
+		return
+	}
+
+	// The CURRENT max replay lag across each cluster's instances: a recent
+	// reading per instance, not the all-time max. A plain all-time MAX() means
+	// one transient lag blip during replication's initial catch-up makes a
+	// cluster report "degraded" forever. A plain "latest non-null reading per
+	// instance" is not enough either, because replication_streaming's
+	// replay_lag column reads NULL whenever PostgreSQL has no fresh feedback,
+	// so "latest non-null" can still reach back to that stale blip. Bounding to
+	// the last 60s is what lets a resolved lag age out.
+	maxLags, err := loadMaxReplayLags(ctx, a.pool, cids)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query max lag failed", err.Error())
+		return
+	}
 
 	now := time.Now().UTC()
 	resp := make([]clusterResp, 0, len(clusters))
@@ -330,14 +438,6 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 			namePtr = &v
 		}
 
-		// Fetch instances for this cluster.
-		irows, qerr := a.pool.Query(ctx,
-			`SELECT instance_id, addr, port, role, pg_version, perm_tier, last_seen FROM instances WHERE tenant_id='default' AND cluster_id=$1 ORDER BY addr, port`,
-			c.idDB)
-		if qerr != nil {
-			writeError(w, http.StatusInternalServerError, "query instances failed", qerr.Error())
-			return
-		}
 		instances := []clusterInstanceResp{}
 		var primaryID *string
 		var primaryLastSeen time.Time
@@ -347,24 +447,15 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 		anyDown := false
 		standbyCount := 0
 		edgeSyncCount := 0
-		for irows.Next() {
-			var iid uuid.UUID
-			var addr, role, permTier string
-			var port, pgVersion int
-			var lastSeen time.Time
-			if scanErr := irows.Scan(&iid, &addr, &port, &role, &pgVersion, &permTier, &lastSeen); scanErr != nil {
-				irows.Close()
-				writeError(w, http.StatusInternalServerError, "scan instance failed", scanErr.Error())
-				return
-			}
-			up := isUp(lastSeen, now)
+		for _, row := range instanceRows[c.idDB] {
+			up := isUp(row.lastSeen, now)
 			if !up {
 				anyDown = true
 			}
-			if role == "standby" {
+			if row.role == "standby" {
 				standbyCount++
 			}
-			if role == "primary" {
+			if row.role == "primary" {
 				primaryCount++
 				if up {
 					livePrimaryCount++
@@ -380,61 +471,40 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 			// instances.role row, so both rows legitimately say "primary"
 			// for a while after a real failover, and the old one kept
 			// winning).
-			if role == "primary" && (!hasPrimary || lastSeen.After(primaryLastSeen)) {
-				s := iid.String()
+			if row.role == "primary" && (!hasPrimary || row.lastSeen.After(primaryLastSeen)) {
+				s := row.id.String()
 				primaryID = &s
-				primaryLastSeen = lastSeen
+				primaryLastSeen = row.lastSeen
 				hasPrimary = true
 			}
 			instances = append(instances, clusterInstanceResp{
-				InstanceID: iid.String(),
-				Addr:       addr,
-				Port:       port,
-				Role:       role,
-				PGVersion:  pgVersion,
-				PermTier:   permTier,
-				LastSeen:   lastSeen,
+				InstanceID: row.id.String(),
+				Addr:       row.addr,
+				Port:       row.port,
+				Role:       row.role,
+				PGVersion:  row.pgVersion,
+				PermTier:   row.permTier,
+				LastSeen:   row.lastSeen,
 				Up:         up,
 			})
 		}
-		if err := irows.Err(); err != nil {
-			irows.Close()
-			writeError(w, http.StatusInternalServerError, "instances rows error", err.Error())
-			return
-		}
-		irows.Close()
 
-		// Fetch topology edges for this cluster.
-		trows, terr := a.pool.Query(ctx,
-			`SELECT from_instance, to_instance, edge_type, sync_state, confidence FROM topology_edges WHERE tenant_id='default' AND cluster_id=$1 ORDER BY from_instance, to_instance`,
-			c.idDB)
-		if terr != nil {
-			writeError(w, http.StatusInternalServerError, "query topology edges failed", terr.Error())
-			return
-		}
 		topology := []topologyEdgeResp{}
-		for trows.Next() {
-			var from, to uuid.UUID
-			var edgeType, confidence string
-			var syncState sql.NullString
-			if scanErr := trows.Scan(&from, &to, &edgeType, &syncState, &confidence); scanErr != nil {
-				trows.Close()
-				writeError(w, http.StatusInternalServerError, "scan edge failed", scanErr.Error())
-				return
-			}
+		for _, e := range edgeRows[c.idDB] {
 			edge := topologyEdgeResp{
-				From:       from.String(),
-				To:         to.String(),
-				Type:       edgeType,
-				Confidence: confidence,
+				From:       e.from.String(),
+				To:         e.to.String(),
+				Type:       e.edgeType,
+				Confidence: e.confidence,
 			}
-			if syncState.Valid {
-				edge.SyncState = &syncState.String
-				if syncState.String == "sync" {
+			if e.syncState.Valid {
+				syncState := e.syncState.String
+				edge.SyncState = &syncState
+				if syncState == "sync" {
 					edgeSyncCount++
 				}
 			}
-			if confidence == "low" {
+			if e.confidence == "low" {
 				// A low-confidence edge is the standby's last-known upstream while
 				// its WAL receiver is not streaming (see wire.Edge.Confidence). The
 				// upstream is still a known instance: the pipeline drops an edge it
@@ -444,61 +514,25 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 			}
 			topology = append(topology, edge)
 		}
-		if err := trows.Err(); err != nil {
-			trows.Close()
-			writeError(w, http.StatusInternalServerError, "topology rows error", err.Error())
-			return
-		}
-		trows.Close()
-
-		syncStates, senderSyncCount, senderSeen, serr := currentSyncStates(ctx, a.pool, c.idDB)
-		if serr != nil {
-			writeError(w, http.StatusInternalServerError, "query sync state failed", serr.Error())
-			return
-		}
+		summary := syncStates[c.idDB]
 		for i := range topology {
 			if topology[i].SyncState != nil {
 				continue
 			}
 			if from, perr := uuid.Parse(topology[i].From); perr == nil {
-				if state, ok := syncStates[from]; ok {
+				if state, ok := summary.states[from]; ok {
 					topology[i].SyncState = &state
 				}
 			}
 		}
 		syncStandbyCount := edgeSyncCount
-		if senderSeen {
-			syncStandbyCount = senderSyncCount
+		if summary.seen {
+			syncStandbyCount = summary.synchronous
 		}
 
-		// Fetch the CURRENT max replay lag across this cluster's instances —
-		// a recent reading per instance, not the all-time max. Found live
-		// while verifying the README's own "ok" health example against a
-		// real idle cluster: a plain all-time MAX() means one transient lag
-		// blip during replication's initial catch-up (routine, harmless, and
-		// exactly what SYS-REPL-004 exercises the recovery half of) makes a
-		// cluster report "degraded" forever, with no way for health to ever
-		// recover. A plain "latest non-null reading per instance" isn't
-		// enough either: `replication_streaming`'s replay_lag column reads
-		// NULL whenever PostgreSQL has no fresh feedback to report (common —
-		// confirmed live, most cycles), so "latest non-null" can still reach
-		// back to that same one-time stale blip while every truly recent
-		// row is null. Bounding to the last 60s (comfortably above every
-		// replication check's own interval, 10-15s) is what actually lets a
-		// resolved lag age out.
 		var maxReplayLag *float64
-		err = a.pool.QueryRow(ctx,
-			`SELECT MAX(replay_lag_sec) FROM (
-				SELECT DISTINCT ON (instance_id, slot_name) replay_lag_sec
-				FROM metrics_replication
-				WHERE tenant_id='default' AND cluster_id=$1 AND replay_lag_sec IS NOT NULL
-				  AND ts > now() - interval '60 seconds'
-				ORDER BY instance_id, slot_name, ts DESC
-			) latest`,
-			c.idDB).Scan(&maxReplayLag)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			writeError(w, http.StatusInternalServerError, "query max lag failed", err.Error())
-			return
+		if lag, ok := maxLags[c.idDB]; ok {
+			maxReplayLag = &lag
 		}
 
 		// Once a live primary exists, primary rows that have gone silent are not
@@ -537,6 +571,36 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 		resp = append(resp, cr)
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// loadMaxReplayLags returns, for each cluster in cids that has a reading in the
+// last 60 seconds, the largest replay lag of its instances' latest readings.
+// Clusters without one are absent from the map.
+func loadMaxReplayLags(ctx context.Context, pool dbPool, cids []int64) (map[int64]float64, error) {
+	rows, err := pool.Query(ctx, `SELECT cluster_id, MAX(replay_lag_sec) FROM (
+			SELECT DISTINCT ON (cluster_id, instance_id, slot_name) cluster_id, replay_lag_sec
+			FROM metrics_replication
+			WHERE tenant_id='default' AND cluster_id = ANY($1) AND replay_lag_sec IS NOT NULL
+			  AND ts > now() - interval '60 seconds'
+			ORDER BY cluster_id, instance_id, slot_name, ts DESC
+		) latest
+		GROUP BY cluster_id`, cids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	lags := make(map[int64]float64)
+	for rows.Next() {
+		var cid int64
+		var lag *float64
+		if err := rows.Scan(&cid, &lag); err != nil {
+			return nil, err
+		}
+		if lag != nil {
+			lags[cid] = *lag
+		}
+	}
+	return lags, rows.Err()
 }
 
 // ----- /api/v1/instances -----
