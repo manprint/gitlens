@@ -12,7 +12,9 @@ import (
 // Observation represents one instance's topology state at a moment in time.
 // Timestamp is when the envelope carrying it was sent. A repeat of that envelope
 // carries the same Timestamp, which is how the engine tells a retry from a new
-// cycle. The engine does not use it for timing, since agent clocks drift.
+// cycle. The engine times an orphan episode with it only against the sent times
+// of the same instance's earlier observations, which share one agent clock. It
+// never compares it with the server's clock, since agent clocks drift.
 type Observation struct {
 	InstanceID pgtype.InstanceID
 	ClusterID  pgtype.ClusterID
@@ -51,15 +53,16 @@ type Event struct {
 
 // instanceState tracks the last seen state of an instance.
 type instanceState struct {
-	role         pgtype.Role
-	clusterID    pgtype.ClusterID
-	timestamp    time.Time
-	lastObs      Observation          // the observation applied last; a repeat of it is ignored
-	quietCycles  int                  // observations without orphan evidence since the last of it
-	orphanAt     time.Time            // when the standby's upstream became unresolvable
-	orphanSeenAt time.Time            // last observation that found the upstream unresolvable
-	orphanedAt   time.Time            // when orphan_standby was last emitted for this standby
-	edgeSeenAt   map[string]time.Time // per-edge last-seen time (key = "to_instance_id")
+	role           pgtype.Role
+	clusterID      pgtype.ClusterID
+	timestamp      time.Time
+	lastObs        Observation          // the observation applied last; a repeat of it is ignored
+	quietCycles    int                  // observations without orphan evidence since the last of it
+	orphanAt       time.Time            // when the standby's upstream became unresolvable
+	orphanSeenAt   time.Time            // last observation that found the upstream unresolvable
+	orphanSeenSent time.Time            // sent time of that observation, on the agent's clock
+	orphanedAt     time.Time            // when orphan_standby was last emitted for this standby
+	edgeSeenAt     map[string]time.Time // per-edge last-seen time (key = "to_instance_id")
 }
 
 // Engine detects topology changes in a cluster and emits events.
@@ -232,6 +235,7 @@ func (e *Engine) Apply(obs Observation) []Event {
 				inst.orphanAt = now
 			}
 			inst.orphanSeenAt = now
+			inst.orphanSeenSent = obs.Timestamp
 			if now.Sub(inst.orphanAt) >= e.orphanWindow && now.Sub(inst.orphanedAt) >= e.orphanWindow {
 				// Emit orphan_standby at most once per orphanWindow, and keep
 				// reporting the age of the *whole* orphan episode.
@@ -260,7 +264,7 @@ func (e *Engine) Apply(obs Observation) []Event {
 			// with a whole window gone since the last evidence, mean the orphan is
 			// over, so the next one is dated from its own start and not from this.
 			inst.quietCycles++
-			if e.orphanGapEnds(inst, now) {
+			if e.orphanGapEnds(inst, now, obs.Timestamp) {
 				inst.orphanAt = time.Time{}
 				inst.orphanedAt = time.Time{}
 			}
@@ -271,9 +275,9 @@ func (e *Engine) Apply(obs Observation) []Event {
 		// Unknown is no evidence either way: the agent reports it when its role
 		// cannot be read this cycle, so it is one cycle without evidence, as an
 		// edgeless observation is. Silence ends nothing: the engine cannot count
-		// cycles it never observed, and a long gap may be one slow push interval.
+		// cycles it never observed.
 		inst.quietCycles++
-		if e.orphanGapEnds(inst, now) {
+		if e.orphanGapEnds(inst, now, obs.Timestamp) {
 			inst.orphanAt = time.Time{}
 			inst.orphanedAt = time.Time{}
 		}
@@ -295,15 +299,26 @@ func (e *Engine) Apply(obs Observation) []Event {
 
 // orphanGapEnds reports whether an observation without evidence ends the orphan
 // episode of a standby. It takes two such observations in a row, and a whole
-// orphan window since the last evidence. One cycle without evidence never ends
-// the episode, at any push interval: an agent that alternates evidence and
-// silence leaves exactly one such cycle between two evidence cycles, however
-// far apart they are. The count is of observations, not of the gaps between
-// them, so a short gap or a burst of replayed envelopes cannot stand for the
-// push interval. A replayed envelope is one cycle the agent ran, so a backlog
-// without evidence counts one cycle per envelope.
-func (e *Engine) orphanGapEnds(inst *instanceState, now time.Time) bool {
-	return inst.quietCycles >= 2 && now.Sub(inst.orphanSeenAt) >= e.orphanWindow
+// orphan window since the last evidence on the server's clock. When the
+// observation and the last evidence both carry a sent time, the agent's clock
+// must show a whole window too. A backlog drained in one burst reaches the
+// server within milliseconds, so the server's clock alone would end the episode
+// while the agent's own cycles were seconds apart. A sent time that steps
+// backwards holds the episode open until the agent's clock has moved a window
+// past the evidence. One cycle without evidence never ends the episode, at any
+// push interval: an agent that alternates evidence and silence leaves exactly
+// one such cycle between two evidence cycles, however far apart they are. The
+// count is of observations, not of the gaps between them, so a short gap alone
+// cannot end an episode. A replayed envelope is one cycle the agent ran, so a
+// backlog without evidence counts one cycle per envelope.
+func (e *Engine) orphanGapEnds(inst *instanceState, now, sent time.Time) bool {
+	if inst.quietCycles < 2 || now.Sub(inst.orphanSeenAt) < e.orphanWindow {
+		return false
+	}
+	if !sent.IsZero() && !inst.orphanSeenSent.IsZero() && sent.Sub(inst.orphanSeenSent) < e.orphanWindow {
+		return false
+	}
+	return true
 }
 
 // detectSplitBrain checks for multiple primary instances in one cluster.
