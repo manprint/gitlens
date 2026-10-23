@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -90,9 +92,45 @@ func receiverReset(ctx context.Context, base string) error {
 	return err
 }
 
-func receiverFailNext(ctx context.Context, base string, n int) error {
-	_, err := receiverCall(ctx, base, http.MethodPost, fmt.Sprintf("/_fail_next?n=%d", n), nil)
+// receiverFailNext makes the next n deliveries for ruleID fail with a 502. An
+// empty ruleID fails whichever delivery arrives first.
+func receiverFailNext(ctx context.Context, base, ruleID string, n int) error {
+	q := url.Values{"n": {strconv.Itoa(n)}, "rule_id": {ruleID}}
+	_, err := receiverCall(ctx, base, http.MethodPost, "/_fail_next?"+q.Encode(), nil)
 	return err
+}
+
+// ruleBodies keeps the deliveries for one rule. The server also sends
+// instance_unreachable for the same outage through the same webhook, so
+// counting every body says nothing about one rule on its own.
+func ruleBodies(bodies []receivedNotification, ruleID string) []receivedNotification {
+	var out []receivedNotification
+	for _, body := range bodies {
+		if body.RuleID == ruleID {
+			out = append(out, body)
+		}
+	}
+	return out
+}
+
+// outageDeliveriesOnce reports an error unless the webhook holds exactly one
+// agent_down and one instance_unreachable body for the outage, so a double
+// send of either rule is caught.
+func outageDeliveriesOnce(bodies []receivedNotification) error {
+	for _, ruleID := range []string{"agent_down", "instance_unreachable"} {
+		if n := len(ruleBodies(bodies, ruleID)); n != 1 {
+			return fmt.Errorf("%d %s bodies, want 1 (all deliveries: %#v)", n, ruleID, bodies)
+		}
+	}
+	return nil
+}
+
+// waitForRuleBodies polls the webhook until it holds want deliveries for ruleID.
+func waitForRuleBodies(ctx context.Context, e *Env, ruleID string, want int) error {
+	return poll(ctx, 500*time.Millisecond, func(ctx context.Context) (bool, error) {
+		bodies, err := receiverCall(ctx, e.MockReceiverURL, http.MethodGet, "/_received", nil)
+		return err == nil && len(ruleBodies(bodies, ruleID)) == want, err
+	})
 }
 
 func alertInstance(ctx context.Context, e *Env) (string, error) {
@@ -229,7 +267,7 @@ func runAlertRetry(ctx context.Context, e *Env) error {
 	if err := receiverReset(ctx, e.MockReceiverURL); err != nil {
 		return err
 	}
-	if err := receiverFailNext(ctx, e.MockReceiverURL, 2); err != nil {
+	if err := receiverFailNext(ctx, e.MockReceiverURL, "agent_down", 2); err != nil {
 		return err
 	}
 	instanceID, err := alertInstance(ctx, e)
@@ -253,18 +291,25 @@ func runAlertRetry(ctx context.Context, e *Env) error {
 	}
 	var ok bool
 	var attempts int
+	// The two injected 502s are absorbed by the webhook's transport retries
+	// inside one Send, so the notifier counts a single attempt and the row
+	// settles ok on it. Without those retries the first Send would fail, and
+	// the notifier would send again on a later pass with attempts at 2 or more.
 	if err := poll(ctx, 500*time.Millisecond, func(ctx context.Context) (bool, error) {
 		err := e.DB.QueryRow(ctx, `SELECT ok,attempts FROM notifications WHERE alert_key LIKE 'agent_down/' || $1 || '/%' AND channel='webhook' AND phase='fire'`, instanceID).Scan(&ok, &attempts)
-		return err == nil && ok && attempts == 1, err
+		return err == nil && ok, err
 	}); err != nil {
-		return fmt.Errorf("notification row did not settle after transport retries: %w (ok:%v attempts:%d)", err, ok, attempts)
+		return fmt.Errorf("notification row did not settle as sent: %w (ok:%v attempts:%d)", err, ok, attempts)
+	}
+	if attempts != 1 {
+		return fmt.Errorf("notification row settled after %d notifier attempts, want 1: the transport retries should absorb both injected failures inside one send", attempts)
 	}
 	bodies, err := receiverCall(ctx, e.MockReceiverURL, http.MethodGet, "/_received", nil)
 	if err != nil {
 		return err
 	}
-	if len(bodies) != 1 {
-		return fmt.Errorf("want one delivered body after two failures, got %d", len(bodies))
+	if got := ruleBodies(bodies, "agent_down"); len(got) != 1 {
+		return fmt.Errorf("want one delivered agent_down body after two failures, got %d (all deliveries: %#v)", len(got), bodies)
 	}
 	e.AssertInvariants(e.T)
 	return nil
@@ -293,6 +338,14 @@ func runAlertLeaderFailover(ctx context.Context, e *Env) error {
 	}); err != nil {
 		return err
 	}
+	// The same outage fires instance_unreachable through the webhook. Wait for
+	// its delivery before the kill, so the counts checked below are the ones a
+	// double send would raise.
+	unreachableCtx, cancelUnreachable := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelUnreachable()
+	if err := waitForRuleBodies(unreachableCtx, e, "instance_unreachable", 1); err != nil {
+		return fmt.Errorf("instance_unreachable not delivered before the failover: %w", err)
+	}
 	if e.KillServerReplica == nil {
 		return fmt.Errorf("alerting harness has no replica kill operation")
 	}
@@ -309,8 +362,8 @@ func runAlertLeaderFailover(ctx context.Context, e *Env) error {
 		if err != nil {
 			return err
 		}
-		if len(bodies) != 1 {
-			return fmt.Errorf("leader failover caused duplicate delivery: %d bodies", len(bodies))
+		if derr := outageDeliveriesOnce(bodies); derr != nil {
+			return fmt.Errorf("leader failover caused duplicate delivery: %w", derr)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
@@ -320,8 +373,10 @@ func runAlertLeaderFailover(ctx context.Context, e *Env) error {
 	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
 		bodies, err := receiverCall(ctx, e.MockReceiverURL, http.MethodGet, "/_received", nil)
-		if err == nil && len(bodies) != 1 {
-			return fmt.Errorf("restart caused duplicate delivery: %d bodies", len(bodies))
+		if err == nil {
+			if derr := outageDeliveriesOnce(bodies); derr != nil {
+				return fmt.Errorf("restart caused duplicate delivery: %w", derr)
+			}
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
@@ -370,8 +425,10 @@ func runAlertSilence(ctx context.Context, e *Env) error {
 		if err != nil {
 			return err
 		}
-		if len(bodies) != 0 {
-			return fmt.Errorf("silenced firing alert delivered %d notifications", len(bodies))
+		// The silence matches rule_id agent_down only, so instance_unreachable
+		// for the same outage is still delivered and is not counted here.
+		if got := ruleBodies(bodies, "agent_down"); len(got) != 0 {
+			return fmt.Errorf("silenced firing alert delivered %d agent_down notifications (all deliveries: %#v)", len(got), bodies)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}

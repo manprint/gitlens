@@ -13,6 +13,25 @@ type receiver struct {
 	mu       sync.Mutex
 	bodies   []json.RawMessage
 	failNext int
+	// failRule limits the failures to deliveries whose rule_id matches, so one
+	// rule's retries are not spent on another rule's deliveries. Empty fails
+	// whichever delivery arrives first.
+	failRule string
+}
+
+// failsRule reports whether the pending failure applies to this delivery.
+// The caller holds r.mu.
+func (r *receiver) failsRule(body []byte) bool {
+	if r.failRule == "" {
+		return true
+	}
+	var note struct {
+		RuleID string `json:"rule_id"`
+	}
+	if err := json.Unmarshal(body, &note); err != nil {
+		return false
+	}
+	return note.RuleID == r.failRule
 }
 
 func (r *receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -29,6 +48,7 @@ func (r *receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		r.mu.Lock()
 		r.bodies = nil
 		r.failNext = 0
+		r.failRule = ""
 		r.mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -40,6 +60,7 @@ func (r *receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 		r.mu.Lock()
 		r.failNext = n
+		r.failRule = req.URL.Query().Get("rule_id")
 		r.mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -54,7 +75,7 @@ func (r *receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	r.mu.Lock()
-	if r.failNext > 0 {
+	if r.failNext > 0 && r.failsRule(body) {
 		r.failNext--
 		r.mu.Unlock()
 		w.WriteHeader(http.StatusBadGateway)
