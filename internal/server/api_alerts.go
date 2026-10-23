@@ -289,11 +289,17 @@ func (a *AlertAPI) listSilences(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 503, "alert store unavailable", "")
 		return
 	}
+	all := r.URL.Query().Get("all") == "true"
 	q := `SELECT silence_id,matchers,reason,starts_at,ends_at FROM silences`
-	if r.URL.Query().Get("all") != "true" {
+	if !all {
 		q += ` WHERE starts_at <= now() AND ends_at > now()`
 	}
 	q += ` ORDER BY ends_at`
+	// The history of silences has no bound either, so the full listing is capped
+	// as the alert listing is: one row past the cap tells whether it was cut.
+	if all {
+		q += ` LIMIT 501`
+	}
 	rows, err := a.pool.Query(r.Context(), q)
 	if err != nil {
 		writeError(w, 500, "silence query failed", err.Error())
@@ -317,6 +323,10 @@ func (a *AlertAPI) listSilences(w http.ResponseWriter, r *http.Request) {
 	if err := rows.Err(); err != nil {
 		writeError(w, 500, "silence query failed", err.Error())
 		return
+	}
+	if all && len(out) > 500 {
+		w.Header().Set("X-Result-Truncated", "true")
+		out = out[:500]
 	}
 	writeJSON(w, 200, out)
 }

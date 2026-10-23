@@ -239,3 +239,91 @@ func TestAlertAPI_INT_ALERTAPI_008_DeleteKeepsTheSchedule(t *testing.T) {
 	require.WithinDuration(t, ends[expired], endOf(expired), time.Millisecond, "an expired silence keeps its end")
 	require.WithinDuration(t, starts[future], endOf(future), time.Millisecond, "a future silence ends at its start")
 }
+
+// TestAlertAPI_INT_ALERTAPI_009_StateFilterAndRowCap: state=all answers the
+// resolved history with the active alerts, and state=resolved answers only the
+// resolved rows. Past 500 rows a listing is cut there and says so in the header.
+func TestAlertAPI_INT_ALERTAPI_009_StateFilterAndRowCap(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := contextBackground()
+	_, err := pool.Exec(ctx, `DELETE FROM alerts`)
+	require.NoError(t, err)
+	st := alert.NewPgStore(pool)
+	now := time.Now().UTC()
+	resolvedAt := now
+	for _, a := range []alert.Alert{
+		{Key: "lag/firing/", RuleID: "replica_lag", Severity: alert.SeverityWarning, State: alert.StateFiring, Summary: "lag", StartedAt: now, LastEvalAt: now, Labels: map[string]string{}},
+		{Key: "lag/resolved/", RuleID: "replica_lag", Severity: alert.SeverityWarning, State: alert.StateResolved, Summary: "lag", StartedAt: now, LastEvalAt: now, ResolvedAt: &resolvedAt, Labels: map[string]string{}},
+	} {
+		require.NoError(t, st.Upsert(ctx, a))
+	}
+	r := alertRouter(NewAlertAPI(pool, st))
+	list := func(query string) (*httptest.ResponseRecorder, []alertJSON) {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/alerts"+query, nil))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var got []alertJSON
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+		return w, got
+	}
+	keys := func(rows []alertJSON) []string {
+		out := make([]string, 0, len(rows))
+		for _, a := range rows {
+			out = append(out, a.Key)
+		}
+		return out
+	}
+
+	_, got := list("")
+	require.Equal(t, []string{"lag/firing/"}, keys(got), "the default lists the active alerts only")
+	_, got = list("?state=all")
+	require.ElementsMatch(t, []string{"lag/firing/", "lag/resolved/"}, keys(got), "state=all includes the resolved history")
+	_, got = list("?state=resolved")
+	require.Equal(t, []string{"lag/resolved/"}, keys(got), "state=resolved returns only the resolved rows")
+
+	// 501 resolved rows, one past the cap, on top of the two above.
+	_, err = pool.Exec(ctx, `INSERT INTO alerts (alert_key, rule_id, severity, state, datname, value, labels, summary, started_at, last_eval_at, resolved_at)
+		SELECT 'lag/bulk/' || g, 'replica_lag', 'warning', 'resolved', 'db', 0, '{}', 'lag', $1::timestamptz - g * interval '1 second', $1::timestamptz - g * interval '1 second', $1::timestamptz
+		FROM generate_series(1, 501) g`, now)
+	require.NoError(t, err)
+	for _, query := range []string{"?state=all", "?state=resolved"} {
+		w, got := list(query)
+		require.Len(t, got, 500, query)
+		require.Equal(t, "true", w.Header().Get("X-Result-Truncated"), query)
+	}
+	_, got = list("?state=resolved")
+	for _, a := range got {
+		require.Equal(t, alert.StateResolved, a.State, a.Key)
+	}
+}
+
+// TestAlertAPI_INT_ALERTAPI_010_SilenceHistoryIsCapped: all=true answers the
+// silence history, and past 500 rows it is cut and the header says so. The
+// active listing is not capped.
+func TestAlertAPI_INT_ALERTAPI_010_SilenceHistoryIsCapped(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := contextBackground()
+	_, err := pool.Exec(ctx, `DELETE FROM silences`)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO silences (silence_id, matchers, reason, starts_at, ends_at)
+		SELECT gen_random_uuid(), '[]'::jsonb, 'history', now() - interval '3 days', now() - interval '2 days' - g * interval '1 second'
+		FROM generate_series(1, 501) g`)
+	require.NoError(t, err)
+	r := alertRouter(NewAlertAPI(pool, alert.NewPgStore(pool)))
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/silences?all=true", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var got []silenceJSON
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	require.Len(t, got, 500)
+	require.Equal(t, "true", w.Header().Get("X-Result-Truncated"))
+
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/silences", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, "[]", strings.TrimSpace(w.Body.String()), "none of the history is active")
+	require.Empty(t, w.Header().Get("X-Result-Truncated"))
+}
