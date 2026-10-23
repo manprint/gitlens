@@ -463,3 +463,50 @@ func TestCgroup_V1QuotaWithoutUsageHasNoRatio(t *testing.T) {
 	require.Equal(t, 2, *s.CPUCount)
 	require.Nil(t, s.CPUUsedRatio)
 }
+
+// Where cpu and cpuacct are mounted apart, the usage counter is in the cpuacct
+// mount and the quota is still read from the cpu one.
+func TestCgroup_V1CPURatioReadsSeparateCpuacctMount(t *testing.T) {
+	procDir, sysDir := t.TempDir(), t.TempDir()
+	root := filepath.Join(sysDir, "fs", "cgroup")
+	writeCgroupFiles(t, root, map[string]string{
+		"memory/memory.limit_in_bytes": "9223372036854771712\n", // unlimited
+		"cpu/cpu.cfs_quota_us":         "200000\n",              // 2 cores
+		"cpu/cpu.cfs_period_us":        "100000\n",
+		"cpuacct/cpuacct.usage":        "1000000000\n",
+	})
+	c := NewCollector(procDir, sysDir)
+	now := time.Unix(1000, 0)
+	c.now = func() time.Time { return now }
+
+	host := 0.125
+	s := Sample{Source: "host", CPUUsedRatio: &host}
+	c.applyCgroup(&s)
+	require.Equal(t, 2, *s.CPUCount)
+	require.Nil(t, s.CPUUsedRatio)
+
+	// One CPU-second in one second is half of a 2-core quota.
+	now = now.Add(time.Second)
+	writeCgroupFiles(t, root, map[string]string{"cpuacct/cpuacct.usage": "2000000000\n"})
+	s = Sample{Source: "host", CPUUsedRatio: &host}
+	c.applyCgroup(&s)
+	require.NotNil(t, s.CPUUsedRatio, "usage in the cpuacct mount was not read")
+	require.InDelta(t, 0.5, *s.CPUUsedRatio, 1e-9)
+}
+
+// A v2 quota whose usage cannot be read has no ratio, as a v1 quota has none:
+// the host ratio would describe the host while the CPU count describes the quota.
+func TestCgroup_CPURatioUnknownWithoutUsage(t *testing.T) {
+	procDir, sysDir := t.TempDir(), t.TempDir()
+	writeCgroupFiles(t, procDir, map[string]string{"self/cgroup": "0::/\n"})
+	root := filepath.Join(sysDir, "fs", "cgroup")
+	writeCgroupFiles(t, root, map[string]string{
+		"cgroup.controllers": "cpu memory\n",
+		"cpu.max":            "200000 100000\n", // 2 cores
+	})
+	host := 0.125
+	s := Sample{Source: "host", CPUUsedRatio: &host}
+	NewCollector(procDir, sysDir).applyCgroup(&s)
+	require.Equal(t, 2, *s.CPUCount)
+	require.Nil(t, s.CPUUsedRatio)
+}

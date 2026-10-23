@@ -145,9 +145,11 @@ func (c *Collector) applyV2CPURatio(dir string, s *Sample) {
 	c.applyCPURatio(quotaCores, hasQuota, usage, hasUsage, s)
 }
 
-// applyV1CPURatio is applyV2CPURatio for cgroup v1. The quota and the usage are
-// read from the mount root, as applyV1 reads the CPU count, so the ratio and the
-// count always describe the same cgroup. The usage counter is in nanoseconds.
+// applyV1CPURatio is applyV2CPURatio for cgroup v1. The quota is read from the
+// mount root, as applyV1 reads the CPU count, so the ratio and the count always
+// describe the same cgroup. The usage counter is in nanoseconds. It is read from
+// the cpuacct mount where cpu and cpuacct are mounted apart, and from the cpu
+// mount where they are mounted together, which is the usual layout.
 func (c *Collector) applyV1CPURatio(root string, s *Sample) {
 	dir := filepath.Join(root, "cpu")
 	quotaCores, hasQuota := readCPUQuotaV1(dir)
@@ -155,7 +157,10 @@ func (c *Collector) applyV1CPURatio(root string, s *Sample) {
 	hasUsage := false
 	if hasQuota {
 		var ns uint64
-		ns, hasUsage = readUint(filepath.Join(dir, "cpuacct.usage"))
+		ns, hasUsage = readUint(filepath.Join(root, "cpuacct", "cpuacct.usage"))
+		if !hasUsage {
+			ns, hasUsage = readUint(filepath.Join(dir, "cpuacct.usage"))
+		}
 		usage = ns / 1000
 	}
 	c.applyCPURatio(quotaCores, hasQuota, usage, hasUsage, s)
