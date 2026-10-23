@@ -160,6 +160,29 @@ func TestExplain_StripsLeadingCommentsBeforeKeyword(t *testing.T) {
 	require.Equal(t, "SELECT", firstSQLKeyword(statement))
 }
 
+// PostgreSQL nests block comments and ends a line comment at a carriage
+// return. The gate must find the keyword the server runs, or a DELETE reads
+// as a SELECT. Verified on PostgreSQL 18: both statements below plan a Delete.
+func TestExplain_KeywordGateReadsCommentsLikePostgreSQL(t *testing.T) {
+	require.Equal(t, "DELETE", firstSQLKeyword("/* /* x */ SELECT 1 */ DELETE FROM t"))
+	require.Equal(t, "UPDATE", firstSQLKeyword("/* a /* b /* c */ */ */ UPDATE t SET x = 1"))
+	require.Equal(t, "DELETE", firstSQLKeyword("--x\rDELETE FROM t WHERE id = (\nSELECT 1)"))
+	require.Equal(t, "SELECT", firstSQLKeyword("--x\r\nSELECT 1"))
+	require.Empty(t, firstSQLKeyword("/* /* x */ SELECT 1"), "an unclosed comment has no keyword")
+}
+
+// The keyword decides what EXPLAIN ANALYZE may run, so a nested comment must
+// not hide a DELETE behind a SELECT. The refusal comes before any statement
+// reaches the database.
+func TestExplain_AnalyzeRefusesDMLBehindANestedComment(t *testing.T) {
+	conn := &explainConn{statement: "/* /* x */ SELECT 1 */ DELETE FROM t", plan: []byte(`[{"Plan":{"Node Type":"Result"}}]`)}
+	_, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{QueryID: int64Ptr(1), Analyze: true})
+	var rejected *RejectedError
+	require.ErrorAs(t, err, &rejected)
+	require.ErrorContains(t, err, "would execute a DELETE statement")
+	require.Empty(t, conn.execSQL)
+}
+
 func TestExplain_UnknownQueryIDIsRejected(t *testing.T) {
 	conn := &explainConn{lookupErr: pgx.ErrNoRows}
 	_, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{QueryID: int64Ptr(404)})

@@ -295,22 +295,28 @@ func allowedExplainKeyword(keyword string) bool {
 	}
 }
 
+// firstSQLKeyword skips leading whitespace and comments the way PostgreSQL's
+// lexer does, so the keyword it returns is the one the server executes. The
+// gate is only as good as that agreement: a comment that ends early here lets
+// a write read as a SELECT.
 func firstSQLKeyword(statement string) string {
 	for {
 		statement = strings.TrimLeft(statement, " \t\r\n")
 		switch {
 		case strings.HasPrefix(statement, "--"):
-			if newline := strings.IndexByte(statement, '\n'); newline >= 0 {
-				statement = statement[newline+1:]
+			// A carriage return ends a line comment too, not only a newline.
+			if end := strings.IndexAny(statement, "\r\n"); end >= 0 {
+				statement = statement[end+1:]
 				continue
 			}
 			return ""
 		case strings.HasPrefix(statement, "/*"):
-			if end := strings.Index(statement[2:], "*/"); end >= 0 {
-				statement = statement[end+4:]
-				continue
+			end := blockCommentEnd(statement)
+			if end < 0 {
+				return ""
 			}
-			return ""
+			statement = statement[end:]
+			continue
 		}
 		break
 	}
@@ -319,6 +325,30 @@ func firstSQLKeyword(statement string) string {
 		end++
 	}
 	return strings.ToUpper(statement[:end])
+}
+
+// blockCommentEnd returns the offset just past the block comment that opens
+// statement, or -1 when the comment is never closed. PostgreSQL nests block
+// comments, so a "*/" closes only the innermost one: in
+// "/* /* x */ SELECT 1 */ DELETE" the comment ends after the second "*/".
+func blockCommentEnd(statement string) int {
+	depth := 0
+	for i := 0; i+1 < len(statement); {
+		switch statement[i : i+2] {
+		case "/*":
+			depth++
+			i += 2
+		case "*/":
+			depth--
+			i += 2
+			if depth == 0 {
+				return i
+			}
+		default:
+			i++
+		}
+	}
+	return -1
 }
 
 func planHash(plan json.RawMessage) (string, error) {
