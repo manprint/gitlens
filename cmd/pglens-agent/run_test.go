@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -234,6 +236,35 @@ func TestFlushEnvelopeKeepsTheSkipsOfAnUnreachableTarget(t *testing.T) {
 	require.Len(t, pending["hung"], 1, "only the skip is kept; the error of this cycle is dropped")
 	require.Equal(t, "replication_streaming", pending["hung"][0].Check)
 	require.Equal(t, "role unknown not allowed", pending["hung"][0].SkipReason)
+}
+
+// TestFlushEnvelopeQueuesNothingWhenNothingIsReachable: an agent whose targets
+// are all unreachable and that has nothing to report queues no envelope, so the
+// buffer does not fill with empty envelopes for as long as the outage lasts.
+func TestFlushEnvelopeQueuesNothingWhenNothingIsReachable(t *testing.T) {
+	t.Setenv("PGLENS_IDENTITY_PATH", filepath.Join(t.TempDir(), "identity.json"))
+	mgr := unreachableManager(t, "down")
+
+	buf, err := buffer.Open(filepath.Join(t.TempDir(), "buffer"), buffer.Options{MaxSize: 1 << 20, MaxAge: time.Hour, Clock: clock.System()})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = buf.Close() })
+	pusher := agent.NewPusher("http://127.0.0.1:1/", "token", clock.System())
+	pusher.SetBuffer(buf)
+
+	var mu sync.Mutex
+	flushEnvelope(context.Background(), []*agent.Manager{mgr}, &mu, map[string][]wire.Result{}, &edgeStates{byName: map[string]edgeState{}}, map[string]bool{}, map[string]map[string]bool{}, pusher)
+
+	_, _, err = buf.Next()
+	require.ErrorIs(t, err, io.EOF, "an empty envelope must not be queued")
+}
+
+// TestWarnSuperuserTargets_UnreachableTargetIsNotReported: a target that cannot
+// be read at start is not reported as a superuser, and the warning does not wait
+// for it.
+func TestWarnSuperuserTargets_UnreachableTargetIsNotReported(t *testing.T) {
+	var out bytes.Buffer
+	warnSuperuserTargets(context.Background(), &out, []*agent.Manager{unreachableManager(t, "down")})
+	require.Empty(t, out.String())
 }
 
 // TestRequeueSkips_KeepsTheNewerSkipPerCheck: a dead target's pending batch

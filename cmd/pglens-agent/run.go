@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -139,6 +140,7 @@ func runAgentCommand(args []string) {
 		managers = append(managers, mgr)
 	}
 	waitForTargets(ctx, managers, targetReadyTimeout)
+	go warnSuperuserTargets(ctx, os.Stderr, managers)
 	for i, tc := range cfg.Targets {
 		// &mu, not "nothing": startASH below launches a goroutine that writes
 		// `pending` under this mutex, and it does so for target N while this
@@ -205,6 +207,12 @@ func runAgentCommand(args []string) {
 		dispatcher.AddExecutor(agent.NewTerminateExecutor())
 		dispatcher.AddExecutor(agent.NewPgstattupleExecutor())
 		for i, mgr := range managers {
+			// A target whose identity cannot be read has no instance id to poll
+			// commands for, so it is not registered under the nil id.
+			if mgr.InstanceID() == uuid.Nil {
+				fmt.Fprintf(os.Stderr, "warning: target %s has no instance id, its commands are not polled until the agent restarts\n", mgr.Database())
+				continue
+			}
 			dispatcher.AddTarget(mgr.InstanceID(), mgr, cfg.Targets[i].AllowExplainAnalyze, cfg.Targets[i].AllowSignal)
 		}
 		go dispatcher.Run(ctx)
@@ -372,15 +380,11 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 	}
 	mu.Unlock()
 
-	if len(batch) == 0 {
-		return
-	}
-
 	env := &wire.Envelope{ProtocolVersion: wire.ProtocolVersion, SentAt: time.Now(), AgentVersion: version}
-	// One reading per envelope, shared by every instance in it: the buffer is
-	// a process-wide resource, and SamplesDroppedRate consumes the interval
-	// since the previous call.
-	selfResult := agentSelfResult(pusher, env.SentAt)
+	// One reading per envelope, shared by every instance in it that carries
+	// results: the buffer is a process-wide resource, and SamplesDroppedRate
+	// consumes the interval since the previous call.
+	var selfResult *wire.Result
 	// Every Manager shares the same identity.json (PGLENS_IDENTITY_PATH is
 	// one path for the whole process), so any of them reports the same
 	// process-wide agent_id — this was never actually sent before
@@ -393,11 +397,13 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 			env.AgentID = id.String()
 		}
 	}
+	// Every target gets an instance on every flush, with or without results. A
+	// target whose checks are all silent (their breakers are open, or none is
+	// scheduled) would otherwise stop reaching the server, which reads an
+	// instance as down once InstanceStaleAfter (90 s) has passed without a push.
+	// A target that cannot be reached is left out, as described below.
 	for _, mgr := range managers {
-		results, ok := batch[mgr.Database()]
-		if !ok {
-			continue
-		}
+		results := batch[mgr.Database()]
 		// A dead target must not hold the whole envelope hostage while another
 		// target is still reachable (notably after primary->standby failover).
 		// Shared() can wait for a pool connection, so bound every target's
@@ -412,8 +418,8 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 		// be reached AT ALL this cycle — found live via SYS-REPL-003
 		// (kill one target of a two-target agent, never promote the other):
 		// every scheduled check for the dead target still produced an
-		// error-only wire.Result every cycle, so `results`/`ok` above stayed
-		// non-empty forever and this wire.Instance kept being pushed with a
+		// error-only wire.Result every cycle, so `results` stayed non-empty
+		// forever and this wire.Instance kept being pushed with a
 		// fresh `last_seen` indefinitely — the server had no way to tell
 		// "still alive" from "every check on it has failed for minutes,"
 		// which made internal/server/staleness.go's no_primary_in_cluster
@@ -428,6 +434,16 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 			// queues it again. Keep it for the first cycle that reaches the target.
 			// The other results are the errors of a cycle with no live signal, and
 			// they are dropped as before.
+			requeueSkips(mu, pending, mgr.Database(), results)
+			continue
+		}
+		// A target whose identity cannot be read has no cluster id or instance id
+		// to report. A zero id would be stored as a real one, so the instance is
+		// left out the same way as an unreachable target, and its skips wait for
+		// the next cycle that can identify it.
+		if mgr.ClusterID() == 0 || mgr.InstanceID() == uuid.Nil { //nolint:contextcheck // Manager caches these at connect time; the accessors take no context
+			fmt.Fprintf(os.Stderr, "warning: identity for %s is not available (omitting from envelope this cycle)\n", mgr.Database())
+			cancel()
 			requeueSkips(mu, pending, mgr.Database(), results)
 			continue
 		}
@@ -450,8 +466,16 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 		dbs = reportScheduled(dbs, scheduled[mgr.Database()])
 		edges := lastEdgeState.build(mgr.Database(), mgr.InstanceID().String(), mgr.Role(), results) //nolint:contextcheck // InstanceID and Role: Manager caches these at connect time; the accessors take no context
 		// Appended after the edges are built so the synthetic result cannot
-		// influence topology derivation.
-		results = append(results, selfResult)
+		// influence topology derivation. A heartbeat carries no results at all:
+		// a self reading in it would report a zero check error rate for a target
+		// whose checks are silent, and that would resolve check_failing.
+		if len(results) > 0 {
+			if selfResult == nil {
+				r := agentSelfResult(pusher, env.SentAt)
+				selfResult = &r
+			}
+			results = append(results, *selfResult)
+		}
 		env.Instances = append(env.Instances, wire.Instance{
 			InstanceID:      mgr.InstanceID().String(), //nolint:contextcheck // Manager caches this at connect time; the accessor takes no context
 			TargetName:      mgr.TargetName(),
@@ -469,7 +493,29 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 		})
 		cancel()
 	}
+	// An envelope with no instance is queued only when a batch was taken. An
+	// agent whose targets are all unreachable and that has nothing to report
+	// would otherwise queue an empty envelope every cycle, filling the buffer
+	// through an outage.
+	if len(env.Instances) == 0 && len(batch) == 0 {
+		return
+	}
 	pusher.Queue(env)
+}
+
+// warnSuperuserTargets writes one warning for each target whose monitoring role
+// is a superuser. The agent still runs as configured: a superuser is refused for
+// EXPLAIN ANALYZE and reported as critical by the security advisor, but nothing
+// at start said so. A target that cannot be read yet is not reported here.
+func warnSuperuserTargets(ctx context.Context, w io.Writer, managers []*agent.Manager) {
+	for _, mgr := range managers {
+		readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		superuser, err := mgr.SessionIsSuperuser(readCtx)
+		cancel()
+		if err == nil && superuser {
+			fmt.Fprintf(w, "warning: target %s connects as a superuser; the monitoring role must not be one (see deploy/sql/monitoring_user.sql), the agent runs anyway\n", mgr.Database())
+		}
+	}
 }
 
 // requeueSkips puts back the skip results of a batch that could not be sent, so
