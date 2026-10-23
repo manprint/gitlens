@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/manprint/pglens/internal/wire"
 )
 
@@ -76,6 +77,19 @@ func transmittedAt(r *http.Request, sentAt time.Time) time.Time {
 		}
 	}
 	return sentAt
+}
+
+// storeRefused reports whether the store refused the envelope's own values on
+// a NOT NULL or CHECK constraint. Such an envelope is refused the same way on
+// every attempt, so the answer is a 400, which the agent does not resend. Other
+// violations can come from writers racing each other (unique, foreign key), and
+// other database errors can be transient, so those stay a 500.
+func storeRefused(err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	return pgErr.Code == "23502" || pgErr.Code == "23514"
 }
 
 // clockSkewSeconds is the agent's clock offset from the server, without a
@@ -243,6 +257,11 @@ func ingestHandler(auth *Auth, inv *Inventory, pipeline *Pipeline, slots chan st
 		}
 		pipeRes, err := pipeline.Process(ctx, filtered)
 		if err != nil {
+			if storeRefused(err) {
+				IncIngestRejected("store_refused")
+				writeError(w, http.StatusBadRequest, "store refused the envelope", err.Error())
+				return
+			}
 			IncIngestRejected("pipeline_error")
 			writeError(w, http.StatusInternalServerError, "pipeline error", err.Error())
 			return

@@ -466,3 +466,37 @@ func TestPipeline_RetriedEnvelopeCountsEachCheckOnce(t *testing.T) {
 	require.Equal(t, 1, res.Accepted)
 	require.Equal(t, okBefore+2, pglensCheckOKTotal.Get(checkKey{instance: instID.String(), check: "activity"}))
 }
+
+// TestPipeline_InvalidEdgeConfidenceIsRefusedAlone: a newer agent may send an
+// edge confidence the store does not admit. The edge is refused and counted,
+// and the rest of the envelope is stored. The CHECK used to fail the whole
+// envelope, which an agent then resends forever.
+func TestPipeline_InvalidEdgeConfidenceIsRefusedAlone(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	cid := pgtype.ClusterID(405).String()
+	standby := uuid.New()
+	before := pglensIngestRejectedTotal.Get("invalid_edge")
+
+	// The edge names the primary, which is in the envelope, so it resolves and
+	// reaches the store.
+	primary := uuid.New()
+	p := NewPipeline(pool, clock.NewFake(time.Now()))
+	res, err := p.Process(ctx, wire.Envelope{Instances: []wire.Instance{{
+		InstanceID: primary.String(), ClusterID: cid, Addr: "10.0.5.1", Port: 5432, PGVersion: 170000, Role: "primary",
+	}, {
+		InstanceID: standby.String(), ClusterID: cid, Addr: "10.0.5.9", Port: 5432, PGVersion: 170000, Role: "standby",
+		Results: []wire.Result{{Check: "activity", TS: time.Now().Add(-time.Minute), Database: "app"}},
+		TopologyEdges: []wire.Edge{
+			{From: standby.String(), To: "10.0.5.1", Port: 5432, Type: "streaming", Confidence: "medium"},
+		},
+	}}})
+	require.NoError(t, err)
+	require.Equal(t, 2, res.Accepted, "both instances are stored")
+	require.Zero(t, res.Rejected)
+	require.Equal(t, before+1, pglensIngestRejectedTotal.Get("invalid_edge"))
+	var edges int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM topology_edges WHERE from_instance=$1`, standby).Scan(&edges))
+	require.Zero(t, edges, "an edge the store would refuse is not written")
+}

@@ -360,6 +360,13 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		undoMark := len(undos)
 		var topoEdges []topology.Edge
 		for _, we := range inst.TopologyEdges {
+			// The store admits only these two confidences. An edge with another one,
+			// from a newer agent, would fail the whole envelope on every attempt, so
+			// it is refused alone, as an invalid fact is.
+			if we.Confidence != "high" && we.Confidence != "low" {
+				IncIngestRejected("invalid_edge")
+				continue
+			}
 			toID, ok := resolveAddr(ctx, cidDB, we.To, we.Port)
 			if p := clusterPrimaries[cid]; !ok && inst.Role == "standby" && p.count == 1 {
 				// A receiver may report the upstream's logical/container hostname

@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/manprint/pglens/internal/wire"
 	"github.com/stretchr/testify/require"
@@ -384,4 +386,20 @@ func TestIngest_RefusesEnvelopeWithoutAgentID(t *testing.T) {
 			require.Contains(t, w.Body.String(), "missing agent_id")
 		})
 	}
+}
+
+// TestStoreRefused_OnlyTheEnvelopesOwnValues: a NOT NULL or CHECK violation is
+// the envelope's own fault and is answered 400. A unique or foreign key
+// violation can come from a writer racing this one, and the retry succeeds.
+func TestStoreRefused_OnlyTheEnvelopesOwnValues(t *testing.T) {
+	t.Parallel()
+	wrapped := func(code string) error {
+		return fmt.Errorf("write topology edges: insert topology edge: %w", &pgconn.PgError{Code: code})
+	}
+	require.True(t, storeRefused(wrapped("23514")))
+	require.True(t, storeRefused(wrapped("23502")))
+	require.False(t, storeRefused(wrapped("23505")))
+	require.False(t, storeRefused(wrapped("23503")))
+	require.False(t, storeRefused(wrapped("40001")))
+	require.False(t, storeRefused(errors.New("connection reset")))
 }

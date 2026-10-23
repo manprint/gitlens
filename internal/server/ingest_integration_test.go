@@ -231,3 +231,40 @@ func TestIngest_INT_INGEST_003_RevokedOwnerRefusesPush(t *testing.T) {
 
 	require.Equal(t, http.StatusAccepted, push(uuid.NewString(), uuid.NewString()).Code, "an unrevoked owner is not refused")
 }
+
+// TestIngest_StoreRefusalIsNotRetried: an envelope the store refuses on a
+// CHECK constraint fails every time it is sent, so the answer is a 400 that
+// the agent consumes. A 500 made the agent resend it forever, and every
+// envelope behind it waited.
+func TestIngest_StoreRefusalIsNotRetried(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	auth := NewAuth("test-token")
+	h := IngestHandler(auth, NewInventory(pool), NewPipeline(pool, nil))
+
+	env := wire.Envelope{
+		ProtocolVersion: wire.ProtocolVersion,
+		AgentID:         uuid.NewString(),
+		SentAt:          time.Now(),
+		Instances: []wire.Instance{{
+			InstanceID: uuid.NewString(),
+			ClusterID:  pgtype.ClusterID(111222444).String(),
+			Role:       "primary",
+			Results: []wire.Result{{
+				Check: "bloat_estimate", TS: time.Now(), Database: "app",
+				Metrics: []wire.Metric{{
+					Name: "pg_bloat_real_bytes", Value: 1, Kind: "gauge",
+					// A kind of object the table does not admit, as a newer agent may send.
+					Labels: map[string]string{"schemaname": "public", "relname": "s", "object_kind": "sequence", "method": "estimate"},
+				}},
+			}},
+		}},
+	}
+	body, err := json.Marshal(env)
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/push", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-token")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+}
