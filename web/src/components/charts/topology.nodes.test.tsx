@@ -36,6 +36,13 @@ describe('TopologyNode', () => {
     expect(screen.getByLabelText(/standby node.*Up/)).toBeInTheDocument()
   })
 
+  it('WU-13 shows the PostgreSQL version as major.minor, as the instance page does', () => {
+    render(<TopologyNode {...nodeProps({ ...baseNode, version: 170006 })} />)
+
+    expect(screen.getByText('17.6')).toBeInTheDocument()
+    expect(screen.queryByText('170006')).not.toBeInTheDocument()
+  })
+
   it('makes a down instance unmistakable and labels an unresolved endpoint', () => {
     const { rerender } = render(
       <TopologyNode {...nodeProps({ ...baseNode, up: false, replayLagSec: null })} />,

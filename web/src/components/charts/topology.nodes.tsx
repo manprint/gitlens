@@ -1,6 +1,7 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
 
 import { Badge } from '@/components/ui/badge'
+import { formatPostgresVersion } from '@/lib/format'
 import type { ReplicationNode } from '@/lib/replication'
 
 export type TopologyNodeData = ReplicationNode &
@@ -41,7 +42,7 @@ export function TopologyNode({ data }: NodeProps<TopologyFlowNode>) {
         <dt>Port</dt>
         <dd>{data.port ?? 'Unknown'}</dd>
         <dt>PG version</dt>
-        <dd>{data.version ?? 'Unknown'}</dd>
+        <dd>{data.version == null ? 'Unknown' : formatPostgresVersion(data.version)}</dd>
         <dt>Permission tier</dt>
         <dd>{data.tier ?? 'Unknown'}</dd>
         {role === 'standby' ? (
