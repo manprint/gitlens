@@ -54,6 +54,12 @@ func TestINTCMD016_ExpirySweepCanUseAnIndex(t *testing.T) {
 	defer func() { _ = tx.Rollback(ctx) }()
 	_, err = tx.Exec(ctx, `SET LOCAL enable_seqscan = off`)
 	require.NoError(t, err)
+	// commands_instance_idx also starts with tenant_id, so the planner takes
+	// it whenever the statistics of the shared table make the two look alike,
+	// which depends on the rows earlier tests left. The transaction drops it
+	// and the rollback restores it, so only the expiry index can serve the sweep.
+	_, err = tx.Exec(ctx, `DROP INDEX commands_instance_idx`)
+	require.NoError(t, err)
 	rows, err := tx.Query(ctx, `EXPLAIN SELECT command_id FROM commands WHERE tenant_id=$1 AND state IN ('pending','claimed') AND expires_at <= now()`, commandTenant)
 	require.NoError(t, err)
 	defer rows.Close()
