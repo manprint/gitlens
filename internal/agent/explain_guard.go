@@ -42,9 +42,11 @@ import (
 
 // sideEffectFreeExtensions only compute: no I/O outside the database, no SQL
 // text executed on the caller's behalf, no state that outlives a transaction.
-// Their functions are allowed whatever volatility they declare (random
-// generators, PostGIS selectivity estimators), apart from the maintenance
-// functions in extensionFunctionsDenied.
+// The members a superuser owns are allowed whatever volatility they declare
+// (random generators, PostGIS selectivity estimators), apart from the
+// maintenance functions in extensionFunctionsDenied. A member a non-superuser
+// added is not the extension's code: it is checked like any user function, so
+// plain EXPLAIN is refused where one is IMMUTABLE or STABLE.
 var sideEffectFreeExtensions = map[string]bool{
 	"btree_gin":      true,
 	"btree_gist":     true,
