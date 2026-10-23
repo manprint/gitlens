@@ -14,7 +14,8 @@ describe('describeHealth', () => {
 
     expect(sentence).toMatch(/primary is present/i)
     expect(sentence).toMatch(/all instances are up/i)
-    expect(sentence).toMatch(/no replication lag/i)
+    expect(sentence).toMatch(/replay lag is within the 30 s threshold/i)
+    expect(sentence).not.toMatch(/no replication lag/i)
   })
 
   it('UI-FLEET-031 names a down instance or lagging standby for degraded health', () => {
