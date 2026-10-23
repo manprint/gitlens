@@ -26,7 +26,9 @@ import (
 func serveAlert(t *testing.T, api *AlertAPI, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	w := httptest.NewRecorder()
-	alertRouter(api).ServeHTTP(w, httptest.NewRequest(method, path, strings.NewReader(body)))
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	alertRouter(api).ServeHTTP(w, req)
 	return w
 }
 
@@ -96,6 +98,7 @@ func TestAlerts_RejectsUnknownState(t *testing.T) {
 func TestAlertRules_Tier0IsRejectedWithConflict(t *testing.T) {
 	r := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/alert-rules/agent_down", strings.NewReader(`{"enabled":false}`))
+	req.Header.Set("Content-Type", "application/json")
 	alertRouter(newAlertAPIForTest(nil, &alertAPITestStore{})).ServeHTTP(r, req)
 	require.Equal(t, 409, r.Code)
 }
@@ -103,6 +106,7 @@ func TestAlertRules_Tier0IsRejectedWithConflict(t *testing.T) {
 func TestAlertRules_InvalidBodyIsBadRequest(t *testing.T) {
 	r := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/alert-rules/custom", strings.NewReader(`{"severity":"bad"}`))
+	req.Header.Set("Content-Type", "application/json")
 	alertRouter(newAlertAPIForTest(nil, &alertAPITestStore{})).ServeHTTP(r, req)
 	require.Equal(t, 400, r.Code)
 }
@@ -110,6 +114,7 @@ func TestAlertRules_InvalidBodyIsBadRequest(t *testing.T) {
 func TestSilences_CreateValidates(t *testing.T) {
 	r := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/silences", strings.NewReader(`{"matchers":[],"reason":"x"}`))
+	req.Header.Set("Content-Type", "application/json")
 	alertRouter(newAlertAPIForTest(nil, &alertAPITestStore{})).ServeHTTP(r, req)
 	require.Equal(t, 400, r.Code)
 }

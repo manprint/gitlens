@@ -115,8 +115,10 @@ func TestFindingsAPI_MuteRefusesAnUntilBeyondTheCap(t *testing.T) {
 		r := chi.NewRouter()
 		(&API{pool: pool}).registerFindingsRoutes(r)
 		body := `{"reason":"accepted","until":"` + until + `"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/findings/query.slow_mean/mute", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
-		r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/findings/query.slow_mean/mute", strings.NewReader(body)))
+		r.ServeHTTP(rec, req)
 		return rec
 	}
 	inside := time.Now().UTC().Add(maxFindingMuteDuration - time.Hour).Format(time.RFC3339)

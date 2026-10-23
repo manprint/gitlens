@@ -26,7 +26,9 @@ func TestAlertAPI_INT_ALERTAPI_001_SilenceLifecycle(t *testing.T) {
 	body := fmt.Sprintf(`{"matchers":[{"name":"rule_id","value":"agent_down"}],"reason":"maintenance","starts_at":%q,"ends_at":%q}`,
 		now.Add(-time.Hour).Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/silences", strings.NewReader(body)))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/silences", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusCreated, w.Code)
 	var created silenceJSON
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
@@ -46,7 +48,9 @@ func TestAlertAPI_INT_ALERTAPI_002_Tier0Immutable(t *testing.T) {
 	pool := getSharedPool(t)
 	r := alertRouter(NewAlertAPI(pool, alert.NewPgStore(pool)))
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/api/v1/alert-rules/agent_down", strings.NewReader(`{"enabled":false}`)))
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/alert-rules/agent_down", strings.NewReader(`{"enabled":false}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusConflict, w.Code)
 }
 
@@ -142,7 +146,9 @@ func TestAlertAPI_INT_ALERTAPI_006_RuleEditDoesNotRevertAnother(t *testing.T) {
 	go func() {
 		w := httptest.NewRecorder()
 		r := alertRouter(NewAlertAPI(pool, alert.NewPgStore(pool)))
-		r.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/api/v1/alert-rules/"+rule, strings.NewReader(`{"threshold":45}`)))
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/alert-rules/"+rule, strings.NewReader(`{"threshold":45}`))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
 		done <- w
 	}()
 	require.Eventually(t, func() bool {
@@ -177,7 +183,9 @@ func TestAlertAPI_INT_ALERTAPI_007_SilenceIDAndDeleteOrder(t *testing.T) {
 		id, now.Add(time.Hour).Format(time.RFC3339), now.Add(2*time.Hour).Format(time.RFC3339))
 	post := func() int {
 		w := httptest.NewRecorder()
-		r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/silences", strings.NewReader(body)))
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/silences", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
 		return w.Code
 	}
 	require.Equal(t, http.StatusCreated, post())

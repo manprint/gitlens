@@ -998,9 +998,41 @@ func TestAPI_JSONWrites_RefuseOversizedBody(t *testing.T) {
 		{"silence create", ar, http.MethodPost, "/api/v1/silences"},
 		{"finding mute", r, http.MethodPost, "/api/v1/findings/some-id/mute"},
 	} {
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
-		tc.handler.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, strings.NewReader(body)))
+		tc.handler.ServeHTTP(w, req)
 		require.Equal(t, http.StatusRequestEntityTooLarge, w.Code, "%s: %s", tc.name, w.Body.String())
+	}
+}
+
+// TestAPI_JSONWrites_RequireJSONBody: a write decodes only a body that declares
+// itself JSON. A form or plain-text body is what a page on another site can
+// send without a preflight, so it is refused before the decoder reads it.
+func TestAPI_JSONWrites_RequireJSONBody(t *testing.T) {
+	t.Parallel()
+	body := `{"reason":"x","until":"2999-01-01T00:00:00Z"}`
+	ar := alertRouter(newAlertAPIForTest(&mockPool{}, &alertAPITestStore{}))
+	r := chi.NewRouter()
+	(&API{pool: &mockPool{}}).RegisterRoutes(r)
+	for _, tc := range []struct {
+		name        string
+		handler     http.Handler
+		method      string
+		path        string
+		contentType string
+	}{
+		{"silence create as text", ar, http.MethodPost, "/api/v1/silences", "text/plain"},
+		{"silence create as form", ar, http.MethodPost, "/api/v1/silences", "application/x-www-form-urlencoded"},
+		{"finding mute without a type", r, http.MethodPost, "/api/v1/findings/some-id/mute", ""},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(body))
+		if tc.contentType != "" {
+			req.Header.Set("Content-Type", tc.contentType)
+		}
+		w := httptest.NewRecorder()
+		tc.handler.ServeHTTP(w, req)
+		require.Equal(t, http.StatusUnsupportedMediaType, w.Code, "%s: %s", tc.name, w.Body.String())
 	}
 }
 

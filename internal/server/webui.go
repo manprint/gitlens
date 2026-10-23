@@ -1,10 +1,13 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"io/fs"
 	"net/http"
 	"net/url"
 	"path"
+	"regexp"
 	"strings"
 )
 
@@ -59,6 +62,41 @@ func SPAHandler(assets fs.FS) http.Handler {
 		http.ServeFileFS(w, r, assets, "index.html")
 	})
 }
+
+// contentSecurityPolicy is sent with every response. The interface has one
+// inline script, the theme setter in index.html, which runs before the bundle
+// loads, so script-src admits it by the hash of the index.html being served
+// and no other inline script. The hash follows the script when the interface
+// is rebuilt. Styles stay inline-permitted: the component libraries set style
+// attributes and inject style sheets at run time.
+func contentSecurityPolicy(assets fs.FS) string {
+	scriptSources := []string{"'self'"}
+	if assets != nil {
+		if index, err := fs.ReadFile(assets, "index.html"); err == nil {
+			for _, match := range inlineScriptPattern.FindAllSubmatch(index, -1) {
+				sum := sha256.Sum256(match[1])
+				scriptSources = append(scriptSources, "'sha256-"+base64.StdEncoding.EncodeToString(sum[:])+"'")
+			}
+		}
+	}
+	return strings.Join([]string{
+		"default-src 'self'",
+		"script-src " + strings.Join(scriptSources, " "),
+		"style-src 'self' 'unsafe-inline'",
+		"img-src 'self' data: blob:",
+		"font-src 'self' data:",
+		"connect-src 'self'",
+		"worker-src 'self' blob:",
+		"object-src 'none'",
+		"base-uri 'self'",
+		"form-action 'self'",
+		"frame-ancestors 'none'",
+	}, "; ")
+}
+
+// inlineScriptPattern matches a script element with no attributes, the only
+// kind of inline script the policy admits.
+var inlineScriptPattern = regexp.MustCompile(`(?s)<script>(.*?)</script>`)
 
 func cleanWebUIPath(u *url.URL) (string, bool) {
 	if hasParentSegment(u.Path) || (u.RawPath != "" && hasParentSegment(u.RawPath)) {

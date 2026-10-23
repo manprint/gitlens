@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -106,6 +107,12 @@ const maxJSONBodyBytes = 64 << 10
 // decodeJSONBody decodes the JSON body of a write request into dst. It writes
 // the error response and returns false when the body is too large or malformed.
 func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) bool {
+	// The body must declare itself JSON. A form or text body is what a page on
+	// another site can send without a preflight, so it is refused unread.
+	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
+		writeError(w, http.StatusUnsupportedMediaType, "unsupported media type", "the body must be application/json")
+		return false
+	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)).Decode(dst); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
