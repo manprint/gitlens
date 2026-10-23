@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/manprint/pglens/internal/cardinality"
 	"github.com/manprint/pglens/internal/pgtype"
@@ -151,10 +152,43 @@ func hashNormalizedDefinition(def string) string {
 	start := strings.Index(def, "(")
 	end := strings.LastIndex(def, ")")
 	if start < 0 || end < start {
-		sum := sha256.Sum256([]byte(strings.Join(strings.Fields(strings.ToLower(def)), " ")))
+		sum := sha256.Sum256([]byte(normalizeDefinition(def)))
 		return hex.EncodeToString(sum[:])
 	}
-	normalized := strings.Join(strings.Fields(strings.ToLower(def[start:end+1])), " ")
+	normalized := normalizeDefinition(def[start : end+1])
 	sum := sha256.Sum256([]byte(normalized))
 	return hex.EncodeToString(sum[:])
+}
+
+// normalizeDefinition lowercases the definition and collapses its whitespace,
+// but only outside quoted text. A string literal and a quoted identifier are
+// case-sensitive: 'ACTIVE' and 'active' select different rows, and "Name" and
+// "NAME" are different columns. A doubled quote inside a span closes and
+// reopens it, so the text is kept either way.
+func normalizeDefinition(def string) string {
+	var b strings.Builder
+	var quote rune
+	pendingSpace := false
+	for _, r := range def {
+		if quote == 0 && unicode.IsSpace(r) {
+			pendingSpace = b.Len() > 0
+			continue
+		}
+		if pendingSpace {
+			b.WriteByte(' ')
+			pendingSpace = false
+		}
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			}
+		case r == '\'' || r == '"':
+			quote = r
+		default:
+			r = unicode.ToLower(r)
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
