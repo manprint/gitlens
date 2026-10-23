@@ -113,7 +113,7 @@ describe('EventTimeline', () => {
     expect(screen.getByText('Agent recovered')).toBeInTheDocument()
   })
 
-  it('UI-CLUS-036 describes every event type the server emits instead of the unknown fallback', () => {
+  it('UI-CLUS-036 titles the four emitted types the taxonomy lacked instead of the unknown fallback', () => {
     // The literals the server writes to the events table: staleness.go,
     // inventory.go and pipeline.go.
     const emitted = [
