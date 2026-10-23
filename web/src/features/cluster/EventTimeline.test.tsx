@@ -129,7 +129,35 @@ describe('EventTimeline', () => {
       />,
     )
 
-    expect(screen.getByText('3 counters reset in this database.')).toBeInTheDocument()
+    expect(screen.getByText('3 counters reset.')).toBeInTheDocument()
+  })
+
+  it('UI-CLUS-053 names the database of a counter reset, or the instance when it covers all of it', () => {
+    renderWithProviders(
+      <EventTimeline
+        events={[
+          {
+            cluster_id: '1',
+            event_id: 5,
+            instance_id: null,
+            payload: { count: 2, database: 'app', series: [] },
+            ts: '2026-08-31T10:00:00Z',
+            type: 'counter_reset_detected',
+          },
+          {
+            cluster_id: '1',
+            event_id: 6,
+            instance_id: null,
+            payload: { count: 1, database: '', series: [] },
+            ts: '2026-08-31T09:00:00Z',
+            type: 'counter_reset_detected',
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByText('2 counters reset in database app.')).toBeInTheDocument()
+    expect(screen.getByText('1 counter reset on this instance.')).toBeInTheDocument()
   })
 
   it('UI-CLUS-050 titles the four emitted types the taxonomy lacked instead of the unknown fallback', () => {

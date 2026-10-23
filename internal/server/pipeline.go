@@ -1602,8 +1602,8 @@ type counterReset struct {
 // result, not one per series. A restart resets every counter together, and a row
 // for each would put a whole restart into the timeline and push older events out
 // of the 1000 it shows. The first series' metric, reason and labels stay at the
-// top of the payload, where readers look for them; the count and a sample of the
-// series follow.
+// top of the payload, where readers look for them; the count, the database (empty
+// for a result that covers the whole instance) and a sample of the series follow.
 func counterResetEvents(resets []counterReset, tenantID string, clusterID int64, instanceID uuid.UUID) []store.EventRow {
 	var order []string
 	byDatname := make(map[string][]counterReset)
@@ -1630,11 +1630,12 @@ func counterResetEvents(resets []counterReset, tenantID string, clusterID int64,
 			ClusterID:  &cid,
 			InstanceID: &iid,
 			Payload: map[string]any{
-				"metric": first.metric,
-				"reason": first.reason,
-				"labels": first.labels,
-				"count":  len(group),
-				"series": sample,
+				"metric":   first.metric,
+				"reason":   first.reason,
+				"labels":   first.labels,
+				"count":    len(group),
+				"database": datname,
+				"series":   sample,
 			},
 		})
 	}

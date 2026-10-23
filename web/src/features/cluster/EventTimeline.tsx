@@ -49,6 +49,14 @@ function counterResetCount(event: ClusterEvent): number | null {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null
 }
 
+// The event names its database, empty for a result that covers the whole
+// instance. An event written before the server sent the name says neither.
+function counterResetScope(event: ClusterEvent): string {
+  const database = event.payload.database
+  if (typeof database !== 'string') return ''
+  return database === '' ? ' on this instance' : ` in database ${database}`
+}
+
 function instanceLink(id: string | null) {
   return id ? <a href={`/instances/${encodeURIComponent(id)}`}>{id}</a> : 'Unknown'
 }
@@ -93,7 +101,8 @@ function EventCard({ event }: { event: ClusterEvent }) {
       <p>{description.whatToCheck}</p>
       {resetCount !== null ? (
         <p>
-          {resetCount} {resetCount === 1 ? 'counter' : 'counters'} reset in this database.
+          {resetCount} {resetCount === 1 ? 'counter' : 'counters'} reset
+          {counterResetScope(event)}.
         </p>
       ) : null}
       {event.type === 'failover_detected' ? <FailoverDetails event={event} /> : null}

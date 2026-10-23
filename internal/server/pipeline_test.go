@@ -1130,3 +1130,21 @@ func TestWithholdLockTreeQueries(t *testing.T) {
 	require.Equal(t, clean, withholdLockTreeQueries(clean))
 	require.Empty(t, withholdLockTreeQueries(nil))
 }
+
+// TestCounterResetEventsNameTheDatabase: each event says which database it
+// covers, so the timeline can tell a reset in one database from one of the
+// whole instance, which comes with an empty name.
+func TestCounterResetEventsNameTheDatabase(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	events := counterResetEvents([]counterReset{
+		{datname: "app", ts: now, metric: "pg_table_seq_scan_total"},
+		{datname: "", ts: now, metric: "pg_wal_records_total"},
+		{datname: "app", ts: now, metric: "pg_table_idx_scan_total"},
+	}, "t", 1, uuid.New())
+	require.Len(t, events, 2)
+	require.Equal(t, "app", events[0].Payload["database"])
+	require.Equal(t, 2, events[0].Payload["count"])
+	require.Equal(t, "", events[1].Payload["database"])
+	require.Equal(t, 1, events[1].Payload["count"])
+}
