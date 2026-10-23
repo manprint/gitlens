@@ -432,6 +432,97 @@ func TestINTCONN010_MixedCaseRoleKeepsItsTier(t *testing.T) {
 	})
 }
 
+// INT-CONN-012: a role that holds pg_read_all_data and pg_signal_backend only
+// through a group role has the T2 tier. The tier lookup used to match direct
+// memberships, so the inherited grants were not seen and the role was
+// reported as T0.
+func TestINTCONN012_TierFollowsGroupRole(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		const group, role = "pglens_group_t2", "pglens_member_t2"
+		// Roles are cluster-wide and the snapshot restore does not drop them.
+		t.Cleanup(func() {
+			_, _ = admin.Exec(context.Background(), "DROP ROLE IF EXISTS "+role)
+			_, _ = admin.Exec(context.Background(), "DROP ROLE IF EXISTS "+group)
+		})
+		_, err := admin.Exec(ctx, "DROP ROLE IF EXISTS "+role)
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "DROP ROLE IF EXISTS "+group)
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "CREATE ROLE "+group+" NOLOGIN")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "GRANT pg_monitor, pg_read_all_data, pg_signal_backend TO "+group)
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "CREATE ROLE "+role+" LOGIN PASSWORD 'test'")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "GRANT "+group+" TO "+role)
+		require.NoError(t, err)
+
+		u, err := url.Parse(pg.DSN("app", pgtest.RoleSuperuser))
+		require.NoError(t, err)
+		u.User = url.UserPassword(role, "test")
+		mgr, err := NewManager(ctx, "group-target", u.String(), DefaultConnOptions(), clock.System())
+		require.NoError(t, err)
+		defer mgr.Close()
+
+		require.NoError(t, mgr.RefreshCapabilities(ctx))
+		require.Equal(t, pgtype.TierSignal, mgr.PermTier())
+	})
+}
+
+// INT-CONN-013: the tier follows what the role can actually read. The role is
+// granted its memberships first and only then set to NOINHERIT, as an existing
+// monitoring role is. On PostgreSQL 16 and later those memberships keep their
+// inherit option, so the role reads the table and holds T1. On PostgreSQL 15
+// the membership is not usable, the read is denied, and the tier must not
+// claim T1.
+func TestINTCONN013_TierTracksEffectiveRead(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		const role, table = "pglens_noinherit", "pglens_noinherit_probe"
+		_, err := admin.Exec(ctx, "DROP ROLE IF EXISTS "+role)
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "CREATE ROLE "+role+" LOGIN PASSWORD 'test'")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "GRANT pg_monitor, pg_read_all_data TO "+role)
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "ALTER ROLE "+role+" NOINHERIT")
+		require.NoError(t, err)
+		// Roles are cluster-wide and the snapshot restore does not drop them.
+		t.Cleanup(func() { _, _ = admin.Exec(context.Background(), "DROP ROLE IF EXISTS "+role) })
+		_, err = admin.Exec(ctx, "CREATE TABLE public."+table+" (x int)")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "REVOKE ALL ON public."+table+" FROM PUBLIC")
+		require.NoError(t, err)
+
+		u, err := url.Parse(pg.DSN("app", pgtest.RoleSuperuser))
+		require.NoError(t, err)
+		u.User = url.UserPassword(role, "test")
+		probe, err := pgx.Connect(ctx, u.String())
+		require.NoError(t, err)
+		defer func() { _ = probe.Close(ctx) }()
+		var rows int
+		readErr := probe.QueryRow(ctx, "SELECT count(*) FROM public."+table).Scan(&rows)
+		canRead := readErr == nil
+		require.Equal(t, pg.Major >= 16, canRead, "premise: NOINHERIT membership usable only from 16: %v", readErr)
+
+		mgr, err := NewManager(ctx, "noinherit-target", u.String(), DefaultConnOptions(), clock.System())
+		require.NoError(t, err)
+		defer mgr.Close()
+
+		require.NoError(t, mgr.RefreshCapabilities(ctx))
+		want := pgtype.TierReadOnly
+		if canRead {
+			want = pgtype.TierExplain
+		}
+		require.Equal(t, want, mgr.PermTier())
+	})
+}
+
 // INT-CONN-011: the cluster identity falls back to the configured name only
 // when the server denies pg_control_system(), and a role that may read it
 // reports the real system_identifier. The grants setupRoles makes live in the

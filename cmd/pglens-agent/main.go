@@ -274,30 +274,17 @@ func formatRolePosture(posture check.RolePosture, err error) string {
 func determinePermTier(ctx context.Context, conn *pgx.Conn) pgtype.PermTier {
 	tier := pgtype.TierReadOnly
 
-	// Check for pg_read_all_data (T1)
+	// Check for pg_read_all_data (T1). pg_has_role applies group inheritance
+	// and the membership's inherit option, as the agent's own probe does.
 	var hasReadAllData bool
-	err := conn.QueryRow(ctx, `
-		SELECT EXISTS(
-			SELECT 1 FROM pg_auth_members m
-			JOIN pg_roles r ON m.roleid = r.oid
-			WHERE r.rolname = 'pg_read_all_data'
-			AND m.member = (SELECT oid FROM pg_roles WHERE rolname = current_user)
-		)
-	`).Scan(&hasReadAllData)
+	err := conn.QueryRow(ctx, `SELECT pg_catalog.pg_has_role('pg_read_all_data', 'USAGE')`).Scan(&hasReadAllData)
 	if err == nil && hasReadAllData {
 		tier = pgtype.TierExplain
 	}
 
 	// Check for pg_signal_backend (T2)
 	var hasSignalBackend bool
-	err = conn.QueryRow(ctx, `
-		SELECT EXISTS(
-			SELECT 1 FROM pg_auth_members m
-			JOIN pg_roles r ON m.roleid = r.oid
-			WHERE r.rolname = 'pg_signal_backend'
-			AND m.member = (SELECT oid FROM pg_roles WHERE rolname = current_user)
-		)
-	`).Scan(&hasSignalBackend)
+	err = conn.QueryRow(ctx, `SELECT pg_catalog.pg_has_role('pg_signal_backend', 'USAGE')`).Scan(&hasSignalBackend)
 	if err == nil && hasSignalBackend {
 		tier = pgtype.TierSignal
 	}

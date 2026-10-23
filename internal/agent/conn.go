@@ -525,28 +525,19 @@ func queryClusterIdentity(ctx context.Context, conn capabilityConn, fallbackName
 // set keep monitoring read-only instead of making an unavailable target look
 // more capable than it is.
 func (m *Manager) queryCapabilities(ctx context.Context, conn capabilityConn) (pgtype.PermTier, map[string]bool) {
+	// pg_has_role asks whether the session can use the privilege, through
+	// group roles and with the membership's inherit option applied. A direct
+	// membership lookup missed a privilege inherited from a group role, and it
+	// kept a NOINHERIT role at its tier on PostgreSQL 15, where that role
+	// cannot use the privilege.
 	tier := pgtype.TierReadOnly
 	var hasReadAllData bool
-	if err := conn.QueryRow(ctx, `
-		SELECT EXISTS(
-			SELECT 1 FROM pg_auth_members m
-			JOIN pg_roles r ON m.roleid = r.oid
-			WHERE r.rolname = 'pg_read_all_data'
-			AND m.member = (SELECT oid FROM pg_roles WHERE rolname = current_user)
-		)
-	`).Scan(&hasReadAllData); err == nil && hasReadAllData {
+	if err := conn.QueryRow(ctx, `SELECT pg_catalog.pg_has_role('pg_read_all_data', 'USAGE')`).Scan(&hasReadAllData); err == nil && hasReadAllData {
 		tier = pgtype.TierExplain
 	}
 
 	var hasSignalBackend bool
-	if err := conn.QueryRow(ctx, `
-		SELECT EXISTS(
-			SELECT 1 FROM pg_auth_members m
-			JOIN pg_roles r ON m.roleid = r.oid
-			WHERE r.rolname = 'pg_signal_backend'
-			AND m.member = (SELECT oid FROM pg_roles WHERE rolname = current_user)
-		)
-	`).Scan(&hasSignalBackend); err == nil && hasSignalBackend {
+	if err := conn.QueryRow(ctx, `SELECT pg_catalog.pg_has_role('pg_signal_backend', 'USAGE')`).Scan(&hasSignalBackend); err == nil && hasSignalBackend {
 		tier = pgtype.TierSignal
 	}
 
