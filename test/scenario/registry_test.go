@@ -533,3 +533,23 @@ func TestRegistry_MissingEventsPropagatesCountError(t *testing.T) {
 		t.Fatalf("MissingEvents error = %v, want it to wrap %v", err, boom)
 	}
 }
+
+func TestRegistry_UnverifiedInvariantsNeedsTheCall(t *testing.T) {
+	withInvariants := Scenario{
+		ID:     "SYS-TEST-INV",
+		Expect: Expectations{Invariants: []string{"I-1"}},
+	}
+	if !withInvariants.UnverifiedInvariants(false) {
+		t.Fatal("a run that declares invariants and never called AssertInvariants was not reported")
+	}
+	if withInvariants.UnverifiedInvariants(true) {
+		t.Fatal("a run that called AssertInvariants was reported as unverified")
+	}
+	eventsOnly := Scenario{
+		ID:     "SYS-TEST-EV",
+		Expect: Expectations{Events: []string{"agent_down"}},
+	}
+	if eventsOnly.UnverifiedInvariants(false) {
+		t.Fatal("a scenario that declares no invariants was reported as unverified")
+	}
+}

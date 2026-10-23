@@ -216,6 +216,14 @@ func (s Scenario) MissingEvents(count func(eventType string) (int, error)) ([]st
 	return missing, nil
 }
 
+// UnverifiedInvariants reports whether a run of s declares invariants but
+// returned without calling AssertInvariants. Invariant IDs cannot be checked by
+// name, so that call is the only evidence the run checked them. checked records
+// whether the call was made.
+func (s Scenario) UnverifiedInvariants(checked bool) bool {
+	return len(s.Expect.Invariants) > 0 && !checked
+}
+
 // Smoke returns all scenarios marked as smoke test scenarios, sorted by ID.
 func Smoke() []Scenario {
 	registryMu.RLock()

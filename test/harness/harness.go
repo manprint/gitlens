@@ -1177,7 +1177,7 @@ func (h *Harness) Scenario(t *testing.T, id string) {
 	if err := s.Run(ctx, env); err != nil {
 		t.Fatalf("scenario %s (%s) failed: %v", id, s.Title, err)
 	}
-	if len(s.Expect.Invariants) > 0 && !invariantsChecked {
+	if s.UnverifiedInvariants(invariantsChecked) {
 		t.Errorf("scenario %s declares invariants %v but never called AssertInvariants", id, s.Expect.Invariants)
 	}
 	checkDeclaredEvents(t, s, env.DB, runStart)
