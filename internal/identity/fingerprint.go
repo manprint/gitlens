@@ -20,6 +20,9 @@ import (
 // directory; apply the default port 5432 when absent; sort query parameters by
 // key and drop those that do not affect target identity (application_name,
 // connect_timeout, statement_timeout, sslmode); re-render; SHA-256; hex.
+//
+// A DSN that names no host at all connects to the local default socket, so
+// its identity is that of the local server: the empty host, as pgx reads it.
 func Fingerprint(dsn string) (string, error) {
 	if dsn == "" {
 		return "", fmt.Errorf("empty dsn")
@@ -54,9 +57,6 @@ func Fingerprint(dsn string) (string, error) {
 		port = values.Get("port")
 		values.Del("host")
 		values.Del("port")
-	}
-	if hostname == "" {
-		return "", fmt.Errorf("fingerprint: missing host")
 	}
 	// A socket directory is a case-sensitive path, not a DNS name.
 	if !strings.HasPrefix(hostname, "/") {

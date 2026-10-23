@@ -70,7 +70,17 @@ func TestFingerprint_SocketAndHostInQuery(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, ipv6Authority, ipv6InQuery)
 
-	// An empty host parameter names nothing.
-	_, err = identity.Fingerprint("postgres://pglens@/app?host=")
-	require.Error(t, err)
+	// A DSN that names no host connects to the local default socket: one
+	// identity for it, distinct from any port or database.
+	local, err := identity.Fingerprint("postgres:///app")
+	require.NoError(t, err)
+	localAgain, err := identity.Fingerprint("postgres://@/app")
+	require.NoError(t, err)
+	require.Equal(t, local, localAgain)
+	localPort, err := identity.Fingerprint("postgres:///app?port=5433")
+	require.NoError(t, err)
+	require.NotEqual(t, local, localPort)
+	otherDB, err := identity.Fingerprint("postgres:///other")
+	require.NoError(t, err)
+	require.NotEqual(t, local, otherDB)
 }
