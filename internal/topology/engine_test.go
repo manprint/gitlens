@@ -752,8 +752,9 @@ func orphanObserver(e *Engine, clk *clock.Fake, standby uuid.UUID, cID pgtype.Cl
 	}
 }
 
-// TestEngine_OrphanEpisodeEndsAfterGap — an observation with no edge for a
-// whole orphan window ends the episode, so the next orphan is dated from its
+// TestEngine_OrphanEpisodeEndsAfterGap — an observation with no edge, after a
+// gap with no evidence of a whole orphan window and twice the standby's own
+// observation interval, ends the episode, so the next orphan is dated from its
 // own start. The duration used to run from the old start: a standby orphaned
 // for four minutes, then edgeless for ten, reported fourteen on its next orphan.
 func TestEngine_OrphanEpisodeEndsAfterGap(t *testing.T) {
@@ -874,11 +875,11 @@ func TestEngine_OrphanEpisodeHeldWhenRoleUnknown(t *testing.T) {
 }
 
 // TestEngine_OrphanEpisodeRestartsAfterUnknownGap — an unknown observation holds
-// an episode for a window after the last evidence, and ends it after that, so a
-// standby that stays unreadable for ten minutes and then shows its orphan again
-// starts a new episode. The reappearance is not reported with
-// the age of the whole gap, and the next orphan is reported a window later,
-// dated from its own start.
+// an episode across the cycles without evidence, and ends it once the gap with
+// no evidence is long enough (see orphanGapEnds). A standby that stays
+// unreadable for ten minutes and then shows its orphan again starts a new
+// episode. The reappearance is not reported with the age of the whole gap, and
+// the next orphan is reported a window later, dated from its own start.
 func TestEngine_OrphanEpisodeRestartsAfterUnknownGap(t *testing.T) {
 	clk := clock.NewFake(time.Unix(0, 0))
 	e := NewEngine(clk)
