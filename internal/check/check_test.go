@@ -124,3 +124,11 @@ func (f *fakeCheck) Timeout() time.Duration { return time.Second }
 func (f *fakeCheck) Scrape(ctx context.Context, t check.Target) (check.Result, error) {
 	return check.Result{}, nil
 }
+
+// TestRegistry_ASHHasNoRegisteredCheck: ASH is sampled by internal/ash and
+// reported by the agent under the "ash" name. A registered check of that name
+// would be a second, count-only source for the same results.
+func TestRegistry_ASHHasNoRegisteredCheck(t *testing.T) {
+	_, ok := check.Get("ash")
+	require.False(t, ok, "ash is owned by the ASH sampler, not a registered check")
+}
