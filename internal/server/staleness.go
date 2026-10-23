@@ -792,11 +792,15 @@ func (s *Staleness) Evaluate(ctx context.Context) error {
 		return topoErr
 	}
 
-	if qtErr := s.purgeQueryTexts(ctx, now); qtErr != nil {
-		return qtErr
-	}
+	return s.purgeRetention(ctx, now)
+}
 
-	return s.purgeEvents(ctx, now)
+// purgeRetention runs the query_texts and the events purge. They are
+// independent: a query_texts purge that keeps failing, on a lock or a
+// statement timeout, must not stop the events purge.
+func (s *Staleness) purgeRetention(ctx context.Context, now time.Time) error {
+	qtErr := s.purgeQueryTexts(ctx, now)
+	return errors.Join(qtErr, s.purgeEvents(ctx, now))
 }
 
 // purgeTopologyEdges deletes the edges reported by an instance that has been

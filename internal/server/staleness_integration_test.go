@@ -891,3 +891,28 @@ func TestINTSTALE021_IngestedLostSlotIsReported(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='slot_lost' AND instance_id=$1`, iid).Scan(&n))
 	require.Equal(t, 1, n, "a lost slot sent through ingest is reported")
 }
+
+// TestINTSTALE022_EventsPurgeRunsWhenTheQueryTextsPurgeFails: a query_texts
+// purge that fails does not stop the events purge, and the failure is still
+// reported.
+func TestINTSTALE022_EventsPurgeRunsWhenTheQueryTextsPurgeFails(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := contextBackground()
+	now := time.Now()
+	_, err := pool.Exec(ctx, `INSERT INTO events (tenant_id, ts, type, payload) VALUES ('default', $1, 'agent_up', '{}')`, now.Add(-100*24*time.Hour))
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `ALTER TABLE query_texts RENAME TO query_texts_away`)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := pool.Exec(contextBackground(), `ALTER TABLE query_texts_away RENAME TO query_texts`)
+		require.NoError(t, err)
+	})
+
+	s := NewStaleness(pool, clock.NewFake(now))
+	err = s.purgeRetention(ctx, now)
+	require.ErrorContains(t, err, "purge query texts")
+	var left int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE ts < $1`, now.Add(-eventRetention)).Scan(&left))
+	require.Zero(t, left, "the events purge ran")
+}
