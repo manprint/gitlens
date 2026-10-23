@@ -973,7 +973,7 @@ warnings
 
 - **server version** — PostgreSQL version; `— NOT SUPPORTED` means it is outside 15–19
 - **role** — `primary`, `standby`, or `read-only replica`; determines which replication checks run
-- **system_identifier** — stable cluster identity; if it says `N/A (requires pg_control_system privilege)`, `EXECUTE` on `pg_control_system()` has been revoked from `PUBLIC` for this role, and the grant from `monitoring_user.sql` fixes it
+- **system_identifier** — stable cluster identity; if it says `N/A (requires pg_control_system privilege)`, the agent's read of `pg_control_system()` failed, which in practice means `EXECUTE` on it has been revoked from `PUBLIC` for this role; the grant from `monitoring_user.sql` fixes it
 - **permission tier**:
   - `T0 (pg_monitor)` — minimum, enables all core monitoring
   - `T1 (pg_monitor + pg_read_all_data)` — enables plan-only `EXPLAIN` and on-demand `pgstattuple` measurement, and lets the bloat estimate see tables whose columns `pg_monitor` alone cannot read; with `allow_explain_analyze`, the agent also accepts `EXPLAIN ANALYZE` (the interface asks for T2)
