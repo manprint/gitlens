@@ -7,7 +7,10 @@ import (
 	"net"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Fingerprint derives a stable, non-reversible key for a DSN. The password is
@@ -16,15 +19,14 @@ import (
 //
 // Normalization, in order: parse the DSN; drop the password, whether it is in
 // the userinfo or in the query, where pgx reads it too; move a host and port
-// given in the query into the authority when the authority has none (Unix
-// socket and host-in-query DSNs); lowercase host unless it is a socket
-// directory; apply the default port 5432 when absent; sort query parameters by
-// key and drop those that do not affect target identity (application_name,
+// given in the query into the authority when the authority has no host (Unix
+// socket and host-in-query DSNs); a DSN that names no host at all takes the host
+// and port pgx resolves from PGHOST and PGPORT or their defaults, so its
+// identity is that of the server pgx reaches; otherwise a missing port is 5432;
+// lowercase host unless it is a socket directory; sort query parameters by key
+// and drop those that do not affect target identity (application_name,
 // connect_timeout, statement_timeout, sslmode, password, sslpassword); re-render;
 // SHA-256; hex.
-//
-// A DSN that names no host at all connects to the local default socket, so
-// its identity is that of the local server: the empty host, as pgx reads it.
 func Fingerprint(dsn string) (string, error) {
 	return fingerprint(dsn, false)
 }
@@ -72,17 +74,35 @@ func fingerprint(dsn string, keepQuerySecrets bool) (string, error) {
 
 	// pgx takes the host and port from the query when the authority has no
 	// host, as TargetIsLocal reads them: postgres:///db?host=/var/run/postgresql
-	// names a socket directory. They are moved into the authority here, so
-	// the same server fingerprints the same however the DSN spells it.
-	var hostname, port string
-	if u.Host != "" {
-		hostname = u.Hostname()
-		port = u.Port()
-	} else {
+	// names a socket directory. A port in the query overrides the authority's,
+	// as it does for pgx. They are moved into the authority here, so the same
+	// server fingerprints the same however the DSN spells it. A port in the
+	// query of a DSN whose authority has a host is not moved, so
+	// postgres://u@h/db?port=6543 keeps the identity it always had, which is
+	// not that of postgres://u@h:6543/db.
+	hostname, port := u.Hostname(), u.Port()
+	if hostname == "" {
 		hostname = values.Get("host")
-		port = values.Get("port")
 		values.Del("host")
+		if p := values.Get("port"); p != "" {
+			port = p
+		}
 		values.Del("port")
+	}
+	// A DSN that names no host connects to the host and port pgx resolves from
+	// PGHOST and PGPORT, or else from its defaults, so its identity is taken from
+	// those. A DSN that names a host keeps 5432 for a missing port, as it always
+	// has: letting PGPORT stand in for it would change the identity of every
+	// instance already recorded under such a DSN.
+	if hostname == "" {
+		cfg, err := pgconn.ParseConfig(dsn)
+		if err != nil {
+			return "", fmt.Errorf("fingerprint: DSN cannot be resolved to a server")
+		}
+		hostname = cfg.Host
+		if port == "" {
+			port = strconv.Itoa(int(cfg.Port))
+		}
 	}
 	// A socket directory is a case-sensitive path, not a DNS name.
 	if !strings.HasPrefix(hostname, "/") {

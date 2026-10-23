@@ -93,3 +93,37 @@ func TestFingerprint_ErrorDoesNotEchoPassword(t *testing.T) {
 	_, err := identity.Fingerprint("host=db.example.invalid user=pglensuser password=s3%zzcret dbname=app")
 	require.EqualError(t, err, "fingerprint: DSN is not a valid URL")
 }
+
+func mustFingerprint(t *testing.T, dsn string) string {
+	t.Helper()
+	fp, err := identity.Fingerprint(dsn)
+	require.NoError(t, err, dsn)
+	return fp
+}
+
+// A DSN that names no host reaches the host and port pgx resolves from PGHOST
+// and PGPORT, or from the defaults, so its identity is that of the server it
+// reaches, whichever way the environment spells it.
+func TestFingerprint_HostAndPortTakenFromEnvironment(t *testing.T) {
+	local := mustFingerprint(t, "postgres:///app")
+
+	t.Setenv("PGPORT", "5433")
+	otherPort := mustFingerprint(t, "postgres:///app")
+	require.NotEqual(t, local, otherPort, "PGPORT=5433 is another server")
+	require.Equal(t, mustFingerprint(t, "postgres:///app?port=5433"), otherPort)
+
+	t.Setenv("PGHOST", "db.internal")
+	remote := mustFingerprint(t, "postgres:///app")
+	require.NotEqual(t, otherPort, remote)
+	require.Equal(t, mustFingerprint(t, "postgres://db.internal:5433/app"), remote)
+}
+
+// With no host in the authority, the host and the port may both come from the
+// query, and a port in the query overrides the authority's, as it does for pgx.
+func TestFingerprint_PortOnlyAuthorityTakesHostFromQuery(t *testing.T) {
+	inQuery := mustFingerprint(t, "postgres:///db?host=/var/run/postgresql&port=5433")
+	require.Equal(t, inQuery, mustFingerprint(t, "postgres://:5433/db?host=/var/run/postgresql"))
+	require.Equal(t, inQuery, mustFingerprint(t, "postgres://:5432/db?host=/var/run/postgresql&port=5433"))
+	require.NotEqual(t, inQuery, mustFingerprint(t, "postgres://:5433/db?host=/tmp"))
+	require.NotEqual(t, mustFingerprint(t, "postgres:///db?host=/var/run/postgresql"), mustFingerprint(t, "postgres://:5433/db?host=/var/run/postgresql"))
+}

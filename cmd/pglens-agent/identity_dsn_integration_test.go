@@ -20,6 +20,8 @@ import (
 // with its host and port moved out of the authority into the query, the form
 // a Unix-socket DSN takes. The target must still get an instance id, a
 // version and a role, not the zero values an unfingerprintable DSN produced.
+// The id must also be the one the same server gets from its authority form,
+// since the two DSNs name one server and the agent keeps one history for it.
 func TestINTID001_HostInQueryDSNIdentifiesTarget(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
 		pg.Lock(t)
@@ -43,5 +45,10 @@ func TestINTID001_HostInQueryDSNIdentifiesTarget(t *testing.T) {
 		require.NotEqual(t, uuid.Nil, mgr.AgentID(), "the agent has an id")
 		require.Equal(t, pg.Version, mgr.PGVersion())
 		require.Equal(t, pgtype.RolePrimary, mgr.Role())
+
+		authority, err := agent.NewManager(ctx, "authority-form", pg.DSN("postgres", pgtest.RoleT0), agent.DefaultConnOptions(), nil)
+		require.NoError(t, err)
+		defer authority.Close()
+		require.Equal(t, authority.InstanceID(), mgr.InstanceID(), "the same server in either form is one instance")
 	})
 }
