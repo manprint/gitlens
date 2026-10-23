@@ -83,6 +83,12 @@ func (a *API) handlePlans(w http.ResponseWriter, r *http.Request) {
 	// the row captured just before it. A plain and an ANALYZE capture of one
 	// shape are separate rows with the same hash, so comparing positions alone
 	// would mark every shape that was ever analyzed as changed.
+	// The hash changed in the upgrade that dropped the runtime and estimate
+	// keys, so rows stored before it keep the old hashes. In a history that
+	// spans the upgrade, the oldest row captured after it is marked changed
+	// against the newest row captured before it, and a shape captured on both
+	// sides of the upgrade counts as two shapes below. Both effects end when the
+	// old rows leave the window; neither means the plan changed.
 	for i := range out.Plans {
 		out.Plans[i].Changed = i+1 < len(out.Plans) && out.Plans[i].PlanHash != out.Plans[i+1].PlanHash
 	}
