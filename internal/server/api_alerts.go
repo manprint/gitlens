@@ -142,7 +142,7 @@ func (a *AlertAPI) listAlerts(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "alerts unavailable", "alert store is not configured")
 		return
 	}
-	f := alert.Filter{State: alert.State(r.URL.Query().Get("state")), Severity: alert.Severity(r.URL.Query().Get("severity")), RuleID: r.URL.Query().Get("rule_id"), InstanceID: r.URL.Query().Get("instance_id")}
+	f := alert.Filter{State: alert.State(r.URL.Query().Get("state")), Severity: alert.Severity(r.URL.Query().Get("severity")), RuleID: r.URL.Query().Get("rule_id")}
 	// Without a state the store answers every active alert, pending and firing.
 	// A pending filter matched nothing, because the engine does not persist
 	// pending episodes yet.
@@ -161,6 +161,16 @@ func (a *AlertAPI) listAlerts(w http.ResponseWriter, r *http.Request) {
 		}
 		n := store.ToDB(cid)
 		f.ClusterID = &n
+	}
+	// The store compares instance_id with a uuid column, so a value that is
+	// not a uuid must be refused here, not reach the query as a 500.
+	if v := r.URL.Query().Get("instance_id"); v != "" {
+		iid, err := uuid.Parse(v)
+		if err != nil {
+			writeError(w, 400, "invalid instance_id", err.Error())
+			return
+		}
+		f.InstanceID = iid.String()
 	}
 	rows, err := a.store.Active(r.Context(), f)
 	if err != nil {

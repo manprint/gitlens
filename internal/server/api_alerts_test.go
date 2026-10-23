@@ -66,6 +66,26 @@ func TestAlerts_DefaultFilterIsPendingAndFiring(t *testing.T) {
 	require.Equal(t, []alert.Filter{{}}, st.filters)
 }
 
+// TestAlerts_InstanceIDMustBeAUUID: a malformed instance_id is the client's
+// error. It is refused with 400 before the store sees it. Passed on, it
+// reaches the uuid column, and the driver error comes back as a 500 with the
+// raw text.
+func TestAlerts_InstanceIDMustBeAUUID(t *testing.T) {
+	st := &alertAPITestStore{}
+	r := httptest.NewRecorder()
+	alertRouter(newAlertAPIForTest(nil, st)).ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?instance_id=abc", nil))
+	require.Equal(t, http.StatusBadRequest, r.Code, r.Body.String())
+	require.Contains(t, r.Body.String(), "invalid instance_id")
+	require.Empty(t, st.filters)
+
+	iid := uuid.NewString()
+	st = &alertAPITestStore{}
+	r = httptest.NewRecorder()
+	alertRouter(newAlertAPIForTest(nil, st)).ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?instance_id="+iid, nil))
+	require.Equal(t, http.StatusOK, r.Code, r.Body.String())
+	require.Equal(t, []alert.Filter{{InstanceID: iid}}, st.filters)
+}
+
 func TestAlerts_RejectsUnknownState(t *testing.T) {
 	r := httptest.NewRecorder()
 	alertRouter(newAlertAPIForTest(nil, &alertAPITestStore{})).ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?state=bogus", nil))
