@@ -134,8 +134,10 @@ type Target interface {
 // ApplySessionLimits sets per-check timeouts on the session with plain SET
 // statements. A check's Conn exposes no transaction, and SET LOCAL outside one
 // only draws a WARNING and changes nothing. The limits therefore stay on a
-// pooled connection after the check returns, and each check reapplies them
-// when its scrape starts.
+// pooled connection after the check returns. The agent reapplies them each
+// time it hands a pooled connection out (Manager.Shared and Manager.ForDatabase
+// in internal/agent/conn.go), and each check reapplies them when its scrape
+// starts.
 func ApplySessionLimits(ctx context.Context, conn Conn, timeout time.Duration) error {
 	ms := int(timeout / time.Millisecond)
 	if _, err := conn.Exec(ctx, fmt.Sprintf("SET statement_timeout = %d", ms)); err != nil {
