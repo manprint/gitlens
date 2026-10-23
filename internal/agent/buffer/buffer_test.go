@@ -1401,3 +1401,87 @@ func TestBuffer_AppendRejectsEmptyRecord(t *testing.T) {
 		t.Fatalf("delivered %q after refused appends, want none", got)
 	}
 }
+
+// TestBuffer_UnreadableCheckpointIsReported — AB-11: a checkpoint that exists
+// but cannot be read still restarts from the first record, as a missing one
+// does, and the fallback is reported. It used to be silent.
+func TestBuffer_UnreadableCheckpointIsReported(t *testing.T) {
+	dir := t.TempDir()
+	buf, err := Open(dir, Options{Clock: clock.System()})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	for _, r := range []string{"acked", "pending"} {
+		if err := buf.Append([]byte(r)); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+	if _, ack, err := buf.Next(); err != nil {
+		t.Fatalf("Next: %v", err)
+	} else if err := ack(context.Background()); err != nil {
+		t.Fatalf("ack: %v", err)
+	}
+	if err := buf.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// A power loss can leave the checkpoint short: three bytes, not twelve.
+	if err := os.WriteFile(filepath.Join(dir, ".acked"), []byte{1, 0, 0}, 0o644); err != nil {
+		t.Fatalf("truncate checkpoint: %v", err)
+	}
+
+	var reopened *Buffer
+	stderr := captureStderr(t, func() {
+		reopened, err = Open(dir, Options{Clock: clock.System()})
+	})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer func() { _ = reopened.Close() }()
+	if !strings.Contains(stderr, "unreadable acked checkpoint") {
+		t.Errorf("reopen with a short checkpoint printed %q, want a warning", stderr)
+	}
+	if got := drainAndAck(t, reopened); len(got) != 2 {
+		t.Fatalf("delivered %q after a short checkpoint, want both records replayed", got)
+	}
+}
+
+// TestBuffer_MissingCheckpointIsNotReported — AB-11: a buffer that has never
+// acked anything has no checkpoint file. That is the normal first start, so it
+// prints nothing.
+func TestBuffer_MissingCheckpointIsNotReported(t *testing.T) {
+	stderr := captureStderr(t, func() {
+		buf, err := Open(t.TempDir(), Options{Clock: clock.System()})
+		if err != nil {
+			t.Errorf("Open: %v", err)
+			return
+		}
+		_ = buf.Close()
+	})
+	if stderr != "" {
+		t.Errorf("first start printed %q, want nothing", stderr)
+	}
+}
+
+// captureStderr runs fn and returns what it wrote to os.Stderr.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	saved := os.Stderr
+	os.Stderr = w
+	defer func() { os.Stderr = saved }()
+
+	done := make(chan string)
+	go func() {
+		var sb strings.Builder
+		_, _ = io.Copy(&sb, r)
+		done <- sb.String()
+	}()
+	fn()
+	_ = w.Close()
+	os.Stderr = saved
+	return <-done
+}

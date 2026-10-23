@@ -144,7 +144,13 @@ func Open(dir string, opts Options) (*Buffer, error) {
 	// retention policies run, so that they count as dropped only the records
 	// that were never delivered.
 	if err := b.loadAckedPosition(); err != nil {
-		// If metadata doesn't exist, start from the beginning.
+		// Without a checkpoint nothing is known to be acked, so start from the
+		// beginning. A checkpoint that exists but cannot be read gets the same
+		// fallback, which replays the retained buffer. That is safe, since
+		// delivery is at least once, but it is reported rather than silent.
+		if !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "warning: buffer: unreadable acked checkpoint in %s, replaying the retained buffer: %v\n", dir, err)
+		}
 		b.ackedSegID = 0
 		b.ackedOff = 0
 	}
@@ -544,9 +550,13 @@ func (b *Buffer) loadAckedPosition() error {
 }
 
 // saveAckedPosition saves the acked position to metadata file. It writes a
-// temporary file and renames it over the checkpoint, so a crash mid-write
-// leaves the previous checkpoint rather than a truncated one (which Open
-// reads as "nothing acked" and replays the whole buffer).
+// temporary file and renames it over the checkpoint, so a crash of the process
+// mid-write leaves the previous checkpoint rather than a truncated one (which
+// Open reads as "nothing acked" and replays the whole buffer).
+//
+// The file is not fsynced. This runs on every ack, and a flush here would be
+// paid per record. A power loss can therefore persist the rename before the
+// data and leave a short checkpoint, which Open reports and replays.
 func (b *Buffer) saveAckedPosition() error {
 	metaPath := filepath.Join(b.dir, ".acked")
 	data := make([]byte, 12)
