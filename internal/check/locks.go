@@ -100,11 +100,6 @@ FROM pg_stat_activity a
 WHERE a.backend_type = 'client backend'
   AND a.pid <> pg_backend_pid()`
 
-// withheldQuery stands for a session text the server cut. The cut text may
-// hide the keyword that makes a credential, so it is not redacted, only
-// withheld.
-const withheldQuery = "[redacted]"
-
 func (c *locksCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 	conn, err := t.Conn(ctx)
 	if err != nil {
@@ -127,9 +122,9 @@ func (c *locksCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 			return Result{}, err
 		}
 		// A statement can carry a role password, and the tree is shipped to
-		// the server and shown in the UI, so the credentials go before the cut.
-		// A text the server already cut cannot be redacted safely, because the
-		// keyword that makes its value a credential may lie past the cut.
+		// the server and shown in the UI, so a text that may hold one is
+		// withheld before the cut. A text the server already cut is withheld
+		// too, because the sign of a credential may lie past the cut.
 		if cut {
 			r.Query = withheldQuery
 		} else {

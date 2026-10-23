@@ -44,7 +44,7 @@ func (m *mockTarget) Clock() clock.Clock {
 }
 
 // PostgreSQL keeps a utility statement's text whole in pg_stat_statements. A
-// credential named early in a block longer than the display length is redacted,
+// credential named early in a block longer than the display length is withheld,
 // and a block longer than statementTextLimit is not shipped, since its text
 // could not be read whole.
 func TestStatStatements_IntegrationLongUtilityTextIsRedacted(t *testing.T) {
@@ -93,7 +93,7 @@ func TestStatStatements_IntegrationLongUtilityTextIsRedacted(t *testing.T) {
 		result, err := check.Scrape(ctx, target)
 		require.NoError(t, err)
 
-		require.Equal(t, "DO '[redacted]'", result.QueryTexts[credentialID])
+		require.Equal(t, withheldQuery, result.QueryTexts[credentialID])
 		for _, text := range result.QueryTexts {
 			require.NotContains(t, text, "hunter2")
 		}

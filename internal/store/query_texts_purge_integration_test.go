@@ -9,14 +9,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Statement texts shipped before the agent redacted them stay in query_texts
+// Statement texts shipped before the agent withheld them stay in query_texts
 // until the migration that purges credential texts runs. Re-running it, as a
 // restart after the version row is missing would, removes the secret and keeps
 // the texts without one.
-func TestINTSTORE_0017_PurgesStoredCredentialTexts(t *testing.T) {
+func TestINTSTORE_0020_PurgesStoredCredentialTexts(t *testing.T) {
 	pool := getStoreTestPool(t)
 	ctx := context.Background()
-	const cluster = int64(970017)
+	const cluster = int64(970020)
 
 	_, err := pool.Exec(ctx, `DELETE FROM query_texts WHERE cluster_id = $1`, cluster)
 	require.NoError(t, err)
@@ -24,10 +24,15 @@ func TestINTSTORE_0017_PurgesStoredCredentialTexts(t *testing.T) {
 		('default', $1, 'app', 1, 17, 'ALTER ROLE tmp_secret PASSWORD ''hunter2'''),
 		('default', $1, 'app', 2, 17, 'SELECT 1'),
 		('default', $1, 'app', 3, 17, 'CREATE USER MAPPING FOR u SERVER s OPTIONS (user ''bob'', password ''sekret'')'),
-		('default', $1, 'app', 4, 17, 'ALTER SUBSCRIPTION s CONNECTION ''postgresql://rep:abc@primary:5432/app''')`, cluster)
+		('default', $1, 'app', 4, 17, 'ALTER SUBSCRIPTION s CONNECTION ''postgresql://rep:abc@primary:5432/app'''),
+		('default', $1, 'app', 5, 17, 'SELECT dblink_connect(''postgresql://app:'' || ''hunter2'' || ''@db/app'')'),
+		('default', $1, 'app', 6, 17, 'SELECT dblink_connect(''host=h pass'' || ''word=hunter2'')'),
+		('default', $1, 'app', 7, 17, E'SELECT dblink_connect(E''host=h \\x70assword=hunter2'')'),
+		('default', $1, 'app', 8, 17, 'SELECT dblink_connect(''host=h oauth_client_secret=hunter2'')'),
+		('default', $1, 'app', 9, 17, 'SELECT datname FROM pg_database WHERE datname = ''postgres''::name')`, cluster)
 	require.NoError(t, err)
 
-	_, err = pool.Exec(ctx, `DELETE FROM schema_migrations WHERE version = 17`)
+	_, err = pool.Exec(ctx, `DELETE FROM schema_migrations WHERE version = 20`)
 	require.NoError(t, err)
 	require.NoError(t, Migrate(ctx, pool))
 
@@ -42,7 +47,7 @@ func TestINTSTORE_0017_PurgesStoredCredentialTexts(t *testing.T) {
 		kept[id] = text
 	}
 	require.NoError(t, rows.Err())
-	require.Equal(t, map[int64]string{2: "SELECT 1"}, kept)
+	require.Equal(t, map[int64]string{2: "SELECT 1", 9: "SELECT datname FROM pg_database WHERE datname = 'postgres'::name"}, kept)
 	_, err = pool.Exec(ctx, `DELETE FROM query_texts WHERE cluster_id = $1`, cluster)
 	require.NoError(t, err)
 }

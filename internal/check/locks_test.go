@@ -123,8 +123,9 @@ func TestLocks_SessionListNotFlaggedWhenComplete(t *testing.T) {
 // A session outside the blocking tree keeps only a short prefix of its query;
 // a session in the tree keeps the full text, since the tree is what the UI
 // shows for a wait.
-// A password in a statement the locks check reads is redacted in the blocking
-// tree and in the session list alike, and the text the UI shows never holds it.
+// A statement the locks check reads that carries a password is withheld in the
+// blocking tree and in the session list alike, and the text the UI shows never
+// holds it.
 func TestLocks_RedactsCredentialsInEveryQuery(t *testing.T) {
 	result := scrapeLocks(t, []([]any){
 		lockValues(1, "transactionid", []int32{9}, 2, "ALTER ROLE tmp_secret PASSWORD 'hunter2'"),
@@ -134,17 +135,18 @@ func TestLocks_RedactsCredentialsInEveryQuery(t *testing.T) {
 	require.NotContains(t, string(result.Facts[0].ValueJSON), "hunter")
 	var tree lockTree
 	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
-	require.Equal(t, "ALTER ROLE tmp_secret PASSWORD '[redacted]'", tree.Nodes[0].Query)
-	require.Equal(t, "CREATE ROLE holder LOGIN PASSWORD '[redacted]'", tree.Nodes[1].Query)
+	require.Equal(t, withheldQuery, tree.Nodes[0].Query)
+	require.Equal(t, withheldQuery, tree.Nodes[1].Query)
 	queries := map[int32]string{}
 	for _, s := range tree.Sessions {
 		queries[s.PID] = s.Query
 	}
-	require.Equal(t, "ALTER ROLE idle PASSWORD '[redacted]'", queries[2])
+	require.Equal(t, withheldQuery, queries[2])
 }
 
 // A long session text full of PASSWORD keywords inside one comment is read in
-// bounded time: the redactor reads the text once, so the cost is linear.
+// bounded time: the redactor reads the text a fixed number of times, so the
+// cost is linear.
 func TestLocks_LongSessionTextIsRedactedInBoundedTime(t *testing.T) {
 	long := "ALTER ROLE u PASSWORD /*" + strings.Repeat("password/*", 60000) + strings.Repeat("*/", 60001)
 	start := time.Now()
@@ -155,10 +157,10 @@ func TestLocks_LongSessionTextIsRedactedInBoundedTime(t *testing.T) {
 	require.Less(t, time.Since(start), 2*time.Second)
 	var tree lockTree
 	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
-	require.Len(t, tree.Nodes[0].Query, 2048)
+	require.Equal(t, withheldQuery, tree.Nodes[0].Query)
 }
 
-// A credential named early in a long DO body is redacted even though the
+// A credential named early in a long DO body is withheld even though the
 // keyword that makes it a credential lies past the first 8192 bytes. Cutting
 // the text before redaction would drop that keyword and leave the value.
 func TestLocks_CredentialNamedEarlierInALongBodyIsRedacted(t *testing.T) {
@@ -170,7 +172,7 @@ func TestLocks_CredentialNamedEarlierInALongBodyIsRedacted(t *testing.T) {
 	require.NotContains(t, string(result.Facts[0].ValueJSON), "hunter")
 	var tree lockTree
 	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
-	require.Equal(t, "DO '[redacted]'", tree.Nodes[0].Query)
+	require.Equal(t, withheldQuery, tree.Nodes[0].Query)
 }
 
 // A session text the server cut is withheld whole in the blocking tree and in

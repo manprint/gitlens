@@ -409,8 +409,8 @@ func TestStatStatements_TextIsResent(t *testing.T) {
 }
 
 // A credential named early in a long DO block whose keyword lies past the
-// display length is redacted: the whole text is redacted before it is cut, so
-// the keyword that makes the value a credential is still there to find.
+// display length is withheld: the whole text is read before it is cut, so the
+// keyword that makes the value a credential is still there to find.
 func TestStatStatements_RedactsTheWholeTextBeforeCutting(t *testing.T) {
 	t.Parallel()
 	ddl := "DO $$ DECLARE p text := 'hunter2'; BEGIN /*" + strings.Repeat("x", 9000) + "*/ EXECUTE 'ALTER ROLE u PASSWORD ' || quote_literal(p); END $$"
@@ -420,14 +420,13 @@ func TestStatStatements_RedactsTheWholeTextBeforeCutting(t *testing.T) {
 
 	res, err := c.Scrape(context.Background(), f.target())
 	require.NoError(t, err)
-	require.Equal(t, "DO '[redacted]'", res.QueryTexts[9])
+	require.Equal(t, withheldQuery, res.QueryTexts[9])
 }
 
-// A text that is still longer than the display length after redaction is cut
-// to it, and the credential is gone from the shipped part.
+// A text longer than the display length is cut to it.
 func TestStatStatements_ShipsAtMostTheDisplayLength(t *testing.T) {
 	t.Parallel()
-	ddl := "ALTER ROLE u PASSWORD 'hunter2' /*" + strings.Repeat("x", 10000) + "*/"
+	ddl := "SELECT 1 /*" + strings.Repeat("x", 10000) + "*/"
 	f := &statementsFixture{}
 	f.perDB = statementRows([]any{int64(9), int64(1), float64(1), int64(1), int64(0), int64(0), int64(0), int64(0), &ddl, int64(1)})
 	c := newStatementsCheck(cardinality.Options{TopN: 50})
@@ -435,12 +434,11 @@ func TestStatStatements_ShipsAtMostTheDisplayLength(t *testing.T) {
 	res, err := c.Scrape(context.Background(), f.target())
 	require.NoError(t, err)
 	require.Len(t, res.QueryTexts[9], 8192)
-	require.True(t, strings.HasPrefix(res.QueryTexts[9], "ALTER ROLE u PASSWORD '[redacted]' /*"))
-	require.NotContains(t, res.QueryTexts[9], "hunter2")
+	require.True(t, strings.HasPrefix(res.QueryTexts[9], "SELECT 1 /*xxx"))
 }
 
-// A credential typed into a utility statement is not shipped, and the text
-// that is shipped keeps the statement readable.
+// A credential typed into a utility statement is not shipped: the statement
+// is shipped with its text withheld.
 func TestStatStatements_ShipsNoCredentialFromUtilityDDL(t *testing.T) {
 	t.Parallel()
 	ddl := "ALTER ROLE tmp_secret_probe PASSWORD 'hunter2-probe-2'"
@@ -450,6 +448,6 @@ func TestStatStatements_ShipsNoCredentialFromUtilityDDL(t *testing.T) {
 
 	res, err := c.Scrape(context.Background(), f.target())
 	require.NoError(t, err)
-	require.Equal(t, "ALTER ROLE tmp_secret_probe PASSWORD '[redacted]'", res.QueryTexts[9])
+	require.Equal(t, withheldQuery, res.QueryTexts[9])
 	require.NotContains(t, res.QueryTexts[9], "hunter2")
 }
