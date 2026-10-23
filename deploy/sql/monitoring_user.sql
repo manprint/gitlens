@@ -292,10 +292,12 @@ GRANT pg_signal_backend TO :"role";
 -- pgstattuple: in each database whose tables should be measurable.
 -- CREATE EXTENSION IF NOT EXISTS pgstattuple;
 
--- pglens only ever reads. Make every session of the role read-only inside
--- PostgreSQL itself, so a write is refused by the server even if a client
--- ever tried one. The agent also sets this on each connection it opens; the
--- role default covers any other client that logs in with the role.
+-- pglens only ever reads. The role default makes every session read-only,
+-- which catches a write from a client that did not ask for a read-only
+-- transaction. It is a guard against mistakes, not a boundary: the role can
+-- turn the setting off, so what stops a write is the privileges granted above
+-- and the PUBLIC grants reported below. The agent also sets this on each
+-- connection it opens.
 ALTER ROLE :"role" SET default_transaction_read_only = on;
 
 -- Bound the blast radius of the monitoring session itself.
