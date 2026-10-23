@@ -1,8 +1,11 @@
 package ash
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,11 +22,13 @@ import (
 type mockRows struct {
 	rows    [][5]any // datname, state, waitEventType, waitEvent, *int64
 	idx     int
-	scanErr error
+	scanErr error // returned by Scan once scanOK rows have scanned
+	scanOK  int
+	err     error // returned by Err after the last row
 }
 
 func (m *mockRows) Close()                                       {}
-func (m *mockRows) Err() error                                   { return nil }
+func (m *mockRows) Err() error                                   { return m.err }
 func (m *mockRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
 func (m *mockRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
 func (m *mockRows) Values() ([]any, error)                       { return nil, nil }
@@ -36,7 +41,7 @@ func (m *mockRows) Next() bool {
 }
 
 func (m *mockRows) Scan(dest ...any) error {
-	if m.scanErr != nil {
+	if m.scanErr != nil && m.idx >= m.scanOK {
 		return m.scanErr
 	}
 	row := m.rows[m.idx]
@@ -85,36 +90,6 @@ func TestSampler_TickBudget(t *testing.T) {
 	// Verify ticks missed starts at 0
 	if s.TicksMissed() != 0 {
 		t.Errorf("expected 0 missed ticks, got %d", s.TicksMissed())
-	}
-}
-
-// TestSampler_ComputeQueryIDDiscovery tests that compute_query_id state is discovered
-// from the first successful query.
-func TestSampler_ComputeQueryIDDiscovery(t *testing.T) {
-	clk := clock.System()
-
-	// First test: compute_query_id is on (query_id is non-nil)
-	s1 := NewSampler((*pgxpool.Conn)(nil), clk, nil)
-	s1.computeQueryIDMu.Lock()
-	trueVal := true
-	s1.computeQueryID = &trueVal // Simulate discovery
-	s1.computeQueryIDMu.Unlock()
-
-	enabled := s1.ComputeQueryIDEnabled()
-	if enabled == nil {
-		t.Error("expected compute_query_id to be discovered")
-	}
-
-	// Second test: compute_query_id is off (query_id is nil on first sample)
-	s2 := NewSampler((*pgxpool.Conn)(nil), clk, nil)
-	s2.computeQueryIDMu.Lock()
-	falseVal := false
-	s2.computeQueryID = &falseVal
-	s2.computeQueryIDMu.Unlock()
-
-	enabled2 := s2.ComputeQueryIDEnabled()
-	if enabled2 == nil || *enabled2 {
-		t.Error("expected compute_query_id to be false")
 	}
 }
 
@@ -228,110 +203,68 @@ func TestSampler_DoSample_QueryError(t *testing.T) {
 }
 
 // TestSampler_DoSample_ScanError propagates a scan error and does not panic.
+// A failed tick delivers none of its rows, even the ones read before the error.
 func TestSampler_DoSample_ScanError(t *testing.T) {
 	rows := &mockRows{
-		rows:    [][5]any{{"app", "active", "CPU", "CPU", (*int64)(nil)}},
+		rows:    [][5]any{{"app", "active", "CPU", "CPU", (*int64)(nil)}, {"app", "active", "Lock", "tuple", (*int64)(nil)}},
 		scanErr: errors.New("scan failed"),
+		scanOK:  1,
 	}
 	q := &mockQuerier{rows: rows}
-	s := NewSampler(q, clock.System(), nil)
+	delivered := 0
+	s := NewSampler(q, clock.System(), func(SampleRow) { delivered++ })
 
 	if err := s.doSample(context.Background()); err == nil {
 		t.Fatal("expected a scan error")
 	}
-}
-
-// TestSampler_DoSample_ComputeQueryIDDiscoveredFromFirstRow proves the sampler
-// discovers compute_query_id from the first row of the first successful sample.
-func TestSampler_DoSample_ComputeQueryIDDiscoveredFromFirstRow(t *testing.T) {
-	rows := &mockRows{rows: [][5]any{
-		{"app", "active", "CPU", "CPU", ptrInt64(7)},
-	}}
-	s := NewSampler(&mockQuerier{rows: rows}, clock.System(), nil)
-
-	if err := s.doSample(context.Background()); err != nil {
-		t.Fatalf("doSample: %v", err)
-	}
-	enabled := s.ComputeQueryIDEnabled()
-	if enabled == nil || !*enabled {
-		t.Fatalf("expected compute_query_id discovered true, got %v", enabled)
+	if delivered != 0 {
+		t.Fatalf("a failed tick delivered %d rows to onSample", delivered)
 	}
 }
 
-// TestSampler_DoSample_WarnsOnceWhenQueryIDMissing proves the "compute_query_id
-// is off" condition warns at most once, no matter how many nil-query_id rows or
-// ticks occur (phase_08.md 7.1: "the warning is emitted once rather than per tick"),
-// and only after computeQueryIDOffSamples CONSECUTIVE fully-null samples — a
-// single early null sample must not latch "off" permanently (found live: it
-// falsely reported compute_query_id off even though the GUC was confirmed on
-// server-wide, because one sample happened to catch every active session
-// between statements).
-func TestSampler_DoSample_WarnsOnceWhenQueryIDMissing(t *testing.T) {
+// TestSampler_DoSample_ErrAfterRowsDeliversNone proves the rows of a tick that
+// the stream then fails are not counted: the error comes after every row.
+func TestSampler_DoSample_ErrAfterRowsDeliversNone(t *testing.T) {
+	rows := &mockRows{
+		rows: [][5]any{{"app", "active", "CPU", "CPU", (*int64)(nil)}},
+		err:  errors.New("connection reset"),
+	}
+	q := &mockQuerier{rows: rows}
+	delivered := 0
+	s := NewSampler(q, clock.System(), func(SampleRow) { delivered++ })
+
+	if err := s.doSample(context.Background()); err == nil {
+		t.Fatal("expected the stream error")
+	}
+	if delivered != 0 {
+		t.Fatalf("a failed tick delivered %d rows to onSample", delivered)
+	}
+}
+
+// TestSampler_DoSample_NeverInfersComputeQueryID proves the sampler does not
+// judge compute_query_id from its own samples. A null query_id is what every
+// sample shows while the setting leaves it unset, so five null-only samples
+// used to be logged as "compute_query_id is off", a verdict the sampler could
+// not know. The setting is read from the server instead.
+func TestSampler_DoSample_NeverInfersComputeQueryID(t *testing.T) {
+	var logBuf bytes.Buffer
+	prev := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(prev)
+
 	mk := func() *mockRows {
-		return &mockRows{rows: [][5]any{
-			{"app", "active", "CPU", "CPU", (*int64)(nil)},
-			{"app", "active", "CPU", "CPU", (*int64)(nil)},
-		}}
+		return &mockRows{rows: [][5]any{{"app", "active", "CPU", "CPU", (*int64)(nil)}}}
 	}
 	q := &mockQuerier{rows: mk()}
 	s := NewSampler(q, clock.System(), nil)
-
-	for i := 0; i < computeQueryIDOffSamples-1; i++ {
+	for i := 0; i < 6; i++ {
+		q.rows = mk()
 		if err := s.doSample(context.Background()); err != nil {
 			t.Fatalf("doSample %d: %v", i, err)
 		}
-		if s.warnedNoQueryID.Load() {
-			t.Fatalf("warned after only %d null samples, want %d", i+1, computeQueryIDOffSamples)
-		}
-		q.rows = mk()
 	}
-
-	if err := s.doSample(context.Background()); err != nil {
-		t.Fatalf("doSample (final): %v", err)
-	}
-	if !s.warnedNoQueryID.Load() {
-		t.Fatalf("expected warnedNoQueryID to be set after %d consecutive null samples", computeQueryIDOffSamples)
-	}
-
-	// A further tick (new mock rows, same sampler) must not flip anything
-	// further; the CompareAndSwap in doSample guards this.
-	q.rows = mk()
-	if err := s.doSample(context.Background()); err != nil {
-		t.Fatalf("doSample (extra tick): %v", err)
-	}
-	if !s.warnedNoQueryID.Load() {
-		t.Fatal("warnedNoQueryID must remain set across ticks")
-	}
-}
-
-// TestSampler_DoSample_SingleEarlyNullSampleDoesNotLatchOff is the direct
-// regression test for the bug: one fully-null sample followed by a sample
-// with a real query_id must discover compute_query_id as ON, not OFF.
-func TestSampler_DoSample_SingleEarlyNullSampleDoesNotLatchOff(t *testing.T) {
-	q := &mockQuerier{rows: &mockRows{rows: [][5]any{
-		{"app", "active", "CPU", "CPU", (*int64)(nil)},
-	}}}
-	s := NewSampler(q, clock.System(), nil)
-
-	if err := s.doSample(context.Background()); err != nil {
-		t.Fatalf("doSample 1: %v", err)
-	}
-	if enabled := s.ComputeQueryIDEnabled(); enabled != nil {
-		t.Fatalf("expected still undiscovered after one null sample, got %v", *enabled)
-	}
-
-	q.rows = &mockRows{rows: [][5]any{
-		{"app", "active", "CPU", "CPU", ptrInt64(42)},
-	}}
-	if err := s.doSample(context.Background()); err != nil {
-		t.Fatalf("doSample 2: %v", err)
-	}
-	enabled := s.ComputeQueryIDEnabled()
-	if enabled == nil || !*enabled {
-		t.Fatalf("expected compute_query_id discovered true after a real query_id, got %v", enabled)
-	}
-	if s.warnedNoQueryID.Load() {
-		t.Fatal("must not have warned — compute_query_id turned out to be on")
+	if strings.Contains(logBuf.String(), "compute_query_id") {
+		t.Fatalf("the sampler logged a compute_query_id verdict from null samples: %q", logBuf.String())
 	}
 }
 
@@ -505,5 +438,33 @@ func TestSampler_TickCallback_FiresOnFailedTick(t *testing.T) {
 	}
 	if lastSuccess.Load() {
 		t.Fatal("expected onTick to report success=false for a failed query")
+	}
+}
+
+// TestSampler_LastError_ReportsFailedTick proves LastError carries the error of
+// the most recent tick, so a window of failed ticks can say why it failed.
+func TestSampler_LastError_ReportsFailedTick(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	q := &mockQuerierZeroRows{err: errors.New("connection reset")}
+	s := NewSampler(q, clk, nil)
+	var calls atomic.Int32
+	s.SetTickCallback(func(bool) { calls.Add(1) })
+
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for calls.Load() < 1 && time.Now().Before(deadline) {
+		clk.Advance(1 * time.Second)
+		time.Sleep(time.Millisecond)
+	}
+
+	if calls.Load() < 1 {
+		t.Fatal("expected onTick to fire at least once")
+	}
+	if err := s.LastError(); err == nil || err.Error() != "connection reset" {
+		t.Fatalf("expected LastError to be the tick's error, got %v", err)
 	}
 }

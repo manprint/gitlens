@@ -1,6 +1,8 @@
 package topology
 
 import (
+	"os"
+	"regexp"
 	"testing"
 	"time"
 
@@ -511,10 +513,31 @@ func TestEngine_Cascade(t *testing.T) {
 		},
 	})
 
-	// s1 is cascade (both From edge from p and To edges to s2).
-	// Engine processes this without error; no cascade event emitted yet
-	// (cascade is marked in API, not as an event).
+	// s1 is a cascade: both a From edge from p and a To edge to s2. The engine
+	// processes it without error and emits no event for it, since a cascade is
+	// shown by the topology edges in the API, not as an event.
 	_ = e
+}
+
+// TestEngine_EveryEventTypeIsEmitted — a declared event type that no code path
+// emits documents an event that never appears. EventCascadeChanged sat unused
+// among the constants for that reason. Each declared type must be the Type of
+// an Event the engine builds.
+func TestEngine_EveryEventTypeIsEmitted(t *testing.T) {
+	src, err := os.ReadFile("engine.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := regexp.MustCompile(`(?m)^\t(Event\w+)\s+EventType = `).FindAllSubmatch(src, -1)
+	if len(declared) == 0 {
+		t.Fatal("found no EventType constants in engine.go")
+	}
+	for _, m := range declared {
+		name := string(m[1])
+		if !regexp.MustCompile(`Type:\s+` + name + `,`).Match(src) {
+			t.Errorf("%s is declared but no Event is built with it as its Type", name)
+		}
+	}
 }
 
 func TestEngine_StaleEdgeExpires(t *testing.T) {
@@ -714,6 +737,643 @@ func TestEngine_OrphanStandbyThrottled(t *testing.T) {
 	}
 }
 
+// orphanObserver feeds one standby's observations to the engine and returns
+// the orphan_standby events each one emits. The standby is the only instance,
+// so its edges and role are all the orphan logic sees.
+func orphanObserver(e *Engine, clk *clock.Fake, standby uuid.UUID, cID pgtype.ClusterID) func([]Edge, pgtype.Role) []Event {
+	return func(edges []Edge, role pgtype.Role) []Event {
+		var orphans []Event
+		for _, evt := range e.Apply(Observation{InstanceID: standby, ClusterID: cID, Role: role, Timestamp: clk.Now(), Edges: edges}) {
+			if evt.Type == EventOrphanStandby {
+				orphans = append(orphans, evt)
+			}
+		}
+		return orphans
+	}
+}
+
+// TestEngine_OrphanEpisodeEndsAfterGap — two observations with no edge in a row,
+// once a whole orphan window has passed since the last evidence, end the
+// episode, so the next orphan is dated from its own start. The duration used to
+// run from the old start: a standby orphaned for four minutes, then edgeless for
+// ten, reported fourteen on its next orphan.
+func TestEngine_OrphanEpisodeEndsAfterGap(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+	standby := uuid.New()
+	cID := pgtype.ManualClusterID("cluster1")
+	observe := orphanObserver(e, clk, standby, cID)
+	lowEdge := []Edge{{From: standby, To: uuid.New(), Confidence: "low"}}
+
+	observe(lowEdge, pgtype.RoleStandby) // starts the episode at t=0
+	clk.Advance(30 * time.Second)
+	observe(lowEdge, pgtype.RoleStandby)
+	clk.Advance(31 * time.Second)
+	first := observe(lowEdge, pgtype.RoleStandby)
+	if len(first) != 1 {
+		t.Fatalf("expected one orphan_standby at t=61, got %d", len(first))
+	}
+	if got := first[0].Payload["duration_seconds"]; got != 61.0 {
+		t.Fatalf("first orphan duration = %v, want 61", got)
+	}
+
+	// Ten minutes with no edge at all, one observation a minute: the episode is
+	// over once the second of them has passed a window without evidence.
+	for i := 0; i < 10; i++ {
+		clk.Advance(60 * time.Second)
+		if got := observe(nil, pgtype.RoleStandby); len(got) != 0 {
+			t.Fatalf("an edgeless observation emitted %d orphan_standby", len(got))
+		}
+	}
+
+	// Orphaned again at t=662: a new episode, silent until a window has passed.
+	clk.Advance(time.Second)
+	if got := observe(lowEdge, pgtype.RoleStandby); len(got) != 0 {
+		t.Fatalf("a new orphan emitted at its own start, duration %v", got[0].Payload["duration_seconds"])
+	}
+	clk.Advance(30 * time.Second)
+	observe(lowEdge, pgtype.RoleStandby) // t=692
+	clk.Advance(30 * time.Second)
+	second := observe(lowEdge, pgtype.RoleStandby)
+	if len(second) != 1 {
+		t.Fatalf("expected one orphan_standby at t=722, got %d", len(second))
+	}
+	if got := second[0].Payload["duration_seconds"]; got != 60.0 {
+		t.Fatalf("second orphan duration = %v, want 60 (its own episode), not the time since the first", got)
+	}
+}
+
+// TestEngine_OrphanEpisodeSurvivesShortGap — the server drops an edge whose
+// address stops resolving for a cycle, so a standby can flap between an edge
+// and none. A gap shorter than the window must not restart the clock, or the
+// orphan would never page.
+func TestEngine_OrphanEpisodeSurvivesShortGap(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+	standby := uuid.New()
+	cID := pgtype.ManualClusterID("cluster1")
+	observe := orphanObserver(e, clk, standby, cID)
+	lowEdge := []Edge{{From: standby, To: uuid.New(), Confidence: "low"}}
+
+	observe(lowEdge, pgtype.RoleStandby) // t=0
+	clk.Advance(30 * time.Second)
+	observe(nil, pgtype.RoleStandby) // a single edgeless cycle at t=30
+	clk.Advance(15 * time.Second)
+	observe(lowEdge, pgtype.RoleStandby) // evidence again at t=45, 45s after the last
+	clk.Advance(16 * time.Second)
+	got := observe(lowEdge, pgtype.RoleStandby) // t=61
+	if len(got) != 1 {
+		t.Fatalf("expected orphan_standby at t=61 across a short gap, got %d", len(got))
+	}
+	if d := got[0].Payload["duration_seconds"]; d != 61.0 {
+		t.Fatalf("duration across a short gap = %v, want 61", d)
+	}
+}
+
+// TestEngine_OrphanEpisodeEndsWhenNotStandby — a standby that is promoted and
+// later rejoins as a standby is not orphaned by its earlier episode.
+func TestEngine_OrphanEpisodeEndsWhenNotStandby(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+	standby := uuid.New()
+	cID := pgtype.ManualClusterID("cluster1")
+	observe := orphanObserver(e, clk, standby, cID)
+	lowEdge := []Edge{{From: standby, To: uuid.New(), Confidence: "low"}}
+
+	observe(lowEdge, pgtype.RoleStandby) // t=0
+	clk.Advance(30 * time.Second)
+	observe(nil, pgtype.RolePrimary) // promoted at t=30
+	clk.Advance(31 * time.Second)
+	if got := observe(lowEdge, pgtype.RoleStandby); len(got) != 0 {
+		t.Fatalf("a standby that rejoined at t=61 was reported orphan with duration %v", got[0].Payload["duration_seconds"])
+	}
+}
+
+// TestEngine_OrphanEpisodeHeldWhenRoleUnknown — the agent reports an unknown
+// role when it cannot read its role cache in a cycle, which says nothing about
+// whether the standby is still orphaned. Such an observation must not restart
+// the episode clock: orphaned at t=0, unknown at t=30, orphaned again at t=61
+// is one episode of 61 seconds, reported at once.
+func TestEngine_OrphanEpisodeHeldWhenRoleUnknown(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+	standby := uuid.New()
+	cID := pgtype.ManualClusterID("cluster1")
+	observe := orphanObserver(e, clk, standby, cID)
+	lowEdge := []Edge{{From: standby, To: uuid.New(), Confidence: "low"}}
+
+	observe(lowEdge, pgtype.RoleStandby) // t=0
+	clk.Advance(30 * time.Second)
+	observe(nil, pgtype.RoleUnknown) // role unreadable at t=30
+	clk.Advance(15 * time.Second)
+	observe(lowEdge, pgtype.RoleStandby) // orphaned again at t=45, 45s after the last
+	clk.Advance(16 * time.Second)
+	got := observe(lowEdge, pgtype.RoleStandby) // t=61
+	if len(got) != 1 {
+		t.Fatalf("got %d orphan events at t=61, want 1: an unknown observation restarted the episode", len(got))
+	}
+	if d, _ := got[0].Payload["duration_seconds"].(float64); d != 61 {
+		t.Fatalf("orphan duration %v, want 61", got[0].Payload["duration_seconds"])
+	}
+}
+
+// TestEngine_OrphanEpisodeRestartsAfterUnknownGap — an unknown observation is one
+// cycle without evidence, so a single one leaves an episode alive. The episode
+// ends at the second unknown observation in a row, once a window has passed since
+// the last evidence (see orphanGapEnds). A standby that stays
+// unreadable for ten minutes and then shows its orphan again starts a new
+// episode. The reappearance is not reported with the age of the whole gap, and
+// the next orphan is reported a window later, dated from its own start.
+func TestEngine_OrphanEpisodeRestartsAfterUnknownGap(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+	standby := uuid.New()
+	cID := pgtype.ManualClusterID("cluster1")
+	observe := orphanObserver(e, clk, standby, cID)
+	lowEdge := []Edge{{From: standby, To: uuid.New(), Confidence: "low"}}
+
+	observe(lowEdge, pgtype.RoleStandby) // t=0
+	clk.Advance(30 * time.Second)
+	observe(nil, pgtype.RoleUnknown) // t=30
+	clk.Advance(600 * time.Second)
+	observe(nil, pgtype.RoleUnknown) // t=630, still unreadable
+	clk.Advance(30 * time.Second)
+	if got := observe(lowEdge, pgtype.RoleStandby); len(got) != 0 { // t=660
+		t.Fatalf("orphan reported at its reappearance with duration %v, want a new episode", got[0].Payload["duration_seconds"])
+	}
+	clk.Advance(30 * time.Second)
+	observe(lowEdge, pgtype.RoleStandby) // t=690
+	clk.Advance(30 * time.Second)
+	got := observe(lowEdge, pgtype.RoleStandby) // t=720
+	if len(got) != 1 {
+		t.Fatalf("expected one orphan_standby a window after the reappearance, got %d", len(got))
+	}
+	if d, _ := got[0].Payload["duration_seconds"].(float64); d != 60 {
+		t.Fatalf("orphan duration %v, want 60: the episode is dated from t=660", got[0].Payload["duration_seconds"])
+	}
+}
+
+// TestEngine_OrphanEpisodeSpansSilence — an instance that reports nothing for
+// ten minutes and then shows its orphan again is still the same episode. Silence
+// is not observed, so there is no observation to end the episode on, and the
+// reappearance reports the whole silence in its duration. This is the accepted
+// limit of the orphan rule. A silent gap followed by one edgeless or unknown
+// observation does not end the episode; two observed cycles without evidence do,
+// as TestEngine_OrphanEpisodeEndsAfterGap pins.
+func TestEngine_OrphanEpisodeSpansSilence(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+	standby := uuid.New()
+	cID := pgtype.ManualClusterID("cluster1")
+	observe := orphanObserver(e, clk, standby, cID)
+	lowEdge := []Edge{{From: standby, To: uuid.New(), Confidence: "low"}}
+
+	observe(lowEdge, pgtype.RoleStandby) // t=0
+	clk.Advance(600 * time.Second)       // silent for ten minutes
+	got := observe(lowEdge, pgtype.RoleStandby)
+	if len(got) != 1 {
+		t.Fatalf("expected orphan_standby at the reappearance, got %d", len(got))
+	}
+	if d, _ := got[0].Payload["duration_seconds"].(float64); d != 600 {
+		t.Fatalf("orphan duration %v, want 600: silence does not end the episode", got[0].Payload["duration_seconds"])
+	}
+}
+
+// TestEngine_OrphanEpisodeKeepsOneQuietCycleAfterSilence — one cycle without
+// evidence after a long silence does not end the episode. The engine cannot tell
+// how many cycles the silence held, so it takes two observed cycles without
+// evidence to end one. The next evidence is the same episode, and its duration
+// covers the silence.
+func TestEngine_OrphanEpisodeKeepsOneQuietCycleAfterSilence(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+	standby := uuid.New()
+	cID := pgtype.ManualClusterID("cluster1")
+	observe := orphanObserver(e, clk, standby, cID)
+	lowEdge := []Edge{{From: standby, To: uuid.New(), Confidence: "low"}}
+
+	observe(lowEdge, pgtype.RoleStandby) // t=0
+	clk.Advance(600 * time.Second)       // silent for ten minutes
+	if got := observe(nil, pgtype.RoleStandby); len(got) != 0 {
+		t.Fatalf("a cycle without evidence emitted %d orphan_standby", len(got))
+	}
+	clk.Advance(time.Second)
+	got := observe(lowEdge, pgtype.RoleStandby) // t=601
+	if len(got) != 1 {
+		t.Fatalf("expected orphan_standby at t=601, got %d: one quiet cycle ended the episode", len(got))
+	}
+	if d, _ := got[0].Payload["duration_seconds"].(float64); d != 601 {
+		t.Fatalf("orphan duration %v, want 601: the episode spans the silence", got[0].Payload["duration_seconds"])
+	}
+}
+
+// TestEngine_OrphanEpisodeKeepsFiringAtAnyCadence — evidence that arrives every
+// cycle keeps one episode, whatever the cycle. An agent that pushes every 60, 90
+// or 120 seconds leaves a whole orphan window between two of its observations,
+// and that gap must not be read as the orphan being over. orphan_standby fires
+// once a window has passed since the episode began or since its last event, and
+// its duration always runs from the start of the episode.
+func TestEngine_OrphanEpisodeKeepsFiringAtAnyCadence(t *testing.T) {
+	for _, cadence := range []time.Duration{30, 60, 90, 120} {
+		cadence *= time.Second
+		t.Run(cadence.String(), func(t *testing.T) {
+			clk := clock.NewFake(time.Unix(0, 0))
+			e := NewEngine(clk)
+			standby := uuid.New()
+			cID := pgtype.ManualClusterID("cluster1")
+			observe := orphanObserver(e, clk, standby, cID)
+			lowEdge := []Edge{{From: standby, To: uuid.New(), Confidence: "low"}}
+
+			start := clk.Now()
+			lastEvent := start
+			observe(lowEdge, pgtype.RoleStandby) // starts the episode
+			fired := 0
+			for i := 0; i < 20; i++ {
+				clk.Advance(cadence)
+				got := observe(lowEdge, pgtype.RoleStandby)
+				due := clk.Now().Sub(lastEvent) >= e.orphanWindow
+				if due != (len(got) == 1) {
+					t.Fatalf("at t=%v: orphan_standby emitted %d times, want due=%v", clk.Now().Sub(start), len(got), due)
+				}
+				if len(got) == 1 {
+					fired++
+					lastEvent = clk.Now()
+					if d := got[0].Payload["duration_seconds"]; d != clk.Now().Sub(start).Seconds() {
+						t.Fatalf("at t=%v: duration %v, want the whole episode from its start", clk.Now().Sub(start), d)
+					}
+				}
+			}
+			if fired == 0 {
+				t.Fatal("orphan_standby never fired")
+			}
+		})
+	}
+}
+
+// TestEngine_OrphanEpisodeKeepsFiringWhenEveryOtherCycleIsSilent — a standby
+// whose edge is dropped on every other cycle, or whose role is unreadable on
+// every other cycle, stays one episode at a 30, 60, 90 or 120 second push
+// interval. Each cycle with evidence fires once a window has passed since the
+// last event, and its duration runs from the start of the episode. The cycles
+// without evidence emit nothing and end nothing.
+func TestEngine_OrphanEpisodeKeepsFiringWhenEveryOtherCycleIsSilent(t *testing.T) {
+	silent := []struct {
+		name string
+		role pgtype.Role
+	}{
+		{"edgeless", pgtype.RoleStandby},
+		{"unknown", pgtype.RoleUnknown},
+	}
+	for _, s := range silent {
+		for _, cadence := range []time.Duration{30, 60, 90, 120} {
+			cadence *= time.Second
+			t.Run(s.name+"/"+cadence.String(), func(t *testing.T) {
+				clk := clock.NewFake(time.Unix(0, 0))
+				e := NewEngine(clk)
+				standby := uuid.New()
+				cID := pgtype.ManualClusterID("cluster1")
+				observe := orphanObserver(e, clk, standby, cID)
+				lowEdge := []Edge{{From: standby, To: uuid.New(), Confidence: "low"}}
+
+				start := clk.Now()
+				lastEvent := start
+				observe(lowEdge, pgtype.RoleStandby) // starts the episode
+				for i := 0; i < 20; i++ {
+					clk.Advance(cadence)
+					if got := observe(nil, s.role); len(got) != 0 {
+						t.Fatalf("at t=%v: a cycle without evidence emitted %d orphan_standby", clk.Now().Sub(start), len(got))
+					}
+					clk.Advance(cadence)
+					got := observe(lowEdge, pgtype.RoleStandby)
+					due := clk.Now().Sub(lastEvent) >= e.orphanWindow
+					if due != (len(got) == 1) {
+						t.Fatalf("at t=%v: orphan_standby emitted %d times, want due=%v", clk.Now().Sub(start), len(got), due)
+					}
+					if len(got) == 1 {
+						lastEvent = clk.Now()
+						if d := got[0].Payload["duration_seconds"]; d != clk.Now().Sub(start).Seconds() {
+							t.Fatalf("at t=%v: duration %v, want the whole episode from its start", clk.Now().Sub(start), d)
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+// TestEngine_OrphanEpisodeSurvivesShortGapAtCadence — a standby that sends one
+// extra evidence cycle ten seconds after a regular one has not changed its
+// cadence. The cycle without evidence one cadence later must not end the
+// episode, so the next evidence still fires, with the whole episode as its
+// duration. A short gap says nothing about the push interval, so it must not
+// make that one cycle end the episode.
+func TestEngine_OrphanEpisodeSurvivesShortGapAtCadence(t *testing.T) {
+	silent := []struct {
+		name string
+		role pgtype.Role
+	}{
+		{"edgeless", pgtype.RoleStandby},
+		{"unknown", pgtype.RoleUnknown},
+	}
+	for _, s := range silent {
+		for _, cadence := range []time.Duration{60, 90, 120} {
+			cadence *= time.Second
+			t.Run(s.name+"/"+cadence.String(), func(t *testing.T) {
+				clk := clock.NewFake(time.Unix(0, 0))
+				e := NewEngine(clk)
+				standby := uuid.New()
+				cID := pgtype.ManualClusterID("cluster1")
+				observe := orphanObserver(e, clk, standby, cID)
+				lowEdge := []Edge{{From: standby, To: uuid.New(), Confidence: "low"}}
+
+				start := clk.Now()
+				lastEvent := start
+				evidence := orphanEvidenceCheck(t, e, clk, observe, lowEdge, start, &lastEvent)
+				quiet := orphanQuietCheck(t, clk, observe, s.role, start)
+
+				evidence("t=0") // starts the episode
+				clk.Advance(cadence)
+				evidence("steady cycle")
+				clk.Advance(10 * time.Second)
+				evidence("short gap")
+				clk.Advance(cadence)
+				quiet("cycle without evidence")
+				clk.Advance(cadence)
+				evidence("after the silent cycle")
+			})
+		}
+	}
+}
+
+// TestEngine_OrphanEpisodeSurvivesReplayBurstAtCadence — the backlog of an agent
+// that was offline is drained in a burst, five replayed evidence envelopes a
+// millisecond apart, and live cycles resume a short while after it. A burst of
+// replayed envelopes says nothing about the push interval, so the cycle without
+// evidence that follows the live resumption must not end the episode.
+func TestEngine_OrphanEpisodeSurvivesReplayBurstAtCadence(t *testing.T) {
+	silent := []struct {
+		name string
+		role pgtype.Role
+	}{
+		{"edgeless", pgtype.RoleStandby},
+		{"unknown", pgtype.RoleUnknown},
+	}
+	for _, s := range silent {
+		for _, cadence := range []time.Duration{60, 90, 120} {
+			cadence *= time.Second
+			t.Run(s.name+"/"+cadence.String(), func(t *testing.T) {
+				clk := clock.NewFake(time.Unix(0, 0))
+				e := NewEngine(clk)
+				standby := uuid.New()
+				cID := pgtype.ManualClusterID("cluster1")
+				observe := orphanObserver(e, clk, standby, cID)
+				lowEdge := []Edge{{From: standby, To: uuid.New(), Confidence: "low"}}
+
+				start := clk.Now()
+				lastEvent := start
+				evidence := orphanEvidenceCheck(t, e, clk, observe, lowEdge, start, &lastEvent)
+				quiet := orphanQuietCheck(t, clk, observe, s.role, start)
+
+				evidence("t=0") // starts the episode
+				clk.Advance(cadence)
+				evidence("steady cycle")
+				clk.Advance(cadence / 2)
+				for i := 0; i < 5; i++ {
+					if i > 0 {
+						clk.Advance(time.Millisecond)
+					}
+					evidence("replayed envelope")
+				}
+				clk.Advance(10 * time.Second)
+				evidence("live cycle")
+				clk.Advance(cadence)
+				quiet("cycle without evidence")
+				clk.Advance(cadence)
+				evidence("after the silent cycle")
+			})
+		}
+	}
+}
+
+// TestEngine_OrphanEpisodeHoldsAcrossQuietCyclesInsideWindow — cycles without
+// evidence in a row end the episode only once a whole window has passed since
+// the last evidence. Three quiet cycles of 15 seconds leave the standby one
+// episode, and the evidence at 60 seconds fires with the whole episode as its
+// duration.
+func TestEngine_OrphanEpisodeHoldsAcrossQuietCyclesInsideWindow(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+	standby := uuid.New()
+	cID := pgtype.ManualClusterID("cluster1")
+	observe := orphanObserver(e, clk, standby, cID)
+	lowEdge := []Edge{{From: standby, To: uuid.New(), Confidence: "low"}}
+
+	start := clk.Now()
+	lastEvent := start
+	evidence := orphanEvidenceCheck(t, e, clk, observe, lowEdge, start, &lastEvent)
+	quiet := orphanQuietCheck(t, clk, observe, pgtype.RoleStandby, start)
+
+	evidence("t=0") // starts the episode
+	for i := 0; i < 3; i++ {
+		clk.Advance(15 * time.Second)
+		quiet("cycle without evidence")
+	}
+	clk.Advance(15 * time.Second)
+	evidence("evidence a window after the start")
+}
+
+// TestEngine_OrphanEpisodeIgnoresRepeatedEnvelope — a push retried after a lost
+// response, or read again from the disk buffer after a restart, reaches the
+// engine a second time with the sent time of the envelope it repeats. That is
+// the same cycle, so it must not count as a second cycle without evidence. At a
+// 90 second push interval a quiet cycle delivered twice would otherwise end the
+// episode, and the evidence after it would fire nothing.
+func TestEngine_OrphanEpisodeIgnoresRepeatedEnvelope(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+	standby := uuid.New()
+	cID := pgtype.ManualClusterID("cluster1")
+	lowEdge := []Edge{{From: standby, To: uuid.New(), Confidence: "low"}}
+	// send applies the standby's observation from the envelope sent at the given
+	// time, and returns the orphan_standby events it emits.
+	send := func(edges []Edge, role pgtype.Role, sent time.Time) []Event {
+		var orphans []Event
+		for _, evt := range e.Apply(Observation{InstanceID: standby, ClusterID: cID, Role: role, Timestamp: sent, Edges: edges}) {
+			if evt.Type == EventOrphanStandby {
+				orphans = append(orphans, evt)
+			}
+		}
+		return orphans
+	}
+
+	start := clk.Now()
+	send(lowEdge, pgtype.RoleStandby, start) // t=0 starts the episode
+	clk.Advance(90 * time.Second)
+	send(lowEdge, pgtype.RoleStandby, clk.Now()) // t=90, evidence
+	clk.Advance(90 * time.Second)
+	quiet := clk.Now()
+	send(nil, pgtype.RoleStandby, quiet) // t=180, one cycle without evidence
+	clk.Advance(11 * time.Second)
+	send(nil, pgtype.RoleStandby, quiet) // t=191, the same envelope retried
+	clk.Advance(79 * time.Second)
+	got := send(lowEdge, pgtype.RoleStandby, clk.Now()) // t=270, evidence
+	if len(got) != 1 {
+		t.Fatalf("expected orphan_standby at t=270, got %d: a retried quiet cycle ended the episode", len(got))
+	}
+	if d, _ := got[0].Payload["duration_seconds"].(float64); d != 270 {
+		t.Fatalf("orphan duration %v, want 270: the episode from its start", got[0].Payload["duration_seconds"])
+	}
+}
+
+// TestEngine_OrphanEpisodeSurvivesDrainAtCadence — an agent that was offline
+// drains its buffered cycles in one burst: envelopes sent one, two and three
+// cadences after the last live evidence reach the server a millisecond apart,
+// a window after that evidence. The two without evidence are one cadence apart
+// on the agent's clock, so they must not end the episode. The evidence in the
+// burst fires with the whole episode as its duration, and the next live cycle a
+// window later fires again from the same start.
+func TestEngine_OrphanEpisodeSurvivesDrainAtCadence(t *testing.T) {
+	silent := []struct {
+		name string
+		role pgtype.Role
+	}{
+		{"edgeless", pgtype.RoleStandby},
+		{"unknown", pgtype.RoleUnknown},
+	}
+	for _, s := range silent {
+		for _, cadence := range []time.Duration{15, 20, 25} {
+			cadence *= time.Second
+			t.Run(s.name+"/"+cadence.String(), func(t *testing.T) {
+				clk := clock.NewFake(time.Unix(0, 0))
+				e := NewEngine(clk)
+				standby := uuid.New()
+				cID := pgtype.ManualClusterID("cluster1")
+				lowEdge := []Edge{{From: standby, To: uuid.New(), Confidence: "low"}}
+				// send applies the standby's observation from the envelope sent at the
+				// given agent time, and returns the orphan_standby events it emits.
+				send := func(edges []Edge, role pgtype.Role, sent time.Time) []Event {
+					var orphans []Event
+					for _, evt := range e.Apply(Observation{InstanceID: standby, ClusterID: cID, Role: role, Timestamp: sent, Edges: edges}) {
+						if evt.Type == EventOrphanStandby {
+							orphans = append(orphans, evt)
+						}
+					}
+					return orphans
+				}
+
+				start := clk.Now()
+				send(lowEdge, pgtype.RoleStandby, start) // live evidence at t=0 starts the episode
+				clk.Advance(100 * time.Second)
+				send(nil, s.role, start.Add(cadence)) // buffered cycles, all drained at t=100
+				clk.Advance(time.Millisecond)
+				send(nil, s.role, start.Add(2*cadence))
+				clk.Advance(time.Millisecond)
+				got := send(lowEdge, pgtype.RoleStandby, start.Add(3*cadence))
+				if len(got) != 1 {
+					t.Fatalf("expected orphan_standby at the drain, got %d: the drained cycles ended the episode", len(got))
+				}
+				if d, _ := got[0].Payload["duration_seconds"].(float64); d != clk.Now().Sub(start).Seconds() {
+					t.Fatalf("orphan duration %v, want %v: the whole episode from t=0", got[0].Payload["duration_seconds"], clk.Now().Sub(start).Seconds())
+				}
+
+				clk.Advance(60 * time.Second)
+				got = send(lowEdge, pgtype.RoleStandby, clk.Now())
+				if len(got) != 1 {
+					t.Fatalf("expected orphan_standby a window after the drain, got %d", len(got))
+				}
+				if d, _ := got[0].Payload["duration_seconds"].(float64); d != clk.Now().Sub(start).Seconds() {
+					t.Fatalf("orphan duration %v, want %v: the episode from t=0", got[0].Payload["duration_seconds"], clk.Now().Sub(start).Seconds())
+				}
+			})
+		}
+	}
+}
+
+// TestEngine_ZeroSentTimeIsNeverARepeat — an observation without a sent time
+// identifies no envelope, so two identical ones in a row are two cycles without
+// evidence, not a retry of one.
+// TestEngine_UndoneObservationIsNotARepeat — an envelope whose store
+// transaction rolls back has its engine state undone, and the agent sends it
+// again with the same sent time. The undo must forget it as the last
+// observation too, or the retry is ignored as a repeat and its events are lost.
+func TestEngine_UndoneObservationIsNotARepeat(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+	obs := Observation{InstanceID: uuid.New(), ClusterID: pgtype.ManualClusterID("cluster1"), Role: pgtype.RolePrimary, Timestamp: clk.Now()}
+
+	events, undo := e.ApplyUndoable(obs)
+	if len(events) != 1 {
+		t.Fatalf("first sighting: expected 1 event, got %d", len(events))
+	}
+	undo()
+	clk.Advance(time.Second)
+	if events := e.Apply(obs); len(events) != 1 || events[0].Type != EventRoleChange {
+		t.Fatalf("retry after the undo: expected the role_change again, got %v", events)
+	}
+}
+
+// TestEngine_UndoKeepsALaterQuietCycle — an undo reverts the instance only
+// while it still holds what the undone Apply wrote. A later observation that
+// changed only the orphan bookkeeping is newer state, and the undo keeps it.
+func TestEngine_UndoKeepsALaterQuietCycle(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+	standby := uuid.New()
+	cID := pgtype.ManualClusterID("cluster1")
+
+	_, undo := e.ApplyUndoable(Observation{InstanceID: standby, ClusterID: cID, Role: pgtype.RoleStandby})
+	e.Apply(Observation{InstanceID: standby, ClusterID: cID, Role: pgtype.RoleStandby})
+	undo()
+	if got := e.instances[standby].quietCycles; got != 2 {
+		t.Fatalf("the undo discarded a later observation: %d cycles without evidence, want 2", got)
+	}
+}
+
+func TestEngine_ZeroSentTimeIsNeverARepeat(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+	standby := uuid.New()
+	cID := pgtype.ManualClusterID("cluster1")
+	for i := 0; i < 2; i++ {
+		e.Apply(Observation{InstanceID: standby, ClusterID: cID, Role: pgtype.RoleStandby})
+	}
+	if got := e.instances[standby].quietCycles; got != 2 {
+		t.Fatalf("two identical observations without a sent time counted %d cycles without evidence, want 2", got)
+	}
+}
+
+// orphanEvidenceCheck returns a step that feeds one cycle with evidence to the
+// engine and checks its orphan_standby against the throttle: one is due once a
+// window has passed since the last event, and it reports the whole episode,
+// from start, as its duration.
+func orphanEvidenceCheck(t *testing.T, e *Engine, clk *clock.Fake, observe func([]Edge, pgtype.Role) []Event, lowEdge []Edge, start time.Time, lastEvent *time.Time) func(string) {
+	return func(step string) {
+		t.Helper()
+		got := observe(lowEdge, pgtype.RoleStandby)
+		now := clk.Now()
+		if due := now.Sub(*lastEvent) >= e.orphanWindow; due != (len(got) == 1) {
+			t.Fatalf("%s at t=%v: orphan_standby emitted %d times, want due=%v", step, now.Sub(start), len(got), due)
+		}
+		if len(got) == 1 {
+			*lastEvent = now
+			if d := got[0].Payload["duration_seconds"]; d != now.Sub(start).Seconds() {
+				t.Fatalf("%s at t=%v: duration %v, want the whole episode from its start", step, now.Sub(start), d)
+			}
+		}
+	}
+}
+
+// orphanQuietCheck returns a step that feeds one cycle without evidence, in the
+// given role, to the engine and checks that it emits nothing.
+func orphanQuietCheck(t *testing.T, clk *clock.Fake, observe func([]Edge, pgtype.Role) []Event, role pgtype.Role, start time.Time) func(string) {
+	return func(step string) {
+		t.Helper()
+		if got := observe(nil, role); len(got) != 0 {
+			t.Fatalf("%s at t=%v: emitted %d orphan_standby, want none", step, clk.Now().Sub(start), len(got))
+		}
+	}
+}
+
 // TestEngine_EvictBoundsState — the engine tracked one instanceState (plus
 // its own edgeSeenAt map) per instance_id it had ever seen, for the lifetime
 // of the server process. Instance ids are not stable across a lost identity
@@ -899,5 +1559,46 @@ func TestEngine_FirstSightingWithoutStoredRoleKeepsNewRolePayload(t *testing.T) 
 		if _, hasOld := events[0].Payload["old_role"]; hasOld || events[0].Payload["new_role"] != pgtype.RolePrimary {
 			t.Fatalf("prior %q: payload = %v, want new_role only", prior, events[0].Payload)
 		}
+	}
+}
+
+// A primary that is demoted and promoted again inside the failover window is
+// not a failover from itself: it is a role change, and no failover is recorded.
+func TestEngine_SelfRepromotionIsRoleChangeNotFailover(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+
+	self := uuid.New()
+	other := uuid.New()
+	cID := pgtype.ManualClusterID("cluster1")
+
+	e.Apply(Observation{InstanceID: self, ClusterID: cID, Role: pgtype.RolePrimary, Timestamp: clk.Now()})
+	clk.Advance(10 * time.Second)
+	e.Apply(Observation{InstanceID: self, ClusterID: cID, Role: pgtype.RoleStandby, Timestamp: clk.Now()})
+	clk.Advance(40 * time.Second)
+	events := e.Apply(Observation{InstanceID: self, ClusterID: cID, Role: pgtype.RolePrimary, Timestamp: clk.Now()})
+	for _, evt := range events {
+		if evt.Type == EventFailoverDetected {
+			t.Fatalf("self re-promotion must not be a failover, got %+v", evt)
+		}
+	}
+	if len(events) != 1 || events[0].Type != EventRoleChange {
+		t.Fatalf("expected exactly one role_change, got %+v", events)
+	}
+	if _, failedOver := e.lastFailoverTime[cID]; failedOver {
+		t.Fatal("self re-promotion must not set lastFailoverTime")
+	}
+
+	// Control: a different standby promoted inside the window is a real failover
+	// from the instance that was primary.
+	clk.Advance(5 * time.Second)
+	e.Apply(Observation{InstanceID: other, ClusterID: cID, Role: pgtype.RoleStandby, Timestamp: clk.Now()})
+	clk.Advance(5 * time.Second)
+	events = e.Apply(Observation{InstanceID: other, ClusterID: cID, Role: pgtype.RolePrimary, Timestamp: clk.Now()})
+	if len(events) == 0 || events[0].Type != EventFailoverDetected {
+		t.Fatalf("expected a failover from the previous primary, got %+v", events)
+	}
+	if got := events[0].Payload["old_primary"]; got != self {
+		t.Fatalf("expected old_primary %v, got %v", self, got)
 	}
 }

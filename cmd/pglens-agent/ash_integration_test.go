@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/manprint/pglens/internal/agent"
@@ -144,5 +145,70 @@ func TestINTASH012_ShutdownStopsASHBeforeClosingPools(t *testing.T) {
 			<-closed
 			t.Fatal("shutdown waits for the ASH connection that its stop should have released")
 		}
+	})
+}
+
+// INT-ASH-006 (agent side): the dedicated connection notices a role that cannot
+// see other users' sessions and records it, and only a role that can see them
+// leaves the flag clear.
+func TestINTASH006_ConnRecordsHiddenSessions(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		_, err := admin.Exec(ctx, `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ash_plain') THEN CREATE ROLE ash_plain LOGIN PASSWORD 'test'; END IF; END $$`)
+		require.NoError(t, err)
+
+		mgr, err := agent.NewManager(ctx, "ash-target", pg.DSN("postgres", pgtest.RoleT0), agent.DefaultConnOptions(), nil)
+		require.NoError(t, err)
+		defer mgr.Close()
+
+		plainCfg, err := pgxpool.ParseConfig(pg.DSN("postgres", pgtest.RoleSuperuser))
+		require.NoError(t, err)
+		plainCfg.ConnConfig.User = "ash_plain"
+		plainCfg.ConnConfig.Password = "test"
+		plainPool, err := pgxpool.NewWithConfig(ctx, plainCfg)
+		require.NoError(t, err)
+		defer plainPool.Close()
+		plainConn, err := plainPool.Acquire(ctx)
+		require.NoError(t, err)
+		defer plainConn.Release()
+
+		hidden := &ashConn{mgr: mgr, base: ctx, clk: clock.NewFake(time.Now())}
+		defer hidden.Close()
+		hidden.warnIfSessionsHidden(ctx, plainConn)
+		require.True(t, hidden.warnedHidden)
+		hidden.warnIfSessionsHidden(ctx, plainConn) // already recorded: nothing more to do
+		require.True(t, hidden.warnedHidden)
+
+		visibleConn, err := mgr.DedicatedConn(ctx)
+		require.NoError(t, err)
+		defer visibleConn.Release()
+		visible := &ashConn{mgr: mgr, base: ctx, clk: clock.NewFake(time.Now())}
+		defer visible.Close()
+		visible.warnIfSessionsHidden(ctx, visibleConn)
+		require.False(t, visible.warnedHidden)
+	})
+}
+
+// INT-ASH-009: a target's first dedicated connection logs its compute_query_id
+// setting, once, so an operator can tell why a sample carries no queryid.
+func TestINTASH009_ConnLogsQueryIDSetting(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+
+		mgr, err := agent.NewManager(ctx, "ash-target", pg.DSN("postgres", pgtest.RoleT0), agent.DefaultConnOptions(), nil)
+		require.NoError(t, err)
+		defer mgr.Close()
+
+		conn, err := mgr.DedicatedConn(ctx)
+		require.NoError(t, err)
+		defer conn.Release()
+
+		logged := &ashConn{mgr: mgr, base: ctx, clk: clock.NewFake(time.Now())}
+		defer logged.Close()
+		logged.logQueryIDSetting(ctx, conn)
+		require.True(t, logged.loggedQueryID)
 	})
 }

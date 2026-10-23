@@ -2,6 +2,7 @@ package topology
 
 import (
 	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -10,6 +11,11 @@ import (
 )
 
 // Observation represents one instance's topology state at a moment in time.
+// Timestamp is when the envelope carrying it was sent. A repeat of that envelope
+// carries the same Timestamp, which is how the engine tells a retry from a new
+// cycle. The engine times an orphan episode with it only against the sent times
+// of the same instance's earlier observations, which share one agent clock. It
+// never compares it with the server's clock, since agent clocks drift.
 type Observation struct {
 	InstanceID pgtype.InstanceID
 	ClusterID  pgtype.ClusterID
@@ -58,22 +64,27 @@ type Event struct {
 
 // instanceState tracks the last seen state of an instance.
 type instanceState struct {
-	role       pgtype.Role
-	clusterID  pgtype.ClusterID
-	timestamp  time.Time
-	orphanAt   time.Time            // when the standby's upstream became unresolvable
-	orphanedAt time.Time            // when orphan_standby was last emitted for this standby
-	edgeSeenAt map[string]time.Time // per-edge last-seen time (key = "to_instance_id")
+	role           pgtype.Role
+	clusterID      pgtype.ClusterID
+	timestamp      time.Time
+	lastObs        Observation          // the observation applied last; a repeat of it is ignored
+	quietCycles    int                  // observations without orphan evidence since the last of it
+	orphanAt       time.Time            // when the standby's upstream became unresolvable
+	orphanSeenAt   time.Time            // last observation that found the upstream unresolvable
+	orphanSeenSent time.Time            // sent time of that observation, on the agent's clock
+	orphanedAt     time.Time            // when orphan_standby was last emitted for this standby
+	edgeSeenAt     map[string]time.Time // per-edge last-seen time (key = "to_instance_id")
 }
 
 // Engine detects topology changes in a cluster and emits events.
 type Engine struct {
 	mu               sync.RWMutex
 	clock            clock.Clock
-	instances        map[pgtype.InstanceID]*instanceState  // per instance
-	lastPrimary      map[pgtype.ClusterID]*lastPrimaryInfo // track recent primary per cluster
-	lastFailoverTime map[pgtype.ClusterID]time.Time        // track last failover time per cluster
-	lastSplitBrain   map[pgtype.ClusterID]time.Time        // last split_brain_detected emission per cluster
+	instances        map[pgtype.InstanceID]*instanceState                // per instance
+	clusterInstances map[pgtype.ClusterID]map[pgtype.InstanceID]struct{} // instances per cluster, so the split-brain check scans one cluster
+	lastPrimary      map[pgtype.ClusterID]*lastPrimaryInfo               // track recent primary per cluster
+	lastFailoverTime map[pgtype.ClusterID]time.Time                      // track last failover time per cluster
+	lastSplitBrain   map[pgtype.ClusterID]time.Time                      // last split_brain_detected emission per cluster
 	failoverWindow   time.Duration
 	orphanWindow     time.Duration
 	splitBrainWindow time.Duration
@@ -94,6 +105,7 @@ func NewEngine(clk clock.Clock) *Engine {
 	return &Engine{
 		clock:            clk,
 		instances:        make(map[pgtype.InstanceID]*instanceState),
+		clusterInstances: make(map[pgtype.ClusterID]map[pgtype.InstanceID]struct{}),
 		lastPrimary:      make(map[pgtype.ClusterID]*lastPrimaryInfo),
 		lastFailoverTime: make(map[pgtype.ClusterID]time.Time),
 		lastSplitBrain:   make(map[pgtype.ClusterID]time.Time),
@@ -203,7 +215,14 @@ func cloneInstanceState(s instanceState) instanceState {
 func sameInstanceState(a, b instanceState) bool {
 	return a.role == b.role && a.clusterID == b.clusterID &&
 		a.timestamp.Equal(b.timestamp) && a.orphanAt.Equal(b.orphanAt) && a.orphanedAt.Equal(b.orphanedAt) &&
+		a.quietCycles == b.quietCycles && a.orphanSeenAt.Equal(b.orphanSeenAt) && a.orphanSeenSent.Equal(b.orphanSeenSent) &&
+		sameObservation(a.lastObs, b.lastObs) &&
 		maps.EqualFunc(a.edgeSeenAt, b.edgeSeenAt, func(x, y time.Time) bool { return x.Equal(y) })
+}
+
+func sameObservation(a, b Observation) bool {
+	return a.InstanceID == b.InstanceID && a.ClusterID == b.ClusterID && a.Role == b.Role &&
+		a.PriorRole == b.PriorRole && a.Timestamp.Equal(b.Timestamp) && slices.Equal(a.Edges, b.Edges)
 }
 
 // apply is Apply for a caller that holds e.mu.
@@ -220,11 +239,26 @@ func (e *Engine) apply(obs Observation) []Event {
 		e.instances[obs.InstanceID] = inst
 	}
 
+	// A push that is retried after a lost response, or read again from the disk
+	// buffer after a restart, reaches the engine a second time with the sent time
+	// and the content of the envelope it repeats. It is the same cycle, so it
+	// changes nothing. A zero time identifies no envelope, so it is never taken
+	// for a repeat.
+	if !obs.Timestamp.IsZero() && obs.Timestamp.Equal(inst.lastObs.Timestamp) &&
+		obs.Role == inst.lastObs.Role && obs.ClusterID == inst.lastObs.ClusterID &&
+		slices.Equal(obs.Edges, inst.lastObs.Edges) {
+		return nil
+	}
+	inst.lastObs = obs
+	inst.lastObs.Edges = slices.Clone(obs.Edges)
+
 	// Detect role change.
 	if inst.role != obs.Role {
 		// Check if this is a failover.
 		if obs.Role == pgtype.RolePrimary && inst.role == pgtype.RoleStandby {
-			if lastPrim, ok := e.lastPrimary[obs.ClusterID]; ok && now.Sub(lastPrim.timestamp) < e.failoverWindow {
+			// An instance demoted and promoted again within the window is not a
+			// failover: the recent primary it would hand over from is itself.
+			if lastPrim, ok := e.lastPrimary[obs.ClusterID]; ok && now.Sub(lastPrim.timestamp) < e.failoverWindow && lastPrim.instanceID != obs.InstanceID {
 				// This is a failover: standby -> primary with recent prior primary
 				events = append(events, Event{
 					Type:       EventFailoverDetected,
@@ -256,6 +290,15 @@ func (e *Engine) apply(obs Observation) []Event {
 				ClusterID:  obs.ClusterID,
 				Payload:    map[string]any{"old_role": inst.role, "new_role": obs.Role},
 			})
+			// An unknown role hides a standby's promotion from the failover check
+			// above, which needs the standby seen as standby. The promotion still
+			// hands over from the recent primary, and the failover time is what
+			// keeps that primary, now silent, from counting in split brain.
+			if inst.role == pgtype.RoleUnknown && obs.Role == pgtype.RolePrimary {
+				if lastPrim, ok := e.lastPrimary[obs.ClusterID]; ok && now.Sub(lastPrim.timestamp) < e.failoverWindow && lastPrim.instanceID != obs.InstanceID {
+					e.lastFailoverTime[obs.ClusterID] = now
+				}
+			}
 		} else if knownRole(obs.PriorRole) {
 			// First sighting, but the store remembers the role the instance had
 			// before the restart or eviction that emptied this engine. A sighting
@@ -282,10 +325,18 @@ func (e *Engine) apply(obs Observation) []Event {
 		}
 	}
 
-	// Update instance state.
+	// Update instance state. The cluster index follows the instance's cluster,
+	// which a re-registered instance can change.
+	if inst.clusterID != obs.ClusterID {
+		delete(e.clusterInstances[inst.clusterID], obs.InstanceID)
+	}
 	inst.role = obs.Role
 	inst.clusterID = obs.ClusterID
 	inst.timestamp = now
+	if e.clusterInstances[obs.ClusterID] == nil {
+		e.clusterInstances[obs.ClusterID] = make(map[pgtype.InstanceID]struct{})
+	}
+	e.clusterInstances[obs.ClusterID][obs.InstanceID] = struct{}{}
 
 	// Track most recent primary per cluster.
 	if obs.Role == pgtype.RolePrimary {
@@ -310,9 +361,13 @@ func (e *Engine) apply(obs Observation) []Event {
 
 		// If no high-confidence edge and we have low-confidence edges, check orphan.
 		if !hasResolvedEdge && len(obs.Edges) > 0 {
+			inst.quietCycles = 0
 			if inst.orphanAt.IsZero() {
 				inst.orphanAt = now
-			} else if now.Sub(inst.orphanAt) >= e.orphanWindow && now.Sub(inst.orphanedAt) >= e.orphanWindow {
+			}
+			inst.orphanSeenAt = now
+			inst.orphanSeenSent = obs.Timestamp
+			if now.Sub(inst.orphanAt) >= e.orphanWindow && now.Sub(inst.orphanedAt) >= e.orphanWindow {
 				// Emit orphan_standby at most once per orphanWindow, and keep
 				// reporting the age of the *whole* orphan episode.
 				//
@@ -333,14 +388,68 @@ func (e *Engine) apply(obs Observation) []Event {
 					Payload:    map[string]any{"duration_seconds": now.Sub(inst.orphanAt).Seconds()},
 				})
 			}
+		} else {
+			// An observation without that evidence is one cycle without it. The
+			// server drops an edge whose address stops resolving for a cycle or
+			// two, and a single such cycle must not restart the clock. Two in a row,
+			// with a whole window gone since the last evidence, mean the orphan is
+			// over, so the next one is dated from its own start and not from this.
+			inst.quietCycles++
+			if e.orphanGapEnds(inst, now, obs.Timestamp) {
+				inst.orphanAt = time.Time{}
+				inst.orphanedAt = time.Time{}
+			}
 		}
 	}
 
-	// Detect split-brain: 2+ primaries in same cluster within 30s of each other
-	// (unless a failover just happened).
+	if obs.Role == pgtype.RoleUnknown {
+		// Unknown is no evidence either way: the agent reports it when its role
+		// cannot be read this cycle, so it is one cycle without evidence, as an
+		// edgeless observation is. Silence ends nothing: the engine cannot count
+		// cycles it never observed.
+		inst.quietCycles++
+		if e.orphanGapEnds(inst, now, obs.Timestamp) {
+			inst.orphanAt = time.Time{}
+			inst.orphanedAt = time.Time{}
+		}
+	}
+
+	if obs.Role == pgtype.RolePrimary {
+		// Only a standby can be orphaned, so a primary ends an episode that
+		// began while the instance was a standby.
+		inst.orphanAt = time.Time{}
+		inst.orphanedAt = time.Time{}
+	}
+
+	// Detect split-brain: 2+ primaries in one cluster, each observed since the
+	// last failover, and no failover within the last 30s.
 	events = append(events, e.detectSplitBrain(obs.ClusterID, now)...)
 
 	return events
+}
+
+// orphanGapEnds reports whether an observation without evidence ends the orphan
+// episode of a standby. It takes two such observations in a row, and a whole
+// orphan window since the last evidence on the server's clock. When the
+// observation and the last evidence both carry a sent time, the agent's clock
+// must show a whole window too. A backlog drained in one burst reaches the
+// server within milliseconds, so the server's clock alone would end the episode
+// while the agent's own cycles were seconds apart. A sent time that steps
+// backwards holds the episode open until the agent's clock has moved a window
+// past the evidence. One cycle without evidence never ends the episode, at any
+// push interval: an agent that alternates evidence and silence leaves exactly
+// one such cycle between two evidence cycles, however far apart they are. The
+// count is of observations, not of the gaps between them, so a short gap alone
+// cannot end an episode. A replayed envelope is one cycle the agent ran, so a
+// backlog without evidence counts one cycle per envelope.
+func (e *Engine) orphanGapEnds(inst *instanceState, now, sent time.Time) bool {
+	if inst.quietCycles < 2 || now.Sub(inst.orphanSeenAt) < e.orphanWindow {
+		return false
+	}
+	if !sent.IsZero() && !inst.orphanSeenSent.IsZero() && sent.Sub(inst.orphanSeenSent) < e.orphanWindow {
+		return false
+	}
+	return true
 }
 
 // detectSplitBrain checks for multiple primary instances in one cluster.
@@ -348,10 +457,17 @@ func (e *Engine) detectSplitBrain(clusterID pgtype.ClusterID, now time.Time) []E
 	var events []Event
 	var primaries []pgtype.InstanceID
 
-	for instID, inst := range e.instances {
-		if inst.clusterID == clusterID && inst.role == pgtype.RolePrimary {
+	// A primary counts only if it was observed since the cluster's last
+	// failover. The agent stops reporting an unreachable or demoted primary,
+	// so its row keeps role=primary until the failover window lapses; counting
+	// it would page a healthy single-primary cluster after every failover. A
+	// zero lastFailover admits every primary, and the promoted standby is
+	// observed at the failover instant, so it always counts.
+	lastFailover := e.lastFailoverTime[clusterID]
+	for instID := range e.clusterInstances[clusterID] {
+		if inst := e.instances[instID]; inst.role == pgtype.RolePrimary {
 			// Only count primaries seen recently (within failover window)
-			if now.Sub(inst.timestamp) < e.failoverWindow {
+			if now.Sub(inst.timestamp) < e.failoverWindow && !inst.timestamp.Before(lastFailover) {
 				primaries = append(primaries, instID)
 			}
 		}
@@ -360,7 +476,6 @@ func (e *Engine) detectSplitBrain(clusterID pgtype.ClusterID, now time.Time) []E
 	// Only emit split-brain if we have 2+ primaries
 	if len(primaries) >= 2 {
 		// Check if there was a recent failover to suppress transient split-brain
-		lastFailover := e.lastFailoverTime[clusterID]
 		if lastFailover.IsZero() || now.Sub(lastFailover) > 30*time.Second {
 			// Throttled per cluster: this runs on every observation of every
 			// instance, so an unresolved split brain used to write one event
@@ -411,6 +526,7 @@ func (e *Engine) Evict(before time.Time) int {
 	for id, st := range e.instances {
 		if st.timestamp.Before(before) {
 			delete(e.instances, id)
+			delete(e.clusterInstances[st.clusterID], id)
 			removed++
 			continue
 		}
@@ -434,6 +550,11 @@ func (e *Engine) Evict(before time.Time) int {
 	for cid := range e.lastSplitBrain {
 		if _, live := liveClusters[cid]; !live {
 			delete(e.lastSplitBrain, cid)
+		}
+	}
+	for cid := range e.clusterInstances {
+		if _, live := liveClusters[cid]; !live {
+			delete(e.clusterInstances, cid)
 		}
 	}
 	return removed

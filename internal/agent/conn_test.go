@@ -454,3 +454,19 @@ func TestManager_ForDatabaseKeepsAPoolBeingAcquired(t *testing.T) {
 	// Its own acquire runs out of time; a closed pool would fail it at once.
 	require.ErrorIs(t, <-firstErr, context.DeadlineExceeded)
 }
+
+// The agent id is the identity file's, so a target whose DSN no longer
+// fingerprints (a PGPORT that does not parse, set after the manager was built)
+// still reports it. Deriving it from the target's instance id returned the nil
+// id here, and the dispatcher then registered nothing under it.
+func TestManager_AgentIDIgnoresTheTargetDSN(t *testing.T) {
+	t.Setenv("PGLENS_IDENTITY_PATH", filepath.Join(t.TempDir(), "identity.json"))
+	mgr, err := NewManager(context.Background(), "hostless", "postgres:///postgres?connect_timeout=1", DefaultConnOptions(), nil)
+	require.NoError(t, err)
+	defer mgr.Close()
+
+	want := mgr.AgentID()
+	require.NotEqual(t, uuid.Nil, want)
+	t.Setenv("PGPORT", "not-a-port")
+	require.Equal(t, want, mgr.AgentID())
+}

@@ -85,8 +85,6 @@ func TestFingerprint_Errors(t *testing.T) {
 	require.Error(t, err)
 	_, err = identity.Fingerprint("mysql://u@h/db")
 	require.Error(t, err)
-	_, err = identity.Fingerprint("postgres:///db")
-	require.Error(t, err)
 	_, err = identity.Fingerprint("not a dsn")
 	require.Error(t, err)
 }

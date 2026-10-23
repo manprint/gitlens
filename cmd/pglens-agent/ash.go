@@ -48,12 +48,15 @@ func startASH(ctx context.Context, mgr *agent.Manager, targetName string, cfg ag
 			fmt.Fprintf(os.Stderr, "warning: ash: invalid checks.ash.interval %q for %s, using the 1s default: %v\n", cfg.Interval, targetName, err)
 		}
 	}
+	ticks := &ashTicks{agg: agg}
 	sampler.SetTickCallback(func(success bool) {
-		if success {
-			agg.TickSucceeded()
-		} else {
-			agg.TickFailed()
+		// The sampler sets its error before it calls back, so this is the
+		// error of this tick and not of one that came after it.
+		var err error
+		if !success {
+			err = sampler.LastError()
 		}
+		ticks.tick(success, err)
 	})
 
 	if err := sampler.Start(ctx); err != nil {
@@ -66,22 +69,31 @@ func startASH(ctx context.Context, mgr *agent.Manager, targetName string, cfg ag
 	flushTicker := clk.NewTicker(ashWindow)
 	go func() {
 		defer flushTicker.Stop()
+		// failing is only for logging: a line when sampling stops succeeding
+		// and another when it resumes, not one per failed tick.
+		failing := false
 		for {
 			select {
 			case <-flushCtx.Done():
 				return
 			case <-flushTicker.C():
-				w := agg.Flush(clk.Now())
-				metrics := ashWindowToMetrics(w)
-				if len(metrics) == 0 {
+				now := clk.Now()
+				w, lastErr := ticks.flush(now)
+				if w.Ticks == 0 && w.FailedTicks > 0 {
+					if !failing {
+						fmt.Fprintf(os.Stderr, "warning: ash: sampling failed for %s: %v\n", targetName, lastErr)
+					}
+					failing = true
+				} else if w.Ticks > 0 && failing {
+					fmt.Fprintf(os.Stderr, "ash: sampling recovered for %s\n", targetName)
+					failing = false
+				}
+				res, ok := ashWindowResult(w, now, lastErr)
+				if !ok {
 					continue
 				}
 				mu.Lock()
-				pending[targetName] = append(pending[targetName], wire.Result{
-					Check:   "ash",
-					TS:      clk.Now(),
-					Metrics: metrics,
-				})
+				pending[targetName] = append(pending[targetName], res)
 				mu.Unlock()
 			}
 		}
@@ -100,6 +112,39 @@ func startASH(ctx context.Context, mgr *agent.Manager, targetName string, cfg ag
 		})
 	}
 	return stop, true
+}
+
+// ashTicks counts a target's sampling ticks into its aggregator and keeps the
+// error of the latest failed tick. A window reports that error, so the error
+// has to be taken with the tick and closed with the window, under one lock: read
+// from the sampler at flush time, it could be the error of a tick of the next
+// window, or nil after a successful one.
+type ashTicks struct {
+	mu      sync.Mutex
+	agg     *ash.Aggregator
+	lastErr error
+}
+
+func (t *ashTicks) tick(success bool, err error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if success {
+		t.agg.TickSucceeded()
+		return
+	}
+	t.agg.TickFailed()
+	t.lastErr = err
+}
+
+// flush closes the window and returns it with the error of its latest failed
+// tick, which is nil when no tick of the window failed.
+func (t *ashTicks) flush(now time.Time) (ash.Window, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	w := t.agg.Flush(now)
+	err := t.lastErr
+	t.lastErr = nil
+	return w, err
 }
 
 // ashReconnectBackoff spaces reconnection attempts to a target that is down,
@@ -134,7 +179,9 @@ type ashConn struct {
 	// when Close runs (Sampler.Stop does not wait for it), and such a tick
 	// must not dial again: the connection it takes would never be released,
 	// and the manager's pool cannot close while it is held.
-	closed bool
+	closed        bool
+	warnedHidden  bool // the hidden-sessions warning has been printed for this target
+	loggedQueryID bool // the compute_query_id setting has been logged for this target
 }
 
 func (c *ashConn) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
@@ -170,8 +217,47 @@ func (c *ashConn) connectLocked() error {
 		conn.Release()
 		return err
 	}
+	c.warnIfSessionsHidden(ctx, conn)
+	c.logQueryIDSetting(ctx, conn)
 	c.conn = conn
 	return nil
+}
+
+// warnIfSessionsHidden says once per target when its role cannot see other
+// users' sessions. Their load is then missing from every sample, and the
+// samples read as an idle instance; nothing else would report it.
+func (c *ashConn) warnIfSessionsHidden(ctx context.Context, conn *pgxpool.Conn) {
+	if c.warnedHidden {
+		return
+	}
+	visible, err := ash.SessionsVisible(ctx, conn)
+	if err != nil || visible {
+		return
+	}
+	c.warnedHidden = true
+	fmt.Fprintf(os.Stderr, "warning: ash: the role of %s cannot see other users' sessions (grant pg_monitor or pg_read_all_stats); their activity is not sampled\n", c.mgr.TargetName())
+}
+
+// logQueryIDSetting says once per target which compute_query_id setting the
+// server runs with. A sample has no queryid whenever that setting leaves query
+// IDs unset, so the logged value is what explains a sample without one.
+func (c *ashConn) logQueryIDSetting(ctx context.Context, conn *pgxpool.Conn) {
+	if c.loggedQueryID {
+		return
+	}
+	setting, err := ash.ComputeQueryIDSetting(ctx, conn)
+	if err != nil {
+		return
+	}
+	c.loggedQueryID = true
+	note := ""
+	switch setting {
+	case "off":
+		note = "; samples carry no queryid"
+	case "auto":
+		note = "; samples carry a queryid only while a loaded module such as pg_stat_statements requests one"
+	}
+	fmt.Fprintf(os.Stderr, "ash: compute_query_id = %s for %s%s\n", setting, c.mgr.TargetName(), note)
 }
 
 // Close returns the connection to the pool and refuses every later Query.
@@ -185,13 +271,48 @@ func (c *ashConn) Close() {
 	}
 }
 
+// ashWindowResult turns one closed window into the wire.Result it adds to the
+// envelope; ok is false when the window has nothing to report. A window where
+// every tick failed has neither samples nor ticks. Left out, it would look like
+// an idle instance, or like no agent at all, so it is reported as a check error
+// that carries the error of the last tick.
+func ashWindowResult(w ash.Window, now time.Time, lastErr error) (res wire.Result, ok bool) {
+	if metrics := ashWindowToMetrics(w); len(metrics) > 0 {
+		return wire.Result{Check: "ash", TS: now, Metrics: metrics}, true
+	}
+	if w.FailedTicks == 0 {
+		return wire.Result{}, false
+	}
+	msg := fmt.Sprintf("ash: none of the %d sampling ticks in the window succeeded", w.FailedTicks)
+	if lastErr != nil {
+		msg += ": " + lastErr.Error()
+	}
+	return wire.Result{Check: "ash", TS: now, Error: msg}, true
+}
+
 // ashWindowToMetrics converts one closed ash.Window into the wire.Metric
 // shape internal/server/pipeline.go's buildASHRow already parses: one
 // "ash_samples" gauge per bucket, labeled with the bucket's key plus the
 // window's own ticks/seconds for the honest samples/ticks average.
+//
+// A window that ticked with no sampled session still yields one zero-count
+// record carrying its ticks. The server counts those ticks in the denominator,
+// so an idle stretch reads as zero active sessions rather than as no data. A
+// window where every tick failed yields nothing: it stays a gap.
 func ashWindowToMetrics(w ash.Window) []wire.Metric {
 	if len(w.Buckets) == 0 {
-		return nil
+		if w.Ticks == 0 {
+			return nil
+		}
+		return []wire.Metric{{
+			Name:  "ash_samples",
+			Value: 0,
+			Kind:  string(pgtype.KindGauge),
+			Labels: map[string]string{
+				"window_seconds": strconv.Itoa(int(ashWindow / time.Second)),
+				"window_ticks":   strconv.Itoa(w.Ticks),
+			},
+		}}
 	}
 	metrics := make([]wire.Metric, 0, len(w.Buckets))
 	for _, b := range w.Buckets {

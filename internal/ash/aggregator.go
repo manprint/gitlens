@@ -38,8 +38,12 @@ type Bucket struct {
 type Window struct {
 	Start, End time.Time
 	Ticks      int // sampling ticks that actually succeeded
-	Buckets    []Bucket
-	Truncated  bool
+	// FailedTicks counts the ticks that timed out or errored. It is kept apart
+	// from Ticks, which is the denominator, so a window whose every tick failed
+	// can be told from one where nothing was running.
+	FailedTicks int
+	Buckets     []Bucket
+	Truncated   bool
 }
 
 // Aggregator folds 1-second samples into fixed-length windows, capping
@@ -55,6 +59,7 @@ type Aggregator struct {
 	started bool
 	counts  map[Key]int
 	ticks   int
+	failed  int
 }
 
 // New creates an Aggregator that closes a window every window duration and
@@ -97,6 +102,7 @@ func (a *Aggregator) TickFailed() {
 	// A failed tick is still a tick attempt for window bookkeeping purposes,
 	// but per phase_08.md 7.2 the denominator is ticks that actually
 	// happened (succeeded); a failed tick therefore contributes 0 to Ticks.
+	a.failed++
 }
 
 // TickSucceeded records that a sampling tick completed successfully, whether
@@ -135,11 +141,12 @@ func (a *Aggregator) Flush(now time.Time) Window {
 		start = now
 	}
 
-	w := Window{Start: start, End: now, Ticks: a.ticks}
+	w := Window{Start: start, End: now, Ticks: a.ticks, FailedTicks: a.failed}
 	w.Buckets, w.Truncated = capConserved(a.counts, a.maxKeys)
 
 	a.counts = make(map[Key]int)
 	a.ticks = 0
+	a.failed = 0
 	a.start = now
 	a.started = true
 

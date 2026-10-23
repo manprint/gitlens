@@ -651,11 +651,11 @@ func (m *Manager) refreshCapabilities(ctx context.Context, conn capabilityConn) 
 // dispatcher a nil agent id (commands disabled until restart) and registered
 // every unreachable target under the zero instance id.
 func (m *Manager) AgentID() uuid.UUID {
-	_, agentID, err := m.localIdentity()
+	store, err := identityStore()
 	if err != nil {
 		return uuid.Nil
 	}
-	return agentID
+	return store.AgentID()
 }
 
 func (m *Manager) InstanceID() pgtype.InstanceID {
@@ -673,11 +673,7 @@ func (m *Manager) localIdentity() (pgtype.InstanceID, uuid.UUID, error) {
 	if err != nil {
 		return pgtype.InstanceID{}, uuid.Nil, fmt.Errorf("open identity store: %w", err)
 	}
-	fingerprint, err := identity.Fingerprint(m.target.dsn)
-	if err != nil {
-		return pgtype.InstanceID{}, uuid.Nil, fmt.Errorf("fingerprint DSN: %w", err)
-	}
-	instanceID, _, err := store.InstanceID(fingerprint)
+	instanceID, _, err := store.InstanceIDForDSN(m.target.dsn)
 	if err != nil {
 		return pgtype.InstanceID{}, uuid.Nil, fmt.Errorf("get instance id: %w", err)
 	}

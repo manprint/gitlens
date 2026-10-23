@@ -404,6 +404,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 			ClusterID:  cid,
 			Role:       pgtype.Role(role),
 			PriorRole:  pgtype.Role(priorRole),
+			Timestamp:  env.SentAt,
 			Edges:      topoEdges,
 		})
 		undos = append(undos, undoTopo)

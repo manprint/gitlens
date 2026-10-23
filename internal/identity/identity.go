@@ -79,19 +79,59 @@ func (s *Store) AgentID() uuid.UUID {
 // persisting a new one on first sight. created reports whether it was
 // allocated by this call.
 func (s *Store) InstanceID(fingerprint string) (uuid.UUID, bool, error) {
+	return s.instanceID(fingerprint, "")
+}
+
+// InstanceIDForDSN returns the stable id of the server a DSN names, as
+// InstanceID does for the DSN's fingerprint. An id recorded under the
+// fingerprint the DSN had before its query password left the identity moves to
+// the current fingerprint, and the old entry is dropped. The server keeps its
+// history across the upgrade, and no hash over a password stays in the file.
+func (s *Store) InstanceIDForDSN(dsn string) (uuid.UUID, bool, error) {
+	fingerprint, err := Fingerprint(dsn)
+	if err != nil {
+		return uuid.Nil, false, fmt.Errorf("fingerprint DSN: %w", err)
+	}
+	return s.instanceID(fingerprint, legacyFingerprint(dsn))
+}
+
+// instanceID is InstanceID with an optional legacy fingerprint, which is "" when
+// there is none. Its entry, when present, moves to fingerprint and is removed.
+func (s *Store) instanceID(fingerprint, legacy string) (uuid.UUID, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if id, ok := s.f.Instances[fingerprint]; ok {
+	id, known := s.f.Instances[fingerprint]
+	var moved uuid.UUID
+	hasLegacy := false
+	if legacy != "" {
+		moved, hasLegacy = s.f.Instances[legacy]
+	}
+	if known && !hasLegacy {
 		return id, false, nil
 	}
-	id := uuid.New()
+	created := false
+	switch {
+	case !known && hasLegacy:
+		id = moved
+	case !known:
+		id = uuid.New()
+		created = true
+	}
 	s.f.Instances[fingerprint] = id
+	if hasLegacy {
+		delete(s.f.Instances, legacy)
+	}
 	if err := s.persistLocked(); err != nil {
 		// Rollback map on failure
-		delete(s.f.Instances, fingerprint)
+		if !known {
+			delete(s.f.Instances, fingerprint)
+		}
+		if hasLegacy {
+			s.f.Instances[legacy] = moved
+		}
 		return uuid.Nil, false, err
 	}
-	return id, true, nil
+	return id, created, nil
 }
 
 func (s *Store) persist() error {

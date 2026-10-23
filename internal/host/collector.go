@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/shirou/gopsutil/v4/common"
 	"github.com/shirou/gopsutil/v4/cpu"
@@ -30,12 +31,14 @@ type Sample struct {
 // Collector reads host metrics using gopsutil's context-scoped path overrides.
 type Collector struct {
 	procPath, sysPath string
+	now               func() time.Time // overridable in tests
 	mu                sync.Mutex
 	previous          *cpu.TimesStat
+	cgroupCPU         *cgroupCPUReading // last container CPU reading, nil before the first
 }
 
 func NewCollector(procPath, sysPath string) *Collector {
-	return &Collector{procPath: procPath, sysPath: sysPath}
+	return &Collector{procPath: procPath, sysPath: sysPath, now: time.Now}
 }
 
 func (c *Collector) context(ctx context.Context) context.Context {
@@ -75,14 +78,12 @@ func (c *Collector) Collect(ctx context.Context, dataDir string) (Sample, error)
 			old := c.previous.User + c.previous.System + c.previous.Idle + c.previous.Nice + c.previous.Iowait + c.previous.Irq + c.previous.Softirq + c.previous.Steal
 			active := total - times[0].Idle - times[0].Iowait - old + c.previous.Idle + c.previous.Iowait
 			elapsed := total - old
+			// No ticks elapsed, or the counters went backwards, measures nothing.
+			// The ratio stays unknown rather than reading as an idle host, and
+			// the next sample is measured from this one.
 			if elapsed > 0 {
 				ratio := active / elapsed
 				s.CPUUsedRatio = ptr(ratio)
-			} else {
-				// A repeated fixture or a counter that did not advance is a
-				// measurable idle interval after the first sample.
-				zero := 0.0
-				s.CPUUsedRatio = &zero
 			}
 		}
 		c.previous = &times[0]
