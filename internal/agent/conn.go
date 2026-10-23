@@ -761,9 +761,8 @@ func (m *Manager) Role() pgtype.Role {
 // found live building SYS-REPL-001 (the plan's own acceptance test): a real
 // `pg_ctl promote` never showed up anywhere, because Role() only ever
 // queries the database once, on the very first call, then serves the same
-// cached value forever. This does not re-evaluate which checks are
-// scheduled (addScheduleEntries still runs once at startup — a real,
-// separate, larger gap, not fixed this session), but it does keep the
+// cached value forever. The checks are re-evaluated by the schedule reconcile
+// (cmd/pglens-agent/schedule.go, reconcile), not by this call. This keeps the
 // pushed wire.Instance.Role current, which is what the server's topology
 // engine (internal/server/pipeline.go) needs to ever detect a failover.
 func (m *Manager) RefreshRole(ctx context.Context) error {
