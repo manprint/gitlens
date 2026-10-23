@@ -63,6 +63,26 @@ func TestWorkflows_RemoteActionsArePinnedToCommits(t *testing.T) {
 	}
 }
 
+// A commit pin says nothing about its release, so the comment after it names
+// the release the commit was taken from: a full version, not the major tag,
+// which a reader cannot resolve to a commit. Local reusable workflows are not
+// pinned and are skipped.
+var releaseComment = regexp.MustCompile(`uses: \S+@[0-9a-f]{40} # v\d+\.\d+\.\d+$`)
+
+func TestWorkflows_PinsNameTheirRelease(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join("..", ".github", "workflows", "*.yml"))
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+	for _, file := range files {
+		for _, line := range strings.Split(string(readFile(t, file)), "\n") {
+			if !strings.Contains(line, "uses: ") || strings.Contains(line, "uses: ./") || !strings.Contains(line, "@") {
+				continue
+			}
+			require.Regexp(t, releaseComment, line, "%s: pin does not name its release", file)
+		}
+	}
+}
+
 // A write scope granted to every job lets any job write, and a job that runs
 // third-party actions with contents: write could be used to change a release.
 // The job that holds contents: write runs no action at all.
