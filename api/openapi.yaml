@@ -281,7 +281,13 @@ components:
       required: [statements, truncated, comparable_scope]
       properties:
         statements: { type: array, items: { $ref: '#/components/schemas/Statement' } }
-        truncated: { $ref: '#/components/schemas/Truncated' }
+        truncated:
+          allOf: [{ $ref: '#/components/schemas/Truncated' }]
+          description: >-
+            True when a statements check was partial during the window. The flag
+            covers the whole instance, not one database. Only a partial that is
+            still in progress is kept, so a partial that has ended is not
+            reported, even when it fell inside the window.
         comparable_scope: { type: string, enum: [cluster] }
         disabled:
           type: boolean

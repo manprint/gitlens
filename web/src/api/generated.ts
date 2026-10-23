@@ -912,6 +912,7 @@ export interface components {
         };
         StatementsResponse: {
             statements: components["schemas"]["Statement"][];
+            /** @description True when a statements check was partial during the window. The flag covers the whole instance, not one database. Only a partial that is still in progress is kept, so a partial that has ended is not reported, even when it fell inside the window. */
             truncated: components["schemas"]["Truncated"];
             /** @enum {string} */
             comparable_scope: "cluster";
