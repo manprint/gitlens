@@ -675,13 +675,24 @@ Il parsing dell'esposizione e le asserzioni vivono in `test/harness/metrics.go`,
 esercitati soltanto dentro uno stack compose.
 
 **Il budget I-8 è 2000 serie per istanza.** Conta le serie counter distinte che
-l'istanza riporta a fine scenario. Il check `stat_statements` tiene al massimo
-200 queryid per scope (istanza × database) e ogni queryid emette sette serie
-counter: 1400 serie per database monitorato, che è il termine dominante di
-`SYS-LOAD-008`. Il run live registrato di quello scenario ha misurato 1256 serie,
-il 63% del budget. Il budget resta a 2000 perché il termine dominante è limitato
-per costruzione; la misura è di un solo run, e un run che superi il budget
-fallisce I-8 come deve.
+l'istanza riporta nell'envelope più recente (`currentSeries` in
+`internal/server/pipeline.go`). È un tetto misurato su questi stack, non un
+limite che il codice garantisce. Per ogni scope (istanza × database) i check
+tengono al massimo 200 chiavi, e ogni chiave emette: `stat_statements` sette
+serie counter (1400), `table_stats` otto (1600), `index_stats` cinque (1000);
+`database_stats` ne emette sette per database. Al tetto, un solo database pesa
+quindi 4007 serie, prima dei counter a livello di istanza. `SYS-LOAD-008` gira
+su uno stack con un solo database connettibile (`postgres`: la discovery esclude
+i template e lo scenario non ne crea altri); lì il run del 2026-10-23 ha
+misurato 1256 serie, il 63% del budget. È una misura di quello stack, non un
+limite. Il run completo del 2026-08-31 ha fallito lo stesso scenario con 2552
+serie, prima dell'alzamento del margine di sanità in `66548ad`
+(`docs/plans/003_plan-Frontend/STATE.md`). Il gauge di allora contava lo stato
+trattenuto dal delta engine, che `fa6de00` ha sostituito con le serie
+dell'envelope corrente: quel valore non è confrontabile, e la sua causa non è
+registrata. Con due database ai tetti i termini per database arrivano a 8014,
+quindi il budget per istanza non regge su uno stack multi-database. Alzarlo o
+abbassare i tetti è una decisione da prendere su misure di uno stack più grande.
 
 `AssertConnectionCeiling` (I-6) resta una chiamata esplicita, perché è uno
 snapshot puntuale di `pg_stat_activity`: ha senso solo mentre il carico è

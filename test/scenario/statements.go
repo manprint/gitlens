@@ -96,15 +96,23 @@ func init() {
 			// I-8 (harness.DefaultMetricBudget), the one budget the suite has;
 			// a bound kept in this scenario would only disagree with it.
 			//
-			// The stat_statements check keeps at most MaxKeys (200) queryids per
-			// (instance, database) scope, and each kept queryid emits seven
-			// counter series, so that check alone is bounded at 1400 series per
-			// monitored database. This scenario's stack creates no database of
-			// its own, so one database scope is expected. The live run of this
-			// scenario on fix/tests-docs measured 1256 series at the end of the
-			// workload, 63% of I-8's 2000. Earlier figures of 1857 to 2552 in
-			// this comment were not reproduced by that run, and no recorded run
-			// backs them, so they are withdrawn.
+			// The 2000 budget is a ceiling measured on this stack, not one the
+			// code guarantees. Each (instance, database) scope adds up to 1400
+			// series from stat_statements (200 queryids at seven counters each),
+			// 1600 from table_stats (200 tables at eight) and 1000 from
+			// index_stats (200 indexes at five), plus seven from database_stats:
+			// 4007 at the caps, before the instance-level counters. This stack
+			// has one connectable database, "postgres", because discovery skips
+			// the templates and this scenario creates none, so only one set of
+			// those terms counts. The measured total, 1256 series on the run of
+			// 2026-10-23 (63% of the budget), is evidence for this stack, not a
+			// bound. The 2552 of the 2026-08-31 full run
+			// (docs/plans/003_plan-Frontend/STATE.md) came from a build whose
+			// gauge counted the delta engine's retained state, which fa6de00
+			// replaced with the current envelope's series. The cause of that
+			// count is not recorded, so this comment does not rely on it. With
+			// two databases at the caps the per-database terms reach 8014, so
+			// the per-instance budget does not hold on a multi-database stack.
 			e.AssertInvariants(e.T)
 			return nil
 		},
