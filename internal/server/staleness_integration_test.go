@@ -262,6 +262,96 @@ func TestINTSTALE007_SlotEventWrittenAgainAfterFailure(t *testing.T) {
 	require.Equal(t, 1, countEvents(), "a stored slot_inactive is not written again")
 }
 
+// insertStaleInstance seeds one standby with an agent and its cluster, and
+// reports its last_seen as lastSeenAgo before now.
+func insertStaleInstance(t *testing.T, pool *pgxpool.Pool, cid int64, iid uuid.UUID, lastSeenAgo string) {
+	t.Helper()
+	ctx := context.Background()
+	agent := uuid.New()
+	_, err := pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual') ON CONFLICT DO NOTHING`, cid)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, fmt.Sprintf(`INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen) VALUES ($1,'default',$2,$3,'10.0.0.9',5432,170000,'standby','T0', now() - interval '%s')`, lastSeenAgo), iid, cid, agent)
+	require.NoError(t, err)
+}
+
+func countEventsFor(t *testing.T, pool *pgxpool.Pool, typ string, iid uuid.UUID) int {
+	t.Helper()
+	var n int
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*) FROM events WHERE type=$1 AND instance_id=$2`, typ, iid).Scan(&n))
+	return n
+}
+
+// TestINTSTALE011_NonLeaderReportsCurrentGauges: a replica that does not hold
+// the lock reports pglens_up from the database as well. A former leader's
+// values are replaced, and a replica that never led is not silent.
+func TestINTSTALE011_NonLeaderReportsCurrentGauges(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	stale := uuid.New()
+	insertStaleInstance(t, pool, store.ToDB(pgtype.ClusterID(9)), stale, "5 minutes")
+
+	// Another session holds the staleness lock, so this replica is not the leader.
+	holder := mustAcquire(t, pool)
+	var locked bool
+	require.NoError(t, holder.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtext('pglens:staleness'))`).Scan(&locked))
+	require.True(t, locked)
+	t.Cleanup(func() {
+		_, _ = holder.Exec(context.Background(), `SELECT pg_advisory_unlock(hashtext('pglens:staleness'))`)
+	})
+
+	// The value a former leader would still hold for an instance that is down now.
+	pglensUpGauge.Set(stale.String(), 1)
+
+	s := NewStaleness(pool, clock.NewFake(time.Now()))
+	// A non-leader keeps its pinned session, so it is stopped to return it.
+	t.Cleanup(s.Stop)
+	require.NoError(t, s.Evaluate(ctx))
+	require.False(t, s.hasLock)
+	require.Equal(t, 0.0, pglensUpGauge.Get(stale.String()), "a replica without the lock must report the instance's current state")
+	require.Zero(t, countEventsFor(t, pool, "agent_down", stale), "a replica without the lock emits no events")
+}
+
+// TestINTSTALE011_LeaderLosingItsSessionGivesUpLeadership: a leader whose
+// session ends (pg_terminate_backend, a restart, a dropped network) gives up
+// the lock at its next evaluation. It must not emit next to the replica that
+// took the lock, so an outage is recorded once.
+func TestINTSTALE011_LeaderLosingItsSessionGivesUpLeadership(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	iid := uuid.New()
+	insertStaleInstance(t, pool, store.ToDB(pgtype.ClusterID(10)), iid, "0 seconds")
+
+	a := NewStaleness(pool, clock.NewFake(time.Now()))
+	t.Cleanup(a.Stop)
+	require.NoError(t, a.Evaluate(ctx))
+	require.True(t, a.hasLock, "the first replica takes the lock")
+	var pid int
+	require.NoError(t, a.conn.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid))
+	var terminated bool
+	require.NoError(t, pool.QueryRow(ctx, `SELECT pg_terminate_backend($1)`, pid).Scan(&terminated))
+	require.True(t, terminated)
+
+	_, err := pool.Exec(ctx, `UPDATE instances SET last_seen = now() - interval '5 minutes' WHERE instance_id=$1`, iid)
+	require.NoError(t, err)
+	b := NewStaleness(pool, clock.NewFake(time.Now()))
+	t.Cleanup(b.Stop)
+	// The server ends the terminated session asynchronously, so the lock can
+	// be taken only after a short wait.
+	for deadline := time.Now().Add(5 * time.Second); !b.hasLock; time.Sleep(50 * time.Millisecond) {
+		require.NoError(t, b.Evaluate(ctx))
+		require.True(t, time.Now().Before(deadline), "the second replica never took the freed lock")
+	}
+	require.Equal(t, 1, countEventsFor(t, pool, "agent_down", iid))
+
+	require.NoError(t, a.Evaluate(ctx))
+	require.False(t, a.hasLock, "a replica whose session ended must give up leadership")
+	require.Equal(t, 1, countEventsFor(t, pool, "agent_down", iid), "the outage is recorded once")
+}
+
 func TestStaleness_EmitEvent_MarshalError_WithPool(t *testing.T) {
 	pool := getSharedPool(t)
 	truncateAll(t, pool)

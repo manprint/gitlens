@@ -338,11 +338,19 @@ func (s *Staleness) ensureLeader(ctx context.Context) error {
 	// kept emitting staleness events believing it was the leader, while
 	// another server legitimately took the freed lock. Two leaders means
 	// duplicate agent_down/instance_unreachable events.
+	//
+	// IsClosed turns true only after something has failed on the session, and a
+	// leader does no I/O on its pinned session while it holds the lock. So the
+	// session is pinged every cycle: one that does not answer no longer holds the
+	// lock, and the leadership goes with it.
 	if s.conn != nil && s.conn.Conn().IsClosed() {
 		s.releaseLeaderConn()
 	}
 	if s.hasLock && s.conn != nil {
-		return nil
+		if err := s.conn.Ping(ctx); err == nil {
+			return nil
+		}
+		s.releaseLeaderConn()
 	}
 	if s.conn == nil {
 		conn, err := s.pool.Acquire(ctx)
@@ -370,8 +378,15 @@ func (s *Staleness) ensureLeader(ctx context.Context) error {
 
 // releaseLeaderConn drops the lock-holding connection and the leadership it
 // carried. Caller must hold s.mu.
+//
+// The session is closed, not returned to the pool: a session that may still
+// hold the advisory lock would keep it for whoever borrowed the connection
+// next, and this replica has given up the lock.
 func (s *Staleness) releaseLeaderConn() {
 	if s.conn != nil {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = s.conn.Conn().Close(closeCtx)
+		cancel()
 		s.conn.Release()
 		s.conn = nil
 	}
@@ -479,9 +494,6 @@ func (s *Staleness) Evaluate(ctx context.Context) error {
 	s.mu.Lock()
 	hasLock := s.hasLock
 	s.mu.Unlock()
-	if !hasLock {
-		return nil
-	}
 
 	now := s.clock.Now()
 	threshold := s.threshold()
@@ -536,16 +548,27 @@ func (s *Staleness) Evaluate(ctx context.Context) error {
 		return fmt.Errorf("iterate instances: %w", rowsErr)
 	}
 
-	// Update gauges and emit transitions under lock to ensure once-per-transition.
+	// Every replica reports the gauges from the database, not only the leader. A
+	// former leader would otherwise keep the values of its last turn for
+	// instances that have gone down since, and a replica that never led would
+	// expose none. Only the leader emits events below.
+	for _, inst := range instances {
+		iidStr := inst.id.String()
+		up := isStaleUp(inst.lastSeen, now, threshold)
+		pglensUpGauge.Set(iidStr, boolToFloat(up))
+		pglensAgentLastSeenGauge.Set(iidStr, float64(inst.lastSeen.Unix()))
+	}
+	if !hasLock {
+		return nil
+	}
+
+	// Emit transitions under lock to ensure once-per-transition.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	for _, inst := range instances {
 		iidStr := inst.id.String()
 		up := isStaleUp(inst.lastSeen, now, threshold)
-
-		pglensUpGauge.Set(iidStr, boolToFloat(up))
-		pglensAgentLastSeenGauge.Set(iidStr, float64(inst.lastSeen.Unix()))
 
 		// A revoked agent stops pushing by design, so its silence is not an
 		// outage: it emits no agent_down or instance_unreachable, as the metric
