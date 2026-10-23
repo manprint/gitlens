@@ -204,3 +204,56 @@ func TestFlushEnvelopeBoundsAnUnreachableTarget(t *testing.T) {
 	flushEnvelope(ctx, []*agent.Manager{mgr}, &mu, pending, &edgeStates{byName: map[string]edgeState{}}, map[string]bool{}, map[string]map[string]bool{}, pusher)
 	require.Less(t, time.Since(began), 10*time.Second, "a flush waited longer than the stop grace for one unreachable target")
 }
+
+// TestFlushEnvelopeKeepsTheSkipsOfAnUnreachableTarget: a skip is queued once,
+// when the schedule is built, so a flush that cannot reach its target must put
+// it back rather than drop it. Otherwise the server never learns that the check
+// was skipped.
+func TestFlushEnvelopeKeepsTheSkipsOfAnUnreachableTarget(t *testing.T) {
+	t.Setenv("PGLENS_IDENTITY_PATH", filepath.Join(t.TempDir(), "identity.json"))
+	target := newHungTarget(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr, err := agent.NewManager(ctx, "hung", target.dsn, agent.DefaultConnOptions(), clock.System())
+	require.NoError(t, err)
+	t.Cleanup(mgr.Close)
+
+	buf, err := buffer.Open(filepath.Join(t.TempDir(), "buffer"), buffer.Options{MaxSize: 1 << 20, MaxAge: time.Hour, Clock: clock.System()})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = buf.Close() })
+	pusher := agent.NewPusher("http://127.0.0.1:1/", "token", clock.System())
+	pusher.SetBuffer(buf)
+
+	var mu sync.Mutex
+	pending := map[string][]wire.Result{"hung": {
+		{Check: "replication_streaming", TS: time.Now(), SkipReason: "role unknown not allowed"},
+		{Check: "probe", TS: time.Now(), Error: "dial timeout"},
+	}}
+	flushEnvelope(ctx, []*agent.Manager{mgr}, &mu, pending, &edgeStates{byName: map[string]edgeState{}}, map[string]bool{}, map[string]map[string]bool{}, pusher)
+
+	require.Len(t, pending["hung"], 1, "only the skip is kept; the error of this cycle is dropped")
+	require.Equal(t, "replication_streaming", pending["hung"][0].Check)
+	require.Equal(t, "role unknown not allowed", pending["hung"][0].SkipReason)
+}
+
+// TestRequeueSkips_KeepsTheNewerSkipPerCheck: a dead target's pending batch
+// stays bounded. A skip that pending already holds for a check is newer than the
+// one in the batch, and a check is kept once however many times it was skipped.
+func TestRequeueSkips_KeepsTheNewerSkipPerCheck(t *testing.T) {
+	var mu sync.Mutex
+	pending := map[string][]wire.Result{"hung": {
+		{Check: "replication_streaming", SkipReason: "role primary not allowed"},
+	}}
+	batch := []wire.Result{
+		{Check: "replication_streaming", SkipReason: "role unknown not allowed"},
+		{Check: "io", SkipReason: "requires PG >= 16.0, got 0.0"},
+		{Check: "io", SkipReason: "requires PG >= 16.0, got 0.0"},
+		{Check: "probe", Error: "dial timeout"},
+	}
+	requeueSkips(&mu, pending, "hung", batch)
+
+	require.Equal(t, []wire.Result{
+		{Check: "replication_streaming", SkipReason: "role primary not allowed"},
+		{Check: "io", SkipReason: "requires PG >= 16.0, got 0.0"},
+	}, pending["hung"])
+}

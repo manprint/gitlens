@@ -424,6 +424,11 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 		if err := mgr.RefreshRole(targetCtx); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: refresh role for %s: %v (target unreachable this cycle, omitting from envelope)\n", mgr.Database(), err)
 			cancel()
+			// A skip is queued once, when the schedule is built, and no later cycle
+			// queues it again. Keep it for the first cycle that reaches the target.
+			// The other results are the errors of a cycle with no live signal, and
+			// they are dropped as before.
+			requeueSkips(mu, pending, mgr.Database(), results)
 			continue
 		}
 		if err := mgr.RefreshCapabilities(targetCtx); err != nil {
@@ -465,6 +470,27 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 		cancel()
 	}
 	pusher.Queue(env)
+}
+
+// requeueSkips puts back the skip results of a batch that could not be sent, so
+// the next cycle that reaches target sends them. A skip that pending already
+// holds for the same check is newer than the batch's, so it is kept instead.
+func requeueSkips(mu *sync.Mutex, pending map[string][]wire.Result, target string, batch []wire.Result) {
+	mu.Lock()
+	defer mu.Unlock()
+	queued := map[string]bool{}
+	for _, r := range pending[target] {
+		if r.SkipReason != "" {
+			queued[r.Check] = true
+		}
+	}
+	for _, r := range batch {
+		if r.SkipReason == "" || queued[r.Check] {
+			continue
+		}
+		queued[r.Check] = true
+		pending[target] = append(pending[target], r)
+	}
 }
 
 // edgeState is the last actually-observed replication_receiver reading for
