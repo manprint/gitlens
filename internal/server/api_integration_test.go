@@ -381,3 +381,52 @@ func TestAPI_INT_API_002_MetricsQueryWithResetGap(t *testing.T) {
 }
 
 func contextBackground() context.Context { return context.Background() }
+
+// TestAPI_INT_API_003_ClusterHealthCountsLivePrimaries: a failed-over cluster
+// keeps the old primary row, which must not make it critical; two live primaries
+// must still read critical.
+func TestAPI_INT_API_003_ClusterHealthCountsLivePrimaries(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := contextBackground()
+	cidDB := store.ToDB(pgtype.ClusterID(333))
+	_, err := pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual')`, cidDB)
+	require.NoError(t, err)
+	addInstance := func(addr, role string, lastSeen time.Time) {
+		t.Helper()
+		agent := uuid.New()
+		_, err := pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+		require.NoError(t, err)
+		_, err = pool.Exec(ctx, `INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen) VALUES ($1,'default',$2,$3,$4,5432,170000,$5,'T0',$6)`, uuid.New(), cidDB, agent, addr, role, lastSeen)
+		require.NoError(t, err)
+	}
+	healthOf := func() []clusterResp {
+		t.Helper()
+		r := chi.NewRouter()
+		NewAPI(pool).RegisterRoutes(r)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/clusters", http.NoBody))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var resp []clusterResp
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		require.Len(t, resp, 1)
+		return resp
+	}
+
+	// Failover: the new primary is live, the old primary row was last seen an hour ago.
+	addInstance("10.0.1.1", "primary", time.Now().Add(-time.Hour))
+	addInstance("10.0.1.2", "primary", time.Now())
+	addInstance("10.0.1.3", "standby", time.Now())
+	resp := healthOf()
+	require.Equal(t, "degraded", resp[0].Health, "the stale former primary must not make the cluster critical")
+	require.Equal(t, 1, resp[0].StandbyCount)
+
+	// Split-brain: two live primaries are still critical.
+	truncateAll(t, pool)
+	_, err = pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual')`, cidDB)
+	require.NoError(t, err)
+	addInstance("10.0.2.1", "primary", time.Now())
+	addInstance("10.0.2.2", "primary", time.Now())
+	addInstance("10.0.2.3", "standby", time.Now())
+	require.Equal(t, "critical", healthOf()[0].Health, "two live primaries are split-brain")
+}

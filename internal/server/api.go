@@ -323,6 +323,7 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 		var primaryLastSeen time.Time
 		hasPrimary := false
 		primaryCount := 0
+		livePrimaryCount := 0
 		anyDown := false
 		standbyCount := 0
 		edgeSyncCount := 0
@@ -345,6 +346,9 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 			}
 			if role == "primary" {
 				primaryCount++
+				if up {
+					livePrimaryCount++
+				}
 			}
 			// Among (possibly multiple, in a split-brain) role="primary"
 			// rows, report the most recently-seen one — not simply the
@@ -477,6 +481,17 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Once a live primary exists, primary rows that have gone silent are not
+		// counted. A failover leaves the old row role='primary' indefinitely, and
+		// counting it kept a failed-over cluster critical. The fallback to every
+		// stored row keeps a cluster whose only primary is down degraded, as it
+		// has always read. The rule is not strict live-only counting: staleness
+		// waits three expected intervals before it stops counting a primary, and
+		// a card that gave up after the shorter up threshold would go critical
+		// first.
+		if livePrimaryCount > 0 {
+			primaryCount = livePrimaryCount
+		}
 		health := healthForCluster(primaryCount, anyDown, len(instances), maxReplayLag)
 		cr := clusterResp{
 			ClusterID:     cidStr,
