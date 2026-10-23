@@ -196,12 +196,26 @@ func TestActivityCheck_Scrape_Happy(t *testing.T) {
 			return pgconn.CommandTag{}, nil
 		},
 		queryFunc: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+			if !strings.Contains(sql, "max_xact_age") {
+				// The per-database, per-application and per-state groups are
+				// not part of this sample.
+				return &mockRows{}, nil
+			}
 			return &mockRows{
 				rows: []([]any){
 					{"active", "CPU", 5, 10.5, 0.0},
 					{"idle in transaction", "Lock", 2, 30.2, 25.5},
 				},
 			}, nil
+		},
+		queryRowFunc: func(ctx context.Context, sql string, args ...any) pgx.Row {
+			switch {
+			case strings.Contains(sql, "current_setting"):
+				return &mockRow{vals: []any{"100"}}
+			case strings.Contains(sql, "pg_prepared_xacts"):
+				return &mockRow{vals: []any{float64(0), float64(0)}}
+			}
+			return &mockRow{vals: []any{float64(0)}}
 		},
 	}
 

@@ -1,8 +1,12 @@
 package check
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 )
 
@@ -134,5 +138,50 @@ func TestActivity_WaitingRatioIgnoresIdleSessions(t *testing.T) {
 	}
 	if got := waitingRatio(rows[:1]); got != 0 {
 		t.Fatalf("waitingRatio with only idle sessions = %v, want 0", got)
+	}
+}
+
+// A sub-query that fails fails the scrape. Its value read as zero before, and
+// a zero frozen-XID age reads as a healthy cluster while the wraparound rule
+// has nothing to judge.
+func TestActivity_FailedSubQueryFailsTheScrape(t *testing.T) {
+	t.Parallel()
+	boom := errors.New("canceling statement due to statement timeout")
+	for _, tc := range []struct{ name, query, queryRow string }{
+		{"control", "", ""},
+		{"database counts", "SELECT COALESCE(datname, '')", ""},
+		{"application counts", "SELECT COALESCE(application_name, '')", ""},
+		{"state ages", "COALESCE(state, 'unknown'), COALESCE(max(", ""},
+		{"prepared transactions", "", "FROM pg_prepared_xacts"},
+		{"frozen XID age", "", "FROM pg_database"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			conn := &mockConn{
+				queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+					if tc.query != "" && strings.Contains(sql, tc.query) {
+						return nil, boom
+					}
+					return &mockRows{}, nil
+				},
+				queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+					switch {
+					case tc.queryRow != "" && strings.Contains(sql, tc.queryRow):
+						return &mockRow{err: boom}
+					case strings.Contains(sql, "pg_prepared_xacts"):
+						return &mockRow{vals: []any{float64(0), float64(0)}}
+					case strings.Contains(sql, "datfrozenxid"):
+						return &mockRow{vals: []any{float64(0)}}
+					}
+					return &mockRow{vals: []any{"100"}}
+				},
+			}
+			_, err := (&activityCheck{}).Scrape(context.Background(), maintenanceTarget(conn))
+			if tc.query == "" && tc.queryRow == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, boom)
+		})
 	}
 }

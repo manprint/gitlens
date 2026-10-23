@@ -70,13 +70,29 @@ GROUP BY 1, 2
 	// Get max_connections
 	var maxConnStr string
 	_ = conn.QueryRow(ctx, "SELECT current_setting('max_connections')").Scan(&maxConnStr)
-	databaseRows := queryActivityGroups(ctx, conn, `SELECT COALESCE(datname, ''), count(*)::float8 FROM pg_stat_activity WHERE backend_type='client backend' AND pid <> pg_backend_pid() GROUP BY 1`)
-	applicationRows := queryActivityGroups(ctx, conn, `SELECT COALESCE(application_name, ''), count(*)::float8 FROM pg_stat_activity WHERE backend_type='client backend' AND pid <> pg_backend_pid() GROUP BY 1`)
-	stateAgeRows := queryActivityGroups(ctx, conn, `SELECT COALESCE(state, 'unknown'), COALESCE(max(EXTRACT(epoch FROM now() - state_change)), 0) FROM pg_stat_activity WHERE backend_type='client backend' AND pid <> pg_backend_pid() GROUP BY 1`)
+	// A probe that fails must fail the scrape: a zero it leaves behind reads as
+	// a healthy value, and the wraparound and prepared-transaction rules would
+	// judge a number nobody read.
+	databaseRows, err := queryActivityGroups(ctx, conn, `SELECT COALESCE(datname, ''), count(*)::float8 FROM pg_stat_activity WHERE backend_type='client backend' AND pid <> pg_backend_pid() GROUP BY 1`)
+	if err != nil {
+		return Result{}, err
+	}
+	applicationRows, err := queryActivityGroups(ctx, conn, `SELECT COALESCE(application_name, ''), count(*)::float8 FROM pg_stat_activity WHERE backend_type='client backend' AND pid <> pg_backend_pid() GROUP BY 1`)
+	if err != nil {
+		return Result{}, err
+	}
+	stateAgeRows, err := queryActivityGroups(ctx, conn, `SELECT COALESCE(state, 'unknown'), COALESCE(max(EXTRACT(epoch FROM now() - state_change)), 0) FROM pg_stat_activity WHERE backend_type='client backend' AND pid <> pg_backend_pid() GROUP BY 1`)
+	if err != nil {
+		return Result{}, err
+	}
 	var prepared, oldestPrepared float64
-	_ = conn.QueryRow(ctx, `SELECT count(*)::float8, COALESCE(EXTRACT(epoch FROM now() - min(prepared)), 0)::float8 FROM pg_prepared_xacts`).Scan(&prepared, &oldestPrepared)
+	if err := conn.QueryRow(ctx, `SELECT count(*)::float8, COALESCE(EXTRACT(epoch FROM now() - min(prepared)), 0)::float8 FROM pg_prepared_xacts`).Scan(&prepared, &oldestPrepared); err != nil {
+		return Result{}, err
+	}
 	var frozenAge float64
-	_ = conn.QueryRow(ctx, `SELECT COALESCE(max(age(datfrozenxid)), 0)::float8 FROM pg_database`).Scan(&frozenAge)
+	if err := conn.QueryRow(ctx, `SELECT COALESCE(max(age(datfrozenxid)), 0)::float8 FROM pg_database`).Scan(&frozenAge); err != nil {
+		return Result{}, err
+	}
 	result := activityCheckResult(parsed, maxConnStr, c.byApplication, databaseRows, applicationRows, stateAgeRows, prepared, oldestPrepared, frozenAge)
 	result.Metrics = append(result.Metrics, pgtype.Metric{Name: "pg_backends_waiting_ratio", Value: waitingRatio(parsed), Kind: pgtype.KindGauge})
 	return result, nil
@@ -103,21 +119,25 @@ func waitingRatio(rows []activityRow) float64 {
 	return float64(waiting) / float64(active)
 }
 
-func queryActivityGroups(ctx context.Context, conn Conn, query string) []activityGroup {
+func queryActivityGroups(ctx context.Context, conn Conn, query string) ([]activityGroup, error) {
 	rows, err := conn.Query(ctx, query)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
 	var result []activityGroup
 	for rows.Next() {
 		var label string
 		var value float64
-		if err := rows.Scan(&label, &value); err == nil {
-			result = append(result, activityGroup{Label: label, Value: value})
+		if err := rows.Scan(&label, &value); err != nil {
+			return nil, err
 		}
+		result = append(result, activityGroup{Label: label, Value: value})
 	}
-	return result
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func buildActivityResult(rows []activityRow, maxConnStr string) Result {
