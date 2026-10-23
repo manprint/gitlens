@@ -176,10 +176,23 @@ func (e *Engine) mark(instanceID pgtype.InstanceID, clusterID pgtype.ClusterID) 
 // still holds what Apply wrote. The caller holds e.mu.
 func (e *Engine) revert(instanceID pgtype.InstanceID, clusterID pgtype.ClusterID, before, written topoMark) {
 	if live, ok := e.instances[instanceID]; ok && live == written.inst && sameInstanceState(*live, written.state) {
+		// The cluster index follows the instance, so it is put back with it. An
+		// instance left in the index without its state would be read as nil by
+		// the split-brain check.
+		if members := e.clusterInstances[written.state.clusterID]; members != nil {
+			delete(members, instanceID)
+			if len(members) == 0 {
+				delete(e.clusterInstances, written.state.clusterID)
+			}
+		}
 		if before.inst == nil {
 			delete(e.instances, instanceID)
 		} else {
 			*live = before.state
+			if e.clusterInstances[before.state.clusterID] == nil {
+				e.clusterInstances[before.state.clusterID] = make(map[pgtype.InstanceID]struct{})
+			}
+			e.clusterInstances[before.state.clusterID][instanceID] = struct{}{}
 		}
 	}
 	if e.lastPrimary[clusterID] == written.lastPrim {

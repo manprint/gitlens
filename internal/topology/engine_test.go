@@ -1329,6 +1329,48 @@ func TestEngine_UndoKeepsALaterQuietCycle(t *testing.T) {
 	}
 }
 
+// TestEngine_UndoTakesTheInstanceOutOfItsCluster — the split-brain check reads
+// a cluster's instances from the cluster index. An undo that dropped a new
+// instance's state but left it in the index made the next observation in that
+// cluster read a missing instance.
+func TestEngine_UndoTakesTheInstanceOutOfItsCluster(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+	cID := pgtype.ManualClusterID("cluster1")
+
+	_, undo := e.ApplyUndoable(Observation{InstanceID: uuid.New(), ClusterID: cID, Role: pgtype.RolePrimary})
+	undo()
+	if _, indexed := e.clusterInstances[cID]; indexed {
+		t.Fatalf("the undone instance is still indexed under its cluster: %v", e.clusterInstances[cID])
+	}
+	other := uuid.New()
+	e.Apply(Observation{InstanceID: other, ClusterID: cID, Role: pgtype.RolePrimary})
+	if got := e.clusterInstances[cID]; len(got) != 1 {
+		t.Fatalf("cluster index = %v, want only %v", got, other)
+	}
+}
+
+// TestEngine_UndoPutsTheInstanceBackInItsCluster — an undone observation that
+// moved an instance to another cluster leaves it indexed under the cluster it
+// had before, and nowhere else.
+func TestEngine_UndoPutsTheInstanceBackInItsCluster(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+	instID := uuid.New()
+	oldCluster, newCluster := pgtype.ManualClusterID("old"), pgtype.ManualClusterID("new")
+
+	e.Apply(Observation{InstanceID: instID, ClusterID: oldCluster, Role: pgtype.RoleStandby})
+	clk.Advance(time.Second)
+	_, undo := e.ApplyUndoable(Observation{InstanceID: instID, ClusterID: newCluster, Role: pgtype.RoleStandby})
+	undo()
+	if _, ok := e.clusterInstances[oldCluster][instID]; !ok {
+		t.Fatalf("the instance is not indexed under its cluster after the undo: %v", e.clusterInstances)
+	}
+	if _, ok := e.clusterInstances[newCluster]; ok {
+		t.Fatalf("the undone cluster still indexes the instance: %v", e.clusterInstances)
+	}
+}
+
 func TestEngine_ZeroSentTimeIsNeverARepeat(t *testing.T) {
 	clk := clock.NewFake(time.Unix(0, 0))
 	e := NewEngine(clk)
