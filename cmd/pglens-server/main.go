@@ -208,9 +208,10 @@ func runHealthcheck() int {
 // a bind to one address does not accept on loopback. Only an unspecified host
 // (empty, 0.0.0.0 or ::) falls back to 127.0.0.1, which such a bind accepts on.
 //
-// cmd/pglens-agent/main.go has the same function, and its TestHealthcheckURL
-// checks the same cases as this file's. The two binaries do not share a
-// package, so the copies change together.
+// cmd/pglens-agent/main.go has the same function. TestHealthcheckURL in
+// cmd/pglens-agent/main_test.go and in this package's main_test.go check the
+// same cases, and the two binaries do not share a package, so the copies change
+// together.
 func healthcheckURL(listen, path string) string {
 	host, port, err := net.SplitHostPort(listen)
 	if err != nil {
