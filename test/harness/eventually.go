@@ -8,7 +8,7 @@ import (
 // Eventually polls fn every 200ms until it returns nil or the timeout
 // elapses, then fails with the LAST error rather than a bare timeout — the
 // last error is the diagnosis.
-func Eventually(t *testing.T, timeout time.Duration, fn func() error) {
+func Eventually(t testing.TB, timeout time.Duration, fn func() error) {
 	t.Helper()
 	pollInterval := 200 * time.Millisecond
 	deadline := time.Now().Add(timeout)
@@ -35,7 +35,7 @@ func Eventually(t *testing.T, timeout time.Duration, fn func() error) {
 
 // Consistently asserts fn stays nil for the whole window. Used to prove a
 // NON-event, e.g. "no second agent_down was emitted".
-func Consistently(t *testing.T, window time.Duration, fn func() error) {
+func Consistently(t testing.TB, window time.Duration, fn func() error) {
 	t.Helper()
 	pollInterval := 200 * time.Millisecond
 	deadline := time.Now().Add(window)
