@@ -354,7 +354,10 @@ func TestINTSI03_LastSeenFollowsStoredData(t *testing.T) {
 	require.True(t, lastSeen().After(old.Add(30*time.Minute)), "stored samples refresh last_seen")
 }
 
-func TestInventory_RoleChange_EmitsEvent(t *testing.T) {
+// The inventory writes no role_change itself: the pipeline's topology step writes
+// it once per transition, in the transaction that stores the envelope. See
+// TestINTXE06_RoleChangeWrittenOnce for the two writers together.
+func TestInventory_RoleChange_NotWrittenByInventory(t *testing.T) {
 	pool := getTestPool(t)
 	truncateAll(t, pool)
 	inv := NewInventory(pool)
@@ -377,31 +380,57 @@ func TestInventory_RoleChange_EmitsEvent(t *testing.T) {
 	}
 	_, err = inv.Upsert(ctx, env2)
 	require.NoError(t, err)
+
+	var role string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT role FROM instances WHERE instance_id=$1`, iid).Scan(&role))
+	require.Equal(t, "standby", role, "the inventory keeps the instance's role current")
 	var ev int
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='role_change'`).Scan(&ev))
-	require.Equal(t, 1, ev)
-	// unknown -> primary should not emit? Only primary<->standby
-	iid2 := uuid.NewString()
-	cid2 := pgtype.ClusterID(77777).String()
-	env3 := wire.Envelope{
-		AgentID: uuid.NewString(),
-		Instances: []wire.Instance{
-			{InstanceID: iid2, ClusterID: cid2, ClusterIDSource: string(pgtype.IDSourceManual), Addr: "10.0.0.8", Port: 5432, Role: "unknown", PGVersion: 170000, PermTier: "T0"},
-		},
+	require.Zero(t, ev, "the inventory writes no role_change, the topology step does")
+}
+
+// TestINTXE06_RoleChangeWrittenOnce: a demotion is one role_change row, and a
+// promotion the topology engine reads as a failover is failover_detected with no
+// role_change. The inventory and the pipeline both see every envelope, and
+// neither may write a transition a second time.
+func TestINTXE06_RoleChangeWrittenOnce(t *testing.T) {
+	pool := getTestPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	clk := clock.NewFake(time.Now())
+	inv := NewInventory(pool)
+	p := NewPipeline(pool, clk)
+	cid := pgtype.ClusterID(60606).String()
+	oldPrimary, standby, agent := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	instance := func(id, role, addr string) wire.Instance {
+		return wire.Instance{InstanceID: id, ClusterID: cid, ClusterIDSource: string(pgtype.IDSourceManual), Addr: addr, Port: 5432, Role: role, PGVersion: 170000, PermTier: "T0"}
 	}
-	_, err = inv.Upsert(ctx, env3)
-	require.NoError(t, err)
-	env4 := wire.Envelope{
-		AgentID: uuid.NewString(),
-		Instances: []wire.Instance{
-			{InstanceID: iid2, ClusterID: cid2, ClusterIDSource: string(pgtype.IDSourceManual), Addr: "10.0.0.8", Port: 5432, Role: "primary", PGVersion: 170000, PermTier: "T0"},
-		},
+	push := func(insts ...wire.Instance) {
+		env := wire.Envelope{AgentID: agent, Instances: insts}
+		_, err := inv.Upsert(ctx, env)
+		require.NoError(t, err)
+		_, err = p.Process(ctx, env)
+		require.NoError(t, err)
 	}
-	_, err = inv.Upsert(ctx, env4)
-	require.NoError(t, err)
-	// should still be 1 total role_change (previous one), not 2, because unknown->primary not counted
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='role_change'`).Scan(&ev))
-	require.Equal(t, 1, ev)
+	count := func(typ string) int {
+		var n int
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type=$1`, typ).Scan(&n))
+		return n
+	}
+
+	push(instance(oldPrimary, "primary", "10.0.0.1"), instance(standby, "standby", "10.0.0.2"))
+	roleChanges := count("role_change")
+
+	clk.Advance(5 * time.Second)
+	push(instance(oldPrimary, "standby", "10.0.0.1"), instance(standby, "standby", "10.0.0.2"))
+	require.Equal(t, roleChanges+1, count("role_change"), "a demotion is one role_change")
+	roleChanges = count("role_change")
+
+	clk.Advance(5 * time.Second)
+	failovers := count("failover_detected")
+	push(instance(oldPrimary, "standby", "10.0.0.1"), instance(standby, "primary", "10.0.0.2"))
+	require.Equal(t, failovers+1, count("failover_detected"), "a promotion after a recent primary is a failover")
+	require.Equal(t, roleChanges, count("role_change"), "a failover is failover_detected and not role_change")
 }
 
 func TestInventory_EmitEvent_JSON(t *testing.T) {

@@ -158,14 +158,16 @@ func TestInventory_MockPool_NewInstance_WithDatabases(t *testing.T) {
 	require.Equal(t, 5, pool.execCalls)
 }
 
-func TestInventory_MockPool_ExistingInstance_RoleChange(t *testing.T) {
+// A role change of an existing instance is written by the pipeline's topology
+// step, once, and not by the inventory: the inventory only updates the instance.
+func TestInventory_MockPool_ExistingInstance_WritesNoRoleChange(t *testing.T) {
 	t.Parallel()
 	cid := pgtype.ClusterID(777)
 	cidDB := store.ToDB(cid)
 	pool := &mockPool{
 		queryRowVals: []*mockRow{
-			{vals: []any{cidDB, "primary"}}, // upsertOne: existing instance, was primary
-			{vals: []any{"manual"}},         // upsertCluster: existing row, same source
+			{vals: []any{cidDB}},    // upsertOne: existing instance
+			{vals: []any{"manual"}}, // upsertCluster: existing row, same source
 		},
 	}
 	inv := &Inventory{pool: pool}
@@ -173,15 +175,15 @@ func TestInventory_MockPool_ExistingInstance_RoleChange(t *testing.T) {
 		Instances: []wire.Instance{{
 			InstanceID: uuid.NewString(),
 			ClusterID:  cid.String(),
-			Role:       "standby", // primary -> standby triggers role_change event
+			Role:       "standby", // a primary that became a standby
 		}},
 	}
 	res, err := inv.Upsert(context.Background(), env)
 	require.NoError(t, err)
 	require.Equal(t, 1, res.Accepted)
 	require.Equal(t, 0, res.Rejected)
-	// role_change event insert, then the mutable-fields UPDATE
-	require.Equal(t, 2, pool.execCalls)
+	// The mutable-fields UPDATE is the only write.
+	require.Equal(t, 1, pool.execCalls)
 }
 
 func TestInventory_MockPool_ClusterIDChanged_Rejected(t *testing.T) {
@@ -190,7 +192,7 @@ func TestInventory_MockPool_ClusterIDChanged_Rejected(t *testing.T) {
 	otherCID := int64(999999)
 	pool := &mockPool{
 		queryRowVals: []*mockRow{
-			{vals: []any{otherCID, "primary"}}, // upsertOne: existing instance has a DIFFERENT cluster_id
+			{vals: []any{otherCID}}, // upsertOne: existing instance has a DIFFERENT cluster_id
 		},
 	}
 	inv := &Inventory{pool: pool}

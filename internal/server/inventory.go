@@ -187,8 +187,7 @@ func (inv *Inventory) upsertOne(ctx context.Context, tenantID string, agentID uu
 	// cluster is created or its identity source is changed, so the refused push
 	// leaves nothing behind in clusters.
 	var existingCID int64
-	var existingRole string
-	err = inv.pool.QueryRow(ctx, `SELECT cluster_id, role FROM instances WHERE instance_id=$1`, instUUID).Scan(&existingCID, &existingRole)
+	err = inv.pool.QueryRow(ctx, `SELECT cluster_id FROM instances WHERE instance_id=$1`, instUUID).Scan(&existingCID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("lookup instance %s: %w", instUUID, err)
 	}
@@ -211,20 +210,12 @@ func (inv *Inventory) upsertOne(ctx context.Context, tenantID string, agentID uu
 	}
 
 	if err == nil {
-		// Existing instance: role change detection – only primary<->standby transitions.
-		if (existingRole == "primary" && role == "standby") || (existingRole == "standby" && role == "primary") {
-			payload := map[string]any{
-				"instance_id": inst.InstanceID,
-				"old_role":    existingRole,
-				"new_role":    role,
-			}
-			if emitErr := inv.emitEvent(ctx, tenantID, time.Now().UTC(), "role_change", &cidDB, &instUUID, payload); emitErr != nil {
-				return fmt.Errorf("emit role_change: %w", emitErr)
-			}
-		}
-		// Update mutable fields. last_seen is not among them: it is the liveness
-		// the server reports, and the pipeline sets it in the transaction that
-		// stores this instance's samples (see Pipeline.Process).
+		// Update mutable fields. The role change of an existing instance is not
+		// recorded here: the pipeline's topology step records it once, and tells a
+		// failover apart, in the transaction that stores the envelope. last_seen is
+		// not among them: it is the liveness the server reports, and the pipeline
+		// sets it in the transaction that stores this instance's samples (see
+		// Pipeline.Process).
 		if _, execErr := inv.pool.Exec(ctx,
 			`UPDATE instances SET role=$1, pg_version=$2, perm_tier=$3, addr=$4, port=$5, target_name=$6, ash_enabled=$7 WHERE instance_id=$8`,
 			role, inst.PGVersion, inst.PermTier, inst.Addr, inst.Port, inst.TargetName, inst.ASHEnabled, instUUID); execErr != nil {
