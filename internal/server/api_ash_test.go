@@ -337,10 +337,12 @@ func TestAshTop_SignificanceWarning_Below60Ticks(t *testing.T) {
 
 	// Create mock rows with total ticks = 59
 	pool := &mockPool{
+		// The range's ticks come first; the top rows carry none of their own.
+		queryRowVals: []*mockRow{{vals: []any{59}}},
 		queryResults: []*mockRows{
 			{
 				rows: []([]any){
-					{int64(9007199254740993), "SELECT 1", 100, 59},
+					{int64(9007199254740993), "SELECT 1", 100},
 				},
 			},
 		},
@@ -377,6 +379,7 @@ func TestAshAPI_GroupByAggregatesAndFillsTheGroup(t *testing.T) {
 			{ts, 30, 20, "LWLock"},
 			{ts, 10, 20, "CPU"},
 		}}},
+		queryRowVals: []*mockRow{nil, {vals: []any{20}}},
 	}
 	r := chi.NewRouter()
 	(&AshAPI{pool: pool}).RegisterRoutes(r)
