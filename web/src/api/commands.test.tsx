@@ -145,6 +145,55 @@ describe('command lifecycle query', () => {
     expect(screen.getByTestId('command-state')).toHaveTextContent('done')
   })
 
+  it('UI-CMD-009 says no agent claimed a command that stayed pending past the client timeout', async () => {
+    server.use(
+      http.get('*/api/v1/commands/:id', () =>
+        HttpResponse.json({ command_id: commandId, state: 'pending' }),
+      ),
+    )
+
+    renderWithProviders(<CommandCopyProbe />)
+    await settle()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(COMMAND_CLIENT_TIMEOUT_MS)
+    })
+    await flushQueryNotification()
+
+    expect(screen.getByTestId('command-copy')).toHaveTextContent(
+      'Command expired: no agent claimed it within the 5 minutes TTL.',
+    )
+  })
+
+  it('UI-CMD-010 keeps a command claimed after it was pending in the claimed state past the client timeout', async () => {
+    let state = 'pending'
+    let calls = 0
+    server.use(
+      http.get('*/api/v1/commands/:id', () => {
+        calls += 1
+        return HttpResponse.json({ command_id: commandId, state })
+      }),
+    )
+
+    renderWithProviders(<CommandProbe />)
+    await settle()
+    expect(screen.getByTestId('command-state')).toHaveTextContent('pending')
+
+    state = 'claimed'
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH.command.interval)
+    })
+    await flushQueryNotification()
+    expect(screen.getByTestId('command-state')).toHaveTextContent('claimed')
+
+    const callsBeforeTimeout = calls
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(COMMAND_CLIENT_TIMEOUT_MS)
+    })
+    await flushQueryNotification()
+    expect(screen.getByTestId('command-state')).toHaveTextContent('claimed')
+    expect(calls).toBeGreaterThan(callsBeforeTimeout)
+  })
+
   it('UI-CMD-008 does not say no agent claimed a command that was claimed before it expired', async () => {
     const responses = [
       { command_id: commandId, state: 'claimed' },

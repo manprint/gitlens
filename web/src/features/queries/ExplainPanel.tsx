@@ -161,6 +161,9 @@ export function ExplainPanel({
   }
 
   const command = createCommand.command.data
+  // A queued or claimed command may still run. A second run would repeat the
+  // same EXPLAIN ANALYZE, so the controls wait until the server ends it.
+  const commandOpen = command?.state === 'pending' || command?.state === 'claimed'
   const status = command
     ? describeCommandState(command.state, command.error)
     : createCommand.isPending
@@ -174,7 +177,7 @@ export function ExplainPanel({
       className="rounded-md border px-3 py-2 text-sm font-medium"
       aria-label="Run plan only"
       onClick={() => submit(false)}
-      disabled={!canPlan || queryID === null || createCommand.isPending}
+      disabled={!canPlan || queryID === null || createCommand.isPending || commandOpen}
     >
       Plan only
     </button>
@@ -185,7 +188,7 @@ export function ExplainPanel({
       variant="outline"
       aria-label="Plan with ANALYZE"
       onClick={() => setConfirmationOpen(true)}
-      disabled={queryID === null || createCommand.isPending}
+      disabled={queryID === null || createCommand.isPending || commandOpen}
     >
       Plan with ANALYZE
     </Button>

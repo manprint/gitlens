@@ -97,6 +97,24 @@ describe('ExplainPanel', () => {
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(rejection))
   })
 
+  it.each([
+    ['pending', 'Command is queued and waiting for an agent.'],
+    ['claimed', 'Command was claimed by an agent and is running.'],
+  ] as const)(
+    'UI-QRY-046 keeps both Run controls disabled while the command is %s',
+    async (state, copy) => {
+      commandHandlers({ command_id: COMMAND_ID, state })
+
+      renderPanel()
+      fireEvent.click(screen.getByRole('button', { name: /Run plan only/i }))
+      vi.useRealTimers()
+
+      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(copy))
+      expect(screen.getByRole('button', { name: /Run plan only/i })).toBeDisabled()
+      expect(screen.getByRole('button', { name: 'Plan with ANALYZE' })).toBeDisabled()
+    },
+  )
+
   it('UI-QRY-025 renders plan node types, estimated and actual rows, and costs', async () => {
     commandHandlers({
       command_id: COMMAND_ID,

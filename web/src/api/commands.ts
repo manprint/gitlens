@@ -30,6 +30,8 @@ export type CreateCommandResponse = components['schemas']['CreateCommandResponse
 // command. Once the client has seen a claim, it says so, because the agent may
 // still be running the statement and a second run would repeat its work.
 const CLAIMED_THEN_EXPIRED = `the agent claimed it, but no result arrived within the ${COMMAND_TTL_LABEL} TTL. It may still be running, so wait before running it again.`
+// The client saw the command pending through its last poll, so no agent had claimed it.
+const NEVER_CLAIMED = `no agent claimed it within the ${COMMAND_TTL_LABEL} TTL.`
 
 export interface CreateCommandVariables {
   kind: CommandKind
@@ -150,7 +152,7 @@ export function useCommand(commandId: string) {
 
   const data =
     clientExpired && query.data?.state === 'pending'
-      ? { ...query.data, state: 'expired' as const, error: undefined }
+      ? { ...query.data, state: 'expired' as const, error: NEVER_CLAIMED }
       : query.data
 
   return { ...query, data, clientExpired }
