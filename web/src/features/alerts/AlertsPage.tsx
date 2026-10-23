@@ -127,6 +127,11 @@ export function AlertsPage() {
   const silenceFilter = silenceId
     ? silences.find((silence) => silence.silence_id === silenceId)
     : undefined
+  // A silence that could not be loaded is not known to be absent, so the page
+  // must not say it is missing from the list.
+  const silenceNote = silencesQuery.error
+    ? 'The silence named in this link could not be checked, so no alerts are shown.'
+    : 'The silence named in this link is not in the current silences list.'
   const summary = useMemo(() => summariseAlerts(alerts), [alerts])
   const visibleAlerts = useMemo(
     () =>
@@ -302,7 +307,7 @@ export function AlertsPage() {
           <span>
             {silenceFilter
               ? `Showing alerts matched by silence “${silenceFilter.reason}”.`
-              : 'The silence named in this link is not in the current silences list.'}
+              : silenceNote}
           </span>
           <button
             className="underline"
