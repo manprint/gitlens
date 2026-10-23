@@ -7,6 +7,7 @@ import {
   describeDocumentedEvent,
   DOCUMENTED_EVENT_TYPES,
   describeEvent,
+  isDocumentedEventType,
   sortEventsNewestFirst,
   type ClusterEvent,
 } from './events'
@@ -16,6 +17,34 @@ const GO_SOURCE_ROOT = join(import.meta.dirname, '..', '..', '..', 'internal')
 // emitRepeatable, set as the Type of an event, declared as an EventType
 // constant, or listed as the typ of a staleness transition emitted later.
 const GO_EVENT_SITE = /emitEvent\(|emitRepeatable\(|Type:|EventType|\btyp:/
+const QUOTED_LOWERCASE = /"([a-z][a-z0-9_]*)"/g
+// Words that share an event site line but are not event types: payload keys,
+// values of other records, and SQL or catalog words on the same lines.
+const NOT_EVENT_TYPES: ReadonlySet<string> = new Set([
+  'attempted_cluster_id',
+  'attempted_source',
+  'cluster_id',
+  'instance_id',
+  'last_seen',
+  'slot_name',
+  'event',
+  'metric',
+  'other',
+  'streaming',
+  'column',
+  'column_type',
+  'constraint',
+  'constraint_type',
+  'data_type',
+  'link',
+  'schemaname',
+  'sequence',
+  'subtype',
+  'table',
+  'table_schema',
+  'wait_event',
+  'wait_event_type',
+])
 
 function goSourceLines(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -54,6 +83,26 @@ describe('event taxonomy', () => {
         `${type} has no emitter, so the taxonomy would describe an event that never occurs`,
       ).toBe(true)
     }
+  })
+
+  it('UI-CLUS-052 every quoted word on a Go event site is a documented type or a known non-event word', () => {
+    const named = new Set<string>()
+    for (const line of goSourceLines(GO_SOURCE_ROOT).filter((line) => GO_EVENT_SITE.test(line))) {
+      for (const [, word] of line.matchAll(QUOTED_LOWERCASE)) {
+        if (word) named.add(word)
+      }
+    }
+
+    // The scan has to reach the emitters, or the check below passes on nothing.
+    expect(named.has('counter_reset_detected')).toBe(true)
+    expect(named.has('failover_detected')).toBe(true)
+    const undocumented = [...named].filter(
+      (word) => !isDocumentedEventType(word) && !NOT_EVENT_TYPES.has(word),
+    )
+    expect(
+      undocumented,
+      'a Go event site names a type the taxonomy does not document, so the UI would show it as unknown',
+    ).toEqual([])
   })
 
   it('keeps unknown event types neutral and visible', () => {
