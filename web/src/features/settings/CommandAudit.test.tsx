@@ -148,4 +148,22 @@ describe('CommandAudit', () => {
 
     await waitFor(() => expect(screen.getByText('No command activity')).toBeInTheDocument())
   })
+
+  it('UI-SET-035 reports a 200 body that is not JSON as an invalid response', async () => {
+    // A proxy can answer 200 with an HTML page. The read must fail as a
+    // malformed API response, not as a bare SyntaxError the alert cannot render.
+    server.use(
+      http.get('*/api/v1/instances/:id/command-audit', () =>
+        HttpResponse.text('<html><body>Gateway</body></html>', {
+          headers: { 'Content-Type': 'text/html' },
+        }),
+      ),
+    )
+    renderWithProviders(<CommandAudit instances={[INSTANCE_SUMMARY]} />)
+    await settleAuditQuery()
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Could not load command audit')
+    expect(alert).toHaveTextContent('The server returned an invalid response')
+  })
 })
