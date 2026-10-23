@@ -21,9 +21,11 @@ const AlertLockName = "pglens:alert-engine"
 // 32 bits in objid, and objsubid 1. hashtext is an int4, so a negative hash
 // sign-extends to a bigint whose high half is all ones; the masks take the
 // unsigned halves that pg_locks reports, for negative and positive hashes alike.
+// host() returns the bare address: the text form of an inet includes the /32
+// mask, which never equals a container's IP address.
 const advisoryLockHolderQuery = `
 WITH k AS (SELECT hashtext($1)::bigint AS key)
-SELECT a.pid, COALESCE(a.client_addr::text, '')
+SELECT a.pid, COALESCE(host(a.client_addr), '')
   FROM pg_locks l
   CROSS JOIN k
   JOIN pg_stat_activity a ON a.pid = l.pid

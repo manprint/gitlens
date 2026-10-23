@@ -29,9 +29,16 @@ func TestAlertLeaderLock_HolderIsFound(t *testing.T) {
 		require.NoError(t, conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtext($1))`, name).Scan(&locked))
 		require.True(t, locked, "lock %q was not taken", name)
 
-		gotPID, _, err := harness.AdvisoryLockHolder(ctx, pool, name)
+		gotPID, gotAddr, err := harness.AdvisoryLockHolder(ctx, pool, name)
 		require.NoError(t, err)
 		require.Equal(t, pid, gotPID, "holder of %q", name)
+		// The address is matched against container IPs, so it must be the bare
+		// address the server sees for that session, not inet's text form.
+		var wantAddr string
+		require.NoError(t, pool.QueryRow(ctx, `SELECT COALESCE(host(client_addr), '') FROM pg_stat_activity WHERE pid = $1`, pid).Scan(&wantAddr))
+		require.NotEmpty(t, wantAddr, "holder %d has no TCP client address", pid)
+		require.NotContains(t, gotAddr, "/", "holder address %q is in inet text form", gotAddr)
+		require.Equal(t, wantAddr, gotAddr, "holder address of %q", name)
 
 		_, err = conn.Exec(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, name)
 		require.NoError(t, err)
