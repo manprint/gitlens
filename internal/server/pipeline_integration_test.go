@@ -500,3 +500,31 @@ func TestPipeline_InvalidEdgeConfidenceIsRefusedAlone(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM topology_edges WHERE from_instance=$1`, standby).Scan(&edges))
 	require.Zero(t, edges, "an edge the store would refuse is not written")
 }
+
+// TestPipeline_RejectedInstanceCountsNoCheck: an instance the pipeline refuses
+// stores none of its results, so its checks must not count as run. The
+// counters used to count them before the refusal.
+func TestPipeline_RejectedInstanceCountsNoCheck(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	p := NewPipeline(pool, clock.NewFake(time.Now()))
+	bad, good := uuid.New(), uuid.New()
+	cid := pgtype.ClusterID(406).String()
+	ts := time.Now().Add(-time.Minute).Truncate(time.Second)
+	badOK := pglensCheckOKTotal.Get(checkKey{instance: bad.String(), check: "activity"})
+	goodOK := pglensCheckOKTotal.Get(checkKey{instance: good.String(), check: "activity"})
+
+	res, err := p.Process(ctx, wire.Envelope{Instances: []wire.Instance{
+		{InstanceID: bad.String(), ClusterID: cid, Role: "primary", Results: []wire.Result{{
+			Check: "activity", TS: ts, Database: "app",
+			Metrics: []wire.Metric{{Name: "pg_stat_activity_count", Value: 1, Kind: "not-a-kind"}},
+		}}},
+		{InstanceID: good.String(), ClusterID: cid, Role: "primary", Results: []wire.Result{{Check: "activity", TS: ts, Database: "app"}}},
+	}})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Accepted)
+	require.Equal(t, 1, res.Rejected)
+	require.Equal(t, badOK, pglensCheckOKTotal.Get(checkKey{instance: bad.String(), check: "activity"}), "a refused instance counts no check")
+	require.Equal(t, goodOK+1, pglensCheckOKTotal.Get(checkKey{instance: good.String(), check: "activity"}))
+}

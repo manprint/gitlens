@@ -340,6 +340,8 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		var instRelationPrunes []store.RelationStatsPrune
 		var instFactPrunes []store.ObjectFactPrune
 		var instErr error
+		// The results this instance counts, kept back until it is stored.
+		var instOutcomes []checkOutcome
 		instSeries := make(map[pgtype.SeriesKey]struct{})
 
 		// The role the store holds is read here, in this transaction, and the reported
@@ -451,7 +453,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 			// it hide the errors the same check reports on that instance. The
 			// counters move after the commit, see countChecks.
 			if r.Error != "" || r.SkipReason == "" {
-				checkOutcomes = append(checkOutcomes, checkOutcome{
+				instOutcomes = append(instOutcomes, checkOutcome{
 					checkCountKey: checkCountKey{instance: instUUID, check: r.Check, database: r.Database},
 					ts:            r.TS,
 					failed:        r.Error != "",
@@ -829,6 +831,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		relationPrunes = append(relationPrunes, instRelationPrunes...)
 		factPrunes = append(factPrunes, instFactPrunes...)
 		storedInstances = append(storedInstances, instUUID)
+		checkOutcomes = append(checkOutcomes, instOutcomes...)
 		storedRoles[instUUID] = role
 		res.Accepted++
 	}
