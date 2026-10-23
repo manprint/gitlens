@@ -412,7 +412,8 @@ func backendPIDs(t *testing.T, admin *pgxpool.Pool, db string) []int32 {
 // are listed, so the new ones wait and pglens reports them as not monitored. The
 // reconcile must not connect to them to look for pg_stat_statements: such a
 // connection takes a slot under the manager's cap and closes a pool the schedule
-// runs its checks through.
+// runs its checks through. A view installed in a waiting database does not count
+// either.
 func TestINTSCH006_WaitingDatabaseIsNotConnected(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
 		pg.Lock(t)
@@ -487,6 +488,14 @@ func TestINTSCH006_WaitingDatabaseIsNotConnected(t *testing.T) {
 		require.NotEmpty(t, backendPIDs(t, admin, heldA), "the schedule runs through a pool for each database it holds")
 		require.NotEmpty(t, backendPIDs(t, admin, heldB))
 
+		// The view is in a waiting database. It must not count: pglens does not
+		// collect from that database, so the schedule must not read through it.
+		installer, err := pgxpool.New(ctx, pg.DSN(waitingA, pgtest.RoleSuperuser))
+		require.NoError(t, err)
+		t.Cleanup(installer.Close)
+		_, err = installer.Exec(ctx, "CREATE EXTENSION pg_stat_statements")
+		require.NoError(t, err)
+
 		// The two busier databases take the budget. The schedule keeps the first
 		// two, since they are still listed.
 		commit(waitingA, 800)
@@ -519,5 +528,6 @@ func TestINTSCH006_WaitingDatabaseIsNotConnected(t *testing.T) {
 		require.Subset(t, backendPIDs(t, admin, heldA), pidsA, "the pool of a scheduled database must survive the reconcile")
 		require.Subset(t, backendPIDs(t, admin, heldB), pidsB, "the pool of a scheduled database must survive the reconcile")
 		require.Equal(t, map[string]bool{heldA: true, heldB: true}, schedules.gates[target].databases)
+		require.False(t, schedules.gates[target].exts["pg_stat_statements"], "a view in a database the schedule does not hold must not count")
 	})
 }
