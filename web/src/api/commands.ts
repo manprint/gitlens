@@ -124,12 +124,13 @@ export function useCommand(commandId: string) {
     retryDelay: 0,
   })
 
+  const observedState = query.data?.state
   useEffect(() => {
     // Only a command that no agent has claimed can time out on the client.
     if (
       !commandId ||
-      isTerminalCommandState(query.data?.state) ||
-      (query.data !== undefined && query.data.state !== 'pending')
+      isTerminalCommandState(observedState) ||
+      (observedState !== undefined && observedState !== 'pending')
     ) {
       return
     }
@@ -145,7 +146,7 @@ export function useCommand(commandId: string) {
     }
     const timer = window.setTimeout(() => setExpiry({ commandId, expired: true }), remaining)
     return () => window.clearTimeout(timer)
-  }, [commandId, query.data?.state])
+  }, [commandId, observedState])
 
   const data =
     clientExpired && query.data?.state === 'pending'
