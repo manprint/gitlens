@@ -9,7 +9,7 @@ import { CLUSTER, INSTANCE_SUMMARY } from '@/test/fixture-helpers'
 import { AGENT_STALE_AFTER_SECONDS } from '@/lib/fleet'
 import { REFRESH } from '@/api/policy'
 import { renderWithProviders } from '@/test/render'
-import { ok, sequence, status } from '@/test/msw/handlers'
+import { never, ok, sequence, status } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 
 import { FleetPage } from './FleetPage'
@@ -245,6 +245,17 @@ describe('FleetPage', () => {
     const cards = screen.getByRole('list', { name: 'Cluster cards' })
     expect(within(cards).getByText('Alerts unavailable')).toBeInTheDocument()
     expect(within(cards).queryByText(/firing alert/)).not.toBeInTheDocument()
+  })
+
+  it('UI-FLEET-047 holds the grid in its loading state while alerts are pending', async () => {
+    server.use(ok('getClusters', [CLUSTER as unknown as Cluster]), never('getAlerts'))
+    renderWithProviders(<FleetPage />)
+    await settleInitialQuery()
+
+    expect(screen.getByRole('status', { name: 'Loading fleet overview' })).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'Cluster cards' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Alerts unavailable')).not.toBeInTheDocument()
+    expect(screen.queryByText('Alert counts unavailable.')).not.toBeInTheDocument()
   })
 
   it('UI-FLEET-046 stops showing alert counts on cards once a refetch fails', async () => {
