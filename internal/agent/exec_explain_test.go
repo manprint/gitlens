@@ -67,7 +67,10 @@ func (c *explainConn) SimpleQuery(_ context.Context, sql string) ([]*pgconn.Resu
 
 func (c *explainConn) Query(context.Context, string, ...any) (pgx.Rows, error) { return nil, nil }
 func (c *explainConn) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
-	if strings.HasPrefix(sql, "SELECT query FROM pg_stat_statements") {
+	if strings.HasPrefix(sql, "SELECT n.nspname") { // check.ExtensionSchema
+		return explainRow{value: "public"}
+	}
+	if strings.HasPrefix(sql, `SELECT query FROM "public"."pg_stat_statements"`) {
 		c.lookupSQL = sql
 		return explainRow{value: c.statement, err: c.lookupErr}
 	}

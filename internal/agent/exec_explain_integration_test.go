@@ -32,7 +32,7 @@ func TestINTCMD006_ExplainKnownQueryIDReturnsPlan(t *testing.T) {
 		_, err = conn.Exec(ctx, "SELECT current_database()")
 		require.NoError(t, err)
 		var queryID int64
-		require.NoError(t, conn.QueryRow(ctx, "SELECT queryid FROM pg_stat_statements WHERE query = 'SELECT current_database()' ORDER BY calls DESC LIMIT 1").Scan(&queryID))
+		require.NoError(t, conn.QueryRow(ctx, "SELECT queryid FROM public.pg_stat_statements WHERE query = 'SELECT current_database()' ORDER BY calls DESC LIMIT 1").Scan(&queryID))
 
 		result, err := NewExplainExecutor().Execute(ctx, mgr, command.Args{QueryID: &queryID, Datname: "postgres"})
 		require.NoError(t, err)

@@ -26,8 +26,8 @@ func (c *pgstattupleConn) Query(context.Context, string, ...any) (pgx.Rows, erro
 func (c *pgstattupleConn) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	c.queries = append(c.queries, sql)
 	c.args = append(c.args, args)
-	if sql == pgstattupleInstalled {
-		return installedRow(c.installed)
+	if strings.HasPrefix(sql, "SELECT n.nspname") { // check.ExtensionSchema
+		return schemaRow(c.installed)
 	}
 	return pgstattupleRow{}
 }
@@ -37,10 +37,15 @@ func (c *pgstattupleConn) Exec(_ context.Context, sql string, _ ...any) (pgconn.
 }
 func (c *pgstattupleConn) Release() {}
 
-type installedRow bool
+// schemaRow answers check.ExtensionSchema: the extension lives in public
+// when it is installed.
+type schemaRow bool
 
-func (r installedRow) Scan(dest ...any) error {
-	*dest[0].(*bool) = bool(r)
+func (r schemaRow) Scan(dest ...any) error {
+	if !r {
+		return pgx.ErrNoRows
+	}
+	*dest[0].(*string) = "public"
 	return nil
 }
 
@@ -77,7 +82,7 @@ func TestPgstattuple_RejectsWithoutExtensionInTheRelationsDatabase(t *testing.T)
 	require.True(t, errors.As(err, &rejected))
 	require.Contains(t, rejected.Error(), `pgstattuple extension is not installed in database "postgres"`)
 	for _, query := range conn.queries {
-		require.NotContains(t, query, "FROM pgstattuple(")
+		require.NotContains(t, query, "pgstattuple\"(")
 	}
 }
 
@@ -95,11 +100,11 @@ func TestPgstattuple_SanitizesIdentifier(t *testing.T) {
 	require.NoError(t, err)
 	var scan string
 	for _, query := range conn.queries {
-		if strings.Contains(query, "FROM pgstattuple(") {
+		if strings.Contains(query, `FROM "public"."pgstattuple"(`) {
 			scan = query
 		}
 	}
-	require.Contains(t, scan, "$1::regclass")
+	require.Contains(t, scan, "$1::pg_catalog.regclass")
 	// The scan is the last QueryRow, and QueryRow records its arguments.
 	require.Equal(t, []any{`"weird""schema"."table""name"`}, conn.args[len(conn.args)-1])
 }

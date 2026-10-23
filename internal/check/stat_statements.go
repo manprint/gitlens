@@ -113,8 +113,8 @@ type statementRow struct {
 // appeared to go backwards, which the server's delta engine reads as a reset.
 //
 // The view is referenced once: every reference re-reads the whole external
-// query-text file. %[1]s selects the database whose rows are read and %[2]d is
-// the per-ranking pre-filter.
+// query-text file. %[1]s selects the database whose rows are read, %[2]d is
+// the per-ranking pre-filter and %[3]s is the view's schema-qualified name.
 const statementsQuery = `
 WITH agg AS (
     SELECT queryid,
@@ -126,7 +126,7 @@ WITH agg AS (
            sum(wal_bytes)::bigint         AS wal_bytes,
            sum(temp_blks_written)::bigint AS temp_blks_written,
            min(query)                     AS query
-      FROM pg_stat_statements
+      FROM %[3]s
      WHERE dbid = (SELECT oid FROM pg_database WHERE datname = %[1]s)
        AND queryid IS NOT NULL
      GROUP BY queryid
@@ -325,7 +325,12 @@ func readStatements(ctx context.Context, conn Conn, timeout time.Duration, datab
 	if err := ApplySessionLimits(ctx, conn, timeout); err != nil {
 		return nil, 0, nil, err
 	}
-	rows, err := conn.Query(ctx, fmt.Sprintf(statementsQuery, database, prefilter), args...)
+	schema, err := ExtensionSchema(ctx, conn, "pg_stat_statements")
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	view := pgx.Identifier{schema, "pg_stat_statements"}.Sanitize()
+	rows, err := conn.Query(ctx, fmt.Sprintf(statementsQuery, database, prefilter, view), args...)
 	if err != nil {
 		return nil, 0, nil, err
 	}
@@ -349,7 +354,7 @@ func readStatements(ctx context.Context, conn Conn, timeout time.Duration, datab
 	// pg_stat_statements_info only exists from extension version 1.9 on; an
 	// older extension simply has no reset hint to offer.
 	var statsReset *time.Time
-	err = conn.QueryRow(ctx, `SELECT stats_reset FROM pg_stat_statements_info`).Scan(&statsReset)
+	err = conn.QueryRow(ctx, "SELECT stats_reset FROM "+pgx.Identifier{schema, "pg_stat_statements_info"}.Sanitize()).Scan(&statsReset)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) && pgErrorCode(err) != pgUndefinedTable {
 		return nil, 0, nil, err
 	}

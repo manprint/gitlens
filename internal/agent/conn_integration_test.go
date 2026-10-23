@@ -11,7 +11,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/manprint/pglens/internal/check"
 	"github.com/manprint/pglens/internal/clock"
+	"github.com/manprint/pglens/internal/command"
 	"github.com/manprint/pglens/test/pgtest"
 	"github.com/stretchr/testify/require"
 )
@@ -270,5 +272,82 @@ func TestINTCONN007_DatabaseNameIsNeverSQL(t *testing.T) {
 		require.Equal(t, name, db)
 		require.Equal(t, "pglens/"+name, appName)
 		require.False(t, pwned)
+	})
+}
+
+// INT-CONN-008: a search_path set for the database cannot put another
+// schema's functions in place of the built-ins the agent calls. A database
+// owner may run ALTER DATABASE ... SET search_path, and a function that
+// replaced now() would otherwise run as the monitoring role.
+func TestINTCONN008_SessionSearchPathIsCatalogOnly(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		ctx := context.Background()
+		const database = "pglens_hijack"
+		maintenance := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		admin := pg.Pool(t, database, pgtest.RoleSuperuser)
+		t.Cleanup(func() {
+			_, _ = maintenance.Exec(context.Background(), "DROP DATABASE IF EXISTS "+database+" WITH (FORCE)")
+		})
+		_, err := admin.Exec(ctx, `DROP SCHEMA IF EXISTS hijack CASCADE;
+CREATE EXTENSION IF NOT EXISTS pgstattuple;
+CREATE SCHEMA hijack;
+GRANT USAGE ON SCHEMA hijack TO PUBLIC;
+CREATE TABLE hijack.t (a int);
+INSERT INTO hijack.t VALUES (1);
+CREATE FUNCTION hijack.now() RETURNS timestamptz LANGUAGE plpgsql
+	AS $$ BEGIN RAISE EXCEPTION 'hijacked'; END $$;
+ALTER DATABASE `+database+` SET search_path = hijack, pg_catalog`)
+		require.NoError(t, err)
+
+		// Without the agent's session settings, the database's search_path
+		// hands now() to the hijacking function.
+		raw, err := pgx.Connect(ctx, pg.DSN(database, pgtest.RoleT1))
+		require.NoError(t, err)
+		_, err = raw.Exec(ctx, "SELECT now()")
+		require.ErrorContains(t, err, "hijacked")
+		require.NoError(t, raw.Close(ctx))
+
+		// An application statement that names its table through the
+		// database's search_path, for EXPLAIN below.
+		app, err := pgx.Connect(ctx, pg.DSN(database, pgtest.RoleSuperuser))
+		require.NoError(t, err)
+		const statement = "SELECT a FROM t"
+		_, err = app.Exec(ctx, statement)
+		require.NoError(t, err)
+		var queryID int64
+		require.NoError(t, app.QueryRow(ctx, "SELECT queryid FROM public.pg_stat_statements WHERE query = $1 LIMIT 1", statement).Scan(&queryID))
+		require.NoError(t, app.Close(ctx))
+
+		mgr, err := NewManager(ctx, "hijack-target", pg.DSN(database, pgtest.RoleT1), DefaultConnOptions(), clock.System())
+		require.NoError(t, err)
+		defer mgr.Close()
+		for _, acquire := range []func(context.Context) (*pgxpool.Conn, error){
+			mgr.Shared,
+			mgr.DedicatedConn,
+			func(ctx context.Context) (*pgxpool.Conn, error) { return mgr.ForDatabase(ctx, database) },
+		} {
+			conn, err := acquire(ctx)
+			require.NoError(t, err)
+			var searchPath string
+			require.NoError(t, conn.QueryRow(ctx, "SHOW search_path").Scan(&searchPath))
+			require.Equal(t, "pg_catalog, pg_temp", searchPath)
+			_, err = conn.Exec(ctx, "SELECT now()")
+			require.NoError(t, err)
+			conn.Release()
+		}
+
+		// Extension objects are named with their schema, and EXPLAIN plans
+		// the statement with the database's own search_path.
+		for _, c := range check.All() {
+			if c.Name() == "stat_statements" {
+				_, err := c.Scrape(ctx, databaseScopedTarget{Target: mgr, database: database})
+				require.NoError(t, err)
+			}
+		}
+		_, err = NewPgstattupleExecutor().Execute(ctx, mgr, command.Args{Schema: "hijack", Relation: "t", Datname: database})
+		require.NoError(t, err)
+		plan, err := NewExplainExecutor().Execute(ctx, mgr, command.Args{QueryID: &queryID, Datname: database})
+		require.NoError(t, err)
+		require.Contains(t, string(plan), `"Relation Name":"t","Schema":"hijack"`)
 	})
 }

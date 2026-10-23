@@ -422,7 +422,15 @@ Security and operational boundaries:
   backlog); `explain` and `pgstattuple` additionally open an explicit
   `READ ONLY` transaction and roll it back. The agent sets only session
   parameters (`application_name`, `statement_timeout`, `lock_timeout`,
-  `idle_in_transaction_session_timeout`).
+  `idle_in_transaction_session_timeout`, `search_path`).
+- Every agent session searches `pg_catalog` alone, whatever `search_path` the
+  database or the role sets, and names the objects of `pg_stat_statements` and
+  `pgstattuple` with the schema the extension was installed in. A database
+  owner can therefore not put a function of their own in place of a built-in
+  the agent calls and have it run with the monitoring role's privileges.
+  `EXPLAIN` alone plans the user's statement with the database's own
+  `search_path`, so that its tables resolve as they did for the application,
+  behind the guard described below.
 - With `commands.enabled: false` the agent does not poll or execute on-demand
   commands at all.
 - The server validates authentication, envelope shape, command state and expiry;

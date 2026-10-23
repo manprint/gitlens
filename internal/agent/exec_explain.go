@@ -98,6 +98,12 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 	if _, err := conn.Exec(ctx, timeout); err != nil {
 		return nil, err
 	}
+	// The statement names its objects the way its application did, through
+	// the database's own search_path rather than the pg_catalog-only one of
+	// the agent's sessions. The guard resolves names through the same path.
+	if _, err := conn.Exec(ctx, "SET LOCAL search_path TO DEFAULT"); err != nil {
+		return nil, err
+	}
 	// Planning alone can run user code (see explain_guard.go), so privileges
 	// are dropped before anything is planned, and ANALYZE runs only once the
 	// guard has inspected the statement, the database and the plan.
@@ -217,8 +223,9 @@ func errorsIsNoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
 // one database. Without the dbid filter a queryid shared by two databases
 // (catalog queries, the same schema deployed twice) could return the other
 // database's text, which then failed — or explained something else — in this
-// one. The %s names that database.
-const statementLookup = `SELECT query FROM pg_stat_statements
+// one. The first %s is the view's schema-qualified name, the second names
+// that database.
+const statementLookup = `SELECT query FROM %s
 		WHERE queryid = $1
 		  AND dbid = (SELECT oid FROM pg_database WHERE datname = %s)
 		  AND query !~ '^[[:space:]]*EXPLAIN'
@@ -232,8 +239,7 @@ const statementLookup = `SELECT query FROM pg_stat_statements
 // them used to fail on the missing view. The text is read the same way here;
 // the plan is still made on conn, in the command's own database.
 func lookupStatement(ctx context.Context, target check.Target, conn check.Conn, datname string, queryID int64) (string, error) {
-	var statement string
-	err := conn.QueryRow(ctx, fmt.Sprintf(statementLookup, "current_database()"), queryID).Scan(&statement)
+	statement, err := readStatementText(ctx, conn, "current_database()", queryID)
 	if datname == "" || !isUndefinedTable(err) {
 		return statement, err
 	}
@@ -242,7 +248,19 @@ func lookupStatement(ctx context.Context, target check.Target, conn check.Conn, 
 		return "", err
 	}
 	defer source.Release()
-	err = source.QueryRow(ctx, fmt.Sprintf(statementLookup, "$2"), queryID, datname).Scan(&statement)
+	return readStatementText(ctx, source, "$2", queryID, datname)
+}
+
+// readStatementText runs statementLookup on conn; database is the SQL
+// expression naming the database, args its parameters after the queryid.
+func readStatementText(ctx context.Context, conn check.Conn, database string, args ...any) (string, error) {
+	schema, err := check.ExtensionSchema(ctx, conn, "pg_stat_statements")
+	if err != nil {
+		return "", err
+	}
+	view := pgx.Identifier{schema, "pg_stat_statements"}.Sanitize()
+	var statement string
+	err = conn.QueryRow(ctx, fmt.Sprintf(statementLookup, view, database), args...).Scan(&statement)
 	return statement, err
 }
 
