@@ -11,8 +11,19 @@ const segmentLabels: Record<string, string> = {
   settings: 'Settings',
 }
 
+// A mangled or hand-typed link can carry a malformed escape such as %E0. The
+// breadcrumb then shows the segment as written, so the header never throws
+// and takes the whole shell down with it.
+function decodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment)
+  } catch {
+    return segment
+  }
+}
+
 function labelForSegment(segment: string): string {
-  return segmentLabels[segment] ?? decodeURIComponent(segment)
+  return segmentLabels[segment] ?? decodeSegment(segment)
 }
 
 export function Breadcrumbs() {
