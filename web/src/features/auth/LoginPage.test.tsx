@@ -1,5 +1,6 @@
 import { act, fireEvent, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { http, HttpResponse } from 'msw/http'
 
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
@@ -49,6 +50,39 @@ describe('LoginPage', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('Password non valida.')
     expect(input).toHaveFocus()
+  })
+
+  it('UI-AUTH-007 says the server is unreachable instead of blaming the password', async () => {
+    server.use(http.post('/api/v1/session', () => HttpResponse.error()))
+    renderWithProviders(<LoginPage />, { route: '/login' })
+
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Accedi' }))
+    await settle()
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Impossibile contattare il server. Controlla la connessione e riprova.',
+    )
+    expect(screen.queryByText('Password non valida.')).not.toBeInTheDocument()
+  })
+
+  it('UI-AUTH-008 says the server could not finish sign-in on a server error', async () => {
+    server.use(
+      status('createSession', 503, {
+        detail: 'session store is not configured',
+        error: 'session_unavailable',
+      }),
+    )
+    renderWithProviders(<LoginPage />, { route: '/login' })
+
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Accedi' }))
+    await settle()
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Il server non riesce a completare la richiesta.',
+    )
+    expect(screen.queryByText('Password non valida.')).not.toBeInTheDocument()
   })
 
   it.each([
