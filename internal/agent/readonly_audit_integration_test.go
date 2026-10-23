@@ -166,8 +166,12 @@ ANALYZE ro_audit`)
 		require.Error(t, err)
 		_, err = NewPgstattupleExecutor().Execute(ctx, mgr, command.Args{Schema: "public", Relation: "ro_audit", Datname: "app"})
 		require.NoError(t, err)
+		// pgstattuple measures ordinary tables only, so an index is refused
+		// before the scan reads it (see PgstattupleExecutor).
 		_, err = NewPgstattupleExecutor().Execute(ctx, mgr, command.Args{Schema: "public", Relation: "ro_audit_v", Datname: "app"})
-		require.NoError(t, err)
+		var rejected *RejectedError
+		require.ErrorAs(t, err, &rejected)
+		require.ErrorContains(t, err, `has relkind "i"`)
 
 		require.Equal(t, before, databaseFingerprint(t, admin))
 
