@@ -43,6 +43,26 @@ func TestCanonicalLabels(t *testing.T) {
 	require.Equal(t, "a=1\x1fb=2", pgtype.CanonicalLabels(map[string]string{"a": "1", "b": "2"}))
 }
 
+// TestCanonicalLabels_DelimitersInFreeTextDoNotCollide covers the free-text
+// cases where a naive join would give two label sets the same canonical string.
+func TestCanonicalLabels_DelimitersInFreeTextDoNotCollide(t *testing.T) {
+	t.Parallel()
+	// A value holding the separator must not read as a second label.
+	require.NotEqual(t,
+		pgtype.CanonicalLabels(map[string]string{"a": "x\x1fb=y"}),
+		pgtype.CanonicalLabels(map[string]string{"a": "x", "b": "y"}))
+	// A key holding "=" must not move the boundary between key and value.
+	require.NotEqual(t,
+		pgtype.CanonicalLabels(map[string]string{"a=b": "c"}),
+		pgtype.CanonicalLabels(map[string]string{"a": "b=c"}))
+	// The escape byte is escaped too, so text that looks like an escape is not one.
+	require.NotEqual(t,
+		pgtype.CanonicalLabels(map[string]string{"a": "\x1e1"}),
+		pgtype.CanonicalLabels(map[string]string{"a": "\x1f"}))
+	// "=" in a value and a backslash are not delimiters, so they keep their bytes.
+	require.Equal(t, "a=b=c\\d", pgtype.CanonicalLabels(map[string]string{"a": "b=c\\d"}))
+}
+
 func TestSeriesKey_Comparable(t *testing.T) {
 	t.Parallel()
 	id := uuid.New()
