@@ -204,6 +204,30 @@ describe('ExplainPanel', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('invalid command: query was evicted')
   })
 
+  it('UI-QRY-051 says the agent queue is full, with the server count, on a 429', async () => {
+    server.use(
+      http.post('*/api/v1/instances/:id/commands', () =>
+        HttpResponse.json(
+          {
+            error: 'command queue full',
+            detail: 'the agent already has 20 pending commands; retry once they run or expire',
+          },
+          { status: 429 },
+        ),
+      ),
+    )
+
+    renderPanel()
+    fireEvent.click(screen.getByRole('button', { name: /Run plan only/i }))
+    vi.useRealTimers()
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not submit EXPLAIN command.')
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Command queue full: the agent already has 20 pending commands',
+    )
+  })
+
   it('keeps the confirmation dialog accessible', async () => {
     renderPanel()
     fireEvent.click(screen.getByRole('button', { name: 'Plan with ANALYZE' }))

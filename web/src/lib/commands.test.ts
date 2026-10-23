@@ -1,8 +1,24 @@
 import { describe, expect, it } from 'vitest'
 
-import { describeCommandState, isTerminalCommandState, type CommandState } from './commands'
+import {
+  commandQueueFullMessage,
+  describeCommandState,
+  isTerminalCommandState,
+  type CommandState,
+} from './commands'
 
 describe('command lifecycle descriptions', () => {
+  it('UI-CMD-012 names a full agent queue only for a 429, with the server count', () => {
+    const detail = 'the agent already has 20 pending commands; retry once they run or expire'
+    expect(
+      commandQueueFullMessage({ kind: 'server', status: 429, error: 'command queue full', detail }),
+    ).toBe(`Command queue full: ${detail}`)
+    expect(
+      commandQueueFullMessage({ kind: 'server', status: 503, error: 'unavailable', detail }),
+    ).toBeNull()
+    expect(commandQueueFullMessage({ kind: 'network', message: 'offline' })).toBeNull()
+  })
+
   it('UI-CMD-003 surfaces the agent rejection reason verbatim', () => {
     expect(describeCommandState('rejected', 'capability denied by target policy')).toContain(
       'capability denied by target policy',

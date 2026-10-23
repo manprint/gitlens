@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 
 import { useCreateCommand } from '@/api/commands'
 import type { PermTier } from '@/api/types'
-import { ErrorState, NotPermitted } from '@/components/state'
+import { CommandSubmitError, NotPermitted } from '@/components/state'
 import {
   Dialog,
   DialogContent,
@@ -230,7 +230,7 @@ export function ExplainPanel({
 
       {status && <p role="status">{status}</p>}
       {createCommand.error && (
-        <ErrorState
+        <CommandSubmitError
           endpoint="EXPLAIN command"
           failure={createCommand.error.failure}
           onRetry={() => createCommand.reset()}

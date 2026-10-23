@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 
 import { useCreateCommand } from '@/api/commands'
 import type { PermTier } from '@/api/types'
-import { ErrorState, NotPermitted } from '@/components/state'
+import { CommandSubmitError, NotPermitted } from '@/components/state'
 import {
   Dialog,
   DialogContent,
@@ -174,14 +174,14 @@ export function SignalActions({
       {commandStatus(cancelCommand)}
       {commandStatus(terminateCommand)}
       {cancelCommand.error ? (
-        <ErrorState
+        <CommandSubmitError
           endpoint="cancel command"
           failure={cancelCommand.error.failure}
           onRetry={() => cancelCommand.reset()}
         />
       ) : null}
       {terminateCommand.error ? (
-        <ErrorState
+        <CommandSubmitError
           endpoint="terminate command"
           failure={terminateCommand.error.failure}
           onRetry={() => terminateCommand.reset()}

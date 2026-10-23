@@ -8,7 +8,11 @@ import { useInstanceBloat, useInstanceIndexes, useInstanceTables } from '@/api/q
 import type { PermTier, Schemas } from '@/api/types'
 import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState, NotPermitted, Truncated, Unknown } from '@/components/state'
-import { describeCommandState, isTerminalCommandState } from '@/lib/commands'
+import {
+  commandQueueFullMessage,
+  describeCommandState,
+  isTerminalCommandState,
+} from '@/lib/commands'
 import { formatBytes, formatCount, formatPercent, formatRate, formatTimestamp } from '@/lib/format'
 
 const RELATION_LIMIT = 50
@@ -526,7 +530,8 @@ function ExactMeasurement({
       ) : null}
       {command.error ? (
         <p role="alert" className="text-destructive text-xs">
-          Could not submit the measurement: {command.error.message}
+          Could not submit the measurement:{' '}
+          {commandQueueFullMessage(command.error.failure) ?? command.error.message}
         </p>
       ) : null}
     </div>
