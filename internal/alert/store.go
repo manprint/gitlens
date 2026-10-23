@@ -62,7 +62,7 @@ func (s *pgStore) Rules(ctx context.Context) ([]Rule, error) {
 }
 
 func (s *pgStore) Silences(ctx context.Context, now time.Time) ([]Silence, error) {
-	rows, err := s.pool.Query(ctx, `SELECT silence_id, matchers, reason, starts_at, ends_at FROM silences WHERE starts_at <= $1 AND ends_at > $1 ORDER BY ends_at`, now)
+	rows, err := s.pool.Query(ctx, `SELECT silence_id, matchers, reason, starts_at, ends_at FROM silences WHERE tenant_id='default' AND starts_at <= $1 AND ends_at > $1 ORDER BY ends_at`, now)
 	if err != nil {
 		return nil, err
 	}
@@ -83,11 +83,17 @@ func (s *pgStore) Silences(ctx context.Context, now time.Time) ([]Silence, error
 }
 
 func (s *pgStore) Upsert(ctx context.Context, a Alert) error {
-	labels, err := json.Marshal(a.Labels)
+	// A nil map marshals to null, and the column would keep that literal. The
+	// column's default is the empty object, so that is what a nil map writes.
+	labels := a.Labels
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	raw, err := json.Marshal(labels)
 	if err != nil {
 		return err
 	}
-	_, err = s.pool.Exec(ctx, `INSERT INTO alerts (alert_key, rule_id, severity, state, cluster_id, instance_id, datname, labels, value, summary, started_at, last_eval_at, resolved_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (tenant_id, alert_key, started_at) DO UPDATE SET state=EXCLUDED.state, value=EXCLUDED.value, last_eval_at=EXCLUDED.last_eval_at, resolved_at=EXCLUDED.resolved_at`, a.Key, a.RuleID, a.Severity, a.State, a.ClusterID, a.InstanceID, a.Datname, labels, a.Value, a.Summary, a.StartedAt, a.LastEvalAt, a.ResolvedAt)
+	_, err = s.pool.Exec(ctx, `INSERT INTO alerts (alert_key, rule_id, severity, state, cluster_id, instance_id, datname, labels, value, summary, started_at, last_eval_at, resolved_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (tenant_id, alert_key, started_at) DO UPDATE SET state=EXCLUDED.state, value=EXCLUDED.value, last_eval_at=EXCLUDED.last_eval_at, resolved_at=EXCLUDED.resolved_at`, a.Key, a.RuleID, a.Severity, a.State, a.ClusterID, a.InstanceID, a.Datname, raw, a.Value, a.Summary, a.StartedAt, a.LastEvalAt, a.ResolvedAt)
 	return err
 }
 
@@ -145,7 +151,7 @@ func purgeBatches(ctx context.Context, db storeDB, batch int, query string, befo
 }
 
 func (s *pgStore) Active(ctx context.Context, f Filter) ([]Alert, error) {
-	query := `SELECT alert_key, rule_id, severity, state, cluster_id, instance_id, datname, labels, value, summary, started_at, last_eval_at, resolved_at FROM alerts WHERE TRUE`
+	query := `SELECT alert_key, rule_id, severity, state, cluster_id, instance_id, datname, labels, value, summary, started_at, last_eval_at, resolved_at FROM alerts WHERE tenant_id='default'`
 	// An explicit resolved state must not be combined with the default
 	// exclusion, which would empty the result.
 	if !f.IncludeResolved && f.State != StateResolved {
