@@ -85,7 +85,9 @@ type Result struct {
 }
 
 // Fact is an observation that is not a number: an index definition, a GUC
-// value, a lock tree, or a query plan. Exactly one value representation is set.
+// value, a lock tree, or a query plan. Exactly one value representation is
+// set, except for a setting whose value is the empty string: value_text is
+// omitted from the wire when empty, so a setting with neither value is "".
 type Fact struct {
 	Kind      string            `json:"kind"`
 	Key       string            `json:"key"`
@@ -102,12 +104,15 @@ func (f Fact) Validate() error {
 		return fmt.Errorf("fact key is required")
 	}
 	switch f.Kind {
-	case "index_def", "setting", "lock_tree", "plan", "check_skip":
+	case "index_def", "setting", "lock_tree", "plan", "check_skip", "monitoring_role":
 	default:
 		return fmt.Errorf("unknown fact kind %q", f.Kind)
 	}
 	textSet := f.ValueText != ""
 	jsonSet := len(f.ValueJSON) > 0
+	if f.EmptySetting() {
+		return nil
+	}
 	if textSet == jsonSet {
 		return fmt.Errorf("exactly one fact value is required")
 	}
@@ -115,6 +120,14 @@ func (f Fact) Validate() error {
 		return fmt.Errorf("fact value_json is malformed")
 	}
 	return nil
+}
+
+// EmptySetting reports a setting whose value is the empty string, such as
+// synchronous_standby_names on a server without synchronous standbys. It
+// used to be rejected as a fact without a value, so the setting was never
+// stored and an earlier non-empty value stayed in its place.
+func (f Fact) EmptySetting() bool {
+	return f.Kind == "setting" && f.ValueText == "" && len(f.ValueJSON) == 0
 }
 
 type Metric struct {

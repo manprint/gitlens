@@ -8,10 +8,12 @@ import (
 
 // The monitoring_role check (internal/check/monitoring_role.go) reports one
 // fact under this kind and key on every scrape. Its value lists what lets the
-// role pglens connects as write, "" when nothing does.
+// role pglens connects as write, or is monitoringRoleReadOnly when nothing
+// does.
 const (
 	monitoringRoleFactKind = "monitoring_role"
 	monitoringRoleFactKey  = "self"
+	monitoringRoleReadOnly = "read-only"
 )
 
 // monitoringRoleFresh is how old the monitoring_role fact may be. The check
@@ -43,7 +45,7 @@ func init() {
 		if degraded != nil {
 			return []Finding{*degraded}
 		}
-		if fact.ValueText == "" {
+		if fact.ValueText == monitoringRoleReadOnly {
 			return nil
 		}
 		role := fact.Labels["role"]

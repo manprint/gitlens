@@ -25,11 +25,12 @@ func scrapeMonitoringRoleForTest(t *testing.T, row []any) Fact {
 
 func readOnlyValue(v string) *string { return &v }
 
-// A clean role still reports its fact, with an empty problem list: the
-// advisor resolves an earlier finding on it.
+// A clean role still reports its fact, saying it is read-only: the advisor
+// resolves an earlier finding on it. The value is never empty, since a fact
+// without one does not pass wire.Fact.Validate.
 func TestMonitoringRole_CleanRoleReportsNoProblem(t *testing.T) {
 	f := scrapeMonitoringRoleForTest(t, []any{"pglens", false, false, false, false, false, []string{}, int64(0), readOnlyValue("on")})
-	require.Empty(t, f.ValueText)
+	require.Equal(t, monitoringRoleReadOnly, f.ValueText)
 	require.Equal(t, map[string]string{"role": "pglens", "read_only_default": "on"}, f.Labels)
 }
 

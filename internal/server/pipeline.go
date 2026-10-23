@@ -367,7 +367,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 					continue
 				}
 				var text *string
-				if f.ValueText != "" {
+				if f.ValueText != "" || f.EmptySetting() {
 					v := f.ValueText
 					text = &v
 				}

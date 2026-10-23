@@ -14,6 +14,7 @@ import (
 	"github.com/manprint/pglens/internal/check"
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/command"
+	"github.com/manprint/pglens/internal/wire"
 	"github.com/manprint/pglens/test/pgtest"
 	"github.com/stretchr/testify/require"
 )
@@ -138,8 +139,14 @@ ANALYZE ro_audit`)
 			if req.Scope == check.ScopeDatabase {
 				target = databaseScopedTarget{Target: mgr, database: "app"}
 			}
-			_, err := c.Scrape(ctx, target)
+			res, err := c.Scrape(ctx, target)
 			require.NoError(t, err, c.Name())
+			// The agent drops a fact wire.Fact.Validate refuses, so it
+			// never reaches the server.
+			for _, f := range res.Facts {
+				wf := wire.Fact{Kind: f.Kind, Key: f.Key, Labels: f.Labels, ValueText: f.ValueText, ValueJSON: f.ValueJSON}
+				require.NoError(t, wf.Validate(), "%s fact %s/%s", c.Name(), f.Kind, f.Key)
+			}
 			ran++
 		}
 		require.Greater(t, ran, 15)

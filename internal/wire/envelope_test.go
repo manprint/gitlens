@@ -110,7 +110,28 @@ func TestFact_Validate_RejectsBothValues(t *testing.T) {
 }
 
 func TestFact_Validate_RejectsNeitherValue(t *testing.T) {
-	require.Error(t, (wire.Fact{Kind: "setting", Key: "k"}).Validate())
+	require.Error(t, (wire.Fact{Kind: "index_def", Key: "k"}).Validate())
+	require.Error(t, (wire.Fact{Kind: "monitoring_role", Key: "k"}).Validate())
+}
+
+// A setting may be empty: synchronous_standby_names defaults to the empty
+// string. The empty value_text is omitted from the wire, and the setting
+// still arrives.
+func TestFact_Validate_AcceptsEmptySetting(t *testing.T) {
+	f := wire.Fact{Kind: "setting", Key: "synchronous_standby_names"}
+	require.NoError(t, f.Validate())
+	require.True(t, f.EmptySetting())
+	raw, err := json.Marshal(f)
+	require.NoError(t, err)
+	var back wire.Fact
+	require.NoError(t, json.Unmarshal(raw, &back))
+	require.NoError(t, back.Validate())
+	require.True(t, back.EmptySetting())
+	require.False(t, (wire.Fact{Kind: "setting", Key: "k", ValueText: "v"}).EmptySetting())
+}
+
+func TestFact_Validate_AcceptsMonitoringRole(t *testing.T) {
+	require.NoError(t, (wire.Fact{Kind: "monitoring_role", Key: "self", ValueText: "read-only"}).Validate())
 }
 
 func TestFact_Validate_RejectsMalformedJSON(t *testing.T) {

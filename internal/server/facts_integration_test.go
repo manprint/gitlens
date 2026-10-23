@@ -111,6 +111,26 @@ func TestINTFACT005_V2StoresTypedMetricAndFact(t *testing.T) {
 	require.Equal(t, 1, facts)
 }
 
+// INT-FACT-007: a setting put back to the empty string replaces its earlier
+// value. The empty fact used to be refused, so synchronous_standby_names kept
+// its old standby list and the alert went on requiring a synchronous standby.
+func TestINTFACT007_EmptySettingReplacesValue(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	instance := uuid.NewString()
+	push := func(ts time.Time, value string) {
+		env := wire.Envelope{ProtocolVersion: wire.ProtocolVersionCurrent, AgentID: uuid.NewString(), SentAt: ts, Instances: []wire.Instance{{InstanceID: instance, ClusterID: "27", Role: "primary", Results: []wire.Result{{Check: "settings", TS: ts, Facts: []wire.Fact{{Kind: "setting", Key: "synchronous_standby_names", ValueText: value}}}}}}}
+		assertPush(t, factsRouter(pool), env, http.StatusAccepted)
+	}
+	first := time.Now().UTC().Truncate(time.Microsecond).Add(-time.Minute)
+	push(first, "standby1")
+	push(first.Add(30*time.Second), "")
+	var value *string
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT value_text FROM object_facts WHERE instance_id=$1 AND kind='setting' AND key='synchronous_standby_names'`, instance).Scan(&value))
+	require.NotNil(t, value)
+	require.Equal(t, "", *value)
+}
+
 // INT-FACT-006: unknown future protocol versions are rejected with the
 // supported range in the response.
 func TestINTFACT006_RejectsUnknownProtocol(t *testing.T) {

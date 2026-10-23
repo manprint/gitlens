@@ -47,7 +47,7 @@ DROP ROLE IF EXISTS check_role_group`)
 
 		for _, role := range []pgtest.Role{pgtest.RoleT0, pgtest.RoleT1, pgtest.RoleT2} {
 			f := scrapeMonitoringRole(t, pg, pg.Pool(t, "app", role), "")
-			require.Empty(t, f.ValueText, role.String())
+			require.Equal(t, monitoringRoleReadOnly, f.ValueText, role.String())
 			require.Equal(t, "on", f.Labels["read_only_default"], role.String())
 		}
 

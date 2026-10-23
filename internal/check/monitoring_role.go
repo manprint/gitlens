@@ -13,12 +13,14 @@ import (
 func init() { Register(&monitoringRoleCheck{}) }
 
 // The monitoring_role check reports one fact on every scrape. Its value lists
-// what lets the role pglens connects as write ("" when nothing does), so the
-// advisor (internal/advisor/rules_security.go) can tell a role that was fixed
-// from one no longer observed.
+// what lets the role pglens connects as write, or is monitoringRoleReadOnly
+// when nothing does, so the advisor (internal/advisor/rules_security.go) can
+// tell a role that was fixed from one no longer observed. A fact needs a
+// value: wire.Fact.Validate drops one without.
 const (
 	monitoringRoleFactKind = "monitoring_role"
 	monitoringRoleFactKey  = "self"
+	monitoringRoleReadOnly = "read-only"
 )
 
 // readOnlyMemberships are the roles deploy/sql/monitoring_user.sql lets the
@@ -72,9 +74,13 @@ func (c *monitoringRoleCheck) Scrape(ctx context.Context, t Target) (Result, err
 	if err != nil {
 		return Result{}, err
 	}
+	value := monitoringRoleReadOnly
+	if len(posture.Problems) > 0 {
+		value = strings.Join(posture.Problems, "; ")
+	}
 	return Result{Facts: []Fact{{
 		Kind: monitoringRoleFactKind, Key: monitoringRoleFactKey,
-		ValueText: strings.Join(posture.Problems, "; "),
+		ValueText: value,
 		Labels:    map[string]string{"role": posture.Role, "read_only_default": posture.ReadOnlyDefault},
 	}}}, nil
 }

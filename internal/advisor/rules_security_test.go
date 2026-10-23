@@ -19,9 +19,9 @@ func monitoringRoleSnapshot(now time.Time, problems, readOnly string, observed t
 func TestSecurity_RulesSatisfyContract(t *testing.T) {
 	now := time.Now()
 	for _, s := range []*Snapshot{
-		monitoringRoleSnapshot(now, "", "on", now),
+		monitoringRoleSnapshot(now, monitoringRoleReadOnly, "on", now),
 		monitoringRoleSnapshot(now, "has SUPERUSER", "off", now),
-		monitoringRoleSnapshot(now, "", "on", now.Add(-2*time.Hour)),
+		monitoringRoleSnapshot(now, monitoringRoleReadOnly, "on", now.Add(-2*time.Hour)),
 	} {
 		assertRuleContract(t, ruleByID(t, "security.monitoring_role_can_write"), s)
 		assertRuleContract(t, ruleByID(t, "security.monitoring_role_read_only_off"), s)
@@ -31,7 +31,7 @@ func TestSecurity_RulesSatisfyContract(t *testing.T) {
 func TestSecurity_MonitoringRoleCanWrite(t *testing.T) {
 	now := time.Now()
 	rule := ruleByID(t, "security.monitoring_role_can_write")
-	require.Empty(t, rule.Evaluate(monitoringRoleSnapshot(now, "", "on", now)))
+	require.Empty(t, rule.Evaluate(monitoringRoleSnapshot(now, monitoringRoleReadOnly, "on", now)))
 
 	got := rule.Evaluate(monitoringRoleSnapshot(now, "is a member of pg_write_all_data; owns 2 object(s)", "on", now))
 	require.Len(t, got, 1)
@@ -44,9 +44,9 @@ func TestSecurity_MonitoringRoleCanWrite(t *testing.T) {
 func TestSecurity_MonitoringRoleReadOnlyOff(t *testing.T) {
 	now := time.Now()
 	rule := ruleByID(t, "security.monitoring_role_read_only_off")
-	require.Empty(t, rule.Evaluate(monitoringRoleSnapshot(now, "", "on", now)))
+	require.Empty(t, rule.Evaluate(monitoringRoleSnapshot(now, monitoringRoleReadOnly, "on", now)))
 	for _, value := range []string{"off", ""} {
-		got := rule.Evaluate(monitoringRoleSnapshot(now, "", value, now))
+		got := rule.Evaluate(monitoringRoleSnapshot(now, monitoringRoleReadOnly, value, now))
 		require.Len(t, got, 1, value)
 		require.Equal(t, StateOpen, got[0].State)
 		require.Equal(t, SeverityWarning, got[0].Severity)
@@ -57,7 +57,7 @@ func TestSecurity_MonitoringRoleReadOnlyOff(t *testing.T) {
 // safe: the finding degrades instead.
 func TestSecurity_MonitoringRoleUnobservedDegrades(t *testing.T) {
 	now := time.Now()
-	stale := monitoringRoleSnapshot(now, "", "on", now.Add(-2*time.Hour))
+	stale := monitoringRoleSnapshot(now, monitoringRoleReadOnly, "on", now.Add(-2*time.Hour))
 	missing := &Snapshot{Now: now, Facts: map[string]map[string]Fact{}}
 	for _, id := range []string{"security.monitoring_role_can_write", "security.monitoring_role_read_only_off"} {
 		rule := ruleByID(t, id)
