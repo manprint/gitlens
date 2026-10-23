@@ -41,7 +41,7 @@ Sistema leggero, open, self-hostable per monitorare fleet Postgres eterogenea:
 
 Requisito trasversale: **sia Server che Agent devono girare nativi o in Docker senza perdita di funzionalità** (host monitoring e discovery inclusi).
 
-**Versioni Postgres supportate: 15 -> 18.** PG 12 è EOL (nov 2024), fuori scope. Ogni check dichiara `MinPG`/`MaxPG` (vedi matrice sez. 3.6).
+**Versioni Postgres supportate: 15 -> 19.** PG 12 è EOL (nov 2024), fuori scope. Ogni check dichiara `MinPG`/`MaxPG` (vedi matrice sez. 3.6).
 
 Obiettivi:
 - Zero overhead su DB prod (query leggere, budget fisso, circuit breaker)
@@ -943,7 +943,7 @@ Da scrivere in README e in UI. Un limite dichiarato è una scelta di design; un 
 
 **12.1 Matrice compose**
 
-Versioni × topologie, generata da template:
+Versioni × topologie, generata da template. È la matrice del piano Phase 0, che elenca PG 15-18; lo stato corrente è nel paragrafo sotto la tabella (L2 su PG 15-19, L3 solo su PG 17).
 
 | | standalone | primary + 1 standby | cascading (P -> S1 -> S2) | logical pub/sub | + pgbouncer |
 |---|---|---|---|---|---|
