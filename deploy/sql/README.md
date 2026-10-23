@@ -105,7 +105,7 @@ At T0 the agent schedules: `instance_info`, `monitoring_role`, `activity`, `lock
 `vacuum_progress`, `replication_slots`, `replication_streaming` on primaries,
 `replication_receiver` on standbys, `table_stats`, `index_stats`,
 `bloat_estimate`, `trigger_inventory`, `fk_indexes`, `extensions`,
-`postgis_columns`, and `sequences`. At T0 `sequences` sees each sequence's
+`postgis_columns`, `sequences`, and `partitions`. At T0 `sequences` sees each sequence's
 type and bounds but reads its value only where the role was granted SELECT
 on it (`GRANT SELECT ON SEQUENCE ... TO pglens`); T1 reads every value.
 Never grant USAGE on a sequence: USAGE allows `nextval()`, which advances it.

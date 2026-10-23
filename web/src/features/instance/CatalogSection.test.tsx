@@ -48,6 +48,7 @@ function renderCatalog(
   extensions: Schemas['Extension'][] = [],
   spatial: Schemas['SpatialColumn'][] = [],
   sequences: Schemas['Sequence'][] = [],
+  partitioned: Schemas['PartitionedTable'][] = [],
 ) {
   server.use(
     ok('getInstanceTriggers', {
@@ -73,6 +74,11 @@ function renderCatalog(
     ok('getInstanceSequences', {
       instance_id: INSTANCE_ID,
       sequences,
+      truncated_databases: [],
+    }),
+    ok('getInstancePartitionedTables', {
+      instance_id: INSTANCE_ID,
+      tables: partitioned,
       truncated_databases: [],
     }),
   )
@@ -110,6 +116,35 @@ function sequence(overrides: Partial<Schemas['Sequence']> = {}): Schemas['Sequen
     changed_at: SEEN,
     ...overrides,
   }
+}
+
+function partitionedTable(
+  overrides: Partial<Schemas['PartitionedTable']> = {},
+): Schemas['PartitionedTable'] {
+  return {
+    datname: 'app',
+    schemaname: 'public',
+    relname: 'events',
+    strategy: 'range',
+    partition_key: 'RANGE (at)',
+    partitions: 12,
+    direct_partitions: 12,
+    depth: 1,
+    bytes: 1048576,
+    rows: 50000,
+    default_partition: null,
+    default_rows: null,
+    invalid_indexes: [],
+    analyzed_at: SEEN,
+    covered_until: null,
+    first_seen: SEEN,
+    last_seen: SEEN,
+    ...overrides,
+  }
+}
+
+function daysFromNow(days: number): string {
+  return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
 }
 
 function tableRows() {
@@ -364,5 +399,65 @@ describe('CatalogSection', () => {
     expect(screen.getByRole('status')).toHaveTextContent(
       'The values of 1 sequence are not readable by the monitoring role',
     )
+  })
+
+  // UI-CAT-007: partition trees are listed whole; a default partition
+  // holding rows, an invalid partitioned index and partitions about to run
+  // out are marked, the last as ended once past, as the advisor does.
+  it('lists partitioned tables with what needs attention', async () => {
+    renderCatalog(
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [
+        partitionedTable({
+          default_partition: 'public.events_default',
+          default_rows: 5,
+          covered_until: daysFromNow(2),
+        }),
+        partitionedTable({
+          relname: 'logs',
+          strategy: 'list',
+          partition_key: 'LIST (kind)',
+          partitions: 2,
+          depth: 2,
+          invalid_indexes: ['logs_kind_idx'],
+          analyzed_at: null,
+        }),
+        partitionedTable({ relname: 'forever', covered_until: 'unbounded' }),
+        partitionedTable({ relname: 'old', covered_until: daysFromNow(-3) }),
+        partitionedTable({ relname: 'planned', covered_until: daysFromNow(90) }),
+        partitionedTable({ relname: 'archive', covered_until: daysFromNow(-400) }),
+      ],
+    )
+    await settle()
+
+    const tab = screen.getByRole('tab', { name: /Partitions/ })
+    expect(tab).toHaveAccessibleName('Partitions 3 need attention')
+    fireEvent.mouseDown(tab)
+    fireEvent.click(tab)
+    await settle()
+    const rows = tableRows()
+    expect(rows.map((row) => within(row).getAllByRole('cell')[1]?.textContent)).toEqual([
+      'public.events',
+      'public.logs',
+      'public.forever',
+      'public.old',
+      'public.planned',
+      'public.archive',
+    ])
+    expect(within(rows[0]!).getByText('5 rows')).toBeInTheDocument()
+    expect(within(rows[0]!).getByText('ends soon')).toBeInTheDocument()
+    expect(within(rows[1]!).getByText('2 in 2 levels')).toBeInTheDocument()
+    expect(within(rows[1]!).getByText('logs_kind_idx')).toBeInTheDocument()
+    expect(within(rows[1]!).getByText('never')).toBeInTheDocument()
+    expect(within(rows[2]!).getByText('no end (MAXVALUE)')).toBeInTheDocument()
+    expect(within(rows[3]!).getByText('ended')).toBeInTheDocument()
+    expect(within(rows[4]!).queryByText(/ends soon|ended/)).not.toBeInTheDocument()
+    // Long past, a table is taken as retired: shown, not counted.
+    expect(within(rows[5]!).getByText('(ended)')).toBeInTheDocument()
   })
 })

@@ -20,17 +20,18 @@ type FactKind struct {
 // drops a fact Validate refuses before sending it: a check that reports a
 // new kind must add it here.
 var factKinds = map[string]FactKind{
-	"index_def":       {Check: "index_stats", Replace: true},
-	"setting":         {Check: "settings", Replace: true},
-	"lock_tree":       {Check: "locks"},
-	"plan":            {},
-	"check_skip":      {},
-	"monitoring_role": {Check: "monitoring_role", Replace: true},
-	"trigger":         {Check: "trigger_inventory", Replace: true},
-	"fk_unindexed":    {Check: "fk_indexes", Replace: true},
-	"extension":       {Check: "extensions", Replace: true},
-	"spatial_column":  {Check: "postgis_columns", Replace: true},
-	"sequence":        {Check: "sequences", Replace: true},
+	"index_def":         {Check: "index_stats", Replace: true},
+	"setting":           {Check: "settings", Replace: true},
+	"lock_tree":         {Check: "locks"},
+	"plan":              {},
+	"check_skip":        {},
+	"monitoring_role":   {Check: "monitoring_role", Replace: true},
+	"trigger":           {Check: "trigger_inventory", Replace: true},
+	"fk_unindexed":      {Check: "fk_indexes", Replace: true},
+	"extension":         {Check: "extensions", Replace: true},
+	"spatial_column":    {Check: "postgis_columns", Replace: true},
+	"sequence":          {Check: "sequences", Replace: true},
+	"partitioned_table": {Check: "partitions", Replace: true},
 }
 
 // LookupFactKind returns the description of a fact kind, and whether the

@@ -65,6 +65,11 @@ function renderPage(
       sequences: [],
       truncated_databases: [],
     }),
+    ok('getInstancePartitionedTables', {
+      instance_id: INSTANCE_ID,
+      tables: [],
+      truncated_databases: [],
+    }),
     ok('getInstanceUnindexedForeignKeys', {
       instance_id: INSTANCE_ID,
       foreign_keys: [],

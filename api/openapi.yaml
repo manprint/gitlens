@@ -614,6 +614,47 @@ components:
         first_seen: { $ref: '#/components/schemas/Timestamp' }
         last_seen: { $ref: '#/components/schemas/Timestamp' }
         changed_at: { $ref: '#/components/schemas/Timestamp' }
+    PartitionedTablesResponse:
+      type: object
+      required: [instance_id, tables, truncated_databases]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        tables: { type: array, items: { $ref: '#/components/schemas/PartitionedTable' } }
+        truncated_databases:
+          type: array
+          items: { type: string }
+          description: Databases with more partitioned tables than the agent reports (200); the largest come first.
+    PartitionedTable:
+      type: object
+      description: A partition tree rolled up to its top partitioned table.
+      required: [datname, schemaname, relname, strategy, partition_key, partitions, direct_partitions, depth, bytes, rows, default_partition, default_rows, invalid_indexes, analyzed_at, covered_until, first_seen, last_seen]
+      properties:
+        datname: { type: string }
+        schemaname: { type: string }
+        relname: { type: string }
+        strategy: { type: string, enum: [range, list, hash] }
+        partition_key: { type: string, description: 'Strategy and key columns, e.g. RANGE (created_at); an expression in the key reads "expression".' }
+        partitions: { type: integer, format: int32, description: Leaf partitions in the whole tree. }
+        direct_partitions: { type: integer, format: int32 }
+        depth: { type: integer, format: int32, description: 'Levels below the top table: 1 without sub-partitions.' }
+        bytes: { type: integer, format: int64, description: 'Leaves with their indexes and TOAST, estimated from relpages as of the last VACUUM or ANALYZE.' }
+        rows: { type: number, format: double, description: Estimated rows of the leaves (reltuples). }
+        default_partition: { type: [string, 'null'], description: 'schema.table of the default partition; null without one.' }
+        default_rows: { type: [number, 'null'], format: double, description: 'Estimated rows in the default partition; null without one.' }
+        invalid_indexes: { type: array, items: { type: string }, description: Partitioned indexes not valid because a partition lacks the index. }
+        analyzed_at:
+          oneOf:
+            - { $ref: '#/components/schemas/Timestamp' }
+            - { type: 'null' }
+          description: When the partitioned table itself was last analyzed; null if never (autovacuum never analyzes it).
+        covered_until:
+          type: [string, 'null']
+          description: >-
+            For a table range-partitioned on one date or timestamp column,
+            the highest upper bound of its partitions (RFC 3339), or
+            "unbounded" when one reaches MAXVALUE; null for any other table.
+        first_seen: { $ref: '#/components/schemas/Timestamp' }
+        last_seen: { $ref: '#/components/schemas/Timestamp' }
     DriftValue:
       type: object
       required: [instance_id, role, value]
@@ -1358,6 +1399,37 @@ paths:
                     instance_id: 11111111-1111-1111-1111-111111111111
                     sequences:
                       - { datname: app, schemaname: public, name: orders_id_seq, data_type: bigint, state: used, start: '1', increment: '1', min: '1', max: '9223372036854775807', cycle: false, last_value: '2000000000', limit: '2147483647', limit_source: column, exhausts: true, used_ratio: 0.931323, remaining: '147483647', table_schema: public, table: orders, column: id, column_type: integer, link: owned, columns: 1, first_seen: '2026-08-27T01:00:00Z', last_seen: '2026-08-27T02:00:00Z', changed_at: '2026-08-27T01:00:00Z' }
+                    truncated_databases: []
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/partitioned-tables:
+    get:
+      tags: [instances]
+      operationId: getInstancePartitionedTables
+      summary: Return the partitioned tables, each rolled up over its partitions.
+      description: >-
+        The latest partitions scrape of each database, reported in the last
+        three hours. Only the catalogs and pg_stat_user_tables are read, so
+        no table is locked: sizes and rows are the planner's estimates.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - name: datname
+          in: query
+          required: false
+          schema: { type: string }
+          description: Return the partitioned tables of this database only.
+      responses:
+        '200':
+          description: Partitioned tables by database, schema and name.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PartitionedTablesResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    tables:
+                      - { datname: app, schemaname: public, relname: events, strategy: range, partition_key: RANGE (at), partitions: 13, direct_partitions: 13, depth: 1, bytes: 104857600, rows: 2500000, default_partition: public.events_default, default_rows: 1200, invalid_indexes: [], analyzed_at: null, covered_until: '2026-11-01T00:00:00Z', first_seen: '2026-08-27T01:00:00Z', last_seen: '2026-08-27T02:00:00Z' }
                     truncated_databases: []
         '400': { $ref: '#/components/responses/BadRequest' }
 

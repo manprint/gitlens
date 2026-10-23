@@ -295,6 +295,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/instances/{id}/partitioned-tables": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Return the partitioned tables, each rolled up over its partitions.
+         * @description The latest partitions scrape of each database, reported in the last three hours. Only the catalogs and pg_stat_user_tables are read, so no table is locked: sizes and rows are the planner's estimates.
+         */
+        get: operations["getInstancePartitionedTables"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instances/{id}/tables": {
         parameters: {
             query?: never;
@@ -1334,6 +1354,59 @@ export interface components {
             last_seen: components["schemas"]["Timestamp"];
             changed_at: components["schemas"]["Timestamp"];
         };
+        PartitionedTablesResponse: {
+            instance_id: components["schemas"]["InstanceId"];
+            tables: components["schemas"]["PartitionedTable"][];
+            /** @description Databases with more partitioned tables than the agent reports (200); the largest come first. */
+            truncated_databases: string[];
+        };
+        /** @description A partition tree rolled up to its top partitioned table. */
+        PartitionedTable: {
+            datname: string;
+            schemaname: string;
+            relname: string;
+            /** @enum {string} */
+            strategy: "range" | "list" | "hash";
+            /** @description Strategy and key columns, e.g. RANGE (created_at); an expression in the key reads "expression". */
+            partition_key: string;
+            /**
+             * Format: int32
+             * @description Leaf partitions in the whole tree.
+             */
+            partitions: number;
+            /** Format: int32 */
+            direct_partitions: number;
+            /**
+             * Format: int32
+             * @description Levels below the top table: 1 without sub-partitions.
+             */
+            depth: number;
+            /**
+             * Format: int64
+             * @description Leaves with their indexes and TOAST, estimated from relpages as of the last VACUUM or ANALYZE.
+             */
+            bytes: number;
+            /**
+             * Format: double
+             * @description Estimated rows of the leaves (reltuples).
+             */
+            rows: number;
+            /** @description schema.table of the default partition; null without one. */
+            default_partition: string | null;
+            /**
+             * Format: double
+             * @description Estimated rows in the default partition; null without one.
+             */
+            default_rows: number | null;
+            /** @description Partitioned indexes not valid because a partition lacks the index. */
+            invalid_indexes: string[];
+            /** @description When the partitioned table itself was last analyzed; null if never (autovacuum never analyzes it). */
+            analyzed_at: components["schemas"]["Timestamp"] | null;
+            /** @description For a table range-partitioned on one date or timestamp column, the highest upper bound of its partitions (RFC 3339), or "unbounded" when one reaches MAXVALUE; null for any other table. */
+            covered_until: string | null;
+            first_seen: components["schemas"]["Timestamp"];
+            last_seen: components["schemas"]["Timestamp"];
+        };
         DriftValue: {
             instance_id: components["schemas"]["InstanceId"];
             role: string;
@@ -1964,6 +2037,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SequencesResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+        };
+    };
+    getInstancePartitionedTables: {
+        parameters: {
+            query?: {
+                /** @description Return the partitioned tables of this database only. */
+                datname?: string;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["InstanceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Partitioned tables by database, schema and name. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartitionedTablesResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];

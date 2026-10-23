@@ -61,7 +61,7 @@ CREATE INDEX ON %[1]s.hashed USING hash (a)`, schema))
 			// wait for them.
 			holder, err := admin.Begin(ctx)
 			require.NoError(t, err)
-			defer func() { _ = holder.Rollback(context.Background()) }()
+			defer func() { _ = holder.Rollback(ctx) }()
 			_, err = holder.Exec(ctx, fmt.Sprintf("LOCK TABLE %[1]s.bare, %[1]s.events_2026 IN ACCESS EXCLUSIVE MODE", schema))
 			require.NoError(t, err)
 			conn, err := pool.Acquire(ctx)

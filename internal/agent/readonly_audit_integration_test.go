@@ -84,7 +84,7 @@ ORDER BY 1`)
 // monitoring role sent is one that reads.
 func TestINTRO001_AgentOnlyReads(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
-		auditAgentOnlyReads(t, pg, "", []string{"trigger", "fk_unindexed", "extension", "sequence"}, "")
+		auditAgentOnlyReads(t, pg, "", []string{"trigger", "fk_unindexed", "extension", "sequence", "partitioned_table"}, "")
 	})
 }
 
@@ -99,7 +99,7 @@ func TestINTRO002_AgentOnlyReadsPostGIS(t *testing.T) {
 CREATE TABLE ro_audit_places (id int PRIMARY KEY, pt geometry(Point, 4326), area geometry(Polygon));
 CREATE INDEX ON ro_audit_places USING gist (pt);
 INSERT INTO ro_audit_places SELECT g, ST_SetSRID(ST_MakePoint(g, g), 4326) FROM generate_series(1, 100) g`,
-			[]string{"trigger", "fk_unindexed", "extension", "spatial_column", "sequence"},
+			[]string{"trigger", "fk_unindexed", "extension", "spatial_column", "sequence", "partitioned_table"},
 			"belongs to extension postgis_topology")
 	})
 }
@@ -116,7 +116,7 @@ func auditAgentOnlyReads(t *testing.T, pg *pgtest.PG, extraFixture string, kinds
 		ctx := context.Background()
 		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
 		t.Cleanup(func() {
-			_, _ = admin.Exec(context.Background(), "DROP TABLE IF EXISTS ro_audit_child, ro_audit, ro_audit_places; DROP FUNCTION IF EXISTS ro_audit_touch(); DROP SEQUENCE IF EXISTS ro_audit_fresh, ro_audit_down")
+			_, _ = admin.Exec(context.Background(), "DROP TABLE IF EXISTS ro_audit_child, ro_audit, ro_audit_places, ro_audit_parts; DROP FUNCTION IF EXISTS ro_audit_touch(); DROP SEQUENCE IF EXISTS ro_audit_fresh, ro_audit_down")
 		})
 		_, err := admin.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 CREATE EXTENSION IF NOT EXISTS pgstattuple;
@@ -132,6 +132,12 @@ CREATE TABLE ro_audit_child (id int PRIMARY KEY, audit_id bigint REFERENCES ro_a
 CREATE TRIGGER ro_audit_touch BEFORE INSERT ON ro_audit_child FOR EACH ROW EXECUTE FUNCTION ro_audit_touch();
 ALTER TABLE ro_audit_child DISABLE TRIGGER ALL;
 DROP SEQUENCE IF EXISTS ro_audit_fresh, ro_audit_down;
+DROP TABLE IF EXISTS ro_audit_parts;
+CREATE TABLE ro_audit_parts (at date NOT NULL, id int) PARTITION BY RANGE (at);
+CREATE TABLE ro_audit_parts_2026 PARTITION OF ro_audit_parts FOR VALUES FROM ('2026-01-01') TO ('2027-01-01');
+CREATE TABLE ro_audit_parts_def PARTITION OF ro_audit_parts DEFAULT;
+CREATE INDEX ro_audit_parts_id ON ONLY ro_audit_parts (id);
+INSERT INTO ro_audit_parts VALUES ('2030-01-01', 1);
 CREATE SEQUENCE ro_audit_fresh;
 CREATE SEQUENCE ro_audit_down AS integer INCREMENT -1 MAXVALUE -1 CYCLE;
 SELECT setval('ro_audit_down', -5);

@@ -461,3 +461,141 @@ func init() {
 		return out
 	}}})
 }
+
+const (
+	partitionedTableFactKind = "partitioned_table"
+	// partitionHorizon is how far ahead a time-range partitioned table's
+	// partitions should reach.
+	partitionHorizon = 7 * 24 * time.Hour
+	// partitionLapsedFor is how long after its partitions ran out a table
+	// is still reported: one that ran out long ago is more likely retired
+	// than forgotten, and rows still arriving show in its default partition.
+	partitionLapsedFor = 30 * 24 * time.Hour
+	// partitionAnalyzeRows is the size, in estimated rows, from which a
+	// partitioned table that was never analyzed is reported.
+	partitionAnalyzeRows = 10000
+)
+
+func init() {
+	Register(relationRule{id: "partition.default_has_rows", severity: SeverityWarning, needs: []string{"partitions"}, eval: func(s *Snapshot) []Finding {
+		const id = "partition.default_has_rows"
+		var out []Finding
+		for _, f := range currentFacts(s, partitionedTableFactKind) {
+			rows, err := strconv.ParseFloat(f.Labels["default_rows"], 64)
+			if err != nil || rows <= 0 {
+				continue
+			}
+			table, tableSQL := catalogTable(f)
+			def := f.Labels["default_partition"]
+			defSQL := pgx.Identifier{f.Labels["default_schema"], f.Labels["default_relname"]}.Sanitize()
+			out = append(out, relationFinding(id, SeverityWarning, f.Datname, table,
+				fmt.Sprintf("Default partition %s holds about %s rows", def, formatCatalogCount(rows)),
+				fmt.Sprintf("Rows of %s in database %s that match no partition land in its default partition %s (about %s rows). Creating a partition for a range that has rows there fails until they are moved, and attaching any partition scans the default partition.", table, f.Datname, def, formatCatalogCount(rows)),
+				fmt.Sprintf("Create the partitions those rows belong to: in one transaction, ALTER TABLE %s DETACH PARTITION %s, create the missing partitions, move the rows with INSERT INTO %s SELECT ... and DELETE, then ATTACH PARTITION %s DEFAULT.", tableSQL, defSQL, tableSQL, defSQL),
+				map[string]any{"table": table, "default_partition": def, "rows": rows}))
+		}
+		return out
+	}})
+	Register(relationRule{id: "partition.future_missing", severity: SeverityCritical, needs: []string{"partitions"}, eval: func(s *Snapshot) []Finding {
+		const id = "partition.future_missing"
+		if s.Now.IsZero() {
+			return nil
+		}
+		var out []Finding
+		for _, f := range currentFacts(s, partitionedTableFactKind) {
+			until, err := time.Parse(time.RFC3339, f.Labels["covered_until"])
+			if err != nil {
+				continue
+			}
+			ahead := until.Sub(s.Now)
+			if ahead >= partitionHorizon || ahead < -partitionLapsedFor {
+				continue
+			}
+			table, tableSQL := catalogTable(f)
+			hasDefault := f.Labels["default_partition"] != ""
+			severity, title := SeverityWarning, fmt.Sprintf("Partitions of %s end in %s", table, formatCatalogDuration(ahead))
+			consequence := "rows past that point will fail to insert"
+			if hasDefault {
+				consequence = "rows past that point will land in the default partition " + f.Labels["default_partition"]
+			}
+			if ahead <= 0 {
+				title = fmt.Sprintf("Partitions of %s ended %s ago", table, formatCatalogDuration(-ahead))
+				if hasDefault {
+					consequence = "rows since then land in the default partition " + f.Labels["default_partition"]
+				} else {
+					severity, consequence = SeverityCritical, "inserts of rows since then fail"
+				}
+			}
+			out = append(out, relationFinding(id, severity, f.Datname, table, title,
+				fmt.Sprintf("%s in database %s is partitioned by range (%s), and its partitions reach %s: %s.", table, f.Datname, f.Labels["partition_key"], until.UTC().Format("2006-01-02 15:04 MST"), consequence),
+				fmt.Sprintf("Create the next partitions ahead of time (CREATE TABLE ... PARTITION OF %s FOR VALUES FROM (...) TO (...)), and schedule their creation, with pg_partman or a cron job, so the table never runs out.", tableSQL),
+				map[string]any{"table": table, "covered_until": f.Labels["covered_until"], "default_partition": f.Labels["default_partition"]}))
+		}
+		return out
+	}})
+	Register(relationRule{id: "partition.index_invalid", severity: SeverityWarning, needs: []string{"partitions"}, eval: func(s *Snapshot) []Finding {
+		const id = "partition.index_invalid"
+		var out []Finding
+		for _, f := range currentFacts(s, partitionedTableFactKind) {
+			if f.Labels["invalid_indexes"] == "" {
+				continue
+			}
+			indexes := strings.Split(f.Labels["invalid_indexes"], ",")
+			table, _ := catalogTable(f)
+			unique := ""
+			if f.Labels["invalid_unique_indexes"] != "" && f.Labels["invalid_unique_indexes"] != "0" {
+				unique = " A unique index among them does not enforce uniqueness on the partitions that lack it."
+			}
+			noun, verb := "index", "is"
+			if len(indexes) > 1 {
+				noun, verb = "indexes", "are"
+			}
+			out = append(out, relationFinding(id, SeverityWarning, f.Datname, table,
+				fmt.Sprintf("%d partitioned %s of %s %s not valid", len(indexes), noun, table, verb),
+				fmt.Sprintf("Partitioned %s %s of %s in database %s %s not valid: some partitions have no matching index attached, so queries on them cannot use it.%s", noun, strings.Join(indexes, ", "), table, f.Datname, verb, unique),
+				"For each partition without the index, CREATE INDEX CONCURRENTLY on the partition, then ALTER INDEX <partitioned index> ATTACH PARTITION <new index>. The partitioned index becomes valid once every partition has one attached.",
+				map[string]any{"table": table, "indexes": indexes}))
+		}
+		return out
+	}})
+	Register(relationRule{id: "partition.parent_not_analyzed", severity: SeverityInfo, needs: []string{"partitions"}, eval: func(s *Snapshot) []Finding {
+		const id = "partition.parent_not_analyzed"
+		var out []Finding
+		for _, f := range currentFacts(s, partitionedTableFactKind) {
+			rows, _ := strconv.ParseFloat(f.Labels["rows"], 64)
+			if f.Labels["analyzed_at"] != "" || rows < partitionAnalyzeRows {
+				continue
+			}
+			table, tableSQL := catalogTable(f)
+			out = append(out, relationFinding(id, SeverityInfo, f.Datname, table,
+				fmt.Sprintf("Partitioned table %s has never been analyzed", table),
+				fmt.Sprintf("%s in database %s holds about %s rows in %s partitions, but has no statistics of its own: autovacuum analyzes partitions, never a partitioned table. The planner uses the table's statistics to estimate joins and queries that span partitions.", table, f.Datname, formatCatalogCount(rows), f.Labels["partitions"]),
+				fmt.Sprintf("ANALYZE %s; and again after large changes in its data, for example from a scheduled job.", tableSQL),
+				map[string]any{"table": table, "rows": rows}))
+		}
+		return out
+	}})
+}
+
+// formatCatalogCount renders an estimated row count with thousands
+// separators.
+func formatCatalogCount(n float64) string {
+	digits := strconv.FormatFloat(n, 'f', 0, 64)
+	var b strings.Builder
+	for i, d := range digits {
+		if i > 0 && (len(digits)-i)%3 == 0 && digits[i-1] != '-' {
+			b.WriteByte(',')
+		}
+		b.WriteRune(d)
+	}
+	return b.String()
+}
+
+// formatCatalogDuration renders a duration in whole days, or hours under a
+// day.
+func formatCatalogDuration(d time.Duration) string {
+	if d < 24*time.Hour {
+		return plural(int(d.Hours()), "hour")
+	}
+	return plural(int(d.Hours()/24), "day")
+}

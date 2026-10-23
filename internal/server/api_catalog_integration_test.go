@@ -197,3 +197,42 @@ func TestINTCAT004_Sequences(t *testing.T) {
 	require.Equal(t, float64(1), wide["columns"])
 	require.Empty(t, raw["truncated_databases"])
 }
+
+// INT-CAT-005: the partitioned tables API types its facts: no default
+// partition and a table never analyzed are null, invalid indexes a list.
+func TestINTCAT005_PartitionedTables(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	instanceID := uuid.New()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	for _, fact := range []struct{ key, strategy, labels string }{
+		{"public.events", "range", `{"schemaname":"public","relname":"events","strategy":"range","partition_key":"RANGE (at)","partitions":"3","direct_partitions":"3","depth":"1","bytes":"819200","rows":"3001","default_partition":"public.events_def","default_schema":"public","default_relname":"events_def","default_rows":"1","invalid_indexes":"ev_uq,ev_b","invalid_unique_indexes":"1","analyzed_at":"2026-10-01T00:00:00Z","covered_until":"2027-07-01T00:00:00Z"}`},
+		{"public.logs", "list", `{"schemaname":"public","relname":"logs","strategy":"list","partition_key":"LIST (kind)","partitions":"2","direct_partitions":"2","depth":"2","bytes":"0","rows":"0","default_partition":"","default_schema":"","default_relname":"","default_rows":"","invalid_indexes":"","invalid_unique_indexes":"0","analyzed_at":"","covered_until":""}`},
+	} {
+		_, err := pool.Exec(ctx, `INSERT INTO object_facts (tenant_id, cluster_id, instance_id, datname, kind, key, labels, value_text, first_seen, last_seen, changed_at) VALUES ('default',1,$1,'app','partitioned_table',$2,$3,$4,$5,$5,$5)`, instanceID, fact.key, fact.labels, fact.strategy, now)
+		require.NoError(t, err)
+	}
+	r := chi.NewRouter()
+	NewAPI(pool).RegisterRoutes(r)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/instances/"+instanceID.String()+"/partitioned-tables", http.NoBody))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &raw))
+	tables := raw["tables"].([]any)
+	require.Len(t, tables, 2)
+	events, logs := tables[0].(map[string]any), tables[1].(map[string]any)
+	require.Equal(t, "public.events_def", events["default_partition"])
+	require.Equal(t, float64(1), events["default_rows"])
+	require.Equal(t, []any{"ev_uq", "ev_b"}, events["invalid_indexes"])
+	require.Equal(t, "2026-10-01T00:00:00Z", events["analyzed_at"])
+	require.Equal(t, "2027-07-01T00:00:00Z", events["covered_until"])
+	require.Equal(t, float64(819200), events["bytes"])
+	require.Nil(t, logs["default_partition"])
+	require.Nil(t, logs["default_rows"])
+	require.Nil(t, logs["analyzed_at"])
+	require.Nil(t, logs["covered_until"])
+	require.Equal(t, []any{}, logs["invalid_indexes"])
+	require.Equal(t, float64(2), logs["depth"])
+}

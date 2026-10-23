@@ -340,6 +340,20 @@ export function useInstanceSequences(id: string) {
   })
 }
 
+export function useInstancePartitionedTables(id: string) {
+  return useApiQuery({
+    policy: REFRESH.catalog,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/partitioned-tables', {
+          params: { path: { id } },
+          signal,
+        }),
+      ),
+    queryKey: qk.instancePartitionedTables(id),
+  })
+}
+
 export function useInstanceTables(
   id: string,
   params: QueryParameters<'/api/v1/instances/{id}/tables'> = {},

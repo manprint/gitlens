@@ -344,3 +344,100 @@ func TestSequenceValueHiddenRule(t *testing.T) {
 	require.Contains(t, got[0].Remediation, "Never grant USAGE")
 	require.NotContains(t, got[0].Remediation, "GRANT USAGE")
 }
+
+func partitionFact(datname, table string, observed time.Time, extra map[string]string) Fact {
+	labels := map[string]string{
+		"schemaname": "public", "relname": table, "strategy": "range", "partition_key": "RANGE (at)",
+		"partitions": "12", "direct_partitions": "12", "depth": "1", "bytes": "1048576", "rows": "50000",
+		"default_partition": "", "default_rows": "", "invalid_indexes": "", "invalid_unique_indexes": "0",
+		"analyzed_at": "2026-10-01T00:00:00Z", "covered_until": "",
+	}
+	for k, v := range extra {
+		labels[k] = v
+	}
+	return Fact{Key: "public." + table, Datname: datname, ValueText: labels["strategy"], Labels: labels, ObservedAt: observed}
+}
+
+func TestPartitionDefaultHasRowsRule(t *testing.T) {
+	now := time.Now()
+	rule := ruleByID(t, "partition.default_has_rows")
+	s := catalogSnapshot(now, "partitioned_table",
+		partitionFact("app", "events", now, map[string]string{"default_partition": "public.events_def", "default_schema": "public", "default_relname": "events_def", "default_rows": "12345"}),
+		partitionFact("app", "empty", now, map[string]string{"default_partition": "public.empty_def", "default_rows": "0"}),
+		partitionFact("app", "none", now, nil),
+	)
+	assertRuleContract(t, rule, s)
+	got := rule.Evaluate(s)
+	require.Len(t, got, 1)
+	require.Equal(t, "Default partition public.events_def holds about 12,345 rows", got[0].Title)
+	require.Contains(t, got[0].Remediation, `ALTER TABLE "public"."events" DETACH PARTITION "public"."events_def"`)
+}
+
+// A time-range table is reported a week before its partitions run out, and
+// up to a month after; without a default partition, running out is critical.
+func TestPartitionFutureMissingRule(t *testing.T) {
+	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+	rule := ruleByID(t, "partition.future_missing")
+	s := catalogSnapshot(now, "partitioned_table",
+		partitionFact("app", "soon", now, map[string]string{"covered_until": "2026-10-26T00:00:00Z"}),
+		partitionFact("app", "lapsed", now, map[string]string{"covered_until": "2026-10-20T00:00:00Z"}),
+		partitionFact("app", "lapsed_default", now, map[string]string{"covered_until": "2026-10-20T00:00:00Z", "default_partition": "public.d"}),
+		partitionFact("app", "ahead", now, map[string]string{"covered_until": "2026-12-01T00:00:00Z"}),
+		partitionFact("app", "retired", now, map[string]string{"covered_until": "2025-01-01T00:00:00Z"}),
+		partitionFact("app", "forever", now, map[string]string{"covered_until": "unbounded"}),
+		partitionFact("app", "list", now, nil),
+	)
+	assertRuleContract(t, rule, s)
+	got := rule.Evaluate(s)
+	byTable := map[string]Finding{}
+	for _, f := range got {
+		byTable[f.ObjectName] = f
+	}
+	require.Len(t, got, 3)
+	require.Equal(t, SeverityWarning, byTable["public.soon"].Severity)
+	require.Equal(t, "Partitions of public.soon end in 2 days", byTable["public.soon"].Title)
+	require.Contains(t, byTable["public.soon"].Detail, "rows past that point will fail to insert")
+	require.Equal(t, SeverityCritical, byTable["public.lapsed"].Severity)
+	require.Equal(t, "Partitions of public.lapsed ended 3 days ago", byTable["public.lapsed"].Title)
+	require.Equal(t, SeverityWarning, byTable["public.lapsed_default"].Severity)
+	require.Contains(t, byTable["public.lapsed_default"].Detail, "land in the default partition public.d")
+}
+
+func TestPartitionIndexInvalidRule(t *testing.T) {
+	now := time.Now()
+	rule := ruleByID(t, "partition.index_invalid")
+	s := catalogSnapshot(now, "partitioned_table",
+		partitionFact("app", "one", now, map[string]string{"invalid_indexes": "one_uq", "invalid_unique_indexes": "1"}),
+		partitionFact("app", "two", now, map[string]string{"invalid_indexes": "two_a,two_b"}),
+		partitionFact("app", "fine", now, nil),
+	)
+	assertRuleContract(t, rule, s)
+	got := rule.Evaluate(s)
+	require.Len(t, got, 2)
+	require.Equal(t, "1 partitioned index of public.one is not valid", got[0].Title)
+	require.Contains(t, got[0].Detail, "does not enforce uniqueness")
+	require.Equal(t, "2 partitioned indexes of public.two are not valid", got[1].Title)
+	require.NotContains(t, got[1].Detail, "uniqueness")
+}
+
+func TestPartitionParentNotAnalyzedRule(t *testing.T) {
+	now := time.Now()
+	rule := ruleByID(t, "partition.parent_not_analyzed")
+	s := catalogSnapshot(now, "partitioned_table",
+		partitionFact("app", "big", now, map[string]string{"analyzed_at": ""}),
+		partitionFact("app", "small", now, map[string]string{"analyzed_at": "", "rows": "10"}),
+		partitionFact("app", "done", now, nil),
+	)
+	assertRuleContract(t, rule, s)
+	got := rule.Evaluate(s)
+	require.Len(t, got, 1)
+	require.Equal(t, "Partitioned table public.big has never been analyzed", got[0].Title)
+	require.Contains(t, got[0].Detail, "about 50,000 rows in 12 partitions")
+	require.Equal(t, `ANALYZE "public"."big"; and again after large changes in its data, for example from a scheduled job.`, got[0].Remediation)
+}
+
+func TestFormatCatalogCount(t *testing.T) {
+	for n, want := range map[float64]string{0: "0", 999: "999", 1000: "1,000", 1234567: "1,234,567", -1234: "-1,234"} {
+		require.Equal(t, want, formatCatalogCount(n))
+	}
+}

@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 
 import {
   useInstanceExtensions,
+  useInstancePartitionedTables,
   useInstanceSequences,
   useInstanceSpatialColumns,
   useInstanceTriggers,
@@ -29,6 +30,7 @@ interface CatalogSectionProps {
 type Trigger = Schemas['Trigger']
 type SpatialColumn = Schemas['SpatialColumn']
 type Sequence = Schemas['Sequence']
+type PartitionedTable = Schemas['PartitionedTable']
 
 const selectClassName = 'border-input bg-background h-9 w-full rounded-md border px-3'
 
@@ -610,6 +612,176 @@ function SequencesTab({ response }: { response: Schemas['SequencesResponse'] }) 
   )
 }
 
+/** How far ahead a time-range table's partitions should reach, as in the advisor. */
+const PARTITION_HORIZON_MS = 7 * 24 * 60 * 60 * 1000
+/**
+ * How long after its partitions ended a table is taken as retired rather than
+ * forgotten, as in the advisor.
+ */
+const PARTITION_LAPSED_MS = 30 * 24 * 60 * 60 * 1000
+/** Rows from which a never-analyzed partitioned table is worth a mention, as in the advisor. */
+const PARTITION_ANALYZE_ROWS = 10_000
+
+/** Milliseconds until a table's partitions run out, or null when that is not known or never. */
+function partitionAhead(table: PartitionedTable, now: Date): number | null {
+  if (table.covered_until === null || table.covered_until === 'unbounded') return null
+  const until = new Date(table.covered_until).getTime()
+  return Number.isFinite(until) ? until - now.getTime() : null
+}
+
+function partitionNeedsAttention(table: PartitionedTable, now: Date): boolean {
+  const ahead = partitionAhead(table, now)
+  return (
+    (table.default_rows ?? 0) > 0 ||
+    table.invalid_indexes.length > 0 ||
+    (ahead !== null && ahead < PARTITION_HORIZON_MS && ahead >= -PARTITION_LAPSED_MS)
+  )
+}
+
+function coveredCell(table: PartitionedTable, now: Date): ReactNode {
+  if (table.covered_until === null) return null
+  if (table.covered_until === 'unbounded') return 'no end (MAXVALUE)'
+  const ahead = partitionAhead(table, now)
+  const shown = formatTimestamp(table.covered_until, 'UTC')
+  if (ahead === null || ahead >= PARTITION_HORIZON_MS) return shown
+  if (ahead < -PARTITION_LAPSED_MS) {
+    return (
+      <span>
+        {shown} <span className="text-muted-foreground">(ended)</span>
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center gap-1">
+      {shown}
+      <Badge variant={ahead <= 0 && table.default_partition === null ? 'destructive' : 'secondary'}>
+        {ahead <= 0 ? 'ended' : 'ends soon'}
+      </Badge>
+    </span>
+  )
+}
+
+function partitionColumns(now: Date): DataTableProps<PartitionedTable>['columns'] {
+  return [
+    { accessorKey: 'datname', header: 'Database' },
+    {
+      id: 'table',
+      header: 'Table',
+      accessorFn: (table) => `${table.schemaname}.${table.relname}`,
+    },
+    { accessorKey: 'partition_key', header: 'Key' },
+    {
+      accessorKey: 'partitions',
+      header: 'Partitions',
+      cell: ({ row }) =>
+        row.original.depth > 1
+          ? `${formatCount(row.original.partitions)} in ${row.original.depth} levels`
+          : formatCount(row.original.partitions),
+    },
+    {
+      accessorKey: 'bytes',
+      header: 'Size (est.)',
+      cell: ({ row }) => formatBytes(row.original.bytes),
+    },
+    {
+      accessorKey: 'rows',
+      header: 'Rows (est.)',
+      cell: ({ row }) => formatCount(row.original.rows),
+    },
+    {
+      id: 'default',
+      header: 'Default partition',
+      accessorFn: (table) => table.default_rows ?? -1,
+      cell: ({ row }) => {
+        const { default_partition: name, default_rows: rows } = row.original
+        if (name === null) return <span className="text-muted-foreground">none</span>
+        if ((rows ?? 0) <= 0) return name
+        return (
+          <span className="inline-flex items-center gap-1">
+            {name}
+            <Badge variant="secondary">{formatCount(rows ?? 0)} rows</Badge>
+          </span>
+        )
+      },
+    },
+    {
+      id: 'invalid',
+      header: 'Invalid indexes',
+      accessorFn: (table) => table.invalid_indexes.length,
+      cell: ({ row }) =>
+        row.original.invalid_indexes.length > 0 ? (
+          <Badge variant="secondary">{row.original.invalid_indexes.join(', ')}</Badge>
+        ) : null,
+    },
+    {
+      id: 'analyzed',
+      header: 'Analyzed',
+      accessorFn: (table) => table.analyzed_at ?? '',
+      cell: ({ row }) =>
+        row.original.analyzed_at !== null ? (
+          formatTimestamp(row.original.analyzed_at, 'UTC')
+        ) : row.original.rows >= PARTITION_ANALYZE_ROWS ? (
+          <Badge variant="secondary">never</Badge>
+        ) : (
+          <span className="text-muted-foreground">never</span>
+        ),
+    },
+    {
+      id: 'covered',
+      header: 'Partitions reach',
+      accessorFn: (table) => table.covered_until ?? '',
+      cell: ({ row }) => coveredCell(row.original, now),
+    },
+  ]
+}
+
+function PartitionsTab({
+  response,
+  now,
+}: {
+  response: Schemas['PartitionedTablesResponse']
+  now: Date
+}) {
+  const filter = useDatabaseFilter(response.tables)
+  const columns = useMemo(() => partitionColumns(now), [now])
+
+  return (
+    <div className="space-y-4">
+      <p className="text-muted-foreground text-sm">
+        Each partitioned table with its whole tree. Sizes and rows are the planner&apos;s estimates,
+        so reading them locks no partition.
+      </p>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <DatabaseFilter
+          id="catalog-partition-database"
+          databases={filter.databases}
+          value={filter.database}
+          onChange={filter.setDatabase}
+        />
+      </div>
+      <TruncatedNotice
+        truncated={response.truncated_databases}
+        database={filter.database}
+        what="partitioned tables"
+        kept="the largest are listed"
+      />
+      <DataTable
+        ariaLabel="Partitioned tables"
+        columns={columns}
+        data={filter.rows}
+        emptyState={
+          <EmptyState
+            title="No partitioned tables reported"
+            description="No monitored database has a partitioned table."
+          />
+        }
+        scope="partitioned tables"
+        total={response.tables.length}
+      />
+    </div>
+  )
+}
+
 interface CatalogTabStateProps<T> {
   query: ApiQueryResult<T>
   label: string
@@ -651,6 +823,10 @@ export function CatalogSection({ instanceId }: CatalogSectionProps) {
   const extensionsQuery = useInstanceExtensions(instanceId)
   const spatialQuery = useInstanceSpatialColumns(instanceId)
   const sequencesQuery = useInstanceSequences(instanceId)
+  const partitionsQuery = useInstancePartitionedTables(instanceId)
+  // Partition reach is judged against when the data was read, not the clock.
+  const partitionsReadAt = partitionsQuery.dataUpdatedAt
+  const now = useMemo(() => new Date(partitionsReadAt), [partitionsReadAt])
   const disabledTriggers =
     triggersQuery.data?.triggers.filter((trigger) => trigger.state === 'disabled').length ?? 0
   const upgradableExtensions =
@@ -659,6 +835,8 @@ export function CatalogSection({ instanceId }: CatalogSectionProps) {
   const unindexedSpatial =
     spatialQuery.data?.columns.filter((column) => column.index_method === '').length ?? 0
   const sequencesAtRisk = sequencesQuery.data?.sequences.filter(sequenceAtRisk).length ?? 0
+  const partitionIssues =
+    partitionsQuery.data?.tables.filter((table) => partitionNeedsAttention(table, now)).length ?? 0
 
   return (
     <Section
@@ -673,6 +851,9 @@ export function CatalogSection({ instanceId }: CatalogSectionProps) {
           </TabsTrigger>
           <TabsTrigger value="sequences">
             Sequences <TabCount count={sequencesAtRisk} label="near their limit" />
+          </TabsTrigger>
+          <TabsTrigger value="partitions">
+            Partitions <TabCount count={partitionIssues} label="need attention" />
           </TabsTrigger>
           <TabsTrigger value="foreign-keys">
             Unindexed foreign keys{' '}
@@ -693,6 +874,11 @@ export function CatalogSection({ instanceId }: CatalogSectionProps) {
         <TabsContent value="sequences">
           <CatalogTabState query={sequencesQuery} label="sequences">
             {(data) => <SequencesTab response={data} />}
+          </CatalogTabState>
+        </TabsContent>
+        <TabsContent value="partitions">
+          <CatalogTabState query={partitionsQuery} label="partitioned tables">
+            {(data) => <PartitionsTab response={data} now={now} />}
           </CatalogTabState>
         </TabsContent>
         <TabsContent value="foreign-keys">

@@ -25,6 +25,7 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | GET | `/api/v1/instances/{id}/extensions` | `getInstanceExtensions` | Return the extensions installed in each database. |
 | GET | `/api/v1/instances/{id}/host` | `getInstanceHost` | Return measurable host metrics for an instance. |
 | GET | `/api/v1/instances/{id}/indexes` | `getInstanceIndexes` | Return index relation statistics. |
+| GET | `/api/v1/instances/{id}/partitioned-tables` | `getInstancePartitionedTables` | Return the partitioned tables, each rolled up over its partitions. |
 | GET | `/api/v1/instances/{id}/sequences` | `getInstanceSequences` | Return the sequences and how much of their range each has used. |
 | GET | `/api/v1/instances/{id}/settings` | `getInstanceSettings` | Return observed PostgreSQL settings. |
 | GET | `/api/v1/instances/{id}/spatial-columns` | `getInstanceSpatialColumns` | Return the PostGIS geometry and geography columns. |

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -26,6 +27,7 @@ func (a *API) registerCatalogRoutes(r chi.Router) {
 	r.Get("/api/v1/instances/{id}/extensions", a.handleExtensions)
 	r.Get("/api/v1/instances/{id}/spatial-columns", a.handleSpatialColumns)
 	r.Get("/api/v1/instances/{id}/sequences", a.handleSequences)
+	r.Get("/api/v1/instances/{id}/partitioned-tables", a.handlePartitionedTables)
 }
 
 // catalogFact is one object_facts row of a catalog kind.
@@ -405,6 +407,91 @@ func (a *API) handleSequences(w http.ResponseWriter, r *http.Request) {
 	}
 	if response.TruncatedDatabases, err = catalogTruncatedDatabases(r.Context(), a.pool, id, "sequences", datname); err != nil {
 		writeError(w, http.StatusInternalServerError, "sequences query failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+// partitionedTableAPIEntry is one partition tree, rolled up to its top
+// table.
+type partitionedTableAPIEntry struct {
+	Datname          string  `json:"datname"`
+	Schemaname       string  `json:"schemaname"`
+	Relname          string  `json:"relname"`
+	Strategy         string  `json:"strategy"`
+	PartitionKey     string  `json:"partition_key"`
+	Partitions       int     `json:"partitions"`
+	DirectPartitions int     `json:"direct_partitions"`
+	Depth            int     `json:"depth"`
+	Bytes            int64   `json:"bytes"`
+	Rows             float64 `json:"rows"`
+	// DefaultPartition and DefaultRows are nil without a default partition.
+	DefaultPartition *string  `json:"default_partition"`
+	DefaultRows      *float64 `json:"default_rows"`
+	InvalidIndexes   []string `json:"invalid_indexes"`
+	// AnalyzedAt is nil when the partitioned table itself was never
+	// analyzed.
+	AnalyzedAt *time.Time `json:"analyzed_at"`
+	// CoveredUntil is the highest upper bound of a table range-partitioned
+	// on one date or timestamp column, "unbounded" when a partition reaches
+	// MAXVALUE, and nil for any other table.
+	CoveredUntil *string   `json:"covered_until"`
+	FirstSeen    time.Time `json:"first_seen"`
+	LastSeen     time.Time `json:"last_seen"`
+}
+
+type partitionedTablesAPIResponse struct {
+	InstanceID         string                     `json:"instance_id"`
+	Tables             []partitionedTableAPIEntry `json:"tables"`
+	TruncatedDatabases []string                   `json:"truncated_databases"`
+}
+
+func (a *API) handlePartitionedTables(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid instance_id", err.Error())
+		return
+	}
+	datname := r.URL.Query().Get("datname")
+	response := partitionedTablesAPIResponse{InstanceID: id.String(), Tables: []partitionedTableAPIEntry{}, TruncatedDatabases: []string{}}
+	if a.pool == nil {
+		writeJSON(w, http.StatusOK, response)
+		return
+	}
+	facts, err := latestCatalogFacts(r.Context(), a.pool, id, "partitioned_table", datname)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "partitioned tables query failed", err.Error())
+		return
+	}
+	for _, f := range facts {
+		l := f.Labels
+		entry := partitionedTableAPIEntry{
+			Datname: f.Datname, Schemaname: l["schemaname"], Relname: l["relname"], Strategy: f.ValueText,
+			PartitionKey: l["partition_key"], InvalidIndexes: []string{}, FirstSeen: f.FirstSeen, LastSeen: f.LastSeen,
+		}
+		entry.Partitions, _ = strconv.Atoi(l["partitions"])
+		entry.DirectPartitions, _ = strconv.Atoi(l["direct_partitions"])
+		entry.Depth, _ = strconv.Atoi(l["depth"])
+		entry.Bytes, _ = strconv.ParseInt(l["bytes"], 10, 64)
+		entry.Rows, _ = strconv.ParseFloat(l["rows"], 64)
+		if def := l["default_partition"]; def != "" {
+			entry.DefaultPartition = &def
+			rows, _ := strconv.ParseFloat(l["default_rows"], 64)
+			entry.DefaultRows = &rows
+		}
+		if names := l["invalid_indexes"]; names != "" {
+			entry.InvalidIndexes = strings.Split(names, ",")
+		}
+		if analyzed, err := time.Parse(time.RFC3339, l["analyzed_at"]); err == nil {
+			entry.AnalyzedAt = &analyzed
+		}
+		if until := l["covered_until"]; until != "" {
+			entry.CoveredUntil = &until
+		}
+		response.Tables = append(response.Tables, entry)
+	}
+	if response.TruncatedDatabases, err = catalogTruncatedDatabases(r.Context(), a.pool, id, "partitions", datname); err != nil {
+		writeError(w, http.StatusInternalServerError, "partitioned tables query failed", err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, response)
