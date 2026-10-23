@@ -74,7 +74,8 @@ func TestPGVersion(t *testing.T) {
 	require.True(t, pgtype.PGVersion(160004).Supported())
 	require.True(t, pgtype.PGVersion(180000).Supported())
 	require.False(t, pgtype.PGVersion(140018).Supported())
-	require.False(t, pgtype.PGVersion(190000).Supported())
+	require.True(t, pgtype.PGVersion(190000).Supported())
+	require.False(t, pgtype.PGVersion(200000).Supported())
 	require.False(t, pgtype.PGVersion(0).Supported())
 }
 

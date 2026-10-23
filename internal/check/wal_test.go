@@ -113,6 +113,14 @@ func TestWAL_CumulativeTimesAreCounters(t *testing.T) {
 	require.Equal(t, pgtype.KindCounter, metricKind(r, "pg_wal_wal_buffers_full"))
 }
 
+// TestWAL_FullPageImageBytesIsACounter: PostgreSQL 19 adds wal_fpi_bytes to
+// pg_stat_wal; it accumulates like wal_bytes.
+func TestWAL_FullPageImageBytesIsACounter(t *testing.T) {
+	r := scrapeWALForTest(t, "0/20", 32, []string{"wal_fpi", "wal_fpi_bytes"})
+	require.Equal(t, pgtype.KindCounter, metricKind(r, "pg_wal_wal_fpi"))
+	require.Equal(t, pgtype.KindCounter, metricKind(r, "pg_wal_wal_fpi_bytes"))
+}
+
 func metricKind(result Result, name string) pgtype.MetricKind {
 	for _, metric := range result.Metrics {
 		if metric.Name == name {

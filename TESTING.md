@@ -426,7 +426,7 @@ func newPG(t *testing.T, version string) *pgxpool.Pool {
 ### 4.3 Matrice versioni
 
 ```go
-var pgVersions = versionsFromEnv() // PR: "15,18" · nightly: "15,16,17,18"
+var pgVersions = versionsFromEnv() // PR: "15,18" · nightly: "15,16,17,18,19"
 
 func TestCheck_StatIO(t *testing.T) {
 	forEachPG(t, func(t *testing.T, pg *PG) {

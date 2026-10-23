@@ -11,6 +11,9 @@ export const ASH_WAIT_TYPES = [
   'IPC',
   'Timeout',
   'BufferPin',
+  // PostgreSQL 19 replaced BufferPin (and LWLock BufferContent) with the
+  // Buffer type; both get the same colour across an upgrade.
+  'Buffer',
   'Extension',
   'Activity',
   'other',
@@ -21,6 +24,7 @@ export type AshPaletteName = (typeof ASH_WAIT_TYPES)[number]
 /** Fixed semantic tokens keep a wait type visually stable between polls. */
 export const ASH_PALETTE: Record<AshPaletteName, string> = {
   Activity: 'var(--text-muted)',
+  Buffer: 'var(--status-degraded)',
   BufferPin: 'var(--status-degraded)',
   CPU: 'var(--status-ok)',
   Client: 'var(--status-stale)',

@@ -5,7 +5,7 @@
 - **L1 — Unit tests** (`make test`). Pure logic, no I/O, no Docker. Uses fake clock where timing is needed (the `clock.Frozen` fake time and `test.Eventually`/`Consistently` in harness for polling, never `time.Sleep`). Tests pass `-race -shuffle=on` for data-race detection and randomized execution order. Runs in seconds.
   - Belongs here: parsing, validation, calculations, marshaling, single-component behavior.
 
-- **L2 — Integration tests** (`make test-integration`). Real PostgreSQL containers across the configured version matrix (PG 15–18 in CI); tests inside one container run serially because `postgres.Restore()` needs exclusive access. Covers agent-to-database behavior, storage and wire-format differences. See `test/pgtest/`.
+- **L2 — Integration tests** (`make test-integration`). Real PostgreSQL containers across the configured version matrix (PG 15–19 in CI); tests inside one container run serially because `postgres.Restore()` needs exclusive access. Covers agent-to-database behavior, storage and wire-format differences. See `test/pgtest/`.
   - Belongs here: agent connection, scheduling, query execution, per-version codec differences.
   - Runs in 15 minutes.
 

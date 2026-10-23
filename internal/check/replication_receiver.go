@@ -110,6 +110,10 @@ LEFT JOIN pg_stat_wal_receiver w ON true
 	return Result{Metrics: metrics}, nil
 }
 
+// statusToFloat maps pg_stat_wal_receiver.status; the status label keeps
+// the text. A receiver that is starting, waiting, connecting (PostgreSQL
+// 19), restarting or stopping is not receiving WAL yet, like any status a
+// later release adds.
 func statusToFloat(status string) float64 {
 	switch status {
 	case "streaming":

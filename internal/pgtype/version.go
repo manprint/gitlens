@@ -21,10 +21,11 @@ func (v PGVersion) String() string {
 }
 
 // Supported reports whether this project supports the version at all
-// (decision D11: PostgreSQL 15 through 18 inclusive).
+// (decision D11, extended to 19 at its release candidate: PostgreSQL 15
+// through 19 inclusive).
 func (v PGVersion) Supported() bool {
 	major := v.Major()
-	return major >= 15 && major < 19
+	return major >= 15 && major < 20
 }
 
 const (
@@ -32,5 +33,6 @@ const (
 	PG16 PGVersion = 160000
 	PG17 PGVersion = 170000
 	PG18 PGVersion = 180000
-	PG19 PGVersion = 190000 // exclusive upper bound
+	PG19 PGVersion = 190000
+	PG20 PGVersion = 200000 // exclusive upper bound
 )

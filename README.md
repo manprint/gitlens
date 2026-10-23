@@ -19,7 +19,7 @@ with an SBOM and build provenance. Every one of them goes through the whole of
 verification (`go mod verify` plus `govulncheck`), unit tests under `-race
 -shuffle=on` with per-package coverage floors, ten repeated shuffled race
 rounds over the concurrency-sensitive packages, a container image build with a
-`--version` smoke test, and the integration matrix across PostgreSQL 15 to 18 in
+`--version` smoke test, and the integration matrix across PostgreSQL 15 to 19 in
 both `vanilla` and `rds-like` permission profiles. The E2E and Playwright
 acceptance suites run nightly and on every pull request into `main`.
 
@@ -33,7 +33,7 @@ acceptance suites run nightly and on every pull request into `main`.
 - Node 22.12+ and pnpm 12.15.0, only to build the web interface from
   source. CI and the container images build on Node 24.
 - Docker and Docker Compose for the test suites and for the server's storage
-- PostgreSQL 15 to 18 as monitoring targets
+- PostgreSQL 15 to 19 as monitoring targets (19 verified on its release candidate)
 - PostgreSQL 17 with TimescaleDB 2.29 for the server's own storage (see Running the server)
 
 ## Building
@@ -963,7 +963,7 @@ warnings
 
 **How to read the output:**
 
-- **server version** — PostgreSQL version; `— NOT SUPPORTED` means it is outside 15–18
+- **server version** — PostgreSQL version; `— NOT SUPPORTED` means it is outside 15–19
 - **role** — `primary`, `standby`, or `read-only replica`; determines which replication checks run
 - **system_identifier** — stable cluster identity; if it says `N/A (requires pg_control_system privilege)`, you need the grant from `monitoring_user.sql`
 - **permission tier**:
@@ -1544,7 +1544,7 @@ is missing.
 
 | Workflow | Trigger | Jobs |
 | --- | --- | --- |
-| `ci.yml` | pull request, push to `main`, manual, and reused by the release workflow | web, format/lint/vet-tags, supply chain (`tidy-check` + `govulncheck`), unit + coverage, repeated race stress (not on pull requests), container image build and `--version` smoke, integration across PostgreSQL 15–18 × `vanilla`/`rds-like`, and a `CI gate` job that aggregates them |
+| `ci.yml` | pull request, push to `main`, manual, and reused by the release workflow | web, format/lint/vet-tags, supply chain (`tidy-check` + `govulncheck`), unit + coverage, repeated race stress (not on pull requests), container image build and `--version` smoke, integration across PostgreSQL 15–19 × `vanilla`/`rds-like`, and a `CI gate` job that aggregates them |
 | `e2e.yml` | pull request to `main`, nightly, manual | the full E2E suite and the Playwright UI acceptance suite, each across `AGENT_MODE` `container` and `binary` |
 | `release-alpha.yml` | a `v*-alpha.*` tag, manual | the whole of `ci.yml`, then multi-arch images pushed to ghcr.io with SBOM and provenance, a `--version` smoke test against the published images, and a GitHub prerelease |
 
@@ -1770,7 +1770,7 @@ the server is rejected, so upgrade the server before upgrading agents.
 - **Host metrics are local-only** — they are attached only to targets declared or inferred as local to the agent. Remote targets report host metrics as unavailable, never as zero. In a container with a memory limit, the reported total is the cgroup limit rather than the machine's memory. Per-device IOPS, disk latency and network metrics are not collected.
 
 **Server and replication:**
-- PostgreSQL 15 to 18 only; 13 and 14 are not supported
+- PostgreSQL 15 to 19 only; 13 and 14 are not supported, and 19 is verified on its release candidate
 - Only streaming replication is supported; logical, Patroni, and Aurora topologies are not detected
 - Raw retention is 30 days with no rollups; compression after 48h (`buffer 6h < sample_age 12h < compress_after 48h`)
 - **Every in-memory structure has a fixed ceiling and drops data past it** — 32 MiB per push on the wire and 256 MiB after gzip, 64 KiB of request headers, 2-minute read/write/idle timeouts, delta and topology state evicted one hour after an instance's last sample, and at most 4 096 live sessions. None of these are configurable; see [limit 13](docs/LIMITS.md#13-every-in-memory-structure-is-bounded-and-a-bound-that-trips-drops-data) for what each one trades away.

@@ -121,10 +121,11 @@ is enabled; it does not eliminate the gap.
 
 ## 9. Supported PostgreSQL versions are limited
 
-The supported and verified range is PostgreSQL 15 through 18. Older versions
-lack views or columns used by this plan. Newer versions are untested until
-their system-view column sets have been probed and verified in the same way as
-the PostgreSQL 18 compatibility work.
+The supported and verified range is PostgreSQL 15 through 19; 19 is verified
+on its release candidate (19rc1) and is verified again at its release. Older
+versions lack views or columns used by this plan. Newer versions are untested
+until their system-view column sets have been probed and verified in the same
+way as the PostgreSQL 18 and 19 compatibility work.
 
 ## 10. Tenant separation is not an isolation boundary
 
