@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
@@ -252,5 +253,169 @@ func TestINTCMD023_ExplainGuardDenyListExists(t *testing.T) {
 				"SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = $1 AND pronamespace = 'pg_catalog'::regnamespace)", name).Scan(&exists))
 			require.True(t, exists, name)
 		}
+	})
+}
+
+// victimsRunning counts the sessions the view-based tests end, while they run.
+func victimsRunning(t *testing.T, admin *pgxpool.Pool) int {
+	t.Helper()
+	var n int
+	require.NoError(t, admin.QueryRow(context.Background(),
+		"SELECT count(*) FROM pg_stat_activity WHERE application_name = 'pglens-guard-victim' AND state = 'active'").Scan(&n))
+	return n
+}
+
+// startVictim opens a session of the monitoring role that sleeps under the
+// name the view-based tests look for.
+func startVictim(t *testing.T, pg *pgtest.PG) {
+	t.Helper()
+	cfg, err := pgx.ParseConfig(pg.DSN("postgres", pgtest.RoleT1))
+	require.NoError(t, err)
+	cfg.RuntimeParams["application_name"] = "pglens-guard-victim"
+	conn, err := pgx.ConnectConfig(context.Background(), cfg)
+	require.NoError(t, err)
+	go func() { _, _ = conn.Exec(context.Background(), "SELECT pg_sleep(30)") }()
+}
+
+// listenFor listens on channel as the superuser and returns a function that
+// reports how many notifications have arrived. Each call runs a statement,
+// which is what lets the driver deliver the ones waiting.
+func listenFor(t *testing.T, pg *pgtest.PG, channel string) func() int {
+	t.Helper()
+	ctx := context.Background()
+	received := make(chan struct{}, 64)
+	cfg, err := pgx.ParseConfig(pg.DSN("postgres", pgtest.RoleSuperuser))
+	require.NoError(t, err)
+	cfg.OnNotification = func(*pgconn.PgConn, *pgconn.Notification) { received <- struct{}{} }
+	conn, err := pgx.ConnectConfig(ctx, cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	_, err = conn.Exec(ctx, "LISTEN "+pgx.Identifier{channel}.Sanitize())
+	require.NoError(t, err)
+	return func() int {
+		_, err := conn.Exec(ctx, "SELECT 1")
+		require.NoError(t, err)
+		return len(received)
+	}
+}
+
+// TestINTCMD024_ExplainAnalyzeRefusesEffectsBehindViews: effects a read-only
+// transaction does not stop, reached through a view, so that the statement
+// names no function. ANALYZE refuses each of them for tier 1 and tier 2, and
+// none of them happens. Registering a statement runs it as the superuser, so
+// each case also shows that the effect exists in this build.
+func TestINTCMD024_ExplainAnalyzeRefusesEffectsBehindViews(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		_, err := admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, guardFixture)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = admin.Exec(context.Background(), "DROP SCHEMA IF EXISTS pglens_guard CASCADE")
+			_, _ = admin.Exec(context.Background(), "DROP EXTENSION IF EXISTS dblink")
+		})
+
+		// Tier 1 may end its own sessions and tier 2 may end this role's
+		// sessions as foreign ones. The victims start after the statement is
+		// registered, which would otherwise end them.
+		_, err = admin.Exec(ctx, `CREATE VIEW pglens_guard.v_kill AS
+	SELECT pg_terminate_backend(pid) AS killed FROM pg_stat_activity WHERE application_name = 'pglens-guard-victim'`)
+		require.NoError(t, err)
+		const kill = "SELECT * FROM pglens_guard.v_kill"
+		killID := registerStatements(t, pg, kill)[kill]
+		startVictim(t, pg)
+		startVictim(t, pg)
+		require.Eventually(t, func() bool { return victimsRunning(t, admin) == 2 }, 5*time.Second, 100*time.Millisecond)
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			_, err = explainAs(t, pg, role, killID, true)
+			requireRefused(t, err, "pg_terminate_backend()")
+			require.Equal(t, 2, victimsRunning(t, admin), role.String())
+		}
+		// Plan-only EXPLAIN plans the view without calling its volatile function.
+		_, err = explainAs(t, pg, pgtest.RoleT1, killID, false)
+		require.NoError(t, err)
+		require.Equal(t, 2, victimsRunning(t, admin))
+
+		// pg_notify returns void, so the view counts its calls. It reaches the
+		// listener only when it is called.
+		notifications := listenFor(t, pg, "pglens_guard")
+		_, err = admin.Exec(ctx, "CREATE VIEW pglens_guard.v_notify AS SELECT count(*) AS notified FROM (SELECT pg_notify('pglens_guard', 'explain')) AS s")
+		require.NoError(t, err)
+		const notify = "SELECT * FROM pglens_guard.v_notify"
+		notifyID := registerStatements(t, pg, notify)[notify]
+		require.Equal(t, 1, notifications())
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			_, err = explainAs(t, pg, role, notifyID, true)
+			requireRefused(t, err, "pg_notify()")
+			require.Equal(t, 1, notifications(), role.String())
+		}
+
+		// Statistics reset. pg_stat_reset is superuser-only, so the monitoring
+		// roles cannot even plan it: the refusal names it either way, and the
+		// reset time shows that no reset happened.
+		statsReset := func() string {
+			var at string
+			require.NoError(t, admin.QueryRow(ctx, "SELECT COALESCE(stats_reset::text, '') FROM pg_stat_database WHERE datname = current_database()").Scan(&at))
+			return at
+		}
+		_, err = admin.Exec(ctx, "CREATE VIEW pglens_guard.v_reset AS SELECT count(*) AS reset FROM (SELECT pg_stat_reset()) AS s")
+		require.NoError(t, err)
+		const reset = "SELECT * FROM pglens_guard.v_reset"
+		before := statsReset()
+		resetID := registerStatements(t, pg, reset)[reset]
+		require.NotEqual(t, before, statsReset())
+		before = statsReset()
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			_, err = explainAs(t, pg, role, resetID, true)
+			requireRefused(t, err, "pg_stat_reset")
+			require.Equal(t, before, statsReset(), role.String())
+		}
+
+		// The effect is WAL that a read-only transaction cannot roll back.
+		walInsert := func() string {
+			var lsn string
+			require.NoError(t, admin.QueryRow(ctx, "SELECT pg_current_wal_insert_lsn()::text").Scan(&lsn))
+			return lsn
+		}
+		_, err = admin.Exec(ctx, "CREATE VIEW pglens_guard.v_message AS SELECT pg_logical_emit_message(false, 'pglens-guard', 'x') AS emitted")
+		require.NoError(t, err)
+		const message = "SELECT * FROM pglens_guard.v_message"
+		before = walInsert()
+		messageID := registerStatements(t, pg, message)[message]
+		require.NotEqual(t, before, walInsert())
+		before = walInsert()
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			_, err = explainAs(t, pg, role, messageID, true)
+			requireRefused(t, err, "pg_logical_emit_message()")
+			require.Equal(t, before, walInsert(), role.String())
+		}
+
+		// dblink opens its own session, so the write it makes is not undone by
+		// the read-only transaction. The registration inserts a row through it.
+		_, err = admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS dblink")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, `CREATE VIEW pglens_guard.v_remote AS
+	SELECT dblink_exec('host=127.0.0.1 port=5432 dbname=postgres user=postgres password=test',
+		'INSERT INTO pglens_guard.t VALUES (3, ''remote'')') AS remote_result`)
+		require.NoError(t, err)
+		const remote = "SELECT * FROM pglens_guard.v_remote"
+		remoteID := registerStatements(t, pg, remote)[remote]
+		rows := func() int {
+			var n int
+			require.NoError(t, admin.QueryRow(ctx, "SELECT count(*) FROM pglens_guard.t").Scan(&n))
+			return n
+		}
+		require.Equal(t, 3, rows())
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			_, err = explainAs(t, pg, role, remoteID, true)
+			requireRefused(t, err, "dblink_exec()")
+			require.Equal(t, 3, rows(), role.String())
+		}
+		_, err = explainAs(t, pg, pgtest.RoleT1, remoteID, false)
+		require.NoError(t, err)
+		require.Equal(t, 3, rows())
 	})
 }
