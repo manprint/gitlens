@@ -124,6 +124,29 @@ describe('AlertsPage', () => {
     )
   })
 
+  it('UI-ALERT-015 a silence link narrows the list to the alerts that silence matches', async () => {
+    await renderAlerts(
+      [alert({ suppressed: true }), alert({ alert_key: 'disk-full', rule_id: 'disk-full' })],
+      [silence()],
+      `/alerts?silence_id=${silence().silence_id}`,
+    )
+
+    expect(screen.getByRole('button', { name: 'replication-lag' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'disk-full' })).not.toBeInTheDocument()
+    expect(screen.getByText(/Showing alerts matched by silence/)).toBeInTheDocument()
+  })
+
+  it('UI-ALERT-016 a silence link to a silence that is not listed shows no alerts', async () => {
+    await renderAlerts(
+      [alert({ suppressed: true })],
+      [],
+      '/alerts?silence_id=00000000-0000-4000-8000-0000000000ff',
+    )
+
+    expect(screen.queryByRole('button', { name: 'replication-lag' })).not.toBeInTheDocument()
+    expect(screen.getByText(/is not in the current silences list/)).toBeInTheDocument()
+  })
+
   it('opens selected alert detail through getAlert', async () => {
     const selected = alert({ labels: { component: 'replication' } })
     server.use(ok('getAlerts', [selected]), ok('getSilences', []), ok('getAlert', selected))
