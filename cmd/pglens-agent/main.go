@@ -438,31 +438,67 @@ func checkMountWarning(identityPath string) string {
 	return ""
 }
 
-// isMountWarning checks if a path is on the root mount (not a separate persistent mount).
-// For testing, mountinfoPath can be overridden.
+// isMountWarning reports whether path is not on a persistent mount. The mount
+// that holds path is the one with the longest mountpoint containing it: a
+// volume under the root holds its own paths, and a tmpfs nested in a volume
+// holds the paths under it. For testing, mountinfoPath can be overridden.
 func isMountWarning(path string, mountinfoPath string) (bool, error) {
 	data, err := os.ReadFile(mountinfoPath)
 	if err != nil {
 		return false, err
 	}
 
-	lines := strings.Split(string(data), "\n")
-
-	// Parse mountinfo to find if path is on a separate mount
-	for _, line := range lines {
-		parts := strings.Fields(line)
-		if len(parts) < 5 {
+	path = filepath.Clean(path)
+	holder := -1 // length of the mountpoint of the mount holding path so far
+	persistent := false
+	for _, line := range strings.Split(string(data), "\n") {
+		mountpoint, fstype, ok := parseMountinfoLine(line)
+		if !ok || !mountContains(mountpoint, path) {
 			continue
 		}
-		mountpoint := parts[4]
-		// Check if the identity path starts with a non-root mountpoint
-		if mountpoint != "/" && strings.HasPrefix(filepath.Clean(path), filepath.Clean(mountpoint)) {
-			return false, nil
+		// mountinfo lists stacked mounts in mount order, so the last one at a
+		// mountpoint is the one on top, and the one that holds path.
+		if len(mountpoint) >= holder {
+			holder = len(mountpoint)
+			persistent = !volatileFSTypes[fstype]
 		}
 	}
+	// No mount containing path means nothing shows it is persistent.
+	return !persistent, nil
+}
 
-	// If we get here, the path is on the root mount
-	return true, nil
+// volatileFSTypes are the filesystems that do not keep their contents across a
+// restart: memory filesystems, the container's overlay root, and the kernel's
+// initial rootfs, which is a ramfs.
+var volatileFSTypes = map[string]bool{"tmpfs": true, "ramfs": true, "rootfs": true, "overlay": true}
+
+// mountinfoEscapes undoes the octal escapes mountinfo uses for the characters
+// that would otherwise break its whitespace-separated fields.
+var mountinfoEscapes = strings.NewReplacer(`\040`, " ", `\011`, "\t", `\012`, "\n", `\134`, `\`)
+
+// parseMountinfoLine returns the mountpoint (field 5) and the filesystem type of
+// one line of /proc/self/mountinfo. The optional fields before the "-" separator
+// vary in number, so the type is found after the separator, not by its index.
+func parseMountinfoLine(line string) (mountpoint, fstype string, ok bool) {
+	fields := strings.Fields(line)
+	if len(fields) < 5 {
+		return "", "", false
+	}
+	for i := 6; i+1 < len(fields); i++ {
+		if fields[i] == "-" {
+			return mountinfoEscapes.Replace(fields[4]), fields[i+1], true
+		}
+	}
+	return "", "", false
+}
+
+// mountContains reports whether path is mountpoint or lies below it. It compares
+// whole path components, so /var/lib/pg does not contain /var/lib/pglens.
+func mountContains(mountpoint, path string) bool {
+	if mountpoint == "/" {
+		return true
+	}
+	return path == mountpoint || strings.HasPrefix(path, mountpoint+"/")
 }
 
 // Helper functions

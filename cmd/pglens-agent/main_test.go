@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -129,5 +131,95 @@ func TestHealthcheckURL(t *testing.T) {
 	}
 	for _, tt := range tests {
 		require.Equal(t, tt.want, healthcheckURL(tt.listen, "/healthz"), "listen %s", tt.listen)
+	}
+}
+
+// TestIsMountWarning: the identity path warns unless the mount that holds it
+// survives a restart. That mount is the longest mountpoint that contains the
+// path, matched by whole path components, and a memory filesystem or the
+// container's overlay root does not survive a restart.
+func TestIsMountWarning(t *testing.T) {
+	const (
+		containerRoot = "36 35 0:31 / / rw,relatime - overlay overlay rw\n"
+		hostRoot      = "36 35 8:1 / / rw,relatime - ext4 /dev/sda1 rw\n"
+		identity      = "/var/lib/pglens/identity.json"
+	)
+	tests := []struct {
+		name      string
+		mountinfo string
+		path      string
+		want      bool
+	}{
+		{
+			name:      "container root holds the identity",
+			mountinfo: containerRoot,
+			path:      identity,
+			want:      true,
+		},
+		{
+			name:      "initial rootfs holds the identity",
+			mountinfo: "1 0 0:1 / / rw,relatime - rootfs rootfs rw\n",
+			path:      "/var/lib/pglens",
+			want:      true,
+		},
+		{
+			name:      "persistent root filesystem in binary mode",
+			mountinfo: hostRoot,
+			path:      identity,
+			want:      false,
+		},
+		{
+			name:      "separate ext4 volume at the identity directory",
+			mountinfo: containerRoot + "40 36 8:2 / /var/lib/pglens rw,relatime shared:2 - ext4 /dev/sdb1 rw\n",
+			path:      identity,
+			want:      false,
+		},
+		{
+			name:      "volume at a sibling prefix does not hold the identity",
+			mountinfo: containerRoot + "41 36 8:2 / /var/lib/pg rw,relatime - ext4 /dev/sdb1 rw\n",
+			path:      identity,
+			want:      true,
+		},
+		{
+			name:      "tmpfs at the identity directory",
+			mountinfo: containerRoot + "42 36 0:40 / /var/lib/pglens rw,nosuid - tmpfs tmpfs rw\n",
+			path:      identity,
+			want:      true,
+		},
+		{
+			name:      "tmpfs nested in a volume holds the identity",
+			mountinfo: containerRoot + "43 36 8:2 / /var/lib/pglens rw - ext4 /dev/sdb1 rw\n44 43 0:41 / /var/lib/pglens/run rw - tmpfs tmpfs rw\n",
+			path:      "/var/lib/pglens/run/identity.json",
+			want:      true,
+		},
+		{
+			name:      "volume stacked over a tmpfs at the same mountpoint",
+			mountinfo: containerRoot + "45 36 0:42 / /var/lib/pglens rw - tmpfs tmpfs rw\n46 36 8:2 / /var/lib/pglens rw - ext4 /dev/sdb1 rw\n",
+			path:      identity,
+			want:      false,
+		},
+		{
+			name:      "escaped space in the mountpoint",
+			mountinfo: containerRoot + `47 36 8:3 / /srv/pg\040data rw - ext4 /dev/sdc1 rw` + "\n",
+			path:      "/srv/pg data/identity.json",
+			want:      false,
+		},
+		{
+			name:      "optional fields before the separator",
+			mountinfo: containerRoot + "48 36 8:2 / /var/lib/pglens rw shared:5 master:3 - ext4 /dev/sdb1 rw\n",
+			path:      identity,
+			want:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpfile := filepath.Join(t.TempDir(), "mountinfo")
+			require.NoError(t, os.WriteFile(tmpfile, []byte(tt.mountinfo), 0600))
+
+			warning, err := isMountWarning(tt.path, tmpfile)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, warning)
+		})
 	}
 }
