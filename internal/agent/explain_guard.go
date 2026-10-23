@@ -15,25 +15,26 @@ import (
 
 // The EXPLAIN guard. pglens never modifies a monitored database, and EXPLAIN
 // is the one place where it runs SQL written by database users. The READ ONLY
-// transaction makes PostgreSQL refuse writes, but some functions act outside
-// any transaction: session advisory locks outlive ROLLBACK, signals reach
+// transaction makes PostgreSQL refuse writes made in it, but some effects
+// happen outside it: session advisory locks outlive ROLLBACK, signals reach
 // other backends, dblink and untrusted procedural languages reach other
 // systems, and a few built-ins write WAL (pg_logical_emit_message) or consume
-// a transaction ID (txid_current) inside a read-only transaction. Planning
-// alone can run code too: the planner folds calls to IMMUTABLE functions with
-// constant arguments, and evaluates STABLE ones for estimates.
+// a transaction ID (txid_current) inside a read-only transaction. Planning can
+// run code too: the planner folds calls to IMMUTABLE functions with constant
+// arguments, and evaluates STABLE ones for estimates.
 //
-// Every EXPLAIN therefore runs with as few privileges as the session can drop
-// to (dropExplainPrivileges) on a connection that is closed afterwards
-// (discardConn), and EXPLAIN ANALYZE, which executes the statement, runs only
-// when guardAnalyze finds nothing in the statement, in the database or in the
-// VERBOSE plan that could act outside the transaction.
+// Every EXPLAIN therefore runs only after guardPlanning has found no function
+// in the database that the planner may run, with as few privileges as the
+// session can drop to (dropExplainPrivileges), on a connection that is closed
+// afterwards (discardConn). EXPLAIN ANALYZE, which executes the statement, runs
+// only when guardAnalyze finds nothing in the statement, in the database or in
+// the VERBOSE plan that could act outside the transaction.
 //
-// What stays outside the guard, by construction: a function its owner
-// declared IMMUTABLE or STABLE although it has such effects runs during
-// planning, before any plan can be inspected; and a function or view replaced
-// concurrently between the inspected plan and the analyzed one. Both need the
-// database owner to work against the declared contract.
+// What stays outside the guard, by construction: a function or view replaced
+// concurrently between the check and the plan; code that runs while planning
+// but is not a function in the database, such as a planner hook loaded with
+// shared_preload_libraries; and the functions of extensions and the C functions
+// a superuser defined, which guardPlanning does not list.
 
 // sideEffectFreeExtensions only compute: no I/O outside the database, no SQL
 // text executed on the caller's behalf, no state that outlives a transaction.
@@ -339,6 +340,51 @@ func dropExplainPrivileges(ctx context.Context, conn check.Conn, major int, anal
 	}
 	if _, err := conn.Exec(ctx, "SET LOCAL ROLE pg_read_all_data"); err != nil {
 		return fmt.Errorf("drop explain privileges: %w", err)
+	}
+	return nil
+}
+
+// plannableFunctionLookup lists the functions the database defines itself that
+// the planner may run while it plans a statement: the functions declared
+// IMMUTABLE or STABLE, which the planner folds or evaluates for estimates. A
+// VOLATILE function runs only when it executes, so it is not listed. Built-in
+// functions are left out, since PostgreSQL declares their volatility itself.
+// The functions of extensions are left out too, and so are the cost and
+// selectivity estimators of operators: an estimator must take internal
+// arguments, which only a C function can declare, and only a superuser can
+// define a C function. Extensions and superusers are the trust boundary.
+const plannableFunctionLookup = `/* pglens: explain guard, plannable functions */
+SELECT COALESCE(pg_catalog.json_agg(pg_catalog.json_build_object(
+		'schema', n.nspname,
+		'name', p.proname,
+		'volatility', p.provolatile) ORDER BY n.nspname, p.proname), '[]')
+FROM pg_catalog.pg_proc p
+JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+  AND p.provolatile IN ('i', 's')
+  AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d
+                  WHERE d.classid = 'pg_catalog.pg_proc'::pg_catalog.regclass AND d.objid = p.oid AND d.deptype = 'e')`
+
+// guardPlanning refuses every EXPLAIN, plan-only or ANALYZE, while the database
+// defines a function the planner may run. A plan does not show those runs, and
+// they happen before any plan exists, so the check reads the catalog rather
+// than a plan: it does not depend on which functions a statement names,
+// directly or through views, operators, casts or policies. The cost is that a
+// database with its own IMMUTABLE or STABLE functions refuses EXPLAIN
+// altogether, and the refusal names the function.
+func guardPlanning(ctx context.Context, conn check.Conn) error {
+	var raw json.RawMessage
+	if err := conn.QueryRow(ctx, plannableFunctionLookup).Scan(&raw); err != nil {
+		return fmt.Errorf("look up the functions the planner may run: %w", err)
+	}
+	var functions []catalogFunction
+	if err := json.Unmarshal(raw, &functions); err != nil {
+		return fmt.Errorf("decode the functions the planner may run: %w", err)
+	}
+	for _, f := range functions {
+		if reason := functionHazard(f); reason != "" {
+			return rejectedf("EXPLAIN refused: the database defines %s, which %s; the planner may run such a function while it plans a statement, and a plan does not show that", f, reason)
+		}
 	}
 	return nil
 }

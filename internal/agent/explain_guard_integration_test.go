@@ -19,21 +19,26 @@ import (
 
 // guardFixture is a schema in the postgres database with the objects the
 // EXPLAIN guard must see through: a plpgsql function that takes a session
-// advisory lock, a view that takes one, and IMMUTABLE functions the planner
-// folds — one that takes a lock, one that reports the role it runs as.
+// advisory lock, and a view that takes one. Its functions are VOLATILE, so
+// the planner never runs them; planFixture adds the ones it does run.
 const guardFixture = `
 DROP SCHEMA IF EXISTS pglens_guard CASCADE;
 CREATE SCHEMA pglens_guard;
 CREATE TABLE pglens_guard.t (a int, b text);
 INSERT INTO pglens_guard.t VALUES (1, 'x'), (2, 'y');
 GRANT USAGE ON SCHEMA pglens_guard TO PUBLIC;
-CREATE FUNCTION pglens_guard.evil() RETURNS int LANGUAGE plpgsql STABLE
+CREATE FUNCTION pglens_guard.evil() RETURNS int LANGUAGE plpgsql
 	AS $$ BEGIN PERFORM pg_advisory_lock(4242); RETURN 1; END $$;
 CREATE VIEW pglens_guard.locker AS SELECT pg_try_advisory_lock(4243) AS locked FROM pglens_guard.t;
+`
+
+// planFixture is an IMMUTABLE function with an effect. PostgreSQL folds a call
+// to it while planning, before any plan can be inspected, so the database that
+// defines it refuses EXPLAIN altogether.
+const planFixture = `
 CREATE FUNCTION pglens_guard.lock_at_plan_time() RETURNS int LANGUAGE plpgsql IMMUTABLE
 	AS $$ BEGIN PERFORM pg_advisory_lock(4244); RETURN 1; END $$;
-CREATE FUNCTION pglens_guard.whoami() RETURNS text LANGUAGE plpgsql IMMUTABLE
-	AS $$ BEGIN RETURN current_user; END $$;
+CREATE VIEW pglens_guard.plan_locker AS SELECT pglens_guard.lock_at_plan_time() AS locked;
 `
 
 // registerStatements runs each statement once as the superuser so that
@@ -137,54 +142,78 @@ func TestINTCMD020_ExplainAnalyzeGuard(t *testing.T) {
 	})
 }
 
-// TestINTCMD021_ExplainSessionIsDroppedAndDiscarded proves the two defences
-// that do not depend on reading a plan. Planning folds an IMMUTABLE function
-// before anything can inspect it: under tier 2 it runs as pg_read_all_data,
-// without the signal privilege, and the session advisory lock it takes ends
-// with the connection the command used instead of staying in the agent's
-// pool.
-func TestINTCMD021_ExplainSessionIsDroppedAndDiscarded(t *testing.T) {
+// TestINTCMD021_ExplainRefusesFunctionsThePlannerRuns proves that EXPLAIN,
+// plan-only or ANALYZE, is refused in a database that defines an IMMUTABLE
+// function with an effect, when the statement calls it directly and when a
+// view does. The lock it would take is not taken. The two defences that do not
+// depend on the catalog are proved on their own: a tier 2 session plans as
+// pg_read_all_data, and a session the command used is closed, not pooled.
+func TestINTCMD021_ExplainRefusesFunctionsThePlannerRuns(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
 		pg.Lock(t)
 		ctx := context.Background()
 		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
 		_, err := admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
 		require.NoError(t, err)
-		_, err = admin.Exec(ctx, guardFixture)
+		_, err = admin.Exec(ctx, guardFixture+planFixture)
 		require.NoError(t, err)
 		t.Cleanup(func() { _, _ = admin.Exec(context.Background(), "DROP SCHEMA IF EXISTS pglens_guard CASCADE") })
 
 		const (
-			whoami = "SELECT pglens_guard.whoami()"
-			locks  = "SELECT pglens_guard.lock_at_plan_time()"
+			direct = "SELECT pglens_guard.lock_at_plan_time()"
+			viewed = "SELECT * FROM pglens_guard.plan_locker"
 		)
-		ids := registerStatements(t, pg, whoami, locks)
+		ids := registerStatements(t, pg, direct, viewed)
 		requireNoAdvisoryLocks(t, admin)
 
-		// Tier 2 plans without its signal privilege; tier 1 has none to
-		// drop and keeps its role.
-		result, err := explainAs(t, pg, pgtest.RoleT2, ids[whoami], false)
-		require.NoError(t, err)
-		require.Contains(t, string(result), `'pg_read_all_data'::text`)
-		result, err = explainAs(t, pg, pgtest.RoleT1, ids[whoami], false)
-		require.NoError(t, err)
-		require.Contains(t, string(result), `'pglens_t1'::text`)
-
 		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
-			_, err = explainAs(t, pg, role, ids[locks], false)
-			require.NoError(t, err, role.String())
-			requireNoAdvisoryLocks(t, admin)
-
-			_, err = explainAs(t, pg, role, ids[locks], true)
-			requireRefused(t, err, "pglens_guard.lock_at_plan_time()")
-			requireNoAdvisoryLocks(t, admin)
+			for _, statement := range []string{direct, viewed} {
+				for _, analyze := range []bool{false, true} {
+					_, err = explainAs(t, pg, role, ids[statement], analyze)
+					requireRefused(t, err, "the database defines pglens_guard.lock_at_plan_time()")
+					requireNoAdvisoryLocks(t, admin)
+				}
+			}
 		}
+
+		// A tier 2 session holds pg_signal_backend. Planning must not run as
+		// that role, so the executor drops to pg_read_all_data first.
+		for role, want := range map[pgtest.Role]string{pgtest.RoleT1: "pglens_t1", pgtest.RoleT2: "pg_read_all_data"} {
+			mgr, err := NewManager(ctx, "explain-guard-session-"+role.String(), pg.DSN("postgres", role), DefaultConnOptions(), clock.System())
+			require.NoError(t, err)
+			conn, err := mgr.ForDatabase(ctx, "postgres")
+			require.NoError(t, err)
+			_, err = conn.Exec(ctx, "BEGIN READ ONLY")
+			require.NoError(t, err)
+			require.NoError(t, dropExplainPrivileges(ctx, conn, pg.Major, false))
+			var user string
+			require.NoError(t, conn.QueryRow(ctx, "SELECT current_user").Scan(&user))
+			require.Equal(t, want, user, role.String())
+			_, err = conn.Exec(ctx, "ROLLBACK")
+			require.NoError(t, err)
+			conn.Release()
+			mgr.Close()
+		}
+
+		// The session a command used ends with it: an advisory lock taken on
+		// it is gone once discardConn has closed the session.
+		mgr, err := NewManager(ctx, "explain-guard-discard", pg.DSN("postgres", pgtest.RoleT1), DefaultConnOptions(), clock.System())
+		require.NoError(t, err)
+		defer mgr.Close()
+		conn, err := mgr.ForDatabase(ctx, "postgres")
+		require.NoError(t, err)
+		_, err = conn.Exec(ctx, "SELECT pg_advisory_lock(4246)")
+		require.NoError(t, err)
+		discardConn(ctx, conn)
+		requireNoAdvisoryLocks(t, admin)
 	})
 }
 
 // TestINTCMD022_ExplainAnalyzeRefusesHiddenCalls: an operator backed by a
 // user-defined function can run without appearing in a plan (CASE x WHEN y
-// compares with it), so its presence in the database closes ANALYZE there.
+// compares with it), so ANALYZE refuses a statement that reaches one. The
+// function is VOLATILE, so the planner does not run it and the refusal is the
+// hidden-call check's.
 func TestINTCMD022_ExplainAnalyzeRefusesHiddenCalls(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
 		pg.Lock(t)
@@ -193,7 +222,7 @@ func TestINTCMD022_ExplainAnalyzeRefusesHiddenCalls(t *testing.T) {
 		_, err := admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
 		require.NoError(t, err)
 		_, err = admin.Exec(ctx, guardFixture+`
-CREATE FUNCTION pglens_guard.eq(int, int) RETURNS bool LANGUAGE plpgsql IMMUTABLE
+CREATE FUNCTION pglens_guard.eq(int, int) RETURNS bool LANGUAGE plpgsql
 	AS $$ BEGIN PERFORM pg_advisory_lock(4245); RETURN $1 = $2; END $$;
 CREATE OPERATOR pglens_guard.=== (LEFTARG = int, RIGHTARG = int, FUNCTION = pglens_guard.eq);`)
 		require.NoError(t, err)

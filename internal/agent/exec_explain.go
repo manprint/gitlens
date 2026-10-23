@@ -83,12 +83,14 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 
 	// READ ONLY for both modes: the session is already read-only (see
 	// ReadOnlySession), and saying so here keeps the guarantee local to the
-	// one place that executes text written by database users. A read-only
-	// transaction makes PostgreSQL itself reject INSERT/UPDATE/DELETE/MERGE
-	// under ANALYZE, data-modifying CTEs, nextval() and writes from volatile
-	// functions. Plan-only EXPLAIN executes nothing; PostgreSQL still checks
-	// the statement's privileges, so a write cannot even be planned by a
-	// role that only reads.
+	// one place that executes text written by database users. The transaction
+	// makes PostgreSQL itself reject the writes made in it, under ANALYZE
+	// INSERT/UPDATE/DELETE/MERGE, data-modifying CTEs, nextval() and the writes
+	// of functions the statement calls. It does not reach a write made through
+	// another session (dblink, postgres_fdw) or the other side effects listed
+	// in explain_guard.go; the guard refuses those before the statement runs. Plan-only
+	// EXPLAIN executes nothing; PostgreSQL still checks the statement's
+	// privileges, so a write cannot even be planned by a role that only reads.
 	if _, err := conn.Exec(ctx, "BEGIN READ ONLY"); err != nil {
 		return nil, err
 	}
@@ -106,9 +108,12 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 	if _, err := conn.Exec(ctx, "SET LOCAL search_path TO DEFAULT"); err != nil {
 		return nil, err
 	}
-	// Planning alone can run user code (see explain_guard.go), so privileges
-	// are dropped before anything is planned, and ANALYZE runs only once the
-	// guard has inspected the statement, the database and the plan.
+	// Planning alone can run user code (see explain_guard.go), so the database
+	// is checked before anything is planned, privileges are dropped next, and
+	// ANALYZE runs only once the guard has inspected the statement and the plan.
+	if err := guardPlanning(ctx, conn); err != nil {
+		return nil, err
+	}
 	if err := dropExplainPrivileges(ctx, conn, target.PGVersion().Major(), args.Analyze); err != nil {
 		return nil, err
 	}

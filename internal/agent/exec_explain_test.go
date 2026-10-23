@@ -26,10 +26,12 @@ type explainConn struct {
 	explainArgs []any
 	simpleSQL   []string
 
-	// The explain guard's answers: the session's privileges, the pg_proc
-	// rows for the names it looks up, the calls hidden in user-defined
-	// objects, and the VERBOSE plan it inspects (plan when nil).
+	// The explain guard's answers: the session's privileges, the functions
+	// the planner may run in the database, the pg_proc rows for the names it
+	// looks up, the calls hidden in user-defined objects, and the VERBOSE
+	// plan it inspects (plan when nil).
 	session     string
+	plannable   string
 	functions   string
 	hidden      string
 	verbosePlan []byte
@@ -43,6 +45,8 @@ func (c *explainConn) guardAnswer(sql string) string {
 	switch {
 	case strings.Contains(sql, "explain guard, session"):
 		answer, fallback = c.session, `{"superuser":false,"signal":false,"read_all_data":true}`
+	case strings.Contains(sql, "explain guard, plannable functions"):
+		answer = c.plannable
 	case strings.Contains(sql, "explain guard, functions"):
 		answer = c.functions
 	case strings.Contains(sql, "explain guard, hidden calls"):
