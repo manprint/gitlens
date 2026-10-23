@@ -45,8 +45,9 @@ services:
       # The server's own storage: it runs migrations on startup, so this DSN is
       # not read from the host environment. A PGLENS_DSN exported for another
       # purpose would otherwise send the migrations to that database. The
-      # password is spliced in as it is, so it must not contain URL-reserved
-      # characters (@ : / ? # %). Edit this line to use another database.
+      # password is spliced in as it is, so use only letters, digits and
+      # - _ . ~ in it: a space or / is rejected, @ moves the host, and % starts
+      # an escape. Edit this line to use another database.
       PGLENS_DSN: postgres://pglens:${PGLENS_DB_PASSWORD:?set PGLENS_DB_PASSWORD}@timescaledb:5432/pglens?sslmode=disable
       # Optional bind address inside the container (default :8080).
       PGLENS_LISTEN: ${PGLENS_LISTEN:-:8080}
