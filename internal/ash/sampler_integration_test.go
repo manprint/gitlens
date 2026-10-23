@@ -389,3 +389,25 @@ func TestINTASH007_AgentSessionsNotSampled(t *testing.T) {
 		require.Equal(t, 1, sleeping, "only the application session must be sampled, the agent's pglens/ sessions are not workload; got %+v", rows)
 	})
 }
+
+// INT-ASH-008: ComputeQueryIDSetting reads the server's own compute_query_id,
+// which the test containers run with set to on (test/pgtest).
+func TestINTASH008_ComputeQueryIDSettingReadsServer(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		pool := newTestPool(t, ctx, pg)
+		conn, err := pool.Acquire(ctx)
+		require.NoError(t, err)
+		defer conn.Release()
+
+		var want string
+		require.NoError(t, conn.QueryRow(ctx, "SHOW compute_query_id").Scan(&want))
+		got, err := ComputeQueryIDSetting(ctx, conn)
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		require.Equal(t, "on", got, "the test containers run with compute_query_id=on")
+	})
+}

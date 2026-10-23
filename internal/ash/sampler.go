@@ -3,7 +3,6 @@ package ash
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,7 +22,7 @@ type SampleRow struct {
 
 // querier is the subset of *pgxpool.Conn the sampler needs. Narrowing to an
 // interface (matching the internal/server dbPool convention) lets unit tests
-// exercise doSample's parsing and warn-once logic with a fake, so the L1
+// exercise doSample's parsing and control-flow logic with a fake, so the L1
 // coverage floor is met without a real database.
 type querier interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
@@ -41,26 +40,11 @@ type Sampler struct {
 	onSample func(SampleRow)    // invoked for every row of every successful tick; nil is valid (rows dropped)
 	onTick   func(success bool) // invoked exactly once per tick attempt, success or not; nil is valid
 
-	mu                  sync.Mutex
-	running             bool
-	ticksMissed         atomic.Int64
-	computeQueryID      *bool // nil = unknown, true/false = discovered
-	computeQueryIDMu    sync.Mutex
-	nullOnlySampleCount int // consecutive samples with >=1 row and every row's query_id null
-	warnedNoQueryID     atomic.Bool
-	lastErr             error // error of the most recent tick, nil if it succeeded
+	mu          sync.Mutex
+	running     bool
+	ticksMissed atomic.Int64
+	lastErr     error // error of the most recent tick, nil if it succeeded
 }
-
-// computeQueryIDOffSamples is how many CONSECUTIVE samples must show every
-// row's query_id null before concluding compute_query_id is off. A single
-// early sample can catch every active session between statements (query_id
-// transiently null even with the GUC genuinely on) — latching "off" from
-// that one observation (the original behavior) reported it permanently,
-// even though compute_query_id was confirmed on server-wide via `SHOW
-// compute_query_id` and later samples would have shown real query_ids. "on"
-// still latches from a single non-null observation, since that can only
-// happen when the GUC is genuinely on.
-const computeQueryIDOffSamples = 5
 
 // NewSampler creates a new ASH sampler.
 // conn must be dedicated (not shared); it will be held for the lifetime of the sampler.
@@ -162,13 +146,6 @@ func (s *Sampler) SetTickCallback(f func(success bool)) {
 	s.onTick = f
 }
 
-// ComputeQueryIDEnabled returns true if compute_query_id is on, false if off, nil if not yet discovered.
-func (s *Sampler) ComputeQueryIDEnabled() *bool {
-	s.computeQueryIDMu.Lock()
-	defer s.computeQueryIDMu.Unlock()
-	return s.computeQueryID
-}
-
 // run is the main sampling loop. It samples every 1 second and processes the results.
 // The sampler must be stopped via Stop(); run does not return until ctx is cancelled.
 func (s *Sampler) run(ctx context.Context, ticker clock.Ticker) {
@@ -228,7 +205,6 @@ SELECT COALESCE(datname, '')             AS datname,
 	// A tick that fails midway is a failed tick and does not count toward its
 	// window's ticks, so the rows it had already returned must not count
 	// toward the window's samples either.
-	var sawRow, sawNonNullQueryID bool
 	var batch []SampleRow
 	for rows.Next() {
 		var datname, state, waitEventType, waitEvent string
@@ -236,10 +212,6 @@ SELECT COALESCE(datname, '')             AS datname,
 
 		if err := rows.Scan(&datname, &state, &waitEventType, &waitEvent, &queryID); err != nil {
 			return err
-		}
-		sawRow = true
-		if queryID != nil {
-			sawNonNullQueryID = true
 		}
 
 		batch = append(batch, SampleRow{
@@ -257,31 +229,6 @@ SELECT COALESCE(datname, '')             AS datname,
 		for _, row := range batch {
 			s.onSample(row)
 		}
-	}
-
-	s.computeQueryIDMu.Lock()
-	if s.computeQueryID == nil {
-		switch {
-		case sawNonNullQueryID:
-			enabled := true
-			s.computeQueryID = &enabled
-		case sawRow:
-			s.nullOnlySampleCount++
-			if s.nullOnlySampleCount >= computeQueryIDOffSamples {
-				disabled := false
-				s.computeQueryID = &disabled
-			}
-		}
-		// No active sessions at all this tick: inconclusive, don't count
-		// either way — waiting for a sample that actually has rows.
-	}
-	s.computeQueryIDMu.Unlock()
-
-	s.computeQueryIDMu.Lock()
-	knownOff := s.computeQueryID != nil && !*s.computeQueryID
-	s.computeQueryIDMu.Unlock()
-	if knownOff && s.warnedNoQueryID.CompareAndSwap(false, true) {
-		log.Printf("ash: compute_query_id is off — samples will not be attributable to a query")
 	}
 
 	return nil
@@ -306,4 +253,24 @@ func SessionsVisible(ctx context.Context, q querier) (bool, error) {
 		return false, err
 	}
 	return visible, nil
+}
+
+// ComputeQueryIDSetting returns the compute_query_id setting: on, off, or auto,
+// where query IDs are computed only while a loaded module asks for them. A
+// sample's query_id is null whenever the setting leaves it unset, so the
+// setting is what the agent reports, rather than a guess from null samples.
+func ComputeQueryIDSetting(ctx context.Context, q querier) (string, error) {
+	rows, err := q.Query(ctx, `SELECT pg_catalog.current_setting('compute_query_id')`)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return "", rows.Err()
+	}
+	var setting string
+	if err := rows.Scan(&setting); err != nil {
+		return "", err
+	}
+	return setting, nil
 }

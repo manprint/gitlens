@@ -117,3 +117,25 @@ func TestINTASH006_ConnRecordsHiddenSessions(t *testing.T) {
 		require.False(t, visible.warnedHidden)
 	})
 }
+
+// INT-ASH-009: a target's first dedicated connection logs its compute_query_id
+// setting, once, so an operator can tell why a sample carries no queryid.
+func TestINTASH009_ConnLogsQueryIDSetting(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+
+		mgr, err := agent.NewManager(ctx, "ash-target", pg.DSN("postgres", pgtest.RoleT0), agent.DefaultConnOptions(), nil)
+		require.NoError(t, err)
+		defer mgr.Close()
+
+		conn, err := mgr.DedicatedConn(ctx)
+		require.NoError(t, err)
+		defer conn.Release()
+
+		logged := &ashConn{mgr: mgr, base: ctx, clk: clock.NewFake(time.Now())}
+		defer logged.Close()
+		logged.logQueryIDSetting(ctx, conn)
+		require.True(t, logged.loggedQueryID)
+	})
+}

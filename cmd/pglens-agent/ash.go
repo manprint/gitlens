@@ -133,10 +133,11 @@ type ashConn struct {
 	base context.Context
 	clk  clock.Clock
 
-	mu           sync.Mutex
-	conn         *pgxpool.Conn
-	retryAfter   time.Time
-	warnedHidden bool // the hidden-sessions warning has been printed for this target
+	mu            sync.Mutex
+	conn          *pgxpool.Conn
+	retryAfter    time.Time
+	warnedHidden  bool // the hidden-sessions warning has been printed for this target
+	loggedQueryID bool // the compute_query_id setting has been logged for this target
 }
 
 func (c *ashConn) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
@@ -170,6 +171,7 @@ func (c *ashConn) connectLocked() error {
 		return err
 	}
 	c.warnIfSessionsHidden(ctx, conn)
+	c.logQueryIDSetting(ctx, conn)
 	c.conn = conn
 	return nil
 }
@@ -187,6 +189,28 @@ func (c *ashConn) warnIfSessionsHidden(ctx context.Context, conn *pgxpool.Conn) 
 	}
 	c.warnedHidden = true
 	fmt.Fprintf(os.Stderr, "warning: ash: the role of %s cannot see other users' sessions (grant pg_monitor or pg_read_all_stats); their activity is not sampled\n", c.mgr.TargetName())
+}
+
+// logQueryIDSetting says once per target which compute_query_id setting the
+// server runs with. A sample has no queryid whenever that setting leaves query
+// IDs unset, so the logged value is what explains a sample without one.
+func (c *ashConn) logQueryIDSetting(ctx context.Context, conn *pgxpool.Conn) {
+	if c.loggedQueryID {
+		return
+	}
+	setting, err := ash.ComputeQueryIDSetting(ctx, conn)
+	if err != nil {
+		return
+	}
+	c.loggedQueryID = true
+	note := ""
+	switch setting {
+	case "off":
+		note = "; samples carry no queryid"
+	case "auto":
+		note = "; samples carry a queryid only while a loaded module such as pg_stat_statements requests one"
+	}
+	fmt.Fprintf(os.Stderr, "ash: compute_query_id = %s for %s%s\n", setting, c.mgr.TargetName(), note)
 }
 
 // Close returns the connection to the pool.
