@@ -153,12 +153,21 @@ func tableStatsResult(selected []cardinality.Candidate, rows map[string]tableSta
 		} {
 			add(m.name, float64(m.value), pgtype.KindCounter)
 		}
+		// The vacuum and analyze counts are cumulative since the last stats
+		// reset too, so they are counters: the server rates them, and a reset
+		// shows up as a counter going backwards.
+		for _, m := range []struct {
+			name  string
+			value float64
+		}{{"autovacuum_count", r.AutovacuumCount}, {"autoanalyze_count", r.AutoanalyzeCount}} {
+			add(m.name, m.value, pgtype.KindCounter)
+		}
 		for _, m := range []struct {
 			name  string
 			value float64
 		}{
 			{"n_live_tup", float64(r.NLiveTup)}, {"n_dead_tup", float64(r.NDeadTup)}, {"n_mod_since_analyze", float64(r.NModSinceAnalyze)},
-			{"autovacuum_count", r.AutovacuumCount}, {"autoanalyze_count", r.AutoanalyzeCount}, {"relpages", float64(r.Relpages)}, {"reltuples", r.RelTuples},
+			{"relpages", float64(r.Relpages)}, {"reltuples", r.RelTuples},
 			{"relfrozenxid_age", float64(r.RelfrozenXIDAge)}, {"total_bytes", float64(r.TotalBytes)}, {"table_bytes", float64(r.TableBytes)}, {"toast_bytes", float64(r.ToastBytes)},
 		} {
 			add(m.name, m.value, pgtype.KindGauge)
