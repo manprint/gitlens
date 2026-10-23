@@ -123,6 +123,26 @@ func TestLocks_SessionListNotFlaggedWhenComplete(t *testing.T) {
 // A session outside the blocking tree keeps only a short prefix of its query;
 // a session in the tree keeps the full text, since the tree is what the UI
 // shows for a wait.
+// A password in a statement the locks check reads is redacted in the blocking
+// tree and in the session list alike, and the text the UI shows never holds it.
+func TestLocks_RedactsCredentialsInEveryQuery(t *testing.T) {
+	result := scrapeLocks(t, []([]any){
+		lockValues(1, "transactionid", []int32{9}, 2, "ALTER ROLE tmp_secret PASSWORD 'hunter2'"),
+		lockValues(9, "", nil, 0, "CREATE ROLE holder LOGIN PASSWORD 'hunter3'"),
+		lockValues(2, "", nil, 0, "ALTER ROLE idle PASSWORD 'hunter4'"),
+	})
+	require.NotContains(t, string(result.Facts[0].ValueJSON), "hunter")
+	var tree lockTree
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
+	require.Equal(t, "ALTER ROLE tmp_secret PASSWORD '[redacted]'", tree.Nodes[0].Query)
+	require.Equal(t, "CREATE ROLE holder LOGIN PASSWORD '[redacted]'", tree.Nodes[1].Query)
+	queries := map[int32]string{}
+	for _, s := range tree.Sessions {
+		queries[s.PID] = s.Query
+	}
+	require.Equal(t, "ALTER ROLE idle PASSWORD '[redacted]'", queries[2])
+}
+
 func TestLocks_IdleSessionQueryIsShortened(t *testing.T) {
 	long := strings.Repeat("x", 3000)
 	result := scrapeLocks(t, []([]any){

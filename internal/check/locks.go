@@ -112,7 +112,9 @@ func (c *locksCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 		if err := rows.Scan(&r.PID, &r.Datname, &r.Username, &r.ApplicationName, &r.ClientAddr, &r.State, &r.WaitEventType, &r.WaitEvent, &r.XactAge, &r.StateAge, &r.Query, &r.BlockedBy); err != nil {
 			return Result{}, err
 		}
-		r.Query = truncateUTF8(r.Query, 2048)
+		// A statement can carry a role password, and the tree is shipped to
+		// the server and shown in the UI, so the credentials go before the cut.
+		r.Query = truncateUTF8(redactQueryText(r.Query), 2048)
 		parsed = append(parsed, r)
 	}
 	return buildLocksResult(parsed, t.Clock().Now()), rows.Err()
