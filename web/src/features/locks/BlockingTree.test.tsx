@@ -147,4 +147,21 @@ describe('BlockingTree', () => {
 
     await expect(expectNoA11yViolations(container)).resolves.toBeUndefined()
   })
+
+  it('UI-LOCK-046 shows a queue that every waiter lists in full as one level under the holder', () => {
+    const queued = Array.from({ length: 8 }, (_, index) => ({
+      pid: 200 + index,
+      blocked_by: [100, ...Array.from({ length: index }, (_, earlier) => 200 + earlier)],
+      wait_duration: 3,
+    }))
+    render(
+      <BlockingTree
+        response={response([{ pid: 100, blocked_by: [], wait_duration: 30 }, ...queued])}
+        now={NOW}
+      />,
+    )
+
+    expect(screen.getAllByRole('treeitem')).toHaveLength(9)
+    expect(screen.getAllByRole('treeitem')[0]).toHaveTextContent('PID 100')
+  })
 })

@@ -63,4 +63,20 @@ describe('lock-tree derivation', () => {
     expect(treeDepth([])).toBe(0)
     expect(blockedCount([])).toBe(0)
   })
+
+  it('UI-LOCK-006 places a queue that every waiter lists in full once, under the holder', () => {
+    const waiters = Array.from({ length: 20 }, (_, index) =>
+      lock(index + 2, [1, ...Array.from({ length: index }, (_, earlier) => earlier + 2)]),
+    )
+
+    const forest = buildBlockingTree([lock(1), ...waiters])
+    const reversed = buildBlockingTree([...waiters].reverse().concat(lock(1)))
+
+    expect(forest).toHaveLength(1)
+    expect(forest[0]?.children).toHaveLength(20)
+    expect(blockedCount(forest)).toBe(20)
+    expect(treeDepth(forest)).toBe(2)
+    expect(blockedCount(reversed)).toBe(20)
+    expect(treeDepth(reversed)).toBe(2)
+  })
 })

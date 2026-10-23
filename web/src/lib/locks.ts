@@ -42,7 +42,15 @@ function fallbackWaitDuration(node: LockNode): number {
   )
 }
 
-/** Build a blocking forest while representing a repeated node as a cycle marker. */
+/**
+ * Build a blocking forest while representing a repeated node as a cycle marker.
+ *
+ * pg_blocking_pids() names every session queued ahead of a waiter on a
+ * conflicting lock, so a queue lists each earlier waiter in every later
+ * waiter's blockers. Each session is placed once, breadth first, under the
+ * blocker closest to a root, which keeps the tree linear in the number of
+ * sessions and independent of the order the blockers are listed in.
+ */
 export function buildBlockingTree(nodes: readonly LockNode[]): BlockingTree {
   const byPID = new Map<string, LockNode>()
   for (const node of nodes) {
@@ -51,8 +59,7 @@ export function buildBlockingTree(nodes: readonly LockNode[]): BlockingTree {
 
   const children = new Map<string, LockNode[]>()
   for (const node of nodes) {
-    for (const blocker of node.blocked_by ?? []) {
-      const blockerKey = keyOf(blocker)
+    for (const blockerKey of new Set((node.blocked_by ?? []).map(keyOf))) {
       if (!byPID.has(blockerKey)) continue
       const siblings = children.get(blockerKey) ?? []
       siblings.push(node)
@@ -60,38 +67,53 @@ export function buildBlockingTree(nodes: readonly LockNode[]): BlockingTree {
     }
   }
 
-  const build = (node: LockNode, path: ReadonlySet<string>): BlockingTreeNode => {
-    const nodeKey = keyOf(node.pid)
-    if (path.has(nodeKey)) return { cycle: true, node, children: [] }
-
-    const nextPath = new Set(path)
-    nextPath.add(nodeKey)
-    return {
-      node,
-      children: (children.get(nodeKey) ?? []).map((child) => build(child, nextPath)),
+  const placed = new Map<string, BlockingTreeNode>()
+  const parentOf = new Map<string, string>()
+  const isAncestorOrSelf = (candidateKey: string, key: string): boolean => {
+    let current: string | undefined = key
+    while (current !== undefined) {
+      if (current === candidateKey) return true
+      current = parentOf.get(current)
     }
+    return false
+  }
+
+  const place = (start: LockNode): BlockingTreeNode => {
+    const root: BlockingTreeNode = { node: start, children: [] }
+    placed.set(keyOf(start.pid), root)
+    const queue: BlockingTreeNode[] = [root]
+    for (const current of queue) {
+      const currentKey = keyOf(current.node.pid)
+      for (const child of children.get(currentKey) ?? []) {
+        const childKey = keyOf(child.pid)
+        if (placed.has(childKey)) {
+          // A session already placed elsewhere is only a cycle when it is one
+          // of this node's ancestors; otherwise the edge is shown from its
+          // placed position and dropped here.
+          if (isAncestorOrSelf(childKey, currentKey)) {
+            current.children.push({ cycle: true, node: child, children: [] })
+          }
+          continue
+        }
+        const childTree: BlockingTreeNode = { node: child, children: [] }
+        placed.set(childKey, childTree)
+        parentOf.set(childKey, currentKey)
+        current.children.push(childTree)
+        queue.push(childTree)
+      }
+    }
+    return root
   }
 
   const hasKnownBlocker = (node: LockNode): boolean =>
     (node.blocked_by ?? []).some((blocker) => byPID.has(keyOf(blocker)))
   const roots = nodes.filter((node) => !hasKnownBlocker(node))
-  const forest = roots.map((root) => build(root, new Set<string>()))
-
-  const covered = new Set<string>()
-  const collect = (tree: BlockingTreeNode): void => {
-    covered.add(keyOf(tree.node.pid))
-    tree.children.forEach(collect)
-  }
-  forest.forEach(collect)
 
   // A cycle has no unblocked root. Add one representative so the operator can
   // see the complete component without allowing recursion to run forever.
-  for (const node of nodes) {
-    if (!covered.has(keyOf(node.pid))) {
-      const tree = build(node, new Set<string>())
-      forest.push(tree)
-      collect(tree)
-    }
+  const forest: BlockingTree = []
+  for (const node of [...roots, ...nodes]) {
+    if (!placed.has(keyOf(node.pid))) forest.push(place(node))
   }
 
   return forest
