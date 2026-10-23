@@ -233,7 +233,6 @@ func (a *AshAPI) queryASHBuckets(ctx context.Context, instanceID uuid.UUID, from
 	defer rows.Close()
 
 	var buckets []ashBucket
-	windowTicks := make(map[time.Time]int)
 	for rows.Next() {
 		var bucket ashBucket
 		var qid *int64
@@ -242,13 +241,28 @@ func (a *AshAPI) queryASHBuckets(ctx context.Context, instanceID uuid.UUID, from
 		}
 		bucket.QueryID = formatQueryID(qid)
 		bucket.AvgActiveSessions = avgActive(bucket.Samples, bucket.Ticks)
-		windowTicks[bucket.TS] = bucket.Ticks
 		buckets = append(buckets, bucket)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, err
 	}
-	return buckets, sumTicks(windowTicks), nil
+	totalTicks, err := a.queryASHTicks(ctx, instanceID, from, to)
+	if err != nil {
+		return nil, 0, err
+	}
+	return buckets, totalTicks, nil
+}
+
+// queryASHTicks counts the instance's sampling ticks over the range, every
+// window once. The filters narrow the samples, never the ticks, so the
+// significance guard reads them here. Summing the rows instead, as the
+// buckets and groups did, reported zero ticks, and a false warning, whenever
+// a filter or the database matched nothing.
+func (a *AshAPI) queryASHTicks(ctx context.Context, instanceID uuid.UUID, from, to *time.Time) (int, error) {
+	where, args := ashWhere(instanceID, from, to, "", ashFilters{})
+	var ticks int
+	err := a.pool.QueryRow(ctx, fmt.Sprintf(`SELECT COALESCE(SUM(t), 0)::int FROM (SELECT ts, MAX(window_ticks) AS t FROM metrics_ash WHERE %s GROUP BY ts) w`, where), args...).Scan(&ticks)
+	return ticks, err
 }
 
 // ashFilters narrows the rows to one wait event type or wait event: the
@@ -394,7 +408,11 @@ SELECT g.bucket, g.samples, t.ticks, %[4]s
 		}
 		buckets[i].AvgActiveSessions = avgActive(buckets[i].Samples, buckets[i].Ticks)
 	}
-	return buckets, sumTicks(bucketTicks), nil
+	totalTicks, err := a.queryASHTicks(ctx, instanceID, &from, &to)
+	if err != nil {
+		return nil, 0, err
+	}
+	return buckets, totalTicks, nil
 }
 
 // foldASHGroups keeps the largest groups (by samples over the range) and
@@ -479,14 +497,6 @@ func avgActive(samples, ticks int) *float64 {
 	}
 	avg := float64(samples) / float64(ticks)
 	return &avg
-}
-
-func sumTicks(byWindow map[time.Time]int) int {
-	total := 0
-	for _, t := range byWindow {
-		total += t
-	}
-	return total
 }
 
 // ----- /api/v1/ash/top -----
@@ -620,7 +630,6 @@ SELECT top.queryid,
 	defer rows.Close()
 
 	entries := []ashTopEntry{}
-	totalTicks := 0
 	for rows.Next() {
 		var qid int64
 		var entry ashTopEntry
@@ -629,10 +638,13 @@ SELECT top.queryid,
 		}
 		entry.QueryID = strconv.FormatInt(qid, 10)
 		entry.AvgActive = avgActive(entry.Samples, entry.Ticks)
-		totalTicks = entry.Ticks
 		entries = append(entries, entry)
 	}
 	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	totalTicks, err := a.queryASHTicks(ctx, instanceID, from, to)
+	if err != nil {
 		return nil, 0, err
 	}
 	return entries, totalTicks, nil

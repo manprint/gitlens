@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -46,6 +47,7 @@ func TestAshAPI_ASHUnknownOrEnabled_FallsThroughToBuckets(t *testing.T) {
 		// mockRow{err: pgx.ErrNoRows}) — unknown/never-reported must behave
 		// exactly like "enabled", not like "disabled".
 		queryResults: []*mockRows{{rows: []([]any){}}},
+		queryRowVals: []*mockRow{nil, {vals: []any{0}}},
 	}
 	api := &AshAPI{pool: pool}
 
@@ -133,6 +135,7 @@ func TestAshAPI_AvgActiveSessions_ZeroTicks(t *testing.T) {
 				},
 			},
 		},
+		queryRowVals: []*mockRow{{vals: []any{0}}},
 	}
 	api := &AshAPI{pool: pool}
 
@@ -155,6 +158,7 @@ func TestAshAPI_AvgActiveSessions_NonZeroTicks(t *testing.T) {
 				},
 			},
 		},
+		queryRowVals: []*mockRow{{vals: []any{10}}},
 	}
 	api := &AshAPI{pool: pool}
 
@@ -200,6 +204,7 @@ func TestAshAPI_SignificanceWarning_59Ticks(t *testing.T) {
 		queryResults: []*mockRows{
 			{rows: mockRowsData},
 		},
+		queryRowVals: []*mockRow{{vals: []any{59}}},
 	}
 	api := &AshAPI{pool: pool}
 
@@ -227,6 +232,7 @@ func TestAshAPI_SignificanceWarning_60Ticks(t *testing.T) {
 		queryResults: []*mockRows{
 			{rows: mockRowsData},
 		},
+		queryRowVals: []*mockRow{{vals: []any{60}}},
 	}
 	api := &AshAPI{pool: pool}
 
@@ -339,6 +345,7 @@ func TestAshTop_SignificanceWarning_Below60Ticks(t *testing.T) {
 				},
 			},
 		},
+		queryRowVals: []*mockRow{{vals: []any{59}}},
 	}
 	api := &AshAPI{pool: pool}
 
@@ -352,19 +359,50 @@ func TestAshTop_SignificanceWarning_Below60Ticks(t *testing.T) {
 	require.True(t, totalTicks < 60)
 }
 
-// TestAshAPI_WindowTicksCountOnce: the rows of one window share its ticks.
-// Summing them per row counted the window once per key.
-func TestAshAPI_WindowTicksCountOnce(t *testing.T) {
+// TestAshAPI_TicksComeFromTheRangeNotTheRows: the rows of a window carry its
+// ticks, and a filter leaves some of them out. The total is the range's ticks,
+// read once, so the rows the filter left are not its source.
+func TestAshAPI_TicksComeFromTheRangeNotTheRows(t *testing.T) {
 	t.Parallel()
 	ts := time.Now().Truncate(time.Second)
-	pool := &mockPool{queryResults: []*mockRows{{rows: [][]any{
-		{ts, 5, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
-		{ts, 3, 10, "db1", "Lock", "transactionid", "active", (*int64)(nil)},
-		{ts.Add(-10 * time.Second), 2, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
-	}}}}
+	pool := &mockPool{
+		queryResults: []*mockRows{{rows: [][]any{
+			{ts, 5, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
+			{ts, 3, 10, "db1", "Lock", "transactionid", "active", (*int64)(nil)},
+			{ts.Add(-10 * time.Second), 2, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
+		}}},
+		queryRowVals: []*mockRow{{vals: []any{600}}},
+	}
 	_, totalTicks, err := (&AshAPI{pool: pool}).queryASHBuckets(context.Background(), uuid.New(), nil, nil, "", ashFilters{}, 1000)
 	require.NoError(t, err)
-	require.Equal(t, 20, totalTicks, "two windows of 10 ticks, not three rows")
+	require.Equal(t, 600, totalTicks, "the range's ticks, not the two windows the rows show")
+}
+
+// TestAshAPI_EmptyResultKeepsTheRangeTicks: a filter that matches nothing leaves
+// no rows to read ticks from. The significance guard must still read the
+// range's ticks, or every empty answer warns of a small sample. The ASH
+// handlers check the instance's ash_enabled first, which takes the first
+// scripted row; the top list has no such check.
+func TestAshAPI_EmptyResultKeepsTheRangeTicks(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		path string
+		rows []*mockRow
+	}{
+		{"/api/v1/ash?instance_id=%s", []*mockRow{nil, {vals: []any{600}}}},
+		{"/api/v1/ash?instance_id=%s&group_by=wait_event_type&from=2026-09-01T11:00:00Z&to=2026-09-01T12:00:00Z", []*mockRow{nil, {vals: []any{600}}}},
+		{"/api/v1/ash/top?instance_id=%s&wait_event=Nope", []*mockRow{{vals: []any{600}}}},
+	} {
+		pool := &mockPool{queryRowVals: tc.rows}
+		r := chi.NewRouter()
+		(&AshAPI{pool: pool}).RegisterRoutes(r)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest("GET", fmt.Sprintf(tc.path, uuid.NewString()), nil))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var resp map[string]any
+		require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+		require.NotContains(t, resp, "warning", tc.path)
+	}
 }
 
 func TestAshResolution_FitsTheRangeInMaxPoints(t *testing.T) {
@@ -387,6 +425,7 @@ func TestAshAPI_GroupByAggregatesAndFillsTheGroup(t *testing.T) {
 			{ts, 30, 20, "LWLock"},
 			{ts, 10, 20, "CPU"},
 		}}},
+		queryRowVals: []*mockRow{nil, {vals: []any{20}}},
 	}
 	r := chi.NewRouter()
 	(&AshAPI{pool: pool}).RegisterRoutes(r)
