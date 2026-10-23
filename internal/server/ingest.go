@@ -27,6 +27,42 @@ const maxBodyBytes = 32 << 20 // 32 MiB
 // Nothing in production reassigns it. Same precedent as sessionRandRead.
 var maxDecompressedBytes int64 = 256 << 20
 
+// maxConcurrentIngest bounds the envelopes held in memory at once. Each one
+// costs several times its size while it is read, decompressed and decoded, so
+// the per-request budgets above multiply by the number of pushes in flight. A
+// push that finds every slot taken gets 503 with Retry-After, which the agent
+// retries as a server error (internal/agent/pusher.go).
+const maxConcurrentIngest = 4
+
+// errBodyTooLarge is returned by budgetReader once the decompressed body is
+// past its budget.
+var errBodyTooLarge = errors.New("decompressed body exceeds the limit")
+
+// budgetReader passes through at most budget bytes of r. A read past the
+// budget fails with errBodyTooLarge instead of ending early, so the decoder
+// reports an oversized body as such and not as truncated JSON.
+type budgetReader struct {
+	r      io.Reader
+	budget int64
+}
+
+func (b *budgetReader) Read(p []byte) (int, error) {
+	if b.budget <= 0 {
+		var probe [1]byte
+		n, err := b.r.Read(probe[:])
+		if n > 0 {
+			return 0, errBodyTooLarge
+		}
+		return 0, err
+	}
+	if int64(len(p)) > b.budget {
+		p = p[:b.budget]
+	}
+	n, err := b.r.Read(p)
+	b.budget -= int64(n)
+	return n, err
+}
+
 const maxSampleAge = 12 * time.Hour
 const futureSkewThreshold = 30 * time.Second
 
@@ -46,6 +82,12 @@ func transmittedAt(r *http.Request, sentAt time.Time) time.Time {
 // delta conversion and storage. inv and pipeline may be built with a nil pool
 // (see NewInventory/NewPipeline) for tests that only exercise validation.
 func IngestHandler(auth *Auth, inv *Inventory, pipeline *Pipeline) http.HandlerFunc {
+	return ingestHandler(auth, inv, pipeline, make(chan struct{}, maxConcurrentIngest))
+}
+
+// ingestHandler is IngestHandler with the slots that bound its concurrent
+// envelopes passed in, so a test can hold them.
+func ingestHandler(auth *Auth, inv *Inventory, pipeline *Pipeline, slots chan struct{}) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Every error goes through writeError. The handler used to build its
 		// JSON with Sprintf and send it with http.Error, as text/plain, with
@@ -56,6 +98,14 @@ func IngestHandler(auth *Auth, inv *Inventory, pipeline *Pipeline) http.HandlerF
 		// Auth
 		if !auth.Validate(r) {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "")
+			return
+		}
+		select {
+		case slots <- struct{}{}:
+			defer func() { <-slots }()
+		default:
+			w.Header().Set("Retry-After", "1")
+			writeError(w, http.StatusServiceUnavailable, "ingest busy", "too many envelopes in flight")
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
@@ -70,6 +120,10 @@ func IngestHandler(auth *Auth, inv *Inventory, pipeline *Pipeline) http.HandlerF
 			writeError(w, http.StatusBadRequest, "read error", err.Error())
 			return
 		}
+		// The envelope is decoded from the decompressed stream, so the
+		// decompressed copy is never held in memory next to the decoder's own
+		// buffer.
+		var src io.Reader = bytes.NewReader(body)
 		// agent.Pusher always gzips (internal/agent/pusher.go's buildRequest)
 		// and sets Content-Encoding accordingly; net/http does not
 		// transparently decompress request bodies (only response bodies),
@@ -83,27 +137,29 @@ func IngestHandler(auth *Auth, inv *Inventory, pipeline *Pipeline) http.HandlerF
 				writeError(w, http.StatusBadRequest, "invalid gzip body", gzErr.Error())
 				return
 			}
-			// LimitReader at maxDecompressedBytes+1 so an envelope that
-			// exactly fills the budget is still accepted and only one that
-			// exceeds it is rejected, with 413 (the status the agent's
-			// pushOne already treats as "drop this, do not retry").
-			body, err = io.ReadAll(io.LimitReader(gz, maxDecompressedBytes+1))
-			_ = gz.Close()
-			if err != nil {
-				writeError(w, http.StatusBadRequest, "invalid gzip body", err.Error())
-				return
-			}
-			if int64(len(body)) > maxDecompressedBytes {
-				IncIngestRejected("decompressed_too_large")
-				writeError(w, http.StatusRequestEntityTooLarge, "payload too large", "decompressed body exceeds the limit")
-				return
-			}
+			defer func() { _ = gz.Close() }()
+			src = &budgetReader{r: gz, budget: maxDecompressedBytes}
 		}
 		var env wire.Envelope
-		dec := json.NewDecoder(bytes.NewReader(body))
+		dec := json.NewDecoder(src)
 		dec.DisallowUnknownFields()
-		if err := dec.Decode(&env); err != nil {
-			writeError(w, http.StatusBadRequest, "bad json", err.Error())
+		decodeErr := dec.Decode(&env)
+		// The whole decompressed body is measured, not only what the decoder
+		// needed: an oversized body is refused with 413 whether its JSON is
+		// valid or not, as it was before the body was decoded as a stream. The
+		// agent treats 413 as "drop this, do not retry".
+		_, drainErr := io.Copy(io.Discard, src)
+		if errors.Is(drainErr, errBodyTooLarge) {
+			IncIngestRejected("decompressed_too_large")
+			writeError(w, http.StatusRequestEntityTooLarge, "payload too large", "decompressed body exceeds the limit")
+			return
+		}
+		if decodeErr != nil {
+			writeError(w, http.StatusBadRequest, "bad json", decodeErr.Error())
+			return
+		}
+		if drainErr != nil {
+			writeError(w, http.StatusBadRequest, "invalid gzip body", drainErr.Error())
 			return
 		}
 		if env.ProtocolVersion < wire.ProtocolVersionMin || env.ProtocolVersion > wire.ProtocolVersionCurrent {

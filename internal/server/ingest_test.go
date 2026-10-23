@@ -89,6 +89,34 @@ func TestIngest_RejectsRevokedInstanceOwner(t *testing.T) {
 	}
 }
 
+// TestIngest_RefusesWhenSaturated: an envelope that finds every slot taken is
+// answered 503 with Retry-After, which the agent retries, and goes through
+// once a slot is free.
+func TestIngest_RefusesWhenSaturated(t *testing.T) {
+	t.Parallel()
+	auth := NewAuth("token")
+	slots := make(chan struct{}, 1)
+	h := ingestHandler(auth, NewInventory(nil), NewPipeline(nil, nil), slots)
+	env := wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: "a", SentAt: time.Now()}
+	body, _ := json.Marshal(env)
+	push := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer token")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		return w
+	}
+
+	slots <- struct{}{}
+	w := push()
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	require.NotEmpty(t, w.Header().Get("Retry-After"))
+
+	<-slots
+	require.Equal(t, http.StatusAccepted, push().Code)
+	require.Empty(t, slots, "the slot is released once the envelope is handled")
+}
+
 func TestIngest_RejectsStaleEnvelope(t *testing.T) {
 	t.Parallel()
 	auth := NewAuth("token")
@@ -241,6 +269,42 @@ func TestIngest_ErrorBodiesAreJSON(t *testing.T) {
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp), w.Body.String())
 			require.Equal(t, "bad json", resp.Error)
 			require.NotEmpty(t, resp.Detail)
+		})
+	}
+}
+
+// TestIngest_DecompressedBudgetIsExact: an envelope that exactly fills the
+// decompressed budget is accepted, and one byte more is refused with 413 even
+// though its JSON is valid.
+func TestIngest_DecompressedBudgetIsExact(t *testing.T) {
+	// Not t.Parallel(): this test temporarily lowers a package-level limit.
+	raw, _ := json.Marshal(wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: "a", SentAt: time.Now()})
+	original := maxDecompressedBytes
+	t.Cleanup(func() { maxDecompressedBytes = original })
+	maxDecompressedBytes = int64(len(raw))
+
+	for _, tc := range []struct {
+		name string
+		body []byte
+		code int
+	}{
+		{"exact", raw, http.StatusAccepted},
+		{"one byte over", append(append([]byte{}, raw...), ' '), http.StatusRequestEntityTooLarge},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			gz := gzip.NewWriter(&buf)
+			_, err := gz.Write(tc.body)
+			require.NoError(t, err)
+			require.NoError(t, gz.Close())
+
+			h := IngestHandler(NewAuth("token"), NewInventory(nil), NewPipeline(nil, nil))
+			req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(buf.Bytes()))
+			req.Header.Set("Authorization", "Bearer token")
+			req.Header.Set("Content-Encoding", "gzip")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			require.Equal(t, tc.code, w.Code, w.Body.String())
 		})
 	}
 }
