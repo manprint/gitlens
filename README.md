@@ -973,7 +973,7 @@ warnings
 
 - **server version** — PostgreSQL version; `— NOT SUPPORTED` means it is outside 15–19
 - **role** — `primary`, `standby`, or `read-only replica`; determines which replication checks run
-- **system_identifier** — stable cluster identity; if it says `N/A (requires pg_control_system privilege)`, you need the grant from `monitoring_user.sql`
+- **system_identifier** — stable cluster identity; if it says `N/A (requires pg_control_system privilege)`, `EXECUTE` on `pg_control_system()` has been revoked from `PUBLIC` for this role, and the grant from `monitoring_user.sql` fixes it
 - **permission tier**:
   - `T0 (pg_monitor)` — minimum, enables all core monitoring
   - `T1 (pg_monitor + pg_read_all_data)` — enables plan-only `EXPLAIN` and on-demand `pgstattuple` measurement, and lets the bloat estimate see tables whose columns `pg_monitor` alone cannot read; with `allow_explain_analyze`, the agent also accepts `EXPLAIN ANALYZE` (the interface asks for T2)
@@ -1433,6 +1433,8 @@ This is applied by `deploy/sql/monitoring_user.sql`. **Where `PUBLIC` has lost `
 
 **Best practice:** keep the grant that `monitoring_user.sql` applies, so the identity does not depend on the `PUBLIC` default. If you cannot grant it (e.g., on some managed PostgreSQL services), explicitly set `cluster_name` to the same value on all instances in the cluster and ensure it survives failover.
 
+The fallback raises no event. To see that it happened, read `id_source` on the cluster in `GET /api/v1/clusters`, or look at the cluster card on the Fleet page: a value other than `system_identifier` (in practice `manual`) means the identity came from `cluster_name`, and the card links to the grant instructions.
+
 ### What the agent does
 
 On each target instance, the agent runs:
@@ -1508,13 +1510,13 @@ Events are the system's way of notifying you of changes in replication topology 
 | `orphan_standby` | a standby's upstream cannot be resolved for more than 60 seconds | Primary is down but the standby has not been promoted. Either the primary is recovering, or you need to promote the standby and reconnect it. |
 | `role_change` | any instance changed role (except failovers, which emit `failover_detected` instead) | Expected during planned promotion or recovery. Check the instance's new role via `/api/v1/clusters`. |
 | **Replication slots** | |
-| `slot_inactive` | a replication slot has been inactive (not actively feeding a standby) for the configured window | Standby is down or disconnected. Check if the standby needs to be restarted or reconnected. |
+| `slot_inactive` | a replication slot has been inactive (not actively feeding a standby) for more than 30 seconds; the window is fixed and is not read from the configuration | Standby is down or disconnected. Check if the standby needs to be restarted or reconnected. |
 | `slot_retained_bytes` | a replication slot is retaining an unusual amount of WAL | Standby is lagging or disconnected; WAL is accumulating. Monitor disk usage; if it grows unbounded, the primary can run out of disk. |
 | **Cluster health** | |
-| `no_primary_in_cluster` | no instance in the cluster is reporting primary role for more than 60 seconds | Critical: the cluster has no leader. Investigate why all instances went down or why none are reporting as primary. Promote a standby if needed. |
+| `no_primary_in_cluster` | no instance in the cluster has reported the primary role for about 135 to 165 seconds: a primary counts for 90 seconds after its last push, then the event follows 60 seconds later | Critical: the cluster has no leader. Investigate why all instances went down or why none are reporting as primary. Promote a standby if needed. |
 | **Other** | |
 | `counter_reset_detected` | a counter (e.g., transaction or connection count) went backwards or `pg_stat_reset()` was called | Expected after `pg_stat_reset()` or an unexpected instance restart; not usually a sign of a problem. |
-| `agent_down` | the agent has not reported for more than 3× its check interval | Agent container crashed, network unreachable, or server unreachable. Check agent logs and connectivity. |
+| `agent_down` | the agent has not reported for more than 90 seconds; the threshold is three times the fixed 30-second expected interval and does not follow the configured check interval | Agent container crashed, network unreachable, or server unreachable. Check agent logs and connectivity. |
 | `agent_up` | the agent resumed reporting after being down | Recovery; check that the instance is operating normally. |
 | `check_circuit_open` | 3 consecutive failures of a single check (e.g., permission denied on a replication query) | Permission issue, query timeout, or transient database problem. Check agent logs and the instance's error log. |
 | `duplicate_instance_suspected` | the agent is generating a different `instance_id` for the same `addr:port` on restart | The agent lost its persistent identity. Verify the container has a persistent volume at `/var/lib/pglens` (in Docker) or the systemd service's `StateDirectory` (in systemd). Without persistence, the agent regenerates its identity on restart and instances are duplicated. |
@@ -1755,7 +1757,7 @@ The agent did not persist its identity across a restart. Verify:
    # Should show: "identity path /var/lib/pglens is not on a persistent mount"
    ```
 
-To fix: mount the persistent volume and restart. Old duplicate instances will age out (last_seen >3× interval) and trigger `agent_down` events.
+To fix: mount the persistent volume and restart. Old duplicate instances will age out (last_seen more than 90 seconds old) and trigger `agent_down` events.
 
 ## Known limits
 

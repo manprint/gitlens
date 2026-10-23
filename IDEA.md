@@ -101,7 +101,7 @@ Tutti i nodi di uno streaming replication cluster condividono lo stesso `system_
 SELECT system_identifier FROM pg_control_system();
 ```
 
-**Attenzione operativa:** `pg_control_system()` è **ristretta a superuser di default e NON è coperta da `pg_monitor`**. Serve grant esplicito:
+**Attenzione operativa:** `pg_control_system()` **NON è coperta da `pg_monitor`**. Su PostgreSQL 15-19 però `PUBLIC` ha `EXECUTE` di default, quindi il grant serve solo dove quel default è stato revocato (installazioni indurite o servizi gestiti):
 
 ```sql
 GRANT EXECUTE ON FUNCTION pg_control_system() TO monitoring;
@@ -493,7 +493,7 @@ v0.1 dichiarava utente `monitoring` con `pg_monitor`, **solo lettura**, e poi pr
 
 | Tier | Grant | Sblocca | Default |
 |---|---|---|---|
-| **T0 - read-only** | `pg_monitor` + `GRANT EXECUTE ON FUNCTION pg_control_system()` | tutte le metriche, ASH, topologia, replica, advisor statistico | **on** |
+| **T0 - read-only** | `pg_monitor` (+ `GRANT EXECUTE ON FUNCTION pg_control_system()` dove `PUBLIC` l'ha revocato) | tutte le metriche, ASH, topologia, replica, advisor statistico | **on** |
 | **T1 - explain** | `pg_read_all_data` (PG14+) *oppure* `GRANT SELECT` mirati sugli schemi | `EXPLAIN` (senza ANALYZE) on-demand | off |
 | **T2 - signal** | `pg_signal_backend` | cancel / terminate query dalla UI | off |
 | **T3 - extension** | `CREATE EXTENSION hypopg`, `pg_buffercache`, `pg_stat_kcache` | advisor con simulazione indici, cache analysis | off |
