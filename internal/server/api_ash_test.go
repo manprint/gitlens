@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 )
 
@@ -492,4 +493,66 @@ func TestAshAPI_UngroupedRowsReportTheAgentWindow(t *testing.T) {
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	require.Len(t, resp.Buckets, 1)
 	require.Equal(t, ashWindowSeconds, resp.ResolutionSeconds)
+}
+
+// ashArgsPool records the arguments of each QueryRow, so a test can check the
+// bounds the tick count was given.
+type ashArgsPool struct {
+	*mockPool
+	rowArgs [][]any
+}
+
+func (p *ashArgsPool) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	p.rowArgs = append(p.rowArgs, args)
+	return p.mockPool.QueryRow(ctx, sql, args...)
+}
+
+// A truncated ungrouped answer counts the ticks of the windows it shows, so the
+// tick scan stops at its oldest row instead of reading the whole retained
+// history. A complete answer counts the range it was asked for, here none.
+func TestAshAPI_UngroupedTicksStopAtTheAnswersOldestRow(t *testing.T) {
+	t.Parallel()
+	ts := time.Now().Truncate(time.Second)
+	oldest := ts.Add(-10 * time.Second)
+	rows := func() *mockRows {
+		return &mockRows{rows: [][]any{
+			{ts, 5, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
+			{oldest, 2, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
+		}}
+	}
+
+	truncated := &ashArgsPool{mockPool: &mockPool{
+		queryResults: []*mockRows{rows()},
+		queryRowVals: []*mockRow{{vals: []any{600}}},
+	}}
+	_, _, err := (&AshAPI{pool: truncated}).queryASHBuckets(context.Background(), uuid.New(), nil, nil, "", ashFilters{}, 2)
+	require.NoError(t, err)
+	require.Len(t, truncated.rowArgs, 1)
+	require.Len(t, truncated.rowArgs[0], 2, "instance and a lower bound")
+	require.True(t, truncated.rowArgs[0][1].(time.Time).Equal(oldest), "the bound is the oldest shown window")
+
+	complete := &ashArgsPool{mockPool: &mockPool{
+		queryResults: []*mockRows{rows()},
+		queryRowVals: []*mockRow{{vals: []any{600}}},
+	}}
+	_, _, err = (&AshAPI{pool: complete}).queryASHBuckets(context.Background(), uuid.New(), nil, nil, "", ashFilters{}, 1000)
+	require.NoError(t, err)
+	require.Len(t, complete.rowArgs, 1)
+	require.Len(t, complete.rowArgs[0], 1, "a complete answer has no lower bound when none was asked")
+}
+
+// The top list's ticks CTE is the range's total and every entry carries it, so
+// a non-empty answer must not run a second tick scan.
+func TestAshTop_NonEmptyAnswerReadsTicksFromItsEntries(t *testing.T) {
+	t.Parallel()
+	pool := &mockPool{
+		queryResults: []*mockRows{{rows: [][]any{
+			{int64(42), "select 1", 7, 600},
+		}}},
+	}
+	entries, totalTicks, err := (&AshAPI{pool: pool}).queryASHTop(context.Background(), uuid.New(), nil, nil, "", ashFilters{}, 10)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, 600, totalTicks)
+	require.Zero(t, pool.queryRowCalls, "the entries already carry the range's ticks")
 }

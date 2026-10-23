@@ -248,7 +248,17 @@ func (a *AshAPI) queryASHBuckets(ctx context.Context, instanceID uuid.UUID, from
 	if err := rows.Err(); err != nil {
 		return nil, 0, err
 	}
-	totalTicks, err := a.queryASHTicks(ctx, instanceID, from, to)
+	// A truncated answer counts the ticks of the windows it shows. The rows come
+	// newest first, so its last row is the oldest, and the tick scan stops there
+	// rather than reading the whole retained history on every request. A
+	// complete answer already read everything it matched, so it counts the
+	// range it was asked for.
+	tickFrom := from
+	if n := len(buckets); n > 0 && n >= limit {
+		oldest := buckets[n-1].TS
+		tickFrom = &oldest
+	}
+	totalTicks, err := a.queryASHTicks(ctx, instanceID, tickFrom, to)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -644,6 +654,12 @@ SELECT top.queryid,
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, err
+	}
+	// The ticks CTE above is the range's total, so every entry already carries
+	// it. Only an empty answer, which has no entry to read it from, counts it
+	// apart.
+	if len(entries) > 0 {
+		return entries, entries[0].Ticks, nil
 	}
 	totalTicks, err := a.queryASHTicks(ctx, instanceID, from, to)
 	if err != nil {
