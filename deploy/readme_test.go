@@ -25,7 +25,7 @@ func TestReadme_ComposeCommandsRunWithTheSecretsTheyExport(t *testing.T) {
 	upCommand := regexp.MustCompile(`(?m)^docker compose -f (\S+) up -d`)
 	exported := regexp.MustCompile(`(?m)^export ([A-Z][A-Z0-9_]*)=`)
 
-	checked := 0
+	var checked []string
 	for _, block := range shellBlock.FindAllStringSubmatch(string(readFile(t, filepath.Join("..", "README.md"))), -1) {
 		exports := exported.FindAllStringSubmatch(block[1], -1)
 		for _, command := range upCommand.FindAllStringSubmatch(block[1], -1) {
@@ -38,8 +38,16 @@ func TestReadme_ComposeCommandsRunWithTheSecretsTheyExport(t *testing.T) {
 			compose.Env = env
 			out, err := compose.CombinedOutput()
 			require.NoError(t, err, "README runs %s, but its code block does not export every secret the file needs: %s", command[1], out)
-			checked++
+			checked = append(checked, command[1])
 		}
 	}
-	require.NotZero(t, checked, "the README documents no compose command")
+	// A command that the expression stops matching, for example one reflowed
+	// over several lines, would drop out of the check without a sign, so the
+	// test names the commands it expects: the quick start and both commands
+	// under Running the server.
+	require.ElementsMatch(t, []string{
+		"deploy/docker-compose.yml",
+		"deploy/docker-compose.yml",
+		"deploy/compose/timescaledb.yml",
+	}, checked, "the README's compose commands changed: update this list")
 }
