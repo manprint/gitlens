@@ -123,6 +123,9 @@ test('SYS-UI-001: failover preserves identity and raises an alert', async ({
   api,
 }) => {
   const page = signedInPage
+  // The standby registers after the stack is up, so the fleet is read only
+  // once it lists both members and the failover starts from a whole picture.
+  await pollAPI(async () => (await instances(api)).length >= 2, 120_000)
   const before = await fleetContext(api)
   await navigateToFleet(page)
 
@@ -782,10 +785,13 @@ test('SYS-UI-010: finding mute and unmute update state', async ({ signedInPage, 
   const findingID = String(mutableFinding?.finding_id ?? '')
   const realState = String(mutableFinding?.state)
   expect(findingID).not.toBe('')
+  // Titles repeat across findings (one index.unused per index, for example), so
+  // the card is found by the finding id it carries as data-finding-id.
+  const findingCard = () => page.locator(`article[data-finding-id="${findingID}"]`)
 
   await page.goto('/findings')
   await expect(page.getByRole('heading', { name: 'Advisor findings' })).toBeVisible()
-  const finding = page.locator(`article[aria-labelledby="finding-${findingID}"]`)
+  const finding = findingCard()
   await expect(finding).toBeVisible({ timeout: 120_000 })
   await finding.getByRole('button', { name: 'Mute finding' }).click()
   const dialog = page.getByRole('dialog')
@@ -795,7 +801,7 @@ test('SYS-UI-010: finding mute and unmute update state', async ({ signedInPage, 
   await dialog.getByRole('button', { name: 'Mute finding' }).click()
   await expect(page.getByRole('dialog')).toBeHidden()
   await page.getByLabel('State').selectOption('all')
-  const mutedFinding = page.locator(`article[aria-labelledby="finding-${findingID}"]`)
+  const mutedFinding = findingCard()
   await expect(mutedFinding).toBeVisible()
   await expect(mutedFinding).toContainText(/muted/i)
   await expect(mutedFinding).toContainText('UI acceptance mute')
@@ -810,7 +816,7 @@ test('SYS-UI-010: finding mute and unmute update state', async ({ signedInPage, 
   await reloadUntil(
     page,
     async () => {
-      const sameFinding = page.locator(`article[aria-labelledby="finding-${findingID}"]`)
+      const sameFinding = findingCard()
       if ((await sameFinding.count()) !== 1) return false
       return (
         (await sameFinding.getByRole('button', { name: 'Mute finding' }).count()) === 1 &&
@@ -820,7 +826,7 @@ test('SYS-UI-010: finding mute and unmute update state', async ({ signedInPage, 
     },
     60_000,
   )
-  const unmutedFinding = page.locator(`article[aria-labelledby="finding-${findingID}"]`)
+  const unmutedFinding = findingCard()
   await expect(unmutedFinding).toContainText(realState)
   await expect(unmutedFinding).not.toContainText('UI acceptance mute')
 })

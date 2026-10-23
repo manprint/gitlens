@@ -480,6 +480,18 @@ describe('FindingsPage', () => {
     expect(screen.getByRole('region', { name: 'Evidence' })).toBeInTheDocument()
   })
 
+  it('UI-FIND-050 marks each card with its finding id when titles repeat', async () => {
+    await renderFindings([
+      finding({ finding_id: 'index.unused/orders_pkey', title: 'Unused index' }),
+      finding({ finding_id: 'index.unused/items_pkey', title: 'Unused index' }),
+    ])
+
+    const cards = screen.getAllByRole('article', { name: 'Unused index' })
+    expect(cards).toHaveLength(2)
+    expect(cards[0]).toHaveAttribute('data-finding-id', 'index.unused/orders_pkey')
+    expect(cards[1]).toHaveAttribute('data-finding-id', 'index.unused/items_pkey')
+  })
+
   it('UI-FIND-027 warns when the server limit cut the findings', async () => {
     await renderFindings(
       Array.from({ length: 1000 }, (_, index) => finding({ finding_id: `finding-${index}` })),

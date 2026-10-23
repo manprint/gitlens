@@ -80,7 +80,11 @@ export function FindingCard({ finding }: FindingCardProps) {
   const evidence = Object.entries(finding.evidence ?? {})
 
   return (
-    <article aria-labelledby={`finding-${domId}`} className="space-y-4 rounded-lg border p-4">
+    <article
+      aria-labelledby={`finding-${domId}`}
+      className="space-y-4 rounded-lg border p-4"
+      data-finding-id={finding.finding_id}
+    >
       <header className="space-y-2">
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="rounded border px-2 py-1 uppercase">{finding.severity}</span>
