@@ -6,7 +6,11 @@ services:
       POSTGRES_USER: pglens
       POSTGRES_DB: pglens
     ports:
-      # Loopback only; this file sets a default superuser password.
+      # Loopback only: this file sets a default superuser password. To publish
+      # the port on another address, first replace that password, then edit
+      # this line (for example "0.0.0.0:5432:5432"). An override file must
+      # replace the list with "ports: !override" instead: a plain override adds
+      # its binding to this one, and the two conflict on the port.
       - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
