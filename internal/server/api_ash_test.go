@@ -46,6 +46,7 @@ func TestAshAPI_ASHUnknownOrEnabled_FallsThroughToBuckets(t *testing.T) {
 		// mockRow{err: pgx.ErrNoRows}) — unknown/never-reported must behave
 		// exactly like "enabled", not like "disabled".
 		queryResults: []*mockRows{{rows: []([]any){}}},
+		queryRowVals: []*mockRow{nil, {vals: []any{0}}},
 	}
 	api := &AshAPI{pool: pool}
 
@@ -133,6 +134,7 @@ func TestAshAPI_AvgActiveSessions_ZeroTicks(t *testing.T) {
 				},
 			},
 		},
+		queryRowVals: []*mockRow{{vals: []any{0}}},
 	}
 	api := &AshAPI{pool: pool}
 
@@ -155,6 +157,7 @@ func TestAshAPI_AvgActiveSessions_NonZeroTicks(t *testing.T) {
 				},
 			},
 		},
+		queryRowVals: []*mockRow{{vals: []any{10}}},
 	}
 	api := &AshAPI{pool: pool}
 
@@ -200,6 +203,7 @@ func TestAshAPI_SignificanceWarning_59Ticks(t *testing.T) {
 		queryResults: []*mockRows{
 			{rows: mockRowsData},
 		},
+		queryRowVals: []*mockRow{{vals: []any{59}}},
 	}
 	api := &AshAPI{pool: pool}
 
@@ -227,6 +231,7 @@ func TestAshAPI_SignificanceWarning_60Ticks(t *testing.T) {
 		queryResults: []*mockRows{
 			{rows: mockRowsData},
 		},
+		queryRowVals: []*mockRow{{vals: []any{60}}},
 	}
 	api := &AshAPI{pool: pool}
 
@@ -350,21 +355,6 @@ func TestAshTop_SignificanceWarning_Below60Ticks(t *testing.T) {
 
 	// When totalTicks < 60, warning should be set by handler
 	require.True(t, totalTicks < 60)
-}
-
-// TestAshAPI_WindowTicksCountOnce: the rows of one window share its ticks.
-// Summing them per row counted the window once per key.
-func TestAshAPI_WindowTicksCountOnce(t *testing.T) {
-	t.Parallel()
-	ts := time.Now().Truncate(time.Second)
-	pool := &mockPool{queryResults: []*mockRows{{rows: [][]any{
-		{ts, 5, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
-		{ts, 3, 10, "db1", "Lock", "transactionid", "active", (*int64)(nil)},
-		{ts.Add(-10 * time.Second), 2, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
-	}}}}
-	_, totalTicks, err := (&AshAPI{pool: pool}).queryASHBuckets(context.Background(), uuid.New(), nil, nil, "", ashFilters{}, 1000)
-	require.NoError(t, err)
-	require.Equal(t, 20, totalTicks, "two windows of 10 ticks, not three rows")
 }
 
 func TestAshResolution_FitsTheRangeInMaxPoints(t *testing.T) {

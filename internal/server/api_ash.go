@@ -221,12 +221,13 @@ func (a *AshAPI) handleASH(w http.ResponseWriter, r *http.Request) {
 
 // queryASHBuckets returns the stored rows unaggregated, newest first: every
 // dimension, one row per window and key. A window that ticked with no sampled
-// session is stored as a zero-count row carrying its ticks: it is not listed,
-// but its ticks still count toward the range.
+// session is stored as a zero-count row carrying its ticks; it is left out of
+// the rows, so it does not take a place under limit, and rangeTicks sums its
+// ticks instead.
 func (a *AshAPI) queryASHBuckets(ctx context.Context, instanceID uuid.UUID, from, to *time.Time, database string, filters ashFilters, limit int) ([]ashBucket, int, error) {
 	where, args := ashWhere(instanceID, from, to, database, filters)
 	query := fmt.Sprintf(`SELECT ts, samples, window_ticks, datname, wait_event_type, wait_event, state, queryid
-		FROM metrics_ash WHERE %s ORDER BY ts DESC LIMIT %d`, where, limit)
+		FROM metrics_ash WHERE %s AND samples > 0 ORDER BY ts DESC LIMIT %d`, where, limit)
 
 	rows, err := a.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -235,16 +236,11 @@ func (a *AshAPI) queryASHBuckets(ctx context.Context, instanceID uuid.UUID, from
 	defer rows.Close()
 
 	var buckets []ashBucket
-	windowTicks := make(map[time.Time]int)
 	for rows.Next() {
 		var bucket ashBucket
 		var qid *int64
 		if err := rows.Scan(&bucket.TS, &bucket.Samples, &bucket.Ticks, &bucket.Datname, &bucket.WaitEventType, &bucket.WaitEvent, &bucket.State, &qid); err != nil {
 			return nil, 0, err
-		}
-		windowTicks[bucket.TS] = bucket.Ticks
-		if bucket.Samples == 0 {
-			continue
 		}
 		bucket.QueryID = formatQueryID(qid)
 		bucket.AvgActiveSessions = avgActive(bucket.Samples, bucket.Ticks)
@@ -253,7 +249,22 @@ func (a *AshAPI) queryASHBuckets(ctx context.Context, instanceID uuid.UUID, from
 	if err := rows.Err(); err != nil {
 		return nil, 0, err
 	}
-	return buckets, sumTicks(windowTicks), nil
+	ticks, err := a.rangeTicks(ctx, instanceID, from, to)
+	if err != nil {
+		return nil, 0, err
+	}
+	return buckets, ticks, nil
+}
+
+// rangeTicks is the instance's sampling ticks over the range, every window
+// counted once, whatever the filters. A window with no sampled session still
+// ticked, so its ticks belong to the range even though no row of it is listed.
+func (a *AshAPI) rangeTicks(ctx context.Context, instanceID uuid.UUID, from, to *time.Time) (int, error) {
+	where, args := ashWhere(instanceID, from, to, "", ashFilters{})
+	var ticks int
+	err := a.pool.QueryRow(ctx, fmt.Sprintf(`SELECT COALESCE(SUM(t), 0)::int
+		FROM (SELECT ts, MAX(window_ticks) AS t FROM metrics_ash WHERE %s GROUP BY ts) w`, where), args...).Scan(&ticks)
+	return ticks, err
 }
 
 // ashFilters narrows the rows to one wait event type or wait event: the
@@ -362,6 +373,7 @@ SELECT g.bucket, g.samples, t.ticks, %[4]s
 
 	var raw []ashBucket
 	bucketTicks := make(map[time.Time]int)
+	sampledBuckets := make(map[time.Time]struct{})
 	for rows.Next() {
 		var b ashBucket
 		dests := []any{&b.TS, &b.Samples, &b.Ticks}
@@ -388,13 +400,14 @@ SELECT g.bucket, g.samples, t.ticks, %[4]s
 		if b.Samples == 0 {
 			continue
 		}
+		sampledBuckets[b.TS] = struct{}{}
 		raw = append(raw, b)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, err
 	}
 
-	buckets := foldASHGroups(raw, groupByCols, len(bucketTicks), limit)
+	buckets := foldASHGroups(raw, groupByCols, len(sampledBuckets), limit)
 	for i := range buckets {
 		if filters.waitEventType != "" {
 			buckets[i].WaitEventType = filters.waitEventType
