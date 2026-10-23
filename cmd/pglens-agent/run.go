@@ -493,11 +493,12 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 		})
 		cancel()
 	}
-	// An envelope with no instance is queued only when a batch was taken. An
-	// agent whose targets are all unreachable and that has nothing to report
-	// would otherwise queue an empty envelope every cycle, filling the buffer
-	// through an outage.
-	if len(env.Instances) == 0 && len(batch) == 0 {
+	// An envelope with no instance carries nothing the server stores: the
+	// results of a target left out were dropped or kept for the next cycle
+	// above. An agent whose targets are all unreachable would otherwise queue
+	// one every cycle, a local target's host results being enough to take a
+	// batch, and fill the buffer with them through an outage.
+	if len(env.Instances) == 0 {
 		return
 	}
 	pusher.Queue(env)

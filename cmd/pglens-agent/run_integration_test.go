@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -141,7 +142,8 @@ func TestINTRUN003_FlushOmitsATargetWithoutIdentity(t *testing.T) {
 			}}
 			flushEnvelope(ctx, []*agent.Manager{mgr}, &mu, pending, &edgeStates{byName: map[string]edgeState{}}, map[string]bool{}, map[string]map[string]bool{}, pusher)
 
-			require.Empty(t, readEnvelope(t, buf).Instances, "an instance without identity must not be sent")
+			_, _, err = buf.Next()
+			require.ErrorIs(t, err, io.EOF, "an instance without identity must not be sent, and an envelope without one is not queued")
 			require.Len(t, pending["unidentified"], 1, "only the skip is kept for the next cycle")
 			require.Equal(t, "replication_streaming", pending["unidentified"][0].Check)
 		})

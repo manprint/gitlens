@@ -258,6 +258,28 @@ func TestFlushEnvelopeQueuesNothingWhenNothingIsReachable(t *testing.T) {
 	require.ErrorIs(t, err, io.EOF, "an empty envelope must not be queued")
 }
 
+// TestFlushEnvelopeQueuesNothingWhenNoTargetIsReachable: results pending for a
+// target that cannot be reached, such as the host results of a local target
+// whose PostgreSQL is down, do not make an envelope without instances worth
+// queueing.
+func TestFlushEnvelopeQueuesNothingWhenNoTargetIsReachable(t *testing.T) {
+	t.Setenv("PGLENS_IDENTITY_PATH", filepath.Join(t.TempDir(), "identity.json"))
+	mgr := unreachableManager(t, "down")
+
+	buf, err := buffer.Open(filepath.Join(t.TempDir(), "buffer"), buffer.Options{MaxSize: 1 << 20, MaxAge: time.Hour, Clock: clock.System()})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = buf.Close() })
+	pusher := agent.NewPusher("http://127.0.0.1:1/", "token", clock.System())
+	pusher.SetBuffer(buf)
+
+	var mu sync.Mutex
+	pending := map[string][]wire.Result{mgr.Database(): {{Check: "host", TS: time.Now()}}}
+	flushEnvelope(context.Background(), []*agent.Manager{mgr}, &mu, pending, &edgeStates{byName: map[string]edgeState{}}, map[string]bool{}, map[string]map[string]bool{}, pusher)
+
+	_, _, err = buf.Next()
+	require.ErrorIs(t, err, io.EOF, "an envelope without instances must not be queued")
+}
+
 // TestWarnSuperuserTargets_UnreachableTargetIsNotReported: a target that cannot
 // be read at start is not reported as a superuser, and the warning does not wait
 // for it.
