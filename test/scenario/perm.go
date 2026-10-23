@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -106,6 +107,7 @@ func init() {
 				return fmt.Errorf("baseline check counters: %w", err)
 			}
 			var grown []string
+			var lastOK, lastErrs map[string]float64
 			freshCtx, cancel4 := context.WithTimeout(ctx, 90*time.Second)
 			defer cancel4()
 			if err := poll(freshCtx, 3*time.Second, func(ctx context.Context) (bool, error) {
@@ -113,6 +115,7 @@ func init() {
 				if err != nil {
 					return false, err
 				}
+				lastOK, lastErrs = ok, errs
 				if grown = checkCounterGrowth(errsBefore, errs); len(grown) > 0 {
 					return true, nil
 				}
@@ -123,7 +126,7 @@ func init() {
 				}
 				return true, nil
 			}); err != nil {
-				return fmt.Errorf("mandatory checks did not complete a fresh scrape under T0: %w", err)
+				return fmt.Errorf("mandatory checks did not complete a fresh scrape under T0 (ok before %v, last %v; errors before %v, last %v): %w", okBefore, lastOK, errsBefore, lastErrs, err)
 			}
 			if len(grown) > 0 {
 				return fmt.Errorf("check errors rose under T0 for %v: a check on the T0 grants should degrade, not fail", grown)
@@ -262,26 +265,32 @@ func scrapeCheckCounters(e *Env) (ok, errs map[string]float64, err error) {
 	return parseCheckCounter(text, "pglens_check_ok_total"), parseCheckCounter(text, "pglens_check_error_total"), nil
 }
 
-// parseCheckCounter returns each check's sample from one labelled counter
-// family in a Prometheus text exposition. A check with no sample yet is
-// absent from the map, which callers read as zero.
+// parseCheckCounter returns each check's total from one labelled counter
+// family in a Prometheus text exposition. The server labels these counters
+// instance_id first and check second, one line per instance and check, so a
+// check's total is the sum over instances; a sum of counters only rises. A
+// check with no sample yet is absent from the map, which callers read as zero.
 func parseCheckCounter(exposition, family string) map[string]float64 {
 	out := make(map[string]float64)
-	prefix := family + `{check="`
+	prefix := family + "{"
+	check := regexp.MustCompile(`(?:^|,)check="([^"]*)"`)
 	for _, line := range strings.Split(exposition, "\n") {
 		if !strings.HasPrefix(line, prefix) {
 			continue
 		}
-		rest := line[len(prefix):]
-		end := strings.Index(rest, `"}`)
+		end := strings.LastIndex(line, "} ")
 		if end < 0 {
 			continue
 		}
-		v, err := strconv.ParseFloat(strings.TrimSpace(rest[end+len(`"}`):]), 64)
+		name := check.FindStringSubmatch(line[len(prefix):end])
+		if name == nil {
+			continue
+		}
+		v, err := strconv.ParseFloat(strings.TrimSpace(line[end+len("} "):]), 64)
 		if err != nil {
 			continue
 		}
-		out[rest[:end]] = v
+		out[name[1]] += v
 	}
 	return out
 }
