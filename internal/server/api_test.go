@@ -640,6 +640,35 @@ func TestAPI_MockPool_Clusters_MostRecentPrimaryWins(t *testing.T) {
 	require.Equal(t, freshID, *resp[0].Primary)
 }
 
+// Two live rows at one address and port are two live instances, not a
+// rebuilt one with its predecessor. Only a silent row is superseded, so both
+// primaries count and the cluster reads as split-brain.
+func TestAPI_MockPool_Clusters_TwoLivePrimariesAtOneEndpointAreCritical(t *testing.T) {
+	t.Parallel()
+	cid := pgtype.ClusterID(9004)
+	cidDB := store.ToDB(cid)
+	pool := &mockPool{
+		queryResults: []*mockRows{
+			{rows: [][]any{{cidDB, nil, "manual"}}},
+			{rows: [][]any{
+				{cidDB, uuid.NewString(), "10.0.5.1", 5432, "primary", 170000, "T0", time.Now().Add(-10 * time.Second)},
+				{cidDB, uuid.NewString(), "10.0.5.1", 5432, "primary", 170000, "T0", time.Now()},
+			}},
+		},
+	}
+	api := &API{pool: pool}
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/clusters", http.NoBody)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp []clusterResp
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp, 1)
+	require.Equal(t, "critical", resp[0].Health)
+}
+
 func TestAPI_MockPool_Clusters_QueryError(t *testing.T) {
 	t.Parallel()
 	pool := &mockPool{queryErrs: []error{errors.New("db down")}}
