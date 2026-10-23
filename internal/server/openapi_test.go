@@ -1,8 +1,10 @@
 package server_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,8 +16,10 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/manprint/pglens/internal/alert"
 	"github.com/manprint/pglens/internal/server"
+	"github.com/manprint/pglens/internal/wire"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -387,13 +391,19 @@ func TestOpenAPIMetricsQueryDocumentsCounterRates(t *testing.T) {
 	}
 }
 
-func loadOpenAPIDocument(t *testing.T) map[string]any {
+// repoRootForOpenAPI is the repository root, found from this test's source.
+func repoRootForOpenAPI(t *testing.T) string {
 	t.Helper()
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("locate openapi test source")
 	}
-	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(filename), "..", ".."))
+	return filepath.Clean(filepath.Join(filepath.Dir(filename), "..", ".."))
+}
+
+func loadOpenAPIDocument(t *testing.T) map[string]any {
+	t.Helper()
+	repoRoot := repoRootForOpenAPI(t)
 	data, err := os.ReadFile(filepath.Join(repoRoot, "api", "openapi.yaml"))
 	if err != nil {
 		t.Fatalf("read OpenAPI document: %v", err)
@@ -453,5 +463,141 @@ func TestOpenAPIStatementsTruncatedNamesItsSources(t *testing.T) {
 		if !strings.Contains(description, want) {
 			t.Errorf("StatementsResponse.truncated description must mention %q, got %q", want, description)
 		}
+	}
+}
+
+// pushContract returns the component schemas of the push contract and the
+// request body example of POST /api/v1/push.
+func pushContract(t *testing.T) (map[string]any, map[string]any) {
+	t.Helper()
+	document := loadOpenAPIDocument(t)
+	components := document["components"].(map[string]any)
+	schemas := components["schemas"].(map[string]any)
+	post := document["paths"].(map[string]any)["/api/v1/push"].(map[string]any)["post"].(map[string]any)
+	body := post["requestBody"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)
+	example := body["examples"].(map[string]any)["default"].(map[string]any)["value"].(map[string]any)
+	return schemas, example
+}
+
+// pushSchemaProblems reports what value holds beyond the schema. An object
+// schema of type object must declare its fields and refuse others, the way
+// the server's ingest decodes an envelope with unknown fields disallowed; a
+// map schema in additionalProperties takes any key. A schema with no type
+// accepts any JSON value.
+func pushSchemaProblems(schemas map[string]any, schema map[string]any, value any, path string) []string {
+	if ref, ok := schema["$ref"].(string); ok {
+		resolved, ok := schemas[strings.TrimPrefix(ref, "#/components/schemas/")].(map[string]any)
+		if !ok {
+			return []string{path + ": unresolved " + ref}
+		}
+		return pushSchemaProblems(schemas, resolved, value, path)
+	}
+	switch v := value.(type) {
+	case map[string]any:
+		if schema["type"] != "object" {
+			return nil
+		}
+		if free, ok := schema["additionalProperties"].(map[string]any); ok {
+			var problems []string
+			for key, item := range v {
+				problems = append(problems, pushSchemaProblems(schemas, free, item, path+"."+key)...)
+			}
+			return problems
+		}
+		props, _ := schema["properties"].(map[string]any)
+		if len(props) == 0 || schema["additionalProperties"] != false {
+			return []string{path + ": object does not refuse undeclared fields"}
+		}
+		var problems []string
+		for key, item := range v {
+			sub, declared := props[key].(map[string]any)
+			if !declared {
+				problems = append(problems, path+"."+key+": field not declared")
+				continue
+			}
+			problems = append(problems, pushSchemaProblems(schemas, sub, item, path+"."+key)...)
+		}
+		return problems
+	case []any:
+		items, _ := schema["items"].(map[string]any)
+		var problems []string
+		for i, item := range v {
+			problems = append(problems, pushSchemaProblems(schemas, items, item, fmt.Sprintf("%s[%d]", path, i))...)
+		}
+		return problems
+	}
+	return nil
+}
+
+// Each request schema of the push contract declares its fields and refuses
+// others, and every golden envelope the wire tests decode fits the contract.
+func TestOpenAPIPushSchemasRefuseUndeclaredFields(t *testing.T) {
+	schemas, _ := pushContract(t)
+	for _, name := range []string{"PushEnvelope", "PushInstance", "PushDatabase", "PushEdge", "PushResult", "PushMetric", "PushFact"} {
+		schema, ok := schemas[name].(map[string]any)
+		if !ok {
+			t.Errorf("%s: missing from components.schemas", name)
+			continue
+		}
+		props, _ := schema["properties"].(map[string]any)
+		if len(props) == 0 || schema["additionalProperties"] != false {
+			t.Errorf("%s: must declare its properties and set additionalProperties false", name)
+		}
+	}
+
+	envelope := schemas["PushEnvelope"].(map[string]any)
+	golden, err := filepath.Glob(filepath.Join(repoRootForOpenAPI(t), "internal", "wire", "testdata", "payload*.json"))
+	if err != nil {
+		t.Fatalf("glob golden payloads: %v", err)
+	}
+	if len(golden) == 0 {
+		t.Fatal("no golden payloads found")
+	}
+	for _, file := range golden {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		var value any
+		if err := json.Unmarshal(data, &value); err != nil {
+			t.Fatalf("parse %s: %v", file, err)
+		}
+		for _, problem := range pushSchemaProblems(schemas, envelope, value, "$") {
+			t.Errorf("%s: %s", filepath.Base(file), problem)
+		}
+	}
+
+	var injected any
+	if err := json.Unmarshal([]byte(`{"protocol_version":3,"agent_id":"x","agent_version":"x","sent_at":"2026-01-01T00:00:00Z","instances":[],"surprise":true}`), &injected); err != nil {
+		t.Fatal(err)
+	}
+	if problems := pushSchemaProblems(schemas, envelope, injected, "$"); len(problems) != 1 {
+		t.Errorf("an undeclared top-level field must be reported once, got %v", problems)
+	}
+}
+
+// The request body example of POST /api/v1/push is an envelope the server
+// accepts: it decodes with unknown fields disallowed, and its agent_id is the
+// UUID the server checks, so a documented example cannot show a request that
+// is refused.
+func TestOpenAPIPushExampleIsAcceptedByIngest(t *testing.T) {
+	schemas, example := pushContract(t)
+	if problems := pushSchemaProblems(schemas, schemas["PushEnvelope"].(map[string]any), example, "$"); len(problems) > 0 {
+		t.Fatalf("example does not match its schema: %v", problems)
+	}
+
+	data, err := json.Marshal(example)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	var env wire.Envelope
+	if err := dec.Decode(&env); err != nil {
+		t.Fatalf("example is refused by the envelope decoder: %v", err)
+	}
+	agentID, err := uuid.Parse(env.AgentID)
+	if err != nil || agentID == uuid.Nil {
+		t.Fatalf("example agent_id %q is not a UUID the server accepts: %v", env.AgentID, err)
 	}
 }

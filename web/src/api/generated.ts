@@ -1948,12 +1948,80 @@ export interface components {
         PushEnvelope: {
             /** Format: int32 */
             protocol_version: number;
+            /** @description The agent's UUID. Required from protocol 3 on. */
             agent_id: string;
             agent_version: string;
             sent_at: components["schemas"]["Timestamp"];
-            instances: {
-                [key: string]: unknown;
-            }[];
+            instances: components["schemas"]["PushInstance"][];
+        };
+        PushInstance: {
+            instance_id?: string;
+            target_name?: string;
+            /** @description Decimal string. */
+            cluster_id?: string;
+            cluster_id_source?: string;
+            addr?: string;
+            /** Format: int32 */
+            port?: number;
+            /** Format: int32 */
+            pg_version?: number;
+            role?: string;
+            perm_tier?: string;
+            capabilities?: string[];
+            databases?: components["schemas"]["PushDatabase"][];
+            results?: components["schemas"]["PushResult"][];
+            topology_edges?: components["schemas"]["PushEdge"][];
+            /** @description Absent from agents that predate the field. */
+            ash_enabled?: boolean;
+        };
+        PushDatabase: {
+            name?: string;
+            monitored?: boolean;
+            skip_reason?: string;
+        };
+        PushEdge: {
+            from?: string;
+            /** @description The upstream's address. */
+            to?: string;
+            /** Format: int32 */
+            port?: number;
+            type?: string;
+            /** @enum {string} */
+            confidence?: "high" | "low";
+        };
+        PushResult: {
+            check?: string;
+            ts?: components["schemas"]["Timestamp"];
+            database?: string;
+            stats_reset?: components["schemas"]["Timestamp"];
+            truncated?: boolean;
+            partial?: boolean;
+            error?: string;
+            skip_reason?: string;
+            metrics?: components["schemas"]["PushMetric"][];
+            facts?: components["schemas"]["PushFact"][];
+            /** @description Maps a queryid to its text. */
+            query_texts?: {
+                [key: string]: string;
+            };
+        };
+        PushMetric: {
+            name?: string;
+            labels?: {
+                [key: string]: string;
+            };
+            value?: number;
+            kind?: string;
+        };
+        PushFact: {
+            kind?: string;
+            key?: string;
+            labels?: {
+                [key: string]: string;
+            };
+            value_text?: string;
+            /** @description Any JSON value. */
+            value_json?: unknown;
         };
         PushResponse: {
             /** Format: int32 */
@@ -3407,7 +3475,15 @@ export interface operations {
                     "application/json": components["schemas"]["PushResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            /** @description The body is not JSON or declares a field the envelope does not have, protocol_version is outside the supported range, sent_at is too old to store, agent_id is not a UUID or is missing from a protocol 3 envelope, or the store refused the envelope. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
             413: components["responses"]["PayloadTooLarge"];
             /** @description Ingest failed while checking or storing the envelope. */

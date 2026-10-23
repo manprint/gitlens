@@ -1107,15 +1107,88 @@ components:
         state: { type: string, enum: [muted] }
         muted_until: { $ref: '#/components/schemas/Timestamp' }
         mute_reason: { type: string }
+    # The push schemas mirror internal/wire. The server decodes an envelope
+    # with unknown fields disallowed, so every object here declares its fields
+    # and refuses others.
     PushEnvelope:
       type: object
+      additionalProperties: false
       required: [protocol_version, agent_id, agent_version, sent_at, instances]
       properties:
         protocol_version: { type: integer, format: int32 }
-        agent_id: { type: string }
+        agent_id: { type: string, description: The agent's UUID. Required from protocol 3 on. }
         agent_version: { type: string }
         sent_at: { $ref: '#/components/schemas/Timestamp' }
-        instances: { type: array, items: { type: object, additionalProperties: true } }
+        instances: { type: array, items: { $ref: '#/components/schemas/PushInstance' } }
+    PushInstance:
+      type: object
+      additionalProperties: false
+      properties:
+        instance_id: { type: string }
+        target_name: { type: string }
+        cluster_id: { type: string, description: Decimal string. }
+        cluster_id_source: { type: string }
+        addr: { type: string }
+        port: { type: integer, format: int32 }
+        pg_version: { type: integer, format: int32 }
+        role: { type: string }
+        perm_tier: { type: string }
+        capabilities: { type: array, items: { type: string } }
+        databases: { type: array, items: { $ref: '#/components/schemas/PushDatabase' } }
+        results: { type: array, items: { $ref: '#/components/schemas/PushResult' } }
+        topology_edges: { type: array, items: { $ref: '#/components/schemas/PushEdge' } }
+        ash_enabled: { type: boolean, description: Absent from agents that predate the field. }
+    PushDatabase:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        monitored: { type: boolean }
+        skip_reason: { type: string }
+    PushEdge:
+      type: object
+      additionalProperties: false
+      properties:
+        from: { type: string }
+        to: { type: string, description: The upstream's address. }
+        port: { type: integer, format: int32 }
+        type: { type: string }
+        confidence: { type: string, enum: [high, low] }
+    PushResult:
+      type: object
+      additionalProperties: false
+      properties:
+        check: { type: string }
+        ts: { $ref: '#/components/schemas/Timestamp' }
+        database: { type: string }
+        stats_reset: { $ref: '#/components/schemas/Timestamp' }
+        truncated: { type: boolean }
+        partial: { type: boolean }
+        error: { type: string }
+        skip_reason: { type: string }
+        metrics: { type: array, items: { $ref: '#/components/schemas/PushMetric' } }
+        facts: { type: array, items: { $ref: '#/components/schemas/PushFact' } }
+        query_texts:
+          type: object
+          description: Maps a queryid to its text.
+          additionalProperties: { type: string }
+    PushMetric:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        labels: { type: object, additionalProperties: { type: string } }
+        value: { type: number }
+        kind: { type: string }
+    PushFact:
+      type: object
+      additionalProperties: false
+      properties:
+        kind: { type: string }
+        key: { type: string }
+        labels: { type: object, additionalProperties: { type: string } }
+        value_text: { type: string }
+        value_json: { description: Any JSON value. }
     PushResponse:
       type: object
       required: [accepted, rejected]
@@ -2724,7 +2797,7 @@ paths:
               default:
                 value:
                   protocol_version: 1
-                  agent_id: agent-11111111-1111-1111-1111-111111111111
+                  agent_id: 11111111-1111-1111-1111-111111111111
                   agent_version: 0.1.0
                   sent_at: '2026-08-29T10:00:00Z'
                   instances: []
@@ -2736,7 +2809,15 @@ paths:
               schema: { $ref: '#/components/schemas/PushResponse' }
               examples:
                 default: { value: { accepted: 1, rejected: 0 } }
-        '400': { $ref: '#/components/responses/BadRequest' }
+        '400':
+          description: >-
+            The body is not JSON or declares a field the envelope does not have,
+            protocol_version is outside the supported range, sent_at is too old
+            to store, agent_id is not a UUID or is missing from a protocol 3
+            envelope, or the store refused the envelope.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '500':
