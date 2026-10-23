@@ -8,8 +8,9 @@ services:
       POSTGRES_DB: pglens
     ports:
       # Loopback only: a published superuser port must not face the network.
-      # To publish it on another address, edit this line (for example
-      # "0.0.0.0:5432:5432"). An override file must replace the list with
+      # Publishing it on another address exposes the superuser port, so change
+      # this line only with a deliberate network control in place, such as a
+      # firewall rule. An override file must replace the list with
       # "ports: !override" instead: a plain override adds its binding to this
       # one, and the two conflict on the port.
       - "127.0.0.1:5432:5432"
