@@ -430,3 +430,61 @@ func TestINTCMD024_ExplainAnalyzeRefusesEffectsBehindViews(t *testing.T) {
 		require.Equal(t, 3, rows())
 	})
 }
+
+// TestINTCMD025_ExplainAnalyzeRefusesForeignScans proves that EXPLAIN ANALYZE
+// refuses a foreign scan. postgres_fdw opens its own session on the remote
+// side, which a read-only transaction does not cover, so the view reads a
+// remote view that calls a VOLATILE function which writes.
+func TestINTCMD025_ExplainAnalyzeRefusesForeignScans(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		_, err := admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, guardFixture)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = admin.Exec(context.Background(), "DROP SCHEMA IF EXISTS pglens_guard CASCADE")
+			_, _ = admin.Exec(context.Background(), "DROP SERVER IF EXISTS pglens_loopback CASCADE")
+			_, _ = admin.Exec(context.Background(), "DROP EXTENSION IF EXISTS postgres_fdw")
+		})
+
+		// The loopback server is this database, reached over TCP as the
+		// superuser, the same way the dblink case reaches it.
+		_, err = admin.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS postgres_fdw;
+CREATE SERVER pglens_loopback FOREIGN DATA WRAPPER postgres_fdw OPTIONS (host '127.0.0.1', port '5432', dbname 'postgres');
+CREATE USER MAPPING FOR PUBLIC SERVER pglens_loopback OPTIONS (user 'postgres', password 'test');
+GRANT USAGE ON FOREIGN SERVER pglens_loopback TO PUBLIC;
+CREATE FUNCTION pglens_guard.write_remote() RETURNS int LANGUAGE plpgsql VOLATILE
+	AS $$ BEGIN INSERT INTO pglens_guard.t VALUES (4, 'remote'); RETURN 1; END $$;
+CREATE VIEW pglens_guard.remote_writer AS SELECT count(*) AS n FROM (SELECT pglens_guard.write_remote()) AS s;
+CREATE FOREIGN TABLE pglens_guard.f_writer (n bigint) SERVER pglens_loopback OPTIONS (schema_name 'pglens_guard', table_name 'remote_writer');
+CREATE VIEW pglens_guard.v_fdw AS SELECT n FROM pglens_guard.f_writer`)
+		require.NoError(t, err)
+		rows := func() int {
+			var n int
+			require.NoError(t, admin.QueryRow(ctx, "SELECT count(*) FROM pglens_guard.t").Scan(&n))
+			return n
+		}
+
+		// Registration runs the view once as the superuser, so the remote
+		// write happens. That shows the path is live: a refusal below means
+		// that nothing ran.
+		const fdw = "SELECT * FROM pglens_guard.v_fdw"
+		before := rows()
+		fdwID := registerStatements(t, pg, fdw)[fdw]
+		require.Equal(t, before+1, rows())
+		afterRegistration := rows()
+
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			_, err = explainAs(t, pg, role, fdwID, true)
+			requireRefused(t, err, "Foreign Scan")
+			require.Equal(t, afterRegistration, rows(), role.String())
+		}
+		// Plan-only EXPLAIN plans the foreign scan without running it.
+		_, err = explainAs(t, pg, pgtest.RoleT1, fdwID, false)
+		require.NoError(t, err)
+		require.Equal(t, afterRegistration, rows())
+	})
+}
