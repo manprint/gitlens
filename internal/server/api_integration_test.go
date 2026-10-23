@@ -504,3 +504,52 @@ func TestAPI_INT_API_005_StatementsTruncatedWindowOverlap(t *testing.T) {
 	require.False(t, truncated(now.Add(-3*time.Hour), now.Add(-2*time.Hour)), "the window ends before the episode began")
 	require.True(t, truncated(now.Add(-2*time.Hour), now.Add(time.Hour)), "the window holds the running episode")
 }
+
+// TestAPI_INT_API_006_ClusterHealthIgnoresASupersededRow: a rebuilt primary
+// re-registers under a new instance id at the same address and port, and its
+// old row goes silent. That predecessor must not make the cluster degraded. A
+// silent row at an address no later row has taken over still reads degraded,
+// because nothing has replaced that host.
+func TestAPI_INT_API_006_ClusterHealthIgnoresASupersededRow(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := contextBackground()
+	cidDB := store.ToDB(pgtype.ClusterID(334))
+	_, err := pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual')`, cidDB)
+	require.NoError(t, err)
+	addInstance := func(addr, role string, lastSeen time.Time) {
+		t.Helper()
+		agent := uuid.New()
+		_, err := pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+		require.NoError(t, err)
+		_, err = pool.Exec(ctx, `INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen) VALUES ($1,'default',$2,$3,$4,5432,170000,$5,'T0',$6)`, uuid.New(), cidDB, agent, addr, role, lastSeen)
+		require.NoError(t, err)
+	}
+	healthOf := func() string {
+		t.Helper()
+		r := chi.NewRouter()
+		NewAPI(pool).RegisterRoutes(r)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/clusters", http.NoBody))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var resp []clusterResp
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		require.Len(t, resp, 1)
+		return resp[0].Health
+	}
+
+	// Rebuilt in place: the predecessor and its successor share 10.0.3.1:5432.
+	addInstance("10.0.3.1", "primary", time.Now().Add(-time.Hour))
+	addInstance("10.0.3.1", "primary", time.Now())
+	addInstance("10.0.3.2", "standby", time.Now())
+	require.Equal(t, "ok", healthOf(), "a superseded predecessor is not a down instance")
+
+	// Gone: the old primary's address has no successor, so it still counts.
+	truncateAll(t, pool)
+	_, err = pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual')`, cidDB)
+	require.NoError(t, err)
+	addInstance("10.0.4.1", "primary", time.Now().Add(-time.Hour))
+	addInstance("10.0.4.2", "primary", time.Now())
+	addInstance("10.0.4.3", "standby", time.Now())
+	require.Equal(t, "degraded", healthOf(), "a silent row with no successor at its endpoint is still down")
+}

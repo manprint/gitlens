@@ -316,6 +316,13 @@ type clusterInstanceRow struct {
 	lastSeen  time.Time
 }
 
+// clusterEndpoint is the host and port an instance answers on. An instance
+// that is rebuilt or re-registered under a new id keeps its endpoint.
+type clusterEndpoint struct {
+	addr string
+	port int
+}
+
 // clusterEdgeRow is one topology_edges row of the cluster list.
 type clusterEdgeRow struct {
 	from, to   uuid.UUID
@@ -472,15 +479,26 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 		anyDown := false
 		standbyCount := 0
 		edgeSyncCount := 0
+		// The newest sighting at each endpoint. A silent row that a later row
+		// has taken over is a predecessor of that instance: it is still listed,
+		// but its silence does not count against the cluster.
+		newestSeen := map[clusterEndpoint]time.Time{}
+		for _, row := range instanceRows[c.idDB] {
+			ep := clusterEndpoint{row.addr, row.port}
+			if row.lastSeen.After(newestSeen[ep]) {
+				newestSeen[ep] = row.lastSeen
+			}
+		}
 		for _, row := range instanceRows[c.idDB] {
 			up := isUp(row.lastSeen, now)
-			if !up {
+			superseded := !up && row.lastSeen.Before(newestSeen[clusterEndpoint{row.addr, row.port}])
+			if !up && !superseded {
 				anyDown = true
 			}
 			if row.role == "standby" {
 				standbyCount++
 			}
-			if row.role == "primary" {
+			if row.role == "primary" && !superseded {
 				primaryCount++
 				if up {
 					livePrimaryCount++
