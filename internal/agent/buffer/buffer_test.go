@@ -1416,6 +1416,102 @@ func TestBuffer_StaleCheckpointKeepsNewSegments(t *testing.T) {
 	}
 }
 
+// TestBuffer_CheckpointPastUnackedSegmentsKeepsThem — AB-03: the checkpoint names
+// a segment past every segment on disk, while the segments below it hold records
+// that were never delivered. Only a pre-fix binary or a manual edit leaves such a
+// checkpoint behind. The records must still be delivered, and the restart that
+// moves the checkpoint back must be persisted: otherwise an unclean exit after new
+// appends would find the old checkpoint again and delete the old records unread.
+func TestBuffer_CheckpointPastUnackedSegmentsKeepsThem(t *testing.T) {
+	const recSize = 64 * 1024
+	// setup leaves 200 records of recSize bytes in segments 0 and 1, none acked,
+	// and a checkpoint that names segment 5.
+	setup := func(t *testing.T) string {
+		t.Helper()
+		dir := t.TempDir()
+		buf, err := Open(dir, Options{Clock: clock.System()})
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		for i := 0; i < 200; i++ {
+			rec := make([]byte, recSize)
+			copy(rec, fmt.Sprintf("old-%03d:", i))
+			if err := buf.Append(rec); err != nil {
+				t.Fatalf("Append %d: %v", i, err)
+			}
+		}
+		if err := buf.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		meta := make([]byte, 12)
+		binary.LittleEndian.PutUint32(meta[0:4], 5)
+		if err := os.WriteFile(filepath.Join(dir, ".acked"), meta, 0o644); err != nil {
+			t.Fatalf("write checkpoint: %v", err)
+		}
+		return dir
+	}
+
+	t.Run("old records are delivered after a clean restart", func(t *testing.T) {
+		dir := setup(t)
+		buf, err := Open(dir, Options{Clock: clock.System()})
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		defer func() { _ = buf.Close() }()
+		got := drainAndAck(t, buf)
+		if len(got) != 200 {
+			t.Fatalf("delivered %d records, want 200", len(got))
+		}
+		for i := range got {
+			if prefix := fmt.Sprintf("old-%03d:", i); !strings.HasPrefix(got[i], prefix) {
+				t.Fatalf("record %d starts %q, want %q", i, got[i][:min(len(got[i]), len(prefix))], prefix)
+			}
+		}
+		if dropped := buf.Stats().SamplesDropped; len(dropped) != 0 {
+			t.Errorf("SamplesDropped = %v, want none", dropped)
+		}
+	})
+
+	t.Run("old records survive an unclean exit after rolled appends", func(t *testing.T) {
+		dir := setup(t)
+		buf, err := Open(dir, Options{Clock: clock.System()})
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		// The new records fill the rest of segment 1 and roll into segments numbered
+		// past the checkpoint.
+		for i := 0; i < 200; i++ {
+			rec := make([]byte, recSize)
+			copy(rec, fmt.Sprintf("new-%03d:", i))
+			if err := buf.Append(rec); err != nil {
+				t.Fatalf("Append new %d: %v", i, err)
+			}
+		}
+		// No Close: the checkpoint on disk is the one Open wrote.
+		reopened, err := Open(dir, Options{Clock: clock.System()})
+		if err != nil {
+			t.Fatalf("second Open: %v", err)
+		}
+		defer func() { _ = reopened.Close() }()
+		got := drainAndAck(t, reopened)
+		if len(got) != 400 {
+			t.Fatalf("delivered %d records, want 400", len(got))
+		}
+		for i := range got {
+			prefix := fmt.Sprintf("old-%03d:", i)
+			if i >= 200 {
+				prefix = fmt.Sprintf("new-%03d:", i-200)
+			}
+			if !strings.HasPrefix(got[i], prefix) {
+				t.Fatalf("record %d starts %q, want %q", i, got[i][:min(len(got[i]), len(prefix))], prefix)
+			}
+		}
+		if dropped := reopened.Stats().SamplesDropped; len(dropped) != 0 {
+			t.Errorf("SamplesDropped = %v, want none", dropped)
+		}
+	})
+}
+
 // TestBuffer_CheckpointPastSegmentEndRestartsAtFileEnd — AB-16: a power loss can
 // leave a segment shorter than the checkpoint that names it, because the
 // checkpoint is renamed into place without a sync and the segment data is not.
@@ -1554,6 +1650,7 @@ func TestBuffer_StaleCheckpointSurvivesFailedSave(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open after cleanup: %v", err)
 	}
+	defer func() { _ = reopened.Close() }()
 	if !strings.Contains(stderr, "cannot save the corrected acked checkpoint") {
 		t.Errorf("Open printed %q, want a warning about the failed save", stderr)
 	}
