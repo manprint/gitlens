@@ -544,10 +544,11 @@ func waitAdvisorResolved(ctx context.Context, e *scenario.Env, instanceID string
 }
 
 // monitoringRoleNeverReported is the degraded reason the advisor gives a
-// security.monitoring_role_* finding while no monitoring_role fact exists
-// (internal/advisor/rules_security.go). The stale-fact reason appends a
-// duration to it and is not filtered.
-const monitoringRoleNeverReported = "the monitoring_role check has not reported"
+// security.monitoring_role_* finding while no monitoring_role fact exists: the
+// engine finds the required input missing and names it (internal/advisor/
+// engine.go). A stale fact is a different degraded reason, from rules_security.go,
+// and is not filtered.
+const monitoringRoleNeverReported = "missing input: monitoring_role"
 
 // withoutAwaitingMonitoringRole drops the security findings that are degraded
 // only because the monitoring_role check has never reported yet. The agent runs
