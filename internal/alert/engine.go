@@ -29,10 +29,14 @@ const (
 	// use for a sweep of the history tables.
 	purgeInterval = time.Hour
 	// metricGrace is how long a metric episode may go unsampled before it
-	// closes. The collectors feeding the builtin metric rules sample every
-	// minute at the slowest, and an agent may pause for several minutes. A
-	// grace shorter than that closes a live incident on every pause and
-	// notifies its resolution and its return.
+	// closes. The builtin metric rules read `up`, which is the instance's last
+	// payload within the last minute, and the pglens_* self-metrics the server
+	// derives from each push. Pushes come every push_interval, 15 seconds by
+	// default, and an agent may pause for several minutes. A grace shorter than
+	// that closes a live incident on every pause and notifies its resolution
+	// and its return. The grace is sized for those builtin inputs only: a
+	// stored rule on a slower metric, such as a bloat estimate sampled every six
+	// hours, closes on each gap longer than this.
 	metricGrace = 10 * time.Minute
 )
 
