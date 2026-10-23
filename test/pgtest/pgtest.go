@@ -55,24 +55,7 @@ func (p *PG) Stop(t *testing.T) {
 var (
 	globalMu  sync.Mutex
 	pgByMajor = map[int]*PG{}
-
-	// pgPrimaryStandbyMu and pgPrimaryStandbyByMajor cache primary-standby pairs
-	// per major version. Unlike single instances, we do NOT snapshot/restore
-	// these between tests, since restoring the primary alone would desync it from
-	// the standby. Instead, we tear down and recreate the pair for each test that
-	// calls PrimaryStandby. This is slower but avoids complex cleanup logic.
-	pgPrimaryStandbyMu      sync.Mutex
-	pgPrimaryStandbyByMajor = map[int]*PrimaryStandbyPair{}
 )
-
-// PrimaryStandbyPair holds both a primary and standby PostgreSQL instance.
-type PrimaryStandbyPair struct {
-	Primary          *PG
-	Standby          *PG
-	network          testcontainers.Network
-	primaryContainer *postgres.PostgresContainer
-	standbyContainer testcontainers.Container
-}
 
 // ForEach runs fn once per version in Versions(), as a subtest named
 // "pg15", "pg18", ... Subtests for different versions may run in parallel;
