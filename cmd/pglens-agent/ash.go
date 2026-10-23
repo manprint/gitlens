@@ -48,12 +48,15 @@ func startASH(ctx context.Context, mgr *agent.Manager, targetName string, cfg ag
 			fmt.Fprintf(os.Stderr, "warning: ash: invalid checks.ash.interval %q for %s, using the 1s default: %v\n", cfg.Interval, targetName, err)
 		}
 	}
+	ticks := &ashTicks{agg: agg}
 	sampler.SetTickCallback(func(success bool) {
-		if success {
-			agg.TickSucceeded()
-		} else {
-			agg.TickFailed()
+		// The sampler sets its error before it calls back, so this is the
+		// error of this tick and not of one that came after it.
+		var err error
+		if !success {
+			err = sampler.LastError()
 		}
+		ticks.tick(success, err)
 	})
 
 	if err := sampler.Start(ctx); err != nil {
@@ -75,17 +78,17 @@ func startASH(ctx context.Context, mgr *agent.Manager, targetName string, cfg ag
 				return
 			case <-flushTicker.C():
 				now := clk.Now()
-				w := agg.Flush(now)
+				w, lastErr := ticks.flush(now)
 				if w.Ticks == 0 && w.FailedTicks > 0 {
 					if !failing {
-						fmt.Fprintf(os.Stderr, "warning: ash: sampling failed for %s: %v\n", targetName, sampler.LastError())
+						fmt.Fprintf(os.Stderr, "warning: ash: sampling failed for %s: %v\n", targetName, lastErr)
 					}
 					failing = true
 				} else if w.Ticks > 0 && failing {
 					fmt.Fprintf(os.Stderr, "ash: sampling recovered for %s\n", targetName)
 					failing = false
 				}
-				res, ok := ashWindowResult(w, now, sampler.LastError())
+				res, ok := ashWindowResult(w, now, lastErr)
 				if !ok {
 					continue
 				}
@@ -109,6 +112,39 @@ func startASH(ctx context.Context, mgr *agent.Manager, targetName string, cfg ag
 		})
 	}
 	return stop, true
+}
+
+// ashTicks counts a target's sampling ticks into its aggregator and keeps the
+// error of the latest failed tick. A window reports that error, so the error
+// has to be taken with the tick and closed with the window, under one lock: read
+// from the sampler at flush time, it could be the error of a tick of the next
+// window, or nil after a successful one.
+type ashTicks struct {
+	mu      sync.Mutex
+	agg     *ash.Aggregator
+	lastErr error
+}
+
+func (t *ashTicks) tick(success bool, err error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if success {
+		t.agg.TickSucceeded()
+		return
+	}
+	t.agg.TickFailed()
+	t.lastErr = err
+}
+
+// flush closes the window and returns it with the error of its latest failed
+// tick, which is nil when no tick of the window failed.
+func (t *ashTicks) flush(now time.Time) (ash.Window, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	w := t.agg.Flush(now)
+	err := t.lastErr
+	t.lastErr = nil
+	return w, err
 }
 
 // ashReconnectBackoff spaces reconnection attempts to a target that is down,

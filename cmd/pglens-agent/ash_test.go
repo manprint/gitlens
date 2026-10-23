@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/manprint/pglens/internal/ash"
+	"github.com/manprint/pglens/internal/clock"
 )
 
 // An idle window still ticked: it must reach the server as a zero-count
@@ -65,4 +66,31 @@ func TestASHWindowResult_IdleWindowIsZeroNotError(t *testing.T) {
 	require.Empty(t, res.Error)
 	require.Len(t, res.Metrics, 1)
 	require.Zero(t, res.Metrics[0].Value)
+}
+
+// A window reports the error of its own failed tick. The error is taken with the
+// tick and closed with the window, so a window with no failed tick reports none,
+// and an error from an earlier window does not carry over.
+func TestASHTicks_WindowReportsItsOwnFailure(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewFake(time.Unix(0, 0))
+	ticks := &ashTicks{agg: ash.New(clk, ashWindow, ashMaxKeys)}
+	errA := errors.New("statement timeout")
+	errB := errors.New("connection reset")
+
+	ticks.tick(false, errA)
+	ticks.tick(false, errB)
+	w, err := ticks.flush(clk.Now())
+	require.Equal(t, 2, w.FailedTicks)
+	require.ErrorIs(t, err, errB, "the window reports its latest failed tick")
+
+	ticks.tick(true, nil)
+	w, err = ticks.flush(clk.Now())
+	require.Equal(t, 1, w.Ticks)
+	require.NoError(t, err, "a window with no failed tick reports none")
+
+	ticks.tick(false, errA)
+	w, err = ticks.flush(clk.Now())
+	require.Equal(t, 0, w.Ticks)
+	require.ErrorIs(t, err, errA)
 }
