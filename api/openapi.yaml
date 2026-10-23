@@ -2106,10 +2106,15 @@ paths:
         fewer when limit rows cannot hold them for every bucket) and the rest
         are folded into one group named other, so the total is conserved.
         Without group_by, the stored rows are returned newest first, every
-        dimension included.
+        dimension included, and a request with no from reads the last hour
+        before to, or before now when to is omitted too.
       parameters:
         - { name: instance_id, in: query, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
-        - { name: from, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - name: from
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/Timestamp' }
+          description: Start of the range. Omitted, it is an hour before to, or before now when to is omitted too.
         - { name: to, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
         - name: group_by
           in: query
@@ -2151,11 +2156,16 @@ paths:
       description: >-
         Queries are ranked by samples over the range. ticks is the instance's
         sampling ticks over the range, whatever the filters, the same
-        denominator for every query. The ASH disabled state is reported by
-        GET /api/v1/ash, not here.
+        denominator for every query. A request with no from ranks the last
+        hour before to, or before now when to is omitted too. The ASH disabled
+        state is reported by GET /api/v1/ash, not here.
       parameters:
         - { name: instance_id, in: query, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
-        - { name: from, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - name: from
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/Timestamp' }
+          description: Start of the range. Omitted, it is an hour before to, or before now when to is omitted too.
         - { name: to, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
         - { name: database, in: query, required: false, schema: { type: string } }
         - name: wait_event_type

@@ -561,7 +561,7 @@ export interface paths {
         };
         /**
          * Return activity samples grouped by the requested dimensions.
-         * @description With group_by, the range (default: the last hour) is aggregated into time buckets of resolution_seconds, at most 180 of them, one row per bucket and group. ticks is the instance's sampling ticks in the bucket, whatever the filters, so avg_active_sessions is the group's share of the instance's time. The largest groups are kept (at most 24, fewer when limit rows cannot hold them for every bucket) and the rest are folded into one group named other, so the total is conserved. Without group_by, the stored rows are returned newest first, every dimension included.
+         * @description With group_by, the range (default: the last hour) is aggregated into time buckets of resolution_seconds, at most 180 of them, one row per bucket and group. ticks is the instance's sampling ticks in the bucket, whatever the filters, so avg_active_sessions is the group's share of the instance's time. The largest groups are kept (at most 24, fewer when limit rows cannot hold them for every bucket) and the rest are folded into one group named other, so the total is conserved. Without group_by, the stored rows are returned newest first, every dimension included, and a request with no from reads the last hour before to, or before now when to is omitted too.
          */
         get: operations["getAsh"];
         put?: never;
@@ -581,7 +581,7 @@ export interface paths {
         };
         /**
          * Return top ASH queries joined to their text.
-         * @description Queries are ranked by samples over the range. ticks is the instance's sampling ticks over the range, whatever the filters, the same denominator for every query. The ASH disabled state is reported by GET /api/v1/ash, not here.
+         * @description Queries are ranked by samples over the range. ticks is the instance's sampling ticks over the range, whatever the filters, the same denominator for every query. A request with no from ranks the last hour before to, or before now when to is omitted too. The ASH disabled state is reported by GET /api/v1/ash, not here.
          */
         get: operations["getAshTop"];
         put?: never;
@@ -2749,6 +2749,7 @@ export interface operations {
         parameters: {
             query: {
                 instance_id: components["schemas"]["InstanceId"];
+                /** @description Start of the range. Omitted, it is an hour before to, or before now when to is omitted too. */
                 from?: components["schemas"]["Timestamp"];
                 to?: components["schemas"]["Timestamp"];
                 group_by?: "wait_event_type" | "wait_event" | "queryid" | "state" | "datname";
@@ -2781,6 +2782,7 @@ export interface operations {
         parameters: {
             query: {
                 instance_id: components["schemas"]["InstanceId"];
+                /** @description Start of the range. Omitted, it is an hour before to, or before now when to is omitted too. */
                 from?: components["schemas"]["Timestamp"];
                 to?: components["schemas"]["Timestamp"];
                 database?: string;
