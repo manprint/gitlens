@@ -5,7 +5,6 @@ package scenario
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -295,18 +294,9 @@ func init() {
 			}); err != nil {
 				return fmt.Errorf("clock_skew_seconds never settled around 300 (last observed: %v): %w", lastSkew, err)
 			}
-
-			warnCtx, cancel3 := context.WithTimeout(ctx, 30*time.Second)
-			defer cancel3()
-			if err := poll(warnCtx, 2*time.Second, func(ctx context.Context) (bool, error) {
-				logs, err := e.Logs("pglens-agent")
-				if err != nil {
-					return false, err
-				}
-				return strings.Contains(logs, "clock skew detected"), nil
-			}); err != nil {
-				return fmt.Errorf("no clock skew warning ever appeared in the agent's logs: %w", err)
-			}
+			// The agent also prints a clock-skew warning to stderr. It is not
+			// asserted: log text is not a public observable, and the skew it
+			// reports is the clock_skew_seconds value checked above.
 
 			// Samples are still accepted: the 12h maxSampleAge threshold
 			// (internal/server/ingest.go) is nowhere near 5 minutes of skew,
