@@ -236,6 +236,18 @@ func TestSystemdUnits_DropCapabilitiesSocketFamiliesAndSyscalls(t *testing.T) {
 	}
 }
 
+// The socket families above leave out AF_NETLINK, which Go uses to resolve a
+// named IPv6 zone. Each unit names that exception, so a reader does not take
+// the list for a full account of what the process can reach.
+func TestSystemdUnits_NameTheNetlinkException(t *testing.T) {
+	units, err := filepath.Glob(filepath.Join("systemd", "*.service"))
+	require.NoError(t, err)
+	require.NotEmpty(t, units)
+	for _, unit := range units {
+		require.Contains(t, string(readFile(t, unit)), "AF_NETLINK", unit)
+	}
+}
+
 // The agent reads host metrics through the paths the compose stack mounts the
 // host's /proc and /sys on. The example leaves those paths to HOST_PROC and
 // HOST_SYS: a path pinned in the file overrides them, and the agent would then

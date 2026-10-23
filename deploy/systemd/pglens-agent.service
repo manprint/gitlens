@@ -14,7 +14,10 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 # Neither service needs a capability or a socket family beyond TCP and Unix
-# sockets, nor a system call outside the standard service set.
+# sockets, nor a system call outside the standard service set. The one
+# exception is AF_NETLINK: Go resolves a named IPv6 zone such as fe80::1%eth0
+# through a netlink socket, so that zone does not resolve here. A numeric zone
+# such as fe80::1%2 and every global address still work.
 CapabilityBoundingSet=
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 SystemCallFilter=@system-service
