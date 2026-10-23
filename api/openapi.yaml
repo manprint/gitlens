@@ -619,7 +619,11 @@ components:
         rule_id: { type: string }
         enabled: { type: boolean }
         severity: { type: string, enum: [critical, warning, info] }
-        threshold: { type: number }
+        threshold:
+          type:
+            - number
+            - 'null'
+          description: The stored threshold; null when the rule has none.
         for_seconds: { type: integer, format: int32 }
     SilenceMatcher:
       type: object
@@ -698,6 +702,12 @@ components:
             $ref: '#/components/schemas/Error'
     PayloadTooLarge:
       description: Request payload is too large.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    UnsupportedMediaType:
+      description: The body is not application/json.
       content:
         application/json:
           schema:
@@ -1600,6 +1610,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '503':
           description: Alert storage is unavailable.
           content:
@@ -1770,6 +1782,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '503':
           description: Alert storage is unavailable.
           content:
@@ -1823,6 +1837,8 @@ paths:
                     mute_reason: maintenance
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '503':
           description: Findings storage is unavailable.
           content:

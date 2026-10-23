@@ -1230,7 +1230,8 @@ export interface components {
             enabled: boolean;
             /** @enum {string} */
             severity: "critical" | "warning" | "info";
-            threshold: number;
+            /** @description The stored threshold; null when the rule has none. */
+            threshold: number | null;
             /** Format: int32 */
             for_seconds: number;
         };
@@ -1316,6 +1317,15 @@ export interface components {
         };
         /** @description Request payload is too large. */
         PayloadTooLarge: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description The body is not application/json. */
+        UnsupportedMediaType: {
             headers: {
                 [name: string]: unknown;
             };
@@ -2015,6 +2025,8 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
             /** @description Alert storage is unavailable. */
             503: {
                 headers: {
@@ -2205,6 +2217,8 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
             /** @description Alert storage is unavailable. */
             503: {
                 headers: {
@@ -2273,6 +2287,8 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             404: components["responses"]["NotFound"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
             /** @description Findings storage is unavailable. */
             503: {
                 headers: {

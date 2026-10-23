@@ -408,3 +408,35 @@ func loadOpenAPIDocument(t *testing.T) map[string]any {
 	}
 	return document
 }
+
+// The JSON write routes refuse a body that is not application/json with 415
+// and one that is too large with 413, so the spec documents both for each of
+// them. The unmute route reads no body and is not listed.
+func TestOpenAPIDocumentsRefusedJSONBodies(t *testing.T) {
+	paths := loadOpenAPIDocument(t)["paths"].(map[string]any)
+
+	for _, route := range []struct{ path, method string }{
+		{"/api/v1/alert-rules/{rule_id}", "put"},
+		{"/api/v1/silences", "post"},
+		{"/api/v1/findings/{finding-id}/mute", "post"},
+	} {
+		operation := paths[route.path].(map[string]any)[route.method].(map[string]any)
+		responses := operation["responses"].(map[string]any)
+		for _, status := range []string{"413", "415"} {
+			if _, ok := responses[status]; !ok {
+				t.Errorf("%s %s: response %s is not documented", strings.ToUpper(route.method), route.path, status)
+			}
+		}
+	}
+}
+
+// updateRule answers the threshold from a nullable column, so a rule whose
+// stored threshold is NULL is answered with null. The schema must allow it.
+func TestOpenAPIAlertRuleUpdateResponseThresholdIsNullable(t *testing.T) {
+	schemas := loadOpenAPIDocument(t)["components"].(map[string]any)["schemas"].(map[string]any)
+	properties := schemas["AlertRuleUpdateResponse"].(map[string]any)["properties"].(map[string]any)
+	threshold := properties["threshold"].(map[string]any)
+	if want := []any{"number", "null"}; !reflect.DeepEqual(threshold["type"], want) {
+		t.Errorf("AlertRuleUpdateResponse.threshold type = %v, want %v", threshold["type"], want)
+	}
+}
