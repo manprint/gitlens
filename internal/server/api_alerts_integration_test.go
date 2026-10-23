@@ -327,3 +327,36 @@ func TestAlertAPI_INT_ALERTAPI_010_SilenceHistoryIsCapped(t *testing.T) {
 	require.Equal(t, "[]", strings.TrimSpace(w.Body.String()), "none of the history is active")
 	require.Empty(t, w.Header().Get("X-Result-Truncated"))
 }
+
+// TestAlertAPI_INT_ALERTAPI_011_SilenceHistoryCapKeepsTheLatest: past the cap
+// the history drops the silences that ended first, never an active or future
+// one, and the rows still come in ending order.
+func TestAlertAPI_INT_ALERTAPI_011_SilenceHistoryCapKeepsTheLatest(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := contextBackground()
+	_, err := pool.Exec(ctx, `DELETE FROM silences`)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO silences (silence_id, matchers, reason, starts_at, ends_at)
+		SELECT gen_random_uuid(), '[]'::jsonb, 'history', now() - interval '3 days', now() - interval '2 days' - g * interval '1 second'
+		FROM generate_series(1, 510) g`)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO silences (silence_id, matchers, reason, starts_at, ends_at) VALUES
+		(gen_random_uuid(), '[]'::jsonb, 'active', now() - interval '1 hour', now() + interval '1 hour'),
+		(gen_random_uuid(), '[]'::jsonb, 'future', now() + interval '1 day', now() + interval '2 days')`)
+	require.NoError(t, err)
+	r := alertRouter(NewAlertAPI(pool, alert.NewPgStore(pool)))
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/silences?all=true", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var got []silenceJSON
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	require.Len(t, got, 500)
+	require.Equal(t, "true", w.Header().Get("X-Result-Truncated"))
+	require.Equal(t, "active", got[498].Reason)
+	require.Equal(t, "future", got[499].Reason)
+	for i := 1; i < len(got); i++ {
+		require.False(t, got[i].EndsAt.Before(got[i-1].EndsAt), "row %d ends before row %d", i, i-1)
+	}
+}

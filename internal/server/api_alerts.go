@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"time"
 
@@ -294,11 +295,14 @@ func (a *AlertAPI) listSilences(w http.ResponseWriter, r *http.Request) {
 	if !all {
 		q += ` WHERE starts_at <= now() AND ends_at > now()`
 	}
-	q += ` ORDER BY ends_at`
 	// The history of silences has no bound either, so the full listing is capped
 	// as the alert listing is: one row past the cap tells whether it was cut.
+	// The cap keeps the latest ending rows, so the active and future silences
+	// are never the ones cut; the rows are put back in ending order below.
 	if all {
-		q += ` LIMIT 501`
+		q += ` ORDER BY ends_at DESC LIMIT 501`
+	} else {
+		q += ` ORDER BY ends_at`
 	}
 	rows, err := a.pool.Query(r.Context(), q)
 	if err != nil {
@@ -324,9 +328,12 @@ func (a *AlertAPI) listSilences(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "silence query failed", err.Error())
 		return
 	}
-	if all && len(out) > 500 {
-		w.Header().Set("X-Result-Truncated", "true")
-		out = out[:500]
+	if all {
+		if len(out) > 500 {
+			w.Header().Set("X-Result-Truncated", "true")
+			out = out[:500]
+		}
+		slices.Reverse(out)
 	}
 	writeJSON(w, 200, out)
 }
