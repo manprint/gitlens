@@ -103,3 +103,73 @@ func TestINTALERT008_Through012_EngineIntegration(t *testing.T) {
 		require.NoError(t, e2.Tick(ctx))
 	})
 }
+
+// countRows returns how many rows of a query on the integration rule hold.
+func countRows(t *testing.T, ctx context.Context, pool *pgxpool.Pool, query string) int {
+	t.Helper()
+	var n int
+	require.NoError(t, pool.QueryRow(ctx, query).Scan(&n))
+	return n
+}
+
+// TestINTALERT015_NewTermStartsFromTheTable — the leader's session dies while an
+// alert fires, another engine takes over and closes the episode, and the first
+// engine leads again with the condition true. Its new term must start from the
+// table: the closed episode stays closed, and the condition opens a new one that
+// is recorded and notified. The firing state the first engine held from its
+// earlier term must not be carried into the new term.
+func TestINTALERT015_NewTermStartsFromTheTable(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		ctx, pool, src, clk, e, e2, _ := setupEngineIntegration(t, pg)
+		t.Cleanup(e.Stop)
+		t.Cleanup(e2.Stop)
+		const rows = `SELECT count(*) FROM alerts WHERE rule_id='integration.rule'`
+		const fires = `SELECT count(*) FROM notifications WHERE alert_key LIKE 'integration.rule/%' AND phase='fire'`
+		require.NoError(t, e.Tick(ctx))
+		src.set(20, clk.Now())
+		require.NoError(t, e.Tick(ctx))
+		clk.Advance(31 * time.Second)
+		require.NoError(t, e.Tick(ctx))
+		require.Equal(t, 1, countRows(t, ctx, pool, rows))
+		require.Equal(t, 1, countRows(t, ctx, pool, fires))
+
+		// The leader's session ends, which releases the advisory lock with it.
+		e.mu.Lock()
+		session := e.conn.Conn()
+		e.mu.Unlock()
+		require.NoError(t, session.Close(ctx))
+
+		// The other engine leads, sees the condition clear and closes the episode.
+		src.set(5, clk.Now())
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			require.NoError(t, e2.Tick(ctx))
+			e2.mu.Lock()
+			led := e2.hasLock
+			e2.mu.Unlock()
+			if led {
+				break
+			}
+			require.True(t, time.Now().Before(deadline), "the second engine never acquired the lock")
+			time.Sleep(10 * time.Millisecond)
+		}
+		e2.Stop()
+
+		// The condition holds again and the first engine leads again. Until the
+		// new episode has held for its For, the table shows the closed one.
+		clk.Advance(time.Minute)
+		src.set(20, clk.Now())
+		require.NoError(t, e.Tick(ctx))
+		var state State
+		require.NoError(t, pool.QueryRow(ctx, `SELECT state FROM alerts WHERE rule_id='integration.rule' ORDER BY started_at DESC LIMIT 1`).Scan(&state))
+		require.Equal(t, StateResolved, state)
+
+		clk.Advance(31 * time.Second)
+		src.set(20, clk.Now())
+		require.NoError(t, e.Tick(ctx))
+		require.NoError(t, pool.QueryRow(ctx, `SELECT state FROM alerts WHERE rule_id='integration.rule' ORDER BY started_at DESC LIMIT 1`).Scan(&state))
+		require.Equal(t, StateFiring, state)
+		require.Equal(t, 2, countRows(t, ctx, pool, rows), "the new episode must be recorded as its own row")
+		require.Equal(t, 2, countRows(t, ctx, pool, fires), "the new episode must notify")
+	})
+}

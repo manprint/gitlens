@@ -72,6 +72,14 @@ func (e *Evaluator) Restore(a Alert, now time.Time) {
 	}
 }
 
+// Reset drops every episode the evaluator holds, so that the next pass starts
+// from what Restore reloads.
+func (e *Evaluator) Reset() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.states = make(map[string]evalState)
+}
+
 func (e *Evaluator) Step(r Rule, s Sample, now time.Time) (*Alert, Transition) {
 	e.mu.Lock()
 	defer e.mu.Unlock()

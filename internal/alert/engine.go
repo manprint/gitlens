@@ -242,6 +242,13 @@ func (e *Engine) ensureLeader(ctx context.Context) error {
 		return fmt.Errorf("try alert advisory lock: %w", err)
 	}
 	e.hasLock = locked
+	if locked {
+		// A new term starts from the alerts the previous leader left behind.
+		// The episodes this engine held in its last term may have been closed
+		// or reopened since, so they are dropped and Tick reloads the table.
+		e.eval.Reset()
+		e.stateLoaded = false
+	}
 	return nil
 }
 
