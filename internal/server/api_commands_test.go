@@ -25,9 +25,16 @@ type commandFakePool struct {
 	execErr  error
 	execArgs []any
 	tx       pgx.Tx
+	// pending is the agent's pending-command count, answered to the queue check.
+	pending int64
 }
 
-func (p *commandFakePool) QueryRow(context.Context, string, ...any) pgx.Row { return p.row }
+func (p *commandFakePool) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+	if strings.Contains(sql, "count(*)") {
+		return &mockRow{vals: []any{p.pending}}
+	}
+	return p.row
+}
 func (p *commandFakePool) Exec(_ context.Context, _ string, args ...any) (pgconn.CommandTag, error) {
 	p.execArgs = args
 	if p.execErr != nil {
@@ -133,6 +140,20 @@ func TestRequesterOf_NamesTheCredentialNotTheSecret(t *testing.T) {
 	who := requesterOf(req, auth)
 	require.Regexp(t, `^ui-session [0-9a-f]{8} from 192\.0\.2\.1$`, who)
 	require.NotContains(t, who, "session-token-value")
+}
+
+// A full queue refuses the command at once: the agent runs its queue one
+// command at a time, so a command queued behind a full queue would only expire.
+func TestEnqueue_RefusesWhenTheAgentQueueIsFull(t *testing.T) {
+	instanceID, agentID := uuid.New(), uuid.New()
+	p := &commandFakePool{row: &mockRow{vals: []any{[]byte(agentID.String()), int64(42), "default"}}, pending: commandQueueLimit}
+	s := NewCommandService(p, NewAuth("secret"))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/instances/"+instanceID.String()+"/commands", bytes.NewBufferString(`{"kind":"explain","args":{"queryid":7}}`))
+	rec := httptest.NewRecorder()
+	commandRouter(s).ServeHTTP(rec, req)
+	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+	require.Contains(t, rec.Body.String(), "command queue full")
+	require.Nil(t, p.execArgs, "a refused command is not queued or audited")
 }
 
 func TestEnqueue_UnknownInstanceIs404(t *testing.T) {

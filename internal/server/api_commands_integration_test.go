@@ -353,3 +353,32 @@ func TestINTPLAN004_PlanWithNoDatnameIsNotStored(t *testing.T) {
 	require.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*) FROM query_plans WHERE instance_id=$1 AND queryid=10`, instanceID).Scan(&count))
 	require.Zero(t, count)
 }
+
+// INT-CMD-030: an agent's queue is bounded. A command over the limit is refused
+// with 429 and not queued, and a command that leaves the queue frees a place.
+func TestINTCMD030_EnqueueRefusesBeyondTheAgentQueueLimit(t *testing.T) {
+	pool := getSharedPool(t)
+	instanceID, agentID := seedCommandInstance(t, pool)
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, `INSERT INTO commands (command_id, tenant_id, agent_id, instance_id, cluster_id, kind, args, state, expires_at) SELECT gen_random_uuid(), tenant_id, agent_id, instance_id, cluster_id, 'cancel', '{"pid":42}', 'pending', now()+interval '5 minutes' FROM instances, generate_series(1, $2) WHERE instance_id=$1`, instanceID, commandQueueLimit)
+	require.NoError(t, err)
+
+	router := commandsIntegrationRouter(pool)
+	enqueue := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/instances/"+instanceID.String()+"/commands", bytes.NewBufferString(`{"kind":"explain","args":{"queryid":11}}`))
+		req.Header.Set("Authorization", "Bearer test-token")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+	rec := enqueue()
+	require.Equal(t, http.StatusTooManyRequests, rec.Code, rec.Body.String())
+	var pending int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM commands WHERE agent_id=$1 AND state='pending'`, agentID.String()).Scan(&pending))
+	require.Equal(t, commandQueueLimit, pending, "the refused command is not queued")
+
+	_, err = pool.Exec(ctx, `UPDATE commands SET state='done', finished_at=now() WHERE command_id = (SELECT command_id FROM commands WHERE agent_id=$1 AND state='pending' LIMIT 1)`, agentID.String())
+	require.NoError(t, err)
+	rec = enqueue()
+	require.Equal(t, http.StatusAccepted, rec.Code, rec.Body.String())
+}

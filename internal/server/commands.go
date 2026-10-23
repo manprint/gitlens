@@ -35,6 +35,11 @@ const (
 	// maxCommandBody bounds a command request. A result is larger, since it
 	// carries a plan, and is bounded by command.MaxResultBytes instead.
 	maxCommandBody int64 = 1 << 20
+	// commandQueueLimit bounds the commands waiting for one agent. The agent
+	// claims them in order and runs one at a time, and a pgstattuple can hold
+	// it for 50 seconds, so an unbounded queue lets a burst expire the commands
+	// behind it before they run. A command over the limit is refused at once.
+	commandQueueLimit = 20
 )
 
 // CommandService owns the server side of the command queue.
@@ -191,6 +196,20 @@ func (s *CommandService) enqueue(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "instance lookup failed", err.Error())
+		return
+	}
+	// The claim serves an agent's queue across all its instances, first in
+	// first out, so the bound is per agent. Two enqueues in flight can both
+	// pass the count, which overshoots the limit by at most that many: the
+	// bound is on the damage a flood can do, not an exact count.
+	var pending int64
+	err = s.pool.QueryRow(r.Context(), `SELECT count(*) FROM commands WHERE tenant_id=$1 AND agent_id=$2 AND state='pending' AND expires_at > now()`, tenantID, agentID).Scan(&pending)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "command queue check failed", err.Error())
+		return
+	}
+	if pending >= commandQueueLimit {
+		writeError(w, http.StatusTooManyRequests, "command queue full", fmt.Sprintf("the agent already has %d pending commands; retry once they run or expire", commandQueueLimit))
 		return
 	}
 	commandID := uuid.New()
