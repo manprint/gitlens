@@ -121,6 +121,21 @@ func TestRedactQueryText_RemovesCredentials(t *testing.T) {
 			`CREATE SUBSCRIPTION s CONNECTION 'host=p password=[redacted] dbname=x' PUBLICATION pub`},
 		{"libpq value in an E-string", `CREATE SUBSCRIPTION s CONNECTION E'host=p password=ab\'cd' PUBLICATION pub`,
 			`CREATE SUBSCRIPTION s CONNECTION E'host=p password=[redacted]' PUBLICATION pub`},
+		// In a dollar body a quote is a plain character, so the value keeps it.
+		{"libpq value with a quote in a dollar body", "CREATE SUBSCRIPTION s CONNECTION $$host=p password=ab'cd dbname=x$$ PUBLICATION pub",
+			"CREATE SUBSCRIPTION s CONNECTION $$host=p password=[redacted] dbname=x$$ PUBLICATION pub"},
+		{"quoted libpq value with an escaped quote in a dollar body", `CREATE SUBSCRIPTION s CONNECTION $$host=p password='ab\'cd' dbname=x$$ PUBLICATION pub`,
+			`CREATE SUBSCRIPTION s CONNECTION $$host=p password=[redacted] dbname=x$$ PUBLICATION pub`},
+		{"libpq value ends a dollar body", "CREATE SUBSCRIPTION s CONNECTION $$host=p password=abc$$",
+			"CREATE SUBSCRIPTION s CONNECTION $$host=p password=[redacted]$$"},
+		{"libpq value ends a plain literal", "CREATE SUBSCRIPTION s CONNECTION 'host=p password=abc'",
+			"CREATE SUBSCRIPTION s CONNECTION 'host=p password=[redacted]'"},
+		{"libpq value with a doubled quote and no blank", "CREATE SUBSCRIPTION s CONNECTION 'host=p password=ab''cd dbname=x' PUBLICATION pub",
+			"CREATE SUBSCRIPTION s CONNECTION 'host=p password=[redacted] dbname=x' PUBLICATION pub"},
+		// Constants joined by a line break are one libpq string, so the value
+		// goes on into the next constant.
+		{"libpq value continued on the next line", "CREATE SUBSCRIPTION s CONNECTION 'host=p password=ab'\n'cd' PUBLICATION pub",
+			"CREATE SUBSCRIPTION s CONNECTION 'host=p password=[redacted]' PUBLICATION pub"},
 		{"subscription connection", "CREATE SUBSCRIPTION s CONNECTION 'host=p password=abc dbname=x' PUBLICATION pub",
 			"CREATE SUBSCRIPTION s CONNECTION 'host=p password=[redacted] dbname=x' PUBLICATION pub"},
 		{"subscription quoted password", "CREATE SUBSCRIPTION s CONNECTION 'host=p password=''a b''' PUBLICATION pub",

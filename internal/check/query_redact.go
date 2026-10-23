@@ -23,11 +23,14 @@ var (
 	// since the option list of a server or user mapping may name the option in
 	// any of these spellings. Inside a constant or a body it is matched as text.
 	passwordKeyword = regexp.MustCompile(`(?i)\bpassword|"password"|U&"(?:[^"]|"")*"(?:\s*uescape\s*'(?:[^']|'')*')?`)
-	// A libpq value quoted inside a SQL literal doubles its quotes, so
-	// ''a b'' is one value even though it holds a space. An unquoted value ends
-	// at a blank, reads a doubled quote as one quote, and reads a backslash as
-	// an escape, so a backslash-blank is one blank in the value.
-	libpqPassword = regexp.MustCompile(`(?is)(\b(?:ssl)?password\s*=\s*)(?:''(?:[^']|'')*''|'(?:[^']|'')*'?|(?:[^\s'\\]|\\.|'')+)`)
+	// The value of a libpq key. libpq reads the string after the SQL literal
+	// around it is unescaped, so a doubled quote inside a literal stands for one
+	// quote, and a value in a dollar body holds its quotes as they are. An
+	// unquoted value runs to a blank, so it may hold quotes, and a backslash
+	// escapes the byte after it. A single-quoted value ends at an unescaped
+	// quote. A value continued by a constant on the next line is one value, as
+	// PostgreSQL joins the constants.
+	libpqPassword = regexp.MustCompile(`(?is)(\b(?:ssl)?password\s*=\s*)(?:''(?:[^']|'')*''|'(?:\\.|[^'\\])*'?|(?:'\s*[\r\n]\s*'|\\.|[^\s\\])+)`)
 )
 
 // redactQueryText hides the credentials a statement carries before its text
@@ -35,8 +38,40 @@ var (
 // readable and its shape still identifies it.
 func redactQueryText(query string) string {
 	query = redactPasswordValues(query)
-	query = libpqPassword.ReplaceAllString(query, "${1}[redacted]")
+	query = redactLibpqValues(query)
 	return conninfoURIPassword.ReplaceAllString(query, "${1}:[redacted]@")
+}
+
+// redactLibpqValues replaces the value of each libpq password key. A value
+// that runs to the end of a constant or a body is cut before the quote or tag
+// that closes it, since that delimiter is SQL, not part of the value.
+func redactLibpqValues(query string) string {
+	closers := closingDelimiters(query)
+	var spans []textSpan
+	for _, loc := range libpqPassword.FindAllStringSubmatchIndex(query, -1) {
+		start, end := loc[3], loc[1]
+		if n, ok := closers[end]; ok && end-n >= start {
+			end -= n
+		}
+		if end > start {
+			spans = append(spans, textSpan{start, end})
+		}
+	}
+	return applySpans(query, spans, "[redacted]")
+}
+
+// closingDelimiters maps the end of each closed string constant and dollar
+// body to the length of its closing delimiter.
+func closingDelimiters(query string) map[int]int {
+	closers := make(map[int]int)
+	for i := 0; i < len(query); {
+		t := scanToken(query, i)
+		i = t.end
+		if t.closing > 0 {
+			closers[t.end] = t.closing
+		}
+	}
+	return closers
 }
 
 // textSpan is a run of the statement text that is replaced by a redaction.
@@ -90,7 +125,7 @@ func redactPasswordValues(query string) string {
 	if cut >= 0 {
 		spans = append(spans, textSpan{cut, len(query)})
 	}
-	return applySpans(query, spans)
+	return applySpans(query, spans, "'[redacted]'")
 }
 
 // earlier returns the smaller of cut and at, where a negative cut means none.
@@ -113,9 +148,9 @@ func hasPasswordKeyword(text string) bool {
 	return false
 }
 
-// applySpans replaces each span of s with a redacted literal. Spans that
-// overlap or touch are replaced as one.
-func applySpans(s string, spans []textSpan) string {
+// applySpans replaces each span of s with replacement. Spans that overlap or
+// touch are replaced as one.
+func applySpans(s string, spans []textSpan, replacement string) string {
 	if len(spans) == 0 {
 		return s
 	}
@@ -128,7 +163,7 @@ func applySpans(s string, spans []textSpan) string {
 			end = max(end, spans[i].end)
 		}
 		out.WriteString(s[copied:start])
-		out.WriteString("'[redacted]'")
+		out.WriteString(replacement)
 		copied = end
 	}
 	out.WriteString(s[copied:])
@@ -157,6 +192,9 @@ type token struct {
 	keyword bool
 	// backslash is set for a plain string constant that holds a backslash.
 	backslash bool
+	// closing is the length of the delimiter that closes a string constant or
+	// a dollar body, or 0 when the text ends before it.
+	closing int
 }
 
 // stringMode is how a string constant reads a backslash.
@@ -221,13 +259,17 @@ func scanToken(s string, i int) token {
 // stringToken returns the string constant whose opening quote is at s[q] and
 // whose prefix, if any, starts at start.
 func stringToken(s string, start, q int, mode stringMode) token {
-	end := stringChainEnd(s, q, mode == escapeString)
-	return token{
+	end, closed := stringChainEnd(s, q, mode == escapeString)
+	t := token{
 		kind:      tokString,
 		start:     start,
 		end:       end,
 		backslash: mode == plainString && strings.IndexByte(s[start:end], '\\') >= 0,
 	}
+	if closed {
+		t.closing = 1
+	}
+	return t
 }
 
 // unicodeNameToken returns the U& identifier whose opening quote is at s[q].
@@ -237,7 +279,7 @@ func unicodeNameToken(s string, start, q int) token {
 	end := quotedEnd(s, q)
 	if k := skipSeparators(s, end); strings.EqualFold(s[k:min(k+7, len(s))], "uescape") {
 		if m := skipSeparators(s, k+7); m < len(s) && s[m] == '\'' {
-			end = stringChainEnd(s, m, false)
+			end, _ = stringChainEnd(s, m, false)
 		}
 	}
 	return token{kind: tokName, start: start, end: end, keyword: true}
@@ -249,10 +291,12 @@ func unicodeNameToken(s string, start, q int) token {
 func dollarToken(s string, start, tagEnd int) token {
 	tag := s[start:tagEnd]
 	end := len(s)
+	closing := 0
 	if i := strings.Index(s[tagEnd:], tag); i >= 0 {
 		end = tagEnd + i + len(tag)
+		closing = len(tag)
 	}
-	return token{kind: tokBody, start: start, end: end}
+	return token{kind: tokBody, start: start, end: end, closing: closing}
 }
 
 // dollarTagEnd returns the index just past the opening tag of a dollar-quoted
@@ -274,19 +318,19 @@ func dollarTagEnd(s string, i int) int {
 }
 
 // stringChainEnd returns the index just past the string constant that opens
-// with the quote at s[q], and of each constant that continues it. A constant
-// continues in the same mode when a line break lies between it and the next
-// one, with blanks and -- comments only. The text ends the constant when it
-// ends first.
-func stringChainEnd(s string, q int, escapes bool) int {
+// with the quote at s[q], and of each constant that continues it, and whether
+// the last of them is closed. A constant continues in the same mode when a
+// line break lies between it and the next one, with blanks and -- comments
+// only. The text ends the constant when it ends first.
+func stringChainEnd(s string, q int, escapes bool) (int, bool) {
 	for {
 		end := literalEnd(s, q, escapes)
 		if end < 0 {
-			return len(s)
+			return len(s), false
 		}
 		next, lineBreak := skipBlanks(s, end)
 		if !lineBreak || next >= len(s) || s[next] != '\'' {
-			return end
+			return end, true
 		}
 		q = next
 	}
