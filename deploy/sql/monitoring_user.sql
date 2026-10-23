@@ -1,13 +1,15 @@
 -- pglens monitoring role for PostgreSQL 15-19.
 -- Run as a superuser, or as rds_superuser on Amazon RDS.
 --
--- Defaults to Tier 0. Apply a higher tier by defining the corresponding
--- psql flag, for example:
+-- Defaults to Tier 0. Apply a higher tier by setting its psql flag to 1, for
+-- example:
 --   psql -v pglens_password='secret' -v dbname=app -v tier1=1 -f monitoring_user.sql
 -- Tier 2 also needs tier1=1. This file never creates an extension.
 -- The role is named pglens unless -v role=<name> names another one.
--- -v harden_public=1 also revokes from PUBLIC the grants that let every
--- role write outside a read-only transaction (see the end of this file).
+-- Large-object creation and WAL messages (pg_logical_emit_message) are revoked
+-- from PUBLIC in every run. -v harden_public=1 also revokes the other grants
+-- that let every role write outside a read-only transaction (see the end of
+-- this file).
 --
 -- The role it configures can only read. Before granting anything the script
 -- checks that an existing role of that name could not write either: it
@@ -25,10 +27,19 @@
 -- about the databases it cannot inspect from the current one.
 \set ON_ERROR_STOP on
 
+-- An empty password is refused like a missing one: ALTER ROLE would clear the
+-- password and leave a LOGIN role without one. The comparisons before BEGIN
+-- are qualified to pg_catalog, see below.
 \if :{?pglens_password}
+SELECT (:'pglens_password' OPERATOR(pg_catalog.<>) '') AS password_set \gset
 \else
-\echo 'pglens_password is required (use psql -v pglens_password=...)' >&2
-\quit 3
+\set password_set false
+\endif
+-- The quit meta-command takes no exit status, so the refusal is an error that
+-- ON_ERROR_STOP turns into exit 3, before anything below runs.
+\if :password_set
+\else
+DO $$ BEGIN RAISE EXCEPTION 'pglens_password is required and must not be empty (use psql -v pglens_password=...)'; END $$;
 \endif
 \if :{?dbname}
 \else
@@ -37,6 +48,32 @@
 \if :{?role}
 \else
 \set role pglens
+\endif
+
+-- A tier is granted by the value 1 only. Testing the variable for existence,
+-- as \if :{?tier1} does, would also grant it for tier1=0 or tier1=false.
+-- Tier 2 is tier 1 plus signal, so tier2=1 without tier1=1 is refused before
+-- anything changes.
+-- The comparisons above and in this part run before BEGIN, so before the
+-- script pins its search_path. Their operator is qualified to pg_catalog: a
+-- schema of the database owner listed first in that database's search_path
+-- could otherwise supply its own = and run it as the superuser, with the
+-- password or the flag as an argument.
+\if :{?tier1}
+SELECT (:'tier1' OPERATOR(pg_catalog.=) '1') AS tier1_on \gset
+\else
+\set tier1_on false
+\endif
+\if :{?tier2}
+SELECT (:'tier2' OPERATOR(pg_catalog.=) '1') AS tier2_on \gset
+\else
+\set tier2_on false
+\endif
+\if :tier2_on
+\if :tier1_on
+\else
+DO $$ BEGIN RAISE EXCEPTION 'tier2=1 needs tier1=1: tier 2 is tier 1 plus signal'; END $$;
+\endif
 \endif
 
 BEGIN;
@@ -109,11 +146,13 @@ BEGIN
   END LOOP;
 
   -- Ownership is recorded for objects in every database, so this check sees
-  -- them all.
+  -- them all. An object of a database is counted under that database. A
+  -- shared object (a database or a tablespace) belongs to no database, so it
+  -- is named on its own.
   FOR item IN
-    SELECT coalesce(d.datname, '(the cluster)') AS datname, count(*) AS owned
+    SELECT d.datname, count(*) AS owned
     FROM pg_catalog.pg_shdepend s
-    LEFT JOIN pg_catalog.pg_database d ON d.oid = s.dbid
+    JOIN pg_catalog.pg_database d ON d.oid = s.dbid
     WHERE s.refclassid = 'pg_catalog.pg_authid'::pg_catalog.regclass
       AND s.refobjid = monitor AND s.deptype = 'o'
     GROUP BY 1
@@ -121,6 +160,16 @@ BEGIN
   LOOP
     problems := problems || format('%1$s owns %2$s object(s) in %3$s: REASSIGN OWNED BY %1$s TO <owner>; (connected to that database)',
                                    who, item.owned, item.datname);
+  END LOOP;
+  FOR item IN
+    SELECT pg_catalog.pg_describe_object(s.classid, s.objid, s.objsubid) AS object
+    FROM pg_catalog.pg_shdepend s
+    WHERE s.refclassid = 'pg_catalog.pg_authid'::pg_catalog.regclass
+      AND s.refobjid = monitor AND s.deptype = 'o' AND s.dbid = 0
+    ORDER BY 1
+  LOOP
+    problems := problems || format('%1$s owns %2$s, a shared object: REASSIGN OWNED BY %1$s TO <owner>;',
+                                   who, item.object);
   END LOOP;
 
   -- Privileges granted to the role itself. Only reads are allowed, plus
@@ -209,6 +258,21 @@ BEGIN
       USING HINT = format('Run this script connected to %I as well.', item.datname);
   END LOOP;
 
+  -- The role can connect to these as well, and PUBLIC may still let it create
+  -- large objects or emit WAL messages there: the grants revoked above are per
+  -- database.
+  FOR item IN
+    SELECT d.datname
+    FROM pg_catalog.pg_database d
+    WHERE d.datallowconn AND d.datname <> current_database()
+      AND has_database_privilege(monitor, d.datname, 'CONNECT')
+    ORDER BY 1
+  LOOP
+    RAISE WARNING '% can connect to %, where PUBLIC may still let it create large objects or emit WAL messages',
+      who, item.datname
+      USING HINT = format('Run this script connected to %I as well.', item.datname);
+  END LOOP;
+
   -- A database-specific setting for the role would override the role-wide
   -- read-only default set below.
   FOR item IN
@@ -245,7 +309,7 @@ GRANT EXECUTE ON FUNCTION pg_control_checkpoint() TO :"role";
 -- pg_read_all_stats is already implied by pg_monitor; it is listed for
 -- clarity. pg_read_all_data is the actual table-read privilege required by
 -- PostgreSQL for EXPLAIN on relations and is the agent's T1 capability gate.
-\if :{?tier1}
+\if :tier1_on
 GRANT pg_read_all_stats TO :"role";
 GRANT pg_read_all_data TO :"role";
 \endif
@@ -253,7 +317,7 @@ GRANT pg_read_all_data TO :"role";
 -- ========================================================================
 -- Tier 2 — cancel and terminate, only with allow_signal enabled.
 -- ========================================================================
-\if :{?tier2}
+\if :tier2_on
 GRANT pg_signal_backend TO :"role";
 \endif
 
@@ -271,10 +335,14 @@ GRANT pg_signal_backend TO :"role";
 -- pgstattuple: in each database whose tables should be measurable.
 -- CREATE EXTENSION IF NOT EXISTS pgstattuple;
 
--- pglens only ever reads. Make every session of the role read-only inside
--- PostgreSQL itself, so a write is refused by the server even if a client
--- ever tried one. The agent also sets this on each connection it opens; the
--- role default covers any other client that logs in with the role.
+-- pglens only ever reads. The role default makes every session read-only,
+-- which catches a write from a client that did not ask for a read-only
+-- transaction. It is a guard against mistakes, not a boundary: the role can
+-- turn the setting off, so a write is stopped by privileges. The script grants
+-- none that allow one, and revokes from PUBLIC the grants that let any role
+-- create large objects or emit WAL messages. The other PUBLIC grants that allow
+-- a write are reported below. The agent also sets this on each connection it
+-- opens.
 ALTER ROLE :"role" SET default_transaction_read_only = on;
 
 -- Bound the blast radius of the monitoring session itself.
@@ -283,13 +351,75 @@ ALTER ROLE :"role" SET lock_timeout = '1s';
 ALTER ROLE :"role" SET idle_in_transaction_session_timeout = '30s';
 ALTER ROLE :"role" SET application_name = 'pglens';
 
+-- Creating a large object writes pg_largeobject. The read-only default does
+-- not stop that on PostgreSQL 15, and on every version once a session turns
+-- the default off, so no default can keep it from the role. Nothing else the
+-- role holds lets it create one, so the grant goes in every run. PUBLIC's
+-- grant is per database: run the script connected to each database the role
+-- can reach (the script warns about them).
+DO $$
+DECLARE
+  monitor oid := (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = current_setting('pglens.role'));
+  who text := quote_ident(current_setting('pglens.role'));
+  creator text;
+BEGIN
+  FOREACH creator IN ARRAY ARRAY['pg_catalog.lo_create(oid)', 'pg_catalog.lo_creat(integer)',
+                                 'pg_catalog.lo_from_bytea(oid, bytea)'] LOOP
+    IF has_function_privilege(monitor, creator, 'EXECUTE') THEN
+      EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC', creator);
+      -- A REVOKE by a role that neither owns the function nor holds the grant
+      -- only warns, as on a managed service, so look again.
+      IF has_function_privilege(monitor, creator, 'EXECUTE') THEN
+        RAISE WARNING '% can still create large objects through %: REVOKE EXECUTE ON FUNCTION % FROM PUBLIC needs the owner of the function',
+          who, creator, creator;
+      ELSE
+        RAISE NOTICE 'revoked EXECUTE on % from PUBLIC: % could create large objects', creator, who;
+      END IF;
+    END IF;
+  END LOOP;
+END
+$$;
+
+-- pg_logical_emit_message writes WAL, and the read-only default does not stop
+-- it: a message is emitted even inside BEGIN READ ONLY. Nothing else the role
+-- holds lets it emit, so the revoke goes in every run, like the large-object
+-- one above. The function has one overload per argument list (PostgreSQL 19
+-- adds a fourth argument), so each is revoked by its own signature. Logical
+-- decoding consumers that emit their own messages need an explicit grant.
+DO $$
+DECLARE
+  monitor oid := (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = current_setting('pglens.role'));
+  who text := quote_ident(current_setting('pglens.role'));
+  emitter record;
+BEGIN
+  FOR emitter IN
+    SELECT p.oid, p.oid::pg_catalog.regprocedure::text AS signature
+    FROM pg_catalog.pg_proc p
+    WHERE p.proname = 'pg_logical_emit_message'
+      AND p.pronamespace = 'pg_catalog'::pg_catalog.regnamespace
+  LOOP
+    IF has_function_privilege(monitor, emitter.oid, 'EXECUTE') THEN
+      EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC', emitter.signature);
+      -- As for large objects: a REVOKE by a role that neither owns the function
+      -- nor holds the grant only warns, so look again.
+      IF has_function_privilege(monitor, emitter.oid, 'EXECUTE') THEN
+        RAISE WARNING '% can still write WAL messages through %: REVOKE EXECUTE ON FUNCTION % FROM PUBLIC needs the owner of the function',
+          who, emitter.signature, emitter.signature;
+      ELSE
+        RAISE NOTICE 'revoked EXECUTE on % from PUBLIC: % could write WAL messages', emitter.signature, who;
+      END IF;
+    END IF;
+  END LOOP;
+END
+$$;
+
 -- What PUBLIC holds, the role holds too. These grants let any role write
--- outside a read-only transaction; pglens never leaves one. They are
+-- outside a read-only transaction; pglens never leaves one. The rest are
 -- reported, and revoked from PUBLIC only with -v harden_public=1, because
 -- revoking them changes what every other role of the database can do: an
--- application that uses temporary tables or large objects then needs its
--- own grants. Functions that run as their owner and lo_compat_privileges
--- are only reported: what to do about them depends on the application.
+-- application that uses temporary tables then needs its own grants. Functions
+-- that run as their owner and lo_compat_privileges are only reported: what to
+-- do about them depends on the application.
 \if :{?harden_public}
 SET LOCAL pglens.harden_public = on;
 \else

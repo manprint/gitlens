@@ -5,6 +5,10 @@ PKG     := ./...
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 UI_E2E_RUN ?= UI
+# Pinned for the same reason as the CI workflow's env: a scanner installed
+# without a version changes its output and exit status without a commit. ci.yml
+# carries the same value, and deploy/workflows_test.go checks that they match.
+GOVULNCHECK_VERSION ?= v1.9.0
 
 .PHONY: build fmt fmt-check lint vet-tags vuln tidy-check stress test test-integration test-e2e test-e2e-full test-e2e-full-evidence test-e2e-matrix api-docs \
         ci-local ci-local-unit ci-local-integration ci-local-security coverage coverage-gate generate golden clean build-images build-images-multiarch test-e2e-unit \
@@ -39,15 +43,15 @@ vet-tags:
 	$(GO) vet -tags=e2e ./...
 
 # Standard-library advisories reach this code through the ingest endpoint, the
-# agent's HTTP client and the notification channels; go.mod's `toolchain`
-# directive is what pins them out, and this is what proves the pin still holds.
+# agent's HTTP client and the notification channels; the `go` line in go.mod
+# is what pins them out, and this is what proves the pin still holds.
 vuln:
 	@if command -v govulncheck >/dev/null 2>&1; then \
 		govulncheck ./...; \
 	elif test -x "$$(go env GOPATH)/bin/govulncheck"; then \
 		"$$(go env GOPATH)/bin/govulncheck" ./...; \
 	else \
-		echo "govulncheck is required: go install golang.org/x/vuln/cmd/govulncheck@latest" >&2; exit 1; \
+		echo "govulncheck is required: go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)" >&2; exit 1; \
 	fi
 
 tidy-check:
@@ -96,8 +100,11 @@ test-e2e-unit:
 test-e2e:
 	$(GO) test -tags=e2e -timeout=35m -count=1 ./test/e2e/... -run 'Smoke'
 
+# -v prints a line for every scenario, passed or skipped. Without it the evidence
+# log of a passing run is a bare package ok line, and a scenario that did not
+# run cannot be told from one that did.
 test-e2e-full:
-	$(GO) test -tags=e2e -timeout=90m -count=1 ./test/e2e/...
+	$(GO) test -tags=e2e -v -timeout=90m -count=1 ./test/e2e/...
 
 test-e2e-full-evidence:
 	./scripts/e2e_evidence.sh $(MAKE) test-e2e-full
@@ -171,7 +178,7 @@ web-lint: web-gen-api
 
 web-build:
 	cd $(WEB) && PGLENS_VERSION=$(VERSION) $(PNPM) run build
-	@printf 'built_at=%s\nvite=8.2.2\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" > internal/webui/dist/.built
+	@printf 'built_at=%s\nvite=%s\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$(cd $(WEB) && node -p 'require("./node_modules/vite/package.json").version')" > internal/webui/dist/.built
 
 web-budget: web-build
 	cd $(WEB) && $(PNPM) exec tsx scripts/bundle-budget.ts
@@ -194,17 +201,22 @@ api-docs:
 golden:
 	$(GO) test -tags=integration -run Golden ./internal/wire -update
 
+# The committed placeholder page is restored only where a build replaced it,
+# which is the case when the directory holds anything besides index.html. A
+# hand edit to an untouched placeholder is kept.
 clean:
 	rm -rf bin dist coverage.out coverage.html web/node_modules web/dist
 	@if test -d internal/webui/dist; then \
+		if test -n "$$(find internal/webui/dist -mindepth 1 -maxdepth 1 ! -name index.html)"; then \
+			git checkout -- internal/webui/dist/index.html; \
+		fi; \
 		find internal/webui/dist -mindepth 1 -maxdepth 1 ! -name index.html -exec rm -rf {} +; \
-		git checkout -- internal/webui/dist/index.html; \
 	fi
 
 build-images:
-	docker build -f Dockerfile.agent -t ghcr.io/manprint/pglens-agent:dev --build-arg VERSION=$(VERSION) .
-	docker build -f Dockerfile.server -t ghcr.io/manprint/pglens-server:dev --build-arg VERSION=$(VERSION) .
+	docker build --pull -f Dockerfile.agent -t ghcr.io/manprint/pglens-agent:dev --build-arg VERSION=$(VERSION) .
+	docker build --pull -f Dockerfile.server -t ghcr.io/manprint/pglens-server:dev --build-arg VERSION=$(VERSION) .
 
 build-images-multiarch:
-	docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.agent -t ghcr.io/manprint/pglens-agent:dev --build-arg VERSION=$(VERSION) .
-	docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.server -t ghcr.io/manprint/pglens-server:dev --build-arg VERSION=$(VERSION) .
+	docker buildx build --pull --platform linux/amd64,linux/arm64 -f Dockerfile.agent -t ghcr.io/manprint/pglens-agent:dev --build-arg VERSION=$(VERSION) .
+	docker buildx build --pull --platform linux/amd64,linux/arm64 -f Dockerfile.server -t ghcr.io/manprint/pglens-server:dev --build-arg VERSION=$(VERSION) .

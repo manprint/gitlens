@@ -2,8 +2,12 @@
 
 `monitoring_user.sql` creates or reconciles the `pglens` login role
 (`-v role=<name>` names another one). It is safe to run again: it adds the
-requested memberships and reapplies the session limits without creating an
-extension or changing database objects.
+requested memberships, reapplies the session limits and never creates an
+extension. A run is not free of side effects, though. Each run revokes
+`EXECUTE` on the large-object and WAL-message functions from `PUBLIC` in the
+database it is connected to, so any other role of that database that creates
+large objects or emits WAL messages through `PUBLIC` loses that access from the
+first run on and needs an explicit grant to keep it.
 
 The role can only read. Before granting anything, the script checks that an
 existing role of that name could not write, and refuses one that:
@@ -30,22 +34,30 @@ DATABASE ... SET`) overrides the role-wide default, so the script resets it.
 And whatever `PUBLIC` holds, the role holds too: by default every role can
 create temporary tables and large objects, and on databases upgraded from
 before PostgreSQL 15 also objects in the `public` schema, outside a read-only
-transaction. The script reports every such path it finds in the connected
-database (temporary tables, new schemas, large objects, `CREATE` on a schema,
-writes on a relation, `USAGE` or `UPDATE` on a sequence, functions that run
-as their owner and `lo_compat_privileges = on`) with the statement that
-closes it. By default it runs none of those statements, because they change
-what every other role can do: an application that uses temporary tables or
-large objects then needs its own grants. pglens itself never leaves a
-read-only transaction.
+transaction. A large object is written even under the read-only default on
+PostgreSQL 15, and on every version once a session turns that default off, so
+the script always revokes from `PUBLIC` the `EXECUTE` that lets any role create
+one (`lo_create`, `lo_creat` and `lo_from_bytea`), in the database it is
+connected to. WAL messages are written the same way: `pg_logical_emit_message`
+is not stopped by the read-only default, so the script revokes its `EXECUTE`
+from `PUBLIC` as well, for every overload of the function. Logical decoding
+consumers that emit their own messages need an explicit grant.
+It reports every other such path it finds in that database
+(temporary tables, new schemas, `CREATE` on a schema, writes on a relation,
+`USAGE` or `UPDATE` on a sequence, functions that run as their owner and
+`lo_compat_privileges = on`) with the statement that closes it. By default it
+runs none of those statements, because they change what every other role can
+do: an application that uses temporary tables then needs its own grants.
+pglens itself never leaves a read-only transaction.
 
-`-v harden_public=1` runs the `REVOKE ... FROM PUBLIC` ones, then looks again
-and warns about what is left. Functions that run as their owner and
-`lo_compat_privileges` stay as they are: what to do about them depends on
-the application. A managed-service admin does not own the large-object
-functions either, so on such a service that grant stays and the warning
-names it. Schemas, relations and functions belong to one database: run the
-script with the flag connected to each database the role can reach.
+`-v harden_public=1` runs the remaining `REVOKE ... FROM PUBLIC` ones, then
+looks again and warns about what is left. Functions that run as their owner and
+`lo_compat_privileges` stay as they are: what to do about them depends on the
+application. A managed-service admin does not own the large-object functions
+either, so on such a service that grant stays and the warning names it. Schemas,
+relations, functions and large-object grants belong to one database: run the
+script connected to each database the role can reach, as the warnings list
+them.
 
 The script runs as a superuser in a database another role may own, so it
 pins its own `search_path` to `pg_catalog`: a schema of the database owner,
@@ -88,6 +100,33 @@ created manually, in each database where the DBA has approved them.
 names or any monitored database, because its statistics cover every database;
 the agent looks for it when it starts. `pgstattuple` is needed in each database
 whose tables should be measurable.
+
+The example stack in `deploy/docker-compose.yml` creates `pglens_monitor` on
+the first boot of an empty volume, by running this script through
+`init_monitoring_user.sh`, and its agent connects as that role with the
+password from `PGLENS_MONITORING_PASSWORD`. Init scripts do not run again on an
+existing volume. There, run the same wrapper in the running container. It
+takes the password from the container's environment, runs this script with
+`pglens_password`, `dbname` and `role=pglens_monitor` once in each database
+that accepts connections, and `harden_public=1`, as on first boot. Compose checks
+the whole stack file before it runs any subcommand, so export the three secrets
+the stack was started with in this shell first. The script reads the container's
+own environment, so these values only have to pass that check:
+
+```sh
+export PGLENS_DB_PASSWORD='<superuser-password>'
+export PGLENS_MONITORING_PASSWORD='<monitoring-password>'
+export PGLENS_BOOTSTRAP_TOKEN='<token>'
+docker compose -f deploy/docker-compose.yml exec timescaledb \
+  sh /docker-entrypoint-initdb.d/01-monitoring.sh
+```
+
+It exits non-zero when the database list cannot be read, when no database
+accepts connections, or when `PGLENS_MONITORING_PASSWORD` is unset or empty, and
+then nothing has been created. Outside the example
+stack, run this script yourself once per database that accepts connections (the
+warnings of a run name the others) with `-v pglens_password=...`,
+`-v dbname=<database>` and `-v role=pglens_monitor`, connected to that database.
 
 ## Capability matrix
 

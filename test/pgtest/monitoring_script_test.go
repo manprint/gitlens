@@ -66,6 +66,8 @@ func TestPerm_INT_PERM_007_ScriptRoleCannotWrite(t *testing.T) {
 		admin := pg.Pool(t, "app", RoleSuperuser)
 		dropScriptRoles(t, admin)
 		t.Cleanup(func() { dropScriptRoles(t, admin) })
+		t.Cleanup(func() { regrantLargeObjects(t, admin) })
+		t.Cleanup(func() { regrantWALEmitters(t, admin) })
 		_, err := admin.Exec(ctx, `CREATE TABLE perm_script_t (a int);
 INSERT INTO perm_script_t VALUES (1);
 CREATE SEQUENCE perm_script_s`)
@@ -87,11 +89,30 @@ CREATE SEQUENCE perm_script_s`)
 		require.Equal(t, "on", readOnly)
 		_, err = conn.Exec(ctx, "INSERT INTO perm_script_t VALUES (2)")
 		require.True(t, isSQLState(err, "25006"), "%v", err)
+		// A WAL message is not a data change, but the read-only default does
+		// not stop it, so the role must not hold EXECUTE on the function.
+		_, err = conn.Exec(ctx, "SELECT pg_catalog.pg_logical_emit_message(true, 'pglens', 'probe')")
+		require.True(t, isSQLState(err, "42501"), "%v", err)
+		// Large objects under the default. Only 42501, the privilege refusal,
+		// shows the revoke: without it PostgreSQL 15 writes, and 16 and later
+		// refuse with 25006 from the read-only default. Each call is rolled
+		// back, so the failing case leaves no large object behind.
+		for _, statement := range []string{
+			"SELECT pg_catalog.lo_create(0)",
+			"SELECT pg_catalog.lo_from_bytea(0, '\\x00')",
+		} {
+			tx, err := conn.Begin(ctx)
+			require.NoError(t, err)
+			_, err = tx.Exec(ctx, statement)
+			require.NoError(t, tx.Rollback(ctx))
+			require.True(t, isSQLState(err, "42501"), "%s: %v", statement, err)
+		}
 
 		_, err = conn.Exec(ctx, "SET default_transaction_read_only = off")
 		require.NoError(t, err)
 		for _, statement := range []string{
 			"INSERT INTO perm_script_t VALUES (2)",
+			"SELECT pg_catalog.pg_logical_emit_message(true, 'pglens', 'probe')",
 			"UPDATE perm_script_t SET a = 3",
 			"DELETE FROM perm_script_t",
 			"TRUNCATE perm_script_t",
@@ -105,6 +126,8 @@ CREATE SEQUENCE perm_script_s`)
 			"CREATE DATABASE perm_script_db",
 			"CREATE ROLE perm_script_role",
 			"ALTER SYSTEM SET work_mem = '1MB'",
+			"SELECT pg_catalog.lo_create(0)",
+			"SELECT pg_catalog.lo_from_bytea(0, '\\x00')",
 		} {
 			_, err := conn.Exec(ctx, statement)
 			require.True(t, isSQLState(err, "42501"), "%s: %v", statement, err)
@@ -202,6 +225,7 @@ DROP TABLE IF EXISTS perm_script_public;
 DROP SEQUENCE IF EXISTS perm_script_public_s;
 DROP FUNCTION IF EXISTS perm_script_definer()`)
 			require.NoError(t, err)
+			regrantWALEmitters(t, admin)
 			dropScriptRoles(t, admin)
 		})
 		_, err := admin.Exec(ctx, `CREATE TABLE perm_script_public (a int);
@@ -215,10 +239,10 @@ CREATE FUNCTION perm_script_definer() RETURNS int LANGUAGE sql SECURITY DEFINER 
 		code, out := runMonitoringScript(t, pg)
 		require.Equal(t, 0, code, out)
 		require.Contains(t, out, scriptRole+", like every role, can write outside a read-only transaction")
+		require.Contains(t, out, "revoked EXECUTE on pg_catalog.lo_create(oid) from PUBLIC")
 		for _, fix := range []string{
 			"REVOKE TEMPORARY ON DATABASE app FROM PUBLIC;",
 			"REVOKE CREATE ON DATABASE app FROM PUBLIC;",
-			"REVOKE EXECUTE ON FUNCTION pg_catalog.lo_create(oid)",
 			"REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.perm_script_public FROM PUBLIC;",
 			"REVOKE USAGE, UPDATE ON SEQUENCE public.perm_script_public_s FROM PUBLIC;",
 			"REVOKE EXECUTE ON FUNCTION public.perm_script_definer() FROM PUBLIC;",
@@ -253,31 +277,169 @@ CREATE FUNCTION perm_script_definer() RETURNS int LANGUAGE sql SECURITY DEFINER 
 	})
 }
 
+// INT-PERM-015: a run warns about every other database the role can connect
+// to, because PUBLIC may let it create large objects or emit WAL messages
+// there, and the warning stops once the connection is revoked. The revokes are
+// per database, so this warning is what names where the script runs next.
+func TestPerm_INT_PERM_015_ScriptWarnsAboutOtherDatabases(t *testing.T) {
+	ForEach(t, func(t *testing.T, pg *PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "app", RoleSuperuser)
+		dropScriptRoles(t, admin)
+		t.Cleanup(func() { dropScriptRoles(t, admin) })
+		_, err := admin.Exec(ctx, "DROP DATABASE IF EXISTS perm_script_other")
+		require.NoError(t, err)
+		// CREATE DATABASE cannot run in a transaction block, so it is sent alone.
+		// A new database grants CONNECT to PUBLIC, so the role can connect to it.
+		_, err = admin.Exec(ctx, "CREATE DATABASE perm_script_other")
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, err := admin.Exec(context.Background(), "DROP DATABASE IF EXISTS perm_script_other")
+			require.NoError(t, err)
+		})
+		warning := scriptRole + " can connect to perm_script_other, where PUBLIC may still let it create large objects or emit WAL messages"
+
+		code, out := runMonitoringScript(t, pg)
+		require.Equal(t, 0, code, out)
+		require.Contains(t, out, warning)
+
+		_, err = admin.Exec(ctx, "REVOKE CONNECT ON DATABASE perm_script_other FROM PUBLIC")
+		require.NoError(t, err)
+		code, out = runMonitoringScript(t, pg)
+		require.Equal(t, 0, code, out)
+		require.NotContains(t, out, "can connect to perm_script_other")
+	})
+}
+
 // INT-PERM-010: the script runs as a superuser in a database another role
 // may own. A schema of that role listed first in the database's search_path
-// cannot put its own functions in place of the built-ins the script calls.
+// cannot put its own functions in place of the built-ins the script calls,
+// nor its own = and <> operators in place of the comparisons of the password
+// and the tier flags, which run before the script pins its search_path.
 func TestPerm_INT_PERM_010_ScriptIgnoresDatabaseSearchPath(t *testing.T) {
 	ForEach(t, func(t *testing.T, pg *PG) {
 		pg.Lock(t)
 		ctx := context.Background()
 		admin := pg.Pool(t, "app", RoleSuperuser)
 		dropScriptRoles(t, admin)
+		t.Cleanup(func() { regrantWALEmitters(t, admin) })
 		t.Cleanup(func() {
 			_, err := admin.Exec(context.Background(), `ALTER DATABASE app RESET search_path;
 DROP SCHEMA IF EXISTS perm_hijack CASCADE`)
 			require.NoError(t, err)
 			dropScriptRoles(t, admin)
 		})
+		// The operators record what the script compares, and answer as the
+		// built-ins would, only in the psql session the script runs in. Every
+		// other session of the database, this test's included, sees the
+		// built-in answers.
 		_, err := admin.Exec(ctx, `CREATE SCHEMA perm_hijack;
 CREATE FUNCTION perm_hijack.current_setting(text) RETURNS text LANGUAGE plpgsql
   AS $$BEGIN RAISE EXCEPTION 'hijacked'; END$$;
 CREATE FUNCTION perm_hijack.quote_ident(text) RETURNS text LANGUAGE plpgsql
   AS $$BEGIN RAISE EXCEPTION 'hijacked'; END$$;
+CREATE TABLE perm_hijack.seen (call text);
+CREATE FUNCTION perm_hijack.hijacked_eq(text, text) RETURNS boolean LANGUAGE plpgsql
+  AS $$BEGIN
+    IF pg_catalog.current_setting('application_name') OPERATOR(pg_catalog.=) 'psql' THEN
+      INSERT INTO perm_hijack.seen VALUES (pg_catalog.concat_ws(' ', '=', $1, $2));
+      RETURN true;
+    END IF;
+    RETURN $1 OPERATOR(pg_catalog.=) $2;
+  END$$;
+CREATE FUNCTION perm_hijack.hijacked_ne(text, text) RETURNS boolean LANGUAGE plpgsql
+  AS $$BEGIN
+    IF pg_catalog.current_setting('application_name') OPERATOR(pg_catalog.=) 'psql' THEN
+      INSERT INTO perm_hijack.seen VALUES (pg_catalog.concat_ws(' ', '<>', $1, $2));
+      RETURN true;
+    END IF;
+    RETURN $1 OPERATOR(pg_catalog.<>) $2;
+  END$$;
+CREATE OPERATOR perm_hijack.= (LEFTARG = text, RIGHTARG = text, PROCEDURE = perm_hijack.hijacked_eq);
+CREATE OPERATOR perm_hijack.<> (LEFTARG = text, RIGHTARG = text, PROCEDURE = perm_hijack.hijacked_ne);
 ALTER DATABASE app SET search_path = perm_hijack, pg_catalog, public`)
 		require.NoError(t, err)
 
 		code, out := runMonitoringScript(t, pg, "tier1=1", "harden_public=1")
 		require.Equal(t, 0, code, out)
 		require.NotContains(t, out, "hijacked")
+		var calls int
+		require.NoError(t, admin.QueryRow(ctx, "SELECT count(*) FROM perm_hijack.seen").Scan(&calls))
+		require.Zero(t, calls, "the script compared values through the database owner's operators")
 	})
+}
+
+// scriptTierGrants reports whether the script role holds the tier 1 read
+// privilege and the tier 2 signal privilege.
+func scriptTierGrants(t *testing.T, admin *pgxpool.Pool) (readAll, signal bool) {
+	t.Helper()
+	require.NoError(t, admin.QueryRow(context.Background(), `SELECT pg_has_role($1::name, 'pg_read_all_data', 'MEMBER'),
+       pg_has_role($1::name, 'pg_signal_backend', 'MEMBER')`, scriptRole).Scan(&readAll, &signal))
+	return readAll, signal
+}
+
+// INT-PERM-011: the script grants a tier only for the value 1. tier1=0 and
+// tier1=false grant nothing, and tier2=1 without tier1=1 is refused before
+// the script changes anything.
+func TestPerm_INT_PERM_011_ScriptTierFlagsNeedValueOne(t *testing.T) {
+	ForEach(t, func(t *testing.T, pg *PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "app", RoleSuperuser)
+		dropScriptRoles(t, admin)
+		t.Cleanup(func() { dropScriptRoles(t, admin) })
+		t.Cleanup(func() { regrantLargeObjects(t, admin) })
+		t.Cleanup(func() { regrantWALEmitters(t, admin) })
+
+		for _, flags := range [][]string{{"tier1=0"}, {"tier1=false", "tier2=0"}} {
+			dropScriptRoles(t, admin)
+			code, out := runMonitoringScript(t, pg, flags...)
+			require.Equal(t, 0, code, "%v: %s", flags, out)
+			readAll, signal := scriptTierGrants(t, admin)
+			require.False(t, readAll, "%v", flags)
+			require.False(t, signal, "%v", flags)
+		}
+
+		dropScriptRoles(t, admin)
+		code, out := runMonitoringScript(t, pg, "tier1=1")
+		require.Equal(t, 0, code, out)
+		readAll, signal := scriptTierGrants(t, admin)
+		require.True(t, readAll)
+		require.False(t, signal)
+
+		dropScriptRoles(t, admin)
+		code, out = runMonitoringScript(t, pg, "tier2=1")
+		require.Equal(t, 3, code, out)
+		require.Contains(t, out, "tier2=1 needs tier1=1")
+		var exists bool
+		require.NoError(t, admin.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)", scriptRole).Scan(&exists))
+		require.False(t, exists, "a refused run must not create the role")
+	})
+}
+
+// regrantLargeObjects gives PUBLIC back the large-object creators that a run
+// of the script without harden_public revokes.
+func regrantLargeObjects(t *testing.T, admin *pgxpool.Pool) {
+	t.Helper()
+	_, err := admin.Exec(context.Background(), `GRANT EXECUTE ON FUNCTION pg_catalog.lo_create(oid), pg_catalog.lo_creat(integer),
+  pg_catalog.lo_from_bytea(oid, bytea) TO PUBLIC`)
+	require.NoError(t, err)
+}
+
+// regrantWALEmitters gives PUBLIC back EXECUTE on every pg_logical_emit_message
+// overload that a run of the script revokes. The overloads differ by
+// PostgreSQL major (19 adds an argument), so the list comes from the catalog.
+func regrantWALEmitters(t *testing.T, admin *pgxpool.Pool) {
+	t.Helper()
+	_, err := admin.Exec(context.Background(), `DO $$
+DECLARE emitter text;
+BEGIN
+  FOR emitter IN SELECT oid::regprocedure::text FROM pg_catalog.pg_proc
+                 WHERE proname = 'pg_logical_emit_message'
+                   AND pronamespace = 'pg_catalog'::regnamespace LOOP
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO PUBLIC', emitter);
+  END LOOP;
+END $$`)
+	require.NoError(t, err)
 }

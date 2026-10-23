@@ -16,7 +16,12 @@ import (
 	"time"
 )
 
-const deployBootstrapToken = "dev-token"
+const (
+	deployBootstrapToken = "dev-token"
+	// The example stack has no default for these: compose stops without them.
+	deployDBPassword         = "deploy-db-password"
+	deployMonitoringPassword = "deploy-monitoring-password"
+)
 
 // TestFull_DeployExampleStack is SYS-DEPLOY-001: the checked-in deployment
 // example must start unedited, become healthy, and expose one recently
@@ -37,6 +42,8 @@ func TestFull_DeployExampleStack(t *testing.T) {
 		fmt.Sprintf("PGLENS_POSTGRES_PORT=%d", postgresPort),
 		fmt.Sprintf("PGLENS_AGENT_HEALTHZ_PORT=%d", agentPort),
 		fmt.Sprintf("PGLENS_BOOTSTRAP_TOKEN=%s", deployBootstrapToken),
+		fmt.Sprintf("PGLENS_DB_PASSWORD=%s", deployDBPassword),
+		fmt.Sprintf("PGLENS_MONITORING_PASSWORD=%s", deployMonitoringPassword),
 	)
 	compose := func(ctx context.Context, args ...string) ([]byte, error) {
 		full := append([]string{"compose", "-p", project, "-f", "deploy/docker-compose.yml"}, args...)

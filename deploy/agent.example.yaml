@@ -8,8 +8,9 @@ push_interval: 15s # Envelope upload cadence; default is 15s.
 host:
   enabled: true # Collect host metrics for local targets; default is true.
   interval: 30s # Host scrape cadence; default is 30s.
-  proc_path: /proc # procfs path; use /host/proc when the container mounts the host tree.
-  sys_path: /sys # sysfs path; use /host/sys when the container mounts the host tree.
+  # proc_path and sys_path are left unset so that the agent reads HOST_PROC and
+  # HOST_SYS: the compose stack points them at the host mounts, and a host
+  # install falls back to /proc and /sys. A path set here overrides both.
 
 buffer:
   path: /var/lib/pglens/buffer # Durable WAL-like sample buffer directory.
@@ -22,13 +23,13 @@ commands:
 
 targets:
   - name: timescaledb
-    dsn: postgres://pglens:pglens@timescaledb:5432/pglens?sslmode=disable # Replace for production.
+    dsn: postgres://pglens_monitor@timescaledb:5432/postgres?sslmode=disable # Read-only role from deploy/sql/monitoring_user.sql; password from PGPASSWORD. Replace for production.
     cluster_name: pglens-example # Optional stable cluster label for this target.
     host_local: false # Host metrics are unavailable for a remote target.
     allow_explain_analyze: false # Keep false unless the target policy explicitly permits it.
     allow_signal: false # Keep false unless pg_signal_backend and operator approval are present.
     databases:
-      include: ["^pglens$"] # Monitor only this database in the self-contained example.
+      include: ["^postgres$"] # Monitor only this database in the self-contained example; pglens is the server's storage and is never monitored.
       exclude: ["^template\\d$"] # Never monitor PostgreSQL template databases.
       max: 10 # Maximum databases discovered per target; 0 means the default.
 

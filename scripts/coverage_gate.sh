@@ -111,14 +111,15 @@ for pkg in $sorted_keys; do
   covered=${pkg_covered["$pkg"]:-0}
   # Determine if package exists/has statements
   if [ "$total" -eq 0 ]; then
-    # Check if floor exists -> skip, not failed (package not yet implemented)
+    # A floor whose package has no statements in the profile means the package
+    # was renamed, moved out of ./internal/..., or lost its tests. Its floor
+    # would stop enforcing without a sign, so that fails instead of skipping.
     if [[ -v FLOORS["$pkg"] ]]; then
-      # Skip packages that don't exist yet or have no statements
-      continue
-    else
-      # If not in FLOORS and no statements, still skip (e.g., internal with no code)
-      continue
+      failing_lines+=("$(printf "%-50s %5s   (floor %s%%) no statements in the profile  FAIL" "$pkg" "-" "${FLOORS["$pkg"]}")")
+      failed=1
     fi
+    # Without a floor, a package with no statements is not one this gate measures.
+    continue
   fi
   # Compute percentage
   pct=$(awk "BEGIN {printf \"%.1f\", $covered*100/$total}")

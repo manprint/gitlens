@@ -105,11 +105,20 @@ export PGLENS_MONITORING_PASSWORD='<password>'
 psql "$PGLENS_DSN" -v pglens_password="$PGLENS_MONITORING_PASSWORD" \
   -v dbname=postgres -f deploy/sql/monitoring_user.sql
 
-# 2. Configure the agent, enable the web interface, and build the local images
-# Keep the defaults for the self-contained example, or edit
-# deploy/agent.example.yaml with your target DSN.
-export PGLENS_BOOTSTRAP_TOKEN=dev-token
-export PGLENS_UI_PASSWORD=dev-password
+# 2. Set the example's secrets, enable the web interface, and build the local images
+# The example has no default secrets and refuses to start without them. Choose
+# each value and reuse it on later runs: an existing database keeps the
+# passwords it was first started with. PGLENS_MONITORING_PASSWORD, exported in
+# step 1 in this same shell, is also the password of the monitoring role the
+# example creates. The script runs in every database of its cluster, because it
+# revokes PUBLIC's large-object and WAL-message grants per database.
+# PGLENS_DB_PASSWORD goes into the server's DSN as it is, so use only letters,
+# digits and - _ . ~ in it: a space or / is rejected, @ moves the host, and % starts
+# an escape. To monitor your own instance instead, edit deploy/agent.example.yaml
+# with your target DSN.
+export PGLENS_DB_PASSWORD='<superuser-password>'
+export PGLENS_BOOTSTRAP_TOKEN='<token>'
+export PGLENS_UI_PASSWORD='<ui-password>'
 make build-images
 docker compose -f deploy/docker-compose.yml up -d
 
@@ -184,6 +193,15 @@ for the complete matrix and downgrade procedure.
 **Docker Compose (recommended):**
 
 ```sh
+# The example stacks take their secrets from the environment and refuse to
+# start without them. Reuse the values of an earlier run: an existing database
+# keeps the passwords it was first started with. The minimal TimescaleDB
+# service needs only PGLENS_DB_PASSWORD. That password goes into the server's
+# DSN as it is, so use only letters, digits and - _ . ~ in it: a space or / is
+# rejected, @ moves the host, and % starts an escape.
+export PGLENS_DB_PASSWORD='<superuser-password>'
+export PGLENS_MONITORING_PASSWORD='<monitoring-password>'
+export PGLENS_BOOTSTRAP_TOKEN='<token>'
 docker compose -f deploy/docker-compose.yml up -d
 # or the minimal TimescaleDB service
 docker compose -f deploy/compose/timescaledb.yml up -d
@@ -205,9 +223,11 @@ interface into that binary.
 
 **Binary:**
 
+Export `PGLENS_DB_PASSWORD` and `PGLENS_BOOTSTRAP_TOKEN` first, as in the Docker Compose commands above. The password goes into the DSN as it is, so the same rule applies: use only letters, digits and - _ . ~ in it.
+
 ```sh
-PGLENS_DSN=postgres://pglens:pglens@localhost:5432/pglens?sslmode=disable \
-PGLENS_BOOTSTRAP_TOKEN=dev-token \
+PGLENS_DSN=postgres://pglens:$PGLENS_DB_PASSWORD@localhost:5432/pglens?sslmode=disable \
+PGLENS_BOOTSTRAP_TOKEN=$PGLENS_BOOTSTRAP_TOKEN \
 PGLENS_LISTEN=:8080 \
 ./bin/pglens-server
 ```

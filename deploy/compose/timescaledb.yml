@@ -2,11 +2,18 @@ services:
   timescaledb:
     image: timescale/timescaledb:2.31.0-pg17
     environment:
-      POSTGRES_PASSWORD: pglens
+      # No default: the superuser password must be chosen per installation.
+      POSTGRES_PASSWORD: ${PGLENS_DB_PASSWORD:?set PGLENS_DB_PASSWORD}
       POSTGRES_USER: pglens
       POSTGRES_DB: pglens
     ports:
-      - "5432:5432"
+      # Loopback only: a published superuser port must not face the network.
+      # Publishing it on another address exposes the superuser port, so change
+      # this line only with a deliberate network control in place, such as a
+      # firewall rule. An override file must replace the list with
+      # "ports: !override" instead: a plain override adds its binding to this
+      # one, and the two conflict on the port.
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
 

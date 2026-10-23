@@ -36,26 +36,19 @@ type TestingT interface {
 // the loop's final scheduling slice has not run yet.
 const settleTimeout = 2 * time.Second
 
-// ignoredPrefixes are goroutines no test controls: the runtime's own
-// bookkeeping, the testing package's, and the pools and background workers of
-// dependencies that are intentionally process-lifetime (pgx's health checker,
-// net/http's idle connection reaper, the race detector's own).
-var ignoredPrefixes = []string{
+// ignoredCreators name the functions that start goroutines for the life of the
+// process, which no test can stop: the runtime's own workers, the signal
+// dispatcher, the testing package's runners, and the read and write loops that
+// net/http keeps on a persistent connection, which it reaps on its own
+// schedule. A goroutine is ignored only when its creation site names one of
+// them. The frames it is parked in are never matched: a sleep, a WaitGroup, a
+// mutex and a socket read all park under runtime or net paths, so matching
+// those hid exactly the leaks this package exists to catch.
+var ignoredCreators = []string{
 	"runtime.",
-	"runtime/",
 	"testing.",
 	"os/signal.",
-	"created by runtime",
-	// net/http keeps idle transport goroutines alive between requests by
-	// design; they are reaped on their own schedule, not on ours.
-	"net/http.(*persistConn)",
-	"net/http.(*Transport)",
-	"internal/poll.runtime_pollWait",
-	// The Go runtime's own trace/GC helpers.
-	"runtime.gcBgMarkWorker",
-	"runtime.bgsweep",
-	"runtime.bgscavenge",
-	"runtime.forcegchelper",
+	"net/http.(*Transport).dialConn",
 }
 
 // Check snapshots the goroutines running now and registers a t.Cleanup that
@@ -107,11 +100,11 @@ func verify(t TestingT, before map[string]int) {
 	}
 }
 
-// snapshot maps each goroutine's identifying stack (its creation site plus
-// its current top frame) to how many goroutines currently share it. Counting
-// rather than collecting identities keeps the check meaningful for worker
-// pools, where the individual goroutines are interchangeable but the
-// population size is exactly what must return to its starting value.
+// snapshot maps each goroutine's identity (see key) to how many goroutines
+// currently share it. Counting rather than collecting identities keeps the
+// check meaningful for worker pools, where the individual goroutines are
+// interchangeable but the population size is exactly what must return to its
+// starting value.
 func snapshot() map[string]int {
 	out := make(map[string]int)
 	for _, stack := range stacks() {
@@ -136,6 +129,14 @@ func diff(before, after map[string]int) []string {
 
 // key reduces a full stack to the lines that identify what the goroutine is,
 // independent of where in its loop it happens to be parked.
+//
+// The creation line keeps its " in goroutine N" suffix, which creatorOf drops.
+// That is deliberate. The ignore rule names the function that starts a
+// goroutine, whichever goroutine ran it, while the identity also separates
+// goroutines started by different parents. A goroutine that replaces an
+// exited one of the same function, from a new parent, then counts as growth;
+// without the suffix it would be netted against the exited one and go
+// unreported.
 func key(stack string) string {
 	lines := strings.Split(strings.TrimSpace(stack), "\n")
 	if len(lines) == 0 {
@@ -155,12 +156,26 @@ func key(stack string) string {
 }
 
 func ignored(stack string) bool {
-	for _, prefix := range ignoredPrefixes {
-		if strings.Contains(stack, prefix) {
+	creator := creatorOf(stack)
+	for _, prefix := range ignoredCreators {
+		if strings.HasPrefix(creator, prefix) {
 			return true
 		}
 	}
 	return false
+}
+
+// creatorOf returns the function named by a goroutine's "created by" line,
+// without the " in goroutine N" the runtime appends. It returns "" for the
+// main goroutine, which has no creator.
+func creatorOf(stack string) string {
+	for _, line := range strings.Split(stack, "\n") {
+		if rest, ok := strings.CutPrefix(line, "created by "); ok {
+			creator, _, _ := strings.Cut(rest, " in goroutine ")
+			return creator
+		}
+	}
+	return ""
 }
 
 // stacks returns one string per live goroutine.

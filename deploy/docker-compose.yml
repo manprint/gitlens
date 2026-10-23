@@ -1,17 +1,29 @@
 # Standalone example deployment. Build the images first with `make build-images`.
-# The agent monitors the same TimescaleDB service used by the server so this
-# file is self-contained; replace its target DSN for a production database.
+# The agent monitors the postgres database of the same TimescaleDB service that
+# the server stores into, so this file is self-contained. The server's storage
+# database, pglens, is never monitored. The agent and the server never write to
+# a monitored database, but the one-time init (sql/init_monitoring_user.sh)
+# changes PUBLIC grants in every database of the service, the monitored one
+# included. Replace the agent's target DSN for a production database.
 services:
   timescaledb:
     image: timescale/timescaledb:2.31.0-pg17
     environment:
       POSTGRES_DB: ${PGLENS_DB_NAME:-pglens}
       POSTGRES_USER: ${PGLENS_DB_USER:-pglens}
-      POSTGRES_PASSWORD: ${PGLENS_DB_PASSWORD:-pglens}
+      # No default: the superuser password must be chosen per installation.
+      POSTGRES_PASSWORD: ${PGLENS_DB_PASSWORD:?set PGLENS_DB_PASSWORD}
+      # Password of pglens_monitor, the read-only role the agent connects as.
+      PGLENS_MONITORING_PASSWORD: ${PGLENS_MONITORING_PASSWORD:?set PGLENS_MONITORING_PASSWORD}
     ports:
-      - "${PGLENS_POSTGRES_PORT:-5432}:5432"
+      # Loopback only: a published superuser port must not face the network.
+      - "127.0.0.1:${PGLENS_POSTGRES_PORT:-5432}:5432"
     volumes:
       - pglens-db-data:/var/lib/postgresql/data
+      # The shipped monitoring script, run once on first boot by the wrapper
+      # below. The superuser above owns the storage; the agent never uses it.
+      - ./sql/monitoring_user.sql:/opt/pglens/monitoring_user.sql:ro
+      - ./sql/init_monitoring_user.sh:/docker-entrypoint-initdb.d/01-monitoring.sh:ro
     healthcheck:
       # -h 127.0.0.1, so the probe cannot pass while the entrypoint's
       # temporary initdb server (socket only, `listen_addresses=''`) is the
@@ -32,12 +44,17 @@ services:
       timescaledb:
         condition: service_healthy
     environment:
-      # Required database connection; the server runs migrations on startup.
-      PGLENS_DSN: ${PGLENS_DSN:-postgres://pglens:pglens@timescaledb:5432/pglens?sslmode=disable}
+      # The server's own storage: it runs migrations on startup, so this DSN is
+      # not read from the host environment. A PGLENS_DSN exported for another
+      # purpose would otherwise send the migrations to that database. The
+      # password is spliced in as it is, so use only letters, digits and
+      # - _ . ~ in it: a space or / is rejected, @ moves the host, and % starts
+      # an escape. Edit this line to use another database.
+      PGLENS_DSN: postgres://pglens:${PGLENS_DB_PASSWORD:?set PGLENS_DB_PASSWORD}@timescaledb:5432/pglens?sslmode=disable
       # Optional bind address inside the container (default :8080).
       PGLENS_LISTEN: ${PGLENS_LISTEN:-:8080}
-      # Required outside this local example; replace dev-token in production.
-      PGLENS_BOOTSTRAP_TOKEN: ${PGLENS_BOOTSTRAP_TOKEN:-dev-token}
+      # Required: the token is the API and ingest bearer, so no default is shipped.
+      PGLENS_BOOTSTRAP_TOKEN: ${PGLENS_BOOTSTRAP_TOKEN:?set PGLENS_BOOTSTRAP_TOKEN}
       # Optional secret-file alternative to PGLENS_BOOTSTRAP_TOKEN.
       PGLENS_BOOTSTRAP_TOKEN_FILE: ${PGLENS_BOOTSTRAP_TOKEN_FILE:-}
       # The interface is served on the same port as the API; set this password to use it.
@@ -58,7 +75,16 @@ services:
       # Time before a queued command expires (default 5m).
       PGLENS_COMMAND_TTL: ${PGLENS_COMMAND_TTL:-5m}
     ports:
-      - "${PGLENS_HTTP_PORT:-8080}:8080"
+      - "127.0.0.1:${PGLENS_HTTP_PORT:-8080}:8080"
+    # The services need no capability, write only to their volume and to a
+    # memory /tmp, and may not gain privileges through a setuid binary.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD", "/usr/local/bin/pglens-server", "--healthcheck"]
       interval: 5s
@@ -76,16 +102,33 @@ services:
     environment:
       # These two values override the sample file without changing it.
       PGLENS_SERVER_URL: ${PGLENS_SERVER_URL:-http://pglens-server:8080}
-      PGLENS_BOOTSTRAP_TOKEN: ${PGLENS_BOOTSTRAP_TOKEN:-dev-token}
+      PGLENS_BOOTSTRAP_TOKEN: ${PGLENS_BOOTSTRAP_TOKEN:?set PGLENS_BOOTSTRAP_TOKEN}
       PGLENS_CONFIG: /etc/pglens/agent.yaml
+      # agent.example.yaml names pglens_monitor without a password; libpq and
+      # pgx read it from here.
+      PGPASSWORD: ${PGLENS_MONITORING_PASSWORD:?set PGLENS_MONITORING_PASSWORD}
       PGLENS_HEALTHZ_LISTEN: ${PGLENS_HEALTHZ_LISTEN:-:9187}
+      # Host metrics come from the read-only host mounts below. Without these
+      # the agent reads the container's own /proc and /sys.
+      HOST_PROC: /host/proc
+      HOST_SYS: /host/sys
     volumes:
       - pglens-agent-data:/var/lib/pglens
       - ./agent.example.yaml:/etc/pglens/agent.yaml:ro
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
     ports:
-      - "${PGLENS_AGENT_HEALTHZ_PORT:-9187}:9187"
+      # Loopback only: the healthz JSON includes the agent last error.
+      - "127.0.0.1:${PGLENS_AGENT_HEALTHZ_PORT:-9187}:9187"
+    # The services need no capability, write only to their volume and to a
+    # memory /tmp, and may not gain privileges through a setuid binary.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD", "/usr/local/bin/pglens-agent", "--healthcheck"]
       interval: 5s
