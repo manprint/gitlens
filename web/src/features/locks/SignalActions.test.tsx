@@ -139,6 +139,15 @@ describe('SignalActions', () => {
     expect(screen.queryByRole('button', { name: /terminate all/i })).not.toBeInTheDocument()
   })
 
+  it('UI-LOCK-054 says signals remain subject to allow_signal on the target', () => {
+    renderActions()
+
+    expect(
+      screen.getByText('Signals remain subject to allow_signal on the target.'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Terminate backend/ })).toBeEnabled()
+  })
+
   it('keeps both confirmation dialogs accessible', async () => {
     renderActions()
     vi.useRealTimers()

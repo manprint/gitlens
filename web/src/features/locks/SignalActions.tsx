@@ -112,7 +112,6 @@ export function SignalActions({
     terminate: terminateCommand,
   }
   const selectedHandle = openKind ? handles[openKind] : null
-  const policyClosed = node.allow_signal === false
   const belowT2 = currentTier !== 'T2'
   const unavailable = !isClientBackend(node)
 
@@ -135,15 +134,11 @@ export function SignalActions({
 
   const buttons = (
     <div className="mt-3 flex flex-wrap gap-2" aria-label={`Signal actions for PID ${pidLabel}`}>
-      {actionButton(
-        'cancel',
-        () => setOpenKind('cancel'),
-        belowT2 || policyClosed || pid === null || sampleStale,
-      )}
+      {actionButton('cancel', () => setOpenKind('cancel'), belowT2 || pid === null || sampleStale)}
       {actionButton(
         'terminate',
         () => setOpenKind('terminate'),
-        belowT2 || policyClosed || pid === null || sampleStale,
+        belowT2 || pid === null || sampleStale,
       )}
     </div>
   )
@@ -154,14 +149,14 @@ export function SignalActions({
         <NotPermitted required="T2" current={currentTier}>
           {actionButton('cancel', () => setOpenKind('cancel'), true)}
         </NotPermitted>
-      ) : policyClosed ? (
-        <div role="status" className="border-muted bg-muted/30 mt-3 p-3 text-sm">
-          <p>Signal actions are disabled because the target reports allow_signal=false.</p>
-          {buttons}
-        </div>
       ) : (
         <>
           {buttons}
+          {/* The locks response does not carry the target's allow_signal setting, so
+              the agent's refusal arrives as the command result, not as a disabled button. */}
+          <p className="text-muted-foreground mt-1 text-xs">
+            Signals remain subject to allow_signal on the target.
+          </p>
           {sampleStale ? (
             <p className="text-muted-foreground mt-1 text-xs">
               Signal actions are disabled until a fresh lock sample arrives.
