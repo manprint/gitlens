@@ -6,9 +6,10 @@ import {
 } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 
-import { client, type ApiFailure, toApiFailure } from './client'
+import { client, parseLargeIntStrings, type ApiFailure, toApiFailure } from './client'
 import type { AlertRule } from './alerts'
 import type { paths } from './generated'
+import type { Schemas } from './types'
 import { qk } from './keys'
 import { REFRESH, type RefreshPolicy } from './policy'
 
@@ -324,10 +325,17 @@ export function useInstanceBloat(
 export function useInstanceCommandAudit(id: string) {
   return useApiQuery({
     policy: REFRESH.instance,
+    // The args of an audit entry carry queryid as a JSON number. Reading the
+    // body as text lets parseLargeIntStrings keep its digits, which response
+    // JSON parsing would round.
     queryFn: (signal) =>
       getApi(() =>
-        client.GET('/api/v1/instances/{id}/command-audit', { params: { path: { id } }, signal }),
-      ),
+        client.GET('/api/v1/instances/{id}/command-audit', {
+          params: { path: { id } },
+          parseAs: 'text',
+          signal,
+        }),
+      ).then((raw) => parseLargeIntStrings(raw) as Schemas['CommandAuditEntry'][]),
     queryKey: qk.instanceCommandAudit(id),
   })
 }
