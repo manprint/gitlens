@@ -25,6 +25,12 @@ const defaultAdvisorInterval = 15 * time.Minute
 // whole has no deadline, see Run.
 const advisorStepBudget = 30 * time.Second
 
+// unseenInstanceGrace is how long an instance may go unseen before its
+// findings are resolved. It is well beyond the hour an instance must be seen
+// within to be evaluated at all: an agent that pauses keeps its findings, and
+// a decommissioned instance does not keep them for ever.
+const unseenInstanceGrace = 24 * time.Hour
+
 type snapshotLoader func(context.Context, uuid.UUID, time.Time) (*Snapshot, error)
 
 // Engine evaluates registered advisor rules and persists current findings.
@@ -238,6 +244,11 @@ func (e *Engine) Run(ctx context.Context) error {
 			return errors.Join(append(errs, ctx.Err())...)
 		}
 	}
+	stepCtx, cancel = e.step(ctx)
+	if err := e.store.ResolveUnseen(stepCtx, now.Add(-unseenInstanceGrace), now); err != nil {
+		errs = append(errs, err)
+	}
+	cancel()
 	stepCtx, cancel = e.step(ctx)
 	if err := e.store.PurgeResolved(stepCtx, now.Add(-90*24*time.Hour)); err != nil {
 		errs = append(errs, err)

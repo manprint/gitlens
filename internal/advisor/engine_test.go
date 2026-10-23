@@ -19,6 +19,8 @@ type engineTestStore struct {
 	ranRules                                   []string
 	seen                                       []string
 	resolved                                   bool
+	unseenBefore                               time.Time
+	unseenCalls                                int
 	purged                                     bool
 	activeErr, upsertErr, resolveErr, purgeErr error
 }
@@ -33,6 +35,10 @@ func (s *engineTestStore) UpsertFinding(_ context.Context, f Finding, _ time.Tim
 func (s *engineTestStore) ResolveAbsent(_ context.Context, _ uuid.UUID, rules, seen []string, _ time.Time) error {
 	s.ranRules, s.seen, s.resolved = append([]string(nil), rules...), append([]string(nil), seen...), true
 	return s.resolveErr
+}
+func (s *engineTestStore) ResolveUnseen(_ context.Context, before, _ time.Time) error {
+	s.unseenBefore, s.unseenCalls = before, s.unseenCalls+1
+	return nil
 }
 func (s *engineTestStore) PurgeResolved(context.Context, time.Time) error {
 	s.purged = true
@@ -371,6 +377,16 @@ func TestRun_PassTimeIsNotBoundedByOneStep(t *testing.T) {
 	require.NoError(t, e.Run(context.Background()))
 	require.Len(t, store.findings, 10)
 	require.True(t, store.purged)
+}
+
+// TestRun_ResolvesFindingsOfInstancesGoneQuiet: a pass sweeps the findings of
+// the instances not seen within the grace period, which the per-instance pass
+// never reaches.
+func TestRun_ResolvesFindingsOfInstancesGoneQuiet(t *testing.T) {
+	e, store, _ := runWithRules(t)
+	require.NoError(t, e.Run(context.Background()))
+	require.Equal(t, 1, store.unseenCalls)
+	require.Equal(t, time.Unix(100, 0).Add(-unseenInstanceGrace), store.unseenBefore)
 }
 
 // TestRun_UpsertFailureStillResolvesAbsentFindings — aborting on a failed

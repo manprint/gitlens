@@ -161,3 +161,52 @@ func TestINTADV006_SameDatabaseFindingOnTwoInstancesStaysSeparate(t *testing.T) 
 		e.Stop()
 	})
 }
+
+// TestINTADV010_MutedAndSilentFindingsResolve — a muted finding stayed muted
+// after its condition cleared, and the findings of an instance that went quiet
+// stayed open for ever. A muted finding whose condition still holds stays muted,
+// and an active instance is never swept.
+func TestINTADV010_MutedAndSilentFindingsResolve(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		pool := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		_, err := pool.Exec(ctx, advisorIntegrationSchema)
+		require.NoError(t, err)
+		now := time.Now().UTC()
+		id := setupAdvisorInstance(t, pool, now)
+		quiet := uuid.New()
+		_, err = pool.Exec(ctx, `INSERT INTO instances(instance_id,cluster_id,addr,port,pg_version,role,perm_tier,last_seen) VALUES ($1,$2,'advisor-gone',5432,180000,'primary','T0',$3)`, quiet, int64(7001), now.Add(-48*time.Hour))
+		require.NoError(t, err)
+		st := NewPgStore(pool)
+		finding := func(instance uuid.UUID, object string) Finding {
+			return Finding{RuleID: "txn.long_running", Severity: SeverityWarning, State: StateOpen, Scope: ScopeInstance, InstanceID: &instance, ObjectName: object, Title: "t", Detail: "d"}
+		}
+		upsertMuted := func(f Finding) {
+			require.NoError(t, st.UpsertFinding(ctx, f, now))
+			_, err := pool.Exec(ctx, `UPDATE findings SET state='muted', muted_until=$2 WHERE finding_id=$1`, f.ID(), now.Add(time.Hour))
+			require.NoError(t, err)
+		}
+		state := func(f Finding) string {
+			var s string
+			require.NoError(t, pool.QueryRow(ctx, `SELECT state FROM findings WHERE finding_id=$1`, f.ID()).Scan(&s))
+			return s
+		}
+
+		cleared, held := finding(id, "cleared"), finding(id, "held")
+		upsertMuted(cleared)
+		upsertMuted(held)
+		require.NoError(t, st.ResolveAbsent(ctx, id, []string{"txn.long_running"}, []string{held.ID()}, now))
+		require.Equal(t, "resolved", state(cleared), "a muted finding whose condition cleared is resolved")
+		require.Equal(t, "muted", state(held), "a muted finding whose condition still holds stays muted")
+
+		goneMuted, goneOpen, active := finding(quiet, "muted-gone"), finding(quiet, "open-gone"), finding(id, "still-open")
+		upsertMuted(goneMuted)
+		require.NoError(t, st.UpsertFinding(ctx, goneOpen, now))
+		require.NoError(t, st.UpsertFinding(ctx, active, now))
+		require.NoError(t, st.ResolveUnseen(ctx, now.Add(-unseenInstanceGrace), now))
+		require.Equal(t, "resolved", state(goneMuted), "the muted finding of an instance gone quiet is resolved")
+		require.Equal(t, "resolved", state(goneOpen), "the open finding of an instance gone quiet is resolved")
+		require.Equal(t, "open", state(active), "an instance seen within the grace period is not swept")
+	})
+}
