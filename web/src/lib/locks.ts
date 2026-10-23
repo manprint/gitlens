@@ -15,6 +15,8 @@ export interface BlockingTreeNode {
   node: LockNode
   children: BlockingTreeNode[]
   cycle?: boolean
+  /** Set on a childless entry for a session already shown elsewhere in the forest. */
+  reference?: BlockingTreeNode
 }
 
 export type BlockingTree = BlockingTreeNode[]
@@ -43,10 +45,12 @@ function fallbackWaitDuration(node: LockNode): number {
 }
 
 /**
- * Build a blocking forest in which each session appears once. A queued waiter
- * is blocked by everyone ahead of it, so attaching it under every blocker would
- * repeat whole subtrees and grow as 2^N. It is attached under the first blocker
- * that reaches it instead, and a repeat along its own path is a cycle marker.
+ * Build a blocking forest in which each session is expanded once. A queued
+ * waiter is blocked by everyone ahead of it, so attaching it under every blocker
+ * would repeat whole subtrees and grow as 2^N. It is expanded under the first
+ * blocker that reaches it. A blocker that does not reach it through its own
+ * subtree gets a childless reference, so the edge is still shown and the root
+ * still counts the session. A repeat along its own path is a cycle marker.
  */
 export function buildBlockingTree(nodes: readonly LockNode[]): BlockingTree {
   const byPID = new Map<string, LockNode>()
@@ -56,8 +60,7 @@ export function buildBlockingTree(nodes: readonly LockNode[]): BlockingTree {
 
   const children = new Map<string, LockNode[]>()
   for (const node of nodes) {
-    for (const blocker of node.blocked_by ?? []) {
-      const blockerKey = keyOf(blocker)
+    for (const blockerKey of new Set((node.blocked_by ?? []).map(keyOf))) {
       if (!byPID.has(blockerKey)) continue
       const siblings = children.get(blockerKey) ?? []
       siblings.push(node)
@@ -65,21 +68,28 @@ export function buildBlockingTree(nodes: readonly LockNode[]): BlockingTree {
     }
   }
 
-  const placed = new Set<string>()
+  // Each placed session records the order it was placed in and its entry. A
+  // session placed at or after the start of a build lies in that build's subtree.
+  const placed = new Map<string, { index: number; tree: BlockingTreeNode }>()
   const build = (node: LockNode, path: ReadonlySet<string>): BlockingTreeNode => {
     const nodeKey = keyOf(node.pid)
     if (path.has(nodeKey)) return { cycle: true, node, children: [] }
 
-    placed.add(nodeKey)
+    const tree: BlockingTreeNode = { node, children: [] }
+    const start = placed.size
+    placed.set(nodeKey, { index: start, tree })
     const nextPath = new Set(path)
     nextPath.add(nodeKey)
-    const childNodes: BlockingTreeNode[] = []
     for (const child of children.get(nodeKey) ?? []) {
       const childKey = keyOf(child.pid)
-      if (!nextPath.has(childKey) && placed.has(childKey)) continue
-      childNodes.push(build(child, nextPath))
+      const seen = placed.get(childKey)
+      if (nextPath.has(childKey) || seen === undefined) {
+        tree.children.push(build(child, nextPath))
+      } else if (seen.index < start) {
+        tree.children.push({ node: child, children: [], reference: seen.tree })
+      }
     }
-    return { node, children: childNodes }
+    return tree
   }
 
   const hasKnownBlocker = (node: LockNode): boolean =>
@@ -108,15 +118,22 @@ export function treeDepth(tree: BlockingTree | BlockingTreeNode): number {
   return Math.max(0, ...roots.map(depthOf))
 }
 
-/** Count distinct sessions represented below the roots, excluding cycle markers. */
+/**
+ * Count distinct sessions represented below the roots, excluding cycle markers.
+ * A reference counts its session and then the sessions below that session's
+ * first entry, so a root ranks the same whichever blocker expanded the waiter.
+ */
 export function blockedCount(tree: BlockingTree | BlockingTreeNode): number {
   const roots = Array.isArray(tree) ? tree : [tree]
   const blocked = new Set<string>()
+  const visited = new Set<BlockingTreeNode>()
   const visit = (node: BlockingTreeNode): void => {
+    if (visited.has(node)) return
+    visited.add(node)
     for (const child of node.children) {
       if (child.cycle) continue
       blocked.add(keyOf(child.node.pid))
-      visit(child)
+      visit(child.reference ?? child)
     }
   }
   roots.forEach(visit)

@@ -50,6 +50,27 @@ describe('BlockingTree', () => {
     expect(screen.getByText(/no blocked sessions were present/i)).toBeInTheDocument()
   })
 
+  it('UI-LOCK-043 lists every direct blocker and marks a waiter repeated under another holder', () => {
+    render(
+      <BlockingTree
+        response={response([
+          { pid: 1, blocked_by: [] },
+          { pid: 2, blocked_by: [] },
+          { pid: 3, blocked_by: [1, 2] },
+        ])}
+        now={NOW}
+      />,
+    )
+
+    const items = screen.getAllByRole('treeitem')
+    expect(items).toHaveLength(4)
+    expect(items[1]).toHaveTextContent('PID 3')
+    expect(items[1]).toHaveTextContent('Blocked by1, 2')
+    expect(items[3]).toHaveTextContent('PID 3')
+    expect(items[3]).toHaveTextContent('Also waits on this blocker')
+    expect(items[3]).not.toHaveTextContent('Blocked by')
+  })
+
   it('UI-LOCK-041 keeps no sample distinct from sampled no contention', () => {
     render(<BlockingTree response={response([], { sampled_at: null, stale: true })} now={NOW} />)
 

@@ -60,6 +60,25 @@ describe('lock-tree derivation', () => {
     expect(blockedCount(forest)).toBe(2)
   })
 
+  it('UI-LOCK-008 keeps a waiter visible under every independent holder that blocks it', () => {
+    const forest = buildBlockingTree([lock(1), lock(2), lock(3, [1, 2])])
+
+    expect(forest.map((tree) => tree.node.pid)).toEqual([1, 2])
+    const secondRoot = forest[1]
+    expect(secondRoot?.children[0]?.node.pid).toBe(3)
+    expect(secondRoot?.children[0]?.reference).toBeDefined()
+    expect(secondRoot?.children[0]?.children).toEqual([])
+    expect(blockedCount(secondRoot ?? [])).toBe(1)
+  })
+
+  it('UI-LOCK-008 counts the sessions below a referenced waiter under the other holder', () => {
+    const forest = buildBlockingTree([lock(1), lock(2), lock(3, [1, 2]), lock(4, [3])])
+
+    expect(countEntries(forest)).toBe(5)
+    expect(blockedCount(forest[1] ?? [])).toBe(2)
+    expect(rankRoots(forest).map((tree) => tree.node.pid)).toEqual([1, 2])
+  })
+
   it('UI-LOCK-003 ranks roots by blocked count then wait duration', () => {
     const forest = buildBlockingTree([
       lock(10, [], { wait_duration: 10 }),
