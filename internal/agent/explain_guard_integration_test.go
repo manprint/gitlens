@@ -520,3 +520,49 @@ CREATE VIEW pglens_guard.v_fdw AS SELECT n FROM pglens_guard.f_writer`)
 		require.Equal(t, afterRegistration, rows())
 	})
 }
+
+// TestINTCMD032_ExplainRefusesRemoteEstimates proves that EXPLAIN, plan-only or
+// ANALYZE, is refused in a database with a foreign table that estimates
+// remotely. With use_remote_estimate on, postgres_fdw sends the remote server an
+// EXPLAIN while the local planner plans the scan, and the remote planner folds
+// and runs the functions of that server. The statement below names no foreign
+// table, so the refusal is the database's, as for the planned functions. The
+// same database plans once the option is off.
+func TestINTCMD032_ExplainRefusesRemoteEstimates(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		_, err := admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, guardFixture)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = admin.Exec(context.Background(), "DROP SCHEMA IF EXISTS pglens_guard CASCADE")
+			_, _ = admin.Exec(context.Background(), "DROP SERVER IF EXISTS pglens_estimate CASCADE")
+			_, _ = admin.Exec(context.Background(), "DROP EXTENSION IF EXISTS postgres_fdw")
+		})
+		_, err = admin.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS postgres_fdw;
+CREATE SERVER pglens_estimate FOREIGN DATA WRAPPER postgres_fdw OPTIONS (host '127.0.0.1', port '5432', dbname 'postgres', use_remote_estimate 'true');
+CREATE USER MAPPING FOR PUBLIC SERVER pglens_estimate OPTIONS (user 'postgres', password 'test');
+GRANT USAGE ON FOREIGN SERVER pglens_estimate TO PUBLIC;
+CREATE FOREIGN TABLE pglens_guard.f_estimate (a int, b text) SERVER pglens_estimate OPTIONS (schema_name 'pglens_guard', table_name 't');`)
+		require.NoError(t, err)
+
+		const readsTable = "SELECT count(*) FROM pglens_guard.t"
+		ids := registerStatements(t, pg, readsTable)
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			for _, analyze := range []bool{false, true} {
+				_, err = explainAs(t, pg, role, ids[readsTable], analyze)
+				requireRefused(t, err, "use_remote_estimate")
+			}
+		}
+
+		// The option is read as false when it is set to false, so the same
+		// database plans again.
+		_, err = admin.Exec(ctx, "ALTER SERVER pglens_estimate OPTIONS (SET use_remote_estimate 'false')")
+		require.NoError(t, err)
+		_, err = explainAs(t, pg, pgtest.RoleT1, ids[readsTable], false)
+		require.NoError(t, err)
+	})
+}

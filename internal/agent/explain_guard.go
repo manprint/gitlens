@@ -33,8 +33,11 @@ import (
 // What stays outside the guard, by construction: a function or view replaced
 // concurrently between the check and the plan; code that runs while planning
 // but is not a function in the database, such as a planner hook loaded with
-// shared_preload_libraries; and the functions of extensions and the C functions
-// a superuser defined, which guardPlanning does not list.
+// shared_preload_libraries; the IMMUTABLE and STABLE functions of installed
+// extensions, which guardPlanning does not list, so plain EXPLAIN folds them
+// unchecked (ANALYZE refuses the ones outside sideEffectFreeExtensions that a
+// statement reaches); and the remote planning of foreign-data wrappers other
+// than postgres_fdw, whose use_remote_estimate guardPlanning refuses.
 
 // sideEffectFreeExtensions only compute: no I/O outside the database, no SQL
 // text executed on the caller's behalf, no state that outlives a transaction.
@@ -349,10 +352,11 @@ func dropExplainPrivileges(ctx context.Context, conn check.Conn, major int, anal
 // IMMUTABLE or STABLE, which the planner folds or evaluates for estimates. A
 // VOLATILE function runs only when it executes, so it is not listed. Built-in
 // functions are left out, since PostgreSQL declares their volatility itself.
-// The functions of extensions are left out too, and so are the cost and
-// selectivity estimators of operators: an estimator must take internal
-// arguments, which only a C function can declare, and only a superuser can
-// define a C function. Extensions and superusers are the trust boundary.
+// The functions of extensions are left out: an installed extension is the
+// trust boundary here, and ANALYZE checks the ones a statement reaches. The
+// C functions a superuser defined are not left out, and neither are the cost
+// and selectivity estimators of operators, which are C functions: an IMMUTABLE
+// or STABLE one of them is listed and refuses EXPLAIN like any other.
 const plannableFunctionLookup = `/* pglens: explain guard, plannable functions */
 SELECT COALESCE(pg_catalog.json_agg(pg_catalog.json_build_object(
 		'schema', n.nspname,
@@ -366,12 +370,13 @@ WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
                   WHERE d.classid = 'pg_catalog.pg_proc'::pg_catalog.regclass AND d.objid = p.oid AND d.deptype = 'e')`
 
 // guardPlanning refuses every EXPLAIN, plan-only or ANALYZE, while the database
-// defines a function the planner may run. A plan does not show those runs, and
-// they happen before any plan exists, so the check reads the catalog rather
-// than a plan: it does not depend on which functions a statement names,
-// directly or through views, operators, casts or policies. The cost is that a
-// database with its own IMMUTABLE or STABLE functions refuses EXPLAIN
-// altogether, and the refusal names the function.
+// defines a function the planner may run, or a foreign table whose planning
+// queries the remote server. A plan does not show those runs, and they happen
+// before any plan exists, so the check reads the catalog rather than a plan: it
+// does not depend on which functions a statement names, directly or through
+// views, operators, casts or policies. The cost is that a database with its
+// own IMMUTABLE or STABLE functions refuses EXPLAIN altogether, and the refusal
+// names the function.
 func guardPlanning(ctx context.Context, conn check.Conn) error {
 	var raw json.RawMessage
 	if err := conn.QueryRow(ctx, plannableFunctionLookup).Scan(&raw); err != nil {
@@ -386,8 +391,36 @@ func guardPlanning(ctx context.Context, conn check.Conn) error {
 			return rejectedf("EXPLAIN refused: the database defines %s, which %s; the planner may run such a function while it plans a statement, and a plan does not show that", f, reason)
 		}
 	}
+	if err := conn.QueryRow(ctx, remoteEstimateLookup).Scan(&raw); err != nil {
+		return fmt.Errorf("look up the foreign tables that estimate remotely: %w", err)
+	}
+	var remote []struct {
+		Relation string `json:"relation"`
+	}
+	if err := json.Unmarshal(raw, &remote); err != nil {
+		return fmt.Errorf("decode the foreign tables that estimate remotely: %w", err)
+	}
+	if len(remote) > 0 {
+		return rejectedf("EXPLAIN refused: foreign table %s has use_remote_estimate on, so planning sends an EXPLAIN to the remote server, which plans it there and runs the functions it folds; a plan does not show that", remote[0].Relation)
+	}
 	return nil
 }
+
+// remoteEstimateLookup lists the foreign tables whose planning queries the
+// remote server. postgres_fdw does so when use_remote_estimate is set on the
+// table or on its server: it sends EXPLAIN to the remote side, where the remote
+// planner folds that server's IMMUTABLE functions. An option set to one of the
+// spellings PostgreSQL reads as false does not count.
+const remoteEstimateLookup = `/* pglens: explain guard, remote estimates */
+SELECT COALESCE(pg_catalog.json_agg(pg_catalog.json_build_object(
+		'relation', n.nspname || '.' || c.relname)), '[]')
+FROM pg_catalog.pg_foreign_table ft
+JOIN pg_catalog.pg_class c ON c.oid = ft.ftrelid
+JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+JOIN pg_catalog.pg_foreign_server s ON s.oid = ft.ftserver
+WHERE EXISTS (SELECT 1 FROM pg_catalog.unnest(COALESCE(ft.ftoptions, '{}') || COALESCE(s.srvoptions, '{}')) AS o(opt)
+              WHERE pg_catalog.split_part(o.opt, '=', 1) = 'use_remote_estimate'
+                AND pg_catalog.lower(pg_catalog.split_part(o.opt, '=', 2)) NOT IN ('false', 'f', 'off', 'no', 'n', '0'))`
 
 // guardAnalyze decides whether statement may be executed by EXPLAIN ANALYZE.
 // It runs inside the read-only transaction, after dropExplainPrivileges and
