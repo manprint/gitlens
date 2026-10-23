@@ -105,10 +105,15 @@ export PGLENS_MONITORING_PASSWORD='<password>'
 psql "$PGLENS_DSN" -v pglens_password="$PGLENS_MONITORING_PASSWORD" \
   -v dbname=postgres -f deploy/sql/monitoring_user.sql
 
-# 2. Configure the agent, enable the web interface, and build the local images
-# Keep the defaults for the self-contained example, or edit
-# deploy/agent.example.yaml with your target DSN.
-export PGLENS_BOOTSTRAP_TOKEN=dev-token
+# 2. Set the example's secrets, enable the web interface, and build the local images
+# The example has no default secrets and refuses to start without them. Choose
+# each value and reuse it on later runs: an existing database keeps the
+# passwords it was first started with. PGLENS_MONITORING_PASSWORD from step 1 is
+# also the password of the monitoring role the example creates on its own
+# database. To monitor your own instance instead, edit deploy/agent.example.yaml
+# with your target DSN.
+export PGLENS_DB_PASSWORD='<superuser-password>'
+export PGLENS_BOOTSTRAP_TOKEN='<token>'
 export PGLENS_UI_PASSWORD=dev-password
 make build-images
 docker compose -f deploy/docker-compose.yml up -d
@@ -179,6 +184,13 @@ for the complete matrix and downgrade procedure.
 **Docker Compose (recommended):**
 
 ```sh
+# The example stacks take their secrets from the environment and refuse to
+# start without them. Reuse the values of an earlier run: an existing database
+# keeps the passwords it was first started with. The minimal TimescaleDB
+# service needs only PGLENS_DB_PASSWORD.
+export PGLENS_DB_PASSWORD='<superuser-password>'
+export PGLENS_MONITORING_PASSWORD='<monitoring-password>'
+export PGLENS_BOOTSTRAP_TOKEN='<token>'
 docker compose -f deploy/docker-compose.yml up -d
 # or the minimal TimescaleDB service
 docker compose -f deploy/compose/timescaledb.yml up -d
