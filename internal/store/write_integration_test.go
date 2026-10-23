@@ -26,7 +26,7 @@ func getStoreTestPool(t *testing.T) *pgxpool.Pool {
 		return storeTestPool
 	}
 	ctx := context.Background()
-	c, err := postgres.Run(ctx, "timescale/timescaledb:2.29.0-pg17",
+	c, err := postgres.Run(ctx, "timescale/timescaledb:2.31.0-pg17",
 		postgres.WithDatabase("test"),
 		postgres.WithUsername("postgres"),
 		postgres.WithPassword("postgres"),

@@ -1,6 +1,6 @@
 services:
   toxiproxy:
-    image: ghcr.io/shopify/toxiproxy:2.9.0
+    image: ghcr.io/shopify/toxiproxy:2.13.0
     ports:
       - "8474"  # admin API
       - "20000-20010"  # proxy ports for server and databases

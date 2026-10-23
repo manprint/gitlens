@@ -45,7 +45,7 @@ func timescaleFixturePool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	tsOnce.Do(func() {
 		ctx := context.Background()
-		c, err := postgres.Run(ctx, "timescale/timescaledb:2.29.0-pg17",
+		c, err := postgres.Run(ctx, "timescale/timescaledb:2.31.0-pg17",
 			postgres.WithDatabase("pglens"),
 			postgres.WithUsername("pglens"),
 			postgres.WithPassword("pglens"),

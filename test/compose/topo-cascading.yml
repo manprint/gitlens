@@ -1,6 +1,6 @@
 services:
   pg-primary:
-    image: timescale/timescaledb:2.29.0-pg17
+    image: timescale/timescaledb:2.31.0-pg17
     environment:
       POSTGRES_PASSWORD: postgres
       POSTGRES_USER: postgres
@@ -22,7 +22,7 @@ services:
       start_period: 90s
 
   pg-standby-a:
-    image: timescale/timescaledb:2.29.0-pg17
+    image: timescale/timescaledb:2.31.0-pg17
     depends_on:
       pg-primary:
         condition: service_healthy
@@ -48,7 +48,7 @@ services:
       start_period: 90s
 
   pg-standby-b:
-    image: timescale/timescaledb:2.29.0-pg17
+    image: timescale/timescaledb:2.31.0-pg17
     depends_on:
       pg-standby-a:
         condition: service_healthy

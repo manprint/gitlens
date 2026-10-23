@@ -34,7 +34,7 @@ acceptance suites run nightly and on every pull request into `main`.
   source. CI and the container images build on Node 24.
 - Docker and Docker Compose for the test suites and for the server's storage
 - PostgreSQL 15 to 18 as monitoring targets
-- PostgreSQL 17 with TimescaleDB 2.29 for the server's own storage (see Running the server)
+- PostgreSQL 17 with TimescaleDB 2.31 for the server's own storage (see Running the server)
 
 ## Building
 
@@ -181,7 +181,7 @@ docker compose -f deploy/docker-compose.yml up -d
 docker compose -f deploy/compose/timescaledb.yml up -d
 ```
 
-The server applies migrations on startup (forward-only, idempotent) and listens on `:8080`. See `deploy/docker-compose.yml` for the pinned image `timescale/timescaledb:2.29.0-pg17` and the self-contained server/agent stack.
+The server applies migrations on startup (forward-only, idempotent) and listens on `:8080`. See `deploy/docker-compose.yml` for the pinned image `timescale/timescaledb:2.31.0-pg17` and the self-contained server/agent stack.
 
 The web interface is served by the server itself on the same address as the API:
 `http://<host>:8080/`. Set `PGLENS_UI_PASSWORD` (see the configuration table

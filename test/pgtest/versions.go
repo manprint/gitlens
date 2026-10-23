@@ -9,10 +9,10 @@ import (
 // Supported range is PostgreSQL 15 through 18 (decision D11).
 // Minors are chosen above the reverted-ABI releases documented in R2.
 var images = map[int]string{
-	15: "postgres:15.14-alpine",
-	16: "postgres:16.10-alpine",
-	17: "postgres:17.6-alpine",
-	18: "postgres:18.2-alpine",
+	15: "postgres:15.19-alpine",
+	16: "postgres:16.15-alpine",
+	17: "postgres:17.11-alpine",
+	18: "postgres:18.6-alpine",
 }
 
 // Versions returns the majors to exercise. PGLENS_PG_VERSIONS overrides it;
