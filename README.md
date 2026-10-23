@@ -885,7 +885,11 @@ curl -s -b cookies.txt 'localhost:8080/api/v1/clusters/<cluster-id>/settings-dri
 
 The settings response contains `name`, `value`, source, context, pending-restart
 and observation timestamps. Drift returns only differing settings with their
-instance IDs, roles and values.
+instance IDs, roles and values. A value whose source is the client, the session
+or a setting of the monitoring role itself describes the agent's connection
+(its `statement_timeout`, `search_path`, read-only default), not the instance,
+so it is not reported; what the instance uses for other roles cannot be read
+from that connection.
 
 **Environment overrides** (take precedence over the config file's own value):
 - `PGLENS_SERVER_URL=http://...` — overrides `server.url`

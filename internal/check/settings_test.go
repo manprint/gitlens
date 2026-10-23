@@ -19,6 +19,21 @@ func TestSettings_EmitsNonDefaultOutsideAllowlist(t *testing.T) {
 	require.Equal(t, "custom_setting", r.Facts[0].Key)
 }
 
+// Values the agent's session, its client or its role set describe pglens's
+// connection, not the instance, even for an allowlisted setting.
+func TestSettings_SkipsConnectionSpecificValues(t *testing.T) {
+	r := scrapeSettingsForTest(t,
+		[]any{"statement_timeout", "5000", "ms", "session", "0", "15000", false, "integer", "user", "timeout"},
+		[]any{"lock_timeout", "1000", "ms", "user", "0", "1000", false, "integer", "user", "timeout"},
+		[]any{"application_name", "pglens", "", "client", "", "pglens", false, "string", "user", "name"},
+		[]any{"work_mem", "8192", "kB", "database", "4096", "8192", true, "integer", "user", "memory"},
+	)
+	require.Len(t, r.Facts, 1)
+	require.Equal(t, "work_mem", r.Facts[0].Key)
+	require.Equal(t, 1.0, metricValue(r, "pg_settings_pending_restart", nil))
+	require.Equal(t, -1.0, metricValue(r, "pg_setting_seconds", map[string]string{"name": "statement_timeout"}))
+}
+
 func TestSettings_SkipsDefaultOutsideAllowlist(t *testing.T) {
 	r := scrapeSettingsForTest(t, []any{"custom_setting", "1", "", "default", "1", "1", false, "integer", "user", "custom"})
 	require.Empty(t, r.Facts)

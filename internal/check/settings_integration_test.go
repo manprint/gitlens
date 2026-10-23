@@ -73,3 +73,24 @@ func TestINTSET002_RestartSettingReportsPendingRestart(t *testing.T) {
 		require.True(t, pending)
 	})
 }
+
+// TestINTSET003_ConnectionSettingsAreNotInstanceSettings: the monitoring
+// role's own defaults and the agent's session settings are not reported as
+// the instance's.
+func TestINTSET003_ConnectionSettingsAreNotInstanceSettings(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		ctx := context.Background()
+		conn, err := pg.Pool(t, "app", pgtest.RoleT0).Acquire(ctx)
+		require.NoError(t, err)
+		_, err = conn.Exec(ctx, "SET search_path = pg_catalog, pg_temp")
+		require.NoError(t, err)
+		result, err := (&settingsCheck{}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
+		require.NoError(t, err)
+		require.NotEmpty(t, result.Facts)
+		for _, f := range result.Facts {
+			require.NotContains(t, []string{"client", "session", "user"}, f.Labels["source"], f.Key)
+			require.NotContains(t, []string{"search_path", "statement_timeout", "lock_timeout",
+				"idle_in_transaction_session_timeout", "default_transaction_read_only", "application_name"}, f.Key)
+		}
+	})
+}
