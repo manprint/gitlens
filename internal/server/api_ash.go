@@ -259,6 +259,8 @@ func (a *AshAPI) queryASHBuckets(ctx context.Context, instanceID uuid.UUID, from
 // rangeTicks is the instance's sampling ticks over the range, every window
 // counted once, whatever the filters. A window with no sampled session still
 // ticked, so its ticks belong to the range even though no row of it is listed.
+// The range is not capped: this reads every window of it in one aggregate, so
+// its cost grows with the range.
 func (a *AshAPI) rangeTicks(ctx context.Context, instanceID uuid.UUID, from, to *time.Time) (int, error) {
 	where, args := ashWhere(instanceID, from, to, "", ashFilters{})
 	var ticks int
@@ -372,7 +374,6 @@ SELECT g.bucket, g.samples, t.ticks, %[4]s
 	defer rows.Close()
 
 	var raw []ashBucket
-	bucketTicks := make(map[time.Time]int)
 	sampledBuckets := make(map[time.Time]struct{})
 	for rows.Next() {
 		var b ashBucket
@@ -396,7 +397,6 @@ SELECT g.bucket, g.samples, t.ticks, %[4]s
 			return nil, 0, err
 		}
 		b.QueryID = formatQueryID(qid)
-		bucketTicks[b.TS] = b.Ticks
 		if b.Samples == 0 {
 			continue
 		}
@@ -417,7 +417,11 @@ SELECT g.bucket, g.samples, t.ticks, %[4]s
 		}
 		buckets[i].AvgActiveSessions = avgActive(buckets[i].Samples, buckets[i].Ticks)
 	}
-	return buckets, sumTicks(bucketTicks), nil
+	ticks, err := a.rangeTicks(ctx, instanceID, &from, &to)
+	if err != nil {
+		return nil, 0, err
+	}
+	return buckets, ticks, nil
 }
 
 // foldASHGroups keeps the largest groups (by samples over the range) and
@@ -502,14 +506,6 @@ func avgActive(samples, ticks int) *float64 {
 	}
 	avg := float64(samples) / float64(ticks)
 	return &avg
-}
-
-func sumTicks(byWindow map[time.Time]int) int {
-	total := 0
-	for _, t := range byWindow {
-		total += t
-	}
-	return total
 }
 
 // ----- /api/v1/ash/top -----
@@ -609,14 +605,16 @@ func (a *AshAPI) handleASHTop(w http.ResponseWriter, r *http.Request) {
 // range, every window counted once, the same denominator for every query.
 // The filters narrow the samples, not the ticks, as they do for group_by.
 func (a *AshAPI) queryASHTop(ctx context.Context, instanceID uuid.UUID, from, to *time.Time, database string, filters ashFilters, limit int) ([]ashTopEntry, int, error) {
+	// The ticks are the range's, read from its windows themselves: a range
+	// whose samples carry no queryid, or none at all, still ticked.
+	ticks, err := a.rangeTicks(ctx, instanceID, from, to)
+	if err != nil {
+		return nil, 0, err
+	}
 	where, args := ashWhere(instanceID, from, to, database, filters)
-	tickWhere, _ := ashWhere(instanceID, from, to, "", ashFilters{})
 	args = append(args, limit)
 	query := fmt.Sprintf(`
-WITH ticks AS (
-  SELECT COALESCE(SUM(t), 0)::int AS ticks
-    FROM (SELECT ts, MAX(window_ticks) AS t FROM metrics_ash WHERE %s GROUP BY ts) w
-), top AS (
+WITH top AS (
   SELECT queryid, MIN(cluster_id) AS cluster_id, SUM(samples)::int AS samples
     FROM metrics_ash
    WHERE %s AND queryid IS NOT NULL
@@ -628,9 +626,9 @@ SELECT top.queryid,
        COALESCE((SELECT q.query_text FROM query_texts q
                   WHERE q.tenant_id = 'default' AND q.cluster_id = top.cluster_id AND q.queryid = top.queryid
                   ORDER BY q.last_seen DESC LIMIT 1), ''),
-       top.samples, ticks.ticks
-  FROM top CROSS JOIN ticks
- ORDER BY top.samples DESC, top.queryid`, tickWhere, where, len(args))
+       top.samples
+  FROM top
+ ORDER BY top.samples DESC, top.queryid`, where, len(args))
 
 	rows, err := a.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -639,22 +637,21 @@ SELECT top.queryid,
 	defer rows.Close()
 
 	entries := []ashTopEntry{}
-	totalTicks := 0
 	for rows.Next() {
 		var qid int64
 		var entry ashTopEntry
-		if err := rows.Scan(&qid, &entry.QueryText, &entry.Samples, &entry.Ticks); err != nil {
+		if err := rows.Scan(&qid, &entry.QueryText, &entry.Samples); err != nil {
 			return nil, 0, err
 		}
 		entry.QueryID = strconv.FormatInt(qid, 10)
-		entry.AvgActive = avgActive(entry.Samples, entry.Ticks)
-		totalTicks = entry.Ticks
+		entry.Ticks = ticks
+		entry.AvgActive = avgActive(entry.Samples, ticks)
 		entries = append(entries, entry)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, err
 	}
-	return entries, totalTicks, nil
+	return entries, ticks, nil
 }
 
 func formatQueryID(qid *int64) *string {
