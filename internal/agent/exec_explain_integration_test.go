@@ -159,3 +159,35 @@ func TestINTCMD014_ExplainAnalyzePlanHashIsStable(t *testing.T) {
 		require.Equal(t, first, second)
 	})
 }
+
+// TestINTCMD026_ExplainEndsItsSession proves that an EXPLAIN does not return
+// its session to the pool. Session state outlives ROLLBACK, so the next caller
+// of the pool must get a new backend, not the one the command used.
+func TestINTCMD026_ExplainEndsItsSession(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		_, err := admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+		require.NoError(t, err)
+		const statement = "SELECT current_database()"
+		queryID := registerStatements(t, pg, statement)[statement]
+
+		mgr, err := NewManager(ctx, "explain-session", pg.DSN("postgres", pgtest.RoleT1), DefaultConnOptions(), clock.System())
+		require.NoError(t, err)
+		defer mgr.Close()
+		backend := func() int {
+			conn, err := mgr.ForDatabase(ctx, "postgres")
+			require.NoError(t, err)
+			defer conn.Release()
+			var pid int
+			require.NoError(t, conn.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&pid))
+			return pid
+		}
+		before := backend()
+
+		_, err = NewExplainExecutor().Execute(ctx, mgr, command.Args{QueryID: &queryID, Datname: "postgres"})
+		require.NoError(t, err)
+		require.NotEqual(t, before, backend(), "the session the EXPLAIN used went back to the pool")
+	})
+}
