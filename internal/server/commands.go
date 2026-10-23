@@ -351,12 +351,12 @@ func (s *CommandService) claim(ctx context.Context, agentID string) (pollRespons
 		WHERE command_id = (
 			SELECT command_id FROM commands
 			WHERE tenant_id=$1 AND agent_id=$2 AND state='pending' AND expires_at > now()
-			  AND NOT EXISTS (SELECT 1 FROM agents WHERE agents.agent_id::text=commands.agent_id AND agents.revoked_at IS NOT NULL)
+			  AND NOT EXISTS (SELECT 1 FROM agents WHERE agent_id=$4 AND revoked_at IS NOT NULL)
 			ORDER BY created_at
 			FOR UPDATE SKIP LOCKED
 			LIMIT 1
 		)
-		RETURNING command_id, kind, args, claim_token, instance_id, cluster_id, expires_at`, commandTenant, parsed, s.now().UTC().Add(commandClaimLease)).Scan(&out.CommandID, &out.Kind, &out.Args, &out.ClaimToken, &out.InstanceID, &out.ClusterID, &out.ExpiresAt)
+		RETURNING command_id, kind, args, claim_token, instance_id, cluster_id, expires_at`, commandTenant, parsed, s.now().UTC().Add(commandClaimLease), parsed).Scan(&out.CommandID, &out.Kind, &out.Args, &out.ClaimToken, &out.InstanceID, &out.ClusterID, &out.ExpiresAt)
 	return out, err
 }
 
