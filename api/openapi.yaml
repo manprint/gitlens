@@ -694,6 +694,94 @@ components:
           format: double
           description: Mean time per call over the window; null when the function was not called in it.
         last_seen: { $ref: '#/components/schemas/Timestamp' }
+    InternalsResponse:
+      type: object
+      required: [instance_id, window_seconds, wal_directory, databases, slru, temp_files, standby]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        window_seconds: { type: integer, format: int32, description: The span the rates are averaged over. }
+        wal_directory:
+          oneOf:
+            - { $ref: '#/components/schemas/WALDirectory' }
+            - { type: 'null' }
+          description: The latest listing of pg_wal in the window; null without one (no EXECUTE on pg_ls_waldir, or not scraped).
+        databases:
+          type: array
+          items: { $ref: '#/components/schemas/DatabaseSize' }
+          description: Each database's latest size, largest first; a database not sized in the last two hours is left out.
+        slru: { type: array, items: { $ref: '#/components/schemas/SLRUCache' } }
+        temp_files: { type: array, items: { $ref: '#/components/schemas/TempFileRate' } }
+        standby:
+          oneOf:
+            - { $ref: '#/components/schemas/StandbyReplay' }
+            - { type: 'null' }
+          description: Null unless the instance replayed WAL in the window.
+    WALDirectory:
+      type: object
+      required: [bytes, files, observed_at]
+      properties:
+        bytes: { type: number, format: double }
+        files: { type: number, format: double }
+        observed_at: { $ref: '#/components/schemas/Timestamp' }
+    DatabaseSize:
+      type: object
+      required: [database, size_bytes, observed_at, growth_24h_bytes, growth_7d_bytes]
+      properties:
+        database: { type: string }
+        size_bytes: { type: number, format: double }
+        observed_at: { $ref: '#/components/schemas/Timestamp' }
+        growth_24h_bytes:
+          type: [number, 'null']
+          format: double
+          description: Size change since the size measured about 24 hours before; null without one.
+        growth_7d_bytes:
+          type: [number, 'null']
+          format: double
+          description: Size change since the size measured about 7 days before; null without one.
+    SLRUCache:
+      type: object
+      description: One SLRU cache, named as PostgreSQL 17 and later name it on every version.
+      required: [name, hit_ratio, hits_per_second, reads_per_second, writes_per_second, zeroed_per_second, flushes_per_second, truncates_per_second, exists_per_second, last_seen]
+      properties:
+        name: { type: string, example: multixact_offset }
+        hit_ratio:
+          type: [number, 'null']
+          format: double
+          description: Hits over hits and reads; null when the cache was not read in the window.
+        hits_per_second: { type: number, format: double }
+        reads_per_second: { type: number, format: double, description: Pages read from disk, under the cache's lock. }
+        writes_per_second: { type: number, format: double }
+        zeroed_per_second: { type: number, format: double }
+        flushes_per_second: { type: number, format: double }
+        truncates_per_second: { type: number, format: double }
+        exists_per_second: { type: number, format: double }
+        last_seen: { $ref: '#/components/schemas/Timestamp' }
+    TempFileRate:
+      type: object
+      required: [database, files_per_second, bytes_per_second]
+      properties:
+        database: { type: string }
+        files_per_second: { type: number, format: double, description: Temporary files written by queries that outgrew work_mem. }
+        bytes_per_second: { type: number, format: double }
+    StandbyReplay:
+      type: object
+      required: [replay_paused, observed_at, conflicts, prefetch_blocks_per_second]
+      properties:
+        replay_paused: { type: boolean, description: Whether WAL replay was paused at the latest scrape. }
+        observed_at: { $ref: '#/components/schemas/Timestamp' }
+        conflicts: { type: array, items: { $ref: '#/components/schemas/RecoveryConflictRate' } }
+        prefetch_blocks_per_second:
+          type: object
+          additionalProperties: { type: number, format: double }
+          description: The WAL prefetcher's blocks per second by outcome (prefetch, hit, skip_init, skip_new, skip_fpw, skip_rep).
+    RecoveryConflictRate:
+      type: object
+      description: Standby queries of a database cancelled by recovery conflicts of one reason; only reasons with a rate above zero.
+      required: [database, reason, per_second]
+      properties:
+        database: { type: string }
+        reason: { type: string, example: snapshot }
+        per_second: { type: number, format: double }
     LogicalReplicationResponse:
       type: object
       required: [instance_id, window_seconds, subscriptions, slots]
@@ -1580,6 +1668,41 @@ paths:
                       - { name: orders_sub, database: app, owner: postgres, enabled: true, slot_name: orders_sub, publications: [orders], apply_worker: true, sync_workers: 0, last_message_at: '2026-08-27T01:59:40Z', apply_errors: 0, sync_errors: 0, conflicts: null, first_seen: '2026-08-27T01:00:00Z', last_seen: '2026-08-27T02:00:00Z' }
                     slots:
                       - { slot_name: orders_sub, bytes_per_second: 20480, txns_per_second: 12.5, spill_bytes_per_second: 0, spill_txns_per_second: 0, stream_bytes_per_second: 0, last_seen: '2026-08-27T02:00:00Z' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/internals:
+    get:
+      tags: [instances]
+      operationId: getInstanceInternals
+      summary: Return the WAL directory, database sizes, SLRU caches, temporary files and standby replay.
+      description: >-
+        The latest size of pg_wal; each database's size and its growth over
+        24 hours and 7 days; each SLRU cache's rates and hit ratio, each
+        database's temporary-file rates, and, for an instance that replayed
+        WAL in the window, whether replay is paused, the queries recovery
+        conflicts cancelled by database and reason, and the WAL prefetcher's
+        rates. Rates are averaged over the last hour.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+      responses:
+        '200':
+          description: SLRU caches by hit rate; databases by temporary bytes; conflicts by rate.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InternalsResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    window_seconds: 3600
+                    wal_directory: { bytes: 1073741824, files: 64, observed_at: '2026-08-27T02:00:00Z' }
+                    databases:
+                      - { database: app, size_bytes: 53687091200, observed_at: '2026-08-27T02:00:00Z', growth_24h_bytes: 1073741824, growth_7d_bytes: null }
+                    slru:
+                      - { name: transaction, hit_ratio: 0.999, hits_per_second: 1200, reads_per_second: 1.2, writes_per_second: 0.5, zeroed_per_second: 0.01, flushes_per_second: 0.02, truncates_per_second: 0, exists_per_second: 0, last_seen: '2026-08-27T02:00:00Z' }
+                    temp_files:
+                      - { database: app, files_per_second: 0.2, bytes_per_second: 1048576 }
+                    standby: null
         '400': { $ref: '#/components/responses/BadRequest' }
 
   /api/v1/instances/{id}/security-definer-functions:

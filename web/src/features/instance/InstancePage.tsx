@@ -8,6 +8,7 @@ import { InstanceHeader } from './InstanceHeader'
 import { CatalogSection } from './CatalogSection'
 import { DatabaseSelector } from './DatabaseSelector'
 import { HostSection } from './HostSection'
+import { InternalsSection } from './InternalsSection'
 import { LogicalReplicationSection } from './LogicalReplicationSection'
 import { OverviewSection } from './OverviewSection'
 import { RelationsSection } from './RelationsSection'
@@ -104,6 +105,7 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
       <RelationsSection instanceId={instanceId} currentTier={instanceQuery.data.perm_tier} />
       <CatalogSection instanceId={instanceId} />
       <LogicalReplicationSection instanceId={instanceId} />
+      <InternalsSection instanceId={instanceId} />
     </div>
   )
 }

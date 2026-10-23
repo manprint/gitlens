@@ -87,6 +87,15 @@ function renderPage(
       subscriptions: [],
       slots: [],
     }),
+    ok('getInstanceInternals', {
+      instance_id: INSTANCE_ID,
+      window_seconds: 3600,
+      wal_directory: null,
+      databases: [],
+      slru: [],
+      temp_files: [],
+      standby: null,
+    }),
     ok('getInstanceUnindexedForeignKeys', {
       instance_id: INSTANCE_ID,
       foreign_keys: [],

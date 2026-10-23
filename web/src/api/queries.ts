@@ -354,6 +354,20 @@ export function useInstanceLogicalReplication(id: string) {
   })
 }
 
+export function useInstanceInternals(id: string) {
+  return useApiQuery({
+    policy: REFRESH.catalog,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/internals', {
+          params: { path: { id } },
+          signal,
+        }),
+      ),
+    queryKey: qk.instanceInternals(id),
+  })
+}
+
 export function useInstanceFunctions(id: string) {
   return useApiQuery({
     policy: REFRESH.catalog,

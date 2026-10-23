@@ -335,6 +335,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/instances/{id}/internals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Return the WAL directory, database sizes, SLRU caches, temporary files and standby replay.
+         * @description The latest size of pg_wal; each database's size and its growth over 24 hours and 7 days; each SLRU cache's rates and hit ratio, each database's temporary-file rates, and, for an instance that replayed WAL in the window, whether replay is paused, the queries recovery conflicts cancelled by database and reason, and the WAL prefetcher's rates. Rates are averaged over the last hour.
+         */
+        get: operations["getInstanceInternals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instances/{id}/security-definer-functions": {
         parameters: {
             query?: never;
@@ -1521,6 +1541,101 @@ export interface components {
             mean_ms: number | null;
             last_seen: components["schemas"]["Timestamp"];
         };
+        InternalsResponse: {
+            instance_id: components["schemas"]["InstanceId"];
+            /**
+             * Format: int32
+             * @description The span the rates are averaged over.
+             */
+            window_seconds: number;
+            /** @description The latest listing of pg_wal in the window; null without one (no EXECUTE on pg_ls_waldir, or not scraped). */
+            wal_directory: components["schemas"]["WALDirectory"] | null;
+            /** @description Each database's latest size, largest first; a database not sized in the last two hours is left out. */
+            databases: components["schemas"]["DatabaseSize"][];
+            slru: components["schemas"]["SLRUCache"][];
+            temp_files: components["schemas"]["TempFileRate"][];
+            /** @description Null unless the instance replayed WAL in the window. */
+            standby: components["schemas"]["StandbyReplay"] | null;
+        };
+        WALDirectory: {
+            /** Format: double */
+            bytes: number;
+            /** Format: double */
+            files: number;
+            observed_at: components["schemas"]["Timestamp"];
+        };
+        DatabaseSize: {
+            database: string;
+            /** Format: double */
+            size_bytes: number;
+            observed_at: components["schemas"]["Timestamp"];
+            /**
+             * Format: double
+             * @description Size change since the size measured about 24 hours before; null without one.
+             */
+            growth_24h_bytes: number | null;
+            /**
+             * Format: double
+             * @description Size change since the size measured about 7 days before; null without one.
+             */
+            growth_7d_bytes: number | null;
+        };
+        /** @description One SLRU cache, named as PostgreSQL 17 and later name it on every version. */
+        SLRUCache: {
+            /** @example multixact_offset */
+            name: string;
+            /**
+             * Format: double
+             * @description Hits over hits and reads; null when the cache was not read in the window.
+             */
+            hit_ratio: number | null;
+            /** Format: double */
+            hits_per_second: number;
+            /**
+             * Format: double
+             * @description Pages read from disk
+             */
+            reads_per_second: number;
+            /** Format: double */
+            writes_per_second: number;
+            /** Format: double */
+            zeroed_per_second: number;
+            /** Format: double */
+            flushes_per_second: number;
+            /** Format: double */
+            truncates_per_second: number;
+            /** Format: double */
+            exists_per_second: number;
+            last_seen: components["schemas"]["Timestamp"];
+        };
+        TempFileRate: {
+            database: string;
+            /**
+             * Format: double
+             * @description Temporary files written by queries that outgrew work_mem.
+             */
+            files_per_second: number;
+            /** Format: double */
+            bytes_per_second: number;
+        };
+        StandbyReplay: {
+            /** @description Whether WAL replay was paused at the latest scrape. */
+            replay_paused: boolean;
+            observed_at: components["schemas"]["Timestamp"];
+            conflicts: components["schemas"]["RecoveryConflictRate"][];
+            /** @description The WAL prefetcher's blocks per second by outcome (prefetch, hit, skip_init, skip_new, skip_fpw, skip_rep). */
+            prefetch_blocks_per_second: {
+                [key: string]: number;
+            };
+        };
+        /** @description Standby queries of a database cancelled by recovery conflicts of one reason; only reasons with a rate above zero. */
+        RecoveryConflictRate: {
+            database: string;
+            /** @example snapshot */
+            reason: string;
+            /** Format: double */
+            per_second: number;
+        };
         LogicalReplicationResponse: {
             instance_id: components["schemas"]["InstanceId"];
             /**
@@ -2300,6 +2415,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LogicalReplicationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+        };
+    };
+    getInstanceInternals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["InstanceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SLRU caches by hit rate; databases by temporary bytes; conflicts by rate. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InternalsResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];

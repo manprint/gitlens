@@ -31,6 +31,7 @@ func (a *API) registerCatalogRoutes(r chi.Router) {
 	r.Get("/api/v1/instances/{id}/functions", a.handleFunctions)
 	r.Get("/api/v1/instances/{id}/security-definer-functions", a.handleSecurityDefinerFunctions)
 	r.Get("/api/v1/instances/{id}/logical-replication", a.handleLogicalReplication)
+	r.Get("/api/v1/instances/{id}/internals", a.handleInternals)
 }
 
 // catalogFact is one object_facts row of a catalog kind.

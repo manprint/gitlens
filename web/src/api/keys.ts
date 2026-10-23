@@ -26,6 +26,7 @@ export const qk = {
   instancePartitionedTables: (id: string) => ['getInstancePartitionedTables', id] as const,
   instanceFunctions: (id: string) => ['getInstanceFunctions', id] as const,
   instanceLogicalReplication: (id: string) => ['getInstanceLogicalReplication', id] as const,
+  instanceInternals: (id: string) => ['getInstanceInternals', id] as const,
   instanceSecurityDefinerFunctions: (id: string) =>
     ['getInstanceSecurityDefinerFunctions', id] as const,
   instanceIndexes: (id: string, limit?: number) => ['getInstanceIndexes', id, limit] as const,

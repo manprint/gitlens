@@ -486,7 +486,19 @@ Security and operational boundaries:
   conflict counters, and the decoding counters of each logical slot (spilled
   and streamed transactions). It reads `pg_subscription` column by column
   and never `subconninfo`, which holds the connection string and its
-  password. The instance page lists them under "Logical replication", and
+  password. `wal_directory` sizes `pg_wal` every minute with
+  `pg_ls_waldir()`, which `pg_monitor` may execute; without that grant the
+  sizes are left out. `database_size` sizes each database every fifteen
+  minutes with `pg_database_size`, which adds up its files without reading
+  them or taking a lock; the instance page shows each database's growth over
+  24 hours and 7 days from that history. `slru` reports, every minute, the counters of each
+  SLRU cache (commit log, subtransactions, multixacts, ...), named as 17
+  and later name them on every version so an upgrade keeps one series.
+  `recovery` reports, every 30 seconds on a standby and nothing on a
+  primary, the standby queries replay cancelled by database and conflict
+  reason, whether replay is paused, and the WAL prefetcher's counters;
+  `database_stats` also counts temporary files. The instance page lists
+  them under "Logical replication" and "Server internals", and
   the catalog objects under "Schema objects"; the `trigger.*` rules
   raise disabled triggers, `index.fk_unindexed` the foreign keys, the
   `extension.*` and `postgis.*` rules outdated extensions, unindexed spatial
@@ -496,8 +508,10 @@ Security and operational boundaries:
   partitions, invalid partitioned indexes and partitioned tables never
   analyzed, the `function.*` rules SECURITY DEFINER functions that do
   not pin `search_path` and databases whose function calls are not
-  tracked, and the `subscription.*` and `logical_slot.*` rules disabled,
-  stalled or failing subscriptions and slots that spill decoding to disk.
+  tracked, the `subscription.*` and `logical_slot.*` rules disabled,
+  stalled or failing subscriptions and slots that spill decoding to disk,
+  the `standby.*` rules standby queries cancelled by replay and paused
+  replay, and `wal.directory_large` WAL held back in `pg_wal`.
 - The integration suite proves the boundary: INT-RO-001 runs every check and
   command at T2 and asserts that the database and the shared catalogs are
   unchanged and that every statement the role sent, as `pg_stat_statements`
@@ -737,6 +751,9 @@ How the rules read the collected data:
 | `subscription.disabled` | warning | A subscription is disabled: it applies nothing, and its slot on the publisher keeps the WAL of the changes it has not confirmed (the `logical_replication` check). |
 | `subscription.not_receiving` | warning | An enabled subscription has no apply worker running, or its worker has heard nothing from the publisher for five minutes, although the publisher sends keepalives. |
 | `subscription.errors` | warning | A subscription's apply or synchronization workers failed since the previous scrape. |
+| `standby.recovery_conflicts` | warning | WAL replay cancelled standby queries of a database since the previous scrape; the finding names each conflict reason (snapshot, lock, buffer pin, deadlock, tablespace, logical slot) and what avoids it (the `recovery` check). |
+| `standby.replay_paused` | warning | WAL replay is paused on a standby (`pg_wal_replay_pause()`, or a recovery target with `recovery_target_action = 'pause'`), so it serves ever older data. |
+| `wal.directory_large` | warning | `pg_wal` holds more than twice `max_wal_size` plus `wal_keep_size`: a slot, a failing `archive_command` or a standby keeps WAL the checkpoints would remove (the `wal_directory` check). |
 | `trigger.user_disabled` | warning | A user trigger is disabled: writes to its table no longer run it. |
 | `extension.upgrade_available` | info | The installed packages carry a newer default version of an extension than the database runs (`ALTER EXTENSION ... UPDATE`); PostGIS extensions are left to `postgis.upgrade_available`. |
 | `sequence.value_hidden` | info | The monitoring role cannot read the values of a database's sequences (no SELECT on them), so their exhaustion is not monitored; one finding per database. |
@@ -946,6 +963,10 @@ checks:
   replication_receiver:    { interval: 10s }  # Replication status on standby
   replication_slots:       { interval: 15s }  # Replication slot status
   logical_replication:     { interval: 1m }   # Subscriptions and logical decoding (subscription.*, logical_slot.*)
+  wal_directory:           { interval: 1m }   # Size of pg_wal (wal.directory_large)
+  database_size:           { interval: 15m }  # Size of each database
+  slru:                    { interval: 1m }   # SLRU cache counters
+  recovery:                { interval: 30s }  # Standby conflicts, replay pause, WAL prefetch (standby.*)
 ```
 
 **Configuration rules:**
@@ -1034,6 +1055,7 @@ checks
   ash                enabled
   bloat_estimate     enabled
   checkpointer       enabled
+  database_size      enabled
   database_stats     enabled
   extensions         enabled
   fk_indexes         enabled
@@ -1047,16 +1069,19 @@ checks
   monitoring_role    enabled
   partitions         enabled
   postgis_columns    enabled
+  recovery           enabled
   replication_receiver disabled  — role primary not allowed
   replication_slots  enabled
   replication_streaming enabled
   sequences          enabled
   settings           enabled
+  slru               enabled
   stat_statements    disabled  — missing extension pg_stat_statements
   table_stats        enabled
   trigger_inventory  enabled
   vacuum_progress    enabled
   wal                enabled
+  wal_directory      enabled
 
 warnings
   - identity path /var/lib/pglens/identity.json is not on a persistent mount:

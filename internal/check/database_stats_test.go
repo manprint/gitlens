@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,11 +18,11 @@ func TestBuildDatabaseStatsResult(t *testing.T) {
 	// Single row
 	now := time.Now()
 	rows := []dbStatRow{
-		{Datname: "app", XactCommit: 100, XactRollback: 5, BlksRead: 10, BlksHit: 90, Deadlocks: 1, TempBytes: 1024, Conflicts: 0, Numbackends: 5, StatsReset: &now},
+		{Datname: "app", XactCommit: 100, XactRollback: 5, BlksRead: 10, BlksHit: 90, Deadlocks: 1, TempBytes: 1024, TempFiles: 3, Conflicts: 0, Numbackends: 5, StatsReset: &now},
 		{Datname: "postgres", XactCommit: 50, XactRollback: 2, BlksRead: 5, BlksHit: 40, Deadlocks: 0, TempBytes: 512, Conflicts: 1, Numbackends: 2, StatsReset: nil},
 	}
 	res = buildDatabaseStatsResult(rows)
-	require.Len(t, res.Metrics, 20) // 8 legacy metrics + 2 lifetime ratios per db
+	require.Len(t, res.Metrics, 22) // 9 counters and gauges + 2 lifetime ratios per db
 	require.NotNil(t, res.StatsReset)
 	require.Equal(t, now, *res.StatsReset)
 
@@ -31,6 +32,10 @@ func TestBuildDatabaseStatsResult(t *testing.T) {
 		if m.Name == "pg_xact_commit_total" && m.Labels["database"] == "app" {
 			require.Equal(t, 100.0, m.Value)
 			found = true
+		}
+		if m.Name == "pg_temp_files_total" && m.Labels["database"] == "app" {
+			require.Equal(t, 3.0, m.Value)
+			require.Equal(t, pgtype.KindCounter, m.Kind)
 		}
 	}
 	require.True(t, found)

@@ -366,3 +366,94 @@ func TestINTCAT007_LogicalReplication(t *testing.T) {
 	require.Equal(t, float64(2048), slot["bytes_per_second"])
 	require.Equal(t, float64(0), slot["stream_bytes_per_second"])
 }
+
+// INT-CAT-008: the internals API serves the latest pg_wal size, each
+// database's size with its growth over 24 hours and 7 days, each SLRU
+// cache's rates and hit ratio, each database's temporary-file rates, and,
+// for a standby, the replay state, the conflicts above zero and the
+// prefetcher's rates; a primary has no standby section.
+func TestINTCAT008_Internals(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	primary, standby := uuid.New(), uuid.New()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	series := int64(1)
+	insert := func(instance uuid.UUID, metric, labels string, values ...float64) {
+		for i, value := range values {
+			_, err := pool.Exec(ctx, `INSERT INTO metrics (ts, tenant_id, cluster_id, instance_id, datname, metric, labels, series_id, value) VALUES ($1,'default',1,$2,'',$3,$4,$5,$6)`,
+				now.Add(time.Duration(i-len(values))*time.Minute), instance, metric, labels, series, value)
+			require.NoError(t, err)
+		}
+		series++
+	}
+	insert(primary, "pg_wal_dir_bytes", `{}`, 1<<30, 2<<30)
+	insert(primary, "pg_wal_dir_files", `{}`, 64, 128)
+	insert(primary, "pg_slru_blks_hit_total", `{"slru":"transaction"}`, 90, 110)
+	insert(primary, "pg_slru_blks_read_total", `{"slru":"transaction"}`, 10, 10)
+	insert(primary, "pg_slru_blks_hit_total", `{"slru":"notify"}`, 0, 0)
+	insert(primary, "pg_slru_blks_read_total", `{"slru":"notify"}`, 0, 0)
+	insert(primary, "pg_temp_files_total", `{"database":"app"}`, 1, 3)
+	insert(primary, "pg_temp_bytes_total", `{"database":"app"}`, 1024, 3072)
+	insert(primary, "pg_temp_bytes_total", `{"database":"postgres"}`, 0)
+	for _, size := range []struct {
+		db  string
+		ago time.Duration
+		v   float64
+	}{{"app", 0, 5 << 30}, {"app", 24*time.Hour + 30*time.Minute, 4 << 30}, {"app", 7*24*time.Hour + time.Hour, 1 << 30}, {"crm", 0, 8 << 30}, {"gone", 3 * time.Hour, 1 << 20}} {
+		_, err := pool.Exec(ctx, `INSERT INTO metrics (ts, tenant_id, cluster_id, instance_id, datname, metric, labels, series_id, value) VALUES ($1,'default',1,$2,'','pg_database_size_bytes',jsonb_build_object('database', $3::text),$4,$5)`,
+			now.Add(-time.Minute-size.ago), primary, size.db, series, size.v)
+		require.NoError(t, err)
+		series++
+	}
+	insert(standby, "pg_recovery_replay_paused", `{}`, 0, 1)
+	insert(standby, "pg_recovery_conflicts_total", `{"database":"app","reason":"snapshot"}`, 0.5, 1.5)
+	insert(standby, "pg_recovery_conflicts_total", `{"database":"app","reason":"lock"}`, 0, 0)
+	insert(standby, "pg_recovery_prefetch_blocks_total", `{"outcome":"hit"}`, 100, 300)
+
+	r := chi.NewRouter()
+	NewAPI(pool).RegisterRoutes(r)
+	get := func(id uuid.UUID) map[string]any {
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/instances/"+id.String()+"/internals", http.NoBody))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var raw map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &raw))
+		return raw
+	}
+
+	p := get(primary)
+	require.Equal(t, float64(3600), p["window_seconds"])
+	dir := p["wal_directory"].(map[string]any)
+	require.Equal(t, float64(2<<30), dir["bytes"])
+	require.Equal(t, float64(128), dir["files"])
+	dbs := p["databases"].([]any)
+	require.Len(t, dbs, 2, "a database not sized in two hours is left out")
+	crm, app := dbs[0].(map[string]any), dbs[1].(map[string]any)
+	require.Equal(t, "crm", crm["database"])
+	require.Nil(t, crm["growth_24h_bytes"])
+	require.Nil(t, crm["growth_7d_bytes"])
+	require.Equal(t, float64(5<<30), app["size_bytes"])
+	require.Equal(t, float64(1<<30), app["growth_24h_bytes"])
+	require.Equal(t, float64(4<<30), app["growth_7d_bytes"])
+	slru := p["slru"].([]any)
+	require.Len(t, slru, 2)
+	xact := slru[0].(map[string]any)
+	require.Equal(t, "transaction", xact["name"])
+	require.Equal(t, float64(100), xact["hits_per_second"])
+	require.InDelta(t, 100.0/110.0, xact["hit_ratio"], 1e-9)
+	require.Nil(t, slru[1].(map[string]any)["hit_ratio"])
+	temp := p["temp_files"].([]any)
+	require.Len(t, temp, 2)
+	require.Equal(t, map[string]any{"database": "app", "files_per_second": float64(2), "bytes_per_second": float64(2048)}, temp[0])
+	require.Nil(t, p["standby"])
+
+	s := get(standby)
+	require.Nil(t, s["wal_directory"])
+	require.Equal(t, []any{}, s["databases"])
+	require.Equal(t, []any{}, s["slru"])
+	sb := s["standby"].(map[string]any)
+	require.Equal(t, true, sb["replay_paused"])
+	require.Equal(t, []any{map[string]any{"database": "app", "reason": "snapshot", "per_second": float64(1)}}, sb["conflicts"])
+	require.Equal(t, map[string]any{"hit": float64(200)}, sb["prefetch_blocks_per_second"])
+}
