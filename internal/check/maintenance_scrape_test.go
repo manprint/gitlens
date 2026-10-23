@@ -127,6 +127,7 @@ func TestVacuumProgress_ScrapeCoversProbeAndViews(t *testing.T) {
 				return &mockRows{}, nil
 			}
 		},
+		queryRowFunc: maintenanceAnswers,
 	}
 	r, err := (&vacuumProgressCheck{}).Scrape(context.Background(), maintenanceTarget(conn))
 	require.NoError(t, err)

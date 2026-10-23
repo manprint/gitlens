@@ -73,11 +73,15 @@ func (c *vacuumProgressCheck) Scrape(ctx context.Context, t Target) (Result, err
 	}
 	var result Result
 	oldestFirst(jobs)
+	maintenance, err := currentDatabase(ctx, conn)
+	if err != nil {
+		return Result{}, err
+	}
 	for i, job := range jobs {
 		if i == 20 {
 			break
 		}
-		labels := map[string]string{"datname": job.datname, "relname": vacuumRelname(ctx, t, c.Timeout(), job.datname, job.relid), "phase": job.phase}
+		labels := map[string]string{"datname": job.datname, "relname": vacuumRelname(ctx, t, c.Timeout(), conn, maintenance, job.datname, job.relid), "phase": job.phase}
 		addVacuumMetric(&result, "pg_vacuum_heap_blks_total", float64(job.total), labels)
 		addVacuumMetric(&result, "pg_vacuum_heap_blks_scanned", float64(job.scanned), labels)
 		addVacuumMetric(&result, "pg_vacuum_heap_blks_vacuumed", float64(job.vacuumed), labels)
@@ -110,7 +114,7 @@ func (c *vacuumProgressCheck) Scrape(ctx context.Context, t Target) (Result, err
 		if i == 20 {
 			break
 		}
-		labels := map[string]string{"datname": job.datname, "relname": vacuumRelname(ctx, t, c.Timeout(), job.datname, job.relid), "phase": job.phase}
+		labels := map[string]string{"datname": job.datname, "relname": vacuumRelname(ctx, t, c.Timeout(), conn, maintenance, job.datname, job.relid), "phase": job.phase}
 		addVacuumMetric(&result, "pg_analyze_sample_blks_total", float64(job.total), labels)
 		addVacuumMetric(&result, "pg_analyze_sample_blks_scanned", float64(job.scanned), labels)
 	}
@@ -157,23 +161,40 @@ func addVacuumMetric(r *Result, name string, value float64, labels map[string]st
 	r.Metrics = append(r.Metrics, pgtype.Metric{Name: name, Value: value, Kind: pgtype.KindGauge, Labels: labels})
 }
 
+// currentDatabase names the database conn is attached to. The shared
+// connection is attached to the maintenance database, which is the one whose
+// pg_class vacuumRelname can read through it.
+func currentDatabase(ctx context.Context, conn Conn) (string, error) {
+	var name string
+	err := conn.QueryRow(ctx, `SELECT current_database()`).Scan(&name)
+	return name, err
+}
+
 // vacuumRelname names the relation a progress row is about. The progress views
-// give the relation's OID for every database, but pg_class answers only for
-// the database the connection is attached to, which is the maintenance
-// database at instance scope. The name is therefore read from the row's own
-// database. When that database cannot be read the name stays empty, as it
-// always was for a relation outside the maintenance database.
-func vacuumRelname(ctx context.Context, t Target, timeout time.Duration, datname string, relid uint32) string {
+// give the relation's OID for every database, but pg_class answers only for the
+// database its connection is attached to. The row's own database is read
+// through its own connection, and only when the agent collects from it: the
+// connection manager would otherwise open a pool to a database the agent does
+// not monitor. When the name cannot be read it stays empty, and the relid still
+// identifies the relation.
+func vacuumRelname(ctx context.Context, t Target, timeout time.Duration, shared Conn, maintenance, datname string, relid uint32) string {
 	if relid == 0 {
 		return ""
 	}
-	conn, err := t.ConnFor(ctx, datname)
-	if err != nil {
-		return ""
-	}
-	defer conn.Release()
-	if err := ApplySessionLimits(ctx, conn, timeout); err != nil {
-		return ""
+	conn := shared
+	if datname != maintenance {
+		if !monitorsDatabase(t, datname) {
+			return ""
+		}
+		other, err := t.ConnFor(ctx, datname)
+		if err != nil {
+			return ""
+		}
+		defer other.Release()
+		if err := ApplySessionLimits(ctx, other, timeout); err != nil {
+			return ""
+		}
+		conn = other
 	}
 	var relname string
 	if err := conn.QueryRow(ctx, `SELECT relname FROM pg_class WHERE oid = $1`, relid).Scan(&relname); err != nil {

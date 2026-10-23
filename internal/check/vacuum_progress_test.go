@@ -57,7 +57,7 @@ func TestVacuumProgress_NamesRelationFromItsOwnDatabase(t *testing.T) {
 			return &mockRows{rows: [][]any{{int32(7), "app", uint32(16384), "scanning heap", int64(100), int64(50), int64(0), int64(0), int64(0), int64(0), nil}}}, nil
 		}
 		return &mockRows{}, nil
-	}}
+	}, queryRowFunc: maintenanceAnswers}
 	app := &mockConn{queryRowFunc: func(_ context.Context, sql string, args ...any) pgx.Row {
 		require.Contains(t, sql, "pg_class")
 		require.Equal(t, []any{uint32(16384)}, args)
@@ -69,6 +69,7 @@ func TestVacuumProgress_NamesRelationFromItsOwnDatabase(t *testing.T) {
 			require.Equal(t, "app", datname)
 			return app, nil
 		},
+		Monitored:  map[string]bool{"app": true},
 		ClockValue: clock.System(),
 	}
 	r, err := (&vacuumProgressCheck{}).Scrape(context.Background(), target)
@@ -102,7 +103,7 @@ func TestVacuumProgress_CapIsPartialNotTruncated(t *testing.T) {
 				return &mockRows{rows: rows}, nil
 			}
 			return &mockRows{}, nil
-		}}
+		}, queryRowFunc: maintenanceAnswers}
 		r, err := (&vacuumProgressCheck{}).Scrape(context.Background(), maintenanceTarget(conn))
 		require.NoError(t, err)
 		require.Equal(t, tc.partial, r.Partial, "%d running vacuums", tc.jobs)
@@ -126,7 +127,7 @@ func TestVacuumProgress_KeepsLongestRunningJobs(t *testing.T) {
 			return &mockRows{rows: rows}, nil
 		}
 		return &mockRows{}, nil
-	}}
+	}, queryRowFunc: maintenanceAnswers}
 	r, err := (&vacuumProgressCheck{}).Scrape(context.Background(), maintenanceTarget(conn))
 	require.NoError(t, err)
 	require.Equal(t, 25.0, metricValue(r, "pg_vacuum_jobs_running", nil))
@@ -139,4 +140,65 @@ func TestVacuumProgress_KeepsLongestRunningJobs(t *testing.T) {
 	require.Len(t, kept, 20)
 	require.Contains(t, kept, 25000.0)
 	require.True(t, r.Partial)
+}
+
+// maintenanceAnswers is the shared connection of a scrape: it is attached to
+// the database "postgres", and its pg_class names only that database's relids.
+func maintenanceAnswers(_ context.Context, sql string, args ...any) pgx.Row {
+	switch {
+	case strings.Contains(sql, "current_database()"):
+		return &mockRow{vals: []any{"postgres"}}
+	case strings.Contains(sql, "pg_class"):
+		if args[0] == uint32(1001) {
+			return &mockRow{vals: []any{"maint_t"}}
+		}
+		return &mockRow{err: pgx.ErrNoRows}
+	}
+	return &mockRow{}
+}
+
+// A vacuum in the maintenance database is named through the shared connection,
+// one in a database the agent monitors through its own connection, and one in a
+// database it does not collect from is never connected to at all: the
+// connection manager would open a pool to that name. Its relname stays empty
+// and its relid still identifies it.
+func TestVacuumProgress_NeverConnectsToUnmonitoredDatabase(t *testing.T) {
+	t.Parallel()
+	maint := &mockConn{queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+		if strings.Contains(sql, "pg_stat_progress_vacuum") && !strings.Contains(sql, "information_schema") {
+			return &mockRows{rows: [][]any{
+				{int32(1), "postgres", uint32(1001), "scanning heap", int64(10), int64(5), int64(0), int64(0), int64(0), int64(0), nil},
+				{int32(2), "app", uint32(16384), "scanning heap", int64(10), int64(5), int64(0), int64(0), int64(0), int64(0), nil},
+				{int32(3), "secret", uint32(2002), "scanning heap", int64(10), int64(5), int64(0), int64(0), int64(0), int64(0), nil},
+			}}, nil
+		}
+		return &mockRows{}, nil
+	}, queryRowFunc: maintenanceAnswers}
+	app := &mockConn{queryRowFunc: func(_ context.Context, sql string, args ...any) pgx.Row {
+		if strings.Contains(sql, "current_database()") {
+			return &mockRow{vals: []any{"app"}}
+		}
+		return &mockRow{vals: []any{"zz_vac_probe"}}
+	}}
+	var opened []string
+	target := &SimpleTarget{
+		ConnFunc: func(context.Context) (Conn, error) { return maint, nil },
+		ConnForFunc: func(_ context.Context, datname string) (Conn, error) {
+			opened = append(opened, datname)
+			require.Equal(t, "app", datname, "a database outside the monitored set was opened")
+			return app, nil
+		},
+		Monitored:  map[string]bool{"postgres": true, "app": true},
+		ClockValue: clock.System(),
+	}
+	r, err := (&vacuumProgressCheck{}).Scrape(context.Background(), target)
+	require.NoError(t, err)
+	require.Equal(t, []string{"app"}, opened)
+	names := map[string]string{}
+	for _, m := range r.Metrics {
+		if m.Name == "pg_vacuum_heap_blks_total" {
+			names[m.Labels["datname"]] = m.Labels["relname"]
+		}
+	}
+	require.Equal(t, map[string]string{"postgres": "maint_t", "app": "zz_vac_probe", "secret": ""}, names)
 }

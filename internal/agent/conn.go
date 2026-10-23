@@ -105,6 +105,9 @@ type Manager struct {
 	// for databases without one; empty means the maintenance database. See
 	// LocateStatements.
 	statementsDB string
+	// monitored is the set of databases the agent collects from, which
+	// MonitorsDatabase answers from. See SetMonitoredDatabases.
+	monitored map[string]bool
 
 	endpointOnce sync.Once
 	addr         string
@@ -751,6 +754,29 @@ func (m *Manager) ConnFor(ctx context.Context, datname string) (check.Conn, erro
 func (m *Manager) Database() string {
 	return m.target.name
 }
+
+// SetMonitoredDatabases records the databases the agent collects from. The
+// scheduler calls it before the database-scoped checks start, so no check sees
+// an earlier or partial set.
+func (m *Manager) SetMonitoredDatabases(names []string) {
+	set := make(map[string]bool, len(names))
+	for _, name := range names {
+		set[name] = true
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.monitored = set
+}
+
+// MonitorsDatabase implements check.DatabaseMonitor. Before SetMonitoredDatabases
+// runs it answers no, so a check reads nothing it cannot confirm is monitored.
+func (m *Manager) MonitorsDatabase(datname string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.monitored[datname]
+}
+
+var _ check.DatabaseMonitor = (*Manager)(nil)
 
 const statementsInstalled = `SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements')`
 

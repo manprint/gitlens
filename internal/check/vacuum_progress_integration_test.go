@@ -29,6 +29,13 @@ func (m *perDatabaseTarget) ConnFor(ctx context.Context, datname string) (Conn, 
 	return conn, nil
 }
 
+// MonitorsDatabase collects from exactly the databases it has pools for, as the
+// agent does for its monitored set.
+func (m *perDatabaseTarget) MonitorsDatabase(datname string) bool {
+	_, ok := m.pools[datname]
+	return ok
+}
+
 func TestINTVAC001_NoRunningVacuumReportsZero(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
 		pg.Lock(t)

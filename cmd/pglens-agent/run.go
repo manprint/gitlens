@@ -659,6 +659,14 @@ func addScheduleEntries(scheduler *agent.Scheduler, mgr *agent.Manager, ctx cont
 			scheduled[db.Name] = true
 		}
 	}
+	// The instance-scope checks read other databases only through
+	// ConnFor, and only the ones collected from here: this is the same set
+	// reportScheduled reports as monitored.
+	monitored := make([]string, 0, len(scheduled))
+	for name := range scheduled {
+		monitored = append(monitored, name)
+	}
+	mgr.SetMonitoredDatabases(monitored)
 
 	for _, c := range check.All() {
 		interval := cfg.GetCheckInterval(c.Name())
