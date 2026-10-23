@@ -333,6 +333,23 @@ func (d databaseScopedTarget) StatementsDatabase() string {
 	return ""
 }
 
+// scheduledConnForer is implemented by a Manager. Its scheduled checks reach
+// their databases through ScheduledConnFor, not through ConnFor, which commands
+// use.
+type scheduledConnForer interface {
+	ScheduledConnFor(ctx context.Context, datname string) (check.Conn, error)
+}
+
+// ConnFor is what the checks call to reach their database, the entry's own
+// one or the statements database. The schedule was built at startup, so these
+// checks use the startup selection rather than the latest one a command sees.
+func (d databaseScopedTarget) ConnFor(ctx context.Context, datname string) (check.Conn, error) {
+	if s, ok := d.Target.(scheduledConnForer); ok {
+		return s.ScheduledConnFor(ctx, datname)
+	}
+	return d.Target.ConnFor(ctx, datname)
+}
+
 func (s *Scheduler) scrapeEntry(parentCtx context.Context, entry schedEntry) {
 	ctx, cancel := context.WithTimeout(parentCtx, entry.check.Timeout())
 	defer cancel()

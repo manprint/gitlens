@@ -111,10 +111,13 @@ type Manager struct {
 	// for databases without one; empty means the maintenance database. See
 	// LocateStatements.
 	statementsDB string
-	// monitored holds every database a discovery has selected, and ownDB is
-	// the one the DSN names. ConnFor opens a pool only for these; see
-	// requireMonitored. The set only grows, see Discover.
+	// monitored holds the databases the latest discovery selected, and ownDB is
+	// the one the DSN names. ConnFor, which commands use, opens a pool only for
+	// these; see requireMonitored. scheduled holds the databases the first
+	// discovery selected, which the checks scheduled at startup were built from;
+	// see ScheduledConnFor.
 	monitored map[string]bool
+	scheduled map[string]bool
 	ownDB     string
 
 	endpointOnce sync.Once
@@ -322,15 +325,21 @@ func (m *Manager) Discover(ctx context.Context) ([]wire.Database, error) {
 	}
 
 	selected := selectDatabases(dbs, m.opts)
-	// The set only grows. The checks scheduled at startup keep their
-	// databases when the budget later ranks one out, and the statements
-	// database was picked from this set, so a shrinking set would fail those
-	// checks on every tick. Excluded and unknown names never enter it.
-	m.mu.Lock()
+	latest := make(map[string]bool, len(selected))
 	for _, db := range selected {
 		if db.Monitored {
-			m.monitored[db.Name] = true
+			latest[db.Name] = true
 		}
+	}
+	// Each discovery replaces the set a command may open, so a database the
+	// budget ranks out is refused to commands. The first discovery also fixes
+	// the set the startup schedule runs against: addScheduleEntries makes it
+	// before any command is served, and a scheduled check keeps its database
+	// when the budget later ranks it out. Neither map is written after this.
+	m.mu.Lock()
+	m.monitored = latest
+	if m.scheduled == nil {
+		m.scheduled = latest
 	}
 	m.mu.Unlock()
 	return selected, nil
@@ -801,11 +810,27 @@ func (m *Manager) ConnFor(ctx context.Context, datname string) (check.Conn, erro
 	return m.ForDatabase(ctx, datname)
 }
 
-// requireMonitored refuses a database that discovery did not select. ForDatabase
-// opens a pool for whatever name it is given: a command naming rdsadmin would
-// connect the monitoring role there, and every unknown name would take one of
-// the LRU slots that hold the real pools. A name the cache does not hold gets
-// one discovery first, which picks up a database created since the last one.
+// ScheduledConnFor is ConnFor for the checks scheduled at startup. A database
+// the first discovery selected stays reachable after the budget ranks it out,
+// because its checks are still scheduled. The statements database and the one
+// the DSN names are reachable as well. Any other name is refused without a
+// discovery, since the schedule never had it.
+func (m *Manager) ScheduledConnFor(ctx context.Context, datname string) (check.Conn, error) {
+	if datname == "" {
+		return m.Shared(ctx)
+	}
+	if !m.isScheduled(datname) {
+		return nil, rejectedf("database %q is not scheduled on this target", datname)
+	}
+	return m.ForDatabase(ctx, datname)
+}
+
+// requireMonitored refuses a database the latest discovery did not select.
+// ForDatabase opens a pool for whatever name it is given: a command naming
+// rdsadmin would connect the monitoring role there, and every unknown name would
+// take one of the LRU slots that hold the real pools. A name the latest selection
+// does not hold gets one discovery first, which picks up a database created since
+// the last one, or one the budget has ranked in since.
 func (m *Manager) requireMonitored(ctx context.Context, datname string) error {
 	if m.isMonitored(datname) {
 		return nil
@@ -819,12 +844,21 @@ func (m *Manager) requireMonitored(ctx context.Context, datname string) error {
 	return rejectedf("database %q is not monitored on this target", datname)
 }
 
-// isMonitored reports whether datname may be opened: a database discovery
-// selected, or the one the DSN names, which the agent connects to anyway.
+// isMonitored reports whether a command may open datname: a database the latest
+// discovery selected, or the one the DSN names, which the agent connects to anyway.
 func (m *Manager) isMonitored(datname string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return datname == m.ownDB || m.monitored[datname]
+}
+
+// isScheduled reports whether a scheduled check may open datname: a database the
+// first discovery selected, the statements database, or the one the DSN names.
+// See ScheduledConnFor.
+func (m *Manager) isScheduled(datname string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return datname == m.ownDB || datname == m.statementsDB || m.scheduled[datname]
 }
 func (m *Manager) Database() string {
 	return m.target.name

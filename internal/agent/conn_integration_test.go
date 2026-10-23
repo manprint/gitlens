@@ -17,6 +17,7 @@ import (
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/command"
 	"github.com/manprint/pglens/internal/pgtype"
+	"github.com/manprint/pglens/internal/wire"
 	"github.com/manprint/pglens/test/pgtest"
 	"github.com/stretchr/testify/require"
 )
@@ -600,72 +601,152 @@ func TestINTCONN015_HeldDatabaseIsNotEvicted(t *testing.T) {
 	})
 }
 
-// INT-CONN-016: a database discovery selected stays reachable after the budget
-// ranks it out. The checks scheduled at startup were given that database, and
-// refusing it fails them on every tick. A database discovery never selected is
-// still refused (INT-CONN-009).
-func TestINTCONN016_SelectedDatabaseStaysReachableAfterRankMoves(t *testing.T) {
+// INT-CONN-016: the checks scheduled at startup keep their database after the
+// budget ranks it out. The schedule was built from the startup selection and
+// reaches its databases through the scheduler's wrapper, so refusing one fails
+// those checks on every tick.
+func TestINTCONN016_ScheduledDatabaseStaysReachableAfterRankMoves(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
 		pg.Lock(t)
 		ctx := context.Background()
-		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
-		// Both databases start with no commits, so the name breaks the tie and
-		// zz_int016_a is the one a budget of one keeps.
-		for _, name := range []string{"zz_int016_a", "zz_int016_b"} {
-			_, err := admin.Exec(ctx, "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)")
-			require.NoError(t, err)
-			_, err = admin.Exec(ctx, "CREATE DATABASE "+name)
-			require.NoError(t, err)
-			t.Cleanup(func() {
-				_, _ = admin.Exec(context.Background(), "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)")
-			})
-		}
-
-		opts := DefaultConnOptions()
-		opts.MaxDatabases = 1
-		opts.Include = []*regexp.Regexp{regexp.MustCompile(`^zz_int016_`)}
-		mgr, err := NewManager(ctx, "rank-target", pg.DSN("postgres", pgtest.RoleT0), opts, clock.System())
-		require.NoError(t, err)
-		defer mgr.Close()
-
+		mgr := newRankManager(t, pg, "zz_int016_")
 		dbs, err := mgr.Discover(ctx)
 		require.NoError(t, err)
-		require.NotEmpty(t, dbs)
-		conn, err := mgr.ConnFor(ctx, "zz_int016_a")
-		require.NoError(t, err, "the database selected at startup must be reachable")
-		conn.Release()
+		require.True(t, monitored(dbs, "zz_int016_a"), "the startup selection must keep zz_int016_a")
+		require.NoError(t, scheduledScrape(t, mgr, "zz_int016_a"))
 
-		// Commits on zz_int016_b move it ahead in the ranking. A backend's
-		// counters reach pg_stat_database only when they are flushed, so the
-		// flush is forced and the ranking is polled.
-		b := pg.Pool(t, "zz_int016_b", pgtest.RoleT0)
-		bconn, err := b.Acquire(ctx)
+		rankAhead(t, pg, mgr, "zz_int016_b")
+		require.NoError(t, scheduledScrape(t, mgr, "zz_int016_a"),
+			"a check scheduled at startup must keep its database after the budget ranks it out")
+	})
+}
+
+// INT-CONN-017: a command refuses a database the budget has ranked out, even
+// one the startup selection picked. The latest selection decides what a command
+// may open; the scheduled path (INT-CONN-016) keeps the startup selection.
+func TestINTCONN017_CommandRefusesDatabaseRankedOut(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		mgr := newRankManager(t, pg, "zz_int017_")
+		dbs, err := mgr.Discover(ctx)
 		require.NoError(t, err)
-		for range 20 {
-			_, err := bconn.Exec(ctx, "SELECT 1")
-			require.NoError(t, err)
+		require.True(t, monitored(dbs, "zz_int017_a"), "the startup selection must keep zz_int017_a")
+		rankAhead(t, pg, mgr, "zz_int017_b")
+
+		var rejected *RejectedError
+		conn, err := mgr.ConnFor(ctx, "zz_int017_a")
+		if conn != nil {
+			conn.Release()
 		}
-		_, err = bconn.Exec(ctx, "SELECT pg_stat_force_next_flush()")
-		require.NoError(t, err)
-		bconn.Release()
+		require.ErrorAs(t, err, &rejected, "a command must not open the database the budget ranked out")
 
-		require.Eventually(t, func() bool {
-			dbs, err := mgr.Discover(ctx)
-			if err != nil {
-				return false
-			}
-			for _, db := range dbs {
-				if db.Monitored && db.Name == "zz_int016_b" {
-					return true
-				}
-			}
-			return false
-		}, 15*time.Second, 200*time.Millisecond, "the commits never moved zz_int016_b ahead of zz_int016_a")
-
-		// The budget now selects only zz_int016_b. zz_int016_a was selected at
-		// startup, so its checks keep their database.
-		conn, err = mgr.ConnFor(ctx, "zz_int016_a")
-		require.NoError(t, err, "zz_int016_a must stay reachable after the budget ranks it out")
+		conn, err = mgr.ConnFor(ctx, "zz_int017_b")
+		require.NoError(t, err, "the database the budget selects stays reachable for a command")
 		conn.Release()
 	})
+}
+
+// INT-CONN-018: a database that a later discovery selected, and the budget then
+// ranked out, is refused by a command. The startup schedule never had it, so
+// the scheduled path refuses it as well.
+func TestINTCONN018_LaterSelectedDatabaseIsRefusedWhenRankedOut(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		mgr := newRankManager(t, pg, "zz_int018_")
+		dbs, err := mgr.Discover(ctx)
+		require.NoError(t, err)
+		require.True(t, monitored(dbs, "zz_int018_a"), "the startup selection must keep zz_int018_a")
+
+		rankAhead(t, pg, mgr, "zz_int018_b")
+		rankAhead(t, pg, mgr, "zz_int018_a")
+
+		var rejected *RejectedError
+		conn, err := mgr.ConnFor(ctx, "zz_int018_b")
+		if conn != nil {
+			conn.Release()
+		}
+		require.ErrorAs(t, err, &rejected, "a command must not open a database the budget ranked out")
+
+		conn, err = databaseScopedTarget{Target: mgr, database: "zz_int018_b"}.ConnFor(ctx, "zz_int018_b")
+		if conn != nil {
+			conn.Release()
+		}
+		require.ErrorAs(t, err, &rejected, "the scheduled path must not open a database the startup selection never kept")
+	})
+}
+
+// newRankManager creates prefix+"a" and prefix+"b" and returns a manager that
+// selects only those databases, with a budget of one. Both start with no
+// commits, so the name breaks the tie and "a" is the database the startup
+// selection keeps.
+func newRankManager(t *testing.T, pg *pgtest.PG, prefix string) *Manager {
+	t.Helper()
+	ctx := context.Background()
+	admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+	for _, name := range []string{prefix + "a", prefix + "b"} {
+		_, err := admin.Exec(ctx, "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "CREATE DATABASE "+name)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = admin.Exec(context.Background(), "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)")
+		})
+	}
+	opts := DefaultConnOptions()
+	opts.MaxDatabases = 1
+	opts.Include = []*regexp.Regexp{regexp.MustCompile("^" + prefix)}
+	mgr, err := NewManager(ctx, "rank-target", pg.DSN("postgres", pgtest.RoleT0), opts, clock.System())
+	require.NoError(t, err)
+	t.Cleanup(mgr.Close)
+	return mgr
+}
+
+// rankAhead commits on name until a discovery of mgr selects it. A backend's
+// counters reach pg_stat_database only when they are flushed, so each round
+// forces the flush and polls the ranking.
+func rankAhead(t *testing.T, pg *pgtest.PG, mgr *Manager, name string) {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := pg.Pool(t, name, pgtest.RoleT0).Acquire(ctx)
+	require.NoError(t, err)
+	defer conn.Release()
+	require.Eventually(t, func() bool {
+		for range 20 {
+			if _, err := conn.Exec(ctx, "SELECT 1"); err != nil {
+				return false
+			}
+		}
+		if _, err := conn.Exec(ctx, "SELECT pg_stat_force_next_flush()"); err != nil {
+			return false
+		}
+		dbs, err := mgr.Discover(ctx)
+		return err == nil && monitored(dbs, name)
+	}, 15*time.Second, 200*time.Millisecond, "the commits never moved %s ahead in the ranking", name)
+}
+
+// scheduledScrape runs table_stats against name the way a check scheduled at
+// startup runs: through the target the scheduler wraps around the Manager.
+func scheduledScrape(t *testing.T, mgr *Manager, name string) error {
+	t.Helper()
+	var table check.Check
+	for _, c := range check.All() {
+		if c.Name() == "table_stats" {
+			table = c
+		}
+	}
+	require.NotNil(t, table)
+	_, err := table.Scrape(context.Background(), databaseScopedTarget{Target: mgr, database: name})
+	return err
+}
+
+// monitored reports whether a discovery selected name.
+func monitored(dbs []wire.Database, name string) bool {
+	for _, db := range dbs {
+		if db.Monitored && db.Name == name {
+			return true
+		}
+	}
+	return false
 }
