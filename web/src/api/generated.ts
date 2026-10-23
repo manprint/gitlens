@@ -1985,6 +1985,15 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            /** @description A silence with this silence_id already exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Alert storage is unavailable. */
             503: {
                 headers: {

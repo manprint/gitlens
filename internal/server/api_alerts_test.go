@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
 
@@ -264,4 +265,14 @@ func TestAlertAPI_UnavailableBranches(t *testing.T) {
 	for _, tc := range routes {
 		require.Equal(t, tc.status, serveAlert(t, api, tc.method, tc.path, tc.body).Code, tc.path)
 	}
+}
+
+// TestAlerts_DuplicateSilenceIDIs409: a silence id the client chose is the
+// key of the row. The store refuses a second insert with it, and that is a
+// conflict for the client, not a server failure.
+func TestAlerts_DuplicateSilenceIDIs409(t *testing.T) {
+	pool := &mockPool{execErrs: []error{&pgconn.PgError{Code: "23505"}}}
+	api := newAlertAPIForTest(pool, nil)
+	w := serveAlert(t, api, http.MethodPost, "/api/v1/silences", `{"silence_id":"`+uuid.NewString()+`","matchers":[{"name":"rule_id","value":"custom"}],"reason":"maintenance","starts_at":"2026-08-29T00:00:00Z","ends_at":"2026-08-30T00:00:00Z"}`)
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 }

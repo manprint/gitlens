@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/manprint/pglens/internal/alert"
@@ -159,4 +160,43 @@ func TestAlertAPI_INT_ALERTAPI_006_RuleEditDoesNotRevertAnother(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, `SELECT enabled, threshold FROM alert_rules WHERE rule_id=$1`, rule).Scan(&enabled, &threshold))
 	require.False(t, enabled, "the first edit's enabled=false must survive the second edit")
 	require.Equal(t, 45.0, threshold)
+}
+
+// TestAlertAPI_INT_ALERTAPI_007_SilenceIDAndDeleteOrder: a silence id that is
+// already taken is a conflict, not a server error. Deleting a silence that has
+// not started ends it at its own start, so the row stays well ordered and
+// inactive. Deleting an expired silence keeps the end it had.
+func TestAlertAPI_INT_ALERTAPI_007_SilenceIDAndDeleteOrder(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := contextBackground()
+	r := alertRouter(NewAlertAPI(pool, alert.NewPgStore(pool)))
+	now := time.Now().UTC()
+	id := uuid.NewString()
+	body := fmt.Sprintf(`{"silence_id":%q,"matchers":[{"name":"rule_id","value":"agent_down"}],"reason":"maintenance","starts_at":%q,"ends_at":%q}`,
+		id, now.Add(time.Hour).Format(time.RFC3339), now.Add(2*time.Hour).Format(time.RFC3339))
+	post := func() int {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/silences", strings.NewReader(body)))
+		return w.Code
+	}
+	require.Equal(t, http.StatusCreated, post())
+	require.Equal(t, http.StatusConflict, post(), "the same silence id again is a conflict")
+
+	del := func(id string) int {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/api/v1/silences/"+id, nil))
+		return w.Code
+	}
+	require.Equal(t, http.StatusNoContent, del(id))
+	var startsAt, endsAt time.Time
+	require.NoError(t, pool.QueryRow(ctx, `SELECT starts_at, ends_at FROM silences WHERE silence_id=$1`, id).Scan(&startsAt, &endsAt))
+	require.True(t, startsAt.Equal(endsAt), "a scheduled silence ends at its own start, starts %s ends %s", startsAt, endsAt)
+
+	expired := uuid.New()
+	_, err := pool.Exec(ctx, `INSERT INTO silences (silence_id, matchers, reason, starts_at, ends_at) VALUES ($1,'[{"name":"rule_id","value":"agent_down"}]','maintenance',$2,$3)`, expired, now.Add(-2*time.Hour), now.Add(-time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNoContent, del(expired.String()))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT ends_at FROM silences WHERE silence_id=$1`, expired).Scan(&endsAt))
+	require.WithinDuration(t, now.Add(-time.Hour), endsAt, time.Second, "an expired silence keeps the end it had")
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/manprint/pglens/internal/alert"
@@ -326,6 +327,13 @@ func (a *AlertAPI) createSilence(w http.ResponseWriter, r *http.Request) {
 	}
 	raw, _ := json.Marshal(s.Matchers)
 	if _, err := a.pool.Exec(r.Context(), `INSERT INTO silences (silence_id,matchers,reason,starts_at,ends_at) VALUES ($1,$2,$3,$4,$5)`, s.ID, raw, s.Reason, s.StartsAt, s.EndsAt); err != nil {
+		// The silence id is the row's primary key. A second create with the
+		// same id is a conflict the client can resolve, not a server failure.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			writeError(w, 409, "silence id already exists", s.ID.String())
+			return
+		}
 		writeError(w, 500, "silence create failed", err.Error())
 		return
 	}
@@ -341,7 +349,11 @@ func (a *AlertAPI) deleteSilence(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid silence id", err.Error())
 		return
 	}
-	tag, err := a.pool.Exec(r.Context(), `UPDATE silences SET ends_at=now() WHERE silence_id=$1`, id)
+	// Ending a silence that has not started at now() would put ends_at before
+	// starts_at. Such a silence ends at its own start instead, which keeps the
+	// row ordered and inactive. An active silence ends now, and an expired one
+	// keeps the end it had, so a delete never moves the silence's history.
+	tag, err := a.pool.Exec(r.Context(), `UPDATE silences SET ends_at = CASE WHEN starts_at > now() THEN starts_at ELSE LEAST(ends_at, now()) END WHERE silence_id=$1`, id)
 	if err != nil {
 		writeError(w, 500, "silence delete failed", err.Error())
 		return
