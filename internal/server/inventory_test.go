@@ -154,8 +154,9 @@ func TestInventory_MockPool_NewInstance_WithDatabases(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, res.Accepted)
 	require.Equal(t, 0, res.Rejected)
-	// insert cluster, ensure agent, insert instance, 2x upsert database
-	require.Equal(t, 5, pool.execCalls)
+	// insert cluster, ensure agent, insert instance, 2x upsert database, and the
+	// removal of the databases the list no longer names
+	require.Equal(t, 6, pool.execCalls)
 }
 
 // A role change of an existing instance is written by the pipeline's topology

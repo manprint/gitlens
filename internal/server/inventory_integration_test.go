@@ -558,3 +558,52 @@ func truncateAll(t *testing.T, pool *pgxpool.Pool) {
 }
 
 var _ = fmt.Sprintf
+
+// TestInventory_DroppedDatabaseLeavesTheInstance: a database the agent stops
+// listing was dropped, and its row used to stay monitored with a frozen
+// last_seen, so the instance page kept showing it. A database still listed
+// stays, a budget skip included. An envelope with no database list, which an
+// agent sends when discovery failed, removes nothing.
+func TestInventory_DroppedDatabaseLeavesTheInstance(t *testing.T) {
+	pool := getTestPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	inv := NewInventory(pool)
+	iid := uuid.New()
+	agentID := uuid.NewString()
+	push := func(dbs ...wire.Database) {
+		t.Helper()
+		res, err := inv.Upsert(ctx, wire.Envelope{
+			AgentID: agentID,
+			Instances: []wire.Instance{{
+				InstanceID: iid.String(), ClusterID: pgtype.ClusterID(7778).String(), ClusterIDSource: string(pgtype.IDSourceManual),
+				Addr: "10.0.0.5", Port: 5432, Role: "primary", PGVersion: 170000, PermTier: "T0", Databases: dbs,
+			}},
+		})
+		require.NoError(t, err)
+		require.Equal(t, 1, res.Accepted)
+	}
+	names := func() []string {
+		t.Helper()
+		rows, err := pool.Query(ctx, `SELECT datname FROM databases WHERE instance_id=$1 ORDER BY datname`, iid)
+		require.NoError(t, err)
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var name string
+			require.NoError(t, rows.Scan(&name))
+			out = append(out, name)
+		}
+		require.NoError(t, rows.Err())
+		return out
+	}
+
+	push(wire.Database{Name: "app", Monitored: true}, wire.Database{Name: "scratch", Monitored: true}, wire.Database{Name: "legacy", SkipReason: "db_budget"})
+	require.Equal(t, []string{"app", "legacy", "scratch"}, names())
+
+	push(wire.Database{Name: "app", Monitored: true}, wire.Database{Name: "legacy", SkipReason: "db_budget"})
+	require.Equal(t, []string{"app", "legacy"}, names(), "a dropped database is gone; a budget skip is still listed")
+
+	push()
+	require.Equal(t, []string{"app", "legacy"}, names(), "an envelope without a database list removes nothing")
+}

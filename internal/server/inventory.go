@@ -254,6 +254,19 @@ func (inv *Inventory) upsertOne(ctx context.Context, tenantID string, agentID uu
 			return fmt.Errorf("upsert database %s for instance %s: %w", db.Name, inst.InstanceID, err)
 		}
 	}
+	// A database the agent no longer lists was dropped, and its row would
+	// otherwise stay monitored with a frozen last_seen. An empty list is not
+	// evidence of that: the agent sends none when discovery fails, so nothing
+	// is removed then.
+	if len(inst.Databases) > 0 {
+		names := make([]string, 0, len(inst.Databases))
+		for _, db := range inst.Databases {
+			names = append(names, db.Name)
+		}
+		if _, err := inv.pool.Exec(ctx, `DELETE FROM databases WHERE instance_id=$1 AND NOT (datname = ANY($2))`, instUUID, names); err != nil {
+			return fmt.Errorf("remove databases no longer reported for instance %s: %w", inst.InstanceID, err)
+		}
+	}
 	return nil
 }
 
