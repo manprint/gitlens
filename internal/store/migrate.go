@@ -4,7 +4,9 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +15,16 @@ import (
 
 //go:embed migrations/*.sql
 var migrationFS embed.FS
+
+// migrationName is the file name every .sql migration must have: a four digit
+// version, an underscore, a name and the .sql suffix.
+var migrationName = regexp.MustCompile(`^([0-9]{4})_.+\.sql$`)
+
+// migration is one migration file and the version it applies.
+type migration struct {
+	version int
+	name    string
+}
 
 // migrationUnlockTimeout bounds the unlock after the migrations ran. It starts
 // when the unlock does, not when the lock was taken: a long migration must not
@@ -60,39 +72,65 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 			files = append(files, e.Name())
 		}
 	}
-	sort.Strings(files)
-	for _, name := range files {
-		var version int
-		if _, err := fmt.Sscanf(name, "%04d_", &version); err != nil {
-			continue
-		}
+	migrations, err := parseMigrations(files)
+	if err != nil {
+		return err
+	}
+	for _, m := range migrations {
 		var exists bool
-		if err := conn.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version=$1)`, version).Scan(&exists); err != nil {
-			return fmt.Errorf("check migration %d: %w", version, err)
+		if err := conn.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version=$1)`, m.version).Scan(&exists); err != nil {
+			return fmt.Errorf("check migration %d: %w", m.version, err)
 		}
 		if exists {
 			continue
 		}
-		data, err := migrationFS.ReadFile("migrations/" + name)
+		data, err := migrationFS.ReadFile("migrations/" + m.name)
 		if err != nil {
-			return fmt.Errorf("read %s: %w", name, err)
+			return fmt.Errorf("read %s: %w", m.name, err)
 		}
 		// Run migration in a transaction
 		tx, err := conn.Begin(ctx)
 		if err != nil {
-			return fmt.Errorf("begin tx for %d: %w", version, err)
+			return fmt.Errorf("begin tx for %d: %w", m.version, err)
 		}
 		if _, err := tx.Exec(ctx, string(data)); err != nil {
 			_ = tx.Rollback(ctx)
-			return fmt.Errorf("apply %s: %w", name, err)
+			return fmt.Errorf("apply %s: %w", m.name, err)
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations(version) VALUES ($1)`, version); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations(version) VALUES ($1)`, m.version); err != nil {
 			_ = tx.Rollback(ctx)
-			return fmt.Errorf("record %d: %w", version, err)
+			return fmt.Errorf("record %d: %w", m.version, err)
 		}
 		if err := tx.Commit(ctx); err != nil {
-			return fmt.Errorf("commit %d: %w", version, err)
+			return fmt.Errorf("commit %d: %w", m.version, err)
 		}
 	}
 	return nil
+}
+
+// parseMigrations checks every migration name and returns the migrations in
+// version order. A name that does not match, or a version that two files
+// share, is an error rather than a skip: a skipped file is a schema change the
+// database never receives, and the server would run without it and say nothing.
+// It runs over the whole set before any migration is applied.
+func parseMigrations(names []string) ([]migration, error) {
+	seen := make(map[int]string, len(names))
+	out := make([]migration, 0, len(names))
+	for _, name := range names {
+		match := migrationName.FindStringSubmatch(name)
+		if match == nil {
+			return nil, fmt.Errorf("migration %s: name must be NNNN_name.sql", name)
+		}
+		version, err := strconv.Atoi(match[1])
+		if err != nil {
+			return nil, fmt.Errorf("migration %s: %w", name, err)
+		}
+		if other, dup := seen[version]; dup {
+			return nil, fmt.Errorf("migrations %s and %s both have version %d", other, name, version)
+		}
+		seen[version] = name
+		out = append(out, migration{version: version, name: name})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].version < out[j].version })
+	return out, nil
 }
