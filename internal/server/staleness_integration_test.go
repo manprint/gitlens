@@ -548,3 +548,50 @@ func TestINTSTALE012_RevokedPrimaryRaisesNoNoPrimary(t *testing.T) {
 	require.Zero(t, noPrimary(revokedCID), "a cluster whose only primary is revoked must raise no no_primary_in_cluster")
 	require.Equal(t, 1, noPrimary(liveCID), "a cluster whose primary went silent must still raise no_primary_in_cluster")
 }
+
+// INT-STALE-013: a standby that stops reporting loses the topology edges it
+// reported, so its upstream no longer counts it as a streaming standby. A live
+// standby's edge to the same primary stays.
+func TestINTSTALE013_SilentInstancesEdgesArePurged(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	cid := store.ToDB(pgtype.ClusterID(1))
+	agent := uuid.New()
+	primary, live, silent := uuid.New(), uuid.New(), uuid.New()
+	_, err := pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual')`, cid)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen) VALUES
+		($1,'default',$4,$5,'10.0.0.1',5432,170000,'primary','T0', now()),
+		($2,'default',$4,$5,'10.0.0.2',5432,170000,'standby','T0', now()),
+		($3,'default',$4,$5,'10.0.0.3',5432,170000,'standby','T0', now() - interval '2 hours')`,
+		primary, live, silent, cid, agent)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO topology_edges (tenant_id, cluster_id, from_instance, to_instance, edge_type, confidence) VALUES
+		('default',$1,$2,$3,'streaming','high'),
+		('default',$1,$4,$3,'streaming','high')`, cid, live, primary, silent)
+	require.NoError(t, err)
+
+	s := NewStaleness(pool, clock.NewFake(time.Now()))
+	s.mu.Lock()
+	s.conn = mustAcquire(t, pool)
+	s.hasLock = true
+	s.mu.Unlock()
+	require.NoError(t, s.Evaluate(ctx))
+
+	// topology_edges is not among the tables truncateAll clears, so the check
+	// names this test's own instances.
+	var from []uuid.UUID
+	rows, err := pool.Query(ctx, `SELECT from_instance FROM topology_edges WHERE from_instance = ANY($1) ORDER BY from_instance`, []uuid.UUID{live, silent})
+	require.NoError(t, err)
+	defer rows.Close()
+	for rows.Next() {
+		var id uuid.UUID
+		require.NoError(t, rows.Scan(&id))
+		from = append(from, id)
+	}
+	require.NoError(t, rows.Err())
+	require.Equal(t, []uuid.UUID{live}, from, "only the live standby's edge survives")
+}

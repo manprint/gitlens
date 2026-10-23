@@ -41,6 +41,12 @@ const (
 	eventRetention     = 90 * 24 * time.Hour
 	eventPurgeInterval = time.Hour
 	eventPurgeBatch    = 10000
+	// topologyEdgeLiveness is how long an instance may stay silent before the
+	// topology edges it reports are dropped. A standby that stops reporting keeps
+	// its edge to its upstream otherwise, and the topology readers and the
+	// sync-state resolver would count that edge for good. It is the same liveness
+	// the other readers of an instance's rows use.
+	topologyEdgeLiveness = time.Hour
 )
 
 // ---------------------------------------------------------------------------
@@ -711,7 +717,25 @@ func (s *Staleness) Evaluate(ctx context.Context) error {
 		return slotErr
 	}
 
+	if topoErr := s.purgeTopologyEdges(ctx, now); topoErr != nil {
+		return topoErr
+	}
+
 	return s.purgeEvents(ctx, now)
+}
+
+// purgeTopologyEdges deletes the edges reported by an instance that has been
+// silent for topologyEdgeLiveness. Only the edges an instance reports are
+// dropped, not the edges that point at it: a live standby's edge to a silent
+// primary is still its upstream. An instance that comes back writes its edges
+// again with its next envelope. Called from Evaluate with s.mu held, by the
+// leader only.
+func (s *Staleness) purgeTopologyEdges(ctx context.Context, now time.Time) error {
+	if _, err := s.pool.Exec(ctx, `DELETE FROM topology_edges e USING instances i
+		WHERE i.instance_id = e.from_instance AND i.last_seen < $1`, now.Add(-topologyEdgeLiveness)); err != nil {
+		return fmt.Errorf("purge topology edges: %w", err)
+	}
+	return nil
 }
 
 // purgeEvents deletes one batch of events older than eventRetention, at most
