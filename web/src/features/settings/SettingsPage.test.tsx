@@ -246,6 +246,17 @@ describe('SettingsPage', () => {
     ).toBeInTheDocument()
   })
 
+  it('UI-SET-036 the T1 card says the interface offers EXPLAIN ANALYZE only at T2', async () => {
+    renderSettings()
+    await settleInitialQueries()
+
+    expect(
+      screen.getByText(
+        'EXPLAIN ANALYZE is accepted when the target sets allow_explain_analyze; the interface offers it at T2 only.',
+      ),
+    ).toBeInTheDocument()
+  })
+
   it('UI-SET-004 the agent view is derived from last_seen and alerts', async () => {
     renderSettings({
       alerts: [baseAlert],

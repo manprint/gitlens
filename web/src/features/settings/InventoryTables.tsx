@@ -233,7 +233,7 @@ function TierSummary({ instances, rules }: Pick<InventoryTablesProps, 'instances
               : tier === 'T1'
                 ? [
                     'Run plan-only EXPLAIN on eligible targets.',
-                    'ANALYZE remains subject to allow_explain_analyze on the target.',
+                    'EXPLAIN ANALYZE is accepted when the target sets allow_explain_analyze; the interface offers it at T2 only.',
                   ]
                 : [
                     'Cancel or terminate client backends on eligible targets.',
