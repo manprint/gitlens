@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -22,17 +23,31 @@ type signalConn struct {
 	ownBackend  bool
 	noPID       bool
 	signalled   bool
-	queries     []string
+	// checkedStart is the backend start the identity check reads, and
+	// currentStart is the start of the session that holds the PID when the
+	// signal runs. They differ when the PID was reused in between.
+	checkedStart time.Time
+	currentStart time.Time
+	queries      []string
 }
 
 func (c *signalConn) Query(context.Context, string, ...any) (pgx.Rows, error) { return nil, nil }
-func (c *signalConn) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+func (c *signalConn) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	c.queries = append(c.queries, sql)
+	if strings.Contains(sql, "backend_start = $2") {
+		// The signal reaches only the session that started when it was checked.
+		started, _ := args[1].(*time.Time)
+		if started == nil || !started.Equal(c.currentStart) {
+			return signalRow{err: pgx.ErrNoRows}
+		}
+		return signalRow{values: []any{c.signalled}}
+	}
 	if strings.Contains(sql, "backend_type") {
 		if c.noPID {
 			return signalRow{err: pgx.ErrNoRows}
 		}
-		return signalRow{values: []any{c.backendType, c.appName, c.username, c.ownRole, c.ownBackend}}
+		checked := c.checkedStart
+		return signalRow{values: []any{c.backendType, c.appName, c.username, c.ownRole, c.ownBackend, &checked}}
 	}
 	return signalRow{values: []any{c.signalled}}
 }
@@ -56,6 +71,8 @@ func (r signalRow) Scan(dest ...any) error {
 			*dst = value.(string)
 		case *bool:
 			*dst = value.(bool)
+		case **time.Time:
+			*dst = value.(*time.Time)
 		default:
 			panic("unsupported signal scan destination")
 		}
@@ -93,6 +110,19 @@ func TestSignal_RefusesOwnBackends(t *testing.T) {
 		require.Contains(t, rejected.Error(), "pglens backend", appName)
 		require.Len(t, conn.queries, 1, appName)
 	}
+}
+
+// A PID that the operating system hands to a new session between the identity
+// check and the signal must not be signalled: the signal names the start time
+// the check read, and the new session started later.
+func TestSignal_LeavesAPIDReusedAfterTheCheckAlone(t *testing.T) {
+	checked := time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)
+	conn := &signalConn{backendType: "client backend", appName: "psql", username: "alice", checkedStart: checked, currentStart: checked.Add(time.Minute), signalled: true}
+	_, err := NewTerminateExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{PID: intPtr(42)})
+	var rejected *RejectedError
+	require.True(t, errors.As(err, &rejected))
+	require.Contains(t, rejected.Error(), "no longer the session that was checked")
+	require.Len(t, conn.queries, 2)
 }
 
 func TestSignal_RefusesMonitoringRoleAndOwnPID(t *testing.T) {
