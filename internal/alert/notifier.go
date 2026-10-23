@@ -78,6 +78,10 @@ func (n *channelNotifier) Notify(ctx context.Context, a Alert) error {
 	if a.State == StateResolved {
 		phase = "resolve"
 	}
+	// A transition is newer than every delivery still pending for its alert, so
+	// those are dropped before this one goes out. Otherwise a channel that was
+	// refused a FIRING would get it after the RESOLVED that follows it.
+	n.dropPending(func(d pendingDelivery) bool { return d.alert.Key == a.Key })
 	// Every channel gets its attempt. One channel that is down must not keep
 	// the others from delivering the same transition.
 	var errs []error

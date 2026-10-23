@@ -590,3 +590,23 @@ func TestChannelNotifier_AClaimCutByTheCycleStillCounts(t *testing.T) {
 	require.Equal(t, maxNotifyAttempts, store.calls)
 	require.Zero(t, slack.sent)
 }
+
+// TestChannelNotifier_ANewerTransitionDropsItsPendingDelivery — without an engine,
+// a transition newer than a delivery still pending for its alert drops that
+// delivery. The channel that refused the FIRING does not get it after the
+// RESOLVED, even when no pass that would have checked the alert's state runs.
+func TestChannelNotifier_ANewerTransitionDropsItsPendingDelivery(t *testing.T) {
+	fire := Alert{Key: "k", RuleID: "r", Severity: SeverityWarning, State: StateFiring, StartedAt: time.Unix(1, 0), LastEvalAt: time.Unix(1, 0)}
+	resolve := fire
+	resolve.State = StateResolved
+	rec := &phaseRecorder{down: true}
+	n := NewChannelNotifier(&markStore{}, recordingChannel{rec})
+	retrier := n.(interface{ Retry(context.Context) error })
+
+	require.Error(t, n.Notify(context.Background(), fire))
+	require.NoError(t, retrier.Retry(context.Background()), "a delivery is not sent again in the pass that failed it")
+	rec.down = false
+	require.NoError(t, n.Notify(context.Background(), resolve))
+	require.NoError(t, retrier.Retry(context.Background()))
+	require.Equal(t, []string{"resolve"}, rec.got, "the refused FIRING is not sent after the RESOLVED")
+}
