@@ -84,3 +84,12 @@ func TestFingerprint_SocketAndHostInQuery(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, local, otherDB)
 }
+
+// A keyword-form DSN whose password is not valid percent-encoding makes
+// url.Parse fail, and that error quotes the whole DSN. The error must not carry
+// the password into the agent's log.
+func TestFingerprint_ErrorDoesNotEchoPassword(t *testing.T) {
+	t.Parallel()
+	_, err := identity.Fingerprint("host=db.example.invalid user=pglensuser password=s3%zzcret dbname=app")
+	require.EqualError(t, err, "fingerprint: DSN is not a valid URL")
+}

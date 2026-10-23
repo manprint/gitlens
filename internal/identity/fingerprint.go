@@ -53,7 +53,9 @@ func fingerprint(dsn string, keepQuerySecrets bool) (string, error) {
 	}
 	u, err := url.Parse(dsn)
 	if err != nil {
-		return "", fmt.Errorf("fingerprint: parse dsn: %w", err)
+		// url.Error quotes the whole DSN, password included, and this error
+		// reaches the agent's log, so the cause is not wrapped.
+		return "", fmt.Errorf("fingerprint: DSN is not a valid URL")
 	}
 	if u.Scheme != "postgres" && u.Scheme != "postgresql" {
 		return "", fmt.Errorf("fingerprint: unsupported scheme %q", u.Scheme)
