@@ -25,6 +25,7 @@ function failureMessage(failure: ApiFailure): string {
       return `${failure.error}: ${failure.detail}`
     case 'network':
     case 'malformed':
+    case 'client':
       return failure.message
     case 'unauthorized':
     case 'forbidden':

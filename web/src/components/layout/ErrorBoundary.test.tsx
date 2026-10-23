@@ -25,6 +25,7 @@ describe('ErrorBoundary', () => {
     )
 
     expect(screen.getByRole('alert')).toHaveTextContent('Could not load pglens.')
+    expect(screen.getByRole('alert')).not.toHaveTextContent('invalid response')
     expect(screen.getByText(`Build ${__PGLENS_BUILD__}`)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Retry pglens' })).toBeInTheDocument()
   })

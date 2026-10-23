@@ -124,6 +124,7 @@ describe('state primitives', () => {
       { kind: 'server', status: 500, error: 'internal', detail: 'try later' },
       { kind: 'network', message: 'offline' },
       { kind: 'malformed', message: 'bad JSON' },
+      { kind: 'client', message: 'render exploded' },
     ]
     const onRetry = vi.fn()
 

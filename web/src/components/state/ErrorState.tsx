@@ -22,6 +22,8 @@ function describeFailure(failure: ApiFailure): string {
       return `The server could not be reached: ${failure.message}`
     case 'malformed':
       return `The server returned an invalid response: ${failure.message}`
+    case 'client':
+      return `The page failed to render in the browser: ${failure.message}`
     default: {
       const exhaustive: never = failure
       return exhaustive

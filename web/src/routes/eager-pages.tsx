@@ -7,7 +7,7 @@ export function RouteErrorBoundary() {
   const location = useLocation()
   const routeError = useRouteError()
   const message = routeError instanceof Error ? routeError.message : 'Unexpected route error.'
-  const failure: ApiFailure = { kind: 'malformed', message }
+  const failure: ApiFailure = { kind: 'client', message }
   const routePath = location.pathname || '/'
 
   return (

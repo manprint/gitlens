@@ -75,6 +75,7 @@ describe('application route registry', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('Could not load /broken.')
     expect(screen.getByRole('alert')).toHaveTextContent('render exploded')
+    expect(screen.getByRole('alert')).not.toHaveTextContent('invalid response')
     expect(screen.getByRole('button', { name: 'Retry /broken' })).toBeInTheDocument()
   })
 

@@ -22,6 +22,8 @@ export type ApiFailure =
   | { kind: 'server'; status: number; error: string; detail: string }
   | { kind: 'network'; message: string }
   | { kind: 'malformed'; message: string }
+  // An exception thrown while rendering in this browser, not a response from the server.
+  | { kind: 'client'; message: string }
 
 interface ErrorEnvelope {
   error: string
