@@ -9,6 +9,12 @@
 -- A key with one more column collides less often, so no set of rows that the
 -- old index accepted can violate the new one. The index is replaced inside
 -- this migration's transaction, so the table never runs without its dedup.
+--
+-- That transaction is also a lock window. DROP INDEX takes ACCESS EXCLUSIVE on
+-- metrics_replication, a hypertable, and the lock is held until the new index
+-- is built on every chunk. Reads and writes of the table wait at startup for
+-- as long as the build takes, which grows with retention. Schedule the first
+-- start that applies this migration for a quiet period.
 DROP INDEX IF EXISTS metrics_replication_dedup_idx;
 CREATE UNIQUE INDEX metrics_replication_dedup_idx ON metrics_replication
   (instance_id, COALESCE(upstream_id, '00000000-0000-0000-0000-000000000000'::uuid),
