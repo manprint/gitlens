@@ -1,8 +1,8 @@
 -- pglens monitoring role for PostgreSQL 15-19.
 -- Run as a superuser, or as rds_superuser on Amazon RDS.
 --
--- Defaults to Tier 0. Apply a higher tier by defining the corresponding
--- psql flag, for example:
+-- Defaults to Tier 0. Apply a higher tier by setting its psql flag to 1, for
+-- example:
 --   psql -v pglens_password='secret' -v dbname=app -v tier1=1 -f monitoring_user.sql
 -- Tier 2 also needs tier1=1. This file never creates an extension.
 -- The role is named pglens unless -v role=<name> names another one.
