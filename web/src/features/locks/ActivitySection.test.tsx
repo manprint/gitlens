@@ -187,4 +187,18 @@ describe('ActivitySection', () => {
 
     expect(screen.getByRole('button', { name: 'Terminate backend' })).toBeDisabled()
   })
+
+  it('UI-LOCK-056 disables session signal actions when the activity sample is older than the threshold without a stale flag', () => {
+    renderWithProviders(
+      <ActivitySection
+        currentTier="T2"
+        instanceId="11111111-1111-4111-8111-111111111111"
+        now={NOW}
+        response={response({ pg_connections_used: [metric(10, 60)] })}
+        sessions={[{ pid: 42, backend_type: 'client backend' }]}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Terminate backend' })).toBeDisabled()
+  })
 })

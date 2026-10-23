@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { REFRESH } from '@/api/policy'
 import { renderWithProviders } from '@/test/render'
+import { NOW } from '@/test/time'
 
 const mocks = vi.hoisted(() => ({
   instance: vi.fn(),
@@ -113,5 +114,15 @@ describe('LocksPage session signal actions', () => {
     renderLocks('/instances/instance-1/locks?range=1h', success({ ...locksResponse, sessions }))
 
     expect(screen.getByRole('button', { name: 'Terminate backend' })).toBeEnabled()
+  })
+
+  it('UI-LOCK-055 disables session signal actions when the lock sample is older than the threshold without a stale flag', () => {
+    const sixtySecondsAgo = new Date(NOW.getTime() - 60_000).toISOString()
+    renderLocks(
+      '/instances/instance-1/locks?range=1h',
+      success({ ...locksResponse, sampled_at: sixtySecondsAgo, sessions }),
+    )
+
+    expect(screen.getByRole('button', { name: 'Terminate backend' })).toBeDisabled()
   })
 })
