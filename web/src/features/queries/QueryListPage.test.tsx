@@ -119,7 +119,8 @@ describe('QueryListPage', () => {
     renderPage()
 
     await settle()
-    expect(screen.getAllByText(/truncated; budget 50/).length).toBeGreaterThan(0)
+    // The table takes no budget, so the one notice is the Truncated element below it.
+    expect(screen.getAllByText(/truncated; budget 50/)).toHaveLength(1)
     expect(screen.getByText('checks.stat_statements.top_n')).toBeInTheDocument()
   })
 
