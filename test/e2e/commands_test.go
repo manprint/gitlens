@@ -527,12 +527,21 @@ func waitPlans(ctx context.Context, e *scenario.Env, instanceID string, queryID 
 // expired the command only if the server's TTL was shorter than that.
 func waitCommandExpired(ctx context.Context, e *scenario.Env, commandID string) error {
 	deadline := time.Now().Add(2 * time.Minute)
+	var last string
 	for time.Now().Before(deadline) {
+		var expiresAt, dbNow time.Time
 		var expired bool
 		err := e.DB.QueryRow(ctx,
-			`SELECT expires_at <= now() FROM commands WHERE command_id::text = $1`, commandID).Scan(&expired)
+			`SELECT expires_at, expires_at <= now(), now() FROM commands WHERE command_id::text = $1`, commandID).Scan(&expiresAt, &expired, &dbNow)
 		if err == nil && expired {
 			return nil
+		}
+		// The last reading is kept for the timeout, so a stall shows whether the
+		// lease was later than expected or the row could not be read.
+		if err != nil {
+			last = err.Error()
+		} else {
+			last = fmt.Sprintf("expires_at=%s database now=%s", expiresAt.UTC().Format(time.RFC3339Nano), dbNow.UTC().Format(time.RFC3339Nano))
 		}
 		select {
 		case <-ctx.Done():
@@ -540,7 +549,7 @@ func waitCommandExpired(ctx context.Context, e *scenario.Env, commandID string) 
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
-	return fmt.Errorf("command %s never reached its expires_at", commandID)
+	return fmt.Errorf("command %s never reached its expires_at (last reading: %s)", commandID, last)
 }
 
 func waitClaimToken(ctx context.Context, e *scenario.Env, commandID string) (string, error) {
