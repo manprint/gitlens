@@ -367,3 +367,18 @@ func TestStatStatements_TextIsResent(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "SELECT 2", res.QueryTexts[5], "a changed text is shipped immediately")
 }
+
+// A credential typed into a utility statement is not shipped, and the text
+// that is shipped keeps the statement readable.
+func TestStatStatements_ShipsNoCredentialFromUtilityDDL(t *testing.T) {
+	t.Parallel()
+	ddl := "ALTER ROLE tmp_secret_probe PASSWORD 'hunter2-probe-2'"
+	f := &statementsFixture{}
+	f.perDB = statementRows([]any{int64(9), int64(1), float64(1), int64(1), int64(0), int64(0), int64(0), int64(0), &ddl, int64(1)})
+	c := newStatementsCheck(cardinality.Options{TopN: 50})
+
+	res, err := c.Scrape(context.Background(), f.target())
+	require.NoError(t, err)
+	require.Equal(t, "ALTER ROLE tmp_secret_probe PASSWORD '[redacted]'", res.QueryTexts[9])
+	require.NotContains(t, res.QueryTexts[9], "hunter2")
+}

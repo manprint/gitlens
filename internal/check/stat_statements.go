@@ -301,10 +301,13 @@ func (c *statStatementsCheck) Scrape(ctx context.Context, t Target) (Result, err
 		})
 
 		if r.Query != nil {
+			// Redacted before the cache sees it, so a credential is neither
+			// shipped nor kept in memory.
+			text := redactQueryText(*r.Query)
 			prev, cached := cache.Get(r.QueryID)
-			if !cached || prev.text != *r.Query || now.Sub(prev.sentAt) >= textResendInterval {
-				queryTexts[r.QueryID] = *r.Query
-				cache.Add(r.QueryID, sentText{text: *r.Query, sentAt: now})
+			if !cached || prev.text != text || now.Sub(prev.sentAt) >= textResendInterval {
+				queryTexts[r.QueryID] = text
+				cache.Add(r.QueryID, sentText{text: text, sentAt: now})
 			}
 		}
 	}
