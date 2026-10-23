@@ -186,7 +186,7 @@ func (s *Sampler) run(ctx context.Context, ticker clock.Ticker) {
 func (s *Sampler) doSample(ctx context.Context) error {
 	rows, err := s.conn.Query(ctx, `
 SELECT COALESCE(datname, '')             AS datname,
-       COALESCE(state, 'unknown')        AS state,
+       state                             AS state,
        COALESCE(wait_event_type, 'CPU')  AS wait_event_type,
        COALESCE(wait_event, 'CPU')       AS wait_event,
        query_id
