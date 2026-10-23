@@ -121,6 +121,50 @@ func TestRun_ResolvesOnlyRulesThatRanForThisInstance(t *testing.T) {
 	require.True(t, store.purged)
 }
 
+// TestRun_DegradedRuleKeepsItsOpenFindings — a pass in which a rule's input is
+// missing says nothing about the findings it reported before. Resolving them
+// hid real problems for as long as the input stayed unavailable, and reopened
+// them on the next healthy pass.
+func TestRun_DegradedRuleKeepsItsOpenFindings(t *testing.T) {
+	rule := engineTestRule{id: "vac", needs: []string{"Tables"}, severity: SeverityWarning, scope: ScopeRelation, eval: func(*Snapshot) []Finding {
+		return []Finding{{RuleID: "vac", State: StateOpen, Scope: ScopeRelation, Datname: "app", ObjectName: "public.t1", Title: "vacuum"}}
+	}}
+	e, store, _ := runWithRules(t, rule)
+	withTables := true
+	e.load = func(_ context.Context, id uuid.UUID, now time.Time) (*Snapshot, error) {
+		s := &Snapshot{Now: now, InstanceID: id, PermTier: pgtype.TierReadOnly, Metrics: map[string]map[string]float64{}, Settings: map[string]string{}}
+		if withTables {
+			s.Tables = []TableStat{}
+		} else {
+			s.SkippedChecks = map[string]string{"Tables": "table statistics timed out"}
+		}
+		return s, nil
+	}
+	ctx := context.Background()
+
+	require.NoError(t, e.Run(ctx))
+	require.Len(t, store.findings, 1)
+	openID := store.findings[0].ID()
+	require.Equal(t, StateOpen, store.findings[0].State)
+	require.Contains(t, store.ranRules, "vac")
+	require.Contains(t, store.seen, openID)
+
+	withTables = false
+	store.findings = nil
+	require.NoError(t, e.Run(ctx))
+	require.Len(t, store.findings, 1)
+	require.Equal(t, StateDegraded, store.findings[0].State)
+	degradedID := store.findings[0].ID()
+	require.NotContains(t, store.ranRules, "vac", "a degraded rule must not resolve its open findings")
+
+	withTables = true
+	store.findings = nil
+	require.NoError(t, e.Run(ctx))
+	require.Contains(t, store.ranRules, "vac")
+	require.Contains(t, store.seen, openID)
+	require.NotContains(t, store.seen, degradedID, "the degraded row is resolved once the rule runs again")
+}
+
 func TestRun_LoadErrorStopsPass(t *testing.T) {
 	e, store, _ := runWithRules(t)
 	e.load = func(context.Context, uuid.UUID, time.Time) (*Snapshot, error) { return nil, errors.New("load failed") }

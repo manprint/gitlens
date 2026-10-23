@@ -240,7 +240,10 @@ func (e *Engine) runInstance(ctx context.Context, id uuid.UUID, now time.Time) e
 	for _, r := range rules {
 		ran = append(ran, r.ID())
 		findings, panicked := e.evaluateRule(r, s)
-		if panicked {
+		// A rule that could not evaluate as a whole gives no answer for this
+		// pass. Its open findings are unknown rather than gone, so it must not
+		// count as having run, or ResolveAbsent would resolve them.
+		if panicked || degradedAsWhole(findings) {
 			ran = ran[:len(ran)-1]
 		}
 		for i := range findings {
@@ -303,6 +306,20 @@ func (e *Engine) evaluateRule(r Rule, s *Snapshot) (out []Finding, panicked bool
 		}
 	}
 	return r.Evaluate(s), false
+}
+
+// degradedAsWhole reports whether a rule answered with a finding about the
+// whole instance rather than about one of its objects. A rule that cannot read
+// its inputs says so this way, whether the engine stopped it or the rule
+// itself found the input missing. A per-object degraded finding leaves the
+// rest of the rule's answer intact, so it does not count.
+func degradedAsWhole(findings []Finding) bool {
+	for _, f := range findings {
+		if f.State == StateDegraded && f.Datname == "" && f.ObjectName == "" {
+			return true
+		}
+	}
+	return false
 }
 
 func missingSnapshotInput(s *Snapshot, need string) bool {
