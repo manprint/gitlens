@@ -23,7 +23,11 @@ func scrapeLocks(t *testing.T, rows []([]any)) Result {
 }
 
 func lockValues(pid int32, wait string, blocked []int32, age float64, query string) []any {
-	return []any{pid, "app", "app", "client", "127.0.0.1", "active", "Lock", wait, 1.0, age, query, blocked, false}
+	return []any{pid, "app", "app", "client", "127.0.0.1", "active", "Lock", wait, 1.0, age, query, blocked, lockBackendStart(pid), false}
+}
+
+func lockBackendStart(pid int32) time.Time {
+	return time.Date(2026, 10, 23, 9, 0, 0, int(pid)*1000, time.UTC)
 }
 
 func TestLocks_NoBlockedSessionsEmitsEmptyFact(t *testing.T) {
@@ -74,6 +78,33 @@ func TestLocks_TreeJSONShape(t *testing.T) {
 	require.Equal(t, int32(9), tree.Nodes[0].BlockedBy[0])
 }
 
+// TestLocks_TreeCarriesBackendStart: every node and session carries the start
+// time of its session at microsecond precision, which a cancel or terminate
+// sends back to tell the session from a later one with the same PID. A
+// session whose start time the role may not see has none.
+func TestLocks_TreeCarriesBackendStart(t *testing.T) {
+	unseen := lockValues(3, "", nil, 0, "select 3")
+	unseen[len(unseen)-2] = nil
+	result := scrapeLocks(t, []([]any){lockValues(9, "", nil, 0, "holder"), lockValues(1, "transactionid", []int32{9}, 2, "update"), unseen})
+	raw := string(result.Facts[0].ValueJSON)
+	require.Contains(t, raw, `"backend_start":"2026-10-23T09:00:00.000001Z"`)
+	require.Contains(t, raw, `"backend_start":"2026-10-23T09:00:00.000009Z"`)
+	var tree lockTree
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
+	require.Len(t, tree.Nodes, 2)
+	for _, n := range tree.Nodes {
+		require.NotNil(t, n.BackendStart, "node %d", n.PID)
+		require.True(t, lockBackendStart(n.PID).Equal(*n.BackendStart), "node %d", n.PID)
+	}
+	for _, s := range tree.Sessions {
+		if s.PID == 3 {
+			require.Nil(t, s.BackendStart)
+			continue
+		}
+		require.NotNil(t, s.BackendStart, "session %d", s.PID)
+	}
+}
+
 func TestLocks_TreeIncludesBlockingSession(t *testing.T) {
 	result := scrapeLocks(t, []([]any){
 		lockValues(9, "", nil, 0, "holder"),
@@ -98,7 +129,7 @@ func TestLocks_QueryIsTruncated(t *testing.T) {
 func TestLocks_SessionListIsCappedOldestFirst(t *testing.T) {
 	rows := make([][]any, 0, 105)
 	for i := 1; i <= 105; i++ {
-		rows = append(rows, []any{int32(i), "app", "app", "client", "127.0.0.1", "idle", "", "", float64(i), 0.0, "select 1", []int32(nil), false})
+		rows = append(rows, []any{int32(i), "app", "app", "client", "127.0.0.1", "idle", "", "", float64(i), 0.0, "select 1", []int32(nil), nil, false})
 	}
 	result := scrapeLocks(t, rows)
 	var tree lockTree

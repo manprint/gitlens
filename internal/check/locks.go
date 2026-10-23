@@ -34,6 +34,7 @@ type lockRow struct {
 	StateAge        float64
 	Query           string
 	BlockedBy       []int32
+	BackendStart    *time.Time
 }
 
 // lockSessionsLimit caps the session list, which the activity view shows
@@ -65,6 +66,10 @@ type lockNode struct {
 	StateAge        float64 `json:"state_age"`
 	Query           string  `json:"query"`
 	BlockedBy       []int32 `json:"blocked_by"`
+	// BackendStart tells this session from a later one given the same PID;
+	// the UI sends it back with a cancel or terminate. It is NULL when the
+	// role may not see the session.
+	BackendStart *time.Time `json:"backend_start,omitempty"`
 }
 
 // locksQuery tolerates every nullable column: client_addr is NULL for each
@@ -96,6 +101,7 @@ SELECT a.pid,
        COALESCE(EXTRACT(epoch FROM now() - a.state_change), 0),
        COALESCE(a.query, ''),
        CASE WHEN a.wait_event_type = 'Lock' THEN pg_blocking_pids(a.pid) ELSE '{}'::int[] END,
+       a.backend_start,
        COALESCE(octet_length(a.query), 0) >= (SELECT setting::int FROM pg_settings WHERE name = 'track_activity_query_size') - 4
 FROM pg_stat_activity a
 WHERE a.backend_type = 'client backend'
@@ -119,7 +125,7 @@ func (c *locksCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 	for rows.Next() {
 		var r lockRow
 		var cut bool
-		if err := rows.Scan(&r.PID, &r.Datname, &r.Username, &r.ApplicationName, &r.ClientAddr, &r.State, &r.WaitEventType, &r.WaitEvent, &r.XactAge, &r.StateAge, &r.Query, &r.BlockedBy, &cut); err != nil {
+		if err := rows.Scan(&r.PID, &r.Datname, &r.Username, &r.ApplicationName, &r.ClientAddr, &r.State, &r.WaitEventType, &r.WaitEvent, &r.XactAge, &r.StateAge, &r.Query, &r.BlockedBy, &r.BackendStart, &cut); err != nil {
 			return Result{}, err
 		}
 		// A statement can carry a role password, and the tree is shipped to

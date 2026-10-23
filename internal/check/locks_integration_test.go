@@ -85,11 +85,14 @@ func TestINTLOCK001_BlockingSessionIsReported(t *testing.T) {
 		require.NotEmpty(t, result.Facts)
 		var tree struct {
 			Nodes []struct {
-				PID       int32   `json:"pid"`
-				BlockedBy []int32 `json:"blocked_by"`
-				WaitEvent string  `json:"wait_event"`
+				PID          int32      `json:"pid"`
+				BlockedBy    []int32    `json:"blocked_by"`
+				WaitEvent    string     `json:"wait_event"`
+				BackendStart *time.Time `json:"backend_start"`
 			} `json:"nodes"`
 		}
+		var holderStart time.Time
+		require.NoError(t, pool.QueryRow(ctx, "SELECT backend_start FROM pg_stat_activity WHERE pid = $1", holderPID).Scan(&holderStart))
 		require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
 		require.Len(t, tree.Nodes, 2)
 		blockedNodes := 0
@@ -100,8 +103,10 @@ func TestINTLOCK001_BlockingSessionIsReported(t *testing.T) {
 				require.Contains(t, node.BlockedBy, holderPID)
 				require.Equal(t, "transactionid", node.WaitEvent)
 			}
+			require.NotNil(t, node.BackendStart, "node %d", node.PID)
 			if node.PID == holderPID {
 				sawHolder = true
+				require.Equal(t, holderStart.UnixMicro(), node.BackendStart.UnixMicro(), "the holder carries the start time of its session")
 			}
 		}
 		require.Equal(t, 1, blockedNodes)
