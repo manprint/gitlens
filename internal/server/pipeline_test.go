@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -1099,4 +1100,33 @@ func TestPipeline_TruncationMarkerOncePerCheckPerEnvelope(t *testing.T) {
 		}
 	}
 	require.Equal(t, 1, markers)
+}
+
+// TestWithholdLockTreeQueries: a statement text with a sign of a credential is
+// withheld in the nodes and in the sessions of a lock tree; every other field,
+// a field this server does not know included, is kept, and a tree with nothing
+// to withhold is stored byte for byte.
+func TestWithholdLockTreeQueries(t *testing.T) {
+	t.Parallel()
+	tree := `{"sampled_at":"2026-10-23T20:00:00Z","nodes":[{"pid":7,"query":"ALTER ROLE app PASSWORD 'hunter2'","blocked_by":[8],"xact_age":1.5,"backend_start":"2026-10-23T19:00:00Z"}],` +
+		`"sessions":[{"pid":8,"query":"SELECT 1"},{"pid":9,"query":"SELECT dblink_connect('postgresql://u:p@h/db')"}],"later_field":{"query":"x"}}`
+	got := withholdLockTreeQueries([]byte(tree))
+	var decoded struct {
+		Nodes    []map[string]any `json:"nodes"`
+		Sessions []map[string]any `json:"sessions"`
+		Later    map[string]any   `json:"later_field"`
+	}
+	require.NoError(t, json.Unmarshal(got, &decoded))
+	require.Equal(t, "[redacted]", decoded.Nodes[0]["query"])
+	require.Equal(t, []any{float64(8)}, decoded.Nodes[0]["blocked_by"])
+	require.Equal(t, 1.5, decoded.Nodes[0]["xact_age"])
+	require.Equal(t, "2026-10-23T19:00:00Z", decoded.Nodes[0]["backend_start"])
+	require.Equal(t, "SELECT 1", decoded.Sessions[0]["query"])
+	require.Equal(t, "[redacted]", decoded.Sessions[1]["query"])
+	require.Equal(t, "x", decoded.Later["query"])
+	require.NotContains(t, string(got), "hunter2")
+
+	clean := []byte(`{"nodes":[{"pid":1,"query":"SELECT 1","xact_age":12345678901234567890}]}`)
+	require.Equal(t, clean, withholdLockTreeQueries(clean))
+	require.Empty(t, withholdLockTreeQueries(nil))
 }

@@ -678,3 +678,28 @@ func TestPipeline_INT_PIPE_009_QueryTextWithACredentialSignIsWithheld(t *testing
 	require.NoError(t, rows.Err())
 	require.Equal(t, map[int64]string{41: "[redacted]", 42: "SELECT 1"}, stored)
 }
+
+// TestPipeline_INT_PIPE_010_LockTreeQueryWithACredentialSignIsWithheld: an
+// agent built before the redaction fix ships the lock tree with every
+// statement text as it was typed. The stored snapshot withholds the text with
+// a sign of a credential and keeps the others.
+func TestPipeline_INT_PIPE_010_LockTreeQueryWithACredentialSignIsWithheld(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	p := NewPipeline(pool, clock.NewFake(time.Now()))
+	iid := uuid.NewString()
+	cid := pgtype.ClusterID(99997).String()
+	tree := `{"nodes":[{"pid":7,"query":"ALTER ROLE app PASSWORD 'hunter2'","blocked_by":[8]}],"sessions":[{"pid":8,"query":"SELECT 1"}]}`
+	_, err := p.Process(context.Background(), wire.Envelope{ProtocolVersion: wire.ProtocolVersionCurrent, Instances: []wire.Instance{{InstanceID: iid, ClusterID: cid, Results: []wire.Result{{Check: "locks", TS: time.Now(), Facts: []wire.Fact{{Kind: "lock_tree", Key: "current", ValueJSON: []byte(tree)}}}}}}})
+	require.NoError(t, err)
+	var stored []byte
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT tree FROM lock_snapshots WHERE instance_id=$1`, uuid.MustParse(iid)).Scan(&stored))
+	require.NotContains(t, string(stored), "hunter2")
+	var got struct {
+		Nodes    []struct{ Query string } `json:"nodes"`
+		Sessions []struct{ Query string } `json:"sessions"`
+	}
+	require.NoError(t, json.Unmarshal(stored, &got))
+	require.Equal(t, "[redacted]", got.Nodes[0].Query)
+	require.Equal(t, "SELECT 1", got.Sessions[0].Query)
+}

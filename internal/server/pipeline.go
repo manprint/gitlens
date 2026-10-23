@@ -1,7 +1,9 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -504,7 +506,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 					continue
 				}
 				if f.Kind == "lock_tree" {
-					instLockSnapshot = &store.LockSnapshotRow{TenantID: tenantID, InstanceID: instUUID, ClusterID: cidDB, TS: r.TS, Tree: append([]byte(nil), f.ValueJSON...)}
+					instLockSnapshot = &store.LockSnapshotRow{TenantID: tenantID, InstanceID: instUUID, ClusterID: cidDB, TS: r.TS, Tree: withholdLockTreeQueries(f.ValueJSON)}
 					continue
 				}
 				if f.Kind == "plan" {
@@ -1147,6 +1149,54 @@ type partialKey struct {
 type partialObservation struct {
 	ts                 time.Time
 	partial, truncated bool
+}
+
+// withholdLockTreeQueries returns a copy of a lock tree in which every
+// statement text with a sign of a credential is withheld. An agent built
+// before the redaction fix ships the text of every session as it was typed;
+// the tree is walked as plain JSON, so a field this server does not know yet
+// is kept as it came.
+func withholdLockTreeQueries(raw []byte) []byte {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var tree any
+	if err := dec.Decode(&tree); err != nil {
+		return append([]byte(nil), raw...)
+	}
+	if !withholdQueries(tree) {
+		return append([]byte(nil), raw...)
+	}
+	out, err := json.Marshal(tree)
+	if err != nil {
+		return []byte("{}")
+	}
+	return out
+}
+
+// withholdQueries replaces, anywhere in v, the string value of a "query" key
+// that may hold a credential, and reports whether it replaced one.
+func withholdQueries(v any) bool {
+	changed := false
+	switch v := v.(type) {
+	case map[string]any:
+		for k, child := range v {
+			if text, ok := child.(string); ok && k == "query" && redact.MayHoldCredential(text) {
+				v[k] = redact.Withheld
+				changed = true
+				continue
+			}
+			if withholdQueries(child) {
+				changed = true
+			}
+		}
+	case []any:
+		for _, child := range v {
+			if withholdQueries(child) {
+				changed = true
+			}
+		}
+	}
+	return changed
 }
 
 // runningBasebackups is the number of base backups a result saw streaming.
