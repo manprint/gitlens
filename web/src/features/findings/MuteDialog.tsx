@@ -42,6 +42,14 @@ function expiryTimestamp(preset: ExpiryPreset, explicit: string): string | null 
   return seconds === undefined ? null : new Date(Date.now() + seconds * 1000).toISOString()
 }
 
+// The server refuses a mute that runs past this many days from its own clock.
+const maxMuteDays = 90
+
+// The local wall-clock time as a datetime-local value, down to the minute.
+function localDateTimeValue(time: Date): string {
+  return new Date(time.getTime() - time.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
+}
+
 function clearFormState(
   setReason: (value: string) => void,
   setPreset: (value: ExpiryPreset) => void,
@@ -61,6 +69,7 @@ export function MuteDialog({ finding }: { finding: JoinedFinding }) {
   const [preset, setPreset] = useState<ExpiryPreset>('24h')
   const [explicit, setExplicit] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
+  const [maxUntil, setMaxUntil] = useState('')
   const mute = useMuteFinding()
   const unmute = useUnmuteFinding()
 
@@ -69,6 +78,7 @@ export function MuteDialog({ finding }: { finding: JoinedFinding }) {
   function openDialog() {
     clearFormState(setReason, setPreset, setExplicit)
     setFormError(null)
+    setMaxUntil(localDateTimeValue(new Date(Date.now() + maxMuteDays * 24 * 60 * 60 * 1000)))
     mute.reset()
     setOpen(true)
   }
@@ -175,6 +185,7 @@ export function MuteDialog({ finding }: { finding: JoinedFinding }) {
                   className="border-input bg-background h-9 rounded-md border px-3"
                   disabled={preset !== 'custom'}
                   id={`mute-until-${domId}`}
+                  max={maxUntil || undefined}
                   onChange={(event) => setExplicit(event.target.value)}
                   type="datetime-local"
                   value={explicit}
