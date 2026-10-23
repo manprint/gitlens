@@ -52,6 +52,23 @@ func TestSilence_Matches_RegexIsAnchored(t *testing.T) {
 	s.Matchers = []Matcher{{Name: "x", Value: "warn", IsRegex: true}}
 	require.False(t, s.Matches(Alert{Labels: map[string]string{"x": "warning"}}))
 }
+
+// TestSilence_RegexCannotBreakOutOfItsAnchor: a value whose unbalanced
+// parenthesis closes the anchoring group early is rejected, and a silence
+// stored with one matches nothing rather than every alert.
+func TestSilence_RegexCannotBreakOutOfItsAnchor(t *testing.T) {
+	const breakout = "nope)|(.*"
+	s := sil()
+	s.Matchers = []Matcher{{Name: "rule_id", Value: breakout, IsRegex: true}}
+	require.ErrorContains(t, s.Validate(), "invalid matcher regex")
+	require.False(t, s.Matches(Alert{RuleID: "replica.lag_high"}))
+	require.False(t, s.Matches(Alert{RuleID: "nope"}))
+
+	s.Matchers = []Matcher{{Name: "rule_id", Value: "replica\\.(lag|sync)_high", IsRegex: true}}
+	require.NoError(t, s.Validate())
+	require.True(t, s.Matches(Alert{RuleID: "replica.lag_high"}))
+	require.False(t, s.Matches(Alert{RuleID: "replica.lag_high_extra"}))
+}
 func TestSilence_Matches_NegateInverts(t *testing.T) {
 	s := sil()
 	s.Matchers = []Matcher{{Name: "x", Value: "bad", Negate: true}}
