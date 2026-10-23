@@ -5,6 +5,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -123,5 +124,64 @@ func TestINTCMD031_SignalIsBoundToTheCheckedSession(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, signalled)
 		require.Error(t, <-queryDone)
+	})
+}
+
+// INT-CMD-037: a cancel that names another session's start time is refused
+// before any signal, and the victim keeps running. The start time the caller
+// saw cancels the query.
+func TestINTCMD037_CancelRefusesAStartTimeOfAnotherSession(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		victim := pg.Pool(t, "postgres", pgtest.RoleVictim)
+		defer victim.Close()
+		observer := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		defer observer.Close()
+		victimConn, err := victim.Acquire(ctx)
+		require.NoError(t, err)
+		defer victimConn.Release()
+		var pid int
+		require.NoError(t, victimConn.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&pid))
+		var started time.Time
+		require.NoError(t, observer.QueryRow(ctx, "SELECT backend_start FROM pg_stat_activity WHERE pid = $1", pid).Scan(&started))
+
+		queryDone := make(chan error, 1)
+		go func() {
+			_, execErr := victimConn.Exec(ctx, "SELECT pg_sleep(30)")
+			queryDone <- execErr
+		}()
+		require.Eventually(t, func() bool {
+			var state string
+			return observer.QueryRow(ctx, "SELECT state FROM pg_stat_activity WHERE pid = $1", pid).Scan(&state) == nil && state == "active"
+		}, 5*time.Second, 50*time.Millisecond)
+
+		mgr, err := NewManager(ctx, "signal-target", pg.DSN("postgres", pgtest.RoleT2), DefaultConnOptions(), clock.System())
+		require.NoError(t, err)
+		defer mgr.Close()
+		otherSession := started.Add(time.Second)
+		_, err = NewCancelExecutor().Execute(ctx, mgr, command.Args{PID: &pid, BackendStart: &otherSession})
+		var rejected *RejectedError
+		require.True(t, errors.As(err, &rejected))
+		require.Contains(t, rejected.Error(), "different session")
+		select {
+		case queryErr := <-queryDone:
+			t.Fatalf("a refused cancel reached the session: %v", queryErr)
+		case <-time.After(500 * time.Millisecond):
+		}
+		var state string
+		require.NoError(t, observer.QueryRow(ctx, "SELECT state FROM pg_stat_activity WHERE pid = $1", pid).Scan(&state))
+		require.Equal(t, "active", state, "a session the caller did not name is left running")
+
+		result, err := NewCancelExecutor().Execute(ctx, mgr, command.Args{PID: &pid, BackendStart: &started})
+		require.NoError(t, err)
+		var cancelled struct {
+			Signalled bool `json:"signalled"`
+		}
+		require.NoError(t, json.Unmarshal(result, &cancelled))
+		require.True(t, cancelled.Signalled)
+		require.Error(t, <-queryDone)
+		_, err = victimConn.Exec(ctx, "SELECT 1")
+		require.NoError(t, err)
 	})
 }

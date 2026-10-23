@@ -12,8 +12,9 @@ import (
 )
 
 // SignalExecutor sends a cancel or terminate request to a verified client
-// backend. The command carries only a PID; the backend identity is read from
-// pg_stat_activity immediately before the signal is sent.
+// backend. The command carries a PID and, when the caller supplies it, the
+// start time of the session the caller saw at that PID. The backend identity
+// is read from pg_stat_activity immediately before the signal is sent.
 type SignalExecutor struct{ kind command.Kind }
 
 func NewCancelExecutor() *SignalExecutor {
@@ -61,6 +62,13 @@ func (e *SignalExecutor) Execute(ctx context.Context, target check.Target, args 
 	// session's role is the robust signal; the name is a second one.
 	if ownBackend || ownRole || isPglensApplication(applicationName) {
 		return nil, rejectedf("refusing to signal pglens backend pid %d", *args.PID)
+	}
+	// A caller that names the session it saw must find that session at the
+	// PID. A PID the operating system gave to a new session since then is
+	// refused here, before any signal is sent. Times are compared at
+	// microsecond precision, the precision PostgreSQL reports.
+	if args.BackendStart != nil && (backendStart == nil || backendStart.UnixMicro() != args.BackendStart.UnixMicro()) {
+		return nil, rejectedf("pid %d is a different session from the one requested (backend_start differs); nothing was signalled", *args.PID)
 	}
 
 	function := "pg_cancel_backend"
