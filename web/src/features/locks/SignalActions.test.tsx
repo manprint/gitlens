@@ -54,6 +54,42 @@ function StaleAfterOpen() {
   )
 }
 
+function captureCommands() {
+  const bodies: unknown[] = []
+  server.use(
+    http.post('*/api/v1/instances/:id/commands', async ({ request }) => {
+      bodies.push(await request.json())
+      return HttpResponse.json({ command_id: COMMAND_ID }, { status: 202 })
+    }),
+    http.get('*/api/v1/commands/:id', () =>
+      HttpResponse.json({ command_id: COMMAND_ID, state: 'done', result: { signalled: true } }),
+    ),
+  )
+  return bodies
+}
+
+// The sample refreshes while the confirmation is open: the same PID now
+// belongs to another session.
+function RefreshingSample() {
+  const [refreshed, setRefreshed] = useState(false)
+  const current: LockNode = refreshed
+    ? {
+        ...node,
+        usename: 'bob',
+        query: 'SELECT 2',
+        backend_start: '2026-10-23T10:00:00.000001Z',
+      }
+    : { ...node, backend_start: '2026-10-23T09:00:00.123456Z' }
+  return (
+    <>
+      <button type="button" onClick={() => setRefreshed(true)}>
+        Sample refreshes
+      </button>
+      <SignalActions node={current} instanceId={INSTANCE_ID} currentTier="T2" />
+    </>
+  )
+}
+
 function openDialog(kind: 'cancel' | 'terminate') {
   fireEvent.click(
     screen.getByRole('button', {
@@ -179,5 +215,48 @@ describe('SignalActions', () => {
     expect(
       within(screen.getByRole('dialog')).getByRole('button', { name: 'Terminate backend' }),
     ).toBeDisabled()
+  })
+
+  it('UI-LOCK-061 sends the start time the operator saw, unchanged to the microsecond', async () => {
+    const bodies = captureCommands()
+    renderActions({ node: { ...node, backend_start: '2026-10-23T09:00:00.123456Z' } })
+    const dialog = openDialog('cancel')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel query' }))
+    vi.useRealTimers()
+
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({
+      kind: 'cancel',
+      args: { pid: 42, backend_start: '2026-10-23T09:00:00.123456Z' },
+    })
+  })
+
+  it('UI-LOCK-062 sends the PID alone when the sample carries no start time', async () => {
+    const bodies = captureCommands()
+    renderActions()
+    const dialog = openDialog('terminate')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Terminate backend' }))
+    vi.useRealTimers()
+
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({ kind: 'terminate', args: { pid: 42 } })
+  })
+
+  it('UI-LOCK-063 confirms the session the dialog was opened for when the sample refreshes', async () => {
+    const bodies = captureCommands()
+    renderWithProviders(<RefreshingSample />)
+    const dialog = openDialog('terminate')
+    expect(dialog).toHaveTextContent('user alice')
+
+    fireEvent.click(screen.getByText('Sample refreshes'))
+    expect(within(dialog).getByText(/user alice/)).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Terminate backend' }))
+    vi.useRealTimers()
+
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({
+      kind: 'terminate',
+      args: { pid: 42, backend_start: '2026-10-23T09:00:00.123456Z' },
+    })
   })
 })
