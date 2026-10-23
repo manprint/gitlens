@@ -877,9 +877,10 @@ func TestEngine_OrphanEpisodeHeldWhenRoleUnknown(t *testing.T) {
 	}
 }
 
-// TestEngine_OrphanEpisodeRestartsAfterUnknownGap — an unknown observation holds
-// an episode across the cycles without evidence, and ends it once the gap with
-// no evidence is long enough (see orphanGapEnds). A standby that stays
+// TestEngine_OrphanEpisodeRestartsAfterUnknownGap — an unknown observation is one
+// cycle without evidence, so a single one leaves an episode alive. The episode
+// ends at the second unknown observation in a row, once a window has passed since
+// the last evidence (see orphanGapEnds). A standby that stays
 // unreadable for ten minutes and then shows its orphan again starts a new
 // episode. The reappearance is not reported with the age of the whole gap, and
 // the next orphan is reported a window later, dated from its own start.
@@ -1179,6 +1180,49 @@ func TestEngine_OrphanEpisodeHoldsAcrossQuietCyclesInsideWindow(t *testing.T) {
 	}
 	clk.Advance(15 * time.Second)
 	evidence("evidence a window after the start")
+}
+
+// TestEngine_OrphanEpisodeIgnoresRepeatedEnvelope — a push retried after a lost
+// response, or read again from the disk buffer after a restart, reaches the
+// engine a second time with the sent time of the envelope it repeats. That is
+// the same cycle, so it must not count as a second cycle without evidence. At a
+// 90 second push interval a quiet cycle delivered twice would otherwise end the
+// episode, and the evidence after it would fire nothing.
+func TestEngine_OrphanEpisodeIgnoresRepeatedEnvelope(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+	standby := uuid.New()
+	cID := pgtype.ManualClusterID("cluster1")
+	lowEdge := []Edge{{From: standby, To: uuid.New(), Confidence: "low"}}
+	// send applies the standby's observation from the envelope sent at the given
+	// time, and returns the orphan_standby events it emits.
+	send := func(edges []Edge, role pgtype.Role, sent time.Time) []Event {
+		var orphans []Event
+		for _, evt := range e.Apply(Observation{InstanceID: standby, ClusterID: cID, Role: role, Timestamp: sent, Edges: edges}) {
+			if evt.Type == EventOrphanStandby {
+				orphans = append(orphans, evt)
+			}
+		}
+		return orphans
+	}
+
+	start := clk.Now()
+	send(lowEdge, pgtype.RoleStandby, start) // t=0 starts the episode
+	clk.Advance(90 * time.Second)
+	send(lowEdge, pgtype.RoleStandby, clk.Now()) // t=90, evidence
+	clk.Advance(90 * time.Second)
+	quiet := clk.Now()
+	send(nil, pgtype.RoleStandby, quiet) // t=180, one cycle without evidence
+	clk.Advance(11 * time.Second)
+	send(nil, pgtype.RoleStandby, quiet) // t=191, the same envelope retried
+	clk.Advance(79 * time.Second)
+	got := send(lowEdge, pgtype.RoleStandby, clk.Now()) // t=270, evidence
+	if len(got) != 1 {
+		t.Fatalf("expected orphan_standby at t=270, got %d: a retried quiet cycle ended the episode", len(got))
+	}
+	if d, _ := got[0].Payload["duration_seconds"].(float64); d != 270 {
+		t.Fatalf("orphan duration %v, want 270: the episode from its start", got[0].Payload["duration_seconds"])
+	}
 }
 
 // orphanEvidenceCheck returns a step that feeds one cycle with evidence to the

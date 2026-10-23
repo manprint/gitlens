@@ -296,6 +296,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 			InstanceID: instUUID,
 			ClusterID:  cid,
 			Role:       pgtype.Role(inst.Role),
+			Timestamp:  env.SentAt,
 			Edges:      topoEdges,
 		}) {
 			evCluster := cidDB

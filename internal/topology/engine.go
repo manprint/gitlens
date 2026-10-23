@@ -1,6 +1,7 @@
 package topology
 
 import (
+	"slices"
 	"sync"
 	"time"
 
@@ -9,6 +10,9 @@ import (
 )
 
 // Observation represents one instance's topology state at a moment in time.
+// Timestamp is when the envelope carrying it was sent. A repeat of that envelope
+// carries the same Timestamp, which is how the engine tells a retry from a new
+// cycle. The engine does not use it for timing, since agent clocks drift.
 type Observation struct {
 	InstanceID pgtype.InstanceID
 	ClusterID  pgtype.ClusterID
@@ -50,6 +54,7 @@ type instanceState struct {
 	role         pgtype.Role
 	clusterID    pgtype.ClusterID
 	timestamp    time.Time
+	lastObs      Observation          // the observation applied last; a repeat of it is ignored
 	quietCycles  int                  // observations without orphan evidence since the last of it
 	orphanAt     time.Time            // when the standby's upstream became unresolvable
 	orphanSeenAt time.Time            // last observation that found the upstream unresolvable
@@ -113,6 +118,19 @@ func (e *Engine) Apply(obs Observation) []Event {
 		}
 		e.instances[obs.InstanceID] = inst
 	}
+
+	// A push that is retried after a lost response, or read again from the disk
+	// buffer after a restart, reaches the engine a second time with the sent time
+	// and the content of the envelope it repeats. It is the same cycle, so it
+	// changes nothing. A zero time identifies no envelope, so it is never taken
+	// for a repeat.
+	if !obs.Timestamp.IsZero() && obs.Timestamp.Equal(inst.lastObs.Timestamp) &&
+		obs.Role == inst.lastObs.Role && obs.ClusterID == inst.lastObs.ClusterID &&
+		slices.Equal(obs.Edges, inst.lastObs.Edges) {
+		return nil
+	}
+	inst.lastObs = obs
+	inst.lastObs.Edges = slices.Clone(obs.Edges)
 
 	// Detect role change.
 	if inst.role != obs.Role {
