@@ -397,3 +397,33 @@ checks:
 		})
 	}
 }
+
+// TestConfig_PlainHTTPWarningNamesOnlyTheHost: the warning names the server
+// host without its port, and a load writes it once.
+func TestConfig_PlainHTTPWarningNamesOnlyTheHost(t *testing.T) {
+	yaml := `
+server:
+  url: http://pglens.example.com:8080
+  token: file-token
+identity_path: /var/lib/pglens/identity.json
+buffer:
+  path: /var/lib/pglens/buffer
+targets:
+  - name: pg-app
+    dsn: postgres://pglens@localhost/postgres
+checks:
+  activity: {}
+`
+	t.Setenv("PGLENS_SERVER_URL", "")
+
+	var logged bytes.Buffer
+	prev := log.Writer()
+	log.SetOutput(&logged)
+	t.Cleanup(func() { log.SetOutput(prev) })
+
+	_, err := LoadConfig(writeConfigFile(t, yaml))
+	require.NoError(t, err)
+	require.Equal(t, 1, strings.Count(logged.String(), "plain http"), "log: %q", logged.String())
+	require.Contains(t, logged.String(), "host pglens.example.com is reached")
+	require.NotContains(t, logged.String(), "8080")
+}

@@ -202,7 +202,7 @@ func (c *Config) validate() error {
 	// the shipped examples run over http inside a private network, but it is
 	// logged. A loopback host never leaves the machine, so it is not.
 	if u, err := url.Parse(c.Server.URL); err == nil && u.Scheme == "http" && !isLoopbackHost(u.Hostname()) {
-		log.Printf("agent config: server.url host %s is reached over plain http, so the bearer token is sent unencrypted", u.Host)
+		log.Printf("agent config: server.url host %s is reached over plain http, so the bearer token is sent unencrypted", u.Hostname())
 	}
 	if c.Server.Token == "" && c.Server.TokenFile == "" {
 		return fmt.Errorf("validation: server.token or server.token_file is required")
