@@ -13,8 +13,6 @@ const (
 	pgUndefinedTable               = "42P01"
 	pgUndefinedColumn              = "42703"
 	pgObjectNotInPrerequisiteState = "55000"
-	pgInsufficientPrivilege        = "42501"
-	pgUndefinedFunction            = "42883"
 	pgLockNotAvailable             = "55P03"
 )
 

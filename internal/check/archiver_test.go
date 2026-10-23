@@ -60,6 +60,16 @@ func TestArchiver_NeverArchivedAgeNeedsReadyFiles(t *testing.T) {
 	require.Equal(t, -1.0, metricValue(r, "pg_archiver_last_archived_age_seconds", nil))
 }
 
+// A statement timeout on the archive directory listing is an answer from the
+// server, not a broken connection: the archiver counters still report.
+func TestArchiver_ReadyFilesTimeoutKeepsCounters(t *testing.T) {
+	timeout := &mockRow{err: &pgconn.PgError{Code: "57014", Message: "canceling statement due to statement timeout"}}
+	r := scrapeArchiverWithReady(t, "on", []any{5.0, nil, nil, 1.0, nil, nil, nil}, nil, timeout)
+	require.Equal(t, -1.0, metricValue(r, "pg_archiver_ready_files", nil))
+	require.Equal(t, 5.0, metricValue(r, "pg_archiver_archived_total", nil))
+	require.Equal(t, 1.0, metricValue(r, "pg_archiver_failed_total", nil))
+}
+
 func TestArchiver_ArchiveModeOffEmitsNoArchiverCounters(t *testing.T) {
 	r := scrapeArchiverForTest(t, "off", nil, nil)
 	require.Equal(t, 0.0, metricValue(r, "pg_archive_mode_enabled", nil))
