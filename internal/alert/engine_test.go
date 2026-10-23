@@ -306,6 +306,36 @@ func TestTick_AFailedSourceClosesNothing(t *testing.T) {
 	require.Len(t, notifier.alerts, 1, "an unobserved rule must not resolve its episodes")
 }
 
+// TestTick_AFailedSourceKeepsAPulseOpen — a pulse closes on the first complete
+// pass that finds no occurrence of it, so a pass whose source failed must not
+// be taken for one. Otherwise a single failed query resolves the episode, and
+// the next pass that samples it fires the same failover again.
+func TestTick_AFailedSourceKeepsAPulseOpen(t *testing.T) {
+	start := time.Unix(1000, 0)
+	clk := clock.NewFake(start)
+	cluster := int64(7)
+	occurrences := []time.Time{start}
+	src := &lifecycleSource{kind: "event", samples: windowedFailovers(clk, &cluster, &occurrences)}
+	store, notifier := &engineStore{}, &engineNotifier{}
+	e := NewEngineWithInterval(nil, clk, 30*time.Second, store, notifier, []Source{src})
+	ctx := context.Background()
+
+	require.NoError(t, e.Tick(ctx))
+	require.Len(t, notifier.alerts, 1)
+
+	src.err = errors.New("statement timeout")
+	for i := 0; i < 5; i++ { // two and a half minutes: the occurrence leaves the window
+		clk.Advance(30 * time.Second)
+		require.Error(t, e.Tick(ctx))
+	}
+	require.Len(t, notifier.alerts, 1, "a failed sample must not resolve the pulse")
+
+	src.err = nil
+	require.NoError(t, e.Tick(ctx))
+	require.Len(t, notifier.alerts, 2, "the first observed pass without the occurrence resolves it")
+	require.Equal(t, StateResolved, notifier.alerts[1].State)
+}
+
 // TestTick_APartlyFailedKindClosesNothing — a rule served by two sources of one
 // kind is observed only when every source answered. The episode here was
 // sampled by the source that now fails; the other source answers with nothing,
