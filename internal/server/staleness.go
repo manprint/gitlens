@@ -349,6 +349,10 @@ type Staleness struct {
 	mu sync.Mutex
 	// instanceUp tracks last emitted up state per instance_id string.
 	instanceUp map[string]bool
+	// announcedLoaded is set once instanceUp has been rebuilt from the events of
+	// the current leadership term. A replica that takes the lock starts from what
+	// the events show as announced, not from whatever it held before.
+	announcedLoaded bool
 	// clusterPrimarySeen tracks last time a primary was seen per cluster.
 	clusterPrimarySeen map[string]time.Time
 	// clusterNoPrimaryEmitted tracks whether no_primary_in_cluster already emitted.
@@ -454,6 +458,9 @@ func (s *Staleness) ensureLeader(ctx context.Context) error {
 		// this evaluator could never regain leadership without a restart.
 		s.releaseLeaderConn(ctx)
 		return fmt.Errorf("try advisory lock: %w", err)
+	}
+	if locked && !s.hasLock {
+		s.announcedLoaded = false
 	}
 	s.hasLock = locked
 	return nil
@@ -565,6 +572,27 @@ func transitionEvents(clusterID int64, instanceID uuid.UUID, up bool, lastSeen t
 	}
 }
 
+// announcedStates returns, for each instance with an agent event on record,
+// whether its latest agent transition was up. The events are what has been
+// announced, whichever replica wrote them.
+func (s *Staleness) announcedStates(ctx context.Context) (map[string]bool, error) {
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT ON (instance_id) instance_id, type FROM events WHERE type IN ('agent_up', 'agent_down') AND instance_id IS NOT NULL ORDER BY instance_id, ts DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("query agent events: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]bool)
+	for rows.Next() {
+		var iid uuid.UUID
+		var typ string
+		if scanErr := rows.Scan(&iid, &typ); scanErr != nil {
+			return nil, fmt.Errorf("scan agent event: %w", scanErr)
+		}
+		out[iid.String()] = typ == "agent_up"
+	}
+	return out, rows.Err()
+}
+
 // Evaluate performs a single staleness evaluation. It is safe to call
 // concurrently, but leader election ensures only one replica emits.
 func (s *Staleness) Evaluate(ctx context.Context) error {
@@ -654,6 +682,27 @@ func (s *Staleness) Evaluate(ctx context.Context) error {
 	// Emit transitions under lock to ensure once-per-transition.
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if !s.announcedLoaded {
+		announced, err := s.announcedStates(ctx)
+		if err != nil {
+			// An empty map here would announce every instance that is down again.
+			return fmt.Errorf("load announced instance states: %w", err)
+		}
+		// Rebuilt, not merged: the map of an earlier term may be older than the events.
+		s.instanceUp = make(map[string]bool, len(instances))
+		for _, inst := range instances {
+			iidStr := inst.id.String()
+			if up, ok := announced[iidStr]; ok {
+				s.instanceUp[iidStr] = up
+			} else if inst.lastSeen.Before(now.Add(-eventRetention)) {
+				// Silent for longer than the events are kept, so the agent_down it
+				// was announced with has been purged. It is down, and was announced.
+				s.instanceUp[iidStr] = false
+			}
+		}
+		s.announcedLoaded = true
+	}
 
 	for _, inst := range instances {
 		iidStr := inst.id.String()

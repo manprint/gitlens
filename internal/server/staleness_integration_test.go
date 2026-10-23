@@ -595,3 +595,125 @@ func TestINTSTALE013_SilentInstancesEdgesArePurged(t *testing.T) {
 	require.NoError(t, rows.Err())
 	require.Equal(t, []uuid.UUID{live}, from, "only the live standby's edge survives")
 }
+
+// resign gives up the staleness lock the way a replica does when its session
+// ends, and waits until the server has freed it for the next replica.
+func resign(t *testing.T, pool *pgxpool.Pool, s *Staleness) {
+	t.Helper()
+	s.mu.Lock()
+	s.releaseLeaderConn(context.Background())
+	s.mu.Unlock()
+	conn := mustAcquire(t, pool)
+	require.Eventually(t, func() bool {
+		var locked bool
+		if err := conn.QueryRow(context.Background(), `SELECT pg_try_advisory_lock(hashtext('pglens:staleness'))`).Scan(&locked); err != nil {
+			return false
+		}
+		if locked {
+			_, _ = conn.Exec(context.Background(), `SELECT pg_advisory_unlock(hashtext('pglens:staleness'))`)
+		}
+		return locked
+	}, 5*time.Second, 50*time.Millisecond, "the server never freed the staleness lock")
+}
+
+// INTSTALE014: a replica that takes over while an instance is already down
+// reads the outage from the events, so it does not announce it a second time.
+// It used to start from an empty map and emit agent_down again.
+func TestINTSTALE014_TakeoverDoesNotAnnounceAnOutageAgain(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	iid := uuid.New()
+	insertStaleInstance(t, pool, store.ToDB(pgtype.ClusterID(14)), iid, "5 minutes")
+
+	first := NewStaleness(pool, clock.NewFake(time.Now()))
+	t.Cleanup(first.Stop)
+	require.NoError(t, first.Evaluate(ctx))
+	require.Equal(t, 1, countEventsFor(t, pool, "agent_down", iid))
+	require.Equal(t, 1, countEventsFor(t, pool, "instance_unreachable", iid))
+	resign(t, pool, first)
+
+	restarted := NewStaleness(pool, clock.NewFake(time.Now()))
+	t.Cleanup(restarted.Stop)
+	require.NoError(t, restarted.Evaluate(ctx))
+	require.True(t, restarted.hasLock, "the restarted replica takes the lock")
+	require.Equal(t, 1, countEventsFor(t, pool, "agent_down", iid), "the outage is announced once")
+	require.Equal(t, 1, countEventsFor(t, pool, "instance_unreachable", iid))
+}
+
+// INTSTALE015: an instance that came back while no replica was leader is
+// announced up by the replica that takes over. It used to be recorded as up
+// without any event, so the timeline never showed the outage end.
+func TestINTSTALE015_RecoveryDuringAGapIsAnnounced(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	iid := uuid.New()
+	insertStaleInstance(t, pool, store.ToDB(pgtype.ClusterID(15)), iid, "5 minutes")
+
+	first := NewStaleness(pool, clock.NewFake(time.Now()))
+	t.Cleanup(first.Stop)
+	require.NoError(t, first.Evaluate(ctx))
+	require.Equal(t, 1, countEventsFor(t, pool, "agent_down", iid))
+	resign(t, pool, first)
+
+	_, err := pool.Exec(ctx, `UPDATE instances SET last_seen = now() WHERE instance_id=$1`, iid)
+	require.NoError(t, err)
+	successor := NewStaleness(pool, clock.NewFake(time.Now()))
+	t.Cleanup(successor.Stop)
+	require.NoError(t, successor.Evaluate(ctx))
+	require.True(t, successor.hasLock, "the successor takes the lock")
+	require.Equal(t, 1, countEventsFor(t, pool, "agent_up", iid), "the recovery is announced")
+	require.Equal(t, 1, countEventsFor(t, pool, "instance_reachable", iid))
+	require.Equal(t, 1.0, pglensUpGauge.Get(iid.String()))
+}
+
+// INTSTALE016: a replica that loses the lock and takes it back does not
+// announce again what the replica that held it in between has announced. Its
+// own memory of the instance is from before the other replica's term.
+func TestINTSTALE016_RegainedLeadershipDoesNotRepeatTheEvents(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	iid := uuid.New()
+	insertStaleInstance(t, pool, store.ToDB(pgtype.ClusterID(16)), iid, "5 minutes")
+
+	a := NewStaleness(pool, clock.NewFake(time.Now()))
+	t.Cleanup(a.Stop)
+	require.NoError(t, a.Evaluate(ctx))
+	require.Equal(t, 1, countEventsFor(t, pool, "agent_down", iid))
+	resign(t, pool, a)
+
+	_, err := pool.Exec(ctx, `UPDATE instances SET last_seen = now() WHERE instance_id=$1`, iid)
+	require.NoError(t, err)
+	b := NewStaleness(pool, clock.NewFake(time.Now()))
+	t.Cleanup(b.Stop)
+	require.NoError(t, b.Evaluate(ctx))
+	require.True(t, b.hasLock)
+	require.Equal(t, 1, countEventsFor(t, pool, "agent_up", iid))
+	resign(t, pool, b)
+
+	require.NoError(t, a.Evaluate(ctx))
+	require.True(t, a.hasLock, "the first replica takes the lock back")
+	require.Equal(t, 1, countEventsFor(t, pool, "agent_up", iid), "the recovery is announced once")
+	require.Equal(t, 1, countEventsFor(t, pool, "instance_reachable", iid))
+	require.Equal(t, 1, countEventsFor(t, pool, "agent_down", iid))
+}
+
+// INTSTALE017: an instance silent for longer than the events are kept was
+// announced down, and that announcement has been purged with them. A replica
+// that takes over must not announce the old outage again.
+func TestINTSTALE017_PurgedOutageIsNotAnnouncedAgain(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	iid := uuid.New()
+	insertStaleInstance(t, pool, store.ToDB(pgtype.ClusterID(17)), iid, "100 days")
+
+	s := NewStaleness(pool, clock.NewFake(time.Now()))
+	t.Cleanup(s.Stop)
+	require.NoError(t, s.Evaluate(ctx))
+	require.True(t, s.hasLock)
+	require.Zero(t, countEventsFor(t, pool, "agent_down", iid))
+	require.Zero(t, countEventsFor(t, pool, "instance_unreachable", iid))
+}
