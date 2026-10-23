@@ -567,3 +567,34 @@ func TestINTCONN011_IdentityFallsBackOnlyOnDenial(t *testing.T) {
 		require.Equal(t, pgtype.ClusterID(systemID), granted.ClusterID())
 	})
 }
+
+// INT-CONN-015: a database whose pool has a connection checked out is not
+// evicted to make room for another one, so the connection keeps its pool and
+// the new database is opened beside it.
+func TestINTCONN015_HeldDatabaseIsNotEvicted(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		ctx := context.Background()
+		opts := DefaultConnOptions()
+		opts.MaxDatabases = 1
+		mgr, err := NewManager(ctx, "test-target", pg.DSN("postgres", pgtest.RoleT0), opts, clock.System())
+		require.NoError(t, err)
+		defer mgr.Close()
+
+		held, err := mgr.ForDatabase(ctx, "postgres")
+		require.NoError(t, err)
+		defer held.Release()
+
+		other, err := mgr.ForDatabase(ctx, "template1")
+		require.NoError(t, err)
+		other.Release()
+
+		var one int
+		require.NoError(t, held.QueryRow(ctx, "SELECT 1").Scan(&one))
+		require.Equal(t, 1, one)
+
+		mgr.mu.Lock()
+		_, kept := mgr.dbs["postgres"]
+		mgr.mu.Unlock()
+		require.True(t, kept, "the database with a connection in use must not be evicted")
+	})
+}

@@ -101,6 +101,9 @@ type Manager struct {
 	mu     sync.Mutex
 	dbs    map[string]*pgxpool.Pool // per-database pools
 	dbtc   map[string]time.Time     // last access time per database
+	// pending counts, per database, the ForDatabase calls that have picked its
+	// pool and are still waiting to acquire from it. See ForDatabase.
+	pending map[string]int
 	// statementsDB is the database whose pg_stat_statements view stands in
 	// for databases without one; empty means the maintenance database. See
 	// LocateStatements.
@@ -138,12 +141,13 @@ func NewManager(ctx context.Context, targetName string, dsn string, opts ConnOpt
 		return nil, fmt.Errorf("create pool: %w", err)
 	}
 	m := &Manager{
-		opts:   opts,
-		target: &poolHolder{name: targetName, pool: pool, dsn: dsn},
-		clock:  clk,
-		dbs:    make(map[string]*pgxpool.Pool),
-		dbtc:   make(map[string]time.Time),
-		ownDB:  cfg.ConnConfig.Database,
+		opts:    opts,
+		target:  &poolHolder{name: targetName, pool: pool, dsn: dsn},
+		clock:   clk,
+		dbs:     make(map[string]*pgxpool.Pool),
+		dbtc:    make(map[string]time.Time),
+		pending: make(map[string]int),
+		ownDB:   cfg.ConnConfig.Database,
 	}
 	return m, nil
 }
@@ -194,26 +198,34 @@ func (m *Manager) ForDatabase(ctx context.Context, datname string) (*pgxpool.Con
 	m.mu.Lock()
 	pool, exists := m.dbs[datname]
 	if !exists {
-		// Evict oldest idle database if at capacity.
-		if len(m.dbs) >= m.opts.MaxDatabases {
+		// Evict the least recently used database while at capacity, but
+		// never one whose pool has a connection checked out or a caller still
+		// waiting to acquire from it: closing that pool fails the caller with
+		// a closed pool. When every database is busy the new one is opened
+		// anyway, so the bound is nominal until those connections are released.
+		for len(m.dbs) >= m.opts.MaxDatabases {
 			oldest := ""
 			var oldestT time.Time
 			for name, t := range m.dbtc {
+				if m.pending[name] > 0 || m.dbs[name].Stat().AcquiredConns() > 0 {
+					continue
+				}
 				if oldest == "" || t.Before(oldestT) {
 					oldest = name
 					oldestT = t
 				}
 			}
-			if oldest != "" {
-				// pgxpool.Close waits for every acquired connection to be
-				// released; doing that under m.mu stalled every other
-				// database lookup behind a check still scanning the evicted
-				// database.
-				evicted := m.dbs[oldest]
-				delete(m.dbs, oldest)
-				delete(m.dbtc, oldest)
-				go evicted.Close()
+			if oldest == "" {
+				break
 			}
+			// pgxpool.Close waits for every acquired connection to be
+			// released; doing that under m.mu stalled every other
+			// database lookup behind a check still scanning the evicted
+			// database.
+			evicted := m.dbs[oldest]
+			delete(m.dbs, oldest)
+			delete(m.dbtc, oldest)
+			go evicted.Close()
 		}
 		// Create new per-database pool.
 		cfg, err := pgxpool.ParseConfig(m.target.dsn)
@@ -243,9 +255,16 @@ func (m *Manager) ForDatabase(ctx context.Context, datname string) (*pgxpool.Con
 		m.dbs[datname] = pool
 	}
 	m.dbtc[datname] = m.clock.Now()
+	m.pending[datname]++
 	m.mu.Unlock()
 
 	conn, err := pool.Acquire(ctx)
+	m.mu.Lock()
+	m.pending[datname]--
+	if m.pending[datname] == 0 {
+		delete(m.pending, datname)
+	}
+	m.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}

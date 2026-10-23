@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,6 +18,7 @@ import (
 	"github.com/pashagolub/pgxmock/v5"
 	"github.com/stretchr/testify/require"
 
+	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/identity"
 	"github.com/manprint/pglens/internal/pgtype"
 )
@@ -342,4 +344,79 @@ func TestManager_IdentityDoesNotNeedTheTarget(t *testing.T) {
 	var persisted identity.File
 	require.NoError(t, json.Unmarshal(raw, &persisted))
 	require.Len(t, persisted.Instances, 2, "neither concurrent allocation may erase the other")
+}
+
+// TestManager_ForDatabaseKeepsAPoolBeingAcquired: a caller still waiting to
+// acquire from a database's pool is not evicted by a request for another
+// database, so it never acquires from a pool that was closed under it. The
+// listener accepts connections and never answers, which keeps the first
+// acquire waiting until its context expires.
+func TestManager_ForDatabaseKeepsAPoolBeingAcquired(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	var (
+		mu    sync.Mutex
+		conns []net.Conn
+	)
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, c)
+			mu.Unlock()
+		}
+	}()
+
+	opts := DefaultConnOptions()
+	opts.MaxDatabases = 1
+	dsn := fmt.Sprintf("postgres://pglens:pglens@%s/postgres?sslmode=disable", ln.Addr().String())
+	m, err := NewManager(context.Background(), "test-target", dsn, opts, clock.System())
+	require.NoError(t, err)
+	defer m.Close()
+	// Registered after m.Close, so it runs first: the silent connections must
+	// be closed before Close, which waits for the pool's own dial to finish.
+	defer func() {
+		_ = ln.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+	}()
+
+	firstErr := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		conn, err := m.ForDatabase(ctx, "postgres")
+		if conn != nil {
+			conn.Release()
+		}
+		firstErr <- err
+	}()
+
+	// The first call has picked its pool once the map holds it, so the second
+	// call runs while the first is still waiting to acquire from it.
+	require.Eventually(t, func() bool {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		_, ok := m.dbs["postgres"]
+		return ok
+	}, time.Second, 5*time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	_, err = m.ForDatabase(ctx, "template1")
+	require.Error(t, err, "the listener never answers, so the second acquire cannot succeed")
+
+	m.mu.Lock()
+	kept := len(m.dbs)
+	m.mu.Unlock()
+	require.Equal(t, 2, kept, "the pool being acquired from must not be evicted")
+
+	// Its own acquire runs out of time; a closed pool would fail it at once.
+	require.ErrorIs(t, <-firstErr, context.DeadlineExceeded)
 }
