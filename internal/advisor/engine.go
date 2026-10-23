@@ -409,6 +409,8 @@ func missingSnapshotInput(s *Snapshot, need string) bool {
 		return s.Baseline == nil
 	case "Replication":
 		return s.Replication == nil
+	case "LockTree":
+		return s.LockTree == nil
 	case "host":
 		return !s.Host.Available
 	case "settings":
