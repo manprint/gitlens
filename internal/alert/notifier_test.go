@@ -165,6 +165,63 @@ func TestChannelNotifier_DeliversATransitionWhoseClaimFailed(t *testing.T) {
 	require.Equal(t, []notificationMark{{phase: "fire", ok: true, attempts: 2}}, store.marks)
 }
 
+// TestChannelNotifier_ReportsAnUnclaimedDeliveryItGivesUp — a claim that fails
+// on every pass is not dropped silently. When its attempts are used up the pass
+// returns the drop, and the counter records it. No send happens.
+func TestChannelNotifier_ReportsAnUnclaimedDeliveryItGivesUp(t *testing.T) {
+	a := Alert{Key: "k", RuleID: "r", Severity: SeverityWarning, State: StateFiring, StartedAt: time.Unix(1, 0), LastEvalAt: time.Unix(1, 0)}
+	store := &claimStore{failClaims: maxNotifyAttempts}
+	slack := &testChannel{name: "slack"}
+	n := NewChannelNotifier(store, slack)
+	retrier := n.(interface{ Retry(context.Context) error })
+	before := UndeliveredNotifications()
+
+	require.ErrorContains(t, n.Notify(context.Background(), a), "claim failed")
+	require.NoError(t, retrier.Retry(context.Background()), "a claim is not made again in the pass that failed it")
+	for i := 2; i < maxNotifyAttempts; i++ {
+		require.ErrorContains(t, retrier.Retry(context.Background()), "claim failed")
+	}
+	require.ErrorIs(t, retrier.Retry(context.Background()), errUndelivered)
+	require.Equal(t, before+1, UndeliveredNotifications())
+	require.NoError(t, retrier.Retry(context.Background()), "a given-up delivery is not retried")
+	require.Zero(t, slack.sent)
+	require.Empty(t, store.marks)
+}
+
+// lostReplyStore commits the first claim and loses its reply, as a connection
+// that drops after the commit does. Every later claim finds the row on record.
+type lostReplyStore struct {
+	markStore
+	claims int
+}
+
+func (s *lostReplyStore) ClaimNotification(context.Context, string, string, string, Alert) (bool, error) {
+	s.claims++
+	if s.claims == 1 {
+		return false, errors.New("connection reset")
+	}
+	return false, nil
+}
+
+// TestChannelNotifier_ReportsAClaimWhoseReplyWasLost — this process never won
+// the claim of a delivery whose reply it lost, so it does not send it. The pass
+// reports it instead of skipping it as delivered by someone else.
+func TestChannelNotifier_ReportsAClaimWhoseReplyWasLost(t *testing.T) {
+	a := Alert{Key: "k", RuleID: "r", Severity: SeverityWarning, State: StateFiring, StartedAt: time.Unix(1, 0), LastEvalAt: time.Unix(1, 0)}
+	store := &lostReplyStore{}
+	slack := &testChannel{name: "slack"}
+	n := NewChannelNotifier(store, slack)
+	retrier := n.(interface{ Retry(context.Context) error })
+	before := UndeliveredNotifications()
+
+	require.ErrorContains(t, n.Notify(context.Background(), a), "connection reset")
+	require.NoError(t, retrier.Retry(context.Background()), "a claim is not made again in the pass that failed it")
+	require.ErrorIs(t, retrier.Retry(context.Background()), errUndelivered)
+	require.Equal(t, before+1, UndeliveredNotifications())
+	require.Zero(t, slack.sent)
+	require.Empty(t, store.marks)
+}
+
 // TestChannelNotifier_AnExpiredClaimDoesNotUseUpAnAttempt — a claim that the
 // expired cycle cut short is not blamed on the store. The delivery keeps all of
 // its attempts, and it goes out on the first pass whose cycle is live.

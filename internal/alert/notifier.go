@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	"github.com/google/uuid"
 	"github.com/manprint/pglens/internal/alert/notify"
@@ -14,8 +16,21 @@ import (
 // maxNotifyAttempts bounds the sends of one delivery, the first included. A
 // channel that is down for a while still gets the transition once it is back,
 // and one that stays down does not keep its messages queued forever: after the
-// last attempt the claim row records the failure.
+// last send the claim row records the failure. A failed claim uses up the same
+// attempts, and a delivery that runs out of them while unclaimed has no row to
+// record it, so keepUnclaimed reports it instead.
 const maxNotifyAttempts = 5
+
+// undelivered counts the unclaimed deliveries this process gave up on. It is
+// read through UndeliveredNotifications.
+var undelivered atomic.Int64
+
+// errUndelivered wraps the error of each delivery given up on.
+var errUndelivered = errors.New("notification not delivered")
+
+// UndeliveredNotifications reports how many deliveries this process gave up on
+// without a claim on record. Such a delivery is never sent, and no row shows it.
+func UndeliveredNotifications() int64 { return undelivered.Load() }
 
 type channelNotifier struct {
 	store    Store
@@ -28,8 +43,9 @@ type channelNotifier struct {
 
 // pendingDelivery is a message that a channel did not accept. It is sent again
 // on the first pass after the one in which it failed. The queue lives in
-// memory: a restart or a change of leader drops it, and the claim row keeps the
-// failure on record.
+// memory: a restart or a change of leader drops it. A failed send stays on
+// record in the claim row; an unclaimed delivery has no row, so its drop is
+// reported instead.
 type pendingDelivery struct {
 	dedupID string
 	channel notify.Channel
@@ -63,7 +79,9 @@ func (n *channelNotifier) Notify(ctx context.Context, a Alert) error {
 			// never be delivered. The claim is made again on a later pass.
 			errs = append(errs, err)
 			d.unclaimed = true
-			n.keep(d)
+			if err := n.keepUnclaimed(d); err != nil {
+				errs = append(errs, err)
+			}
 			continue
 		}
 		if !won {
@@ -127,13 +145,18 @@ func (n *channelNotifier) Retry(ctx context.Context) error {
 		if d.unclaimed {
 			won, err := n.claim(ctx, &d)
 			if err != nil {
-				n.keep(d)
 				errs = append(errs, err)
+				if err := n.keepUnclaimed(d); err != nil {
+					errs = append(errs, err)
+				}
 				continue
 			}
 			if !won {
-				// Claimed on record by an earlier attempt or another replica, which
-				// delivers it, so this pass has nothing to send.
+				// This process claims a delivery only before it sends it, so a claim
+				// on record that it did not win was made by an earlier attempt whose
+				// reply was lost, or by another leader. Nothing here can tell whether
+				// that message went out, so the delivery is given up and reported.
+				errs = append(errs, n.giveUp(d, "its claim is already on record and this pass did not make it"))
 				continue
 			}
 			d.unclaimed = false
@@ -180,4 +203,22 @@ func (n *channelNotifier) keep(d pendingDelivery) {
 	d.failedIn = n.passes
 	n.pending = append(n.pending, d)
 	n.mu.Unlock()
+}
+
+// keepUnclaimed queues a delivery whose claim failed. When its attempts are used
+// up it is given up, since no claim row records a failure for it.
+func (n *channelNotifier) keepUnclaimed(d pendingDelivery) error {
+	if d.attempts < maxNotifyAttempts {
+		n.keep(d)
+		return nil
+	}
+	return n.giveUp(d, "its claim failed on every attempt")
+}
+
+// giveUp reports an unclaimed delivery that this process will not send. The
+// drop is counted, logged and returned, so that it is not silent.
+func (n *channelNotifier) giveUp(d pendingDelivery, reason string) error {
+	undelivered.Add(1)
+	log.Printf("alert notifier: %s on %s (%s) not sent: %s", d.dedupID, d.channel.Name(), d.phase, reason)
+	return fmt.Errorf("%w: channel %s, %s of %s: %s", errUndelivered, d.channel.Name(), d.phase, d.dedupID, reason)
 }
