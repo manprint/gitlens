@@ -18,6 +18,7 @@ import (
 // composeFile is the part of a compose file these tests read.
 type composeFile struct {
 	Services map[string]struct {
+		Image       string            `yaml:"image"`
 		Environment map[string]string `yaml:"environment"`
 		Ports       []string          `yaml:"ports"`
 		Volumes     []string          `yaml:"volumes"`
@@ -78,8 +79,11 @@ func TestExampleStack_PublishesLoopbackOnlyAndRequiresSecrets(t *testing.T) {
 				require.True(t, strings.HasPrefix(port, "127.0.0.1:"), "%s: %s publishes %q on every interface", name, service, port)
 			}
 			// A superuser password with a default is one that anyone who can
-			// reach the published port knows, so every stack requires it.
-			if password, ok := s.Environment["POSTGRES_PASSWORD"]; ok {
+			// reach the published port knows, so every database service of
+			// every stack requires one. The image names the database services.
+			if strings.Contains(s.Image, "postgres") || strings.Contains(s.Image, "timescale") {
+				password, ok := s.Environment["POSTGRES_PASSWORD"]
+				require.True(t, ok, "%s: %s runs a database without POSTGRES_PASSWORD", name, service)
 				require.Contains(t, password, ":?", "%s: %s has a default superuser password", name, service)
 			}
 		}
@@ -88,6 +92,7 @@ func TestExampleStack_PublishesLoopbackOnlyAndRequiresSecrets(t *testing.T) {
 	var stack composeFile
 	require.NoError(t, yaml.Unmarshal(readFile(t, "docker-compose.yml"), &stack))
 	for service, key := range map[string]string{
+		"timescaledb":   "POSTGRES_PASSWORD",
 		"pglens-server": "PGLENS_BOOTSTRAP_TOKEN",
 		"pglens-agent":  "PGLENS_BOOTSTRAP_TOKEN",
 	} {
