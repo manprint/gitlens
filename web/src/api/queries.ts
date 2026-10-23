@@ -331,14 +331,11 @@ export function useInstanceCommandAudit(id: string) {
     // which is not JSON is reported as a malformed response, not a bare SyntaxError.
     queryFn: (signal) =>
       getApi<Schemas['CommandAuditEntry'][]>(async () => {
-        const { data, error, response } = await client.GET(
-          '/api/v1/instances/{id}/command-audit',
-          {
-            params: { path: { id } },
-            parseAs: 'text',
-            signal,
-          },
-        )
+        const { data, error, response } = await client.GET('/api/v1/instances/{id}/command-audit', {
+          params: { path: { id } },
+          parseAs: 'text',
+          signal,
+        })
         if (data === undefined) {
           return { error, response }
         }
