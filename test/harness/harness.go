@@ -404,13 +404,14 @@ func (h *Harness) startAgentBinary() error {
 	// Full E2E scenarios poll statement and relation samples on bounded
 	// deadlines. Keep both binary and container harnesses observable before
 	// startup churn can evict the probe from the selector.
+	// The sample stays at 50 statements in both suites, as in the container
+	// fixtures. Each statement brings about ten counter series, so the 300
+	// the UI suite once used put an instance at about 3500 series, over the
+	// I-8 budget of 2000.
 	statStatementsInterval := "5s"
 	statStatementsTopN := 50
 	if h.ui {
-		// The UI smoke suite benefits from a wider statement sample, while the
-		// full suite must keep the cardinality budget bounded under its load.
 		statStatementsInterval = "10s"
-		statStatementsTopN = 300
 	}
 	config := fmt.Sprintf(`server:
   url: http://localhost:%d
