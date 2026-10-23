@@ -178,6 +178,11 @@ func (inv *Inventory) upsertOne(ctx context.Context, tenantID string, agentID uu
 	if err != nil {
 		return instanceRejected{fmt.Errorf("invalid instance_id %q: %w", inst.InstanceID, err)}
 	}
+	// The nil UUID parses, but it names no instance. An agent that has no
+	// identity yet sends it, and it must not be registered as one.
+	if instUUID == uuid.Nil {
+		return instanceRejected{fmt.Errorf("invalid instance_id %q: the nil UUID names no instance", inst.InstanceID)}
+	}
 
 	// 1. Look up the instance before anything is written for it. A push that
 	// names another cluster than the instance's own is refused before that
