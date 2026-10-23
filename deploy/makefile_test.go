@@ -125,23 +125,27 @@ func TestMakefile_E2EFullPrintsEachScenario(t *testing.T) {
 	require.Contains(t, strings.Fields(string(out)), "-v", "test-e2e-full must pass -v: %s", out)
 }
 
-// make build-images must re-resolve the base images. Without --pull, docker
+// The image targets must re-resolve the base images. Without --pull, docker
 // reuses a cached golang or distroless image for a tag that has since moved,
-// so a local build can pick up an older base than the tag names.
+// so a local build can pick up an older base than the tag names. The
+// multi-arch target builds the same two images with buildx, which takes the
+// same flag.
 func TestMakefile_BuildImagesPullTheBaseImages(t *testing.T) {
 	if _, err := exec.LookPath("make"); err != nil {
 		t.Skip("make is required")
 	}
-	out, err := exec.Command("make", "-n", "-f", filepath.Join("..", "Makefile"), "build-images").CombinedOutput()
-	require.NoError(t, err, "%s", out)
-	var builds []string
-	for _, line := range strings.Split(string(out), "\n") {
-		if strings.HasPrefix(line, "docker build") {
-			builds = append(builds, line)
-			require.Contains(t, strings.Fields(line), "--pull", line)
+	for _, target := range []string{"build-images", "build-images-multiarch"} {
+		out, err := exec.Command("make", "-n", "-f", filepath.Join("..", "Makefile"), target).CombinedOutput()
+		require.NoError(t, err, "%s", out)
+		var builds []string
+		for _, line := range strings.Split(string(out), "\n") {
+			if strings.HasPrefix(line, "docker build") {
+				builds = append(builds, line)
+				require.Contains(t, strings.Fields(line), "--pull", "%s: %s", target, line)
+			}
 		}
+		require.Len(t, builds, 2, target)
 	}
-	require.Len(t, builds, 2)
 }
 
 // go.mod pins the standard library with its go line and has no toolchain
