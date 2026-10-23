@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -27,17 +28,32 @@ func TestHostAPI_RemoteInstanceReportsUnavailable(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	require.Equal(t, false, got["available"])
 	require.Equal(t, "target is not local to any agent", got["reason"])
+	// No sample was taken, so there is no time to report. The zero time is
+	// not a sample, and omitempty does not drop a struct field.
+	_, hasSampled := got["sampled_at"]
+	require.False(t, hasSampled, rec.Body.String())
 	_, hasMemory := got["host_mem_total_bytes"]
 	require.False(t, hasMemory)
 }
 
 func TestHostAPI_OmitsAbsentFields(t *testing.T) {
 	data := map[string]any{"instance_id": uuid.NewString(), "available": true, "source": "host", "sampled_at": time.Now(), "stale": false}
-	encoded := mustJSON(data)
+	rec := httptest.NewRecorder()
+	writeJSON(rec, http.StatusOK, data)
 	var got map[string]any
-	require.NoError(t, json.Unmarshal(encoded, &got))
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	_, present := got["host_cpu_used_ratio"]
 	require.False(t, present)
+}
+
+// A host metric that cannot be encoded must fail the request. The response
+// used to be a 200 with the body null, which a client reads as no host data.
+func TestHostAPI_UnencodableMetricIsServerError(t *testing.T) {
+	id := uuid.New()
+	pool := &mockPool{queryResults: []*mockRows{{rows: [][]any{{time.Now(), "host_load1", math.NaN()}}}}}
+	rec := httptest.NewRecorder()
+	hostTestRouter(&API{pool: pool}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/instances/"+id.String()+"/host", nil))
+	require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
 }
 
 func TestHostAPI_SourceIsDecoded(t *testing.T) {

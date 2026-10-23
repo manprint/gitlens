@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -251,6 +252,27 @@ func TestAPI_Metrics_StepTooSmall(t *testing.T) {
 	require.NotEmpty(t, errResp.Error)
 }
 
+// TestAPI_Metrics_OverflowingPointCountIsRefused: a 1ns step over a span near
+// the duration limit is past int range, and the converted count wrapped to a
+// value under the cap, so the query ran unbounded. A one-year step over a
+// span longer than a duration can hold was answered from its first 292 years.
+func TestAPI_Metrics_OverflowingPointCountIsRefused(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, step string }{
+		{"1ns step over the whole span", "1ns"},
+		{"one year step over a span longer than a duration", "8760h"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := chi.NewRouter()
+			NewAPI(nil).RegisterRoutes(r)
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/query?metric=x&instance_id=11111111-1111-1111-1111-111111111111&from=0001-01-01T00:00:00Z&to=9999-12-31T23:59:59Z&step="+tc.step, http.NoBody)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			require.Equal(t, http.StatusUnprocessableEntity, w.Code, w.Body.String())
+		})
+	}
+}
+
 func TestAPI_Metrics_NullForGap(t *testing.T) {
 	t.Parallel()
 	api := NewAPI(nil)
@@ -434,8 +456,8 @@ func TestAPI_MockPool_Clusters_TwoInstances(t *testing.T) {
 		queryResults: []*mockRows{
 			{rows: [][]any{{cidDB, nil, "manual"}}}, // clusters: one cluster, no name
 			{rows: [][]any{ // instances for that cluster
-				{uuid.NewString(), "10.0.0.1", 5432, "primary", 170000, "T0", time.Now()},
-				{uuid.NewString(), "10.0.0.2", 5432, "standby", 170000, "T0", time.Now().Add(-10 * time.Minute)}, // stale => down
+				{cidDB, uuid.NewString(), "10.0.0.1", 5432, "primary", 170000, "T0", time.Now()},
+				{cidDB, uuid.NewString(), "10.0.0.2", 5432, "standby", 170000, "T0", time.Now().Add(-10 * time.Minute)}, // stale => down
 			}},
 		},
 	}
@@ -473,15 +495,17 @@ func TestAPI_MockPool_Clusters_TopologyEdgesAndLag(t *testing.T) {
 		queryResults: []*mockRows{
 			{rows: [][]any{{cidDB, nil, "manual"}}},
 			{rows: [][]any{
-				{from.String(), "10.0.0.1", 5432, "primary", 170000, "T0", time.Now()},
-				{toSync.String(), "10.0.0.2", 5432, "standby", 170000, "T0", time.Now()},
+				{cidDB, from.String(), "10.0.0.1", 5432, "primary", 170000, "T0", time.Now()},
+				{cidDB, toSync.String(), "10.0.0.2", 5432, "standby", 170000, "T0", time.Now()},
 			}},
 			{rows: [][]any{
-				{from.String(), toSync.String(), "streaming", "sync", "high"},
-				{from.String(), toLow.String(), "streaming", nil, "low"},
+				{cidDB, from.String(), toSync.String(), "streaming", "sync", "high"},
+				{cidDB, from.String(), toLow.String(), "streaming", nil, "low"},
 			}},
+			// standby names, standby edges and sender names, then sync states
+			nil, nil, nil, nil,
+			{rows: [][]any{{cidDB, 0.75}}}, // max replay lag
 		},
-		queryRowVals: []*mockRow{{vals: []any{0.75}}},
 	}
 	api := &API{pool: pool}
 	r := chi.NewRouter()
@@ -513,6 +537,70 @@ func TestAPI_MockPool_Clusters_TopologyEdgesAndLag(t *testing.T) {
 	require.True(t, sawLowWithNote)
 }
 
+// TestAPI_MockPool_Clusters_MeasuredZeroLag: a caught-up standby measures a
+// replay lag of exactly 0. That is a measurement, so the cluster must carry
+// it. The UI reads a missing key as "not measured", which would show a
+// fully caught-up cluster as unknown lag.
+func TestAPI_MockPool_Clusters_MeasuredZeroLag(t *testing.T) {
+	t.Parallel()
+	cidDB := store.ToDB(pgtype.ClusterID(9004))
+	pool := &mockPool{
+		queryResults: []*mockRows{
+			{rows: [][]any{{cidDB, nil, "manual"}}},
+			{rows: [][]any{
+				{cidDB, uuid.NewString(), "10.0.0.1", 5432, "primary", 170000, "T0", time.Now()},
+				{cidDB, uuid.NewString(), "10.0.0.2", 5432, "standby", 170000, "T0", time.Now()},
+			}},
+			nil, nil, nil, nil, nil,
+			{rows: [][]any{{cidDB, 0.0}}}, // max replay lag
+		},
+	}
+	api := &API{pool: pool}
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/clusters", http.NoBody)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp []clusterResp
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp, 1)
+	require.NotNil(t, resp[0].MaxReplayLagSeconds, "a measured zero is still a measurement")
+	require.Equal(t, 0.0, *resp[0].MaxReplayLagSeconds)
+	require.Equal(t, "ok", resp[0].Health)
+	require.Contains(t, w.Body.String(), `"max_replay_lag_seconds":0`)
+}
+
+// TestAPI_MockPool_Clusters_SkipsClusterWithoutInstances: a cluster row with
+// no instance behind it is left by a registration that failed. Its health is
+// "unknown", which the spec does not allow, and the fleet summary cannot
+// count it. The list leaves it out, so the total matches the clusters shown.
+func TestAPI_MockPool_Clusters_SkipsClusterWithoutInstances(t *testing.T) {
+	t.Parallel()
+	orphan := store.ToDB(pgtype.ClusterID(9005))
+	withInstances := store.ToDB(pgtype.ClusterID(9006))
+	pool := &mockPool{
+		queryResults: []*mockRows{
+			{rows: [][]any{{orphan, nil, "manual"}, {withInstances, nil, "manual"}}},
+			{rows: [][]any{
+				{withInstances, uuid.NewString(), "10.0.0.5", 5432, "primary", 170000, "T0", time.Now()},
+			}},
+		},
+	}
+	api := &API{pool: pool}
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/clusters", http.NoBody)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp []clusterResp
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp, 1)
+	require.Equal(t, pgtype.ClusterID(9006).String(), resp[0].ClusterID)
+	require.Equal(t, "ok", resp[0].Health)
+}
+
 // TestAPI_MockPool_Clusters_MostRecentPrimaryWins covers a real bug found
 // live running SYS-REPL-001: after a real failover, the old (now-dead)
 // primary's own instances.role row still says "primary" for a while (a
@@ -533,8 +621,8 @@ func TestAPI_MockPool_Clusters_MostRecentPrimaryWins(t *testing.T) {
 				// "pg-primary" sorts before "pg-standby" by addr, but it's
 				// the stale, dead one; the freshly-promoted instance must
 				// still win.
-				{staleID, "pg-primary", 5432, "primary", 170000, "T0", time.Now().Add(-2 * time.Minute)},
-				{freshID, "pg-standby", 5432, "primary", 170000, "T0", time.Now()},
+				{cidDB, staleID, "pg-primary", 5432, "primary", 170000, "T0", time.Now().Add(-2 * time.Minute)},
+				{cidDB, freshID, "pg-standby", 5432, "primary", 170000, "T0", time.Now()},
 			}},
 		},
 	}
@@ -550,6 +638,75 @@ func TestAPI_MockPool_Clusters_MostRecentPrimaryWins(t *testing.T) {
 	require.Len(t, resp, 1)
 	require.NotNil(t, resp[0].Primary)
 	require.Equal(t, freshID, *resp[0].Primary)
+}
+
+// Two live rows at one address and port are two live instances, not a
+// rebuilt one with its predecessor. Only a silent row is superseded, so both
+// primaries count and the cluster reads as split-brain.
+func TestAPI_MockPool_Clusters_TwoLivePrimariesAtOneEndpointAreCritical(t *testing.T) {
+	t.Parallel()
+	cid := pgtype.ClusterID(9004)
+	cidDB := store.ToDB(cid)
+	pool := &mockPool{
+		queryResults: []*mockRows{
+			{rows: [][]any{{cidDB, nil, "manual"}}},
+			{rows: [][]any{
+				{cidDB, uuid.NewString(), "10.0.5.1", 5432, "primary", 170000, "T0", time.Now().Add(-10 * time.Second)},
+				{cidDB, uuid.NewString(), "10.0.5.1", 5432, "primary", 170000, "T0", time.Now()},
+			}},
+		},
+	}
+	api := &API{pool: pool}
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/clusters", http.NoBody)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp []clusterResp
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp, 1)
+	require.Equal(t, "critical", resp[0].Health)
+}
+
+// A superseded row is a predecessor, so it is neither the cluster's primary nor
+// one of its standbys: the primary shown is the newest row that is not one,
+// and the standby count covers the rows that are. Every row here is silent, so
+// the cluster is degraded, not critical, and the primary shown is the one row
+// that still counts as a primary.
+func TestAPI_MockPool_Clusters_SupersededRowsAreNotPrimaryOrStandby(t *testing.T) {
+	t.Parallel()
+	cid := pgtype.ClusterID(9005)
+	cidDB := store.ToDB(cid)
+	primaryID := uuid.NewString()
+	pool := &mockPool{
+		queryResults: []*mockRows{
+			{rows: [][]any{{cidDB, nil, "manual"}}},
+			{rows: [][]any{
+				// The former primary at 10.0.6.1 was rebuilt as a standby there.
+				{cidDB, uuid.NewString(), "10.0.6.1", 5432, "primary", 170000, "T0", time.Now().Add(-10 * time.Minute)},
+				{cidDB, uuid.NewString(), "10.0.6.1", 5432, "standby", 170000, "T0", time.Now().Add(-5 * time.Minute)},
+				{cidDB, primaryID, "10.0.6.2", 5432, "primary", 170000, "T0", time.Now().Add(-20 * time.Minute)},
+				// A standby at 10.0.6.3 was rebuilt in place.
+				{cidDB, uuid.NewString(), "10.0.6.3", 5432, "standby", 170000, "T0", time.Now().Add(-30 * time.Minute)},
+				{cidDB, uuid.NewString(), "10.0.6.3", 5432, "standby", 170000, "T0", time.Now().Add(-2 * time.Minute)},
+			}},
+		},
+	}
+	api := &API{pool: pool}
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/clusters", http.NoBody)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp []clusterResp
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp, 1)
+	require.NotNil(t, resp[0].Primary)
+	require.Equal(t, primaryID, *resp[0].Primary, "a superseded former primary is not the primary shown")
+	require.Equal(t, 2, resp[0].StandbyCount, "superseded standby rows are not counted as standbys")
+	require.Equal(t, "degraded", resp[0].Health)
 }
 
 func TestAPI_MockPool_Clusters_QueryError(t *testing.T) {
@@ -614,7 +771,7 @@ func TestAPI_MockPool_MetricsQuery_NullAndValue(t *testing.T) {
 	// one point landing in the 2nd of 3 one-minute buckets
 	pool := &mockPool{
 		queryResults: []*mockRows{
-			{rows: [][]any{{from.Add(90 * time.Second), 42.0}}},
+			{rows: [][]any{{from.Add(90 * time.Second), 42.0, int64(1)}}},
 		},
 	}
 	api := &API{pool: pool}
@@ -633,6 +790,64 @@ func TestAPI_MockPool_MetricsQuery_NullAndValue(t *testing.T) {
 	require.NotNil(t, resp.Series[1].Value)
 	require.Equal(t, 42.0, *resp.Series[1].Value)
 	require.Nil(t, resp.Series[2].Value)
+}
+
+func TestAPI_MockPool_MetricsQuery_RefusesSeveralSeries(t *testing.T) {
+	t.Parallel()
+	iid := uuid.New()
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := from.Add(time.Minute)
+	// Two label sets scraped in the same cycle share one timestamp.
+	pool := &mockPool{
+		queryResults: []*mockRows{
+			{rows: [][]any{
+				{from.Add(10 * time.Second), 42.0, int64(1)},
+				{from.Add(10 * time.Second), 3.0, int64(2)},
+			}},
+		},
+	}
+	api := &API{pool: pool}
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	url := "/api/v1/metrics/query?metric=pg_io_hits&instance_id=" + iid.String() +
+		"&from=" + from.Format(time.RFC3339) + "&to=" + to.Format(time.RFC3339) + "&step=60s"
+	req := httptest.NewRequest(http.MethodGet, url, http.NoBody)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "several series")
+}
+
+func TestAPI_MockPool_MetricsQuery_MeanWithinOneSeries(t *testing.T) {
+	t.Parallel()
+	iid := uuid.New()
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := from.Add(time.Minute)
+	// One series with three samples in the same bucket answers with their mean,
+	// not with the last scrape (2.0), which would count one interval for the bucket.
+	pool := &mockPool{
+		queryResults: []*mockRows{
+			{rows: [][]any{
+				{from.Add(10 * time.Second), 1.0, int64(7)},
+				{from.Add(25 * time.Second), 0.0, int64(7)},
+				{from.Add(40 * time.Second), 2.0, int64(7)},
+			}},
+		},
+	}
+	api := &API{pool: pool}
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	url := "/api/v1/metrics/query?metric=pg_io_hits&instance_id=" + iid.String() +
+		"&from=" + from.Format(time.RFC3339) + "&to=" + to.Format(time.RFC3339) + "&step=60s"
+	req := httptest.NewRequest(http.MethodGet, url, http.NoBody)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp metricsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Series, 1)
+	require.NotNil(t, resp.Series[0].Value)
+	require.Equal(t, 1.0, *resp.Series[0].Value)
 }
 
 func TestAPI_MockPool_Events_WithRows(t *testing.T) {
@@ -829,4 +1044,156 @@ func TestAPI_InstanceTruncated_QueryVariants(t *testing.T) {
 		_, err := api.instanceTruncated(context.Background(), iid, nil, nil)
 		require.Error(t, err)
 	})
+}
+
+// TestAPI_JSONWrites_RefuseOversizedBody: the write routes must not buffer a
+// body of arbitrary size. A 1 MiB body is refused with 413 before the decoder
+// reads it, on every route that takes JSON.
+func TestAPI_JSONWrites_RefuseOversizedBody(t *testing.T) {
+	t.Parallel()
+	body := `{"junk":"` + strings.Repeat("A", 1<<20) + `"}`
+	api := &API{pool: &mockPool{}}
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	alerts := newAlertAPIForTest(&mockPool{}, &alertAPITestStore{})
+	ar := alertRouter(alerts)
+	for _, tc := range []struct {
+		name    string
+		handler http.Handler
+		method  string
+		path    string
+	}{
+		{"rule update", ar, http.MethodPut, "/api/v1/alert-rules/custom"},
+		{"silence create", ar, http.MethodPost, "/api/v1/silences"},
+		{"finding mute", r, http.MethodPost, "/api/v1/findings/some-id/mute"},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		tc.handler.ServeHTTP(w, req)
+		require.Equal(t, http.StatusRequestEntityTooLarge, w.Code, "%s: %s", tc.name, w.Body.String())
+	}
+}
+
+// TestAPI_JSONWrites_RequireJSONBody: a write decodes only a body that declares
+// itself JSON. A form or plain-text body is what a page on another site can
+// send without a preflight, so it is refused before the decoder reads it.
+func TestAPI_JSONWrites_RequireJSONBody(t *testing.T) {
+	t.Parallel()
+	body := `{"reason":"x","until":"2999-01-01T00:00:00Z"}`
+	ar := alertRouter(newAlertAPIForTest(&mockPool{}, &alertAPITestStore{}))
+	r := chi.NewRouter()
+	(&API{pool: &mockPool{}}).RegisterRoutes(r)
+	for _, tc := range []struct {
+		name        string
+		handler     http.Handler
+		method      string
+		path        string
+		contentType string
+	}{
+		{"silence create as text", ar, http.MethodPost, "/api/v1/silences", "text/plain"},
+		{"silence create as form", ar, http.MethodPost, "/api/v1/silences", "application/x-www-form-urlencoded"},
+		{"finding mute without a type", r, http.MethodPost, "/api/v1/findings/some-id/mute", ""},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(body))
+		if tc.contentType != "" {
+			req.Header.Set("Content-Type", tc.contentType)
+		}
+		w := httptest.NewRecorder()
+		tc.handler.ServeHTTP(w, req)
+		require.Equal(t, http.StatusUnsupportedMediaType, w.Code, "%s: %s", tc.name, w.Body.String())
+	}
+}
+
+// TestAPI_MockPool_Clusters_QueriesDoNotGrowWithClusters: the cluster list reads
+// every cluster's instances, edges, sync states and lag in one query each, so
+// it issues the same number of queries for one cluster as for twenty.
+func TestAPI_MockPool_Clusters_QueriesDoNotGrowWithClusters(t *testing.T) {
+	t.Parallel()
+	countQueries := func(n int) int {
+		clusters := make([][]any, 0, n)
+		for i := 0; i < n; i++ {
+			clusters = append(clusters, []any{int64(9100 + i), nil, "manual"})
+		}
+		pool := &mockPool{queryResults: []*mockRows{{rows: clusters}}}
+		api := &API{pool: pool}
+		r := chi.NewRouter()
+		api.RegisterRoutes(r)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/clusters", http.NoBody))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		return pool.queryCalls
+	}
+	require.Equal(t, countQueries(1), countQueries(20))
+}
+
+// A payload that cannot be encoded, such as a NaN metric, must not reach the
+// client as an empty 200: the status is only written once the body is known.
+func TestAPI_WriteJSON_EncodeFailureIsServerError(t *testing.T) {
+	t.Parallel()
+	w := httptest.NewRecorder()
+	writeJSON(w, http.StatusOK, map[string]any{"v": math.NaN()})
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	require.Equal(t, "application/json", w.Header().Get("Content-Type"))
+	var got apiError
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got), w.Body.String())
+	require.Equal(t, "encode failed", got.Error)
+}
+
+func TestAPI_WriteJSON_EncodesWithTrailingNewline(t *testing.T) {
+	t.Parallel()
+	w := httptest.NewRecorder()
+	writeJSON(w, http.StatusOK, map[string]any{"v": 1.5})
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, "{\"v\":1.5}\n", w.Body.String())
+}
+
+// argsPool records the arguments of each query, so a test can read the window
+// a handler sent.
+type argsPool struct {
+	*mockPool
+	queried [][]any
+}
+
+func (p *argsPool) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	p.queried = append(p.queried, args)
+	return p.mockPool.Query(ctx, sql, args...)
+}
+
+func (p *argsPool) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	p.queried = append(p.queried, args)
+	return p.mockPool.QueryRow(ctx, sql, args...)
+}
+
+// Without from, statements cover the hour before to, or before now, not the
+// whole retained history that every such request used to scan.
+func TestAPI_MockPool_Statements_DefaultWindowIsTheLastHour(t *testing.T) {
+	t.Parallel()
+	windowStart := func(query string) time.Time {
+		t.Helper()
+		pool := &argsPool{mockPool: &mockPool{
+			queryResults: []*mockRows{{rows: [][]any{}}},
+			queryRowVals: []*mockRow{{vals: []any{false}}, {err: pgx.ErrNoRows}},
+		}}
+		r := chi.NewRouter()
+		(&API{pool: pool}).RegisterRoutes(r)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/statements?instance_id="+uuid.NewString()+query, http.NoBody)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.NotEmpty(t, pool.queried)
+		for _, arg := range pool.queried[0] {
+			if ts, ok := arg.(time.Time); ok {
+				return ts
+			}
+		}
+		t.Fatal("the aggregate query carries no window start")
+		return time.Time{}
+	}
+
+	before := time.Now()
+	require.WithinDuration(t, before.Add(-time.Hour), windowStart(""), time.Minute)
+
+	to := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	require.Equal(t, to.Add(-time.Hour), windowStart("&to="+to.Format(time.RFC3339)))
 }

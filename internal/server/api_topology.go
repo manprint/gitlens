@@ -16,6 +16,11 @@ import (
 	"github.com/manprint/pglens/internal/store"
 )
 
+// topologyFailoverLimit caps the failover events a topology answer carries,
+// newest first. The events are retained for 90 days, and a long-lived cluster
+// would otherwise return its whole history on every render of the page.
+const topologyFailoverLimit = 100
+
 // TopologyAPI handles topology-related read extensions.
 // Phase 6 extends it with /clusters/{id}/topology and /clusters/{id}/replication endpoints.
 type TopologyAPI struct {
@@ -132,10 +137,10 @@ func (t *TopologyAPI) handleTopology(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Fetch failover events for this cluster
+	// Fetch the newest failover events for this cluster
 	arows, err := t.pool.Query(ctx,
-		`SELECT event_id, ts, type, instance_id, payload FROM events WHERE tenant_id='default' AND cluster_id=$1 AND type='failover_detected' ORDER BY ts DESC`,
-		cidDB)
+		`SELECT event_id, ts, type, instance_id, payload FROM events WHERE tenant_id='default' AND cluster_id=$1 AND type='failover_detected' ORDER BY ts DESC LIMIT $2`,
+		cidDB, topologyFailoverLimit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query events failed", err.Error())
 		return
@@ -400,65 +405,91 @@ type standbyResolver struct {
 	namesOf map[uuid.UUID]map[string]struct{}
 }
 
+// loadStandbyResolver builds the standby resolver of one cluster.
 func loadStandbyResolver(ctx context.Context, pool dbPool, cidDB int64) (*standbyResolver, error) {
-	r := &standbyResolver{
-		byTargetName: make(map[string]uuid.UUID),
-		standbysOf:   make(map[uuid.UUID][]uuid.UUID),
-		namesOf:      make(map[uuid.UUID]map[string]struct{}),
+	resolvers, err := loadStandbyResolvers(ctx, pool, []int64{cidDB})
+	if err != nil {
+		return nil, err
 	}
-	rows, err := pool.Query(ctx, `SELECT instance_id, COALESCE(target_name, '') FROM instances WHERE tenant_id='default' AND cluster_id=$1`, cidDB)
+	return resolvers[cidDB], nil
+}
+
+// loadStandbyResolvers builds the standby resolver of every cluster in cids,
+// with one query per table for all of them rather than three per cluster.
+func loadStandbyResolvers(ctx context.Context, pool dbPool, cids []int64) (map[int64]*standbyResolver, error) {
+	resolvers := make(map[int64]*standbyResolver, len(cids))
+	for _, cid := range cids {
+		resolvers[cid] = &standbyResolver{
+			byTargetName: make(map[string]uuid.UUID),
+			standbysOf:   make(map[uuid.UUID][]uuid.UUID),
+			namesOf:      make(map[uuid.UUID]map[string]struct{}),
+		}
+	}
+	rows, err := pool.Query(ctx, `SELECT cluster_id, instance_id, COALESCE(target_name, '') FROM instances WHERE tenant_id='default' AND cluster_id = ANY($1)`, cids)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
+		var cid int64
 		var id uuid.UUID
 		var name string
-		if err := rows.Scan(&id, &name); err != nil {
+		if err := rows.Scan(&cid, &id, &name); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		if name != "" {
-			r.byTargetName[name] = id
+			resolvers[cid].byTargetName[name] = id
 		}
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	rows, err = pool.Query(ctx, `SELECT from_instance, to_instance FROM topology_edges WHERE tenant_id='default' AND cluster_id=$1`, cidDB)
+	rows, err = pool.Query(ctx, `SELECT cluster_id, from_instance, to_instance FROM topology_edges WHERE tenant_id='default' AND cluster_id = ANY($1)`, cids)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
+		var cid int64
 		var standby, upstream uuid.UUID
-		if err := rows.Scan(&standby, &upstream); err != nil {
+		if err := rows.Scan(&cid, &standby, &upstream); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		r.standbysOf[upstream] = append(r.standbysOf[upstream], standby)
+		resolvers[cid].standbysOf[upstream] = append(resolvers[cid].standbysOf[upstream], standby)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	rows, err = pool.Query(ctx, `SELECT DISTINCT instance_id, slot_name FROM metrics_replication
-		WHERE tenant_id='default' AND cluster_id=$1 AND source='sender' AND ts >= now() - interval '1 hour'`, cidDB)
+	rows, err = pool.Query(ctx, `SELECT DISTINCT cluster_id, instance_id, slot_name FROM metrics_replication
+		WHERE tenant_id='default' AND cluster_id = ANY($1) AND source='sender' AND ts >= now() - interval '1 hour'`, cids)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
+		var cid int64
 		var primary uuid.UUID
 		var name string
-		if err := rows.Scan(&primary, &name); err != nil {
+		if err := rows.Scan(&cid, &primary, &name); err != nil {
 			return nil, err
 		}
-		if r.namesOf[primary] == nil {
-			r.namesOf[primary] = make(map[string]struct{})
+		if resolvers[cid].namesOf[primary] == nil {
+			resolvers[cid].namesOf[primary] = make(map[string]struct{})
 		}
-		r.namesOf[primary][name] = struct{}{}
+		resolvers[cid].namesOf[primary][name] = struct{}{}
 	}
-	return r, rows.Err()
+	return resolvers, rows.Err()
+}
+
+// syncStateSummary is what the sync states of one cluster say: the sync state
+// of each standby that resolves to an instance, how many standbys are
+// synchronous (sync or quorum), and whether any sender row was seen at all.
+type syncStateSummary struct {
+	states      map[uuid.UUID]string
+	synchronous int
+	seen        bool
 }
 
 // currentSyncStates reads each primary's latest pg_stat_replication rows: the
@@ -471,33 +502,48 @@ func currentSyncStates(ctx context.Context, pool dbPool, cidDB int64) (map[uuid.
 	if err != nil {
 		return nil, 0, false, err
 	}
-	rows, err := pool.Query(ctx, `SELECT DISTINCT ON (instance_id, slot_name) instance_id, slot_name, sync_state
-		FROM metrics_replication
-		WHERE tenant_id='default' AND cluster_id=$1 AND sync_state IS NOT NULL AND slot_name <> ''
-		  AND ts > now() - interval '60 seconds'
-		ORDER BY instance_id, slot_name, ts DESC`, cidDB)
+	summaries, err := loadSyncStates(ctx, pool, []int64{cidDB}, map[int64]*standbyResolver{cidDB: resolver})
 	if err != nil {
 		return nil, 0, false, err
 	}
+	summary := summaries[cidDB]
+	return summary.states, summary.synchronous, summary.seen, nil
+}
+
+// loadSyncStates reads the latest sync state of every primary in cids, with
+// one query for all of them, and resolves each standby with its cluster's
+// resolver.
+func loadSyncStates(ctx context.Context, pool dbPool, cids []int64, resolvers map[int64]*standbyResolver) (map[int64]*syncStateSummary, error) {
+	rows, err := pool.Query(ctx, `SELECT DISTINCT ON (cluster_id, instance_id, slot_name) cluster_id, instance_id, slot_name, sync_state
+		FROM metrics_replication
+		WHERE tenant_id='default' AND cluster_id = ANY($1) AND sync_state IS NOT NULL AND slot_name <> ''
+		  AND ts > now() - interval '60 seconds'
+		ORDER BY cluster_id, instance_id, slot_name, ts DESC`, cids)
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
-	states := make(map[uuid.UUID]string)
-	synchronous := 0
-	seen := false
+	summaries := make(map[int64]*syncStateSummary, len(cids))
+	for _, cid := range cids {
+		summaries[cid] = &syncStateSummary{states: make(map[uuid.UUID]string)}
+	}
 	for rows.Next() {
+		var cid int64
 		var primary uuid.UUID
 		var name, state string
-		if err := rows.Scan(&primary, &name, &state); err != nil {
-			return nil, 0, false, err
+		if err := rows.Scan(&cid, &primary, &name, &state); err != nil {
+			return nil, err
 		}
-		seen = true
+		summary := summaries[cid]
+		summary.seen = true
 		if state == "sync" || state == "quorum" {
-			synchronous++
+			summary.synchronous++
 		}
-		if standby, ok := resolver.resolve(primary, name); ok {
-			states[standby] = state
+		if standby, ok := resolvers[cid].resolve(primary, name); ok {
+			summary.states[standby] = state
 		}
 	}
-	return states, synchronous, seen, rows.Err()
+	return summaries, rows.Err()
 }
 
 // resolve finds the standby a primary's row describes: the instance whose
@@ -537,6 +583,26 @@ type slotsResp struct {
 	Slots     []slotResp `json:"slots"`
 }
 
+// slotsSQL is the newest reading of each slot, with the last active reading of
+// an inactive one. That lookup binds the instance, the slot and the activity,
+// ordered by time, which metrics_replication_slot_active_idx serves. Without
+// it, each inactive slot walked its history back to the last active row.
+const slotsSQL = `
+		SELECT l.instance_id, l.slot_name, l.slot_type, l.slot_active, l.slot_wal_status,
+		       l.slot_retained_bytes, l.slot_safe_wal_size_bytes,
+		       CASE WHEN l.slot_active THEN l.ts ELSE (
+		         SELECT max(h.ts) FROM metrics_replication h
+		          WHERE h.tenant_id='default' AND h.instance_id=l.instance_id
+		            AND h.slot_name=l.slot_name AND h.slot_active) END,
+		       l.ts
+		FROM (SELECT DISTINCT ON (instance_id, slot_name) *
+		        FROM metrics_replication
+		       WHERE tenant_id='default' AND cluster_id=$1 AND slot_name <> ''
+		         AND (source='slot' OR (source IS NULL AND slot_active IS NOT NULL))
+		         AND ts >= now() - interval '5 minutes'
+		       ORDER BY instance_id, slot_name, ts DESC) l
+		ORDER BY l.slot_name, l.instance_id`
+
 // handleSlots returns the newest state of every replication slot in the
 // cluster. The cluster page had a slots section and nothing to fill it with:
 // no endpoint served the rows the replication_slots check has always sent.
@@ -556,21 +622,7 @@ func (t *TopologyAPI) handleSlots(w http.ResponseWriter, r *http.Request) {
 	// A slot not reported for five minutes (the check runs every 15s) has
 	// been dropped, or its instance is gone. last_active_at looks back over
 	// the retained history for the slot's last active reading.
-	rows, err := t.pool.Query(ctx, `
-		SELECT l.instance_id, l.slot_name, l.slot_type, l.slot_active, l.slot_wal_status,
-		       l.slot_retained_bytes, l.slot_safe_wal_size_bytes,
-		       CASE WHEN l.slot_active THEN l.ts ELSE (
-		         SELECT max(h.ts) FROM metrics_replication h
-		          WHERE h.tenant_id='default' AND h.instance_id=l.instance_id
-		            AND h.slot_name=l.slot_name AND h.slot_active) END,
-		       l.ts
-		FROM (SELECT DISTINCT ON (instance_id, slot_name) *
-		        FROM metrics_replication
-		       WHERE tenant_id='default' AND cluster_id=$1 AND slot_name <> ''
-		         AND (source='slot' OR (source IS NULL AND slot_active IS NOT NULL))
-		         AND ts >= now() - interval '5 minutes'
-		       ORDER BY instance_id, slot_name, ts DESC) l
-		ORDER BY l.slot_name, l.instance_id`, store.ToDB(cid))
+	rows, err := t.pool.Query(ctx, slotsSQL, store.ToDB(cid))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query slots failed", err.Error())
 		return

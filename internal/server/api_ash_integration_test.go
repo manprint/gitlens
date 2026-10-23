@@ -515,3 +515,74 @@ func TestIntASH015_GroupByAggregatesPerBucket(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, entries, "no query was seen in a wait event outside the range's samples")
 }
+
+// INT-ASH-016: the significance guard reads the range's ticks. Sixty windows,
+// each with two wait events, are sixty ticks, not one hundred and twenty. A
+// filter that matches nothing has no rows to count, and keeps those sixty
+// instead of warning of a sample too small to trust.
+func TestIntASH016_TicksCountEachWindowOnceAndSurviveAnEmptyFilter(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+
+	ctx := contextBackground()
+	instID := uuid.New()
+	cid := pgtype.ClusterID(12345)
+	start := time.Now().UTC().Truncate(time.Second)
+	metric := func(waitEventType, waitEvent string) wire.Metric {
+		return wire.Metric{
+			Name:  "ash_bucket",
+			Value: 1,
+			Kind:  "gauge",
+			Labels: map[string]string{
+				"wait_event_type": waitEventType,
+				"wait_event":      waitEvent,
+				"state":           "active",
+				"datname":         "testdb",
+				"window_seconds":  "10",
+				"window_ticks":    "1",
+			},
+		}
+	}
+	for i := 0; i < 60; i++ {
+		env := wire.Envelope{
+			ProtocolVersion: 1,
+			Instances: []wire.Instance{{
+				InstanceID: instID.String(),
+				ClusterID:  cid.String(),
+				Results: []wire.Result{{
+					Check:   "ash",
+					TS:      start.Add(time.Duration(i) * time.Second),
+					Metrics: []wire.Metric{metric("CPU", "CPU"), metric("LWLock", "WALWrite")},
+				}},
+			}},
+		}
+		_, err := NewPipeline(pool, nil).Process(ctx, env)
+		require.NoError(t, err)
+	}
+
+	ashAPI := NewAshAPI(pool)
+	_, totalTicks, err := ashAPI.queryASHBuckets(ctx, instID, nil, nil, "", ashFilters{}, 1000)
+	require.NoError(t, err)
+	require.Equal(t, 60, totalTicks, "each window's ticks once, not once per wait event")
+
+	from := start.Add(-time.Minute).Format(time.RFC3339)
+	to := start.Add(3 * time.Minute).Format(time.RFC3339)
+	for _, path := range []string{
+		"/api/v1/ash?instance_id=" + instID.String() + "&wait_event=Nope",
+		"/api/v1/ash?instance_id=" + instID.String() + "&group_by=wait_event_type&wait_event=Nope&from=" + from + "&to=" + to,
+		"/api/v1/ash/top?instance_id=" + instID.String() + "&wait_event=Nope",
+	} {
+		r := chi.NewRouter()
+		ashAPI.RegisterRoutes(r)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		require.Equal(t, http.StatusOK, w.Code, path)
+		var resp map[string]any
+		require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+		require.NotContains(t, resp, "warning", path)
+	}
+}

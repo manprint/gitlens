@@ -1,12 +1,15 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -96,10 +99,45 @@ func writeError(w http.ResponseWriter, status int, msg, detail string) {
 	_ = json.NewEncoder(w).Encode(apiError{Error: msg, Detail: detail})
 }
 
+// maxJSONBodyBytes caps the body of a JSON write. Rule edits, silences and
+// mutes are a few hundred bytes, and the decoder buffers each value in full, so
+// a larger body is refused before it is read.
+const maxJSONBodyBytes = 64 << 10
+
+// decodeJSONBody decodes the JSON body of a write request into dst. It writes
+// the error response and returns false when the body is too large or malformed.
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) bool {
+	// The body must declare itself JSON. A form or text body is what a page on
+	// another site can send without a preflight, so it is refused unread.
+	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
+		writeError(w, http.StatusUnsupportedMediaType, "unsupported media type", "the body must be application/json")
+		return false
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)).Decode(dst); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "payload too large", fmt.Sprintf("the body may not exceed %d bytes", maxJSONBodyBytes))
+			return false
+		}
+		writeError(w, http.StatusBadRequest, "invalid body", err.Error())
+		return false
+	}
+	return true
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
+	// The body is encoded before the status is written. Once the header is
+	// out, a payload that fails to encode, such as a NaN, leaves the client a
+	// 200 with no body and leaves nothing in the log.
+	var body bytes.Buffer
+	if err := json.NewEncoder(&body).Encode(v); err != nil {
+		log.Printf("encode response: %v", err)
+		writeError(w, http.StatusInternalServerError, "encode failed", err.Error())
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	_, _ = w.Write(body.Bytes())
 }
 
 func parseTimeParam(s string) (time.Time, error) {
@@ -267,12 +305,39 @@ type clusterResp struct {
 	Topology            []topologyEdgeResp `json:"topology,omitempty"`
 }
 
+// clusterInstanceRow is one instances row of the cluster list.
+type clusterInstanceRow struct {
+	id        uuid.UUID
+	addr      string
+	port      int
+	role      string
+	pgVersion int
+	permTier  string
+	lastSeen  time.Time
+}
+
+// clusterEndpoint is the host and port an instance answers on. An instance
+// that is rebuilt or re-registered under a new id keeps its endpoint.
+type clusterEndpoint struct {
+	addr string
+	port int
+}
+
+// clusterEdgeRow is one topology_edges row of the cluster list.
+type clusterEdgeRow struct {
+	from, to   uuid.UUID
+	edgeType   string
+	syncState  sql.NullString
+	confidence string
+}
+
 func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	if a.pool == nil {
 		writeJSON(w, http.StatusOK, []clusterResp{})
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
 	rows, err := a.pool.Query(ctx, `SELECT cluster_id, name, id_source FROM clusters WHERE tenant_id='default' ORDER BY cluster_id`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query failed", err.Error())
@@ -298,10 +363,105 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "rows error", err.Error())
 		return
 	}
+	if len(clusters) == 0 {
+		writeJSON(w, http.StatusOK, []clusterResp{})
+		return
+	}
+
+	// Each per-cluster read is issued once for all the clusters and grouped
+	// here, so the list costs the same round trips however many clusters
+	// there are. It used to be a query per cluster, on the endpoint the
+	// dashboard polls most.
+	cids := make([]int64, 0, len(clusters))
+	for _, c := range clusters {
+		cids = append(cids, c.idDB)
+	}
+
+	irows, qerr := a.pool.Query(ctx,
+		`SELECT cluster_id, instance_id, addr, port, role, pg_version, perm_tier, last_seen FROM instances WHERE tenant_id='default' AND cluster_id = ANY($1) ORDER BY cluster_id, addr, port`,
+		cids)
+	if qerr != nil {
+		writeError(w, http.StatusInternalServerError, "query instances failed", qerr.Error())
+		return
+	}
+	instanceRows := make(map[int64][]clusterInstanceRow)
+	for irows.Next() {
+		var cid int64
+		var row clusterInstanceRow
+		if scanErr := irows.Scan(&cid, &row.id, &row.addr, &row.port, &row.role, &row.pgVersion, &row.permTier, &row.lastSeen); scanErr != nil {
+			irows.Close()
+			writeError(w, http.StatusInternalServerError, "scan instance failed", scanErr.Error())
+			return
+		}
+		instanceRows[cid] = append(instanceRows[cid], row)
+	}
+	if err := irows.Err(); err != nil {
+		irows.Close()
+		writeError(w, http.StatusInternalServerError, "instances rows error", err.Error())
+		return
+	}
+	irows.Close()
+
+	trows, terr := a.pool.Query(ctx,
+		`SELECT cluster_id, from_instance, to_instance, edge_type, sync_state, confidence FROM topology_edges WHERE tenant_id='default' AND cluster_id = ANY($1) ORDER BY cluster_id, from_instance, to_instance`,
+		cids)
+	if terr != nil {
+		writeError(w, http.StatusInternalServerError, "query topology edges failed", terr.Error())
+		return
+	}
+	edgeRows := make(map[int64][]clusterEdgeRow)
+	for trows.Next() {
+		var cid int64
+		var edge clusterEdgeRow
+		if scanErr := trows.Scan(&cid, &edge.from, &edge.to, &edge.edgeType, &edge.syncState, &edge.confidence); scanErr != nil {
+			trows.Close()
+			writeError(w, http.StatusInternalServerError, "scan edge failed", scanErr.Error())
+			return
+		}
+		edgeRows[cid] = append(edgeRows[cid], edge)
+	}
+	if err := trows.Err(); err != nil {
+		trows.Close()
+		writeError(w, http.StatusInternalServerError, "topology rows error", err.Error())
+		return
+	}
+	trows.Close()
+
+	resolvers, err := loadStandbyResolvers(ctx, a.pool, cids)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query instances failed", err.Error())
+		return
+	}
+	syncStates, err := loadSyncStates(ctx, a.pool, cids, resolvers)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query sync state failed", err.Error())
+		return
+	}
+
+	// The CURRENT max replay lag across each cluster's instances: a recent
+	// reading per instance, not the all-time max. A plain all-time MAX() means
+	// one transient lag blip during replication's initial catch-up makes a
+	// cluster report "degraded" forever. A plain "latest non-null reading per
+	// instance" is not enough either, because replication_streaming's
+	// replay_lag column reads NULL whenever PostgreSQL has no fresh feedback,
+	// so "latest non-null" can still reach back to that stale blip. Bounding to
+	// the last 60s is what lets a resolved lag age out.
+	maxLags, err := loadMaxReplayLags(ctx, a.pool, cids)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query max lag failed", err.Error())
+		return
+	}
 
 	now := time.Now().UTC()
 	resp := make([]clusterResp, 0, len(clusters))
 	for _, c := range clusters {
+		// A cluster with no instance behind it is left by a registration that
+		// failed after its cluster row was written. healthForCluster reads it
+		// as "unknown", which the spec does not allow, and the fleet summary
+		// cannot count it, so it is left out of the list.
+		if len(instanceRows[c.idDB]) == 0 {
+			continue
+		}
 		cidStr := store.FromDB(c.idDB).String()
 
 		var namePtr *string
@@ -310,41 +470,39 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 			namePtr = &v
 		}
 
-		// Fetch instances for this cluster.
-		irows, qerr := a.pool.Query(ctx,
-			`SELECT instance_id, addr, port, role, pg_version, perm_tier, last_seen FROM instances WHERE tenant_id='default' AND cluster_id=$1 ORDER BY addr, port`,
-			c.idDB)
-		if qerr != nil {
-			writeError(w, http.StatusInternalServerError, "query instances failed", qerr.Error())
-			return
-		}
 		instances := []clusterInstanceResp{}
 		var primaryID *string
 		var primaryLastSeen time.Time
 		hasPrimary := false
 		primaryCount := 0
+		livePrimaryCount := 0
 		anyDown := false
 		standbyCount := 0
 		edgeSyncCount := 0
-		for irows.Next() {
-			var iid uuid.UUID
-			var addr, role, permTier string
-			var port, pgVersion int
-			var lastSeen time.Time
-			if scanErr := irows.Scan(&iid, &addr, &port, &role, &pgVersion, &permTier, &lastSeen); scanErr != nil {
-				irows.Close()
-				writeError(w, http.StatusInternalServerError, "scan instance failed", scanErr.Error())
-				return
+		// The newest sighting at each endpoint. A silent row that a later row
+		// has taken over is a predecessor of that instance: it is still listed,
+		// but it counts neither as down nor as the primary or a standby.
+		newestSeen := map[clusterEndpoint]time.Time{}
+		for _, row := range instanceRows[c.idDB] {
+			ep := clusterEndpoint{row.addr, row.port}
+			if row.lastSeen.After(newestSeen[ep]) {
+				newestSeen[ep] = row.lastSeen
 			}
-			up := isUp(lastSeen, now)
-			if !up {
+		}
+		for _, row := range instanceRows[c.idDB] {
+			up := isUp(row.lastSeen, now)
+			superseded := !up && row.lastSeen.Before(newestSeen[clusterEndpoint{row.addr, row.port}])
+			if !up && !superseded {
 				anyDown = true
 			}
-			if role == "standby" {
+			if row.role == "standby" && !superseded {
 				standbyCount++
 			}
-			if role == "primary" {
+			if row.role == "primary" && !superseded {
 				primaryCount++
+				if up {
+					livePrimaryCount++
+				}
 			}
 			// Among (possibly multiple, in a split-brain) role="primary"
 			// rows, report the most recently-seen one — not simply the
@@ -356,61 +514,40 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 			// instances.role row, so both rows legitimately say "primary"
 			// for a while after a real failover, and the old one kept
 			// winning).
-			if role == "primary" && (!hasPrimary || lastSeen.After(primaryLastSeen)) {
-				s := iid.String()
+			if row.role == "primary" && !superseded && (!hasPrimary || row.lastSeen.After(primaryLastSeen)) {
+				s := row.id.String()
 				primaryID = &s
-				primaryLastSeen = lastSeen
+				primaryLastSeen = row.lastSeen
 				hasPrimary = true
 			}
 			instances = append(instances, clusterInstanceResp{
-				InstanceID: iid.String(),
-				Addr:       addr,
-				Port:       port,
-				Role:       role,
-				PGVersion:  pgVersion,
-				PermTier:   permTier,
-				LastSeen:   lastSeen,
+				InstanceID: row.id.String(),
+				Addr:       row.addr,
+				Port:       row.port,
+				Role:       row.role,
+				PGVersion:  row.pgVersion,
+				PermTier:   row.permTier,
+				LastSeen:   row.lastSeen,
 				Up:         up,
 			})
 		}
-		if err := irows.Err(); err != nil {
-			irows.Close()
-			writeError(w, http.StatusInternalServerError, "instances rows error", err.Error())
-			return
-		}
-		irows.Close()
 
-		// Fetch topology edges for this cluster.
-		trows, terr := a.pool.Query(ctx,
-			`SELECT from_instance, to_instance, edge_type, sync_state, confidence FROM topology_edges WHERE tenant_id='default' AND cluster_id=$1 ORDER BY from_instance, to_instance`,
-			c.idDB)
-		if terr != nil {
-			writeError(w, http.StatusInternalServerError, "query topology edges failed", terr.Error())
-			return
-		}
 		topology := []topologyEdgeResp{}
-		for trows.Next() {
-			var from, to uuid.UUID
-			var edgeType, confidence string
-			var syncState sql.NullString
-			if scanErr := trows.Scan(&from, &to, &edgeType, &syncState, &confidence); scanErr != nil {
-				trows.Close()
-				writeError(w, http.StatusInternalServerError, "scan edge failed", scanErr.Error())
-				return
-			}
+		for _, e := range edgeRows[c.idDB] {
 			edge := topologyEdgeResp{
-				From:       from.String(),
-				To:         to.String(),
-				Type:       edgeType,
-				Confidence: confidence,
+				From:       e.from.String(),
+				To:         e.to.String(),
+				Type:       e.edgeType,
+				Confidence: e.confidence,
 			}
-			if syncState.Valid {
-				edge.SyncState = &syncState.String
-				if syncState.String == "sync" {
+			if e.syncState.Valid {
+				syncState := e.syncState.String
+				edge.SyncState = &syncState
+				if syncState == "sync" {
 					edgeSyncCount++
 				}
 			}
-			if confidence == "low" {
+			if e.confidence == "low" {
 				// A low-confidence edge is the standby's last-known upstream while
 				// its WAL receiver is not streaming (see wire.Edge.Confidence). The
 				// upstream is still a known instance: the pipeline drops an edge it
@@ -420,63 +557,38 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 			}
 			topology = append(topology, edge)
 		}
-		if err := trows.Err(); err != nil {
-			trows.Close()
-			writeError(w, http.StatusInternalServerError, "topology rows error", err.Error())
-			return
-		}
-		trows.Close()
-
-		syncStates, senderSyncCount, senderSeen, serr := currentSyncStates(ctx, a.pool, c.idDB)
-		if serr != nil {
-			writeError(w, http.StatusInternalServerError, "query sync state failed", serr.Error())
-			return
-		}
+		summary := syncStates[c.idDB]
 		for i := range topology {
 			if topology[i].SyncState != nil {
 				continue
 			}
 			if from, perr := uuid.Parse(topology[i].From); perr == nil {
-				if state, ok := syncStates[from]; ok {
+				if state, ok := summary.states[from]; ok {
 					topology[i].SyncState = &state
 				}
 			}
 		}
 		syncStandbyCount := edgeSyncCount
-		if senderSeen {
-			syncStandbyCount = senderSyncCount
+		if summary.seen {
+			syncStandbyCount = summary.synchronous
 		}
 
-		// Fetch the CURRENT max replay lag across this cluster's instances —
-		// a recent reading per instance, not the all-time max. Found live
-		// while verifying the README's own "ok" health example against a
-		// real idle cluster: a plain all-time MAX() means one transient lag
-		// blip during replication's initial catch-up (routine, harmless, and
-		// exactly what SYS-REPL-004 exercises the recovery half of) makes a
-		// cluster report "degraded" forever, with no way for health to ever
-		// recover. A plain "latest non-null reading per instance" isn't
-		// enough either: `replication_streaming`'s replay_lag column reads
-		// NULL whenever PostgreSQL has no fresh feedback to report (common —
-		// confirmed live, most cycles), so "latest non-null" can still reach
-		// back to that same one-time stale blip while every truly recent
-		// row is null. Bounding to the last 60s (comfortably above every
-		// replication check's own interval, 10-15s) is what actually lets a
-		// resolved lag age out.
 		var maxReplayLag *float64
-		err = a.pool.QueryRow(ctx,
-			`SELECT MAX(replay_lag_sec) FROM (
-				SELECT DISTINCT ON (instance_id, slot_name) replay_lag_sec
-				FROM metrics_replication
-				WHERE tenant_id='default' AND cluster_id=$1 AND replay_lag_sec IS NOT NULL
-				  AND ts > now() - interval '60 seconds'
-				ORDER BY instance_id, slot_name, ts DESC
-			) latest`,
-			c.idDB).Scan(&maxReplayLag)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			writeError(w, http.StatusInternalServerError, "query max lag failed", err.Error())
-			return
+		if lag, ok := maxLags[c.idDB]; ok {
+			maxReplayLag = &lag
 		}
 
+		// Once a live primary exists, primary rows that have gone silent are not
+		// counted. A failover leaves the old row role='primary' indefinitely, and
+		// counting it kept a failed-over cluster critical. The fallback to every
+		// stored row keeps a cluster whose only primary is down degraded, as it
+		// has always read. The rule is not strict live-only counting: staleness
+		// waits three expected intervals before it stops counting a primary, and
+		// a card that gave up after the shorter up threshold would go critical
+		// first.
+		if livePrimaryCount > 0 {
+			primaryCount = livePrimaryCount
+		}
 		health := healthForCluster(primaryCount, anyDown, len(instances), maxReplayLag)
 		cr := clusterResp{
 			ClusterID:     cidStr,
@@ -493,7 +605,9 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 		if syncStandbyCount > 0 {
 			cr.SyncStandbyCount = syncStandbyCount
 		}
-		if maxReplayLag != nil && *maxReplayLag > 0 {
+		// A measured zero is kept: a caught-up standby reports exactly 0, and
+		// the spec reads a missing value as "not measured", never as zero.
+		if maxReplayLag != nil {
 			cr.MaxReplayLagSeconds = maxReplayLag
 		}
 		if len(topology) > 0 {
@@ -502,6 +616,36 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 		resp = append(resp, cr)
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// loadMaxReplayLags returns, for each cluster in cids that has a reading in the
+// last 60 seconds, the largest replay lag of its instances' latest readings.
+// Clusters without one are absent from the map.
+func loadMaxReplayLags(ctx context.Context, pool dbPool, cids []int64) (map[int64]float64, error) {
+	rows, err := pool.Query(ctx, `SELECT cluster_id, MAX(replay_lag_sec) FROM (
+			SELECT DISTINCT ON (cluster_id, instance_id, slot_name) cluster_id, replay_lag_sec
+			FROM metrics_replication
+			WHERE tenant_id='default' AND cluster_id = ANY($1) AND replay_lag_sec IS NOT NULL
+			  AND ts > now() - interval '60 seconds'
+			ORDER BY cluster_id, instance_id, slot_name, ts DESC
+		) latest
+		GROUP BY cluster_id`, cids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	lags := make(map[int64]float64)
+	for rows.Next() {
+		var cid int64
+		var lag *float64
+		if err := rows.Scan(&cid, &lag); err != nil {
+			return nil, err
+		}
+		if lag != nil {
+			lags[cid] = *lag
+		}
+	}
+	return lags, rows.Err()
 }
 
 // ----- /api/v1/instances -----
@@ -731,16 +875,24 @@ func (a *API) handleMetricsQuery(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid step", err.Error())
 		return
 	}
-	// Point count cap: >10000 points => 422
+	// Point count cap: >10000 points => 422. to.Sub saturates at about 292
+	// years, so a longer range is refused rather than cut short. The count is
+	// compared as a float: at a 1ns step it is past int range, and converting
+	// it first wrapped to a value under the cap.
 	duration := to.Sub(from)
+	if !from.Add(duration).Equal(to) {
+		writeError(w, http.StatusUnprocessableEntity, "range too long", "a range over 292 years cannot be expressed")
+		return
+	}
 	// Use ceil to be conservative: if duration not divisible, need extra bucket.
-	points := int(math.Ceil(float64(duration) / float64(step)))
+	pointCount := math.Ceil(float64(duration) / float64(step))
+	if pointCount > maxMetricPoints {
+		writeError(w, http.StatusUnprocessableEntity, "step too small", fmt.Sprintf("would produce %.0f points, max %d", pointCount, maxMetricPoints))
+		return
+	}
+	points := int(pointCount)
 	if points <= 0 {
 		points = 1
-	}
-	if points > maxMetricPoints {
-		writeError(w, http.StatusUnprocessableEntity, "step too small", fmt.Sprintf("would produce %d points, max %d", points, maxMetricPoints))
-		return
 	}
 
 	// Build bucket timestamps [from, from+step, ... ) < to
@@ -773,11 +925,11 @@ func (a *API) handleMetricsQuery(w http.ResponseWriter, r *http.Request) {
 	var rows pgx.Rows
 	if database != "" {
 		rows, err = a.pool.Query(ctx,
-			`SELECT ts, value FROM metrics WHERE instance_id=$1 AND metric=$2 AND datname=$3 AND ts >= $4 AND ts < $5 ORDER BY ts`,
+			`SELECT ts, value, series_id FROM metrics WHERE instance_id=$1 AND metric=$2 AND datname=$3 AND ts >= $4 AND ts < $5 ORDER BY ts`,
 			iid, metric, database, from, to)
 	} else {
 		rows, err = a.pool.Query(ctx,
-			`SELECT ts, value FROM metrics WHERE instance_id=$1 AND metric=$2 AND ts >= $3 AND ts < $4 ORDER BY ts`,
+			`SELECT ts, value, series_id FROM metrics WHERE instance_id=$1 AND metric=$2 AND ts >= $3 AND ts < $4 ORDER BY ts`,
 			iid, metric, from, to)
 	}
 	if err != nil {
@@ -786,14 +938,31 @@ func (a *API) handleMetricsQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	// Map bucket index -> value (last value wins if multiple per bucket)
-	bucketValues := make(map[int]float64)
-	bucketHas := make(map[int]bool)
+	// Map bucket index -> sum and count of its samples. A stored value is the
+	// rate since the previous scrape, so a bucket answers with the mean of its
+	// samples: the overview multiplies that mean by the bucket width, and keeping
+	// only the last scrape counted one interval for the whole bucket.
+	bucketSums := make(map[int]float64)
+	bucketCounts := make(map[int]int)
+	// A mean is only meaningful within one series. Rows of different label
+	// sets (pg_io_* by object, context and backend_type, pg_backends by state)
+	// share timestamps, so averaging them returned an arbitrary series.
+	// This endpoint cannot select a series yet, so a range holding several is
+	// refused rather than answered with one of them.
+	var firstSeries int64
+	haveSeries := false
 	for rows.Next() {
 		var ts time.Time
 		var val float64
-		if scanErr := rows.Scan(&ts, &val); scanErr != nil {
+		var sid int64
+		if scanErr := rows.Scan(&ts, &val, &sid); scanErr != nil {
 			writeError(w, http.StatusInternalServerError, "scan failed", scanErr.Error())
+			return
+		}
+		if !haveSeries {
+			firstSeries, haveSeries = sid, true
+		} else if sid != firstSeries {
+			writeError(w, http.StatusBadRequest, "ambiguous metric query", fmt.Sprintf("metric %q has several series in this range, and this endpoint cannot select one", metric))
 			return
 		}
 		// Compute bucket index: floor((ts - from)/step)
@@ -804,8 +973,8 @@ func (a *API) handleMetricsQuery(w http.ResponseWriter, r *http.Request) {
 		if idx < 0 || idx >= len(buckets) {
 			continue
 		}
-		bucketValues[idx] = val
-		bucketHas[idx] = true
+		bucketSums[idx] += val
+		bucketCounts[idx]++
 	}
 	if err := rows.Err(); err != nil {
 		writeError(w, http.StatusInternalServerError, "rows error", err.Error())
@@ -814,8 +983,8 @@ func (a *API) handleMetricsQuery(w http.ResponseWriter, r *http.Request) {
 
 	series := make([]metricPoint, 0, len(buckets))
 	for i, ts := range buckets {
-		if bucketHas[i] {
-			v := bucketValues[i]
+		if bucketCounts[i] > 0 {
+			v := bucketSums[i] / float64(bucketCounts[i])
 			series = append(series, metricPoint{TS: ts, Value: &v})
 		} else {
 			series = append(series, metricPoint{TS: ts, Value: nil})
@@ -1041,7 +1210,18 @@ func (a *API) handleStatements(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If from/to missing, use defaults that still allow query (last 1h) for unit tests without DB.
+	// Without from, the answer covers the hour before to, or before now: the
+	// window the UI asks for by default. Summing the statements over the whole
+	// retained history cost every such request a scan of all of it.
+	if fromPtr == nil {
+		start := time.Now()
+		if toPtr != nil {
+			start = *toPtr
+		}
+		start = start.Add(-time.Hour)
+		fromPtr = &start
+	}
+
 	if a.pool == nil {
 		resp := statementsResp{
 			Statements:      []statementEntry{},
@@ -1203,9 +1383,12 @@ func (a *API) statementsSkipReason(ctx context.Context, instanceID uuid.UUID) (*
 
 // instanceTruncated reports whether the statements for this instance may be
 // incomplete: the agent's hard cardinality cap cut the list during the
-// requested window (a "cardinality_truncated" event), or its latest
-// pg_stat_statements result held only the top statements (a check_partial
-// fact, removed again by the next complete result).
+// requested window (a "cardinality_truncated" event), or a pg_stat_statements
+// result held only the top statements (a check_partial fact). The fact holds
+// the current partial episode, from first_seen to last_seen, so it counts only
+// when that episode overlaps the window. The flag is instance-wide, not
+// per database: the fact is keyed by the target database, but the statements
+// are read from one instance-wide view.
 func (a *API) instanceTruncated(ctx context.Context, instanceID uuid.UUID, from, to *time.Time) (bool, error) {
 	var sb strings.Builder
 	args := []any{instanceID}
@@ -1228,8 +1411,13 @@ func (a *API) instanceTruncated(ctx context.Context, instanceID uuid.UUID, from,
 	if from != nil {
 		fmt.Fprintf(&sb, " AND last_seen >= $%d", argIdx)
 		args = append(args, *from)
+		argIdx++
 	} else {
 		sb.WriteString(" AND last_seen >= now() - interval '1 day'")
+	}
+	if to != nil {
+		fmt.Fprintf(&sb, " AND first_seen < $%d", argIdx)
+		args = append(args, *to)
 	}
 	sb.WriteString(")")
 	var truncated bool

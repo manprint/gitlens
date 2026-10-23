@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -44,11 +46,20 @@ func (a *API) registerFindingsRoutes(r chi.Router) {
 	r.Get("/api/v1/findings", a.listFindings)
 	// Finding IDs are rule_id/subject and therefore may contain slashes. Chi's
 	// catch-all route preserves that stable ID while allowing the mute action
-	// to remain a suffix of the same resource path.
+	// to remain a suffix of the same resource path. The writes refuse a bare id,
+	// which the catch-all matches as well.
 	r.Post("/api/v1/findings/*", a.muteFinding)
 	r.Delete("/api/v1/findings/*", a.unmuteFinding)
 	r.Get("/api/v1/findings/*", a.getFinding)
 	r.Get("/api/v1/advisor/rules", a.listAdvisorRules)
+}
+
+// findingIsMuteAction reports whether a mute write addresses the mute action.
+// The catch-all also matches a bare finding id, and findingPathID trims the
+// suffix only when it is present, so a POST or DELETE to the id itself would
+// otherwise change that finding.
+func findingIsMuteAction(r *http.Request) bool {
+	return strings.HasSuffix(chi.URLParam(r, "*"), "/mute")
 }
 
 func findingPathID(r *http.Request, action string) string {
@@ -59,8 +70,14 @@ func findingPathID(r *http.Request, action string) string {
 	if action != "" {
 		id = strings.TrimSuffix(id, "/"+action)
 	}
-	if decoded, err := url.PathUnescape(id); err == nil {
-		id = decoded
+	// chi routes on RawPath when the request has one and hands the wildcard
+	// back still encoded. Without RawPath it routes on the decoded path, so the
+	// wildcard is already the id, and decoding it again turned a literal '%41'
+	// in a relation name into 'A' and addressed a different finding.
+	if r.URL.RawPath != "" {
+		if decoded, err := url.PathUnescape(id); err == nil {
+			id = decoded
+		}
 	}
 	return id
 }
@@ -182,7 +199,14 @@ func (a *API) getFinding(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, f)
 }
 
+// maxFindingMuteDuration bounds how far ahead a finding may be muted.
+const maxFindingMuteDuration = 90 * 24 * time.Hour
+
 func (a *API) muteFinding(w http.ResponseWriter, r *http.Request) {
+	if !findingIsMuteAction(r) {
+		writeError(w, http.StatusNotFound, "not_found", "no such endpoint")
+		return
+	}
 	if a.pool == nil {
 		writeError(w, 503, "findings unavailable", "database pool is not configured")
 		return
@@ -191,13 +215,21 @@ func (a *API) muteFinding(w http.ResponseWriter, r *http.Request) {
 		Reason string `json:"reason"`
 		Until  string `json:"until"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || strings.TrimSpace(in.Reason) == "" || in.Until == "" {
+	if !decodeJSONBody(w, r, &in) {
+		return
+	}
+	if strings.TrimSpace(in.Reason) == "" || in.Until == "" {
 		writeError(w, 400, "invalid mute", "reason and until are required")
 		return
 	}
+	now := time.Now()
 	until, err := time.Parse(time.RFC3339, in.Until)
-	if err != nil || !until.After(time.Now()) {
+	if err != nil || !until.After(now) {
 		writeError(w, 400, "invalid mute", "until must be a future RFC3339 timestamp")
+		return
+	}
+	if until.After(now.Add(maxFindingMuteDuration)) {
+		writeError(w, 400, "invalid mute", fmt.Sprintf("until must be at most %d days ahead", int(maxFindingMuteDuration/(24*time.Hour))))
 		return
 	}
 	id := findingPathID(r, "mute")
@@ -210,10 +242,17 @@ func (a *API) muteFinding(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "finding not found", id)
 		return
 	}
+	// A mute leaves no audit row, so the log is the only record of the
+	// silence: the finding, how long it lasts, the client and the reason.
+	log.Printf("finding %s muted until %s from %s: %q", id, until.Format(time.RFC3339), sessionClientAddress(r), in.Reason)
 	writeJSON(w, 200, map[string]any{"finding_id": id, "state": "muted", "muted_until": until, "mute_reason": in.Reason})
 }
 
 func (a *API) unmuteFinding(w http.ResponseWriter, r *http.Request) {
+	if !findingIsMuteAction(r) {
+		writeError(w, http.StatusNotFound, "not_found", "no such endpoint")
+		return
+	}
 	if a.pool == nil {
 		writeError(w, 503, "findings unavailable", "database pool is not configured")
 		return

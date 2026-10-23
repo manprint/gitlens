@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/manprint/pglens/internal/alert"
@@ -55,7 +57,7 @@ type alertJSON struct {
 	Summary    string            `json:"summary"`
 	StartedAt  time.Time         `json:"started_at"`
 	LastEvalAt time.Time         `json:"last_eval_at"`
-	ResolvedAt *time.Time        `json:"resolved_at,omitempty"`
+	ResolvedAt *time.Time        `json:"resolved_at"`
 	Suppressed bool              `json:"suppressed"`
 }
 
@@ -92,6 +94,12 @@ func renderAlertRule(v alert.Rule) alertRuleJSON {
 
 func renderAlert(v alert.Alert) alertJSON {
 	o := alertJSON{Key: v.Key, RuleID: v.RuleID, Severity: v.Severity, State: v.State, Datname: v.Datname, Labels: v.Labels, Value: v.Value, Summary: v.Summary, StartedAt: v.StartedAt, LastEvalAt: v.LastEvalAt, ResolvedAt: v.ResolvedAt, Suppressed: v.Suppressed}
+	// The spec makes labels a required object, and a nil map encodes as null.
+	// Rows written while the store still stored a nil map come back as nil, so
+	// the empty object is filled in here rather than only on write.
+	if o.Labels == nil {
+		o.Labels = map[string]string{}
+	}
 	// The column holds the uint64 system identifier's bit pattern: render it
 	// unsigned, like every other endpoint (ClusterId in the spec). It was
 	// rendered signed, so an identifier above 2^63 did not match its cluster.
@@ -106,11 +114,16 @@ func renderAlert(v alert.Alert) alertJSON {
 	return o
 }
 
+// activeSilencesSQL leads with the tenant because silences_window_idx does: the
+// tenant is constant, but without it the window index cannot seek before
+// PostgreSQL 18, and every list and detail call read the whole table.
+const activeSilencesSQL = `SELECT silence_id,matchers,reason,starts_at,ends_at FROM silences WHERE tenant_id='default' AND starts_at <= now() AND ends_at > now()`
+
 func (a *AlertAPI) activeSilences(ctx context.Context) ([]alert.Silence, error) {
 	if a.pool == nil {
 		return nil, nil
 	}
-	rows, err := a.pool.Query(ctx, `SELECT silence_id,matchers,reason,starts_at,ends_at FROM silences WHERE starts_at <= now() AND ends_at > now()`)
+	rows, err := a.pool.Query(ctx, activeSilencesSQL)
 	if err != nil {
 		return nil, err
 	}
@@ -135,13 +148,10 @@ func (a *AlertAPI) listAlerts(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "alerts unavailable", "alert store is not configured")
 		return
 	}
-	f := alert.Filter{State: alert.State(r.URL.Query().Get("state")), Severity: alert.Severity(r.URL.Query().Get("severity")), RuleID: r.URL.Query().Get("rule_id"), InstanceID: r.URL.Query().Get("instance_id")}
-	if f.State == "" {
-		f.State = alert.StatePending
-	}
-	if state := r.URL.Query().Get("state"); state == "" {
-		f.State = alert.StatePending
-	}
+	f := alert.Filter{State: alert.State(r.URL.Query().Get("state")), Severity: alert.Severity(r.URL.Query().Get("severity")), RuleID: r.URL.Query().Get("rule_id")}
+	// Without a state the store answers every active alert, pending and firing.
+	// A pending filter matched nothing, because the engine does not persist
+	// pending episodes yet.
 	if state := r.URL.Query().Get("state"); state == "all" {
 		f.State = ""
 	}
@@ -157,6 +167,16 @@ func (a *AlertAPI) listAlerts(w http.ResponseWriter, r *http.Request) {
 		}
 		n := store.ToDB(cid)
 		f.ClusterID = &n
+	}
+	// The store compares instance_id with a uuid column, so a value that is
+	// not a uuid must be refused here, not reach the query as a 500.
+	if v := r.URL.Query().Get("instance_id"); v != "" {
+		iid, err := uuid.Parse(v)
+		if err != nil {
+			writeError(w, 400, "invalid instance_id", err.Error())
+			return
+		}
+		f.InstanceID = iid.String()
 	}
 	rows, err := a.store.Active(r.Context(), f)
 	if err != nil {
@@ -213,8 +233,7 @@ func (a *AlertAPI) updateRule(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var in ruleUpdate
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeError(w, 400, "invalid body", err.Error())
+	if !decodeJSONBody(w, r, &in) {
 		return
 	}
 	if in.Severity != nil && *in.Severity != "critical" && *in.Severity != "warning" && *in.Severity != "info" {
@@ -229,33 +248,22 @@ func (a *AlertAPI) updateRule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 503, "alert store unavailable", "")
 		return
 	}
+	// One statement reads and writes the row. COALESCE keeps every column the
+	// body left out, and a request that waits on the row lock re-evaluates the
+	// SET list against the version the other edit committed. Reading the row
+	// first and writing every column back let a concurrent edit to another
+	// field revert.
 	var enabled bool
 	var severity alert.Severity
-	var threshold float64
+	var threshold *float64
 	var seconds int
-	row := a.pool.QueryRow(r.Context(), `SELECT enabled,severity,threshold,for_seconds FROM alert_rules WHERE rule_id=$1`, id)
+	row := a.pool.QueryRow(r.Context(), `UPDATE alert_rules SET enabled=COALESCE($1::boolean,enabled),severity=COALESCE($2::text,severity),threshold=COALESCE($3::double precision,threshold),for_seconds=COALESCE($4::integer,for_seconds),updated_at=now() WHERE rule_id=$5 RETURNING enabled,severity,threshold,for_seconds`, in.Enabled, in.Severity, in.Threshold, in.ForSeconds, id)
 	if err := row.Scan(&enabled, &severity, &threshold, &seconds); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, 404, "rule not found", id)
 		} else {
-			writeError(w, 500, "rule query failed", err.Error())
+			writeError(w, 500, "rule update failed", err.Error())
 		}
-		return
-	}
-	if in.Enabled != nil {
-		enabled = *in.Enabled
-	}
-	if in.Severity != nil {
-		severity = *in.Severity
-	}
-	if in.Threshold != nil {
-		threshold = *in.Threshold
-	}
-	if in.ForSeconds != nil {
-		seconds = *in.ForSeconds
-	}
-	if _, err := a.pool.Exec(r.Context(), `UPDATE alert_rules SET enabled=$1,severity=$2,threshold=$3,for_seconds=$4,updated_at=now() WHERE rule_id=$5`, enabled, severity, threshold, seconds, id); err != nil {
-		writeError(w, 500, "rule update failed", err.Error())
 		return
 	}
 	writeJSON(w, 200, map[string]any{"rule_id": id, "enabled": enabled, "severity": severity, "threshold": threshold, "for_seconds": seconds})
@@ -307,8 +315,7 @@ func (a *AlertAPI) listSilences(w http.ResponseWriter, r *http.Request) {
 }
 func (a *AlertAPI) createSilence(w http.ResponseWriter, r *http.Request) {
 	var s silenceJSON
-	if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
-		writeError(w, 400, "invalid body", err.Error())
+	if !decodeJSONBody(w, r, &s) {
 		return
 	}
 	if s.ID == uuid.Nil {
@@ -325,6 +332,13 @@ func (a *AlertAPI) createSilence(w http.ResponseWriter, r *http.Request) {
 	}
 	raw, _ := json.Marshal(s.Matchers)
 	if _, err := a.pool.Exec(r.Context(), `INSERT INTO silences (silence_id,matchers,reason,starts_at,ends_at) VALUES ($1,$2,$3,$4,$5)`, s.ID, raw, s.Reason, s.StartsAt, s.EndsAt); err != nil {
+		// The silence id is the row's primary key. A second create with the
+		// same id is a conflict the client can resolve, not a server failure.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			writeError(w, 409, "silence id already exists", s.ID.String())
+			return
+		}
 		writeError(w, 500, "silence create failed", err.Error())
 		return
 	}
@@ -340,7 +354,11 @@ func (a *AlertAPI) deleteSilence(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid silence id", err.Error())
 		return
 	}
-	tag, err := a.pool.Exec(r.Context(), `UPDATE silences SET ends_at=now() WHERE silence_id=$1`, id)
+	// Ending a silence that has not started at now() would put ends_at before
+	// starts_at. Such a silence ends at its own start instead, which keeps the
+	// row ordered and inactive. An active silence ends now, and an expired one
+	// keeps the end it had, so a delete never moves the silence's history.
+	tag, err := a.pool.Exec(r.Context(), `UPDATE silences SET ends_at = CASE WHEN starts_at > now() THEN starts_at ELSE LEAST(ends_at, now()) END WHERE silence_id=$1`, id)
 	if err != nil {
 		writeError(w, 500, "silence delete failed", err.Error())
 		return
@@ -352,17 +370,35 @@ func (a *AlertAPI) deleteSilence(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// alertDetailSQL leads with the tenant so the primary key (tenant_id, alert_key,
+// started_at) serves the lookup on every PostgreSQL major. Without it, PostgreSQL
+// 15 to 17 cannot seek on alert_key alone and read the whole alerts table.
+const alertDetailSQL = `SELECT alert_key,rule_id,severity,state,cluster_id,instance_id,datname,labels,value,summary,started_at,last_eval_at,resolved_at FROM alerts WHERE tenant_id='default' AND alert_key=$1 ORDER BY started_at DESC LIMIT 1`
+
 func (a *AlertAPI) alertDetail(w http.ResponseWriter, r *http.Request) {
 	if a.pool == nil {
 		writeError(w, 503, "alert store unavailable", "")
 		return
 	}
 	key := chi.URLParam(r, "alert_key")
+	// Keys contain '/' separators, so the client sends one percent-encoded path
+	// segment. chi routes on the escaped path and hands the segment back still
+	// encoded, which matched no row and 404ed every alert. Decode it once, and
+	// only when the escaped path was routed: without RawPath chi already used
+	// the decoded path, and decoding again would corrupt a key with a literal '%'.
+	if r.URL.RawPath != "" {
+		decoded, err := url.PathUnescape(key)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid alert key", err.Error())
+			return
+		}
+		key = decoded
+	}
 	var v alert.Alert
 	var raw []byte
 	var cluster *int64
 	var iid *uuid.UUID
-	err := a.pool.QueryRow(r.Context(), `SELECT alert_key,rule_id,severity,state,cluster_id,instance_id,datname,labels,value,summary,started_at,last_eval_at,resolved_at FROM alerts WHERE alert_key=$1 ORDER BY started_at DESC LIMIT 1`, key).Scan(&v.Key, &v.RuleID, &v.Severity, &v.State, &cluster, &iid, &v.Datname, &raw, &v.Value, &v.Summary, &v.StartedAt, &v.LastEvalAt, &v.ResolvedAt)
+	err := a.pool.QueryRow(r.Context(), alertDetailSQL, key).Scan(&v.Key, &v.RuleID, &v.Severity, &v.State, &cluster, &iid, &v.Datname, &raw, &v.Value, &v.Summary, &v.StartedAt, &v.LastEvalAt, &v.ResolvedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, 404, "alert not found", key)
 		return

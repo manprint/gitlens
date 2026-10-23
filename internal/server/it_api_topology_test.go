@@ -361,3 +361,37 @@ func TestAPI_Topology_ReplicationSeries_WithMetrics(t *testing.T) {
 		require.Nil(t, e.Series[0].Value, "%s was never inserted, so its series value must be a null gap, not 0", metric)
 	}
 }
+
+// INT-API-014: A cluster with more failovers than the topology answer carries
+// returns only the newest ones, so a long-lived cluster does not load its whole
+// retained history on every render.
+func TestAPI_Topology_INT_API_014_FailoverEventsAreCapped(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+
+	cid := pgtype.ClusterID(333)
+	cidDB := store.ToDB(cid)
+	total := topologyFailoverLimit + 5
+	// Failover n is n minutes old, so the newest is one minute old.
+	_, err := pool.Exec(context.Background(),
+		`INSERT INTO events (tenant_id, cluster_id, type, payload, ts)
+		 SELECT 'default', $1, 'failover_detected', '{}'::jsonb, now() - make_interval(mins => g)
+		 FROM generate_series(1, $2) AS g`,
+		cidDB, total)
+	require.NoError(t, err)
+
+	topo := NewTopologyAPI(pool)
+	r := chi.NewRouter()
+	topo.RegisterRoutes(r)
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/clusters/%s/topology", cid.String()), http.NoBody)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp topologyResp
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Events, topologyFailoverLimit)
+	oldest := resp.Events[len(resp.Events)-1].TS
+	require.True(t, oldest.After(time.Now().Add(-time.Duration(topologyFailoverLimit+1)*time.Minute)),
+		"the kept events must be the newest, but the oldest kept is %s", oldest)
+}

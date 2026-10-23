@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 )
 
@@ -46,6 +48,7 @@ func TestAshAPI_ASHUnknownOrEnabled_FallsThroughToBuckets(t *testing.T) {
 		// mockRow{err: pgx.ErrNoRows}) — unknown/never-reported must behave
 		// exactly like "enabled", not like "disabled".
 		queryResults: []*mockRows{{rows: []([]any){}}},
+		queryRowVals: []*mockRow{nil, {vals: []any{0}}},
 	}
 	api := &AshAPI{pool: pool}
 
@@ -77,7 +80,7 @@ func TestAshAPI_NoPool_ReturnsEmpty(t *testing.T) {
 	resp := ashResponse{}
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	require.Equal(t, []ashBucket{}, resp.Buckets)
-	require.Equal(t, 1, resp.ResolutionSeconds)
+	require.Equal(t, ashWindowSeconds, resp.ResolutionSeconds)
 	require.True(t, resp.Statistical)
 	require.Nil(t, resp.Warning)
 }
@@ -133,6 +136,7 @@ func TestAshAPI_AvgActiveSessions_ZeroTicks(t *testing.T) {
 				},
 			},
 		},
+		queryRowVals: []*mockRow{{vals: []any{0}}},
 	}
 	api := &AshAPI{pool: pool}
 
@@ -155,6 +159,7 @@ func TestAshAPI_AvgActiveSessions_NonZeroTicks(t *testing.T) {
 				},
 			},
 		},
+		queryRowVals: []*mockRow{{vals: []any{10}}},
 	}
 	api := &AshAPI{pool: pool}
 
@@ -200,6 +205,7 @@ func TestAshAPI_SignificanceWarning_59Ticks(t *testing.T) {
 		queryResults: []*mockRows{
 			{rows: mockRowsData},
 		},
+		queryRowVals: []*mockRow{{vals: []any{59}}},
 	}
 	api := &AshAPI{pool: pool}
 
@@ -227,6 +233,7 @@ func TestAshAPI_SignificanceWarning_60Ticks(t *testing.T) {
 		queryResults: []*mockRows{
 			{rows: mockRowsData},
 		},
+		queryRowVals: []*mockRow{{vals: []any{60}}},
 	}
 	api := &AshAPI{pool: pool}
 
@@ -339,6 +346,7 @@ func TestAshTop_SignificanceWarning_Below60Ticks(t *testing.T) {
 				},
 			},
 		},
+		queryRowVals: []*mockRow{{vals: []any{59}}},
 	}
 	api := &AshAPI{pool: pool}
 
@@ -352,19 +360,50 @@ func TestAshTop_SignificanceWarning_Below60Ticks(t *testing.T) {
 	require.True(t, totalTicks < 60)
 }
 
-// TestAshAPI_WindowTicksCountOnce: the rows of one window share its ticks.
-// Summing them per row counted the window once per key.
-func TestAshAPI_WindowTicksCountOnce(t *testing.T) {
+// TestAshAPI_TicksComeFromTheRangeNotTheRows: the rows of a window carry its
+// ticks, and a filter leaves some of them out. The total is the range's ticks,
+// read once, so the rows the filter left are not its source.
+func TestAshAPI_TicksComeFromTheRangeNotTheRows(t *testing.T) {
 	t.Parallel()
 	ts := time.Now().Truncate(time.Second)
-	pool := &mockPool{queryResults: []*mockRows{{rows: [][]any{
-		{ts, 5, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
-		{ts, 3, 10, "db1", "Lock", "transactionid", "active", (*int64)(nil)},
-		{ts.Add(-10 * time.Second), 2, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
-	}}}}
+	pool := &mockPool{
+		queryResults: []*mockRows{{rows: [][]any{
+			{ts, 5, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
+			{ts, 3, 10, "db1", "Lock", "transactionid", "active", (*int64)(nil)},
+			{ts.Add(-10 * time.Second), 2, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
+		}}},
+		queryRowVals: []*mockRow{{vals: []any{600}}},
+	}
 	_, totalTicks, err := (&AshAPI{pool: pool}).queryASHBuckets(context.Background(), uuid.New(), nil, nil, "", ashFilters{}, 1000)
 	require.NoError(t, err)
-	require.Equal(t, 20, totalTicks, "two windows of 10 ticks, not three rows")
+	require.Equal(t, 600, totalTicks, "the range's ticks, not the two windows the rows show")
+}
+
+// TestAshAPI_EmptyResultKeepsTheRangeTicks: a filter that matches nothing leaves
+// no rows to read ticks from. The significance guard must still read the
+// range's ticks, or every empty answer warns of a small sample. The ASH
+// handlers check the instance's ash_enabled first, which takes the first
+// scripted row; the top list has no such check.
+func TestAshAPI_EmptyResultKeepsTheRangeTicks(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		path string
+		rows []*mockRow
+	}{
+		{"/api/v1/ash?instance_id=%s", []*mockRow{nil, {vals: []any{600}}}},
+		{"/api/v1/ash?instance_id=%s&group_by=wait_event_type&from=2026-09-01T11:00:00Z&to=2026-09-01T12:00:00Z", []*mockRow{nil, {vals: []any{600}}}},
+		{"/api/v1/ash/top?instance_id=%s&wait_event=Nope", []*mockRow{{vals: []any{600}}}},
+	} {
+		pool := &mockPool{queryRowVals: tc.rows}
+		r := chi.NewRouter()
+		(&AshAPI{pool: pool}).RegisterRoutes(r)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest("GET", fmt.Sprintf(tc.path, uuid.NewString()), nil))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var resp map[string]any
+		require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+		require.NotContains(t, resp, "warning", tc.path)
+	}
 }
 
 func TestAshResolution_FitsTheRangeInMaxPoints(t *testing.T) {
@@ -387,6 +426,7 @@ func TestAshAPI_GroupByAggregatesAndFillsTheGroup(t *testing.T) {
 			{ts, 30, 20, "LWLock"},
 			{ts, 10, 20, "CPU"},
 		}}},
+		queryRowVals: []*mockRow{nil, {vals: []any{20}}},
 	}
 	r := chi.NewRouter()
 	(&AshAPI{pool: pool}).RegisterRoutes(r)
@@ -431,4 +471,122 @@ func TestFoldASHGroups_ConservesTheTotal(t *testing.T) {
 	require.Equal(t, "0", *out[0].QueryID)
 	require.Equal(t, "1", *out[1].QueryID)
 	require.Equal(t, 50+8+7+6, out[2].Samples)
+}
+
+// Ungrouped rows are the agent's 10-second windows, so the answer must say
+// that spacing, not the 1 that a grouped answer's default once reported.
+func TestAshAPI_UngroupedRowsReportTheAgentWindow(t *testing.T) {
+	t.Parallel()
+	ts := time.Now().Truncate(time.Second)
+	pool := &mockPool{
+		queryResults: []*mockRows{{rows: [][]any{
+			{ts, 4, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
+		}}},
+		queryRowVals: []*mockRow{nil, {vals: []any{10}}},
+	}
+	r := chi.NewRouter()
+	(&AshAPI{pool: pool}).RegisterRoutes(r)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/ash?instance_id="+uuid.NewString(), nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp ashResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.Len(t, resp.Buckets, 1)
+	require.Equal(t, ashWindowSeconds, resp.ResolutionSeconds)
+}
+
+// ashArgsPool records the query text and the arguments of each read, so a test
+// can check the row limit that was asked for and the bounds the tick count was
+// given.
+type ashArgsPool struct {
+	*mockPool
+	querySQL []string
+	rowArgs  [][]any
+}
+
+func (p *ashArgsPool) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	p.querySQL = append(p.querySQL, sql)
+	return p.mockPool.Query(ctx, sql, args...)
+}
+
+func (p *ashArgsPool) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	p.rowArgs = append(p.rowArgs, args)
+	return p.mockPool.QueryRow(ctx, sql, args...)
+}
+
+// A truncated ungrouped answer counts the ticks of the windows it shows, so the
+// tick scan stops at its oldest shown row instead of reading the whole retained
+// history. A complete answer counts the range it was asked for, here none. The
+// read asks for one row past the limit, and that row is not returned.
+func TestAshAPI_UngroupedTicksStopAtTheAnswersOldestRow(t *testing.T) {
+	t.Parallel()
+	ts := time.Now().Truncate(time.Second)
+	middle := ts.Add(-10 * time.Second)
+	oldest := ts.Add(-20 * time.Second)
+	rows := func() *mockRows {
+		return &mockRows{rows: [][]any{
+			{ts, 5, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
+			{middle, 2, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
+			{oldest, 2, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
+		}}
+	}
+
+	truncated := &ashArgsPool{mockPool: &mockPool{
+		queryResults: []*mockRows{rows()},
+		queryRowVals: []*mockRow{{vals: []any{600}}},
+	}}
+	buckets, _, err := (&AshAPI{pool: truncated}).queryASHBuckets(context.Background(), uuid.New(), nil, nil, "", ashFilters{}, 2)
+	require.NoError(t, err)
+	require.Len(t, buckets, 2, "the row read past the limit is not returned")
+	require.Contains(t, truncated.querySQL[0], "ORDER BY ts DESC LIMIT 3")
+	require.Len(t, truncated.rowArgs, 1)
+	require.Len(t, truncated.rowArgs[0], 2, "instance and a lower bound")
+	require.True(t, truncated.rowArgs[0][1].(time.Time).Equal(middle), "the bound is the oldest shown window")
+
+	complete := &ashArgsPool{mockPool: &mockPool{
+		queryResults: []*mockRows{rows()},
+		queryRowVals: []*mockRow{{vals: []any{600}}},
+	}}
+	_, _, err = (&AshAPI{pool: complete}).queryASHBuckets(context.Background(), uuid.New(), nil, nil, "", ashFilters{}, 1000)
+	require.NoError(t, err)
+	require.Len(t, complete.rowArgs, 1)
+	require.Len(t, complete.rowArgs[0], 1, "a complete answer has no lower bound when none was asked")
+}
+
+// A complete answer of exactly limit rows is not a truncated one. The read asks
+// for one row past the limit and gets none back, so the tick count keeps the
+// range's bounds and no lower bound is set.
+func TestAshAPI_ExactlyLimitRowsIsACompleteAnswer(t *testing.T) {
+	t.Parallel()
+	ts := time.Now().Truncate(time.Second)
+	pool := &ashArgsPool{mockPool: &mockPool{
+		queryResults: []*mockRows{{rows: [][]any{
+			{ts, 5, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
+			{ts.Add(-10 * time.Second), 2, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
+		}}},
+		queryRowVals: []*mockRow{{vals: []any{600}}},
+	}}
+	buckets, ticks, err := (&AshAPI{pool: pool}).queryASHBuckets(context.Background(), uuid.New(), nil, nil, "", ashFilters{}, 2)
+	require.NoError(t, err)
+	require.Len(t, buckets, 2)
+	require.Equal(t, 600, ticks)
+	require.Contains(t, pool.querySQL[0], "ORDER BY ts DESC LIMIT 3")
+	require.Len(t, pool.rowArgs, 1)
+	require.Len(t, pool.rowArgs[0], 1, "a complete answer of exactly limit rows has no lower bound")
+}
+
+// The top list's ticks CTE is the range's total and every entry carries it, so
+// a non-empty answer must not run a second tick scan.
+func TestAshTop_NonEmptyAnswerReadsTicksFromItsEntries(t *testing.T) {
+	t.Parallel()
+	pool := &mockPool{
+		queryResults: []*mockRows{{rows: [][]any{
+			{int64(42), "select 1", 7, 600},
+		}}},
+	}
+	entries, totalTicks, err := (&AshAPI{pool: pool}).queryASHTop(context.Background(), uuid.New(), nil, nil, "", ashFilters{}, 10)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, 600, totalTicks)
+	require.Zero(t, pool.queryRowCalls, "the entries already carry the range's ticks")
 }

@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"net/http"
 	"time"
 
@@ -16,7 +15,7 @@ type hostAPIResponse struct {
 	Available  bool               `json:"available"`
 	Reason     string             `json:"reason,omitempty"`
 	Source     string             `json:"source,omitempty"`
-	SampledAt  time.Time          `json:"sampled_at,omitempty"`
+	SampledAt  time.Time          `json:"sampled_at,omitzero"`
 	Stale      bool               `json:"stale,omitempty"`
 	Metrics    map[string]float64 `json:"-"`
 }
@@ -98,10 +97,5 @@ func (a *API) handleHost(w http.ResponseWriter, r *http.Request) {
 		}
 		data[name] = value
 	}
-	writeJSON(w, http.StatusOK, json.RawMessage(mustJSON(data)))
-}
-
-func mustJSON(value any) []byte {
-	b, _ := json.Marshal(value)
-	return b
+	writeJSON(w, http.StatusOK, data)
 }

@@ -1,15 +1,20 @@
 package server_test
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/manprint/pglens/internal/alert"
 	"github.com/manprint/pglens/internal/server"
 	"go.yaml.in/yaml/v3"
 )
@@ -223,8 +228,9 @@ func canonicalizeRegisteredRoute(method, route string) string {
 		return normalized
 	}
 	// Finding IDs may contain slashes, so the production router uses a
-	// catch-all. Canonicalize its public operations to the OpenAPI templates;
-	// the generic normalizer above still strips only chi's route suffix.
+	// catch-all. GET serves the finding; the write methods serve only the mute
+	// action, because their handlers answer a bare id with 404. The generic
+	// normalizer above still strips only chi's route suffix.
 	if method == "GET" {
 		return "/api/v1/findings/{finding-id}"
 	}
@@ -294,6 +300,93 @@ func TestOpenAPIAgentRoutesAreBearerOnly(t *testing.T) {
 	}
 }
 
+// Generated clients handle only the statuses the document lists. The login
+// route can also answer 500 and 503, and the poll route's 403 has a second
+// cause: a valid agent token sent without the identity header.
+func TestOpenAPIDocumentsSessionAndPollResponses(t *testing.T) {
+	paths := loadOpenAPIDocument(t)["paths"].(map[string]any)
+
+	login := paths["/api/v1/session"].(map[string]any)["post"].(map[string]any)
+	responses := login["responses"].(map[string]any)
+	for _, status := range []string{"204", "400", "401", "429", "500", "503"} {
+		if _, ok := responses[status]; !ok {
+			t.Errorf("POST /api/v1/session: response %s is not documented", status)
+		}
+	}
+
+	poll := paths["/api/v1/agents/{agent_id}/commands"].(map[string]any)["get"].(map[string]any)
+	forbidden := poll["responses"].(map[string]any)["403"].(map[string]any)
+	if description, _ := forbidden["description"].(string); !strings.Contains(description, "X-PGLENS-Agent-ID") {
+		t.Errorf("GET agent commands: 403 must name the identity header, got %q", description)
+	}
+}
+
+// ruleListStore answers the rule listing, the only store call the catalogue
+// route makes. Any other call panics on the nil embedded store.
+type ruleListStore struct{ alert.Store }
+
+func (ruleListStore) Rules(context.Context) ([]alert.Rule, error) { return nil, nil }
+
+// A reader copies the catalogue example, so each example rule must be the rule
+// the server returns. The example once named a heartbeat metric that no rule
+// uses and left out the fields the rule carries.
+func TestOpenAPIAlertRuleExampleMatchesTheServer(t *testing.T) {
+	router := chi.NewRouter()
+	server.NewAlertAPI(nil, ruleListStore{}).RegisterRoutes(router)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/alert-rules", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v1/alert-rules = %d, want 200", rec.Code)
+	}
+	var served []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &served); err != nil {
+		t.Fatalf("decode served alert rules: %v", err)
+	}
+
+	paths := loadOpenAPIDocument(t)["paths"].(map[string]any)
+	get := paths["/api/v1/alert-rules"].(map[string]any)["get"].(map[string]any)
+	content := get["responses"].(map[string]any)["200"].(map[string]any)["content"].(map[string]any)
+	examples := content["application/json"].(map[string]any)["examples"].(map[string]any)
+	for _, rawRule := range examples["default"].(map[string]any)["value"].([]any) {
+		// The example is decoded from YAML and the response from JSON, so both
+		// are normalized through JSON before they are compared.
+		raw, err := json.Marshal(rawRule)
+		if err != nil {
+			t.Fatalf("encode example rule: %v", err)
+		}
+		var want map[string]any
+		if err := json.Unmarshal(raw, &want); err != nil {
+			t.Fatalf("decode example rule: %v", err)
+		}
+		id, _ := want["id"].(string)
+		var got map[string]any
+		for _, rule := range served {
+			if rule["id"] == id {
+				got = rule
+			}
+		}
+		if got == nil {
+			t.Errorf("example rule %q is not served", id)
+			continue
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("example rule %q = %v, the server returns %v", id, want, got)
+		}
+	}
+}
+
+// A counter is stored under its own name as a per-second rate, and the query
+// returns the stored value. A client that reads it as the cumulative count
+// would chart the rate as a total, so the document must say it is a rate.
+func TestOpenAPIMetricsQueryDocumentsCounterRates(t *testing.T) {
+	paths := loadOpenAPIDocument(t)["paths"].(map[string]any)
+	get := paths["/api/v1/metrics/query"].(map[string]any)["get"].(map[string]any)
+	ok := get["responses"].(map[string]any)["200"].(map[string]any)
+	if description, _ := ok["description"].(string); !strings.Contains(description, "per-second rate") {
+		t.Errorf("GET /api/v1/metrics/query 200 must say counters are per-second rates, got %q", description)
+	}
+}
+
 func loadOpenAPIDocument(t *testing.T) map[string]any {
 	t.Helper()
 	_, filename, _, ok := runtime.Caller(0)
@@ -314,4 +407,51 @@ func loadOpenAPIDocument(t *testing.T) map[string]any {
 		t.Fatal("OpenAPI document is empty")
 	}
 	return document
+}
+
+// The JSON write routes refuse a body that is not application/json with 415
+// and one that is too large with 413, so the spec documents both for each of
+// them. The unmute route reads no body and is not listed.
+func TestOpenAPIDocumentsRefusedJSONBodies(t *testing.T) {
+	paths := loadOpenAPIDocument(t)["paths"].(map[string]any)
+
+	for _, route := range []struct{ path, method string }{
+		{"/api/v1/alert-rules/{rule_id}", "put"},
+		{"/api/v1/silences", "post"},
+		{"/api/v1/findings/{finding-id}/mute", "post"},
+	} {
+		operation := paths[route.path].(map[string]any)[route.method].(map[string]any)
+		responses := operation["responses"].(map[string]any)
+		for _, status := range []string{"413", "415"} {
+			if _, ok := responses[status]; !ok {
+				t.Errorf("%s %s: response %s is not documented", strings.ToUpper(route.method), route.path, status)
+			}
+		}
+	}
+}
+
+// updateRule answers the threshold from a nullable column, so a rule whose
+// stored threshold is NULL is answered with null. The schema must allow it.
+func TestOpenAPIAlertRuleUpdateResponseThresholdIsNullable(t *testing.T) {
+	schemas := loadOpenAPIDocument(t)["components"].(map[string]any)["schemas"].(map[string]any)
+	properties := schemas["AlertRuleUpdateResponse"].(map[string]any)["properties"].(map[string]any)
+	threshold := properties["threshold"].(map[string]any)
+	if want := []any{"number", "null"}; !reflect.DeepEqual(threshold["type"], want) {
+		t.Errorf("AlertRuleUpdateResponse.threshold type = %v, want %v", threshold["type"], want)
+	}
+}
+
+// The statements truncated flag is set by two records, and a client reads a
+// clear flag as a complete window. The description must name the event that
+// keeps a historical cut, and say that the partial record is cleared by the
+// next complete result, so a partial that ended is not reported.
+func TestOpenAPIStatementsTruncatedNamesItsSources(t *testing.T) {
+	schemas := loadOpenAPIDocument(t)["components"].(map[string]any)["schemas"].(map[string]any)
+	properties := schemas["StatementsResponse"].(map[string]any)["properties"].(map[string]any)
+	description, _ := properties["truncated"].(map[string]any)["description"].(string)
+	for _, want := range []string{"cardinality_truncated", "next complete result"} {
+		if !strings.Contains(description, want) {
+			t.Errorf("StatementsResponse.truncated description must mention %q, got %q", want, description)
+		}
+	}
 }

@@ -381,3 +381,175 @@ func TestAPI_INT_API_002_MetricsQueryWithResetGap(t *testing.T) {
 }
 
 func contextBackground() context.Context { return context.Background() }
+
+// TestAPI_INT_API_003_ClusterHealthCountsLivePrimaries: a failed-over cluster
+// keeps the old primary row, which must not make it critical; two live primaries
+// must still read critical.
+func TestAPI_INT_API_003_ClusterHealthCountsLivePrimaries(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := contextBackground()
+	cidDB := store.ToDB(pgtype.ClusterID(333))
+	_, err := pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual')`, cidDB)
+	require.NoError(t, err)
+	addInstance := func(addr, role string, lastSeen time.Time) {
+		t.Helper()
+		agent := uuid.New()
+		_, err := pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+		require.NoError(t, err)
+		_, err = pool.Exec(ctx, `INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen) VALUES ($1,'default',$2,$3,$4,5432,170000,$5,'T0',$6)`, uuid.New(), cidDB, agent, addr, role, lastSeen)
+		require.NoError(t, err)
+	}
+	healthOf := func() []clusterResp {
+		t.Helper()
+		r := chi.NewRouter()
+		NewAPI(pool).RegisterRoutes(r)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/clusters", http.NoBody))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var resp []clusterResp
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		require.Len(t, resp, 1)
+		return resp
+	}
+
+	// Failover: the new primary is live, the old primary row was last seen an hour ago.
+	addInstance("10.0.1.1", "primary", time.Now().Add(-time.Hour))
+	addInstance("10.0.1.2", "primary", time.Now())
+	addInstance("10.0.1.3", "standby", time.Now())
+	resp := healthOf()
+	require.Equal(t, "degraded", resp[0].Health, "the stale former primary must not make the cluster critical")
+	require.Equal(t, 1, resp[0].StandbyCount)
+
+	// Split-brain: two live primaries are still critical.
+	truncateAll(t, pool)
+	_, err = pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual')`, cidDB)
+	require.NoError(t, err)
+	addInstance("10.0.2.1", "primary", time.Now())
+	addInstance("10.0.2.2", "primary", time.Now())
+	addInstance("10.0.2.3", "standby", time.Now())
+	require.Equal(t, "critical", healthOf()[0].Health, "two live primaries are split-brain")
+}
+
+// TestAPI_INT_API_004_MetricsQueryRefusesSeveralSeries: a labelled metric whose
+// series share a timestamp is refused, not answered with one arbitrary series.
+func TestAPI_INT_API_004_MetricsQueryRefusesSeveralSeries(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := contextBackground()
+	iid := uuid.New()
+	cid := store.ToDB(pgtype.ClusterID(556))
+	agent := uuid.New()
+	_, err := pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual')`, cid)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen) VALUES ($1,'default',$2,$3,'10.0.0.1',5432,170000,'primary','T0',now())`, iid, cid, agent)
+	require.NoError(t, err)
+	ts := time.Date(2026, 1, 1, 0, 0, 10, 0, time.UTC)
+	_, err = pool.Exec(ctx, `INSERT INTO metrics (ts, tenant_id, cluster_id, instance_id, datname, metric, labels, series_id, value)
+		VALUES
+		($1,'default',$2,$3,'','pg_io_hits','{"context":"normal"}', 701, 42),
+		($1,'default',$2,$3,'','pg_io_hits','{"context":"vacuum"}', 702, 3)
+	`, ts, cid, iid)
+	require.NoError(t, err)
+
+	api := NewAPI(pool)
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := from.Add(time.Minute)
+	url := fmt.Sprintf("/api/v1/metrics/query?metric=pg_io_hits&instance_id=%s&from=%s&to=%s&step=60s",
+		iid.String(), from.Format(time.RFC3339), to.Format(time.RFC3339))
+	req := httptest.NewRequest(http.MethodGet, url, http.NoBody)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "several series")
+}
+
+// TestAPI_INT_API_005_StatementsTruncatedWindowOverlap: a partial
+// stat_statements episode flags only the windows it overlaps. The episode
+// below began an hour ago and is still running, so last week's statements
+// are not truncated by it, while a window around now is.
+func TestAPI_INT_API_005_StatementsTruncatedWindowOverlap(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := contextBackground()
+	cidDB := store.ToDB(pgtype.ClusterID(555))
+	iid := uuid.New()
+	agent := uuid.New()
+	_, err := pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual')`, cidDB)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen) VALUES ($1,'default',$2,$3,'10.0.3.1',5432,170000,'primary','T0',now())`, iid, cidDB, agent)
+	require.NoError(t, err)
+	now := time.Now().UTC()
+	_, err = pool.Exec(ctx, `INSERT INTO object_facts (tenant_id, cluster_id, instance_id, datname, kind, key, labels, value_text, first_seen, last_seen, changed_at) VALUES ('default',$1,$2,'db','check_partial','stat_statements','{}','partial',$3,$4,$4)`, cidDB, iid, now.Add(-time.Hour), now)
+	require.NoError(t, err)
+	truncated := func(from, to time.Time) bool {
+		t.Helper()
+		r := chi.NewRouter()
+		NewAPI(pool).RegisterRoutes(r)
+		w := httptest.NewRecorder()
+		target := fmt.Sprintf("/api/v1/statements?instance_id=%s&from=%s&to=%s", iid.String(), from.Format(time.RFC3339), to.Format(time.RFC3339))
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, target, http.NoBody))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var resp statementsResp
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		return resp.Truncated
+	}
+	require.False(t, truncated(now.Add(-8*24*time.Hour), now.Add(-7*24*time.Hour)), "last week's window predates the running episode")
+	require.False(t, truncated(now.Add(-3*time.Hour), now.Add(-2*time.Hour)), "the window ends before the episode began")
+	require.True(t, truncated(now.Add(-2*time.Hour), now.Add(time.Hour)), "the window holds the running episode")
+}
+
+// TestAPI_INT_API_006_ClusterHealthIgnoresASupersededRow: a rebuilt primary
+// re-registers under a new instance id at the same address and port, and its
+// old row goes silent. That predecessor must not make the cluster degraded. A
+// silent row at an address no later row has taken over still reads degraded,
+// because nothing has replaced that host.
+func TestAPI_INT_API_006_ClusterHealthIgnoresASupersededRow(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := contextBackground()
+	cidDB := store.ToDB(pgtype.ClusterID(334))
+	_, err := pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual')`, cidDB)
+	require.NoError(t, err)
+	addInstance := func(addr, role string, lastSeen time.Time) {
+		t.Helper()
+		agent := uuid.New()
+		_, err := pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+		require.NoError(t, err)
+		_, err = pool.Exec(ctx, `INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen) VALUES ($1,'default',$2,$3,$4,5432,170000,$5,'T0',$6)`, uuid.New(), cidDB, agent, addr, role, lastSeen)
+		require.NoError(t, err)
+	}
+	healthOf := func() string {
+		t.Helper()
+		r := chi.NewRouter()
+		NewAPI(pool).RegisterRoutes(r)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/clusters", http.NoBody))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var resp []clusterResp
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		require.Len(t, resp, 1)
+		return resp[0].Health
+	}
+
+	// Rebuilt in place: the predecessor and its successor share 10.0.3.1:5432.
+	addInstance("10.0.3.1", "primary", time.Now().Add(-time.Hour))
+	addInstance("10.0.3.1", "primary", time.Now())
+	addInstance("10.0.3.2", "standby", time.Now())
+	require.Equal(t, "ok", healthOf(), "a superseded predecessor is not a down instance")
+
+	// Gone: the old primary's address has no successor, so it still counts.
+	truncateAll(t, pool)
+	_, err = pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual')`, cidDB)
+	require.NoError(t, err)
+	addInstance("10.0.4.1", "primary", time.Now().Add(-time.Hour))
+	addInstance("10.0.4.2", "primary", time.Now())
+	addInstance("10.0.4.3", "standby", time.Now())
+	require.Equal(t, "degraded", healthOf(), "a silent row with no successor at its endpoint is still down")
+}

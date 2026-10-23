@@ -11,6 +11,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+
+	"github.com/manprint/pglens/internal/pgtype"
+	"github.com/manprint/pglens/internal/store"
 )
 
 var errQueryFailed = errors.New("query failed")
@@ -216,11 +219,12 @@ func TestTopologyAPI_HandleReplication_MockPool_ExpandsPerMetric(t *testing.T) {
 func TestTopologyAPI_HandleReplication_PrimaryRowsAreEdges(t *testing.T) {
 	primary, standby := uuid.New(), uuid.New()
 	ts := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	cidDB := store.ToDB(pgtype.ClusterID(123))
 	pool := &mockPool{
 		queryResults: []*mockRows{
-			{rows: [][]any{{primary.String(), "pg-primary"}, {standby.String(), "pg-standby-a"}}},
-			{rows: [][]any{{standby.String(), primary.String()}}},
-			{rows: [][]any{{primary.String(), "pg-standby-a"}, {primary.String(), "reporting"}}},
+			{rows: [][]any{{cidDB, primary.String(), "pg-primary"}, {cidDB, standby.String(), "pg-standby-a"}}},
+			{rows: [][]any{{cidDB, standby.String(), primary.String()}}},
+			{rows: [][]any{{cidDB, primary.String(), "pg-standby-a"}, {cidDB, primary.String(), "reporting"}}},
 			{rows: [][]any{
 				{standby.String(), &primary, "", "receiver", nil, ts, nil, nil, 9.0},
 				{primary.String(), nil, "pg-standby-a", "sender", strPtr("sync"), ts, 1.0, 2.0, 3.0},

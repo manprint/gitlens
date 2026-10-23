@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -12,7 +14,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/manprint/pglens/internal/alert"
 	"github.com/manprint/pglens/internal/pgtype"
@@ -22,13 +26,16 @@ import (
 func serveAlert(t *testing.T, api *AlertAPI, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	w := httptest.NewRecorder()
-	alertRouter(api).ServeHTTP(w, httptest.NewRequest(method, path, strings.NewReader(body)))
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	alertRouter(api).ServeHTTP(w, req)
 	return w
 }
 
 type alertAPITestStore struct {
-	alerts []alert.Alert
-	rules  []alert.Rule
+	alerts  []alert.Alert
+	rules   []alert.Rule
+	filters []alert.Filter
 }
 
 func (s *alertAPITestStore) Rules(context.Context) ([]alert.Rule, error) { return s.rules, nil }
@@ -42,7 +49,8 @@ func (s *alertAPITestStore) ClaimNotification(context.Context, string, string, s
 func (s *alertAPITestStore) MarkNotification(context.Context, string, string, string, bool, int, error) error {
 	return nil
 }
-func (s *alertAPITestStore) Active(context.Context, alert.Filter) ([]alert.Alert, error) {
+func (s *alertAPITestStore) Active(_ context.Context, f alert.Filter) ([]alert.Alert, error) {
+	s.filters = append(s.filters, f)
 	return s.alerts, nil
 }
 
@@ -56,6 +64,29 @@ func TestAlerts_DefaultFilterIsPendingAndFiring(t *testing.T) {
 	var got []alertJSON
 	require.NoError(t, json.Unmarshal(r.Body.Bytes(), &got))
 	require.Len(t, got, 2)
+	// The default must send no state filter: a pending filter asked the store for
+	// pending rows only, and the engine never persists those, so it returned [].
+	require.Equal(t, []alert.Filter{{}}, st.filters)
+}
+
+// TestAlerts_InstanceIDMustBeAUUID: a malformed instance_id is the client's
+// error. It is refused with 400 before the store sees it. Passed on, it
+// reaches the uuid column, and the driver error comes back as a 500 with the
+// raw text.
+func TestAlerts_InstanceIDMustBeAUUID(t *testing.T) {
+	st := &alertAPITestStore{}
+	r := httptest.NewRecorder()
+	alertRouter(newAlertAPIForTest(nil, st)).ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?instance_id=abc", nil))
+	require.Equal(t, http.StatusBadRequest, r.Code, r.Body.String())
+	require.Contains(t, r.Body.String(), "invalid instance_id")
+	require.Empty(t, st.filters)
+
+	iid := uuid.NewString()
+	st = &alertAPITestStore{}
+	r = httptest.NewRecorder()
+	alertRouter(newAlertAPIForTest(nil, st)).ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?instance_id="+iid, nil))
+	require.Equal(t, http.StatusOK, r.Code, r.Body.String())
+	require.Equal(t, []alert.Filter{{InstanceID: iid}}, st.filters)
 }
 
 func TestAlerts_RejectsUnknownState(t *testing.T) {
@@ -67,6 +98,7 @@ func TestAlerts_RejectsUnknownState(t *testing.T) {
 func TestAlertRules_Tier0IsRejectedWithConflict(t *testing.T) {
 	r := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/alert-rules/agent_down", strings.NewReader(`{"enabled":false}`))
+	req.Header.Set("Content-Type", "application/json")
 	alertRouter(newAlertAPIForTest(nil, &alertAPITestStore{})).ServeHTTP(r, req)
 	require.Equal(t, 409, r.Code)
 }
@@ -74,6 +106,7 @@ func TestAlertRules_Tier0IsRejectedWithConflict(t *testing.T) {
 func TestAlertRules_InvalidBodyIsBadRequest(t *testing.T) {
 	r := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/alert-rules/custom", strings.NewReader(`{"severity":"bad"}`))
+	req.Header.Set("Content-Type", "application/json")
 	alertRouter(newAlertAPIForTest(nil, &alertAPITestStore{})).ServeHTTP(r, req)
 	require.Equal(t, 400, r.Code)
 }
@@ -81,6 +114,7 @@ func TestAlertRules_InvalidBodyIsBadRequest(t *testing.T) {
 func TestSilences_CreateValidates(t *testing.T) {
 	r := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/silences", strings.NewReader(`{"matchers":[],"reason":"x"}`))
+	req.Header.Set("Content-Type", "application/json")
 	alertRouter(newAlertAPIForTest(nil, &alertAPITestStore{})).ServeHTTP(r, req)
 	require.Equal(t, 400, r.Code)
 }
@@ -145,6 +179,79 @@ func TestAlertAPI_DatabaseBackedBranches(t *testing.T) {
 	require.Equal(t, 404, serveAlert(t, api, http.MethodGet, "/api/v1/alerts/missing", "").Code)
 }
 
+// alertKeyPool records the key each detail query runs with. The shared mockPool
+// ignores query arguments, so it cannot show what the handler sent.
+type alertKeyPool struct {
+	*mockPool
+	keys []string
+}
+
+func (p *alertKeyPool) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	p.keys = append(p.keys, args[0].(string))
+	return p.mockPool.QueryRow(ctx, sql, args...)
+}
+
+// encodeURIComponent escapes a path parameter the way the web client does, so
+// the tests send the same bytes the UI sends.
+func encodeURIComponent(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if ('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z') || ('0' <= c && c <= '9') || strings.IndexByte("-_.!~*'()", c) >= 0 {
+			b.WriteByte(c)
+			continue
+		}
+		fmt.Fprintf(&b, "%%%02X", c)
+	}
+	return b.String()
+}
+
+func TestAlertAPI_DetailDecodesKeyOnce(t *testing.T) {
+	t.Parallel()
+	iid := uuid.New()
+	// The evaluator's key shapes: a '/' separator, a database subject holding a
+	// literal '%', labels joined by \x1f with '=' inside, and a key with no
+	// escaping at all, whose request path chi routes on the decoded form.
+	keys := []string{
+		"agent_down/" + iid.String() + "/",
+		"replica_lag/" + iid.String() + ":app%41/team=dba\x1fcluster=7",
+		"plain%41",
+		"plainkey",
+	}
+	for _, key := range keys {
+		now := time.Now()
+		row := &mockRow{vals: []any{key, "custom", alert.SeverityWarning, alert.StateFiring, nil, nil, "db", []byte(`{}`), 1.0, "s", now, now, nil}}
+		pool := &alertKeyPool{mockPool: &mockPool{queryRowVals: []*mockRow{row}}}
+		w := serveAlert(t, newAlertAPIForTest(pool, &alertAPITestStore{}), http.MethodGet, "/api/v1/alerts/"+encodeURIComponent(key), "")
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.Equal(t, []string{key}, pool.keys)
+	}
+}
+
+// TestAlertJSON_ActiveAlertCarriesEverySpecField renders an active alert and
+// checks it against the openapi Alert schema: every required field is present,
+// resolved_at is null rather than absent, and labels is an object, not null.
+func TestAlertJSON_ActiveAlertCarriesEverySpecField(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	body, err := json.Marshal(renderAlert(alert.Alert{Key: "agent_down/x/", RuleID: "agent_down", Severity: alert.SeverityCritical, State: alert.StateFiring, Summary: "s", StartedAt: now, LastEvalAt: now}))
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(body, &got))
+
+	raw, err := os.ReadFile("../../api/openapi.yaml")
+	require.NoError(t, err)
+	var document map[string]any
+	require.NoError(t, yaml.Unmarshal(raw, &document))
+	schema := document["components"].(map[string]any)["schemas"].(map[string]any)["Alert"].(map[string]any)
+	for _, field := range schema["required"].([]any) {
+		require.Contains(t, got, field, "rendered alert lacks a field the spec requires")
+	}
+	require.Contains(t, got, "resolved_at")
+	require.Nil(t, got["resolved_at"])
+	require.Equal(t, map[string]any{}, got["labels"])
+}
+
 func TestAlertAPI_UnavailableBranches(t *testing.T) {
 	routes := []struct {
 		method string
@@ -163,4 +270,14 @@ func TestAlertAPI_UnavailableBranches(t *testing.T) {
 	for _, tc := range routes {
 		require.Equal(t, tc.status, serveAlert(t, api, tc.method, tc.path, tc.body).Code, tc.path)
 	}
+}
+
+// TestAlerts_DuplicateSilenceIDIs409: a silence id the client chose is the
+// key of the row. The store refuses a second insert with it, and that is a
+// conflict for the client, not a server failure.
+func TestAlerts_DuplicateSilenceIDIs409(t *testing.T) {
+	pool := &mockPool{execErrs: []error{&pgconn.PgError{Code: "23505"}}}
+	api := newAlertAPIForTest(pool, nil)
+	w := serveAlert(t, api, http.MethodPost, "/api/v1/silences", `{"silence_id":"`+uuid.NewString()+`","matchers":[{"name":"rule_id","value":"custom"}],"reason":"maintenance","starts_at":"2026-08-29T00:00:00Z","ends_at":"2026-08-30T00:00:00Z"}`)
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 }

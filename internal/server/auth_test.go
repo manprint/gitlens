@@ -50,3 +50,27 @@ func TestAuth_ConstantTime(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer longer-token-that-is-wrong")
 	require.False(t, auth.Validate(req))
 }
+
+// The comparison must be right for every relation between the two secrets: a
+// digest that is equal for different inputs would be a bypass, and a length
+// check that short-circuits would be the timing leak the digests remove.
+func TestSecretsEqual(t *testing.T) {
+	t.Parallel()
+	const secret = "a-much-longer-configured-password-value"
+	tests := map[string]struct {
+		got  string
+		want bool
+	}{
+		"equal":               {secret, true},
+		"same length differs": {"a-much-longer-configured-password-valuX", false},
+		"prefix":              {secret[:10], false},
+		"longer":              {secret + "!", false},
+		"empty guess":         {"", false},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, secretsEqual(tc.got, secret))
+		})
+	}
+}

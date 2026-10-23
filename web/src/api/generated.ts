@@ -299,7 +299,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Query a metric as a time series. */
+        /**
+         * Query a metric as a time series.
+         * @description A metric with more than one series in the range is refused with 400, because this endpoint does not select a series yet; a labelled metric needs a series-selecting parameter before it can be read here.
+         */
         get: operations["queryMetrics"];
         put?: never;
         post?: never;
@@ -316,7 +319,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List events newest first. */
+        /**
+         * List events newest first.
+         * @description Without from, the newest events are returned, up to limit. Events older than the 90-day retention are not kept, so a range is bounded by it.
+         */
         get: operations["getEvents"];
         put?: never;
         post?: never;
@@ -333,7 +339,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Return top statements joined to query text. */
+        /**
+         * Return top statements joined to query text.
+         * @description Without from, the hour before to (or before now) is aggregated. A range is bounded by the retained statement history.
+         */
         get: operations["getStatements"];
         put?: never;
         post?: never;
@@ -597,7 +606,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Mute a finding until a future timestamp. */
+        /** Mute a finding until a future timestamp, at most 90 days ahead. */
         post: operations["muteFinding"];
         /** Remove a finding mute. */
         delete: operations["unmuteFinding"];
@@ -784,6 +793,7 @@ export interface components {
             /** Format: int64 */
             event_id: number;
             ts: components["schemas"]["Timestamp"];
+            /** @description The event type. The server emits failover_detected, role_change, orphan_standby, split_brain_detected, agent_down, agent_up, instance_unreachable, instance_reachable, no_primary_in_cluster, slot_inactive, cluster_id_changed, cluster_identity_conflict, duplicate_instance_suspected, cardinality_truncated and counter_reset_detected. The set is open, so a client must show a type it does not know. */
             type: string;
             cluster_id: string | null;
             /** Format: uuid */
@@ -902,6 +912,7 @@ export interface components {
         };
         StatementsResponse: {
             statements: components["schemas"]["Statement"][];
+            /** @description True when the statements of the window may be incomplete. The flag covers the whole instance, not one database. Two records set it. A cardinality_truncated event of the statements check, with its time in the window, sets it, so a cut that happened inside the window is reported. A partial statements check, which kept only the top statements, sets it while its episode overlaps the window. That record is removed by the next complete result for its database, so a partial that ended inside the window and was followed by a complete result is not reported. */
             truncated: components["schemas"]["Truncated"];
             /** @enum {string} */
             comparable_scope: "cluster";
@@ -949,7 +960,10 @@ export interface components {
         };
         AshResponse: {
             buckets: components["schemas"]["AshBucket"][];
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Seconds between rows. Without group_by each row is one agent window
+             */
             resolution_seconds: number;
             statistical: boolean;
             warning?: string;
@@ -972,7 +986,10 @@ export interface components {
         };
         AshTopResponse: {
             entries: components["schemas"]["AshTopEntry"][];
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Always 1. Each entry aggregates the whole range
+             */
             resolution_seconds: number;
             statistical: boolean;
             warning?: string;
@@ -1030,6 +1047,7 @@ export interface components {
             /** Format: int32 */
             not_monitored_count: number;
         };
+        /** @description When available is true, the response carries the sample time, the source and each host metric as a top-level numeric property named host_*. When available is false, reason says why and no sample time is sent. */
         HostResponse: {
             instance_id: components["schemas"]["InstanceId"];
             available: boolean;
@@ -1037,6 +1055,7 @@ export interface components {
             source?: string;
             sampled_at?: components["schemas"]["Timestamp"];
             stale?: boolean;
+            /** @description Never sent. Read the host_* properties instead. */
             metrics?: {
                 [key: string]: number;
             };
@@ -1134,6 +1153,11 @@ export interface components {
                 [key: string]: unknown;
             };
             degraded_reason?: string;
+            first_seen?: components["schemas"]["Timestamp"];
+            last_seen?: components["schemas"]["Timestamp"];
+            resolved_at?: components["schemas"]["Timestamp"];
+            muted_until?: components["schemas"]["Timestamp"];
+            mute_reason?: string;
         };
         AdvisorRule: {
             id: string;
@@ -1207,7 +1231,8 @@ export interface components {
             enabled: boolean;
             /** @enum {string} */
             severity: "critical" | "warning" | "info";
-            threshold: number;
+            /** @description The stored threshold; null when the rule has none. */
+            threshold: number | null;
             /** Format: int32 */
             for_seconds: number;
         };
@@ -1225,6 +1250,7 @@ export interface components {
             starts_at: components["schemas"]["Timestamp"];
             ends_at: components["schemas"]["Timestamp"];
         };
+        /** @description until must be in the future and at most 90 days ahead; a later one is refused with 400, so a mute always ends. */
         MuteFindingRequest: {
             reason: string;
             until: components["schemas"]["Timestamp"];
@@ -1299,6 +1325,15 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /** @description The body is not application/json. */
+        UnsupportedMediaType: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
     };
     parameters: never;
     requestBodies: never;
@@ -1338,7 +1373,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Topology graph and failover events. */
+            /** @description Topology graph and the 100 newest failover events, newest first. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1707,7 +1742,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Fixed-step series; missing intervals are null, never zero or interpolated. */
+            /** @description Fixed-step series; missing intervals are null, never zero or interpolated. A bucket holding several samples of the series carries their mean. A counter metric, such as pg_xact_commit_total, is stored under its own name as a per-second rate, so its values are rates and not the cumulative count. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1868,6 +1903,7 @@ export interface operations {
     getAlerts: {
         parameters: {
             query?: {
+                /** @description Omitted returns the pending and firing alerts. */
                 state?: "pending" | "firing" | "resolved" | "all";
                 severity?: string;
                 rule_id?: string;
@@ -1897,6 +1933,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description Percent-encoded alert key. Keys contain '/' separators, so they must be sent as %2F. */
                 alert_key: string;
             };
             cookie?: never;
@@ -1980,6 +2017,17 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            /** @description A silence with this silence_id already exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
             /** @description Alert storage is unavailable. */
             503: {
                 headers: {
@@ -2170,6 +2218,8 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
             /** @description Alert storage is unavailable. */
             503: {
                 headers: {
@@ -2238,6 +2288,8 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             404: components["responses"]["NotFound"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
             /** @description Findings storage is unavailable. */
             503: {
                 headers: {
@@ -2336,6 +2388,31 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            /** @description Too many sign-in attempts from this client or too many sign-ins in progress; the Retry-After header gives the wait in seconds. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The browser session could not be created. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No session store is configured on this server. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     deleteSession: {
@@ -2425,7 +2502,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            /** @description The authenticated agent does not own the requested queue. */
+            /** @description The authenticated agent does not own the requested queue, or the agent token was sent without the X-PGLENS-Agent-ID header. */
             403: {
                 headers: {
                     [name: string]: unknown;

@@ -156,7 +156,7 @@ func (a *AshAPI) handleASH(w http.ResponseWriter, r *http.Request) {
 	if a.pool == nil {
 		resp := ashResponse{
 			Buckets:           []ashBucket{},
-			ResolutionSeconds: 1,
+			ResolutionSeconds: ashWindowSeconds,
 			Statistical:       true,
 		}
 		writeJSON(w, http.StatusOK, resp)
@@ -179,14 +179,16 @@ func (a *AshAPI) handleASH(w http.ResponseWriter, r *http.Request) {
 		disabled := false
 		writeJSON(w, http.StatusOK, ashResponse{
 			Buckets:           []ashBucket{},
-			ResolutionSeconds: 1,
+			ResolutionSeconds: ashWindowSeconds,
 			Statistical:       true,
 			Enabled:           &disabled,
 		})
 		return
 	}
 
-	resp := ashResponse{ResolutionSeconds: 1, Statistical: true}
+	// The ungrouped rows are the agent's windows, ashWindowSeconds apart. A
+	// grouped answer replaces this with its bucket size below.
+	resp := ashResponse{ResolutionSeconds: ashWindowSeconds, Statistical: true}
 	var totalTicks int
 	if len(groupByCols) == 0 {
 		resp.Buckets, totalTicks, err = a.queryASHBuckets(ctx, iid, fromPtr, toPtr, database, filters, limit)
@@ -223,8 +225,10 @@ func (a *AshAPI) handleASH(w http.ResponseWriter, r *http.Request) {
 // dimension, one row per window and key.
 func (a *AshAPI) queryASHBuckets(ctx context.Context, instanceID uuid.UUID, from, to *time.Time, database string, filters ashFilters, limit int) ([]ashBucket, int, error) {
 	where, args := ashWhere(instanceID, from, to, database, filters)
+	// One row past the limit is read, because only a row beyond it shows that
+	// the answer was cut. A complete answer of exactly limit rows has none.
 	query := fmt.Sprintf(`SELECT ts, samples, window_ticks, datname, wait_event_type, wait_event, state, queryid
-		FROM metrics_ash WHERE %s ORDER BY ts DESC LIMIT %d`, where, limit)
+		FROM metrics_ash WHERE %s ORDER BY ts DESC LIMIT %d`, where, limit+1)
 
 	rows, err := a.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -233,7 +237,6 @@ func (a *AshAPI) queryASHBuckets(ctx context.Context, instanceID uuid.UUID, from
 	defer rows.Close()
 
 	var buckets []ashBucket
-	windowTicks := make(map[time.Time]int)
 	for rows.Next() {
 		var bucket ashBucket
 		var qid *int64
@@ -242,13 +245,45 @@ func (a *AshAPI) queryASHBuckets(ctx context.Context, instanceID uuid.UUID, from
 		}
 		bucket.QueryID = formatQueryID(qid)
 		bucket.AvgActiveSessions = avgActive(bucket.Samples, bucket.Ticks)
-		windowTicks[bucket.TS] = bucket.Ticks
 		buckets = append(buckets, bucket)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, err
 	}
-	return buckets, sumTicks(windowTicks), nil
+	// A truncated answer counts the ticks of the windows it shows. The rows come
+	// newest first, so its last shown row is the oldest, and the tick scan starts
+	// there rather than at the start of the range, which keeps a dense filter
+	// from reading the whole retained history on every request. The scan still
+	// runs to the range end and drops the filters, so a filter that matches
+	// sparsely over a long history scans the windows from that row to the end of
+	// the range. A complete answer already read everything it matched, so it
+	// counts the range it was asked for.
+	truncated := len(buckets) > limit
+	if truncated {
+		buckets = buckets[:limit]
+	}
+	tickFrom := from
+	if truncated {
+		oldest := buckets[limit-1].TS
+		tickFrom = &oldest
+	}
+	totalTicks, err := a.queryASHTicks(ctx, instanceID, tickFrom, to)
+	if err != nil {
+		return nil, 0, err
+	}
+	return buckets, totalTicks, nil
+}
+
+// queryASHTicks counts the instance's sampling ticks over the range, every
+// window once. The filters narrow the samples, never the ticks, so the
+// significance guard reads them here. Summing the rows instead, as the
+// buckets and groups did, reported zero ticks, and a false warning, whenever
+// a filter or the database matched nothing.
+func (a *AshAPI) queryASHTicks(ctx context.Context, instanceID uuid.UUID, from, to *time.Time) (int, error) {
+	where, args := ashWhere(instanceID, from, to, "", ashFilters{})
+	var ticks int
+	err := a.pool.QueryRow(ctx, fmt.Sprintf(`SELECT COALESCE(SUM(t), 0)::int FROM (SELECT ts, MAX(window_ticks) AS t FROM metrics_ash WHERE %s GROUP BY ts) w`, where), args...).Scan(&ticks)
+	return ticks, err
 }
 
 // ashFilters narrows the rows to one wait event type or wait event: the
@@ -394,7 +429,11 @@ SELECT g.bucket, g.samples, t.ticks, %[4]s
 		}
 		buckets[i].AvgActiveSessions = avgActive(buckets[i].Samples, buckets[i].Ticks)
 	}
-	return buckets, sumTicks(bucketTicks), nil
+	totalTicks, err := a.queryASHTicks(ctx, instanceID, &from, &to)
+	if err != nil {
+		return nil, 0, err
+	}
+	return buckets, totalTicks, nil
 }
 
 // foldASHGroups keeps the largest groups (by samples over the range) and
@@ -479,14 +518,6 @@ func avgActive(samples, ticks int) *float64 {
 	}
 	avg := float64(samples) / float64(ticks)
 	return &avg
-}
-
-func sumTicks(byWindow map[time.Time]int) int {
-	total := 0
-	for _, t := range byWindow {
-		total += t
-	}
-	return total
 }
 
 // ----- /api/v1/ash/top -----
@@ -576,6 +607,12 @@ func (a *AshAPI) handleASHTop(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// ashTopTextSQL is the newest text of a top entry's queryid in its cluster. The
+// primary key leads with datname, which the join never binds, so each entry
+// scanned the cluster's whole text table. query_texts_cluster_queryid_idx
+// serves the join on the cluster and the queryid.
+const ashTopTextSQL = `(SELECT q.query_text FROM query_texts q WHERE q.tenant_id = 'default' AND q.cluster_id = top.cluster_id AND q.queryid = top.queryid ORDER BY q.last_seen DESC LIMIT 1)`
+
 // queryASHTop ranks the queries by samples over the range.
 //
 // The text used to be joined from query_texts row by row: that table keeps
@@ -602,12 +639,10 @@ WITH ticks AS (
    LIMIT $%d
 )
 SELECT top.queryid,
-       COALESCE((SELECT q.query_text FROM query_texts q
-                  WHERE q.tenant_id = 'default' AND q.cluster_id = top.cluster_id AND q.queryid = top.queryid
-                  ORDER BY q.last_seen DESC LIMIT 1), ''),
+       COALESCE(%s, ''),
        top.samples, ticks.ticks
   FROM top CROSS JOIN ticks
- ORDER BY top.samples DESC, top.queryid`, tickWhere, where, len(args))
+ ORDER BY top.samples DESC, top.queryid`, tickWhere, where, len(args), ashTopTextSQL)
 
 	rows, err := a.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -616,7 +651,6 @@ SELECT top.queryid,
 	defer rows.Close()
 
 	entries := []ashTopEntry{}
-	totalTicks := 0
 	for rows.Next() {
 		var qid int64
 		var entry ashTopEntry
@@ -625,10 +659,19 @@ SELECT top.queryid,
 		}
 		entry.QueryID = strconv.FormatInt(qid, 10)
 		entry.AvgActive = avgActive(entry.Samples, entry.Ticks)
-		totalTicks = entry.Ticks
 		entries = append(entries, entry)
 	}
 	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	// The ticks CTE above is the range's total, so every entry already carries
+	// it. Only an empty answer, which has no entry to read it from, counts it
+	// apart.
+	if len(entries) > 0 {
+		return entries, entries[0].Ticks, nil
+	}
+	totalTicks, err := a.queryASHTicks(ctx, instanceID, from, to)
+	if err != nil {
 		return nil, 0, err
 	}
 	return entries, totalTicks, nil

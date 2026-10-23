@@ -1,6 +1,8 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -148,4 +150,27 @@ func TestRouter_UIDisabledServesNoSPA(t *testing.T) {
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "ok", rec.Body.String())
+}
+
+// The theme script in index.html runs before the bundle loads, so the policy
+// admits it by the hash of the index.html that is served, and no other inline
+// script.
+func TestContentSecurityPolicy_AdmitsTheServedInlineScriptByHash(t *testing.T) {
+	const inline = "document.documentElement.classList.add('dark')"
+	assets := fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte("<!doctype html><script>" + inline + "</script><script type=\"module\" src=\"/assets/app.js\"></script>")},
+	}
+	sum := sha256.Sum256([]byte(inline))
+	want := "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+
+	policy := contentSecurityPolicy(assets)
+	require.Contains(t, policy, "script-src 'self' "+want+";")
+	require.Contains(t, policy, "frame-ancestors 'none'")
+	require.Contains(t, policy, "object-src 'none'")
+}
+
+func TestContentSecurityPolicy_NoInlineScriptAdmitsNone(t *testing.T) {
+	policy := contentSecurityPolicy(testWebUIAssets())
+	require.Contains(t, policy, "script-src 'self';")
+	require.NotContains(t, policy, "sha256-")
 }
