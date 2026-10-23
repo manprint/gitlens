@@ -148,6 +148,120 @@ func TestStaleness_SlotInactive(t *testing.T) {
 	s.mu.Unlock()
 }
 
+// installEventFault makes the store refuse every insert of one event type,
+// until the returned func is called. The refusal comes from the database, the
+// way a write that fails part way does in production.
+func installEventFault(t *testing.T, pool *pgxpool.Pool, eventType string) func() {
+	t.Helper()
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, fmt.Sprintf(`CREATE OR REPLACE FUNCTION pglens_test_refuse_event() RETURNS trigger LANGUAGE plpgsql AS $f$
+BEGIN
+  IF NEW.type = '%s' THEN
+    RAISE EXCEPTION 'injected insert failure';
+  END IF;
+  RETURN NEW;
+END
+$f$`, eventType))
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `CREATE TRIGGER pglens_test_refuse_event BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTION pglens_test_refuse_event()`)
+	require.NoError(t, err)
+	restore := func() {
+		_, err := pool.Exec(context.Background(), `DROP TRIGGER IF EXISTS pglens_test_refuse_event ON events`)
+		require.NoError(t, err)
+		_, err = pool.Exec(context.Background(), `DROP FUNCTION IF EXISTS pglens_test_refuse_event()`)
+		require.NoError(t, err)
+	}
+	// A test that fails before restore must not leave the fault in the shared
+	// database for the tests that follow it.
+	t.Cleanup(restore)
+	return restore
+}
+
+// TestINTSTALE007_TransitionWrittenAgainAfterFailure: a transition whose event
+// the store refuses is stored whole or not at all, and is not recorded as done,
+// so the next evaluation writes it.
+func TestINTSTALE007_TransitionWrittenAgainAfterFailure(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	cid := store.ToDB(pgtype.ClusterID(7))
+	agent, iid := uuid.New(), uuid.New()
+	_, err := pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual')`, cid)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen) VALUES ($1,'default',$2,$3,'10.0.0.7',5432,170000,'standby','T0', now() - interval '5 minutes')`, iid, cid, agent)
+	require.NoError(t, err)
+
+	s := NewStaleness(pool, clock.NewFake(time.Now()))
+	s.mu.Lock()
+	s.conn = mustAcquire(t, pool)
+	s.hasLock = true
+	s.mu.Unlock()
+	countEvents := func(typ string) int {
+		var n int
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type=$1 AND instance_id=$2`, typ, iid).Scan(&n))
+		return n
+	}
+
+	restore := installEventFault(t, pool, "instance_unreachable")
+	require.Error(t, s.Evaluate(ctx), "the refused event must fail the evaluation")
+	require.Zero(t, countEvents("agent_down"), "a transition is stored whole or not at all")
+	restore()
+
+	require.NoError(t, s.Evaluate(ctx))
+	require.Equal(t, 1, countEvents("agent_down"))
+	require.Equal(t, 1, countEvents("instance_unreachable"), "the refused transition is written by the next evaluation")
+
+	require.NoError(t, s.Evaluate(ctx))
+	require.Equal(t, 1, countEvents("agent_down"), "a stored transition is not written again")
+	require.Equal(t, 1, countEvents("instance_unreachable"))
+}
+
+// TestINTSTALE007_SlotEventWrittenAgainAfterFailure: a slot_inactive the store
+// refuses is not taken as reported, so the next evaluation of the same spell of
+// inactivity writes it.
+func TestINTSTALE007_SlotEventWrittenAgainAfterFailure(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	cid := store.ToDB(pgtype.ClusterID(8))
+	iid, agent := uuid.New(), uuid.New()
+	_, err := pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual')`, cid)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen) VALUES ($1,'default',$2,$3,'10.0.0.8',5432,170000,'primary','T0', now())`, iid, cid, agent)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx,
+		`INSERT INTO metrics_replication (ts, tenant_id, cluster_id, instance_id, slot_name, edge_type, slot_active) VALUES (now(), 'default', $1, $2, 'faultslot', 'streaming', false)`,
+		cid, iid)
+	require.NoError(t, err)
+
+	fc := clock.NewFake(time.Now())
+	s := NewStaleness(pool, fc)
+	s.mu.Lock()
+	s.conn = mustAcquire(t, pool)
+	s.hasLock = true
+	s.slotInactiveSince[iid.String()+"/faultslot"] = fc.Now().Add(-40 * time.Second)
+	s.mu.Unlock()
+	countEvents := func() int {
+		var n int
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='slot_inactive' AND instance_id=$1`, iid).Scan(&n))
+		return n
+	}
+
+	restore := installEventFault(t, pool, "slot_inactive")
+	require.Error(t, s.Evaluate(ctx))
+	require.Zero(t, countEvents())
+	restore()
+
+	require.NoError(t, s.Evaluate(ctx))
+	require.Equal(t, 1, countEvents(), "the refused slot_inactive is written by the next evaluation")
+	require.NoError(t, s.Evaluate(ctx))
+	require.Equal(t, 1, countEvents(), "a stored slot_inactive is not written again")
+}
+
 func TestStaleness_EmitEvent_MarshalError_WithPool(t *testing.T) {
 	pool := getSharedPool(t)
 	truncateAll(t, pool)

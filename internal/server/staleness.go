@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -377,18 +378,53 @@ func (s *Staleness) releaseLeaderConn() {
 	s.hasLock = false
 }
 
+// staleEvent is one event an evaluation writes.
+type staleEvent struct {
+	typ        string
+	clusterID  *int64
+	instanceID *uuid.UUID
+	payload    map[string]any
+}
+
 // emitEvent inserts a single event row. Caller must hold s.mu if it needs the
 // transition guarantee, but this helper does not acquire the mutex itself for
 // the DB operation to avoid holding it across network I/O; callers should
 // manage locking as needed. It always checks errors.
 func (s *Staleness) emitEvent(ctx context.Context, typ string, clusterID *int64, instanceID *uuid.UUID, payload map[string]any) error {
+	return s.emitEvents(ctx, staleEvent{typ: typ, clusterID: clusterID, instanceID: instanceID, payload: payload})
+}
+
+// emitEvents writes events together or not at all. A transition is such a
+// group, and its state is recorded as done only once every event of it is
+// stored: a write that fails part way leaves the state as it was, so the next
+// evaluation writes the whole transition again.
+func (s *Staleness) emitEvents(ctx context.Context, events ...staleEvent) error {
 	if s.pool == nil {
 		return nil
 	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin events tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	ts := s.clock.Now()
+	for _, ev := range events {
+		if err := insertStaleEvent(ctx, tx, ts, ev); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit events: %w", err)
+	}
+	return nil
+}
+
+// insertStaleEvent writes one event row inside tx.
+func insertStaleEvent(ctx context.Context, tx pgx.Tx, ts time.Time, ev staleEvent) error {
 	var payloadJSON []byte
 	var err error
-	if payload != nil {
-		payloadJSON, err = json.Marshal(payload)
+	if ev.payload != nil {
+		payloadJSON, err = json.Marshal(ev.payload)
 		if err != nil {
 			return fmt.Errorf("marshal event payload: %w", err)
 		}
@@ -396,22 +432,39 @@ func (s *Staleness) emitEvent(ctx context.Context, typ string, clusterID *int64,
 		payloadJSON = []byte(`{}`)
 	}
 	var cidParam any
-	if clusterID != nil {
-		cidParam = *clusterID
+	if ev.clusterID != nil {
+		cidParam = *ev.clusterID
 	}
 	var iidParam any
-	if instanceID != nil {
-		iidParam = *instanceID
+	if ev.instanceID != nil {
+		iidParam = *ev.instanceID
 	}
 	tenantID := "default"
-	ts := s.clock.Now()
-	_, execErr := s.pool.Exec(ctx,
+	_, execErr := tx.Exec(ctx,
 		`INSERT INTO events (tenant_id, ts, type, cluster_id, instance_id, payload) VALUES ($1,$2,$3,$4,$5,$6::jsonb)`,
-		tenantID, ts, typ, cidParam, iidParam, string(payloadJSON))
+		tenantID, ts, ev.typ, cidParam, iidParam, string(payloadJSON))
 	if execErr != nil {
-		return fmt.Errorf("insert event %s: %w", typ, execErr)
+		return fmt.Errorf("insert event %s: %w", ev.typ, execErr)
 	}
 	return nil
+}
+
+// transitionEvents are the events an instance's move to up or to down writes:
+// the agent event and the instance event that the alert rules read.
+func transitionEvents(clusterID int64, instanceID uuid.UUID, up bool, lastSeen time.Time) []staleEvent {
+	cid := clusterID
+	iid := instanceID
+	iidStr := instanceID.String()
+	if up {
+		return []staleEvent{
+			{typ: "agent_up", clusterID: &cid, instanceID: &iid, payload: map[string]any{"instance_id": iidStr}},
+			{typ: "instance_reachable", clusterID: &cid, instanceID: &iid, payload: map[string]any{"instance_id": iidStr}},
+		}
+	}
+	return []staleEvent{
+		{typ: "agent_down", clusterID: &cid, instanceID: &iid, payload: map[string]any{"instance_id": iidStr, "last_seen": lastSeen}},
+		{typ: "instance_unreachable", clusterID: &cid, instanceID: &iid, payload: map[string]any{"instance_id": iidStr}},
+	}
 }
 
 // Evaluate performs a single staleness evaluation. It is safe to call
@@ -503,42 +556,22 @@ func (s *Staleness) Evaluate(ctx context.Context) error {
 			continue
 		}
 
+		// The state of an instance moves only once the events of the move are
+		// stored. Recorded first, a failed write would be taken for done, and
+		// its events would never be written.
 		prevUp, seenBefore := s.instanceUp[iidStr]
-		if !seenBefore {
-			s.instanceUp[iidStr] = up
-			if !up {
-				// First observation already stale: emit down once.
-				cid := inst.clusterID
-				iidCopy := inst.id
-				if emitErr := s.emitEvent(ctx, "agent_down", &cid, &iidCopy, map[string]any{"instance_id": iidStr, "last_seen": inst.lastSeen}); emitErr != nil {
-					return emitErr
-				}
-				if emitErr := s.emitEvent(ctx, "instance_unreachable", &cid, &iidCopy, map[string]any{"instance_id": iidStr}); emitErr != nil {
-					return emitErr
-				}
-			}
+		if seenBefore && prevUp == up {
 			continue
 		}
-		if prevUp != up {
+		// An instance seen for the first time emits only when it is already down.
+		if !seenBefore && up {
 			s.instanceUp[iidStr] = up
-			cid := inst.clusterID
-			iidCopy := inst.id
-			if up {
-				if emitErr := s.emitEvent(ctx, "agent_up", &cid, &iidCopy, map[string]any{"instance_id": iidStr}); emitErr != nil {
-					return emitErr
-				}
-				if emitErr := s.emitEvent(ctx, "instance_reachable", &cid, &iidCopy, map[string]any{"instance_id": iidStr}); emitErr != nil {
-					return emitErr
-				}
-			} else {
-				if emitErr := s.emitEvent(ctx, "agent_down", &cid, &iidCopy, map[string]any{"instance_id": iidStr, "last_seen": inst.lastSeen}); emitErr != nil {
-					return emitErr
-				}
-				if emitErr := s.emitEvent(ctx, "instance_unreachable", &cid, &iidCopy, map[string]any{"instance_id": iidStr}); emitErr != nil {
-					return emitErr
-				}
-			}
+			continue
 		}
+		if emitErr := s.emitEvents(ctx, transitionEvents(inst.clusterID, inst.id, up, inst.lastSeen)...); emitErr != nil {
+			return emitErr
+		}
+		s.instanceUp[iidStr] = up
 	}
 
 	// no_primary_in_cluster handling
@@ -609,6 +642,11 @@ type slotEmission struct {
 	SlotName   string
 }
 
+// slotKey identifies one slot of one instance in the slot state maps.
+func slotKey(instanceID uuid.UUID, slotName string) string {
+	return instanceID.String() + "/" + slotName
+}
+
 // decideSlotInactiveEmissions applies the slot_inactive state machine to one
 // evaluation's rows, mutating since/emitted in place (the same maps
 // evaluateSlots persists across calls as Staleness.slotInactiveSince/
@@ -624,7 +662,7 @@ func decideSlotInactiveEmissions(rows []slotRow, now time.Time, since map[string
 	var out []slotEmission
 	present := make(map[string]struct{}, len(rows))
 	for _, r := range rows {
-		present[r.InstanceID.String()+"/"+r.SlotName] = struct{}{}
+		present[slotKey(r.InstanceID, r.SlotName)] = struct{}{}
 	}
 	for key := range since {
 		if _, ok := present[key]; !ok {
@@ -637,7 +675,7 @@ func decideSlotInactiveEmissions(rows []slotRow, now time.Time, since map[string
 		}
 	}
 	for _, r := range rows {
-		key := r.InstanceID.String() + "/" + r.SlotName
+		key := slotKey(r.InstanceID, r.SlotName)
 		if r.Active {
 			delete(since, key)
 			delete(emitted, key)
@@ -695,10 +733,16 @@ ORDER BY instance_id, slot_name, ts DESC`, now.Add(-slotStateWindow))
 		return err
 	}
 
-	for _, em := range decideSlotInactiveEmissions(slotRows, now, s.slotInactiveSince, s.slotInactiveEmitted) {
+	emissions := decideSlotInactiveEmissions(slotRows, now, s.slotInactiveSince, s.slotInactiveEmitted)
+	for i, em := range emissions {
 		cidCopy := em.ClusterID
 		iidCopy := em.InstanceID
 		if emitErr := s.emitEvent(ctx, "slot_inactive", &cidCopy, &iidCopy, map[string]any{"slot_name": em.SlotName}); emitErr != nil {
+			// decide marked this emission and the ones after it as reported, but
+			// they were not written. Unmark them, so the next evaluation emits them.
+			for _, rest := range emissions[i:] {
+				delete(s.slotInactiveEmitted, slotKey(rest.InstanceID, rest.SlotName))
+			}
 			return emitErr
 		}
 	}
@@ -734,7 +778,9 @@ func (s *Staleness) Start(ctx context.Context) {
 				case t := <-ticker.C():
 					_ = t
 					evalCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-					_ = s.Evaluate(evalCtx)
+					if err := s.Evaluate(evalCtx); err != nil {
+						log.Printf("staleness: evaluate: %v", err)
+					}
 					cancel()
 				}
 			}
