@@ -70,7 +70,7 @@ func TestVacuumProgress_ScrapeCoversProbeAndViews(t *testing.T) {
 				return &mockRows{rows: [][]any{{"max_dead_tuple_bytes"}, {"dead_tuple_bytes"}}}, nil
 			case strings.Contains(q, "progress_vacuum"):
 				return &mockRows{rows: [][]any{{
-					int32(1), "app", "t", "scanning", int64(10), int64(2),
+					int32(1), "app", uint32(0), "scanning", int64(10), int64(2),
 					int64(1), int64(0), int64(2), int64(1),
 				}}}, nil
 			default:

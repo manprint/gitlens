@@ -1,9 +1,13 @@
 package check
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/stretchr/testify/require"
 )
@@ -41,4 +45,42 @@ func vacuumDeadMetricName(bytes bool) string {
 		return "pg_vacuum_dead_tuple_bytes"
 	}
 	return "pg_vacuum_dead_tuples"
+}
+
+// A vacuum in another database is named from that database: the maintenance
+// database's pg_class does not hold the OID of a table in the application's
+// database, so the same row read there comes back with an empty name.
+func TestVacuumProgress_NamesRelationFromItsOwnDatabase(t *testing.T) {
+	t.Parallel()
+	maint := &mockConn{queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+		if strings.Contains(sql, "pg_stat_progress_vacuum") && !strings.Contains(sql, "information_schema") {
+			return &mockRows{rows: [][]any{{int32(7), "app", uint32(16384), "scanning heap", int64(100), int64(50), int64(0), int64(0), int64(0), int64(0)}}}, nil
+		}
+		return &mockRows{}, nil
+	}}
+	app := &mockConn{queryRowFunc: func(_ context.Context, sql string, args ...any) pgx.Row {
+		require.Contains(t, sql, "pg_class")
+		require.Equal(t, []any{uint32(16384)}, args)
+		return &mockRow{vals: []any{"zz_vac_probe"}}
+	}}
+	target := &SimpleTarget{
+		ConnFunc: func(context.Context) (Conn, error) { return maint, nil },
+		ConnForFunc: func(_ context.Context, datname string) (Conn, error) {
+			require.Equal(t, "app", datname)
+			return app, nil
+		},
+		ClockValue: clock.System(),
+	}
+	r, err := (&vacuumProgressCheck{}).Scrape(context.Background(), target)
+	require.NoError(t, err)
+	found := false
+	for _, m := range r.Metrics {
+		if m.Name == "pg_vacuum_heap_blks_total" {
+			found = true
+			require.Equal(t, "zz_vac_probe", m.Labels["relname"])
+			require.Equal(t, "app", m.Labels["datname"])
+		}
+	}
+	require.True(t, found)
+	require.Equal(t, 1, app.releaseCalls)
 }
