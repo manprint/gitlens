@@ -240,6 +240,12 @@ func TestINTALERT019_ALeaderChangeDoesNotSendAnOverruledFiring(t *testing.T) {
 		clk.Advance(time.Minute)
 		src.set(5, clk.Now())
 		require.NoError(t, first.Tick(ctx))
+		// A pass that did not lead would send nothing, and the check below would
+		// pass for no reason.
+		first.mu.Lock()
+		led := first.hasLock
+		first.mu.Unlock()
+		require.True(t, led, "the first engine leads again")
 		require.Equal(t, []string{"resolve"}, rec.got, "the FIRING the first engine failed to send is obsolete")
 	})
 }
