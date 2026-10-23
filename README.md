@@ -1710,7 +1710,7 @@ The agent's disk buffer grows when samples cannot be delivered to the server. Ch
    - Agent container: check DNS resolution and network connectivity to server
    - Binary deployment: check firewall rules and routing
 
-After the server becomes reachable, the buffer is replayed automatically, in order. Delivery is at least once: a record sent twice is absorbed by the server's dedup index. Buffer overflow after 512 MiB deletes the oldest (least recent) segments, and those samples are counted as dropped. Losses that are not counted are listed under Known limits.
+After the server becomes reachable, the buffer is replayed automatically, in order. Delivery is at least once: a record sent twice is absorbed by the server's dedup index. Buffer overflow after 512 MiB deletes the oldest (least recent) segments, and those samples are counted as dropped. Some losses are not counted; Known limits describes the ones documented so far.
 
 **Agent container restarting or marked as down**
 
