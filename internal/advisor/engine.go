@@ -163,8 +163,14 @@ func (e *Engine) ensureLeader(ctx context.Context) error {
 	if e.conn != nil && e.conn.Conn().IsClosed() {
 		e.releaseLeaderConn()
 	}
+	// A session the server has terminated is not seen as closed until it is next
+	// used, so the session is pinged every pass. One that does not answer no
+	// longer holds the lock, and the leadership goes with it.
 	if e.hasLock && e.conn != nil {
-		return nil
+		if err := e.conn.Ping(ctx); err == nil {
+			return nil
+		}
+		e.releaseLeaderConn()
 	}
 	if e.conn == nil {
 		c, err := e.pool.Acquire(ctx)
@@ -191,8 +197,15 @@ func (e *Engine) ensureLeader(ctx context.Context) error {
 
 // releaseLeaderConn drops the lock-holding connection and the leadership it
 // carried. Caller must hold e.mu.
+//
+// The session is closed, not returned to the pool: a session that may still
+// hold the advisory lock would keep it for whoever borrowed the connection
+// next, and this engine has given the lock up.
 func (e *Engine) releaseLeaderConn() {
 	if e.conn != nil {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = e.conn.Conn().Close(closeCtx)
+		cancel()
 		e.conn.Release()
 		e.conn = nil
 	}

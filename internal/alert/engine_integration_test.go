@@ -298,3 +298,41 @@ func TestINTALERT018_SpellClosesAfterARestartDuringTheOutage(t *testing.T) {
 		require.Zero(t, countRows(t, ctx, pool, `SELECT count(*) FROM events WHERE type = 'instance_reachable'`), "no reachable event was written, so the spell cleared on state")
 	})
 }
+
+// TestINTALERT021_LeaderWithADeadSessionGivesUpTheLock: the server ends the
+// leader's session without pgx seeing it close, so the connection still looks
+// open. Once another session holds the engine's lock, the dead leader must not
+// go on evaluating as the leader.
+func TestINTALERT021_LeaderWithADeadSessionGivesUpTheLock(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		ctx, pool, src, clk, _, _, _ := setupEngineIntegration(t, pg)
+		st := NewPgStore(pool)
+		rec := &phaseRecorder{}
+		e := NewEngineWithInterval(pool, clk, 30*time.Second, st, NewChannelNotifier(st, ruleChannel{rule: "integration.rule", rec: rec}), []Source{src})
+		t.Cleanup(e.Stop)
+		require.NoError(t, e.Tick(ctx))
+		e.mu.Lock()
+		led, pid := e.hasLock, e.conn.Conn().PgConn().PID()
+		e.mu.Unlock()
+		require.True(t, led, "the engine leads on its first pass")
+
+		_, err := pool.Exec(ctx, `SELECT pg_terminate_backend($1)`, pid)
+		require.NoError(t, err)
+		other, err := pool.Acquire(ctx)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = other.Exec(context.Background(), `SELECT pg_advisory_unlock(hashtext('pglens:alert-engine'))`)
+			other.Release()
+		})
+		// Blocks until the terminated session has let go of the lock.
+		_, err = other.Exec(ctx, `SELECT pg_advisory_lock(hashtext('pglens:alert-engine'))`)
+		require.NoError(t, err)
+
+		src.set(20, clk.Now())
+		require.NoError(t, e.Tick(ctx))
+		e.mu.Lock()
+		led = e.hasLock
+		e.mu.Unlock()
+		require.False(t, led, "a leader whose session is gone does not lead while another session holds the lock")
+	})
+}
