@@ -221,10 +221,13 @@ func (c *Config) validate() error {
 		c.parsedPushInterval = 15 * time.Second
 	} else {
 		d, err := time.ParseDuration(c.PushInterval)
-		if err != nil || d <= 0 {
-			if err == nil {
-				err = fmt.Errorf("must be greater than zero")
-			}
+		if err == nil && d <= 0 {
+			err = fmt.Errorf("must be greater than zero")
+		}
+		if err == nil && d >= maxPushInterval {
+			err = fmt.Errorf("must be less than %s, after which the server counts a target as down", maxPushInterval)
+		}
+		if err != nil {
 			return fmt.Errorf("validation: push_interval: %w", err)
 		}
 		c.parsedPushInterval = d
@@ -358,6 +361,10 @@ func compilePatterns(patterns []string) ([]*regexp.Regexp, error) {
 	}
 	return out, nil
 }
+
+// maxPushInterval is the server's InstanceStaleAfter: a target that pushes
+// less often than this is counted as down between two healthy pushes.
+const maxPushInterval = 90 * time.Second
 
 // GetParsedPushInterval returns the parsed push interval duration.
 func (c *Config) GetParsedPushInterval() time.Duration {

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/manprint/pglens/internal/store"
 	"github.com/stretchr/testify/require"
 )
 
@@ -350,6 +351,26 @@ checks:
 `,
 			errMsg: "push_interval",
 		},
+		{
+			// The server counts a target as down after 90 s without a push, so
+			// a longer interval would flag every healthy target between pushes.
+			name: "push_interval_past_staleness",
+			yaml: `
+server:
+  url: http://localhost:8080
+  token: test-token
+identity_path: /var/lib/pglens/identity.json
+push_interval: 90s
+buffer:
+  path: /var/lib/pglens/buffer
+targets:
+  - name: pg-app
+    dsn: postgres://pglens@localhost:5432/postgres
+checks:
+  activity: {}
+`,
+			errMsg: "push_interval: must be less than 1m30s",
+		},
 	}
 
 	for _, tt := range tests {
@@ -523,4 +544,10 @@ checks:
 			require.NoError(t, err)
 		})
 	}
+}
+
+// TestMaxPushIntervalIsTheServerStaleness keeps the agent's limit on
+// push_interval equal to the server's staleness threshold.
+func TestMaxPushIntervalIsTheServerStaleness(t *testing.T) {
+	require.Equal(t, store.InstanceStaleAfter, maxPushInterval)
 }
