@@ -374,4 +374,67 @@ describe('RelationsSection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Sort Tables by Last analyze' }))
     expect(within(tables).getAllByRole('row')).toHaveLength(3)
   })
+
+  it('UI-INST-067 shows the last scan of each index or why it is unknown, and sorts by it', async () => {
+    renderRelations({
+      indexes: response([
+        item({
+          indexrelname: 'orders_pkey',
+          idx_scan_rate: 3,
+          last_scan_at: '2026-10-20T08:30:00Z',
+          last_scan_status: 'scanned',
+        }),
+        item({
+          indexrelname: 'orders_archive_idx',
+          idx_scan_rate: 0,
+          last_scan_at: '2026-10-19T07:00:00Z',
+          last_scan_status: 'scanned',
+        }),
+        item({
+          indexrelname: 'orders_status_idx',
+          idx_scan_rate: 0,
+          last_scan_at: null,
+          last_scan_status: 'never_since_reset',
+        }),
+        item({
+          indexrelname: 'orders_legacy_idx',
+          idx_scan_rate: null,
+          last_scan_at: null,
+          last_scan_status: 'not_available',
+        }),
+      ]),
+    })
+    await settle()
+
+    const indexes = screen.getByRole('table', { name: 'Indexes' })
+    expect(within(indexes).getByRole('row', { name: /orders_pkey/ })).toHaveTextContent(
+      '2026-10-20 08:30:00 UTC',
+    )
+    expect(within(indexes).getByRole('row', { name: /orders_status_idx/ })).toHaveTextContent(
+      'never since reset',
+    )
+    expect(within(indexes).getByRole('row', { name: /orders_legacy_idx/ })).toHaveTextContent(
+      'not available',
+    )
+    expect(
+      within(indexes).getByTitle('No scan of this index since the statistics were reset.'),
+    ).toBeInTheDocument()
+
+    const sortByLastScan = within(indexes).getByRole('button', {
+      name: 'Sort Indexes by Last scan',
+    })
+    fireEvent.click(sortByLastScan)
+    expect(sortByLastScan).toHaveAttribute('aria-pressed', 'true')
+    const names = ['orders_pkey', 'orders_archive_idx', 'orders_status_idx', 'orders_legacy_idx']
+    const order = within(indexes)
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => names.find((name) => row.textContent?.includes(name)))
+    expect(order).toEqual([
+      'orders_archive_idx',
+      'orders_pkey',
+      'orders_status_idx',
+      'orders_legacy_idx',
+    ])
+  })
 })

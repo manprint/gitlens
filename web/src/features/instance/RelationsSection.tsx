@@ -342,6 +342,37 @@ const TABLE_COLUMNS: RelationColumn[] = [
   OBSERVED_COLUMN,
 ]
 
+/**
+ * The index's last scan since the statistics reset, from the API's last_scan_status.
+ * "never since reset" is an index with no scan since the reset (PostgreSQL 16 and
+ * later); "not available" means the server has no last scan for it (PostgreSQL 15).
+ */
+const LAST_SCAN_STATUS_TEXT: Record<string, { text: string; title: string }> = {
+  never_since_reset: {
+    text: 'never since reset',
+    title: 'No scan of this index since the statistics were reset.',
+  },
+  not_available: {
+    text: 'not available',
+    title:
+      'PostgreSQL 15 does not report the last scan of an index (pg_stat_user_indexes.last_idx_scan).',
+  },
+}
+
+function lastScanCell(item: RelationItem): ReactNode {
+  const at = timeValue(item, 'last_scan_at')
+  if (at) {
+    return (
+      <span title="Last scan of this index since the statistics were reset.">
+        {formatTimestamp(at.iso, 'UTC')}
+      </span>
+    )
+  }
+  const status = stringValue(item, 'last_scan_status')
+  const known = status ? LAST_SCAN_STATUS_TEXT[status] : undefined
+  return known ? <span title={known.title}>{known.text}</span> : <Unknown />
+}
+
 const INDEX_COLUMNS: RelationColumn[] = [
   RELATION_COLUMN,
   DATABASE_COLUMN,
@@ -356,6 +387,12 @@ const INDEX_COLUMNS: RelationColumn[] = [
     label: 'Index scans',
     render: (item) => rateCell(item, 'idx_scan_rate'),
     sortValue: (item) => numberValue(item, 'idx_scan_rate'),
+  },
+  {
+    key: 'last_scan',
+    label: 'Last scan',
+    render: lastScanCell,
+    sortValue: (item) => timeValue(item, 'last_scan_at')?.ms ?? null,
   },
   {
     key: 'size',
