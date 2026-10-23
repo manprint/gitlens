@@ -166,7 +166,7 @@ describe('BlockingTree', () => {
     expect(screen.getAllByRole('treeitem')[0]).toHaveTextContent('PID 100')
   })
 
-  it('UI-LOCK-049 disables signal actions on a stale lock sample and keeps them on a fresh one', () => {
+  it('UI-LOCK-049 disables signal actions on a lock sample that is flagged stale or older than the threshold', () => {
     const instanceId = '11111111-1111-4111-8111-111111111111'
     const sixtySecondsAgo = new Date(NOW.getTime() - 60_000).toISOString()
     const { unmount } = renderWithProviders(
