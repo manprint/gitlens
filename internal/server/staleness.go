@@ -40,6 +40,15 @@ const (
 	eventRetention     = 90 * 24 * time.Hour
 	eventPurgeInterval = time.Hour
 	eventPurgeBatch    = 10000
+	// query_texts had no retention either: the text of a statement that stopped
+	// running stayed for good. The leader purges the rows not seen for
+	// queryTextRetention, once per queryTextPurgeInterval, queryTextPurgeBatch
+	// rows at a time. A statement that still runs has its text resent about
+	// hourly, which refreshes last_seen, so only one gone for the whole window
+	// is removed.
+	queryTextRetention     = 90 * 24 * time.Hour
+	queryTextPurgeInterval = time.Hour
+	queryTextPurgeBatch    = 10000
 	// topologyEdgeLiveness is how long an instance may stay silent before the
 	// topology edges it reports are dropped. A standby that stops reporting keeps
 	// its edge to its upstream otherwise, and the topology readers and the
@@ -376,6 +385,9 @@ type Staleness struct {
 	// lastEventPurge/eventPurgeBacklog pace purgeEvents.
 	lastEventPurge    time.Time
 	eventPurgeBacklog bool
+	// lastQueryTextPurge/queryTextPurgeBacklog pace purgeQueryTexts.
+	lastQueryTextPurge    time.Time
+	queryTextPurgeBacklog bool
 
 	conn    *pgxpool.Conn
 	hasLock bool
@@ -776,6 +788,10 @@ func (s *Staleness) Evaluate(ctx context.Context) error {
 		return topoErr
 	}
 
+	if qtErr := s.purgeQueryTexts(ctx, now); qtErr != nil {
+		return qtErr
+	}
+
 	return s.purgeEvents(ctx, now)
 }
 
@@ -807,6 +823,23 @@ func (s *Staleness) purgeEvents(ctx context.Context, now time.Time) error {
 	}
 	s.lastEventPurge = now
 	s.eventPurgeBacklog = tag.RowsAffected() == eventPurgeBatch
+	return nil
+}
+
+// purgeQueryTexts deletes one batch of query texts not seen for
+// queryTextRetention, at most once per queryTextPurgeInterval unless the
+// previous batch was full. Called from Evaluate() with s.mu already held.
+func (s *Staleness) purgeQueryTexts(ctx context.Context, now time.Time) error {
+	if !s.queryTextPurgeBacklog && !s.lastQueryTextPurge.IsZero() && now.Sub(s.lastQueryTextPurge) < queryTextPurgeInterval {
+		return nil
+	}
+	tag, err := s.pool.Exec(ctx, `DELETE FROM query_texts WHERE (tenant_id, cluster_id, datname, queryid, pg_major) IN (
+		SELECT tenant_id, cluster_id, datname, queryid, pg_major FROM query_texts WHERE last_seen < $1 LIMIT $2)`, now.Add(-queryTextRetention), queryTextPurgeBatch)
+	if err != nil {
+		return fmt.Errorf("purge query texts: %w", err)
+	}
+	s.lastQueryTextPurge = now
+	s.queryTextPurgeBacklog = tag.RowsAffected() == queryTextPurgeBatch
 	return nil
 }
 

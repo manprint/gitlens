@@ -757,3 +757,35 @@ func TestINTSTALE018_GaugeAndAlertAgreeOnDown(t *testing.T) {
 	require.Equal(t, 0.0, pglensUpGauge.Get(iid.String()), "95 seconds of silence is past the threshold")
 	require.Equal(t, 0.0, alertValue(), "the alert agrees with the gauge")
 }
+
+// INT-STALE-019: the query texts of a statement not seen for the retention
+// window are purged by the leader, and a text seen recently stays. The purge
+// runs on the evaluator's pass, as the event purge does.
+func TestINTSTALE019_QueryTextsPastRetentionArePurged(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, `INSERT INTO query_texts (cluster_id, datname, queryid, pg_major, query_text, first_seen, last_seen) VALUES
+		(1, 'app', 1, 17, 'SELECT 1', now() - interval '200 days', now() - interval '100 days'),
+		(1, 'app', 2, 17, 'SELECT 2', now() - interval '200 days', now() - interval '1 day')`)
+	require.NoError(t, err)
+
+	s := NewStaleness(pool, clock.NewFake(time.Now()))
+	s.mu.Lock()
+	s.conn = mustAcquire(t, pool)
+	s.hasLock = true
+	s.mu.Unlock()
+	require.NoError(t, s.Evaluate(ctx))
+
+	var remaining []int64
+	rows, err := pool.Query(ctx, `SELECT queryid FROM query_texts ORDER BY queryid`)
+	require.NoError(t, err)
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		require.NoError(t, rows.Scan(&id))
+		remaining = append(remaining, id)
+	}
+	require.NoError(t, rows.Err())
+	require.Equal(t, []int64{2}, remaining, "only the text seen inside the retention window survives")
+}
