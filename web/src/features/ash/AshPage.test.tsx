@@ -494,7 +494,7 @@ describe('AshPage', () => {
     expect(screen.queryByRole('heading', { name: 'Top queries' })).not.toBeInTheDocument()
   })
 
-  it('UI-ASH-046 explains missing query attribution when compute_query_id is left at auto', () => {
+  it('UI-ASH-049 explains missing query attribution when compute_query_id is left at auto', () => {
     renderAsh('/instances/instance-1/ash?group=queryid', {
       ...ashResponse,
       buckets: ashResponse.buckets.map((bucket) => ({ ...bucket, queryid: null })),
