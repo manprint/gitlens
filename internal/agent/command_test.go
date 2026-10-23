@@ -28,13 +28,15 @@ type dispatcherTarget struct {
 	pgstattuple  bool
 	connForCalls int
 	conn         check.Conn
+	refreshErr   error
 }
 
-func (t *dispatcherTarget) InstanceID() pgtype.InstanceID { return uuid.New() }
-func (t *dispatcherTarget) ClusterID() pgtype.ClusterID   { return 1 }
-func (t *dispatcherTarget) Role() pgtype.Role             { return pgtype.RolePrimary }
-func (t *dispatcherTarget) PGVersion() pgtype.PGVersion   { return 170000 }
-func (t *dispatcherTarget) PermTier() pgtype.PermTier     { return t.tier }
+func (t *dispatcherTarget) RefreshCapabilities(context.Context) error { return t.refreshErr }
+func (t *dispatcherTarget) InstanceID() pgtype.InstanceID             { return uuid.New() }
+func (t *dispatcherTarget) ClusterID() pgtype.ClusterID               { return 1 }
+func (t *dispatcherTarget) Role() pgtype.Role                         { return pgtype.RolePrimary }
+func (t *dispatcherTarget) PGVersion() pgtype.PGVersion               { return 170000 }
+func (t *dispatcherTarget) PermTier() pgtype.PermTier                 { return t.tier }
 func (t *dispatcherTarget) HasExtension(name string) bool {
 	return name == "pgstattuple" && t.pgstattuple
 }
@@ -161,6 +163,38 @@ func TestDispatcher_ClosedGateRejectsWithoutExecuting(t *testing.T) {
 	err := d.dispatch(context.Background(), polledFor(instanceID, command.KindExplain, command.Args{QueryID: int64Ptr(7)}))
 	require.NoError(t, err)
 	require.Zero(t, executor.executed)
+}
+
+// TestDispatcher_RefusesWhenCapabilitiesCannotBeRefreshed: the tier a command
+// is judged on must be read again first. A failed refresh keeps the last
+// snapshot, which may still allow EXPLAIN ANALYZE after the grant was revoked,
+// so the command is not executed. The failure is transient, so the outcome is
+// an error rather than a closed gate.
+func TestDispatcher_RefusesWhenCapabilitiesCannotBeRefreshed(t *testing.T) {
+	agentID, instanceID := uuid.New(), uuid.New()
+	run := func(t *testing.T, refreshErr error) (commandResult, int) {
+		var got commandResult
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		defer server.Close()
+		d := NewDispatcher(server.URL, "token", agentID, true)
+		d.AddTarget(instanceID, &dispatcherTarget{tier: pgtype.TierExplain, refreshErr: refreshErr}, true, false)
+		executor := &dispatcherExecutor{kind: command.KindExplain}
+		d.AddExecutor(executor)
+		require.NoError(t, d.dispatch(context.Background(), polledFor(instanceID, command.KindExplain, command.Args{QueryID: int64Ptr(7)})))
+		return got, executor.executed
+	}
+
+	got, executed := run(t, errors.New("connection reset"))
+	require.Equal(t, "error", got.Outcome)
+	require.Contains(t, got.Error, "could not be refreshed")
+	require.Zero(t, executed)
+
+	got, executed = run(t, nil)
+	require.Equal(t, "ok", got.Outcome)
+	require.Equal(t, 1, executed)
 }
 
 func TestDispatcher_BackoffOnTransportError(t *testing.T) {

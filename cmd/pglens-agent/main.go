@@ -4,6 +4,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -57,30 +59,47 @@ func showUsage() {
 // or curl to do this any other way.
 func runAgentHealthcheck() int {
 	addr := envOr("PGLENS_HEALTHZ_LISTEN", ":9187")
-	port := addr
-	if i := lastColon(addr); i >= 0 {
-		port = addr[i+1:]
-	}
 	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%s/healthz", port))
+	url := healthcheckURL(addr, "/healthz")
+	resp, err := client.Get(url)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "healthcheck:", err)
 		return 1
 	}
 	defer func() { _ = resp.Body.Close() }()
-	// /healthz itself reports 503 for revoked/unauthorized/incompatible —
-	// that is the agent correctly staying alive and saying so, not a reason
-	// to have Docker restart it, so any response at all is a pass here.
+	// /healthz answers 503 while the server has revoked or unauthorized the
+	// agent, or has answered a push with 400, which the agent reads as
+	// incompatible. The probe fails so that Docker shows the container
+	// unhealthy, and the body says which state it is in. A 400 can reject a
+	// single envelope, so incompatible clears with the next accepted push.
+	// Plain Docker and Compose do not restart an unhealthy container; Swarm and
+	// autoheal-style tooling can, and the agent process keeps running either
+	// way.
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		fmt.Fprintf(os.Stderr, "healthcheck: %s: %s %s\n", url, resp.Status, body)
+		return 1
+	}
 	return 0
 }
 
-func lastColon(s string) int {
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == ':' {
-			return i
-		}
+// healthcheckURL is the URL the --healthcheck probe requests for path on the
+// address the process listens on. A specific host is probed as it is, because
+// a bind to one address does not accept on loopback. Only an unspecified host
+// (empty, 0.0.0.0 or ::) falls back to 127.0.0.1, which such a bind accepts on.
+//
+// cmd/pglens-server/main.go has the same function and tests. The two binaries
+// do not share a package, so the copies change together.
+func healthcheckURL(listen, path string) string {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		// A bare port has no host part to keep.
+		host, port = "", listen
 	}
-	return -1
+	if host == "" || net.ParseIP(host).IsUnspecified() {
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port) + path
 }
 
 func runCheckCommand(args []string) {
@@ -194,15 +213,32 @@ func runCheck(dsn string, identityPath string) {
 
 	// Print checks status
 	fmt.Printf("checks\n")
-	allChecks := check.All()
-	mandatoryEnabled := 0
-	mandatoryCount := 0
+	mandatoryCount, mandatoryEnabled := printChecks(os.Stdout, check.All(), role, pgVersion, tier, extensions)
 
-	for _, c := range allChecks {
+	// Print warnings
+	warnings := getCheckWarnings(identityPath)
+	if postureErr == nil && !strings.EqualFold(posture.ReadOnlyDefault, "on") {
+		warnings = append(warnings, fmt.Sprintf("default_transaction_read_only is %q for role %s: pglens sets it in every session, but the role default is the second safeguard (run deploy/sql/monitoring_user.sql)", posture.ReadOnlyDefault, posture.Role))
+	}
+	if len(warnings) > 0 {
+		fmt.Printf("\nwarnings\n")
+		for _, w := range warnings {
+			fmt.Printf("  - %s\n", w)
+		}
+	}
+
+	os.Exit(checkExitCode(mandatoryCount, mandatoryEnabled, pgVersion, postureErr, posture))
+}
+
+// printChecks prints the status of every check for this server and returns how
+// many mandatory checks there are and how many of them are enabled.
+func printChecks(w io.Writer, checks []check.Check, role pgtype.Role, pgVersion pgtype.PGVersion, tier pgtype.PermTier, extensions map[string]bool) (mandatoryCount, mandatoryEnabled int) {
+	for _, c := range checks {
 		req := c.Requires()
 		supported, reason := req.Supports(role, pgVersion, tier, extensions)
 
 		var status string
+		enabled := false
 		if !supported {
 			status = fmt.Sprintf("disabled  — %s", reason)
 		} else if len(req.Roles) > 0 {
@@ -218,45 +254,38 @@ func runCheck(dsn string, identityPath string) {
 				status = "disabled  — requires role=primary or standby with a upstream"
 			} else {
 				status = "enabled"
-				if isMandatory(c.Name()) {
-					mandatoryCount++
-					mandatoryEnabled++
-				}
+				enabled = true
 			}
 		} else {
 			status = "enabled"
-			if isMandatory(c.Name()) {
-				mandatoryCount++
+			enabled = true
+		}
+		// A mandatory check counts whether or not it is enabled. Counting only
+		// the enabled ones made the exit code unable to see a disabled check.
+		if isMandatory(c.Name()) {
+			mandatoryCount++
+			if enabled {
 				mandatoryEnabled++
 			}
 		}
 
-		fmt.Printf("  %-18s %s\n", c.Name(), status)
+		_, _ = fmt.Fprintf(w, "  %-18s %s\n", c.Name(), status)
 	}
+	return mandatoryCount, mandatoryEnabled
+}
 
-	// Print warnings
-	warnings := getCheckWarnings(identityPath)
-	if postureErr == nil && !strings.EqualFold(posture.ReadOnlyDefault, "on") {
-		warnings = append(warnings, fmt.Sprintf("default_transaction_read_only is %q for role %s: pglens sets it in every session, but the role default is the second safeguard (run deploy/sql/monitoring_user.sql)", posture.ReadOnlyDefault, posture.Role))
-	}
-	if len(warnings) > 0 {
-		fmt.Printf("\nwarnings\n")
-		for _, w := range warnings {
-			fmt.Printf("  - %s\n", w)
-		}
-	}
-
-	// Determine exit code: 0 if all mandatory checks are enabled and the
-	// role cannot write, 1 otherwise
-	exitCode := 0
-	if mandatoryCount > 0 && mandatoryEnabled < mandatoryCount {
-		exitCode = 1
+// checkExitCode is the exit status of `pglens-agent check`, as the README
+// documents it: 0 when every mandatory check is enabled, the server version is
+// supported and the monitoring role cannot write, 1 otherwise. The report says
+// NOT SUPPORTED for a version outside 15-19, so the status must not be 0 for it.
+func checkExitCode(mandatoryCount, mandatoryEnabled int, pgVersion pgtype.PGVersion, postureErr error, posture check.RolePosture) int {
+	if mandatoryEnabled < mandatoryCount || !pgVersion.Supported() {
+		return 1
 	}
 	if postureErr != nil || len(posture.Problems) > 0 {
-		exitCode = 1
+		return 1
 	}
-
-	os.Exit(exitCode)
+	return 0
 }
 
 // formatRolePosture reports whether the role the DSN logs in as could write.
@@ -404,7 +433,13 @@ func checkMountWarning(identityPath string) string {
 	return ""
 }
 
-// isMountWarning checks if a path is on the root mount (not a separate persistent mount).
+// isMountWarning reports whether path is not on a persistent mount. The mount
+// that holds path is the one with the longest mountpoint containing it: a
+// volume under the root holds its own paths, and a tmpfs nested in a volume
+// holds the paths under it. The root mount always counts as not persistent,
+// whatever its filesystem type: a container's root can report any type,
+// depending on the storage driver, and mountinfo cannot tell it from a host
+// disk. A missed warning for a container is the worse error, so the root warns.
 // For testing, mountinfoPath can be overridden.
 func isMountWarning(path string, mountinfoPath string) (bool, error) {
 	data, err := os.ReadFile(mountinfoPath)
@@ -412,23 +447,56 @@ func isMountWarning(path string, mountinfoPath string) (bool, error) {
 		return false, err
 	}
 
-	lines := strings.Split(string(data), "\n")
-
-	// Parse mountinfo to find if path is on a separate mount
-	for _, line := range lines {
-		parts := strings.Fields(line)
-		if len(parts) < 5 {
+	path = filepath.Clean(path)
+	holder := -1 // length of the mountpoint of the mount holding path so far
+	persistent := false
+	for _, line := range strings.Split(string(data), "\n") {
+		mountpoint, fstype, ok := parseMountinfoLine(line)
+		if !ok || !mountContains(mountpoint, path) {
 			continue
 		}
-		mountpoint := parts[4]
-		// Check if the identity path starts with a non-root mountpoint
-		if mountpoint != "/" && strings.HasPrefix(filepath.Clean(path), filepath.Clean(mountpoint)) {
-			return false, nil
+		// mountinfo lists stacked mounts in mount order, so the last one at a
+		// mountpoint is the one on top, and the one that holds path.
+		if len(mountpoint) >= holder {
+			holder = len(mountpoint)
+			persistent = mountpoint != "/" && !volatileFSTypes[fstype]
 		}
 	}
+	// No mount containing path means nothing shows it is persistent.
+	return !persistent, nil
+}
 
-	// If we get here, the path is on the root mount
-	return true, nil
+// volatileFSTypes are the filesystems that do not keep their contents across a
+// restart when mounted below the root: memory filesystems and overlay.
+var volatileFSTypes = map[string]bool{"tmpfs": true, "ramfs": true, "overlay": true}
+
+// mountinfoEscapes undoes the octal escapes mountinfo uses for the characters
+// that would otherwise break its whitespace-separated fields.
+var mountinfoEscapes = strings.NewReplacer(`\040`, " ", `\011`, "\t", `\012`, "\n", `\134`, `\`)
+
+// parseMountinfoLine returns the mountpoint (field 5) and the filesystem type of
+// one line of /proc/self/mountinfo. The optional fields before the "-" separator
+// vary in number, so the type is found after the separator, not by its index.
+func parseMountinfoLine(line string) (mountpoint, fstype string, ok bool) {
+	fields := strings.Fields(line)
+	if len(fields) < 5 {
+		return "", "", false
+	}
+	for i := 6; i+1 < len(fields); i++ {
+		if fields[i] == "-" {
+			return mountinfoEscapes.Replace(fields[4]), fields[i+1], true
+		}
+	}
+	return "", "", false
+}
+
+// mountContains reports whether path is mountpoint or lies below it. It compares
+// whole path components, so /var/lib/pg does not contain /var/lib/pglens.
+func mountContains(mountpoint, path string) bool {
+	if mountpoint == "/" {
+		return true
+	}
+	return path == mountpoint || strings.HasPrefix(path, mountpoint+"/")
 }
 
 // Helper functions

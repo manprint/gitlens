@@ -221,7 +221,10 @@ func (c *Config) validate() error {
 		c.parsedPushInterval = 15 * time.Second
 	} else {
 		d, err := time.ParseDuration(c.PushInterval)
-		if err != nil {
+		if err != nil || d <= 0 {
+			if err == nil {
+				err = fmt.Errorf("must be greater than zero")
+			}
 			return fmt.Errorf("validation: push_interval: %w", err)
 		}
 		c.parsedPushInterval = d
@@ -290,10 +293,18 @@ func (c *Config) validate() error {
 	if len(c.Targets) == 0 {
 		return fmt.Errorf("validation: targets is required and must not be empty")
 	}
+	seenTargets := make(map[string]int, len(c.Targets))
 	for i, t := range c.Targets {
 		if t.Name == "" {
 			return fmt.Errorf("validation: targets[%d].name is required", i)
 		}
+		// The target name keys the pending results and the envelope instances.
+		// Two targets with one name would share a bucket, so each instance
+		// would carry the other's results.
+		if first, dup := seenTargets[t.Name]; dup {
+			return fmt.Errorf("validation: targets[%d].name %q duplicates targets[%d].name", i, t.Name, first)
+		}
+		seenTargets[t.Name] = i
 		if t.DSN == "" {
 			return fmt.Errorf("validation: targets[%d].dsn is required", i)
 		}

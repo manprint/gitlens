@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -18,6 +17,7 @@ import (
 	"github.com/manprint/pglens/internal/check"
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/host"
+	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/manprint/pglens/internal/wire"
 )
 
@@ -115,14 +115,13 @@ func runAgentCommand(args []string) {
 	// queued in the pusher's disk-backed buffer (SetBuffer above) for the
 	// at-least-once/crash-durability contract; the collection loop itself
 	// never blocks on the network either way, since Pusher.Push runs on its
-	// own ticker, independent of the scheduler's Results() drain below.
+	// own ticker, independent of the schedule's results drain (scheduleSet).
 	var mu sync.Mutex
-	pending := map[string][]wire.Result{}        // target name -> results since last flush
-	lastEdgeState := map[string]edgeState{}      // target name -> last actual replication_receiver reading, across cycles with none
-	ashEnabled := map[string]bool{}              // target name -> whether the dedicated ASH sampler actually started for it
-	scheduledDBs := map[string]map[string]bool{} // target name -> databases its database-scoped checks run for
+	pending := map[string][]wire.Result{}                        // target name -> results since last flush
+	lastEdgeState := &edgeStates{byName: map[string]edgeState{}} // target name -> last actual replication_receiver reading, across cycles with none
+	ashEnabled := map[string]bool{}                              // target name -> whether the dedicated ASH sampler actually started for it
+	scheduledDBs := map[string]map[string]bool{}                 // target name -> databases its database-scoped checks run for
 
-	scheduler := agent.NewScheduler(agent.DefaultScheduleOptions())
 	configureChecks(cfg)
 	managers := make([]*agent.Manager, 0, len(cfg.Targets))
 	var ashStops []func()
@@ -138,15 +137,16 @@ func runAgentCommand(args []string) {
 			os.Exit(1)
 		}
 		managers = append(managers, mgr)
-		waitForTarget(ctx, mgr)
+	}
+	waitForTargets(ctx, managers, targetReadyTimeout)
+	for i, tc := range cfg.Targets {
 		// &mu, not "nothing": startASH below launches a goroutine that writes
 		// `pending` under this mutex, and it does so for target N while this
 		// loop is still setting up target N+1. Writing the same map unlocked
 		// here is a concurrent map write, which the Go runtime turns into an
 		// unrecoverable crash of the agent — reachable on any multi-target
 		// config, invisible on the single-target ones every fixture uses.
-		scheduledDBs[tc.Name] = addScheduleEntries(scheduler, mgr, ctx, cfg, &mu, pending)
-		ashStop, enabled := startASH(ctx, mgr, tc.Name, cfg.Checks["ash"], clk, &mu, pending)
+		ashStop, enabled := startASH(ctx, managers[i], tc.Name, cfg.Checks["ash"], clk, &mu, pending)
 		ashStops = append(ashStops, ashStop)
 		ashEnabled[tc.Name] = enabled
 	}
@@ -187,10 +187,12 @@ func runAgentCommand(args []string) {
 		}
 	}()
 
-	if err := scheduler.Start(ctx); err != nil {
+	schedules := newScheduleSet(ctx, cfg, clk, managers, &mu, pending, scheduledDBs)
+	if err := schedules.start(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "error: start scheduler: %v\n", err)
 		os.Exit(1)
 	}
+	go schedules.run()
 
 	// Commands are long-polled once per agent, independently from the check
 	// scheduler. Executors are registered by the command-executor phases; the
@@ -207,56 +209,6 @@ func runAgentCommand(args []string) {
 		}
 		go dispatcher.Run(ctx)
 	}
-
-	// Closed once every result the scheduler ever produced has been folded
-	// into `pending`. The shutdown flush below waits on it so the final
-	// envelope deterministically contains the last cycle's scrapes instead
-	// of racing the drain.
-	resultsDrained := make(chan struct{})
-	go func() {
-		defer close(resultsDrained)
-		for res := range scheduler.Results() {
-			m := make([]wire.Metric, 0, len(res.Metrics))
-			for _, pm := range res.Metrics {
-				m = append(m, wire.Metric{Name: pm.Name, Labels: pm.Labels, Value: pm.Value, Kind: string(pm.Kind)})
-			}
-			wr := wire.Result{Check: res.Entry.CheckName, TS: clk.Now(), Database: res.Entry.Database, Metrics: m, Truncated: res.Truncated, Partial: res.Partial}
-			for _, f := range res.Facts {
-				wf := wire.Fact{Kind: f.Kind, Key: f.Key, Labels: f.Labels, ValueText: f.ValueText, ValueJSON: f.ValueJSON}
-				if err := wf.Validate(); err != nil {
-					fmt.Fprintf(os.Stderr, "warning: drop invalid fact check=%s key=%s: %v\n", res.Entry.CheckName, f.Key, err)
-					continue
-				}
-				wr.Facts = append(wr.Facts, wf)
-			}
-			if res.Err != nil {
-				wr.Error = res.Err.Error()
-			}
-			// check.Result.QueryTexts (int64 -> text) was computed by
-			// stat_statements.go all along but never actually reached the
-			// wire — agent.EntryResult never carried it and this loop never
-			// converted it, found live re-verifying phase 7.5's README:
-			// /api/v1/ash/top's query_text join always returned "" because
-			// query_texts was never being written by anything, since
-			// pipeline.go's own wire.Result.QueryTexts consumer (already
-			// correct) had nothing to consume.
-			if len(res.QueryTexts) > 0 {
-				wr.QueryTexts = make(map[string]string, len(res.QueryTexts))
-				for qid, text := range res.QueryTexts {
-					wr.QueryTexts[strconv.FormatInt(qid, 10)] = text
-				}
-			}
-			// Same class of gap, found immediately after: check.Result.StatsReset
-			// (stat_statements.go's own pg_stat_statements_info.reset_time
-			// read) never reached the wire either — SYS-RESET-002 needs the
-			// server's delta engine to see an explicit reset hint, not just
-			// infer one from a counter decrease.
-			wr.StatsReset = res.StatsReset
-			mu.Lock()
-			pending[res.Entry.TargetName] = append(pending[res.Entry.TargetName], wr)
-			mu.Unlock()
-		}
-	}()
 
 	pushInterval := cfg.GetParsedPushInterval()
 	pushTicker := clk.NewTicker(pushInterval)
@@ -296,11 +248,11 @@ func runAgentCommand(args []string) {
 				// scheduler only, not the per-target ASH samplers (their
 				// stop() releases a pooled connection and is only safe to
 				// call once — the deferred shutdown-time call already owns
-				// that) — scheduler.Stop() alone covers the checks that
+				// that) — schedules.stop() alone covers the checks that
 				// actually drive the bulk of what gets pushed.
 				if !revokedStopped && pusher.HealthState() == agent.HealthRevoked {
 					fmt.Fprintf(os.Stderr, "warning: agent revoked by server, stopping collection\n")
-					scheduler.Stop()
+					schedules.stop()
 					revokedStopped = true
 				}
 			}
@@ -312,12 +264,12 @@ func runAgentCommand(args []string) {
 	<-ch
 
 	cancel()
-	scheduler.Stop()
+	schedules.stop()
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer shutdownCancel()
 
 	select {
-	case <-resultsDrained:
+	case <-schedules.drained():
 	case <-shutdownCtx.Done():
 	}
 
@@ -333,11 +285,11 @@ func runAgentCommand(args []string) {
 	closeTargets(ashStops, managers)
 }
 
-// closeTargets stops the ASH samplers, then closes every target's pools. The
-// samplers hold a pool connection for their whole life, and Manager.Close
-// waits for every acquired connection to come back. The deferred stops in
-// runAgentCommand run only after Close, so stopping them here is what lets
-// the shutdown finish instead of hanging until SIGKILL.
+// closeTargets stops the ASH samplers before it closes the managers. A sampler
+// holds a pooled connection for its whole run, and pgxpool.Close waits for
+// every acquired connection to be released, so closing a manager first blocked
+// the agent on shutdown until SIGKILL. stop is sync.Once, so the deferred sweep
+// in runAgentCommand is a no-op after this.
 func closeTargets(ashStops []func(), managers []*agent.Manager) {
 	for _, stop := range ashStops {
 		stop()
@@ -405,12 +357,18 @@ func hostWireResult(s host.Sample, now time.Time) wire.Result {
 	return r
 }
 
-func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mutex, pending map[string][]wire.Result, lastEdgeState map[string]edgeState, ashEnabled map[string]bool, scheduledDBs map[string]map[string]bool, pusher *agent.Pusher) {
+func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mutex, pending map[string][]wire.Result, lastEdgeState *edgeStates, ashEnabled map[string]bool, scheduledDBs map[string]map[string]bool, pusher *agent.Pusher) {
 	mu.Lock()
 	batch := make(map[string][]wire.Result, len(pending))
 	for k, v := range pending {
 		batch[k] = v
 		delete(pending, k)
+	}
+	// The schedule set replaces each target's map under mu rather than editing
+	// it, so this shallow copy is a stable view for the whole flush.
+	scheduled := make(map[string]map[string]bool, len(scheduledDBs))
+	for k, v := range scheduledDBs {
+		scheduled[k] = v
 	}
 	mu.Unlock()
 
@@ -445,23 +403,9 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 		// Shared() can wait for a pool connection, so bound every target's
 		// refresh/discovery cycle independently of the agent lifetime.
 		targetCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		if err := mgr.RefreshCapabilities(targetCtx); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: refresh capabilities for %s: %v\n", mgr.Database(), err)
-		}
-		exts := map[string]bool{}
-		for _, name := range []string{"pg_stat_statements"} {
-			exts[name] = mgr.HasExtension(name) //nolint:contextcheck // Manager refreshes this before each envelope; accessor takes no context
-		}
-		// Discover was never being called again after startup, so
-		// wire.Instance.Databases (and therefore the server's `databases`
-		// table / db_budget skip_reason reporting) stayed permanently
-		// empty on every real push — nothing had ever exercised this path
-		// end to end before SYS-DB-001 (test/scenario/db.go).
-		dbs, err := mgr.Discover(targetCtx)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: discover databases for %s: %v\n", mgr.Database(), err)
-		}
-		dbs = reportScheduled(dbs, scheduledDBs[mgr.Database()])
+		// The role refresh runs first. An unreachable target then costs this one
+		// timeout, instead of its capability refresh and extension check waiting
+		// out their own timeouts before the role refresh reports it.
 		// Role() alone would report a permanently stale, cached-at-connect
 		// value — see RefreshRole's own doc comment for why this matters
 		// (SYS-REPL-001). A RefreshRole failure means this target could not
@@ -480,9 +424,31 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 		if err := mgr.RefreshRole(targetCtx); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: refresh role for %s: %v (target unreachable this cycle, omitting from envelope)\n", mgr.Database(), err)
 			cancel()
+			// A skip is queued once, when the schedule is built, and no later cycle
+			// queues it again. Keep it for the first cycle that reaches the target.
+			// The other results are the errors of a cycle with no live signal, and
+			// they are dropped as before.
+			requeueSkips(mu, pending, mgr.Database(), results)
 			continue
 		}
-		edges := buildTopologyEdges(mgr, results, lastEdgeState) //nolint:contextcheck // buildTopologyEdges->InstanceID: Manager caches this at connect time; the accessor takes no context
+		if err := mgr.RefreshCapabilities(targetCtx); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: refresh capabilities for %s: %v\n", mgr.Database(), err)
+		}
+		exts := map[string]bool{}
+		for _, name := range []string{"pg_stat_statements"} {
+			exts[name] = mgr.HasExtension(name) //nolint:contextcheck // Manager refreshes this before each envelope; accessor takes no context
+		}
+		// Discover was never being called again after startup, so
+		// wire.Instance.Databases (and therefore the server's `databases`
+		// table / db_budget skip_reason reporting) stayed permanently
+		// empty on every real push — nothing had ever exercised this path
+		// end to end before SYS-DB-001 (test/scenario/db.go).
+		dbs, err := mgr.Discover(targetCtx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: discover databases for %s: %v\n", mgr.Database(), err)
+		}
+		dbs = reportScheduled(dbs, scheduled[mgr.Database()])
+		edges := lastEdgeState.build(mgr.Database(), mgr.InstanceID().String(), mgr.Role(), results) //nolint:contextcheck // InstanceID and Role: Manager caches these at connect time; the accessors take no context
 		// Appended after the edges are built so the synthetic result cannot
 		// influence topology derivation.
 		results = append(results, selfResult)
@@ -506,6 +472,33 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 	pusher.Queue(env)
 }
 
+// requeueSkips puts back the skip results of a batch that could not be sent, so
+// the next cycle that reaches target sends them. A skip that pending already
+// holds for the same check is newer than the batch's, so it is kept instead.
+//
+// A batch taken before a rebuild can still carry skips of the schedule the
+// rebuild replaced, and they are put back here. The server clears a skip only
+// on an error-free result for its check (internal/server/pipeline.go), so such a
+// skip stays until that check next succeeds. A check that keeps failing keeps
+// the skip for as long as it fails.
+func requeueSkips(mu *sync.Mutex, pending map[string][]wire.Result, target string, batch []wire.Result) {
+	mu.Lock()
+	defer mu.Unlock()
+	queued := map[string]bool{}
+	for _, r := range pending[target] {
+		if r.SkipReason != "" {
+			queued[r.Check] = true
+		}
+	}
+	for _, r := range batch {
+		if r.SkipReason == "" || queued[r.Check] {
+			continue
+		}
+		queued[r.Check] = true
+		pending[target] = append(pending[target], r)
+	}
+}
+
 // edgeState is the last actually-observed replication_receiver reading for
 // one target, persisted across push cycles in lastEdgeState. host is sticky
 // (only overwritten by a non-empty reading) precisely because
@@ -519,10 +512,18 @@ type edgeState struct {
 	connected bool
 }
 
-// buildTopologyEdges derives this cycle's replication edge for a standby
-// target from the replication_receiver check's own result (sender_host,
-// status), which is the only place that data already exists — no extra
-// query. A currently-streaming/catching-up receiver is a high-confidence
+// edgeStates holds edgeState for every target. The push ticker and the
+// shutdown flush both build edges from it, and they can overlap, so the map is
+// only touched under mu.
+type edgeStates struct {
+	mu     sync.Mutex
+	byName map[string]edgeState
+}
+
+// build derives this cycle's replication edge for a standby target from the
+// replication_receiver check's own result (sender_host, status), which is the
+// only place that data already exists — no extra query. A
+// currently-streaming/catching-up receiver is a high-confidence
 // edge to its sender host; the server resolves that host to an instance_id
 // (internal/server/pipeline.go). Once disconnected, the edge becomes
 // low-confidence but keeps pointing at the last known host — required for
@@ -544,11 +545,20 @@ type edgeState struct {
 // version of this function replaced the whole struct wholesale on any
 // reading, including a genuine disconnect whose empty sender_host wiped out
 // the very host the low-confidence edge needs to point at.
-func buildTopologyEdges(mgr *agent.Manager, results []wire.Result, lastEdgeState map[string]edgeState) []wire.Edge {
-	name := mgr.Database() //nolint:contextcheck // Manager caches this at connect time; the accessor takes no context
-	from := mgr.InstanceID().String()
+func (e *edgeStates) build(name, from string, role pgtype.Role, results []wire.Result) []wire.Edge {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 
-	state := lastEdgeState[name] // zero value {"", false} if never seen before
+	// Only a standby has an upstream. A node promoted since its last reading
+	// would otherwise keep streaming from its old upstream in the remembered
+	// state and report an edge from the new primary to a dead node, so the
+	// state goes with the role.
+	if role != pgtype.RoleStandby {
+		delete(e.byName, name)
+		return nil
+	}
+
+	state := e.byName[name] // zero value {"", false} if never seen before
 	for _, r := range results {
 		if r.Check != "replication_receiver" {
 			continue
@@ -572,7 +582,7 @@ func buildTopologyEdges(mgr *agent.Manager, results []wire.Result, lastEdgeState
 			}
 		}
 	}
-	lastEdgeState[name] = state
+	e.byName[name] = state
 
 	if state.host == "" {
 		return nil
@@ -584,30 +594,51 @@ func buildTopologyEdges(mgr *agent.Manager, results []wire.Result, lastEdgeState
 	return []wire.Edge{{From: from, To: state.host, Port: state.port, Type: "streaming", Confidence: confidence}}
 }
 
-// waitForTarget blocks (up to 60s) until mgr's identity cache initializes
-// successfully, retrying every second. addScheduleEntries below reads
-// mgr.Role()/PGVersion()/PermTier()/HasExtension() exactly once, at startup,
-// to decide which checks ever get scheduled for this target's entire
-// lifetime — those accessors DO retry internally on a later call (their
-// underlying ensureCache doesn't latch a failure), but addScheduleEntries
-// itself never re-evaluates, so a target that isn't reachable yet at the
-// single moment addScheduleEntries runs would otherwise end up with zero
-// scheduled checks forever. This matters concretely: compose can't declare
-// a static `depends_on: pg` in agent-container.yml (it's shared by both the
-// standalone and primary-standby topologies, which name their PostgreSQL
-// services differently), so the agent routinely starts before its target
-// is ready to accept connections.
-func waitForTarget(ctx context.Context, mgr *agent.Manager) {
-	deadline := time.Now().Add(60 * time.Second)
+// targetReadyTimeout is how long startup waits for a target to become readable
+// before it moves on without it.
+const targetReadyTimeout = 60 * time.Second
+
+// waitForTargets waits for every target at once. Waited for one after another,
+// each unreachable target added its full window to startup, and a healthy target
+// behind them was not started until every one before it had run out. The
+// identity store the targets share is locked, so their first reads may run
+// concurrently.
+func waitForTargets(ctx context.Context, managers []*agent.Manager, timeout time.Duration) {
+	var wg sync.WaitGroup
+	for _, mgr := range managers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			waitForTarget(ctx, mgr, timeout)
+		}()
+	}
+	wg.Wait()
+}
+
+// waitForTarget blocks (up to timeout, or until ctx ends) until mgr's identity
+// cache initializes successfully, retrying every second. This matters
+// concretely: compose can't declare a static `depends_on: pg` in
+// agent-container.yml (it's shared by both the standalone and primary-standby
+// topologies, which name their PostgreSQL services differently), so the agent
+// routinely starts before its target is ready to accept connections. A target
+// still unreachable after the wait is not left without checks: scheduleSet
+// reads its role, version and databases again on every reconcile pass, and
+// rebuilds the schedule once it can read them.
+func waitForTarget(ctx context.Context, mgr *agent.Manager, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
 	for {
 		if mgr.PGVersion() != 0 { //nolint:contextcheck // Manager caches this at connect time; the accessor takes no context
 			return
 		}
 		if time.Now().After(deadline) {
-			fmt.Fprintf(os.Stderr, "warning: target %s not reachable after 60s, scheduling checks anyway\n", mgr.Database())
+			fmt.Fprintf(os.Stderr, "warning: target %s not reachable after %v, its checks are scheduled once it is\n", mgr.Database(), timeout)
 			return
 		}
-		time.Sleep(1 * time.Second)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(1 * time.Second):
+		}
 	}
 }
 
@@ -630,80 +661,36 @@ func configureChecks(cfg *agent.Config) {
 	}
 }
 
-// reportScheduled makes "monitored" mean what the agent collects. The
-// scheduler takes its database-scoped entries once, at startup, but every
-// envelope re-ran the selection: a database created later was reported as
-// monitored and never got a table, index, bloat or statement sample until
-// the agent restarted, while one pushed out of the budget later was reported
-// as skipped and still collected.
+// reportScheduled makes "monitored" mean what the agent collects. Every
+// envelope re-runs the database selection, but the schedule only takes the
+// databases it keeps, which scheduleSet reconciles every 30 seconds. A database
+// the budget monitors that is not scheduled is waiting for a free slot: it is
+// reported as discovered_after_start until the next reconcile fills one, or as
+// db_budget when the scheduled databases already hold every slot. A database
+// the budget has pushed out but the schedule still keeps is reported as
+// collected.
 func reportScheduled(dbs []wire.Database, scheduled map[string]bool) []wire.Database {
+	held, monitored := 0, 0
+	for _, db := range dbs {
+		if scheduled[db.Name] {
+			held++
+		}
+		if db.Monitored {
+			monitored++
+		}
+	}
+	full := held >= monitored
 	for i := range dbs {
 		switch {
 		case scheduled[dbs[i].Name]:
 			dbs[i].Monitored, dbs[i].SkipReason = true, ""
+		case dbs[i].Monitored && full:
+			dbs[i].Monitored, dbs[i].SkipReason = false, "db_budget"
 		case dbs[i].Monitored:
 			dbs[i].Monitored, dbs[i].SkipReason = false, "discovered_after_start"
 		}
 	}
 	return dbs
-}
-
-// addScheduleEntries returns the databases its database-scoped entries run
-// for.
-func addScheduleEntries(scheduler *agent.Scheduler, mgr *agent.Manager, ctx context.Context, cfg *agent.Config, mu *sync.Mutex, pending map[string][]wire.Result) map[string]bool {
-	role := mgr.Role()         //nolint:contextcheck // Manager caches this at connect time; the accessor takes no context
-	version := mgr.PGVersion() //nolint:contextcheck // same as above
-	tier := mgr.PermTier()     //nolint:contextcheck // same as above
-
-	dbs, err := mgr.Discover(ctx)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: discover databases for %s: %v\n", mgr.Database(), err)
-	}
-	// pg_stat_statements counts as present when any monitored database has
-	// the view, not only the maintenance database: the check reads the
-	// others through it.
-	locateCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	exts := map[string]bool{"pg_stat_statements": mgr.LocateStatements(locateCtx, dbs)}
-	cancel()
-	scheduled := map[string]bool{}
-	for _, db := range dbs {
-		if db.Monitored {
-			scheduled[db.Name] = true
-		}
-	}
-
-	for _, c := range check.All() {
-		interval := cfg.GetCheckInterval(c.Name())
-		if c.Name() == "ash" {
-			// Driven by a dedicated sampler+aggregator (startASH, ash.go),
-			// not the scheduler's once-per-interval Scrape() model — a
-			// continuously-running 1-second loop doesn't fit that shape.
-			// The registered check itself stays for its own unit tests, but
-			// must never actually be scheduled, or its own superficial
-			// count-only scrape would double-report under the same "ash"
-			// check name.
-			continue
-		}
-		req := c.Requires()
-		if ok, reason := req.Supports(role, version, tier, exts); !ok {
-			mu.Lock()
-			pending[mgr.Database()] = append(pending[mgr.Database()], wire.Result{
-				Check: c.Name(), TS: time.Now().UTC(), SkipReason: reason,
-			})
-			mu.Unlock()
-			continue
-		}
-		if req.Scope == check.ScopeDatabase {
-			for _, db := range dbs {
-				if db.Monitored {
-					scheduler.AddEntryWithInterval(mgr, c, db.Name, interval)
-				}
-			}
-			continue
-		}
-		scheduler.AddEntryWithInterval(mgr, c, "", interval)
-	}
-	return scheduled
 }
 
 // connOptionsFromConfig maps a target's databases block and cluster_name onto

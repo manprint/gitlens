@@ -507,7 +507,12 @@ func (m *Manager) ensureCache(ctx context.Context) error {
 	// on every scrape/command, so a DBA grant takes effect without an agent
 	// restart. The cluster identity above is not re-read: it is decided once
 	// per process.
-	permTier, extensions := m.queryCapabilities(ctx, conn)
+	permTier, extensions, err := m.queryCapabilities(ctx, conn)
+	if err != nil {
+		// Nothing was read before this, so the conservative state stands in
+		// until RefreshCapabilities reads the grants again.
+		permTier, extensions = pgtype.TierReadOnly, map[string]bool{}
+	}
 
 	// A target is not usable without its identity: every envelope carries it.
 	if _, _, err := m.localIdentity(); err != nil {
@@ -555,10 +560,10 @@ func queryClusterIdentity(ctx context.Context, conn capabilityConn, fallbackName
 }
 
 // queryCapabilities reads the privileges and extensions relevant to checks
-// and commands. Errors are treated conservatively: T0 and an empty extension
-// set keep monitoring read-only instead of making an unavailable target look
-// more capable than it is.
-func (m *Manager) queryCapabilities(ctx context.Context, conn capabilityConn) (pgtype.PermTier, map[string]bool) {
+// and commands. A failed read returns its error and no partial answer. A tier
+// or extension set that is only incomplete would look like a change, so the
+// caller decides what to keep.
+func (m *Manager) queryCapabilities(ctx context.Context, conn capabilityConn) (pgtype.PermTier, map[string]bool, error) {
 	// pg_has_role asks whether the session can use the privilege, through
 	// group roles and with the membership's inherit option applied. A direct
 	// membership lookup missed a privilege inherited from a group role, and it
@@ -568,28 +573,38 @@ func (m *Manager) queryCapabilities(ctx context.Context, conn capabilityConn) (p
 	// monitoring role, and the deploy script refuses a superuser as one.
 	tier := pgtype.TierReadOnly
 	var hasReadAllData bool
-	if err := conn.QueryRow(ctx, `SELECT pg_catalog.pg_has_role('pg_read_all_data', 'USAGE') AND pg_catalog.current_setting('is_superuser') = 'off'`).Scan(&hasReadAllData); err == nil && hasReadAllData {
+	if err := conn.QueryRow(ctx, `SELECT pg_catalog.pg_has_role('pg_read_all_data', 'USAGE') AND pg_catalog.current_setting('is_superuser') = 'off'`).Scan(&hasReadAllData); err != nil {
+		return pgtype.TierReadOnly, nil, fmt.Errorf("query pg_read_all_data membership: %w", err)
+	}
+	if hasReadAllData {
 		tier = pgtype.TierExplain
 	}
 
 	var hasSignalBackend bool
-	if err := conn.QueryRow(ctx, `SELECT pg_catalog.pg_has_role('pg_signal_backend', 'USAGE') AND pg_catalog.current_setting('is_superuser') = 'off'`).Scan(&hasSignalBackend); err == nil && hasSignalBackend {
+	if err := conn.QueryRow(ctx, `SELECT pg_catalog.pg_has_role('pg_signal_backend', 'USAGE') AND pg_catalog.current_setting('is_superuser') = 'off'`).Scan(&hasSignalBackend); err != nil {
+		return pgtype.TierReadOnly, nil, fmt.Errorf("query pg_signal_backend membership: %w", err)
+	}
+	if hasSignalBackend {
 		tier = pgtype.TierSignal
 	}
 
 	exts := make(map[string]bool)
 	rows, err := conn.Query(ctx, "SELECT extname FROM pg_extension")
 	if err != nil {
-		return tier, exts
+		return pgtype.TierReadOnly, nil, fmt.Errorf("query extensions: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var name string
-		if err := rows.Scan(&name); err == nil {
-			exts[name] = true
+		if err := rows.Scan(&name); err != nil {
+			return pgtype.TierReadOnly, nil, fmt.Errorf("scan extension: %w", err)
 		}
+		exts[name] = true
 	}
-	return tier, exts
+	if err := rows.Err(); err != nil {
+		return pgtype.TierReadOnly, nil, fmt.Errorf("read extensions: %w", err)
+	}
+	return tier, exts, nil
 }
 
 // RefreshCapabilities re-reads privilege membership and installed
@@ -605,7 +620,18 @@ func (m *Manager) RefreshCapabilities(ctx context.Context) error {
 		return err
 	}
 	defer conn.Release()
-	tier, extensions := m.queryCapabilities(ctx, conn)
+	return m.refreshCapabilities(ctx, conn)
+}
+
+// refreshCapabilities replaces the cached tier and extensions with what conn
+// reads now. A failed read leaves the last snapshot in place. A transient error
+// must not drop the tier to read-only, because the schedule rebuilds on a change
+// to it, and the command dispatcher refuses a command whose refresh failed.
+func (m *Manager) refreshCapabilities(ctx context.Context, conn capabilityConn) error {
+	tier, extensions, err := m.queryCapabilities(ctx, conn)
+	if err != nil {
+		return fmt.Errorf("refresh capabilities: %w", err)
+	}
 	m.target.cache.mu.Lock()
 	m.target.cache.permTier = tier
 	m.target.cache.extensions = extensions
@@ -874,8 +900,13 @@ const statementsInstalled = `SELECT EXISTS (SELECT 1 FROM pg_extension WHERE ext
 // database that does. Scheduling used to look at the maintenance database
 // alone, so an extension created only in an application database left the
 // check disabled and every statement unseen.
-func (m *Manager) LocateStatements(ctx context.Context, dbs []wire.Database) bool {
+//
+// A database that cannot be checked may hold the view, so when none is found
+// and one could not be checked, the error reports that the absence is not
+// known. The choice of database is then left as it was too.
+func (m *Manager) LocateStatements(ctx context.Context, dbs []wire.Database) (bool, error) {
 	found, where := m.HasExtension("pg_stat_statements"), "" //nolint:contextcheck // reads the capability cache, which bounds its own refresh
+	var unchecked error
 	for _, db := range dbs {
 		if found {
 			break
@@ -885,19 +916,29 @@ func (m *Manager) LocateStatements(ctx context.Context, dbs []wire.Database) boo
 		}
 		conn, err := m.ForDatabase(ctx, db.Name)
 		if err != nil {
+			unchecked = fmt.Errorf("check %s for pg_stat_statements: %w", db.Name, err)
 			continue
 		}
 		var installed bool
 		err = conn.QueryRow(ctx, statementsInstalled).Scan(&installed)
 		conn.Release()
-		if err == nil && installed {
+		if err != nil {
+			unchecked = fmt.Errorf("check %s for pg_stat_statements: %w", db.Name, err)
+			continue
+		}
+		if installed {
 			found, where = true, db.Name
 		}
 	}
-	m.mu.Lock()
-	m.statementsDB = where
-	m.mu.Unlock()
-	return found
+	if found || unchecked == nil {
+		m.mu.Lock()
+		m.statementsDB = where
+		m.mu.Unlock()
+	}
+	if found {
+		return true, nil
+	}
+	return false, unchecked
 }
 
 // StatementsDatabase implements check.StatementsSource.

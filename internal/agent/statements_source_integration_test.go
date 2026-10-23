@@ -39,11 +39,15 @@ func TestINTCONN008_StatementsViewOutsideTheMaintenanceDatabase(t *testing.T) {
 		defer mgr.Close()
 		require.False(t, mgr.HasExtension("pg_stat_statements"))
 
-		require.False(t, mgr.LocateStatements(ctx, []wire.Database{{Name: maintDB, Monitored: true}}))
+		found, err := mgr.LocateStatements(ctx, []wire.Database{{Name: maintDB, Monitored: true}})
+		require.NoError(t, err)
+		require.False(t, found)
 		require.Empty(t, mgr.StatementsDatabase())
 
 		dbs := []wire.Database{{Name: maintDB, Monitored: true}, {Name: appDB, Monitored: true}}
-		require.True(t, mgr.LocateStatements(ctx, dbs))
+		found, err = mgr.LocateStatements(ctx, dbs)
+		require.NoError(t, err)
+		require.True(t, found)
 		require.Equal(t, appDB, mgr.StatementsDatabase())
 
 		var statements check.Check

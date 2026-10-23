@@ -1,17 +1,61 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/manprint/pglens/internal/agent"
+	"github.com/manprint/pglens/internal/agent/buffer"
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/host"
 	"github.com/manprint/pglens/internal/wire"
 )
+
+// unreachableManager is a target whose server refuses every connection, so a
+// readiness wait on it runs until its window ends.
+func unreachableManager(t *testing.T, name string) *agent.Manager {
+	t.Helper()
+	dsn := "postgres://pglens@127.0.0.1:1/postgres?sslmode=disable"
+	mgr, err := agent.NewManager(context.Background(), name, dsn, agent.DefaultConnOptions(), clock.System())
+	require.NoError(t, err)
+	t.Cleanup(mgr.Close)
+	return mgr
+}
+
+// TestWaitForTargets_UnreachableTargetsWaitTogether: three targets that never
+// become readable take one readiness window, not one window each. Waited for in
+// turn, a 1s window takes at least 3s.
+func TestWaitForTargets_UnreachableTargetsWaitTogether(t *testing.T) {
+	managers := []*agent.Manager{
+		unreachableManager(t, "down-a"),
+		unreachableManager(t, "down-b"),
+		unreachableManager(t, "down-c"),
+	}
+
+	start := time.Now()
+	waitForTargets(context.Background(), managers, time.Second)
+
+	require.Less(t, time.Since(start), 2*time.Second)
+}
+
+// TestWaitForTarget_EndsWhenContextIsCancelled: a wait ends as soon as its
+// context is cancelled, rather than running out its whole window.
+func TestWaitForTarget_EndsWhenContextIsCancelled(t *testing.T) {
+	mgr := unreachableManager(t, "down")
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(50*time.Millisecond, cancel)
+
+	start := time.Now()
+	waitForTarget(ctx, mgr, 30*time.Second)
+
+	require.Less(t, time.Since(start), 5*time.Second)
+}
 
 // TestAgentSelfResult_ShipsTheBufferDropRate — pglens_samples_dropped_rate is
 // the metric the agent_buffer_full Tier 0 rule compares, and before this
@@ -86,22 +130,130 @@ func TestCheckDatabaseSummary_AppliesTheAgentSelection(t *testing.T) {
 		formatDatabaseSummary(1, agent.SelectDatabases(candidates[1:2], agent.DefaultConnOptions())))
 }
 
-// TestReportScheduled_MonitoredMeansCollected — the selection re-runs every
-// envelope, the schedule does not: a database created after startup is not
-// collected, and one pushed out of the budget after startup still is.
+// TestReportScheduled_MonitoredMeansCollected: the selection re-runs every
+// envelope, the schedule keeps only the databases it holds. A database the
+// budget monitors waits for a free slot: it is reported as skipped until the
+// next reconcile fills one, or as db_budget while the held databases take every
+// slot. A database the budget has pushed out but the schedule still holds is
+// collected.
 func TestReportScheduled_MonitoredMeansCollected(t *testing.T) {
-	scheduled := map[string]bool{"app": true, "old": true}
-	got := reportScheduled([]wire.Database{
-		{Name: "app", Monitored: true},
-		{Name: "created_later", Monitored: true},
-		{Name: "old", Monitored: false, SkipReason: "db_budget"},
-		{Name: "never", Monitored: false, SkipReason: "db_budget"},
-	}, scheduled)
+	discovered := func() []wire.Database {
+		return []wire.Database{
+			{Name: "app", Monitored: true},
+			{Name: "created_later", Monitored: true},
+			{Name: "old", Monitored: false, SkipReason: "db_budget"},
+			{Name: "never", Monitored: false, SkipReason: "db_budget"},
+		}
+	}
+	tests := []struct {
+		name      string
+		scheduled map[string]bool
+		want      []wire.Database
+	}{
+		{
+			name:      "a free slot is filled by the next reconcile",
+			scheduled: map[string]bool{"app": true},
+			want: []wire.Database{
+				{Name: "app", Monitored: true},
+				{Name: "created_later", Monitored: false, SkipReason: "discovered_after_start"},
+				{Name: "old", Monitored: false, SkipReason: "db_budget"},
+				{Name: "never", Monitored: false, SkipReason: "db_budget"},
+			},
+		},
+		{
+			name:      "the held databases take every slot",
+			scheduled: map[string]bool{"app": true, "old": true},
+			want: []wire.Database{
+				{Name: "app", Monitored: true},
+				{Name: "created_later", Monitored: false, SkipReason: "db_budget"},
+				{Name: "old", Monitored: true},
+				{Name: "never", Monitored: false, SkipReason: "db_budget"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, reportScheduled(discovered(), tt.scheduled))
+		})
+	}
+}
 
-	require.Equal(t, []wire.Database{
-		{Name: "app", Monitored: true},
-		{Name: "created_later", Monitored: false, SkipReason: "discovered_after_start"},
-		{Name: "old", Monitored: true},
-		{Name: "never", Monitored: false, SkipReason: "db_budget"},
-	}, got)
+// TestFlushEnvelopeBoundsAnUnreachableTarget: a flush must not hold an
+// unreachable target for longer than its refresh timeout. The shutdown flush
+// runs under the stop grace of the container runtime, which is 10s by default,
+// so a hung target that also waited out the capability refresh and the
+// extension check would outlast it.
+func TestFlushEnvelopeBoundsAnUnreachableTarget(t *testing.T) {
+	t.Setenv("PGLENS_IDENTITY_PATH", filepath.Join(t.TempDir(), "identity.json"))
+	target := newHungTarget(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr, err := agent.NewManager(ctx, "hung", target.dsn, agent.DefaultConnOptions(), clock.System())
+	require.NoError(t, err)
+	t.Cleanup(mgr.Close)
+
+	buf, err := buffer.Open(filepath.Join(t.TempDir(), "buffer"), buffer.Options{MaxSize: 1 << 20, MaxAge: time.Hour, Clock: clock.System()})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = buf.Close() })
+	pusher := agent.NewPusher("http://127.0.0.1:1/", "token", clock.System())
+	pusher.SetBuffer(buf)
+
+	var mu sync.Mutex
+	pending := map[string][]wire.Result{"hung": {{Check: "probe", TS: time.Now()}}}
+	began := time.Now()
+	flushEnvelope(ctx, []*agent.Manager{mgr}, &mu, pending, &edgeStates{byName: map[string]edgeState{}}, map[string]bool{}, map[string]map[string]bool{}, pusher)
+	require.Less(t, time.Since(began), 10*time.Second, "a flush waited longer than the stop grace for one unreachable target")
+}
+
+// TestFlushEnvelopeKeepsTheSkipsOfAnUnreachableTarget: a skip is queued once,
+// when the schedule is built, so a flush that cannot reach its target must put
+// it back rather than drop it. Otherwise the server never learns that the check
+// was skipped.
+func TestFlushEnvelopeKeepsTheSkipsOfAnUnreachableTarget(t *testing.T) {
+	t.Setenv("PGLENS_IDENTITY_PATH", filepath.Join(t.TempDir(), "identity.json"))
+	target := newHungTarget(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr, err := agent.NewManager(ctx, "hung", target.dsn, agent.DefaultConnOptions(), clock.System())
+	require.NoError(t, err)
+	t.Cleanup(mgr.Close)
+
+	buf, err := buffer.Open(filepath.Join(t.TempDir(), "buffer"), buffer.Options{MaxSize: 1 << 20, MaxAge: time.Hour, Clock: clock.System()})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = buf.Close() })
+	pusher := agent.NewPusher("http://127.0.0.1:1/", "token", clock.System())
+	pusher.SetBuffer(buf)
+
+	var mu sync.Mutex
+	pending := map[string][]wire.Result{"hung": {
+		{Check: "replication_streaming", TS: time.Now(), SkipReason: "role unknown not allowed"},
+		{Check: "probe", TS: time.Now(), Error: "dial timeout"},
+	}}
+	flushEnvelope(ctx, []*agent.Manager{mgr}, &mu, pending, &edgeStates{byName: map[string]edgeState{}}, map[string]bool{}, map[string]map[string]bool{}, pusher)
+
+	require.Len(t, pending["hung"], 1, "only the skip is kept; the error of this cycle is dropped")
+	require.Equal(t, "replication_streaming", pending["hung"][0].Check)
+	require.Equal(t, "role unknown not allowed", pending["hung"][0].SkipReason)
+}
+
+// TestRequeueSkips_KeepsTheNewerSkipPerCheck: a dead target's pending batch
+// stays bounded. A skip that pending already holds for a check is newer than the
+// one in the batch, and a check is kept once however many times it was skipped.
+func TestRequeueSkips_KeepsTheNewerSkipPerCheck(t *testing.T) {
+	var mu sync.Mutex
+	pending := map[string][]wire.Result{"hung": {
+		{Check: "replication_streaming", SkipReason: "role primary not allowed"},
+	}}
+	batch := []wire.Result{
+		{Check: "replication_streaming", SkipReason: "role unknown not allowed"},
+		{Check: "io", SkipReason: "requires PG >= 16.0, got 0.0"},
+		{Check: "io", SkipReason: "requires PG >= 16.0, got 0.0"},
+		{Check: "probe", Error: "dial timeout"},
+	}
+	requeueSkips(&mu, pending, "hung", batch)
+
+	require.Equal(t, []wire.Result{
+		{Check: "replication_streaming", SkipReason: "role primary not allowed"},
+		{Check: "io", SkipReason: "requires PG >= 16.0, got 0.0"},
+	}, pending["hung"])
 }

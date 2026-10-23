@@ -216,19 +216,15 @@ func shutdownServer(srv *http.Server, cancelRequests context.CancelFunc, budget 
 
 // runHealthcheck is invoked as `pglens-server --healthcheck` from the
 // container's own HEALTHCHECK directive. It reads PGLENS_LISTEN the same way
-// main() does, so it always checks the port the running server actually
+// main() does, so it always checks the address the running server actually
 // bound, even if PGLENS_LISTEN is overridden from the default.
 func runHealthcheck() int {
 	listen := os.Getenv("PGLENS_LISTEN")
 	if listen == "" {
 		listen = ":8080"
 	}
-	port := listen
-	if i := lastColon(listen); i >= 0 {
-		port = listen[i+1:]
-	}
 	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%s/readyz", port))
+	resp, err := client.Get(healthcheckURL(listen, "/readyz"))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "healthcheck:", err)
 		return 1
@@ -241,11 +237,23 @@ func runHealthcheck() int {
 	return 0
 }
 
-func lastColon(s string) int {
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == ':' {
-			return i
-		}
+// healthcheckURL is the URL the --healthcheck probe requests for path on the
+// address the process listens on. A specific host is probed as it is, because
+// a bind to one address does not accept on loopback. Only an unspecified host
+// (empty, 0.0.0.0 or ::) falls back to 127.0.0.1, which such a bind accepts on.
+//
+// cmd/pglens-agent/main.go has the same function. TestHealthcheckURL in
+// cmd/pglens-agent/main_test.go and in this package's main_test.go check the
+// same cases, and the two binaries do not share a package, so the copies change
+// together.
+func healthcheckURL(listen, path string) string {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		// A bare port has no host part to keep.
+		host, port = "", listen
 	}
-	return -1
+	if host == "" || net.ParseIP(host).IsUnspecified() {
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port) + path
 }

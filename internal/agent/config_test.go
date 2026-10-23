@@ -293,6 +293,63 @@ checks:
 `,
 			errMsg: "max",
 		},
+		{
+			name: "duplicate_target_name",
+			yaml: `
+server:
+  url: http://localhost:8080
+  token: test-token
+identity_path: /var/lib/pglens/identity.json
+buffer:
+  path: /var/lib/pglens/buffer
+targets:
+  - name: pg-app
+    dsn: postgres://pglens@localhost:5432/postgres
+  - name: pg-app
+    dsn: postgres://pglens@localhost:5433/postgres
+checks:
+  activity: {}
+`,
+			errMsg: "duplicates",
+		},
+		{
+			// A push interval that is not positive has no ticker: the agent
+			// would panic at start rather than refuse the config.
+			name: "zero_push_interval",
+			yaml: `
+server:
+  url: http://localhost:8080
+  token: test-token
+identity_path: /var/lib/pglens/identity.json
+push_interval: 0s
+buffer:
+  path: /var/lib/pglens/buffer
+targets:
+  - name: pg-app
+    dsn: postgres://pglens@localhost:5432/postgres
+checks:
+  activity: {}
+`,
+			errMsg: "push_interval",
+		},
+		{
+			name: "negative_push_interval",
+			yaml: `
+server:
+  url: http://localhost:8080
+  token: test-token
+identity_path: /var/lib/pglens/identity.json
+push_interval: -5s
+buffer:
+  path: /var/lib/pglens/buffer
+targets:
+  - name: pg-app
+    dsn: postgres://pglens@localhost:5432/postgres
+checks:
+  activity: {}
+`,
+			errMsg: "push_interval",
+		},
 	}
 
 	for _, tt := range tests {
