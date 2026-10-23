@@ -28,8 +28,9 @@
 
 \if :{?pglens_password}
 \else
-\echo 'pglens_password is required (use psql -v pglens_password=...)' >&2
-\quit 3
+-- The quit meta-command takes no exit status, so the refusal is an error that
+-- ON_ERROR_STOP turns into exit 3, before anything below runs.
+DO $$ BEGIN RAISE EXCEPTION 'pglens_password is required (use psql -v pglens_password=...)'; END $$;
 \endif
 \if :{?dbname}
 \else
