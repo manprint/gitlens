@@ -164,8 +164,8 @@ func TestInventory_MockPool_ExistingInstance_RoleChange(t *testing.T) {
 	cidDB := store.ToDB(cid)
 	pool := &mockPool{
 		queryRowVals: []*mockRow{
-			{vals: []any{"manual"}},         // upsertCluster: existing row, same source
 			{vals: []any{cidDB, "primary"}}, // upsertOne: existing instance, was primary
+			{vals: []any{"manual"}},         // upsertCluster: existing row, same source
 		},
 	}
 	inv := &Inventory{pool: pool}
@@ -190,7 +190,6 @@ func TestInventory_MockPool_ClusterIDChanged_Rejected(t *testing.T) {
 	otherCID := int64(999999)
 	pool := &mockPool{
 		queryRowVals: []*mockRow{
-			nil,                                // upsertCluster: no existing row -> insert
 			{vals: []any{otherCID, "primary"}}, // upsertOne: existing instance has a DIFFERENT cluster_id
 		},
 	}
@@ -208,6 +207,8 @@ func TestInventory_MockPool_ClusterIDChanged_Rejected(t *testing.T) {
 	require.Equal(t, 0, res.Accepted)
 	require.Equal(t, 1, res.Rejected)
 	require.Contains(t, res.Errors[instID].Error(), "cluster_id_changed")
+	// Only the event: the attempted cluster is neither created nor touched.
+	require.Equal(t, 1, pool.execCalls)
 }
 
 func TestInventory_MockPool_DuplicateInstanceSuspected(t *testing.T) {
@@ -285,8 +286,8 @@ func TestInventory_MockPool_IdentityConflict_ManualLosesToSystemIdentifier(t *te
 	cid := pgtype.ClusterID(31337)
 	pool := &mockPool{
 		queryRowVals: []*mockRow{
-			{vals: []any{"system_identifier"}}, // existing row was identifier-sourced
 			nil,                                // upsertOne: new instance
+			{vals: []any{"system_identifier"}}, // upsertCluster: existing row was identifier-sourced
 		},
 	}
 	inv := &Inventory{pool: pool}

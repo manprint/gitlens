@@ -182,32 +182,36 @@ func (inv *Inventory) upsertOne(ctx context.Context, tenantID string, agentID uu
 		role = "unknown"
 	}
 
-	// 1. Upsert cluster row (must precede instance FK).
-	if err := inv.upsertCluster(ctx, tenantID, cidDB, inst.ClusterID, inst.ClusterIDSource, instUUID); err != nil {
-		return err
-	}
-
-	// 2. Check existing instance for I-1 immutability and role changes.
+	// 1. Look up the instance before anything is written for it. A push that
+	// names another cluster than the instance's own is refused before that
+	// cluster is created or its identity source is changed, so the refused push
+	// leaves nothing behind in clusters.
 	var existingCID int64
 	var existingRole string
 	err = inv.pool.QueryRow(ctx, `SELECT cluster_id, role FROM instances WHERE instance_id=$1`, instUUID).Scan(&existingCID, &existingRole)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("lookup instance %s: %w", instUUID, err)
 	}
-	if err == nil {
-		// Existing instance – enforce cluster_id immutability (I-1).
-		if existingCID != cidDB {
-			payload := map[string]any{
-				"instance_id":          inst.InstanceID,
-				"existing_cluster_id":  pgtype.ClusterID(uint64(existingCID)).String(),
-				"attempted_cluster_id": inst.ClusterID,
-			}
-			if emitErr := inv.emitEvent(ctx, tenantID, time.Now().UTC(), "cluster_id_changed", &existingCID, &instUUID, payload); emitErr != nil {
-				return fmt.Errorf("emit cluster_id_changed: %w", emitErr)
-			}
-			return instanceRejected{fmt.Errorf("cluster_id_changed for instance %s: existing %s attempted %s", inst.InstanceID, pgtype.ClusterID(uint64(existingCID)).String(), inst.ClusterID)}
+	// Existing instance – enforce cluster_id immutability (I-1).
+	if err == nil && existingCID != cidDB {
+		payload := map[string]any{
+			"instance_id":          inst.InstanceID,
+			"existing_cluster_id":  pgtype.ClusterID(uint64(existingCID)).String(),
+			"attempted_cluster_id": inst.ClusterID,
 		}
-		// Role change detection – only primary<->standby transitions.
+		if emitErr := inv.emitRepeatable(ctx, tenantID, "cluster_id_changed", existingCID, instUUID, payload, "attempted_cluster_id", inst.ClusterID); emitErr != nil {
+			return fmt.Errorf("emit cluster_id_changed: %w", emitErr)
+		}
+		return instanceRejected{fmt.Errorf("cluster_id_changed for instance %s: existing %s attempted %s", inst.InstanceID, pgtype.ClusterID(uint64(existingCID)).String(), inst.ClusterID)}
+	}
+
+	// 2. Upsert cluster row (must precede instance FK).
+	if err := inv.upsertCluster(ctx, tenantID, cidDB, inst.ClusterID, inst.ClusterIDSource, instUUID); err != nil {
+		return err
+	}
+
+	if err == nil {
+		// Existing instance: role change detection – only primary<->standby transitions.
 		if (existingRole == "primary" && role == "standby") || (existingRole == "standby" && role == "primary") {
 			payload := map[string]any{
 				"instance_id": inst.InstanceID,
@@ -288,7 +292,7 @@ func (inv *Inventory) upsertCluster(ctx context.Context, tenantID string, cidDB 
 			"attempted_source": source,
 			"instance_id":      instID.String(),
 		}
-		if emitErr := inv.emitEvent(ctx, tenantID, time.Now().UTC(), "cluster_identity_conflict", &cidDB, &instID, payload); emitErr != nil {
+		if emitErr := inv.emitRepeatable(ctx, tenantID, "cluster_identity_conflict", cidDB, instID, payload, "attempted_source", source); emitErr != nil {
 			return fmt.Errorf("emit cluster_identity_conflict: %w", emitErr)
 		}
 		// Keep existing row.
@@ -339,6 +343,36 @@ func (inv *Inventory) checkDuplicateInstance(ctx context.Context, tenantID strin
 		if emitErr := inv.emitEvent(ctx, tenantID, time.Now().UTC(), "duplicate_instance_suspected", &cidDB, &newID, payload); emitErr != nil {
 			return fmt.Errorf("emit duplicate_instance_suspected: %w", emitErr)
 		}
+	}
+	return nil
+}
+
+// repeatedEventWindow bounds how often an event that a push repeats is written
+// again for the same instance. A misidentified agent pushes every few seconds,
+// and the same event on every push says nothing new; a mismatch that stands is
+// still reported once a day.
+const repeatedEventWindow = 24 * time.Hour
+
+// emitRepeatable writes an event for a refusal that the same instance keeps
+// sending, unless the instance already has an event of this type for the same
+// attempted value (payload[attemptedKey]) inside repeatedEventWindow. The check
+// and the insert are one statement, so two replicas taking the same push at
+// once do not both write it.
+func (inv *Inventory) emitRepeatable(ctx context.Context, tenantID, typ string, clusterID int64, instanceID uuid.UUID, payload map[string]any, attemptedKey, attempted string) error {
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal event payload: %w", err)
+	}
+	ts := time.Now().UTC()
+	if _, execErr := inv.pool.Exec(ctx,
+		`INSERT INTO events (tenant_id, ts, type, cluster_id, instance_id, payload)
+		 SELECT $1::text, $2::timestamptz, $3::text, $4::bigint, $5::uuid, $6::jsonb
+		 WHERE NOT EXISTS (
+		   SELECT 1 FROM events
+		   WHERE tenant_id=$1::text AND cluster_id=$4::bigint AND type=$3::text AND instance_id=$5::uuid
+		     AND ts > $7::timestamptz AND payload->>$8::text = $9::text)`,
+		tenantID, ts, typ, clusterID, instanceID, string(payloadJSON), ts.Add(-repeatedEventWindow), attemptedKey, attempted); execErr != nil {
+		return fmt.Errorf("insert event %s: %w", typ, execErr)
 	}
 	return nil
 }

@@ -269,6 +269,40 @@ func TestInventory_ClusterIDChanged_EmitsEvent(t *testing.T) {
 	require.Equal(t, int64(pgtype.ClusterID(44444)), storedCID)
 }
 
+// TestInventory_ClusterIDChanged_LeavesNoClusterAndRepeatsOncePerDay: a push
+// that names another cluster than the instance's own creates no cluster row for
+// it, and the same mismatch pushed again writes its event once, not on every
+// push.
+func TestInventory_ClusterIDChanged_LeavesNoClusterAndRepeatsOncePerDay(t *testing.T) {
+	pool := getTestPool(t)
+	truncateAll(t, pool)
+	inv := NewInventory(pool)
+	ctx := context.Background()
+	iid := uuid.NewString()
+	cid1 := pgtype.ClusterID(66666)
+	cid2 := pgtype.ClusterID(77777)
+	push := func(cid pgtype.ClusterID) *UpsertResult {
+		res, err := inv.Upsert(ctx, wire.Envelope{
+			AgentID: uuid.NewString(),
+			Instances: []wire.Instance{
+				{InstanceID: iid, ClusterID: cid.String(), ClusterIDSource: string(pgtype.IDSourceManual), Addr: "10.0.0.7", Port: 5432, Role: "primary", PGVersion: 170000, PermTier: "T0"},
+			},
+		})
+		require.NoError(t, err)
+		return res
+	}
+	require.Equal(t, 1, push(cid1).Accepted)
+	for range 3 {
+		require.Equal(t, 1, push(cid2).Rejected)
+	}
+	var events int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='cluster_id_changed' AND instance_id=$1`, uuid.MustParse(iid)).Scan(&events))
+	require.Equal(t, 1, events, "a push that repeats the same mismatch writes its event once")
+	var phantom int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM clusters WHERE cluster_id=$1`, int64(cid2)).Scan(&phantom))
+	require.Zero(t, phantom, "a refused push must not create the cluster it names")
+}
+
 func TestInventory_RoleChange_EmitsEvent(t *testing.T) {
 	pool := getTestPool(t)
 	truncateAll(t, pool)
