@@ -53,6 +53,9 @@ func (c *indexStatsCheck) Scrape(ctx context.Context, t Target) (Result, error) 
 	if err := ApplySessionLimits(ctx, conn, c.Timeout()); err != nil {
 		return Result{}, err
 	}
+	// pg_stat_user_indexes lists the indexes of every session's temporary tables
+	// under their pg_temp_N schemas. They are gone with their session, so they
+	// are left out, as table_stats leaves its temporary tables out.
 	rows, err := conn.Query(ctx, `
 SELECT s.schemaname, s.relname, s.indexrelname,
        COALESCE(s.idx_scan,0), COALESCE(s.idx_tup_read,0), COALESCE(s.idx_tup_fetch,0),
@@ -62,7 +65,8 @@ SELECT s.schemaname, s.relname, s.indexrelname,
 FROM pg_stat_user_indexes s
 JOIN pg_index ix ON ix.indexrelid = s.indexrelid
 JOIN pg_class ic ON ic.oid = s.indexrelid
-LEFT JOIN pg_statio_user_indexes io ON io.indexrelid = s.indexrelid`)
+LEFT JOIN pg_statio_user_indexes io ON io.indexrelid = s.indexrelid
+WHERE ic.relpersistence <> 't'`)
 	if err != nil {
 		return Result{}, err
 	}
