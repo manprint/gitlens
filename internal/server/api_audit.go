@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -68,7 +69,11 @@ func (a *API) listCommandAudit(w http.ResponseWriter, r *http.Request) {
 		if detail != nil {
 			item.Detail = *detail
 		}
-		if err := json.Unmarshal(rawArgs, &item.Args); err != nil {
+		// Keep numbers as json.Number: a float64 rounds a queryid above 2^53
+		// before the operator reads the audit trail.
+		decoder := json.NewDecoder(bytes.NewReader(rawArgs))
+		decoder.UseNumber()
+		if err := decoder.Decode(&item.Args); err != nil {
 			writeError(w, http.StatusInternalServerError, "command audit args decode failed", err.Error())
 			return
 		}
