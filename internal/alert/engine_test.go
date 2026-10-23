@@ -579,3 +579,26 @@ func TestTick_ALongPendingEpisodeFiresAfterItsFor(t *testing.T) {
 	require.Len(t, notifier.alerts, 1)
 	require.Equal(t, StateFiring, notifier.alerts[0].State)
 }
+
+// TestTick_AFiringEpisodeRefreshesItsStoredRow — while an alert fires, its row
+// shows the value and the time of the last pass. Both used to stay at the
+// values of the pass that fired it, so an alert still firing hours later looked
+// unevaluated. Refreshing the row must not notify again.
+func TestTick_AFiringEpisodeRefreshesItsStoredRow(t *testing.T) {
+	start := time.Unix(100, 0)
+	clk := clock.NewFake(start)
+	rule := Rule{ID: "custom", Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1, Summary: "x"}
+	store, notifier := &engineStore{rules: []Rule{rule}}, &engineNotifier{}
+	e := NewEngine(nil, clk, store, notifier, []Source{clockSource{kind: "metric", value: 2}})
+	require.NoError(t, e.Tick(context.Background()))
+
+	clk.Advance(time.Hour)
+	e.sources = []Source{clockSource{kind: "metric", value: 5}}
+	require.NoError(t, e.Tick(context.Background()))
+
+	last := store.alerts[len(store.alerts)-1]
+	require.Equal(t, StateFiring, last.State)
+	require.Equal(t, 5.0, last.Value)
+	require.True(t, last.LastEvalAt.Equal(start.Add(time.Hour)), "the stored row must carry the last pass, got %s", last.LastEvalAt)
+	require.Len(t, notifier.alerts, 1)
+}

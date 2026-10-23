@@ -335,6 +335,10 @@ func (e *Engine) Tick(ctx context.Context) error {
 			for _, sample := range samples {
 				undo := e.eval.Checkpoint(Key(rule, sample))
 				alertValue, transition := e.eval.Step(rule, sample, now)
+				if alertValue != nil && transition == TransitionNone && alertValue.State == StateFiring {
+					errs = append(errs, e.refresh(ctx, *alertValue)...)
+					continue
+				}
 				if alertValue == nil || transition == TransitionNone || transition == TransitionOpened || transition == TransitionCancelled {
 					continue
 				}
@@ -395,6 +399,19 @@ func (e *Engine) clearedBy(ctx context.Context, rule Rule, episodes []Alert) ([]
 		}
 	}
 	return nil, nil
+}
+
+// refresh rewrites a firing episode that is still being evaluated, so that its
+// stored value and last evaluation time follow the pass. Nothing is notified:
+// the episode was notified when it fired.
+func (e *Engine) refresh(ctx context.Context, a Alert) []error {
+	if e.store == nil {
+		return nil
+	}
+	if err := e.store.Upsert(ctx, a); err != nil {
+		return []error{fmt.Errorf("refresh alert %s: %w", a.Key, err)}
+	}
+	return nil
 }
 
 // publish persists one transition and notifies it unless a silence covers the
