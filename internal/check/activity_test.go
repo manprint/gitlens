@@ -152,6 +152,7 @@ func TestActivity_FailedSubQueryFailsTheScrape(t *testing.T) {
 		{"database counts", "SELECT COALESCE(datname, '')", ""},
 		{"application counts", "SELECT COALESCE(application_name, '')", ""},
 		{"state ages", "COALESCE(state, 'unknown'), COALESCE(max(", ""},
+		{"max_connections", "", "current_setting('max_connections')"},
 		{"prepared transactions", "", "FROM pg_prepared_xacts"},
 		{"frozen XID age", "", "FROM pg_database"},
 	} {

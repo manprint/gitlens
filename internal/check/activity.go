@@ -67,12 +67,13 @@ GROUP BY 1, 2
 	if err := rows.Err(); err != nil {
 		return Result{}, err
 	}
-	// Get max_connections
+	// A probe that fails must fail the scrape: a zero or an empty value it
+	// leaves behind reads as a healthy value, and the saturation and
+	// wraparound rules would judge a number nobody read.
 	var maxConnStr string
-	_ = conn.QueryRow(ctx, "SELECT current_setting('max_connections')").Scan(&maxConnStr)
-	// A probe that fails must fail the scrape: a zero it leaves behind reads as
-	// a healthy value, and the wraparound and prepared-transaction rules would
-	// judge a number nobody read.
+	if err := conn.QueryRow(ctx, "SELECT current_setting('max_connections')").Scan(&maxConnStr); err != nil {
+		return Result{}, err
+	}
 	databaseRows, err := queryActivityGroups(ctx, conn, `SELECT COALESCE(datname, ''), count(*)::float8 FROM pg_stat_activity WHERE backend_type='client backend' AND pid <> pg_backend_pid() GROUP BY 1`)
 	if err != nil {
 		return Result{}, err
