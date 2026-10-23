@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -150,6 +151,41 @@ func TestExampleStack_ServerStoresIntoItsOwnDatabase(t *testing.T) {
 	require.Equal(t,
 		"postgres://pglens:${PGLENS_DB_PASSWORD:?set PGLENS_DB_PASSWORD}@timescaledb:5432/pglens?sslmode=disable",
 		stack.Services["pglens-server"].Environment["PGLENS_DSN"])
+}
+
+// The server writes its migrations and its samples into the database its
+// PGLENS_DSN names, so the example agent must not monitor that database: pglens
+// never alters a monitored database. The agent checks the database of its own
+// DSN as well as the include list, so both are held to it.
+func TestExampleStack_AgentDoesNotMonitorTheStorageDatabase(t *testing.T) {
+	var stack composeFile
+	require.NoError(t, yaml.Unmarshal(readFile(t, "docker-compose.yml"), &stack))
+	storage := stack.Services["pglens-server"].Environment["PGLENS_DSN"]
+	_, afterHost, found := strings.Cut(storage, "@timescaledb:5432/")
+	require.True(t, found, storage)
+	storageDB, _, _ := strings.Cut(afterHost, "?")
+	require.NotEmpty(t, storageDB)
+
+	var example struct {
+		Targets []struct {
+			DSN       string `yaml:"dsn"`
+			Databases struct {
+				Include []string `yaml:"include"`
+			} `yaml:"databases"`
+		} `yaml:"targets"`
+	}
+	require.NoError(t, yaml.Unmarshal(readFile(t, "agent.example.yaml"), &example))
+	require.NotEmpty(t, example.Targets)
+	for _, target := range example.Targets {
+		dsn, err := url.Parse(target.DSN)
+		require.NoError(t, err)
+		require.NotEqual(t, "/"+storageDB, dsn.Path, "the example agent connects to the storage database %s", storageDB)
+		for _, pattern := range target.Databases.Include {
+			matched, err := regexp.MatchString(pattern, storageDB)
+			require.NoError(t, err)
+			require.False(t, matched, "the example agent monitors %s, the database the server writes to", storageDB)
+		}
+	}
 }
 
 // composeFiles lists every YAML file under deploy/. A compose file added
