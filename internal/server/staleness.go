@@ -834,10 +834,15 @@ func (s *Staleness) Stop() {
 		defer s.mu.Unlock()
 		if s.conn != nil {
 			unlockCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			_, _ = s.conn.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtext('pglens:staleness'))`)
+			if _, err := s.conn.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtext('pglens:staleness'))`); err != nil {
+				// The lock may still be held by this session, which must not
+				// go back to the pool: close it, so the server frees the lock.
+				s.releaseLeaderConn(unlockCtx)
+			} else {
+				s.conn.Release()
+				s.conn = nil
+			}
 			cancel()
-			s.conn.Release()
-			s.conn = nil
 		}
 		s.hasLock = false
 		if s.ticker != nil {
