@@ -60,15 +60,23 @@ func showUsage() {
 func runAgentHealthcheck() int {
 	addr := envOr("PGLENS_HEALTHZ_LISTEN", ":9187")
 	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get(healthcheckURL(addr, "/healthz"))
+	url := healthcheckURL(addr, "/healthz")
+	resp, err := client.Get(url)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "healthcheck:", err)
 		return 1
 	}
 	defer func() { _ = resp.Body.Close() }()
-	// /healthz itself reports 503 for revoked/unauthorized/incompatible —
-	// that is the agent correctly staying alive and saying so, not a reason
-	// to have Docker restart it, so any response at all is a pass here.
+	// /healthz answers 503 for revoked, unauthorized or incompatible, and the
+	// agent is not shipping data in any of them. The probe must fail so that
+	// Docker shows the container unhealthy and the body says which state it is
+	// in. Docker does not restart a container for being unhealthy, so the agent
+	// stays up and keeps retrying, as it did before.
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		fmt.Fprintf(os.Stderr, "healthcheck: %s: %s %s\n", url, resp.Status, body)
+		return 1
+	}
 	return 0
 }
 

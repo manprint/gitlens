@@ -99,6 +99,25 @@ func TestRunAgentHealthcheck_ProbesTheListenAddress(t *testing.T) {
 	require.Equal(t, 0, runAgentHealthcheck())
 }
 
+// TestRunAgentHealthcheck_FailsWhenHealthzReports503: /healthz answers 503 for a
+// revoked, unauthorized or incompatible agent. Docker reads only the probe's
+// exit status, so a 503 must fail the probe, or the container shows healthy
+// while the agent ships nothing.
+func TestRunAgentHealthcheck_FailsWhenHealthzReports503(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"state":"revoked"}`))
+	})}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+	t.Setenv("PGLENS_HEALTHZ_LISTEN", ln.Addr().String())
+
+	require.Equal(t, 1, runAgentHealthcheck())
+}
+
 func TestHealthcheckURL(t *testing.T) {
 	tests := []struct{ listen, want string }{
 		{":9187", "http://127.0.0.1:9187/healthz"},
