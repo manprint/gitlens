@@ -56,7 +56,11 @@ type notificationMark struct {
 	attempts int
 }
 
-func (s *markStore) MarkNotification(_ context.Context, _, _, phase string, ok bool, attempts int, _ error) error {
+func (s *markStore) MarkNotification(ctx context.Context, _, _, phase string, ok bool, attempts int, _ error) error {
+	// Like the store, it does not write on a context that is done.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.marks = append(s.marks, notificationMark{phase: phase, ok: ok, attempts: attempts})
 	return nil
 }
@@ -288,12 +292,14 @@ func TestChannelNotifier_AnExpiredCycleDoesNotUseUpAnAttempt(t *testing.T) {
 	require.Equal(t, []notificationMark{{phase: "fire", ok: false, attempts: 1}, {phase: "fire", ok: true, attempts: 2}}, store.marks)
 }
 
-// hangingChannel accepts a send and then never answers it, until the context of
-// the send is done, as a webhook behind a stalled proxy does.
+// hangingChannel accepts a send and then never answers it. The cycle ends while
+// the send waits, as it does when the cycle's deadline arrives first, so the
+// test ends the cycle from inside the send instead of waiting for a deadline.
 type hangingChannel struct {
-	name  string
-	hang  bool
-	calls int
+	name   string
+	hang   bool
+	calls  int
+	cancel context.CancelFunc
 }
 
 func (c *hangingChannel) Name() string { return c.name }
@@ -302,6 +308,7 @@ func (c *hangingChannel) Send(ctx context.Context, _ notify.Message) error {
 	if !c.hang {
 		return errors.New("HTTP 503")
 	}
+	c.cancel()
 	<-ctx.Done()
 	return ctx.Err()
 }
@@ -309,6 +316,7 @@ func (c *hangingChannel) Send(ctx context.Context, _ notify.Message) error {
 // TestChannelNotifier_AHungChannelUsesUpItsAttempts — a send that starts and
 // then runs into the end of the cycle counts as an attempt. Otherwise a channel
 // that never answers would be kept for every later pass and never marked failed.
+// Its outcome is still recorded, although the cycle has ended.
 func TestChannelNotifier_AHungChannelUsesUpItsAttempts(t *testing.T) {
 	a := Alert{Key: "k", RuleID: "r", Severity: SeverityWarning, State: StateFiring, StartedAt: time.Unix(1, 0), LastEvalAt: time.Unix(1, 0)}
 	store := &markStore{}
@@ -319,7 +327,8 @@ func TestChannelNotifier_AHungChannelUsesUpItsAttempts(t *testing.T) {
 
 	hung.hang = true
 	for i := 0; i < maxNotifyAttempts+1; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+		ctx, cancel := context.WithCancel(context.Background())
+		hung.cancel = cancel
 		_ = retrier.Retry(ctx)
 		cancel()
 	}

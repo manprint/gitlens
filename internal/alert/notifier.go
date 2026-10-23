@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/manprint/pglens/internal/alert/notify"
@@ -180,13 +181,21 @@ func (n *channelNotifier) deliver(ctx context.Context, d pendingDelivery) error 
 		// never asked and the attempt says nothing about it. It is kept for a
 		// later pass without being counted, or the time the rules took would use
 		// up the attempts. A send that did begin counts, even when the cycle ends
-		// while it waits: a channel that never answers is failing.
+		// while it waits: a channel that never answers is failing. A slow channel
+		// that needs more time than the cycle has left is cut short the same way.
+		// That is the price of bounding a hung one, since the cycle is 10 seconds
+		// and the retries run last.
 		n.keep(d)
 		return fmt.Errorf("channel %s: %w", d.channel.Name(), err)
 	}
 	sendErr := d.channel.Send(ctx, d.message)
 	d.attempts++
-	markErr := n.store.MarkNotification(ctx, d.dedupID, d.channel.Name(), d.phase, sendErr == nil, d.attempts, sendErr)
+	// The outcome is recorded even when the cycle ended during the send. The
+	// cycle's deadline may already be spent, so the write gets a short one of its
+	// own.
+	markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	markErr := n.store.MarkNotification(markCtx, d.dedupID, d.channel.Name(), d.phase, sendErr == nil, d.attempts, sendErr)
+	cancel()
 	if sendErr != nil {
 		n.keep(d)
 		return fmt.Errorf("channel %s: %w", d.channel.Name(), sendErr)
