@@ -952,7 +952,10 @@ export interface components {
         };
         AshResponse: {
             buckets: components["schemas"]["AshBucket"][];
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Seconds between rows. Without group_by each row is one agent window
+             */
             resolution_seconds: number;
             statistical: boolean;
             warning?: string;
@@ -975,7 +978,10 @@ export interface components {
         };
         AshTopResponse: {
             entries: components["schemas"]["AshTopEntry"][];
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Always 1. Each entry aggregates the whole range
+             */
             resolution_seconds: number;
             statistical: boolean;
             warning?: string;

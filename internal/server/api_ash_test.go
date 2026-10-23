@@ -79,7 +79,7 @@ func TestAshAPI_NoPool_ReturnsEmpty(t *testing.T) {
 	resp := ashResponse{}
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	require.Equal(t, []ashBucket{}, resp.Buckets)
-	require.Equal(t, 1, resp.ResolutionSeconds)
+	require.Equal(t, ashWindowSeconds, resp.ResolutionSeconds)
 	require.True(t, resp.Statistical)
 	require.Nil(t, resp.Warning)
 }
@@ -470,4 +470,26 @@ func TestFoldASHGroups_ConservesTheTotal(t *testing.T) {
 	require.Equal(t, "0", *out[0].QueryID)
 	require.Equal(t, "1", *out[1].QueryID)
 	require.Equal(t, 50+8+7+6, out[2].Samples)
+}
+
+// Ungrouped rows are the agent's 10-second windows, so the answer must say
+// that spacing, not the 1 that a grouped answer's default once reported.
+func TestAshAPI_UngroupedRowsReportTheAgentWindow(t *testing.T) {
+	t.Parallel()
+	ts := time.Now().Truncate(time.Second)
+	pool := &mockPool{
+		queryResults: []*mockRows{{rows: [][]any{
+			{ts, 4, 10, "db1", "CPU", "CPU", "active", (*int64)(nil)},
+		}}},
+		queryRowVals: []*mockRow{nil, {vals: []any{10}}},
+	}
+	r := chi.NewRouter()
+	(&AshAPI{pool: pool}).RegisterRoutes(r)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/ash?instance_id="+uuid.NewString(), nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp ashResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.Len(t, resp.Buckets, 1)
+	require.Equal(t, ashWindowSeconds, resp.ResolutionSeconds)
 }

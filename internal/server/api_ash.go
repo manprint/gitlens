@@ -156,7 +156,7 @@ func (a *AshAPI) handleASH(w http.ResponseWriter, r *http.Request) {
 	if a.pool == nil {
 		resp := ashResponse{
 			Buckets:           []ashBucket{},
-			ResolutionSeconds: 1,
+			ResolutionSeconds: ashWindowSeconds,
 			Statistical:       true,
 		}
 		writeJSON(w, http.StatusOK, resp)
@@ -179,14 +179,16 @@ func (a *AshAPI) handleASH(w http.ResponseWriter, r *http.Request) {
 		disabled := false
 		writeJSON(w, http.StatusOK, ashResponse{
 			Buckets:           []ashBucket{},
-			ResolutionSeconds: 1,
+			ResolutionSeconds: ashWindowSeconds,
 			Statistical:       true,
 			Enabled:           &disabled,
 		})
 		return
 	}
 
-	resp := ashResponse{ResolutionSeconds: 1, Statistical: true}
+	// The ungrouped rows are the agent's windows, ashWindowSeconds apart. A
+	// grouped answer replaces this with its bucket size below.
+	resp := ashResponse{ResolutionSeconds: ashWindowSeconds, Statistical: true}
 	var totalTicks int
 	if len(groupByCols) == 0 {
 		resp.Buckets, totalTicks, err = a.queryASHBuckets(ctx, iid, fromPtr, toPtr, database, filters, limit)

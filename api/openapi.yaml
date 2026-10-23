@@ -324,7 +324,7 @@ components:
       required: [buckets, resolution_seconds, statistical]
       properties:
         buckets: { type: array, items: { $ref: '#/components/schemas/AshBucket' } }
-        resolution_seconds: { type: integer, format: int32 }
+        resolution_seconds: { type: integer, format: int32, description: Seconds between rows. Without group_by each row is one agent window, 10 seconds. With group_by it is the bucket size, a multiple of 10. }
         statistical: { type: boolean }
         warning: { type: string }
         enabled: { type: boolean, description: Present as false when ASH is disabled. }
@@ -342,7 +342,7 @@ components:
       required: [entries, resolution_seconds, statistical]
       properties:
         entries: { type: array, items: { $ref: '#/components/schemas/AshTopEntry' } }
-        resolution_seconds: { type: integer, format: int32 }
+        resolution_seconds: { type: integer, format: int32, description: Always 1. Each entry aggregates the whole range, so the answer has no time spacing to report. }
         statistical: { type: boolean }
         warning: { type: string }
         enabled: { type: boolean }
