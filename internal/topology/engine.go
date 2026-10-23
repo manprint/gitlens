@@ -213,8 +213,8 @@ func (e *Engine) Apply(obs Observation) []Event {
 		}
 	}
 
-	// Detect split-brain: 2+ primaries in same cluster within 30s of each other
-	// (unless a failover just happened).
+	// Detect split-brain: 2+ primaries in one cluster, each observed since the
+	// last failover, and no failover within the last 30s.
 	events = append(events, e.detectSplitBrain(obs.ClusterID, now)...)
 
 	return events
@@ -225,10 +225,17 @@ func (e *Engine) detectSplitBrain(clusterID pgtype.ClusterID, now time.Time) []E
 	var events []Event
 	var primaries []pgtype.InstanceID
 
+	// A primary counts only if it was observed since the cluster's last
+	// failover. The agent stops reporting an unreachable or demoted primary,
+	// so its row keeps role=primary until the failover window lapses; counting
+	// it would page a healthy single-primary cluster after every failover. A
+	// zero lastFailover admits every primary, and the promoted standby is
+	// observed at the failover instant, so it always counts.
+	lastFailover := e.lastFailoverTime[clusterID]
 	for instID, inst := range e.instances {
 		if inst.clusterID == clusterID && inst.role == pgtype.RolePrimary {
 			// Only count primaries seen recently (within failover window)
-			if now.Sub(inst.timestamp) < e.failoverWindow {
+			if now.Sub(inst.timestamp) < e.failoverWindow && !inst.timestamp.Before(lastFailover) {
 				primaries = append(primaries, instID)
 			}
 		}
@@ -237,7 +244,6 @@ func (e *Engine) detectSplitBrain(clusterID pgtype.ClusterID, now time.Time) []E
 	// Only emit split-brain if we have 2+ primaries
 	if len(primaries) >= 2 {
 		// Check if there was a recent failover to suppress transient split-brain
-		lastFailover := e.lastFailoverTime[clusterID]
 		if lastFailover.IsZero() || now.Sub(lastFailover) > 30*time.Second {
 			// Throttled per cluster: this runs on every observation of every
 			// instance, so an unresolved split brain used to write one event
