@@ -5,6 +5,7 @@ package agent
 import (
 	"context"
 	"net/url"
+	"regexp"
 	"testing"
 	"time"
 
@@ -596,5 +597,75 @@ func TestINTCONN015_HeldDatabaseIsNotEvicted(t *testing.T) {
 		_, kept := mgr.dbs["postgres"]
 		mgr.mu.Unlock()
 		require.True(t, kept, "the database with a connection in use must not be evicted")
+	})
+}
+
+// INT-CONN-016: a database discovery selected stays reachable after the budget
+// ranks it out. The checks scheduled at startup were given that database, and
+// refusing it fails them on every tick. A database discovery never selected is
+// still refused (INT-CONN-009).
+func TestINTCONN016_SelectedDatabaseStaysReachableAfterRankMoves(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		// Both databases start with no commits, so the name breaks the tie and
+		// zz_int016_a is the one a budget of one keeps.
+		for _, name := range []string{"zz_int016_a", "zz_int016_b"} {
+			_, err := admin.Exec(ctx, "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)")
+			require.NoError(t, err)
+			_, err = admin.Exec(ctx, "CREATE DATABASE "+name)
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				_, _ = admin.Exec(context.Background(), "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)")
+			})
+		}
+
+		opts := DefaultConnOptions()
+		opts.MaxDatabases = 1
+		opts.Include = []*regexp.Regexp{regexp.MustCompile(`^zz_int016_`)}
+		mgr, err := NewManager(ctx, "rank-target", pg.DSN("postgres", pgtest.RoleT0), opts, clock.System())
+		require.NoError(t, err)
+		defer mgr.Close()
+
+		dbs, err := mgr.Discover(ctx)
+		require.NoError(t, err)
+		require.NotEmpty(t, dbs)
+		conn, err := mgr.ConnFor(ctx, "zz_int016_a")
+		require.NoError(t, err, "the database selected at startup must be reachable")
+		conn.Release()
+
+		// Commits on zz_int016_b move it ahead in the ranking. A backend's
+		// counters reach pg_stat_database only when they are flushed, so the
+		// flush is forced and the ranking is polled.
+		b := pg.Pool(t, "zz_int016_b", pgtest.RoleT0)
+		bconn, err := b.Acquire(ctx)
+		require.NoError(t, err)
+		for range 20 {
+			_, err := bconn.Exec(ctx, "SELECT 1")
+			require.NoError(t, err)
+		}
+		_, err = bconn.Exec(ctx, "SELECT pg_stat_force_next_flush()")
+		require.NoError(t, err)
+		bconn.Release()
+
+		require.Eventually(t, func() bool {
+			dbs, err := mgr.Discover(ctx)
+			if err != nil {
+				return false
+			}
+			for _, db := range dbs {
+				if db.Monitored && db.Name == "zz_int016_b" {
+					return true
+				}
+			}
+			return false
+		}, 15*time.Second, 200*time.Millisecond, "the commits never moved zz_int016_b ahead of zz_int016_a")
+
+		// The budget now selects only zz_int016_b. zz_int016_a was selected at
+		// startup, so its checks keep their database.
+		conn, err = mgr.ConnFor(ctx, "zz_int016_a")
+		require.NoError(t, err, "zz_int016_a must stay reachable after the budget ranks it out")
+		conn.Release()
 	})
 }

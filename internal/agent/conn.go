@@ -111,9 +111,9 @@ type Manager struct {
 	// for databases without one; empty means the maintenance database. See
 	// LocateStatements.
 	statementsDB string
-	// monitored holds the databases the last discovery selected, and ownDB
-	// is the one the DSN names. ConnFor opens a pool only for these; see
-	// requireMonitored. monitored is nil until the first discovery.
+	// monitored holds every database a discovery has selected, and ownDB is
+	// the one the DSN names. ConnFor opens a pool only for these; see
+	// requireMonitored. The set only grows, see Discover.
 	monitored map[string]bool
 	ownDB     string
 
@@ -144,13 +144,14 @@ func NewManager(ctx context.Context, targetName string, dsn string, opts ConnOpt
 		return nil, fmt.Errorf("create pool: %w", err)
 	}
 	m := &Manager{
-		opts:    opts,
-		target:  &poolHolder{name: targetName, pool: pool, dsn: dsn},
-		clock:   clk,
-		dbs:     make(map[string]*pgxpool.Pool),
-		dbtc:    make(map[string]time.Time),
-		pending: make(map[string]int),
-		ownDB:   cfg.ConnConfig.Database,
+		opts:      opts,
+		target:    &poolHolder{name: targetName, pool: pool, dsn: dsn},
+		clock:     clk,
+		dbs:       make(map[string]*pgxpool.Pool),
+		dbtc:      make(map[string]time.Time),
+		pending:   make(map[string]int),
+		monitored: make(map[string]bool),
+		ownDB:     cfg.ConnConfig.Database,
 	}
 	return m, nil
 }
@@ -321,14 +322,16 @@ func (m *Manager) Discover(ctx context.Context) ([]wire.Database, error) {
 	}
 
 	selected := selectDatabases(dbs, m.opts)
-	monitored := make(map[string]bool, len(selected))
+	// The set only grows. The checks scheduled at startup keep their
+	// databases when the budget later ranks one out, and the statements
+	// database was picked from this set, so a shrinking set would fail those
+	// checks on every tick. Excluded and unknown names never enter it.
+	m.mu.Lock()
 	for _, db := range selected {
 		if db.Monitored {
-			monitored[db.Name] = true
+			m.monitored[db.Name] = true
 		}
 	}
-	m.mu.Lock()
-	m.monitored = monitored
 	m.mu.Unlock()
 	return selected, nil
 }
