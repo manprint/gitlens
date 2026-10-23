@@ -5,7 +5,6 @@ package scenario
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -93,64 +92,19 @@ func init() {
 
 			// The cardinality budget itself must hold: pglens_series_total
 			// for this instance must stay bounded, nowhere near the 5000
-			// distinct queries actually executed (V001-F11's own /metrics
-			// endpoint — the check_error_total/series_total gap this
-			// scenario was blocked on until it existed).
-			metricsBody, err := e.API.RawGet("/metrics")
-			if err != nil {
-				return fmt.Errorf("GET /metrics: %w", err)
-			}
-			seriesTotal, ok := parseSeriesTotal(metricsBody, instanceID)
-			if !ok {
-				return fmt.Errorf("pglens_series_total{instance_id=%q} not found in /metrics output", instanceID)
-			}
-			// internal/check/stat_statements.go emits SIX separate metrics per
-			// kept queryid (calls_total, total_exec_time_ms, rows_total,
-			// shared_blks_hit_total, shared_blks_read_total, wal_bytes_total)
-			// — each is its own pgtype.SeriesKey in internal/delta.Engine, so
-			// pglens_series_total (Engine.CountByInstance) is really
-			// "distinct queryids kept" × 6, not "distinct queryids kept".
-			// With the check's own production MaxKeys=200,
-			// stat_statements alone can legitimately reach 200*6=1200 —
-			// before ANY other instance-level series and before accounting
-			// for cardinality.Selector's Hysteresis window legitimately
-			// keeping a few prior cycles' worth of now-stale queryids
-			// briefly overlapping the current fresh set. Found live: an
-			// earlier 500 bound here failed on every correctly-bounded run
-			// (~1857-2217 observed, never approaching the true
-			// 5000-queries-leaked-through-uncapped disaster of ~30000) —
-			// the bound was simply never derived from this fanout. 3000
-			// covers the observed full-suite peak (2552) plus scheduling and
-			// hysteresis-overlap variation while remaining an order of
-			// magnitude below what an actual leak would produce.
-			const seriesBudgetSanityBound = 3000
-			if seriesTotal > seriesBudgetSanityBound {
-				return fmt.Errorf("pglens_series_total=%d exceeds the cardinality budget sanity bound (%d) — 5000 distinct queries may have leaked through uncapped", seriesTotal, seriesBudgetSanityBound)
-			}
-
+			// distinct queries actually executed. AssertInvariants holds it to
+			// I-8 (harness.DefaultMetricBudget), the one budget the suite has;
+			// a bound kept in this scenario would only disagree with it.
+			//
+			// stat_statements.go's MaxKeys of 200 per check, times the six
+			// series each kept queryid emits, reaches 1200 before any other
+			// instance-level series or the Selector's hysteresis overlap. The
+			// full-suite values observed so far, 1857 to 2552, are above I-8's
+			// 2000, so this scenario can fail I-8. Whether the budget or the
+			// fan-out is wrong needs measured data; this scenario should not
+			// settle it with a number of its own.
 			e.AssertInvariants(e.T)
 			return nil
 		},
 	})
-}
-
-// parseSeriesTotal extracts pglens_series_total{instance_id="<id>"} <value>
-// from a raw Prometheus text-exposition body.
-func parseSeriesTotal(body, instanceID string) (int, bool) {
-	prefix := fmt.Sprintf(`pglens_series_total{instance_id=%q}`, instanceID)
-	for _, line := range strings.Split(body, "\n") {
-		if !strings.HasPrefix(line, prefix) {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		var v float64
-		if _, err := fmt.Sscanf(fields[len(fields)-1], "%g", &v); err != nil {
-			continue
-		}
-		return int(v), true
-	}
-	return 0, false
 }
