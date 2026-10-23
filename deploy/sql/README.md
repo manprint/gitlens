@@ -30,20 +30,27 @@ DATABASE ... SET`) overrides the role-wide default, so the script resets it.
 And whatever `PUBLIC` holds, the role holds too: by default every role can
 create temporary tables and large objects, and on databases upgraded from
 before PostgreSQL 15 also objects in the `public` schema, outside a read-only
-transaction. The script reports these grants with the `REVOKE ... FROM PUBLIC`
-statements that close them, but by default does not run those statements,
-because they change what every other role can do: an application that uses
-temporary tables or large objects then needs its own grants. pglens itself
-never leaves a read-only transaction.
+transaction. The script reports every such path it finds in the connected
+database (temporary tables, new schemas, large objects, `CREATE` on a schema,
+writes on a relation, `USAGE` or `UPDATE` on a sequence, functions that run
+as their owner and `lo_compat_privileges = on`) with the statement that
+closes it. By default it runs none of those statements, because they change
+what every other role can do: an application that uses temporary tables or
+large objects then needs its own grants. pglens itself never leaves a
+read-only transaction.
 
-`-v harden_public=1` runs them: it revokes from `PUBLIC` `TEMPORARY` on the
-connected database, `EXECUTE` on `lo_create`, `lo_creat` and `lo_from_bytea`,
-`CREATE` on every schema and `INSERT`, `UPDATE`, `DELETE` and `TRUNCATE` on
-every relation where `PUBLIC` holds them, then looks again and warns about
-what is left. A managed-service admin does not own the large-object
-functions, so on such a service that grant stays and the warning names it.
-Schemas, relations and functions belong to one database: run the script with
-the flag connected to each database the role can reach.
+`-v harden_public=1` runs the `REVOKE ... FROM PUBLIC` ones, then looks again
+and warns about what is left. Functions that run as their owner and
+`lo_compat_privileges` stay as they are: what to do about them depends on
+the application. A managed-service admin does not own the large-object
+functions either, so on such a service that grant stays and the warning
+names it. Schemas, relations and functions belong to one database: run the
+script with the flag connected to each database the role can reach.
+
+The script runs as a superuser in a database another role may own, so it
+pins its own `search_path` to `pg_catalog`: a schema of the database owner,
+listed first in the database's `search_path`, cannot put its own functions
+in place of the built-ins the script calls.
 
 Run it as a PostgreSQL superuser (or the equivalent managed-service admin):
 

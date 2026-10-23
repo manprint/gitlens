@@ -134,11 +134,11 @@ GRANT pg_write_all_data TO perm_script_app; GRANT perm_script_app TO pglens_scri
 		{"owner", `CREATE ROLE pglens_script; CREATE TABLE perm_script_owned (a int);
 ALTER TABLE perm_script_owned OWNER TO pglens_script`, "REASSIGN OWNED BY pglens_script TO <owner>;"},
 		{"table grant", `CREATE ROLE pglens_script; CREATE TABLE perm_script_t (a int);
-GRANT SELECT, INSERT ON perm_script_t TO pglens_script`, "REVOKE INSERT ON perm_script_t FROM pglens_script;"},
+GRANT SELECT, INSERT ON perm_script_t TO pglens_script`, "REVOKE INSERT ON public.perm_script_t FROM pglens_script;"},
 		{"column grant", `CREATE ROLE pglens_script; CREATE TABLE perm_script_t (a int);
-GRANT UPDATE (a) ON perm_script_t TO pglens_script`, "REVOKE UPDATE (a) ON perm_script_t FROM pglens_script;"},
+GRANT UPDATE (a) ON perm_script_t TO pglens_script`, "REVOKE UPDATE (a) ON public.perm_script_t FROM pglens_script;"},
 		{"sequence grant", `CREATE ROLE pglens_script; CREATE SEQUENCE perm_script_s;
-GRANT USAGE ON SEQUENCE perm_script_s TO pglens_script`, "REVOKE USAGE ON perm_script_s FROM pglens_script;"},
+GRANT USAGE ON SEQUENCE perm_script_s TO pglens_script`, "REVOKE USAGE ON public.perm_script_s FROM pglens_script;"},
 		{"schema grant", `CREATE ROLE pglens_script; GRANT CREATE ON SCHEMA public TO pglens_script`,
 			"REVOKE CREATE ON SCHEMA public FROM pglens_script;"},
 		{"database grant", `CREATE ROLE pglens_script; GRANT TEMPORARY ON DATABASE app TO pglens_script`,
@@ -192,35 +192,47 @@ func TestPerm_INT_PERM_009_ScriptHardensPublic(t *testing.T) {
 		admin := pg.Pool(t, "app", RoleSuperuser)
 		dropScriptRoles(t, admin)
 		// The database ACL lives in a shared catalog the snapshot does not
-		// restore, so every grant this test takes from PUBLIC goes back.
+		// restore, so every grant this test changes goes back.
 		t.Cleanup(func() {
-			_, err := admin.Exec(context.Background(), `GRANT TEMPORARY ON DATABASE app TO PUBLIC;
+			_, err := admin.Exec(context.Background(), `REVOKE CREATE ON DATABASE app FROM PUBLIC;
+GRANT TEMPORARY ON DATABASE app TO PUBLIC;
 GRANT EXECUTE ON FUNCTION pg_catalog.lo_create(oid), pg_catalog.lo_creat(integer),
   pg_catalog.lo_from_bytea(oid, bytea) TO PUBLIC;
-DROP TABLE IF EXISTS perm_script_public`)
+DROP TABLE IF EXISTS perm_script_public;
+DROP SEQUENCE IF EXISTS perm_script_public_s;
+DROP FUNCTION IF EXISTS perm_script_definer()`)
 			require.NoError(t, err)
 			dropScriptRoles(t, admin)
 		})
 		_, err := admin.Exec(ctx, `CREATE TABLE perm_script_public (a int);
-GRANT INSERT ON perm_script_public TO PUBLIC`)
+GRANT INSERT ON perm_script_public TO PUBLIC;
+CREATE SEQUENCE perm_script_public_s;
+GRANT USAGE ON SEQUENCE perm_script_public_s TO PUBLIC;
+GRANT CREATE ON DATABASE app TO PUBLIC;
+CREATE FUNCTION perm_script_definer() RETURNS int LANGUAGE sql SECURITY DEFINER AS 'SELECT 1'`)
 		require.NoError(t, err)
 
 		code, out := runMonitoringScript(t, pg)
 		require.Equal(t, 0, code, out)
-		require.Contains(t, out, "PUBLIC grants let "+scriptRole)
+		require.Contains(t, out, scriptRole+", like every role, can write outside a read-only transaction")
 		for _, fix := range []string{
 			"REVOKE TEMPORARY ON DATABASE app FROM PUBLIC;",
+			"REVOKE CREATE ON DATABASE app FROM PUBLIC;",
 			"REVOKE EXECUTE ON FUNCTION pg_catalog.lo_create(oid)",
-			"REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON perm_script_public FROM PUBLIC;",
+			"REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.perm_script_public FROM PUBLIC;",
+			"REVOKE USAGE, UPDATE ON SEQUENCE public.perm_script_public_s FROM PUBLIC;",
+			"REVOKE EXECUTE ON FUNCTION public.perm_script_definer() FROM PUBLIC;",
 		} {
 			require.Contains(t, out, fix)
 		}
 
 		code, out = runMonitoringScript(t, pg, "harden_public=1")
 		require.Equal(t, 0, code, out)
-		code, out = runMonitoringScript(t, pg)
-		require.Equal(t, 0, code, out)
-		require.NotContains(t, out, "PUBLIC grants let")
+		// A function that runs as its owner is only reported: revoking
+		// EXECUTE is the application's call.
+		require.Contains(t, out, "after harden_public, "+scriptRole+" can still")
+		require.Contains(t, out, "public.perm_script_definer()")
+		require.NotContains(t, out, "REVOKE TEMPORARY ON DATABASE app FROM PUBLIC;")
 
 		conn := connectAs(t, pg, scriptRole, "script")
 		_, err = conn.Exec(ctx, "SET default_transaction_read_only = off")
@@ -230,11 +242,42 @@ GRANT INSERT ON perm_script_public TO PUBLIC`)
 			"SELECT pg_catalog.lo_creat(-1)",
 			"SELECT pg_catalog.lo_from_bytea(0, '\\x00')",
 			"CREATE TEMP TABLE perm_script_temp (a int)",
+			"CREATE SCHEMA perm_script_schema",
 			"INSERT INTO perm_script_public VALUES (1)",
+			"SELECT nextval('perm_script_public_s')",
 			"CREATE TABLE public.perm_script_new (a int)",
 		} {
 			_, err := conn.Exec(ctx, statement)
 			require.True(t, isSQLState(err, "42501"), "%s: %v", statement, err)
 		}
+	})
+}
+
+// INT-PERM-010: the script runs as a superuser in a database another role
+// may own. A schema of that role listed first in the database's search_path
+// cannot put its own functions in place of the built-ins the script calls.
+func TestPerm_INT_PERM_010_ScriptIgnoresDatabaseSearchPath(t *testing.T) {
+	ForEach(t, func(t *testing.T, pg *PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "app", RoleSuperuser)
+		dropScriptRoles(t, admin)
+		t.Cleanup(func() {
+			_, err := admin.Exec(context.Background(), `ALTER DATABASE app RESET search_path;
+DROP SCHEMA IF EXISTS perm_hijack CASCADE`)
+			require.NoError(t, err)
+			dropScriptRoles(t, admin)
+		})
+		_, err := admin.Exec(ctx, `CREATE SCHEMA perm_hijack;
+CREATE FUNCTION perm_hijack.current_setting(text) RETURNS text LANGUAGE plpgsql
+  AS $$BEGIN RAISE EXCEPTION 'hijacked'; END$$;
+CREATE FUNCTION perm_hijack.quote_ident(text) RETURNS text LANGUAGE plpgsql
+  AS $$BEGIN RAISE EXCEPTION 'hijacked'; END$$;
+ALTER DATABASE app SET search_path = perm_hijack, pg_catalog, public`)
+		require.NoError(t, err)
+
+		code, out := runMonitoringScript(t, pg, "tier1=1", "harden_public=1")
+		require.Equal(t, 0, code, out)
+		require.NotContains(t, out, "hijacked")
 	})
 }
