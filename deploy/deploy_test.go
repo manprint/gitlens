@@ -77,13 +77,17 @@ func TestExampleStack_PublishesLoopbackOnlyAndRequiresSecrets(t *testing.T) {
 			for _, port := range s.Ports {
 				require.True(t, strings.HasPrefix(port, "127.0.0.1:"), "%s: %s publishes %q on every interface", name, service, port)
 			}
+			// A superuser password with a default is one that anyone who can
+			// reach the published port knows, so every stack requires it.
+			if password, ok := s.Environment["POSTGRES_PASSWORD"]; ok {
+				require.Contains(t, password, ":?", "%s: %s has a default superuser password", name, service)
+			}
 		}
 	}
 
 	var stack composeFile
 	require.NoError(t, yaml.Unmarshal(readFile(t, "docker-compose.yml"), &stack))
 	for service, key := range map[string]string{
-		"timescaledb":   "POSTGRES_PASSWORD",
 		"pglens-server": "PGLENS_BOOTSTRAP_TOKEN",
 		"pglens-agent":  "PGLENS_BOOTSTRAP_TOKEN",
 	} {
