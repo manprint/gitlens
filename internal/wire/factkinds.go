@@ -26,6 +26,7 @@ var factKinds = map[string]FactKind{
 	"plan":            {},
 	"check_skip":      {},
 	"monitoring_role": {Check: "monitoring_role", Replace: true},
+	"trigger":         {Check: "trigger_inventory", Replace: true},
 }
 
 // LookupFactKind returns the description of a fact kind, and whether the

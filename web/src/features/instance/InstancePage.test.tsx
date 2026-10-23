@@ -49,6 +49,7 @@ function renderPage(
       reason: 'agent unreachable',
     }),
     ok('getInstanceSettings', { instance_id: INSTANCE_ID, settings: [] }),
+    ok('getInstanceTriggers', { instance_id: INSTANCE_ID, triggers: [], truncated_databases: [] }),
     ok('getInstanceTables', {
       instance_id: INSTANCE_ID,
       items: [],

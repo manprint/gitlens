@@ -49,6 +49,7 @@ UNION ALL SELECT 'member ' || m.roleid || ' ' || m.member FROM pg_auth_members m
 UNION ALL SELECT 'setting ' || s.setdatabase || ' ' || s.setrole || ' ' || s.setconfig::text FROM pg_db_role_setting s
 UNION ALL SELECT 'db ' || d.datname || ' ' || COALESCE(d.datacl::text, '') FROM pg_database d
 UNION ALL SELECT 'ext ' || e.extname || ' ' || e.extversion FROM pg_extension e
+UNION ALL SELECT 'trg ' || t.oid || ' ' || t.tgname || ' ' || t.tgenabled::text FROM pg_trigger t
 UNION ALL SELECT 'seq ' || s.schemaname || '.' || s.sequencename || ' ' || COALESCE(s.last_value::text, '') FROM pg_sequences s
 UNION ALL SELECT 'reset db ' || COALESCE(d.datname, '') || ' ' || COALESCE(d.stats_reset::text, '') FROM pg_stat_database d
 UNION ALL SELECT 'reset bgwriter ' || COALESCE(stats_reset::text, '') FROM pg_stat_bgwriter
@@ -87,16 +88,21 @@ func TestINTRO001_AgentOnlyReads(t *testing.T) {
 		ctx := context.Background()
 		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
 		t.Cleanup(func() {
-			_, _ = admin.Exec(context.Background(), "DROP TABLE IF EXISTS ro_audit")
+			_, _ = admin.Exec(context.Background(), "DROP TABLE IF EXISTS ro_audit_child, ro_audit; DROP FUNCTION IF EXISTS ro_audit_touch()")
 		})
 		_, err := admin.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 CREATE EXTENSION IF NOT EXISTS pgstattuple;
-DROP TABLE IF EXISTS ro_audit;
+DROP TABLE IF EXISTS ro_audit_child, ro_audit;
+DROP FUNCTION IF EXISTS ro_audit_touch();
 CREATE TABLE ro_audit (id bigserial PRIMARY KEY, v text);
 CREATE INDEX ro_audit_v ON ro_audit (v);
 INSERT INTO ro_audit (v) SELECT 'v' || g FROM generate_series(1, 2000) g;
 DELETE FROM ro_audit WHERE id % 3 = 0;
-ANALYZE ro_audit`)
+ANALYZE ro_audit;
+CREATE FUNCTION ro_audit_touch() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END';
+CREATE TABLE ro_audit_child (id int PRIMARY KEY, audit_id bigint REFERENCES ro_audit (id));
+CREATE TRIGGER ro_audit_touch BEFORE INSERT ON ro_audit_child FOR EACH ROW EXECUTE FUNCTION ro_audit_touch();
+ALTER TABLE ro_audit_child DISABLE TRIGGER ALL`)
 		require.NoError(t, err)
 
 		// From here, every statement the monitoring role sends is recorded.
@@ -130,6 +136,7 @@ ANALYZE ro_audit`)
 		require.NoError(t, mgr.RefreshCapabilities(ctx))
 		exts := map[string]bool{"pg_stat_statements": mgr.HasExtension("pg_stat_statements")}
 		ran := 0
+		factsByKind := map[string]int{}
 		for _, c := range check.All() {
 			req := c.Requires()
 			if ok, _ := req.Supports(mgr.Role(), mgr.PGVersion(), mgr.PermTier(), exts); !ok {
@@ -149,10 +156,16 @@ ANALYZE ro_audit`)
 				require.NoError(t, wf.Validate(), "%s fact %s/%s", c.Name(), f.Kind, f.Key)
 				kind, _ := wire.LookupFactKind(f.Kind)
 				require.Equal(t, c.Name(), kind.Check, "fact kind %s", f.Kind)
+				factsByKind[f.Kind]++
 			}
 			ran++
 		}
 		require.Greater(t, ran, 15)
+		// The fixture holds an object of each catalog kind, so each catalog
+		// check ran its queries on something.
+		for _, kind := range []string{"trigger"} {
+			require.Positive(t, factsByKind[kind], "no %s fact", kind)
+		}
 
 		_, err = NewExplainExecutor().Execute(ctx, mgr, command.Args{QueryID: readID, Datname: "app"})
 		require.NoError(t, err)

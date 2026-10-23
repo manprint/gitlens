@@ -195,6 +195,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/instances/{id}/triggers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Return the triggers of the instance's databases.
+         * @description The latest trigger_inventory scrape of each database reported in the last three hours: every user trigger, internal (constraint) triggers only when disabled, and a partition's inherited trigger only when its state differs from its parent's.
+         */
+        get: operations["getInstanceTriggers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instances/{id}/tables": {
         parameters: {
             query?: never;
@@ -1056,6 +1076,43 @@ export interface components {
             instance_id: components["schemas"]["InstanceId"];
             settings: components["schemas"]["Setting"][];
         };
+        TriggersResponse: {
+            instance_id: components["schemas"]["InstanceId"];
+            triggers: components["schemas"]["Trigger"][];
+            /** @description Databases with more triggers than the agent reports (1000); their list holds the disabled triggers first. */
+            truncated_databases: string[];
+        };
+        Trigger: {
+            datname: string;
+            schemaname: string;
+            relname: string;
+            name: string;
+            /**
+             * @description internal is a trigger PostgreSQL creates to enforce a constraint (foreign key, deferrable unique); it is listed only when disabled.
+             * @enum {string}
+             */
+            kind: "user" | "internal";
+            /**
+             * @description replica fires only in sessions with session_replication_role = replica, always in every session.
+             * @enum {string}
+             */
+            state: "enabled" | "disabled" | "replica" | "always" | "unknown";
+            /** @description Schema-qualified trigger function. */
+            function: string;
+            /** @enum {string} */
+            timing: "BEFORE" | "AFTER" | "INSTEAD OF";
+            /** @description Events joined by OR, e.g. INSERT OR UPDATE. */
+            events: string;
+            /** @enum {string} */
+            level: "ROW" | "STATEMENT";
+            /** @description Constraint an internal trigger enforces; empty otherwise. */
+            constraint: string;
+            /** @enum {string} */
+            constraint_type: "" | "foreign key" | "unique" | "primary key" | "exclusion" | "constraint trigger" | "other";
+            first_seen: components["schemas"]["Timestamp"];
+            last_seen: components["schemas"]["Timestamp"];
+            changed_at: components["schemas"]["Timestamp"];
+        };
         DriftValue: {
             instance_id: components["schemas"]["InstanceId"];
             role: string;
@@ -1556,6 +1613,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SettingsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+        };
+    };
+    getInstanceTriggers: {
+        parameters: {
+            query?: {
+                /** @description Return the triggers of this database only. */
+                datname?: string;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["InstanceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Triggers by database, schema, table and name. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggersResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];

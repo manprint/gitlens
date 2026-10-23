@@ -103,8 +103,8 @@ whose tables should be measurable.
 At T0 the agent schedules: `instance_info`, `monitoring_role`, `activity`, `locks`,
 `database_stats`, `settings`, `wal`, `checkpointer`, `archiver`,
 `vacuum_progress`, `replication_slots`, `replication_streaming` on primaries,
-`replication_receiver` on standbys, `table_stats`, `index_stats`, and
-`bloat_estimate`. `io` is scheduled on PostgreSQL 16 and newer. The dedicated
+`replication_receiver` on standbys, `table_stats`, `index_stats`,
+`bloat_estimate`, and `trigger_inventory`. `io` is scheduled on PostgreSQL 16 and newer. The dedicated
 ASH sampler is available when enabled. `stat_statements` is scheduled when
 `pg_stat_statements` is installed and preloaded; installing that extension is
 an explicit DBA action, not a pglens action.

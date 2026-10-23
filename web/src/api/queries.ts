@@ -270,6 +270,20 @@ export function useInstanceSettings(
   })
 }
 
+export function useInstanceTriggers(id: string) {
+  return useApiQuery({
+    policy: REFRESH.catalog,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/triggers', {
+          params: { path: { id } },
+          signal,
+        }),
+      ),
+    queryKey: qk.instanceTriggers(id),
+  })
+}
+
 export function useInstanceTables(
   id: string,
   params: QueryParameters<'/api/v1/instances/{id}/tables'> = {},

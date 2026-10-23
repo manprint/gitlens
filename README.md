@@ -436,6 +436,14 @@ Security and operational boundaries:
   (an attribute, a membership, owned objects) and whether the role defaults
   to read-only transactions; the `security.*` advisor rules raise it.
   `pglens-agent check` prints the same and exits 1 for a role that could write.
+- The catalog checks read the system catalogs only. `trigger_inventory`
+  reports, every five minutes and for each monitored database, every user
+  trigger with its state, timing, events and function, and each internal
+  trigger a constraint relies on once it is disabled (`ALTER TABLE ...
+  DISABLE TRIGGER ALL` stops enforcing foreign keys). A partition's
+  inherited trigger is reported only when its state differs from its
+  parent's. The instance page lists them under "Schema objects", and the
+  `trigger.*` advisor rules raise the disabled ones.
 - The integration suite proves the boundary: INT-RO-001 runs every check and
   command at T2 and asserts that the database and the shared catalogs are
   unchanged and that every statement the role sent, as `pg_stat_statements`
@@ -660,6 +668,8 @@ How the rules read the collected data:
 | `backup.no_basebackup_seen` | warning | The cluster archives WAL, but no base backup has been seen running in the last seven days. |
 | `backup.no_strategy` | critical | Neither archiving nor a visible base-backup strategy is configured. |
 | `security.monitoring_role_can_write` | critical | The role pglens connects as could write if a session of it left read-only mode: an attribute, a membership or owned objects (the `monitoring_role` check). |
+| `trigger.constraint_disabled` | critical | The internal triggers that enforce a foreign key (or another constraint) are disabled, so rows that violate it can be written (the `trigger_inventory` check). |
+| `trigger.user_disabled` | warning | A user trigger is disabled: writes to its table no longer run it. |
 | `security.monitoring_role_read_only_off` | warning | The role pglens connects as does not default to read-only transactions in the database it connects to. |
 
 ## Running the agent
@@ -838,6 +848,7 @@ checks:
   activity:        { interval: 10s, by_application: false } # Session activity
   locks:           { interval: 10s }        # Blocking tree (instance scope, T0)
   monitoring_role: { interval: 10m }        # What would let the monitoring role write (security.* rules)
+  trigger_inventory: { interval: 5m }       # Triggers of each database and which are disabled (trigger.* rules)
   table_stats:     { interval: 5m, top_n: 50 }
   index_stats:     { interval: 5m, top_n: 50 }
   vacuum_progress: { interval: 30s }
@@ -953,6 +964,7 @@ checks
   settings           enabled
   stat_statements    disabled  — missing extension pg_stat_statements
   table_stats        enabled
+  trigger_inventory  enabled
   vacuum_progress    enabled
   wal                enabled
 

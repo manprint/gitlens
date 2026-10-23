@@ -5,6 +5,7 @@ import { ErrorState } from '@/components/state'
 import { selectedDatabase } from '@/lib/databases'
 
 import { InstanceHeader } from './InstanceHeader'
+import { CatalogSection } from './CatalogSection'
 import { DatabaseSelector } from './DatabaseSelector'
 import { HostSection } from './HostSection'
 import { OverviewSection } from './OverviewSection'
@@ -100,6 +101,7 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
       <HostSection instanceId={instanceId} />
       <SettingsSection instanceId={instanceId} />
       <RelationsSection instanceId={instanceId} currentTier={instanceQuery.data.perm_tier} />
+      <CatalogSection instanceId={instanceId} />
     </div>
   )
 }

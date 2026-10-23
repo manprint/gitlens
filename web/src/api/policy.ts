@@ -7,6 +7,7 @@ export const REFRESH = {
   ash: { interval: 30_000, staleAfter: 90_000 },
   statements: { interval: 60_000, staleAfter: 180_000 },
   findings: { interval: 60_000, staleAfter: 300_000 },
+  catalog: { interval: 60_000, staleAfter: 300_000 },
   alerts: { interval: 15_000, staleAfter: 60_000 },
   command: { interval: 1_000, staleAfter: 0 },
   static: { interval: 0, staleAfter: 0 },

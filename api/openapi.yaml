@@ -432,6 +432,47 @@ components:
       properties:
         instance_id: { $ref: '#/components/schemas/InstanceId' }
         settings: { type: array, items: { $ref: '#/components/schemas/Setting' } }
+    TriggersResponse:
+      type: object
+      required: [instance_id, triggers, truncated_databases]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        triggers: { type: array, items: { $ref: '#/components/schemas/Trigger' } }
+        truncated_databases:
+          type: array
+          items: { type: string }
+          description: >-
+            Databases with more triggers than the agent reports (1000); their
+            list holds the disabled triggers first.
+    Trigger:
+      type: object
+      required: [datname, schemaname, relname, name, kind, state, function, timing, events, level, constraint, constraint_type, first_seen, last_seen, changed_at]
+      properties:
+        datname: { type: string }
+        schemaname: { type: string }
+        relname: { type: string }
+        name: { type: string }
+        kind:
+          type: string
+          enum: [user, internal]
+          description: >-
+            internal is a trigger PostgreSQL creates to enforce a constraint
+            (foreign key, deferrable unique); it is listed only when disabled.
+        state:
+          type: string
+          enum: [enabled, disabled, replica, always, unknown]
+          description: >-
+            replica fires only in sessions with session_replication_role =
+            replica, always in every session.
+        function: { type: string, description: Schema-qualified trigger function. }
+        timing: { type: string, enum: [BEFORE, AFTER, INSTEAD OF] }
+        events: { type: string, description: 'Events joined by OR, e.g. INSERT OR UPDATE.' }
+        level: { type: string, enum: [ROW, STATEMENT] }
+        constraint: { type: string, description: Constraint an internal trigger enforces; empty otherwise. }
+        constraint_type: { type: string, enum: ['', foreign key, unique, primary key, exclusion, constraint trigger, other] }
+        first_seen: { $ref: '#/components/schemas/Timestamp' }
+        last_seen: { $ref: '#/components/schemas/Timestamp' }
+        changed_at: { $ref: '#/components/schemas/Timestamp' }
     DriftValue:
       type: object
       required: [instance_id, role, value]
@@ -1017,6 +1058,38 @@ paths:
                         first_seen: '2026-08-27T01:00:00Z'
                         last_seen: '2026-08-27T02:00:00Z'
                         changed_at: '2026-08-27T01:00:00Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/triggers:
+    get:
+      tags: [instances]
+      operationId: getInstanceTriggers
+      summary: Return the triggers of the instance's databases.
+      description: >-
+        The latest trigger_inventory scrape of each database reported in the
+        last three hours: every user trigger, internal (constraint) triggers
+        only when disabled, and a partition's inherited trigger only when its
+        state differs from its parent's.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - name: datname
+          in: query
+          required: false
+          schema: { type: string }
+          description: Return the triggers of this database only.
+      responses:
+        '200':
+          description: Triggers by database, schema, table and name.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TriggersResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    triggers:
+                      - { datname: app, schemaname: public, relname: orders, name: audit, kind: user, state: disabled, function: public.audit_orders, timing: AFTER, events: INSERT OR UPDATE, level: ROW, constraint: '', constraint_type: '', first_seen: '2026-08-27T01:00:00Z', last_seen: '2026-08-27T02:00:00Z', changed_at: '2026-08-27T01:30:00Z' }
+                    truncated_databases: []
         '400': { $ref: '#/components/responses/BadRequest' }
 
   /api/v1/instances/{id}/tables:
