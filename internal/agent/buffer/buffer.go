@@ -701,13 +701,15 @@ func openSegment(fpath string, keep uint64) (*Segment, int64, error) {
 	// and cut the records after it. A checkpoint past the end of the file leaves
 	// nothing to walk, and Open moves it back to the end of the file.
 	//
-	// This holds for the checkpoint's own segment only. A segment wholly below the
-	// checkpoint is walked from byte 0, and Open then deletes it unread, so a
-	// corrupt header there can add a cut and a warning but loses nothing. The
-	// checkpoint itself is trusted as a record boundary, since .acked has no
-	// checksum. A corrupt offset there starts the walk mid-record, and the cut
-	// then removes the unacked bytes behind it. That residual is accepted until
-	// .acked is checksummed.
+	// This holds for the checkpoint's own segment only. A segment that Open deletes
+	// as acknowledged is walked from byte 0 first, so a corrupt header there can
+	// add a cut and a warning but loses nothing. A checkpoint past every segment is
+	// the exception: Open moves it to the first segment, which then stays and holds
+	// the unacked records, so a corrupt header there cuts the records behind it,
+	// as it would with no checkpoint. The checkpoint itself is trusted as a record
+	// boundary, since .acked has no checksum. A corrupt offset there starts the
+	// walk mid-record, and the cut then removes the unacked bytes behind it. That
+	// residual is accepted until .acked is checksummed.
 	//
 	// A record that runs past the end of the file is a torn write, and the reader
 	// cannot get past it: an append landing after the torn bytes would be read as
