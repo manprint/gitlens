@@ -29,12 +29,13 @@ type explainConn struct {
 
 	// The explain guard's answers: the session's privileges, the functions
 	// the planner may run in the database, the pg_proc rows for the names it
-	// looks up, the calls hidden in user-defined objects, and the VERBOSE
-	// plan it inspects (plan when nil).
+	// looks up, the calls hidden in user-defined objects, the foreign tables
+	// that estimate remotely, and the VERBOSE plan it inspects (plan when nil).
 	session     string
 	plannable   string
 	functions   string
 	hidden      string
+	remote      string
 	verbosePlan []byte
 	verboseErr  error
 	guardSQL    []string
@@ -52,6 +53,8 @@ func (c *explainConn) guardAnswer(sql string) string {
 		answer = c.functions
 	case strings.Contains(sql, "explain guard, hidden calls"):
 		answer = c.hidden
+	case strings.Contains(sql, "explain guard, remote estimates"):
+		answer = c.remote
 	}
 	if answer == "" {
 		return fallback
