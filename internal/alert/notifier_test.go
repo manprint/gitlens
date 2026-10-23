@@ -125,3 +125,81 @@ func TestTick_RetriesAFailedNotificationOnALaterPass(t *testing.T) {
 	require.NoError(t, e.Tick(context.Background()))
 	require.Equal(t, 2, slack.sent)
 }
+
+// claimStore fails the first claims it is asked for and records the rest as
+// won, so a transition can be persisted with no claim on record.
+type claimStore struct {
+	markStore
+	failClaims int
+}
+
+func (s *claimStore) ClaimNotification(context.Context, string, string, string, Alert) (bool, error) {
+	if s.failClaims > 0 {
+		s.failClaims--
+		return false, errors.New("claim failed")
+	}
+	return true, nil
+}
+
+// TestChannelNotifier_DeliversATransitionWhoseClaimFailed — a transition that is
+// persisted but whose claim failed is not dropped. The next pass claims it and
+// delivers it, and the failed claim counts as one of its attempts.
+func TestChannelNotifier_DeliversATransitionWhoseClaimFailed(t *testing.T) {
+	a := Alert{Key: "k", RuleID: "r", Severity: SeverityWarning, State: StateFiring, StartedAt: time.Unix(1, 0), LastEvalAt: time.Unix(1, 0)}
+	store := &claimStore{failClaims: 1}
+	slack := &testChannel{name: "slack"}
+	n := NewChannelNotifier(store, slack)
+	retrier, ok := n.(interface{ Retry(context.Context) error })
+	require.True(t, ok, "the channel notifier must retry failed deliveries")
+
+	require.ErrorContains(t, n.Notify(context.Background(), a), "claim failed")
+	require.Zero(t, slack.sent, "nothing is sent before the claim is on record")
+	require.NoError(t, retrier.Retry(context.Background()))
+	require.Zero(t, slack.sent, "a claim is not made again in the pass that failed it")
+	require.NoError(t, retrier.Retry(context.Background()))
+	require.Equal(t, 1, slack.sent)
+	require.Equal(t, []notificationMark{{phase: "fire", ok: true, attempts: 2}}, store.marks)
+}
+
+// ctxChannel refuses to send once its context is done, as the HTTP channel does.
+type ctxChannel struct {
+	name string
+	err  error
+	sent int
+}
+
+func (c *ctxChannel) Name() string { return c.name }
+func (c *ctxChannel) Send(ctx context.Context, _ notify.Message) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if c.err != nil {
+		return c.err
+	}
+	c.sent++
+	return nil
+}
+
+// TestChannelNotifier_AnExpiredCycleDoesNotUseUpAnAttempt — when the cycle has
+// run out of time before a retry, the channel is not blamed for the failure, so
+// the delivery keeps all of its attempts.
+func TestChannelNotifier_AnExpiredCycleDoesNotUseUpAnAttempt(t *testing.T) {
+	a := Alert{Key: "k", RuleID: "r", Severity: SeverityWarning, State: StateFiring, StartedAt: time.Unix(1, 0), LastEvalAt: time.Unix(1, 0)}
+	store := &markStore{}
+	slack := &ctxChannel{name: "slack", err: errors.New("HTTP 503")}
+	n := NewChannelNotifier(store, slack)
+	retrier := n.(interface{ Retry(context.Context) error })
+	require.Error(t, n.Notify(context.Background(), a))
+
+	expired, cancel := context.WithCancel(context.Background())
+	cancel()
+	for i := 0; i < maxNotifyAttempts+2; i++ {
+		_ = retrier.Retry(expired)
+	}
+	require.Zero(t, slack.sent)
+
+	slack.err = nil
+	require.NoError(t, retrier.Retry(context.Background()))
+	require.Equal(t, 1, slack.sent, "the delivery is still pending after the expired passes")
+	require.Equal(t, []notificationMark{{phase: "fire", ok: false, attempts: 1}, {phase: "fire", ok: true, attempts: 2}}, store.marks)
+}

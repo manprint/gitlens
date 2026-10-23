@@ -31,12 +31,16 @@ type channelNotifier struct {
 // memory: a restart or a change of leader drops it, and the claim row keeps the
 // failure on record.
 type pendingDelivery struct {
-	dedupID  string
-	channel  notify.Channel
-	phase    string
-	message  notify.Message
-	attempts int
-	failedIn int
+	dedupID string
+	channel notify.Channel
+	phase   string
+	message notify.Message
+	// unclaimed marks a delivery whose claim failed. It is not on record yet,
+	// so the next pass claims it before it sends, and it sends only if it wins.
+	unclaimed bool
+	alert     Alert
+	attempts  int
+	failedIn  int
 }
 
 func NewChannelNotifier(store Store, channels ...notify.Channel) Notifier {
@@ -52,26 +56,38 @@ func (n *channelNotifier) Notify(ctx context.Context, a Alert) error {
 	// the others from delivering the same transition.
 	var errs []error
 	for _, ch := range n.channels {
-		won, err := n.store.ClaimNotification(ctx, DedupID(a), ch.Name(), phase, a)
+		d := pendingDelivery{dedupID: DedupID(a), channel: ch, phase: phase, alert: a}
+		won, err := n.store.ClaimNotification(ctx, d.dedupID, ch.Name(), phase, a)
 		if err != nil {
+			// The transition is already persisted, so without a claim it would
+			// never be delivered. The claim is made again on a later pass.
 			errs = append(errs, err)
+			d.unclaimed = true
+			d.attempts++
+			n.keep(d)
 			continue
 		}
 		if !won {
 			continue
 		}
-		m := notify.Message{DedupID: DedupID(a), RuleID: a.RuleID, Severity: string(a.Severity), Phase: phase, Summary: a.Summary, Database: a.Datname, Value: a.Value, At: a.LastEvalAt, Labels: a.Labels}
-		if a.ClusterID != nil {
-			m.Cluster = strconv.FormatInt(*a.ClusterID, 10)
-		}
-		if a.InstanceID != nil {
-			m.Instance = uuid.MustParse(a.InstanceID.String()).String()
-		}
-		if err := n.deliver(ctx, pendingDelivery{dedupID: DedupID(a), channel: ch, phase: phase, message: m}); err != nil {
+		d.message = newMessage(a, phase)
+		if err := n.deliver(ctx, d); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// newMessage builds the message a channel receives for one transition.
+func newMessage(a Alert, phase string) notify.Message {
+	m := notify.Message{DedupID: DedupID(a), RuleID: a.RuleID, Severity: string(a.Severity), Phase: phase, Summary: a.Summary, Database: a.Datname, Value: a.Value, At: a.LastEvalAt, Labels: a.Labels}
+	if a.ClusterID != nil {
+		m.Cluster = strconv.FormatInt(*a.ClusterID, 10)
+	}
+	if a.InstanceID != nil {
+		m.Instance = uuid.MustParse(a.InstanceID.String()).String()
+	}
+	return m
 }
 
 // Retry makes again the deliveries that failed on an earlier pass. A delivery
@@ -92,6 +108,22 @@ func (n *channelNotifier) Retry(ctx context.Context) error {
 	n.mu.Unlock()
 	var errs []error
 	for _, d := range due {
+		if d.unclaimed {
+			won, err := n.store.ClaimNotification(ctx, d.dedupID, d.channel.Name(), d.phase, d.alert)
+			if err != nil {
+				d.attempts++
+				n.keep(d)
+				errs = append(errs, err)
+				continue
+			}
+			if !won {
+				// Claimed on record by an earlier attempt or another replica, which
+				// delivers it, so this pass has nothing to send.
+				continue
+			}
+			d.unclaimed = false
+			d.message = newMessage(d.alert, d.phase)
+		}
 		if err := n.deliver(ctx, d); err != nil {
 			errs = append(errs, err)
 		}
@@ -105,17 +137,30 @@ func (n *channelNotifier) Retry(ctx context.Context) error {
 // deliver makes one attempt at a delivery and records it. A failed attempt is
 // kept for a later pass while attempts remain.
 func (n *channelNotifier) deliver(ctx context.Context, d pendingDelivery) error {
-	d.attempts++
 	sendErr := d.channel.Send(ctx, d.message)
+	if sendErr != nil && ctx.Err() != nil {
+		// The cycle ran out of time before the channel answered, so the attempt
+		// says nothing about the channel. It is kept for a later pass without
+		// being counted, or the time the rules took would use up the attempts.
+		n.keep(d)
+		return fmt.Errorf("channel %s: %w", d.channel.Name(), sendErr)
+	}
+	d.attempts++
 	markErr := n.store.MarkNotification(ctx, d.dedupID, d.channel.Name(), d.phase, sendErr == nil, d.attempts, sendErr)
 	if sendErr != nil {
-		if d.attempts < maxNotifyAttempts {
-			n.mu.Lock()
-			d.failedIn = n.passes
-			n.pending = append(n.pending, d)
-			n.mu.Unlock()
-		}
+		n.keep(d)
 		return fmt.Errorf("channel %s: %w", d.channel.Name(), sendErr)
 	}
 	return markErr
+}
+
+// keep queues a delivery for the next pass while it has attempts left.
+func (n *channelNotifier) keep(d pendingDelivery) {
+	if d.attempts >= maxNotifyAttempts {
+		return
+	}
+	n.mu.Lock()
+	d.failedIn = n.passes
+	n.pending = append(n.pending, d)
+	n.mu.Unlock()
 }
