@@ -344,13 +344,13 @@ func (s *Staleness) ensureLeader(ctx context.Context) error {
 	// session is pinged every cycle: one that does not answer no longer holds the
 	// lock, and the leadership goes with it.
 	if s.conn != nil && s.conn.Conn().IsClosed() {
-		s.releaseLeaderConn()
+		s.releaseLeaderConn(ctx)
 	}
 	if s.hasLock && s.conn != nil {
 		if err := s.conn.Ping(ctx); err == nil {
 			return nil
 		}
-		s.releaseLeaderConn()
+		s.releaseLeaderConn(ctx)
 	}
 	if s.conn == nil {
 		conn, err := s.pool.Acquire(ctx)
@@ -369,7 +369,7 @@ func (s *Staleness) ensureLeader(ctx context.Context) error {
 		// Give the connection back instead of pinning a broken one: every
 		// later cycle would otherwise retry on the same dead session, and
 		// this evaluator could never regain leadership without a restart.
-		s.releaseLeaderConn()
+		s.releaseLeaderConn(ctx)
 		return fmt.Errorf("try advisory lock: %w", err)
 	}
 	s.hasLock = locked
@@ -382,9 +382,9 @@ func (s *Staleness) ensureLeader(ctx context.Context) error {
 // The session is closed, not returned to the pool: a session that may still
 // hold the advisory lock would keep it for whoever borrowed the connection
 // next, and this replica has given up the lock.
-func (s *Staleness) releaseLeaderConn() {
+func (s *Staleness) releaseLeaderConn(ctx context.Context) {
 	if s.conn != nil {
-		closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		closeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		_ = s.conn.Conn().Close(closeCtx)
 		cancel()
 		s.conn.Release()
