@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/manprint/pglens/internal/agent"
+	"github.com/manprint/pglens/internal/agent/buffer"
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/host"
 	"github.com/manprint/pglens/internal/wire"
@@ -145,4 +148,31 @@ func TestReportScheduled_MonitoredMeansCollected(t *testing.T) {
 		{Name: "old", Monitored: true},
 		{Name: "never", Monitored: false, SkipReason: "db_budget"},
 	}, got)
+}
+
+// TestFlushEnvelopeBoundsAnUnreachableTarget: a flush must not hold an
+// unreachable target for longer than its refresh timeout. The shutdown flush
+// runs under the stop grace of the container runtime, which is 10s by default,
+// so a hung target that also waited out the capability refresh and the
+// extension check would outlast it.
+func TestFlushEnvelopeBoundsAnUnreachableTarget(t *testing.T) {
+	t.Setenv("PGLENS_IDENTITY_PATH", filepath.Join(t.TempDir(), "identity.json"))
+	target := newHungTarget(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr, err := agent.NewManager(ctx, "hung", target.dsn, agent.DefaultConnOptions(), clock.System())
+	require.NoError(t, err)
+	t.Cleanup(mgr.Close)
+
+	buf, err := buffer.Open(filepath.Join(t.TempDir(), "buffer"), buffer.Options{MaxSize: 1 << 20, MaxAge: time.Hour, Clock: clock.System()})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = buf.Close() })
+	pusher := agent.NewPusher("http://127.0.0.1:1/", "token", clock.System())
+	pusher.SetBuffer(buf)
+
+	var mu sync.Mutex
+	pending := map[string][]wire.Result{"hung": {{Check: "probe", TS: time.Now()}}}
+	began := time.Now()
+	flushEnvelope(ctx, []*agent.Manager{mgr}, &mu, pending, &edgeStates{byName: map[string]edgeState{}}, map[string]bool{}, map[string]map[string]bool{}, pusher)
+	require.Less(t, time.Since(began), 10*time.Second, "a flush waited longer than the stop grace for one unreachable target")
 }

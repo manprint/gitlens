@@ -403,23 +403,9 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 		// Shared() can wait for a pool connection, so bound every target's
 		// refresh/discovery cycle independently of the agent lifetime.
 		targetCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		if err := mgr.RefreshCapabilities(targetCtx); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: refresh capabilities for %s: %v\n", mgr.Database(), err)
-		}
-		exts := map[string]bool{}
-		for _, name := range []string{"pg_stat_statements"} {
-			exts[name] = mgr.HasExtension(name) //nolint:contextcheck // Manager refreshes this before each envelope; accessor takes no context
-		}
-		// Discover was never being called again after startup, so
-		// wire.Instance.Databases (and therefore the server's `databases`
-		// table / db_budget skip_reason reporting) stayed permanently
-		// empty on every real push — nothing had ever exercised this path
-		// end to end before SYS-DB-001 (test/scenario/db.go).
-		dbs, err := mgr.Discover(targetCtx)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: discover databases for %s: %v\n", mgr.Database(), err)
-		}
-		dbs = reportScheduled(dbs, scheduled[mgr.Database()])
+		// The role refresh runs first. An unreachable target then costs this one
+		// timeout, instead of its capability refresh and extension check waiting
+		// out their own timeouts before the role refresh reports it.
 		// Role() alone would report a permanently stale, cached-at-connect
 		// value — see RefreshRole's own doc comment for why this matters
 		// (SYS-REPL-001). A RefreshRole failure means this target could not
@@ -440,6 +426,23 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 			cancel()
 			continue
 		}
+		if err := mgr.RefreshCapabilities(targetCtx); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: refresh capabilities for %s: %v\n", mgr.Database(), err)
+		}
+		exts := map[string]bool{}
+		for _, name := range []string{"pg_stat_statements"} {
+			exts[name] = mgr.HasExtension(name) //nolint:contextcheck // Manager refreshes this before each envelope; accessor takes no context
+		}
+		// Discover was never being called again after startup, so
+		// wire.Instance.Databases (and therefore the server's `databases`
+		// table / db_budget skip_reason reporting) stayed permanently
+		// empty on every real push — nothing had ever exercised this path
+		// end to end before SYS-DB-001 (test/scenario/db.go).
+		dbs, err := mgr.Discover(targetCtx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: discover databases for %s: %v\n", mgr.Database(), err)
+		}
+		dbs = reportScheduled(dbs, scheduled[mgr.Database()])
 		edges := lastEdgeState.build(mgr.Database(), mgr.InstanceID().String(), mgr.Role(), results) //nolint:contextcheck // InstanceID and Role: Manager caches these at connect time; the accessors take no context
 		// Appended after the edges are built so the synthetic result cannot
 		// influence topology derivation.
