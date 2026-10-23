@@ -103,6 +103,22 @@ func (s *pgStore) MarkNotification(ctx context.Context, dedupID, channel, phase 
 	return err
 }
 
+// Purge removes the history that is older than before: resolved alerts, the
+// deliveries of episodes that no longer have an open alert, and silences that
+// ended before it. A pending or firing alert keeps its row, and so does every
+// delivery of an episode still open, because the dedup of that episode is
+// the claim those rows hold.
+func (s *pgStore) Purge(ctx context.Context, before time.Time) error {
+	if _, err := s.pool.Exec(ctx, `DELETE FROM alerts WHERE state='resolved' AND resolved_at < $1`, before); err != nil {
+		return err
+	}
+	if _, err := s.pool.Exec(ctx, `DELETE FROM notifications n WHERE n.sent_at < $1 AND NOT EXISTS (SELECT 1 FROM alerts a WHERE a.started_at = n.started_at AND a.state <> 'resolved')`, before); err != nil {
+		return err
+	}
+	_, err := s.pool.Exec(ctx, `DELETE FROM silences WHERE ends_at < $1`, before)
+	return err
+}
+
 func (s *pgStore) Active(ctx context.Context, f Filter) ([]Alert, error) {
 	query := `SELECT alert_key, rule_id, severity, state, cluster_id, instance_id, datname, labels, value, summary, started_at, last_eval_at, resolved_at FROM alerts WHERE TRUE`
 	// An explicit resolved state must not be combined with the default

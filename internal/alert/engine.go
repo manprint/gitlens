@@ -19,6 +19,17 @@ import (
 
 const defaultEngineInterval = 30 * time.Second
 
+const (
+	// historyRetention is how long a resolved alert, the deliveries of its
+	// episode and an expired silence are kept. It is the span the advisor
+	// keeps its resolved findings for, so the two histories cover the same
+	// time.
+	historyRetention = 90 * 24 * time.Hour
+	// purgeInterval spaces the purge out: a tick every few seconds has no
+	// use for a sweep of the history tables.
+	purgeInterval = time.Hour
+)
+
 // Source produces samples for rules of one kind.
 type Source interface {
 	Kind() string
@@ -55,6 +66,12 @@ type Notifier interface {
 // and makes them again on later passes of the engine.
 type retrier interface {
 	Retry(context.Context) error
+}
+
+// purger is implemented by a store that can remove the history older than a
+// cutoff. A store that cannot keeps its history.
+type purger interface {
+	Purge(context.Context, time.Time) error
 }
 
 // Filter is the query selector used by the alert store.
@@ -104,6 +121,8 @@ type Engine struct {
 	started     bool
 	stopped     bool
 	stateLoaded bool
+	// purgedAt is when the history was last purged; zero until the first.
+	purgedAt time.Time
 }
 
 func NewEngine(pool *pgxpool.Pool, clk clock.Clock, st Store, n Notifier, srcs []Source) *Engine {
@@ -373,6 +392,9 @@ func (e *Engine) Tick(ctx context.Context) error {
 		return !ok
 	}, now))...)
 	e.eval.Forget(now.Add(-time.Hour))
+	if err := e.purgeHistory(ctx, now); err != nil {
+		errs = append(errs, err)
+	}
 	// The retries come last, so that a channel which hangs cannot take the
 	// time the rules need.
 	if r, ok := e.notifier.(retrier); ok {
@@ -381,6 +403,29 @@ func (e *Engine) Tick(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// purgeHistory removes the history past historyRetention, at most once per
+// purgeInterval. The time of the last purge is kept only when it succeeds, so
+// a failed one is tried again on the next pass.
+func (e *Engine) purgeHistory(ctx context.Context, now time.Time) error {
+	p, ok := e.store.(purger)
+	if !ok {
+		return nil
+	}
+	e.mu.Lock()
+	due := e.purgedAt.IsZero() || now.Sub(e.purgedAt) >= purgeInterval
+	e.mu.Unlock()
+	if !due {
+		return nil
+	}
+	if err := p.Purge(ctx, now.Add(-historyRetention)); err != nil {
+		return fmt.Errorf("purge alert history: %w", err)
+	}
+	e.mu.Lock()
+	e.purgedAt = now
+	e.mu.Unlock()
+	return nil
 }
 
 // endUnsampled closes the episodes that a pass did not confirm. rule is the

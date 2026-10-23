@@ -65,6 +65,52 @@ func TestTick_NotifiesOnFire(t *testing.T) {
 	require.Len(t, notifier.alerts, 1)
 }
 
+// purgeStore is an engineStore that also keeps history, and records the
+// cutoffs that history was purged to. A non-nil err makes the purge fail.
+type purgeStore struct {
+	*engineStore
+	cutoffs []time.Time
+	err     error
+}
+
+func (s *purgeStore) Purge(_ context.Context, before time.Time) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.cutoffs = append(s.cutoffs, before)
+	return nil
+}
+
+// TestTick_PurgesHistoryOncePerInterval: the first pass purges the history
+// past its retention, the passes before purgeInterval has elapsed do not, and
+// a purge that fails is tried again on the next pass.
+func TestTick_PurgesHistoryOncePerInterval(t *testing.T) {
+	t0 := time.Unix(1_000_000, 0)
+	clk := clock.NewFake(t0)
+	store := &purgeStore{engineStore: &engineStore{}}
+	e := NewEngine(nil, clk, store, &engineNotifier{}, []Source{engineSource{kind: "metric"}})
+	ctx := context.Background()
+
+	require.NoError(t, e.Tick(ctx))
+	require.Equal(t, []time.Time{t0.Add(-historyRetention)}, store.cutoffs)
+
+	clk.Advance(30 * time.Second)
+	require.NoError(t, e.Tick(ctx))
+	require.Len(t, store.cutoffs, 1, "a pass inside the interval does not purge")
+
+	clk.Advance(purgeInterval)
+	require.NoError(t, e.Tick(ctx))
+	require.Equal(t, t0.Add(30*time.Second+purgeInterval).Add(-historyRetention), store.cutoffs[1])
+
+	store.err = errors.New("database is down")
+	clk.Advance(purgeInterval)
+	require.ErrorContains(t, e.Tick(ctx), "purge alert history")
+	store.err = nil
+	clk.Advance(time.Second)
+	require.NoError(t, e.Tick(ctx))
+	require.Len(t, store.cutoffs, 3, "a failed purge is retried on the next pass")
+}
+
 func TestTick_RestoresPersistedFiringAlert(t *testing.T) {
 	now := time.Unix(100, 0)
 	id := uuid.New()

@@ -4,6 +4,7 @@ package alert
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -145,5 +146,88 @@ TRUNCATE alerts RESTART IDENTITY`)
 		got, err = st.Active(ctx, Filter{IncludeResolved: true, Limit: 2})
 		require.NoError(t, err)
 		require.Equal(t, []string{"k/resolved", "k/firing"}, keys(got))
+	})
+}
+
+// TestINTALERT016_HistoryPurgeKeepsOpenEpisodes: the purge removes resolved
+// alerts, deliveries and silences older than the cutoff, and keeps a firing
+// episode with its deliveries however old it is, since its dedup depends on them.
+func TestINTALERT016_HistoryPurgeKeepsOpenEpisodes(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		pool := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		ctx := context.Background()
+		_, err := pool.Exec(ctx, `
+CREATE TABLE IF NOT EXISTS alerts (alert_key text NOT NULL, tenant_id text NOT NULL DEFAULT 'default', rule_id text NOT NULL, severity text NOT NULL, state text NOT NULL, cluster_id bigint, instance_id uuid, datname text, labels jsonb NOT NULL, value double precision, summary text NOT NULL, started_at timestamptz NOT NULL, last_eval_at timestamptz NOT NULL, resolved_at timestamptz, PRIMARY KEY (tenant_id, alert_key, started_at));
+CREATE TABLE IF NOT EXISTS notifications (notification_id bigserial PRIMARY KEY, tenant_id text NOT NULL DEFAULT 'default', alert_key text NOT NULL, started_at timestamptz NOT NULL, channel text NOT NULL, phase text NOT NULL, sent_at timestamptz NOT NULL DEFAULT now(), ok boolean NOT NULL, attempts integer NOT NULL, error text);
+CREATE UNIQUE INDEX IF NOT EXISTS alert_store_notifications_once ON notifications (tenant_id, alert_key, started_at, channel, phase);
+CREATE TABLE IF NOT EXISTS silences (silence_id uuid PRIMARY KEY, tenant_id text NOT NULL DEFAULT 'default', matchers jsonb NOT NULL, reason text NOT NULL, starts_at timestamptz NOT NULL, ends_at timestamptz NOT NULL);
+TRUNCATE alerts, notifications, silences RESTART IDENTITY`)
+		require.NoError(t, err)
+
+		now := time.Now().UTC().Truncate(time.Microsecond)
+		old := now.Add(-100 * 24 * time.Hour)
+		recent := now.Add(-24 * time.Hour)
+		ancient := now.Add(-200 * 24 * time.Hour)
+		cutoff := now.Add(-historyRetention)
+		// Each episode has a start, a state and, when resolved, the time it resolved.
+		episodes := []struct {
+			key       string
+			started   time.Time
+			resolved  *time.Time
+			sentAt    time.Time
+			wantAlert bool
+		}{
+			{"old", old.Add(-time.Hour), &old, old, false},
+			{"recent", recent.Add(-time.Hour), &recent, recent, true},
+			{"open", ancient, nil, ancient, true},
+		}
+		st := NewPgStore(pool)
+		for _, ep := range episodes {
+			state := StateResolved
+			if ep.resolved == nil {
+				state = StateFiring
+			}
+			a := Alert{Key: ep.key, RuleID: "r", Severity: SeverityWarning, State: state, Summary: "s", StartedAt: ep.started, LastEvalAt: ep.started, ResolvedAt: ep.resolved, Labels: map[string]string{}}
+			require.NoError(t, st.Upsert(ctx, a))
+			_, err := pool.Exec(ctx, `INSERT INTO notifications (alert_key, started_at, channel, phase, sent_at, ok, attempts) VALUES ($1,$2,'slack','fire',$3,true,1)`, ep.key+"/"+ep.started.Format(time.RFC3339Nano), ep.started, ep.sentAt)
+			require.NoError(t, err)
+		}
+		_, err = pool.Exec(ctx, `INSERT INTO silences (silence_id, matchers, reason, starts_at, ends_at) VALUES
+			(gen_random_uuid(), '[]', 'expired long ago', $1, $2),
+			(gen_random_uuid(), '[]', 'expired recently', $3, $4),
+			(gen_random_uuid(), '[]', 'still active', $3, $5)`, old.Add(-time.Hour), old, recent.Add(-time.Hour), recent, now.Add(time.Hour))
+		require.NoError(t, err)
+
+		require.NoError(t, st.(purger).Purge(ctx, cutoff))
+
+		var keys []string
+		rows, err := pool.Query(ctx, `SELECT alert_key FROM alerts ORDER BY alert_key`)
+		require.NoError(t, err)
+		for rows.Next() {
+			var k string
+			require.NoError(t, rows.Scan(&k))
+			keys = append(keys, k)
+		}
+		require.NoError(t, rows.Err())
+		rows.Close()
+		require.Equal(t, []string{"open", "recent"}, keys, "the resolved alert past the cutoff goes; the firing one never does")
+
+		var deliveries []string
+		rows, err = pool.Query(ctx, `SELECT alert_key FROM notifications ORDER BY alert_key`)
+		require.NoError(t, err)
+		for rows.Next() {
+			var k string
+			require.NoError(t, rows.Scan(&k))
+			deliveries = append(deliveries, k)
+		}
+		require.NoError(t, rows.Err())
+		rows.Close()
+		require.Len(t, deliveries, 2, "the delivery of the open episode and of the recent one stay")
+		require.True(t, strings.HasPrefix(deliveries[0], "open/") && strings.HasPrefix(deliveries[1], "recent/"), deliveries)
+
+		var silences int
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM silences`).Scan(&silences))
+		require.Equal(t, 2, silences, "the silence that expired long ago goes; the recent and the active one stay")
 	})
 }
