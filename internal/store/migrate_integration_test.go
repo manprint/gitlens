@@ -51,7 +51,7 @@ func requireMigrationLockFree(t *testing.T, ctx context.Context, dsn string) {
 		if err != nil {
 			return false
 		}
-		defer func() { _ = probe.Close(context.Background()) }()
+		defer func() { _ = probe.Close(ctx) }()
 		var acquired bool
 		if err := probe.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtext('pglens:migrations'))`).Scan(&acquired); err != nil {
 			return false
