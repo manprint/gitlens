@@ -36,7 +36,7 @@ Da qui discendono i principi non negoziabili:
 |---|------|---------------|------|-------|-----------------|---------|--------|
 | **L1** | Unit Go | Logica pura: aggregazione ASH, calcolo delta, reset detection, parsing LSN, selezione top-N, valutazione regole alert, matching topologia | `**/*_test.go` accanto al codice | `testing` + `testify/require` | ❌ no IO | ogni push | **< 60s** |
 | **L2** | Integration Go | Le query SQL fanno davvero quello che crediamo, su ogni versione PG. Permessi. Differenze di vista per versione. Reset reali | `internal/**/it_*_test.go`, tag `integration` | `testcontainers-go` | ✅ container effimero | ogni PR | **< 5 min** |
-| **L3** | E2E sistema | Il sistema completo (agent + server + TSDB) sotto guasti reali: failover, partizioni, deadlock, lock storm, slow query, cardinalità, buffer, skew | `test/e2e/` | Go + `docker compose` + Toxiproxy | ✅ topologie multi-nodo | PR (smoke) / nightly (full) | **~20 min / ~80 min** |
+| **L3** | E2E sistema | Il sistema completo (agent + server + TSDB) sotto guasti reali: failover, partizioni, deadlock, lock storm, slow query, cardinalità, buffer, skew | `test/e2e/` | Go + `docker compose` + Toxiproxy | ✅ topologie multi-nodo | PR (smoke) / nightly (full) | **18-19 min / 66-81 min** |
 | **L4** | Component frontend | Componenti React con logica: formattazione, stati vuoto/errore/gap, form validation, riduttori di filtro | `web/src/**/*.test.{ts,tsx}` | Vitest + Testing Library + MSW | ❌ API mockata | ogni PR | **< 90s** |
 | **L5** | E2E frontend | Il browser vede la verità: click, form, drill-down, grafici, permessi UI, stati degradati | `web/e2e/` | Playwright | ✅ contro stack L3 | PR (smoke) / nightly (full) | **8 min / 20 min** |
 
@@ -423,12 +423,12 @@ func newPG(t *testing.T, version string) *pgxpool.Pool {
 1. Un container per (versione PG × profilo permessi) per package, condiviso via `TestMain`. I test ottengono un **database isolato** (`CREATE DATABASE test_<n>`), non un container isolato.
 2. `testcontainers` **Reuse** in locale (`TESTCONTAINERS_REUSE_ENABLE=true`) per non ripagare l'avvio a ogni `go test`. Mai in CI: il riuso nasconde le dipendenze dall'ordine.
 3. `fsync=off`, `full_page_writes=off`, `synchronous_commit=off`, volume su tmpfs. Sono container usa-e-getta: la durabilità non serve e costa.
-4. Matrice PG **ridotta su PR** (15, 18), **completa nightly** (15→19). Le tre versioni scelte coprono i tre regimi: minimo supportato, mediano, ultimo.
+4. Matrice PG **ridotta in locale**: senza `PGLENS_PG_VERSIONS` si eseguono 15 e 18, cioè il minimo supportato e l'ultima major con release stabile. Il job `integration` di `ci.yml` esegue 15→19 su ogni PR (§11.2).
 
 ### 4.3 Matrice versioni
 
 ```go
-var pgVersions = versionsFromEnv() // PR: "15,18" · nightly: "15,16,17,18,19"
+var pgVersions = versionsFromEnv() // CI: "15,16,17,18,19" · senza variabile: "15,18"
 
 func TestCheck_StatIO(t *testing.T) {
 	forEachPG(t, func(t *testing.T, pg *PG) {
@@ -1001,7 +1001,7 @@ Il catalogo è generato dai `Register` in `test/scenario/` e dalle registrazioni
 | `SYS-AGENT-001` | agent restart with its volume keeps the instance id | standalone | sì | phase_06.md#5.7, I-1 |
 | `SYS-AGENT-002` | agent restart WITHOUT its volume: a new instance_id appears (documented failure) | standalone |  | phase_06.md#5.7, IDEA.md#2.2 |
 | `SYS-AGENT-003` | buffer directory on a tiny tmpfs, server stopped until it fills | standalone |  | phase_06.md#5.7, I-7 |
-| `SYS-AGENT-004` | agent container started with a 5-minute clock offset | standalone |  | phase_06.md#5.7 |
+| `SYS-AGENT-004` | agent container started with a 5-minute clock offset; proves `/healthz` `clock_skew_seconds` settles near 300 and metrics keep landing; no check of the stderr skew warning | standalone |  | phase_06.md#5.7 |
 | `SYS-AGENT-005` | UPDATE agents SET revoked_at = now(): next push returns 401, agent stops collecting | standalone |  | phase_06.md#5.7 |
 | `SYS-NET-001` | server outage: buffered samples survive, none dropped, none duplicated | standalone | sì | phase_06.md#5.7, I-3 |
 | `SYS-NET-003` | black hole between agent and PostgreSQL: agent stays responsive | standalone | sì | phase_06.md#5.7 |
@@ -1056,7 +1056,7 @@ Il catalogo è generato dai `Register` in `test/scenario/` e dalle registrazioni
 
 Questi ID compaiono nei piani ma non hanno ancora un `Register`, quindi non sono nel catalogo: `SYS-AGENT-006`, `SYS-DB-002`, `SYS-DB-003`, `SYS-HA-001`, `SYS-LOAD-001`, `SYS-LOAD-004`, `SYS-LOAD-006`, `SYS-LOAD-007`, `SYS-NET-002`, `SYS-NET-004`, `SYS-PERM-003`, `SYS-POOL-001`, `SYS-POOL-002`, `SYS-RESET-003`, `SYS-SLOT-002`, `SYS-WAL-001`. Un ID entra nel catalogo quando ha una registrazione.
 
-**Smoke set per PR** (`make test-e2e`, cioè `-run Smoke`, ~20 min): gli undici `TestSmoke_*` di `test/e2e/smoke_test.go`, cioè `SYS-HARNESS-001`, `SYS-TOPO-001`, `SYS-RESET-001`, `SYS-AGENT-001`, `SYS-PERM-001`, `SYS-PERM-002`, `SYS-REPL-001`, `SYS-NET-003`, `SYS-NET-001`, `SYS-LOAD-003`, `SYS-LOAD-008`, più `TestUI_Smoke` (`SYS-UI-000`), che il pattern `-run Smoke` seleziona anche. `SYS-UI-000` non ha il flag *Smoke* nella registrazione, quindi la colonna della tabella non lo segna.
+**Smoke set per PR** (`make test-e2e`, cioè `-run Smoke`, 18-19 min): gli undici `TestSmoke_*` di `test/e2e/smoke_test.go`, cioè `SYS-HARNESS-001`, `SYS-TOPO-001`, `SYS-RESET-001`, `SYS-AGENT-001`, `SYS-PERM-001`, `SYS-PERM-002`, `SYS-REPL-001`, `SYS-NET-003`, `SYS-NET-001`, `SYS-LOAD-003`, `SYS-LOAD-008`, più `TestUI_Smoke` (`SYS-UI-000`), che il pattern `-run Smoke` seleziona anche. `SYS-UI-000` non ha il flag *Smoke* nella registrazione, quindi la colonna della tabella non lo segna.
 **Full set**: nightly, tutte le topologie × `AGENT_MODE` × versioni PG.
 
 ---
