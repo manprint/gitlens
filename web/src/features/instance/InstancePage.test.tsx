@@ -70,6 +70,17 @@ function renderPage(
       tables: [],
       truncated_databases: [],
     }),
+    ok('getInstanceFunctions', {
+      instance_id: INSTANCE_ID,
+      window_seconds: 3600,
+      databases: [],
+      functions: [],
+    }),
+    ok('getInstanceSecurityDefinerFunctions', {
+      instance_id: INSTANCE_ID,
+      functions: [],
+      truncated_databases: [],
+    }),
     ok('getInstanceUnindexedForeignKeys', {
       instance_id: INSTANCE_ID,
       foreign_keys: [],

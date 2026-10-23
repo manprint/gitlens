@@ -84,7 +84,7 @@ ORDER BY 1`)
 // monitoring role sent is one that reads.
 func TestINTRO001_AgentOnlyReads(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
-		auditAgentOnlyReads(t, pg, "", []string{"trigger", "fk_unindexed", "extension", "sequence", "partitioned_table"}, "")
+		auditAgentOnlyReads(t, pg, "", []string{"trigger", "fk_unindexed", "extension", "sequence", "partitioned_table", "function_tracking", "security_definer_function"}, "")
 	})
 }
 
@@ -99,7 +99,7 @@ func TestINTRO002_AgentOnlyReadsPostGIS(t *testing.T) {
 CREATE TABLE ro_audit_places (id int PRIMARY KEY, pt geometry(Point, 4326), area geometry(Polygon));
 CREATE INDEX ON ro_audit_places USING gist (pt);
 INSERT INTO ro_audit_places SELECT g, ST_SetSRID(ST_MakePoint(g, g), 4326) FROM generate_series(1, 100) g`,
-			[]string{"trigger", "fk_unindexed", "extension", "spatial_column", "sequence", "partitioned_table"},
+			[]string{"trigger", "fk_unindexed", "extension", "spatial_column", "sequence", "partitioned_table", "function_tracking", "security_definer_function"},
 			"belongs to extension postgis_topology")
 	})
 }
@@ -116,12 +116,14 @@ func auditAgentOnlyReads(t *testing.T, pg *pgtest.PG, extraFixture string, kinds
 		ctx := context.Background()
 		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
 		t.Cleanup(func() {
-			_, _ = admin.Exec(context.Background(), "DROP TABLE IF EXISTS ro_audit_child, ro_audit, ro_audit_places, ro_audit_parts; DROP FUNCTION IF EXISTS ro_audit_touch(); DROP SEQUENCE IF EXISTS ro_audit_fresh, ro_audit_down")
+			_, _ = admin.Exec(context.Background(), "DROP TABLE IF EXISTS ro_audit_child, ro_audit, ro_audit_places, ro_audit_parts; DROP FUNCTION IF EXISTS ro_audit_touch(), ro_audit_definer(); DROP SEQUENCE IF EXISTS ro_audit_fresh, ro_audit_down")
 		})
 		_, err := admin.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 CREATE EXTENSION IF NOT EXISTS pgstattuple;
 DROP TABLE IF EXISTS ro_audit_child, ro_audit;
-DROP FUNCTION IF EXISTS ro_audit_touch();
+DROP FUNCTION IF EXISTS ro_audit_touch(), ro_audit_definer();
+CREATE FUNCTION ro_audit_definer() RETURNS integer LANGUAGE plpgsql SECURITY DEFINER AS 'BEGIN RETURN 1; END';
+REVOKE EXECUTE ON FUNCTION ro_audit_definer() FROM PUBLIC;
 CREATE TABLE ro_audit (id bigserial PRIMARY KEY, v text);
 CREATE INDEX ro_audit_v ON ro_audit (v);
 INSERT INTO ro_audit (v) SELECT 'v' || g FROM generate_series(1, 2000) g;

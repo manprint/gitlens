@@ -295,6 +295,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/instances/{id}/functions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Return the busiest tracked functions and each database's function tracking.
+         * @description Rates averaged over the last hour of function_stats scrapes. Without track_functions = pl or all, a database's functions are not tracked and none are listed for it; its tracking says so.
+         */
+        get: operations["getInstanceFunctions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/instances/{id}/security-definer-functions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Return the SECURITY DEFINER functions and procedures.
+         * @description The latest function_security scrape of each database, reported in the last three hours. Functions of extensions are left out.
+         */
+        get: operations["getInstanceSecurityDefinerFunctions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instances/{id}/partitioned-tables": {
         parameters: {
             query?: never;
@@ -1407,6 +1447,89 @@ export interface components {
             first_seen: components["schemas"]["Timestamp"];
             last_seen: components["schemas"]["Timestamp"];
         };
+        FunctionsResponse: {
+            instance_id: components["schemas"]["InstanceId"];
+            /**
+             * Format: int32
+             * @description The span the rates are averaged over.
+             */
+            window_seconds: number;
+            databases: components["schemas"]["FunctionTracking"][];
+            functions: components["schemas"]["FunctionStat"][];
+        };
+        /** @description Whether a database's function calls are tracked. */
+        FunctionTracking: {
+            datname: string;
+            /** @description track_functions as the sessions of the database see it: none, pl or all. */
+            track_functions: string;
+            /**
+             * Format: int32
+             * @description Functions pg_stat_user_functions holds statistics for.
+             */
+            tracked_functions: number;
+            /**
+             * Format: int32
+             * @description Functions written in a procedural language, outside extensions: those track_functions = pl tracks.
+             */
+            pl_functions: number;
+            last_seen: components["schemas"]["Timestamp"];
+        };
+        /** @description A tracked function's calls and time over the window. Only the functions with the most time in their own body and the most calls are reported. */
+        FunctionStat: {
+            datname: string;
+            schemaname: string;
+            name: string;
+            /** @description The identity arguments */
+            arguments: string;
+            language: string;
+            /** Format: double */
+            calls_per_second: number;
+            /**
+             * Format: double
+             * @description Milliseconds spent in the function per second
+             */
+            total_ms_per_second: number;
+            /**
+             * Format: double
+             * @description Milliseconds spent in the function's own body per second.
+             */
+            self_ms_per_second: number;
+            /**
+             * Format: double
+             * @description Mean time per call over the window; null when the function was not called in it.
+             */
+            mean_ms: number | null;
+            last_seen: components["schemas"]["Timestamp"];
+        };
+        SecurityDefinerFunctionsResponse: {
+            instance_id: components["schemas"]["InstanceId"];
+            functions: components["schemas"]["SecurityDefinerFunction"][];
+            /** @description Databases with more SECURITY DEFINER functions than the agent reports (200); those without a pinned search_path come first. */
+            truncated_databases: string[];
+        };
+        /** @description A SECURITY DEFINER function or procedure outside extensions. */
+        SecurityDefinerFunction: {
+            datname: string;
+            schemaname: string;
+            name: string;
+            arguments: string;
+            /** @description Schema-qualified, quoted name with its identity arguments, as ALTER FUNCTION takes it. */
+            signature: string;
+            /** @enum {string} */
+            kind: "function" | "procedure";
+            language: string;
+            /** @description The role whose privileges the function runs with. */
+            owner: string;
+            owner_superuser: boolean;
+            /** @description Whether every role may execute it (the default for a function). */
+            public_execute: boolean;
+            /** @description The search_path the function pins; null when it pins none and uses the caller's. */
+            search_path: string | null;
+            /** @description Whether the pinned search_path names pg_temp last; otherwise the temporary schema is searched first for tables. */
+            pg_temp_last: boolean;
+            first_seen: components["schemas"]["Timestamp"];
+            last_seen: components["schemas"]["Timestamp"];
+        };
         DriftValue: {
             instance_id: components["schemas"]["InstanceId"];
             role: string;
@@ -2037,6 +2160,58 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SequencesResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+        };
+    };
+    getInstanceFunctions: {
+        parameters: {
+            query?: {
+                /** @description Return the functions of this database only. */
+                datname?: string;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["InstanceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Functions by self time, then calls. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FunctionsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+        };
+    };
+    getInstanceSecurityDefinerFunctions: {
+        parameters: {
+            query?: {
+                /** @description Return the functions of this database only. */
+                datname?: string;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["InstanceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SECURITY DEFINER functions by database and signature. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityDefinerFunctionsResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];

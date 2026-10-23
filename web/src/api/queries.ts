@@ -340,6 +340,34 @@ export function useInstanceSequences(id: string) {
   })
 }
 
+export function useInstanceFunctions(id: string) {
+  return useApiQuery({
+    policy: REFRESH.catalog,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/functions', {
+          params: { path: { id } },
+          signal,
+        }),
+      ),
+    queryKey: qk.instanceFunctions(id),
+  })
+}
+
+export function useInstanceSecurityDefinerFunctions(id: string) {
+  return useApiQuery({
+    policy: REFRESH.catalog,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/security-definer-functions', {
+          params: { path: { id } },
+          signal,
+        }),
+      ),
+    queryKey: qk.instanceSecurityDefinerFunctions(id),
+  })
+}
+
 export function useInstancePartitionedTables(id: string) {
   return useApiQuery({
     policy: REFRESH.catalog,

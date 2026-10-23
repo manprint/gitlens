@@ -24,6 +24,9 @@ export const qk = {
   instanceSpatialColumns: (id: string) => ['getInstanceSpatialColumns', id] as const,
   instanceSequences: (id: string) => ['getInstanceSequences', id] as const,
   instancePartitionedTables: (id: string) => ['getInstancePartitionedTables', id] as const,
+  instanceFunctions: (id: string) => ['getInstanceFunctions', id] as const,
+  instanceSecurityDefinerFunctions: (id: string) =>
+    ['getInstanceSecurityDefinerFunctions', id] as const,
   instanceIndexes: (id: string, limit?: number) => ['getInstanceIndexes', id, limit] as const,
   instanceBloat: (id: string, limit?: number) => ['getInstanceBloat', id, limit] as const,
   instanceCommandAudit: (id: string) => ['getInstanceCommandAudit', id] as const,

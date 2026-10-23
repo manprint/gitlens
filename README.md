@@ -469,15 +469,27 @@ Security and operational boundaries:
   `pg_inherits`, sizes come from `relpages`, and bounds and the partition
   key are read without the functions that lock each partition
   (`pg_partition_tree`, the size functions, `pg_get_partkeydef`), so a
-  partition held by `ALTER TABLE` or `VACUUM FULL` does not stop it. The
-  instance page lists them all under "Schema objects"; the `trigger.*` rules
+  partition held by `ALTER TABLE` or `VACUUM FULL` does not stop it.
+  `function_stats` reports, every five minutes, the calls and time of the
+  tracked functions with the most time in their own body and the most calls
+  (overloads apart), and the `track_functions` value of each database's
+  sessions: with the default `none`, `pg_stat_user_functions` is empty.
+  `pl` tracks functions in a procedural language at little cost; `all`
+  also tracks SQL and C functions at a higher one, and an SQL function the
+  planner inlines is never tracked. pglens never changes the setting, and
+  never resets statistics. `function_security` reports, every fifteen
+  minutes, each SECURITY DEFINER function or procedure outside extensions,
+  with the role it runs as, the `search_path` it pins and whether PUBLIC may
+  execute it. The instance page lists them all under "Schema objects"; the `trigger.*` rules
   raise disabled triggers, `index.fk_unindexed` the foreign keys, the
   `extension.*` and `postgis.*` rules outdated extensions, unindexed spatial
   columns and undefined or mixed SRIDs, the `sequence.*` rules sequences
   near their limit and columns narrower than their sequence, and the
   `partition.*` rules partitions about to run out, rows in default
   partitions, invalid partitioned indexes and partitioned tables never
-  analyzed.
+  analyzed, and the `function.*` rules SECURITY DEFINER functions that do
+  not pin `search_path` and databases whose function calls are not
+  tracked.
 - The integration suite proves the boundary: INT-RO-001 runs every check and
   command at T2 and asserts that the database and the shared catalogs are
   unchanged and that every statement the role sent, as `pg_stat_statements`
@@ -705,6 +717,7 @@ How the rules read the collected data:
 | `security.monitoring_role_can_write` | critical | The role pglens connects as could write if a session of it left read-only mode: an attribute, a membership or owned objects (the `monitoring_role` check). |
 | `sequence.exhaustion_risk` | critical | A sequence has used 90% of its range, counted up to the nearer of its own bound and its column's integer type; a warning from 75%. A cycling sequence whose own bound applies is left out (the `sequences` check). |
 | `partition.future_missing` | critical | The partitions of a table range-partitioned on a date or timestamp column ended, and it has no default partition, so inserts of rows since then fail; a warning when they end within seven days, or ended into a default partition. Left out 30 days after they ended (the `partitions` check). |
+| `function.secdef_no_search_path` | critical | A SECURITY DEFINER function or procedure does not pin `search_path`, so it finds the objects its body names through the caller's: critical when a superuser owns it and PUBLIC may execute it, a warning otherwise (the `function_security` check). |
 | `trigger.constraint_disabled` | critical | The internal triggers that enforce a foreign key (or another constraint) are disabled, so rows that violate it can be written (the `trigger_inventory` check). |
 | `index.fk_unindexed` | warning | No index leads with a foreign key's columns, so deleting or re-keying a referenced row scans the referencing table; information below 10 MiB (the `fk_indexes` check). |
 | `postgis.upgrade_available` | warning | The installed PostGIS packages carry a newer version of postgis or one of its companion extensions than the database runs; `SELECT postgis_extensions_upgrade();` updates them together (the `extensions` check). |
@@ -717,6 +730,7 @@ How the rules read the collected data:
 | `extension.upgrade_available` | info | The installed packages carry a newer default version of an extension than the database runs (`ALTER EXTENSION ... UPDATE`); PostGIS extensions are left to `postgis.upgrade_available`. |
 | `sequence.value_hidden` | info | The monitoring role cannot read the values of a database's sequences (no SELECT on them), so their exhaustion is not monitored; one finding per database. |
 | `partition.parent_not_analyzed` | info | A partitioned table with 10,000 or more estimated rows has never been analyzed; autovacuum never analyzes a partitioned table, so the planner has no statistics for the whole tree. |
+| `function.untracked` | info | `track_functions` is `none` for a database's sessions and no function has statistics, although the database defines functions in a procedural language; one finding per database (the `function_stats` check). |
 | `postgis.srid_mixed` | info | The constrained geometry columns of one database use more than one non-zero SRID, so joins between them need `ST_Transform`. |
 | `security.monitoring_role_read_only_off` | warning | The role pglens connects as does not default to read-only transactions in the database it connects to. |
 
@@ -902,6 +916,8 @@ checks:
   postgis_columns: { interval: 1h }         # PostGIS columns, SRIDs and spatial indexes (postgis.*)
   sequences:       { interval: 10m }        # How much of its range each sequence used (sequence.*)
   partitions:      { interval: 10m }        # Partition trees, default partitions and how far they reach (partition.*)
+  function_stats:  { interval: 5m, top_n: 50 } # Calls and time of the busiest tracked functions (function.untracked)
+  function_security: { interval: 15m }      # SECURITY DEFINER functions and their search_path (function.secdef_no_search_path)
   table_stats:     { interval: 5m, top_n: 50 }
   index_stats:     { interval: 5m, top_n: 50 }
   vacuum_progress: { interval: 30s }
@@ -1008,6 +1024,8 @@ checks
   database_stats     enabled
   extensions         enabled
   fk_indexes         enabled
+  function_security  enabled
+  function_stats     enabled
   index_stats        enabled
   instance_info      enabled
   io                 enabled

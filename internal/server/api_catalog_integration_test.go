@@ -236,3 +236,81 @@ func TestINTCAT005_PartitionedTables(t *testing.T) {
 	require.Equal(t, []any{}, logs["invalid_indexes"])
 	require.Equal(t, float64(2), logs["depth"])
 }
+
+// INT-CAT-006: the functions API averages each function's rates over the
+// last hour, overloads apart, with each database's tracking; the security
+// definer API serves the latest batch with the pinned search_path or null.
+func TestINTCAT006_Functions(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	instanceID := uuid.New()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	series := int64(1)
+	insert := func(ts time.Time, metric, labels string, value float64) {
+		t.Helper()
+		_, err := pool.Exec(ctx, `INSERT INTO metrics (ts, tenant_id, cluster_id, instance_id, datname, metric, labels, series_id, value) VALUES ($1,'default',1,$2,'app',$3,$4,$5,$6)`,
+			ts, instanceID, metric, labels, series, value)
+		require.NoError(t, err)
+		series++
+	}
+	intLabels := `{"schemaname":"public","function":"f","arguments":"x integer","language":"plpgsql"}`
+	textLabels := `{"schemaname":"public","function":"f","arguments":"x text","language":"plpgsql"}`
+	for _, at := range []time.Time{now.Add(-10 * time.Minute), now.Add(-5 * time.Minute)} {
+		insert(at, "pg_function_calls_total", intLabels, 2)
+		insert(at, "pg_function_total_time_ms_total", intLabels, 10)
+		insert(at, "pg_function_self_time_ms_total", intLabels, 8)
+		insert(at, "pg_function_calls_total", textLabels, 0)
+		insert(at, "pg_function_total_time_ms_total", textLabels, 0)
+		insert(at, "pg_function_self_time_ms_total", textLabels, 0)
+	}
+	// Outside the window.
+	insert(now.Add(-2*time.Hour), "pg_function_calls_total", intLabels, 1000)
+	_, err := pool.Exec(ctx, `INSERT INTO object_facts (tenant_id, cluster_id, instance_id, datname, kind, key, labels, value_text, first_seen, last_seen, changed_at) VALUES
+		('default',1,$1,'app','function_tracking','track_functions','{"tracked":"2","pl_functions":"5"}','pl',$2,$2,$2),
+		('default',1,$1,'app','security_definer_function','public.grant_all(r text)','{"schemaname":"public","name":"grant_all","arguments":"r text","kind":"function","language":"plpgsql","owner":"postgres","owner_superuser":"true","public_execute":"true","search_path":"","pg_temp_last":"false"}','unpinned',$2,$2,$2),
+		('default',1,$1,'app','security_definer_function','public.safe()','{"schemaname":"public","name":"safe","arguments":"","kind":"procedure","language":"sql","owner":"app","owner_superuser":"false","public_execute":"false","search_path":"public, pg_temp","pg_temp_last":"true"}','pinned',$2,$2,$2)`, instanceID, now)
+	require.NoError(t, err)
+
+	r := chi.NewRouter()
+	NewAPI(pool).RegisterRoutes(r)
+	get := func(path string) map[string]any {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/instances/"+instanceID.String()+path, http.NoBody))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var raw map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &raw))
+		return raw
+	}
+
+	raw := get("/functions")
+	require.Equal(t, float64(3600), raw["window_seconds"])
+	databases := raw["databases"].([]any)
+	require.Len(t, databases, 1)
+	tracking := databases[0].(map[string]any)
+	delete(tracking, "last_seen")
+	require.Equal(t, map[string]any{"datname": "app", "track_functions": "pl", "tracked_functions": float64(2), "pl_functions": float64(5)}, tracking)
+	functions := raw["functions"].([]any)
+	require.Len(t, functions, 2)
+	busy, idle := functions[0].(map[string]any), functions[1].(map[string]any)
+	require.Equal(t, "x integer", busy["arguments"])
+	require.Equal(t, float64(2), busy["calls_per_second"])
+	require.Equal(t, float64(8), busy["self_ms_per_second"])
+	require.Equal(t, float64(5), busy["mean_ms"])
+	require.Equal(t, "x text", idle["arguments"])
+	require.Nil(t, idle["mean_ms"])
+
+	raw = get("/security-definer-functions")
+	require.Equal(t, []any{}, raw["truncated_databases"])
+	secdef := raw["functions"].([]any)
+	require.Len(t, secdef, 2)
+	exposed, safe := secdef[0].(map[string]any), secdef[1].(map[string]any)
+	require.Equal(t, "public.grant_all(r text)", exposed["signature"])
+	require.Nil(t, exposed["search_path"])
+	require.Equal(t, true, exposed["owner_superuser"])
+	require.Equal(t, true, exposed["public_execute"])
+	require.Equal(t, "public, pg_temp", safe["search_path"])
+	require.Equal(t, "procedure", safe["kind"])
+	require.Equal(t, true, safe["pg_temp_last"])
+}

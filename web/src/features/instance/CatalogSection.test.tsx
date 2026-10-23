@@ -49,6 +49,10 @@ function renderCatalog(
   spatial: Schemas['SpatialColumn'][] = [],
   sequences: Schemas['Sequence'][] = [],
   partitioned: Schemas['PartitionedTable'][] = [],
+  more: {
+    functions?: Partial<Schemas['FunctionsResponse']>
+    securityDefiner?: Schemas['SecurityDefinerFunction'][]
+  } = {},
 ) {
   server.use(
     ok('getInstanceTriggers', {
@@ -79,6 +83,18 @@ function renderCatalog(
     ok('getInstancePartitionedTables', {
       instance_id: INSTANCE_ID,
       tables: partitioned,
+      truncated_databases: [],
+    }),
+    ok('getInstanceFunctions', {
+      instance_id: INSTANCE_ID,
+      window_seconds: 3600,
+      databases: [],
+      functions: [],
+      ...more.functions,
+    }),
+    ok('getInstanceSecurityDefinerFunctions', {
+      instance_id: INSTANCE_ID,
+      functions: more.securityDefiner ?? [],
       truncated_databases: [],
     }),
   )
@@ -137,6 +153,44 @@ function partitionedTable(
     invalid_indexes: [],
     analyzed_at: SEEN,
     covered_until: null,
+    first_seen: SEEN,
+    last_seen: SEEN,
+    ...overrides,
+  }
+}
+
+function functionStat(overrides: Partial<Schemas['FunctionStat']> = {}): Schemas['FunctionStat'] {
+  return {
+    datname: 'app',
+    schemaname: 'public',
+    name: 'audit_row',
+    arguments: '',
+    language: 'plpgsql',
+    calls_per_second: 40.5,
+    total_ms_per_second: 12.2,
+    self_ms_per_second: 11.9,
+    mean_ms: 0.3,
+    last_seen: SEEN,
+    ...overrides,
+  }
+}
+
+function securityDefiner(
+  overrides: Partial<Schemas['SecurityDefinerFunction']> = {},
+): Schemas['SecurityDefinerFunction'] {
+  return {
+    datname: 'app',
+    schemaname: 'public',
+    name: 'grant_role',
+    arguments: 'r text',
+    signature: 'public.grant_role(r text)',
+    kind: 'function',
+    language: 'plpgsql',
+    owner: 'postgres',
+    owner_superuser: true,
+    public_execute: true,
+    search_path: null,
+    pg_temp_last: false,
     first_seen: SEEN,
     last_seen: SEEN,
     ...overrides,
@@ -459,5 +513,101 @@ describe('CatalogSection', () => {
     expect(within(rows[4]!).queryByText(/ends soon|ended/)).not.toBeInTheDocument()
     // Long past, a table is taken as retired: shown, not counted.
     expect(within(rows[5]!).getByText('(ended)')).toBeInTheDocument()
+  })
+
+  // UI-CAT-008: function rates are listed with their mean per call, and a
+  // database without tracking says so; SECURITY DEFINER functions show the
+  // role they run as and whether they pin search_path, the exposed case
+  // marked as the advisor's critical one.
+  it('lists function rates and SECURITY DEFINER functions', async () => {
+    renderCatalog([], [], [], [], [], [], [], {
+      functions: {
+        databases: [
+          {
+            datname: 'app',
+            track_functions: 'pl',
+            tracked_functions: 2,
+            pl_functions: 2,
+            last_seen: SEEN,
+          },
+          {
+            datname: 'crm',
+            track_functions: 'none',
+            tracked_functions: 0,
+            pl_functions: 4,
+            last_seen: SEEN,
+          },
+        ],
+        functions: [
+          functionStat(),
+          functionStat({
+            name: 'f',
+            arguments: 'x text',
+            calls_per_second: 0,
+            total_ms_per_second: 0,
+            self_ms_per_second: 0,
+            mean_ms: null,
+          }),
+        ],
+      },
+      securityDefiner: [
+        securityDefiner(),
+        securityDefiner({
+          name: 'job',
+          arguments: '',
+          signature: 'public.job()',
+          kind: 'procedure',
+          owner: 'app',
+          owner_superuser: false,
+          public_execute: false,
+        }),
+        securityDefiner({
+          name: 'safe',
+          arguments: '',
+          signature: 'public.safe()',
+          search_path: 'public, pg_temp',
+          pg_temp_last: true,
+        }),
+        securityDefiner({
+          name: 'half',
+          arguments: '',
+          signature: 'public.half()',
+          search_path: 'public',
+        }),
+      ],
+    })
+    await settle()
+
+    const functionsTab = screen.getByRole('tab', { name: /^Functions/ })
+    fireEvent.mouseDown(functionsTab)
+    fireEvent.click(functionsTab)
+    await settle()
+    let rows = tableRows()
+    expect(rows.map((row) => within(row).getAllByRole('cell')[1]?.textContent)).toEqual([
+      'public.audit_row()',
+      'public.f(x text)',
+    ])
+    expect(within(rows[0]!).getByText('41/s')).toBeInTheDocument()
+    expect(within(rows[0]!).getByText('11.9 ms/s')).toBeInTheDocument()
+    expect(within(rows[0]!).getByText('0.3 ms')).toBeInTheDocument()
+    expect(within(rows[1]!).getByText('not called')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Function calls are not tracked in crm: track_functions is none.',
+    )
+
+    const secdefTab = screen.getByRole('tab', { name: /Security definer/ })
+    expect(secdefTab).toHaveAccessibleName('Security definer 2 without a pinned search_path')
+    fireEvent.mouseDown(secdefTab)
+    fireEvent.click(secdefTab)
+    await settle()
+    rows = tableRows()
+    expect(within(rows[0]!).getByText("caller's")).toBeInTheDocument()
+    expect(within(rows[0]!).getByText('superuser')).toBeInTheDocument()
+    expect(within(rows[0]!).getByText('every role (PUBLIC)')).toBeInTheDocument()
+    expect(within(rows[1]!).getByText('procedure')).toBeInTheDocument()
+    expect(within(rows[1]!).getByText('granted roles')).toBeInTheDocument()
+    expect(within(rows[2]!).getByText('public, pg_temp')).toBeInTheDocument()
+    expect(within(rows[2]!).queryByText('(pg_temp first)')).not.toBeInTheDocument()
+    expect(within(rows[3]!).getByText('(pg_temp first)')).toBeInTheDocument()
   })
 })

@@ -2,7 +2,9 @@ import { useMemo, useState, type ReactNode } from 'react'
 
 import {
   useInstanceExtensions,
+  useInstanceFunctions,
   useInstancePartitionedTables,
+  useInstanceSecurityDefinerFunctions,
   useInstanceSequences,
   useInstanceSpatialColumns,
   useInstanceTriggers,
@@ -20,6 +22,7 @@ import {
   formatCount,
   formatIntegerString,
   formatPercent,
+  formatRate,
   formatTimestamp,
 } from '@/lib/format'
 
@@ -31,6 +34,8 @@ type Trigger = Schemas['Trigger']
 type SpatialColumn = Schemas['SpatialColumn']
 type Sequence = Schemas['Sequence']
 type PartitionedTable = Schemas['PartitionedTable']
+type FunctionStat = Schemas['FunctionStat']
+type SecurityDefinerFunction = Schemas['SecurityDefinerFunction']
 
 const selectClassName = 'border-input bg-background h-9 w-full rounded-md border px-3'
 
@@ -782,6 +787,207 @@ function PartitionsTab({
   )
 }
 
+const MILLISECONDS = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 })
+
+function formatMilliseconds(value: number): string {
+  return `${MILLISECONDS.format(value)} ms`
+}
+
+function functionName(fn: { schemaname: string; name: string; arguments: string }): string {
+  return `${fn.schemaname}.${fn.name}(${fn.arguments})`
+}
+
+function functionColumns(): DataTableProps<FunctionStat>['columns'] {
+  return [
+    { accessorKey: 'datname', header: 'Database' },
+    { id: 'function', header: 'Function', accessorFn: functionName },
+    { accessorKey: 'language', header: 'Language' },
+    {
+      accessorKey: 'calls_per_second',
+      header: 'Calls',
+      cell: ({ row }) => formatRate(row.original.calls_per_second),
+    },
+    {
+      accessorKey: 'self_ms_per_second',
+      header: 'Own time',
+      cell: ({ row }) => `${formatMilliseconds(row.original.self_ms_per_second)}/s`,
+    },
+    {
+      accessorKey: 'total_ms_per_second',
+      header: 'Total time',
+      cell: ({ row }) => `${formatMilliseconds(row.original.total_ms_per_second)}/s`,
+    },
+    {
+      id: 'mean',
+      header: 'Mean per call',
+      accessorFn: (fn) => fn.mean_ms ?? -1,
+      cell: ({ row }) =>
+        row.original.mean_ms === null ? (
+          <span className="text-muted-foreground">not called</span>
+        ) : (
+          formatMilliseconds(row.original.mean_ms)
+        ),
+    },
+  ]
+}
+
+function FunctionsTab({ response }: { response: Schemas['FunctionsResponse'] }) {
+  const filter = useDatabaseFilter(response.functions)
+  const columns = useMemo(() => functionColumns(), [])
+  const untracked = response.databases
+    .filter(
+      (db) =>
+        db.track_functions === 'none' &&
+        db.tracked_functions === 0 &&
+        (filter.database === 'all' || db.datname === filter.database),
+    )
+    .map((db) => db.datname)
+  const minutes = Math.round(response.window_seconds / 60)
+
+  return (
+    <div className="space-y-4">
+      <p className="text-muted-foreground text-sm">
+        The tracked functions with the most time in their own body and the most calls, averaged over
+        the last {minutes} minutes. Own time leaves out the functions a function calls.
+      </p>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <DatabaseFilter
+          id="catalog-function-database"
+          databases={filter.databases}
+          value={filter.database}
+          onChange={filter.setDatabase}
+        />
+      </div>
+      {untracked.length > 0 ? (
+        <p role="status" className="text-muted-foreground text-sm">
+          Function calls are not tracked in {untracked.join(', ')}: track_functions is none. Set it
+          to pl to track functions written in a procedural language; pglens never changes it.
+        </p>
+      ) : null}
+      <DataTable
+        ariaLabel="Functions"
+        columns={columns}
+        data={filter.rows}
+        emptyState={
+          <EmptyState
+            title="No function calls reported"
+            description="No tracked function was called in the window, or track_functions is none."
+          />
+        }
+        scope="functions"
+        total={response.functions.length}
+      />
+    </div>
+  )
+}
+
+/** A SECURITY DEFINER function every role can call as a superuser, as the advisor's critical case. */
+function securityDefinerExposed(fn: SecurityDefinerFunction): boolean {
+  return fn.search_path === null && fn.owner_superuser && fn.public_execute
+}
+
+function securityDefinerColumns(): DataTableProps<SecurityDefinerFunction>['columns'] {
+  return [
+    { accessorKey: 'datname', header: 'Database' },
+    {
+      id: 'function',
+      header: 'Function',
+      accessorFn: functionName,
+      cell: ({ row }) => (
+        <span className="inline-flex items-center gap-1">
+          {functionName(row.original)}
+          {row.original.kind === 'procedure' ? <Badge variant="outline">procedure</Badge> : null}
+        </span>
+      ),
+    },
+    {
+      accessorKey: 'owner',
+      header: 'Runs as',
+      cell: ({ row }) => (
+        <span className="inline-flex items-center gap-1">
+          {row.original.owner}
+          {row.original.owner_superuser ? <Badge variant="secondary">superuser</Badge> : null}
+        </span>
+      ),
+    },
+    {
+      id: 'search_path',
+      header: 'search_path',
+      accessorFn: (fn) => fn.search_path ?? '',
+      cell: ({ row }) => {
+        const fn = row.original
+        if (fn.search_path === null) {
+          return (
+            <Badge variant={securityDefinerExposed(fn) ? 'destructive' : 'secondary'}>
+              caller&apos;s
+            </Badge>
+          )
+        }
+        return (
+          <span className="inline-flex items-center gap-1">
+            <code className="text-xs">{fn.search_path === '' ? '""' : fn.search_path}</code>
+            {fn.pg_temp_last ? null : (
+              <span className="text-muted-foreground text-xs">(pg_temp first)</span>
+            )}
+          </span>
+        )
+      },
+    },
+    {
+      id: 'public',
+      header: 'Executable by',
+      accessorFn: (fn) => (fn.public_execute ? 1 : 0),
+      cell: ({ row }) => (row.original.public_execute ? 'every role (PUBLIC)' : 'granted roles'),
+    },
+  ]
+}
+
+function SecurityDefinerTab({
+  response,
+}: {
+  response: Schemas['SecurityDefinerFunctionsResponse']
+}) {
+  const filter = useDatabaseFilter(response.functions)
+  const columns = useMemo(() => securityDefinerColumns(), [])
+
+  return (
+    <div className="space-y-4">
+      <p className="text-muted-foreground text-sm">
+        These functions run with their owner&apos;s privileges. One that does not pin search_path
+        finds the objects its body names through the caller&apos;s, so a caller can substitute their
+        own.
+      </p>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <DatabaseFilter
+          id="catalog-secdef-database"
+          databases={filter.databases}
+          value={filter.database}
+          onChange={filter.setDatabase}
+        />
+      </div>
+      <TruncatedNotice
+        truncated={response.truncated_databases}
+        database={filter.database}
+        what="SECURITY DEFINER functions"
+        kept="those without a pinned search_path are listed first"
+      />
+      <DataTable
+        ariaLabel="SECURITY DEFINER functions"
+        columns={columns}
+        data={filter.rows}
+        emptyState={
+          <EmptyState
+            title="No SECURITY DEFINER functions reported"
+            description="No monitored database defines one outside its extensions."
+          />
+        }
+        scope="functions"
+        total={response.functions.length}
+      />
+    </div>
+  )
+}
+
 interface CatalogTabStateProps<T> {
   query: ApiQueryResult<T>
   label: string
@@ -824,6 +1030,8 @@ export function CatalogSection({ instanceId }: CatalogSectionProps) {
   const spatialQuery = useInstanceSpatialColumns(instanceId)
   const sequencesQuery = useInstanceSequences(instanceId)
   const partitionsQuery = useInstancePartitionedTables(instanceId)
+  const functionsQuery = useInstanceFunctions(instanceId)
+  const securityDefinerQuery = useInstanceSecurityDefinerFunctions(instanceId)
   // Partition reach is judged against when the data was read, not the clock.
   const partitionsReadAt = partitionsQuery.dataUpdatedAt
   const now = useMemo(() => new Date(partitionsReadAt), [partitionsReadAt])
@@ -835,6 +1043,8 @@ export function CatalogSection({ instanceId }: CatalogSectionProps) {
   const unindexedSpatial =
     spatialQuery.data?.columns.filter((column) => column.index_method === '').length ?? 0
   const sequencesAtRisk = sequencesQuery.data?.sequences.filter(sequenceAtRisk).length ?? 0
+  const unpinnedFunctions =
+    securityDefinerQuery.data?.functions.filter((fn) => fn.search_path === null).length ?? 0
   const partitionIssues =
     partitionsQuery.data?.tables.filter((table) => partitionNeedsAttention(table, now)).length ?? 0
 
@@ -854,6 +1064,11 @@ export function CatalogSection({ instanceId }: CatalogSectionProps) {
           </TabsTrigger>
           <TabsTrigger value="partitions">
             Partitions <TabCount count={partitionIssues} label="need attention" />
+          </TabsTrigger>
+          <TabsTrigger value="functions">Functions</TabsTrigger>
+          <TabsTrigger value="security-definer">
+            Security definer{' '}
+            <TabCount count={unpinnedFunctions} label="without a pinned search_path" />
           </TabsTrigger>
           <TabsTrigger value="foreign-keys">
             Unindexed foreign keys{' '}
@@ -879,6 +1094,16 @@ export function CatalogSection({ instanceId }: CatalogSectionProps) {
         <TabsContent value="partitions">
           <CatalogTabState query={partitionsQuery} label="partitioned tables">
             {(data) => <PartitionsTab response={data} now={now} />}
+          </CatalogTabState>
+        </TabsContent>
+        <TabsContent value="functions">
+          <CatalogTabState query={functionsQuery} label="functions">
+            {(data) => <FunctionsTab response={data} />}
+          </CatalogTabState>
+        </TabsContent>
+        <TabsContent value="security-definer">
+          <CatalogTabState query={securityDefinerQuery} label="SECURITY DEFINER functions">
+            {(data) => <SecurityDefinerTab response={data} />}
           </CatalogTabState>
         </TabsContent>
         <TabsContent value="foreign-keys">

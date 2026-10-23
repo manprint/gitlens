@@ -655,6 +655,76 @@ components:
             "unbounded" when one reaches MAXVALUE; null for any other table.
         first_seen: { $ref: '#/components/schemas/Timestamp' }
         last_seen: { $ref: '#/components/schemas/Timestamp' }
+    FunctionsResponse:
+      type: object
+      required: [instance_id, window_seconds, databases, functions]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        window_seconds: { type: integer, format: int32, description: The span the rates are averaged over. }
+        databases: { type: array, items: { $ref: '#/components/schemas/FunctionTracking' } }
+        functions: { type: array, items: { $ref: '#/components/schemas/FunctionStat' } }
+    FunctionTracking:
+      type: object
+      description: Whether a database's function calls are tracked.
+      required: [datname, track_functions, tracked_functions, pl_functions, last_seen]
+      properties:
+        datname: { type: string }
+        track_functions: { type: string, description: 'track_functions as the sessions of the database see it: none, pl or all.' }
+        tracked_functions: { type: integer, format: int32, description: Functions pg_stat_user_functions holds statistics for. }
+        pl_functions: { type: integer, format: int32, description: 'Functions written in a procedural language, outside extensions: those track_functions = pl tracks.' }
+        last_seen: { $ref: '#/components/schemas/Timestamp' }
+    FunctionStat:
+      type: object
+      description: >-
+        A tracked function's calls and time over the window. Only the
+        functions with the most time in their own body and the most calls
+        are reported.
+      required: [datname, schemaname, name, arguments, language, calls_per_second, total_ms_per_second, self_ms_per_second, mean_ms, last_seen]
+      properties:
+        datname: { type: string }
+        schemaname: { type: string }
+        name: { type: string }
+        arguments: { type: string, description: The identity arguments, which tell overloads apart. }
+        language: { type: string }
+        calls_per_second: { type: number, format: double }
+        total_ms_per_second: { type: number, format: double, description: Milliseconds spent in the function per second, the functions it calls included. }
+        self_ms_per_second: { type: number, format: double, description: Milliseconds spent in the function's own body per second. }
+        mean_ms:
+          type: [number, 'null']
+          format: double
+          description: Mean time per call over the window; null when the function was not called in it.
+        last_seen: { $ref: '#/components/schemas/Timestamp' }
+    SecurityDefinerFunctionsResponse:
+      type: object
+      required: [instance_id, functions, truncated_databases]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        functions: { type: array, items: { $ref: '#/components/schemas/SecurityDefinerFunction' } }
+        truncated_databases:
+          type: array
+          items: { type: string }
+          description: Databases with more SECURITY DEFINER functions than the agent reports (200); those without a pinned search_path come first.
+    SecurityDefinerFunction:
+      type: object
+      description: A SECURITY DEFINER function or procedure outside extensions.
+      required: [datname, schemaname, name, arguments, signature, kind, language, owner, owner_superuser, public_execute, search_path, pg_temp_last, first_seen, last_seen]
+      properties:
+        datname: { type: string }
+        schemaname: { type: string }
+        name: { type: string }
+        arguments: { type: string }
+        signature: { type: string, description: 'Schema-qualified, quoted name with its identity arguments, as ALTER FUNCTION takes it.' }
+        kind: { type: string, enum: [function, procedure] }
+        language: { type: string }
+        owner: { type: string, description: The role whose privileges the function runs with. }
+        owner_superuser: { type: boolean }
+        public_execute: { type: boolean, description: Whether every role may execute it (the default for a function). }
+        search_path:
+          type: [string, 'null']
+          description: The search_path the function pins; null when it pins none and uses the caller's.
+        pg_temp_last: { type: boolean, description: Whether the pinned search_path names pg_temp last; otherwise the temporary schema is searched first for tables. }
+        first_seen: { $ref: '#/components/schemas/Timestamp' }
+        last_seen: { $ref: '#/components/schemas/Timestamp' }
     DriftValue:
       type: object
       required: [instance_id, role, value]
@@ -1399,6 +1469,69 @@ paths:
                     instance_id: 11111111-1111-1111-1111-111111111111
                     sequences:
                       - { datname: app, schemaname: public, name: orders_id_seq, data_type: bigint, state: used, start: '1', increment: '1', min: '1', max: '9223372036854775807', cycle: false, last_value: '2000000000', limit: '2147483647', limit_source: column, exhausts: true, used_ratio: 0.931323, remaining: '147483647', table_schema: public, table: orders, column: id, column_type: integer, link: owned, columns: 1, first_seen: '2026-08-27T01:00:00Z', last_seen: '2026-08-27T02:00:00Z', changed_at: '2026-08-27T01:00:00Z' }
+                    truncated_databases: []
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/functions:
+    get:
+      tags: [instances]
+      operationId: getInstanceFunctions
+      summary: Return the busiest tracked functions and each database's function tracking.
+      description: >-
+        Rates averaged over the last hour of function_stats scrapes. Without
+        track_functions = pl or all, a database's functions are not tracked
+        and none are listed for it; its tracking says so.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - name: datname
+          in: query
+          required: false
+          schema: { type: string }
+          description: Return the functions of this database only.
+      responses:
+        '200':
+          description: Functions by self time, then calls.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FunctionsResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    window_seconds: 3600
+                    databases:
+                      - { datname: app, track_functions: pl, tracked_functions: 14, pl_functions: 20, last_seen: '2026-08-27T02:00:00Z' }
+                    functions:
+                      - { datname: app, schemaname: public, name: audit_row, arguments: '', language: plpgsql, calls_per_second: 40.5, total_ms_per_second: 12.2, self_ms_per_second: 11.9, mean_ms: 0.3, last_seen: '2026-08-27T02:00:00Z' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/security-definer-functions:
+    get:
+      tags: [instances]
+      operationId: getInstanceSecurityDefinerFunctions
+      summary: Return the SECURITY DEFINER functions and procedures.
+      description: >-
+        The latest function_security scrape of each database, reported in
+        the last three hours. Functions of extensions are left out.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - name: datname
+          in: query
+          required: false
+          schema: { type: string }
+          description: Return the functions of this database only.
+      responses:
+        '200':
+          description: SECURITY DEFINER functions by database and signature.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SecurityDefinerFunctionsResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    functions:
+                      - { datname: app, schemaname: public, name: grant_role, arguments: 'r text', signature: 'public.grant_role(r text)', kind: function, language: plpgsql, owner: postgres, owner_superuser: true, public_execute: true, search_path: null, pg_temp_last: false, first_seen: '2026-08-27T01:00:00Z', last_seen: '2026-08-27T02:00:00Z' }
                     truncated_databases: []
         '400': { $ref: '#/components/responses/BadRequest' }
 

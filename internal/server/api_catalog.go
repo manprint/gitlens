@@ -28,6 +28,8 @@ func (a *API) registerCatalogRoutes(r chi.Router) {
 	r.Get("/api/v1/instances/{id}/spatial-columns", a.handleSpatialColumns)
 	r.Get("/api/v1/instances/{id}/sequences", a.handleSequences)
 	r.Get("/api/v1/instances/{id}/partitioned-tables", a.handlePartitionedTables)
+	r.Get("/api/v1/instances/{id}/functions", a.handleFunctions)
+	r.Get("/api/v1/instances/{id}/security-definer-functions", a.handleSecurityDefinerFunctions)
 }
 
 // catalogFact is one object_facts row of a catalog kind.
