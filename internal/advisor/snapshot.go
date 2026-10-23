@@ -276,9 +276,9 @@ func loadLockTree(ctx context.Context, pool snapshotDB, s *Snapshot) error {
 	sample, parseErr := parseLockTree(ts, raw)
 	if parseErr != nil {
 		s.SkippedChecks["LockTree"] = "lock tree unreadable: " + parseErr.Error()
-		return nil
+	} else {
+		s.LockTree = sample
 	}
-	s.LockTree = sample
 	return nil
 }
 
