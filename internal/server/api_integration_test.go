@@ -430,3 +430,40 @@ func TestAPI_INT_API_003_ClusterHealthCountsLivePrimaries(t *testing.T) {
 	addInstance("10.0.2.3", "standby", time.Now())
 	require.Equal(t, "critical", healthOf()[0].Health, "two live primaries are split-brain")
 }
+
+// TestAPI_INT_API_004_MetricsQueryRefusesSeveralSeries: a labelled metric whose
+// series share a timestamp is refused, not answered with one arbitrary series.
+func TestAPI_INT_API_004_MetricsQueryRefusesSeveralSeries(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := contextBackground()
+	iid := uuid.New()
+	cid := store.ToDB(pgtype.ClusterID(556))
+	agent := uuid.New()
+	_, err := pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual')`, cid)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen) VALUES ($1,'default',$2,$3,'10.0.0.1',5432,170000,'primary','T0',now())`, iid, cid, agent)
+	require.NoError(t, err)
+	ts := time.Date(2026, 1, 1, 0, 0, 10, 0, time.UTC)
+	_, err = pool.Exec(ctx, `INSERT INTO metrics (ts, tenant_id, cluster_id, instance_id, datname, metric, labels, series_id, value)
+		VALUES
+		($1,'default',$2,$3,'','pg_io_hits','{"context":"normal"}', 701, 42),
+		($1,'default',$2,$3,'','pg_io_hits','{"context":"vacuum"}', 702, 3)
+	`, ts, cid, iid)
+	require.NoError(t, err)
+
+	api := NewAPI(pool)
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := from.Add(time.Minute)
+	url := fmt.Sprintf("/api/v1/metrics/query?metric=pg_io_hits&instance_id=%s&from=%s&to=%s&step=60s",
+		iid.String(), from.Format(time.RFC3339), to.Format(time.RFC3339))
+	req := httptest.NewRequest(http.MethodGet, url, http.NoBody)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "several series")
+}

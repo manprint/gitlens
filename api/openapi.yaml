@@ -1184,6 +1184,7 @@ paths:
       tags: [metrics]
       operationId: queryMetrics
       summary: Query a metric as a time series.
+      description: A metric with more than one series in the range is refused with 400, because this endpoint does not select a series yet; a labelled metric needs a series-selecting parameter before it can be read here.
       parameters:
         - { name: metric, in: query, required: true, schema: { type: string } }
         - { name: instance_id, in: query, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }

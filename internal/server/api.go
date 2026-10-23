@@ -788,11 +788,11 @@ func (a *API) handleMetricsQuery(w http.ResponseWriter, r *http.Request) {
 	var rows pgx.Rows
 	if database != "" {
 		rows, err = a.pool.Query(ctx,
-			`SELECT ts, value FROM metrics WHERE instance_id=$1 AND metric=$2 AND datname=$3 AND ts >= $4 AND ts < $5 ORDER BY ts`,
+			`SELECT ts, value, series_id FROM metrics WHERE instance_id=$1 AND metric=$2 AND datname=$3 AND ts >= $4 AND ts < $5 ORDER BY ts`,
 			iid, metric, database, from, to)
 	} else {
 		rows, err = a.pool.Query(ctx,
-			`SELECT ts, value FROM metrics WHERE instance_id=$1 AND metric=$2 AND ts >= $3 AND ts < $4 ORDER BY ts`,
+			`SELECT ts, value, series_id FROM metrics WHERE instance_id=$1 AND metric=$2 AND ts >= $3 AND ts < $4 ORDER BY ts`,
 			iid, metric, from, to)
 	}
 	if err != nil {
@@ -804,11 +804,25 @@ func (a *API) handleMetricsQuery(w http.ResponseWriter, r *http.Request) {
 	// Map bucket index -> value (last value wins if multiple per bucket)
 	bucketValues := make(map[int]float64)
 	bucketHas := make(map[int]bool)
+	// Last-wins is only meaningful within one series. Rows of different label
+	// sets (pg_io_* by object, context and backend_type, pg_backends by state)
+	// share timestamps, so keeping the last row returned an arbitrary series.
+	// This endpoint cannot select a series yet, so a range holding several is
+	// refused rather than answered with one of them.
+	var firstSeries int64
+	haveSeries := false
 	for rows.Next() {
 		var ts time.Time
 		var val float64
-		if scanErr := rows.Scan(&ts, &val); scanErr != nil {
+		var sid int64
+		if scanErr := rows.Scan(&ts, &val, &sid); scanErr != nil {
 			writeError(w, http.StatusInternalServerError, "scan failed", scanErr.Error())
+			return
+		}
+		if !haveSeries {
+			firstSeries, haveSeries = sid, true
+		} else if sid != firstSeries {
+			writeError(w, http.StatusBadRequest, "ambiguous metric query", fmt.Sprintf("metric %q has several series in this range, and this endpoint cannot select one", metric))
 			return
 		}
 		// Compute bucket index: floor((ts - from)/step)

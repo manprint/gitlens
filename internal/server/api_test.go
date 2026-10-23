@@ -614,7 +614,7 @@ func TestAPI_MockPool_MetricsQuery_NullAndValue(t *testing.T) {
 	// one point landing in the 2nd of 3 one-minute buckets
 	pool := &mockPool{
 		queryResults: []*mockRows{
-			{rows: [][]any{{from.Add(90 * time.Second), 42.0}}},
+			{rows: [][]any{{from.Add(90 * time.Second), 42.0, int64(1)}}},
 		},
 	}
 	api := &API{pool: pool}
@@ -633,6 +633,62 @@ func TestAPI_MockPool_MetricsQuery_NullAndValue(t *testing.T) {
 	require.NotNil(t, resp.Series[1].Value)
 	require.Equal(t, 42.0, *resp.Series[1].Value)
 	require.Nil(t, resp.Series[2].Value)
+}
+
+func TestAPI_MockPool_MetricsQuery_RefusesSeveralSeries(t *testing.T) {
+	t.Parallel()
+	iid := uuid.New()
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := from.Add(time.Minute)
+	// Two label sets scraped in the same cycle share one timestamp.
+	pool := &mockPool{
+		queryResults: []*mockRows{
+			{rows: [][]any{
+				{from.Add(10 * time.Second), 42.0, int64(1)},
+				{from.Add(10 * time.Second), 3.0, int64(2)},
+			}},
+		},
+	}
+	api := &API{pool: pool}
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	url := "/api/v1/metrics/query?metric=pg_io_hits&instance_id=" + iid.String() +
+		"&from=" + from.Format(time.RFC3339) + "&to=" + to.Format(time.RFC3339) + "&step=60s"
+	req := httptest.NewRequest(http.MethodGet, url, http.NoBody)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "several series")
+}
+
+func TestAPI_MockPool_MetricsQuery_LastValueWithinOneSeries(t *testing.T) {
+	t.Parallel()
+	iid := uuid.New()
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := from.Add(time.Minute)
+	// One series with two samples in the same bucket keeps the last value.
+	pool := &mockPool{
+		queryResults: []*mockRows{
+			{rows: [][]any{
+				{from.Add(10 * time.Second), 1.0, int64(7)},
+				{from.Add(40 * time.Second), 2.0, int64(7)},
+			}},
+		},
+	}
+	api := &API{pool: pool}
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	url := "/api/v1/metrics/query?metric=pg_io_hits&instance_id=" + iid.String() +
+		"&from=" + from.Format(time.RFC3339) + "&to=" + to.Format(time.RFC3339) + "&step=60s"
+	req := httptest.NewRequest(http.MethodGet, url, http.NoBody)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp metricsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Series, 1)
+	require.NotNil(t, resp.Series[0].Value)
+	require.Equal(t, 2.0, *resp.Series[0].Value)
 }
 
 func TestAPI_MockPool_Events_WithRows(t *testing.T) {

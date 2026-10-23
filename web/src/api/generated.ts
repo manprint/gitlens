@@ -299,7 +299,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Query a metric as a time series. */
+        /**
+         * Query a metric as a time series.
+         * @description A metric with more than one series in the range is refused with 400, because this endpoint does not select a series yet; a labelled metric needs a series-selecting parameter before it can be read here.
+         */
         get: operations["queryMetrics"];
         put?: never;
         post?: never;
