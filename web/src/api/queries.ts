@@ -166,8 +166,10 @@ export function useClusterTopology(id: string) {
 export function useClusterReplication(
   id: string,
   params: QueryParameters<'/api/v1/clusters/{id}/replication'>,
+  options: { enabled?: boolean } = {},
 ) {
   return useApiQuery({
+    enabled: options.enabled ?? true,
     keepPrevious: true,
     policy: REFRESH.cluster,
     queryFn: (signal) =>
