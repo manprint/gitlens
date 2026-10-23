@@ -10,7 +10,9 @@ import (
 	"io"
 	"math"
 	"math/rand"
+	"net"
 	"net/http"
+	"net/http/httptrace"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,6 +33,15 @@ const maxPendingEnvelopes = 1024
 // maxRetryAfter caps the wait a Retry-After header can ask for. It matches the
 // 60 second cap the exponential backoff reaches.
 const maxRetryAfter = 60 * time.Second
+
+// pushAttemptTimeout is how long one push attempt waits for the server's
+// answer. An attempt the server received in full and did not answer in time
+// is retried with a doubled wait, up to maxPushAttemptTimeout, which is the
+// server's own write timeout: past it the server cannot answer anyway.
+const (
+	pushAttemptTimeout    = 10 * time.Second
+	maxPushAttemptTimeout = 2 * time.Minute
+)
 
 // Health represents the pusher's health state.
 type Health string
@@ -59,6 +70,11 @@ type Pusher struct {
 	clockSkew          time.Duration
 	lastError          string
 	stopped            atomic.Bool
+
+	// attemptTimeout is the wait for one attempt's answer, and
+	// maxAttemptTimeout is where that wait stops growing (see pushOne).
+	attemptTimeout    time.Duration
+	maxAttemptTimeout time.Duration
 
 	pendingMu sync.Mutex
 	pending   []*wire.Envelope
@@ -93,12 +109,12 @@ func NewPusher(serverURL, token string, clk clock.Clock) *Pusher {
 		token: token,
 		// Trimmed as the command dispatcher trims the same setting: the path
 		// is appended to it, so a trailing slash must not reach the request.
-		serverURL: strings.TrimRight(serverURL, "/"),
-		clk:       clk,
-		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
-		},
-		health: HealthOK,
+		serverURL:         strings.TrimRight(serverURL, "/"),
+		clk:               clk,
+		httpClient:        &http.Client{},
+		attemptTimeout:    pushAttemptTimeout,
+		maxAttemptTimeout: maxPushAttemptTimeout,
+		health:            HealthOK,
 	}
 }
 
@@ -239,8 +255,11 @@ const (
 // exponential backoff + jitter until the envelope reaches a terminal outcome
 // or ctx is cancelled.
 func (p *Pusher) pushOne(ctx context.Context, env *wire.Envelope) (pushOutcome, error) {
-	// wait is the Retry-After the previous attempt was given, if any.
+	// wait is the Retry-After the previous attempt was given, if any. stalls
+	// counts the attempts the server received in full and did not answer in
+	// time; each one lengthens the next attempt's wait.
 	var wait time.Duration
+	stalls := 0
 	for attempt := 0; ; attempt++ {
 		// Backoff applies to retries only. Sleeping before the first attempt
 		// delayed every push by backoffDelay(1) — 1 to 2 seconds — even
@@ -257,8 +276,11 @@ func (p *Pusher) pushOne(ctx context.Context, env *wire.Envelope) (pushOutcome, 
 		}
 		wait = 0
 
-		req, err := p.buildRequest(ctx, env)
+		timeout := p.attemptTimeoutAfter(stalls)
+		attemptCtx, cancel := context.WithTimeout(ctx, timeout)
+		req, err := p.buildRequest(attemptCtx, env)
 		if err != nil {
+			cancel()
 			// An envelope that cannot be encoded will never encode: keeping
 			// it queued would wedge the queue behind it forever (the disk
 			// buffer would re-offer the same record on every push), so it is
@@ -267,7 +289,8 @@ func (p *Pusher) pushOne(ctx context.Context, env *wire.Envelope) (pushOutcome, 
 			return pushConsumed, fmt.Errorf("encode envelope: %w", err)
 		}
 
-		status, skew, body, retryAfter, err := p.doRequest(req)
+		status, skew, body, retryAfter, sent, err := p.doRequest(req)
+		cancel()
 		if err != nil {
 			// Transient: network error, connection refused, timeout. The
 			// retry loop continues, but the state must not stay ok while
@@ -280,6 +303,23 @@ func (p *Pusher) pushOne(ctx context.Context, env *wire.Envelope) (pushOutcome, 
 				p.lastError = fmt.Sprintf("push failed: %v", err)
 			}
 			p.mu.Unlock()
+			// A timeout after the server had the whole envelope means the
+			// server is still working on it, not that it is gone, so the next
+			// attempt waits longer. Once the wait has reached its ceiling and
+			// still expires, the envelope is dropped and counted, so one
+			// envelope cannot hold the queue head forever. A request the
+			// server never got in full is never counted: the disk buffer
+			// exists to hold those through an outage.
+			if sent && isTimeout(err) {
+				stalls++
+				if timeout >= p.maxAttemptTimeout {
+					atomic.AddInt64(&p.nDropped, 1)
+					p.mu.Lock()
+					p.lastError = fmt.Sprintf("push timed out after %s, envelope dropped: %v", timeout, err)
+					p.mu.Unlock()
+					return pushConsumed, nil
+				}
+			}
 			continue
 		}
 
@@ -349,7 +389,9 @@ func (p *Pusher) pushOne(ctx context.Context, env *wire.Envelope) (pushOutcome, 
 
 		default:
 			if status >= 500 {
-				// 5xx: retry
+				// 5xx: retry. An overloaded server can say when to come back,
+				// and that wait is honoured as it is for a 429.
+				wait = retryAfter
 				continue
 			}
 			// Unknown status: treat as error, don't retry forever. The
@@ -406,13 +448,19 @@ func (p *Pusher) buildRequest(ctx context.Context, env *wire.Envelope) (*http.Re
 	return req, nil
 }
 
-// doRequest sends the request and returns (status, skew, body, retryAfter, error).
+// doRequest sends the request and returns (status, skew, body, retryAfter, sent, error).
 // error is non-nil only for network errors; status is parsed from response when err is nil.
-func (p *Pusher) doRequest(req *http.Request) (int, *time.Duration, string, time.Duration, error) {
-	resp, err := p.httpClient.Do(req)
+// sent reports whether the whole request was written before the error, which
+// tells a server that is slow to answer apart from one that cannot be reached.
+func (p *Pusher) doRequest(req *http.Request) (int, *time.Duration, string, time.Duration, bool, error) {
+	var sent atomic.Bool
+	trace := &httptrace.ClientTrace{
+		WroteRequest: func(info httptrace.WroteRequestInfo) { sent.Store(info.Err == nil) },
+	}
+	resp, err := p.httpClient.Do(req.WithContext(httptrace.WithClientTrace(req.Context(), trace)))
 	if err != nil {
 		// Network error, timeout, connection refused: return error
-		return 0, nil, "", 0, err
+		return 0, nil, "", 0, sent.Load(), err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -430,7 +478,24 @@ func (p *Pusher) doRequest(req *http.Request) (int, *time.Duration, string, time
 	// of WHY the agent went "incompatible"/"unauthorized", not even in logs.
 	bodyBytes, _ := io.ReadAll(resp.Body)
 
-	return resp.StatusCode, skew, string(bodyBytes), retryAfter, nil
+	return resp.StatusCode, skew, string(bodyBytes), retryAfter, true, nil
+}
+
+// attemptTimeoutAfter returns the wait for an attempt that follows the given
+// number of stalls: it doubles with each stall and stops at maxAttemptTimeout.
+func (p *Pusher) attemptTimeoutAfter(stalls int) time.Duration {
+	d := p.attemptTimeout
+	for i := 0; i < stalls && d < p.maxAttemptTimeout; i++ {
+		d *= 2
+	}
+	return min(d, p.maxAttemptTimeout)
+}
+
+// isTimeout reports whether err is a deadline expiry, which net/http returns
+// as a net.Error whose Timeout reports true.
+func isTimeout(err error) bool {
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
 }
 
 // parseRetryAfter reads a Retry-After header, given either as seconds or as an

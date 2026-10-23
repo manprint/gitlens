@@ -13,6 +13,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -782,4 +783,176 @@ func TestParseRetryAfter(t *testing.T) {
 	for value, want := range cases {
 		require.Equal(t, want, parseRetryAfter(value, now), "Retry-After %q", value)
 	}
+}
+
+// shortAttemptTimeouts shrinks the attempt waits so a test that stalls the
+// server waits milliseconds, not the production 10 seconds and 2 minutes.
+func shortAttemptTimeouts(p *Pusher) {
+	p.attemptTimeout = 50 * time.Millisecond
+	p.maxAttemptTimeout = 200 * time.Millisecond
+}
+
+// releaseBackoffs moves a fake clock forward so every retry backoff the pusher
+// sleeps on returns at once, instead of after its real exponential delay. It
+// stops when done is closed.
+func releaseBackoffs(clk *clock.Fake, done <-chan struct{}) {
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			clk.Advance(time.Hour)
+			time.Sleep(time.Millisecond)
+		}
+	}()
+}
+
+// timeoutErr is a failure that net/http reports as a timeout, such as a dial
+// that never completed, before the request was written.
+type timeoutErr struct{}
+
+func (timeoutErr) Error() string   { return "dial tcp: i/o timeout" }
+func (timeoutErr) Timeout() bool   { return true }
+func (timeoutErr) Temporary() bool { return true }
+
+// TestPusher_StalledServerIsRetriedWithLongerWait: a server that needs longer
+// than the first attempt's wait is given a longer wait on each retry, and the
+// envelope is delivered once it answers. Nothing is dropped.
+func TestPusher_StalledServerIsRetriedWithLongerWait(t *testing.T) {
+	t.Parallel()
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		// The body is read first: net/http reports a disconnect on the
+		// request context only once the body has been consumed.
+		_, _ = io.Copy(io.Discard, r.Body)
+		// The answer takes 120ms, so the 50ms and 100ms waits expire and the
+		// 200ms wait is the first one the answer fits in.
+		select {
+		case <-time.After(120 * time.Millisecond):
+			w.WriteHeader(http.StatusAccepted)
+		case <-r.Context().Done():
+		}
+	}))
+	defer srv.Close()
+
+	clk := clock.NewFake(time.Unix(0, 0))
+	p := NewPusher(srv.URL, "token", clk)
+	shortAttemptTimeouts(p)
+	done := make(chan struct{})
+	defer close(done)
+	releaseBackoffs(clk, done)
+
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	require.NoError(t, p.Push(ctx))
+
+	require.Equal(t, int32(3), requests.Load())
+	acked, dropped := p.BufferStats()
+	require.Equal(t, int64(1), acked)
+	require.Equal(t, int64(0), dropped)
+}
+
+// TestPusher_ServerThatNeverAnswersDropsEnvelope: a server that takes the
+// whole envelope and never answers cannot hold the queue head forever. The
+// waits grow to their ceiling, and the envelope is then dropped and counted,
+// so the push returns and the next envelope goes out.
+func TestPusher_ServerThatNeverAnswersDropsEnvelope(t *testing.T) {
+	t.Parallel()
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		_, _ = io.Copy(io.Discard, r.Body)
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	clk := clock.NewFake(time.Unix(0, 0))
+	p := NewPusher(srv.URL, "token", clk)
+	shortAttemptTimeouts(p)
+	done := make(chan struct{})
+	defer close(done)
+	releaseBackoffs(clk, done)
+
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	require.NoError(t, p.Push(ctx))
+
+	// 50ms, 100ms, then the 200ms ceiling, which expires and drops the envelope.
+	require.Equal(t, int32(3), requests.Load())
+	acked, dropped := p.BufferStats()
+	require.Equal(t, int64(0), acked)
+	require.Equal(t, int64(1), dropped)
+	require.Contains(t, p.LastError(), "envelope dropped")
+	p.pendingMu.Lock()
+	require.Empty(t, p.pending)
+	p.pendingMu.Unlock()
+}
+
+// TestPusher_UnreachableServerIsNeverDropped: a request that never reached the
+// server, because the connection was refused or could not be made, is retried
+// until the push context ends. The disk buffer holds the envelope through the
+// outage, so it must not be counted as lost.
+func TestPusher_UnreachableServerIsNeverDropped(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewFake(time.Unix(0, 0))
+	p := NewPusher("http://pglens.invalid", "token", clk)
+	shortAttemptTimeouts(p)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	calls := 0
+	p.httpClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 6 {
+			cancel()
+		}
+		return nil, timeoutErr{}
+	})
+	done := make(chan struct{})
+	defer close(done)
+	releaseBackoffs(clk, done)
+
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+	require.Error(t, p.Push(ctx))
+
+	require.GreaterOrEqual(t, calls, 6)
+	acked, dropped := p.BufferStats()
+	require.Equal(t, int64(0), acked)
+	require.Equal(t, int64(0), dropped)
+	p.pendingMu.Lock()
+	require.Len(t, p.pending, 1)
+	p.pendingMu.Unlock()
+}
+
+// TestPusher_ServerErrorHonoursRetryAfter: a 503 that names a longer wait than
+// the first backoff is not retried before that wait has passed, as a 429 is
+// not.
+func TestPusher_ServerErrorHonoursRetryAfter(t *testing.T) {
+	t.Parallel()
+	var requests atomic.Int32
+	var second time.Time
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) == 1 {
+			w.Header().Set("Retry-After", "3")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		second = time.Now()
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	p := NewPusher(srv.URL, "token", clock.System())
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	start := time.Now()
+	require.NoError(t, p.Push(ctx))
+
+	require.Equal(t, int32(2), requests.Load())
+	require.GreaterOrEqual(t, second.Sub(start), 3*time.Second)
 }
