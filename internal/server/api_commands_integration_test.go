@@ -385,3 +385,29 @@ func TestINTCMD030_EnqueueRefusesBeyondTheAgentQueueLimit(t *testing.T) {
 	rec = enqueue()
 	require.Equal(t, http.StatusAccepted, rec.Code, rec.Body.String())
 }
+
+// TestINTCMD033_ResultRevocationLookupUsesThePrimaryKey: a result is checked
+// against its agent's revocation on the agents primary key. The command holds
+// the agent as text, so a comparison that casts the agent column instead of the
+// command's text makes the key unusable. With sequential scans off, the planner
+// must reach agents through agents_pkey.
+func TestINTCMD033_ResultRevocationLookupUsesThePrimaryKey(t *testing.T) {
+	pool := getSharedPool(t)
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+	_, err = tx.Exec(ctx, `SET LOCAL enable_seqscan = off`)
+	require.NoError(t, err)
+	rows, err := tx.Query(ctx, "EXPLAIN "+resultRevocationLookup, uuid.New())
+	require.NoError(t, err)
+	defer rows.Close()
+	var plan strings.Builder
+	for rows.Next() {
+		var line string
+		require.NoError(t, rows.Scan(&line))
+		plan.WriteString(line + "\n")
+	}
+	require.NoError(t, rows.Err())
+	require.Contains(t, plan.String(), "agents_pkey", plan.String())
+}

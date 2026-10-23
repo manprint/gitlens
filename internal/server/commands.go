@@ -395,6 +395,12 @@ func expireCommands(ctx context.Context, db dbPool) error {
 	return err
 }
 
+// resultRevocationLookup reads whether the agent that queued a command is
+// revoked. The command keeps the agent as text, so the agent is joined on its
+// primary key by casting the command's text: the join stays an index probe on
+// agents, and the cast is per command, not per agent row.
+const resultRevocationLookup = `SELECT a.revoked_at IS NOT NULL FROM commands c JOIN agents a ON a.agent_id = c.agent_id::uuid WHERE c.command_id=$1`
+
 // requesterOf names who enqueued a command for the audit: the credential
 // kind (the agent bearer token or a UI session, identified by a digest of
 // the session token, never the token itself) and the client address. The
@@ -446,7 +452,7 @@ func (s *CommandService) result(w http.ResponseWriter, r *http.Request) {
 	// A result from a revoked agent is refused, even for a claim it held before
 	// the revocation. The agent is the one that queued the command, not a header.
 	var revoked bool
-	err = tx.QueryRow(ctx, `SELECT a.revoked_at IS NOT NULL FROM commands c JOIN agents a ON a.agent_id::text = c.agent_id WHERE c.command_id=$1`, commandID).Scan(&revoked)
+	err = tx.QueryRow(ctx, resultRevocationLookup, commandID).Scan(&revoked)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusInternalServerError, "command agent lookup failed", err.Error())
 		return
