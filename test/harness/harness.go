@@ -1168,8 +1168,9 @@ func (h *Harness) Scenario(t *testing.T, id string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
-	// The window for declared events opens on the store's clock, the same
-	// clock the events are stamped with, before Run starts.
+	// The window for declared events opens on the store's clock before Run
+	// starts. checkDeclaredEvents says why that clock bounds every event the
+	// scenarios declare.
 	var runStart time.Time
 	if err := env.DB.QueryRow(ctx, `SELECT now()`).Scan(&runStart); err != nil {
 		t.Fatalf("scenario %s: read the store clock: %v", id, err)
@@ -1187,6 +1188,17 @@ func (h *Harness) Scenario(t *testing.T, id string) {
 // that the store holds no event of since the run began. The server writes
 // events asynchronously, so the window is polled for a minute before it fails.
 // Run has normally waited for them already.
+//
+// The window is safe because the store's now() and the time every declared
+// event is stamped with come from one clock. The compose containers share the
+// host kernel clock. The writers stamp with that clock: staleness.go:407
+// (agent_down, no_primary_in_cluster, slot_inactive), topology/engine.go:103
+// (failover_detected, split_brain_detected, orphan_standby) and inventory.go:272
+// (duplicate_instance_suspected). counter_reset_detected carries the agent's
+// sample time (pipeline.go:467), and no scenario that declares an event skews
+// the agent: the clock-skew topology declares none. An event is therefore
+// stamped when the condition that Run produced takes effect, after the window
+// opened.
 func checkDeclaredEvents(t *testing.T, s scenario.Scenario, pool *pgxpool.Pool, since time.Time) {
 	t.Helper()
 	count := func(eventType string) (int, error) {
