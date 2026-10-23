@@ -25,7 +25,7 @@ func TestCgroup_DetectsV1ByLimitFile(t *testing.T) {
 func TestCgroup_V2MaxMeansUnlimited(t *testing.T) {
 	total := uint64(1048576 * 1024)
 	s := Sample{Source: "host", MemTotalBytes: &total}
-	applyV2("testdata/cgroup_v2_unlimited/fs/cgroup", &s)
+	applyV2("testdata/cgroup_v2_unlimited/fs/cgroup", "testdata/cgroup_v2_unlimited/fs/cgroup", &s)
 	require.Equal(t, total, *s.MemTotalBytes)
 	require.Equal(t, "host", s.Source)
 }
@@ -37,7 +37,7 @@ func TestCgroup_V1SentinelMeansUnlimited(t *testing.T) {
 }
 func TestCgroup_V2CPUQuotaRoundsUp(t *testing.T) {
 	s := Sample{Source: "host"}
-	applyV2("testdata/cgroup_v2/fs/cgroup", &s)
+	applyV2("testdata/cgroup_v2/fs/cgroup", "testdata/cgroup_v2/fs/cgroup", &s)
 	require.Equal(t, 3, *s.CPUCount)
 }
 func TestCgroup_V1NegativeQuotaMeansUnlimited(t *testing.T) {
@@ -51,7 +51,7 @@ func TestCgroup_V1NegativeQuotaMeansUnlimited(t *testing.T) {
 // which the kernel reclaims, so 1024 - (256 - 100) is available.
 func TestCgroup_AvailableExcludesInactiveFileCache(t *testing.T) {
 	s := Sample{Source: "host"}
-	applyV2("testdata/cgroup_v2/fs/cgroup", &s)
+	applyV2("testdata/cgroup_v2/fs/cgroup", "testdata/cgroup_v2/fs/cgroup", &s)
 	require.Equal(t, uint64(868), *s.MemAvailableBytes)
 }
 
@@ -74,7 +74,7 @@ func TestCgroup_AvailableKeepsUsageWithoutMemoryStat(t *testing.T) {
 		"memory.current":     "256\n",
 	})
 	s := Sample{Source: "host"}
-	applyV2(root, &s)
+	applyV2(root, root, &s)
 	require.Equal(t, uint64(768), *s.MemAvailableBytes)
 }
 
@@ -89,7 +89,7 @@ func TestCgroup_AvailableClampsInactiveFileToUsage(t *testing.T) {
 		"memory.stat":        "inactive_file 300\n",
 	})
 	s := Sample{Source: "host"}
-	applyV2(root, &s)
+	applyV2(root, root, &s)
 	require.Equal(t, uint64(1024), *s.MemAvailableBytes)
 }
 
@@ -107,7 +107,7 @@ func TestCgroup_V1AvailableExcludesTotalInactiveFile(t *testing.T) {
 }
 func TestCgroup_SourceReflectsDetection(t *testing.T) {
 	s := Sample{Source: "host"}
-	applyV2("testdata/cgroup_v2/fs/cgroup", &s)
+	applyV2("testdata/cgroup_v2/fs/cgroup", "testdata/cgroup_v2/fs/cgroup", &s)
 	require.Equal(t, "cgroup_v2", s.Source)
 }
 func TestCgroup_NoCgroupKeepsHostFigures(t *testing.T) {
@@ -131,6 +131,7 @@ func applyCgroupForTest(sys string, s *Sample) { NewCollector("", sys).applyCgro
 
 // With a host cgroup namespace the limits sit under the cgroup the process
 // belongs to, not at the mount root, which holds only the host's root cgroup.
+// PID 1 of the container is in that same cgroup (the fixture's proc/1/cgroup).
 func TestCgroup_ReadsLimitsOfOwnCgroupWhenNamespaceIsHost(t *testing.T) {
 	c := NewCollector("testdata/cgroup_v2_nested/proc", "testdata/cgroup_v2_nested/sys")
 	s := Sample{Source: "host"}
@@ -226,4 +227,59 @@ func TestCgroup_CPURatioKeepsHostWithoutQuota(t *testing.T) {
 	s := Sample{Source: "host", CPUUsedRatio: &host}
 	c.applyCgroup(&s)
 	require.Equal(t, 0.125, *s.CPUUsedRatio)
+}
+
+// A process inside a child of the cgroup that sets the limit is bound by that
+// limit, which the kernel enforces at every ancestor. The child's own files say
+// "max", so the limit and the usage it is measured by come from the ancestor.
+func TestCgroup_LimitOnAncestorBindsOwnCgroup(t *testing.T) {
+	procDir, sysDir := t.TempDir(), t.TempDir()
+	writeCgroupFiles(t, procDir, map[string]string{
+		"self/cgroup": "0::/sub\n",
+		"1/cgroup":    "0::/sub\n",
+	})
+	root := filepath.Join(sysDir, "fs", "cgroup")
+	writeCgroupFiles(t, root, map[string]string{
+		"cgroup.controllers": "cpu memory\n",
+		"memory.max":         "1024\n",
+		"memory.current":     "256\n",
+		"cpu.max":            "200000 100000\n",
+	})
+	writeCgroupFiles(t, filepath.Join(root, "sub"), map[string]string{
+		"memory.max":     "max\n",
+		"memory.current": "9999\n",
+		"cpu.max":        "max 100000\n",
+	})
+	s := Sample{Source: "host"}
+	NewCollector(procDir, sysDir).applyCgroup(&s)
+	require.Equal(t, "cgroup_v2", s.Source)
+	require.Equal(t, uint64(1024), *s.MemTotalBytes)
+	require.Equal(t, uint64(768), *s.MemAvailableBytes)
+	require.Equal(t, 2, *s.CPUCount)
+}
+
+// An agent run as a host service names its own unit's cgroup in
+// /proc/self/cgroup, and that unit may set a limit of its own. The host is not a
+// container, so the unit's limit is not the host's total. PID 1 sits in
+// init.scope and does not share the cgroup, so the host figures stand.
+func TestCgroup_HostServiceLimitIsNotReported(t *testing.T) {
+	procDir, sysDir := t.TempDir(), t.TempDir()
+	writeCgroupFiles(t, procDir, map[string]string{
+		"self/cgroup": "0::/system.slice/pglens-agent.service\n",
+		"1/cgroup":    "0::/init.scope\n",
+	})
+	root := filepath.Join(sysDir, "fs", "cgroup")
+	writeCgroupFiles(t, root, map[string]string{"cgroup.controllers": "cpu memory\n"})
+	writeCgroupFiles(t, filepath.Join(root, "system.slice", "pglens-agent.service"), map[string]string{
+		"memory.max":     "536870912\n",
+		"memory.current": "134217728\n",
+		"cpu.max":        "200000 100000\n",
+	})
+	hostMem := uint64(8 << 30)
+	hostCPUs := 16
+	s := Sample{Source: "host", MemTotalBytes: &hostMem, CPUCount: &hostCPUs}
+	NewCollector(procDir, sysDir).applyCgroup(&s)
+	require.Equal(t, "host", s.Source)
+	require.Equal(t, uint64(8<<30), *s.MemTotalBytes)
+	require.Equal(t, 16, *s.CPUCount)
 }

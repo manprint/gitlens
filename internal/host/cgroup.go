@@ -15,14 +15,48 @@ const cgroupV1Unlimited = uint64(1 << 62)
 func (c *Collector) applyCgroup(s *Sample) {
 	root := filepath.Join(c.sysPath, "fs", "cgroup")
 	if _, err := os.Stat(filepath.Join(root, "cgroup.controllers")); err == nil {
-		dir := c.ownCgroupDir(root)
-		applyV2(dir, s)
-		c.applyV2CPURatio(dir, s)
+		own := c.ownCgroupDir(root)
+		memDir := governingDir(own, root, hasMemoryLimit)
+		cpuDir := governingDir(own, root, hasCPUQuota)
+		applyV2(memDir, cpuDir, s)
+		c.applyV2CPURatio(cpuDir, s)
 		return
 	}
 	if _, err := os.Stat(filepath.Join(root, "memory", "memory.limit_in_bytes")); err == nil {
 		applyV1(root, s)
 	}
+}
+
+// governingDir is the directory whose limit binds own: the nearest one from own
+// up to root that has such a limit, since the kernel enforces every ancestor's
+// limit. The usage it is measured by is read from that same directory. It is ""
+// when no directory up to root has one, and the host figures stand.
+func governingDir(own, root string, hasLimit func(dir string) bool) string {
+	for dir := own; ; dir = filepath.Dir(dir) {
+		if hasLimit(dir) {
+			return dir
+		}
+		if dir == root || !strings.HasPrefix(dir, root+string(filepath.Separator)) {
+			return ""
+		}
+	}
+}
+
+// hasMemoryLimit reports whether dir holds a memory limit that the usage of the
+// cgroup can be measured against.
+func hasMemoryLimit(dir string) bool {
+	limit, ok := readUint(filepath.Join(dir, "memory.max"))
+	if !ok || limit >= cgroupV1Unlimited {
+		return false
+	}
+	_, ok = readUint(filepath.Join(dir, "memory.current"))
+	return ok
+}
+
+// hasCPUQuota reports whether dir holds a CPU quota.
+func hasCPUQuota(dir string) bool {
+	_, ok := readCPUQuota(dir)
+	return ok
 }
 
 func readUint(path string) (uint64, bool) {
@@ -40,10 +74,34 @@ func readUint(path string) (uint64, bool) {
 // directory /proc/self/cgroup names. Without that file, or when it names no
 // directory below root, root is used, which is the answer for a private
 // cgroup namespace.
+//
+// The path is followed only when PID 1 names the same cgroup. The processes of
+// a container share its cgroup, so the container's init names it too. An agent
+// run as a host service names its own unit's cgroup while PID 1 sits in
+// init.scope; the unit's limit is then not the container's, and root is used.
 func (c *Collector) ownCgroupDir(root string) string {
-	b, err := os.ReadFile(filepath.Join(c.procPath, "self", "cgroup"))
-	if err != nil {
+	own, ok := unifiedCgroupPath(filepath.Join(c.procPath, "self", "cgroup"))
+	if !ok {
 		return root
+	}
+	pid1, ok := unifiedCgroupPath(filepath.Join(c.procPath, "1", "cgroup"))
+	if !ok || pid1 != own {
+		return root
+	}
+	dir := filepath.Join(root, filepath.FromSlash(own))
+	if info, err := os.Stat(dir); err == nil && info.IsDir() {
+		return dir
+	}
+	return root
+}
+
+// unifiedCgroupPath is the path of the unified (v2) hierarchy in a
+// /proc/<pid>/cgroup file. A path that climbs out of the mount with ".." is
+// refused.
+func unifiedCgroupPath(file string) (string, bool) {
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return "", false
 	}
 	for _, line := range strings.Split(string(b), "\n") {
 		// The unified hierarchy is the single line "0::<path>".
@@ -53,15 +111,11 @@ func (c *Collector) ownCgroupDir(root string) string {
 		}
 		rel := strings.TrimSpace(fields[2])
 		if strings.Contains(rel, "..") {
-			return root
+			return "", false
 		}
-		dir := filepath.Join(root, filepath.FromSlash(rel))
-		if info, err := os.Stat(dir); err == nil && info.IsDir() {
-			return dir
-		}
-		return root
+		return rel, true
 	}
-	return root
+	return "", false
 }
 
 // cgroupCPUReading is a cgroup's cumulative CPU time at one moment.
@@ -74,10 +128,18 @@ type cgroupCPUReading struct {
 // since the previous sample. The host ratio is host-wide, so next to a quota
 // that describes the container it reads as an idle container: a container at
 // its 2-CPU quota on a 16-core host showed 12.5%. Without a quota the host is
-// the resource, and the host ratio stands.
+// the resource, and the host ratio stands. dir is the directory governingDir
+// chose for the quota, "" when there is none.
 func (c *Collector) applyV2CPURatio(dir string, s *Sample) {
-	quotaCores, hasQuota := readCPUQuota(dir)
-	usage, hasUsage := readStatField(filepath.Join(dir, "cpu.stat"), "usage_usec")
+	quotaCores, hasQuota := 0.0, false
+	if dir != "" {
+		quotaCores, hasQuota = readCPUQuota(dir)
+	}
+	var usage uint64
+	hasUsage := false
+	if hasQuota {
+		usage, hasUsage = readStatField(filepath.Join(dir, "cpu.stat"), "usage_usec")
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !hasQuota || !hasUsage {
@@ -153,26 +215,26 @@ func cgroupAvailable(limit, current uint64, statPath, inactiveKey string) uint64
 	return limit - used
 }
 
-func applyV2(root string, s *Sample) {
+// applyV2 takes the memory limit from memDir and the CPU count from cpuDir, the
+// directories governingDir chose for each. An empty one leaves its figures
+// standing.
+func applyV2(memDir, cpuDir string, s *Sample) {
 	limited := false
-	if limit, ok := readUint(filepath.Join(root, "memory.max")); ok && limit < cgroupV1Unlimited {
-		if current, ok := readUint(filepath.Join(root, "memory.current")); ok {
-			s.MemTotalBytes = &limit
-			available := cgroupAvailable(limit, current, filepath.Join(root, "memory.stat"), "inactive_file")
-			s.MemAvailableBytes = &available
-			limited = true
+	if memDir != "" {
+		if limit, ok := readUint(filepath.Join(memDir, "memory.max")); ok && limit < cgroupV1Unlimited {
+			if current, ok := readUint(filepath.Join(memDir, "memory.current")); ok {
+				s.MemTotalBytes = &limit
+				available := cgroupAvailable(limit, current, filepath.Join(memDir, "memory.stat"), "inactive_file")
+				s.MemAvailableBytes = &available
+				limited = true
+			}
 		}
 	}
-	if b, err := os.ReadFile(filepath.Join(root, "cpu.max")); err == nil {
-		parts := strings.Fields(string(b))
-		if len(parts) == 2 && parts[0] != "max" {
-			if q, e1 := strconv.ParseUint(parts[0], 10, 64); e1 == nil {
-				if p, e2 := strconv.ParseUint(parts[1], 10, 64); e2 == nil && p > 0 {
-					n := int(math.Ceil(float64(q) / float64(p)))
-					s.CPUCount = &n
-					limited = true
-				}
-			}
+	if cpuDir != "" {
+		if quota, ok := readCPUQuota(cpuDir); ok {
+			n := int(math.Ceil(quota))
+			s.CPUCount = &n
+			limited = true
 		}
 	}
 	if limited {
