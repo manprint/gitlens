@@ -67,10 +67,30 @@ func (c *archiverCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 	// nothing to archive. The function needs pg_monitor; without it the
 	// metric is left out rather than failing the scrape.
 	var ready float64
+	readyKnown := false
 	if err := conn.QueryRow(ctx, `SELECT count(*)::float8 FROM pg_ls_archive_statusdir() WHERE name LIKE '%.ready'`).Scan(&ready); err == nil {
+		readyKnown = true
 		result.Metrics = append(result.Metrics, pgtype.Metric{Name: "pg_archiver_ready_files", Value: ready, Kind: pgtype.KindGauge})
 	} else if code := pgErrorCode(err); code != pgInsufficientPrivilege && code != pgUndefinedFunction {
 		return Result{}, err
+	}
+	// A server that has never archived has no last archived time, so the age
+	// above is missing and the stall rule has nothing to judge. Archiving has
+	// been expected since the server started (archive_mode changes only at a
+	// restart), or since the statistics were reset when that is later, so the
+	// age is at least the time since then. It is reported only together with
+	// the waiting segments: an idle server that never archived has nothing
+	// stuck, and the age alone would read as a stall once it had been up for
+	// an hour.
+	if lastArchived == nil && readyKnown {
+		var since time.Time
+		if err := conn.QueryRow(ctx, `SELECT pg_postmaster_start_time()`).Scan(&since); err != nil {
+			return Result{}, err
+		}
+		if statsReset != nil && statsReset.After(since) {
+			since = *statsReset
+		}
+		result.Metrics = append(result.Metrics, pgtype.Metric{Name: "pg_archiver_last_archived_age_seconds", Value: nonNegativeAge(now, since), Kind: pgtype.KindGauge})
 	}
 	return result, nil
 }

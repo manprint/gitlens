@@ -24,9 +24,40 @@ func TestArchiver_FailedRatioZeroWhenLastArchivedIsNewer(t *testing.T) {
 }
 
 func TestArchiver_OmitsAgesWhenNull(t *testing.T) {
-	r := scrapeArchiverForTest(t, "on", []any{1.0, nil, nil, 0.0, nil, nil, nil}, nil)
+	denied := &mockRow{err: &pgconn.PgError{Code: "42501", Message: "permission denied for function pg_ls_archive_statusdir"}}
+	r := scrapeArchiverWithReady(t, "on", []any{1.0, nil, nil, 0.0, nil, nil, nil}, nil, denied)
 	require.Equal(t, -1.0, metricValue(r, "pg_archiver_last_archived_age_seconds", nil))
 	require.Equal(t, -1.0, metricValue(r, "pg_archiver_last_failed_age_seconds", nil))
+}
+
+// TestArchiver_NeverArchivedAgeStartsAtPostmaster: an archiver that has never
+// archived still reports an age, from the server start, so that archive.stalled
+// can judge the segments waiting behind it. Without it the stall was invisible.
+func TestArchiver_NeverArchivedAgeStartsAtPostmaster(t *testing.T) {
+	never := []any{0.0, nil, nil, 0.0, nil, nil, nil}
+	r := scrapeArchiverWithReady(t, "on", never, nil, &mockRow{vals: []any{3.0}})
+	require.Greater(t, metricValue(r, "pg_archiver_last_archived_age_seconds", nil), 3600.0)
+	require.Equal(t, 3.0, metricValue(r, "pg_archiver_ready_files", nil))
+}
+
+// TestArchiver_NeverArchivedAgeStartsAtStatsReset: when the statistics were
+// reset after the server started, the age runs from the reset, the later time.
+func TestArchiver_NeverArchivedAgeStartsAtStatsReset(t *testing.T) {
+	reset := time.Now().Add(-10 * time.Minute)
+	r := scrapeArchiverWithReady(t, "on", []any{0.0, nil, nil, 0.0, nil, nil, &reset}, nil, &mockRow{vals: []any{3.0}})
+	age := metricValue(r, "pg_archiver_last_archived_age_seconds", nil)
+	require.GreaterOrEqual(t, age, 600.0)
+	require.Less(t, age, 3600.0)
+}
+
+// TestArchiver_NeverArchivedAgeNeedsReadyFiles: without the waiting-segment
+// count an idle server that never archived would read as stalled once it had
+// been up for an hour, so no age is reported.
+func TestArchiver_NeverArchivedAgeNeedsReadyFiles(t *testing.T) {
+	never := []any{0.0, nil, nil, 0.0, nil, nil, nil}
+	denied := &mockRow{err: &pgconn.PgError{Code: "42501", Message: "permission denied for function pg_ls_archive_statusdir"}}
+	r := scrapeArchiverWithReady(t, "on", never, nil, denied)
+	require.Equal(t, -1.0, metricValue(r, "pg_archiver_last_archived_age_seconds", nil))
 }
 
 func TestArchiver_ArchiveModeOffEmitsNoArchiverCounters(t *testing.T) {
@@ -101,6 +132,8 @@ func archiverMockConn(mode string, stats []any, progress [][]any, ready *mockRow
 				return &mockRow{vals: []any{mode}}
 			case strings.Contains(query, "pg_ls_archive_statusdir"):
 				return ready
+			case strings.Contains(query, "pg_postmaster_start_time"):
+				return &mockRow{vals: []any{time.Now().Add(-2 * time.Hour)}}
 			default:
 				return &mockRow{vals: stats}
 			}
