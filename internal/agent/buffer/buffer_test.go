@@ -1135,3 +1135,78 @@ func TestBuffer_AppendAfterPartialWriteKeepsLaterRecords(t *testing.T) {
 		}
 	}
 }
+
+// TestBuffer_CorruptRecordInClosedSegmentKeepsNeighbours — AB-01: a corrupt
+// record in a closed segment is skipped on its own. The reader used to move on
+// to the next segment at the corrupt record's offset, so it could ack a record
+// misread from there. Once that ack moved the checkpoint forward, the closed
+// segment was deleted with its undelivered records and nothing counted the loss.
+func TestBuffer_CorruptRecordInClosedSegmentKeepsNeighbours(t *testing.T) {
+	dir := t.TempDir()
+	buf, err := Open(dir, Options{Clock: clock.System()})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// 127 records of this size fill the first 8 MiB segment; the rest roll over.
+	const total = 200
+	const recSize = 64 * 1024
+	numbered := func(i int) []byte {
+		rec := make([]byte, recSize)
+		copy(rec, fmt.Sprintf("rec-%03d:", i))
+		return rec
+	}
+	for i := 0; i < total; i++ {
+		if err := buf.Append(numbered(i)); err != nil {
+			t.Fatalf("Append %d: %v", i, err)
+		}
+	}
+	if err := buf.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Flip one payload byte of record 10, which sits in the closed first segment.
+	segPath := firstSegmentFile(t, dir)
+	f, err := os.OpenFile(segPath, os.O_RDWR, 0644)
+	if err != nil {
+		t.Fatalf("open segment: %v", err)
+	}
+	off := int64(10*(8+recSize) + 8 + 100)
+	b := make([]byte, 1)
+	if _, err := f.ReadAt(b, off); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	b[0] ^= 0xFF
+	if _, err := f.WriteAt(b, off); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	buf, err = Open(dir, Options{Clock: clock.System()})
+	if err != nil {
+		t.Fatalf("Reopen: %v", err)
+	}
+	defer func() { _ = buf.Close() }()
+
+	got := drainAndAck(t, buf)
+	var want []int
+	for i := 0; i < total; i++ {
+		if i != 10 {
+			want = append(want, i)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("delivered %d records, want %d", len(got), len(want))
+	}
+	for i, idx := range want {
+		prefix := fmt.Sprintf("rec-%03d:", idx)
+		if !strings.HasPrefix(got[i], prefix) {
+			t.Fatalf("delivery %d starts %q, want %q", i, got[i][:min(len(got[i]), len(prefix))], prefix)
+		}
+	}
+	if n := buf.Stats().CorruptRecords; n != 1 {
+		t.Errorf("CorruptRecords = %d, want 1", n)
+	}
+}

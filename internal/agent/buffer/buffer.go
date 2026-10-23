@@ -231,6 +231,7 @@ func (b *Buffer) Next() ([]byte, AckFunc, error) {
 	defer b.mu.Unlock()
 
 	// Loop to skip corrupt records.
+scan:
 	for {
 		// Start from nextReadSeg/nextReadOff (or after the last ack).
 		for si := b.nextReadSeg; si < len(b.segments); si++ {
@@ -241,7 +242,7 @@ func (b *Buffer) Next() ([]byte, AckFunc, error) {
 			}
 
 			// If we got an envelope (nextOff advanced), return it with an ack function.
-			if nextOff > b.nextReadOff || si > b.nextReadSeg {
+			if nextOff > b.nextReadOff {
 				// We have a record (possibly after skipping corrupt ones).
 				if env != nil {
 					// Capture the segment and offset for the ack.
@@ -275,7 +276,11 @@ func (b *Buffer) Next() ([]byte, AckFunc, error) {
 				corruptAt := b.opts.Clock.Now()
 				b.stats.LastCorruptTime = &corruptAt
 				b.nextReadOff = nextOff
-				continue
+				// The inner loop is the one that reads the segments; continuing it
+				// would probe the next segment at this segment's offset. Re-read this
+				// segment after the corrupt record instead.
+				b.nextReadSeg = si
+				continue scan
 			}
 
 			// Segment caught up to its current end. Only advance past it
