@@ -91,6 +91,20 @@ func Open(dir string, opts Options) (*Buffer, error) {
 	}
 	sort.Strings(segFiles)
 
+	// Load the acked position before the segments are walked: the walk of the
+	// segment that holds the checkpoint starts there.
+	if err := b.loadAckedPosition(); err != nil {
+		// Without a checkpoint nothing is known to be acked, so start from the
+		// beginning. A checkpoint that exists but cannot be read gets the same
+		// fallback, which replays the retained buffer. That is safe, since
+		// delivery is at least once, but it is reported rather than silent.
+		if !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "warning: buffer: unreadable acked checkpoint in %s, replaying the retained buffer: %v\n", dir, err)
+		}
+		b.ackedSegID = 0
+		b.ackedOff = 0
+	}
+
 	// closeLoaded releases every descriptor opened so far. Open returns a nil
 	// Buffer on error, so nothing else can ever close them: without this an
 	// agent that fails to start (one unreadable segment, one unparsable name)
@@ -104,18 +118,24 @@ func Open(dir string, opts Options) (*Buffer, error) {
 	// Load each segment and recover the next segment ID.
 	for _, fname := range segFiles {
 		fpath := filepath.Join(dir, fname)
-		seg, cut, err := openSegment(fpath)
-		if err != nil {
-			closeLoaded()
-			return nil, fmt.Errorf("open segment %s: %w", fname, err)
-		}
 
 		// Extract segment ID and update nextSegID.
 		var segID uint32
 		if _, err := fmt.Sscanf(fname, "%08x.seg", &segID); err != nil {
-			_ = seg.Close()
 			closeLoaded()
 			return nil, fmt.Errorf("parse segment filename %s: %w", fname, err)
+		}
+
+		// Only the segment that holds the checkpoint is walked from it. See
+		// openSegment for why the bytes before the checkpoint are not walked.
+		var keep uint64
+		if segID == b.ackedSegID {
+			keep = b.ackedOff
+		}
+		seg, cut, err := openSegment(fpath, keep)
+		if err != nil {
+			closeLoaded()
+			return nil, fmt.Errorf("open segment %s: %w", fname, err)
 		}
 		seg.id = segID
 		seg.maxSize = segmentSize(opts.MaxSize)
@@ -123,11 +143,15 @@ func Open(dir string, opts Options) (*Buffer, error) {
 			b.nextSegID = segID + 1
 		}
 		if cut > 0 {
-			// The cut record was never complete, so it was never deliverable.
-			// Counting it keeps the loss visible instead of silent.
+			// The cut bytes were never readable, so they were never deliverable.
+			// Counting them keeps the loss visible instead of silent. One record
+			// is counted per cut: the records behind a header that cannot be
+			// placed cannot be counted from the bytes, so the warning names the
+			// size as well.
 			b.stats.CorruptRecords++
 			tornAt := opts.Clock.Now()
 			b.stats.LastCorruptTime = &tornAt
+			fmt.Fprintf(os.Stderr, "warning: buffer: cut %d unreadable bytes from %s in %s\n", cut, fname, dir)
 		}
 
 		b.segments = append(b.segments, seg)
@@ -140,21 +164,9 @@ func Open(dir string, opts Options) (*Buffer, error) {
 	// Recalculate stats (recovered from disk).
 	b.recalculateStats()
 
-	// Load acked position from metadata file. It is read before the
-	// retention policies run, so that they count as dropped only the records
-	// that were never delivered.
-	if err := b.loadAckedPosition(); err != nil {
-		// Without a checkpoint nothing is known to be acked, so start from the
-		// beginning. A checkpoint that exists but cannot be read gets the same
-		// fallback, which replays the retained buffer. That is safe, since
-		// delivery is at least once, but it is reported rather than silent.
-		if !errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintf(os.Stderr, "warning: buffer: unreadable acked checkpoint in %s, replaying the retained buffer: %v\n", dir, err)
-		}
-		b.ackedSegID = 0
-		b.ackedOff = 0
-	}
-
+	// The retention policies below run after the checkpoint is known, so that
+	// they count as dropped only the records that were never delivered.
+	//
 	// The checkpoint can point past every segment on disk: the segment files
 	// were removed (an operator clearing the directory, or every segment aging
 	// out) while .acked survived. New segments are numbered from the files
@@ -162,11 +174,34 @@ func Open(dir string, opts Options) (*Buffer, error) {
 	// dropAckedSegments would delete them unread on the next start. Nothing on
 	// disk is acknowledged in that case, so the checkpoint restarts at the
 	// first segment that exists.
+	checkpointSegID, checkpointOff := b.ackedSegID, b.ackedOff
 	if n := len(b.segments); n == 0 || b.ackedSegID > b.segments[n-1].id {
 		b.ackedSegID = 0
 		b.ackedOff = 0
 		if n > 0 {
 			b.ackedSegID = b.segments[0].id
+		}
+	}
+
+	// The checkpoint can also point past the end of its own segment. A power
+	// loss can persist the rename of .acked without the data it refers to, so
+	// the segment is shorter than the checkpoint. Appends land at the end of the
+	// file, below the checkpoint, and the reader would never offer them. The
+	// checkpoint moves to the end of the file, where nothing is unacknowledged.
+	for _, seg := range b.segments {
+		if seg.id == b.ackedSegID && b.ackedOff > uint64(seg.fileSize) {
+			fmt.Fprintf(os.Stderr, "warning: buffer: acked checkpoint in %s is past the end of %08x.seg, restarting it at byte %d\n", dir, seg.id, seg.fileSize)
+			b.ackedOff = uint64(seg.fileSize)
+		}
+	}
+
+	// A corrected checkpoint is written before the buffer takes any append. Kept
+	// only in memory, it would come back on the next Open after an unclean exit,
+	// and the new records would be cut or hidden by the stale position.
+	if b.ackedSegID != checkpointSegID || b.ackedOff != checkpointOff {
+		if err := b.saveAckedPosition(); err != nil {
+			closeLoaded()
+			return nil, fmt.Errorf("save corrected checkpoint: %w", err)
 		}
 	}
 
@@ -608,9 +643,11 @@ type Segment struct {
 	mu          sync.Mutex
 }
 
-// openSegment opens an existing segment file. It returns the number of bytes
-// it cut from the end of the file, which is non-zero only after a torn write.
-func openSegment(fpath string) (*Segment, int64, error) {
+// openSegment opens an existing segment file. keep is the checkpoint's offset
+// within it, or 0 when the checkpoint is elsewhere. It returns the number of
+// bytes it cut from the end of the file, which is non-zero only after a torn
+// write or a length header the walk cannot place.
+func openSegment(fpath string, keep uint64) (*Segment, int64, error) {
 	f, err := os.OpenFile(fpath, os.O_RDWR|os.O_APPEND, 0644)
 	if err != nil {
 		return nil, 0, err
@@ -629,13 +666,20 @@ func openSegment(fpath string) (*Segment, int64, error) {
 		lastWrite: stat.ModTime(),
 	}
 
-	// Walk the records by their length headers, as recordsFrom does. A record
-	// that runs past the end of the file is a torn write, and nothing can follow
-	// it. The file is cut back to the end of the last complete record: an append
-	// landing after the torn bytes would be read as part of their payload, and
-	// the reader would never realign. A complete record with a bad CRC is kept.
-	// Its length is sound, so the reader skips it and the records after it stay
-	// reachable.
+	// Walk the records by their length headers, as recordsFrom does, starting at
+	// the checkpoint. The bytes before it were acknowledged and the reader never
+	// reads them again, so a corrupt length header there must not stop the walk
+	// and cut the records after it. A checkpoint past the end of the file leaves
+	// nothing to walk, and Open moves it back to the end of the file.
+	//
+	// A record that runs past the end of the file is a torn write, and the reader
+	// cannot get past it: an append landing after the torn bytes would be read as
+	// part of their payload, and the reader would never realign. The file is cut
+	// back to the end of the last complete record. A length header past the
+	// checkpoint that is corrupt takes the same course, since the reader cannot
+	// get past it either, so the records behind it are cut too. A complete record
+	// with a bad CRC is kept. Its length is sound, so the reader skips it and the
+	// records after it stay reachable.
 	//
 	// A zero-length header is not a record: the writer never produces one, and a
 	// zero-filled tail, which some filesystems leave after a crash, is made of
@@ -644,7 +688,8 @@ func openSegment(fpath string) (*Segment, int64, error) {
 	// be dropped as acked, and they would be counted as dropped when it was
 	// retired. Zeros between records are left for the reader to skip.
 	size := stat.Size()
-	var offset, end int64
+	start := min(keep, uint64(size))
+	offset, end := int64(start), int64(start)
 	for offset+8 <= size {
 		var header [8]byte
 		if _, err := f.ReadAt(header[:], offset); err != nil {

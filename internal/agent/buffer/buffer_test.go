@@ -1141,6 +1141,112 @@ func TestBuffer_AppendAfterPartialWriteKeepsLaterRecords(t *testing.T) {
 	}
 }
 
+// TestBuffer_CorruptAckedPrefixKeepsUnackedRecords — AB-02: a flipped length
+// header inside the acknowledged prefix used to stop the scan of the segment on
+// reopen, and the torn-tail cut then removed every record after it, including
+// the ones nobody had acknowledged yet. The reader never reads the acknowledged
+// prefix, so the records after the checkpoint must survive the reopen.
+func TestBuffer_CorruptAckedPrefixKeepsUnackedRecords(t *testing.T) {
+	// Five records of 16 bytes each (an 8-byte header and an 8-byte payload).
+	// The first three are acknowledged, so the checkpoint is at byte 48.
+	setup := func(t *testing.T) string {
+		t.Helper()
+		dir := t.TempDir()
+		buf, err := Open(dir, Options{Clock: clock.System()})
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		for i := 0; i < 5; i++ {
+			if err := buf.Append([]byte(fmt.Sprintf("rec-%d---", i))); err != nil {
+				t.Fatalf("Append %d: %v", i, err)
+			}
+		}
+		for i := 0; i < 3; i++ {
+			data, ack, err := buf.Next()
+			if err != nil || data == nil {
+				t.Fatalf("Next %d: %q, %v", i, data, err)
+			}
+			if err := ack(context.Background()); err != nil {
+				t.Fatalf("ack %d: %v", i, err)
+			}
+		}
+		if err := buf.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+
+		// Set the length header of rec-1, which lies inside the acknowledged prefix.
+		f, err := os.OpenFile(firstSegmentFile(t, dir), os.O_WRONLY, 0)
+		if err != nil {
+			t.Fatalf("open segment: %v", err)
+		}
+		header := make([]byte, 4)
+		binary.LittleEndian.PutUint32(header, 0xFFFFFF00)
+		if _, err := f.WriteAt(header, 16); err != nil {
+			t.Fatalf("write header: %v", err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatalf("close: %v", err)
+		}
+		return dir
+	}
+
+	t.Run("unacknowledged records survive", func(t *testing.T) {
+		dir := setup(t)
+		buf, err := Open(dir, Options{Clock: clock.System()})
+		if err != nil {
+			t.Fatalf("reopen: %v", err)
+		}
+		defer func() { _ = buf.Close() }()
+		if err := buf.Append([]byte("rec-5---")); err != nil {
+			t.Fatalf("Append rec-5: %v", err)
+		}
+		got := drainAndAck(t, buf)
+		want := []string{"rec-3---", "rec-4---", "rec-5---"}
+		if len(got) != len(want) {
+			t.Fatalf("delivered %q, want %q", got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("record %d = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("a torn tail after the corrupt prefix is still cut", func(t *testing.T) {
+		dir := setup(t)
+		// Cut rec-4 short, as a crash mid-write does.
+		segPath := firstSegmentFile(t, dir)
+		stat, err := os.Stat(segPath)
+		if err != nil {
+			t.Fatalf("Stat: %v", err)
+		}
+		if err := os.Truncate(segPath, stat.Size()-3); err != nil {
+			t.Fatalf("Truncate: %v", err)
+		}
+		buf, err := Open(dir, Options{Clock: clock.System()})
+		if err != nil {
+			t.Fatalf("reopen: %v", err)
+		}
+		defer func() { _ = buf.Close() }()
+		if n := buf.Stats().CorruptRecords; n != 1 {
+			t.Errorf("CorruptRecords = %d, want 1 for the torn rec-4", n)
+		}
+		if err := buf.Append([]byte("rec-5---")); err != nil {
+			t.Fatalf("Append rec-5: %v", err)
+		}
+		got := drainAndAck(t, buf)
+		want := []string{"rec-3---", "rec-5---"}
+		if len(got) != len(want) {
+			t.Fatalf("delivered %q, want %q", got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("record %d = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
+}
+
 // TestBuffer_CorruptRecordInClosedSegmentKeepsNeighbours — AB-01: a corrupt
 // record in a closed segment is skipped on its own. The reader used to move on
 // to the next segment at the corrupt record's offset, so it could ack a record
@@ -1225,9 +1331,14 @@ func TestBuffer_StaleCheckpointKeepsNewSegments(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		closeFirst bool
+		fresh      int
 	}{
-		{name: "closed before restart", closeFirst: true},
-		{name: "unclean exit before restart", closeFirst: false},
+		{name: "closed before restart", closeFirst: true, fresh: 200},
+		{name: "unclean exit before restart", closeFirst: false, fresh: 200},
+		// 400 and 600 fresh records number new segments through the checkpoint's
+		// own ID and past it, so the stale offset lands inside a new segment.
+		{name: "unclean exit after 400 fresh records", closeFirst: false, fresh: 400},
+		{name: "unclean exit after 600 fresh records", closeFirst: false, fresh: 600},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -1267,8 +1378,7 @@ func TestBuffer_StaleCheckpointKeepsNewSegments(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Open after cleanup: %v", err)
 			}
-			const fresh = 200
-			for i := 0; i < fresh; i++ {
+			for i := 0; i < tc.fresh; i++ {
 				rec := make([]byte, recSize)
 				copy(rec, fmt.Sprintf("new-%03d:", i))
 				if err := buf.Append(rec); err != nil {
@@ -1287,16 +1397,101 @@ func TestBuffer_StaleCheckpointKeepsNewSegments(t *testing.T) {
 			}
 			defer func() { _ = buf.Close() }()
 			got := drainAndAck(t, buf)
-			if len(got) != fresh {
-				t.Fatalf("delivered %d records written after the cleanup, want %d", len(got), fresh)
+			if len(got) != tc.fresh {
+				t.Fatalf("delivered %d records written after the cleanup, want %d", len(got), tc.fresh)
 			}
 			for i := range got {
 				if prefix := fmt.Sprintf("new-%03d:", i); !strings.HasPrefix(got[i], prefix) {
 					t.Fatalf("record %d starts %q, want %q", i, got[i][:min(len(got[i]), len(prefix))], prefix)
 				}
 			}
+			// Nothing undelivered may be dropped silently on the way.
+			if dropped := buf.Stats().SamplesDropped; len(dropped) != 0 {
+				t.Errorf("SamplesDropped = %v after the cleanup, want none", dropped)
+			}
 		})
 	}
+}
+
+// TestBuffer_CheckpointPastSegmentEndRestartsAtFileEnd — AB-16: a power loss can
+// leave a segment shorter than the checkpoint that names it, because the
+// checkpoint is renamed into place without a sync and the segment data is not.
+// The checkpoint then points past the end of the file, and the appends that
+// follow land below it, where the reader never looks.
+func TestBuffer_CheckpointPastSegmentEndRestartsAtFileEnd(t *testing.T) {
+	// Three records, the first two acknowledged, so the checkpoint is at byte 32.
+	// The segment then loses its tail and keeps only record-0.
+	setup := func(t *testing.T) string {
+		t.Helper()
+		dir := t.TempDir()
+		buf, err := Open(dir, Options{Clock: clock.System()})
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		for _, r := range []string{"record-0", "record-1", "record-2"} {
+			if err := buf.Append([]byte(r)); err != nil {
+				t.Fatalf("Append: %v", err)
+			}
+		}
+		for i := 0; i < 2; i++ {
+			data, ack, err := buf.Next()
+			if err != nil || data == nil {
+				t.Fatalf("Next %d: %q, %v", i, data, err)
+			}
+			if err := ack(context.Background()); err != nil {
+				t.Fatalf("ack %d: %v", i, err)
+			}
+		}
+		if err := buf.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		if err := os.Truncate(firstSegmentFile(t, dir), 16); err != nil {
+			t.Fatalf("Truncate: %v", err)
+		}
+		return dir
+	}
+
+	t.Run("appends after the reopen are delivered", func(t *testing.T) {
+		dir := setup(t)
+		var buf *Buffer
+		var err error
+		stderr := captureStderr(t, func() {
+			buf, err = Open(dir, Options{Clock: clock.System()})
+		})
+		if err != nil {
+			t.Fatalf("reopen: %v", err)
+		}
+		defer func() { _ = buf.Close() }()
+		if !strings.Contains(stderr, "past the end") {
+			t.Errorf("reopen printed %q, want a warning about the checkpoint", stderr)
+		}
+		if err := buf.Append([]byte("record-3")); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+		if got := drainAndAck(t, buf); len(got) != 1 || got[0] != "record-3" {
+			t.Fatalf("delivered %q, want [record-3]", got)
+		}
+	})
+
+	t.Run("appends survive an unclean exit before any ack", func(t *testing.T) {
+		dir := setup(t)
+		buf, err := Open(dir, Options{Clock: clock.System()})
+		if err != nil {
+			t.Fatalf("reopen: %v", err)
+		}
+		if err := buf.Append([]byte("record-3")); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+		// No Close: the checkpoint on disk is the one Open wrote.
+		buf, err = Open(dir, Options{Clock: clock.System()})
+		if err != nil {
+			t.Fatalf("second Open: %v", err)
+		}
+		defer func() { _ = buf.Close() }()
+		if got := drainAndAck(t, buf); len(got) != 1 || got[0] != "record-3" {
+			t.Fatalf("delivered %q, want [record-3]", got)
+		}
+	})
 }
 
 // frameRecord returns payload framed the way Segment.Append writes it: the
