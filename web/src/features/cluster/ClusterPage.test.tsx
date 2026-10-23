@@ -10,7 +10,7 @@ import { base as topologyBase } from '@/test/fixtures/getClusterTopology'
 import { base as replicationBase } from '@/test/fixtures/getClusterReplication'
 import { base as slotsBase, inactive as inactiveSlots } from '@/test/fixtures/getClusterSlots'
 import { renderWithProviders } from '@/test/render'
-import { ok, sequence, status } from '@/test/msw/handlers'
+import { never, ok, sequence, status } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 
 import { ClusterPage } from './ClusterPage'
@@ -85,6 +85,25 @@ describe('ClusterPage', () => {
     expect(screen.getByText('No replication observed for this cluster.')).toBeInTheDocument()
     vi.useRealTimers()
     await expectNoA11yViolations(document.body)
+  })
+
+  it('UI-CLUS-048 shows loading, not clean empty states, while lag, slots and drift are pending', async () => {
+    server.use(
+      ok('getClusters', [cluster]),
+      ok('getClusterTopology', topologyBase),
+      never('getClusterReplication'),
+      never('getClusterSettingsDrift'),
+      never('getClusterSlots'),
+    )
+    renderPage()
+    await settle()
+
+    expect(screen.queryByText('No drift detected')).not.toBeInTheDocument()
+    expect(screen.queryByText('No replication slots')).not.toBeInTheDocument()
+    expect(screen.queryByText('No replication lag data in this range')).not.toBeInTheDocument()
+    expect(screen.getByText('Loading replication lag')).toBeInTheDocument()
+    expect(screen.getByText('Loading replication slots')).toBeInTheDocument()
+    expect(screen.getByText('Loading configuration drift')).toBeInTheDocument()
   })
 
   it('UI-CLUS-042 keeps the graph and marks lag charts unavailable after a replication failure', async () => {

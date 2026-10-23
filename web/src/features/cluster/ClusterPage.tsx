@@ -148,31 +148,45 @@ export function ClusterPage({ clusterId: clusterIdOverride }: ClusterPageProps =
             failure={replicationQuery.error}
             onRetry={() => void replicationQuery.refetch()}
           />
+        ) : replicationQuery.isPending ? (
+          <EmptyState
+            title="Loading replication lag"
+            description="Reading the replication lag series for this range."
+          />
         ) : (
           <LagSection edges={replicationQuery.data?.edges ?? []} instances={instances} />
         )}
       </section>
 
-      <SlotsSection
-        slots={slots}
-        onRetry={() => void slotsQuery.refetch()}
-        {...(slotsQuery.error && !slotsQuery.data ? { failure: slotsQuery.error } : {})}
-      />
-
-      <DriftSection
-        entries={driftQuery.data ?? []}
-        onRetry={() => void driftQuery.refetch()}
-        {...(driftQuery.error ? { failure: driftQuery.error } : {})}
-      />
-
-      <EventTimeline events={events} />
+      {/* A pending query has no data yet, so its section must not show the empty
+          state that a settled, empty response would show. */}
+      {slotsQuery.isPending ? (
+        <EmptyState
+          title="Loading replication slots"
+          description="Reading the replication slots this cluster reports."
+        />
+      ) : (
+        <SlotsSection
+          slots={slots}
+          onRetry={() => void slotsQuery.refetch()}
+          {...(slotsQuery.error && !slotsQuery.data ? { failure: slotsQuery.error } : {})}
+        />
+      )}
 
       {driftQuery.isPending ? (
         <EmptyState
           title="Loading configuration drift"
           description="Comparing observed settings across the cluster instances."
         />
-      ) : null}
+      ) : (
+        <DriftSection
+          entries={driftQuery.data ?? []}
+          onRetry={() => void driftQuery.refetch()}
+          {...(driftQuery.error ? { failure: driftQuery.error } : {})}
+        />
+      )}
+
+      <EventTimeline events={events} />
 
       <p className="text-muted-foreground text-xs">
         Cluster identity: <code>{cluster.cluster_id}</code>
