@@ -1319,9 +1319,12 @@ func (a *API) statementsSkipReason(ctx context.Context, instanceID uuid.UUID) (*
 
 // instanceTruncated reports whether the statements for this instance may be
 // incomplete: the agent's hard cardinality cap cut the list during the
-// requested window (a "cardinality_truncated" event), or its latest
-// pg_stat_statements result held only the top statements (a check_partial
-// fact, removed again by the next complete result).
+// requested window (a "cardinality_truncated" event), or a pg_stat_statements
+// result held only the top statements (a check_partial fact). The fact holds
+// the current partial episode, from first_seen to last_seen, so it counts only
+// when that episode overlaps the window. The flag is instance-wide, not
+// per database: the fact is keyed by the target database, but the statements
+// are read from one instance-wide view.
 func (a *API) instanceTruncated(ctx context.Context, instanceID uuid.UUID, from, to *time.Time) (bool, error) {
 	var sb strings.Builder
 	args := []any{instanceID}
@@ -1341,8 +1344,13 @@ func (a *API) instanceTruncated(ctx context.Context, instanceID uuid.UUID, from,
 	if from != nil {
 		fmt.Fprintf(&sb, " AND last_seen >= $%d", argIdx)
 		args = append(args, *from)
+		argIdx++
 	} else {
 		sb.WriteString(" AND last_seen >= now() - interval '1 day'")
+	}
+	if to != nil {
+		fmt.Fprintf(&sb, " AND first_seen < $%d", argIdx)
+		args = append(args, *to)
 	}
 	sb.WriteString(")")
 	var truncated bool

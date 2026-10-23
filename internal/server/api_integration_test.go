@@ -467,3 +467,40 @@ func TestAPI_INT_API_004_MetricsQueryRefusesSeveralSeries(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "several series")
 }
+
+// TestAPI_INT_API_005_StatementsTruncatedWindowOverlap: a partial
+// stat_statements episode flags only the windows it overlaps. The episode
+// below began an hour ago and is still running, so last week's statements
+// are not truncated by it, while a window around now is.
+func TestAPI_INT_API_005_StatementsTruncatedWindowOverlap(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := contextBackground()
+	cidDB := store.ToDB(pgtype.ClusterID(555))
+	iid := uuid.New()
+	agent := uuid.New()
+	_, err := pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual')`, cidDB)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen) VALUES ($1,'default',$2,$3,'10.0.3.1',5432,170000,'primary','T0',now())`, iid, cidDB, agent)
+	require.NoError(t, err)
+	now := time.Now().UTC()
+	_, err = pool.Exec(ctx, `INSERT INTO object_facts (tenant_id, cluster_id, instance_id, datname, kind, key, labels, value_text, first_seen, last_seen, changed_at) VALUES ('default',$1,$2,'db','check_partial','stat_statements','{}','partial',$3,$4,$4)`, cidDB, iid, now.Add(-time.Hour), now)
+	require.NoError(t, err)
+	truncated := func(from, to time.Time) bool {
+		t.Helper()
+		r := chi.NewRouter()
+		NewAPI(pool).RegisterRoutes(r)
+		w := httptest.NewRecorder()
+		target := fmt.Sprintf("/api/v1/statements?instance_id=%s&from=%s&to=%s", iid.String(), from.Format(time.RFC3339), to.Format(time.RFC3339))
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, target, http.NoBody))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var resp statementsResp
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		return resp.Truncated
+	}
+	require.False(t, truncated(now.Add(-8*24*time.Hour), now.Add(-7*24*time.Hour)), "last week's window predates the running episode")
+	require.False(t, truncated(now.Add(-3*time.Hour), now.Add(-2*time.Hour)), "the window ends before the episode began")
+	require.True(t, truncated(now.Add(-2*time.Hour), now.Add(time.Hour)), "the window holds the running episode")
+}
