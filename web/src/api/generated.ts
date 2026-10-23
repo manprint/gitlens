@@ -444,7 +444,7 @@ export interface paths {
         };
         /**
          * Return relation bloat estimates.
-         * @description The newest reading of each relation and method: estimates from the last 13 hours (the check runs every 6 hours) and pgstattuple measurements from the last 7 days.
+         * @description The newest reading of each relation and method: table and index estimates from the last 13 hours (the check runs every 6 hours) and pgstattuple measurements of tables from the last 7 days. An index row carries its table's name in relname and its own name in indexrelname. skipped_tables counts the tables the estimate cannot read, because the monitoring role cannot see their column statistics; skipped_relations names up to ten of the largest per database. Their bloat is unknown, not zero.
          */
         get: operations["getInstanceBloat"];
         put?: never;
@@ -1776,6 +1776,27 @@ export interface components {
             /** Format: int32 */
             relations_not_reported: number | null;
         };
+        BloatResponse: {
+            instance_id: components["schemas"]["InstanceId"];
+            items: {
+                [key: string]: unknown;
+            }[];
+            truncated: components["schemas"]["Truncated"];
+            /** Format: int32 */
+            relations_not_reported: number | null;
+            /**
+             * Format: int64
+             * @description Tables, summed over the databases of the instance, whose column statistics the monitoring role cannot read. No bloat is estimated for them.
+             */
+            skipped_tables: number;
+            /** @description The largest skipped tables, up to ten per database. */
+            skipped_relations: components["schemas"]["SkippedRelation"][];
+        };
+        SkippedRelation: {
+            datname: string;
+            schemaname: string;
+            relname: string;
+        };
         Alert: {
             alert_key: string;
             rule_id: string;
@@ -2659,6 +2680,8 @@ export interface operations {
         parameters: {
             query?: {
                 method?: "estimate" | "pgstattuple";
+                /** @description Only rows of this kind. Tables and indexes have separate budgets, each checks.bloat_estimate.top_n, so a filtered list shows the whole budget of its kind. */
+                object_kind?: "table" | "index";
                 /** @description Maximum number of relations returned by the instance-level budget. */
                 limit?: number;
             };
@@ -2670,13 +2693,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Bloat rows and cardinality-budget metadata. */
+            /** @description Bloat rows, the count of tables whose bloat is not estimated, and cardinality-budget metadata. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RelationResponse"];
+                    "application/json": components["schemas"]["BloatResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];

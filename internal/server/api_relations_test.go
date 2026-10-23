@@ -71,3 +71,25 @@ func TestRelationLimit_DefaultAndCap(t *testing.T) {
 		require.Equal(t, tc.want, relationLimit(req), tc.query)
 	}
 }
+
+// TestRelationAPI_BloatRejectsUnknownObjectKind: object_kind selects tables or
+// indexes, so any other kind is refused rather than matched to nothing.
+func TestRelationAPI_BloatRejectsUnknownObjectKind(t *testing.T) {
+	rec := httptest.NewRecorder()
+	relationRouter(NewAPI(nil)).ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
+		"/api/v1/instances/"+uuid.New().String()+"/bloat?object_kind=sequence", http.NoBody))
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// TestRelationAPI_BloatStatesSkippedTablesWhenEmpty: with no pool the answer
+// still says that nothing was skipped, rather than leaving the fields out.
+func TestRelationAPI_BloatStatesSkippedTablesWhenEmpty(t *testing.T) {
+	rec := httptest.NewRecorder()
+	relationRouter(NewAPI(nil)).ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
+		"/api/v1/instances/"+uuid.New().String()+"/bloat", http.NoBody))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+	require.Equal(t, float64(0), payload["skipped_tables"])
+	require.Equal(t, []any{}, payload["skipped_relations"])
+}

@@ -918,6 +918,30 @@ components:
         items: { type: array, items: { type: object, additionalProperties: true } }
         truncated: { $ref: '#/components/schemas/Truncated' }
         relations_not_reported: { type: [integer, 'null'], format: int32 }
+    BloatResponse:
+      type: object
+      required: [instance_id, items, truncated, relations_not_reported, skipped_tables, skipped_relations]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        items: { type: array, items: { type: object, additionalProperties: true } }
+        truncated: { $ref: '#/components/schemas/Truncated' }
+        relations_not_reported: { type: [integer, 'null'], format: int32 }
+        skipped_tables:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Tables, summed over the databases of the instance, whose column statistics the monitoring role cannot read. No bloat is estimated for them.
+        skipped_relations:
+          type: array
+          description: The largest skipped tables, up to ten per database.
+          items: { $ref: '#/components/schemas/SkippedRelation' }
+    SkippedRelation:
+      type: object
+      required: [datname, schemaname, relname]
+      properties:
+        datname: { type: string }
+        schemaname: { type: string }
+        relname: { type: string }
     Alert:
       type: object
       required: [alert_key, rule_id, severity, state, datname, labels, value, summary, started_at, last_eval_at, resolved_at, suppressed]
@@ -1973,15 +1997,25 @@ paths:
       operationId: getInstanceBloat
       summary: Return relation bloat estimates.
       description: >-
-        The newest reading of each relation and method: estimates from the last
-        13 hours (the check runs every 6 hours) and pgstattuple measurements
-        from the last 7 days.
+        The newest reading of each relation and method: table and index
+        estimates from the last 13 hours (the check runs every 6 hours) and
+        pgstattuple measurements of tables from the last 7 days. An index row
+        carries its table's name in relname and its own name in indexrelname.
+        skipped_tables counts the tables the estimate cannot read, because the
+        monitoring role cannot see their column statistics; skipped_relations
+        names up to ten of the largest per database. Their bloat is unknown,
+        not zero.
       parameters:
         - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
         - name: method
           in: query
           required: false
           schema: { type: string, enum: [estimate, pgstattuple] }
+        - name: object_kind
+          in: query
+          required: false
+          schema: { type: string, enum: [table, index] }
+          description: Only rows of this kind. Tables and indexes have separate budgets, each checks.bloat_estimate.top_n, so a filtered list shows the whole budget of its kind.
         - name: limit
           in: query
           required: false
@@ -1989,18 +2023,21 @@ paths:
           description: Maximum number of relations returned by the instance-level budget.
       responses:
         '200':
-          description: Bloat rows and cardinality-budget metadata.
+          description: Bloat rows, the count of tables whose bloat is not estimated, and cardinality-budget metadata.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/RelationResponse' }
+              schema: { $ref: '#/components/schemas/BloatResponse' }
               examples:
                 default:
                   value:
                     instance_id: 11111111-1111-1111-1111-111111111111
                     items:
                       - { datname: app, schemaname: public, relname: users, indexrelname: '', object_kind: table, method: estimate, real_bytes: 1048576, expected_bytes: 851968, bloat_bytes: 196608, bloat_ratio: 0.19, ts: '2026-08-27T02:00:00Z' }
+                      - { datname: app, schemaname: public, relname: users, indexrelname: users_email_idx, object_kind: index, method: estimate, real_bytes: 2097152, expected_bytes: 262144, bloat_bytes: 1835008, bloat_ratio: 0.88, ts: '2026-08-27T02:00:00Z' }
                     truncated: false
                     relations_not_reported: null
+                    skipped_tables: 1
+                    skipped_relations: [{ datname: app, schemaname: public, relname: secret_payloads }]
         '400': { $ref: '#/components/responses/BadRequest' }
 
   /api/v1/instances/{id}/command-audit:
