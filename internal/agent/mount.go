@@ -8,6 +8,11 @@ import (
 
 // isMountWarning checks if a path is on the root mount (not a separate persistent mount).
 // For testing, mountinfoPath can be overridden.
+//
+// This is a test-only copy. The production check is cmd/pglens-agent's
+// isMountWarning, which matches whole path components and reads the filesystem
+// type. This copy still matches by prefix and ignores the type, so delete it
+// together with TestMountWarning in config_test.go.
 func isMountWarning(path string, mountinfoPath string) (bool, error) {
 	data, err := os.ReadFile(mountinfoPath)
 	if err != nil {
