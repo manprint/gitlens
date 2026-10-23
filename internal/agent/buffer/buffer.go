@@ -149,6 +149,21 @@ func Open(dir string, opts Options) (*Buffer, error) {
 		b.ackedOff = 0
 	}
 
+	// The checkpoint can point past every segment on disk: the segment files
+	// were removed (an operator clearing the directory, or every segment aging
+	// out) while .acked survived. New segments are numbered from the files
+	// alone, so they would land below the checkpoint, look acknowledged, and
+	// dropAckedSegments would delete them unread on the next start. Nothing on
+	// disk is acknowledged in that case, so the checkpoint restarts at the
+	// first segment that exists.
+	if n := len(b.segments); n == 0 || b.ackedSegID > b.segments[n-1].id {
+		b.ackedSegID = 0
+		b.ackedOff = 0
+		if n > 0 {
+			b.ackedSegID = b.segments[0].id
+		}
+	}
+
 	b.dropAckedSegments()
 	b.enforceMaxAge()
 	// A buffer recovered from disk can already exceed the budget — most often

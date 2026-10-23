@@ -1210,3 +1210,86 @@ func TestBuffer_CorruptRecordInClosedSegmentKeepsNeighbours(t *testing.T) {
 		t.Errorf("CorruptRecords = %d, want 1", n)
 	}
 }
+
+// TestBuffer_StaleCheckpointKeepsNewSegments — AB-03: the segment files are
+// removed while .acked survives, as when an operator clears the buffer
+// directory to free space. The checkpoint then points past everything on disk.
+// New segments are numbered from the files alone, so they land below the
+// checkpoint, look acknowledged, and the next Open deletes them unread.
+func TestBuffer_StaleCheckpointKeepsNewSegments(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		closeFirst bool
+	}{
+		{name: "closed before restart", closeFirst: true},
+		{name: "unclean exit before restart", closeFirst: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			buf, err := Open(dir, Options{Clock: clock.System()})
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			// 400 records of this size span four segments; draining them all
+			// leaves the checkpoint in the last one.
+			const recSize = 64 * 1024
+			for i := 0; i < 400; i++ {
+				rec := make([]byte, recSize)
+				copy(rec, fmt.Sprintf("old-%03d:", i))
+				if err := buf.Append(rec); err != nil {
+					t.Fatalf("Append %d: %v", i, err)
+				}
+			}
+			if got := len(drainAndAck(t, buf)); got != 400 {
+				t.Fatalf("drained %d old records, want 400", got)
+			}
+			if err := buf.Close(); err != nil {
+				t.Fatalf("Close: %v", err)
+			}
+
+			// The cleanup: every segment file goes, .acked stays.
+			segs, err := filepath.Glob(filepath.Join(dir, "*.seg"))
+			if err != nil || len(segs) == 0 {
+				t.Fatalf("no segment files to remove: %v", err)
+			}
+			for _, s := range segs {
+				if err := os.Remove(s); err != nil {
+					t.Fatalf("remove %s: %v", s, err)
+				}
+			}
+
+			buf, err = Open(dir, Options{Clock: clock.System()})
+			if err != nil {
+				t.Fatalf("Open after cleanup: %v", err)
+			}
+			const fresh = 200
+			for i := 0; i < fresh; i++ {
+				rec := make([]byte, recSize)
+				copy(rec, fmt.Sprintf("new-%03d:", i))
+				if err := buf.Append(rec); err != nil {
+					t.Fatalf("Append new %d: %v", i, err)
+				}
+			}
+			if tc.closeFirst {
+				if err := buf.Close(); err != nil {
+					t.Fatalf("Close: %v", err)
+				}
+			}
+
+			buf, err = Open(dir, Options{Clock: clock.System()})
+			if err != nil {
+				t.Fatalf("second Open: %v", err)
+			}
+			defer func() { _ = buf.Close() }()
+			got := drainAndAck(t, buf)
+			if len(got) != fresh {
+				t.Fatalf("delivered %d records written after the cleanup, want %d", len(got), fresh)
+			}
+			for i := range got {
+				if prefix := fmt.Sprintf("new-%03d:", i); !strings.HasPrefix(got[i], prefix) {
+					t.Fatalf("record %d starts %q, want %q", i, got[i][:min(len(got[i]), len(prefix))], prefix)
+				}
+			}
+		})
+	}
+}
