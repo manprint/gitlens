@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"time"
 
@@ -80,8 +81,19 @@ func (a *API) handleLocks(w http.ResponseWriter, r *http.Request) {
 				Nodes    []json.RawMessage `json:"nodes"`
 				Sessions []json.RawMessage `json:"sessions"`
 			}
-			if json.Unmarshal(raw, &tree) == nil {
+			// A tree that does not decode is not an empty tree: answering it as a
+			// fresh, empty result would show no contention as current data.
+			if err := json.Unmarshal(raw, &tree); err != nil {
+				log.Printf("decode lock tree of instance %s: %v", id, err)
+				writeError(w, http.StatusInternalServerError, "lock tree unreadable", err.Error())
+				return
+			}
+			// A tree that omits a list, or stores null, keeps the empty list the
+			// response promises instead of encoding null.
+			if tree.Nodes != nil {
 				resp.Nodes = tree.Nodes
+			}
+			if tree.Sessions != nil {
 				resp.Sessions = tree.Sessions
 			}
 		}
@@ -128,7 +140,9 @@ func (a *API) handleActivity(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "scan failed", err.Error())
 			return
 		}
-		_ = json.Unmarshal(labels, &m.Labels)
+		if err := json.Unmarshal(labels, &m.Labels); err != nil {
+			log.Printf("decode labels of metric %s for instance %s: %v", name, id, err)
+		}
 		resp.Metrics[name] = append(resp.Metrics[name], m)
 		resp.Stale = false
 	}
