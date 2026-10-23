@@ -65,6 +65,30 @@ func (p *Pipeline) maybeEvict() {
 	p.lastEvict = now
 }
 
+// seriesDatname is the database a metric series belongs to. A result that names
+// no database of its own, such as database_stats, carries one row per database,
+// and the row's label names the database.
+func seriesDatname(r wire.Result, m wire.Metric) string {
+	if r.Database != "" {
+		return r.Database
+	}
+	return m.Labels["database"]
+}
+
+// seriesStatsReset is the stats_reset a counter series is observed with. A
+// result covering several databases has one StatsReset for all of them, the
+// newest of their resets. Given to a database that was not reset, it reads as a
+// reset of that database (delta Rule 3): the rate point is dropped and a
+// counter_reset_detected event is raised for a database that never changed.
+// Such a series gets no reset marker instead. When its counter really goes
+// back, Rule 4 still reports the reset.
+func seriesStatsReset(r wire.Result, m wire.Metric) *time.Time {
+	if r.Database == "" && m.Labels["database"] != "" {
+		return nil
+	}
+	return r.StatsReset
+}
+
 // destinationTable routes a check name to its storage table.
 func destinationTable(check string) string {
 	switch {
@@ -411,14 +435,11 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 				})
 			}
 			for _, m := range r.Metrics {
-				metricDatname := r.Database
 				// Database-scoped checks such as database_stats emit one result
 				// containing labelled rows. Preserve that database identity in the
 				// generic metric row when the envelope result itself has no
 				// Database field, so database-scoped alert samples retain datname.
-				if metricDatname == "" {
-					metricDatname = m.Labels["database"]
-				}
+				metricDatname := seriesDatname(r, m)
 				dest := destinationTable(r.Check)
 				// ASH buckets are counts, never through delta, regardless of Kind.
 				if dest == "metrics_ash" {
@@ -450,7 +471,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 						Key:        key,
 						TS:         r.TS,
 						Value:      m.Value,
-						StatsReset: r.StatsReset,
+						StatsReset: seriesStatsReset(r, m),
 					}
 					pt, ev, undoDelta := p.delta.ObserveUndoable(obs)
 					undos = append(undos, undoDelta)
@@ -911,14 +932,14 @@ func (p *Pipeline) processInstanceNoDB(_ context.Context, inst wire.Instance) er
 				key := pgtype.SeriesKey{
 					Metric:   m.Name,
 					Instance: instUUID,
-					Database: r.Database,
+					Database: seriesDatname(r, m),
 					Labels:   canonical,
 				}
 				obs := delta.Observation{
 					Key:        key,
 					TS:         r.TS,
 					Value:      m.Value,
-					StatsReset: r.StatsReset,
+					StatsReset: seriesStatsReset(r, m),
 				}
 				_, _ = p.delta.Observe(obs)
 			default:
