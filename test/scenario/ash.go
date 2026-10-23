@@ -76,23 +76,24 @@ func init() {
 			}
 			allActiveTS := time.Now().UTC()
 
-			// Let the sleeps finish, then wait for the window that was open when
-			// the last session ended to reach the server. ASH writes a row only
-			// for a window that saw active sessions, so a row stamped after the
-			// sessions ended is that window (it closes within 10s and is pushed
-			// within push_interval 5s).
+			// Let the sleeps finish, then wait for the window that closes right
+			// after the measurement window below to reach the server. The
+			// measurement window ends 5s before the sessions do, so sessions are
+			// still active in the next window and it has rows. Every earlier
+			// window was pushed before it (windows close every 10s and are
+			// pushed within push_interval 5s).
 			wg.Wait()
-			sessionsDoneTS := time.Now().UTC()
+			windowEnd := startTS.Add(time.Duration(sleepSeconds)*time.Second - 5*time.Second)
 			flushCtx, cancelFlush := context.WithTimeout(ctx, 60*time.Second)
 			defer cancelFlush()
 			if err := poll(flushCtx, 2*time.Second, func(ctx context.Context) (bool, error) {
 				var n int
 				err := e.DB.QueryRow(ctx,
 					`SELECT count(*) FROM metrics_ash WHERE instance_id=$1::uuid AND ts > $2`,
-					instanceID, sessionsDoneTS).Scan(&n)
+					instanceID, windowEnd).Scan(&n)
 				return err == nil && n > 0, err
 			}); err != nil {
-				return fmt.Errorf("the ASH window open when the sessions ended never reached the store: %w", err)
+				return fmt.Errorf("the ASH window after the measurement window never reached the store: %w", err)
 			}
 
 			// Only trust the middle of the sleep period, not its edges: the
@@ -107,7 +108,6 @@ func init() {
 			// completion (sessions sleep the same duration from their own
 			// individually-staggered start, so the first one finishes at
 			// startTS+sleepSeconds at the earliest).
-			windowEnd := startTS.Add(time.Duration(sleepSeconds)*time.Second - 5*time.Second)
 			if !allActiveTS.Add(10 * time.Second).Before(windowEnd) {
 				return fmt.Errorf("no safe measurement window: sessions became active too close to their own end (allActiveTS=%s, deadline=%s)", allActiveTS, windowEnd)
 			}
