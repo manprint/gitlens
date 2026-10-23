@@ -103,9 +103,7 @@ func (f Fact) Validate() error {
 	if f.Key == "" {
 		return fmt.Errorf("fact key is required")
 	}
-	switch f.Kind {
-	case "index_def", "setting", "lock_tree", "plan", "check_skip", "monitoring_role":
-	default:
+	if _, ok := LookupFactKind(f.Kind); !ok {
 		return fmt.Errorf("unknown fact kind %q", f.Kind)
 	}
 	textSet := f.ValueText != ""

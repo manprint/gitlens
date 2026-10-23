@@ -142,10 +142,13 @@ ANALYZE ro_audit`)
 			res, err := c.Scrape(ctx, target)
 			require.NoError(t, err, c.Name())
 			// The agent drops a fact wire.Fact.Validate refuses, so it
-			// never reaches the server.
+			// never reaches the server; and the server replaces a kind's
+			// facts on results of the check wire says reports it.
 			for _, f := range res.Facts {
 				wf := wire.Fact{Kind: f.Kind, Key: f.Key, Labels: f.Labels, ValueText: f.ValueText, ValueJSON: f.ValueJSON}
 				require.NoError(t, wf.Validate(), "%s fact %s/%s", c.Name(), f.Kind, f.Key)
+				kind, _ := wire.LookupFactKind(f.Kind)
+				require.Equal(t, c.Name(), kind.Check, "fact kind %s", f.Kind)
 			}
 			ran++
 		}

@@ -43,9 +43,15 @@ const (
 	pgBlockSize = 8192
 )
 
+// Fact is one object_facts row. Snapshot.Facts keys a fact of an instance
+// (Datname empty) by its key, and a fact of a database by
+// databaseFactKey(Datname, Key): the same object name exists in several
+// databases.
 type Fact struct {
-	Key        string
-	ValueText  string
+	Key       string
+	Datname   string
+	ValueText string
+	// Value is value_json, when it is an object.
 	Value      map[string]any
 	Labels     map[string]string
 	ObservedAt time.Time
@@ -434,11 +440,12 @@ func latestSettingBatch(observed, newest time.Time) bool {
 type factRow struct {
 	kind, key, value, datname string
 	labels                    map[string]string
+	object                    map[string]any
 	observed                  time.Time
 }
 
 func loadFacts(ctx context.Context, pool snapshotDB, s *Snapshot) error {
-	rows, err := pool.Query(ctx, `SELECT kind, key, labels, COALESCE(value_text, ''), last_seen, datname
+	rows, err := pool.Query(ctx, `SELECT kind, key, labels, COALESCE(value_text, ''), last_seen, datname, value_json
 		FROM object_facts
 		WHERE tenant_id='default' AND instance_id=$1`, s.InstanceID)
 	if err != nil {
@@ -449,13 +456,16 @@ func loadFacts(ctx context.Context, pool snapshotDB, s *Snapshot) error {
 	var newestSetting time.Time
 	for rows.Next() {
 		var f factRow
-		var rawLabels []byte
-		if err := rows.Scan(&f.kind, &f.key, &rawLabels, &f.value, &f.observed, &f.datname); err != nil {
+		var rawLabels, rawValue []byte
+		if err := rows.Scan(&f.kind, &f.key, &rawLabels, &f.value, &f.observed, &f.datname, &rawValue); err != nil {
 			return err
 		}
 		f.labels = map[string]string{}
 		if len(rawLabels) > 0 {
 			_ = json.Unmarshal(rawLabels, &f.labels)
+		}
+		if len(rawValue) > 0 {
+			_ = json.Unmarshal(rawValue, &f.object)
 		}
 		if f.kind == "setting" && f.observed.After(newestSetting) {
 			newestSetting = f.observed
@@ -473,10 +483,10 @@ func loadFacts(ctx context.Context, pool snapshotDB, s *Snapshot) error {
 			s.Facts[f.kind] = map[string]Fact{}
 		}
 		key := f.key
-		if f.kind == "index_def" {
-			key = indexHashKey(f.datname, f.key)
+		if f.kind == "index_def" || f.datname != "" {
+			key = databaseFactKey(f.datname, f.key)
 		}
-		s.Facts[f.kind][key] = Fact{Key: f.key, ValueText: f.value, Labels: f.labels, ObservedAt: f.observed}
+		s.Facts[f.kind][key] = Fact{Key: f.key, Datname: f.datname, ValueText: f.value, Value: f.object, Labels: f.labels, ObservedAt: f.observed}
 		if f.kind == "setting" {
 			s.Settings[f.key] = f.value
 			if f.labels["context"] != "" {
@@ -575,7 +585,11 @@ func loadBaseline(ctx context.Context, pool snapshotDB, s *Snapshot, now time.Ti
 
 // indexHashKey names an index definition across databases: the same schema
 // and index name can exist in several databases of one instance.
-func indexHashKey(datname, name string) string { return datname + "\x00" + name }
+func indexHashKey(datname, name string) string { return databaseFactKey(datname, name) }
+
+// databaseFactKey is the Snapshot.Facts key of a fact reported for one
+// database.
+func databaseFactKey(datname, key string) string { return datname + "\x00" + key }
 
 type siblingFactRow struct {
 	id                                 uuid.UUID

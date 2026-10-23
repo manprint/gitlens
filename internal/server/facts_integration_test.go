@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/store"
@@ -129,6 +130,61 @@ func TestINTFACT007_EmptySettingReplacesValue(t *testing.T) {
 	require.NoError(t, pool.QueryRow(context.Background(), `SELECT value_text FROM object_facts WHERE instance_id=$1 AND kind='setting' AND key='synchronous_standby_names'`, instance).Scan(&value))
 	require.NotNil(t, value)
 	require.Equal(t, "", *value)
+}
+
+// INT-FACT-008: a complete result replaces the facts of the kinds its check
+// owns, for its database only. A fact it no longer reports is removed (an
+// index dropped, a setting put back to its default); one it still reports
+// keeps its first_seen. A partial, truncated or failed result removes
+// nothing, and neither does a result of another check.
+func TestINTFACT008_CompleteResultReplacesItsFacts(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	instance := uuid.NewString()
+	push := func(results ...wire.Result) {
+		env := wire.Envelope{ProtocolVersion: wire.ProtocolVersionCurrent, AgentID: uuid.NewString(), SentAt: results[0].TS, Instances: []wire.Instance{{InstanceID: instance, ClusterID: "28", Role: "primary", Results: results}}}
+		assertPush(t, factsRouter(pool), env, http.StatusAccepted)
+	}
+	def := func(key string) wire.Fact { return wire.Fact{Kind: "index_def", Key: key, ValueText: "CREATE INDEX " + key} }
+	facts := func() []string {
+		rows, err := pool.Query(ctx, `SELECT datname || ':' || kind || ':' || key FROM object_facts WHERE instance_id=$1 AND kind IN ('index_def', 'setting') ORDER BY 1`, instance)
+		require.NoError(t, err)
+		got, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		require.NoError(t, err)
+		return got
+	}
+	t1 := time.Now().UTC().Truncate(time.Microsecond).Add(-10 * time.Minute)
+	push(
+		wire.Result{Check: "index_stats", TS: t1, Database: "app", Facts: []wire.Fact{def("public.a"), def("public.b")}},
+		wire.Result{Check: "index_stats", TS: t1, Database: "other", Facts: []wire.Fact{def("public.c")}},
+		wire.Result{Check: "settings", TS: t1, Facts: []wire.Fact{{Kind: "setting", Key: "work_mem", ValueText: "8MB"}, {Kind: "setting", Key: "wal_level", ValueText: "logical"}}},
+	)
+	require.Equal(t, []string{":setting:wal_level", ":setting:work_mem", "app:index_def:public.a", "app:index_def:public.b", "other:index_def:public.c"}, facts())
+
+	// Nothing that is not complete replaces anything.
+	t2 := t1.Add(time.Minute)
+	push(
+		wire.Result{Check: "index_stats", TS: t2, Database: "app", Partial: true},
+		wire.Result{Check: "index_stats", TS: t2, Database: "other", Truncated: true},
+		wire.Result{Check: "settings", TS: t2, Error: "timeout"},
+		wire.Result{Check: "table_stats", TS: t2, Database: "app"},
+	)
+	require.Len(t, facts(), 5)
+
+	t3 := t2.Add(time.Minute)
+	push(
+		wire.Result{Check: "index_stats", TS: t3, Database: "app", Facts: []wire.Fact{def("public.a")}},
+		wire.Result{Check: "settings", TS: t3, Facts: []wire.Fact{{Kind: "setting", Key: "work_mem", ValueText: "8MB"}}},
+	)
+	require.Equal(t, []string{":setting:work_mem", "app:index_def:public.a", "other:index_def:public.c"}, facts())
+	var firstSeen time.Time
+	require.NoError(t, pool.QueryRow(ctx, `SELECT first_seen FROM object_facts WHERE instance_id=$1 AND kind='index_def' AND key='public.a'`, instance).Scan(&firstSeen))
+	require.True(t, firstSeen.Equal(t1), "first_seen %s, want %s", firstSeen, t1)
+
+	// A complete result that reports nothing removes everything of its kind.
+	push(wire.Result{Check: "index_stats", TS: t3.Add(time.Minute), Database: "other"})
+	require.Equal(t, []string{":setting:work_mem", "app:index_def:public.a"}, facts())
 }
 
 // INT-FACT-006: unknown future protocol versions are rejected with the

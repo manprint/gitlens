@@ -130,6 +130,18 @@ func TestFact_Validate_AcceptsEmptySetting(t *testing.T) {
 	require.False(t, (wire.Fact{Kind: "setting", Key: "k", ValueText: "v"}).EmptySetting())
 }
 
+func TestFactKinds_ReplacedByTheirCheck(t *testing.T) {
+	require.Equal(t, []string{"index_def"}, wire.ReplacedFactKinds("index_stats"))
+	require.Equal(t, []string{"setting"}, wire.ReplacedFactKinds("settings"))
+	require.Empty(t, wire.ReplacedFactKinds("locks"))
+	require.Empty(t, wire.ReplacedFactKinds("no_such_check"))
+	kind, ok := wire.LookupFactKind("lock_tree")
+	require.True(t, ok)
+	require.Equal(t, "locks", kind.Check)
+	_, ok = wire.LookupFactKind("other")
+	require.False(t, ok)
+}
+
 func TestFact_Validate_AcceptsMonitoringRole(t *testing.T) {
 	require.NoError(t, (wire.Fact{Kind: "monitoring_role", Key: "self", ValueText: "read-only"}).Validate())
 }
