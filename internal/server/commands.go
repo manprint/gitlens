@@ -534,14 +534,13 @@ func persistCommandArtifact(ctx context.Context, tx pgx.Tx, tenantID string, ins
 		}
 		// A plan is only meaningful under its database, and the command often
 		// names none. The agent reports the database it ran in, which is the one
-		// to file under. A plan with no name at all is not stored, since a row
-		// under an empty name is found by no database filter in the plan history.
+		// to file under. An agent that predates that report sends no name, and
+		// its plan is filed under the empty name, as plans were before the
+		// report existed. A database filter does not find such a row, but the
+		// unfiltered history does, so the plan is kept rather than dropped.
 		datname := args.Datname
 		if datname == "" {
 			datname = payload.Datname
-		}
-		if datname == "" {
-			return nil
 		}
 		return store.WriteQueryPlan(ctx, tx, store.QueryPlanRow{TenantID: tenantID, InstanceID: instanceID, ClusterID: clusterID, Datname: datname, QueryID: *args.QueryID, PlanHash: payload.PlanHash, Analyzed: args.Analyze, CapturedAt: capturedAt.UTC(), Plan: payload.Plan})
 	case command.KindPgstattuple:

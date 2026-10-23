@@ -342,16 +342,19 @@ func TestINTPLAN003_PlanWithoutDatnameIsFiledUnderTheDatabaseItRanIn(t *testing.
 	require.Equal(t, "appdb", datname)
 }
 
-// TestINTPLAN004_PlanWithNoDatnameIsNotStored: a result that names no database,
-// from an agent that predates the name, is not filed under an empty one.
-func TestINTPLAN004_PlanWithNoDatnameIsNotStored(t *testing.T) {
+// TestINTPLAN004_PlanWithNoDatnameIsStoredUnderNoName: a result that names no
+// database, from an agent that predates the name, is still stored, under an
+// empty name, so the plan is not lost in the upgrade window.
+func TestINTPLAN004_PlanWithNoDatnameIsStoredUnderNoName(t *testing.T) {
 	pool := getSharedPool(t)
 	instanceID, agentID := seedCommandInstance(t, pool)
 	router := commandsIntegrationRouter(pool)
 	completeCommand(t, router, instanceID, agentID, `{"kind":"explain","args":{"queryid":10}}`, `{"claim_token":"00000000-0000-0000-0000-000000000000","outcome":"ok","result":{"plan":[{"Plan":{"Node Type":"Seq Scan"}}],"plan_hash":"unnamed"}}`)
 	var count int
-	require.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*) FROM query_plans WHERE instance_id=$1 AND queryid=10`, instanceID).Scan(&count))
-	require.Zero(t, count)
+	var datname string
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*), COALESCE(max(datname), '') FROM query_plans WHERE instance_id=$1 AND queryid=10`, instanceID).Scan(&count, &datname))
+	require.Equal(t, 1, count)
+	require.Empty(t, datname)
 }
 
 // INT-CMD-030: an agent's queue is bounded. A command over the limit is refused
