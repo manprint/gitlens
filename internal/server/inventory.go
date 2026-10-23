@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/manprint/pglens/internal/pgtype"
@@ -38,10 +40,45 @@ type UpsertResult struct {
 	Errors map[string]error
 }
 
+// instanceRejected is the inventory refusing an instance on its own terms: an
+// identifier it cannot read, or a cluster_id other than the one the instance
+// already has. Only the instance is refused; the rest of the envelope goes on.
+type instanceRejected struct{ err error }
+
+func (r instanceRejected) Error() string { return r.err.Error() }
+func (r instanceRejected) Unwrap() error { return r.err }
+
+// storeFailure reports whether err says the database could not do the work
+// just now, rather than that the instance is refused. The envelope is worth
+// sending again after a store failure. A refusal is not: the same instance
+// would be refused on every push, and the agent would keep sending it.
+func storeFailure(err error) bool {
+	var rejected instanceRejected
+	if errors.As(err, &rejected) {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		// No answer from the server: a refused connection, a dropped one, or
+		// a context that ended.
+		return true
+	}
+	// Connection exceptions, transaction rollbacks (serialization, deadlock),
+	// insufficient resources and operator interventions go away on their own.
+	// A constraint or data error is about this instance, and would repeat.
+	for _, class := range []string{"08", "40", "53", "57"} {
+		if strings.HasPrefix(pgErr.Code, class) {
+			return true
+		}
+	}
+	return false
+}
+
 // Upsert processes all instances in the envelope. Instances are handled
-// independently: a per-instance failure increments Rejected and is recorded in
-// Errors but does not abort the envelope. It returns an UpsertResult and, only
-// on a top-level failure (e.g. context cancellation), a non-nil error.
+// independently: an instance the inventory refuses increments Rejected and is
+// recorded in Errors, and the rest of the envelope goes on. A store failure is
+// not a refusal, so it stops the envelope and is returned as an error: the
+// caller answers it so the agent sends the envelope again.
 func (inv *Inventory) Upsert(ctx context.Context, env wire.Envelope) (*UpsertResult, error) {
 	res := &UpsertResult{Errors: make(map[string]error)}
 	if inv.pool == nil {
@@ -60,6 +97,9 @@ func (inv *Inventory) Upsert(ctx context.Context, env wire.Envelope) (*UpsertRes
 
 	for _, inst := range env.Instances {
 		if err := inv.upsertOne(ctx, tenantID, agentUUID, inst); err != nil {
+			if storeFailure(err) {
+				return nil, err
+			}
 			res.Rejected++
 			res.Errors[inst.InstanceID] = err
 			continue
@@ -124,14 +164,14 @@ func (inv *Inventory) upsertOne(ctx context.Context, tenantID string, agentID uu
 	// Parse and validate cluster_id.
 	cid, err := pgtype.ParseClusterID(inst.ClusterID)
 	if err != nil {
-		return fmt.Errorf("invalid cluster_id %q: %w", inst.ClusterID, err)
+		return instanceRejected{fmt.Errorf("invalid cluster_id %q: %w", inst.ClusterID, err)}
 	}
 	cidDB := store.ToDB(cid)
 
 	// Parse instance_id.
 	instUUID, err := uuid.Parse(inst.InstanceID)
 	if err != nil {
-		return fmt.Errorf("invalid instance_id %q: %w", inst.InstanceID, err)
+		return instanceRejected{fmt.Errorf("invalid instance_id %q: %w", inst.InstanceID, err)}
 	}
 
 	// Validate role – keep as-is but normalize unknown values to "unknown".
@@ -165,7 +205,7 @@ func (inv *Inventory) upsertOne(ctx context.Context, tenantID string, agentID uu
 			if emitErr := inv.emitEvent(ctx, tenantID, time.Now().UTC(), "cluster_id_changed", &existingCID, &instUUID, payload); emitErr != nil {
 				return fmt.Errorf("emit cluster_id_changed: %w", emitErr)
 			}
-			return fmt.Errorf("cluster_id_changed for instance %s: existing %s attempted %s", inst.InstanceID, pgtype.ClusterID(uint64(existingCID)).String(), inst.ClusterID)
+			return instanceRejected{fmt.Errorf("cluster_id_changed for instance %s: existing %s attempted %s", inst.InstanceID, pgtype.ClusterID(uint64(existingCID)).String(), inst.ClusterID)}
 		}
 		// Role change detection – only primary<->standby transitions.
 		if (existingRole == "primary" && role == "standby") || (existingRole == "standby" && role == "primary") {

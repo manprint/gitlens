@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/manprint/pglens/internal/wire"
 	"github.com/stretchr/testify/require"
 )
@@ -87,6 +89,28 @@ func TestIngest_RejectsRevokedInstanceOwner(t *testing.T) {
 			require.Contains(t, w.Body.String(), "revoked")
 		})
 	}
+}
+
+// TestIngest_InventoryStoreFailureIsNotAccepted: the inventory cannot read the
+// database, so the envelope is answered 500 and the agent sends it again. A
+// 202 here would drop the envelope, because the agent takes it as stored.
+func TestIngest_InventoryStoreFailureIsNotAccepted(t *testing.T) {
+	t.Parallel()
+	auth := NewAuth("token")
+	// The owner check of the instance comes first, then the first lookup of the
+	// upsert, which fails.
+	pool := &mockPool{queryRowVals: []*mockRow{{vals: []any{false}}, {err: errors.New("connection refused")}}}
+	inv := &Inventory{pool: pool}
+	h := IngestHandler(auth, inv, NewPipeline(nil, nil))
+	env := wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: "", SentAt: time.Now(),
+		Instances: []wire.Instance{{InstanceID: uuid.NewString(), ClusterID: pgtype.ClusterID(1).String(), Role: "primary"}}}
+	body, _ := json.Marshal(env)
+	req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer token")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	require.Contains(t, w.Body.String(), "inventory error")
 }
 
 // TestIngest_RefusesWhenSaturated: an envelope that finds every slot taken is

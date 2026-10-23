@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/manprint/pglens/internal/store"
 	"github.com/manprint/pglens/internal/wire"
@@ -236,12 +237,35 @@ func TestInventory_MockPool_DuplicateInstanceSuspected(t *testing.T) {
 	require.Equal(t, 4, pool.execCalls)
 }
 
-func TestInventory_MockPool_UpsertCluster_LookupError_Rejected(t *testing.T) {
+// A database that cannot be read says nothing about the instance. The envelope
+// is not stored and not acknowledged, so the agent sends it again, and nothing
+// is written for it in the meantime.
+func TestInventory_MockPool_StoreFailure_FailsEnvelope(t *testing.T) {
 	t.Parallel()
 	cid := pgtype.ClusterID(1)
 	pool := &mockPool{
 		queryRowVals: []*mockRow{
 			{err: errors.New("db down")},
+		},
+	}
+	inv := &Inventory{pool: pool}
+	env := wire.Envelope{
+		Instances: []wire.Instance{{InstanceID: uuid.NewString(), ClusterID: cid.String(), Role: "primary"}},
+	}
+	res, err := inv.Upsert(context.Background(), env)
+	require.ErrorContains(t, err, "db down")
+	require.Nil(t, res)
+	require.Equal(t, 0, pool.execCalls)
+}
+
+// A data error from the database would come back on every push, so the
+// instance it concerns is refused and the rest of the envelope is stored.
+func TestInventory_MockPool_DataError_RejectsInstance(t *testing.T) {
+	t.Parallel()
+	cid := pgtype.ClusterID(1)
+	pool := &mockPool{
+		queryRowVals: []*mockRow{
+			{err: &pgconn.PgError{Code: "22001", Message: "value too long for type"}},
 		},
 	}
 	inv := &Inventory{pool: pool}
@@ -251,9 +275,9 @@ func TestInventory_MockPool_UpsertCluster_LookupError_Rejected(t *testing.T) {
 	}
 	res, err := inv.Upsert(context.Background(), env)
 	require.NoError(t, err)
+	require.Equal(t, 0, res.Accepted)
 	require.Equal(t, 1, res.Rejected)
-	require.Contains(t, res.Errors[instID].Error(), "lookup cluster")
-	require.Equal(t, 0, pool.execCalls)
+	require.Contains(t, res.Errors[instID].Error(), "value too long for type")
 }
 
 func TestInventory_MockPool_IdentityConflict_ManualLosesToSystemIdentifier(t *testing.T) {
