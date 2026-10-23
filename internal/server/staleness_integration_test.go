@@ -14,6 +14,7 @@ import (
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/manprint/pglens/internal/store"
+	"github.com/manprint/pglens/internal/wire"
 	"github.com/stretchr/testify/require"
 )
 
@@ -842,4 +843,51 @@ func TestINTSTALE020_LostSlotEmitsOncePerSpell(t *testing.T) {
 	report(false, "lost")
 	require.NoError(t, s.Evaluate(ctx))
 	require.Equal(t, 2, lostEvents(), "a new spell of loss is reported")
+}
+
+// TestINTSTALE021_IngestedLostSlotIsReported: a lost slot sent by an agent
+// reaches the evaluator as slot_lost. The agent sends the status as the status
+// label of the slot's metrics, and the pipeline must store it on the row that
+// carries the slot's activity, which is the row the evaluator reads.
+func TestINTSTALE021_IngestedLostSlotIsReported(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+	start := time.Now().UTC().Truncate(time.Second)
+	iid := uuid.New()
+	labels := map[string]string{"slot_name": "lostslot", "slot_type": "physical", "status": "lost"}
+	env := wire.Envelope{ProtocolVersion: 3, AgentID: uuid.NewString(), SentAt: start, Instances: []wire.Instance{{
+		InstanceID:      iid.String(),
+		ClusterID:       pgtype.ClusterID(7).String(),
+		ClusterIDSource: "manual",
+		Addr:            "10.0.0.7",
+		Port:            5432,
+		PGVersion:       170000,
+		Role:            "primary",
+		PermTier:        "T0",
+		Results: []wire.Result{{Check: "replication_slots", TS: start, Metrics: []wire.Metric{
+			{Name: "replication_slot_active", Value: 0, Kind: "gauge", Labels: labels},
+			{Name: "replication_slot_retained_bytes", Value: 4096, Kind: "gauge", Labels: labels},
+		}}},
+	}}}
+	_, err := NewPipeline(pool, nil).Process(ctx, env)
+	require.NoError(t, err)
+
+	var walStatus string
+	var active bool
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT slot_wal_status, slot_active FROM metrics_replication WHERE instance_id=$1 AND slot_name='lostslot'`, iid).Scan(&walStatus, &active))
+	require.Equal(t, "lost", walStatus, "the status label is stored on the row of the slot's activity")
+	require.False(t, active)
+
+	s := NewStaleness(pool, clock.NewFake(start))
+	s.mu.Lock()
+	s.conn = mustAcquire(t, pool)
+	s.hasLock = true
+	s.mu.Unlock()
+	require.NoError(t, s.Evaluate(ctx))
+
+	var n int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='slot_lost' AND instance_id=$1`, iid).Scan(&n))
+	require.Equal(t, 1, n, "a lost slot sent through ingest is reported")
 }
