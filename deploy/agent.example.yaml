@@ -22,7 +22,7 @@ commands:
 
 targets:
   - name: timescaledb
-    dsn: postgres://pglens:pglens@timescaledb:5432/pglens?sslmode=disable # Replace for production.
+    dsn: postgres://pglens_monitor@timescaledb:5432/pglens?sslmode=disable # Read-only role from deploy/sql/monitoring_user.sql; password from PGPASSWORD. Replace for production.
     cluster_name: pglens-example # Optional stable cluster label for this target.
     host_local: false # Host metrics are unavailable for a remote target.
     allow_explain_analyze: false # Keep false unless the target policy explicitly permits it.

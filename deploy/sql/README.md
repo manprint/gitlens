@@ -89,6 +89,13 @@ names or any monitored database, because its statistics cover every database;
 the agent looks for it when it starts. `pgstattuple` is needed in each database
 whose tables should be measurable.
 
+The example stack in `deploy/docker-compose.yml` creates `pglens_monitor` on
+the first boot of an empty volume, by running this script through
+`init_monitoring_user.sh`, and its agent connects as that role with the
+password from `PGLENS_MONITORING_PASSWORD`. Init scripts do not run again on an
+existing volume: there, run the script yourself with `-v role=pglens_monitor`
+before starting the agent.
+
 ## Capability matrix
 
 | Tier | Granted capability | Scheduled checks | Advisor rules | What degrades when absent |
