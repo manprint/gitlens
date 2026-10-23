@@ -352,12 +352,40 @@ func TestReplicationStreaming_StandbysStayDistinct(t *testing.T) {
 		names[m.Labels["application_name"]] = m.Labels["sync_state"]
 	}
 	require.Equal(t, map[string]string{
-		"walreceiver@10.0.0.2:40001": "async",
-		"walreceiver@10.0.0.3:40002": "sync",
-		"reporting":                  "async",
+		"walreceiver@10.0.0.2": "async",
+		"walreceiver@10.0.0.3": "sync",
+		"reporting":            "async",
 	}, names)
 	require.Contains(t, sql, "pg_current_wal_lsn()", "byte lag is measured from the generated WAL, not from sent_lsn")
 	require.NotContains(t, sql, "sent_lsn")
+}
+
+// TestReplicationStreaming_ReconnectKeepsStandbyIdentity: a reconnected
+// standby gets a new client port. Its identity must not change, or the server
+// would count it twice while its old row is still in the lookback.
+func TestReplicationStreaming_ReconnectKeepsStandbyIdentity(t *testing.T) {
+	t.Parallel()
+	before := standbyIdentity([]replicationStreamingRow{
+		{ApplicationName: "walreceiver", ClientAddr: "10.0.0.2", ClientPort: 50001},
+		{ApplicationName: "walreceiver", ClientAddr: "10.0.0.3", ClientPort: 50002},
+	})
+	after := standbyIdentity([]replicationStreamingRow{
+		{ApplicationName: "walreceiver", ClientAddr: "10.0.0.2", ClientPort: 50117},
+		{ApplicationName: "walreceiver", ClientAddr: "10.0.0.3", ClientPort: 50002},
+	})
+	require.Equal(t, before, after)
+	require.Equal(t, []string{"walreceiver@10.0.0.2", "walreceiver@10.0.0.3"}, after)
+}
+
+// TestReplicationStreaming_SameAddressStandbysStayDistinct: standbys that share
+// a name and an address are numbered, so one does not overwrite the other.
+func TestReplicationStreaming_SameAddressStandbysStayDistinct(t *testing.T) {
+	t.Parallel()
+	ids := standbyIdentity([]replicationStreamingRow{
+		{ApplicationName: "walreceiver", ClientAddr: "127.0.0.1", ClientPort: 50002},
+		{ApplicationName: "walreceiver", ClientAddr: "127.0.0.1", ClientPort: 50001},
+	})
+	require.Equal(t, []string{"walreceiver@127.0.0.1#2", "walreceiver@127.0.0.1#1"}, ids)
 }
 
 // TestReplicationReceiver_ToleratesArchiveOnlyStandby pins that no nullable

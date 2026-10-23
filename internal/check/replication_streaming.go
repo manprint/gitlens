@@ -3,6 +3,7 @@ package check
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/manprint/pglens/internal/pgtype"
@@ -133,7 +134,11 @@ func staleLag(lag, replyAge *float64, behindBytes *int64) *float64 {
 // standbyIdentity names each walsender row. The server keys a standby's lag
 // row by its application_name label, and standbys whose primary_conninfo sets
 // none all report the default "walreceiver": the client address keeps them
-// apart instead of letting one overwrite the other.
+// apart instead of letting one overwrite the other. The port is left out of
+// the name, because a reconnected standby gets a new one. While its old row
+// was still in the lookback it would be counted twice. Standbys that still
+// share both name and address are numbered in port order; after a reconnect
+// the numbers of such a pair can swap, but no extra identity appears.
 func standbyIdentity(rows []replicationStreamingRow) []string {
 	seen := make(map[string]int, len(rows))
 	for _, r := range rows {
@@ -143,7 +148,22 @@ func standbyIdentity(rows []replicationStreamingRow) []string {
 	for i, r := range rows {
 		ids[i] = r.ApplicationName
 		if seen[r.ApplicationName] > 1 || r.ApplicationName == "" {
-			ids[i] = fmt.Sprintf("%s@%s:%d", r.ApplicationName, r.ClientAddr, r.ClientPort)
+			ids[i] = r.ApplicationName + "@" + r.ClientAddr
+		}
+	}
+	members := make(map[string][]int, len(rows))
+	for i, id := range ids {
+		members[id] = append(members[id], i)
+	}
+	for id, group := range members {
+		if len(group) < 2 {
+			continue
+		}
+		sort.SliceStable(group, func(a, b int) bool {
+			return rows[group[a]].ClientPort < rows[group[b]].ClientPort
+		})
+		for n, i := range group {
+			ids[i] = fmt.Sprintf("%s#%d", id, n+1)
 		}
 	}
 	return ids
