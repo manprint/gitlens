@@ -1580,9 +1580,13 @@ func TestBuffer_CheckpointPastUnackedSegmentsKeepsThem(t *testing.T) {
 			t.Fatalf("chmod: %v", err)
 		}
 		defer func() { _ = os.Chmod(dir, 0o755) }() // let t.TempDir() clean up
-		if buf, err := Open(dir, Options{Clock: clock.System()}); err == nil {
+		buf, err := Open(dir, Options{Clock: clock.System()})
+		if err == nil {
 			_ = buf.Close()
 			t.Fatal("Open succeeded, want an error: the stale checkpoint is still on disk")
+		}
+		if !strings.Contains(err.Error(), "stale acked checkpoint") {
+			t.Errorf("Open error = %v, want one naming the stale acked checkpoint", err)
 		}
 	})
 }
