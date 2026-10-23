@@ -14,7 +14,7 @@ import (
 // INT-GOLDEN-002: protocol-v2 fixtures are frozen independently from the
 // legacy v1 payloads used by INT-GOLDEN-001.
 func TestINTGOLDEN002_ProtocolV2Facts(t *testing.T) {
-	for _, major := range []int{15, 18} {
+	for _, major := range []int{15, 18, 19} {
 		t.Run(fmt.Sprintf("pg%d", major), func(t *testing.T) {
 			path := filepath.Join("testdata", fmt.Sprintf("payload_v2_pg%d.json", major))
 			data, err := os.ReadFile(path)
@@ -25,8 +25,11 @@ func TestINTGOLDEN002_ProtocolV2Facts(t *testing.T) {
 			require.LessOrEqual(t, env.ProtocolVersion, wire.ProtocolVersionCurrent, "a v2 payload is still accepted")
 			require.Len(t, env.Instances, 1)
 			expectedVersion := 150014
-			if major == 18 {
+			switch major {
+			case 18:
 				expectedVersion = 180002
+			case 19:
+				expectedVersion = 190000
 			}
 			require.Equal(t, expectedVersion, env.Instances[0].PGVersion)
 			require.Len(t, env.Instances[0].Results, 1)
