@@ -27,11 +27,19 @@
 -- about the databases it cannot inspect from the current one.
 \set ON_ERROR_STOP on
 
+-- An empty password is refused like a missing one: ALTER ROLE would clear the
+-- password and leave a LOGIN role without one. The comparisons before BEGIN
+-- are qualified to pg_catalog, see below.
 \if :{?pglens_password}
+SELECT (:'pglens_password' OPERATOR(pg_catalog.<>) '') AS password_set \gset
 \else
+\set password_set false
+\endif
 -- The quit meta-command takes no exit status, so the refusal is an error that
 -- ON_ERROR_STOP turns into exit 3, before anything below runs.
-DO $$ BEGIN RAISE EXCEPTION 'pglens_password is required (use psql -v pglens_password=...)'; END $$;
+\if :password_set
+\else
+DO $$ BEGIN RAISE EXCEPTION 'pglens_password is required and must not be empty (use psql -v pglens_password=...)'; END $$;
 \endif
 \if :{?dbname}
 \else
@@ -46,13 +54,18 @@ DO $$ BEGIN RAISE EXCEPTION 'pglens_password is required (use psql -v pglens_pas
 -- as \if :{?tier1} does, would also grant it for tier1=0 or tier1=false.
 -- Tier 2 is tier 1 plus signal, so tier2=1 without tier1=1 is refused before
 -- anything changes.
+-- The comparisons above and in this part run before BEGIN, so before the
+-- script pins its search_path. Their operator is qualified to pg_catalog: a
+-- schema of the database owner listed first in that database's search_path
+-- could otherwise supply its own = and run it as the superuser, with the
+-- password or the flag as an argument.
 \if :{?tier1}
-SELECT (:'tier1' = '1') AS tier1_on \gset
+SELECT (:'tier1' OPERATOR(pg_catalog.=) '1') AS tier1_on \gset
 \else
 \set tier1_on false
 \endif
 \if :{?tier2}
-SELECT (:'tier2' = '1') AS tier2_on \gset
+SELECT (:'tier2' OPERATOR(pg_catalog.=) '1') AS tier2_on \gset
 \else
 \set tier2_on false
 \endif

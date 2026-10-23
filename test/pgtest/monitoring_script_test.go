@@ -265,7 +265,9 @@ CREATE FUNCTION perm_script_definer() RETURNS int LANGUAGE sql SECURITY DEFINER 
 
 // INT-PERM-010: the script runs as a superuser in a database another role
 // may own. A schema of that role listed first in the database's search_path
-// cannot put its own functions in place of the built-ins the script calls.
+// cannot put its own functions in place of the built-ins the script calls,
+// nor its own = and <> operators in place of the comparisons of the password
+// and the tier flags, which run before the script pins its search_path.
 func TestPerm_INT_PERM_010_ScriptIgnoresDatabaseSearchPath(t *testing.T) {
 	ForEach(t, func(t *testing.T, pg *PG) {
 		pg.Lock(t)
@@ -279,17 +281,43 @@ DROP SCHEMA IF EXISTS perm_hijack CASCADE`)
 			require.NoError(t, err)
 			dropScriptRoles(t, admin)
 		})
+		// The operators record what the script compares, and answer as the
+		// built-ins would, only in the psql session the script runs in. Every
+		// other session of the database, this test's included, sees the
+		// built-in answers.
 		_, err := admin.Exec(ctx, `CREATE SCHEMA perm_hijack;
 CREATE FUNCTION perm_hijack.current_setting(text) RETURNS text LANGUAGE plpgsql
   AS $$BEGIN RAISE EXCEPTION 'hijacked'; END$$;
 CREATE FUNCTION perm_hijack.quote_ident(text) RETURNS text LANGUAGE plpgsql
   AS $$BEGIN RAISE EXCEPTION 'hijacked'; END$$;
+CREATE TABLE perm_hijack.seen (call text);
+CREATE FUNCTION perm_hijack.hijacked_eq(text, text) RETURNS boolean LANGUAGE plpgsql
+  AS $$BEGIN
+    IF pg_catalog.current_setting('application_name') OPERATOR(pg_catalog.=) 'psql' THEN
+      INSERT INTO perm_hijack.seen VALUES (pg_catalog.concat_ws(' ', '=', $1, $2));
+      RETURN true;
+    END IF;
+    RETURN $1 OPERATOR(pg_catalog.=) $2;
+  END$$;
+CREATE FUNCTION perm_hijack.hijacked_ne(text, text) RETURNS boolean LANGUAGE plpgsql
+  AS $$BEGIN
+    IF pg_catalog.current_setting('application_name') OPERATOR(pg_catalog.=) 'psql' THEN
+      INSERT INTO perm_hijack.seen VALUES (pg_catalog.concat_ws(' ', '<>', $1, $2));
+      RETURN true;
+    END IF;
+    RETURN $1 OPERATOR(pg_catalog.<>) $2;
+  END$$;
+CREATE OPERATOR perm_hijack.= (LEFTARG = text, RIGHTARG = text, PROCEDURE = perm_hijack.hijacked_eq);
+CREATE OPERATOR perm_hijack.<> (LEFTARG = text, RIGHTARG = text, PROCEDURE = perm_hijack.hijacked_ne);
 ALTER DATABASE app SET search_path = perm_hijack, pg_catalog, public`)
 		require.NoError(t, err)
 
 		code, out := runMonitoringScript(t, pg, "tier1=1", "harden_public=1")
 		require.Equal(t, 0, code, out)
 		require.NotContains(t, out, "hijacked")
+		var calls int
+		require.NoError(t, admin.QueryRow(ctx, "SELECT count(*) FROM perm_hijack.seen").Scan(&calls))
+		require.Zero(t, calls, "the script compared values through the database owner's operators")
 	})
 }
 
