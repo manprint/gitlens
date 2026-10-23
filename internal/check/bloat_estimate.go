@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/manprint/pglens/internal/cardinality"
@@ -44,7 +45,7 @@ const bloatUnreadableQuery = `SELECT count(*) ` + bloatUnreadableFrom
 
 // bloatUnreadableNamesQuery names the largest of those tables, the ones the
 // fact keeps. It runs only when the count is positive.
-const bloatUnreadableNamesQuery = `SELECT n.nspname::text, c.relname::text ` + bloatUnreadableFrom + ` ORDER BY c.relpages DESC, n.nspname, c.relname LIMIT 10`
+var bloatUnreadableNamesQuery = fmt.Sprintf(`SELECT n.nspname::text, c.relname::text `+bloatUnreadableFrom+` ORDER BY c.relpages DESC, n.nspname, c.relname LIMIT %d`, bloatNamedTables)
 
 // bloatNamedTables bounds how many skipped tables the fact names.
 const bloatNamedTables = 10
