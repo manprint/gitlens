@@ -467,7 +467,12 @@ func (m *Manager) ensureCache(ctx context.Context) error {
 	// Query permission tier and extensions. The initial snapshot is refreshed
 	// again by RefreshCapabilities so a DBA grant takes effect on the next
 	// scrape/command without an agent restart.
-	permTier, extensions := m.queryCapabilities(ctx, conn)
+	permTier, extensions, err := m.queryCapabilities(ctx, conn)
+	if err != nil {
+		// Nothing was read before this, so the conservative state stands in
+		// until RefreshCapabilities reads the grants again.
+		permTier, extensions = pgtype.TierReadOnly, map[string]bool{}
+	}
 
 	// A target is not usable without its identity: every envelope carries it.
 	if _, _, err := m.localIdentity(); err != nil {
@@ -490,10 +495,10 @@ func (m *Manager) ensureCache(ctx context.Context) error {
 }
 
 // queryCapabilities reads the privileges and extensions relevant to checks
-// and commands. Errors are treated conservatively: T0 and an empty extension
-// set keep monitoring read-only instead of making an unavailable target look
-// more capable than it is.
-func (m *Manager) queryCapabilities(ctx context.Context, conn capabilityConn) (pgtype.PermTier, map[string]bool) {
+// and commands. A failed read returns its error and no partial answer. A tier
+// or extension set that is only incomplete would look like a change, so the
+// caller decides what to keep.
+func (m *Manager) queryCapabilities(ctx context.Context, conn capabilityConn) (pgtype.PermTier, map[string]bool, error) {
 	tier := pgtype.TierReadOnly
 	var hasReadAllData bool
 	if err := conn.QueryRow(ctx, `
@@ -503,7 +508,10 @@ func (m *Manager) queryCapabilities(ctx context.Context, conn capabilityConn) (p
 			WHERE r.rolname = 'pg_read_all_data'
 			AND m.member = current_user::regrole::oid
 		)
-	`).Scan(&hasReadAllData); err == nil && hasReadAllData {
+	`).Scan(&hasReadAllData); err != nil {
+		return pgtype.TierReadOnly, nil, fmt.Errorf("query pg_read_all_data membership: %w", err)
+	}
+	if hasReadAllData {
 		tier = pgtype.TierExplain
 	}
 
@@ -515,23 +523,30 @@ func (m *Manager) queryCapabilities(ctx context.Context, conn capabilityConn) (p
 			WHERE r.rolname = 'pg_signal_backend'
 			AND m.member = current_user::regrole::oid
 		)
-	`).Scan(&hasSignalBackend); err == nil && hasSignalBackend {
+	`).Scan(&hasSignalBackend); err != nil {
+		return pgtype.TierReadOnly, nil, fmt.Errorf("query pg_signal_backend membership: %w", err)
+	}
+	if hasSignalBackend {
 		tier = pgtype.TierSignal
 	}
 
 	exts := make(map[string]bool)
 	rows, err := conn.Query(ctx, "SELECT extname FROM pg_extension")
 	if err != nil {
-		return tier, exts
+		return pgtype.TierReadOnly, nil, fmt.Errorf("query extensions: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var name string
-		if err := rows.Scan(&name); err == nil {
-			exts[name] = true
+		if err := rows.Scan(&name); err != nil {
+			return pgtype.TierReadOnly, nil, fmt.Errorf("scan extension: %w", err)
 		}
+		exts[name] = true
 	}
-	return tier, exts
+	if err := rows.Err(); err != nil {
+		return pgtype.TierReadOnly, nil, fmt.Errorf("read extensions: %w", err)
+	}
+	return tier, exts, nil
 }
 
 // RefreshCapabilities re-reads privilege membership and installed
@@ -547,7 +562,18 @@ func (m *Manager) RefreshCapabilities(ctx context.Context) error {
 		return err
 	}
 	defer conn.Release()
-	tier, extensions := m.queryCapabilities(ctx, conn)
+	return m.refreshCapabilities(ctx, conn)
+}
+
+// refreshCapabilities replaces the cached tier and extensions with what conn
+// reads now. A failed read leaves the last snapshot in place. A transient error
+// must not drop the tier to read-only, because the schedule rebuilds on a change
+// to it, and the command dispatcher refuses a command whose refresh failed.
+func (m *Manager) refreshCapabilities(ctx context.Context, conn capabilityConn) error {
+	tier, extensions, err := m.queryCapabilities(ctx, conn)
+	if err != nil {
+		return fmt.Errorf("refresh capabilities: %w", err)
+	}
 	m.target.cache.mu.Lock()
 	m.target.cache.permTier = tier
 	m.target.cache.extensions = extensions

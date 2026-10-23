@@ -22,16 +22,19 @@ import (
 
 func TestManager_QueryCapabilities(t *testing.T) {
 	tests := []struct {
-		name       string
-		readAll    bool
-		signal     bool
-		exts       []string
-		wantTier   pgtype.PermTier
-		wantErrors bool
+		name     string
+		readAll  bool
+		signal   bool
+		exts     []string
+		failAt   string // the probe that fails: "read", "signal" or "ext"
+		wantTier pgtype.PermTier
 	}{
-		{name: "T0 when optional queries fail", wantTier: pgtype.TierReadOnly, wantErrors: true},
+		{name: "T0 without the optional roles", exts: []string{}, wantTier: pgtype.TierReadOnly},
 		{name: "T1 with extension", readAll: true, exts: []string{"pg_stat_statements"}, wantTier: pgtype.TierExplain},
 		{name: "T2 with extension", readAll: true, signal: true, exts: []string{"pgstattuple", "pg_stat_statements"}, wantTier: pgtype.TierSignal},
+		{name: "a failed role probe is an error", failAt: "read"},
+		{name: "a failed signal probe is an error", failAt: "signal"},
+		{name: "a failed extension query is an error", failAt: "ext"},
 	}
 
 	for _, tt := range tests {
@@ -43,21 +46,21 @@ func TestManager_QueryCapabilities(t *testing.T) {
 				require.NoError(t, mock.ExpectationsWereMet())
 			})
 
-			readExpectation := mock.ExpectQuery("pg_read_all_data").WillReturnRows(
-				pgxmock.NewRows([]string{"exists"}).AddRow(tt.readAll),
-			)
-			if tt.wantErrors {
-				readExpectation.WillReturnError(errors.New("capability probe failed"))
-			}
-			signalExpectation := mock.ExpectQuery("pg_signal_backend").WillReturnRows(
-				pgxmock.NewRows([]string{"exists"}).AddRow(tt.signal),
-			)
-			if tt.wantErrors {
-				signalExpectation.WillReturnError(errors.New("capability probe failed"))
-			}
-			if tt.exts == nil {
+			// A probe that fails ends the read there, so the probes after it
+			// are not expected at all.
+			switch tt.failAt {
+			case "read":
+				mock.ExpectQuery("pg_read_all_data").WillReturnError(errors.New("capability probe failed"))
+			case "signal":
+				mock.ExpectQuery("pg_read_all_data").WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(tt.readAll))
+				mock.ExpectQuery("pg_signal_backend").WillReturnError(errors.New("capability probe failed"))
+			case "ext":
+				mock.ExpectQuery("pg_read_all_data").WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(tt.readAll))
+				mock.ExpectQuery("pg_signal_backend").WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(tt.signal))
 				mock.ExpectQuery("SELECT extname").WillReturnError(errors.New("extension probe failed"))
-			} else {
+			default:
+				mock.ExpectQuery("pg_read_all_data").WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(tt.readAll))
+				mock.ExpectQuery("pg_signal_backend").WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(tt.signal))
 				rows := pgxmock.NewRows([]string{"extname"})
 				for _, ext := range tt.exts {
 					rows.AddRow(ext)
@@ -67,13 +70,44 @@ func TestManager_QueryCapabilities(t *testing.T) {
 			mock.ExpectClose()
 
 			m := &Manager{}
-			gotTier, gotExts := m.queryCapabilities(context.Background(), mock)
+			gotTier, gotExts, err := m.queryCapabilities(context.Background(), mock)
+			if tt.failAt != "" {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
 			require.Equal(t, tt.wantTier, gotTier)
 			for _, ext := range tt.exts {
 				require.True(t, gotExts[ext])
 			}
 		})
 	}
+}
+
+// TestManager_RefreshCapabilities_KeepsTheSnapshotWhenAQueryFails: a transient
+// error in a refresh must leave the tier and extensions as they were. The
+// schedule and the command gate were built from them, and a read-only fallback
+// would rebuild the one and refuse the other.
+func TestManager_RefreshCapabilities_KeepsTheSnapshotWhenAQueryFails(t *testing.T) {
+	mock, err := pgxmock.NewConn()
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, mock.Close(context.Background()))
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+	mock.ExpectQuery("pg_read_all_data").WillReturnError(errors.New("connection reset"))
+	mock.ExpectClose()
+
+	m := &Manager{target: &poolHolder{}}
+	m.target.cache.initialized = true
+	m.target.cache.permTier = pgtype.TierSignal
+	m.target.cache.extensions = map[string]bool{"pg_stat_statements": true}
+
+	require.Error(t, m.refreshCapabilities(context.Background(), mock))
+	m.target.cache.mu.RLock()
+	defer m.target.cache.mu.RUnlock()
+	require.Equal(t, pgtype.TierSignal, m.target.cache.permTier)
+	require.True(t, m.target.cache.extensions["pg_stat_statements"])
 }
 
 func TestManager_RefreshCapabilities_ConnectionError(t *testing.T) {

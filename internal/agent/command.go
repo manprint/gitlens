@@ -181,9 +181,12 @@ func (d *Dispatcher) dispatch(ctx context.Context, polled polledCommand) error {
 	if refresher, ok := binding.target.(interface {
 		RefreshCapabilities(context.Context) error
 	}); ok {
-		// Keep the last known conservative capability state on a transient
-		// refresh failure; the executor will still enforce its gates.
-		_ = refresher.RefreshCapabilities(ctx)
+		// A failed refresh keeps the last snapshot, which may still show a grant
+		// that was revoked since. The command is refused rather than judged on
+		// that tier, so a transient error never widens what runs.
+		if err := refresher.RefreshCapabilities(ctx); err != nil {
+			return d.postResult(ctx, polled.CommandID, commandResult{ClaimToken: polled.ClaimToken, Outcome: "rejected", Error: fmt.Sprintf("capabilities could not be refreshed, command refused: %v", err)})
+		}
 	}
 	gates := command.Gates{
 		Tier:                binding.target.PermTier(),
