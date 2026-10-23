@@ -42,14 +42,18 @@ function fallbackWaitDuration(node: LockNode): number {
   )
 }
 
+function compareByPID(left: LockNode, right: LockNode): number {
+  return keyOf(left.pid).localeCompare(keyOf(right.pid), 'en', { numeric: true })
+}
+
 /**
  * Build a blocking forest while representing a repeated node as a cycle marker.
  *
  * pg_blocking_pids() names every session queued ahead of a waiter on a
  * conflicting lock, so a queue lists each earlier waiter in every later
- * waiter's blockers. Each session is placed once, breadth first, under the
- * blocker closest to a root, which keeps the tree linear in the number of
- * sessions and independent of the order the blockers are listed in.
+ * waiter's blockers. Each session is placed once, breadth first from all the
+ * roots together, under the blocker closest to a root. Waiters are visited in
+ * pid order, so the tree does not depend on the order the nodes arrive in.
  */
 export function buildBlockingTree(nodes: readonly LockNode[]): BlockingTree {
   const byPID = new Map<string, LockNode>()
@@ -67,6 +71,8 @@ export function buildBlockingTree(nodes: readonly LockNode[]): BlockingTree {
     }
   }
 
+  for (const siblings of children.values()) siblings.sort(compareByPID)
+
   const placed = new Map<string, BlockingTreeNode>()
   const parentOf = new Map<string, string>()
   const isAncestorOrSelf = (candidateKey: string, key: string): boolean => {
@@ -78,10 +84,18 @@ export function buildBlockingTree(nodes: readonly LockNode[]): BlockingTree {
     return false
   }
 
-  const place = (start: LockNode): BlockingTreeNode => {
-    const root: BlockingTreeNode = { node: start, children: [] }
-    placed.set(keyOf(start.pid), root)
-    const queue: BlockingTreeNode[] = [root]
+  // Every start is queued before the first step, so each session is placed
+  // under the nearest start that reaches it, whichever order the starts came in.
+  const place = (starts: readonly LockNode[]): BlockingTreeNode[] => {
+    const startTrees: BlockingTreeNode[] = []
+    const queue: BlockingTreeNode[] = []
+    for (const start of starts) {
+      if (placed.has(keyOf(start.pid))) continue
+      const root: BlockingTreeNode = { node: start, children: [] }
+      placed.set(keyOf(start.pid), root)
+      startTrees.push(root)
+      queue.push(root)
+    }
     for (const current of queue) {
       const currentKey = keyOf(current.node.pid)
       for (const child of children.get(currentKey) ?? []) {
@@ -102,18 +116,19 @@ export function buildBlockingTree(nodes: readonly LockNode[]): BlockingTree {
         queue.push(childTree)
       }
     }
-    return root
+    return startTrees
   }
 
   const hasKnownBlocker = (node: LockNode): boolean =>
     (node.blocked_by ?? []).some((blocker) => byPID.has(keyOf(blocker)))
-  const roots = nodes.filter((node) => !hasKnownBlocker(node))
+  const rootNodes = nodes.filter((node) => !hasKnownBlocker(node)).sort(compareByPID)
+  const forest: BlockingTree = place(rootNodes)
 
   // A cycle has no unblocked root. Add one representative so the operator can
   // see the complete component without allowing recursion to run forever.
-  const forest: BlockingTree = []
-  for (const node of [...roots, ...nodes]) {
-    if (!placed.has(keyOf(node.pid))) forest.push(place(node))
+  const unplaced = nodes.filter((node) => !placed.has(keyOf(node.pid))).sort(compareByPID)
+  for (const node of unplaced) {
+    if (!placed.has(keyOf(node.pid))) forest.push(...place([node]))
   }
 
   return forest

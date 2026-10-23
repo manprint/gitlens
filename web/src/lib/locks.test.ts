@@ -6,11 +6,36 @@ import {
   rankRoots,
   treeDepth,
   waitDuration,
+  type BlockingTree,
+  type BlockingTreeNode,
   type LockNode,
 } from './locks'
 
 function lock(pid: number, blocked_by: number[] = [], overrides: Partial<LockNode> = {}): LockNode {
   return { pid, blocked_by, ...overrides }
+}
+
+// Each placed parent-child pair as a string, so two trees compare as sets of edges
+// whatever order their children were listed in.
+function edgesOf(forest: BlockingTree): string[] {
+  const edges: string[] = []
+  const visit = (parent: string, tree: BlockingTreeNode) => {
+    const child = `${parent}>${tree.node.pid}${tree.cycle ? '*' : ''}`
+    edges.push(child)
+    for (const grandchild of tree.children) visit(String(tree.node.pid), grandchild)
+  }
+  for (const root of forest) visit('root', root)
+  return edges.sort()
+}
+
+function permutations<T>(items: readonly T[]): T[][] {
+  if (items.length <= 1) return [[...items]]
+  return items.flatMap((item, index) =>
+    permutations([...items.slice(0, index), ...items.slice(index + 1)]).map((rest) => [
+      item,
+      ...rest,
+    ]),
+  )
 }
 
 describe('lock-tree derivation', () => {
@@ -78,5 +103,21 @@ describe('lock-tree derivation', () => {
     expect(treeDepth(forest)).toBe(2)
     expect(blockedCount(reversed)).toBe(20)
     expect(treeDepth(reversed)).toBe(2)
+  })
+
+  it('UI-LOCK-007 places a session under the blocker nearest a root, whatever order the nodes arrive in', () => {
+    // 4 is reachable from root 9 in one step and from root 1 in two, so it belongs under 9.
+    const nearest = [lock(1), lock(3, [1]), lock(4, [3, 9]), lock(9)]
+    // 4 is two steps from each of the roots 1 and 9, so the tie goes to the lower pid, 3.
+    const tied = [lock(1), lock(9), lock(3, [1]), lock(5, [9]), lock(4, [3, 5])]
+
+    for (const order of permutations(nearest)) {
+      expect(edgesOf(buildBlockingTree(order))).toEqual(['root>1', 'root>9', '1>3', '9>4'].sort())
+    }
+    for (const order of permutations(tied)) {
+      expect(edgesOf(buildBlockingTree(order))).toEqual(
+        ['root>1', 'root>9', '1>3', '9>5', '3>4'].sort(),
+      )
+    }
   })
 })
