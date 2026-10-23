@@ -165,6 +165,13 @@ func hashNormalizedDefinition(def string) string {
 // case-sensitive: 'ACTIVE' and 'active' select different rows, and "Name" and
 // "NAME" are different columns. A doubled quote inside a span closes and
 // reopens it, so the text is kept either way.
+//
+// The input is always pg_get_indexdef output, which never writes a backslash
+// escape: it doubles a quote, and it writes a backslash as it is or doubled
+// depending on standard_conforming_strings (checked on PostgreSQL 15 and 18).
+// It never writes an E-prefixed literal either. A backslash is therefore not an
+// escape here, and a quote always closes a span. Text that is not from that
+// function may not be normalised this way.
 func normalizeDefinition(def string) string {
 	var b strings.Builder
 	var quote rune
