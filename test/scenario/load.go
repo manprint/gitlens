@@ -46,8 +46,10 @@ func init() {
 			// sessions piled up on SELECT...FOR UPDATE must not block the
 			// activity check's own timeout-bounded scrape. Poll THROUGH the
 			// storm (not just after it) for fresh pg_backends samples, and
-			// require at least one pg_max_xact_age_seconds reading that
-			// reflects the storm's long-held transactions.
+			// require at least one pg_max_xact_age_seconds reading above zero.
+			// That floor only shows that some open transaction was visible:
+			// any client transaction satisfies it, so the storm itself is
+			// proved by the ASH Lock waits asserted below.
 			var sawBlockedXact bool
 			var lastFreshCount int
 			checkCtx, cancelCheck := context.WithTimeout(ctx, stormDuration+15*time.Second)
@@ -92,7 +94,7 @@ func init() {
 				return fmt.Errorf("no pg_backends samples landed with ts during the storm — the activity check may have stalled behind the 50 blocked sessions")
 			}
 			if !sawBlockedXact {
-				return fmt.Errorf("pg_max_xact_age_seconds never reflected the storm's held transactions (>1s)")
+				return fmt.Errorf("pg_max_xact_age_seconds never rose above 0 during the storm")
 			}
 			// phase 7.4's own re-assertion of this SAME scenario ID
 			// (phase_08.md#7.4): the storm must be visible as Lock waits,
