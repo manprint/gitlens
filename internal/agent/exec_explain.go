@@ -86,7 +86,9 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 	// one place that executes text written by database users. A read-only
 	// transaction makes PostgreSQL itself reject INSERT/UPDATE/DELETE/MERGE
 	// under ANALYZE, data-modifying CTEs, nextval() and writes from volatile
-	// functions, while plan-only EXPLAIN of any statement keeps working.
+	// functions. Plan-only EXPLAIN executes nothing; PostgreSQL still checks
+	// the statement's privileges, so a write cannot even be planned by a
+	// role that only reads.
 	if _, err := conn.Exec(ctx, "BEGIN READ ONLY"); err != nil {
 		return nil, err
 	}

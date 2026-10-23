@@ -431,6 +431,15 @@ Security and operational boundaries:
   `EXPLAIN` alone plans the user's statement with the database's own
   `search_path`, so that its tables resolve as they did for the application,
   behind the guard described below.
+- The `monitoring_role` check reports, every ten minutes, what would let the
+  role the agent connects as write if a session of it left read-only mode
+  (an attribute, a membership, owned objects) and whether the role defaults
+  to read-only transactions; the `security.*` advisor rules raise it.
+  `pglens-agent check` prints the same and exits 1 for a role that could write.
+- The integration suite proves the boundary: INT-RO-001 runs every check and
+  command at T2 and asserts that the database and the shared catalogs are
+  unchanged and that every statement the role sent, as `pg_stat_statements`
+  recorded it, reads.
 - With `commands.enabled: false` the agent does not poll or execute on-demand
   commands at all.
 - The server validates authentication, envelope shape, command state and expiry;
