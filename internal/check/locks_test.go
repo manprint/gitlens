@@ -107,6 +107,8 @@ func TestLocks_SessionListIsCappedOldestFirst(t *testing.T) {
 	require.True(t, tree.SessionsTruncated)
 	require.Equal(t, int32(105), tree.Sessions[0].PID)
 	require.Empty(t, tree.Nodes)
+	// The cut list is a partial view, so the result says so to the server.
+	require.True(t, result.Partial)
 }
 
 func TestLocks_SessionListNotFlaggedWhenComplete(t *testing.T) {
@@ -115,6 +117,7 @@ func TestLocks_SessionListNotFlaggedWhenComplete(t *testing.T) {
 	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
 	require.Len(t, tree.Sessions, 2)
 	require.False(t, tree.SessionsTruncated)
+	require.False(t, result.Partial)
 }
 
 // A session outside the blocking tree keeps only a short prefix of its query;

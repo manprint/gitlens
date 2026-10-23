@@ -201,7 +201,10 @@ func buildLocksResult(rows []lockRow, sampledAt time.Time) Result {
 	if other > 0 {
 		metrics = append(metrics, pgtype.Metric{Name: "pg_lock_waits", Value: float64(other), Kind: pgtype.KindGauge, Labels: map[string]string{"wait_event": "other"}})
 	}
-	result := Result{Metrics: metrics}
+	// A session cut by the cap was observed, not gone, but the list the UI shows
+	// is not exhaustive, so the result is Partial. The metrics and the blocking
+	// tree are complete either way.
+	result := Result{Metrics: metrics, Partial: sessionsTruncated}
 	// Persist an empty tree as well as a populated one. Without the empty
 	// snapshot, a released blocker remains visible in the API until the
 	// fifteen-minute retention cleanup, rather than disappearing on the next
