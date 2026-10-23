@@ -136,6 +136,24 @@ func (e *Evaluator) endLocked(key string, now time.Time) (*Alert, Transition) {
 	return nil, TransitionCancelled
 }
 
+// Checkpoint returns a function that puts back the episode of key as it stands
+// now. A transition that cannot be persisted is undone with it, so the next
+// pass derives that transition again instead of taking it for recorded.
+func (e *Evaluator) Checkpoint(key string) (undo func()) {
+	e.mu.Lock()
+	prev, had := e.states[key]
+	e.mu.Unlock()
+	return func() {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		if had {
+			e.states[key] = prev
+		} else {
+			delete(e.states, key)
+		}
+	}
+}
+
 // Unsampled returns the episodes of the rules that include selects whose
 // subject was last sampled at or before cutoff, so the pass that ended at
 // cutoff did not see them. The alerts are copies in key order: nothing is

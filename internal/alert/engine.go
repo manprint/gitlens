@@ -333,11 +333,12 @@ func (e *Engine) Tick(ctx context.Context) error {
 			}
 			observed++
 			for _, sample := range samples {
+				undo := e.eval.Checkpoint(Key(rule, sample))
 				alertValue, transition := e.eval.Step(rule, sample, now)
 				if alertValue == nil || transition == TransitionNone || transition == TransitionOpened || transition == TransitionCancelled {
 					continue
 				}
-				errs = append(errs, e.publish(ctx, *alertValue, silences, now)...)
+				errs = append(errs, e.publish(ctx, *alertValue, silences, now, undo)...)
 				if ctx.Err() != nil {
 					return errors.Join(append(errs, ctx.Err())...)
 				}
@@ -377,8 +378,9 @@ func (e *Engine) endUnsampled(ctx context.Context, rule *Rule, silences []Silenc
 	}
 	var errs []error
 	for _, a := range closing {
+		undo := e.eval.Checkpoint(a.Key)
 		if resolved, transition := e.eval.End(a.Key, now); transition == TransitionResolved && resolved != nil {
-			errs = append(errs, e.publish(ctx, *resolved, silences, now)...)
+			errs = append(errs, e.publish(ctx, *resolved, silences, now, undo)...)
 		}
 	}
 	return errs
@@ -396,14 +398,17 @@ func (e *Engine) clearedBy(ctx context.Context, rule Rule, episodes []Alert) ([]
 }
 
 // publish persists one transition and notifies it unless a silence covers the
-// alert. Failures are returned, not raised, so one alert cannot stop the rest
-// of the pass.
-func (e *Engine) publish(ctx context.Context, a Alert, silences []Silence, now time.Time) []error {
+// alert. A transition that cannot be persisted is undone and not notified: the
+// next pass derives it again, and it is notified once it is on record, so a
+// page is never sent for an alert the table does not show. Failures are
+// returned, not raised, so one alert cannot stop the rest of the pass.
+func (e *Engine) publish(ctx context.Context, a Alert, silences []Silence, now time.Time, undo func()) []error {
 	var errs []error
 	a.Suppressed = FirstMatch(silences, a, now) != nil
 	if e.store != nil {
 		if err := e.store.Upsert(ctx, a); err != nil {
-			errs = append(errs, fmt.Errorf("persist alert %s: %w", a.Key, err))
+			undo()
+			return append(errs, fmt.Errorf("persist alert %s: %w", a.Key, err))
 		}
 	}
 	if !a.Suppressed && e.notifier != nil {

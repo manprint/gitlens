@@ -475,25 +475,77 @@ func TestTick_OneBrokenRuleDoesNotStopTheCycle(t *testing.T) {
 	require.Contains(t, fired, healthy.ID, "the healthy rule must still be able to fire")
 }
 
-// failingStore fails every Upsert.
-type failingStore struct{ engineStore }
+// flakyStore fails its next failures writes and then behaves like engineStore.
+type flakyStore struct {
+	engineStore
+	failures int
+}
 
-func (s *failingStore) Upsert(context.Context, Alert) error { return errors.New("write failed") }
+func (s *flakyStore) Upsert(ctx context.Context, a Alert) error {
+	if s.failures > 0 {
+		s.failures--
+		return errors.New("write failed")
+	}
+	return s.engineStore.Upsert(ctx, a)
+}
 
-// TestTick_PersistFailureIsReportedAndCycleContinues — a single alert failing
-// to persist must not stop the remaining alerts from being evaluated and
-// notified.
-func TestTick_PersistFailureIsReportedAndCycleContinues(t *testing.T) {
+func notifiedCount(alerts []Alert, ruleID string) int {
+	n := 0
+	for _, a := range alerts {
+		if a.RuleID == ruleID {
+			n++
+		}
+	}
+	return n
+}
+
+// TestTick_AFailedFireWriteIsNotifiedOnceOnceItIsPersisted — a fire whose write
+// fails must not be notified, since nothing on record says it happened. It is
+// derived again on the next pass, written and notified exactly once. The other
+// alert of the same pass is not held back by it.
+func TestTick_AFailedFireWriteIsNotifiedOnceOnceItIsPersisted(t *testing.T) {
 	now := time.Unix(100, 0)
-	rule := Rule{ID: "custom", Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1, Summary: "x"}
-	store := &failingStore{}
-	store.rules = []Rule{rule}
+	first := Rule{ID: "first", Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1, Summary: "x"}
+	second := first
+	second.ID = "second"
+	store := &flakyStore{failures: 1}
+	store.rules = []Rule{first, second}
 	notifier := &engineNotifier{}
 	e := NewEngine(nil, clock.NewFake(now), store, notifier, []Source{engineSource{kind: "metric", samples: []Sample{{Value: 2, TS: now}}}})
 
 	err := e.Tick(context.Background())
-	require.ErrorContains(t, err, "persist alert")
-	require.Len(t, notifier.alerts, 1, "a persistence failure must not swallow the notification")
+	require.ErrorContains(t, err, "persist alert first")
+	require.Equal(t, 0, notifiedCount(notifier.alerts, "first"), "an unpersisted fire must not be notified")
+	require.Equal(t, 1, notifiedCount(notifier.alerts, "second"), "the other alert must still be notified")
+
+	require.NoError(t, e.Tick(context.Background()))
+	require.Equal(t, 1, notifiedCount(notifier.alerts, "first"))
+	require.Equal(t, 1, notifiedCount(notifier.alerts, "second"))
+	require.Equal(t, 1, notifiedCount(store.alerts, "first"), "the fire must be on record once")
+}
+
+// TestTick_AFailedResolveWriteIsNotifiedOnceOnceItIsPersisted — a resolve whose
+// write fails must not be notified, and the episode stays open in the evaluator
+// so that the next pass resolves it again.
+func TestTick_AFailedResolveWriteIsNotifiedOnceOnceItIsPersisted(t *testing.T) {
+	now := time.Unix(100, 0)
+	rule := Rule{ID: "custom", Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1, Summary: "x"}
+	store := &flakyStore{}
+	store.rules = []Rule{rule}
+	notifier := &engineNotifier{}
+	e := NewEngine(nil, clock.NewFake(now), store, notifier, []Source{engineSource{kind: "metric", samples: []Sample{{Value: 2, TS: now}}}})
+	require.NoError(t, e.Tick(context.Background()))
+	require.Len(t, notifier.alerts, 1)
+
+	e.sources = []Source{engineSource{kind: "metric", samples: []Sample{{Value: 0, TS: now.Add(time.Second)}}}}
+	store.failures = 1
+	require.ErrorContains(t, e.Tick(context.Background()), "persist alert custom")
+	require.Len(t, notifier.alerts, 1, "an unpersisted resolve must not be notified")
+
+	require.NoError(t, e.Tick(context.Background()))
+	require.Len(t, notifier.alerts, 2)
+	require.Equal(t, StateResolved, notifier.alerts[1].State)
+	require.Equal(t, StateResolved, store.alerts[len(store.alerts)-1].State)
 }
 
 // clockSource observes the rule "custom" on every pass, as a live source does:
