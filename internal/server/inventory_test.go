@@ -224,6 +224,7 @@ func TestInventory_MockPool_DuplicateInstanceSuspected(t *testing.T) {
 	}
 	inv := &Inventory{pool: pool}
 	env := wire.Envelope{
+		AgentID: uuid.NewString(),
 		Instances: []wire.Instance{{
 			InstanceID: uuid.NewString(),
 			ClusterID:  cid.String(),
@@ -294,6 +295,7 @@ func TestInventory_MockPool_IdentityConflict_ManualLosesToSystemIdentifier(t *te
 	}
 	inv := &Inventory{pool: pool}
 	env := wire.Envelope{
+		AgentID: uuid.NewString(),
 		Instances: []wire.Instance{{
 			InstanceID:      uuid.NewString(),
 			ClusterID:       cid.String(),
@@ -321,4 +323,26 @@ func TestInventory_EmitEvent_NilPoolNoDB(t *testing.T) {
 	var out map[string]any
 	require.NoError(t, json.Unmarshal(b, &out))
 	require.Equal(t, "b", out["a"])
+}
+
+// TestInventory_MockPool_NewInstanceWithoutAgent_Refused: a new instance is booked
+// to the agent that reports it. Without an agent_id it is refused before its
+// cluster is written, so the refused push leaves nothing behind.
+func TestInventory_MockPool_NewInstanceWithoutAgent_Refused(t *testing.T) {
+	t.Parallel()
+	pool := &mockPool{queryRowVals: []*mockRow{{err: pgx.ErrNoRows}}}
+	inv := &Inventory{pool: pool}
+	env := wire.Envelope{
+		Instances: []wire.Instance{{
+			InstanceID: uuid.NewString(),
+			ClusterID:  pgtype.ClusterID(555556).String(),
+			Role:       "primary",
+		}},
+	}
+	res, err := inv.Upsert(context.Background(), env)
+	require.NoError(t, err)
+	require.Equal(t, 0, res.Accepted)
+	require.Equal(t, 1, res.Rejected)
+	require.Contains(t, res.Errors[env.Instances[0].InstanceID].Error(), "missing agent_id")
+	require.Equal(t, 0, pool.execCalls, "a refused instance writes no cluster, agent or instance row")
 }

@@ -21,7 +21,7 @@ func TestIngest_RejectsUnknownProtocolVersion(t *testing.T) {
 	t.Parallel()
 	auth := NewAuth("token")
 	h := IngestHandler(auth, NewInventory(nil), NewPipeline(nil, nil))
-	env := wire.Envelope{ProtocolVersion: wire.ProtocolVersionCurrent + 1, AgentID: "a", SentAt: time.Now()}
+	env := wire.Envelope{ProtocolVersion: wire.ProtocolVersionCurrent + 1, AgentID: uuid.NewString(), SentAt: time.Now()}
 	body, _ := json.Marshal(env)
 	req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
@@ -97,12 +97,12 @@ func TestIngest_RejectsRevokedInstanceOwner(t *testing.T) {
 func TestIngest_InventoryStoreFailureIsNotAccepted(t *testing.T) {
 	t.Parallel()
 	auth := NewAuth("token")
-	// The owner check of the instance comes first, then the first lookup of the
-	// upsert, which fails.
-	pool := &mockPool{queryRowVals: []*mockRow{{vals: []any{false}}, {err: errors.New("connection refused")}}}
+	// The agent's revoked_at comes first, then the owner check of the instance,
+	// then the first lookup of the upsert, which fails.
+	pool := &mockPool{queryRowVals: []*mockRow{{vals: []any{nil}}, {vals: []any{false}}, {err: errors.New("connection refused")}}}
 	inv := &Inventory{pool: pool}
 	h := IngestHandler(auth, inv, NewPipeline(nil, nil))
-	env := wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: "", SentAt: time.Now(),
+	env := wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: uuid.NewString(), SentAt: time.Now(),
 		Instances: []wire.Instance{{InstanceID: uuid.NewString(), ClusterID: pgtype.ClusterID(1).String(), Role: "primary"}}}
 	body, _ := json.Marshal(env)
 	req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
@@ -121,7 +121,7 @@ func TestIngest_RefusesWhenSaturated(t *testing.T) {
 	auth := NewAuth("token")
 	slots := make(chan struct{}, 1)
 	h := ingestHandler(auth, NewInventory(nil), NewPipeline(nil, nil), slots)
-	env := wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: "a", SentAt: time.Now()}
+	env := wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: uuid.NewString(), SentAt: time.Now()}
 	body, _ := json.Marshal(env)
 	push := func() *httptest.ResponseRecorder {
 		req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
@@ -145,7 +145,7 @@ func TestIngest_RejectsStaleEnvelope(t *testing.T) {
 	t.Parallel()
 	auth := NewAuth("token")
 	h := IngestHandler(auth, NewInventory(nil), NewPipeline(nil, nil))
-	env := wire.Envelope{ProtocolVersion: 1, AgentID: "a", SentAt: time.Now().Add(-13 * time.Hour)}
+	env := wire.Envelope{ProtocolVersion: 1, AgentID: uuid.NewString(), SentAt: time.Now().Add(-13 * time.Hour)}
 	body, _ := json.Marshal(env)
 	req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
@@ -158,7 +158,7 @@ func TestIngest_AcceptsFutureSkew(t *testing.T) {
 	t.Parallel()
 	auth := NewAuth("token")
 	h := IngestHandler(auth, NewInventory(nil), NewPipeline(nil, nil))
-	env := wire.Envelope{ProtocolVersion: 1, AgentID: "a", SentAt: time.Now().Add(5 * time.Minute)}
+	env := wire.Envelope{ProtocolVersion: 1, AgentID: uuid.NewString(), SentAt: time.Now().Add(5 * time.Minute)}
 	body, _ := json.Marshal(env)
 	req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
@@ -177,7 +177,7 @@ func TestIngest_AcceptsGzipBody(t *testing.T) {
 	t.Parallel()
 	auth := NewAuth("token")
 	h := IngestHandler(auth, NewInventory(nil), NewPipeline(nil, nil))
-	env := wire.Envelope{ProtocolVersion: 1, AgentID: "a", SentAt: time.Now()}
+	env := wire.Envelope{ProtocolVersion: 1, AgentID: uuid.NewString(), SentAt: time.Now()}
 	raw, _ := json.Marshal(env)
 
 	var buf bytes.Buffer
@@ -302,7 +302,7 @@ func TestIngest_ErrorBodiesAreJSON(t *testing.T) {
 // though its JSON is valid.
 func TestIngest_DecompressedBudgetIsExact(t *testing.T) {
 	// Not t.Parallel(): this test temporarily lowers a package-level limit.
-	raw, _ := json.Marshal(wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: "a", SentAt: time.Now()})
+	raw, _ := json.Marshal(wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: uuid.NewString(), SentAt: time.Now()})
 	original := maxDecompressedBytes
 	t.Cleanup(func() { maxDecompressedBytes = original })
 	maxDecompressedBytes = int64(len(raw))
@@ -332,6 +332,27 @@ func TestIngest_DecompressedBudgetIsExact(t *testing.T) {
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, req)
 			require.Equal(t, tc.code, w.Code, w.Body.String())
+		})
+	}
+}
+
+// TestIngest_RefusesEnvelopeWithoutAgentID: the contract requires the agent_id of
+// the envelope. One without a valid id is refused with 400 before the inventory
+// sees it, so no instance is booked to a stand-in owner.
+func TestIngest_RefusesEnvelopeWithoutAgentID(t *testing.T) {
+	t.Parallel()
+	for _, agentID := range []string{"", "a", uuid.Nil.String()} {
+		t.Run(agentID, func(t *testing.T) {
+			h := IngestHandler(NewAuth("token"), NewInventory(nil), NewPipeline(nil, nil))
+			env := wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: agentID, SentAt: time.Now(),
+				Instances: []wire.Instance{{InstanceID: uuid.NewString(), ClusterID: pgtype.ClusterID(1).String(), Role: "primary"}}}
+			body, _ := json.Marshal(env)
+			req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
+			req.Header.Set("Authorization", "Bearer token")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			require.Equal(t, http.StatusBadRequest, w.Code)
+			require.Contains(t, w.Body.String(), "missing agent_id")
 		})
 	}
 }

@@ -196,6 +196,14 @@ func (inv *Inventory) upsertOne(ctx context.Context, tenantID string, agentID uu
 		return instanceRejected{fmt.Errorf("cluster_id_changed for instance %s: existing %s attempted %s", inst.InstanceID, pgtype.ClusterID(uint64(existingCID)).String(), inst.ClusterID)}
 	}
 
+	// A new instance is booked to the agent that reports it, because revocation
+	// matches an agent by its id. Without one there is no owner to book it to, so
+	// it is refused instead of being given the instance_id as a stand-in. This is
+	// checked before the cluster is created, so a refused instance leaves nothing.
+	if err != nil && agentID == uuid.Nil {
+		return instanceRejected{fmt.Errorf("new instance %s: missing agent_id", inst.InstanceID)}
+	}
+
 	// 2. Upsert cluster row (must precede instance FK).
 	if err := inv.upsertCluster(ctx, tenantID, cidDB, inst.ClusterID, inst.ClusterIDSource, instUUID); err != nil {
 		return err
@@ -219,16 +227,9 @@ func (inv *Inventory) upsertOne(ctx context.Context, tenantID string, agentID uu
 		if dupErr := inv.checkDuplicateInstance(ctx, tenantID, cidDB, inst, instUUID); dupErr != nil {
 			return dupErr
 		}
-		// Insert new instance.
-		agentParam := agentID
-		// If envelope had no valid agent_id, fall back to instance_id as placeholder – the FK requires a valid agents row,
-		// but in production auth ensures agents exists. For tests we still need a UUID.
-		if agentParam == uuid.Nil {
-			agentParam = instUUID
-		}
 		// Ensure agent row exists for FK (best-effort, ignore conflict).
-		if _, err := inv.pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1) ON CONFLICT DO NOTHING`, agentParam); err != nil {
-			return fmt.Errorf("ensure agent %s: %w", agentParam, err)
+		if _, err := inv.pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1) ON CONFLICT DO NOTHING`, agentID); err != nil {
+			return fmt.Errorf("ensure agent %s: %w", agentID, err)
 		}
 		// The role starts as "unknown". The pipeline stores the reported role in the
 		// envelope transaction, and reports a first sighting against the stored role:
@@ -238,7 +239,7 @@ func (inv *Inventory) upsertOne(ctx context.Context, tenantID string, agentID uu
 			`INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, target_name, last_seen, ash_enabled)
 			 VALUES ($1,$2,$3,$4,$5,$6,$7,'unknown',$8,$9,now(),$10)
 			 ON CONFLICT (instance_id) DO UPDATE SET pg_version=EXCLUDED.pg_version, perm_tier=EXCLUDED.perm_tier, addr=EXCLUDED.addr, port=EXCLUDED.port, target_name=EXCLUDED.target_name, ash_enabled=EXCLUDED.ash_enabled`,
-			instUUID, tenantID, cidDB, agentParam, inst.Addr, inst.Port, inst.PGVersion, inst.PermTier, inst.TargetName, inst.ASHEnabled); err != nil {
+			instUUID, tenantID, cidDB, agentID, inst.Addr, inst.Port, inst.PGVersion, inst.PermTier, inst.TargetName, inst.ASHEnabled); err != nil {
 			return fmt.Errorf("insert instance %s: %w", inst.InstanceID, err)
 		}
 	}

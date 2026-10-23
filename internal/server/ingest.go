@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/manprint/pglens/internal/wire"
 )
 
@@ -205,6 +206,16 @@ func ingestHandler(auth *Auth, inv *Inventory, pipeline *Pipeline, slots chan st
 		}
 		if revoked {
 			writeError(w, http.StatusUnauthorized, "revoked", "")
+			return
+		}
+
+		// The contract requires the envelope's agent_id: it is the agent a new
+		// instance is booked to, and revocation matches agents by it. An
+		// envelope without one is refused, not booked to a placeholder owner
+		// that no revocation could reach. It is checked after revocation, so a
+		// revoked agent still gets the revoked answer.
+		if agentID, parseErr := uuid.Parse(env.AgentID); parseErr != nil || agentID == uuid.Nil {
+			writeError(w, http.StatusBadRequest, "missing agent_id", "the envelope must name the agent that sent it")
 			return
 		}
 
