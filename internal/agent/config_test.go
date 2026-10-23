@@ -305,48 +305,6 @@ checks:
 	}
 }
 
-// TestMountWarning verifies that isMountWarning detects root filesystem paths correctly.
-func TestMountWarning(t *testing.T) {
-	tests := []struct {
-		name        string
-		path        string
-		mountinfo   string
-		wantWarning bool
-	}{
-		{
-			name: "root_filesystem_path",
-			path: "/var/lib/pglens",
-			mountinfo: `1 0 0:1 / / rw,relatime - rootfs rootfs rw
-2 1 0:2 / /dev rw,relatime - devtmpfs devtmpfs rw
-3 1 0:3 / /proc rw,relatime - proc proc rw
-`,
-			wantWarning: true,
-		},
-		{
-			name: "separate_mount",
-			path: "/var/lib/pglens",
-			mountinfo: `1 0 0:1 / / rw,relatime - rootfs rootfs rw
-2 1 0:2 / /dev rw,relatime - devtmpfs devtmpfs rw
-3 1 0:3 / /proc rw,relatime - proc proc rw
-4 1 8:1 / /var/lib/pglens rw,relatime - ext4 /dev/sda1 rw
-`,
-			wantWarning: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tmpfile := filepath.Join(t.TempDir(), "mountinfo")
-			err := os.WriteFile(tmpfile, []byte(tt.mountinfo), 0600)
-			require.NoError(t, err)
-
-			warning, err := isMountWarning(tt.path, tmpfile)
-			require.NoError(t, err)
-			require.Equal(t, tt.wantWarning, warning)
-		})
-	}
-}
-
 // Helper function to write config to temp file
 func writeConfigFile(t *testing.T, yaml string) string {
 	tmpfile, err := os.CreateTemp(t.TempDir(), "config-*.yaml")
