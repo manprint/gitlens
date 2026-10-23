@@ -29,6 +29,7 @@ func serveAlert(t *testing.T, api *AlertAPI, method, path, body string) *httptes
 type alertAPITestStore struct {
 	alerts []alert.Alert
 	rules  []alert.Rule
+	filter alert.Filter // the filter of the last listing
 }
 
 func (s *alertAPITestStore) Rules(context.Context) ([]alert.Rule, error) { return s.rules, nil }
@@ -42,7 +43,8 @@ func (s *alertAPITestStore) ClaimNotification(context.Context, string, string, s
 func (s *alertAPITestStore) MarkNotification(context.Context, string, string, string, bool, int, error) error {
 	return nil
 }
-func (s *alertAPITestStore) Active(context.Context, alert.Filter) ([]alert.Alert, error) {
+func (s *alertAPITestStore) Active(_ context.Context, f alert.Filter) ([]alert.Alert, error) {
+	s.filter = f
 	return s.alerts, nil
 }
 
@@ -62,6 +64,29 @@ func TestAlerts_RejectsUnknownState(t *testing.T) {
 	r := httptest.NewRecorder()
 	alertRouter(newAlertAPIForTest(nil, &alertAPITestStore{})).ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?state=bogus", nil))
 	require.Equal(t, 400, r.Code)
+}
+
+// TestAlerts_FilterLiftsResolvedOnlyWhenAsked: the store leaves resolved alerts
+// out unless the listing names them, and every listing is capped in the query.
+func TestAlerts_FilterLiftsResolvedOnlyWhenAsked(t *testing.T) {
+	for _, tc := range []struct {
+		query    string
+		state    alert.State
+		resolved bool
+	}{
+		{"", alert.StatePending, false},
+		{"?state=firing", alert.StateFiring, false},
+		{"?state=resolved", alert.StateResolved, false},
+		{"?state=all", "", true},
+	} {
+		st := &alertAPITestStore{}
+		r := httptest.NewRecorder()
+		alertRouter(newAlertAPIForTest(nil, st)).ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/api/v1/alerts"+tc.query, nil))
+		require.Equal(t, 200, r.Code, tc.query)
+		require.Equal(t, tc.state, st.filter.State, tc.query)
+		require.Equal(t, tc.resolved, st.filter.IncludeResolved, tc.query)
+		require.Equal(t, 500, st.filter.Limit, tc.query)
+	}
 }
 
 func TestAlertRules_Tier0IsRejectedWithConflict(t *testing.T) {
