@@ -113,3 +113,36 @@ func TestINTASH011_ClosedConnectionIsNotReopened(t *testing.T) {
 		}
 	})
 }
+
+// TestINTASH012_ShutdownStopsASHBeforeClosingPools holds the sampler's dedicated
+// connection and runs the shutdown sequence. The stop must release that
+// connection before the manager closes its pools, or the close waits forever.
+func TestINTASH012_ShutdownStopsASHBeforeClosingPools(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		mgr, err := agent.NewManager(ctx, "ash-target", pg.DSN("postgres", pgtest.RoleT0), agent.DefaultConnOptions(), nil)
+		require.NoError(t, err)
+
+		clk := clock.NewFake(time.Now())
+		conn := &ashConn{mgr: mgr, base: ctx, clk: clk}
+		rows, err := conn.Query(ctx, "SELECT 1")
+		require.NoError(t, err)
+		rows.Close()
+
+		closed := make(chan struct{})
+		go func() {
+			closeTargets([]func(){conn.Close}, []*agent.Manager{mgr})
+			close(closed)
+		}()
+		select {
+		case <-closed:
+		case <-time.After(10 * time.Second):
+			// Release the held connection so the blocked close returns and the
+			// failing test does not leak a goroutine.
+			conn.Close()
+			<-closed
+			t.Fatal("shutdown waits for the ASH connection that its stop should have released")
+		}
+	})
+}
