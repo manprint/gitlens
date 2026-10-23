@@ -376,8 +376,11 @@ const repeatedEventWindow = 24 * time.Hour
 // emitRepeatable writes an event for a refusal that the same instance keeps
 // sending, unless the instance already has an event of this type for the same
 // attempted value (payload[attemptedKey]) inside repeatedEventWindow. The check
-// and the insert are one statement, so two replicas taking the same push at
-// once do not both write it.
+// and the insert are one statement, which keeps the window for a race short. It
+// does not close the window: under READ COMMITTED two replicas taking the same
+// push at the same moment can each see no event yet and both insert one, and
+// events has no unique key to stop the second. Such a race writes the event
+// twice.
 func (inv *Inventory) emitRepeatable(ctx context.Context, tenantID, typ string, clusterID int64, instanceID uuid.UUID, payload map[string]any, attemptedKey, attempted string) error {
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
