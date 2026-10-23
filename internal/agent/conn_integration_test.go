@@ -544,11 +544,17 @@ func TestINTCONN014_SuperuserKeepsReadOnlyTier(t *testing.T) {
 // INT-CONN-011: the cluster identity falls back to the configured name only
 // when the server denies pg_control_system(), and a role that may read it
 // reports the real system_identifier. The grants setupRoles makes live in the
-// app database (pg_proc is per database), so the roles connect there. A
-// transient failure has no integration test here: the unit test pins that
-// branch.
+// app database (pg_proc is per database), so the roles connect there. A fresh
+// cluster grants the function to PUBLIC (INT-PERM-013), so the denial is
+// modelled by revoking it, as a hardened cluster does. A transient failure
+// has no integration test here: the unit test pins that branch.
 func TestINTCONN011_IdentityFallsBackOnlyOnDenial(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		pg.Exec(t, `REVOKE EXECUTE ON FUNCTION pg_control_system() FROM PUBLIC`)
+		t.Cleanup(func() {
+			pg.Exec(t, `GRANT EXECUTE ON FUNCTION pg_control_system() TO PUBLIC`)
+		})
 		ctx := context.Background()
 		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
 		var systemID uint64
