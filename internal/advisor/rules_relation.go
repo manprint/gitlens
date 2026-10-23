@@ -123,6 +123,12 @@ func isPrefix(a, b []string) bool {
 }
 func init() {
 	Register(relationRule{id: "index.unused", severity: SeverityWarning, needs: []string{"Indexes"}, eval: func(s *Snapshot) []Finding {
+		// A standby counts only the scans it serves itself, so an index the
+		// primary uses looks idle there. Only the primary can say that an index
+		// is unused.
+		if s.Role == pgtype.RoleStandby {
+			return nil
+		}
 		var out []Finding
 		for _, i := range s.Indexes {
 			if i.HistoryDays < 7 {

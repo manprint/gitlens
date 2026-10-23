@@ -103,6 +103,15 @@ func TestRule_NeverAutovacuumedSkipsStandbys(t *testing.T) {
 	require.Empty(t, relationRuleByID(t, "table.never_autovacuumed").Evaluate(s))
 }
 
+// TestRule_IndexUnusedSkipsStandbys — a standby counts only the scans it serves
+// itself, so an index the primary uses looks unused there. Only the primary's
+// count can say that an index is idle.
+func TestRule_IndexUnusedSkipsStandbys(t *testing.T) {
+	idx := IndexStat{Name: "public.orders_pkey", Datname: "app", HistoryDays: 30, SizeBytes: unusedIndexBytes + 1}
+	require.Empty(t, relationRuleByID(t, "index.unused").Evaluate(&Snapshot{Role: pgtype.RoleStandby, Indexes: []IndexStat{idx}}))
+	require.Len(t, relationRuleByID(t, "index.unused").Evaluate(&Snapshot{Role: pgtype.RolePrimary, Indexes: []IndexStat{idx}}), 1)
+}
+
 // TestRule_RelationFindingsAreQualifiedByDatabase: the same relation in two
 // databases yields two findings with two identities.
 func TestRule_RelationFindingsAreQualifiedByDatabase(t *testing.T) {
