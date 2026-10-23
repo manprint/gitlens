@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net"
+	"net/http"
 	"testing"
 	"time"
 
@@ -77,5 +79,36 @@ func TestCheckExitCode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			require.Equal(t, tt.want, checkExitCode(tt.mandatory, tt.enabled, tt.version, tt.postureErr, tt.posture))
 		})
+	}
+}
+
+// TestRunAgentHealthcheck_ProbesTheListenAddress: an agent bound to one address
+// does not answer on loopback, so the probe must dial the address it bound.
+func TestRunAgentHealthcheck_ProbesTheListenAddress(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.2:0")
+	if err != nil {
+		t.Skipf("no 127.0.0.2 loopback address on this host: %v", err)
+	}
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+	t.Setenv("PGLENS_HEALTHZ_LISTEN", ln.Addr().String())
+
+	require.Equal(t, 0, runAgentHealthcheck())
+}
+
+func TestHealthcheckURL(t *testing.T) {
+	tests := []struct{ listen, want string }{
+		{":9187", "http://127.0.0.1:9187/healthz"},
+		{"0.0.0.0:9187", "http://127.0.0.1:9187/healthz"},
+		{"[::]:9187", "http://127.0.0.1:9187/healthz"},
+		{"127.0.0.1:9187", "http://127.0.0.1:9187/healthz"},
+		{"10.0.0.5:9187", "http://10.0.0.5:9187/healthz"},
+		{"[::1]:9187", "http://[::1]:9187/healthz"},
+	}
+	for _, tt := range tests {
+		require.Equal(t, tt.want, healthcheckURL(tt.listen, "/healthz"), "listen %s", tt.listen)
 	}
 }

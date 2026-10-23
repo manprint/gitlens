@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -58,12 +59,8 @@ func showUsage() {
 // or curl to do this any other way.
 func runAgentHealthcheck() int {
 	addr := envOr("PGLENS_HEALTHZ_LISTEN", ":9187")
-	port := addr
-	if i := lastColon(addr); i >= 0 {
-		port = addr[i+1:]
-	}
 	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%s/healthz", port))
+	resp, err := client.Get(healthcheckURL(addr, "/healthz"))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "healthcheck:", err)
 		return 1
@@ -75,13 +72,20 @@ func runAgentHealthcheck() int {
 	return 0
 }
 
-func lastColon(s string) int {
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == ':' {
-			return i
-		}
+// healthcheckURL is the URL the --healthcheck probe requests for path on the
+// address the process listens on. A specific host is probed as it is, because
+// a bind to one address does not accept on loopback. Only an unspecified host
+// (empty, 0.0.0.0 or ::) falls back to 127.0.0.1, which such a bind accepts on.
+func healthcheckURL(listen, path string) string {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		// A bare port has no host part to keep.
+		host, port = "", listen
 	}
-	return -1
+	if host == "" || net.ParseIP(host).IsUnspecified() {
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port) + path
 }
 
 func runCheckCommand(args []string) {
