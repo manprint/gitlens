@@ -6,31 +6,44 @@ import { defineConfig, type Plugin } from 'vite'
 
 const openApiDocument = readFileSync(new URL('../api/openapi.yaml', import.meta.url), 'utf8')
 const apiContractVersion = /^ {2}version:\s*(\S+)\s*$/m.exec(openApiDocument)?.[1] ?? 'unknown'
-const readme = new URL('../README.md', import.meta.url)
+/** Documents the interface links to, keyed by the path they are served at. */
+const documents = {
+  'README.md': new URL('../README.md', import.meta.url),
+  'docs/LIMITS.md': new URL('../docs/LIMITS.md', import.meta.url),
+  'docs/api.md': new URL('../docs/api.md', import.meta.url),
+}
 
 /**
- * The interface links its guidance to /README.md, which nothing served: the
- * server answers unknown paths with the application, so every documentation
- * link opened the Not found page. The README now ships next to the bundle
- * (and is served by the dev server), as plain text.
+ * The interface links its guidance to these documents, which nothing served:
+ * the server answers unknown paths with the application, so every documentation
+ * link opened the Not found page. They now ship next to the bundle, and the dev
+ * server serves them too, as plain text.
  */
-function readmeAsset(): Plugin {
+function documentAssets(): Plugin {
   return {
-    name: 'pglens-readme',
+    name: 'pglens-documents',
     configureServer(server) {
-      server.middlewares.use('/README.md', (_request, response) => {
+      server.middlewares.use((request, response, next) => {
+        const path = request.url?.split('?')[0] ?? ''
+        const document = Object.entries(documents).find(([name]) => path === `/${name}`)
+        if (document === undefined) {
+          next()
+          return
+        }
         response.setHeader('Content-Type', 'text/plain; charset=utf-8')
-        response.end(readFileSync(readme))
+        response.end(readFileSync(document[1]))
       })
     },
     generateBundle() {
-      this.emitFile({ type: 'asset', fileName: 'README.md', source: readFileSync(readme, 'utf8') })
+      for (const [fileName, file] of Object.entries(documents)) {
+        this.emitFile({ type: 'asset', fileName, source: readFileSync(file, 'utf8') })
+      }
     },
   }
 }
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), readmeAsset()],
+  plugins: [react(), tailwindcss(), documentAssets()],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

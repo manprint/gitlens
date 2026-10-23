@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 
 import type { Schemas } from '@/api/types'
 import { Section } from '@/components/layout/Section'
@@ -85,10 +85,11 @@ export function DatabaseSelector({ databases, notMonitoredCount }: DatabaseSelec
             </ul>
           ) : null}
           <p className="mt-2">
-            Review the <Link to="/README.md#agent-configuration">databases.max</Link> budget and
-            <Link className="ml-1" to="/README.md#agent-configuration">
+            {/* The README is a static file: a router link would render the not-found page. */}
+            Review the <a href="/README.md#agent-configuration">databases.max</a> budget and
+            <a className="ml-1" href="/README.md#agent-configuration">
               include
-            </Link>{' '}
+            </a>{' '}
             filter configuration.
           </p>
         </aside>
