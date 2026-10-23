@@ -409,7 +409,7 @@ func (state *ToxicState) deleteToxics(proxyName string, toxicNames []string) err
 			continue
 		}
 		func() {
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 				body, _ := io.ReadAll(resp.Body)
 				errs = append(errs, fmt.Sprintf("toxiproxy API returned %d: %s", resp.StatusCode, body))
