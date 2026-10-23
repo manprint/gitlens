@@ -8,10 +8,13 @@ import { Section } from '@/components/layout/Section'
 import { Degraded, EmptyState, ErrorState, Stale, Truncated } from '@/components/state'
 import { ActivitySection, type ActivityResponseLike } from './ActivitySection'
 import { SignalActions } from './SignalActions'
-import { formatDuration, formatRelative, truncateQuery } from '@/lib/format'
+import { formatDuration, formatRelative, formatTimestamp, truncateQuery } from '@/lib/format'
 import {
   buildBlockingTree,
+  isRootBlocker,
+  isWaiting,
   rankRoots,
+  sessionsWithTreeQuery,
   waitDuration,
   type BlockingTree as BlockingForest,
   type BlockingTreeNode,
@@ -133,6 +136,7 @@ function LockDetails({ node, sampledAt }: { node: LockNode; sampledAt: string | 
   // The tree places a waiter under one blocker, so every direct blocker is listed here,
   // each pid once even if the snapshot repeats it.
   const blockedBy = [...new Set((node.blocked_by ?? []).map(String))].join(', ') || '—'
+  const waiting = isWaiting(node)
   const bytes = queryBytes(query)
   const shownQuery = truncateQuery(query, QUERY_BYTE_BUDGET)
   const backendMarkedTruncated = node.query_truncated === true || node.truncated === true
@@ -172,8 +176,16 @@ function LockDetails({ node, sampledAt }: { node: LockNode; sampledAt: string | 
       </div>
       <div>
         <span className="text-muted-foreground">Wait duration</span>
-        <span className="block">{formatDuration(waitDuration(node, sampledAt))}</span>
+        <span className="block">
+          {waiting ? formatDuration(waitDuration(node, sampledAt)) : 'Not waiting'}
+        </span>
       </div>
+      {waiting && typeof node.wait_started_at === 'string' ? (
+        <div>
+          <span className="text-muted-foreground">Waiting since</span>
+          <span className="block">{formatTimestamp(node.wait_started_at, 'UTC')}</span>
+        </div>
+      ) : null}
       <div className="sm:col-span-2 lg:col-span-4">
         <span className="text-muted-foreground">Query</span>
         <span className="block">
@@ -206,6 +218,7 @@ function TreeItem({
   const { tree } = entry
   const hasChildren = !tree.cycle && tree.children.length > 0
   const pid = String(tree.node.pid)
+  const rootBlocker = isRootBlocker(tree)
 
   return (
     <li
@@ -239,8 +252,13 @@ function TreeItem({
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <strong>PID {pid}</strong>
             {tree.cycle ? <span className="text-destructive">Cycle detected</span> : null}
+            {rootBlocker ? <span className="font-medium">Root blocker</span> : null}
             <span className="text-muted-foreground">
-              {tree.cycle ? 'blocking relationship repeats this session' : 'blocking session'}
+              {tree.cycle
+                ? 'blocking relationship repeats this session'
+                : rootBlocker
+                  ? 'blocks the sessions below; not itself blocked'
+                  : 'blocking session'}
             </span>
           </div>
           {tree.cycle ? (
@@ -400,7 +418,7 @@ export function BlockingTree({
         <>
           Latest sample: {formatRelative(response.sampled_at, now)}; sample age:{' '}
           {formatDuration(age)}. Samples are collected every {SAMPLE_INTERVAL_SECONDS} seconds;
-          shorter episodes can be missed.
+          shorter episodes can be missed. Wait durations are measured on the server at the sample.
         </>
       }
     >
@@ -506,11 +524,12 @@ export function LocksPage({ instanceId: explicitInstanceId }: LocksPageProps = {
               currentTier={instanceQuery.data?.perm_tier ?? 'T0'}
               instanceId={instanceId}
               response={activityResponse}
-              sessions={
+              sessions={sessionsWithTreeQuery(
                 response.sessions
                   ?.map(normalizeNode)
-                  .filter((node): node is LockNode => node !== null) ?? []
-              }
+                  .filter((node): node is LockNode => node !== null) ?? [],
+                response.nodes.map(normalizeNode).filter((node): node is LockNode => node !== null),
+              )}
               sessionsStale={sampleIsStale(response, new Date())}
             />
           ) : (

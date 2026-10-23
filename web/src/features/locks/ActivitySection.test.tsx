@@ -174,6 +174,21 @@ describe('ActivitySection', () => {
     expect(screen.getByRole('button', { name: 'Cancel query' })).toBeInTheDocument()
   })
 
+  it('UI-LOCK-072 says where query text is shown when a session carries none', () => {
+    renderWithProviders(
+      <ActivitySection
+        response={response({})}
+        sessions={[{ pid: 77, state: 'idle', datname: 'app', usename: 'app', session_id: 'x.77' }]}
+        instanceId="instance-1"
+        now={NOW}
+      />,
+    )
+
+    expect(screen.getByRole('list', { name: 'Active sessions' })).toHaveTextContent(
+      'Query text shown only for sessions in a blocking tree.',
+    )
+  })
+
   it('UI-LOCK-051 disables session signal actions while the activity sample is stale', () => {
     renderWithProviders(
       <ActivitySection

@@ -6,7 +6,11 @@ export interface LockNode {
   sampled_at?: string | null
   /** Start time of the session, sent back unchanged with a cancel or terminate. When it is absent, the signal names the PID alone. */
   backend_start?: string | null
+  /** Identity across PID reuse: the start time in microseconds, hex, a dot and the PID. Absent when backend_start is. */
+  session_id?: string | null
+  /** When the session began waiting for the lock it waits on, from the server. Absent for a session that waits on none. */
   wait_started_at?: string | null
+  /** Seconds the session had waited at the sample, measured on the server. Absent for a session that waits on none. */
   wait_duration?: number | null
   xact_age?: number | null
   state_age?: number | null
@@ -188,8 +192,30 @@ export function blockedCount(tree: BlockingTree | BlockingTreeNode): number {
   return blocked.size
 }
 
-/** Derive wait seconds from the sample timestamp, never from the current clock. */
+/** A session waits on a lock when the snapshot names a blocker for it. */
+export function isWaiting(node: LockNode): boolean {
+  return (node.blocked_by ?? []).length > 0
+}
+
+/**
+ * A root blocker blocks at least one session and is not itself blocked, so it
+ * is the top of its blocking tree. A cycle marker or a reference is never one.
+ */
+export function isRootBlocker(tree: BlockingTreeNode): boolean {
+  return (
+    !tree.cycle && tree.reference === undefined && tree.children.length > 0 && !isWaiting(tree.node)
+  )
+}
+
+/**
+ * The wait in seconds at the sample. The server measured wait_duration on its
+ * own clock at the sample, so it is used as sent. Without it, the wait is
+ * derived from the start time and the sample timestamp, never the current clock.
+ */
 export function waitDuration(node: LockNode, sampledAt: string | Date | null): number {
+  const measured = finiteDuration(node.wait_duration)
+  if (measured !== null) return measured
+
   const sampleMillis = timestampMillis(sampledAt)
   const startedMillis = timestampMillis(node.wait_started_at)
   if (sampleMillis !== null && startedMillis !== null) {
@@ -197,6 +223,29 @@ export function waitDuration(node: LockNode, sampledAt: string | Date | null): n
   }
 
   return fallbackWaitDuration(node)
+}
+
+/** The identity a session list entry and its tree node share. */
+export function sessionKey(node: LockNode): string {
+  return typeof node.session_id === 'string' && node.session_id !== ''
+    ? node.session_id
+    : keyOf(node.pid)
+}
+
+/**
+ * Give each session list entry the query text of its tree node, by session
+ * identity. The server ships text for the sessions of a blocking tree only, so
+ * a session outside every tree gets none, even if an older agent sent one.
+ */
+export function sessionsWithTreeQuery(
+  sessions: readonly LockNode[],
+  nodes: readonly LockNode[],
+): LockNode[] {
+  const textByKey = new Map<string, string>()
+  for (const node of nodes) {
+    if (typeof node.query === 'string') textByKey.set(sessionKey(node), node.query)
+  }
+  return sessions.map((session) => ({ ...session, query: textByKey.get(sessionKey(session)) }))
 }
 
 /** Rank roots by the number of blocked sessions, then by snapshot wait duration. */
