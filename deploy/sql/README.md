@@ -2,8 +2,12 @@
 
 `monitoring_user.sql` creates or reconciles the `pglens` login role
 (`-v role=<name>` names another one). It is safe to run again: it adds the
-requested memberships and reapplies the session limits without creating an
-extension or changing database objects.
+requested memberships, reapplies the session limits and never creates an
+extension. A run is not free of side effects, though. Each run revokes
+`EXECUTE` on the large-object and WAL-message functions from `PUBLIC` in the
+database it is connected to, so any other role of that database that creates
+large objects or emits WAL messages through `PUBLIC` loses that access on the
+next run and needs an explicit grant to keep it.
 
 The role can only read. Before granting anything, the script checks that an
 existing role of that name could not write, and refuses one that:
