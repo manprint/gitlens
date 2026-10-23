@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -115,6 +116,37 @@ func TestDispatcher_UnknownInstanceIsRejected(t *testing.T) {
 	require.Equal(t, claimToken, got.ClaimToken)
 	require.Equal(t, "rejected", got.Outcome)
 	require.Contains(t, got.Error, "does not monitor")
+}
+
+// refreshFailingTarget reports a capability refresh that cannot read the
+// database, the way a connection that cannot be acquired does.
+type refreshFailingTarget struct {
+	dispatcherTarget
+}
+
+func (t *refreshFailingTarget) RefreshCapabilities(context.Context) error {
+	return errors.New("connection refused")
+}
+
+// A failed refresh keeps the cached tier, and that tier may be T2 after the
+// grant was revoked. The command must not run on it.
+func TestDispatcher_DoesNotRunOnAStaleTierWhenRefreshFails(t *testing.T) {
+	agentID, instanceID := uuid.New(), uuid.New()
+	var got commandResult
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	d := NewDispatcher(server.URL, "token", agentID, true)
+	d.AddTarget(instanceID, &refreshFailingTarget{dispatcherTarget: dispatcherTarget{tier: pgtype.TierSignal}}, false, true)
+	executor := &dispatcherExecutor{kind: command.KindCancel}
+	d.AddExecutor(executor)
+	err := d.dispatch(context.Background(), polledFor(instanceID, command.KindCancel, command.Args{PID: intPtr(42)}))
+	require.NoError(t, err)
+	require.Zero(t, executor.executed)
+	require.Equal(t, "error", got.Outcome)
+	require.Contains(t, got.Error, "could not be refreshed")
 }
 
 func TestDispatcher_ClosedGateRejectsWithoutExecuting(t *testing.T) {
