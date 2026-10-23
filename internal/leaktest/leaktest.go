@@ -100,11 +100,11 @@ func verify(t TestingT, before map[string]int) {
 	}
 }
 
-// snapshot maps each goroutine's identifying stack (its creation site plus
-// its current top frame) to how many goroutines currently share it. Counting
-// rather than collecting identities keeps the check meaningful for worker
-// pools, where the individual goroutines are interchangeable but the
-// population size is exactly what must return to its starting value.
+// snapshot maps each goroutine's identity (see key) to how many goroutines
+// currently share it. Counting rather than collecting identities keeps the
+// check meaningful for worker pools, where the individual goroutines are
+// interchangeable but the population size is exactly what must return to its
+// starting value.
 func snapshot() map[string]int {
 	out := make(map[string]int)
 	for _, stack := range stacks() {
@@ -129,6 +129,14 @@ func diff(before, after map[string]int) []string {
 
 // key reduces a full stack to the lines that identify what the goroutine is,
 // independent of where in its loop it happens to be parked.
+//
+// The creation line keeps its " in goroutine N" suffix, which creatorOf drops.
+// That is deliberate. The ignore rule names the function that starts a
+// goroutine, whichever goroutine ran it, while the identity also separates
+// goroutines started by different parents. A goroutine that replaces an
+// exited one of the same function, from a new parent, then counts as growth;
+// without the suffix it would be netted against the exited one and go
+// unreported.
 func key(stack string) string {
 	lines := strings.Split(strings.TrimSpace(stack), "\n")
 	if len(lines) == 0 {

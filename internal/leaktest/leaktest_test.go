@@ -125,6 +125,22 @@ func TestKey_FallsBackToTheTopFrame(t *testing.T) {
 	}
 }
 
+// A goroutine that replaces an exited one of the same function, started from
+// another parent, is growth. The identity keeps the parent, so the replacement
+// is not netted against the goroutine that exited.
+func TestKey_ReplacementFromAnotherParentIsGrowth(t *testing.T) {
+	stack := func(parent string) string {
+		return "goroutine 42 [chan receive]:\n" +
+			"example.com/pkg.worker(...)\n\t/src/pkg/worker.go:10 +0x1c\n" +
+			"created by example.com/pkg.Start in goroutine " + parent + "\n\t/src/pkg/start.go:20 +0x40"
+	}
+	before := map[string]int{key(stack("1")): 1}
+	after := map[string]int{key(stack("9")): 1}
+	if leaked := diff(before, after); len(leaked) != 1 {
+		t.Errorf("diff() = %v, want the replacement reported as growth", leaked)
+	}
+}
+
 func TestDiff_OnlyReportsGrowth(t *testing.T) {
 	before := map[string]int{"a": 2, "b": 1}
 	after := map[string]int{"a": 2, "b": 3, "c": 1}
@@ -166,8 +182,17 @@ func expectLeak(t *testing.T, park func()) {
 // runtime and net paths.
 
 func TestCheck_ReportsAGoroutineInTimeSleep(t *testing.T) {
+	// time.Sleep cannot be woken, and the detector reports only a goroutine
+	// still running after its settle window, so the goroutine sleeps past that
+	// window. The test waits for it before it returns, so it does not leak
+	// into the tests that follow.
+	done := make(chan struct{})
+	t.Cleanup(func() { <-done })
 	expectLeak(t, func() {
-		go func() { time.Sleep(time.Hour) }()
+		go func() {
+			defer close(done)
+			time.Sleep(2 * settleTimeout)
+		}()
 	})
 }
 
