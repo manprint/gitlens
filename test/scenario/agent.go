@@ -378,6 +378,17 @@ func init() {
 				return fmt.Errorf("agent /healthz never reported state=revoked: %w", err)
 			}
 
+			// The warm-up count above proves data exists, but it was read
+			// before the revoke, and a push in flight at that moment can still
+			// land after it and look like growth. The agent pushes one envelope
+			// at a time, so it cannot receive the 401 until every earlier push
+			// has been acknowledged, and an acknowledged push is already
+			// committed. Re-reading the count now starts the window after all
+			// accepted pushes.
+			if err := e.DB.QueryRow(ctx, `SELECT count(*) FROM metrics`).Scan(&baseline); err != nil {
+				return fmt.Errorf("re-read metrics baseline after revocation: %w", err)
+			}
+
 			// The agent stops collecting: cmd/pglens-agent/run.go's push
 			// loop stops the scheduler once it observes Health ==
 			// HealthRevoked, so no further envelope is ever built. Proven
