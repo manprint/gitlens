@@ -127,13 +127,17 @@ func TestTick_RetriesAFailedNotificationOnALaterPass(t *testing.T) {
 }
 
 // claimStore fails the first claims it is asked for and records the rest as
-// won, so a transition can be persisted with no claim on record.
+// won, so a transition can be persisted with no claim on record. Like pgx, it
+// does not write on a context that is done.
 type claimStore struct {
 	markStore
 	failClaims int
 }
 
-func (s *claimStore) ClaimNotification(context.Context, string, string, string, Alert) (bool, error) {
+func (s *claimStore) ClaimNotification(ctx context.Context, _, _, _ string, _ Alert) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	if s.failClaims > 0 {
 		s.failClaims--
 		return false, errors.New("claim failed")
@@ -158,6 +162,29 @@ func TestChannelNotifier_DeliversATransitionWhoseClaimFailed(t *testing.T) {
 	require.Zero(t, slack.sent, "a claim is not made again in the pass that failed it")
 	require.NoError(t, retrier.Retry(context.Background()))
 	require.Equal(t, 1, slack.sent)
+	require.Equal(t, []notificationMark{{phase: "fire", ok: true, attempts: 2}}, store.marks)
+}
+
+// TestChannelNotifier_AnExpiredClaimDoesNotUseUpAnAttempt — a claim that the
+// expired cycle cut short is not blamed on the store. The delivery keeps all of
+// its attempts, and it goes out on the first pass whose cycle is live.
+func TestChannelNotifier_AnExpiredClaimDoesNotUseUpAnAttempt(t *testing.T) {
+	a := Alert{Key: "k", RuleID: "r", Severity: SeverityWarning, State: StateFiring, StartedAt: time.Unix(1, 0), LastEvalAt: time.Unix(1, 0)}
+	store := &claimStore{failClaims: 1}
+	slack := &testChannel{name: "slack"}
+	n := NewChannelNotifier(store, slack)
+	retrier := n.(interface{ Retry(context.Context) error })
+	require.Error(t, n.Notify(context.Background(), a))
+
+	expired, cancel := context.WithCancel(context.Background())
+	cancel()
+	for i := 0; i < maxNotifyAttempts+2; i++ {
+		_ = retrier.Retry(expired)
+	}
+	require.Zero(t, slack.sent)
+
+	require.NoError(t, retrier.Retry(context.Background()))
+	require.Equal(t, 1, slack.sent, "the delivery is still pending after the expired passes")
 	require.Equal(t, []notificationMark{{phase: "fire", ok: true, attempts: 2}}, store.marks)
 }
 

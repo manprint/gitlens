@@ -57,13 +57,12 @@ func (n *channelNotifier) Notify(ctx context.Context, a Alert) error {
 	var errs []error
 	for _, ch := range n.channels {
 		d := pendingDelivery{dedupID: DedupID(a), channel: ch, phase: phase, alert: a}
-		won, err := n.store.ClaimNotification(ctx, d.dedupID, ch.Name(), phase, a)
+		won, err := n.claim(ctx, &d)
 		if err != nil {
 			// The transition is already persisted, so without a claim it would
 			// never be delivered. The claim is made again on a later pass.
 			errs = append(errs, err)
 			d.unclaimed = true
-			d.attempts++
 			n.keep(d)
 			continue
 		}
@@ -76,6 +75,23 @@ func (n *channelNotifier) Notify(ctx context.Context, a Alert) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// claim makes the claim row of d and reports whether this pass won it. A claim
+// that the cycle's deadline cut short is not counted as an attempt: the store
+// was never given the chance to answer, as with a send that did not begin.
+func (n *channelNotifier) claim(ctx context.Context, d *pendingDelivery) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	won, err := n.store.ClaimNotification(ctx, d.dedupID, d.channel.Name(), d.phase, d.alert)
+	if err != nil {
+		if ctx.Err() == nil {
+			d.attempts++
+		}
+		return false, err
+	}
+	return won, nil
 }
 
 // newMessage builds the message a channel receives for one transition.
@@ -109,9 +125,8 @@ func (n *channelNotifier) Retry(ctx context.Context) error {
 	var errs []error
 	for _, d := range due {
 		if d.unclaimed {
-			won, err := n.store.ClaimNotification(ctx, d.dedupID, d.channel.Name(), d.phase, d.alert)
+			won, err := n.claim(ctx, &d)
 			if err != nil {
-				d.attempts++
 				n.keep(d)
 				errs = append(errs, err)
 				continue
