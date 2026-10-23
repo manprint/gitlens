@@ -523,6 +523,22 @@ func TestINTCONN013_TierTracksEffectiveRead(t *testing.T) {
 	})
 }
 
+// INT-CONN-014: pg_has_role is true for every role in a superuser session, so
+// the tier lookup must not read a superuser as holding the tiers above T0. A
+// superuser DSN stays at T0, as it did before the lookup used pg_has_role.
+func TestINTCONN014_SuperuserKeepsReadOnlyTier(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		mgr, err := NewManager(ctx, "superuser-target", pg.DSN("app", pgtest.RoleSuperuser), DefaultConnOptions(), clock.System())
+		require.NoError(t, err)
+		defer mgr.Close()
+
+		require.NoError(t, mgr.RefreshCapabilities(ctx))
+		require.Equal(t, pgtype.TierReadOnly, mgr.PermTier())
+	})
+}
+
 // INT-CONN-011: the cluster identity falls back to the configured name only
 // when the server denies pg_control_system(), and a role that may read it
 // reports the real system_identifier. The grants setupRoles makes live in the

@@ -82,3 +82,19 @@ func TestINTCLI002_CheckTierFollowsGroupRole(t *testing.T) {
 		require.Equal(t, pgtype.TierSignal, determinePermTier(ctx, conn))
 	})
 }
+
+// TestINTCLI003_CheckTierKeepsSuperuserReadOnly runs the check command's tier
+// lookup as a superuser. pg_has_role is true for every role in a superuser
+// session, so the lookup must not report a superuser at a tier it was never
+// granted.
+func TestINTCLI003_CheckTierKeepsSuperuserReadOnly(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		conn, err := pgx.Connect(ctx, pg.DSN("app", pgtest.RoleSuperuser))
+		require.NoError(t, err)
+		defer func() { _ = conn.Close(ctx) }()
+
+		require.Equal(t, pgtype.TierReadOnly, determinePermTier(ctx, conn))
+	})
+}

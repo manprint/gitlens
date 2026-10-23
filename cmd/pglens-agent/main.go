@@ -275,16 +275,18 @@ func determinePermTier(ctx context.Context, conn *pgx.Conn) pgtype.PermTier {
 	tier := pgtype.TierReadOnly
 
 	// Check for pg_read_all_data (T1). pg_has_role applies group inheritance
-	// and the membership's inherit option, as the agent's own probe does.
+	// and the membership's inherit option, as the agent's own probe does. It
+	// is true for a superuser without the grant, so a superuser stays at T0,
+	// as the agent's probe keeps it.
 	var hasReadAllData bool
-	err := conn.QueryRow(ctx, `SELECT pg_catalog.pg_has_role('pg_read_all_data', 'USAGE')`).Scan(&hasReadAllData)
+	err := conn.QueryRow(ctx, `SELECT pg_catalog.pg_has_role('pg_read_all_data', 'USAGE') AND pg_catalog.current_setting('is_superuser') = 'off'`).Scan(&hasReadAllData)
 	if err == nil && hasReadAllData {
 		tier = pgtype.TierExplain
 	}
 
 	// Check for pg_signal_backend (T2)
 	var hasSignalBackend bool
-	err = conn.QueryRow(ctx, `SELECT pg_catalog.pg_has_role('pg_signal_backend', 'USAGE')`).Scan(&hasSignalBackend)
+	err = conn.QueryRow(ctx, `SELECT pg_catalog.pg_has_role('pg_signal_backend', 'USAGE') AND pg_catalog.current_setting('is_superuser') = 'off'`).Scan(&hasSignalBackend)
 	if err == nil && hasSignalBackend {
 		tier = pgtype.TierSignal
 	}

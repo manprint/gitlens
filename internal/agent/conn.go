@@ -529,15 +529,17 @@ func (m *Manager) queryCapabilities(ctx context.Context, conn capabilityConn) (p
 	// group roles and with the membership's inherit option applied. A direct
 	// membership lookup missed a privilege inherited from a group role, and it
 	// kept a NOINHERIT role at its tier on PostgreSQL 15, where that role
-	// cannot use the privilege.
+	// cannot use the privilege. pg_has_role is true for every role in a
+	// superuser session, so a superuser is kept at T0: the tier describes the
+	// monitoring role, and the deploy script refuses a superuser as one.
 	tier := pgtype.TierReadOnly
 	var hasReadAllData bool
-	if err := conn.QueryRow(ctx, `SELECT pg_catalog.pg_has_role('pg_read_all_data', 'USAGE')`).Scan(&hasReadAllData); err == nil && hasReadAllData {
+	if err := conn.QueryRow(ctx, `SELECT pg_catalog.pg_has_role('pg_read_all_data', 'USAGE') AND pg_catalog.current_setting('is_superuser') = 'off'`).Scan(&hasReadAllData); err == nil && hasReadAllData {
 		tier = pgtype.TierExplain
 	}
 
 	var hasSignalBackend bool
-	if err := conn.QueryRow(ctx, `SELECT pg_catalog.pg_has_role('pg_signal_backend', 'USAGE')`).Scan(&hasSignalBackend); err == nil && hasSignalBackend {
+	if err := conn.QueryRow(ctx, `SELECT pg_catalog.pg_has_role('pg_signal_backend', 'USAGE') AND pg_catalog.current_setting('is_superuser') = 'off'`).Scan(&hasSignalBackend); err == nil && hasSignalBackend {
 		tier = pgtype.TierSignal
 	}
 
