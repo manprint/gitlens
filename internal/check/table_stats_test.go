@@ -1,6 +1,7 @@
 package check
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -61,6 +62,50 @@ func TestTableStats_TruncatedFlagSetWhenSelectorTruncates(t *testing.T) {
 	result := tableStatsResult(selected, map[string]tableStatsRow{"a": {}, "b": {}, "c": {}}, time.Now())
 	result.Truncated = truncated
 	require.True(t, result.Truncated)
+}
+
+func TestTableStats_OldestRelationSurvivesTheDeadTupleAndSizeSelection(t *testing.T) {
+	var parsed []tableStatsRow
+	for i := 0; i < 200; i++ {
+		parsed = append(parsed, tableStatsRow{Schema: "public", Relation: fmt.Sprintf("churn_%03d", i), NDeadTup: int64(1000 + i), TotalBytes: int64(1<<30 + i), RelfrozenXIDAge: 1000 + int64(i)})
+	}
+	for i := 0; i < 100; i++ {
+		parsed = append(parsed, tableStatsRow{Schema: "public", Relation: fmt.Sprintf("tiny_%03d", i), TotalBytes: int64(8192 + i), RelfrozenXIDAge: 5})
+	}
+	parsed = append(parsed, tableStatsRow{Schema: "public", Relation: "ledger", TotalBytes: 8192, RelfrozenXIDAge: 1_800_000_000})
+
+	// The premise: the dead-tuple and size selection alone does not reach the
+	// append-only relation, which has no dead tuples and is the smallest.
+	base, _ := cardinality.NewSelector(cardinality.Options{TopN: 50}).Select(1, relationCandidates(parsed))
+	require.False(t, hasRelation(base, "public.ledger"))
+
+	selected, _ := selectRelations(cardinality.NewSelector(cardinality.Options{TopN: 50}), 1, parsed)
+	require.True(t, hasRelation(selected, "public.ledger"), "the oldest relfrozenxid must be reported")
+}
+
+func TestTableStats_OldestRelationsAreReportedOnceAndBounded(t *testing.T) {
+	var parsed []tableStatsRow
+	for i := 0; i < 300; i++ {
+		parsed = append(parsed, tableStatsRow{Schema: "public", Relation: fmt.Sprintf("t_%03d", i), TotalBytes: int64(i), RelfrozenXIDAge: int64(i)})
+	}
+	selected, truncated := selectRelations(cardinality.NewSelector(cardinality.Options{TopN: 50}), 1, parsed)
+	require.False(t, truncated)
+	seen := make(map[string]bool, len(selected))
+	for _, c := range selected {
+		require.False(t, seen[c.Key], "duplicate relation %s", c.Key)
+		seen[c.Key] = true
+	}
+	require.LessOrEqual(t, len(selected), 2*50+oldestRelationsKept)
+	require.True(t, hasRelation(selected, "public.t_299"), "the oldest relation of the batch is reported")
+}
+
+func hasRelation(selected []cardinality.Candidate, key string) bool {
+	for _, c := range selected {
+		if c.Key == key {
+			return true
+		}
+	}
+	return false
 }
 
 func timePtr(t time.Time) *time.Time { return &t }

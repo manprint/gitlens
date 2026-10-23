@@ -2,6 +2,7 @@ package check
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	"github.com/manprint/pglens/internal/cardinality"
@@ -78,23 +79,78 @@ WHERE c.relkind = 'r'`)
 		return Result{}, err
 	}
 	selector, cycle := c.selectors.next(t)
-	candidates := make([]cardinality.Candidate, 0, len(parsed))
+	selected, truncated := selectRelations(selector, cycle, parsed)
 	byKey := make(map[string]tableStatsRow, len(parsed))
 	for _, r := range parsed {
-		key := r.Schema + "." + r.Relation
-		byKey[key] = r
-		candidates = append(candidates, cardinality.Candidate{Key: key, Primary: float64(r.NDeadTup), Secondary: float64(r.TotalBytes)})
+		byKey[relationKey(r)] = r
 	}
-	selected, truncated := selector.Select(cycle, candidates)
-	selector.Forget(cycle)
 	result := tableStatsResult(selected, byKey, t.Clock().Now())
 	// Truncated is the hard MaxKeys cap only. Reporting the top-N subset of
 	// a database with more tables than that is the normal case, and flagging
 	// it as truncated kept cardinality_budget_exceeded firing on every real
 	// database and stopped the server from ever pruning dropped tables.
 	result.Truncated = truncated
-	result.Partial = len(selected) < len(candidates)
+	result.Partial = len(selected) < len(parsed)
 	return result, nil
+}
+
+// oldestRelationsKept is how many relations per database are reported on top
+// of the dead-tuple and size selection, ranked by relfrozenxid age. Append-only
+// tables have no dead tuples and are usually small, so neither ranking of the
+// selector reaches them, and they are the relations closest to wraparound.
+const oldestRelationsKept = 20
+
+// selectRelations picks the relations one scrape reports: the selector's
+// dead-tuple and size selection, widened by the oldest relations by
+// relfrozenxid age. The selector keeps its own state across scrapes, and the
+// age ranking is recomputed each time without touching that state. The union
+// can exceed the selector's MaxKeys by at most oldestRelationsKept.
+func selectRelations(selector *cardinality.Selector, cycle uint64, parsed []tableStatsRow) ([]cardinality.Candidate, bool) {
+	selected, truncated := selector.Select(cycle, relationCandidates(parsed))
+	selector.Forget(cycle)
+	held := make(map[string]bool, len(selected))
+	for _, c := range selected {
+		held[c.Key] = true
+	}
+	for _, key := range oldestRelationKeys(parsed, oldestRelationsKept) {
+		if !held[key] {
+			held[key] = true
+			// tableStatsResult reads only the key of a selected candidate.
+			selected = append(selected, cardinality.Candidate{Key: key})
+		}
+	}
+	return selected, truncated
+}
+
+func relationKey(r tableStatsRow) string { return r.Schema + "." + r.Relation }
+
+func relationCandidates(parsed []tableStatsRow) []cardinality.Candidate {
+	candidates := make([]cardinality.Candidate, 0, len(parsed))
+	for _, r := range parsed {
+		candidates = append(candidates, cardinality.Candidate{Key: relationKey(r), Primary: float64(r.NDeadTup), Secondary: float64(r.TotalBytes)})
+	}
+	return candidates
+}
+
+// oldestRelationKeys returns the keys of the k relations with the greatest
+// relfrozenxid age, oldest first, ties broken by key.
+func oldestRelationKeys(rows []tableStatsRow, k int) []string {
+	ranked := make([]tableStatsRow, len(rows))
+	copy(ranked, rows)
+	sort.Slice(ranked, func(i, j int) bool {
+		if ranked[i].RelfrozenXIDAge != ranked[j].RelfrozenXIDAge {
+			return ranked[i].RelfrozenXIDAge > ranked[j].RelfrozenXIDAge
+		}
+		return relationKey(ranked[i]) < relationKey(ranked[j])
+	})
+	if len(ranked) > k {
+		ranked = ranked[:k]
+	}
+	keys := make([]string, 0, len(ranked))
+	for _, r := range ranked {
+		keys = append(keys, relationKey(r))
+	}
+	return keys
 }
 
 func tableStatsResult(selected []cardinality.Candidate, rows map[string]tableStatsRow, now time.Time) Result {

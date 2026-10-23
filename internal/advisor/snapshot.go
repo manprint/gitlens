@@ -700,19 +700,31 @@ func loadTables(ctx context.Context, pool snapshotDB, s *Snapshot, now time.Time
 	// One row per relation: the window holds several scrapes, and every
 	// relation used to be evaluated once per scrape (vacuum.starvation
 	// counted each table three times).
-	rows, err := pool.Query(ctx, `SELECT datname, schemaname, relname, n_live_tup, n_dead_tup,
-		n_mod_since_analyze, last_autovacuum, last_vacuum, relfrozenxid_age, seq_scan, idx_scan
-		FROM (SELECT DISTINCT ON (datname, schemaname, relname)
-			datname, schemaname, relname,
-			COALESCE(n_live_tup, 0)::float8 AS n_live_tup, COALESCE(n_dead_tup, 0)::float8 AS n_dead_tup,
-			COALESCE(n_mod_since_analyze, 0)::float8 AS n_mod_since_analyze, last_autovacuum, last_vacuum,
-			COALESCE(relfrozenxid_age, 0)::float8 AS relfrozenxid_age, COALESCE(seq_scan, 0)::float8 AS seq_scan,
-			COALESCE(idx_scan, 0)::float8 AS idx_scan
+	// Two rankings of 500 each: the relations with the most dead tuples, and
+	// the relations with the oldest relfrozenxid. Dead tuples alone dropped
+	// the append-only tables, which have none, and they are the tables at
+	// risk of wraparound.
+	rows, err := pool.Query(ctx, `WITH latest AS (
+			SELECT DISTINCT ON (datname, schemaname, relname)
+				datname, schemaname, relname,
+				COALESCE(n_live_tup, 0)::float8 AS n_live_tup, COALESCE(n_dead_tup, 0)::float8 AS n_dead_tup,
+				COALESCE(n_mod_since_analyze, 0)::float8 AS n_mod_since_analyze, last_autovacuum, last_vacuum,
+				COALESCE(relfrozenxid_age, 0)::float8 AS relfrozenxid_age, COALESCE(seq_scan, 0)::float8 AS seq_scan,
+				COALESCE(idx_scan, 0)::float8 AS idx_scan
 			FROM metrics_tables
 			WHERE instance_id=$1 AND ts >= $2
-			ORDER BY datname, schemaname, relname, ts DESC) latest
-		ORDER BY n_dead_tup DESC
-		LIMIT 500`, s.InstanceID, now.Add(-recentWindow))
+			ORDER BY datname, schemaname, relname, ts DESC
+		), ranked AS (
+			SELECT latest.*,
+				row_number() OVER (ORDER BY n_dead_tup DESC, datname, schemaname, relname) AS by_dead,
+				row_number() OVER (ORDER BY relfrozenxid_age DESC, datname, schemaname, relname) AS by_age
+			FROM latest
+		)
+		SELECT datname, schemaname, relname, n_live_tup, n_dead_tup,
+			n_mod_since_analyze, last_autovacuum, last_vacuum, relfrozenxid_age, seq_scan, idx_scan
+		FROM ranked
+		WHERE by_dead <= 500 OR by_age <= 500
+		ORDER BY n_dead_tup DESC, datname, schemaname, relname`, s.InstanceID, now.Add(-recentWindow))
 	if err != nil {
 		return err
 	}
