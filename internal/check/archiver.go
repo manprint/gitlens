@@ -84,10 +84,10 @@ func (c *archiverCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 	// above is missing and the stall rule has nothing to judge. Archiving has
 	// been expected since the server started (archive_mode changes only at a
 	// restart), or since the statistics were reset when that is later, so the
-	// age is at least the time since then. It is reported only together with
-	// the waiting segments: an idle server that never archived has nothing
-	// stuck, and the age alone would read as a stall once it had been up for
-	// an hour.
+	// age is at least the time since then. It is reported only when the count of
+	// waiting segments could be read, since the stall rule reads a count of zero
+	// as no stall: an idle server that never archived has nothing stuck, and the
+	// age alone would read as a stall once it had been up for an hour.
 	if lastArchived == nil && readyKnown {
 		var since time.Time
 		if err := conn.QueryRow(ctx, `SELECT pg_postmaster_start_time()`).Scan(&since); err != nil {
