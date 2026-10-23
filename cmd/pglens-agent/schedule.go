@@ -34,6 +34,10 @@ type targetGate struct {
 	tier      pgtype.PermTier
 	exts      map[string]bool
 	databases map[string]bool
+	// statementsUnknown reports that pg_stat_statements could not be looked for
+	// in every monitored database, so an absent view means nothing. nextGate
+	// keeps the last answer then. It is not part of key.
+	statementsUnknown bool
 }
 
 // key is the part of a gate that a change rebuilds the schedule for. The
@@ -78,9 +82,13 @@ func readTargetGate(ctx context.Context, mgr *agent.Manager) (targetGate, bool) 
 	// pg_stat_statements counts as present when any monitored database has the
 	// view, not only the maintenance database: the check reads the others
 	// through it. LocateStatements also records the database the check reads
-	// through, so it only runs on a complete discovery; a failed one keeps the
-	// last choice.
-	g.exts["pg_stat_statements"] = err == nil && mgr.LocateStatements(ctx, dbs)
+	// through, so it only runs on a complete discovery.
+	g.exts["pg_stat_statements"] = false
+	if err == nil {
+		found, statementsErr := mgr.LocateStatements(ctx, dbs)
+		g.exts["pg_stat_statements"] = found
+		g.statementsUnknown = statementsErr != nil
+	}
 	for _, db := range dbs {
 		if db.Monitored {
 			g.databases[db.Name] = true
@@ -103,6 +111,18 @@ func nextGate(last targetGate, seen bool, read targetGate, readOK bool) (targetG
 		return read, true
 	case !readOK:
 		return last, false
+	}
+	// A database that could not be checked may be the one holding the view, so
+	// its absence is not evidence. The answer the schedule was built with stays,
+	// and a database that is unreachable for a while does not rebuild the checks
+	// each time. The other gate values are still current.
+	if read.statementsUnknown {
+		exts := make(map[string]bool, len(read.exts))
+		for name, present := range read.exts {
+			exts[name] = present
+		}
+		exts["pg_stat_statements"] = last.exts["pg_stat_statements"]
+		read.exts = exts
 	}
 	read.databases = unionDatabases(last.databases, read.databases)
 	return read, read.key() != last.key() || len(read.databases) != len(last.databases)

@@ -206,3 +206,79 @@ func TestINTSCH003_ExtensionInstalledAfterStartIsScheduled(t *testing.T) {
 		require.NotContains(t, skips, "stat_statements", "the check must no longer be skipped once the extension is installed")
 	})
 }
+
+// TestINTSCH004_UncheckableDatabaseKeepsTheStatementsAnswer: pg_stat_statements
+// is installed in a monitored database that the role is then locked out of, as
+// a DBA does when hardening PUBLIC. The view cannot be looked for there, so its
+// absence is not known. The reconcile must keep the schedule it has, instead of
+// rebuilding it without the check on every pass.
+func TestINTSCH004_UncheckableDatabaseKeepsTheStatementsAnswer(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// The maintenance database has no view; the extension is in a second
+		// monitored database.
+		const maintDB, extDB = "sch004_maintenance", "sch004_extension"
+		const target = "uncheckable-target"
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		for _, db := range []string{maintDB, extDB} {
+			_, err := admin.Exec(ctx, "CREATE DATABASE "+db)
+			require.NoError(t, err)
+		}
+		t.Cleanup(func() {
+			for _, db := range []string{maintDB, extDB} {
+				_, _ = admin.Exec(context.Background(), "DROP DATABASE IF EXISTS "+db+" WITH (FORCE)")
+			}
+		})
+		installer, err := pgxpool.New(ctx, pg.DSN(extDB, pgtest.RoleSuperuser))
+		require.NoError(t, err)
+		t.Cleanup(installer.Close)
+		_, err = installer.Exec(ctx, "CREATE EXTENSION pg_stat_statements")
+		require.NoError(t, err)
+
+		opts := agent.DefaultConnOptions()
+		opts.Include = []*regexp.Regexp{regexp.MustCompile("^(" + maintDB + "|" + extDB + ")$")}
+		mgr, err := agent.NewManager(ctx, target, pg.DSN(maintDB, pgtest.RoleT0), opts, clock.System())
+		require.NoError(t, err)
+		t.Cleanup(mgr.Close)
+
+		var mu sync.Mutex
+		pending := map[string][]wire.Result{}
+		scheduledDBs := map[string]map[string]bool{}
+		schedules := newScheduleSet(ctx, &agent.Config{}, clock.System(), []*agent.Manager{mgr}, &mu, pending, scheduledDBs)
+		require.NoError(t, schedules.start(ctx))
+		t.Cleanup(schedules.stop)
+
+		require.True(t, schedules.gates[target].exts["pg_stat_statements"], "the view is found in the second database")
+		require.NotContains(t, takeSkips(&mu, pending, target), "stat_statements")
+
+		// Revoke CONNECT from PUBLIC on the extension database and end its
+		// sessions: pooled connections opened before the REVOKE would otherwise
+		// keep working.
+		_, err = admin.Exec(ctx, "REVOKE CONNECT ON DATABASE "+extDB+" FROM PUBLIC")
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = admin.Exec(context.Background(), "GRANT CONNECT ON DATABASE "+extDB+" TO PUBLIC")
+		})
+		_, err = admin.Exec(ctx, "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()", extDB)
+		require.NoError(t, err)
+
+		// The lockout must be real, or the test proves nothing.
+		_, err = mgr.LocateStatements(ctx, []wire.Database{{Name: extDB, Monitored: true}})
+		require.Error(t, err, "the role must be locked out of the extension database")
+
+		currentScheduler := func() *agent.Scheduler {
+			schedules.schedMu.Lock()
+			defer schedules.schedMu.Unlock()
+			return schedules.current
+		}
+		before := currentScheduler()
+		schedules.reconcile()
+
+		require.Same(t, before, currentScheduler(), "a database that cannot be checked must not rebuild the schedule")
+		require.True(t, schedules.gates[target].exts["pg_stat_statements"], "the last answer is kept")
+		require.NotContains(t, takeSkips(&mu, pending, target), "stat_statements", "the check must not be skipped as missing")
+	})
+}

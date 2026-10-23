@@ -123,6 +123,38 @@ func TestNextGate(t *testing.T) {
 	}
 }
 
+// TestNextGate_UnknownStatementsKeepTheAnswer: a database that cannot be checked
+// for pg_stat_statements must not read as "absent" and rebuild the schedule. The
+// other gate values still follow the read.
+func TestNextGate_UnknownStatementsKeepTheAnswer(t *testing.T) {
+	last := targetGate{
+		role:      pgtype.RolePrimary,
+		version:   pgtype.PGVersion(190000),
+		tier:      pgtype.TierReadOnly,
+		exts:      map[string]bool{"pg_stat_statements": true},
+		databases: map[string]bool{"app": true},
+	}
+	read := last
+	read.exts = map[string]bool{"pg_stat_statements": false}
+	read.statementsUnknown = true
+
+	got, changed := nextGate(last, true, read, true)
+	require.False(t, changed, "an unknown answer is not a change")
+	require.True(t, got.exts["pg_stat_statements"])
+
+	read.role = pgtype.RoleStandby
+	got, changed = nextGate(last, true, read, true)
+	require.True(t, changed, "a role change in the same read still rebuilds the schedule")
+	require.Equal(t, pgtype.RoleStandby, got.role)
+	require.True(t, got.exts["pg_stat_statements"])
+
+	read.statementsUnknown = false
+	read.role = pgtype.RolePrimary
+	got, changed = nextGate(last, true, read, true)
+	require.True(t, changed, "once the view can be looked for, its absence is an answer again")
+	require.False(t, got.exts["pg_stat_statements"])
+}
+
 // hungTarget is a listener that accepts every connection and never answers one:
 // a target the agent cannot reach, behind a route that drops its replies.
 // attempts counts the connections it has accepted.

@@ -788,8 +788,13 @@ const statementsInstalled = `SELECT EXISTS (SELECT 1 FROM pg_extension WHERE ext
 // database that does. Scheduling used to look at the maintenance database
 // alone, so an extension created only in an application database left the
 // check disabled and every statement unseen.
-func (m *Manager) LocateStatements(ctx context.Context, dbs []wire.Database) bool {
+//
+// A database that cannot be checked may hold the view, so when none is found
+// and one could not be checked, the error reports that the absence is not
+// known. The choice of database is then left as it was too.
+func (m *Manager) LocateStatements(ctx context.Context, dbs []wire.Database) (bool, error) {
 	found, where := m.HasExtension("pg_stat_statements"), "" //nolint:contextcheck // reads the capability cache, which bounds its own refresh
+	var unchecked error
 	for _, db := range dbs {
 		if found {
 			break
@@ -799,19 +804,29 @@ func (m *Manager) LocateStatements(ctx context.Context, dbs []wire.Database) boo
 		}
 		conn, err := m.ForDatabase(ctx, db.Name)
 		if err != nil {
+			unchecked = fmt.Errorf("check %s for pg_stat_statements: %w", db.Name, err)
 			continue
 		}
 		var installed bool
 		err = conn.QueryRow(ctx, statementsInstalled).Scan(&installed)
 		conn.Release()
-		if err == nil && installed {
+		if err != nil {
+			unchecked = fmt.Errorf("check %s for pg_stat_statements: %w", db.Name, err)
+			continue
+		}
+		if installed {
 			found, where = true, db.Name
 		}
 	}
-	m.mu.Lock()
-	m.statementsDB = where
-	m.mu.Unlock()
-	return found
+	if found || unchecked == nil {
+		m.mu.Lock()
+		m.statementsDB = where
+		m.mu.Unlock()
+	}
+	if found {
+		return true, nil
+	}
+	return false, unchecked
 }
 
 // StatementsDatabase implements check.StatementsSource.
