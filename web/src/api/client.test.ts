@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseLargeIntStrings, toApiFailure } from './client'
+import { toApiFailure } from './client'
 
 describe('toApiFailure', () => {
   it('UI-API-001 maps 401 to unauthorized', () => {
@@ -87,31 +87,6 @@ describe('toApiFailure', () => {
     expect(toApiFailure({}, null)).toEqual({
       kind: 'malformed',
       message: 'Malformed API response',
-    })
-  })
-})
-
-describe('parseLargeIntStrings', () => {
-  it('UI-API-005 preserves 9007199254740993 as a string', () => {
-    const raw = '{"queryid":9007199254740993}'
-
-    expect(JSON.parse(raw)).toEqual({ queryid: 9007199254740992 })
-    expect(parseLargeIntStrings(raw)).toEqual({ queryid: '9007199254740993' })
-  })
-
-  it('leaves other numbers untouched', () => {
-    expect(parseLargeIntStrings('{"queryid":42,"samples":7}')).toEqual({
-      queryid: 42,
-      samples: 7,
-    })
-  })
-
-  it('does not corrupt a queryid inside a query text string', () => {
-    const raw = '{"query_text":"select \\"queryid\\": 9007199254740993","queryid":9007199254740993}'
-
-    expect(parseLargeIntStrings(raw)).toEqual({
-      query_text: 'select "queryid": 9007199254740993',
-      queryid: '9007199254740993',
     })
   })
 })

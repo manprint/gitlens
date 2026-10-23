@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/manprint/pglens/internal/check"
 	"github.com/manprint/pglens/internal/command"
@@ -37,11 +38,12 @@ func (e *SignalExecutor) Execute(ctx context.Context, target check.Target, args 
 
 	var backendType, applicationName, username string
 	var ownRole, ownBackend bool
+	var backendStart *time.Time
 	err = conn.QueryRow(ctx, `
 		SELECT COALESCE(backend_type, ''), COALESCE(application_name, ''), COALESCE(usename, ''),
-		       COALESCE(usename = current_user, false), pid = pg_backend_pid()
+		       COALESCE(usename = current_user, false), pid = pg_backend_pid(), backend_start
 		FROM pg_stat_activity
-		WHERE pid = $1`, *args.PID).Scan(&backendType, &applicationName, &username, &ownRole, &ownBackend)
+		WHERE pid = $1`, *args.PID).Scan(&backendType, &applicationName, &username, &ownRole, &ownBackend, &backendStart)
 	if err != nil {
 		if errorsIsNoRows(err) {
 			return nil, rejectedf("pid %d is not present on this instance", *args.PID)
@@ -65,8 +67,11 @@ func (e *SignalExecutor) Execute(ctx context.Context, target check.Target, args 
 	if e.kind == command.KindTerminate {
 		function = "pg_terminate_backend"
 	}
-	var signalled bool
-	if err := conn.QueryRow(ctx, fmt.Sprintf("SELECT %s($1)", function), *args.PID).Scan(&signalled); err != nil {
+	signalled, err := signalVerifiedBackend(ctx, conn, function, *args.PID, backendStart)
+	if errorsIsNoRows(err) {
+		return nil, rejectedf("pid %d is no longer the session that was checked; nothing was signalled", *args.PID)
+	}
+	if err != nil {
 		return nil, err
 	}
 	result, err := json.Marshal(struct {
@@ -79,6 +84,27 @@ func (e *SignalExecutor) Execute(ctx context.Context, target check.Target, args 
 		return nil, err
 	}
 	return result, nil
+}
+
+// signalVerifiedBackend signals the backend the identity check read, and no
+// other. The check and the signal are separate round trips, so the PID can be
+// handed to a new session in between. The statement repeats the guards and
+// requires the start time the check saw, so a new session with the same PID
+// matches no row and is left running. A reuse inside this one statement is
+// still possible, because PostgreSQL names a backend only by its PID.
+func signalVerifiedBackend(ctx context.Context, conn check.Conn, function string, pid int, started *time.Time) (bool, error) {
+	var signalled bool
+	err := conn.QueryRow(ctx, fmt.Sprintf(`
+		SELECT %s(pid) FROM pg_stat_activity
+		WHERE pid = $1
+		  AND backend_start = $2
+		  AND backend_type = 'client backend'
+		  AND usename IS DISTINCT FROM current_user
+		  AND pid <> pg_backend_pid()
+		  AND NOT (COALESCE(application_name, '') = 'pglens'
+		           OR starts_with(COALESCE(application_name, ''), 'pglens/')
+		           OR starts_with(COALESCE(application_name, ''), 'pglens-agent/'))`, function), pid, started).Scan(&signalled)
+	return signalled, err
 }
 
 // isPglensApplication reports whether an application_name belongs to a

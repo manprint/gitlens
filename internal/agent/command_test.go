@@ -3,8 +3,11 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -83,6 +86,14 @@ func (e *dispatcherExecutor) Execute(ctx context.Context, target check.Target, a
 	return json.RawMessage(`{"ok":true}`), nil
 }
 
+// oversizeExecutor returns a result larger than the server accepts.
+type oversizeExecutor struct{}
+
+func (oversizeExecutor) Kind() command.Kind { return command.KindExplain }
+func (oversizeExecutor) Execute(context.Context, check.Target, command.Args) (json.RawMessage, error) {
+	return json.RawMessage(`{"plan":"` + strings.Repeat("x", command.MaxResultBytes) + `","plan_hash":"h"}`), nil
+}
+
 func polledFor(instanceID uuid.UUID, kind command.Kind, args command.Args) polledCommand {
 	return polledCommand{CommandID: uuid.New(), Kind: kind, Args: args, InstanceID: instanceID, ClaimToken: uuid.New()}
 }
@@ -105,6 +116,37 @@ func TestDispatcher_UnknownInstanceIsRejected(t *testing.T) {
 	require.Equal(t, claimToken, got.ClaimToken)
 	require.Equal(t, "rejected", got.Outcome)
 	require.Contains(t, got.Error, "does not monitor")
+}
+
+// refreshFailingTarget reports a capability refresh that cannot read the
+// database, the way a connection that cannot be acquired does.
+type refreshFailingTarget struct {
+	dispatcherTarget
+}
+
+func (t *refreshFailingTarget) RefreshCapabilities(context.Context) error {
+	return errors.New("connection refused")
+}
+
+// A failed refresh keeps the cached tier, and that tier may be T2 after the
+// grant was revoked. The command must not run on it.
+func TestDispatcher_DoesNotRunOnAStaleTierWhenRefreshFails(t *testing.T) {
+	agentID, instanceID := uuid.New(), uuid.New()
+	var got commandResult
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	d := NewDispatcher(server.URL, "token", agentID, true)
+	d.AddTarget(instanceID, &refreshFailingTarget{dispatcherTarget: dispatcherTarget{tier: pgtype.TierSignal}}, false, true)
+	executor := &dispatcherExecutor{kind: command.KindCancel}
+	d.AddExecutor(executor)
+	err := d.dispatch(context.Background(), polledFor(instanceID, command.KindCancel, command.Args{PID: intPtr(42)}))
+	require.NoError(t, err)
+	require.Zero(t, executor.executed)
+	require.Equal(t, "error", got.Outcome)
+	require.Contains(t, got.Error, "could not be refreshed")
 }
 
 func TestDispatcher_ClosedGateRejectsWithoutExecuting(t *testing.T) {
@@ -175,6 +217,33 @@ func TestDispatcher_UsesDedicatedConnection(t *testing.T) {
 	err := d.dispatch(context.Background(), polledFor(instanceID, command.KindExplain, command.Args{QueryID: int64Ptr(7)}))
 	require.NoError(t, err)
 	require.Equal(t, 1, target.connForCalls)
+}
+
+// The server refuses a body over command.MaxResultBytes, which reads as a
+// result that never arrived. The agent posts such a result as an error that
+// names the size, under the same claim token, so the audit records the cause.
+func TestDispatcher_PostsAnOversizeResultAsAnError(t *testing.T) {
+	agentID, instanceID, claimToken := uuid.New(), uuid.New(), uuid.New()
+	var got commandResult
+	var size int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		size = len(body)
+		require.NoError(t, json.Unmarshal(body, &got))
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	d := NewDispatcher(server.URL, "token", agentID, true)
+	d.AddTarget(instanceID, &dispatcherTarget{tier: pgtype.TierExplain}, false, false)
+	d.AddExecutor(oversizeExecutor{})
+	err := d.dispatch(context.Background(), polledCommand{CommandID: uuid.New(), ClaimToken: claimToken, InstanceID: instanceID, Kind: command.KindExplain, Args: command.Args{QueryID: int64Ptr(7)}})
+	require.NoError(t, err)
+	require.LessOrEqual(t, size, command.MaxResultBytes)
+	require.Equal(t, claimToken, got.ClaimToken)
+	require.Equal(t, "error", got.Outcome)
+	require.Contains(t, got.Error, "byte limit")
+	require.Empty(t, got.Result)
 }
 
 func TestDispatcher_DisabledDoesNotPoll(t *testing.T) {

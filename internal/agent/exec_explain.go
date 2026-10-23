@@ -83,12 +83,14 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 
 	// READ ONLY for both modes: the session is already read-only (see
 	// ReadOnlySession), and saying so here keeps the guarantee local to the
-	// one place that executes text written by database users. A read-only
-	// transaction makes PostgreSQL itself reject INSERT/UPDATE/DELETE/MERGE
-	// under ANALYZE, data-modifying CTEs, nextval() and writes from volatile
-	// functions. Plan-only EXPLAIN executes nothing; PostgreSQL still checks
-	// the statement's privileges, so a write cannot even be planned by a
-	// role that only reads.
+	// one place that executes text written by database users. The transaction
+	// makes PostgreSQL itself reject the writes made in it, under ANALYZE
+	// INSERT/UPDATE/DELETE/MERGE, data-modifying CTEs, nextval() and the writes
+	// of functions the statement calls. It does not reach a write made through
+	// another session (dblink, postgres_fdw) or the other side effects listed
+	// in explain_guard.go; the guard refuses those before the statement runs. Plan-only
+	// EXPLAIN executes nothing; PostgreSQL still checks the statement's
+	// privileges, so a write cannot even be planned by a role that only reads.
 	if _, err := conn.Exec(ctx, "BEGIN READ ONLY"); err != nil {
 		return nil, err
 	}
@@ -106,9 +108,12 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 	if _, err := conn.Exec(ctx, "SET LOCAL search_path TO DEFAULT"); err != nil {
 		return nil, err
 	}
-	// Planning alone can run user code (see explain_guard.go), so privileges
-	// are dropped before anything is planned, and ANALYZE runs only once the
-	// guard has inspected the statement, the database and the plan.
+	// Planning alone can run user code (see explain_guard.go), so the database
+	// is checked before anything is planned, privileges are dropped next, and
+	// ANALYZE runs only once the guard has inspected the statement and the plan.
+	if err := guardPlanning(ctx, conn); err != nil {
+		return nil, err
+	}
 	if err := dropExplainPrivileges(ctx, conn, target.PGVersion().Major(), args.Analyze); err != nil {
 		return nil, err
 	}
@@ -145,10 +150,18 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 	if err != nil {
 		return nil, fmt.Errorf("hash explain plan: %w", err)
 	}
+	// The plan is filed under the database it was made in. A command that
+	// names no database runs in the target's own, and the server has no other
+	// way to learn that name.
+	var datname string
+	if err := conn.QueryRow(ctx, "SELECT current_database()").Scan(&datname); err != nil {
+		return nil, err
+	}
 	result, err := json.Marshal(struct {
 		Plan     json.RawMessage `json:"plan"`
 		PlanHash string          `json:"plan_hash"`
-	}{Plan: plan, PlanHash: hash})
+		Datname  string          `json:"datname"`
+	}{Plan: plan, PlanHash: hash, Datname: datname})
 	if err != nil {
 		return nil, err
 	}
@@ -290,22 +303,28 @@ func allowedExplainKeyword(keyword string) bool {
 	}
 }
 
+// firstSQLKeyword skips leading whitespace and comments the way PostgreSQL's
+// lexer does, so the keyword it returns is the one the server executes. The
+// gate is only as good as that agreement: a comment that ends early here lets
+// a write read as a SELECT.
 func firstSQLKeyword(statement string) string {
 	for {
 		statement = strings.TrimLeft(statement, " \t\r\n")
 		switch {
 		case strings.HasPrefix(statement, "--"):
-			if newline := strings.IndexByte(statement, '\n'); newline >= 0 {
-				statement = statement[newline+1:]
+			// A carriage return ends a line comment too, not only a newline.
+			if end := strings.IndexAny(statement, "\r\n"); end >= 0 {
+				statement = statement[end+1:]
 				continue
 			}
 			return ""
 		case strings.HasPrefix(statement, "/*"):
-			if end := strings.Index(statement[2:], "*/"); end >= 0 {
-				statement = statement[end+4:]
-				continue
+			end := blockCommentEnd(statement)
+			if end < 0 {
+				return ""
 			}
-			return ""
+			statement = statement[end:]
+			continue
 		}
 		break
 	}
@@ -316,12 +335,36 @@ func firstSQLKeyword(statement string) string {
 	return strings.ToUpper(statement[:end])
 }
 
+// blockCommentEnd returns the offset just past the block comment that opens
+// statement, or -1 when the comment is never closed. PostgreSQL nests block
+// comments, so a "*/" closes only the innermost one: in
+// "/* /* x */ SELECT 1 */ DELETE" the comment ends after the second "*/".
+func blockCommentEnd(statement string) int {
+	depth := 0
+	for i := 0; i+1 < len(statement); {
+		switch statement[i : i+2] {
+		case "/*":
+			depth++
+			i += 2
+		case "*/":
+			depth--
+			i += 2
+			if depth == 0 {
+				return i
+			}
+		default:
+			i++
+		}
+	}
+	return -1
+}
+
 func planHash(plan json.RawMessage) (string, error) {
 	var value any
 	if err := json.Unmarshal(plan, &value); err != nil {
 		return "", err
 	}
-	normalized := stripPlanRuntimeFields(value)
+	normalized := structuralPlanFields(value)
 	canonical, err := json.Marshal(normalized)
 	if err != nil {
 		return "", err
@@ -330,19 +373,60 @@ func planHash(plan json.RawMessage) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func stripPlanRuntimeFields(value any) any {
+// structuralPlanKeys are the keys of a FORMAT JSON plan that describe its
+// shape. The hash keeps only these, not everything but a list of runtime
+// keys: EXPLAIN ANALYZE with BUFFERS adds timings, buffer counters, planning
+// and execution time, trigger and I/O figures, and their names change across
+// major versions, so a denylist misses some on every release. Estimates
+// (costs, row counts and widths) are left out too, so that the hash moves when
+// the plan changes shape, not when the statistics behind it do.
+var structuralPlanKeys = map[string]bool{
+	"Plan":                true,
+	"Plans":               true,
+	"Node Type":           true,
+	"Parent Relationship": true,
+	"Parallel Aware":      true,
+	"Async Capable":       true,
+	"Join Type":           true,
+	"Partial Mode":        true,
+	"Strategy":            true,
+	"Scan Direction":      true,
+	"Command":             true,
+	"Operation":           true,
+	"Relation Name":       true,
+	"Schema":              true,
+	"Alias":               true,
+	"Index Name":          true,
+	"Function Name":       true,
+	"CTE Name":            true,
+	"Subplan Name":        true,
+	"Filter":              true,
+	"Index Cond":          true,
+	"Recheck Cond":        true,
+	"Hash Cond":           true,
+	"Merge Cond":          true,
+	"Join Filter":         true,
+	"One-Time Filter":     true,
+	"Sort Key":            true,
+	"Group Key":           true,
+	"Output":              true,
+	"Workers Planned":     true,
+	"Inner Unique":        true,
+}
+
+func structuralPlanFields(value any) any {
 	switch typed := value.(type) {
 	case []any:
 		for i := range typed {
-			typed[i] = stripPlanRuntimeFields(typed[i])
+			typed[i] = structuralPlanFields(typed[i])
 		}
 	case map[string]any:
 		for key, child := range typed {
-			if key == "Actual Rows" || key == "Actual Total Time" || key == "Actual Startup Time" || key == "Actual Loops" || strings.HasPrefix(key, "Buffers") {
+			if !structuralPlanKeys[key] {
 				delete(typed, key)
 				continue
 			}
-			typed[key] = stripPlanRuntimeFields(child)
+			typed[key] = structuralPlanFields(child)
 		}
 	}
 	return value

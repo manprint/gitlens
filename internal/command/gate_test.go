@@ -101,14 +101,28 @@ func TestValidate_AcceptsValidArguments(t *testing.T) {
 	require.NoError(t, (Args{Schema: "public", Relation: "orders"}).Validate(KindPgstattuple))
 }
 
-func TestValidate_RejectsDatnameWithQuote(t *testing.T) {
-	err := (Args{QueryID: int64Ptr(1), Datname: `app"db`}).Validate(KindExplain)
-	require.ErrorContains(t, err, "datname")
+// PostgreSQL accepts these names, and a name never reaches SQL text, so they
+// are valid targets. The old character allowlist refused them as unsafe.
+func TestValidate_AcceptsDatnamesPostgreSQLAccepts(t *testing.T) {
+	for _, datname := range []string{"my-app.prod", "my app", "città", "app_1$x", `app"db`, "app;drop"} {
+		require.NoError(t, (Args{QueryID: int64Ptr(1), Datname: datname}).Validate(KindExplain), datname)
+	}
 }
 
-func TestValidate_RejectsDatnameWithSemicolon(t *testing.T) {
-	err := (Args{QueryID: int64Ptr(1), Datname: "app;drop"}).Validate(KindExplain)
-	require.ErrorContains(t, err, "datname")
+// The length is in bytes, as PostgreSQL counts it: 32 two-byte letters are
+// 64 bytes and too long, though they are only 32 characters.
+func TestValidate_RejectsDatnameLongerThanPostgreSQLAllows(t *testing.T) {
+	require.NoError(t, (Args{QueryID: int64Ptr(1), Datname: strings.Repeat("a", 63)}).Validate(KindExplain))
+	err := (Args{QueryID: int64Ptr(1), Datname: strings.Repeat("a", 64)}).Validate(KindExplain)
+	require.ErrorContains(t, err, "longer than 63 bytes")
+	err = (Args{QueryID: int64Ptr(1), Datname: strings.Repeat("ì", 32)}).Validate(KindExplain)
+	require.ErrorContains(t, err, "longer than 63 bytes")
+}
+
+// The command store keeps the arguments as jsonb, which cannot hold a NUL.
+func TestValidate_RejectsDatnameWithNULByte(t *testing.T) {
+	err := (Args{QueryID: int64Ptr(1), Datname: "app\x00db"}).Validate(KindExplain)
+	require.ErrorContains(t, err, "NUL byte")
 }
 
 func TestAllowed_ReasonNamesTheClosedGate(t *testing.T) {

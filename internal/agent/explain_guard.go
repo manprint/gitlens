@@ -15,31 +15,38 @@ import (
 
 // The EXPLAIN guard. pglens never modifies a monitored database, and EXPLAIN
 // is the one place where it runs SQL written by database users. The READ ONLY
-// transaction makes PostgreSQL refuse writes, but some functions act outside
-// any transaction: session advisory locks outlive ROLLBACK, signals reach
+// transaction makes PostgreSQL refuse writes made in it, but some effects
+// happen outside it: session advisory locks outlive ROLLBACK, signals reach
 // other backends, dblink and untrusted procedural languages reach other
 // systems, and a few built-ins write WAL (pg_logical_emit_message) or consume
-// a transaction ID (txid_current) inside a read-only transaction. Planning
-// alone can run code too: the planner folds calls to IMMUTABLE functions with
-// constant arguments, and evaluates STABLE ones for estimates.
+// a transaction ID (txid_current) inside a read-only transaction. Planning can
+// run code too: the planner folds calls to IMMUTABLE functions with constant
+// arguments, and evaluates STABLE ones for estimates.
 //
-// Every EXPLAIN therefore runs with as few privileges as the session can drop
-// to (dropExplainPrivileges) on a connection that is closed afterwards
-// (discardConn), and EXPLAIN ANALYZE, which executes the statement, runs only
-// when guardAnalyze finds nothing in the statement, in the database or in the
-// VERBOSE plan that could act outside the transaction.
+// Every EXPLAIN therefore runs only after guardPlanning has found no function
+// in the database that the planner may run, with as few privileges as the
+// session can drop to (dropExplainPrivileges), on a connection that is closed
+// afterwards (discardConn). EXPLAIN ANALYZE, which executes the statement, runs
+// only when guardAnalyze finds nothing in the statement, in the database or in
+// the VERBOSE plan that could act outside the transaction.
 //
-// What stays outside the guard, by construction: a function its owner
-// declared IMMUTABLE or STABLE although it has such effects runs during
-// planning, before any plan can be inspected; and a function or view replaced
-// concurrently between the inspected plan and the analyzed one. Both need the
-// database owner to work against the declared contract.
+// What stays outside the guard, by construction: a function or view replaced
+// concurrently between the check and the plan; code that runs while planning
+// but is not a function in the database, such as a planner hook loaded with
+// shared_preload_libraries; the IMMUTABLE and STABLE functions of installed
+// extensions that a superuser owns, which guardPlanning does not list, so plain
+// EXPLAIN folds them unchecked (ANALYZE refuses the ones outside
+// sideEffectFreeExtensions that a statement reaches); and the remote planning
+// of foreign-data wrappers other than postgres_fdw, whose use_remote_estimate
+// guardPlanning refuses.
 
 // sideEffectFreeExtensions only compute: no I/O outside the database, no SQL
 // text executed on the caller's behalf, no state that outlives a transaction.
-// Their functions are allowed whatever volatility they declare (random
-// generators, PostGIS selectivity estimators), apart from the maintenance
-// functions in extensionFunctionsDenied.
+// The members a superuser owns are allowed whatever volatility they declare
+// (random generators, PostGIS selectivity estimators), apart from the
+// maintenance functions in extensionFunctionsDenied. A member a non-superuser
+// added is not the extension's code: it is checked like any user function, so
+// plain EXPLAIN is refused where one is IMMUTABLE or STABLE.
 var sideEffectFreeExtensions = map[string]bool{
 	"btree_gin":      true,
 	"btree_gist":     true,
@@ -215,7 +222,9 @@ func builtinVolatileAllowedName(name string) bool {
 
 // functionLookup lists every function named in $1, in any schema. visible
 // marks the schemas an unqualified name can resolve to; both the plan and
-// this lookup run in the same session, so they share the search_path.
+// this lookup run in the same session, so they share the search_path. Only a
+// function a superuser owns can count as an extension's, for the reason given
+// at plannableFunctionLookup.
 const functionLookup = `/* pglens: explain guard, functions */
 SELECT COALESCE(pg_catalog.json_agg(pg_catalog.json_build_object(
 		'schema', n.nspname,
@@ -225,18 +234,22 @@ SELECT COALESCE(pg_catalog.json_agg(pg_catalog.json_build_object(
 		'visible', n.nspname = ANY (pg_catalog.current_schemas(true)))), '[]')
 FROM pg_catalog.pg_proc p
 JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+JOIN pg_catalog.pg_roles ow ON ow.oid = p.proowner
 LEFT JOIN pg_catalog.pg_depend d
 	ON d.classid = 'pg_catalog.pg_proc'::pg_catalog.regclass AND d.objid = p.oid AND d.deptype = 'e'
-LEFT JOIN pg_catalog.pg_extension e ON e.oid = d.refobjid
+LEFT JOIN pg_catalog.pg_extension e ON e.oid = d.refobjid AND ow.rolsuper
 WHERE p.proname = ANY ($1::pg_catalog.name[])`
 
 // hiddenCallLookup lists the functions that user-defined operators, casts,
 // domain constraints and aggregates call. A plan does not always show these
 // calls: CASE x WHEN y and NULLIF hide the equality operator, an implicit cast
 // shows as its argument, a domain check runs inside record input, and an
-// aggregate shows only its own name. Objects of the side-effect-free
-// extensions ($1) are skipped; built-in objects (OIDs below
-// FirstNormalObjectId, 16384) only reference built-in functions.
+// aggregate shows only its own name. Built-in objects (OIDs below
+// FirstNormalObjectId, 16384) only reference built-in functions, so they are
+// skipped. An object of a side-effect-free extension is not skipped: a
+// non-superuser who can install such an extension can add an operator of
+// their own to it (ALTER EXTENSION ... ADD OPERATOR), and the object is then
+// checked by the function it calls like any other.
 const hiddenCallLookup = `/* pglens: explain guard, hidden calls */
 WITH refs(object, objclass, objid, fn) AS (
 	SELECT 'operator ' || o.oid::pg_catalog.regoperator::pg_catalog.text,
@@ -275,13 +288,11 @@ SELECT COALESCE(pg_catalog.json_agg(pg_catalog.json_build_object(
 FROM refs r
 JOIN pg_catalog.pg_proc p ON p.oid = r.fn
 JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+JOIN pg_catalog.pg_roles ow ON ow.oid = p.proowner
 LEFT JOIN pg_catalog.pg_depend d
 	ON d.classid = 'pg_catalog.pg_proc'::pg_catalog.regclass AND d.objid = p.oid AND d.deptype = 'e'
-LEFT JOIN pg_catalog.pg_extension e ON e.oid = d.refobjid
-LEFT JOIN pg_catalog.pg_depend od ON od.classid = r.objclass AND od.objid = r.objid AND od.deptype = 'e'
-LEFT JOIN pg_catalog.pg_extension oe ON oe.oid = od.refobjid
-WHERE r.fn <> 0
-  AND NOT (COALESCE(oe.extname, '') = ANY ($1::pg_catalog.text[]))`
+LEFT JOIN pg_catalog.pg_extension e ON e.oid = d.refobjid AND ow.rolsuper
+WHERE r.fn <> 0`
 
 // hiddenCall is one function a user-defined object calls.
 type hiddenCall struct {
@@ -342,6 +353,87 @@ func dropExplainPrivileges(ctx context.Context, conn check.Conn, major int, anal
 	}
 	return nil
 }
+
+// plannableFunctionLookup lists the functions the database defines itself that
+// the planner may run while it plans a statement: the functions declared
+// IMMUTABLE or STABLE, which the planner folds or evaluates for estimates. A
+// VOLATILE function runs only when it executes, so it is not listed. Built-in
+// functions are left out, since PostgreSQL declares their volatility itself.
+// The functions of extensions are left out: an installed extension is the
+// trust boundary here, and ANALYZE checks the ones a statement reaches. Only
+// a function a superuser owns is an extension's, though. A non-superuser who
+// can install a trusted extension, such as pg_trgm, can add a function of
+// their own to it with ALTER EXTENSION ... ADD FUNCTION, and the planner would
+// run that function like any other user function. The C functions a superuser
+// defined are not left out, and neither are the cost and selectivity
+// estimators of operators, which are C functions: an IMMUTABLE or STABLE one
+// of them is listed and refuses EXPLAIN like any other.
+const plannableFunctionLookup = `/* pglens: explain guard, plannable functions */
+SELECT COALESCE(pg_catalog.json_agg(pg_catalog.json_build_object(
+		'schema', n.nspname,
+		'name', p.proname,
+		'volatility', p.provolatile) ORDER BY n.nspname, p.proname), '[]')
+FROM pg_catalog.pg_proc p
+JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+  AND p.provolatile IN ('i', 's')
+  AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d
+                  JOIN pg_catalog.pg_roles ow ON ow.oid = p.proowner
+                  WHERE d.classid = 'pg_catalog.pg_proc'::pg_catalog.regclass AND d.objid = p.oid AND d.deptype = 'e'
+                    AND ow.rolsuper)`
+
+// guardPlanning refuses every EXPLAIN, plan-only or ANALYZE, while the database
+// defines a function the planner may run, or a foreign table whose planning
+// queries the remote server. A plan does not show those runs, and they happen
+// before any plan exists, so the check reads the catalog rather than a plan: it
+// does not depend on which functions a statement names, directly or through
+// views, operators, casts or policies. The cost is that a database with its
+// own IMMUTABLE or STABLE functions refuses EXPLAIN altogether, and the refusal
+// names the function.
+func guardPlanning(ctx context.Context, conn check.Conn) error {
+	var raw json.RawMessage
+	if err := conn.QueryRow(ctx, plannableFunctionLookup).Scan(&raw); err != nil {
+		return fmt.Errorf("look up the functions the planner may run: %w", err)
+	}
+	var functions []catalogFunction
+	if err := json.Unmarshal(raw, &functions); err != nil {
+		return fmt.Errorf("decode the functions the planner may run: %w", err)
+	}
+	for _, f := range functions {
+		if reason := functionHazard(f); reason != "" {
+			return rejectedf("EXPLAIN refused: the database defines %s, which %s; the planner may run such a function while it plans a statement, and a plan does not show that", f, reason)
+		}
+	}
+	if err := conn.QueryRow(ctx, remoteEstimateLookup).Scan(&raw); err != nil {
+		return fmt.Errorf("look up the foreign tables that estimate remotely: %w", err)
+	}
+	var remote []struct {
+		Relation string `json:"relation"`
+	}
+	if err := json.Unmarshal(raw, &remote); err != nil {
+		return fmt.Errorf("decode the foreign tables that estimate remotely: %w", err)
+	}
+	if len(remote) > 0 {
+		return rejectedf("EXPLAIN refused: foreign table %s has use_remote_estimate on, so planning sends an EXPLAIN to the remote server, which plans it there and runs the functions it folds; a plan does not show that", remote[0].Relation)
+	}
+	return nil
+}
+
+// remoteEstimateLookup lists the foreign tables whose planning queries the
+// remote server. postgres_fdw does so when use_remote_estimate is set on the
+// table or on its server: it sends EXPLAIN to the remote side, where the remote
+// planner folds that server's IMMUTABLE functions. An option set to one of the
+// spellings PostgreSQL reads as false does not count.
+const remoteEstimateLookup = `/* pglens: explain guard, remote estimates */
+SELECT COALESCE(pg_catalog.json_agg(pg_catalog.json_build_object(
+		'relation', n.nspname || '.' || c.relname)), '[]')
+FROM pg_catalog.pg_foreign_table ft
+JOIN pg_catalog.pg_class c ON c.oid = ft.ftrelid
+JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+JOIN pg_catalog.pg_foreign_server s ON s.oid = ft.ftserver
+WHERE EXISTS (SELECT 1 FROM pg_catalog.unnest(COALESCE(ft.ftoptions, '{}') || COALESCE(s.srvoptions, '{}')) AS o(opt)
+              WHERE pg_catalog.split_part(o.opt, '=', 1) = 'use_remote_estimate'
+                AND pg_catalog.lower(pg_catalog.split_part(o.opt, '=', 2)) NOT IN ('false', 'f', 'off', 'no', 'n', '0'))`
 
 // guardAnalyze decides whether statement may be executed by EXPLAIN ANALYZE.
 // It runs inside the read-only transaction, after dropExplainPrivileges and
@@ -452,13 +544,8 @@ func lookupFunctions(ctx context.Context, conn check.Conn, refs []funcRef) ([]ca
 }
 
 func lookupHiddenCalls(ctx context.Context, conn check.Conn) ([]hiddenCall, error) {
-	allowed := make([]string, 0, len(sideEffectFreeExtensions))
-	for name := range sideEffectFreeExtensions {
-		allowed = append(allowed, name)
-	}
-	sort.Strings(allowed)
 	var raw json.RawMessage
-	if err := conn.QueryRow(ctx, hiddenCallLookup, allowed).Scan(&raw); err != nil {
+	if err := conn.QueryRow(ctx, hiddenCallLookup).Scan(&raw); err != nil {
 		return nil, fmt.Errorf("look up operators, casts, domains and aggregates for the explain guard: %w", err)
 	}
 	var calls []hiddenCall

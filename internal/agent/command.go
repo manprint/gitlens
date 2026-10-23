@@ -178,12 +178,18 @@ func (d *Dispatcher) dispatch(ctx context.Context, polled polledCommand) error {
 	// Privilege grants are expected to take effect for the next command while
 	// the agent remains running. Managers expose this optional refresh hook so
 	// older test targets and lightweight fakes keep working unchanged.
+	var refreshErr error
 	if refresher, ok := binding.target.(interface {
 		RefreshCapabilities(context.Context) error
 	}); ok {
-		// Keep the last known conservative capability state on a transient
-		// refresh failure; the executor will still enforce its gates.
-		_ = refresher.RefreshCapabilities(ctx)
+		refreshErr = refresher.RefreshCapabilities(ctx)
+	}
+	// A failed refresh keeps the cached tier, which may predate a revoked
+	// grant, so the command is not gated on it. The failure is transient, so
+	// the outcome is an error, not a closed gate. PostgreSQL still enforces
+	// the real privilege for every command that does run.
+	if refreshErr != nil {
+		return d.postResult(ctx, polled.CommandID, commandResult{ClaimToken: polled.ClaimToken, Outcome: "error", Error: "capabilities could not be refreshed, so the command was not run: " + refreshErr.Error()})
 	}
 	gates := command.Gates{
 		Tier:                binding.target.PermTier(),
@@ -217,6 +223,15 @@ func (d *Dispatcher) postResult(ctx context.Context, commandID uuid.UUID, result
 	body, err := json.Marshal(result)
 	if err != nil {
 		return err
+	}
+	// The server refuses a body over command.MaxResultBytes, and a refused
+	// request reads as a result that never arrived. A result that large is
+	// posted as an error that says so, so the audit records the real cause.
+	if len(body) > command.MaxResultBytes {
+		body, err = json.Marshal(commandResult{ClaimToken: result.ClaimToken, Outcome: "error", Error: fmt.Sprintf("result is %d bytes, over the %d byte limit", len(body), command.MaxResultBytes)})
+		if err != nil {
+			return err
+		}
 	}
 	endpoint := fmt.Sprintf("%s/api/v1/commands/%s/result", d.serverURL, commandID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(body)))

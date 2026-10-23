@@ -1732,6 +1732,12 @@ paths:
                   value: { command_id: 22222222-2222-2222-2222-222222222222 }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '429':
+          description: The agent already has the maximum number of pending commands; retry once they run or expire.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '503':
           description: Command storage is unavailable.
           content:
@@ -2040,6 +2046,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '500':
           description: Command result could not be persisted.
           content:

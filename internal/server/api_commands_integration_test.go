@@ -34,11 +34,47 @@ func TestINTCMD001_MigrationCreatesCommandTablesAndIndexes(t *testing.T) {
 		require.NoError(t, pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name=$1)`, table).Scan(&exists))
 		require.True(t, exists, table)
 	}
-	for _, index := range []string{"commands_queue_idx", "commands_instance_idx", "command_audit_instance_idx", "query_plans_dedup_idx", "query_plans_lookup_idx"} {
+	for _, index := range []string{"commands_queue_idx", "commands_instance_idx", "commands_expiry_idx", "command_audit_instance_idx", "query_plans_dedup_idx", "query_plans_lookup_idx"} {
 		var exists bool
 		require.NoError(t, pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname=$1)`, index).Scan(&exists))
 		require.True(t, exists, index)
 	}
+}
+
+// TestINTCMD016_ExpirySweepCanUseAnIndex: the sweep runs on every claim and
+// every GET, and filters on tenant, state and expiry. commands_queue_idx covers
+// only pending rows, so without an index on the sweep the whole table was read
+// on each run. With sequential scans off, the planner must be able to use the
+// index for the sweep's predicate.
+func TestINTCMD016_ExpirySweepCanUseAnIndex(t *testing.T) {
+	pool := getSharedPool(t)
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+	_, err = tx.Exec(ctx, `SET LOCAL enable_seqscan = off`)
+	require.NoError(t, err)
+	// commands_instance_idx also starts with tenant_id, so the planner takes
+	// it whenever the statistics of the shared table make the two look alike,
+	// which depends on the rows earlier tests left. The transaction drops it
+	// and the rollback restores it, so only the expiry index can serve the sweep.
+	// The test pins that the expiry index can serve the sweep, not the planner's
+	// choice between the two indexes when both exist. That choice depends on the
+	// statistics and on the rows earlier tests leave, so a check on it would be
+	// flaky, and no test covers it.
+	_, err = tx.Exec(ctx, `DROP INDEX commands_instance_idx`)
+	require.NoError(t, err)
+	rows, err := tx.Query(ctx, `EXPLAIN SELECT command_id FROM commands WHERE tenant_id=$1 AND state IN ('pending','claimed') AND expires_at <= now()`, commandTenant)
+	require.NoError(t, err)
+	defer rows.Close()
+	var plan strings.Builder
+	for rows.Next() {
+		var line string
+		require.NoError(t, rows.Scan(&line))
+		plan.WriteString(line + "\n")
+	}
+	require.NoError(t, rows.Err())
+	require.Contains(t, plan.String(), "commands_expiry_idx", plan.String())
 }
 
 func seedCommandInstance(t *testing.T, pool *pgxpool.Pool) (uuid.UUID, uuid.UUID) {
@@ -301,4 +337,87 @@ func TestINTCMD012_ReadingAnExpiredCommandExpiresIt(t *testing.T) {
 	require.Equal(t, "expired", outcome)
 	require.Equal(t, "ui-session 0badcafe from 10.0.0.9", who)
 	require.Equal(t, "expired before the agent claimed it", detail)
+}
+
+// TestINTPLAN003_PlanWithoutDatnameIsFiledUnderTheDatabaseItRanIn: a command
+// that names no database explains in the target's own. The plan is filed under
+// the database the agent reports, not under an empty name.
+func TestINTPLAN003_PlanWithoutDatnameIsFiledUnderTheDatabaseItRanIn(t *testing.T) {
+	pool := getSharedPool(t)
+	instanceID, agentID := seedCommandInstance(t, pool)
+	router := commandsIntegrationRouter(pool)
+	completeCommand(t, router, instanceID, agentID, `{"kind":"explain","args":{"queryid":9}}`, `{"claim_token":"00000000-0000-0000-0000-000000000000","outcome":"ok","result":{"plan":[{"Plan":{"Node Type":"Seq Scan"}}],"plan_hash":"named-by-agent","datname":"appdb"}}`)
+	var datname string
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT datname FROM query_plans WHERE instance_id=$1 AND queryid=9`, instanceID).Scan(&datname))
+	require.Equal(t, "appdb", datname)
+}
+
+// TestINTPLAN004_PlanWithNoDatnameIsStoredUnderNoName: a result that names no
+// database, from an agent that predates the name, is still stored, under an
+// empty name, so the plan is not lost in the upgrade window.
+func TestINTPLAN004_PlanWithNoDatnameIsStoredUnderNoName(t *testing.T) {
+	pool := getSharedPool(t)
+	instanceID, agentID := seedCommandInstance(t, pool)
+	router := commandsIntegrationRouter(pool)
+	completeCommand(t, router, instanceID, agentID, `{"kind":"explain","args":{"queryid":10}}`, `{"claim_token":"00000000-0000-0000-0000-000000000000","outcome":"ok","result":{"plan":[{"Plan":{"Node Type":"Seq Scan"}}],"plan_hash":"unnamed"}}`)
+	var count int
+	var datname string
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*), COALESCE(max(datname), '') FROM query_plans WHERE instance_id=$1 AND queryid=10`, instanceID).Scan(&count, &datname))
+	require.Equal(t, 1, count)
+	require.Empty(t, datname)
+}
+
+// INT-CMD-030: an agent's queue is bounded. A command over the limit is refused
+// with 429 and not queued, and a command that leaves the queue frees a place.
+func TestINTCMD030_EnqueueRefusesBeyondTheAgentQueueLimit(t *testing.T) {
+	pool := getSharedPool(t)
+	instanceID, agentID := seedCommandInstance(t, pool)
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, `INSERT INTO commands (command_id, tenant_id, agent_id, instance_id, cluster_id, kind, args, state, expires_at) SELECT gen_random_uuid(), tenant_id, agent_id, instance_id, cluster_id, 'cancel', '{"pid":42}', 'pending', now()+interval '5 minutes' FROM instances, generate_series(1, $2) WHERE instance_id=$1`, instanceID, commandQueueLimit)
+	require.NoError(t, err)
+
+	router := commandsIntegrationRouter(pool)
+	enqueue := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/instances/"+instanceID.String()+"/commands", bytes.NewBufferString(`{"kind":"explain","args":{"queryid":11}}`))
+		req.Header.Set("Authorization", "Bearer test-token")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+	rec := enqueue()
+	require.Equal(t, http.StatusTooManyRequests, rec.Code, rec.Body.String())
+	var pending int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM commands WHERE agent_id=$1 AND state='pending'`, agentID.String()).Scan(&pending))
+	require.Equal(t, commandQueueLimit, pending, "the refused command is not queued")
+
+	_, err = pool.Exec(ctx, `UPDATE commands SET state='done', finished_at=now() WHERE command_id = (SELECT command_id FROM commands WHERE agent_id=$1 AND state='pending' LIMIT 1)`, agentID.String())
+	require.NoError(t, err)
+	rec = enqueue()
+	require.Equal(t, http.StatusAccepted, rec.Code, rec.Body.String())
+}
+
+// TestINTCMD033_ResultRevocationLookupUsesThePrimaryKey: a result is checked
+// against its agent's revocation on the agents primary key. The command holds
+// the agent as text, so a comparison that casts the agent column instead of the
+// command's text makes the key unusable. With sequential scans off, the planner
+// must reach agents through agents_pkey.
+func TestINTCMD033_ResultRevocationLookupUsesThePrimaryKey(t *testing.T) {
+	pool := getSharedPool(t)
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+	_, err = tx.Exec(ctx, `SET LOCAL enable_seqscan = off`)
+	require.NoError(t, err)
+	rows, err := tx.Query(ctx, "EXPLAIN "+resultRevocationLookup, uuid.New())
+	require.NoError(t, err)
+	defer rows.Close()
+	var plan strings.Builder
+	for rows.Next() {
+		var line string
+		require.NoError(t, rows.Scan(&line))
+		plan.WriteString(line + "\n")
+	}
+	require.NoError(t, rows.Err())
+	require.Contains(t, plan.String(), "agents_pkey", plan.String())
 }

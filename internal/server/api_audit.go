@@ -69,13 +69,18 @@ func (a *API) listCommandAudit(w http.ResponseWriter, r *http.Request) {
 		if detail != nil {
 			item.Detail = *detail
 		}
-		// Keep numbers as json.Number: a float64 rounds a queryid above 2^53
-		// before the operator reads the audit trail.
+		// A queryid is an int64 hash. A float64 loses its low digits, and a
+		// browser parses a JSON number the same way, so it leaves as a string,
+		// as the other endpoints write it. UseNumber keeps the other numbers
+		// as their literal digits.
 		decoder := json.NewDecoder(bytes.NewReader(rawArgs))
 		decoder.UseNumber()
 		if err := decoder.Decode(&item.Args); err != nil {
 			writeError(w, http.StatusInternalServerError, "command audit args decode failed", err.Error())
 			return
+		}
+		if queryID, ok := item.Args["queryid"].(json.Number); ok {
+			item.Args["queryid"] = queryID.String()
 		}
 		out = append(out, item)
 	}

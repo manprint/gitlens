@@ -23,15 +23,19 @@ type explainConn struct {
 	explainErr  error
 	execSQL     []string
 	lookupSQL   string
+	lookupArgs  []any
 	explainArgs []any
 	simpleSQL   []string
 
-	// The explain guard's answers: the session's privileges, the pg_proc
-	// rows for the names it looks up, the calls hidden in user-defined
-	// objects, and the VERBOSE plan it inspects (plan when nil).
+	// The explain guard's answers: the session's privileges, the functions
+	// the planner may run in the database, the pg_proc rows for the names it
+	// looks up, the calls hidden in user-defined objects, the foreign tables
+	// that estimate remotely, and the VERBOSE plan it inspects (plan when nil).
 	session     string
+	plannable   string
 	functions   string
 	hidden      string
+	remote      string
 	verbosePlan []byte
 	verboseErr  error
 	guardSQL    []string
@@ -43,10 +47,14 @@ func (c *explainConn) guardAnswer(sql string) string {
 	switch {
 	case strings.Contains(sql, "explain guard, session"):
 		answer, fallback = c.session, `{"superuser":false,"signal":false,"read_all_data":true}`
+	case strings.Contains(sql, "explain guard, plannable functions"):
+		answer = c.plannable
 	case strings.Contains(sql, "explain guard, functions"):
 		answer = c.functions
 	case strings.Contains(sql, "explain guard, hidden calls"):
 		answer = c.hidden
+	case strings.Contains(sql, "explain guard, remote estimates"):
+		answer = c.remote
 	}
 	if answer == "" {
 		return fallback
@@ -72,11 +80,15 @@ func (c *explainConn) QueryRow(_ context.Context, sql string, args ...any) pgx.R
 	}
 	if strings.HasPrefix(sql, `SELECT query FROM "public"."pg_stat_statements"`) {
 		c.lookupSQL = sql
+		c.lookupArgs = args
 		return explainRow{value: c.statement, err: c.lookupErr}
 	}
 	if strings.HasPrefix(sql, "/* pglens: explain guard") {
 		c.guardSQL = append(c.guardSQL, sql)
 		return explainRow{value: []byte(c.guardAnswer(sql))}
+	}
+	if sql == "SELECT current_database()" {
+		return explainRow{value: explainDatname}
 	}
 	if strings.HasPrefix(sql, "EXPLAIN (VERBOSE, FORMAT JSON, COSTS OFF)") {
 		c.execSQL = append(c.execSQL, sql)
@@ -95,6 +107,9 @@ func (c *explainConn) Exec(_ context.Context, sql string, _ ...any) (pgconn.Comm
 	return pgconn.CommandTag{}, nil
 }
 func (c *explainConn) Release() { c.released = true }
+
+// explainDatname is the database the fake connection reports as current.
+const explainDatname = "appdb"
 
 type explainRow struct {
 	value any
@@ -154,6 +169,42 @@ func TestExplain_StripsLeadingCommentsBeforeKeyword(t *testing.T) {
 	require.Equal(t, "SELECT", firstSQLKeyword(statement))
 }
 
+// PostgreSQL nests block comments and ends a line comment at a carriage
+// return. The gate must find the keyword the server runs, or a DELETE reads
+// as a SELECT. Verified on PostgreSQL 18: both statements below plan a Delete.
+func TestExplain_KeywordGateReadsCommentsLikePostgreSQL(t *testing.T) {
+	require.Equal(t, "DELETE", firstSQLKeyword("/* /* x */ SELECT 1 */ DELETE FROM t"))
+	require.Equal(t, "UPDATE", firstSQLKeyword("/* a /* b /* c */ */ */ UPDATE t SET x = 1"))
+	require.Equal(t, "DELETE", firstSQLKeyword("--x\rDELETE FROM t WHERE id = (\nSELECT 1)"))
+	require.Equal(t, "SELECT", firstSQLKeyword("--x\r\nSELECT 1"))
+	require.Empty(t, firstSQLKeyword("/* /* x */ SELECT 1"), "an unclosed comment has no keyword")
+}
+
+// The keyword decides what EXPLAIN ANALYZE may run, so a nested comment must
+// not hide a DELETE behind a SELECT. The refusal comes before any statement
+// reaches the database.
+func TestExplain_AnalyzeRefusesDMLBehindANestedComment(t *testing.T) {
+	conn := &explainConn{statement: "/* /* x */ SELECT 1 */ DELETE FROM t", plan: []byte(`[{"Plan":{"Node Type":"Result"}}]`)}
+	_, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{QueryID: int64Ptr(1), Analyze: true})
+	var rejected *RejectedError
+	require.ErrorAs(t, err, &rejected)
+	require.ErrorContains(t, err, "would execute a DELETE statement")
+	require.Empty(t, conn.execSQL)
+}
+
+// The server files a plan under the database the agent reports, so the result
+// names the database the explain ran in, even when the command named none.
+func TestExplain_ResultNamesTheDatabaseThePlanWasMadeIn(t *testing.T) {
+	conn := &explainConn{statement: "SELECT 1", plan: []byte(`[{"Plan":{"Node Type":"Result"}}]`)}
+	result, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{QueryID: int64Ptr(1)})
+	require.NoError(t, err)
+	var decoded struct {
+		Datname string `json:"datname"`
+	}
+	require.NoError(t, json.Unmarshal(result, &decoded))
+	require.Equal(t, explainDatname, decoded.Datname)
+}
+
 func TestExplain_UnknownQueryIDIsRejected(t *testing.T) {
 	conn := &explainConn{lookupErr: pgx.ErrNoRows}
 	_, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{QueryID: int64Ptr(404)})
@@ -181,12 +232,32 @@ func TestExplain_BuffersOnlyWithAnalyze(t *testing.T) {
 	}
 }
 
-func TestExplain_PlanHashIgnoresActualFields(t *testing.T) {
-	one, err := planHash([]byte(`[{"Plan":{"Node Type":"Index Scan","Actual Rows":1,"Actual Total Time":2,"Buffers":{"Shared Hit Blocks":3}}}]`))
+// planOutput is EXPLAIN (ANALYZE, BUFFERS, VERBOSE, FORMAT JSON) of an index
+// scan, with the keys PostgreSQL adds to a real plan: buffer counters on the
+// node and in Planning, timings, and triggers at the top level.
+func planOutput(rows, hit, planRows, executionTime, indexName string) string {
+	return `[{"Plan":{"Node Type":"Index Scan","Parallel Aware":false,"Async Capable":false,` +
+		`"Scan Direction":"Forward","Index Name":"` + indexName + `","Relation Name":"t","Schema":"public","Alias":"t",` +
+		`"Startup Cost":0.15,"Total Cost":8.17,"Plan Rows":` + planRows + `,"Plan Width":36,` +
+		`"Actual Startup Time":0.02,"Actual Total Time":0.03,"Actual Rows":` + rows + `,"Actual Loops":1,` +
+		`"Output":["id","v"],"Index Cond":"(id = 1)","Rows Removed by Index Recheck":0,` +
+		`"Shared Hit Blocks":` + hit + `,"Shared Read Blocks":0,"Shared Dirtied Blocks":0,"Shared Written Blocks":0,` +
+		`"Local Hit Blocks":0,"Local Read Blocks":0,"Local Dirtied Blocks":0,"Local Written Blocks":0,` +
+		`"Temp Read Blocks":0,"Temp Written Blocks":0,"I/O Read Time":0.0,"I/O Write Time":0.0},` +
+		`"Planning":{"Shared Hit Blocks":5,"Shared Read Blocks":0,"Shared Dirtied Blocks":0,"Shared Written Blocks":0,` +
+		`"Local Hit Blocks":0,"Local Read Blocks":0,"Local Dirtied Blocks":0,"Local Written Blocks":0,` +
+		`"Temp Read Blocks":0,"Temp Written Blocks":0,"I/O Read Time":0.0,"I/O Write Time":0.0},` +
+		`"Planning Time":0.112,"Triggers":[],"Execution Time":` + executionTime + `}]`
+}
+
+// Two runs of the same statement differ in every runtime figure and in the
+// estimates the statistics produced; the hash must not move with either.
+func TestExplain_PlanHashIgnoresRuntimeAndEstimates(t *testing.T) {
+	first, err := planHash([]byte(planOutput("1", "2", "1", "0.051", "t_pkey")))
 	require.NoError(t, err)
-	two, err := planHash([]byte(`[{"Plan":{"Node Type":"Index Scan","Actual Rows":99,"Actual Total Time":88,"Buffers":{"Shared Hit Blocks":77}}}]`))
+	second, err := planHash([]byte(planOutput("1", "3", "40", "0.203", "t_pkey")))
 	require.NoError(t, err)
-	require.Equal(t, one, two)
+	require.Equal(t, first, second)
 }
 
 func TestExplain_PlanHashDiffersOnDifferentShape(t *testing.T) {
@@ -195,6 +266,13 @@ func TestExplain_PlanHashDiffersOnDifferentShape(t *testing.T) {
 	two, err := planHash([]byte(`[{"Plan":{"Node Type":"Seq Scan"}}]`))
 	require.NoError(t, err)
 	require.NotEqual(t, one, two)
+
+	// The same node type on another index is another plan.
+	withPrimary, err := planHash([]byte(planOutput("1", "2", "1", "0.05", "t_pkey")))
+	require.NoError(t, err)
+	withOther, err := planHash([]byte(planOutput("1", "2", "1", "0.05", "t_v_idx")))
+	require.NoError(t, err)
+	require.NotEqual(t, withPrimary, withOther)
 }
 
 func TestExplain_AnalyzeAlwaysRollsBack(t *testing.T) {
@@ -304,6 +382,23 @@ func TestExplain_ReadsTheTextFromTheMaintenanceDatabaseWithoutTheView(t *testing
 	require.NoError(t, err)
 	require.Contains(t, maint.lookupSQL, "datname = $2", "the text of this database, read where the view exists")
 	require.Contains(t, strings.Join(conn.execSQL, "\n"), "EXPLAIN (FORMAT JSON, VERBOSE, COSTS) SELECT 1", "the plan is still made in the command's database")
+}
+
+// The database name is free text, so the lookup binds it as an argument and
+// never splices it into the statement. That is what lets a name that looks
+// like SQL pass validation.
+func TestExplain_DatnameStaysOutOfTheLookupSQL(t *testing.T) {
+	const hostile = `app"; DROP TABLE t; --`
+	conn := &explainConn{lookupErr: &pgconn.PgError{Code: "42P01"}, plan: []byte(`[{"Plan":{}}]`)}
+	maint := &explainConn{statement: "SELECT 1"}
+	target := &maintenanceTarget{dispatcherTarget: dispatcherTarget{conn: conn}, maint: maint}
+
+	_, err := NewExplainExecutor().Execute(context.Background(), target, command.Args{QueryID: int64Ptr(1), Datname: hostile})
+
+	require.NoError(t, err)
+	require.NotContains(t, maint.lookupSQL, "DROP")
+	require.NotContains(t, maint.lookupSQL, "app")
+	require.Equal(t, []any{int64(1), hostile}, maint.lookupArgs)
 }
 
 func TestExplain_NamesAMissingViewInBothDatabases(t *testing.T) {

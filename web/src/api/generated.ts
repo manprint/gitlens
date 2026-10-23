@@ -2139,6 +2139,16 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             404: components["responses"]["NotFound"];
+            413: components["responses"]["PayloadTooLarge"];
+            /** @description The agent already has the maximum number of pending commands; retry once they run or expire. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Command storage is unavailable. */
             503: {
                 headers: {
@@ -2555,6 +2565,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            413: components["responses"]["PayloadTooLarge"];
             /** @description Command result could not be persisted. */
             500: {
                 headers: {

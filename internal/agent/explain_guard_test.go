@@ -280,13 +280,49 @@ func TestGuard_SignalSessionPlansAsReadAllData(t *testing.T) {
 	}
 }
 
-// Plain EXPLAIN plans without the ANALYZE guard.
-func TestGuard_PlainExplainChecksTheSessionOnly(t *testing.T) {
+// Plain EXPLAIN plans only when the database defines no function the planner
+// may run. The planner runs IMMUTABLE and STABLE functions while it plans, so a
+// plain EXPLAIN is refused before it plans, just as ANALYZE is.
+func TestGuard_PlainExplainRefusesWhenThePlannerMayRunAFunction(t *testing.T) {
 	conn := analyzeConn()
-	conn.verbosePlan = []byte(`[{"Plan":{"Node Type":"Foreign Scan"}}]`)
+	conn.plannable = `[{"schema":"app","name":"current_tenant","volatility":"s","extension":""}]`
+	_, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{QueryID: int64Ptr(1)})
+	var rejected *RejectedError
+	require.True(t, errors.As(err, &rejected), "want a refusal, got %v", err)
+	require.Contains(t, rejected.Error(), "app.current_tenant()")
+	require.Contains(t, rejected.Error(), "user-defined function")
+	for _, sql := range conn.execSQL {
+		require.NotContains(t, sql, "EXPLAIN (", "nothing may be planned")
+	}
+	require.Contains(t, conn.execSQL, "ROLLBACK")
+}
+
+func TestGuard_PlainExplainPlansWhenNoFunctionIsPlannable(t *testing.T) {
+	conn := analyzeConn()
 	_, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{QueryID: int64Ptr(1)})
 	require.NoError(t, err)
-	require.Len(t, conn.guardSQL, 1, "only the session check runs")
+	require.Len(t, conn.guardSQL, 3, "the session, the planning and the remote estimate checks run")
+	var planned bool
+	for _, sql := range conn.execSQL {
+		planned = planned || strings.HasPrefix(sql, "EXPLAIN (FORMAT JSON, VERBOSE, COSTS)")
+	}
+	require.True(t, planned)
+}
+
+// A foreign table whose planning goes to its remote server is refused before
+// anything is planned, as a plan does not show the remote side's functions.
+func TestGuard_PlainExplainRefusesForeignTablesThatEstimateRemotely(t *testing.T) {
+	conn := analyzeConn()
+	conn.remote = `[{"relation":"public.remote_t"}]`
+	_, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{QueryID: int64Ptr(1)})
+	var rejected *RejectedError
+	require.True(t, errors.As(err, &rejected), "want a refusal, got %v", err)
+	require.Contains(t, rejected.Error(), "use_remote_estimate")
+	require.Contains(t, rejected.Error(), "public.remote_t")
+	for _, sql := range conn.execSQL {
+		require.NotContains(t, sql, "EXPLAIN (", "nothing may be planned")
+	}
+	require.Contains(t, conn.execSQL, "ROLLBACK")
 }
 
 func TestDiscardConn_ReleasesWhatCannotBeHijacked(t *testing.T) {

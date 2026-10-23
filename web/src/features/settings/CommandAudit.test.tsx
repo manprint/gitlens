@@ -25,12 +25,12 @@ function renderAudit(entries: AuditEntry[]) {
 
 describe('CommandAudit', () => {
   it('UI-SET-024 shows a queryid above 2^53 with every digit', async () => {
-    // The body is written as text: a JavaScript number literal would round the
-    // queryid before the request is made, hiding the fault this test covers.
+    // The server writes queryid as a string, since a JSON number above 2^53
+    // loses its last digits when the browser parses it.
     const body =
       '[{"audit_id":1,"command_id":"00000000-0000-4000-8000-000000000001","instance_id":"' +
       INSTANCE_ID +
-      '","kind":"explain","args":{"analyze":false,"queryid":1234567890123456789},"requested_by":"api-token from 192.0.2.10","executed_at":"2026-09-01T01:00:00Z","outcome":"ok"}]'
+      '","kind":"explain","args":{"analyze":false,"queryid":"1234567890123456789"},"requested_by":"api-token from 192.0.2.10","executed_at":"2026-09-01T01:00:00Z","outcome":"ok"}]'
     server.use(
       http.get('*/api/v1/instances/:id/command-audit', () =>
         HttpResponse.text(body, { headers: { 'Content-Type': 'application/json' } }),

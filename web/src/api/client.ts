@@ -76,14 +76,3 @@ export function toApiFailure(response: unknown, body: unknown): ApiFailure {
     detail: body.detail,
   }
 }
-
-/**
- * Parse a response body whose queryid may be a JSON number. The statements and
- * ash endpoints send queryid as a string already; the command audit echoes the
- * queryid of an explain as a number. Rewriting unsafe integer literals before
- * JSON.parse preserves their exact string form.
- */
-export function parseLargeIntStrings(raw: string): unknown {
-  const rewritten = raw.replace(/(?<!\\)("queryid"\s*:\s*)(-?\d{16,})(?=\s*[,}])/g, '$1"$2"')
-  return JSON.parse(rewritten) as unknown
-}

@@ -27,6 +27,19 @@ const (
 	commandWaitInterval  = 500 * time.Millisecond
 	maxCommandWait       = 30 * time.Second
 	commandTenant        = "default"
+	// commandClaimLease is how long the agent that claimed a command has to
+	// report its result. The agent runs a command for at most 60 seconds, and
+	// the rest covers the capability refresh and the result post. The TTL
+	// bounds the wait for a claim; it must not expire a command being run.
+	commandClaimLease = 2 * time.Minute
+	// maxCommandBody bounds a command request. A result is larger, since it
+	// carries a plan, and is bounded by command.MaxResultBytes instead.
+	maxCommandBody int64 = 1 << 20
+	// commandQueueLimit bounds the commands waiting for one agent. The agent
+	// claims them in order and runs one at a time, and a pgstattuple can hold
+	// it for 50 seconds, so an unbounded queue lets a burst expire the commands
+	// behind it before they run. A command over the limit is refused at once.
+	commandQueueLimit = 20
 )
 
 // CommandService owns the server side of the command queue.
@@ -125,10 +138,18 @@ type resultRequest struct {
 	Error      string          `json:"error,omitempty"`
 }
 
-func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+// decodeJSON decodes a request body of at most maxBytes. A body over the
+// limit is reported as such, not as invalid JSON: a result too large to store
+// must read as a size problem, not as a malformed request.
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any, maxBytes int64) bool {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBytes))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "payload too large", fmt.Sprintf("request body exceeds %d bytes", maxBytes))
+			return false
+		}
 		writeError(w, http.StatusBadRequest, "invalid JSON", err.Error())
 		return false
 	}
@@ -146,7 +167,7 @@ func (s *CommandService) enqueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req enqueueRequest
-	if !decodeJSON(w, r, &req) {
+	if !decodeJSON(w, r, &req, maxCommandBody) {
 		return
 	}
 	var args command.Args
@@ -175,6 +196,20 @@ func (s *CommandService) enqueue(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "instance lookup failed", err.Error())
+		return
+	}
+	// The claim serves an agent's queue across all its instances, first in
+	// first out, so the bound is per agent. Two enqueues in flight can both
+	// pass the count, which overshoots the limit by at most that many: the
+	// bound is on the damage a flood can do, not an exact count.
+	var pending int64
+	err = s.pool.QueryRow(r.Context(), `SELECT count(*) FROM commands WHERE tenant_id=$1 AND agent_id=$2 AND state='pending' AND expires_at > now()`, tenantID, agentID).Scan(&pending)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "command queue check failed", err.Error())
+		return
+	}
+	if pending >= commandQueueLimit {
+		writeError(w, http.StatusTooManyRequests, "command queue full", fmt.Sprintf("the agent already has %d pending commands; retry once they run or expire", commandQueueLimit))
 		return
 	}
 	commandID := uuid.New()
@@ -258,7 +293,8 @@ func (s *CommandService) poll(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "forbidden", "agent may only poll its own queue")
 		return
 	}
-	if _, err := uuid.Parse(requestedID); err != nil {
+	agentID, err := uuid.Parse(requestedID)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid agent id", err.Error())
 		return
 	}
@@ -269,6 +305,17 @@ func (s *CommandService) poll(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.pool == nil {
 		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	// A revoked agent is given no commands, as its pushes are refused. The
+	// claim repeats this check, so a revocation during the wait holds too.
+	revoked, err := agentRevoked(r.Context(), s.pool, agentID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "agent lookup failed", err.Error())
+		return
+	}
+	if revoked {
+		writeError(w, http.StatusUnauthorized, "revoked", "agent is revoked and receives no commands")
 		return
 	}
 	deadline := s.now().Add(wait)
@@ -294,6 +341,19 @@ func (s *CommandService) poll(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// agentRevoked reports whether agents.revoked_at is set for the agent. An
+// agent that is not registered is not revoked.
+func agentRevoked(ctx context.Context, q interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, agentID uuid.UUID) (bool, error) {
+	var revoked bool
+	err := q.QueryRow(ctx, `SELECT revoked_at IS NOT NULL FROM agents WHERE agent_id=$1`, agentID).Scan(&revoked)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return revoked, err
+}
+
 func (s *CommandService) claim(ctx context.Context, agentID string) (pollResponse, error) {
 	var out pollResponse
 	parsed, err := uuid.Parse(agentID)
@@ -303,16 +363,19 @@ func (s *CommandService) claim(ctx context.Context, agentID string) (pollRespons
 	if err := expireCommands(ctx, s.pool); err != nil {
 		return out, err
 	}
+	// The claim takes its lease in the same statement, so the TTL the command
+	// was queued with no longer expires it. GREATEST keeps a longer expiry.
 	err = s.pool.QueryRow(ctx, `UPDATE commands
-		SET state='claimed', claimed_at=now(), claim_token=gen_random_uuid()
+		SET state='claimed', claimed_at=now(), claim_token=gen_random_uuid(), expires_at=GREATEST(expires_at, $3)
 		WHERE command_id = (
 			SELECT command_id FROM commands
 			WHERE tenant_id=$1 AND agent_id=$2 AND state='pending' AND expires_at > now()
+			  AND NOT EXISTS (SELECT 1 FROM agents WHERE agent_id=$4 AND revoked_at IS NOT NULL)
 			ORDER BY created_at
 			FOR UPDATE SKIP LOCKED
 			LIMIT 1
 		)
-		RETURNING command_id, kind, args, claim_token, instance_id, cluster_id, expires_at`, commandTenant, parsed).Scan(&out.CommandID, &out.Kind, &out.Args, &out.ClaimToken, &out.InstanceID, &out.ClusterID, &out.ExpiresAt)
+		RETURNING command_id, kind, args, claim_token, instance_id, cluster_id, expires_at`, commandTenant, parsed, s.now().UTC().Add(commandClaimLease), parsed).Scan(&out.CommandID, &out.Kind, &out.Args, &out.ClaimToken, &out.InstanceID, &out.ClusterID, &out.ExpiresAt)
 	return out, err
 }
 
@@ -331,6 +394,12 @@ func expireCommands(ctx context.Context, db dbPool) error {
 		  FROM expired`, commandTenant)
 	return err
 }
+
+// resultRevocationLookup reads whether the agent that queued a command is
+// revoked. The command keeps the agent as text, so the agent is joined on its
+// primary key by casting the command's text: the join stays an index probe on
+// agents, and the cast is per command, not per agent row.
+const resultRevocationLookup = `SELECT a.revoked_at IS NOT NULL FROM commands c JOIN agents a ON a.agent_id = c.agent_id::uuid WHERE c.command_id=$1`
 
 // requesterOf names who enqueued a command for the audit: the credential
 // kind (the agent bearer token or a UI session, identified by a digest of
@@ -366,7 +435,7 @@ func (s *CommandService) result(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req resultRequest
-	if !decodeJSON(w, r, &req) {
+	if !decodeJSON(w, r, &req, command.MaxResultBytes) {
 		return
 	}
 	if err := validateResult(req); err != nil {
@@ -380,6 +449,18 @@ func (s *CommandService) result(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	defer func() { _ = tx.Rollback(ctx) }()
+	// A result from a revoked agent is refused, even for a claim it held before
+	// the revocation. The agent is the one that queued the command, not a header.
+	var revoked bool
+	err = tx.QueryRow(ctx, resultRevocationLookup, commandID).Scan(&revoked)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "command agent lookup failed", err.Error())
+		return
+	}
+	if revoked {
+		writeError(w, http.StatusUnauthorized, "revoked", "agent is revoked and its results are refused")
+		return
+	}
 	state := "failed"
 	if req.Outcome == "ok" {
 		state = "done"
@@ -393,9 +474,18 @@ func (s *CommandService) result(w http.ResponseWriter, r *http.Request) {
 	err = tx.QueryRow(ctx, `UPDATE commands SET state=$3, result=$4, error=$5, finished_at=now() WHERE command_id=$1 AND state='claimed' AND claim_token=$2 RETURNING tenant_id, instance_id, cluster_id, kind, args, requested_by`, commandID, req.ClaimToken, state, nullableJSON(req.Result), nullableText(req.Error)).Scan(&tenantID, &instanceID, &clusterID, &kind, &args, &requestedBy)
 	if errors.Is(err, pgx.ErrNoRows) {
 		var tenantID, commandState string
-		err = tx.QueryRow(ctx, `SELECT tenant_id, instance_id, kind, args, requested_by, state FROM commands WHERE command_id=$1 FOR UPDATE`, commandID).Scan(&tenantID, &instanceID, &kind, &args, &requestedBy, &commandState)
+		var claimToken *uuid.UUID
+		err = tx.QueryRow(ctx, `SELECT tenant_id, instance_id, kind, args, requested_by, state, claim_token FROM commands WHERE command_id=$1 FOR UPDATE`, commandID).Scan(&tenantID, &instanceID, &kind, &args, &requestedBy, &commandState, &claimToken)
 		if err == nil && commandState == "expired" {
-			if _, auditErr := tx.Exec(ctx, `INSERT INTO command_audit (tenant_id, command_id, instance_id, kind, args, requested_by, outcome, detail) VALUES ($1,$2,$3,$4,$5,$6,'rejected',$7)`, tenantID, commandID, instanceID, kind, args, requestedBy, nullableText(req.Error)); auditErr != nil {
+			// The sweep keeps the claim token of a claim it expires, so a
+			// matching token shows the result came from the agent that claimed
+			// the command. The result is still refused, but the audit records
+			// what that agent reported, not a rejection it never sent.
+			outcome := "rejected"
+			if claimToken != nil && *claimToken == req.ClaimToken {
+				outcome = req.Outcome
+			}
+			if _, auditErr := tx.Exec(ctx, `INSERT INTO command_audit (tenant_id, command_id, instance_id, kind, args, requested_by, outcome, detail) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, tenantID, commandID, instanceID, kind, args, requestedBy, outcome, nullableText(req.Error)); auditErr != nil {
 				writeError(w, http.StatusInternalServerError, "command audit failed", auditErr.Error())
 				return
 			}
@@ -440,6 +530,7 @@ func persistCommandArtifact(ctx context.Context, tx pgx.Tx, tenantID string, ins
 		var payload struct {
 			Plan     json.RawMessage `json:"plan"`
 			PlanHash string          `json:"plan_hash"`
+			Datname  string          `json:"datname"`
 		}
 		if err := json.Unmarshal(result, &payload); err != nil {
 			return fmt.Errorf("decode explain result: %w", err)
@@ -447,7 +538,17 @@ func persistCommandArtifact(ctx context.Context, tx pgx.Tx, tenantID string, ins
 		if len(payload.Plan) == 0 || payload.PlanHash == "" || args.QueryID == nil {
 			return nil
 		}
-		return store.WriteQueryPlan(ctx, tx, store.QueryPlanRow{TenantID: tenantID, InstanceID: instanceID, ClusterID: clusterID, Datname: args.Datname, QueryID: *args.QueryID, PlanHash: payload.PlanHash, Analyzed: args.Analyze, CapturedAt: capturedAt.UTC(), Plan: payload.Plan})
+		// A plan is only meaningful under its database, and the command often
+		// names none. The agent reports the database it ran in, which is the one
+		// to file under. An agent that predates that report sends no name, and
+		// its plan is filed under the empty name, as plans were before the
+		// report existed. A database filter does not find such a row, but the
+		// unfiltered history does, so the plan is kept rather than dropped.
+		datname := args.Datname
+		if datname == "" {
+			datname = payload.Datname
+		}
+		return store.WriteQueryPlan(ctx, tx, store.QueryPlanRow{TenantID: tenantID, InstanceID: instanceID, ClusterID: clusterID, Datname: datname, QueryID: *args.QueryID, PlanHash: payload.PlanHash, Analyzed: args.Analyze, CapturedAt: capturedAt.UTC(), Plan: payload.Plan})
 	case command.KindPgstattuple:
 		var payload struct {
 			Datname      string `json:"datname"`
@@ -473,6 +574,8 @@ func persistCommandArtifact(ctx context.Context, tx pgx.Tx, tenantID string, ins
 		if datname == "" {
 			datname = payload.Datname
 		}
+		// The agent measures ordinary tables only (see PgstattupleExecutor), so the
+		// kind is always table.
 		return store.WriteBloat(ctx, tx, []store.BloatRow{{TS: capturedAt.UTC(), TenantID: tenantID, ClusterID: clusterID, InstanceID: instanceID, Datname: datname, Schemaname: args.Schema, Relname: args.Relation, ObjectKind: "table", Method: "pgstattuple", RealBytes: &payload.TableLen, ExpectedBytes: &expected, BloatBytes: &bloat, BloatRatio: &ratio}})
 	default:
 		return nil

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
@@ -19,21 +20,26 @@ import (
 
 // guardFixture is a schema in the postgres database with the objects the
 // EXPLAIN guard must see through: a plpgsql function that takes a session
-// advisory lock, a view that takes one, and IMMUTABLE functions the planner
-// folds — one that takes a lock, one that reports the role it runs as.
+// advisory lock, and a view that takes one. Its functions are VOLATILE, so
+// the planner never runs them; planFixture adds the ones it does run.
 const guardFixture = `
 DROP SCHEMA IF EXISTS pglens_guard CASCADE;
 CREATE SCHEMA pglens_guard;
 CREATE TABLE pglens_guard.t (a int, b text);
 INSERT INTO pglens_guard.t VALUES (1, 'x'), (2, 'y');
 GRANT USAGE ON SCHEMA pglens_guard TO PUBLIC;
-CREATE FUNCTION pglens_guard.evil() RETURNS int LANGUAGE plpgsql STABLE
+CREATE FUNCTION pglens_guard.evil() RETURNS int LANGUAGE plpgsql
 	AS $$ BEGIN PERFORM pg_advisory_lock(4242); RETURN 1; END $$;
 CREATE VIEW pglens_guard.locker AS SELECT pg_try_advisory_lock(4243) AS locked FROM pglens_guard.t;
+`
+
+// planFixture is an IMMUTABLE function with an effect. PostgreSQL folds a call
+// to it while planning, before any plan can be inspected, so the database that
+// defines it refuses EXPLAIN altogether.
+const planFixture = `
 CREATE FUNCTION pglens_guard.lock_at_plan_time() RETURNS int LANGUAGE plpgsql IMMUTABLE
 	AS $$ BEGIN PERFORM pg_advisory_lock(4244); RETURN 1; END $$;
-CREATE FUNCTION pglens_guard.whoami() RETURNS text LANGUAGE plpgsql IMMUTABLE
-	AS $$ BEGIN RETURN current_user; END $$;
+CREATE VIEW pglens_guard.plan_locker AS SELECT pglens_guard.lock_at_plan_time() AS locked;
 `
 
 // registerStatements runs each statement once as the superuser so that
@@ -137,54 +143,78 @@ func TestINTCMD020_ExplainAnalyzeGuard(t *testing.T) {
 	})
 }
 
-// TestINTCMD021_ExplainSessionIsDroppedAndDiscarded proves the two defences
-// that do not depend on reading a plan. Planning folds an IMMUTABLE function
-// before anything can inspect it: under tier 2 it runs as pg_read_all_data,
-// without the signal privilege, and the session advisory lock it takes ends
-// with the connection the command used instead of staying in the agent's
-// pool.
-func TestINTCMD021_ExplainSessionIsDroppedAndDiscarded(t *testing.T) {
+// TestINTCMD021_ExplainRefusesFunctionsThePlannerRuns proves that EXPLAIN,
+// plan-only or ANALYZE, is refused in a database that defines an IMMUTABLE
+// function with an effect, when the statement calls it directly and when a
+// view does. The lock it would take is not taken. The two defences that do not
+// depend on the catalog are proved on their own: a tier 2 session plans as
+// pg_read_all_data, and a session the command used is closed, not pooled.
+func TestINTCMD021_ExplainRefusesFunctionsThePlannerRuns(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
 		pg.Lock(t)
 		ctx := context.Background()
 		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
 		_, err := admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
 		require.NoError(t, err)
-		_, err = admin.Exec(ctx, guardFixture)
+		_, err = admin.Exec(ctx, guardFixture+planFixture)
 		require.NoError(t, err)
 		t.Cleanup(func() { _, _ = admin.Exec(context.Background(), "DROP SCHEMA IF EXISTS pglens_guard CASCADE") })
 
 		const (
-			whoami = "SELECT pglens_guard.whoami()"
-			locks  = "SELECT pglens_guard.lock_at_plan_time()"
+			direct = "SELECT pglens_guard.lock_at_plan_time()"
+			viewed = "SELECT * FROM pglens_guard.plan_locker"
 		)
-		ids := registerStatements(t, pg, whoami, locks)
+		ids := registerStatements(t, pg, direct, viewed)
 		requireNoAdvisoryLocks(t, admin)
 
-		// Tier 2 plans without its signal privilege; tier 1 has none to
-		// drop and keeps its role.
-		result, err := explainAs(t, pg, pgtest.RoleT2, ids[whoami], false)
-		require.NoError(t, err)
-		require.Contains(t, string(result), `'pg_read_all_data'::text`)
-		result, err = explainAs(t, pg, pgtest.RoleT1, ids[whoami], false)
-		require.NoError(t, err)
-		require.Contains(t, string(result), `'pglens_t1'::text`)
-
 		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
-			_, err = explainAs(t, pg, role, ids[locks], false)
-			require.NoError(t, err, role.String())
-			requireNoAdvisoryLocks(t, admin)
-
-			_, err = explainAs(t, pg, role, ids[locks], true)
-			requireRefused(t, err, "pglens_guard.lock_at_plan_time()")
-			requireNoAdvisoryLocks(t, admin)
+			for _, statement := range []string{direct, viewed} {
+				for _, analyze := range []bool{false, true} {
+					_, err = explainAs(t, pg, role, ids[statement], analyze)
+					requireRefused(t, err, "the database defines pglens_guard.lock_at_plan_time()")
+					requireNoAdvisoryLocks(t, admin)
+				}
+			}
 		}
+
+		// A tier 2 session holds pg_signal_backend. Planning must not run as
+		// that role, so the executor drops to pg_read_all_data first.
+		for role, want := range map[pgtest.Role]string{pgtest.RoleT1: "pglens_t1", pgtest.RoleT2: "pg_read_all_data"} {
+			mgr, err := NewManager(ctx, "explain-guard-session-"+role.String(), pg.DSN("postgres", role), DefaultConnOptions(), clock.System())
+			require.NoError(t, err)
+			conn, err := mgr.ForDatabase(ctx, "postgres")
+			require.NoError(t, err)
+			_, err = conn.Exec(ctx, "BEGIN READ ONLY")
+			require.NoError(t, err)
+			require.NoError(t, dropExplainPrivileges(ctx, conn, pg.Major, false))
+			var user string
+			require.NoError(t, conn.QueryRow(ctx, "SELECT current_user").Scan(&user))
+			require.Equal(t, want, user, role.String())
+			_, err = conn.Exec(ctx, "ROLLBACK")
+			require.NoError(t, err)
+			conn.Release()
+			mgr.Close()
+		}
+
+		// The session a command used ends with it: an advisory lock taken on
+		// it is gone once discardConn has closed the session.
+		mgr, err := NewManager(ctx, "explain-guard-discard", pg.DSN("postgres", pgtest.RoleT1), DefaultConnOptions(), clock.System())
+		require.NoError(t, err)
+		defer mgr.Close()
+		conn, err := mgr.ForDatabase(ctx, "postgres")
+		require.NoError(t, err)
+		_, err = conn.Exec(ctx, "SELECT pg_advisory_lock(4246)")
+		require.NoError(t, err)
+		discardConn(ctx, conn)
+		requireNoAdvisoryLocks(t, admin)
 	})
 }
 
 // TestINTCMD022_ExplainAnalyzeRefusesHiddenCalls: an operator backed by a
 // user-defined function can run without appearing in a plan (CASE x WHEN y
-// compares with it), so its presence in the database closes ANALYZE there.
+// compares with it), so ANALYZE refuses a statement that reaches one. The
+// function is VOLATILE, so the planner does not run it and the refusal is the
+// hidden-call check's.
 func TestINTCMD022_ExplainAnalyzeRefusesHiddenCalls(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
 		pg.Lock(t)
@@ -193,7 +223,7 @@ func TestINTCMD022_ExplainAnalyzeRefusesHiddenCalls(t *testing.T) {
 		_, err := admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
 		require.NoError(t, err)
 		_, err = admin.Exec(ctx, guardFixture+`
-CREATE FUNCTION pglens_guard.eq(int, int) RETURNS bool LANGUAGE plpgsql IMMUTABLE
+CREATE FUNCTION pglens_guard.eq(int, int) RETURNS bool LANGUAGE plpgsql
 	AS $$ BEGIN PERFORM pg_advisory_lock(4245); RETURN $1 = $2; END $$;
 CREATE OPERATOR pglens_guard.=== (LEFTARG = int, RIGHTARG = int, FUNCTION = pglens_guard.eq);`)
 		require.NoError(t, err)
@@ -222,6 +252,476 @@ func TestINTCMD023_ExplainGuardDenyListExists(t *testing.T) {
 			require.NoError(t, admin.QueryRow(context.Background(),
 				"SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = $1 AND pronamespace = 'pg_catalog'::regnamespace)", name).Scan(&exists))
 			require.True(t, exists, name)
+		}
+	})
+}
+
+// victimsRunning counts the sessions the view-based tests end, while they run.
+func victimsRunning(t *testing.T, admin *pgxpool.Pool) int {
+	t.Helper()
+	var n int
+	require.NoError(t, admin.QueryRow(context.Background(),
+		"SELECT count(*) FROM pg_stat_activity WHERE application_name = 'pglens-guard-victim' AND state = 'active'").Scan(&n))
+	return n
+}
+
+// startVictim opens a session of the monitoring role that sleeps under the
+// name the view-based tests look for. The session is ended when the test
+// finishes, so the goroutine that runs its sleep does not outlive the test.
+func startVictim(t *testing.T, pg *pgtest.PG) {
+	t.Helper()
+	cfg, err := pgx.ParseConfig(pg.DSN("postgres", pgtest.RoleT1))
+	require.NoError(t, err)
+	cfg.RuntimeParams["application_name"] = "pglens-guard-victim"
+	conn, err := pgx.ConnectConfig(context.Background(), cfg)
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = conn.Exec(ctx, "SELECT pg_sleep(30)")
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+		_ = conn.Close(context.Background())
+	})
+}
+
+// listenFor listens on channel as the superuser and returns a function that
+// reports how many notifications have arrived. Each call runs a statement,
+// which is what lets the driver deliver the ones waiting.
+func listenFor(t *testing.T, pg *pgtest.PG, channel string) func() int {
+	t.Helper()
+	ctx := context.Background()
+	received := make(chan struct{}, 64)
+	cfg, err := pgx.ParseConfig(pg.DSN("postgres", pgtest.RoleSuperuser))
+	require.NoError(t, err)
+	cfg.OnNotification = func(*pgconn.PgConn, *pgconn.Notification) { received <- struct{}{} }
+	conn, err := pgx.ConnectConfig(ctx, cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	_, err = conn.Exec(ctx, "LISTEN "+pgx.Identifier{channel}.Sanitize())
+	require.NoError(t, err)
+	return func() int {
+		_, err := conn.Exec(ctx, "SELECT 1")
+		require.NoError(t, err)
+		return len(received)
+	}
+}
+
+// TestINTCMD024_ExplainAnalyzeRefusesEffectsBehindViews: effects a read-only
+// transaction does not stop, reached through a view, so that the statement
+// names no function. ANALYZE refuses each of them for tier 1 and tier 2, and
+// none of them happens. Registering a statement runs it as the superuser, so
+// each case also shows that the effect exists in this build.
+func TestINTCMD024_ExplainAnalyzeRefusesEffectsBehindViews(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		_, err := admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, guardFixture)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = admin.Exec(context.Background(), "DROP SCHEMA IF EXISTS pglens_guard CASCADE")
+			_, _ = admin.Exec(context.Background(), "DROP EXTENSION IF EXISTS dblink")
+		})
+
+		// Tier 1 may end its own sessions and tier 2 may end this role's
+		// sessions as foreign ones. The victims start after the statement is
+		// registered, which would otherwise end them.
+		_, err = admin.Exec(ctx, `CREATE VIEW pglens_guard.v_kill AS
+	SELECT pg_terminate_backend(pid) AS killed FROM pg_stat_activity WHERE application_name = 'pglens-guard-victim'`)
+		require.NoError(t, err)
+		const kill = "SELECT * FROM pglens_guard.v_kill"
+		killID := registerStatements(t, pg, kill)[kill]
+		startVictim(t, pg)
+		startVictim(t, pg)
+		require.Eventually(t, func() bool { return victimsRunning(t, admin) == 2 }, 5*time.Second, 100*time.Millisecond)
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			_, err = explainAs(t, pg, role, killID, true)
+			requireRefused(t, err, "pg_terminate_backend()")
+			require.Equal(t, 2, victimsRunning(t, admin), role.String())
+		}
+		// Plan-only EXPLAIN plans the view without calling its volatile function.
+		_, err = explainAs(t, pg, pgtest.RoleT1, killID, false)
+		require.NoError(t, err)
+		require.Equal(t, 2, victimsRunning(t, admin))
+
+		// pg_notify returns void, so the view counts its calls. It reaches the
+		// listener only when it is called.
+		notifications := listenFor(t, pg, "pglens_guard")
+		_, err = admin.Exec(ctx, "CREATE VIEW pglens_guard.v_notify AS SELECT count(*) AS notified FROM (SELECT pg_notify('pglens_guard', 'explain')) AS s")
+		require.NoError(t, err)
+		const notify = "SELECT * FROM pglens_guard.v_notify"
+		notifyID := registerStatements(t, pg, notify)[notify]
+		require.Equal(t, 1, notifications())
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			_, err = explainAs(t, pg, role, notifyID, true)
+			requireRefused(t, err, "pg_notify()")
+			require.Equal(t, 1, notifications(), role.String())
+		}
+
+		// Statistics reset. pg_stat_reset is superuser-only, so the monitoring
+		// roles cannot even plan it: the refusal names it either way, and the
+		// reset time shows that no reset happened.
+		statsReset := func() string {
+			var at string
+			require.NoError(t, admin.QueryRow(ctx, "SELECT COALESCE(stats_reset::text, '') FROM pg_stat_database WHERE datname = current_database()").Scan(&at))
+			return at
+		}
+		_, err = admin.Exec(ctx, "CREATE VIEW pglens_guard.v_reset AS SELECT count(*) AS reset FROM (SELECT pg_stat_reset()) AS s")
+		require.NoError(t, err)
+		const reset = "SELECT * FROM pglens_guard.v_reset"
+		before := statsReset()
+		resetID := registerStatements(t, pg, reset)[reset]
+		require.NotEqual(t, before, statsReset())
+		before = statsReset()
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			_, err = explainAs(t, pg, role, resetID, true)
+			requireRefused(t, err, "pg_stat_reset")
+			require.Equal(t, before, statsReset(), role.String())
+		}
+
+		// The effect is a WAL message that a read-only transaction cannot roll
+		// back. The cluster writes WAL of its own (running-transaction records,
+		// checkpoints) while the test runs, so an insert-LSN delta cannot tell
+		// the refused statement from that. pg_walinspect reads the records
+		// between two LSNs, and the test counts only the messages with the
+		// guard's prefix. pg_walinspect reads only flushed WAL, and under
+		// synchronous_commit=off the flush of a non-transactional message can
+		// wait for the WAL writer. A mark therefore commits a transactional
+		// message with synchronous_commit on: that commit flushes all the WAL
+		// before it, and the insert LSN read first lies before the commit.
+		_, err = admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_walinspect")
+		require.NoError(t, err)
+		t.Cleanup(func() { _, _ = admin.Exec(context.Background(), "DROP EXTENSION IF EXISTS pg_walinspect") })
+		walMark := func() string {
+			var lsn string
+			require.NoError(t, admin.QueryRow(ctx, "SELECT pg_catalog.pg_current_wal_insert_lsn()::text").Scan(&lsn))
+			tx, err := admin.Begin(ctx)
+			require.NoError(t, err)
+			_, err = tx.Exec(ctx, "SET LOCAL synchronous_commit = on")
+			require.NoError(t, err)
+			_, err = tx.Exec(ctx, "SELECT pg_catalog.pg_logical_emit_message(true, 'pglens-mark', '')")
+			require.NoError(t, err)
+			require.NoError(t, tx.Commit(ctx))
+			return lsn
+		}
+		// guardMessages counts the messages with the guard's prefix written
+		// after from, and returns the mark that ends the count.
+		guardMessages := func(from string) (int, string) {
+			to := walMark()
+			var n int
+			require.NoError(t, admin.QueryRow(ctx, `SELECT pg_catalog.count(*) FROM pg_get_wal_records_info($1::pg_catalog.pg_lsn, $2::pg_catalog.pg_lsn)
+				WHERE resource_manager = 'LogicalMessage' AND description LIKE '%prefix "pglens-guard";%'`, from, to).Scan(&n))
+			return n, to
+		}
+		_, err = admin.Exec(ctx, "CREATE VIEW pglens_guard.v_message AS SELECT pg_logical_emit_message(false, 'pglens-guard', 'x') AS emitted")
+		require.NoError(t, err)
+		const message = "SELECT * FROM pglens_guard.v_message"
+		mark := walMark()
+		messageID := registerStatements(t, pg, message)[message]
+		// The positive control: the registration wrote the message.
+		var written int
+		written, mark = guardMessages(mark)
+		require.Equal(t, 1, written)
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			_, err = explainAs(t, pg, role, messageID, true)
+			requireRefused(t, err, "pg_logical_emit_message()")
+			var n int
+			n, mark = guardMessages(mark)
+			require.Equal(t, 0, n, role.String())
+		}
+
+		// dblink opens its own session, so the write it makes is not undone by
+		// the read-only transaction. The registration inserts a row through it.
+		_, err = admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS dblink")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, `CREATE VIEW pglens_guard.v_remote AS
+	SELECT dblink_exec('host=127.0.0.1 port=5432 dbname=postgres user=postgres password=test',
+		'INSERT INTO pglens_guard.t VALUES (3, ''remote'')') AS remote_result`)
+		require.NoError(t, err)
+		const remote = "SELECT * FROM pglens_guard.v_remote"
+		remoteID := registerStatements(t, pg, remote)[remote]
+		rows := func() int {
+			var n int
+			require.NoError(t, admin.QueryRow(ctx, "SELECT count(*) FROM pglens_guard.t").Scan(&n))
+			return n
+		}
+		require.Equal(t, 3, rows())
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			_, err = explainAs(t, pg, role, remoteID, true)
+			requireRefused(t, err, "dblink_exec()")
+			require.Equal(t, 3, rows(), role.String())
+		}
+		_, err = explainAs(t, pg, pgtest.RoleT1, remoteID, false)
+		require.NoError(t, err)
+		require.Equal(t, 3, rows())
+	})
+}
+
+// TestINTCMD025_ExplainAnalyzeRefusesForeignScans proves that EXPLAIN ANALYZE
+// refuses a foreign scan. postgres_fdw opens its own session on the remote
+// side, which a read-only transaction does not cover, so the view reads a
+// remote view that calls a VOLATILE function which writes.
+func TestINTCMD025_ExplainAnalyzeRefusesForeignScans(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		_, err := admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, guardFixture)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = admin.Exec(context.Background(), "DROP SCHEMA IF EXISTS pglens_guard CASCADE")
+			_, _ = admin.Exec(context.Background(), "DROP SERVER IF EXISTS pglens_loopback CASCADE")
+			_, _ = admin.Exec(context.Background(), "DROP EXTENSION IF EXISTS postgres_fdw")
+		})
+
+		// The loopback server is this database, reached over TCP as the
+		// superuser, the same way the dblink case reaches it.
+		_, err = admin.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS postgres_fdw;
+CREATE SERVER pglens_loopback FOREIGN DATA WRAPPER postgres_fdw OPTIONS (host '127.0.0.1', port '5432', dbname 'postgres');
+CREATE USER MAPPING FOR PUBLIC SERVER pglens_loopback OPTIONS (user 'postgres', password 'test');
+GRANT USAGE ON FOREIGN SERVER pglens_loopback TO PUBLIC;
+CREATE FUNCTION pglens_guard.write_remote() RETURNS int LANGUAGE plpgsql VOLATILE
+	AS $$ BEGIN INSERT INTO pglens_guard.t VALUES (4, 'remote'); RETURN 1; END $$;
+CREATE VIEW pglens_guard.remote_writer AS SELECT count(*) AS n FROM (SELECT pglens_guard.write_remote()) AS s;
+CREATE FOREIGN TABLE pglens_guard.f_writer (n bigint) SERVER pglens_loopback OPTIONS (schema_name 'pglens_guard', table_name 'remote_writer');
+CREATE VIEW pglens_guard.v_fdw AS SELECT n FROM pglens_guard.f_writer`)
+		require.NoError(t, err)
+		rows := func() int {
+			var n int
+			require.NoError(t, admin.QueryRow(ctx, "SELECT count(*) FROM pglens_guard.t").Scan(&n))
+			return n
+		}
+
+		// Registration runs the view once as the superuser, so the remote
+		// write happens. That shows the path is live: a refusal below means
+		// that nothing ran.
+		const fdw = "SELECT * FROM pglens_guard.v_fdw"
+		before := rows()
+		fdwID := registerStatements(t, pg, fdw)[fdw]
+		require.Equal(t, before+1, rows())
+		afterRegistration := rows()
+
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			_, err = explainAs(t, pg, role, fdwID, true)
+			requireRefused(t, err, "Foreign Scan")
+			require.Equal(t, afterRegistration, rows(), role.String())
+		}
+		// Plan-only EXPLAIN plans the foreign scan without running it.
+		_, err = explainAs(t, pg, pgtest.RoleT1, fdwID, false)
+		require.NoError(t, err)
+		require.Equal(t, afterRegistration, rows())
+	})
+}
+
+// TestINTCMD032_ExplainRefusesRemoteEstimates proves that EXPLAIN, plan-only or
+// ANALYZE, is refused in a database with a foreign table that estimates
+// remotely. With use_remote_estimate on, postgres_fdw sends the remote server an
+// EXPLAIN while the local planner plans the scan, and the remote planner folds
+// and runs the functions of that server. The statement below names no foreign
+// table, so the refusal is the database's, as for the planned functions. The
+// same database plans once the option is off.
+func TestINTCMD032_ExplainRefusesRemoteEstimates(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		_, err := admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, guardFixture)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = admin.Exec(context.Background(), "DROP SCHEMA IF EXISTS pglens_guard CASCADE")
+			_, _ = admin.Exec(context.Background(), "DROP SERVER IF EXISTS pglens_estimate CASCADE")
+			_, _ = admin.Exec(context.Background(), "DROP EXTENSION IF EXISTS postgres_fdw")
+		})
+		_, err = admin.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS postgres_fdw;
+CREATE SERVER pglens_estimate FOREIGN DATA WRAPPER postgres_fdw OPTIONS (host '127.0.0.1', port '5432', dbname 'postgres', use_remote_estimate 'true');
+CREATE USER MAPPING FOR PUBLIC SERVER pglens_estimate OPTIONS (user 'postgres', password 'test');
+GRANT USAGE ON FOREIGN SERVER pglens_estimate TO PUBLIC;
+CREATE FOREIGN TABLE pglens_guard.f_estimate (a int, b text) SERVER pglens_estimate OPTIONS (schema_name 'pglens_guard', table_name 't');`)
+		require.NoError(t, err)
+
+		const readsTable = "SELECT count(*) FROM pglens_guard.t"
+		ids := registerStatements(t, pg, readsTable)
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			for _, analyze := range []bool{false, true} {
+				_, err = explainAs(t, pg, role, ids[readsTable], analyze)
+				requireRefused(t, err, "use_remote_estimate")
+			}
+		}
+
+		// The option is read as false when it is set to false, so the same
+		// database plans again.
+		_, err = admin.Exec(ctx, "ALTER SERVER pglens_estimate OPTIONS (SET use_remote_estimate 'false')")
+		require.NoError(t, err)
+		_, err = explainAs(t, pg, pgtest.RoleT1, ids[readsTable], false)
+		require.NoError(t, err)
+	})
+}
+
+// TestINTCMD034_ExplainRefusesFunctionsAnOwnerAddsToAnExtension: the owner of a
+// database may install a trusted extension such as pg_trgm, and then add
+// objects of their own to it. Those objects became extension members, which the
+// guard skipped as side-effect-free: the planner ran an IMMUTABLE function of
+// the owner's, and ANALYZE ran a VOLATILE function of the owner's, both when a
+// statement named it and when it was reached through an operator added to the
+// extension. Only an extension member a superuser owns counts as the
+// extension's.
+func TestINTCMD034_ExplainRefusesFunctionsAnOwnerAddsToAnExtension(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		_, err := admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, guardFixture)
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, `CREATE ROLE pglens_guard_owner NOLOGIN;
+GRANT CREATE ON DATABASE postgres TO pglens_guard_owner;
+GRANT CREATE ON SCHEMA public TO pglens_guard_owner;`)
+		require.NoError(t, err)
+		// One statement per Exec: a multi-statement string runs as one
+		// transaction, and a DROP ROLE refused for the grants still held would
+		// roll back the drops before it.
+		t.Cleanup(func() {
+			for _, statement := range []string{
+				"DROP EXTENSION IF EXISTS pg_trgm CASCADE",
+				"DROP FUNCTION IF EXISTS public.pglens_guard_op(integer, integer)",
+				"REVOKE CREATE ON SCHEMA public FROM pglens_guard_owner",
+				"REVOKE CREATE ON DATABASE postgres FROM pglens_guard_owner",
+				"DROP ROLE IF EXISTS pglens_guard_owner",
+			} {
+				_, _ = admin.Exec(context.Background(), statement)
+			}
+		})
+
+		// asOwner runs sql as the database owner on its own session, so the
+		// extension and the objects are owned by that role, as they would be
+		// for a user who installed pg_trgm in their own database.
+		asOwner := func(sql string) {
+			conn, err := pgx.Connect(ctx, pg.DSN("postgres", pgtest.RoleSuperuser))
+			require.NoError(t, err)
+			defer func() { _ = conn.Close(ctx) }()
+			_, err = conn.Exec(ctx, "SET ROLE pglens_guard_owner")
+			require.NoError(t, err)
+			_, err = conn.Exec(ctx, sql)
+			require.NoError(t, err, sql)
+		}
+
+		// Installing pg_trgm alone changes nothing: its own functions are
+		// superuser-owned and still pass.
+		asOwner("CREATE EXTENSION pg_trgm")
+		const similar = "SELECT similarity(t.b, t.b) FROM pglens_guard.t"
+		ids := registerStatements(t, pg, similar)
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			for _, analyze := range []bool{false, true} {
+				_, err = explainAs(t, pg, role, ids[similar], analyze)
+				require.NoError(t, err, role.String())
+			}
+		}
+
+		// A VOLATILE function the owner adds to the extension, which the
+		// statement names directly. It comes before the operator below: the
+		// hidden-call lookup covers the whole database, so once an operator
+		// that calls a refused function exists, it would refuse every ANALYZE
+		// here, whatever the statement names. The statement-level check reads
+		// the extension membership through functionLookup, so it must refuse
+		// the function before anything is planned.
+		asOwner(`CREATE FUNCTION public.pglens_guard_vol() RETURNS boolean LANGUAGE plpgsql VOLATILE
+	AS $$ BEGIN PERFORM pg_advisory_lock(4251); RETURN true; END $$;
+ALTER EXTENSION pg_trgm ADD FUNCTION public.pglens_guard_vol();`)
+		const named = "SELECT public.pglens_guard_vol()"
+		ids = registerStatements(t, pg, named)
+		requireNoAdvisoryLocks(t, admin)
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			_, err = explainAs(t, pg, role, ids[named], true)
+			requireRefused(t, err, "the statement calls public.pglens_guard_vol()")
+			requireNoAdvisoryLocks(t, admin)
+		}
+
+		// A VOLATILE operator function, added to the extension with its
+		// operator and as a member of it, as an owner adds the function an
+		// operator calls. Plain EXPLAIN does not run it; ANALYZE must refuse
+		// it, as it refuses the same operator outside the extension. The
+		// function must be a member for the owner rule to decide anything: a
+		// function outside every extension is refused whoever owns it.
+		asOwner(`CREATE FUNCTION public.pglens_guard_op(integer, integer) RETURNS boolean LANGUAGE plpgsql VOLATILE
+	AS $$ BEGIN PERFORM pg_advisory_lock(4248); RETURN true; END $$;
+CREATE OPERATOR public.#!# (LEFTARG = integer, RIGHTARG = integer, PROCEDURE = public.pglens_guard_op);
+ALTER EXTENSION pg_trgm ADD OPERATOR public.#!# (integer, integer);
+ALTER EXTENSION pg_trgm ADD FUNCTION public.pglens_guard_op(integer, integer);`)
+		const viaOperator = "SELECT t.a #!# t.a FROM pglens_guard.t"
+		ids = registerStatements(t, pg, viaOperator)
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			_, err = explainAs(t, pg, role, ids[viaOperator], true)
+			requireRefused(t, err, "calls public.pglens_guard_op()")
+			requireNoAdvisoryLocks(t, admin)
+		}
+
+		// An IMMUTABLE function the owner adds to the extension is run while
+		// the statement is planned, so the database refuses EXPLAIN, plain or
+		// ANALYZE, as it refuses one outside any extension.
+		asOwner(`CREATE FUNCTION public.pglens_guard_plan() RETURNS int LANGUAGE plpgsql IMMUTABLE
+	AS $$ BEGIN PERFORM pg_advisory_lock(4249); RETURN 1; END $$;
+ALTER EXTENSION pg_trgm ADD FUNCTION public.pglens_guard_plan();`)
+		const planned = "SELECT public.pglens_guard_plan()"
+		ids = registerStatements(t, pg, planned)
+		requireNoAdvisoryLocks(t, admin)
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			for _, analyze := range []bool{false, true} {
+				_, err = explainAs(t, pg, role, ids[planned], analyze)
+				requireRefused(t, err, "the database defines public.pglens_guard_plan()")
+				requireNoAdvisoryLocks(t, admin)
+			}
+		}
+	})
+}
+
+// TestINTCMD035_ExplainAdmitsTheStockContribExtensions: the extensions in
+// sideEffectFreeExtensions ship with PostgreSQL. Their operators, casts and
+// aggregates are checked by the hidden-call lookup, which covers the whole
+// database and not only the statement, so one of them reaching a function the
+// guard refuses would refuse ANALYZE everywhere. A database that installs
+// them must still be analyzed and planned.
+func TestINTCMD035_ExplainAdmitsTheStockContribExtensions(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		_, err := admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, guardFixture)
+		require.NoError(t, err)
+
+		// postgis is left out: the stock image does not ship it.
+		contrib := []string{"btree_gin", "btree_gist", "citext", "cube", "earthdistance", "fuzzystrmatch",
+			"hstore", "intarray", "isn", "ltree", "pg_trgm", "pgcrypto", "seg", "unaccent", "uuid-ossp"}
+		t.Cleanup(func() {
+			for _, name := range contrib {
+				_, _ = admin.Exec(context.Background(), "DROP EXTENSION IF EXISTS "+pgx.Identifier{name}.Sanitize()+" CASCADE")
+			}
+			_, _ = admin.Exec(context.Background(), "DROP SCHEMA IF EXISTS pglens_guard CASCADE")
+		})
+		for _, name := range contrib {
+			_, err = admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS "+pgx.Identifier{name}.Sanitize()+" CASCADE")
+			require.NoError(t, err, name)
+		}
+
+		const trivial = "SELECT count(*) FROM pglens_guard.t"
+		ids := registerStatements(t, pg, trivial)
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			for _, analyze := range []bool{false, true} {
+				_, err = explainAs(t, pg, role, ids[trivial], analyze)
+				require.NoError(t, err, role.String())
+			}
 		}
 	})
 }
