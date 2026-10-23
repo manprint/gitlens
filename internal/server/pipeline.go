@@ -15,6 +15,7 @@ import (
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/delta"
 	"github.com/manprint/pglens/internal/pgtype"
+	"github.com/manprint/pglens/internal/redact"
 	"github.com/manprint/pglens/internal/store"
 	"github.com/manprint/pglens/internal/topology"
 	"github.com/manprint/pglens/internal/wire"
@@ -540,6 +541,12 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 					pgMajor = int(pgtype.PGVersion(inst.PGVersion).Major())
 				}
 				datname := r.Database
+				// An agent built before the redaction fix ships the text of a statement
+				// that may hold a credential. Such a text is stored as withheld, since
+				// the first text stored for a queryid is the one kept.
+				if redact.MayHoldCredential(text) {
+					text = redact.Withheld
+				}
 				instQueryTexts = append(instQueryTexts, store.QueryTextRow{
 					TenantID:  tenantID,
 					ClusterID: cidDB,

@@ -647,3 +647,34 @@ func TestPipeline_INT_PIPE_005_SkippedResultCountsNoCheck(t *testing.T) {
 	require.Equal(t, okBefore, pglensCheckOKTotal.Get(skipped), "a skipped result is not a success")
 	require.Equal(t, errBefore, pglensCheckErrorTotal.Get(skipped), "a skipped result is not an error")
 }
+
+// TestPipeline_INT_PIPE_009_QueryTextWithACredentialSignIsWithheld: an agent
+// built before the redaction fix ships a statement's text as it was typed. The
+// server stores a text with a sign of a credential as withheld, and a text
+// without one as it is.
+func TestPipeline_INT_PIPE_009_QueryTextWithACredentialSignIsWithheld(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	p := NewPipeline(pool, clock.NewFake(time.Now()))
+	instID := uuid.NewString()
+	cid := pgtype.ClusterID(99998).String()
+	texts := map[string]string{"41": "ALTER ROLE tmp PASSWORD 'hunter2'", "42": "SELECT 1"}
+	result := wire.Result{Check: "stat_statements", TS: time.Now(), Database: "app", QueryTexts: texts}
+	env := wire.Envelope{Instances: []wire.Instance{{InstanceID: instID, ClusterID: cid, PGVersion: 170000, Results: []wire.Result{result}}}}
+	res, err := p.Process(context.Background(), env)
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Accepted)
+
+	stored := map[int64]string{}
+	rows, err := pool.Query(context.Background(), `SELECT queryid, query_text FROM query_texts WHERE datname='app' ORDER BY queryid`)
+	require.NoError(t, err)
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var text string
+		require.NoError(t, rows.Scan(&id, &text))
+		stored[id] = text
+	}
+	require.NoError(t, rows.Err())
+	require.Equal(t, map[int64]string{41: "[redacted]", 42: "SELECT 1"}, stored)
+}
