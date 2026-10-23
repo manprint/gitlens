@@ -100,7 +100,7 @@ whose tables should be measurable.
 
 ### Scheduled checks
 
-At T0 the agent schedules: `instance_info`, `activity`, `locks`,
+At T0 the agent schedules: `instance_info`, `monitoring_role`, `activity`, `locks`,
 `database_stats`, `settings`, `wal`, `checkpointer`, `archiver`,
 `vacuum_progress`, `replication_slots`, `replication_streaming` on primaries,
 `replication_receiver` on standbys, `table_stats`, `index_stats`, and
@@ -122,6 +122,7 @@ commands, not additional advisor rules. The complete T0 rule set is:
 |------|----------|
 | Query and transactions | `query.slow_mean`, `query.total_time_share`, `query.regression`, `query.temp_bytes_high`, `query.cache_miss_high`, `txn.long_running`, `txn.idle_in_transaction`, `txn.prepared_orphan`, `txn.wraparound_risk`, `txn.high_rollback_ratio` |
 | Relations | `index.unused`, `index.duplicate`, `index.redundant_prefix`, `index.invalid`, `index.bloat_high`, `index.divergence`, `table.dead_tuples_high`, `table.never_autovacuumed`, `table.autoanalyze_stale`, `table.wraparound_risk`, `table.bloat_high`, `table.seq_scan_heavy`, `vacuum.starvation`, `vacuum.disabled` |
+| Security | `security.monitoring_role_can_write`, `security.monitoring_role_read_only_off` |
 | Configuration and connections | `config.work_mem_oversized`, `config.work_mem_low`, `config.shared_buffers_low`, `config.shared_buffers_high`, `config.effective_cache_size_mismatch`, `config.maintenance_work_mem_low`, `config.max_connections_high`, `config.track_io_timing_off`, `config.checkpoints_too_frequent`, `config.wal_keep_size_low`, `config.fsync_off`, `config.full_page_writes_off`, `config.drift`, `conn.saturation`, `conn.idle_share_high` |
 | Archive and backup | `archive.disabled`, `archive.failing`, `archive.stalled`, `backup.no_basebackup_seen`, `backup.no_strategy` |
 

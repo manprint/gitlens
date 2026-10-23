@@ -328,6 +328,8 @@ func missingSnapshotInput(s *Snapshot, need string) bool {
 		return !s.Host.Available
 	case "settings":
 		return s.Settings == nil
+	case monitoringRoleFactKind:
+		return s.Facts[monitoringRoleFactKind] == nil
 	}
 	if strings.HasPrefix(need, "pg_") {
 		_, ok := s.Metrics[need]

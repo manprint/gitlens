@@ -149,6 +149,7 @@ func runCheck(dsn string, identityPath string) {
 
 	// Determine permission tier
 	tier := determinePermTier(ctx, conn)
+	posture, postureErr := check.ReadRolePosture(ctx, conn)
 
 	// Get extensions
 	extensions := getExtensions(ctx, conn)
@@ -181,6 +182,7 @@ func runCheck(dsn string, identityPath string) {
 	fmt.Printf("  role             : %s\n", role)
 	fmt.Printf("  system_identifier: %s\n", systemID)
 	fmt.Printf("  permission tier  : %s\n", formatPermTier(tier))
+	fmt.Printf("  monitoring role  : %s\n", formatRolePosture(posture, postureErr))
 	fmt.Printf("  extensions       : ")
 	extStr := formatExtensions(extensions)
 	if statementsVia != "" {
@@ -234,6 +236,9 @@ func runCheck(dsn string, identityPath string) {
 
 	// Print warnings
 	warnings := getCheckWarnings(identityPath)
+	if postureErr == nil && !strings.EqualFold(posture.ReadOnlyDefault, "on") {
+		warnings = append(warnings, fmt.Sprintf("default_transaction_read_only is %q for role %s: pglens sets it in every session, but the role default is the second safeguard (run deploy/sql/monitoring_user.sql)", posture.ReadOnlyDefault, posture.Role))
+	}
 	if len(warnings) > 0 {
 		fmt.Printf("\nwarnings\n")
 		for _, w := range warnings {
@@ -241,13 +246,28 @@ func runCheck(dsn string, identityPath string) {
 		}
 	}
 
-	// Determine exit code: 0 if all mandatory checks are enabled, 1 otherwise
+	// Determine exit code: 0 if all mandatory checks are enabled and the
+	// role cannot write, 1 otherwise
 	exitCode := 0
 	if mandatoryCount > 0 && mandatoryEnabled < mandatoryCount {
 		exitCode = 1
 	}
+	if postureErr != nil || len(posture.Problems) > 0 {
+		exitCode = 1
+	}
 
 	os.Exit(exitCode)
+}
+
+// formatRolePosture reports whether the role the DSN logs in as could write.
+func formatRolePosture(posture check.RolePosture, err error) string {
+	if err != nil {
+		return fmt.Sprintf("unknown (%v)", err)
+	}
+	if len(posture.Problems) == 0 {
+		return posture.Role + " — read-only"
+	}
+	return fmt.Sprintf("%s — COULD WRITE: %s (run deploy/sql/monitoring_user.sql for the fix)", posture.Role, strings.Join(posture.Problems, "; "))
 }
 
 // determinePermTier queries the database to determine the permission tier.

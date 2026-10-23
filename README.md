@@ -650,6 +650,8 @@ How the rules read the collected data:
 | `archive.stalled` | critical | The last successful archive is older than the allowed interval. |
 | `backup.no_basebackup_seen` | warning | The cluster archives WAL, but no base backup has been seen running in the last seven days. |
 | `backup.no_strategy` | critical | Neither archiving nor a visible base-backup strategy is configured. |
+| `security.monitoring_role_can_write` | critical | The role pglens connects as could write if a session of it left read-only mode: an attribute, a membership or owned objects (the `monitoring_role` check). |
+| `security.monitoring_role_read_only_off` | warning | The role pglens connects as does not default to read-only transactions in the database it connects to. |
 
 ## Running the agent
 
@@ -826,6 +828,7 @@ checks:
   instance_info:    { interval: 60s }        # General instance metadata (mandatory)
   activity:        { interval: 10s, by_application: false } # Session activity
   locks:           { interval: 10s }        # Blocking tree (instance scope, T0)
+  monitoring_role: { interval: 10m }        # What would let the monitoring role write (security.* rules)
   table_stats:     { interval: 5m, top_n: 50 }
   index_stats:     { interval: 5m, top_n: 50 }
   vacuum_progress: { interval: 30s }
@@ -915,6 +918,7 @@ pglens agent check
   role             : primary
   system_identifier: 7688462038932361259
   permission tier  : T0 (pg_monitor)
+  monitoring role  : pglens — read-only
   extensions       : pg_stat_statements=no
   databases        : 1 found, 1 monitored, default selection
 
@@ -929,6 +933,7 @@ checks
   instance_info      enabled
   io                 enabled
   locks              enabled
+  monitoring_role    enabled
   replication_receiver disabled  — role primary not allowed
   replication_slots  enabled
   replication_streaming enabled
@@ -953,6 +958,7 @@ warnings
   - `T1 (pg_monitor + pg_read_all_data)` — enables plan-only `EXPLAIN` and on-demand `pgstattuple` measurement, and lets the bloat estimate see tables whose columns `pg_monitor` alone cannot read; with `allow_explain_analyze`, the agent also accepts `EXPLAIN ANALYZE` (the interface asks for T2)
   - `T2 (pg_monitor + pg_read_all_data + pg_signal_backend)` — enables query cancellation and termination, with `allow_signal`
   - The tier counts direct grants of these roles to the monitoring role only; a grant through an intermediate role is not seen
+- **monitoring role** — `read-only`, or `COULD WRITE:` followed by what would let the role change data if a session of it left read-only mode: an attribute (`SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION`, `BYPASSRLS`), a membership, direct or through another role, in any role but the read-only predefined ones, or objects it owns in any database. pglens never leaves read-only mode, but anyone holding its credentials could. `deploy/sql/monitoring_user.sql` lists the statement that removes each problem. A warning also names a role whose `default_transaction_read_only` is not `on` in this database
 - **extensions** — `pg_stat_statements=yes` is required for the `stat_statements` check. When the DSN's database has no view, the check looks in the monitored databases, as the agent does, and names the one it found (`pg_stat_statements=yes (in database app)`); databases without the view are read through it. `pgstattuple` is checked when a measurement runs, in the database that holds the table
 - **databases** — connectable databases found, how many the agent monitors, and how many are excluded or skipped (`db_budget`). The check does not read the agent configuration, so it applies the default selection: the default excludes (`template0`–`template9`, `rdsadmin`, `azure_*`) and the ten busiest databases by commit count
 
@@ -962,8 +968,8 @@ warnings
 - `database_stats` — per-database counters
 
 **Exit codes:**
-- `0` — all mandatory checks enabled; safe to deploy this target
-- `1` — one or more mandatory checks disabled; fix the permission tier or configuration before deploying
+- `0` — all mandatory checks enabled and the monitoring role read-only; safe to deploy this target
+- `1` — one or more mandatory checks disabled, or the monitoring role could write; fix the permission tier, the role or the configuration before deploying
 
 **Warnings:**
 - The persistent-mount warning indicates that `/var/lib/pglens` is not on a persistent volume. This is the #1 container misconfiguration and causes instance duplication on restart. Always mount the identity directory on a persistent volume (e.g., `docker run -v agent-data:/var/lib/pglens ...` or in compose: `volumes: ["agent-data:/var/lib/pglens"]`).
