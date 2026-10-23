@@ -114,3 +114,49 @@ func TestAlertAPI_INT_ALERTAPI_004_StoredNullLabelsRenderAsObject(t *testing.T) 
 	require.Contains(t, got, "resolved_at")
 	require.Nil(t, got["resolved_at"])
 }
+
+// TestAlertAPI_INT_ALERTAPI_006_RuleEditDoesNotRevertAnother: an edit to one
+// field must not write back the value of another field that a concurrent edit
+// committed while the request waited on the row lock.
+func TestAlertAPI_INT_ALERTAPI_006_RuleEditDoesNotRevertAnother(t *testing.T) {
+	pool := getSharedPool(t)
+	ctx := contextBackground()
+	const rule = "replica.lag_high"
+	var origEnabled bool
+	var origThreshold float64
+	require.NoError(t, pool.QueryRow(ctx, `SELECT enabled, threshold FROM alert_rules WHERE rule_id=$1`, rule).Scan(&origEnabled, &origThreshold))
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `UPDATE alert_rules SET enabled=$1, threshold=$2 WHERE rule_id=$3`, origEnabled, origThreshold, rule)
+	})
+
+	// The first edit holds the row lock until it commits, and disables the rule.
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+	_, err = tx.Exec(ctx, `UPDATE alert_rules SET enabled=false WHERE rule_id=$1`, rule)
+	require.NoError(t, err)
+
+	// The second edit changes only the threshold, and must wait for the first.
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		r := alertRouter(NewAlertAPI(pool, alert.NewPgStore(pool)))
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/api/v1/alert-rules/"+rule, strings.NewReader(`{"threshold":45}`)))
+		done <- w
+	}()
+	require.Eventually(t, func() bool {
+		var waiting int
+		err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE 'UPDATE alert_rules%'`).Scan(&waiting)
+		return err == nil && waiting > 0
+	}, 10*time.Second, 10*time.Millisecond)
+	require.NoError(t, tx.Commit(ctx))
+
+	w := <-done
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), `"enabled":false`)
+	var enabled bool
+	var threshold float64
+	require.NoError(t, pool.QueryRow(ctx, `SELECT enabled, threshold FROM alert_rules WHERE rule_id=$1`, rule).Scan(&enabled, &threshold))
+	require.False(t, enabled, "the first edit's enabled=false must survive the second edit")
+	require.Equal(t, 45.0, threshold)
+}

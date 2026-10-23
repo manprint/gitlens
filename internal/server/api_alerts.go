@@ -233,33 +233,22 @@ func (a *AlertAPI) updateRule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 503, "alert store unavailable", "")
 		return
 	}
+	// One statement reads and writes the row. COALESCE keeps every column the
+	// body left out, and a request that waits on the row lock re-evaluates the
+	// SET list against the version the other edit committed. Reading the row
+	// first and writing every column back let a concurrent edit to another
+	// field revert.
 	var enabled bool
 	var severity alert.Severity
-	var threshold float64
+	var threshold *float64
 	var seconds int
-	row := a.pool.QueryRow(r.Context(), `SELECT enabled,severity,threshold,for_seconds FROM alert_rules WHERE rule_id=$1`, id)
+	row := a.pool.QueryRow(r.Context(), `UPDATE alert_rules SET enabled=COALESCE($1::boolean,enabled),severity=COALESCE($2::text,severity),threshold=COALESCE($3::double precision,threshold),for_seconds=COALESCE($4::integer,for_seconds),updated_at=now() WHERE rule_id=$5 RETURNING enabled,severity,threshold,for_seconds`, in.Enabled, in.Severity, in.Threshold, in.ForSeconds, id)
 	if err := row.Scan(&enabled, &severity, &threshold, &seconds); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, 404, "rule not found", id)
 		} else {
-			writeError(w, 500, "rule query failed", err.Error())
+			writeError(w, 500, "rule update failed", err.Error())
 		}
-		return
-	}
-	if in.Enabled != nil {
-		enabled = *in.Enabled
-	}
-	if in.Severity != nil {
-		severity = *in.Severity
-	}
-	if in.Threshold != nil {
-		threshold = *in.Threshold
-	}
-	if in.ForSeconds != nil {
-		seconds = *in.ForSeconds
-	}
-	if _, err := a.pool.Exec(r.Context(), `UPDATE alert_rules SET enabled=$1,severity=$2,threshold=$3,for_seconds=$4,updated_at=now() WHERE rule_id=$5`, enabled, severity, threshold, seconds, id); err != nil {
-		writeError(w, 500, "rule update failed", err.Error())
 		return
 	}
 	writeJSON(w, 200, map[string]any{"rule_id": id, "enabled": enabled, "severity": severity, "threshold": threshold, "for_seconds": seconds})
