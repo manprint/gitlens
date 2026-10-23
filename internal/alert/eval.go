@@ -153,10 +153,12 @@ func (e *Evaluator) Unsampled(include func(ruleID string) bool, cutoff time.Time
 	return out
 }
 
-// Forget drops evaluator state for pending episodes that started before the
-// cutoff — conditions that went true, never held long enough to fire, and
-// stopped being sampled (an instance that disappeared, a rule that was
-// disabled), which would otherwise pin their key in memory forever.
+// Forget drops evaluator state for pending episodes that were last sampled
+// before the cutoff — conditions that went true, never held long enough to
+// fire, and stopped being sampled (an instance that disappeared, a rule that
+// was disabled), which would otherwise pin their key in memory forever. An
+// episode that is still sampled is kept however long ago it started: its For
+// timer must be able to complete, even when that takes longer than the cutoff.
 //
 // Firing episodes are never forgotten, however old they are. Dropping them
 // was actively harmful: the state machine is the only record that an alert is
@@ -173,7 +175,7 @@ func (e *Evaluator) Forget(before time.Time) int {
 		if s.firing {
 			continue
 		}
-		if s.first.Before(before) {
+		if s.seen.Before(before) {
 			delete(e.states, k)
 			n++
 		}

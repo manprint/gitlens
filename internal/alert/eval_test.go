@@ -224,3 +224,16 @@ func TestEnd_ResolvesAFiringEpisodeAndCancelsAPendingOne(t *testing.T) {
 	require.Nil(t, closed)
 	require.Equal(t, TransitionCancelled, tr)
 }
+
+// TestForget_KeepsAPendingEpisodeThatIsStillSampled — staleness is judged by
+// the last pass that sampled an episode, not by when it started.
+func TestForget_KeepsAPendingEpisodeThatIsStillSampled(t *testing.T) {
+	e := NewEvaluator()
+	r := evalRule()
+	r.For = 3 * time.Hour
+	start := time.Unix(1, 0)
+	e.Step(r, evalSample(start), start)
+	later := start.Add(2 * time.Hour)
+	e.Step(r, evalSample(later), later)
+	require.Equal(t, 0, e.Forget(later.Add(-time.Hour)))
+}

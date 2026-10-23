@@ -495,3 +495,35 @@ func TestTick_PersistFailureIsReportedAndCycleContinues(t *testing.T) {
 	require.ErrorContains(t, err, "persist alert")
 	require.Len(t, notifier.alerts, 1, "a persistence failure must not swallow the notification")
 }
+
+// clockSource observes the rule "custom" on every pass, as a live source does:
+// each sample carries the pass time the engine asked for.
+type clockSource struct {
+	kind  string
+	value float64
+}
+
+func (s clockSource) Kind() string { return s.kind }
+func (s clockSource) Samples(_ context.Context, r Rule, now time.Time) ([]Sample, error) {
+	if r.ID != "custom" {
+		return nil, nil
+	}
+	return []Sample{{Value: s.value, TS: now}}, nil
+}
+
+// TestTick_ALongPendingEpisodeFiresAfterItsFor — a condition that has to hold
+// for longer than an hour must still fire. The pending state used to be
+// forgotten an hour after its first sample while the condition was still
+// being observed, so the For timer restarted every hour and never completed.
+func TestTick_ALongPendingEpisodeFiresAfterItsFor(t *testing.T) {
+	clk := clock.NewFake(time.Unix(100, 0))
+	rule := Rule{ID: "custom", Enabled: true, Severity: SeverityWarning, Scope: ScopeInstance, Metric: "x", Comparator: GT, Threshold: 1, For: 2 * time.Hour, Summary: "x"}
+	store, notifier := &engineStore{rules: []Rule{rule}}, &engineNotifier{}
+	e := NewEngineWithInterval(nil, clk, 30*time.Second, store, notifier, []Source{clockSource{kind: "metric", value: 2}})
+	for i := 0; i < 5*120; i++ {
+		require.NoError(t, e.Tick(context.Background()))
+		clk.Advance(30 * time.Second)
+	}
+	require.Len(t, notifier.alerts, 1)
+	require.Equal(t, StateFiring, notifier.alerts[0].State)
+}
