@@ -67,6 +67,7 @@ func TestPerm_INT_PERM_007_ScriptRoleCannotWrite(t *testing.T) {
 		dropScriptRoles(t, admin)
 		t.Cleanup(func() { dropScriptRoles(t, admin) })
 		t.Cleanup(func() { regrantLargeObjects(t, admin) })
+		t.Cleanup(func() { regrantWALEmitters(t, admin) })
 		_, err := admin.Exec(ctx, `CREATE TABLE perm_script_t (a int);
 INSERT INTO perm_script_t VALUES (1);
 CREATE SEQUENCE perm_script_s`)
@@ -88,11 +89,16 @@ CREATE SEQUENCE perm_script_s`)
 		require.Equal(t, "on", readOnly)
 		_, err = conn.Exec(ctx, "INSERT INTO perm_script_t VALUES (2)")
 		require.True(t, isSQLState(err, "25006"), "%v", err)
+		// A WAL message is not a data change, but the read-only default does
+		// not stop it, so the role must not hold EXECUTE on the function.
+		_, err = conn.Exec(ctx, "SELECT pg_catalog.pg_logical_emit_message(true, 'pglens', 'probe')")
+		require.True(t, isSQLState(err, "42501"), "%v", err)
 
 		_, err = conn.Exec(ctx, "SET default_transaction_read_only = off")
 		require.NoError(t, err)
 		for _, statement := range []string{
 			"INSERT INTO perm_script_t VALUES (2)",
+			"SELECT pg_catalog.pg_logical_emit_message(true, 'pglens', 'probe')",
 			"UPDATE perm_script_t SET a = 3",
 			"DELETE FROM perm_script_t",
 			"TRUNCATE perm_script_t",
@@ -205,6 +211,7 @@ DROP TABLE IF EXISTS perm_script_public;
 DROP SEQUENCE IF EXISTS perm_script_public_s;
 DROP FUNCTION IF EXISTS perm_script_definer()`)
 			require.NoError(t, err)
+			regrantWALEmitters(t, admin)
 			dropScriptRoles(t, admin)
 		})
 		_, err := admin.Exec(ctx, `CREATE TABLE perm_script_public (a int);
@@ -265,6 +272,7 @@ func TestPerm_INT_PERM_010_ScriptIgnoresDatabaseSearchPath(t *testing.T) {
 		ctx := context.Background()
 		admin := pg.Pool(t, "app", RoleSuperuser)
 		dropScriptRoles(t, admin)
+		t.Cleanup(func() { regrantWALEmitters(t, admin) })
 		t.Cleanup(func() {
 			_, err := admin.Exec(context.Background(), `ALTER DATABASE app RESET search_path;
 DROP SCHEMA IF EXISTS perm_hijack CASCADE`)
@@ -305,6 +313,7 @@ func TestPerm_INT_PERM_011_ScriptTierFlagsNeedValueOne(t *testing.T) {
 		dropScriptRoles(t, admin)
 		t.Cleanup(func() { dropScriptRoles(t, admin) })
 		t.Cleanup(func() { regrantLargeObjects(t, admin) })
+		t.Cleanup(func() { regrantWALEmitters(t, admin) })
 
 		for _, flags := range [][]string{{"tier1=0"}, {"tier1=false", "tier2=0"}} {
 			dropScriptRoles(t, admin)
@@ -338,5 +347,22 @@ func regrantLargeObjects(t *testing.T, admin *pgxpool.Pool) {
 	t.Helper()
 	_, err := admin.Exec(context.Background(), `GRANT EXECUTE ON FUNCTION pg_catalog.lo_create(oid), pg_catalog.lo_creat(integer),
   pg_catalog.lo_from_bytea(oid, bytea) TO PUBLIC`)
+	require.NoError(t, err)
+}
+
+// regrantWALEmitters gives PUBLIC back EXECUTE on every pg_logical_emit_message
+// overload that a run of the script revokes. The overloads differ by
+// PostgreSQL major (19 adds an argument), so the list comes from the catalog.
+func regrantWALEmitters(t *testing.T, admin *pgxpool.Pool) {
+	t.Helper()
+	_, err := admin.Exec(context.Background(), `DO $$
+DECLARE emitter text;
+BEGIN
+  FOR emitter IN SELECT oid::regprocedure::text FROM pg_catalog.pg_proc
+                 WHERE proname = 'pg_logical_emit_message'
+                   AND pronamespace = 'pg_catalog'::regnamespace LOOP
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO PUBLIC', emitter);
+  END LOOP;
+END $$`)
 	require.NoError(t, err)
 }

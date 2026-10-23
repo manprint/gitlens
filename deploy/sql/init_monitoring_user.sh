@@ -9,8 +9,8 @@
 # them. It is mounted next to the file by deploy/docker-compose.yml; the
 # script itself is not copied.
 #
-# The script covers one database per run, and PUBLIC's large-object grant is
-# per database. The role can connect to every database that accepts
+# The script covers one database per run, and PUBLIC's large-object and WAL
+# message grants are per database. The role can connect to every database that accepts
 # connections, so the script runs in each of them.
 #
 # harden_public=1 revokes the PUBLIC write grants too, not only the one the

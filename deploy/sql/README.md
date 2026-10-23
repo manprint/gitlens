@@ -34,7 +34,11 @@ transaction. A large object is written even under the read-only default on
 PostgreSQL 15, and on every version once a session turns that default off, so
 the script always revokes from `PUBLIC` the `EXECUTE` that lets any role create
 one (`lo_create`, `lo_creat` and `lo_from_bytea`), in the database it is
-connected to. It reports every other such path it finds in that database
+connected to. WAL messages are written the same way: `pg_logical_emit_message`
+is not stopped by the read-only default, so the script revokes its `EXECUTE`
+from `PUBLIC` as well, for every overload of the function. Logical decoding
+consumers that emit their own messages need an explicit grant.
+It reports every other such path it finds in that database
 (temporary tables, new schemas, `CREATE` on a schema, writes on a relation,
 `USAGE` or `UPDATE` on a sequence, functions that run as their owner and
 `lo_compat_privileges = on`) with the statement that closes it. By default it

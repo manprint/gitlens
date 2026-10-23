@@ -6,9 +6,10 @@
 --   psql -v pglens_password='secret' -v dbname=app -v tier1=1 -f monitoring_user.sql
 -- Tier 2 also needs tier1=1. This file never creates an extension.
 -- The role is named pglens unless -v role=<name> names another one.
--- Large-object creation is revoked from PUBLIC in every run. -v
--- harden_public=1 also revokes the other grants that let every role write
--- outside a read-only transaction (see the end of this file).
+-- Large-object creation and WAL messages (pg_logical_emit_message) are revoked
+-- from PUBLIC in every run. -v harden_public=1 also revokes the other grants
+-- that let every role write outside a read-only transaction (see the end of
+-- this file).
 --
 -- The role it configures can only read. Before granting anything the script
 -- checks that an existing role of that name could not write either: it
@@ -233,7 +234,8 @@ BEGIN
   END LOOP;
 
   -- The role can connect to these as well, and PUBLIC may still let it create
-  -- large objects there: the grant revoked above is per database.
+  -- large objects or emit WAL messages there: the grants revoked above are per
+  -- database.
   FOR item IN
     SELECT d.datname
     FROM pg_catalog.pg_database d
@@ -241,7 +243,7 @@ BEGIN
       AND has_database_privilege(monitor, d.datname, 'CONNECT')
     ORDER BY 1
   LOOP
-    RAISE WARNING '% can connect to %, where PUBLIC may still let it create large objects',
+    RAISE WARNING '% can connect to %, where PUBLIC may still let it create large objects or emit WAL messages',
       who, item.datname
       USING HINT = format('Run this script connected to %I as well.', item.datname);
   END LOOP;
@@ -312,9 +314,10 @@ GRANT pg_signal_backend TO :"role";
 -- which catches a write from a client that did not ask for a read-only
 -- transaction. It is a guard against mistakes, not a boundary: the role can
 -- turn the setting off, so a write is stopped by privileges. The script grants
--- none that allow one, and revokes from PUBLIC the grant that lets any role
--- create large objects. The other PUBLIC grants that allow a write are
--- reported below. The agent also sets this on each connection it opens.
+-- none that allow one, and revokes from PUBLIC the grants that let any role
+-- create large objects or emit WAL messages. The other PUBLIC grants that allow
+-- a write are reported below. The agent also sets this on each connection it
+-- opens.
 ALTER ROLE :"role" SET default_transaction_read_only = on;
 
 -- Bound the blast radius of the monitoring session itself.
@@ -346,6 +349,39 @@ BEGIN
           who, creator, creator;
       ELSE
         RAISE NOTICE 'revoked EXECUTE on % from PUBLIC: % could create large objects', creator, who;
+      END IF;
+    END IF;
+  END LOOP;
+END
+$$;
+
+-- pg_logical_emit_message writes WAL, and the read-only default does not stop
+-- it: a message is emitted even inside BEGIN READ ONLY. Nothing else the role
+-- holds lets it emit, so the revoke goes in every run, like the large-object
+-- one above. The function has one overload per argument list (PostgreSQL 19
+-- adds a fourth argument), so each is revoked by its own signature. Logical
+-- decoding consumers that emit their own messages need an explicit grant.
+DO $$
+DECLARE
+  monitor oid := (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = current_setting('pglens.role'));
+  who text := quote_ident(current_setting('pglens.role'));
+  emitter record;
+BEGIN
+  FOR emitter IN
+    SELECT p.oid, p.oid::pg_catalog.regprocedure::text AS signature
+    FROM pg_catalog.pg_proc p
+    WHERE p.proname = 'pg_logical_emit_message'
+      AND p.pronamespace = 'pg_catalog'::pg_catalog.regnamespace
+  LOOP
+    IF has_function_privilege(monitor, emitter.oid, 'EXECUTE') THEN
+      EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC', emitter.signature);
+      -- As for large objects: a REVOKE by a role that neither owns the function
+      -- nor holds the grant only warns, so look again.
+      IF has_function_privilege(monitor, emitter.oid, 'EXECUTE') THEN
+        RAISE WARNING '% can still write WAL messages through %: REVOKE EXECUTE ON FUNCTION % FROM PUBLIC needs the owner of the function',
+          who, emitter.signature, emitter.signature;
+      ELSE
+        RAISE NOTICE 'revoked EXECUTE on % from PUBLIC: % could write WAL messages', emitter.signature, who;
       END IF;
     END IF;
   END LOOP;
