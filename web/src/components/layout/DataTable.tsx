@@ -23,7 +23,9 @@ export interface DataTableProps<TData extends RowData> {
   columns: ColumnDef<typeof dataTableFeatures, TData>[]
   data: TData[]
   emptyState: ReactNode
+  /** The full result size. Truncation is reported only when it exceeds the rows shown. */
   total?: number
+  /** The server's row budget. It reports truncation only together with total. */
   budget?: number
   scope?: string
   ariaLabel?: string
