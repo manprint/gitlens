@@ -1,6 +1,8 @@
 package topology
 
 import (
+	"os"
+	"regexp"
 	"testing"
 	"time"
 
@@ -511,10 +513,31 @@ func TestEngine_Cascade(t *testing.T) {
 		},
 	})
 
-	// s1 is cascade (both From edge from p and To edges to s2).
-	// Engine processes this without error; no cascade event emitted yet
-	// (cascade is marked in API, not as an event).
+	// s1 is a cascade: both a From edge from p and a To edge to s2. The engine
+	// processes it without error and emits no event for it, since a cascade is
+	// shown by the topology edges in the API, not as an event.
 	_ = e
+}
+
+// TestEngine_EveryEventTypeIsEmitted — a declared event type that no code path
+// emits documents an event that never appears. EventCascadeChanged sat unused
+// among the constants for that reason. Each declared type must be the Type of
+// an Event the engine builds.
+func TestEngine_EveryEventTypeIsEmitted(t *testing.T) {
+	src, err := os.ReadFile("engine.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := regexp.MustCompile(`(?m)^\t(Event\w+)\s+EventType = `).FindAllSubmatch(src, -1)
+	if len(declared) == 0 {
+		t.Fatal("found no EventType constants in engine.go")
+	}
+	for _, m := range declared {
+		name := string(m[1])
+		if !regexp.MustCompile(`Type:\s+` + name + `,`).Match(src) {
+			t.Errorf("%s is declared but no Event is built with it as its Type", name)
+		}
+	}
 }
 
 func TestEngine_StaleEdgeExpires(t *testing.T) {
