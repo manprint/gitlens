@@ -2,6 +2,8 @@ package agent
 
 import (
 	"fmt"
+	"log"
+	"net"
 	"net/url"
 	"os"
 	"regexp"
@@ -121,13 +123,18 @@ type DatabasesConfig struct {
 	Max     int      `yaml:"max"`
 }
 
+// maxTopN is the largest checks.<name>.top_n that validation accepts. The
+// shipped configs use 50, and the cap keeps a typo from sizing a check's
+// series budget to millions.
+const maxTopN = 1000
+
 // ChecksConfig configures per-check overrides.
 type ChecksConfig map[string]CheckConfig
 
 // CheckConfig is a single check's configuration.
 type CheckConfig struct {
 	Interval      string `yaml:"interval"`
-	TopN          int    `yaml:"top_n"`          // for stat_statements
+	TopN          int    `yaml:"top_n"`          // for every check that takes a top-N budget
 	ByApplication bool   `yaml:"by_application"` // for activity
 	// Enabled is nil (default enabled) unless explicitly set; only "ash"
 	// consults this today (SYS-ASH-002: disabling it must produce no
@@ -178,10 +185,29 @@ func LoadConfig(path string) (*Config, error) {
 	return cfg, nil
 }
 
+// isLoopbackHost reports whether host names this machine.
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 // validate performs strict validation on the configuration.
 func (c *Config) validate() error {
 	if c.Server.URL == "" {
 		return fmt.Errorf("validation: server.url is required")
+	}
+	// The push path is appended to this URL, so a trailing slash would make
+	// the request //api/v1/push, which the server does not route.
+	c.Server.URL = strings.TrimRight(c.Server.URL, "/")
+	// The bearer token goes with every push, command poll and result, so over
+	// plain http it crosses the network unencrypted. That stays allowed, since
+	// the shipped examples run over http inside a private network, but it is
+	// logged. A loopback host never leaves the machine, so it is not.
+	if u, err := url.Parse(c.Server.URL); err == nil && u.Scheme == "http" && !isLoopbackHost(u.Hostname()) {
+		log.Printf("agent config: server.url host %s is reached over plain http, so the bearer token is sent unencrypted", u.Hostname())
 	}
 	if c.Server.Token == "" && c.Server.TokenFile == "" {
 		return fmt.Errorf("validation: server.token or server.token_file is required")
@@ -253,8 +279,10 @@ func (c *Config) validate() error {
 			}
 			c.parsedCheckIntervals[name] = interval
 		}
-		if check.TopN < 0 {
-			return fmt.Errorf("validation: checks.%s.top_n must be >= 0", name)
+		// The cardinality selector keeps up to 2*top_n keys per scope, so an
+		// unbounded value would let one check hold as many series as it asks.
+		if check.TopN < 0 || check.TopN > maxTopN {
+			return fmt.Errorf("validation: checks.%s.top_n must be between 0 and %d", name, maxTopN)
 		}
 	}
 

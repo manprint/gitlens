@@ -67,13 +67,16 @@ func DefaultDatabaseExcludes() []*regexp.Regexp {
 
 // ReadOnlySession runs on every physical connection the agent opens, before
 // any caller can use it: the Manager's pools and the check command's single
-// connection. pglens only ever reads from a monitored instance, so
-// the server itself is told to refuse writes for the whole session: every
-// transaction — implicit or explicit, from a check, from ASH or from an
-// on-demand command — then starts READ ONLY, and INSERT/UPDATE/DELETE,
-// DDL, nextval() and friends fail inside PostgreSQL rather than depending on
-// the agent never issuing them. The statements are constants, so the simple
-// protocol pgx uses for an argument-less Exec carries no injection risk.
+// connection. pglens only ever reads from a monitored instance, so the session
+// sets default_transaction_read_only: every transaction, implicit or explicit,
+// from a check, from ASH or from an on-demand command, then starts READ ONLY,
+// and a write the agent issued by mistake fails inside PostgreSQL. That
+// parameter is a setting any session can change back, so it guards against a
+// bug in the agent and is not the boundary. The boundary is the monitoring
+// role: deploy/sql/monitoring_user.sql grants it reads only and refuses a role
+// that could write, and the EXPLAIN path adds its own READ ONLY transaction
+// (exec_explain.go). The statements are constants, so the simple protocol pgx
+// uses for an argument-less Exec carries no injection risk.
 //
 // The session also searches pg_catalog alone. A search_path set for the
 // database or the role (ALTER DATABASE ... SET search_path, which a database
@@ -101,10 +104,21 @@ type Manager struct {
 	mu     sync.Mutex
 	dbs    map[string]*pgxpool.Pool // per-database pools
 	dbtc   map[string]time.Time     // last access time per database
+	// pending counts, per database, the ForDatabase calls that have picked its
+	// pool and are still waiting to acquire from it. See ForDatabase.
+	pending map[string]int
 	// statementsDB is the database whose pg_stat_statements view stands in
 	// for databases without one; empty means the maintenance database. See
 	// LocateStatements.
 	statementsDB string
+	// monitored holds the databases the latest discovery selected, and ownDB is
+	// the one the DSN names. ConnFor, which commands use, opens a pool only for
+	// these; see requireMonitored. scheduled holds the databases the first
+	// discovery selected, which the checks scheduled at startup were built from;
+	// see ScheduledConnFor.
+	monitored map[string]bool
+	scheduled map[string]bool
+	ownDB     string
 
 	endpointOnce sync.Once
 	addr         string
@@ -133,11 +147,14 @@ func NewManager(ctx context.Context, targetName string, dsn string, opts ConnOpt
 		return nil, fmt.Errorf("create pool: %w", err)
 	}
 	m := &Manager{
-		opts:   opts,
-		target: &poolHolder{name: targetName, pool: pool, dsn: dsn},
-		clock:  clk,
-		dbs:    make(map[string]*pgxpool.Pool),
-		dbtc:   make(map[string]time.Time),
+		opts:      opts,
+		target:    &poolHolder{name: targetName, pool: pool, dsn: dsn},
+		clock:     clk,
+		dbs:       make(map[string]*pgxpool.Pool),
+		dbtc:      make(map[string]time.Time),
+		pending:   make(map[string]int),
+		monitored: make(map[string]bool),
+		ownDB:     cfg.ConnConfig.Database,
 	}
 	return m, nil
 }
@@ -188,26 +205,34 @@ func (m *Manager) ForDatabase(ctx context.Context, datname string) (*pgxpool.Con
 	m.mu.Lock()
 	pool, exists := m.dbs[datname]
 	if !exists {
-		// Evict oldest idle database if at capacity.
-		if len(m.dbs) >= m.opts.MaxDatabases {
+		// Evict the least recently used database while at capacity, but
+		// never one whose pool has a connection checked out or a caller still
+		// waiting to acquire from it: closing that pool fails the caller with
+		// a closed pool. When every database is busy the new one is opened
+		// anyway, so the bound is nominal until those connections are released.
+		for len(m.dbs) >= m.opts.MaxDatabases {
 			oldest := ""
 			var oldestT time.Time
 			for name, t := range m.dbtc {
+				if m.pending[name] > 0 || m.dbs[name].Stat().AcquiredConns() > 0 {
+					continue
+				}
 				if oldest == "" || t.Before(oldestT) {
 					oldest = name
 					oldestT = t
 				}
 			}
-			if oldest != "" {
-				// pgxpool.Close waits for every acquired connection to be
-				// released; doing that under m.mu stalled every other
-				// database lookup behind a check still scanning the evicted
-				// database.
-				evicted := m.dbs[oldest]
-				delete(m.dbs, oldest)
-				delete(m.dbtc, oldest)
-				go evicted.Close()
+			if oldest == "" {
+				break
 			}
+			// pgxpool.Close waits for every acquired connection to be
+			// released; doing that under m.mu stalled every other
+			// database lookup behind a check still scanning the evicted
+			// database.
+			evicted := m.dbs[oldest]
+			delete(m.dbs, oldest)
+			delete(m.dbtc, oldest)
+			go evicted.Close()
 		}
 		// Create new per-database pool.
 		cfg, err := pgxpool.ParseConfig(m.target.dsn)
@@ -237,9 +262,16 @@ func (m *Manager) ForDatabase(ctx context.Context, datname string) (*pgxpool.Con
 		m.dbs[datname] = pool
 	}
 	m.dbtc[datname] = m.clock.Now()
+	m.pending[datname]++
 	m.mu.Unlock()
 
 	conn, err := pool.Acquire(ctx)
+	m.mu.Lock()
+	m.pending[datname]--
+	if m.pending[datname] == 0 {
+		delete(m.pending, datname)
+	}
+	m.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
@@ -293,6 +325,23 @@ func (m *Manager) Discover(ctx context.Context) ([]wire.Database, error) {
 	}
 
 	selected := selectDatabases(dbs, m.opts)
+	latest := make(map[string]bool, len(selected))
+	for _, db := range selected {
+		if db.Monitored {
+			latest[db.Name] = true
+		}
+	}
+	// Each discovery replaces the set a command may open, so a database the
+	// budget ranks out is refused to commands. The first discovery also fixes
+	// the set the startup schedule runs against: addScheduleEntries makes it
+	// before any command is served, and a scheduled check keeps its database
+	// when the budget later ranks it out. Neither map is written after this.
+	m.mu.Lock()
+	m.monitored = latest
+	if m.scheduled == nil {
+		m.scheduled = latest
+	}
+	m.mu.Unlock()
 	return selected, nil
 }
 
@@ -449,24 +498,15 @@ func (m *Manager) ensureCache(ctx context.Context) error {
 	}
 
 	// Query for system_identifier to derive ClusterID
-	var clusterID pgtype.ClusterID
-	idSource := pgtype.IDSourceSystemIdentifier
-	var systemID uint64
-	if err := conn.QueryRow(ctx, "SELECT system_identifier FROM pg_control_system()").Scan(&systemID); err == nil {
-		clusterID = pgtype.ClusterID(systemID)
-	} else {
-		// Fall back to the configured cluster_name (documented), or to the
-		// target name when none is configured. The target name alone used to
-		// be the only fallback, so the cluster_name every instance of a
-		// cluster was told to share was silently ignored and each target
-		// became its own cluster.
-		clusterID = pgtype.ManualClusterID(m.fallbackClusterName())
-		idSource = pgtype.IDSourceManual
+	clusterID, idSource, err := queryClusterIdentity(ctx, conn, m.fallbackClusterName())
+	if err != nil {
+		return err
 	}
 
-	// Query permission tier and extensions. The initial snapshot is refreshed
-	// again by RefreshCapabilities so a DBA grant takes effect on the next
-	// scrape/command without an agent restart.
+	// Query permission tier and extensions. RefreshCapabilities re-reads them
+	// on every scrape/command, so a DBA grant takes effect without an agent
+	// restart. The cluster identity above is not re-read: it is decided once
+	// per process.
 	permTier, extensions := m.queryCapabilities(ctx, conn)
 
 	// A target is not usable without its identity: every envelope carries it.
@@ -489,33 +529,51 @@ func (m *Manager) ensureCache(ctx context.Context) error {
 	return nil
 }
 
+// queryClusterIdentity reads the cluster's system_identifier. Only a
+// permission denial falls back to the manual id. A denial is kept for the
+// life of the process, so a manual id is never replaced by a later read: the
+// id a cluster was reported under cannot change (invariant I-1), and a grant
+// takes effect after a restart. Any other failure, such as a timeout or a
+// reset connection, is returned and nothing is cached, so the next call asks
+// again: latching the manual id on a transient error would split one cluster
+// into several ids.
+func queryClusterIdentity(ctx context.Context, conn capabilityConn, fallbackName string) (pgtype.ClusterID, pgtype.IDSource, error) {
+	var systemID uint64
+	err := conn.QueryRow(ctx, "SELECT system_identifier FROM pg_control_system()").Scan(&systemID)
+	if err == nil {
+		return pgtype.ClusterID(systemID), pgtype.IDSourceSystemIdentifier, nil
+	}
+	if !isInsufficientPrivilege(err) {
+		return 0, "", fmt.Errorf("query system identifier: %w", err)
+	}
+	// Fall back to the configured cluster_name (documented), or to the
+	// target name when none is configured. The target name alone used to
+	// be the only fallback, so the cluster_name every instance of a
+	// cluster was told to share was silently ignored and each target
+	// became its own cluster.
+	return pgtype.ManualClusterID(fallbackName), pgtype.IDSourceManual, nil
+}
+
 // queryCapabilities reads the privileges and extensions relevant to checks
 // and commands. Errors are treated conservatively: T0 and an empty extension
 // set keep monitoring read-only instead of making an unavailable target look
 // more capable than it is.
 func (m *Manager) queryCapabilities(ctx context.Context, conn capabilityConn) (pgtype.PermTier, map[string]bool) {
+	// pg_has_role asks whether the session can use the privilege, through
+	// group roles and with the membership's inherit option applied. A direct
+	// membership lookup missed a privilege inherited from a group role, and it
+	// kept a NOINHERIT role at its tier on PostgreSQL 15, where that role
+	// cannot use the privilege. pg_has_role is true for every role in a
+	// superuser session, so a superuser is kept at T0: the tier describes the
+	// monitoring role, and the deploy script refuses a superuser as one.
 	tier := pgtype.TierReadOnly
 	var hasReadAllData bool
-	if err := conn.QueryRow(ctx, `
-		SELECT EXISTS(
-			SELECT 1 FROM pg_auth_members m
-			JOIN pg_roles r ON m.roleid = r.oid
-			WHERE r.rolname = 'pg_read_all_data'
-			AND m.member = current_user::regrole::oid
-		)
-	`).Scan(&hasReadAllData); err == nil && hasReadAllData {
+	if err := conn.QueryRow(ctx, `SELECT pg_catalog.pg_has_role('pg_read_all_data', 'USAGE') AND pg_catalog.current_setting('is_superuser') = 'off'`).Scan(&hasReadAllData); err == nil && hasReadAllData {
 		tier = pgtype.TierExplain
 	}
 
 	var hasSignalBackend bool
-	if err := conn.QueryRow(ctx, `
-		SELECT EXISTS(
-			SELECT 1 FROM pg_auth_members m
-			JOIN pg_roles r ON m.roleid = r.oid
-			WHERE r.rolname = 'pg_signal_backend'
-			AND m.member = current_user::regrole::oid
-		)
-	`).Scan(&hasSignalBackend); err == nil && hasSignalBackend {
+	if err := conn.QueryRow(ctx, `SELECT pg_catalog.pg_has_role('pg_signal_backend', 'USAGE') AND pg_catalog.current_setting('is_superuser') = 'off'`).Scan(&hasSignalBackend); err == nil && hasSignalBackend {
 		tier = pgtype.TierSignal
 	}
 
@@ -746,7 +804,61 @@ func (m *Manager) ConnFor(ctx context.Context, datname string) (check.Conn, erro
 	if datname == "" {
 		return m.Shared(ctx)
 	}
+	if err := m.requireMonitored(ctx, datname); err != nil {
+		return nil, err
+	}
 	return m.ForDatabase(ctx, datname)
+}
+
+// ScheduledConnFor is ConnFor for the checks scheduled at startup. A database
+// the first discovery selected stays reachable after the budget ranks it out,
+// because its checks are still scheduled. The statements database and the one
+// the DSN names are reachable as well. Any other name is refused without a
+// discovery, since the schedule never had it.
+func (m *Manager) ScheduledConnFor(ctx context.Context, datname string) (check.Conn, error) {
+	if datname == "" {
+		return m.Shared(ctx)
+	}
+	if !m.isScheduled(datname) {
+		return nil, rejectedf("database %q is not scheduled on this target", datname)
+	}
+	return m.ForDatabase(ctx, datname)
+}
+
+// requireMonitored refuses a database the latest discovery did not select.
+// ForDatabase opens a pool for whatever name it is given: a command naming
+// rdsadmin would connect the monitoring role there, and every unknown name would
+// take one of the LRU slots that hold the real pools. A name the latest selection
+// does not hold gets one discovery first, which picks up a database created since
+// the last one, or one the budget has ranked in since.
+func (m *Manager) requireMonitored(ctx context.Context, datname string) error {
+	if m.isMonitored(datname) {
+		return nil
+	}
+	if _, err := m.Discover(ctx); err != nil {
+		return fmt.Errorf("discover databases: %w", err)
+	}
+	if m.isMonitored(datname) {
+		return nil
+	}
+	return rejectedf("database %q is not monitored on this target", datname)
+}
+
+// isMonitored reports whether a command may open datname: a database the latest
+// discovery selected, or the one the DSN names, which the agent connects to anyway.
+func (m *Manager) isMonitored(datname string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return datname == m.ownDB || m.monitored[datname]
+}
+
+// isScheduled reports whether a scheduled check may open datname: a database the
+// first discovery selected, the statements database, or the one the DSN names.
+// See ScheduledConnFor.
+func (m *Manager) isScheduled(datname string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return datname == m.ownDB || datname == m.statementsDB || m.scheduled[datname]
 }
 func (m *Manager) Database() string {
 	return m.target.name

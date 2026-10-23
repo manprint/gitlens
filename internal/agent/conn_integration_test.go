@@ -4,6 +4,8 @@ package agent
 
 import (
 	"context"
+	"net/url"
+	"regexp"
 	"testing"
 	"time"
 
@@ -14,6 +16,8 @@ import (
 	"github.com/manprint/pglens/internal/check"
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/command"
+	"github.com/manprint/pglens/internal/pgtype"
+	"github.com/manprint/pglens/internal/wire"
 	"github.com/manprint/pglens/test/pgtest"
 	"github.com/stretchr/testify/require"
 )
@@ -354,4 +358,395 @@ ALTER DATABASE `+database+` SET search_path = hijack, pg_catalog`)
 		require.NoError(t, err)
 		require.Contains(t, string(plan), `"Relation Name":"t","Schema":"hijack"`)
 	})
+}
+
+// INT-CONN-009: ConnFor opens a pool only for a database discovery selected.
+// An excluded admin database and an unknown name are refused before any pool
+// is opened for them, and a database that discovery lists still works.
+func TestINTCONN009_ConnForRefusesUnselectedDatabases(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		_, err := admin.Exec(ctx, "DROP DATABASE IF EXISTS rdsadmin WITH (FORCE)")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "CREATE DATABASE rdsadmin")
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = admin.Exec(context.Background(), "DROP DATABASE IF EXISTS rdsadmin WITH (FORCE)")
+		})
+
+		mgr, err := NewManager(ctx, "guard-target", pg.DSN("postgres", pgtest.RoleT0), DefaultConnOptions(), clock.System())
+		require.NoError(t, err)
+		defer mgr.Close()
+
+		// A connection handed out for a refused name is released at once, so a
+		// failing assertion ends the test instead of hanging the pool close.
+		var rejected *RejectedError
+		for _, name := range []string{"rdsadmin", "no_such_database", "template1"} {
+			conn, err := mgr.ConnFor(ctx, name)
+			if conn != nil {
+				conn.Release()
+			}
+			require.ErrorAs(t, err, &rejected, "ConnFor(%q) must be refused", name)
+		}
+
+		mgr.mu.Lock()
+		require.NotContains(t, mgr.dbs, "rdsadmin")
+		require.NotContains(t, mgr.dbs, "no_such_database")
+		mgr.mu.Unlock()
+
+		conn, err := mgr.ConnFor(ctx, "postgres")
+		require.NoError(t, err, "the database the DSN names stays reachable")
+		conn.Release()
+	})
+}
+
+// INT-CONN-010: a role whose name has an upper-case letter keeps the
+// permission tier it was granted. The tier lookup used to cast current_user to
+// regrole, which folds an unquoted name to lower case, so the role was not
+// found and was reported as T0 with no visible error.
+func TestINTCONN010_MixedCaseRoleKeepsItsTier(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		const role = "PgLensMixed"
+		quoted := pgx.Identifier{role}.Sanitize()
+		_, err := admin.Exec(ctx, "DROP ROLE IF EXISTS "+quoted)
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "CREATE ROLE "+quoted+" LOGIN PASSWORD 'test'")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "GRANT pg_monitor, pg_read_all_data TO "+quoted)
+		require.NoError(t, err)
+		// Roles are cluster-wide and the snapshot restore does not drop them.
+		t.Cleanup(func() { _, _ = admin.Exec(context.Background(), "DROP ROLE IF EXISTS "+quoted) })
+
+		u, err := url.Parse(pg.DSN("app", pgtest.RoleSuperuser))
+		require.NoError(t, err)
+		u.User = url.UserPassword(role, "test")
+		mgr, err := NewManager(ctx, "mixed-target", u.String(), DefaultConnOptions(), clock.System())
+		require.NoError(t, err)
+		defer mgr.Close()
+
+		require.NoError(t, mgr.RefreshCapabilities(ctx))
+		require.Equal(t, pgtype.TierExplain, mgr.PermTier())
+	})
+}
+
+// INT-CONN-012: a role that holds pg_read_all_data and pg_signal_backend only
+// through a group role has the T2 tier. The tier lookup used to match direct
+// memberships, so the inherited grants were not seen and the role was
+// reported as T0.
+func TestINTCONN012_TierFollowsGroupRole(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		const group, role = "pglens_group_t2", "pglens_member_t2"
+		// Roles are cluster-wide and the snapshot restore does not drop them.
+		t.Cleanup(func() {
+			_, _ = admin.Exec(context.Background(), "DROP ROLE IF EXISTS "+role)
+			_, _ = admin.Exec(context.Background(), "DROP ROLE IF EXISTS "+group)
+		})
+		_, err := admin.Exec(ctx, "DROP ROLE IF EXISTS "+role)
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "DROP ROLE IF EXISTS "+group)
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "CREATE ROLE "+group+" NOLOGIN")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "GRANT pg_monitor, pg_read_all_data, pg_signal_backend TO "+group)
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "CREATE ROLE "+role+" LOGIN PASSWORD 'test'")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "GRANT "+group+" TO "+role)
+		require.NoError(t, err)
+
+		u, err := url.Parse(pg.DSN("app", pgtest.RoleSuperuser))
+		require.NoError(t, err)
+		u.User = url.UserPassword(role, "test")
+		mgr, err := NewManager(ctx, "group-target", u.String(), DefaultConnOptions(), clock.System())
+		require.NoError(t, err)
+		defer mgr.Close()
+
+		require.NoError(t, mgr.RefreshCapabilities(ctx))
+		require.Equal(t, pgtype.TierSignal, mgr.PermTier())
+	})
+}
+
+// INT-CONN-013: the tier follows what the role can actually read. The role is
+// granted its memberships first and only then set to NOINHERIT, as an existing
+// monitoring role is. On PostgreSQL 16 and later those memberships keep their
+// inherit option, so the role reads the table and holds T1. On PostgreSQL 15
+// the membership is not usable, the read is denied, and the tier must not
+// claim T1.
+func TestINTCONN013_TierTracksEffectiveRead(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		const role, table = "pglens_noinherit", "pglens_noinherit_probe"
+		_, err := admin.Exec(ctx, "DROP ROLE IF EXISTS "+role)
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "CREATE ROLE "+role+" LOGIN PASSWORD 'test'")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "GRANT pg_monitor, pg_read_all_data TO "+role)
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "ALTER ROLE "+role+" NOINHERIT")
+		require.NoError(t, err)
+		// Roles are cluster-wide and the snapshot restore does not drop them.
+		t.Cleanup(func() { _, _ = admin.Exec(context.Background(), "DROP ROLE IF EXISTS "+role) })
+		_, err = admin.Exec(ctx, "CREATE TABLE public."+table+" (x int)")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "REVOKE ALL ON public."+table+" FROM PUBLIC")
+		require.NoError(t, err)
+
+		u, err := url.Parse(pg.DSN("app", pgtest.RoleSuperuser))
+		require.NoError(t, err)
+		u.User = url.UserPassword(role, "test")
+		probe, err := pgx.Connect(ctx, u.String())
+		require.NoError(t, err)
+		defer func() { _ = probe.Close(ctx) }()
+		var rows int
+		readErr := probe.QueryRow(ctx, "SELECT count(*) FROM public."+table).Scan(&rows)
+		canRead := readErr == nil
+		require.Equal(t, pg.Major >= 16, canRead, "premise: NOINHERIT membership usable only from 16: %v", readErr)
+
+		mgr, err := NewManager(ctx, "noinherit-target", u.String(), DefaultConnOptions(), clock.System())
+		require.NoError(t, err)
+		defer mgr.Close()
+
+		require.NoError(t, mgr.RefreshCapabilities(ctx))
+		want := pgtype.TierReadOnly
+		if canRead {
+			want = pgtype.TierExplain
+		}
+		require.Equal(t, want, mgr.PermTier())
+	})
+}
+
+// INT-CONN-014: pg_has_role is true for every role in a superuser session, so
+// the tier lookup must not read a superuser as holding the tiers above T0. A
+// superuser DSN stays at T0, as it did before the lookup used pg_has_role.
+func TestINTCONN014_SuperuserKeepsReadOnlyTier(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		mgr, err := NewManager(ctx, "superuser-target", pg.DSN("app", pgtest.RoleSuperuser), DefaultConnOptions(), clock.System())
+		require.NoError(t, err)
+		defer mgr.Close()
+
+		require.NoError(t, mgr.RefreshCapabilities(ctx))
+		require.Equal(t, pgtype.TierReadOnly, mgr.PermTier())
+	})
+}
+
+// INT-CONN-011: the cluster identity falls back to the configured name only
+// when the server denies pg_control_system(), and a role that may read it
+// reports the real system_identifier. The grants setupRoles makes live in the
+// app database (pg_proc is per database), so the roles connect there. A
+// transient failure has no integration test here: the unit test pins that
+// branch.
+func TestINTCONN011_IdentityFallsBackOnlyOnDenial(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		ctx := context.Background()
+		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		var systemID uint64
+		require.NoError(t, admin.QueryRow(ctx, "SELECT system_identifier FROM pg_control_system()").Scan(&systemID))
+
+		opts := DefaultConnOptions()
+		opts.ClusterName = "shared-cluster"
+		denied, err := NewManager(ctx, "denied-target", pg.DSN("app", pgtest.RoleT0NoControl), opts, clock.System())
+		require.NoError(t, err)
+		defer denied.Close()
+		require.Equal(t, pgtype.IDSourceManual, denied.ClusterIDSource())
+		require.Equal(t, pgtype.ManualClusterID("shared-cluster"), denied.ClusterID())
+
+		granted, err := NewManager(ctx, "granted-target", pg.DSN("app", pgtest.RoleT0), opts, clock.System())
+		require.NoError(t, err)
+		defer granted.Close()
+		require.Equal(t, pgtype.IDSourceSystemIdentifier, granted.ClusterIDSource())
+		require.Equal(t, pgtype.ClusterID(systemID), granted.ClusterID())
+	})
+}
+
+// INT-CONN-015: a database whose pool has a connection checked out is not
+// evicted to make room for another one, so the connection keeps its pool and
+// the new database is opened beside it.
+func TestINTCONN015_HeldDatabaseIsNotEvicted(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		ctx := context.Background()
+		opts := DefaultConnOptions()
+		opts.MaxDatabases = 1
+		mgr, err := NewManager(ctx, "test-target", pg.DSN("postgres", pgtest.RoleT0), opts, clock.System())
+		require.NoError(t, err)
+		defer mgr.Close()
+
+		held, err := mgr.ForDatabase(ctx, "postgres")
+		require.NoError(t, err)
+		defer held.Release()
+
+		other, err := mgr.ForDatabase(ctx, "template1")
+		require.NoError(t, err)
+		other.Release()
+
+		var one int
+		require.NoError(t, held.QueryRow(ctx, "SELECT 1").Scan(&one))
+		require.Equal(t, 1, one)
+
+		mgr.mu.Lock()
+		_, kept := mgr.dbs["postgres"]
+		mgr.mu.Unlock()
+		require.True(t, kept, "the database with a connection in use must not be evicted")
+	})
+}
+
+// INT-CONN-016: the checks scheduled at startup keep their database after the
+// budget ranks it out. The schedule was built from the startup selection and
+// reaches its databases through the scheduler's wrapper, so refusing one fails
+// those checks on every tick.
+func TestINTCONN016_ScheduledDatabaseStaysReachableAfterRankMoves(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		mgr := newRankManager(t, pg, "zz_int016_")
+		dbs, err := mgr.Discover(ctx)
+		require.NoError(t, err)
+		require.True(t, monitored(dbs, "zz_int016_a"), "the startup selection must keep zz_int016_a")
+		require.NoError(t, scheduledScrape(t, mgr, "zz_int016_a"))
+
+		rankAhead(t, pg, mgr, "zz_int016_b")
+		require.NoError(t, scheduledScrape(t, mgr, "zz_int016_a"),
+			"a check scheduled at startup must keep its database after the budget ranks it out")
+	})
+}
+
+// INT-CONN-017: a command refuses a database the budget has ranked out, even
+// one the startup selection picked. The latest selection decides what a command
+// may open; the scheduled path (INT-CONN-016) keeps the startup selection.
+func TestINTCONN017_CommandRefusesDatabaseRankedOut(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		mgr := newRankManager(t, pg, "zz_int017_")
+		dbs, err := mgr.Discover(ctx)
+		require.NoError(t, err)
+		require.True(t, monitored(dbs, "zz_int017_a"), "the startup selection must keep zz_int017_a")
+		rankAhead(t, pg, mgr, "zz_int017_b")
+
+		var rejected *RejectedError
+		conn, err := mgr.ConnFor(ctx, "zz_int017_a")
+		if conn != nil {
+			conn.Release()
+		}
+		require.ErrorAs(t, err, &rejected, "a command must not open the database the budget ranked out")
+
+		conn, err = mgr.ConnFor(ctx, "zz_int017_b")
+		require.NoError(t, err, "the database the budget selects stays reachable for a command")
+		conn.Release()
+	})
+}
+
+// INT-CONN-018: a database that a later discovery selected, and the budget then
+// ranked out, is refused by a command. The startup schedule never had it, so
+// the scheduled path refuses it as well.
+func TestINTCONN018_LaterSelectedDatabaseIsRefusedWhenRankedOut(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		mgr := newRankManager(t, pg, "zz_int018_")
+		dbs, err := mgr.Discover(ctx)
+		require.NoError(t, err)
+		require.True(t, monitored(dbs, "zz_int018_a"), "the startup selection must keep zz_int018_a")
+
+		rankAhead(t, pg, mgr, "zz_int018_b")
+		rankAhead(t, pg, mgr, "zz_int018_a")
+
+		var rejected *RejectedError
+		conn, err := mgr.ConnFor(ctx, "zz_int018_b")
+		if conn != nil {
+			conn.Release()
+		}
+		require.ErrorAs(t, err, &rejected, "a command must not open a database the budget ranked out")
+
+		conn, err = databaseScopedTarget{Target: mgr, database: "zz_int018_b"}.ConnFor(ctx, "zz_int018_b")
+		if conn != nil {
+			conn.Release()
+		}
+		require.ErrorAs(t, err, &rejected, "the scheduled path must not open a database the startup selection never kept")
+	})
+}
+
+// newRankManager creates prefix+"a" and prefix+"b" and returns a manager that
+// selects only those databases, with a budget of one. Both start with no
+// commits, so the name breaks the tie and "a" is the database the startup
+// selection keeps.
+func newRankManager(t *testing.T, pg *pgtest.PG, prefix string) *Manager {
+	t.Helper()
+	ctx := context.Background()
+	admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+	for _, name := range []string{prefix + "a", prefix + "b"} {
+		_, err := admin.Exec(ctx, "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "CREATE DATABASE "+name)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = admin.Exec(context.Background(), "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)")
+		})
+	}
+	opts := DefaultConnOptions()
+	opts.MaxDatabases = 1
+	opts.Include = []*regexp.Regexp{regexp.MustCompile("^" + prefix)}
+	mgr, err := NewManager(ctx, "rank-target", pg.DSN("postgres", pgtest.RoleT0), opts, clock.System())
+	require.NoError(t, err)
+	t.Cleanup(mgr.Close)
+	return mgr
+}
+
+// rankAhead commits on name until a discovery of mgr selects it. A backend's
+// counters reach pg_stat_database only when they are flushed, so each round
+// forces the flush and polls the ranking.
+func rankAhead(t *testing.T, pg *pgtest.PG, mgr *Manager, name string) {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := pg.Pool(t, name, pgtest.RoleT0).Acquire(ctx)
+	require.NoError(t, err)
+	defer conn.Release()
+	require.Eventually(t, func() bool {
+		for range 20 {
+			if _, err := conn.Exec(ctx, "SELECT 1"); err != nil {
+				return false
+			}
+		}
+		if _, err := conn.Exec(ctx, "SELECT pg_stat_force_next_flush()"); err != nil {
+			return false
+		}
+		dbs, err := mgr.Discover(ctx)
+		return err == nil && monitored(dbs, name)
+	}, 15*time.Second, 200*time.Millisecond, "the commits never moved %s ahead in the ranking", name)
+}
+
+// scheduledScrape runs table_stats against name the way a check scheduled at
+// startup runs: through the target the scheduler wraps around the Manager.
+func scheduledScrape(t *testing.T, mgr *Manager, name string) error {
+	t.Helper()
+	var table check.Check
+	for _, c := range check.All() {
+		if c.Name() == "table_stats" {
+			table = c
+		}
+	}
+	require.NotNil(t, table)
+	_, err := table.Scrape(context.Background(), databaseScopedTarget{Target: mgr, database: name})
+	return err
+}
+
+// monitored reports whether a discovery selected name.
+func monitored(dbs []wire.Database, name string) bool {
+	for _, db := range dbs {
+		if db.Monitored && db.Name == name {
+			return true
+		}
+	}
+	return false
 }

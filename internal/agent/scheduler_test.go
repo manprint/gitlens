@@ -576,3 +576,75 @@ func (f *failingCheck) Timeout() time.Duration         { return time.Second }
 func (f *failingCheck) Scrape(context.Context, check.Target) (check.Result, error) {
 	return check.Result{}, errors.New("connection refused")
 }
+
+// overlapCheck records how many of its own scrapes run at once. Each scrape
+// takes five times the entry interval.
+type overlapCheck struct {
+	mu          sync.Mutex
+	inFlight    int
+	maxInFlight int
+	starts      int
+}
+
+func (o *overlapCheck) Name() string                   { return "overlap" }
+func (o *overlapCheck) Requires() check.Requirements   { return check.Requirements{} }
+func (o *overlapCheck) DefaultInterval() time.Duration { return 10 * time.Millisecond }
+func (o *overlapCheck) Timeout() time.Duration         { return time.Second }
+func (o *overlapCheck) Scrape(ctx context.Context, _ check.Target) (check.Result, error) {
+	o.mu.Lock()
+	o.starts++
+	o.inFlight++
+	if o.inFlight > o.maxInFlight {
+		o.maxInFlight = o.inFlight
+	}
+	o.mu.Unlock()
+
+	select {
+	case <-time.After(50 * time.Millisecond):
+	case <-ctx.Done():
+	}
+
+	o.mu.Lock()
+	o.inFlight--
+	o.mu.Unlock()
+	return check.Result{}, nil
+}
+
+// TestScheduler_SlowScrapeIsNotOverlapped proves that a scrape longer than
+// its interval is never joined by the next tick's scrape of the same entry.
+// The ticks in the meantime are skipped, so the entry never runs more than
+// one scrape at a time, even with a free worker for every tick.
+func TestScheduler_SlowScrapeIsNotOverlapped(t *testing.T) {
+	s := NewScheduler(ScheduleOptions{
+		MaxWorkers: 4, NoJitter: true, Clock: clock.System(), ShutdownTimeout: 5 * time.Second,
+	})
+	c := &overlapCheck{}
+	s.AddEntryWithInterval(&mockTarget{name: "slow", conn: &mockConn{}}, c, "", 10*time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	received := 0
+	deadline := time.After(5 * time.Second)
+	for received < 3 {
+		select {
+		case <-s.Results():
+			received++
+		case <-deadline:
+			t.Fatalf("the entry produced %d results in 5s, want 3", received)
+		}
+	}
+	s.Stop()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.starts < 3 {
+		t.Fatalf("scrapes started = %d, want at least 3", c.starts)
+	}
+	if c.maxInFlight != 1 {
+		t.Fatalf("up to %d scrapes of one entry ran at once, want 1", c.maxInFlight)
+	}
+}

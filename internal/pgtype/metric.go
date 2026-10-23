@@ -35,9 +35,13 @@ type SeriesKey struct {
 
 // CanonicalLabels serializes labels deterministically: keys sorted
 // lexicographically, each rendered as key=value, pairs joined by "\x1f"
-// (unit separator). Empty map yields "". The separator is chosen because it
-// cannot appear in a PostgreSQL identifier or in any label value this project
-// produces.
+// (unit separator). Empty map yields "". Keys and values are free text: a
+// PostgreSQL identifier can hold control bytes such as "\x1f", so the
+// delimiters inside them are escaped. "\x1e" (the escape byte itself) becomes
+// "\x1e0", "\x1f" becomes "\x1e1", and "=" in a key becomes "\x1e2". Without
+// this, two different label sets could share one canonical string and their
+// series would merge. Only those bytes are rewritten, so ordinary labels keep
+// their bytes and the series and alert keys hashed from them stay the same.
 func CanonicalLabels(l map[string]string) string {
 	if len(l) == 0 {
 		return ""
@@ -52,9 +56,27 @@ func CanonicalLabels(l map[string]string) string {
 		if i > 0 {
 			b.WriteString("\x1f")
 		}
-		b.WriteString(k)
+		b.WriteString(labelKeyEscaper.Replace(k))
 		b.WriteByte('=')
-		b.WriteString(l[k])
+		b.WriteString(labelValueEscaper.Replace(l[k]))
 	}
 	return b.String()
 }
+
+// The replacers are safe for concurrent use. The key replacer also escapes "="
+// because the first unescaped "=" is what separates a key from its value.
+var (
+	labelValueEscaper = strings.NewReplacer("\x1e", "\x1e0", "\x1f", "\x1e1")
+	labelKeyEscaper   = strings.NewReplacer("\x1e", "\x1e0", "\x1f", "\x1e1", "=", "\x1e2")
+)
+
+// UnescapeLabel reverses the escaping in CanonicalLabels. A reader that takes
+// one key or value back out of a canonical string must pass it through here,
+// or a value holding an escaped byte comes back in its escaped form.
+// Every escape byte is written as "\x1e" followed by a digit, so reading left
+// to right is unambiguous.
+func UnescapeLabel(s string) string {
+	return labelUnescaper.Replace(s)
+}
+
+var labelUnescaper = strings.NewReplacer("\x1e0", "\x1e", "\x1e1", "\x1f", "\x1e2", "=")

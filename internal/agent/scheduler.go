@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/manprint/pglens/internal/check"
@@ -254,9 +255,19 @@ func (s *Scheduler) runEntry(ctx context.Context, entry schedEntry) {
 	ticker := s.clk.NewTicker(interval)
 	defer ticker.Stop()
 
+	// A scrape still running when the next tick arrives owns the entry: the
+	// tick is skipped instead of starting a second scrape of it. Overlapping
+	// scrapes could deliver their snapshots out of order, and the delta-based
+	// checks need them in order; a slow check would also fill every worker
+	// with copies of itself. Only this loop sets the flag, so it needs no lock.
+	var busy atomic.Bool
+
 	for {
 		select {
 		case <-ticker.C():
+			if busy.Load() {
+				continue
+			}
 			if entry.breaker.Allow() {
 				// Acquiring the worker slot must observe cancellation: with
 				// every worker busy on a target that has stopped answering,
@@ -269,12 +280,14 @@ func (s *Scheduler) runEntry(ctx context.Context, entry schedEntry) {
 				case <-ctx.Done():
 					return
 				}
+				busy.Store(true)
 				s.wg.Add(1)
 				s.scrapeWG.Add(1)
 				go func() {
 					defer s.wg.Done()
 					defer s.scrapeWG.Done()
 					defer func() { <-s.workerSem }()
+					defer busy.Store(false)
 					s.scrapeEntry(ctx, entry)
 				}()
 			}
@@ -318,6 +331,23 @@ func (d databaseScopedTarget) StatementsDatabase() string {
 		return s.StatementsDatabase()
 	}
 	return ""
+}
+
+// scheduledConnForer is implemented by a Manager. Its scheduled checks reach
+// their databases through ScheduledConnFor, not through ConnFor, which commands
+// use.
+type scheduledConnForer interface {
+	ScheduledConnFor(ctx context.Context, datname string) (check.Conn, error)
+}
+
+// ConnFor is what the checks call to reach their database, the entry's own
+// one or the statements database. The schedule was built at startup, so these
+// checks use the startup selection rather than the latest one a command sees.
+func (d databaseScopedTarget) ConnFor(ctx context.Context, datname string) (check.Conn, error) {
+	if s, ok := d.Target.(scheduledConnForer); ok {
+		return s.ScheduledConnFor(ctx, datname)
+	}
+	return d.Target.ConnFor(ctx, datname)
 }
 
 func (s *Scheduler) scrapeEntry(parentCtx context.Context, entry schedEntry) {

@@ -5,12 +5,16 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,8 +29,25 @@ func TestPusher_BackoffCapped(t *testing.T) {
 
 	for attempt := 1; attempt <= 20; attempt++ {
 		delay := backoffDelay(attempt, clk)
-		require.LessOrEqual(t, delay, 120*time.Second, "attempt %d exceeded cap", attempt)
+		require.LessOrEqual(t, delay, 60*time.Second, "attempt %d exceeded cap", attempt)
 	}
+}
+
+// TestPusher_BackoffJitterAtTheCap: at the cap every wait falls between 30s
+// and 60s, and the waits vary, so agents that failed together do not retry
+// together.
+func TestPusher_BackoffJitterAtTheCap(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+
+	lo, hi := time.Hour, time.Duration(0)
+	for i := 0; i < 500; i++ {
+		delay := backoffDelay(20, clk)
+		lo = min(lo, delay)
+		hi = max(hi, delay)
+	}
+	require.GreaterOrEqual(t, lo, 30*time.Second)
+	require.LessOrEqual(t, hi, 60*time.Second)
+	require.Greater(t, hi, lo)
 }
 
 func TestPusher_NeverBlocksCollection(t *testing.T) {
@@ -563,6 +584,25 @@ func TestPusher_RejectedEnvelopesAreCountedAsDropped(t *testing.T) {
 	}
 }
 
+// TestPusher_RejectionBodyIsCapped checks that a rejection with a huge body
+// keeps only a bounded prefix. The body becomes LastError, which /healthz
+// echoes on every probe, so the agent must not hold a whole error page.
+func TestPusher_RejectionBodyIsCapped(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(strings.Repeat("x", 4<<20)))
+	}))
+	defer srv.Close()
+
+	p := NewPusher(srv.URL, "token", clock.System())
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, p.Push(ctx))
+	require.Equal(t, HealthIncompatible, p.HealthState())
+	require.Equal(t, maxPushResponseBytes, len(p.LastError()))
+}
+
 // TestPusher_SendsTransmissionTime lets the server measure clock skew against
 // the moment of sending rather than the moment of queueing.
 func TestPusher_SendsTransmissionTime(t *testing.T) {
@@ -582,4 +622,374 @@ func TestPusher_SendsTransmissionTime(t *testing.T) {
 	sent, err := time.Parse(time.RFC3339Nano, header)
 	require.NoError(t, err)
 	require.True(t, sent.Equal(now), "header %q, want the push time", header)
+}
+
+// TestPusher_TrailingSlashInServerURLStillPushes: server.url written with a
+// trailing slash must reach the push endpoint, not //api/v1/push, which the
+// server answers with 404 and every envelope was then dropped.
+func TestPusher_TrailingSlashInServerURLStillPushes(t *testing.T) {
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		if path != "/api/v1/push" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	p := NewPusher(srv.URL+"/", "token", clock.System())
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	require.NoError(t, p.Push(ctx))
+	require.Equal(t, "/api/v1/push", path)
+	acked, dropped := p.BufferStats()
+	require.Equal(t, int64(1), acked)
+	require.Equal(t, int64(0), dropped)
+}
+
+// roundTripFunc lets a test script the transport under the pusher's client.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// TestPusher_NetworkFailureReportsUnreachable: a push that fails at the
+// network level must show in healthz while it is retried, and the first
+// accepted push must clear it.
+func TestPusher_NetworkFailureReportsUnreachable(t *testing.T) {
+	p := NewPusher("http://pglens.invalid", "token", clock.System())
+	calls := 0
+	var observed Health
+	var observedBody string
+	p.httpClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 1 {
+			return nil, errors.New("dial tcp: connection refused")
+		}
+		if calls == 2 {
+			observed = p.HealthState()
+			rec := httptest.NewRecorder()
+			p.HealthzHandler()(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+			observedBody = rec.Body.String()
+			require.Equal(t, http.StatusOK, rec.Code)
+		}
+		return &http.Response{
+			StatusCode: http.StatusAccepted,
+			Body:       io.NopCloser(bytes.NewReader(nil)),
+			Header:     http.Header{},
+			Request:    r,
+		}, nil
+	})
+
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	require.NoError(t, p.Push(ctx))
+
+	require.Equal(t, HealthUnreachable, observed)
+	require.Contains(t, observedBody, `"state":"unreachable"`)
+	require.Contains(t, observedBody, "connection refused")
+	require.Equal(t, HealthOK, p.HealthState(), "an accepted push clears the unreachable state")
+}
+
+// TestPusher_NetworkFailureKeepsRejection: an agent the server has revoked
+// stays revoked while the network is also down.
+func TestPusher_NetworkFailureKeepsRejection(t *testing.T) {
+	p := NewPusher("http://pglens.invalid", "token", clock.System())
+	p.mu.Lock()
+	p.health = HealthRevoked
+	p.mu.Unlock()
+	p.httpClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return nil, errors.New("dial tcp: connection refused")
+	})
+
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	require.Error(t, p.Push(ctx))
+
+	require.Equal(t, HealthRevoked, p.HealthState())
+}
+
+// TestPusher_TransientRejectionsAreRetried: a 408, 425 or 429 says the push
+// may succeed later. The envelope must be retried, not counted as lost.
+func TestPusher_TransientRejectionsAreRetried(t *testing.T) {
+	for _, status := range []int{http.StatusRequestTimeout, http.StatusTooEarly, http.StatusTooManyRequests} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			t.Parallel()
+			requests := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				if requests == 1 {
+					w.WriteHeader(status)
+					return
+				}
+				w.WriteHeader(http.StatusAccepted)
+			}))
+			defer srv.Close()
+
+			p := NewPusher(srv.URL, "token", clock.System())
+			p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			require.NoError(t, p.Push(ctx))
+
+			require.Equal(t, 2, requests)
+			acked, dropped := p.BufferStats()
+			require.Equal(t, int64(1), acked)
+			require.Equal(t, int64(0), dropped)
+		})
+	}
+}
+
+// TestPusher_RetryAfterIsHonoured: a 429 that names a longer wait than the
+// first backoff must not be retried before that wait has passed.
+func TestPusher_RetryAfterIsHonoured(t *testing.T) {
+	requests := 0
+	var second time.Time
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests == 1 {
+			w.Header().Set("Retry-After", "2")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		second = time.Now()
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	p := NewPusher(srv.URL, "token", clock.System())
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	start := time.Now()
+	require.NoError(t, p.Push(ctx))
+
+	require.Equal(t, 2, requests)
+	require.GreaterOrEqual(t, second.Sub(start), 2*time.Second)
+}
+
+// TestPusher_NotFoundKeepsEnvelopeQueued: a 404 or 405 from the push endpoint
+// means the URL or a proxy is wrong, not the envelope. It stays queued, and
+// healthz reports the state as incompatible.
+func TestPusher_NotFoundKeepsEnvelopeQueued(t *testing.T) {
+	for _, status := range []int{http.StatusNotFound, http.StatusMethodNotAllowed} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			requests := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				w.WriteHeader(status)
+			}))
+			defer srv.Close()
+
+			p := NewPusher(srv.URL, "token", clock.System())
+			p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			require.NoError(t, p.Push(ctx))
+
+			require.Equal(t, 1, requests)
+			_, dropped := p.BufferStats()
+			require.Equal(t, int64(0), dropped)
+			p.pendingMu.Lock()
+			require.Len(t, p.pending, 1)
+			p.pendingMu.Unlock()
+			require.Equal(t, HealthIncompatible, p.HealthState())
+			require.Contains(t, p.LastError(), strconv.Itoa(status))
+		})
+	}
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+	cases := map[string]time.Duration{
+		"":                              0,
+		"3":                             3 * time.Second,
+		" 5 ":                           5 * time.Second,
+		"0":                             0,
+		"-4":                            0,
+		"soon":                          0,
+		"99999":                         maxRetryAfter,
+		"Fri, 23 Oct 2026 12:00:30 GMT": 30 * time.Second,
+		"Fri, 23 Oct 2026 11:59:00 GMT": 0,
+		"Fri, 23 Oct 2026 14:00:00 GMT": maxRetryAfter,
+	}
+	for value, want := range cases {
+		require.Equal(t, want, parseRetryAfter(value, now), "Retry-After %q", value)
+	}
+}
+
+// shortAttemptTimeouts shrinks the attempt waits so a test that stalls the
+// server waits milliseconds, not the production 10 seconds and 2 minutes.
+func shortAttemptTimeouts(p *Pusher) {
+	p.attemptTimeout = 50 * time.Millisecond
+	p.maxAttemptTimeout = 200 * time.Millisecond
+}
+
+// releaseBackoffs moves a fake clock forward so every retry backoff the pusher
+// sleeps on returns at once, instead of after its real exponential delay. It
+// stops when done is closed.
+func releaseBackoffs(clk *clock.Fake, done <-chan struct{}) {
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			clk.Advance(time.Hour)
+			time.Sleep(time.Millisecond)
+		}
+	}()
+}
+
+// timeoutErr is a failure that net/http reports as a timeout, such as a dial
+// that never completed, before the request was written.
+type timeoutErr struct{}
+
+func (timeoutErr) Error() string   { return "dial tcp: i/o timeout" }
+func (timeoutErr) Timeout() bool   { return true }
+func (timeoutErr) Temporary() bool { return true }
+
+// TestPusher_StalledServerIsRetriedWithLongerWait: a server that needs longer
+// than the first attempt's wait is given a longer wait on each retry, and the
+// envelope is delivered once it answers. Nothing is dropped.
+func TestPusher_StalledServerIsRetriedWithLongerWait(t *testing.T) {
+	t.Parallel()
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		// The body is read first: net/http reports a disconnect on the
+		// request context only once the body has been consumed.
+		_, _ = io.Copy(io.Discard, r.Body)
+		// The answer takes 120ms, so the 50ms and 100ms waits expire and the
+		// 200ms wait is the first one the answer fits in.
+		select {
+		case <-time.After(120 * time.Millisecond):
+			w.WriteHeader(http.StatusAccepted)
+		case <-r.Context().Done():
+		}
+	}))
+	defer srv.Close()
+
+	clk := clock.NewFake(time.Unix(0, 0))
+	p := NewPusher(srv.URL, "token", clk)
+	shortAttemptTimeouts(p)
+	done := make(chan struct{})
+	defer close(done)
+	releaseBackoffs(clk, done)
+
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	require.NoError(t, p.Push(ctx))
+
+	require.Equal(t, int32(3), requests.Load())
+	acked, dropped := p.BufferStats()
+	require.Equal(t, int64(1), acked)
+	require.Equal(t, int64(0), dropped)
+}
+
+// TestPusher_ServerThatNeverAnswersDropsEnvelope: a server that takes the
+// whole envelope and never answers cannot hold the queue head forever. The
+// waits grow to their ceiling, and the envelope is then dropped and counted,
+// so the push returns and the next envelope goes out.
+func TestPusher_ServerThatNeverAnswersDropsEnvelope(t *testing.T) {
+	t.Parallel()
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		_, _ = io.Copy(io.Discard, r.Body)
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	clk := clock.NewFake(time.Unix(0, 0))
+	p := NewPusher(srv.URL, "token", clk)
+	shortAttemptTimeouts(p)
+	done := make(chan struct{})
+	defer close(done)
+	releaseBackoffs(clk, done)
+
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	require.NoError(t, p.Push(ctx))
+
+	// 50ms, 100ms, then the 200ms ceiling, which expires and drops the envelope.
+	require.Equal(t, int32(3), requests.Load())
+	acked, dropped := p.BufferStats()
+	require.Equal(t, int64(0), acked)
+	require.Equal(t, int64(1), dropped)
+	require.Contains(t, p.LastError(), "envelope dropped")
+	p.pendingMu.Lock()
+	require.Empty(t, p.pending)
+	p.pendingMu.Unlock()
+}
+
+// TestPusher_UnreachableServerIsNeverDropped: a request that never reached the
+// server, because the connection was refused or could not be made, is retried
+// until the push context ends. The disk buffer holds the envelope through the
+// outage, so it must not be counted as lost.
+func TestPusher_UnreachableServerIsNeverDropped(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewFake(time.Unix(0, 0))
+	p := NewPusher("http://pglens.invalid", "token", clk)
+	shortAttemptTimeouts(p)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	calls := 0
+	p.httpClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 6 {
+			cancel()
+		}
+		return nil, timeoutErr{}
+	})
+	done := make(chan struct{})
+	defer close(done)
+	releaseBackoffs(clk, done)
+
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+	require.Error(t, p.Push(ctx))
+
+	require.GreaterOrEqual(t, calls, 6)
+	acked, dropped := p.BufferStats()
+	require.Equal(t, int64(0), acked)
+	require.Equal(t, int64(0), dropped)
+	p.pendingMu.Lock()
+	require.Len(t, p.pending, 1)
+	p.pendingMu.Unlock()
+}
+
+// TestPusher_ServerErrorHonoursRetryAfter: a 503 that names a longer wait than
+// the first backoff is not retried before that wait has passed, as a 429 is
+// not.
+func TestPusher_ServerErrorHonoursRetryAfter(t *testing.T) {
+	t.Parallel()
+	var requests atomic.Int32
+	var second time.Time
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) == 1 {
+			w.Header().Set("Retry-After", "3")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		second = time.Now()
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	p := NewPusher(srv.URL, "token", clock.System())
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	start := time.Now()
+	require.NoError(t, p.Push(ctx))
+
+	require.Equal(t, int32(2), requests.Load())
+	require.GreaterOrEqual(t, second.Sub(start), 3*time.Second)
 }

@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"bytes"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -305,48 +307,6 @@ checks:
 	}
 }
 
-// TestMountWarning verifies that isMountWarning detects root filesystem paths correctly.
-func TestMountWarning(t *testing.T) {
-	tests := []struct {
-		name        string
-		path        string
-		mountinfo   string
-		wantWarning bool
-	}{
-		{
-			name: "root_filesystem_path",
-			path: "/var/lib/pglens",
-			mountinfo: `1 0 0:1 / / rw,relatime - rootfs rootfs rw
-2 1 0:2 / /dev rw,relatime - devtmpfs devtmpfs rw
-3 1 0:3 / /proc rw,relatime - proc proc rw
-`,
-			wantWarning: true,
-		},
-		{
-			name: "separate_mount",
-			path: "/var/lib/pglens",
-			mountinfo: `1 0 0:1 / / rw,relatime - rootfs rootfs rw
-2 1 0:2 / /dev rw,relatime - devtmpfs devtmpfs rw
-3 1 0:3 / /proc rw,relatime - proc proc rw
-4 1 8:1 / /var/lib/pglens rw,relatime - ext4 /dev/sda1 rw
-`,
-			wantWarning: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tmpfile := filepath.Join(t.TempDir(), "mountinfo")
-			err := os.WriteFile(tmpfile, []byte(tt.mountinfo), 0600)
-			require.NoError(t, err)
-
-			warning, err := isMountWarning(tt.path, tmpfile)
-			require.NoError(t, err)
-			require.Equal(t, tt.wantWarning, warning)
-		})
-	}
-}
-
 // Helper function to write config to temp file
 func writeConfigFile(t *testing.T, yaml string) string {
 	tmpfile, err := os.CreateTemp(t.TempDir(), "config-*.yaml")
@@ -357,4 +317,153 @@ func writeConfigFile(t *testing.T, yaml string) string {
 	require.NoError(t, err)
 
 	return tmpfile.Name()
+}
+
+// TestConfig_ServerURLLosesTrailingSlash: the push path is appended to
+// server.url, so a trailing slash from the file or from PGLENS_SERVER_URL is
+// removed before anything builds a request from it.
+func TestConfig_ServerURLLosesTrailingSlash(t *testing.T) {
+	yaml := `
+server:
+  url: http://localhost:8080/
+  token: file-token
+identity_path: /var/lib/pglens/identity.json
+buffer:
+  path: /var/lib/pglens/buffer
+targets:
+  - name: pg-app
+    dsn: postgres://pglens@localhost/postgres
+checks:
+  activity: {}
+`
+	tmpfile := writeConfigFile(t, yaml)
+	defer func() { _ = os.Remove(tmpfile) }()
+
+	cfg, err := LoadConfig(tmpfile)
+	require.NoError(t, err)
+	require.Equal(t, "http://localhost:8080", cfg.Server.URL)
+
+	t.Setenv("PGLENS_SERVER_URL", "http://override:9999//")
+	cfg, err = LoadConfig(tmpfile)
+	require.NoError(t, err)
+	require.Equal(t, "http://override:9999", cfg.Server.URL)
+}
+
+// TestConfig_PlainHTTPServerURLIsLogged: the bearer token goes unencrypted over
+// plain http to any host but this machine, so the config load says so. Loopback
+// and https stay quiet, and an environment override is checked like the file.
+func TestConfig_PlainHTTPServerURLIsLogged(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		env     string
+		wantLog bool
+	}{
+		{name: "remote_hostname_http", url: "http://pglens.example.com:8080", wantLog: true},
+		{name: "compose_service_http", url: "http://pglens-server:8080", wantLog: true},
+		{name: "private_address_http", url: "http://10.0.0.5:8080", wantLog: true},
+		{name: "localhost_http", url: "http://localhost:8080", wantLog: false},
+		{name: "loopback_ipv4_http", url: "http://127.0.0.1:8080", wantLog: false},
+		{name: "loopback_ipv6_http", url: "http://[::1]:8080", wantLog: false},
+		{name: "remote_https", url: "https://pglens.example.com", wantLog: false},
+		{name: "env_override_remote_http", url: "http://localhost:8080", env: "http://pglens.example.com:8080", wantLog: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			yaml := fmt.Sprintf(`
+server:
+  url: %s
+  token: file-token
+identity_path: /var/lib/pglens/identity.json
+buffer:
+  path: /var/lib/pglens/buffer
+targets:
+  - name: pg-app
+    dsn: postgres://pglens@localhost/postgres
+checks:
+  activity: {}
+`, tt.url)
+			t.Setenv("PGLENS_SERVER_URL", tt.env)
+
+			var logged bytes.Buffer
+			prev := log.Writer()
+			log.SetOutput(&logged)
+			t.Cleanup(func() { log.SetOutput(prev) })
+
+			_, err := LoadConfig(writeConfigFile(t, yaml))
+			require.NoError(t, err)
+			require.Equal(t, tt.wantLog, strings.Contains(logged.String(), "plain http"), "log: %q", logged.String())
+		})
+	}
+}
+
+// TestConfig_PlainHTTPWarningNamesOnlyTheHost: the warning names the server
+// host without its port, and a load writes it once.
+func TestConfig_PlainHTTPWarningNamesOnlyTheHost(t *testing.T) {
+	yaml := `
+server:
+  url: http://pglens.example.com:8080
+  token: file-token
+identity_path: /var/lib/pglens/identity.json
+buffer:
+  path: /var/lib/pglens/buffer
+targets:
+  - name: pg-app
+    dsn: postgres://pglens@localhost/postgres
+checks:
+  activity: {}
+`
+	t.Setenv("PGLENS_SERVER_URL", "")
+
+	var logged bytes.Buffer
+	prev := log.Writer()
+	log.SetOutput(&logged)
+	t.Cleanup(func() { log.SetOutput(prev) })
+
+	_, err := LoadConfig(writeConfigFile(t, yaml))
+	require.NoError(t, err)
+	require.Equal(t, 1, strings.Count(logged.String(), "plain http"), "log: %q", logged.String())
+	require.Contains(t, logged.String(), "host pglens.example.com is reached")
+	require.NotContains(t, logged.String(), "8080")
+}
+
+// TestConfig_TopNIsBounded: top_n sizes the cardinality cap, so a value outside
+// 0 to maxTopN is refused at load and the bound itself is accepted.
+func TestConfig_TopNIsBounded(t *testing.T) {
+	tests := []struct {
+		name    string
+		topN    int
+		wantErr bool
+	}{
+		{name: "default", topN: 0},
+		{name: "shipped_value", topN: 50},
+		{name: "bound", topN: maxTopN},
+		{name: "above_bound", topN: maxTopN + 1, wantErr: true},
+		{name: "negative", topN: -1, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			yaml := fmt.Sprintf(`
+server:
+  url: https://pglens.example.com
+  token: file-token
+identity_path: /var/lib/pglens/identity.json
+buffer:
+  path: /var/lib/pglens/buffer
+targets:
+  - name: pg-app
+    dsn: postgres://pglens@localhost/postgres
+checks:
+  table_stats: { top_n: %d }
+`, tt.topN)
+
+			_, err := LoadConfig(writeConfigFile(t, yaml))
+			if tt.wantErr {
+				require.ErrorContains(t, err, "table_stats.top_n must be between 0 and 1000")
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
 }

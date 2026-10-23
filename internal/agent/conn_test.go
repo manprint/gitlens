@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,9 +14,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pashagolub/pgxmock/v5"
 	"github.com/stretchr/testify/require"
 
+	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/identity"
 	"github.com/manprint/pglens/internal/pgtype"
 )
@@ -72,6 +75,56 @@ func TestManager_QueryCapabilities(t *testing.T) {
 			for _, ext := range tt.exts {
 				require.True(t, gotExts[ext])
 			}
+		})
+	}
+}
+
+// TestQueryClusterIdentity pins the three outcomes of the identity read: the
+// system_identifier, the manual id for a denied read, and an error for any
+// other failure. A transient failure must never turn into a manual id, since
+// the manual id is then kept for the life of the process.
+func TestQueryClusterIdentity(t *testing.T) {
+	const systemID uint64 = 7381927364512345678
+	tests := []struct {
+		name       string
+		err        error
+		wantID     pgtype.ClusterID
+		wantSource pgtype.IDSource
+		wantErr    bool
+	}{
+		{name: "system identifier", wantID: pgtype.ClusterID(systemID), wantSource: pgtype.IDSourceSystemIdentifier},
+		{name: "permission denied falls back to the manual id", err: &pgconn.PgError{Code: "42501"}, wantID: pgtype.ManualClusterID("shared-cluster"), wantSource: pgtype.IDSourceManual},
+		{name: "connection reset is returned, not cached", err: errors.New("connection reset by peer"), wantErr: true},
+		{name: "statement timeout is returned, not cached", err: &pgconn.PgError{Code: "57014"}, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock, err := pgxmock.NewConn()
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				require.NoError(t, mock.Close(context.Background()))
+				require.NoError(t, mock.ExpectationsWereMet())
+			})
+
+			expectation := mock.ExpectQuery("pg_control_system")
+			if tt.err != nil {
+				expectation.WillReturnError(tt.err)
+			} else {
+				expectation.WillReturnRows(pgxmock.NewRows([]string{"system_identifier"}).AddRow(systemID))
+			}
+			mock.ExpectClose()
+
+			gotID, gotSource, err := queryClusterIdentity(context.Background(), mock, "shared-cluster")
+			if tt.wantErr {
+				require.Error(t, err)
+				require.Equal(t, pgtype.ClusterID(0), gotID)
+				require.Empty(t, gotSource)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.wantID, gotID)
+			require.Equal(t, tt.wantSource, gotSource)
 		})
 	}
 }
@@ -291,4 +344,79 @@ func TestManager_IdentityDoesNotNeedTheTarget(t *testing.T) {
 	var persisted identity.File
 	require.NoError(t, json.Unmarshal(raw, &persisted))
 	require.Len(t, persisted.Instances, 2, "neither concurrent allocation may erase the other")
+}
+
+// TestManager_ForDatabaseKeepsAPoolBeingAcquired: a caller still waiting to
+// acquire from a database's pool is not evicted by a request for another
+// database, so it never acquires from a pool that was closed under it. The
+// listener accepts connections and never answers, which keeps the first
+// acquire waiting until its context expires.
+func TestManager_ForDatabaseKeepsAPoolBeingAcquired(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	var (
+		mu    sync.Mutex
+		conns []net.Conn
+	)
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, c)
+			mu.Unlock()
+		}
+	}()
+
+	opts := DefaultConnOptions()
+	opts.MaxDatabases = 1
+	dsn := fmt.Sprintf("postgres://pglens:pglens@%s/postgres?sslmode=disable", ln.Addr().String())
+	m, err := NewManager(context.Background(), "test-target", dsn, opts, clock.System())
+	require.NoError(t, err)
+	defer m.Close()
+	// Registered after m.Close, so it runs first: the silent connections must
+	// be closed before Close, which waits for the pool's own dial to finish.
+	defer func() {
+		_ = ln.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+	}()
+
+	firstErr := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		conn, err := m.ForDatabase(ctx, "postgres")
+		if conn != nil {
+			conn.Release()
+		}
+		firstErr <- err
+	}()
+
+	// The first call has picked its pool once the map holds it, so the second
+	// call runs while the first is still waiting to acquire from it.
+	require.Eventually(t, func() bool {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		_, ok := m.dbs["postgres"]
+		return ok
+	}, time.Second, 5*time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	_, err = m.ForDatabase(ctx, "template1")
+	require.Error(t, err, "the listener never answers, so the second acquire cannot succeed")
+
+	m.mu.Lock()
+	kept := len(m.dbs)
+	m.mu.Unlock()
+	require.Equal(t, 2, kept, "the pool being acquired from must not be evicted")
+
+	// Its own acquire runs out of time; a closed pool would fail it at once.
+	require.ErrorIs(t, <-firstErr, context.DeadlineExceeded)
 }

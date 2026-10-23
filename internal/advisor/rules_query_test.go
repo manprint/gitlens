@@ -3,6 +3,7 @@ package advisor
 import (
 	"testing"
 
+	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/stretchr/testify/require"
 )
 
@@ -136,6 +137,16 @@ func TestRule_txn_high_rollback_ratio_IsPerDatabase(t *testing.T) {
 	require.Equal(t, "app", f[0].Datname)
 	require.Equal(t, "txn.high_rollback_ratio/app", f[0].ID())
 	require.Equal(t, "app", canonicalLabel("a=1\x1fdatabase=app", "database"))
+}
+
+// A database name is free text, so a name holding a separator or the escape
+// byte must come back exactly as written from the canonical label set.
+func TestCanonicalLabel_ReadsEscapedNamesBack(t *testing.T) {
+	for _, name := range []string{"a\x1fb", "a\x1eb", "a\x1e1b", "a=b"} {
+		canonical := pgtype.CanonicalLabels(map[string]string{"database": name, "state": "active"})
+		require.Equal(t, name, canonicalLabel(canonical, "database"))
+		require.Equal(t, "active", canonicalLabel(canonical, "state"))
+	}
 }
 
 func TestPackA_AllRulesSatisfyContract(t *testing.T) {

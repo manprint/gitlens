@@ -16,7 +16,7 @@ type Candidate struct {
 type Options struct {
 	TopN       int // per ranking metric; default 50
 	Hysteresis int // cycles a key is retained after dropping out; default 5
-	MaxKeys    int // hard cap after the union; default 200
+	MaxKeys    int // hard cap after the union; default 200, or 2*TopN when larger
 }
 
 func (o *Options) defaults() {
@@ -27,7 +27,10 @@ func (o *Options) defaults() {
 		o.Hysteresis = 5
 	}
 	if o.MaxKeys == 0 {
-		o.MaxKeys = 200
+		// The two top-N rankings can name up to 2*TopN distinct keys. A cap
+		// below that cuts keys the configured top_n asked for, so it grows
+		// with TopN instead of staying at 200.
+		o.MaxKeys = max(200, 2*o.TopN)
 	}
 }
 
@@ -111,26 +114,33 @@ func (s *Selector) Select(cycle uint64, in []Candidate) (kept []Candidate, trunc
 		}
 	}
 
-	// Step 3: kept = fresh ∪ retained, ordered by Primary descending then Key ascending
-	var keptList []Candidate
+	// Step 3: fresh and retained keys, each ordered by Primary descending then Key ascending
+	var freshList, retainedList []Candidate
 	for key := range freshSet {
-		keptList = append(keptList, byKey[key])
+		freshList = append(freshList, byKey[key])
 	}
 	for key := range retainedSet {
-		keptList = append(keptList, byKey[key])
+		retainedList = append(retainedList, byKey[key])
 	}
-	sort.Slice(keptList, func(i, j int) bool {
-		if keptList[i].Primary != keptList[j].Primary {
-			return keptList[i].Primary > keptList[j].Primary
-		}
-		return keptList[i].Key < keptList[j].Key
-	})
+	sortByRank(freshList)
+	sortByRank(retainedList)
 
-	// Step 4: truncate to MaxKeys
-	if len(keptList) > s.opts.MaxKeys {
-		keptList = keptList[:s.opts.MaxKeys]
+	// Step 4: truncate to MaxKeys. Retained keys are history, so they are
+	// the ones cut to make room. Cutting the union by Primary alone let a
+	// retained key with a higher Primary push out a fresh key that the
+	// configured top-N asked for. Only a fresh set that is itself over the
+	// cap loses its lowest-ranked keys.
+	if len(freshList)+len(retainedList) > s.opts.MaxKeys {
 		truncated = true
+		if len(freshList) > s.opts.MaxKeys {
+			freshList = freshList[:s.opts.MaxKeys]
+			retainedList = nil
+		} else {
+			retainedList = retainedList[:s.opts.MaxKeys-len(freshList)]
+		}
 	}
+	keptList := append(freshList, retainedList...)
+	sortByRank(keptList)
 
 	// Step 5: Update lastSeen for every key in fresh ONLY
 	for key := range freshSet {
@@ -138,6 +148,17 @@ func (s *Selector) Select(cycle uint64, in []Candidate) (kept []Candidate, trunc
 	}
 
 	return keptList, truncated
+}
+
+// sortByRank orders candidates by Primary descending, then Key ascending, so
+// the same input always yields the same selection.
+func sortByRank(cs []Candidate) {
+	sort.Slice(cs, func(i, j int) bool {
+		if cs[i].Primary != cs[j].Primary {
+			return cs[i].Primary > cs[j].Primary
+		}
+		return cs[i].Key < cs[j].Key
+	})
 }
 
 // Forget drops retention state for keys not seen within the window, bounding

@@ -3,6 +3,7 @@ package clock
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -18,7 +19,7 @@ type fakeTicker struct {
 	interval time.Duration
 	next     time.Time
 	ch       chan time.Time
-	stopped  bool
+	stopped  atomic.Bool
 }
 
 type sleeper struct {
@@ -58,13 +59,11 @@ func (f *Fake) NewTicker(d time.Duration) Ticker {
 
 func (t *fakeTicker) C() <-chan time.Time { return t.ch }
 
+// Stop may run on another goroutine while Advance reads the flag under Fake.mu.
+// The ticker holds no pointer back to the Fake, so Stop cannot take that lock;
+// an atomic flag makes the handoff race-free instead.
 func (t *fakeTicker) Stop() {
-	// No lock needed: stopped flag is only set by the caller, but Advance reads it under Fake.mu.
-	// To make it safe we don't protect stopped with separate mutex; instead we assume Stop is called
-	// while holding no other lock. Advance checks stopped under Fake.mu, so we need to synchronize.
-	// We use a simple store without lock and rely on the fact that Fake.mu protects read.
-	// To be race-free, we mark stopped; Advance will see it on next call.
-	t.stopped = true
+	t.stopped.Store(true)
 }
 
 // Sleep blocks until d has elapsed on the fake clock or ctx is cancelled.
@@ -110,7 +109,7 @@ func (f *Fake) Advance(d time.Duration) {
 
 	// Fire tickers
 	for _, t := range f.tickers {
-		if t.stopped {
+		if t.stopped.Load() {
 			continue
 		}
 		for !t.next.After(newNow) {
