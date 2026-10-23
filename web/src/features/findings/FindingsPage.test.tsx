@@ -311,6 +311,17 @@ describe('FindingsPage', () => {
     expect(screen.getByText('Reason: maintenance window')).toBeInTheDocument()
   })
 
+  it('UI-FIND-049 offers no explicit mute time past the server limit of ninety days', async () => {
+    await renderFindings()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mute finding' }))
+    const dialog = screen.getByRole('dialog')
+    fireEvent.click(within(dialog).getByLabelText('Explicit timestamp'))
+
+    // NOW is 2026-08-27T02:00 UTC, so ninety days later is 2026-11-25T02:00.
+    expect(within(dialog).getByLabelText('Mute until')).toHaveAttribute('max', '2026-11-25T02:00')
+  })
+
   it('UI-FIND-022 the dialog states that muting is not resolution', async () => {
     await renderFindings()
 

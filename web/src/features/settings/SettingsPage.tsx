@@ -1,7 +1,7 @@
 import { useAlerts, useAdvisorRules, useClusters, useInstances } from '@/api/queries'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { EmptyState, ErrorState } from '@/components/state'
+import { AlertListTruncated, EmptyState, ErrorState } from '@/components/state'
 
 import { CommandAudit } from './CommandAudit'
 import { InventoryTables } from './InventoryTables'
@@ -63,6 +63,7 @@ export function SettingsPage() {
           title="The fleet is empty"
         />
       ) : null}
+      <AlertListTruncated truncated={alertsQuery.truncated} />
       <InventoryTables alerts={alerts} clusters={clusters} instances={instances} rules={rules} />
       <CommandAudit instances={instances} />
       <ServerInfo />

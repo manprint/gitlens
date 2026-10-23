@@ -1,3 +1,4 @@
+import type { ApiFailure } from '@/api/client'
 import type { components } from '@/api/generated'
 
 export type ServerCommandState = components['schemas']['CommandResponse']['state']
@@ -17,6 +18,15 @@ export function isTerminalCommandState(state: unknown): state is CommandState {
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled command state: ${String(value)}`)
+}
+
+/**
+ * The server refuses a new command once the agent holds its pending limit: 429,
+ * with a detail that names the count. Any other failure has no such message.
+ */
+export function commandQueueFullMessage(failure: ApiFailure): string | null {
+  if (failure.kind !== 'server' || failure.status !== 429) return null
+  return `Command queue full: ${failure.detail}`
 }
 
 export function describeCommandState(state: CommandState, error?: string | null): string {

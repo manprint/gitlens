@@ -340,7 +340,6 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
         </div>
         <DataTable
           ariaLabel="Statement statistics"
-          {...(truncated ? { budget: STATEMENT_LIMIT } : {})}
           columns={statementColumns(instanceId)}
           data={rows}
           emptyState={

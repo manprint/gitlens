@@ -39,8 +39,8 @@ function QueryRow({
         </Link>
         <span className="text-text-secondary text-sm">
           {query.avg_active_sessions === null
-            ? 'Unknown average active sessions'
-            : `${query.avg_active_sessions} avg active sessions`}
+            ? 'Unknown average active backends'
+            : `${query.avg_active_sessions} avg active backends`}
         </span>
       </div>
       <code className="mt-2 block text-sm whitespace-pre-wrap">{query.query_text}</code>

@@ -50,7 +50,9 @@ function isApiFailure(error: unknown): error is ApiFailure {
   )
 }
 
-async function getApi<T>(run: () => Promise<ClientResponse<T>>): Promise<T> {
+async function getApiResponse<T>(
+  run: () => Promise<ClientResponse<T>>,
+): Promise<{ data: T; response: Response }> {
   try {
     const { data, error, response } = await run()
     if (error !== undefined) {
@@ -59,13 +61,17 @@ async function getApi<T>(run: () => Promise<ClientResponse<T>>): Promise<T> {
     if (data === undefined) {
       throw new ApiQueryError({ kind: 'malformed', message: 'API response did not contain data' })
     }
-    return data
+    return { data, response }
   } catch (error) {
     if (error instanceof ApiQueryError) {
       throw error
     }
     throw new ApiQueryError(toApiFailure(error, null))
   }
+}
+
+async function getApi<T>(run: () => Promise<ClientResponse<T>>): Promise<T> {
+  return (await getApiResponse(run)).data
 }
 
 function shouldRetry(failureCount: number, error: unknown): boolean {
@@ -607,11 +613,22 @@ export function usePlans(params: QueryParameters<'/api/v1/plans'>) {
   })
 }
 
+// The alert list carries its truncation flag in a header, which getApi drops.
+async function fetchAlerts(params: QueryParameters<'/api/v1/alerts'>, signal: AbortSignal) {
+  const { data, response } = await getApiResponse(() =>
+    client.GET('/api/v1/alerts', { params: { query: params }, signal }),
+  )
+  return { alerts: data, truncated: response.headers.get('X-Result-Truncated') === 'true' }
+}
+
+/**
+ * The alerts, and whether the server cut the list short. A cut list means any
+ * count or listing built from it is a lower bound.
+ */
 export function useAlerts(params: QueryParameters<'/api/v1/alerts'> = {}) {
-  return useApiQuery({
+  const query = useApiQuery({
     policy: REFRESH.alerts,
-    queryFn: (signal) =>
-      getApi(() => client.GET('/api/v1/alerts', { params: { query: params }, signal })),
+    queryFn: (signal) => fetchAlerts(params, signal),
     queryKey: qk.alerts(
       params.state,
       params.severity,
@@ -620,6 +637,11 @@ export function useAlerts(params: QueryParameters<'/api/v1/alerts'> = {}) {
       params.cluster_id,
     ),
   })
+  return {
+    ...query,
+    data: query.data?.alerts,
+    truncated: query.data?.truncated ?? false,
+  }
 }
 
 export function useAlert(alertKey: string) {

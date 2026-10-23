@@ -16,13 +16,22 @@ export type SessionStatus = components['schemas']['SessionStatus']
 export class AuthRequestError extends Error {
   readonly failure: ApiFailure
   readonly kind: ApiFailure['kind']
+  /** The Retry-After wait of a refused sign-in, in seconds; null when the header is absent. */
+  readonly retryAfterSeconds: number | null
 
-  constructor(failure: ApiFailure) {
+  constructor(failure: ApiFailure, retryAfterSeconds: number | null = null) {
     super('message' in failure ? failure.message : `API request failed: ${failure.kind}`)
     this.name = 'AuthRequestError'
     this.failure = failure
     this.kind = failure.kind
+    this.retryAfterSeconds = retryAfterSeconds
   }
+}
+
+// Only the seconds form is read. A date form, or a missing header, gives null.
+function retryAfterSeconds(response: Response): number | null {
+  const header = response.headers.get('Retry-After')?.trim() ?? ''
+  return /^\d+$/.test(header) ? Number.parseInt(header, 10) : null
 }
 
 interface AuthRuntime {
@@ -126,7 +135,10 @@ async function createSession(password: string): Promise<void> {
   try {
     const result = await client.POST('/api/v1/session', { body: { password } })
     if (result.error !== undefined) {
-      throw new AuthRequestError(toApiFailure(result.response, result.error))
+      throw new AuthRequestError(
+        toApiFailure(result.response, result.error),
+        retryAfterSeconds(result.response),
+      )
     }
   } catch (error) {
     if (error instanceof AuthRequestError) {

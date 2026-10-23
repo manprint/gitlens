@@ -33,11 +33,9 @@ function nullableNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
+// The server flattens every host metric to a top-level key, so the values are
+// read from the response itself.
 function metricValues(data: Schemas['HostResponse']): Record<string, unknown> {
-  if (data.metrics !== undefined) {
-    return data.metrics
-  }
-
   return Object.fromEntries(
     Object.entries(data as Record<string, unknown>).filter(
       ([key, value]) => key.startsWith('host_') && typeof value === 'number',
@@ -72,6 +70,18 @@ const METRICS: readonly HostMetricDefinition[] = [
   { key: 'host_disk_free_ratio', label: 'Filesystem free ratio', format: formatRatio },
 ]
 
+// The CPU ratio comes from the container's CPU limit when the agent found one,
+// and from the whole host otherwise. A cgroup source does not settle which: a
+// memory limit alone also makes the source a cgroup, and the ratio then stays
+// host-wide. So the cgroup label names both cases.
+function cpuUsedLabel(source: string | undefined): string {
+  if (source === 'host') return 'CPU used (host-wide)'
+  if (source === 'cgroup_v1' || source === 'cgroup_v2') {
+    return 'CPU used (of container CPU limit, or host if none set)'
+  }
+  return 'CPU used'
+}
+
 function HostMetricTiles({ data }: { data: Schemas['HostResponse'] }) {
   const values = metricValues(data)
 
@@ -79,7 +89,8 @@ function HostMetricTiles({ data }: { data: Schemas['HostResponse'] }) {
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       {METRICS.map(({ format, key, label }) => {
         const value = nullableNumber(values[key])
-        return <MetricTile key={key} label={label} value={format(value)} />
+        const tileLabel = key === 'host_cpu_used_ratio' ? cpuUsedLabel(data.source) : label
+        return <MetricTile key={key} label={tileLabel} value={format(value)} />
       })}
     </div>
   )

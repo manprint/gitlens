@@ -6,7 +6,7 @@ import { useAlerts, useSilences } from '@/api/queries'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
-import { EmptyState, ErrorState } from '@/components/state'
+import { AlertListTruncated, EmptyState, ErrorState } from '@/components/state'
 import { formatDuration } from '@/lib/format'
 import { silenceWindow, type Silence } from '@/lib/alerts'
 
@@ -117,6 +117,7 @@ export function SilencesPage() {
         title="Alert silences"
       />
 
+      <AlertListTruncated truncated={alertsQuery.truncated} />
       {alertsQuery.error ? (
         <div className="border-warning/40 bg-warning/10 p-3 text-sm" role="alert">
           Current firing alerts are unavailable; the silence list remains available but creation

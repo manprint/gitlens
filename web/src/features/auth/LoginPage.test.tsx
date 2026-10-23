@@ -85,6 +85,53 @@ describe('LoginPage', () => {
     expect(screen.queryByText('Password non valida.')).not.toBeInTheDocument()
   })
 
+  it('UI-AUTH-010 says how long to wait when the server refuses too many sign-in attempts', async () => {
+    server.use(
+      http.post('*/api/v1/session', () =>
+        HttpResponse.json(
+          {
+            error: 'too_many_attempts',
+            detail: 'too many sign-in attempts; wait before trying again',
+          },
+          { status: 429, headers: { 'Retry-After': '30' } },
+        ),
+      ),
+    )
+    renderWithProviders(<LoginPage />, { route: '/login' })
+
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Accedi' }))
+    await settle()
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Troppi tentativi di accesso. Riprova tra 30 secondi.',
+    )
+    expect(screen.queryByText('Password non valida.')).not.toBeInTheDocument()
+  })
+
+  it('UI-AUTH-011 gives a general wait when a refused sign-in carries no Retry-After', async () => {
+    server.use(
+      http.post('*/api/v1/session', () =>
+        HttpResponse.json(
+          {
+            error: 'too_many_attempts',
+            detail: 'too many sign-in attempts; wait before trying again',
+          },
+          { status: 429 },
+        ),
+      ),
+    )
+    renderWithProviders(<LoginPage />, { route: '/login' })
+
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Accedi' }))
+    await settle()
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Troppi tentativi di accesso. Attendi qualche minuto e riprova.',
+    )
+  })
+
   it.each([
     ['/valid/path', '/valid/path'],
     ['https://evil.example', '/'],

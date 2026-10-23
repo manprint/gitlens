@@ -24,7 +24,7 @@ function renderAudit(entries: AuditEntry[]) {
 }
 
 describe('CommandAudit', () => {
-  it('UI-SET-024 shows a queryid above 2^53 with every digit', async () => {
+  it('UI-SET-037 shows a queryid above 2^53 with every digit', async () => {
     // The server writes queryid as a string, since a JSON number above 2^53
     // loses its last digits when the browser parses it.
     const body =
@@ -149,7 +149,7 @@ describe('CommandAudit', () => {
     await waitFor(() => expect(screen.getByText('No command activity')).toBeInTheDocument())
   })
 
-  it('UI-SET-035 reports a 200 body that is not JSON as an invalid response', async () => {
+  it('UI-SET-038 reports a 200 body that is not JSON as an invalid response', async () => {
     // A proxy can answer 200 with an HTML page. The read must fail as a
     // malformed API response, not as a bare SyntaxError the alert cannot render.
     server.use(

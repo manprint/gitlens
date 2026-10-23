@@ -114,7 +114,7 @@ function tooltipFor(
     const samples = metadataPoint?.samples
     const ticks = metadataPoint?.ticks
     return (
-      `<div><strong>${escapeHtml(name)}</strong>: ${formatMetric(value)} avg_active_sessions ` +
+      `<div><strong>${escapeHtml(name)}</strong>: ${formatMetric(value)} avg active backends ` +
       `(samples: ${formatCount(samples)}, ticks: ${formatCount(ticks)})</div>`
     )
   })
@@ -198,7 +198,7 @@ export function buildAshOption(
       type: 'time',
       axisLabel: { formatter: formatUtcTimestamp },
     },
-    yAxis: { type: 'value', min: 0, name: 'avg active sessions' },
+    yAxis: { type: 'value', min: 0, name: 'avg active backends' },
     dataZoom: [
       { type: 'inside', xAxisIndex: 0, filterMode: 'none', throttle: 50 },
       { type: 'slider', xAxisIndex: 0, filterMode: 'none', bottom: 8 },

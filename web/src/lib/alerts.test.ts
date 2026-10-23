@@ -77,6 +77,33 @@ describe('alerts derivation', () => {
     ).toBe(false)
   })
 
+  it('UI-ALERT-059 matchSilence treats a null label map and null ids as absent', () => {
+    const raw = {
+      ...alert(),
+      labels: null,
+      cluster_id: null,
+      instance_id: null,
+    } as unknown as Alert
+    expect(matchSilence(raw, silence({ matchers: [{ name: 'instance_id', value: 'null' }] }))).toBe(
+      false,
+    )
+    expect(matchSilence(raw, silence({ matchers: [{ name: 'team', value: 'database' }] }))).toBe(
+      false,
+    )
+  })
+
+  it('UI-ALERT-062 orders an alert with a null cluster as it orders one with no cluster', () => {
+    const cluster = alert({ alert_key: 'on-cluster', cluster_id: '7' })
+    const absent = alert({ alert_key: 'unassigned' })
+    const nullCluster = {
+      ...alert({ alert_key: 'unassigned' }),
+      cluster_id: null,
+    } as unknown as Alert
+    const order = (alerts: Alert[]) => rankAlerts(alerts).map((item) => item.alert_key)
+
+    expect(order([cluster, nullCluster])).toEqual(order([cluster, absent]))
+  })
+
   it('UI-ALERT-005 silenceWindow classifies pending, active and expired against the frozen clock', () => {
     const current = new Date(instant)
     const window = silence({

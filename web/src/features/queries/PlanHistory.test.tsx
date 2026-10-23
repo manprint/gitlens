@@ -35,8 +35,11 @@ function renderHistory() {
   )
 }
 
-function plansHandler(plans: object[]) {
-  return http.get('*/api/v1/plans', () => HttpResponse.json({ plans, total_shapes: plans.length }))
+// total_shapes counts distinct plan hashes, as the server does: plain and ANALYZE
+// captures of one shape share a hash.
+function plansHandler(plans: { plan_hash: string }[]) {
+  const total_shapes = new Set(plans.map((plan) => plan.plan_hash)).size
+  return http.get('*/api/v1/plans', () => HttpResponse.json({ plans, total_shapes }))
 }
 
 describe('PlanHistory', () => {
