@@ -161,6 +161,53 @@ func TestSelector_MaxKeysTruncates(t *testing.T) {
 	require.Equal(t, "key-0", kept[0].Key)
 }
 
+func TestSelector_ConfiguredTopNIsHonoured(t *testing.T) {
+	t.Parallel()
+	// The two rankings are disjoint: the 150 highest Primary and the 150
+	// highest Secondary name 300 different keys, which is what top_n = 150
+	// asks for. The default cap of 200 used to cut 100 of them every cycle.
+	sel := cardinality.NewSelector(cardinality.Options{TopN: 150, Hysteresis: 5})
+	candidates := make([]cardinality.Candidate, 0, 400)
+	for i := 0; i < 150; i++ {
+		candidates = append(candidates,
+			cardinality.Candidate{Key: "p-" + itoa(i), Primary: float64(1000 - i), Secondary: 0},
+			cardinality.Candidate{Key: "s-" + itoa(i), Primary: 0, Secondary: float64(1000 - i)},
+		)
+	}
+	for i := 0; i < 100; i++ {
+		candidates = append(candidates, cardinality.Candidate{Key: "o-" + itoa(i), Primary: 0, Secondary: 0})
+	}
+	for cycle := uint64(1); cycle <= 3; cycle++ {
+		kept, truncated := sel.Select(cycle, candidates)
+		require.False(t, truncated, "cycle %d", cycle)
+		require.Len(t, kept, 300, "cycle %d", cycle)
+	}
+}
+
+func TestSelector_FreshKeysOutrankRetainedHistory(t *testing.T) {
+	t.Parallel()
+	// In cycle 2 the top two by Primary are new keys. h1 and h2 are retained
+	// history with a high Primary, and s1 and s2 are fresh by Secondary with a
+	// low Primary. With a cap of 4 the history must be cut, not the fresh keys.
+	sel := cardinality.NewSelector(cardinality.Options{TopN: 2, MaxKeys: 4, Hysteresis: 5})
+	sel.Select(1, []cardinality.Candidate{
+		{Key: "h1", Primary: 100, Secondary: 0},
+		{Key: "h2", Primary: 99, Secondary: 0},
+		{Key: "s1", Primary: 2, Secondary: 100},
+		{Key: "s2", Primary: 1, Secondary: 99},
+	})
+	kept, truncated := sel.Select(2, []cardinality.Candidate{
+		{Key: "n1", Primary: 200, Secondary: 0},
+		{Key: "n2", Primary: 190, Secondary: 0},
+		{Key: "h1", Primary: 100, Secondary: 0},
+		{Key: "h2", Primary: 99, Secondary: 0},
+		{Key: "s1", Primary: 2, Secondary: 100},
+		{Key: "s2", Primary: 1, Secondary: 99},
+	})
+	require.True(t, truncated)
+	require.ElementsMatch(t, []string{"n1", "n2", "s1", "s2"}, keysOf(kept))
+}
+
 func itoa(i int) string {
 	// simple
 	if i == 0 {

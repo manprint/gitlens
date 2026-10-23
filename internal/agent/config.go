@@ -127,7 +127,7 @@ type ChecksConfig map[string]CheckConfig
 // CheckConfig is a single check's configuration.
 type CheckConfig struct {
 	Interval      string `yaml:"interval"`
-	TopN          int    `yaml:"top_n"`          // for stat_statements
+	TopN          int    `yaml:"top_n"`          // for every check that takes a top-N budget
 	ByApplication bool   `yaml:"by_application"` // for activity
 	// Enabled is nil (default enabled) unless explicitly set; only "ash"
 	// consults this today (SYS-ASH-002: disabling it must produce no
