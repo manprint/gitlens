@@ -128,3 +128,34 @@ func TestINTCMD008_ExplainParameterisedStatement(t *testing.T) {
 		require.NotEmpty(t, result)
 	})
 }
+
+// TestINTCMD014_ExplainAnalyzePlanHashIsStable: plan history keys each plan by
+// its hash, so two ANALYZE runs of one statement must hash alike. The real
+// output carries timings and buffer counts that differ on every run.
+func TestINTCMD014_ExplainAnalyzePlanHashIsStable(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		_, err := admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+		require.NoError(t, err)
+
+		const statement = "SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace"
+		ids := registerStatements(t, pg, statement)
+
+		hashOf := func() string {
+			result, err := explainAs(t, pg, pgtest.RoleT1, ids[statement], true)
+			require.NoError(t, err)
+			require.Contains(t, string(result), "Shared Hit Blocks")
+			var decoded struct {
+				PlanHash string `json:"plan_hash"`
+			}
+			require.NoError(t, json.Unmarshal(result, &decoded))
+			require.NotEmpty(t, decoded.PlanHash)
+			return decoded.PlanHash
+		}
+		first := hashOf()
+		second := hashOf()
+		require.Equal(t, first, second)
+	})
+}

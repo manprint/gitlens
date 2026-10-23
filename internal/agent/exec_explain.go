@@ -321,7 +321,7 @@ func planHash(plan json.RawMessage) (string, error) {
 	if err := json.Unmarshal(plan, &value); err != nil {
 		return "", err
 	}
-	normalized := stripPlanRuntimeFields(value)
+	normalized := structuralPlanFields(value)
 	canonical, err := json.Marshal(normalized)
 	if err != nil {
 		return "", err
@@ -330,19 +330,60 @@ func planHash(plan json.RawMessage) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func stripPlanRuntimeFields(value any) any {
+// structuralPlanKeys are the keys of a FORMAT JSON plan that describe its
+// shape. The hash keeps only these, not everything but a list of runtime
+// keys: EXPLAIN ANALYZE with BUFFERS adds timings, buffer counters, planning
+// and execution time, trigger and I/O figures, and their names change across
+// major versions, so a denylist misses some on every release. Estimates
+// (costs, row counts and widths) are left out too, so that the hash moves when
+// the plan changes shape, not when the statistics behind it do.
+var structuralPlanKeys = map[string]bool{
+	"Plan":                true,
+	"Plans":               true,
+	"Node Type":           true,
+	"Parent Relationship": true,
+	"Parallel Aware":      true,
+	"Async Capable":       true,
+	"Join Type":           true,
+	"Partial Mode":        true,
+	"Strategy":            true,
+	"Scan Direction":      true,
+	"Command":             true,
+	"Operation":           true,
+	"Relation Name":       true,
+	"Schema":              true,
+	"Alias":               true,
+	"Index Name":          true,
+	"Function Name":       true,
+	"CTE Name":            true,
+	"Subplan Name":        true,
+	"Filter":              true,
+	"Index Cond":          true,
+	"Recheck Cond":        true,
+	"Hash Cond":           true,
+	"Merge Cond":          true,
+	"Join Filter":         true,
+	"One-Time Filter":     true,
+	"Sort Key":            true,
+	"Group Key":           true,
+	"Output":              true,
+	"Workers Planned":     true,
+	"Inner Unique":        true,
+}
+
+func structuralPlanFields(value any) any {
 	switch typed := value.(type) {
 	case []any:
 		for i := range typed {
-			typed[i] = stripPlanRuntimeFields(typed[i])
+			typed[i] = structuralPlanFields(typed[i])
 		}
 	case map[string]any:
 		for key, child := range typed {
-			if key == "Actual Rows" || key == "Actual Total Time" || key == "Actual Startup Time" || key == "Actual Loops" || strings.HasPrefix(key, "Buffers") {
+			if !structuralPlanKeys[key] {
 				delete(typed, key)
 				continue
 			}
-			typed[key] = stripPlanRuntimeFields(child)
+			typed[key] = structuralPlanFields(child)
 		}
 	}
 	return value

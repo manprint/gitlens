@@ -46,6 +46,23 @@ func TestPlansAPI_MarksChangedAfterFirst(t *testing.T) {
 	require.False(t, response.Plans[1].Changed)
 }
 
+// A plain and an ANALYZE capture of the same shape are two rows with one hash;
+// neither is a change.
+func TestPlansAPI_SameShapeCapturedTwiceIsNotChanged(t *testing.T) {
+	now := time.Now().UTC()
+	p := &mockPool{queryResults: []*mockRows{{rows: [][]any{
+		{int64(2), "shape", now.Add(time.Minute), true, []byte(`[]`)},
+		{int64(1), "shape", now, false, []byte(`[]`)},
+	}}}}
+	rec := httptest.NewRecorder()
+	plansRouter(&API{pool: p}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/plans?queryid=7", http.NoBody))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var response planHistoryResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.False(t, response.Plans[0].Changed)
+	require.False(t, response.Plans[1].Changed)
+}
+
 func TestPlansAPI_TotalShapes(t *testing.T) {
 	p := &mockPool{queryResults: []*mockRows{{rows: [][]any{{int64(1), "one", time.Now(), false, []byte(`[]`)}}}}}
 	rec := httptest.NewRecorder()

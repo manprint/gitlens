@@ -181,12 +181,32 @@ func TestExplain_BuffersOnlyWithAnalyze(t *testing.T) {
 	}
 }
 
-func TestExplain_PlanHashIgnoresActualFields(t *testing.T) {
-	one, err := planHash([]byte(`[{"Plan":{"Node Type":"Index Scan","Actual Rows":1,"Actual Total Time":2,"Buffers":{"Shared Hit Blocks":3}}}]`))
+// planOutput is EXPLAIN (ANALYZE, BUFFERS, VERBOSE, FORMAT JSON) of an index
+// scan, with the keys PostgreSQL adds to a real plan: buffer counters on the
+// node and in Planning, timings, and triggers at the top level.
+func planOutput(rows, hit, planRows, executionTime, indexName string) string {
+	return `[{"Plan":{"Node Type":"Index Scan","Parallel Aware":false,"Async Capable":false,` +
+		`"Scan Direction":"Forward","Index Name":"` + indexName + `","Relation Name":"t","Schema":"public","Alias":"t",` +
+		`"Startup Cost":0.15,"Total Cost":8.17,"Plan Rows":` + planRows + `,"Plan Width":36,` +
+		`"Actual Startup Time":0.02,"Actual Total Time":0.03,"Actual Rows":` + rows + `,"Actual Loops":1,` +
+		`"Output":["id","v"],"Index Cond":"(id = 1)","Rows Removed by Index Recheck":0,` +
+		`"Shared Hit Blocks":` + hit + `,"Shared Read Blocks":0,"Shared Dirtied Blocks":0,"Shared Written Blocks":0,` +
+		`"Local Hit Blocks":0,"Local Read Blocks":0,"Local Dirtied Blocks":0,"Local Written Blocks":0,` +
+		`"Temp Read Blocks":0,"Temp Written Blocks":0,"I/O Read Time":0.0,"I/O Write Time":0.0},` +
+		`"Planning":{"Shared Hit Blocks":5,"Shared Read Blocks":0,"Shared Dirtied Blocks":0,"Shared Written Blocks":0,` +
+		`"Local Hit Blocks":0,"Local Read Blocks":0,"Local Dirtied Blocks":0,"Local Written Blocks":0,` +
+		`"Temp Read Blocks":0,"Temp Written Blocks":0,"I/O Read Time":0.0,"I/O Write Time":0.0},` +
+		`"Planning Time":0.112,"Triggers":[],"Execution Time":` + executionTime + `}]`
+}
+
+// Two runs of the same statement differ in every runtime figure and in the
+// estimates the statistics produced; the hash must not move with either.
+func TestExplain_PlanHashIgnoresRuntimeAndEstimates(t *testing.T) {
+	first, err := planHash([]byte(planOutput("1", "2", "1", "0.051", "t_pkey")))
 	require.NoError(t, err)
-	two, err := planHash([]byte(`[{"Plan":{"Node Type":"Index Scan","Actual Rows":99,"Actual Total Time":88,"Buffers":{"Shared Hit Blocks":77}}}]`))
+	second, err := planHash([]byte(planOutput("1", "3", "40", "0.203", "t_pkey")))
 	require.NoError(t, err)
-	require.Equal(t, one, two)
+	require.Equal(t, first, second)
 }
 
 func TestExplain_PlanHashDiffersOnDifferentShape(t *testing.T) {
@@ -195,6 +215,13 @@ func TestExplain_PlanHashDiffersOnDifferentShape(t *testing.T) {
 	two, err := planHash([]byte(`[{"Plan":{"Node Type":"Seq Scan"}}]`))
 	require.NoError(t, err)
 	require.NotEqual(t, one, two)
+
+	// The same node type on another index is another plan.
+	withPrimary, err := planHash([]byte(planOutput("1", "2", "1", "0.05", "t_pkey")))
+	require.NoError(t, err)
+	withOther, err := planHash([]byte(planOutput("1", "2", "1", "0.05", "t_v_idx")))
+	require.NoError(t, err)
+	require.NotEqual(t, withPrimary, withOther)
 }
 
 func TestExplain_AnalyzeAlwaysRollsBack(t *testing.T) {

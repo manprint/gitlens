@@ -79,11 +79,12 @@ func (a *API) handlePlans(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "plan history read failed", err.Error())
 		return
 	}
-	// Rows are newest-first. A row is changed when it has an older shape to
-	// compare against, so the newest row—not the historical predecessor—must
-	// carry changed=true when more than one shape exists.
+	// Rows are newest-first. A row is changed when its plan hash differs from
+	// the row captured just before it. A plain and an ANALYZE capture of one
+	// shape are separate rows with the same hash, so comparing positions alone
+	// would mark every shape that was ever analyzed as changed.
 	for i := range out.Plans {
-		out.Plans[i].Changed = i < len(out.Plans)-1
+		out.Plans[i].Changed = i+1 < len(out.Plans) && out.Plans[i].PlanHash != out.Plans[i+1].PlanHash
 	}
 	out.TotalShapes = len(out.Plans)
 	writeJSON(w, http.StatusOK, out)
