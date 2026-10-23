@@ -2,13 +2,16 @@ import { act, fireEvent, screen } from '@testing-library/react'
 import { http, HttpResponse } from 'msw/http'
 import { describe, expect, it, vi } from 'vitest'
 
-import { COMMAND_CLIENT_TIMEOUT_MS, describeCommandState } from '@/lib/commands'
+import { describeCommandState } from '@/lib/commands'
 import { useCommand, useCreateCommand } from './commands'
 import { REFRESH } from './policy'
 import { renderWithProviders } from '@/test/render'
 import { server } from '@/test/msw/server'
 
 const commandId = '00000000-0000-4000-8000-000000000002'
+// Just past the default five-minute server TTL. The client must not decide
+// expiry before the server does, so a command still pending here stays pending.
+const PAST_DEFAULT_TTL_MS = 5 * 60_000 + 5_000
 
 function settle() {
   return act(async () => {
@@ -95,19 +98,27 @@ describe('command lifecycle query', () => {
     },
   )
 
-  it('UI-CMD-004 expires locally after TTL plus grace when the server remains pending', async () => {
+  it('UI-CMD-004 keeps a pending command pending past the TTL until the server expires it', async () => {
+    let state = 'pending'
     let calls = 0
     server.use(
       http.get('*/api/v1/commands/:id', () => {
         calls += 1
-        return HttpResponse.json({ command_id: commandId, state: 'pending' })
+        return HttpResponse.json({ command_id: commandId, state })
       }),
     )
 
     renderWithProviders(<CommandProbe />)
     await settle()
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(5 * 60_000 + 5_000)
+      await vi.advanceTimersByTimeAsync(PAST_DEFAULT_TTL_MS)
+    })
+    await flushQueryNotification()
+    expect(screen.getByTestId('command-state')).toHaveTextContent('pending')
+
+    state = 'expired'
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH.command.interval)
     })
     await flushQueryNotification()
     expect(screen.getByTestId('command-state')).toHaveTextContent('expired')
@@ -130,7 +141,7 @@ describe('command lifecycle query', () => {
     renderWithProviders(<CommandProbe />)
     await settle()
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(COMMAND_CLIENT_TIMEOUT_MS + REFRESH.command.interval)
+      await vi.advanceTimersByTimeAsync(PAST_DEFAULT_TTL_MS + REFRESH.command.interval)
     })
     await flushQueryNotification()
     expect(screen.getByTestId('command-state')).toHaveTextContent('claimed')
@@ -145,26 +156,33 @@ describe('command lifecycle query', () => {
     expect(screen.getByTestId('command-state')).toHaveTextContent('done')
   })
 
-  it('UI-CMD-009 says no agent claimed a command that stayed pending past the client timeout', async () => {
+  it('UI-CMD-009 keeps a command the server still reports pending past the TTL, then follows a claim', async () => {
+    let state = 'pending'
     server.use(
-      http.get('*/api/v1/commands/:id', () =>
-        HttpResponse.json({ command_id: commandId, state: 'pending' }),
-      ),
+      http.get('*/api/v1/commands/:id', () => HttpResponse.json({ command_id: commandId, state })),
     )
 
     renderWithProviders(<CommandCopyProbe />)
     await settle()
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(COMMAND_CLIENT_TIMEOUT_MS)
+      await vi.advanceTimersByTimeAsync(PAST_DEFAULT_TTL_MS)
     })
     await flushQueryNotification()
-
     expect(screen.getByTestId('command-copy')).toHaveTextContent(
-      'Command expired: no agent claimed it within the 5 minutes TTL.',
+      'Command is queued and waiting for an agent.',
+    )
+
+    state = 'claimed'
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH.command.interval)
+    })
+    await flushQueryNotification()
+    expect(screen.getByTestId('command-copy')).toHaveTextContent(
+      'Command was claimed by an agent and is running.',
     )
   })
 
-  it('UI-CMD-010 keeps a command claimed after it was pending in the claimed state past the client timeout', async () => {
+  it('UI-CMD-010 keeps a command claimed after it was pending in the claimed state past the TTL', async () => {
     let state = 'pending'
     let calls = 0
     server.use(
@@ -187,7 +205,7 @@ describe('command lifecycle query', () => {
 
     const callsBeforeTimeout = calls
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(COMMAND_CLIENT_TIMEOUT_MS)
+      await vi.advanceTimersByTimeAsync(PAST_DEFAULT_TTL_MS)
     })
     await flushQueryNotification()
     expect(screen.getByTestId('command-state')).toHaveTextContent('claimed')

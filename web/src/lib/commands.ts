@@ -3,11 +3,6 @@ import type { components } from '@/api/generated'
 export type ServerCommandState = components['schemas']['CommandResponse']['state']
 export type CommandState = ServerCommandState | 'succeeded' | 'rejected'
 
-export const COMMAND_TTL_MS = 5 * 60_000
-export const COMMAND_GRACE_MS = 5_000
-export const COMMAND_CLIENT_TIMEOUT_MS = COMMAND_TTL_MS + COMMAND_GRACE_MS
-export const COMMAND_TTL_LABEL = '5 minutes'
-
 const terminalStates: ReadonlySet<CommandState> = new Set([
   'done',
   'succeeded',
@@ -38,7 +33,7 @@ export function describeCommandState(state: CommandState, error?: string | null)
     case 'expired':
       return error
         ? `Command expired: ${error}`
-        : `Command expired: no result was recorded within the ${COMMAND_TTL_LABEL} TTL.`
+        : 'Command expired: its TTL ended before a result was recorded.'
     case 'rejected':
       return error ? `Command rejected by the agent: ${error}` : 'Command rejected by the agent.'
     default:

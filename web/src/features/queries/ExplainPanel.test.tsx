@@ -1,9 +1,10 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw/http'
 import { describe, expect, it, vi } from 'vitest'
 
 import ExplainPanel from './ExplainPanel'
 
+import { REFRESH } from '@/api/policy'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { renderWithProviders } from '@/test/render'
 import { server } from '@/test/msw/server'
@@ -114,6 +115,32 @@ describe('ExplainPanel', () => {
       expect(screen.getByRole('button', { name: 'Plan with ANALYZE' })).toBeDisabled()
     },
   )
+
+  it('UI-QRY-048 keeps both Run controls disabled past the TTL while the server reports pending', async () => {
+    // A server TTL above five minutes must not re-enable the controls for a command
+    // that an agent may still claim, so the client waits for the server's verdict.
+    commandHandlers({ command_id: COMMAND_ID, state: 'pending' })
+
+    renderPanel()
+    fireEvent.click(screen.getByRole('button', { name: /Run plan only/i }))
+    // The first poll must see the command pending before the clock moves on, so
+    // that the TTL window starts after the command exists.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH.command.interval)
+    })
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Command is queued and waiting for an agent.',
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5 * 60_000 + 5_000)
+    })
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Command is queued and waiting for an agent.',
+    )
+    expect(screen.getByRole('button', { name: /Run plan only/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Plan with ANALYZE' })).toBeDisabled()
+  })
 
   it('UI-QRY-025 renders plan node types, estimated and actual rows, and costs', async () => {
     commandHandlers({

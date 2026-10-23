@@ -1,13 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import {
-  COMMAND_CLIENT_TIMEOUT_MS,
-  COMMAND_GRACE_MS,
-  COMMAND_TTL_LABEL,
-  describeCommandState,
-  isTerminalCommandState,
-  type CommandState,
-} from './commands'
+import { describeCommandState, isTerminalCommandState, type CommandState } from './commands'
 
 describe('command lifecycle descriptions', () => {
   it('UI-CMD-003 surfaces the agent rejection reason verbatim', () => {
@@ -16,10 +9,11 @@ describe('command lifecycle descriptions', () => {
     )
   })
 
-  it('UI-CMD-004 names the TTL and grace period used by client expiry', () => {
-    expect(describeCommandState('expired')).toContain(COMMAND_TTL_LABEL)
-    expect(COMMAND_CLIENT_TIMEOUT_MS).toBeGreaterThan(COMMAND_TTL_LABEL === '5 minutes' ? 0 : 0)
-    expect(COMMAND_CLIENT_TIMEOUT_MS).toBe(5 * 60_000 + COMMAND_GRACE_MS)
+  it('UI-CMD-004 describes a server expiry without naming a TTL the client cannot know', () => {
+    // PGLENS_COMMAND_TTL sets the TTL on the server, so the copy must not state five minutes.
+    expect(describeCommandState('expired')).toBe(
+      'Command expired: its TTL ended before a result was recorded.',
+    )
   })
 
   it('WD-10 does not say no agent claimed a command when the server expired it', () => {
