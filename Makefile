@@ -5,6 +5,10 @@ PKG     := ./...
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 UI_E2E_RUN ?= UI
+# Pinned for the same reason as the CI workflow's env: a scanner installed
+# without a version changes its output and exit status without a commit. ci.yml
+# carries the same value, and deploy/workflows_test.go checks that they match.
+GOVULNCHECK_VERSION ?= v1.9.0
 
 .PHONY: build fmt fmt-check lint vet-tags vuln tidy-check stress test test-integration test-e2e test-e2e-full test-e2e-full-evidence test-e2e-matrix api-docs \
         ci-local ci-local-unit ci-local-integration ci-local-security coverage coverage-gate generate golden clean build-images build-images-multiarch \
@@ -47,7 +51,7 @@ vuln:
 	elif test -x "$$(go env GOPATH)/bin/govulncheck"; then \
 		"$$(go env GOPATH)/bin/govulncheck" ./...; \
 	else \
-		echo "govulncheck is required: go install golang.org/x/vuln/cmd/govulncheck@latest" >&2; exit 1; \
+		echo "govulncheck is required: go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)" >&2; exit 1; \
 	fi
 
 tidy-check:

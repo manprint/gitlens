@@ -27,6 +27,11 @@ env:
   # ("export data version 4 is greater than maximum supported version 2").
   # Raise this whenever go.mod's version rises; never lower it independently.
   GOLANGCI_LINT_VERSION: v2.15.0
+  # Pinned like the linter, and to the same value as the Makefile's
+  # GOVULNCHECK_VERSION. The scanner's output and exit status are what the
+  # security gate reads, so a new release has to arrive as a commit that
+  # changes this value.
+  GOVULNCHECK_VERSION: v1.9.0
 
 jobs:
   # Keep this fast gate independent; the Docker-backed browser gate lives in e2e.yml.
@@ -119,7 +124,7 @@ jobs:
       - name: Check module hygiene
         run: make tidy-check
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        run: go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
       - name: Scan for known vulnerabilities
         run: |
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"

@@ -14,6 +14,7 @@ import (
 // workflow is the part of a GitHub Actions workflow these tests read.
 type workflow struct {
 	Permissions map[string]string `yaml:"permissions"`
+	Env         map[string]string `yaml:"env"`
 	Jobs        map[string]struct {
 		Permissions map[string]string `yaml:"permissions"`
 		Uses        string            `yaml:"uses"`
@@ -80,4 +81,19 @@ func TestWorkflows_WriteScopeStaysWithAJobThatRunsNoAction(t *testing.T) {
 			}
 		}
 	}
+}
+
+// The security gate reads the output and exit status of govulncheck, so the
+// scanner has to change by a commit, not by a release. An install at @latest
+// changes with every release. One version is pinned in the Makefile, the
+// Makefile's hint names it, and ci.yml installs the same one.
+func TestWorkflows_GovulncheckIsPinnedToTheMakefileVersion(t *testing.T) {
+	makefile := string(readFile(t, filepath.Join("..", "Makefile")))
+	pin := regexp.MustCompile(`(?m)^GOVULNCHECK_VERSION \?= (v\d+\.\d+\.\d+)$`).FindStringSubmatch(makefile)
+	require.NotNil(t, pin, "Makefile must pin GOVULNCHECK_VERSION to a release")
+	require.Equal(t, pin[1], workflows(t)["ci.yml"].Env["GOVULNCHECK_VERSION"], "ci.yml must install the Makefile's govulncheck")
+	ci := string(readFile(t, filepath.Join("..", ".github", "workflows", "ci.yml")))
+	require.Contains(t, ci, "govulncheck@${{ env.GOVULNCHECK_VERSION }}")
+	require.NotContains(t, ci, "@latest")
+	require.NotContains(t, makefile, "@latest")
 }
