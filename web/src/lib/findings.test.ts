@@ -112,6 +112,12 @@ describe('finding helpers', () => {
     })
   })
 
+  it('UI-FIND-048 a catalogue that did not load flags no finding as missing from it', () => {
+    const [joined] = joinCatalogue([finding({ rule_id: 'missing-rule' })], [], false)
+
+    expect(joined).toMatchObject({ catalogue: null, catalogueMissing: false, needs: [] })
+  })
+
   it('UI-FIND-006 muteExpiry returns null for an unmuted finding', () => {
     expect(
       muteExpiry(

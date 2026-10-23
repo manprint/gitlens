@@ -92,10 +92,14 @@ export function summariseFindings(findings: readonly FindingRecord[]): FindingSu
   return summary
 }
 
-/** Attach the authoritative catalogue entry without losing findings for missing rules. */
+/**
+ * Attach the authoritative catalogue entry without losing findings for missing rules.
+ * When the catalogue itself did not load, no rule is known to be missing from it.
+ */
 export function joinCatalogue(
   findings: readonly FindingRecord[],
   rules: readonly AdvisorRule[],
+  catalogueLoaded = true,
 ): JoinedFinding[] {
   const catalogue = new Map(rules.map((rule) => [rule.id, rule]))
   return findings.map((finding) => {
@@ -103,7 +107,7 @@ export function joinCatalogue(
     return {
       ...finding,
       catalogue: rule,
-      catalogueMissing: rule === null,
+      catalogueMissing: catalogueLoaded && rule === null,
       min_tier: rule?.min_tier ?? null,
       needs: rule?.needs ?? [],
     }

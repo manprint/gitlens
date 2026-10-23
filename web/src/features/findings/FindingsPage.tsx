@@ -120,7 +120,11 @@ export function FindingsPage() {
     [findingsQuery.data],
   )
   const rules = useMemo(() => rulesQuery.data ?? [], [rulesQuery.data])
-  const joinedFindings = useMemo(() => joinCatalogue(findings, rules), [findings, rules])
+  const catalogueLoaded = rulesQuery.data !== undefined
+  const joinedFindings = useMemo(
+    () => joinCatalogue(findings, rules, catalogueLoaded),
+    [catalogueLoaded, findings, rules],
+  )
   const summary = useMemo(() => summariseFindings(findings), [findings])
   const allFindingsDegraded =
     findings.length > 0 && findings.every((finding) => finding.state === 'degraded')
