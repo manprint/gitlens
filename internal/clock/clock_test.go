@@ -2,6 +2,7 @@ package clock_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -99,6 +100,41 @@ func TestFake_TickerStop(t *testing.T) {
 	}
 	// Stop should not panic on second call
 	ticker.Stop()
+}
+
+// TestFake_TickerStopRacesAdvance runs Stop and Advance on one ticker from two
+// goroutines with nothing ordering them. Its job is the race detector: without
+// a synchronised stop flag, go test -race reports the two accesses. Stop must
+// still hold once both have returned.
+func TestFake_TickerStopRacesAdvance(t *testing.T) {
+	t.Parallel()
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 100; i++ {
+		f := clock.NewFake(start)
+		ticker := f.NewTicker(time.Millisecond)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			ticker.Stop()
+		}()
+		go func() {
+			defer wg.Done()
+			f.Advance(time.Millisecond)
+		}()
+		wg.Wait()
+
+		select {
+		case <-ticker.C():
+		default:
+		}
+		f.Advance(time.Millisecond)
+		select {
+		case <-ticker.C():
+			t.Fatal("should not fire after Stop")
+		default:
+		}
+	}
 }
 
 func TestFake_SleepReleases(t *testing.T) {
