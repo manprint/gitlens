@@ -6,9 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -17,6 +15,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 // TestDumpContainerInspect_InspectsEveryContainerOfTheStack proves the dump
@@ -82,34 +83,30 @@ esac
 // TestWriteMetricTables_DumpsRecentRowsOfEveryHypertable proves the metrics
 // dump lists the hypertables of the schema, counts their rows, and keeps the
 // newest rows, leaving out plain tables. It runs against a throwaway
-// TimescaleDB container that the test starts and removes itself.
+// TimescaleDB container started through testcontainers, which removes it at
+// the end of the test, or through its reaper if the test binary dies first.
 func TestWriteMetricTables_DumpsRecentRowsOfEveryHypertable(t *testing.T) {
-	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skip("docker is not available")
-	}
-	const image = "timescale/timescaledb:2.29.0-pg17"
-	name := fmt.Sprintf("pglens-probe-dump-%d", time.Now().UnixNano())
-	out, err := exec.Command("docker", "run", "-d", "--name", name,
-		"--label", "pglens.probe=1",
-		"-e", "POSTGRES_USER=pglens", "-e", "POSTGRES_PASSWORD=pglens", "-e", "POSTGRES_DB=pglens",
-		"-p", "127.0.0.1::5432", image).CombinedOutput()
-	if err != nil {
-		t.Fatalf("docker run %s: %v: %s", image, err, out)
-	}
-	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", name).Run() })
-
-	portOut, err := exec.Command("docker", "port", name, "5432").Output()
-	if err != nil {
-		t.Fatalf("docker port %s: %v", name, err)
-	}
-	var port int
-	if _, err := fmt.Sscanf(string(portOut), "127.0.0.1:%d", &port); err != nil {
-		t.Fatalf("parse published port %q: %v", portOut, err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	testcontainers.SkipIfProviderIsNotHealthy(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
-	dsn := fmt.Sprintf("postgres://pglens:pglens@127.0.0.1:%d/pglens?sslmode=disable", port)
+
+	ctr, err := postgres.Run(ctx, "timescale/timescaledb:2.29.0-pg17",
+		postgres.WithDatabase("pglens"),
+		postgres.WithUsername("pglens"),
+		postgres.WithPassword("pglens"),
+		testcontainers.WithWaitStrategy(
+			wait.ForLog("database system is ready to accept connections").
+				WithOccurrence(2).WithStartupTimeout(120*time.Second)),
+	)
+	testcontainers.CleanupContainer(t, ctr)
+	if err != nil {
+		t.Fatalf("start timescaledb: %v", err)
+	}
+	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
+	if err != nil {
+		t.Fatalf("timescaledb connection string: %v", err)
+	}
+
 	pool, err := waitForPool(ctx, dsn)
 	if err != nil {
 		t.Fatalf("timescaledb never accepted connections: %v", err)
