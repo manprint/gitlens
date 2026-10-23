@@ -273,14 +273,23 @@ func runAlertLeaderFailover(ctx context.Context, e *Env) error {
 	if e.KillServerReplica == nil {
 		return fmt.Errorf("alerting harness has no replica kill operation")
 	}
+	// KillServerReplica kills the replica holding the alert lock and returns
+	// once another replica holds it. A new leader restores the firing alert
+	// without re-sending it, so the one notification from before the kill must
+	// stay the only one across several engine ticks (2s each).
 	if err := e.KillServerReplica(); err != nil {
-		return fmt.Errorf("kill one server replica: %w", err)
+		return fmt.Errorf("kill the alert leader replica: %w", err)
 	}
-	if err := poll(ctx, 500*time.Millisecond, func(ctx context.Context) (bool, error) {
+	settle := time.Now().Add(8 * time.Second)
+	for time.Now().Before(settle) {
 		bodies, err := receiverCall(ctx, e.MockReceiverURL, http.MethodGet, "/_received", nil)
-		return err == nil && len(bodies) == 1, err
-	}); err != nil {
-		return fmt.Errorf("leader failover caused duplicate delivery: %w", err)
+		if err != nil {
+			return err
+		}
+		if len(bodies) != 1 {
+			return fmt.Errorf("leader failover caused duplicate delivery: %d bodies", len(bodies))
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
 	if err := e.Compose("start", "pglens-server"); err != nil {
 		return fmt.Errorf("restart killed server replica: %w", err)

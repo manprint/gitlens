@@ -944,11 +944,14 @@ func (h *Harness) Logs(service string) (string, error) {
 	return h.composeOutput("logs", "--no-color", service)
 }
 
-// KillServerReplica terminates exactly one pglens-server container from a
-// scaled alerting stack. A service-level compose kill would terminate both
-// replicas, so resolve one container id and use Docker directly.
-func (h *Harness) KillServerReplica() error {
-	out, err := h.composeOutput("ps", "-q", "pglens-server")
+// KillServerReplica terminates the pglens-server replica that holds the alert
+// engine's advisory lock, then waits until another replica has taken the lock.
+// Killing an arbitrary replica would be a failover only half the time, and a
+// service-level compose kill would terminate both replicas, so one container
+// id is resolved and killed with Docker directly.
+func (h *Harness) KillServerReplica(t *testing.T) error {
+	t.Helper()
+	out, err := h.composeOutput("ps", "-q", "--status", "running", "pglens-server")
 	if err != nil {
 		return err
 	}
@@ -956,11 +959,76 @@ func (h *Harness) KillServerReplica() error {
 	if len(ids) == 0 {
 		return fmt.Errorf("no pglens-server replica is running")
 	}
-	cmd := exec.Command("docker", "kill", ids[0])
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("docker kill %s: %w, output: %s", ids[0], err, output)
+	leader, err := h.alertLeaderReplica(t, ids)
+	if err != nil {
+		return err
 	}
-	return nil
+	if leader == "" {
+		return fmt.Errorf("no running pglens-server replica holds the alert engine lock")
+	}
+	cmd := exec.Command("docker", "kill", leader)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("docker kill %s: %w, output: %s", leader, err, output)
+	}
+	return h.awaitAlertFailover(t, leader, ids)
+}
+
+// alertLeaderReplica returns the id, among ids, of the replica whose address
+// holds the alert engine's lock, or "" when none does. The lock lives on the
+// store database, so the holder's client address is a replica's address.
+func (h *Harness) alertLeaderReplica(t *testing.T, ids []string) (string, error) {
+	t.Helper()
+	_, addr, err := AdvisoryLockHolder(context.Background(), h.DB(t), AlertLockName)
+	if err != nil {
+		return "", err
+	}
+	if addr == "" {
+		return "", nil
+	}
+	for _, id := range ids {
+		ips, err := containerIPs(id)
+		if err != nil {
+			return "", err
+		}
+		for _, ip := range ips {
+			if ip == addr {
+				return id, nil
+			}
+		}
+	}
+	return "", nil
+}
+
+// awaitAlertFailover waits, for a bounded time, until a replica other than
+// killed holds the alert engine's lock. The engine ticks every 2 seconds and
+// the lock is released when the killed replica's connection closes, so a
+// failover completes within a few ticks. The bound is a clock deadline, not the
+// scenario context, so a stuck failover fails here rather than after minutes.
+func (h *Harness) awaitAlertFailover(t *testing.T, killed string, ids []string) error {
+	t.Helper()
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		holder, err := h.alertLeaderReplica(t, ids)
+		if err == nil && holder != "" && holder != killed {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				return fmt.Errorf("no failover within 60s: %w", err)
+			}
+			return fmt.Errorf("no failover within 60s: alert engine lock holder is %q", holder)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// containerIPs returns the addresses a container has on its networks.
+func containerIPs(id string) ([]string, error) {
+	out, err := exec.Command("docker", "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}", id).Output()
+	if err != nil {
+		return nil, fmt.Errorf("docker inspect %s: %w", id, err)
+	}
+	return strings.Fields(string(out)), nil
 }
 
 // Workload runs test/workload (workloadctl) as a host subprocess with the
@@ -1063,7 +1131,7 @@ func (h *Harness) Scenario(t *testing.T, id string) {
 			return scenario.RemoveFunc(remove), nil
 		},
 		AssertInvariants:  h.AssertInvariants,
-		KillServerReplica: h.KillServerReplica,
+		KillServerReplica: func() error { return h.KillServerReplica(t) },
 	}
 	for _, api := range h.apiClients {
 		env.APIs = append(env.APIs, api)
