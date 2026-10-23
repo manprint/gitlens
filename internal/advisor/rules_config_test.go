@@ -276,3 +276,24 @@ func TestPackC_AllRulesSatisfyContract(t *testing.T) {
 		}
 	}
 }
+
+// TestRule_config_work_mem_low_EvidenceCarriesTempFiles: the finding names the
+// count of temporary files, summed over the databases, so the evidence tells
+// many small spills from a few large ones. Without the metric it names none.
+func TestRule_config_work_mem_low_EvidenceCarriesTempFiles(t *testing.T) {
+	s := configBase()
+	s.Settings["work_mem_bytes"] = "1"
+	s.Statements = []StatementStat{{Calls: 2, TempBytes: 10}}
+	s.Metrics = map[string]map[string]float64{"pg_temp_files_total": {
+		pgtype.CanonicalLabels(map[string]string{"database": "app1"}): 3,
+		pgtype.CanonicalLabels(map[string]string{"database": "app2"}): 2,
+	}}
+	got := ruleByID(t, "config.work_mem_low").Evaluate(s)
+	require.Len(t, got, 1)
+	require.Equal(t, 5.0, got[0].Evidence["pg_temp_files_total"])
+
+	s.Metrics = nil
+	got = ruleByID(t, "config.work_mem_low").Evaluate(s)
+	require.Len(t, got, 1)
+	require.NotContains(t, got[0].Evidence, "pg_temp_files_total")
+}
