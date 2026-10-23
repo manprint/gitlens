@@ -255,7 +255,7 @@ func printChecks(w io.Writer, checks []check.Check, role pgtype.Role, pgVersion 
 			}
 		}
 
-		fmt.Fprintf(w, "  %-18s %s\n", c.Name(), status)
+		_, _ = fmt.Fprintf(w, "  %-18s %s\n", c.Name(), status)
 	}
 	return mandatoryCount, mandatoryEnabled
 }
