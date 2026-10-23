@@ -233,9 +233,13 @@ func (e *Engine) Apply(obs Observation) []Event {
 			inst.orphanAt = time.Time{}
 			inst.orphanedAt = time.Time{}
 		}
-	} else {
-		// Only a standby can be orphaned, so any other role ends an episode that
-		// began while the instance was a standby.
+	}
+
+	if obs.Role == pgtype.RolePrimary {
+		// Only a standby can be orphaned, so a primary ends an episode that
+		// began while the instance was a standby. Unknown is no evidence either
+		// way: the agent reports it when its role cannot be read this cycle, and
+		// that must not restart the clock.
 		inst.orphanAt = time.Time{}
 		inst.orphanedAt = time.Time{}
 	}

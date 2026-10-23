@@ -839,6 +839,32 @@ func TestEngine_OrphanEpisodeEndsWhenNotStandby(t *testing.T) {
 	}
 }
 
+// TestEngine_OrphanEpisodeHeldWhenRoleUnknown — the agent reports an unknown
+// role when it cannot read its role cache in a cycle, which says nothing about
+// whether the standby is still orphaned. Such an observation must not restart
+// the episode clock: orphaned at t=0, unknown at t=30, orphaned again at t=61
+// is one episode of 61 seconds, reported at once.
+func TestEngine_OrphanEpisodeHeldWhenRoleUnknown(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	e := NewEngine(clk)
+	standby := uuid.New()
+	cID := pgtype.ManualClusterID("cluster1")
+	observe := orphanObserver(e, clk, standby, cID)
+	lowEdge := []Edge{{From: standby, To: uuid.New(), Confidence: "low"}}
+
+	observe(lowEdge, pgtype.RoleStandby) // t=0
+	clk.Advance(30 * time.Second)
+	observe(nil, pgtype.RoleUnknown) // role unreadable at t=30
+	clk.Advance(31 * time.Second)
+	got := observe(lowEdge, pgtype.RoleStandby) // t=61
+	if len(got) != 1 {
+		t.Fatalf("got %d orphan events at t=61, want 1: an unknown observation restarted the episode", len(got))
+	}
+	if d, _ := got[0].Payload["duration_seconds"].(float64); d != 61 {
+		t.Fatalf("orphan duration %v, want 61", got[0].Payload["duration_seconds"])
+	}
+}
+
 // TestEngine_EvictBoundsState — the engine tracked one instanceState (plus
 // its own edgeSeenAt map) per instance_id it had ever seen, for the lifetime
 // of the server process. Instance ids are not stable across a lost identity
