@@ -28,6 +28,10 @@ func TestHostAPI_RemoteInstanceReportsUnavailable(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	require.Equal(t, false, got["available"])
 	require.Equal(t, "target is not local to any agent", got["reason"])
+	// No sample was taken, so there is no time to report. The zero time is
+	// not a sample, and omitempty does not drop a struct field.
+	_, hasSampled := got["sampled_at"]
+	require.False(t, hasSampled, rec.Body.String())
 	_, hasMemory := got["host_mem_total_bytes"]
 	require.False(t, hasMemory)
 }

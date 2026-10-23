@@ -405,6 +405,11 @@ components:
     HostResponse:
       type: object
       required: [instance_id, available]
+      description: >-
+        When available is true, the response carries the sample time, the
+        source and each host metric as a top-level numeric property named
+        host_*. When available is false, reason says why and no sample time
+        is sent.
       properties:
         instance_id: { $ref: '#/components/schemas/InstanceId' }
         available: { type: boolean }
@@ -412,7 +417,10 @@ components:
         source: { type: string }
         sampled_at: { $ref: '#/components/schemas/Timestamp' }
         stale: { type: boolean }
-        metrics: { type: object, additionalProperties: { type: number } }
+        metrics:
+          type: object
+          description: Never sent. Read the host_* properties instead.
+          additionalProperties: { type: number }
     Setting:
       type: object
       required: [name, value, unit, source, context, pending_restart, first_seen, last_seen, changed_at]

@@ -1033,6 +1033,7 @@ export interface components {
             /** Format: int32 */
             not_monitored_count: number;
         };
+        /** @description When available is true, the response carries the sample time, the source and each host metric as a top-level numeric property named host_*. When available is false, reason says why and no sample time is sent. */
         HostResponse: {
             instance_id: components["schemas"]["InstanceId"];
             available: boolean;
@@ -1040,6 +1041,7 @@ export interface components {
             source?: string;
             sampled_at?: components["schemas"]["Timestamp"];
             stale?: boolean;
+            /** @description Never sent. Read the host_* properties instead. */
             metrics?: {
                 [key: string]: number;
             };

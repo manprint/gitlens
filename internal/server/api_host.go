@@ -15,7 +15,7 @@ type hostAPIResponse struct {
 	Available  bool               `json:"available"`
 	Reason     string             `json:"reason,omitempty"`
 	Source     string             `json:"source,omitempty"`
-	SampledAt  time.Time          `json:"sampled_at,omitempty"`
+	SampledAt  time.Time          `json:"sampled_at,omitzero"`
 	Stale      bool               `json:"stale,omitempty"`
 	Metrics    map[string]float64 `json:"-"`
 }
