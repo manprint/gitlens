@@ -385,23 +385,55 @@ func TestINTCMD024_ExplainAnalyzeRefusesEffectsBehindViews(t *testing.T) {
 			require.Equal(t, before, statsReset(), role.String())
 		}
 
-		// The effect is WAL that a read-only transaction cannot roll back.
-		walInsert := func() string {
+		// The effect is a WAL message that a read-only transaction cannot roll
+		// back. The cluster writes WAL of its own (running-transaction records,
+		// checkpoints) while the test runs, so an insert-LSN delta cannot tell
+		// the refused statement from that. pg_walinspect reads the records
+		// between two LSNs, and the test counts only the messages with the
+		// guard's prefix. pg_walinspect reads only flushed WAL, and under
+		// synchronous_commit=off the flush of a non-transactional message can
+		// wait for the WAL writer. A mark therefore commits a transactional
+		// message with synchronous_commit on: that commit flushes all the WAL
+		// before it, and the insert LSN read first lies before the commit.
+		_, err = admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_walinspect")
+		require.NoError(t, err)
+		t.Cleanup(func() { _, _ = admin.Exec(context.Background(), "DROP EXTENSION IF EXISTS pg_walinspect") })
+		walMark := func() string {
 			var lsn string
-			require.NoError(t, admin.QueryRow(ctx, "SELECT pg_current_wal_insert_lsn()::text").Scan(&lsn))
+			require.NoError(t, admin.QueryRow(ctx, "SELECT pg_catalog.pg_current_wal_insert_lsn()::text").Scan(&lsn))
+			tx, err := admin.Begin(ctx)
+			require.NoError(t, err)
+			_, err = tx.Exec(ctx, "SET LOCAL synchronous_commit = on")
+			require.NoError(t, err)
+			_, err = tx.Exec(ctx, "SELECT pg_catalog.pg_logical_emit_message(true, 'pglens-mark', '')")
+			require.NoError(t, err)
+			require.NoError(t, tx.Commit(ctx))
 			return lsn
+		}
+		// guardMessages counts the messages with the guard's prefix written
+		// after from, and returns the mark that ends the count.
+		guardMessages := func(from string) (int, string) {
+			to := walMark()
+			var n int
+			require.NoError(t, admin.QueryRow(ctx, `SELECT pg_catalog.count(*) FROM pg_get_wal_records_info($1::pg_catalog.pg_lsn, $2::pg_catalog.pg_lsn)
+				WHERE resource_manager = 'LogicalMessage' AND description LIKE '%prefix "pglens-guard";%'`, from, to).Scan(&n))
+			return n, to
 		}
 		_, err = admin.Exec(ctx, "CREATE VIEW pglens_guard.v_message AS SELECT pg_logical_emit_message(false, 'pglens-guard', 'x') AS emitted")
 		require.NoError(t, err)
 		const message = "SELECT * FROM pglens_guard.v_message"
-		before = walInsert()
+		mark := walMark()
 		messageID := registerStatements(t, pg, message)[message]
-		require.NotEqual(t, before, walInsert())
-		before = walInsert()
+		// The positive control: the registration wrote the message.
+		var written int
+		written, mark = guardMessages(mark)
+		require.Equal(t, 1, written)
 		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
 			_, err = explainAs(t, pg, role, messageID, true)
 			requireRefused(t, err, "pg_logical_emit_message()")
-			require.Equal(t, before, walInsert(), role.String())
+			var n int
+			n, mark = guardMessages(mark)
+			require.Equal(t, 0, n, role.String())
 		}
 
 		// dblink opens its own session, so the write it makes is not undone by
