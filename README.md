@@ -413,12 +413,20 @@ results.
 
 Security and operational boundaries:
 
-- pglens never writes to a monitored database. Every connection the agent
-  opens sets `default_transaction_read_only = on` before first use, so every
-  transaction — from a check, from ASH or from a command — starts read-only
-  and PostgreSQL itself refuses `INSERT`/`UPDATE`/`DELETE`, DDL and
-  `nextval()`. The checks read catalog views and statistics functions covered
-  by `pg_monitor` (for example `pg_ls_archive_statusdir()` for the archiver's
+- pglens's own statements do not write to a monitored database. Every
+  connection the agent opens sets `default_transaction_read_only = on` before
+  first use, so every transaction — from a check, from ASH or from a command —
+  starts read-only and PostgreSQL itself refuses `INSERT`/`UPDATE`/`DELETE`,
+  DDL and `nextval()`. Some effects lie outside a transaction: a rollback does
+  not undo them and the read-only setting does not refuse them. They are a
+  `dblink` call, a session advisory lock, a WAL message, a signal to another
+  backend, and a transaction ID. The checks never make them. Only the opt-in
+  commands can: `EXPLAIN ANALYZE` refuses a statement whose plan reaches one
+  before it runs, and cancel and terminate are the signals themselves, which
+  need the T2 grant and `allow_signal`.
+  [docs/LIMITS.md](docs/LIMITS.md#4-explain-analyze-executes-the-statement)
+  lists the effects that remain. The checks read catalog views and statistics
+  functions covered by `pg_monitor` (for example `pg_ls_archive_statusdir()` for the archiver's
   backlog); `explain` and `pgstattuple` additionally open an explicit
   `READ ONLY` transaction and roll it back. The agent sets only session
   parameters (`application_name`, `statement_timeout`, `lock_timeout`,
@@ -445,8 +453,8 @@ Security and operational boundaries:
 - The server validates authentication, envelope shape, command state and expiry;
   the agent is authoritative for capability, target-policy and execution gates.
 - `EXPLAIN ANALYZE` executes the selected statement. The read-only transaction
-  stops it from changing data; effects outside the transaction (a `dblink`
-  call, a signal, a session advisory lock) are not undone by it, so the agent
+  stops it from changing this database's data; effects outside the transaction
+  (a `dblink` call, a signal, a session advisory lock) are not undone by it, so the agent
   first inspects the statement, the database and the `EXPLAIN (VERBOSE)` plan
   and refuses ANALYZE when anything could have such an effect: a user-defined
   function, a function of an extension that is not known to only compute, a
@@ -1623,7 +1631,7 @@ psql "$PGLENS_DSN" -v pglens_password="$PGLENS_MONITORING_PASSWORD" \
 
 Without this grant, the agent falls back to `cluster_name` for cluster identity, and a failover can split the cluster into two in the UI.
 
-**Agent reports `revoked` and stops collecting**
+**Agent reports `revoked` and stops scheduled collection**
 
 The agent has been explicitly revoked in the server. Check the database:
 
@@ -1636,7 +1644,7 @@ To re-enroll:
 UPDATE agents SET revoked_at = NULL WHERE agent_id = '...';
 ```
 
-The agent will resume after the next health check (default every push interval, ~15 seconds). Do not exit the agent container/service — the `revoked` state is visible in logs and health checks; restarting just delays visibility.
+After the update, the agent's next accepted push (about one push interval, ~15 seconds) sets its health back to `ok` and sends the records it still holds. Its scheduled checks (activity, locks, `pg_stat_statements` and the rest) do not come back with it: the scheduler stops once, when the agent sees the revocation, and nothing starts it again in the same process. Restart the agent with an accepted token to resume them. Keep the agent running until then, because its logs and health check show the `revoked` state. ASH sampling and host collection are not stopped by a revocation.
 
 **Ingest returns HTTP 400 for an unsupported protocol**
 
