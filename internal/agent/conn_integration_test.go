@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"net/url"
 	"testing"
 	"time"
 
@@ -396,6 +397,38 @@ func TestINTCONN009_ConnForRefusesUnselectedDatabases(t *testing.T) {
 		conn, err := mgr.ConnFor(ctx, "postgres")
 		require.NoError(t, err, "the database the DSN names stays reachable")
 		conn.Release()
+	})
+}
+
+// INT-CONN-010: a role whose name has an upper-case letter keeps the
+// permission tier it was granted. The tier lookup used to cast current_user to
+// regrole, which folds an unquoted name to lower case, so the role was not
+// found and was reported as T0 with no visible error.
+func TestINTCONN010_MixedCaseRoleKeepsItsTier(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		const role = "PgLensMixed"
+		quoted := pgx.Identifier{role}.Sanitize()
+		_, err := admin.Exec(ctx, "DROP ROLE IF EXISTS "+quoted)
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "CREATE ROLE "+quoted+" LOGIN PASSWORD 'test'")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, "GRANT pg_monitor, pg_read_all_data TO "+quoted)
+		require.NoError(t, err)
+		// Roles are cluster-wide and the snapshot restore does not drop them.
+		t.Cleanup(func() { _, _ = admin.Exec(context.Background(), "DROP ROLE IF EXISTS "+quoted) })
+
+		u, err := url.Parse(pg.DSN("app", pgtest.RoleSuperuser))
+		require.NoError(t, err)
+		u.User = url.UserPassword(role, "test")
+		mgr, err := NewManager(ctx, "mixed-target", u.String(), DefaultConnOptions(), clock.System())
+		require.NoError(t, err)
+		defer mgr.Close()
+
+		require.NoError(t, mgr.RefreshCapabilities(ctx))
+		require.Equal(t, pgtype.TierExplain, mgr.PermTier())
 	})
 }
 

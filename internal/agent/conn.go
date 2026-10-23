@@ -532,7 +532,7 @@ func (m *Manager) queryCapabilities(ctx context.Context, conn capabilityConn) (p
 			SELECT 1 FROM pg_auth_members m
 			JOIN pg_roles r ON m.roleid = r.oid
 			WHERE r.rolname = 'pg_read_all_data'
-			AND m.member = current_user::regrole::oid
+			AND m.member = (SELECT oid FROM pg_roles WHERE rolname = current_user)
 		)
 	`).Scan(&hasReadAllData); err == nil && hasReadAllData {
 		tier = pgtype.TierExplain
@@ -544,7 +544,7 @@ func (m *Manager) queryCapabilities(ctx context.Context, conn capabilityConn) (p
 			SELECT 1 FROM pg_auth_members m
 			JOIN pg_roles r ON m.roleid = r.oid
 			WHERE r.rolname = 'pg_signal_backend'
-			AND m.member = current_user::regrole::oid
+			AND m.member = (SELECT oid FROM pg_roles WHERE rolname = current_user)
 		)
 	`).Scan(&hasSignalBackend); err == nil && hasSignalBackend {
 		tier = pgtype.TierSignal

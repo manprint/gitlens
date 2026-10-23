@@ -281,7 +281,7 @@ func determinePermTier(ctx context.Context, conn *pgx.Conn) pgtype.PermTier {
 			SELECT 1 FROM pg_auth_members m
 			JOIN pg_roles r ON m.roleid = r.oid
 			WHERE r.rolname = 'pg_read_all_data'
-			AND m.member = current_user::regrole::oid
+			AND m.member = (SELECT oid FROM pg_roles WHERE rolname = current_user)
 		)
 	`).Scan(&hasReadAllData)
 	if err == nil && hasReadAllData {
@@ -295,7 +295,7 @@ func determinePermTier(ctx context.Context, conn *pgx.Conn) pgtype.PermTier {
 			SELECT 1 FROM pg_auth_members m
 			JOIN pg_roles r ON m.roleid = r.oid
 			WHERE r.rolname = 'pg_signal_backend'
-			AND m.member = current_user::regrole::oid
+			AND m.member = (SELECT oid FROM pg_roles WHERE rolname = current_user)
 		)
 	`).Scan(&hasSignalBackend)
 	if err == nil && hasSignalBackend {
