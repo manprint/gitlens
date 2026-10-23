@@ -513,7 +513,7 @@ func warnSuperuserTargets(ctx context.Context, w io.Writer, managers []*agent.Ma
 		superuser, err := mgr.SessionIsSuperuser(readCtx)
 		cancel()
 		if err == nil && superuser {
-			fmt.Fprintf(w, "warning: target %s connects as a superuser; the monitoring role must not be one (see deploy/sql/monitoring_user.sql), the agent runs anyway\n", mgr.Database())
+			_, _ = fmt.Fprintf(w, "warning: target %s connects as a superuser; the monitoring role must not be one (see deploy/sql/monitoring_user.sql), the agent runs anyway\n", mgr.Database())
 		}
 	}
 }

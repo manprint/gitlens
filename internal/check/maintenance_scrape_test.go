@@ -356,10 +356,10 @@ func TestRelationSizes_StopsBeforeTheDeadline(t *testing.T) {
 	// probe waits out the lock on every size probe, and counts them.
 	probe := func(sizeQuery string, probes *atomic.Int64) func(context.Context, string, ...any) pgx.Row {
 		return func(ctx context.Context, sql string, _ ...any) pgx.Row {
-			switch {
-			case sql == "SELECT now()":
+			switch sql {
+			case "SELECT now()":
 				return &mockRow{vals: []any{time.Now()}}
-			case sql == sizeQuery:
+			case sizeQuery:
 				probes.Add(1)
 				select {
 				case <-ctx.Done():
