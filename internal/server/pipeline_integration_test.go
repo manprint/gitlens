@@ -311,3 +311,85 @@ func TestPipeline_ReplicationSyncStateIsStored(t *testing.T) {
 		})
 	}
 }
+
+// TestPipeline_RetryAfterRolledBackEnvelopeKeepsRate — XR-08: the agent sends an
+// envelope again when its push fails with a 5xx. When the first attempt's write
+// failed, its counter baseline must not have moved, so the retry still stores
+// the rate of that interval. Before the fix the baseline had already advanced,
+// and the retry was dropped as a replay.
+func TestPipeline_RetryAfterRolledBackEnvelopeKeepsRate(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := context.Background()
+
+	// A trigger that fails metrics writes while the switch row is set. It stands
+	// in for a transient failure of the transaction after the observations.
+	_, err := pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS pglens_test_fail_writes (id int PRIMARY KEY, fail boolean NOT NULL)`)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO pglens_test_fail_writes (id, fail) VALUES (1, false) ON CONFLICT (id) DO UPDATE SET fail = false`)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `CREATE OR REPLACE FUNCTION pglens_test_fail_writes_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN
+			IF EXISTS (SELECT 1 FROM pglens_test_fail_writes WHERE fail) THEN
+				RAISE EXCEPTION 'injected write failure';
+			END IF;
+			RETURN NEW;
+		END $$`)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `CREATE TRIGGER pglens_test_fail_writes BEFORE INSERT ON metrics FOR EACH ROW EXECUTE FUNCTION pglens_test_fail_writes_fn()`)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DROP TRIGGER IF EXISTS pglens_test_fail_writes ON metrics`)
+		_, _ = pool.Exec(context.Background(), `DROP FUNCTION IF EXISTS pglens_test_fail_writes_fn()`)
+		_, _ = pool.Exec(context.Background(), `DROP TABLE IF EXISTS pglens_test_fail_writes`)
+	})
+	setFail := func(fail bool) {
+		t.Helper()
+		_, err := pool.Exec(ctx, `UPDATE pglens_test_fail_writes SET fail = $1 WHERE id = 1`, fail)
+		require.NoError(t, err)
+	}
+
+	instID := uuid.NewString()
+	cid := pgtype.ClusterID(55556).String()
+	p := NewPipeline(pool, clock.NewFake(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)))
+
+	ts1 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	ts2 := ts1.Add(60 * time.Second)
+	envAt := func(ts time.Time, value float64) wire.Envelope {
+		return wire.Envelope{
+			Instances: []wire.Instance{{
+				InstanceID: instID,
+				ClusterID:  cid,
+				Results: []wire.Result{{
+					Check: "bgwriter",
+					TS:    ts,
+					Metrics: []wire.Metric{{
+						Name:  "pg_xact_commit",
+						Value: value,
+						Kind:  "counter",
+					}},
+				}},
+			}},
+		}
+	}
+
+	_, err = p.Process(ctx, envAt(ts1, 1000))
+	require.NoError(t, err)
+
+	// First attempt: the write fails after the counter was observed.
+	setFail(true)
+	_, err = p.Process(ctx, envAt(ts2, 1100))
+	require.ErrorContains(t, err, "injected write failure")
+
+	// The agent re-sends the same envelope once the store is healthy again.
+	setFail(false)
+	_, err = p.Process(ctx, envAt(ts2, 1100))
+	require.NoError(t, err)
+
+	var stored int
+	var rate float64
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*), coalesce(max(value), 0) FROM metrics WHERE metric='pg_xact_commit' AND ts=$1`, ts2).Scan(&stored, &rate))
+	require.Equal(t, 1, stored, "the retry must store the rate of the interval the failed attempt observed")
+	require.InDelta(t, 100.0/60.0, rate, 1e-9)
+}

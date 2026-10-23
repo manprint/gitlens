@@ -29,7 +29,8 @@ type Stats struct {
 	BytesUsed       int64
 	Segments        int64
 	SamplesDropped  map[string]int64
-	CorruptRecords  int64
+	CorruptRecords  int64 // skipped on read: bad CRCs and zero headers (a zero-filled run counts once per header); one per cut on open
+	CutBytes        int64 // bytes removed from segment tails on open: torn writes and unplaceable headers
 	BufferFull      bool
 	LastDropTime    *time.Time
 	LastCorruptTime *time.Time
@@ -53,6 +54,10 @@ type Buffer struct {
 }
 
 // Open opens or creates a buffer in the given directory.
+//
+// A directory has exactly one writer. Nothing locks it, and Append cuts the
+// active segment back to the size this buffer tracks, which would cut the
+// records of a second writer.
 func Open(dir string, opts Options) (*Buffer, error) {
 	if opts.Clock == nil {
 		opts.Clock = clock.System()
@@ -91,6 +96,22 @@ func Open(dir string, opts Options) (*Buffer, error) {
 	}
 	sort.Strings(segFiles)
 
+	// Load the acked position before the segments are walked: the walk of the
+	// segment that holds the checkpoint starts there.
+	haveCheckpoint := true
+	if err := b.loadAckedPosition(); err != nil {
+		// Without a checkpoint nothing is known to be acked, so start from the
+		// beginning. A checkpoint that exists but cannot be read gets the same
+		// fallback, which replays the retained buffer. That is safe, since
+		// delivery is at least once, but it is reported rather than silent.
+		if !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "warning: buffer: unreadable acked checkpoint in %s, replaying the retained buffer: %v\n", dir, err)
+		}
+		haveCheckpoint = false
+		b.ackedSegID = 0
+		b.ackedOff = 0
+	}
+
 	// closeLoaded releases every descriptor opened so far. Open returns a nil
 	// Buffer on error, so nothing else can ever close them: without this an
 	// agent that fails to start (one unreadable segment, one unparsable name)
@@ -104,23 +125,42 @@ func Open(dir string, opts Options) (*Buffer, error) {
 	// Load each segment and recover the next segment ID.
 	for _, fname := range segFiles {
 		fpath := filepath.Join(dir, fname)
-		seg, err := openSegment(fpath)
-		if err != nil {
-			closeLoaded()
-			return nil, fmt.Errorf("open segment %s: %w", fname, err)
-		}
 
 		// Extract segment ID and update nextSegID.
 		var segID uint32
 		if _, err := fmt.Sscanf(fname, "%08x.seg", &segID); err != nil {
-			_ = seg.Close()
 			closeLoaded()
 			return nil, fmt.Errorf("parse segment filename %s: %w", fname, err)
+		}
+
+		// Only the segment that holds the checkpoint is walked from it. See
+		// openSegment for why the bytes before the checkpoint are not walked.
+		var keep uint64
+		if segID == b.ackedSegID {
+			keep = b.ackedOff
+		}
+		seg, cut, err := openSegment(fpath, keep)
+		if err != nil {
+			closeLoaded()
+			return nil, fmt.Errorf("open segment %s: %w", fname, err)
 		}
 		seg.id = segID
 		seg.maxSize = segmentSize(opts.MaxSize)
 		if segID >= b.nextSegID {
 			b.nextSegID = segID + 1
+		}
+		if cut > 0 {
+			// The cut bytes were never readable, so they were never deliverable.
+			// Counting them, with the warning, keeps the loss visible in Stats and
+			// on stderr, though nothing exports the counters yet. One record is
+			// counted per cut: the records behind a header that cannot be placed
+			// cannot be counted from the bytes, so the warning names the size as
+			// well.
+			b.stats.CorruptRecords++
+			b.stats.CutBytes += cut
+			tornAt := opts.Clock.Now()
+			b.stats.LastCorruptTime = &tornAt
+			fmt.Fprintf(os.Stderr, "warning: buffer: cut %d unreadable bytes from %s in %s\n", cut, fname, dir)
 		}
 
 		b.segments = append(b.segments, seg)
@@ -133,13 +173,59 @@ func Open(dir string, opts Options) (*Buffer, error) {
 	// Recalculate stats (recovered from disk).
 	b.recalculateStats()
 
-	// Load acked position from metadata file. It is read before the
-	// retention policies run, so that they count as dropped only the records
-	// that were never delivered.
-	if err := b.loadAckedPosition(); err != nil {
-		// If metadata doesn't exist, start from the beginning.
+	// The retention policies below run after the checkpoint is known, so that
+	// they count as dropped only the records that were never delivered.
+	//
+	// The checkpoint can point past every segment on disk: the segment files
+	// were removed (an operator clearing the directory, or every segment aging
+	// out) while .acked survived. New segments are numbered from the files
+	// alone, so they would land below the checkpoint, look acknowledged, and
+	// dropAckedSegments would delete them unread on the next start. Nothing on
+	// disk is acknowledged in that case, so the checkpoint restarts at the
+	// first segment that exists.
+	checkpointSegID, checkpointOff := b.ackedSegID, b.ackedOff
+	// The checkpoint is a segment ID too. The files alone do not show the IDs
+	// the checkpoint has used, so new segments are numbered above it and never
+	// take its ID.
+	if haveCheckpoint && b.ackedSegID >= b.nextSegID {
+		b.nextSegID = b.ackedSegID + 1
+	}
+	if n := len(b.segments); n == 0 || b.ackedSegID > b.segments[n-1].id {
 		b.ackedSegID = 0
 		b.ackedOff = 0
+		if n > 0 {
+			b.ackedSegID = b.segments[0].id
+		}
+	}
+
+	// The checkpoint can also point past the end of its own segment. A power
+	// loss can persist the rename of .acked without the data it refers to, so
+	// the segment is shorter than the checkpoint. Appends land at the end of the
+	// file, below the checkpoint, and the reader would never offer them. The
+	// checkpoint moves to the end of the file, where nothing is unacknowledged.
+	for _, seg := range b.segments {
+		if seg.id == b.ackedSegID && b.ackedOff > uint64(seg.fileSize) {
+			fmt.Fprintf(os.Stderr, "warning: buffer: acked checkpoint in %s is past the end of %08x.seg, restarting it at byte %d\n", dir, seg.id, seg.fileSize)
+			b.ackedOff = uint64(seg.fileSize)
+		}
+	}
+
+	// A corrected checkpoint is written now, before the buffer takes an append:
+	// kept only in memory, it would come back after an unclean exit. If the write
+	// fails, the stale checkpoint on disk must not stay. Left in place, the next
+	// Open would take the segments below it for acknowledged and delete them
+	// unread, once new segments exist above it. It is removed instead, so the next
+	// Open replays the buffer from its first segment. That repeats delivered
+	// records, which at-least-once delivery allows, but deletes nothing. If the
+	// removal fails too, Open fails rather than leave the stale checkpoint behind.
+	if b.ackedSegID != checkpointSegID || b.ackedOff != checkpointOff {
+		if err := b.saveAckedPosition(); err != nil {
+			if rmErr := os.Remove(filepath.Join(dir, ".acked")); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+				closeLoaded()
+				return nil, fmt.Errorf("remove stale acked checkpoint in %s after failed save (%w): %w", dir, err, rmErr)
+			}
+			fmt.Fprintf(os.Stderr, "warning: buffer: cannot save the corrected acked checkpoint in %s, removed the stale one: %v\n", dir, err)
+		}
 	}
 
 	b.dropAckedSegments()
@@ -162,6 +248,12 @@ func Open(dir string, opts Options) (*Buffer, error) {
 
 // Append appends an envelope to the buffer.
 func (b *Buffer) Append(env []byte) error {
+	// A zero-length record is never written. The reader and the reopen scan both
+	// treat a zero-length header as no record, so one written here would vanish.
+	if len(env) == 0 {
+		return errors.New("buffer: empty record")
+	}
+
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -224,6 +316,7 @@ func (b *Buffer) Next() ([]byte, AckFunc, error) {
 	defer b.mu.Unlock()
 
 	// Loop to skip corrupt records.
+scan:
 	for {
 		// Start from nextReadSeg/nextReadOff (or after the last ack).
 		for si := b.nextReadSeg; si < len(b.segments); si++ {
@@ -234,7 +327,7 @@ func (b *Buffer) Next() ([]byte, AckFunc, error) {
 			}
 
 			// If we got an envelope (nextOff advanced), return it with an ack function.
-			if nextOff > b.nextReadOff || si > b.nextReadSeg {
+			if nextOff > b.nextReadOff {
 				// We have a record (possibly after skipping corrupt ones).
 				if env != nil {
 					// Capture the segment and offset for the ack.
@@ -268,7 +361,11 @@ func (b *Buffer) Next() ([]byte, AckFunc, error) {
 				corruptAt := b.opts.Clock.Now()
 				b.stats.LastCorruptTime = &corruptAt
 				b.nextReadOff = nextOff
-				continue
+				// The inner loop is the one that reads the segments; continuing it
+				// would probe the next segment at this segment's offset. Re-read this
+				// segment after the corrupt record instead.
+				b.nextReadSeg = si
+				continue scan
 			}
 
 			// Segment caught up to its current end. Only advance past it
@@ -466,7 +563,13 @@ func (b *Buffer) unackedRecords(seg *Segment) int64 {
 
 // removeOldestSegment deletes the oldest segment. reason names the retention
 // policy responsible; only records that were never delivered count as
-// dropped, and an empty reason drops nothing but delivered records.
+// dropped. An empty reason is for the segments the checkpoint passes. Open
+// settles the checkpoint before any segment is dropped: a checkpoint past the
+// files moves back to the first one, and a stale checkpoint that cannot be
+// saved is removed, or Open fails. So those segments hold only delivered
+// records, with two residuals. A checkpoint from a pre-fix binary can pass
+// unacked records, which Open cannot detect, and .acked has no checksum
+// (AB-11), so a corrupted checkpoint of the right size is trusted.
 func (b *Buffer) removeOldestSegment(reason string) {
 	oldestSeg := b.segments[0]
 	var dropped int64
@@ -511,9 +614,13 @@ func (b *Buffer) loadAckedPosition() error {
 }
 
 // saveAckedPosition saves the acked position to metadata file. It writes a
-// temporary file and renames it over the checkpoint, so a crash mid-write
-// leaves the previous checkpoint rather than a truncated one (which Open
-// reads as "nothing acked" and replays the whole buffer).
+// temporary file and renames it over the checkpoint, so a crash of the process
+// mid-write leaves the previous checkpoint rather than a truncated one (which
+// Open reads as "nothing acked" and replays the whole buffer).
+//
+// The file is not fsynced. This runs on every ack, and a flush here would be
+// paid per record. A power loss can therefore persist the rename before the
+// data and leave a short checkpoint, which Open reports and replays.
 func (b *Buffer) saveAckedPosition() error {
 	metaPath := filepath.Join(b.dir, ".acked")
 	data := make([]byte, 12)
@@ -565,17 +672,20 @@ type Segment struct {
 	mu          sync.Mutex
 }
 
-// openSegment opens an existing segment file.
-func openSegment(fpath string) (*Segment, error) {
+// openSegment opens an existing segment file. keep is the checkpoint's offset
+// within it, or 0 when the checkpoint is elsewhere. It returns the number of
+// bytes it cut from the end of the file, which is non-zero only after a torn
+// write or a length header the walk cannot place.
+func openSegment(fpath string, keep uint64) (*Segment, int64, error) {
 	f, err := os.OpenFile(fpath, os.O_RDWR|os.O_APPEND, 0644)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	stat, err := f.Stat()
 	if err != nil {
 		_ = f.Close()
-		return nil, err
+		return nil, 0, err
 	}
 
 	seg := &Segment{
@@ -583,51 +693,70 @@ func openSegment(fpath string) (*Segment, error) {
 		path:      fpath,
 		createdAt: stat.ModTime(),
 		lastWrite: stat.ModTime(),
-		fileSize:  stat.Size(),
 	}
 
-	// Count records in the file by scanning. A truncated or corrupt trailing
-	// record is expected (a crash mid-write) and stops the scan without being
-	// an error the caller should see — Open() still succeeds with whatever
-	// intact records were found, per the buffer's crash-tolerance contract.
-	if _, err := f.Seek(0, 0); err != nil {
-		_ = f.Close()
-		return nil, err
-	}
-
-scan:
-	for {
-		var lenBuf [4]byte
-		n, readErr := f.Read(lenBuf[:])
-		if n == 0 || errors.Is(readErr, io.EOF) {
+	// Walk the records by their length headers, as recordsFrom does, starting at
+	// the checkpoint. The bytes before it were acknowledged and the reader never
+	// reads them again, so a corrupt length header there must not stop the walk
+	// and cut the records after it. A checkpoint past the end of the file leaves
+	// nothing to walk, and Open moves it back to the end of the file.
+	//
+	// This holds for the checkpoint's own segment only. A segment that Open deletes
+	// as acknowledged is walked from byte 0 first, so a corrupt header there can
+	// add a cut and a warning but loses nothing. A checkpoint past every segment is
+	// the exception: Open moves it to the first segment, which then stays and holds
+	// the unacked records, so a corrupt header there cuts the records behind it,
+	// as it would with no checkpoint. The checkpoint itself is trusted as a record
+	// boundary, since .acked has no checksum. A corrupt offset there starts the
+	// walk mid-record, and the cut then removes the unacked bytes behind it. That
+	// residual is accepted until .acked is checksummed.
+	//
+	// A record that runs past the end of the file is a torn write, and the reader
+	// cannot get past it: an append landing after the torn bytes would be read as
+	// part of their payload, and the reader would never realign. The file is cut
+	// back to the end of the last complete record. A length header past the
+	// checkpoint that is corrupt takes the same course, since the reader cannot
+	// get past it either, so the records behind it are cut too. A complete record
+	// with a bad CRC is kept. Its length is sound, so the reader skips it and the
+	// records after it stay reachable.
+	//
+	// A zero-length header is not a record: the writer never produces one, and a
+	// zero-filled tail, which some filesystems leave after a crash, is made of
+	// them. The zeros after the last record with a payload are cut with the torn
+	// bytes. Left in place they would never be acked, so their segment could not
+	// be dropped as acked, and they would be counted as dropped when it was
+	// retired. Zeros between records are left for the reader to skip.
+	size := stat.Size()
+	start := min(keep, uint64(size))
+	offset, end := int64(start), int64(start)
+	for offset+8 <= size {
+		var header [8]byte
+		if _, err := f.ReadAt(header[:], offset); err != nil {
+			_ = f.Close()
+			return nil, 0, err
+		}
+		length := binary.LittleEndian.Uint32(header[0:4])
+		next := offset + 8 + int64(length)
+		if next > size {
 			break
 		}
-		if readErr != nil {
+		offset = next
+		if length > 0 {
+			end = offset
+			seg.recordCount++
+		}
+	}
+
+	cut := size - end
+	if cut > 0 {
+		if err := f.Truncate(end); err != nil {
 			_ = f.Close()
-			return nil, readErr
+			return nil, 0, err
 		}
-
-		length := binary.LittleEndian.Uint32(lenBuf[:])
-		crcBuf := make([]byte, 4)
-		if _, readErr := f.Read(crcBuf); readErr != nil {
-			break scan // truncated trailing record; stop counting, not fatal
-		}
-
-		// Skip the actual data.
-		if _, readErr := f.Seek(int64(length), 1); readErr != nil {
-			break scan // truncated trailing record; stop counting, not fatal
-		}
-
-		seg.recordCount++
 	}
+	seg.fileSize = end
 
-	// Seek to end for appending.
-	if _, err := f.Seek(0, 2); err != nil {
-		_ = f.Close()
-		return nil, err
-	}
-
-	return seg, nil
+	return seg, cut, nil
 }
 
 // Append appends a record to this segment.
@@ -635,29 +764,34 @@ func (s *Segment) Append(data []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	length := uint32(len(data))
-	crc := computeCRC32C(data)
-
-	lenBuf := make([]byte, 4)
-	binary.LittleEndian.PutUint32(lenBuf, length)
-
-	if _, err := s.file.Write(lenBuf); err != nil {
+	// Bytes past fileSize are left by a write that failed part-way. They are not
+	// a record, and a record written after them would be read as part of their
+	// payload. They are cut off before anything is written.
+	info, err := s.file.Stat()
+	if err != nil {
 		return err
 	}
-
-	creBuf := make([]byte, 4)
-	binary.LittleEndian.PutUint32(creBuf, crc)
-
-	if _, err := s.file.Write(creBuf); err != nil {
-		return err
+	if info.Size() != s.fileSize {
+		if err := s.file.Truncate(s.fileSize); err != nil {
+			return err
+		}
 	}
 
-	if _, err := s.file.Write(data); err != nil {
+	// The header and the payload go out in one write, so a failure leaves at
+	// most one partial record, and that is cut off by the next append.
+	buf := make([]byte, 8+len(data))
+	binary.LittleEndian.PutUint32(buf[0:4], uint32(len(data)))
+	binary.LittleEndian.PutUint32(buf[4:8], computeCRC32C(data))
+	copy(buf[8:], data)
+
+	if _, err := s.file.Write(buf); err != nil {
+		// Best effort: the next append cuts the same bytes off if this fails.
+		_ = s.file.Truncate(s.fileSize)
 		return err
 	}
 
 	s.recordCount++
-	s.fileSize += int64(len(lenBuf) + len(creBuf) + len(data))
+	s.fileSize += int64(len(buf))
 
 	return nil
 }
@@ -709,6 +843,13 @@ func (s *Segment) ReadAt(offset uint64) ([]byte, uint64, error) {
 
 	length := binary.LittleEndian.Uint32(header[0:4])
 	crcBuf := header[4:8]
+
+	// No record is empty, so a zero length is never a record. It is what a
+	// zero-filled region reads as, and the CRC of empty input is 0, so the check
+	// below would accept it and hand the reader an empty envelope to ack.
+	if length == 0 {
+		return nil, offset + 8, nil
+	}
 
 	// A corrupt length field must not turn into a multi-gigabyte allocation.
 	// No record can be larger than the segment budget itself, and a record

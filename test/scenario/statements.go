@@ -108,8 +108,9 @@ func init() {
 			// kept queryid (calls_total, total_exec_time_ms, rows_total,
 			// shared_blks_hit_total, shared_blks_read_total, wal_bytes_total)
 			// — each is its own pgtype.SeriesKey in internal/delta.Engine, so
-			// pglens_series_total (Engine.CountByInstance) is really
-			// "distinct queryids kept" × 6, not "distinct queryids kept".
+			// pglens_series_total (the pipeline's currentSeries, reported through
+			// SetSeriesTotal) is really "distinct queryids kept" × 6, not
+			// "distinct queryids kept".
 			// With the check's own production MaxKeys=200,
 			// stat_statements alone can legitimately reach 200*6=1200 —
 			// before ANY other instance-level series and before accounting
