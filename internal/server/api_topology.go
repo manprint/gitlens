@@ -16,6 +16,11 @@ import (
 	"github.com/manprint/pglens/internal/store"
 )
 
+// topologyFailoverLimit caps the failover events a topology answer carries,
+// newest first. The events are retained for 90 days, and a long-lived cluster
+// would otherwise return its whole history on every render of the page.
+const topologyFailoverLimit = 100
+
 // TopologyAPI handles topology-related read extensions.
 // Phase 6 extends it with /clusters/{id}/topology and /clusters/{id}/replication endpoints.
 type TopologyAPI struct {
@@ -132,10 +137,10 @@ func (t *TopologyAPI) handleTopology(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Fetch failover events for this cluster
+	// Fetch the newest failover events for this cluster
 	arows, err := t.pool.Query(ctx,
-		`SELECT event_id, ts, type, instance_id, payload FROM events WHERE tenant_id='default' AND cluster_id=$1 AND type='failover_detected' ORDER BY ts DESC`,
-		cidDB)
+		`SELECT event_id, ts, type, instance_id, payload FROM events WHERE tenant_id='default' AND cluster_id=$1 AND type='failover_detected' ORDER BY ts DESC LIMIT $2`,
+		cidDB, topologyFailoverLimit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query events failed", err.Error())
 		return

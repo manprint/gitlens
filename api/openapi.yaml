@@ -760,7 +760,7 @@ paths:
         - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/ClusterId' } }
       responses:
         '200':
-          description: Topology graph and failover events.
+          description: Topology graph and the 100 newest failover events, newest first.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TopologyResponse' }
