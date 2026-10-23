@@ -1154,7 +1154,7 @@ Ogni comando emette su stdout un **report JSON** (quanti deadlock effettivi, qua
 
 | File | Trigger | Cosa esegue | Budget |
 |---|---|---|---|
-| `.github/workflows/ci.yml` | PR, push su `main`, `workflow_dispatch`, `workflow_call` | web, lint, security, unit, race-stress (non su PR), immagini, integration PG 15→19 × `vanilla`/`rds-like` | ~25 min wall clock, job paralleli |
+| `.github/workflows/ci.yml` | PR, push su `main`, `workflow_dispatch`, `workflow_call` | web, lint, security, unit, race-stress (non su PR), immagini, integration PG 15→19 × `vanilla`/`rds-like`, harness (`make test-e2e-unit`: unit test dell'harness e2e e invarianti TimescaleDB) | ~25 min wall clock, job paralleli |
 | `.github/workflows/e2e.yml` | PR verso `main`, nightly (02:00 UTC), `workflow_dispatch` | suite E2E completa × `AGENT_MODE` `container`/`binary` (job `Full E2E`), più accettazione UI Playwright × `AGENT_MODE` (job `ui-acceptance`) | suite completa 66–81 min, limite job 100 min; UI acceptance limite 45 min |
 | `.github/workflows/release-alpha.yml` | tag `v*-alpha.*`, `workflow_dispatch` | richiama `ci.yml` per intero, poi build multi-arch (amd64+arm64), push su ghcr.io con SBOM e provenance, smoke `--version` sulle immagini pubblicate, prerelease GitHub | ~2 h |
 
@@ -1227,6 +1227,7 @@ make test-e2e            # L3 smoke
 make test-e2e-full       # L3 completo (lungo)
 make test-e2e-full-evidence # L3 completo con log durevole ed exit status catturato
 make test-e2e-matrix     # L3 smoke su AGENT_MODE container e binary
+make test-e2e-unit       # unit test di test/harness e test/scenario (tag e2e) e invarianti TimescaleDB (tag integration+e2e)
 make test-ui-e2e         # L5, browser reale contro lo stack locale
 
 # frontend
@@ -1241,7 +1242,7 @@ make web-budget          # budget di dimensione del bundle
 make ci-local            # ci-local-unit + ci-local-security + ci-local-integration
 make ci-local-unit       # tutto il gate veloce Go + web
 make ci-local-security    # tidy-check + vuln
-make ci-local-integration # L2 su tutte le 8 combinazioni PG × profilo
+make ci-local-integration # L2 su tutte le 10 combinazioni PG 15–19 × profilo, poi test-e2e-unit
 make golden              # rigenera i golden file
 make coverage            # report HTML
 make api-docs            # rigenera docs/api.md da api/openapi.yaml

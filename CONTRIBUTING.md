@@ -44,6 +44,7 @@ make web-coverage-gate
 make web-build
 make web-budget
 make test-integration
+make test-e2e-unit
 make test-e2e
 AGENT_MODE=binary make test-e2e
 make test-ui-e2e

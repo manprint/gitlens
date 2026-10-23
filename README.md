@@ -1540,6 +1540,7 @@ make tidy-check       # go.mod/go.sum are tidy, and every module verifies
 make vuln             # govulncheck against the pinned toolchain and dependencies
 make api-docs         # regenerate the offline HTTP API reference from OpenAPI
 make test-integration # integration tests against real PostgreSQL (requires Docker)
+make test-e2e-unit    # unit tests of the E2E harness and scenarios, plus the TimescaleDB invariant checks (requires Docker)
 make test-e2e         # E2E smoke subset (requires Docker, ~20m)
 make test-e2e-full    # full E2E suite (requires Docker, ~80m)
 make test-e2e-full-evidence # full E2E suite with a durable log and captured exit status (requires Docker, ~80m)
