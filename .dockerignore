@@ -23,6 +23,8 @@
 
 # Not needed to build the binaries
 docs/
+!docs/LIMITS.md
+!docs/api.md
 deploy/
 test/
 !test/

@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -64,7 +65,7 @@ func runLockContention(ctx context.Context, e *scenario.Env) error {
 	// this context with enough lifetime for that wait plus transaction cleanup;
 	// a short context created before polling can expire before the holder is
 	// released.
-	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 	defer cleanupCancel()
 	defer holderConn.Release()
 	defer waiterConn.Release()
@@ -104,14 +105,14 @@ func runLockContention(ctx context.Context, e *scenario.Env) error {
 	defer cancelLock()
 	if err := waitForBlockedNode(lockCtx, e, instanceID, waiterPID, holderPID, waiterMarker); err != nil {
 		_ = holderTx.Rollback(cleanupCtx)
-		<-waiterDone
+		e.T.Logf("blocked session after cancel: %v", <-waiterDone)
 		_ = waiterTx.Rollback(cleanupCtx)
 		return err
 	}
 
-	if err := holderTx.Rollback(cleanupCtx); err != nil && err != pgx.ErrTxClosed {
+	if err := holderTx.Rollback(cleanupCtx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
 		waiterCancel()
-		<-waiterDone
+		e.T.Logf("blocked session after cancel: %v", <-waiterDone)
 		_ = waiterTx.Rollback(cleanupCtx)
 		return fmt.Errorf("release holder lock: %w", err)
 	}
@@ -125,7 +126,7 @@ func runLockContention(ctx context.Context, e *scenario.Env) error {
 		waiterCancel()
 		return fmt.Errorf("blocked session pid %d did not resume after holder pid %d released", waiterPID, holderPID)
 	}
-	if err := waiterTx.Rollback(cleanupCtx); err != nil && err != pgx.ErrTxClosed {
+	if err := waiterTx.Rollback(cleanupCtx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
 		return fmt.Errorf("cleanup blocked transaction: %w", err)
 	}
 
@@ -170,8 +171,8 @@ ON CONFLICT (tenant_id, rule_id) DO UPDATE SET enabled=true, threshold=0, for_se
 		return fmt.Errorf("install deadlock alert rule: %w", err)
 	}
 	defer func() {
-		_, _ = e.DB.Exec(context.Background(), `DELETE FROM alerts WHERE rule_id=$1`, ruleID)
-		_, _ = e.DB.Exec(context.Background(), `DELETE FROM alert_rules WHERE rule_id=$1`, ruleID)
+		_, _ = e.DB.Exec(context.WithoutCancel(ctx), `DELETE FROM alerts WHERE rule_id=$1`, ruleID)
+		_, _ = e.DB.Exec(context.WithoutCancel(ctx), `DELETE FROM alert_rules WHERE rule_id=$1`, ruleID)
 	}()
 
 	conn1, err := pg.Acquire(ctx)
@@ -222,8 +223,8 @@ ON CONFLICT (tenant_id, rule_id) DO UPDATE SET enabled=true, threshold=0, for_se
 		errs <- queryErr
 	}()
 	err1, err2 := <-errs, <-errs
-	_ = tx1.Rollback(context.Background())
-	_ = tx2.Rollback(context.Background())
+	_ = tx1.Rollback(context.WithoutCancel(ctx))
+	_ = tx2.Rollback(context.WithoutCancel(ctx))
 	if (err1 == nil) == (err2 == nil) {
 		return fmt.Errorf("deadlock did not choose exactly one victim: tx1=%v tx2=%v", err1, err2)
 	}
@@ -425,7 +426,7 @@ func waitForDatabaseDeadlockAlert(ctx context.Context, e *scenario.Env, instance
 		return false, nil
 	})
 	if err != nil {
-		debugCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		debugCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 		defer cancel()
 		var ruleCount, metricCount, alertCount int
 		var metricDatnames, alertDatnames string
@@ -461,7 +462,7 @@ func pollContention(ctx context.Context, interval time.Duration, check func(cont
 		select {
 		case <-ctx.Done():
 			if lastErr != nil {
-				return fmt.Errorf("poll timed out: %w (last error: %v)", ctx.Err(), lastErr)
+				return fmt.Errorf("poll timed out: %w (last error: %w)", ctx.Err(), lastErr)
 			}
 			return fmt.Errorf("poll timed out: %w", ctx.Err())
 		case <-ticker.C:

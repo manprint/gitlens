@@ -29,7 +29,7 @@ func poll(ctx context.Context, interval time.Duration, check func(context.Contex
 		select {
 		case <-ctx.Done():
 			if lastErr != nil {
-				return fmt.Errorf("poll timed out: %w (last error: %v)", ctx.Err(), lastErr)
+				return fmt.Errorf("poll timed out: %w (last error: %w)", ctx.Err(), lastErr)
 			}
 			return fmt.Errorf("poll timed out: %w", ctx.Err())
 		case <-ticker.C:

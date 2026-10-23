@@ -70,7 +70,7 @@ func receiverCall(ctx context.Context, base, method, path string, body []byte) (
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		data, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("receiver %s %s: %d %s", method, path, resp.StatusCode, data)

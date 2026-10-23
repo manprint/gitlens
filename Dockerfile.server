@@ -4,9 +4,12 @@ RUN corepack enable
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY api/openapi.yaml /src/api/openapi.yaml
-# The build ships the README next to the bundle for the interface's
-# documentation links.
+# The build ships the documents the interface links to next to the bundle. The
+# bundle reads each one from the repository root while it builds, so each one
+# needs its own copy here.
 COPY README.md /src/README.md
+COPY docs/LIMITS.md /src/docs/LIMITS.md
+COPY docs/api.md /src/docs/api.md
 COPY web/ ./
 RUN pnpm build
 

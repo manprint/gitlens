@@ -56,7 +56,7 @@ func init() {
 					if err != nil {
 						return
 					}
-					defer conn.Close(ctx)
+					defer func() { _ = conn.Close(ctx) }()
 					_, _ = conn.Exec(ctx, fmt.Sprintf("SELECT pg_sleep(%d)", sleepSeconds))
 				}()
 			}
@@ -394,7 +394,7 @@ func init() {
 			}
 			qidRows.Close()
 			if !haveQueryID {
-				return fmt.Errorf("no ASH sample carried a non-null queryid during the slow-query window (compute_query_id may not have been discovered yet)")
+				return fmt.Errorf("no ASH sample carried a non-null queryid during the slow-query window")
 			}
 
 			if err := <-workloadErr; err != nil {

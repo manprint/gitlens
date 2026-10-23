@@ -236,11 +236,11 @@ func (h *Harness) waitToxiproxyReady(toxiproxyURL string) error {
 	for {
 		resp, err := http.Get(toxiproxyURL + "/version")
 		if err == nil && resp.StatusCode == 200 {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return nil
 		}
 		if resp != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("toxiproxy did not become ready within 30s")
@@ -304,19 +304,20 @@ func (h *Harness) Toxic(link Link, t Toxic) (RemoveFunc, error) {
 
 	// Get the proxy name for this link
 	var proxyName string
-	if link.kind == "server" {
+	switch link.kind {
+	case "server":
 		var ok bool
 		proxyName, ok = state.proxyNames[link.kind]
 		if !ok {
 			return nil, fmt.Errorf("server proxy not found")
 		}
-	} else if link.kind == "pg" {
+	case "pg":
 		var ok bool
 		proxyName, ok = state.proxyNames[fmt.Sprintf("pg:%s", link.svc)]
 		if !ok {
 			return nil, fmt.Errorf("postgres proxy for service %q not found", link.svc)
 		}
-	} else {
+	default:
 		return nil, fmt.Errorf("unknown link kind: %s", link.kind)
 	}
 
@@ -357,7 +358,7 @@ func (h *Harness) Toxic(link Link, t Toxic) (RemoveFunc, error) {
 			return nil, toxicFailure(state, proxyName, toxicNames, fmt.Errorf("failed to create %s toxic: %w", stream, err))
 		}
 		func() {
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
 				body, _ := io.ReadAll(resp.Body)
 				err = fmt.Errorf("toxiproxy API returned %d creating %s toxic: %s", resp.StatusCode, stream, body)

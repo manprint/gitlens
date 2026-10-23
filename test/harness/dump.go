@@ -284,7 +284,7 @@ func writeJSON(path string, data interface{}, t *testing.T) {
 		t.Logf("failed to create %s: %v", path, err)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	enc := json.NewEncoder(file)
 	enc.SetIndent("", "  ")

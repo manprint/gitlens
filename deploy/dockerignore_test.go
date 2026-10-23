@@ -15,13 +15,7 @@ import (
 // host's bundle out, and keeps the placeholder page, which the agent image
 // needs to compile the embed. Docker matches the file with this package.
 func TestDockerignore_HostWebBuildStaysOutOfTheContext(t *testing.T) {
-	file, err := os.Open("../.dockerignore")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = file.Close() })
-	patterns, err := ignorefile.ReadAll(file)
-	require.NoError(t, err)
-	matcher, err := patternmatcher.New(patterns)
-	require.NoError(t, err)
+	matcher := dockerignoreMatcher(t)
 
 	for _, path := range []string{
 		"internal/webui/dist/.built",
@@ -42,4 +36,32 @@ func TestDockerignore_HostWebBuildStaysOutOfTheContext(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, excluded, "%s is missing from the build context", path)
 	}
+}
+
+// The server image's web stage copies the documents the bundle serves out of
+// docs/, and the ignore file drops that directory. Each served document is
+// named back in, and the rest of docs/ stays out of the context.
+func TestDockerignore_ServedDocumentsStayInTheContext(t *testing.T) {
+	matcher := dockerignoreMatcher(t)
+
+	for _, path := range servedDocuments(t) {
+		excluded, err := matcher.MatchesOrParentMatches(path)
+		require.NoError(t, err)
+		require.False(t, excluded, "%s is served by the bundle but missing from the build context", path)
+	}
+	excluded, err := matcher.MatchesOrParentMatches("docs/plans/001_plan-Foundations/STATE.md")
+	require.NoError(t, err)
+	require.True(t, excluded, "docs/plans is not needed by any build and must stay out of the context")
+}
+
+func dockerignoreMatcher(t *testing.T) *patternmatcher.PatternMatcher {
+	t.Helper()
+	file, err := os.Open("../.dockerignore")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = file.Close() })
+	patterns, err := ignorefile.ReadAll(file)
+	require.NoError(t, err)
+	matcher, err := patternmatcher.New(patterns)
+	require.NoError(t, err)
+	return matcher
 }

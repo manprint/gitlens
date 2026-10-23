@@ -65,7 +65,7 @@ func registerUIScenario(id, title string, topology scenario.Topology, cover stri
 			}
 			if err := runUISpec(ctx, e, id); err != nil {
 				if workloadDone != nil {
-					<-workloadDone
+					e.T.Logf("UI workload after spec failure: %v", <-workloadDone)
 				}
 				return err
 			}
@@ -96,11 +96,9 @@ func prepareUIScenario(e *scenario.Env, id string) (chan error, error) {
 	case "SYS-UI-007":
 		return startUIWorkload(e, "pg-primary", "slow-query", "--sleep", "30s", "--count", "3"), nil
 	case "SYS-UI-009":
-		target := "pg-primary"
+		target := "pg-standby"
 		if os.Getenv("PGLENS_UI_CANCEL_MODE") == "t0" {
 			target = "pg"
-		} else {
-			target = "pg-standby"
 		}
 		return startUIWorkload(e, target, "slow-query", "--sleep", "45s", "--count", "1"), nil
 	case "SYS-UI-010":
@@ -165,7 +163,8 @@ func runUISpec(ctx context.Context, e *scenario.Env, id string) error {
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		_ = cmd.Process.Kill()
 		select {
-		case <-processDone:
+		case err := <-processDone:
+			e.T.Logf("Playwright exited during teardown: %v", err)
 		case <-time.After(10 * time.Second):
 			e.T.Log("timed out waiting for Playwright process teardown")
 		}
