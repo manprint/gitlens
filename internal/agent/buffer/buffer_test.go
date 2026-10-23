@@ -1293,3 +1293,111 @@ func TestBuffer_StaleCheckpointKeepsNewSegments(t *testing.T) {
 		})
 	}
 }
+
+// frameRecord returns payload framed the way Segment.Append writes it: the
+// length, the CRC32C of the payload, then the payload.
+func frameRecord(payload string) []byte {
+	buf := make([]byte, 8+len(payload))
+	binary.LittleEndian.PutUint32(buf[0:4], uint32(len(payload)))
+	binary.LittleEndian.PutUint32(buf[4:8], computeCRC32C([]byte(payload)))
+	copy(buf[8:], payload)
+	return buf
+}
+
+// TestBuffer_ZeroFilledTailIsNotDelivered — AB-13: a zero-filled tail, which
+// some filesystems leave after a crash, is not a record. Its zero headers carry
+// the CRC of empty input, which is 0, so they used to pass the check and reach
+// the pusher as empty envelopes, to be acked without a trace.
+func TestBuffer_ZeroFilledTailIsNotDelivered(t *testing.T) {
+	dir := t.TempDir()
+	buf, err := Open(dir, Options{Clock: clock.System()})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := buf.Append([]byte("hello")); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if err := buf.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	segPath := firstSegmentFile(t, dir)
+	f, err := os.OpenFile(segPath, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		t.Fatalf("open segment: %v", err)
+	}
+	if _, err := f.Write(make([]byte, 24)); err != nil {
+		t.Fatalf("write zero tail: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	buf, err = Open(dir, Options{Clock: clock.System()})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer func() { _ = buf.Close() }()
+	// The zeros are cut off on open, so a retired segment holds no garbage that
+	// could block its removal once every record in it is acked.
+	info, err := os.Stat(segPath)
+	if err != nil {
+		t.Fatalf("stat segment: %v", err)
+	}
+	if want := int64(len(frameRecord("hello"))); info.Size() != want {
+		t.Errorf("segment is %d bytes after reopen, want %d: the zero tail was not cut", info.Size(), want)
+	}
+	if got := drainAndAck(t, buf); len(got) != 1 || got[0] != "hello" {
+		t.Fatalf("delivered %q, want [hello]", got)
+	}
+	if n := buf.Stats().CorruptRecords; n == 0 {
+		t.Error("the zero-filled tail was not counted as corruption")
+	}
+}
+
+// TestBuffer_ZeroLengthHeaderInsideSegmentIsSkipped — AB-13: a zero-length
+// header between two records is skipped as corrupt. It used to come back as an
+// empty envelope.
+func TestBuffer_ZeroLengthHeaderInsideSegmentIsSkipped(t *testing.T) {
+	dir := t.TempDir()
+	var seg []byte
+	seg = append(seg, frameRecord("first")...)
+	seg = append(seg, make([]byte, 8)...)
+	seg = append(seg, frameRecord("second")...)
+	if err := os.WriteFile(filepath.Join(dir, "00000000.seg"), seg, 0o644); err != nil {
+		t.Fatalf("write segment: %v", err)
+	}
+
+	buf, err := Open(dir, Options{Clock: clock.System()})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = buf.Close() }()
+	if got := drainAndAck(t, buf); len(got) != 2 || got[0] != "first" || got[1] != "second" {
+		t.Fatalf("delivered %q, want [first second]", got)
+	}
+	if n := buf.Stats().CorruptRecords; n == 0 {
+		t.Error("the zero-length header was not counted as corruption")
+	}
+}
+
+// TestBuffer_AppendRejectsEmptyRecord — AB-13: an empty record is refused
+// before it is written. The reader and the reopen scan both treat a
+// zero-length header as no record, so one written here would vanish unseen.
+func TestBuffer_AppendRejectsEmptyRecord(t *testing.T) {
+	buf, err := Open(t.TempDir(), Options{Clock: clock.System()})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = buf.Close() }()
+
+	if err := buf.Append(nil); err == nil {
+		t.Error("Append(nil) succeeded")
+	}
+	if err := buf.Append([]byte{}); err == nil {
+		t.Error("Append of an empty slice succeeded")
+	}
+	if got := drainAndAck(t, buf); len(got) != 0 {
+		t.Fatalf("delivered %q after refused appends, want none", got)
+	}
+}

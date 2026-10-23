@@ -184,6 +184,12 @@ func Open(dir string, opts Options) (*Buffer, error) {
 
 // Append appends an envelope to the buffer.
 func (b *Buffer) Append(env []byte) error {
+	// A zero-length record is never written. The reader and the reopen scan both
+	// treat a zero-length header as no record, so one written here would vanish.
+	if len(env) == 0 {
+		return errors.New("buffer: empty record")
+	}
+
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -620,30 +626,41 @@ func openSegment(fpath string) (*Segment, int64, error) {
 	// the reader would never realign. A complete record with a bad CRC is kept.
 	// Its length is sound, so the reader skips it and the records after it stay
 	// reachable.
+	//
+	// A zero-length header is not a record: the writer never produces one, and a
+	// zero-filled tail, which some filesystems leave after a crash, is made of
+	// them. The zeros after the last record with a payload are cut with the torn
+	// bytes. Left in place they would never be acked, so their segment could not
+	// be dropped as acked, and they would be counted as dropped when it was
+	// retired. Zeros between records are left for the reader to skip.
 	size := stat.Size()
-	var offset int64
+	var offset, end int64
 	for offset+8 <= size {
 		var header [8]byte
 		if _, err := f.ReadAt(header[:], offset); err != nil {
 			_ = f.Close()
 			return nil, 0, err
 		}
-		next := offset + 8 + int64(binary.LittleEndian.Uint32(header[0:4]))
+		length := binary.LittleEndian.Uint32(header[0:4])
+		next := offset + 8 + int64(length)
 		if next > size {
 			break
 		}
 		offset = next
-		seg.recordCount++
+		if length > 0 {
+			end = offset
+			seg.recordCount++
+		}
 	}
 
-	cut := size - offset
+	cut := size - end
 	if cut > 0 {
-		if err := f.Truncate(offset); err != nil {
+		if err := f.Truncate(end); err != nil {
 			_ = f.Close()
 			return nil, 0, err
 		}
 	}
-	seg.fileSize = offset
+	seg.fileSize = end
 
 	return seg, cut, nil
 }
@@ -732,6 +749,13 @@ func (s *Segment) ReadAt(offset uint64) ([]byte, uint64, error) {
 
 	length := binary.LittleEndian.Uint32(header[0:4])
 	crcBuf := header[4:8]
+
+	// No record is empty, so a zero length is never a record. It is what a
+	// zero-filled region reads as, and the CRC of empty input is 0, so the check
+	// below would accept it and hand the reader an empty envelope to ack.
+	if length == 0 {
+		return nil, offset + 8, nil
+	}
 
 	// A corrupt length field must not turn into a multi-gigabyte allocation.
 	// No record can be larger than the segment budget itself, and a record
