@@ -14,9 +14,10 @@ import { renderRoute } from '@/test/render'
 const INSTANCE_ID = '11111111-1111-4111-8111-111111111111'
 const COMMAND_ID = '22222222-2222-4222-8222-222222222222'
 // The route loads lazily and waits on the instance response. On a busy full run
-// that can take longer than vi.waitFor's 1 s default, so these waits use the
-// test timeout instead.
-const ROUTE_WAIT = { timeout: 5000 }
+// that can take longer than vi.waitFor's 1 s default. The budget stays below the
+// 5 s testTimeout, so a stalled wait reports its own assertion instead of racing
+// the test timeout.
+const ROUTE_WAIT = { timeout: 4000 }
 
 describe('query detail route', () => {
   it('AC-08 runs EXPLAIN and reads plan history in the database the statement came from', async () => {
