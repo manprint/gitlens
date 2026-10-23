@@ -2,6 +2,8 @@ package agent
 
 import (
 	"fmt"
+	"log"
+	"net"
 	"net/url"
 	"os"
 	"regexp"
@@ -178,6 +180,15 @@ func LoadConfig(path string) (*Config, error) {
 	return cfg, nil
 }
 
+// isLoopbackHost reports whether host names this machine.
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 // validate performs strict validation on the configuration.
 func (c *Config) validate() error {
 	if c.Server.URL == "" {
@@ -186,6 +197,13 @@ func (c *Config) validate() error {
 	// The push path is appended to this URL, so a trailing slash would make
 	// the request //api/v1/push, which the server does not route.
 	c.Server.URL = strings.TrimRight(c.Server.URL, "/")
+	// The bearer token goes with every push, command poll and result, so over
+	// plain http it crosses the network unencrypted. That stays allowed, since
+	// the shipped examples run over http inside a private network, but it is
+	// logged. A loopback host never leaves the machine, so it is not.
+	if u, err := url.Parse(c.Server.URL); err == nil && u.Scheme == "http" && !isLoopbackHost(u.Hostname()) {
+		log.Printf("agent config: server.url host %s is reached over plain http, so the bearer token is sent unencrypted", u.Host)
+	}
 	if c.Server.Token == "" && c.Server.TokenFile == "" {
 		return fmt.Errorf("validation: server.token or server.token_file is required")
 	}

@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"bytes"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -345,4 +347,53 @@ checks:
 	cfg, err = LoadConfig(tmpfile)
 	require.NoError(t, err)
 	require.Equal(t, "http://override:9999", cfg.Server.URL)
+}
+
+// TestConfig_PlainHTTPServerURLIsLogged: the bearer token goes unencrypted over
+// plain http to any host but this machine, so the config load says so. Loopback
+// and https stay quiet, and an environment override is checked like the file.
+func TestConfig_PlainHTTPServerURLIsLogged(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		env     string
+		wantLog bool
+	}{
+		{name: "remote_hostname_http", url: "http://pglens.example.com:8080", wantLog: true},
+		{name: "compose_service_http", url: "http://pglens-server:8080", wantLog: true},
+		{name: "private_address_http", url: "http://10.0.0.5:8080", wantLog: true},
+		{name: "localhost_http", url: "http://localhost:8080", wantLog: false},
+		{name: "loopback_ipv4_http", url: "http://127.0.0.1:8080", wantLog: false},
+		{name: "loopback_ipv6_http", url: "http://[::1]:8080", wantLog: false},
+		{name: "remote_https", url: "https://pglens.example.com", wantLog: false},
+		{name: "env_override_remote_http", url: "http://localhost:8080", env: "http://pglens.example.com:8080", wantLog: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			yaml := fmt.Sprintf(`
+server:
+  url: %s
+  token: file-token
+identity_path: /var/lib/pglens/identity.json
+buffer:
+  path: /var/lib/pglens/buffer
+targets:
+  - name: pg-app
+    dsn: postgres://pglens@localhost/postgres
+checks:
+  activity: {}
+`, tt.url)
+			t.Setenv("PGLENS_SERVER_URL", tt.env)
+
+			var logged bytes.Buffer
+			prev := log.Writer()
+			log.SetOutput(&logged)
+			t.Cleanup(func() { log.SetOutput(prev) })
+
+			_, err := LoadConfig(writeConfigFile(t, yaml))
+			require.NoError(t, err)
+			require.Equal(t, tt.wantLog, strings.Contains(logged.String(), "plain http"), "log: %q", logged.String())
+		})
+	}
 }
