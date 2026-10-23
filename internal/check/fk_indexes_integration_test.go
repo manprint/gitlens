@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/manprint/pglens/test/pgtest"
 	"github.com/stretchr/testify/require"
@@ -35,6 +36,7 @@ CREATE TABLE %[1]s.hashed (a int, b int, FOREIGN KEY (a, b) REFERENCES %[1]s.par
 CREATE TABLE %[1]s.bare (a int, b int, CONSTRAINT bare_fk FOREIGN KEY (a, b) REFERENCES %[1]s.parent (a, b));
 INSERT INTO %[1]s.parent SELECT g, g FROM generate_series(1, 100) g;
 INSERT INTO %[1]s.bare SELECT g, g FROM generate_series(1, 100) g;
+ANALYZE %[1]s.bare;
 CREATE TABLE %[1]s.wrong_lead (id int, a int, b int, CONSTRAINT wrong_lead_fk FOREIGN KEY (a, b) REFERENCES %[1]s.parent (a, b));
 CREATE INDEX ON %[1]s.wrong_lead (id, a, b);
 CREATE TABLE %[1]s.partial (a int, b int, CONSTRAINT partial_fk FOREIGN KEY (a, b) REFERENCES %[1]s.parent (a, b));
@@ -54,10 +56,20 @@ CREATE INDEX ON %[1]s.hashed USING hash (a)`, schema))
 		require.NoError(t, err)
 
 		scrape := func() map[string]Fact {
+			// Another session holds a reported table and a partition, as
+			// ALTER TABLE would: the check takes no lock, so it does not
+			// wait for them.
+			holder, err := admin.Begin(ctx)
+			require.NoError(t, err)
+			defer func() { _ = holder.Rollback(context.Background()) }()
+			_, err = holder.Exec(ctx, fmt.Sprintf("LOCK TABLE %[1]s.bare, %[1]s.events_2026 IN ACCESS EXCLUSIVE MODE", schema))
+			require.NoError(t, err)
 			conn, err := pool.Acquire(ctx)
 			require.NoError(t, err)
+			started := time.Now()
 			result, err := (&fkIndexesCheck{}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
 			require.NoError(t, err)
+			require.Less(t, time.Since(started), 900*time.Millisecond, "the check waited for a lock")
 			require.False(t, result.Truncated)
 			facts := map[string]Fact{}
 			for _, f := range result.Facts {

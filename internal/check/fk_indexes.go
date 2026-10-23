@@ -29,8 +29,11 @@ const fkUnindexedFactLimit = 200
 // partition inherits from its partitioned table is left out: the partitioned
 // table's own constraint is checked against its partitioned indexes, which are
 // valid only once every partition has the index. The referencing table's size
-// is the sum of its leaf partitions. Everything is read from the catalogs and
-// pg_relation_size, which any role may call.
+// is the sum of its leaf partitions, estimated from relpages (as of the last
+// VACUUM or ANALYZE) and found through pg_inherits: pg_relation_size and
+// pg_partition_tree lock every table they measure, so one table held by
+// ALTER TABLE would make the check wait out lock_timeout and fail. Only the
+// catalogs are read.
 const fkUnindexedQuery = `SELECT pg_catalog.quote_ident(n.nspname) || '.' || pg_catalog.quote_ident(c.relname) || '.' || pg_catalog.quote_ident(con.conname),
        n.nspname, c.relname, con.conname,
        pn.nspname || '.' || pc.relname,
@@ -41,9 +44,14 @@ const fkUnindexedQuery = `SELECT pg_catalog.quote_ident(n.nspname) || '.' || pg_
           FROM pg_catalog.unnest(con.conkey) WITH ORDINALITY AS k (attnum, ord)
           JOIN pg_catalog.pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum),
        CASE WHEN c.relkind = 'p'
-            THEN COALESCE((SELECT pg_catalog.sum(pg_catalog.pg_relation_size(p.relid))
-                             FROM pg_catalog.pg_partition_tree(c.oid) p WHERE p.isleaf), 0)
-            ELSE pg_catalog.pg_relation_size(c.oid) END::pg_catalog.int8 AS bytes
+            THEN COALESCE((WITH RECURSIVE tree (relid) AS (
+                                SELECT c.oid
+                                UNION ALL
+                                SELECT i.inhrelid FROM pg_catalog.pg_inherits i JOIN tree t ON i.inhparent = t.relid)
+                           SELECT pg_catalog.sum(pc.relpages::pg_catalog.int8)
+                             FROM tree JOIN pg_catalog.pg_class pc ON pc.oid = tree.relid
+                            WHERE pc.relkind <> 'p'), 0)
+            ELSE c.relpages END::pg_catalog.int8 * pg_catalog.current_setting('block_size')::pg_catalog.int8 AS bytes
   FROM pg_catalog.pg_constraint con
   JOIN pg_catalog.pg_class c ON c.oid = con.conrelid
   JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace

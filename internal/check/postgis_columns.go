@@ -33,16 +33,21 @@ const spatialColumnFactLimit = 500
 // types are matched in the schema of the postgis extension, so a database
 // without PostGIS returns no rows; the typmod is decoded by the agent, not by
 // PostGIS functions. Only the catalogs are read; geometry_columns would
-// filter out every table the role cannot SELECT.
+// filter out every table the role cannot SELECT. A partitioned table's rows
+// are summed over the partitions pg_inherits lists: pg_partition_tree would
+// lock each of them.
 const postgisColumnsQuery = `SELECT s.key, s.nspname, s.relname, s.attname, s.typname, s.atttypmod, s.rows, s.method
   FROM (
     SELECT pg_catalog.quote_ident(n.nspname) || '.' || pg_catalog.quote_ident(c.relname) || '.' || pg_catalog.quote_ident(a.attname) AS key,
            n.nspname, c.relname, a.attname, t.typname::pg_catalog.text AS typname, a.atttypmod,
            CASE WHEN c.relkind = 'p'
-                THEN COALESCE((SELECT pg_catalog.sum(GREATEST(pc.reltuples, 0))
-                                 FROM pg_catalog.pg_partition_tree(c.oid) p
-                                 JOIN pg_catalog.pg_class pc ON pc.oid = p.relid
-                                WHERE p.isleaf), 0)
+                THEN COALESCE((WITH RECURSIVE tree (relid) AS (
+                                    SELECT c.oid
+                                    UNION ALL
+                                    SELECT i.inhrelid FROM pg_catalog.pg_inherits i JOIN tree t ON i.inhparent = t.relid)
+                               SELECT pg_catalog.sum(GREATEST(pc.reltuples, 0))
+                                 FROM tree JOIN pg_catalog.pg_class pc ON pc.oid = tree.relid
+                                WHERE pc.relkind <> 'p'), 0)
                 ELSE GREATEST(c.reltuples, 0) END::pg_catalog.float8 AS rows,
            COALESCE((SELECT am.amname::pg_catalog.text
                        FROM pg_catalog.pg_index i

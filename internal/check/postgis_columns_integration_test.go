@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/manprint/pglens/test/pgtest"
 	"github.com/stretchr/testify/require"
@@ -40,10 +41,20 @@ CREATE MATERIALIZED VIEW %[1]s.centroids AS SELECT id, pt FROM %[1]s.places;
 CREATE VIEW %[1]s.v AS SELECT pt FROM %[1]s.places`, schema))
 		require.NoError(t, err)
 
+		// Another session holds a table and a partition, as ALTER TABLE
+		// would: the check takes no lock, so it does not wait for them.
+		holder, err := admin.Begin(ctx)
+		require.NoError(t, err)
+		defer func() { _ = holder.Rollback(context.Background()) }()
+		_, err = holder.Exec(ctx, fmt.Sprintf("LOCK TABLE %[1]s.places, %[1]s.zones_2026 IN ACCESS EXCLUSIVE MODE", schema))
+		require.NoError(t, err)
+
 		conn, err := pool.Acquire(ctx)
 		require.NoError(t, err)
+		started := time.Now()
 		result, err := (&postgisColumnsCheck{}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
 		require.NoError(t, err)
+		require.Less(t, time.Since(started), 900*time.Millisecond, "the check waited for a lock")
 		require.False(t, result.Truncated)
 		facts := map[string]Fact{}
 		var order []string
