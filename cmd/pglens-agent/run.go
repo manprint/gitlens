@@ -522,9 +522,9 @@ type edgeStates struct {
 
 // build derives this cycle's replication edge for a standby target from the
 // replication_receiver check's own result (sender_host, status), which is the
-// only place that data already exists — no extra query. A
-// currently-streaming/catching-up receiver is a high-confidence
-// edge to its sender host; the server resolves that host to an instance_id
+// only place that data already exists — no extra query. A currently-streaming
+// receiver is a high-confidence edge to its sender host; the server resolves
+// that host to an instance_id
 // (internal/server/pipeline.go). Once disconnected, the edge becomes
 // low-confidence but keeps pointing at the last known host — required for
 // internal/topology.Engine's orphan-standby detection to start its clock at
@@ -566,7 +566,7 @@ func (e *edgeStates) build(name, from string, role pgtype.Role, results []wire.R
 		for _, m := range r.Metrics {
 			switch m.Name {
 			case "replication_receiver_status":
-				state.connected = m.Value == 1 || m.Value == 2 // streaming or catchup
+				state.connected = m.Value == 1 // streaming; the check maps every other status to 0 or -1
 				if host := m.Labels["sender_host"]; host != "" {
 					if state.host != "" && state.host != host {
 						state.port = 0

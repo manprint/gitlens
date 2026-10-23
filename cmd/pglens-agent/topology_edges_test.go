@@ -66,6 +66,29 @@ func TestEdgeStatesBuild_PromotedNodeDropsItsUpstream(t *testing.T) {
 	require.Nil(t, states.build("pg", "instance", pgtype.RoleStandby, nil), "a rejoined standby has no known host until it reports one")
 }
 
+// TestEdgeStatesBuild_OnlyStreamingIsConnected: the replication_receiver check
+// maps a receiver to 1 only while it streams, and to 0 or -1 otherwise. The
+// status 2 that the agent used to count as catching up is never emitted, so
+// only the streaming value is a high-confidence edge.
+func TestEdgeStatesBuild_OnlyStreamingIsConnected(t *testing.T) {
+	for _, tc := range []struct {
+		value      float64
+		confidence string
+	}{
+		{1, "high"},
+		{0, "low"},
+		{-1, "low"},
+		{2, "low"},
+	} {
+		states := &edgeStates{byName: map[string]edgeState{}}
+		reading := streamingReceiver("10.0.0.1")
+		reading[0].Metrics[0].Value = tc.value
+		edges := states.build("pg", "instance", pgtype.RoleStandby, reading)
+		require.Len(t, edges, 1, "status %v", tc.value)
+		require.Equal(t, tc.confidence, edges[0].Confidence, "status %v", tc.value)
+	}
+}
+
 // TestEdgeStatesBuild_UnknownRoleEmitsNoEdge: an unreadable role is not a
 // standby, so no edge is claimed for it.
 func TestEdgeStatesBuild_UnknownRoleEmitsNoEdge(t *testing.T) {
