@@ -115,6 +115,32 @@ func TestIngest_InventoryStoreFailureIsNotAccepted(t *testing.T) {
 	require.Contains(t, w.Body.String(), "inventory error")
 }
 
+// TestIngest_StoreErrorOfAnyCodeIsNotAccepted: the codes the inventory does not
+// name as a refusal are a store failure too, so each is answered 500. They used
+// to be answered 202, and the agent consumed the envelope.
+func TestIngest_StoreErrorOfAnyCodeIsNotAccepted(t *testing.T) {
+	t.Parallel()
+	for _, code := range []string{"42501", "42P01", "42P10", "55P03", "58030", "XX000"} {
+		t.Run(code, func(t *testing.T) {
+			t.Parallel()
+			auth := NewAuth("token")
+			// The same order as TestIngest_InventoryStoreFailureIsNotAccepted.
+			pool := &mockPool{queryRowVals: []*mockRow{{vals: []any{nil}}, {vals: []any{false}}, {err: &pgconn.PgError{Code: code}}}}
+			inv := &Inventory{pool: pool}
+			h := IngestHandler(auth, inv, NewPipeline(nil, nil))
+			env := wire.Envelope{ProtocolVersion: wire.ProtocolVersion, AgentID: uuid.NewString(), SentAt: time.Now(),
+				Instances: []wire.Instance{{InstanceID: uuid.NewString(), ClusterID: pgtype.ClusterID(1).String(), Role: "primary"}}}
+			body, _ := json.Marshal(env)
+			req := httptest.NewRequest("POST", "/api/v1/push", bytes.NewReader(body))
+			req.Header.Set("Authorization", "Bearer token")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			require.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
+			require.Contains(t, w.Body.String(), "inventory error")
+		})
+	}
+}
+
 // TestIngest_RefusesWhenSaturated: an envelope that finds every slot taken is
 // answered 503 with Retry-After, which the agent retries, and goes through
 // once a slot is free.

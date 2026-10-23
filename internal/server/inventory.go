@@ -52,6 +52,14 @@ func (r instanceRejected) Unwrap() error { return r.err }
 // just now, rather than that the instance is refused. The envelope is worth
 // sending again after a store failure. A refusal is not: the same instance
 // would be refused on every push, and the agent would keep sending it.
+//
+// Only a data or constraint error (SQLSTATE class 22 or 23) refuses the
+// instance. Any other database error is a store failure, whatever its class:
+// answered with 202 the envelope would be consumed by the agent and lost, so
+// it is answered 500 and sent again. Unique and foreign-key violations stay
+// per instance, because a deterministic one would fail on every push and wedge
+// the agent's queue. A racing writer can cause one of them, and then only that
+// instance's samples in that envelope are lost.
 func storeFailure(err error) bool {
 	var rejected instanceRejected
 	if errors.As(err, &rejected) {
@@ -63,15 +71,12 @@ func storeFailure(err error) bool {
 		// a context that ended.
 		return true
 	}
-	// Connection exceptions, transaction rollbacks (serialization, deadlock),
-	// insufficient resources and operator interventions go away on their own.
-	// A constraint or data error is about this instance, and would repeat.
-	for _, class := range []string{"08", "40", "53", "57"} {
+	for _, class := range []string{"22", "23"} {
 		if strings.HasPrefix(pgErr.Code, class) {
-			return true
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 // Upsert processes all instances in the envelope. Instances are handled

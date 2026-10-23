@@ -285,6 +285,21 @@ func TestInventory_MockPool_DataError_RejectsInstance(t *testing.T) {
 	require.Contains(t, res.Errors[instID].Error(), "value too long for type")
 }
 
+// TestStoreFailure_OnlyDataAndConstraintErrorsRefuseTheInstance: a database error
+// is a refusal of the instance only when it is a data or constraint error. Any
+// other class, including one this list does not name, fails the envelope.
+func TestStoreFailure_OnlyDataAndConstraintErrorsRefuseTheInstance(t *testing.T) {
+	t.Parallel()
+	for _, code := range []string{"08006", "40001", "42501", "42P01", "42P10", "53100", "55P03", "57014", "58030", "XX000"} {
+		require.True(t, storeFailure(&pgconn.PgError{Code: code}), "SQLSTATE %s is a store failure", code)
+	}
+	for _, code := range []string{"22001", "23502", "23503", "23505"} {
+		require.False(t, storeFailure(&pgconn.PgError{Code: code}), "SQLSTATE %s refuses the instance", code)
+	}
+	require.True(t, storeFailure(errors.New("connection refused")))
+	require.False(t, storeFailure(instanceRejected{errors.New("invalid cluster_id")}))
+}
+
 func TestInventory_MockPool_IdentityConflict_ManualLosesToSystemIdentifier(t *testing.T) {
 	t.Parallel()
 	cid := pgtype.ClusterID(31337)
