@@ -1,27 +1,28 @@
 import type { ApiFailure } from '@/api/client'
 import { commandQueueFullMessage } from '@/lib/commands'
 
-import { ErrorState } from './ErrorState'
+import { describeFailure } from './describeFailure'
 
 interface CommandSubmitErrorProps {
   endpoint: string
   failure: ApiFailure
-  onRetry: () => void
+  onDismiss: () => void
 }
 
 /**
- * A command the server refused to queue. A full agent queue gets its own text
- * with the server's count; every other failure is the generic error.
+ * A command the server refused to queue. The command was submitted and
+ * refused, not loaded, so every failure says so; a full agent queue gets its
+ * own text with the server's count. Dismissing clears the error, and the
+ * action can be submitted again.
  */
-export function CommandSubmitError({ endpoint, failure, onRetry }: CommandSubmitErrorProps) {
-  const queueFull = commandQueueFullMessage(failure)
-  if (queueFull === null) {
-    return <ErrorState endpoint={endpoint} failure={failure} onRetry={onRetry} />
-  }
+export function CommandSubmitError({ endpoint, failure, onDismiss }: CommandSubmitErrorProps) {
   return (
     <div role="alert" className="border-destructive/40 bg-destructive/10 text-sm">
       <strong>Could not submit {endpoint}.</strong>
-      <p>{queueFull}</p>
+      <p>{commandQueueFullMessage(failure) ?? describeFailure(failure)}</p>
+      <button type="button" onClick={onDismiss}>
+        Dismiss
+      </button>
     </div>
   )
 }

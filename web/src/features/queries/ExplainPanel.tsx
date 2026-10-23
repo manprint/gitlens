@@ -233,7 +233,7 @@ export function ExplainPanel({
         <CommandSubmitError
           endpoint="EXPLAIN command"
           failure={createCommand.error.failure}
-          onRetry={() => createCommand.reset()}
+          onDismiss={() => createCommand.reset()}
         />
       )}
       {result !== undefined && <PlanResult result={result} />}

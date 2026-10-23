@@ -5,6 +5,7 @@ import type { ApiFailure } from '@/api/client'
 import { expectNoA11yViolations } from '@/test/a11y'
 
 import {
+  CommandSubmitError,
   Degraded,
   Disabled,
   EmptyState,
@@ -177,5 +178,30 @@ describe('state primitives', () => {
       'Value was not measured.',
     )
     await expectNoA11yViolations(container)
+  })
+
+  it('UI-STATE-010 a refused command reads as a submit failure and can be dismissed', () => {
+    const onDismiss = vi.fn()
+    const failures: ApiFailure[] = [
+      { kind: 'forbidden' },
+      {
+        kind: 'server',
+        status: 429,
+        error: 'queue full',
+        detail: 'the agent already has 20 pending commands',
+      },
+    ]
+    for (const failure of failures) {
+      const { unmount } = render(
+        <CommandSubmitError endpoint="terminate command" failure={failure} onDismiss={onDismiss} />,
+      )
+      const alert = screen.getByRole('alert')
+      expect(alert).toHaveTextContent('Could not submit terminate command.')
+      expect(alert).not.toHaveTextContent('Could not load')
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+      unmount()
+    }
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(onDismiss).toHaveBeenCalledTimes(failures.length)
   })
 })

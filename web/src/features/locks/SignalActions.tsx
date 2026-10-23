@@ -216,14 +216,14 @@ export function SignalActions({
         <CommandSubmitError
           endpoint="cancel command"
           failure={cancelCommand.error.failure}
-          onRetry={() => cancelCommand.reset()}
+          onDismiss={() => cancelCommand.reset()}
         />
       ) : null}
       {terminateCommand.error ? (
         <CommandSubmitError
           endpoint="terminate command"
           failure={terminateCommand.error.failure}
-          onRetry={() => terminateCommand.reset()}
+          onDismiss={() => terminateCommand.reset()}
         />
       ) : null}
 
