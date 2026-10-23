@@ -802,7 +802,11 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 			}
 		}
 		instGeneric = append(instGeneric, selfMetricRows(env, inst, tenantID, cidDB, instUUID, p.clock.Now())...)
-		currentSeries[instUUID] = instSeries
+		// A heartbeat carries no results, so it says nothing about the series
+		// an instance tracks; the gauge keeps the last envelope that did.
+		if len(inst.Results) > 0 {
+			currentSeries[instUUID] = instSeries
+		}
 		deltaBatches = append(deltaBatches, instDelta)
 		// Append per-instance buffers to envelope buffers
 		genericRows = append(genericRows, instGeneric...)

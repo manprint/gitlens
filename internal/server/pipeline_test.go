@@ -766,6 +766,28 @@ func TestPipeline_MockPool_SetsSeriesTotal(t *testing.T) {
 	require.Equal(t, 1.0, pglensSeriesTotalGauge.Get(instID))
 }
 
+// TestPipeline_MockPool_HeartbeatKeepsSeriesTotal: a heartbeat, an instance
+// with no results, says nothing about the series the instance tracks, so the
+// gauge keeps the count of the last envelope with results.
+func TestPipeline_MockPool_HeartbeatKeepsSeriesTotal(t *testing.T) {
+	t.Parallel()
+	p, _, _ := newPipelineWithMockPool()
+	instID := uuid.NewString()
+	cid := pgtype.ClusterID(31).String()
+	_, err := p.Process(context.Background(), wire.Envelope{Instances: []wire.Instance{{
+		InstanceID: instID,
+		ClusterID:  cid,
+		Results: []wire.Result{{
+			Check: "bgwriter", TS: time.Now(),
+			Metrics: []wire.Metric{{Name: "pg_xact_commit_total", Value: 100, Kind: "counter"}},
+		}},
+	}}})
+	require.NoError(t, err)
+	_, err = p.Process(context.Background(), wire.Envelope{Instances: []wire.Instance{{InstanceID: instID, ClusterID: cid}}})
+	require.NoError(t, err)
+	require.Equal(t, 1.0, pglensSeriesTotalGauge.Get(instID))
+}
+
 func TestPipeline_MockPool_SeriesTotalExcludesRetainedDeltaHistory(t *testing.T) {
 	t.Parallel()
 	p, _, _ := newPipelineWithMockPool()
