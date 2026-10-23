@@ -84,3 +84,28 @@ func TestVacuumProgress_NamesRelationFromItsOwnDatabase(t *testing.T) {
 	require.True(t, found)
 	require.Equal(t, 1, app.releaseCalls)
 }
+
+// The 20-row cap keeps the first rows of a deliberate subset. Truncated means a
+// configured budget dropped keys, so the cap must read as Partial only.
+func TestVacuumProgress_CapIsPartialNotTruncated(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		jobs    int
+		partial bool
+	}{{20, false}, {21, true}} {
+		rows := make([][]any, 0, tc.jobs)
+		for i := 0; i < tc.jobs; i++ {
+			rows = append(rows, []any{int32(i + 1), "app", uint32(0), "scanning heap", int64(10), int64(2), int64(1), int64(0), int64(2), int64(1)})
+		}
+		conn := &mockConn{queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			if strings.Contains(sql, "pg_stat_progress_vacuum") && !strings.Contains(sql, "information_schema") {
+				return &mockRows{rows: rows}, nil
+			}
+			return &mockRows{}, nil
+		}}
+		r, err := (&vacuumProgressCheck{}).Scrape(context.Background(), maintenanceTarget(conn))
+		require.NoError(t, err)
+		require.Equal(t, tc.partial, r.Partial, "%d running vacuums", tc.jobs)
+		require.False(t, r.Truncated, "%d running vacuums", tc.jobs)
+	}
+}

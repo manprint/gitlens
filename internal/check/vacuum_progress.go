@@ -113,7 +113,10 @@ func (c *vacuumProgressCheck) Scrape(ctx context.Context, t Target) (Result, err
 		return Result{}, err
 	}
 	result.Metrics = append(result.Metrics, pgtype.Metric{Name: "pg_analyze_jobs_running", Kind: pgtype.KindGauge, Value: float64(analyze)})
-	result.Truncated = jobs > 20 || analyze > 20
+	// The 20-row cap is a fixed top-N subset, not a configured budget that
+	// dropped keys, so it is Partial. Truncated would raise cardinality_truncated
+	// and ask the operator to raise a budget this check does not have.
+	result.Partial = jobs > 20 || analyze > 20
 	return result, nil
 }
 func addVacuumMetric(r *Result, name string, value float64, labels map[string]string) {
