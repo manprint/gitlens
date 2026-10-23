@@ -31,9 +31,19 @@ And whatever `PUBLIC` holds, the role holds too: by default every role can
 create temporary tables and large objects, and on databases upgraded from
 before PostgreSQL 15 also objects in the `public` schema, outside a read-only
 transaction. The script reports these grants with the `REVOKE ... FROM PUBLIC`
-statements that close them, but does not run those statements, because they
-change what every other role can do. pglens itself never leaves a read-only
-transaction.
+statements that close them, but by default does not run those statements,
+because they change what every other role can do: an application that uses
+temporary tables or large objects then needs its own grants. pglens itself
+never leaves a read-only transaction.
+
+`-v harden_public=1` runs them: it revokes from `PUBLIC` `TEMPORARY` on the
+connected database, `EXECUTE` on `lo_create`, `lo_creat` and `lo_from_bytea`,
+`CREATE` on every schema and `INSERT`, `UPDATE`, `DELETE` and `TRUNCATE` on
+every relation where `PUBLIC` holds them, then looks again and warns about
+what is left. A managed-service admin does not own the large-object
+functions, so on such a service that grant stays and the warning names it.
+Schemas, relations and functions belong to one database: run the script with
+the flag connected to each database the role can reach.
 
 Run it as a PostgreSQL superuser (or the equivalent managed-service admin):
 
@@ -54,6 +64,12 @@ psql "$PGLENS_DSN" \
 psql "$PGLENS_DSN" \
   -v pglens_password="$PGLENS_MONITORING_PASSWORD" \
   -v dbname=app -v tier1=1 -v tier2=1 \
+  -f deploy/sql/monitoring_user.sql
+
+# Any tier: also revoke from PUBLIC what lets every role write (see above).
+psql "$PGLENS_DSN" \
+  -v pglens_password="$PGLENS_MONITORING_PASSWORD" \
+  -v dbname=app -v harden_public=1 \
   -f deploy/sql/monitoring_user.sql
 ```
 

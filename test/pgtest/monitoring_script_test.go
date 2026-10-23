@@ -181,3 +181,60 @@ FROM pg_roles WHERE rolname = $1`, scriptRole).Scan(&canLogin, &monitor, &readAl
 		}
 	})
 }
+
+// INT-PERM-009: the shipped script reports the grants PUBLIC holds that let
+// any role write, and with harden_public revokes them, so the role it
+// configures cannot write even through PUBLIC.
+func TestPerm_INT_PERM_009_ScriptHardensPublic(t *testing.T) {
+	ForEach(t, func(t *testing.T, pg *PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "app", RoleSuperuser)
+		dropScriptRoles(t, admin)
+		// The database ACL lives in a shared catalog the snapshot does not
+		// restore, so every grant this test takes from PUBLIC goes back.
+		t.Cleanup(func() {
+			_, err := admin.Exec(context.Background(), `GRANT TEMPORARY ON DATABASE app TO PUBLIC;
+GRANT EXECUTE ON FUNCTION pg_catalog.lo_create(oid), pg_catalog.lo_creat(integer),
+  pg_catalog.lo_from_bytea(oid, bytea) TO PUBLIC;
+DROP TABLE IF EXISTS perm_script_public`)
+			require.NoError(t, err)
+			dropScriptRoles(t, admin)
+		})
+		_, err := admin.Exec(ctx, `CREATE TABLE perm_script_public (a int);
+GRANT INSERT ON perm_script_public TO PUBLIC`)
+		require.NoError(t, err)
+
+		code, out := runMonitoringScript(t, pg)
+		require.Equal(t, 0, code, out)
+		require.Contains(t, out, "PUBLIC grants let "+scriptRole)
+		for _, fix := range []string{
+			"REVOKE TEMPORARY ON DATABASE app FROM PUBLIC;",
+			"REVOKE EXECUTE ON FUNCTION pg_catalog.lo_create(oid)",
+			"REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON perm_script_public FROM PUBLIC;",
+		} {
+			require.Contains(t, out, fix)
+		}
+
+		code, out = runMonitoringScript(t, pg, "harden_public=1")
+		require.Equal(t, 0, code, out)
+		code, out = runMonitoringScript(t, pg)
+		require.Equal(t, 0, code, out)
+		require.NotContains(t, out, "PUBLIC grants let")
+
+		conn := connectAs(t, pg, scriptRole, "script")
+		_, err = conn.Exec(ctx, "SET default_transaction_read_only = off")
+		require.NoError(t, err)
+		for _, statement := range []string{
+			"SELECT pg_catalog.lo_create(0)",
+			"SELECT pg_catalog.lo_creat(-1)",
+			"SELECT pg_catalog.lo_from_bytea(0, '\\x00')",
+			"CREATE TEMP TABLE perm_script_temp (a int)",
+			"INSERT INTO perm_script_public VALUES (1)",
+			"CREATE TABLE public.perm_script_new (a int)",
+		} {
+			_, err := conn.Exec(ctx, statement)
+			require.True(t, isSQLState(err, "42501"), "%s: %v", statement, err)
+		}
+	})
+}

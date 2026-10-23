@@ -6,6 +6,8 @@
 --   psql -v pglens_password='secret' -v dbname=app -v tier1=1 -f monitoring_user.sql
 -- Tier 2 also needs tier1=1. This file never creates an extension.
 -- The role is named pglens unless -v role=<name> names another one.
+-- -v harden_public=1 also revokes from PUBLIC the grants that let every
+-- role write outside a read-only transaction (see the end of this file).
 --
 -- The role it configures can only read. Before granting anything the script
 -- checks that an existing role of that name could not write either: it
@@ -275,39 +277,70 @@ ALTER ROLE :"role" SET idle_in_transaction_session_timeout = '30s';
 ALTER ROLE :"role" SET application_name = 'pglens';
 
 -- What PUBLIC holds, the role holds too. These grants let any role write
--- outside a read-only transaction; pglens never leaves one, so they are
--- reported, not revoked: revoking them changes what every other role can do.
+-- outside a read-only transaction; pglens never leaves one. They are
+-- reported, and revoked from PUBLIC only with -v harden_public=1, because
+-- revoking them changes what every other role of the database can do: an
+-- application that uses temporary tables or large objects then needs its
+-- own grants.
+\if :{?harden_public}
+SET LOCAL pglens.harden_public = on;
+\else
+SET LOCAL pglens.harden_public = off;
+\endif
 DO $$
 DECLARE
   monitor oid := (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = current_setting('pglens.role'));
+  harden boolean := current_setting('pglens.harden_public')::boolean;
+  item record;
   paths text[] := '{}';
 BEGIN
-  IF pg_catalog.has_database_privilege(monitor, current_database(), 'TEMPORARY') THEN
-    paths := paths || format('temporary tables (REVOKE TEMPORARY ON DATABASE %I FROM PUBLIC;)', current_database());
-  END IF;
-  IF pg_catalog.has_function_privilege(monitor, 'pg_catalog.lo_create(oid)', 'EXECUTE')
-     OR pg_catalog.has_function_privilege(monitor, 'pg_catalog.lo_creat(integer)', 'EXECUTE')
-     OR pg_catalog.has_function_privilege(monitor, 'pg_catalog.lo_from_bytea(oid, bytea)', 'EXECUTE') THEN
-    paths := paths || 'large objects (REVOKE EXECUTE ON FUNCTION lo_create(oid), lo_creat(integer), lo_from_bytea(oid, bytea) FROM PUBLIC;)'::text;
-  END IF;
-  paths := paths || ARRAY(
-    SELECT format('new objects in schema %1$I (REVOKE CREATE ON SCHEMA %1$I FROM PUBLIC;)', n.nspname)
-    FROM pg_catalog.pg_namespace n
-    WHERE pg_catalog.has_schema_privilege(monitor, n.oid, 'CREATE')
-      AND n.nspname !~ '^pg_(temp|toast_temp)_'
-    ORDER BY n.nspname);
-  paths := paths || ARRAY(
-    SELECT format('rows of %1$s (REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON %1$s FROM PUBLIC;)', c.oid::pg_catalog.regclass)
-    FROM pg_catalog.pg_class c
-    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-    WHERE c.relkind IN ('r', 'p', 'v', 'f', 'm')
-      AND n.nspname NOT IN ('pg_catalog', 'information_schema')
-      AND pg_catalog.has_table_privilege(monitor, c.oid, 'INSERT, UPDATE, DELETE, TRUNCATE')
-    ORDER BY 1);
-  IF cardinality(paths) > 0 THEN
+  -- With harden_public the grants are revoked, then looked for again: a
+  -- REVOKE by a role that neither owns the object nor holds the grant only
+  -- warns, which is what a managed-service admin gets on pg_catalog.
+  LOOP
+    FOR item IN
+      SELECT 'temporary tables' AS what,
+             format('REVOKE TEMPORARY ON DATABASE %I FROM PUBLIC', current_database()) AS fix
+      WHERE pg_catalog.has_database_privilege(monitor, current_database(), 'TEMPORARY')
+      UNION ALL
+      SELECT 'large objects',
+             'REVOKE EXECUTE ON FUNCTION pg_catalog.lo_create(oid), pg_catalog.lo_creat(integer), pg_catalog.lo_from_bytea(oid, bytea) FROM PUBLIC'
+      WHERE pg_catalog.has_function_privilege(monitor, 'pg_catalog.lo_create(oid)', 'EXECUTE')
+         OR pg_catalog.has_function_privilege(monitor, 'pg_catalog.lo_creat(integer)', 'EXECUTE')
+         OR pg_catalog.has_function_privilege(monitor, 'pg_catalog.lo_from_bytea(oid, bytea)', 'EXECUTE')
+      UNION ALL
+      SELECT format('new objects in schema %I', n.nspname),
+             format('REVOKE CREATE ON SCHEMA %I FROM PUBLIC', n.nspname)
+      FROM pg_catalog.pg_namespace n
+      WHERE pg_catalog.has_schema_privilege(monitor, n.oid, 'CREATE')
+        AND n.nspname !~ '^pg_(temp|toast_temp)_'
+      UNION ALL
+      SELECT format('rows of %s', c.oid::pg_catalog.regclass),
+             format('REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON %s FROM PUBLIC', c.oid::pg_catalog.regclass)
+      FROM pg_catalog.pg_class c
+      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      WHERE c.relkind IN ('r', 'p', 'v', 'f', 'm')
+        AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+        AND pg_catalog.has_table_privilege(monitor, c.oid, 'INSERT, UPDATE, DELETE, TRUNCATE')
+    LOOP
+      IF harden THEN
+        EXECUTE item.fix;
+        RAISE NOTICE 'harden_public: %', item.fix;
+      ELSE
+        paths := paths || format('%s (%s;)', item.what, item.fix);
+      END IF;
+    END LOOP;
+    EXIT WHEN NOT harden;
+    harden := false;
+  END LOOP;
+  IF cardinality(paths) > 0 AND current_setting('pglens.harden_public')::boolean THEN
+    RAISE WARNING 'harden_public could not revoke from PUBLIC what lets %, like every role, write outside a read-only transaction: %',
+      quote_ident(current_setting('pglens.role')), array_to_string(paths, ', ')
+      USING HINT = 'Run the statements in parentheses as the owner of each object.';
+  ELSIF cardinality(paths) > 0 THEN
     RAISE NOTICE 'PUBLIC grants let %, like every role, write outside a read-only transaction: %',
       quote_ident(current_setting('pglens.role')), array_to_string(paths, ', ')
-      USING HINT = 'pglens never leaves one: every session it opens is read-only. Run the statements in parentheses to close them for every role.';
+      USING HINT = 'pglens never leaves one: every session it opens is read-only. Run the statements in parentheses, or rerun this script with -v harden_public=1, to close them for every role.';
   END IF;
 END
 $$;
