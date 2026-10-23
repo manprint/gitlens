@@ -15,6 +15,58 @@ describe('TimeRangePicker', () => {
     expect(result.router.state.location.search).toBe('?range=15m')
   })
 
+  it('UI-TIME-012 keeps the drill-down parameters when a preset is chosen or zoomed out', () => {
+    const result = renderWithProviders(<TimeRangePicker />, {
+      route: '/instances/i1/ash?range=24h&db=app&group=wait_event&wait_event_type=Lock',
+    })
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Time range preset' }), {
+      target: { value: '1h' },
+    })
+    let params = new URLSearchParams(result.router.state.location.search)
+    expect(params.get('range')).toBe('1h')
+    expect(params.get('db')).toBe('app')
+    expect(params.get('group')).toBe('wait_event')
+    expect(params.get('wait_event_type')).toBe('Lock')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom out time range' }))
+    params = new URLSearchParams(result.router.state.location.search)
+    expect(params.get('range')).toBe('6h')
+    expect(params.get('db')).toBe('app')
+    expect(params.get('wait_event_type')).toBe('Lock')
+  })
+
+  it('UI-TIME-013 keeps the other parameters when an absolute range is applied', () => {
+    const result = renderWithProviders(<TimeRangePicker />, {
+      route: '/instances/i1/ash?range=24h&db=app&wait_event_type=Lock',
+    })
+
+    fireEvent.submit(screen.getByRole('form', { name: 'Absolute time range' }))
+
+    const params = new URLSearchParams(result.router.state.location.search)
+    expect(params.has('range')).toBe(false)
+    expect(params.get('from')).not.toBeNull()
+    expect(params.get('to')).not.toBeNull()
+    expect(params.get('db')).toBe('app')
+    expect(params.get('wait_event_type')).toBe('Lock')
+  })
+
+  it('UI-TIME-014 drops an absolute window when a preset is chosen', () => {
+    const result = renderWithProviders(<TimeRangePicker />, {
+      route: '/findings?from=2026-01-01T00:00:00Z&to=2026-01-01T01:00:00Z&db=app',
+    })
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Time range preset' }), {
+      target: { value: '15m' },
+    })
+
+    const params = new URLSearchParams(result.router.state.location.search)
+    expect(params.get('range')).toBe('15m')
+    expect(params.has('from')).toBe(false)
+    expect(params.has('to')).toBe(false)
+    expect(params.get('db')).toBe('app')
+  })
+
   it('UI-TIME-011 renders Degraded for an invalid URL range and uses 1h', () => {
     renderWithProviders(<TimeRangePicker />, { route: '/findings?range=invalid' })
 
