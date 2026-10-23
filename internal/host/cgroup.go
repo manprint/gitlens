@@ -1,6 +1,7 @@
 package host
 
 import (
+	"cmp"
 	"math"
 	"os"
 	"path/filepath"
@@ -16,8 +17,8 @@ func (c *Collector) applyCgroup(s *Sample) {
 	root := filepath.Join(c.sysPath, "fs", "cgroup")
 	if _, err := os.Stat(filepath.Join(root, "cgroup.controllers")); err == nil {
 		own := c.ownCgroupDir(root)
-		memDir := governingDir(own, root, hasMemoryLimit)
-		cpuDir := governingDir(own, root, hasCPUQuota)
+		memDir := governingDir(own, root, memoryLimit)
+		cpuDir := governingDir(own, root, readCPUQuota)
 		applyV2(memDir, cpuDir, s)
 		c.applyV2CPURatio(cpuDir, s)
 		return
@@ -27,36 +28,36 @@ func (c *Collector) applyCgroup(s *Sample) {
 	}
 }
 
-// governingDir is the directory whose limit binds own: the nearest one from own
-// up to root that has such a limit, since the kernel enforces every ancestor's
-// limit. The usage it is measured by is read from that same directory. It is ""
-// when no directory up to root has one, and the host figures stand.
-func governingDir(own, root string, hasLimit func(dir string) bool) string {
-	for dir := own; ; dir = filepath.Dir(dir) {
-		if hasLimit(dir) {
+// governingDir is the directory whose limit binds own: the tightest one from own
+// up to root. The kernel enforces every ancestor's limit, so the smallest of
+// them is the one a process reaches first, and a looser limit nearer to the
+// process does not hide it. The usage it is measured by is read from that same
+// directory. Among equal limits the nearest one wins. It is "" when no directory
+// up to root has one, and the host figures stand.
+func governingDir[T cmp.Ordered](own, root string, limitOf func(dir string) (T, bool)) string {
+	dir, found := "", false
+	var tightest T
+	for d := own; ; d = filepath.Dir(d) {
+		if limit, ok := limitOf(d); ok && (!found || limit < tightest) {
+			dir, tightest, found = d, limit, true
+		}
+		if d == root || !strings.HasPrefix(d, root+string(filepath.Separator)) {
 			return dir
 		}
-		if dir == root || !strings.HasPrefix(dir, root+string(filepath.Separator)) {
-			return ""
-		}
 	}
 }
 
-// hasMemoryLimit reports whether dir holds a memory limit that the usage of the
-// cgroup can be measured against.
-func hasMemoryLimit(dir string) bool {
+// memoryLimit reports the memory limit of dir, when it has one that the usage of
+// the cgroup can be measured against.
+func memoryLimit(dir string) (uint64, bool) {
 	limit, ok := readUint(filepath.Join(dir, "memory.max"))
 	if !ok || limit >= cgroupV1Unlimited {
-		return false
+		return 0, false
 	}
-	_, ok = readUint(filepath.Join(dir, "memory.current"))
-	return ok
-}
-
-// hasCPUQuota reports whether dir holds a CPU quota.
-func hasCPUQuota(dir string) bool {
-	_, ok := readCPUQuota(dir)
-	return ok
+	if _, ok := readUint(filepath.Join(dir, "memory.current")); !ok {
+		return 0, false
+	}
+	return limit, true
 }
 
 func readUint(path string) (uint64, bool) {

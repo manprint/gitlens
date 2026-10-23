@@ -318,3 +318,76 @@ func TestCgroup_HostServiceLimitIsNotReported(t *testing.T) {
 	require.Equal(t, uint64(8<<30), *s.MemTotalBytes)
 	require.Equal(t, 16, *s.CPUCount)
 }
+
+// The kernel enforces every ancestor's limit, so a looser limit on the process's
+// own cgroup does not hide a tighter one above it. The parent allows 1 GiB and
+// 2 cores, the own cgroup 2 GiB and 4 cores: the parent binds, and its usage and
+// its quota are the ones measured.
+func TestCgroup_TighterAncestorLimitBindsOwnCgroup(t *testing.T) {
+	procDir, sysDir := t.TempDir(), t.TempDir()
+	writeCgroupFiles(t, procDir, map[string]string{
+		"self/cgroup": "0::/parent/sub\n",
+		"1/cgroup":    "0::/parent/sub\n",
+	})
+	root := filepath.Join(sysDir, "fs", "cgroup")
+	parent := filepath.Join(root, "parent")
+	writeCgroupFiles(t, root, map[string]string{"cgroup.controllers": "cpu memory\n"})
+	writeCgroupFiles(t, parent, map[string]string{
+		"memory.max":     "1073741824\n", // 1 GiB
+		"memory.current": "268435456\n",  // 256 MiB, of which 64 MiB is inactive file cache
+		"memory.stat":    "inactive_file 67108864\n",
+		"cpu.max":        "200000 100000\n", // 2 cores
+		"cpu.stat":       "usage_usec 1000000\n",
+	})
+	writeCgroupFiles(t, filepath.Join(parent, "sub"), map[string]string{
+		"memory.max":     "2147483648\n", // 2 GiB, looser than the parent's
+		"memory.current": "1048576\n",
+		"cpu.max":        "400000 100000\n", // 4 cores, looser than the parent's
+		"cpu.stat":       "usage_usec 9000000\n",
+	})
+	c := NewCollector(procDir, sysDir)
+	now := time.Unix(1000, 0)
+	c.now = func() time.Time { return now }
+
+	s := Sample{Source: "host"}
+	c.applyCgroup(&s)
+	require.Equal(t, "cgroup_v2", s.Source)
+	require.Equal(t, uint64(1<<30), *s.MemTotalBytes)
+	require.Equal(t, uint64(1<<30-(256<<20-64<<20)), *s.MemAvailableBytes)
+	require.Equal(t, 2, *s.CPUCount)
+
+	// One CPU-second in one second of the parent's 2-core quota is half of it.
+	now = now.Add(time.Second)
+	writeCgroupFiles(t, parent, map[string]string{"cpu.stat": "usage_usec 2000000\n"})
+	host := 0.125
+	s = Sample{Source: "host", CPUUsedRatio: &host}
+	c.applyCgroup(&s)
+	require.InDelta(t, 0.5, *s.CPUUsedRatio, 1e-9)
+}
+
+// The own cgroup can hold the tighter limit, and then it binds as before.
+func TestCgroup_TighterOwnLimitBindsOwnCgroup(t *testing.T) {
+	procDir, sysDir := t.TempDir(), t.TempDir()
+	writeCgroupFiles(t, procDir, map[string]string{
+		"self/cgroup": "0::/parent/sub\n",
+		"1/cgroup":    "0::/parent/sub\n",
+	})
+	root := filepath.Join(sysDir, "fs", "cgroup")
+	parent := filepath.Join(root, "parent")
+	writeCgroupFiles(t, root, map[string]string{"cgroup.controllers": "cpu memory\n"})
+	writeCgroupFiles(t, parent, map[string]string{
+		"memory.max":     "1073741824\n",
+		"memory.current": "268435456\n",
+		"cpu.max":        "200000 100000\n", // 2 cores
+	})
+	writeCgroupFiles(t, filepath.Join(parent, "sub"), map[string]string{
+		"memory.max":     "536870912\n", // 512 MiB, tighter than the parent's
+		"memory.current": "134217728\n",
+		"cpu.max":        "100000 100000\n", // 1 core, tighter than the parent's
+	})
+	s := Sample{Source: "host"}
+	NewCollector(procDir, sysDir).applyCgroup(&s)
+	require.Equal(t, uint64(536870912), *s.MemTotalBytes)
+	require.Equal(t, uint64(536870912-134217728), *s.MemAvailableBytes)
+	require.Equal(t, 1, *s.CPUCount)
+}
