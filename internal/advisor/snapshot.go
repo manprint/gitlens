@@ -250,11 +250,7 @@ func loadRelationSnapshot(ctx context.Context, pool snapshotDB, s *Snapshot, now
 			return err
 		}
 	}
-	if err := loadIndexFacts(ctx, pool, s); err != nil {
-		if !isOptionalSnapshotError(err) {
-			return err
-		}
-	}
+	attachIndexDefs(s)
 	if err := loadBloat(ctx, pool, s, now); err != nil {
 		if !isOptionalSnapshotError(err) {
 			return err
@@ -785,31 +781,17 @@ func loadIndexes(ctx context.Context, pool snapshotDB, s *Snapshot, now time.Tim
 	return rows.Err()
 }
 
-func loadIndexFacts(ctx context.Context, pool snapshotDB, s *Snapshot) error {
-	rows, err := pool.Query(ctx, `SELECT datname, key, COALESCE(value_text, ''), COALESCE(labels->>'def_hash', '') FROM object_facts WHERE tenant_id='default' AND instance_id=$1 AND kind='index_def'`, s.InstanceID)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	type indexDef struct{ definition, hash string }
-	defs := make(map[string]indexDef)
-	for rows.Next() {
-		var datname, key, definition, hash string
-		if err := rows.Scan(&datname, &key, &definition, &hash); err != nil {
-			return err
-		}
-		defs[indexHashKey(datname, key)] = indexDef{definition: definition, hash: hash}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
+// attachIndexDefs gives each index of the window its definition and hash from
+// the index_def facts that loadFacts has already read. They used to be read a
+// second time, with a query of their own, on every pass.
+func attachIndexDefs(s *Snapshot) {
+	defs := s.Facts["index_def"]
 	for i := range s.Indexes {
 		if def, ok := defs[indexHashKey(s.Indexes[i].Datname, s.Indexes[i].Name)]; ok {
-			s.Indexes[i].IndexDef = def.definition
-			s.Indexes[i].DefHash = def.hash
+			s.Indexes[i].IndexDef = def.ValueText
+			s.Indexes[i].DefHash = def.Labels["def_hash"]
 		}
 	}
-	return nil
 }
 
 // loadBloat keeps the latest measurement of each relation, preferring an
