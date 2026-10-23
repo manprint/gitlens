@@ -223,6 +223,11 @@ VALUES ($1::uuid,'default',$2,$3::uuid,'advisor-misconfigured',5432,$4,'primary'
 		return err
 	}
 	for _, finding := range findings {
+		// A degraded finding says which input is missing, not what to change, so
+		// it carries no remediation (internal/advisor/engine.go and rules_config.go).
+		if stringValue(finding["state"]) == "degraded" {
+			continue
+		}
 		if strings.TrimSpace(stringValue(finding["remediation"])) == "" {
 			return fmt.Errorf("finding %s has empty remediation", stringValue(finding["rule_id"]))
 		}
