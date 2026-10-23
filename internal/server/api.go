@@ -96,6 +96,26 @@ func writeError(w http.ResponseWriter, status int, msg, detail string) {
 	_ = json.NewEncoder(w).Encode(apiError{Error: msg, Detail: detail})
 }
 
+// maxJSONBodyBytes caps the body of a JSON write. Rule edits, silences and
+// mutes are a few hundred bytes, and the decoder buffers each value in full, so
+// a larger body is refused before it is read.
+const maxJSONBodyBytes = 64 << 10
+
+// decodeJSONBody decodes the JSON body of a write request into dst. It writes
+// the error response and returns false when the body is too large or malformed.
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) bool {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)).Decode(dst); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "payload too large", fmt.Sprintf("the body may not exceed %d bytes", maxJSONBodyBytes))
+			return false
+		}
+		writeError(w, http.StatusBadRequest, "invalid body", err.Error())
+		return false
+	}
+	return true
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

@@ -217,8 +217,7 @@ func (a *AlertAPI) updateRule(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var in ruleUpdate
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeError(w, 400, "invalid body", err.Error())
+	if !decodeJSONBody(w, r, &in) {
 		return
 	}
 	if in.Severity != nil && *in.Severity != "critical" && *in.Severity != "warning" && *in.Severity != "info" {
@@ -300,8 +299,7 @@ func (a *AlertAPI) listSilences(w http.ResponseWriter, r *http.Request) {
 }
 func (a *AlertAPI) createSilence(w http.ResponseWriter, r *http.Request) {
 	var s silenceJSON
-	if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
-		writeError(w, 400, "invalid body", err.Error())
+	if !decodeJSONBody(w, r, &s) {
 		return
 	}
 	if s.ID == uuid.Nil {

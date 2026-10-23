@@ -191,7 +191,10 @@ func (a *API) muteFinding(w http.ResponseWriter, r *http.Request) {
 		Reason string `json:"reason"`
 		Until  string `json:"until"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || strings.TrimSpace(in.Reason) == "" || in.Until == "" {
+	if !decodeJSONBody(w, r, &in) {
+		return
+	}
+	if strings.TrimSpace(in.Reason) == "" || in.Until == "" {
 		writeError(w, 400, "invalid mute", "reason and until are required")
 		return
 	}

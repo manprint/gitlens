@@ -888,3 +888,30 @@ func TestAPI_InstanceTruncated_QueryVariants(t *testing.T) {
 		require.Error(t, err)
 	})
 }
+
+// TestAPI_JSONWrites_RefuseOversizedBody: the write routes must not buffer a
+// body of arbitrary size. A 1 MiB body is refused with 413 before the decoder
+// reads it, on every route that takes JSON.
+func TestAPI_JSONWrites_RefuseOversizedBody(t *testing.T) {
+	t.Parallel()
+	body := `{"junk":"` + strings.Repeat("A", 1<<20) + `"}`
+	api := &API{pool: &mockPool{}}
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	alerts := newAlertAPIForTest(&mockPool{}, &alertAPITestStore{})
+	ar := alertRouter(alerts)
+	for _, tc := range []struct {
+		name    string
+		handler http.Handler
+		method  string
+		path    string
+	}{
+		{"rule update", ar, http.MethodPut, "/api/v1/alert-rules/custom"},
+		{"silence create", ar, http.MethodPost, "/api/v1/silences"},
+		{"finding mute", r, http.MethodPost, "/api/v1/findings/some-id/mute"},
+	} {
+		w := httptest.NewRecorder()
+		tc.handler.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, strings.NewReader(body)))
+		require.Equal(t, http.StatusRequestEntityTooLarge, w.Code, "%s: %s", tc.name, w.Body.String())
+	}
+}
