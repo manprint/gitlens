@@ -7,7 +7,6 @@ Wants=network-online.target
 Type=simple
 ExecStart=/usr/local/bin/pglens-server
 EnvironmentFile=-/etc/pglens/server.env
-StateDirectory=pglens
 DynamicUser=yes
 NoNewPrivileges=true
 PrivateTmp=true

@@ -124,3 +124,26 @@ func TestExampleStack_DependenciesWaitForHealthyServices(t *testing.T) {
 		}
 	}
 }
+
+// Two DynamicUser units that name the same state directory share it, and
+// systemd re-owns the whole tree for whichever unit starts last. The other
+// unit then cannot write its own files, so each unit gets a directory of its
+// own, or none when it keeps no state.
+func TestSystemdUnits_DoNotShareADynamicStateDirectory(t *testing.T) {
+	units, err := filepath.Glob(filepath.Join("systemd", "*.service"))
+	require.NoError(t, err)
+	require.NotEmpty(t, units)
+	owner := map[string]string{}
+	for _, unit := range units {
+		for _, line := range strings.Split(string(readFile(t, unit)), "\n") {
+			value, ok := strings.CutPrefix(line, "StateDirectory=")
+			if !ok {
+				continue
+			}
+			for _, dir := range strings.Fields(value) {
+				require.NotContains(t, owner, dir, "%s and %s both name the state directory %s", owner[dir], unit, dir)
+				owner[dir] = unit
+			}
+		}
+	}
+}
