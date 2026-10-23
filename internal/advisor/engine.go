@@ -239,8 +239,9 @@ func (e *Engine) Run(ctx context.Context) error {
 		if err := e.runInstanceWithin(ctx, id, now); err != nil {
 			errs = append(errs, err)
 		}
-		// Only the parent's cancellation stops the pass, which is a shutdown.
-		if ctx.Err() != nil {
+		// A shutdown ends the pass between instances. Stop waits for the pass
+		// in progress, so it must not wait for every instance of the fleet.
+		if ctx.Err() != nil || e.stopRequested() {
 			return errors.Join(append(errs, ctx.Err())...)
 		}
 	}
@@ -255,6 +256,16 @@ func (e *Engine) Run(ctx context.Context) error {
 	}
 	cancel()
 	return errors.Join(errs...)
+}
+
+// stopRequested reports whether Stop has been called.
+func (e *Engine) stopRequested() bool {
+	select {
+	case <-e.stopCh:
+		return true
+	default:
+		return false
+	}
 }
 
 // step returns ctx limited to one step's budget, see Run.

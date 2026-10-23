@@ -351,6 +351,26 @@ func TestRun_SlowInstanceDoesNotStopThePass(t *testing.T) {
 	require.True(t, store.purged, "the retention purge must still run")
 }
 
+// TestRun_StopEndsThePassBetweenInstances: Stop during a pass ends it before the
+// next instance, and the purge is left for the next pass. Stop waits for the
+// pass in progress, so it must not wait for the whole fleet.
+func TestRun_StopEndsThePassBetweenInstances(t *testing.T) {
+	rule := engineTestRule{id: "ok", severity: SeverityInfo, scope: ScopeInstance, eval: func(s *Snapshot) []Finding {
+		return []Finding{{RuleID: "ok", State: StateOpen, Scope: ScopeInstance, Title: "ok", ObjectName: s.InstanceID.String()}}
+	}}
+	e, store, _ := runWithRules(t, rule)
+	store.ids = []uuid.UUID{uuid.New(), uuid.New(), uuid.New()}
+	now := time.Unix(100, 0)
+	e.load = func(_ context.Context, id uuid.UUID, _ time.Time) (*Snapshot, error) {
+		e.Stop()
+		return &Snapshot{Now: now, InstanceID: id, PermTier: pgtype.TierReadOnly, Metrics: map[string]map[string]float64{}, Settings: map[string]string{}}, nil
+	}
+
+	require.NoError(t, e.Run(context.Background()))
+	require.Len(t, store.findings, 1, "only the instance in progress when Stop was called is evaluated")
+	require.False(t, store.purged)
+}
+
 // TestRun_PassTimeIsNotBoundedByOneStep: the instances of a pass may take
 // together far longer than one step's budget, since each has its own. Every
 // instance is evaluated in the pass that lists it.
