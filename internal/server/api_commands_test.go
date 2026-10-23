@@ -40,11 +40,17 @@ func (p *commandFakePool) Begin(context.Context) (pgx.Tx, error) { return p.tx, 
 type commandFakeTx struct {
 	pgx.Tx
 	row       pgx.Row
+	revoked   bool // the agent's revoked_at flag, answered to the revocation lookup
 	execCalls int
 	committed bool
 }
 
-func (t *commandFakeTx) QueryRow(context.Context, string, ...any) pgx.Row { return t.row }
+func (t *commandFakeTx) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+	if strings.Contains(sql, "revoked_at") {
+		return &mockRow{vals: []any{t.revoked}}
+	}
+	return t.row
+}
 func (t *commandFakeTx) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
 	t.execCalls++
 	return pgconn.NewCommandTag("OK"), nil
@@ -343,4 +349,36 @@ func TestResult_WritesAuditRow(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, rec.Code)
 	require.True(t, tx.committed)
 	require.Equal(t, 1, tx.execCalls)
+}
+
+// A revoked agent gets no commands, as its pushes are refused. The poll checks
+// the agent before it claims anything.
+func TestPoll_RefusesARevokedAgentWith401(t *testing.T) {
+	agentID := uuid.New()
+	pool := &commandFakePool{row: &mockRow{vals: []any{true}}}
+	s := NewCommandService(pool, NewAuth("secret"))
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents/"+agentID.String()+"/commands?wait=0s", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set(commandAgentIDHeader, agentID.String())
+	rec := httptest.NewRecorder()
+	commandRouter(s).ServeHTTP(rec, req)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	require.Contains(t, rec.Body.String(), "revoked")
+}
+
+// A result from a revoked agent is refused before anything is written, even
+// for a claim the agent held before its revocation.
+func TestResult_RefusesAResultFromARevokedAgent(t *testing.T) {
+	commandID, instanceID, claimToken := uuid.New(), uuid.New(), uuid.New()
+	tx := &commandFakeTx{revoked: true, row: &mockRow{vals: []any{"default", []byte(instanceID.String()), int64(0), command.KindCancel, []byte(`{"pid":42}`), "api"}}}
+	s := NewCommandService(&commandFakePool{tx: tx}, NewAuth("secret"))
+	body := `{"claim_token":"` + claimToken.String() + `","outcome":"ok","result":{"signalled":true}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/"+commandID.String()+"/result", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	commandRouter(s).ServeHTTP(rec, req)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	require.Contains(t, rec.Body.String(), "revoked")
+	require.False(t, tx.committed)
+	require.Equal(t, 0, tx.execCalls)
 }

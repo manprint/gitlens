@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 )
 
@@ -160,4 +161,56 @@ func TestINTCMD015_ClaimedCommandKeepsItsLease(t *testing.T) {
 	var outcomes string
 	require.NoError(t, pool.QueryRow(ctx, `SELECT string_agg(outcome, ',' ORDER BY audit_id) FROM command_audit WHERE command_id=$1`, commandID).Scan(&outcomes))
 	require.Equal(t, "expired,ok", outcomes, "the agent ran the command, so the late result is audited as the agent reported it")
+}
+
+// TestINTCMD029_RevokedAgentIsGivenNoCommands: revocation stops the command
+// queue as it stops ingest. A command queued after the revocation is never
+// claimed, the poll is refused with 401, and a result from a claim the agent
+// held before the revocation is refused and leaves that claim as it was.
+func TestINTCMD029_RevokedAgentIsGivenNoCommands(t *testing.T) {
+	pool := getSharedPool(t)
+	instanceID, agentID := seedCommandInstance(t, pool)
+	ctx := context.Background()
+	first, second := uuid.New(), uuid.New()
+	queue := func(commandID uuid.UUID) {
+		_, err := pool.Exec(ctx, `INSERT INTO commands (command_id, tenant_id, agent_id, instance_id, cluster_id, kind, args, state, expires_at) SELECT $1, tenant_id, agent_id, instance_id, cluster_id, 'cancel', '{"pid":42}', 'pending', now()+interval '5 minutes' FROM instances WHERE instance_id=$2`, commandID, instanceID)
+		require.NoError(t, err)
+	}
+	queue(first)
+
+	router := commandsIntegrationRouter(pool)
+	poll := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/agents/%s/commands?wait=0s", agentID), nil)
+		req.Header.Set("Authorization", "Bearer test-token")
+		req.Header.Set(commandAgentIDHeader, agentID.String())
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+	rec := poll()
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var claimed pollResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &claimed))
+	require.Equal(t, first, claimed.CommandID)
+
+	_, err := pool.Exec(ctx, `UPDATE agents SET revoked_at = now() WHERE agent_id=$1`, agentID)
+	require.NoError(t, err)
+	queue(second)
+
+	require.Equal(t, http.StatusUnauthorized, poll().Code)
+	_, err = NewCommandService(pool, NewAuth("test-token")).claim(ctx, agentID.String())
+	require.ErrorIs(t, err, pgx.ErrNoRows, "the claim itself skips a revoked agent's commands")
+	var secondState string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT state FROM commands WHERE command_id=$1`, second).Scan(&secondState))
+	require.Equal(t, "pending", secondState)
+
+	payload := fmt.Sprintf(`{"claim_token":"%s","outcome":"ok","result":{"signalled":true}}`, claimed.ClaimToken)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/"+first.String()+"/result", bytes.NewBufferString(payload))
+	req.Header.Set("Authorization", "Bearer test-token")
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusUnauthorized, rec.Code, rec.Body.String())
+	var firstState string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT state FROM commands WHERE command_id=$1`, first).Scan(&firstState))
+	require.Equal(t, "claimed", firstState, "a refused result leaves the claim as it was")
 }

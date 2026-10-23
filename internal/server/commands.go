@@ -274,7 +274,8 @@ func (s *CommandService) poll(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "forbidden", "agent may only poll its own queue")
 		return
 	}
-	if _, err := uuid.Parse(requestedID); err != nil {
+	agentID, err := uuid.Parse(requestedID)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid agent id", err.Error())
 		return
 	}
@@ -285,6 +286,17 @@ func (s *CommandService) poll(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.pool == nil {
 		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	// A revoked agent is given no commands, as its pushes are refused. The
+	// claim repeats this check, so a revocation during the wait holds too.
+	revoked, err := agentRevoked(r.Context(), s.pool, agentID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "agent lookup failed", err.Error())
+		return
+	}
+	if revoked {
+		writeError(w, http.StatusUnauthorized, "revoked", "agent is revoked and receives no commands")
 		return
 	}
 	deadline := s.now().Add(wait)
@@ -310,6 +322,19 @@ func (s *CommandService) poll(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// agentRevoked reports whether agents.revoked_at is set for the agent. An
+// agent that is not registered is not revoked.
+func agentRevoked(ctx context.Context, q interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, agentID uuid.UUID) (bool, error) {
+	var revoked bool
+	err := q.QueryRow(ctx, `SELECT revoked_at IS NOT NULL FROM agents WHERE agent_id=$1`, agentID).Scan(&revoked)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return revoked, err
+}
+
 func (s *CommandService) claim(ctx context.Context, agentID string) (pollResponse, error) {
 	var out pollResponse
 	parsed, err := uuid.Parse(agentID)
@@ -326,6 +351,7 @@ func (s *CommandService) claim(ctx context.Context, agentID string) (pollRespons
 		WHERE command_id = (
 			SELECT command_id FROM commands
 			WHERE tenant_id=$1 AND agent_id=$2 AND state='pending' AND expires_at > now()
+			  AND NOT EXISTS (SELECT 1 FROM agents WHERE agents.agent_id::text=commands.agent_id AND agents.revoked_at IS NOT NULL)
 			ORDER BY created_at
 			FOR UPDATE SKIP LOCKED
 			LIMIT 1
@@ -398,6 +424,18 @@ func (s *CommandService) result(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	defer func() { _ = tx.Rollback(ctx) }()
+	// A result from a revoked agent is refused, even for a claim it held before
+	// the revocation. The agent is the one that queued the command, not a header.
+	var revoked bool
+	err = tx.QueryRow(ctx, `SELECT a.revoked_at IS NOT NULL FROM commands c JOIN agents a ON a.agent_id::text = c.agent_id WHERE c.command_id=$1`, commandID).Scan(&revoked)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "command agent lookup failed", err.Error())
+		return
+	}
+	if revoked {
+		writeError(w, http.StatusUnauthorized, "revoked", "agent is revoked and its results are refused")
+		return
+	}
 	state := "failed"
 	if req.Outcome == "ok" {
 		state = "done"
