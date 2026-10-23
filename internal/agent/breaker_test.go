@@ -181,3 +181,59 @@ func TestBreaker_HalfOpenSuccessResetsLadder(t *testing.T) {
 		t.Fatal("expected Allow to be true once the restarted 1m backoff elapsed")
 	}
 }
+
+// TestBreaker_BackoffStaysInRange sweeps far past the point where the old
+// shift overflowed time.Duration. Every step must be positive, must not
+// shrink, and must stop at the 15m cap.
+func TestBreaker_BackoffStaysInRange(t *testing.T) {
+	b := NewBreaker()
+	const maxBackoff = 15 * time.Minute
+
+	prev := time.Duration(0)
+	for attempt := 0; attempt <= 100; attempt++ {
+		backoff := b.calculateBackoff(attempt)
+		if backoff <= 0 || backoff > maxBackoff {
+			t.Fatalf("attempt %d: backoff %v, want within (0, %v]", attempt, backoff, maxBackoff)
+		}
+		if backoff < prev {
+			t.Fatalf("attempt %d: backoff %v shrank from %v", attempt, backoff, prev)
+		}
+		prev = backoff
+	}
+	if prev != maxBackoff {
+		t.Fatalf("backoff after 100 attempts = %v, want %v", prev, maxBackoff)
+	}
+}
+
+// TestBreaker_OpenAfterLongOutageStaysSuspended drives a breaker through 40
+// failed half-open trials, the state a target that stays down for hours
+// reaches. Every trial must be suspended again right after it fails, and the
+// breaker must not allow a scrape before the 15m cap has elapsed.
+func TestBreaker_OpenAfterLongOutageStaysSuspended(t *testing.T) {
+	now := time.Now()
+	b := NewBreaker()
+	b.now = func() time.Time { return now }
+
+	b.RecordFailure()
+	b.RecordFailure()
+	b.RecordFailure()
+	for i := 0; i < 40; i++ {
+		now = now.Add(15 * time.Minute)
+		if !b.Allow() {
+			t.Fatalf("trial %d: expected the half-open trial to be allowed after the cap", i)
+		}
+		b.RecordFailure()
+		if b.Allow() {
+			t.Fatalf("trial %d: expected Allow to be false right after a failed trial", i)
+		}
+	}
+
+	now = now.Add(15*time.Minute - time.Second)
+	if b.Allow() {
+		t.Fatal("expected Allow to be false just before the 15m cap elapsed")
+	}
+	now = now.Add(time.Second)
+	if !b.Allow() {
+		t.Fatal("expected Allow to be true once the 15m cap elapsed")
+	}
+}

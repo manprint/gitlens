@@ -90,13 +90,14 @@ func (b *Breaker) RecordFailure() {
 // Sequence: 1m, 2m, 4m, 8m, capped at 15m.
 func (b *Breaker) calculateBackoff(attempt int) time.Duration {
 	max := time.Duration(15 * time.Minute)
-	if attempt < 0 {
-		attempt = 0
+	// Double until the cap is reached. Shifting the attempt count instead
+	// overflowed time.Duration (int64 nanoseconds) from attempt 28 on, which
+	// made the backoff negative or zero, so an open breaker allowed a scrape
+	// at once.
+	backoff := time.Minute
+	for i := 0; i < attempt && backoff < max; i++ {
+		backoff *= 2
 	}
-	if attempt > 62 {
-		return max
-	}
-	backoff := time.Duration(1<<uint(attempt)) * time.Minute
 	if backoff > max {
 		backoff = max
 	}
