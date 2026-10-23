@@ -68,6 +68,30 @@ func TestFindingPathID_DecodesEscapedSlash(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 }
 
+// TestFindingPathID_DecodesTheWildcardOnce: a request with no RawPath routes
+// on the decoded path, so the wildcard is already decoded. A literal '%' in a
+// relation name must survive, or the request names another finding.
+func TestFindingPathID_DecodesTheWildcardOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, action, want string
+	}{
+		{"escaped percent after an escaped slash", "/api/v1/findings/rule_a/obj%2541x/mute", "mute", "rule_a/obj%41x"},
+		{"escaped percent before a slash", "/api/v1/findings/rule_b/x%252Fy", "", "rule_b/x%2Fy"},
+		{"ui form with an escaped percent", "/api/v1/findings/rule_a%2Fobj%2541x/mute", "mute", "rule_a/obj%41x"},
+		{"plain id", "/api/v1/findings/rule_a/obj/mute", "mute", "rule_a/obj"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got string
+			r := chi.NewRouter()
+			r.HandleFunc("/api/v1/findings/*", func(w http.ResponseWriter, req *http.Request) {
+				got = findingPathID(req, tc.action)
+			})
+			r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, tc.path, nil))
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
 // TestScanFinding_ClusterIDIsAnUnsignedString: the spec's ClusterId. The
 // field was a JSON number, which a browser rounds past 2^53.
 func TestScanFinding_ClusterIDIsAnUnsignedString(t *testing.T) {

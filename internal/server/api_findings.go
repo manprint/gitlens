@@ -59,8 +59,14 @@ func findingPathID(r *http.Request, action string) string {
 	if action != "" {
 		id = strings.TrimSuffix(id, "/"+action)
 	}
-	if decoded, err := url.PathUnescape(id); err == nil {
-		id = decoded
+	// chi routes on RawPath when the request has one and hands the wildcard
+	// back still encoded. Without RawPath it routes on the decoded path, so the
+	// wildcard is already the id, and decoding it again turned a literal '%41'
+	// in a relation name into 'A' and addressed a different finding.
+	if r.URL.RawPath != "" {
+		if decoded, err := url.PathUnescape(id); err == nil {
+			id = decoded
+		}
 	}
 	return id
 }
