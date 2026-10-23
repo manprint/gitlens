@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -581,6 +582,25 @@ func TestPusher_RejectedEnvelopesAreCountedAsDropped(t *testing.T) {
 			require.Contains(t, p.LastError(), "samples too old")
 		})
 	}
+}
+
+// TestPusher_RejectionBodyIsCapped checks that a rejection with a huge body
+// keeps only a bounded prefix. The body becomes LastError, which /healthz
+// echoes on every probe, so the agent must not hold a whole error page.
+func TestPusher_RejectionBodyIsCapped(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(strings.Repeat("x", 4<<20)))
+	}))
+	defer srv.Close()
+
+	p := NewPusher(srv.URL, "token", clock.System())
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, p.Push(ctx))
+	require.Equal(t, HealthIncompatible, p.HealthState())
+	require.Equal(t, maxPushResponseBytes, len(p.LastError()))
 }
 
 // TestPusher_SendsTransmissionTime lets the server measure clock skew against

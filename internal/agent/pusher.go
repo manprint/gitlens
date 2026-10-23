@@ -34,6 +34,12 @@ const maxPendingEnvelopes = 1024
 // 60 second cap the exponential backoff reaches.
 const maxRetryAfter = 60 * time.Second
 
+// maxPushResponseBytes caps how much of a server response is read. A rejection
+// is explained in a few lines, and the text is kept as LastError and echoed by
+// /healthz on every probe, so a large error page from a proxy would otherwise
+// stay in memory for as long as the rejection does.
+const maxPushResponseBytes = 64 << 10
+
 // pushAttemptTimeout is how long one push attempt waits for the server's
 // answer. An attempt the server received in full and did not answer in time
 // is retried with a doubled wait, up to maxPushAttemptTimeout, which is the
@@ -480,7 +486,7 @@ func (p *Pusher) doRequest(req *http.Request) (int, *time.Duration, string, time
 	// Consumed here (rather than discarded) so a rejection's reason is
 	// available to LastError() — a 400/401 used to leave no trace anywhere
 	// of WHY the agent went "incompatible"/"unauthorized", not even in logs.
-	bodyBytes, _ := io.ReadAll(resp.Body)
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, maxPushResponseBytes))
 
 	return resp.StatusCode, skew, string(bodyBytes), retryAfter, true, nil
 }
