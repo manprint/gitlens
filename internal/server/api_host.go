@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"net/http"
 	"time"
 
@@ -98,10 +97,5 @@ func (a *API) handleHost(w http.ResponseWriter, r *http.Request) {
 		}
 		data[name] = value
 	}
-	writeJSON(w, http.StatusOK, json.RawMessage(mustJSON(data)))
-}
-
-func mustJSON(value any) []byte {
-	b, _ := json.Marshal(value)
-	return b
+	writeJSON(w, http.StatusOK, data)
 }

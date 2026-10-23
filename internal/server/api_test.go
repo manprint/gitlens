@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1023,4 +1024,25 @@ func TestAPI_MockPool_Clusters_QueriesDoNotGrowWithClusters(t *testing.T) {
 		return pool.queryCalls
 	}
 	require.Equal(t, countQueries(1), countQueries(20))
+}
+
+// A payload that cannot be encoded, such as a NaN metric, must not reach the
+// client as an empty 200: the status is only written once the body is known.
+func TestAPI_WriteJSON_EncodeFailureIsServerError(t *testing.T) {
+	t.Parallel()
+	w := httptest.NewRecorder()
+	writeJSON(w, http.StatusOK, map[string]any{"v": math.NaN()})
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	require.Equal(t, "application/json", w.Header().Get("Content-Type"))
+	var got apiError
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got), w.Body.String())
+	require.Equal(t, "encode failed", got.Error)
+}
+
+func TestAPI_WriteJSON_EncodesWithTrailingNewline(t *testing.T) {
+	t.Parallel()
+	w := httptest.NewRecorder()
+	writeJSON(w, http.StatusOK, map[string]any{"v": 1.5})
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, "{\"v\":1.5}\n", w.Body.String())
 }

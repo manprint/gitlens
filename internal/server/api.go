@@ -1,11 +1,13 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"net/http"
 	"strconv"
@@ -117,9 +119,18 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) bool {
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
+	// The body is encoded before the status is written. Once the header is
+	// out, a payload that fails to encode, such as a NaN, leaves the client a
+	// 200 with no body and leaves nothing in the log.
+	var body bytes.Buffer
+	if err := json.NewEncoder(&body).Encode(v); err != nil {
+		log.Printf("encode response: %v", err)
+		writeError(w, http.StatusInternalServerError, "encode failed", err.Error())
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	_, _ = w.Write(body.Bytes())
 }
 
 func parseTimeParam(s string) (time.Time, error) {
