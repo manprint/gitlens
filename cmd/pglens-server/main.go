@@ -25,15 +25,21 @@ import (
 var version = "dev" // overridden at build time with -ldflags
 
 func main() {
+	os.Exit(run())
+}
+
+// run is main with its exit status returned rather than passed to os.Exit,
+// so that the deferred stops and the pool close run before the process ends.
+func run() int {
 	showVersion := flag.Bool("version", false, "print version and exit")
 	healthcheck := flag.Bool("healthcheck", false, "GET /readyz on the configured listen address, exit 0 if it returns 200 else 1 (for Docker HEALTHCHECK — the distroless image has no shell or curl to do this any other way)")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println(version)
-		return
+		return 0
 	}
 	if *healthcheck {
-		os.Exit(runHealthcheck())
+		return runHealthcheck()
 	}
 	token, err := server.LoadBootstrapToken(nil, nil)
 	if err != nil {
@@ -166,17 +172,21 @@ func main() {
 			listenErr <- err
 		}
 	}()
-	// Wait for a signal, or for the listener to fail.
+	// Wait for a signal, or for the listener to fail. A listener that fails
+	// is an error exit, so a supervisor that restarts on failure does.
+	exitCode := 0
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT)
 	select {
 	case <-ch:
 	case err := <-listenErr:
 		log.Printf("listen: %v", err)
+		exitCode = 1
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
+	return exitCode
 }
 
 // runHealthcheck is invoked as `pglens-server --healthcheck` from the
