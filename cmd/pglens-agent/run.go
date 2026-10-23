@@ -330,6 +330,18 @@ func runAgentCommand(args []string) {
 	flushEnvelope(shutdownCtx, managers, &mu, pending, lastEdgeState, ashEnabled, scheduledDBs, pusher) //nolint:contextcheck // flushEnvelope->HasExtension: Manager caches this at connect time, the accessor takes no context
 
 	_ = healthSrv.Shutdown(shutdownCtx)
+	closeTargets(ashStops, managers)
+}
+
+// closeTargets stops the ASH samplers before it closes the managers. A sampler
+// holds a pooled connection for its whole run, and pgxpool.Close waits for
+// every acquired connection to be released, so closing a manager first blocked
+// the agent on shutdown until SIGKILL. stop is sync.Once, so the deferred sweep
+// in runAgentCommand is a no-op after this.
+func closeTargets(ashStops []func(), managers []*agent.Manager) {
+	for _, stop := range ashStops {
+		stop()
+	}
 	for _, mgr := range managers {
 		mgr.Close()
 	}
