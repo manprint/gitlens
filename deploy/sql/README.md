@@ -108,9 +108,15 @@ password from `PGLENS_MONITORING_PASSWORD`. Init scripts do not run again on an
 existing volume. There, run the same wrapper in the running container. It
 takes the password from the container's environment, runs this script with
 `pglens_password`, `dbname` and `role=pglens_monitor` once in each database
-that accepts connections, and `harden_public=1`, as on first boot:
+that accepts connections, and `harden_public=1`, as on first boot. Compose checks
+the whole stack file before it runs any subcommand, so export the three secrets
+the stack was started with in this shell first. The script reads the container's
+own environment, so these values only have to pass that check:
 
 ```sh
+export PGLENS_DB_PASSWORD='<superuser-password>'
+export PGLENS_MONITORING_PASSWORD='<monitoring-password>'
+export PGLENS_BOOTSTRAP_TOKEN='<token>'
 docker compose -f deploy/docker-compose.yml exec timescaledb \
   sh /docker-entrypoint-initdb.d/01-monitoring.sh
 ```
