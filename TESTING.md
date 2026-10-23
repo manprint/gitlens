@@ -1146,7 +1146,7 @@ Ogni comando emette su stdout un **report JSON** (quanti deadlock effettivi, qua
 | File | Trigger | Cosa esegue | Budget |
 |---|---|---|---|
 | `.github/workflows/ci.yml` | PR, push su `main`, `workflow_dispatch`, `workflow_call` | web, lint, security, unit, race-stress (non su PR), immagini, integration PG 15→19 × `vanilla`/`rds-like` | ~25 min wall clock, job paralleli |
-| `.github/workflows/e2e.yml` | PR verso `main`, nightly (02:00 UTC), `workflow_dispatch` | suite E2E completa × `AGENT_MODE` `container`/`binary`, più accettazione UI Playwright × `AGENT_MODE` | ~100 min |
+| `.github/workflows/e2e.yml` | PR verso `main`, nightly (02:00 UTC), `workflow_dispatch` | suite E2E completa × `AGENT_MODE` `container`/`binary` (job `Full E2E`), più accettazione UI Playwright × `AGENT_MODE` (job `ui-acceptance`) | suite completa 66–81 min, limite job 100 min; UI acceptance limite 45 min |
 | `.github/workflows/release-alpha.yml` | tag `v*-alpha.*`, `workflow_dispatch` | richiama `ci.yml` per intero, poi build multi-arch (amd64+arm64), push su ghcr.io con SBOM e provenance, smoke `--version` sulle immagini pubblicate, prerelease GitHub | ~2 h |
 
 `ci.yml` è riusabile via `workflow_call`: il workflow di release non duplica un
