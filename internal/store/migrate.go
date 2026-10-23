@@ -14,6 +14,11 @@ import (
 //go:embed migrations/*.sql
 var migrationFS embed.FS
 
+// migrationUnlockTimeout bounds the unlock after the migrations ran. It starts
+// when the unlock does, not when the lock was taken: a long migration must not
+// use up the unlock's budget.
+var migrationUnlockTimeout = 5 * time.Second
+
 // Migrate applies all pending migrations in order. It is forward-only and
 // idempotent. It creates the schema_migrations table if needed and records
 // each applied version. Running it twice is a no-op.
@@ -29,10 +34,16 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock(hashtext('pglens:migrations'))`); err != nil {
 		return fmt.Errorf("acquire migration lock: %w", err)
 	}
-	unlockCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
 	defer func() {
-		_, _ = conn.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtext('pglens:migrations'))`)
+		// The unlock runs after the migrations, possibly past the caller's
+		// deadline, so it gets its own budget. If it fails, the lock must not
+		// outlive the call on a pooled session that other replicas wait on:
+		// closing the connection ends the session and releases the lock.
+		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), migrationUnlockTimeout)
+		defer cancel()
+		if _, err := conn.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtext('pglens:migrations'))`); err != nil {
+			_ = conn.Conn().Close(unlockCtx)
+		}
 	}()
 
 	// Ensure schema_migrations exists
