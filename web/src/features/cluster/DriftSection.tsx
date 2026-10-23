@@ -34,13 +34,15 @@ function instanceIds(entries: readonly DriftEntry[]): string[] {
  * flags never depend on the order the response happens to list instances in.
  */
 function referenceValue(values: readonly DriftValue[]): string | undefined {
-  const counts = new Map<string, number>()
-  for (const value of values) {
-    counts.set(value.value, (counts.get(value.value) ?? 0) + 1)
-  }
   const byInstance = [...values].sort((left, right) =>
     left.instance_id.localeCompare(right.instance_id),
   )
+  // Counting in instance order keeps a tie between two non-primary values
+  // independent of the response order too.
+  const counts = new Map<string, number>()
+  for (const value of byInstance) {
+    counts.set(value.value, (counts.get(value.value) ?? 0) + 1)
+  }
   let reference = values.find((value) => value.role === 'primary')?.value ?? byInstance[0]?.value
   let referenceCount = reference === undefined ? 0 : (counts.get(reference) ?? 0)
   for (const [value, count] of counts) {
