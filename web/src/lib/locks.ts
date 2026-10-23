@@ -42,7 +42,12 @@ function fallbackWaitDuration(node: LockNode): number {
   )
 }
 
-/** Build a blocking forest while representing a repeated node as a cycle marker. */
+/**
+ * Build a blocking forest in which each session appears once. A queued waiter
+ * is blocked by everyone ahead of it, so attaching it under every blocker would
+ * repeat whole subtrees and grow as 2^N. It is attached under the first blocker
+ * that reaches it instead, and a repeat along its own path is a cycle marker.
+ */
 export function buildBlockingTree(nodes: readonly LockNode[]): BlockingTree {
   const byPID = new Map<string, LockNode>()
   for (const node of nodes) {
@@ -60,16 +65,21 @@ export function buildBlockingTree(nodes: readonly LockNode[]): BlockingTree {
     }
   }
 
+  const placed = new Set<string>()
   const build = (node: LockNode, path: ReadonlySet<string>): BlockingTreeNode => {
     const nodeKey = keyOf(node.pid)
     if (path.has(nodeKey)) return { cycle: true, node, children: [] }
 
+    placed.add(nodeKey)
     const nextPath = new Set(path)
     nextPath.add(nodeKey)
-    return {
-      node,
-      children: (children.get(nodeKey) ?? []).map((child) => build(child, nextPath)),
+    const childNodes: BlockingTreeNode[] = []
+    for (const child of children.get(nodeKey) ?? []) {
+      const childKey = keyOf(child.pid)
+      if (!nextPath.has(childKey) && placed.has(childKey)) continue
+      childNodes.push(build(child, nextPath))
     }
+    return { node, children: childNodes }
   }
 
   const hasKnownBlocker = (node: LockNode): boolean =>
@@ -77,20 +87,11 @@ export function buildBlockingTree(nodes: readonly LockNode[]): BlockingTree {
   const roots = nodes.filter((node) => !hasKnownBlocker(node))
   const forest = roots.map((root) => build(root, new Set<string>()))
 
-  const covered = new Set<string>()
-  const collect = (tree: BlockingTreeNode): void => {
-    covered.add(keyOf(tree.node.pid))
-    tree.children.forEach(collect)
-  }
-  forest.forEach(collect)
-
   // A cycle has no unblocked root. Add one representative so the operator can
   // see the complete component without allowing recursion to run forever.
   for (const node of nodes) {
-    if (!covered.has(keyOf(node.pid))) {
-      const tree = build(node, new Set<string>())
-      forest.push(tree)
-      collect(tree)
+    if (!placed.has(keyOf(node.pid))) {
+      forest.push(build(node, new Set<string>()))
     }
   }
 
@@ -107,17 +108,19 @@ export function treeDepth(tree: BlockingTree | BlockingTreeNode): number {
   return Math.max(0, ...roots.map(depthOf))
 }
 
-function blockedCountOf(tree: BlockingTreeNode): number {
-  return tree.children.reduce(
-    (count, child) => count + (child.cycle ? 0 : 1 + blockedCountOf(child)),
-    0,
-  )
-}
-
-/** Count distinct descendants represented by a tree, excluding cycle markers. */
+/** Count distinct sessions represented below the roots, excluding cycle markers. */
 export function blockedCount(tree: BlockingTree | BlockingTreeNode): number {
   const roots = Array.isArray(tree) ? tree : [tree]
-  return roots.reduce((count, root) => count + blockedCountOf(root), 0)
+  const blocked = new Set<string>()
+  const visit = (node: BlockingTreeNode): void => {
+    for (const child of node.children) {
+      if (child.cycle) continue
+      blocked.add(keyOf(child.node.pid))
+      visit(child)
+    }
+  }
+  roots.forEach(visit)
+  return blocked.size
 }
 
 /** Derive wait seconds from the sample timestamp, never from the current clock. */
