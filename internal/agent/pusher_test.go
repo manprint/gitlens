@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -672,4 +673,113 @@ func TestPusher_NetworkFailureKeepsRejection(t *testing.T) {
 	require.Error(t, p.Push(ctx))
 
 	require.Equal(t, HealthRevoked, p.HealthState())
+}
+
+// TestPusher_TransientRejectionsAreRetried: a 408, 425 or 429 says the push
+// may succeed later. The envelope must be retried, not counted as lost.
+func TestPusher_TransientRejectionsAreRetried(t *testing.T) {
+	for _, status := range []int{http.StatusRequestTimeout, http.StatusTooEarly, http.StatusTooManyRequests} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			t.Parallel()
+			requests := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				if requests == 1 {
+					w.WriteHeader(status)
+					return
+				}
+				w.WriteHeader(http.StatusAccepted)
+			}))
+			defer srv.Close()
+
+			p := NewPusher(srv.URL, "token", clock.System())
+			p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			require.NoError(t, p.Push(ctx))
+
+			require.Equal(t, 2, requests)
+			acked, dropped := p.BufferStats()
+			require.Equal(t, int64(1), acked)
+			require.Equal(t, int64(0), dropped)
+		})
+	}
+}
+
+// TestPusher_RetryAfterIsHonoured: a 429 that names a longer wait than the
+// first backoff must not be retried before that wait has passed.
+func TestPusher_RetryAfterIsHonoured(t *testing.T) {
+	requests := 0
+	var second time.Time
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests == 1 {
+			w.Header().Set("Retry-After", "2")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		second = time.Now()
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	p := NewPusher(srv.URL, "token", clock.System())
+	p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	start := time.Now()
+	require.NoError(t, p.Push(ctx))
+
+	require.Equal(t, 2, requests)
+	require.GreaterOrEqual(t, second.Sub(start), 2*time.Second)
+}
+
+// TestPusher_NotFoundKeepsEnvelopeQueued: a 404 or 405 from the push endpoint
+// means the URL or a proxy is wrong, not the envelope. It stays queued, and
+// healthz reports the state as incompatible.
+func TestPusher_NotFoundKeepsEnvelopeQueued(t *testing.T) {
+	for _, status := range []int{http.StatusNotFound, http.StatusMethodNotAllowed} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			requests := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				w.WriteHeader(status)
+			}))
+			defer srv.Close()
+
+			p := NewPusher(srv.URL, "token", clock.System())
+			p.Queue(&wire.Envelope{ProtocolVersion: wire.ProtocolVersion})
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			require.NoError(t, p.Push(ctx))
+
+			require.Equal(t, 1, requests)
+			_, dropped := p.BufferStats()
+			require.Equal(t, int64(0), dropped)
+			p.pendingMu.Lock()
+			require.Len(t, p.pending, 1)
+			p.pendingMu.Unlock()
+			require.Equal(t, HealthIncompatible, p.HealthState())
+			require.Contains(t, p.LastError(), strconv.Itoa(status))
+		})
+	}
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+	cases := map[string]time.Duration{
+		"":                              0,
+		"3":                             3 * time.Second,
+		" 5 ":                           5 * time.Second,
+		"0":                             0,
+		"-4":                            0,
+		"soon":                          0,
+		"99999":                         maxRetryAfter,
+		"Fri, 23 Oct 2026 12:00:30 GMT": 30 * time.Second,
+		"Fri, 23 Oct 2026 11:59:00 GMT": 0,
+		"Fri, 23 Oct 2026 14:00:00 GMT": maxRetryAfter,
+	}
+	for value, want := range cases {
+		require.Equal(t, want, parseRetryAfter(value, now), "Retry-After %q", value)
+	}
 }

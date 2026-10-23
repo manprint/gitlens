@@ -11,6 +11,7 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,6 +27,10 @@ import (
 // of envelopes, comfortably longer than any outage the in-memory path is
 // expected to ride out (the durable path is buffer.Buffer).
 const maxPendingEnvelopes = 1024
+
+// maxRetryAfter caps the wait a Retry-After header can ask for. It matches the
+// 60 second cap the exponential backoff reaches.
+const maxRetryAfter = 60 * time.Second
 
 // Health represents the pusher's health state.
 type Health string
@@ -224,8 +229,9 @@ const (
 	// never going to take.
 	pushConsumed pushOutcome = iota
 	// pushRetryLater: delivery failed for a reason a later push may resolve
-	// (401 — token rotated, agent pending re-approval). The envelope must
-	// stay queued and the drain must stop.
+	// (401 — token rotated, agent pending re-approval; 404 and 405 — the push
+	// URL is wrong or something in front of the server is blocking it). The
+	// envelope must stay queued and the drain must stop.
 	pushRetryLater
 )
 
@@ -233,16 +239,23 @@ const (
 // exponential backoff + jitter until the envelope reaches a terminal outcome
 // or ctx is cancelled.
 func (p *Pusher) pushOne(ctx context.Context, env *wire.Envelope) (pushOutcome, error) {
+	// wait is the Retry-After the previous attempt was given, if any.
+	var wait time.Duration
 	for attempt := 0; ; attempt++ {
 		// Backoff applies to retries only. Sleeping before the first attempt
 		// delayed every push by backoffDelay(1) — 1 to 2 seconds — even
 		// against a perfectly healthy server, and made the flush at shutdown
 		// (and any test with a short deadline) race its own timeout.
 		if attempt > 0 {
-			if err := p.clk.Sleep(ctx, backoffDelay(attempt, p.clk)); err != nil {
+			delay := backoffDelay(attempt, p.clk)
+			if wait > delay {
+				delay = wait
+			}
+			if err := p.clk.Sleep(ctx, delay); err != nil {
 				return pushRetryLater, err // context cancelled
 			}
 		}
+		wait = 0
 
 		req, err := p.buildRequest(ctx, env)
 		if err != nil {
@@ -254,7 +267,7 @@ func (p *Pusher) pushOne(ctx context.Context, env *wire.Envelope) (pushOutcome, 
 			return pushConsumed, fmt.Errorf("encode envelope: %w", err)
 		}
 
-		status, skew, body, err := p.doRequest(req)
+		status, skew, body, retryAfter, err := p.doRequest(req)
 		if err != nil {
 			// Transient: network error, connection refused, timeout. The
 			// retry loop continues, but the state must not stay ok while
@@ -317,6 +330,23 @@ func (p *Pusher) pushOne(ctx context.Context, env *wire.Envelope) (pushOutcome, 
 			atomic.AddInt64(&p.nDropped, 1)
 			return pushConsumed, nil
 
+		case http.StatusRequestTimeout, http.StatusTooEarly, http.StatusTooManyRequests: // 408, 425, 429
+			// The server, or something in front of it, asked for a later
+			// retry. The envelope is still good, so it is kept and retried
+			// after the backoff, or after the Retry-After it was given.
+			wait = retryAfter
+			continue
+
+		case http.StatusNotFound, http.StatusMethodNotAllowed: // 404, 405
+			// Nothing accepts pushes at this URL, so server.url is wrong or a
+			// proxy is in the way. The envelope is not at fault: it stays
+			// queued until the endpoint answers, and healthz says why.
+			p.mu.Lock()
+			p.health = HealthIncompatible
+			p.lastError = fmt.Sprintf("push returned %d: %s", status, body)
+			p.mu.Unlock()
+			return pushRetryLater, nil
+
 		default:
 			if status >= 500 {
 				// 5xx: retry
@@ -376,13 +406,13 @@ func (p *Pusher) buildRequest(ctx context.Context, env *wire.Envelope) (*http.Re
 	return req, nil
 }
 
-// doRequest sends the request and returns (status, skew, error).
+// doRequest sends the request and returns (status, skew, body, retryAfter, error).
 // error is non-nil only for network errors; status is parsed from response when err is nil.
-func (p *Pusher) doRequest(req *http.Request) (int, *time.Duration, string, error) {
+func (p *Pusher) doRequest(req *http.Request) (int, *time.Duration, string, time.Duration, error) {
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		// Network error, timeout, connection refused: return error
-		return 0, nil, "", err
+		return 0, nil, "", 0, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -393,13 +423,37 @@ func (p *Pusher) doRequest(req *http.Request) (int, *time.Duration, string, erro
 			skew = &skewVal
 		}
 	}
+	retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"), p.clk.Now())
 
 	// Consumed here (rather than discarded) so a rejection's reason is
 	// available to LastError() — a 400/401 used to leave no trace anywhere
 	// of WHY the agent went "incompatible"/"unauthorized", not even in logs.
 	bodyBytes, _ := io.ReadAll(resp.Body)
 
-	return resp.StatusCode, skew, string(bodyBytes), nil
+	return resp.StatusCode, skew, string(bodyBytes), retryAfter, nil
+}
+
+// parseRetryAfter reads a Retry-After header, given either as seconds or as an
+// HTTP date. A missing, malformed or past value is no wait at all, and a wait
+// longer than maxRetryAfter is cut to it so one response cannot park the push
+// loop for hours.
+func parseRetryAfter(value string, now time.Time) time.Duration {
+	if secs, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err == nil {
+		switch {
+		case secs <= 0:
+			return 0
+		case secs >= int64(maxRetryAfter/time.Second):
+			return maxRetryAfter
+		default:
+			return time.Duration(secs) * time.Second
+		}
+	}
+	if at, err := http.ParseTime(value); err == nil {
+		if wait := at.Sub(now); wait > 0 {
+			return min(wait, maxRetryAfter)
+		}
+	}
+	return 0
 }
 
 // Health returns current health state.
