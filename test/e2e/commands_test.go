@@ -525,8 +525,13 @@ func waitPlans(ctx context.Context, e *scenario.Env, instanceID string, queryID 
 // waitCommandExpired polls until the command's expires_at has passed on the
 // database clock. The lease scenarios used to sleep a fixed 6 seconds, which
 // expired the command only if the server's TTL was shorter than that.
+//
+// A claimed command expires at the end of the server's 2-minute claim lease,
+// which starts just before this wait does. The deadline is a minute longer:
+// a wait as long as the lease ended on its last reading, a few milliseconds
+// short of expiry, when the agent was a binary that stops at once.
 func waitCommandExpired(ctx context.Context, e *scenario.Env, commandID string) error {
-	deadline := time.Now().Add(2 * time.Minute)
+	deadline := time.Now().Add(3 * time.Minute)
 	var last string
 	for time.Now().Before(deadline) {
 		var expiresAt, dbNow time.Time
