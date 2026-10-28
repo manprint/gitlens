@@ -1,3 +1,4 @@
+import { ListChecks } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
@@ -56,8 +57,13 @@ export function RulesPage() {
   return (
     <div className="space-y-8">
       <PageHeader
+        icon={ListChecks}
+        eyebrow="Alerting"
         actions={
-          <Link className="rounded-md border px-3 py-2 text-sm" to="/alerts">
+          <Link
+            className="hover:bg-muted inline-flex h-9 items-center gap-1.5 rounded-md border px-3 text-sm font-medium transition-colors"
+            to="/alerts"
+          >
             Back to alerts
           </Link>
         }
@@ -81,7 +87,7 @@ export function RulesPage() {
           description="Tier 0 staleness rules are always on by design. Tier 1 rules can be changed and are saved by the server."
           title="Configured rules"
         >
-          <div className="overflow-x-auto">
+          <div className="relative overflow-x-auto" tabIndex={0}>
             <table className="w-full text-left text-sm" aria-label="Alert rules">
               <thead>
                 <tr className="border-b">

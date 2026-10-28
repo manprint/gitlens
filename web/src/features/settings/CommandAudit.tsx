@@ -125,7 +125,7 @@ function InstanceCommandAudit({ instance }: { instance: InstanceSummary }) {
 
   return (
     <Section description={`Newest activity first for ${label}.`} title={label}>
-      <div className="overflow-x-auto">
+      <div className="relative overflow-x-auto" tabIndex={0}>
         <table aria-label={`Command audit for ${label}`}>
           <thead>
             <tr>

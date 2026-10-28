@@ -1,3 +1,4 @@
+import { Network } from 'lucide-react'
 import { useEffect, useMemo, useRef } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 
@@ -119,6 +120,8 @@ export function ClusterPage({ clusterId: clusterIdOverride }: ClusterPageProps =
   return (
     <div className="space-y-8">
       <PageHeader
+        icon={Network}
+        eyebrow="Cluster"
         title={cluster.name ?? `Cluster ${cluster.cluster_id}`}
         subtitle={`${cluster.instance_count} monitored instance${cluster.instance_count === 1 ? '' : 's'} · ${cluster.health}`}
         freshness={<FreshnessBadge dataUpdatedAt={topologyQuery.dataUpdatedAt} policy="cluster" />}

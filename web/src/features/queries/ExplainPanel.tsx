@@ -109,7 +109,7 @@ function PlanResult({ result }: { result: unknown }) {
         Query plan
       </h3>
       {plan ? (
-        <ul aria-label="Query plan tree" className="rounded-md border p-3">
+        <ul aria-label="Query plan tree" className="bg-muted/30 rounded-lg border p-4">
           <PlanNode node={plan} />
         </ul>
       ) : (
@@ -118,8 +118,13 @@ function PlanResult({ result }: { result: unknown }) {
         </p>
       )}
       <details>
-        <summary>Raw JSON</summary>
-        <pre className="mt-2 max-h-96 overflow-auto rounded-md border p-3 text-xs">
+        <summary className="text-muted-foreground hover:text-foreground cursor-pointer text-sm font-medium">
+          Raw JSON
+        </summary>
+        <pre
+          className="bg-muted/30 mt-2 max-h-96 overflow-auto rounded-lg border p-3 font-mono text-xs"
+          tabIndex={0}
+        >
           {JSON.stringify(result, null, 2)}
         </pre>
       </details>
@@ -172,15 +177,14 @@ export function ExplainPanel({
   const result =
     command?.state === 'done' || command?.state === 'succeeded' ? command.result : undefined
   const planOnlyButton = (
-    <button
+    <Button
       type="button"
-      className="rounded-md border px-3 py-2 text-sm font-medium"
       aria-label="Run plan only"
       onClick={() => submit(false)}
       disabled={!canPlan || queryID === null || createCommand.isPending || commandOpen}
     >
       Plan only
-    </button>
+    </Button>
   )
   const analyzeButton = (
     <Button
@@ -195,16 +199,22 @@ export function ExplainPanel({
   )
 
   return (
-    <section aria-labelledby="explain-panel-title" className="space-y-5">
+    <section
+      aria-labelledby="explain-panel-title"
+      className="bg-card shadow-card space-y-5 rounded-xl border p-5"
+    >
       <header>
-        <h1 id="explain-panel-title">Query detail and plan history</h1>
-        <p className="text-muted-foreground text-sm">
+        <h2 id="explain-panel-title" className="text-base font-semibold">
+          Execution plan
+        </h2>
+        <p className="text-muted-foreground mt-1 text-sm">
           Request an execution plan for query {String(queryid)}
-          {datname ? ` in ${datname}` : ''}.
+          {datname ? ` in ${datname}` : ''}. The agent runs EXPLAIN on the monitored database and
+          stores the result in the plan history below.
         </p>
       </header>
 
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-wrap items-start gap-3">
         {canPlan ? (
           planOnlyButton
         ) : (
@@ -254,14 +264,14 @@ export function ExplainPanel({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <button
+            <Button
               ref={cancelRef}
               type="button"
-              className="rounded-md border px-3 py-2 text-sm font-medium"
+              variant="outline"
               onClick={() => setConfirmationOpen(false)}
             >
               Cancel
-            </button>
+            </Button>
             <Button
               type="button"
               onClick={() => {

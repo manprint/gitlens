@@ -7,7 +7,9 @@ import { ErrorState } from '@/components/state'
 import { isMonitoredDatabase } from '@/lib/databases'
 import ExplainPanel from '@/features/queries/ExplainPanel'
 import PlanHistory from '@/features/queries/PlanHistory'
+import { QueryOverview } from '@/features/queries/QueryOverview'
 import QueryListPageComponent from '@/features/queries/QueryListPage'
+import SlowQueriesPageComponent from '@/features/queries/SlowQueriesPage'
 import LocksPageComponent from '@/features/locks/BlockingTree'
 import { FindingsPage as FindingsPageComponent } from '@/features/findings/FindingsPage'
 import { AlertsPage as AlertsPageComponent } from '@/features/alerts/AlertsPage'
@@ -32,6 +34,10 @@ function PlaceholderPage({ surface }: PlaceholderPageProps) {
 
 export function FleetOverviewPage() {
   return <FleetPage />
+}
+
+export function SlowQueriesPage() {
+  return <SlowQueriesPageComponent />
 }
 
 export function ClusterDetailPage() {
@@ -80,7 +86,10 @@ export function QueryDetailPage() {
     }
     if (!isMonitoredDatabase(instanceQuery.data.databases, requestedDatabase)) {
       return (
-        <section role="alert" className="border-destructive/40 bg-destructive/10 text-sm">
+        <section
+          role="alert"
+          className="border-destructive/40 bg-destructive/10 rounded-xl border text-sm"
+        >
           <strong>Database not monitored.</strong> {requestedDatabase} is not monitored on this
           instance, so this statement is not explained or planned here.
         </section>
@@ -90,7 +99,12 @@ export function QueryDetailPage() {
 
   const datname = requestedDatabase ?? undefined
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
+      <QueryOverview
+        {...(datname === undefined ? {} : { datname })}
+        instanceId={instanceId}
+        queryid={queryid}
+      />
       <ExplainPanel
         currentTier={instanceQuery.data?.perm_tier ?? 'T0'}
         {...(datname === undefined ? {} : { datname })}

@@ -1,3 +1,4 @@
+import { History } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
@@ -68,23 +69,25 @@ function AlertStatus({
       description="Alert health is evaluated independently from the event history."
     >
       {firingCount === 0 ? (
-        <p role="status">
+        <p className="text-sm" role="status">
           No alerts firing. Last evaluated: {evaluation ?? 'no alert evaluation has been recorded'}.
         </p>
       ) : (
-        <p role="status">Firing alerts: {firingCount}</p>
+        <p className="text-destructive text-sm font-semibold" role="status">
+          Firing alerts: {firingCount}
+        </p>
       )}
 
       {alerts.length > 0 ? (
         <div aria-label="Alert suppression status" className="mt-4 grid gap-2" role="list">
           {alerts.map((alert) => (
             <div
-              className="border-muted flex flex-wrap justify-between gap-2 rounded-md border p-3 text-sm"
+              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-sm"
               key={alert.alert_key}
               role="listitem"
             >
-              <span>{alert.alert_key}</span>
-              <span>
+              <span className="min-w-0 font-mono text-xs break-all">{alert.alert_key}</span>
+              <span className="text-muted-foreground text-xs">
                 Suppression:{' '}
                 {suppressionUnknown
                   ? 'Unknown'
@@ -165,8 +168,10 @@ export function EventsPage() {
   return (
     <div className="space-y-8">
       <PageHeader
+        icon={History}
+        eyebrow="Alerting"
         title="Fleet event timeline"
-        subtitle="Events across all monitored clusters, with alert health and suppression state kept separate."
+        subtitle="Everything that happened across the fleet in the selected time range: failovers, restarts, configuration changes and alert transitions."
         freshness={<FreshnessBadge dataUpdatedAt={eventsQuery.dataUpdatedAt} policy="activity" />}
       />
 
@@ -185,7 +190,7 @@ export function EventsPage() {
         />
       ) : null}
       {silencesQuery.error ? (
-        <div className="border-warning/40 bg-warning/10 p-3 text-sm" role="alert">
+        <div className="border-warning/40 bg-warning/10 rounded-lg border p-3 text-sm" role="alert">
           Suppression state: Unknown because silences could not be loaded. Alert data remains
           visible; retry silences to restore suppression context.
           <button
@@ -204,7 +209,7 @@ export function EventsPage() {
       >
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <label className="space-y-1 text-sm" htmlFor="events-cluster">
-            <span className="font-medium">Cluster</span>
+            <span className="block font-medium">Cluster</span>
             <Input
               id="events-cluster"
               onChange={(event) =>
@@ -215,7 +220,7 @@ export function EventsPage() {
             />
           </label>
           <label className="space-y-1 text-sm" htmlFor="events-limit">
-            <span className="font-medium">Event limit</span>
+            <span className="block font-medium">Event limit</span>
             <select
               className="border-input bg-background h-9 w-full rounded-md border px-3"
               id="events-limit"
@@ -229,12 +234,14 @@ export function EventsPage() {
               <option value="1000">1,000 events</option>
             </select>
           </label>
-          <p className="text-muted-foreground self-end text-sm">Selected range: {range.label}</p>
+          <p className="text-muted-foreground self-end pb-2 text-sm">
+            Selected range: <span className="text-foreground font-medium">{range.label}</span>
+          </p>
         </div>
       </Section>
 
       {eventLimitReached ? (
-        <p className="border-warning/40 bg-warning/10 p-3 text-sm" role="note">
+        <p className="border-warning/40 bg-warning/10 rounded-lg border p-3 text-sm" role="note">
           The event list is capped at 1,000 results; older events may exist outside this view.
         </p>
       ) : null}

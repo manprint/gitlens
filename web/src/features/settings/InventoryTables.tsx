@@ -8,7 +8,7 @@ import { DataTable } from '@/components/layout/DataTable'
 import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Input } from '@/components/ui/input'
-import { formatPostgresVersion } from '@/lib/format'
+import { formatPostgresVersion, formatTimestamp } from '@/lib/format'
 
 type Alert = Schemas['Alert']
 type AdvisorRule = Schemas['AdvisorRule']
@@ -127,7 +127,9 @@ function instanceColumns() {
       accessorKey: 'last_seen',
       header: 'Last seen',
       cell: ({ row }: { row: { original: InstanceRow } }) => (
-        <time dateTime={row.original.last_seen}>{row.original.last_seen}</time>
+        <time dateTime={row.original.last_seen}>
+          {formatTimestamp(row.original.last_seen, 'UTC')}
+        </time>
       ),
     },
     {
@@ -307,7 +309,9 @@ function AgentInventory({ instances, alerts }: Pick<InventoryTablesProps, 'insta
             accessorKey: 'last_seen',
             header: 'Last seen',
             cell: ({ row }: { row: { original: AgentRow } }) => (
-              <time dateTime={row.original.last_seen}>{row.original.last_seen}</time>
+              <time dateTime={row.original.last_seen}>
+                {formatTimestamp(row.original.last_seen, 'UTC')}
+              </time>
             ),
           },
           { accessorKey: 'state', header: 'State' },

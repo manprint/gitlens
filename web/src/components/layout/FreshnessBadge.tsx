@@ -1,3 +1,5 @@
+import { RefreshCw } from 'lucide-react'
+
 import { Badge } from '@/components/ui/badge'
 import { Stale } from '@/components/state'
 import { REFRESH, type RefreshSurface } from '@/api/policy'
@@ -21,7 +23,13 @@ export function FreshnessBadge({ dataUpdatedAt, policy }: FreshnessBadgeProps) {
   }
 
   return (
-    <Badge role="status" variant="secondary" aria-label={`Data freshness: ${label}`}>
+    <Badge
+      role="status"
+      variant="outline"
+      aria-label={`Data freshness: ${label}`}
+      className="text-muted-foreground bg-card font-medium"
+    >
+      <RefreshCw aria-hidden="true" />
       {label}
     </Badge>
   )

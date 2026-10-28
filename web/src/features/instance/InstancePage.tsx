@@ -57,6 +57,36 @@ interface InstancePageProps {
   instanceId?: string
 }
 
+const PAGE_SECTIONS = [
+  { id: 'instance-overview', label: 'Activity' },
+  { id: 'host-metrics', label: 'Host' },
+  { id: 'settings', label: 'Settings' },
+  { id: 'instance-relations', label: 'Tables and indexes' },
+  { id: 'catalog', label: 'Schema objects' },
+  { id: 'logical-replication', label: 'Logical replication' },
+  { id: 'internals', label: 'Internals' },
+] as const
+
+/** Jump links to the long sections below, since the overview is one long page. */
+function OnThisPage() {
+  return (
+    <nav aria-label="On this page" className="-mt-2">
+      <ul className="flex flex-wrap gap-1.5">
+        {PAGE_SECTIONS.map((section) => (
+          <li key={section.id}>
+            <a
+              className="bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground inline-flex h-7 items-center rounded-full border px-3 text-xs font-medium transition-colors"
+              href={`#${section.id}`}
+            >
+              {section.label}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  )
+}
+
 function LoadingInstance() {
   return (
     <section aria-busy="true" aria-label="Loading instance detail" role="status">
@@ -114,6 +144,7 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
         instance={instanceQuery.data}
         replayLag={replayLagOf(replicationQuery, instanceId)}
       />
+      <OnThisPage />
       {databasesQuery.error && !databasesQuery.data ? (
         <ErrorState
           endpoint="instance databases"

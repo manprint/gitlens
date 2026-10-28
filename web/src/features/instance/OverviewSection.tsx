@@ -199,6 +199,7 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
 
   return (
     <Section
+      id="instance-overview"
       title="Instance overview"
       description={`Transactions, cache hit ratio, temporary files and bytes, and deadlocks are for database ${database}; connections, WAL and checkpoints are instance-wide. Selected range step ${step}. Null buckets remain gaps; reset markers identify counter resets.`}
     >

@@ -1,4 +1,5 @@
 import { Link, NavLink } from 'react-router-dom'
+import { Activity, Gauge, Lock, Server, Zap } from 'lucide-react'
 
 import type { Schemas } from '@/api/types'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
@@ -20,10 +21,10 @@ interface InstanceHeaderProps {
 }
 
 const tabs = [
-  { label: 'Overview', path: '' },
-  { label: 'ASH', path: '/ash' },
-  { label: 'Queries', path: '/queries' },
-  { label: 'Locks', path: '/locks' },
+  { icon: Server, label: 'Overview', path: '' },
+  { icon: Zap, label: 'Query performance', path: '/queries' },
+  { icon: Activity, label: 'Wait events', path: '/ash' },
+  { icon: Lock, label: 'Locks and activity', path: '/locks' },
 ] as const
 
 function instancePath(instanceId: string, suffix: string): string {
@@ -49,21 +50,41 @@ export function InstanceHeader({ dataUpdatedAt, instance, replayLag }: InstanceH
   const lastSeen = formatTimestamp(instance.last_seen, 'UTC', 'en-GB')
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <PageHeader
+        eyebrow="Server"
+        icon={Server}
         title={`${instance.addr}:${instance.port}`}
         subtitle={
-          <span>
-            Instance <code className="font-mono text-xs">{instance.instance_id}</code>
+          <span className="inline-flex flex-wrap items-center gap-2">
+            <Badge variant={instance.up ? 'success' : 'destructive'}>
+              <span
+                aria-hidden="true"
+                className={`size-1.5 rounded-full ${instance.up ? 'bg-success' : 'bg-current'}`}
+              />
+              {instance.up ? 'up' : 'down'}
+            </Badge>
+            <span>
+              Instance <code className="font-mono text-xs">{instance.instance_id}</code>
+            </span>
           </span>
         }
         freshness={<FreshnessBadge dataUpdatedAt={dataUpdatedAt} policy="instance" />}
+        actions={
+          <Link
+            className="bg-primary text-primary-foreground hover:bg-primary/90 inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-sm font-medium shadow-sm transition-colors"
+            to={`/queries?instance=${encodeURIComponent(instance.instance_id)}`}
+          >
+            <Gauge aria-hidden="true" className="size-4" />
+            Slowest queries
+          </Link>
+        }
       />
 
-      <dl className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
-        <div>
-          <dt className="text-text-secondary">Role</dt>
-          <dd>
+      <dl className="bg-card shadow-card grid divide-y rounded-xl border text-sm sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-5 lg:divide-x">
+        <div className="px-4 py-3">
+          <dt className="text-muted-foreground text-xs font-medium uppercase">Role</dt>
+          <dd className="mt-1">
             <Badge
               variant={
                 role === 'primary' ? 'secondary' : role === 'standby' ? 'outline' : 'destructive'
@@ -73,31 +94,23 @@ export function InstanceHeader({ dataUpdatedAt, instance, replayLag }: InstanceH
             </Badge>
           </dd>
         </div>
-        <div>
-          <dt className="text-text-secondary">PostgreSQL</dt>
-          <dd>{formatPostgresVersion(instance.pg_version)}</dd>
+        <div className="px-4 py-3">
+          <dt className="text-muted-foreground text-xs font-medium uppercase">PostgreSQL</dt>
+          <dd className="mt-1 font-medium">{formatPostgresVersion(instance.pg_version)}</dd>
         </div>
-        <div>
-          <dt className="text-text-secondary">Permission tier</dt>
-          <dd>{instance.perm_tier}</dd>
+        <div className="px-4 py-3">
+          <dt className="text-muted-foreground text-xs font-medium uppercase">Permission tier</dt>
+          <dd className="mt-1 font-medium">{instance.perm_tier}</dd>
         </div>
-        <div>
-          <dt className="text-text-secondary">Last seen</dt>
-          <dd>{lastSeen}</dd>
+        <div className="px-4 py-3">
+          <dt className="text-muted-foreground text-xs font-medium uppercase">Last seen</dt>
+          <dd className="mt-1 font-medium tabular-nums">{lastSeen}</dd>
         </div>
-        <div>
-          <dt className="text-text-secondary">State</dt>
-          <dd>
-            <Badge variant={instance.up ? 'secondary' : 'destructive'}>
-              {instance.up ? 'up' : 'down'}
-            </Badge>
-          </dd>
-        </div>
-        <div>
-          <dt className="text-text-secondary">Owning cluster</dt>
-          <dd>
+        <div className="min-w-0 px-4 py-3">
+          <dt className="text-muted-foreground text-xs font-medium uppercase">Owning cluster</dt>
+          <dd className="mt-1 truncate">
             <Link
-              className="underline underline-offset-2"
+              className="text-primary hover:underline"
               to={`/clusters/${encodeURIComponent(instance.cluster_id)}`}
             >
               <code className="font-mono text-xs">{instance.cluster_id}</code>
@@ -107,7 +120,10 @@ export function InstanceHeader({ dataUpdatedAt, instance, replayLag }: InstanceH
       </dl>
 
       {instance.role === 'standby' ? (
-        <div role="status" className="border-warning/40 bg-warning/10 text-sm">
+        <div
+          role="status"
+          className="border-warning/40 bg-warning/10 rounded-lg border px-4 py-2.5 text-sm"
+        >
           <strong>standby (read-only)</strong>
           <span className="ml-2">Replay lag: {replayLagText(replayLag)}</span>
         </div>
@@ -119,20 +135,21 @@ export function InstanceHeader({ dataUpdatedAt, instance, replayLag }: InstanceH
 
       <nav aria-label="Instance views">
         <ul className="flex flex-wrap gap-1 border-b">
-          {tabs.map((tab) => (
-            <li key={tab.label}>
+          {tabs.map(({ icon: Icon, label, path }) => (
+            <li key={label}>
               <NavLink
-                end={tab.path === ''}
-                to={instancePath(instance.instance_id, tab.path)}
+                end={path === ''}
+                to={instancePath(instance.instance_id, path)}
                 className={({ isActive }) =>
-                  `inline-flex border-b-2 px-3 py-2 text-sm ${
+                  `-mb-px inline-flex items-center gap-2 border-b-2 px-3 py-2.5 text-sm font-medium transition-colors ${
                     isActive
-                      ? 'border-primary text-foreground font-medium'
-                      : 'text-muted-foreground hover:text-foreground border-transparent'
+                      ? 'border-primary text-foreground'
+                      : 'text-muted-foreground hover:text-foreground hover:border-border border-transparent'
                   }`
                 }
               >
-                {tab.label}
+                <Icon aria-hidden="true" className="size-4" />
+                {label}
               </NavLink>
             </li>
           ))}

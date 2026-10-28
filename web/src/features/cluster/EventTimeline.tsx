@@ -1,9 +1,26 @@
 import { useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
-import { describeEvent, sortEventsNewestFirst, type ClusterEvent } from '@/lib/events'
+import {
+  describeEvent,
+  sortEventsNewestFirst,
+  type ClusterEvent,
+  type EventSeverity,
+} from '@/lib/events'
 import { UNKNOWN } from '@/lib/format/shared'
 import { formatTimestamp } from '@/lib/format/timestamp'
+
+const SEVERITY_BORDER: Record<EventSeverity, string> = {
+  critical: 'border-l-destructive',
+  warning: 'border-l-warning',
+  info: 'border-l-info',
+}
+
+const SEVERITY_PILL: Record<EventSeverity, string> = {
+  critical: 'bg-destructive/10 text-destructive',
+  warning: 'bg-warning/15 text-warning-foreground',
+  info: 'bg-primary/10 text-primary',
+}
 
 export interface EventTimelineProps {
   events: readonly ClusterEvent[]
@@ -58,7 +75,16 @@ function counterResetScope(event: ClusterEvent): string {
 }
 
 function instanceLink(id: string | null) {
-  return id ? <a href={`/instances/${encodeURIComponent(id)}`}>{id}</a> : 'Unknown'
+  return id ? (
+    <a
+      className="text-primary font-mono text-xs hover:underline"
+      href={`/instances/${encodeURIComponent(id)}`}
+    >
+      {id}
+    </a>
+  ) : (
+    'Unknown'
+  )
 }
 
 function FailoverDetails({ event }: { event: ClusterEvent }) {
@@ -78,27 +104,27 @@ function EventCard({ event }: { event: ClusterEvent }) {
 
   return (
     <article
-      className={`border-l-4 p-3 ${
-        description.severity === 'critical'
-          ? 'border-critical bg-critical/10'
-          : description.severity === 'warning'
-            ? 'border-warning bg-warning/10'
-            : 'border-muted'
-      }`}
+      className={`bg-card relative space-y-1.5 rounded-lg border border-l-4 py-3 pr-4 pl-4 text-sm ${SEVERITY_BORDER[description.severity]}`}
       data-event-type={event.type}
       data-severity={description.severity}
     >
-      <header className="flex flex-wrap items-baseline gap-2">
-        <strong>{description.title}</strong>
-        <span className="text-muted-foreground text-xs uppercase">{description.severity}</span>
-        <time dateTime={event.ts}>{eventWhen(event.ts)}</time>
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <strong className="font-semibold">{description.title}</strong>
+        <span
+          className={`rounded-full px-2 py-0.5 text-[0.6875rem] font-semibold tracking-wide uppercase ${SEVERITY_PILL[description.severity]}`}
+        >
+          {description.severity}
+        </span>
+        <time className="text-muted-foreground ml-auto text-xs tabular-nums" dateTime={event.ts}>
+          {eventWhen(event.ts)}
+        </time>
       </header>
       {unknown ? (
         <p>
           Raw event type: <code>{event.type}</code>
         </p>
       ) : null}
-      <p>{description.whatToCheck}</p>
+      <p className="text-muted-foreground">{description.whatToCheck}</p>
       {resetCount !== null ? (
         <p>
           {resetCount} {resetCount === 1 ? 'counter' : 'counters'} reset
@@ -107,7 +133,7 @@ function EventCard({ event }: { event: ClusterEvent }) {
       ) : null}
       {event.type === 'failover_detected' ? <FailoverDetails event={event} /> : null}
       {invariantViolation ? (
-        <p role="alert" className="font-semibold">
+        <p role="alert" className="text-destructive font-semibold">
           Critical invariant violation I-1: cluster identity must never change.
         </p>
       ) : null}
@@ -135,32 +161,47 @@ export function EventTimeline({ events }: EventTimelineProps) {
   }
 
   return (
-    <section aria-labelledby="event-timeline-heading">
-      <h2 id="event-timeline-heading">Event timeline</h2>
-      <label>
-        Event type
-        <select
-          aria-label="Filter events by type"
-          value={selectedType}
-          onChange={(event) => updateType(event.target.value)}
-        >
-          <option value="">All event types</option>
-          {[...new Set([...events.map((event) => event.type)])]
-            .sort((left, right) => left.localeCompare(right))
-            .map((type) => (
-              <option key={type} value={type}>
-                {type}
-              </option>
-            ))}
-        </select>
-      </label>
+    <section
+      aria-labelledby="event-timeline-heading"
+      className="bg-card shadow-card rounded-xl border"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
+        <h2 id="event-timeline-heading" className="text-base font-semibold">
+          Event timeline
+        </h2>
+        <label className="flex items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Event type</span>
+          <select
+            aria-label="Filter events by type"
+            className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+            value={selectedType}
+            onChange={(event) => updateType(event.target.value)}
+          >
+            <option value="">All event types</option>
+            {[...new Set([...events.map((event) => event.type)])]
+              .sort((left, right) => left.localeCompare(right))
+              .map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
+          </select>
+        </label>
+      </div>
       {groups.length === 0 ? (
-        <p role="status">No events match this filter.</p>
+        <p className="text-muted-foreground p-5 text-sm" role="status">
+          No events match this filter.
+        </p>
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-6 p-5">
           {groups.map((group) => (
             <section key={group.day} aria-labelledby={`event-day-${group.day}`}>
-              <h3 id={`event-day-${group.day}`}>{group.day}</h3>
+              <h3
+                id={`event-day-${group.day}`}
+                className="text-muted-foreground mb-2 text-xs font-semibold tracking-wide uppercase"
+              >
+                {group.day}
+              </h3>
               <div className="space-y-2">
                 {group.events.map((event) => (
                   <EventCard key={event.event_id} event={event} />

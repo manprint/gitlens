@@ -1,3 +1,4 @@
+import { Bell } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
@@ -105,6 +106,33 @@ function Detail({ alertKey }: { alertKey: string }) {
   )
 }
 
+const TILE_TONE = {
+  critical: 'text-destructive',
+  warning: 'text-warning-foreground',
+  info: 'text-primary',
+} as const
+
+function SummaryTile({
+  label,
+  value,
+  tone,
+}: {
+  label: string
+  value: number
+  tone?: keyof typeof TILE_TONE
+}) {
+  return (
+    <div className="rounded-lg border px-4 py-3">
+      <dt className="text-muted-foreground text-xs font-medium tracking-wide uppercase">{label}</dt>
+      <dd
+        className={`mt-1 text-2xl font-semibold tabular-nums ${value > 0 && tone ? TILE_TONE[tone] : ''}`}
+      >
+        {value}
+      </dd>
+    </div>
+  )
+}
+
 export function AlertsPage() {
   const alertsQuery = useAlerts({ state: 'all' })
   const silencesQuery = useSilences({ all: true })
@@ -193,8 +221,10 @@ export function AlertsPage() {
   return (
     <div className="space-y-8">
       <PageHeader
+        icon={Bell}
+        eyebrow="Alerting"
         title="Alerts and events"
-        subtitle="Current and historical alert state, with suppression kept visible for on-call context."
+        subtitle="Alerts raised by the alert rules: what is firing now, what was resolved, and what is silenced. Open an alert for its labels, history and delivery."
         freshness={<FreshnessBadge dataUpdatedAt={alertsQuery.dataUpdatedAt} policy="alerts" />}
       />
 
@@ -223,13 +253,16 @@ export function AlertsPage() {
         title="Summary"
         description="Firing alerts are counted by severity; suppressed alerts are shown separately."
       >
-        <div aria-label="Alert summary" className="flex flex-wrap gap-4 text-sm" role="group">
-          <span>Critical firing: {summary.firing.critical}</span>
-          <span>Warning firing: {summary.firing.warning}</span>
-          <span>Info firing: {summary.firing.info}</span>
-          <span>Suppressed: {summary.suppressed}</span>
-          <span>Resolved: {summary.resolved}</span>
-        </div>
+        <dl
+          aria-label="Alert summary"
+          className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5"
+        >
+          <SummaryTile label="Critical firing" tone="critical" value={summary.firing.critical} />
+          <SummaryTile label="Warning firing" tone="warning" value={summary.firing.warning} />
+          <SummaryTile label="Info firing" tone="info" value={summary.firing.info} />
+          <SummaryTile label="Suppressed" value={summary.suppressed} />
+          <SummaryTile label="Resolved" value={summary.resolved} />
+        </dl>
       </Section>
 
       <Section

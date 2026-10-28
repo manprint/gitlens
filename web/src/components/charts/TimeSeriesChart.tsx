@@ -96,27 +96,30 @@ export function TimeSeriesChart({
         option={option}
         style={{ height: 300, width: '100%' }}
       />
-      <table className="sr-only" aria-label={dataTableLabel}>
-        <caption>{dataTableLabel}</caption>
-        <thead>
-          <tr>
-            <th scope="col">Metric</th>
-            <th scope="col">Timestamp (UTC)</th>
-            <th scope="col">{valueLabel}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {series.flatMap((metric) =>
-            metric.points.map((point) => (
-              <tr key={`${metric.name}-${point.ts}`}>
-                <th scope="row">{metric.name}</th>
-                <td>{point.ts}</td>
-                <td>{point.value ?? 'Unknown'}</td>
-              </tr>
-            )),
-          )}
-        </tbody>
-      </table>
+      {/* Tables ignore a 1px width, so the wrapper hides the data table instead. */}
+      <div className="sr-only">
+        <table aria-label={dataTableLabel}>
+          <caption>{dataTableLabel}</caption>
+          <thead>
+            <tr>
+              <th scope="col">Metric</th>
+              <th scope="col">Timestamp (UTC)</th>
+              <th scope="col">{valueLabel}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {series.flatMap((metric) =>
+              metric.points.map((point) => (
+                <tr key={`${metric.name}-${point.ts}`}>
+                  <th scope="row">{metric.name}</th>
+                  <td>{point.ts}</td>
+                  <td>{point.value ?? 'Unknown'}</td>
+                </tr>
+              )),
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

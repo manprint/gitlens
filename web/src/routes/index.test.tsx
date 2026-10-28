@@ -15,6 +15,7 @@ describe('application route registry', () => {
     expect(routeTable.map(({ path }) => path)).toEqual([
       '/login',
       '/',
+      '/queries',
       '/clusters/:clusterId',
       '/instances/:instanceId',
       '/instances/:instanceId/ash',

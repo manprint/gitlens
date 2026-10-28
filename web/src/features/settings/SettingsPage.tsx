@@ -1,3 +1,4 @@
+import { Settings } from 'lucide-react'
 import { useAlerts, useAdvisorRules, useClusters, useInstances } from '@/api/queries'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -44,8 +45,10 @@ export function SettingsPage() {
   return (
     <div className="space-y-8">
       <PageHeader
+        icon={Settings}
+        eyebrow="System"
         freshness={<FreshnessBadge dataUpdatedAt={instancesQuery.dataUpdatedAt} policy="fleet" />}
-        subtitle="Inventory, permission capabilities, and agent telemetry for the monitored fleet."
+        subtitle="What pglens monitors and with which permissions: server build, agents and their telemetry, the instance inventory, and an audit of the commands sent to the agents."
         title="Settings and inventory"
       />
       {clustersQuery.error || alertsQuery.error || rulesQuery.error ? (

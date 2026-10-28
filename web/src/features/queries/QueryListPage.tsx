@@ -1,3 +1,4 @@
+import { Zap } from 'lucide-react'
 import { useMemo } from 'react'
 
 import { Link, useParams, useSearchParams } from 'react-router-dom'
@@ -7,11 +8,12 @@ import { DataTable, type DataTableProps } from '@/components/layout/DataTable'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
+import { SqlText } from '@/components/layout/SqlText'
 import { EmptyState } from '@/components/state/EmptyState'
 import { ErrorState } from '@/components/state/ErrorState'
 import { Truncated } from '@/components/state/Truncated'
 import { Unknown } from '@/components/state/Unknown'
-import { formatBytes, formatCount, formatPercent } from '@/lib/format'
+import { formatBytes, formatCount, formatMilliseconds, formatPercent } from '@/lib/format'
 import {
   normaliseQueryText,
   shareOfTotal,
@@ -75,10 +77,6 @@ function formatNumber(value: number | null | undefined): string {
     : new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value)
 }
 
-function formatMilliseconds(value: number | null | undefined): string {
-  return value == null ? '—' : `${formatNumber(value)} ms`
-}
-
 function queryTextCell(row: StatementDisplayRow, instanceId: string) {
   const queryText = row.query_text ?? ''
   const normalised = normaliseQueryText(queryText)
@@ -86,18 +84,18 @@ function queryTextCell(row: StatementDisplayRow, instanceId: string) {
   return (
     <div className="min-w-64 space-y-1">
       <Link
-        className="text-primary text-xs underline-offset-4 hover:underline"
+        className="text-primary text-xs font-semibold underline-offset-4 hover:underline"
         to={queryPath(instanceId, row.queryid, row.datname)}
       >
         Query {String(row.queryid)}
       </Link>
       {queryText ? (
         <details className="max-w-xl">
-          <summary className="cursor-pointer truncate font-mono text-sm" title={normalised}>
-            {normalised}
+          <summary className="cursor-pointer truncate text-sm" title={normalised}>
+            <SqlText sql={normalised} />
           </summary>
-          <pre className="bg-muted mt-2 max-h-48 overflow-auto rounded p-2 font-mono text-xs whitespace-pre-wrap">
-            {queryText}
+          <pre className="bg-muted/60 mt-2 max-h-48 overflow-auto rounded-lg border p-3 text-xs whitespace-pre-wrap">
+            <SqlText sql={queryText} />
           </pre>
         </details>
       ) : (
@@ -134,7 +132,11 @@ function statementColumns(instanceId: string): DataTableProps<StatementDisplayRo
       enableSorting: false,
       cell: ({ row }) => {
         const summary = summariseStatement(row.original)
-        return <span className="tabular-nums">{formatMilliseconds(summary.total)}</span>
+        return (
+          <span className="whitespace-nowrap tabular-nums">
+            {formatMilliseconds(summary.total)}
+          </span>
+        )
       },
     },
     {
@@ -143,7 +145,9 @@ function statementColumns(instanceId: string): DataTableProps<StatementDisplayRo
       enableSorting: false,
       cell: ({ row }) => {
         const summary = summariseStatement(row.original)
-        return <span className="tabular-nums">{formatMilliseconds(summary.mean)}</span>
+        return (
+          <span className="whitespace-nowrap tabular-nums">{formatMilliseconds(summary.mean)}</span>
+        )
       },
     },
     {
@@ -225,10 +229,12 @@ function DisabledStatementsState({ reason }: { reason: string | undefined }) {
   return (
     <div className="space-y-4">
       <PageHeader
+        icon={Zap}
+        eyebrow="Query performance"
         title="Query inspector"
-        subtitle="Inspect the statements collected for the selected instance."
+        subtitle="Every statement pg_stat_statements recorded on this instance in the selected time range. Change the ranking to find the slowest, most frequent or most I/O-heavy queries, and open one to see its plan."
       />
-      <div role="status" className="border-muted bg-muted/30 text-sm">
+      <div role="status" className="bg-muted/50 rounded-lg border px-4 py-3 text-sm">
         <strong>pg_stat_statements disabled.</strong> {skipSentence(reason)}
       </div>
       <p className="text-muted-foreground text-sm">
@@ -302,8 +308,10 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
   return (
     <div className="space-y-8">
       <PageHeader
+        icon={Zap}
+        eyebrow="Query performance"
         title="Query inspector"
-        subtitle="Inspect the statements collected for the selected instance."
+        subtitle="Every statement pg_stat_statements recorded on this instance in the selected time range. Change the ranking to find the slowest, most frequent or most I/O-heavy queries, and open one to see its plan."
         freshness={
           <FreshnessBadge dataUpdatedAt={statementsQuery.dataUpdatedAt} policy="statements" />
         }
@@ -321,13 +329,13 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
             {skipSentence(response.disabled_reason)} The statements below were collected earlier.
           </p>
         ) : null}
-        <div className="mb-4 flex items-center gap-2">
-          <label className="text-sm font-medium" htmlFor="statement-sort">
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <label className="text-muted-foreground text-sm font-medium" htmlFor="statement-sort">
             Sort statements
           </label>
           <select
             id="statement-sort"
-            className="bg-background rounded border px-2 py-1 text-sm"
+            className="border-input bg-card h-9 rounded-md border px-3 text-sm shadow-xs"
             value={sort}
             onChange={(event) => onSortChange(event.target.value)}
           >

@@ -44,12 +44,13 @@ export function DatabaseSelector({ databases, notMonitoredCount }: DatabaseSelec
       description="Per-database metrics are shown for one monitored database at a time."
     >
       {partition.monitored.length > 0 ? (
-        <div className="max-w-xl">
+        <div className="mb-4 flex max-w-xl flex-col gap-1.5">
           <label className="text-sm font-medium" htmlFor="instance-database-selector">
             Database
           </label>
           <select
             aria-describedby="instance-database-help"
+            className="border-input bg-card h-9 w-64 max-w-full rounded-md border px-3 text-sm shadow-xs"
             id="instance-database-selector"
             onChange={(event) => updateDatabase(event.target.value)}
             value={selectedDatabase}
@@ -60,7 +61,7 @@ export function DatabaseSelector({ databases, notMonitoredCount }: DatabaseSelec
               </option>
             ))}
           </select>
-          <p className="text-muted-foreground mt-1 text-xs" id="instance-database-help">
+          <p className="text-muted-foreground text-xs" id="instance-database-help">
             The default is the most active monitored database when activity is available.
           </p>
         </div>

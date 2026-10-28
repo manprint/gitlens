@@ -1,3 +1,4 @@
+import { BellOff } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
@@ -6,8 +7,9 @@ import { useAlerts, useSilences } from '@/api/queries'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
+import { Button } from '@/components/ui/button'
 import { AlertListTruncated, EmptyState, ErrorState } from '@/components/state'
-import { formatDuration } from '@/lib/format'
+import { formatDuration, formatTimestamp } from '@/lib/format'
 import { silenceWindow, type Silence } from '@/lib/alerts'
 
 import { SilenceEditor } from './SilenceEditor'
@@ -99,17 +101,25 @@ export function SilencesPage() {
   return (
     <div className="space-y-8">
       <PageHeader
+        icon={BellOff}
+        eyebrow="Alerting"
         actions={
           <>
-            <Link className="underline" to="/alerts">
+            <Link
+              className="hover:bg-muted inline-flex h-9 items-center gap-1.5 rounded-md border px-3 text-sm font-medium transition-colors"
+              to="/alerts"
+            >
               Alerts
             </Link>
-            <Link className="underline" to="/alerts/rules">
+            <Link
+              className="hover:bg-muted inline-flex h-9 items-center gap-1.5 rounded-md border px-3 text-sm font-medium transition-colors"
+              to="/alerts/rules"
+            >
               Rules
             </Link>
-            <button onClick={() => setEditorOpen((open) => !open)} type="button">
+            <Button onClick={() => setEditorOpen((open) => !open)} type="button">
               {editorOpen ? 'Close editor' : 'Create silence'}
-            </button>
+            </Button>
           </>
         }
         freshness={<FreshnessBadge dataUpdatedAt={silencesQuery.dataUpdatedAt} policy="findings" />}
@@ -119,7 +129,7 @@ export function SilencesPage() {
 
       <AlertListTruncated truncated={alertsQuery.truncated} />
       {alertsQuery.error ? (
-        <div className="border-warning/40 bg-warning/10 p-3 text-sm" role="alert">
+        <div className="border-warning/40 bg-warning/10 rounded-lg border p-3 text-sm" role="alert">
           Current firing alerts are unavailable; the silence list remains available but creation
           preview is disabled.
           <button
@@ -157,7 +167,7 @@ export function SilencesPage() {
         {sortedSilences.length === 0 ? (
           <EmptyState description="No silences have been created." title="No stored silences" />
         ) : (
-          <div className="overflow-x-auto">
+          <div className="relative overflow-x-auto" tabIndex={0}>
             <table aria-label="Alert silences" className="w-full text-left text-sm">
               <thead>
                 <tr>
@@ -174,20 +184,30 @@ export function SilencesPage() {
               <tbody>
                 {sortedSilences.map((silence) => (
                   <tr key={silence.silence_id}>
-                    <td>{matcherLabel(silence)}</td>
+                    <td className="font-mono text-xs">{matcherLabel(silence)}</td>
                     <td>{silence.reason}</td>
-                    <td>{silence.starts_at}</td>
-                    <td>{silence.ends_at}</td>
-                    <td>{windowLabel(silence)}</td>
-                    <td>
-                      <button
+                    <td className="whitespace-nowrap tabular-nums">
+                      <time dateTime={silence.starts_at}>
+                        {formatTimestamp(silence.starts_at, 'UTC')}
+                      </time>
+                    </td>
+                    <td className="whitespace-nowrap tabular-nums">
+                      <time dateTime={silence.ends_at}>
+                        {formatTimestamp(silence.ends_at, 'UTC')}
+                      </time>
+                    </td>
+                    <td className="whitespace-nowrap">{windowLabel(silence)}</td>
+                    <td className="text-right">
+                      <Button
+                        size="sm"
+                        variant="outline"
                         aria-label={`End silence ${silence.silence_id}`}
                         disabled={deleteSilence.isPending}
                         onClick={() => endSilence(silence)}
                         type="button"
                       >
                         End silence
-                      </button>
+                      </Button>
                     </td>
                   </tr>
                 ))}

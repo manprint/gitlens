@@ -11,8 +11,8 @@ export function RouteErrorBoundary() {
   const routePath = location.pathname || '/'
 
   return (
-    <section>
-      <h1>Route error</h1>
+    <section className="mx-auto max-w-2xl space-y-4 py-10">
+      <h1 className="text-foreground text-2xl font-semibold tracking-tight">Route error</h1>
       <ErrorState endpoint={routePath} failure={failure} onRetry={() => window.location.reload()} />
     </section>
   )
@@ -20,10 +20,16 @@ export function RouteErrorBoundary() {
 
 export function NotFoundPage() {
   return (
-    <section>
-      <h1>Page not found</h1>
-      <p>The requested page does not exist.</p>
-      <Link to="/">Back to fleet overview</Link>
+    <section className="flex flex-col items-center justify-center py-24 text-center">
+      <p className="text-primary text-sm font-semibold">404</p>
+      <h1 className="text-foreground mt-2 text-3xl font-semibold tracking-tight">Page not found</h1>
+      <p className="text-muted-foreground mt-2">The requested page does not exist.</p>
+      <Link
+        className="bg-primary text-primary-foreground hover:bg-primary/90 mt-6 inline-flex h-9 items-center rounded-md px-4 text-sm font-medium"
+        to="/"
+      >
+        Back to fleet overview
+      </Link>
     </section>
   )
 }

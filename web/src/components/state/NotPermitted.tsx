@@ -25,7 +25,10 @@ export function NotPermitted({ required, current, children }: NotPermittedProps)
     : null
 
   return (
-    <div role="status" className="border-muted bg-muted/30 text-sm">
+    <div
+      role="status"
+      className="bg-muted/50 text-muted-foreground rounded-lg border px-3 py-2 text-sm"
+    >
       <p>{reason}</p>
       {control}
     </div>

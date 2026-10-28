@@ -1055,7 +1055,10 @@ export function CatalogSection({ instanceId }: CatalogSectionProps) {
       description="Objects the catalog checks report for each database, refreshed every few minutes to hourly."
     >
       <Tabs defaultValue="triggers">
-        <TabsList aria-label="Schema object kinds">
+        <TabsList
+          aria-label="Schema object kinds"
+          className="h-auto max-w-full flex-wrap justify-start"
+        >
           <TabsTrigger value="triggers">
             Triggers <TabCount count={disabledTriggers} label="disabled" />
           </TabsTrigger>

@@ -129,25 +129,25 @@ describe('application shell', () => {
     expect(result.router.state.location.pathname).toBe('/alerts')
   })
 
-  it('UI-SHELL-023 names the current theme on the toggle and cycles dark, light, system', () => {
+  it('UI-SHELL-023 names the current theme on the toggle and cycles light, dark, system', () => {
     window.localStorage.clear()
     renderWithProviders(<Header />)
 
     const toggle = screen.getByRole('button', { name: /Toggle theme/ })
-    expect(toggle).toHaveTextContent('Dark theme')
-    expect(toggle).toHaveAccessibleName('Toggle theme: Dark theme')
-
-    fireEvent.click(toggle)
     expect(toggle).toHaveTextContent('Light theme')
     expect(toggle).toHaveAccessibleName('Toggle theme: Light theme')
+
+    fireEvent.click(toggle)
+    expect(toggle).toHaveTextContent('Dark theme')
+    expect(toggle).toHaveAccessibleName('Toggle theme: Dark theme')
 
     fireEvent.click(toggle)
     expect(toggle).toHaveTextContent(/^System \((dark|light)\)$/)
     expect(toggle).toHaveAccessibleName(/^Toggle theme: System \((dark|light)\)$/)
 
     fireEvent.click(toggle)
-    expect(toggle).toHaveTextContent('Dark theme')
-    expect(toggle).toHaveAccessibleName('Toggle theme: Dark theme')
+    expect(toggle).toHaveTextContent('Light theme')
+    expect(toggle).toHaveAccessibleName('Toggle theme: Light theme')
   })
 
   it('has no serious or critical accessibility violations', async () => {

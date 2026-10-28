@@ -1,5 +1,8 @@
 import { Link } from 'react-router-dom'
 
+import { Badge } from '@/components/ui/badge'
+import { formatTimestamp } from '@/lib/format'
+
 import type { Alert, Silence } from '@/lib/alerts'
 import { silenceWindow } from '@/lib/alerts'
 
@@ -21,11 +24,26 @@ function objectLink(path: string, value: string | undefined, label: string) {
   return (
     <span>
       {label}:{' '}
-      <Link className="underline" to={`${path}/${encodeURIComponent(value)}`}>
+      <Link
+        className="text-primary font-mono text-xs hover:underline"
+        to={`${path}/${encodeURIComponent(value)}`}
+      >
         {value}
       </Link>
     </span>
   )
+}
+
+const SEVERITY_BORDER: Record<string, string> = {
+  critical: 'border-l-destructive',
+  warning: 'border-l-warning',
+  info: 'border-l-primary',
+}
+
+const SEVERITY_BADGE: Record<string, 'destructive' | 'warning' | 'secondary'> = {
+  critical: 'destructive',
+  warning: 'warning',
+  info: 'secondary',
 }
 
 export function AlertRow({ alert, matchingSilence, onSelect }: AlertRowProps) {
@@ -40,28 +58,35 @@ export function AlertRow({ alert, matchingSilence, onSelect }: AlertRowProps) {
     ) : null
 
   return (
-    <article className="border-muted space-y-3 rounded-md border p-4">
+    <article
+      className={`bg-card space-y-3 rounded-lg border border-l-4 p-4 ${SEVERITY_BORDER[alert.severity] ?? ''}`}
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <button
-          className="font-medium underline"
+          className="text-primary min-w-0 text-left font-mono text-sm font-medium break-all hover:underline"
           onClick={() => onSelect(alert.alert_key)}
           type="button"
         >
           {alert.alert_key}
         </button>
         <div className="flex gap-2 text-sm">
-          <span className="rounded border px-2 py-1">{alert.severity}</span>
-          <span className="rounded border px-2 py-1">{alert.state}</span>
+          <Badge variant={SEVERITY_BADGE[alert.severity] ?? 'outline'}>{alert.severity}</Badge>
+          <Badge variant={alert.state === 'firing' ? 'destructive' : 'outline'}>
+            {alert.state}
+          </Badge>
         </div>
       </div>
       <p className="text-muted-foreground text-sm">{alert.summary}</p>
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
         {objectLink('/clusters', clusterId, 'Cluster')}
         {objectLink('/instances', instanceId, 'Instance')}
-        <span>Started: {alert.started_at}</span>
+        <span>
+          Started:{' '}
+          <time dateTime={alert.started_at}>{formatTimestamp(alert.started_at, 'UTC')}</time>
+        </span>
       </div>
       {alert.suppressed ? (
-        <p className="text-warning text-sm" role="status">
+        <p className="text-warning-foreground text-sm" role="status">
           {matchingSilence ? (
             <>
               Suppressed by{' '}

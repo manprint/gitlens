@@ -13,6 +13,9 @@ type LazyPage = ComponentType
 const FleetOverviewPage = lazy(() =>
   import('./pages').then(({ FleetOverviewPage: Page }) => ({ default: Page })),
 )
+const SlowQueriesPage = lazy(() =>
+  import('./pages').then(({ SlowQueriesPage: Page }) => ({ default: Page })),
+)
 const ClusterDetailPage = lazy(() =>
   import('./pages').then(({ ClusterDetailPage: Page }) => ({ default: Page })),
 )
@@ -46,8 +49,18 @@ interface PageSkeletonProps {
 
 function PageSkeleton({ surface }: PageSkeletonProps) {
   return (
-    <section aria-busy="true" aria-label={`Loading ${surface}`}>
-      <p aria-hidden="true">Loading {surface}…</p>
+    <section aria-busy="true" aria-label={`Loading ${surface}`} className="animate-pulse space-y-6">
+      <div className="space-y-2">
+        <div className="bg-muted h-7 w-64 rounded-md" />
+        <div className="bg-muted h-4 w-96 max-w-full rounded-md" />
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {[0, 1, 2, 3].map((tile) => (
+          <div key={tile} className="bg-muted h-24 rounded-xl" />
+        ))}
+      </div>
+      <div className="bg-muted h-80 rounded-xl" />
+      <p className="sr-only">Loading {surface}…</p>
     </section>
   )
 }
@@ -78,6 +91,7 @@ const loginRoute: RouteDefinition = {
 
 const dataRoutes: RouteDefinition[] = [
   lazyRoute('/', 'Fleet overview', FleetOverviewPage),
+  lazyRoute('/queries', 'Slowest queries', SlowQueriesPage),
   lazyRoute('/clusters/:clusterId', 'Cluster detail', ClusterDetailPage),
   lazyRoute('/instances/:instanceId', 'Instance detail', InstanceDetailPage),
   lazyRoute('/instances/:instanceId/ash', 'ASH and wait analysis', AshPage),

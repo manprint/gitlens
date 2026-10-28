@@ -189,7 +189,7 @@ function SortableRelationTable({
   }
 
   return (
-    <div className="overflow-x-auto">
+    <div className="relative overflow-x-auto" tabIndex={0}>
       <table className="w-full text-left text-sm">
         <caption className="sr-only">{caption}</caption>
         <thead>
@@ -567,7 +567,7 @@ function ExactMeasurement({
       <button
         type="button"
         className="rounded-md border px-2 py-1 text-xs font-medium whitespace-nowrap"
-        aria-label={`Measure ${name} exactly with pgstattuple`}
+        aria-label={`Measure exactly: ${name} with pgstattuple`}
         disabled={!permitted || running}
         onClick={() =>
           command.mutate({

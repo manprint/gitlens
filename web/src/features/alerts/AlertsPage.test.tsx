@@ -72,9 +72,9 @@ describe('AlertsPage', () => {
       alert({ alert_key: 'resolved', state: 'resolved', severity: 'info' }),
     ])
 
-    expect(screen.getByText('Critical firing: 1')).toBeInTheDocument()
-    expect(screen.getByText('Suppressed: 1')).toBeInTheDocument()
-    expect(screen.getByText('Resolved: 1')).toBeInTheDocument()
+    expect(screen.getByLabelText('Alert summary')).toHaveTextContent(/Critical firing\s*1(?!\d)/)
+    expect(screen.getByLabelText('Alert summary')).toHaveTextContent(/Suppressed\s*1(?!\d)/)
+    expect(screen.getByLabelText('Alert summary')).toHaveTextContent(/Resolved\s*1(?!\d)/)
   })
 
   it('UI-ALERT-011 a suppressed alert is listed with its silence and remaining time', async () => {

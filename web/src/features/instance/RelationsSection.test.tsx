@@ -187,7 +187,7 @@ describe('RelationsSection', () => {
     await settle()
 
     expect(
-      screen.getByRole('button', { name: 'Measure public.orders exactly with pgstattuple' }),
+      screen.getByRole('button', { name: 'Measure exactly: public.orders with pgstattuple' }),
     ).toBeDisabled()
     expect(screen.getByRole('status')).toHaveTextContent(
       'Requires T1 permission; current tier is T0.',
@@ -235,7 +235,7 @@ describe('RelationsSection', () => {
     await settle()
     vi.useRealTimers()
     const measure = screen.getByRole('button', {
-      name: 'Measure public.orders exactly with pgstattuple',
+      name: 'Measure exactly: public.orders with pgstattuple',
     })
     expect(
       screen.queryByRole('button', { name: /public\.orders_archive exactly/ }),
@@ -272,7 +272,7 @@ describe('RelationsSection', () => {
     await settle()
     vi.useRealTimers()
     fireEvent.click(
-      screen.getByRole('button', { name: 'Measure public.orders exactly with pgstattuple' }),
+      screen.getByRole('button', { name: 'Measure exactly: public.orders with pgstattuple' }),
     )
 
     await waitFor(() =>
@@ -458,7 +458,7 @@ describe('RelationsSection', () => {
     expect(
       within(indexes).getByRole('button', { name: 'Sort Index bloat estimates by Index' }),
     ).toBeInTheDocument()
-    expect(within(indexes).queryByRole('button', { name: /exactly with pgstattuple/ })).toBeNull()
+    expect(within(indexes).queryByRole('button', { name: /with pgstattuple/ })).toBeNull()
   })
 
   it('UI-INST-069 shows the last scan of each index or why it is unknown, and sorts by it', async () => {

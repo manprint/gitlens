@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { qk } from '@/api/keys'
 import { REFRESH } from '@/api/policy'
 import type { Schemas } from '@/api/types'
+import { formatTimestamp } from '@/lib/format'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { base as hostBase } from '@/test/fixtures/getInstanceHost'
 import { CLUSTER, INSTANCE_ID, INSTANCE_SUMMARY, NOW } from '@/test/fixture-helpers'
@@ -272,7 +273,7 @@ describe('SettingsPage', () => {
     const rows = within(table).getAllByRole('row')
     expect(rows[2]).toHaveTextContent('Down')
     expect(rows[2]).toHaveTextContent('Agent has stopped reporting')
-    expect(within(table).getAllByText(NOW)).toHaveLength(2)
+    expect(within(table).getAllByText(formatTimestamp(NOW, 'UTC'))).toHaveLength(2)
     expect(screen.getByText(/no separate agent listing endpoint/i)).toBeInTheDocument()
   })
 

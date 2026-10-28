@@ -6,6 +6,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import './index.css'
 import { ErrorBoundary } from './components/layout/ErrorBoundary'
 import { routes } from './routes'
+import { applyTheme } from './hooks/useTheme'
+import { readPreferences } from './lib/preferences'
+
+// The theme is applied before the first render, so the sign-in page and the
+// session check use the operator's theme too, not only the shell.
+applyTheme(readPreferences().theme)
 
 const root = document.getElementById('root')
 

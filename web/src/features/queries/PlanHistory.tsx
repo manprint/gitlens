@@ -104,7 +104,7 @@ function PlanComparison({ plans }: { plans: [Plan, Plan] }) {
       {paths.length === 0 ? (
         <p className="text-muted-foreground text-sm">Neither selected entry contains plan nodes.</p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto" tabIndex={0}>
           <table className="w-full text-left text-sm">
             <caption className="sr-only">Side-by-side comparison of two query plans</caption>
             <thead>
@@ -189,9 +189,12 @@ export function PlanHistory({ queryid, instanceId, datname }: PlanHistoryProps) 
   }
 
   return (
-    <section aria-labelledby="plan-history-title" className="space-y-4">
+    <section
+      aria-labelledby="plan-history-title"
+      className="bg-card shadow-card space-y-4 rounded-xl border p-5"
+    >
       <div>
-        <h2 id="plan-history-title" className="text-lg font-medium">
+        <h2 id="plan-history-title" className="text-base font-semibold">
           Plan history
         </h2>
         <p className="text-muted-foreground mt-1 text-sm">
@@ -215,7 +218,7 @@ export function PlanHistory({ queryid, instanceId, datname }: PlanHistoryProps) 
                   <button
                     type="button"
                     aria-pressed={selected}
-                    className={`w-full rounded-md border px-3 py-2 text-left text-sm ${selected ? 'border-primary bg-muted' : ''}`}
+                    className={`hover:border-primary/40 w-full rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${selected ? 'border-primary bg-primary/5 ring-primary/20 ring-2' : ''}`}
                     onClick={() => togglePlan(plan)}
                   >
                     <span className="font-medium">{describePlan(plan)}</span>

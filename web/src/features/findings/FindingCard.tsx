@@ -66,6 +66,21 @@ function remainingMuteTime(finding: JoinedFinding): string {
   return `${Math.ceil(seconds / (24 * 60 * 60))} days`
 }
 
+// The colour follows the severity name, so an unknown one stays neutral.
+function severityAccent(severity: string): string {
+  if (severity === 'critical') return 'before:bg-severity-critical'
+  if (severity === 'warning') return 'before:bg-severity-warning'
+  if (severity === 'info') return 'before:bg-severity-info'
+  return 'before:bg-border'
+}
+
+function severityBadge(severity: string): string {
+  if (severity === 'critical') return 'border-destructive/30 bg-destructive/10 text-destructive'
+  if (severity === 'warning') return 'border-warning/40 bg-warning/15 text-warning-foreground'
+  if (severity === 'info') return 'border-info/30 bg-info/10 text-info'
+  return 'bg-muted text-muted-foreground'
+}
+
 export function FindingCard({ finding }: FindingCardProps) {
   // Not the finding id: it holds database and object names, which can
   // contain spaces and would split the aria-labelledby references.
@@ -82,14 +97,22 @@ export function FindingCard({ finding }: FindingCardProps) {
   return (
     <article
       aria-labelledby={`finding-${domId}`}
-      className="space-y-4 rounded-lg border p-4"
+      className={`bg-card shadow-card relative space-y-4 overflow-hidden rounded-xl border p-5 pl-6 before:absolute before:inset-y-0 before:left-0 before:w-1 ${severityAccent(finding.severity)}`}
       data-finding-id={finding.finding_id}
     >
       <header className="space-y-2">
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="rounded border px-2 py-1 uppercase">{finding.severity}</span>
-          <span className="rounded border px-2 py-1">{finding.state}</span>
-          <span className="rounded border px-2 py-1">{finding.scope}</span>
+          <span
+            className={`rounded-full border px-2.5 py-0.5 font-semibold uppercase ${severityBadge(finding.severity)}`}
+          >
+            {finding.severity}
+          </span>
+          <span className="bg-muted text-muted-foreground rounded-full border px-2.5 py-0.5">
+            {finding.state}
+          </span>
+          <span className="bg-muted text-muted-foreground rounded-full border px-2.5 py-0.5">
+            {finding.scope}
+          </span>
         </div>
         <h3 className="text-base font-semibold" id={`finding-${domId}`}>
           {finding.title}

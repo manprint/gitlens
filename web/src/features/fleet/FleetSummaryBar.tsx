@@ -1,4 +1,5 @@
 import type { Cluster } from '@/api/types'
+import { cn } from '@/lib/utils'
 
 export type HealthFilter = 'all' | Cluster['health']
 export type InstanceFilter = 'all' | 'up' | 'down'
@@ -20,6 +21,15 @@ interface FleetSummaryBarProps {
   summary: FleetSummary
 }
 
+type Tone = 'neutral' | 'ok' | 'warning' | 'critical'
+
+const TONE_DOT: Record<Tone, string> = {
+  critical: 'bg-status-critical',
+  neutral: 'bg-primary',
+  ok: 'bg-status-ok',
+  warning: 'bg-status-degraded',
+}
+
 function SummaryFilter({
   active,
   children,
@@ -27,6 +37,7 @@ function SummaryFilter({
   disabled = false,
   label,
   onClick,
+  tone = 'neutral',
 }: {
   active: boolean
   children: string
@@ -34,18 +45,29 @@ function SummaryFilter({
   disabled?: boolean
   label: string
   onClick: () => void
+  tone?: Tone
 }) {
   return (
     <button
-      aria-label={label}
+      aria-label={`${children} ${count}: ${label}`}
       aria-pressed={active}
-      className="border-input bg-background hover:bg-accent flex min-w-28 flex-col rounded-md border px-3 py-2 text-left text-sm transition-colors"
+      className={cn(
+        'bg-card shadow-card group flex h-full flex-col justify-between gap-1.5 rounded-xl border px-4 py-3 text-left transition-all disabled:cursor-not-allowed disabled:opacity-60',
+        active
+          ? 'border-primary ring-primary/20 ring-2'
+          : 'hover:border-primary/40 hover:shadow-raised',
+      )}
       disabled={disabled}
       onClick={onClick}
       type="button"
     >
-      <span className="text-muted-foreground">{children}</span>
-      <strong className="text-lg tabular-nums">{count}</strong>
+      <span className="text-muted-foreground flex items-center gap-2 text-xs font-medium tracking-wide whitespace-nowrap uppercase">
+        <span aria-hidden="true" className={cn('size-2 rounded-full', TONE_DOT[tone])} />
+        {children}
+      </span>{' '}
+      <strong className="text-foreground text-2xl font-semibold tracking-tight tabular-nums">
+        {count}
+      </strong>
     </button>
   )
 }
@@ -63,8 +85,8 @@ export function FleetSummaryBar({
 
   return (
     <section aria-label="Fleet summary filters" className="space-y-3" data-testid="fleet-summary">
-      <h2 className="text-lg font-medium">Fleet summary</h2>
-      <div className="flex flex-wrap gap-2">
+      <h2 className="sr-only">Fleet summary</h2>
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] gap-3">
         <SummaryFilter
           active={healthFilter === 'all'}
           count={totalClusters}
@@ -78,6 +100,7 @@ export function FleetSummaryBar({
           count={summary.health.ok}
           label={`Filter healthy clusters (${summary.health.ok})`}
           onClick={() => onHealthFilterChange(healthFilter === 'ok' ? 'all' : 'ok')}
+          tone="ok"
         >
           Healthy
         </SummaryFilter>
@@ -86,6 +109,7 @@ export function FleetSummaryBar({
           count={summary.health.degraded}
           label={`Filter degraded clusters (${summary.health.degraded})`}
           onClick={() => onHealthFilterChange(healthFilter === 'degraded' ? 'all' : 'degraded')}
+          tone="warning"
         >
           Degraded
         </SummaryFilter>
@@ -94,6 +118,7 @@ export function FleetSummaryBar({
           count={summary.health.critical}
           label={`Filter critical clusters (${summary.health.critical})`}
           onClick={() => onHealthFilterChange(healthFilter === 'critical' ? 'all' : 'critical')}
+          tone="critical"
         >
           Critical
         </SummaryFilter>
@@ -102,6 +127,7 @@ export function FleetSummaryBar({
           count={summary.instancesUp}
           label={`Filter clusters with instances up (${summary.instancesUp})`}
           onClick={() => onInstanceFilterChange(instanceFilter === 'up' ? 'all' : 'up')}
+          tone="ok"
         >
           Instances up
         </SummaryFilter>
@@ -110,6 +136,7 @@ export function FleetSummaryBar({
           count={summary.instancesDown}
           label={`Filter clusters with instances down (${summary.instancesDown})`}
           onClick={() => onInstanceFilterChange(instanceFilter === 'down' ? 'all' : 'down')}
+          tone="critical"
         >
           Instances down
         </SummaryFilter>
@@ -119,6 +146,7 @@ export function FleetSummaryBar({
           disabled={summary.firingAlerts === null}
           label={`Filter clusters with firing alerts (${summary.firingAlerts ?? 'unavailable'})`}
           onClick={() => onAlertsOnlyChange(!alertsOnly)}
+          tone="warning"
         >
           Firing alerts
         </SummaryFilter>

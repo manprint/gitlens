@@ -10,7 +10,7 @@ export interface Preferences {
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
-  theme: 'dark',
+  theme: 'light',
   density: 'comfortable',
   sidebarCollapsed: false,
 }

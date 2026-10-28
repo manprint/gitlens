@@ -1,3 +1,4 @@
+import { Lock } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 
@@ -495,8 +496,10 @@ export function LocksPage({ instanceId: explicitInstanceId }: LocksPageProps = {
   return (
     <div className="space-y-8">
       <PageHeader
+        icon={Lock}
+        eyebrow="Instance"
         title="Locks and activity"
-        subtitle="Blocking sessions from the latest stored lock sample."
+        subtitle="Who is blocking whom right now: the blocking chains from the latest lock sample, and the sessions currently running on the instance."
       />
       {locksQuery.isPending && response === undefined ? (
         <p role="status">Loading lock sample…</p>

@@ -1,3 +1,4 @@
+import { LayoutDashboard, Search } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
@@ -172,8 +173,10 @@ export function FleetPage() {
   return (
     <div className="space-y-8">
       <PageHeader
+        icon={LayoutDashboard}
+        eyebrow="Dashboard"
         title="Fleet overview"
-        subtitle="Every monitored cluster, its instances, and the problems that need attention."
+        subtitle="Every monitored PostgreSQL cluster at a glance: its health, its instances and their replication lag. Click a tile to filter, or a cluster to open it."
         freshness={<FreshnessBadge dataUpdatedAt={clustersQuery.dataUpdatedAt} policy="fleet" />}
       />
 
@@ -202,21 +205,28 @@ export function FleetPage() {
         summary={summary}
       />
 
-      <div className="max-w-xl">
+      <div className="max-w-xl space-y-1.5">
         <label className="text-sm font-medium" htmlFor="fleet-filter">
           Filter clusters
         </label>
-        <Input
-          aria-describedby="fleet-filter-help"
-          data-primary-filter
-          id="fleet-filter"
-          onChange={(event) => updateSearchParam('q', event.target.value)}
-          placeholder="Search cluster name or instance address"
-          type="search"
-          value={textFilter}
-        />
-        <p className="text-muted-foreground mt-1 text-xs" id="fleet-filter-help">
-          Search by cluster name or instance address.
+        <div className="relative">
+          <Search
+            aria-hidden="true"
+            className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
+          />
+          <Input
+            aria-describedby="fleet-filter-help"
+            className="bg-card h-10 pl-9"
+            data-primary-filter
+            id="fleet-filter"
+            onChange={(event) => updateSearchParam('q', event.target.value)}
+            placeholder="Search cluster name or instance address"
+            type="search"
+            value={textFilter}
+          />
+        </div>
+        <p className="text-muted-foreground text-xs" id="fleet-filter-help">
+          Search by cluster name or instance address. Press <kbd>/</kbd> to jump here.
         </p>
       </div>
 
@@ -262,7 +272,7 @@ export function FleetPage() {
         )}
       </Section>
 
-      <small>Build {__PGLENS_BUILD__}</small>
+      <small className="text-muted-foreground block text-xs">Build {__PGLENS_BUILD__}</small>
     </div>
   )
 }

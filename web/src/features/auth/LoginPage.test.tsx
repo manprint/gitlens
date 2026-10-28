@@ -19,6 +19,17 @@ async function settle() {
 }
 
 describe('LoginPage', () => {
+  it('shows and hides the typed characters on request', () => {
+    renderWithProviders(<LoginPage />, { route: '/login' })
+    const input = screen.getByLabelText('Password')
+
+    expect(input).toHaveAttribute('type', 'password')
+    fireEvent.click(screen.getByRole('button', { name: 'Mostra i caratteri digitati' }))
+    expect(input).toHaveAttribute('type', 'text')
+    fireEvent.click(screen.getByRole('button', { name: 'Nascondi i caratteri digitati' }))
+    expect(input).toHaveAttribute('type', 'password')
+  })
+
   it('UI-AUTH-001 submits the password and navigates to next', async () => {
     server.use(sequence('createSession', { status: 204 }))
     const view = renderWithProviders(<LoginPage />, {

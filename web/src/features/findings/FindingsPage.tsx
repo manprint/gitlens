@@ -1,3 +1,4 @@
+import { Lightbulb } from 'lucide-react'
 import { useEffect, useMemo, useRef } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
@@ -91,12 +92,12 @@ function SummaryButton({
     <button
       aria-label={`${label} ${count}`}
       aria-pressed={active}
-      className="rounded-md border px-3 py-2 text-left text-sm"
+      className={`bg-card shadow-card min-w-28 rounded-xl border px-4 py-2.5 text-left text-sm transition-colors ${active ? 'border-primary ring-primary/20 ring-2' : 'hover:border-primary/40'}`}
       onClick={onClick}
       type="button"
     >
-      <span className="block font-medium">{label}</span>
-      <span className="text-muted-foreground">{count}</span>
+      <span className="text-muted-foreground block text-xs font-medium">{label}</span>{' '}
+      <span className="text-foreground text-xl font-semibold tabular-nums">{count}</span>
     </button>
   )
 }
@@ -188,8 +189,10 @@ export function FindingsPage() {
   return (
     <div className="space-y-8">
       <PageHeader
+        icon={Lightbulb}
+        eyebrow="Checkup"
         title="Advisor findings"
-        subtitle="Rules evaluated from collected PostgreSQL statistics, with the evidence and inputs behind each result."
+        subtitle="Automatic health checks on the collected PostgreSQL statistics: missing or unused indexes, bloat, vacuum, configuration and more. Each finding shows the evidence behind it and what to do."
         freshness={<FreshnessBadge dataUpdatedAt={findingsQuery.dataUpdatedAt} policy="findings" />}
       />
 

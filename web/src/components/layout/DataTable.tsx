@@ -10,6 +10,7 @@ import {
   type RowData,
 } from '@tanstack/react-table'
 import { useVirtualizer } from '@tanstack/react-virtual'
+import { Columns3 } from 'lucide-react'
 
 import { Truncated } from '../state/Truncated'
 
@@ -92,8 +93,11 @@ export function DataTable<TData extends RowData>({
     <div className="space-y-3">
       <div className="flex justify-end">
         <details className="relative">
-          <summary className="cursor-pointer rounded border px-3 py-1.5 text-sm">Columns</summary>
-          <div className="bg-background absolute right-0 z-10 mt-1 min-w-48 space-y-2 rounded border p-3 shadow-md">
+          <summary className="border-input bg-card text-muted-foreground hover:bg-muted hover:text-foreground inline-flex h-8 list-none items-center gap-1.5 rounded-md border px-3 text-xs font-medium shadow-xs transition-colors [&::-webkit-details-marker]:hidden">
+            <Columns3 aria-hidden="true" className="size-3.5" />
+            Columns
+          </summary>
+          <div className="bg-popover shadow-raised absolute right-0 z-20 mt-1.5 max-h-80 min-w-56 space-y-2 overflow-auto rounded-lg border p-3">
             {table.getAllLeafColumns().map((column) => {
               if (!column.getCanHide()) return null
               const label =
@@ -113,10 +117,10 @@ export function DataTable<TData extends RowData>({
         </details>
       </div>
 
-      <div ref={scrollRef} className="max-h-[30rem] overflow-auto rounded-md border">
+      <div ref={scrollRef} className="bg-card max-h-[32rem] overflow-auto rounded-lg border">
         <table aria-label={ariaLabel} className="w-full border-collapse text-sm">
           <caption className="sr-only">{ariaLabel}</caption>
-          <thead className="bg-muted/80 sticky top-0 z-[1]">
+          <thead className="bg-muted/90 sticky top-0 z-[1] backdrop-blur">
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id}>
                 {headerGroup.headers.map((header) => {
@@ -128,12 +132,12 @@ export function DataTable<TData extends RowData>({
                       aria-sort={
                         sort === 'asc' ? 'ascending' : sort === 'desc' ? 'descending' : 'none'
                       }
-                      className="px-3 py-2 text-left font-medium"
+                      className="text-muted-foreground border-b px-3 py-2.5 text-left text-xs font-semibold tracking-wide whitespace-nowrap uppercase"
                     >
                       {header.isPlaceholder ? null : header.column.getCanSort() ? (
                         <button
                           type="button"
-                          className="font-medium underline-offset-2 hover:underline"
+                          className="hover:text-foreground inline-flex items-center font-semibold tracking-wide uppercase transition-colors"
                           onClick={header.column.getToggleSortingHandler()}
                         >
                           {flexRender(header.column.columnDef.header, header.getContext())}
@@ -174,10 +178,10 @@ export function DataTable<TData extends RowData>({
                         }
                       : undefined
                   }
-                  className="border-t"
+                  className="hover:bg-muted/40 border-b transition-colors last:border-b-0"
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="px-3 py-2 tabular-nums">
+                    <td key={cell.id} className="px-3 py-2.5 align-top tabular-nums">
                       {flexRender(cell.column.columnDef.cell, cell.getContext()) ??
                         renderPrimitiveValue(cell.getValue())}
                     </td>
@@ -189,7 +193,7 @@ export function DataTable<TData extends RowData>({
         </table>
       </div>
 
-      <footer className="text-muted-foreground text-sm">
+      <footer className="text-muted-foreground text-xs">
         {budget !== undefined && total > data.length ? (
           <Truncated shown={data.length} budget={budget} scope={scope} />
         ) : (

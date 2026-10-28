@@ -1,3 +1,4 @@
+import { Activity } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
@@ -223,6 +224,8 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
   return (
     <div className="space-y-8">
       <PageHeader
+        icon={Activity}
+        eyebrow="Wait events"
         freshness={<FreshnessBadge dataUpdatedAt={ashQuery.dataUpdatedAt} policy="ash" />}
         title="ASH and wait analysis"
         subtitle={
