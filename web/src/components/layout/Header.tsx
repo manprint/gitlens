@@ -109,7 +109,8 @@ export function Header({
         target instanceof HTMLElement &&
         (target.isContentEditable || ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName))
 
-      if (isEditable) {
+      // Ctrl, Cmd and Alt combinations belong to the browser and the system.
+      if (isEditable || event.ctrlKey || event.metaKey || event.altKey) {
         setPendingShortcut(false)
         return
       }
@@ -152,7 +153,12 @@ export function Header({
     }
 
     window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    // A "g" left alone expires, so a later single key is not read as its second half.
+    const expiry = pendingShortcut ? window.setTimeout(() => setPendingShortcut(false), 1_500) : 0
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.clearTimeout(expiry)
+    }
   }, [navigate, pendingShortcut])
 
   function toggleTheme() {

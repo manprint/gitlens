@@ -1,6 +1,10 @@
 import { useState, type FormEvent } from 'react'
 
 import { useUpdateAlertRule, type AlertRule, type AlertRuleUpdateResponse } from '@/api/alerts'
+import { Button } from '@/components/ui/button'
+import { NativeSelect } from '@/components/ui/native-select'
+import { Input } from '@/components/ui/input'
+import { Callout } from '@/components/ui/callout'
 
 const SEVERITIES = ['critical', 'warning', 'info'] as const
 type Severity = (typeof SEVERITIES)[number]
@@ -113,9 +117,9 @@ export function RuleEditor({ onCancel, rule }: RuleEditorProps) {
       <form className="grid max-w-xl gap-4" noValidate onSubmit={submit}>
         <label className="space-y-1 text-sm" htmlFor="rule-threshold">
           <span className="font-medium">Threshold</span>
-          <input
+          <Input
             aria-describedby={errors.threshold ? 'rule-threshold-error' : undefined}
-            className="border-input bg-background h-9 w-full rounded-md border px-3"
+
             id="rule-threshold"
             inputMode="decimal"
             onChange={(event) =>
@@ -125,7 +129,7 @@ export function RuleEditor({ onCancel, rule }: RuleEditorProps) {
             value={values.threshold}
           />
           {errors.threshold ? (
-            <span id="rule-threshold-error" role="alert">
+            <span className="text-destructive block text-xs" id="rule-threshold-error" role="alert">
               {errors.threshold}
             </span>
           ) : null}
@@ -133,9 +137,9 @@ export function RuleEditor({ onCancel, rule }: RuleEditorProps) {
 
         <label className="space-y-1 text-sm" htmlFor="rule-for-seconds">
           <span className="font-medium">Duration (seconds)</span>
-          <input
+          <Input
             aria-describedby={errors.forSeconds ? 'rule-for-seconds-error' : undefined}
-            className="border-input bg-background h-9 w-full rounded-md border px-3"
+
             id="rule-for-seconds"
             min="0"
             onChange={(event) =>
@@ -146,7 +150,11 @@ export function RuleEditor({ onCancel, rule }: RuleEditorProps) {
             value={values.forSeconds}
           />
           {errors.forSeconds ? (
-            <span id="rule-for-seconds-error" role="alert">
+            <span
+              className="text-destructive block text-xs"
+              id="rule-for-seconds-error"
+              role="alert"
+            >
               {errors.forSeconds}
             </span>
           ) : null}
@@ -154,8 +162,8 @@ export function RuleEditor({ onCancel, rule }: RuleEditorProps) {
 
         <label className="space-y-1 text-sm" htmlFor="rule-severity">
           <span className="font-medium">Severity</span>
-          <select
-            className="border-input bg-background h-9 w-full rounded-md border px-3"
+          <NativeSelect
+            className="w-full"
             id="rule-severity"
             onChange={(event) =>
               setValues((current) => ({ ...current, severity: event.target.value as Severity }))
@@ -167,7 +175,7 @@ export function RuleEditor({ onCancel, rule }: RuleEditorProps) {
                 {severity}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
 
         <label className="flex items-center gap-2 text-sm" htmlFor="rule-enabled">
@@ -182,20 +190,23 @@ export function RuleEditor({ onCancel, rule }: RuleEditorProps) {
           <span className="font-medium">Enabled</span>
         </label>
 
-        {mutation.isError ? <p role="alert">{mutation.error.message}</p> : null}
+        {mutation.isError ? (
+          <Callout variant="destructive">{mutation.error.message}</Callout>
+        ) : null}
         {saved ? <p role="status">{saved}</p> : null}
 
         <div className="flex gap-2">
-          <button
-            className="rounded-md border px-3 py-2 text-sm"
+          <Button
+            size="sm"
+
             disabled={mutation.isPending}
             type="submit"
           >
             {mutation.isPending ? 'Saving…' : 'Save rule'}
-          </button>
-          <button className="rounded-md border px-3 py-2 text-sm" onClick={onCancel} type="button">
+          </Button>
+          <Button size="sm" variant="outline" onClick={onCancel} type="button">
             Cancel
-          </button>
+          </Button>
         </div>
       </form>
     </section>

@@ -23,6 +23,7 @@ import {
 } from '@/lib/statements'
 import { useTimeRange } from '@/hooks/useTimeRange'
 import { queryWindowOf } from '@/lib/timerange'
+import { NativeSelect } from '@/components/ui/native-select'
 
 const STATEMENT_LIMIT = 50
 type StatementSort = StatementOrderBy
@@ -333,9 +334,9 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
           <label className="text-muted-foreground text-sm font-medium" htmlFor="statement-sort">
             Sort statements
           </label>
-          <select
+          <NativeSelect
             id="statement-sort"
-            className="border-input bg-card h-9 rounded-md border px-3 text-sm shadow-xs"
+
             value={sort}
             onChange={(event) => onSortChange(event.target.value)}
           >
@@ -344,7 +345,7 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
                 {option.label}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </div>
         <DataTable
           ariaLabel="Statement statistics"

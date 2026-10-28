@@ -31,27 +31,17 @@ describe('preferences', () => {
     }
 
     expect(readPreferences(brokenStorage)).toEqual(DEFAULT_PREFERENCES)
-    expect(writePreferences({ theme: 'light' }, brokenStorage)).toEqual({
+    expect(writePreferences({ theme: 'dark' }, brokenStorage)).toEqual({
       ...DEFAULT_PREFERENCES,
-      theme: 'light',
+      theme: 'dark',
     })
   })
 
   it('normalizes valid and invalid stored preference fields', () => {
-    localStorage.setItem(
-      PREFERENCES_STORAGE_KEY,
-      JSON.stringify({ theme: 'system', density: 'compact', sidebarCollapsed: true }),
-    )
-    expect(readPreferences()).toEqual({
-      theme: 'system',
-      density: 'compact',
-      sidebarCollapsed: true,
-    })
+    localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify({ theme: 'system' }))
+    expect(readPreferences()).toEqual({ theme: 'system' })
 
-    localStorage.setItem(
-      PREFERENCES_STORAGE_KEY,
-      JSON.stringify({ theme: 'sepia', density: 'dense', sidebarCollapsed: 'yes' }),
-    )
+    localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify({ theme: 'sepia' }))
     expect(readPreferences()).toEqual(DEFAULT_PREFERENCES)
   })
 

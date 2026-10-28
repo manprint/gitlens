@@ -24,9 +24,9 @@ describe('LoginPage', () => {
     const input = screen.getByLabelText('Password')
 
     expect(input).toHaveAttribute('type', 'password')
-    fireEvent.click(screen.getByRole('button', { name: 'Mostra i caratteri digitati' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Show password' }))
     expect(input).toHaveAttribute('type', 'text')
-    fireEvent.click(screen.getByRole('button', { name: 'Nascondi i caratteri digitati' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Hide password' }))
     expect(input).toHaveAttribute('type', 'password')
   })
 
@@ -38,7 +38,7 @@ describe('LoginPage', () => {
     const input = screen.getByLabelText('Password')
 
     fireEvent.change(input, { target: { value: 'correct horse battery staple' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Accedi' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
     await settle()
 
     expect(view.router.state.location.pathname).toBe('/clusters')
@@ -56,10 +56,10 @@ describe('LoginPage', () => {
     const input = screen.getByLabelText('Password')
 
     fireEvent.change(input, { target: { value: 'wrong' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Accedi' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
     await settle()
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Password non valida.')
+    expect(screen.getByRole('alert')).toHaveTextContent('Invalid password.')
     expect(input).toHaveFocus()
   })
 
@@ -68,13 +68,13 @@ describe('LoginPage', () => {
     renderWithProviders(<LoginPage />, { route: '/login' })
 
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Accedi' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
     await settle()
 
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'Impossibile contattare il server. Controlla la connessione e riprova.',
+      'Cannot reach the server. Check the connection and try again.',
     )
-    expect(screen.queryByText('Password non valida.')).not.toBeInTheDocument()
+    expect(screen.queryByText('Invalid password.')).not.toBeInTheDocument()
   })
 
   it('UI-AUTH-008 says the server could not finish sign-in on a server error', async () => {
@@ -87,13 +87,13 @@ describe('LoginPage', () => {
     renderWithProviders(<LoginPage />, { route: '/login' })
 
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Accedi' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
     await settle()
 
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'Il server non riesce a completare la richiesta.',
+      'The server could not complete the request.',
     )
-    expect(screen.queryByText('Password non valida.')).not.toBeInTheDocument()
+    expect(screen.queryByText('Invalid password.')).not.toBeInTheDocument()
   })
 
   it('UI-AUTH-010 says how long to wait when the server refuses too many sign-in attempts', async () => {
@@ -111,13 +111,13 @@ describe('LoginPage', () => {
     renderWithProviders(<LoginPage />, { route: '/login' })
 
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Accedi' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
     await settle()
 
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'Troppi tentativi di accesso. Riprova tra 30 secondi.',
+      'Too many sign-in attempts. Try again in 30 seconds.',
     )
-    expect(screen.queryByText('Password non valida.')).not.toBeInTheDocument()
+    expect(screen.queryByText('Invalid password.')).not.toBeInTheDocument()
   })
 
   it('UI-AUTH-011 gives a general wait when a refused sign-in carries no Retry-After', async () => {
@@ -135,11 +135,11 @@ describe('LoginPage', () => {
     renderWithProviders(<LoginPage />, { route: '/login' })
 
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Accedi' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
     await settle()
 
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'Troppi tentativi di accesso. Attendi qualche minuto e riprova.',
+      'Too many sign-in attempts. Wait a few minutes and try again.',
     )
   })
 
@@ -155,7 +155,7 @@ describe('LoginPage', () => {
     const input = screen.getByLabelText('Password')
 
     fireEvent.change(input, { target: { value: 'correct' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Accedi' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
     await settle()
 
     expect(view.router.state.location.pathname).toBe(expected)
@@ -166,7 +166,7 @@ describe('LoginPage', () => {
     renderRoute('/')
     await settle()
 
-    expect(screen.getByRole('heading', { name: 'Interfaccia non configurata' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Interface not configured' })).toBeInTheDocument()
     expect(screen.getByText('PGLENS_UI_PASSWORD')).toBeInTheDocument()
   })
 
@@ -175,7 +175,7 @@ describe('LoginPage', () => {
     const view = renderWithProviders(<SignOutProbe />, { route: '/clusters' })
     view.queryClient.setQueryData(['getClusters'], [{ cluster_id: 'stale' }])
 
-    fireEvent.click(screen.getByRole('button', { name: 'Esci' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }))
     await settle()
 
     expect(view.queryClient.getQueryData(['getClusters'])).toBeUndefined()
@@ -186,14 +186,14 @@ describe('LoginPage', () => {
     server.use(slow('getSession', { authenticated: true }, 1000))
     const view = renderRoute('/')
     expect(screen.getByTestId('session-loading')).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'Accedi a pglens' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Sign in to pglens' })).not.toBeInTheDocument()
     view.unmount()
   })
 
   it('has no serious accessibility violations', async () => {
     vi.useRealTimers()
     const view = renderWithProviders(<LoginPage />, { route: '/login' })
-    expect(screen.getByRole('heading', { name: 'Accedi a pglens' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Sign in to pglens' })).toBeInTheDocument()
     await expectNoA11yViolations(view.container)
   })
 })
@@ -206,7 +206,7 @@ function SignOutProbe() {
 
   return (
     <button type="button" onClick={() => void signOut.mutateAsync()}>
-      Esci
+      Sign out
     </button>
   )
 }

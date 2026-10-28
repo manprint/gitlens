@@ -83,15 +83,17 @@ function isClientBackend(node: LockNode): boolean {
 
 function actionButton(kind: SignalKind, onClick: () => void, disabled = false) {
   return (
-    <button
+    <Button
+      size="sm"
+      variant="outline"
       type="button"
-      className="rounded-md border px-3 py-2 text-sm font-medium"
+
       aria-label={kind === 'cancel' ? 'Cancel query' : 'Terminate backend'}
       disabled={disabled}
       onClick={onClick}
     >
       {kind === 'cancel' ? 'Cancel query' : 'Terminate backend'}
-    </button>
+    </Button>
   )
 }
 
@@ -247,14 +249,16 @@ export function SignalActions({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <button
+            <Button
+              size="sm"
+              variant="outline"
               ref={cancelRef}
               type="button"
-              className="rounded-md border px-3 py-2 text-sm font-medium"
+
               onClick={() => setPending(null)}
             >
               Keep running
-            </button>
+            </Button>
             <Button
               type="button"
               variant={openKind === 'terminate' ? 'destructive' : 'default'}

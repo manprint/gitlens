@@ -8,10 +8,13 @@ import type { ReplicationGraphEdge, ReplicationInstance, TopologyEdge } from '@/
 import { buildGraph, detectAnomalies, layoutGraph } from '@/lib/replication'
 
 import {
-  topologyNodeTypes,
+  TopologyNode,
   type TopologyFlowNode,
   type TopologyNodeData,
 } from '@/components/charts/topology.nodes'
+
+// Declared once, outside the component, so React Flow keeps the same node types between renders.
+const topologyNodeTypes = { topology: TopologyNode }
 
 export interface TopologyGraphProps {
   instances: readonly ReplicationInstance[]

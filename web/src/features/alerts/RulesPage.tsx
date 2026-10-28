@@ -10,6 +10,7 @@ import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState } from '@/components/state'
 
 import { RuleEditor } from './RuleEditor'
+import { Button } from '@/components/ui/button'
 
 function tierLabel(rule: AlertRule): string {
   const tier = String(rule.min_tier ?? rule.tier ?? '')
@@ -135,13 +136,15 @@ export function RulesPage() {
                         {tierZero ? (
                           <span className="text-muted-foreground">Always on by design</span>
                         ) : (
-                          <button
-                            className="rounded-md border px-3 py-1.5 text-sm"
+                          <Button
+                            size="sm"
+                            variant="outline"
+
                             onClick={() => setEditingRuleId(rule.id)}
                             type="button"
                           >
                             Edit {rule.id}
-                          </button>
+                          </Button>
                         )}
                       </td>
                     </tr>

@@ -4,6 +4,8 @@ import { useCreateSilence } from '@/api/silences'
 import { Input } from '@/components/ui/input'
 import type { Alert, Silence } from '@/lib/alerts'
 import { matchSilence } from '@/lib/alerts'
+import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
 
 interface MatcherDraft {
   name: string
@@ -146,9 +148,9 @@ export function SilenceEditor({
             evaluated.
           </p>
         </div>
-        <button onClick={onCancel} type="button">
+        <Button size="sm" variant="outline" onClick={onCancel} type="button">
           Cancel
-        </button>
+        </Button>
       </div>
 
       <form
@@ -180,7 +182,9 @@ export function SilenceEditor({
                 />
               </label>
               {matchers.length > 1 ? (
-                <button
+                <Button
+                  size="sm"
+                  variant="outline"
                   aria-label={`Remove matcher ${index + 1}`}
                   onClick={() =>
                     setMatchers((current) =>
@@ -190,16 +194,18 @@ export function SilenceEditor({
                   type="button"
                 >
                   Remove
-                </button>
+                </Button>
               ) : null}
             </div>
           ))}
-          <button
+          <Button
+            size="sm"
+            variant="outline"
             onClick={() => setMatchers((current) => [...current, { ...emptyMatcher }])}
             type="button"
           >
             Add matcher
-          </button>
+          </Button>
         </fieldset>
 
         <label className="block">
@@ -239,13 +245,19 @@ export function SilenceEditor({
         <div aria-label="Silence duration presets" className="flex flex-wrap gap-2" role="group">
           <span className="text-sm">Presets:</span>
           {[1, 4, 24].map((hours) => (
-            <button key={hours} onClick={() => applyPreset(hours)} type="button">
+            <Button
+              size="sm"
+              variant="outline"
+              key={hours}
+              onClick={() => applyPreset(hours)}
+              type="button"
+            >
               {hours} hour{hours === 1 ? '' : 's'}
-            </button>
+            </Button>
           ))}
         </div>
 
-        <div aria-live="polite" className="border-muted bg-muted/20 p-3 text-sm">
+        <div aria-live="polite" className="bg-muted/20 rounded-lg border p-3 text-sm">
           <strong>Live preview</strong>
           {previewUnavailable ? (
             <p>Current firing alerts are unavailable, so the preview cannot be verified.</p>
@@ -269,7 +281,7 @@ export function SilenceEditor({
         </div>
 
         {matchesAllFiring ? (
-          <label className="border-destructive/40 bg-destructive/10 block p-3 text-sm">
+          <label className="border-destructive/40 bg-destructive/10 block rounded-lg border p-3 text-sm">
             <span>
               This silence would suppress notifications for all {firingAlerts.length} currently
               firing alerts. Confirm to continue.
@@ -287,15 +299,23 @@ export function SilenceEditor({
           </label>
         ) : null}
 
-        {validationError ? <p role="alert">{validationError}</p> : null}
-        {createSilence.error ? <p role="alert">{createSilence.error.message}</p> : null}
+        {validationError ? <Callout variant="destructive">{validationError}</Callout> : null}
+        {createSilence.error ? (
+          <Callout variant="destructive">{createSilence.error.message}</Callout>
+        ) : null}
         <div className="flex gap-2">
-          <button disabled={createSilence.isPending} type="submit">
+          <Button size="sm" disabled={createSilence.isPending} type="submit">
             {createSilence.isPending ? 'Creating…' : 'Create silence'}
-          </button>
-          <button disabled={createSilence.isPending} onClick={onCancel} type="button">
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={createSilence.isPending}
+            onClick={onCancel}
+            type="button"
+          >
             Cancel
-          </button>
+          </Button>
         </div>
       </form>
     </section>

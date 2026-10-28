@@ -22,6 +22,7 @@ import {
   type LockNode,
   type LockPID,
 } from '@/lib/locks'
+import { Button } from '@/components/ui/button'
 
 const QUERY_BYTE_BUDGET = 2048
 const SAMPLE_INTERVAL_SECONDS = 10
@@ -233,14 +234,16 @@ function TreeItem({
     >
       <div className="flex items-start gap-2">
         {hasChildren ? (
-          <button
+          <Button
+            size="icon-xs"
+            variant="outline"
             type="button"
-            className="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded border text-sm"
+            className="mt-0.5"
             aria-label={`${expanded ? 'Collapse' : 'Expand'} lock session ${pid}`}
             onClick={() => onToggle(entry.key)}
           >
             {expanded ? '−' : '+'}
-          </button>
+          </Button>
         ) : (
           <span
             aria-hidden="true"

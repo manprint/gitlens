@@ -12,6 +12,8 @@ import { matchSilence, rankAlerts, summariseAlerts, type Alert, type Silence } f
 
 import { AlertRow } from './AlertRow'
 import { DeliverySection } from './DeliverySection'
+import { NativeSelect } from '@/components/ui/native-select'
+import { Callout } from '@/components/ui/callout'
 
 type StateFilter = 'all' | Alert['state']
 type SeverityFilter = 'all' | Alert['severity']
@@ -236,7 +238,7 @@ export function AlertsPage() {
         />
       ) : null}
       {silencesQuery.error ? (
-        <div className="border-warning/40 bg-warning/10 p-3 text-sm" role="alert">
+        <Callout variant="warning">
           Suppression details are unavailable; alerts remain visible without silence context.
           <button
             className="ml-2 underline"
@@ -245,7 +247,7 @@ export function AlertsPage() {
           >
             Retry silences
           </button>
-        </div>
+        </Callout>
       ) : null}
 
       <AlertListTruncated truncated={alertsQuery.truncated} />
@@ -272,8 +274,8 @@ export function AlertsPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <label className="space-y-1 text-sm" htmlFor="alerts-state">
             <span className="font-medium">State</span>
-            <select
-              className="border-input bg-background h-9 w-full rounded-md border px-3"
+            <NativeSelect
+              className="w-full"
               id="alerts-state"
               onChange={(event) => updateFilter('state', event.target.value, 'firing')}
               value={state}
@@ -282,12 +284,12 @@ export function AlertsPage() {
               <option value="all">All states</option>
               <option value="pending">Pending</option>
               <option value="resolved">Resolved</option>
-            </select>
+            </NativeSelect>
           </label>
           <label className="space-y-1 text-sm" htmlFor="alerts-severity">
             <span className="font-medium">Severity</span>
-            <select
-              className="border-input bg-background h-9 w-full rounded-md border px-3"
+            <NativeSelect
+              className="w-full"
               id="alerts-severity"
               onChange={(event) => updateFilter('severity', event.target.value)}
               value={severity}
@@ -296,7 +298,7 @@ export function AlertsPage() {
               <option value="critical">Critical</option>
               <option value="warning">Warning</option>
               <option value="info">Info</option>
-            </select>
+            </NativeSelect>
           </label>
           <label className="space-y-1 text-sm" htmlFor="alerts-cluster">
             <span className="font-medium">Cluster</span>
@@ -309,8 +311,8 @@ export function AlertsPage() {
           </label>
           <label className="space-y-1 text-sm" htmlFor="alerts-suppressed">
             <span className="font-medium">Suppression</span>
-            <select
-              className="border-input bg-background h-9 w-full rounded-md border px-3"
+            <NativeSelect
+              className="w-full"
               id="alerts-suppressed"
               onChange={(event) => updateFilter('suppressed', event.target.value)}
               value={suppressed}
@@ -318,7 +320,7 @@ export function AlertsPage() {
               <option value="all">All alerts</option>
               <option value="suppressed">Suppressed</option>
               <option value="unsuppressed">Not suppressed</option>
-            </select>
+            </NativeSelect>
           </label>
         </div>
       </Section>

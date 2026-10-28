@@ -56,5 +56,3 @@ export function TopologyNode({ data }: NodeProps<TopologyFlowNode>) {
     </div>
   )
 }
-
-export const topologyNodeTypes = { topology: TopologyNode }

@@ -127,7 +127,7 @@ function PlanComparison({ plans }: { plans: [Plan, Plan] }) {
                     {[leftNode, rightNode].map((node, index) => (
                       <td
                         key={`${path}-${index}`}
-                        className={`py-2 pr-3 ${different ? 'bg-amber-100 dark:bg-amber-950' : ''}`}
+                        className={`py-2 pr-3 ${different ? 'bg-warning/15' : ''}`}
                         data-different={different ? 'true' : undefined}
                         data-testid={different ? 'plan-diff' : undefined}
                       >

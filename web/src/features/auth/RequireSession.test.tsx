@@ -1,9 +1,9 @@
 import { act, fireEvent, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { sequence } from '@/test/msw/handlers'
+import { ok, sequence } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
-import { renderWithProviders } from '@/test/render'
+import { renderRoute, renderWithProviders } from '@/test/render'
 
 import RequireSession from './RequireSession'
 
@@ -30,11 +30,22 @@ describe('RequireSession', () => {
     )
     await settle()
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Impossibile verificare la sessione.')
-    fireEvent.click(screen.getByRole('button', { name: 'Riprova' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not verify the session.')
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
     await settle()
 
     expect(screen.getByText('Protected content')).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('sends a signed-out operator to sign-in with the requested page as next', async () => {
+    server.use(ok('getSession', { authenticated: false, configured: true }))
+    const result = renderRoute('/instances/i1/ash?range=6h')
+    await settle()
+
+    expect(result.router.state.location.pathname).toBe('/login')
+    expect(new URLSearchParams(result.router.state.location.search).get('next')).toBe(
+      '/instances/i1/ash?range=6h',
+    )
   })
 })

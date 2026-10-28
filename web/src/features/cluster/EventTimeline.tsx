@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import {
   describeEvent,
@@ -9,6 +9,7 @@ import {
 } from '@/lib/events'
 import { UNKNOWN } from '@/lib/format/shared'
 import { formatTimestamp } from '@/lib/format/timestamp'
+import { NativeSelect } from '@/components/ui/native-select'
 
 const SEVERITY_BORDER: Record<EventSeverity, string> = {
   critical: 'border-l-destructive',
@@ -76,12 +77,12 @@ function counterResetScope(event: ClusterEvent): string {
 
 function instanceLink(id: string | null) {
   return id ? (
-    <a
+    <Link
       className="text-primary font-mono text-xs hover:underline"
-      href={`/instances/${encodeURIComponent(id)}`}
+      to={`/instances/${encodeURIComponent(id)}`}
     >
       {id}
-    </a>
+    </Link>
   ) : (
     'Unknown'
   )
@@ -171,9 +172,9 @@ export function EventTimeline({ events }: EventTimelineProps) {
         </h2>
         <label className="flex items-center gap-2 text-sm">
           <span className="text-muted-foreground">Event type</span>
-          <select
+          <NativeSelect
             aria-label="Filter events by type"
-            className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+
             value={selectedType}
             onChange={(event) => updateType(event.target.value)}
           >
@@ -185,7 +186,7 @@ export function EventTimeline({ events }: EventTimelineProps) {
                   {type}
                 </option>
               ))}
-          </select>
+          </NativeSelect>
         </label>
       </div>
       {groups.length === 0 ? (

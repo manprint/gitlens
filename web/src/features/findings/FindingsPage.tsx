@@ -18,6 +18,7 @@ import {
 
 import { FindingCard } from './FindingCard'
 import { RuleCatalogue } from './RuleCatalogue'
+import { NativeSelect } from '@/components/ui/native-select'
 
 type StateFilter = 'active' | 'all' | 'open' | 'degraded' | 'muted' | 'resolved'
 type SeverityFilter = 'all' | 'critical' | 'warning' | 'info'
@@ -255,13 +256,13 @@ export function FindingsPage() {
           </p>
         ) : null}
         {findings.length >= FINDINGS_LIMIT ? (
-          <p className="text-warning mt-3 text-sm" role="status">
+          <p className="text-warning-foreground mt-3 text-sm" role="status">
             Only the first {FINDINGS_LIMIT} findings were returned. Open and degraded findings come
             first, so muted and resolved findings may be missing from the counts and the list.
           </p>
         ) : null}
         {allFindingsDegraded ? (
-          <p className="text-warning mt-3 text-sm" role="status">
+          <p className="text-warning-foreground mt-3 text-sm" role="status">
             Rules could not be evaluated; this is not a healthy “no findings” result.
           </p>
         ) : null}
@@ -274,8 +275,8 @@ export function FindingsPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <label className="space-y-1 text-sm" htmlFor="findings-state">
             <span className="font-medium">State</span>
-            <select
-              className="border-input bg-background h-9 w-full rounded-md border px-3"
+            <NativeSelect
+              className="w-full"
               id="findings-state"
               onChange={(event) =>
                 updateFilter('state', event.target.value === 'active' ? '' : event.target.value)
@@ -288,12 +289,12 @@ export function FindingsPage() {
               <option value="degraded">Degraded</option>
               <option value="muted">Muted</option>
               <option value="resolved">Resolved</option>
-            </select>
+            </NativeSelect>
           </label>
           <label className="space-y-1 text-sm" htmlFor="findings-severity">
             <span className="font-medium">Severity</span>
-            <select
-              className="border-input bg-background h-9 w-full rounded-md border px-3"
+            <NativeSelect
+              className="w-full"
               id="findings-severity"
               onChange={(event) =>
                 updateFilter('severity', event.target.value === 'all' ? '' : event.target.value)
@@ -304,12 +305,12 @@ export function FindingsPage() {
               <option value="critical">Critical</option>
               <option value="warning">Warning</option>
               <option value="info">Info</option>
-            </select>
+            </NativeSelect>
           </label>
           <label className="space-y-1 text-sm" htmlFor="findings-scope">
             <span className="font-medium">Scope</span>
-            <select
-              className="border-input bg-background h-9 w-full rounded-md border px-3"
+            <NativeSelect
+              className="w-full"
               id="findings-scope"
               onChange={(event) =>
                 updateFilter('scope', event.target.value === 'all' ? '' : event.target.value)
@@ -319,7 +320,7 @@ export function FindingsPage() {
               <option value="all">All scopes</option>
               <option value="cluster">Cluster</option>
               <option value="instance">Instance</option>
-            </select>
+            </NativeSelect>
           </label>
           <label className="space-y-1 text-sm" htmlFor="findings-cluster">
             <span className="font-medium">Cluster</span>

@@ -22,6 +22,7 @@ import { EventTimeline } from './EventTimeline'
 import { LagSection } from './LagSection'
 import { SlotsSection } from './SlotsSection'
 import { TopologyGraph } from './TopologyGraph'
+import { Callout } from '@/components/ui/callout'
 
 interface ClusterPageProps {
   /** Optional override keeps the page easy to exercise without the lazy route. */
@@ -32,9 +33,14 @@ const EMPTY_CLUSTER_INSTANCES: Cluster['instances'] = []
 
 function ClusterNotFound({ clusterId }: { clusterId: string }) {
   return (
-    <section aria-labelledby="cluster-not-found-title">
-      <h1 id="cluster-not-found-title">Cluster not found</h1>
-      <p>
+    <section aria-labelledby="cluster-not-found-title" className="space-y-3">
+      <h1
+        className="text-foreground text-2xl font-semibold tracking-tight"
+        id="cluster-not-found-title"
+      >
+        Cluster not found
+      </h1>
+      <p className="text-muted-foreground">
         No monitored cluster matches <code>{clusterId}</code>.
       </p>
       <Link to="/">Back to fleet overview</Link>
@@ -128,9 +134,9 @@ export function ClusterPage({ clusterId: clusterIdOverride }: ClusterPageProps =
       />
 
       {topologyQuery.error ? (
-        <div role="status" className="border-warning/40 bg-warning/10 text-sm">
+        <Callout role="status" variant="warning">
           Cluster topology is showing the last successful snapshot while the latest refresh failed.
-        </div>
+        </Callout>
       ) : null}
 
       <TopologyGraph instances={instances} topology={topology} />

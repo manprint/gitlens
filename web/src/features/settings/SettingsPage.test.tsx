@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import type { HttpHandler } from 'msw/http'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { qk } from '@/api/keys'
 import { REFRESH } from '@/api/policy'
@@ -9,7 +9,7 @@ import { formatTimestamp } from '@/lib/format'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { base as hostBase } from '@/test/fixtures/getInstanceHost'
 import { CLUSTER, INSTANCE_ID, INSTANCE_SUMMARY, NOW } from '@/test/fixture-helpers'
-import { renderRoute, renderWithProviders } from '@/test/render'
+import { preloadLazyRoutes, renderRoute, renderWithProviders } from '@/test/render'
 import { ok, sequence, status } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 
@@ -97,6 +97,8 @@ function renderSettings(options: RenderSettingsOptions = {}) {
 }
 
 describe('SettingsPage', () => {
+  beforeAll(preloadLazyRoutes)
+
   it('UI-SET-030 an empty fleet renders setup guidance', async () => {
     renderSettings({ clusters: [], instances: [] })
     await settleInitialQueries()

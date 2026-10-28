@@ -150,7 +150,7 @@ describe('authentication middleware', () => {
     server.use(status('getSession', 500, { detail: 'down', error: 'internal_error' }))
     renderRoute('/private')
     await settle()
-    expect(screen.getByRole('alert')).toHaveTextContent('Impossibile verificare')
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not verify')
   })
 })
 

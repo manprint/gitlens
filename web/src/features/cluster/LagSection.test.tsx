@@ -1,7 +1,7 @@
 import { screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-vi.mock('echarts-for-react', () => ({
+vi.mock('echarts-for-react/esm/core', () => ({
   default: () => <div data-testid="mock-echarts" />,
 }))
 

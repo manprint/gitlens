@@ -5,6 +5,8 @@ import type { Schemas } from '@/api/types'
 import { Section } from '@/components/layout/Section'
 import { EmptyState } from '@/components/state'
 import { partitionDatabases, defaultDatabase, type DatabaseEntry } from '@/lib/databases'
+import { NativeSelect } from '@/components/ui/native-select'
+import { Callout } from '@/components/ui/callout'
 
 interface DatabaseSelectorProps {
   databases: readonly Schemas['Database'][]
@@ -48,9 +50,9 @@ export function DatabaseSelector({ databases, notMonitoredCount }: DatabaseSelec
           <label className="text-sm font-medium" htmlFor="instance-database-selector">
             Database
           </label>
-          <select
+          <NativeSelect
             aria-describedby="instance-database-help"
-            className="border-input bg-card h-9 w-64 max-w-full rounded-md border px-3 text-sm shadow-xs"
+            className="w-64 max-w-full"
             id="instance-database-selector"
             onChange={(event) => updateDatabase(event.target.value)}
             value={selectedDatabase}
@@ -60,7 +62,7 @@ export function DatabaseSelector({ databases, notMonitoredCount }: DatabaseSelec
                 {database.datname}
               </option>
             ))}
-          </select>
+          </NativeSelect>
           <p className="text-muted-foreground text-xs" id="instance-database-help">
             The default is the most active monitored database when activity is available.
           </p>
@@ -73,7 +75,7 @@ export function DatabaseSelector({ databases, notMonitoredCount }: DatabaseSelec
       )}
 
       {displayedNotMonitoredCount > 0 ? (
-        <aside className="border-warning/40 bg-warning/10 text-sm" role="status">
+        <Callout role="status" variant="warning">
           <strong>{formatDatabaseCount(displayedNotMonitoredCount)} not monitored.</strong> Hidden
           databases are a blind spot in this instance’s metrics.
           {[...partition.skipped.entries()].length > 0 ? (
@@ -93,7 +95,7 @@ export function DatabaseSelector({ databases, notMonitoredCount }: DatabaseSelec
             </a>{' '}
             filter configuration.
           </p>
-        </aside>
+        </Callout>
       ) : null}
     </Section>
   )

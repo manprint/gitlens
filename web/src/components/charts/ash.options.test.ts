@@ -77,4 +77,12 @@ describe('buildAshOption', () => {
       optionSeries(buildAshOption(series, { cpuCount: 4 })).some((item) => item.markLine),
     ).toBe(true)
   })
+  it('gives every wait-event type its own colour, with BufferPin sharing Buffer', () => {
+    const colours = Object.entries(ASH_PALETTE)
+      .filter(([name]) => name !== 'BufferPin')
+      .map(([, colour]) => colour)
+
+    expect(new Set(colours).size).toBe(colours.length)
+    expect(ASH_PALETTE.BufferPin).toBe(ASH_PALETTE.Buffer)
+  })
 })

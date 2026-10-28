@@ -68,16 +68,16 @@ function remainingMuteTime(finding: JoinedFinding): string {
 
 // The colour follows the severity name, so an unknown one stays neutral.
 function severityAccent(severity: string): string {
-  if (severity === 'critical') return 'before:bg-severity-critical'
-  if (severity === 'warning') return 'before:bg-severity-warning'
-  if (severity === 'info') return 'before:bg-severity-info'
+  if (severity === 'critical') return 'before:bg-destructive'
+  if (severity === 'warning') return 'before:bg-warning'
+  if (severity === 'info') return 'before:bg-info'
   return 'before:bg-border'
 }
 
 function severityBadge(severity: string): string {
   if (severity === 'critical') return 'border-destructive/30 bg-destructive/10 text-destructive'
   if (severity === 'warning') return 'border-warning/40 bg-warning/15 text-warning-foreground'
-  if (severity === 'info') return 'border-info/30 bg-info/10 text-info'
+  if (severity === 'info') return 'border-info/30 bg-info/10 text-info-foreground'
   return 'bg-muted text-muted-foreground'
 }
 

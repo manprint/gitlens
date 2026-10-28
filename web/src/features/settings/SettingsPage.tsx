@@ -7,6 +7,7 @@ import { AlertListTruncated, EmptyState, ErrorState } from '@/components/state'
 import { CommandAudit } from './CommandAudit'
 import { InventoryTables } from './InventoryTables'
 import { ServerInfo } from './ServerInfo'
+import { Callout } from '@/components/ui/callout'
 
 export function SettingsPage() {
   const instancesQuery = useInstances()
@@ -52,13 +53,13 @@ export function SettingsPage() {
         title="Settings and inventory"
       />
       {clustersQuery.error || alertsQuery.error || rulesQuery.error ? (
-        <div className="border-warning/40 bg-warning/10 text-sm" role="status">
+        <Callout role="status" variant="warning">
           <strong>Some inventory details are unavailable.</strong>
           <p>
             The instance list is current, but cluster links, firing alerts, or advisor rules may be
             incomplete. Retry the affected surface from its owning page.
           </p>
-        </div>
+        </Callout>
       ) : null}
       {instances.length === 0 ? (
         <EmptyState

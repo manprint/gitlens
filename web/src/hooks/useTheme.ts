@@ -4,19 +4,18 @@ import {
   readPreferences,
   writePreferences,
   type Preferences,
-  type TableDensity,
   type ThemePreference,
 } from '@/lib/preferences'
 
 export type ResolvedTheme = 'dark' | 'light'
 
 function systemTheme(): ResolvedTheme {
-  if (typeof window === 'undefined') return 'dark'
+  if (typeof window === 'undefined') return 'light'
 
   try {
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
   } catch {
-    return 'dark'
+    return 'light'
   }
 }
 
@@ -32,11 +31,7 @@ export function applyTheme(theme: ThemePreference): ResolvedTheme {
 export interface UseThemeResult {
   theme: ThemePreference
   resolvedTheme: ResolvedTheme
-  density: TableDensity
-  sidebarCollapsed: boolean
   setTheme: (theme: ThemePreference) => void
-  setDensity: (density: TableDensity) => void
-  setSidebarCollapsed: (collapsed: boolean) => void
 }
 
 export function useTheme(): UseThemeResult {
@@ -76,10 +71,6 @@ export function useTheme(): UseThemeResult {
   return {
     theme: preferences.theme,
     resolvedTheme,
-    density: preferences.density,
-    sidebarCollapsed: preferences.sidebarCollapsed,
     setTheme: (theme) => updatePreferences({ theme }),
-    setDensity: (density) => updatePreferences({ density }),
-    setSidebarCollapsed: (sidebarCollapsed) => updatePreferences({ sidebarCollapsed }),
   }
 }

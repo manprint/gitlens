@@ -16,6 +16,8 @@ import {
   isRedactedArchiveCommand,
   settingDisplayValue,
 } from '@/lib/settings'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 
 interface SettingsSectionProps {
   instanceId: string
@@ -194,7 +196,8 @@ export function SettingsSection({ instanceId }: SettingsSectionProps) {
           <div className="flex flex-wrap items-end gap-4">
             <label className="grid gap-1 text-sm">
               <span>Search settings</span>
-              <input
+              <Input
+                className="w-auto"
                 type="search"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
@@ -203,16 +206,17 @@ export function SettingsSection({ instanceId }: SettingsSectionProps) {
             </label>
             <label className="grid gap-1 text-sm">
               <span>Changed since</span>
-              <input
+              <Input
+                className="w-auto"
                 aria-label="Changed since"
                 type="datetime-local"
                 value={toLocalDateTime(changedSince)}
                 onChange={(event) => updateChangedSince(event.target.value)}
               />
             </label>
-            <button type="button" onClick={resetChangedSince}>
+            <Button size="sm" variant="outline" type="button" onClick={resetChangedSince}>
               Use selected range
-            </button>
+            </Button>
           </div>
           <DurabilitySummary settings={query.data.settings} />
           {changedSettings.length === 0 ? (

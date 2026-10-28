@@ -9,7 +9,7 @@ import { renderWithProviders } from '@/test/render'
 
 const echartsMock = vi.hoisted(() => ({ render: vi.fn() }))
 
-vi.mock('echarts-for-react', () => ({
+vi.mock('echarts-for-react/esm/core', () => ({
   default: (props: {
     option: EChartsOption
     onEvents?: Record<string, (event: unknown) => void>
@@ -114,5 +114,29 @@ describe('TimeSeriesChart', () => {
     }
 
     expect(result.router.state.location.search).toBe(changedSearch)
+  })
+  it('keeps the data table outside the image role, where screen readers reach it', () => {
+    renderWithProviders(<TimeSeriesChart {...chartProps} />)
+
+    const image = screen.getByRole('img', { name: 'Replication lag for primary to standby' })
+    expect(within(image).queryByRole('table')).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('table', { name: 'Replication lag for primary to standby data' }),
+    ).toBeInTheDocument()
+  })
+
+  it('passes a theme built from the page tokens and rebuilds it when the theme changes', async () => {
+    renderWithProviders(<TimeSeriesChart {...chartProps} />)
+    const first = echartsMock.render.mock.calls.at(-1)?.[0] as { theme?: object }
+    expect(first.theme).toMatchObject({ backgroundColor: 'transparent' })
+
+    await act(async () => {
+      document.documentElement.classList.add('dark')
+      await Promise.resolve()
+    })
+    const second = echartsMock.render.mock.calls.at(-1)?.[0] as { theme?: object }
+    document.documentElement.classList.remove('dark')
+
+    expect(second.theme).not.toBe(first.theme)
   })
 })

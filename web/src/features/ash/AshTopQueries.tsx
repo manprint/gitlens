@@ -37,14 +37,14 @@ function QueryRow({
         <Link className="font-medium underline" to={queryPath(instanceId, query.queryid, database)}>
           Query {query.queryid}
         </Link>
-        <span className="text-text-secondary text-sm">
+        <span className="text-muted-foreground text-sm">
           {query.avg_active_sessions === null
             ? 'Unknown average active backends'
             : `${query.avg_active_sessions} avg active backends`}
         </span>
       </div>
       <code className="mt-2 block text-sm whitespace-pre-wrap">{query.query_text}</code>
-      <p className="text-text-secondary mt-2 text-xs">
+      <p className="text-muted-foreground mt-2 text-xs">
         {query.samples} samples across {query.ticks} ticks
       </p>
     </li>

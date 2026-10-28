@@ -7,9 +7,9 @@ export type LagMetric = (typeof LAG_METRICS)[number]
 
 /** Design-system palette tokens kept in the pure option builder. */
 export const LAG_PALETTE: Record<LagMetric, string> = {
-  flush_lag_sec: 'var(--severity-warning)',
-  replay_lag_sec: 'var(--severity-critical)',
-  write_lag_sec: 'var(--severity-info)',
+  flush_lag_sec: 'var(--warning)',
+  replay_lag_sec: 'var(--destructive)',
+  write_lag_sec: 'var(--info)',
 }
 
 function points(series: AlignedReplicationSeries, metric: LagMetric): [string, number | null][] {

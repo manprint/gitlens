@@ -5,6 +5,7 @@ import { DataTable, type DataTableProps } from '@/components/layout/DataTable'
 import { EmptyState } from '@/components/state'
 import { Section } from '@/components/layout/Section'
 import type { AdvisorRule, FindingRecord } from '@/lib/findings'
+import { NativeSelect } from '@/components/ui/native-select'
 
 const permissionTiers: readonly PermTier[] = ['T0', 'T1', 'T2']
 const tierRank: Record<PermTier, number> = { T0: 0, T1: 1, T2: 2 }
@@ -122,8 +123,8 @@ export function RuleCatalogue({ rules, findings }: RuleCatalogueProps) {
       <div className="mb-4 grid gap-4 sm:grid-cols-3">
         <label className="space-y-1 text-sm" htmlFor="catalogue-severity">
           <span className="font-medium">Rule level</span>
-          <select
-            className="border-input bg-background h-9 w-full rounded-md border px-3"
+          <NativeSelect
+            className="w-full"
             id="catalogue-severity"
             onChange={(event) => setSeverity(event.target.value)}
             value={severity}
@@ -134,12 +135,12 @@ export function RuleCatalogue({ rules, findings }: RuleCatalogueProps) {
                 {value}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
         <label className="space-y-1 text-sm" htmlFor="catalogue-scope">
           <span className="font-medium">Rule scope</span>
-          <select
-            className="border-input bg-background h-9 w-full rounded-md border px-3"
+          <NativeSelect
+            className="w-full"
             id="catalogue-scope"
             onChange={(event) => setScope(event.target.value)}
             value={scope}
@@ -150,12 +151,12 @@ export function RuleCatalogue({ rules, findings }: RuleCatalogueProps) {
                 {value}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
         <label className="space-y-1 text-sm" htmlFor="catalogue-tier">
           <span className="font-medium">Available at or below</span>
-          <select
-            className="border-input bg-background h-9 w-full rounded-md border px-3"
+          <NativeSelect
+            className="w-full"
             id="catalogue-tier"
             onChange={(event) => setMaxTier(event.target.value)}
             value={maxTier}
@@ -166,7 +167,7 @@ export function RuleCatalogue({ rules, findings }: RuleCatalogueProps) {
                 {tier}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
       </div>
       <DataTable

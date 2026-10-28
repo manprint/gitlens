@@ -13,6 +13,7 @@ import { formatDuration, formatTimestamp } from '@/lib/format'
 import { silenceWindow, type Silence } from '@/lib/alerts'
 
 import { SilenceEditor } from './SilenceEditor'
+import { Callout } from '@/components/ui/callout'
 
 interface SilenceMatcher extends Record<string, unknown> {
   name: string
@@ -146,7 +147,9 @@ export function SilencesPage() {
           {status}
         </p>
       ) : null}
-      {deleteSilence.error ? <p role="alert">{deleteSilence.error.message}</p> : null}
+      {deleteSilence.error ? (
+        <Callout variant="destructive">{deleteSilence.error.message}</Callout>
+      ) : null}
 
       {editorOpen ? (
         <SilenceEditor

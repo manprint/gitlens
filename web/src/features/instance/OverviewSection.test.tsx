@@ -13,7 +13,7 @@ import { OverviewSection } from './OverviewSection'
 
 const chartMock = vi.hoisted(() => ({ options: [] as unknown[] }))
 
-vi.mock('echarts-for-react', () => ({
+vi.mock('echarts-for-react/esm/core', () => ({
   default: (props: { option: unknown }) => {
     chartMock.options.push(props.option)
     return null

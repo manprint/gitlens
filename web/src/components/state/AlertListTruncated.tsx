@@ -1,4 +1,5 @@
 import { ALERT_LIST_LIMIT } from '@/lib/alerts'
+import { Callout } from '@/components/ui/callout'
 
 interface AlertListTruncatedProps {
   truncated: boolean
@@ -11,11 +12,11 @@ interface AlertListTruncatedProps {
 export function AlertListTruncated({ truncated }: AlertListTruncatedProps) {
   if (!truncated) return null
   return (
-    <div className="border-warning/40 bg-warning/10 text-sm" role="status">
+    <Callout role="status" variant="warning">
       <strong>Only the {ALERT_LIST_LIMIT} most recently evaluated alerts are loaded.</strong>
       <p>
         Older alerts are not on this page, so any count or list built from alerts is a lower bound.
       </p>
-    </div>
+    </Callout>
   )
 }

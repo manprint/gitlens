@@ -97,9 +97,14 @@ function LoadingInstance() {
 
 function InstanceNotFound({ instanceId }: { instanceId: string }) {
   return (
-    <section aria-labelledby="instance-not-found-title">
-      <h1 id="instance-not-found-title">Instance not found</h1>
-      <p>
+    <section aria-labelledby="instance-not-found-title" className="space-y-3">
+      <h1
+        className="text-foreground text-2xl font-semibold tracking-tight"
+        id="instance-not-found-title"
+      >
+        Instance not found
+      </h1>
+      <p className="text-muted-foreground">
         No monitored instance matches <code>{instanceId}</code>.
       </p>
       <Link to="/">Back to fleet overview</Link>

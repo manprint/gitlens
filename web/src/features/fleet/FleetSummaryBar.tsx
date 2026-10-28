@@ -24,10 +24,10 @@ interface FleetSummaryBarProps {
 type Tone = 'neutral' | 'ok' | 'warning' | 'critical'
 
 const TONE_DOT: Record<Tone, string> = {
-  critical: 'bg-status-critical',
+  critical: 'bg-destructive',
   neutral: 'bg-primary',
-  ok: 'bg-status-ok',
-  warning: 'bg-status-degraded',
+  ok: 'bg-success',
+  warning: 'bg-warning',
 }
 
 function SummaryFilter({

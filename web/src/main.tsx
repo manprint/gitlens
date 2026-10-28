@@ -3,6 +3,9 @@ import { createRoot } from 'react-dom/client'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
+// Self-hosted, so the fonts load under the same-origin font-src policy.
+import '@fontsource-variable/inter'
+import '@fontsource-variable/jetbrains-mono'
 import './index.css'
 import { ErrorBoundary } from './components/layout/ErrorBoundary'
 import { routes } from './routes'

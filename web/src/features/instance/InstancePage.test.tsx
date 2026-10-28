@@ -15,7 +15,7 @@ import { server } from '@/test/msw/server'
 
 import { InstancePage } from './InstancePage'
 
-vi.mock('echarts-for-react', () => ({
+vi.mock('echarts-for-react/esm/core', () => ({
   default: () => null,
 }))
 

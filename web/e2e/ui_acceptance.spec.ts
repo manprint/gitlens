@@ -322,7 +322,7 @@ test('SYS-UI-002: unauthenticated navigation cannot restore fleet data', async (
   )
   expect(unauthenticatedStatus).toBe(401)
 
-  await page.getByLabel(/password/i).fill(process.env.PGLENS_UI_PASSWORD ?? '')
+  await page.getByLabel('Password', { exact: true }).fill(process.env.PGLENS_UI_PASSWORD ?? '')
   await page.getByRole('button', { name: /sign in|accedi|login/i }).click()
   await expect(page.getByRole('heading', { name: 'Fleet overview' })).toBeVisible()
   await page.getByRole('button', { name: /sign out|esci|logout/i }).click()

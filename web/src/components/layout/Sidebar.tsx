@@ -101,7 +101,7 @@ function NavItem({
             'group relative flex h-9 items-center gap-3 rounded-md px-2.5 text-sm font-medium transition-colors',
             isActive
               ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-              : 'text-sidebar-foreground/85 hover:bg-white/[0.06] hover:text-white',
+              : 'text-sidebar-foreground/85 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground',
             !expanded && 'justify-center lg:justify-start',
           )
         }
@@ -115,13 +115,15 @@ function NavItem({
             {isActive ? (
               <span
                 aria-hidden="true"
-                className="absolute inset-y-1.5 -left-2 w-1 rounded-r bg-sky-400"
+                className="bg-sidebar-primary absolute inset-y-1.5 -left-2 w-1 rounded-r"
               />
             ) : null}
             <Icon
               className={cn(
                 'size-4 shrink-0',
-                isActive ? 'text-sky-300' : 'text-sidebar-foreground/70 group-hover:text-white',
+                isActive
+                  ? 'text-sidebar-primary'
+                  : 'text-sidebar-foreground/70 group-hover:text-sidebar-accent-foreground',
               )}
             />
             <span className={cn('truncate', !expanded && 'hidden lg:inline')}>{label}</span>
@@ -209,7 +211,7 @@ function InstanceSwitcher({
           className="text-sidebar-foreground/60 pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
         />
         <select
-          className="border-sidebar-border h-9 w-full cursor-pointer appearance-none truncate rounded-md border bg-white/[0.06] pr-8 pl-8 text-sm text-white transition-colors outline-none hover:bg-white/[0.1] focus-visible:ring-2 focus-visible:ring-sky-400 [&>option]:text-black"
+          className="border-sidebar-border bg-sidebar-accent/40 text-sidebar-accent-foreground hover:bg-sidebar-accent/70 focus-visible:ring-sidebar-ring [&>option]:bg-sidebar [&>option]:text-sidebar-accent-foreground h-9 w-full cursor-pointer appearance-none truncate rounded-md border pr-8 pl-8 text-sm scheme-dark transition-colors outline-none focus-visible:ring-2"
           id="sidebar-instance"
           onChange={(event) => choose(event.target.value)}
           value={current ?? ''}
@@ -260,7 +262,12 @@ export function SidebarContent({ clusters = [], expanded = false, onNavigate }: 
   return (
     <div className="flex h-full flex-col">
       <div className="border-sidebar-border flex h-16 shrink-0 items-center border-b px-4">
-        <Link aria-label="pglens home" className="text-white" onClick={onNavigate} to="/">
+        <Link
+          aria-label="pglens home"
+          className="text-sidebar-accent-foreground"
+          onClick={onNavigate}
+          to="/"
+        >
           <Logo wordmarkClassName={cn(!expanded && 'hidden lg:inline')} />
         </Link>
       </div>
@@ -297,7 +304,7 @@ export function SidebarContent({ clusters = [], expanded = false, onNavigate }: 
 export function Sidebar({ clusters }: { clusters?: readonly Cluster[] }) {
   return (
     <aside
-      className="bg-sidebar text-sidebar-foreground fixed inset-y-0 left-0 z-30 hidden w-16 flex-col border-r border-black/20 md:flex lg:w-64"
+      className="bg-sidebar text-sidebar-foreground border-sidebar-border fixed inset-y-0 left-0 z-30 hidden w-16 flex-col border-r md:flex lg:w-64"
       data-collapsed-below="1024px"
       data-testid="app-sidebar"
     >

@@ -1,18 +1,14 @@
 export const PREFERENCES_STORAGE_KEY = 'pglens.preferences'
 
 export type ThemePreference = 'dark' | 'light' | 'system'
-export type TableDensity = 'compact' | 'comfortable'
 
 export interface Preferences {
   theme: ThemePreference
-  density: TableDensity
-  sidebarCollapsed: boolean
 }
 
+// index.html repeats this default for the first paint; keep the two in step.
 export const DEFAULT_PREFERENCES: Preferences = {
   theme: 'light',
-  density: 'comfortable',
-  sidebarCollapsed: false,
 }
 
 type PreferencesStorage = Pick<Storage, 'getItem' | 'setItem'>
@@ -29,21 +25,12 @@ function isThemePreference(value: unknown): value is ThemePreference {
   return value === 'dark' || value === 'light' || value === 'system'
 }
 
-function isTableDensity(value: unknown): value is TableDensity {
-  return value === 'compact' || value === 'comfortable'
-}
-
 function normalizePreferences(value: unknown): Preferences {
   if (typeof value !== 'object' || value === null) return { ...DEFAULT_PREFERENCES }
 
   const candidate = value as Partial<Preferences>
   return {
     theme: isThemePreference(candidate.theme) ? candidate.theme : DEFAULT_PREFERENCES.theme,
-    density: isTableDensity(candidate.density) ? candidate.density : DEFAULT_PREFERENCES.density,
-    sidebarCollapsed:
-      typeof candidate.sidebarCollapsed === 'boolean'
-        ? candidate.sidebarCollapsed
-        : DEFAULT_PREFERENCES.sidebarCollapsed,
   }
 }
 

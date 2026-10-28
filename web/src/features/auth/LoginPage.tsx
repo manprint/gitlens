@@ -18,18 +18,18 @@ import { Logo } from '@/components/layout/Logo'
 const HIGHLIGHTS = [
   {
     icon: Gauge,
-    title: 'Query più lente',
-    text: 'Le 20 query con il tempo di esecuzione più alto, con piani e storico.',
+    title: 'Slowest queries',
+    text: 'The 20 queries with the highest execution time, with plans and history.',
   },
   {
     icon: Activity,
-    title: 'Eventi di attesa e lock',
-    text: 'Cosa stanno aspettando le sessioni e chi blocca chi, in tempo reale.',
+    title: 'Wait events and locks',
+    text: 'What sessions are waiting for and who blocks whom, as it happens.',
   },
   {
     icon: Lightbulb,
-    title: 'Consigli automatici',
-    text: 'Indici mancanti, bloat, vacuum e configurazione da rivedere.',
+    title: 'Automatic advice',
+    text: 'Missing indexes, bloat, vacuum and settings worth a second look.',
   },
 ] as const
 
@@ -44,25 +44,25 @@ function safeNext(value: string | null): string {
 // failure says nothing about the password, so it gets its own message.
 function tooManyAttempts(seconds: number | null): string {
   if (seconds === null || seconds === 0) {
-    return 'Troppi tentativi di accesso. Attendi qualche minuto e riprova.'
+    return 'Too many sign-in attempts. Wait a few minutes and try again.'
   }
-  return `Troppi tentativi di accesso. Riprova tra ${seconds} ${seconds === 1 ? 'secondo' : 'secondi'}.`
+  return `Too many sign-in attempts. Try again in ${seconds} ${seconds === 1 ? 'second' : 'seconds'}.`
 }
 
 function signInFailure(error: unknown): string {
   if (error instanceof AuthRequestError) {
-    if (error.kind === 'unauthorized') return 'Password non valida.'
+    if (error.kind === 'unauthorized') return 'Invalid password.'
     if (error.failure.kind === 'server' && error.failure.status === 429) {
       return tooManyAttempts(error.retryAfterSeconds)
     }
     if (error.kind === 'network') {
-      return 'Impossibile contattare il server. Controlla la connessione e riprova.'
+      return 'Cannot reach the server. Check the connection and try again.'
     }
     if (error.kind === 'server') {
-      return 'Il server non riesce a completare la richiesta. Riprova tra poco.'
+      return 'The server could not complete the request. Try again shortly.'
     }
   }
-  return 'Accesso non riuscito. Riprova.'
+  return 'Sign-in failed. Try again.'
 }
 
 export default function LoginPage() {
@@ -96,30 +96,30 @@ export default function LoginPage() {
     <main className="bg-background grid min-h-screen lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
       <aside
         aria-hidden="true"
-        className="bg-sidebar relative hidden overflow-hidden text-white lg:flex lg:flex-col lg:justify-between lg:p-12"
+        className="bg-sidebar text-sidebar-accent-foreground relative hidden overflow-hidden lg:flex lg:flex-col lg:justify-between lg:p-12"
       >
         <div className="bg-grid pointer-events-none absolute inset-0 opacity-[0.12]" />
-        <div className="pointer-events-none absolute -top-40 -right-32 size-[28rem] rounded-full bg-sky-500/25 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-48 -left-24 size-[30rem] rounded-full bg-blue-600/25 blur-3xl" />
+        <div className="bg-sidebar-primary/25 pointer-events-none absolute -top-40 -right-32 size-[28rem] rounded-full blur-3xl" />
+        <div className="bg-primary/25 pointer-events-none absolute -bottom-48 -left-24 size-[30rem] rounded-full blur-3xl" />
         <Logo className="relative" />
         <div className="relative max-w-md space-y-8">
           <div className="space-y-3">
             <h2 className="text-3xl leading-tight font-semibold tracking-tight">
-              Monitoraggio PostgreSQL, chiaro e immediato.
+              PostgreSQL monitoring, clear at a glance.
             </h2>
             <p className="text-sidebar-foreground text-base leading-relaxed">
-              Prestazioni delle query, attese, lock, replica e consigli di ottimizzazione per tutta
-              la tua flotta, in un unico posto.
+              Query performance, waits, locks, replication and tuning advice for your whole fleet,
+              in one place.
             </p>
           </div>
           <ul className="space-y-4 text-sm">
             {HIGHLIGHTS.map(({ icon: Icon, title, text }) => (
               <li key={title} className="flex gap-3">
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-white/10 ring-1 ring-white/15">
-                  <Icon className="size-4 text-sky-300" />
+                <span className="bg-sidebar-accent ring-sidebar-border flex size-9 shrink-0 items-center justify-center rounded-lg ring-1">
+                  <Icon className="text-sidebar-primary size-4" />
                 </span>
                 <span>
-                  <span className="block font-medium text-white">{title}</span>
+                  <span className="text-sidebar-accent-foreground block font-medium">{title}</span>
                   <span className="text-sidebar-foreground">{text}</span>
                 </span>
               </li>
@@ -139,10 +139,10 @@ export default function LoginPage() {
           <Logo className="text-foreground mb-10 lg:hidden" />
           <div className="mb-8 space-y-2">
             <h1 id="login-title" className="text-foreground text-2xl font-semibold tracking-tight">
-              Accedi a pglens
+              Sign in to pglens
             </h1>
             <p className="text-muted-foreground text-sm">
-              Inserisci la password dell’interfaccia per continuare.
+              Enter the interface password to continue.
             </p>
           </div>
           <form className="space-y-5" noValidate onSubmit={handleSubmit}>
@@ -170,9 +170,7 @@ export default function LoginPage() {
                   value={password}
                 />
                 <button
-                  aria-label={
-                    visible ? 'Nascondi i caratteri digitati' : 'Mostra i caratteri digitati'
-                  }
+                  aria-label={visible ? 'Hide password' : 'Show password'}
                   aria-pressed={visible}
                   className="text-muted-foreground hover:text-foreground absolute top-1/2 right-1.5 flex size-8 -translate-y-1/2 items-center justify-center rounded-md transition-colors"
                   onClick={() => setVisible((current) => !current)}
@@ -204,19 +202,19 @@ export default function LoginPage() {
               {signIn.isPending ? (
                 <>
                   <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
-                  Accesso in corso…
+                  Signing in…
                 </>
               ) : (
                 <>
-                  Accedi
+                  Sign in
                   <ArrowRight aria-hidden="true" className="size-4" />
                 </>
               )}
             </button>
           </form>
           <p className="text-muted-foreground mt-10 text-xs leading-relaxed">
-            La password è impostata sul server con <code>PGLENS_UI_PASSWORD</code>. La sessione
-            resta attiva su questo browser finché non esci.
+            The password is set on the server with <code>PGLENS_UI_PASSWORD</code>. The session
+            stays active in this browser until you sign out.
           </p>
         </div>
       </section>

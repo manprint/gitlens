@@ -25,6 +25,7 @@ import {
   formatRate,
   formatTimestamp,
 } from '@/lib/format'
+import { NativeSelect } from '@/components/ui/native-select'
 
 interface CatalogSectionProps {
   instanceId: string
@@ -36,8 +37,6 @@ type Sequence = Schemas['Sequence']
 type PartitionedTable = Schemas['PartitionedTable']
 type FunctionStat = Schemas['FunctionStat']
 type SecurityDefinerFunction = Schemas['SecurityDefinerFunction']
-
-const selectClassName = 'border-input bg-background h-9 w-full rounded-md border px-3'
 
 /** Keeps the rows of one database, or of every database for "all". */
 function useDatabaseFilter<T extends { datname: string }>(items: readonly T[]) {
@@ -70,8 +69,8 @@ function DatabaseFilter({
   return (
     <label className="space-y-1 text-sm" htmlFor={id}>
       <span className="font-medium">Database</span>
-      <select
-        className={selectClassName}
+      <NativeSelect
+        className="w-full"
         id={id}
         onChange={(event) => onChange(event.target.value)}
         value={value}
@@ -82,7 +81,7 @@ function DatabaseFilter({
             {name}
           </option>
         ))}
-      </select>
+      </NativeSelect>
     </label>
   )
 }

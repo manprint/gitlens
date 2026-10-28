@@ -75,4 +75,35 @@ describe('TimeRangePicker', () => {
     expect(screen.getByRole('combobox', { name: 'Time range preset' })).toHaveValue('1h')
     expect(screen.getByText('Last hour')).toBeInTheDocument()
   })
+  it('refuses a custom range that ends before it starts, and keeps the URL', () => {
+    const result = renderWithProviders(<TimeRangePicker />, { route: '/findings?range=1h' })
+
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-01-02T00:00' } })
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-01-01T00:00' } })
+    fireEvent.submit(screen.getByRole('form', { name: 'Absolute time range' }))
+
+    expect(screen.getByRole('alert')).toHaveTextContent('The start must not be later than the end.')
+    expect(result.router.state.location.search).toBe('?range=1h')
+  })
+
+  it('refuses a custom range longer than 30 days', () => {
+    const result = renderWithProviders(<TimeRangePicker />, { route: '/findings?range=1h' })
+
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-01-01T00:00' } })
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-03-01T00:00' } })
+    fireEvent.submit(screen.getByRole('form', { name: 'Absolute time range' }))
+
+    expect(screen.getByRole('alert')).toHaveTextContent('The range cannot be longer than 30 days.')
+    expect(result.router.state.location.search).toBe('?range=1h')
+  })
+
+  it('zooms an absolute range out to the shortest longer preset', () => {
+    const result = renderWithProviders(<TimeRangePicker />, {
+      route: '/findings?from=2026-01-01T00:00:00Z&to=2026-01-01T02:00:00Z',
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom out time range' }))
+
+    expect(new URLSearchParams(result.router.state.location.search).get('range')).toBe('6h')
+  })
 })

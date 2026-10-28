@@ -21,20 +21,23 @@ export const ASH_WAIT_TYPES = [
 
 export type AshPaletteName = (typeof ASH_WAIT_TYPES)[number]
 
-/** Fixed semantic tokens keep a wait type visually stable between polls. */
+/**
+ * One wait-event token per type keeps a type the same colour between polls,
+ * and keeps stacked neighbours apart. The tokens are defined in index.css.
+ */
 export const ASH_PALETTE: Record<AshPaletteName, string> = {
-  Activity: 'var(--text-muted)',
-  Buffer: 'var(--status-degraded)',
-  BufferPin: 'var(--status-degraded)',
-  CPU: 'var(--status-ok)',
-  Client: 'var(--status-stale)',
-  Extension: 'var(--text-secondary)',
-  IO: 'var(--severity-warning)',
-  IPC: 'var(--status-unknown)',
-  LWLock: 'var(--severity-info)',
-  Lock: 'var(--status-critical)',
-  Timeout: 'var(--severity-critical)',
-  other: 'var(--status-muted)',
+  Activity: 'var(--wait-activity)',
+  Buffer: 'var(--wait-buffer)',
+  BufferPin: 'var(--wait-buffer)',
+  CPU: 'var(--wait-cpu)',
+  Client: 'var(--wait-client)',
+  Extension: 'var(--wait-extension)',
+  IO: 'var(--wait-io)',
+  IPC: 'var(--wait-ipc)',
+  LWLock: 'var(--wait-lwlock)',
+  Lock: 'var(--wait-lock)',
+  Timeout: 'var(--wait-timeout)',
+  other: 'var(--wait-other)',
 }
 
 export const OTHER_FOLDED_LABEL = 'other (folded)'
@@ -176,7 +179,7 @@ export function buildAshOption(
               yAxis: cpuCount,
               name: `CPU count (${cpuCount})`,
               label: { formatter: `CPU count (${cpuCount})` },
-              lineStyle: { color: 'var(--text-secondary)', type: 'dashed' as const, width: 1 },
+              lineStyle: { color: 'var(--muted-foreground)', type: 'dashed' as const, width: 1 },
             },
           ],
         },

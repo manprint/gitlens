@@ -14,6 +14,7 @@ import {
   isTerminalCommandState,
 } from '@/lib/commands'
 import { formatBytes, formatCount, formatPercent, formatRate, formatTimestamp } from '@/lib/format'
+import { Button } from '@/components/ui/button'
 
 const RELATION_LIMIT = 50
 
@@ -564,9 +565,11 @@ function ExactMeasurement({
   const running = command.isPending || (state !== undefined && !isTerminalCommandState(state))
   return (
     <div className="space-y-1">
-      <button
+      <Button
+        size="xs"
+        variant="outline"
         type="button"
-        className="rounded-md border px-2 py-1 text-xs font-medium whitespace-nowrap"
+
         aria-label={`Measure exactly: ${name} with pgstattuple`}
         disabled={!permitted || running}
         onClick={() =>
@@ -577,7 +580,7 @@ function ExactMeasurement({
         }
       >
         Measure exactly
-      </button>
+      </Button>
       {command.command.data ? (
         <p role="status" className="text-xs">
           {describeCommandState(command.command.data.state, command.command.data.error)}

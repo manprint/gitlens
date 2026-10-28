@@ -12,6 +12,7 @@ import { summariseAlerts, type Alert } from '@/lib/alerts'
 import { EventTimeline } from '@/features/cluster/EventTimeline'
 import type { ClusterEvent } from '@/lib/events'
 import { parseRange, queryWindowOf } from '@/lib/timerange'
+import { NativeSelect } from '@/components/ui/native-select'
 
 const DEFAULT_EVENT_LIMIT = 100
 const MAX_EVENT_LIMIT = 1_000
@@ -221,8 +222,8 @@ export function EventsPage() {
           </label>
           <label className="space-y-1 text-sm" htmlFor="events-limit">
             <span className="block font-medium">Event limit</span>
-            <select
-              className="border-input bg-background h-9 w-full rounded-md border px-3"
+            <NativeSelect
+              className="w-full"
               id="events-limit"
               onChange={(event) =>
                 updateSearchParams(searchParams, setSearchParams, 'limit', event.target.value)
@@ -232,7 +233,7 @@ export function EventsPage() {
               <option value="100">100 events</option>
               <option value="500">500 events</option>
               <option value="1000">1,000 events</option>
-            </select>
+            </NativeSelect>
           </label>
           <p className="text-muted-foreground self-end pb-2 text-sm">
             Selected range: <span className="text-foreground font-medium">{range.label}</span>

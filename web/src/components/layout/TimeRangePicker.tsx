@@ -1,10 +1,11 @@
-import type { FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import { CalendarClock, Clock, ZoomOut } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Degraded } from '@/components/state/Degraded'
 import { Input } from '@/components/ui/input'
 import {
+  MAX_RANGE_MS,
   RANGE_PRESET_ORDER,
   RANGE_PRESETS,
   chooseStep,
@@ -12,6 +13,7 @@ import {
   type RangePreset,
 } from '@/lib/timerange'
 import { useTimeRange } from '@/hooks/useTimeRange'
+import { NativeSelect } from '@/components/ui/native-select'
 
 function dateTimeLocalValue(date: Date): string {
   return date.toISOString().slice(0, 16)
@@ -31,13 +33,28 @@ function formString(form: FormData, name: string): string {
 export function TimeRangePicker() {
   const { range, setPreset, setRange } = useTimeRange()
   const step = chooseStep(range.from, range.to)
+  const [formError, setFormError] = useState<string | null>(null)
 
+  // The URL parser rejects these ranges and falls back to the default, so they
+  // are refused here, where the operator can still correct them.
   function applyAbsolute(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
     const from = parseDateTimeLocal(formString(form, 'from'))
     const to = parseDateTimeLocal(formString(form, 'to'))
-    if (!from || !to) return
+    if (!from || !to) {
+      setFormError('Enter both a start and an end time.')
+      return
+    }
+    if (from.getTime() > to.getTime()) {
+      setFormError('The start must not be later than the end.')
+      return
+    }
+    if (to.getTime() - from.getTime() > MAX_RANGE_MS) {
+      setFormError('The range cannot be longer than 30 days.')
+      return
+    }
+    setFormError(null)
     setRange({ from, kind: 'absolute', label: 'Custom range', to })
   }
 
@@ -50,7 +67,11 @@ export function TimeRangePicker() {
       setPreset(nextPreset)
       return
     }
-    setPreset('24h')
+    // An absolute range widens to the shortest preset longer than it, so the
+    // button never narrows the view.
+    const duration = range.to.getTime() - range.from.getTime()
+    const wider = RANGE_PRESET_ORDER.find((preset) => RANGE_PRESETS[preset].durationMs > duration)
+    setPreset(wider ?? RANGE_PRESET_ORDER.at(-1) ?? '7d')
   }
 
   return (
@@ -63,9 +84,9 @@ export function TimeRangePicker() {
         <label className="sr-only" htmlFor="time-range-preset">
           Time range preset
         </label>
-        <select
+        <NativeSelect
           aria-label="Time range preset"
-          className="border-input bg-card hover:bg-muted h-8 cursor-pointer rounded-md border pr-3 pl-8 text-sm font-medium shadow-xs transition-colors"
+          className="hover:bg-muted h-8 pr-3 pl-8 font-medium"
           id="time-range-preset"
           onChange={(event) => setPreset(event.target.value as RangePreset)}
           value={range.kind === 'relative' ? range.preset : ''}
@@ -78,7 +99,7 @@ export function TimeRangePicker() {
               {RANGE_PRESETS[preset].label}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </div>
       <details className="group relative">
         <summary className="border-input bg-card hover:bg-muted flex h-8 list-none items-center gap-1.5 rounded-md border px-2.5 text-sm font-medium shadow-xs transition-colors [&::-webkit-details-marker]:hidden">
@@ -97,6 +118,8 @@ export function TimeRangePicker() {
             <Input
               aria-label="From"
               defaultValue={dateTimeLocalValue(range.from)}
+              aria-describedby={formError ? 'time-range-error' : undefined}
+              aria-invalid={formError ? true : undefined}
               id="time-range-from"
               name="from"
               required
@@ -111,11 +134,18 @@ export function TimeRangePicker() {
             <Input
               aria-label="To"
               defaultValue={dateTimeLocalValue(range.to)}
+              aria-describedby={formError ? 'time-range-error' : undefined}
+              aria-invalid={formError ? true : undefined}
               id="time-range-to"
               name="to"
               required
               type="datetime-local"
             />
+            {formError ? (
+              <p className="text-destructive text-xs" id="time-range-error" role="alert">
+                {formError}
+              </p>
+            ) : null}
             <Button className="w-full" size="sm" type="submit">
               Apply range
             </Button>

@@ -28,9 +28,11 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
     return (
       <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-4 p-6">
-        <h1 className="text-xl font-semibold">The application could not render.</h1>
+        <h1 className="text-foreground text-2xl font-semibold tracking-tight">
+          The application could not render.
+        </h1>
         <ErrorState endpoint="pglens" failure={failure} onRetry={() => window.location.reload()} />
-        <p className="text-text-secondary text-sm">Build {__PGLENS_BUILD__}</p>
+        <p className="text-muted-foreground text-sm">Build {__PGLENS_BUILD__}</p>
       </main>
     )
   }

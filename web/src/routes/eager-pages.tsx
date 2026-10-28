@@ -22,7 +22,7 @@ export function NotFoundPage() {
   return (
     <section className="flex flex-col items-center justify-center py-24 text-center">
       <p className="text-primary text-sm font-semibold">404</p>
-      <h1 className="text-foreground mt-2 text-3xl font-semibold tracking-tight">Page not found</h1>
+      <h1 className="text-foreground mt-2 text-2xl font-semibold tracking-tight">Page not found</h1>
       <p className="text-muted-foreground mt-2">The requested page does not exist.</p>
       <Link
         className="bg-primary text-primary-foreground hover:bg-primary/90 mt-6 inline-flex h-9 items-center rounded-md px-4 text-sm font-medium"

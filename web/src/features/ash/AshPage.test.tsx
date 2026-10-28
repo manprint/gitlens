@@ -20,7 +20,7 @@ vi.mock('@/api/queries', () => ({
   useInstanceSettings: mocks.settings,
 }))
 
-vi.mock('echarts-for-react', () => ({
+vi.mock('echarts-for-react/esm/core', () => ({
   default: (props: {
     option: EChartsOption
     onEvents?: Record<string, (event: unknown) => void>

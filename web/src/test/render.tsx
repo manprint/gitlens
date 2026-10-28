@@ -72,6 +72,16 @@ export function renderWithProviders(
   return renderRoutes([{ path: '*', element: ui }], options)
 }
 
+/**
+ * Load the lazily imported page modules ahead of a suite. The first lazy route
+ * a file renders otherwise transforms the whole page tree inside the test, and
+ * on a cold or instrumented run that alone can outlast the test's waits. Call
+ * it from beforeAll, whose timeout is longer than a test's.
+ */
+export async function preloadLazyRoutes(): Promise<void> {
+  await import('@/routes/pages')
+}
+
 /** Render the application's route registry at a controlled in-memory URL. */
 export function renderRoute(
   path: string,

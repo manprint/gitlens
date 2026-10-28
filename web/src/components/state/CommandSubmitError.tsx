@@ -2,6 +2,8 @@ import type { ApiFailure } from '@/api/client'
 import { commandQueueFullMessage } from '@/lib/commands'
 
 import { describeFailure } from './describeFailure'
+import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
 
 interface CommandSubmitErrorProps {
   endpoint: string
@@ -17,12 +19,12 @@ interface CommandSubmitErrorProps {
  */
 export function CommandSubmitError({ endpoint, failure, onDismiss }: CommandSubmitErrorProps) {
   return (
-    <div role="alert" className="border-destructive/40 bg-destructive/10 text-sm">
+    <Callout variant="destructive">
       <strong>Could not submit {endpoint}.</strong>
       <p>{commandQueueFullMessage(failure) ?? describeFailure(failure)}</p>
-      <button type="button" onClick={onDismiss}>
+      <Button size="sm" variant="outline" type="button" onClick={onDismiss}>
         Dismiss
-      </button>
-    </div>
+      </Button>
+    </Callout>
   )
 }

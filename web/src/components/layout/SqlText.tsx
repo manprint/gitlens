@@ -6,9 +6,9 @@ import { cn } from '@/lib/utils'
 const TOKEN_CLASS: Record<SqlTokenKind, string> = {
   comment: 'text-muted-foreground italic',
   keyword: 'text-primary font-semibold',
-  number: 'text-fuchsia-700 dark:text-fuchsia-300',
-  parameter: 'font-medium text-cyan-700 dark:text-cyan-300',
-  string: 'text-success-foreground dark:text-success',
+  number: 'text-syntax-number',
+  parameter: 'text-syntax-parameter font-medium',
+  string: 'text-syntax-string',
   text: '',
 }
 

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -7,7 +7,9 @@
     <title>pglens</title>
     <script>
       ;(() => {
-        const fallback = 'dark'
+        // Keep in step with DEFAULT_PREFERENCES and applyTheme in src: this runs
+        // before the bundle, so the first paint already has the right theme.
+        const fallback = 'light'
         try {
           const raw = window.localStorage.getItem('pglens.preferences')
           const parsed = raw ? JSON.parse(raw) : null
@@ -17,15 +19,15 @@
               ? storedTheme
               : fallback
           const resolved =
-            theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches
-              ? 'dark'
-              : theme === 'light'
-                ? 'light'
-                : 'dark'
+            theme === 'system'
+              ? window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light'
+              : theme
           document.documentElement.classList.toggle('dark', resolved === 'dark')
           document.documentElement.style.colorScheme = resolved
         } catch {
-          document.documentElement.classList.add('dark')
+          document.documentElement.style.colorScheme = fallback
         }
       })()
     </script>

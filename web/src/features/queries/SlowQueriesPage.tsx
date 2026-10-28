@@ -22,6 +22,7 @@ import {
 import { chooseInstance, readLastInstance } from '@/lib/lastInstance'
 import { queryWindowOf } from '@/lib/timerange'
 import { cn } from '@/lib/utils'
+import { NativeSelect } from '@/components/ui/native-select'
 
 /** How many statements the page ranks: the operator asked for the top 20. */
 export const SLOWEST_LIMIT = 20
@@ -261,8 +262,8 @@ function InstanceStatements({ controls, instanceId, ranking }: InstanceStatement
               aria-hidden="true"
               className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
             />
-            <select
-              className="border-input bg-card h-9 w-56 max-w-full rounded-md border pr-3 pl-8 text-sm shadow-xs"
+            <NativeSelect
+              className="w-56 max-w-full pr-3 pl-8"
               id="slow-db"
               onChange={(event) => setDatabase(event.target.value)}
               value={database ?? ''}
@@ -276,7 +277,7 @@ function InstanceStatements({ controls, instanceId, ranking }: InstanceStatement
               {database !== undefined && !monitored.some((entry) => entry.datname === database) ? (
                 <option value={database}>{database}</option>
               ) : null}
-            </select>
+            </NativeSelect>
           </div>
         </div>
         <div className="ml-auto self-center">
@@ -450,8 +451,8 @@ export function SlowQueriesPage() {
                       aria-hidden="true"
                       className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
                     />
-                    <select
-                      className="border-input bg-card h-9 w-72 max-w-full rounded-md border pr-3 pl-8 text-sm shadow-xs"
+                    <NativeSelect
+                      className="w-72 max-w-full pr-3 pl-8"
                       id="slow-instance"
                       onChange={(event) => update('instance', event.target.value)}
                       value={instanceId}
@@ -462,7 +463,7 @@ export function SlowQueriesPage() {
                           {option.up ? '' : ' (down)'}
                         </option>
                       ))}
-                    </select>
+                    </NativeSelect>
                   </div>
                 </div>
                 <fieldset>

@@ -20,7 +20,7 @@ const ashResponse = {
   statistical: false,
 }
 
-vi.mock('echarts-for-react', () => ({
+vi.mock('echarts-for-react/esm/core', () => ({
   default: () => <div data-testid="mock-echarts" />,
 }))
 

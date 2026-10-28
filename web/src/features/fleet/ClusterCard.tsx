@@ -22,9 +22,9 @@ function healthVariant(health: Cluster['health']): 'success' | 'warning' | 'dest
 }
 
 const HEALTH_ACCENT: Record<Cluster['health'], string> = {
-  critical: 'before:bg-status-critical',
-  degraded: 'before:bg-status-degraded',
-  ok: 'before:bg-status-ok',
+  critical: 'before:bg-destructive',
+  degraded: 'before:bg-warning',
+  ok: 'before:bg-success',
 }
 
 export function ClusterCard({ agentStaleAgeSeconds, alertCount = 0, cluster }: ClusterCardProps) {
@@ -104,7 +104,7 @@ export function ClusterCard({ agentStaleAgeSeconds, alertCount = 0, cluster }: C
             <dd>{permissionTiers || <Unknown reason="No permission tier has been reported." />}</dd>
           </dl>
           {cluster.id_source !== 'system_identifier' ? (
-            <p className="text-warning text-xs">
+            <p className="text-warning-foreground text-xs">
               Identity source: <code>{cluster.id_source}</code>. Grant instructions are linked
               below.
             </p>
@@ -119,7 +119,7 @@ export function ClusterCard({ agentStaleAgeSeconds, alertCount = 0, cluster }: C
         </CardContent>
       </Card>
       {cluster.id_source !== 'system_identifier' ? (
-        <p className="text-warning text-xs">
+        <p className="text-warning-foreground text-xs">
           <a href="/README.md#setting-up-the-monitoring-role">
             View monitoring role grant instructions
           </a>

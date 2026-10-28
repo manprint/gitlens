@@ -25,9 +25,11 @@ interface PlaceholderPageProps {
 
 function PlaceholderPage({ surface }: PlaceholderPageProps) {
   return (
-    <section aria-labelledby="page-title">
-      <h1 id="page-title">{surface}</h1>
-      <p>{surface} is not implemented in this build.</p>
+    <section aria-labelledby="page-title" className="space-y-3">
+      <h1 className="text-foreground text-2xl font-semibold tracking-tight" id="page-title">
+        {surface}
+      </h1>
+      <p className="text-muted-foreground">{surface} is not implemented in this build.</p>
     </section>
   )
 }

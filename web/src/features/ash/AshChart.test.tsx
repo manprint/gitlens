@@ -8,7 +8,7 @@ import { renderWithProviders } from '@/test/render'
 
 const echartsMock = vi.hoisted(() => ({ render: vi.fn() }))
 
-vi.mock('echarts-for-react', () => ({
+vi.mock('echarts-for-react/esm/core', () => ({
   default: (props: {
     option: EChartsOption
     onEvents?: Record<string, (event: unknown) => void>

@@ -9,7 +9,7 @@ import { renderWithProviders } from '@/test/render'
 
 import { HostSection } from './HostSection'
 
-vi.mock('echarts-for-react', () => ({
+vi.mock('echarts-for-react/esm/core', () => ({
   default: () => null,
 }))
 

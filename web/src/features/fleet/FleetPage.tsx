@@ -19,6 +19,8 @@ import {
   type HealthFilter,
   type InstanceFilter,
 } from './FleetSummaryBar'
+import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
 
 const HEALTH_FILTERS: readonly HealthFilter[] = ['all', 'ok', 'degraded', 'critical']
 const HEALTH_RANK: Record<Cluster['health'], number> = { critical: 0, degraded: 1, ok: 2 }
@@ -181,13 +183,18 @@ export function FleetPage() {
       />
 
       {alertsQuery.error ? (
-        <div role="alert" className="border-warning/40 bg-warning/10 text-sm">
+        <Callout variant="warning">
           <strong>Alert counts unavailable.</strong>
           <p>Firing alerts could not be loaded, but the cluster grid remains available.</p>
-          <button onClick={() => void alertsQuery.refetch()} type="button">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void alertsQuery.refetch()}
+            type="button"
+          >
             Retry alerts
-          </button>
-        </div>
+          </Button>
+        </Callout>
       ) : null}
 
       <AlertListTruncated truncated={alertsQuery.truncated} />

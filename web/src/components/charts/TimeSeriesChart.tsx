@@ -1,6 +1,10 @@
+import { useMemo } from 'react'
 import type { EChartsOption } from 'echarts'
-import EChartsReact from 'echarts-for-react'
+import EChartsReact from 'echarts-for-react/esm/core'
 import { useTimeRange } from '@/hooks/useTimeRange'
+
+import { buildChartTheme, resolveTokens, useTokenReader } from './chartTheme'
+import { echarts } from './echarts'
 
 export interface TimeSeriesPoint {
   ts: string
@@ -72,6 +76,13 @@ export function TimeSeriesChart({
   valueLabel = 'Value (seconds)',
 }: TimeSeriesChartProps) {
   const { setRange } = useTimeRange()
+  const read = useTokenReader()
+  // A theme change gives a new reader, and a new theme makes the chart library
+  // rebuild the chart with the other palette.
+  const themed = useMemo(
+    () => ({ option: resolveTokens(option, read), theme: buildChartTheme(read) }),
+    [option, read],
+  )
 
   function handleDataZoom(event: unknown) {
     const range = rangeFromDataZoom(event)
@@ -86,16 +97,21 @@ export function TimeSeriesChart({
   }
 
   return (
-    <div role="img" aria-label={ariaLabel}>
-      <EChartsReact
-        aria-hidden="true"
-        onEvents={{
-          datazoom: handleDataZoom,
-          ...(onSeriesSelect === undefined ? {} : { click: handleSeriesClick }),
-        }}
-        option={option}
-        style={{ height: 300, width: '100%' }}
-      />
+    <div>
+      {/* role="img" makes its children presentational, so the data table sits
+          beside the chart rather than inside it, where screen readers reach it. */}
+      <div aria-label={ariaLabel} role="img">
+        <EChartsReact
+          echarts={echarts}
+          onEvents={{
+            datazoom: handleDataZoom,
+            ...(onSeriesSelect === undefined ? {} : { click: handleSeriesClick }),
+          }}
+          option={themed.option}
+          style={{ height: 300, width: '100%' }}
+          theme={themed.theme}
+        />
+      </div>
       {/* Tables ignore a 1px width, so the wrapper hides the data table instead. */}
       <div className="sr-only">
         <table aria-label={dataTableLabel}>

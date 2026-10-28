@@ -13,6 +13,7 @@ import { queryWindowOf } from '@/lib/timerange'
 
 import { AshBreakdown } from './AshBreakdown'
 import { AshTopQueries } from './AshTopQueries'
+import { Callout } from '@/components/ui/callout'
 
 type DrillGroup = Extract<AshGroupBy, 'wait_event_type' | 'wait_event' | 'queryid'>
 
@@ -24,7 +25,7 @@ const ASH_ROW_LIMIT = 5_000
 
 function AshFootnote() {
   return (
-    <p className="text-text-secondary text-xs" data-testid="ash-sampling-footnote">
+    <p className="text-muted-foreground text-xs" data-testid="ash-sampling-footnote">
       ASH uses 1 s statistical sampling; sub-second queries are under-represented. At most 100 wait
       keys are retained per 10 s window; the remainder is folded into “other” and the total is
       conserved. The chart plots the largest groups of the range and folds the rest into “other”
@@ -69,7 +70,7 @@ interface DrillBreadcrumbProps {
 function DrillBreadcrumb({ groupBy, onNavigate, waitEvent, waitEventType }: DrillBreadcrumbProps) {
   return (
     <nav aria-label="ASH drill path">
-      <ol className="text-text-secondary flex flex-wrap items-center gap-2 text-sm">
+      <ol className="text-muted-foreground flex flex-wrap items-center gap-2 text-sm">
         <li>
           {groupBy === DEFAULT_GROUP ? (
             <span aria-current="page">Wait event types</span>
@@ -243,17 +244,17 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
       {ashQuery.data.enabled === false ? (
         <>
           <Disabled feature="ASH sampling" configKey="checks.ash in the agent configuration file" />
-          <p className="text-text-secondary text-sm">
+          <p className="text-muted-foreground text-sm">
             Keeping ASH disabled avoids its sampling cost but removes wait-analysis visibility.
           </p>
         </>
       ) : (
         <>
           {ashQuery.data.warning ? (
-            <div className="border-warning/40 bg-warning/10 text-sm" role="status">
+            <Callout role="status" variant="warning">
               <strong>ASH sampling warning:</strong> {ashQuery.data.warning} {sampleCount} samples
               were collected in this range; conclusions are unreliable.
-            </div>
+            </Callout>
           ) : null}
           {queryIdsUnavailable ? (
             <div className="space-y-2">
@@ -265,7 +266,7 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
                 }
                 requires="compute_query_id=on"
               />
-              <p className="text-text-secondary text-sm">
+              <p className="text-muted-foreground text-sm">
                 See the{' '}
                 <a className="underline" href="/README.md#agent-configuration">
                   agent configuration in the README

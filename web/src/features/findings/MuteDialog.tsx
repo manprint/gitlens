@@ -12,6 +12,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import type { JoinedFinding } from '@/lib/findings'
+import { Input } from '@/components/ui/input'
+import { Callout } from '@/components/ui/callout'
 
 type ExpiryPreset = '1h' | '8h' | '24h' | '7d' | 'custom'
 
@@ -134,7 +136,9 @@ export function MuteDialog({ finding }: { finding: JoinedFinding }) {
       )}
 
       {unmute.error ? (
-        <p role="alert">{mutationErrorMessage(unmute.error, 'remove the mute')}</p>
+        <Callout variant="destructive">
+          {mutationErrorMessage(unmute.error, 'remove the mute')}
+        </Callout>
       ) : null}
 
       <Dialog open={open} onOpenChange={setOpen}>
@@ -180,9 +184,9 @@ export function MuteDialog({ finding }: { finding: JoinedFinding }) {
               </div>
               <label className="flex flex-col gap-1 text-sm" htmlFor={`mute-until-${domId}`}>
                 <span>Mute until</span>
-                <input
+                <Input
                   aria-label="Mute until"
-                  className="border-input bg-background h-9 rounded-md border px-3"
+                  className="w-auto"
                   disabled={preset !== 'custom'}
                   id={`mute-until-${domId}`}
                   max={maxUntil || undefined}
@@ -194,12 +198,14 @@ export function MuteDialog({ finding }: { finding: JoinedFinding }) {
             </fieldset>
 
             {formError ? (
-              <p id={`mute-error-${domId}`} role="alert">
+              <p className="text-destructive text-sm" id={`mute-error-${domId}`} role="alert">
                 {formError}
               </p>
             ) : null}
             {mute.error ? (
-              <p role="alert">{mutationErrorMessage(mute.error, 'mute the finding')}</p>
+              <Callout variant="destructive">
+                {mutationErrorMessage(mute.error, 'mute the finding')}
+              </Callout>
             ) : null}
             {mute.isPending ? <p role="status">Sending mute request…</p> : null}
 

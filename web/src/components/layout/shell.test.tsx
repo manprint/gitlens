@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from '@testing-library/react'
+import { act, fireEvent, screen, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw/http'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -155,5 +155,27 @@ describe('application shell', () => {
     const { container } = renderWithProviders(<AppShell />, { route: '/findings' })
 
     await expect(expectNoA11yViolations(container)).resolves.toBeUndefined()
+  })
+  it('ignores a shortcut typed with Ctrl, Cmd or Alt', () => {
+    const result = renderWithProviders(<AppShell />, { route: '/findings' })
+
+    fireEvent.keyDown(window, { key: 'g', ctrlKey: true })
+    fireEvent.keyDown(window, { key: 'f' })
+    fireEvent.keyDown(window, { key: 'g' })
+    fireEvent.keyDown(window, { key: 'f', metaKey: true })
+
+    expect(result.router.state.location.pathname).toBe('/findings')
+  })
+
+  it('forgets a lone g after a moment', () => {
+    const result = renderWithProviders(<AppShell />, { route: '/findings' })
+
+    fireEvent.keyDown(window, { key: 'g' })
+    act(() => {
+      vi.advanceTimersByTime(2_000)
+    })
+    fireEvent.keyDown(window, { key: 'f' })
+
+    expect(result.router.state.location.pathname).toBe('/findings')
   })
 })
