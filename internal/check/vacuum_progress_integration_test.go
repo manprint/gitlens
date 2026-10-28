@@ -87,6 +87,8 @@ DELETE FROM zz_vac_probe WHERE id % 2 = 0`)
 		require.NoError(t, err)
 		_, err = vac.Exec(ctx, "SET vacuum_cost_delay = 20; SET vacuum_cost_limit = 1")
 		require.NoError(t, err)
+		var vacPID int32
+		require.NoError(t, vac.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&vacPID))
 		vacCtx, cancel := context.WithCancel(ctx)
 		done := make(chan struct{})
 		go func() {
@@ -98,6 +100,7 @@ DELETE FROM zz_vac_probe WHERE id % 2 = 0`)
 		t.Cleanup(func() {
 			cancel()
 			<-done
+			stopVacuum(t, admin, vacPID)
 		})
 
 		maintenance := pg.Pool(t, "app", pgtest.RoleT0)
@@ -120,4 +123,26 @@ DELETE FROM zz_vac_probe WHERE id % 2 = 0`)
 		}
 		require.Equal(t, "zz_vac_probe", relname)
 	})
+}
+
+// stopVacuum cancels the vacuum backend pid on the server and waits until it
+// has stopped. When a query's context is cancelled, pgx returns at once and
+// sends the cancel request from a background goroutine, so the throttled probe
+// vacuum can still be running when its test ends. The snapshot restore resets
+// only the app database and leaves it alone, and a later test sees it running:
+// TestINTVAC001 failed that way when -shuffle ran it after TestINTVAC003.
+func stopVacuum(t *testing.T, pool *pgxpool.Pool, pid int32) {
+	t.Helper()
+	ctx := context.Background()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		var running int
+		require.NoError(t, pool.QueryRow(ctx,
+			"SELECT count(pg_cancel_backend(pid)) FROM pg_stat_progress_vacuum WHERE pid = $1", pid).Scan(&running))
+		if running == 0 {
+			return
+		}
+		require.True(t, time.Now().Before(deadline), "the probe vacuum did not stop")
+		time.Sleep(100 * time.Millisecond)
+	}
 }
