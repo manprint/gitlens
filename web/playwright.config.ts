@@ -16,18 +16,33 @@ export default defineConfig({
     baseURL: process.env.PGLENS_UI_BASE_URL ?? 'http://127.0.0.1:8080',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
-    video: 'off',
+    video: 'retain-on-failure',
     actionTimeout: 10_000,
     timezoneId: 'UTC',
     locale: 'en-US',
     colorScheme: 'dark',
   },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    // Legacy specs, run by test/e2e/ui_test.go with --grep and no --project.
     {
-      name: 'desktop-fullhd',
-      use: { ...devices['Desktop Chrome'], viewport: { width: 1920, height: 1080 } },
-      testIgnore: [/(smoke|ui_acceptance)\.spec\.ts/, /qa\/(harness|traceability)\.spec\.ts/],
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
+      testMatch: /(smoke|ui_acceptance)\.spec\.ts/,
     },
+    // Node-only QA harness and traceability checks: no browser.
+    { name: 'harness', testMatch: /qa\/(harness|traceability)\.spec\.ts/ },
+    ...(
+      [
+        ['desktop-fullhd', 1920, 1080],
+        ['desktop-maximized', 1920, 950],
+        ['laptop', 1440, 900],
+        ['tablet', 768, 1024],
+        ['phone', 390, 844],
+      ] as const
+    ).map(([name, width, height]) => ({
+      name,
+      use: { ...devices['Desktop Chrome'], viewport: { width, height } },
+      testIgnore: [/(smoke|ui_acceptance)\.spec\.ts/, /qa\/(harness|traceability)\.spec\.ts/],
+    })),
   ],
 })

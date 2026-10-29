@@ -1,7 +1,7 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test'
 
 /** Widths every visual screenshot is taken at (the height follows the current viewport). */
-export const SHOOT_WIDTHS = [1440, 1024, 390] as const
+export const SHOOT_WIDTHS = [1920, 1440, 1024, 390] as const
 
 const ARTIFACT_DIR = '../test/e2e/_artifacts/ui/visual'
 const HOST_FRESH_MS = 5 * 60_000
@@ -157,6 +157,19 @@ export async function shoot(page: Page, name: string): Promise<string[]> {
     if (original) await page.setViewportSize(original)
   }
   return files
+}
+
+/** One screenshot at 1920×950 (a maximised browser window); the viewport is restored. */
+export async function shootMaximized(page: Page, name: string): Promise<string> {
+  const original = page.viewportSize()
+  const file = `${ARTIFACT_DIR}/${name}-1920x950.png`
+  try {
+    await page.setViewportSize({ width: 1920, height: 950 })
+    await page.screenshot({ fullPage: false, path: file })
+  } finally {
+    if (original) await page.setViewportSize(original)
+  }
+  return file
 }
 
 /**
