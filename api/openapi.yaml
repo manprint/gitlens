@@ -991,6 +991,34 @@ components:
         tables:
           type: array
           items: { $ref: '#/components/schemas/TableHistorySeries' }
+    WorkloadSeriesResponse:
+      type: object
+      required: [step_seconds, source, series]
+      properties:
+        step_seconds:
+          type: integer
+          format: int64
+          minimum: 120
+          description: The effective step, after raising it to two samples of the source and to at most 1000 buckets.
+        source: { type: string, enum: [statements, tables, indexes] }
+        series:
+          type: array
+          items: { $ref: '#/components/schemas/WorkloadSeries' }
+    WorkloadSeries:
+      type: object
+      required: [name, unit, kind, points]
+      properties:
+        name: { type: string }
+        unit: { type: string, description: 'Unit of the values, e.g. calls/s, ms/s, rows, bytes, ratio.' }
+        kind: { type: string, enum: [rate, gauge] }
+        points:
+          type: array
+          items:
+            type: object
+            required: [ts, value]
+            properties:
+              ts: { $ref: '#/components/schemas/Timestamp' }
+              value: { type: [number, 'null'], format: double }
     TableHistorySeries:
       type: object
       required: [datname, schemaname, relname, points]
@@ -2102,6 +2130,72 @@ paths:
                           - { ts: '2026-08-27T01:00:00Z', n_dead_tup: 900, n_live_tup: 5000 }
                           - { ts: '2026-08-27T01:01:00Z', n_dead_tup: 950, n_live_tup: 5000 }
         '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/workload/series:
+    get:
+      tags: [instances]
+      operationId: getWorkloadSeries
+      summary: Return time series of the tracked statements, tables or indexes.
+      description: >-
+        Each series is a whitelisted total over the rows the agent tracks (its top_n statements, tables
+        and indexes): the rows of one scrape are summed per database, those sums are averaged over the
+        scrapes of a bucket, and the databases are added up. Counters are stored as per-second rates, so
+        a rate series is a rate of the tracked rows; a gauge (dead_tuples, live_tuples, index_bytes) is
+        a sum of the latest values. Buckets are aligned to the Unix epoch and every bucket covering the
+        window is returned, with value null where no scrape landed. Series names per source: statements
+        calls, exec_time, rows, blks_hit, blks_read, hit_ratio, wal_bytes, temp_blks; tables seq_scans,
+        idx_scans, tup_ins, tup_upd, tup_del, tup_hot_upd, dead_tuples, live_tuples, autovacuums; indexes
+        idx_scans, idx_tup_read, idx_tup_fetch, idx_blks_read, idx_blks_hit, index_bytes.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - name: source
+          in: query
+          required: true
+          schema: { type: string, enum: [statements, tables, indexes] }
+        - name: series
+          in: query
+          required: true
+          description: Comma-separated series names of the source, at most 8.
+          schema: { type: string }
+        - name: database
+          in: query
+          required: false
+          description: Only this database; all databases of the instance when absent.
+          schema: { type: string }
+        - { name: from, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - { name: to, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - name: step
+          in: query
+          required: false
+          description: >-
+            A Go duration such as 2m. It is raised to two samples of the source (statements 120 s,
+            tables and indexes 600 s, also the default) and so that the window holds at most 1000 buckets.
+          schema: { type: string }
+      responses:
+        '200':
+          description: One series per requested name, in the requested order.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkloadSeriesResponse' }
+              examples:
+                default:
+                  value:
+                    step_seconds: 120
+                    source: statements
+                    series:
+                      - name: calls
+                        unit: calls/s
+                        kind: rate
+                        points:
+                          - { ts: '2026-08-27T01:00:00Z', value: 16.5 }
+                          - { ts: '2026-08-27T01:02:00Z', value: null }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503':
+          description: The server has no database pool.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/instances/{id}/indexes:
     get:

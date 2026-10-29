@@ -37,6 +37,7 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | GET | `/api/v1/instances/{id}/tables/history` | `getInstanceTableHistory` | Return the dead and live tuple trend of the tables with the most dead tuples. |
 | GET | `/api/v1/instances/{id}/triggers` | `getInstanceTriggers` | Return the triggers of the instance's databases. |
 | GET | `/api/v1/instances/{id}/unindexed-foreign-keys` | `getInstanceUnindexedForeignKeys` | Return the foreign keys no index serves. |
+| GET | `/api/v1/instances/{id}/workload/series` | `getWorkloadSeries` | Return time series of the tracked statements, tables or indexes. |
 | GET | `/api/v1/locks` | `getLocks` | Return the latest sampled blocking tree. |
 
 ## metrics

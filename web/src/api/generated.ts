@@ -435,6 +435,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/instances/{id}/workload/series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Return time series of the tracked statements, tables or indexes.
+         * @description Each series is a whitelisted total over the rows the agent tracks (its top_n statements, tables and indexes): the rows of one scrape are summed per database, those sums are averaged over the scrapes of a bucket, and the databases are added up. Counters are stored as per-second rates, so a rate series is a rate of the tracked rows; a gauge (dead_tuples, live_tuples, index_bytes) is a sum of the latest values. Buckets are aligned to the Unix epoch and every bucket covering the window is returned, with value null where no scrape landed. Series names per source: statements calls, exec_time, rows, blks_hit, blks_read, hit_ratio, wal_bytes, temp_blks; tables seq_scans, idx_scans, tup_ins, tup_upd, tup_del, tup_hot_upd, dead_tuples, live_tuples, autovacuums; indexes idx_scans, idx_tup_read, idx_tup_fetch, idx_blks_read, idx_blks_hit, index_bytes.
+         */
+        get: operations["getWorkloadSeries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instances/{id}/indexes": {
         parameters: {
             query?: never;
@@ -1848,6 +1868,28 @@ export interface components {
             step_seconds: number;
             tables: components["schemas"]["TableHistorySeries"][];
         };
+        WorkloadSeriesResponse: {
+            /**
+             * Format: int64
+             * @description The effective step, after raising it to two samples of the source and to at most 1000 buckets.
+             */
+            step_seconds: number;
+            /** @enum {string} */
+            source: "statements" | "tables" | "indexes";
+            series: components["schemas"]["WorkloadSeries"][];
+        };
+        WorkloadSeries: {
+            name: string;
+            /** @description Unit of the values, e.g. calls/s, ms/s, rows, bytes, ratio. */
+            unit: string;
+            /** @enum {string} */
+            kind: "rate" | "gauge";
+            points: {
+                ts: components["schemas"]["Timestamp"];
+                /** Format: double */
+                value: number | null;
+            }[];
+        };
         TableHistorySeries: {
             datname: string;
             schemaname: string;
@@ -2761,6 +2803,49 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+        };
+    };
+    getWorkloadSeries: {
+        parameters: {
+            query: {
+                source: "statements" | "tables" | "indexes";
+                /** @description Comma-separated series names of the source, at most 8. */
+                series: string;
+                /** @description Only this database; all databases of the instance when absent. */
+                database?: string;
+                from?: components["schemas"]["Timestamp"];
+                to?: components["schemas"]["Timestamp"];
+                /** @description A Go duration such as 2m. It is raised to two samples of the source (statements 120 s, tables and indexes 600 s, also the default) and so that the window holds at most 1000 buckets. */
+                step?: string;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["InstanceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One series per requested name, in the requested order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkloadSeriesResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            /** @description The server has no database pool. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     getInstanceIndexes: {

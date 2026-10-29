@@ -457,6 +457,33 @@ export function useInstanceTableHistory(
   })
 }
 
+/** Whitelisted series of the tracked statements, tables or indexes (one source per call). */
+export function useWorkloadSeries(
+  id: string,
+  params: WindowlessParameters<'/api/v1/instances/{id}/workload/series'>,
+  window: QueryWindow,
+) {
+  return useApiQuery({
+    keepPrevious: true,
+    policy: REFRESH.activity,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/workload/series', {
+          params: { path: { id }, query: { ...params, ...resolveQueryWindow(window) } },
+          signal,
+        }),
+      ),
+    queryKey: qk.workloadSeries(
+      id,
+      params.source,
+      params.series,
+      window,
+      params.step,
+      params.database,
+    ),
+  })
+}
+
 export function useInstanceIndexes(
   id: string,
   params: QueryParameters<'/api/v1/instances/{id}/indexes'> = {},

@@ -40,6 +40,7 @@ import {
   useSession,
   useSilences,
   useStatements,
+  useWorkloadSeries,
 } from './queries'
 import { renderWithProviders } from '@/test/render'
 import { base as clusters, empty as emptyClusters } from '@/test/fixtures/getClusters'
@@ -139,6 +140,15 @@ function ReplicationWindowProbe() {
   return null
 }
 
+function WorkloadWindowProbe() {
+  useWorkloadSeries(
+    'instance-a',
+    { source: 'statements', series: 'calls,hit_ratio', step: '2m', database: 'app' },
+    RELATIVE_HOUR,
+  )
+  return null
+}
+
 function MetricWindowProbe() {
   useQueryMetrics({ metric: 'cpu_usage', instance_id: 'instance-a', step: '1m' }, RELATIVE_HOUR)
   return null
@@ -176,6 +186,12 @@ describe('relative windows', () => {
       path: '/api/v1/metrics/query',
       Probe: MetricWindowProbe,
     },
+    {
+      interval: REFRESH.activity.interval,
+      name: 'workload series',
+      path: '/api/v1/instances/instance-a/workload/series',
+      Probe: WorkloadWindowProbe,
+    },
   ])(
     'UI-API-016 polls the $name window once per interval, sending the window at each request',
     async ({ interval, path, Probe }) => {
@@ -189,6 +205,7 @@ describe('relative windows', () => {
         ok('getAshTop', { entries: [], resolution_seconds: 30, statistical: false }),
         ok('getClusterReplication', { cluster_id: '1', edges: [] }),
         ok('queryMetrics', { series: [] }),
+        ok('getWorkloadSeries', { step_seconds: 120, source: 'statements', series: [] }),
       )
       renderWithProviders(<Probe />)
       await flushNetwork()
@@ -207,6 +224,26 @@ describe('relative windows', () => {
       expect(Math.abs(lastTo - (NOW.getTime() + polls * interval))).toBeLessThan(1_000)
     },
   )
+
+  it('WSER-UI-001 sends the workload source, series, step and database', async () => {
+    const requested: URL[] = []
+    server.events.on('request:start', ({ request }) => {
+      requested.push(new URL(request.url))
+    })
+    server.use(ok('getWorkloadSeries', { step_seconds: 120, source: 'statements', series: [] }))
+    renderWithProviders(<WorkloadWindowProbe />)
+    await flushNetwork()
+
+    const url = requested.find(({ pathname }) => pathname.endsWith('/workload/series'))
+    expect(url?.pathname).toBe('/api/v1/instances/instance-a/workload/series')
+    expect(Object.fromEntries(url?.searchParams ?? [])).toMatchObject({
+      database: 'app',
+      series: 'calls,hit_ratio',
+      source: 'statements',
+      step: '2m',
+    })
+    expect(url?.searchParams.get('from')).not.toBeNull()
+  })
 })
 
 describe('query hooks', () => {
