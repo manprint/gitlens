@@ -279,6 +279,20 @@ selector. Counters are stored as per-second rates, so a tile such as "WAL
 generated in range" integrates the rate over the range rather than
 differencing raw counters.
 
+Below the summary tiles, a separate chart area groups the time series under an
+anchor nav (sticky on wide screens): **Workload** (transactions, connections,
+deadlocks and conflicts), **Memory & I/O** (cache hit ratio, blocks read vs hit, temporary
+files and bytes), **WAL & checkpoints** (WAL generation, checkpoints and their
+write/sync time per query step), **Queries** (calls, execution time, rows,
+block reads and temporary blocks of the tracked statements) and **Tables &
+indexes** (sequential vs index scans, tuple churn, dead tuples, index scans
+and index size of the tracked relations); the nav also links the Host section.
+Query, table and index charts are instance-wide and count only the statements
+and relations the agent tracks (`top_n`), sampled every minute (statements) or
+every five minutes (tables and indexes). Every chart states its range and
+query step; empty buckets stay gaps, and a chart with too many of them for
+dashed markers names how many gaps or counter resets it holds.
+
 The relation tables show, per database, live and dead tuples, size, sequential
 and index scans per second, and the latest vacuum and analyze (whichever of
 the manual or automatic one is newer, labelled as such). Their budgets are the
@@ -1039,6 +1053,18 @@ and, for tables, the `last_vacuum_at`, `last_autovacuum_at`,
 was never processed that way). Bloat returns estimates from the last 13 hours
 and `pgstattuple` measurements from the last 7 days.
 
+Time series of the tracked statements, tables and indexes are available at
+`/api/v1/instances/{id}/workload/series?source=statements|tables|indexes&series=<csv>`
+(at most 8 names from the source's whitelist, for example `calls,exec_time`
+for statements, `seq_scans,dead_tuples` for tables, `idx_scans,index_bytes`
+for indexes), with optional `database`, `from`, `to` and `step`. Each series
+is summed over the tracked rows of one scrape per database, averaged over the
+scrapes in a bucket, then added across databases; empty buckets are `null`.
+The step is raised to at least twice the source's sampling interval (120 s
+for statements, 600 s for tables and indexes) and to at most 1000 buckets, and
+the response states the effective `step_seconds` and each series' `kind`
+(`rate` or `gauge`). For example: `curl -s -b cookies.txt 'http://localhost:8080/api/v1/instances/<instance-id>/workload/series?source=statements&series=calls,exec_time' | jq .`.
+
 Host metrics for a local target are available at:
 
 ```sh
@@ -1561,6 +1587,7 @@ GET    /api/v1/clusters/{id}/slots
 GET    /api/v1/instances
 GET    /api/v1/instances/{id}
 GET    /api/v1/instances/{id}/activity|databases|host|settings|tables|indexes|bloat|command-audit
+GET    /api/v1/instances/{id}/workload/series
 GET    /api/v1/locks
 GET    /api/v1/metrics/query
 GET    /api/v1/events
