@@ -7,6 +7,11 @@ const slackVariables = [
 
 const webhookVariables = ['PGLENS_WEBHOOK_URL'] as const
 
+const googleChatVariables = [
+  'PGLENS_GOOGLE_CHAT_WEBHOOK_URL',
+  'PGLENS_GOOGLE_CHAT_WEBHOOK_URL_FILE',
+] as const
+
 function VariableList({ variables }: { variables: readonly string[] }) {
   return (
     <ul className="text-muted-foreground mt-2 space-y-1 text-sm">
@@ -41,6 +46,13 @@ export function DeliverySection() {
             Configure the generic webhook with this server variable:
           </p>
           <VariableList variables={webhookVariables} />
+        </li>
+        <li className="border-border rounded-md border p-3">
+          <h3 className="font-medium">Google Chat</h3>
+          <p className="text-muted-foreground mt-1 text-sm">
+            Configure the Google Chat space webhook with one of these server variables:
+          </p>
+          <VariableList variables={googleChatVariables} />
         </li>
       </ul>
 

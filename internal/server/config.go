@@ -12,6 +12,9 @@ type AlertConfig struct {
 	Interval   time.Duration
 	SlackURL   string
 	WebhookURL string
+	// GoogleChatURL is a Google Chat incoming-webhook URL; it carries its key
+	// and token in the query string, so it is a secret like the Slack URL.
+	GoogleChatURL string
 }
 
 type UIConfig struct {
@@ -99,6 +102,14 @@ func LoadAlertConfig(getenv func(string) string, readFile func(string) ([]byte, 
 			return AlertConfig{}, fmt.Errorf("read Slack webhook file: %w", err)
 		}
 		c.SlackURL = strings.TrimSpace(string(b))
+	}
+	c.GoogleChatURL = strings.TrimSpace(getenv("PGLENS_GOOGLE_CHAT_WEBHOOK_URL"))
+	if p := strings.TrimSpace(getenv("PGLENS_GOOGLE_CHAT_WEBHOOK_URL_FILE")); p != "" {
+		b, err := readFile(p)
+		if err != nil {
+			return AlertConfig{}, fmt.Errorf("read Google Chat webhook file: %w", err)
+		}
+		c.GoogleChatURL = strings.TrimSpace(string(b))
 	}
 	return c, nil
 }

@@ -88,14 +88,14 @@ checkpoint. Capture/open and restore/close are each one STATE.md update.
 - Active scope: plan (whole `005_plan-ConsoleInsights`, no selector)
 - Scope result: RUNNING
 - Type: sub-phase
-- ID / attempt: 0.3 / 1
-- Status: OPEN (owned paths: phase_01.md 0.3 Files)
+- ID / attempt: 0.4 / 1
+- Status: OPEN (owned paths: phase_01.md 0.4 Files: `web/playwright.config.ts`, `web/e2e/visual_helpers.ts`, NEW `web/e2e/qa/*`)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-opus-5-5; supervisor: Opus review agent (agent-1); exploration/mechanical: agent-3:claude-haiku-5-5
-- File / unit heading: phase_01.md → `### 0.3 Google Chat notification channel`
+- File / unit heading: phase_01.md → `### 0.4 Playwright live-test harness (strategy D29)`
 - Current step: S0
-- Next action: 0.3 S1 (`googlechat.go` + tests, red first).
-- Next eligible plan unit: 0.3 (phase_01.md)
+- Next action: 0.4 S1 (`runid.ts`, `budget.ts`, `guard.ts` + tests).
+- Next eligible plan unit: 0.4 (phase_01.md)
 - Unit base: `5929be2` (no unit open); branch: `feat/index-analysis` (never switch or create branches)
 - Repo state: dirty with pre-existing changes (§5) + untracked plan folder; nothing of the plan implemented yet.
 
@@ -105,8 +105,8 @@ Readiness: READY — finalised on the user's instruction ("applica i fix e non f
 Goal, reference scenario items 1–17, exclusions, requirement register REQ-01…REQ-44, decisions D1–D33, assumptions A1–A3, open question Q2, invariants I-1…I-17, interfaces, reuse map and risks: [overview.md](overview.md). Test strategy: [test-strategy.md](test-strategy.md).
 Current decisions needed by remaining work: all rows of overview "Decisions" (D9 revised: HA lab with local images and the `hactl` controller; D11 commits local with trailers; D32 baseline commit).
 Unresolved design/acceptance questions: none blocking. Q2 (store webhook URLs in the database, write-only?) blocks **only 11.5b**; 11.5a (status + test send) proceeds. A1, A2, A3 are non-blocking assumptions to confirm in the final report. Q1 resolved (local images only).
-Research evidence: overview R1, R2 CONFIRMED; R4 UNVERIFIED until the live post in 0.3 S6 (blocks only the live-delivery claim of 0.3/11.5a); R3 UNVERIFIED until 7.0 S1 (blocks 7.1+ only).
-Required unverified external claims: R4 (0.3 live post), R3 (7.1+). No other phase depends on one.
+Research evidence: overview R1, R2 CONFIRMED; R4 CONFIRMED at 0.3 S6 (both posts delivered, §7); R3 UNVERIFIED until 7.0 S1 (blocks 7.1+ only).
+Required unverified external claims: R3 (7.1+). No other phase depends on one.
 Required supervisor reviews cannot be silently replaced by weaker self-review.
 
 ### Authorization scope (standing user instructions, `/home/agent/.claude/CLAUDE.md` and the user's messages)
@@ -159,6 +159,7 @@ Required supervisor reviews cannot be silently replaced by weaker self-review.
 |------|--------------|---------------|-------|---------|-----------------|--------|
 | plan | authoring | 1 | agent-2:claude-sonnet-5-5 | `docs/plans/005_plan-ConsoleInsights/*` | R-PLAN-1..11 | uncommitted (committed at 0.2 S1b) |
 | plan + baseline | d7647d0, ce13a72 | 1 | agent-2:claude-opus-5-5 | plan folder; pre-existing §5 paths (without `dist/index.html`, `.claude/`) | G-SECRETS pass before each | `d7647d0` (`PEV-Unit: plan`), `ce13a72` (`PEV-Unit: baseline`) |
+| sub-phase | 0.3 / 1 | 1 | agent-2:claude-opus-5-5 | `internal/alert/notify/{googlechat.go,googlechat_test.go,http.go}`, `internal/server/{config.go,config_test.go}`, `cmd/pglens-server/{main.go,channels.go,channels_test.go}`, `internal/alert/engine_integration_test.go`, `deploy/docker-compose.yml`, `README.md`, `QUICK_START.md`, `web/src/features/alerts/{DeliverySection.tsx,DeliverySection.test.tsx,AlertsPage.test.tsx}` | §7 0.3 rows; review at P0 | unit:0.3:1 |
 | sub-phase | 0.2 / 1 | 1 | agent-2:claude-opus-5-5 | `web/playwright.config.ts` (project `desktop-fullhd`), NEW `web/e2e/visual_helpers.ts`, `web/e2e/console_visual.spec.ts`; stack T1 grants | G-BASE, VIS-000, G-WEB-STATIC pass | unit:0.2:1 |
 | sub-phase | 0.1 / 1 | 1 | agent-2:claude-opus-5-5 | stack dir only: `backup.sh` (MANIFEST `created_at`, `db_container`, before/after counts; original kept as `backup.sh.orig-0.1`), NEW `verify_backup.sh`, `deploy.sh`, `README.md`, `seed/api.py`, `seed/seed.log`, `load/rpc_load.py`; backup `02-loaded-20261029-165510` | ENV-001/002/003/004/006 pass (§7); review at P0 | no repository file (nothing to commit) |
 
@@ -187,11 +188,11 @@ Unit-owned paths are listed in each phase file's sub-phase `Files` field and rec
 
 ## 6. In-flight checkpoint
 
-Unit 0.3 / 1 OPEN.
-Last durable step: 0.2 closed (unit:0.2:1); `deploy.sh` running in the background (log `deploy1.log` in the scratchpad).
-Actual files/diff: none yet for 0.3.
+Unit 0.4 / 1 OPEN.
+Last durable step: 0.3 closed (unit:0.3:1); stack runs the 0.3 build with the Google Chat channel.
+Actual files/diff: none yet for 0.4.
 Pending edits: P0 must verify the `table_columns` fact (`select count(*) from object_facts where kind='table_columns'` in the pglens store, `n_distinct` label present).
-Next step: 0.3 S1.
+Next step: 0.4 S1.
 Last check: n/a.
 Running resources: stack `pglens-odoo` up (deployed pglens images are the phase-1 build); no background processes of this plan.
 Stop reason / supervisor request: supervisor coherence review requested by the user ("fai sempre una review con advisor opus dopo le modifiche del piano; non iniziare lo sviluppo se non è tutto perfettamente coerente").
@@ -211,6 +212,13 @@ Research checkpoint: R3 pending (7.0), R4 pending (0.3 S6).
 | T1 grant (0.2 S2) | `monitoring_user.sql -v role=pglens_monitor -v tier1=1` on `postgres`, `odoo`, `template1` + agent restart | pass | role member of `pg_monitor`, `pg_read_all_stats`, `pg_read_all_data`; `/api/v1/instances` `perm_tier` = `T1` | stack | 2026-10-29 15:58 UTC |
 | VIS-000 (0.2) | `playwright test --project=desktop-fullhd e2e/console_visual.spec.ts -g VIS-000` | pass | `--list` = 1; `1 passed`; VISTMO-001 and `completenessOf` self-checks inside; screenshots `test/e2e/_artifacts/ui/visual/vis-000-instance-{1440,1024,390}.png` | 0.2 diff | 2026-10-29 |
 | G-WEB-STATIC (0.2) | `make web-typecheck web-lint` | pass | exit 0 (after `noUncheckedIndexedAccess` fixes and prettier) | 0.2 diff | 2026-10-29 |
+| 0.3 focused Go | `go test -race -shuffle=on -count=1 ./internal/alert/... ./internal/server ./cmd/pglens-server -run 'NOTIF|CONFIG|Alert|Config'` | pass | `-list 'NOTIFGC|GoogleChat'` = 5 (NOTIF-GC-001..005); CONFIG-GC-001 (`TestCONFIGGC001_GoogleChatWebhook`), CONFIG-GC-002 (`TestCONFIGGC002_…`) ran | 0.3 diff | 2026-10-29 |
+| INT-NOTIF-GC-001 | `go test -tags=integration -race -count=1 ./internal/alert -run INTNOTIFGC -v` | pass | pg15 and pg18 subtests PASS (one post per phase, 2 `google_chat` rows ok) | 0.3 diff | 2026-10-29 |
+| DELIVERY-UI-001 + alerts | `TZ=UTC pnpm exec vitest run src/features/alerts` | pass | 7 files / 51 tests | 0.3 diff | 2026-10-29 |
+| G-WEB-STATIC (0.3) | `make web-typecheck web-lint` | pass | exit 0 | 0.3 diff | 2026-10-29 |
+| Go static (0.3) | `go vet` touched packages; `make vet-tags` | pass | exit 0; `golangci-lint` NOT available (§9) | 0.3 diff | 2026-10-29 |
+| G-DEPLOY (0.3) | `deploy.sh` | pass | 38 s (first run at 0.2 end: 43 s); server image `3e696c48b356`, agent `86c6409335df`; no "no alert notification channel" log | 0.3 tree | 2026-10-29 |
+| R4 live (0.3 S6) | `docker stop pglens-odoo-pglens-agent-1` → firing → `docker start` | pass | `instance_unreachable` firing after 110 s; `notifications`: `google_chat|fire|ok|1 attempt`, `google_chat|resolve|ok|1 attempt` (HTTP 2xx, no proxy block); 2 live posts; server log has 0 lines with `spaces/`, `key=`, `token=`; user confirmation of the two Chat messages requested in the report | 0.3 tree | 2026-10-29 16:09–16:16 UTC |
 | ENV-004 | `seed/api.py /api/v1/instances`; Odoo `/web/login` | pass | instance `fcc281dc…` up, `last_seen` 1 s old, `perm_tier` T0; Odoo 200 | deployed phase-1 images | 2026-10-29 15:57 UTC |
 
 Results: pass, fail, blocked, not-run, not-applicable-yet. Only pass satisfies a required active gate. Keep relevant failing output/evidence references.
@@ -242,6 +250,10 @@ Rule (user): after **every** modification of the plan the `advisor` reviews it a
 | 1 | supervisor = `advisor` tool | user disabled the `advisor` tool at execution start (2026-10-29, `/advisor` → disabled; model Opus 5.5, effort medium); supervisor reviews are made by fresh read-only Opus 5.5 review agents (`model: opus`) with self-contained prompts | user | every review point in the phase files; §3 Supervisor access |
 | 1 | 0.2 Done: `table_columns` statistics check | the `table_columns` fact can only appear once the current tree is deployed (the running images were the phase-1 build) and its check interval is 1 h (first run = jitter + interval until 13.1) | verified at P0 instead (deploy started at 0.2 end); `perm_tier` = T1 already verified | executor (no contract change) | P0 |
 | 1 | stack `.env` quoting | `PGLENS_GOOGLE_CHAT_WEBHOOK_URL` was unquoted and contains `&`, so `set -a; . .env` (G-SECRETS, every live gate) silently left it empty | value wrapped in single quotes (backup `.env.bak-0.2`, chmod 600; compose accepts quoted values) | executor | G-SECRETS, 0.3 |
+| 1 | 0.3 sendJSON 4xx error (NOTIF-GC-004 oracle) | a 4xx error was `notification returned HTTP %d` without redaction, so it could never contain `[redacted webhook]` | message is now `notification to [redacted webhook] returned HTTP %d: <body>` and 4xx errors pass through `redactError`; `redactError` masks every `hooks.slack.com/` and `chat.googleapis.com/` path (multi-occurrence, also `'`); Slack/webhook behaviour otherwise unchanged | executor (tightens the contract) | 0.3 |
+| 1 | existing test UI-ALERT-040 (0.3) | asserted exactly 2 delivery channels (`Slack`, `Generic webhook`) | now asserts the 3 channels incl. `Google Chat` (title updated); intent (only the supported channels are named) kept; required by D19 | executor | 0.3 |
+| 1 | Go module download (0.3) | — | `make vet-tags` downloaded `github.com/Shopify/toxiproxy/v2 v2.13.0` (e2e tag dependency missing from the module cache) through the proxy; disclosed in the final report | — | — |
+| 1 | stack compose (0.3 S6) | — | `pglens-server` gains `PGLENS_GOOGLE_CHAT_WEBHOOK_URL: ${PGLENS_GOOGLE_CHAT_WEBHOOK_URL:-}` (backup `compose.yml.bak-0.3`) | executor | — |
 | 1 | D11 (no commits) | commits local with trailers (user set full-autonomous + WIP on) | user | all closure lines say "Commit per STATE §3" |
 | 1 | 9.3 Slowest queries (R-PLAN-5) | the plan treated `QueryListPage` as the Slowest queries page | `SlowQueriesPage` (`/queries`, ranked card list, `SLOWEST_LIMIT = 20`) becomes a `DataTable` in 9.3 (`STATEMENT_FETCH_LIMIT = 200`, 20 rows per page, I-13 fit) and gets server `q` in 12.2; the Query inspector keeps its own route. Existing `SlowQueriesPage.test.tsx` expectations change in 9.3 (recorded here when done): `list` role → `table` role (3 places), `limit` expectation, heading `Top 20 by total time` → `Ranked by total time`, one test title | supervisor (review R-PLAN-5) | 9.3, 12.2, 12.3, 15.x FHD measure |
 | 1 | 16.3 UI tests (R-PLAN-5/6) | review R-PLAN-5 asked for more existing UI tests to be listed | only `UI-LOCK-021` changes (D28 callout, recorded here when done); the tests that select the old `Active sessions` list and its buttons (metadata test, `UI-LOCK-052/053/055/072/073`) use fixtures without `origin`, which trigger the unchanged fallback markup, so they pass untouched; SYS-UI-008/009 (live specs) are adapted | supervisor (reviews R-PLAN-5, R-PLAN-6) | 16.3 |
@@ -255,6 +267,7 @@ Rule (user): after **every** modification of the plan the `advisor` reviews it a
 ## 9. Blockers
 
 - Q2 (→ 11.5b only): may pglens store notification webhook URLs in its database, write-only, without encryption at rest in v1? Resolution owner: user. Next action: ask at the 11.5 closure; 11.5a proceeds without it.
+- `golangci-lint` is not installed and installing it needs a download outside the authorised hosts: the `make lint` part of G-GO-FULL cannot run. Substitute evidence: `gofmt -l`, `go vet`, `make vet-tags`. Resolution owner: user (install it or authorise the download). G-GO-FULL is reported as partially UNVERIFIED until then.
 - No other blocker.
 
 ## 10. Do-not-repeat
@@ -282,8 +295,8 @@ Rule (user): after **every** modification of the plan the `advisor` reviews it a
 |----|------------|------------|--------|---------|-------------------|
 | 0.1 | phase_01.md | none | DONE | 1 | ENV-001..004, 006 pass (§7) |
 | 0.2 | phase_01.md | 0.1 | DONE | 1 | G-BASE, VIS-000, T1 (§7); `table_columns` check at P0 (§8) |
-| 0.3 | phase_01.md | 0.2 | IN_PROGRESS | 1 | — |
-| 0.4 | phase_01.md | 0.2 | TODO | 1 | — |
+| 0.3 | phase_01.md | 0.2 | DONE | 1 | NOTIF-GC, CONFIG-GC, INT-NOTIF-GC, DELIVERY-UI, live R4 (§7) |
+| 0.4 | phase_01.md | 0.2 | IN_PROGRESS | 1 | — |
 | 13.1 | phase_14.md | 0 | TODO | 1 | — |
 | 1.1 | phase_02.md | 0 | TODO | 1 | — |
 | 1.2 | phase_02.md | 1.1 | TODO | 1 | — |

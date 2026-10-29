@@ -17,7 +17,6 @@ import (
 
 	"github.com/manprint/pglens/internal/advisor"
 	"github.com/manprint/pglens/internal/alert"
-	"github.com/manprint/pglens/internal/alert/notify"
 	"github.com/manprint/pglens/internal/server"
 	"github.com/manprint/pglens/internal/store"
 	"github.com/manprint/pglens/internal/webui"
@@ -124,13 +123,7 @@ func run() int {
 	if pool != nil {
 		alertStore = alert.NewPgStore(pool)
 		alertSources = []alert.Source{alert.NewMetricSource(pool, alertCfg.Interval), alert.NewEventSource(pool, alertCfg.Interval)}
-		channels := []notify.Channel{}
-		if alertCfg.SlackURL != "" {
-			channels = append(channels, notify.NewSlack(alertCfg.SlackURL, nil))
-		}
-		if alertCfg.WebhookURL != "" {
-			channels = append(channels, notify.NewWebhook(alertCfg.WebhookURL, nil))
-		}
+		channels := buildChannels(alertCfg)
 		if len(channels) == 0 {
 			log.Println("no alert notification channel configured; alerts will be persisted but not delivered")
 		} else {

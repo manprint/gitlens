@@ -336,3 +336,50 @@ func TestINTALERT021_LeaderWithADeadSessionGivesUpTheLock(t *testing.T) {
 		require.False(t, led, "a leader whose session is gone does not lead while another session holds the lock")
 	})
 }
+
+func TestINTNOTIFGC001_GoogleChatReceivesFiringAndResolved(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		ctx, pool, src, clk, _, _, _ := setupEngineIntegration(t, pg)
+		bodies := make(chan map[string]any, 10)
+		chat := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			bodies <- body
+			w.WriteHeader(http.StatusOK)
+		}))
+		t.Cleanup(chat.Close)
+		st := NewPgStore(pool)
+		e := NewEngineWithInterval(pool, clk, 30*time.Second, st, NewChannelNotifier(st, notify.NewGoogleChat(chat.URL, nil)), []Source{src})
+		t.Cleanup(e.Stop)
+
+		next := func(phase string) string {
+			select {
+			case body := <-bodies:
+				require.Len(t, body, 1, phase)
+				text, ok := body["text"].(string)
+				require.True(t, ok, phase)
+				return text
+			case <-time.After(10 * time.Second):
+				t.Fatalf("no Google Chat post for the %s phase", phase)
+				return ""
+			}
+		}
+
+		require.NoError(t, e.Tick(ctx))
+		src.set(20, clk.Now())
+		require.NoError(t, e.Tick(ctx))
+		clk.Advance(31 * time.Second)
+		require.NoError(t, e.Tick(ctx))
+		require.Contains(t, next("firing"), "WARNING integration alert")
+		require.Len(t, bodies, 0, "exactly one post per phase")
+
+		src.set(5, clk.Now())
+		require.NoError(t, e.Tick(ctx))
+		require.Contains(t, next("resolved"), "integration alert")
+		require.Len(t, bodies, 0, "exactly one post per phase")
+
+		var n int
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM notifications WHERE channel='google_chat' AND ok`).Scan(&n))
+		require.Equal(t, 2, n)
+	})
+}

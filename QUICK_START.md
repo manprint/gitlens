@@ -357,6 +357,7 @@ Le variabili principali:
 | `PGLENS_COMMAND_TTL` | `5m` | durata di un comando su richiesta prima della scadenza |
 | `PGLENS_ALERT_SLACK_WEBHOOK_URL` / `_FILE` | — | notifiche Slack |
 | `PGLENS_WEBHOOK_URL` | — | notifiche su webhook generico |
+| `PGLENS_GOOGLE_CHAT_WEBHOOK_URL` / `_FILE` | — | notifiche Google Chat (webhook in ingresso di uno spazio; l'URL contiene chiave e token, va tenuto segreto) |
 
 La retention è una costante delle migrazioni, non una variabile: 30 giorni di
 metriche grezze, con compressione TimescaleDB oltre le 48 h.

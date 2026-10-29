@@ -39,9 +39,9 @@ func sendJSON(ctx context.Context, client *http.Client, url string, body []byte)
 			} else if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 				return nil
 			} else {
-				err = fmt.Errorf("notification returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+				err = fmt.Errorf("notification to [redacted webhook] returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
 				if resp.StatusCode < 500 {
-					return err
+					return redactError(err, url)
 				}
 			}
 		} else {
@@ -61,15 +61,34 @@ func redactError(err error, url string) error {
 	if err == nil {
 		return nil
 	}
-	msg := strings.ReplaceAll(err.Error(), url, "[redacted webhook]")
-	if i := strings.Index(msg, "hooks.slack.com/"); i >= 0 {
-		end := strings.IndexAny(msg[i:], " \t\r\n\")")
-		if end < 0 {
-			end = len(msg) - i
-		}
-		msg = msg[:i] + "hooks.slack.com/[redacted]" + msg[i+end:]
+	msg := err.Error()
+	if url != "" {
+		msg = strings.ReplaceAll(msg, url, "[redacted webhook]")
+	}
+	for _, host := range []string{"hooks.slack.com/", "chat.googleapis.com/"} {
+		msg = redactHost(msg, host)
 	}
 	return fmt.Errorf("%s", msg)
+}
+
+// redactHost replaces every path following host, up to whitespace, a quote or a
+// closing parenthesis, so webhook paths and their key/token query never leak.
+func redactHost(msg, host string) string {
+	var b strings.Builder
+	for {
+		i := strings.Index(msg, host)
+		if i < 0 {
+			b.WriteString(msg)
+			return b.String()
+		}
+		rest := msg[i+len(host):]
+		end := strings.IndexAny(rest, " \t\r\n\"')")
+		if end < 0 {
+			end = len(rest)
+		}
+		b.WriteString(msg[:i] + host + "[redacted]")
+		msg = rest[end:]
+	}
 }
 
 func sleepBackoff(ctx context.Context, attempt int) error {

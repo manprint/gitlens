@@ -70,6 +70,10 @@ services:
       PGLENS_SLACK_WEBHOOK_URL_FILE: ${PGLENS_SLACK_WEBHOOK_URL_FILE:-}
       # Optional generic webhook notifier.
       PGLENS_WEBHOOK_URL: ${PGLENS_WEBHOOK_URL:-}
+      # Optional Google Chat incoming webhook (the URL holds its key and token: keep it secret).
+      PGLENS_GOOGLE_CHAT_WEBHOOK_URL: ${PGLENS_GOOGLE_CHAT_WEBHOOK_URL:-}
+      # Optional file-secret alias for the Google Chat webhook; takes precedence.
+      PGLENS_GOOGLE_CHAT_WEBHOOK_URL_FILE: ${PGLENS_GOOGLE_CHAT_WEBHOOK_URL_FILE:-}
       # Advisor cadence; accepts a Go duration or positive seconds.
       PGLENS_ADVISOR_INTERVAL: ${PGLENS_ADVISOR_INTERVAL:-15m}
       # Time before a queued command expires (default 5m).

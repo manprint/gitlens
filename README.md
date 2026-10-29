@@ -377,6 +377,8 @@ probes and monitoring.
 | `PGLENS_ALERT_SLACK_WEBHOOK_URL_FILE` | path | unset | reads the Slack URL; takes precedence over the inline URL |
 | `PGLENS_SLACK_WEBHOOK_URL[_FILE]` | URL/path | unset | legacy Slack aliases, still accepted |
 | `PGLENS_WEBHOOK_URL` | URL | unset | enables generic webhook notifications |
+| `PGLENS_GOOGLE_CHAT_WEBHOOK_URL` | URL | unset | enables Google Chat notifications (incoming webhook of a space; the URL carries its key and token, keep it secret) |
+| `PGLENS_GOOGLE_CHAT_WEBHOOK_URL_FILE` | path | unset | reads the Google Chat URL; takes precedence over the inline URL |
 
 The bootstrap token is a shared secret; this release has no token rotation, no mTLS, and no approval queue. Revocation is supported: `UPDATE agents SET revoked_at = now()` makes the next push return 401.
 
@@ -616,13 +618,15 @@ name, so one lagging standby cannot hide behind a healthy one. `agent_down`
 skips instances whose agent was revoked: a revoked agent stops pushing by
 design.
 
-Configure Slack or a generic webhook with the variables above. A silence suppresses notification while the alert remains visible and continues to be evaluated.
+Configure Slack, Google Chat or a generic webhook with the variables above. A silence suppresses notification while the alert remains visible and continues to be evaluated.
 
 Alerts are persisted and evaluated even when no delivery channel is configured.
 Delivery remains limited to Slack via `PGLENS_ALERT_SLACK_WEBHOOK_URL` or
 `PGLENS_ALERT_SLACK_WEBHOOK_URL_FILE` (with the accepted legacy
-`PGLENS_SLACK_WEBHOOK_URL` aliases) and generic webhooks via
-`PGLENS_WEBHOOK_URL`.
+`PGLENS_SLACK_WEBHOOK_URL` aliases), Google Chat via
+`PGLENS_GOOGLE_CHAT_WEBHOOK_URL` or `PGLENS_GOOGLE_CHAT_WEBHOOK_URL_FILE` (a
+text message per firing and resolved alert; webhook paths are redacted from
+errors and logs), and generic webhooks via `PGLENS_WEBHOOK_URL`.
 
 Run the HTTP API sign-in block once before these examples; reuse its
 `cookies.txt` for every protected request.

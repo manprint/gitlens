@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -205,3 +206,28 @@ var errTestPasswordFile = &testPasswordFileError{}
 type testPasswordFileError struct{}
 
 func (*testPasswordFileError) Error() string { return "permission denied" }
+
+func TestCONFIGGC001_GoogleChatWebhook(t *testing.T) {
+	env := func(vals map[string]string) func(string) string { return func(k string) string { return vals[k] } }
+
+	c, err := LoadAlertConfig(env(nil), nil)
+	require.NoError(t, err)
+	require.Empty(t, c.GoogleChatURL)
+
+	c, err = LoadAlertConfig(env(map[string]string{"PGLENS_GOOGLE_CHAT_WEBHOOK_URL": " https://chat.example/inline "}), nil)
+	require.NoError(t, err)
+	require.Equal(t, "https://chat.example/inline", c.GoogleChatURL)
+
+	var read string
+	c, err = LoadAlertConfig(env(map[string]string{
+		"PGLENS_GOOGLE_CHAT_WEBHOOK_URL":      "https://chat.example/inline",
+		"PGLENS_GOOGLE_CHAT_WEBHOOK_URL_FILE": "/run/secrets/gchat",
+	}), func(p string) ([]byte, error) { read = p; return []byte("  https://chat.example/file\n"), nil })
+	require.NoError(t, err)
+	require.Equal(t, "/run/secrets/gchat", read)
+	require.Equal(t, "https://chat.example/file", c.GoogleChatURL)
+
+	_, err = LoadAlertConfig(env(map[string]string{"PGLENS_GOOGLE_CHAT_WEBHOOK_URL_FILE": "/missing"}),
+		func(string) ([]byte, error) { return nil, os.ErrNotExist })
+	require.ErrorContains(t, err, "read Google Chat webhook file: ")
+}
