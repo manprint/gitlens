@@ -88,14 +88,14 @@ checkpoint. Capture/open and restore/close are each one STATE.md update.
 - Active scope: plan (whole `005_plan-ConsoleInsights`, no selector)
 - Scope result: RUNNING
 - Type: sub-phase
-- ID / attempt: P2 / 1
-- Status: OPEN (2.3 closed: unit:2.3:1)
+- ID / attempt: 3.1 / 1
+- Status: OPEN (P2 closed: unit:P2:1)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-opus-5-5; supervisor: Opus review agent (agent-1); exploration/mechanical: agent-3:claude-haiku-5-5
-- File / unit heading: phase_03.md → Phase gates and closure
-- Current step: gates
-- Next action: P2 gates.
-- Next eligible plan unit: P2 (phase_03.md), then 3.1
+- File / unit heading: phase_04.md → 3.1
+- Current step: S1
+- Next action: 3.1 S1.
+- Next eligible plan unit: 3.1 (phase_04.md), then 3.2
 - Unit base: `5929be2` (no unit open); branch: `feat/index-analysis` (never switch or create branches)
 - Repo state: dirty with pre-existing changes (§5) + untracked plan folder; nothing of the plan implemented yet.
 
@@ -161,6 +161,7 @@ Required supervisor reviews cannot be silently replaced by weaker self-review.
 | plan + baseline | d7647d0, ce13a72 | 1 | agent-2:claude-opus-5-5 | plan folder; pre-existing §5 paths (without `dist/index.html`, `.claude/`) | G-SECRETS pass before each | `d7647d0` (`PEV-Unit: plan`), `ce13a72` (`PEV-Unit: baseline`) |
 | sub-phase | 2.2 / 1 | 1 | agent-2:claude-opus-5-5 | stack (outside the repo): `/home/agent/pglens-odoo-stack/compose.yml` (`odoo-db-data:/var/lib/postgresql:ro` on `pglens-agent`), `README.md` (one paragraph); backups `*.bak-2.2`; deploy9.log | §7 2.2 rows | unit:2.2:1 (STATE only) |
 | sub-phase | 2.3 / 1 | 1 | agent-2:claude-opus-5-5 | NEW `web/src/lib/hostSeries.ts` (+test), `web/src/features/instance/HostCharts.tsx` (+test); `HostSection.tsx` (+test: charts below the tiles, disk tiles "Not visible to the agent"); `stepParam` moved to `web/src/lib/chartStep.ts` (+test) from `OverviewSection.tsx`; `metric.options.ts` exports `tooltipTime`/`tooltipValue`/`AxisTooltipParam`; `e2e/console_visual.spec.ts` VIS-020 | §7 2.3 rows, R-2.3-C2 | unit:2.3:1 |
+| phase closure | P2 / 1 | 1 | agent-2:claude-opus-5-5 | R-P2 fixes: `internal/host/collector.go` (`WithDisk`/`diskUsage`: disk measured on a copy of one tick's sample), `cmd/pglens-agent/host_loop.go` (one `Collect` per tick, `DataDirectory` in parallel, warning re-armed after a measured disk), tests HOSTDD009..011; `README.md` (the data-directory path must be the mount); STATE (REQ-14/15/16 DONE) | §7 P2 rows, R-P2 | unit:P2:1 |
 | sub-phase | 2.1 / 1 | 1 | agent-2:claude-opus-5-5 | NEW `internal/agent/{datadir.go,datadir_test.go,datadir_integration_test.go}`, `internal/agent/conn.go` (cache fields), `internal/host/{collector.go,collector_test.go}` (`DiskUnavailable`), NEW `cmd/pglens-agent/{host_loop.go,host_loop_test.go}` (`groupTargetsByDataDir`, `diskWarner`, `collectHostByDataDir`), `cmd/pglens-agent/run.go` (host loop, `hostWireResult`), `README.md`, `deploy/agent.example.yaml`, `deploy/docker-compose.yml`, `QUICK_START.md` | §7 2.1 rows | unit:2.1:1 |
 | phase closure | P1 / 1 | 1 | agent-2:claude-opus-5-5 | `web/src/components/charts/{ash.options.ts,ash.options.test.ts}` (ASH axis pinned to the selected window, ASHOPT-013), `web/src/features/ash/{AshChart,AshBreakdown,AshChartGrid}.tsx`; STATE (REQ-10/32, VIS-* DONE, G-API note, README check); deploy8.log | §7 P1 rows; R-P1 | unit:P1:1 |
 | sub-phase | 1.5 / 1 | 1 | agent-2:claude-opus-5-5 | NEW `web/src/lib/{ashGroups.ts,ashGroups.test.ts}`, `web/src/features/ash/{AshChartGrid,AshLegend}.tsx` + tests, `ash.options.ts` (`buildAshGroupOption`, isolated-sample dots, helpers; ASHOPT-010..012 + snapshot `__snapshots__/ash.options.test.ts.snap`), `TimeSeriesChart.tsx` (`group` → `echarts.connect`), `AshBreakdown.tsx`, `AshPage.tsx` (`view` param, Chart layout radiogroup, queryid note) + `AshPage.test.tsx` (renderAsh pins view=stacked, 2 expectations, ASHPAGE-010..012); backend `internal/server/api_ash.go` (wait_event rows carry `wait_event_type` via MIN), `api_ash_test.go` (TestAPI_Ash_WaitEventSeriesCarryType), `api_ash_integration_test.go` (INT-ASH-015 unfiltered events), `api/openapi.yaml`, `docs/api.md`, `web/src/api/generated.ts`; `web/e2e/console_visual.spec.ts` (VIS-016; VIS-015 on view=stacked); deploy7.log | §7 1.5 rows; R-1.5-C1c | unit:1.5:1 |
@@ -200,11 +201,11 @@ Unit-owned paths are listed in each phase file's sub-phase `Files` field and rec
 
 ## 6. In-flight checkpoint
 
-P2 / 1 OPEN.
-Last durable step: 2.3 closed (unit:2.3:1); live Memory used needed nearest-bucket pairing (§8). Earlier: 2.2 closed (unit:2.2:1); stack compose/README backups `compose.yml.bak-2.2`, `README.md.bak-2.2`. Earlier: 2.1 closed (unit:2.1:1). 2.1: `DataDirectory` errors other than 42501 are retried silently (target still starting); only ErrDataDirNotReadable and collector DiskUnavailable reasons are warned. Earlier: P1 closed (unit:P1:1). Earlier: 1.5 closed (unit:1.5:1). 1.5 shared zoom/pointer: `echarts.connect` (TimeSeriesChart `group` prop); the slider zooms in place (its event carries percentages, so the URL range is unchanged), inside-zoom/brush still sets the URL range; S6 backend type field was needed (handler carried no type without the filter).
+3.1 / 1 OPEN.
+Last durable step: P2 closed (unit:P2:1); agent collects CPU once per tick and measures each data directory on a copy (R-P2 major). Earlier: 2.3 closed (unit:2.3:1); live Memory used needed nearest-bucket pairing (§8). Earlier: 2.2 closed (unit:2.2:1); stack compose/README backups `compose.yml.bak-2.2`, `README.md.bak-2.2`. Earlier: 2.1 closed (unit:2.1:1). 2.1: `DataDirectory` errors other than 42501 are retried silently (target still starting); only ErrDataDirNotReadable and collector DiskUnavailable reasons are warned. Earlier: P1 closed (unit:P1:1). Earlier: 1.5 closed (unit:1.5:1). 1.5 shared zoom/pointer: `echarts.connect` (TimeSeriesChart `group` prop); the slider zooms in place (its event carries percentages, so the URL range is unchanged), inside-zoom/brush still sets the URL range; S6 backend type field was needed (handler carried no type without the filter).
 Actual files/diff: none.
 Pending edits: none.
-Next step: P2 gates.
+Next step: 3.1 S1.
 Last check: n/a.
 Running resources: stack `pglens-odoo` up (deployed pglens images are the phase-1 build); no background processes of this plan.
 Stop reason / supervisor request: supervisor coherence review requested by the user ("fai sempre una review con advisor opus dopo le modifiche del piano; non iniziare lo sviluppo se non è tutto perfettamente coerente").
@@ -220,6 +221,9 @@ Research checkpoint: R3 pending (7.0), R4 pending (0.3 S6).
 | G-DEPLOY + LIVE-HOST (2.2) | `deploy.sh`; `docker inspect` mounts; `seed/api.py`-based query of `/api/v1/metrics/query?metric=host_disk_*&step=60s` (last 10 min) and `/api/v1/instances/<id>/host`; `docker logs pglens-odoo-pglens-agent-1` | pass | `/var/lib/postgresql` mounted RW=false; LIVE-HOST-001 total 31 526 391 808 B (4 non-null of 10 buckets after deploy); LIVE-HOST-002 free 5 137 195 008 ≤ total; ratio 0.163 ∈ (0,1); `/host` available true with the 3 disk fields; LIVE-HOST-003 0 warning lines | deployed 2.1 build (deploy9) | 2026-10-29 |
 | G-WEB-UNIT + G-WEB-STATIC (2.3) | `cd web && TZ=UTC pnpm exec vitest run src/lib src/features/instance`; `pnpm exec eslint .`; `prettier --check .`; `pnpm run typecheck` | pass | 49 files / 373 tests before the review fixes; after: unit command of 2.3 + chartStep 40 passed (HOSTCH-001..011 incl. offset buckets, tie-break, CPU-count failure, loading state, section axe) | working tree | 2026-10-29 |
 | G-DEPLOY + VIS-020 (2.3) | `deploy.sh`; `pnpm exec playwright test --project=desktop-fullhd e2e/console_visual.spec.ts -g VIS-020` | pass | Filesystem total/free tiles have values, 5 cards, CPU/Memory completeness ≥ 0.9 at 1 h, Memory Used rows non-empty, canvases not blank, swap explanation (host swap 0), no console errors; screenshots `vis-020-host-grid-{1440,1024,390}.png` | deployed 2.3 build | 2026-10-29 |
+| P2 gates | G-GO-FOCUS `go test -race -shuffle=on -count=1 ./internal/host ./internal/agent ./cmd/pglens-agent`; G-GO-INT/G-RO `go test -tags=integration -race -count=1 ./internal/agent ./internal/host -run 'INTHOST|TestINTRO001'` (discovery 6: INTHOST001/002 agent, INTHOST001/004/005 host, INTRO001); G-WEB-STATIC `make web-typecheck web-lint`; G-WEB-FULL full vitest + `make web-coverage-gate web-budget`; G-STACK compose ps + `/healthz`; golangci-lint on host + agent cmd | pass | vitest 129 files / 1051 tests; coverage lib 97.2 / charts 98.9 / features 90.4 / state 100; budget PASS (entry 152.80 KiB); stack 5 services up/healthy, healthz ok, latest backup `02-loaded-20261029-165510`; after the R-P2 fix: focus + int rerun pass, HOSTDD009/010 fail on the pre-fix loop (sabotage) and pass after, 0 lint issues | P2 tree | 2026-10-29 |
+| P2 live re-check | `deploy.sh`; LIVE-HOST (`livehost.py`, `s0host.py`); agent log; VIS-020 | pass | disk 10/10 buckets, ratio 0.143, cpu_used 116/120 buckets at 30 s, 0 disk warnings in 2 min, VIS-020 passed | deployed P2 build (agent sha256:0354299b1fce) | 2026-10-29 |
+| P2 README obligation | README host section (+ path-must-be-the-mount note), `agent.example.yaml`, QUICK_START, `docker-compose.yml` comment, stack README lines 41–43 | pass | checked by R-P2 | P2 | 2026-10-29 |
 | G-GO-FOCUS 2.1 | `go test -race -shuffle=on -count=1 ./internal/host ./internal/agent ./cmd/pglens-agent` (+ `-run 'HOSTDD\|DataDir'`) | pass | discovery HOSTDD: host 2, agent 3, cmd 4 (HOST-DD-001..008); packages ok | 2.1 diff | 2026-10-29 |
 | G-GO-INT 2.1 | `go test -tags=integration -race -count=1 ./internal/agent -run 'INTHOST\|TestINTRO001'` | pass | INT-HOST-001 pg15/pg18 (T0 role reads data_directory; collector reports unavailable on the test host), INT-RO-001 pg15/pg18 | 2.1 diff | 2026-10-29 |
 | static 2.1 | `gofmt -l`, `go vet` (+ `-tags=integration`), `golangci-lint run` on the three packages | pass | 0 issues | 2.1 diff | 2026-10-29 |
@@ -287,6 +291,7 @@ Results: pass, fail, blocked, not-run, not-applicable-yet. Only pass satisfies a
 | R-P1 | Opus review agent (read-only, fresh) | phase 1 diff 0b6cedb..d0934bb, §7/§8, screenshots vis-010/015/016 | P1 closure: integration, I-1, screenshots, README | APPROVED; README yes; REQ-10/REQ-32 DONE; fixes applied at P1: ASH axis pinned to the selected window (ASHOPT-013), §8 row re-targeted, VIS-* and REQ rows marked DONE, G-API note, timeout row clarified |
 | R-1.5-C1c | Opus review agent (read-only, fresh) | vis-016 card/full-page screenshots + 1.5 diff | checklist C-1c, contract 1.5 | C-1c: own scales PASS, legend colours PASS, descriptions PASS (390 wrap minor), labels at 390 PASS, Lock N/A (load sampled no locks); CHANGES-REQUIRED: swatch letters collided (Lock/LWLock) → unique letters per legend (`swatchLetters`, ASHLEG-004), 390 wrap → flex-wrap, `avg 0.00 · 0%` → `<0.01`/`<1%` (ASHLEG-006); applied and re-run live (6 passed); slider pixel-scan accepted (works live) |
 | R-2.3-C2 | Opus review agent (read-only, fresh) | vis-020 grid screenshots + 2.3 diff | checklist C-2, contract 2.3 | C-2: units, load vs CPU-count line, filesystem populated, swap explanation PASS; CHANGES-REQUIRED: filesystem grid right padding doubled with containLabel (unreadable at 390) → removed; load axis top 9 → `niceCeil` (1/2/2.5/5×10ⁿ); CPU-count line moved to its own empty series outside the legend; cpu_count failure no longer errors the load card; tooltip helpers reused from `metric.options.ts`; section axe in HostSection; stepParam test moved; nearest tie-break explicit. Nit not taken: byte axis ticks in decimal GiB come from shared `buildMetricOption` (follow-up). Fixes verified by unit tests + re-shot 390 | 2026-10-29 |
+| R-P2 | Opus review agent (read-only, fresh) | phase 2 diff baffa78..HEAD, D6, screenshots vis-020 | P2 closure: D6 end to end, read-only audit, README | CHANGES-REQUIRED → fixed: (major) one `Collect` per data-directory bucket measured the later buckets' CPU over milliseconds (ratio lost) → one `Collect` per tick + `WithDisk` per directory (HOSTDD009/011); (minor) serial 3 s `DataDirectory` per target → parallel; (nit) warning never re-armed → cleared on a measured disk (HOSTDD010); (minor) empty same-name directory in the image measures the container fs → README note (no device check). Not taken: byte-axis GiB ticks (shared `buildMetricOption`, follow-up, also R-2.3-C2). Read-only audit PASS (`SHOW data_directory` only new SQL). D6 PASS after the fix | 2026-10-29 |
 | R-1.4-C1b | Opus review agent (read-only, fresh) | vis-015 ASH/lag screenshots + 1.4 diff | checklist C-1b, contract 1.4, D2 | C-1b signed off all; code APPROVED; lows: shared cached axis object mutable (accepted: ECharts clones options, cache bounded 32), `step 0s` when resolution missing (applied: `formatRangeLabel` drops step ≤ 0, CTIME-008), lag interval comment (applied); info: ASH axis spans data not selected range (pre-existing, → 1.5) |
 | R-1.3-C1 | Opus review agent (read-only, fresh) | VIS-010 screenshots (cards 1h/6h, full page 1920/1440/390) + 1.3 diff | checklist C-1, contract 1.3 | C-1 signed off all 5; code APPROVED; minors: legend overlaps y-axis name on narrow cards (→ 3.2 layout), description wording (applied: "data gaps or counter resets"), OV-STEP-001 plan text (§8) |
 | R-1.2-1 | Opus review agent (read-only, fresh) | 1.1 (70ac9b0) + 1.2 diff | contracts D1–D3, test oracles, adapted tests, tooltip injection, NaN, TZ, a11y | CHANGES-REQUIRED: 2 majors (`metricKind` missed `pg_wal_wal_fpi_bytes`/suffix rule and `pg_table_*`/`pg_index_*` counters; NaN tooltip time threw `RangeError`), 3 minors (`stepSeconds` unused, `wide` untested, fixed loading height); all applied in unit:1.2:1 (`stepSeconds` documented as informational) |
@@ -341,6 +346,8 @@ Rule (user): after **every** modification of the plan the `advisor` reviews it a
 | 1 | 1.5 finding (pre-existing) | — | `AshBreakdown` never receives a CPU count, so the CPU-count markLine never renders (stacked or grid); not in any 005 contract — recorded, not fixed | supervisor | — |
 | 1 | 2.3 `subtractSeries` "aligned on ts" (HOSTCH-002) | every metric query resolves its own "now" (`resolveQueryWindow`) and the server buckets from `from`, so total and available differ by milliseconds and exact matching left the live Memory Used line empty; buckets now pair with the nearest bucket within half a step (exact matching stays the default, tie → earlier bucket) | supervisor (R-2.3-C2) | 2.3, 3.x charts deriving one series from two |
 | 1 | 2.3 axis names | CPU `%`, load `load`, filesystem `free %` axis names | dropped: they collided with the legend at 390 px; units are in the tick labels and the card title (`Free (%)` series name) | supervisor (C-2) | 2.3 |
+| 1 | D6 "`Collect(ctx, dir)` once per distinct directory" | `Collect` measures CPU against its previous call, so a second call in one tick lost the ratio | `Collect(ctx, "")` once per tick, then `Collector.WithDisk(ctx, sample, dir)` per distinct directory (statfs only) | supervisor (R-P2) | P2 |
+| 1 | follow-up (not in a 005 contract) | byte axes tick in decimal GiB (4.7/9.3/…) from the shared `buildMetricOption` | recorded, not changed; candidate for a later chart unit | supervisor (R-2.3-C2, R-P2) | — |
 | 1 | D28 | `checks.activity.by_application` default flips to true: the two tests `TestConfig_ByApplicationDefaultsFalse` and `TestActivity_ByApplicationDisabledByDefault` change expectation in 16.1 (recorded here when done) | user REQ-40 | 16.1 |
 
 ## 9. Blockers
@@ -480,9 +487,9 @@ Statuses: TODO, IN_PROGRESS, IN_REVIEW, DONE, SKIPPED, BLOCKED. SKIPPED retains 
 | REQ-11 | Chart section separated from summary cards | 3.2 | TODO | — |
 | REQ-12 | More charts about queries and indexes | 3.1, 3.2 | TODO | — |
 | REQ-13 | Charts in semantic sub-sections | 3.2 | TODO | — |
-| REQ-14 | Host metrics arrive from the agent container | stack fix done; documented 2.2 | TODO | — |
-| REQ-15 | Host metrics charts, done well | 2.3 | TODO | — |
-| REQ-16 | Filesystem total/free populated | 2.1, 2.2 | TODO | — |
+| REQ-14 | Host metrics arrive from the agent container | stack fix done; documented 2.2 | DONE | §7 2.2, P2 live re-check |
+| REQ-15 | Host metrics charts, done well | 2.3 | DONE | HOSTCH, VIS-020, R-2.3-C2 |
+| REQ-16 | Filesystem total/free populated | 2.1, 2.2 | DONE | LIVE-HOST-001..003, P2 live re-check |
 | REQ-17 | Settings/autovacuum data populated (was jitter, not a bug) | 13.1, 6.2 | TODO | — |
 | REQ-18 | Tests on all new developments: unit, integration, visual | every unit; gates G-* | TODO | — |
 | REQ-19 | Role at T1 for dev/testing | 0.2 | TODO | — |
@@ -625,12 +632,12 @@ Statuses: TODO, IN_PROGRESS, IN_REVIEW, DONE, SKIPPED, BLOCKED. SKIPPED retains 
 | CARD-ALL-* | 17.2 | G-WEB-UNIT | TODO | — |
 | CARD-INDEX-* | 17.2 | G-WEB-UNIT | TODO | — |
 | VIS-CAP-* | 17.3 | G-VIS | TODO | — |
-| HOST-DD-* | 2.1 | G-GO-FOCUS | TODO | — |
-| INT-HOST-* | 2.1 | G-GO-INT | TODO | — |
+| HOST-DD-* | 2.1 | G-GO-FOCUS | DONE | HOSTDD001..011 (§7 2.1, P2) |
+| INT-HOST-* | 2.1 | G-GO-INT | DONE | §7 P2 gates |
 | INT-RO-* | 2.1 | G-GO-INT | TODO | — |
-| LIVE-HOST-* | 2.2 | live API checks (2.2 S3/S4, seed/api.py) | TODO | — |
-| HOSTCH-* | 2.3 | G-WEB-UNIT | TODO | — |
-| VIS-* | 2.3 | G-VIS | TODO | — |
+| LIVE-HOST-* | 2.2 | live API checks (2.2 S3/S4, seed/api.py) | DONE | §7 2.2, P2 live re-check |
+| HOSTCH-* | 2.3 | G-WEB-UNIT | DONE | §7 2.3 |
+| VIS-* | 2.3 | G-VIS | DONE | VIS-020 (§7 2.3, P2) |
 | WSER-* | 3.1 | G-GO-FOCUS | TODO | — |
 | WSER-INT-* | 3.1 | G-GO-INT | TODO | — |
 | OVC-* | 3.2 | G-WEB-UNIT | TODO | — |
@@ -683,7 +690,7 @@ Statuses: TODO, IN_PROGRESS, IN_REVIEW, DONE, SKIPPED, BLOCKED. SKIPPED retains 
 |-------------------|-------------|--------|----------|
 | 0.1 (stack README), 0.3 (README/QUICK_START/compose notification tables); other repo READMEs checked unchanged. | P0 (phase_01.md) | DONE | 0.1 stack README, 0.3 commit 643c23f, `web/e2e/qa/README.md` (up/upAll) |
 | no user-facing README section changes (checked: charts are not documented there); `web/README.md` checked for a chart section — update only if it describes the removed markers. | P1 (phase_02.md) | TODO | — |
-| 2.1 (README host section, example yaml, QUICK_START, compose comment), 2.2 (stack README). | P2 (phase_03.md) | TODO | — |
+| 2.1 (README host section, example yaml, QUICK_START, compose comment), 2.2 (stack README). | P2 (phase_03.md) | DONE | §7 P2 README obligation |
 | `README.md` API list (`workload/series`) and any Overview description; `docs/api.md` regenerated. | P3 (phase_04.md) | TODO | — |
 | `README.md` (Index analysis → Suggestions, API entry, estimate caveats), `docs/api.md`. | P4 (phase_05.md) | TODO | — |
 | `README.md` Index analysis section (history, Index tax), `docs/api.md`. | P5 (phase_06.md) | TODO | — |

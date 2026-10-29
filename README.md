@@ -1055,6 +1055,8 @@ data directory: the agent reads `SHOW data_directory` (Tier 0 is enough) and
 measures that path once per distinct directory. The path must be visible in
 the agent's container at the same location, so mount the PostgreSQL data
 volume read-only there (for example `odoo-db-data:/var/lib/postgresql:ro`).
+The path has to be that mount: an empty directory of the same name inside the
+agent image is measured too, and reports the container's own filesystem.
 When the path is not visible, or the role may not read the setting, the disk
 fields are left out, CPU, load and memory are still reported, and the agent
 logs one warning per target and reason:

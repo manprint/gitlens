@@ -40,10 +40,16 @@ func newDiskWarner(out io.Writer) *diskWarner {
 	return &diskWarner{out: out, seen: make(map[string]string)}
 }
 
+// warn logs reason for target unless it is the reason logged last. An empty
+// reason means the disk was measured: the next failure is logged again.
 func (w *diskWarner) warn(target, reason string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if reason == "" || w.seen[target] == reason {
+	if reason == "" {
+		delete(w.seen, target)
+		return
+	}
+	if w.seen[target] == reason {
 		return
 	}
 	w.seen[target] = reason
@@ -53,38 +59,55 @@ func (w *diskWarner) warn(target, reason string) {
 // hostDataDirs asks each local target for its data directory. A role that
 // may not read it is reported once and left without disk metrics; any other
 // failure (a target still starting) is retried on the next tick silently.
+// The targets are asked in parallel, so unreachable ones delay the tick by
+// one timeout, not one each.
 func hostDataDirs(ctx context.Context, managers map[string]*agent.Manager, warner *diskWarner) map[string]string {
+	var (
+		mu sync.Mutex
+		wg sync.WaitGroup
+	)
 	dirs := make(map[string]string, len(managers))
 	for name, mgr := range managers {
-		dir, err := mgr.DataDirectory(ctx)
-		if err != nil {
-			if errors.Is(err, agent.ErrDataDirNotReadable) {
-				warner.warn(name, err.Error())
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			dir, err := mgr.DataDirectory(ctx)
+			if err != nil {
+				if errors.Is(err, agent.ErrDataDirNotReadable) {
+					warner.warn(name, err.Error())
+				}
+				return
 			}
-			continue
-		}
-		dirs[name] = dir
+			mu.Lock()
+			dirs[name] = dir
+			mu.Unlock()
+		}()
 	}
+	wg.Wait()
 	return dirs
 }
 
-// collectHostByDataDir collects one sample per data directory and hands it to
-// every target of that directory. A collection failure of one bucket skips
-// that bucket only.
+// collectHostByDataDir collects one sample per tick (CPU, load, memory) and
+// measures each data directory's filesystem on top of it, handing the result
+// to every target of that directory. A failed collection skips the tick.
 func collectHostByDataDir(ctx context.Context, collector *host.Collector, buckets map[string][]string, warner *diskWarner, errOut io.Writer, emit func(target string, s host.Sample)) {
+	if len(buckets) == 0 {
+		return
+	}
+	base, err := collector.Collect(ctx, "")
+	if err != nil {
+		_, _ = fmt.Fprintf(errOut, "warning: host collection: %v\n", err)
+		return
+	}
 	dirs := make([]string, 0, len(buckets))
 	for dir := range buckets {
 		dirs = append(dirs, dir)
 	}
 	sort.Strings(dirs)
 	for _, dir := range dirs {
-		sample, err := collector.Collect(ctx, dir)
-		if err != nil {
-			_, _ = fmt.Fprintf(errOut, "warning: host collection: %v\n", err)
-			continue
-		}
+		sample := collector.WithDisk(ctx, base, dir)
 		for _, target := range buckets[dir] {
-			if sample.DiskUnavailable != "" {
+			if dir != "" {
 				warner.warn(target, sample.DiskUnavailable)
 			}
 			emit(target, sample)

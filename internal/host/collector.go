@@ -96,16 +96,34 @@ func (c *Collector) Collect(ctx context.Context, dataDir string) (Sample, error)
 		c.mu.Unlock()
 	}
 	if dataDir != "" {
-		du, e := disk.UsageWithContext(ctx, filepath.Clean(dataDir))
-		switch {
-		case e != nil:
-			s.DiskUnavailable = fmt.Sprintf("data directory %s is not readable: %v", filepath.Clean(dataDir), e)
-		case du.Total == 0:
-			s.DiskUnavailable = fmt.Sprintf("data directory %s reports a zero-size filesystem", filepath.Clean(dataDir))
-		default:
-			s.DiskTotalBytes, s.DiskFreeBytes = ptr(du.Total), ptr(du.Free)
-		}
+		s.DiskTotalBytes, s.DiskFreeBytes, s.DiskUnavailable = c.diskUsage(ctx, dataDir)
 	}
 	c.applyCgroup(&s)
 	return s, nil
+}
+
+// WithDisk returns a copy of s measured on dataDir's filesystem. It reads no
+// CPU counters, so one Collect per tick can serve several data directories:
+// every Collect measures CPU against the previous call, and a second call in
+// the same tick measured a few milliseconds and lost the ratio.
+func (c *Collector) WithDisk(ctx context.Context, s Sample, dataDir string) Sample {
+	s.DiskTotalBytes, s.DiskFreeBytes, s.DiskUnavailable = nil, nil, ""
+	if dataDir != "" {
+		s.DiskTotalBytes, s.DiskFreeBytes, s.DiskUnavailable = c.diskUsage(c.context(ctx), dataDir)
+	}
+	return s
+}
+
+// diskUsage measures dataDir's filesystem, or says why it cannot.
+func (c *Collector) diskUsage(ctx context.Context, dataDir string) (total, free *uint64, unavailable string) {
+	dir := filepath.Clean(dataDir)
+	du, err := disk.UsageWithContext(ctx, dir)
+	switch {
+	case err != nil:
+		return nil, nil, fmt.Sprintf("data directory %s is not readable: %v", dir, err)
+	case du.Total == 0:
+		return nil, nil, fmt.Sprintf("data directory %s reports a zero-size filesystem", dir)
+	default:
+		return ptr(du.Total), ptr(du.Free), ""
+	}
 }

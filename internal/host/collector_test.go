@@ -140,3 +140,28 @@ func TestHOSTDD005_CollectToleratesAnUnreadableDataDir(t *testing.T) {
 	require.Nil(t, s.DiskFreeBytes)
 	require.Contains(t, s.DiskUnavailable, "/nonexistent/path")
 }
+
+// TestHOSTDD011_WithDiskReplacesOnlyTheDiskFields: WithDisk measures another
+// directory on a copy of the sample, keeps cpu, load and memory, and drops
+// the disk fields of the directory measured before.
+func TestHOSTDD011_WithDiskReplacesOnlyTheDiskFields(t *testing.T) {
+	c := fixtureCollector()
+	base, err := c.Collect(context.Background(), "/nonexistent/path")
+	require.NoError(t, err)
+
+	measured := c.WithDisk(context.Background(), base, t.TempDir())
+	require.NotNil(t, measured.DiskTotalBytes)
+	require.Empty(t, measured.DiskUnavailable)
+	require.Equal(t, base.MemTotalBytes, measured.MemTotalBytes)
+	require.Equal(t, base.Load1, measured.Load1)
+	require.Contains(t, base.DiskUnavailable, "/nonexistent/path")
+
+	none := c.WithDisk(context.Background(), measured, "")
+	require.Nil(t, none.DiskTotalBytes)
+	require.Nil(t, none.DiskFreeBytes)
+	require.Empty(t, none.DiskUnavailable)
+
+	missing := c.WithDisk(context.Background(), measured, "/nonexistent/other")
+	require.Nil(t, missing.DiskTotalBytes)
+	require.Contains(t, missing.DiskUnavailable, "/nonexistent/other")
+}

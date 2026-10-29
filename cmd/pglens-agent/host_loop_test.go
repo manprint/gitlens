@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -100,3 +103,57 @@ func TestHOSTDD008_CollectByDataDirWarnsAndEmitsPerTarget(t *testing.T) {
 	require.Contains(t, warnings.String(), "target p3: data directory /nonexistent/pgdata is not readable")
 	require.Empty(t, errs.String())
 }
+
+// TestHOSTDD009_OneCPUReadingServesEveryDataDir: two data directories in one
+// tick both carry the CPU ratio measured over the whole tick. Collecting once
+// per directory measured the second over a few milliseconds and lost it.
+func TestHOSTDD009_OneCPUReadingServesEveryDataDir(t *testing.T) {
+	proc := t.TempDir()
+	for _, name := range []string{"loadavg", "meminfo", "vmstat"} {
+		data, err := os.ReadFile(filepath.Join("../../internal/host/testdata/proc", name))
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(proc, name), data, 0o600))
+	}
+	writeStat := func(user, idle int) {
+		line := func(cpu string) string {
+			return cpu + " " + itoa(user) + " 0 0 " + itoa(idle) + " 0 0 0 0 0 0\n"
+		}
+		require.NoError(t, os.WriteFile(filepath.Join(proc, "stat"), []byte(line("cpu ")+line("cpu0")), 0o600))
+	}
+	writeStat(100, 900)
+	collector := host.NewCollector(proc, "../../internal/host/testdata/sys")
+	_, err := collector.Collect(context.Background(), "") // previous tick
+	require.NoError(t, err)
+	writeStat(150, 950) // 50 busy of 100 ticks
+
+	got := map[string]host.Sample{}
+	var warnings, errs bytes.Buffer
+	collectHostByDataDir(context.Background(), collector,
+		map[string][]string{t.TempDir(): {"a"}, t.TempDir(): {"b"}, "": {"c"}},
+		newDiskWarner(&warnings), &errs,
+		func(target string, s host.Sample) { got[target] = s })
+
+	require.Len(t, got, 3)
+	for _, target := range []string{"a", "b", "c"} {
+		require.NotNil(t, got[target].CPUUsedRatio, target)
+		require.InDelta(t, 0.5, *got[target].CPUUsedRatio, 1e-9, target)
+	}
+	require.NotNil(t, got["a"].DiskTotalBytes)
+	require.NotNil(t, got["b"].DiskTotalBytes)
+	require.Nil(t, got["c"].DiskTotalBytes)
+	require.Empty(t, warnings.String())
+	require.Empty(t, errs.String())
+}
+
+// TestHOSTDD010_DiskWarningAgainAfterRecovery: once a target's disk is
+// measured, the same failure is logged again when it comes back.
+func TestHOSTDD010_DiskWarningAgainAfterRecovery(t *testing.T) {
+	var out bytes.Buffer
+	w := newDiskWarner(&out)
+	w.warn("a", "not mounted")
+	w.warn("a", "")
+	w.warn("a", "not mounted")
+	require.Equal(t, 2, strings.Count(out.String(), "target a: not mounted"))
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }
