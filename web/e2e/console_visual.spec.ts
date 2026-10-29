@@ -1,5 +1,7 @@
 import { expect, test } from './fixtures'
 import {
+  canvasNotBlank,
+  chartCompleteness,
   collectConsoleErrors,
   completenessOf,
   liveTimeout,
@@ -32,3 +34,41 @@ test('VIS-000 the instance page loads for the picked instance without browser er
   await shoot(page, 'vis-000-instance')
   browserErrors.assertClean()
 })
+
+for (const range of ['1h', '6h'] as const) {
+  test(`VIS-010 ${range} the TPS chart is complete and readable`, async ({
+    api,
+    signedInPage: page,
+  }) => {
+    test.setTimeout(liveTimeout(0, 3 * 30_000))
+    const browserErrors = collectConsoleErrors(page)
+    const instanceId = await pickInstance(api)
+    await page.goto(`/instances/${instanceId}?range=${range}`)
+
+    const card = page.getByRole('region', { name: 'Transactions per second' })
+    await expect(card).toBeVisible()
+    await expect(card.getByText(/UTC · step \d+[smhd]$/)).toBeVisible()
+    // The data table fills once the metric query answers.
+    await expect
+      .poll(async () => (await chartCompleteness(page, 'Transactions per second')).total, {
+        timeout: 3 * 30_000,
+      })
+      .toBeGreaterThan(0)
+
+    const completeness = await chartCompleteness(page, 'Transactions per second')
+    const history = completeness.leadingNull / completeness.total
+    if (range === '6h' && history > 0.5) {
+      test.skip(true, `UNVERIFIED: history ${((1 - history) * 6).toFixed(1)} h`)
+    }
+    expect(history).toBeLessThanOrEqual(0.5)
+    expect(completeness.observedRatio).toBeGreaterThanOrEqual(0.95)
+    expect(await canvasNotBlank(card)).toBe(true)
+
+    await card.scrollIntoViewIfNeeded()
+    await card.screenshot({
+      path: `../test/e2e/_artifacts/ui/visual/vis-010-tps-${range}-card.png`,
+    })
+    await shoot(page, `vis-010-tps-${range}`)
+    browserErrors.assertClean()
+  })
+}

@@ -88,14 +88,14 @@ checkpoint. Capture/open and restore/close are each one STATE.md update.
 - Active scope: plan (whole `005_plan-ConsoleInsights`, no selector)
 - Scope result: RUNNING
 - Type: sub-phase
-- ID / attempt: 1.3 / 1
-- Status: OPEN (1.2 closed: unit:1.2:1)
+- ID / attempt: 1.4 / 1
+- Status: OPEN (1.3 closed: unit:1.3:1)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-opus-5-5; supervisor: Opus review agent (agent-1); exploration/mechanical: agent-3:claude-haiku-5-5
-- File / unit heading: phase_02.md → 1.3
+- File / unit heading: phase_02.md → 1.4
 - Current step: S0
-- Next action: 1.3 S1.
-- Next eligible plan unit: 1.3 (phase_02.md), then 1.4
+- Next action: 1.4 S1.
+- Next eligible plan unit: 1.4 (phase_02.md), then 1.5
 - Unit base: `5929be2` (no unit open); branch: `feat/index-analysis` (never switch or create branches)
 - Repo state: dirty with pre-existing changes (§5) + untracked plan folder; nothing of the plan implemented yet.
 
@@ -159,6 +159,7 @@ Required supervisor reviews cannot be silently replaced by weaker self-review.
 |------|--------------|---------------|-------|---------|-----------------|--------|
 | plan | authoring | 1 | agent-2:claude-sonnet-5-5 | `docs/plans/005_plan-ConsoleInsights/*` | R-PLAN-1..11 | uncommitted (committed at 0.2 S1b) |
 | plan + baseline | d7647d0, ce13a72 | 1 | agent-2:claude-opus-5-5 | plan folder; pre-existing §5 paths (without `dist/index.html`, `.claude/`) | G-SECRETS pass before each | `d7647d0` (`PEV-Unit: plan`), `ce13a72` (`PEV-Unit: baseline`) |
+| sub-phase | 1.3 / 1 | 1 | agent-2:claude-opus-5-5 | `web/src/features/instance/{OverviewSection.tsx,OverviewSection.test.tsx}` (per-metric `stepFor`, `ChartCard`, unit formatting, OV-STEP-001/002, OV-CARD-001), `internal/server/api_integration_test.go` (INT-API-007 StepBelowSampling), `web/e2e/console_visual.spec.ts` (VIS-010 1h/6h + card screenshots); deploy4.log | §7 1.3 rows; R-1.3-C1 | unit:1.3:1 |
 | sub-phase | 1.2 / 1 | 1 | agent-2:claude-opus-5-5 | `web/src/components/charts/{metric.options.ts,metric.options.test.ts,TimeSeriesChart.tsx,TimeSeriesChart.test.tsx}`, NEW `ChartCard.tsx`, `ChartCard.test.tsx`, `ChartGroup.tsx`, `ChartGroup.test.tsx`; `web/src/features/instance/OverviewSection.test.tsx` (UI-INST-024 markPoint → markLine); R-1.2-1 fixes to 1.1 `web/src/lib/chartStep.ts`/`chartStep.test.ts` (wal suffix rule, table/index counters) | §7 1.2 rows; R-1.2-1 | unit:1.2:1 |
 | sub-phase | 1.1 / 1 | 1 | agent-2:claude-opus-5-5 | NEW `web/src/lib/{chartStep.ts,chartStep.test.ts,chartTime.ts,chartTime.test.ts}` | §7 1.1 rows; contract-test review batched with 1.2 (§8) | unit:1.1:1 |
 | sub-phase | 13.1 / 1 | 1 | agent-2:claude-opus-5-5 | `internal/agent/scheduler.go` (`warmupCap`, `firstRunDelay`, `ScheduleOptions.FirstRunRand`, `tryScrape` + immediate post-jitter scrape), `internal/agent/scheduler_test.go` (FIRSTRUN-001..008; GracefulShutdown drain per §8), NEW `cmd/pglens-agent/first_run_integration_test.go`, `README.md`, `deploy/agent.example.yaml`; stack redeployed (deploy3.log) | §7 13.1 rows; R-13.1-S | unit:13.1:1 |
@@ -193,11 +194,11 @@ Unit-owned paths are listed in each phase file's sub-phase `Files` field and rec
 
 ## 6. In-flight checkpoint
 
-1.3 / 1 OPEN.
-Last durable step: 1.2 closed (unit:1.2:1).
+1.4 / 1 OPEN.
+Last durable step: 1.3 closed (unit:1.3:1).
 Actual files/diff: none.
 Pending edits: none.
-Next step: 1.3 S1.
+Next step: 1.4 S1.
 Last check: n/a.
 Running resources: stack `pglens-odoo` up (deployed pglens images are the phase-1 build); no background processes of this plan.
 Stop reason / supervisor request: supervisor coherence review requested by the user ("fai sempre una review con advisor opus dopo le modifiche del piano; non iniziare lo sviluppo se non è tutto perfettamente coerente").
@@ -207,6 +208,10 @@ Research checkpoint: R3 pending (7.0), R4 pending (0.3 S6).
 
 | Gate/test | Command | Result | Test count/named evidence | Tested revision/diff | When |
 |-----------|---------|--------|--------------------------|---------------------|------|
+| make lint (golangci-lint v2.15.0, installed 2026-10-29 after the user authorised downloads) | `make lint` | pass | 0 issues (covers 0.3 and 13.1 Go diffs) | cf87cd7 | 2026-10-29 |
+| G-WEB-UNIT 1.3 | `cd web && TZ=UTC pnpm exec vitest run src/features/instance` | pass | 59 passed (OV-STEP-001/002, OV-CARD-001 + existing UI-INST-0xx unchanged) | 1.3 diff | 2026-10-29 |
+| INT-API-007 (1.3 S4) | `go test -tags=integration -race -count=1 ./internal/server -run StepBelowSampling` | pass | 15s: 240 buckets ≥ 40 % null; 60s: 60 buckets, 0 null | 1.3 diff | 2026-10-29 |
+| G-DEPLOY + VIS-010 (1.3 S6) | `deploy.sh`; `pnpm exec playwright test --project=desktop-fullhd e2e/console_visual.spec.ts` | pass | VIS-000, VIS-010 1h, VIS-010 6h passed (no skip: ≥ 6 h history) | deployed 1.3 build | 2026-10-29 17:11 UTC |
 | G-BASE web after 1.2 | `cd web && TZ=UTC pnpm exec vitest run` | pass | 123 files, 988 tests | 1.2 diff | 2026-10-29 |
 | G-WEB-UNIT 1.2 | `cd web && TZ=UTC pnpm exec vitest run src/lib/chartStep.test.ts src/lib/chartTime.test.ts src/components/charts src/features/instance` | pass | 117 passed (METOPT-001..011, CCARD-001..006, CGRP-001..002, TSC-HEIGHT-001, UI-INST-022/024 adapted); charts coverage lines 96.6 %, statements 93.4 % | 1.2 diff | 2026-10-29 |
 | G-WEB-STATIC 1.2 | `make web-typecheck web-lint` | pass | exit 0; R1 confirmed (`confine`, `hideOverlap`, slider `labelFormatter`, `markLine` typecheck) | 1.2 diff | 2026-10-29 |
@@ -255,6 +260,7 @@ Results: pass, fail, blocked, not-run, not-applicable-yet. Only pass satisfies a
 | R-PLAN-8 | Opus review agent (read-only, fresh) | plan revision 1 after the R-PLAN-7 fixes | same | NOT-READY: 0 blockers, 4 majors (1.5 claim "no assertion changed" false: `renderAsh` pin changes two existing expectations; 15.3 cluster tabs left `EventTimeline` without a tab and broke SYS-UI-001/007 and `ClusterPage.test.tsx`; 13.3/14.2 banner mount point undefined (no instance layout route) and MSW handlers; `test.setTimeout` rule did not cover `console_visual.spec.ts` live specs VIS-016/COV-E2E-001), 2 minors (tab/view defaults must never be written to the URL; UI-ASH gate family mapped to G-GO-FOCUS); all applied (D12 URL-default rule, `AppShell` banner mount, `clusterSections.ts` + `events` tab, `liveTimeout()` helper) |
 | R-PLAN-9 | Opus review agent (read-only, fresh) | plan revision 1 after the R-PLAN-8 fixes | same | NOT-READY: 0 blockers, 6 majors (VIS-016/COV-E2E-001 `liveTimeout` not stated in the phase files; sweep tests (FHD-*, VIS-CAP, QA-TOUR, SET-E2E, HA-*, ADV-E2E) without timeouts and ADV-E2E needing a 15-min advisor cadence; QA timeout formula failing sequential waits (RDY-E2E, SORIGIN-E2E); 14.2 unlisted `render.test.tsx` break and non-existent shared FleetPage setup; 9.2 InventoryTables vs UI-SET-005; 15.3 scope vs Done), 8 minors (wrong test name for the 1.5 `?range=1h` expectation, HA-STATIC-003 unit, Cluster identity placement, VISTMO unit, LIVE-HOST gate, six weaker Preconditions, G-UI-LEGACY at P13/P14, VIS-020 field); all applied (`liveTimeout` loop/sequence rule + `serviceRestart` 120 s, `PGLENS_ADVISOR_INTERVAL=60s`, `pendingUnit` inventory entries) |
 | R-PLAN-10 | Opus review agent (read-only, fresh) | plan revision 1 after the R-PLAN-9 fixes | same | NOT-READY: 1 blocker (13.1 assumed first run = jitter only, but `runEntry` scrapes only on the first ticker tick, so first run = jitter + interval: FIRSTRUN-006, INT-FIRSTRUN-001, readiness/coverage budgets could never pass), 5 majors (9.1/9.3 unlisted existing-test breaks in `page-primitives.test.tsx`, `DeadRowsPanel.test.tsx`, `IndexAnalysisPage.test.tsx` and wrong test-file name; `pendingUnit` not implementable or closed; 6.4 IND/LIFE tests without timeouts and no `rebuild` budget; IND-DB/IND-FIND/IND-SUGG budgets unreachable with 15-min/hourly checks; many live specs without declared timeouts), 5 minors (findings budget text, drill 4 restarts, Databases-by-instance filter, `INSTANCE_SECTIONS` export, `data-table-rows` testid); all applied (`tryScrape` immediate post-jitter scrape + FIRSTRUN-008, `BUDGET.rebuild`, agent restart in IND-DB/FIND/SUGG, `FHD-ROUTES-004`) |
+| R-1.3-C1 | Opus review agent (read-only, fresh) | VIS-010 screenshots (cards 1h/6h, full page 1920/1440/390) + 1.3 diff | checklist C-1, contract 1.3 | C-1 signed off all 5; code APPROVED; minors: legend overlaps y-axis name on narrow cards (→ 3.2 layout), description wording (applied: "data gaps or counter resets"), OV-STEP-001 plan text (§8) |
 | R-1.2-1 | Opus review agent (read-only, fresh) | 1.1 (70ac9b0) + 1.2 diff | contracts D1–D3, test oracles, adapted tests, tooltip injection, NaN, TZ, a11y | CHANGES-REQUIRED: 2 majors (`metricKind` missed `pg_wal_wal_fpi_bytes`/suffix rule and `pg_table_*`/`pg_index_*` counters; NaN tooltip time threw `RangeError`), 3 minors (`stepSeconds` unused, `wide` untested, fixed loading height); all applied in unit:1.2:1 (`stepSeconds` documented as informational) |
 | R-13.1-S | Opus review agent (read-only, fresh) | 13.1 scheduler diff + GracefulShutdown failure | wg/scrapeWG accounting, send on closed channel, busy/breaker/worker slot, flakiness (`-race -count=20` both packages) | (a) adapt test by draining; no concurrency issue; no other flaky test |
 | R-P0-1 | Opus review agent (read-only, fresh) | 0.1–0.4 diffs + stack dir | guard rails, secret handling, cleanup, compose safety | CHANGES-REQUIRED: 0 blockers, 2 majors (`up()` could recreate odoo-db; `lockPair`/`openSessions` leaked children on failure, no spawn `error` listener), minors (env-redirectable backup dir, compose label, cleanup by name, server statement_timeout, sqlInt negatives, whitelist breadth, NOTIF-GC-005 weak oracle, QA-HARNESS-015 `exec(`/`-c`, HA override path, MANIFEST hash); all applied in unit:P0:1. Deferred: the teardown-asserting `consoleGuard` fixture lands with its first live consumer (1.x); budget findings/rebuild are measured at their first live use. Open to the user: the toxiproxy module download (§8) and confirmation that the two Google Chat messages (0.3 R4) arrived |
@@ -293,6 +299,8 @@ Rule (user): after **every** modification of the plan the `advisor` reviews it a
 | 1 | 1.1 `metricKind` counter list (D1 says verify against wal.go) | list in D1: wal columns + `pg_wal_lsn_bytes` | derived from `internal/check`: wal `walCounterColumn` over pg_stat_wal 14-18 (`wal_records/fpi/bytes/buffers_full/write/sync/write_time/sync_time`), `pg_wal_lsn_bytes`, `pg_stat_statements_total_exec_time_ms`, and every `pg_io_*` except `pg_io_timing_enabled` (io.go stores all pg_stat_io columns as KindCounter); CSTEP-006 table extended accordingly | executor (contract allows the derived list) | 1.1 |
 | 1 | 1.1 advisor review of the contract tests (done: R-1.2-1) | separate review per 1.1 | batched with the 1.2 diff review (same Opus agent, same chart contract) to avoid two agents on one contract | executor | 1.2 |
 | 1 | Network constraint (user, 2026-10-29) | only the Odoo stack images/builds and `chat.googleapis.com` authorised | user: "autorizzo i download e l'uso della rete internet" — downloads and internet use authorised (toxiproxy download retroactively covered); still no push. Unblocks golangci-lint install, PostGIS image, other pinned images | user | all |
+| 1 | 1.3 OV-STEP-001 oracle | `pg_connections_used` step=30s at 1 h | 15s: connections come from `activity`, sampled every 10 s (D1 table), so the gauge's 1 h base step 15 s already holds a sample; supervisor R-1.3-C1 confirmed | supervisor | 1.3 |
+| 1 | 1.3 chart legend vs y-axis name | grid `top: 40` (1.2 contract) | on narrow cards the legend overlaps the y-axis name; fixed in 3.2 (Overview layout) together with the card layout | supervisor | 3.2 |
 | 1 | D28 | `checks.activity.by_application` default flips to true: the two tests `TestConfig_ByApplicationDefaultsFalse` and `TestActivity_ByApplicationDisabledByDefault` change expectation in 16.1 (recorded here when done) | user REQ-40 | 16.1 |
 
 ## 9. Blockers
@@ -331,7 +339,7 @@ Rule (user): after **every** modification of the plan the `advisor` reviews it a
 | 13.1 | phase_14.md | 0 | DONE | 1 | FIRSTRUN-001..008, INT-FIRSTRUN-001, live `table_columns` (§7) |
 | 1.1 | phase_02.md | 0 | DONE | 1 | CSTEP-001..007, CTIME-001..007 (§7) |
 | 1.2 | phase_02.md | 1.1 | DONE | 1 | METOPT, CCARD, CGRP, TSC-HEIGHT (§7) |
-| 1.3 | phase_02.md | 1.2, 13.1 | TODO | 1 | — |
+| 1.3 | phase_02.md | 1.2, 13.1 | DONE | 1 | OV-STEP, OV-CARD, INT-API-007, VIS-010 1h/6h, C-1 (§7) |
 | 1.4 | phase_02.md | 1.1 | TODO | 1 | — |
 | 1.5 | phase_02.md | 1.2, 1.4 | TODO | 1 | — |
 | 2.1 | phase_03.md | 0 | TODO | 1 | — |

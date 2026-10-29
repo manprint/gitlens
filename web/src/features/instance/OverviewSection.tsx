@@ -1,5 +1,6 @@
 import { useTimeRange } from '@/hooks/useTimeRange'
-import { chooseStep, queryWindowOf, stepMilliseconds, type QueryWindow } from '@/lib/timerange'
+import { metricKind, SAMPLE_SECONDS, stepFor } from '@/lib/chartStep'
+import { queryWindowOf, STEP_LADDER, type QueryWindow } from '@/lib/timerange'
 import {
   cacheHitRatioSeries,
   cacheHitRatioValue,
@@ -14,7 +15,13 @@ import { Section } from '@/components/layout/Section'
 import { MetricTile } from '@/components/layout/MetricTile'
 import { Unknown } from '@/components/state/Unknown'
 
-import { buildMetricOption } from '@/components/charts/metric.options'
+import { ChartCard } from '@/components/charts/ChartCard'
+import {
+  buildMetricOption,
+  MAX_RESET_LINES,
+  type MetricUnit,
+} from '@/components/charts/metric.options'
+import { countResets } from '@/lib/chartTime'
 import { TimeSeriesChart, type TimeSeriesTableSeries } from '@/components/charts/TimeSeriesChart'
 
 interface OverviewSectionProps {
@@ -36,6 +43,34 @@ function metricParams(
   }
 }
 
+/** The check that samples each Overview metric; the others come from database_stats. */
+const METRIC_CHECK: Record<string, string> = {
+  pg_connections_used: 'activity',
+  pg_connections_limit: 'activity',
+  pg_checkpoints_timed_total: 'checkpointer',
+  pg_checkpoints_requested_total: 'checkpointer',
+  pg_wal_lsn_bytes: 'wal',
+}
+
+/**
+ * Query step of one metric over the range, in seconds: never finer than its
+ * sampling (two samples for a rate), so no bucket is empty for lack of data.
+ */
+function overviewStepSeconds(metric: string, from: Date, to: Date): number {
+  return stepFor(
+    metricKind(metric),
+    from,
+    to,
+    SAMPLE_SECONDS[METRIC_CHECK[metric] ?? 'database_stats'],
+  )
+}
+
+function stepParam(seconds: number): string {
+  return (
+    STEP_LADDER.find(({ milliseconds }) => milliseconds === seconds * 1_000)?.value ?? `${seconds}s`
+  )
+}
+
 /**
  * Connections, checkpoints and WAL come from instance-wide checks and are
  * stored without a database. They used to be requested with the selected
@@ -46,10 +81,12 @@ function useOverviewMetricQueries(
   instanceId: string,
   database: string,
   timeWindow: QueryWindow,
-  step: string,
+  stepOf: (metric: string) => number,
 ) {
-  const perDatabase = (metric: string) => metricParams(metric, instanceId, database, step)
-  const instanceWide = (metric: string) => metricParams(metric, instanceId, undefined, step)
+  const perDatabase = (metric: string) =>
+    metricParams(metric, instanceId, database, stepParam(stepOf(metric)))
+  const instanceWide = (metric: string) =>
+    metricParams(metric, instanceId, undefined, stepParam(stepOf(metric)))
 
   return {
     blksHit: useQueryMetrics(perDatabase('pg_blks_hit_total'), timeWindow),
@@ -105,6 +142,8 @@ interface ChartDefinition {
   dataTableLabel: string
   name: string
   series: readonly TimeSeriesTableSeries[]
+  stepSeconds: number
+  unit?: MetricUnit
   yAxisName?: string
   annotateResets?: boolean
 }
@@ -112,9 +151,12 @@ interface ChartDefinition {
 export function OverviewSection({ database, instanceId }: OverviewSectionProps) {
   const { range } = useTimeRange()
   const timeWindow = queryWindowOf(range)
-  const step = chooseStep(range.from, range.to)
-  const stepSeconds = stepMilliseconds(step) / 1_000
-  const queries = useOverviewMetricQueries(instanceId, database, timeWindow, step)
+  const stepOf = (metric: string) => overviewStepSeconds(metric, range.from, range.to)
+  const queries = useOverviewMetricQueries(instanceId, database, timeWindow, stepOf)
+  const connectionsStep = stepOf('pg_connections_used')
+  const databaseRateStep = stepOf('pg_xact_commit_total')
+  const checkpointStep = stepOf('pg_checkpoints_timed_total')
+  const walStep = stepOf('pg_wal_lsn_bytes')
 
   // Counters arrive as per-second rates: pg_xact_commit_total is commits per
   // second, pg_wal_lsn_bytes is WAL bytes per second, and so on.
@@ -137,9 +179,9 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
   const cacheHitRatio = cacheHitRatioSeries(blksHit, blksRead)
   const latestConnectionsLimit = latestValue(connectionsLimit)
   const latestCacheHitRatio = cacheHitRatioValue(latestValue(blksHit), latestValue(blksRead))
-  const checkpointsInRange = integrateRate(checkpointRate, stepSeconds)
-  const deadlocksInRange = integrateRate(deadlockRate, stepSeconds)
-  const tempFilesInRange = integrateRate(tempFileRate, stepSeconds)
+  const checkpointsInRange = integrateRate(checkpointRate, checkpointStep)
+  const deadlocksInRange = integrateRate(deadlockRate, databaseRateStep)
+  const tempFilesInRange = integrateRate(tempFileRate, databaseRateStep)
 
   const charts: readonly ChartDefinition[] = [
     {
@@ -150,6 +192,8 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
         { name: 'Connections in use', points: connectionsUsed },
         { name: 'Configured maximum', points: connectionsLimit },
       ],
+      stepSeconds: connectionsStep,
+      unit: 'count',
       yAxisName: 'connections',
     },
     {
@@ -157,6 +201,8 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
       dataTableLabel: 'Transactions per second data',
       name: 'Transactions per second',
       series: [{ name: 'Transactions per second', points: transactionRate }],
+      stepSeconds: databaseRateStep,
+      unit: 'count',
       yAxisName: 'per second',
     },
     {
@@ -165,6 +211,8 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
       dataTableLabel: 'Cache hit ratio data',
       name: 'Cache hit ratio',
       series: [{ name: 'Cache hit ratio', points: cacheHitRatio }],
+      stepSeconds: databaseRateStep,
+      unit: 'ratio',
       yAxisName: 'ratio',
     },
     {
@@ -172,6 +220,8 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
       dataTableLabel: 'WAL generation rate data',
       name: 'WAL generation',
       series: [{ name: 'WAL bytes per second', points: walRate }],
+      stepSeconds: walStep,
+      unit: 'bytes',
       yAxisName: 'bytes per second',
     },
     {
@@ -179,6 +229,8 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
       dataTableLabel: 'Checkpoint frequency data',
       name: 'Checkpoint frequency',
       series: [{ name: 'Checkpoints per hour', points: checkpointsPerHour }],
+      stepSeconds: checkpointStep,
+      unit: 'count',
       yAxisName: 'per hour',
     },
     {
@@ -186,6 +238,8 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
       dataTableLabel: 'Temporary bytes data',
       name: 'Temporary bytes',
       series: [{ name: 'Temporary bytes per second', points: tempByteRate }],
+      stepSeconds: databaseRateStep,
+      unit: 'bytes',
       yAxisName: 'bytes per second',
     },
     {
@@ -193,6 +247,8 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
       dataTableLabel: 'Deadlocks data',
       name: 'Deadlocks',
       series: [{ name: 'Deadlocks per second', points: deadlockRate }],
+      stepSeconds: databaseRateStep,
+      unit: 'count',
       yAxisName: 'per second',
     },
   ]
@@ -201,7 +257,7 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
     <Section
       id="instance-overview"
       title="Instance overview"
-      description={`Transactions, cache hit ratio, temporary files and bytes, and deadlocks are for database ${database}; connections, WAL and checkpoints are instance-wide. Selected range step ${step}. Null buckets remain gaps; reset markers identify counter resets.`}
+      description={`Transactions, cache hit ratio, temporary files and bytes, and deadlocks are for database ${database}; connections, WAL and checkpoints are instance-wide. Each chart states its range and query step. Null buckets remain gaps; dashed lines mark data gaps or counter resets.`}
     >
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricTile
@@ -221,7 +277,7 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
         <MetricTile label="Cache hit ratio" value={latestCacheHitRatio} />
         <MetricTile
           label="WAL generated in range"
-          value={formattedBytes(integrateRate(walRate, stepSeconds))}
+          value={formattedBytes(integrateRate(walRate, walStep))}
         />
         <MetricTile
           label="Checkpoints in range"
@@ -229,7 +285,7 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
         />
         <MetricTile
           label="Temporary bytes in range"
-          value={formattedBytes(integrateRate(tempByteRate, stepSeconds))}
+          value={formattedBytes(integrateRate(tempByteRate, databaseRateStep))}
         />
         <MetricTile
           label="Temporary files in range"
@@ -242,22 +298,36 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
       </div>
 
       <div className="grid gap-8 xl:grid-cols-2">
-        {charts.map((chart) => (
-          <article key={chart.name} className="bg-card rounded-lg border p-4 shadow-sm">
-            <h3 className="mb-3 font-medium">{chart.name}</h3>
-            <TimeSeriesChart
-              ariaLabel={chart.ariaLabel}
-              dataTableLabel={chart.dataTableLabel}
-              option={buildMetricOption(chart.series, {
-                ...(chart.annotateResets === undefined
-                  ? {}
-                  : { annotateResets: chart.annotateResets }),
-                ...(chart.yAxisName === undefined ? {} : { yAxisName: chart.yAxisName }),
-              })}
-              series={chart.series}
-            />
-          </article>
-        ))}
+        {charts.map((chart) => {
+          const resets =
+            chart.annotateResets === false
+              ? 0
+              : Math.max(0, ...chart.series.map((metric) => countResets(metric.points)))
+          return (
+            <ChartCard
+              key={chart.name}
+              range={range}
+              state="ready"
+              stepSeconds={chart.stepSeconds}
+              title={chart.name}
+              {...(resets > MAX_RESET_LINES ? { subtitle: `${resets} counter resets` } : {})}
+            >
+              <TimeSeriesChart
+                ariaLabel={chart.ariaLabel}
+                dataTableLabel={chart.dataTableLabel}
+                option={buildMetricOption(chart.series, {
+                  stepSeconds: chart.stepSeconds,
+                  ...(chart.unit === undefined ? {} : { unit: chart.unit }),
+                  ...(chart.annotateResets === undefined
+                    ? {}
+                    : { annotateResets: chart.annotateResets }),
+                  ...(chart.yAxisName === undefined ? {} : { yAxisName: chart.yAxisName }),
+                })}
+                series={chart.series}
+              />
+            </ChartCard>
+          )
+        })}
       </div>
     </Section>
   )

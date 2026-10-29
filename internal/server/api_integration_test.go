@@ -380,6 +380,70 @@ func TestAPI_INT_API_002_MetricsQueryWithResetGap(t *testing.T) {
 	require.Equal(t, 200.0, *resp.Series[4].Value)
 }
 
+// INT-API-007 (plan 005 I-1): a counter stored every 30 s and queried at a 15 s
+// step leaves about every other bucket null, which the UI drew as a broken line
+// with reset markers; queried at 60 s every bucket holds a sample. The server
+// is unchanged: the UI chooses the step (web/src/lib/chartStep.ts).
+func TestAPI_INT_API_007_StepBelowSampling(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := contextBackground()
+
+	iid := uuid.New()
+	cid := store.ToDB(pgtype.ClusterID(556))
+	agent := uuid.New()
+	_, err := pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO clusters (tenant_id, cluster_id, id_source) VALUES ('default',$1,'manual')`, cid)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, last_seen) VALUES ($1,'default',$2,$3,'10.0.0.1',5432,170000,'primary','T0',now())`, iid, cid, agent)
+	require.NoError(t, err)
+
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := from.Add(time.Hour)
+	// 120 stored per-second rates, one every 30 s, as database_stats writes them.
+	_, err = pool.Exec(ctx, `INSERT INTO metrics (ts, tenant_id, cluster_id, instance_id, datname, metric, labels, series_id, value)
+		SELECT $1::timestamptz + make_interval(secs => i * 30), 'default', $2, $3, '', 'pg_xact_commit_total', '{}', 1000, 5 + i % 3
+		FROM generate_series(0, 119) AS i`, from, cid, iid)
+	require.NoError(t, err)
+
+	api := NewAPI(pool)
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	query := func(step string) []struct{ Value *float64 } {
+		url := fmt.Sprintf("/api/v1/metrics/query?metric=pg_xact_commit_total&instance_id=%s&from=%s&to=%s&step=%s",
+			iid.String(), from.Format(time.RFC3339), to.Format(time.RFC3339), step)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, url, http.NoBody))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var resp metricsResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		out := make([]struct{ Value *float64 }, len(resp.Series))
+		for i, point := range resp.Series {
+			out[i].Value = point.Value
+		}
+		return out
+	}
+	nulls := func(series []struct{ Value *float64 }) int {
+		n := 0
+		for _, point := range series {
+			if point.Value == nil {
+				n++
+			}
+		}
+		return n
+	}
+
+	fine := query("15s")
+	require.Len(t, fine, 240)
+	require.GreaterOrEqual(t, float64(nulls(fine))/float64(len(fine)), 0.4,
+		"a step below the sampling interval must leave empty buckets")
+
+	coarse := query("60s")
+	require.Len(t, coarse, 60)
+	require.Zero(t, nulls(coarse), "a step of two samples must fill every bucket")
+}
+
 func contextBackground() context.Context { return context.Background() }
 
 // TestAPI_INT_API_003_ClusterHealthCountsLivePrimaries: a failed-over cluster

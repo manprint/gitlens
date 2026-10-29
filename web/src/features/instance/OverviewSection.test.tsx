@@ -134,6 +134,67 @@ describe('OverviewSection', () => {
     expect(steps.length).toBeGreaterThan(initialCalls)
   })
 
+  function stepsByMetric() {
+    const steps = new Map<string, string>()
+    server.use(
+      http.get(metricsUrl, ({ request }) => {
+        const url = new URL(request.url)
+        steps.set(url.searchParams.get('metric') ?? '', url.searchParams.get('step') ?? '')
+        return HttpResponse.json({ series: [] })
+      }),
+    )
+    return steps
+  }
+
+  it('OV-STEP-001 queries a counter at one minute and a gauge at its sampling over 1 h', async () => {
+    const steps = stepsByMetric()
+    renderWithProviders(<OverviewSection database="app" instanceId={INSTANCE_ID} />, {
+      route: `/instances/${INSTANCE_ID}?db=app&range=1h`,
+    })
+    await settle()
+
+    expect(steps.get('pg_xact_commit_total')).toBe('1m')
+    expect(steps.get('pg_xact_rollback_total')).toBe('1m')
+    expect(steps.get('pg_wal_lsn_bytes')).toBe('1m')
+    // Connections are sampled by the activity check every 10 s: the 1 h base step of 15 s.
+    expect(steps.get('pg_connections_used')).toBe('15s')
+    expect(steps.get('pg_connections_limit')).toBe('15s')
+  })
+
+  it('OV-STEP-002 queries a counter at five minutes or more over 24 h', async () => {
+    const steps = stepsByMetric()
+    renderWithProviders(<OverviewSection database="app" instanceId={INSTANCE_ID} />, {
+      route: `/instances/${INSTANCE_ID}?db=app&range=24h`,
+    })
+    await settle()
+
+    expect(steps.get('pg_xact_commit_total')).toBe('5m')
+    expect(steps.get('pg_connections_used')).toBe('5m')
+  })
+
+  it('OV-CARD-001 places every chart in a card that states its range and step', async () => {
+    server.use(metricsHandler(resetSeries))
+    renderWithProviders(<OverviewSection database="app" instanceId={INSTANCE_ID} />, {
+      route: `/instances/${INSTANCE_ID}?db=app&range=1h`,
+    })
+    await settle()
+
+    for (const [title, step] of [
+      ['Connections', '15s'],
+      ['Transactions per second', '1m'],
+      ['Cache hit ratio', '1m'],
+      ['WAL generation', '1m'],
+      ['Checkpoint frequency', '1m'],
+      ['Temporary bytes', '1m'],
+      ['Deadlocks', '1m'],
+    ] as const) {
+      const card = screen.getByRole('region', { name: title })
+      expect(within(card).getByRole('heading', { level: 3, name: title })).toBeVisible()
+      expect(within(card).getByText(new RegExp(`UTC · step ${step}$`))).toBeVisible()
+      expect(within(card).getByRole('img', { name: new RegExp(title) })).toBeVisible()
+    }
+  })
+
   it('UI-INST-028 counts rolled-back transactions in the transactions tile', async () => {
     server.use(
       http.get(metricsUrl, ({ request }) => {
