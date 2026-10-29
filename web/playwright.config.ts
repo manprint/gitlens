@@ -22,5 +22,12 @@ export default defineConfig({
     locale: 'en-US',
     colorScheme: 'dark',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    {
+      name: 'desktop-fullhd',
+      use: { ...devices['Desktop Chrome'], viewport: { width: 1920, height: 1080 } },
+      testIgnore: [/(smoke|ui_acceptance)\.spec\.ts/, /qa\/(harness|traceability)\.spec\.ts/],
+    },
+  ],
 })

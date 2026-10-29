@@ -88,14 +88,14 @@ checkpoint. Capture/open and restore/close are each one STATE.md update.
 - Active scope: plan (whole `005_plan-ConsoleInsights`, no selector)
 - Scope result: RUNNING
 - Type: sub-phase
-- ID / attempt: 0.2 / 1
-- Status: OPEN (owned paths: `web/playwright.config.ts` (project `desktop-fullhd` only), NEW `web/e2e/visual_helpers.ts`, NEW `web/e2e/console_visual.spec.ts`; stack: T1 grants + agent restart; baseline commits of the plan folder and of the pre-existing §5 paths)
+- ID / attempt: 0.3 / 1
+- Status: OPEN (owned paths: phase_01.md 0.3 Files)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-opus-5-5; supervisor: Opus review agent (agent-1); exploration/mechanical: agent-3:claude-haiku-5-5
-- File / unit heading: phase_01.md → `### 0.2 Baseline, Tier 1 role and visual harness`
+- File / unit heading: phase_01.md → `### 0.3 Google Chat notification channel`
 - Current step: S0
-- Next action: 0.2 S1 baseline (`playwright test --list` count, Go build/vet/test, web typecheck/lint/vitest).
-- Next eligible plan unit: 0.2 (phase_01.md)
+- Next action: 0.3 S1 (`googlechat.go` + tests, red first).
+- Next eligible plan unit: 0.3 (phase_01.md)
 - Unit base: `5929be2` (no unit open); branch: `feat/index-analysis` (never switch or create branches)
 - Repo state: dirty with pre-existing changes (§5) + untracked plan folder; nothing of the plan implemented yet.
 
@@ -158,6 +158,8 @@ Required supervisor reviews cannot be silently replaced by weaker self-review.
 | Type | ID / attempt | Plan revision | Agent | Changes | Evidence/review | Commit |
 |------|--------------|---------------|-------|---------|-----------------|--------|
 | plan | authoring | 1 | agent-2:claude-sonnet-5-5 | `docs/plans/005_plan-ConsoleInsights/*` | R-PLAN-1..11 | uncommitted (committed at 0.2 S1b) |
+| plan + baseline | d7647d0, ce13a72 | 1 | agent-2:claude-opus-5-5 | plan folder; pre-existing §5 paths (without `dist/index.html`, `.claude/`) | G-SECRETS pass before each | `d7647d0` (`PEV-Unit: plan`), `ce13a72` (`PEV-Unit: baseline`) |
+| sub-phase | 0.2 / 1 | 1 | agent-2:claude-opus-5-5 | `web/playwright.config.ts` (project `desktop-fullhd`), NEW `web/e2e/visual_helpers.ts`, `web/e2e/console_visual.spec.ts`; stack T1 grants | G-BASE, VIS-000, G-WEB-STATIC pass | unit:0.2:1 |
 | sub-phase | 0.1 / 1 | 1 | agent-2:claude-opus-5-5 | stack dir only: `backup.sh` (MANIFEST `created_at`, `db_container`, before/after counts; original kept as `backup.sh.orig-0.1`), NEW `verify_backup.sh`, `deploy.sh`, `README.md`, `seed/api.py`, `seed/seed.log`, `load/rpc_load.py`; backup `02-loaded-20261029-165510` | ENV-001/002/003/004/006 pass (§7); review at P0 | no repository file (nothing to commit) |
 
 Commit references match trailers PEV-Plan, PEV-Unit, PEV-Attempt, PEV-Result.
@@ -185,11 +187,11 @@ Unit-owned paths are listed in each phase file's sub-phase `Files` field and rec
 
 ## 6. In-flight checkpoint
 
-none
-Last durable step: plan authoring (phase files 01–18, overview, test-strategy, STATE).
-Actual files/diff: plan folder only.
-Pending edits: none (R-PLAN-1..11 fixes applied).
-Next step: user OK → 0.1 S1.
+Unit 0.3 / 1 OPEN.
+Last durable step: 0.2 closed (unit:0.2:1); `deploy.sh` running in the background (log `deploy1.log` in the scratchpad).
+Actual files/diff: none yet for 0.3.
+Pending edits: P0 must verify the `table_columns` fact (`select count(*) from object_facts where kind='table_columns'` in the pglens store, `n_distinct` label present).
+Next step: 0.3 S1.
 Last check: n/a.
 Running resources: stack `pglens-odoo` up (deployed pglens images are the phase-1 build); no background processes of this plan.
 Stop reason / supervisor request: supervisor coherence review requested by the user ("fai sempre una review con advisor opus dopo le modifiche del piano; non iniziare lo sviluppo se non è tutto perfettamente coerente").
@@ -204,6 +206,11 @@ Research checkpoint: R3 pending (7.0), R4 pending (0.3 S6).
 | ENV-001/002 old manifest | `verify_backup.sh …/01-modules-installed-20261029-112930` | pass | `ENV-002 n/a (… res_partner=8)`, VERIFIED written (created `2026-10-29T10:29:32Z`) | backup 01 | 2026-10-29 |
 | ENV-001 negative | byte-flipped copy of 02-loaded in the scratchpad | pass | exit 1 `checksum mismatch`, copied `VERIFIED` removed, no `pglens-restore-test` left | — | 2026-10-29 |
 | ENV-006 | `rpc_load.py --self-check` | pass | `calls=5151 created=161 remaining_qa=0`, `ENV-006 ok` (Odoo admin login `admin`/default; category `QA` record now exists in Odoo) | — | 2026-10-29 |
+| G-BASE (0.2 S1) | `go build ./...`; `go vet ./...`; `go test ./internal/check ./internal/wire ./internal/server ./internal/agent`; `pnpm run typecheck`; `pnpm run lint`; `TZ=UTC pnpm exec vitest run` | pass (all 6 exit 0) | Go: 4 packages ok; vitest 118 files / 953 tests passed; no pre-existing failure | tree at `ce13a72` + 0.2 S3 e2e files | 2026-10-29 |
+| N_legacy (0.2 S1) | `pnpm exec playwright test --list` before any config change | recorded | **12** tests in 2 files (`smoke.spec.ts`, `ui_acceptance.spec.ts`); after 0.2 the `chromium` project lists 13 (it also picks `console_visual.spec.ts` until 0.4 adds its `testMatch`) | — | 2026-10-29 |
+| T1 grant (0.2 S2) | `monitoring_user.sql -v role=pglens_monitor -v tier1=1` on `postgres`, `odoo`, `template1` + agent restart | pass | role member of `pg_monitor`, `pg_read_all_stats`, `pg_read_all_data`; `/api/v1/instances` `perm_tier` = `T1` | stack | 2026-10-29 15:58 UTC |
+| VIS-000 (0.2) | `playwright test --project=desktop-fullhd e2e/console_visual.spec.ts -g VIS-000` | pass | `--list` = 1; `1 passed`; VISTMO-001 and `completenessOf` self-checks inside; screenshots `test/e2e/_artifacts/ui/visual/vis-000-instance-{1440,1024,390}.png` | 0.2 diff | 2026-10-29 |
+| G-WEB-STATIC (0.2) | `make web-typecheck web-lint` | pass | exit 0 (after `noUncheckedIndexedAccess` fixes and prettier) | 0.2 diff | 2026-10-29 |
 | ENV-004 | `seed/api.py /api/v1/instances`; Odoo `/web/login` | pass | instance `fcc281dc…` up, `last_seen` 1 s old, `perm_tier` T0; Odoo 200 | deployed phase-1 images | 2026-10-29 15:57 UTC |
 
 Results: pass, fail, blocked, not-run, not-applicable-yet. Only pass satisfies a required active gate. Keep relevant failing output/evidence references.
@@ -233,6 +240,8 @@ Rule (user): after **every** modification of the plan the `advisor` reviews it a
 | 1 | pre-start amendments from R-PLAN-1 | T2 = `pg_signal_backend` only (no pgstattuple), stack role `pglens_monitor` grant command; advisor windows limited to `unusedWindow`/`backupHistory`; cold-start envelope fields `agent_started_at`/`check_intervals` (13.2 S0); one session classifier `internal/sessionorigin` (D27); `deploy.sh` replaces `make build-images`; Playwright projects `chromium`/`harness`/browser projects; hactl timeline-aware election and docker-level fencing; retention per-family `min_days`; test-ID to Go `-run` mapping; batch boundaries for large sweeps | supervisor review R-PLAN-1/2 | all phase files |
 | 1 | roster: agent-2 = Sonnet 5.5 implementer | user 2026-10-29: implementation and reviews Opus 5.5, only exploration and mechanical work Haiku 5.5, Sonnet not used (every `Model:` field, the overview summary, §3 roster/delegation rules and the commit trailer changed; no unit contract changed) | user | roster-only edit; per the user's stop on review rounds it was not re-reviewed |
 | 1 | supervisor = `advisor` tool | user disabled the `advisor` tool at execution start (2026-10-29, `/advisor` → disabled; model Opus 5.5, effort medium); supervisor reviews are made by fresh read-only Opus 5.5 review agents (`model: opus`) with self-contained prompts | user | every review point in the phase files; §3 Supervisor access |
+| 1 | 0.2 Done: `table_columns` statistics check | the `table_columns` fact can only appear once the current tree is deployed (the running images were the phase-1 build) and its check interval is 1 h (first run = jitter + interval until 13.1) | verified at P0 instead (deploy started at 0.2 end); `perm_tier` = T1 already verified | executor (no contract change) | P0 |
+| 1 | stack `.env` quoting | `PGLENS_GOOGLE_CHAT_WEBHOOK_URL` was unquoted and contains `&`, so `set -a; . .env` (G-SECRETS, every live gate) silently left it empty | value wrapped in single quotes (backup `.env.bak-0.2`, chmod 600; compose accepts quoted values) | executor | G-SECRETS, 0.3 |
 | 1 | D11 (no commits) | commits local with trailers (user set full-autonomous + WIP on) | user | all closure lines say "Commit per STATE §3" |
 | 1 | 9.3 Slowest queries (R-PLAN-5) | the plan treated `QueryListPage` as the Slowest queries page | `SlowQueriesPage` (`/queries`, ranked card list, `SLOWEST_LIMIT = 20`) becomes a `DataTable` in 9.3 (`STATEMENT_FETCH_LIMIT = 200`, 20 rows per page, I-13 fit) and gets server `q` in 12.2; the Query inspector keeps its own route. Existing `SlowQueriesPage.test.tsx` expectations change in 9.3 (recorded here when done): `list` role → `table` role (3 places), `limit` expectation, heading `Top 20 by total time` → `Ranked by total time`, one test title | supervisor (review R-PLAN-5) | 9.3, 12.2, 12.3, 15.x FHD measure |
 | 1 | 16.3 UI tests (R-PLAN-5/6) | review R-PLAN-5 asked for more existing UI tests to be listed | only `UI-LOCK-021` changes (D28 callout, recorded here when done); the tests that select the old `Active sessions` list and its buttons (metadata test, `UI-LOCK-052/053/055/072/073`) use fixtures without `origin`, which trigger the unchanged fallback markup, so they pass untouched; SYS-UI-008/009 (live specs) are adapted | supervisor (reviews R-PLAN-5, R-PLAN-6) | 16.3 |
@@ -253,6 +262,8 @@ Rule (user): after **every** modification of the plan the `advisor` reviews it a
 - The grep hook denies symbol-like patterns in code files: use `tokensave_search` or prefix `TOKENSAVE_DISABLE_GREP_HOOK=1` for genuinely non-symbol greps.
 - `tokensave_read` with `mode: "lines"` needs `lines: "a-b"`.
 - Never put the webhook URL in any file or output.
+- Git identity is not configured globally: commit with `git -c user.name=Fabio -c user.email=fabio@git.it commit …` (the repository's existing author).
+- The background `deploy.sh` log goes to the scratchpad (`deploy<n>.log`).
 - Never use `docker build --pull` / `make build-images` (reaches a registry): use `deploy.sh`.
 - Never run `test/harness/dump_test.go` (`-tags=e2e`, image `timescale/timescaledb:2.29.0-pg17` is not local): `make vet-tags` only compiles it.
 - Never `git add -A` and never discard `internal/webui/dist/index.html`: commit with explicit pathspecs and check `git diff --cached --name-only`.
@@ -270,8 +281,8 @@ Rule (user): after **every** modification of the plan the `advisor` reviews it a
 | ID | Phase file | Depends on | Status | Attempt | Evidence / reason |
 |----|------------|------------|--------|---------|-------------------|
 | 0.1 | phase_01.md | none | DONE | 1 | ENV-001..004, 006 pass (§7) |
-| 0.2 | phase_01.md | 0.1 | IN_PROGRESS | 1 | — |
-| 0.3 | phase_01.md | 0.2 | TODO | 1 | — |
+| 0.2 | phase_01.md | 0.1 | DONE | 1 | G-BASE, VIS-000, T1 (§7); `table_columns` check at P0 (§8) |
+| 0.3 | phase_01.md | 0.2 | IN_PROGRESS | 1 | — |
 | 0.4 | phase_01.md | 0.2 | TODO | 1 | — |
 | 13.1 | phase_14.md | 0 | TODO | 1 | — |
 | 1.1 | phase_02.md | 0 | TODO | 1 | — |
