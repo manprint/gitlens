@@ -51,6 +51,7 @@ var factKinds = map[string]FactKind{
 	"monitoring_role":           {Check: "monitoring_role", Replace: true},
 	"trigger":                   {Check: "trigger_inventory", Replace: true},
 	"fk_unindexed":              {Check: "fk_indexes", Replace: true},
+	"table_columns":             {Check: "table_columns", Replace: true},
 	"extension":                 {Check: "extensions", Replace: true},
 	"spatial_column":            {Check: "postgis_columns", Replace: true},
 	"sequence":                  {Check: "sequences", Replace: true},

@@ -211,6 +211,7 @@ var knownChecks = map[string]bool{
 	"settings":              true,
 	"slru":                  true,
 	"stat_statements":       true,
+	"table_columns":         true,
 	"table_stats":           true,
 	"trigger_inventory":     true,
 	"vacuum_progress":       true,

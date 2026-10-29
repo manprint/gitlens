@@ -21,6 +21,7 @@ type relationAPIResponse struct {
 
 func (a *API) registerRelationRoutes(r chi.Router) {
 	r.Get("/api/v1/instances/{id}/tables", a.handleTables)
+	r.Get("/api/v1/instances/{id}/tables/history", a.handleTableHistory)
 	r.Get("/api/v1/instances/{id}/indexes", a.handleIndexes)
 	r.Get("/api/v1/instances/{id}/bloat", a.handleBloat)
 }
@@ -75,7 +76,9 @@ func (a *API) handleTables(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, e := a.pool.Query(r.Context(), `SELECT datname, schemaname, relname, n_live_tup, n_dead_tup, dead_tuple_ratio,
 			last_vacuum_age_seconds, total_bytes, seq_scan, idx_scan, ts,
-			last_vacuum, last_autovacuum, last_analyze, last_autoanalyze
+			last_vacuum, last_autovacuum, last_analyze, last_autoanalyze,
+			seq_tup_read, n_tup_ins, n_tup_upd, n_tup_del, n_tup_hot_upd, n_mod_since_analyze,
+			autovacuum_count, autoanalyze_count, table_bytes, toast_bytes, relfrozenxid_age
 		FROM (SELECT DISTINCT ON (datname, schemaname, relname) *
 		        FROM metrics_tables
 		       WHERE tenant_id='default' AND instance_id=$1 AND ts >= now() - interval '15 minutes'
@@ -88,12 +91,15 @@ func (a *API) handleTables(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	for rows.Next() {
 		var datname, schema, name string
-		var live, dead, bytes *int64
+		var live, dead, bytes, modSinceAnalyze, tableBytes, toastBytes, frozenAge *int64
 		var ratio, vacuumAge, seqScan, idxScan *float64
+		var seqTupRead, tupIns, tupUpd, tupDel, tupHotUpd, autovacuums, autoanalyzes *float64
 		var ts time.Time
 		var lastVacuum, lastAutovacuum, lastAnalyze, lastAutoanalyze *time.Time
 		if e := rows.Scan(&datname, &schema, &name, &live, &dead, &ratio, &vacuumAge, &bytes, &seqScan, &idxScan, &ts,
-			&lastVacuum, &lastAutovacuum, &lastAnalyze, &lastAutoanalyze); e != nil {
+			&lastVacuum, &lastAutovacuum, &lastAnalyze, &lastAutoanalyze,
+			&seqTupRead, &tupIns, &tupUpd, &tupDel, &tupHotUpd, &modSinceAnalyze,
+			&autovacuums, &autoanalyzes, &tableBytes, &toastBytes, &frozenAge); e != nil {
 			writeError(w, http.StatusInternalServerError, "scan failed", e.Error())
 			return
 		}
@@ -111,6 +117,23 @@ func (a *API) handleTables(w http.ResponseWriter, r *http.Request) {
 		putNumber(item, "seq_scan_rate", seqScan)
 		putNumber(item, "idx_scan_rate", idxScan)
 		putNumber(item, "last_vacuum_age_seconds", vacuumAge)
+		// The write, scan and vacuum figures are per-second rates, like the scan
+		// rates above. A table that has not been updated has no HOT ratio, not a
+		// perfect one.
+		putNumber(item, "seq_tup_read_rate", seqTupRead)
+		putNumber(item, "n_tup_ins_rate", tupIns)
+		putNumber(item, "n_tup_upd_rate", tupUpd)
+		putNumber(item, "n_tup_del_rate", tupDel)
+		putNumber(item, "n_tup_hot_upd_rate", tupHotUpd)
+		putNumber(item, "autovacuum_rate", autovacuums)
+		putNumber(item, "autoanalyze_rate", autoanalyzes)
+		putNumber(item, "n_mod_since_analyze", modSinceAnalyze)
+		putNumber(item, "table_bytes", tableBytes)
+		putNumber(item, "toast_bytes", toastBytes)
+		putNumber(item, "relfrozenxid_age", frozenAge)
+		if hot := hotUpdateRatio(tupUpd, tupHotUpd); hot != nil {
+			item["hot_update_ratio"] = *hot
+		}
 		switch {
 		case ratio != nil:
 			item["dead_ratio"] = *ratio
@@ -125,6 +148,143 @@ func (a *API) handleTables(w http.ResponseWriter, r *http.Request) {
 	}
 	if e := setRelationMetadata(r.Context(), a.pool, &resp, id, "table_stats"); e != nil {
 		writeError(w, http.StatusInternalServerError, "query failed", e.Error())
+		return
+	}
+	writeJSON(w, 200, resp)
+}
+
+// tableHistoryPoint is one bucket of a table's dead and live tuple counts.
+type tableHistoryPoint struct {
+	TS       time.Time `json:"ts"`
+	NDeadTup *int64    `json:"n_dead_tup"`
+	NLiveTup *int64    `json:"n_live_tup"`
+}
+
+// tableHistorySeries is the history of one table, oldest bucket first.
+type tableHistorySeries struct {
+	Datname    string              `json:"datname"`
+	Schemaname string              `json:"schemaname"`
+	Relname    string              `json:"relname"`
+	Points     []tableHistoryPoint `json:"points"`
+}
+
+type tableHistoryResponse struct {
+	InstanceID string               `json:"instance_id"`
+	From       time.Time            `json:"from"`
+	To         time.Time            `json:"to"`
+	StepSecs   int                  `json:"step_seconds"`
+	Tables     []tableHistorySeries `json:"tables"`
+}
+
+const (
+	tableHistoryDefaultLimit = 10
+	tableHistoryMaxLimit     = 25
+	// tableHistoryBuckets is how many points a series is cut to, at most.
+	tableHistoryBuckets = 60
+	tableHistoryMinStep = 60
+)
+
+// handleTableHistory returns the dead and live tuple counts over time of the
+// tables with the most dead tuples now: the trend behind the dead-rows list. A
+// counter is a reading, not a rate, so each bucket keeps its last reading.
+func (a *API) handleTableHistory(w http.ResponseWriter, r *http.Request) {
+	id, e := relationID(r)
+	if e != nil {
+		writeError(w, 400, "invalid instance_id", e.Error())
+		return
+	}
+	q := r.URL.Query()
+	limit := tableHistoryDefaultLimit
+	if raw := q.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > tableHistoryMaxLimit {
+			writeError(w, 400, "invalid limit", "allowed range: 1 to "+strconv.Itoa(tableHistoryMaxLimit))
+			return
+		}
+		limit = n
+	}
+	to := time.Now().UTC()
+	if raw := q.Get("to"); raw != "" {
+		t, err := parseTimeParam(raw)
+		if err != nil {
+			writeError(w, 400, "invalid to", err.Error())
+			return
+		}
+		to = t
+	}
+	from := to.Add(-time.Hour)
+	if raw := q.Get("from"); raw != "" {
+		t, err := parseTimeParam(raw)
+		if err != nil {
+			writeError(w, 400, "invalid from", err.Error())
+			return
+		}
+		from = t
+	}
+	if !from.Before(to) {
+		writeError(w, 400, "invalid range", "from must be before to")
+		return
+	}
+	step := int(to.Sub(from).Seconds()) / tableHistoryBuckets
+	if step < tableHistoryMinStep {
+		step = tableHistoryMinStep
+	}
+	resp := tableHistoryResponse{InstanceID: id.String(), From: from, To: to, StepSecs: step, Tables: []tableHistorySeries{}}
+	if a.pool == nil {
+		writeJSON(w, 200, resp)
+		return
+	}
+	args := []any{id, limit, from, to, float64(step)}
+	database := ""
+	if database = q.Get("database"); database != "" {
+		args = append(args, database)
+	}
+	filter := ""
+	if database != "" {
+		filter = " AND datname=$6"
+	}
+	// The tables are those with the most dead tuples in the newest reading,
+	// as the tables endpoint ranks them; the history is read for exactly those.
+	rows, e := a.pool.Query(r.Context(), `WITH picked AS (
+			SELECT datname, schemaname, relname, row_number() OVER (ORDER BY n_dead_tup DESC NULLS LAST, datname, schemaname, relname) AS rank
+			FROM (SELECT DISTINCT ON (datname, schemaname, relname) datname, schemaname, relname, n_dead_tup
+			        FROM metrics_tables
+			       WHERE tenant_id='default' AND instance_id=$1 AND ts >= now() - interval '15 minutes'`+filter+`
+			       ORDER BY datname, schemaname, relname, ts DESC) latest
+			ORDER BY n_dead_tup DESC NULLS LAST, datname, schemaname, relname LIMIT $2)
+		SELECT p.rank, m.datname, m.schemaname, m.relname,
+		       time_bucket(make_interval(secs => $5), m.ts) AS bucket,
+		       last(m.n_dead_tup, m.ts), last(m.n_live_tup, m.ts)
+		FROM metrics_tables m
+		JOIN picked p ON p.datname = m.datname AND p.schemaname = m.schemaname AND p.relname = m.relname
+		WHERE m.tenant_id='default' AND m.instance_id=$1 AND m.ts >= $3 AND m.ts < $4
+		GROUP BY p.rank, m.datname, m.schemaname, m.relname, bucket
+		ORDER BY p.rank, bucket`, args...)
+	if e != nil {
+		writeError(w, http.StatusInternalServerError, "query failed", e.Error())
+		return
+	}
+	defer rows.Close()
+	index := map[int64]int{}
+	for rows.Next() {
+		var rank int64
+		var datname, schema, name string
+		var bucket time.Time
+		var dead, live *int64
+		if e := rows.Scan(&rank, &datname, &schema, &name, &bucket, &dead, &live); e != nil {
+			writeError(w, http.StatusInternalServerError, "scan failed", e.Error())
+			return
+		}
+		at, seen := index[rank]
+		if !seen {
+			resp.Tables = append(resp.Tables, tableHistorySeries{Datname: datname, Schemaname: schema, Relname: name, Points: []tableHistoryPoint{}})
+			at = len(resp.Tables) - 1
+			index[rank] = at
+		}
+		resp.Tables[at].Points = append(resp.Tables[at].Points, tableHistoryPoint{TS: bucket.UTC(), NDeadTup: dead, NLiveTup: live})
+	}
+	if e := rows.Err(); e != nil {
+		writeError(w, http.StatusInternalServerError, "rows error", e.Error())
 		return
 	}
 	writeJSON(w, 200, resp)
@@ -218,6 +378,20 @@ type skippedRelation struct {
 	Datname    string `json:"datname"`
 	Schemaname string `json:"schemaname"`
 	Relname    string `json:"relname"`
+}
+
+// hotUpdateRatio is the share of a table's updates that were heap-only, from
+// the per-second update rates. It is nil when either rate is missing or the
+// table was not updated in the interval.
+func hotUpdateRatio(updates, hot *float64) *float64 {
+	if updates == nil || hot == nil || *updates <= 0 {
+		return nil
+	}
+	ratio := *hot / *updates
+	if ratio > 1 {
+		ratio = 1
+	}
+	return &ratio
 }
 
 // indexCacheHitRatio is the share of an index's block reads served from the

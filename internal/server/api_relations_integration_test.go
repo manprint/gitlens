@@ -127,3 +127,47 @@ func TestINTIDX007_RelationIndexEndpointReportsLastScan(t *testing.T) {
 	require.Equal(t, "not_available", got["orders_v15_idx"].status)
 	require.Nil(t, got["orders_v15_idx"].at)
 }
+
+// TestINTIDX010_TableHistoryReturnsTheDeadTupleTrendOfTheWorstTables: the history
+// endpoint picks the tables with the most dead tuples now and returns their
+// dead and live counts per bucket, oldest first, one series per table.
+func TestINTIDX010_TableHistoryReturnsTheDeadTupleTrendOfTheWorstTables(t *testing.T) {
+	pool := getSharedPool(t)
+	ctx := context.Background()
+	id := uuid.New()
+	now := time.Now().UTC().Truncate(time.Minute)
+	for minute := 0; minute < 30; minute += 5 {
+		at := now.Add(-time.Duration(minute) * time.Minute)
+		for _, row := range []struct {
+			table string
+			dead  int64
+		}{{"orders", int64(1000 - minute*10)}, {"items", int64(50 - minute)}} {
+			_, err := pool.Exec(ctx, `INSERT INTO metrics_tables
+				(ts, cluster_id, instance_id, datname, schemaname, relname, n_dead_tup, n_live_tup)
+				VALUES ($1, 1, $2, 'app', 'public', $3, $4, 5000)`, at, id, row.table, row.dead)
+			require.NoError(t, err)
+		}
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM metrics_tables WHERE instance_id=$1`, id) })
+
+	rec := httptest.NewRecorder()
+	relationRouter(NewAPI(pool)).ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
+		"/api/v1/instances/"+id.String()+"/tables/history?limit=1&from="+now.Add(-time.Hour).Format(time.RFC3339)+"&to="+now.Add(time.Minute).Format(time.RFC3339), http.NoBody))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var body tableHistoryResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Len(t, body.Tables, 1, "limit=1 keeps only the table with the most dead tuples")
+	series := body.Tables[0]
+	require.Equal(t, "orders", series.Relname)
+	require.Len(t, series.Points, 6)
+	for i := 1; i < len(series.Points); i++ {
+		require.True(t, series.Points[i].TS.After(series.Points[i-1].TS), "points are oldest first")
+	}
+	require.EqualValues(t, 1000, *series.Points[len(series.Points)-1].NDeadTup)
+	require.EqualValues(t, 5000, *series.Points[0].NLiveTup)
+
+	rec = httptest.NewRecorder()
+	relationRouter(NewAPI(pool)).ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
+		"/api/v1/instances/"+id.String()+"/tables/history?limit=99", http.NoBody))
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+}

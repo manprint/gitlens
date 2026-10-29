@@ -143,7 +143,7 @@ At T0 the agent schedules: `instance_info`, `monitoring_role`, `activity`, `lock
 `database_stats`, `settings`, `wal`, `checkpointer`, `archiver`,
 `vacuum_progress`, `replication_slots`, `logical_replication`, `replication_streaming` on primaries,
 `replication_receiver` on standbys, `table_stats`, `index_stats`,
-`bloat_estimate`, `trigger_inventory`, `fk_indexes`, `extensions`,
+`bloat_estimate`, `trigger_inventory`, `fk_indexes`, `table_columns`, `extensions`,
 `postgis_columns`, `sequences`, `partitions`, `function_stats`,
 `function_security`, `wal_directory`, `database_size`, `slru`, and `recovery` (which reports
 only on a standby). At T0 `sequences` sees each sequence's

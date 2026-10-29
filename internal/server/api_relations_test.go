@@ -102,3 +102,12 @@ func TestIndexCacheHitRatio(t *testing.T) {
 	require.InDelta(t, 0.75, *indexCacheHitRatio(f(1), f(3)), 1e-9)
 	require.InDelta(t, 0.0, *indexCacheHitRatio(f(2), f(0)), 1e-9)
 }
+
+func TestHotUpdateRatio(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	require.Nil(t, hotUpdateRatio(nil, f(1)), "a missing update rate has no ratio")
+	require.Nil(t, hotUpdateRatio(f(1), nil), "a missing HOT rate has no ratio")
+	require.Nil(t, hotUpdateRatio(f(0), f(0)), "a table that was not updated has no ratio, not a perfect one")
+	require.InDelta(t, 0.75, *hotUpdateRatio(f(4), f(3)), 1e-9)
+	require.InDelta(t, 1.0, *hotUpdateRatio(f(1), f(1.5)), 1e-9, "rate noise cannot push the ratio past 1")
+}

@@ -19,7 +19,14 @@ export const qk = {
   instanceHost: (id: string) => ['getInstanceHost', id] as const,
   instanceSettings: (id: string, changedSince?: string) =>
     ['getInstanceSettings', id, changedSince] as const,
-  instanceTables: (id: string, limit?: number) => ['getInstanceTables', id, limit] as const,
+  instanceTables: (id: string, limit?: number, orderBy?: string) =>
+    ['getInstanceTables', id, limit, orderBy] as const,
+  instanceTableHistory: (
+    id: string,
+    database: string | undefined,
+    window: QueryWindow,
+    limit?: number,
+  ) => ['getInstanceTableHistory', id, database, queryWindowKey(window), limit] as const,
   instanceTriggers: (id: string) => ['getInstanceTriggers', id] as const,
   instanceUnindexedForeignKeys: (id: string) => ['getInstanceUnindexedForeignKeys', id] as const,
   instanceExtensions: (id: string) => ['getInstanceExtensions', id] as const,

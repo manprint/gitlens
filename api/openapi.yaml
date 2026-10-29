@@ -980,6 +980,33 @@ components:
         items: { type: array, items: { type: object, additionalProperties: true } }
         truncated: { $ref: '#/components/schemas/Truncated' }
         relations_not_reported: { type: [integer, 'null'], format: int32 }
+    TableHistoryResponse:
+      type: object
+      required: [instance_id, from, to, step_seconds, tables]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        from: { $ref: '#/components/schemas/Timestamp' }
+        to: { $ref: '#/components/schemas/Timestamp' }
+        step_seconds: { type: integer, format: int32, minimum: 60 }
+        tables:
+          type: array
+          items: { $ref: '#/components/schemas/TableHistorySeries' }
+    TableHistorySeries:
+      type: object
+      required: [datname, schemaname, relname, points]
+      properties:
+        datname: { type: string }
+        schemaname: { type: string }
+        relname: { type: string }
+        points:
+          type: array
+          items:
+            type: object
+            required: [ts, n_dead_tup, n_live_tup]
+            properties:
+              ts: { $ref: '#/components/schemas/Timestamp' }
+              n_dead_tup: { type: [integer, 'null'], format: int64 }
+              n_live_tup: { type: [integer, 'null'], format: int64 }
     BloatResponse:
       type: object
       required: [instance_id, items, truncated, relations_not_reported, skipped_tables, skipped_relations]
@@ -2003,6 +2030,10 @@ paths:
         scrape; last_vacuum_at, last_autovacuum_at, last_analyze_at and
         last_autoanalyze_at are the timestamps pg_stat_user_tables reports,
         absent when the table was never processed that way.
+        seq_tup_read_rate, n_tup_ins_rate, n_tup_upd_rate, n_tup_del_rate, n_tup_hot_upd_rate, autovacuum_rate and
+        autoanalyze_rate are per-second rates over the last scrape interval. hot_update_ratio is n_tup_hot_upd_rate over
+        n_tup_upd_rate, and is absent when the table was not updated in the interval. n_mod_since_analyze, table_bytes,
+        toast_bytes and relfrozenxid_age are the latest readings; table_bytes excludes indexes and TOAST.
       parameters:
         - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
         - name: order_by
@@ -2025,9 +2056,51 @@ paths:
                   value:
                     instance_id: 11111111-1111-1111-1111-111111111111
                     items:
-                      - { datname: app, schemaname: public, relname: users, n_live_tup: 1200, n_dead_tup: 30, dead_ratio: 0.025, total_bytes: 1048576, seq_scan_rate: 0.02, idx_scan_rate: 4.5, last_vacuum_age_seconds: 3600, last_vacuum_at: '2026-08-27T01:00:00Z', last_autovacuum_at: '2026-08-27T01:40:00Z', last_autoanalyze_at: '2026-08-27T01:41:00Z', ts: '2026-08-27T02:00:00Z' }
+                      - { datname: app, schemaname: public, relname: users, n_live_tup: 1200, n_dead_tup: 30, dead_ratio: 0.025, total_bytes: 1048576, seq_scan_rate: 0.02, idx_scan_rate: 4.5, last_vacuum_age_seconds: 3600, last_vacuum_at: '2026-08-27T01:00:00Z', last_autovacuum_at: '2026-08-27T01:40:00Z', last_autoanalyze_at: '2026-08-27T01:41:00Z', seq_tup_read_rate: 12.5, n_tup_ins_rate: 0.4, n_tup_upd_rate: 1.2, n_tup_del_rate: 0.1, n_tup_hot_upd_rate: 0.9, hot_update_ratio: 0.75, autovacuum_rate: 0.0003, autoanalyze_rate: 0.0003, n_mod_since_analyze: 85, table_bytes: 262144, toast_bytes: 0, relfrozenxid_age: 1200000, ts: '2026-08-27T02:00:00Z' }
                     truncated: false
                     relations_not_reported: null
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/tables/history:
+    get:
+      tags: [instances]
+      operationId: getInstanceTableHistory
+      summary: Return the dead and live tuple trend of the tables with the most dead tuples.
+      description: >-
+        The tables are those with the most dead tuples in the newest reading (the tables endpoint's ranking), and the
+        series are their n_dead_tup and n_live_tup over the window. Each point is the last reading of a bucket of
+        step_seconds. Without from, the hour before to (or before now) is returned. A table with no reading in the window
+        has no series.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - { name: database, in: query, required: false, schema: { type: string } }
+        - { name: from, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - { name: to, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, format: int32, minimum: 1, maximum: 25, default: 10 }
+          description: Maximum number of tables.
+      responses:
+        '200':
+          description: One series per table, worst first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TableHistoryResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    from: '2026-08-27T01:00:00Z'
+                    to: '2026-08-27T02:00:00Z'
+                    step_seconds: 60
+                    tables:
+                      - datname: app
+                        schemaname: public
+                        relname: orders
+                        points:
+                          - { ts: '2026-08-27T01:00:00Z', n_dead_tup: 900, n_live_tup: 5000 }
+                          - { ts: '2026-08-27T01:01:00Z', n_dead_tup: 950, n_live_tup: 5000 }
         '400': { $ref: '#/components/responses/BadRequest' }
 
   /api/v1/instances/{id}/indexes:

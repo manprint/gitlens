@@ -22,6 +22,7 @@ import { EmptyState, ErrorState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { formatBytes, formatCount, formatPercent, formatRate, formatRelative } from '@/lib/format'
 import {
   buildIndexRows,
@@ -39,6 +40,10 @@ import {
 import { summariseColumns } from '@/lib/indexDefinition'
 import { chooseInstance, readLastInstance } from '@/lib/lastInstance'
 import { cn } from '@/lib/utils'
+
+import { CleanupPanel, type SiblingServer } from './CleanupPanel'
+import { DeadRowsPanel } from './DeadRowsPanel'
+import { SortHeader } from './SortHeader'
 
 /** The most indexes the API returns for one server. */
 export const INDEX_LIMIT = 500
@@ -69,6 +74,20 @@ const FILTERS: readonly { value: RowFilter; label: string; hint: string }[] = [
 
 type SortKey = 'name' | 'table' | 'bytes' | 'scanRate' | 'lastScan'
 
+const TABS = [
+  { value: 'indexes', label: 'Indexes' },
+  { value: 'cleanup', label: 'Cleanup' },
+  { value: 'dead-rows', label: 'Dead rows' },
+] as const
+
+type TabValue = (typeof TABS)[number]['value']
+
+const DEFAULT_TAB: TabValue = 'indexes'
+
+function readTab(value: string | null): TabValue {
+  return TABS.find((tab) => tab.value === value)?.value ?? DEFAULT_TAB
+}
+
 function readFilter(value: string | null): RowFilter {
   return FILTERS.some((filter) => filter.value === value) ? (value as RowFilter) : 'all'
 }
@@ -87,6 +106,15 @@ function instanceOptions(clusters: readonly Cluster[]): InstanceOption[] {
       up: instance.up,
     })),
   )
+}
+
+function siblingServers(clusters: readonly Cluster[], instanceId: string): SiblingServer[] {
+  const cluster = clusters.find((candidate) =>
+    candidate.instances.some((instance) => instance.instance_id === instanceId),
+  )
+  return (cluster?.instances ?? [])
+    .filter((instance) => instance.instance_id !== instanceId)
+    .map((instance) => ({ id: instance.instance_id, label: `${instance.addr}:${instance.port}` }))
 }
 
 function sortValue(row: IndexRow, key: SortKey): string | number | null {
@@ -263,35 +291,6 @@ function Detail({ row }: { row: IndexRow }) {
   )
 }
 
-function SortHeader({
-  active,
-  descending,
-  label,
-  onSort,
-}: {
-  active: boolean
-  descending: boolean
-  label: string
-  onSort: () => void
-}) {
-  return (
-    <th
-      aria-sort={active ? (descending ? 'descending' : 'ascending') : 'none'}
-      className="px-3 py-2 text-left font-medium"
-      scope="col"
-    >
-      <button
-        className="hover:text-foreground inline-flex items-center gap-1 uppercase"
-        onClick={onSort}
-        type="button"
-      >
-        {label}
-        {active ? <span aria-hidden="true">{descending ? '↓' : '↑'}</span> : null}
-      </button>
-    </th>
-  )
-}
-
 function Breakdown({
   title,
   entries,
@@ -321,12 +320,15 @@ function Breakdown({
 interface AnalysisProps {
   controls: React.ReactNode
   instanceId: string
+  /** The other servers of the same cluster. */
+  siblings: readonly SiblingServer[]
 }
 
-function InstanceIndexes({ controls, instanceId }: AnalysisProps) {
+function InstanceIndexes({ controls, instanceId, siblings }: AnalysisProps) {
   const [searchParams, setSearchParams] = useSearchParams()
   const database = searchParams.get('db') ?? ''
   const filter = readFilter(searchParams.get('show'))
+  const tab = readTab(searchParams.get('tab'))
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<{ key: SortKey; descending: boolean }>({
     key: 'bytes',
@@ -403,6 +405,13 @@ function InstanceIndexes({ controls, instanceId }: AnalysisProps) {
     setSearchParams(next, { replace: true })
   }
 
+  function setTab(value: string) {
+    const next = new URLSearchParams(searchParams)
+    if (value === DEFAULT_TAB) next.delete('tab')
+    else next.set('tab', value)
+    setSearchParams(next, { replace: true })
+  }
+
   function toggleSort(key: SortKey) {
     setSort((current) =>
       current.key === key
@@ -456,367 +465,402 @@ function InstanceIndexes({ controls, instanceId }: AnalysisProps) {
         </div>
       </div>
 
-      {indexesQuery.isPending && response === undefined ? (
-        <div aria-busy="true" aria-label="Loading indexes" role="status">
-          Loading indexes…
-        </div>
-      ) : indexesQuery.error && response === undefined ? (
-        <ErrorState
-          endpoint="indexes"
-          failure={indexesQuery.error}
-          onRetry={() => void indexesQuery.refetch()}
-        />
-      ) : (
-        <>
-          {response?.truncated || allRows.length >= INDEX_LIMIT ? (
-            <div
-              className="border-warning/40 bg-warning/10 flex items-start gap-2 rounded-lg border px-4 py-3 text-sm"
-              role="status"
-            >
-              <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-              <p>
-                <strong>The list is incomplete.</strong> The agent reports only its busiest and
-                largest indexes per database (<code>checks.index_stats.top_n</code>, 50 by default)
-                {allRows.length >= INDEX_LIMIT
-                  ? `, and this page shows at most ${INDEX_LIMIT}`
-                  : ''}
-                . The counts below cover the {formatCount(allRows.length)} indexes reported, not
-                every index of the server. Raise <code>top_n</code> in the agent configuration to
-                see more.
-              </p>
+      <Tabs onValueChange={setTab} value={tab}>
+        <TabsList aria-label="Index management sections" variant="line">
+          {TABS.map((option) => (
+            <TabsTrigger key={option.value} value={option.value}>
+              {option.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        <TabsContent className="space-y-6" value="indexes">
+          {indexesQuery.isPending && response === undefined ? (
+            <div aria-busy="true" aria-label="Loading indexes" role="status">
+              Loading indexes…
             </div>
-          ) : null}
-
-          {unusedPending > 0 ? (
-            <div className="bg-muted/40 rounded-lg border px-4 py-3 text-sm" role="status">
-              <strong>
-                Unused-index check pending for {formatCount(unusedPending)}{' '}
-                {unusedPending === 1 ? 'index' : 'indexes'}.
-              </strong>{' '}
-              The advisor needs 7 days of usage history before it calls an index unused. Until then,
-              &quot;never scanned&quot; below is the raw statistic: no scan since the statistics
-              were last reset.
-            </div>
-          ) : null}
-
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <MetricTile label="Indexes" value={formatCount(summary.total)} unit="reported" />
-            <MetricTile label="Total size" value={formatBytes(summary.bytes)} />
-            <MetricTile
-              label="Need attention"
-              value={formatCount(attention)}
-              unit={`of ${formatCount(summary.total)}`}
+          ) : indexesQuery.error && response === undefined ? (
+            <ErrorState
+              endpoint="indexes"
+              failure={indexesQuery.error}
+              onRetry={() => void indexesQuery.refetch()}
             />
-            <MetricTile
-              label="Never scanned"
-              value={formatCount(summary.neverScanned)}
-              unit={summary.neverScanned > 0 ? formatBytes(summary.neverScannedBytes) : undefined}
-            />
-            <MetricTile label="Primary keys" value={formatCount(summary.primary)} />
-            <MetricTile label="Unique" value={formatCount(summary.unique)} />
-            <MetricTile label="Partial" value={formatCount(summary.partial)} />
-            <MetricTile label="Expression" value={formatCount(summary.expression)} />
-            <MetricTile label="Composite" value={formatCount(summary.composite)} />
-            <MetricTile label="Invalid" value={formatCount(summary.invalid)} />
-            <MetricTile
-              label="Duplicate groups"
-              value={formatCount(counts.duplicate)}
-              unit={`${formatCount(counts.redundant)} redundant prefix`}
-            />
-            <MetricTile
-              label="Foreign keys w/o index"
-              value={formatCount(gaps.length)}
-              unit={findingsQuery.isPending ? 'loading…' : undefined}
-            />
-          </div>
-
-          {scopedFindings.length === 0 && gaps.length === 0 ? null : (
-            <section
-              aria-labelledby="index-attention-title"
-              className="bg-card shadow-card overflow-hidden rounded-xl border"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b px-5 py-4">
-                <div>
-                  <h2 className="text-base font-semibold" id="index-attention-title">
-                    Advisor findings on indexes
-                  </h2>
-                  <p className="text-muted-foreground mt-0.5 text-sm">
-                    {formatCount(counts.unused)} unused · {formatCount(counts.duplicate)} duplicate
-                    groups · {formatCount(counts.redundant)} redundant prefixes ·{' '}
-                    {formatCount(counts.invalid)} invalid · {formatCount(counts.divergence)}{' '}
-                    diverging · {formatCount(gaps.length)} foreign keys without an index
+          ) : (
+            <>
+              {response?.truncated || allRows.length >= INDEX_LIMIT ? (
+                <div
+                  className="border-warning/40 bg-warning/10 flex items-start gap-2 rounded-lg border px-4 py-3 text-sm"
+                  role="status"
+                >
+                  <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+                  <p>
+                    <strong>The list is incomplete.</strong> The agent reports only its busiest and
+                    largest indexes per database (<code>checks.index_stats.top_n</code>, 50 by
+                    default)
+                    {allRows.length >= INDEX_LIMIT
+                      ? `, and this page shows at most ${INDEX_LIMIT}`
+                      : ''}
+                    . The counts below cover the {formatCount(allRows.length)} indexes reported, not
+                    every index of the server. Raise <code>top_n</code> in the agent configuration
+                    to see more.
                   </p>
                 </div>
-                <Link className="text-primary text-sm font-medium hover:underline" to="/findings">
-                  Open Findings
-                </Link>
-              </div>
-              <ul className="divide-y">
-                {[...scopedFindings]
-                  .filter((finding) => finding.rule_id !== INDEX_RULES.bloat)
-                  .sort((a, b) => a.rule_id.localeCompare(b.rule_id))
-                  .map((finding) => (
-                    <li key={finding.finding_id} className="space-y-1 px-5 py-3 text-sm">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge
-                          variant={finding.severity === 'critical' ? 'destructive' : 'warning'}
-                        >
-                          {finding.rule_id}
-                        </Badge>
-                        {finding.datname ? (
-                          <Badge variant="outline">
-                            <Database aria-hidden="true" />
-                            {finding.datname}
-                          </Badge>
-                        ) : null}
-                        <span className="font-medium">{finding.title}</span>
-                      </div>
-                      {finding.detail ? (
-                        <p className="text-muted-foreground">{finding.detail}</p>
-                      ) : null}
-                      {finding.remediation ? <p>{finding.remediation}</p> : null}
-                    </li>
-                  ))}
-              </ul>
-            </section>
-          )}
+              ) : null}
 
-          {summary.total > 0 ? (
-            <div className="grid gap-4 lg:grid-cols-3">
-              <Breakdown title="By access method" entries={summary.byMethod} />
-              <Breakdown title="By database" entries={summary.byDatabase} />
-              <Breakdown
-                title="Tables with the most indexes"
-                entries={tables.map((group) => ({
-                  label: `${group.schema}.${group.table}`,
-                  count: group.indexes.length,
-                  bytes: group.bytes,
-                }))}
-              />
-            </div>
-          ) : null}
-
-          <section
-            aria-labelledby="index-inventory-title"
-            className="bg-card shadow-card overflow-hidden rounded-xl border"
-          >
-            <div className="space-y-3 border-b px-5 py-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-base font-semibold" id="index-inventory-title">
-                    Index inventory
-                  </h2>
-                  <p className="text-muted-foreground mt-0.5 text-sm">
-                    {formatCount(visible.length)} of {formatCount(scoped.length)} indexes. Scan
-                    figures are per-second rates over the last collection interval.
-                  </p>
+              {unusedPending > 0 ? (
+                <div className="bg-muted/40 rounded-lg border px-4 py-3 text-sm" role="status">
+                  <strong>
+                    Unused-index check pending for {formatCount(unusedPending)}{' '}
+                    {unusedPending === 1 ? 'index' : 'indexes'}.
+                  </strong>{' '}
+                  The advisor needs 7 days of usage history before it calls an index unused. Until
+                  then, &quot;never scanned&quot; below is the raw statistic: no scan since the
+                  statistics were last reset.
                 </div>
-                <div className="relative">
-                  <Search
-                    aria-hidden="true"
-                    className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
-                  />
-                  <Input
-                    aria-label="Search indexes"
-                    className="w-72 max-w-full pl-8"
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Name, table, column or method"
-                    type="search"
-                    value={search}
-                  />
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter indexes">
-                {FILTERS.map((option) => (
-                  <button
-                    key={option.value}
-                    aria-pressed={option.value === filter}
-                    className={cn(
-                      'h-8 rounded-full border px-3 text-sm font-medium transition-colors',
-                      option.value === filter
-                        ? 'bg-primary text-primary-foreground border-transparent'
-                        : 'text-muted-foreground hover:text-foreground',
-                    )}
-                    onClick={() => setParam('show', option.value)}
-                    title={option.hint}
-                    type="button"
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+              ) : null}
 
-            {visible.length === 0 ? (
-              <div className="p-5">
-                <EmptyState
-                  description={
-                    summary.total === 0
-                      ? 'The agent has not reported index statistics for this server yet.'
-                      : 'No index matches the current filter and search.'
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <MetricTile label="Indexes" value={formatCount(summary.total)} unit="reported" />
+                <MetricTile label="Total size" value={formatBytes(summary.bytes)} />
+                <MetricTile
+                  label="Need attention"
+                  value={formatCount(attention)}
+                  unit={`of ${formatCount(summary.total)}`}
+                />
+                <MetricTile
+                  label="Never scanned"
+                  value={formatCount(summary.neverScanned)}
+                  unit={
+                    summary.neverScanned > 0 ? formatBytes(summary.neverScannedBytes) : undefined
                   }
-                  title="No indexes to show"
+                />
+                <MetricTile label="Primary keys" value={formatCount(summary.primary)} />
+                <MetricTile label="Unique" value={formatCount(summary.unique)} />
+                <MetricTile label="Partial" value={formatCount(summary.partial)} />
+                <MetricTile label="Expression" value={formatCount(summary.expression)} />
+                <MetricTile label="Composite" value={formatCount(summary.composite)} />
+                <MetricTile label="Invalid" value={formatCount(summary.invalid)} />
+                <MetricTile
+                  label="Duplicate groups"
+                  value={formatCount(counts.duplicate)}
+                  unit={`${formatCount(counts.redundant)} redundant prefix`}
+                />
+                <MetricTile
+                  label="Foreign keys w/o index"
+                  value={formatCount(gaps.length)}
+                  unit={findingsQuery.isPending ? 'loading…' : undefined}
                 />
               </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table aria-label="Indexes" className="w-full text-sm">
-                  <thead className="text-muted-foreground bg-muted/40 text-xs uppercase">
-                    <tr>
-                      <th className="w-8 px-3 py-2" scope="col">
-                        <span className="sr-only">Details</span>
-                      </th>
-                      <SortHeader
-                        active={sort.key === 'name'}
-                        descending={sort.descending}
-                        label="Index"
-                        onSort={() => toggleSort('name')}
-                      />
-                      <SortHeader
-                        active={sort.key === 'table'}
-                        descending={sort.descending}
-                        label="Table"
-                        onSort={() => toggleSort('table')}
-                      />
-                      <th className="px-3 py-2 text-left font-medium" scope="col">
-                        Columns
-                      </th>
-                      <th className="px-3 py-2 text-left font-medium" scope="col">
-                        Method
-                      </th>
-                      <th className="px-3 py-2 text-left font-medium" scope="col">
-                        Flags
-                      </th>
-                      <SortHeader
-                        active={sort.key === 'bytes'}
-                        descending={sort.descending}
-                        label="Size"
-                        onSort={() => toggleSort('bytes')}
-                      />
-                      <SortHeader
-                        active={sort.key === 'scanRate'}
-                        descending={sort.descending}
-                        label="Scans"
-                        onSort={() => toggleSort('scanRate')}
-                      />
-                      <th className="px-3 py-2 text-left font-medium" scope="col">
-                        Cache hit
-                      </th>
-                      <SortHeader
-                        active={sort.key === 'lastScan'}
-                        descending={sort.descending}
-                        label="Last scan"
-                        onSort={() => toggleSort('lastScan')}
-                      />
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {visible.map((row) => {
-                      const expanded = open.has(row.key)
-                      const Chevron = expanded ? ChevronDown : ChevronRight
-                      return (
-                        <Fragment key={row.key}>
-                          <tr className="hover:bg-muted/30 align-top">
-                            <td className="px-3 py-2">
-                              <button
-                                aria-expanded={expanded}
-                                aria-label={`${expanded ? 'Hide' : 'Show'} details of ${row.name}`}
-                                className="text-muted-foreground hover:text-foreground"
-                                onClick={() => toggleOpen(row.key)}
-                                type="button"
-                              >
-                                <Chevron aria-hidden="true" className="size-4" />
-                              </button>
-                            </td>
-                            <td className="px-3 py-2 font-medium break-all">{row.name}</td>
-                            <td className="px-3 py-2 break-all">
-                              <span className="text-muted-foreground">
-                                {summary.byDatabase.length > 1 && database === ''
-                                  ? `${row.datname} · `
-                                  : ''}
-                                {row.schema}.
-                              </span>
-                              {row.table}
-                            </td>
-                            <td className="px-3 py-2">
-                              <code className="font-mono text-xs break-words">
-                                {row.parsed.columns.length === 0
-                                  ? '—'
-                                  : summariseColumns(row.parsed)}
-                              </code>
-                            </td>
-                            <td className="px-3 py-2">{row.parsed.method ?? '—'}</td>
-                            <td className="px-3 py-2">
-                              <RowBadges row={row} />
-                            </td>
-                            <td className="px-3 py-2 whitespace-nowrap tabular-nums">
-                              {row.bytes === null ? 'Unknown' : formatBytes(row.bytes)}
-                            </td>
-                            <td className="px-3 py-2 whitespace-nowrap tabular-nums">
-                              {row.scanRate === null ? 'Unknown' : formatRate(row.scanRate)}
-                            </td>
-                            <td className="px-3 py-2 whitespace-nowrap tabular-nums">
-                              {row.cacheHitRatio === null
-                                ? '—'
-                                : formatPercent(row.cacheHitRatio, 1)}
-                            </td>
-                            <td className="px-3 py-2 whitespace-nowrap">
-                              {lastScanText(row, now)}
-                            </td>
-                          </tr>
-                          {expanded ? (
-                            <tr className="bg-muted/20">
-                              <td colSpan={10}>
-                                <Detail row={row} />
-                              </td>
-                            </tr>
-                          ) : null}
-                        </Fragment>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
 
-          {gaps.length > 0 ? (
-            <section
-              aria-labelledby="index-fk-title"
-              className="bg-card shadow-card overflow-hidden rounded-xl border"
-            >
-              <div className="border-b px-5 py-4">
-                <h2 className="text-base font-semibold" id="index-fk-title">
-                  Foreign keys without a covering index
-                </h2>
-                <p className="text-muted-foreground mt-0.5 text-sm">
-                  Deleting or re-keying a referenced row scans the referencing table. These are
-                  indexes that are missing, so they do not appear in the inventory.
-                </p>
-              </div>
-              <ul className="divide-y">
-                {gaps.map((gap) => (
-                  <li key={gap.finding.finding_id} className="space-y-1 px-5 py-3 text-sm">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant={gap.finding.severity === 'info' ? 'outline' : 'warning'}>
-                        {gap.finding.severity}
-                      </Badge>
-                      {gap.datname ? <Badge variant="outline">{gap.datname}</Badge> : null}
-                      <code className="font-mono">{gap.table}</code>
-                      <span className="text-muted-foreground">
-                        ({gap.columns}) → {gap.referenced}
-                      </span>
+              {scopedFindings.length === 0 && gaps.length === 0 ? null : (
+                <section
+                  aria-labelledby="index-attention-title"
+                  className="bg-card shadow-card overflow-hidden rounded-xl border"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b px-5 py-4">
+                    <div>
+                      <h2 className="text-base font-semibold" id="index-attention-title">
+                        Advisor findings on indexes
+                      </h2>
+                      <p className="text-muted-foreground mt-0.5 text-sm">
+                        {formatCount(counts.unused)} unused · {formatCount(counts.duplicate)}{' '}
+                        duplicate groups · {formatCount(counts.redundant)} redundant prefixes ·{' '}
+                        {formatCount(counts.invalid)} invalid · {formatCount(counts.divergence)}{' '}
+                        diverging · {formatCount(gaps.length)} foreign keys without an index
+                      </p>
                     </div>
-                    {gap.finding.remediation ? (
-                      <p className="text-muted-foreground">{gap.finding.remediation}</p>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
-        </>
-      )}
+                    <Link
+                      className="text-primary text-sm font-medium hover:underline"
+                      to="/findings"
+                    >
+                      Open Findings
+                    </Link>
+                  </div>
+                  <ul className="divide-y">
+                    {[...scopedFindings]
+                      .filter((finding) => finding.rule_id !== INDEX_RULES.bloat)
+                      .sort((a, b) => a.rule_id.localeCompare(b.rule_id))
+                      .map((finding) => (
+                        <li key={finding.finding_id} className="space-y-1 px-5 py-3 text-sm">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge
+                              variant={finding.severity === 'critical' ? 'destructive' : 'warning'}
+                            >
+                              {finding.rule_id}
+                            </Badge>
+                            {finding.datname ? (
+                              <Badge variant="outline">
+                                <Database aria-hidden="true" />
+                                {finding.datname}
+                              </Badge>
+                            ) : null}
+                            <span className="font-medium">{finding.title}</span>
+                          </div>
+                          {finding.detail ? (
+                            <p className="text-muted-foreground">{finding.detail}</p>
+                          ) : null}
+                          {finding.remediation ? <p>{finding.remediation}</p> : null}
+                        </li>
+                      ))}
+                  </ul>
+                </section>
+              )}
+
+              {summary.total > 0 ? (
+                <div className="grid gap-4 lg:grid-cols-3">
+                  <Breakdown title="By access method" entries={summary.byMethod} />
+                  <Breakdown title="By database" entries={summary.byDatabase} />
+                  <Breakdown
+                    title="Tables with the most indexes"
+                    entries={tables.map((group) => ({
+                      label: `${group.schema}.${group.table}`,
+                      count: group.indexes.length,
+                      bytes: group.bytes,
+                    }))}
+                  />
+                </div>
+              ) : null}
+
+              <section
+                aria-labelledby="index-inventory-title"
+                className="bg-card shadow-card overflow-hidden rounded-xl border"
+              >
+                <div className="space-y-3 border-b px-5 py-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-base font-semibold" id="index-inventory-title">
+                        Index inventory
+                      </h2>
+                      <p className="text-muted-foreground mt-0.5 text-sm">
+                        {formatCount(visible.length)} of {formatCount(scoped.length)} indexes. Scan
+                        figures are per-second rates over the last collection interval.
+                      </p>
+                    </div>
+                    <div className="relative">
+                      <Search
+                        aria-hidden="true"
+                        className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
+                      />
+                      <Input
+                        aria-label="Search indexes"
+                        className="w-72 max-w-full pl-8"
+                        onChange={(event) => setSearch(event.target.value)}
+                        placeholder="Name, table, column or method"
+                        type="search"
+                        value={search}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter indexes">
+                    {FILTERS.map((option) => (
+                      <button
+                        key={option.value}
+                        aria-pressed={option.value === filter}
+                        className={cn(
+                          'h-8 rounded-full border px-3 text-sm font-medium transition-colors',
+                          option.value === filter
+                            ? 'bg-primary text-primary-foreground border-transparent'
+                            : 'text-muted-foreground hover:text-foreground',
+                        )}
+                        onClick={() => setParam('show', option.value)}
+                        title={option.hint}
+                        type="button"
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {visible.length === 0 ? (
+                  <div className="p-5">
+                    <EmptyState
+                      description={
+                        summary.total === 0
+                          ? 'The agent has not reported index statistics for this server yet.'
+                          : 'No index matches the current filter and search.'
+                      }
+                      title="No indexes to show"
+                    />
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table aria-label="Indexes" className="w-full text-sm">
+                      <thead className="text-muted-foreground bg-muted/40 text-xs uppercase">
+                        <tr>
+                          <th className="w-8 px-3 py-2" scope="col">
+                            <span className="sr-only">Details</span>
+                          </th>
+                          <SortHeader
+                            active={sort.key === 'name'}
+                            descending={sort.descending}
+                            label="Index"
+                            onSort={() => toggleSort('name')}
+                          />
+                          <SortHeader
+                            active={sort.key === 'table'}
+                            descending={sort.descending}
+                            label="Table"
+                            onSort={() => toggleSort('table')}
+                          />
+                          <th className="px-3 py-2 text-left font-medium" scope="col">
+                            Columns
+                          </th>
+                          <th className="px-3 py-2 text-left font-medium" scope="col">
+                            Method
+                          </th>
+                          <th className="px-3 py-2 text-left font-medium" scope="col">
+                            Flags
+                          </th>
+                          <SortHeader
+                            active={sort.key === 'bytes'}
+                            descending={sort.descending}
+                            label="Size"
+                            onSort={() => toggleSort('bytes')}
+                          />
+                          <SortHeader
+                            active={sort.key === 'scanRate'}
+                            descending={sort.descending}
+                            label="Scans"
+                            onSort={() => toggleSort('scanRate')}
+                          />
+                          <th className="px-3 py-2 text-left font-medium" scope="col">
+                            Cache hit
+                          </th>
+                          <SortHeader
+                            active={sort.key === 'lastScan'}
+                            descending={sort.descending}
+                            label="Last scan"
+                            onSort={() => toggleSort('lastScan')}
+                          />
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {visible.map((row) => {
+                          const expanded = open.has(row.key)
+                          const Chevron = expanded ? ChevronDown : ChevronRight
+                          return (
+                            <Fragment key={row.key}>
+                              <tr className="hover:bg-muted/30 align-top">
+                                <td className="px-3 py-2">
+                                  <button
+                                    aria-expanded={expanded}
+                                    aria-label={`${expanded ? 'Hide' : 'Show'} details of ${row.name}`}
+                                    className="text-muted-foreground hover:text-foreground"
+                                    onClick={() => toggleOpen(row.key)}
+                                    type="button"
+                                  >
+                                    <Chevron aria-hidden="true" className="size-4" />
+                                  </button>
+                                </td>
+                                <td className="px-3 py-2 font-medium break-all">{row.name}</td>
+                                <td className="px-3 py-2 break-all">
+                                  <span className="text-muted-foreground">
+                                    {summary.byDatabase.length > 1 && database === ''
+                                      ? `${row.datname} · `
+                                      : ''}
+                                    {row.schema}.
+                                  </span>
+                                  {row.table}
+                                </td>
+                                <td className="px-3 py-2">
+                                  <code className="font-mono text-xs break-words">
+                                    {row.parsed.columns.length === 0
+                                      ? '—'
+                                      : summariseColumns(row.parsed)}
+                                  </code>
+                                </td>
+                                <td className="px-3 py-2">{row.parsed.method ?? '—'}</td>
+                                <td className="px-3 py-2">
+                                  <RowBadges row={row} />
+                                </td>
+                                <td className="px-3 py-2 whitespace-nowrap tabular-nums">
+                                  {row.bytes === null ? 'Unknown' : formatBytes(row.bytes)}
+                                </td>
+                                <td className="px-3 py-2 whitespace-nowrap tabular-nums">
+                                  {row.scanRate === null ? 'Unknown' : formatRate(row.scanRate)}
+                                </td>
+                                <td className="px-3 py-2 whitespace-nowrap tabular-nums">
+                                  {row.cacheHitRatio === null
+                                    ? '—'
+                                    : formatPercent(row.cacheHitRatio, 1)}
+                                </td>
+                                <td className="px-3 py-2 whitespace-nowrap">
+                                  {lastScanText(row, now)}
+                                </td>
+                              </tr>
+                              {expanded ? (
+                                <tr className="bg-muted/20">
+                                  <td colSpan={10}>
+                                    <Detail row={row} />
+                                  </td>
+                                </tr>
+                              ) : null}
+                            </Fragment>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+
+              {gaps.length > 0 ? (
+                <section
+                  aria-labelledby="index-fk-title"
+                  className="bg-card shadow-card overflow-hidden rounded-xl border"
+                >
+                  <div className="border-b px-5 py-4">
+                    <h2 className="text-base font-semibold" id="index-fk-title">
+                      Foreign keys without a covering index
+                    </h2>
+                    <p className="text-muted-foreground mt-0.5 text-sm">
+                      Deleting or re-keying a referenced row scans the referencing table. These are
+                      indexes that are missing, so they do not appear in the inventory.
+                    </p>
+                  </div>
+                  <ul className="divide-y">
+                    {gaps.map((gap) => (
+                      <li key={gap.finding.finding_id} className="space-y-1 px-5 py-3 text-sm">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant={gap.finding.severity === 'info' ? 'outline' : 'warning'}>
+                            {gap.finding.severity}
+                          </Badge>
+                          {gap.datname ? <Badge variant="outline">{gap.datname}</Badge> : null}
+                          <code className="font-mono">{gap.table}</code>
+                          <span className="text-muted-foreground">
+                            ({gap.columns}) → {gap.referenced}
+                          </span>
+                        </div>
+                        {gap.finding.remediation ? (
+                          <p className="text-muted-foreground">{gap.finding.remediation}</p>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+            </>
+          )}
+        </TabsContent>
+        <TabsContent value="cleanup">
+          {indexesQuery.isPending && response === undefined ? (
+            <div aria-busy="true" aria-label="Loading indexes" role="status">
+              Loading indexes…
+            </div>
+          ) : indexesQuery.error && response === undefined ? (
+            <ErrorState
+              endpoint="indexes"
+              failure={indexesQuery.error}
+              onRetry={() => void indexesQuery.refetch()}
+            />
+          ) : (
+            <CleanupPanel instanceId={instanceId} rows={scoped} siblings={siblings} />
+          )}
+        </TabsContent>
+        <TabsContent value="dead-rows">
+          <DeadRowsPanel database={database} findings={findings} instanceId={instanceId} />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
@@ -899,6 +943,7 @@ export function IndexAnalysisPage() {
             </div>
           }
           instanceId={instanceId}
+          siblings={siblingServers(clustersQuery.data ?? [], instanceId)}
         />
       )}
     </div>

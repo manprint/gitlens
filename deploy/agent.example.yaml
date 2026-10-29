@@ -39,6 +39,7 @@ checks:
   monitoring_role: { interval: 10m } # What would let the monitoring role write.
   trigger_inventory: { interval: 5m } # Triggers of each database and which are disabled.
   fk_indexes: { interval: 15m } # Foreign keys no index serves.
+  table_columns: { interval: 1h } # Columns of each table, to size and rank index suggestions.
   extensions: { interval: 1h } # Installed extensions and available updates.
   postgis_columns: { interval: 1h } # PostGIS columns, SRIDs and spatial indexes.
   sequences: { interval: 10m } # How much of its range each sequence used.

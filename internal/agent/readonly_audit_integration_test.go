@@ -84,7 +84,7 @@ ORDER BY 1`)
 // monitoring role sent is one that reads.
 func TestINTRO001_AgentOnlyReads(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
-		auditAgentOnlyReads(t, pg, "", []string{"trigger", "fk_unindexed", "extension", "sequence", "partitioned_table", "function_tracking", "security_definer_function", "subscription"}, "")
+		auditAgentOnlyReads(t, pg, "", []string{"trigger", "fk_unindexed", "table_columns", "extension", "sequence", "partitioned_table", "function_tracking", "security_definer_function", "subscription"}, "")
 	})
 }
 
@@ -99,7 +99,7 @@ func TestINTRO002_AgentOnlyReadsPostGIS(t *testing.T) {
 CREATE TABLE ro_audit_places (id int PRIMARY KEY, pt geometry(Point, 4326), area geometry(Polygon));
 CREATE INDEX ON ro_audit_places USING gist (pt);
 INSERT INTO ro_audit_places SELECT g, ST_SetSRID(ST_MakePoint(g, g), 4326) FROM generate_series(1, 100) g`,
-			[]string{"trigger", "fk_unindexed", "extension", "spatial_column", "sequence", "partitioned_table", "function_tracking", "security_definer_function", "subscription"},
+			[]string{"trigger", "fk_unindexed", "table_columns", "extension", "spatial_column", "sequence", "partitioned_table", "function_tracking", "security_definer_function", "subscription"},
 			"belongs to extension postgis_topology")
 	})
 }

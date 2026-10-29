@@ -434,7 +434,26 @@ export function useInstanceTables(
           signal,
         }),
       ),
-    queryKey: qk.instanceTables(id, params.limit),
+    queryKey: qk.instanceTables(id, params.limit, params.order_by),
+  })
+}
+
+export function useInstanceTableHistory(
+  id: string,
+  params: WindowlessParameters<'/api/v1/instances/{id}/tables/history'>,
+  window: QueryWindow,
+) {
+  return useApiQuery({
+    keepPrevious: true,
+    policy: REFRESH.instance,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/tables/history', {
+          params: { path: { id }, query: { ...params, ...resolveQueryWindow(window) } },
+          signal,
+        }),
+      ),
+    queryKey: qk.instanceTableHistory(id, params.database, window, params.limit),
   })
 }
 

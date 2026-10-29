@@ -484,7 +484,11 @@ Security and operational boundaries:
   inherited trigger is reported only when its state differs from its
   parent's. `fk_indexes` reports, every fifteen minutes, the foreign keys no
   valid, non-partial index leads with, so that deleting a referenced row
-  scans the referencing table. `extensions` reports, hourly, each
+  scans the referencing table. `table_columns` reports, hourly and for each
+  monitored database, the columns of its largest tables (up to 1,000), with their
+  type, width and NOT NULL, and the planner's `n_distinct`, `null_frac` and
+  `avg_width` where the role may read `pg_stats` (T1); the server uses them to
+  size and rank index suggestions. `extensions` reports, hourly, each
   database's extensions with their version and the version the server's
   installed packages would update them to; `postgis_columns` reports, hourly,
   the geometry and geography columns of each database that has PostGIS, with
@@ -982,6 +986,7 @@ checks:
   monitoring_role: { interval: 10m }        # What would let the monitoring role write (security.* rules)
   trigger_inventory: { interval: 5m }       # Triggers of each database and which are disabled (trigger.* rules)
   fk_indexes:      { interval: 15m }        # Foreign keys no index serves (index.fk_unindexed)
+  table_columns:   { interval: 1h }         # Columns of each table, to size and rank index suggestions
   extensions:      { interval: 1h }         # Installed extensions and available updates (extension.*, postgis.upgrade_available)
   postgis_columns: { interval: 1h }         # PostGIS columns, SRIDs and spatial indexes (postgis.*)
   sequences:       { interval: 10m }        # How much of its range each sequence used (sequence.*)
@@ -1100,6 +1105,7 @@ checks
   database_stats     enabled
   extensions         enabled
   fk_indexes         enabled
+  table_columns      enabled
   function_security  enabled
   function_stats     enabled
   index_stats        enabled

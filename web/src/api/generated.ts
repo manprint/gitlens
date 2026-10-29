@@ -404,9 +404,29 @@ export interface paths {
         };
         /**
          * Return table relation statistics.
-         * @description The newest reading of each table reported in the last 15 minutes. seq_scan_rate and idx_scan_rate are scans per second over the last scrape interval; a column the agent could not read is absent. last_vacuum_age_seconds is the age of the last manual VACUUM at the scrape; last_vacuum_at, last_autovacuum_at, last_analyze_at and last_autoanalyze_at are the timestamps pg_stat_user_tables reports, absent when the table was never processed that way.
+         * @description The newest reading of each table reported in the last 15 minutes. seq_scan_rate and idx_scan_rate are scans per second over the last scrape interval; a column the agent could not read is absent. last_vacuum_age_seconds is the age of the last manual VACUUM at the scrape; last_vacuum_at, last_autovacuum_at, last_analyze_at and last_autoanalyze_at are the timestamps pg_stat_user_tables reports, absent when the table was never processed that way. seq_tup_read_rate, n_tup_ins_rate, n_tup_upd_rate, n_tup_del_rate, n_tup_hot_upd_rate, autovacuum_rate and autoanalyze_rate are per-second rates over the last scrape interval. hot_update_ratio is n_tup_hot_upd_rate over n_tup_upd_rate, and is absent when the table was not updated in the interval. n_mod_since_analyze, table_bytes, toast_bytes and relfrozenxid_age are the latest readings; table_bytes excludes indexes and TOAST.
          */
         get: operations["getInstanceTables"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/instances/{id}/tables/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Return the dead and live tuple trend of the tables with the most dead tuples.
+         * @description The tables are those with the most dead tuples in the newest reading (the tables endpoint's ranking), and the series are their n_dead_tup and n_live_tup over the window. Each point is the last reading of a bucket of step_seconds. Without from, the hour before to (or before now) is returned. A table with no reading in the window has no series.
+         */
+        get: operations["getInstanceTableHistory"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1820,6 +1840,26 @@ export interface components {
             /** Format: int32 */
             relations_not_reported: number | null;
         };
+        TableHistoryResponse: {
+            instance_id: components["schemas"]["InstanceId"];
+            from: components["schemas"]["Timestamp"];
+            to: components["schemas"]["Timestamp"];
+            /** Format: int32 */
+            step_seconds: number;
+            tables: components["schemas"]["TableHistorySeries"][];
+        };
+        TableHistorySeries: {
+            datname: string;
+            schemaname: string;
+            relname: string;
+            points: {
+                ts: components["schemas"]["Timestamp"];
+                /** Format: int64 */
+                n_dead_tup: number | null;
+                /** Format: int64 */
+                n_live_tup: number | null;
+            }[];
+        };
         BloatResponse: {
             instance_id: components["schemas"]["InstanceId"];
             items: {
@@ -2689,6 +2729,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RelationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+        };
+    };
+    getInstanceTableHistory: {
+        parameters: {
+            query?: {
+                database?: string;
+                from?: components["schemas"]["Timestamp"];
+                to?: components["schemas"]["Timestamp"];
+                /** @description Maximum number of tables. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["InstanceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One series per table, worst first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TableHistoryResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
