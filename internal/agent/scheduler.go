@@ -44,6 +44,7 @@ type EntryResult struct {
 type Scheduler struct {
 	maxWorkers      int
 	noJitter        bool
+	firstRunRand    func(int64) int64
 	clk             clock.Clock
 	entries         []schedEntry
 	breaker         map[breakerKey]*Breaker // per (target, check, database)
@@ -80,6 +81,9 @@ type ScheduleOptions struct {
 	NoJitter        bool
 	Clock           clock.Clock
 	ShutdownTimeout time.Duration
+	// FirstRunRand draws the first-run delay of each entry in [0, n); nil uses
+	// rand.Int63n. Tests inject it to pin the delay.
+	FirstRunRand func(n int64) int64
 }
 
 // DefaultScheduleOptions returns sensible defaults.
@@ -101,7 +105,11 @@ func NewScheduler(opts ScheduleOptions) *Scheduler {
 	if opts.Clock == nil {
 		opts.Clock = clock.System()
 	}
+	if opts.FirstRunRand == nil {
+		opts.FirstRunRand = rand.Int63n
+	}
 	return &Scheduler{
+		firstRunRand:    opts.FirstRunRand,
 		maxWorkers:      opts.MaxWorkers,
 		noJitter:        opts.NoJitter,
 		clk:             opts.Clock,
@@ -143,10 +151,7 @@ func (s *Scheduler) AddEntryWithInterval(target check.Target, c check.Check, dat
 	}
 	jitter := time.Duration(0)
 	if !s.noJitter {
-		// Jitter up to one interval per entry
-		if interval > 0 {
-			jitter = time.Duration(rand.Int63n(int64(interval)))
-		}
+		jitter = firstRunDelay(interval, s.firstRunRand)
 	}
 
 	s.entries = append(s.entries, schedEntry{
@@ -238,6 +243,29 @@ func (s *Scheduler) run(ctx context.Context) {
 	s.scrapeWG.Wait()
 }
 
+// warmupCap bounds the first-run delay so that a slow check (hourly, say)
+// still reports shortly after the agent starts instead of up to one whole
+// interval later; the spread keeps entries from all firing at once.
+func warmupCap(interval time.Duration) time.Duration {
+	switch {
+	case interval <= time.Minute:
+		return 30 * time.Second
+	case interval <= 15*time.Minute:
+		return 120 * time.Second
+	default:
+		return 600 * time.Second
+	}
+}
+
+// firstRunDelay draws the delay before an entry's first scrape:
+// rnd(min(interval, warmupCap(interval))). A non-positive interval has no delay.
+func firstRunDelay(interval time.Duration, rnd func(int64) int64) time.Duration {
+	if interval <= 0 {
+		return 0
+	}
+	return time.Duration(rnd(int64(min(interval, warmupCap(interval)))))
+}
+
 func (s *Scheduler) runEntry(ctx context.Context, entry schedEntry) {
 	interval := entry.interval
 	if interval == 0 {
@@ -262,39 +290,54 @@ func (s *Scheduler) runEntry(ctx context.Context, entry schedEntry) {
 	// with copies of itself. Only this loop sets the flag, so it needs no lock.
 	var busy atomic.Bool
 
+	// The first scrape runs right after the first-run delay; the ticker,
+	// created above, then paces the following ones one interval apart.
+	if !s.tryScrape(ctx, entry, &busy) {
+		return
+	}
 	for {
 		select {
 		case <-ticker.C():
-			if busy.Load() {
-				continue
-			}
-			if entry.breaker.Allow() {
-				// Acquiring the worker slot must observe cancellation: with
-				// every worker busy on a target that has stopped answering,
-				// a bare send parked this ticker loop until some scrape's
-				// own timeout expired, so Stop() had to wait out that scrape
-				// before this loop could even notice ctx was done — turning
-				// a graceful stop into a ShutdownTimeout-length hang.
-				select {
-				case s.workerSem <- struct{}{}:
-				case <-ctx.Done():
-					return
-				}
-				busy.Store(true)
-				s.wg.Add(1)
-				s.scrapeWG.Add(1)
-				go func() {
-					defer s.wg.Done()
-					defer s.scrapeWG.Done()
-					defer func() { <-s.workerSem }()
-					defer busy.Store(false)
-					s.scrapeEntry(ctx, entry)
-				}()
+			if !s.tryScrape(ctx, entry, &busy) {
+				return
 			}
 		case <-ctx.Done():
 			return
 		}
 	}
+}
+
+// tryScrape starts one scrape of entry unless the previous one is still
+// running or the breaker is open. It returns false only when ctx is done.
+func (s *Scheduler) tryScrape(ctx context.Context, entry schedEntry, busy *atomic.Bool) bool {
+	if busy.Load() {
+		return true
+	}
+	if !entry.breaker.Allow() {
+		return true
+	}
+	// Acquiring the worker slot must observe cancellation: with
+	// every worker busy on a target that has stopped answering,
+	// a bare send parked this ticker loop until some scrape's
+	// own timeout expired, so Stop() had to wait out that scrape
+	// before this loop could even notice ctx was done — turning
+	// a graceful stop into a ShutdownTimeout-length hang.
+	select {
+	case s.workerSem <- struct{}{}:
+	case <-ctx.Done():
+		return false
+	}
+	busy.Store(true)
+	s.wg.Add(1)
+	s.scrapeWG.Add(1)
+	go func() {
+		defer s.wg.Done()
+		defer s.scrapeWG.Done()
+		defer func() { <-s.workerSem }()
+		defer busy.Store(false)
+		s.scrapeEntry(ctx, entry)
+	}()
+	return true
 }
 
 // databaseScopedTarget wraps a check.Target for one ScopeDatabase entry,

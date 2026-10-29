@@ -33,6 +33,7 @@ targets:
       exclude: ["^template\\d$"] # Never monitor PostgreSQL template databases.
       max: 10 # Maximum databases discovered per target; 0 means the default.
 
+# Every check runs once shortly after start (within 30 s – 10 min depending on its interval) and then on its interval.
 checks:
   activity: { interval: 10s, by_application: false } # Session state and wait groups.
   locks: { interval: 10s } # Blocking/blocked lock tree at Tier 0.

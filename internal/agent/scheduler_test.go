@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -460,10 +461,18 @@ func TestScheduler_GracefulShutdown(t *testing.T) {
 	// Stop should complete and close channel
 	s.Stop()
 
-	// Results channel should be closed after Stop
-	_, ok := <-results
-	if ok {
-		t.Fatal("expected results channel to be closed after Stop")
+	// Stop must close the results channel; results buffered before the
+	// close (e.g. the immediate first scrape) are drained first.
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case _, ok := <-results:
+			if !ok {
+				return
+			}
+		case <-deadline:
+			t.Fatal("expected results channel to be closed after Stop")
+		}
 	}
 }
 
@@ -646,5 +655,196 @@ func TestScheduler_SlowScrapeIsNotOverlapped(t *testing.T) {
 	}
 	if c.maxInFlight != 1 {
 		t.Fatalf("up to %d scrapes of one entry ran at once, want 1", c.maxInFlight)
+	}
+}
+
+// maxRand returns the largest value rand.Int63n(n) can return and records n.
+func maxRand(seen *[]int64) func(int64) int64 {
+	return func(n int64) int64 {
+		if seen != nil {
+			*seen = append(*seen, n)
+		}
+		return n - 1
+	}
+}
+
+func TestFIRSTRUN001_DelayBelowShortIntervals(t *testing.T) {
+	for _, interval := range []time.Duration{10 * time.Second, 30 * time.Second} {
+		var seen []int64
+		got := firstRunDelay(interval, maxRand(&seen))
+		if got >= interval {
+			t.Errorf("firstRunDelay(%v) = %v, want < %v", interval, got, interval)
+		}
+		if len(seen) != 1 || seen[0] != int64(interval) {
+			t.Errorf("firstRunDelay(%v) drew from %v, want [%d]", interval, seen, int64(interval))
+		}
+	}
+}
+
+func TestFIRSTRUN002_HourlyCappedAtTenMinutes(t *testing.T) {
+	var seen []int64
+	got := firstRunDelay(time.Hour, maxRand(&seen))
+	if len(seen) != 1 || seen[0] != int64(600*time.Second) {
+		t.Fatalf("drew from %v, want [%d]", seen, int64(600*time.Second))
+	}
+	if got != 600*time.Second-1 {
+		t.Errorf("firstRunDelay(1h) = %v, want just under 600s", got)
+	}
+}
+
+func TestFIRSTRUN003_FifteenMinutesCappedAtTwoMinutes(t *testing.T) {
+	var seen []int64
+	got := firstRunDelay(15*time.Minute, maxRand(&seen))
+	if got >= 120*time.Second || len(seen) != 1 || seen[0] != int64(120*time.Second) {
+		t.Errorf("firstRunDelay(15m) = %v drawn from %v, want < 120s drawn from 120s", got, seen)
+	}
+}
+
+func TestFIRSTRUN004_OneMinuteCappedAtThirtySeconds(t *testing.T) {
+	var seen []int64
+	got := firstRunDelay(time.Minute, maxRand(&seen))
+	if got >= 30*time.Second || len(seen) != 1 || seen[0] != int64(30*time.Second) {
+		t.Errorf("firstRunDelay(1m) = %v drawn from %v, want < 30s drawn from 30s", got, seen)
+	}
+}
+
+func TestFIRSTRUN005_ZeroDrawAndNonPositiveInterval(t *testing.T) {
+	zero := func(int64) int64 { return 0 }
+	if got := firstRunDelay(time.Hour, zero); got != 0 {
+		t.Errorf("firstRunDelay(1h, 0) = %v, want 0", got)
+	}
+	called := false
+	never := func(int64) int64 { called = true; return 0 }
+	for _, interval := range []time.Duration{0, -time.Second} {
+		if got := firstRunDelay(interval, never); got != 0 {
+			t.Errorf("firstRunDelay(%v) = %v, want 0", interval, got)
+		}
+	}
+	if called {
+		t.Error("rnd called for a non-positive interval")
+	}
+}
+
+// stubCheck mirrors a registered check's name and interval; Scrape only counts.
+type stubCheck struct {
+	name     string
+	interval time.Duration
+	runs     atomic.Int64
+}
+
+func (c *stubCheck) Name() string                   { return c.name }
+func (c *stubCheck) Requires() check.Requirements   { return check.Requirements{} }
+func (c *stubCheck) DefaultInterval() time.Duration { return c.interval }
+func (c *stubCheck) Timeout() time.Duration         { return time.Second }
+func (c *stubCheck) Scrape(context.Context, check.Target) (check.Result, error) {
+	c.runs.Add(1)
+	return check.Result{}, nil
+}
+
+func startFake(t *testing.T, opts ScheduleOptions, entries ...check.Check) (*Scheduler, *clock.Fake) {
+	t.Helper()
+	clk := clock.NewFake(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	opts.Clock = clk
+	if opts.MaxWorkers == 0 {
+		opts.MaxWorkers = 4
+	}
+	opts.ShutdownTimeout = 5 * time.Second
+	s := NewScheduler(opts)
+	target := &mockTarget{name: "target1", conn: &mockConn{}}
+	for _, c := range entries {
+		s.AddEntry(target, c, "")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := s.Start(ctx); err != nil {
+		cancel()
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		s.Stop()
+	})
+	return s, clk
+}
+
+func expectResult(t *testing.T, s *Scheduler, what string) EntryResult {
+	t.Helper()
+	select {
+	case r := <-s.Results():
+		return r
+	case <-time.After(5 * time.Second):
+		t.Fatalf("no result: %s", what)
+		return EntryResult{}
+	}
+}
+
+func expectNoResult(t *testing.T, s *Scheduler, what string) {
+	t.Helper()
+	select {
+	case r := <-s.Results():
+		t.Fatalf("unexpected result for %s: %s", r.Entry.CheckName, what)
+	case <-time.After(150 * time.Millisecond):
+	}
+}
+
+func TestFIRSTRUN006_EveryDefaultCheckRunsWithinTheCap(t *testing.T) {
+	registered := check.All()
+	if len(registered) == 0 {
+		t.Fatal("check.All() is empty")
+	}
+	stubs := make([]*stubCheck, 0, len(registered))
+	entries := make([]check.Check, 0, len(registered))
+	for _, c := range registered {
+		stub := &stubCheck{name: c.Name(), interval: c.DefaultInterval()}
+		stubs = append(stubs, stub)
+		entries = append(entries, stub)
+	}
+	s, clk := startFake(t, ScheduleOptions{FirstRunRand: maxRand(nil)}, entries...)
+
+	// An Advance sent before an entry sleeps would be lost.
+	clk.BlockUntilSleepers(len(entries))
+	clk.Advance(600 * time.Second)
+
+	seen := map[string]bool{}
+	for len(seen) < len(entries) {
+		seen[expectResult(t, s, "one result per entry within 600 s").Entry.CheckName] = true
+	}
+	for _, stub := range stubs {
+		if stub.runs.Load() < 1 {
+			t.Errorf("%s (interval %v) did not run within 600 s", stub.name, stub.interval)
+		}
+	}
+}
+
+func TestFIRSTRUN007_HourlyCheckRunsAgainOneIntervalLater(t *testing.T) {
+	stub := &stubCheck{name: "hourly", interval: time.Hour}
+	s, clk := startFake(t, ScheduleOptions{FirstRunRand: maxRand(nil)}, stub)
+
+	clk.BlockUntilSleepers(1)
+	expectNoResult(t, s, "before the first-run delay")
+	clk.Advance(600 * time.Second)
+	expectResult(t, s, "first run after the first-run delay")
+	expectNoResult(t, s, "right after the first run")
+
+	clk.Advance(time.Hour - time.Second)
+	expectNoResult(t, s, "before one interval elapsed")
+	clk.Advance(time.Second)
+	expectResult(t, s, "second run one interval after the first")
+	expectNoResult(t, s, "after the second run")
+	if got := stub.runs.Load(); got != 2 {
+		t.Errorf("runs = %d, want 2", got)
+	}
+}
+
+func TestFIRSTRUN008_NoJitterRunsAtStartThenOnInterval(t *testing.T) {
+	stub := &stubCheck{name: "hourly", interval: time.Hour}
+	s, clk := startFake(t, ScheduleOptions{NoJitter: true}, stub)
+
+	expectResult(t, s, "immediate run before any Advance")
+	expectNoResult(t, s, "before Advance(1h)")
+	clk.Advance(time.Hour)
+	expectResult(t, s, "run after Advance(1h)")
+	expectNoResult(t, s, "after the second run")
+	if got := stub.runs.Load(); got != 2 {
+		t.Errorf("runs = %d, want 2", got)
 	}
 }

@@ -983,6 +983,8 @@ targets:
                                      # when every slot is held
 
 # Per-check configuration overrides (optional)
+# Every check runs once shortly after start (within 30 s – 10 min depending on its
+# interval) and then on its interval.
 checks:
   instance_info:    { interval: 60s }        # General instance metadata (mandatory)
   activity:        { interval: 10s, by_application: false } # Session activity

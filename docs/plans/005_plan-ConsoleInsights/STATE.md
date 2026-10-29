@@ -88,14 +88,14 @@ checkpoint. Capture/open and restore/close are each one STATE.md update.
 - Active scope: plan (whole `005_plan-ConsoleInsights`, no selector)
 - Scope result: RUNNING
 - Type: sub-phase
-- ID / attempt: 13.1 / 1
-- Status: OPEN (P0 closed: unit:P0:1)
+- ID / attempt: 1.1 / 1
+- Status: OPEN (13.1 closed: unit:13.1:1)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-opus-5-5; supervisor: Opus review agent (agent-1); exploration/mechanical: agent-3:claude-haiku-5-5
-- File / unit heading: phase_14.md → 13.1
+- File / unit heading: phase_02.md → 1.1
 - Current step: S0
-- Next action: 13.1 S1 (scheduler first run).
-- Next eligible plan unit: 13.1 (phase_14.md), then 1.1
+- Next action: 1.1 S1.
+- Next eligible plan unit: 1.1 (phase_02.md), then 1.2
 - Unit base: `5929be2` (no unit open); branch: `feat/index-analysis` (never switch or create branches)
 - Repo state: dirty with pre-existing changes (§5) + untracked plan folder; nothing of the plan implemented yet.
 
@@ -159,6 +159,7 @@ Required supervisor reviews cannot be silently replaced by weaker self-review.
 |------|--------------|---------------|-------|---------|-----------------|--------|
 | plan | authoring | 1 | agent-2:claude-sonnet-5-5 | `docs/plans/005_plan-ConsoleInsights/*` | R-PLAN-1..11 | uncommitted (committed at 0.2 S1b) |
 | plan + baseline | d7647d0, ce13a72 | 1 | agent-2:claude-opus-5-5 | plan folder; pre-existing §5 paths (without `dist/index.html`, `.claude/`) | G-SECRETS pass before each | `d7647d0` (`PEV-Unit: plan`), `ce13a72` (`PEV-Unit: baseline`) |
+| sub-phase | 13.1 / 1 | 1 | agent-2:claude-opus-5-5 | `internal/agent/scheduler.go` (`warmupCap`, `firstRunDelay`, `ScheduleOptions.FirstRunRand`, `tryScrape` + immediate post-jitter scrape), `internal/agent/scheduler_test.go` (FIRSTRUN-001..008; GracefulShutdown drain per §8), NEW `cmd/pglens-agent/first_run_integration_test.go`, `README.md`, `deploy/agent.example.yaml`; stack redeployed (deploy3.log) | §7 13.1 rows; R-13.1-S | unit:13.1:1 |
 | phase closure | P0 / 1 | 1 | agent-2:claude-opus-5-5 | P0 review fixes: `web/e2e/qa/{stack.ts (upArgs/up --no-deps, upAll --no-recreate, compose-project label check),guard.ts (backup dir only as a parameter, compose project not from env, sqlInt >= 0),pg.ts (cleanup registered before each spawn, child 'error' listener, PGOPTIONS statement_timeout, cleanup by pid <> pg_backend_pid()),observe.ts (whitelist also matches the status),harness.spec.ts,README.md}`, `internal/alert/notify/googlechat_test.go` (NOTIF-GC-005 distinctive key/token); stack dir: `deploy.sh` (HA override when present), `backup.sh` (MANIFEST in SHA256SUMS); backup 02-loaded SHA256SUMS + MANIFEST, re-verified | R-P0-1; §7 P0 rows | unit:P0:1 |
 | sub-phase | 0.4 / 1 | 1 | agent-2:claude-opus-5-5 | `web/playwright.config.ts` (projects `chromium` testMatch, `harness`, `desktop-maximized`, `laptop`, `tablet`, `phone`; video retain-on-failure), `web/e2e/visual_helpers.ts` (1920 width, `shootMaximized`), NEW `web/e2e/qa/{guard,stack,pg,odoo,api,observe,budget,runid}.ts`, `harness.spec.ts`, `harness-browser.spec.ts`, `README.md` | §7 0.4 rows; guard rails reviewed at P0 | unit:0.4:1 |
 | sub-phase | 0.3 / 1 | 1 | agent-2:claude-opus-5-5 | `internal/alert/notify/{googlechat.go,googlechat_test.go,http.go}`, `internal/server/{config.go,config_test.go}`, `cmd/pglens-server/{main.go,channels.go,channels_test.go}`, `internal/alert/engine_integration_test.go`, `deploy/docker-compose.yml`, `README.md`, `QUICK_START.md`, `web/src/features/alerts/{DeliverySection.tsx,DeliverySection.test.tsx,AlertsPage.test.tsx}` | §7 0.3 rows; review at P0 | unit:0.3:1 |
@@ -190,11 +191,11 @@ Unit-owned paths are listed in each phase file's sub-phase `Files` field and rec
 
 ## 6. In-flight checkpoint
 
-13.1 / 1 OPEN.
-Last durable step: P0 closed (unit:P0:1).
+1.1 / 1 OPEN.
+Last durable step: 13.1 closed (unit:13.1:1).
 Actual files/diff: none.
-Pending edits: 13.1 closure must verify the `table_columns` fact (`select count(*) from object_facts where kind='table_columns'`, `n_distinct` present).
-Next step: 13.1 S1.
+Pending edits: none.
+Next step: 1.1 S1.
 Last check: n/a.
 Running resources: stack `pglens-odoo` up (deployed pglens images are the phase-1 build); no background processes of this plan.
 Stop reason / supervisor request: supervisor coherence review requested by the user ("fai sempre una review con advisor opus dopo le modifiche del piano; non iniziare lo sviluppo se non è tutto perfettamente coerente").
@@ -204,6 +205,10 @@ Research checkpoint: R3 pending (7.0), R4 pending (0.3 S6).
 
 | Gate/test | Command | Result | Test count/named evidence | Tested revision/diff | When |
 |-----------|---------|--------|--------------------------|---------------------|------|
+| FIRSTRUN (13.1) | `go test -race -shuffle=on -count=3 ./internal/agent -run FIRSTRUN`; discovery `go test -list FIRSTRUN` | pass | 8 discovered, 8 passed ×3 | 13.1 diff | 2026-10-29 |
+| 13.1 focused | `go test -race -count=1 ./internal/agent/... ./cmd/pglens-agent/`; `-count=10 -run 'GracefulShutdown|FIRSTRUN'`; `go vet ./...`; `make vet-tags`; `go test ./deploy/` | pass | ok all | 13.1 diff | 2026-10-29 |
+| G-GO-INT-LONG INT-FIRSTRUN-001 | `PGLENS_FIRSTRUN_LONG=1 go test -tags=integration -race -count=1 -timeout=20m ./cmd/pglens-agent -run INTFIRSTRUN` | pass | pg15 facts after 5m10s, pg18 after 9m40s | 13.1 diff | 2026-10-29 |
+| `table_columns` live (from 0.2/P0, §8) | store `object_facts where kind='table_columns'` after 16:39 UTC redeploy | pass | 872 facts, 89 with `n_distinct` | deployed 13.1 build | 2026-10-29 16:44 UTC |
 | P0 harness after review fixes | `pnpm exec playwright test --project=harness`; `--project=desktop-fullhd e2e/qa/harness-browser.spec.ts` | pass | 14 passed; 2 passed | P0 diff | 2026-10-29 |
 | P0 G-WEB-STATIC | `make web-typecheck web-lint` | pass | exit 0 | P0 diff | 2026-10-29 |
 | P0 notify | `go test ./internal/alert/notify/` | pass | ok (NOTIF-GC-001..005) | P0 diff | 2026-10-29 |
@@ -243,6 +248,7 @@ Results: pass, fail, blocked, not-run, not-applicable-yet. Only pass satisfies a
 | R-PLAN-8 | Opus review agent (read-only, fresh) | plan revision 1 after the R-PLAN-7 fixes | same | NOT-READY: 0 blockers, 4 majors (1.5 claim "no assertion changed" false: `renderAsh` pin changes two existing expectations; 15.3 cluster tabs left `EventTimeline` without a tab and broke SYS-UI-001/007 and `ClusterPage.test.tsx`; 13.3/14.2 banner mount point undefined (no instance layout route) and MSW handlers; `test.setTimeout` rule did not cover `console_visual.spec.ts` live specs VIS-016/COV-E2E-001), 2 minors (tab/view defaults must never be written to the URL; UI-ASH gate family mapped to G-GO-FOCUS); all applied (D12 URL-default rule, `AppShell` banner mount, `clusterSections.ts` + `events` tab, `liveTimeout()` helper) |
 | R-PLAN-9 | Opus review agent (read-only, fresh) | plan revision 1 after the R-PLAN-8 fixes | same | NOT-READY: 0 blockers, 6 majors (VIS-016/COV-E2E-001 `liveTimeout` not stated in the phase files; sweep tests (FHD-*, VIS-CAP, QA-TOUR, SET-E2E, HA-*, ADV-E2E) without timeouts and ADV-E2E needing a 15-min advisor cadence; QA timeout formula failing sequential waits (RDY-E2E, SORIGIN-E2E); 14.2 unlisted `render.test.tsx` break and non-existent shared FleetPage setup; 9.2 InventoryTables vs UI-SET-005; 15.3 scope vs Done), 8 minors (wrong test name for the 1.5 `?range=1h` expectation, HA-STATIC-003 unit, Cluster identity placement, VISTMO unit, LIVE-HOST gate, six weaker Preconditions, G-UI-LEGACY at P13/P14, VIS-020 field); all applied (`liveTimeout` loop/sequence rule + `serviceRestart` 120 s, `PGLENS_ADVISOR_INTERVAL=60s`, `pendingUnit` inventory entries) |
 | R-PLAN-10 | Opus review agent (read-only, fresh) | plan revision 1 after the R-PLAN-9 fixes | same | NOT-READY: 1 blocker (13.1 assumed first run = jitter only, but `runEntry` scrapes only on the first ticker tick, so first run = jitter + interval: FIRSTRUN-006, INT-FIRSTRUN-001, readiness/coverage budgets could never pass), 5 majors (9.1/9.3 unlisted existing-test breaks in `page-primitives.test.tsx`, `DeadRowsPanel.test.tsx`, `IndexAnalysisPage.test.tsx` and wrong test-file name; `pendingUnit` not implementable or closed; 6.4 IND/LIFE tests without timeouts and no `rebuild` budget; IND-DB/IND-FIND/IND-SUGG budgets unreachable with 15-min/hourly checks; many live specs without declared timeouts), 5 minors (findings budget text, drill 4 restarts, Databases-by-instance filter, `INSTANCE_SECTIONS` export, `data-table-rows` testid); all applied (`tryScrape` immediate post-jitter scrape + FIRSTRUN-008, `BUDGET.rebuild`, agent restart in IND-DB/FIND/SUGG, `FHD-ROUTES-004`) |
+| R-13.1-S | Opus review agent (read-only, fresh) | 13.1 scheduler diff + GracefulShutdown failure | wg/scrapeWG accounting, send on closed channel, busy/breaker/worker slot, flakiness (`-race -count=20` both packages) | (a) adapt test by draining; no concurrency issue; no other flaky test |
 | R-P0-1 | Opus review agent (read-only, fresh) | 0.1–0.4 diffs + stack dir | guard rails, secret handling, cleanup, compose safety | CHANGES-REQUIRED: 0 blockers, 2 majors (`up()` could recreate odoo-db; `lockPair`/`openSessions` leaked children on failure, no spawn `error` listener), minors (env-redirectable backup dir, compose label, cleanup by name, server statement_timeout, sqlInt negatives, whitelist breadth, NOTIF-GC-005 weak oracle, QA-HARNESS-015 `exec(`/`-c`, HA override path, MANIFEST hash); all applied in unit:P0:1. Deferred: the teardown-asserting `consoleGuard` fixture lands with its first live consumer (1.x); budget findings/rebuild are measured at their first live use. Open to the user: the toxiproxy module download (§8) and confirmation that the two Google Chat messages (0.3 R4) arrived |
 | R-PLAN-11 | Opus review agent (read-only, fresh) | plan revision 1 after the R-PLAN-10 fixes | same | NOT-READY: 0 blockers, 6 majors (INT-FIRSTRUN-001 pointed at a harness that does not exist; FIRSTRUN-006 had no workable oracle and no way to inject `rnd`; `backupHistory` serves both freshness and monitored-history; D22b ignored the existing PG ≥ 16 `neverScannedSinceReset` path and could not be reproduced on PG ≤ 15; WINDOW-INT-001 needs an unproducible `stats_reset`; toolbar `Database` filters would collide with existing page controls), 7 minors; all applied in plan files. Per the user's instruction no further review (R-PLAN-12) was run; the applied fixes are unreviewed |
 
@@ -275,6 +281,7 @@ Rule (user): after **every** modification of the plan the `advisor` reviews it a
 | 1 | 1.5 / 15.2 / 11.x existing-test and live-spec adaptations (R-PLAN-7) | existing tests/specs that would break were not all recorded | recorded here when done: `AshPage.test.tsx` helper `renderAsh` appends `view=stacked` to every route (default view is `separate`) and exactly two expectations change: the 'ignores clicks on the folded other series' test `toBe('?range=1h')` → `'?range=1h&view=stacked'` and UI-ASH-042 `next=…%3Frange%3D1h` → `…%3Frange%3D1h%26view%3Dstacked` (R-PLAN-8); 15.2 rewires the Overview `ChartNav` Host link to `?section=host`, adapts `ChartNav.test.tsx`, `VIS-020`, `VIS-030`, `TBL-E2E-005`, smoke/acceptance specs; 9.3 `SlowQueriesPage.test.tsx` row-count and link assertions follow the table | supervisor (review R-PLAN-7) | 1.5, 15.2, 9.3 |
 | 1 | 15.3 cluster tabs, 13.3/14.2 banners, 11.1 settings tabs (R-PLAN-8) | existing tests/specs that would break | recorded here when done: `ClusterPage.test.tsx` helper `renderPage(section?)` and UI-CLUS-042/046/047/048 follow the tabs (UI-CLUS-040/041/043/044/045/049 unchanged because all queries stay in `ClusterPage`); `ui_acceptance.spec.ts` SYS-UI-007 goes to `?section=lag` before the canvas poll and SYS-UI-001 to `?section=events` before its failover-article loop; `shell.test.tsx` UI-SHELL-011 gains `getCoverage` (13.3) and `getReadiness` (14.2) handlers; `FleetPage.test.tsx` gains a `beforeEach` `getReadinessSummary` handler (re-registered after its `server.resetHandlers()` test) and `src/test/render.test.tsx` 'mounts the application route registry' gains the same handler (14.2); instance-tab count assertions iterate the registry (+`readiness`); SETTABS and every tab unit assert the default is never written to the URL ; 9.1/9.3 `page-primitives.test.tsx` UI-LAYOUT-003/006 and both WU-27 tests, `DeadRowsPanel.test.tsx` DEAD-UI-004/005, `IndexAnalysisPage.test.tsx` IDX-UI-003 follow the new header buttons, footer text, `show` select and `partial` kind filter (R-PLAN-10); 9.2 `SettingsPage.test.tsx` UI-SET-005 follows the removal of the `Filter instances` box (route `/?monitored-instances.q=standby`, label `Search Monitored instances`, `toBe('?monitored-instances.q=postgres')`) | supervisor (review R-PLAN-8, R-PLAN-9) | 15.3, 13.3, 14.2, 11.1, 9.1, 9.2, 9.3 |
 | 1 | 13.1 scheduler first run (R-PLAN-10) | D22(a) assumed a first run at the warm-up delay, but `runEntry` (`internal/agent/scheduler.go`) scrapes only on the first ticker tick (delay + interval) | 13.1 also adds the immediate post-jitter scrape (`tryScrape`); existing scheduler tests use the real clock with `NoJitter` and lower bounds, expected unchanged; recorded here when done | supervisor (review R-PLAN-10) | 13.1 |
+| 1 | 13.1 existing test `TestScheduler_GracefulShutdown` | contract: existing scheduler tests stay unchanged | with `NoJitter` the immediate post-jitter scrape can buffer a result before `Stop` closes the channel, so the single `<-results` read saw a value (7/20 runs under `-race -count=20`); supervisor ruling (Opus review agent, R-13.1-S): drain buffered results until closed with a 2 s deadline (intent "Stop closes the results channel" kept); no code change, delivery after cancellation was already possible on the tick path | supervisor | 13.1 |
 | 1 | D28 | `checks.activity.by_application` default flips to true: the two tests `TestConfig_ByApplicationDefaultsFalse` and `TestActivity_ByApplicationDisabledByDefault` change expectation in 16.1 (recorded here when done) | user REQ-40 | 16.1 |
 
 ## 9. Blockers
@@ -310,7 +317,7 @@ Rule (user): after **every** modification of the plan the `advisor` reviews it a
 | 0.2 | phase_01.md | 0.1 | DONE | 1 | G-BASE, VIS-000, T1 (§7); `table_columns` check at P0 (§8) |
 | 0.3 | phase_01.md | 0.2 | DONE | 1 | NOTIF-GC, CONFIG-GC, INT-NOTIF-GC, DELIVERY-UI, live R4 (§7) |
 | 0.4 | phase_01.md | 0.2 | DONE | 1 | QA-HARNESS-001..015, QA-CLEAN-001 (§7); guard-rail review at P0 |
-| 13.1 | phase_14.md | 0 | IN_PROGRESS | 1 | — |
+| 13.1 | phase_14.md | 0 | DONE | 1 | FIRSTRUN-001..008, INT-FIRSTRUN-001, live `table_columns` (§7) |
 | 1.1 | phase_02.md | 0 | TODO | 1 | — |
 | 1.2 | phase_02.md | 1.1 | TODO | 1 | — |
 | 1.3 | phase_02.md | 1.2, 13.1 | TODO | 1 | — |
