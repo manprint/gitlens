@@ -10,6 +10,7 @@ import PlanHistory from '@/features/queries/PlanHistory'
 import { QueryOverview } from '@/features/queries/QueryOverview'
 import QueryListPageComponent from '@/features/queries/QueryListPage'
 import SlowQueriesPageComponent from '@/features/queries/SlowQueriesPage'
+import IndexAnalysisPageComponent from '@/features/indexes/IndexAnalysisPage'
 import LocksPageComponent from '@/features/locks/BlockingTree'
 import { FindingsPage as FindingsPageComponent } from '@/features/findings/FindingsPage'
 import { AlertsPage as AlertsPageComponent } from '@/features/alerts/AlertsPage'
@@ -40,6 +41,10 @@ export function FleetOverviewPage() {
 
 export function SlowQueriesPage() {
   return <SlowQueriesPageComponent />
+}
+
+export function IndexAnalysisPage() {
+  return <IndexAnalysisPageComponent />
 }
 
 export function ClusterDetailPage() {

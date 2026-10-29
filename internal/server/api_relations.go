@@ -141,11 +141,14 @@ func (a *API) handleIndexes(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, resp)
 		return
 	}
-	// The last scan comes from the definition fact the index_stats check writes
-	// for the same index: its last_idx_scan label.
+	// The last scan and the definition come from the definition fact the
+	// index_stats check writes for the same index: its last_idx_scan label and
+	// its value_text. The tuple and block figures are per-second rates, like
+	// idx_scan.
 	rows, e := a.pool.Query(r.Context(), `SELECT latest.datname, latest.schemaname, latest.relname, latest.indexrelname,
 			latest.idx_scan, latest.index_bytes, latest.is_unique, latest.is_primary, latest.is_valid, latest.ts,
-			f.labels->>'last_idx_scan'
+			f.labels->>'last_idx_scan', f.value_text,
+			latest.idx_tup_read, latest.idx_tup_fetch, latest.idx_blks_read, latest.idx_blks_hit
 		FROM (SELECT DISTINCT ON (datname, schemaname, indexrelname) *
 		        FROM metrics_indexes
 		       WHERE tenant_id='default' AND instance_id=$1 AND ts >= now() - interval '15 minutes'
@@ -160,12 +163,13 @@ func (a *API) handleIndexes(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	for rows.Next() {
 		var datname, schema, name, index string
-		var scans *float64
+		var scans, tupRead, tupFetch, blksRead, blksHit *float64
 		var bytes *int64
 		var unique, primary, valid *bool
 		var ts time.Time
-		var lastScan *string
-		if e := rows.Scan(&datname, &schema, &name, &index, &scans, &bytes, &unique, &primary, &valid, &ts, &lastScan); e != nil {
+		var lastScan, definition *string
+		if e := rows.Scan(&datname, &schema, &name, &index, &scans, &bytes, &unique, &primary, &valid, &ts, &lastScan, &definition,
+			&tupRead, &tupFetch, &blksRead, &blksHit); e != nil {
 			writeError(w, http.StatusInternalServerError, "scan failed", e.Error())
 			return
 		}
@@ -175,6 +179,14 @@ func (a *API) handleIndexes(w http.ResponseWriter, r *http.Request) {
 		putBool(item, "is_unique", unique)
 		putBool(item, "is_primary", primary)
 		putBool(item, "is_valid", valid)
+		putNumber(item, "idx_tup_read_rate", tupRead)
+		putNumber(item, "idx_tup_fetch_rate", tupFetch)
+		if ratio := indexCacheHitRatio(blksRead, blksHit); ratio != nil {
+			item["cache_hit_ratio"] = *ratio
+		}
+		if definition != nil && *definition != "" {
+			item["definition"] = *definition
+		}
 		at, status := indexLastScan(lastScan)
 		item["last_scan_at"] = at
 		item["last_scan_status"] = status
@@ -206,6 +218,18 @@ type skippedRelation struct {
 	Datname    string `json:"datname"`
 	Schemaname string `json:"schemaname"`
 	Relname    string `json:"relname"`
+}
+
+// indexCacheHitRatio is the share of an index's block reads served from the
+// buffer cache, from the per-second block rates. It is nil when either rate is
+// missing or the index read no block in the interval: an idle index has no
+// ratio, not a perfect one.
+func indexCacheHitRatio(read, hit *float64) *float64 {
+	if read == nil || hit == nil || *read+*hit <= 0 {
+		return nil
+	}
+	ratio := *hit / (*read + *hit)
+	return &ratio
 }
 
 // indexLastScan reads the last_idx_scan label of an index's definition fact.

@@ -38,8 +38,12 @@ async function copyText(text: string): Promise<boolean> {
   return copyWithSelection(text)
 }
 
-/** Copies a query's text to the clipboard and confirms it, or the failure, for a moment. */
-export function CopyButton({ text }: { text: string }) {
+function capitalise(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+/** Copies a query's text (or the named subject) to the clipboard and confirms it, or the failure, for a moment. */
+export function CopyButton({ text, subject = 'query text' }: { text: string; subject?: string }) {
   const [state, setState] = useState<CopyState>('idle')
 
   useEffect(() => {
@@ -57,10 +61,10 @@ export function CopyButton({ text }: { text: string }) {
     <button
       aria-label={
         state === 'copied'
-          ? 'Query text copied'
+          ? `${capitalise(subject)} copied`
           : state === 'failed'
-            ? 'Could not copy query text'
-            : 'Copy query text'
+            ? `Could not copy ${subject}`
+            : `Copy ${subject}`
       }
       className="text-muted-foreground hover:bg-muted hover:text-foreground inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium transition-colors"
       onClick={copy}

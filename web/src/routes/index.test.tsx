@@ -16,6 +16,7 @@ describe('application route registry', () => {
       '/login',
       '/',
       '/queries',
+      '/indexes',
       '/clusters/:clusterId',
       '/instances/:instanceId',
       '/instances/:instanceId/ash',

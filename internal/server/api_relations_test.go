@@ -93,3 +93,12 @@ func TestRelationAPI_BloatStatesSkippedTablesWhenEmpty(t *testing.T) {
 	require.Equal(t, float64(0), payload["skipped_tables"])
 	require.Equal(t, []any{}, payload["skipped_relations"])
 }
+
+func TestIndexCacheHitRatio(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	require.Nil(t, indexCacheHitRatio(nil, f(1)), "a missing read rate has no ratio")
+	require.Nil(t, indexCacheHitRatio(f(1), nil), "a missing hit rate has no ratio")
+	require.Nil(t, indexCacheHitRatio(f(0), f(0)), "an idle index has no ratio, not a perfect one")
+	require.InDelta(t, 0.75, *indexCacheHitRatio(f(1), f(3)), 1e-9)
+	require.InDelta(t, 0.0, *indexCacheHitRatio(f(2), f(0)), 1e-9)
+}

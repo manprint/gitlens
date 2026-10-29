@@ -38,16 +38,34 @@ func TestINTIDX004_RelationIndexEndpointReturnsDefinitionFactFields(t *testing.T
 	id := uuid.New()
 	now := time.Now().UTC()
 	_, err := pool.Exec(ctx, `INSERT INTO metrics_indexes
-		(ts, cluster_id, instance_id, datname, schemaname, relname, indexrelname, idx_scan, index_bytes, is_unique, is_primary, is_valid)
-		VALUES ($1, 1, $2, 'app', 'public', 'orders', 'orders_id_idx', 0, 4096, true, false, true)`, now, id)
+		(ts, cluster_id, instance_id, datname, schemaname, relname, indexrelname, idx_scan, index_bytes, is_unique, is_primary, is_valid,
+		 idx_tup_read, idx_tup_fetch, idx_blks_read, idx_blks_hit)
+		VALUES ($1, 1, $2, 'app', 'public', 'orders', 'orders_id_idx', 0, 4096, true, false, true, 2.5, 1.5, 1, 3)`, now, id)
 	require.NoError(t, err)
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM metrics_indexes WHERE instance_id=$1`, id) })
+	_, err = pool.Exec(ctx, `INSERT INTO object_facts (cluster_id, instance_id, datname, kind, key, labels, value_text, first_seen, last_seen, changed_at)
+		VALUES (1, $1, 'app', 'index_def', 'public.orders_id_idx', '{}'::jsonb,
+		        'CREATE UNIQUE INDEX orders_id_idx ON public.orders USING btree (id)', $2, $2, $2)`, id, now)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM metrics_indexes WHERE instance_id=$1`, id)
+		_, _ = pool.Exec(ctx, `DELETE FROM object_facts WHERE instance_id=$1`, id)
+	})
 
 	rec := httptest.NewRecorder()
 	relationRouter(NewAPI(pool)).ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
 		"/api/v1/instances/"+id.String()+"/indexes", http.NoBody))
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), `"indexrelname":"orders_id_idx"`)
+	var body struct {
+		Items []map[string]any `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Len(t, body.Items, 1)
+	item := body.Items[0]
+	require.Equal(t, "CREATE UNIQUE INDEX orders_id_idx ON public.orders USING btree (id)", item["definition"])
+	require.InDelta(t, 2.5, item["idx_tup_read_rate"], 1e-9)
+	require.InDelta(t, 1.5, item["idx_tup_fetch_rate"], 1e-9)
+	require.InDelta(t, 0.75, item["cache_hit_ratio"], 1e-9)
 }
 
 // TestINTIDX007_RelationIndexEndpointReportsLastScan: the indexes endpoint says

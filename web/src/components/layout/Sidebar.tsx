@@ -16,6 +16,7 @@ import {
   LayoutDashboard,
   Lightbulb,
   ListChecks,
+  ListTree,
   Lock,
   Server,
   Settings,
@@ -47,6 +48,7 @@ const monitoringGroup: NavGroup = {
   items: [
     { icon: LayoutDashboard, label: 'Fleet', path: '/', end: true },
     { icon: Gauge, label: 'Slowest queries', path: '/queries', end: true },
+    { icon: ListTree, label: 'Index analysis', path: '/indexes', end: true },
     { icon: Lightbulb, label: 'Findings', path: '/findings' },
   ],
 }
@@ -59,6 +61,11 @@ const alertingGroup: NavGroup = {
     { icon: ListChecks, label: 'Alert rules', path: '/alerts/rules' },
     { icon: BellOff, label: 'Silences', path: '/alerts/silences' },
   ],
+}
+
+/** Fleet-level pages that name their server in the `instance` search parameter. */
+function isFleetServerPage(pathname: string): boolean {
+  return pathname === '/queries' || pathname === '/indexes'
 }
 
 function instanceGroup(instanceId: string): NavGroup {
@@ -184,12 +191,12 @@ function InstanceSwitcher({
 
   function choose(instanceId: string) {
     if (!instanceId) return
-    // The slowest-queries page is fleet-level and names its server in the URL.
-    if (pathname === '/queries') {
+    // The slowest-queries and index-analysis pages are fleet-level and name their server in the URL.
+    if (isFleetServerPage(pathname)) {
       const next = new URLSearchParams(search)
       next.set('instance', instanceId)
       next.delete('db')
-      void navigate(`/queries?${next.toString()}`)
+      void navigate(`${pathname}?${next.toString()}`)
       return
     }
     // Keep the operator on the same instance view when they switch servers.
@@ -251,7 +258,8 @@ export function SidebarContent({ clusters = [], expanded = false, onNavigate }: 
 
   const [searchParams] = useSearchParams()
   const { pathname } = useLocation()
-  const requested = routeInstance ?? (pathname === '/queries' ? searchParams.get('instance') : null)
+  const requested =
+    routeInstance ?? (isFleetServerPage(pathname) ? searchParams.get('instance') : null)
   const currentInstance = chooseInstance(clusters, requested, readLastInstance())
 
   // Only a server the operator opened is remembered, not a fallback choice.

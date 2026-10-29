@@ -7,6 +7,7 @@ const segmentLabels: Record<string, string> = {
   clusters: 'Clusters',
   events: 'Events',
   findings: 'Findings',
+  indexes: 'Index analysis',
   instances: 'Instances',
   locks: 'Locks',
   queries: 'Queries',

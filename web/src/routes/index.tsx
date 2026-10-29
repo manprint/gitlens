@@ -16,6 +16,9 @@ const FleetOverviewPage = lazy(() =>
 const SlowQueriesPage = lazy(() =>
   import('./pages').then(({ SlowQueriesPage: Page }) => ({ default: Page })),
 )
+const IndexAnalysisPage = lazy(() =>
+  import('./pages').then(({ IndexAnalysisPage: Page }) => ({ default: Page })),
+)
 const ClusterDetailPage = lazy(() =>
   import('./pages').then(({ ClusterDetailPage: Page }) => ({ default: Page })),
 )
@@ -92,6 +95,7 @@ const loginRoute: RouteDefinition = {
 const dataRoutes: RouteDefinition[] = [
   lazyRoute('/', 'Fleet overview', FleetOverviewPage),
   lazyRoute('/queries', 'Slowest queries', SlowQueriesPage),
+  lazyRoute('/indexes', 'Index analysis', IndexAnalysisPage),
   lazyRoute('/clusters/:clusterId', 'Cluster detail', ClusterDetailPage),
   lazyRoute('/instances/:instanceId', 'Instance detail', InstanceDetailPage),
   lazyRoute('/instances/:instanceId/ash', 'ASH and wait analysis', AshPage),
