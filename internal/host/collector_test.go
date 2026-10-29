@@ -112,3 +112,31 @@ func TestCollect_SourceIsHostWhenNoCgroup(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "host", s.Source)
 }
+
+// TestHOSTDD004_CollectMeasuresAReadableDataDir: a real directory yields the
+// filesystem's size and free space and no unavailability reason.
+func TestHOSTDD004_CollectMeasuresAReadableDataDir(t *testing.T) {
+	s, err := fixtureCollector().Collect(context.Background(), t.TempDir())
+	require.NoError(t, err)
+	require.NotNil(t, s.DiskTotalBytes)
+	require.NotNil(t, s.DiskFreeBytes)
+	require.Positive(t, *s.DiskTotalBytes)
+	require.LessOrEqual(t, *s.DiskFreeBytes, *s.DiskTotalBytes)
+	ratio := float64(*s.DiskFreeBytes) / float64(*s.DiskTotalBytes)
+	require.GreaterOrEqual(t, ratio, 0.0)
+	require.LessOrEqual(t, ratio, 1.0)
+	require.Empty(t, s.DiskUnavailable)
+}
+
+// TestHOSTDD005_CollectToleratesAnUnreadableDataDir: a directory the agent
+// cannot see costs only the disk fields; cpu, load and memory stay.
+func TestHOSTDD005_CollectToleratesAnUnreadableDataDir(t *testing.T) {
+	s, err := fixtureCollector().Collect(context.Background(), "/nonexistent/path")
+	require.NoError(t, err)
+	require.NotNil(t, s.MemTotalBytes)
+	require.NotNil(t, s.CPUCount)
+	require.NotNil(t, s.Load1)
+	require.Nil(t, s.DiskTotalBytes)
+	require.Nil(t, s.DiskFreeBytes)
+	require.Contains(t, s.DiskUnavailable, "/nonexistent/path")
+}

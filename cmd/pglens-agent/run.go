@@ -154,23 +154,31 @@ func runAgentCommand(args []string) {
 	}
 	if cfg.HostEnabled() {
 		collector := host.NewCollector(cfg.HostProcPath(), cfg.HostSysPath())
+		// Host metrics belong to the targets on this host. Their data
+		// directories (SHOW data_directory) say which filesystem to measure;
+		// targets sharing one are measured once.
+		local := make(map[string]*agent.Manager)
+		var localNames []string
+		for i, tc := range cfg.Targets {
+			if agent.TargetIsLocal(tc) {
+				local[tc.Name] = managers[i]
+				localNames = append(localNames, tc.Name)
+			}
+		}
+		warner := newDiskWarner(os.Stderr)
 		go func() {
 			ticker := clk.NewTicker(cfg.GetHostInterval())
 			defer ticker.Stop()
 			collect := func() {
-				sample, err := collector.Collect(ctx, "")
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "warning: host collection: %v\n", err)
+				if len(localNames) == 0 {
 					return
 				}
-				for _, tc := range cfg.Targets {
-					if !agent.TargetIsLocal(tc) {
-						continue
-					}
+				buckets := groupTargetsByDataDir(localNames, hostDataDirs(ctx, local, warner))
+				collectHostByDataDir(ctx, collector, buckets, warner, os.Stderr, func(target string, sample host.Sample) {
 					mu.Lock()
-					pending[tc.Name] = append(pending[tc.Name], hostWireResult(sample, clk.Now()))
+					pending[target] = append(pending[target], hostWireResult(sample, clk.Now()))
 					mu.Unlock()
-				}
+				})
 			}
 			collect()
 			for {
@@ -354,9 +362,13 @@ func hostWireResult(s host.Sample, now time.Time) wire.Result {
 	addFloat("host_load1", s.Load1)
 	addFloat("host_load5", s.Load5)
 	addFloat("host_load15", s.Load15)
-	add("host_disk_total_bytes", s.DiskTotalBytes)
-	add("host_disk_free_bytes", s.DiskFreeBytes)
-	if s.DiskTotalBytes != nil && *s.DiskTotalBytes > 0 && s.DiskFreeBytes != nil {
+	// An unmeasurable data directory sends no disk metric rather than a
+	// partial or stale one.
+	if s.DiskUnavailable == "" {
+		add("host_disk_total_bytes", s.DiskTotalBytes)
+		add("host_disk_free_bytes", s.DiskFreeBytes)
+	}
+	if s.DiskUnavailable == "" && s.DiskTotalBytes != nil && *s.DiskTotalBytes > 0 && s.DiskFreeBytes != nil {
 		ratio := float64(*s.DiskFreeBytes) / float64(*s.DiskTotalBytes)
 		addFloat("host_disk_free_ratio", &ratio)
 	}

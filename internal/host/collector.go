@@ -25,7 +25,10 @@ type Sample struct {
 	Load1, Load5, Load15 *float64
 	DiskTotalBytes       *uint64
 	DiskFreeBytes        *uint64
-	Source               string
+	// DiskUnavailable says why the disk fields are nil for a requested data
+	// directory (empty when they are filled, or when none was requested).
+	DiskUnavailable string
+	Source          string
 }
 
 // Collector reads host metrics using gopsutil's context-scoped path overrides.
@@ -48,6 +51,9 @@ func (c *Collector) context(ctx context.Context) context.Context {
 func ptr[T any](v T) *T { return &v }
 
 // Collect returns one sample. Disk fields are omitted when dataDir is empty.
+// A data directory that cannot be measured (not mounted in the agent's
+// container, no permission) leaves the disk fields nil and DiskUnavailable
+// set; the rest of the sample is still returned and Collect does not fail.
 func (c *Collector) Collect(ctx context.Context, dataDir string) (Sample, error) {
 	ctx = c.context(ctx)
 	vm, err := mem.VirtualMemoryWithContext(ctx)
@@ -90,7 +96,13 @@ func (c *Collector) Collect(ctx context.Context, dataDir string) (Sample, error)
 		c.mu.Unlock()
 	}
 	if dataDir != "" {
-		if du, e := disk.UsageWithContext(ctx, filepath.Clean(dataDir)); e == nil {
+		du, e := disk.UsageWithContext(ctx, filepath.Clean(dataDir))
+		switch {
+		case e != nil:
+			s.DiskUnavailable = fmt.Sprintf("data directory %s is not readable: %v", filepath.Clean(dataDir), e)
+		case du.Total == 0:
+			s.DiskUnavailable = fmt.Sprintf("data directory %s reports a zero-size filesystem", filepath.Clean(dataDir))
+		default:
 			s.DiskTotalBytes, s.DiskFreeBytes = ptr(du.Total), ptr(du.Free)
 		}
 	}

@@ -121,6 +121,10 @@ services:
       - ./agent.example.yaml:/etc/pglens/agent.yaml:ro
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
+      # Optional: filesystem total/free of a local target are measured on its
+      # data directory (SHOW data_directory). Mount the PostgreSQL data volume
+      # read-only at the same path for them, e.g.
+      # - postgres-data:/var/lib/postgresql/data:ro
     ports:
       # Loopback only: the healthz JSON includes the agent last error.
       - "127.0.0.1:${PGLENS_AGENT_HEALTHZ_PORT:-9187}:9187"

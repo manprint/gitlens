@@ -123,6 +123,10 @@ type Manager struct {
 	endpointOnce sync.Once
 	addr         string
 	port         int
+
+	// dataDir caches the first answer of DataDirectory; see datadir.go.
+	dataDirMu sync.Mutex
+	dataDir   string
 }
 
 type capabilityConn interface {

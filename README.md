@@ -1050,6 +1050,16 @@ or `cgroup_v2`) and only fields that were measurable. A remote target returns
 `{"instance_id":"…","available":false,"reason":"target is not local to any agent"}`;
 it never returns zeros for unavailable host metrics.
 
+Filesystem total and free space (`host_disk_*`) are measured on the target's
+data directory: the agent reads `SHOW data_directory` (Tier 0 is enough) and
+measures that path once per distinct directory. The path must be visible in
+the agent's container at the same location, so mount the PostgreSQL data
+volume read-only there (for example `odoo-db-data:/var/lib/postgresql:ro`).
+When the path is not visible, or the role may not read the setting, the disk
+fields are left out, CPU, load and memory are still reported, and the agent
+logs one warning per target and reason:
+`host disk metrics unavailable for target <name>: <reason> (mount the data directory read-only at the same path in the agent container)`.
+
 Settings and cluster drift are available with:
 
 ```sh

@@ -456,6 +456,10 @@ services:
       - ./agent.yaml:/etc/pglens/agent.yaml:ro
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
+      # Opzionale: spazio totale/libero del filesystem, misurato sulla data
+      # directory dell'istanza (SHOW data_directory). Montare il volume dei
+      # dati PostgreSQL in sola lettura allo stesso percorso, ad esempio:
+      # - pgdata:/var/lib/postgresql/data:ro
     networks: [pglens-net]
     ports:
       - "127.0.0.1:9187:9187"

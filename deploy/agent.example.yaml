@@ -11,6 +11,9 @@ host:
   # proc_path and sys_path are left unset so that the agent reads HOST_PROC and
   # HOST_SYS: the compose stack points them at the host mounts, and a host
   # install falls back to /proc and /sys. A path set here overrides both.
+  # Filesystem total/free are measured on each local target's data directory
+  # (SHOW data_directory). In a container, mount that directory read-only at
+  # the same path, or the disk fields stay empty (one warning is logged).
 
 buffer:
   path: /var/lib/pglens/buffer # Durable WAL-like sample buffer directory.
