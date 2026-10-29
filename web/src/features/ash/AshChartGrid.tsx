@@ -2,7 +2,6 @@ import { useState } from 'react'
 
 import { ChartCard } from '@/components/charts/ChartCard'
 import { TimeSeriesChart } from '@/components/charts/TimeSeriesChart'
-import { spanOf } from '@/components/charts/timeAxis'
 import {
   ASH_EVENT_COLORS,
   buildAshGroupOption,
@@ -67,9 +66,8 @@ export function AshChartGrid({
   stepSeconds,
 }: AshChartGridProps) {
   const [isolated, setIsolated] = useState<ReadonlyMap<AshWaitGroupId, string>>(new Map())
-  const spanMs = spanOf(
-    groups.flatMap(({ series }) => series.flatMap(({ points }) => points.map(({ ts }) => ts))),
-  )
+  // Every card spans the selected range, so the shared zoom lines them up.
+  const spanMs = range.to.getTime() - range.from.getTime()
   const interactionProps = onSeriesSelect === undefined ? {} : { onSeriesSelect }
 
   return (
@@ -94,6 +92,7 @@ export function AshChartGrid({
           showCpuCount: group.id === 'cpu',
           spanMs,
           stack: group.id,
+          window: range,
         })
 
         return (

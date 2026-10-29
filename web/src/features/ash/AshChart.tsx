@@ -12,6 +12,8 @@ export interface AshChartProps {
   ariaLabel?: string
   dataTableLabel?: string
   onSeriesSelect?: (name: string) => void
+  /** The selected time range; the axis spans it. */
+  window?: AshOptionOptions['window']
 }
 
 /** Accessible ASH chart wrapper; brush events are delegated to TimeSeriesChart. */
@@ -22,11 +24,12 @@ export function AshChart({
   foldedCount = 0,
   onSeriesSelect,
   series,
+  window,
 }: AshChartProps) {
   const option =
     cpuCount === undefined
-      ? buildAshOption(series, { foldedCount })
-      : buildAshOption(series, { cpuCount, foldedCount })
+      ? buildAshOption(series, { foldedCount, window })
+      : buildAshOption(series, { cpuCount, foldedCount, window })
   const tableProps = dataTableLabel === undefined ? {} : { dataTableLabel }
   const interactionProps = onSeriesSelect === undefined ? {} : { onSeriesSelect }
 

@@ -150,6 +150,7 @@ export function AshBreakdown({
             foldedCount={folded}
             {...interactionProps}
             series={series}
+            window={range}
           />
         </ChartCard>
       ) : (

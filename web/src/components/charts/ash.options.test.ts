@@ -185,6 +185,22 @@ describe('ASH time axis (plan 005 1.4)', () => {
     expect(line.symbolSize?.(null, {})).toBe(0)
   })
 
+  it('ASHOPT-013 pins the time axis to the selected window', () => {
+    const window = { from: new Date('2026-09-01T09:30:00Z'), to: new Date('2026-09-01T10:30:00Z') }
+    const hour = 60 * 60 * 1_000
+    for (const option of [
+      buildAshOption(series, { window }),
+      buildAshGroupOption(series, { stack: 'cpu', window }),
+    ]) {
+      expect(option.xAxis).toEqual({
+        ...timeAxisOption(hour),
+        min: window.from.getTime(),
+        max: window.to.getTime(),
+      })
+    }
+    expect(buildAshOption(series).xAxis).toBe(timeAxisOption(60 * 1_000))
+  })
+
   it('ASHOPT-011 keeps the stacked option unchanged', () => {
     expect(buildAshOption(series, { cpuCount: 4, foldedCount: 2 })).toMatchSnapshot()
     expect(buildAshOption(series)).toMatchSnapshot()

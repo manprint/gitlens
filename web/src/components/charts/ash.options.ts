@@ -56,6 +56,8 @@ export interface AshChartSeries {
 }
 
 export interface AshOptionOptions {
+  /** The selected time range; the time axis spans it rather than the data alone. */
+  window?: { from: Date; to: Date } | undefined
   /** Host CPU count; absent or non-positive values omit the reference line. */
   cpuCount?: number | null
   /** Number of source groups folded into the `other` series. */
@@ -173,6 +175,17 @@ function tooltipMetadata(
   return metadata
 }
 
+/** Span of the time axis: the selected window when given, else the data. */
+function axisSpan(window: AshOptionOptions['window'], dataSpanMs: number): number {
+  return window ? window.to.getTime() - window.from.getTime() : dataSpanMs
+}
+
+/** The shared time axis, pinned to the selected window when one is given. */
+function ashTimeAxis(spanMs: number, window: AshOptionOptions['window']) {
+  const axis = timeAxisOption(spanMs)
+  return window ? { ...axis, min: window.from.getTime(), max: window.to.getTime() } : axis
+}
+
 function safeFolded(foldedCount: number): number {
   return Number.isFinite(foldedCount) ? Math.max(0, Math.floor(foldedCount)) : 0
 }
@@ -214,11 +227,14 @@ function cpuCountLine(cpuCount: number) {
 /** Build a deterministic, gap-preserving stacked area option for ASH groups. */
 export function buildAshOption(
   series: readonly AshChartSeries[] | readonly AshSeries[],
-  { cpuCount, foldedCount = 0 }: AshOptionOptions = {},
+  { cpuCount, foldedCount = 0, window }: AshOptionOptions = {},
 ): EChartsOption {
   const ordered = orderAshSeries<AshChartSeries | AshSeries>(series)
   const metadata = tooltipMetadata(ordered)
-  const spanMs = spanOf(ordered.flatMap((item) => item.points.map((point) => point.ts)))
+  const spanMs = axisSpan(
+    window,
+    spanOf(ordered.flatMap((item) => item.points.map((point) => point.ts))),
+  )
   const safeFoldedCount = safeFolded(foldedCount)
   const metricSeries = ordered.map((item, index) => {
     const optionSeries = ashLineSeries(item, 'ash')
@@ -237,7 +253,7 @@ export function buildAshOption(
       trigger: 'axis',
       formatter: (params: unknown) => tooltipFor(params, metadata, safeFoldedCount),
     },
-    xAxis: timeAxisOption(spanMs),
+    xAxis: ashTimeAxis(spanMs, window),
     yAxis: { type: 'value', min: 0, name: 'avg active backends' },
     dataZoom: [
       { type: 'inside', xAxisIndex: 0, filterMode: 'none', throttle: 50 },
@@ -291,11 +307,15 @@ export function buildAshGroupOption(
     showCpuCount = false,
     spanMs,
     stack,
+    window,
   }: AshGroupOptionOptions,
 ): EChartsOption {
   const ordered = orderAshSeries<AshChartSeries | AshSeries>(series)
   const metadata = tooltipMetadata(ordered)
-  const span = spanMs ?? spanOf(ordered.flatMap((item) => item.points.map((point) => point.ts)))
+  const span = axisSpan(
+    window,
+    spanMs ?? spanOf(ordered.flatMap((item) => item.points.map((point) => point.ts))),
+  )
   const safeFoldedCount = safeFolded(foldedCount)
   const metricSeries = ordered.map((item, index) => {
     const isolated = isolatedPoints(item.points)
@@ -323,7 +343,7 @@ export function buildAshGroupOption(
       confine: true,
       formatter: (params: unknown) => tooltipFor(params, metadata, safeFoldedCount),
     },
-    xAxis: timeAxisOption(span),
+    xAxis: ashTimeAxis(span, window),
     yAxis: { type: 'value', min: 0, name: 'avg active backends' },
     dataZoom: [
       { type: 'inside', xAxisIndex: 0, filterMode: 'none', throttle: 50 },
