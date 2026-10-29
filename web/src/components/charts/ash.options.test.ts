@@ -1,6 +1,11 @@
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 import { describe, expect, it } from 'vitest'
 
 import { ASH_PALETTE, buildAshOption, type AshChartSeries, OTHER_FOLDED_LABEL } from './ash.options'
+import { timeAxisOption } from './timeAxis'
 
 const points = [
   { ts: '2026-09-01T10:00:00Z', value: 1, samples: 10, ticks: 20 },
@@ -84,5 +89,47 @@ describe('buildAshOption', () => {
 
     expect(new Set(colours).size).toBe(colours.length)
     expect(ASH_PALETTE.BufferPin).toBe(ASH_PALETTE.Buffer)
+  })
+})
+
+describe('ASH time axis (plan 005 1.4)', () => {
+  const at = Date.UTC(2026, 8, 1, 10, 0)
+
+  it('ASHOPT-001 uses the shared time axis with short UTC labels', () => {
+    const option = buildAshOption(series)
+    expect(option.xAxis).toBe(timeAxisOption(60_000))
+    const axis = option.xAxis as { axisLabel: { formatter: (value: number) => string } }
+    expect(axis.axisLabel.formatter(Date.UTC(2026, 9, 29, 9, 41))).toBe('09:41')
+  })
+
+  it('ASHOPT-002 labels the slider with the short form', () => {
+    const zoom = buildAshOption(series).dataZoom as {
+      type: string
+      labelFormatter?: (value: number) => string
+    }[]
+    expect(zoom.find((item) => item.type === 'slider')?.labelFormatter?.(at)).toBe('10:00')
+  })
+
+  it('ASHOPT-003 keeps the CPU-count line and the tooltip rows, with a UTC tooltip time', () => {
+    const option = buildAshOption(series, { cpuCount: 4 })
+    const cpu = optionSeries(option).find((item) => item.name === 'CPU') as {
+      markLine?: { data: { yAxis: number; name: string }[] }
+    }
+    expect(cpu.markLine?.data[0]).toEqual(
+      expect.objectContaining({ yAxis: 4, name: 'CPU count (4)' }),
+    )
+    const tooltip = (option.tooltip as { formatter: (params: unknown) => string }).formatter
+    const html = tooltip([{ seriesName: 'CPU', value: ['2026-09-01T10:00:00Z', 1] }])
+    expect(html).toContain('2026-09-01 10:00:00 UTC')
+    expect(html).toContain(
+      '<strong>CPU</strong>: 1.00 avg active backends (samples: 10, ticks: 20)',
+    )
+  })
+
+  it('ASHOPT-004 no option builder formats times with toISOString', () => {
+    const dir = dirname(fileURLToPath(import.meta.url))
+    for (const file of ['ash.options.ts', 'lag.options.ts', 'metric.options.ts', 'timeAxis.ts']) {
+      expect(readFileSync(join(dir, file), 'utf8'), file).not.toContain('toISOString')
+    }
   })
 })

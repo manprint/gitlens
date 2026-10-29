@@ -51,4 +51,11 @@ describe('chart time labels', () => {
     expect(countResets([null, null, 3])).toBe(0)
     expect(countResets([])).toBe(0)
   })
+
+  it('CTIME-008 drops the step when it is unknown', () => {
+    const from = new Date('2026-10-29T09:41:00Z')
+    const to = new Date('2026-10-29T10:41:00Z')
+    expect(formatRangeLabel(from, to, 0)).toBe('Oct 29 09:41 → 10:41 UTC')
+    expect(formatRangeLabel(from, to, -5)).toBe('Oct 29 09:41 → 10:41 UTC')
+  })
 })

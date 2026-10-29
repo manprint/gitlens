@@ -1,6 +1,9 @@
 import type { EChartsOption } from 'echarts'
 
 import type { AshPoint, AshSeries } from '@/lib/ash'
+import { formatTooltipTime } from '@/lib/chartTime'
+
+import { sliderLabelFormatter, spanOf, timeAxisOption } from './timeAxis'
 
 export const ASH_WAIT_TYPES = [
   'Lock',
@@ -123,11 +126,10 @@ function tooltipFor(
   })
   const folded =
     foldedCount > 0 ? `<div>${OTHER_FOLDED_LABEL}: ${foldedCount} groups folded</div>` : ''
-  return `<div>${escapeHtml(timestamp)}</div>${rows.join('')}${folded}`
-}
-
-function formatUtcTimestamp(value: number): string {
-  return new Date(value).toISOString()
+  // The lookup keeps the raw timestamp; the reader sees the UTC tooltip form.
+  const parsed = Date.parse(timestamp)
+  const time = Number.isFinite(parsed) ? formatTooltipTime(parsed) : timestamp
+  return `<div>${escapeHtml(time)}</div>${rows.join('')}${folded}`
 }
 
 function validCpuCount(value: number | null | undefined): value is number {
@@ -152,6 +154,7 @@ export function buildAshOption(
       metadata.set(`${displayName(item.name)}\u0000${point.ts}`, point)
     }
   }
+  const spanMs = spanOf(ordered.flatMap((item) => item.points.map((point) => point.ts)))
   const safeFoldedCount = Number.isFinite(foldedCount) ? Math.max(0, Math.floor(foldedCount)) : 0
   const metricSeries = ordered.map((item, index) => {
     const name = displayName(item.name)
@@ -197,14 +200,17 @@ export function buildAshOption(
       trigger: 'axis',
       formatter: (params: unknown) => tooltipFor(params, metadata, safeFoldedCount),
     },
-    xAxis: {
-      type: 'time',
-      axisLabel: { formatter: formatUtcTimestamp },
-    },
+    xAxis: timeAxisOption(spanMs),
     yAxis: { type: 'value', min: 0, name: 'avg active backends' },
     dataZoom: [
       { type: 'inside', xAxisIndex: 0, filterMode: 'none', throttle: 50 },
-      { type: 'slider', xAxisIndex: 0, filterMode: 'none', bottom: 8 },
+      {
+        type: 'slider',
+        xAxisIndex: 0,
+        filterMode: 'none',
+        bottom: 8,
+        labelFormatter: sliderLabelFormatter(spanMs),
+      },
     ],
     series: metricSeries,
   }

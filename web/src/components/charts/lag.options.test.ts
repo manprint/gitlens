@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { AlignedReplicationSeries } from '@/lib/replication'
 
 import { buildLagOption, LAG_METRICS } from './lag.options'
+import { timeAxisOption } from './timeAxis'
 
 const aligned: AlignedReplicationSeries = {
   timestamps: ['2026-08-31T10:00:00Z', '2026-08-31T10:01:00Z', '2026-08-31T10:02:00Z'],
@@ -49,12 +50,39 @@ describe('buildLagOption', () => {
     }
 
     expect(xAxis.type).toBe('time')
-    expect(xAxis.axisLabel?.formatter?.(Date.parse('2026-08-31T10:00:00Z'))).toBe(
-      '2026-08-31T10:00:00.000Z',
-    )
+    // Short UTC labels (plan 005 1.4): the ISO form overlapped on narrow charts.
+    expect(xAxis.axisLabel?.formatter?.(Date.parse('2026-08-31T10:00:00Z'))).toBe('10:00')
   })
 
   it('UI-CLUS-014 is deterministic for the same input', () => {
     expect(buildLagOption(aligned)).toEqual(buildLagOption(aligned))
+  })
+})
+
+describe('lag time axis (plan 005 1.4)', () => {
+  it('LAGOPT-001 uses the shared time axis and a short slider label', () => {
+    const option = buildLagOption(aligned)
+    expect(option.xAxis).toBe(timeAxisOption(2 * 60_000))
+    const zoom = option.dataZoom as { type: string; labelFormatter?: (value: number) => string }[]
+    expect(
+      zoom
+        .find((item) => item.type === 'slider')
+        ?.labelFormatter?.(Date.parse('2026-08-31T10:01:00Z')),
+    ).toBe('10:01')
+  })
+
+  it('LAGOPT-002 shows the UTC time and each lag in seconds in the tooltip', () => {
+    const tooltip = buildLagOption(aligned).tooltip as {
+      confine: boolean
+      formatter: (params: unknown) => string
+    }
+    expect(tooltip.confine).toBe(true)
+    const html = tooltip.formatter([
+      { seriesName: 'write_lag_sec', value: ['2026-08-31T10:00:00Z', 1.5] },
+      { seriesName: 'flush_lag_sec', value: ['2026-08-31T10:00:00Z', null] },
+    ])
+    expect(html).toContain('2026-08-31 10:00:00 UTC')
+    expect(html).toContain('write_lag_sec: <strong>1.5s</strong>')
+    expect(html).toContain('flush_lag_sec: <strong>—</strong>')
   })
 })

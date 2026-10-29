@@ -32,10 +32,14 @@ export function formatStepLabel(seconds: number): string {
   return `${seconds}s`
 }
 
-/** `Oct 29 09:41 → 10:41 UTC · step 1m`; the end repeats the date when it is another day. */
+/**
+ * `Oct 29 09:41 → 10:41 UTC · step 1m`; the end repeats the date when it is another day.
+ * An unknown step (zero or less) drops the step part.
+ */
 export function formatRangeLabel(from: Date, to: Date, stepSeconds: number): string {
   const end = sameUTCDay(from, to) ? clock(to) : `${day(to)} ${clock(to)}`
-  return `${day(from)} ${clock(from)} → ${end} UTC · step ${formatStepLabel(stepSeconds)}`
+  const step = stepSeconds > 0 ? ` · step ${formatStepLabel(stepSeconds)}` : ''
+  return `${day(from)} ${clock(from)} → ${end} UTC${step}`
 }
 
 /** Null buckets with measured values on both sides (counter resets or gaps). */

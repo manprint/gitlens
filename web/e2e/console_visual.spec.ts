@@ -72,3 +72,68 @@ for (const range of ['1h', '6h'] as const) {
     browserErrors.assertClean()
   })
 }
+
+const VIS015_WIDTHS = [1440, 1024, 768, 390] as const
+
+interface ClusterRow {
+  cluster_id: string
+  instance_count: number
+  instances: { instance_id: string }[]
+}
+
+test('VIS-015 ASH chart labels stay short and readable at every width', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, 4 * 30_000))
+  const browserErrors = collectConsoleErrors(page)
+  const instanceId = await pickInstance(api)
+  await page.goto(`/instances/${instanceId}/ash?range=1h`)
+
+  const card = page.getByRole('region', { name: /average active backends$/ }).first()
+  await expect(card).toBeVisible({ timeout: 4 * 30_000 })
+  await expect(card.getByText(/UTC · step \d+[smhd]$/)).toBeVisible()
+  for (const width of VIS015_WIDTHS) {
+    await page.setViewportSize({ width, height: 1000 })
+    await card.scrollIntoViewIfNeeded()
+    await expect.poll(() => canvasNotBlank(card), { timeout: 30_000 }).toBe(true)
+    await card.screenshot({ path: `../test/e2e/_artifacts/ui/visual/vis-015-ash-${width}.png` })
+  }
+  browserErrors.assertClean()
+})
+
+test('VIS-015 replication lag shows a readable chart or states that there is no lag', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, 4 * 30_000))
+  const browserErrors = collectConsoleErrors(page)
+  const instanceId = await pickInstance(api)
+  const response = await api.get('/api/v1/clusters')
+  expect(response.ok()).toBe(true)
+  const clusters = (await response.json()) as ClusterRow[]
+  const cluster = clusters.find((row) =>
+    row.instances.some((instance) => instance.instance_id === instanceId),
+  )
+  expect(cluster, 'the picked instance belongs to a cluster').toBeDefined()
+  if (!cluster) return
+
+  // `section=lag` is ignored until 15.3 adds the cluster tabs.
+  await page.goto(`/clusters/${cluster.cluster_id}?section=lag&range=1h`)
+  // The cluster page wraps LagSection in a section of the same name; take LagSection itself.
+  const lag = page.locator('section[aria-labelledby="replication-lag-heading"]')
+  await expect(lag).toBeVisible({ timeout: 4 * 30_000 })
+  for (const width of VIS015_WIDTHS) {
+    await page.setViewportSize({ width, height: 1000 })
+    await lag.scrollIntoViewIfNeeded()
+    if (cluster.instance_count <= 1) {
+      await expect(lag.getByText(/No replication lag/)).toBeVisible()
+    } else {
+      const edge = lag.getByRole('article').first()
+      await expect(edge.getByText(/UTC · step \d+[smhd]$/)).toBeVisible()
+      await expect.poll(() => canvasNotBlank(edge), { timeout: 30_000 }).toBe(true)
+    }
+    await lag.screenshot({ path: `../test/e2e/_artifacts/ui/visual/vis-015-lag-${width}.png` })
+  }
+  browserErrors.assertClean()
+})

@@ -14,6 +14,14 @@ import {
   type ReplicationMetricEdge,
 } from '@/lib/replication'
 import type { TimeRangeResult } from '@/lib/timerange'
+import { formatRangeLabel } from '@/lib/chartTime'
+
+/**
+ * The server returns raw replication rows (no buckets), written by the
+ * replication_streaming check every 10 s (its DefaultInterval in
+ * internal/check/replication_streaming.go), so the chart's step is that interval.
+ */
+const LAG_SAMPLE_SECONDS = 10
 
 export interface LagSectionProps {
   edges: readonly ReplicationMetricEdge[]
@@ -107,6 +115,9 @@ export function LagSection({
             return (
               <article key={`${group.from}\u0000${group.to}`} aria-labelledby={headingId}>
                 <h3 id={headingId}>{heading}</h3>
+                <p className="text-muted-foreground text-xs">
+                  {formatRangeLabel(range.from, range.to, LAG_SAMPLE_SECONDS)}
+                </p>
                 {hasData ? (
                   <>
                     <TimeSeriesChart

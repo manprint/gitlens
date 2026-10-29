@@ -1,10 +1,11 @@
 import type { EChartsOption } from 'echarts'
 
-import { formatAxisTime, formatTooltipTime } from '@/lib/chartTime'
+import { formatTooltipTime } from '@/lib/chartTime'
 import { formatBytes, formatDuration, formatMilliseconds, formatPercent } from '@/lib/format'
 import { localizedNumber } from '@/lib/format/shared'
 import { findResets } from '@/lib/metrics'
 
+import { sliderLabelFormatter, spanOf, timeAxisOption } from './timeAxis'
 import type { TimeSeriesTableSeries } from './TimeSeriesChart'
 
 export type MetricUnit = 'count' | 'bytes' | 'percent' | 'ratio' | 'seconds' | 'ms'
@@ -82,27 +83,12 @@ function tooltipTime(param: AxisTooltipParam | undefined): number {
   return typeof first === 'string' ? Date.parse(first) : typeof first === 'number' ? first : NaN
 }
 
-function seriesSpanMs(series: readonly TimeSeriesTableSeries[]): number {
-  let first = Infinity
-  let last = -Infinity
-  for (const metric of series) {
-    for (const point of metric.points) {
-      const ms = Date.parse(point.ts)
-      if (!Number.isFinite(ms)) continue
-      first = Math.min(first, ms)
-      last = Math.max(last, ms)
-    }
-  }
-  return last >= first ? last - first : 0
-}
-
 /** Build a null-preserving option for an instance metric series or series group. */
 export function buildMetricOption(
   series: readonly TimeSeriesTableSeries[],
   { annotateResets = true, yAxisName, unit }: MetricOptionOptions = {},
 ): EChartsOption {
-  const spanMs = seriesSpanMs(series)
-  const axisTime = (value: number) => (Number.isFinite(value) ? formatAxisTime(value, spanMs) : '')
+  const spanMs = spanOf(series.flatMap((metric) => metric.points.map((point) => point.ts)))
 
   const metricSeries = series.map((metric) => {
     const optionSeries = {
@@ -152,15 +138,7 @@ export function buildMetricOption(
         )
       },
     },
-    xAxis: {
-      type: 'time',
-      axisLabel: {
-        formatter: axisTime,
-        hideOverlap: true,
-        showMinLabel: false,
-        showMaxLabel: false,
-      },
-    },
+    xAxis: timeAxisOption(spanMs),
     yAxis: {
       type: 'value',
       ...(yAxisName ? { name: yAxisName } : {}),
@@ -175,7 +153,7 @@ export function buildMetricOption(
         xAxisIndex: 0,
         filterMode: 'none',
         bottom: 8,
-        labelFormatter: (value: number) => axisTime(value),
+        labelFormatter: sliderLabelFormatter(spanMs),
       },
     ],
     series: metricSeries,

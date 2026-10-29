@@ -83,6 +83,8 @@ describe('LagSection', () => {
       screen.getByRole('heading', { name: /00000000-0000-0000-0000-000000000001/ }),
     ).toBeInTheDocument()
     expect(screen.getByRole('note')).toHaveTextContent('Gaps in this range')
+    // The range line states the raw sampling step (plan 005 1.4).
+    expect(screen.getByText(/UTC · step 10s$/)).toBeInTheDocument()
     expect(screen.getByTestId('mock-echarts')).toBeInTheDocument()
   })
 

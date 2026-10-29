@@ -1,4 +1,6 @@
+import { ChartCard } from '@/components/charts/ChartCard'
 import { Section } from '@/components/layout/Section'
+import { useTimeRange } from '@/hooks/useTimeRange'
 import { EmptyState } from '@/components/state'
 import { AshChart, type AshChartProps } from './AshChart'
 import {
@@ -98,6 +100,7 @@ export function AshBreakdown({
   onSeriesSelect,
   resolutionSeconds,
 }: AshBreakdownProps) {
+  const { range } = useTimeRange()
   const { folded, series } = chartSeries(buckets, groupBy, resolutionSeconds)
   const title = GROUP_LABELS[groupBy]
   const interactionProps = onSeriesSelect === undefined ? {} : { onSeriesSelect }
@@ -108,13 +111,20 @@ export function AshBreakdown({
   return (
     <Section title={title} description={description}>
       {series.length > 0 ? (
-        <AshChart
-          ariaLabel={`${title} average active backends`}
-          dataTableLabel={`${title} average active backends data`}
-          foldedCount={folded}
-          {...interactionProps}
-          series={series}
-        />
+        <ChartCard
+          range={range}
+          state="ready"
+          stepSeconds={resolutionSeconds ?? 0}
+          title={`${title} average active backends`}
+        >
+          <AshChart
+            ariaLabel={`${title} average active backends`}
+            dataTableLabel={`${title} average active backends data`}
+            foldedCount={folded}
+            {...interactionProps}
+            series={series}
+          />
+        </ChartCard>
       ) : (
         <EmptyState
           title={`No ${title.toLocaleLowerCase('en-US')} observed`}
