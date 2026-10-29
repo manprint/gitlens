@@ -88,14 +88,14 @@ checkpoint. Capture/open and restore/close are each one STATE.md update.
 - Active scope: plan (whole `005_plan-ConsoleInsights`, no selector)
 - Scope result: RUNNING
 - Type: sub-phase
-- ID / attempt: 2.2 / 1
-- Status: OPEN (2.1 closed: unit:2.1:1)
+- ID / attempt: 2.3 / 1
+- Status: OPEN (2.2 closed: unit:2.2:1)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-opus-5-5; supervisor: Opus review agent (agent-1); exploration/mechanical: agent-3:claude-haiku-5-5
-- File / unit heading: phase_03.md → 2.2
+- File / unit heading: phase_03.md → 2.3
 - Current step: S0
-- Next action: 2.2 S1.
-- Next eligible plan unit: 2.2 (phase_03.md), then 2.3
+- Next action: 2.3 S0.
+- Next eligible plan unit: 2.3 (phase_03.md), then P2
 - Unit base: `5929be2` (no unit open); branch: `feat/index-analysis` (never switch or create branches)
 - Repo state: dirty with pre-existing changes (§5) + untracked plan folder; nothing of the plan implemented yet.
 
@@ -159,6 +159,7 @@ Required supervisor reviews cannot be silently replaced by weaker self-review.
 |------|--------------|---------------|-------|---------|-----------------|--------|
 | plan | authoring | 1 | agent-2:claude-sonnet-5-5 | `docs/plans/005_plan-ConsoleInsights/*` | R-PLAN-1..11 | uncommitted (committed at 0.2 S1b) |
 | plan + baseline | d7647d0, ce13a72 | 1 | agent-2:claude-opus-5-5 | plan folder; pre-existing §5 paths (without `dist/index.html`, `.claude/`) | G-SECRETS pass before each | `d7647d0` (`PEV-Unit: plan`), `ce13a72` (`PEV-Unit: baseline`) |
+| sub-phase | 2.2 / 1 | 1 | agent-2:claude-opus-5-5 | stack (outside the repo): `/home/agent/pglens-odoo-stack/compose.yml` (`odoo-db-data:/var/lib/postgresql:ro` on `pglens-agent`), `README.md` (one paragraph); backups `*.bak-2.2`; deploy9.log | §7 2.2 rows | unit:2.2:1 (STATE only) |
 | sub-phase | 2.1 / 1 | 1 | agent-2:claude-opus-5-5 | NEW `internal/agent/{datadir.go,datadir_test.go,datadir_integration_test.go}`, `internal/agent/conn.go` (cache fields), `internal/host/{collector.go,collector_test.go}` (`DiskUnavailable`), NEW `cmd/pglens-agent/{host_loop.go,host_loop_test.go}` (`groupTargetsByDataDir`, `diskWarner`, `collectHostByDataDir`), `cmd/pglens-agent/run.go` (host loop, `hostWireResult`), `README.md`, `deploy/agent.example.yaml`, `deploy/docker-compose.yml`, `QUICK_START.md` | §7 2.1 rows | unit:2.1:1 |
 | phase closure | P1 / 1 | 1 | agent-2:claude-opus-5-5 | `web/src/components/charts/{ash.options.ts,ash.options.test.ts}` (ASH axis pinned to the selected window, ASHOPT-013), `web/src/features/ash/{AshChart,AshBreakdown,AshChartGrid}.tsx`; STATE (REQ-10/32, VIS-* DONE, G-API note, README check); deploy8.log | §7 P1 rows; R-P1 | unit:P1:1 |
 | sub-phase | 1.5 / 1 | 1 | agent-2:claude-opus-5-5 | NEW `web/src/lib/{ashGroups.ts,ashGroups.test.ts}`, `web/src/features/ash/{AshChartGrid,AshLegend}.tsx` + tests, `ash.options.ts` (`buildAshGroupOption`, isolated-sample dots, helpers; ASHOPT-010..012 + snapshot `__snapshots__/ash.options.test.ts.snap`), `TimeSeriesChart.tsx` (`group` → `echarts.connect`), `AshBreakdown.tsx`, `AshPage.tsx` (`view` param, Chart layout radiogroup, queryid note) + `AshPage.test.tsx` (renderAsh pins view=stacked, 2 expectations, ASHPAGE-010..012); backend `internal/server/api_ash.go` (wait_event rows carry `wait_event_type` via MIN), `api_ash_test.go` (TestAPI_Ash_WaitEventSeriesCarryType), `api_ash_integration_test.go` (INT-ASH-015 unfiltered events), `api/openapi.yaml`, `docs/api.md`, `web/src/api/generated.ts`; `web/e2e/console_visual.spec.ts` (VIS-016; VIS-015 on view=stacked); deploy7.log | §7 1.5 rows; R-1.5-C1c | unit:1.5:1 |
@@ -198,11 +199,11 @@ Unit-owned paths are listed in each phase file's sub-phase `Files` field and rec
 
 ## 6. In-flight checkpoint
 
-2.2 / 1 OPEN.
-Last durable step: 2.1 closed (unit:2.1:1). 2.1: `DataDirectory` errors other than 42501 are retried silently (target still starting); only ErrDataDirNotReadable and collector DiskUnavailable reasons are warned. Earlier: P1 closed (unit:P1:1). Earlier: 1.5 closed (unit:1.5:1). 1.5 shared zoom/pointer: `echarts.connect` (TimeSeriesChart `group` prop); the slider zooms in place (its event carries percentages, so the URL range is unchanged), inside-zoom/brush still sets the URL range; S6 backend type field was needed (handler carried no type without the filter).
+2.3 / 1 OPEN.
+Last durable step: 2.2 closed (unit:2.2:1); stack compose/README backups `compose.yml.bak-2.2`, `README.md.bak-2.2`. Earlier: 2.1 closed (unit:2.1:1). 2.1: `DataDirectory` errors other than 42501 are retried silently (target still starting); only ErrDataDirNotReadable and collector DiskUnavailable reasons are warned. Earlier: P1 closed (unit:P1:1). Earlier: 1.5 closed (unit:1.5:1). 1.5 shared zoom/pointer: `echarts.connect` (TimeSeriesChart `group` prop); the slider zooms in place (its event carries percentages, so the URL range is unchanged), inside-zoom/brush still sets the URL range; S6 backend type field was needed (handler carried no type without the filter).
 Actual files/diff: none.
 Pending edits: none.
-Next step: 2.2 S1.
+Next step: 2.3 S0.
 Last check: n/a.
 Running resources: stack `pglens-odoo` up (deployed pglens images are the phase-1 build); no background processes of this plan.
 Stop reason / supervisor request: supervisor coherence review requested by the user ("fai sempre una review con advisor opus dopo le modifiche del piano; non iniziare lo sviluppo se non è tutto perfettamente coerente").
@@ -215,6 +216,7 @@ Research checkpoint: R3 pending (7.0), R4 pending (0.3 S6).
 | make lint (golangci-lint v2.15.0, installed 2026-10-29 after the user authorised downloads) | `make lint` | pass | 0 issues (covers 0.3 and 13.1 Go diffs) | cf87cd7 | 2026-10-29 |
 | G-WEB-UNIT 1.3 | `cd web && TZ=UTC pnpm exec vitest run src/features/instance` | pass | 59 passed (OV-STEP-001/002, OV-CARD-001 + existing UI-INST-0xx unchanged) | 1.3 diff | 2026-10-29 |
 | INT-API-007 (1.3 S4) | `go test -tags=integration -race -count=1 ./internal/server -run StepBelowSampling` | pass | 15s: 240 buckets ≥ 40 % null; 60s: 60 buckets, 0 null | 1.3 diff | 2026-10-29 |
+| G-DEPLOY + LIVE-HOST (2.2) | `deploy.sh`; `docker inspect` mounts; `seed/api.py`-based query of `/api/v1/metrics/query?metric=host_disk_*&step=60s` (last 10 min) and `/api/v1/instances/<id>/host`; `docker logs pglens-odoo-pglens-agent-1` | pass | `/var/lib/postgresql` mounted RW=false; LIVE-HOST-001 total 31 526 391 808 B (4 non-null of 10 buckets after deploy); LIVE-HOST-002 free 5 137 195 008 ≤ total; ratio 0.163 ∈ (0,1); `/host` available true with the 3 disk fields; LIVE-HOST-003 0 warning lines | deployed 2.1 build (deploy9) | 2026-10-29 |
 | G-GO-FOCUS 2.1 | `go test -race -shuffle=on -count=1 ./internal/host ./internal/agent ./cmd/pglens-agent` (+ `-run 'HOSTDD\|DataDir'`) | pass | discovery HOSTDD: host 2, agent 3, cmd 4 (HOST-DD-001..008); packages ok | 2.1 diff | 2026-10-29 |
 | G-GO-INT 2.1 | `go test -tags=integration -race -count=1 ./internal/agent -run 'INTHOST\|TestINTRO001'` | pass | INT-HOST-001 pg15/pg18 (T0 role reads data_directory; collector reports unavailable on the test host), INT-RO-001 pg15/pg18 | 2.1 diff | 2026-10-29 |
 | static 2.1 | `gofmt -l`, `go vet` (+ `-tags=integration`), `golangci-lint run` on the three packages | pass | 0 issues | 2.1 diff | 2026-10-29 |
@@ -375,7 +377,7 @@ Rule (user): after **every** modification of the plan the `advisor` reviews it a
 | 1.4 | phase_02.md | 1.1 | DONE | 1 | TAXIS, ASHOPT, LAGOPT, CTIME-008, VIS-015, C-1b (§7) |
 | 1.5 | phase_02.md | 1.2, 1.4 | DONE | 1 | ASHGRP, ASHOPT-010..012, ASHLEG, ASHGRID, ASHPAGE-010..012, VIS-016, C-1c (§7) |
 | 2.1 | phase_03.md | 0 | DONE | 1 | HOST-DD-001..008, INT-HOST-001, INT-RO-001 (§7) |
-| 2.2 | phase_03.md | 2.1 | TODO | 1 | — |
+| 2.2 | phase_03.md | 2.1 | DONE | 1 | LIVE-HOST-001..003 (§7) |
 | 2.3 | phase_03.md | 2.2, 1.2 | TODO | 1 | — |
 | 3.1 | phase_04.md | 0 (server-only; independent of 1.x) | TODO | 1 | — |
 | 3.2 | phase_04.md | 3.1, 1.3, 2.3 | TODO | 1 | — |
