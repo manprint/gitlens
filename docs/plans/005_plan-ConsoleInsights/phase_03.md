@@ -1,0 +1,62 @@
+# Phase 2 — Host metrics: filesystem data and real charts
+
+Intent: the host section shows CPU, load, memory, swap and filesystem as proper charts, and "Filesystem total/free" are populated from the PostgreSQL data directory.
+Prerequisites: 2.1 needs 0.2; 2.2 needs 2.1; 2.3 needs 1.2 (ChartCard/builders) and 2.2 for live proof.
+Phase closure: P2; review by `advisor`.
+
+## State and ownership contract
+Read STATE.md §0–1 first. Open before edits; checkpoint at a recovery boundary; close with evidence. Missing design goes to the `advisor`.
+
+## Local design context
+Plan revision: 1.
+- D6: the agent reads `SHOW data_directory` per local target (Tier 0 is enough, R2) and calls `host.Collector.Collect(ctx, dir)` once per distinct directory; an unreadable path leaves disk fields absent, logs one warning per target and reason, and never drops cpu/load/memory fields; the UI shows an actionable hint when disk metrics are missing.
+- D1/D2/D3: charts use `stepFor('gauge', …, 30)`, `ChartCard`, `buildMetricOption`.
+- Existing facts: `cmd/pglens-agent/run.go` lines 155–185 (host loop, `collector.Collect(ctx, "")` at line 161, `agent.TargetIsLocal(tc)` filter, one `hostWireResult(sample, clk.Now())` appended per local target); `internal/host/collector.go` `Collect(ctx, dataDir)` fills disk only when `dataDir != ""` via `disk.UsageWithContext(ctx, filepath.Clean(dataDir))`; `hostWireResult` (run.go ~line 331) emits `host_disk_total_bytes`, `host_disk_free_bytes`, `host_disk_free_ratio` only when the sample has disk fields; `web/src/features/instance/HostSection.tsx` (137 lines; tiles for those three at lines 68–70, other tiles for cpu/load/memory/swap); metric names stored in `metrics`: `host_cpu_count`, `host_cpu_used_ratio`, `host_load1`, `host_load5`, `host_load15`, `host_mem_total_bytes`, `host_mem_available_bytes`, `host_swap_total_bytes`, `host_swap_used_bytes` (both confirmed in `hostWireResult`), `host_disk_total_bytes`, `host_disk_free_bytes`, `host_disk_free_ratio`, `host_metrics_source` (2.3 S0 re-confirms the names against `hostWireResult` in `cmd/pglens-agent/run.go`).
+- Live facts: PG data directory in the DB container is `/var/lib/postgresql/18/docker` on volume `odoo-db-data` (`/dev/vdd`, 30 G, 24 G used at recon); the agent container already has `HOST_PROC=/host/proc`, `HOST_SYS=/host/sys` mounts and `host.enabled: true`, target `odoo-db` has `host_local: true`.
+
+## Sub-phases
+
+### 2.1 Agent: data directory discovery and disk collection
+- **Model:** agent-2:claude-opus-5-5
+- **Assignment:** implement; `advisor` reviews at P2 (I-2 read-only is preserved by construction: one `SHOW`).
+- **Files:** READ `cmd/pglens-agent/run.go` (lines 100–200, 340–380), `internal/host/collector.go` (+ tests), `internal/agent/conn.go` (`Manager`, how queries run on the target pool), `internal/agent/config.go` (`TargetIsLocal`), `internal/agent/readonly_audit_integration_test.go`, `test/pgtest` harness. WRITE `cmd/pglens-agent/run.go`, `internal/host/collector.go` (+ `collector_test.go`), `internal/agent/conn.go` or NEW `internal/agent/datadir.go` (+ `datadir_test.go`, `datadir_integration_test.go`), `README.md` (agent host-metrics section), `deploy/agent.example.yaml` comment, `QUICK_START.md` (Italian, host metrics note), `deploy/docker-compose.yml` comment for the optional data-dir mount.
+- **Change:**
+  Preconditions: 0.2 done.
+  Contract: `(*Manager).DataDirectory(ctx) (string, error)` runs `SHOW data_directory` with a 3 s timeout, returns `filepath.Clean` of a non-empty absolute path, caches the first success, never caches failures (retried on the next tick). `host.Sample` gains `DiskUnavailable string` (reason; empty when disk fields are filled). `Collect(ctx, dir)` with a dir whose `statfs` fails returns the sample with cpu/load/memory/swap filled, disk fields nil and `DiskUnavailable` set (not an error). `groupTargetsByDataDir(targets, dirs)` (pure, in `run.go` or a helper file) returns `map[string][]string` (dir → target names) with the empty dir bucket for targets whose directory is not yet known; for each bucket the loop calls `Collect(ctx, dir)` once and appends `hostWireResult(sample, now)` to each target in the bucket; `hostWireResult` omits disk metrics when `DiskUnavailable != ""`; a warning `host disk metrics unavailable for target %s: %s (mount the data directory read-only at the same path in the agent container)` is logged once per target and reason.
+  Steps: S1 `DataDirectory` + unit tests (pgxmock, module already cached) and integration test. S2 collector tolerance + tests. S3 `groupTargetsByDataDir` + loop change. S4 `hostWireResult` change + tests. S5 docs (README, example yaml, QUICK_START, compose comment). S6 run the read-only audit (`TestINTRO001`).
+  Recovery boundary: after S2.
+  Failure handling: if `SHOW data_directory` is denied for a role (older Tier 0 setup), treat as unavailable with reason `data_directory is not readable by the monitoring role`, never escalate privileges.
+- **Unit tests:** HOST-DD-001 `DataDirectory` returns the cleaned path from a pgxmock row `'/var/lib/postgresql/18/docker/'`; HOST-DD-002 error from the pool is returned and not cached (second call queries again); HOST-DD-003 relative or empty value → error; HOST-DD-004 `Collect` on `t.TempDir()` → `DiskTotal > 0`, `0 <= DiskFree <= DiskTotal`, ratio in [0,1], `DiskUnavailable == ""`; HOST-DD-005 `Collect` on `/nonexistent/path` → cpu/mem fields present, disk nil, reason non-empty, no error; HOST-DD-006 `hostWireResult` with disk emits the three disk metrics, with `DiskUnavailable` emits none; HOST-DD-007 `groupTargetsByDataDir` groups two targets with the same dir into one bucket and puts an unknown-dir target in the empty bucket; HOST-DD-008 the warning is emitted once per target/reason (log capture). Command: `go test -race -shuffle=on -count=1 ./internal/host ./internal/agent ./cmd/pglens-agent -run 'HOSTDD|DataDir'`; discovery with `go test -list` on the three packages.
+- **e2e tests:** INT-HOST-001 (`-tags=integration`): PostgreSQL container, T0 role, `Manager.DataDirectory` returns the container's data directory (`/var/lib/postgresql/data` or the image's value) and `Collect` of that path on the test host reports unavailable (path not visible) → reason set; INT-RO-001 `TestINTRO001` still passes (the agent issues only reads). Command: `go test -tags=integration -race -count=1 ./internal/agent -run 'INTHOST|TestINTRO001'`.
+- **Done:** tests above pass with the named tests executed; `go vet`, `gofmt`, `make lint` clean for touched packages; docs updated; unit closed.
+
+### 2.2 Stack: mount the data directory and prove live data
+- **Model:** agent-2:claude-opus-5-5
+- **Assignment:** implement; evidence reviewed at P2.
+- **Files:** READ `/home/agent/pglens-odoo-stack/compose.yml` (agent service). WRITE `/home/agent/pglens-odoo-stack/compose.yml`, `/home/agent/pglens-odoo-stack/README.md` (one paragraph).
+- **Change:**
+  Preconditions: 2.1 done; backup `02-loaded` exists (0.1).
+  Contract: the `pglens-agent` service mounts `odoo-db-data:/var/lib/postgresql:ro` so that `/var/lib/postgresql/18/docker` exists at the same path read-only; no other change.
+  Steps: S1 edit compose. S2 `/home/agent/pglens-odoo-stack/deploy.sh` (G-DEPLOY) (rebuilds both images; the agent image carries 2.1). S3 verify in the agent log that no disk warning appears; query `GET /api/v1/metrics/query?metric=host_disk_total_bytes&instance_id=<id>&step=60s&from=<now-10m>&to=<now>` after two scrapes → at least one non-null value, `host_disk_free_ratio` in (0,1). S4 `GET /api/v1/instances/<id>/host` shows `available: true`.
+  Failure handling: the volume is mounted read-only on purpose (agent must not write to the DB volume); if `statfs` still fails, inspect `docker exec pglens-odoo-pglens-agent-1 ls /var/lib/postgresql/18/docker` and fix the mount path, never mount read-write.
+- **Unit tests:** LIVE-HOST-001 `host_disk_total_bytes` non-null; LIVE-HOST-002 `host_disk_free_bytes <= host_disk_total_bytes`; LIVE-HOST-003 no `host disk metrics unavailable` line in `docker logs pglens-odoo-pglens-agent-1`. Commands in S3/S4 via `/home/agent/pglens-odoo-stack/seed/api.py` (0.1 S0; the password comes from the environment).
+- **e2e tests:** N/A — the UI proof is in 2.3.
+- **Done:** the three live checks pass; compose + README updated; unit closed.
+
+### 2.3 Host charts
+- **Model:** agent-2:claude-opus-5-5
+- **Assignment:** implement; `advisor` reviews screenshots with checklist C-2.
+- **Files:** READ `web/src/features/instance/HostSection.tsx` (+ test), `OverviewSection.tsx` (how it queries metrics: `useQueryMetrics` in `web/src/api/queries.ts`), `web/src/test/fixtures/queryMetrics.ts`, `web/src/lib/format`. WRITE `HostSection.tsx`, `HostSection.test.tsx`. NEW `web/src/lib/hostSeries.ts` (+ test), `web/src/features/instance/HostCharts.tsx` (+ test). Also WRITE `web/e2e/console_visual.spec.ts` (`VIS-020`, the unit's live spec; titles start with the test ID).
+- **Change:**
+  Preconditions: 1.2 done, 2.2 done.
+  Contract: `hostSeries.ts`: `subtractSeries(total, available)` → points `{ts, value: total − available}` aligned on `ts`, null when either is null; `toPercent(series)` multiplies by 100 keeping null; `usedRatio(total, free)`. `HostCharts` renders, as `ChartCard`s inside one `ChartGroup id="host"`: "CPU used (%)" (`host_cpu_used_ratio` ×100, y 0–100), "Load average" (`host_load1`, `host_load5`, `host_load15` + a horizontal `markLine` at `host_cpu_count` named "CPU count"), "Memory" (used = total − available, with `host_mem_total_bytes` as a dashed reference line; bytes unit), "Swap" (used = `host_swap_used_bytes`, reference line `host_swap_total_bytes`; hidden with an explanation when swap total is 0), "Filesystem" (used = total − free, free ratio as a second series on a 0–100 % axis, only when disk metrics exist). Step = `stepFor('gauge', from, to, 30)`. When `host_disk_total_bytes` is missing but host metrics are available, the Filesystem card shows the hint "Filesystem metrics need the PostgreSQL data directory mounted read-only at the same path in the agent container." (no API change). The three existing disk tiles show the formatted bytes, or "Not visible to the agent" instead of "—" when missing.
+  Steps: S0 confirm exact metric names against the live API. S1 `hostSeries.ts` + tests. S2 `HostCharts` + tests. S3 integrate in `HostSection` below the tiles (separator + spacing as in D4). S4 update `HostSection.test.tsx`. S5 G-DEPLOY, then Playwright `VIS-020`. S6 screenshot review C-2.
+  Recovery boundary: after S2.
+- **Unit tests:** HOSTCH-001 `subtractSeries` aligned values and null propagation; HOSTCH-002 misaligned timestamps → only common ts kept; HOSTCH-003 `toPercent`; HOSTCH-004 CPU card has 0–100 axis; HOSTCH-005 load card has a "CPU count" reference line with value `host_cpu_count`; HOSTCH-006 memory used series = total − available; HOSTCH-007 swap card hidden when swap total 0 with the explanation; HOSTCH-008 filesystem card shows the hint when disk metrics are missing; HOSTCH-009 disk tiles show "Not visible to the agent" instead of "—"; HOSTCH-010 steps requested are >= 30 s; HOSTCH-011 axe on the section. Command: `cd web && TZ=UTC pnpm exec vitest run src/lib/hostSeries.test.ts src/features/instance/HostCharts.test.tsx src/features/instance/HostSection.test.tsx`.
+- **e2e tests:** VIS-020 (live): open the Host section, tiles "Filesystem total/free" show values (not `—`), the five chart cards exist, `chartCompleteness(...).observedRatio` of CPU/Memory >= 0.9 at 1 h (precondition `leadingNull / total <= 0.5`), canvases not blank, no console errors, screenshots at three widths. Checklist C-2: charts readable, units correct (bytes, %), load line vs CPU-count reference, filesystem card populated. VIS-020 calls `test.setTimeout(liveTimeout(0, 3 * 30_000))`.
+- **Done:** tests pass, VIS-020 passes, C-2 signed off, unit closed.
+
+## Phase gates and closure
+- Required gates: G-GO-FOCUS (`./internal/host ./internal/agent ./cmd/pglens-agent`), G-GO-INT (`-run 'INTHOST|TestINTRO001'`), G-RO, G-WEB-STATIC, G-WEB-UNIT (`src/lib src/features/instance`), G-DEPLOY, G-STACK, G-VIS (`VIS-020`).
+- README obligation: 2.1 (README host section, example yaml, QUICK_START, compose comment), 2.2 (stack README).
+- Every sub-phase DONE. `advisor` reviews D6 behaviour, read-only audit and screenshots. Open P2, record, mark DONE. Commit per STATE §3.
