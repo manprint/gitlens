@@ -44,6 +44,17 @@ beforeEach(() => {
 })
 
 describe('TimeSeriesChart', () => {
+  it('TSC-HEIGHT-001 applies the height prop and defaults to 300 px', () => {
+    renderWithProviders(<TimeSeriesChart {...chartProps} height={180} />)
+    const props = echartsMock.render.mock.calls[0]?.[0] as { style?: { height?: number } }
+    expect(props.style?.height).toBe(180)
+
+    echartsMock.render.mockClear()
+    renderWithProviders(<TimeSeriesChart {...chartProps} />)
+    const fallback = echartsMock.render.mock.calls[0]?.[0] as { style?: { height?: number } }
+    expect(fallback.style?.height).toBe(300)
+  })
+
   it('UI-CLUS-015 passes the built option to the chart library', () => {
     renderWithProviders(<TimeSeriesChart {...chartProps} />)
 

@@ -1,23 +1,109 @@
 import type { EChartsOption } from 'echarts'
 
+import { formatAxisTime, formatTooltipTime } from '@/lib/chartTime'
+import { formatBytes, formatDuration, formatMilliseconds, formatPercent } from '@/lib/format'
+import { localizedNumber } from '@/lib/format/shared'
 import { findResets } from '@/lib/metrics'
 
 import type { TimeSeriesTableSeries } from './TimeSeriesChart'
 
+export type MetricUnit = 'count' | 'bytes' | 'percent' | 'ratio' | 'seconds' | 'ms'
+
 export interface MetricOptionOptions {
   annotateResets?: boolean
   yAxisName?: string
+  unit?: MetricUnit
+  /** Query step of the series; informational, the ChartCard states it. */
+  stepSeconds?: number
 }
 
-function formatUtcTimestamp(value: number): string {
-  return new Date(value).toISOString()
+/** Above this many resets in one series no line is drawn; the card states the count instead. */
+export const MAX_RESET_LINES = 12
+
+const MISSING = '—'
+
+/** A value in the chart's unit; `—` for a missing bucket. */
+export function formatMetricValue(value: number | null | undefined, unit: MetricUnit = 'count') {
+  if (value === null || value === undefined || !Number.isFinite(value)) return MISSING
+  switch (unit) {
+    case 'bytes':
+      return formatBytes(value)
+    case 'percent':
+      return formatPercent(value, 100) ?? MISSING
+    case 'ratio':
+      return formatPercent(value, 1) ?? MISSING
+    case 'seconds':
+      return formatDuration(value)
+    case 'ms':
+      return formatMilliseconds(value)
+    case 'count':
+      return localizedNumber(value, 'en-US', { maximumFractionDigits: 2 })
+  }
+}
+
+export interface TooltipRow {
+  seriesName: string
+  marker?: string
+  value: number | null
+}
+
+const escapeHtml = (text: string) => text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`)
+
+/** Tooltip body: the UTC time, then one row per series in the chart's unit. */
+export function tooltipHtml(ms: number, rows: readonly TooltipRow[], unit?: MetricUnit): string {
+  const lines = rows.map(
+    (row) =>
+      `<div>${row.marker ?? ''}${escapeHtml(row.seriesName)}: <strong>${escapeHtml(
+        formatMetricValue(row.value, unit),
+      )}</strong></div>`,
+  )
+  // An unparseable time drops the time row instead of throwing in the tooltip.
+  const time = Number.isFinite(ms) ? [`<div>${formatTooltipTime(ms)}</div>`] : []
+  return [...time, ...lines].join('')
+}
+
+interface AxisTooltipParam {
+  seriesName?: string
+  marker?: unknown
+  value?: unknown
+  axisValue?: unknown
+}
+
+function tooltipValue(value: unknown): number | null {
+  const raw = Array.isArray(value) ? (value as unknown[])[1] : value
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : null
+}
+
+function tooltipTime(param: AxisTooltipParam | undefined): number {
+  const axis = param?.axisValue
+  if (typeof axis === 'number') return axis
+  if (typeof axis === 'string') return Date.parse(axis)
+  const first = Array.isArray(param?.value) ? (param.value as unknown[])[0] : undefined
+  return typeof first === 'string' ? Date.parse(first) : typeof first === 'number' ? first : NaN
+}
+
+function seriesSpanMs(series: readonly TimeSeriesTableSeries[]): number {
+  let first = Infinity
+  let last = -Infinity
+  for (const metric of series) {
+    for (const point of metric.points) {
+      const ms = Date.parse(point.ts)
+      if (!Number.isFinite(ms)) continue
+      first = Math.min(first, ms)
+      last = Math.max(last, ms)
+    }
+  }
+  return last >= first ? last - first : 0
 }
 
 /** Build a null-preserving option for an instance metric series or series group. */
 export function buildMetricOption(
   series: readonly TimeSeriesTableSeries[],
-  { annotateResets = true, yAxisName }: MetricOptionOptions = {},
+  { annotateResets = true, yAxisName, unit }: MetricOptionOptions = {},
 ): EChartsOption {
+  const spanMs = seriesSpanMs(series)
+  const axisTime = (value: number) => (Number.isFinite(value) ? formatAxisTime(value, spanMs) : '')
+
   const metricSeries = series.map((metric) => {
     const optionSeries = {
       type: 'line' as const,
@@ -30,33 +116,67 @@ export function buildMetricOption(
 
     if (!annotateResets) return optionSeries
 
-    const resetPoints = findResets(metric.points).map((index) => {
-      const point = metric.points[index]
-      return {
-        coord: [point?.ts ?? '', 0],
-        name: 'Counter reset',
-        value: 'reset',
-      }
-    })
+    const resets = findResets(metric.points)
+    if (resets.length === 0 || resets.length > MAX_RESET_LINES) return optionSeries
 
-    return resetPoints.length > 0
-      ? { ...optionSeries, markPoint: { data: resetPoints } }
-      : optionSeries
+    return {
+      ...optionSeries,
+      markLine: {
+        silent: true,
+        symbol: 'none',
+        label: { show: false },
+        lineStyle: { type: 'dashed' as const, width: 1, opacity: 0.5 },
+        data: resets.map((index) => ({ xAxis: metric.points[index]?.ts ?? '' })),
+      },
+    }
   })
 
   return {
     animation: false,
-    grid: { bottom: 72, containLabel: true, left: 48, right: 24, top: 48 },
+    grid: { bottom: 72, containLabel: true, left: 56, right: 24, top: 40 },
     legend: { data: series.map(({ name }) => name), top: 8, type: 'scroll' },
-    tooltip: { trigger: 'axis' },
+    tooltip: {
+      trigger: 'axis',
+      confine: true,
+      axisPointer: { type: 'line' },
+      formatter: (params: unknown) => {
+        const list = (Array.isArray(params) ? params : [params]) as AxisTooltipParam[]
+        return tooltipHtml(
+          tooltipTime(list[0]),
+          list.map((param) => ({
+            seriesName: param.seriesName ?? '',
+            marker: typeof param.marker === 'string' ? param.marker : '',
+            value: tooltipValue(param.value),
+          })),
+          unit,
+        )
+      },
+    },
     xAxis: {
       type: 'time',
-      axisLabel: { formatter: formatUtcTimestamp },
+      axisLabel: {
+        formatter: axisTime,
+        hideOverlap: true,
+        showMinLabel: false,
+        showMaxLabel: false,
+      },
     },
-    yAxis: yAxisName ? { type: 'value', name: yAxisName } : { type: 'value' },
+    yAxis: {
+      type: 'value',
+      ...(yAxisName ? { name: yAxisName } : {}),
+      ...(unit
+        ? { axisLabel: { formatter: (value: number) => formatMetricValue(value, unit) } }
+        : {}),
+    },
     dataZoom: [
       { type: 'inside', xAxisIndex: 0, filterMode: 'none', throttle: 50 },
-      { type: 'slider', xAxisIndex: 0, filterMode: 'none', bottom: 8 },
+      {
+        type: 'slider',
+        xAxisIndex: 0,
+        filterMode: 'none',
+        bottom: 8,
+        labelFormatter: (value: number) => axisTime(value),
+      },
     ],
     series: metricSeries,
   }

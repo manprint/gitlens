@@ -23,6 +23,8 @@ export interface TimeSeriesChartProps {
   dataTableLabel?: string
   onSeriesSelect?: (name: string) => void
   valueLabel?: string
+  /** Chart height in pixels (default 300). */
+  height?: number
 }
 
 interface DataZoomWindow {
@@ -70,6 +72,7 @@ function rangeFromDataZoom(event: unknown): { from: Date; to: Date } | null {
 export function TimeSeriesChart({
   ariaLabel,
   dataTableLabel = `${ariaLabel} data`,
+  height = 300,
   onSeriesSelect,
   option,
   series,
@@ -108,7 +111,7 @@ export function TimeSeriesChart({
             ...(onSeriesSelect === undefined ? {} : { click: handleSeriesClick }),
           }}
           option={themed.option}
-          style={{ height: 300, width: '100%' }}
+          style={{ height, width: '100%' }}
           theme={themed.theme}
         />
       </div>

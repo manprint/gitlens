@@ -19,22 +19,45 @@ export const DEFAULT_SAMPLE_SECONDS = 30
 
 /**
  * Agent counters (KindCounter, delta-converted at ingest) whose names do not
- * end in `_total`. Derived from internal/check: wal.go (`walCounterColumn`
- * over the pg_stat_wal columns of PostgreSQL 14-18, plus `pg_wal_lsn_bytes`)
- * and stat_statements.go.
+ * end in `_total`, from internal/check: table_stats.go, index_stats.go and
+ * stat_statements.go. The pg_wal_* counters follow `walCounterColumn` below.
  */
 const COUNTERS_WITHOUT_SUFFIX = new Set([
-  'pg_wal_lsn_bytes',
-  'pg_wal_wal_records',
-  'pg_wal_wal_fpi',
-  'pg_wal_wal_bytes',
-  'pg_wal_wal_buffers_full',
-  'pg_wal_wal_write',
-  'pg_wal_wal_sync',
-  'pg_wal_wal_write_time',
-  'pg_wal_wal_sync_time',
   'pg_stat_statements_total_exec_time_ms',
+  'pg_table_seq_scan',
+  'pg_table_seq_tup_read',
+  'pg_table_idx_scan',
+  'pg_table_idx_tup_fetch',
+  'pg_table_n_tup_ins',
+  'pg_table_n_tup_upd',
+  'pg_table_n_tup_del',
+  'pg_table_n_tup_hot_upd',
+  'pg_table_autovacuum_count',
+  'pg_table_autoanalyze_count',
+  'pg_index_idx_scan',
+  'pg_index_idx_tup_read',
+  'pg_index_idx_tup_fetch',
+  'pg_index_idx_blks_read',
+  'pg_index_idx_blks_hit',
 ])
+
+const WAL_COUNTER_COLUMNS = new Set([
+  'wal_records',
+  'wal_fpi',
+  'wal_buffers_full',
+  'wal_sync',
+  'wal_write',
+])
+
+/** Mirrors wal.go `walCounterColumn` for `pg_wal_<column>`, plus `pg_wal_lsn_bytes`. */
+function walCounterColumn(column: string): boolean {
+  return (
+    column.endsWith('_count') ||
+    column.endsWith('_bytes') ||
+    column.endsWith('_time') ||
+    WAL_COUNTER_COLUMNS.has(column)
+  )
+}
 
 /**
  * Whether a metric is a per-second rate derived from a counter or a gauge.
@@ -43,6 +66,7 @@ const COUNTERS_WITHOUT_SUFFIX = new Set([
 export function metricKind(name: string): MetricKind {
   if (name.endsWith('_total') || name.includes('_rate')) return 'rate'
   if (COUNTERS_WITHOUT_SUFFIX.has(name)) return 'rate'
+  if (name.startsWith('pg_wal_') && walCounterColumn(name.slice('pg_wal_'.length))) return 'rate'
   // io.go stores every pg_stat_io column as a counter; only the timing flag is a gauge.
   if (name.startsWith('pg_io_') && name !== 'pg_io_timing_enabled') return 'rate'
   return 'gauge'

@@ -69,20 +69,22 @@ describe('OverviewSection', () => {
     await settle()
 
     const option = chartMock.options.find((candidate) => {
-      const series = (candidate as { series?: { markPoint?: unknown }[] }).series
-      return series?.some((item) => item.markPoint !== undefined)
+      const series = (candidate as { series?: { markLine?: unknown }[] }).series
+      return series?.some((item) => item.markLine !== undefined)
     }) as {
       series: {
         connectNulls: boolean
         data: [string, number | null][]
-        markPoint?: { data: { name: string }[] }
+        markPoint?: unknown
+        markLine?: { data: { xAxis: string }[] }
       }[]
     }
-    const series = option.series.find((item) => item.markPoint !== undefined)
+    const series = option.series.find((item) => item.markLine !== undefined)
 
     expect(series?.connectNulls).toBe(false)
     expect(series?.data[1]?.[1]).toBeNull()
-    expect(series?.markPoint?.data).toEqual([expect.objectContaining({ name: 'Counter reset' })])
+    expect(series?.markPoint).toBeUndefined()
+    expect(series?.markLine?.data).toEqual([{ xAxis: series?.data[1]?.[0] }])
   })
 
   it('UI-INST-025 renders every tile as not measured when its value is null', async () => {
