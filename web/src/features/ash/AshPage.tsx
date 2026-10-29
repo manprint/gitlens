@@ -14,6 +14,7 @@ import { queryWindowOf } from '@/lib/timerange'
 import { AshBreakdown } from './AshBreakdown'
 import { AshTopQueries } from './AshTopQueries'
 import { Callout } from '@/components/ui/callout'
+import { cn } from '@/lib/utils'
 
 type DrillGroup = Extract<AshGroupBy, 'wait_event_type' | 'wait_event' | 'queryid'>
 
@@ -40,6 +41,53 @@ function AshFootnote() {
 function computeQueryIdSetting(settings: readonly { name: string; value: string | null }[]) {
   const setting = settings.find(({ name }) => name === 'compute_query_id')
   return setting?.value?.trim().toLocaleLowerCase('en-US') ?? 'auto'
+}
+
+type ChartView = 'separate' | 'stacked'
+
+// Separate is the default and is never written to the URL.
+function readView(value: string | null): ChartView {
+  return value === 'stacked' ? 'stacked' : 'separate'
+}
+
+interface ChartLayoutToggleProps {
+  view: ChartView
+  onChange: (view: ChartView) => void
+}
+
+const LAYOUTS: readonly { value: ChartView; label: string }[] = [
+  { value: 'separate', label: 'Separate' },
+  { value: 'stacked', label: 'Stacked' },
+]
+
+function ChartLayoutToggle({ onChange, view }: ChartLayoutToggleProps) {
+  return (
+    <div
+      aria-label="Chart layout"
+      className="bg-muted/40 inline-flex items-center gap-1 rounded-lg border p-1 text-sm"
+      role="radiogroup"
+    >
+      {LAYOUTS.map(({ label, value }) => (
+        <label
+          className={cn(
+            'focus-within:ring-ring cursor-pointer rounded-md px-3 py-1 focus-within:ring-2',
+            view === value ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground',
+          )}
+          key={value}
+        >
+          <input
+            checked={view === value}
+            className="sr-only"
+            name="ash-chart-layout"
+            onChange={() => onChange(value)}
+            type="radio"
+            value={value}
+          />
+          {label}
+        </label>
+      ))}
+    </div>
+  )
 }
 
 function readGroup(value: string | null): DrillGroup {
@@ -127,6 +175,7 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
   const waitEventType = searchParams.get('wait_event_type')
   const waitEvent = searchParams.get('wait_event')
   const database = searchParams.get('db') ?? undefined
+  const view = readView(searchParams.get('view'))
   const filters = drillFilters(groupBy, waitEventType, waitEvent)
   const params = {
     group_by: groupBy,
@@ -181,6 +230,13 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
     setSearchParams(next)
   }
 
+  function changeView(nextView: ChartView) {
+    const next = new URLSearchParams(searchParams)
+    if (nextView === 'separate') next.delete('view')
+    else next.set('view', nextView)
+    setSearchParams(next)
+  }
+
   function selectSeries(name: string) {
     const cleanName = name.replace(/ \(folded\)$/u, '')
     if (cleanName.toLocaleLowerCase('en-US') === 'other') return
@@ -228,6 +284,9 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
         icon={Activity}
         eyebrow="Wait events"
         freshness={<FreshnessBadge dataUpdatedAt={ashQuery.dataUpdatedAt} policy="ash" />}
+        {...(groupBy === 'queryid'
+          ? {}
+          : { actions: <ChartLayoutToggle onChange={changeView} view={view} /> })}
         title="ASH and wait analysis"
         subtitle={
           <span>
@@ -287,8 +346,14 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
               groupBy={groupBy}
               onSeriesSelect={selectSeries}
               resolutionSeconds={ashQuery.data.resolution_seconds}
+              view={view}
             />
           )}
+          {groupBy === 'queryid' ? (
+            <p className="text-muted-foreground text-sm" data-testid="ash-queryid-note">
+              Queries are plotted in one stacked chart: each series is a query, not a wait group.
+            </p>
+          ) : null}
           {groupBy === 'queryid' && !queryIdsUnavailable ? (
             <AshTopQueries {...topQueryProps} timeWindow={timeWindow} instanceId={instanceId} />
           ) : null}

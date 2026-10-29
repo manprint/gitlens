@@ -1,4 +1,4 @@
-import { act, fireEvent, screen } from '@testing-library/react'
+import { act, fireEvent, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { EChartsOption } from 'echarts'
@@ -100,6 +100,20 @@ function renderAsh(
   mocks.ash.mockReturnValue(ashResult ?? success(response))
   mocks.ashTop.mockReturnValue(success(ashTopResponse))
   mocks.settings.mockReturnValue(settingsResult ?? success({ instance_id: 'instance-1', settings }))
+  // The page defaults to one chart per wait group; these tests read the last
+  // chart's props, so they pin the single stacked chart.
+  return renderWithProviders(<AshPage instanceId="instance-1" />, { route: pinStacked(route) })
+}
+
+function pinStacked(route: string) {
+  return `${route}${route.includes('?') ? '&' : '?'}view=stacked`
+}
+
+/** Render without pinning the chart layout. */
+function renderAshDefault(route = '/instances/instance-1/ash?range=1h') {
+  mocks.ash.mockReturnValue(success(ashResponse))
+  mocks.ashTop.mockReturnValue(success(ashTopResponse))
+  mocks.settings.mockReturnValue(success({ instance_id: 'instance-1', settings: [] }))
   return renderWithProviders(<AshPage instanceId="instance-1" />, { route })
 }
 
@@ -385,7 +399,7 @@ describe('AshPage', () => {
 
     expect(view.router.state.location.pathname).toBe('/login')
     expect(view.router.state.location.search).toBe(
-      '?next=%2Finstances%2Finstance-1%2Fash%3Frange%3D1h',
+      '?next=%2Finstances%2Finstance-1%2Fash%3Frange%3D1h%26view%3Dstacked',
     )
 
     await act(async () => {
@@ -447,7 +461,7 @@ describe('AshPage', () => {
 
     act(() => chartProps.onEvents?.click?.({ seriesName: 'other (folded)' }))
 
-    expect(view.router.state.location.search).toBe('?range=1h')
+    expect(view.router.state.location.search).toBe('?range=1h&view=stacked')
   })
 
   it('drills from a wait event to query ids', () => {
@@ -577,5 +591,57 @@ describe('AshPage', () => {
     expect(view.container).toBeTruthy()
     vi.useRealTimers()
     await expectNoA11yViolations(view.container)
+  })
+
+  it('ASHPAGE-010 defaults to one chart per wait group and toggles to stacked', () => {
+    const view = renderAshDefault()
+
+    expect(screen.getByTestId('ash-chart-grid')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Locks and contention' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Client and inter-process' })).toBeInTheDocument()
+    const layout = screen.getByRole('radiogroup', { name: 'Chart layout' })
+    expect(within(layout).getByRole('radio', { name: 'Separate' })).toBeChecked()
+
+    fireEvent.click(within(layout).getByRole('radio', { name: 'Stacked' }))
+    expect(new URLSearchParams(view.router.state.location.search).get('view')).toBe('stacked')
+    expect(screen.queryByTestId('ash-chart-grid')).not.toBeInTheDocument()
+    expect(within(layout).getByRole('radio', { name: 'Stacked' })).toBeChecked()
+
+    fireEvent.click(within(layout).getByRole('radio', { name: 'Separate' }))
+    expect(view.router.state.location.search).toBe('?range=1h')
+    expect(screen.getByTestId('ash-chart-grid')).toBeInTheDocument()
+  })
+
+  it('ASHPAGE-010 renders the single stacked chart for view=stacked', () => {
+    renderAshDefault('/instances/instance-1/ash?range=1h&view=stacked')
+
+    expect(screen.queryByTestId('ash-chart-grid')).not.toBeInTheDocument()
+    expect(mocks.chart).toHaveBeenCalledTimes(1)
+    const option = (mocks.chart.mock.calls.at(-1)?.[0] as { option: EChartsOption }).option
+    expect((option.series as { stack?: string }[]).every(({ stack }) => stack === 'ash')).toBe(true)
+  })
+
+  it('ASHPAGE-011 keeps queries in one stacked chart, without the toggle, with a note', () => {
+    mocks.ash.mockReturnValue(success(ashQueryIdResponse))
+    mocks.ashTop.mockReturnValue(success(ashTopResponse))
+    mocks.settings.mockReturnValue(success({ instance_id: 'instance-1', settings: [] }))
+    renderWithProviders(<AshPage instanceId="instance-1" />, {
+      route: '/instances/instance-1/ash?group=queryid&wait_event_type=Lock&wait_event=relation',
+    })
+
+    expect(screen.queryByRole('radiogroup', { name: 'Chart layout' })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('ash-chart-grid')).not.toBeInTheDocument()
+    expect(screen.getByTestId('ash-queryid-note')).toHaveTextContent(
+      'each series is a query, not a wait group',
+    )
+  })
+
+  it('ASHPAGE-012 never writes the default layout to the URL', () => {
+    const view = renderAshDefault()
+
+    expect(view.router.state.location.search).toBe('?range=1h')
+    fireEvent.click(screen.getByRole('radio', { name: 'Separate' }))
+    expect(view.router.state.location.search).toBe('?range=1h')
+    expect(new URLSearchParams(view.router.state.location.search).has('view')).toBe(false)
   })
 })

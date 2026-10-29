@@ -2960,6 +2960,7 @@ export interface operations {
                 /** @description Start of the range. Omitted, it is an hour before to, or before now when to is omitted too. */
                 from?: components["schemas"]["Timestamp"];
                 to?: components["schemas"]["Timestamp"];
+                /** @description Grouped by wait_event without wait_event_type, every bucket still carries its event's wait_event_type. */
                 group_by?: "wait_event_type" | "wait_event" | "queryid" | "state" | "datname";
                 database?: string;
                 /** @description Only samples of this wait event type; echoed on every returned row. */

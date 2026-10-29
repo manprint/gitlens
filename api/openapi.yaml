@@ -2392,6 +2392,7 @@ paths:
           in: query
           required: false
           schema: { type: string, enum: [wait_event_type, wait_event, queryid, state, datname] }
+          description: Grouped by wait_event without wait_event_type, every bucket still carries its event's wait_event_type.
         - { name: database, in: query, required: false, schema: { type: string } }
         - name: wait_event_type
           in: query

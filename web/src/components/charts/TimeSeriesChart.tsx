@@ -25,6 +25,8 @@ export interface TimeSeriesChartProps {
   valueLabel?: string
   /** Chart height in pixels (default 300). */
   height?: number
+  /** Charts of one group share their tooltip pointer and zoom (`echarts.connect`). */
+  group?: string
 }
 
 interface DataZoomWindow {
@@ -72,6 +74,7 @@ function rangeFromDataZoom(event: unknown): { from: Date; to: Date } | null {
 export function TimeSeriesChart({
   ariaLabel,
   dataTableLabel = `${ariaLabel} data`,
+  group,
   height = 300,
   onSeriesSelect,
   option,
@@ -93,6 +96,12 @@ export function TimeSeriesChart({
     setRange({ from: range.from, kind: 'absolute', label: 'Custom range', to: range.to })
   }
 
+  function handleChartReady(instance: { group: string }) {
+    if (group === undefined) return
+    instance.group = group
+    echarts.connect(group)
+  }
+
   function handleSeriesClick(event: unknown) {
     if (typeof event !== 'object' || event === null) return
     const name = (event as Record<string, unknown>).seriesName
@@ -106,6 +115,7 @@ export function TimeSeriesChart({
       <div aria-label={ariaLabel} role="img">
         <EChartsReact
           echarts={echarts}
+          {...(group === undefined ? {} : { onChartReady: handleChartReady })}
           onEvents={{
             datazoom: handleDataZoom,
             ...(onSeriesSelect === undefined ? {} : { click: handleSeriesClick }),

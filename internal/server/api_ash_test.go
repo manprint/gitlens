@@ -443,6 +443,32 @@ func TestAshAPI_GroupByAggregatesAndFillsTheGroup(t *testing.T) {
 	require.NotNil(t, resp.Warning, "20 ticks are not significant")
 }
 
+// TestAPI_Ash_WaitEventSeriesCarryType: grouped by wait event without a type
+// filter, each row still names its event's type, read from the extra column.
+func TestAPI_Ash_WaitEventSeriesCarryType(t *testing.T) {
+	t.Parallel()
+	ts := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	pool := &mockPool{
+		queryResults: []*mockRows{{rows: [][]any{
+			{ts, 30, 20, "WALWrite", "LWLock"},
+			{ts, 10, 20, "ClientRead", "Client"},
+		}}},
+		queryRowVals: []*mockRow{nil, {vals: []any{20}}},
+	}
+	r := chi.NewRouter()
+	(&AshAPI{pool: pool}).RegisterRoutes(r)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/ash?instance_id="+uuid.NewString()+"&group_by=wait_event&from=2026-09-01T11:00:00Z&to=2026-09-01T12:00:00Z", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp ashResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.Len(t, resp.Buckets, 2)
+	require.Equal(t, "WALWrite", resp.Buckets[0].WaitEvent)
+	require.Equal(t, "LWLock", resp.Buckets[0].WaitEventType)
+	require.Equal(t, "ClientRead", resp.Buckets[1].WaitEvent)
+	require.Equal(t, "Client", resp.Buckets[1].WaitEventType)
+}
+
 // TestFoldASHGroups_ConservesTheTotal: the groups beyond the largest ones
 // become one "other" row per bucket, and a NULL queryid, which the chart
 // already shows as other, is folded with them rather than duplicated.

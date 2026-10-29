@@ -88,14 +88,14 @@ checkpoint. Capture/open and restore/close are each one STATE.md update.
 - Active scope: plan (whole `005_plan-ConsoleInsights`, no selector)
 - Scope result: RUNNING
 - Type: sub-phase
-- ID / attempt: 1.5 / 1
-- Status: OPEN (1.4 closed: unit:1.4:1)
+- ID / attempt: P1 / 1
+- Status: OPEN (1.5 closed: unit:1.5:1)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-opus-5-5; supervisor: Opus review agent (agent-1); exploration/mechanical: agent-3:claude-haiku-5-5
-- File / unit heading: phase_02.md → 1.5
+- File / unit heading: phase_02.md → P1
 - Current step: S0
-- Next action: 1.5 S1.
-- Next eligible plan unit: 1.5 (phase_02.md), then P1
+- Next action: P1 full gates + Opus phase review.
+- Next eligible plan unit: P1 (phase_02.md), then 2.1
 - Unit base: `5929be2` (no unit open); branch: `feat/index-analysis` (never switch or create branches)
 - Repo state: dirty with pre-existing changes (§5) + untracked plan folder; nothing of the plan implemented yet.
 
@@ -159,6 +159,7 @@ Required supervisor reviews cannot be silently replaced by weaker self-review.
 |------|--------------|---------------|-------|---------|-----------------|--------|
 | plan | authoring | 1 | agent-2:claude-sonnet-5-5 | `docs/plans/005_plan-ConsoleInsights/*` | R-PLAN-1..11 | uncommitted (committed at 0.2 S1b) |
 | plan + baseline | d7647d0, ce13a72 | 1 | agent-2:claude-opus-5-5 | plan folder; pre-existing §5 paths (without `dist/index.html`, `.claude/`) | G-SECRETS pass before each | `d7647d0` (`PEV-Unit: plan`), `ce13a72` (`PEV-Unit: baseline`) |
+| sub-phase | 1.5 / 1 | 1 | agent-2:claude-opus-5-5 | NEW `web/src/lib/{ashGroups.ts,ashGroups.test.ts}`, `web/src/features/ash/{AshChartGrid,AshLegend}.tsx` + tests, `ash.options.ts` (`buildAshGroupOption`, isolated-sample dots, helpers; ASHOPT-010..012 + snapshot `__snapshots__/ash.options.test.ts.snap`), `TimeSeriesChart.tsx` (`group` → `echarts.connect`), `AshBreakdown.tsx`, `AshPage.tsx` (`view` param, Chart layout radiogroup, queryid note) + `AshPage.test.tsx` (renderAsh pins view=stacked, 2 expectations, ASHPAGE-010..012); backend `internal/server/api_ash.go` (wait_event rows carry `wait_event_type` via MIN), `api_ash_test.go` (TestAPI_Ash_WaitEventSeriesCarryType), `api_ash_integration_test.go` (INT-ASH-015 unfiltered events), `api/openapi.yaml`, `docs/api.md`, `web/src/api/generated.ts`; `web/e2e/console_visual.spec.ts` (VIS-016; VIS-015 on view=stacked); deploy7.log | §7 1.5 rows; R-1.5-C1c | unit:1.5:1 |
 | sub-phase | 1.4 / 1 | 1 | agent-2:claude-opus-5-5 | NEW `web/src/components/charts/{timeAxis.ts,timeAxis.test.ts}` (shared time axis + slider formatter memoized per span), `{metric,ash,lag}.options.ts` + tests (ASHOPT-001..004, LAGOPT-001/002, UI-CLUS-013 ISO → `10:00`), `web/src/features/ash/AshBreakdown.tsx` (ChartCard), `web/src/features/cluster/{LagSection.tsx,LagSection.test.tsx}` (range line step 10s), `web/src/lib/{chartTime.ts,chartTime.test.ts}` (CTIME-008 unknown step), `web/e2e/console_visual.spec.ts` (VIS-015 ASH + lag); deploy5.log | §7 1.4 rows; R-1.4-C1b | unit:1.4:1 |
 | sub-phase | 1.3 / 1 | 1 | agent-2:claude-opus-5-5 | `web/src/features/instance/{OverviewSection.tsx,OverviewSection.test.tsx}` (per-metric `stepFor`, `ChartCard`, unit formatting, OV-STEP-001/002, OV-CARD-001), `internal/server/api_integration_test.go` (INT-API-007 StepBelowSampling), `web/e2e/console_visual.spec.ts` (VIS-010 1h/6h + card screenshots); deploy4.log | §7 1.3 rows; R-1.3-C1 | unit:1.3:1 |
 | sub-phase | 1.2 / 1 | 1 | agent-2:claude-opus-5-5 | `web/src/components/charts/{metric.options.ts,metric.options.test.ts,TimeSeriesChart.tsx,TimeSeriesChart.test.tsx}`, NEW `ChartCard.tsx`, `ChartCard.test.tsx`, `ChartGroup.tsx`, `ChartGroup.test.tsx`; `web/src/features/instance/OverviewSection.test.tsx` (UI-INST-024 markPoint → markLine); R-1.2-1 fixes to 1.1 `web/src/lib/chartStep.ts`/`chartStep.test.ts` (wal suffix rule, table/index counters) | §7 1.2 rows; R-1.2-1 | unit:1.2:1 |
@@ -195,11 +196,11 @@ Unit-owned paths are listed in each phase file's sub-phase `Files` field and rec
 
 ## 6. In-flight checkpoint
 
-1.5 / 1 OPEN.
-Last durable step: 1.4 closed (unit:1.4:1).
+P1 / 1 OPEN.
+Last durable step: 1.5 closed (unit:1.5:1). 1.5 shared zoom/pointer: `echarts.connect` (TimeSeriesChart `group` prop); the slider zooms in place (its event carries percentages, so the URL range is unchanged), inside-zoom/brush still sets the URL range; S6 backend type field was needed (handler carried no type without the filter).
 Actual files/diff: none.
 Pending edits: none.
-Next step: 1.5 S1.
+Next step: P1 full gates.
 Last check: n/a.
 Running resources: stack `pglens-odoo` up (deployed pglens images are the phase-1 build); no background processes of this plan.
 Stop reason / supervisor request: supervisor coherence review requested by the user ("fai sempre una review con advisor opus dopo le modifiche del piano; non iniziare lo sviluppo se non è tutto perfettamente coerente").
@@ -212,6 +213,9 @@ Research checkpoint: R3 pending (7.0), R4 pending (0.3 S6).
 | make lint (golangci-lint v2.15.0, installed 2026-10-29 after the user authorised downloads) | `make lint` | pass | 0 issues (covers 0.3 and 13.1 Go diffs) | cf87cd7 | 2026-10-29 |
 | G-WEB-UNIT 1.3 | `cd web && TZ=UTC pnpm exec vitest run src/features/instance` | pass | 59 passed (OV-STEP-001/002, OV-CARD-001 + existing UI-INST-0xx unchanged) | 1.3 diff | 2026-10-29 |
 | INT-API-007 (1.3 S4) | `go test -tags=integration -race -count=1 ./internal/server -run StepBelowSampling` | pass | 15s: 240 buckets ≥ 40 % null; 60s: 60 buckets, 0 null | 1.3 diff | 2026-10-29 |
+| G-WEB-UNIT 1.5 | `cd web && TZ=UTC pnpm exec vitest run src/lib/ashGroups.test.ts src/components/charts src/features/ash` | pass | ASHGRP-001..006, ASHOPT-010..012, ASHLEG-001..006, ASHGRID-001..004, ASHPAGE-010..012; AshChart.test and AshPage.refresh.test untouched | 1.5 diff | 2026-10-29 |
+| G-BASE + G-WEB-STATIC 1.5 | `make web-typecheck web-lint`; `cd web && TZ=UTC pnpm exec vitest run`; `go test ./internal/server`; `go test -tags=integration ./internal/server -run TestIntASH` | pass | clean; 127 files, 1024 tests; server ok (TestAPI_Ash_WaitEventSeriesCarryType); INT-ASH ok | 1.5 diff | 2026-10-29 |
+| G-DEPLOY + console_visual (1.5) | `deploy.sh`; `pnpm exec playwright test --project=desktop-fullhd e2e/console_visual.spec.ts` | pass | 6 passed (VIS-000, VIS-010 1h/6h, VIS-015 ×2, VIS-016 with rpc_load 360 s: 3 groups CPU/I/O/Client, legends, stacked↔separate, shared zoom moved the I/O chart) | deployed 1.5 build (deploy7) | 2026-10-29 |
 | G-WEB-UNIT 1.4 | `cd web && TZ=UTC pnpm exec vitest run src/lib src/components/charts src/features/ash src/features/cluster` | pass | 56 files, 421 tests (TAXIS-001..003, ASHOPT-001..004, LAGOPT-001/002, CTIME-008) | 1.4 diff | 2026-10-29 |
 | G-WEB-STATIC + G-BASE web 1.4 | `make web-typecheck web-lint`; `cd web && TZ=UTC pnpm exec vitest run` | pass | clean; 124 files, 1000 tests | 1.4 diff | 2026-10-29 |
 | G-DEPLOY + VIS-015 (1.4) | `deploy.sh`; `pnpm exec playwright test --project=desktop-fullhd e2e/console_visual.spec.ts` | pass | VIS-015 ASH (1440/1024/768/390) and lag (single instance → empty state) passed | deployed 1.4 build | 2026-10-29 |
@@ -264,6 +268,7 @@ Results: pass, fail, blocked, not-run, not-applicable-yet. Only pass satisfies a
 | R-PLAN-8 | Opus review agent (read-only, fresh) | plan revision 1 after the R-PLAN-7 fixes | same | NOT-READY: 0 blockers, 4 majors (1.5 claim "no assertion changed" false: `renderAsh` pin changes two existing expectations; 15.3 cluster tabs left `EventTimeline` without a tab and broke SYS-UI-001/007 and `ClusterPage.test.tsx`; 13.3/14.2 banner mount point undefined (no instance layout route) and MSW handlers; `test.setTimeout` rule did not cover `console_visual.spec.ts` live specs VIS-016/COV-E2E-001), 2 minors (tab/view defaults must never be written to the URL; UI-ASH gate family mapped to G-GO-FOCUS); all applied (D12 URL-default rule, `AppShell` banner mount, `clusterSections.ts` + `events` tab, `liveTimeout()` helper) |
 | R-PLAN-9 | Opus review agent (read-only, fresh) | plan revision 1 after the R-PLAN-8 fixes | same | NOT-READY: 0 blockers, 6 majors (VIS-016/COV-E2E-001 `liveTimeout` not stated in the phase files; sweep tests (FHD-*, VIS-CAP, QA-TOUR, SET-E2E, HA-*, ADV-E2E) without timeouts and ADV-E2E needing a 15-min advisor cadence; QA timeout formula failing sequential waits (RDY-E2E, SORIGIN-E2E); 14.2 unlisted `render.test.tsx` break and non-existent shared FleetPage setup; 9.2 InventoryTables vs UI-SET-005; 15.3 scope vs Done), 8 minors (wrong test name for the 1.5 `?range=1h` expectation, HA-STATIC-003 unit, Cluster identity placement, VISTMO unit, LIVE-HOST gate, six weaker Preconditions, G-UI-LEGACY at P13/P14, VIS-020 field); all applied (`liveTimeout` loop/sequence rule + `serviceRestart` 120 s, `PGLENS_ADVISOR_INTERVAL=60s`, `pendingUnit` inventory entries) |
 | R-PLAN-10 | Opus review agent (read-only, fresh) | plan revision 1 after the R-PLAN-9 fixes | same | NOT-READY: 1 blocker (13.1 assumed first run = jitter only, but `runEntry` scrapes only on the first ticker tick, so first run = jitter + interval: FIRSTRUN-006, INT-FIRSTRUN-001, readiness/coverage budgets could never pass), 5 majors (9.1/9.3 unlisted existing-test breaks in `page-primitives.test.tsx`, `DeadRowsPanel.test.tsx`, `IndexAnalysisPage.test.tsx` and wrong test-file name; `pendingUnit` not implementable or closed; 6.4 IND/LIFE tests without timeouts and no `rebuild` budget; IND-DB/IND-FIND/IND-SUGG budgets unreachable with 15-min/hourly checks; many live specs without declared timeouts), 5 minors (findings budget text, drill 4 restarts, Databases-by-instance filter, `INSTANCE_SECTIONS` export, `data-table-rows` testid); all applied (`tryScrape` immediate post-jitter scrape + FIRSTRUN-008, `BUDGET.rebuild`, agent restart in IND-DB/FIND/SUGG, `FHD-ROUTES-004`) |
+| R-1.5-C1c | Opus review agent (read-only, fresh) | vis-016 card/full-page screenshots + 1.5 diff | checklist C-1c, contract 1.5 | C-1c: own scales PASS, legend colours PASS, descriptions PASS (390 wrap minor), labels at 390 PASS, Lock N/A (load sampled no locks); CHANGES-REQUIRED: swatch letters collided (Lock/LWLock) → unique letters per legend (`swatchLetters`, ASHLEG-004), 390 wrap → flex-wrap, `avg 0.00 · 0%` → `<0.01`/`<1%` (ASHLEG-006); applied and re-run live (6 passed); slider pixel-scan accepted (works live) |
 | R-1.4-C1b | Opus review agent (read-only, fresh) | vis-015 ASH/lag screenshots + 1.4 diff | checklist C-1b, contract 1.4, D2 | C-1b signed off all; code APPROVED; lows: shared cached axis object mutable (accepted: ECharts clones options, cache bounded 32), `step 0s` when resolution missing (applied: `formatRangeLabel` drops step ≤ 0, CTIME-008), lag interval comment (applied); info: ASH axis spans data not selected range (pre-existing, → 1.5) |
 | R-1.3-C1 | Opus review agent (read-only, fresh) | VIS-010 screenshots (cards 1h/6h, full page 1920/1440/390) + 1.3 diff | checklist C-1, contract 1.3 | C-1 signed off all 5; code APPROVED; minors: legend overlaps y-axis name on narrow cards (→ 3.2 layout), description wording (applied: "data gaps or counter resets"), OV-STEP-001 plan text (§8) |
 | R-1.2-1 | Opus review agent (read-only, fresh) | 1.1 (70ac9b0) + 1.2 diff | contracts D1–D3, test oracles, adapted tests, tooltip injection, NaN, TZ, a11y | CHANGES-REQUIRED: 2 majors (`metricKind` missed `pg_wal_wal_fpi_bytes`/suffix rule and `pg_table_*`/`pg_index_*` counters; NaN tooltip time threw `RangeError`), 3 minors (`stepSeconds` unused, `wide` untested, fixed loading height); all applied in unit:1.2:1 (`stepSeconds` documented as informational) |
@@ -309,6 +314,13 @@ Rule (user): after **every** modification of the plan the `advisor` reviews it a
 | 1 | 1.4 lag range line | step 30s, lag in ChartCard | step 10s (server returns raw rows from replication_streaming every 10 s); LagSection keeps its `<article>` per edge (UI-CLUS tests query role article) with a `formatRangeLabel` line instead of ChartCard; supervisor R-1.4-C1b accepted | supervisor | 1.4 |
 | 1 | 1.4 axis memoization | new axis object per build | `timeAxisOption`/`sliderLabelFormatter` memoized per span (cache 32) so UI-CLUS-014 `toEqual` determinism keeps passing | supervisor | 1.4 |
 | 1 | 1.4 ASH finding | — | live ASH data sparse (isolated non-null buckets between nulls) draws nothing with `showSymbol:false`, `connectNulls:false` (pre-existing); and ASH x-axis spans data not the selected range; handle in 1.5 separate ASH charts | supervisor | 1.5 |
+| 1 | 1.5 legend placement | HTML legend under the card list | one legend per card under its chart (VIS-016 asks "each legend"; isolation acts in its own chart) | supervisor | 1.5 |
+| 1 | 1.5 VIS-016 timeout | `liveTimeout(420_000, 3 * 45_000)` | 480 000 ms: rpc_load runs its 60 s warm-up before its 360 s and then cleans up, so 420 s killed it | supervisor | 1.5 |
+| 1 | 1.5 VIS-016 shared-zoom oracle | chart tables' first/last timestamps change | the canvases of chart 1 and chart 2 change after dragging chart 1's slider: the slider's datazoom event carries percentages, so the URL range (and the data tables) stay; `echarts.connect` moves the others | supervisor | 1.5 |
+| 1 | 1.5 group total | average over the visible window | average over sampled buckets (null = unsampled, never zero) per series, summed per group | supervisor | 1.5 |
+| 1 | 1.5 wait_event colours | type token per series | in `wait_event` mode colours by position (`ASH_EVENT_COLORS`), since events of one type would share one colour | supervisor | 1.5 |
+| 1 | 1.5 VIS-015 route | `/ash?range=1h` | `&view=stacked`: 1.5 made the grid the default | supervisor | 1.5 |
+| 1 | 1.5 finding (pre-existing) | — | `AshBreakdown` never receives a CPU count, so the CPU-count markLine never renders (stacked or grid); not in any 005 contract — recorded, not fixed | supervisor | — |
 | 1 | D28 | `checks.activity.by_application` default flips to true: the two tests `TestConfig_ByApplicationDefaultsFalse` and `TestActivity_ByApplicationDisabledByDefault` change expectation in 16.1 (recorded here when done) | user REQ-40 | 16.1 |
 
 ## 9. Blockers
@@ -349,7 +361,7 @@ Rule (user): after **every** modification of the plan the `advisor` reviews it a
 | 1.2 | phase_02.md | 1.1 | DONE | 1 | METOPT, CCARD, CGRP, TSC-HEIGHT (§7) |
 | 1.3 | phase_02.md | 1.2, 13.1 | DONE | 1 | OV-STEP, OV-CARD, INT-API-007, VIS-010 1h/6h, C-1 (§7) |
 | 1.4 | phase_02.md | 1.1 | DONE | 1 | TAXIS, ASHOPT, LAGOPT, CTIME-008, VIS-015, C-1b (§7) |
-| 1.5 | phase_02.md | 1.2, 1.4 | TODO | 1 | — |
+| 1.5 | phase_02.md | 1.2, 1.4 | DONE | 1 | ASHGRP, ASHOPT-010..012, ASHLEG, ASHGRID, ASHPAGE-010..012, VIS-016, C-1c (§7) |
 | 2.1 | phase_03.md | 0 | TODO | 1 | — |
 | 2.2 | phase_03.md | 2.1 | TODO | 1 | — |
 | 2.3 | phase_03.md | 2.2, 1.2 | TODO | 1 | — |

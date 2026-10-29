@@ -4,7 +4,14 @@ import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it } from 'vitest'
 
-import { ASH_PALETTE, buildAshOption, type AshChartSeries, OTHER_FOLDED_LABEL } from './ash.options'
+import {
+  ASH_PALETTE,
+  buildAshGroupOption,
+  buildAshOption,
+  type AshChartSeries,
+  isolatedPoints,
+  OTHER_FOLDED_LABEL,
+} from './ash.options'
 import { timeAxisOption } from './timeAxis'
 
 const points = [
@@ -124,6 +131,63 @@ describe('ASH time axis (plan 005 1.4)', () => {
     expect(html).toContain(
       '<strong>CPU</strong>: 1.00 avg active backends (samples: 10, ticks: 20)',
     )
+  })
+
+  it('ASHOPT-010 builds one stack per group on its own y axis from zero', () => {
+    const locks: AshChartSeries[] = [
+      { name: 'LWLock', points },
+      { name: 'Lock', points },
+    ]
+    const spanMs = 6 * 60 * 60 * 1_000
+    const option = buildAshGroupOption(locks, { cpuCount: 4, stack: 'locks', spanMs })
+    const lines = optionSeries(option)
+
+    expect(lines.map(({ name }) => name)).toEqual(['Lock', 'LWLock'])
+    expect(lines.every(({ stack }) => stack === 'locks')).toBe(true)
+    expect(option.yAxis).toEqual({ type: 'value', min: 0, name: 'avg active backends' })
+    expect(option.xAxis).toBe(timeAxisOption(spanMs))
+    expect(option.legend).toEqual({ show: false })
+    expect(lines.some(({ markLine }) => markLine !== undefined)).toBe(false)
+
+    const cpu = buildAshGroupOption([{ name: 'CPU', points }], {
+      cpuCount: 4,
+      showCpuCount: true,
+      stack: 'cpu',
+      spanMs,
+    })
+    expect(JSON.stringify(optionSeries(cpu)[0]?.markLine)).toContain('CPU count (4)')
+    expect(
+      optionSeries(
+        buildAshGroupOption([{ name: 'CPU', points }], { stack: 'cpu', showCpuCount: true }),
+      )[0]?.markLine,
+    ).toBeUndefined()
+  })
+
+  it('ASHOPT-012 marks isolated samples so sparse data stays visible', () => {
+    const sparse = [
+      { ts: '2026-09-01T10:00:00Z', value: null },
+      { ts: '2026-09-01T10:01:00Z', value: 0.05 },
+      { ts: '2026-09-01T10:02:00Z', value: null },
+      { ts: '2026-09-01T10:03:00Z', value: 1 },
+      { ts: '2026-09-01T10:04:00Z', value: 2 },
+    ]
+    expect([...isolatedPoints(sparse)]).toEqual([1])
+
+    const line = optionSeries(
+      buildAshGroupOption([{ name: 'Client', points: sparse }], { stack: 'client' }),
+    )[0] as {
+      showSymbol?: boolean
+      symbolSize?: (value: unknown, params: { dataIndex?: number }) => number
+    }
+    expect(line.showSymbol).toBe(true)
+    expect(line.symbolSize?.(null, { dataIndex: 1 })).toBeGreaterThan(0)
+    expect(line.symbolSize?.(null, { dataIndex: 3 })).toBe(0)
+    expect(line.symbolSize?.(null, {})).toBe(0)
+  })
+
+  it('ASHOPT-011 keeps the stacked option unchanged', () => {
+    expect(buildAshOption(series, { cpuCount: 4, foldedCount: 2 })).toMatchSnapshot()
+    expect(buildAshOption(series)).toMatchSnapshot()
   })
 
   it('ASHOPT-004 no option builder formats times with toISOString', () => {

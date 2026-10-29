@@ -498,6 +498,16 @@ func TestIntASH015_GroupByAggregatesPerBucket(t *testing.T) {
 		require.Equal(t, 20, b.Ticks, "the filter narrows the samples, not the instance's ticks")
 	}
 
+	// Without the type filter each event row still names its type.
+	allEvents := get("&group_by=wait_event")
+	require.NotEmpty(t, allEvents.Buckets)
+	for _, b := range allEvents.Buckets {
+		require.NotEmpty(t, b.WaitEventType, "event %q carries its type", b.WaitEvent)
+		if b.WaitEventType != "CPU" {
+			require.Equal(t, "LWLock", b.WaitEventType, "event %q", b.WaitEvent)
+		}
+	}
+
 	entries, ticks, err := NewAshAPI(pool).queryASHTop(ctx, instID, &base, nil, "", ashFilters{}, 10)
 	require.NoError(t, err)
 	require.Len(t, entries, 1)

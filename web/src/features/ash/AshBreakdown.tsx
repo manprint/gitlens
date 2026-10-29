@@ -3,12 +3,14 @@ import { Section } from '@/components/layout/Section'
 import { useTimeRange } from '@/hooks/useTimeRange'
 import { EmptyState } from '@/components/state'
 import { AshChart, type AshChartProps } from './AshChart'
+import { AshChartGrid } from './AshChartGrid'
 import {
   ASH_WAIT_TYPES,
   type AshChartPoint,
   type AshChartSeries,
 } from '@/components/charts/ash.options'
 import { foldOther, orderGroups, toStackedSeries, type AshBucket, type AshGroupBy } from '@/lib/ash'
+import { groupSeries } from '@/lib/ashGroups'
 
 const MAX_VISIBLE_SERIES = ASH_WAIT_TYPES.length
 const OTHER = 'other'
@@ -29,6 +31,19 @@ interface AshBreakdownProps {
   onSeriesSelect?: AshChartProps['onSeriesSelect']
   /** The server's bucket width, so a missing bucket is drawn as a gap. */
   resolutionSeconds?: number
+  /** `separate`: one chart per wait group; `stacked`: one chart. Queries always stack. */
+  view?: 'separate' | 'stacked'
+}
+
+/** Each wait event's type, as the server names it on every bucket. */
+function eventTypesOf(buckets: readonly AshBucket[]): Map<string, string> {
+  const types = new Map<string, string>()
+  for (const bucket of buckets) {
+    const type = bucket.wait_event_type
+    if (type === undefined || type === '') continue
+    types.set(groupValue(bucket, 'wait_event'), type)
+  }
+  return types
 }
 
 function groupValue(bucket: AshBucket, groupBy: AshGroupBy): string {
@@ -99,10 +114,12 @@ export function AshBreakdown({
   groupBy,
   onSeriesSelect,
   resolutionSeconds,
+  view = 'stacked',
 }: AshBreakdownProps) {
   const { range } = useTimeRange()
   const { folded, series } = chartSeries(buckets, groupBy, resolutionSeconds)
   const title = GROUP_LABELS[groupBy]
+  const eventTypes = eventTypesOf(buckets)
   const interactionProps = onSeriesSelect === undefined ? {} : { onSeriesSelect }
   const description = filterLabel
     ? `${title} filtered by ${filterLabel}. Select a plotted series to drill deeper.`
@@ -110,7 +127,17 @@ export function AshBreakdown({
 
   return (
     <Section title={title} description={description}>
-      {series.length > 0 ? (
+      {series.length > 0 && view === 'separate' && groupBy !== 'queryid' ? (
+        <AshChartGrid
+          eventTypes={eventTypes}
+          foldedCount={folded}
+          groupBy={groupBy}
+          groups={groupSeries(series, groupBy, eventTypes)}
+          {...interactionProps}
+          range={range}
+          stepSeconds={resolutionSeconds ?? 0}
+        />
+      ) : series.length > 0 ? (
         <ChartCard
           range={range}
           state="ready"

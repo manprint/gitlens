@@ -1,0 +1,375 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ASH time axis (plan 005 1.4) > ASHOPT-011 keeps the stacked option unchanged 1`] = `
+{
+  "animation": false,
+  "color": [
+    "var(--wait-cpu)",
+    "var(--wait-io)",
+    "var(--wait-lock)",
+    "var(--wait-other)",
+  ],
+  "dataZoom": [
+    {
+      "filterMode": "none",
+      "throttle": 50,
+      "type": "inside",
+      "xAxisIndex": 0,
+    },
+    {
+      "bottom": 8,
+      "filterMode": "none",
+      "labelFormatter": [Function],
+      "type": "slider",
+      "xAxisIndex": 0,
+    },
+  ],
+  "grid": {
+    "bottom": 72,
+    "containLabel": true,
+    "left": 58,
+    "right": 24,
+    "top": 48,
+  },
+  "legend": {
+    "data": [
+      "CPU",
+      "IO",
+      "Lock",
+      "other (folded)",
+    ],
+    "top": 8,
+    "type": "scroll",
+  },
+  "series": [
+    {
+      "areaStyle": {
+        "opacity": 0.55,
+      },
+      "connectNulls": false,
+      "data": [
+        [
+          "2026-09-01T10:00:00Z",
+          1,
+        ],
+        [
+          "2026-09-01T10:01:00Z",
+          null,
+        ],
+      ],
+      "itemStyle": {
+        "color": "var(--wait-cpu)",
+      },
+      "lineStyle": {
+        "color": "var(--wait-cpu)",
+        "width": 1,
+      },
+      "markLine": {
+        "data": [
+          {
+            "label": {
+              "formatter": "CPU count (4)",
+            },
+            "lineStyle": {
+              "color": "var(--muted-foreground)",
+              "type": "dashed",
+              "width": 1,
+            },
+            "name": "CPU count (4)",
+            "yAxis": 4,
+          },
+        ],
+        "silent": true,
+        "symbol": "none",
+      },
+      "name": "CPU",
+      "showSymbol": false,
+      "smooth": false,
+      "stack": "ash",
+      "type": "line",
+    },
+    {
+      "areaStyle": {
+        "opacity": 0.55,
+      },
+      "connectNulls": false,
+      "data": [
+        [
+          "2026-09-01T10:00:00Z",
+          1,
+        ],
+        [
+          "2026-09-01T10:01:00Z",
+          null,
+        ],
+      ],
+      "itemStyle": {
+        "color": "var(--wait-io)",
+      },
+      "lineStyle": {
+        "color": "var(--wait-io)",
+        "width": 1,
+      },
+      "name": "IO",
+      "showSymbol": false,
+      "smooth": false,
+      "stack": "ash",
+      "type": "line",
+    },
+    {
+      "areaStyle": {
+        "opacity": 0.55,
+      },
+      "connectNulls": false,
+      "data": [
+        [
+          "2026-09-01T10:00:00Z",
+          1,
+        ],
+        [
+          "2026-09-01T10:01:00Z",
+          null,
+        ],
+      ],
+      "itemStyle": {
+        "color": "var(--wait-lock)",
+      },
+      "lineStyle": {
+        "color": "var(--wait-lock)",
+        "width": 1,
+      },
+      "name": "Lock",
+      "showSymbol": false,
+      "smooth": false,
+      "stack": "ash",
+      "type": "line",
+    },
+    {
+      "areaStyle": {
+        "opacity": 0.55,
+      },
+      "connectNulls": false,
+      "data": [
+        [
+          "2026-09-01T10:00:00Z",
+          1,
+        ],
+        [
+          "2026-09-01T10:01:00Z",
+          null,
+        ],
+      ],
+      "itemStyle": {
+        "color": "var(--wait-other)",
+      },
+      "lineStyle": {
+        "color": "var(--wait-other)",
+        "width": 1,
+      },
+      "name": "other (folded)",
+      "showSymbol": false,
+      "smooth": false,
+      "stack": "ash",
+      "type": "line",
+    },
+  ],
+  "tooltip": {
+    "formatter": [Function],
+    "trigger": "axis",
+  },
+  "xAxis": {
+    "axisLabel": {
+      "formatter": [Function],
+      "hideOverlap": true,
+      "margin": 12,
+      "showMaxLabel": false,
+      "showMinLabel": false,
+    },
+    "splitNumber": 6,
+    "type": "time",
+  },
+  "yAxis": {
+    "min": 0,
+    "name": "avg active backends",
+    "type": "value",
+  },
+}
+`;
+
+exports[`ASH time axis (plan 005 1.4) > ASHOPT-011 keeps the stacked option unchanged 2`] = `
+{
+  "animation": false,
+  "color": [
+    "var(--wait-cpu)",
+    "var(--wait-io)",
+    "var(--wait-lock)",
+    "var(--wait-other)",
+  ],
+  "dataZoom": [
+    {
+      "filterMode": "none",
+      "throttle": 50,
+      "type": "inside",
+      "xAxisIndex": 0,
+    },
+    {
+      "bottom": 8,
+      "filterMode": "none",
+      "labelFormatter": [Function],
+      "type": "slider",
+      "xAxisIndex": 0,
+    },
+  ],
+  "grid": {
+    "bottom": 72,
+    "containLabel": true,
+    "left": 58,
+    "right": 24,
+    "top": 48,
+  },
+  "legend": {
+    "data": [
+      "CPU",
+      "IO",
+      "Lock",
+      "other (folded)",
+    ],
+    "top": 8,
+    "type": "scroll",
+  },
+  "series": [
+    {
+      "areaStyle": {
+        "opacity": 0.55,
+      },
+      "connectNulls": false,
+      "data": [
+        [
+          "2026-09-01T10:00:00Z",
+          1,
+        ],
+        [
+          "2026-09-01T10:01:00Z",
+          null,
+        ],
+      ],
+      "itemStyle": {
+        "color": "var(--wait-cpu)",
+      },
+      "lineStyle": {
+        "color": "var(--wait-cpu)",
+        "width": 1,
+      },
+      "name": "CPU",
+      "showSymbol": false,
+      "smooth": false,
+      "stack": "ash",
+      "type": "line",
+    },
+    {
+      "areaStyle": {
+        "opacity": 0.55,
+      },
+      "connectNulls": false,
+      "data": [
+        [
+          "2026-09-01T10:00:00Z",
+          1,
+        ],
+        [
+          "2026-09-01T10:01:00Z",
+          null,
+        ],
+      ],
+      "itemStyle": {
+        "color": "var(--wait-io)",
+      },
+      "lineStyle": {
+        "color": "var(--wait-io)",
+        "width": 1,
+      },
+      "name": "IO",
+      "showSymbol": false,
+      "smooth": false,
+      "stack": "ash",
+      "type": "line",
+    },
+    {
+      "areaStyle": {
+        "opacity": 0.55,
+      },
+      "connectNulls": false,
+      "data": [
+        [
+          "2026-09-01T10:00:00Z",
+          1,
+        ],
+        [
+          "2026-09-01T10:01:00Z",
+          null,
+        ],
+      ],
+      "itemStyle": {
+        "color": "var(--wait-lock)",
+      },
+      "lineStyle": {
+        "color": "var(--wait-lock)",
+        "width": 1,
+      },
+      "name": "Lock",
+      "showSymbol": false,
+      "smooth": false,
+      "stack": "ash",
+      "type": "line",
+    },
+    {
+      "areaStyle": {
+        "opacity": 0.55,
+      },
+      "connectNulls": false,
+      "data": [
+        [
+          "2026-09-01T10:00:00Z",
+          1,
+        ],
+        [
+          "2026-09-01T10:01:00Z",
+          null,
+        ],
+      ],
+      "itemStyle": {
+        "color": "var(--wait-other)",
+      },
+      "lineStyle": {
+        "color": "var(--wait-other)",
+        "width": 1,
+      },
+      "name": "other (folded)",
+      "showSymbol": false,
+      "smooth": false,
+      "stack": "ash",
+      "type": "line",
+    },
+  ],
+  "tooltip": {
+    "formatter": [Function],
+    "trigger": "axis",
+  },
+  "xAxis": {
+    "axisLabel": {
+      "formatter": [Function],
+      "hideOverlap": true,
+      "margin": 12,
+      "showMaxLabel": false,
+      "showMinLabel": false,
+    },
+    "splitNumber": 6,
+    "type": "time",
+  },
+  "yAxis": {
+    "min": 0,
+    "name": "avg active backends",
+    "type": "value",
+  },
+}
+`;

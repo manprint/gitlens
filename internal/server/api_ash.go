@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -378,7 +379,8 @@ func ashResolution(from, to time.Time) int {
 // bucket, but the row is not a group. Groups beyond the largest ones are
 // folded into "other" so the stacked total is conserved; filter values are
 // echoed on every row, so a drill-down can tell which type or event it is
-// looking at.
+// looking at. Grouped by wait event without its type, each row still names
+// the event's type, so the console can group the events by type.
 func (a *AshAPI) queryASHGrouped(ctx context.Context, instanceID uuid.UUID, from, to time.Time, resolution int, database string, filters ashFilters, groupByCols []string, limit int) ([]ashBucket, int, error) {
 	where, args := ashWhere(instanceID, &from, &to, database, filters)
 	res := time.Duration(resolution) * time.Second
@@ -386,6 +388,14 @@ func (a *AshAPI) queryASHGrouped(ctx context.Context, instanceID uuid.UUID, from
 	resArg, fromArg, toArg := len(args)-2, len(args)-1, len(args)
 	cols := strings.Join(groupByCols, ", ")
 	gcols := "g." + strings.Join(groupByCols, ", g.")
+	carryType := slices.Contains(groupByCols, "wait_event") && !slices.Contains(groupByCols, "wait_event_type")
+	selectCols := cols
+	if carryType {
+		// An event name belongs to one type; MIN only picks it without
+		// splitting the group should a name ever repeat across types.
+		selectCols += ", MIN(wait_event_type) AS wait_event_type"
+		gcols += ", g.wait_event_type"
+	}
 	query := fmt.Sprintf(`
 WITH ticks AS (
   SELECT bucket, SUM(t)::int AS ticks
@@ -396,12 +406,12 @@ WITH ticks AS (
    GROUP BY bucket
 )
 SELECT g.bucket, g.samples, t.ticks, %[4]s
-  FROM (SELECT time_bucket($%[1]d::interval, ts) AS bucket, %[5]s, SUM(samples)::int AS samples
+  FROM (SELECT time_bucket($%[1]d::interval, ts) AS bucket, %[7]s, SUM(samples)::int AS samples
           FROM metrics_ash
          WHERE %[6]s
          GROUP BY 1, %[5]s) g
   JOIN ticks t ON t.bucket = g.bucket
- ORDER BY g.bucket`, resArg, fromArg, toArg, gcols, cols, where)
+ ORDER BY g.bucket`, resArg, fromArg, toArg, gcols, cols, where, selectCols)
 
 	rows, err := a.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -428,6 +438,9 @@ SELECT g.bucket, g.samples, t.ticks, %[4]s
 			case "queryid":
 				dests = append(dests, &qid)
 			}
+		}
+		if carryType {
+			dests = append(dests, &b.WaitEventType)
 		}
 		if err := rows.Scan(dests...); err != nil {
 			return nil, 0, err

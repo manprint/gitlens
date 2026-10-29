@@ -77,13 +77,28 @@ function escapeHtml(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
 }
 
-function displayName(name: string): string {
+export function displayName(name: string): string {
   return name === 'other' ? OTHER_FOLDED_LABEL : name
 }
 
-function paletteFor(name: string): string {
+/** The colour token of a wait event type; unknown types take the `other` colour. */
+export function paletteFor(name: string): string {
   return ASH_PALETTE[name as AshPaletteName] ?? ASH_PALETTE.other
 }
+
+/** Distinct tokens for wait events, which share their type's colour otherwise. */
+export const ASH_EVENT_COLORS: readonly string[] = [
+  'var(--wait-io)',
+  'var(--wait-lock)',
+  'var(--wait-cpu)',
+  'var(--wait-lwlock)',
+  'var(--wait-timeout)',
+  'var(--wait-ipc)',
+  'var(--wait-client)',
+  'var(--wait-extension)',
+  'var(--wait-buffer)',
+  'var(--wait-activity)',
+]
 
 function formatMetric(value: unknown): string {
   return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : 'Unknown'
@@ -136,57 +151,79 @@ function validCpuCount(value: number | null | undefined): value is number {
   return value !== null && value !== undefined && Number.isFinite(value) && value > 0
 }
 
-/** Build a deterministic, gap-preserving stacked area option for ASH groups. */
-export function buildAshOption(
-  series: readonly AshChartSeries[] | readonly AshSeries[],
-  { cpuCount, foldedCount = 0 }: AshOptionOptions = {},
-): EChartsOption {
-  const ordered = [...series].sort((left, right) => {
+export function orderAshSeries<S extends AshChartSeries | AshSeries>(series: readonly S[]): S[] {
+  return [...series].sort((left, right) => {
     if (left.name === 'CPU' && right.name !== 'CPU') return -1
     if (left.name !== 'CPU' && right.name === 'CPU') return 1
     if (left.name === 'other' && right.name !== 'other') return 1
     if (left.name !== 'other' && right.name === 'other') return -1
     return left.name.localeCompare(right.name)
   })
+}
+
+function tooltipMetadata(
+  series: readonly (AshChartSeries | AshSeries)[],
+): Map<string, AshChartPoint> {
   const metadata = new Map<string, AshChartPoint>()
-  for (const item of ordered) {
+  for (const item of series) {
     for (const point of item.points) {
       metadata.set(`${displayName(item.name)}\u0000${point.ts}`, point)
     }
   }
-  const spanMs = spanOf(ordered.flatMap((item) => item.points.map((point) => point.ts)))
-  const safeFoldedCount = Number.isFinite(foldedCount) ? Math.max(0, Math.floor(foldedCount)) : 0
-  const metricSeries = ordered.map((item, index) => {
-    const name = displayName(item.name)
-    const optionSeries = {
-      type: 'line' as const,
-      name,
-      stack: 'ash',
-      data: item.points.map((point) => [point.ts, point.value] as [string, number | null]),
-      connectNulls: false,
-      showSymbol: false,
-      smooth: false,
-      areaStyle: { opacity: 0.55 },
-      itemStyle: { color: paletteFor(item.name) },
-      lineStyle: { color: paletteFor(item.name), width: 1 },
-    }
+  return metadata
+}
 
+function safeFolded(foldedCount: number): number {
+  return Number.isFinite(foldedCount) ? Math.max(0, Math.floor(foldedCount)) : 0
+}
+
+function ashLineSeries(
+  item: AshChartSeries | AshSeries,
+  stack: string,
+  color: string = paletteFor(item.name),
+) {
+  return {
+    type: 'line' as const,
+    name: displayName(item.name),
+    stack,
+    data: item.points.map((point) => [point.ts, point.value] as [string, number | null]),
+    connectNulls: false,
+    showSymbol: false,
+    smooth: false,
+    areaStyle: { opacity: 0.55 },
+    itemStyle: { color },
+    lineStyle: { color, width: 1 },
+  }
+}
+
+function cpuCountLine(cpuCount: number) {
+  return {
+    silent: true,
+    symbol: 'none',
+    data: [
+      {
+        yAxis: cpuCount,
+        name: `CPU count (${cpuCount})`,
+        label: { formatter: `CPU count (${cpuCount})` },
+        lineStyle: { color: 'var(--muted-foreground)', type: 'dashed' as const, width: 1 },
+      },
+    ],
+  }
+}
+
+/** Build a deterministic, gap-preserving stacked area option for ASH groups. */
+export function buildAshOption(
+  series: readonly AshChartSeries[] | readonly AshSeries[],
+  { cpuCount, foldedCount = 0 }: AshOptionOptions = {},
+): EChartsOption {
+  const ordered = orderAshSeries<AshChartSeries | AshSeries>(series)
+  const metadata = tooltipMetadata(ordered)
+  const spanMs = spanOf(ordered.flatMap((item) => item.points.map((point) => point.ts)))
+  const safeFoldedCount = safeFolded(foldedCount)
+  const metricSeries = ordered.map((item, index) => {
+    const optionSeries = ashLineSeries(item, 'ash')
     if (index === 0 && validCpuCount(cpuCount)) {
-      return {
-        ...optionSeries,
-        markLine: {
-          silent: true,
-          symbol: 'none',
-          data: [
-            {
-              yAxis: cpuCount,
-              name: `CPU count (${cpuCount})`,
-              label: { formatter: `CPU count (${cpuCount})` },
-              lineStyle: { color: 'var(--muted-foreground)', type: 'dashed' as const, width: 1 },
-            },
-          ],
-        },
-      }
+      return { ...optionSeries, markLine: cpuCountLine(cpuCount) }
     }
     return optionSeries
   })
@@ -210,6 +247,92 @@ export function buildAshOption(
         filterMode: 'none',
         bottom: 8,
         labelFormatter: sliderLabelFormatter(spanMs),
+      },
+    ],
+    series: metricSeries,
+  }
+}
+
+/** Indexes of values with no value on either side: a line through them draws nothing. */
+export function isolatedPoints(points: readonly AshPoint[]): Set<number> {
+  const isolated = new Set<number>()
+  points.forEach((point, index) => {
+    if (point.value === null) return
+    const before = points[index - 1]?.value ?? null
+    const after = points[index + 1]?.value ?? null
+    if (before === null && after === null) isolated.add(index)
+  })
+  return isolated
+}
+
+const ISOLATED_SYMBOL_SIZE = 5
+
+export interface AshGroupOptionOptions extends AshOptionOptions {
+  /** The stack (and wait group) id; each group's chart stacks only its own series. */
+  stack: string
+  /** Only the CPU card draws the CPU-count line. */
+  showCpuCount?: boolean
+  /** Span of the whole page's data, so every card labels its time axis alike. */
+  spanMs?: number
+  /** Colour of a series; by default the token of its wait event type. */
+  colorOf?: (name: string) => string
+}
+
+/**
+ * One wait group's stacked chart: its own y axis from zero, the shared short
+ * UTC time axis, and no ECharts legend (the page draws an HTML legend).
+ */
+export function buildAshGroupOption(
+  series: readonly AshChartSeries[] | readonly AshSeries[],
+  {
+    colorOf = paletteFor,
+    cpuCount,
+    foldedCount = 0,
+    showCpuCount = false,
+    spanMs,
+    stack,
+  }: AshGroupOptionOptions,
+): EChartsOption {
+  const ordered = orderAshSeries<AshChartSeries | AshSeries>(series)
+  const metadata = tooltipMetadata(ordered)
+  const span = spanMs ?? spanOf(ordered.flatMap((item) => item.points.map((point) => point.ts)))
+  const safeFoldedCount = safeFolded(foldedCount)
+  const metricSeries = ordered.map((item, index) => {
+    const isolated = isolatedPoints(item.points)
+    // A sample between two unsampled buckets gets a dot, or it would not show.
+    const optionSeries = {
+      ...ashLineSeries(item, stack, colorOf(item.name)),
+      showSymbol: isolated.size > 0,
+      symbol: 'circle',
+      symbolSize: (_value: unknown, params: { dataIndex?: number }) =>
+        params.dataIndex !== undefined && isolated.has(params.dataIndex) ? ISOLATED_SYMBOL_SIZE : 0,
+    }
+    if (index === 0 && showCpuCount && validCpuCount(cpuCount)) {
+      return { ...optionSeries, markLine: cpuCountLine(cpuCount) }
+    }
+    return optionSeries
+  })
+
+  return {
+    animation: false,
+    color: ordered.map((item) => colorOf(item.name)),
+    grid: { bottom: 72, containLabel: true, left: 58, right: 24, top: 32 },
+    legend: { show: false },
+    tooltip: {
+      trigger: 'axis',
+      confine: true,
+      formatter: (params: unknown) => tooltipFor(params, metadata, safeFoldedCount),
+    },
+    xAxis: timeAxisOption(span),
+    yAxis: { type: 'value', min: 0, name: 'avg active backends' },
+    dataZoom: [
+      { type: 'inside', xAxisIndex: 0, filterMode: 'none', throttle: 50 },
+      {
+        type: 'slider',
+        xAxisIndex: 0,
+        filterMode: 'none',
+        bottom: 8,
+        labelFormatter: sliderLabelFormatter(span),
       },
     ],
     series: metricSeries,
