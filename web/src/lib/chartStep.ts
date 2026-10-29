@@ -90,3 +90,10 @@ export function stepFor(
   const wanted = Math.max(base, minStep)
   return LADDER_SECONDS.find((seconds) => seconds >= wanted) ?? LADDER_SECONDS.at(-1) ?? 86_400
 }
+
+/** The query `step` parameter for a step in seconds: a ladder value such as `30s`. */
+export function stepParam(seconds: number): string {
+  return (
+    STEP_LADDER.find(({ milliseconds }) => milliseconds === seconds * 1_000)?.value ?? `${seconds}s`
+  )
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { metricKind, SAMPLE_SECONDS, stepFor } from './chartStep'
+import { metricKind, SAMPLE_SECONDS, stepFor, stepParam } from './chartStep'
 import { chooseStep, stepMilliseconds } from './timerange'
 
 const HOUR = 60 * 60 * 1_000
@@ -74,5 +74,11 @@ describe('chart step', () => {
     for (const [check, seconds] of Object.entries(SAMPLE_SECONDS)) {
       expect(seconds, check).toBeGreaterThan(0)
     }
+  })
+
+  it('HOSTCH-010 names a ladder step and falls back to seconds', () => {
+    expect(stepParam(30)).toBe('30s')
+    expect(stepParam(300)).toBe('5m')
+    expect(stepParam(7)).toBe('7s')
   })
 })

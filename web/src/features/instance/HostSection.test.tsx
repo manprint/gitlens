@@ -2,12 +2,14 @@ import { act, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { Schemas } from '@/api/types'
+import { expectNoA11yViolations } from '@/test/a11y'
 import { INSTANCE_ID, NOW } from '@/test/fixture-helpers'
 import { ok } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 import { renderWithProviders } from '@/test/render'
 
-import { HostSection } from './HostSection'
+import { FILESYSTEM_HINT, NO_SWAP_TEXT } from './HostCharts'
+import { DISK_NOT_VISIBLE, HostSection } from './HostSection'
 
 vi.mock('echarts-for-react/esm/core', () => ({
   default: () => null,
@@ -27,7 +29,7 @@ async function settle() {
 type HostFixture = Schemas['HostResponse'] & Record<string, unknown>
 
 function renderHost(data: HostFixture) {
-  server.use(ok('getInstanceHost', data))
+  server.use(ok('getInstanceHost', data), ok('queryMetrics', { series: [] }))
   return renderWithProviders(<HostSection instanceId={INSTANCE_ID} />, {
     route: `/instances/${INSTANCE_ID}`,
   })
@@ -124,6 +126,70 @@ describe('HostSection', () => {
 
     expect(screen.getByRole('region', { name: 'Host metrics' })).toBeInTheDocument()
     expect(screen.getByText('target is not local to any agent')).toBeInTheDocument()
+  })
+
+  it('HOSTCH-009 says the filesystem is not visible to the agent instead of a dash', async () => {
+    renderHost({
+      instance_id: INSTANCE_ID,
+      available: true,
+      source: 'host',
+      host_mem_total_bytes: 1024,
+      host_swap_total_bytes: 0,
+    })
+    await settle()
+
+    for (const name of ['Filesystem total', 'Filesystem free', 'Filesystem free ratio']) {
+      const tile = screen.getByRole('article', { name })
+      expect(tile).toHaveTextContent(DISK_NOT_VISIBLE)
+      expect(tile).not.toHaveTextContent('—')
+    }
+    expect(screen.getByRole('article', { name: 'Memory available' })).toHaveTextContent('—')
+    expect(screen.getByText(FILESYSTEM_HINT)).toBeInTheDocument()
+    expect(screen.getByText(NO_SWAP_TEXT)).toBeInTheDocument()
+  })
+
+  it('HOSTCH-009 shows measured filesystem tiles and the host charts below the tiles', async () => {
+    renderHost({
+      instance_id: INSTANCE_ID,
+      available: true,
+      source: 'host',
+      host_disk_total_bytes: 100 * 1024 ** 3,
+      host_disk_free_bytes: 25 * 1024 ** 3,
+      host_disk_free_ratio: 0.25,
+      host_swap_total_bytes: 2 * 1024 ** 3,
+    })
+    await settle()
+
+    expect(screen.getByRole('article', { name: 'Filesystem total' })).toHaveTextContent('100.0 GiB')
+    expect(screen.getByRole('article', { name: 'Filesystem free ratio' })).toHaveTextContent(
+      '25.0%',
+    )
+    expect(screen.queryByText(DISK_NOT_VISIBLE)).not.toBeInTheDocument()
+    expect(screen.queryByText(FILESYSTEM_HINT)).not.toBeInTheDocument()
+    expect(screen.queryByText(NO_SWAP_TEXT)).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Host charts' })).toBeInTheDocument()
+  })
+
+  it('HOSTCH-011 the section with tiles and charts has no serious accessibility violations', async () => {
+    const view = renderHost({
+      instance_id: INSTANCE_ID,
+      available: true,
+      source: 'host',
+      host_cpu_used_ratio: 0.2,
+      host_swap_total_bytes: 0,
+    })
+    await settle()
+    expect(screen.getByRole('region', { name: 'Host charts' })).toBeInTheDocument()
+
+    vi.useRealTimers()
+    await expectNoA11yViolations(view.container)
+  })
+
+  it('does not render the host charts when host metrics are unavailable', async () => {
+    renderHost({ instance_id: INSTANCE_ID, available: false, reason: 'not local' })
+    await settle()
+
+    expect(screen.queryByRole('region', { name: 'Host charts' })).not.toBeInTheDocument()
   })
 
   it('supports the flat response emitted by the server', async () => {

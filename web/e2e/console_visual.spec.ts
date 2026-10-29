@@ -9,6 +9,7 @@ import {
   collectConsoleErrors,
   completenessOf,
   liveTimeout,
+  pickHostInstance,
   pickInstance,
   shoot,
 } from './visual_helpers'
@@ -242,5 +243,80 @@ test('VIS-016 ASH shows one readable chart per wait group with a clear legend', 
     path: '../test/e2e/_artifacts/ui/visual/vis-016-ash-zoomed-card-1.png',
   })
   await shoot(page, 'vis-016-ash-zoomed')
+  browserErrors.assertClean()
+})
+
+const VIS020_WIDTHS = [1440, 1024, 390] as const
+const HOST_CARDS = ['CPU used (%)', 'Load average', 'Memory', 'Swap', 'Filesystem'] as const
+
+test('VIS-020 the host section charts CPU, load, memory, swap and filesystem', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, 3 * 30_000))
+  const browserErrors = collectConsoleErrors(page)
+  const instanceId = await pickHostInstance(api)
+  await page.goto(`/instances/${instanceId}?range=1h#host-metrics`)
+
+  const section = page.getByRole('region', { name: 'Host metrics' })
+  await expect(section).toBeVisible()
+  for (const name of ['Filesystem total', 'Filesystem free']) {
+    const tile = section.getByRole('article', { name, exact: true })
+    await expect(tile).toBeVisible()
+    await expect(tile).not.toContainText('—')
+    await expect(tile).not.toContainText('Not visible to the agent')
+  }
+
+  const grid = page.getByTestId('host-grid')
+  const cards = grid.locator('[data-chart-card]')
+  await expect(cards).toHaveCount(HOST_CARDS.length)
+  for (const title of HOST_CARDS) {
+    await expect(grid.getByRole('heading', { level: 3, name: title })).toBeVisible()
+  }
+
+  for (const label of ['CPU used (%)', 'Memory']) {
+    await expect
+      .poll(async () => (await chartCompleteness(page, label)).total, { timeout: 3 * 30_000 })
+      .toBeGreaterThan(0)
+    const completeness = await chartCompleteness(page, label)
+    expect(completeness.leadingNull / completeness.total).toBeLessThanOrEqual(0.5)
+    expect(completeness.observedRatio, label).toBeGreaterThanOrEqual(0.9)
+  }
+
+  // Used memory pairs two queries; it must not come out empty.
+  const usedMemory = await page
+    .getByRole('table', { name: 'Memory data', exact: true })
+    .locator('tbody tr')
+    .evaluateAll(
+      (rows) =>
+        rows.filter(
+          (row) =>
+            row.querySelector('th')?.textContent === 'Used' &&
+            row.querySelectorAll('td').item(1)?.textContent !== 'Unknown',
+        ).length,
+    )
+  expect(usedMemory).toBeGreaterThan(0)
+
+  // Every card holds a drawn chart, except swap on a host without swap, which explains it.
+  for (const title of HOST_CARDS) {
+    const card = grid.getByRole('region', { name: title })
+    await card.scrollIntoViewIfNeeded()
+    const note = card.getByRole('note')
+    if (title === 'Swap' && (await note.count()) > 0) {
+      await expect(note).toContainText('swap total of 0 bytes')
+      continue
+    }
+    await expect(card.locator('canvas').first()).toBeVisible()
+    expect(await canvasNotBlank(card), title).toBe(true)
+  }
+
+  for (const width of VIS020_WIDTHS) {
+    await page.setViewportSize({ width, height: 1080 })
+    await grid.scrollIntoViewIfNeeded()
+    await grid.screenshot({
+      path: `../test/e2e/_artifacts/ui/visual/vis-020-host-grid-${width}.png`,
+    })
+  }
+  await shoot(page, 'vis-020-host')
   browserErrors.assertClean()
 })

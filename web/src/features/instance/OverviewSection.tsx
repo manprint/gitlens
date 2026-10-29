@@ -1,6 +1,6 @@
 import { useTimeRange } from '@/hooks/useTimeRange'
-import { metricKind, SAMPLE_SECONDS, stepFor } from '@/lib/chartStep'
-import { queryWindowOf, STEP_LADDER, type QueryWindow } from '@/lib/timerange'
+import { metricKind, SAMPLE_SECONDS, stepFor, stepParam } from '@/lib/chartStep'
+import { queryWindowOf, type QueryWindow } from '@/lib/timerange'
 import {
   cacheHitRatioSeries,
   cacheHitRatioValue,
@@ -62,12 +62,6 @@ function overviewStepSeconds(metric: string, from: Date, to: Date): number {
     from,
     to,
     SAMPLE_SECONDS[METRIC_CHECK[metric] ?? 'database_stats'],
-  )
-}
-
-function stepParam(seconds: number): string {
-  return (
-    STEP_LADDER.find(({ milliseconds }) => milliseconds === seconds * 1_000)?.value ?? `${seconds}s`
   )
 }
 

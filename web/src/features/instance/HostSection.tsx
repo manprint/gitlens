@@ -5,6 +5,8 @@ import { Section } from '@/components/layout/Section'
 import { Degraded, ErrorState, Unknown } from '@/components/state'
 import { formatBytes, formatCount, formatPercent } from '@/lib/format'
 
+import { HostCharts } from './HostCharts'
+
 interface HostSectionProps {
   instanceId: string
 }
@@ -55,6 +57,15 @@ function formatHostCount(value: number | null): string | null {
   return value === null ? null : formatCount(value)
 }
 
+/** The filesystem tiles depend on the agent seeing the data directory. */
+const DISK_KEYS: ReadonlySet<HostMetricKey> = new Set([
+  'host_disk_total_bytes',
+  'host_disk_free_bytes',
+  'host_disk_free_ratio',
+])
+
+export const DISK_NOT_VISIBLE = 'Not visible to the agent'
+
 const METRICS: readonly HostMetricDefinition[] = [
   { key: 'host_cpu_used_ratio', label: 'CPU used', format: formatRatio },
   { key: 'host_cpu_count', label: 'CPU count', format: formatHostCount },
@@ -82,6 +93,15 @@ function cpuUsedLabel(source: string | undefined): string {
   return 'CPU used'
 }
 
+/** What the latest reading says about the filesystem and swap charts. */
+function hostChartFlags(data: Schemas['HostResponse']) {
+  const values = metricValues(data)
+  return {
+    diskMeasured: typeof values.host_disk_total_bytes === 'number',
+    swapAbsent: values.host_swap_total_bytes === 0,
+  }
+}
+
 function HostMetricTiles({ data }: { data: Schemas['HostResponse'] }) {
   const values = metricValues(data)
 
@@ -90,7 +110,22 @@ function HostMetricTiles({ data }: { data: Schemas['HostResponse'] }) {
       {METRICS.map(({ format, key, label }) => {
         const value = nullableNumber(values[key])
         const tileLabel = key === 'host_cpu_used_ratio' ? cpuUsedLabel(data.source) : label
-        return <MetricTile key={key} label={tileLabel} value={format(value)} />
+        const shown = format(value)
+        return (
+          <MetricTile
+            key={key}
+            label={tileLabel}
+            value={
+              value === null && DISK_KEYS.has(key) ? (
+                <span className="text-muted-foreground text-base font-normal">
+                  {DISK_NOT_VISIBLE}
+                </span>
+              ) : (
+                shown
+              )
+            }
+          />
+        )
       })}
     </div>
   )
@@ -130,6 +165,8 @@ export function HostSection({ instanceId }: HostSectionProps) {
             {query.data.source ?? <Unknown reason="Source was not reported." />}
           </p>
           <HostMetricTiles data={query.data} />
+          <hr className="border-border my-8" />
+          <HostCharts instanceId={instanceId} {...hostChartFlags(query.data)} />
         </div>
       )}
     </Section>

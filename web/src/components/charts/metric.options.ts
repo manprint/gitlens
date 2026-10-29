@@ -63,19 +63,21 @@ export function tooltipHtml(ms: number, rows: readonly TooltipRow[], unit?: Metr
   return [...time, ...lines].join('')
 }
 
-interface AxisTooltipParam {
+export interface AxisTooltipParam {
   seriesName?: string
   marker?: unknown
   value?: unknown
   axisValue?: unknown
 }
 
-function tooltipValue(value: unknown): number | null {
+/** The value of an axis tooltip parameter, `[ts, value]` or a bare value. */
+export function tooltipValue(value: unknown): number | null {
   const raw = Array.isArray(value) ? (value as unknown[])[1] : value
   return typeof raw === 'number' && Number.isFinite(raw) ? raw : null
 }
 
-function tooltipTime(param: AxisTooltipParam | undefined): number {
+/** The time of an axis tooltip parameter in milliseconds; NaN when unknown. */
+export function tooltipTime(param: AxisTooltipParam | undefined): number {
   const axis = param?.axisValue
   if (typeof axis === 'number') return axis
   if (typeof axis === 'string') return Date.parse(axis)
