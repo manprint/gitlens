@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildMetricOption, MAX_RESET_LINES, tooltipHtml } from './metric.options'
+import {
+  buildMetricOption,
+  MAX_RESET_LINES,
+  formatMetricValue,
+  mixedUnitTooltip,
+  tooltipHtml,
+  withSecondaryAxis,
+} from './metric.options'
 
 interface LineSeries {
   connectNulls: boolean
@@ -174,5 +181,64 @@ describe('buildMetricOption', () => {
     const [series] = seriesOf(buildMetricOption([withResets(2)], { annotateResets: false }))
     expect(series?.markLine).toBeUndefined()
     expect(series?.markPoint).toBeUndefined()
+  })
+})
+
+describe('withSecondaryAxis', () => {
+  const lines = [
+    { name: 'Temporary files', points: [{ ts: '2026-01-01T00:00:00Z', value: 2 }] },
+    { name: 'Temporary bytes', points: [{ ts: '2026-01-01T00:00:00Z', value: 2048 }] },
+  ]
+
+  it('OVC-AXIS-001 moves the lines of a second unit to a right axis in that unit', () => {
+    const option = withSecondaryAxis(buildMetricOption(lines, { unit: 'count' }), [
+      'count',
+      'bytes',
+    ])
+    const axes = option.yAxis as { axisLabel?: { formatter?: (value: number) => string } }[]
+    const series = option.series as { yAxisIndex?: number }[]
+
+    expect(axes).toHaveLength(2)
+    expect(axes[1]?.axisLabel?.formatter?.(2048)).toBe('2.0 KiB')
+    expect(series[0]?.yAxisIndex).toBeUndefined()
+    expect(series[1]?.yAxisIndex).toBe(1)
+  })
+
+  it('OVC-AXIS-002 leaves a single-unit chart unchanged', () => {
+    const option = buildMetricOption(lines, { unit: 'count' })
+    expect(withSecondaryAxis(option, ['count', 'count'])).toBe(option)
+    expect(withSecondaryAxis(option, [])).toBe(option)
+  })
+
+  it('OVC-AXIS-003 formats each tooltip row in the unit of its line', () => {
+    const html = mixedUnitTooltip(['count', 'bytes'])([
+      {
+        axisValue: '2026-01-01T00:00:00Z',
+        seriesIndex: 0,
+        seriesName: 'Temporary files',
+        value: ['2026-01-01T00:00:00Z', 2],
+      },
+      {
+        axisValue: '2026-01-01T00:00:00Z',
+        seriesIndex: 1,
+        seriesName: 'Temporary bytes',
+        value: ['2026-01-01T00:00:00Z', 2048],
+      },
+    ])
+    expect(html).toContain('Temporary files: <strong>2</strong>')
+    expect(html).toContain('Temporary bytes: <strong>2.0 KiB</strong>')
+    expect(html).toContain('2026-01-01')
+  })
+})
+
+describe('formatMetricValue count', () => {
+  it('OVC-AXIS-004 keeps two significant digits below 1 so small ticks stay distinct', () => {
+    const ticks = [0, 0.002, 0.004, 0.006, 0.008, 0.01].map((value) =>
+      formatMetricValue(value, 'count'),
+    )
+    expect(ticks).toEqual(['0', '0.002', '0.004', '0.006', '0.008', '0.01'])
+    expect(formatMetricValue(0.12345, 'count')).toBe('0.12')
+    expect(formatMetricValue(1234.567, 'count')).toBe('1,234.57')
+    expect(formatMetricValue(-0.0042, 'count')).toBe('-0.0042')
   })
 })

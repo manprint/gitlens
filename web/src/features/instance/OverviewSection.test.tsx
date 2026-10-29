@@ -8,6 +8,7 @@ import { formatBytes } from '@/lib/format'
 import { INSTANCE_ID } from '@/test/fixture-helpers'
 import { renderWithProviders } from '@/test/render'
 import { server } from '@/test/msw/server'
+import { expectNoA11yViolations } from '@/test/a11y'
 
 import { OverviewSection } from './OverviewSection'
 
@@ -182,14 +183,18 @@ describe('OverviewSection', () => {
     for (const [title, step] of [
       ['Connections', '15s'],
       ['Transactions per second', '1m'],
+      ['Deadlocks and conflicts', '1m'],
       ['Cache hit ratio', '1m'],
+      ['Blocks read vs hit', '1m'],
+      ['Temp files and bytes', '1m'],
       ['WAL generation', '1m'],
-      ['Checkpoint frequency', '1m'],
-      ['Temporary bytes', '1m'],
-      ['Deadlocks', '1m'],
+      ['Checkpoints', '1m'],
+      ['Checkpoint write and sync time', '1m'],
     ] as const) {
-      const card = screen.getByRole('region', { name: title })
-      expect(within(card).getByRole('heading', { level: 3, name: title })).toBeVisible()
+      // The unit hint follows the title in the heading.
+      const name = new RegExp(`^${title}( ?\\(|$)`)
+      const card = screen.getByRole('region', { name })
+      expect(within(card).getByRole('heading', { level: 3, name })).toBeVisible()
       expect(within(card).getByText(new RegExp(`UTC · step ${step}$`))).toBeVisible()
       expect(within(card).getByRole('img', { name: new RegExp(title) })).toBeVisible()
     }
@@ -312,5 +317,42 @@ describe('OverviewSection', () => {
 
     // The mount fetch, then one per poll.
     expect(checkpointRequests).toHaveLength(polls + 1)
+  })
+
+  it('OVC-006 separates the tiles from the first chart group with a rule and spacing', async () => {
+    server.use(metricsHandler(resetSeries))
+    renderWithProviders(<OverviewSection database="app" instanceId={INSTANCE_ID} />, {
+      route: `/instances/${INSTANCE_ID}?db=app&range=1h`,
+    })
+    await settle()
+
+    const charts = screen.getByTestId('overview-charts')
+    const tile = screen.getByRole('article', { name: 'Connections in use' })
+    expect(charts).toHaveClass('mt-12')
+    expect(within(charts).getByRole('separator')).toHaveClass('mb-6')
+    expect(charts).not.toContainElement(tile)
+    expect(within(charts).getByRole('region', { name: 'Workload' })).toHaveClass(
+      'mt-6',
+      'scroll-mt-32',
+    )
+    expect(within(charts).getByRole('region', { name: 'Memory & I/O' })).toHaveClass(
+      'mt-10',
+      'scroll-mt-32',
+    )
+    expect(within(charts).getByTestId('workload-grid')).toHaveClass('gap-6')
+    expect(within(charts).getByRole('navigation', { name: 'Chart groups' })).toBeVisible()
+  })
+
+  it('OVC-009 the whole Overview has no axe violations', async () => {
+    server.use(metricsHandler(resetSeries))
+    const { container } = renderWithProviders(
+      <OverviewSection database="app" instanceId={INSTANCE_ID} />,
+      { route: `/instances/${INSTANCE_ID}?db=app&range=1h` },
+    )
+    await settle()
+
+    expect(screen.getAllByRole('region').length).toBeGreaterThan(20)
+    vi.useRealTimers()
+    await expectNoA11yViolations(container)
   })
 })

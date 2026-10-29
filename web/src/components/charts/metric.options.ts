@@ -38,7 +38,11 @@ export function formatMetricValue(value: number | null | undefined, unit: Metric
     case 'ms':
       return formatMilliseconds(value)
     case 'count':
-      return localizedNumber(value, 'en-US', { maximumFractionDigits: 2 })
+      // Small rates (0.004 rows/s) keep two significant digits, so axis ticks
+      // stay distinct instead of all rounding to 0 or 0.01.
+      return Math.abs(value) > 0 && Math.abs(value) < 1
+        ? localizedNumber(value, 'en-US', { maximumSignificantDigits: 2 })
+        : localizedNumber(value, 'en-US', { maximumFractionDigits: 2 })
   }
 }
 
@@ -83,6 +87,60 @@ export function tooltipTime(param: AxisTooltipParam | undefined): number {
   if (typeof axis === 'string') return Date.parse(axis)
   const first = Array.isArray(param?.value) ? (param.value as unknown[])[0] : undefined
   return typeof first === 'string' ? Date.parse(first) : typeof first === 'number' ? first : NaN
+}
+
+type AxisParam = AxisTooltipParam & { seriesIndex?: number }
+
+/** Tooltip of a chart whose series have different units, one unit per series index. */
+export function mixedUnitTooltip(units: readonly MetricUnit[]) {
+  return (params: unknown) => {
+    const list = (Array.isArray(params) ? params : [params]) as AxisParam[]
+    const ms = tooltipTime(list[0])
+    const time = Number.isFinite(ms) ? `<div>${formatTooltipTime(ms)}</div>` : ''
+    const rows = list.map((param) =>
+      tooltipHtml(
+        Number.NaN,
+        [
+          {
+            seriesName: param.seriesName ?? '',
+            marker: typeof param.marker === 'string' ? param.marker : '',
+            value: tooltipValue(param.value),
+          },
+        ],
+        units[param.seriesIndex ?? 0],
+      ),
+    )
+    return time + rows.join('')
+  }
+}
+
+/**
+ * Lines whose unit differs from the first line's move to a right axis in that
+ * unit (one secondary unit per chart); the tooltip shows each line in its unit.
+ */
+export function withSecondaryAxis(
+  option: EChartsOption,
+  units: readonly MetricUnit[],
+): EChartsOption {
+  const primary = units[0]
+  const secondary = units.find((unit) => unit !== primary)
+  if (primary === undefined || secondary === undefined) return option
+  const lines = option.series as Record<string, unknown>[]
+  return {
+    ...option,
+    tooltip: { ...(option.tooltip as object), formatter: mixedUnitTooltip(units) },
+    yAxis: [
+      option.yAxis as object,
+      {
+        type: 'value',
+        splitLine: { show: false },
+        axisLabel: { formatter: (value: number) => formatMetricValue(value, secondary) },
+      },
+    ],
+    series: lines.map((line, index) =>
+      units[index] === primary ? line : { ...line, yAxisIndex: 1 },
+    ),
+  }
 }
 
 /** Build a null-preserving option for an instance metric series or series group. */

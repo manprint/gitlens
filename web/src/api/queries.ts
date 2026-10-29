@@ -1,7 +1,9 @@
 import {
   keepPreviousData,
+  useQueries,
   useQuery,
   useQueryClient,
+  type UseQueryOptions,
   type UseQueryResult,
 } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
@@ -465,7 +467,8 @@ export function useWorkloadSeries(
 ) {
   return useApiQuery({
     keepPrevious: true,
-    policy: REFRESH.activity,
+    // The sources are scraped every 60 s (statements) or 5 min (tables, indexes).
+    policy: REFRESH.statements,
     queryFn: (signal) =>
       getApi(() =>
         client.GET('/api/v1/instances/{id}/workload/series', {
@@ -542,14 +545,11 @@ export function useLocks(instanceId: string) {
   })
 }
 
-export function useQueryMetrics(
-  params: WindowlessParameters<'/api/v1/metrics/query'>,
-  window: QueryWindow,
-) {
-  return useApiQuery({
-    keepPrevious: true,
-    policy: REFRESH.activity,
-    queryFn: (signal) =>
+type QueryMetricsParameters = WindowlessParameters<'/api/v1/metrics/query'>
+
+function queryMetricsRequest(params: QueryMetricsParameters, window: QueryWindow) {
+  return {
+    queryFn: (signal: AbortSignal) =>
       getApi(() =>
         client.GET('/api/v1/metrics/query', {
           params: { query: { ...params, ...resolveQueryWindow(window) } },
@@ -563,7 +563,56 @@ export function useQueryMetrics(
       params.step,
       params.database,
     ),
+  }
+}
+
+export function useQueryMetrics(params: QueryMetricsParameters, window: QueryWindow) {
+  return useApiQuery({
+    keepPrevious: true,
+    policy: REFRESH.activity,
+    ...queryMetricsRequest(params, window),
   })
+}
+
+type QueryMetricsData = Awaited<ReturnType<ReturnType<typeof queryMetricsRequest>['queryFn']>>
+
+export type QueryMetricsResult = UseQueryResult<QueryMetricsData, ApiFailure>
+
+/**
+ * `useQueryMetrics` for a list of metrics whose length is fixed by the
+ * caller (one chart's lines). Same cache keys, polling and retries, so a
+ * metric already read elsewhere on the page is fetched once.
+ */
+export function useQueryMetricsList(
+  paramsList: readonly QueryMetricsParameters[],
+  window: QueryWindow,
+): QueryMetricsResult[] {
+  const paused = useAutoRefreshPaused()
+  const queries = useQueries({
+    queries: paramsList.map((params): UseQueryOptions<QueryMetricsData, ApiFailure> => {
+      const { queryFn, queryKey } = queryMetricsRequest(params, window)
+      return {
+        placeholderData: keepPreviousData,
+        queryFn: ({ signal }) => queryFn(signal),
+        queryKey,
+        refetchInterval: paused ? false : REFRESH.activity.interval,
+        retry: shouldRetry,
+        retryDelay: 0,
+      }
+    }),
+  })
+  const wasPaused = useRef(paused)
+
+  // `queries` is a new array on every render; the ref keeps this to one
+  // refetch per return from a hidden tab.
+  useEffect(() => {
+    if (wasPaused.current && !paused) {
+      queries.forEach((query) => void query.refetch())
+    }
+    wasPaused.current = paused
+  }, [paused, queries])
+
+  return queries
 }
 
 export function useEvents(params: WindowlessParameters<'/api/v1/events'>, window: QueryWindow) {

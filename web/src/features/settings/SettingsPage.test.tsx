@@ -103,8 +103,10 @@ describe('SettingsPage', () => {
     renderSettings({ clusters: [], instances: [] })
     await settleInitialQueries()
 
+    // Real timers here: wait for the guidance instead of a fixed 25 ms, which
+    // was too short when the suite runs under coverage.
     expect(
-      screen.getByText(
+      await screen.findByText(
         'Install and configure the pglens agent on a PostgreSQL host to populate the fleet inventory.',
       ),
     ).toBeInTheDocument()

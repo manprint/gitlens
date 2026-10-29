@@ -36,6 +36,7 @@ import {
   useMetrics,
   usePlans,
   useQueryMetrics,
+  useQueryMetricsList,
   useReadyz,
   useSession,
   useSilences,
@@ -187,7 +188,7 @@ describe('relative windows', () => {
       Probe: MetricWindowProbe,
     },
     {
-      interval: REFRESH.activity.interval,
+      interval: REFRESH.statements.interval,
       name: 'workload series',
       path: '/api/v1/instances/instance-a/workload/series',
       Probe: WorkloadWindowProbe,
@@ -587,3 +588,82 @@ function useReadyzForCoverage() {
 function useMetricsForCoverage() {
   return useMetrics()
 }
+
+function MetricListProbe() {
+  const single = useQueryMetrics(
+    { metric: 'pg_blks_hit_total', instance_id: 'instance-a', step: '1m' },
+    RELATIVE_HOUR,
+  )
+  const list = useQueryMetricsList(
+    [
+      { metric: 'pg_blks_hit_total', instance_id: 'instance-a', step: '1m' },
+      { metric: 'pg_blks_read_total', instance_id: 'instance-a', step: '1m' },
+    ],
+    RELATIVE_HOUR,
+  )
+  return (
+    <div data-testid="metric-list-probe">
+      {[single, ...list].map((query) => query.data?.series[0]?.value ?? 'none').join(',')}
+    </div>
+  )
+}
+
+describe('useQueryMetricsList', () => {
+  afterEach(() => {
+    server.events.removeAllListeners()
+    setVisibility('visible')
+  })
+
+  function countMetricRequests() {
+    const metrics: string[] = []
+    server.use(
+      http.get('*/api/v1/metrics/query', ({ request }) => {
+        const metric = new URL(request.url).searchParams.get('metric') ?? ''
+        metrics.push(metric)
+        return HttpResponse.json({
+          series: [{ ts: '2026-08-27T01:00:00Z', value: metric === 'pg_blks_hit_total' ? 3 : 1 }],
+        })
+      }),
+    )
+    return metrics
+  }
+
+  it('OVC-LIST-001 shares the cache of useQueryMetrics and keeps the list order', async () => {
+    const metrics = countMetricRequests()
+    renderWithProviders(<MetricListProbe />)
+    await flushNetwork()
+
+    expect(screen.getByTestId('metric-list-probe')).toHaveTextContent('3,3,1')
+    expect(metrics.filter((metric) => metric === 'pg_blks_hit_total')).toHaveLength(1)
+    expect(metrics.filter((metric) => metric === 'pg_blks_read_total')).toHaveLength(1)
+  })
+
+  it('OVC-LIST-002 polls at the activity interval, stops while hidden and refetches on return', async () => {
+    const metrics = countMetricRequests()
+    const view = renderWithProviders(<MetricListProbe />)
+    await flushNetwork()
+    const reads = () => metrics.filter((metric) => metric === 'pg_blks_read_total').length
+    expect(reads()).toBe(1)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH.activity.interval)
+    })
+    await flushNetwork()
+    expect(reads()).toBe(2)
+
+    setVisibility('hidden')
+    await settleInitialQuery()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH.activity.interval * 2)
+    })
+    expect(reads()).toBe(2)
+
+    await act(async () => {
+      setVisibility('visible')
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    await flushNetwork()
+    expect(reads()).toBe(3)
+    view.unmount()
+  })
+})

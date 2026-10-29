@@ -4,18 +4,10 @@ import type { ReactNode } from 'react'
 import { useQueryMetrics } from '@/api/queries'
 import { ChartCard, type ChartCardState } from '@/components/charts/ChartCard'
 import { ChartGroup } from '@/components/charts/ChartGroup'
-import {
-  buildMetricOption,
-  tooltipHtml,
-  tooltipTime,
-  tooltipValue,
-  type AxisTooltipParam,
-  type MetricUnit,
-} from '@/components/charts/metric.options'
+import { buildMetricOption, mixedUnitTooltip } from '@/components/charts/metric.options'
 import { TimeSeriesChart, type TimeSeriesTableSeries } from '@/components/charts/TimeSeriesChart'
 import { useTimeRange } from '@/hooks/useTimeRange'
 import { SAMPLE_SECONDS, stepFor, stepParam } from '@/lib/chartStep'
-import { formatTooltipTime } from '@/lib/chartTime'
 import { niceCeil, subtractSeries, toPercent } from '@/lib/hostSeries'
 import type { MetricSeriesPoint } from '@/lib/metrics'
 import { queryWindowOf, type QueryWindow } from '@/lib/timerange'
@@ -54,31 +46,6 @@ function cardState(queries: readonly MetricQuery[], series: readonly TimeSeriesT
   if (queries.some((query) => query.isPending)) return { state: 'loading' as ChartCardState }
   const measured = series.some((item) => item.points.some((point) => point.value !== null))
   return { state: (measured ? 'ready' : 'empty') as ChartCardState }
-}
-
-type AxisParam = AxisTooltipParam & { seriesIndex?: number }
-
-/** Tooltip of a chart whose series have different units, one unit per series index. */
-function mixedUnitTooltip(units: readonly MetricUnit[]) {
-  return (params: unknown) => {
-    const list = (Array.isArray(params) ? params : [params]) as AxisParam[]
-    const ms = tooltipTime(list[0])
-    const time = Number.isFinite(ms) ? `<div>${formatTooltipTime(ms)}</div>` : ''
-    const rows = list.map((param) =>
-      tooltipHtml(
-        Number.NaN,
-        [
-          {
-            seriesName: param.seriesName ?? '',
-            marker: typeof param.marker === 'string' ? param.marker : '',
-            value: tooltipValue(param.value),
-          },
-        ],
-        units[param.seriesIndex ?? 0],
-      ),
-    )
-    return time + rows.join('')
-  }
 }
 
 function percentAxis(option: EChartsOption): EChartsOption {
