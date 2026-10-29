@@ -212,7 +212,7 @@ describe('OverviewCharts', () => {
     ).toHaveLength(1)
   })
 
-  it('OVC-003 derives the hit ratio, scales checkpoints per hour and splits units on two axes', async () => {
+  it('OVC-003 derives the hit ratio, counts checkpoints per step and splits units on two axes', async () => {
     serve((name) =>
       name === 'pg_blks_hit_total'
         ? 3
@@ -226,7 +226,9 @@ describe('OverviewCharts', () => {
     await settle()
 
     expect(optionWithLegend('Cache hit ratio')?.series[0]?.data[0]?.[1]).toBe(0.75)
-    expect(optionWithLegend('Timed', 'Requested')?.series[0]?.data[0]?.[1]).toBeCloseTo(3.6)
+    // 0.001 checkpoints/s over a 1 m step: 0.06 per step, not a 3.6/h spike.
+    expect(optionWithLegend('Timed', 'Requested')?.series[0]?.data[0]?.[1]).toBeCloseTo(0.06)
+    expect(within(card('Checkpoints')).getByText('(per step)')).toBeVisible()
     const temp = optionWithLegend('Temporary files', 'Temporary bytes')
     expect(Array.isArray(temp?.yAxis) && temp.yAxis).toHaveLength(2)
     expect(temp?.series.map((line) => line.yAxisIndex)).toEqual([undefined, 1])
@@ -256,5 +258,54 @@ describe('OverviewCharts', () => {
     expect(within(card('Index size')).getByRole('button', { name: /retry/i })).toBeVisible()
     expect(within(card('Connections')).queryByRole('button', { name: /retry/i })).toBeNull()
     expect(within(card('Connections')).getByRole('img')).toBeVisible()
+  })
+
+  it('OVC-004 draws dashed gap lines on counters only, never on gauges', async () => {
+    server.use(
+      http.get(metricsUrl, () =>
+        HttpResponse.json({
+          series: [
+            { ts: TS[0], value: 4 },
+            { ts: '2026-08-27T01:02:30Z', value: null },
+            { ts: TS[1], value: 4 },
+          ],
+        }),
+      ),
+      http.get(workloadUrl, () =>
+        HttpResponse.json({ step_seconds: 600, source: 'tables', series: [] }),
+      ),
+    )
+    renderCharts()
+    await settle()
+
+    const hasGapLine = (...names: string[]) =>
+      optionWithLegend(...names)?.series.some((line) => 'markLine' in line)
+    expect(hasGapLine('Commits', 'Rollbacks')).toBe(true)
+    expect(hasGapLine('Connections in use', 'Configured maximum')).toBe(false)
+  })
+
+  it('OVC-010 names one long outage as one gap, not one reset per null bucket', async () => {
+    const start = Date.parse(TS[0] ?? '')
+    const minute = (index: number) => new Date(start + index * 60_000).toISOString()
+    server.use(
+      http.get(metricsUrl, () =>
+        HttpResponse.json({
+          series: Array.from({ length: 51 }, (_, index) => ({
+            ts: minute(index),
+            value: index === 0 || index === 50 ? 4 : null,
+          })),
+        }),
+      ),
+      http.get(workloadUrl, () =>
+        HttpResponse.json({ step_seconds: 600, source: 'tables', series: [] }),
+      ),
+    )
+    renderCharts()
+    await settle()
+
+    expect(
+      within(card('Transactions per second')).getByText(/· 1 gap or counter reset$/),
+    ).toBeVisible()
+    expect(screen.queryByText(/49 counter resets/)).toBeNull()
   })
 })

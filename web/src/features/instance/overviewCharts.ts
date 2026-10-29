@@ -16,8 +16,6 @@ export interface MetricLine {
   scope: MetricScope
   /** Unit of this line when it differs from the card's; it then uses a right axis. */
   unit?: MetricUnit
-  /** Multiplier applied to the stored value, e.g. 3600 for per-hour rates. */
-  scale?: number
 }
 
 export interface WorkloadLine {
@@ -34,7 +32,7 @@ interface CardBase {
   unit: MetricUnit
   /** Span both columns of the group grid. */
   wide?: boolean
-  /** Dashed reset lines make no sense on a derived ratio. */
+  /** Dashed reset lines make no sense on a derived ratio or a gauge. */
   annotateResets?: boolean
 }
 
@@ -43,6 +41,11 @@ export interface MetricCardSpec extends CardBase {
   metrics: readonly MetricLine[]
   /** `cache-hit-ratio`: the two lines (hit, read) become one hit / (hit + read) line. */
   derive?: 'cache-hit-ratio'
+  /**
+   * Show the count in each step (rate × step) instead of the per-second rate:
+   * rare events such as checkpoints read as "1", not as a 60/h spike.
+   */
+  perStep?: boolean
 }
 
 export interface WorkloadCardSpec extends CardBase {
@@ -135,6 +138,7 @@ export const OVERVIEW_GROUPS: readonly ChartGroupSpec[] = [
         id: 'connections',
         title: 'Connections',
         unit: 'count',
+        annotateResets: false,
         source: 'metrics',
         metrics: [
           instance('pg_connections_used', 'Connections in use'),
@@ -216,20 +220,22 @@ export const OVERVIEW_GROUPS: readonly ChartGroupSpec[] = [
       {
         id: 'checkpoints',
         title: 'Checkpoints',
-        unitHint: 'per hour',
+        unitHint: 'per step',
         unit: 'count',
         source: 'metrics',
+        perStep: true,
         metrics: [
-          instance('pg_checkpoints_timed_total', 'Timed', { scale: 3_600 }),
-          instance('pg_checkpoints_requested_total', 'Requested', { scale: 3_600 }),
+          instance('pg_checkpoints_timed_total', 'Timed'),
+          instance('pg_checkpoints_requested_total', 'Requested'),
         ],
       },
       {
         id: 'checkpoint-time',
         title: 'Checkpoint write and sync time',
-        unitHint: 'ms per second',
+        unitHint: 'per step',
         unit: 'ms',
         source: 'metrics',
+        perStep: true,
         metrics: [
           instance('pg_checkpoint_write_time_ms_total', 'Write'),
           instance('pg_checkpoint_sync_time_ms_total', 'Sync'),
@@ -328,6 +334,7 @@ export const OVERVIEW_GROUPS: readonly ChartGroupSpec[] = [
         title: 'Dead tuples',
         unitHint: 'tracked tables',
         unit: 'count',
+        annotateResets: false,
         source: 'workload',
         workloadSource: 'tables',
         series: [{ series: 'dead_tuples', label: 'Dead tuples' }],
@@ -347,6 +354,7 @@ export const OVERVIEW_GROUPS: readonly ChartGroupSpec[] = [
         unitHint: 'tracked indexes',
         unit: 'bytes',
         wide: true,
+        annotateResets: false,
         source: 'workload',
         workloadSource: 'indexes',
         series: [{ series: 'index_bytes', label: 'Index size' }],

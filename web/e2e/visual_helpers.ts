@@ -3,7 +3,7 @@ import type { APIRequestContext, Locator, Page } from '@playwright/test'
 /** Widths every visual screenshot is taken at (the height follows the current viewport). */
 export const SHOOT_WIDTHS = [1920, 1440, 1024, 390] as const
 
-const ARTIFACT_DIR = '../test/e2e/_artifacts/ui/visual'
+export const ARTIFACT_DIR = '../test/e2e/_artifacts/ui/visual'
 const HOST_FRESH_MS = 5 * 60_000
 
 interface InstanceRow {
@@ -89,16 +89,38 @@ export function completenessOf(values: readonly string[]): Completeness {
   }
 }
 
-/** Reads the sr-only data table `<label> data` of a chart (last cell of each row). */
-export async function chartCompleteness(page: Page, label: string): Promise<Completeness> {
+/**
+ * Reads the sr-only data table `<label> data` of a chart (last cell of each
+ * row). With `series`, only that series' rows: the table lists the series one
+ * after the other, so mixing them would count the second one's leading nulls
+ * as gaps.
+ */
+export async function chartCompleteness(
+  page: Page,
+  label: string,
+  series?: string,
+): Promise<Completeness> {
   const table = page.getByRole('table', { name: `${label} data`, exact: true })
-  const values = await table.locator('tbody tr').evaluateAll((rows) =>
-    rows.map((row) => {
-      const cells = row.querySelectorAll('td')
-      return cells.item(cells.length - 1)?.textContent ?? ''
-    }),
+  const values = await table.locator('tbody tr').evaluateAll(
+    (rows, name) =>
+      rows
+        .filter((row) => name === null || row.querySelector('th')?.textContent === name)
+        .map((row) => {
+          const cells = row.querySelectorAll('td')
+          return cells.item(cells.length - 1)?.textContent ?? ''
+        }),
+    series ?? null,
   )
   return completenessOf(values)
+}
+
+/** The series names of a chart's data table, in table order. */
+export async function chartSeriesNames(page: Page, label: string): Promise<string[]> {
+  const table = page.getByRole('table', { name: `${label} data`, exact: true })
+  const names = await table
+    .locator('tbody tr th')
+    .evaluateAll((cells) => cells.map((cell) => cell.textContent ?? ''))
+  return [...new Set(names)]
 }
 
 /** True when the canvas inside `locator` has >= 3 colours and > 0.5 % non-background pixels. */

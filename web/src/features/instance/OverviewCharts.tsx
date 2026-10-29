@@ -13,7 +13,7 @@ import {
 import { TimeSeriesChart, type TimeSeriesTableSeries } from '@/components/charts/TimeSeriesChart'
 import { useTimeRange } from '@/hooks/useTimeRange'
 import { stepParam } from '@/lib/chartStep'
-import { countResets } from '@/lib/chartTime'
+import { countGaps, countResets } from '@/lib/chartTime'
 import { cacheHitRatioSeries, scaleSeries, type MetricSeriesPoint } from '@/lib/metrics'
 import { queryWindowOf, type QueryWindow } from '@/lib/timerange'
 
@@ -75,6 +75,9 @@ function CardFrame({
   annotateResets,
 }: CardFrameProps) {
   const resets = annotateResets ? Math.max(0, ...series.map((item) => countResets(item.points))) : 0
+  // Too many null buckets for dashed lines: name the runs, a long outage is one gap.
+  const gaps =
+    resets > MAX_RESET_LINES ? Math.max(...series.map((item) => countGaps(item.points))) : 0
   return (
     <ChartCard
       range={range}
@@ -83,7 +86,9 @@ function CardFrame({
       title={title}
       {...(unitHint === undefined ? {} : { unitHint })}
       {...(wide ? { wide } : {})}
-      {...(resets > MAX_RESET_LINES ? { subtitle: `${resets} counter resets` } : {})}
+      {...(gaps > 0
+        ? { subtitle: gaps === 1 ? '1 gap or counter reset' : `${gaps} gaps or counter resets` }
+        : {})}
       {...(failure ? { error: failure.error, onRetry: failure.retry } : {})}
     >
       <TimeSeriesChart
@@ -147,7 +152,7 @@ function MetricChartCard({
   )
   const lines = card.metrics.map((line, index) => ({
     name: line.label,
-    points: queries[index] ? pointsOf(queries[index], line.scale) : [],
+    points: queries[index] ? pointsOf(queries[index], card.perStep ? stepSeconds : undefined) : [],
     unit: line.unit ?? card.unit,
   }))
   const derived =

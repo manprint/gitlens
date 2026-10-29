@@ -46,3 +46,11 @@ export function formatRangeLabel(from: Date, to: Date, stepSeconds: number): str
 export function countResets(series: readonly (MetricSeriesPoint | number | null)[]): number {
   return findResets(series).length
 }
+
+/**
+ * Runs of consecutive interior null buckets: one outage spanning 49 buckets
+ * is one gap, not 49 counter resets.
+ */
+export function countGaps(series: readonly (MetricSeriesPoint | number | null)[]): number {
+  return findResets(series).filter((index, position, all) => all[position - 1] !== index - 1).length
+}

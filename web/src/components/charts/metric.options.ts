@@ -143,6 +143,35 @@ export function withSecondaryAxis(
   }
 }
 
+/**
+ * Width a legend may use in the narrowest chart card (a half-width card at
+ * 1024 px, a full-width one at 390 px), and the width of one legend entry:
+ * its icon and gap plus about 7 px per character at 12 px.
+ */
+const LEGEND_WIDTH_PX = 280
+const LEGEND_ICON_PX = 35
+const LEGEND_CHAR_PX = 7
+const LEGEND_ROW_PX = 22
+
+/**
+ * Rows a wrapping legend takes in the narrowest card. The legend wraps
+ * instead of scrolling, so no series hides behind paging; the plot starts
+ * below the last row.
+ */
+export function legendRows(names: readonly string[]): number {
+  let rows = 1
+  let used = 0
+  for (const name of names) {
+    const width = LEGEND_ICON_PX + name.length * LEGEND_CHAR_PX
+    if (used > 0 && used + width > LEGEND_WIDTH_PX) {
+      rows += 1
+      used = 0
+    }
+    used += width
+  }
+  return rows
+}
+
 /** Build a null-preserving option for an instance metric series or series group. */
 export function buildMetricOption(
   series: readonly TimeSeriesTableSeries[],
@@ -179,8 +208,14 @@ export function buildMetricOption(
 
   return {
     animation: false,
-    grid: { bottom: 72, containLabel: true, left: 56, right: 24, top: 40 },
-    legend: { data: series.map(({ name }) => name), top: 8, type: 'scroll' },
+    grid: {
+      bottom: 72,
+      containLabel: true,
+      left: 56,
+      right: 24,
+      top: 40 + (legendRows(series.map(({ name }) => name)) - 1) * LEGEND_ROW_PX,
+    },
+    legend: { data: series.map(({ name }) => name), top: 8, type: 'plain' },
     tooltip: {
       trigger: 'axis',
       confine: true,

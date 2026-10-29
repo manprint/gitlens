@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  countGaps,
   countResets,
   formatAxisTime,
   formatRangeLabel,
@@ -50,6 +51,13 @@ describe('chart time labels', () => {
     expect(countResets([null, 1, null, null, 2, null])).toBe(2)
     expect(countResets([null, null, 3])).toBe(0)
     expect(countResets([])).toBe(0)
+  })
+
+  it('CTIME-009 counts a run of interior null buckets as one gap', () => {
+    expect(countGaps([null, 1, null, null, 2, null, 3, null])).toBe(2)
+    expect(countGaps([1, ...Array<null>(49).fill(null), 2])).toBe(1)
+    expect(countGaps([null, null, 3])).toBe(0)
+    expect(countGaps([])).toBe(0)
   })
 
   it('CTIME-008 drops the step when it is unknown', () => {

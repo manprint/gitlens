@@ -4,6 +4,7 @@ import {
   buildMetricOption,
   MAX_RESET_LINES,
   formatMetricValue,
+  legendRows,
   mixedUnitTooltip,
   tooltipHtml,
   withSecondaryAxis,
@@ -240,5 +241,24 @@ describe('formatMetricValue count', () => {
     expect(formatMetricValue(0.12345, 'count')).toBe('0.12')
     expect(formatMetricValue(1234.567, 'count')).toBe('1,234.57')
     expect(formatMetricValue(-0.0042, 'count')).toBe('-0.0042')
+  })
+})
+
+describe('legend', () => {
+  it('OVC-AXIS-005 wraps the legend and moves the plot below its rows', () => {
+    const point = [{ ts: '2026-01-01T00:00:00Z', value: 1 }]
+    const two = buildMetricOption([
+      { name: 'Commits', points: point },
+      { name: 'Rollbacks', points: point },
+    ])
+    const four = buildMetricOption(
+      ['Inserted', 'Updated', 'HOT updated', 'Deleted'].map((name) => ({ name, points: point })),
+    )
+    expect((two.legend as { type: string }).type).toBe('plain')
+    expect((two.grid as { top: number }).top).toBe(40)
+    expect(legendRows(['Inserted', 'Updated', 'HOT updated', 'Deleted'])).toBe(2)
+    expect((four.grid as { top: number }).top).toBe(62)
+    expect(legendRows([])).toBe(1)
+    expect(legendRows(['A very long series name that fills a whole row', 'Next'])).toBe(2)
   })
 })
