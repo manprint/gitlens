@@ -21,7 +21,7 @@ import {
   truth,
 } from './pg'
 import { newRunId, RUN_ID_PATTERN } from './runid'
-import { BASE_SERVICES, stackStatus, stop, waitReady } from './stack'
+import { BASE_SERVICES, stackStatus, stop, upArgs, waitReady } from './stack'
 
 test.describe.configure({ mode: 'serial', retries: 0 })
 test.setTimeout(120_000)
@@ -56,7 +56,7 @@ test('QA-HARNESS-003 lifecycle actions need a VERIFIED backup younger than 24 h'
     const now = new Date()
     expect(await findVerifiedBackup(root, now)).toBeNull()
     await expect(
-      assertLifecycleAllowed({ PGLENS_QA_ALLOW_LIFECYCLE: '1', PGLENS_QA_BACKUP_DIR: root }),
+      assertLifecycleAllowed({ PGLENS_QA_ALLOW_LIFECYCLE: '1' }, 'pglens-odoo', root),
     ).rejects.toThrow(/no VERIFIED backup/)
 
     const make = async (
@@ -159,6 +159,7 @@ test('QA-HARNESS-014 SQL builders reject non-integers and unsafe identifiers', (
   expect(() => sqlInt(Number.NaN)).toThrow(/not an integer/)
   expect(() => sqlInt('1; drop')).toThrow(/not an integer/)
   expect(() => sqlInt(1.5)).toThrow(/not an integer/)
+  expect(() => sqlInt(-1)).toThrow(/not an integer/)
   expect(sqlInt(42)).toBe('42')
   expect(() => sqlIdent('t; drop table x')).toThrow(/not a safe SQL identifier/)
   expect(RUN_ID_PATTERN.test(newRunId())).toBe(true)
@@ -175,14 +176,22 @@ test('QA-HARNESS-015 commands run with argument arrays, never shell strings', as
     expect(code, file).not.toMatch(/\bexec(Sync)?\(\s*`/)
     expect(code, file).not.toMatch(/\bexecSync\(/)
     expect(code, file).not.toMatch(/shell:\s*true/)
+    // This spec spells the forbidden patterns itself, so it is exempt from the two below.
+    if (file === 'harness.spec.ts') continue
+    expect(source, file).not.toMatch(/\bexec\(/)
+    expect(source, file).not.toMatch(/'-c'|"-c"/)
   }
+  const args = upArgs()
+  expect(args).not.toContain('odoo-db')
+  expect(args).not.toContain('-v')
+  expect(args).toContain('--no-deps')
 })
 
 test('QA-CLEAN-001 no qa_tmp schema and no qa-% session remain', async () => {
   expect(await queryInt(`SELECT count(*) FROM pg_namespace WHERE nspname = 'qa_tmp';`)).toBe(0)
   expect(
     await queryInt(
-      `SELECT count(*) FROM pg_stat_activity WHERE application_name LIKE 'qa-%' AND application_name <> 'qa-harness';`,
+      `SELECT count(*) FROM pg_stat_activity WHERE application_name LIKE 'qa-%' AND pid <> pg_backend_pid();`,
     ),
   ).toBe(0)
 })

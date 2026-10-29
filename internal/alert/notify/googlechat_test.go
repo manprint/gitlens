@@ -77,13 +77,13 @@ func TestNOTIFGC004_ClientErrorIsNotRetriedAndRedacted(t *testing.T) {
 
 func TestNOTIFGC005_RedactsGoogleChatURLs(t *testing.T) {
 	for _, raw := range []string{
-		`Post "https://chat.googleapis.com/v1/spaces/X/messages?key=K&token=T": dial tcp: lookup failed`,
-		`dial https://chat.googleapis.com/v1/spaces/X/messages?key=K&token=T failed (twice: chat.googleapis.com/v1/spaces/X?key=K)`,
+		`Post "https://chat.googleapis.com/v1/spaces/X/messages?key=KEYX01&token=TOKX01": dial tcp: lookup failed`,
+		`dial https://chat.googleapis.com/v1/spaces/X/messages?key=KEYX01&token=TOKX01 failed (twice: chat.googleapis.com/v1/spaces/X?key=KEYX01)`,
 	} {
 		msg := redactError(errors.New(raw), "").Error()
 		require.NotContains(t, msg, "spaces/X")
-		require.NotContains(t, msg, "K")
-		require.NotContains(t, msg, "T&")
+		require.NotContains(t, msg, "KEYX01")
+		require.NotContains(t, msg, "TOKX01")
 		require.NotContains(t, msg, "token=")
 		require.Contains(t, msg, "chat.googleapis.com/[redacted]")
 	}

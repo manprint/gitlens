@@ -7,16 +7,16 @@ budgets and indicator matrix are in
 
 ## Modules
 
-| Module | Purpose |
-|--------|---------|
-| `guard.ts` | flags, compose project and verified-backup checks; integer/identifier SQL builders |
-| `stack.ts` | `run()` (argument arrays only), `stackStatus`, `restart/stop/start/down/up/rebuild`, `waitReady` |
-| `pg.ts` | ground truth and stimulus on the monitored PostgreSQL through `docker exec … psql`; finalizers `registerCleanup`/`runCleanups` |
-| `odoo.ts` | Odoo JSON-RPC stimulus (writes only QA-category partners and their draft orders) |
-| `api.ts` | pglens API reads with the bootstrap token |
-| `observe.ts` | UI readers and `consoleGuard` |
-| `budget.ts` | stimulus → UI response budgets and `qaTimeout()` |
-| `runid.ts` | `qa-<yyyymmddhhmmss>-<4hex>` run identifiers |
+| Module       | Purpose                                                                                                                        |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `guard.ts`   | flags, compose project and verified-backup checks; integer/identifier SQL builders                                             |
+| `stack.ts`   | `run()` (argument arrays only), `stackStatus`, `restart/stop/start/down/up/rebuild`, `waitReady`                               |
+| `pg.ts`      | ground truth and stimulus on the monitored PostgreSQL through `docker exec … psql`; finalizers `registerCleanup`/`runCleanups` |
+| `odoo.ts`    | Odoo JSON-RPC stimulus (writes only QA-category partners and their draft orders)                                               |
+| `api.ts`     | pglens API reads with the bootstrap token                                                                                      |
+| `observe.ts` | UI readers and `consoleGuard`                                                                                                  |
+| `budget.ts`  | stimulus → UI response budgets and `qaTimeout()`                                                                               |
+| `runid.ts`   | `qa-<yyyymmddhhmmss>-<4hex>` run identifiers                                                                                   |
 
 ## Running
 
@@ -42,7 +42,9 @@ Projects: `chromium` (legacy `smoke`/`ui_acceptance` specs only, driven by
   `PGLENS_QA_ALLOW_LIFECYCLE=1`, the compose project `pglens-odoo` and a backup in
   `/home/agent/odoo-backups/` whose `VERIFIED` file (from `verify_backup.sh`) is
   younger than 24 h and matches its `SHA256SUMS`. `odoo-db` is never stopped by
-  `down()`; volumes are never removed.
+  `down()`; volumes are never removed. `up()` starts only the lifecycle services with
+  `--no-deps`, so `odoo-db` is never recreated; `upAll()` (`--no-recreate`) is
+  reserved for LIFE-DOWN-UP-FULL and the HA drills.
 - Stimulus objects live in schema `qa_tmp` and in sessions named `qa-…`; the
   finalizers remove them even after a failure, and `QA-CLEAN-001` (last test of
   the harness project) proves nothing is left.

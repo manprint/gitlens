@@ -2,7 +2,13 @@ import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { assertLifecycleAllowed, COMPOSE_PROJECT, GuardError, STACK_DIR } from './guard'
+import {
+  assertComposeProject,
+  assertLifecycleAllowed,
+  COMPOSE_PROJECT,
+  GuardError,
+  STACK_DIR,
+} from './guard'
 
 export interface RunResult {
   stdout: string
@@ -72,11 +78,17 @@ export interface ServiceStatus {
 
 export async function stackStatus(): Promise<ServiceStatus[]> {
   const { stdout } = await run('docker', [...composeArgs(), 'ps', '--all', '--format', 'json'])
-  return stdout
+  const rows = stdout
     .split('\n')
     .filter((line) => line.trim() !== '')
-    .map((line) => JSON.parse(line) as { Service: string; State: string; Health?: string })
-    .map((row) => ({ service: row.Service, state: row.State, health: row.Health ?? '' }))
+    .map(
+      (line) =>
+        JSON.parse(line) as { Service: string; State: string; Health?: string; Project?: string },
+    )
+  for (const row of rows) {
+    if (row.Project !== undefined) assertComposeProject(row.Project)
+  }
+  return rows.map((row) => ({ service: row.Service, state: row.State, health: row.Health ?? '' }))
 }
 
 async function compose(verb: string, services: readonly string[]): Promise<void> {
@@ -100,9 +112,26 @@ export async function down(): Promise<void> {
   )
 }
 
+/** Arguments of `up()`: only the lifecycle services, never their dependencies (odoo-db). */
+export function upArgs(): string[] {
+  return [...composeArgs(), 'up', '-d', '--no-deps', ...LIFECYCLE_SERVICES]
+}
+
+/** Starts the non-database services again; odoo-db is never recreated. */
 export async function up(): Promise<void> {
   await assertLifecycleAllowed()
-  await timed('up', () => run('docker', [...composeArgs(), 'up', '-d'], { timeoutMs: 600_000 }))
+  await timed('up', () => run('docker', upArgs(), { timeoutMs: 600_000 }))
+}
+
+/**
+ * `compose up -d` over every service, odoo-db included. Only LIFE-DOWN-UP-FULL
+ * and the 7.x HA drills may call it (test-strategy.md §2).
+ */
+export async function upAll(): Promise<void> {
+  await assertLifecycleAllowed()
+  await timed('up (all services)', () =>
+    run('docker', [...composeArgs(), 'up', '-d', '--no-recreate'], { timeoutMs: 600_000 }),
+  )
 }
 
 /** Rebuilds the local :dev images and recreates pglens-server/pglens-agent (deploy.sh). */

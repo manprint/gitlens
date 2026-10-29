@@ -65,7 +65,9 @@ export function consoleGuard(page: Page, allowed: AllowedFailure[] = []) {
     const location = message.location().url
     if (
       message.text().includes('Failed to load resource') &&
-      allowed.some((rule) => rule.url.test(location))
+      allowed.some(
+        (rule) => rule.url.test(location) && message.text().includes(`status of ${rule.status}`),
+      )
     ) {
       return
     }

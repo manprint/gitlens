@@ -39,7 +39,7 @@ export interface VerifiedBackup {
  * records a creation time younger than 24 h and the current sha256 of SHA256SUMS.
  */
 export async function findVerifiedBackup(
-  backupDir: string = process.env.PGLENS_QA_BACKUP_DIR ?? DEFAULT_BACKUP_DIR,
+  backupDir: string = DEFAULT_BACKUP_DIR,
   now: Date = new Date(),
 ): Promise<VerifiedBackup | null> {
   let entries: string[]
@@ -69,25 +69,30 @@ export async function findVerifiedBackup(
   return best
 }
 
-/** Lifecycle actions need the flag, the expected compose project and a fresh verified backup. */
+/**
+ * Lifecycle actions need the flag, the expected compose project and a fresh
+ * verified backup. `backupDir` is a parameter for the self-tests only; the
+ * environment cannot redirect it.
+ */
 export async function assertLifecycleAllowed(
   env: Env = process.env,
-  project: string = env.PGLENS_QA_COMPOSE_PROJECT ?? COMPOSE_PROJECT,
+  project: string = COMPOSE_PROJECT,
+  backupDir: string = DEFAULT_BACKUP_DIR,
 ): Promise<VerifiedBackup> {
   if (env.PGLENS_QA_ALLOW_LIFECYCLE !== '1') {
     throw new GuardError('lifecycle action refused: set PGLENS_QA_ALLOW_LIFECYCLE=1')
   }
   assertComposeProject(project)
-  const backup = await findVerifiedBackup(env.PGLENS_QA_BACKUP_DIR ?? DEFAULT_BACKUP_DIR)
+  const backup = await findVerifiedBackup(backupDir)
   if (!backup) {
     throw new GuardError('lifecycle action refused: no VERIFIED backup younger than 24 h')
   }
   return backup
 }
 
-/** An integer SQL literal; anything that is not a safe integer is refused. */
+/** A non-negative integer SQL literal; anything else is refused. */
 export function sqlInt(value: unknown): string {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
     throw new GuardError(`not an integer SQL parameter: ${String(value)}`)
   }
   return String(value)

@@ -12,6 +12,7 @@ import { run } from './stack'
 const container = () => process.env.PGLENS_QA_DB_CONTAINER ?? 'pglens-odoo-odoo-db-1'
 const database = () => process.env.PGLENS_QA_DB ?? 'odoo'
 const PSQL = ['psql', '-U', 'odoo', '-X', '-A', '-t', '-q', '-v', 'ON_ERROR_STOP=1']
+const QUERY_TIMEOUT_MS = 600_000
 
 export const QA_SCHEMA = 'qa_tmp'
 
@@ -23,8 +24,20 @@ export async function query(
 ): Promise<string> {
   const { stdout } = await run(
     'docker',
-    ['exec', '-i', '-e', `PGAPPNAME=${applicationName}`, container(), ...PSQL, '-d', dbname],
-    { input: sql, timeoutMs: 600_000 },
+    [
+      'exec',
+      '-i',
+      '-e',
+      `PGAPPNAME=${applicationName}`,
+      // The client timeout only kills docker exec; the server must stop the statement too.
+      '-e',
+      `PGOPTIONS=-c statement_timeout=${QUERY_TIMEOUT_MS}`,
+      container(),
+      ...PSQL,
+      '-d',
+      dbname,
+    ],
+    { input: sql, timeoutMs: QUERY_TIMEOUT_MS + 5_000 },
   )
   return stdout.trim()
 }
@@ -55,7 +68,7 @@ export async function runCleanups(): Promise<void> {
   }
   await query(
     `SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity
-       WHERE application_name LIKE 'qa-%' AND application_name <> 'qa-harness' AND pid <> pg_backend_pid();
+       WHERE application_name LIKE 'qa-%' AND pid <> pg_backend_pid();
      DROP SCHEMA IF EXISTS ${QA_SCHEMA} CASCADE;`,
   )
   if (errors.length > 0) throw new AggregateError(errors, 'qa cleanup failed')
@@ -79,6 +92,8 @@ function holdSession(applicationName: string, sql: string): ChildProcess {
     ['exec', '-i', '-e', `PGAPPNAME=${applicationName}`, container(), ...PSQL, '-d', database()],
     { stdio: ['pipe', 'ignore', 'ignore'] },
   )
+  child.on('error', (error) => console.log(`[qa/pg] session ${applicationName}: ${error.message}`))
+  child.stdin?.on('error', () => undefined)
   child.stdin?.write(sql)
   return child
 }
@@ -118,9 +133,10 @@ export async function openSessions(
   const count = Number(sqlInt(n))
   const name = safeAppName(options.applicationName)
   const body = options.idleInTransaction ? 'BEGIN; SELECT 1;\n' : 'SELECT 1;\n'
-  const children = Array.from({ length: count }, () => holdSession(name, body))
+  const children: ChildProcess[] = []
   const close = () => endSessions(children, name)
   registerCleanup(close)
+  for (let index = 0; index < count; index += 1) children.push(holdSession(name, body))
   await waitFor(
     async () => (await sessionCount(name)) >= count,
     30_000,
@@ -145,7 +161,10 @@ export async function lockPair(
      INSERT INTO ${relation}(id) VALUES (${row}) ON CONFLICT DO NOTHING;`,
   )
   const lock = `BEGIN; SELECT id FROM ${relation} WHERE id = ${row} FOR UPDATE;\n`
-  const holder = holdSession(name, lock)
+  const children: ChildProcess[] = []
+  const release = () => endSessions(children, name)
+  registerCleanup(release)
+  children.push(holdSession(name, lock))
   await waitFor(
     async () =>
       (await queryInt(
@@ -154,7 +173,7 @@ export async function lockPair(
     30_000,
     'lock holder',
   )
-  const waiter = holdSession(name, lock)
+  children.push(holdSession(name, lock))
   await waitFor(
     async () =>
       (await queryInt(
@@ -163,8 +182,6 @@ export async function lockPair(
     30_000,
     'blocked waiter',
   )
-  const release = () => endSessions([holder, waiter], name)
-  registerCleanup(release)
   return { release }
 }
 

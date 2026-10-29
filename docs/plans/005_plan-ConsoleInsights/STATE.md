@@ -88,14 +88,14 @@ checkpoint. Capture/open and restore/close are each one STATE.md update.
 - Active scope: plan (whole `005_plan-ConsoleInsights`, no selector)
 - Scope result: RUNNING
 - Type: sub-phase
-- ID / attempt: P0 / 1
-- Status: OPEN (phase closure: review of 0.1–0.4 + 0.4 guard rails by an Opus review agent)
+- ID / attempt: 13.1 / 1
+- Status: OPEN (P0 closed: unit:P0:1)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-opus-5-5; supervisor: Opus review agent (agent-1); exploration/mechanical: agent-3:claude-haiku-5-5
-- File / unit heading: phase_01.md → phase closure P0
+- File / unit heading: phase_14.md → 13.1
 - Current step: S0
-- Next action: P0 Opus review; then 13.1.
-- Next eligible plan unit: P0, then 13.1 (phase_14.md)
+- Next action: 13.1 S1 (scheduler first run).
+- Next eligible plan unit: 13.1 (phase_14.md), then 1.1
 - Unit base: `5929be2` (no unit open); branch: `feat/index-analysis` (never switch or create branches)
 - Repo state: dirty with pre-existing changes (§5) + untracked plan folder; nothing of the plan implemented yet.
 
@@ -159,6 +159,7 @@ Required supervisor reviews cannot be silently replaced by weaker self-review.
 |------|--------------|---------------|-------|---------|-----------------|--------|
 | plan | authoring | 1 | agent-2:claude-sonnet-5-5 | `docs/plans/005_plan-ConsoleInsights/*` | R-PLAN-1..11 | uncommitted (committed at 0.2 S1b) |
 | plan + baseline | d7647d0, ce13a72 | 1 | agent-2:claude-opus-5-5 | plan folder; pre-existing §5 paths (without `dist/index.html`, `.claude/`) | G-SECRETS pass before each | `d7647d0` (`PEV-Unit: plan`), `ce13a72` (`PEV-Unit: baseline`) |
+| phase closure | P0 / 1 | 1 | agent-2:claude-opus-5-5 | P0 review fixes: `web/e2e/qa/{stack.ts (upArgs/up --no-deps, upAll --no-recreate, compose-project label check),guard.ts (backup dir only as a parameter, compose project not from env, sqlInt >= 0),pg.ts (cleanup registered before each spawn, child 'error' listener, PGOPTIONS statement_timeout, cleanup by pid <> pg_backend_pid()),observe.ts (whitelist also matches the status),harness.spec.ts,README.md}`, `internal/alert/notify/googlechat_test.go` (NOTIF-GC-005 distinctive key/token); stack dir: `deploy.sh` (HA override when present), `backup.sh` (MANIFEST in SHA256SUMS); backup 02-loaded SHA256SUMS + MANIFEST, re-verified | R-P0-1; §7 P0 rows | unit:P0:1 |
 | sub-phase | 0.4 / 1 | 1 | agent-2:claude-opus-5-5 | `web/playwright.config.ts` (projects `chromium` testMatch, `harness`, `desktop-maximized`, `laptop`, `tablet`, `phone`; video retain-on-failure), `web/e2e/visual_helpers.ts` (1920 width, `shootMaximized`), NEW `web/e2e/qa/{guard,stack,pg,odoo,api,observe,budget,runid}.ts`, `harness.spec.ts`, `harness-browser.spec.ts`, `README.md` | §7 0.4 rows; guard rails reviewed at P0 | unit:0.4:1 |
 | sub-phase | 0.3 / 1 | 1 | agent-2:claude-opus-5-5 | `internal/alert/notify/{googlechat.go,googlechat_test.go,http.go}`, `internal/server/{config.go,config_test.go}`, `cmd/pglens-server/{main.go,channels.go,channels_test.go}`, `internal/alert/engine_integration_test.go`, `deploy/docker-compose.yml`, `README.md`, `QUICK_START.md`, `web/src/features/alerts/{DeliverySection.tsx,DeliverySection.test.tsx,AlertsPage.test.tsx}` | §7 0.3 rows; review at P0 | unit:0.3:1 |
 | sub-phase | 0.2 / 1 | 1 | agent-2:claude-opus-5-5 | `web/playwright.config.ts` (project `desktop-fullhd`), NEW `web/e2e/visual_helpers.ts`, `web/e2e/console_visual.spec.ts`; stack T1 grants | G-BASE, VIS-000, G-WEB-STATIC pass | unit:0.2:1 |
@@ -189,11 +190,11 @@ Unit-owned paths are listed in each phase file's sub-phase `Files` field and rec
 
 ## 6. In-flight checkpoint
 
-P0 / 1 OPEN.
-Last durable step: 0.4 closed (unit:0.4:1).
+13.1 / 1 OPEN.
+Last durable step: P0 closed (unit:P0:1).
 Actual files/diff: none.
 Pending edits: 13.1 closure must verify the `table_columns` fact (`select count(*) from object_facts where kind='table_columns'`, `n_distinct` present).
-Next step: P0 review.
+Next step: 13.1 S1.
 Last check: n/a.
 Running resources: stack `pglens-odoo` up (deployed pglens images are the phase-1 build); no background processes of this plan.
 Stop reason / supervisor request: supervisor coherence review requested by the user ("fai sempre una review con advisor opus dopo le modifiche del piano; non iniziare lo sviluppo se non è tutto perfettamente coerente").
@@ -203,6 +204,10 @@ Research checkpoint: R3 pending (7.0), R4 pending (0.3 S6).
 
 | Gate/test | Command | Result | Test count/named evidence | Tested revision/diff | When |
 |-----------|---------|--------|--------------------------|---------------------|------|
+| P0 harness after review fixes | `pnpm exec playwright test --project=harness`; `--project=desktop-fullhd e2e/qa/harness-browser.spec.ts` | pass | 14 passed; 2 passed | P0 diff | 2026-10-29 |
+| P0 G-WEB-STATIC | `make web-typecheck web-lint` | pass | exit 0 | P0 diff | 2026-10-29 |
+| P0 notify | `go test ./internal/alert/notify/` | pass | ok (NOTIF-GC-001..005) | P0 diff | 2026-10-29 |
+| P0 backup re-verify | `verify_backup.sh 02-loaded-20261029-165510` after adding MANIFEST to SHA256SUMS | pass | ENV-001/002/003 ok | stack dir | 2026-10-29 |
 | ENV-S1 live counts (0.1 S1) | `psql` counts on `odoo` | pass | res_partner 30408, product_template 3011, sale_order 4000, crm_lead 8000, mail_message 49364, modules installed 187 | live stack | 2026-10-29 15:55 UTC |
 | ENV-001/002/003 | `verify_backup.sh /home/agent/odoo-backups/02-loaded-20261029-165510` | pass | `ENV-001 ok`, `ENV-002 ok`, `ENV-003 ok`; VERIFIED `2026-10-29T15:55:10Z` / `415dfb8c…`; SHA256SUMS line 1 `cd2806d1…  odoo.dump`; run ≈ 9 s | backup 02-loaded | 2026-10-29 |
 | ENV-001/002 old manifest | `verify_backup.sh …/01-modules-installed-20261029-112930` | pass | `ENV-002 n/a (… res_partner=8)`, VERIFIED written (created `2026-10-29T10:29:32Z`) | backup 01 | 2026-10-29 |
@@ -238,6 +243,7 @@ Results: pass, fail, blocked, not-run, not-applicable-yet. Only pass satisfies a
 | R-PLAN-8 | Opus review agent (read-only, fresh) | plan revision 1 after the R-PLAN-7 fixes | same | NOT-READY: 0 blockers, 4 majors (1.5 claim "no assertion changed" false: `renderAsh` pin changes two existing expectations; 15.3 cluster tabs left `EventTimeline` without a tab and broke SYS-UI-001/007 and `ClusterPage.test.tsx`; 13.3/14.2 banner mount point undefined (no instance layout route) and MSW handlers; `test.setTimeout` rule did not cover `console_visual.spec.ts` live specs VIS-016/COV-E2E-001), 2 minors (tab/view defaults must never be written to the URL; UI-ASH gate family mapped to G-GO-FOCUS); all applied (D12 URL-default rule, `AppShell` banner mount, `clusterSections.ts` + `events` tab, `liveTimeout()` helper) |
 | R-PLAN-9 | Opus review agent (read-only, fresh) | plan revision 1 after the R-PLAN-8 fixes | same | NOT-READY: 0 blockers, 6 majors (VIS-016/COV-E2E-001 `liveTimeout` not stated in the phase files; sweep tests (FHD-*, VIS-CAP, QA-TOUR, SET-E2E, HA-*, ADV-E2E) without timeouts and ADV-E2E needing a 15-min advisor cadence; QA timeout formula failing sequential waits (RDY-E2E, SORIGIN-E2E); 14.2 unlisted `render.test.tsx` break and non-existent shared FleetPage setup; 9.2 InventoryTables vs UI-SET-005; 15.3 scope vs Done), 8 minors (wrong test name for the 1.5 `?range=1h` expectation, HA-STATIC-003 unit, Cluster identity placement, VISTMO unit, LIVE-HOST gate, six weaker Preconditions, G-UI-LEGACY at P13/P14, VIS-020 field); all applied (`liveTimeout` loop/sequence rule + `serviceRestart` 120 s, `PGLENS_ADVISOR_INTERVAL=60s`, `pendingUnit` inventory entries) |
 | R-PLAN-10 | Opus review agent (read-only, fresh) | plan revision 1 after the R-PLAN-9 fixes | same | NOT-READY: 1 blocker (13.1 assumed first run = jitter only, but `runEntry` scrapes only on the first ticker tick, so first run = jitter + interval: FIRSTRUN-006, INT-FIRSTRUN-001, readiness/coverage budgets could never pass), 5 majors (9.1/9.3 unlisted existing-test breaks in `page-primitives.test.tsx`, `DeadRowsPanel.test.tsx`, `IndexAnalysisPage.test.tsx` and wrong test-file name; `pendingUnit` not implementable or closed; 6.4 IND/LIFE tests without timeouts and no `rebuild` budget; IND-DB/IND-FIND/IND-SUGG budgets unreachable with 15-min/hourly checks; many live specs without declared timeouts), 5 minors (findings budget text, drill 4 restarts, Databases-by-instance filter, `INSTANCE_SECTIONS` export, `data-table-rows` testid); all applied (`tryScrape` immediate post-jitter scrape + FIRSTRUN-008, `BUDGET.rebuild`, agent restart in IND-DB/FIND/SUGG, `FHD-ROUTES-004`) |
+| R-P0-1 | Opus review agent (read-only, fresh) | 0.1–0.4 diffs + stack dir | guard rails, secret handling, cleanup, compose safety | CHANGES-REQUIRED: 0 blockers, 2 majors (`up()` could recreate odoo-db; `lockPair`/`openSessions` leaked children on failure, no spawn `error` listener), minors (env-redirectable backup dir, compose label, cleanup by name, server statement_timeout, sqlInt negatives, whitelist breadth, NOTIF-GC-005 weak oracle, QA-HARNESS-015 `exec(`/`-c`, HA override path, MANIFEST hash); all applied in unit:P0:1. Deferred: the teardown-asserting `consoleGuard` fixture lands with its first live consumer (1.x); budget findings/rebuild are measured at their first live use. Open to the user: the toxiproxy module download (§8) and confirmation that the two Google Chat messages (0.3 R4) arrived |
 | R-PLAN-11 | Opus review agent (read-only, fresh) | plan revision 1 after the R-PLAN-10 fixes | same | NOT-READY: 0 blockers, 6 majors (INT-FIRSTRUN-001 pointed at a harness that does not exist; FIRSTRUN-006 had no workable oracle and no way to inject `rnd`; `backupHistory` serves both freshness and monitored-history; D22b ignored the existing PG ≥ 16 `neverScannedSinceReset` path and could not be reproduced on PG ≤ 15; WINDOW-INT-001 needs an unproducible `stats_reset`; toolbar `Database` filters would collide with existing page controls), 7 minors; all applied in plan files. Per the user's instruction no further review (R-PLAN-12) was run; the applied fixes are unreviewed |
 
 Rule (user): after **every** modification of the plan the `advisor` reviews it again and development does not start (or resume a changed unit) until the plan is perfectly coherent.
@@ -304,7 +310,7 @@ Rule (user): after **every** modification of the plan the `advisor` reviews it a
 | 0.2 | phase_01.md | 0.1 | DONE | 1 | G-BASE, VIS-000, T1 (§7); `table_columns` check at P0 (§8) |
 | 0.3 | phase_01.md | 0.2 | DONE | 1 | NOTIF-GC, CONFIG-GC, INT-NOTIF-GC, DELIVERY-UI, live R4 (§7) |
 | 0.4 | phase_01.md | 0.2 | DONE | 1 | QA-HARNESS-001..015, QA-CLEAN-001 (§7); guard-rail review at P0 |
-| 13.1 | phase_14.md | 0 | TODO | 1 | — |
+| 13.1 | phase_14.md | 0 | IN_PROGRESS | 1 | — |
 | 1.1 | phase_02.md | 0 | TODO | 1 | — |
 | 1.2 | phase_02.md | 1.1 | TODO | 1 | — |
 | 1.3 | phase_02.md | 1.2, 13.1 | TODO | 1 | — |
@@ -371,7 +377,7 @@ README obligation per phase: see the Documentation table below; each phase file'
 ### Phases
 | ID | File | Closure unit | Status | Review / commit reference |
 |----|------|--------------|--------|---------------------------|
-| 0 | phase_01.md | P0 | IN_PROGRESS | — |
+| 0 | phase_01.md | P0 | DONE | R-P0-1 / unit:P0:1 |
 | 1 | phase_02.md | P1 | TODO | — |
 | 2 | phase_03.md | P2 | TODO | — |
 | 3 | phase_04.md | P3 | TODO | — |
@@ -609,7 +615,7 @@ Statuses: TODO, IN_PROGRESS, IN_REVIEW, DONE, SKIPPED, BLOCKED. SKIPPED retains 
 ### Documentation
 | Document/sections | Owning unit | Status | Evidence |
 |-------------------|-------------|--------|----------|
-| 0.1 (stack README), 0.3 (README/QUICK_START/compose notification tables); other repo READMEs checked unchanged. | P0 (phase_01.md) | TODO | — |
+| 0.1 (stack README), 0.3 (README/QUICK_START/compose notification tables); other repo READMEs checked unchanged. | P0 (phase_01.md) | DONE | 0.1 stack README, 0.3 commit 643c23f, `web/e2e/qa/README.md` (up/upAll) |
 | no user-facing README section changes (checked: charts are not documented there); `web/README.md` checked for a chart section — update only if it describes the removed markers. | P1 (phase_02.md) | TODO | — |
 | 2.1 (README host section, example yaml, QUICK_START, compose comment), 2.2 (stack README). | P2 (phase_03.md) | TODO | — |
 | `README.md` API list (`workload/series`) and any Overview description; `docs/api.md` regenerated. | P3 (phase_04.md) | TODO | — |
