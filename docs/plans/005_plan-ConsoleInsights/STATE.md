@@ -89,12 +89,12 @@ checkpoint. Capture/open and restore/close are each one STATE.md update.
 - Scope result: RUNNING
 - Type: sub-phase
 - ID / attempt: 11.1 / 1
-- Status: TODO (11.0 closed: unit:11.0:1)
+- Status: OPEN (11.0 closed: unit:11.0:1)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-opus-5-5; supervisor: Opus review agent (agent-1); exploration/mechanical: agent-3:claude-haiku-5-5
 - File / unit heading: phase_12.md → 11.1
 - Current step: —
-- Next action: open 11.1 (phase_12.md).
+- Next action: 11.1 S1 tab registry (restart from scratch: the interrupted implementer left no file changes).
 - Next eligible plan unit: 11.1 (phase_12.md)
 - Unit base: the unit:11.0:1 commit; branch: `feat/index-analysis` (never switch or create branches)
 - Repo state: phases 0–3, 9 and 10 closed; 15.1–15.3 and 17.1 committed; only `internal/webui/dist/index.html` (never staged) and `.claude/` stay uncommitted.
@@ -216,7 +216,8 @@ Unit-owned paths are listed in each phase file's sub-phase `Files` field and rec
 
 ## 6. In-flight checkpoint
 
-11.0 / 1 DONE (unit:11.0:1). Next: 11.1 (phase_12.md). A5 (R-11.0): windows stored by 11.4 have no effect until 13.2; ADV-E2E-001 checks read-back only.
+11.1 / 1 OPEN (base 59d6c83). Owned (phase_12.md 11.1 Files): `web/src/features/settings/SettingsPage.tsx` (+ tests), NEW `settingsTabs.ts`, `SettingsPage.tabs.test.tsx`, `web/src/lib/settingsInventory.test.ts`, `web/e2e/{fullhd_routes.ts,ui_acceptance.spec.ts,console_visual.spec.ts}`; placeholder panels for tabs owned by 11.2–11.5. 11.0 DONE (unit:11.0:1). A5 (R-11.0): windows stored by 11.4 have no effect until 13.2; ADV-E2E-001 checks read-back only.
+HANDOFF (2026-10-30, session stopped at the user's request): 11.1 opened, nothing implemented on disk (the Opus implementer was stopped before writing files; `git status` shows only STATE.md and the never-staged `internal/webui/dist/index.html`). Resume: re-launch an Opus implementer with the 11.1 brief (phase_12.md 11.1 + `settings-inventory.md` tab registry/T1 + STATE §8 rows 17.1/R-17.1 follow-up/10.2/11.0; Settings `?tab=` registry `settingsTabs.ts` like `clusterSections.ts`; Inventory tab split into one-table `?view=`s; placeholders with helper text for 11.2–11.5 tabs; `fullhd_routes.ts` one entry per tab and drop `pendingUnit: '11.1'`; SYS-UI-006 → `/settings?tab=audit`; SET-E2E-001 with `assertFits` per tab, `liveTimeout(0, 7 * 30_000)`; captions literal `captionId`, allowlist counts exact), then: gates (typecheck, eslint src e2e, prettier, full vitest with `--experimental.fsModuleCache=false`), `deploy.sh`, live `-g 'SET-E2E-001|FHD-FIT-001|SYS-UI'` (env: `set -a; . /home/agent/pglens-odoo-stack/.env; set +a; PGLENS_UI_BASE_URL=http://127.0.0.1:9090`), Opus review R-11.1, close + commit. After 11.1: 11.2 (with the R-11.0 follow-up: `useFreshness.ts`, `FreshnessBadge.tsx`, PREF-009), 11.3, 11.4, 11.5a (11.5b BLOCKED Q2), P11, then 13.2 → … per §11 execution order. Method that worked this session: Opus implementer agents per unit with a precise brief; coordinator verifies gates, deploys, runs live specs, launches a fresh read-only Opus reviewer (`model: opus`), applies findings, records §7/§8, G-SECRETS, commits with trailers. Estimated remaining work: ~40 units + ~12 phase closures (50–80 h).
 Last durable step: phase 10 DONE (P10: R-P10 APPROVED; gates §7 "P10 gates"); 10.2 (unit:10.2:1), 10.1 (unit:10.1:1), 17.1 (unit:17.1:1), 15.3 (unit:15.3:1).
 Actual files/diff: none beyond `internal/webui/dist/index.html` (never staged) and `.claude/`.
 Pending edits: none.
@@ -495,7 +496,7 @@ Rule (user): after **every** modification of the plan the `advisor` reviews it a
 | 10.1 | phase_11.md | 0 | DONE | 1 | CLNAME-001..005, INAME-001..003, CLNAME-INT-001/002, INAME-INT-001, MIG-NAME-001 (§7 10.1); R-10.1 |
 | 10.2 | phase_11.md | 10.1, 9.1, 17.1 | DONE | 1 | CLNAME-UI-001..016, CLNAME-E2E-001 (§7 10.2); R-10.2 |
 | 11.0 | phase_12.md | 9.1, 17.1 | DONE | 1 | `settings-inventory.md` (live Timescale policies 2026-10-30); R-11.0 |
-| 11.1 | phase_12.md | 11.0, 10.2 | TODO | 1 | — |
+| 11.1 | phase_12.md | 11.0, 10.2 | IN_PROGRESS | 1 | — |
 | 11.2 | phase_12.md | 11.1 | TODO | 1 | — |
 | 11.3 | phase_12.md | 11.1 | TODO | 1 | — |
 | 11.4 | phase_12.md | 11.1 | TODO | 1 | — |
