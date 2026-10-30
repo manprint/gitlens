@@ -6,6 +6,8 @@ import { promisify } from 'node:util'
 import type { Page } from '@playwright/test'
 
 import { expect, test } from './fixtures'
+import { measureRoutes } from './fullhd_fit'
+import { FULLHD_ROUTES } from './fullhd_routes'
 import {
   ARTIFACT_DIR,
   canvasNotBlank,
@@ -831,4 +833,18 @@ test('TBL-E2E-006 the most used tables have no serious accessibility violations'
       })
     }
   }
+})
+
+test('FHD-MEASURE-001 measures what every Full HD page spends its height on', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, FULLHD_ROUTES.length * 2 * 30_000))
+  // Measurement only: the fit is asserted by FHD-FIT-001 (15.3) once the density work lands.
+  const measures = await measureRoutes(page, api)
+  expect(measures.length).toBeGreaterThan(0)
+  await test.info().attach('fullhd-measure', {
+    body: JSON.stringify(measures, null, 2),
+    contentType: 'application/json',
+  })
 })

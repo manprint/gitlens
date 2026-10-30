@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react'
+import { useMemo, type CSSProperties, type ReactNode } from 'react'
 import {
   columnVisibilityFeature,
   flexRender,
@@ -21,6 +21,16 @@ import {
 import { useFilteredRows, type TableToolbarSpec } from '@/hooks/useFilteredRows'
 import { PAGE_SIZES, paginate, sortRows, type Comparable } from '@/lib/tableControls'
 
+import { cn } from '@/lib/utils'
+
+import {
+  FULLHD_CELL,
+  FULLHD_FIXED,
+  FULLHD_HEADER_CELL,
+  FULLHD_ROW,
+  FULLHD_TABLE,
+  FULLHD_TRUNCATE,
+} from './fullhdTable'
 import { SortButtons } from './SortButtons'
 import { NoRowsMatch, TableFooter } from './TableFooter'
 import { TableToolbar } from './TableToolbar'
@@ -28,6 +38,10 @@ import { TableToolbar } from './TableToolbar'
 const dataTableFeatures = tableFeatures({
   columnVisibilityFeature,
   rowSortingFeature,
+  // Types `meta` in the column definitions (width, truncate, title). TanStack reads
+  // the type of this slot only, so the assertion is what carries it.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+  columnMeta: {} as DataTableColumnMeta,
 })
 
 /** Search box and filters above the table (D12). */
@@ -49,6 +63,21 @@ export interface DataTableProps<TData extends RowData> {
   tableId?: string
   /** Order when the URL names none. */
   defaultSort?: { id: string; desc: boolean }
+}
+
+/**
+ * Per-column layout hints, read from `columnDef.meta` (D26): `width` sizes the
+ * column of the fixed table from 1600 px; `truncate` keeps a free-text cell on
+ * one line with the full text in its `title` (from `title`, else the value).
+ */
+export interface DataTableColumnMeta<TData = unknown> {
+  width?: string
+  truncate?: boolean
+  title?: (row: TData) => string
+}
+
+function columnMeta<TData>(columnDef: { meta?: unknown }): DataTableColumnMeta<TData> {
+  return columnDef.meta ?? {}
 }
 
 function renderPrimitiveValue(value: unknown): string {
@@ -113,6 +142,11 @@ function DataTableView<TData extends RowData>({
     activeFilterCount,
     filters: filterSpecs,
   } = useFilteredRows(data, state, toolbar)
+  // Fixed layout only when a column carries a width or truncation hint (D26).
+  const hinted = columns.some((column) => {
+    const meta = columnMeta(column)
+    return meta.width !== undefined || meta.truncate === true
+  })
 
   const sorting: SortingState =
     state.sort === null ? [] : [{ id: state.sort, desc: state.dir === 'desc' }]
@@ -154,7 +188,7 @@ function DataTableView<TData extends RowData>({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" data-table-card>
       <div className="flex flex-wrap items-end justify-between gap-3">
         {toolbar ? (
           // The toolbar takes the free width so its filters do not wrap beside Columns.
@@ -212,7 +246,7 @@ function DataTableView<TData extends RowData>({
               : 'bg-card overflow-x-auto rounded-lg border'
           }
         >
-          <table aria-label={ariaLabel} className="w-full border-collapse text-sm">
+          <table aria-label={ariaLabel} className={cn(FULLHD_TABLE, hinted && FULLHD_FIXED)}>
             <caption className="sr-only">{ariaLabel}</caption>
             <thead className="bg-muted/90 sticky top-0 z-[1] backdrop-blur">
               {table.getHeaderGroups().map((headerGroup) => (
@@ -224,6 +258,7 @@ function DataTableView<TData extends RowData>({
                       typeof column.columnDef.header === 'string'
                         ? column.columnDef.header
                         : column.id
+                    const width = columnMeta(column.columnDef).width
                     return (
                       <th
                         key={header.id}
@@ -231,7 +266,14 @@ function DataTableView<TData extends RowData>({
                         aria-sort={
                           sort === 'asc' ? 'ascending' : sort === 'desc' ? 'descending' : 'none'
                         }
-                        className="text-muted-foreground border-b px-3 py-2 text-left text-xs font-semibold tracking-wide whitespace-nowrap uppercase"
+                        className={cn(
+                          'text-muted-foreground border-b px-3 py-2 text-left text-xs font-semibold tracking-wide whitespace-nowrap uppercase',
+                          FULLHD_HEADER_CELL,
+                          width !== undefined && 'min-[1600px]:w-(--col-w)',
+                        )}
+                        style={
+                          width === undefined ? undefined : ({ '--col-w': width } as CSSProperties)
+                        }
                       >
                         {header.isPlaceholder ? null : column.getCanSort() ? (
                           <span className="inline-flex items-center gap-1">
@@ -267,14 +309,37 @@ function DataTableView<TData extends RowData>({
               {page.rows.map((row) => (
                 <tr
                   key={row.id}
-                  className="hover:bg-muted/40 border-b transition-colors last:border-b-0"
+                  className={cn(
+                    'hover:bg-muted/40 border-b transition-colors last:border-b-0',
+                    FULLHD_ROW,
+                  )}
                 >
-                  {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="px-3 py-2.5 align-top tabular-nums">
-                      {flexRender(cell.column.columnDef.cell, cell.getContext()) ??
-                        renderPrimitiveValue(cell.getValue())}
-                    </td>
-                  ))}
+                  {row.getVisibleCells().map((cell) => {
+                    const content =
+                      flexRender(cell.column.columnDef.cell, cell.getContext()) ??
+                      renderPrimitiveValue(cell.getValue())
+                    const meta = columnMeta(cell.column.columnDef)
+                    return (
+                      <td
+                        key={cell.id}
+                        className={cn('px-3 py-2.5 align-top tabular-nums', FULLHD_CELL)}
+                      >
+                        {meta.truncate ? (
+                          <span
+                            className={FULLHD_TRUNCATE}
+                            title={
+                              meta.title?.(row.original) ??
+                              (renderPrimitiveValue(cell.getValue()) || undefined)
+                            }
+                          >
+                            {content}
+                          </span>
+                        ) : (
+                          content
+                        )}
+                      </td>
+                    )
+                  })}
                 </tr>
               ))}
             </tbody>

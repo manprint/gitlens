@@ -113,7 +113,7 @@ const INDEX_TOOLBAR: TableToolbarSpec<IndexRow> = {
 
 type SortKey = 'name' | 'table' | 'bytes' | 'scanRate' | 'lastScan'
 
-const TABS = [
+export const TABS = [
   { value: 'indexes', label: 'Indexes' },
   { value: 'cleanup', label: 'Cleanup' },
   { value: 'dead-rows', label: 'Dead rows' },

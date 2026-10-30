@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
@@ -7,6 +7,14 @@ import type { TableDefaults } from '@/hooks/useTableState'
 import { PAGE_SIZES, type Accessor, type SortDirection } from '@/lib/tableControls'
 import { cn } from '@/lib/utils'
 
+import {
+  FULLHD_CELL,
+  FULLHD_FIXED,
+  FULLHD_HEADER_CELL,
+  FULLHD_ROW,
+  FULLHD_TABLE,
+  FULLHD_TRUNCATE,
+} from './fullhdTable'
 import { SortButtons } from './SortButtons'
 import { NoRowsMatch, TableFooter } from './TableFooter'
 import { TableToolbar } from './TableToolbar'
@@ -25,6 +33,19 @@ export interface SimpleColumn<T> {
   /** Render the cell as a row header (`th scope="row"`). */
   rowHeader?: boolean
   className?: string
+  /** Column width of the fixed table from 1600 px (D26), e.g. `12rem` or `30%`. */
+  width?: string
+  /** A free-text column: one line with an ellipsis from 1600 px, the full text in `title`. */
+  truncate?: (row: T) => string
+}
+
+function cellContent<T>(column: SimpleColumn<T>, row: T): ReactNode {
+  if (!column.truncate) return column.cell(row)
+  return (
+    <span className={FULLHD_TRUNCATE} title={column.truncate(row)}>
+      {column.cell(row)}
+    </span>
+  )
 }
 
 export interface SimpleTableProps<T> {
@@ -123,7 +144,7 @@ export function SimpleTable<T>({
 
   const columnCount = columns.length + (renderDetail ? 1 : 0)
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" data-table-card>
       {toolbar ? (
         <TableToolbar
           activeFilterCount={view.activeFilterCount}
@@ -141,6 +162,7 @@ export function SimpleTable<T>({
       ) : (
         // Focusable so a wide table scrolls sideways from the keyboard.
         <div
+          data-testid="data-table-scroll"
           tabIndex={0}
           className={cn(
             state.size > PAGE_SIZES[0]
@@ -149,7 +171,14 @@ export function SimpleTable<T>({
             className,
           )}
         >
-          <table aria-label={ariaLabel} className="w-full border-collapse text-sm">
+          <table
+            aria-label={ariaLabel}
+            className={cn(
+              FULLHD_TABLE,
+              columns.some((column) => column.width !== undefined || column.truncate) &&
+                FULLHD_FIXED,
+            )}
+          >
             <caption className="sr-only">{caption}</caption>
             <thead className="bg-muted/90 sticky top-0 z-[1] backdrop-blur">
               <tr>
@@ -171,7 +200,16 @@ export function SimpleTable<T>({
                             ? 'descending'
                             : 'none'
                       }
-                      className="text-muted-foreground border-b px-3 py-2 text-left text-xs font-semibold tracking-wide whitespace-nowrap uppercase"
+                      className={cn(
+                        'text-muted-foreground border-b px-3 py-2 text-left text-xs font-semibold tracking-wide whitespace-nowrap uppercase',
+                        FULLHD_HEADER_CELL,
+                        column.width !== undefined && 'min-[1600px]:w-(--col-w)',
+                      )}
+                      style={
+                        column.width === undefined
+                          ? undefined
+                          : ({ '--col-w': column.width } as CSSProperties)
+                      }
                     >
                       {column.sortValue ? (
                         <span className="inline-flex items-center gap-1">
@@ -217,7 +255,12 @@ export function SimpleTable<T>({
                 const open = openKeys.has(key)
                 return (
                   <Fragment key={key}>
-                    <tr className="hover:bg-muted/40 border-b transition-colors last:border-b-0">
+                    <tr
+                      className={cn(
+                        'hover:bg-muted/40 border-b transition-colors last:border-b-0',
+                        FULLHD_ROW,
+                      )}
+                    >
                       {renderDetail ? (
                         <td className="px-2 py-2 align-top">
                           <button
@@ -242,17 +285,22 @@ export function SimpleTable<T>({
                             scope="row"
                             className={cn(
                               'px-3 py-2.5 text-left align-top font-medium',
+                              FULLHD_CELL,
                               column.className,
                             )}
                           >
-                            {column.cell(row)}
+                            {cellContent(column, row)}
                           </th>
                         ) : (
                           <td
                             key={column.id}
-                            className={cn('px-3 py-2.5 align-top tabular-nums', column.className)}
+                            className={cn(
+                              'px-3 py-2.5 align-top tabular-nums',
+                              FULLHD_CELL,
+                              column.className,
+                            )}
                           >
-                            {column.cell(row)}
+                            {cellContent(column, row)}
                           </td>
                         ),
                       )}

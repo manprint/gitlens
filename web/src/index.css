@@ -335,3 +335,14 @@
     );
   background-size: 32px 32px;
 }
+
+/*
+ * Full HD density (D26): from 1600 px width a table row is one compact 28 px
+ * line, so a 20-row page, its toolbar and its pager fit 1920×950. Below 1600 px
+ * the token is unused and tables keep their responsive layout.
+ */
+@media (min-width: 1600px) {
+  :root {
+    --table-row-h: 28px;
+  }
+}
