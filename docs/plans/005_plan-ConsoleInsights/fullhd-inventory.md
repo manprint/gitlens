@@ -115,4 +115,5 @@ the HA stack (the cluster `events` tab still renders an unpaged card list).
 | `/events?section=alerts` | 1080 / 950 | 1920 | 36 | 36 | — | 33 | 29 (12) | — | 176 | fits |
 | `/alerts/rules` | 1080 / 950 | 1920 | 36 | — | 32 | 33 | 29 (20) | 32 | 176 | fits |
 | `/alerts/silences` | 1080 / 950 | 1920 | 36 | — | — | — | — (0) | — | — | fits; unproven at 20 rows (no data) |
-| `/settings` | 3789 / 3789 | 1920 | 36 | — | 32 | 33 | 28 (1) | — | 176 | pending 11.1 |
+| `/settings` (Inventory: instances) and `?view=tiers\|agents`, `?tab=preferences\|retention\|advisor\|notifications\|names\|audit`, `?tab=audit&view=server` | 1080 / 950 | 1920 | 36 | 36 | — | — | — | — | — | fits (SET-E2E-001, FHD-FIT-001, 11.1; tiers 903 px content); placeholders until 11.2–11.5 |
+| `/settings?view=databases` | 1080 / 950 | 1920 | 36 | 36 | — | — | — | — | — | fits with one instance; unproven with several instances (one table per instance; R-11.1 follow-up, re-measure at 7.x/15.4) |

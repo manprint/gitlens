@@ -7,9 +7,16 @@ import type { Schemas } from '@/api/types'
 import { DataTable, type DataTableToolbar } from '@/components/layout/DataTable'
 import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState } from '@/components/state'
+import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
+import { Tabs, TabsContent } from '@/components/ui/tabs'
 import { formatPostgresVersion, formatTimestamp } from '@/lib/format'
 import { clusterLabel, hasDisplayName, instanceAddress, instanceLabel } from '@/lib/names'
 import { matchesSearch, type SearchField } from '@/lib/tableControls'
+
+import { InstanceViewTabs } from '@/features/instance/InstancePanel'
+import { useInstanceView } from '@/features/instance/instanceViews'
+import { INVENTORY_VIEWS } from './settingsTabs'
 
 type Alert = Schemas['Alert']
 type AdvisorRule = Schemas['AdvisorRule']
@@ -55,6 +62,9 @@ export interface InventoryTablesProps {
   instances: readonly InstanceSummary[]
   rules: readonly AdvisorRule[]
 }
+
+/** The URL parameter of the Monitored instances search; the database views follow it. */
+const INSTANCE_SEARCH_PARAM = 'monitored-instances.q'
 
 /** The fields the Monitored instances search matches; "Databases by instance" follows it. */
 const MONITORED_INSTANCE_SEARCH: readonly SearchField<InstanceRow>[] = [
@@ -282,17 +292,33 @@ function TierSummary({ instances, rules }: Pick<InventoryTablesProps, 'instances
                   ]
 
           return (
-            <article key={tier} className="rounded-md border p-4">
-              <h3 className="font-medium">Tier {tier}</h3>
-              <p className="mt-1 text-sm">
-                <strong>Instances:</strong> {instanceCount}
-              </p>
-              <div className="mt-3 text-sm">
-                <strong>Advisor rules unlocked</strong>
+            // From 1600 px the cards are tighter and each label runs in before its list,
+            // which wraps inline, so the three cards fit one Full HD screen (D26).
+            <article
+              key={tier}
+              className="rounded-md border p-4 min-[1600px]:px-3 min-[1600px]:py-2.5"
+            >
+              <div className="min-[1600px]:flex min-[1600px]:items-baseline min-[1600px]:gap-3">
+                <h3 className="font-medium">Tier {tier}</h3>
+                <p className="mt-1 text-sm min-[1600px]:mt-0">
+                  <strong>Instances:</strong> {instanceCount}
+                </p>
+              </div>
+              <div className="mt-3 text-sm min-[1600px]:mt-1.5 min-[1600px]:text-xs min-[1600px]:leading-4">
+                <strong className="min-[1600px]:mr-2 min-[1600px]:whitespace-nowrap min-[1600px]:after:content-[':']">
+                  Advisor rules unlocked
+                </strong>
                 {unlockedRules.length > 0 ? (
-                  <ul className="mt-1 list-disc pl-5">
+                  <ul
+                    className="mt-1 list-disc pl-5 min-[1600px]:inline min-[1600px]:list-none min-[1600px]:pl-0"
+                    // `list-none` drops the list role in Safari; keep it explicit.
+                    role="list"
+                  >
                     {unlockedRules.map((rule) => (
-                      <li key={rule.id}>
+                      <li
+                        className="min-[1600px]:mr-2 min-[1600px]:inline-block min-[1600px]:whitespace-nowrap"
+                        key={rule.id}
+                      >
                         {rule.id} ({rule.min_tier})
                       </li>
                     ))}
@@ -301,11 +327,18 @@ function TierSummary({ instances, rules }: Pick<InventoryTablesProps, 'instances
                   <p className="text-muted-foreground mt-1">No rules returned by the catalogue.</p>
                 )}
               </div>
-              <div className="mt-3 text-sm">
-                <strong>Actions unlocked</strong>
-                <ul className="mt-1 list-disc pl-5">
+              <div className="mt-3 text-sm min-[1600px]:mt-1.5 min-[1600px]:text-xs min-[1600px]:leading-4">
+                <strong className="min-[1600px]:mr-2 min-[1600px]:whitespace-nowrap min-[1600px]:after:content-[':']">
+                  Actions unlocked
+                </strong>
+                <ul
+                  className="mt-1 list-disc pl-5 min-[1600px]:inline min-[1600px]:list-none min-[1600px]:pl-0"
+                  role="list"
+                >
                   {actions.map((action) => (
-                    <li key={action}>{action}</li>
+                    <li className="min-[1600px]:mr-2 min-[1600px]:inline" key={action}>
+                      {action}
+                    </li>
                   ))}
                 </ul>
               </div>
@@ -373,8 +406,8 @@ function AgentInventory({ instances, alerts }: Pick<InventoryTablesProps, 'insta
 }
 
 export function InventoryTables({ alerts, clusters, instances, rules }: InventoryTablesProps) {
-  const [searchParams] = useSearchParams()
-  const query = searchParams.get('monitored-instances.q') ?? ''
+  const [searchParams, setSearchParams] = useSearchParams()
+  const query = searchParams.get(INSTANCE_SEARCH_PARAM) ?? ''
   // Built once. Fresh column definitions on each render give the host cell a
   // new component type, so every render remounts it and refetches its metrics.
   const instanceTableColumns = useMemo(() => instanceColumns(), [])
@@ -404,50 +437,83 @@ export function InventoryTables({ alerts, clusters, instances, rules }: Inventor
     () => rows.filter((instance) => matchesSearch(instance, query, MONITORED_INSTANCE_SEARCH)),
     [query, rows],
   )
+  const [view = 'instances', showView] = useInstanceView(INVENTORY_VIEWS)
+
+  function clearInstanceSearch() {
+    setSearchParams(
+      (current) => {
+        const params = new URLSearchParams(current)
+        params.delete(INSTANCE_SEARCH_PARAM)
+        return params
+      },
+      { replace: true },
+    )
+  }
 
   return (
-    <div className="space-y-8 min-[1600px]:space-y-4">
-      <Section
-        title="Instances"
-        description="Every monitored PostgreSQL instance, its cluster relationship, permission tier, and telemetry availability."
-      >
-        <DataTable
-          ariaLabel="Monitored instances"
-          tableId="monitored-instances"
-          toolbar={INSTANCE_TOOLBAR}
-          columns={instanceTableColumns}
-          data={rows}
-          emptyState={
-            <EmptyState
-              description="Install and configure the pglens agent on a PostgreSQL host to add the first instance."
-              title="No monitored instances"
-            />
-          }
-          scope="instances"
-          total={instances.length}
-        />
-      </Section>
-
-      <TierSummary instances={instances} rules={rules} />
-      <AgentInventory alerts={alerts} instances={instances} />
-
-      <Section
-        title="Databases by instance"
-        description="Unmonitored databases appear first because their skip reason needs operator attention."
-      >
-        {rows.length > 0 && matching.length === 0 ? (
-          <EmptyState
-            description="Try a different address, cluster, role, tier, or instance ID."
-            title="No instances match this filter"
+    // One table per view, in the URL (11.1); Instances is the default.
+    <Tabs className="gap-4" onValueChange={showView} value={view}>
+      <InstanceViewTabs label="Inventory views" views={INVENTORY_VIEWS} />
+      <TabsContent value="instances">
+        <Section
+          title="Instances"
+          description="Every monitored PostgreSQL instance, its cluster relationship, permission tier, and telemetry availability."
+        >
+          <DataTable
+            ariaLabel="Monitored instances"
+            tableId="monitored-instances"
+            toolbar={INSTANCE_TOOLBAR}
+            columns={instanceTableColumns}
+            data={rows}
+            emptyState={
+              <EmptyState
+                description="Install and configure the pglens agent on a PostgreSQL host to add the first instance."
+                title="No monitored instances"
+              />
+            }
+            scope="instances"
+            total={instances.length}
           />
-        ) : (
-          <div className="space-y-6 min-[1600px]:space-y-4">
-            {matching.map((instance) => (
-              <DatabaseInventory instance={instance} key={instance.instance_id} />
-            ))}
-          </div>
-        )}
-      </Section>
-    </div>
+        </Section>
+      </TabsContent>
+
+      <TabsContent value="tiers">
+        <TierSummary instances={instances} rules={rules} />
+      </TabsContent>
+      <TabsContent value="agents">
+        <AgentInventory alerts={alerts} instances={instances} />
+      </TabsContent>
+
+      <TabsContent value="databases">
+        <Section
+          title="Databases by instance"
+          description="Unmonitored databases appear first because their skip reason needs operator attention."
+        >
+          {query !== '' ? (
+            // The search box is in the Instances view; say so here, where it still filters.
+            <Callout className="mb-4" role="status">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <span>Filtered by the Instances search “{query}”.</span>
+                <Button onClick={clearInstanceSearch} size="xs" type="button" variant="outline">
+                  Clear filter
+                </Button>
+              </div>
+            </Callout>
+          ) : null}
+          {rows.length > 0 && matching.length === 0 ? (
+            <EmptyState
+              description="Try a different address, cluster, role, tier, or instance ID."
+              title="No instances match this filter"
+            />
+          ) : (
+            <div className="space-y-6 min-[1600px]:space-y-4">
+              {matching.map((instance) => (
+                <DatabaseInventory instance={instance} key={instance.instance_id} />
+              ))}
+            </div>
+          )}
+        </Section>
+      </TabsContent>
+    </Tabs>
   )
 }

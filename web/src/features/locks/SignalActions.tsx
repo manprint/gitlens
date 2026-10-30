@@ -109,7 +109,7 @@ function commandStatus(handle: CommandHandle) {
         <>
           {' '}
           {/* The audit is a section of Settings; its API endpoint returns raw JSON. */}
-          <Link className="text-primary underline underline-offset-2" to="/settings">
+          <Link className="text-primary underline underline-offset-2" to="/settings?tab=audit">
             View command audit
           </Link>
         </>

@@ -5,6 +5,7 @@ import { CLUSTER_SECTIONS } from '@/features/cluster/clusterSections'
 import { TABS } from '@/features/indexes/IndexAnalysisPage'
 import { FINDINGS_VIEWS } from '@/features/findings/findingsViews'
 import { INDEX_VIEWS } from '@/features/indexes/indexViews'
+import { AUDIT_VIEWS, INVENTORY_VIEWS, SETTINGS_TABS } from '@/features/settings/settingsTabs'
 import {
   CATALOG_VIEW_IDS,
   INSTANCE_SECTIONS,
@@ -69,6 +70,17 @@ describe('Full HD route inventory', () => {
     }
     for (const { id } of INDEX_VIEWS.slice(1)) {
       expect(FULLHD_ROUTES.map((route) => route.path)).toContain(`/indexes?tab=indexes&view=${id}`)
+    }
+    for (const [index, { id }] of SETTINGS_TABS.entries()) {
+      expect(FULLHD_ROUTES.map((route) => route.path)).toContain(
+        index === 0 ? '/settings' : `/settings?tab=${id}`,
+      )
+    }
+    for (const { id } of INVENTORY_VIEWS.slice(1)) {
+      expect(FULLHD_ROUTES.map((route) => route.path)).toContain(`/settings?view=${id}`)
+    }
+    for (const { id } of AUDIT_VIEWS.slice(1)) {
+      expect(FULLHD_ROUTES.map((route) => route.path)).toContain(`/settings?tab=audit&view=${id}`)
     }
     for (const { value } of TABS) {
       expect(FULLHD_ROUTES.map((route) => route.path)).toContain(`/indexes?tab=${value}`)

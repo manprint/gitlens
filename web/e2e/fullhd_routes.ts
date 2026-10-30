@@ -17,6 +17,7 @@ import { ALERTS_SECTIONS, EVENTS_SECTIONS } from '../src/features/alerts/alertin
 import { CLUSTER_SECTIONS } from '../src/features/cluster/clusterSections'
 import { INDEX_VIEWS } from '../src/features/indexes/indexViews'
 import { FINDINGS_VIEWS } from '../src/features/findings/findingsViews'
+import { AUDIT_VIEWS, INVENTORY_VIEWS, SETTINGS_TABS } from '../src/features/settings/settingsTabs'
 import {
   CATALOG_VIEW_IDS,
   INSTANCE_SECTIONS,
@@ -115,7 +116,24 @@ export const FULLHD_ROUTES: readonly FullHdRoute[] = [
   })),
   { path: '/alerts/rules', name: 'Alert rules', kind: 'fit' },
   { path: '/alerts/silences', name: 'Alert silences', kind: 'fit' },
-  { path: '/settings', name: 'Settings and inventory', kind: 'fit', pendingUnit: '11.1' },
+  // One entry per Settings tab (11.1); the default tab has no `tab` in its URL.
+  ...SETTINGS_TABS.map(({ id, label }, index): FullHdRoute => ({
+    path: index === 0 ? '/settings' : `/settings?tab=${id}`,
+    name: `Settings: ${label}`,
+    kind: 'fit',
+  })),
+  // The other views of the Inventory tab, one table each; Instances is the default.
+  ...INVENTORY_VIEWS.slice(1).map(({ id, label }): FullHdRoute => ({
+    path: `/settings?view=${id}`,
+    name: `Settings: Inventory, ${label}`,
+    kind: 'fit',
+  })),
+  // The other view of the Audit & server tab; Command audit is the default.
+  ...AUDIT_VIEWS.slice(1).map(({ id, label }): FullHdRoute => ({
+    path: `/settings?tab=audit&view=${id}`,
+    name: `Settings: Audit & server, ${label}`,
+    kind: 'fit',
+  })),
   { path: '*', name: 'Not found', kind: 'exempt', reason: 'no data page' },
 ]
 

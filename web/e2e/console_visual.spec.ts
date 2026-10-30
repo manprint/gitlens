@@ -7,8 +7,14 @@ import type { Page } from '@playwright/test'
 
 import { expect, test } from './fixtures'
 import { assertFits, measureRoutes } from './fullhd_fit'
-import { FULLHD_ROUTES } from './fullhd_routes'
+import { FULLHD_ROUTES, routePathname } from './fullhd_routes'
 import { INSTANCE_SECTIONS } from '../src/features/instance/instanceSections'
+import {
+  AUDIT_VIEWS,
+  DEFAULT_SETTINGS_TAB,
+  INVENTORY_VIEWS,
+  SETTINGS_TABS,
+} from '../src/features/settings/settingsTabs'
 import { CAPTIONS } from '../src/lib/captions'
 import {
   ARTIFACT_DIR,
@@ -941,6 +947,61 @@ test('FHD-FIT-001 every fit route shows its table and pager on a Full HD screen'
   expect(failures, failures.join('\n')).toEqual([])
 })
 
+/** What each Settings tab shows once open: a table, or the heading of its panel. */
+const SETTINGS_TAB_CONTENT: Record<
+  (typeof SETTINGS_TABS)[number]['id'],
+  { role: 'table' | 'heading'; name: string }
+> = {
+  inventory: { role: 'table', name: 'Monitored instances' },
+  preferences: { role: 'heading', name: 'Preferences' },
+  retention: { role: 'heading', name: 'Data retention' },
+  advisor: { role: 'heading', name: 'Advisor rules' },
+  notifications: { role: 'heading', name: 'Notifications' },
+  names: { role: 'table', name: 'Cluster and instance names' },
+  audit: { role: 'heading', name: 'Command audit' },
+}
+
+test('SET-E2E-001 every Settings tab opens with its content and fits a Full HD screen', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, 7 * 30_000))
+  const browserErrors = collectConsoleErrors(page)
+  await page.setViewportSize({ width: 1920, height: 1080 })
+  await page.goto('/settings')
+  await expect(page.getByRole('heading', { level: 1, name: 'Settings and inventory' })).toBeVisible(
+    { timeout: 30_000 },
+  )
+  const tabs = page.getByRole('tablist', { name: 'Settings sections' })
+  for (const { id, label } of SETTINGS_TABS) {
+    await test.step(`open ${label}`, async () => {
+      const tab = tabs.getByRole('tab', { name: label, exact: true })
+      await tab.click()
+      await expect(tab).toHaveAttribute('aria-selected', 'true')
+      // The default tab is never written to the URL (D12).
+      expect(new URL(page.url()).searchParams.get('tab')).toBe(
+        id === DEFAULT_SETTINGS_TAB ? null : id,
+      )
+      const { role, name } = SETTINGS_TAB_CONTENT[id]
+      await expect(page.getByRole(role, { name, exact: true }).first()).toBeVisible({
+        timeout: 30_000,
+      })
+      await page.screenshot({ path: `${ARTIFACT_DIR}/set-e2e-001-${id}.png` })
+    })
+  }
+  // Every Settings entry of the Full HD inventory: the seven tabs and the Inventory and Audit views.
+  const routes = FULLHD_ROUTES.filter((route) => routePathname(route.path) === '/settings')
+  expect(routes.length).toBe(
+    SETTINGS_TABS.length + INVENTORY_VIEWS.length - 1 + AUDIT_VIEWS.length - 1,
+  )
+  for (const route of routes) {
+    await test.step(`fits ${route.path}`, async () => {
+      await assertFits(page, api, route)
+    })
+  }
+  browserErrors.assertClean()
+})
+
 /** Where the names spec keeps its screenshots (C-10). */
 const NAMES_ARTIFACT_DIR = '../test/e2e/_artifacts/ui/names'
 const NAMES_TABLE = 'Cluster and instance names'
@@ -985,7 +1046,7 @@ async function renameThroughSettings(
   value: string,
   shot?: string,
 ): Promise<void> {
-  await page.goto('/settings')
+  await page.goto('/settings?tab=names')
   const table = page.getByRole('table', { name: NAMES_TABLE })
   await expect(table).toBeVisible({ timeout: 30_000 })
   await page.getByRole('searchbox', { name: `Search ${NAMES_TABLE}` }).fill(clusterId)
@@ -1012,12 +1073,12 @@ async function renameThroughSettings(
 /**
  * The Names table at 1920×950 (§8, the first captioned DataTable): its toolbar
  * row stays one line (≤ 52 px) with the caption beside the controls, the
- * caption text wider than 0. `/settings` itself is pending 11.1, so only the
- * table card is measured here.
+ * caption text wider than 0. The fit of the whole Names tab is asserted by
+ * SET-E2E-001 (11.1).
  */
 async function assertNamesTableFits(page: Page): Promise<void> {
   await page.setViewportSize({ width: 1920, height: 950 })
-  await page.goto('/settings')
+  await page.goto('/settings?tab=names')
   await expect(page.getByRole('table', { name: NAMES_TABLE })).toBeVisible({ timeout: 30_000 })
   const card = page.locator('[data-table-card][data-caption-id="settings.names-table"]')
   await card.scrollIntoViewIfNeeded()
@@ -1045,12 +1106,6 @@ test('CLNAME-E2E-001 renamed clusters and instances show everywhere and clear ba
   const clusterId = cluster.cluster_id
   const address = `${instance.addr}:${instance.port}`
   const original = { cluster: cluster.name, instance: instance.display_name ?? null }
-  test.info().annotations.push({
-    type: 'UNVERIFIED',
-    description:
-      '/settings: page fit pending 11.1 (the Names tab); assertFits not called, the Names table card is measured',
-  })
-
   try {
     // A leftover name equal to the target would leave Save disabled (unchanged): clear it first.
     if (original.cluster === CLUSTER_NAME) {
@@ -1110,11 +1165,13 @@ test('CLNAME-E2E-001 renamed clusters and instances show everywhere and clear ba
     await expect(
       page.getByRole('table', { name: NAMES_TABLE }).getByText(INSTANCE_NAME, { exact: true }),
     ).toBeVisible({ timeout: 30_000 })
+    // The instance table is in the Inventory tab since 11.1.
+    await page.goto('/settings')
     await expect(
       page.getByRole('table', { name: 'Monitored instances' }).getByText(INSTANCE_NAME, {
         exact: true,
       }),
-    ).toBeVisible()
+    ).toBeVisible({ timeout: 30_000 })
     await page.screenshot({
       path: `${NAMES_ARTIFACT_DIR}/clname-e2e-001-settings-instance.png`,
       fullPage: true,

@@ -41,7 +41,8 @@ function SessionExpiry() {
 
 export function ServerInfo() {
   return (
-    <div className="grid gap-8 lg:grid-cols-2">
+    // From 1600 px the cards and the limit rows are tighter, so the view fits a Full HD screen (D26).
+    <div className="grid gap-8 min-[1600px]:gap-4 lg:grid-cols-2">
       <Section
         description="Build and session details reported by this pglens server."
         title="Server information"
@@ -65,10 +66,10 @@ export function ServerInfo() {
       </Section>
 
       <Section description={<DocumentationLink />} title="Product limits">
-        <ul className="space-y-3 text-sm">
+        <ul className="space-y-3 text-sm min-[1600px]:space-y-1.5">
           {limits.map(([label, detail]) => (
             <li
-              className="flex items-start justify-between gap-4 rounded-md border p-3"
+              className="flex items-start justify-between gap-4 rounded-md border p-3 min-[1600px]:py-2"
               key={label}
             >
               <span>
@@ -86,7 +87,7 @@ export function ServerInfo() {
         description="The current authentication boundary is deliberately small and shared."
         title="Authentication"
       >
-        <ul className="list-disc space-y-2 pl-5 text-sm">
+        <ul className="list-disc space-y-2 pl-5 text-sm min-[1600px]:space-y-1">
           <li>One shared password protects the browser session.</li>
           <li>No user accounts exist.</li>
           <li>No roles or per-user audit exist.</li>

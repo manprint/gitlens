@@ -551,7 +551,7 @@ test('SYS-UI-006: plan-only execution is audited without query text', async ({
     return auditEntry !== undefined
   })
   expect(auditEntry).toBeDefined()
-  await page.goto('/settings')
+  await page.goto('/settings?tab=audit')
   const auditTable = page.getByRole('table', { name: /Command audit for/i })
   await expect(auditTable).toBeVisible()
   await expect

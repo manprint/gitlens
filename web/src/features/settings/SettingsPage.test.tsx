@@ -65,6 +65,13 @@ async function settleFakeTimers() {
   })
 }
 
+/** Opens a view of the Inventory tab (11.1 split the tab into one-table views). */
+function openInventoryView(name: string) {
+  fireEvent.mouseDown(
+    within(screen.getByRole('tablist', { name: 'Inventory views' })).getByRole('tab', { name }),
+  )
+}
+
 interface RenderSettingsOptions {
   alerts?: Alert[]
   clusters?: Schemas['Cluster'][]
@@ -136,6 +143,7 @@ describe('SettingsPage', () => {
         },
       ),
       instances: [INSTANCE_SUMMARY, secondInstance],
+      route: '/?view=databases',
     })
     await settleInitialQueries()
 
@@ -146,6 +154,7 @@ describe('SettingsPage', () => {
       screen.getByRole('table', { name: 'Databases for standby.example.test:5432' }),
     )
     expect(within(secondTable).getByText('app')).toBeInTheDocument()
+    openInventoryView('Instances')
     expect(
       within(screen.getByRole('table', { name: 'Monitored instances' })).getAllByRole('row'),
     ).toHaveLength(3)
@@ -204,6 +213,7 @@ describe('SettingsPage', () => {
         { datname: 'app', monitored: true },
         { datname: 'legacy', monitored: false, skip_reason: 'extension unavailable' },
       ],
+      route: '/?view=databases',
     })
     await settleInitialQueries()
 
@@ -229,6 +239,7 @@ describe('SettingsPage', () => {
         },
       ],
       clusters: [],
+      route: '/?view=tiers',
     })
     await settleInitialQueries()
 
@@ -240,7 +251,7 @@ describe('SettingsPage', () => {
   })
 
   it('UI-SET-003 the tier summary lists what each tier unlocks', async () => {
-    renderSettings()
+    renderSettings({ route: '/?view=tiers' })
     await settleInitialQueries()
 
     expect(screen.getAllByText('connections (T0)')).toHaveLength(3)
@@ -253,7 +264,7 @@ describe('SettingsPage', () => {
   })
 
   it('UI-SET-036 the T1 card says the interface offers EXPLAIN ANALYZE only at T2', async () => {
-    renderSettings()
+    renderSettings({ route: '/?view=tiers' })
     await settleInitialQueries()
 
     expect(
@@ -271,6 +282,7 @@ describe('SettingsPage', () => {
         { ...INSTANCE_SUMMARY, instance_id: SECOND_INSTANCE_ID, addr: 'standby.example.test' },
       ],
       clusters: [],
+      route: '/?view=agents',
     })
     await settleInitialQueries()
 
@@ -352,6 +364,7 @@ describe('SettingsPage tables: pages, search, filters, sort', () => {
         monitored: index >= 3,
         skip_reason: index < 3 ? 'no CONNECT privilege' : null,
       })),
+      route: '/?view=databases',
     })
     await settleInitialQueries()
     const name = `Databases for ${INSTANCE_SUMMARY.addr}:${INSTANCE_SUMMARY.port}`
@@ -390,7 +403,9 @@ describe('SettingsPage tables: pages, search, filters, sort', () => {
     // A search with no match keeps the toolbar; the database sections say so.
     searchTable(instances, 'nothing-like-this')
     expect(screen.getByText('No rows match')).toBeInTheDocument()
+    openInventoryView('Databases by instance')
     expect(screen.getByText('No instances match this filter')).toBeInTheDocument()
+    openInventoryView('Instances')
     expect(screen.getByRole('searchbox', { name: 'Search Monitored instances' })).toBeVisible()
     expect(screen.getByRole('button', { name: 'Clear filters' })).toBeVisible()
     expect(screen.getByText(/\(filtered from 25\)/)).toBeInTheDocument()
@@ -419,6 +434,7 @@ describe('SettingsPage tables: pages, search, filters, sort', () => {
       })),
     })
     await settleInitialQueries()
+    openInventoryView('Agents')
     const agents = 'Derived agent inventory'
     expect(dataRows(agents)).toHaveLength(20)
     searchTable(agents, 'host-0')
