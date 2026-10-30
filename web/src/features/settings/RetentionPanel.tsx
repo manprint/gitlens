@@ -35,7 +35,7 @@ const RETENTION_HELP = {
   preview:
     'Preview counts the chunks and bytes this value would delete now. It changes nothing; Apply is enabled once the preview matches the value typed.',
   apply:
-    'Apply replaces the retention policy. A longer retention applies at once; a shorter one asks for confirmation. Deletion is not immediate: each policy runs once a day and drops whole chunks older than its retention.',
+    'Apply changes the retention of the policy, which keeps its daily schedule. A longer retention applies at once; a shorter one asks for confirmation. Deletion is not immediate: the policy drops whole chunks older than its retention at its next daily run, up to a day later.',
 } as const
 
 /** A preview, with the live retention it was computed against. */

@@ -348,29 +348,40 @@ targets, and the minimum permission tier. Muting requires a reason and expiry.
 
 Alerts shows firing and suppressed alerts, editable rules where permitted,
 silences with their preview, and the fleet-wide event timeline. Suppression
-does not resolve an alert; delivery remains configured separately for Slack or
-generic webhooks.
+does not resolve an alert; delivery to Slack, Google Chat or a generic webhook
+is configured in the server environment, and the Notifications tab of Settings
+shows its state and sends a test message.
 
 #### Settings
 
-Settings lists instances and databases, summarizes permission tiers and
-available actions, and exposes the command audit. The audit has one entry per
-event of a command — its request, its result (`ok`, `error` or `rejected`) or
-its expiry — with the arguments, the time and any detail. `requested_by` names
-the credential that asked (`api-token`, or `ui-session` with a short hash of
-the session) and the client address; it does not identify a person, since
-pglens has no user accounts.
+Settings has seven tabs, in this order. `?tab=` in the URL names the open tab
+(`inventory`, `preferences`, `retention`, `advisor`, `notifications`, `names`,
+`audit`); without it, or with an unknown value, Settings opens on Inventory.
 
-The Names panel gives a cluster a name and an instance a display name
-(`PATCH /api/v1/clusters/{id}` with `{"name": …}`, `PATCH
-/api/v1/instances/{id}` with `{"display_name": …}`). A name has 1–64
-characters, no control or invisible characters, and is unique without regard
-to case (a duplicate is refused with 409); an empty name restores the default
-labels (`Cluster <id>`, or `address:port` for an instance). The names then
-replace the identifiers wherever the console labels a cluster or an instance —
-fleet cards, page titles, breadcrumbs, server pickers, the findings filters,
-the alert and event tables and the topology graph — with the identifier or
-address in the tooltip, and they survive restarts and inventory refreshes.
+| Tab | Holds |
+|-----|-------|
+| Inventory | instances, permission tiers and available actions, agents, databases by instance (read-only) |
+| Preferences | theme, default time range, refresh interval and table page size of this browser |
+| Data retention | days of history kept per metrics family |
+| Advisor rules | rule on/off switches and the two observation windows |
+| Notifications | state of the Slack, generic webhook and Google Chat channels, and a test send |
+| Names | cluster names and instance display names |
+| Audit & server | the command audit and the server information (read-only) |
+
+The Preferences tab sets the console's theme (light, dark, or system, which
+follows the operating system; the theme button in the header changes the same
+preference), the default time range pages open with when the URL names none
+(1 hour, 6 hours, 24 hours or 7 days), the refresh interval, and the table page
+size (20, 50 or 100 rows) used when the URL sets none. The refresh interval is
+Automatic by default, which keeps each page's own interval; 15, 30 or 60
+seconds, or Off, applies only to the pages that refresh every 15 seconds or
+slower and moves their stale-data warning with it; Off stops their refresh and
+hides the warning. Locks, activity, metric charts, events and running commands
+keep their faster refresh. A range
+or page size in a link still wins over the preference. Preferences are stored
+in the browser's local storage (`pglens.preferences`), apply at once to every
+open page, and are not sent to the server: other browsers and other users keep
+their own. Reset to defaults restores all four.
 
 The Data retention tab shows how many days of history each metrics family
 keeps (`metrics`, `metrics_statements`, `metrics_ash`, `metrics_replication`,
@@ -384,9 +395,102 @@ Preview counts the chunks and bytes a shorter retention would drop; a
 shortening, or a policy for a family that has none, is applied only after
 the confirmation (`"confirm": true`), and the chunks are deleted by
 TimescaleDB at the next run of the policy, not at once: take a backup first.
-A lengthening deletes nothing. The 90-day purges of events, unseen query
-texts, resolved alerts (with their deliveries and expired silences) and
-resolved findings are fixed and are not part of this tab.
+A change keeps the policy's daily schedule, so the new value applies at its
+next daily run, at most a day later and sooner when that run is near: a run
+already in progress finishes with the old value, and a policy whose last run
+failed keeps its retry, minutes away. A policy given to a family that had none
+first runs one day after it is created.
+A lengthening deletes nothing. A retention policy set outside the console
+without a `drop_after` is shown and is not replaced. The 90-day purges of
+events, unseen query texts, resolved alerts (with their deliveries and expired
+silences) and resolved findings are fixed and are not part of this tab; see
+[docs/LIMITS.md](docs/LIMITS.md#14-history-is-deleted-by-retention-policies-and-fixed-purges).
+
+The Advisor rules tab lists every advisor rule with its category, severity,
+scope and minimum permission tier, and an Enabled switch per rule
+(`GET /api/v1/advisor/rules`, which reports `enabled` and `overridden` for each
+rule; `PUT /api/v1/advisor/rules/{id}/override` with `{"enabled": false}` or
+`{"enabled": true}`). Disabling a rule stores an override in the pglens
+database, shared by every console user. At the next evaluation the advisor
+skips the rule and resolves its open, degraded and muted findings, adding
+`"resolved_reason": "rule_disabled"` to their evidence; the resolved findings
+then follow the 90-day purge like any other. Enabling the rule deletes the
+override, and its findings reopen at the following evaluation if the condition
+still holds. The evaluation runs every `PGLENS_ADVISOR_INTERVAL` (15 minutes by
+default). Rule thresholds cannot be edited. The Observation windows view sets
+`window.unused_index` and `window.backup_history` (`GET` and
+`PUT /api/v1/settings/advisor-windows`, values in seconds, from 1 hour to 90
+days; `null` resets a window to its 7-day default). The windows are stored
+only: the advisor keeps using its 7-day windows until a later release reads the
+stored values, so a change does not alter any finding yet.
+
+The Notifications tab lists the three alert delivery channels — Slack,
+generic webhook and Google Chat — with whether each is configured, the host
+name of its webhook address, and the environment variable that sets it
+(`GET /api/v1/notification-channels`). The addresses are set only in the server
+environment (`PGLENS_ALERT_SLACK_WEBHOOK_URL`, `PGLENS_WEBHOOK_URL`,
+`PGLENS_GOOGLE_CHAT_WEBHOOK_URL`, the `_FILE` forms of the Slack and Google
+Chat variables, and the legacy `PGLENS_SLACK_WEBHOOK_URL[_FILE]`; see
+[Configuration](#configuration) and `deploy/server.example.env`) and are read
+at start, so a change needs a restart. The console cannot store an address; it
+never receives, shows or logs one, only its host. Send test
+(`POST /api/v1/notification-channels/{kind}/test`, `kind` being `slack`,
+`webhook` or `google_chat`) posts the message "pglens test notification"
+(rule `pglens.test`, severity `info`) through the same channel the alerts use
+and waits at most 10 seconds; a fast failure (a server error or an unreachable
+host) may be retried within them.
+The answer carries `delivered`, a `status` of `delivered`, `failed` or
+`timeout`, and on failure the `error` with the webhook address redacted; a
+failed delivery is still a 200. Nothing is recorded as a delivery, and the
+server log notes only the channel, the requester and the outcome, with the
+redacted error on failure. One test per
+channel runs at a time: a second request while one is in flight is refused with
+429. A channel that is not configured answers 409.
+
+The Names panel gives a cluster a name and an instance a display name
+(`PATCH /api/v1/clusters/{id}` with `{"name": …}`, `PATCH
+/api/v1/instances/{id}` with `{"display_name": …}`). A name has 1–64
+characters, no control or invisible characters, and is unique without regard
+to case (a duplicate is refused with 409); an empty name restores the default
+labels (`Cluster <id>`, or `address:port` for an instance). The names then
+replace the identifiers wherever the console labels a cluster or an instance —
+fleet cards, page titles, breadcrumbs, server pickers, the findings filters,
+the alert and event tables and the topology graph — with the identifier or
+address in the tooltip, and they survive restarts and inventory refreshes.
+
+The Audit & server tab has two views. Command audit has one entry per event
+of a command — its request, its result (`ok`, `error` or `rejected`) or its
+expiry — with the arguments, the time and any detail. `requested_by` names
+the credential that asked (`api-token`, or `ui-session` with a short hash of
+the session) and the client address; it does not identify a person, since
+pglens has no user accounts. Server info shows the interface build, the API
+contract, the session expiry and the product limits.
+
+Not configurable from the console, and why:
+
+- The 90-day purges of events, unseen query texts, alert history and resolved
+  findings, and the notification retries (3 attempts of 10 seconds, 45
+  seconds in all) are code constants, not settings. The compression delays
+  and chunk intervals are set by the schema migrations. Queued commands, the
+  command audit and captured query plans have no purge and are kept.
+- The UI password is a secret of the deployment; changing it from the console
+  would need a credential store and weaken it.
+- The agent bearer token is not rotated from the console: rotating it needs a
+  change on every agent.
+- Webhook addresses are secrets and are set only in the server environment
+  today; storing them from the console is a pending decision.
+- The other server environment variables and flags (`PGLENS_DSN`,
+  `PGLENS_LISTEN`, `PGLENS_UI_ENABLED`, `PGLENS_UI_SESSION_TTL`,
+  `PGLENS_UI_COOKIE_SECURE`, `PGLENS_ALERT_INTERVAL`,
+  `PGLENS_ADVISOR_INTERVAL`, `PGLENS_COMMAND_TTL`) are read once at start; a
+  change needs a restart.
+- `agent.yaml` (targets, checks and intervals, buffer, host metrics, commands)
+  stays on the agent: there is no channel from the server to configure an
+  agent, and the agent stays read-only.
+- Advisor thresholds and the advisor's fixed windows, including the base-backup
+  age limits: the advisor exposes none.
+- Alert rules, silences and finding mutes are edited on the Alerts and Advisor
+  pages, not in Settings.
 
 The selected time range is reflected in the URL, so a view can be shared as a
 link. Keyboard shortcuts are available for the main destinations and filters:
@@ -684,6 +788,9 @@ Delivery remains limited to Slack via `PGLENS_ALERT_SLACK_WEBHOOK_URL` or
 `PGLENS_GOOGLE_CHAT_WEBHOOK_URL` or `PGLENS_GOOGLE_CHAT_WEBHOOK_URL_FILE` (a
 text message per firing and resolved alert; webhook paths are redacted from
 errors and logs), and generic webhooks via `PGLENS_WEBHOOK_URL`.
+The addresses come only from these variables. Settings → Notifications shows
+which channels are configured, with the host of each address and never the
+address, and sends a test message through each one (see [Settings](#settings)).
 
 Run the HTTP API sign-in block once before these examples; reuse its
 `cookies.txt` for every protected request.
@@ -699,7 +806,7 @@ curl -s -b cookies.txt -X DELETE http://localhost:8080/api/v1/silences/<silence-
 
 An alert listing contains objects such as `{"alert_key":"agent_down/...","state":"firing","severity":"critical","cluster_id":"7381927364512345678","suppressed":false}`. The API returns cluster identifiers as strings and timestamps in RFC 3339 format.
 
-Alerting delivers only to Slack and generic webhooks. Email and PagerDuty are not supported.
+Alerting delivers only to Slack, Google Chat and generic webhooks. Email and PagerDuty are not supported.
 
 ## Advisor findings
 
@@ -1642,6 +1749,10 @@ POST   /api/v1/push
 GET    /api/v1/plans
 GET    /api/v1/settings/retention|settings/retention/preview
 PUT    /api/v1/settings/retention/{family}
+GET    /api/v1/settings/advisor-windows
+PUT    /api/v1/settings/advisor-windows
+GET    /api/v1/notification-channels
+POST   /api/v1/notification-channels/{kind}/test
 POST   /api/v1/instances/{id}/commands
 GET    /api/v1/commands/{id}
 GET    /api/v1/agents/{agent_id}/commands
@@ -1656,6 +1767,7 @@ GET    /api/v1/findings|findings/{finding-id}
 POST   /api/v1/findings/{finding-id}/mute
 DELETE /api/v1/findings/{finding-id}/mute
 GET    /api/v1/advisor/rules
+PUT    /api/v1/advisor/rules/{id}/override
 GET    /api/v1/session
 POST   /api/v1/session
 DELETE /api/v1/session
@@ -2042,7 +2154,7 @@ the server is rejected, so upgrade the server before upgrading agents.
 **Server and replication:**
 - PostgreSQL 15 to 19 only; 13 and 14 are not supported, and 19 is verified on its release candidate
 - Only streaming replication is supported; logical, Patroni, and Aurora topologies are not detected
-- Raw retention is 30 days by default (bloat estimates 90 days), settable per metrics family from 3 to 365 days in Settings > Data retention, with no rollups; compression after 48h (`buffer 6h < sample_age 12h < compress_after 48h`)
+- Raw retention is 30 days by default (bloat estimates 90 days), settable per metrics family from 3 days (8 for bloat estimates) to 365 days in Settings → Data retention, with no rollups; compression after 48h (`buffer 6h < sample_age 12h < compress_after 48h`). Events, unseen query texts, alert history and resolved findings are purged after a fixed 90 days; see [limit 14](docs/LIMITS.md#14-history-is-deleted-by-retention-policies-and-fixed-purges)
 - **Every in-memory structure has a fixed ceiling and drops data past it** — 32 MiB per push on the wire and 256 MiB after gzip, 64 KiB of request headers, 2-minute read/write/idle timeouts, delta and topology state evicted one hour after an instance's last sample, and at most 4 096 live sessions. None of these are configurable; see [limit 13](docs/LIMITS.md#13-every-in-memory-structure-is-bounded-and-a-bound-that-trips-drops-data) for what each one trades away.
 
 **Contention:**

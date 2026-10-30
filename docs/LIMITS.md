@@ -196,3 +196,43 @@ queued forever.
 These numbers are not configurable. They are chosen to be far above any real
 deployment and to exist purely so that an abnormal one degrades visibly instead
 of dying.
+
+## 14. History is deleted by retention policies and fixed purges
+
+pglens keeps no rollups: history past its retention is deleted, not
+summarised.
+
+Metrics history is kept per family (`metrics`, `metrics_statements`,
+`metrics_ash`, `metrics_replication`, `metrics_tables`, `metrics_indexes`,
+`metrics_bloat`) by the TimescaleDB retention policy of the family's
+hypertable: 30 days by default, 90 days for bloat estimates. Settings → Data
+retention changes it, from 3 days (8 for bloat estimates, one day past their
+7-day compression delay) to 365. The policy drops whole chunks, 6 hours each
+(1 day for bloat estimates), once a chunk's end is older than the retention,
+and only when it runs, once a day; nothing is deleted at the change itself. A
+console change keeps the policy's daily schedule, so the new value is applied
+at its next daily run. A day is the upper bound, not the exact delay: the next
+run may be near, a run already in progress finishes with the old value, and a
+policy whose last run failed keeps its retry time, minutes away. A policy the
+console creates for a family that has none first runs one day after its
+creation. A shortening is
+irreversible. Once the policy has run, the dropped
+chunks are gone, and lengthening the retention again does not bring them back.
+Take a backup of the pglens database before shortening a retention; pglens
+does not take or verify one (see [section 1](#1-backups-and-recovery)).
+
+The other history is deleted by four purges with a fixed 90-day limit:
+
+- **Events**: events older than 90 days.
+- **Query texts**: statement texts not seen for 90 days.
+- **Alert history**: alerts resolved more than 90 days ago; deliveries sent
+  more than 90 days ago whose episode has no open alert; silences that ended
+  more than 90 days ago.
+- **Resolved findings**: advisor findings resolved more than 90 days ago,
+  including those resolved because their rule was disabled.
+
+The first three run about once an hour, in batches; the findings purge runs
+at the end of every advisor evaluation. The 90 days are code constants, not
+settings: neither the console nor an environment variable changes them, and the
+Data retention tab does not show them. Queued commands, the command audit and
+captured query plans have no purge and are kept.

@@ -390,7 +390,7 @@ func TestRET005(t *testing.T) {
 		"preview":  retentionPreviewSQL,
 		"lock":     retentionLockSQL,
 		"current":  retentionCurrentSQL,
-		"remove":   retentionRemoveSQL,
+		"alter":    retentionAlterSQL,
 		"add":      retentionAddSQL,
 	}
 	goVerb := regexp.MustCompile(`%[-+# 0-9.]*[sdvqxXT]`)
@@ -400,18 +400,31 @@ func TestRET005(t *testing.T) {
 			require.NotContains(t, sql, "'"+f.Hypertable+"'", "%s: no literal hypertable", name)
 		}
 	}
-	for _, name := range []string{"policies", "current", "remove"} {
+	for _, name := range []string{"policies", "current"} {
 		require.Contains(t, statements[name], "$1", name)
 	}
-	for _, name := range []string{"preview", "add"} {
+	for _, name := range []string{"preview", "alter", "add"} {
 		require.Contains(t, statements[name], "$1", name)
 		require.Contains(t, statements[name], "$2::int", name)
 	}
 	// Identifiers are quoted by format('%I'), never concatenated.
-	require.Contains(t, retentionRemoveSQL, `format('public.%I', $1::text)::regclass`)
 	require.Contains(t, retentionAddSQL, `format('public.%I', $1::text)::regclass`)
 	require.Contains(t, retentionAddSQL, `make_interval(days => $2::int)`)
-	require.Contains(t, retentionRemoveSQL, `if_exists => true`)
+	// A new policy first runs a day later; an existing one is altered in
+	// place, never removed and added again (which would run it at once).
+	require.Contains(t, retentionAddSQL, `alter_job(n.job_id, next_start => now() + interval '1 day')`)
+	require.NotContains(t, retentionAddSQL, `initial_start`)
+	require.Contains(t, retentionAlterSQL, `alter_job(j.job_id,`)
+	require.Contains(t, retentionAlterSQL, `to_jsonb(make_interval(days => $2::int)::text)`)
+	require.Contains(t, retentionAlterSQL, `j.hypertable_name = $1::text`)
+	// A job removed meanwhile counts 0 (decided again), never an error.
+	require.Contains(t, retentionAlterSQL, `if_exists => true`)
+	require.Contains(t, retentionAlterSQL, `SELECT count(a.job_id)`)
+	for name, sql := range statements {
+		require.NotContains(t, sql, "remove_retention_policy", name)
+	}
+	// The alter keeps the job's schedule: it sets no next start.
+	require.NotContains(t, retentionAlterSQL, "next_start")
 	require.Contains(t, retentionPreviewSQL, `show_chunks(h.rel, older_than => $2::int * interval '1 day')`)
 	require.Contains(t, retentionPreviewSQL, `chunks_detailed_size(h.rel)`)
 
@@ -444,21 +457,43 @@ func TestRET005(t *testing.T) {
 		{sql: retentionPreviewSQL, args: []any{"metrics_ash", 14}},
 		{sql: retentionLockSQL},
 		{sql: retentionCurrentSQL, args: []any{"metrics_ash"}},
-		{sql: retentionRemoveSQL, args: []any{"metrics_ash"}},
-		{sql: retentionAddSQL, args: []any{"metrics_ash", 14}},
+		{sql: retentionAlterSQL, args: []any{"metrics_ash", 14}},
 	}, pool.calls)
 	require.True(t, pool.tx.committed)
+
+	// A hypertable without a policy gets one created, nothing altered.
+	none := &retentionRecPool{current: &mockRow{vals: []any{nil, int64(0)}}}
+	require.NoError(t, pgPolicyStore{pool: none}.Replace(context.Background(), "metrics_tables", 30, nil))
+	require.Equal(t, []recordedExec{
+		{sql: retentionLockSQL},
+		{sql: retentionCurrentSQL, args: []any{"metrics_tables"}},
+		{sql: retentionAddSQL, args: []any{"metrics_tables", 30}},
+	}, none.calls)
+	require.True(t, none.tx.committed)
 }
 
-// RET-005: a failing policy call rolls the transaction back, so the removed
-// policy comes back; a policy changed since it was read is not replaced.
+// RET-005: a failing policy call rolls the transaction back, so the old policy
+// stays; a policy changed since it was read is not touched.
 func TestRET005Rollback(t *testing.T) {
 	t.Parallel()
-	pool := &retentionRecPool{current: &mockRow{vals: []any{secondsOf(30 * day), int64(0)}}, addErr: &pgconn.PgError{Code: "XX000", Message: "add failed"}}
+	pool := &retentionRecPool{current: &mockRow{vals: []any{secondsOf(30 * day), int64(0)}}, alterErr: &pgconn.PgError{Code: "XX000", Message: "alter failed"}}
 	err := pgPolicyStore{pool: pool}.Replace(context.Background(), "metrics_ash", 14, secondsOf(30*day))
-	require.ErrorContains(t, err, "add_retention_policy")
+	require.ErrorContains(t, err, "alter_job")
 	require.False(t, pool.tx.committed)
 	require.True(t, pool.tx.rolledBack)
+
+	added := &retentionRecPool{current: &mockRow{vals: []any{nil, int64(0)}}, addErr: &pgconn.PgError{Code: "XX000", Message: "add failed"}}
+	err = pgPolicyStore{pool: added}.Replace(context.Background(), "metrics_tables", 30, nil)
+	require.ErrorContains(t, err, "add_retention_policy")
+	require.False(t, added.tx.committed)
+	require.True(t, added.tx.rolledBack)
+
+	// The policy read under the lock is gone by the alter: nothing changed.
+	vanished := &retentionRecPool{current: &mockRow{vals: []any{secondsOf(30 * day), int64(0)}}, altered: &mockRow{vals: []any{int64(0)}}}
+	err = pgPolicyStore{pool: vanished}.Replace(context.Background(), "metrics_ash", 14, secondsOf(30*day))
+	require.ErrorIs(t, err, errRetentionChanged)
+	require.False(t, vanished.tx.committed)
+	require.True(t, vanished.tx.rolledBack)
 
 	changed := &retentionRecPool{current: &mockRow{vals: []any{secondsOf(20 * day), int64(0)}}}
 	err = pgPolicyStore{pool: changed}.Replace(context.Background(), "metrics_ash", 14, secondsOf(30*day))
@@ -466,12 +501,9 @@ func TestRET005Rollback(t *testing.T) {
 	require.False(t, changed.tx.committed)
 	require.True(t, changed.tx.rolledBack)
 	for _, call := range changed.calls {
-		require.NotEqual(t, retentionRemoveSQL, call.sql, "nothing removed")
+		require.NotEqual(t, retentionAlterSQL, call.sql, "nothing altered")
+		require.NotEqual(t, retentionAddSQL, call.sql, "nothing added")
 	}
-
-	none := &retentionRecPool{current: &mockRow{vals: []any{nil, int64(0)}}}
-	require.NoError(t, pgPolicyStore{pool: none}.Replace(context.Background(), "metrics_tables", 30, nil))
-	require.True(t, none.tx.committed)
 }
 
 // RET-006: min_days follows the family's compression policy: one day past its
@@ -548,7 +580,8 @@ func TestRET007(t *testing.T) {
 	require.ErrorIs(t, err, errRetentionUnsupported)
 	require.True(t, late.tx.rolledBack)
 	for _, call := range late.calls {
-		require.NotEqual(t, retentionRemoveSQL, call.sql, "nothing removed")
+		require.NotEqual(t, retentionAlterSQL, call.sql, "nothing altered")
+		require.NotEqual(t, retentionAddSQL, call.sql, "nothing added")
 	}
 	raced := &stubPolicyStore{policies: defaultPolicies(), replaceErrs: []error{errRetentionUnsupported}}
 	requireAPIError(t, retentionRequest(t, &API{retention: raced}, http.MethodPut, "/api/v1/settings/retention/metrics", `{"days":60}`), http.StatusServiceUnavailable, "unsupported retention policy")
@@ -556,11 +589,14 @@ func TestRET007(t *testing.T) {
 
 // retentionRecPool records the statements of the policy store and answers
 // them: the policy read with no row, the preview with zeros, the live
-// drop_after with current, and the add with a job id or addErr.
+// drop_after with current, the alter with altered (one job when nil) or
+// alterErr, and the add with a job id or addErr.
 type retentionRecPool struct {
 	calls      []recordedExec
 	policyRows [][]any
 	current    *mockRow
+	altered    *mockRow
+	alterErr   error
 	addErr     error
 	tx         *retentionRecTx
 }
@@ -582,6 +618,14 @@ func (p *retentionRecPool) QueryRow(_ context.Context, sql string, args ...any) 
 		return &mockRow{vals: []any{int64(0), int64(0), nil, nil}}
 	case retentionCurrentSQL:
 		return p.current
+	case retentionAlterSQL:
+		if p.alterErr != nil {
+			return &mockRow{err: p.alterErr}
+		}
+		if p.altered != nil {
+			return p.altered
+		}
+		return &mockRow{vals: []any{int64(1)}}
 	case retentionAddSQL:
 		if p.addErr != nil {
 			return &mockRow{err: p.addErr}

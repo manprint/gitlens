@@ -9,11 +9,11 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 )
@@ -25,7 +25,7 @@ type retentionJob struct {
 }
 
 // retentionJobs reads the retention policies of a hypertable by name, never by
-// job id: a replaced policy is a new job.
+// job id: a policy created again is a new job.
 func retentionJobs(t *testing.T, pool *pgxpool.Pool, hypertable string) []retentionJob {
 	t.Helper()
 	rows, err := pool.Query(context.Background(), `SELECT job_id, config->>'drop_after'
@@ -195,13 +195,13 @@ func TestRETINT001(t *testing.T) {
 	require.Equal(t, "365 days", retentionJobs(t, pool, "metrics_replication")[0].DropAfter)
 }
 
-// faultPool is the shared pool whose transactions send the add of a retention
-// policy to a hypertable that does not exist, after the remove of the real
-// one ran: the add fails inside the transaction. removes counts the removes
-// that ran without an error.
+// faultPool is the shared pool whose transactions fail the policy write in
+// the database after it ran: the alter of an existing policy is followed by a
+// failing statement, and the add of a new one is sent to a hypertable that
+// does not exist. alters counts the alters that ran without an error.
 type faultPool struct {
 	*pgxpool.Pool
-	removes *int
+	alters *int
 }
 
 func (p faultPool) Begin(ctx context.Context) (pgx.Tx, error) {
@@ -209,51 +209,188 @@ func (p faultPool) Begin(ctx context.Context) (pgx.Tx, error) {
 	if err != nil {
 		return nil, err
 	}
-	return faultTx{Tx: tx, removes: p.removes}, nil
+	return faultTx{Tx: tx, alters: p.alters}, nil
 }
 
 type faultTx struct {
 	pgx.Tx
-	removes *int
-}
-
-func (t faultTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-	tag, err := t.Tx.Exec(ctx, sql, args...)
-	if sql == retentionRemoveSQL && err == nil {
-		*t.removes++
-	}
-	return tag, err
+	alters *int
 }
 
 func (t faultTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
-	if sql == retentionAddSQL {
+	switch sql {
+	case retentionAlterSQL:
+		var altered int64
+		if err := t.Tx.QueryRow(ctx, sql, args...).Scan(&altered); err == nil && altered > 0 {
+			*t.alters++
+		}
+		// A division by zero aborts the transaction the alter ran in.
+		return t.Tx.QueryRow(ctx, `SELECT 1/0`)
+	case retentionAddSQL:
 		args = append([]any{"metrics_no_such_family"}, args[1:]...)
 	}
 	return t.Tx.QueryRow(ctx, sql, args...)
 }
 
-// RET-INT-002: a PUT whose add_retention_policy fails after the remove ran
-// rolls back: the hypertable keeps its old policy, the same job, and is never
-// left without one.
+// RET-INT-002: a PUT whose policy write fails in the database rolls back. An
+// altered policy keeps its old drop_after, its job and its next start; a
+// family without a policy is left without one.
 func TestRETINT002(t *testing.T) {
 	pool := getSharedPool(t)
 	restoreRetention(t, pool, "metrics_ash", "30 days")
-	before := retentionJobs(t, pool, "metrics_ash")
-	require.Len(t, before, 1)
+	before := settledSchedule(t, pool, "metrics_ash")
 
-	var removes int
-	h := retentionRouter(&API{pool: faultPool{Pool: pool, removes: &removes}})
+	var alters int
+	h := retentionRouter(&API{pool: faultPool{Pool: pool, alters: &alters}})
 	for i, body := range []string{`{"days":14,"confirm":true}`, `{"days":60}`} {
 		rec := putRetention(t, h, "metrics_ash", body)
-		require.Equal(t, i+1, removes, "remove_retention_policy ran before the failing add")
+		require.Equal(t, i+1, alters, "alter_job ran before the failure")
 		require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
 		require.Contains(t, rec.Body.String(), `"error":"retention update failed"`)
-		require.Contains(t, rec.Body.String(), "add_retention_policy")
-		require.Equal(t, before, retentionJobs(t, pool, "metrics_ash"), "the old policy is kept")
+		require.Contains(t, rec.Body.String(), "alter_job")
+		after := retentionScheduleOf(t, pool, "metrics_ash")
+		require.Equal(t, before.JobID, after.JobID)
+		require.Equal(t, "30 days", after.DropAfter, "the old policy is kept")
+		require.True(t, before.NextStart.Equal(after.NextStart))
 	}
 
 	var rows []retentionRow
 	getJSON(t, retentionRouter(NewAPI(pool)), "/api/v1/settings/retention", &rows)
 	require.Equal(t, 30, *rows[2].Days)
 	require.Equal(t, "default", rows[2].Source)
+
+	restoreRetention(t, pool, "metrics_replication", "30 days")
+	_, err := pool.Exec(context.Background(), `SELECT remove_retention_policy('metrics_replication')`)
+	require.NoError(t, err)
+	rec := putRetention(t, h, "metrics_replication", `{"days":60,"confirm":true}`)
+	require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), "add_retention_policy")
+	require.Empty(t, retentionJobs(t, pool, "metrics_replication"), "still no policy")
+}
+
+// retentionSchedule is the job of a hypertable's retention policy as the
+// scheduler sees it.
+type retentionSchedule struct {
+	JobID     int64
+	DropAfter string
+	NextStart time.Time
+	TotalRuns int64
+	Running   bool
+	// Unscheduled is true while the scheduler has not yet given the job a
+	// next start (a job just added without initial_start).
+	Unscheduled bool
+}
+
+// retentionScheduleOf reads the single retention job of a hypertable, with its
+// next start and the runs recorded for it (none before its first run).
+func retentionScheduleOf(t *testing.T, pool *pgxpool.Pool, hypertable string) retentionSchedule {
+	t.Helper()
+	var (
+		s    retentionSchedule
+		next *time.Time
+	)
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT j.job_id, j.config->>'drop_after', j.next_start,
+			coalesce(st.total_runs, 0), coalesce(st.job_status = 'Running', false)
+		FROM timescaledb_information.jobs j
+		LEFT JOIN timescaledb_information.job_stats st USING (job_id)
+		WHERE j.proc_name = 'policy_retention' AND j.hypertable_name = $1`, hypertable).
+		Scan(&s.JobID, &s.DropAfter, &next, &s.TotalRuns, &s.Running))
+	if next == nil {
+		s.Unscheduled = true
+	} else {
+		s.NextStart = *next
+	}
+	return s
+}
+
+// settledSchedule waits until the hypertable's retention job is scheduled and
+// not running, so its run count and next start are stable before a write is
+// measured against them.
+func settledSchedule(t *testing.T, pool *pgxpool.Pool, hypertable string) retentionSchedule {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		s := retentionScheduleOf(t, pool, hypertable)
+		if !s.Running && !s.Unscheduled {
+			return s
+		}
+		require.True(t, time.Now().Before(deadline), "the retention job of %s kept running", hypertable)
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// retentionRunGrace is how long the test watches for a run the write must not
+// start: TimescaleDB started a newly added job within a second.
+const retentionRunGrace = 5 * time.Second
+
+// RET-INT-003: a console change keeps the policy's schedule. Changing the days
+// of an existing policy alters its job in place: same job id, same next start,
+// no run started by the write, drop_after the new value, and that value is the
+// one the policy deletes with when it runs. A policy given to a family that has
+// none first runs one day later, not at once.
+func TestRETINT003(t *testing.T) {
+	pool := getSharedPool(t)
+	ctx := context.Background()
+	truncateAll(t, pool)
+	t.Cleanup(func() { truncateAll(t, pool) })
+	restoreRetention(t, pool, "metrics_ash", "30 days")
+	h := retentionRouter(NewAPI(pool))
+
+	before := settledSchedule(t, pool, "metrics_ash")
+	require.Equal(t, "30 days", before.DropAfter)
+
+	// Ages 1 and 5 days stay under 14 days of retention; 20 and 25 are older.
+	seedAshChunks(t, pool, 1, 5, 20, 25)
+	countChunks := func() int64 {
+		var n int64
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM show_chunks('metrics_ash')`).Scan(&n))
+		return n
+	}
+	require.Equal(t, int64(4), countChunks())
+
+	rec := putRetention(t, h, "metrics_ash", `{"days":14,"confirm":true}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	time.Sleep(retentionRunGrace)
+	require.Equal(t, int64(4), countChunks(), "the shortening deleted nothing before the policy's next run")
+	after := retentionScheduleOf(t, pool, "metrics_ash")
+	require.Equal(t, before.JobID, after.JobID, "the job is altered, not replaced")
+	require.True(t, before.NextStart.Equal(after.NextStart), "next_start kept: %s, now %s", before.NextStart, after.NextStart)
+	require.Equal(t, before.TotalRuns, after.TotalRuns, "the write started no run")
+	require.False(t, after.Running)
+	require.Equal(t, "14 days", after.DropAfter, "stored as add_retention_policy stores it")
+
+	// Lengthening keeps the schedule too, and reads back as the default.
+	rec = putRetention(t, h, "metrics_ash", `{"days":30}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), `"source":"default"`)
+	lengthened := retentionScheduleOf(t, pool, "metrics_ash")
+	require.Equal(t, before.JobID, lengthened.JobID)
+	require.True(t, before.NextStart.Equal(lengthened.NextStart))
+	require.Equal(t, "30 days", lengthened.DropAfter)
+
+	// The policy deletes with the stored value when it runs: at 14 days the
+	// chunks aged 20 and 25 days go, those aged 1 and 5 stay.
+	rec = putRetention(t, h, "metrics_ash", `{"days":14,"confirm":true}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, int64(4), countChunks(), "nothing is deleted before the policy runs")
+	_, err := pool.Exec(ctx, `CALL run_job($1)`, before.JobID)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), countChunks(), "the run dropped the chunks older than the new 14 days")
+
+	// A family without a policy gets one whose first run is a day away.
+	restoreRetention(t, pool, "metrics_replication", "30 days")
+	_, err = pool.Exec(ctx, `SELECT remove_retention_policy('metrics_replication')`)
+	require.NoError(t, err)
+	rec = putRetention(t, h, "metrics_replication", `{"days":60,"confirm":true}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var now time.Time
+	require.NoError(t, pool.QueryRow(ctx, `SELECT now()`).Scan(&now))
+	time.Sleep(retentionRunGrace)
+	created := retentionScheduleOf(t, pool, "metrics_replication")
+	require.Equal(t, "60 days", created.DropAfter)
+	require.True(t, !created.NextStart.Before(now.Add(23*time.Hour)), "first run %s, not before %s", created.NextStart, now.Add(23*time.Hour))
+	var fixed bool
+	require.NoError(t, pool.QueryRow(ctx, `SELECT fixed_schedule FROM timescaledb_information.jobs WHERE job_id = $1`, created.JobID).Scan(&fixed))
+	require.False(t, fixed, "a day after each run ends, as the migrations' jobs")
+	require.Zero(t, created.TotalRuns, "the new policy has not run")
 }

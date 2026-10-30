@@ -886,7 +886,7 @@ export interface paths {
         };
         /**
          * List the data retention of each metrics family.
-         * @description One row per metrics family, in a fixed order, with the live TimescaleDB retention policy of its hypertable and the range of days the console accepts. A policy drops a whole chunk once the chunk's end is older than the retention, at the policy's next run (once a day).
+         * @description One row per metrics family, in a fixed order, with the live TimescaleDB retention policy of its hypertable and the range of days the console accepts. A policy drops a whole chunk once the chunk's end is older than the retention, at the policy's next daily run.
          */
         get: operations["getRetention"];
         put?: never;
@@ -927,7 +927,7 @@ export interface paths {
         get?: never;
         /**
          * Set the data retention of a metrics family.
-         * @description Replaces the hypertable's retention policy in one transaction (remove_retention_policy, then add_retention_policy with drop_after of days); a failure rolls back and keeps the old policy. Lengthening is applied at once. Shortening, or giving a retention to a family that has none, deletes the history older than days at the policy's next run, so it needs confirm true and is otherwise answered 409 with the preview. The same days as now answer the row without rewriting the policy.
+         * @description Sets the retention of the hypertable in one transaction. An existing policy is altered in place (alter_job with drop_after of days), so it keeps its job, its daily schedule and its next start; a family without a policy gets one (add_retention_policy) whose first run is one day later. A failure rolls back and keeps the old policy. Nothing is deleted by the request itself. Lengthening needs no confirmation. Shortening, or giving a retention to a family that has none, deletes the history older than days at the policy's next daily run, so it needs confirm true and is otherwise answered 409 with the preview. The same days as now answer the row without rewriting the policy.
          */
         put: operations["setRetention"];
         post?: never;

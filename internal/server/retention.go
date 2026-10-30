@@ -17,8 +17,11 @@ import (
 // Data retention (11.3, D17): how many days of history each metrics family
 // keeps. A family is one hypertable; its TimescaleDB retention policy drops a
 // whole chunk once the chunk's end is older than drop_after, at the policy's
-// next run (once a day). Only the families below can be read or changed, and a
-// family reaches SQL only as a bound parameter (I-3).
+// next daily run, never at the write. A change of days alters the existing job
+// in place, so it keeps its schedule and next start; a policy given to a family
+// that has none first runs one day after it is created. Only the families
+// below can be read or changed, and a family reaches SQL only as a bound
+// parameter (I-3).
 
 // retentionFamily is one metrics family: the hypertable it maps to and the
 // retention its migration gives it.
@@ -98,24 +101,26 @@ type chunkPreview struct {
 
 // errRetentionChanged is returned by Replace when the hypertable's policy is no
 // longer the one the caller decided on.
-var errRetentionChanged = errors.New("the retention policy changed while it was being replaced")
+var errRetentionChanged = errors.New("the retention policy changed while it was being set")
 
 // errRetentionUnsupported is returned by Replace when the hypertable has a
 // retention policy without drop_after, which the console never replaces.
 var errRetentionUnsupported = errors.New("the hypertable has a retention policy without drop_after")
 
 // policyStore is the TimescaleDB side of retention. The handlers decide what
-// to do; the store reads and replaces policies. Unit tests stub it.
+// to do; the store reads, changes and creates policies. Unit tests stub it.
 type policyStore interface {
 	// Policies reads the retention and compression policy of each whitelisted
 	// hypertable, keyed by hypertable name.
 	Policies(ctx context.Context) (map[string]livePolicy, error)
 	// Preview counts the chunks a retention of days would drop now.
 	Preview(ctx context.Context, hypertable string, days int) (chunkPreview, error)
-	// Replace swaps the hypertable's retention policy for one of days in one
-	// transaction. seen is the drop_after the caller decided on (nil: no
-	// policy); a different live value aborts with errRetentionChanged. Any
-	// failure rolls back and leaves the old policy in place.
+	// Replace sets the hypertable's retention to days in one transaction:
+	// an existing policy is altered in place (same job, schedule and next
+	// start), a missing one is created with its first run a day away. seen is
+	// the drop_after the caller decided on (nil: no policy); a different live
+	// value aborts with errRetentionChanged. Any failure rolls back and leaves
+	// the old policy in place.
 	Replace(ctx context.Context, hypertable string, days int, seen *float64) error
 }
 
@@ -157,7 +162,7 @@ const (
 	       (SELECT max(ranged.range_end) FROM ranged JOIN dropped USING (chunk))`
 
 	// retentionLockSQL serialises retention writes, so two writes never both
-	// remove and then add a policy for the same hypertable.
+	// change, or both create, the policy of the same hypertable.
 	retentionLockSQL = `SELECT pg_advisory_xact_lock(hashtext('pglens.retention'))`
 
 	// retentionCurrentSQL reads the live drop_after of one hypertable inside
@@ -170,9 +175,35 @@ const (
 	   AND j.hypertable_schema = 'public'
 	   AND j.hypertable_name = $1::text`
 
-	retentionRemoveSQL = `SELECT remove_retention_policy(format('public.%I', $1::text)::regclass, if_exists => true)`
+	// retentionAlterSQL sets drop_after of the hypertable's retention job in
+	// place with alter_job, which changes only the config: the job keeps its
+	// id, schedule and next_start, so no run starts at the write (a job that
+	// add_retention_policy creates without initial_start runs at once). The
+	// value is the interval as text, the form add_retention_policy stores
+	// ("14 days") and the policy parses at each run. It answers the number of
+	// jobs altered: with if_exists, a job removed meanwhile answers no row, so
+	// it counts 0 and the write is decided again instead of failing.
+	retentionAlterSQL = `SELECT count(a.job_id)
+	  FROM timescaledb_information.jobs j
+	 CROSS JOIN LATERAL alter_job(j.job_id,
+	       config => jsonb_set(j.config, '{drop_after}', to_jsonb(make_interval(days => $2::int)::text)),
+	       if_exists => true) AS a
+	 WHERE j.proc_name = 'policy_retention'
+	   AND j.hypertable_schema = 'public'
+	   AND j.hypertable_name = $1::text
+	   AND j.config->>'drop_after' IS NOT NULL`
 
-	retentionAddSQL = `SELECT add_retention_policy(format('public.%I', $1::text)::regclass, drop_after => make_interval(days => $2::int))`
+	// retentionAddSQL creates the retention policy of a hypertable that has
+	// none. Its first run is one day away, the policy's own interval, so a new
+	// policy deletes nothing at the write either. The policy is added without
+	// initial_start, so it is not fixed_schedule and runs a day after each run
+	// ends, as the jobs of the migrations do; alter_job sets its first
+	// next_start in the same transaction, before the scheduler can see the
+	// job. (initial_start would make it fixed_schedule, and turning that off
+	// with alter_job starts a run at once.) It answers the job id.
+	retentionAddSQL = `SELECT a.job_id
+	  FROM (SELECT add_retention_policy(format('public.%I', $1::text)::regclass, drop_after => make_interval(days => $2::int)) AS job_id) n
+	 CROSS JOIN LATERAL alter_job(n.job_id, next_start => now() + interval '1 day') AS a`
 )
 
 // pgPolicyStore is the policy store on the pglens database.
@@ -236,7 +267,7 @@ func (s pgPolicyStore) Replace(ctx context.Context, hypertable string, days int,
 	if err != nil {
 		return err
 	}
-	// A no-op after Commit; on any error it puts the old policy back.
+	// A no-op after Commit; on any error the old policy stays as it was.
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
 
 	if _, err := tx.Exec(ctx, retentionLockSQL); err != nil {
@@ -255,8 +286,16 @@ func (s pgPolicyStore) Replace(ctx context.Context, hypertable string, days int,
 	if !sameSeconds(current, seen) {
 		return errRetentionChanged
 	}
-	if _, err := tx.Exec(ctx, retentionRemoveSQL, hypertable); err != nil {
-		return fmt.Errorf("remove_retention_policy: %w", err)
+	if current != nil {
+		var altered int64
+		if err := tx.QueryRow(ctx, retentionAlterSQL, hypertable, days).Scan(&altered); err != nil {
+			return fmt.Errorf("alter_job: %w", err)
+		}
+		if altered == 0 {
+			// The policy read under the lock is gone: nothing was changed.
+			return errRetentionChanged
+		}
+		return tx.Commit(ctx)
 	}
 	var jobID int64
 	if err := tx.QueryRow(ctx, retentionAddSQL, hypertable, days).Scan(&jobID); err != nil {
@@ -487,9 +526,10 @@ type retentionBody struct {
 	Confirm bool `json:"confirm"`
 }
 
-// handleSetRetention replaces a family's retention policy. Lengthening needs
+// handleSetRetention sets a family's retention policy. Lengthening needs
 // nothing more; shortening, or giving a retention to a family that has none,
-// deletes history at the policy's next run, so it needs confirm: true and is
+// deletes history at the policy's next daily run (an existing policy keeps its
+// schedule; a new one first runs a day later), so it needs confirm: true and is
 // otherwise answered 409 with the preview. The same days answer the row
 // without touching the policy.
 func (a *API) handleSetRetention(w http.ResponseWriter, r *http.Request) {
@@ -552,7 +592,7 @@ func (a *API) handleSetRetention(w http.ResponseWriter, r *http.Request) {
 		}
 		err = ps.Replace(ctx, f.Hypertable, days, p.DropAfter)
 		if errors.Is(err, errRetentionChanged) {
-			// Another write replaced the policy since it was read: decide again.
+			// Another write changed the policy since it was read: decide again.
 			continue
 		}
 		if errors.Is(err, errRetentionUnsupported) {
@@ -562,7 +602,7 @@ func (a *API) handleSetRetention(w http.ResponseWriter, r *http.Request) {
 		var pgErr *pgconn.PgError
 		if err != nil && !errors.As(err, &pgErr) {
 			// The store did not answer (connection, timeout): nothing was
-			// replaced, and the old policy stays.
+			// changed, and the old policy stays.
 			writeRetentionStoreError(w, err)
 			return
 		}
