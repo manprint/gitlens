@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+
 import type { TableStateControls } from '@/hooks/useTableState'
 import { PAGE_SIZES, type Page } from '@/lib/tableControls'
 
@@ -24,6 +26,11 @@ export interface TableFooterProps {
   /** The server's full result size and row budget: a capped load shows the truncation note. */
   total?: number
   budget?: number
+  /**
+   * A sentence after the visible range, e.g. the server's match count of a
+   * full search (D20); announced politely when it changes.
+   */
+  note?: ReactNode
 }
 
 /**
@@ -38,6 +45,7 @@ export function TableFooter({
   controls,
   total = loaded,
   budget,
+  note,
 }: TableFooterProps) {
   const { state, set } = controls
   return (
@@ -45,7 +53,9 @@ export function TableFooter({
       <div className="space-y-1">
         <span className="block">
           Showing {page.from}–{page.to} of {page.total} {scope}
-          {page.total < loaded ? ` (filtered from ${loaded})` : null}.
+          {page.total < loaded ? ` (filtered from ${loaded})` : null}.{' '}
+          {/* Always there, so a new match count is announced (polite). */}
+          <span aria-live="polite">{note}</span>
         </span>
         {budget !== undefined && total > loaded ? (
           <Truncated shown={loaded} budget={budget} scope={scope} />

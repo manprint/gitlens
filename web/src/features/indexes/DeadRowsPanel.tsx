@@ -7,6 +7,7 @@ import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
+import { useFocusMissing } from '@/hooks/useSearch'
 import { useTimeRange } from '@/hooks/useTimeRange'
 import {
   buildDeadRows,
@@ -289,13 +290,23 @@ interface DeadRowsPanelProps {
   /** The database picked on the page; empty for all of them. */
   database: string
   findings: readonly Finding[]
+  /** The key of a row to expand and give focus to (a search hit, D20). */
+  focusKey?: string | undefined
+  /** Called once the row is shown (true) or when it is not in the list (false). */
+  onFocusDone?: (found: boolean) => void
 }
 
 /**
  * The tables the agent reports, ranked by how many dead tuples they hold,
  * with the vacuum state and the write pattern that explain them.
  */
-export function DeadRowsPanel({ instanceId, database, findings }: DeadRowsPanelProps) {
+export function DeadRowsPanel({
+  instanceId,
+  database,
+  findings,
+  focusKey,
+  onFocusDone,
+}: DeadRowsPanelProps) {
   const { range } = useTimeRange()
 
   const tablesQuery = useInstanceTables(instanceId, {
@@ -323,6 +334,8 @@ export function DeadRowsPanel({ instanceId, database, findings }: DeadRowsPanelP
     [allRows, database],
   )
   const summary = useMemo(() => summariseDeadRows(scoped), [scoped])
+  // Without tables there is no row to show for a search hit (D20).
+  useFocusMissing(focusKey, onFocusDone, response !== undefined && scoped.length === 0)
   const trends = useMemo(() => {
     const byTable = new Map<string, number[]>()
     for (const series of historyQuery.data?.tables ?? []) {
@@ -431,6 +444,8 @@ export function DeadRowsPanel({ instanceId, database, findings }: DeadRowsPanelP
           scope="tables"
           tableId="dead-rows"
           toolbar={DEAD_TOOLBAR}
+          focusKey={focusKey}
+          {...(onFocusDone === undefined ? {} : { onFocusDone })}
         />
       )}
     </IndexPanel>

@@ -1,4 +1,12 @@
-import { Fragment, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
@@ -78,6 +86,14 @@ export interface SimpleTableProps<T> {
   headerToggleName?: (column: SimpleColumn<T>) => string
   /** Classes of the scroll box around the table. */
   className?: string
+  /**
+   * The key of a row to show: the table turns to its page, expands it and
+   * gives its toggle focus (a search hit, D20). A row its own search or
+   * filters hide clears them first; without the row it does nothing.
+   */
+  focusKey?: string | undefined
+  /** Called once per `focusKey`: true once the row is shown, false when no row has that key. */
+  onFocusDone?: (found: boolean) => void
 }
 
 /**
@@ -103,6 +119,8 @@ export function SimpleTable<T>({
   compare,
   headerToggleName,
   className,
+  focusKey,
+  onFocusDone,
 }: SimpleTableProps<T>) {
   const accessors = useMemo(() => {
     const byId: Record<string, Accessor<T>> = {}
@@ -123,6 +141,44 @@ export function SimpleTable<T>({
     setShownPage(page.page)
     setOpenKeys(new Set())
   }
+
+  // A row to show (D20): its page first, then it opens, in the same render as the page.
+  const focusIndex =
+    focusKey === undefined ? -1 : view.sorted.findIndex((row) => rowKey(row) === focusKey)
+  const focusPage = focusIndex < 0 ? null : Math.floor(focusIndex / state.size) + 1
+  const focusHidden =
+    focusPage === null &&
+    focusKey !== undefined &&
+    view.activeFilterCount > 0 &&
+    rows.some((row) => rowKey(row) === focusKey)
+  const [focused, setFocused] = useState<string | null>(null)
+  if (focusKey === undefined && focused !== null) setFocused(null)
+  if (focusKey !== undefined && focused !== focusKey && focusPage === page.page) {
+    setFocused(focusKey)
+    setOpenKeys(new Set([focusKey]))
+  }
+  const focusToggle = useRef<HTMLButtonElement>(null)
+  const reported = useRef<string | null>(null)
+  useEffect(() => {
+    if (focusKey === undefined) {
+      reported.current = null
+      return
+    }
+    if (reported.current === focusKey) return
+    if (focusHidden) {
+      controls.clear()
+    } else if (focusPage === null) {
+      reported.current = focusKey
+      onFocusDone?.(false)
+    } else if (focusPage !== page.page) {
+      set({ page: focusPage })
+    } else if (focused === focusKey) {
+      reported.current = focusKey
+      focusToggle.current?.focus()
+      focusToggle.current?.scrollIntoView?.({ block: 'center' })
+      onFocusDone?.(true)
+    }
+  }, [controls, focusHidden, focusKey, focusPage, focused, onFocusDone, page.page, set])
 
   // The header label: the first press picks the column's first direction, the next flips it.
   function toggleSort(column: SimpleColumn<T>) {
@@ -264,6 +320,7 @@ export function SimpleTable<T>({
                       {renderDetail ? (
                         <td className="px-2 py-2 align-top min-[1600px]:py-1 min-[1600px]:align-middle min-[1600px]:[&_*]:align-top">
                           <button
+                            ref={key === focused ? focusToggle : undefined}
                             type="button"
                             aria-expanded={open}
                             aria-label={detailLabel(row, open)}

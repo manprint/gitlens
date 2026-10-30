@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react'
+import { useEffect, useMemo, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
 import type { Schemas } from '@/api/types'
@@ -10,6 +10,7 @@ import { EmptyState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
+import { useFocusMissing } from '@/hooks/useSearch'
 import { formatBytes, formatCount, formatPercent, formatRate, formatRelative } from '@/lib/format'
 import {
   foreignKeyGaps,
@@ -549,6 +550,10 @@ interface IndexesPanelProps {
   /** The database picked on the page; empty for all of them. */
   database: string
   dataUpdatedAt: number
+  /** The key of a row to expand and give focus to (a search hit, D20). */
+  focusKey?: string | undefined
+  /** Called once the row is shown (true) or when it is not in the list (false). */
+  onFocusDone?: (found: boolean) => void
 }
 
 /**
@@ -565,9 +570,24 @@ export function IndexesPanel({
   findingsPending,
   database,
   dataUpdatedAt,
+  focusKey,
+  onFocusDone,
 }: IndexesPanelProps) {
   const [searchParams, setSearchParams] = useSearchParams()
   const view = readIndexView(searchParams.get(INDEX_VIEW_PARAM))
+  // A search hit is a row of the inventory (D20): that view opens to show it.
+  useEffect(() => {
+    if (focusKey === undefined || view === DEFAULT_INDEX_VIEW) return
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current)
+        next.delete(INDEX_VIEW_PARAM)
+        return next
+      },
+      { replace: true },
+    )
+  }, [focusKey, setSearchParams, view])
+  useFocusMissing(focusKey, onFocusDone, rows.length === 0)
 
   const summary = useMemo(() => summariseIndexes(rows), [rows])
   const tables = useMemo(() => groupByTable(rows).slice(0, 8), [rows])
@@ -713,6 +733,8 @@ export function IndexesPanel({
           scope="indexes"
           tableId="indexes"
           toolbar={INDEX_TOOLBAR}
+          focusKey={focusKey}
+          {...(onFocusDone === undefined ? {} : { onFocusDone })}
         />
       ),
     summary: () => (

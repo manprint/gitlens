@@ -6,10 +6,14 @@ import { useAdvisorRules, useClusters, useFindings } from '@/api/queries'
 import type { Cluster } from '@/api/types'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { FULL_SEARCH_HINT, SearchBox } from '@/components/layout/SearchBox'
 import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState } from '@/components/state'
+import { Button } from '@/components/ui/button'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useSearchDraft, useShownTerm } from '@/hooks/useSearch'
+import { searchTermOf } from '@/lib/highlight'
 import { clusterLabel, instanceLabel } from '@/lib/names'
 import {
   joinCatalogue,
@@ -185,13 +189,23 @@ function FilterLineNote({ children }: { children: string }) {
 }
 
 export function FindingsPage() {
-  const findingsQuery = useFindings({ state: 'all', limit: FINDINGS_LIMIT })
+  const [searchParams, setSearchParams] = useSearchParams()
+  // The search runs on the server over every finding, whatever its state (D20).
+  const q = searchParams.get('q') ?? ''
+  const term = searchTermOf(q)
+  const findingsQuery = useFindings(
+    { state: 'all', limit: FINDINGS_LIMIT, ...(term === '' ? {} : { q: term }) },
+    { keepPrevious: true },
+  )
+  // The term the listed findings answer: the previous one while a new search loads.
+  const shownTerm = useShownTerm(term, findingsQuery.isPlaceholderData, findingsQuery.isSuccess)
+  // The box is drawn again when a failed search replaces the page: its text lives here.
+  const searchDraft = useSearchDraft(q)
   const rulesQuery = useAdvisorRules()
   // The Cluster and Instance filters list what the fleet reports, by name.
   const clustersQuery = useClusters()
   const location = useLocation()
   const navigate = useNavigate()
-  const [searchParams, setSearchParams] = useSearchParams()
   const redirectedForUnauthorized = useRef(false)
   const view = readFindingsView(searchParams.get('view'))
 
@@ -241,6 +255,26 @@ export function FindingsPage() {
     updateSearchParams(searchParams, setSearchParams, { severity: value === 'all' ? '' : value })
   }
 
+  function setSearch(value: string) {
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current)
+        if (value.trim() === '') next.delete('q')
+        else next.set('q', value)
+        // Another search shows its first page of findings.
+        next.delete('findings.page')
+        return next
+      },
+      { replace: true },
+    )
+  }
+
+  // A no-match action removes its own button: the search box keeps the keyboard.
+  function afterNoMatch(action: () => void) {
+    action()
+    document.getElementById('findings-search')?.focus()
+  }
+
   function selectDegraded() {
     updateSearchParams(searchParams, setSearchParams, { state: 'degraded', severity: '' })
   }
@@ -268,20 +302,42 @@ export function FindingsPage() {
     void navigate(`/login?next=${encodeURIComponent(next)}`, { replace: true })
   }, [location.pathname, location.search, navigate, unauthorized])
 
+  const searchBox = (
+    <SearchBox
+      busy={findingsQuery.isFetching && term !== ''}
+      draft={searchDraft}
+      hint={FULL_SEARCH_HINT}
+      id="findings-search"
+      label="Search findings"
+      onChange={setSearch}
+      placeholder="Rule, title, object or evidence"
+      value={q}
+    />
+  )
+
   if (findingsQuery.error && !findingsQuery.data) {
+    // The box stays, so a search the server refused can be changed or cleared.
     return (
-      <ErrorState
-        endpoint="findings"
-        failure={findingsQuery.error}
-        onRetry={() => void findingsQuery.refetch()}
-      />
+      <div className="space-y-4">
+        {term === '' ? null : <div className="flex">{searchBox}</div>}
+        <ErrorState
+          endpoint="findings"
+          failure={findingsQuery.error}
+          onRetry={() => void findingsQuery.refetch()}
+        />
+      </div>
     )
   }
+  // Loading and failing draw the box in the same place, so it keeps its text
+  // and focus while a corrected search loads after a failed one.
   if (findingsQuery.isPending || (rulesQuery.isPending && !rulesQuery.data)) {
     return (
-      <section aria-busy="true" aria-label="Loading advisor findings" role="status">
-        Loading advisor findings…
-      </section>
+      <div className="space-y-4">
+        {term === '' ? null : <div className="flex">{searchBox}</div>}
+        <section aria-busy="true" aria-label="Loading advisor findings" role="status">
+          Loading advisor findings…
+        </section>
+      </div>
     )
   }
 
@@ -293,7 +349,17 @@ export function FindingsPage() {
     ? findings.filter((finding) => finding.state === 'resolved').length
     : 0
 
-  const shownText = `${visibleFindings.length} of ${findings.length} findings shown`
+  const shownText =
+    shownTerm === ''
+      ? `${visibleFindings.length} of ${findings.length} findings shown`
+      : `${visibleFindings.length} of ${findings.length} findings matching “${shownTerm}” shown`
+  // What hides the matches of a search (D20): the state filter alone, or the other filters too.
+  const matchesInOtherStates =
+    shownTerm !== '' &&
+    visibleFindings.length === 0 &&
+    joinedFindings.some((finding) =>
+      matchesFilter(finding, 'all', severity, scope, clusterId, instanceId),
+    )
   const description =
     defaultView && (hiddenMuted > 0 || hiddenResolved > 0)
       ? `${shownText}. By default, ${hiddenMuted} muted and ${hiddenResolved} resolved findings are hidden. Use the state filter to show them.`
@@ -348,7 +414,12 @@ export function FindingsPage() {
       <TabsContent value="findings">
         <Section
           title="Findings"
-          description={description}
+          description={
+            // Polite: a new search's match count is announced.
+            <span aria-live="polite" title={description}>
+              {description}
+            </span>
+          }
           actions={
             <div aria-label="Finding summary" className="flex flex-wrap gap-2" role="group">
               <SummaryButton
@@ -385,6 +456,20 @@ export function FindingsPage() {
               className="flex flex-wrap items-end gap-3"
               role="group"
             >
+              {searchBox}
+              {term !== '' ? (
+                // The search reaches muted and resolved findings too; one press shows them (D20).
+                <Button
+                  aria-pressed={state === 'all'}
+                  className="self-end min-[1600px]:self-center"
+                  onClick={() => updateFilter('state', state === 'all' ? '' : 'all')}
+                  size="sm"
+                  type="button"
+                  variant={state === 'all' ? 'secondary' : 'outline'}
+                >
+                  All states
+                </Button>
+              ) : null}
               <FilterControl label="State">
                 <NativeSelect
                   aria-label="State"
@@ -479,7 +564,58 @@ export function FindingsPage() {
             </div>
 
             {visibleFindings.length > 0 ? (
-              <FindingsTable findings={visibleFindings} />
+              <FindingsTable findings={visibleFindings} q={shownTerm} />
+            ) : shownTerm !== '' ? (
+              <EmptyState
+                action={
+                  findings.length === 0 ? (
+                    <Button
+                      onClick={() => afterNoMatch(() => setSearch(''))}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      Show all findings
+                    </Button>
+                  ) : matchesInOtherStates ? (
+                    <Button
+                      onClick={() => afterNoMatch(() => updateFilter('state', 'all'))}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      Search all states
+                    </Button>
+                  ) : (
+                    <Button
+                      onClick={() =>
+                        afterNoMatch(() =>
+                          updateSearchParams(searchParams, setSearchParams, {
+                            state: 'all',
+                            severity: '',
+                            scope: '',
+                            cluster_id: '',
+                            instance_id: '',
+                          }),
+                        )
+                      }
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      Clear filters
+                    </Button>
+                  )
+                }
+                description={
+                  findings.length === 0
+                    ? 'No finding of any state matches the search: rule, title, detail, remediation, object, database, mute reason and evidence were searched.'
+                    : matchesInOtherStates
+                      ? `${findings.length} ${findings.length === 1 ? 'finding matches' : 'findings match'} in other states.`
+                      : `${findings.length} ${findings.length === 1 ? 'finding matches' : 'findings match'}, hidden by the severity, scope, cluster or instance filter.`
+                }
+                title={`No finding matches “${shownTerm}”`}
+              />
             ) : (
               <EmptyState
                 description={

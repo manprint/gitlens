@@ -13,6 +13,8 @@ import {
 export interface TableRows<T> {
   controls: TableStateControls
   filtered: readonly T[]
+  /** The filtered rows in table order, every page. */
+  sorted: readonly T[]
   page: Page<T>
   /** The column the rows are sorted by, when it exists and is sortable. */
   sortId: string | null
@@ -49,6 +51,7 @@ export function useTableRows<T>(
   return {
     controls: { ...controls, activeFilterCount },
     filtered,
+    sorted,
     page,
     sortId,
     options,

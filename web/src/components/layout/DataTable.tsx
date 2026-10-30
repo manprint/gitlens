@@ -60,6 +60,8 @@ export interface DataTableBaseProps<TData extends RowData> {
   toolbarExtra?: ReactNode
   /** The server's row budget. It reports truncation only together with total. */
   budget?: number
+  /** A sentence after the footer's visible range (the match count of a server search, D20). */
+  footerNote?: ReactNode
   scope?: string
   ariaLabel?: string
   /** Search box and filters above the table (D12). */
@@ -149,6 +151,7 @@ function DataTableView<TData extends RowData>({
   emptyState,
   total = data.length,
   budget,
+  footerNote,
   toolbarExtra,
   captionId,
   scope = 'rows',
@@ -398,6 +401,7 @@ function DataTableView<TData extends RowData>({
         scope={scope}
         total={total}
         {...(budget === undefined ? {} : { budget })}
+        {...(footerNote === undefined ? {} : { note: footerNote })}
       />
     </div>
   )

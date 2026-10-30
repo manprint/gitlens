@@ -648,8 +648,11 @@ describe('FindingsPage', () => {
     expect(within(summary).getByRole('button', { name: /Warning\s+1/ })).toHaveClass(
       'min-[1600px]:h-6',
     )
-    const description = within(section).getByText(/0 resolved findings are hidden/)
-    expect(description).toHaveClass('min-[1600px]:truncate')
+    // The count is a polite live region inside the truncated description line.
+    const description = within(section).getByText(/0 resolved findings are hidden/, {
+      selector: 'p.min-\\[1600px\\]\\:truncate > span',
+    })
+    expect(description).toHaveAttribute('aria-live', 'polite')
     expect(description).toHaveAttribute(
       'title',
       expect.stringMatching(/^1 of 2 findings shown\. By default, 1 muted/),
@@ -715,5 +718,219 @@ describe('FindingsPage cluster and instance filters', () => {
     expect(view.router.state.location.search).toBe(`?instance_id=${INSTANCE_ID}`)
     fireEvent.change(instance, { target: { value: '' } })
     expect(view.router.state.location.search).toBe('')
+  })
+})
+
+describe('FindingsPage search (D20)', () => {
+  const partner = [
+    finding({
+      finding_id: 'f-open',
+      title: 'Unused index on res_partner',
+      object_name: 'public.res_partner_ref_idx',
+      state: 'open',
+    }),
+    finding({
+      finding_id: 'f-resolved',
+      title: 'Bloated res_partner',
+      object_name: 'public.res_partner',
+      state: 'resolved',
+    }),
+  ]
+
+  function capture(requests: URL[], body: FindingRecord[]) {
+    return http.get('*/api/v1/findings', ({ request }) => {
+      requests.push(new URL(request.url))
+      return HttpResponse.json(body)
+    })
+  }
+
+  it('SRCH-UI-009 typing sends q, marks the matches and offers All states', async () => {
+    const requests: URL[] = []
+    server.use(capture(requests, [finding()]), ok('getAdvisorRules', [rule()]))
+    const view = await renderPage()
+    expect(requests.at(-1)?.searchParams.has('q')).toBe(false)
+    expect(screen.queryByRole('button', { name: 'All states' })).not.toBeInTheDocument()
+
+    server.use(capture(requests, partner))
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search findings' }), {
+      target: { value: 'res_partner' },
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300)
+    })
+    await flushNetwork(30)
+
+    expect(view.router.state.location.search).toBe('?q=res_partner')
+    expect(requests.at(-1)?.searchParams.get('q')).toBe('res_partner')
+    // The search reaches every state; the default view still shows the open ones.
+    expect(requests.at(-1)?.searchParams.get('state')).toBe('all')
+    const table = screen.getByRole('table', { name: 'Advisor findings' })
+    expect(
+      within(table)
+        .getAllByRole('mark')
+        .map((mark) => mark.textContent),
+    ).toEqual(['res_partner', 'res_partner'])
+    expect(within(table).queryByText(/Bloated/)).not.toBeInTheDocument()
+
+    const allStates = screen.getByRole('button', { name: 'All states' })
+    expect(allStates).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(allStates)
+    await flushNetwork(30)
+    expect(view.router.state.location.search).toContain('state=all')
+    expect(screen.getByRole('button', { name: 'All states' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    expect(
+      within(screen.getByRole('table', { name: 'Advisor findings' })).getByText(/Bloated/),
+    ).toBeInTheDocument()
+  })
+
+  it('SRCH-UI-009 a search with no match in the shown states offers to search them all', async () => {
+    server.use(ok('getFindings', [partner[1]!]), ok('getAdvisorRules', [rule()]))
+    const view = await renderPage('/findings?q=res_partner')
+
+    expect(screen.getByRole('heading', { name: 'No finding matches “res_partner”' })).toBeVisible()
+    expect(screen.getByText('1 finding matches in other states.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Search all states' }))
+    await flushNetwork(30)
+    expect(view.router.state.location.search).toContain('state=all')
+    // The button is gone: the search box keeps the keyboard.
+    expect(screen.getByRole('searchbox', { name: 'Search findings' })).toHaveFocus()
+    expect(screen.getByRole('table', { name: 'Advisor findings' })).toBeInTheDocument()
+  })
+
+  it('offers to clear the filters when they, not the state, hide the matches', async () => {
+    server.use(
+      ok('getFindings', [{ ...partner[0]!, severity: 'warning' }]),
+      ok('getAdvisorRules', [rule()]),
+    )
+    const view = await renderPage('/findings?q=res_partner&severity=critical')
+
+    expect(screen.getByRole('heading', { name: 'No finding matches “res_partner”' })).toBeVisible()
+    expect(
+      screen.getByText(
+        '1 finding matches, hidden by the severity, scope, cluster or instance filter.',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Search all states' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
+    await flushNetwork(30)
+    expect(screen.getByRole('searchbox', { name: 'Search findings' })).toHaveFocus()
+    expect(view.router.state.location.search).not.toContain('severity=')
+    expect(view.router.state.location.search).toContain('q=res_partner')
+    expect(screen.getByRole('table', { name: 'Advisor findings' })).toBeInTheDocument()
+  })
+
+  it('keeps the box when the server refuses the search, to change or clear it', async () => {
+    const long = 'x'.repeat(201)
+    server.use(
+      http.get('*/api/v1/findings', ({ request }) =>
+        new URL(request.url).searchParams.has('q')
+          ? HttpResponse.json(
+              { error: 'invalid q', detail: 'q must be 2–200 characters' },
+              { status: 400 },
+            )
+          : HttpResponse.json(partner),
+      ),
+      ok('getAdvisorRules', [rule()]),
+    )
+    const view = renderWithProviders(<FindingsPage />, { route: `/findings?q=${long}` })
+    await flushNetwork(60)
+
+    const box = screen.getByRole('searchbox', { name: 'Search findings' })
+    expect(box).toHaveValue(long)
+    expect(box).toHaveAttribute('maxlength', '200')
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }))
+    await flushNetwork(60)
+    expect(view.router.state.location.search).not.toContain('q=')
+    expect(screen.getByRole('table', { name: 'Advisor findings' })).toBeInTheDocument()
+  })
+
+  it('keeps the box, its text and focus while a corrected search loads after a failed one', async () => {
+    let release: (() => void) | undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    server.use(
+      http.get('*/api/v1/findings', async ({ request }) => {
+        if (new URL(request.url).searchParams.get('q') === 'res_partner') {
+          await gate
+          return HttpResponse.json(partner)
+        }
+        return HttpResponse.json(
+          { error: 'invalid q', detail: 'q must be 2–200 characters' },
+          { status: 400 },
+        )
+      }),
+      ok('getAdvisorRules', [rule()]),
+    )
+    renderWithProviders(<FindingsPage />, { route: `/findings?q=${'x'.repeat(201)}` })
+    await flushNetwork(60)
+
+    const box = () => screen.getByRole('searchbox', { name: 'Search findings' })
+    act(() => box().focus())
+    fireEvent.change(box(), { target: { value: 'res_partner' } })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300)
+    })
+    await flushNetwork(30)
+    expect(screen.getByRole('status', { name: 'Loading advisor findings' })).toBeInTheDocument()
+    expect(box()).toHaveValue('res_partner')
+    expect(box()).toHaveFocus()
+
+    release?.()
+    await flushNetwork(30)
+    expect(screen.getByRole('table', { name: 'Advisor findings' })).toBeInTheDocument()
+  })
+
+  it('never labels the shown findings with a search that failed (I-9)', async () => {
+    let release: (() => void) | undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const abc = [finding({ finding_id: 'f-abc', title: 'Unused index abc', state: 'open' })]
+    server.use(
+      http.get('*/api/v1/findings', async ({ request }) => {
+        const q = new URL(request.url).searchParams.get('q')
+        if (q === 'ab') {
+          return HttpResponse.json({ error: 'search failed', detail: 'boom' }, { status: 500 })
+        }
+        if (q === 'abc') await gate
+        return HttpResponse.json(abc)
+      }),
+      ok('getAdvisorRules', [rule()]),
+    )
+    await renderPage()
+    const box = () => screen.getByRole('searchbox', { name: 'Search findings' })
+    for (const value of ['ab', 'abc']) {
+      fireEvent.change(box(), { target: { value } })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300)
+      })
+      await flushNetwork(60)
+    }
+    expect(screen.queryAllByRole('mark')).toHaveLength(0)
+    expect(screen.queryByText(/matching “/)).not.toBeInTheDocument()
+
+    release?.()
+    await flushNetwork(30)
+    expect(new Set(screen.getAllByRole('mark').map((mark) => mark.textContent))).toEqual(
+      new Set(['abc']),
+    )
+    expect(screen.getByText(/1 of 1 findings matching “abc” shown/)).toHaveAttribute(
+      'aria-live',
+      'polite',
+    )
+  })
+
+  it('SRCH-UI-012 has no serious accessibility violations with a search', async () => {
+    vi.useRealTimers()
+    server.use(ok('getFindings', partner), ok('getAdvisorRules', [rule()]))
+    const { container } = renderWithProviders(<FindingsPage />, {
+      route: '/findings?q=res_partner',
+    })
+    await screen.findByRole('table', { name: 'Advisor findings' })
+    await expect(expectNoA11yViolations(container)).resolves.toBeUndefined()
   })
 })

@@ -862,9 +862,17 @@ export function useSilences(params: QueryParameters<'/api/v1/silences'> = {}) {
   })
 }
 
-export function useFindings(rawParams: QueryParameters<'/api/v1/findings'> = {}) {
+/**
+ * `keepPrevious` shows the findings already loaded while a changed search
+ * term is asked for (D20), so a search box above them stays in place.
+ */
+export function useFindings(
+  rawParams: QueryParameters<'/api/v1/findings'> = {},
+  { keepPrevious = false }: { keepPrevious?: boolean } = {},
+) {
   const params = withSearchTerm(rawParams)
   return useApiQuery({
+    keepPrevious,
     policy: REFRESH.findings,
     queryFn: (signal) =>
       getApi(() => client.GET('/api/v1/findings', { params: { query: params }, signal })),

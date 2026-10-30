@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react'
+import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Database, ListTree, Server } from 'lucide-react'
 
@@ -8,6 +8,7 @@ import type { Cluster } from '@/api/types'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { EmptyState, ErrorState } from '@/components/state'
+import { Button } from '@/components/ui/button'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { buildIndexRows } from '@/lib/indexAnalysis'
@@ -17,6 +18,7 @@ import { chooseInstance, readLastInstance } from '@/lib/lastInstance'
 import { CleanupPanel, type SiblingServer } from './CleanupPanel'
 import { DeadRowsPanel } from './DeadRowsPanel'
 import { IndexesPanel } from './IndexesPanel'
+import { SearchEverythingBox, SearchEverythingResults } from './SearchEverything'
 import { INDEX_TABLE_IDS, INDEX_VIEW_PARAM } from './indexViews'
 
 /** The most indexes the API returns for one server. */
@@ -94,6 +96,27 @@ function InstanceIndexes({ serverControl, instanceId, siblings }: AnalysisProps)
   const database = searchParams.get('db') ?? ''
   const tab = readTab(searchParams.get('tab'))
 
+  // A search hit opens its row (D20): `focus` names the row key. The open
+  // tab's table turns to the row and expands it, then the key leaves the URL.
+  // The page shows current metrics only, so a row may be gone: say so.
+  const focusKey = searchParams.get('focus') ?? undefined
+  const [missing, setMissing] = useState<{ key: string; tab: TabValue } | null>(null)
+  if (focusKey !== undefined && missing !== null && missing.key !== focusKey) setMissing(null)
+  const focusDone = useCallback(
+    (found: boolean) => {
+      setSearchParams(
+        (current) => {
+          const next = new URLSearchParams(current)
+          next.delete('focus')
+          return next
+        },
+        { replace: true },
+      )
+      setMissing(found || focusKey === undefined ? null : { key: focusKey, tab })
+    },
+    [focusKey, setSearchParams, tab],
+  )
+
   const indexesQuery = useInstanceIndexes(instanceId, { limit: INDEX_LIMIT })
   const findingsQuery = useFindings({ instance_id: instanceId, limit: 1000 })
   const response = indexesQuery.data
@@ -124,6 +147,7 @@ function InstanceIndexes({ serverControl, instanceId, siblings }: AnalysisProps)
     else next.set('tab', value)
     // The view belongs to the Indexes tab: a tab change starts on its first view.
     next.delete(INDEX_VIEW_PARAM)
+    setMissing(null)
     setSearchParams(next, { replace: true })
   }
 
@@ -146,6 +170,7 @@ function InstanceIndexes({ serverControl, instanceId, siblings }: AnalysisProps)
       className="flex flex-wrap items-end gap-x-6 gap-y-4 min-[1600px]:flex-nowrap min-[1600px]:items-center min-[1600px]:gap-3"
       data-testid="index-page-controls"
     >
+      <SearchEverythingBox instanceId={instanceId} />
       <TabsList aria-label="Index management sections" variant="line">
         {TABS.map((option) => (
           <TabsTrigger key={option.value} value={option.value}>
@@ -193,12 +218,30 @@ function InstanceIndexes({ serverControl, instanceId, siblings }: AnalysisProps)
   return (
     <Tabs className="gap-6 min-[1600px]:gap-4" onValueChange={setTab} value={tab}>
       <IndexPageHeader actions={controls} />
+      <SearchEverythingResults database={database} instanceId={instanceId} />
+      {missing !== null ? (
+        <div
+          className="border-warning/40 bg-warning/10 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-4 py-2 text-sm"
+          role="status"
+        >
+          <span className="min-w-0">
+            {missing.tab === 'dead-rows' ? 'The table' : 'The index'}{' '}
+            <code className="font-mono text-xs">{missing.key}</code> is not in the current list:
+            Index analysis shows only what the agent reported in its latest collection.
+          </span>
+          <Button onClick={() => setMissing(null)} size="xs" type="button" variant="ghost">
+            Dismiss
+          </Button>
+        </div>
+      ) : null}
       <TabsContent value="indexes">
         {indexesState ?? (
           <IndexesPanel
             dataUpdatedAt={indexesQuery.dataUpdatedAt}
             database={database}
             findings={findings}
+            focusKey={tab === 'indexes' ? focusKey : undefined}
+            onFocusDone={focusDone}
             findingsPending={findingsQuery.isPending}
             incomplete={response?.truncated === true || allRows.length >= INDEX_LIMIT}
             limit={INDEX_LIMIT}
@@ -211,7 +254,13 @@ function InstanceIndexes({ serverControl, instanceId, siblings }: AnalysisProps)
         {indexesState ?? <CleanupPanel instanceId={instanceId} rows={scoped} siblings={siblings} />}
       </TabsContent>
       <TabsContent value="dead-rows">
-        <DeadRowsPanel database={database} findings={findings} instanceId={instanceId} />
+        <DeadRowsPanel
+          database={database}
+          findings={findings}
+          focusKey={tab === 'dead-rows' ? focusKey : undefined}
+          instanceId={instanceId}
+          onFocusDone={focusDone}
+        />
       </TabsContent>
     </Tabs>
   )

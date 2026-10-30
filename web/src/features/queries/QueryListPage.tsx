@@ -4,20 +4,21 @@ import { useMemo } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 
 import { useStatements } from '@/api/queries'
-import {
-  DataTable,
-  type DataTableProps,
-  type DataTableToolbar,
-} from '@/components/layout/DataTable'
+import { DataTable, type DataTableProps } from '@/components/layout/DataTable'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { FULL_SEARCH_HINT, SearchBox } from '@/components/layout/SearchBox'
 import { Section } from '@/components/layout/Section'
 import { SqlText } from '@/components/layout/SqlText'
+import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/state/EmptyState'
 import { ErrorState } from '@/components/state/ErrorState'
 import { Truncated } from '@/components/state/Truncated'
 import { Unknown } from '@/components/state/Unknown'
 import { formatBytes, formatCount, formatMilliseconds, formatPercent } from '@/lib/format'
+import { matchCountNote, searchTermOf } from '@/lib/highlight'
+import { useKeepFocus } from '@/hooks/useKeepFocus'
+import { useLegacySearchParam, useSearchDraft, useShownTerm } from '@/hooks/useSearch'
 import {
   normaliseQueryText,
   shareOfTotal,
@@ -61,6 +62,8 @@ interface StatementApiResponse {
   enabled?: boolean
   statements: StatementRow[]
   truncated: boolean
+  /** Sent with `q` only: more statements match than the limit returned (D20). */
+  has_more?: boolean
 }
 
 function readSort(value: string | null): StatementSort {
@@ -82,7 +85,7 @@ function formatNumber(value: number | null | undefined): string {
     : new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value)
 }
 
-function queryTextCell(row: StatementDisplayRow, instanceId: string) {
+function queryTextCell(row: StatementDisplayRow, instanceId: string, term: string) {
   const queryText = row.query_text ?? ''
   const normalised = normaliseQueryText(queryText)
 
@@ -101,10 +104,10 @@ function queryTextCell(row: StatementDisplayRow, instanceId: string) {
             className="cursor-pointer truncate text-sm min-[1600px]:leading-5 min-[1600px]:[&_code]:leading-5"
             title={normalised}
           >
-            <SqlText sql={normalised} />
+            <SqlText highlight={term} sql={normalised} />
           </summary>
           <pre className="bg-muted/60 mt-2 max-h-48 overflow-auto rounded-lg border p-3 text-xs whitespace-pre-wrap">
-            <SqlText sql={queryText} />
+            <SqlText highlight={term} sql={queryText} />
           </pre>
         </details>
       ) : (
@@ -114,21 +117,20 @@ function queryTextCell(row: StatementDisplayRow, instanceId: string) {
   )
 }
 
-// The `Sort statements` select ranks on the server; the column sort buttons
-// reorder the loaded statements. The search matches the loaded rows until the
-// server search arrives (D20).
-const STATEMENT_TOOLBAR: DataTableToolbar<StatementDisplayRow> = {
-  searchFields: [(row) => row.query_text, (row) => row.queryid],
-}
-
-function statementColumns(instanceId: string): DataTableProps<StatementDisplayRow>['columns'] {
+// The `Sort statements` select ranks on the server and the search box filters
+// there, over the whole window (D20); the column sort buttons reorder the
+// loaded statements.
+function statementColumns(
+  instanceId: string,
+  term: string,
+): DataTableProps<StatementDisplayRow>['columns'] {
   return [
     {
       id: 'query',
       header: 'Query',
       // Takes the width the fixed-width figures leave from 1600 px (D26).
       enableSorting: false,
-      cell: ({ row }) => queryTextCell(row.original, instanceId),
+      cell: ({ row }) => queryTextCell(row.original, instanceId, term),
     },
     {
       id: 'calls',
@@ -282,15 +284,24 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
   const instanceId = instanceIdOverride ?? routeInstanceId ?? ''
   const sort = readSort(searchParams.get('sort'))
   const database = searchParams.get('db') ?? undefined
+  const q = searchParams.get('q') ?? ''
+  const term = searchTermOf(q)
+  // An older link searched the table (`statement-statistics.q`): it now searches the server.
+  useLegacySearchParam('statement-statistics.q')
+  // The box moves between the toolbar and a bar: its text lives here.
+  const searchDraft = useSearchDraft(q)
   const params = {
     instance_id: instanceId,
     limit: STATEMENT_LIMIT,
     order_by: sort,
     ...(database === undefined ? {} : { database }),
+    ...(term === '' ? {} : { q: term }),
   }
   const statementsQuery = useStatements(params, queryWindowOf(range))
 
   const response = statementsQuery.data as StatementApiResponse | undefined
+  // The term the listed statements answer: the previous one while a new search loads.
+  const shownTerm = useShownTerm(term, statementsQuery.isPlaceholderData, statementsQuery.isSuccess)
   const rows = useMemo<StatementDisplayRow[]>(() => {
     const statementRows = response?.statements ?? []
     const shares = shareOfTotal(statementRows)
@@ -308,8 +319,55 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
     setSearchParams(next, { replace: true })
   }
 
+  function setSearch(value: string) {
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current)
+        if (value.trim() === '') next.delete('q')
+        else next.set('q', value)
+        // Another search is another result: back to the first page (D23); the
+        // table's own search is replaced by this box.
+        next.delete('statement-statistics.page')
+        next.delete('statement-statistics.q')
+        return next
+      },
+      { replace: true },
+    )
+  }
+
+  // The no-match action: the search ends and the box keeps the keyboard.
+  function clearSearch() {
+    setSearch('')
+    document.getElementById('statement-search')?.focus()
+  }
+
+  // The box sits in the table's toolbar line, or above the empty state without rows.
+  const keepFocus = useKeepFocus(rows.length === 0 ? 'bar' : 'table')
+  const searchBox = (
+    // `contents`: the wrapper only keeps focus as the box moves, it adds no box.
+    <div className="contents" {...keepFocus}>
+      <SearchBox
+        busy={statementsQuery.isFetching && term !== ''}
+        draft={searchDraft}
+        hint={FULL_SEARCH_HINT}
+        id="statement-search"
+        label="Search statements"
+        onChange={setSearch}
+        placeholder="Query text, queryid or database"
+        value={q}
+      />
+    </div>
+  )
+
+  // Loading and failing draw the box in the same place, so it keeps its text
+  // and focus while a corrected search loads after a failed one.
   if (statementsQuery.isPending && response === undefined) {
-    return <div role="status">Loading statements…</div>
+    return (
+      <div className="space-y-4">
+        <div className="flex">{searchBox}</div>
+        <div role="status">Loading statements…</div>
+      </div>
+    )
   }
 
   if (statementsQuery.error?.kind === 'not_found') {
@@ -317,18 +375,22 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
   }
 
   if (statementsQuery.error && response === undefined) {
+    // The box stays, so a search the server refused can be changed or cleared.
     return (
-      <ErrorState
-        endpoint="statements"
-        failure={statementsQuery.error}
-        onRetry={() => void statementsQuery.refetch()}
-      />
+      <div className="space-y-4">
+        <div className="flex">{searchBox}</div>
+        <ErrorState
+          endpoint="statements"
+          failure={statementsQuery.error}
+          onRetry={() => void statementsQuery.refetch()}
+        />
+      </div>
     )
   }
 
   const disabled = response !== undefined && isDisabledResponse(response)
   // Statements collected before the check was skipped are still shown.
-  if (disabled && rows.length === 0) {
+  if (disabled && rows.length === 0 && term === '') {
     return <DisabledStatementsState reason={response.disabled_reason} />
   }
 
@@ -397,20 +459,40 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
             {skipSentence(response.disabled_reason)} The statements below were collected earlier.
           </p>
         ) : null}
+        {rows.length === 0 ? <div className="mb-3 flex">{searchBox}</div> : null}
         <DataTable
           ariaLabel="Statement statistics"
           tableId="statement-statistics"
-          toolbar={STATEMENT_TOOLBAR}
-          columns={statementColumns(instanceId)}
+          columns={statementColumns(instanceId, shownTerm)}
           data={rows}
           emptyState={
-            <EmptyState
-              title="No statements"
-              description="No pg_stat_statements entries match the selected instance, database, and time range."
-            />
+            shownTerm === '' ? (
+              <EmptyState
+                title="No statements"
+                description="No pg_stat_statements entries match the selected instance, database, and time range."
+              />
+            ) : (
+              <EmptyState
+                action={
+                  <Button onClick={() => clearSearch()} size="sm" type="button" variant="outline">
+                    Show all statements
+                  </Button>
+                }
+                description="The search covers every statement collected on this instance in the time range, not only the listed ones. Try another term or a wider range."
+                title={`No statement matches “${shownTerm}” in this range`}
+              />
+            )
           }
+          {...(shownTerm === ''
+            ? {}
+            : { footerNote: matchCountNote(rows.length, response?.has_more === true) })}
           scope="statements"
-          toolbarExtra={statementNotes}
+          toolbarExtra={
+            <>
+              {searchBox}
+              {statementNotes}
+            </>
+          }
         />
         {/* Without rows the table has no toolbar line: the notes follow the empty state. */}
         {rows.length === 0 ? <div className="mt-3 flex">{statementNotes}</div> : null}

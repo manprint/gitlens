@@ -5,19 +5,19 @@ import { Database, Gauge, Hash, Server, Timer } from 'lucide-react'
 import { useClusters, useInstanceDatabases, useStatements } from '@/api/queries'
 import type { Cluster } from '@/api/types'
 import { CopyButton } from '@/components/layout/CopyButton'
-import {
-  DataTable,
-  type DataTableProps,
-  type DataTableToolbar,
-} from '@/components/layout/DataTable'
+import { DataTable, type DataTableProps } from '@/components/layout/DataTable'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { MetricTile } from '@/components/layout/MetricTile'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { FULL_SEARCH_HINT, HighlightedText, SearchBox } from '@/components/layout/SearchBox'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { useKeepFocus } from '@/hooks/useKeepFocus'
+import { useLegacySearchParam, useSearchDraft, useShownTerm } from '@/hooks/useSearch'
 import { useTimeRange } from '@/hooks/useTimeRange'
 import { formatCount, formatMilliseconds, formatPercent } from '@/lib/format'
+import { matchCountNote, searchTermOf } from '@/lib/highlight'
 import {
   normaliseQueryText,
   shareOfTotal,
@@ -86,6 +86,8 @@ interface StatementsPayload {
   disabled_reason?: string
   statements: StatementRow[]
   truncated: boolean
+  /** Sent with `q` only: more statements match than the limit returned (D20). */
+  has_more?: boolean
 }
 
 interface SlowRow {
@@ -97,16 +99,7 @@ interface SlowRow {
   share: number | null
 }
 
-// The search acts on the loaded statements until the server search arrives (D20).
-const SLOW_TOOLBAR: DataTableToolbar<SlowRow> = {
-  searchFields: [
-    (slow) => slow.row.query_text,
-    (slow) => String(slow.row.queryid),
-    (slow) => slow.row.datname,
-  ],
-}
-
-function slowColumns(instanceId: string): DataTableProps<SlowRow>['columns'] {
+function slowColumns(instanceId: string, term: string): DataTableProps<SlowRow>['columns'] {
   return [
     {
       id: 'rank',
@@ -143,7 +136,7 @@ function slowColumns(instanceId: string): DataTableProps<SlowRow>['columns'] {
               {text ? (
                 <>
                   <span className="sr-only">Query {String(statement.queryid)}: </span>
-                  {text}
+                  <HighlightedText q={term} text={text} />
                 </>
               ) : (
                 `Query ${String(statement.queryid)}`
@@ -218,6 +211,13 @@ function InstanceStatements({ controls, instanceId, ranking }: InstanceStatement
   const [searchParams, setSearchParams] = useSearchParams()
   const { range } = useTimeRange()
   const database = searchParams.get('db') ?? undefined
+  // The search runs on the server over the whole window (D20); one box, `?q=`.
+  const q = searchParams.get('q') ?? ''
+  const term = searchTermOf(q)
+  // An older link searched the table (`slow.q`): it now searches the server.
+  useLegacySearchParam('slow.q')
+  // The box moves between the toolbar and a bar: its text lives here.
+  const searchDraft = useSearchDraft(q)
   const databasesQuery = useInstanceDatabases(instanceId)
   const statementsQuery = useStatements(
     {
@@ -225,10 +225,13 @@ function InstanceStatements({ controls, instanceId, ranking }: InstanceStatement
       limit: STATEMENT_FETCH_LIMIT,
       order_by: ORDER_BY[ranking],
       ...(database === undefined ? {} : { database }),
+      ...(term === '' ? {} : { q: term }),
     },
     queryWindowOf(range),
   )
   const response = statementsQuery.data as StatementsPayload | undefined
+  // The term the listed statements answer: the previous one while a new search loads.
+  const shownTerm = useShownTerm(term, statementsQuery.isPlaceholderData, statementsQuery.isSuccess)
   const rows = useMemo(() => response?.statements ?? [], [response?.statements])
   const shares = useMemo(() => shareOfTotal(rows), [rows])
   const summaries = useMemo(() => rows.map((row) => summariseStatement(row)), [rows])
@@ -246,7 +249,7 @@ function InstanceStatements({ controls, instanceId, ranking }: InstanceStatement
       })),
     [rows, shares, summaries],
   )
-  const columns = useMemo(() => slowColumns(instanceId), [instanceId])
+  const columns = useMemo(() => slowColumns(instanceId, shownTerm), [instanceId, shownTerm])
   const totalTime = summaries.reduce((sum, summary) => sum + (summary.total ?? 0), 0)
   const totalCalls = summaries.reduce((sum, summary) => sum + (summary.calls ?? 0), 0)
   const slowestMean = Math.max(0, ...summaries.map((summary) => summary.mean ?? 0))
@@ -260,10 +263,42 @@ function InstanceStatements({ controls, instanceId, ranking }: InstanceStatement
     setSearchParams(next, { replace: true })
   }
 
+  function setSearch(value: string) {
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current)
+        if (value.trim() === '') next.delete('q')
+        else next.set('q', value)
+        // Another search is another result: back to the first page (D23).
+        next.delete('slow.page')
+        // The table's own search, which this box replaces (D20).
+        next.delete('slow.q')
+        return next
+      },
+      { replace: true },
+    )
+  }
+
+  // The no-match action: the search ends and the box keeps the keyboard.
+  function clearSearch() {
+    setSearch('')
+    document.getElementById('slow-search')?.focus()
+  }
+
   // The server, ranking and database controls. With statements to list they sit in
   // the table's toolbar line beside the search box (15.3, D26); otherwise in a bar.
   const controlBar = (
     <>
+      <SearchBox
+        busy={statementsQuery.isFetching && term !== ''}
+        draft={searchDraft}
+        hint={FULL_SEARCH_HINT}
+        id="slow-search"
+        label="Search statements"
+        onChange={setSearch}
+        placeholder="Query text, queryid or database"
+        value={q}
+      />
       {controls}
       <div className="space-y-1.5">
         <label
@@ -411,10 +446,22 @@ function InstanceStatements({ controls, instanceId, ranking }: InstanceStatement
         </div>
         {rows.length === 0 ? (
           <div className="p-5">
-            <EmptyState
-              description="No pg_stat_statements entries match this server, database and time range. Try a wider range."
-              title="No statements yet"
-            />
+            {shownTerm === '' ? (
+              <EmptyState
+                description="No pg_stat_statements entries match this server, database and time range. Try a wider range."
+                title="No statements yet"
+              />
+            ) : (
+              <EmptyState
+                action={
+                  <Button onClick={() => clearSearch()} size="sm" type="button" variant="outline">
+                    Show all statements
+                  </Button>
+                }
+                description="The search covers every statement collected for this server and database in the time range, not only the ranked ones. Try another term or a wider range."
+                title={`No statement matches “${shownTerm}” in this range`}
+              />
+            )}
           </div>
         ) : (
           <div className="p-5 min-[1600px]:p-3">
@@ -423,9 +470,11 @@ function InstanceStatements({ controls, instanceId, ranking }: InstanceStatement
               columns={columns}
               data={slowRows}
               emptyState={null}
+              {...(shownTerm === ''
+                ? {}
+                : { footerNote: matchCountNote(rows.length, response?.has_more === true) })}
               scope="statements"
               tableId="slow"
-              toolbar={SLOW_TOOLBAR}
               toolbarExtra={movableControls}
             />
           </div>

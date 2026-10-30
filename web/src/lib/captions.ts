@@ -138,6 +138,15 @@ export const CAPTIONS = {
     howToRead:
       'After a start every check runs once within 30 s to 10 min, depending on its interval; until then pages may show gaps. A failed check returned an error on its last run, so it has no current result: the banner stays and names it until a run succeeds.',
   },
+  'indexes.search': {
+    what: 'Indexes, tables, columns and statements whose name, table, definition, column type, text, queryid or database contains the term, in the picked database if any.',
+    source:
+      'searchInstance: the index definitions and table columns the agent reported (index_def and table_columns facts) and the statement texts of pg_stat_statements (query_texts), matched ignoring case.',
+    window:
+      'Objects seen and statements run in the selected time range. Each group lists at most 50 matches and counts them all.',
+    howToRead:
+      'The marked text is what matched. A link opens the index or table, expanded, on its tab, or the statement search on Slowest queries, in the same time range.',
+  },
 } as const satisfies Record<string, CaptionEntry>
 
 export type CaptionId = keyof typeof CAPTIONS

@@ -117,3 +117,19 @@ the HA stack (the cluster `events` tab still renders an unpaged card list).
 | `/alerts/silences` | 1080 / 950 | 1920 | 36 | — | — | — | — (0) | — | — | fits; unproven at 20 rows (no data) |
 | `/settings` (Inventory: instances) and `?view=tiers\|agents`, `?tab=preferences\|retention\|advisor\|notifications\|names\|audit`, `?tab=audit&view=server` | 1080 / 950 | 1920 | 36 | 36 | — | — | — | — | — | fits (SET-E2E-001, FHD-FIT-001, 11.1; tiers 903 px content); placeholders until 11.2–11.5 |
 | `/settings?view=databases` | 1080 / 950 | 1920 | 36 | 36 | — | — | — | — | — | fits with one instance; unproven with several instances (one table per instance; R-11.1 follow-up, re-measure at 7.x/15.4) |
+
+## Search states (12.2, D20)
+
+`web/e2e/fullhd_routes.ts` lists the search state of Slowest queries
+(`/queries?q=res_partner`), Query inspector
+(`/instances/:instanceId/queries?q=res_partner`) and Advisor findings
+(`/findings?q=index`), pending 12.3: the box sits on the toolbar line and the
+matches fill the same table, so these pages must fit like their default state.
+
+Exception: the search-results state of Index analysis (`/indexes?q=…`, any
+tab). The grouped results of "Search everything" are a user action shown above
+the tab's table, like an expanded row (D26), so that state is not listed and
+may scroll the page. From 1600 px each result list is capped at 160 px and
+scrolls inside its group, so at 1920×950 the tab's table header stays on
+screen (estimated about 640 px down; 12.3 confirms it live). Without `q` the
+page is measured as before.
