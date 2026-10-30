@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useState, type Ref } from 'react'
 import { Keyboard, LogOut, Menu, Monitor, Moon, Sun } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
@@ -25,6 +25,14 @@ export interface HeaderProps {
   dataUpdatedAt?: number
   /** Opens the navigation drawer on narrow screens. */
   onOpenNavigation?: () => void
+  /**
+   * When set, the header row has a status slot after the breadcrumbs, in the
+   * space the row leaves free, and this ref receives it: the shell moves the
+   * instance status banners into it from 1600 px (13.3). The slot shrinks to
+   * nothing before it moves the controls or wraps the row; it clips what does
+   * not fit, with room for a focus ring.
+   */
+  statusSlot?: Ref<HTMLDivElement> | undefined
 }
 
 const SHORTCUTS: readonly (readonly [readonly string[], string])[] = [
@@ -94,6 +102,7 @@ export function Header({
   connection = defaultConnection,
   dataUpdatedAt = 0,
   onOpenNavigation,
+  statusSlot,
 }: HeaderProps) {
   const navigate = useNavigate()
   const signOut = useSignOut()
@@ -178,8 +187,11 @@ export function Header({
 
   return (
     <header className="bg-card/85 supports-[backdrop-filter]:bg-card/70 sticky top-0 z-20 border-b backdrop-blur">
-      <div className="flex min-h-14 flex-wrap items-center justify-between gap-3 px-4 py-2 sm:px-6 xl:flex-nowrap">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
+      <div
+        className="flex min-h-14 flex-wrap items-center justify-between gap-3 px-4 py-2 sm:px-6 xl:flex-nowrap"
+        data-testid="header-row"
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-2" data-testid="header-start">
           {onOpenNavigation ? (
             <Button
               aria-label="Open navigation"
@@ -192,8 +204,18 @@ export function Header({
             </Button>
           ) : null}
           <Breadcrumbs />
+          {statusSlot ? (
+            <div
+              ref={statusSlot}
+              className="flex min-w-0 flex-1 items-center overflow-x-clip p-[3px]"
+              data-testid="header-status"
+            />
+          ) : null}
         </div>
-        <div className="flex min-w-0 flex-wrap items-center gap-2 xl:shrink-0">
+        <div
+          className="flex min-w-0 flex-wrap items-center gap-2 xl:shrink-0"
+          data-testid="header-controls"
+        >
           <TimeRangePicker />
           <span aria-hidden="true" className="bg-border mx-1 hidden h-6 w-px sm:block" />
           <span className="hidden sm:contents">

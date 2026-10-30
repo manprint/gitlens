@@ -166,19 +166,29 @@ const FIELDS = [
   ['thresholds', 'Thresholds'],
 ] as const
 
-/** The ⓘ of a caption: the `what` sentence and the fields the entry has. */
+/**
+ * The ⓘ of a caption: the `what` sentence and the fields the entry has.
+ * `extra` comes first: the live state a compact element cannot show in full
+ * (a truncated status line), so keyboard and touch users reach it too, as the
+ * button's description and in the pinned tooltip.
+ */
 export function InfoHint({
   id,
   label,
   className,
+  extra,
 }: {
   id: CaptionId
   label: string
   className?: string
+  extra?: ReactNode
 }) {
   const entry = CAPTIONS[id]
   return (
     <HintButton className={className} label={label}>
+      {extra === undefined ? null : (
+        <div className="text-foreground mb-2 space-y-1 border-b pb-2 text-sm">{extra}</div>
+      )}
       <p className="text-foreground mb-2 text-sm">{entry.what}</p>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
         {FIELDS.map(([key, name]) => {

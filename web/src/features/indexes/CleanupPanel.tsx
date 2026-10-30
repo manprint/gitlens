@@ -1,7 +1,7 @@
 import { Fragment, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 
-import { useInstanceTables } from '@/api/queries'
+import { useAdvisorWindows, useInstanceTables } from '@/api/queries'
 import { CopyButton } from '@/components/layout/CopyButton'
 import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { EmptyState } from '@/components/state'
@@ -14,6 +14,8 @@ import {
   cleanupScript,
   indexWriteRates,
   summariseCleanup,
+  UNUSED_INDEX_MIN_BYTES,
+  unusedWindowPhrase,
   type CleanupCandidate,
   type CleanupReason,
 } from '@/lib/indexCleanup'
@@ -252,16 +254,26 @@ export function CleanupPanel({ instanceId, rows, siblings }: CleanupPanelProps) 
     () => indexWriteRates(tablesQuery.data?.items ?? []),
     [tablesQuery.data],
   )
-  const candidates = useMemo(() => buildCleanup(rows, writeRates), [rows, writeRates])
+  // The configured window names the length when no finding carries it; any
+  // console session may read it. Until it loads, the texts name no length.
+  const windowsQuery = useAdvisorWindows()
+  const configuredWindow =
+    windowsQuery.data?.find((window) => window.key === 'window.unused_index')?.seconds ?? null
+  const candidates = useMemo(
+    () => buildCleanup(rows, writeRates, configuredWindow),
+    [rows, writeRates, configuredWindow],
+  )
   const totalBytes = useMemo(() => rows.reduce((sum, row) => sum + (row.bytes ?? 0), 0), [rows])
   const summary = useMemo(() => summariseCleanup(candidates, totalBytes), [candidates, totalBytes])
-  const script = useMemo(() => cleanupScript(candidates), [candidates])
+  const script = useMemo(
+    () => cleanupScript(candidates, configuredWindow),
+    [candidates, configuredWindow],
+  )
   const statistical = candidates.filter((candidate) => candidate.basis === 'statistics').length
 
   const clusterText = `This server is part of a cluster. Check ${siblings.map((sibling) => sibling.label).join(', ')} before you drop anything: scans are counted on the server that runs them, so an index with no scan here may be in use on a standby.`
   const statisticalHeadline = `${formatCount(statistical)} ${statistical === 1 ? 'candidate rests' : 'candidates rest'} on raw counters.`
-  const statisticalText =
-    'The advisor calls an index unused only after 7 days of usage history. Until then "never scanned" means no scan since the statistics were last reset.'
+  const statisticalText = `"Never scanned" means no scan since the statistics were last reset. The advisor calls an index unused only after ${unusedWindowPhrase(rows, configuredWindow)} with no scan, and never one of ${formatBytes(UNUSED_INDEX_MIN_BYTES)} or less.`
   const notes =
     siblings.length > 0 || statistical > 0 ? (
       <>

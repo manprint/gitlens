@@ -118,7 +118,7 @@ export const CAPTIONS = {
     unit: 'hours or days',
     window: 'Between 1 hour and 90 days.',
     howToRead:
-      'A shorter window reports sooner and can raise false positives. The advisor keeps its 7-day windows until a later release reads these values.',
+      'A shorter window reports sooner and can raise false positives. The advisor applies a saved window at its next evaluation. An index is judged unused once pglens history covers the unused-index window with no scan of it. On PostgreSQL 16 and later the statistics age counts only for an index never scanned since the reset: such an index is judged unused once the reset is a window old, or at once when its time is unknown. The backup-history window only sets how long an instance must be monitored before a missing base backup is reported; whatever the window, a base backup counts as recent for 7 days (No recent base backup) and as a backup strategy for 30 days (No visible backup strategy).',
   },
   'settings.notifications': {
     what: 'Which alert delivery channels are configured, from the server environment or the console, the host each posts to, and a test message per channel.',
@@ -128,6 +128,15 @@ export const CAPTIONS = {
       'Read when the tab opens. An address stored from the console applies at once and overrides the environment; a change of the environment needs a server restart.',
     howToRead:
       'Send test posts "pglens test notification" through the same channel the alerts use and waits at most 10 s; a failure shows the error with the address removed.',
+  },
+  'instance.coverage': {
+    what: 'How many of the checks the agent schedules for this instance have stored a result since the agent last started.',
+    source:
+      'getCoverage: the start time and check intervals the agent sends with every push, merged with the newest stored result of each check (check_results).',
+    unit: 'checks',
+    window: 'Since the agent started; refreshed every 15 s.',
+    howToRead:
+      'After a start every check runs once within 30 s to 10 min, depending on its interval; until then pages may show gaps. A failed check returned an error on its last run, so it has no current result: the banner stays and names it until a run succeeds.',
   },
 } as const satisfies Record<string, CaptionEntry>
 

@@ -6,7 +6,7 @@ import { promisify } from 'node:util'
 import type { Page } from '@playwright/test'
 
 import { expect, test } from './fixtures'
-import { assertFits, measureRoutes } from './fullhd_fit'
+import { assertFits, measureRoutes, routeUrl, routeValues } from './fullhd_fit'
 import { FULLHD_ROUTES, fullHdRoute, routePathname } from './fullhd_routes'
 import { STACK_DIR, stackGoogleChatSecrets } from './notification_secrets'
 import { BUDGET } from './qa/budget'
@@ -1991,4 +1991,241 @@ test('DL-E2E-001 real deadlocks show in the activity, the Locks and Overview til
   } finally {
     await runCleanups()
   }
+})
+
+/**
+ * The banner's count, "x of y checks have a current result" above the page or
+ * "x/y checks" in the header row, or null when it reads otherwise.
+ */
+function coverageCounts(text: string): { reported: number; total: number } | null {
+  const match = /(\d+)(?: of |\/)(\d+) checks/.exec(text)
+  return match ? { reported: Number(match[1]), total: Number(match[2]) } : null
+}
+
+/** What getCoverage reports for the instance now. */
+async function liveCoverage(
+  api: Parameters<typeof pickInstance>[0],
+  instanceId: string,
+): Promise<{
+  agentStartedAt: string | null
+  reported: number
+  total: number
+  pending: string[]
+  failed: string[]
+}> {
+  const response = await api.get(`/api/v1/instances/${instanceId}/coverage`)
+  expect(response.status(), 'getCoverage answers').toBe(200)
+  const body = (await response.json()) as {
+    agent_started_at: string | null
+    reported: number
+    total: number
+    checks: { check: string; state: string }[]
+  }
+  const named = (state: string) =>
+    body.checks.filter((check) => check.state === state).map((check) => check.check)
+  return {
+    agentStartedAt: body.agent_started_at,
+    reported: body.reported,
+    total: body.total,
+    pending: named('pending'),
+    failed: named('failed'),
+  }
+}
+
+test('COV-E2E-001 after an agent restart the data-collection banner counts checks with a current result, fits Full HD, and disappears when all have one', async ({
+  api,
+  signedInPage: page,
+}) => {
+  // The banner is polled for up to 15 minutes, the cold-start acceptance (13.3).
+  test.setTimeout(liveTimeout(0, 900_000))
+  const startedAt = Date.now()
+  const deadline = startedAt + 900_000
+  const remaining = () => Math.max(1_000, deadline - Date.now())
+  const browserErrors = collectConsoleErrors(page)
+  const instanceId = await pickInstance(api)
+
+  // This spec only means something right after the agent starts: it runs
+  // within 2 minutes of the restart in 13.3 S3 or of a G-DEPLOY that restarts
+  // the agent, and is not part of any later "all specs" run.
+  const restartInstruction =
+    'COV-E2E-001 must run within 2 minutes of an agent restart: run `docker compose restart pglens-agent` (or G-DEPLOY) in the stack directory, then start this spec again'
+  // Right after a restart the server may still hold the previous agent's
+  // start until the new agent's first push lands, so the start is polled for
+  // up to 60 s before the spec gives up.
+  // An object, so the closure's write is seen by the catch below.
+  const agent: { startedAt: string | null } = { startedAt: null }
+  const startAge = async () => {
+    agent.startedAt = (await liveCoverage(api, instanceId)).agentStartedAt
+    const started = agent.startedAt === null ? NaN : Date.parse(agent.startedAt)
+    return Number.isFinite(started) ? (startedAt - started) / 1000 : Infinity
+  }
+  try {
+    await expect
+      .poll(startAge, { intervals: [2_000, 5_000], timeout: 60_000 })
+      .toBeLessThanOrEqual(120)
+  } catch (error) {
+    const seen = agent.startedAt
+    throw new Error(
+      `${restartInstruction} (${seen === null ? 'the agent reports no start time' : `the agent started at ${seen}, more than 120 s before this test`})`,
+      { cause: error },
+    )
+  }
+
+  await page.setViewportSize({ width: 1920, height: 1080 })
+  await page.goto(`/instances/${instanceId}`)
+  const banner = page.getByTestId('coverage-banner')
+  await expect(banner, restartInstruction).toBeVisible({ timeout: 30_000 })
+  await expect(banner).toHaveAttribute('role', 'status')
+  await expect(banner).toHaveAttribute('aria-live', 'polite')
+  await expect(banner).toHaveAttribute('data-caption-id', 'instance.coverage')
+  // From 1600 px the banner is a line of the header row, so it adds no height
+  // to the page (D26); below it, it sits above the page.
+  await expect(
+    banner.locator('xpath=ancestor::header'),
+    'at 1920 px the banner is inside the header',
+  ).toHaveCount(1)
+  const first = coverageCounts((await banner.textContent()) ?? '')
+  expect(first, 'the banner says "x/y checks"').not.toBeNull()
+  expect(first!.reported).toBeLessThan(first!.total)
+  test.info().annotations.push({
+    type: 'COV-E2E-001 first',
+    description: `${first!.reported} of ${first!.total} checks at ${new Date().toISOString()}`,
+  })
+
+  // C-13: the banner at a laptop and a phone width, above the page there.
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize(viewport)
+    await expect(banner).toBeVisible()
+    await expect(banner.locator('xpath=ancestor::main')).toHaveCount(1)
+    await page.screenshot({ path: `${ARTIFACT_DIR}/cov-e2e-001-banner-${viewport.width}.png` })
+  }
+
+  // I-13: each instance dashboard that shows the banner still fits a Full HD
+  // screen with the banner on it. The banner is visible before the page is
+  // measured and still visible after its last viewport: it only goes once
+  // coverage is complete, so it was there for every measure. These run first,
+  // while the heavy checks are still pending.
+  const values = await routeValues(api)
+  for (const path of [
+    '/instances/:instanceId?section=overview',
+    '/instances/:instanceId/queries',
+    '/instances/:instanceId/locks',
+  ]) {
+    const route = fullHdRoute(path)
+    await page.setViewportSize({ width: 1920, height: 1080 })
+    await page.goto(routeUrl(route, values))
+    await expect(banner, `${path}: the banner is on the page before it is measured`).toBeVisible({
+      timeout: 30_000,
+    })
+    if (route.pendingUnit !== undefined) {
+      // As in FHD-FIT-001, a skip is never a pass: the owning unit runs the fit check.
+      test.info().annotations.push({
+        type: 'UNVERIFIED',
+        description: `COV-E2E-001 ${path}: fit pending ${route.pendingUnit}; the banner is visible on it`,
+      })
+      continue
+    }
+    await expect(
+      banner.locator('xpath=ancestor::header'),
+      `${path}: at 1920 px the banner is inside the header`,
+    ).toHaveCount(1)
+    await assertFits(page, api, route)
+    await expect(banner, `${path}: the banner was on the page while it was measured`).toBeVisible()
+    await expect(banner.locator('xpath=ancestor::header')).toHaveCount(1)
+  }
+
+  // R-13.3b: at 1600×950, the narrowest width with the banner in the header,
+  // the header row keeps its height, the status slot ends before the
+  // controls, and each fit route still fits with the banner visible.
+  for (const path of [
+    '/instances/:instanceId/queries',
+    '/instances/:instanceId?section=overview',
+  ]) {
+    const route = fullHdRoute(path)
+    await page.setViewportSize({ width: 1600, height: 950 })
+    await page.goto(routeUrl(route, values))
+    await expect(banner, `${path} at 1600 px: the banner is visible`).toBeVisible({
+      timeout: 30_000,
+    })
+    await expect(
+      banner.locator('xpath=ancestor::header'),
+      `${path} at 1600 px: the banner is inside the header`,
+    ).toHaveCount(1)
+    await page.waitForLoadState('networkidle')
+    await expect(page.locator('[aria-busy="true"]')).toHaveCount(0, { timeout: 30_000 })
+    const box = async (testId: string) => {
+      const found = await page.getByTestId(testId).boundingBox()
+      expect(found, `${path} at 1600 px: ${testId} is laid out`).not.toBeNull()
+      return found!
+    }
+    const row = await box('header-row')
+    const status = await box('header-status')
+    const controls = await box('header-controls')
+    expect(row.height, `${path} at 1600 px: header row height`).toBeLessThanOrEqual(57)
+    expect(
+      status.x + status.width,
+      `${path} at 1600 px: the status slot ends before the controls`,
+    ).toBeLessThanOrEqual(controls.x)
+    await expect(page.getByTestId('coverage-count')).toBeVisible()
+    if (route.kind === 'fit' && route.pendingUnit === undefined) {
+      const { scrollHeight, innerHeight, scrollWidth, innerWidth } = await page.evaluate(() => ({
+        scrollHeight: document.scrollingElement?.scrollHeight ?? 0,
+        innerHeight: window.innerHeight,
+        scrollWidth: document.scrollingElement?.scrollWidth ?? 0,
+        innerWidth: window.innerWidth,
+      }))
+      expect(scrollWidth, `${path} at 1600×950: horizontal scrollbar`).toBeLessThanOrEqual(
+        innerWidth,
+      )
+      expect(scrollHeight, `${path} at 1600×950: page scrollbar`).toBeLessThanOrEqual(innerHeight)
+    }
+    await expect(banner, `${path} at 1600 px: the banner was visible while measured`).toBeVisible()
+    await page.screenshot({
+      path: `${ARTIFACT_DIR}/cov-e2e-001-header-1600-${path.includes('queries') ? 'queries' : 'overview'}.png`,
+    })
+  }
+  await page.setViewportSize({ width: 1920, height: 1080 })
+  await page.goto(`/instances/${instanceId}`)
+
+  // The count rises as the console polls (every 15 s); once the banner is gone
+  // the server's own count stands for it.
+  const reportedNow = async () => {
+    if (await banner.isVisible()) {
+      const counts = coverageCounts((await banner.textContent()) ?? '')
+      if (counts !== null) return counts.reported
+    }
+    return (await liveCoverage(api, instanceId)).reported
+  }
+  await expect
+    .poll(reportedNow, {
+      message: `the banner count rises above ${first!.reported}`,
+      intervals: [5_000],
+      timeout: remaining(),
+    })
+    .toBeGreaterThan(first!.reported)
+
+  // A failing check keeps the banner (its data is missing), so on a timeout
+  // the message names what is still missing.
+  try {
+    await expect(banner).toBeHidden({ timeout: remaining() })
+  } catch (error) {
+    const missing = await liveCoverage(api, instanceId)
+    throw new Error(
+      `the banner disappears once every check has a current result; now ${missing.reported} of ${missing.total}, pending: ${missing.pending.join(', ') || 'none'}; failed: ${missing.failed.join(', ') || 'none'}\n${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    )
+  }
+  const final = await liveCoverage(api, instanceId)
+  expect(final.pending, 'no check is still pending').toEqual([])
+  expect(final.failed, 'no check failed on its last run').toEqual([])
+  expect(final.reported).toBe(final.total)
+  await page.screenshot({ path: `${ARTIFACT_DIR}/cov-e2e-001-complete.png` })
+  test.info().annotations.push({
+    type: 'COV-E2E-001 complete',
+    description: `${final.reported} of ${final.total} checks at ${new Date().toISOString()}`,
+  })
+  browserErrors.assertClean()
 })

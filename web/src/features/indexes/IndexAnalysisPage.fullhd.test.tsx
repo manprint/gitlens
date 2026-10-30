@@ -6,6 +6,7 @@ import { DEFAULT_INDEX_VIEW, INDEX_VIEWS, readIndexView } from './indexViews'
 
 import { expectNoA11yViolations } from '@/test/a11y'
 import { INSTANCE_ID } from '@/test/fixture-helpers'
+import { base as advisorWindows } from '@/test/fixtures/getAdvisorWindows'
 import { base as clusters } from '@/test/fixtures/getClusters'
 import { ok } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
@@ -78,6 +79,7 @@ const FINDINGS = [
 
 function render(route = '/indexes', truncated = false) {
   server.use(
+    ok('getAdvisorWindows', advisorWindows),
     ok('getClusters', clusters),
     ok('getInstanceIndexes', {
       instance_id: INSTANCE_ID,

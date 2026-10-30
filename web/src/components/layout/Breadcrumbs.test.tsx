@@ -64,7 +64,24 @@ describe('Breadcrumbs', () => {
       within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
         name: 'postgres.example.test:5432',
       }),
-    ).toHaveAttribute('title', INSTANCE_ID)
+    ).toHaveAttribute('title', `postgres.example.test:5432 (${INSTANCE_ID})`)
+  })
+
+  it('CLNAME-UI-017 a long instance name before the last crumb truncates and keeps its whole name', async () => {
+    const long = `odoo-${'x'.repeat(59)}`
+    const view = renderWithProviders(<Breadcrumbs />, {
+      route: `/instances/${INSTANCE_ID}/queries`,
+    })
+    await cacheClusters(view, [
+      { ...CLUSTER, instances: [{ ...INSTANCE_SUMMARY, display_name: long }] },
+    ])
+    const link = within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
+      name: long,
+    })
+    expect(link).toHaveClass('truncate', 'max-w-[16rem]', 'min-w-0')
+    expect(link).toHaveAttribute('title', `${long} (${INSTANCE_ID})`)
+    // The plain crumbs keep their width.
+    expect(screen.getByRole('link', { name: 'Instances' })).not.toHaveClass('truncate')
   })
 
   it('CLNAME-UI-011 an id the cluster list does not hold keeps today’s label', async () => {

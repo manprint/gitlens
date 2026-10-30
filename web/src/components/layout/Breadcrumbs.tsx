@@ -85,10 +85,14 @@ export function Breadcrumbs() {
       <ol className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-sm">
         {items.map((item, index) => {
           const current = index === items.length - 1
+          // A named crumb before the last (an instance or cluster name) may be
+          // long: it truncates rather than squeeze the header status slot to
+          // nothing, and keeps its whole name, with the id, in its title.
+          const named = !current && item.titled
           return (
             <li
               key={item.path}
-              className={`flex items-center gap-1.5 ${current ? 'min-w-0' : 'shrink-0'}`}
+              className={`flex items-center gap-1.5 ${current || named ? 'min-w-0' : 'shrink-0'}`}
             >
               {index > 0 ? (
                 <ChevronRight aria-hidden="true" className="text-muted-foreground/60 size-3.5" />
@@ -103,8 +107,10 @@ export function Breadcrumbs() {
                 </span>
               ) : (
                 <Link
-                  className="hover:text-foreground transition-colors"
-                  {...(item.titled ? { title: item.title } : {})}
+                  className={`hover:text-foreground transition-colors${named ? 'block max-w-[16rem] min-w-0 truncate' : ''}`}
+                  {...(named
+                    ? { 'aria-label': item.label, title: `${item.label} (${item.title})` }
+                    : {})}
                   to={item.path}
                 >
                   {item.label}

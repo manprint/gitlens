@@ -1,14 +1,18 @@
 import { describe, expect, it } from 'vitest'
 
+import { formatBytes } from './format'
 import { buildIndexRows } from './indexAnalysis'
 import {
   buildCleanup,
   cleanupScript,
   dropStatement,
   indexWriteRates,
+  observationBasis,
   quoteIdentifier,
   recreateStatement,
   summariseCleanup,
+  UNUSED_INDEX_MIN_BYTES,
+  unusedWindowPhrase,
 } from './indexCleanup'
 
 function item(name: string, definition: string, extra: Record<string, unknown> = {}) {
@@ -49,8 +53,9 @@ function candidates(
   items: Record<string, unknown>[],
   findings: Record<string, unknown>[] = [],
   rates = new Map<string, number>(),
+  configuredWindow: number | null = null,
 ) {
-  return buildCleanup(buildIndexRows(items, findings as never), rates)
+  return buildCleanup(buildIndexRows(items, findings as never), rates, configuredWindow)
 }
 
 describe('identifiers and statements', () => {
@@ -280,6 +285,199 @@ describe('summariseCleanup', () => {
     expect(summary.byReason.invalid).toBe(1)
     expect(summary.byReason['never-scanned']).toBe(2)
     expect(summariseCleanup([], 0).confirmedShare).toBeNull()
+  })
+})
+
+describe('unused-index wording (13.3)', () => {
+  const evidence = (extra: Record<string, unknown>) => ({
+    evidence: { peak_scan_rate: 0, history_days: 0.1, size_bytes: 1000, ...extra },
+  })
+  const big = { index_bytes: 64 * 1024 * 1024 }
+
+  it('COVUI-005 the reason uses the observation and the window of the finding', () => {
+    const [stats] = candidates(
+      [item('idle', def('idle'), { last_scan_status: 'never_since_reset' })],
+      [
+        finding(
+          'index.unused',
+          'public.idle',
+          evidence({
+            observed_source: 'postgres_stats',
+            observed_for_seconds: 9 * 86_400 + 3_000,
+            window_seconds: 7 * 86_400,
+          }),
+        ),
+      ],
+    )
+    expect(stats?.why).toBe(
+      'The advisor saw no scans of this index: PostgreSQL statistics cover 9 days; the window is 7 days.',
+    )
+
+    const [own] = candidates(
+      [item('idle', def('idle'))],
+      [
+        finding(
+          'index.unused',
+          'public.idle',
+          evidence({
+            observed_source: 'pglens',
+            observed_for_seconds: 2 * 3_600 + 59,
+            window_seconds: 3_600,
+          }),
+        ),
+      ],
+    )
+    expect(own?.why).toBe(
+      'The advisor saw no scans of this index: pglens history covers 2 hours; the window is 1 hour.',
+    )
+  })
+
+  it('COVUI-005 the observed span is written in the unit of the window, never below it', () => {
+    // 1.6 days against a 36-hour window: "1 day" would read shorter than the window.
+    expect(
+      observationBasis({
+        observed_source: 'pglens',
+        observed_for_seconds: 1.6 * 86_400,
+        window_seconds: 36 * 3_600,
+      }),
+    ).toBe('pglens history covers 38 hours; the window is 36 hours')
+    expect(
+      observationBasis({
+        observed_source: 'pglens',
+        observed_for_seconds: 36 * 3_600,
+        window_seconds: 36 * 3_600,
+      }),
+    ).toBe('pglens history covers 36 hours; the window is 36 hours')
+    expect(
+      observationBasis({
+        observed_source: 'postgres_stats',
+        observed_for_seconds: 7 * 86_400 + 86_399,
+        window_seconds: 7 * 86_400,
+      }),
+    ).toBe('PostgreSQL statistics cover 7 days; the window is 7 days')
+  })
+
+  it('COVUI-005 a verdict since the statistics reset is worded from the reset', () => {
+    // The advisor's evidence for an index never scanned since a reset of
+    // unknown time: pglens history may be minutes old, and is not the basis.
+    const unknown = evidence({
+      window: 'since statistics reset',
+      observed_source: 'pglens',
+      observed_for_seconds: 0,
+      window_seconds: 7 * 86_400,
+    })
+    const [unknownReset] = candidates(
+      [item('idle', def('idle'), { last_scan_status: 'never_since_reset' })],
+      [finding('index.unused', 'public.idle', unknown)],
+    )
+    expect(unknownReset?.why).toBe(
+      'The advisor saw no scans of this index: PostgreSQL statistics show no scan since their last reset (time unknown); the window is 7 days.',
+    )
+    expect(unknownReset?.why).not.toContain('pglens history')
+
+    const known = evidence({
+      window: 'since statistics reset',
+      stats_reset: '2026-10-01T08:30:00Z',
+      observed_source: 'postgres_stats',
+      observed_for_seconds: 29 * 86_400,
+      window_seconds: 7 * 86_400,
+    })
+    expect(observationBasis(known.evidence)).toBe(
+      'PostgreSQL statistics show no scan since their reset on 2026-10-01; the window is 7 days',
+    )
+    expect(observationBasis({ window: 'since statistics reset' })).toBe(
+      'PostgreSQL statistics show no scan since their last reset (time unknown)',
+    )
+  })
+
+  it('COVUI-005 a finding without the numbers keeps the general sentence', () => {
+    const [old] = candidates([item('idle', def('idle'))], [finding('index.unused', 'public.idle')])
+    expect(old?.why).toBe('The advisor saw no scans of this index over its usage history.')
+    expect(observationBasis({ observed_source: 'pglens', observed_for_seconds: 60 })).toBeNull()
+    expect(observationBasis({ observed_for_seconds: 'x', window_seconds: 3_600 })).toBeNull()
+    expect(observationBasis(undefined)).toBeNull()
+    // An observation shorter than the window is no basis for a verdict.
+    expect(
+      observationBasis({
+        observed_source: 'pglens',
+        observed_for_seconds: 90,
+        window_seconds: 3_600,
+      }),
+    ).toBeNull()
+  })
+
+  it('COVUI-005 a raw counter names the window of the findings, not a fixed 7 days', () => {
+    const result = candidates(
+      [
+        item('judged', def('judged')),
+        item('raw', def('raw'), { last_scan_status: 'never_since_reset', ...big }),
+      ],
+      [
+        finding(
+          'index.unused',
+          'public.judged',
+          evidence({
+            observed_source: 'pglens',
+            observed_for_seconds: 5_400,
+            window_seconds: 3_600,
+          }),
+        ),
+      ],
+      new Map(),
+      7 * 86_400,
+    )
+    const raw = result.find((candidate) => candidate.row.name === 'raw')
+    expect(raw?.why).toBe(
+      'No scan since the statistics were last reset. The advisor calls an index unused only after 1 hour with no scan, here and on any standby, so this is the raw counter, not a verdict.',
+    )
+    expect(cleanupScript(result)).toContain(
+      '-- Raw counters only. The advisor has not called these indexes unused (that takes 1 hour',
+    )
+  })
+
+  it('COVUI-005 without a finding the configured window is named', () => {
+    const raw = [item('raw', def('raw'), { last_scan_status: 'never_since_reset', ...big })]
+    const [configured] = candidates(raw, [], new Map(), 36 * 3_600)
+    expect(configured?.why).toBe(
+      'No scan since the statistics were last reset. The advisor calls an index unused only after 36 hours with no scan, here and on any standby, so this is the raw counter, not a verdict.',
+    )
+    expect(cleanupScript([configured!], 36 * 3_600)).toContain('(that takes 36 hours')
+    expect(unusedWindowPhrase(buildIndexRows(raw, []), 36 * 3_600)).toBe('36 hours')
+
+    // Neither a finding nor the settings: the window is unknown, and no length is claimed.
+    const [alone] = candidates(raw)
+    expect(alone?.why).toBe(
+      'No scan since the statistics were last reset. The advisor calls an index unused only after its full observation window with no scan, here and on any standby, so this is the raw counter, not a verdict.',
+    )
+    expect(cleanupScript([alone!])).not.toContain('7 days')
+  })
+
+  it("COVUI-005 a small index is out of the advisor's reach, not short of history", () => {
+    const [small] = candidates(
+      [item('raw', def('raw'), { last_scan_status: 'never_since_reset', index_bytes: 8192 })],
+      [],
+      new Map(),
+      3_600,
+    )
+    expect(small?.why).toBe(
+      `No scan since the statistics were last reset. The advisor leaves out indexes of ${formatBytes(UNUSED_INDEX_MIN_BYTES)} or less, so this is the raw counter, not a verdict.`,
+    )
+    expect(small?.why).not.toContain('history')
+    // At the limit the index is still left out; one byte more and the window applies.
+    const [limit] = candidates([
+      item('raw', def('raw'), {
+        last_scan_status: 'never_since_reset',
+        index_bytes: UNUSED_INDEX_MIN_BYTES,
+      }),
+    ])
+    expect(limit?.why).toContain('leaves out indexes')
+    const [over] = candidates([
+      item('raw', def('raw'), {
+        last_scan_status: 'never_since_reset',
+        index_bytes: UNUSED_INDEX_MIN_BYTES + 1,
+      }),
+    ])
+    expect(over?.why).toContain('only after its full observation window')
   })
 })
 

@@ -5,6 +5,7 @@ import IndexAnalysisPage from './IndexAnalysisPage'
 
 import { expectNoA11yViolations } from '@/test/a11y'
 import { INSTANCE_ID } from '@/test/fixture-helpers'
+import { custom as advisorWindows } from '@/test/fixtures/getAdvisorWindows'
 import { base as clusters } from '@/test/fixtures/getClusters'
 import { formatRate } from '@/lib/format'
 import { ok } from '@/test/msw/handlers'
@@ -101,8 +102,10 @@ function render({
   items = ITEMS,
   tables = TABLES,
   cluster = clusters,
-}: { items?: unknown[]; tables?: unknown[]; cluster?: unknown } = {}) {
+  windows = advisorWindows,
+}: { items?: unknown[]; tables?: unknown[]; cluster?: unknown; windows?: unknown } = {}) {
   server.use(
+    ok('getAdvisorWindows', windows),
     ok('getClusters', cluster),
     ok('getInstanceIndexes', {
       instance_id: INSTANCE_ID,
@@ -199,6 +202,11 @@ describe('CleanupPanel', () => {
 
     expect(screen.getByRole('button', { name: 'Copy cleanup script' })).toBeInTheDocument()
     expect(screen.getByText('1 candidate rests on raw counters.')).toBeInTheDocument()
+    // The configured window (1 hour here), not a fixed 7 days (13.3).
+    expect(
+      screen.getByText(/The advisor calls an index unused only after 1 hour with no scan/),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/7 days/)).not.toBeInTheDocument()
   })
 
   it('CLEAN-UI-007 sends the reader to the standbys before a drop', async () => {

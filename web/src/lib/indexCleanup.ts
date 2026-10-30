@@ -1,3 +1,5 @@
+import { formatWindow } from './advisorSettings'
+import { formatBytes } from './format'
 import type { IndexRow } from './indexAnalysis'
 
 type RelationItem = Record<string, unknown>
@@ -117,6 +119,7 @@ function enforcesConstraint(row: IndexRow): boolean {
 function classify(
   row: IndexRow,
   byName: ReadonlyMap<string, IndexRow>,
+  window: number | null,
 ): Pick<CleanupCandidate, 'reason' | 'why' | 'coveredBy' | 'basis'> | null {
   if (enforcesConstraint(row)) return null
   if (!row.valid || row.invalidFinding !== null) {
@@ -156,9 +159,13 @@ function classify(
     }
   }
   if (row.unusedFinding !== null) {
+    const basis = observationBasis(row.unusedFinding.evidence)
     return {
       reason: 'unused',
-      why: 'The advisor saw no scans of this index over its usage history.',
+      why:
+        basis === null
+          ? 'The advisor saw no scans of this index over its usage history.'
+          : `The advisor saw no scans of this index: ${basis}.`,
       coveredBy: null,
       basis: 'advisor',
     }
@@ -166,7 +173,7 @@ function classify(
   if (row.lastScanStatus === 'never_since_reset') {
     return {
       reason: 'never-scanned',
-      why: 'No scan since the statistics were last reset. The advisor has not yet seen 7 days of history, so this is the raw counter, not a verdict.',
+      why: neverScannedWhy(row, window),
       coveredBy: null,
       basis: 'statistics',
     }
@@ -174,14 +181,130 @@ function classify(
   return null
 }
 
+/**
+ * The advisor leaves out an index of this size or less (unusedIndexBytes in
+ * internal/advisor/rules_relation.go): dropping it gives back too little.
+ */
+export const UNUSED_INDEX_MIN_BYTES = 10 * 1024 * 1024
+
+/**
+ * Why an index with no scan since the statistics reset has no unused-index
+ * finding. A small index is left out by the advisor. A larger one is called
+ * unused only when no scan shows over the whole window, in PostgreSQL's
+ * statistics or in pglens's history, here and on the standbys: a statistics
+ * reset newer than the window, a short history, a scan seen before the reset
+ * or on a standby, or an evaluation still to come all keep the finding away.
+ * Primary keys and unique indexes never reach this point (enforcesConstraint).
+ */
+function neverScannedWhy(row: IndexRow, window: number | null): string {
+  const counter = 'No scan since the statistics were last reset.'
+  if (row.bytes !== null && row.bytes <= UNUSED_INDEX_MIN_BYTES) {
+    return `${counter} The advisor leaves out indexes of ${formatBytes(UNUSED_INDEX_MIN_BYTES)} or less, so this is the raw counter, not a verdict.`
+  }
+  return `${counter} The advisor calls an index unused only after ${windowPhrase(window)} with no scan, here and on any standby, so this is the raw counter, not a verdict.`
+}
+
+type Evidence = Record<string, unknown> | null | undefined
+
+function seconds(evidence: Evidence, key: string): number | null {
+  const value = evidence?.[key]
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+}
+
+/**
+ * An observed span in the unit the window is written in ("38 hours" next to
+ * "36 hours", "9 days" next to "7 days"), rounded down so it never claims more
+ * history than there is. A span at least as long as the window never reads
+ * shorter than it, because the window is a whole number of that unit.
+ */
+function spanText(total: number, window: number): string {
+  const unit = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+  if (window % 86_400 === 0) return unit(Math.floor(total / 86_400), 'day', 'days')
+  if (window % 3_600 === 0) return unit(Math.floor(total / 3_600), 'hour', 'hours')
+  return unit(Math.floor(total), 'second', 'seconds')
+}
+
+/** The day of an RFC 3339 time, as the advisor writes it in the finding detail; null when unreadable. */
+function resetDay(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const time = new Date(value)
+  return Number.isNaN(time.getTime()) ? null : time.toISOString().slice(0, 10)
+}
+
+/**
+ * What the advisor's unused-index verdict rests on, from the finding's
+ * evidence (13.2, D22b): "PostgreSQL statistics cover 9 days; the window is 7
+ * days". A verdict from an index never scanned since the statistics reset
+ * (evidence `window: "since statistics reset"`) rests on that reset, not on
+ * pglens's history: "PostgreSQL statistics show no scan since their reset on
+ * 2026-10-01". Null when the finding predates these fields, or when its
+ * observation is shorter than the window, which no verdict rests on.
+ */
+export function observationBasis(evidence: Evidence): string | null {
+  const window = seconds(evidence, 'window_seconds')
+  const windowText =
+    window === null || window === 0 ? null : `the window is ${formatWindow(window)}`
+  if (evidence?.window === 'since statistics reset') {
+    const day = resetDay(evidence.stats_reset)
+    const reset =
+      day === null
+        ? 'PostgreSQL statistics show no scan since their last reset (time unknown)'
+        : `PostgreSQL statistics show no scan since their reset on ${day}`
+    return windowText === null ? reset : `${reset}; ${windowText}`
+  }
+  const observed = seconds(evidence, 'observed_for_seconds')
+  if (observed === null || window === null || window === 0 || observed < window) return null
+  const covered =
+    evidence?.observed_source === 'postgres_stats'
+      ? `PostgreSQL statistics cover ${spanText(observed, window)}`
+      : `pglens history covers ${spanText(observed, window)}`
+  return `${covered}; ${windowText}`
+}
+
+/**
+ * The unused-index window the advisor applies, in seconds: read from the
+ * evidence of any of its findings, which tells the window it judged with, else
+ * the configured window (`getAdvisorWindows`), else null. The window is one
+ * setting for the whole server, so any finding tells it.
+ */
+function unusedWindowSeconds(
+  rows: readonly IndexRow[],
+  configured: number | null | undefined,
+): number | null {
+  for (const row of rows) {
+    const window = seconds(row.unusedFinding?.evidence, 'window_seconds')
+    if (window !== null && window > 0) return window
+  }
+  return configured !== null && configured !== undefined && configured > 0 ? configured : null
+}
+
+/** "7 days" for a known window, else a phrase that names no length. */
+function windowPhrase(window: number | null): string {
+  return window === null ? 'its full observation window' : formatWindow(window)
+}
+
+/** The unused-index window as the cleanup texts name it: "7 days", or a phrase that names no length. */
+export function unusedWindowPhrase(
+  rows: readonly IndexRow[],
+  configuredWindow: number | null = null,
+): string {
+  return windowPhrase(unusedWindowSeconds(rows, configuredWindow))
+}
+
+/**
+ * The cleanup list. `configuredWindow` is the unused-index window from the
+ * settings, in seconds, used when no finding tells the window.
+ */
 export function buildCleanup(
   rows: readonly IndexRow[],
   writeRates: ReadonlyMap<string, number>,
+  configuredWindow: number | null = null,
 ): CleanupCandidate[] {
   const byName = new Map(rows.map((row) => [`${row.datname}.${row.schema}.${row.name}`, row]))
+  const window = unusedWindowSeconds(rows, configuredWindow)
   const candidates: CleanupCandidate[] = []
   for (const row of rows) {
-    const found = classify(row, byName)
+    const found = classify(row, byName, window)
     if (found === null) continue
     candidates.push({
       row,
@@ -238,7 +361,10 @@ export function summariseCleanup(
  * raw counters are commented out: a few hours of counters are not a verdict,
  * and one paste of the whole script must not drop them.
  */
-export function cleanupScript(candidates: readonly CleanupCandidate[]): string {
+export function cleanupScript(
+  candidates: readonly CleanupCandidate[],
+  configuredWindow: number | null = null,
+): string {
   const confirmed = candidates.filter((candidate) => candidate.basis === 'advisor')
   const provisional = candidates.filter((candidate) => candidate.basis === 'statistics')
   const lines = [
@@ -252,8 +378,13 @@ export function cleanupScript(candidates: readonly CleanupCandidate[]): string {
   if (provisional.length > 0) {
     lines.push(
       '',
-      '-- Raw counters only. The advisor has not yet seen 7 days of usage history for these',
-      '-- indexes, so none of them is active below. Uncomment one only after you have checked it.',
+      `-- Raw counters only. The advisor has not called these indexes unused (that takes ${windowPhrase(
+        unusedWindowSeconds(
+          candidates.map((candidate) => candidate.row),
+          configuredWindow,
+        ),
+      )}`,
+      '-- with no scan), so none of them is active below. Uncomment one only after you have checked it.',
     )
     for (const candidate of provisional)
       lines.push(describe(candidate), `-- ${candidate.dropStatement}`)
