@@ -283,3 +283,54 @@ describe('CleanupPanel table controls', () => {
     expect(dataRows(name)).toHaveLength(5)
   })
 })
+
+/** The header line of the open tab's panel. */
+const panelHeader = () => screen.getByTestId('index-panel-header')
+
+/** The status note that starts with `headline`. */
+function noteFor(headline: string): HTMLElement {
+  const note = screen
+    .getAllByRole('status')
+    .find((status) => status.textContent?.startsWith(headline))
+  expect(note, headline).toBeDefined()
+  return note!
+}
+
+describe('CleanupPanel on a Full HD screen (15.3)', () => {
+  it('FHD-APPLY-036 one table under a one-line header: figures, notes with a title, compact rows', async () => {
+    render({ cluster: withStandby() })
+    await flushNetwork(30)
+
+    expect(screen.getAllByRole('table')).toHaveLength(1)
+    const line = panelHeader()
+    expect(line).toContainElement(
+      screen.getByRole('heading', { name: 'Indexes that look removable' }),
+    )
+    expect(line).toHaveClass('min-[1600px]:flex-row')
+    const tile = screen.getByRole('article', { name: 'Candidates' })
+    expect(line).toContainElement(tile)
+    // The breakdown leaves the line from 1600 px and stays in the title.
+    expect(within(tile).getByText('4 confirmed · 1 raw counters')).toHaveClass(
+      'min-[1600px]:hidden',
+    )
+    expect(tile).toHaveAttribute('title', 'Candidates: 5 4 confirmed · 1 raw counters')
+    expect(line).toContainElement(screen.getByRole('button', { name: 'Copy cleanup script' }))
+    for (const headline of [
+      'This server is part of a cluster.',
+      '1 candidate rests on raw counters.',
+    ]) {
+      const note = noteFor(headline)
+      expect(line).toContainElement(note)
+      expect(note).toHaveClass('min-[1600px]:truncate')
+      expect(note.getAttribute('title')).toContain(headline)
+    }
+    expect(screen.getByText(/^Primary keys and unique indexes are never listed/)).toHaveClass(
+      'min-[1600px]:truncate',
+    )
+
+    const table = screen.getByRole('table', { name: 'Cleanup candidates' })
+    expect(table).toHaveClass('min-[1600px]:table-fixed')
+    expect(within(table).getByTitle('orders_old_idx')).toHaveClass('min-[1600px]:truncate')
+    expect(within(table).getAllByText('Unused')[0]).toHaveClass('min-[1600px]:py-0')
+  })
+})

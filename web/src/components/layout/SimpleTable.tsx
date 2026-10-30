@@ -262,13 +262,13 @@ export function SimpleTable<T>({
                       )}
                     >
                       {renderDetail ? (
-                        <td className="px-2 py-2 align-top">
+                        <td className="px-2 py-2 align-top min-[1600px]:py-1 min-[1600px]:align-middle min-[1600px]:[&_*]:align-top">
                           <button
                             type="button"
                             aria-expanded={open}
                             aria-label={detailLabel(row, open)}
                             onClick={() => toggle(key)}
-                            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 inline-flex size-6 items-center justify-center rounded outline-none focus-visible:ring-[3px]"
+                            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 inline-flex size-6 items-center justify-center rounded outline-none focus-visible:ring-[3px] min-[1600px]:size-5"
                           >
                             {open ? (
                               <ChevronDown aria-hidden="true" className="size-4" />

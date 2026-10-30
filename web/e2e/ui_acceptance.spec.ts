@@ -279,6 +279,8 @@ test('SYS-UI-001: failover preserves identity and raises an alert', async ({
   await expect(edgeCells.nth(1)).toContainText(standbyAddress)
   await expect(edgeCells.nth(2)).toHaveText(String(promotedEdge?.type))
   expect(String(promotedEdge?.confidence ?? '').toLowerCase()).toBe('high')
+  // The event timeline is its own tab of the cluster page (15.3).
+  await page.goto(`/clusters/${clusterID}?section=events`)
   await reloadUntil(page, async () =>
     /failover_detected/i.test(await page.locator('body').innerText()),
   )
@@ -298,11 +300,13 @@ test('SYS-UI-001: failover preserves identity and raises an alert', async ({
     `/instances/${standbyID}`,
   )
 
-  await page.goto('/events')
+  // The lists are paged (15.3): the filters keep the failover on the first page.
+  const clusterQuery = `cluster_id=${encodeURIComponent(renderedClusterID)}`
+  await page.goto(`/events?${clusterQuery}&type=failover_detected`)
   await reloadUntil(page, async () =>
     /failover_detected/i.test(await page.locator('body').innerText()),
   )
-  await page.goto('/alerts')
+  await page.goto(`/alerts?${clusterQuery}`)
   await reloadUntil(page, async () => {
     const body = await page.locator('body').innerText()
     return /failover_detected/i.test(body) && /firing/i.test(body)
@@ -574,6 +578,8 @@ test('SYS-UI-007: replication and ASH charts render data', async ({ signedInPage
 
   await page.goto(`/clusters/${cluster.cluster_id}`)
   await expect(page.getByRole('region', { name: 'Replication topology graph' })).toBeVisible()
+  // The lag charts are their own tab of the cluster page (15.3).
+  await page.goto(`/clusters/${cluster.cluster_id}?section=lag`)
   await expect.poll(() => page.locator('canvas').count(), { timeout: 60_000 }).toBeGreaterThan(0)
   const replicationCanvas = page.locator('canvas').first()
   const replicationPixels = await replicationCanvas.evaluate((canvas: HTMLCanvasElement) => {
@@ -790,11 +796,29 @@ test('SYS-UI-010: finding mute and unmute update state', async ({ signedInPage, 
   // Titles repeat across findings (one index.unused per index, for example), so
   // the card is found by the finding id it carries as data-finding-id.
   const findingCard = () => page.locator(`article[data-finding-id="${findingID}"]`)
+  // Findings are a paged table (15.3): the card opens under the finding's row.
+  const findingRow = () =>
+    page.locator('tr', { has: page.locator(`[data-finding-row="${findingID}"]`) })
+  const openFindingCard = async () => {
+    const pager = page.getByRole('navigation', { name: 'Advisor findings pagination' })
+    while ((await findingRow().count()) === 0) {
+      const next = pager.getByRole('button', { name: 'Next page' })
+      if ((await pager.count()) === 0 || (await next.isDisabled())) break
+      await next.click()
+    }
+    await findingRow()
+      .getByRole('button', { name: /^Show details of / })
+      .click({ timeout: 10_000 })
+  }
 
   await page.goto('/findings')
   await expect(page.getByRole('heading', { name: 'Advisor findings' })).toBeVisible()
+  await expect(page.getByRole('table', { name: 'Advisor findings' })).toBeVisible({
+    timeout: 120_000,
+  })
+  await openFindingCard()
   const finding = findingCard()
-  await expect(finding).toBeVisible({ timeout: 120_000 })
+  await expect(finding).toBeVisible()
   await finding.getByRole('button', { name: 'Mute finding' }).click()
   const dialog = page.getByRole('dialog')
   await expect(dialog).toBeVisible()
@@ -802,7 +826,8 @@ test('SYS-UI-010: finding mute and unmute update state', async ({ signedInPage, 
   await dialog.getByRole('radio').first().check()
   await dialog.getByRole('button', { name: 'Mute finding' }).click()
   await expect(page.getByRole('dialog')).toBeHidden()
-  await page.getByLabel('State').selectOption('all')
+  await page.getByLabel('State', { exact: true }).selectOption('all')
+  await openFindingCard()
   const mutedFinding = findingCard()
   await expect(mutedFinding).toBeVisible()
   await expect(mutedFinding).toContainText(/muted/i)
@@ -818,6 +843,10 @@ test('SYS-UI-010: finding mute and unmute update state', async ({ signedInPage, 
   await reloadUntil(
     page,
     async () => {
+      // A reload collapses the rows; the table may still be loading.
+      if ((await findingCard().count()) === 0) {
+        await openFindingCard().catch(() => undefined)
+      }
       const sameFinding = findingCard()
       if ((await sameFinding.count()) !== 1) return false
       return (

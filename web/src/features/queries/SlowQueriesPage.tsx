@@ -15,6 +15,7 @@ import { MetricTile } from '@/components/layout/MetricTile'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
+import { useKeepFocus } from '@/hooks/useKeepFocus'
 import { useTimeRange } from '@/hooks/useTimeRange'
 import { formatCount, formatMilliseconds, formatPercent } from '@/lib/format'
 import {
@@ -50,6 +51,9 @@ const RANKINGS: readonly { value: Ranking; label: string; hint: string }[] = [
 ]
 
 const ORDER_BY = { mean: 'mean_exec_time', total: 'total_exec_time' } as const
+
+// The tiles share the list header, so from 1600 px they are one short line each (D26).
+const HEADER_TILE = 'min-[1600px]:py-1.5'
 
 function readRanking(value: string | null): Ranking {
   return value === 'total' ? 'total' : 'mean'
@@ -110,7 +114,7 @@ function slowColumns(instanceId: string): DataTableProps<SlowRow>['columns'] {
       cell: ({ row }) => (
         <span
           className={cn(
-            'flex size-7 items-center justify-center rounded-md text-xs font-semibold tabular-nums',
+            'flex size-7 items-center justify-center rounded-md text-xs font-semibold tabular-nums min-[1600px]:size-5',
             row.original.rank <= 3
               ? 'bg-destructive/10 text-destructive ring-destructive/20 ring-1'
               : 'bg-muted text-muted-foreground',
@@ -255,48 +259,76 @@ function InstanceStatements({ controls, instanceId, ranking }: InstanceStatement
     setSearchParams(next, { replace: true })
   }
 
-  return (
-    <div className="space-y-6">
-      <div className="bg-card shadow-card flex flex-wrap items-end gap-x-6 gap-y-4 rounded-xl border p-4">
-        {controls}
-        <div className="space-y-1.5">
-          <label className="text-muted-foreground text-xs font-medium" htmlFor="slow-db">
-            Database
-          </label>
-          <div className="relative">
-            <Database
-              aria-hidden="true"
-              className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
-            />
-            <NativeSelect
-              className="w-56 max-w-full pr-3 pl-8"
-              id="slow-db"
-              onChange={(event) => setDatabase(event.target.value)}
-              value={database ?? ''}
-            >
-              <option value="">All databases</option>
-              {monitored.map((entry) => (
-                <option key={entry.datname} value={entry.datname}>
-                  {entry.datname}
-                </option>
-              ))}
-              {database !== undefined && !monitored.some((entry) => entry.datname === database) ? (
-                <option value={database}>{database}</option>
-              ) : null}
-            </NativeSelect>
-          </div>
-        </div>
-        <div className="ml-auto self-center">
-          <FreshnessBadge dataUpdatedAt={statementsQuery.dataUpdatedAt} policy="statements" />
+  // The server, ranking and database controls. With statements to list they sit in
+  // the table's toolbar line beside the search box (15.3, D26); otherwise in a bar.
+  const controlBar = (
+    <>
+      {controls}
+      <div className="space-y-1.5">
+        <label
+          className="text-muted-foreground text-xs font-medium min-[1600px]:sr-only"
+          htmlFor="slow-db"
+        >
+          Database
+        </label>
+        <div className="relative">
+          <Database
+            aria-hidden="true"
+            className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
+          />
+          <NativeSelect
+            className="w-56 max-w-full pr-3 pl-8 min-[1600px]:h-8 min-[1600px]:w-44"
+            id="slow-db"
+            onChange={(event) => setDatabase(event.target.value)}
+            value={database ?? ''}
+          >
+            <option value="">All databases</option>
+            {monitored.map((entry) => (
+              <option key={entry.datname} value={entry.datname}>
+                {entry.datname}
+              </option>
+            ))}
+            {database !== undefined && !monitored.some((entry) => entry.datname === database) ? (
+              <option value={database}>{database}</option>
+            ) : null}
+          </NativeSelect>
         </div>
       </div>
+      <div className="ml-auto self-center">
+        <FreshnessBadge dataUpdatedAt={statementsQuery.dataUpdatedAt} policy="statements" />
+      </div>
+    </>
+  )
+  const keepFocus = useKeepFocus(rows.length === 0 ? 'bar' : 'table')
+  // `contents`: the wrapper only keeps focus as the controls move, it adds no box.
+  const movableControls = (
+    <div className="contents" {...keepFocus}>
+      {controlBar}
+    </div>
+  )
+  const standaloneBar = (
+    <div className="bg-card shadow-card flex flex-wrap items-end gap-x-6 gap-y-4 rounded-xl border p-4">
+      {movableControls}
+    </div>
+  )
+  const hint = RANKINGS.find((option) => option.value === ranking)?.hint
 
-      {statementsQuery.isPending && response === undefined ? (
+  if (statementsQuery.isPending && response === undefined) {
+    return (
+      <div className="space-y-6 min-[1600px]:space-y-4">
+        {standaloneBar}
         <div aria-busy="true" aria-label="Loading slowest queries" role="status">
           Loading slowest queries…
         </div>
-      ) : statementsQuery.error && response === undefined ? (
-        statementsQuery.error.kind === 'not_found' ? (
+      </div>
+    )
+  }
+
+  if (statementsQuery.error && response === undefined) {
+    return (
+      <div className="space-y-6 min-[1600px]:space-y-4">
+        {standaloneBar}
+        {statementsQuery.error.kind === 'not_found' ? (
           <EmptyState
             description="This instance does not report pg_stat_statements. Add the module to shared_preload_libraries and create the extension, then restart the agent."
             title="pg_stat_statements is not available"
@@ -307,83 +339,97 @@ function InstanceStatements({ controls, instanceId, ranking }: InstanceStatement
             failure={statementsQuery.error}
             onRetry={() => void statementsQuery.refetch()}
           />
-        )
-      ) : (
-        <>
-          {response?.disabled ? (
-            <div
-              className="border-warning/40 bg-warning/10 rounded-lg border px-4 py-3 text-sm"
-              role="status"
-            >
-              <strong>pg_stat_statements is not collected.</strong>{' '}
-              {response.disabled_reason
-                ? `The agent skips the check: ${response.disabled_reason}.`
-                : 'The agent skips the check on this instance.'}{' '}
-              Statements collected earlier are still shown.
-            </div>
-          ) : null}
+        )}
+      </div>
+    )
+  }
 
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+  return (
+    <div className="space-y-6 min-[1600px]:space-y-4">
+      {rows.length === 0 ? standaloneBar : null}
+      {response?.disabled ? (
+        <div
+          className="border-warning/40 bg-warning/10 rounded-lg border px-4 py-3 text-sm"
+          role="status"
+        >
+          <strong>pg_stat_statements is not collected.</strong>{' '}
+          {response.disabled_reason
+            ? `The agent skips the check: ${response.disabled_reason}.`
+            : 'The agent skips the check on this instance.'}{' '}
+          Statements collected earlier are still shown.
+        </div>
+      ) : null}
+
+      <section
+        aria-labelledby="slowest-list-title"
+        className="bg-card shadow-card overflow-hidden rounded-xl border"
+      >
+        {/* The summary tiles share the list header; from 1600 px on one line (D26). */}
+        <div className="flex flex-col gap-4 border-b px-5 py-4 min-[1600px]:flex-row min-[1600px]:items-center min-[1600px]:justify-between min-[1600px]:py-2">
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold" id="slowest-list-title">
+              Ranked by {ranking === 'mean' ? 'mean time per call' : 'total time'}
+            </h2>
+            <p
+              className="text-muted-foreground mt-0.5 text-sm min-[1600px]:truncate"
+              title={`${hint ?? ''} Open a query to run EXPLAIN and see its plan history.${response?.truncated ? ' Some statements may be missing: the agent kept only its top-N budget (checks.stat_statements.top_n) in this window.' : ''}`}
+            >
+              {hint} Open a query to run EXPLAIN and see its plan history.
+              {response?.truncated ? (
+                <>
+                  {' '}
+                  Some statements may be missing: the agent kept only its top-N budget (
+                  <code>checks.stat_statements.top_n</code>) in this window.
+                </>
+              ) : null}
+            </p>
+          </div>
+          <div className="grid gap-4 min-[1600px]:flex min-[1600px]:shrink-0 min-[1600px]:gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <MetricTile
+              className={HEADER_TILE}
               label="Slowest mean time"
               value={rows.length === 0 ? null : formatMilliseconds(slowestMean)}
             />
             <MetricTile
+              className={HEADER_TILE}
               label="Time spent by these queries"
               value={rows.length === 0 ? null : formatMilliseconds(totalTime)}
             />
-            <MetricTile label="Calls" value={rows.length === 0 ? null : formatCount(totalCalls)} />
             <MetricTile
+              className={HEADER_TILE}
+              label="Calls"
+              value={rows.length === 0 ? null : formatCount(totalCalls)}
+            />
+            <MetricTile
+              className={HEADER_TILE}
               label="Statements ranked"
               value={String(rows.length)}
               unit={`of ${STATEMENT_FETCH_LIMIT} max`}
             />
           </div>
-
-          <section
-            aria-labelledby="slowest-list-title"
-            className="bg-card shadow-card overflow-hidden rounded-xl border"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b px-5 py-4">
-              <div>
-                <h2 className="text-base font-semibold" id="slowest-list-title">
-                  Ranked by {ranking === 'mean' ? 'mean time per call' : 'total time'}
-                </h2>
-                <p className="text-muted-foreground mt-0.5 text-sm">
-                  {RANKINGS.find((option) => option.value === ranking)?.hint} Open a query to run
-                  EXPLAIN and see its plan history.
-                </p>
-              </div>
-            </div>
-            {rows.length === 0 ? (
-              <div className="p-5">
-                <EmptyState
-                  description="No pg_stat_statements entries match this server, database and time range. Try a wider range."
-                  title="No statements yet"
-                />
-              </div>
-            ) : (
-              <div className="p-5">
-                <DataTable
-                  ariaLabel="Slowest queries"
-                  columns={columns}
-                  data={slowRows}
-                  emptyState={null}
-                  scope="statements"
-                  tableId="slow"
-                  toolbar={SLOW_TOOLBAR}
-                />
-              </div>
-            )}
-            {response?.truncated ? (
-              <p className="text-muted-foreground border-t px-5 py-3 text-xs">
-                Some statements may be missing: the agent kept only its top-N budget (
-                <code>checks.stat_statements.top_n</code>) in this window.
-              </p>
-            ) : null}
-          </section>
-        </>
-      )}
+        </div>
+        {rows.length === 0 ? (
+          <div className="p-5">
+            <EmptyState
+              description="No pg_stat_statements entries match this server, database and time range. Try a wider range."
+              title="No statements yet"
+            />
+          </div>
+        ) : (
+          <div className="p-5 min-[1600px]:p-3">
+            <DataTable
+              ariaLabel="Slowest queries"
+              columns={columns}
+              data={slowRows}
+              emptyState={null}
+              scope="statements"
+              tableId="slow"
+              toolbar={SLOW_TOOLBAR}
+              toolbarExtra={movableControls}
+            />
+          </div>
+        )}
+      </section>
     </div>
   )
 }
@@ -410,7 +456,7 @@ export function SlowQueriesPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 min-[1600px]:space-y-4">
       <PageHeader
         eyebrow="Query performance"
         icon={Gauge}
@@ -447,7 +493,7 @@ export function SlowQueriesPage() {
               <>
                 <div className="space-y-1.5">
                   <label
-                    className="text-muted-foreground text-xs font-medium"
+                    className="text-muted-foreground text-xs font-medium min-[1600px]:sr-only"
                     htmlFor="slow-instance"
                   >
                     Server
@@ -458,7 +504,7 @@ export function SlowQueriesPage() {
                       className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
                     />
                     <NativeSelect
-                      className="w-72 max-w-full pr-3 pl-8"
+                      className="w-72 max-w-full pr-3 pl-8 min-[1600px]:h-8 min-[1600px]:w-56"
                       id="slow-instance"
                       onChange={(event) => update('instance', event.target.value)}
                       value={instanceId}
@@ -473,10 +519,10 @@ export function SlowQueriesPage() {
                   </div>
                 </div>
                 <fieldset>
-                  <legend className="text-muted-foreground mb-1.5 text-xs font-medium">
+                  <legend className="text-muted-foreground mb-1.5 text-xs font-medium min-[1600px]:sr-only">
                     Rank by
                   </legend>
-                  <div className="bg-muted inline-flex rounded-lg p-1">
+                  <div className="bg-muted inline-flex rounded-lg p-1 min-[1600px]:p-0.5">
                     {RANKINGS.map((option) => {
                       const Icon = option.value === 'mean' ? Timer : Hash
                       const active = option.value === ranking
@@ -484,7 +530,7 @@ export function SlowQueriesPage() {
                         <label
                           key={option.value}
                           className={cn(
-                            'has-[:focus-visible]:ring-ring inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-3 text-sm font-medium transition-colors has-[:focus-visible]:ring-2',
+                            'has-[:focus-visible]:ring-ring inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-3 text-sm font-medium transition-colors has-[:focus-visible]:ring-2 min-[1600px]:h-7',
                             active
                               ? 'bg-card text-foreground shadow-sm'
                               : 'text-muted-foreground hover:text-foreground',
@@ -493,6 +539,7 @@ export function SlowQueriesPage() {
                         >
                           <input
                             checked={active}
+                            id={`slow-rank-${option.value}`}
                             className="sr-only"
                             name="slow-rank"
                             onChange={() => update('rank', option.value)}

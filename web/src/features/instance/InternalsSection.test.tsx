@@ -1,4 +1,4 @@
-import { act, screen, within } from '@testing-library/react'
+import { act, fireEvent, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { Schemas } from '@/api/types'
@@ -36,7 +36,15 @@ function cache(name: string, overrides: Partial<Schemas['SLRUCache']> = {}): Sch
   }
 }
 
-function renderSection(data: Partial<Schemas['InternalsResponse']>) {
+/** Opens one list: the section shows one list at a time (15.3). */
+async function openView(name: string) {
+  const tab = screen.getByRole('tab', { name })
+  fireEvent.mouseDown(tab)
+  fireEvent.click(tab)
+  await settle()
+}
+
+function renderSection(data: Partial<Schemas['InternalsResponse']>, view?: string) {
   server.use(
     ok('getInstanceInternals', {
       instance_id: INSTANCE_ID,
@@ -50,7 +58,7 @@ function renderSection(data: Partial<Schemas['InternalsResponse']>) {
     }),
   )
   return renderWithProviders(<InternalsSection instanceId={INSTANCE_ID} />, {
-    route: `/instances/${INSTANCE_ID}`,
+    route: `/instances/${INSTANCE_ID}${view === undefined ? '' : `?view=${view}`}`,
   })
 }
 
@@ -102,6 +110,7 @@ describe('InternalsSection', () => {
     expect(within(sizes[0]!).getByText('-512.0 MiB')).toBeInTheDocument()
     expect(within(sizes[1]!).getAllByText('n/a')).toHaveLength(2)
 
+    await openView('SLRU caches')
     const caches = within(screen.getByRole('table', { name: 'SLRU caches' }))
       .getAllByRole('row')
       .slice(1)
@@ -109,6 +118,7 @@ describe('InternalsSection', () => {
     expect(within(caches[0]!).getByText('10/s')).toBeInTheDocument()
     expect(within(caches[1]!).getByText('not read')).toBeInTheDocument()
 
+    await openView('Temporary files')
     const temp = within(screen.getByRole('table', { name: 'Temporary files' }))
       .getAllByRole('row')
       .slice(1)
@@ -134,6 +144,10 @@ describe('InternalsSection', () => {
     const replay = screen.getByRole('article', { name: 'WAL replay' })
     expect(within(replay).getByText('paused')).toBeInTheDocument()
     expect(screen.getByText(/pg_wal is not listed/)).toBeInTheDocument()
+    expect(screen.getByText('No query outgrew work_mem in the last hour.')).toBeInTheDocument()
+
+    await openView('Recovery conflicts')
+    expect(screen.getByText(/pg_wal is not listed/)).toBeInTheDocument()
     const conflicts = within(screen.getByRole('table', { name: 'Recovery conflicts' }))
       .getAllByRole('row')
       .slice(1)
@@ -142,7 +156,6 @@ describe('InternalsSection', () => {
     expect(
       screen.getByText('WAL prefetch: 4/s blocks read ahead, 200/s already in shared buffers.'),
     ).toBeInTheDocument()
-    expect(screen.getByText('No query outgrew work_mem in the last hour.')).toBeInTheDocument()
   })
 
   it('UI-INT-003 says when nothing was collected', async () => {
@@ -154,18 +167,21 @@ describe('InternalsSection', () => {
 
 describe('InternalsSection tables: pages, search, filters, sort', () => {
   it('TBL-UI-021 recovery-conflicts', async () => {
-    renderSection({
-      standby: {
-        replay_paused: false,
-        observed_at: NOW,
-        conflicts: seq(25).map((n, index) => ({
-          database: index < 4 ? 'crm' : `db_${n}`,
-          reason: index % 5 === 0 ? 'lock' : 'snapshot',
-          per_second: (index + 1) / 100,
-        })),
-        prefetch_blocks_per_second: { prefetch: 0, hit: 0 },
+    renderSection(
+      {
+        standby: {
+          replay_paused: false,
+          observed_at: NOW,
+          conflicts: seq(25).map((n, index) => ({
+            database: index < 4 ? 'crm' : `db_${n}`,
+            reason: index % 5 === 0 ? 'lock' : 'snapshot',
+            per_second: (index + 1) / 100,
+          })),
+          prefetch_blocks_per_second: { prefetch: 0, hit: 0 },
+        },
       },
-    })
+      'replay',
+    )
     await settle()
     const name = 'Recovery conflicts'
 
@@ -180,23 +196,26 @@ describe('InternalsSection tables: pages, search, filters, sort', () => {
     expect(columnTexts(name)[0]).toBe('db_25')
   })
 
-  async function renderMany() {
-    renderSection({
-      databases: seq(25).map((n, index) => ({
-        database: `db_${n}`,
-        size_bytes: (index + 1) * 1024 ** 2,
-        growth_24h_bytes: index === 0 ? null : index,
-        growth_7d_bytes: null,
-        observed_at: NOW,
-      })),
-      slru: seq(25).map((n, index) => cache(`cache_${n}`, { reads_per_second: index + 1 })),
-      temp_files: seq(25).map((n, index) => ({
-        database: `db_${n}`,
-        files_per_second: 0.1,
-        bytes_per_second: (index + 1) * 1_024,
-        last_seen: NOW,
-      })),
-    })
+  async function renderMany(view?: string) {
+    renderSection(
+      {
+        databases: seq(25).map((n, index) => ({
+          database: `db_${n}`,
+          size_bytes: (index + 1) * 1024 ** 2,
+          growth_24h_bytes: index === 0 ? null : index,
+          growth_7d_bytes: null,
+          observed_at: NOW,
+        })),
+        slru: seq(25).map((n, index) => cache(`cache_${n}`, { reads_per_second: index + 1 })),
+        temp_files: seq(25).map((n, index) => ({
+          database: `db_${n}`,
+          files_per_second: 0.1,
+          bytes_per_second: (index + 1) * 1_024,
+          last_seen: NOW,
+        })),
+      },
+      view,
+    )
     await settle()
   }
 
@@ -215,7 +234,7 @@ describe('InternalsSection tables: pages, search, filters, sort', () => {
   })
 
   it('TBL-UI-023 slru-caches', async () => {
-    await renderMany()
+    await renderMany('slru')
     expect(dataRows('SLRU caches')).toHaveLength(20)
     searchTable('SLRU caches', 'cache_2')
     expect(dataRows('SLRU caches')).toHaveLength(6)
@@ -224,7 +243,7 @@ describe('InternalsSection tables: pages, search, filters, sort', () => {
   })
 
   it('TBL-UI-024 temporary-files', async () => {
-    await renderMany()
+    await renderMany('temp')
     expect(dataRows('Temporary files')).toHaveLength(20)
     searchTable('Temporary files', 'db_2')
     expect(dataRows('Temporary files')).toHaveLength(6)

@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'vitest'
 
+import { ALERTS_SECTIONS, EVENTS_SECTIONS } from '@/features/alerts/alertingSections'
+import { CLUSTER_SECTIONS } from '@/features/cluster/clusterSections'
 import { TABS } from '@/features/indexes/IndexAnalysisPage'
-import { INSTANCE_SECTIONS } from '@/features/instance/instanceSections'
+import { FINDINGS_VIEWS } from '@/features/findings/findingsViews'
+import { INDEX_VIEWS } from '@/features/indexes/indexViews'
+import {
+  CATALOG_VIEW_IDS,
+  INSTANCE_SECTIONS,
+  RELATION_VIEW_IDS,
+} from '@/features/instance/instanceSections'
 
-import { FULLHD_ROUTES, routePathname } from '../../e2e/fullhd_routes'
+import { FULLHD_ROUTES, INSTANCE_SUBVIEWS, routePathname } from '../../e2e/fullhd_routes'
 import { routeTable } from './index'
 
 /** The routes whose vertical fit may be waived: chart pages only (D26). */
@@ -11,6 +19,7 @@ const CHART_ROUTES = [
   '/instances/:instanceId/ash',
   '/instances/:instanceId?section=overview',
   '/instances/:instanceId?section=host',
+  '/clusters/:clusterId?section=lag',
 ]
 
 describe('Full HD route inventory', () => {
@@ -20,10 +29,46 @@ describe('Full HD route inventory', () => {
 
     for (const path of routerPaths) expect(inventoryPaths, `missing ${path}`).toContain(path)
     for (const path of inventoryPaths) expect(routerPaths, `unknown ${path}`).toContain(path)
+    for (const { id } of CLUSTER_SECTIONS) {
+      expect(FULLHD_ROUTES.map((route) => route.path)).toContain(
+        `/clusters/:clusterId?section=${id}`,
+      )
+    }
     for (const { id } of INSTANCE_SECTIONS) {
       expect(FULLHD_ROUTES.map((route) => route.path)).toContain(
         `/instances/:instanceId?section=${id}`,
       )
+    }
+    for (const [page, sections] of [
+      ['/alerts', ALERTS_SECTIONS],
+      ['/events', EVENTS_SECTIONS],
+    ] as const) {
+      for (const [index, { id }] of sections.entries()) {
+        expect(FULLHD_ROUTES.map((route) => route.path)).toContain(
+          index === 0 ? page : `${page}?section=${id}`,
+        )
+      }
+    }
+    for (const [section, views] of [
+      ['relations', RELATION_VIEW_IDS],
+      ['catalog', CATALOG_VIEW_IDS],
+    ] as const) {
+      for (const view of views.slice(1)) {
+        expect(INSTANCE_SUBVIEWS).toContainEqual([section, view])
+      }
+    }
+    for (const [section, view] of INSTANCE_SUBVIEWS) {
+      expect(FULLHD_ROUTES.map((route) => route.path)).toContain(
+        `/instances/:instanceId?section=${section}&view=${view}`,
+      )
+    }
+    for (const [index, { id }] of FINDINGS_VIEWS.entries()) {
+      expect(FULLHD_ROUTES.map((route) => route.path)).toContain(
+        index === 0 ? '/findings' : `/findings?view=${id}`,
+      )
+    }
+    for (const { id } of INDEX_VIEWS.slice(1)) {
+      expect(FULLHD_ROUTES.map((route) => route.path)).toContain(`/indexes?tab=indexes&view=${id}`)
     }
     for (const { value } of TABS) {
       expect(FULLHD_ROUTES.map((route) => route.path)).toContain(`/indexes?tab=${value}`)

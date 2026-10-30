@@ -56,3 +56,63 @@ strip or moved to a tab) and per-column widths/truncation so rows stay one line.
 page). Routes with `pendingUnit` in `web/e2e/fullhd_routes.ts` wait for the
 unit that restructures them (15.2 instance tabs, 15.3 cluster tabs, 16.3
 locks/activity, 11.1 settings tabs).
+
+## 15.3 per-route results (deploy 15.3g, 2026-10-30)
+
+`FHD-FIT-001` passes every `fit` route without `pendingUnit` at 1920×1080 and 1920×950
+(no page or horizontal scrollbar, no table box scrolling, pager on screen); the
+`pendingUnit` routes are annotated UNVERIFIED and measured only. Columns below are
+the 1920×950 measurement (scroll height at both viewports). Compaction from 1600 px:
+one-line page header (36), page gaps 16, one-line Section header and toolbar, rows
+29 (`FULLHD_CELL` top-aligns inline content), pager per viewport. Restructures (tabs,
+views, controls in toolbar lines) are listed in STATE §8. Routes with no rows on the
+live stack fit, but their fit at 20 rows is unproven: 15.4 / 7.x re-measure them on
+the HA stack (the cluster `events` tab still renders an unpaged card list).
+
+| Route | Scroll height 1080 / 950 | Scroll width | Page header | Tab bar | Toolbar | Table header | Row (rows) | Pager | Above table | Result |
+|-------|--------------------------|--------------|-------------|---------|---------|--------------|------------|-------|-------------|--------|
+| `/` | 1080 / 950 | 1920 | 36 | — | — | — | — (0) | — | — | fits (no data table) |
+| `/queries` | 1080 / 950 | 1920 | 36 | — | 32 | 33 | 29 (20) | 32 | 189 | fits |
+| `/indexes?tab=indexes` | 1080 / 950 | 1920 | 36 | 36 | 32 | 33 | 29 (20) | 32 | 183 | fits |
+| `/indexes?tab=indexes&view=summary` | 1080 / 950 | 1920 | 36 | 36 | — | — | — (0) | — | — | fits (no data table) |
+| `/indexes?tab=indexes&view=findings` | 1080 / 950 | 1920 | 36 | 36 | 32 | 33 | 29 (20) | 32 | 183 | fits |
+| `/indexes?tab=indexes&view=foreign-keys` | 1080 / 950 | 1920 | 36 | 36 | 32 | 33 | 29 (20) | 32 | 183 | fits |
+| `/indexes?tab=cleanup` | 1080 / 950 | 1920 | 36 | 36 | 32 | 33 | 29 (20) | 32 | 175 | fits |
+| `/indexes?tab=dead-rows` | 1080 / 950 | 1920 | 36 | 36 | 32 | 33 | 29 (20) | 32 | 175 | fits |
+| `/clusters/:clusterId?section=topology` | 1080 / 950 | 1920 | 36 | 36 | — | — | — (0) | — | — | fits; unproven at 20 rows (no data) |
+| `/clusters/:clusterId?section=lag` | 1080 / 950 | 1920 | 36 | 36 | — | — | — (0) | — | — | charts (no horizontal scroll) |
+| `/clusters/:clusterId?section=slots` | 1080 / 950 | 1920 | 36 | 36 | — | — | — (0) | — | — | fits; unproven at 20 rows (no data) |
+| `/clusters/:clusterId?section=drift` | 1080 / 950 | 1920 | 36 | 36 | — | — | — (0) | — | — | fits; unproven at 20 rows (no data) |
+| `/clusters/:clusterId?section=events` | 1080 / 950 | 1920 | 36 | 36 | — | — | — (0) | — | — | fits; unproven at 20 rows (no data) |
+| `/instances/:instanceId?section=overview` | 5936 / 5936 | 1920 | 36 | 36 | — | — | — (0) | — | — | charts (no horizontal scroll) |
+| `/instances/:instanceId?section=host` | 1808 / 1808 | 1920 | 36 | 36 | — | — | — (0) | — | — | charts (no horizontal scroll) |
+| `/instances/:instanceId?section=settings` | 1080 / 950 | 1920 | 36 | 36 | — | — | — (0) | — | — | fits; unproven at 20 rows (no data) |
+| `/instances/:instanceId?section=relations` | 1080 / 950 | 1920 | 36 | 36 | 32 | 29 | 29 (20) | 32 | 193 | fits |
+| `/instances/:instanceId?section=catalog` | 1080 / 950 | 1920 | 36 | 36 | — | — | — (0) | — | — | fits; unproven at 20 rows (no data) |
+| `/instances/:instanceId?section=logical` | 1080 / 950 | 1920 | 36 | 36 | — | — | — (0) | — | — | fits; unproven at 20 rows (no data) |
+| `/instances/:instanceId?section=internals` | 1080 / 950 | 1920 | 36 | 36 | 32 | 33 | 29 (2) | — | 195 | fits |
+| `/instances/:instanceId?section=relations&view=indexes` | 1080 / 950 | 1920 | 36 | 36 | 32 | 29 | 29 (20) | 32 | 193 | fits |
+| `/instances/:instanceId?section=relations&view=table-bloat` | 1080 / 950 | 1920 | 36 | 36 | 32 | 29 | 29 (20) | 32 | 215 | fits |
+| `/instances/:instanceId?section=relations&view=index-bloat` | 1080 / 950 | 1920 | 36 | 36 | 32 | 29 | 29 (14) | — | 193 | fits |
+| `/instances/:instanceId?section=catalog&view=sequences` | 1080 / 950 | 1920 | 36 | 36 | 32 | 33 | 29 (20) | 32 | 193 | fits |
+| `/instances/:instanceId?section=catalog&view=partitions` | 1080 / 950 | 1920 | 36 | 36 | — | — | — (0) | — | — | fits; unproven at 20 rows (no data) |
+| `/instances/:instanceId?section=catalog&view=functions` | 1080 / 950 | 1920 | 36 | 36 | — | — | — (0) | — | — | fits; unproven at 20 rows (no data) |
+| `/instances/:instanceId?section=catalog&view=security-definer` | 1080 / 950 | 1920 | 36 | 36 | — | — | — (0) | — | — | fits; unproven at 20 rows (no data) |
+| `/instances/:instanceId?section=catalog&view=foreign-keys` | 1080 / 950 | 1920 | 36 | 36 | 32 | 33 | 29 (20) | 32 | 193 | fits |
+| `/instances/:instanceId?section=catalog&view=extensions` | 1080 / 950 | 1920 | 36 | 36 | 32 | 33 | 29 (4) | — | 193 | fits |
+| `/instances/:instanceId?section=catalog&view=postgis` | 1080 / 950 | 1920 | 36 | 36 | — | — | — (0) | — | — | fits; unproven at 20 rows (no data) |
+| `/instances/:instanceId?section=internals&view=slru` | 1080 / 950 | 1920 | 36 | 36 | 32 | 33 | 29 (8) | — | 195 | fits |
+| `/instances/:instanceId?section=internals&view=temp` | 1080 / 950 | 1920 | 36 | 36 | — | — | — (0) | — | — | fits; unproven at 20 rows (no data) |
+| `/instances/:instanceId/ash` | 1080 / 950 | 1920 | 38 | — | — | — | — (0) | — | — | charts (no horizontal scroll) |
+| `/instances/:instanceId/queries` | 1080 / 950 | 1920 | 36 | — | 32 | 33 | 30 (20) | 32 | 183 | fits |
+| `/instances/:instanceId/queries/:queryid` | 1080 / 950 | 1920 | 36 | — | — | — | — (0) | — | — | fits (no data table) |
+| `/instances/:instanceId/locks` | 2517 / 2517 | 1920 | 36 | — | — | — | — (0) | — | — | pending 16.3 |
+| `/findings` | 1080 / 950 | 1920 | 36 | 36 | — | 33 | 29 (20) | 32 | 176 | fits |
+| `/findings?view=rules` | 1080 / 950 | 1920 | 36 | 36 | 32 | 33 | 29 (20) | 32 | 176 | fits |
+| `/alerts` | 1080 / 950 | 1920 | 36 | 36 | — | — | — (0) | — | — | fits; unproven at 20 rows (no data) |
+| `/alerts?section=delivery` | 1080 / 950 | 1920 | 36 | 36 | — | — | — (0) | — | — | fits (no data table) |
+| `/events` | 1080 / 950 | 1920 | 36 | 36 | — | 33 | 29 (3) | — | 183 | fits |
+| `/events?section=alerts` | 1080 / 950 | 1920 | 36 | 36 | — | 33 | 29 (12) | — | 176 | fits |
+| `/alerts/rules` | 1080 / 950 | 1920 | 36 | — | 32 | 33 | 29 (20) | 32 | 176 | fits |
+| `/alerts/silences` | 1080 / 950 | 1920 | 36 | — | — | — | — (0) | — | — | fits; unproven at 20 rows (no data) |
+| `/settings` | 3789 / 3789 | 1920 | 36 | — | 32 | 33 | 28 (1) | — | 176 | pending 11.1 |

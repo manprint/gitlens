@@ -105,7 +105,7 @@ export function QueryOverview({ instanceId, queryid, datname }: QueryOverviewPro
   const backLink = `/instances/${encodeURIComponent(instanceId)}/queries`
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 min-[1600px]:space-y-4">
       <PageHeader
         icon={Zap}
         eyebrow={server ?? 'Query performance'}

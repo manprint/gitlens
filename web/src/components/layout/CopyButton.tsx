@@ -66,7 +66,7 @@ export function CopyButton({ text, subject = 'query text' }: { text: string; sub
             ? `Could not copy ${subject}`
             : `Copy ${subject}`
       }
-      className="text-muted-foreground hover:bg-muted hover:text-foreground inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium transition-colors"
+      className="text-muted-foreground hover:bg-muted hover:text-foreground inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium transition-colors min-[1600px]:h-5"
       onClick={copy}
       type="button"
     >

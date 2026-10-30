@@ -7,10 +7,14 @@ import {
   type DataTableProps,
   type DataTableToolbar,
 } from '@/components/layout/DataTable'
-import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsContent } from '@/components/ui/tabs'
 import { formatBytes, formatCount, formatRate, formatTimestamp } from '@/lib/format'
+
+import { InstancePanel, InstanceViewTabs, ToolbarNote } from './InstancePanel'
+import { LOGICAL_VIEW_IDS } from './instanceSections'
+import { useInstanceView, type InstanceView } from './instanceViews'
 
 type Subscription = Schemas['Subscription']
 type LogicalSlot = Schemas['LogicalSlotStats']
@@ -62,11 +66,12 @@ function subscriptionState(sub: Subscription, readAt: number) {
 
 function subscriptionColumns(readAt: number): DataTableProps<Subscription>['columns'] {
   return [
-    { accessorKey: 'name', header: 'Subscription' },
-    { accessorKey: 'database', header: 'Database' },
+    { accessorKey: 'name', header: 'Subscription', meta: { truncate: true } },
+    { accessorKey: 'database', header: 'Database', meta: { width: '9rem', truncate: true } },
     {
       id: 'state',
       header: 'State',
+      meta: { width: '8rem' },
       accessorFn: (sub) => (sub.enabled ? (sub.apply_worker ? 2 : 1) : 0),
       cell: ({ row }) => subscriptionState(row.original, readAt),
     },
@@ -74,11 +79,13 @@ function subscriptionColumns(readAt: number): DataTableProps<Subscription>['colu
       id: 'publications',
       header: 'Publications',
       accessorFn: (sub) => sub.publications.join(', '),
+      meta: { truncate: true },
     },
     {
       id: 'slot',
       header: 'Slot',
       accessorFn: (sub) => sub.slot_name,
+      meta: { width: '10rem', truncate: true },
       cell: ({ row }) =>
         row.original.slot_name ?? <span className="text-muted-foreground">none</span>,
     },
@@ -86,6 +93,7 @@ function subscriptionColumns(readAt: number): DataTableProps<Subscription>['colu
       id: 'last_message',
       header: 'Last message',
       accessorFn: (sub) => sub.last_message_at,
+      meta: { width: '13rem' },
       cell: ({ row }) =>
         row.original.last_message_at === null
           ? null
@@ -95,6 +103,7 @@ function subscriptionColumns(readAt: number): DataTableProps<Subscription>['colu
       id: 'errors',
       header: 'Errors (apply / sync)',
       accessorFn: (sub) => sub.apply_errors + sub.sync_errors,
+      meta: { width: '15rem' },
       cell: ({ row }) =>
         `${formatCount(row.original.apply_errors)} / ${formatCount(row.original.sync_errors)}`,
     },
@@ -102,6 +111,7 @@ function subscriptionColumns(readAt: number): DataTableProps<Subscription>['colu
       id: 'conflicts',
       header: 'Conflicts',
       accessorFn: (sub) => sub.conflicts,
+      meta: { width: '9.5rem' },
       cell: ({ row }) =>
         row.original.conflicts === null ? (
           <span className="text-muted-foreground">n/a</span>
@@ -118,7 +128,7 @@ function perSecond(bytes: number): string {
 
 function slotColumns(): DataTableProps<LogicalSlot>['columns'] {
   return [
-    { accessorKey: 'slot_name', header: 'Slot' },
+    { accessorKey: 'slot_name', header: 'Slot', meta: { truncate: true } },
     {
       accessorKey: 'bytes_per_second',
       header: 'Decoded',
@@ -154,6 +164,13 @@ export function LogicalReplicationSection({ instanceId }: { instanceId: string }
   const subscriptions = useMemo(() => subscriptionColumns(readAt), [readAt])
   const subscriptionFilters = useMemo(() => subscriptionToolbar(readAt), [readAt])
   const slots = useMemo(() => slotColumns(), [])
+  // One table per view (15.3): only the lists the instance has are offered.
+  const views: InstanceView<(typeof LOGICAL_VIEW_IDS)[number]>[] = []
+  if ((query.data?.subscriptions.length ?? 0) > 0) {
+    views.push({ id: 'subscriptions', label: 'Subscriptions' })
+  }
+  if ((query.data?.slots.length ?? 0) > 0) views.push({ id: 'slots', label: 'Logical slots' })
+  const [view, showView] = useInstanceView(views)
 
   let body
   if (query.error && !query.data) {
@@ -180,8 +197,8 @@ export function LogicalReplicationSection({ instanceId }: { instanceId: string }
   } else {
     const minutes = Math.round(query.data.window_seconds / 60)
     body = (
-      <div className="space-y-6">
-        {query.data.subscriptions.length > 0 ? (
+      <>
+        <TabsContent value="subscriptions">
           <DataTable
             ariaLabel="Subscriptions"
             tableId="subscriptions"
@@ -192,35 +209,42 @@ export function LogicalReplicationSection({ instanceId }: { instanceId: string }
             scope="subscriptions"
             total={query.data.subscriptions.length}
           />
-        ) : null}
-        {query.data.slots.length > 0 ? (
-          <div className="space-y-2">
-            <p className="text-muted-foreground text-sm">
-              Decoding of each logical slot, averaged over the last {minutes} minutes.
-            </p>
-            <DataTable
-              ariaLabel="Logical slots"
-              tableId="logical-slots"
-              toolbar={SLOT_TOOLBAR}
-              columns={slots}
-              data={query.data.slots}
-              emptyState={null}
-              scope="slots"
-              total={query.data.slots.length}
-            />
-          </div>
-        ) : null}
-      </div>
+        </TabsContent>
+        <TabsContent value="slots">
+          <DataTable
+            ariaLabel="Logical slots"
+            tableId="logical-slots"
+            toolbar={SLOT_TOOLBAR}
+            toolbarExtra={
+              <ToolbarNote>
+                {`Decoding of each logical slot, averaged over the last ${minutes} minutes.`}
+              </ToolbarNote>
+            }
+            columns={slots}
+            data={query.data.slots}
+            emptyState={null}
+            scope="slots"
+            total={query.data.slots.length}
+          />
+        </TabsContent>
+      </>
     )
   }
 
   return (
-    <Section
-      id="logical-replication"
-      title="Logical replication"
-      description="Subscriptions this instance applies, and the logical slots it decodes for. Connection strings are never read."
-    >
-      {body}
-    </Section>
+    <Tabs onValueChange={showView} value={view ?? ''}>
+      <InstancePanel
+        id="logical-replication"
+        title="Logical replication"
+        description="Subscriptions this instance applies, and the logical slots it decodes for. Connection strings are never read."
+        actions={
+          views.length > 1 ? (
+            <InstanceViewTabs label="Logical replication lists" views={views} />
+          ) : undefined
+        }
+      >
+        {body}
+      </InstancePanel>
+    </Tabs>
   )
 }

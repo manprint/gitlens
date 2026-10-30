@@ -271,3 +271,19 @@ describe('RulesPage table controls', () => {
     expect(dataRows(name)).toHaveLength(5)
   })
 })
+
+describe('RulesPage Full HD layout (D26)', () => {
+  it('FHD-APPLY-027 keeps a rule on one line and opens the editor above the list', async () => {
+    await renderRules([makeRule()])
+
+    const table = screen.getByRole('table', { name: 'Alert rules' })
+    expect(table).toHaveClass('min-[1600px]:table-fixed')
+    const edit = screen.getByRole('button', { name: 'Edit replication-lag' })
+    expect(edit).toHaveClass('min-[1600px]:h-6')
+    fireEvent.click(edit)
+    const editor = screen.getByRole('heading', { name: 'Edit alert rule: replication-lag' })
+    expect(editor.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // The editor opens away from the Edit button, so its heading takes the focus.
+    expect(editor).toHaveFocus()
+  })
+})

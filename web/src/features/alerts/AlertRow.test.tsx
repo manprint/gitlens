@@ -1,10 +1,11 @@
-import { screen } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { Schemas } from '@/api/types'
+import { SimpleTable } from '@/components/layout/SimpleTable'
 import { renderWithProviders } from '@/test/render'
 
-import { AlertRow } from './AlertRow'
+import { alertColumns } from './AlertRow'
 
 type Alert = Schemas['Alert']
 
@@ -30,10 +31,22 @@ describe('AlertRow', () => {
       instance_id: null,
     } as unknown as Alert
 
-    renderWithProviders(<AlertRow alert={alert} onSelect={vi.fn()} />)
+    // The alert is a row of the alert list (15.3): its Cluster and Instance cells read Unknown.
+    renderWithProviders(
+      <SimpleTable
+        ariaLabel="Alerts"
+        columns={alertColumns({ onSelect: vi.fn(), silenceFor: () => undefined })}
+        emptyState={null}
+        rowKey={(row) => row.alert_key}
+        rows={[alert]}
+        tableId="alerts"
+      />,
+    )
 
-    expect(screen.getByText('Instance: Unknown')).toBeInTheDocument()
-    expect(screen.getByText('Cluster: Unknown')).toBeInTheDocument()
+    const cells = within(screen.getAllByRole('row')[1]!).getAllByRole('cell')
+    const headers = screen.getAllByRole('columnheader').map((header) => header.textContent)
+    expect(cells[headers.indexOf('Instance') - 1]).toHaveTextContent(/^Unknown$/)
+    expect(cells[headers.indexOf('Cluster') - 1]).toHaveTextContent(/^Unknown$/)
     expect(screen.queryAllByRole('link').map((link) => link.getAttribute('href'))).toEqual([
       '/README.md#troubleshooting',
     ])

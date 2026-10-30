@@ -402,7 +402,7 @@ export function InventoryTables({ alerts, clusters, instances, rules }: Inventor
   )
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 min-[1600px]:space-y-4">
       <Section
         title="Instances"
         description="Every monitored PostgreSQL instance, its cluster relationship, permission tier, and telemetry availability."
@@ -437,7 +437,7 @@ export function InventoryTables({ alerts, clusters, instances, rules }: Inventor
             title="No instances match this filter"
           />
         ) : (
-          <div className="space-y-6">
+          <div className="space-y-6 min-[1600px]:space-y-4">
             {matching.map((instance) => (
               <DatabaseInventory instance={instance} key={instance.instance_id} />
             ))}

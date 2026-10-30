@@ -53,6 +53,8 @@ export interface DataTableProps<TData extends RowData> {
   emptyState: ReactNode
   /** The full result size. Truncation is reported only when it exceeds the rows shown. */
   total?: number
+  /** Page controls shown in the toolbar line beside the search box (D26). */
+  toolbarExtra?: ReactNode
   /** The server's row budget. It reports truncation only together with total. */
   budget?: number
   scope?: string
@@ -130,6 +132,7 @@ function DataTableView<TData extends RowData>({
   emptyState,
   total = data.length,
   budget,
+  toolbarExtra,
   scope = 'rows',
   ariaLabel = 'Data table',
   toolbar,
@@ -202,8 +205,11 @@ function DataTableView<TData extends RowData>({
               options={options}
               state={state}
               {...(toolbar.searchLabel === undefined ? {} : { searchLabel: toolbar.searchLabel })}
+              {...(toolbarExtra === undefined ? {} : { extra: toolbarExtra })}
             />
           </div>
+        ) : toolbarExtra ? (
+          <div className="flex min-w-0 flex-1 flex-wrap items-end gap-3">{toolbarExtra}</div>
         ) : (
           <span />
         )}

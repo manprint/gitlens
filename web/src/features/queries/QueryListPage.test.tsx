@@ -1,4 +1,4 @@
-import { act, fireEvent, screen } from '@testing-library/react'
+import { act, fireEvent, screen, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw/http'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -324,5 +324,24 @@ describe('QueryListPage table', () => {
     expect(columnTexts(name)[0]).toContain('stmt_25')
     sortTable(name, 'Calls', 'ascending')
     expect(columnTexts(name)[0]).toContain('stmt_01')
+  })
+})
+
+describe('QueryListPage Full HD layout (D26)', () => {
+  it('FHD-APPLY-005 shows the sort select in the section header and the query on one line', async () => {
+    server.use(statementsHandler(statementResponse()))
+    renderPage()
+    await settle()
+    expect(screen.getByRole('table', { name: 'Statement statistics' })).toBeInTheDocument()
+    const list = screen.getByRole('region', { name: 'Statements' })
+    const sort = within(list).getByLabelText('Sort statements')
+    // The select sits in the section header, before the table.
+    expect(
+      sort.compareDocumentPosition(screen.getByRole('table', { name: 'Statement statistics' })) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Query 123' })).toHaveClass(
+      'min-[1600px]:whitespace-nowrap',
+    )
   })
 })

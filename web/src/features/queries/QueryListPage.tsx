@@ -87,16 +87,20 @@ function queryTextCell(row: StatementDisplayRow, instanceId: string) {
   const normalised = normaliseQueryText(queryText)
 
   return (
-    <div className="min-w-64 space-y-1">
+    // From 1600 px the link and the statement share one line (D26).
+    <div className="min-w-64 space-y-1 min-[1600px]:flex min-[1600px]:items-center min-[1600px]:gap-2 min-[1600px]:space-y-0">
       <Link
-        className="text-primary text-xs font-semibold underline-offset-4 hover:underline"
+        className="text-primary text-xs font-semibold underline-offset-4 hover:underline min-[1600px]:shrink-0 min-[1600px]:whitespace-nowrap"
         to={queryPath(instanceId, row.queryid, row.datname)}
       >
         Query {String(row.queryid)}
       </Link>
       {queryText ? (
-        <details className="max-w-xl">
-          <summary className="cursor-pointer truncate text-sm" title={normalised}>
+        <details className="max-w-xl min-[1600px]:min-w-0">
+          <summary
+            className="cursor-pointer truncate text-sm min-[1600px]:leading-5 min-[1600px]:[&_code]:leading-5"
+            title={normalised}
+          >
             <SqlText sql={normalised} />
           </summary>
           <pre className="bg-muted/60 mt-2 max-h-48 overflow-auto rounded-lg border p-3 text-xs whitespace-pre-wrap">
@@ -122,11 +126,13 @@ function statementColumns(instanceId: string): DataTableProps<StatementDisplayRo
     {
       id: 'query',
       header: 'Query',
+      // Takes the width the fixed-width figures leave from 1600 px (D26).
       enableSorting: false,
       cell: ({ row }) => queryTextCell(row.original, instanceId),
     },
     {
       id: 'calls',
+      meta: { width: '7rem' },
       header: 'Calls',
       accessorFn: (row) => summariseStatement(row).calls,
       cell: ({ row }) => {
@@ -140,6 +146,7 @@ function statementColumns(instanceId: string): DataTableProps<StatementDisplayRo
     },
     {
       id: 'total-time',
+      meta: { width: '8rem' },
       header: 'Total time',
       accessorFn: (row) => summariseStatement(row).total,
       cell: ({ row }) => {
@@ -153,6 +160,7 @@ function statementColumns(instanceId: string): DataTableProps<StatementDisplayRo
     },
     {
       id: 'mean-time',
+      meta: { width: '8rem' },
       header: 'Mean time',
       accessorFn: (row) => summariseStatement(row).mean,
       cell: ({ row }) => {
@@ -164,6 +172,7 @@ function statementColumns(instanceId: string): DataTableProps<StatementDisplayRo
     },
     {
       id: 'share-total',
+      meta: { width: '10rem' },
       header: 'Share of listed rows',
       enableSorting: false,
       cell: ({ row }) => {
@@ -177,6 +186,7 @@ function statementColumns(instanceId: string): DataTableProps<StatementDisplayRo
     },
     {
       id: 'rows',
+      meta: { width: '7rem' },
       header: 'Rows',
       accessorFn: (row) =>
         typeof row.rows === 'number' && Number.isFinite(row.rows) ? row.rows : null,
@@ -184,6 +194,7 @@ function statementColumns(instanceId: string): DataTableProps<StatementDisplayRo
     },
     {
       id: 'cache-hit-ratio',
+      meta: { width: '10rem' },
       header: 'Cache hit ratio',
       accessorFn: (row) => summariseStatement(row).cacheHitRatio,
       cell: ({ row }) => {
@@ -197,6 +208,7 @@ function statementColumns(instanceId: string): DataTableProps<StatementDisplayRo
     },
     {
       id: 'wal-bytes',
+      meta: { width: '6.5rem' },
       header: 'WAL',
       accessorFn: (row) =>
         typeof row.wal_bytes === 'number' && Number.isFinite(row.wal_bytes) ? row.wal_bytes : null,
@@ -213,6 +225,7 @@ function statementColumns(instanceId: string): DataTableProps<StatementDisplayRo
     },
     {
       id: 'temporary-bytes',
+      meta: { width: '12rem' },
       header: 'Temporary bytes/call',
       accessorFn: (row) => summariseStatement(row).tempBytesPerCall,
       cell: ({ row }) => {
@@ -320,9 +333,29 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
   }
 
   const truncated = response?.truncated === true
+  // The budget and eviction notes share the table's toolbar line (15.3, D26).
+  const statementNotes = (
+    <div
+      className="text-muted-foreground flex min-w-0 flex-1 items-center gap-2 self-center overflow-hidden text-xs whitespace-nowrap"
+      title={`${truncated ? `Showing ${rows.length} of ${STATEMENT_LIMIT} statements (truncated; budget ${STATEMENT_LIMIT}). The top-N budget is configured by checks.stat_statements.top_n. ` : ''}Entries beyond pg_stat_statements.max are evicted and may appear and disappear. queryid values are comparable only within this cluster.`}
+    >
+      {truncated ? (
+        <>
+          <Truncated shown={rows.length} budget={STATEMENT_LIMIT} scope="statements" />
+          <span>
+            The top-N budget is configured by <code>checks.stat_statements.top_n</code>.
+          </span>
+        </>
+      ) : null}
+      <span className="truncate">
+        Entries beyond <code>pg_stat_statements.max</code> are evicted and may appear and disappear.{' '}
+        <code>queryid</code> values are comparable only within this cluster.
+      </span>
+    </div>
+  )
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 min-[1600px]:space-y-4">
       <PageHeader
         icon={Zap}
         eyebrow="Query performance"
@@ -336,6 +369,25 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
         id="statement-list"
         title="Statements"
         description="Statement statistics are scoped to the selected database and time range."
+        actions={
+          <>
+            <label className="text-muted-foreground text-sm font-medium" htmlFor="statement-sort">
+              Sort statements
+            </label>
+            <NativeSelect
+              className="min-[1600px]:h-8"
+              id="statement-sort"
+              value={sort}
+              onChange={(event) => onSortChange(event.target.value)}
+            >
+              {SORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </NativeSelect>
+          </>
+        }
       >
         {disabled ? (
           <p
@@ -345,23 +397,6 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
             {skipSentence(response.disabled_reason)} The statements below were collected earlier.
           </p>
         ) : null}
-        <div className="mb-4 flex flex-wrap items-center gap-2">
-          <label className="text-muted-foreground text-sm font-medium" htmlFor="statement-sort">
-            Sort statements
-          </label>
-          <NativeSelect
-            id="statement-sort"
-
-            value={sort}
-            onChange={(event) => onSortChange(event.target.value)}
-          >
-            {SORT_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </NativeSelect>
-        </div>
         <DataTable
           ariaLabel="Statement statistics"
           tableId="statement-statistics"
@@ -375,19 +410,10 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
             />
           }
           scope="statements"
+          toolbarExtra={statementNotes}
         />
-        {truncated ? (
-          <div className="text-muted-foreground mt-3 text-sm">
-            <Truncated shown={rows.length} budget={STATEMENT_LIMIT} scope="statements" />{' '}
-            <span>
-              The top-N budget is configured by <code>checks.stat_statements.top_n</code>.
-            </span>
-          </div>
-        ) : null}
-        <p className="text-muted-foreground mt-4 text-sm">
-          Entries beyond <code>pg_stat_statements.max</code> are evicted and may appear and
-          disappear. <code>queryid</code> values are comparable only within this cluster.
-        </p>
+        {/* Without rows the table has no toolbar line: the notes follow the empty state. */}
+        {rows.length === 0 ? <div className="mt-3 flex">{statementNotes}</div> : null}
       </Section>
     </div>
   )

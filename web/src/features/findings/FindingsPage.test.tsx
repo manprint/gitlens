@@ -48,9 +48,18 @@ async function settlePage() {
   })
 }
 
+// The findings table shows one line per finding; the card with the detail,
+// evidence and mute action opens under its row (15.3).
+function expandFindings() {
+  for (const button of screen.queryAllByRole('button', { name: /^Show details of / })) {
+    fireEvent.click(button)
+  }
+}
+
 async function renderPage(route = '/findings') {
   const view = renderWithProviders(<FindingsPage />, { route })
   await settlePage()
+  expandFindings()
   return view
 }
 
@@ -250,6 +259,7 @@ describe('FindingsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry findings' }))
     await settlePage()
     await settlePage()
+    expandFindings()
 
     expect(screen.getByRole('heading', { name: 'Replication lag' })).toBeInTheDocument()
   })
@@ -404,7 +414,10 @@ describe('FindingsPage', () => {
     await settleMutation()
 
     expect(deleteCalled).toBe(true)
-    expect(screen.getByText('open')).toBeInTheDocument()
+    // The row repeats the state, so the card is the one to read.
+    expect(
+      within(screen.getByRole('article', { name: 'Replication lag' })).getByText('open'),
+    ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Mute finding' })).toBeInTheDocument()
     expect(screen.queryByText('Reason: maintenance')).not.toBeInTheDocument()
   })
@@ -515,5 +528,148 @@ describe('FindingsPage', () => {
     expect(view.container).toBeTruthy()
     vi.useRealTimers()
     await expectNoA11yViolations(view.container)
+  })
+
+  it('FHD-APPLY-010 shows the findings and the rule catalogue as tabs in the page header, the default never written', async () => {
+    const view = await renderFindings()
+
+    // The tab list shares the page header line.
+    const header = screen
+      .getAllByRole('banner')
+      .find((banner) => within(banner).queryByRole('heading', { level: 1 }))
+    expect(header).toBeDefined()
+    const tabs = within(header!).getByRole('tablist', { name: 'Findings views' })
+    expect(within(tabs).getByRole('tab', { name: 'Findings' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    expect(screen.getByRole('table', { name: 'Advisor findings' })).toBeInTheDocument()
+    expect(screen.queryByRole('table', { name: 'Advisor rule catalogue' })).not.toBeInTheDocument()
+
+    fireEvent.mouseDown(within(tabs).getByRole('tab', { name: 'Rule catalogue' }))
+    expect(view.router.state.location.search).toBe('?view=rules')
+    expect(screen.getByRole('table', { name: 'Advisor rule catalogue' })).toBeInTheDocument()
+    expect(screen.queryByRole('table', { name: 'Advisor findings' })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('table')).toHaveLength(1)
+
+    fireEvent.mouseDown(within(tabs).getByRole('tab', { name: 'Findings' }))
+    expect(view.router.state.location.search).toBe('')
+  })
+
+  it('FHD-APPLY-011 opens the tab a view parameter names', async () => {
+    await renderFindings([finding()], [rule()], '/findings?view=rules&state=all')
+    expect(screen.getByRole('tab', { name: 'Rule catalogue' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    expect(screen.getAllByRole('table')).toHaveLength(1)
+    expect(screen.getByRole('table', { name: 'Advisor rule catalogue' })).toBeInTheDocument()
+  })
+
+  it('FHD-APPLY-012 treats an unknown view as the findings tab', async () => {
+    await renderFindings([finding()], [rule()], '/findings?view=unknown')
+
+    expect(screen.getByRole('tab', { name: 'Findings' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getAllByRole('table')).toHaveLength(1)
+    expect(screen.getByRole('table', { name: 'Advisor findings' })).toBeInTheDocument()
+  })
+
+  it('FHD-APPLY-013 lists each finding on one line and opens its card under the row', async () => {
+    server.use(
+      ok('getFindings', [
+        finding({ object_name: 'public.orders', datname: 'shop', title: 'Long finding title' }),
+      ]),
+      ok('getAdvisorRules', [rule()]),
+    )
+    renderWithProviders(<FindingsPage />, { route: '/findings' })
+    await settlePage()
+
+    const table = screen.getByRole('table', { name: 'Advisor findings' })
+    expect(table).toHaveClass('min-[1600px]:table-fixed')
+    expect(screen.queryByRole('article')).not.toBeInTheDocument()
+    const title = within(table).getByTitle('Long finding title')
+    expect(title).toHaveClass('min-[1600px]:truncate')
+    expect(within(table).getByTitle('public.orders · database shop')).toHaveClass(
+      'min-[1600px]:truncate',
+    )
+    expect(screen.getByRole('button', { name: 'Show details of Long finding title' })).toHaveClass(
+      'min-[1600px]:size-5',
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show details of Long finding title' }))
+    expect(screen.getByRole('article', { name: 'Long finding title' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Hide details of Long finding title' }),
+    ).toBeInTheDocument()
+  })
+
+  it('FHD-APPLY-014 shows 20 findings per page and a new filter returns to the first page', async () => {
+    server.use(
+      ok(
+        'getFindings',
+        Array.from({ length: 25 }, (_, index) =>
+          finding({ finding_id: `finding-${index}`, title: `Finding ${index}` }),
+        ),
+      ),
+      ok('getAdvisorRules', [rule()]),
+    )
+    const view = renderWithProviders(<FindingsPage />, { route: '/findings?findings.page=2' })
+    await settlePage()
+
+    const rows = within(screen.getByTestId('simple-table-rows')).getAllByRole('row')
+    expect(rows).toHaveLength(5)
+
+    fireEvent.change(screen.getByLabelText('Scope'), { target: { value: 'cluster' } })
+    expect(view.router.state.location.search).toBe('?scope=cluster')
+    expect(within(screen.getByTestId('simple-table-rows')).getAllByRole('row')).toHaveLength(20)
+  })
+
+  it('FHD-APPLY-015 puts the summary in the section header and the hidden counts in its truncated description', async () => {
+    await renderFindings([
+      finding({ finding_id: 'open', title: 'Visible open' }),
+      finding({ finding_id: 'muted', state: 'muted', title: 'Hidden muted' }),
+    ])
+
+    const section = screen.getByRole('region', { name: 'Findings' })
+    const summary = within(section).getByRole('group', { name: 'Finding summary' })
+    // The header of the section holds the summary; the table sits in its body.
+    expect(summary.compareDocumentPosition(screen.getByRole('table'))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    )
+    expect(within(summary).getByRole('button', { name: /Warning\s+1/ })).toHaveClass(
+      'min-[1600px]:h-6',
+    )
+    const description = within(section).getByText(/0 resolved findings are hidden/)
+    expect(description).toHaveClass('min-[1600px]:truncate')
+    expect(description).toHaveAttribute(
+      'title',
+      expect.stringMatching(/^1 of 2 findings shown\. By default, 1 muted/),
+    )
+  })
+
+  it('FHD-APPLY-016 keeps the filters on one line, their names hidden from 1600 px', async () => {
+    await renderFindings()
+
+    const filters = screen.getByRole('group', { name: 'Finding filters' })
+    for (const name of ['State', 'Severity', 'Scope', 'Cluster', 'Instance']) {
+      expect(within(filters).getByLabelText(name)).toHaveClass('h-8')
+      const caption = within(filters).getByText(name, { selector: 'span' })
+      expect(caption).toHaveClass('min-[1600px]:hidden')
+      expect(caption).toHaveAttribute('aria-hidden', 'true')
+    }
+  })
+
+  it('FHD-APPLY-017 states the server limit on the filter line, truncated with the full text in its title', async () => {
+    await renderFindings(
+      Array.from({ length: 1000 }, (_, index) => finding({ finding_id: `finding-${index}` })),
+    )
+
+    const note = within(screen.getByRole('group', { name: 'Finding filters' })).getByText(
+      /Only the first 1000 findings were returned/,
+    )
+    expect(note).toHaveClass('min-[1600px]:truncate')
+    expect(note).toHaveAttribute('title', expect.stringMatching(/may be missing/))
+    // One page of rows, each with its expand button.
+    expect(screen.getAllByRole('button', { name: /^(Show|Hide) details of / })).toHaveLength(20)
   })
 })

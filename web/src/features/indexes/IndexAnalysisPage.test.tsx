@@ -108,6 +108,8 @@ describe('IndexAnalysisPage', () => {
     expect(within(table).getByText('orders_pkey')).toBeInTheDocument()
     expect(within(table).getByText('customer_id, created_at')).toBeInTheDocument()
     expect(screen.getByRole('article', { name: 'Indexes' })).toHaveTextContent('3')
+    // The kind counts are on the Summary view of the tab (15.3).
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Summary' }))
     expect(screen.getByRole('article', { name: 'Primary keys' })).toHaveTextContent('1')
     expect(screen.getByRole('article', { name: 'Partial' })).toHaveTextContent('1')
   })
@@ -116,9 +118,14 @@ describe('IndexAnalysisPage', () => {
     render()
     await flushNetwork(30)
 
+    // Each list is a view of the tab (15.3): findings, foreign keys, then the summary tile.
+    fireEvent.mouseDown(screen.getByRole('tab', { name: /^Advisor findings/ }))
     expect(screen.getByText('Advisor findings on indexes')).toBeInTheDocument()
-    expect(screen.getByText('index.unused')).toBeInTheDocument()
+    const findings = screen.getByRole('table', { name: 'Index findings' })
+    expect(within(findings).getByText('index.unused')).toBeInTheDocument()
+    fireEvent.mouseDown(screen.getByRole('tab', { name: /^Foreign keys/ }))
     expect(screen.getByText('Foreign keys without a covering index')).toBeInTheDocument()
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Summary' }))
     expect(screen.getByRole('article', { name: 'Foreign keys w/o index' })).toHaveTextContent('1')
   })
 

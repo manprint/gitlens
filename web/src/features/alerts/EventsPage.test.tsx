@@ -1,4 +1,4 @@
-import { act, fireEvent, screen } from '@testing-library/react'
+import { act, fireEvent, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { qk } from '@/api/keys'
@@ -66,6 +66,16 @@ async function renderPage(
   return view
 }
 
+/** The Suppression cell of the first alert row; the Alert column is the row header. */
+function suppressionCell() {
+  const table = screen.getByRole('table', { name: 'Alert suppression status' })
+  const headers = within(table)
+    .getAllByRole('columnheader')
+    .map((header) => header.textContent)
+  const row = within(table).getAllByRole('row')[1]!
+  return within(row).getAllByRole('cell')[headers.indexOf('Suppression') - 1]
+}
+
 describe('EventsPage', () => {
   it('UI-ALERT-050 renders a positive no-firing state with the last evaluation', async () => {
     await renderPage('/events?range=1h', [baseEvent], [alert()])
@@ -93,10 +103,11 @@ describe('EventsPage', () => {
       ok('getAlerts', [alert()]),
       status('getSilences', 500, { error: 'internal_error', detail: 'silences unavailable' }),
     )
-    renderWithProviders(<EventsPage />, { route: '/events?range=1h' })
+    // The per-alert suppression is the Alert status tab of the page (15.3).
+    renderWithProviders(<EventsPage />, { route: '/events?range=1h&section=alerts' })
     await settle()
 
-    expect(screen.getByText('Suppression: Unknown')).toBeInTheDocument()
+    expect(suppressionCell()).toHaveTextContent(/^Unknown$/)
     expect(screen.queryByText(/Not suppressed/i)).not.toBeInTheDocument()
   })
 
@@ -196,14 +207,99 @@ describe('EventsPage', () => {
   })
 
   it('UI-ALERT-058 counts a suppressed firing alert as suppressed, not firing, as the alerts page does', async () => {
+    // The per-alert suppression is the Alert status tab of the page (15.3).
     await renderPage(
-      '/events?range=1h',
+      '/events?range=1h&section=alerts',
       [baseEvent],
       [alert({ state: 'firing', suppressed: true })],
     )
 
     expect(screen.queryByText('Firing alerts: 1')).not.toBeInTheDocument()
     expect(screen.getByText(/No alerts firing/)).toBeInTheDocument()
-    expect(screen.getByText('Suppression: Suppressed')).toBeInTheDocument()
+    expect(suppressionCell()).toHaveTextContent(/^Suppressed$/)
+  })
+})
+
+describe('EventsPage Full HD layout (D26)', () => {
+  it('FHD-APPLY-024 shows the event list on the default tab with the firing status beside the tabs', async () => {
+    const view = await renderPage()
+
+    const tabs = screen.getByRole('tablist', { name: 'Event sections' })
+    expect(screen.getByRole('tab', { name: 'Events' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getAllByRole('table')).toHaveLength(1)
+    expect(screen.getByRole('table', { name: 'Fleet events' })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('table', { name: 'Alert suppression status' }),
+    ).not.toBeInTheDocument()
+    expect(screen.getByTestId('events-tab-row')).toContainElement(tabs)
+    expect(screen.getByTestId('events-tab-row')).toContainElement(
+      screen.getByText(/No alerts firing/),
+    )
+    expect(view.router.state.location.search).toBe('?range=1h')
+  })
+
+  it('FHD-APPLY-025 keeps the alert status tab in ?section= and falls back on an unknown value', async () => {
+    const view = await renderPage('/events?range=1h&section=alerts')
+
+    expect(screen.getByRole('tab', { name: 'Alert status' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    expect(screen.getAllByRole('table')).toHaveLength(1)
+    expect(screen.getByRole('table', { name: 'Alert suppression status' })).toBeInTheDocument()
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Events' }))
+    await settle()
+    expect(view.router.state.location.search).toBe('?range=1h')
+    expect(screen.getByRole('table', { name: 'Fleet events' })).toBeInTheDocument()
+
+    view.unmount()
+    await renderPage('/events?range=1h&section=unknown')
+    expect(screen.getByRole('tab', { name: 'Events' })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('FHD-APPLY-026 puts the filters in the list header and lists 20 one-line events per page', async () => {
+    const failover = event({
+      event_id: 99,
+      type: 'failover_detected',
+      ts: '2026-09-01T05:00:00Z',
+      payload: { old_primary: 'old-id', new_primary: 'new-id' },
+    })
+    const events = [
+      failover,
+      ...Array.from({ length: 24 }, (_, index) => event({ event_id: index + 1 })),
+    ]
+    const view = await renderPage('/events?range=1h', events)
+
+    const list = screen.getByRole('region', { name: 'Event timeline' })
+    const table = screen.getByRole('table', { name: 'Fleet events' })
+    for (const label of ['Cluster', 'Event type', 'Event limit']) {
+      const control = within(list).getByLabelText(label)
+      expect(control).toHaveClass('min-[1600px]:h-8')
+      expect(control.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    }
+    expect(table).toHaveClass('min-[1600px]:table-fixed')
+    expect(within(table).getAllByRole('row')).toHaveLength(21)
+    expect(screen.getByRole('navigation', { name: 'Fleet events pagination' })).toBeInTheDocument()
+    // Newest first; the details are cut to one line with the full text in the title.
+    const first = within(table).getAllByRole('row')[1]!
+    expect(first).toHaveTextContent('failover_detected')
+    expect(within(first).getByTitle(/^Old primary: old-id; New primary: new-id\. /)).toHaveClass(
+      'min-[1600px]:truncate',
+    )
+    expect(within(first).getByRole('link', { name: 'new-id' })).toHaveAttribute(
+      'href',
+      '/instances/new-id',
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(new URLSearchParams(view.router.state.location.search).get('events.page')).toBe('2')
+    fireEvent.change(within(list).getByLabelText('Event type'), {
+      target: { value: 'failover_detected' },
+    })
+    await settle()
+    const search = new URLSearchParams(view.router.state.location.search)
+    expect(search.get('type')).toBe('failover_detected')
+    // A narrower list starts on its first page (D23).
+    expect(search.get('events.page')).toBeNull()
   })
 })

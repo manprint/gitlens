@@ -210,7 +210,7 @@ export function CommandAudit({ instances }: CommandAuditProps) {
           title="No command audit"
         />
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-6 min-[1600px]:space-y-4">
           {instances.map((instance) => (
             <InstanceCommandAudit instance={instance} key={instance.instance_id} />
           ))}

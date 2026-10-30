@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 
 import type { PermTier } from '@/api/types'
 import {
@@ -8,6 +8,7 @@ import {
 } from '@/components/layout/DataTable'
 import { EmptyState } from '@/components/state'
 import { Section } from '@/components/layout/Section'
+import { useKeepFocus } from '@/hooks/useKeepFocus'
 import type { AdvisorRule, FindingRecord } from '@/lib/findings'
 import { NativeSelect } from '@/components/ui/native-select'
 
@@ -64,27 +65,46 @@ function makeRow(rule: AdvisorRule, findings: readonly FindingRecord[]): RuleCat
   }
 }
 
-// Severity, scope and tier already have the selects above the table.
+// Severity, scope and tier already have their own selects on the toolbar line.
 const RULE_TOOLBAR: DataTableToolbar<RuleCatalogueRow> = {
   searchFields: [(row) => row.ruleId, (row) => row.needs],
 }
 
 function ruleColumns(): DataTableProps<RuleCatalogueRow>['columns'] {
   return [
-    { accessorKey: 'ruleId', header: 'Rule ID' },
-    { accessorKey: 'severity', header: 'Severity', enableHiding: false },
-    { accessorKey: 'scope', header: 'Scope', enableHiding: false },
-    { accessorKey: 'needs', header: 'Needs' },
-    { accessorKey: 'minTier', header: 'Minimum tier' },
+    // One line per rule from 1600 px (D26): the free-text columns truncate.
+    { accessorKey: 'ruleId', header: 'Rule ID', meta: { width: '24%', truncate: true } },
+    { accessorKey: 'severity', header: 'Severity', enableHiding: false, meta: { width: '8rem' } },
+    { accessorKey: 'scope', header: 'Scope', enableHiding: false, meta: { width: '8rem' } },
+    { accessorKey: 'needs', header: 'Needs', meta: { truncate: true } },
+    { accessorKey: 'minTier', header: 'Minimum tier', meta: { width: '9.5rem' } },
     {
       accessorKey: 'firingInstances',
       header: 'Firing instances',
+      meta: { width: '11rem' },
     },
     {
       accessorKey: 'nonEvaluableInstances',
       header: 'Cannot evaluate',
+      meta: { width: '11rem' },
     },
   ]
+}
+
+/**
+ * One catalogue filter. From 1600 px it sits on the table toolbar line (D26):
+ * the name above the select is hidden and the select keeps it as its
+ * accessible name.
+ */
+function CatalogueFilter({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="text-muted-foreground flex flex-col gap-1 text-xs">
+      <span aria-hidden="true" className="font-medium min-[1600px]:hidden">
+        {label}
+      </span>
+      {children}
+    </div>
+  )
 }
 
 function filterOptions(values: readonly string[]): string[] {
@@ -124,71 +144,93 @@ export function RuleCatalogue({ rules, findings }: RuleCatalogueProps) {
       />
     )
 
+  const filters = (
+    <>
+      <CatalogueFilter label="Rule level">
+        <NativeSelect
+          aria-label="Rule level"
+          className="h-8 px-2 text-sm"
+          id="catalogue-severity"
+          onChange={(event) => setSeverity(event.target.value)}
+          value={severity}
+        >
+          <option value="all">All severities</option>
+          {severityOptions.map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </NativeSelect>
+      </CatalogueFilter>
+      <CatalogueFilter label="Rule scope">
+        <NativeSelect
+          aria-label="Rule scope"
+          className="h-8 px-2 text-sm"
+          id="catalogue-scope"
+          onChange={(event) => setScope(event.target.value)}
+          value={scope}
+        >
+          <option value="all">All scopes</option>
+          {scopeOptions.map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </NativeSelect>
+      </CatalogueFilter>
+      <CatalogueFilter label="Available at or below">
+        <NativeSelect
+          aria-label="Available at or below"
+          className="h-8 px-2 text-sm"
+          id="catalogue-tier"
+          onChange={(event) => setMaxTier(event.target.value)}
+          value={maxTier}
+        >
+          <option value="all">All permission tiers</option>
+          {permissionTiers.map((tier) => (
+            <option key={tier} value={tier}>
+              {tier}
+            </option>
+          ))}
+        </NativeSelect>
+      </CatalogueFilter>
+    </>
+  )
+
+  const empty = rows.length === 0 && rules.length > 0
+  const keepFocus = useKeepFocus(empty ? 'bar' : 'table')
+  // `contents`: the wrapper only keeps focus, it adds no box to the layout.
+  const filterControls = (
+    <div className="contents" {...keepFocus}>
+      {filters}
+    </div>
+  )
+
   return (
     <Section
       title="Rule catalogue"
       description="See which checks are available at each permission tier and how many targets currently exercise them."
     >
-      <div className="mb-4 grid gap-4 sm:grid-cols-3">
-        <label className="space-y-1 text-sm" htmlFor="catalogue-severity">
-          <span className="font-medium">Rule level</span>
-          <NativeSelect
-            className="w-full"
-            id="catalogue-severity"
-            onChange={(event) => setSeverity(event.target.value)}
-            value={severity}
-          >
-            <option value="all">All severities</option>
-            {severityOptions.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </NativeSelect>
-        </label>
-        <label className="space-y-1 text-sm" htmlFor="catalogue-scope">
-          <span className="font-medium">Rule scope</span>
-          <NativeSelect
-            className="w-full"
-            id="catalogue-scope"
-            onChange={(event) => setScope(event.target.value)}
-            value={scope}
-          >
-            <option value="all">All scopes</option>
-            {scopeOptions.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </NativeSelect>
-        </label>
-        <label className="space-y-1 text-sm" htmlFor="catalogue-tier">
-          <span className="font-medium">Available at or below</span>
-          <NativeSelect
-            className="w-full"
-            id="catalogue-tier"
-            onChange={(event) => setMaxTier(event.target.value)}
-            value={maxTier}
-          >
-            <option value="all">All permission tiers</option>
-            {permissionTiers.map((tier) => (
-              <option key={tier} value={tier}>
-                {tier}
-              </option>
-            ))}
-          </NativeSelect>
-        </label>
-      </div>
-      <DataTable
-        ariaLabel="Advisor rule catalogue"
-        tableId="advisor-rule-catalogue"
-        toolbar={RULE_TOOLBAR}
-        columns={columns}
-        data={rows}
-        emptyState={emptyState}
-        scope="rules"
-        total={rules.length}
-      />
+      {empty ? (
+        // The table hides its toolbar without rows, so the filters that
+        // emptied it stay reachable here.
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-end gap-3">{filterControls}</div>
+          <div role="status">{emptyState}</div>
+        </div>
+      ) : (
+        <DataTable
+          ariaLabel="Advisor rule catalogue"
+          tableId="advisor-rule-catalogue"
+          toolbar={RULE_TOOLBAR}
+          toolbarExtra={filterControls}
+          columns={columns}
+          data={rows}
+          emptyState={emptyState}
+          scope="rules"
+          total={rules.length}
+        />
+      )}
     </Section>
   )
 }

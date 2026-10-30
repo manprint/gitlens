@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 
 import { useInstanceTables } from '@/api/queries'
 import { CopyButton } from '@/components/layout/CopyButton'
-import { MetricTile } from '@/components/layout/MetricTile'
 import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { EmptyState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
@@ -21,6 +20,7 @@ import {
 import { summariseColumns } from '@/lib/indexDefinition'
 
 import { DEAD_ROWS_LIMIT } from './DeadRowsPanel'
+import { CELL_BADGE, IndexPanel, PanelNote } from './IndexPanel'
 
 const REASONS: Record<
   CleanupReason,
@@ -65,6 +65,8 @@ const CLEANUP_COLUMNS: readonly SimpleColumn<CleanupCandidate>[] = [
     header: 'Index',
     sortValue: (candidate) => candidate.row.name,
     className: 'font-medium break-all',
+    width: '22rem',
+    truncate: (candidate) => candidate.row.name,
     cell: (candidate) => candidate.row.name,
   },
   {
@@ -72,6 +74,7 @@ const CLEANUP_COLUMNS: readonly SimpleColumn<CleanupCandidate>[] = [
     header: 'Table',
     sortValue: (candidate) => `${candidate.row.schema}.${candidate.row.table}`,
     className: 'break-all',
+    truncate: ({ row }) => `${row.datname} · ${row.schema}.${row.table}`,
     cell: ({ row }) => (
       <>
         <span className="text-muted-foreground">
@@ -84,9 +87,14 @@ const CLEANUP_COLUMNS: readonly SimpleColumn<CleanupCandidate>[] = [
   {
     id: 'reason',
     header: 'Reason',
+    width: '10rem',
     cell: (candidate) => {
       const reason = REASONS[candidate.reason]
-      return <Badge variant={reason.variant}>{reason.label}</Badge>
+      return (
+        <Badge className={CELL_BADGE} variant={reason.variant}>
+          {reason.label}
+        </Badge>
+      )
     },
   },
   {
@@ -94,6 +102,7 @@ const CLEANUP_COLUMNS: readonly SimpleColumn<CleanupCandidate>[] = [
     header: 'Size',
     sortValue: (candidate) => candidate.row.bytes,
     className: 'whitespace-nowrap',
+    width: '7rem',
     cell: ({ row }) => (row.bytes === null ? 'Unknown' : formatBytes(row.bytes)),
   },
   {
@@ -101,6 +110,7 @@ const CLEANUP_COLUMNS: readonly SimpleColumn<CleanupCandidate>[] = [
     header: 'Index writes',
     sortValue: (candidate) => candidate.writeRate,
     className: 'whitespace-nowrap',
+    width: '9rem',
     cell: (candidate) =>
       candidate.writeRate === null ? 'Not measured' : formatRate(candidate.writeRate),
   },
@@ -248,48 +258,56 @@ export function CleanupPanel({ instanceId, rows, siblings }: CleanupPanelProps) 
   const script = useMemo(() => cleanupScript(candidates), [candidates])
   const statistical = candidates.filter((candidate) => candidate.basis === 'statistics').length
 
+  const clusterText = `This server is part of a cluster. Check ${siblings.map((sibling) => sibling.label).join(', ')} before you drop anything: scans are counted on the server that runs them, so an index with no scan here may be in use on a standby.`
+  const statisticalHeadline = `${formatCount(statistical)} ${statistical === 1 ? 'candidate rests' : 'candidates rest'} on raw counters.`
+  const statisticalText =
+    'The advisor calls an index unused only after 7 days of usage history. Until then "never scanned" means no scan since the statistics were last reset.'
+  const notes =
+    siblings.length > 0 || statistical > 0 ? (
+      <>
+        {siblings.length > 0 ? (
+          <PanelNote title={clusterText}>
+            <strong>This server is part of a cluster.</strong> Check{' '}
+            {siblings.map((sibling, position) => (
+              <Fragment key={sibling.id}>
+                {position > 0 ? ', ' : ''}
+                <Link
+                  className="text-primary font-medium hover:underline"
+                  to={`/indexes?instance=${encodeURIComponent(sibling.id)}&tab=cleanup`}
+                >
+                  {sibling.label}
+                </Link>
+              </Fragment>
+            ))}{' '}
+            before you drop anything: scans are counted on the server that runs them, so an index
+            with no scan here may be in use on a standby.
+          </PanelNote>
+        ) : null}
+        {statistical > 0 ? (
+          <PanelNote title={`${statisticalHeadline} ${statisticalText}`}>
+            <strong>{statisticalHeadline}</strong> {statisticalText}
+          </PanelNote>
+        ) : null}
+      </>
+    ) : null
+
   return (
-    <div className="space-y-6">
-      {siblings.length > 0 ? (
-        <div className="bg-muted/40 rounded-lg border px-4 py-3 text-sm" role="status">
-          <strong>This server is part of a cluster.</strong> Scans are counted on the server that
-          runs them, so an index with no scan here may be in use on a standby. Check{' '}
-          {siblings.map((sibling, position) => (
-            <Fragment key={sibling.id}>
-              {position > 0 ? ', ' : ''}
-              <Link
-                className="text-primary font-medium hover:underline"
-                to={`/indexes?instance=${encodeURIComponent(sibling.id)}&tab=cleanup`}
-              >
-                {sibling.label}
-              </Link>
-            </Fragment>
-          ))}{' '}
-          before you drop anything.
-        </div>
-      ) : null}
-
-      {statistical > 0 ? (
-        <div className="bg-muted/40 rounded-lg border px-4 py-3 text-sm" role="status">
-          <strong>
-            {formatCount(statistical)} {statistical === 1 ? 'candidate rests' : 'candidates rest'}{' '}
-            on raw counters.
-          </strong>{' '}
-          The advisor calls an index unused only after 7 days of usage history. Until then
-          &quot;never scanned&quot; means no scan since the statistics were last reset.
-        </div>
-      ) : null}
-
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricTile
-          label="Candidates"
-          value={formatCount(summary.count)}
-          unit={`${formatCount(summary.confirmed.count)} confirmed · ${formatCount(summary.provisional.count)} raw counters`}
-        />
-        <MetricTile
-          label="Space to give back"
-          value={formatBytes(summary.confirmed.reclaimBytes)}
-          unit={[
+    <IndexPanel
+      actions={
+        candidates.length > 0 ? <CopyButton subject="cleanup script" text={script} /> : undefined
+      }
+      description="Primary keys and unique indexes are never listed. Index writes are the entries every insert and every non-HOT update add to each index of the table. pglens does not run any statement: copy it, review it, run it yourself. The script holds the confirmed drops; those that rest on raw counters are in it as comments."
+      notes={notes}
+      stats={[
+        {
+          label: 'Candidates',
+          value: formatCount(summary.count),
+          detail: `${formatCount(summary.confirmed.count)} confirmed · ${formatCount(summary.provisional.count)} raw counters`,
+        },
+        {
+          label: 'Space to give back',
+          value: formatBytes(summary.confirmed.reclaimBytes),
+          detail: [
             summary.confirmedShare === null
               ? null
               : `${formatPercent(summary.confirmed.reclaimBytes, totalBytes) ?? ''} of the indexes`,
@@ -298,12 +316,12 @@ export function CleanupPanel({ instanceId, rows, siblings }: CleanupPanelProps) 
               : null,
           ]
             .filter((part) => part !== null)
-            .join(' · ')}
-        />
-        <MetricTile
-          label="Index writes saved"
-          value={formatRate(summary.confirmed.writeRate)}
-          unit={[
+            .join(' · '),
+        },
+        {
+          label: 'Index writes saved',
+          value: formatRate(summary.confirmed.writeRate),
+          detail: [
             summary.confirmed.writeRateUnknown > 0
               ? `${formatCount(summary.confirmed.writeRateUnknown)} not measured`
               : null,
@@ -312,64 +330,42 @@ export function CleanupPanel({ instanceId, rows, siblings }: CleanupPanelProps) 
               : null,
           ]
             .filter((part) => part !== null)
-            .join(' · ')}
+            .join(' · '),
+        },
+        {
+          label: 'By reason',
+          value: `${formatCount(summary.byReason.unused + summary.byReason['never-scanned'])} unused`,
+          detail: `${formatCount(summary.byReason.duplicate)} duplicate · ${formatCount(summary.byReason.redundant)} redundant · ${formatCount(summary.byReason.invalid)} invalid`,
+        },
+      ]}
+      title="Indexes that look removable"
+      titleId="cleanup-title"
+    >
+      {candidates.length === 0 ? (
+        <EmptyState
+          description={
+            rows.length === 0
+              ? 'The agent has not reported index statistics for this server yet.'
+              : 'No index is invalid, duplicated, redundant or unused.'
+          }
+          title="Nothing to clean up"
         />
-        <MetricTile
-          label="By reason"
-          value={`${formatCount(summary.byReason.unused + summary.byReason['never-scanned'])} unused`}
-          unit={`${formatCount(summary.byReason.duplicate)} duplicate · ${formatCount(summary.byReason.redundant)} redundant · ${formatCount(summary.byReason.invalid)} invalid`}
+      ) : (
+        <SimpleTable
+          ariaLabel="Cleanup candidates"
+          columns={CLEANUP_COLUMNS}
+          detailLabel={(candidate, expanded) =>
+            `${expanded ? 'Hide' : 'Show'} the drop of ${candidate.row.name}`
+          }
+          emptyState={null}
+          renderDetail={(candidate) => <Detail candidate={candidate} siblings={siblings} />}
+          rowKey={(candidate) => candidate.row.key}
+          rows={candidates}
+          scope="candidates"
+          tableId="cleanup"
+          toolbar={CLEANUP_TOOLBAR}
         />
-      </div>
-
-      <section
-        aria-labelledby="cleanup-title"
-        className="bg-card shadow-card overflow-hidden rounded-xl border"
-      >
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
-          <div>
-            <h2 className="text-base font-semibold" id="cleanup-title">
-              Indexes that look removable
-            </h2>
-            <p className="text-muted-foreground mt-0.5 text-sm">
-              Primary keys and unique indexes are never listed. Index writes are the entries every
-              insert and every non-HOT update add to each index of the table. pglens does not run
-              any statement: copy it, review it, run it yourself. The script holds the confirmed
-              drops; those that rest on raw counters are in it as comments.
-            </p>
-          </div>
-          {candidates.length > 0 ? <CopyButton subject="cleanup script" text={script} /> : null}
-        </div>
-
-        {candidates.length === 0 ? (
-          <div className="p-5">
-            <EmptyState
-              description={
-                rows.length === 0
-                  ? 'The agent has not reported index statistics for this server yet.'
-                  : 'No index is invalid, duplicated, redundant or unused.'
-              }
-              title="Nothing to clean up"
-            />
-          </div>
-        ) : (
-          <div className="p-5">
-            <SimpleTable
-              ariaLabel="Cleanup candidates"
-              columns={CLEANUP_COLUMNS}
-              detailLabel={(candidate, expanded) =>
-                `${expanded ? 'Hide' : 'Show'} the drop of ${candidate.row.name}`
-              }
-              emptyState={null}
-              renderDetail={(candidate) => <Detail candidate={candidate} siblings={siblings} />}
-              rowKey={(candidate) => candidate.row.key}
-              rows={candidates}
-              scope="candidates"
-              tableId="cleanup"
-              toolbar={CLEANUP_TOOLBAR}
-            />
-          </div>
-        )}
-      </section>
-    </div>
+      )}
+    </IndexPanel>
   )
 }

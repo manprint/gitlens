@@ -177,7 +177,8 @@ describe('AlertsPage', () => {
   })
 
   it('UI-ALERT-040 names only Slack, generic webhook and Google Chat as delivery channels', async () => {
-    await renderAlerts()
+    // Delivery is its own tab of the alerts page (15.3).
+    await renderAlerts([alert()], [], '/alerts?section=delivery')
 
     const channels = screen.getByRole('list', { name: 'Supported notification channels' })
     expect(channels).toHaveTextContent('Slack')
@@ -187,7 +188,8 @@ describe('AlertsPage', () => {
   })
 
   it('UI-ALERT-041 explains that unconfigured channels still persist alerts', async () => {
-    await renderAlerts()
+    // Delivery is its own tab of the alerts page (15.3).
+    await renderAlerts([alert()], [], '/alerts?section=delivery')
 
     expect(screen.getByRole('note')).toHaveTextContent('alerts are persisted but not delivered')
   })
@@ -207,7 +209,8 @@ describe('AlertsPage', () => {
   })
 
   it('UI-ALERT-042 does not offer a webhook URL editor', async () => {
-    await renderAlerts()
+    // Delivery is its own tab of the alerts page (15.3).
+    await renderAlerts([alert()], [], '/alerts?section=delivery')
 
     expect(screen.queryByRole('textbox', { name: /webhook url/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /save webhook/i })).not.toBeInTheDocument()
@@ -220,5 +223,84 @@ describe('AlertsPage', () => {
     await screen.findByRole('button', { name: 'replication-lag' })
 
     await expect(expectNoA11yViolations(view.container)).resolves.toBeUndefined()
+  })
+})
+
+describe('AlertsPage Full HD layout (D26)', () => {
+  afterEach(() => server.resetHandlers())
+
+  it('FHD-APPLY-020 shows the alert list on the default tab, without writing it to the URL', async () => {
+    const view = await renderAlerts()
+
+    expect(screen.getByRole('tablist', { name: 'Alert sections' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Alerts' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getAllByRole('table')).toHaveLength(1)
+    expect(screen.getByRole('table', { name: 'Alerts' })).toBeInTheDocument()
+    // Only the active tab is mounted.
+    expect(
+      screen.queryByRole('list', { name: 'Supported notification channels' }),
+    ).not.toBeInTheDocument()
+    expect(view.router.state.location.search).toBe('')
+  })
+
+  it('FHD-APPLY-021 keeps the delivery tab in ?section= and falls back on an unknown value', async () => {
+    const view = await renderAlerts([alert()], [], '/alerts?section=delivery&state=all')
+
+    expect(screen.getByRole('tab', { name: 'Notification delivery' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Alerts' }))
+    await settle()
+    // The default tab is never written; the filters stay.
+    expect(view.router.state.location.search).toBe('?state=all')
+    expect(screen.getByRole('table', { name: 'Alerts' })).toBeInTheDocument()
+
+    view.unmount()
+    await renderAlerts([alert()], [], '/alerts?section=unknown')
+    expect(screen.getByRole('tab', { name: 'Alerts' })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('FHD-APPLY-022 puts the filters in the list header and the summary beside the tab list', async () => {
+    await renderAlerts()
+
+    const list = screen.getByRole('region', { name: 'Alerts' })
+    const table = screen.getByRole('table', { name: 'Alerts' })
+    for (const label of ['State', 'Severity', 'Cluster', 'Suppression']) {
+      const control = within(list).getByLabelText(label)
+      expect(control).toHaveClass('min-[1600px]:h-8')
+      expect(control.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    }
+    const summary = screen.getByLabelText('Alert summary')
+    expect(summary).toHaveClass('min-[1600px]:flex')
+    const row = screen.getByTestId('alerts-tab-row')
+    expect(row).toContainElement(summary)
+    expect(row).toContainElement(screen.getByRole('tablist', { name: 'Alert sections' }))
+  })
+
+  it('FHD-APPLY-023 lists 20 alerts per page, one line each, with the full text in a title', async () => {
+    await renderAlerts(
+      Array.from({ length: 25 }, (_, index) =>
+        alert({ alert_key: `alert-${String(index + 1).padStart(2, '0')}` }),
+      ),
+    )
+
+    const table = screen.getByRole('table', { name: 'Alerts' })
+    expect(table).toHaveClass('min-[1600px]:table-fixed')
+    expect(within(table).getAllByRole('row')).toHaveLength(21)
+    expect(screen.getByRole('navigation', { name: 'Alerts pagination' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'alert-01' })).toHaveClass('min-[1600px]:truncate')
+    expect(within(table).getAllByTitle('Replication lag is above the threshold')[0]).toHaveClass(
+      'min-[1600px]:truncate',
+    )
+
+    // A filter change sends the list back to its first page (D23).
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(screen.getByText('Page 2 of 2')).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('combobox', { name: 'State' }), {
+      target: { value: 'all' },
+    })
+    expect(screen.getByText('Page 1 of 2')).toBeInTheDocument()
   })
 })

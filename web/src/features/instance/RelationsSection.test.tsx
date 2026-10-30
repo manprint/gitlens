@@ -80,6 +80,14 @@ async function settle() {
   })
 }
 
+/** Opens one relation list: the section shows one list at a time (15.3). */
+async function openView(name: string) {
+  const tab = screen.getByRole('tab', { name })
+  fireEvent.mouseDown(tab)
+  fireEvent.click(tab)
+  await settle()
+}
+
 function renderRelations({
   tables = response(),
   indexes = response(),
@@ -126,18 +134,22 @@ describe('RelationsSection', () => {
       ),
     ).toBeInTheDocument()
     expect(screen.getByText('checks.table_stats.top_n')).toBeInTheDocument()
+    await openView('Indexes')
     expect(screen.getByText('checks.index_stats.top_n')).toBeInTheDocument()
-    expect(screen.getAllByText('checks.bloat_estimate.top_n')).toHaveLength(2)
     expect(
       screen.getByText(
         'Showing 1 of 50 indexes shared per instance across databases (truncated; budget 50).',
       ),
     ).toBeInTheDocument()
+    await openView('Table bloat')
+    expect(screen.getByText('checks.bloat_estimate.top_n')).toBeInTheDocument()
     expect(
       screen.getByText(
         'Showing 1 of 50 table bloat estimates shared per instance across databases (truncated; budget 50).',
       ),
     ).toBeInTheDocument()
+    await openView('Index bloat')
+    expect(screen.getByText('checks.bloat_estimate.top_n')).toBeInTheDocument()
     expect(
       screen.getByText(
         'Showing 1 of 50 index bloat estimates shared per instance across databases (truncated; budget 50).',
@@ -172,7 +184,9 @@ describe('RelationsSection', () => {
     })
     await settle()
 
+    await openView('Table bloat')
     expect(screen.getByRole('heading', { name: 'No table bloat estimates' })).toBeInTheDocument()
+    await openView('Index bloat')
     expect(screen.getByRole('heading', { name: 'No index bloat estimates' })).toBeInTheDocument()
     expect(screen.queryByText('never_analysed')).not.toBeInTheDocument()
     expect(screen.queryByText('0 B')).not.toBeInTheDocument()
@@ -186,6 +200,7 @@ describe('RelationsSection', () => {
       currentTier: 'T0',
     })
     await settle()
+    await openView('Table bloat')
 
     expect(
       screen.getByRole('button', { name: 'Measure exactly: public.orders with pgstattuple' }),
@@ -234,6 +249,7 @@ describe('RelationsSection', () => {
 
     expect(screen.getByRole('status', { name: /Loading Tables/i })).toBeInTheDocument()
     await settle()
+    await openView('Table bloat')
     vi.useRealTimers()
     const measure = screen.getByRole('button', {
       name: 'Measure exactly: public.orders with pgstattuple',
@@ -271,6 +287,7 @@ describe('RelationsSection', () => {
       ),
     )
     await settle()
+    await openView('Table bloat')
     vi.useRealTimers()
     fireEvent.click(
       screen.getByRole('button', { name: 'Measure exactly: public.orders with pgstattuple' }),
@@ -352,13 +369,17 @@ describe('RelationsSection', () => {
 
     expect(screen.getAllByText('orders').length).toBeGreaterThan(0)
     expect(screen.getAllByLabelText('not measured').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('yes').length).toBeGreaterThan(0)
-    expect(screen.getByText('no')).toBeInTheDocument()
 
     const liveTuples = screen.getByRole('button', { name: 'Sort Tables by Live tuples' })
     fireEvent.click(liveTuples)
     fireEvent.click(liveTuples)
     fireEvent.click(screen.getByRole('button', { name: 'Sort Tables by Relation' }))
+
+    await openView('Indexes')
+    expect(screen.getAllByText('yes').length).toBeGreaterThan(0)
+    expect(screen.getByText('no')).toBeInTheDocument()
+    await openView('Table bloat')
+    expect(screen.getAllByLabelText('not measured').length).toBeGreaterThan(0)
   })
 
   it('UI-INST-057 renders a retryable error when table relations fail', async () => {
@@ -413,12 +434,13 @@ describe('RelationsSection', () => {
     expect(events).toHaveTextContent('reporting')
     expect(within(events).getAllByTitle(/since the statistics were reset/)).toHaveLength(2)
 
-    const indexes = screen.getByRole('table', { name: 'Indexes' })
-    expect(within(indexes).getByRole('row', { name: /orders_pkey/ })).toHaveTextContent('13/s')
-
     fireEvent.click(screen.getByRole('button', { name: 'Sort Tables by Last vacuum' }))
     fireEvent.click(screen.getByRole('button', { name: 'Sort Tables by Last analyze' }))
     expect(within(tables).getAllByRole('row')).toHaveLength(3)
+
+    await openView('Indexes')
+    const indexes = screen.getByRole('table', { name: 'Indexes' })
+    expect(within(indexes).getByRole('row', { name: /orders_pkey/ })).toHaveTextContent('13/s')
   })
 
   it('UI-INST-067 names the skipped tables and says their bloat is unknown, even with no estimate', async () => {
@@ -429,6 +451,7 @@ describe('RelationsSection', () => {
       }),
     })
     await settle()
+    await openView('Table bloat')
 
     expect(screen.getByText(/3 tables have no bloat estimate/)).toBeInTheDocument()
     expect(screen.getByText(/Largest: app: public\.secrets and 2 more\./)).toBeInTheDocument()
@@ -451,10 +474,12 @@ describe('RelationsSection', () => {
     })
     await settle()
 
+    await openView('Table bloat')
     const tables = screen.getByRole('table', { name: 'Table bloat estimates' })
-    const indexes = screen.getByRole('table', { name: 'Index bloat estimates' })
     expect(within(tables).getByRole('row', { name: /public\.orders/ })).toBeInTheDocument()
     expect(within(tables).queryByText('orders_pkey')).not.toBeInTheDocument()
+    await openView('Index bloat')
+    const indexes = screen.getByRole('table', { name: 'Index bloat estimates' })
     expect(within(indexes).getByRole('row', { name: /orders_pkey/ })).toBeInTheDocument()
     expect(
       within(indexes).getByRole('button', { name: 'Sort Index bloat estimates by Index' }),
@@ -492,6 +517,7 @@ describe('RelationsSection', () => {
       ]),
     })
     await settle()
+    await openView('Indexes')
 
     const indexes = screen.getByRole('table', { name: 'Indexes' })
     expect(within(indexes).getByRole('row', { name: /orders_pkey/ })).toHaveTextContent(

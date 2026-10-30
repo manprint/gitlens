@@ -1,5 +1,5 @@
 import { ListChecks } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import type { AlertRule } from '@/api/alerts'
@@ -49,36 +49,48 @@ function ruleColumns(onEdit: (ruleId: string) => void): SimpleColumn<AlertRule>[
       header: 'Rule',
       rowHeader: true,
       sortValue: (rule) => rule.id,
+      truncate: (rule) => rule.id,
       cell: (rule) => rule.id,
     },
-    { id: 'tier', header: 'Tier', sortValue: tierLabel, cell: tierLabel },
+    { id: 'tier', header: 'Tier', width: '6rem', sortValue: tierLabel, cell: tierLabel },
     {
       id: 'severity',
       header: 'Severity',
+      width: '8rem',
       sortValue: (rule) => rule.severity,
       cell: (rule) => rule.severity,
     },
     {
       id: 'threshold',
       header: 'Threshold',
+      width: '9rem',
       sortValue: (rule) => rule.threshold,
       cell: (rule) => valueLabel(rule.threshold),
     },
     {
       id: 'duration',
       header: 'Duration',
+      width: '9rem',
       sortValue: (rule) => rule.for_seconds,
       cell: (rule) => (rule.for_seconds === undefined ? '—' : `${rule.for_seconds}s`),
     },
-    { id: 'enabled', header: 'Enabled', cell: enabledLabel },
+    { id: 'enabled', header: 'Enabled', width: '7rem', cell: enabledLabel },
     {
       id: 'action',
       header: 'Action',
+      width: '18rem',
       cell: (rule) =>
         isTierZero(rule) ? (
           <span className="text-muted-foreground">Always on by design</span>
         ) : (
-          <Button onClick={() => onEdit(rule.id)} size="sm" type="button" variant="outline">
+          // From 1600 px the button fits the one-line row (D26).
+          <Button
+            className="min-[1600px]:h-6 min-[1600px]:text-xs"
+            onClick={() => onEdit(rule.id)}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
             Edit {rule.id}
           </Button>
         ),
@@ -95,6 +107,11 @@ export function RulesPage() {
     [rulesQuery.data],
   )
   const editingRule = rules.find((rule) => rule.id === editingRuleId)
+  // The editor opens above the list, away from the Edit button: focus its heading.
+  const editingId = editingRule?.id
+  useEffect(() => {
+    if (editingId !== undefined) document.getElementById('alert-rule-editor-title')?.focus()
+  }, [editingId])
   const columns = useMemo(() => ruleColumns(setEditingRuleId), [])
 
   if (rulesQuery.error && !rulesQuery.data) {
@@ -115,7 +132,7 @@ export function RulesPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 min-[1600px]:space-y-4">
       <PageHeader
         icon={ListChecks}
         eyebrow="Alerting"
@@ -140,6 +157,17 @@ export function RulesPage() {
         />
       ) : null}
 
+      {/* Above the list: with 20 rows per page a form below it would open off screen (15.3). */}
+      {editingRule ? (
+        <Section title="Edit rule">
+          <RuleEditor
+            key={editingRule.id}
+            onCancel={() => setEditingRuleId(undefined)}
+            rule={editingRule}
+          />
+        </Section>
+      ) : null}
+
       {rules.length === 0 ? (
         <EmptyState description="No alert rules are currently available." title="No alert rules" />
       ) : (
@@ -159,16 +187,6 @@ export function RulesPage() {
           />
         </Section>
       )}
-
-      {editingRule ? (
-        <Section title="Edit rule">
-          <RuleEditor
-            key={editingRule.id}
-            onCancel={() => setEditingRuleId(undefined)}
-            rule={editingRule}
-          />
-        </Section>
-      ) : null}
     </div>
   )
 }

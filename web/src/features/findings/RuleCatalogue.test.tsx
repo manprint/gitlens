@@ -129,4 +129,32 @@ describe('RuleCatalogue', () => {
     sortTable(name, 'Rule ID', 'descending')
     expect(columnTexts(name)[0]).toBe('rule-25')
   })
+
+  it('FHD-APPLY-018 puts the catalogue filters on the toolbar line and keeps each rule on one line', () => {
+    renderCatalogue()
+
+    const search = screen.getByRole('search', { name: 'Advisor rule catalogue search' })
+    for (const name of ['Rule level', 'Rule scope', 'Available at or below']) {
+      const select = screen.getByRole('combobox', { name })
+      // After the search box, on its line, the name above hidden from 1600 px.
+      expect(search.compareDocumentPosition(select) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(select).toHaveClass('h-8')
+      expect(screen.getByText(name, { selector: 'span' })).toHaveClass('min-[1600px]:hidden')
+    }
+    const table = screen.getByRole('table', { name: 'Advisor rule catalogue' })
+    expect(table).toHaveClass('min-[1600px]:table-fixed')
+    expect(within(table).getByTitle('metric:lag')).toHaveClass('min-[1600px]:truncate')
+  })
+
+  it('FHD-APPLY-019 keeps the filters reachable when they leave no rule to show', () => {
+    renderCatalogue()
+
+    fireEvent.change(screen.getByLabelText('Rule level'), { target: { value: 'info' } })
+    fireEvent.change(screen.getByLabelText('Available at or below'), { target: { value: 'T0' } })
+
+    expect(screen.getByRole('status')).toHaveTextContent('No rules match these filters')
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Rule level'), { target: { value: 'all' } })
+    expect(screen.getByRole('table', { name: 'Advisor rule catalogue' })).toBeInTheDocument()
+  })
 })

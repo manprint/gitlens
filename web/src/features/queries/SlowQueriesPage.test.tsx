@@ -240,3 +240,68 @@ describe('SlowQueriesPage table', () => {
     expect(dataRows('Slowest queries')).toHaveLength(5)
   })
 })
+
+describe('SlowQueriesPage Full HD layout (D26)', () => {
+  function renderLoaded(
+    body: object = { comparable_scope: 'cluster', statements: STATEMENTS, truncated: false },
+  ) {
+    server.use(
+      ok('getClusters', clusters),
+      ok('getInstanceDatabases', databases()),
+      captureStatements([], body),
+    )
+    renderWithProviders(<SlowQueriesPage />, { route: '/queries' })
+  }
+
+  it('FHD-APPLY-001 puts the server, ranking and database controls in the list, after the search box', async () => {
+    renderLoaded()
+    await flushNetwork(30)
+    const list = screen.getByRole('region', { name: /Ranked by mean time per call/ })
+    const search = within(list).getByRole('search')
+    for (const [label, id] of [
+      ['Server', 'slow-instance'],
+      ['Database', 'slow-db'],
+    ] as const) {
+      const control = within(list).getByRole('combobox', { name: label })
+      expect(
+        search.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy()
+      // From 1600 px the control names leave the line but still label the controls.
+      expect(within(list).getByText(label, { selector: `label[for="${id}"]` })).toHaveClass(
+        'min-[1600px]:sr-only',
+      )
+    }
+    expect(within(list).getByRole('radio', { name: 'Mean time per call' })).toBeChecked()
+  })
+
+  it('FHD-APPLY-002 shows the summary tiles in the ranked list header', async () => {
+    renderLoaded()
+    await flushNetwork(30)
+    const list = screen.getByRole('region', { name: /Ranked by mean time per call/ })
+    expect(within(list).getAllByRole('article')).toHaveLength(4)
+    expect(within(list).getByRole('article', { name: 'Calls' })).toHaveTextContent('1,004')
+    expect(
+      screen
+        .getByRole('heading', { name: /Ranked by/ })
+        .compareDocumentPosition(within(list).getByRole('article', { name: 'Calls' })) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  it('FHD-APPLY-003 states the top-N cut in the list header description', async () => {
+    renderLoaded({ comparable_scope: 'cluster', statements: STATEMENTS, truncated: true })
+    await flushNetwork(30)
+    const description = screen.getByTitle(/Some statements may be missing/)
+    expect(description).toHaveTextContent('Some statements may be missing')
+    expect(description).toHaveClass('min-[1600px]:truncate')
+  })
+
+  it('FHD-APPLY-004 keeps the controls in a bar when there is no statement to list', async () => {
+    renderLoaded({ comparable_scope: 'cluster', statements: [], truncated: false })
+    await flushNetwork(30)
+    expect(screen.queryByRole('table', { name: 'Slowest queries' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Server')).toBeInTheDocument()
+    expect(screen.getByLabelText('Database')).toBeInTheDocument()
+    expect(screen.getByText('No statements yet')).toBeInTheDocument()
+  })
+})

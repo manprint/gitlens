@@ -3,7 +3,6 @@ import { useSearchParams } from 'react-router-dom'
 
 import { useInstanceSettings } from '@/api/queries'
 import type { Schemas } from '@/api/types'
-import { Section } from '@/components/layout/Section'
 import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { EmptyState, ErrorState, Unknown } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
@@ -20,6 +19,8 @@ import {
 } from '@/lib/settings'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+
+import { InstancePanel } from './InstancePanel'
 
 interface SettingsSectionProps {
   instanceId: string
@@ -52,17 +53,21 @@ function DurabilitySummary({ settings }: { settings: Schemas['Setting'][] }) {
     [settings],
   )
 
+  // From 1600 px the summary is one line in the panel heading (D26).
   return (
     <div>
-      <h3 className="font-medium">Durability summary</h3>
-      <dl className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <h3 className="font-medium min-[1600px]:sr-only">Durability summary</h3>
+      <dl className="mt-3 grid gap-3 min-[1600px]:mt-0 min-[1600px]:flex min-[1600px]:gap-x-3 sm:grid-cols-2 lg:grid-cols-5">
         {DURABILITY_SETTING_NAMES.map((name) => {
           const setting = byName.get(name)
           const severity = setting ? durabilitySeverity(setting) : null
           return (
-            <div key={name} className="border-muted bg-muted/20 p-3">
+            <div
+              key={name}
+              className="border-muted bg-muted/20 p-3 min-[1600px]:flex min-[1600px]:items-center min-[1600px]:gap-1.5 min-[1600px]:rounded-md min-[1600px]:px-2 min-[1600px]:py-1 min-[1600px]:whitespace-nowrap"
+            >
               <dt className="text-muted-foreground text-xs">{name}</dt>
-              <dd className="mt-1 flex items-center gap-2 font-medium">
+              <dd className="mt-1 flex items-center gap-2 font-medium min-[1600px]:mt-0 min-[1600px]:gap-1.5">
                 {setting ? <DisplayValue setting={setting} /> : <Unknown />}
                 {severity ? (
                   <Badge
@@ -119,11 +124,19 @@ const SETTING_COLUMNS: readonly SimpleColumn<Setting>[] = [
     rowHeader: true,
     sortValue: (setting) => setting.name,
     cell: (setting) => setting.name,
+    width: '18rem',
+    truncate: (setting) => setting.name,
   },
-  { id: 'value', header: 'Value', cell: (setting) => <DisplayValue setting={setting} /> },
+  {
+    id: 'value',
+    header: 'Value',
+    cell: (setting) => <DisplayValue setting={setting} />,
+    truncate: (setting) => settingDisplayValue(setting) ?? '',
+  },
   {
     id: 'unit',
     header: 'Unit',
+    width: '5rem',
     cell: (setting) => setting.unit || <Unknown reason="Unit was not reported." />,
   },
   {
@@ -131,22 +144,28 @@ const SETTING_COLUMNS: readonly SimpleColumn<Setting>[] = [
     header: 'Source',
     sortValue: (setting) => setting.source || null,
     cell: (setting) => setting.source || <Unknown reason="Source was not reported." />,
+    width: '9rem',
+    truncate: (setting) => setting.source,
   },
   {
     id: 'context',
     header: 'Context',
     sortValue: (setting) => setting.context || null,
     cell: (setting) => setting.context || <Unknown reason="Context was not reported." />,
+    width: '9rem',
+    truncate: (setting) => setting.context,
   },
   {
     id: 'changed',
     header: 'Changed at',
     sortValue: (setting) => Date.parse(setting.changed_at),
     cell: (setting) => formatTimestamp(setting.changed_at, 'UTC'),
+    width: '13rem',
   },
   {
     id: 'state',
     header: 'State',
+    width: '9rem',
     cell: (setting) => {
       const pending = isPendingRestart(setting)
       return (
@@ -206,10 +225,33 @@ export function SettingsSection({ instanceId }: SettingsSectionProps) {
   }
 
   return (
-    <Section
+    <InstancePanel
       id="settings"
       title="Settings and durability"
       description="Observed PostgreSQL settings and restart state. The durability posture is the latest scrape; the change table is narrowed to the selected time range."
+      actions={
+        query.data ? (
+          <>
+            <DurabilitySummary settings={query.data.settings} />
+            {/* From 1600 px the controls share the heading line; the input keeps its name. */}
+            <div className="flex flex-wrap items-end gap-4 min-[1600px]:flex-nowrap min-[1600px]:items-center min-[1600px]:gap-2">
+              <label className="grid gap-1 text-sm min-[1600px]:flex min-[1600px]:items-center">
+                <span className="min-[1600px]:sr-only">Changed since</span>
+                <Input
+                  className="w-auto min-[1600px]:h-8"
+                  aria-label="Changed since"
+                  type="datetime-local"
+                  value={toLocalDateTime(changedSince)}
+                  onChange={(event) => updateChangedSince(event.target.value)}
+                />
+              </label>
+              <Button size="sm" variant="outline" type="button" onClick={resetChangedSince}>
+                Use selected range
+              </Button>
+            </div>
+          </>
+        ) : undefined
+      }
     >
       {query.error && !query.data ? (
         <ErrorState
@@ -221,34 +263,14 @@ export function SettingsSection({ instanceId }: SettingsSectionProps) {
         <section aria-busy="true" aria-label="Loading settings" role="status">
           Loading settings…
         </section>
+      ) : changedSettings.length === 0 ? (
+        <EmptyState
+          title="No setting changes"
+          description="No observed setting changes fall in the selected time range."
+        />
       ) : (
-        <div className="space-y-5">
-          <div className="flex flex-wrap items-end gap-4">
-            <label className="grid gap-1 text-sm">
-              <span>Changed since</span>
-              <Input
-                className="w-auto"
-                aria-label="Changed since"
-                type="datetime-local"
-                value={toLocalDateTime(changedSince)}
-                onChange={(event) => updateChangedSince(event.target.value)}
-              />
-            </label>
-            <Button size="sm" variant="outline" type="button" onClick={resetChangedSince}>
-              Use selected range
-            </Button>
-          </div>
-          <DurabilitySummary settings={query.data.settings} />
-          {changedSettings.length === 0 ? (
-            <EmptyState
-              title="No setting changes"
-              description="No observed setting changes fall in the selected time range."
-            />
-          ) : (
-            <SettingTable settings={changedSettings} />
-          )}
-        </div>
+        <SettingTable settings={changedSettings} />
       )}
-    </Section>
+    </InstancePanel>
   )
 }

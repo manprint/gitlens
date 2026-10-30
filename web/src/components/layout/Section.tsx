@@ -19,20 +19,29 @@ export function Section({ title, description, children, id, actions }: SectionPr
       className="bg-card shadow-card scroll-mt-20 rounded-xl border"
       {...(id === undefined ? {} : { id })}
     >
-      <div className="flex flex-col gap-3 border-b px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <h2 id={titleId} className="text-foreground text-base font-semibold">
+      <div className="flex flex-col gap-3 border-b px-5 py-4 min-[1600px]:items-center min-[1600px]:py-2.5 sm:flex-row sm:items-start sm:justify-between">
+        {/* From 1600 px the title and its description share one line (D26). */}
+        <div className="min-w-0 min-[1600px]:flex min-[1600px]:items-baseline min-[1600px]:gap-3">
+          <h2
+            id={titleId}
+            className="text-foreground text-base font-semibold min-[1600px]:shrink-0"
+          >
             {title}
           </h2>
           {description ? (
-            <p className="text-muted-foreground mt-1 text-sm leading-relaxed">{description}</p>
+            <p
+              className="text-muted-foreground mt-1 text-sm leading-relaxed min-[1600px]:mt-0 min-[1600px]:min-w-0 min-[1600px]:truncate"
+              title={typeof description === 'string' ? description : undefined}
+            >
+              {description}
+            </p>
           ) : null}
         </div>
         {actions ? (
           <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>
         ) : null}
       </div>
-      <div className="min-w-0 p-5">{children}</div>
+      <div className="min-w-0 p-5 min-[1600px]:p-4">{children}</div>
     </section>
   )
 }

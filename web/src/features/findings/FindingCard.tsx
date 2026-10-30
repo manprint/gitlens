@@ -4,6 +4,7 @@ import { Degraded } from '@/components/state'
 import { formatTimestamp } from '@/lib/format/timestamp'
 import { muteExpiry, type JoinedFinding } from '@/lib/findings'
 
+import { findingTarget, severityAccent, severityBadge } from './findingDisplay'
 import { MuteDialog } from './MuteDialog'
 
 interface FindingCardProps {
@@ -66,32 +67,12 @@ function remainingMuteTime(finding: JoinedFinding): string {
   return `${Math.ceil(seconds / (24 * 60 * 60))} days`
 }
 
-// The colour follows the severity name, so an unknown one stays neutral.
-function severityAccent(severity: string): string {
-  if (severity === 'critical') return 'before:bg-destructive'
-  if (severity === 'warning') return 'before:bg-warning'
-  if (severity === 'info') return 'before:bg-info'
-  return 'before:bg-border'
-}
-
-function severityBadge(severity: string): string {
-  if (severity === 'critical') return 'border-destructive/30 bg-destructive/10 text-destructive'
-  if (severity === 'warning') return 'border-warning/40 bg-warning/15 text-warning-foreground'
-  if (severity === 'info') return 'border-info/30 bg-info/10 text-info-foreground'
-  return 'bg-muted text-muted-foreground'
-}
-
 export function FindingCard({ finding }: FindingCardProps) {
   // Not the finding id: it holds database and object names, which can
   // contain spaces and would split the aria-labelledby references.
   const domId = useId().replaceAll(':', '')
   const requirements = requirementText(finding)
-  const target = [
-    finding.object_name,
-    finding.datname ? `database ${finding.datname}` : undefined,
-    finding.instance_id ? `instance ${finding.instance_id}` : undefined,
-    finding.cluster_id ? `cluster ${finding.cluster_id}` : undefined,
-  ].filter((value): value is string => Boolean(value))
+  const target = findingTarget(finding)
   const evidence = Object.entries(finding.evidence ?? {})
 
   return (

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Search, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -18,11 +19,15 @@ export interface TableToolbarProps<T> {
   activeFilterCount: number
   onChange: (patch: TableStatePatch) => void
   onClear: () => void
+  /** Page controls placed after the filters, on the same line (D26). */
+  extra?: ReactNode
 }
 
 /**
  * Search box, one control per filter, the active-filter count and "Clear
- * filters" (D12). Each control is named only by its table-scoped aria-label;
+ * filters" (D12). From 1600 px the toolbar is one line (D26): the column
+ * names above the controls are hidden and each select's empty choice names
+ * its column (`Kind: all`). Each control is named only by its table-scoped aria-label;
  * the column name above it is hidden from the accessibility tree so it never
  * shares a label with another control on the page.
  */
@@ -35,6 +40,7 @@ export function TableToolbar<T>({
   activeFilterCount,
   onChange,
   onClear,
+  extra,
 }: TableToolbarProps<T>) {
   const setFilter = (id: string, value: string) =>
     onChange({ filters: { ...state.filters, [id]: value } })
@@ -63,7 +69,9 @@ export function TableToolbar<T>({
         if (spec.kind === 'min') {
           return (
             <div key={spec.id} className="text-muted-foreground flex flex-col gap-1 text-xs">
-              <span aria-hidden="true">{spec.label} at least</span>
+              <span aria-hidden="true" className="min-[1600px]:hidden">
+                {spec.label} at least
+              </span>
               <Input
                 aria-label={name}
                 className="h-8 w-28 text-sm"
@@ -81,7 +89,7 @@ export function TableToolbar<T>({
           return (
             <fieldset key={spec.id} className="flex flex-col gap-1 text-xs">
               <legend className="sr-only">{name}</legend>
-              <span aria-hidden="true" className="text-muted-foreground">
+              <span aria-hidden="true" className="text-muted-foreground min-[1600px]:hidden">
                 {spec.label}
               </span>
               <div className="flex h-8 flex-wrap items-center gap-3">
@@ -112,14 +120,16 @@ export function TableToolbar<T>({
         }
         return (
           <div key={spec.id} className="text-muted-foreground flex flex-col gap-1 text-xs">
-            <span aria-hidden="true">{spec.label}</span>
+            <span aria-hidden="true" className="min-[1600px]:hidden">
+              {spec.label}
+            </span>
             <NativeSelect
               aria-label={name}
               className="h-8 px-2 text-sm"
               onChange={(event) => setFilter(spec.id, event.target.value)}
               value={value}
             >
-              <option value="">All</option>
+              <option value="">{`${spec.label}: all`}</option>
               {choices.map((choice) => (
                 <option key={choice.value} value={choice.value}>
                   {choice.label}
@@ -129,6 +139,8 @@ export function TableToolbar<T>({
           </div>
         )
       })}
+
+      {extra}
 
       {activeFilterCount > 0 ? (
         <div className="flex h-8 items-center gap-2 text-xs">

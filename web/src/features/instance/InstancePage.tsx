@@ -22,6 +22,7 @@ import {
   readInstanceSection,
   type InstanceSectionId,
 } from './instanceSections'
+import { INSTANCE_VIEW_PARAM } from './instanceViews'
 import { SettingsSection } from './SettingsSection'
 
 // The header shows the newest replay-lag reading, so a short window holds it.
@@ -114,6 +115,8 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
         // The default section is never written to the URL (D12).
         if (next === DEFAULT_INSTANCE_SECTION) params.delete('section')
         else params.set('section', next)
+        // A view belongs to the section that wrote it.
+        if (next !== section) params.delete(INSTANCE_VIEW_PARAM)
         return params
       },
       { replace: true },
@@ -156,12 +159,36 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
   const instance = instanceQuery.data
   // Every registry section has its panel: a new section without one fails the type check.
   const content: Record<InstanceSectionId, () => ReactNode> = {
+    // The database selector scopes the Overview only, so it lives in that tab (15.3).
     overview: () => {
-      if (!databasesQuery.data) return null
+      if (databasesQuery.error && !databasesQuery.data) {
+        return (
+          <ErrorState
+            endpoint="instance databases"
+            failure={databasesQuery.error}
+            onRetry={() => void databasesQuery.refetch()}
+          />
+        )
+      }
+      if (databasesQuery.isPending || databasesQuery.data === undefined) {
+        return (
+          <section aria-busy="true" aria-label="Loading instance databases" role="status">
+            Loading instance databases…
+          </section>
+        )
+      }
       const selected = selectedDatabase(databasesQuery.data.databases, searchParams.get('db'))
-      return selected ? (
-        <OverviewSection database={selected.datname} instanceId={instanceId} />
-      ) : null
+      return (
+        <div className="space-y-8 min-[1600px]:space-y-4">
+          <DatabaseSelector
+            databases={databasesQuery.data.databases}
+            notMonitoredCount={databasesQuery.data.not_monitored_count}
+          />
+          {selected ? (
+            <OverviewSection database={selected.datname} instanceId={instanceId} />
+          ) : null}
+        </div>
+      )
     },
     host: () => <HostSection instanceId={instanceId} />,
     settings: () => <SettingsSection instanceId={instanceId} />,
@@ -172,44 +199,33 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
   }
 
   return (
-    <div className="space-y-8">
+    // One section at a time (15.2): only the active tab is mounted and fetched.
+    // The tab list sits in the header, beside the metrics from 1600 px (15.3).
+    <Tabs onValueChange={(value) => showSection(readInstanceSection(value))} value={section}>
       <InstanceHeader
         dataUpdatedAt={instanceQuery.dataUpdatedAt}
         instance={instanceQuery.data}
         replayLag={replayLagOf(replicationQuery, instanceId)}
+        sectionTabs={
+          <TabsList
+            aria-label="Instance sections"
+            className="h-auto flex-wrap min-[1600px]:flex-nowrap"
+            ref={tabList}
+          >
+            {INSTANCE_SECTIONS.map((entry) => (
+              <TabsTrigger key={entry.id} value={entry.id}>
+                {entry.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        }
       />
-      {databasesQuery.error && !databasesQuery.data ? (
-        <ErrorState
-          endpoint="instance databases"
-          failure={databasesQuery.error}
-          onRetry={() => void databasesQuery.refetch()}
-        />
-      ) : databasesQuery.isPending || databasesQuery.data === undefined ? (
-        <section aria-busy="true" aria-label="Loading instance databases" role="status">
-          Loading instance databases…
-        </section>
-      ) : (
-        <DatabaseSelector
-          databases={databasesQuery.data.databases}
-          notMonitoredCount={databasesQuery.data.not_monitored_count}
-        />
-      )}
-      {/* One section at a time (15.2): only the active tab is mounted and fetched. */}
-      <Tabs onValueChange={(value) => showSection(readInstanceSection(value))} value={section}>
-        <TabsList aria-label="Instance sections" className="h-auto flex-wrap" ref={tabList}>
-          {INSTANCE_SECTIONS.map((entry) => (
-            <TabsTrigger key={entry.id} value={entry.id}>
-              {entry.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-        {INSTANCE_SECTIONS.map((entry) => (
-          <TabsContent key={entry.id} value={entry.id}>
-            {content[entry.id]()}
-          </TabsContent>
-        ))}
-      </Tabs>
-    </div>
+      {INSTANCE_SECTIONS.map((entry) => (
+        <TabsContent key={entry.id} value={entry.id}>
+          {content[entry.id]()}
+        </TabsContent>
+      ))}
+    </Tabs>
   )
 }
 

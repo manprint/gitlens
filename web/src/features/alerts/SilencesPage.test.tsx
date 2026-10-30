@@ -1,4 +1,4 @@
-import { fireEvent, screen } from '@testing-library/react'
+import { fireEvent, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { http, HttpResponse } from 'msw/http'
 
@@ -351,5 +351,19 @@ describe('SilencesPage table controls', () => {
     expect(columnTexts(name, 1)[0]).toBe('job_25')
     fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
     expect(dataRows(name)).toHaveLength(5)
+  })
+})
+
+describe('SilencesPage Full HD layout (D26)', () => {
+  it('FHD-APPLY-028 keeps a silence on one line with the full matchers and reason in a title', async () => {
+    await renderSilences([makeSilence()])
+
+    const table = screen.getByRole('table', { name: 'Alert silences' })
+    expect(table).toHaveClass('min-[1600px]:table-fixed')
+    expect(within(table).getByTitle('severity=warning')).toHaveClass('min-[1600px]:truncate')
+    expect(within(table).getByTitle('maintenance window')).toHaveClass('min-[1600px]:truncate')
+    expect(
+      screen.getByRole('button', { name: 'End silence 00000000-0000-4000-8000-000000000003' }),
+    ).toHaveClass('min-[1600px]:h-6')
   })
 })

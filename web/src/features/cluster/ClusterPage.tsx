@@ -1,6 +1,6 @@
 import { Network } from 'lucide-react'
-import { useEffect, useMemo, useRef } from 'react'
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useEffect, useMemo, useRef, type ReactNode } from 'react'
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import {
   useClusterReplication,
@@ -13,10 +13,17 @@ import type { Cluster } from '@/api/types'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { EmptyState, ErrorState } from '@/components/state'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useTimeRange } from '@/hooks/useTimeRange'
 import { toSlotRows } from '@/lib/replication'
 import { queryWindowOf } from '@/lib/timerange'
 
+import {
+  CLUSTER_SECTIONS,
+  DEFAULT_CLUSTER_SECTION,
+  readClusterSection,
+  type ClusterSectionId,
+} from './clusterSections'
 import { DriftSection } from './DriftSection'
 import { EventTimeline } from './EventTimeline'
 import { LagSection } from './LagSection'
@@ -68,6 +75,21 @@ export function ClusterPage({ clusterId: clusterIdOverride }: ClusterPageProps =
   const driftQuery = useClusterSettingsDrift(clusterId)
   const slotsQuery = useClusterSlots(clusterId)
   const redirectedForUnauthorized = useRef(false)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const section = readClusterSection(searchParams.get('section'))
+
+  function showSection(next: ClusterSectionId) {
+    setSearchParams(
+      (current) => {
+        const params = new URLSearchParams(current)
+        // The default tab is never written to the URL (D12).
+        if (next === DEFAULT_CLUSTER_SECTION) params.delete('section')
+        else params.set('section', next)
+        return params
+      },
+      { replace: true },
+    )
+  }
 
   const cluster = clustersQuery.data?.find((candidate) => candidate.cluster_id === clusterId)
   const instances = cluster?.instances ?? EMPTY_CLUSTER_INSTANCES
@@ -123,27 +145,17 @@ export function ClusterPage({ clusterId: clusterIdOverride }: ClusterPageProps =
     return <LoadingCluster />
   }
 
-  return (
-    <div className="space-y-8">
-      <PageHeader
-        icon={Network}
-        eyebrow="Cluster"
-        title={cluster.name ?? `Cluster ${cluster.cluster_id}`}
-        subtitle={`${cluster.instance_count} monitored instance${cluster.instance_count === 1 ? '' : 's'} · ${cluster.health}`}
-        freshness={<FreshnessBadge dataUpdatedAt={topologyQuery.dataUpdatedAt} policy="cluster" />}
-      />
-
-      {topologyQuery.error ? (
-        <Callout role="status" variant="warning">
-          Cluster topology is showing the last successful snapshot while the latest refresh failed.
-        </Callout>
-      ) : null}
-
-      <TopologyGraph instances={instances} topology={topology} />
-      {topology.length === 0 ? (
-        <p role="status">No replication observed for this cluster.</p>
-      ) : null}
-
+  // Every registry tab has its panel: a new tab without one fails the type check.
+  const content: Record<ClusterSectionId, () => ReactNode> = {
+    topology: () => (
+      <>
+        <TopologyGraph instances={instances} topology={topology} />
+        {topology.length === 0 ? (
+          <p role="status">No replication observed for this cluster.</p>
+        ) : null}
+      </>
+    ),
+    lag: () => (
       <section aria-labelledby="cluster-lag-heading">
         <h2 id="cluster-lag-heading" className="sr-only">
           Replication lag charts
@@ -163,10 +175,11 @@ export function ClusterPage({ clusterId: clusterIdOverride }: ClusterPageProps =
           <LagSection edges={replicationQuery.data?.edges ?? []} instances={instances} />
         )}
       </section>
-
-      {/* A pending query has no data yet, so its section must not show the empty
-          state that a settled, empty response would show. */}
-      {slotsQuery.isPending ? (
+    ),
+    // A pending query has no data yet, so its tab must not show the empty
+    // state that a settled, empty response would show.
+    slots: () =>
+      slotsQuery.isPending ? (
         <EmptyState
           title="Loading replication slots"
           description="Reading the replication slots this cluster reports."
@@ -177,9 +190,9 @@ export function ClusterPage({ clusterId: clusterIdOverride }: ClusterPageProps =
           onRetry={() => void slotsQuery.refetch()}
           {...(slotsQuery.error && !slotsQuery.data ? { failure: slotsQuery.error } : {})}
         />
-      )}
-
-      {driftQuery.isPending ? (
+      ),
+    drift: () =>
+      driftQuery.isPending ? (
         <EmptyState
           title="Loading configuration drift"
           description="Comparing observed settings across the cluster instances."
@@ -190,13 +203,44 @@ export function ClusterPage({ clusterId: clusterIdOverride }: ClusterPageProps =
           onRetry={() => void driftQuery.refetch()}
           {...(driftQuery.error ? { failure: driftQuery.error } : {})}
         />
-      )}
+      ),
+    events: () => <EventTimeline events={events} />,
+  }
 
-      <EventTimeline events={events} />
+  return (
+    <div className="space-y-8 min-[1600px]:space-y-4">
+      <PageHeader
+        icon={Network}
+        eyebrow="Cluster"
+        title={cluster.name ?? `Cluster ${cluster.cluster_id}`}
+        subtitle={`${cluster.instance_count} monitored instance${cluster.instance_count === 1 ? '' : 's'} · ${cluster.health}`}
+        freshness={<FreshnessBadge dataUpdatedAt={topologyQuery.dataUpdatedAt} policy="cluster" />}
+      />
 
-      <p className="text-muted-foreground text-xs">
-        Cluster identity: <code>{cluster.cluster_id}</code>
-      </p>
+      {topologyQuery.error ? (
+        <Callout role="status" variant="warning">
+          Cluster topology is showing the last successful snapshot while the latest refresh failed.
+        </Callout>
+      ) : null}
+
+      {/* One view per tab (15.3); every query above stays in the page, as before. */}
+      <Tabs onValueChange={(value) => showSection(readClusterSection(value))} value={section}>
+        <TabsList aria-label="Cluster sections" className="h-auto flex-wrap">
+          {CLUSTER_SECTIONS.map((entry) => (
+            <TabsTrigger key={entry.id} value={entry.id}>
+              {entry.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        <p className="text-muted-foreground text-xs">
+          Cluster identity: <code>{cluster.cluster_id}</code>
+        </p>
+        {CLUSTER_SECTIONS.map((entry) => (
+          <TabsContent className="space-y-6 min-[1600px]:space-y-4" key={entry.id} value={entry.id}>
+            {content[entry.id]()}
+          </TabsContent>
+        ))}
+      </Tabs>
     </div>
   )
 }

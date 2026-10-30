@@ -289,3 +289,45 @@ describe('DeadRowsPanel table controls', () => {
     expect(dataRows(name)).toHaveLength(5)
   })
 })
+
+/** The header line of the open tab's panel. */
+const panelHeader = () => screen.getByTestId('index-panel-header')
+
+/** The status note that starts with `headline`. */
+function noteFor(headline: string): HTMLElement {
+  const note = screen
+    .getAllByRole('status')
+    .find((status) => status.textContent?.startsWith(headline))
+  expect(note, headline).toBeDefined()
+  return note!
+}
+
+describe('DeadRowsPanel on a Full HD screen (15.3)', () => {
+  it('FHD-APPLY-037 one table under a one-line header, each row one line', async () => {
+    render({ settings: [], truncated: true })
+    await flushNetwork(30)
+
+    expect(screen.getAllByRole('table')).toHaveLength(1)
+    const line = panelHeader()
+    expect(line).toContainElement(screen.getByRole('heading', { name: 'Tables by dead rows' }))
+    expect(line).toHaveClass('min-[1600px]:flex-row')
+    expect(line).toContainElement(screen.getByRole('article', { name: 'Dead tuples' }))
+    for (const headline of ['The list is incomplete.', 'Autovacuum trigger is approximate.']) {
+      const note = noteFor(headline)
+      expect(line).toContainElement(note)
+      expect(note).toHaveClass('min-[1600px]:truncate')
+      expect(note.getAttribute('title')).toContain(headline)
+    }
+
+    const table = screen.getByRole('table', { name: 'Tables' })
+    expect(table).toHaveClass('min-[1600px]:table-fixed')
+    // Most dead tuples first: orders.
+    const row = within(dataRows('Tables')[0]!)
+    expect(row.getByText('orders')).toBeInTheDocument()
+    // The second lines of a cell sit beside the figure from 1600 px.
+    expect(row.getByText(/^≈/)).toHaveClass('min-[1600px]:inline')
+    expect(row.getByText('flagged')).toHaveClass('min-[1600px]:py-0')
+    expect(row.getByRole('img', { name: /Dead tuples of orders/ })).toHaveClass('min-[1600px]:h-4')
+    expect(row.getByRole('button', { expanded: false })).toHaveClass('min-[1600px]:size-5')
+  })
+})

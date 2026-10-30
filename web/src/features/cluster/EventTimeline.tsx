@@ -2,7 +2,10 @@ import { useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
 import {
+  counterResetCount,
+  counterResetScope,
   describeEvent,
+  payloadInstance,
   sortEventsNewestFirst,
   type ClusterEvent,
   type EventSeverity,
@@ -53,26 +56,6 @@ function groupEvents(events: readonly ClusterEvent[]): EventDay[] {
     else groups.set(day, [event])
   }
   return [...groups.entries()].map(([day, groupedEvents]) => ({ day, events: groupedEvents }))
-}
-
-function payloadInstance(event: ClusterEvent, key: string): string | null {
-  const value = event.payload[key]
-  return typeof value === 'string' && value.length > 0 ? value : null
-}
-
-// A counter_reset_detected event is written per database and carries the number
-// of counters that reset, so the card can say how many.
-function counterResetCount(event: ClusterEvent): number | null {
-  const value = event.payload.count
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null
-}
-
-// The event names its database, empty for a result that covers the whole
-// instance. An event written before the server sent the name says neither.
-function counterResetScope(event: ClusterEvent): string {
-  const database = event.payload.database
-  if (typeof database !== 'string') return ''
-  return database === '' ? ' on this instance' : ` in database ${database}`
 }
 
 function instanceLink(id: string | null) {

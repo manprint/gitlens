@@ -3,7 +3,6 @@ import { useMemo, type ReactNode } from 'react'
 import { useInstanceSettings, useInstanceTableHistory, useInstanceTables } from '@/api/queries'
 import type { Schemas } from '@/api/types'
 import { Sparkline } from '@/components/charts/Sparkline'
-import { MetricTile } from '@/components/layout/MetricTile'
 import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
@@ -26,6 +25,8 @@ import { formatBytes, formatCount, formatPercent, formatRate, formatRelative } f
 import type { SortDirection } from '@/lib/tableControls'
 import { queryWindowOf } from '@/lib/timerange'
 import { cn } from '@/lib/utils'
+
+import { CELL_BADGE, IndexPanel, PanelNote } from './IndexPanel'
 
 /** The most tables the API returns for one server. */
 export const DEAD_ROWS_LIMIT = 500
@@ -82,13 +83,14 @@ function deadColumns(
     id: DeadSortKey,
     header: string,
     cell: (row: DeadRow) => ReactNode,
-    className = 'whitespace-nowrap',
+    width: string,
   ): SimpleColumn<DeadRow> => ({
     id,
     header,
     sortValue: SORTED_BY_COMPARE,
     firstDirection: 'desc',
-    className,
+    className: 'whitespace-nowrap',
+    width,
     cell,
   })
   return [
@@ -97,6 +99,8 @@ function deadColumns(
       header: 'Table',
       sortValue: SORTED_BY_COMPARE,
       className: 'break-all',
+      truncate: (row) =>
+        `${database === '' ? `${row.datname} · ` : ''}${row.schema}.${row.table}${row.findings.length > 0 ? ' (flagged)' : ''}`,
       cell: (row) => (
         <>
           <span className="text-muted-foreground">
@@ -105,51 +109,75 @@ function deadColumns(
           </span>
           <span className="font-medium">{row.table}</span>
           {row.findings.length > 0 ? (
-            <Badge className="ml-2" variant="warning">
+            <Badge className={cn('ml-2', CELL_BADGE)} variant="warning">
               flagged
             </Badge>
           ) : null}
         </>
       ),
     },
-    counted('dead', 'Dead', (row) => (
-      <>
-        {formatCount(row.dead)}
-        {row.deadBytes === null || row.deadBytes <= 0 ? null : (
-          <span className="text-muted-foreground block text-xs">
-            ≈ {formatBytes(row.deadBytes)}
-          </span>
-        )}
-      </>
-    )),
-    counted('ratio', 'Dead / live', (row) => percent(row.deadRatio)),
-    counted('trigger', 'Trigger', (row) => (
-      <span
-        className={cn(row.triggerShare >= 1 && 'font-medium')}
-        title={`Autovacuum starts at about ${formatCount(Math.round(row.trigger))} dead tuples.`}
-      >
-        {triggerText(row)}
-        {row.triggerShare >= 1 ? (
-          <span className="text-muted-foreground block text-xs">due</span>
-        ) : null}
-      </span>
-    )),
-    counted('size', 'Size', (row) => (row.bytes === null ? 'Unknown' : formatBytes(row.bytes))),
+    // From 1600 px the second lines (dead space, "due") sit beside the figure (D26).
+    counted(
+      'dead',
+      'Dead',
+      (row) => (
+        <>
+          {formatCount(row.dead)}
+          {row.deadBytes === null || row.deadBytes <= 0 ? null : (
+            <span className="text-muted-foreground block text-xs min-[1600px]:ml-1.5 min-[1600px]:inline">
+              ≈ {formatBytes(row.deadBytes)}
+            </span>
+          )}
+        </>
+      ),
+      '10rem',
+    ),
+    counted('ratio', 'Dead / live', (row) => percent(row.deadRatio), '8.5rem'),
+    counted(
+      'trigger',
+      'Trigger',
+      (row) => (
+        <span
+          className={cn(row.triggerShare >= 1 && 'font-medium')}
+          title={`Autovacuum starts at about ${formatCount(Math.round(row.trigger))} dead tuples.`}
+        >
+          {triggerText(row)}
+          {row.triggerShare >= 1 ? (
+            <span className="text-muted-foreground block text-xs min-[1600px]:ml-1.5 min-[1600px]:inline">
+              due
+            </span>
+          ) : null}
+        </span>
+      ),
+      '7rem',
+    ),
+    counted(
+      'size',
+      'Size',
+      (row) => (row.bytes === null ? 'Unknown' : formatBytes(row.bytes)),
+      '6.5rem',
+    ),
     {
       id: 'vacuum',
       header: 'Last vacuum',
       sortValue: SORTED_BY_COMPARE,
       className: 'whitespace-nowrap',
+      width: '10rem',
+      truncate: (row) => vacuumText(row, now),
       cell: (row) => vacuumText(row, now),
     },
-    counted('hot', 'HOT', (row) => percent(row.hotRatio)),
-    counted('writes', 'Writes', (row) =>
-      row.writeRate === null ? 'Unknown' : formatRate(row.writeRate),
+    counted('hot', 'HOT', (row) => percent(row.hotRatio), '6rem'),
+    counted(
+      'writes',
+      'Writes',
+      (row) => (row.writeRate === null ? 'Unknown' : formatRate(row.writeRate)),
+      '7rem',
     ),
     {
       id: 'trend',
       header: 'Trend',
       className: 'whitespace-nowrap',
+      width: '10rem',
       cell: (row) => {
         const values = trends.get(row.key)
         if (values === undefined || values.length < 2) {
@@ -164,6 +192,7 @@ function deadColumns(
             )}
           >
             <Sparkline
+              className="min-[1600px]:h-4 min-[1600px]:w-16"
               label={`Dead tuples of ${row.table} over the selected range`}
               values={values}
             />
@@ -329,94 +358,81 @@ export function DeadRowsPanel({ instanceId, database, findings }: DeadRowsPanelP
     )
   }
 
+  const incomplete = response?.truncated === true || allRows.length >= DEAD_ROWS_LIMIT
+  const incompleteText = `The list is incomplete. The agent reports the tables with the most dead tuples first, up to checks.table_stats.top_n per database (50 by default). The figures cover the ${formatCount(allRows.length)} tables reported, so the worst tables are here and the long tail is not.`
+  const approximateText =
+    "Autovacuum trigger is approximate. The instance's autovacuum settings are not reported yet, so the page assumes PostgreSQL's defaults (50 dead tuples plus 20% of the live ones). A table's own storage parameters can change it."
+  const notes =
+    incomplete || autovacuum.source === 'default' ? (
+      <>
+        {incomplete ? (
+          <PanelNote title={incompleteText}>
+            <strong>The list is incomplete.</strong> The agent reports the tables with the most dead
+            tuples first, up to <code>checks.table_stats.top_n</code> per database (50 by default).
+            The figures cover the {formatCount(allRows.length)} tables reported, so the worst tables
+            are here and the long tail is not.
+          </PanelNote>
+        ) : null}
+        {autovacuum.source === 'default' ? (
+          <PanelNote title={approximateText}>
+            <strong>Autovacuum trigger is approximate.</strong> The instance&apos;s autovacuum
+            settings are not reported yet, so the page assumes PostgreSQL&apos;s defaults (50 dead
+            tuples plus 20% of the live ones). A table&apos;s own storage parameters can change it.
+          </PanelNote>
+        ) : null}
+      </>
+    ) : null
+
   return (
-    <div className="space-y-6">
-      {response?.truncated || allRows.length >= DEAD_ROWS_LIMIT ? (
-        <div className="bg-muted/40 rounded-lg border px-4 py-3 text-sm" role="status">
-          <strong>The list is incomplete.</strong> The agent reports the tables with the most dead
-          tuples first, up to <code>checks.table_stats.top_n</code> per database (50 by default).
-          The figures below cover the {formatCount(allRows.length)} tables reported, so the worst
-          tables are here and the long tail is not.
-        </div>
-      ) : null}
-
-      {autovacuum.source === 'default' ? (
-        <div className="bg-muted/40 rounded-lg border px-4 py-3 text-sm" role="status">
-          <strong>Autovacuum trigger is approximate.</strong> The instance&apos;s autovacuum
-          settings are not reported yet, so the page assumes PostgreSQL&apos;s defaults (50 dead
-          tuples plus 20% of the live ones). A table&apos;s own storage parameters can change it.
-        </div>
-      ) : null}
-
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <MetricTile
-          label="Tables with dead rows"
-          value={formatCount(summary.withDead)}
-          unit={`of ${formatCount(summary.tables)}`}
-        />
-        <MetricTile
-          label="Dead tuples"
-          value={formatCount(summary.totalDead)}
-          unit={summary.deadBytes > 0 ? `≈ ${formatBytes(summary.deadBytes)}` : undefined}
-        />
-        <MetricTile
-          label="Worst table"
-          value={summary.worst === null ? '—' : percent(summary.worst.deadRatio)}
-          unit={
+    <IndexPanel
+      description={`${formatCount(scoped.length)} tables. Dead space is an estimate: the heap size times the dead share of its tuples. The trend follows the ${TREND_TABLES} worst tables over the selected time range.`}
+      notes={notes}
+      stats={[
+        {
+          label: 'Tables with dead rows',
+          value: formatCount(summary.withDead),
+          unit: `of ${formatCount(summary.tables)}`,
+        },
+        {
+          label: 'Dead tuples',
+          value: formatCount(summary.totalDead),
+          ...(summary.deadBytes > 0 ? { unit: `≈ ${formatBytes(summary.deadBytes)}` } : {}),
+        },
+        {
+          label: 'Worst table',
+          value: summary.worst === null ? '—' : percent(summary.worst.deadRatio),
+          unit:
             summary.worst === null
               ? `none past ${formatCount(WORST_FLOOR)} dead tuples`
-              : summary.worst.table
-          }
+              : summary.worst.table,
+        },
+        { label: 'Past autovacuum trigger', value: formatCount(summary.overTrigger) },
+        { label: 'Never vacuumed', value: formatCount(summary.neverVacuumed) },
+      ]}
+      title="Tables by dead rows"
+      titleId="dead-rows-title"
+    >
+      {scoped.length === 0 ? (
+        <EmptyState
+          description="The agent has not reported table statistics for this server yet."
+          title="No tables to show"
         />
-        <MetricTile label="Past autovacuum trigger" value={formatCount(summary.overTrigger)} />
-        <MetricTile label="Never vacuumed" value={formatCount(summary.neverVacuumed)} />
-      </div>
-
-      <section
-        aria-labelledby="dead-rows-title"
-        className="bg-card shadow-card overflow-hidden rounded-xl border"
-      >
-        <div className="space-y-3 border-b px-5 py-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-base font-semibold" id="dead-rows-title">
-                Tables by dead rows
-              </h2>
-              <p className="text-muted-foreground mt-0.5 text-sm">
-                {formatCount(scoped.length)} tables. Dead space is an estimate: the heap size times
-                the dead share of its tuples. The trend follows the {TREND_TABLES} worst tables over
-                the selected time range.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="p-5">
-          {scoped.length === 0 ? (
-            <EmptyState
-              description="The agent has not reported table statistics for this server yet."
-              title="No tables to show"
-            />
-          ) : (
-            <SimpleTable
-              ariaLabel="Tables"
-              columns={columns}
-              compare={compareDead}
-              defaultSort={{ id: 'dead', desc: true }}
-              detailLabel={(row, expanded) =>
-                `${expanded ? 'Hide' : 'Show'} details of ${row.table}`
-              }
-              emptyState={null}
-              renderDetail={(row) => <Detail now={now} row={row} />}
-              rowKey={(row) => row.key}
-              rows={scoped}
-              scope="tables"
-              tableId="dead-rows"
-              toolbar={DEAD_TOOLBAR}
-            />
-          )}
-        </div>
-      </section>
-    </div>
+      ) : (
+        <SimpleTable
+          ariaLabel="Tables"
+          columns={columns}
+          compare={compareDead}
+          defaultSort={{ id: 'dead', desc: true }}
+          detailLabel={(row, expanded) => `${expanded ? 'Hide' : 'Show'} details of ${row.table}`}
+          emptyState={null}
+          renderDetail={(row) => <Detail now={now} row={row} />}
+          rowKey={(row) => row.key}
+          rows={scoped}
+          scope="tables"
+          tableId="dead-rows"
+          toolbar={DEAD_TOOLBAR}
+        />
+      )}
+    </IndexPanel>
   )
 }

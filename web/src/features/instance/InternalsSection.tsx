@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 
 import { useInstanceInternals } from '@/api/queries'
 import type { Schemas } from '@/api/types'
@@ -8,15 +8,29 @@ import {
   type DataTableToolbar,
 } from '@/components/layout/DataTable'
 import { MetricTile } from '@/components/layout/MetricTile'
-import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsContent } from '@/components/ui/tabs'
 import { formatBytes, formatCount, formatPercent, formatRate } from '@/lib/format'
+
+import { InstancePanel, InstanceViewTabs, ToolbarNote } from './InstancePanel'
+import { INTERNALS_VIEW_IDS } from './instanceSections'
+import { useInstanceView, type InstanceView } from './instanceViews'
+
+type InternalsViewId = (typeof INTERNALS_VIEW_IDS)[number]
+
+const WAL_NOT_LISTED =
+  'pg_wal is not listed: the monitoring role needs EXECUTE on pg_ls_waldir(), which pg_monitor grants.'
+const SLRU_HINT =
+  "A page missing from a cache is read from disk under the cache's lock, which stalls every session that needs it: watch the subtransaction and multixact caches."
 
 type DatabaseSize = Schemas['DatabaseSize']
 type SLRUCache = Schemas['SLRUCache']
 type TempFileRate = Schemas['TempFileRate']
 type RecoveryConflictRate = Schemas['RecoveryConflictRate']
+
+/** A WAL tile on the panel's heading line from 1600 px: one compact line. */
+const TILE_IN_HEADING = 'min-[1600px]:py-1'
 
 const perMinuteFormat = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 })
 
@@ -46,7 +60,7 @@ const CONFLICT_TOOLBAR: DataTableToolbar<RecoveryConflictRate> = {
 
 function databaseColumns(): DataTableProps<DatabaseSize>['columns'] {
   return [
-    { accessorKey: 'database', header: 'Database' },
+    { accessorKey: 'database', header: 'Database', meta: { truncate: true } },
     {
       accessorKey: 'size_bytes',
       header: 'Size',
@@ -69,7 +83,7 @@ function databaseColumns(): DataTableProps<DatabaseSize>['columns'] {
 
 function slruColumns(): DataTableProps<SLRUCache>['columns'] {
   return [
-    { accessorKey: 'name', header: 'Cache' },
+    { accessorKey: 'name', header: 'Cache', meta: { truncate: true } },
     {
       id: 'hit_ratio',
       header: 'Hit ratio',
@@ -110,7 +124,7 @@ function slruColumns(): DataTableProps<SLRUCache>['columns'] {
 
 function tempFileColumns(): DataTableProps<TempFileRate>['columns'] {
   return [
-    { accessorKey: 'database', header: 'Database' },
+    { accessorKey: 'database', header: 'Database', meta: { truncate: true } },
     {
       accessorKey: 'files_per_second',
       header: 'Files',
@@ -126,8 +140,8 @@ function tempFileColumns(): DataTableProps<TempFileRate>['columns'] {
 
 function conflictColumns(): DataTableProps<RecoveryConflictRate>['columns'] {
   return [
-    { accessorKey: 'database', header: 'Database' },
-    { accessorKey: 'reason', header: 'Reason' },
+    { accessorKey: 'database', header: 'Database', meta: { truncate: true } },
+    { accessorKey: 'reason', header: 'Reason', meta: { truncate: true } },
     {
       accessorKey: 'per_second',
       header: 'Queries cancelled',
@@ -136,37 +150,61 @@ function conflictColumns(): DataTableProps<RecoveryConflictRate>['columns'] {
   ]
 }
 
-function StandbyReplay({ standby }: { standby: Schemas['StandbyReplay'] }) {
+/** The notes shown in a table's toolbar line, or above the view when it has no table. */
+function notesOf(notes: readonly string[]) {
+  return notes.length === 0 ? undefined : (
+    <>
+      {notes.map((note) => (
+        <ToolbarNote key={note}>{note}</ToolbarNote>
+      ))}
+    </>
+  )
+}
+
+function StandbyReplay({
+  standby,
+  walNotes,
+}: {
+  standby: Schemas['StandbyReplay']
+  walNotes: readonly string[]
+}) {
   const conflicts = useMemo(() => conflictColumns(), [])
   const prefetch = standby.prefetch_blocks_per_second
   const prefetched = prefetch.prefetch
   const cached = prefetch.hit
-  return (
-    <div className="space-y-2">
-      <h3 className="text-sm font-medium">Recovery conflicts</h3>
-      {standby.conflicts.length > 0 ? (
-        <DataTable
-          ariaLabel="Recovery conflicts"
-          tableId="recovery-conflicts"
-          toolbar={CONFLICT_TOOLBAR}
-          columns={conflicts}
-          data={standby.conflicts}
-          emptyState={null}
-          scope="conflicts"
-          total={standby.conflicts.length}
-        />
-      ) : (
+  const notes =
+    prefetched === undefined || cached === undefined
+      ? walNotes
+      : [
+          ...walNotes,
+          `WAL prefetch: ${formatRate(prefetched)} blocks read ahead, ${formatRate(cached)} already in shared buffers.`,
+        ]
+  if (standby.conflicts.length === 0) {
+    return (
+      <div className="space-y-2">
         <p className="text-muted-foreground text-sm">
           Replay cancelled no standby query in the last hour.
         </p>
-      )}
-      {prefetched === undefined || cached === undefined ? null : (
-        <p className="text-muted-foreground text-sm">
-          WAL prefetch: {formatRate(prefetched)} blocks read ahead, {formatRate(cached)} already in
-          shared buffers.
-        </p>
-      )}
-    </div>
+        {notes.map((note) => (
+          <p key={note} className="text-muted-foreground text-sm">
+            {note}
+          </p>
+        ))}
+      </div>
+    )
+  }
+  return (
+    <DataTable
+      ariaLabel="Recovery conflicts"
+      tableId="recovery-conflicts"
+      toolbar={CONFLICT_TOOLBAR}
+      {...(notes.length === 0 ? {} : { toolbarExtra: notesOf(notes) })}
+      columns={conflicts}
+      data={standby.conflicts}
+      emptyState={null}
+      scope="conflicts"
+      total={standby.conflicts.length}
+    />
   )
 }
 
@@ -175,8 +213,19 @@ export function InternalsSection({ instanceId }: { instanceId: string }) {
   const databases = useMemo(() => databaseColumns(), [])
   const slru = useMemo(() => slruColumns(), [])
   const temp = useMemo(() => tempFileColumns(), [])
+  // One table per view (15.3): only the lists the instance has are offered.
+  const views: InstanceView<InternalsViewId>[] = []
+  if (query.data) {
+    if (query.data.databases.length > 0) views.push({ id: 'databases', label: 'Database sizes' })
+    if (query.data.slru.length > 0) views.push({ id: 'slru', label: 'SLRU caches' })
+    views.push({ id: 'temp', label: 'Temporary files' })
+    if (query.data.standby !== null) views.push({ id: 'replay', label: 'Recovery conflicts' })
+  }
+  const [view, showView] = useInstanceView(views)
 
-  let body
+  let body: ReactNode
+  // From 1600 px the WAL tiles share the heading line with the views (D26).
+  let tiles: ReactNode = null
   if (query.error && !query.data) {
     body = (
       <ErrorState
@@ -207,74 +256,65 @@ export function InternalsSection({ instanceId }: { instanceId: string }) {
   } else {
     const { standby, temp_files: tempFiles, wal_directory: walDirectory } = query.data
     const spilling = tempFiles.filter((row) => row.files_per_second > 0 || row.bytes_per_second > 0)
-    body = (
-      <div className="space-y-6">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    const walNotes = walDirectory === null ? [WAL_NOT_LISTED] : []
+    tiles = (
+      <>
+        <MetricTile
+          className={TILE_IN_HEADING}
+          label="WAL directory"
+          value={walDirectory === null ? null : formatBytes(walDirectory.bytes)}
+          unit={walDirectory === null ? null : `${formatCount(walDirectory.files)} files`}
+        />
+        {standby === null ? null : (
           <MetricTile
-            label="WAL directory"
-            value={walDirectory === null ? null : formatBytes(walDirectory.bytes)}
-            unit={walDirectory === null ? null : `${formatCount(walDirectory.files)} files`}
+            className={TILE_IN_HEADING}
+            label="WAL replay"
+            value={
+              standby.replay_paused ? (
+                <Badge variant="destructive">paused</Badge>
+              ) : (
+                <Badge variant="outline">running</Badge>
+              )
+            }
           />
-          {standby === null ? null : (
-            <MetricTile
-              label="WAL replay"
-              value={
-                standby.replay_paused ? (
-                  <Badge variant="destructive">paused</Badge>
-                ) : (
-                  <Badge variant="outline">running</Badge>
-                )
-              }
-            />
-          )}
-        </div>
-        {walDirectory === null ? (
-          <p className="text-muted-foreground text-sm">
-            pg_wal is not listed: the monitoring role needs EXECUTE on pg_ls_waldir(), which
-            pg_monitor grants.
-          </p>
-        ) : null}
-        {query.data.databases.length > 0 ? (
-          <div className="space-y-2">
-            <h3 className="text-sm font-medium">Database sizes</h3>
-            <DataTable
-              ariaLabel="Database sizes"
-              tableId="database-sizes"
-              toolbar={DATABASE_SIZE_TOOLBAR}
-              columns={databases}
-              data={query.data.databases}
-              emptyState={null}
-              scope="databases"
-              total={query.data.databases.length}
-            />
-          </div>
-        ) : null}
-        {query.data.slru.length > 0 ? (
-          <div className="space-y-2">
-            <h3 className="text-sm font-medium">SLRU caches</h3>
-            <p className="text-muted-foreground text-sm">
-              A page missing from a cache is read from disk under the cache&apos;s lock, which
-              stalls every session that needs it: watch the subtransaction and multixact caches.
-            </p>
-            <DataTable
-              ariaLabel="SLRU caches"
-              tableId="slru-caches"
-              toolbar={SLRU_TOOLBAR}
-              columns={slru}
-              data={query.data.slru}
-              emptyState={null}
-              scope="caches"
-              total={query.data.slru.length}
-            />
-          </div>
-        ) : null}
-        <div className="space-y-2">
-          <h3 className="text-sm font-medium">Temporary files</h3>
+        )}
+      </>
+    )
+    body = (
+      <>
+        <TabsContent value="databases">
+          <DataTable
+            ariaLabel="Database sizes"
+            tableId="database-sizes"
+            toolbar={DATABASE_SIZE_TOOLBAR}
+            {...(walNotes.length === 0 ? {} : { toolbarExtra: notesOf(walNotes) })}
+            columns={databases}
+            data={query.data.databases}
+            emptyState={null}
+            scope="databases"
+            total={query.data.databases.length}
+          />
+        </TabsContent>
+        <TabsContent value="slru">
+          <DataTable
+            ariaLabel="SLRU caches"
+            tableId="slru-caches"
+            toolbar={SLRU_TOOLBAR}
+            toolbarExtra={notesOf([...walNotes, SLRU_HINT])}
+            columns={slru}
+            data={query.data.slru}
+            emptyState={null}
+            scope="caches"
+            total={query.data.slru.length}
+          />
+        </TabsContent>
+        <TabsContent value="temp">
           {spilling.length > 0 ? (
             <DataTable
               ariaLabel="Temporary files"
               tableId="temporary-files"
               toolbar={TEMP_FILE_TOOLBAR}
+              {...(walNotes.length === 0 ? {} : { toolbarExtra: notesOf(walNotes) })}
               columns={temp}
               data={spilling}
               emptyState={null}
@@ -282,23 +322,44 @@ export function InternalsSection({ instanceId }: { instanceId: string }) {
               total={spilling.length}
             />
           ) : (
-            <p className="text-muted-foreground text-sm">
-              No query outgrew work_mem in the last hour.
-            </p>
+            <div className="space-y-2">
+              <p className="text-muted-foreground text-sm">
+                No query outgrew work_mem in the last hour.
+              </p>
+              {walNotes.map((note) => (
+                <p key={note} className="text-muted-foreground text-sm">
+                  {note}
+                </p>
+              ))}
+            </div>
           )}
-        </div>
-        {standby === null ? null : <StandbyReplay standby={standby} />}
-      </div>
+        </TabsContent>
+        {standby === null ? null : (
+          <TabsContent value="replay">
+            <StandbyReplay standby={standby} walNotes={walNotes} />
+          </TabsContent>
+        )}
+      </>
     )
   }
 
   return (
-    <Section
-      id="internals"
-      title="Server internals"
-      description="The WAL kept in pg_wal, database sizes, the SLRU caches, temporary files and, on a standby, WAL replay. Rates are averaged over the last hour."
-    >
-      {body}
-    </Section>
+    <Tabs onValueChange={showView} value={view ?? ''}>
+      <InstancePanel
+        id="internals"
+        title="Server internals"
+        description="The WAL kept in pg_wal, database sizes, the SLRU caches, temporary files and, on a standby, WAL replay. Rates are averaged over the last hour."
+        actions={
+          tiles === null ? undefined : (
+            <>
+              {tiles}
+              <InstanceViewTabs label="Server internals lists" views={views} />
+            </>
+          )
+        }
+      >
+        {body}
+      </InstancePanel>
+    </Tabs>
   )
 }

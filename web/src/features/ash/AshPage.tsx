@@ -279,7 +279,7 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 min-[1600px]:space-y-4">
       <PageHeader
         icon={Activity}
         eyebrow="Wait events"

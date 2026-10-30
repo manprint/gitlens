@@ -432,4 +432,24 @@ describe('InstancePage sections', () => {
     await screen.findByRole('tablist', { name: 'Instance sections' })
     await expect(expectNoA11yViolations(container)).resolves.toBeUndefined()
   })
+
+  it('FHD-APPLY-047 the section tabs sit in the header and a section change drops the view of the previous one', async () => {
+    const view = at('?section=catalog&view=sequences')
+    await settle()
+
+    // The tab list is part of the header grid, beside the metrics from 1600 px (15.3).
+    const sectionTabs = screen.getByTestId('instance-section-tabs')
+    expect(
+      within(sectionTabs).getByRole('tablist', { name: 'Instance sections' }),
+    ).toBeInTheDocument()
+    expect(sectionTabs).toHaveClass('min-[1600px]:col-start-1', 'min-[1600px]:row-start-2')
+    expect(within(screen.getByTestId('instance-header')).getByTestId('instance-section-tabs')).toBe(
+      sectionTabs,
+    )
+    expect(screen.getByRole('tab', { name: /^Sequences/ })).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.mouseDown(tab('Settings'))
+    await settle()
+    expect(view.router.state.location.search).toBe('?section=settings')
+  })
 })

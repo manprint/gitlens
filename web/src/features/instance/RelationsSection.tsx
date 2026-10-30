@@ -6,7 +6,6 @@ import { useCreateCommand } from '@/api/commands'
 import { qk } from '@/api/keys'
 import { useInstanceBloat, useInstanceIndexes, useInstanceTables } from '@/api/queries'
 import type { PermTier, Schemas } from '@/api/types'
-import { Section } from '@/components/layout/Section'
 import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { EmptyState, ErrorState, NotPermitted, Truncated, Unknown } from '@/components/state'
 import {
@@ -16,7 +15,13 @@ import {
 } from '@/lib/commands'
 import { formatBytes, formatCount, formatPercent, formatRate, formatTimestamp } from '@/lib/format'
 import { Button } from '@/components/ui/button'
+import { Tabs, TabsContent } from '@/components/ui/tabs'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
+
+import { DENSE_TABLE } from './denseTable'
+import { InstancePanel, InstanceViewTabs } from './InstancePanel'
+import { RELATION_VIEW_IDS } from './instanceSections'
+import { useInstanceView, type InstanceView } from './instanceViews'
 
 const RELATION_LIMIT = 50
 
@@ -30,6 +35,10 @@ interface RelationColumn {
   render: (item: RelationItem) => ReactNode
   /** Absent for action columns, which have nothing to sort by. */
   sortValue?: (item: RelationItem) => string | number | null
+  /** Column width from 1600 px (D26). */
+  width?: string
+  /** A free-text column: one line from 1600 px, the full text in its title. */
+  truncate?: (item: RelationItem) => string
 }
 
 interface RelationQueryState {
@@ -142,12 +151,24 @@ function maintenanceColumn(
       return `${formatTimestamp(latest.iso, 'UTC')} (${latest.auto ? 'auto' : 'manual'})`
     },
     sortValue: (item) => latestMaintenance(item, manualKey, autoKey)?.ms ?? null,
+    width: '9.75rem',
+    truncate: (item) => {
+      const latest = latestMaintenance(item, manualKey, autoKey)
+      return latest
+        ? `${formatTimestamp(latest.iso, 'UTC')} (${latest.auto ? 'auto' : 'manual'})`
+        : ''
+    },
   }
 }
 
 function isTableRow(item: RelationItem): boolean {
   const kind = stringValue(item, 'object_kind')
   return kind ? kind === 'table' : !stringValue(item, 'indexrelname')
+}
+
+/** The full text of a cell that is truncated from 1600 px. */
+function textOf(value: string | null): string {
+  return value ?? ''
 }
 
 /** URL prefix of each relation list (tables inventory). */
@@ -205,6 +226,8 @@ function SortableRelationTable({
         rowHeader: index === 0,
         className: index === 0 ? 'font-normal' : '',
         cell: column.render,
+        ...(column.width === undefined ? {} : { width: column.width }),
+        ...(column.truncate === undefined ? {} : { truncate: column.truncate }),
       })),
     [columns],
   )
@@ -223,6 +246,8 @@ function SortableRelationTable({
         RELATION_TABLE_IDS[caption] ?? `relations-${caption.toLowerCase().replaceAll(' ', '-')}`
       }
       toolbar={RELATION_TOOLBAR}
+      // Eleven sortable columns fit 1600 px only with the dense cells (D26).
+      className={DENSE_TABLE}
       {...(firstKey === undefined ? {} : { defaultSort: { id: firstKey, desc: true } })}
     />
   )
@@ -233,6 +258,7 @@ const RELATION_COLUMN: RelationColumn = {
   label: 'Relation',
   render: relationCell,
   sortValue: (item) => relationName(item),
+  truncate: (item) => textOf(relationName(item)),
 }
 
 // The budget is shared across databases, so the same schema and table name
@@ -242,6 +268,8 @@ const DATABASE_COLUMN: RelationColumn = {
   label: 'Database',
   render: (item) => textCell(item, 'datname'),
   sortValue: (item) => stringValue(item, 'datname'),
+  width: '8rem',
+  truncate: (item) => textOf(stringValue(item, 'datname')),
 }
 
 const OBSERVED_COLUMN: RelationColumn = {
@@ -249,12 +277,18 @@ const OBSERVED_COLUMN: RelationColumn = {
   label: 'Observed',
   render: timestampCell,
   sortValue: (item) => stringValue(item, 'ts'),
+  width: '8rem',
+  truncate: (item) => {
+    const value = stringValue(item, 'ts')
+    return value ? formatTimestamp(value, 'UTC') : ''
+  },
 }
 
-function booleanColumn(key: string, label: string, field: string): RelationColumn {
+function booleanColumn(key: string, label: string, field: string, width: string): RelationColumn {
   return {
     key,
     label,
+    width,
     render: (item) => booleanCell(item, field),
     sortValue: (item) => {
       const value = booleanValue(item, field)
@@ -274,36 +308,42 @@ const TABLE_COLUMNS: RelationColumn[] = [
     label: 'Live tuples',
     render: (item) => countCell(item, 'n_live_tup'),
     sortValue: (item) => numberValue(item, 'n_live_tup'),
+    width: '9rem',
   },
   {
     key: 'dead_tuples',
     label: 'Dead tuples',
     render: (item) => countCell(item, 'n_dead_tup'),
     sortValue: (item) => numberValue(item, 'n_dead_tup'),
+    width: '9.25rem',
   },
   {
     key: 'dead_ratio',
     label: 'Dead ratio',
     render: (item) => percentCell(item, 'dead_ratio'),
     sortValue: (item) => numberValue(item, 'dead_ratio'),
+    width: '8.75rem',
   },
   {
     key: 'size',
     label: 'Size',
     render: (item) => bytesCell(item, 'total_bytes'),
     sortValue: (item) => numberValue(item, 'total_bytes'),
+    width: '5.75rem',
   },
   {
     key: 'seq_scan_rate',
     label: 'Sequential scans',
     render: (item) => rateCell(item, 'seq_scan_rate'),
     sortValue: (item) => numberValue(item, 'seq_scan_rate'),
+    width: '11.75rem',
   },
   {
     key: 'idx_scan_rate',
     label: 'Index scans',
     render: (item) => rateCell(item, 'idx_scan_rate'),
     sortValue: (item) => numberValue(item, 'idx_scan_rate'),
+    width: '9.25rem',
   },
   maintenanceColumn(
     'last_vacuum',
@@ -343,7 +383,10 @@ function lastScanCell(item: RelationItem): ReactNode {
   const at = timeValue(item, 'last_scan_at')
   if (at) {
     return (
-      <span title="Last scan of this index since the statistics were reset.">
+      <span
+        className="min-[1600px]:block min-[1600px]:truncate"
+        title={`Last scan of this index since the statistics were reset: ${formatTimestamp(at.iso, 'UTC')}.`}
+      >
         {formatTimestamp(at.iso, 'UTC')}
       </span>
     )
@@ -361,28 +404,32 @@ const INDEX_COLUMNS: RelationColumn[] = [
     label: 'Index',
     render: (item) => textCell(item, 'indexrelname'),
     sortValue: (item) => stringValue(item, 'indexrelname'),
+    truncate: (item) => textOf(stringValue(item, 'indexrelname')),
   },
   {
     key: 'idx_scan_rate',
     label: 'Index scans',
     render: (item) => rateCell(item, 'idx_scan_rate'),
     sortValue: (item) => numberValue(item, 'idx_scan_rate'),
+    width: '9.25rem',
   },
   {
     key: 'last_scan',
     label: 'Last scan',
     render: lastScanCell,
     sortValue: (item) => timeValue(item, 'last_scan_at')?.ms ?? null,
+    width: '10rem',
   },
   {
     key: 'size',
     label: 'Size',
     render: (item) => bytesCell(item, 'index_bytes'),
     sortValue: (item) => numberValue(item, 'index_bytes'),
+    width: '5.75rem',
   },
-  booleanColumn('unique', 'Unique', 'is_unique'),
-  booleanColumn('primary', 'Primary', 'is_primary'),
-  booleanColumn('valid', 'Valid', 'is_valid'),
+  booleanColumn('unique', 'Unique', 'is_unique', '7rem'),
+  booleanColumn('primary', 'Primary', 'is_primary', '7.5rem'),
+  booleanColumn('valid', 'Valid', 'is_valid', '6.25rem'),
   OBSERVED_COLUMN,
 ]
 
@@ -395,6 +442,7 @@ const BLOAT_INDEX_COLUMN: RelationColumn = {
   label: 'Index',
   render: (item) => textCell(item, 'indexrelname'),
   sortValue: (item) => stringValue(item, 'indexrelname'),
+  truncate: (item) => textOf(stringValue(item, 'indexrelname')),
 }
 
 const BLOAT_MEASURE_COLUMNS: RelationColumn[] = [
@@ -403,30 +451,35 @@ const BLOAT_MEASURE_COLUMNS: RelationColumn[] = [
     label: 'Real size',
     render: (item) => bytesCell(item, 'real_bytes'),
     sortValue: (item) => numberValue(item, 'real_bytes'),
+    width: '8rem',
   },
   {
     key: 'expected_bytes',
     label: 'Expected size',
     render: (item) => bytesCell(item, 'expected_bytes'),
     sortValue: (item) => numberValue(item, 'expected_bytes'),
+    width: '10rem',
   },
   {
     key: 'bloat_bytes',
     label: 'Bloat',
     render: (item) => bytesCell(item, 'bloat_bytes'),
     sortValue: (item) => numberValue(item, 'bloat_bytes'),
+    width: '6.5rem',
   },
   {
     key: 'bloat_ratio',
     label: 'Bloat ratio',
     render: (item) => percentCell(item, 'bloat_ratio'),
     sortValue: (item) => numberValue(item, 'bloat_ratio'),
+    width: '9rem',
   },
   {
     key: 'method',
     label: 'Method',
     render: (item) => textCell(item, 'method'),
     sortValue: (item) => stringValue(item, 'method'),
+    width: '7.5rem',
   },
   OBSERVED_COLUMN,
 ]
@@ -454,25 +507,24 @@ function BudgetNotice({
   configKey: string
 }) {
   if (!response.truncated) return null
+  const shown = response.items.length
+  // From 1600 px the notice is one truncated line in the panel heading (D26).
   return (
-    <div className="space-y-1">
-      <Truncated shown={response.items.length} budget={RELATION_LIMIT} scope={scope} />
-      <p className="text-muted-foreground text-sm">
+    <div
+      className="space-y-1 min-[1600px]:flex min-[1600px]:max-w-[40rem] min-[1600px]:min-w-0 min-[1600px]:items-baseline min-[1600px]:gap-1 min-[1600px]:space-y-0"
+      title={`Showing ${shown} of ${RELATION_LIMIT} ${scope} (truncated; budget ${RELATION_LIMIT}). This budget is shared per instance across databases. Change it at ${configKey}.`}
+    >
+      <div className="min-[1600px]:min-w-0 min-[1600px]:truncate">
+        <Truncated shown={shown} budget={RELATION_LIMIT} scope={scope} />
+      </div>
+      <p className="text-muted-foreground text-sm min-[1600px]:min-w-0 min-[1600px]:truncate">
         This budget is shared per instance across databases. Change it at <code>{configKey}</code>.
       </p>
     </div>
   )
 }
 
-function RelationPanel({
-  title,
-  endpoint,
-  query,
-  columns,
-  emptyDescription,
-  scope,
-  configKey,
-}: {
+interface RelationPanelProps {
   title: string
   endpoint: string
   query: RelationQueryState
@@ -480,7 +532,9 @@ function RelationPanel({
   emptyDescription: string
   scope: string
   configKey: string
-}) {
+}
+
+function RelationPanel({ title, endpoint, query, columns, emptyDescription }: RelationPanelProps) {
   if (query.error && !query.data) {
     return (
       <ErrorState endpoint={endpoint} failure={query.error} onRetry={() => void query.refetch()} />
@@ -496,12 +550,7 @@ function RelationPanel({
   if (query.data.items.length === 0) {
     return <EmptyState title={`No ${title.toLowerCase()}`} description={emptyDescription} />
   }
-  return (
-    <div className="space-y-3">
-      <SortableRelationTable caption={title} items={query.data.items} columns={columns} />
-      <BudgetNotice response={query.data} scope={scope} configKey={configKey} />
-    </div>
-  )
+  return <SortableRelationTable caption={title} items={query.data.items} columns={columns} />
 }
 
 /**
@@ -544,6 +593,7 @@ function ExactMeasurement({
   return (
     <div className="space-y-1">
       <Button
+        className="min-[1600px]:h-5"
         size="xs"
         variant="outline"
         type="button"
@@ -580,6 +630,7 @@ function tableBloatColumns(instanceId: string, permitted: boolean): RelationColu
     {
       key: 'exact',
       label: 'Exact measurement',
+      width: '10rem',
       render: (item) => (
         <ExactMeasurement instanceId={instanceId} item={item} permitted={permitted} />
       ),
@@ -596,37 +647,62 @@ function SkippedTablesNotice({ response }: { response: BloatResponse | undefined
   if (!response || response.skipped_tables < 1) return null
   const named = response.skipped_relations
   const more = response.skipped_tables - named.length
+  const skipped = `${formatCount(response.skipped_tables)} ${
+    response.skipped_tables === 1 ? 'table has' : 'tables have'
+  } no bloat estimate: the monitoring role cannot read a column of them, or row security hides rows from it. Their bloat is unknown, not zero.`
+  const largest =
+    named.length > 0
+      ? `Largest: ${named.map((t) => `${t.datname}: ${t.schemaname}.${t.relname}`).join(', ')}${
+          more > 0 ? ` and ${formatCount(more)} more` : ''
+        }.`
+      : null
+  // From 1600 px the notice is one truncated line beside the exact-measurement note (D26).
   return (
-    <div className="text-muted-foreground space-y-1 text-sm">
-      <p>
-        {formatCount(response.skipped_tables)}{' '}
-        {response.skipped_tables === 1 ? 'table has' : 'tables have'} no bloat estimate: the
-        monitoring role cannot read a column of them, or row security hides rows from it. Their
-        bloat is unknown, not zero.
-      </p>
-      {named.length > 0 ? (
-        <p>
-          Largest: {named.map((t) => `${t.datname}: ${t.schemaname}.${t.relname}`).join(', ')}
-          {more > 0 ? ` and ${formatCount(more)} more` : ''}.
-        </p>
-      ) : null}
+    <div
+      className="text-muted-foreground space-y-1 text-sm min-[1600px]:min-w-0 min-[1600px]:flex-1 min-[1600px]:space-y-0 min-[1600px]:truncate min-[1600px]:text-xs"
+      title={largest === null ? skipped : `${skipped} ${largest}`}
+    >
+      <p className="min-[1600px]:inline">{skipped}</p>
+      {largest === null ? null : (
+        <>
+          {' '}
+          <p className="min-[1600px]:inline">{largest}</p>
+        </>
+      )}
     </div>
   )
 }
 
+const EXACT_BLOAT_NOTE =
+  'An exact measurement runs pgstattuple on the agent in a read-only transaction. It reads the whole table (bounded at 50 seconds) and needs the extension to be installed already in the database that holds the table: pglens never installs extensions, and the agent rejects the command when it is missing there.'
+
 function ExactBloatNotice({ currentTier }: { currentTier: PermTier }) {
   return (
-    <div className="text-muted-foreground space-y-2 text-sm">
-      <p>
+    <div className="text-muted-foreground space-y-2 text-sm min-[1600px]:flex min-[1600px]:min-w-0 min-[1600px]:flex-1 min-[1600px]:items-center min-[1600px]:gap-3 min-[1600px]:space-y-0 min-[1600px]:text-xs">
+      <p className="min-[1600px]:min-w-0 min-[1600px]:truncate" title={EXACT_BLOAT_NOTE}>
         An exact measurement runs <code>pgstattuple</code> on the agent in a read-only transaction.
         It reads the whole table (bounded at 50 seconds) and needs the extension to be installed
         already in the database that holds the table: pglens never installs extensions, and the
         agent rejects the command when it is missing there.
       </p>
-      {currentTier === 'T0' ? <NotPermitted required="T1" current={currentTier} /> : null}
+      {currentTier === 'T0' ? (
+        <div className="min-[1600px]:shrink-0">
+          <NotPermitted required="T1" current={currentTier} />
+        </div>
+      ) : null}
     </div>
   )
 }
+
+type RelationViewId = (typeof RELATION_VIEW_IDS)[number]
+
+/** One relation list per view (15.3); Tables is the default. */
+const RELATION_VIEWS: readonly InstanceView<RelationViewId>[] = [
+  { id: 'tables', label: 'Tables' },
+  { id: 'indexes', label: 'Indexes' },
+  { id: 'table-bloat', label: 'Table bloat' },
+  { id: 'index-bloat', label: 'Index bloat' },
+]
 
 export function RelationsSection({
   instanceId,
@@ -651,65 +727,88 @@ export function RelationsSection({
     [instanceId, permitted],
   )
 
+  const [view = 'tables', showView] = useInstanceView(RELATION_VIEWS)
+  const panels: Record<RelationViewId, RelationPanelProps> = {
+    tables: {
+      title: 'Tables',
+      endpoint: 'table relations',
+      query: tablesQuery,
+      columns: TABLE_COLUMNS,
+      emptyDescription: 'No table relations are currently reported.',
+      scope: 'tables shared per instance across databases',
+      configKey: 'checks.table_stats.top_n',
+    },
+    indexes: {
+      title: 'Indexes',
+      endpoint: 'index relations',
+      query: indexesQuery,
+      columns: INDEX_COLUMNS,
+      emptyDescription: 'No index relations are currently reported.',
+      scope: 'indexes shared per instance across databases',
+      configKey: 'checks.index_stats.top_n',
+    },
+    'table-bloat': {
+      title: 'Table bloat estimates',
+      endpoint: 'table bloat estimates',
+      query: bloatTablesQuery,
+      columns: bloatTableColumns,
+      emptyDescription: 'No table bloat estimates are currently reported.',
+      scope: 'table bloat estimates shared per instance across databases',
+      configKey: 'checks.bloat_estimate.top_n',
+    },
+    'index-bloat': {
+      title: 'Index bloat estimates',
+      endpoint: 'index bloat estimates',
+      query: bloatIndexesQuery,
+      columns: INDEX_BLOAT_COLUMNS,
+      emptyDescription: 'No index bloat estimates are currently reported.',
+      scope: 'index bloat estimates shared per instance across databases',
+      configKey: 'checks.bloat_estimate.top_n',
+    },
+  }
+  const active = panels[view]
+
   return (
-    <Section
-      title="Relations, bloat and truncation"
-      description={
-        'Tables, indexes and bloat estimates each use a top-N budget per database. A bloat estimate is a statistical estimate, not a measurement: it covers tables and btree indexes. Relations under 1 MiB, never-analysed relations, and partial and expression indexes are not estimated. Tables the monitoring role cannot read in full are not estimated either; they are counted above the table estimates. Rows with method pgstattuple are exact measurements of tables.'
-      }
-      id="instance-relations"
-    >
-      <div className="space-y-8">
-        <div className="space-y-3">
-          <h3 className="text-base font-medium">Tables</h3>
-          <RelationPanel
-            title="Tables"
-            endpoint="table relations"
-            query={tablesQuery}
-            columns={TABLE_COLUMNS}
-            emptyDescription="No table relations are currently reported."
-            scope="tables shared per instance across databases"
-            configKey="checks.table_stats.top_n"
-          />
-        </div>
-
-        <div className="space-y-3">
-          <h3 className="text-base font-medium">Indexes</h3>
-          <RelationPanel
-            title="Indexes"
-            endpoint="index relations"
-            query={indexesQuery}
-            columns={INDEX_COLUMNS}
-            emptyDescription="No index relations are currently reported."
-            scope="indexes shared per instance across databases"
-            configKey="checks.index_stats.top_n"
-          />
-        </div>
-
-        <div className="space-y-6">
-          <h3 className="text-base font-medium">Bloat estimates</h3>
-          <SkippedTablesNotice response={bloatTablesQuery.data} />
-          <RelationPanel
-            title="Table bloat estimates"
-            endpoint="table bloat estimates"
-            query={bloatTablesQuery}
-            columns={bloatTableColumns}
-            emptyDescription="No table bloat estimates are currently reported."
-            scope="table bloat estimates shared per instance across databases"
-            configKey="checks.bloat_estimate.top_n"
-          />
-          <RelationPanel
-            title="Index bloat estimates"
-            endpoint="index bloat estimates"
-            query={bloatIndexesQuery}
-            columns={INDEX_BLOAT_COLUMNS}
-            emptyDescription="No index bloat estimates are currently reported."
-            scope="index bloat estimates shared per instance across databases"
-            configKey="checks.bloat_estimate.top_n"
-          />
-          <ExactBloatNotice currentTier={currentTier} />
-        </div>
-      </div>
-    </Section>
+    <Tabs onValueChange={showView} value={view}>
+      <InstancePanel
+        title="Relations, bloat and truncation"
+        description={
+          'Tables, indexes and bloat estimates each use a top-N budget per database. A bloat estimate is a statistical estimate, not a measurement: it covers tables and btree indexes. Relations under 1 MiB, never-analysed relations, and partial and expression indexes are not estimated. Tables the monitoring role cannot read in full are not estimated either; they are counted above the table estimates. Rows with method pgstattuple are exact measurements of tables.'
+        }
+        id="instance-relations"
+        actions={
+          <>
+            {active.query.data ? (
+              <BudgetNotice
+                response={active.query.data}
+                scope={active.scope}
+                configKey={active.configKey}
+              />
+            ) : null}
+            <InstanceViewTabs label="Relation lists" views={RELATION_VIEWS} />
+          </>
+        }
+      >
+        <TabsContent value="tables">
+          <RelationPanel {...panels.tables} />
+        </TabsContent>
+        <TabsContent value="indexes">
+          <RelationPanel {...panels.indexes} />
+        </TabsContent>
+        <TabsContent value="table-bloat">
+          <div className="space-y-3 min-[1600px]:space-y-1.5">
+            {/* From 1600 px both notes share one line above the table (D26). */}
+            <div className="space-y-3 min-[1600px]:flex min-[1600px]:items-center min-[1600px]:gap-4 min-[1600px]:space-y-0">
+              <SkippedTablesNotice response={bloatTablesQuery.data} />
+              <ExactBloatNotice currentTier={currentTier} />
+            </div>
+            <RelationPanel {...panels['table-bloat']} />
+          </div>
+        </TabsContent>
+        <TabsContent value="index-bloat">
+          <RelationPanel {...panels['index-bloat']} />
+        </TabsContent>
+      </InstancePanel>
+    </Tabs>
   )
 }

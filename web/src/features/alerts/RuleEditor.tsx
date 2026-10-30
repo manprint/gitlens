@@ -106,7 +106,7 @@ export function RuleEditor({ onCancel, rule }: RuleEditorProps) {
   return (
     <section aria-labelledby="alert-rule-editor-title" className="space-y-4">
       <div>
-        <h2 id="alert-rule-editor-title" className="text-lg font-semibold">
+        <h2 id="alert-rule-editor-title" className="text-lg font-semibold" tabIndex={-1}>
           Edit alert rule: {rule.id}
         </h2>
         <p className="text-muted-foreground text-sm">

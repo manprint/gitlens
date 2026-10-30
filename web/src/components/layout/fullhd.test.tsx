@@ -13,6 +13,9 @@ import {
   FULLHD_TABLE,
   FULLHD_TRUNCATE,
 } from './fullhdTable'
+import { MetricTile } from './MetricTile'
+import { PageHeader } from './PageHeader'
+import { Section } from './Section'
 import { SimpleTable, type SimpleColumn } from './SimpleTable'
 
 interface Row {
@@ -157,6 +160,59 @@ describe('Full HD table layout (D26)', () => {
     )
     expect(screen.getByRole('table', { name: 'Plain simple' })).not.toHaveClass(
       'min-[1600px]:table-fixed',
+    )
+  })
+
+  it('FHD-APPLY-006 the page header puts eyebrow, title and subtitle on one line', () => {
+    const subtitle = 'A long page explanation that ends with an ellipsis from 1600 px.'
+    renderWithProviders(<PageHeader eyebrow="Checkup" subtitle={subtitle} title="Findings" />)
+    const title = screen.getByRole('heading', { level: 1, name: 'Findings' })
+    expect(title).toHaveClass('min-[1600px]:text-xl', 'min-[1600px]:shrink-0')
+    expect(screen.getByText('Checkup')).toHaveClass('min-[1600px]:mb-0')
+    expect(screen.getByTitle(subtitle)).toHaveClass('min-[1600px]:truncate')
+  })
+
+  it('FHD-APPLY-007 a section puts its title and description on one line', () => {
+    const description = 'What the section lists, cut to one line from 1600 px.'
+    renderWithProviders(
+      <Section description={description} title="Rules">
+        <p>body</p>
+      </Section>,
+    )
+    const title = screen.getByRole('heading', { level: 2, name: 'Rules' })
+    expect(title).toHaveClass('min-[1600px]:shrink-0')
+    expect(screen.getByTitle(description)).toHaveClass('min-[1600px]:mt-0', 'min-[1600px]:truncate')
+  })
+
+  it('FHD-APPLY-008 page controls share the table toolbar line with the search box', () => {
+    renderWithProviders(
+      <DataTable
+        ariaLabel="Notes"
+        columns={COLUMNS}
+        data={ROWS}
+        emptyState={<p>No notes</p>}
+        tableId="notes"
+        toolbar={{ searchFields: [(row: Row) => row.name] }}
+        toolbarExtra={<label htmlFor="extra-control">Server</label>}
+      />,
+    )
+    expect(
+      screen.getByRole('search').compareDocumentPosition(screen.getByText('Server')) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(
+      screen
+        .getByText('Server')
+        .compareDocumentPosition(screen.getByRole('table', { name: 'Notes' })) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  it('FHD-APPLY-009 a metric tile shows its label and value on one line', () => {
+    renderWithProviders(<MetricTile label="Calls" value="42" />)
+    expect(screen.getByRole('article', { name: 'Calls' })).toHaveClass(
+      'min-[1600px]:flex',
+      'min-[1600px]:justify-between',
     )
   })
 })

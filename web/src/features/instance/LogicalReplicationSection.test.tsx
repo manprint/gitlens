@@ -1,4 +1,4 @@
-import { act, screen, within } from '@testing-library/react'
+import { act, fireEvent, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { Schemas } from '@/api/types'
@@ -42,6 +42,14 @@ function subscription(overrides: Partial<Schemas['Subscription']> = {}): Schemas
     last_seen: NOW,
     ...overrides,
   }
+}
+
+/** Opens one list: the section shows one list at a time (15.3). */
+async function openView(name: string) {
+  const tab = screen.getByRole('tab', { name })
+  fireEvent.mouseDown(tab)
+  fireEvent.click(tab)
+  await settle()
 }
 
 function renderSection(data: Partial<Schemas['LogicalReplicationResponse']>) {
@@ -108,6 +116,7 @@ describe('LogicalReplicationSection', () => {
     expect(within(subs[3]!).getByText('3')).toBeInTheDocument()
     expect(within(subs[0]!).getByText('n/a')).toBeInTheDocument()
 
+    await openView('Logical slots')
     const slots = within(screen.getByRole('table', { name: 'Logical slots' }))
       .getAllByRole('row')
       .slice(1)
@@ -185,6 +194,7 @@ describe('LogicalReplicationSection tables: pages, search, filters, sort', () =>
       })),
     })
     await settle()
+    await openView('Logical slots')
     const slots = 'Logical slots'
     expect(dataRows(slots)).toHaveLength(20)
     searchTable(slots, 'slot_2')

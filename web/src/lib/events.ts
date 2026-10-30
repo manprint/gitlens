@@ -167,3 +167,24 @@ export function sortEventsNewestFirst(events: readonly ClusterEvent[]): ClusterE
     return timeDifference || right.event_id - left.event_id
   })
 }
+
+/** An instance id the event payload names under `key`, or null. */
+export function payloadInstance(event: ClusterEvent, key: string): string | null {
+  const value = event.payload[key]
+  return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+// A counter_reset_detected event is written per database and carries the number
+// of counters that reset, so the UI can say how many.
+export function counterResetCount(event: ClusterEvent): number | null {
+  const value = event.payload.count
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null
+}
+
+// The event names its database, empty for a result that covers the whole
+// instance. An event written before the server sent the name says neither.
+export function counterResetScope(event: ClusterEvent): string {
+  const database = event.payload.database
+  if (typeof database !== 'string') return ''
+  return database === '' ? ' on this instance' : ` in database ${database}`
+}

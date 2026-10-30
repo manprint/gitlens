@@ -13,7 +13,32 @@
  * fit check passes.
  */
 
-import { INSTANCE_SECTIONS } from '../src/features/instance/instanceSections'
+import { ALERTS_SECTIONS, EVENTS_SECTIONS } from '../src/features/alerts/alertingSections'
+import { CLUSTER_SECTIONS } from '../src/features/cluster/clusterSections'
+import { INDEX_VIEWS } from '../src/features/indexes/indexViews'
+import { FINDINGS_VIEWS } from '../src/features/findings/findingsViews'
+import {
+  CATALOG_VIEW_IDS,
+  INSTANCE_SECTIONS,
+  INTERNALS_VIEW_IDS,
+  RELATION_VIEW_IDS,
+} from '../src/features/instance/instanceSections'
+
+/**
+ * Section and view of every non-default view of an instance tab (15.3). The
+ * data-dependent views are left out: `replay` exists on a standby only (the
+ * live check picks a primary) and the logical-replication views only with
+ * subscriptions or slots; the tab entry measures whichever view opens first.
+ * `slru` is kept but also depends on data: without SLRU rows the URL falls back
+ * to the first Internals view.
+ */
+export const INSTANCE_SUBVIEWS: readonly (readonly [string, string])[] = [
+  ...RELATION_VIEW_IDS.slice(1).map((view) => ['relations', view] as const),
+  ...CATALOG_VIEW_IDS.slice(1).map((view) => ['catalog', view] as const),
+  ...INTERNALS_VIEW_IDS.filter((view) => view === 'slru' || view === 'temp').map(
+    (view) => ['internals', view] as const,
+  ),
+]
 
 export type FullHdKind = 'fit' | 'charts' | 'exempt'
 
@@ -30,14 +55,33 @@ export const FULLHD_ROUTES: readonly FullHdRoute[] = [
   { path: '/', name: 'Fleet overview', kind: 'fit' },
   { path: '/queries', name: 'Slowest queries', kind: 'fit' },
   { path: '/indexes?tab=indexes', name: 'Index analysis: indexes', kind: 'fit' },
+  // The other views of the Indexes tab (15.3); the inventory is the default.
+  ...INDEX_VIEWS.slice(1).map(({ id, label }): FullHdRoute => ({
+    path: `/indexes?tab=indexes&view=${id}`,
+    name: `Index analysis: indexes, ${label}`,
+    kind: 'fit',
+  })),
   { path: '/indexes?tab=cleanup', name: 'Index analysis: cleanup', kind: 'fit' },
   { path: '/indexes?tab=dead-rows', name: 'Index analysis: dead rows', kind: 'fit' },
-  { path: '/clusters/:clusterId', name: 'Cluster detail', kind: 'fit' },
+  // One entry per cluster-page tab (15.3), kind from the tab registry.
+  ...CLUSTER_SECTIONS.map(({ id, label, kind }): FullHdRoute => ({
+    path: `/clusters/:clusterId?section=${id}`,
+    name: `Cluster detail: ${label}`,
+    kind: kind === 'charts' ? 'charts' : 'fit',
+  })),
   // One entry per instance-page tab (15.2), kind from the section registry.
   ...INSTANCE_SECTIONS.map(({ id, label, kind }): FullHdRoute => ({
     path: `/instances/:instanceId?section=${id}`,
     name: `Instance detail: ${label}`,
     kind: kind === 'charts' ? 'charts' : 'fit',
+  })),
+  // The views inside instance tabs (15.3), one table each; the first view of a tab
+  // is its default. Views that only exist with data (logical replication, a
+  // standby's recovery conflicts) are measured through the tab entry.
+  ...INSTANCE_SUBVIEWS.map(([section, view]): FullHdRoute => ({
+    path: `/instances/:instanceId?section=${section}&view=${view}`,
+    name: `Instance detail: ${section}, ${view}`,
+    kind: 'fit',
   })),
   { path: '/instances/:instanceId/ash', name: 'ASH and wait analysis', kind: 'charts' },
   { path: '/instances/:instanceId/queries', name: 'Query inspector', kind: 'fit' },
@@ -52,9 +96,23 @@ export const FULLHD_ROUTES: readonly FullHdRoute[] = [
     kind: 'fit',
     pendingUnit: '16.3',
   },
-  { path: '/findings', name: 'Advisor findings', kind: 'fit' },
-  { path: '/alerts', name: 'Alerts and events', kind: 'fit' },
-  { path: '/events', name: 'Fleet event timeline', kind: 'fit' },
+  // One entry per findings tab (15.3); the default tab has no `view` in its URL.
+  ...FINDINGS_VIEWS.map(({ id, label }, index): FullHdRoute => ({
+    path: index === 0 ? '/findings' : `/findings?view=${id}`,
+    name: `Advisor findings: ${label}`,
+    kind: 'fit',
+  })),
+  // One entry per alerting tab (15.3); the default tab has no `section` in its URL.
+  ...ALERTS_SECTIONS.map(({ id, label }, index): FullHdRoute => ({
+    path: index === 0 ? '/alerts' : `/alerts?section=${id}`,
+    name: `Alerts: ${label}`,
+    kind: 'fit',
+  })),
+  ...EVENTS_SECTIONS.map(({ id, label }, index): FullHdRoute => ({
+    path: index === 0 ? '/events' : `/events?section=${id}`,
+    name: `Fleet events: ${label}`,
+    kind: 'fit',
+  })),
   { path: '/alerts/rules', name: 'Alert rules', kind: 'fit' },
   { path: '/alerts/silences', name: 'Alert silences', kind: 'fit' },
   { path: '/settings', name: 'Settings and inventory', kind: 'fit', pendingUnit: '11.1' },

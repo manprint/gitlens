@@ -33,6 +33,26 @@ export const INSTANCE_SECTIONS = [
   { id: 'internals', label: 'Internals', kind: 'table', legacyHash: 'internals', captionId: null },
 ] as const
 
+/**
+ * The views inside instance tabs (15.3), one table each, in tab order: the
+ * first is the default and never written to `?view=`. Internals and logical
+ * replication offer a view only when the instance has its data (`replay` on a
+ * standby, `subscriptions`/`slots` when present).
+ */
+export const RELATION_VIEW_IDS = ['tables', 'indexes', 'table-bloat', 'index-bloat'] as const
+export const CATALOG_VIEW_IDS = [
+  'triggers',
+  'sequences',
+  'partitions',
+  'functions',
+  'security-definer',
+  'foreign-keys',
+  'extensions',
+  'postgis',
+] as const
+export const INTERNALS_VIEW_IDS = ['databases', 'slru', 'temp', 'replay'] as const
+export const LOGICAL_VIEW_IDS = ['subscriptions', 'slots'] as const
+
 export type InstanceSectionId = (typeof INSTANCE_SECTIONS)[number]['id']
 
 export const DEFAULT_INSTANCE_SECTION: InstanceSectionId = 'overview'

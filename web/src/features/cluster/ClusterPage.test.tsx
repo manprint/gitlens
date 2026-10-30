@@ -1,4 +1,4 @@
-import { act, screen } from '@testing-library/react'
+import { act, fireEvent, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { Cluster } from '@/api/types'
@@ -54,10 +54,16 @@ async function settle() {
   })
 }
 
-function renderPage() {
+function renderPage(section?: string) {
   return renderWithProviders(<ClusterPage clusterId={CLUSTER_ID} />, {
-    route: `/clusters/${CLUSTER_ID}`,
+    route: section ? `/clusters/${CLUSTER_ID}?section=${section}` : `/clusters/${CLUSTER_ID}`,
   })
+}
+
+/** Opens a tab of the cluster page (Radix tabs switch on mouse down). */
+async function openTab(name: string) {
+  fireEvent.mouseDown(screen.getByRole('tab', { name }))
+  await settle()
 }
 
 afterEach(() => {
@@ -102,11 +108,15 @@ describe('ClusterPage', () => {
     renderPage()
     await settle()
 
-    expect(screen.queryByText('No drift detected')).not.toBeInTheDocument()
-    expect(screen.queryByText('No replication slots')).not.toBeInTheDocument()
+    // One tab at a time (15.3): each pending tab shows its own loading text.
+    await openTab('Replication lag')
     expect(screen.queryByText('No replication lag data in this range')).not.toBeInTheDocument()
     expect(screen.getByText('Loading replication lag')).toBeInTheDocument()
+    await openTab('Replication slots')
+    expect(screen.queryByText('No replication slots')).not.toBeInTheDocument()
     expect(screen.getByText('Loading replication slots')).toBeInTheDocument()
+    await openTab('Configuration drift')
+    expect(screen.queryByText('No drift detected')).not.toBeInTheDocument()
     expect(screen.getByText('Loading configuration drift')).toBeInTheDocument()
   })
 
@@ -119,6 +129,7 @@ describe('ClusterPage', () => {
     await settle()
 
     expect(screen.getByTestId('cluster-topology-graph')).toBeInTheDocument()
+    await openTab('Replication lag')
     expect(screen.getByRole('alert')).toHaveTextContent('Could not load replication lag charts')
     vi.useRealTimers()
     await expectNoA11yViolations(document.body)
@@ -178,7 +189,7 @@ describe('ClusterPage', () => {
   it('UI-CLUS-046 lists the replication slots the slots endpoint reports', async () => {
     configurePage()
     server.use(ok('getClusterSlots', inactiveSlots))
-    renderPage()
+    renderPage('slots')
     await settle()
 
     const table = screen.getByRole('table', { name: 'Replication slots' })
@@ -196,6 +207,7 @@ describe('ClusterPage', () => {
     await settle()
 
     expect(screen.getByTestId('cluster-topology-graph')).toBeInTheDocument()
+    await openTab('Replication slots')
     expect(screen.getByRole('alert')).toHaveTextContent('Could not load replication slots')
   })
 
@@ -221,5 +233,62 @@ describe('ClusterPage', () => {
 
     // The mount fetch, then one per poll.
     expect(replicationRequests).toHaveLength(polls + 1)
+  })
+
+  it('CLTAB-001 opens Topology by default and CLTAB-004 writes nothing to the URL', async () => {
+    configurePage()
+    const view = renderPage()
+    await settle()
+
+    expect(screen.getByRole('tab', { name: 'Topology' })).toHaveAttribute('aria-selected', 'true')
+    expect(view.router.state.location.search).toBe('')
+    expect(screen.getByText(/Cluster identity:/)).toBeInTheDocument()
+  })
+
+  it('CLTAB-002 ?section=lag selects the lag tab and CLTAB-003 an unknown one falls back', async () => {
+    configurePage()
+    const view = renderPage('lag')
+    await settle()
+    expect(screen.getByRole('tab', { name: 'Replication lag' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    expect(screen.getByText(/Cluster identity:/)).toBeInTheDocument()
+    view.unmount()
+
+    configurePage()
+    renderPage('nonsense')
+    await settle()
+    expect(screen.getByRole('tab', { name: 'Topology' })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('CLTAB-006 mounts only the active tab while the page keeps every query', async () => {
+    const requested: string[] = []
+    server.events.on('request:start', ({ request }) => {
+      requested.push(new URL(request.url).pathname)
+    })
+    configurePage()
+    const view = renderPage('drift')
+    await settle()
+
+    expect(screen.queryByTestId('cluster-topology-graph')).toBeNull()
+    expect(screen.queryByRole('table', { name: 'Replication slots' })).toBeNull()
+    for (const path of ['/topology', '/replication', '/settings-drift', '/slots']) {
+      expect(
+        requested.some((request) => request.endsWith(path)),
+        path,
+      ).toBe(true)
+    }
+    await openTab('Topology')
+    expect(screen.getByTestId('cluster-topology-graph')).toBeInTheDocument()
+    expect(view.router.state.location.search).toBe('')
+  })
+
+  it('CLTAB-007 the cluster tabs have no serious accessibility violations', async () => {
+    configurePage()
+    renderPage('events')
+    await settle()
+    vi.useRealTimers()
+    await expect(expectNoA11yViolations(document.body)).resolves.toBeUndefined()
   })
 })

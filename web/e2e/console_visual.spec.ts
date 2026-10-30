@@ -6,7 +6,7 @@ import { promisify } from 'node:util'
 import type { Page } from '@playwright/test'
 
 import { expect, test } from './fixtures'
-import { measureRoutes } from './fullhd_fit'
+import { assertFits, measureRoutes } from './fullhd_fit'
 import { FULLHD_ROUTES } from './fullhd_routes'
 import { INSTANCE_SECTIONS } from '../src/features/instance/instanceSections'
 import {
@@ -757,6 +757,8 @@ test('TBL-E2E-005 no data table renders more than one page of rows (I-12)', asyn
     `/queries?instance=${instanceId}&range=24h`,
     `/indexes?instance=${instanceId}`,
     '/findings',
+    // The rule catalogue has its own tab since 15.3.
+    '/findings?view=rules',
     '/settings',
     `/clusters/${clusterId}`,
     `/instances/${instanceId}/queries`,
@@ -899,4 +901,41 @@ test('FHD-INST-001 every instance-page tab opens on the live instance', async ({
     timeout: 30_000,
   })
   browserErrors.assertClean()
+})
+
+test('FHD-FIT-001 every fit route shows its table and pager on a Full HD screen', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, FULLHD_ROUTES.length * 2 * 30_000))
+  const failures: string[] = []
+  for (const route of FULLHD_ROUTES) {
+    if (route.kind === 'exempt') continue
+    if (route.pendingUnit !== undefined) {
+      // A skip is never a pass: the owning unit runs its own fit check.
+      test.info().annotations.push({
+        type: 'UNVERIFIED',
+        description: `${route.path}: pending ${route.pendingUnit}`,
+      })
+      continue
+    }
+    try {
+      await test.step(route.path, async () => {
+        // assertFits also checks, per viewport, that the pager is on screen.
+        await assertFits(page, api, route)
+      })
+    } catch (error) {
+      failures.push(
+        `${route.path}: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`,
+      )
+    } finally {
+      // Passing or not, the route's last viewport (1920×950) is kept for the review.
+      const slug = route.path.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'fleet'
+      await page.screenshot({
+        path: `../test/e2e/_artifacts/ui/fullhd/${slug}-950.png`,
+        fullPage: true,
+      })
+    }
+  }
+  expect(failures, failures.join('\n')).toEqual([])
 })

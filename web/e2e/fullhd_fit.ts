@@ -31,6 +31,8 @@ export interface FullHdMeasure {
   mainPadding: number
   /** Data-table scroll boxes whose content scrolls vertically at the default page size. */
   scrollingTableBoxes: number
+  /** Bottom edge of the first table pager in the viewport (`null`: no pager). */
+  pagerBottom: number | null
 }
 
 interface RouteValues {
@@ -117,6 +119,10 @@ async function measurePage(page: Page): Promise<Omit<FullHdMeasure, 'route' | 'u
         ? Math.round(parseFloat(mainStyle.paddingTop) + parseFloat(mainStyle.paddingBottom))
         : 0,
       scrollingTableBoxes: boxes.filter((box) => box.scrollHeight > box.clientHeight + 1).length,
+      pagerBottom: (() => {
+        const nav = document.querySelector('[data-table-card] nav[aria-label$="pagination"]')
+        return nav ? Math.round(nav.getBoundingClientRect().bottom) : null
+      })(),
     }
   })
 }
@@ -152,7 +158,8 @@ export async function measureRoutes(page: Page, api: APIRequestContext): Promise
  * Signature `assertFits(page, api, route)`: the API context resolves the
  * route's `:instanceId`, `:clusterId` and `:queryid` on the live stack.
  * no horizontal scrollbar for any kind; for `fit` no page scrollbar and no
- * table box scrolling at the default page size. Returns the measurements.
+ * table box scrolling at the default page size, and the pager on screen.
+ * Returns the measurements.
  */
 export async function assertFits(
   page: Page,
@@ -175,6 +182,12 @@ export async function assertFits(
       expect(measure.scrollHeight, `${where}: page scrollbar`).toBeLessThanOrEqual(
         measure.innerHeight,
       )
+      // The pager, when the table has one, is on screen.
+      if (measure.pagerBottom !== null) {
+        expect(measure.pagerBottom, `${where}: pager below the fold`).toBeLessThanOrEqual(
+          measure.innerHeight,
+        )
+      }
     }
   }
   return measures

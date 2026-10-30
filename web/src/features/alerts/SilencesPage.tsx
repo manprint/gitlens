@@ -86,12 +86,20 @@ function silenceColumns(
       header: 'Matchers',
       sortValue: matcherLabel,
       className: 'font-mono text-xs',
+      width: '30%',
+      truncate: matcherLabel,
       cell: matcherLabel,
     },
-    { id: 'reason', header: 'Reason', cell: (silence) => silence.reason },
+    {
+      id: 'reason',
+      header: 'Reason',
+      truncate: (silence) => silence.reason,
+      cell: (silence) => silence.reason,
+    },
     {
       id: 'start',
       header: 'Start',
+      width: '12.5rem',
       sortValue: (silence) => Date.parse(silence.starts_at),
       className: 'whitespace-nowrap',
       cell: (silence) => (
@@ -101,21 +109,32 @@ function silenceColumns(
     {
       id: 'end',
       header: 'End',
+      width: '12.5rem',
       sortValue: (silence) => Date.parse(silence.ends_at),
       className: 'whitespace-nowrap',
       cell: (silence) => (
         <time dateTime={silence.ends_at}>{formatTimestamp(silence.ends_at, 'UTC')}</time>
       ),
     },
-    { id: 'state', header: 'State', className: 'whitespace-nowrap', cell: windowLabel },
+    {
+      id: 'state',
+      header: 'State',
+      width: '13rem',
+      className: 'whitespace-nowrap',
+      truncate: windowLabel,
+      cell: windowLabel,
+    },
     {
       id: 'actions',
       header: 'Actions',
       srOnlyHeader: true,
+      width: '8rem',
       className: 'text-right',
       cell: (silence) => (
         <Button
           aria-label={`End silence ${silence.silence_id}`}
+          // From 1600 px the button fits the one-line row (D26).
+          className="min-[1600px]:h-6 min-[1600px]:text-xs"
           disabled={ending}
           onClick={() => onEnd(silence)}
           size="sm"
@@ -182,7 +201,7 @@ export function SilencesPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 min-[1600px]:space-y-4">
       <PageHeader
         icon={BellOff}
         eyebrow="Alerting"
