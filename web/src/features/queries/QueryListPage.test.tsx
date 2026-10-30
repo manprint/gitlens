@@ -8,6 +8,7 @@ import { REFRESH } from '@/api/policy'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { renderWithProviders } from '@/test/render'
 import { server } from '@/test/msw/server'
+import { columnTexts, dataRows, searchTable, seq, sortTable } from '@/test/table'
 import { NOW } from '@/test/time'
 
 const INSTANCE_ID = '11111111-1111-4111-8111-111111111111'
@@ -278,5 +279,50 @@ describe('QueryListPage', () => {
     } finally {
       server.events.removeAllListeners()
     }
+  })
+})
+
+describe('QueryListPage table', () => {
+  it('TBL-UI-027 statement-statistics pages, searches and sorts the loaded statements', async () => {
+    server.use(
+      statementsHandler(
+        statementResponse({
+          statements: seq(25).map((n, index) => ({
+            calls: index + 1,
+            datname: 'postgres',
+            query_text: `SELECT stmt_${n}`,
+            queryid: 1_000 + index,
+            rows: 1,
+            total_exec_time_ms: 10,
+            truncated: false,
+          })),
+        }),
+      ),
+    )
+    const { router } = renderPage(
+      `/instances/${INSTANCE_ID}/queries?range=1h&statement-statistics.page=2`,
+    )
+    await settle()
+    const name = 'Statement statistics'
+
+    expect(dataRows(name)).toHaveLength(5)
+    // A new server ranking returns to page 1.
+    fireEvent.change(screen.getByRole('combobox', { name: 'Sort statements' }), {
+      target: { value: 'mean_exec_time' },
+    })
+    await settle()
+    expect(router.state.location.search).not.toContain('statement-statistics.page')
+    expect(dataRows(name)).toHaveLength(20)
+
+    searchTable(name, 'stmt_2')
+    expect(dataRows(name)).toHaveLength(6)
+    searchTable(name, '1024')
+    expect(dataRows(name)).toHaveLength(1)
+    expect(columnTexts(name)[0]).toContain('stmt_25')
+    searchTable(name, '')
+    sortTable(name, 'Calls', 'descending')
+    expect(columnTexts(name)[0]).toContain('stmt_25')
+    sortTable(name, 'Calls', 'ascending')
+    expect(columnTexts(name)[0]).toContain('stmt_01')
   })
 })

@@ -6,6 +6,7 @@ import { INSTANCE_ID } from '@/test/fixture-helpers'
 import { ok } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 import { renderWithProviders } from '@/test/render'
+import { columnTexts, dataRows, filterTable, searchTable, seq, sortTable } from '@/test/table'
 
 import { CatalogSection } from './CatalogSection'
 
@@ -373,10 +374,12 @@ describe('CatalogSection', () => {
     await settle()
     expect(screen.getByText('gis: PostGIS 3.5.2 (packages carry 3.6.4)')).toBeInTheDocument()
     expect(tableRows()).toHaveLength(2)
-    expect(screen.getByText('geometry(MultiPolygon)')).toBeInTheDocument()
-    expect(screen.getByText('250,000')).toBeInTheDocument()
-    expect(screen.getByText('missing')).toBeInTheDocument()
-    expect(screen.getByText('unknown')).toBeInTheDocument()
+    // Scoped to the table: the Type and Spatial index filters list the same text.
+    const spatial = within(screen.getByRole('table', { name: 'Spatial columns' }))
+    expect(spatial.getByText('geometry(MultiPolygon)')).toBeInTheDocument()
+    expect(spatial.getByText('250,000')).toBeInTheDocument()
+    expect(spatial.getByText('missing')).toBeInTheDocument()
+    expect(spatial.getByText('unknown')).toBeInTheDocument()
   })
 
   // UI-CAT-006: sequences are listed closest to their limit first, bigint
@@ -609,5 +612,236 @@ describe('CatalogSection', () => {
     expect(within(rows[2]!).getByText('public, pg_temp')).toBeInTheDocument()
     expect(within(rows[2]!).queryByText('(pg_temp first)')).not.toBeInTheDocument()
     expect(within(rows[3]!).getByText('(pg_temp first)')).toBeInTheDocument()
+  })
+})
+
+describe('CatalogSection tables: pages, search, filters, sort', () => {
+  async function openTab(name: RegExp) {
+    const tab = screen.getByRole('tab', { name })
+    fireEvent.mouseDown(tab)
+    fireEvent.click(tab)
+    await settle()
+  }
+
+  it('TBL-UI-013 triggers', async () => {
+    renderCatalog(
+      seq(25).map((n, index) =>
+        trigger({ name: `trig_${n}`, relname: index < 3 ? 'leads' : 'orders' }),
+      ),
+    )
+    await settle()
+    const name = 'Triggers'
+
+    expect(dataRows(name)).toHaveLength(20)
+    searchTable(name, 'leads')
+    expect(columnTexts(name, 2)).toEqual(['trig_01', 'trig_02', 'trig_03'])
+    searchTable(name, '')
+    sortTable(name, 'Trigger', 'descending')
+    expect(columnTexts(name, 2)[0]).toBe('trig_25')
+  })
+
+  it('TBL-UI-014 unindexed-foreign-keys', async () => {
+    renderCatalog(
+      [],
+      [],
+      seq(25).map((n, index) => ({
+        datname: 'app',
+        schemaname: 'public',
+        relname: index < 3 ? 'leads' : 'orders',
+        constraint: `fk_${n}`,
+        columns: 'customer_id',
+        referenced: 'public.customers',
+        table_bytes: (index + 1) * 1_000,
+        first_seen: SEEN,
+        last_seen: SEEN,
+      })),
+    )
+    await settle()
+    await openTab(/Unindexed foreign keys/)
+    const name = 'Unindexed foreign keys'
+
+    expect(dataRows(name)).toHaveLength(20)
+    searchTable(name, 'leads')
+    expect(columnTexts(name, 2)).toEqual(['fk_01', 'fk_02', 'fk_03'])
+    searchTable(name, '')
+    sortTable(name, 'Table size', 'descending')
+    expect(columnTexts(name, 2)[0]).toBe('fk_25')
+  })
+
+  it('TBL-UI-015 extensions', async () => {
+    renderCatalog(
+      [],
+      [],
+      [],
+      seq(25).map((n, index) => ({
+        datname: 'app',
+        name: `ext_${n}`,
+        schema: index < 5 ? 'extensions' : 'public',
+        version: '1.0',
+        default_version: '1.0',
+        upgrade: 'none',
+        first_seen: SEEN,
+        last_seen: SEEN,
+        changed_at: SEEN,
+      })),
+    )
+    await settle()
+    await openTab(/Extensions/)
+    const name = 'Extensions'
+
+    expect(dataRows(name)).toHaveLength(20)
+    searchTable(name, 'ext_1')
+    expect(dataRows(name)).toHaveLength(10)
+    searchTable(name, '')
+    filterTable(name, 'Schema', 'extensions')
+    expect(columnTexts(name, 1)).toEqual(seq(5).map((n) => `ext_${n}`))
+    filterTable(name, 'Schema', '')
+    sortTable(name, 'Extension', 'descending')
+    expect(columnTexts(name, 1)[0]).toBe('ext_25')
+  })
+
+  it('TBL-UI-016 spatial-columns', async () => {
+    renderCatalog(
+      [],
+      [],
+      [],
+      [],
+      seq(25).map((n, index) => ({
+        datname: 'gis',
+        schemaname: 'public',
+        relname: 'parcels',
+        column: `col_${n}`,
+        type: 'geometry',
+        subtype: index < 4 ? 'Point' : 'Polygon',
+        srid: 4326,
+        srid_known: true,
+        index_method: index % 2 === 0 ? 'gist' : '',
+        rows: index + 1,
+        first_seen: SEEN,
+        last_seen: SEEN,
+      })),
+    )
+    await settle()
+    await openTab(/PostGIS/)
+    const name = 'Spatial columns'
+
+    expect(dataRows(name)).toHaveLength(20)
+    searchTable(name, 'col_2')
+    expect(dataRows(name)).toHaveLength(6)
+    searchTable(name, '')
+    filterTable(name, 'Type', 'geometry(Point)')
+    expect(columnTexts(name, 2)).toEqual(seq(4).map((n) => `col_${n}`))
+    filterTable(name, 'Type', '')
+    filterTable(name, 'Spatial index', 'missing')
+    expect(dataRows(name)).toHaveLength(12)
+    filterTable(name, 'Spatial index', '')
+    sortTable(name, 'Rows (est.)', 'descending')
+    expect(columnTexts(name, 2)[0]).toBe('col_25')
+  })
+
+  it('TBL-UI-017 sequences', async () => {
+    renderCatalog(
+      [],
+      [],
+      [],
+      [],
+      [],
+      seq(25).map((n, index) =>
+        sequence({
+          name: `seq_${n}`,
+          data_type: index < 3 ? 'integer' : 'bigint',
+          used_ratio: (index + 1) / 100,
+        }),
+      ),
+    )
+    await settle()
+    await openTab(/Sequences/)
+    const name = 'Sequences'
+
+    expect(dataRows(name)).toHaveLength(20)
+    searchTable(name, 'seq_0')
+    expect(dataRows(name)).toHaveLength(9)
+    searchTable(name, '')
+    filterTable(name, 'Type', 'integer')
+    expect(dataRows(name)).toHaveLength(3)
+    filterTable(name, 'Type', '')
+    sortTable(name, 'Used', 'ascending')
+    expect(columnTexts(name, 1)[0]).toContain('seq_01')
+  })
+
+  it('TBL-UI-018 partitioned-tables', async () => {
+    renderCatalog(
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      seq(25).map((n, index) =>
+        partitionedTable({ relname: `part_${n}`, bytes: (index + 1) * 1_024 }),
+      ),
+    )
+    await settle()
+    await openTab(/Partitions/)
+    const name = 'Partitioned tables'
+
+    expect(dataRows(name)).toHaveLength(20)
+    searchTable(name, 'part_2')
+    expect(dataRows(name)).toHaveLength(6)
+    searchTable(name, '')
+    sortTable(name, 'Size (est.)', 'descending')
+    expect(columnTexts(name, 1)[0]).toBe('public.part_25')
+  })
+
+  it('TBL-UI-019 functions', async () => {
+    renderCatalog([], [], [], [], [], [], [], {
+      functions: {
+        databases: [
+          {
+            datname: 'app',
+            track_functions: 'pl',
+            tracked_functions: 25,
+            pl_functions: 25,
+            last_seen: SEEN,
+          },
+        ],
+        functions: seq(25).map((n, index) =>
+          functionStat({ name: `fn_${n}`, arguments: '', calls_per_second: index + 1 }),
+        ),
+      },
+    })
+    await settle()
+    await openTab(/^Functions/)
+    const name = 'Functions'
+
+    expect(dataRows(name)).toHaveLength(20)
+    searchTable(name, 'fn_2')
+    expect(dataRows(name)).toHaveLength(6)
+    searchTable(name, '')
+    sortTable(name, 'Calls', 'descending')
+    expect(columnTexts(name, 1)[0]).toBe('public.fn_25()')
+  })
+
+  it('TBL-UI-020 security-definer-functions', async () => {
+    renderCatalog([], [], [], [], [], [], [], {
+      securityDefiner: seq(25).map((n, index) =>
+        securityDefiner({
+          name: `sd_${n}`,
+          arguments: '',
+          signature: `public.sd_${n}()`,
+          owner: index < 2 ? 'admin' : 'postgres',
+        }),
+      ),
+    })
+    await settle()
+    await openTab(/Security definer/)
+    const name = 'SECURITY DEFINER functions'
+
+    expect(dataRows(name)).toHaveLength(20)
+    searchTable(name, 'admin')
+    expect(dataRows(name)).toHaveLength(2)
+    searchTable(name, '')
+    sortTable(name, 'Function', 'descending')
+    expect(columnTexts(name, 1)[0]).toBe('public.sd_25()')
   })
 })

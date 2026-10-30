@@ -7,6 +7,8 @@ import { ok } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 import { renderWithProviders } from '@/test/render'
 
+import { columnTexts, dataRows, filterTable, searchTable, seq, sortTable } from '@/test/table'
+
 import { LogicalReplicationSection } from './LogicalReplicationSection'
 
 async function settle() {
@@ -117,5 +119,78 @@ describe('LogicalReplicationSection', () => {
     renderSection({})
     await settle()
     expect(screen.getByText('No logical replication')).toBeInTheDocument()
+  })
+})
+
+describe('LogicalReplicationSection tables: pages, search, filters, sort', () => {
+  it('TBL-UI-025 subscriptions', async () => {
+    renderSection({
+      subscriptions: seq(25).map((n, index) =>
+        subscription({
+          name: `sub_${n}`,
+          slot_name: `slot_${n}`,
+          database: index < 6 ? 'crm' : 'app',
+          enabled: index >= 2,
+          last_message_at: index === 2 ? minutesBefore(30) : minutesBefore(1),
+        }),
+      ),
+      slots: seq(25).map((n, index) => ({
+        slot_name: `slot_${n}`,
+        bytes_per_second: (index + 1) * 1_024,
+        txns_per_second: 1,
+        spill_bytes_per_second: 0,
+        spill_txns_per_second: 0,
+        stream_bytes_per_second: 0,
+        last_seen: NOW,
+      })),
+    })
+    await settle()
+
+    const subs = 'Subscriptions'
+    expect(dataRows(subs)).toHaveLength(20)
+    searchTable(subs, 'slot_1')
+    expect(dataRows(subs)).toHaveLength(10)
+    searchTable(subs, '')
+    filterTable(subs, 'State', 'disabled')
+    expect(columnTexts(subs)).toEqual(['sub_01', 'sub_02'])
+    filterTable(subs, 'State', 'silent')
+    expect(columnTexts(subs)).toEqual(['sub_03'])
+    filterTable(subs, 'State', '')
+    filterTable(subs, 'Database', 'crm')
+    expect(dataRows(subs)).toHaveLength(6)
+    filterTable(subs, 'Database', '')
+    sortTable(subs, 'Subscription', 'descending')
+    expect(columnTexts(subs)[0]).toBe('sub_25')
+  })
+
+  it('TBL-UI-026 logical-slots', async () => {
+    renderSection({
+      subscriptions: seq(25).map((n, index) =>
+        subscription({
+          name: `sub_${n}`,
+          slot_name: `slot_${n}`,
+          database: index < 6 ? 'crm' : 'app',
+          enabled: index >= 2,
+          last_message_at: index === 2 ? minutesBefore(30) : minutesBefore(1),
+        }),
+      ),
+      slots: seq(25).map((n, index) => ({
+        slot_name: `slot_${n}`,
+        bytes_per_second: (index + 1) * 1_024,
+        txns_per_second: 1,
+        spill_bytes_per_second: 0,
+        spill_txns_per_second: 0,
+        stream_bytes_per_second: 0,
+        last_seen: NOW,
+      })),
+    })
+    await settle()
+    const slots = 'Logical slots'
+    expect(dataRows(slots)).toHaveLength(20)
+    searchTable(slots, 'slot_2')
+    expect(dataRows(slots)).toHaveLength(6)
+    searchTable(slots, '')
+    sortTable(slots, 'Decoded', 'descending')
+    expect(columnTexts(slots)[0]).toBe('slot_25')
   })
 })

@@ -2,6 +2,7 @@ import { fireEvent, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { renderWithProviders } from '@/test/render'
+import { columnTexts, dataRows, filterTable, searchTable, seq, sortTable } from '@/test/table'
 
 import { SlotsSection, type SlotRow } from './SlotsSection'
 
@@ -91,5 +92,39 @@ describe('SlotsSection', () => {
     const row = within(screen.getByTestId('data-table-rows')).getByRole('row')
     expect(row).toHaveTextContent('None: required WAL already lost')
     expect(row).not.toHaveTextContent('Unlimited')
+  })
+
+  it('TBL-UI-011 replication-slots pages, searches, filters and sorts the slots', () => {
+    const many: SlotRow[] = seq(25).map((n, index) => ({
+      active: index % 2 === 0,
+      inactiveAgeSeconds: index % 2 === 0 ? null : 60,
+      name: `slot_${n}`,
+      owningInstance: index < 5 ? 'standby-9' : 'primary',
+      retainedBytes: (index + 1) * 1_024,
+      safeWalSizeBytes: null,
+      slotType: index % 5 === 0 ? 'logical' : 'physical',
+      walStatus: 'reserved',
+    }))
+    renderWithProviders(<SlotsSection slots={many} />)
+    const name = 'Replication slots'
+
+    expect(dataRows(name)).toHaveLength(20)
+    searchTable(name, 'standby-9')
+    expect(dataRows(name)).toHaveLength(5)
+    searchTable(name, '')
+    filterTable(name, 'Type', 'logical')
+    expect(columnTexts(name).sort()).toEqual([
+      'slot_01',
+      'slot_06',
+      'slot_11',
+      'slot_16',
+      'slot_21',
+    ])
+    filterTable(name, 'Active state', 'inactive')
+    expect(columnTexts(name)).toEqual(['slot_06', 'slot_16'])
+    filterTable(name, 'Type', '')
+    filterTable(name, 'Active state', '')
+    sortTable(name, 'Retained bytes', 'descending')
+    expect(columnTexts(name)[0]).toBe('slot_25')
   })
 })

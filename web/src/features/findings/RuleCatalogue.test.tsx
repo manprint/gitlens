@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { AdvisorRule, FindingRecord } from '@/lib/findings'
 import { renderWithProviders } from '@/test/render'
+import { columnTexts, dataRows, searchTable, seq, sortTable } from '@/test/table'
 
 import { RuleCatalogue } from './RuleCatalogue'
 
@@ -108,5 +109,24 @@ describe('RuleCatalogue', () => {
 
     expect(screen.getByRole('status')).toHaveTextContent('No advisor rules available')
     expect(screen.queryByRole('table')).not.toBeInTheDocument()
+  })
+
+  it('TBL-UI-012 advisor-rule-catalogue pages, searches and sorts the rules', () => {
+    const many: AdvisorRule[] = seq(25).map((n, index) => ({
+      id: `rule-${n}`,
+      severity: 'warning',
+      scope: 'instance',
+      needs: index < 3 ? ['host'] : [],
+      min_tier: 'T0',
+    }))
+    renderCatalogue(many, [])
+    const name = 'Advisor rule catalogue'
+
+    expect(dataRows(name)).toHaveLength(20)
+    searchTable(name, 'host')
+    expect(columnTexts(name)).toEqual(['rule-01', 'rule-02', 'rule-03'])
+    searchTable(name, '')
+    sortTable(name, 'Rule ID', 'descending')
+    expect(columnTexts(name)[0]).toBe('rule-25')
   })
 })

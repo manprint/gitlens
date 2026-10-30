@@ -2,7 +2,11 @@ import { useMemo } from 'react'
 
 import { useInstanceInternals } from '@/api/queries'
 import type { Schemas } from '@/api/types'
-import { DataTable, type DataTableProps } from '@/components/layout/DataTable'
+import {
+  DataTable,
+  type DataTableProps,
+  type DataTableToolbar,
+} from '@/components/layout/DataTable'
 import { MetricTile } from '@/components/layout/MetricTile'
 import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState } from '@/components/state'
@@ -25,6 +29,21 @@ function growth(bytes: number | null) {
   return bytes > 0 ? `+${formatBytes(bytes)}` : formatBytes(bytes)
 }
 
+// The database is the identity of the sizes and temporary-files rows: search only.
+const DATABASE_SIZE_TOOLBAR: DataTableToolbar<DatabaseSize> = {
+  searchFields: [(db) => db.database],
+}
+const SLRU_TOOLBAR: DataTableToolbar<SLRUCache> = { searchFields: [(cache) => cache.name] }
+const TEMP_FILE_TOOLBAR: DataTableToolbar<TempFileRate> = {
+  searchFields: [(rate) => rate.database],
+}
+const CONFLICT_TOOLBAR: DataTableToolbar<RecoveryConflictRate> = {
+  searchFields: [(rate) => rate.database, (rate) => rate.reason],
+  filters: [
+    { id: 'database', label: 'Database', kind: 'select', accessor: (rate) => rate.database },
+  ],
+}
+
 function databaseColumns(): DataTableProps<DatabaseSize>['columns'] {
   return [
     { accessorKey: 'database', header: 'Database' },
@@ -36,13 +55,13 @@ function databaseColumns(): DataTableProps<DatabaseSize>['columns'] {
     {
       id: 'growth_24h',
       header: 'Last 24 hours',
-      accessorFn: (db) => db.growth_24h_bytes ?? Number.NEGATIVE_INFINITY,
+      accessorFn: (db) => db.growth_24h_bytes,
       cell: ({ row }) => growth(row.original.growth_24h_bytes),
     },
     {
       id: 'growth_7d',
       header: 'Last 7 days',
-      accessorFn: (db) => db.growth_7d_bytes ?? Number.NEGATIVE_INFINITY,
+      accessorFn: (db) => db.growth_7d_bytes,
       cell: ({ row }) => growth(row.original.growth_7d_bytes),
     },
   ]
@@ -54,7 +73,7 @@ function slruColumns(): DataTableProps<SLRUCache>['columns'] {
     {
       id: 'hit_ratio',
       header: 'Hit ratio',
-      accessorFn: (cache) => cache.hit_ratio ?? -1,
+      accessorFn: (cache) => cache.hit_ratio,
       cell: ({ row }) =>
         formatPercent(
           row.original.hits_per_second,
@@ -128,6 +147,8 @@ function StandbyReplay({ standby }: { standby: Schemas['StandbyReplay'] }) {
       {standby.conflicts.length > 0 ? (
         <DataTable
           ariaLabel="Recovery conflicts"
+          tableId="recovery-conflicts"
+          toolbar={CONFLICT_TOOLBAR}
           columns={conflicts}
           data={standby.conflicts}
           emptyState={null}
@@ -218,6 +239,8 @@ export function InternalsSection({ instanceId }: { instanceId: string }) {
             <h3 className="text-sm font-medium">Database sizes</h3>
             <DataTable
               ariaLabel="Database sizes"
+              tableId="database-sizes"
+              toolbar={DATABASE_SIZE_TOOLBAR}
               columns={databases}
               data={query.data.databases}
               emptyState={null}
@@ -235,6 +258,8 @@ export function InternalsSection({ instanceId }: { instanceId: string }) {
             </p>
             <DataTable
               ariaLabel="SLRU caches"
+              tableId="slru-caches"
+              toolbar={SLRU_TOOLBAR}
               columns={slru}
               data={query.data.slru}
               emptyState={null}
@@ -248,6 +273,8 @@ export function InternalsSection({ instanceId }: { instanceId: string }) {
           {spilling.length > 0 ? (
             <DataTable
               ariaLabel="Temporary files"
+              tableId="temporary-files"
+              toolbar={TEMP_FILE_TOOLBAR}
               columns={temp}
               data={spilling}
               emptyState={null}

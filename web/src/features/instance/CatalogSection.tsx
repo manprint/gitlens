@@ -12,7 +12,11 @@ import {
   type ApiQueryResult,
 } from '@/api/queries'
 import type { Schemas } from '@/api/types'
-import { DataTable, type DataTableProps } from '@/components/layout/DataTable'
+import {
+  DataTable,
+  type DataTableProps,
+  type DataTableToolbar,
+} from '@/components/layout/DataTable'
 import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState, Unknown } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
@@ -118,6 +122,15 @@ function triggerStateBadge(trigger: Trigger) {
   return <Badge variant="outline">{trigger.state}</Badge>
 }
 
+// Every tab has its Database select above the table: no database filter here.
+const TRIGGER_TOOLBAR: DataTableToolbar<Trigger> = {
+  searchFields: [
+    (trigger) => trigger.name,
+    (trigger) => `${trigger.schemaname}.${trigger.relname}`,
+    (trigger) => trigger.function,
+  ],
+}
+
 function triggerColumns(): DataTableProps<Trigger>['columns'] {
   return [
     { accessorKey: 'datname', header: 'Database' },
@@ -201,6 +214,8 @@ function TriggersTab({ response }: { response: Schemas['TriggersResponse'] }) {
       />
       <DataTable
         ariaLabel="Triggers"
+        tableId="triggers"
+        toolbar={TRIGGER_TOOLBAR}
         columns={columns}
         data={rows}
         emptyState={emptyState}
@@ -209,6 +224,15 @@ function TriggersTab({ response }: { response: Schemas['TriggersResponse'] }) {
       />
     </div>
   )
+}
+
+const FOREIGN_KEY_TOOLBAR: DataTableToolbar<Schemas['UnindexedForeignKey']> = {
+  searchFields: [
+    (fk) => `${fk.schemaname}.${fk.relname}`,
+    (fk) => fk.constraint,
+    (fk) => String(fk.columns),
+    (fk) => fk.referenced,
+  ],
 }
 
 function foreignKeyColumns(): DataTableProps<Schemas['UnindexedForeignKey']>['columns'] {
@@ -260,6 +284,8 @@ function UnindexedForeignKeysTab({
       />
       <DataTable
         ariaLabel="Unindexed foreign keys"
+        tableId="unindexed-foreign-keys"
+        toolbar={FOREIGN_KEY_TOOLBAR}
         columns={columns}
         data={filter.rows}
         emptyState={
@@ -273,6 +299,13 @@ function UnindexedForeignKeysTab({
       />
     </div>
   )
+}
+
+const EXTENSION_TOOLBAR: DataTableToolbar<Schemas['Extension']> = {
+  searchFields: [(extension) => extension.name, (extension) => extension.schema],
+  filters: [
+    { id: 'schema', label: 'Schema', kind: 'select', accessor: (extension) => extension.schema },
+  ],
 }
 
 function extensionColumns(): DataTableProps<Schemas['Extension']>['columns'] {
@@ -324,6 +357,8 @@ function ExtensionsTab({ response }: { response: Schemas['ExtensionsResponse'] }
       />
       <DataTable
         ariaLabel="Extensions"
+        tableId="extensions"
+        toolbar={EXTENSION_TOOLBAR}
         columns={columns}
         data={filter.rows}
         emptyState={
@@ -352,6 +387,24 @@ function sridCell(column: SpatialColumn): ReactNode {
     )
   }
   return column.srid
+}
+
+const SPATIAL_TOOLBAR: DataTableToolbar<SpatialColumn> = {
+  searchFields: [(column) => `${column.schemaname}.${column.relname}`, (column) => column.column],
+  filters: [
+    {
+      id: 'type',
+      label: 'Type',
+      kind: 'select',
+      accessor: (column) => `${column.type}(${column.subtype})`,
+    },
+    {
+      id: 'index',
+      label: 'Spatial index',
+      kind: 'select',
+      accessor: (column) => column.index_method || 'missing',
+    },
+  ],
 }
 
 function spatialColumns(): DataTableProps<SpatialColumn>['columns'] {
@@ -440,6 +493,8 @@ function PostGISTab({
       />
       <DataTable
         ariaLabel="Spatial columns"
+        tableId="spatial-columns"
+        toolbar={SPATIAL_TOOLBAR}
         columns={columns}
         data={filter.rows}
         emptyState={
@@ -485,6 +540,17 @@ function sequenceUsedCell(sequence: Sequence): ReactNode {
   )
 }
 
+const SEQUENCE_TOOLBAR: DataTableToolbar<Sequence> = {
+  searchFields: [
+    (sequence) => `${sequence.schemaname}.${sequence.name}`,
+    (sequence) =>
+      sequence.column ? `${sequence.table_schema}.${sequence.table}.${sequence.column}` : null,
+  ],
+  filters: [
+    { id: 'type', label: 'Type', kind: 'select', accessor: (sequence) => sequence.data_type },
+  ],
+}
+
 function sequenceColumns(): DataTableProps<Sequence>['columns'] {
   return [
     { accessorKey: 'datname', header: 'Database' },
@@ -517,7 +583,7 @@ function sequenceColumns(): DataTableProps<Sequence>['columns'] {
     {
       id: 'last_value',
       header: 'Last value',
-      accessorFn: (sequence) => sequence.last_value ?? '',
+      accessorFn: (sequence) => sequence.last_value,
       cell: ({ row }) =>
         row.original.last_value !== null ? (
           formatIntegerString(row.original.last_value)
@@ -542,13 +608,13 @@ function sequenceColumns(): DataTableProps<Sequence>['columns'] {
     {
       id: 'used',
       header: 'Used',
-      accessorFn: (sequence) => sequence.used_ratio ?? -1,
+      accessorFn: (sequence) => sequence.used_ratio,
       cell: ({ row }) => sequenceUsedCell(row.original),
     },
     {
       id: 'remaining',
       header: 'Remaining',
-      accessorFn: (sequence) => sequence.remaining ?? '',
+      accessorFn: (sequence) => sequence.remaining,
       cell: ({ row }) =>
         row.original.remaining !== null ? formatIntegerString(row.original.remaining) : null,
     },
@@ -601,6 +667,8 @@ function SequencesTab({ response }: { response: Schemas['SequencesResponse'] }) 
       />
       <DataTable
         ariaLabel="Sequences"
+        tableId="sequences"
+        toolbar={SEQUENCE_TOOLBAR}
         columns={columns}
         data={filter.rows}
         emptyState={
@@ -665,6 +733,10 @@ function coveredCell(table: PartitionedTable, now: Date): ReactNode {
   )
 }
 
+const PARTITION_TOOLBAR: DataTableToolbar<PartitionedTable> = {
+  searchFields: [(table) => `${table.schemaname}.${table.relname}`, (table) => table.partition_key],
+}
+
 function partitionColumns(now: Date): DataTableProps<PartitionedTable>['columns'] {
   return [
     { accessorKey: 'datname', header: 'Database' },
@@ -695,7 +767,7 @@ function partitionColumns(now: Date): DataTableProps<PartitionedTable>['columns'
     {
       id: 'default',
       header: 'Default partition',
-      accessorFn: (table) => table.default_rows ?? -1,
+      accessorFn: (table) => table.default_rows,
       cell: ({ row }) => {
         const { default_partition: name, default_rows: rows } = row.original
         if (name === null) return <span className="text-muted-foreground">none</span>
@@ -720,7 +792,7 @@ function partitionColumns(now: Date): DataTableProps<PartitionedTable>['columns'
     {
       id: 'analyzed',
       header: 'Analyzed',
-      accessorFn: (table) => table.analyzed_at ?? '',
+      accessorFn: (table) => table.analyzed_at,
       cell: ({ row }) =>
         row.original.analyzed_at !== null ? (
           formatTimestamp(row.original.analyzed_at, 'UTC')
@@ -733,7 +805,7 @@ function partitionColumns(now: Date): DataTableProps<PartitionedTable>['columns'
     {
       id: 'covered',
       header: 'Partitions reach',
-      accessorFn: (table) => table.covered_until ?? '',
+      accessorFn: (table) => table.covered_until,
       cell: ({ row }) => coveredCell(row.original, now),
     },
   ]
@@ -771,6 +843,8 @@ function PartitionsTab({
       />
       <DataTable
         ariaLabel="Partitioned tables"
+        tableId="partitioned-tables"
+        toolbar={PARTITION_TOOLBAR}
         columns={columns}
         data={filter.rows}
         emptyState={
@@ -796,6 +870,8 @@ function functionName(fn: { schemaname: string; name: string; arguments: string 
   return `${fn.schemaname}.${fn.name}(${fn.arguments})`
 }
 
+const FUNCTION_TOOLBAR: DataTableToolbar<FunctionStat> = { searchFields: [functionName] }
+
 function functionColumns(): DataTableProps<FunctionStat>['columns'] {
   return [
     { accessorKey: 'datname', header: 'Database' },
@@ -819,7 +895,7 @@ function functionColumns(): DataTableProps<FunctionStat>['columns'] {
     {
       id: 'mean',
       header: 'Mean per call',
-      accessorFn: (fn) => fn.mean_ms ?? -1,
+      accessorFn: (fn) => fn.mean_ms,
       cell: ({ row }) =>
         row.original.mean_ms === null ? (
           <span className="text-muted-foreground">not called</span>
@@ -865,6 +941,8 @@ function FunctionsTab({ response }: { response: Schemas['FunctionsResponse'] }) 
       ) : null}
       <DataTable
         ariaLabel="Functions"
+        tableId="functions"
+        toolbar={FUNCTION_TOOLBAR}
         columns={columns}
         data={filter.rows}
         emptyState={
@@ -883,6 +961,10 @@ function FunctionsTab({ response }: { response: Schemas['FunctionsResponse'] }) 
 /** A SECURITY DEFINER function every role can call as a superuser, as the advisor's critical case. */
 function securityDefinerExposed(fn: SecurityDefinerFunction): boolean {
   return fn.search_path === null && fn.owner_superuser && fn.public_execute
+}
+
+const SECURITY_DEFINER_TOOLBAR: DataTableToolbar<SecurityDefinerFunction> = {
+  searchFields: [functionName, (fn) => fn.owner],
 }
 
 function securityDefinerColumns(): DataTableProps<SecurityDefinerFunction>['columns'] {
@@ -912,7 +994,7 @@ function securityDefinerColumns(): DataTableProps<SecurityDefinerFunction>['colu
     {
       id: 'search_path',
       header: 'search_path',
-      accessorFn: (fn) => fn.search_path ?? '',
+      accessorFn: (fn) => fn.search_path,
       cell: ({ row }) => {
         const fn = row.original
         if (fn.search_path === null) {
@@ -972,6 +1054,8 @@ function SecurityDefinerTab({
       />
       <DataTable
         ariaLabel="SECURITY DEFINER functions"
+        tableId="security-definer-functions"
+        toolbar={SECURITY_DEFINER_TOOLBAR}
         columns={columns}
         data={filter.rows}
         emptyState={

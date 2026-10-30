@@ -4,7 +4,11 @@ import { useMemo } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 
 import { useStatements } from '@/api/queries'
-import { DataTable, type DataTableProps } from '@/components/layout/DataTable'
+import {
+  DataTable,
+  type DataTableProps,
+  type DataTableToolbar,
+} from '@/components/layout/DataTable'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
@@ -106,6 +110,13 @@ function queryTextCell(row: StatementDisplayRow, instanceId: string) {
   )
 }
 
+// The `Sort statements` select ranks on the server; the column sort buttons
+// reorder the loaded statements. The search matches the loaded rows until the
+// server search arrives (D20).
+const STATEMENT_TOOLBAR: DataTableToolbar<StatementDisplayRow> = {
+  searchFields: [(row) => row.query_text, (row) => row.queryid],
+}
+
 function statementColumns(instanceId: string): DataTableProps<StatementDisplayRow>['columns'] {
   return [
     {
@@ -117,7 +128,7 @@ function statementColumns(instanceId: string): DataTableProps<StatementDisplayRo
     {
       id: 'calls',
       header: 'Calls',
-      enableSorting: false,
+      accessorFn: (row) => summariseStatement(row).calls,
       cell: ({ row }) => {
         const summary = summariseStatement(row.original)
         return (
@@ -130,7 +141,7 @@ function statementColumns(instanceId: string): DataTableProps<StatementDisplayRo
     {
       id: 'total-time',
       header: 'Total time',
-      enableSorting: false,
+      accessorFn: (row) => summariseStatement(row).total,
       cell: ({ row }) => {
         const summary = summariseStatement(row.original)
         return (
@@ -143,7 +154,7 @@ function statementColumns(instanceId: string): DataTableProps<StatementDisplayRo
     {
       id: 'mean-time',
       header: 'Mean time',
-      enableSorting: false,
+      accessorFn: (row) => summariseStatement(row).mean,
       cell: ({ row }) => {
         const summary = summariseStatement(row.original)
         return (
@@ -167,13 +178,14 @@ function statementColumns(instanceId: string): DataTableProps<StatementDisplayRo
     {
       id: 'rows',
       header: 'Rows',
-      enableSorting: false,
+      accessorFn: (row) =>
+        typeof row.rows === 'number' && Number.isFinite(row.rows) ? row.rows : null,
       cell: ({ row }) => <span className="tabular-nums">{formatNumber(row.original.rows)}</span>,
     },
     {
       id: 'cache-hit-ratio',
       header: 'Cache hit ratio',
-      enableSorting: false,
+      accessorFn: (row) => summariseStatement(row).cacheHitRatio,
       cell: ({ row }) => {
         const summary = summariseStatement(row.original)
         return (
@@ -186,7 +198,8 @@ function statementColumns(instanceId: string): DataTableProps<StatementDisplayRo
     {
       id: 'wal-bytes',
       header: 'WAL',
-      enableSorting: false,
+      accessorFn: (row) =>
+        typeof row.wal_bytes === 'number' && Number.isFinite(row.wal_bytes) ? row.wal_bytes : null,
       cell: ({ row }) => {
         const walBytes = row.original.wal_bytes
         return (
@@ -201,7 +214,7 @@ function statementColumns(instanceId: string): DataTableProps<StatementDisplayRo
     {
       id: 'temporary-bytes',
       header: 'Temporary bytes/call',
-      enableSorting: false,
+      accessorFn: (row) => summariseStatement(row).tempBytesPerCall,
       cell: ({ row }) => {
         const summary = summariseStatement(row.original)
         return (
@@ -277,6 +290,8 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
   const onSortChange = (value: string) => {
     const next = new URLSearchParams(searchParams)
     next.set('sort', readSort(value))
+    // A new server ranking starts on the first page (D23).
+    next.delete('statement-statistics.page')
     setSearchParams(next, { replace: true })
   }
 
@@ -349,6 +364,8 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
         </div>
         <DataTable
           ariaLabel="Statement statistics"
+          tableId="statement-statistics"
+          toolbar={STATEMENT_TOOLBAR}
           columns={statementColumns(instanceId)}
           data={rows}
           emptyState={

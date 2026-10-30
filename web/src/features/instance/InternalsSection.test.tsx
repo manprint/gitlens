@@ -7,6 +7,8 @@ import { ok } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 import { renderWithProviders } from '@/test/render'
 
+import { columnTexts, dataRows, filterTable, searchTable, seq, sortTable } from '@/test/table'
+
 import { InternalsSection } from './InternalsSection'
 
 async function settle() {
@@ -147,5 +149,86 @@ describe('InternalsSection', () => {
     renderSection({})
     await settle()
     expect(screen.getByText('No internals collected')).toBeInTheDocument()
+  })
+})
+
+describe('InternalsSection tables: pages, search, filters, sort', () => {
+  it('TBL-UI-021 recovery-conflicts', async () => {
+    renderSection({
+      standby: {
+        replay_paused: false,
+        observed_at: NOW,
+        conflicts: seq(25).map((n, index) => ({
+          database: index < 4 ? 'crm' : `db_${n}`,
+          reason: index % 5 === 0 ? 'lock' : 'snapshot',
+          per_second: (index + 1) / 100,
+        })),
+        prefetch_blocks_per_second: { prefetch: 0, hit: 0 },
+      },
+    })
+    await settle()
+    const name = 'Recovery conflicts'
+
+    expect(dataRows(name)).toHaveLength(20)
+    searchTable(name, 'lock')
+    expect(dataRows(name)).toHaveLength(5)
+    searchTable(name, '')
+    filterTable(name, 'Database', 'crm')
+    expect(dataRows(name)).toHaveLength(4)
+    filterTable(name, 'Database', '')
+    sortTable(name, 'Queries cancelled', 'descending')
+    expect(columnTexts(name)[0]).toBe('db_25')
+  })
+
+  async function renderMany() {
+    renderSection({
+      databases: seq(25).map((n, index) => ({
+        database: `db_${n}`,
+        size_bytes: (index + 1) * 1024 ** 2,
+        growth_24h_bytes: index === 0 ? null : index,
+        growth_7d_bytes: null,
+        observed_at: NOW,
+      })),
+      slru: seq(25).map((n, index) => cache(`cache_${n}`, { reads_per_second: index + 1 })),
+      temp_files: seq(25).map((n, index) => ({
+        database: `db_${n}`,
+        files_per_second: 0.1,
+        bytes_per_second: (index + 1) * 1_024,
+        last_seen: NOW,
+      })),
+    })
+    await settle()
+  }
+
+  it('TBL-UI-022 database-sizes', async () => {
+    await renderMany()
+
+    expect(dataRows('Database sizes')).toHaveLength(20)
+    searchTable('Database sizes', 'db_1')
+    expect(dataRows('Database sizes')).toHaveLength(10)
+    searchTable('Database sizes', '')
+    sortTable('Database sizes', 'Size', 'descending')
+    expect(columnTexts('Database sizes')[0]).toBe('db_25')
+    // The database without growth history sorts last in both directions.
+    sortTable('Database sizes', 'Last 24 hours', 'ascending')
+    expect(columnTexts('Database sizes')[0]).toBe('db_02')
+  })
+
+  it('TBL-UI-023 slru-caches', async () => {
+    await renderMany()
+    expect(dataRows('SLRU caches')).toHaveLength(20)
+    searchTable('SLRU caches', 'cache_2')
+    expect(dataRows('SLRU caches')).toHaveLength(6)
+    sortTable('SLRU caches', 'Read from disk', 'descending')
+    expect(columnTexts('SLRU caches')[0]).toBe('cache_25')
+  })
+
+  it('TBL-UI-024 temporary-files', async () => {
+    await renderMany()
+    expect(dataRows('Temporary files')).toHaveLength(20)
+    searchTable('Temporary files', 'db_2')
+    expect(dataRows('Temporary files')).toHaveLength(6)
+    sortTable('Temporary files', 'Written', 'descending')
+    expect(columnTexts('Temporary files')[0]).toBe('db_25')
   })
 })

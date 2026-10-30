@@ -1,7 +1,11 @@
 import { useMemo } from 'react'
 
 import type { ApiFailure } from '@/api/client'
-import { DataTable, type DataTableProps } from '@/components/layout/DataTable'
+import {
+  DataTable,
+  type DataTableProps,
+  type DataTableToolbar,
+} from '@/components/layout/DataTable'
 import { EmptyState } from '@/components/state/EmptyState'
 import { ErrorState } from '@/components/state/ErrorState'
 import type { components } from '@/api/generated'
@@ -68,6 +72,8 @@ function makeRow(entry: DriftEntry): DriftTableRow {
   return { differingInstances, name: entry.name, values }
 }
 
+const DRIFT_TOOLBAR: DataTableToolbar<DriftTableRow> = { searchFields: [(row) => row.name] }
+
 function driftColumns(ids: readonly string[]): DataTableProps<DriftTableRow>['columns'] {
   return [
     { accessorKey: 'name', header: 'Setting' },
@@ -109,6 +115,8 @@ export function DriftSection({ entries = [], failure, onRetry }: DriftSectionPro
       ) : (
         <DataTable
           ariaLabel="Configuration drift"
+          tableId="configuration-drift"
+          toolbar={DRIFT_TOOLBAR}
           columns={columns}
           data={rows}
           emptyState={

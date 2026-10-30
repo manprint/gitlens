@@ -2,6 +2,7 @@ import { screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import { renderWithProviders } from '@/test/render'
+import { columnTexts, dataRows, searchTable, seq, sortTable } from '@/test/table'
 
 import { DriftSection } from './DriftSection'
 
@@ -92,5 +93,28 @@ describe('DriftSection', () => {
       <DriftSection entries={[{ name: 'max_connections', values: [...values].reverse() }]} />,
     )
     expect(flaggedInstances()).toEqual(expected)
+  })
+
+  it('TBL-UI-010 configuration-drift pages, searches and sorts the settings', () => {
+    const entries = seq(25).map((n) => ({
+      name: `setting_${n}`,
+      values: [
+        { instance_id: 'primary', role: 'primary', value: '1' },
+        { instance_id: 'standby-1', role: 'standby', value: '1' },
+      ],
+    }))
+    const { router } = renderWithProviders(<DriftSection entries={entries} />)
+    const name = 'Configuration drift'
+
+    expect(dataRows(name)).toHaveLength(20)
+    searchTable(name, 'setting_2')
+    expect(columnTexts(name)).toEqual(
+      seq(25)
+        .slice(19)
+        .map((n) => `setting_${n}`),
+    )
+    sortTable(name, 'Setting', 'descending')
+    expect(columnTexts(name)[0]).toBe('setting_25')
+    expect(router.state.location.search).toContain('configuration-drift.q=setting_2')
   })
 })

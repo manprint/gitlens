@@ -1,7 +1,11 @@
 import { useMemo } from 'react'
 
 import type { ApiFailure } from '@/api/client'
-import { DataTable, type DataTableProps } from '@/components/layout/DataTable'
+import {
+  DataTable,
+  type DataTableProps,
+  type DataTableToolbar,
+} from '@/components/layout/DataTable'
 import { EmptyState } from '@/components/state/EmptyState'
 import { ErrorState } from '@/components/state/ErrorState'
 import { formatBytes } from '@/lib/format/bytes'
@@ -31,6 +35,26 @@ function walStatusLabel(slot: SlotRow): string {
   if (slot.active === false) return 'Retaining WAL'
   if (slot.active === true) return 'Streaming'
   return 'Unknown'
+}
+
+const SLOT_STATES = ['Active', 'Inactive', 'Unknown'].map((label) => ({
+  value: label.toLowerCase(),
+  label,
+}))
+
+const SLOTS_TOOLBAR: DataTableToolbar<SlotRow> = {
+  searchFields: [(slot) => slot.name, (slot) => slot.owningInstance],
+  filters: [
+    { id: 'type', label: 'Type', kind: 'select', accessor: (slot) => slot.slotType ?? 'Unknown' },
+    {
+      id: 'active',
+      label: 'Active state',
+      kind: 'select',
+      options: SLOT_STATES,
+      accessor: (slot) => activeLabel(slot.active).toLowerCase(),
+    },
+    { id: 'wal', label: 'WAL status', kind: 'select', accessor: walStatusLabel },
+  ],
 }
 
 function sortSlots(slots: readonly SlotRow[]): SlotRow[] {
@@ -121,6 +145,8 @@ export function SlotsSection({
       ) : (
         <DataTable
           ariaLabel="Replication slots"
+          tableId="replication-slots"
+          toolbar={SLOTS_TOOLBAR}
           columns={columns}
           data={sortedSlots}
           emptyState={

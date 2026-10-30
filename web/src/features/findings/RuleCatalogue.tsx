@@ -1,7 +1,11 @@
 import { useMemo, useState } from 'react'
 
 import type { PermTier } from '@/api/types'
-import { DataTable, type DataTableProps } from '@/components/layout/DataTable'
+import {
+  DataTable,
+  type DataTableProps,
+  type DataTableToolbar,
+} from '@/components/layout/DataTable'
 import { EmptyState } from '@/components/state'
 import { Section } from '@/components/layout/Section'
 import type { AdvisorRule, FindingRecord } from '@/lib/findings'
@@ -58,6 +62,11 @@ function makeRow(rule: AdvisorRule, findings: readonly FindingRecord[]): RuleCat
       (finding) => finding.state === 'degraded',
     ),
   }
+}
+
+// Severity, scope and tier already have the selects above the table.
+const RULE_TOOLBAR: DataTableToolbar<RuleCatalogueRow> = {
+  searchFields: [(row) => row.ruleId, (row) => row.needs],
 }
 
 function ruleColumns(): DataTableProps<RuleCatalogueRow>['columns'] {
@@ -172,6 +181,8 @@ export function RuleCatalogue({ rules, findings }: RuleCatalogueProps) {
       </div>
       <DataTable
         ariaLabel="Advisor rule catalogue"
+        tableId="advisor-rule-catalogue"
+        toolbar={RULE_TOOLBAR}
         columns={columns}
         data={rows}
         emptyState={emptyState}

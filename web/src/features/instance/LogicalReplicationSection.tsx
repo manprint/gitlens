@@ -2,7 +2,11 @@ import { useMemo } from 'react'
 
 import { useInstanceLogicalReplication } from '@/api/queries'
 import type { Schemas } from '@/api/types'
-import { DataTable, type DataTableProps } from '@/components/layout/DataTable'
+import {
+  DataTable,
+  type DataTableProps,
+  type DataTableToolbar,
+} from '@/components/layout/DataTable'
 import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
@@ -16,13 +20,43 @@ const SUBSCRIPTION_SILENT_MS = 5 * 60 * 1000
 /** Spill rate from which a slot is marked, as in the advisor. */
 const SPILL_BYTES_PER_SECOND = 1024 * 1024
 
-function subscriptionState(sub: Subscription, readAt: number) {
-  if (!sub.enabled) return <Badge variant="secondary">disabled</Badge>
-  if (!sub.apply_worker) return <Badge variant="destructive">not running</Badge>
+const SUBSCRIPTION_STATES = ['disabled', 'not running', 'silent', 'running'] as const
+type SubscriptionState = (typeof SUBSCRIPTION_STATES)[number]
+
+/** The state the State column shows, also what its filter matches. */
+function subscriptionStateLabel(sub: Subscription, readAt: number): SubscriptionState {
+  if (!sub.enabled) return 'disabled'
+  if (!sub.apply_worker) return 'not running'
   if (sub.last_message_at !== null) {
     const silent = readAt - new Date(sub.last_message_at).getTime()
-    if (silent >= SUBSCRIPTION_SILENT_MS) return <Badge variant="destructive">silent</Badge>
+    if (silent >= SUBSCRIPTION_SILENT_MS) return 'silent'
   }
+  return 'running'
+}
+
+function subscriptionToolbar(readAt: number): DataTableToolbar<Subscription> {
+  return {
+    searchFields: [(sub) => sub.name, (sub) => sub.publications.join(', '), (sub) => sub.slot_name],
+    filters: [
+      {
+        id: 'state',
+        label: 'State',
+        kind: 'select',
+        options: SUBSCRIPTION_STATES.map((value) => ({ value, label: value })),
+        accessor: (sub) => subscriptionStateLabel(sub, readAt),
+      },
+      { id: 'database', label: 'Database', kind: 'select', accessor: (sub) => sub.database },
+    ],
+  }
+}
+
+const SLOT_TOOLBAR: DataTableToolbar<LogicalSlot> = { searchFields: [(slot) => slot.slot_name] }
+
+function subscriptionState(sub: Subscription, readAt: number) {
+  const state = subscriptionStateLabel(sub, readAt)
+  if (state === 'disabled') return <Badge variant="secondary">disabled</Badge>
+  if (state === 'not running') return <Badge variant="destructive">not running</Badge>
+  if (state === 'silent') return <Badge variant="destructive">silent</Badge>
   return <Badge variant="outline">running</Badge>
 }
 
@@ -44,14 +78,14 @@ function subscriptionColumns(readAt: number): DataTableProps<Subscription>['colu
     {
       id: 'slot',
       header: 'Slot',
-      accessorFn: (sub) => sub.slot_name ?? '',
+      accessorFn: (sub) => sub.slot_name,
       cell: ({ row }) =>
         row.original.slot_name ?? <span className="text-muted-foreground">none</span>,
     },
     {
       id: 'last_message',
       header: 'Last message',
-      accessorFn: (sub) => sub.last_message_at ?? '',
+      accessorFn: (sub) => sub.last_message_at,
       cell: ({ row }) =>
         row.original.last_message_at === null
           ? null
@@ -67,7 +101,7 @@ function subscriptionColumns(readAt: number): DataTableProps<Subscription>['colu
     {
       id: 'conflicts',
       header: 'Conflicts',
-      accessorFn: (sub) => sub.conflicts ?? -1,
+      accessorFn: (sub) => sub.conflicts,
       cell: ({ row }) =>
         row.original.conflicts === null ? (
           <span className="text-muted-foreground">n/a</span>
@@ -118,6 +152,7 @@ export function LogicalReplicationSection({ instanceId }: { instanceId: string }
   // Silence is judged against when the data was read, not the clock.
   const readAt = query.dataUpdatedAt
   const subscriptions = useMemo(() => subscriptionColumns(readAt), [readAt])
+  const subscriptionFilters = useMemo(() => subscriptionToolbar(readAt), [readAt])
   const slots = useMemo(() => slotColumns(), [])
 
   let body
@@ -149,6 +184,8 @@ export function LogicalReplicationSection({ instanceId }: { instanceId: string }
         {query.data.subscriptions.length > 0 ? (
           <DataTable
             ariaLabel="Subscriptions"
+            tableId="subscriptions"
+            toolbar={subscriptionFilters}
             columns={subscriptions}
             data={query.data.subscriptions}
             emptyState={null}
@@ -163,6 +200,8 @@ export function LogicalReplicationSection({ instanceId }: { instanceId: string }
             </p>
             <DataTable
               ariaLabel="Logical slots"
+              tableId="logical-slots"
+              toolbar={SLOT_TOOLBAR}
               columns={slots}
               data={query.data.slots}
               emptyState={null}

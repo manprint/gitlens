@@ -4,11 +4,11 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useInstanceDatabases, useInstanceHost } from '@/api/queries'
 import { REFRESH } from '@/api/policy'
 import type { Schemas } from '@/api/types'
-import { DataTable } from '@/components/layout/DataTable'
+import { DataTable, type DataTableToolbar } from '@/components/layout/DataTable'
 import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState } from '@/components/state'
-import { Input } from '@/components/ui/input'
 import { formatPostgresVersion, formatTimestamp } from '@/lib/format'
+import { matchesSearch, type SearchField } from '@/lib/tableControls'
 
 type Alert = Schemas['Alert']
 type AdvisorRule = Schemas['AdvisorRule']
@@ -55,19 +55,52 @@ export interface InventoryTablesProps {
   rules: readonly AdvisorRule[]
 }
 
-function instanceMatchesFilter(instance: InstanceRow, filter: string): boolean {
-  if (!filter) return true
-  const haystack = [
-    instance.instance_id,
-    instance.addr,
-    instance.role,
-    instance.cluster_id ?? '',
-    instance.cluster_name ?? '',
-    instance.perm_tier,
-  ]
-    .join(' ')
-    .toLocaleLowerCase()
-  return haystack.includes(filter.toLocaleLowerCase())
+/** The fields the Monitored instances search matches; "Databases by instance" follows it. */
+const MONITORED_INSTANCE_SEARCH: readonly SearchField<InstanceRow>[] = [
+  (instance) => instance.instance_id,
+  (instance) => instance.addr,
+  (instance) => instance.role,
+  (instance) => instance.cluster_id,
+  (instance) => instance.cluster_name,
+  (instance) => instance.perm_tier,
+]
+
+const INSTANCE_TOOLBAR: DataTableToolbar<InstanceRow> = {
+  searchFields: MONITORED_INSTANCE_SEARCH,
+  filters: [
+    { id: 'role', label: 'Role', kind: 'select', accessor: (instance) => instance.role },
+    {
+      id: 'state',
+      label: 'State',
+      kind: 'select',
+      options: [
+        { value: 'up', label: 'Up' },
+        { value: 'down', label: 'Down' },
+      ],
+      accessor: (instance) => (instance.up ? 'up' : 'down'),
+    },
+  ],
+}
+
+const DATABASE_TOOLBAR: DataTableToolbar<DatabaseRow> = {
+  searchFields: [(database) => database.datname, (database) => database.skip_reason],
+  filters: [
+    {
+      id: 'monitored',
+      label: 'Monitored',
+      kind: 'select',
+      options: [
+        { value: 'yes', label: 'Yes' },
+        { value: 'no', label: 'No' },
+      ],
+      accessor: (database) => (database.monitored ? 'yes' : 'no'),
+    },
+  ],
+}
+
+const AGENT_TOOLBAR: DataTableToolbar<AgentRow> = {
+  searchFields: [(agent) => agent.agent_id, (agent) => agent.address, (agent) => agent.reason],
+  filters: [{ id: 'state', label: 'State', kind: 'select', accessor: (agent) => agent.state }],
 }
 
 function HostMetricsCell({ instanceId }: { instanceId: string }) {
@@ -204,6 +237,8 @@ function DatabaseInventory({ instance }: { instance: InstanceRow }) {
     >
       <DataTable
         ariaLabel={`Databases for ${instance.addr}:${instance.port}`}
+        tableId={`instance-databases-${instance.instance_id}`}
+        toolbar={DATABASE_TOOLBAR}
         columns={databaseColumns()}
         data={rows}
         emptyState={
@@ -302,6 +337,8 @@ function AgentInventory({ instances, alerts }: Pick<InventoryTablesProps, 'insta
     >
       <DataTable
         ariaLabel="Derived agent inventory"
+        tableId="derived-agent-inventory"
+        toolbar={AGENT_TOOLBAR}
         columns={[
           { accessorKey: 'agent_id', header: 'Agent' },
           { accessorKey: 'address', header: 'Instance address' },
@@ -332,8 +369,8 @@ function AgentInventory({ instances, alerts }: Pick<InventoryTablesProps, 'insta
 }
 
 export function InventoryTables({ alerts, clusters, instances, rules }: InventoryTablesProps) {
-  const [searchParams, setSearchParams] = useSearchParams()
-  const filter = searchParams.get('q') ?? ''
+  const [searchParams] = useSearchParams()
+  const query = searchParams.get('monitored-instances.q') ?? ''
   // Built once. Fresh column definitions on each render give the host cell a
   // new component type, so every render remounts it and refetches its metrics.
   const instanceTableColumns = useMemo(() => instanceColumns(), [])
@@ -348,25 +385,21 @@ export function InventoryTables({ alerts, clusters, instances, rules }: Inventor
   }, [clusters])
   const rows = useMemo(
     () =>
-      instances
-        .map<InstanceRow>((instance) => {
-          const cluster = clusterByInstance.get(instance.instance_id)
-          return {
-            ...instance,
-            cluster_id: cluster?.cluster_id ?? null,
-            cluster_name: cluster?.name ?? null,
-          }
-        })
-        .filter((instance) => instanceMatchesFilter(instance, filter)),
-    [clusterByInstance, filter, instances],
+      instances.map<InstanceRow>((instance) => {
+        const cluster = clusterByInstance.get(instance.instance_id)
+        return {
+          ...instance,
+          cluster_id: cluster?.cluster_id ?? null,
+          cluster_name: cluster?.name ?? null,
+        }
+      }),
+    [clusterByInstance, instances],
   )
-
-  function updateFilter(value: string) {
-    const next = new URLSearchParams(searchParams)
-    if (value) next.set('q', value)
-    else next.delete('q')
-    setSearchParams(next, { replace: true })
-  }
+  // The table searches its own rows; the database sections follow its search only.
+  const matching = useMemo(
+    () => rows.filter((instance) => matchesSearch(instance, query, MONITORED_INSTANCE_SEARCH)),
+    [query, rows],
+  )
 
   return (
     <div className="space-y-8">
@@ -374,32 +407,17 @@ export function InventoryTables({ alerts, clusters, instances, rules }: Inventor
         title="Instances"
         description="Every monitored PostgreSQL instance, its cluster relationship, permission tier, and telemetry availability."
       >
-        <label className="mb-4 block max-w-xl space-y-1 text-sm" htmlFor="instance-filter">
-          <span className="font-medium">Filter instances</span>
-          <Input
-            id="instance-filter"
-            onChange={(event) => updateFilter(event.target.value)}
-            placeholder="Address, cluster, role, tier, or instance ID"
-            type="search"
-            value={filter}
-          />
-        </label>
         <DataTable
           ariaLabel="Monitored instances"
+          tableId="monitored-instances"
+          toolbar={INSTANCE_TOOLBAR}
           columns={instanceTableColumns}
           data={rows}
           emptyState={
-            instances.length === 0 ? (
-              <EmptyState
-                description="Install and configure the pglens agent on a PostgreSQL host to add the first instance."
-                title="No monitored instances"
-              />
-            ) : (
-              <EmptyState
-                description="Try a different address, cluster, role, tier, or instance ID."
-                title="No instances match this filter"
-              />
-            )
+            <EmptyState
+              description="Install and configure the pglens agent on a PostgreSQL host to add the first instance."
+              title="No monitored instances"
+            />
           }
           scope="instances"
           total={instances.length}
@@ -413,11 +431,18 @@ export function InventoryTables({ alerts, clusters, instances, rules }: Inventor
         title="Databases by instance"
         description="Unmonitored databases appear first because their skip reason needs operator attention."
       >
-        <div className="space-y-6">
-          {rows.map((instance) => (
-            <DatabaseInventory instance={instance} key={instance.instance_id} />
-          ))}
-        </div>
+        {rows.length > 0 && matching.length === 0 ? (
+          <EmptyState
+            description="Try a different address, cluster, role, tier, or instance ID."
+            title="No instances match this filter"
+          />
+        ) : (
+          <div className="space-y-6">
+            {matching.map((instance) => (
+              <DatabaseInventory instance={instance} key={instance.instance_id} />
+            ))}
+          </div>
+        )}
       </Section>
     </div>
   )

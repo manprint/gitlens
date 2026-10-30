@@ -12,6 +12,7 @@ import { CLUSTER, INSTANCE_ID, INSTANCE_SUMMARY, NOW } from '@/test/fixture-help
 import { preloadLazyRoutes, renderRoute, renderWithProviders } from '@/test/render'
 import { ok, sequence, status } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
+import { columnTexts, dataRows, filterTable, searchTable, seq, sortTable } from '@/test/table'
 
 import { SettingsPage } from './SettingsPage'
 
@@ -288,17 +289,19 @@ describe('SettingsPage', () => {
         { ...INSTANCE_SUMMARY, instance_id: SECOND_INSTANCE_ID, addr: 'standby.example.test' },
       ],
       clusters: [],
-      route: '/?q=standby',
+      route: '/?monitored-instances.q=standby',
     })
     await settleInitialQueries()
 
-    expect(screen.getByLabelText('Filter instances')).toHaveValue('standby')
+    expect(screen.getByLabelText('Search Monitored instances')).toHaveValue('standby')
     const instanceTable = screen.getByRole('table', { name: 'Monitored instances' })
     expect(within(instanceTable).getByText('standby.example.test:5432')).toBeInTheDocument()
     expect(within(instanceTable).queryByText('postgres.example.test:5432')).not.toBeInTheDocument()
 
-    fireEvent.change(screen.getByLabelText('Filter instances'), { target: { value: 'postgres' } })
-    expect(view.router.state.location.search).toBe('?q=postgres')
+    fireEvent.change(screen.getByLabelText('Search Monitored instances'), {
+      target: { value: 'postgres' },
+    })
+    expect(view.router.state.location.search).toBe('?monitored-instances.q=postgres')
     expect(within(instanceTable).getByText('postgres.example.test:5432')).toBeInTheDocument()
   })
 
@@ -336,5 +339,95 @@ describe('SettingsPage', () => {
     } finally {
       server.events.removeListener('request:start', countInventory)
     }
+  })
+})
+
+describe('SettingsPage tables: pages, search, filters, sort', () => {
+  beforeAll(preloadLazyRoutes)
+
+  it('TBL-UI-028 instance-databases pages, searches, filters and sorts one instance', async () => {
+    renderSettings({
+      databases: seq(25).map((n, index) => ({
+        datname: `db_${n}`,
+        monitored: index >= 3,
+        skip_reason: index < 3 ? 'no CONNECT privilege' : null,
+      })),
+    })
+    await settleInitialQueries()
+    const name = `Databases for ${INSTANCE_SUMMARY.addr}:${INSTANCE_SUMMARY.port}`
+    await waitFor(() => expect(dataRows(name)).toHaveLength(20))
+
+    searchTable(name, 'CONNECT')
+    expect(columnTexts(name)).toEqual(['db_01', 'db_02', 'db_03'])
+    searchTable(name, '')
+    filterTable(name, 'Monitored', 'no')
+    expect(dataRows(name)).toHaveLength(3)
+    filterTable(name, 'Monitored', '')
+    sortTable(name, 'Database', 'descending')
+    expect(columnTexts(name)[0]).toBe('db_25')
+  })
+
+  it('TBL-UI-030 monitored-instances', async () => {
+    const start = new Date(NOW).getTime()
+    const view = renderSettings({
+      clusters: [],
+      instances: seq(25).map((n, index) => ({
+        ...INSTANCE_SUMMARY,
+        instance_id: `00000000-0000-4000-8000-0000000000${n}`,
+        addr: `host-${n}.example.test`,
+        role: index < 5 ? 'standby' : 'primary',
+        up: index !== 0,
+        last_seen: new Date(start - index * 60_000).toISOString(),
+      })),
+    })
+    await settleInitialQueries()
+
+    const instances = 'Monitored instances'
+    expect(dataRows(instances)).toHaveLength(20)
+    searchTable(instances, 'host-2')
+    expect(dataRows(instances)).toHaveLength(6)
+    expect(view.router.state.location.search).toBe('?monitored-instances.q=host-2')
+    // A search with no match keeps the toolbar; the database sections say so.
+    searchTable(instances, 'nothing-like-this')
+    expect(screen.getByText('No rows match')).toBeInTheDocument()
+    expect(screen.getByText('No instances match this filter')).toBeInTheDocument()
+    expect(screen.getByRole('searchbox', { name: 'Search Monitored instances' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Clear filters' })).toBeVisible()
+    expect(screen.getByText(/\(filtered from 25\)/)).toBeInTheDocument()
+    searchTable(instances, '')
+    filterTable(instances, 'Role', 'standby')
+    expect(dataRows(instances)).toHaveLength(5)
+    filterTable(instances, 'Role', '')
+    filterTable(instances, 'State', 'down')
+    expect(columnTexts(instances, 1)).toEqual(['host-01.example.test:5432'])
+    filterTable(instances, 'State', '')
+    sortTable(instances, 'Last seen', 'ascending')
+    expect(columnTexts(instances, 1)[0]).toBe('host-25.example.test:5432')
+  })
+
+  it('TBL-UI-029 derived-agent-inventory', async () => {
+    const start = new Date(NOW).getTime()
+    renderSettings({
+      clusters: [],
+      instances: seq(25).map((n, index) => ({
+        ...INSTANCE_SUMMARY,
+        instance_id: `00000000-0000-4000-8000-0000000000${n}`,
+        addr: `host-${n}.example.test`,
+        role: index < 5 ? 'standby' : 'primary',
+        up: index !== 0,
+        last_seen: new Date(start - index * 60_000).toISOString(),
+      })),
+    })
+    await settleInitialQueries()
+    const agents = 'Derived agent inventory'
+    expect(dataRows(agents)).toHaveLength(20)
+    searchTable(agents, 'host-0')
+    expect(dataRows(agents)).toHaveLength(9)
+    searchTable(agents, '')
+    filterTable(agents, 'State', 'Down')
+    expect(columnTexts(agents, 1)).toEqual(['host-01.example.test:5432'])
+    filterTable(agents, 'State', '')
+    sortTable(agents, 'Last seen', 'ascending')
+    expect(columnTexts(agents, 1)[0]).toBe('host-25.example.test:5432')
   })
 })
