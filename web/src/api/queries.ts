@@ -994,3 +994,67 @@ export function useSetRetention(): UseMutationResult<
     retry: false,
   })
 }
+
+type AdvisorRule = components['schemas']['AdvisorRule']
+type AdvisorWindow = components['schemas']['AdvisorWindow']
+type AdvisorWindowsUpdate = components['schemas']['AdvisorWindowsUpdate']
+
+export interface SetAdvisorRuleOverrideVariables {
+  ruleId: string
+  enabled: boolean
+}
+
+/**
+ * `PUT /api/v1/advisor/rules/{id}/override` (setAdvisorRuleOverride): disables
+ * a rule, or enables it again. The catalogue is read again either way, so a
+ * failed write shows the live state (I-11).
+ */
+export function useSetAdvisorRuleOverride(): UseMutationResult<
+  AdvisorRule,
+  ApiFailure,
+  SetAdvisorRuleOverrideVariables
+> {
+  const queryClient = useQueryClient()
+  return useMutation<AdvisorRule, ApiFailure, SetAdvisorRuleOverrideVariables>({
+    mutationFn: ({ ruleId, enabled }) =>
+      getApi(() =>
+        client.PUT('/api/v1/advisor/rules/{id}/override', {
+          params: { path: { id: ruleId } },
+          body: { enabled },
+        }),
+      ),
+    onSuccess: (rule) =>
+      queryClient.setQueryData<AdvisorRule[]>(qk.advisorRules(), (rules) =>
+        rules?.map((entry) => (entry.id === rule.id ? rule : entry)),
+      ),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: qk.advisorRules() }),
+    retry: false,
+  })
+}
+
+/** `GET /api/v1/settings/advisor-windows` (getAdvisorWindows): both observation windows. */
+export function useAdvisorWindows() {
+  return useApiQuery({
+    policy: REFRESH.static,
+    queryFn: (signal) => getApi(() => client.GET('/api/v1/settings/advisor-windows', { signal })),
+    queryKey: qk.advisorWindows(),
+  })
+}
+
+/**
+ * `PUT /api/v1/settings/advisor-windows` (setAdvisorWindows): seconds set a
+ * window, `null` resets it to the default.
+ */
+export function useSetAdvisorWindows(): UseMutationResult<
+  AdvisorWindow[],
+  ApiFailure,
+  AdvisorWindowsUpdate
+> {
+  const queryClient = useQueryClient()
+  return useMutation<AdvisorWindow[], ApiFailure, AdvisorWindowsUpdate>({
+    mutationFn: (body) => getApi(() => client.PUT('/api/v1/settings/advisor-windows', { body })),
+    onSuccess: (windows) => queryClient.setQueryData(qk.advisorWindows(), windows),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: qk.advisorWindows() }),
+    retry: false,
+  })
+}

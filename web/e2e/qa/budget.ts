@@ -24,10 +24,11 @@ export const BUDGET = {
   /** host metrics every 30 s */
   host: 90_000,
   /**
-   * advisor findings: default cadence 15 min (measured at 0.4) + 50 %; 11.4 sets
-   * PGLENS_ADVISOR_INTERVAL=60s on the dev stack and lowers this to 90_000.
+   * advisor findings: the dev stack evaluates every 60 s
+   * (PGLENS_ADVISOR_INTERVAL=60s, set by 11.4; the default cadence is 15 min),
+   * so 60 s cadence + evaluation + 30 s.
    */
-  findings: 1_350_000,
+  findings: 90_000,
   /** container restart until /healthz and the first agent heartbeat */
   serviceRestart: 120_000,
   /** one deploy.sh run (measured 43 s at 0.2/0.3) + 50 % */

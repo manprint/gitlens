@@ -43,6 +43,9 @@ type API struct {
 	pool dbPool
 	// retention replaces the database's policy store in unit tests (11.3).
 	retention policyStore
+	// advisorSettings replaces the database's advisor settings store in unit
+	// tests (11.4).
+	advisorSettings advisorSettingsStore
 	// auth tells a bearer-token request from a UI session in the log of a
 	// retention change; nil names every request a UI session.
 	auth *Auth
@@ -54,8 +57,8 @@ func NewAPI(pool *pgxpool.Pool) *API {
 	return &API{pool: asDBPool(pool)}
 }
 
-// SetAuth gives the API the bootstrap token check, so a retention change is
-// logged with the credential that made it (requesterOf).
+// SetAuth gives the API the bootstrap token check, so a retention or advisor
+// settings change is logged with the credential that made it (requesterOf).
 func (a *API) SetAuth(auth *Auth) {
 	a.auth = auth
 }
@@ -80,6 +83,7 @@ func (a *API) RegisterRoutes(r chi.Router) {
 	a.registerPlanRoutes(r)
 	a.registerAuditRoutes(r)
 	a.registerRetentionRoutes(r)
+	a.registerAdvisorSettingsRoutes(r)
 }
 
 // Ready verifies that the database is reachable and the complete migration

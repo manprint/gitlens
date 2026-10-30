@@ -29,6 +29,8 @@ function rule(overrides: Partial<AdvisorRule> = {}): AdvisorRule {
     scope: 'cluster',
     needs: ['replication_lag'],
     min_tier: 'T0',
+    enabled: true,
+    overridden: false,
     ...overrides,
   }
 }

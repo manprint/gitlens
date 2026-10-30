@@ -8,9 +8,11 @@ import type { Page } from '@playwright/test'
 import { expect, test } from './fixtures'
 import { assertFits, measureRoutes } from './fullhd_fit'
 import { FULLHD_ROUTES, routePathname } from './fullhd_routes'
+import { BUDGET } from './qa/budget'
 import { run } from './qa/stack'
 import { INSTANCE_SECTIONS } from '../src/features/instance/instanceSections'
 import {
+  ADVISOR_VIEWS,
   AUDIT_VIEWS,
   DEFAULT_SETTINGS_TAB,
   INVENTORY_VIEWS,
@@ -956,7 +958,7 @@ const SETTINGS_TAB_CONTENT: Record<
   inventory: { role: 'table', name: 'Monitored instances' },
   preferences: { role: 'heading', name: 'Preferences' },
   retention: { role: 'heading', name: 'Data retention' },
-  advisor: { role: 'heading', name: 'Advisor rules' },
+  advisor: { role: 'table', name: 'Advisor rules' },
   notifications: { role: 'heading', name: 'Notifications' },
   names: { role: 'table', name: 'Cluster and instance names' },
   audit: { role: 'heading', name: 'Command audit' },
@@ -990,10 +992,17 @@ test('SET-E2E-001 every Settings tab opens with its content and fits a Full HD s
       await page.screenshot({ path: `${ARTIFACT_DIR}/set-e2e-001-${id}.png` })
     })
   }
-  // Every Settings entry of the Full HD inventory: the seven tabs and the Inventory and Audit views.
+  // Every Settings entry of the Full HD inventory: the seven tabs and the Inventory,
+  // Advisor rules and Audit views.
   const routes = FULLHD_ROUTES.filter((route) => routePathname(route.path) === '/settings')
   expect(routes.length).toBe(
-    SETTINGS_TABS.length + INVENTORY_VIEWS.length - 1 + AUDIT_VIEWS.length - 1,
+    SETTINGS_TABS.length +
+      INVENTORY_VIEWS.length -
+      1 +
+      ADVISOR_VIEWS.length -
+      1 +
+      AUDIT_VIEWS.length -
+      1,
   )
   for (const route of routes) {
     await test.step(`fits ${route.path}`, async () => {
@@ -1464,5 +1473,248 @@ test('RET-E2E-001 the Data retention tab previews, confirms a shortening up to t
       }
       expect(message, 'the original retention must be restored').toBeNull()
     }
+  }
+})
+
+interface LiveFinding {
+  finding_id: string
+  rule_id: string
+  state: string
+}
+
+interface LiveAdvisorWindow {
+  key: string
+  seconds: number
+  source: string
+}
+
+/** The findings the Findings page lists now (the default listing), of one rule or of all. */
+async function liveFindings(
+  api: Parameters<typeof pickInstance>[0],
+  ruleId?: string,
+): Promise<LiveFinding[]> {
+  const query = ruleId === undefined ? '' : `?rule_id=${encodeURIComponent(ruleId)}`
+  const response = await api.get(`/api/v1/findings${query}`)
+  expect(response.ok(), `GET /api/v1/findings${query}`).toBe(true)
+  return ((await response.json()) as LiveFinding[]).filter(
+    (finding) => finding.state !== 'resolved',
+  )
+}
+
+/**
+ * The live rule for ADV-E2E-001: the one with the fewest open findings (at
+ * least one), so the cycle disturbs as little of the dev stack as it can.
+ */
+async function ruleWithOpenFindings(api: Parameters<typeof pickInstance>[0]): Promise<string> {
+  const open = new Map<string, number>()
+  for (const finding of await liveFindings(api)) {
+    if (finding.state === 'open') open.set(finding.rule_id, (open.get(finding.rule_id) ?? 0) + 1)
+  }
+  const ranked = [...open.entries()].sort(
+    ([leftRule, left], [rightRule, right]) => left - right || leftRule.localeCompare(rightRule),
+  )
+  const picked = ranked[0]?.[0]
+  if (picked === undefined) throw new Error('no advisor rule has an open finding on the live stack')
+  return picked
+}
+
+/** The Findings → Rules catalogue row of one rule, searched by its id. */
+function catalogueRow(page: Page, ruleId: string) {
+  return page
+    .getByRole('table', { name: 'Advisor rule catalogue' })
+    .getByRole('row')
+    .filter({ has: page.getByTitle(ruleId, { exact: true }) })
+}
+
+/**
+ * At 1920×1080 and 1920×950 the open Advisor view ends at least 24 px above
+ * the bottom of the viewport (D26), on top of `assertFits`.
+ */
+async function assertAdvisorHeadroom(page: Page, path: string, sectionId: string): Promise<void> {
+  for (const viewport of [
+    { width: 1920, height: 1080 },
+    { width: 1920, height: 950 },
+  ]) {
+    await page.setViewportSize(viewport)
+    await page.goto(path)
+    const section = page.locator(`#${sectionId}`)
+    await expect(section).toBeVisible({ timeout: 30_000 })
+    // Loaded: the rules table or the window inputs, not the loading line.
+    await expect(section.getByRole('table').or(section.getByRole('textbox')).first()).toBeVisible({
+      timeout: 30_000,
+    })
+    if (sectionId === 'settings-advisor-rules') {
+      // The table caption is the visible help of the switches (I-16): one
+      // whole line at 1920 px, not cut by the ≥ 1600 px truncation.
+      const caption = section.getByTitle(CAPTIONS['settings.advisor-rules-table'].what)
+      await expect(caption).toBeVisible()
+      const cut = await caption.evaluate((node) => ({
+        scrollWidth: node.scrollWidth,
+        clientWidth: node.clientWidth,
+        height: node.getBoundingClientRect().height,
+      }))
+      console.log(
+        `ADV-E2E-001 caption at ${viewport.width}×${viewport.height}: ${JSON.stringify(cut)}`,
+      )
+      expect(cut.scrollWidth, `${path}: caption truncated`).toBeLessThanOrEqual(cut.clientWidth)
+      expect(cut.height, `${path}: caption on one line`).toBeLessThanOrEqual(24)
+    }
+    const box = await section.boundingBox()
+    expect(box, `${path} section box`).not.toBeNull()
+    const bottom = (box?.y ?? Infinity) + (box?.height ?? 0)
+    expect(
+      viewport.height - bottom,
+      `${path} at ${viewport.width}×${viewport.height}: headroom below the view`,
+    ).toBeGreaterThanOrEqual(24)
+    await page.screenshot({
+      path: `${ARTIFACT_DIR}/adv-e2e-001-${sectionId}-${viewport.width}x${viewport.height}.png`,
+    })
+  }
+}
+
+test('ADV-E2E-001 a rule disabled in Settings leaves the Findings page within one cycle and returns when enabled; the unused-index window reads back', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, 2 * BUDGET.findings))
+  const browserErrors = collectConsoleErrors(page)
+  const rule = await ruleWithOpenFindings(api)
+  const before = await liveFindings(api, rule)
+  expect(before.length, `${rule} has findings on the Findings page`).toBeGreaterThan(0)
+  test.info().annotations.push({
+    type: 'ADV-E2E-001 rule',
+    description: `${rule} (${before.length} findings)`,
+  })
+  let disabled = false
+  try {
+    // The tab and its two views fit a Full HD screen.
+    await assertFits(page, api, fullHdRoute('/settings?tab=advisor'))
+    await assertFits(page, api, fullHdRoute('/settings?tab=advisor&view=windows'))
+    await assertAdvisorHeadroom(page, '/settings?tab=advisor', 'settings-advisor-rules')
+    await assertAdvisorHeadroom(
+      page,
+      '/settings?tab=advisor&view=windows',
+      'settings-advisor-windows',
+    )
+
+    // Disable the rule from its switch.
+    await page.setViewportSize({ width: 1920, height: 1080 })
+    await page.goto('/settings?tab=advisor')
+    const table = page.getByRole('table', { name: 'Advisor rules' })
+    await expect(table).toBeVisible({ timeout: 30_000 })
+    await page.getByRole('searchbox', { name: 'Search Advisor rules' }).fill(rule)
+    const toggle = table.getByRole('switch', { name: `Run ${rule}` })
+    await expect(toggle).toHaveAttribute('aria-checked', 'true')
+    disabled = true
+    await toggle.click()
+    const disabledAt = Date.now()
+    await expect(toggle).toHaveAttribute('aria-checked', 'false', { timeout: 30_000 })
+    await expect(table.getByText('custom', { exact: true })).toBeVisible()
+    await page.screenshot({ path: `${ARTIFACT_DIR}/adv-e2e-001-disabled.png` })
+
+    // Within one advisor cycle its findings leave the Findings page.
+    await expect
+      .poll(async () => (await liveFindings(api, rule)).length, {
+        message: `${rule} findings resolved after the disable`,
+        intervals: [2_000],
+        timeout: BUDGET.findings,
+      })
+      .toBe(0)
+    const goneAfter = Date.now() - disabledAt
+    await page.goto(`/findings?view=rules&advisor-rule-catalogue.q=${encodeURIComponent(rule)}`)
+    const row = catalogueRow(page, rule)
+    await expect(row).toBeVisible({ timeout: 30_000 })
+    await expect(row.getByText('Disabled', { exact: true })).toBeVisible()
+    await expect(row.getByRole('cell').nth(5)).toHaveText('0')
+    await page.screenshot({ path: `${ARTIFACT_DIR}/adv-e2e-001-findings-disabled.png` })
+
+    // Enabled again, the next cycle reopens them.
+    await page.goto('/settings?tab=advisor')
+    await page.getByRole('searchbox', { name: 'Search Advisor rules' }).fill(rule)
+    const again = page
+      .getByRole('table', { name: 'Advisor rules' })
+      .getByRole('switch', { name: `Run ${rule}` })
+    await expect(again).toHaveAttribute('aria-checked', 'false', { timeout: 30_000 })
+    await again.click()
+    const enabledAt = Date.now()
+    await expect(again).toHaveAttribute('aria-checked', 'true', { timeout: 30_000 })
+    disabled = false
+    await expect
+      .poll(async () => (await liveFindings(api, rule)).length, {
+        message: `${rule} findings back after the enable`,
+        intervals: [2_000],
+        timeout: BUDGET.findings,
+      })
+      .toBeGreaterThan(0)
+    const backAfter = Date.now() - enabledAt
+    await page.goto(`/findings?view=rules&advisor-rule-catalogue.q=${encodeURIComponent(rule)}`)
+    await expect(catalogueRow(page, rule)).toBeVisible({ timeout: 30_000 })
+    await expect(catalogueRow(page, rule).getByText('Disabled', { exact: true })).toHaveCount(0)
+    test.info().annotations.push({
+      type: 'ADV-E2E-001 timings',
+      description: `gone ${Math.round(goneAfter / 1000)} s after disable, back ${Math.round(backAfter / 1000)} s after enable`,
+    })
+    console.log(
+      `ADV-E2E-001 ${rule}: findings gone ${goneAfter} ms after disable, back ${backAfter} ms after enable`,
+    )
+
+    // The unused-index window: 1 hour, read back from the API and the form. Kept
+    // on the dev stack (README); it has no effect until the advisor reads it (A5).
+    await page.goto('/settings?tab=advisor&view=windows')
+    const input = page.getByRole('textbox', { name: 'Unused-index history' })
+    await expect(input).toBeVisible({ timeout: 30_000 })
+    const reset = page.getByRole('button', { name: 'Reset Unused-index history to default' })
+    if (await reset.isEnabled()) {
+      // A previous run kept 1 hour: back to the default first, so Save writes it again.
+      await reset.click()
+      await expect(input).toHaveValue('7', { timeout: 30_000 })
+    }
+    await page.getByRole('combobox', { name: 'Unused-index history unit' }).selectOption('hours')
+    await input.fill('1')
+    await expect(page.getByText(/Shorter than the 7-day default/)).toBeVisible()
+    await page.getByRole('button', { name: 'Save windows' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Saved:' })).toHaveText(
+      /Saved: Unused-index history 1 hour, Backup history /,
+      { timeout: 30_000 },
+    )
+    const windows = (await (
+      await api.get('/api/v1/settings/advisor-windows')
+    ).json()) as LiveAdvisorWindow[]
+    expect(windows.map((window) => window.key)).toEqual([
+      'window.unused_index',
+      'window.backup_history',
+    ])
+    expect(windows[0]).toMatchObject({ seconds: 3600, source: 'custom' })
+    await page.reload()
+    await expect(page.getByRole('textbox', { name: 'Unused-index history' })).toHaveValue('1', {
+      timeout: 30_000,
+    })
+    await expect(page.getByRole('combobox', { name: 'Unused-index history unit' })).toHaveValue(
+      'hours',
+    )
+    await page.screenshot({ path: `${ARTIFACT_DIR}/adv-e2e-001-windows.png` })
+    browserErrors.assertClean()
+  } finally {
+    // Never leave the rule disabled on the dev stack, even when a step failed.
+    // Never hides the real failure.
+    let message: string | null = null
+    try {
+      const response = await api.put(`/api/v1/advisor/rules/${encodeURIComponent(rule)}/override`, {
+        data: { enabled: true },
+      })
+      if (!response.ok()) {
+        message = `re-enable ${rule}: HTTP ${response.status()} ${await response.text()}`
+      }
+    } catch (error) {
+      message = `re-enable ${rule}: ${error instanceof Error ? error.message : String(error)}`
+    }
+    if (message !== null) {
+      console.error(`ADV-E2E-001 ${message}`)
+      test.info().annotations.push({ type: 'RESTORE-FAILED', description: message })
+    }
+    expect(
+      message,
+      `${rule} must be enabled again${disabled ? ' (left disabled by a failed step)' : ''}`,
+    ).toBeNull()
   }
 })

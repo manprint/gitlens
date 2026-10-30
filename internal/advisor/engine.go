@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,6 +34,21 @@ const unseenInstanceGrace = 24 * time.Hour
 
 type snapshotLoader func(context.Context, uuid.UUID, time.Time) (*Snapshot, error)
 
+// OverridesSource reports the console's rule overrides (11.4, D18): rule id to
+// enabled. A rule absent from the map is enabled. The server reads them from
+// its own table and injects the source, so the engine never reads that table
+// itself.
+type OverridesSource func(ctx context.Context) (map[string]bool, error)
+
+// DisabledRuleResolver is the part of a Store that closes the findings of
+// disabled rules. A Store without it leaves those findings as they are; the
+// engine still skips the rules.
+type DisabledRuleResolver interface {
+	// ResolveDisabled resolves the open, degraded and muted findings of the
+	// rules, marking their evidence with resolved_reason rule_disabled.
+	ResolveDisabled(ctx context.Context, ruleIDs []string, now time.Time) error
+}
+
 // Engine evaluates registered advisor rules and persists current findings.
 type Engine struct {
 	pool      *pgxpool.Pool
@@ -54,6 +70,12 @@ type Engine struct {
 	leaderOverride func(context.Context) (bool, error)
 	// stepBudget is advisorStepBudget unless a test shrinks it.
 	stepBudget time.Duration
+	// overrides is the injected rule overrides source; nil disables nothing.
+	overrides OverridesSource
+	// disabled is the last set of disabled rule ids the source answered. A
+	// failed read keeps it, so a passing database error neither re-enables nor
+	// disables a rule.
+	disabled map[string]bool
 }
 
 func NewEngine(pool *pgxpool.Pool, clk clock.Clock, interval time.Duration) *Engine {
@@ -88,6 +110,49 @@ func newEngine(pool *pgxpool.Pool, clk clock.Clock, interval time.Duration, st S
 		}
 	}
 	return e
+}
+
+// SetOverridesSource gives the engine the console's rule overrides. Call it
+// before Start; nil (the default) disables no rule.
+func (e *Engine) SetOverridesSource(src OverridesSource) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.overrides = src
+}
+
+// disabledRules reads the overrides and answers the ids of the disabled rules
+// that are registered: an override left by a rule no longer in the registry
+// is ignored, so the findings of such a rule are never resolved as disabled.
+// When the read fails it logs the error and answers the previous answer.
+func (e *Engine) disabledRules(ctx context.Context) map[string]bool {
+	e.mu.Lock()
+	src := e.overrides
+	previous := e.disabled
+	e.mu.Unlock()
+	if src == nil {
+		return nil
+	}
+	stepCtx, cancel := e.step(ctx)
+	defer cancel()
+	overrides, err := src(stepCtx)
+	if err != nil {
+		log.Printf("advisor engine: read rule overrides (keeping the previous ones): %v", err)
+		return previous
+	}
+	registered := map[string]bool{}
+	for _, r := range All() {
+		registered[r.ID()] = true
+	}
+	disabled := map[string]bool{}
+	for id, enabled := range overrides {
+		if !enabled && registered[id] {
+			disabled[id] = true
+		}
+	}
+	e.mu.Lock()
+	e.disabled = disabled
+	e.mu.Unlock()
+	return disabled
 }
 
 func (e *Engine) Start(ctx context.Context) {
@@ -237,6 +302,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		return nil
 	}
 	now := e.clock.Now()
+	disabled := e.disabledRules(ctx)
 	stepCtx, cancel = e.step(ctx)
 	ids, err := e.store.ActiveInstances(stepCtx, now.Add(-time.Hour))
 	cancel()
@@ -250,8 +316,14 @@ func (e *Engine) Run(ctx context.Context) error {
 	// the retention purge entirely — indefinitely, since the list order is
 	// stable.
 	var errs []error
+	// A disabled rule does not run, so ResolveAbsent never reaches its
+	// findings: they are resolved here, on every instance, once per pass.
+	// Enabling the rule again lets its next evaluation reopen them.
+	if err := e.resolveDisabled(ctx, disabled, now); err != nil {
+		errs = append(errs, err)
+	}
 	for _, id := range ids {
-		if err := e.runInstanceWithin(ctx, id, now); err != nil {
+		if err := e.runInstanceWithin(ctx, id, now, disabled); err != nil {
 			errs = append(errs, err)
 		}
 		// A shutdown ends the pass between instances. Stop waits for the pass
@@ -288,15 +360,35 @@ func (e *Engine) step(ctx context.Context) (context.Context, context.CancelFunc)
 	return context.WithTimeout(ctx, e.stepBudget)
 }
 
-// runInstanceWithin runs one instance under its own budget, so an instance
-// that exceeds it fails alone and the pass goes on to the next.
-func (e *Engine) runInstanceWithin(ctx context.Context, id uuid.UUID, now time.Time) error {
+// resolveDisabled resolves the findings of the disabled rules, if the store
+// can.
+func (e *Engine) resolveDisabled(ctx context.Context, disabled map[string]bool, now time.Time) error {
+	resolver, ok := e.store.(DisabledRuleResolver)
+	if !ok || len(disabled) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(disabled))
+	for id := range disabled {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
 	stepCtx, cancel := e.step(ctx)
 	defer cancel()
-	return e.runInstance(stepCtx, id, now)
+	if err := resolver.ResolveDisabled(stepCtx, ids, now); err != nil {
+		return fmt.Errorf("resolve findings of disabled rules: %w", err)
+	}
+	return nil
 }
 
-func (e *Engine) runInstance(ctx context.Context, id uuid.UUID, now time.Time) error {
+// runInstanceWithin runs one instance under its own budget, so an instance
+// that exceeds it fails alone and the pass goes on to the next.
+func (e *Engine) runInstanceWithin(ctx context.Context, id uuid.UUID, now time.Time, disabled map[string]bool) error {
+	stepCtx, cancel := e.step(ctx)
+	defer cancel()
+	return e.runInstance(stepCtx, id, now, disabled)
+}
+
+func (e *Engine) runInstance(ctx context.Context, id uuid.UUID, now time.Time, disabled map[string]bool) error {
 	s, err := e.load(ctx, id, now)
 	if err != nil {
 		return fmt.Errorf("load advisor snapshot %s: %w", id, err)
@@ -306,6 +398,10 @@ func (e *Engine) runInstance(ctx context.Context, id uuid.UUID, now time.Time) e
 	seen := []string{}
 	var errs []error
 	for _, r := range rules {
+		// A disabled rule is not evaluated and does not count as having run.
+		if disabled[r.ID()] {
+			continue
+		}
 		ran = append(ran, r.ID())
 		findings, panicked := e.evaluateRule(r, s)
 		// A rule that could not evaluate as a whole gives no answer for this

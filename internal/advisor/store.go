@@ -85,6 +85,22 @@ func (s *PgStore) ResolveUnseen(ctx context.Context, before, now time.Time) erro
 	return err
 }
 
+// resolveDisabledSQL closes the findings of disabled rules and marks why in
+// their evidence (no new column, R-11.0 A1). A muted finding is closed too: its
+// rule no longer runs, so nothing else would. UpsertFinding replaces the
+// evidence when the rule, enabled again, finds the condition again, so the
+// marker goes with the reopening.
+const resolveDisabledSQL = `UPDATE findings SET state='resolved',resolved_at=$1,evidence=(CASE WHEN jsonb_typeof(evidence)='object' THEN evidence ELSE '{}'::jsonb END) || '{"resolved_reason":"rule_disabled"}'::jsonb WHERE tenant_id='default' AND state IN ('open','degraded','muted') AND rule_id = ANY($2)`
+
+// ResolveDisabled resolves the open, degraded and muted findings of the rules.
+func (s *PgStore) ResolveDisabled(ctx context.Context, ruleIDs []string, now time.Time) error {
+	if len(ruleIDs) == 0 {
+		return nil
+	}
+	_, err := s.db.Exec(ctx, resolveDisabledSQL, now, ruleIDs)
+	return err
+}
+
 func (s *PgStore) PurgeResolved(ctx context.Context, before time.Time) error {
 	_, err := s.db.Exec(ctx, `DELETE FROM findings WHERE tenant_id='default' AND state='resolved' AND resolved_at < $1`, before)
 	return err

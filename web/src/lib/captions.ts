@@ -103,6 +103,23 @@ export const CAPTIONS = {
     howToRead:
       'The shortest retention is one day past the family’s compression horizon and never under 3 days; the longest is 365 days.',
   },
+  'settings.advisor-rules-table': {
+    what: 'Switched off, a rule is skipped and its findings are resolved.',
+    source:
+      'getAdvisorRules for the rows; the switch calls setAdvisorRuleOverride, stored in advisor_rule_overrides.',
+    window: 'Live catalogue. A change takes effect at the next advisor evaluation.',
+    howToRead:
+      'Which advisor rules run. Switched off, a rule is not evaluated and its findings are resolved at the next evaluation. Switched on again, the rule runs at the next evaluation and its findings reopen if the condition still holds. custom marks a stored override; switching back deletes it. Search and filters change no rule; thresholds are not editable.',
+  },
+  'settings.advisor-windows': {
+    what: 'How far back the unused-index and backup-history checks look before they report a finding.',
+    source:
+      'The windows stored by setAdvisorWindows (server_settings), read with getAdvisorWindows; without a stored value, 7 days.',
+    unit: 'hours or days',
+    window: 'Between 1 hour and 90 days.',
+    howToRead:
+      'A shorter window reports sooner and can raise false positives. The advisor keeps its 7-day windows until a later release reads these values.',
+  },
 } as const satisfies Record<string, CaptionEntry>
 
 export type CaptionId = keyof typeof CAPTIONS
@@ -113,6 +130,8 @@ export const columnHelp = {
   'statements.total-time':
     'Execution time of all calls in the selected range, from pg_stat_statements.',
   'indexes.scans': 'Index scans counted by pg_stat_user_indexes.idx_scan since the last reset.',
+  'advisor.enabled':
+    'Off: the rule is not evaluated and its findings are resolved at the next evaluation. On again: they reopen if the condition still holds.',
 } as const satisfies Record<string, string>
 
 export type ColumnHelpId = keyof typeof columnHelp

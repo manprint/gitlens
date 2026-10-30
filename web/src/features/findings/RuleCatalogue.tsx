@@ -8,6 +8,7 @@ import {
 } from '@/components/layout/DataTable'
 import { EmptyState } from '@/components/state'
 import { Section } from '@/components/layout/Section'
+import { Badge } from '@/components/ui/badge'
 import { useKeepFocus } from '@/hooks/useKeepFocus'
 import type { AdvisorRule, FindingRecord } from '@/lib/findings'
 import { NativeSelect } from '@/components/ui/native-select'
@@ -19,6 +20,8 @@ type FilterValue = string
 
 interface RuleCatalogueRow {
   ruleId: string
+  /** False for a rule disabled from Settings → Advisor rules (11.4). */
+  enabled: boolean
   severity: string
   scope: string
   needs: string
@@ -52,6 +55,7 @@ function countTargets(
 function makeRow(rule: AdvisorRule, findings: readonly FindingRecord[]): RuleCatalogueRow {
   return {
     ruleId: rule.id,
+    enabled: rule.enabled,
     severity: rule.severity,
     scope: rule.scope,
     needs: rule.needs.length > 0 ? rule.needs.join(', ') : 'None',
@@ -73,7 +77,22 @@ const RULE_TOOLBAR: DataTableToolbar<RuleCatalogueRow> = {
 function ruleColumns(): DataTableProps<RuleCatalogueRow>['columns'] {
   return [
     // One line per rule from 1600 px (D26): the free-text columns truncate.
-    { accessorKey: 'ruleId', header: 'Rule ID', meta: { width: '24%', truncate: true } },
+    {
+      accessorKey: 'ruleId',
+      header: 'Rule ID',
+      // A disabled rule is not evaluated, so its counts stay at zero (11.4).
+      cell: ({ row }) => (
+        <>
+          {row.original.ruleId}
+          {row.original.enabled ? null : (
+            <Badge className="ml-2" title="Disabled in Settings → Advisor rules" variant="outline">
+              Disabled
+            </Badge>
+          )}
+        </>
+      ),
+      meta: { width: '24%', truncate: true },
+    },
     { accessorKey: 'severity', header: 'Severity', enableHiding: false, meta: { width: '8rem' } },
     { accessorKey: 'scope', header: 'Scope', enableHiding: false, meta: { width: '8rem' } },
     { accessorKey: 'needs', header: 'Needs', meta: { truncate: true } },

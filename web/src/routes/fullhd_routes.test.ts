@@ -5,7 +5,12 @@ import { CLUSTER_SECTIONS } from '@/features/cluster/clusterSections'
 import { TABS } from '@/features/indexes/IndexAnalysisPage'
 import { FINDINGS_VIEWS } from '@/features/findings/findingsViews'
 import { INDEX_VIEWS } from '@/features/indexes/indexViews'
-import { AUDIT_VIEWS, INVENTORY_VIEWS, SETTINGS_TABS } from '@/features/settings/settingsTabs'
+import {
+  ADVISOR_VIEWS,
+  AUDIT_VIEWS,
+  INVENTORY_VIEWS,
+  SETTINGS_TABS,
+} from '@/features/settings/settingsTabs'
 import {
   CATALOG_VIEW_IDS,
   INSTANCE_SECTIONS,
@@ -81,6 +86,9 @@ describe('Full HD route inventory', () => {
     }
     for (const { id } of AUDIT_VIEWS.slice(1)) {
       expect(FULLHD_ROUTES.map((route) => route.path)).toContain(`/settings?tab=audit&view=${id}`)
+    }
+    for (const { id } of ADVISOR_VIEWS.slice(1)) {
+      expect(FULLHD_ROUTES.map((route) => route.path)).toContain(`/settings?tab=advisor&view=${id}`)
     }
     for (const { value } of TABS) {
       expect(FULLHD_ROUTES.map((route) => route.path)).toContain(`/indexes?tab=${value}`)

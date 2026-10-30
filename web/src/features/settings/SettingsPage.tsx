@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { InstanceViewTabs } from '@/features/instance/InstancePanel'
 import { INSTANCE_VIEW_PARAM, useInstanceView } from '@/features/instance/instanceViews'
 
+import { AdvisorPanel } from './AdvisorPanel'
 import { CommandAudit } from './CommandAudit'
 import { InventoryTables } from './InventoryTables'
 import { NamesPanel } from './NamesPanel'
@@ -19,6 +20,7 @@ import { PreferencesPanel } from './PreferencesPanel'
 import { RetentionPanel } from './RetentionPanel'
 import { ServerInfo } from './ServerInfo'
 import {
+  ADVISOR_VIEWS,
   AUDIT_VIEWS,
   DEFAULT_SETTINGS_TAB,
   INVENTORY_VIEWS,
@@ -29,12 +31,10 @@ import {
 } from './settingsTabs'
 
 /**
- * What the tabs that 11.4–11.5 fill will configure (I-16). Until then they
- * state it and offer no control.
+ * What the tab that 11.5 fills will configure (I-16). Until then it states it
+ * and offers no control.
  */
-const PLANNED_TABS: Record<'advisor' | 'notifications', string> = {
-  advisor:
-    'Which advisor rules run, and the observation windows of the unused-index and backup-history checks.',
+const PLANNED_TABS: Record<'notifications', string> = {
   notifications:
     'Whether each notification channel (Slack, webhook, Google Chat) is configured, and a test message per channel.',
 }
@@ -59,6 +59,7 @@ function PlannedTab({ id, label }: { id: keyof typeof PLANNED_TABS; label: strin
 /** The tabs with their own `?view=` views; the other tabs have none. */
 const TAB_VIEWS: Partial<Record<SettingsTabId, readonly { id: string }[]>> = {
   inventory: INVENTORY_VIEWS,
+  advisor: ADVISOR_VIEWS,
   audit: AUDIT_VIEWS,
 }
 
@@ -166,7 +167,7 @@ export function SettingsPage() {
     ),
     preferences: () => <PreferencesPanel />,
     retention: () => <RetentionPanel />,
-    advisor: () => <PlannedTab id="advisor" label="Advisor rules" />,
+    advisor: () => <AdvisorPanel />,
     notifications: () => <PlannedTab id="notifications" label="Notifications" />,
     names: () => <NamesPanel clusters={clusters} instances={instances} />,
     audit: () => <AuditTab instances={instances} />,

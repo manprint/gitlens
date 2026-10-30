@@ -38,9 +38,33 @@ const findings: FindingRecord[] = [
 ]
 
 const rules: AdvisorRule[] = [
-  { id: 'rule-open', severity: 'warning', scope: 'cluster', needs: ['metric:lag'], min_tier: 'T0' },
-  { id: 'rule-instance', severity: 'critical', scope: 'instance', needs: [], min_tier: 'T1' },
-  { id: 'rule-sensitive', severity: 'info', scope: 'cluster', needs: ['host'], min_tier: 'T2' },
+  {
+    id: 'rule-open',
+    severity: 'warning',
+    scope: 'cluster',
+    needs: ['metric:lag'],
+    min_tier: 'T0',
+    enabled: true,
+    overridden: false,
+  },
+  {
+    id: 'rule-instance',
+    severity: 'critical',
+    scope: 'instance',
+    needs: [],
+    min_tier: 'T1',
+    enabled: true,
+    overridden: false,
+  },
+  {
+    id: 'rule-sensitive',
+    severity: 'info',
+    scope: 'cluster',
+    needs: ['host'],
+    min_tier: 'T2',
+    enabled: true,
+    overridden: false,
+  },
 ]
 
 function renderCatalogue(
@@ -71,7 +95,17 @@ describe('RuleCatalogue', () => {
 
   it('UI-FIND-034 a muted finding is not counted as firing', () => {
     renderCatalogue(
-      [{ id: 'rule-muted', severity: 'warning', scope: 'cluster', needs: [], min_tier: 'T0' }],
+      [
+        {
+          id: 'rule-muted',
+          severity: 'warning',
+          scope: 'cluster',
+          needs: [],
+          min_tier: 'T0',
+          enabled: true,
+          overridden: false,
+        },
+      ],
       [
         {
           finding_id: 'finding-muted',
@@ -118,6 +152,8 @@ describe('RuleCatalogue', () => {
       scope: 'instance',
       needs: index < 3 ? ['host'] : [],
       min_tier: 'T0',
+      enabled: true,
+      overridden: false,
     }))
     renderCatalogue(many, [])
     const name = 'Advisor rule catalogue'
@@ -156,5 +192,21 @@ describe('RuleCatalogue', () => {
     expect(screen.queryByRole('table')).not.toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Rule level'), { target: { value: 'all' } })
     expect(screen.getByRole('table', { name: 'Advisor rule catalogue' })).toBeInTheDocument()
+  })
+
+  it('ADVO-UI-004 a rule disabled in Settings shows a Disabled badge; the enabled ones none', () => {
+    renderCatalogue(
+      rules.map((rule) =>
+        rule.id === 'rule-instance' ? { ...rule, enabled: false, overridden: true } : rule,
+      ),
+      [],
+    )
+
+    const table = screen.getByRole('table', { name: 'Advisor rule catalogue' })
+    const badges = within(table).getAllByText('Disabled')
+    expect(badges).toHaveLength(1)
+    // The badge sits in the rule's own cell, whose title keeps the bare rule id.
+    expect(within(table).getByTitle('rule-instance')).toContainElement(badges[0]!)
+    expect(within(table).getByTitle('rule-instance')).toHaveTextContent('rule-instanceDisabled')
   })
 })

@@ -1,6 +1,7 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 
+import { base as advisorWindowsBase } from '@/test/fixtures/getAdvisorWindows'
 import { base as hostBase } from '@/test/fixtures/getInstanceHost'
 import { base as retentionBase } from '@/test/fixtures/getRetention'
 import { expectNoA11yViolations } from '@/test/a11y'
@@ -11,6 +12,7 @@ import { preloadLazyRoutes, renderWithProviders } from '@/test/render'
 
 import { SettingsPage } from './SettingsPage'
 import {
+  ADVISOR_VIEWS,
   AUDIT_VIEWS,
   DEFAULT_SETTINGS_TAB,
   INVENTORY_VIEWS,
@@ -43,6 +45,8 @@ function renderSettings(route = '/') {
     ok('getInstanceHost', hostBase),
     // The Data retention tab reads the live policies (11.3).
     ok('getRetention', retentionBase),
+    // The Advisor rules tab reads the stored observation windows (11.4).
+    ok('getAdvisorWindows', advisorWindowsBase),
   )
   return renderWithProviders(<SettingsPage />, { route })
 }
@@ -150,11 +154,14 @@ describe('Settings tabs', () => {
       within(screen.getByRole('tabpanel')).getByRole('combobox', { name: 'Default time range' }),
     ).toBeVisible()
 
-    // The planned tabs state what they will configure and offer no control.
-    for (const [name, text] of [
-      ['Advisor rules', /Which advisor rules run/],
-      ['Notifications', /Whether each notification channel/],
-    ] as const) {
+    // Advisor rules holds its controls since 11.4: the rules and windows views.
+    fireEvent.mouseDown(settingsTab('Advisor rules'))
+    expect(screen.getByRole('tablist', { name: 'Advisor views' })).toBeVisible()
+    // The page's catalogue is empty here: the rules view says so.
+    expect(screen.getByText('The advisor reported no rule.')).toBeVisible()
+
+    // The planned tab states what it will configure and offers no control.
+    for (const [name, text] of [['Notifications', /Whether each notification channel/]] as const) {
       fireEvent.mouseDown(settingsTab(name))
       const panel = screen.getByRole('tabpanel')
       expect(within(panel).getByText(text)).toBeVisible()
@@ -180,7 +187,9 @@ describe('Settings tabs', () => {
           ? { list: 'Inventory views', labels: INVENTORY_VIEWS.map((entry) => entry.label) }
           : label === 'Audit & server'
             ? { list: 'Audit views', labels: AUDIT_VIEWS.map((entry) => entry.label) }
-            : null
+            : label === 'Advisor rules'
+              ? { list: 'Advisor views', labels: ADVISOR_VIEWS.map((entry) => entry.label) }
+              : null
       if (views === null) continue
       for (const name of views.labels.slice(1)) {
         fireEvent.mouseDown(

@@ -793,6 +793,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/advisor/rules/{id}/override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Enable or disable an advisor rule.
+         * @description Disabling stores an override; enabling deletes it, back to the default. The advisor applies the change at its next evaluation: a disabled rule is not evaluated, and its open, degraded and muted findings are resolved with resolved_reason rule_disabled in their evidence. Enabling the rule again lets its next evaluation reopen the findings whose condition still holds.
+         */
+        put: operations["setAdvisorRuleOverride"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/advisor-windows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the advisor observation windows.
+         * @description Both windows, always in the order window.unused_index, window.backup_history, with their default and bounds. A stored window has no effect on findings until the advisor reads the windows (13.2).
+         */
+        get: operations["getAdvisorWindows"];
+        /**
+         * Set or reset advisor observation windows.
+         * @description Sets each key of the body to its seconds, or resets it to the default with null, all in one transaction; an empty object changes nothing. Only the two window keys are accepted. A short window can raise false positives.
+         */
+        put: operations["setAdvisorWindows"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/retention": {
         parameters: {
             query?: never;
@@ -2090,6 +2134,63 @@ export interface components {
             scope: string;
             needs: string[];
             min_tier: components["schemas"]["PermTier"];
+            /** @description true by default; false when the rule was disabled from the console (setAdvisorRuleOverride): the advisor does not evaluate it and resolves its findings at its next evaluation. Without a database every rule is enabled. */
+            enabled: boolean;
+            /** @description true when the rule has an override row. Enabling a rule deletes its row, so a rule back at its default is not overridden. */
+            overridden: boolean;
+        };
+        AdvisorRuleOverride: {
+            /** @description false disables the rule (stores an override); true enables it again (deletes the override, back to the default). */
+            enabled: boolean;
+        };
+        /**
+         * @description An advisor observation window: the history the unused-index check and the backup-history check look back over.
+         * @enum {string}
+         */
+        AdvisorWindowKey: "window.unused_index" | "window.backup_history";
+        AdvisorWindow: {
+            key: components["schemas"]["AdvisorWindowKey"];
+            /**
+             * Format: int64
+             * @description The window in seconds, the stored value or the default.
+             */
+            seconds: number;
+            /**
+             * Format: int64
+             * @description The window without a stored value, 7 days.
+             * @enum {integer}
+             */
+            default_seconds: 604800;
+            /**
+             * Format: int64
+             * @description The shortest window, 1 hour.
+             * @enum {integer}
+             */
+            min_seconds: 3600;
+            /**
+             * Format: int64
+             * @description The longest window, 90 days.
+             * @enum {integer}
+             */
+            max_seconds: 7776000;
+            /**
+             * @description custom when a value is stored, default otherwise.
+             * @enum {string}
+             */
+            source: "default" | "custom";
+        };
+        /** @description The windows to change. A key absent from the body is left as it is; an empty object changes nothing. */
+        AdvisorWindowsUpdate: {
+            /**
+             * Format: int64
+             * @description Seconds between 3600 and 7776000, or null to reset the key to its default.
+             */
+            "window.unused_index"?: number | null;
+            /**
+             * Format: int64
+             * @description Seconds between 3600 and 7776000, or null to reset the key to its default.
+             */
+            "window.backup_history"?: number | null;
         };
         /** @description Per-kind arguments: explain requires queryid and may include datname or analyze; cancel and terminate require pid and may include backend_start; pgstattuple requires schema and relation and may include datname. backend_start is the start time of the session the caller saw at pid. Send it back exactly as the API reported it. When it is given and the session at pid started at another time, the agent refuses the command and signals nothing. datname is the database the command runs in; without it, the target DSN's own database. Query text is never sent to this API. */
         CommandArgs: {
@@ -3610,6 +3711,139 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdvisorRule"][];
+                };
+            };
+            /** @description The rule overrides could not be read. Without a database every rule is listed as enabled instead. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    setAdvisorRuleOverride: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The rule id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdvisorRuleOverride"];
+            };
+        };
+        responses: {
+            /** @description The rule as getAdvisorRules lists it after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdvisorRule"];
+                };
+            };
+            /** @description The body has no boolean enabled, or is malformed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            /** @description The store is unavailable; nothing was changed. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAdvisorWindows: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The two observation windows. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdvisorWindow"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description The store is unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    setAdvisorWindows: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdvisorWindowsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Both windows after the change, as getAdvisorWindows lists them. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdvisorWindow"][];
+                };
+            };
+            /** @description A value is not an integer between 3600 and 7776000 (or null), a key is not one of the two windows (another window.* key included), or the body is not an object; nothing was changed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            /** @description The store is unavailable; nothing was changed. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };

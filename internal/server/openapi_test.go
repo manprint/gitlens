@@ -432,6 +432,8 @@ func TestOpenAPIDocumentsRefusedJSONBodies(t *testing.T) {
 		{"/api/v1/clusters/{id}", "patch"},
 		{"/api/v1/instances/{id}", "patch"},
 		{"/api/v1/settings/retention/{family}", "put"},
+		{"/api/v1/advisor/rules/{id}/override", "put"},
+		{"/api/v1/settings/advisor-windows", "put"},
 	} {
 		operation := paths[route.path].(map[string]any)[route.method].(map[string]any)
 		responses := operation["responses"].(map[string]any)

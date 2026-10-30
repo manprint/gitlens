@@ -95,6 +95,7 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | GET | `/api/v1/findings` | `getFindings` | List advisor findings. |
 | GET | `/api/v1/findings/{finding-id}` | `getFinding` | Return one advisor finding. |
 | POST | `/api/v1/findings/{finding-id}/mute` | `muteFinding` | Mute a finding until a future timestamp, at most 90 days ahead. |
+| PUT | `/api/v1/advisor/rules/{id}/override` | `setAdvisorRuleOverride` | Enable or disable an advisor rule. |
 | DELETE | `/api/v1/findings/{finding-id}/mute` | `unmuteFinding` | Remove a finding mute. |
 
 ## agent
@@ -125,6 +126,8 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 
 | METHOD | Path | operationId | Summary |
 |---|---|---|---|
+| GET | `/api/v1/settings/advisor-windows` | `getAdvisorWindows` | List the advisor observation windows. |
 | GET | `/api/v1/settings/retention` | `getRetention` | List the data retention of each metrics family. |
 | GET | `/api/v1/settings/retention/preview` | `previewRetention` | Preview what a retention of some days would delete. |
+| PUT | `/api/v1/settings/advisor-windows` | `setAdvisorWindows` | Set or reset advisor observation windows. |
 | PUT | `/api/v1/settings/retention/{family}` | `setRetention` | Set the data retention of a metrics family. |

@@ -44,9 +44,27 @@ const rules: AdvisorRule[] = [
     scope: 'instance',
     needs: ['activity'],
     min_tier: 'T0',
+    enabled: true,
+    overridden: false,
   },
-  { id: 'bloat', severity: 'warning', scope: 'database', needs: ['stats'], min_tier: 'T1' },
-  { id: 'locks', severity: 'critical', scope: 'instance', needs: ['locks'], min_tier: 'T2' },
+  {
+    id: 'bloat',
+    severity: 'warning',
+    scope: 'database',
+    needs: ['stats'],
+    min_tier: 'T1',
+    enabled: true,
+    overridden: false,
+  },
+  {
+    id: 'locks',
+    severity: 'critical',
+    scope: 'instance',
+    needs: ['locks'],
+    min_tier: 'T2',
+    enabled: true,
+    overridden: false,
+  },
 ]
 
 async function settleInitialQueries() {

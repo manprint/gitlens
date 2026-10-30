@@ -1154,13 +1154,88 @@ components:
         mute_reason: { type: string }
     AdvisorRule:
       type: object
-      required: [id, severity, scope, needs, min_tier]
+      required: [id, severity, scope, needs, min_tier, enabled, overridden]
       properties:
         id: { type: string }
         severity: { type: string }
         scope: { type: string }
         needs: { type: array, items: { type: string } }
         min_tier: { $ref: '#/components/schemas/PermTier' }
+        enabled:
+          type: boolean
+          description: >-
+            true by default; false when the rule was disabled from the console
+            (setAdvisorRuleOverride): the advisor does not evaluate it and
+            resolves its findings at its next evaluation. Without a database
+            every rule is enabled.
+        overridden:
+          type: boolean
+          description: >-
+            true when the rule has an override row. Enabling a rule deletes its
+            row, so a rule back at its default is not overridden.
+    AdvisorRuleOverride:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+          description: >-
+            false disables the rule (stores an override); true enables it again
+            (deletes the override, back to the default).
+    AdvisorWindowKey:
+      type: string
+      enum: [window.unused_index, window.backup_history]
+      description: >-
+        An advisor observation window: the history the unused-index check and
+        the backup-history check look back over.
+    AdvisorWindow:
+      type: object
+      required: [key, seconds, default_seconds, min_seconds, max_seconds, source]
+      properties:
+        key: { $ref: '#/components/schemas/AdvisorWindowKey' }
+        seconds:
+          type: integer
+          format: int64
+          description: The window in seconds, the stored value or the default.
+        default_seconds:
+          type: integer
+          format: int64
+          enum: [604800]
+          description: The window without a stored value, 7 days.
+        min_seconds:
+          type: integer
+          format: int64
+          enum: [3600]
+          description: The shortest window, 1 hour.
+        max_seconds:
+          type: integer
+          format: int64
+          enum: [7776000]
+          description: The longest window, 90 days.
+        source:
+          type: string
+          enum: [default, custom]
+          description: custom when a value is stored, default otherwise.
+    AdvisorWindowsUpdate:
+      type: object
+      additionalProperties: false
+      description: >-
+        The windows to change. A key absent from the body is left as it is; an
+        empty object changes nothing.
+      properties:
+        window.unused_index:
+          type: [integer, 'null']
+          format: int64
+          minimum: 3600
+          maximum: 7776000
+          description: Seconds between 3600 and 7776000, or null to reset the key to its default.
+        window.backup_history:
+          type: [integer, 'null']
+          format: int64
+          minimum: 3600
+          maximum: 7776000
+          description: Seconds between 3600 and 7776000, or null to reset the key to its default.
     CommandArgs:
       type: object
       additionalProperties: false
@@ -3095,7 +3170,142 @@ paths:
               examples:
                 default:
                   value:
-                    - { id: query.slow_mean, severity: warning, scope: instance, needs: [Statements], min_tier: T0 }
+                    - { id: index.unused, severity: warning, scope: relation, needs: [Indexes], min_tier: T0, enabled: false, overridden: true }
+                    - { id: query.slow_mean, severity: warning, scope: instance, needs: [Statements], min_tier: T0, enabled: true, overridden: false }
+        '503':
+          description: >-
+            The rule overrides could not be read. Without a database every rule
+            is listed as enabled instead.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/advisor/rules/{id}/override:
+    put:
+      tags: [findings]
+      operationId: setAdvisorRuleOverride
+      summary: Enable or disable an advisor rule.
+      description: >-
+        Disabling stores an override; enabling deletes it, back to the default.
+        The advisor applies the change at its next evaluation: a disabled rule
+        is not evaluated, and its open, degraded and muted findings are
+        resolved with resolved_reason rule_disabled in their evidence. Enabling
+        the rule again lets its next evaluation reopen the findings whose
+        condition still holds.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }, description: The rule id, as getAdvisorRules lists it. }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdvisorRuleOverride' }
+            examples:
+              disable:
+                value: { enabled: false }
+              enable:
+                value: { enabled: true }
+      responses:
+        '200':
+          description: The rule as getAdvisorRules lists it after the change.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdvisorRule' }
+              examples:
+                default:
+                  value: { id: index.unused, severity: warning, scope: relation, needs: [Indexes], min_tier: T0, enabled: false, overridden: true }
+        '400':
+          description: The body has no boolean enabled, or is malformed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                default:
+                  value: { error: invalid enabled, detail: enabled is required and must be a boolean }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '503':
+          description: The store is unavailable; nothing was changed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/settings/advisor-windows:
+    get:
+      tags: [settings]
+      operationId: getAdvisorWindows
+      summary: List the advisor observation windows.
+      description: >-
+        Both windows, always in the order window.unused_index,
+        window.backup_history, with their default and bounds. A stored window
+        has no effect on findings until the advisor reads the windows (13.2).
+      responses:
+        '200':
+          description: The two observation windows.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AdvisorWindow' } }
+              examples:
+                default:
+                  value:
+                    - { key: window.unused_index, seconds: 3600, default_seconds: 604800, min_seconds: 3600, max_seconds: 7776000, source: custom }
+                    - { key: window.backup_history, seconds: 604800, default_seconds: 604800, min_seconds: 3600, max_seconds: 7776000, source: default }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '503':
+          description: The store is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    put:
+      tags: [settings]
+      operationId: setAdvisorWindows
+      summary: Set or reset advisor observation windows.
+      description: >-
+        Sets each key of the body to its seconds, or resets it to the default
+        with null, all in one transaction; an empty object changes nothing.
+        Only the two window keys are accepted. A short window can raise false
+        positives.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdvisorWindowsUpdate' }
+            examples:
+              set:
+                value: { window.unused_index: 3600 }
+              reset:
+                value: { window.backup_history: null }
+      responses:
+        '200':
+          description: Both windows after the change, as getAdvisorWindows lists them.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AdvisorWindow' } }
+              examples:
+                default:
+                  value:
+                    - { key: window.unused_index, seconds: 3600, default_seconds: 604800, min_seconds: 3600, max_seconds: 7776000, source: custom }
+                    - { key: window.backup_history, seconds: 604800, default_seconds: 604800, min_seconds: 3600, max_seconds: 7776000, source: default }
+        '400':
+          description: >-
+            A value is not an integer between 3600 and 7776000 (or null), a key
+            is not one of the two windows (another window.* key included), or
+            the body is not an object; nothing was changed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                default:
+                  value: { error: unknown key, detail: window.pgstattuple is not a setting; the keys are window.unused_index and window.backup_history }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '503':
+          description: The store is unavailable; nothing was changed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/settings/retention:
     get:

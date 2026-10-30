@@ -17,7 +17,12 @@ import { ALERTS_SECTIONS, EVENTS_SECTIONS } from '../src/features/alerts/alertin
 import { CLUSTER_SECTIONS } from '../src/features/cluster/clusterSections'
 import { INDEX_VIEWS } from '../src/features/indexes/indexViews'
 import { FINDINGS_VIEWS } from '../src/features/findings/findingsViews'
-import { AUDIT_VIEWS, INVENTORY_VIEWS, SETTINGS_TABS } from '../src/features/settings/settingsTabs'
+import {
+  ADVISOR_VIEWS,
+  AUDIT_VIEWS,
+  INVENTORY_VIEWS,
+  SETTINGS_TABS,
+} from '../src/features/settings/settingsTabs'
 import {
   CATALOG_VIEW_IDS,
   INSTANCE_SECTIONS,
@@ -126,6 +131,12 @@ export const FULLHD_ROUTES: readonly FullHdRoute[] = [
   ...INVENTORY_VIEWS.slice(1).map(({ id, label }): FullHdRoute => ({
     path: `/settings?view=${id}`,
     name: `Settings: Inventory, ${label}`,
+    kind: 'fit',
+  })),
+  // The other view of the Advisor rules tab; Rules is the default.
+  ...ADVISOR_VIEWS.slice(1).map(({ id, label }): FullHdRoute => ({
+    path: `/settings?tab=advisor&view=${id}`,
+    name: `Settings: Advisor rules, ${label}`,
     kind: 'fit',
   })),
   // The other view of the Audit & server tab; Command audit is the default.

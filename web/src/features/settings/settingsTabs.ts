@@ -52,3 +52,15 @@ export const AUDIT_VIEWS = [
 ] as const
 
 export type AuditViewId = (typeof AUDIT_VIEWS)[number]['id']
+
+/**
+ * The views of the Advisor rules tab (11.4, D26): the rules table at 20 rows
+ * and the observation windows form do not fit one Full HD screen together.
+ * Rules is the default and is never written to the URL.
+ */
+export const ADVISOR_VIEWS = [
+  { id: 'rules', label: 'Rules' },
+  { id: 'windows', label: 'Observation windows' },
+] as const
+
+export type AdvisorViewId = (typeof ADVISOR_VIEWS)[number]['id']

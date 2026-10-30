@@ -99,6 +99,36 @@ func TestMigrations_0022_0023_NameIndexes(t *testing.T) {
 	require.Contains(t, sql, "CREATE UNIQUE INDEX IF NOT EXISTS instances_display_name_uniq ON instances (tenant_id, lower(display_name)) WHERE display_name IS NOT NULL;")
 }
 
+// ADVO-001 (schema): the rule overrides table of 11.4 (D18) is keyed by tenant
+// and rule, its tenant defaults to 'default', and the migration is safe to run
+// again. The round trip itself runs on a real database (MIG-ADV-001,
+// ADVO-INT-001).
+func TestADVO001_MigrationDefinesRuleOverrides(t *testing.T) {
+	data, err := migrationFS.ReadFile("migrations/0024_advisor_rule_overrides.sql")
+	require.NoError(t, err)
+	sql := string(data)
+	require.Contains(t, sql, "CREATE TABLE IF NOT EXISTS advisor_rule_overrides (")
+	require.Contains(t, sql, "tenant_id text NOT NULL DEFAULT 'default',")
+	require.Contains(t, sql, "rule_id text NOT NULL,")
+	require.Contains(t, sql, "enabled boolean NOT NULL,")
+	require.Contains(t, sql, "updated_at timestamptz NOT NULL DEFAULT now(),")
+	require.Contains(t, sql, "PRIMARY KEY (tenant_id, rule_id)")
+}
+
+// ADVW-001 (schema): server_settings holds one jsonb value per tenant and key
+// (D22c); a key without a row has its default.
+func TestADVW001_MigrationDefinesServerSettings(t *testing.T) {
+	data, err := migrationFS.ReadFile("migrations/0025_server_settings.sql")
+	require.NoError(t, err)
+	sql := string(data)
+	require.Contains(t, sql, "CREATE TABLE IF NOT EXISTS server_settings (")
+	require.Contains(t, sql, "tenant_id text NOT NULL DEFAULT 'default',")
+	require.Contains(t, sql, "key text NOT NULL,")
+	require.Contains(t, sql, "value jsonb NOT NULL,")
+	require.Contains(t, sql, "updated_at timestamptz NOT NULL DEFAULT now(),")
+	require.Contains(t, sql, "PRIMARY KEY (tenant_id, key)")
+}
+
 // TestMigrations_SeededRuleMetricsAreProduced — a Tier 1 seed rule whose
 // metric name does not match a metric something actually emits is silently
 // dead: internal/alert's metric source queries `metrics` by exact name, so

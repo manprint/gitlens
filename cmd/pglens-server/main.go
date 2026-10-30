@@ -135,6 +135,9 @@ func run() int {
 	alertEngine.Start(startupCtx)
 	defer alertEngine.Stop()
 	advisorEngine := advisor.NewEngine(pool, nil, 0)
+	// The rules disabled from the console (11.4) are read by the server and
+	// handed to the engine, which never reads their table itself.
+	advisorEngine.SetOverridesSource(server.AdvisorOverridesSource(pool))
 	advisorEngine.Start(startupCtx)
 	defer advisorEngine.Stop()
 	alertAPI := server.NewAlertAPI(pool, alertStore)

@@ -31,6 +31,8 @@ const baseRule: AdvisorRule = {
   scope: 'cluster',
   needs: [],
   min_tier: 'T0',
+  enabled: true,
+  overridden: false,
 }
 
 const mutedUntil = '2026-08-27T04:00:00.000Z'

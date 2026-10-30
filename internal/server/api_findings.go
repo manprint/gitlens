@@ -15,7 +15,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/manprint/pglens/internal/advisor"
 	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/manprint/pglens/internal/store"
 )
@@ -268,19 +267,4 @@ func (a *API) unmuteFinding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func (a *API) listAdvisorRules(w http.ResponseWriter, r *http.Request) {
-	type ruleJSON struct {
-		ID       string           `json:"id"`
-		Severity advisor.Severity `json:"severity"`
-		Scope    advisor.Scope    `json:"scope"`
-		Needs    []string         `json:"needs"`
-		MinTier  string           `json:"min_tier"`
-	}
-	out := make([]ruleJSON, 0, len(advisor.All()))
-	for _, rule := range advisor.All() {
-		out = append(out, ruleJSON{rule.ID(), rule.Severity(), rule.Scope(), rule.Needs(), rule.MinTier().String()})
-	}
-	writeJSON(w, 200, out)
 }
