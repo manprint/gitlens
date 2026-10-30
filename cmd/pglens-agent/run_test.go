@@ -203,7 +203,7 @@ func TestFlushEnvelopeBoundsAnUnreachableTarget(t *testing.T) {
 	var mu sync.Mutex
 	pending := map[string][]wire.Result{"hung": {{Check: "probe", TS: time.Now()}}}
 	began := time.Now()
-	flushEnvelope(ctx, []*agent.Manager{mgr}, &mu, pending, &edgeStates{byName: map[string]edgeState{}}, map[string]bool{}, map[string]map[string]bool{}, pusher)
+	flushEnvelope(ctx, []*agent.Manager{mgr}, &mu, pending, &edgeStates{byName: map[string]edgeState{}}, map[string]bool{}, map[string]map[string]bool{}, agentCoverage{}, pusher)
 	require.Less(t, time.Since(began), 10*time.Second, "a flush waited longer than the stop grace for one unreachable target")
 }
 
@@ -231,7 +231,7 @@ func TestFlushEnvelopeKeepsTheSkipsOfAnUnreachableTarget(t *testing.T) {
 		{Check: "replication_streaming", TS: time.Now(), SkipReason: "role unknown not allowed"},
 		{Check: "probe", TS: time.Now(), Error: "dial timeout"},
 	}}
-	flushEnvelope(ctx, []*agent.Manager{mgr}, &mu, pending, &edgeStates{byName: map[string]edgeState{}}, map[string]bool{}, map[string]map[string]bool{}, pusher)
+	flushEnvelope(ctx, []*agent.Manager{mgr}, &mu, pending, &edgeStates{byName: map[string]edgeState{}}, map[string]bool{}, map[string]map[string]bool{}, agentCoverage{}, pusher)
 
 	require.Len(t, pending["hung"], 1, "only the skip is kept; the error of this cycle is dropped")
 	require.Equal(t, "replication_streaming", pending["hung"][0].Check)
@@ -252,7 +252,7 @@ func TestFlushEnvelopeQueuesNothingWhenNothingIsReachable(t *testing.T) {
 	pusher.SetBuffer(buf)
 
 	var mu sync.Mutex
-	flushEnvelope(context.Background(), []*agent.Manager{mgr}, &mu, map[string][]wire.Result{}, &edgeStates{byName: map[string]edgeState{}}, map[string]bool{}, map[string]map[string]bool{}, pusher)
+	flushEnvelope(context.Background(), []*agent.Manager{mgr}, &mu, map[string][]wire.Result{}, &edgeStates{byName: map[string]edgeState{}}, map[string]bool{}, map[string]map[string]bool{}, agentCoverage{}, pusher)
 
 	_, _, err = buf.Next()
 	require.ErrorIs(t, err, io.EOF, "an empty envelope must not be queued")
@@ -274,7 +274,7 @@ func TestFlushEnvelopeQueuesNothingWhenNoTargetIsReachable(t *testing.T) {
 
 	var mu sync.Mutex
 	pending := map[string][]wire.Result{mgr.Database(): {{Check: "host", TS: time.Now()}}}
-	flushEnvelope(context.Background(), []*agent.Manager{mgr}, &mu, pending, &edgeStates{byName: map[string]edgeState{}}, map[string]bool{}, map[string]map[string]bool{}, pusher)
+	flushEnvelope(context.Background(), []*agent.Manager{mgr}, &mu, pending, &edgeStates{byName: map[string]edgeState{}}, map[string]bool{}, map[string]map[string]bool{}, agentCoverage{}, pusher)
 
 	_, _, err = buf.Next()
 	require.ErrorIs(t, err, io.EOF, "an envelope without instances must not be queued")

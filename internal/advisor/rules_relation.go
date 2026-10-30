@@ -124,18 +124,45 @@ func isPrefix(a, b []string) bool {
 }
 
 // unusedWindow is how long an index must go unscanned to be a candidate: in
-// the instance's own history, or since the statistics reset.
+// the instance's own history, or since the statistics reset. It is the default
+// of Windows.UnusedIndex, which the console can change.
 const unusedWindow = 7 * 24 * time.Hour
 
 // neverScannedSinceReset reports whether the index has no scan since the
 // statistics reset and that reset is at least a window old, or is unknown. Such
 // an index is a candidate at once, without the instance's own history. It is
 // never true before PostgreSQL 16, where the scan is untracked.
-func neverScannedSinceReset(now time.Time, i IndexStat) bool {
+func neverScannedSinceReset(now time.Time, i IndexStat, window time.Duration) bool {
 	if !i.ScanTracked || i.LastScan != nil {
 		return false
 	}
-	return i.StatsReset == nil || now.Sub(*i.StatsReset) >= unusedWindow
+	return i.StatsReset == nil || now.Sub(*i.StatsReset) >= window
+}
+
+// scannedWithin reports whether PostgreSQL (16 and later) recorded a scan of
+// the index within the window. Such an index is in use, however short the
+// instance's own history is.
+func scannedWithin(now time.Time, i IndexStat, window time.Duration) bool {
+	return i.ScanTracked && i.LastScan != nil && now.Sub(*i.LastScan) < window
+}
+
+// indexObservation is the effective observation window of an index (D22b):
+// the instance's own history of it, or the age of PostgreSQL's statistics when
+// that is longer. Before PostgreSQL 16 the scans made before pglens started
+// cannot be told apart (the counters are stored as rates and last_idx_scan
+// does not exist), so the instance's own history alone counts. When
+// PostgreSQL recorded a scan since the reset, its statistics prove non-use
+// only since that last scan, so the observation runs from it.
+func indexObservation(now time.Time, i IndexStat) Observation {
+	firstSeen := now.Add(-time.Duration(i.HistoryDays * float64(24*time.Hour)))
+	var since *time.Time
+	if i.ScanTracked {
+		since = i.StatsReset
+		if i.LastScan != nil {
+			since = i.LastScan
+		}
+	}
+	return EffectiveObservation(firstSeen, since, now)
 }
 
 // standbyScans reports whether a sibling scanned the index, and whether any
@@ -162,11 +189,15 @@ func init() {
 			return nil
 		}
 		var out []Finding
+		window := s.windows().UnusedIndex
 		for _, i := range s.Indexes {
-			sinceReset := neverScannedSinceReset(s.Now, i)
+			if scannedWithin(s.Now, i, window) {
+				continue
+			}
+			sinceReset := neverScannedSinceReset(s.Now, i, window)
 			if !sinceReset {
-				if i.HistoryDays < 7 {
-					out = append(out, degradedRelation("index.unused", SeverityWarning, i.Datname, i.Name, "index usage history is shorter than 7 days"))
+				if i.HistoryDays < window.Hours()/24 {
+					out = append(out, degradedRelation("index.unused", SeverityWarning, i.Datname, i.Name, "index usage history is shorter than "+windowText(window)))
 					continue
 				}
 				// IdxScan is the peak scan rate over the whole history; the
@@ -180,7 +211,12 @@ func init() {
 				continue
 			}
 			detail := fmt.Sprintf("no scan of this index was recorded in %.1f days", i.HistoryDays)
-			evidence := map[string]any{"peak_scan_rate": i.IdxScan, "history_days": i.HistoryDays, "size_bytes": i.SizeBytes}
+			observed := indexObservation(s.Now, i)
+			evidence := map[string]any{
+				"peak_scan_rate": i.IdxScan, "history_days": i.HistoryDays, "size_bytes": i.SizeBytes,
+				"observed_source": observed.Source, "observed_for_seconds": int64(observed.Duration / time.Second),
+				"window_seconds": int64(window / time.Second),
+			}
 			if sinceReset {
 				detail = "no scan of this index since the statistics were reset, at an unknown time"
 				evidence["window"] = "since statistics reset"

@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -23,8 +24,8 @@ import (
 // advisor_rule_overrides and hands it to the advisor engine through
 // advisor.OverridesSource; the engine skips the rule and resolves its findings
 // at its next evaluation. The two observation windows are stored in
-// server_settings; until 13.2 wires advisor.Windows they change no finding
-// (R-11.0 A5).
+// server_settings and reach the engine the same way, through
+// advisor.WindowsSource (13.2); the engine reads them again every 30 seconds.
 
 // advisorWindow is one observation window the console sets.
 type advisorWindow struct {
@@ -180,6 +181,52 @@ func AdvisorOverridesSource(pool *pgxpool.Pool) advisor.OverridesSource {
 	}
 	st := pgAdvisorSettingsStore{pool: pool}
 	return st.RuleOverrides
+}
+
+// AdvisorWindowsSource is the advisor engine's view of the console's
+// observation windows (advisor.WindowsSource). Without a pool the engine keeps
+// its defaults.
+func AdvisorWindowsSource(pool *pgxpool.Pool) advisor.WindowsSource {
+	if pool == nil {
+		return nil
+	}
+	return advisorWindowsSource(pgAdvisorSettingsStore{pool: pool})
+}
+
+// advisorWindowsSource reads the two window keys through the loader the API
+// uses, which drops a stored value outside the bounds, so a key without a
+// valid value is its default. A failed read answers the windows of the last
+// read that succeeded, the defaults before any: a passing database error must
+// not move a window.
+func advisorWindowsSource(st advisorSettingsStore) advisor.WindowsSource {
+	var mu sync.Mutex
+	last := advisor.DefaultWindows()
+	return func(ctx context.Context) advisor.Windows {
+		stored, err := st.Windows(ctx)
+		mu.Lock()
+		defer mu.Unlock()
+		if err != nil {
+			log.Printf("advisor windows: read the console's windows (keeping the previous ones): %v", err)
+			return last
+		}
+		last = advisorWindowsOf(stored)
+		return last
+	}
+}
+
+// advisorWindowsOf turns the stored windows, key to seconds, into the
+// advisor's. A key that is absent or out of bounds is its default.
+func advisorWindowsOf(stored map[string]int64) advisor.Windows {
+	windows := advisor.DefaultWindows()
+	window := func(key string, def time.Duration) time.Duration {
+		if seconds, ok := stored[key]; ok && windowInBounds(seconds) {
+			return time.Duration(seconds) * time.Second
+		}
+		return def
+	}
+	windows.UnusedIndex = window("window.unused_index", windows.UnusedIndex)
+	windows.BackupHistory = window("window.backup_history", windows.BackupHistory)
+	return windows
 }
 
 // advisorSettings is the store of the API: the stub of a test, else the

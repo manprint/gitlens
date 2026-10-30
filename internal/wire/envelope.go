@@ -51,6 +51,42 @@ type Instance struct {
 	// nil means an agent build that predates this field (unknown, treated
 	// as enabled by the server). SYS-ASH-002.
 	ASHEnabled *bool `json:"ash_enabled,omitempty"`
+	// AgentStartedAt is when the agent process started, in UTC: the same in
+	// every push until the agent restarts. The coverage endpoint measures the
+	// checks' first runs from it (D22d). nil means an agent build that
+	// predates this field.
+	AgentStartedAt *time.Time `json:"agent_started_at,omitempty"`
+	// CheckIntervals maps every check the agent schedules for this target to
+	// its interval in seconds, as the schedule resolved it (the configured
+	// interval, else the check's default). nil means an agent build that
+	// predates this field, or a target with no check scheduled yet.
+	CheckIntervals map[string]int `json:"check_intervals,omitempty"`
+}
+
+// FirstRunWarmupCap bounds the delay before a check's first run after the
+// agent starts (D22a): an interval of up to a minute waits at most 30 s, up to
+// 15 minutes at most 120 s, and anything longer at most 600 s. The agent draws
+// each first-run delay below FirstRunBound; the server uses the same bound to
+// say when a check that has not reported yet is expected.
+func FirstRunWarmupCap(interval time.Duration) time.Duration {
+	switch {
+	case interval <= time.Minute:
+		return 30 * time.Second
+	case interval <= 15*time.Minute:
+		return 120 * time.Second
+	default:
+		return 600 * time.Second
+	}
+}
+
+// FirstRunBound is the longest a check of this interval waits before its
+// first run: the interval or its warm-up cap, whichever is shorter. A
+// non-positive interval runs at once.
+func FirstRunBound(interval time.Duration) time.Duration {
+	if interval <= 0 {
+		return 0
+	}
+	return min(interval, FirstRunWarmupCap(interval))
 }
 
 type Database struct {

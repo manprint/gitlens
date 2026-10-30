@@ -140,6 +140,9 @@ func run() int {
 	// The rules disabled from the console (11.4) are read by the server and
 	// handed to the engine, which never reads their table itself.
 	advisorEngine.SetOverridesSource(server.AdvisorOverridesSource(pool))
+	// The observation windows set from the console (13.2) reach the rules the
+	// same way.
+	advisorEngine.SetWindowsSource(server.AdvisorWindowsSource(pool))
 	advisorEngine.Start(startupCtx)
 	defer advisorEngine.Stop()
 	alertAPI := server.NewAlertAPI(pool, alertStore)

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -195,6 +196,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	var relationPrunes []store.RelationStatsPrune
 	var factPrunes []store.ObjectFactPrune
 	var checkOutcomes []checkOutcome
+	var checkResultRows []store.CheckResultRow
 	currentSeries := make(map[uuid.UUID]map[pgtype.SeriesKey]struct{}, len(env.Instances))
 	// Counter baselines move only once the rows that use them have committed
 	// (delta.Batch). One batch per instance, so a rejected instance drops its own.
@@ -365,6 +367,8 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		var instErr error
 		// The results this instance counts, kept back until it is stored.
 		var instOutcomes []checkOutcome
+		// The newest result of each check, for the coverage endpoint.
+		instCheckResults := make(map[partialKey]store.CheckResultRow)
 		instSeries := make(map[pgtype.SeriesKey]struct{})
 		instDelta := p.delta.Begin()
 
@@ -479,6 +483,9 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 				if latest, seen := partialState[pk]; !seen || !r.TS.Before(latest.ts) {
 					partialState[pk] = partialObservation{ts: r.TS, partial: r.Partial, truncated: r.Truncated}
 				}
+			}
+			if r.SkipReason == "" {
+				observeCheckResult(instCheckResults, instUUID, inst.AgentStartedAt, r)
 			}
 			// A skipped scrape completed neither way. Counting it as OK would let
 			// it hide the errors the same check reports on that instance. The
@@ -876,6 +883,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		factPrunes = append(factPrunes, instFactPrunes...)
 		storedInstances = append(storedInstances, instUUID)
 		checkOutcomes = append(checkOutcomes, instOutcomes...)
+		checkResultRows = append(checkResultRows, sortedCheckResults(instCheckResults)...)
 		storedRoles[instUUID] = role
 		res.Accepted++
 	}
@@ -923,6 +931,9 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 			return nil, err
 		}
 	}
+	if err := store.WriteCheckResults(ctx, tx, checkResultRows); err != nil {
+		return nil, fmt.Errorf("write check results: %w", err)
+	}
 	if err := store.WriteLockSnapshots(ctx, tx, lockSnapshotRows); err != nil {
 		return nil, fmt.Errorf("write lock snapshots: %w", err)
 	}
@@ -956,6 +967,43 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		SetSeriesTotal(instID.String(), float64(len(series)))
 	}
 	return res, nil
+}
+
+// observeCheckResult folds r into the row of its check and database: the
+// first and the newest result of the envelope, and whether the newest failed.
+// A database-scoped check has a row per database, so a success in one does not
+// hide a failure in another; of results with the same time a failed one wins.
+func observeCheckResult(results map[partialKey]store.CheckResultRow, instance uuid.UUID, agentStartedAt *time.Time, r wire.Result) {
+	failed := r.Error != ""
+	key := partialKey{check: r.Check, datname: r.Database}
+	prev, ok := results[key]
+	if !ok {
+		results[key] = store.CheckResultRow{InstanceID: instance, Check: r.Check, Datname: r.Database, FirstTS: r.TS, LastTS: r.TS, Failed: failed, AgentStartedAt: agentStartedAt}
+		return
+	}
+	if r.TS.Before(prev.FirstTS) {
+		prev.FirstTS = r.TS
+	}
+	if r.TS.After(prev.LastTS) || (r.TS.Equal(prev.LastTS) && failed) {
+		prev.LastTS, prev.Failed = r.TS, failed
+	}
+	results[key] = prev
+}
+
+// sortedCheckResults lists the rows in check and database order, so two
+// envelopes of one instance always lock its rows in the same order.
+func sortedCheckResults(results map[partialKey]store.CheckResultRow) []store.CheckResultRow {
+	out := make([]store.CheckResultRow, 0, len(results))
+	for _, row := range results {
+		out = append(out, row)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Check != out[j].Check {
+			return out[i].Check < out[j].Check
+		}
+		return out[i].Datname < out[j].Datname
+	})
+	return out
 }
 
 func uniqueStrings(values []string) []string {

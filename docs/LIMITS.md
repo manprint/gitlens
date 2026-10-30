@@ -112,6 +112,22 @@ warehouse or another unusual workload can legitimately trigger several rules.
 Findings are advice with an attached reason, not verdicts; review the reason
 and disagree with it when the workload justifies doing so.
 
+`index.unused` needs an index to have gone unscanned for its observation
+window (`window.unused_index`, 7 days by default). On PostgreSQL 16 and later
+the window can be covered by PostgreSQL's own statistics: an index with no
+`last_idx_scan` since a statistics reset older than the window is a candidate
+at once. PostgreSQL 15 and earlier have no `last_idx_scan`, and pglens stores
+index scans as per-scrape rates, so a scan made before pglens started cannot
+be told apart: there the window is covered only by pglens's own history of the
+index, and the finding stays degraded until it is.
+
+The coverage of an instance (`GET /api/v1/instances/{id}/coverage`) expects
+each check's first result within its first-run bound of the agent process
+start. A check scheduled later than the start — after a schedule reconcile,
+once an extension it needs is installed, or for a target unreachable at start
+— is listed `pending` with an `expected_by` already past until its first
+result arrives.
+
 ## 8. Scrapes do not see sub-interval events
 
 There is no sampling below a check's scrape interval. A lock held for 200 ms

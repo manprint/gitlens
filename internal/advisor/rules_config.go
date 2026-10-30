@@ -20,8 +20,13 @@ const (
 	// WAL a primary recycles.
 	walSegmentBytes = 16 * 1024 * 1024
 	// backupHistory is how long an instance must have been watched before
-	// "no base backup seen" means something.
+	// "no base backup seen" means something: the default of
+	// Windows.BackupHistory, which the console can change.
 	backupHistory = 7 * 24 * time.Hour
+	// basebackupRecentAge is the age below which a base backup is recent. It
+	// is fixed, not the configured window: a shorter window must not make a
+	// two-day-old backup stale.
+	basebackupRecentAge = 7 * 24 * time.Hour
 	// basebackupMaxAge is the age past which a base backup no longer counts
 	// as a backup strategy.
 	basebackupMaxAge = 30 * 24 * time.Hour
@@ -115,8 +120,8 @@ func monitoredFor(s *Snapshot) time.Duration {
 	return s.Now.Sub(s.FirstSeen)
 }
 
-func degradedBackup(id string, sev Severity) Finding {
-	return Finding{RuleID: id, Severity: sev, State: StateDegraded, Scope: ScopeInstance, Title: "Backup history unavailable", Detail: "the instance has been monitored for less than 7 days and no base backup has been seen yet", DegradedReason: "insufficient backup history"}
+func degradedBackup(id string, sev Severity, window time.Duration) Finding {
+	return Finding{RuleID: id, Severity: sev, State: StateDegraded, Scope: ScopeInstance, Title: "Backup history unavailable", Detail: "the instance has been monitored for less than " + windowText(window) + " and no base backup has been seen yet", DegradedReason: "insufficient backup history"}
 }
 
 type configRule struct {
@@ -386,14 +391,14 @@ func init() {
 		}
 		if last, ok := lastBasebackup(s); ok {
 			age := s.Now.Sub(last)
-			if age < backupHistory {
+			if age < basebackupRecentAge {
 				return nil
 			}
 			days := age.Hours() / 24
 			return []Finding{configFinding("backup.no_basebackup_seen", SeverityWarning, "No recent base backup", fmt.Sprintf("the last base backup seen streaming from the cluster is %.0f days old", days), "Establish and verify a regular base backup schedule; backups copied outside the replication protocol (file-level tools, storage snapshots) are not visible here", map[string]any{"age_days": days})}
 		}
-		if monitoredFor(s) < backupHistory {
-			return []Finding{degradedBackup("backup.no_basebackup_seen", SeverityWarning)}
+		if window := s.windows().BackupHistory; monitoredFor(s) < window {
+			return []Finding{degradedBackup("backup.no_basebackup_seen", SeverityWarning, window)}
 		}
 		days := monitoredFor(s).Hours() / 24
 		return []Finding{configFinding("backup.no_basebackup_seen", SeverityWarning, "No recent base backup", fmt.Sprintf("no base backup has been seen streaming from the cluster in %.0f days of monitoring", days), "Establish and verify a regular base backup schedule; backups copied outside the replication protocol (file-level tools, storage snapshots) are not visible here", map[string]any{"monitored_days": days})}
@@ -408,8 +413,8 @@ func init() {
 		if last, ok := lastBasebackup(s); ok && s.Now.Sub(last) <= basebackupMaxAge {
 			return nil
 		}
-		if monitoredFor(s) < backupHistory {
-			return []Finding{degradedBackup("backup.no_strategy", SeverityCritical)}
+		if window := s.windows().BackupHistory; monitoredFor(s) < window {
+			return []Finding{degradedBackup("backup.no_strategy", SeverityCritical, window)}
 		}
 		return []Finding{configFinding("backup.no_strategy", SeverityCritical, "No visible backup strategy", "no member of the cluster archives WAL and no base backup has been seen streaming in the last 30 days", "Configure archiving or establish a verified base backup strategy", nil)}
 	}})

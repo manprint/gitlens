@@ -12,6 +12,7 @@ import (
 	"github.com/manprint/pglens/internal/check"
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/pgtype"
+	"github.com/manprint/pglens/internal/wire"
 )
 
 // ScheduleEntry is a single (target, check, database?) entry.
@@ -245,16 +246,11 @@ func (s *Scheduler) run(ctx context.Context) {
 
 // warmupCap bounds the first-run delay so that a slow check (hourly, say)
 // still reports shortly after the agent starts instead of up to one whole
-// interval later; the spread keeps entries from all firing at once.
+// interval later; the spread keeps entries from all firing at once. The caps
+// live in the wire package, because the server's coverage endpoint states the
+// same bound to the console.
 func warmupCap(interval time.Duration) time.Duration {
-	switch {
-	case interval <= time.Minute:
-		return 30 * time.Second
-	case interval <= 15*time.Minute:
-		return 120 * time.Second
-	default:
-		return 600 * time.Second
-	}
+	return wire.FirstRunWarmupCap(interval)
 }
 
 // firstRunDelay draws the delay before an entry's first scrape:
@@ -264,6 +260,23 @@ func firstRunDelay(interval time.Duration, rnd func(int64) int64) time.Duration 
 		return 0
 	}
 	return time.Duration(rnd(int64(min(interval, warmupCap(interval)))))
+}
+
+// Intervals answers the resolved schedule of one target: every check it has an
+// entry for, mapped to that entry's interval in whole seconds (the configured
+// interval, else the check's default). A database-scoped check has one entry
+// per database, all on the same interval, and is listed once.
+func (s *Scheduler) Intervals(target string) map[string]int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]int{}
+	for _, entry := range s.entries {
+		if entry.target.Database() != target {
+			continue
+		}
+		out[entry.check.Name()] = int(entry.interval / time.Second)
+	}
+	return out
 }
 
 func (s *Scheduler) runEntry(ctx context.Context, entry schedEntry) {

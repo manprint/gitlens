@@ -499,6 +499,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/instances/{id}/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Return how complete the data of an instance is since its agent started.
+         * @description Every check the instance's agent schedules, with its newest stored result of the current agent run. A check reports once shortly after the agent starts (within 30 s to 10 minutes, by its interval) and then on its interval; until it has reported it is pending and expected_by says when it should have. Rate series still need two samples and are not part of this view.
+         */
+        get: operations["getCoverage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instances/{id}/bloat": {
         parameters: {
             query?: never;
@@ -2239,6 +2259,56 @@ export interface components {
             "window.backup_history"?: number | null;
         };
         /**
+         * @description reported once a result of the current agent run is stored; failed when that newest result carried an error (for a check run in every database, the newest result in any one database); pending until then.
+         * @enum {string}
+         */
+        CoverageCheckState: "reported" | "pending" | "failed";
+        CoverageCheck: {
+            check: string;
+            /**
+             * Format: int32
+             * @description The check's interval; null when the agent does not report intervals.
+             */
+            interval_seconds: number | null;
+            state: components["schemas"]["CoverageCheckState"];
+            /**
+             * Format: date-time
+             * @description The first stored result of the current agent run; null while pending.
+             */
+            first_result_at: string | null;
+            /**
+             * Format: date-time
+             * @description The newest stored result of the current agent run; null while pending.
+             */
+            last_result_at: string | null;
+            /**
+             * Format: date-time
+             * @description While pending and the agent start is known: the start, plus the check's first-run bound (its interval, at most 30 s for an interval up to 1 minute, 120 s up to 15 minutes and 600 s beyond), plus 30 s. It counts from the agent process start, so a check scheduled later can be pending with an expected_by already past. Null otherwise.
+             */
+            expected_by: string | null;
+        };
+        CoverageResponse: {
+            instance_id: components["schemas"]["InstanceId"];
+            /**
+             * Format: date-time
+             * @description When the instance's agent started; null for an agent that does not report it. Its checks are then the stored results, with no interval and no expected_by.
+             */
+            agent_started_at: string | null;
+            generated_at: components["schemas"]["Timestamp"];
+            /** @description Every check the agent schedules for the instance, by name. */
+            checks: components["schemas"]["CoverageCheck"][];
+            /**
+             * Format: int32
+             * @description The checks in state reported.
+             */
+            reported: number;
+            /**
+             * Format: int32
+             * @description The checks listed.
+             */
+            total: number;
+        };
+        /**
          * @description A delivery channel of the alerts: a Slack incoming webhook, a generic JSON webhook, or a Google Chat space webhook.
          * @enum {string}
          */
@@ -2391,6 +2461,12 @@ export interface components {
             topology_edges?: components["schemas"]["PushEdge"][];
             /** @description Absent from agents that predate the field. */
             ash_enabled?: boolean;
+            /** @description When the agent process started, in UTC: the same on every push until the agent restarts. Absent from agents that predate the field; the server then has no start to measure coverage from. */
+            agent_started_at?: components["schemas"]["Timestamp"];
+            /** @description Every check the agent schedules for the target, mapped to its interval in seconds (the configured interval, else the check's default). Absent from agents that predate the field. */
+            check_intervals?: {
+                [key: string]: number;
+            };
         };
         PushDatabase: {
             name?: string;
@@ -3313,6 +3389,30 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+        };
+    };
+    getCoverage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["InstanceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The checks of the instance and how many have reported. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
         };
     };
     getInstanceBloat: {

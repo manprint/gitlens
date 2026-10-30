@@ -105,7 +105,7 @@ func TestINTRUN002_FlushSendsAQuietTargetAsAHeartbeat(t *testing.T) {
 		buf, pusher := newFlushBuffer(t)
 
 		var mu sync.Mutex
-		flushEnvelope(ctx, []*agent.Manager{mgr}, &mu, map[string][]wire.Result{}, &edgeStates{byName: map[string]edgeState{}}, map[string]bool{}, map[string]map[string]bool{}, pusher)
+		flushEnvelope(ctx, []*agent.Manager{mgr}, &mu, map[string][]wire.Result{}, &edgeStates{byName: map[string]edgeState{}}, map[string]bool{}, map[string]map[string]bool{}, agentCoverage{}, pusher)
 
 		env := readEnvelope(t, buf)
 		require.Len(t, env.Instances, 1)
@@ -140,7 +140,7 @@ func TestINTRUN003_FlushOmitsATargetWithoutIdentity(t *testing.T) {
 				{Check: "replication_streaming", TS: time.Now(), SkipReason: "role primary not allowed"},
 				{Check: "locks", TS: time.Now()},
 			}}
-			flushEnvelope(ctx, []*agent.Manager{mgr}, &mu, pending, &edgeStates{byName: map[string]edgeState{}}, map[string]bool{}, map[string]map[string]bool{}, pusher)
+			flushEnvelope(ctx, []*agent.Manager{mgr}, &mu, pending, &edgeStates{byName: map[string]edgeState{}}, map[string]bool{}, map[string]map[string]bool{}, agentCoverage{}, pusher)
 
 			_, _, err = buf.Next()
 			require.ErrorIs(t, err, io.EOF, "an instance without identity must not be sent, and an envelope without one is not queued")

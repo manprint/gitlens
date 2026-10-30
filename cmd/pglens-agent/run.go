@@ -35,6 +35,10 @@ func runAgentCommand(args []string) {
 	configPath := fs.String("config", envOr("PGLENS_CONFIG", "/etc/pglens/agent.yaml"), "path to the agent config file")
 	_ = fs.Parse(args) // flag.ExitOnError: Parse never returns on failure
 
+	// The process start, reported on every push until the agent restarts: the
+	// server measures the checks' first runs from it (D22d).
+	startedAt := time.Now().UTC()
+
 	cfg, err := agent.LoadConfig(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: load config %s: %v\n", *configPath, err)
@@ -203,6 +207,7 @@ func runAgentCommand(args []string) {
 		os.Exit(1)
 	}
 	go schedules.run()
+	coverage := agentCoverage{startedAt: startedAt, intervals: schedules.checkIntervals}
 
 	// Commands are long-polled once per agent, independently from the check
 	// scheduler. Executors are registered by the command-executor phases; the
@@ -235,7 +240,7 @@ func runAgentCommand(args []string) {
 			case <-ctx.Done():
 				return
 			case <-pushTicker.C():
-				flushEnvelope(ctx, managers, &mu, pending, lastEdgeState, ashEnabled, scheduledDBs, pusher) //nolint:contextcheck // flushEnvelope->HasExtension: Manager caches this at connect time, the accessor takes no context
+				flushEnvelope(ctx, managers, &mu, pending, lastEdgeState, ashEnabled, scheduledDBs, coverage, pusher) //nolint:contextcheck // flushEnvelope->HasExtension: Manager caches this at connect time, the accessor takes no context
 			}
 		}
 	}()
@@ -295,7 +300,7 @@ func runAgentCommand(args []string) {
 	// cannot protect, because the envelope had not been built yet. Queue()
 	// only writes to the local buffer, so this is bounded disk I/O, not a
 	// network round trip, and the records are delivered on the next start.
-	flushEnvelope(shutdownCtx, managers, &mu, pending, lastEdgeState, ashEnabled, scheduledDBs, pusher) //nolint:contextcheck // flushEnvelope->HasExtension: Manager caches this at connect time, the accessor takes no context
+	flushEnvelope(shutdownCtx, managers, &mu, pending, lastEdgeState, ashEnabled, scheduledDBs, coverage, pusher) //nolint:contextcheck // flushEnvelope->HasExtension: Manager caches this at connect time, the accessor takes no context
 
 	_ = healthSrv.Shutdown(shutdownCtx)
 	closeTargets(ashStops, managers)
@@ -377,7 +382,7 @@ func hostWireResult(s host.Sample, now time.Time) wire.Result {
 	return r
 }
 
-func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mutex, pending map[string][]wire.Result, lastEdgeState *edgeStates, ashEnabled map[string]bool, scheduledDBs map[string]map[string]bool, pusher *agent.Pusher) {
+func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mutex, pending map[string][]wire.Result, lastEdgeState *edgeStates, ashEnabled map[string]bool, scheduledDBs map[string]map[string]bool, coverage agentCoverage, pusher *agent.Pusher) {
 	mu.Lock()
 	batch := make(map[string][]wire.Result, len(pending))
 	for k, v := range pending {
@@ -390,6 +395,7 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 	for k, v := range scheduledDBs {
 		scheduled[k] = v
 	}
+	coverage = coverage.snapshot()
 	mu.Unlock()
 
 	env := &wire.Envelope{ProtocolVersion: wire.ProtocolVersion, SentAt: time.Now(), AgentVersion: version}
@@ -502,6 +508,8 @@ func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mute
 			Results:         results,
 			TopologyEdges:   edges,
 			ASHEnabled:      boolPtr(ashEnabled[mgr.Database()]),
+			AgentStartedAt:  coverage.started(),
+			CheckIntervals:  coverage.intervals[mgr.Database()],
 		})
 		cancel()
 	}
@@ -794,3 +802,32 @@ func envOr(key, def string) string {
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+// agentCoverage is what each instance of an envelope reports about the agent's
+// schedule (D22d): when the agent process started, and every target's resolved
+// check intervals (scheduleSet.checkIntervals, guarded by the flush's mutex).
+// The zero value reports neither.
+type agentCoverage struct {
+	startedAt time.Time
+	intervals map[string]map[string]int
+}
+
+// snapshot copies the target map. The schedule set replaces a target's
+// intervals rather than editing them, so the copy is a stable view for the
+// whole flush. Call it with the mutex held.
+func (c agentCoverage) snapshot() agentCoverage {
+	out := agentCoverage{startedAt: c.startedAt, intervals: make(map[string]map[string]int, len(c.intervals))}
+	for target, intervals := range c.intervals {
+		out.intervals[target] = intervals
+	}
+	return out
+}
+
+// started is the agent start for the wire, nil when unknown.
+func (c agentCoverage) started() *time.Time {
+	if c.startedAt.IsZero() {
+		return nil
+	}
+	t := c.startedAt.UTC()
+	return &t
+}

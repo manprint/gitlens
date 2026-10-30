@@ -50,6 +50,7 @@ export const qk = {
   instanceBloat: (id: string, limit?: number, objectKind?: string) =>
     ['getInstanceBloat', id, limit, objectKind] as const,
   instanceCommandAudit: (id: string) => ['getInstanceCommandAudit', id] as const,
+  coverage: (id: string) => ['getCoverage', id] as const,
   locks: (instanceId: string) => ['getLocks', instanceId] as const,
   queryMetrics: (
     metric: string,

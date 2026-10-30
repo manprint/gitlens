@@ -420,9 +420,12 @@ still holds. The evaluation runs every `PGLENS_ADVISOR_INTERVAL` (15 minutes by
 default). Rule thresholds cannot be edited. The Observation windows view sets
 `window.unused_index` and `window.backup_history` (`GET` and
 `PUT /api/v1/settings/advisor-windows`, values in seconds, from 1 hour to 90
-days; `null` resets a window to its 7-day default). The windows are stored
-only: the advisor keeps using its 7-day windows until a later release reads the
-stored values, so a change does not alter any finding yet.
+days; `null` resets a window to its 7-day default). The advisor reads the
+stored windows at most every 30 seconds and judges with them from its next
+evaluation: `window.unused_index` is the history `index.unused` needs, and
+`window.backup_history` the monitoring history after which the backup rules
+stop being degraded. A base backup still counts as recent for a fixed seven
+days, whatever the window.
 
 The Notifications tab lists the three alert delivery channels — Slack,
 generic webhook and Google Chat — with whether each is configured, the host
@@ -874,10 +877,20 @@ How the rules read the collected data:
   the median mean of the previous week.
 - `txn.high_rollback_ratio` is evaluated per database: the share of that
   database's transactions rolled back since its statistics were reset.
-- `index.unused` waits for seven days of history of the index and uses its
-  peak scan rate over the whole stored history, so an index that was merely
-  idle for a few minutes is not a candidate; primary-key and unique indexes
-  never are.
+- `index.unused` waits until the index has been observed for its window
+  (`window.unused_index`, seven days by default) and uses its peak scan rate
+  over the whole stored history, so an index that was merely idle for a few
+  minutes is not a candidate; primary-key and unique indexes never are. The
+  observation is the longer of pglens's own history of the index and, on
+  PostgreSQL 16 and later, the time since PostgreSQL's statistics were reset:
+  an index with no `last_idx_scan` since a reset older than the window is a
+  candidate at once, and one PostgreSQL saw scanned inside the window is not.
+  The finding's evidence carries `observed_source` (`pglens` or
+  `postgres_stats`), `observed_for_seconds` and `window_seconds`; an index
+  PostgreSQL saw scanned before the window counts as observed since that
+  scan, not since the reset. PostgreSQL 15 and earlier have no
+  `last_idx_scan`, so there only pglens's history counts (see
+  `docs/LIMITS.md`).
 - The bloat rules read the latest bloat row of each relation: an exact
   `pgstattuple` measurement from the last seven days wins over an estimate,
   and an estimate counts for 13 hours (the estimate runs every six hours).
@@ -898,7 +911,7 @@ How the rules read the collected data:
   taken outside the replication protocol (file-level tools, storage
   snapshots) are never seen. Until a base backup has been seen,
   `backup.no_basebackup_seen` and `backup.no_strategy` stay degraded for the
-  first seven days of monitoring.
+  first `window.backup_history` of monitoring (seven days by default).
 
 ### Advisor rule catalogue
 
@@ -1564,6 +1577,42 @@ curl -s -b cookies.txt "localhost:8080/api/v1/instances/11111111-1111-1111-1111-
 The response groups recent activity metrics, including database connection
 counts and age gauges, for example `{"stale":false,"metrics":{"pg_connections_by_database":[{"value":3,"labels":{"datname":"app"}}]}}`.
 
+### `GET /api/v1/instances/{id}/coverage`
+
+```sh
+curl -s -b cookies.txt "localhost:8080/api/v1/instances/11111111-1111-1111-1111-111111111111/coverage" | jq .
+```
+
+How complete the picture of an instance is since its agent last started. The
+agent reports its start time and the interval of every check it schedules on
+each push; every check is `reported` once a result of the current agent run is
+stored, `failed` when its newest result carried an error (for a check that runs
+in every database, its newest result in any one database), and `pending` until
+then, with `expected_by` set to the agent start plus the check's first-run
+bound (its interval, at most 30 seconds, 2 minutes or 10 minutes for intervals
+up to 1 minute, 15 minutes and longer) plus 30 seconds. `expected_by` counts
+from the start of the agent process, so a check scheduled later — after a
+schedule reconcile, once an extension it needs is installed, or for a target
+that was unreachable at start — can be `pending` with an `expected_by` already
+past. An agent older than this endpoint reports neither: `agent_started_at`
+and `expected_by` are `null` and the states come from the stored results alone.
+The agent must not be newer than the server: a server that predates these
+fields refuses its pushes.
+
+```json
+{
+  "instance_id": "11111111-1111-1111-1111-111111111111",
+  "agent_started_at": "2026-10-30T02:00:00Z",
+  "generated_at": "2026-10-30T02:03:00Z",
+  "checks": [
+    {"check": "activity", "interval_seconds": 15, "state": "reported", "first_result_at": "2026-10-30T02:00:12Z", "last_result_at": "2026-10-30T02:02:57Z", "expected_by": null},
+    {"check": "settings", "interval_seconds": 3600, "state": "pending", "first_result_at": null, "last_result_at": null, "expected_by": "2026-10-30T02:10:30Z"}
+  ],
+  "reported": 1,
+  "total": 2
+}
+```
+
 ### `GET /api/v1/metrics/query`
 
 ```sh
@@ -1738,7 +1787,7 @@ GET    /api/v1/clusters/{id}/slots
 GET    /api/v1/instances
 GET    /api/v1/instances/{id}
 PATCH  /api/v1/instances/{id}
-GET    /api/v1/instances/{id}/activity|databases|host|settings|tables|indexes|bloat|command-audit
+GET    /api/v1/instances/{id}/activity|databases|host|settings|tables|indexes|bloat|command-audit|coverage
 GET    /api/v1/instances/{id}/workload/series
 GET    /api/v1/locks
 GET    /api/v1/metrics/query

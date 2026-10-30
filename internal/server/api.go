@@ -46,6 +46,8 @@ type API struct {
 	// advisorSettings replaces the database's advisor settings store in unit
 	// tests (11.4).
 	advisorSettings advisorSettingsStore
+	// coverage replaces the database's coverage store in unit tests (13.2).
+	coverage coverageStore
 	// notifications is the delivery configuration of the Notifications tab
 	// (11.5a), set by SetNotificationChannels.
 	notifications notificationChannels
@@ -88,6 +90,7 @@ func (a *API) RegisterRoutes(r chi.Router) {
 	a.registerRetentionRoutes(r)
 	a.registerAdvisorSettingsRoutes(r)
 	a.registerNotificationChannelRoutes(r)
+	a.registerCoverageRoutes(r)
 }
 
 // Ready verifies that the database is reachable and the complete migration

@@ -18,6 +18,7 @@ import {
   useClusters,
   useClusterTopology,
   useCommand,
+  useCoverage,
   useEvents,
   useFinding,
   useFindings,
@@ -372,6 +373,7 @@ describe('query hooks', () => {
       'getInstanceIndexes',
       'getInstanceBloat',
       'getInstanceCommandAudit',
+      'getCoverage',
       'getLocks',
       'queryMetrics',
       'getEvents',
@@ -411,6 +413,7 @@ describe('query hooks', () => {
         <HookProbe label="instance-indexes" useHook={useInstanceIndexesForCoverage} />
         <HookProbe label="instance-bloat" useHook={useInstanceBloatForCoverage} />
         <HookProbe label="instance-command-audit" useHook={useInstanceCommandAuditForCoverage} />
+        <HookProbe label="coverage" useHook={useCoverageForCoverage} />
         <HookProbe label="locks" useHook={useLocksForCoverage} />
         <HookProbe label="query-metrics" useHook={useQueryMetricsForCoverage} />
         <HookProbe label="events" useHook={useEventsForCoverage} />
@@ -504,6 +507,10 @@ function useInstanceBloatForCoverage() {
 
 function useInstanceCommandAuditForCoverage() {
   return useInstanceCommandAudit('instance-a')
+}
+
+function useCoverageForCoverage() {
+  return useCoverage('instance-a')
 }
 
 function useLocksForCoverage() {

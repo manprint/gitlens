@@ -76,6 +76,12 @@ type Engine struct {
 	// failed read keeps it, so a passing database error neither re-enables nor
 	// disables a rule.
 	disabled map[string]bool
+	// windowsSrc is the injected observation windows source; nil means
+	// DefaultWindows. windows is its last answer, read at windowsAt and kept
+	// for windowsCacheTTL.
+	windowsSrc WindowsSource
+	windows    Windows
+	windowsAt  time.Time
 }
 
 func NewEngine(pool *pgxpool.Pool, clk clock.Clock, interval time.Duration) *Engine {
@@ -118,6 +124,37 @@ func (e *Engine) SetOverridesSource(src OverridesSource) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.overrides = src
+}
+
+// SetWindowsSource gives the engine the console's observation windows. Call it
+// before Start; nil (the default) keeps DefaultWindows.
+func (e *Engine) SetWindowsSource(src WindowsSource) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.windowsSrc = src
+	e.windowsAt = time.Time{}
+}
+
+// currentWindows answers the observation windows of a pass: the source's
+// answer, read again once windowsCacheTTL has passed, so a change from the
+// console applies within that time.
+func (e *Engine) currentWindows(ctx context.Context, now time.Time) Windows {
+	e.mu.Lock()
+	src, cached, at := e.windowsSrc, e.windows, e.windowsAt
+	e.mu.Unlock()
+	if src == nil {
+		return DefaultWindows()
+	}
+	if !at.IsZero() && now.Sub(at) < windowsCacheTTL && !now.Before(at) {
+		return cached
+	}
+	stepCtx, cancel := e.step(ctx)
+	defer cancel()
+	windows := src(stepCtx).orDefault()
+	e.mu.Lock()
+	e.windows, e.windowsAt = windows, now
+	e.mu.Unlock()
+	return windows
 }
 
 // disabledRules reads the overrides and answers the ids of the disabled rules
@@ -303,6 +340,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	}
 	now := e.clock.Now()
 	disabled := e.disabledRules(ctx)
+	windows := e.currentWindows(ctx, now)
 	stepCtx, cancel = e.step(ctx)
 	ids, err := e.store.ActiveInstances(stepCtx, now.Add(-time.Hour))
 	cancel()
@@ -323,7 +361,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		errs = append(errs, err)
 	}
 	for _, id := range ids {
-		if err := e.runInstanceWithin(ctx, id, now, disabled); err != nil {
+		if err := e.runInstanceWithin(ctx, id, now, disabled, windows); err != nil {
 			errs = append(errs, err)
 		}
 		// A shutdown ends the pass between instances. Stop waits for the pass
@@ -382,17 +420,18 @@ func (e *Engine) resolveDisabled(ctx context.Context, disabled map[string]bool, 
 
 // runInstanceWithin runs one instance under its own budget, so an instance
 // that exceeds it fails alone and the pass goes on to the next.
-func (e *Engine) runInstanceWithin(ctx context.Context, id uuid.UUID, now time.Time, disabled map[string]bool) error {
+func (e *Engine) runInstanceWithin(ctx context.Context, id uuid.UUID, now time.Time, disabled map[string]bool, windows Windows) error {
 	stepCtx, cancel := e.step(ctx)
 	defer cancel()
-	return e.runInstance(stepCtx, id, now, disabled)
+	return e.runInstance(stepCtx, id, now, disabled, windows)
 }
 
-func (e *Engine) runInstance(ctx context.Context, id uuid.UUID, now time.Time, disabled map[string]bool) error {
+func (e *Engine) runInstance(ctx context.Context, id uuid.UUID, now time.Time, disabled map[string]bool, windows Windows) error {
 	s, err := e.load(ctx, id, now)
 	if err != nil {
 		return fmt.Errorf("load advisor snapshot %s: %w", id, err)
 	}
+	s.Windows = windows
 	rules := All()
 	ran := make([]string, 0, len(rules))
 	seen := []string{}

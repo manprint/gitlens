@@ -345,6 +345,26 @@ export function useInstanceExtensions(id: string) {
   })
 }
 
+/**
+ * `GET /api/v1/instances/{id}/coverage` (getCoverage): every check the
+ * instance's agent schedules and whether it has reported since the agent
+ * started. Polled like the instance page, so a check's report shows within one
+ * interval.
+ */
+export function useCoverage(id: string) {
+  return useApiQuery({
+    policy: REFRESH.instance,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/coverage', {
+          params: { path: { id } },
+          signal,
+        }),
+      ),
+    queryKey: qk.coverage(id),
+  })
+}
+
 export function useInstanceSpatialColumns(id: string) {
   return useApiQuery({
     policy: REFRESH.catalog,

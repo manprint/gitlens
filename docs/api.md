@@ -22,6 +22,7 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | GET | `/api/v1/instances/{id}/activity` | `getInstanceActivity` | Return recent activity metrics grouped by metric name. |
 | GET | `/api/v1/instances/{id}/bloat` | `getInstanceBloat` | Return relation bloat estimates. |
 | GET | `/api/v1/instances/{id}/command-audit` | `getInstanceCommandAudit` | Return the immutable command audit stream for an instance. |
+| GET | `/api/v1/instances/{id}/coverage` | `getCoverage` | Return how complete the data of an instance is since its agent started. |
 | GET | `/api/v1/instances/{id}/databases` | `getInstanceDatabases` | List databases and monitoring status for an instance. |
 | GET | `/api/v1/instances/{id}/extensions` | `getInstanceExtensions` | Return the extensions installed in each database. |
 | GET | `/api/v1/instances/{id}/functions` | `getInstanceFunctions` | Return the busiest tracked functions and each database's function tracking. |

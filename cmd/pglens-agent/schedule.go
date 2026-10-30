@@ -217,6 +217,10 @@ type scheduleSet struct {
 	mu           *sync.Mutex // guards pending and scheduledDBs, which the flush also reads
 	pending      map[string][]wire.Result
 	scheduledDBs map[string]map[string]bool // target -> databases its database-scoped checks run for
+	// checkIntervals is the resolved schedule of each target, check name to
+	// interval in seconds, replaced under mu by every build. The flush reports
+	// it on wire.Instance.CheckIntervals.
+	checkIntervals map[string]map[string]int
 
 	// reconcileMu serialises start and reconcile, so two passes never build from
 	// the same gates. It is held across the reads, which wait on the targets, so
@@ -240,6 +244,8 @@ func newScheduleSet(ctx context.Context, cfg *agent.Config, clk clock.Clock, man
 		mu:           mu,
 		pending:      pending,
 		scheduledDBs: scheduledDBs,
+
+		checkIntervals: map[string]map[string]int{},
 	}
 }
 
@@ -380,6 +386,11 @@ func (s *scheduleSet) buildLocked() error {
 		mgr.SetScheduledDatabases(s.gates[mgr.Database()].databases)
 		addScheduleEntries(sched, mgr, s.cfg, s.mu, s.pending, s.gates[mgr.Database()])
 	}
+	s.mu.Lock()
+	for _, mgr := range s.managers {
+		s.checkIntervals[mgr.Database()] = sched.Intervals(mgr.Database())
+	}
+	s.mu.Unlock()
 	if err := sched.Start(s.ctx); err != nil {
 		return err
 	}

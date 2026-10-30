@@ -201,6 +201,14 @@ type Snapshot struct {
 	Settings      map[string]string
 	// SettingContexts maps a setting to its pg_settings context.
 	SettingContexts map[string]string
+	// Windows are the observation windows of this evaluation. The engine sets
+	// them from its WindowsSource; an unset window is its default.
+	Windows Windows
+}
+
+// windows answers the observation windows the rules judge with.
+func (s *Snapshot) windows() Windows {
+	return s.Windows.orDefault()
 }
 
 func (s *Snapshot) Metric(name string, labels map[string]string) (float64, bool) {

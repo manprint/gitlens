@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -252,8 +253,8 @@ func (inv *Inventory) upsertOne(ctx context.Context, tenantID string, agentID uu
 		// among them either: it is the liveness the server reports, and the pipeline
 		// sets it in the same transaction.
 		if _, execErr := inv.pool.Exec(ctx,
-			`UPDATE instances SET pg_version=$1, perm_tier=$2, addr=$3, port=$4, target_name=$5, ash_enabled=$6 WHERE instance_id=$7`,
-			inst.PGVersion, inst.PermTier, inst.Addr, inst.Port, inst.TargetName, inst.ASHEnabled, instUUID); execErr != nil {
+			`UPDATE instances SET pg_version=$1, perm_tier=$2, addr=$3, port=$4, target_name=$5, ash_enabled=$6, agent_started_at=$7, check_intervals=$8 WHERE instance_id=$9`,
+			inst.PGVersion, inst.PermTier, inst.Addr, inst.Port, inst.TargetName, inst.ASHEnabled, inst.AgentStartedAt, checkIntervalsParam(inst.CheckIntervals), instUUID); execErr != nil {
 			return fmt.Errorf("update instance %s: %w", inst.InstanceID, execErr)
 		}
 	} else {
@@ -270,10 +271,10 @@ func (inv *Inventory) upsertOne(ctx context.Context, tenantID string, agentID uu
 		// a new instance must not already hold the role it is about to report, or
 		// its first sighting would look unchanged.
 		if _, err := inv.pool.Exec(ctx,
-			`INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, target_name, last_seen, ash_enabled)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,'unknown',$8,$9,now(),$10)
-			 ON CONFLICT (instance_id) DO UPDATE SET pg_version=EXCLUDED.pg_version, perm_tier=EXCLUDED.perm_tier, addr=EXCLUDED.addr, port=EXCLUDED.port, target_name=EXCLUDED.target_name, ash_enabled=EXCLUDED.ash_enabled`,
-			instUUID, tenantID, cidDB, agentID, inst.Addr, inst.Port, inst.PGVersion, inst.PermTier, inst.TargetName, inst.ASHEnabled); err != nil {
+			`INSERT INTO instances (instance_id, tenant_id, cluster_id, agent_id, addr, port, pg_version, role, perm_tier, target_name, last_seen, ash_enabled, agent_started_at, check_intervals)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,'unknown',$8,$9,now(),$10,$11,$12)
+			 ON CONFLICT (instance_id) DO UPDATE SET pg_version=EXCLUDED.pg_version, perm_tier=EXCLUDED.perm_tier, addr=EXCLUDED.addr, port=EXCLUDED.port, target_name=EXCLUDED.target_name, ash_enabled=EXCLUDED.ash_enabled, agent_started_at=EXCLUDED.agent_started_at, check_intervals=EXCLUDED.check_intervals`,
+			instUUID, tenantID, cidDB, agentID, inst.Addr, inst.Port, inst.PGVersion, inst.PermTier, inst.TargetName, inst.ASHEnabled, inst.AgentStartedAt, checkIntervalsParam(inst.CheckIntervals)); err != nil {
 			return fmt.Errorf("insert instance %s: %w", inst.InstanceID, err)
 		}
 	}
@@ -463,4 +464,33 @@ func nullableString(s string) any {
 		return nil
 	}
 	return s
+}
+
+// maxCheckIntervals bounds the checks one instance may report: the agent has a
+// few dozen, and the map is stored and listed as it comes.
+const maxCheckIntervals = 256
+
+// checkIntervalsParam is the check_intervals column of an instance: NULL when
+// the agent did not report the field (an older agent), else the JSON object of
+// the entries that name a check (1 to 128 bytes) with a positive interval.
+func checkIntervalsParam(intervals map[string]int) any {
+	if intervals == nil {
+		return nil
+	}
+	names := make([]string, 0, len(intervals))
+	for name := range intervals {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	kept := make(map[string]int, len(intervals))
+	for _, name := range names {
+		if seconds := intervals[name]; name != "" && len(name) <= 128 && seconds > 0 && len(kept) < maxCheckIntervals {
+			kept[name] = seconds
+		}
+	}
+	raw, err := json.Marshal(kept)
+	if err != nil {
+		return nil
+	}
+	return raw
 }

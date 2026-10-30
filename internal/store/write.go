@@ -183,6 +183,22 @@ type ObjectFactRow struct {
 	FirstSeen, LastSeen, ChangedAt time.Time
 }
 
+// CheckResultRow sums up the results of one check of an instance in one
+// database in one envelope (13.2, D22d): the first and the newest result, and
+// whether the newest failed. Datname is empty for an instance-scoped check. A
+// skipped check has none.
+type CheckResultRow struct {
+	InstanceID uuid.UUID
+	Check      string
+	Datname    string
+	FirstTS    time.Time
+	LastTS     time.Time
+	Failed     bool
+	// AgentStartedAt is the start of the agent run that produced the result;
+	// nil from an agent that does not report it.
+	AgentStartedAt *time.Time
+}
+
 // LockSnapshotRow contains the latest sampled lock tree for one instance.
 type LockSnapshotRow struct {
 	TenantID   string
@@ -498,6 +514,31 @@ func WriteObjectFacts(ctx context.Context, tx pgx.Tx, rows []ObjectFactRow) erro
 		args = append(args, []any{r.TenantID, r.ClusterID, r.InstanceID, r.Datname, r.Kind, r.Key, labels, r.ValueText, r.ValueJSON, r.FirstSeen, r.LastSeen, r.ChangedAt})
 	}
 	return writeRows(ctx, tx, `INSERT INTO object_facts (tenant_id,cluster_id,instance_id,datname,kind,key,labels,value_text,value_json,first_seen,last_seen,changed_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (tenant_id,instance_id,datname,kind,key) DO UPDATE SET last_seen=EXCLUDED.last_seen,labels=EXCLUDED.labels,value_text=EXCLUDED.value_text,value_json=EXCLUDED.value_json,changed_at=CASE WHEN object_facts.value_text IS DISTINCT FROM EXCLUDED.value_text OR object_facts.value_json IS DISTINCT FROM EXCLUDED.value_json THEN EXCLUDED.last_seen ELSE object_facts.changed_at END`, args)
+}
+
+// CheckResultUpsertSQL keeps one row per check of an instance and database:
+// the newest result decides last_failed, and a result whose agent run started
+// after the stored result begins the run's first_result_at again. A result
+// older than the stored one, as a replayed envelope carries, moves neither
+// forward. A result of an instance the inventory does not hold is not stored:
+// the row references the instance, and a missing one would otherwise fail the
+// whole envelope.
+const CheckResultUpsertSQL = `INSERT INTO check_results (instance_id, check_name, datname, first_result_at, last_result_at, last_failed)
+	SELECT $1::uuid, $2::text, $3::text, $4::timestamptz, $5::timestamptz, $6::boolean
+	WHERE EXISTS (SELECT 1 FROM instances WHERE instance_id = $1::uuid)
+	ON CONFLICT (instance_id, check_name, datname) DO UPDATE SET
+	first_result_at = CASE WHEN $7::timestamptz IS NOT NULL AND check_results.last_result_at < $7::timestamptz AND EXCLUDED.last_result_at >= $7::timestamptz THEN EXCLUDED.first_result_at
+		ELSE LEAST(check_results.first_result_at, EXCLUDED.first_result_at) END,
+	last_result_at = GREATEST(check_results.last_result_at, EXCLUDED.last_result_at),
+	last_failed = CASE WHEN EXCLUDED.last_result_at >= check_results.last_result_at THEN EXCLUDED.last_failed ELSE check_results.last_failed END`
+
+// WriteCheckResults records the results of every check of the envelope.
+func WriteCheckResults(ctx context.Context, tx pgx.Tx, rows []CheckResultRow) error {
+	args := make([][]any, 0, len(rows))
+	for _, r := range rows {
+		args = append(args, []any{r.InstanceID, r.Check, r.Datname, r.FirstTS, r.LastTS, r.Failed, r.AgentStartedAt})
+	}
+	return writeRows(ctx, tx, CheckResultUpsertSQL, args)
 }
 
 // ObjectFactPrune describes a complete result of a check whose fact kinds it
