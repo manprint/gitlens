@@ -165,6 +165,11 @@ components:
       required: [instance_id, addr, port, role, pg_version, perm_tier, last_seen, up]
       properties:
         instance_id: { $ref: '#/components/schemas/InstanceId' }
+        display_name:
+          type: [string, 'null']
+          description: >-
+            The name given to the instance with renameInstance; null when it has
+            none, and the instance is labelled by address and port.
         addr: { type: string }
         port: { type: integer, format: int32 }
         role: { type: string }
@@ -172,12 +177,37 @@ components:
         perm_tier: { $ref: '#/components/schemas/PermTier' }
         last_seen: { $ref: '#/components/schemas/Timestamp' }
         up: { type: boolean }
+    ClusterRename:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: [string, 'null']
+          description: >-
+            The new cluster name. Surrounding white space is trimmed; the trimmed
+            name has at most 64 characters, any Unicode text but no control,
+            invisible format or separator character, and is unique among the clusters without regard to case.
+            null, an empty or an all-blank name clears it.
+    InstanceRename:
+      type: object
+      additionalProperties: false
+      required: [display_name]
+      properties:
+        display_name:
+          type: [string, 'null']
+          description: >-
+            The new instance display name, under the rules of ClusterRename.name,
+            unique among the instances without regard to case. null, an empty or
+            an all-blank name clears it.
     Cluster:
       type: object
       required: [cluster_id, name, id_source, primary, instance_count, health, instances]
       properties:
         cluster_id: { $ref: '#/components/schemas/ClusterId' }
-        name: { type: [string, 'null'] }
+        name:
+          type: [string, 'null']
+          description: The name given to the cluster with renameCluster; null when it has none.
         id_source: { type: string }
         primary: { type: [string, 'null'], format: uuid }
         instance_count: { type: integer, format: int32 }
@@ -1428,6 +1458,71 @@ paths:
                           last_seen: '2026-08-27T02:00:00Z'
                           up: true
 
+  /api/v1/clusters/{id}:
+    patch:
+      tags: [clusters]
+      operationId: renameCluster
+      summary: Set or clear the name of a cluster.
+      description: >-
+        The name is written by one statement and answered with the cluster as
+        getClusters lists it. A cluster without an instance is not listed and is
+        answered 404. An inventory refresh does not change the name.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/ClusterId' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClusterRename' }
+            examples:
+              default:
+                value: { name: pg-prod-eu }
+              clear:
+                value: { name: null }
+      responses:
+        '200':
+          description: The renamed cluster.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cluster' }
+              examples:
+                default:
+                  value:
+                    cluster_id: '7381927364512345678'
+                    name: pg-prod-eu
+                    id_source: system_identifier
+                    primary: 11111111-1111-1111-1111-111111111111
+                    instance_count: 1
+                    health: ok
+                    instances:
+                      - instance_id: 11111111-1111-1111-1111-111111111111
+                        display_name: null
+                        addr: pg-primary
+                        port: 5432
+                        role: primary
+                        pg_version: 170006
+                        perm_tier: T0
+                        last_seen: '2026-08-27T02:00:00Z'
+                        up: true
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Another cluster already has the name, compared without case.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                default:
+                  value: { error: name already in use, detail: another cluster has this name; names are compared without case }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '503':
+          description: The store is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/clusters/{id}/topology:
     get:
       tags: [clusters]
@@ -1621,6 +1716,63 @@ paths:
                     databases_not_monitored: 0
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [instances]
+      operationId: renameInstance
+      summary: Set or clear the display name of an instance.
+      description: >-
+        The display name is written by one statement and answered with the
+        instance as getInstances lists it. An inventory refresh does not change
+        the display name.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InstanceRename' }
+            examples:
+              default:
+                value: { display_name: odoo-db-1 }
+              clear:
+                value: { display_name: null }
+      responses:
+        '200':
+          description: The renamed instance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InstanceSummary' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    display_name: odoo-db-1
+                    cluster_id: '7381927364512345678'
+                    addr: pg-primary
+                    port: 5432
+                    role: primary
+                    pg_version: 170006
+                    perm_tier: T0
+                    last_seen: '2026-08-27T02:00:00Z'
+                    up: true
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Another instance already has the name, compared without case.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                default:
+                  value: { error: name already in use, detail: another instance has this name; names are compared without case }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '503':
+          description: The store is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/instances/{id}/activity:
     get:

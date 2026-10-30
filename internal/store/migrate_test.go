@@ -83,6 +83,22 @@ func TestMigrations_0012_ContainsTargetNameIdentity(t *testing.T) {
 	require.Contains(t, sql, "instances_target_name_idx")
 }
 
+// The rename endpoints rely on these indexes to refuse a duplicate name, so
+// each must be unique, case-insensitive, scoped to the tenant, and leave a
+// cleared name unconstrained. Both migrations must be safe to run again.
+func TestMigrations_0022_0023_NameIndexes(t *testing.T) {
+	data, err := migrationFS.ReadFile("migrations/0022_cluster_name_unique.sql")
+	require.NoError(t, err)
+	sql := string(data)
+	require.Contains(t, sql, "CREATE UNIQUE INDEX IF NOT EXISTS clusters_name_uniq ON clusters (tenant_id, lower(name)) WHERE name IS NOT NULL;")
+
+	data, err = migrationFS.ReadFile("migrations/0023_instance_display_name.sql")
+	require.NoError(t, err)
+	sql = string(data)
+	require.Contains(t, sql, "ALTER TABLE instances ADD COLUMN IF NOT EXISTS display_name text;")
+	require.Contains(t, sql, "CREATE UNIQUE INDEX IF NOT EXISTS instances_display_name_uniq ON instances (tenant_id, lower(display_name)) WHERE display_name IS NOT NULL;")
+}
+
 // TestMigrations_SeededRuleMetricsAreProduced — a Tier 1 seed rule whose
 // metric name does not match a metric something actually emits is silently
 // dead: internal/alert's metric source queries `metrics` by exact name, so

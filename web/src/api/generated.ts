@@ -22,6 +22,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clusters/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set or clear the name of a cluster.
+         * @description The name is written by one statement and answered with the cluster as getClusters lists it. A cluster without an instance is not listed and is answered 404. An inventory refresh does not change the name.
+         */
+        patch: operations["renameCluster"];
+        trace?: never;
+    };
     "/api/v1/clusters/{id}/topology": {
         parameters: {
             query?: never;
@@ -124,7 +144,11 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Set or clear the display name of an instance.
+         * @description The display name is written by one statement and answered with the instance as getInstances lists it. An inventory refresh does not change the display name.
+         */
+        patch: operations["renameInstance"];
         trace?: never;
     };
     "/api/v1/instances/{id}/activity": {
@@ -1047,6 +1071,8 @@ export interface components {
         };
         InstanceSummary: {
             instance_id: components["schemas"]["InstanceId"];
+            /** @description The name given to the instance with renameInstance; null when it has none, and the instance is labelled by address and port. */
+            display_name?: string | null;
             addr: string;
             /** Format: int32 */
             port: number;
@@ -1057,8 +1083,17 @@ export interface components {
             last_seen: components["schemas"]["Timestamp"];
             up: boolean;
         };
+        ClusterRename: {
+            /** @description The new cluster name. Surrounding white space is trimmed; the trimmed name has at most 64 characters, any Unicode text but no control, invisible format or separator character, and is unique among the clusters without regard to case. null, an empty or an all-blank name clears it. */
+            name: string | null;
+        };
+        InstanceRename: {
+            /** @description The new instance display name, under the rules of ClusterRename.name, unique among the instances without regard to case. null, an empty or an all-blank name clears it. */
+            display_name: string | null;
+        };
         Cluster: {
             cluster_id: components["schemas"]["ClusterId"];
+            /** @description The name given to the cluster with renameCluster; null when it has none. */
             name: string | null;
             id_source: string;
             /** Format: uuid */
@@ -2261,6 +2296,55 @@ export interface operations {
             };
         };
     };
+    renameCluster: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ClusterId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClusterRename"];
+            };
+        };
+        responses: {
+            /** @description The renamed cluster. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Cluster"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            /** @description Another cluster already has the name, compared without case. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            /** @description The store is unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     getClusterTopology: {
         parameters: {
             query?: never;
@@ -2398,6 +2482,55 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    renameInstance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["InstanceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstanceRename"];
+            };
+        };
+        responses: {
+            /** @description The renamed instance. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstanceSummary"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            /** @description Another instance already has the name, compared without case. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            /** @description The store is unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     getInstanceActivity: {

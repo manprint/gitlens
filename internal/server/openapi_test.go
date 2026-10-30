@@ -429,6 +429,8 @@ func TestOpenAPIDocumentsRefusedJSONBodies(t *testing.T) {
 		{"/api/v1/alert-rules/{rule_id}", "put"},
 		{"/api/v1/silences", "post"},
 		{"/api/v1/findings/{finding-id}/mute", "post"},
+		{"/api/v1/clusters/{id}", "patch"},
+		{"/api/v1/instances/{id}", "patch"},
 	} {
 		operation := paths[route.path].(map[string]any)[route.method].(map[string]any)
 		responses := operation["responses"].(map[string]any)

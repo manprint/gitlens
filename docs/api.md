@@ -11,6 +11,7 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | GET | `/api/v1/clusters/{id}/settings-drift` | `getClusterSettingsDrift` | Return settings that differ between instances in a cluster. |
 | GET | `/api/v1/clusters/{id}/slots` | `getClusterSlots` | Return the current state of every replication slot in a cluster. |
 | GET | `/api/v1/clusters/{id}/topology` | `getClusterTopology` | Return the replication topology and failover events for a cluster. |
+| PATCH | `/api/v1/clusters/{id}` | `renameCluster` | Set or clear the name of a cluster. |
 
 ## instances
 
@@ -39,6 +40,7 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | GET | `/api/v1/instances/{id}/unindexed-foreign-keys` | `getInstanceUnindexedForeignKeys` | Return the foreign keys no index serves. |
 | GET | `/api/v1/instances/{id}/workload/series` | `getWorkloadSeries` | Return time series of the tracked statements, tables or indexes. |
 | GET | `/api/v1/locks` | `getLocks` | Return the latest sampled blocking tree. |
+| PATCH | `/api/v1/instances/{id}` | `renameInstance` | Set or clear the display name of an instance. |
 
 ## metrics
 

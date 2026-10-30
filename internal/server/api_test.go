@@ -456,8 +456,8 @@ func TestAPI_MockPool_Clusters_TwoInstances(t *testing.T) {
 		queryResults: []*mockRows{
 			{rows: [][]any{{cidDB, nil, "manual"}}}, // clusters: one cluster, no name
 			{rows: [][]any{ // instances for that cluster
-				{cidDB, uuid.NewString(), "10.0.0.1", 5432, "primary", 170000, "T0", time.Now()},
-				{cidDB, uuid.NewString(), "10.0.0.2", 5432, "standby", 170000, "T0", time.Now().Add(-10 * time.Minute)}, // stale => down
+				{cidDB, uuid.NewString(), "10.0.0.1", 5432, "primary", 170000, "T0", time.Now(), nil},
+				{cidDB, uuid.NewString(), "10.0.0.2", 5432, "standby", 170000, "T0", time.Now().Add(-10 * time.Minute), nil}, // stale => down
 			}},
 		},
 	}
@@ -495,8 +495,8 @@ func TestAPI_MockPool_Clusters_TopologyEdgesAndLag(t *testing.T) {
 		queryResults: []*mockRows{
 			{rows: [][]any{{cidDB, nil, "manual"}}},
 			{rows: [][]any{
-				{cidDB, from.String(), "10.0.0.1", 5432, "primary", 170000, "T0", time.Now()},
-				{cidDB, toSync.String(), "10.0.0.2", 5432, "standby", 170000, "T0", time.Now()},
+				{cidDB, from.String(), "10.0.0.1", 5432, "primary", 170000, "T0", time.Now(), nil},
+				{cidDB, toSync.String(), "10.0.0.2", 5432, "standby", 170000, "T0", time.Now(), nil},
 			}},
 			{rows: [][]any{
 				{cidDB, from.String(), toSync.String(), "streaming", "sync", "high"},
@@ -548,8 +548,8 @@ func TestAPI_MockPool_Clusters_MeasuredZeroLag(t *testing.T) {
 		queryResults: []*mockRows{
 			{rows: [][]any{{cidDB, nil, "manual"}}},
 			{rows: [][]any{
-				{cidDB, uuid.NewString(), "10.0.0.1", 5432, "primary", 170000, "T0", time.Now()},
-				{cidDB, uuid.NewString(), "10.0.0.2", 5432, "standby", 170000, "T0", time.Now()},
+				{cidDB, uuid.NewString(), "10.0.0.1", 5432, "primary", 170000, "T0", time.Now(), nil},
+				{cidDB, uuid.NewString(), "10.0.0.2", 5432, "standby", 170000, "T0", time.Now(), nil},
 			}},
 			nil, nil, nil, nil, nil,
 			{rows: [][]any{{cidDB, 0.0}}}, // max replay lag
@@ -583,7 +583,7 @@ func TestAPI_MockPool_Clusters_SkipsClusterWithoutInstances(t *testing.T) {
 		queryResults: []*mockRows{
 			{rows: [][]any{{orphan, nil, "manual"}, {withInstances, nil, "manual"}}},
 			{rows: [][]any{
-				{withInstances, uuid.NewString(), "10.0.0.5", 5432, "primary", 170000, "T0", time.Now()},
+				{withInstances, uuid.NewString(), "10.0.0.5", 5432, "primary", 170000, "T0", time.Now(), nil},
 			}},
 		},
 	}
@@ -621,8 +621,8 @@ func TestAPI_MockPool_Clusters_MostRecentPrimaryWins(t *testing.T) {
 				// "pg-primary" sorts before "pg-standby" by addr, but it's
 				// the stale, dead one; the freshly-promoted instance must
 				// still win.
-				{cidDB, staleID, "pg-primary", 5432, "primary", 170000, "T0", time.Now().Add(-2 * time.Minute)},
-				{cidDB, freshID, "pg-standby", 5432, "primary", 170000, "T0", time.Now()},
+				{cidDB, staleID, "pg-primary", 5432, "primary", 170000, "T0", time.Now().Add(-2 * time.Minute), nil},
+				{cidDB, freshID, "pg-standby", 5432, "primary", 170000, "T0", time.Now(), nil},
 			}},
 		},
 	}
@@ -651,8 +651,8 @@ func TestAPI_MockPool_Clusters_TwoLivePrimariesAtOneEndpointAreCritical(t *testi
 		queryResults: []*mockRows{
 			{rows: [][]any{{cidDB, nil, "manual"}}},
 			{rows: [][]any{
-				{cidDB, uuid.NewString(), "10.0.5.1", 5432, "primary", 170000, "T0", time.Now().Add(-10 * time.Second)},
-				{cidDB, uuid.NewString(), "10.0.5.1", 5432, "primary", 170000, "T0", time.Now()},
+				{cidDB, uuid.NewString(), "10.0.5.1", 5432, "primary", 170000, "T0", time.Now().Add(-10 * time.Second), nil},
+				{cidDB, uuid.NewString(), "10.0.5.1", 5432, "primary", 170000, "T0", time.Now(), nil},
 			}},
 		},
 	}
@@ -684,12 +684,12 @@ func TestAPI_MockPool_Clusters_SupersededRowsAreNotPrimaryOrStandby(t *testing.T
 			{rows: [][]any{{cidDB, nil, "manual"}}},
 			{rows: [][]any{
 				// The former primary at 10.0.6.1 was rebuilt as a standby there.
-				{cidDB, uuid.NewString(), "10.0.6.1", 5432, "primary", 170000, "T0", time.Now().Add(-10 * time.Minute)},
-				{cidDB, uuid.NewString(), "10.0.6.1", 5432, "standby", 170000, "T0", time.Now().Add(-5 * time.Minute)},
-				{cidDB, primaryID, "10.0.6.2", 5432, "primary", 170000, "T0", time.Now().Add(-20 * time.Minute)},
+				{cidDB, uuid.NewString(), "10.0.6.1", 5432, "primary", 170000, "T0", time.Now().Add(-10 * time.Minute), nil},
+				{cidDB, uuid.NewString(), "10.0.6.1", 5432, "standby", 170000, "T0", time.Now().Add(-5 * time.Minute), nil},
+				{cidDB, primaryID, "10.0.6.2", 5432, "primary", 170000, "T0", time.Now().Add(-20 * time.Minute), nil},
 				// A standby at 10.0.6.3 was rebuilt in place.
-				{cidDB, uuid.NewString(), "10.0.6.3", 5432, "standby", 170000, "T0", time.Now().Add(-30 * time.Minute)},
-				{cidDB, uuid.NewString(), "10.0.6.3", 5432, "standby", 170000, "T0", time.Now().Add(-2 * time.Minute)},
+				{cidDB, uuid.NewString(), "10.0.6.3", 5432, "standby", 170000, "T0", time.Now().Add(-30 * time.Minute), nil},
+				{cidDB, uuid.NewString(), "10.0.6.3", 5432, "standby", 170000, "T0", time.Now().Add(-2 * time.Minute), nil},
 			}},
 		},
 	}
@@ -727,7 +727,7 @@ func TestAPI_MockPool_Instance_Found(t *testing.T) {
 	iid := uuid.New()
 	pool := &mockPool{
 		queryRowVals: []*mockRow{
-			{vals: []any{iid.String(), store.ToDB(cid), "10.0.0.9", 5432, "primary", 170000, "T0", time.Now()}},
+			{vals: []any{iid.String(), store.ToDB(cid), "10.0.0.9", 5432, "primary", 170000, "T0", time.Now(), nil}},
 		},
 		queryResults: []*mockRows{
 			{rows: [][]any{

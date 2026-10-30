@@ -54,6 +54,8 @@ func (a *API) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/clusters", a.handleClusters)
 	r.Get("/api/v1/instances", a.handleInstances)
 	r.Get("/api/v1/instances/{id}", a.handleInstance)
+	r.Patch("/api/v1/clusters/{id}", a.handleRenameCluster)
+	r.Patch("/api/v1/instances/{id}", a.handleRenameInstance)
 	r.Get("/api/v1/metrics/query", a.handleMetricsQuery)
 	r.Get("/api/v1/events", a.handleEvents)
 	r.Get("/api/v1/statements", a.handleStatements)
@@ -109,13 +111,27 @@ const maxJSONBodyBytes = 64 << 10
 // decodeJSONBody decodes the JSON body of a write request into dst. It writes
 // the error response and returns false when the body is too large or malformed.
 func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) bool {
+	return decodeJSONBodyAs(w, r, dst, false)
+}
+
+// decodeStrictJSONBody is decodeJSONBody that also refuses a field dst does not
+// declare, so a misspelled field is a 400 rather than a silent no-op.
+func decodeStrictJSONBody(w http.ResponseWriter, r *http.Request, dst any) bool {
+	return decodeJSONBodyAs(w, r, dst, true)
+}
+
+func decodeJSONBodyAs(w http.ResponseWriter, r *http.Request, dst any, strict bool) bool {
 	// The body must declare itself JSON. A form or text body is what a page on
 	// another site can send without a preflight, so it is refused unread.
 	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
 		writeError(w, http.StatusUnsupportedMediaType, "unsupported media type", "the body must be application/json")
 		return false
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)).Decode(dst); err != nil {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxJSONBodyBytes))
+	if strict {
+		dec.DisallowUnknownFields()
+	}
+	if err := dec.Decode(dst); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			writeError(w, http.StatusRequestEntityTooLarge, "payload too large", fmt.Sprintf("the body may not exceed %d bytes", maxJSONBodyBytes))
@@ -273,14 +289,15 @@ type statementsResp struct {
 // ----- /api/v1/clusters -----
 
 type clusterInstanceResp struct {
-	InstanceID string    `json:"instance_id"`
-	Addr       string    `json:"addr"`
-	Port       int       `json:"port"`
-	Role       string    `json:"role"`
-	PGVersion  int       `json:"pg_version"`
-	PermTier   string    `json:"perm_tier"`
-	LastSeen   time.Time `json:"last_seen"`
-	Up         bool      `json:"up"`
+	InstanceID  string    `json:"instance_id"`
+	DisplayName *string   `json:"display_name"`
+	Addr        string    `json:"addr"`
+	Port        int       `json:"port"`
+	Role        string    `json:"role"`
+	PGVersion   int       `json:"pg_version"`
+	PermTier    string    `json:"perm_tier"`
+	LastSeen    time.Time `json:"last_seen"`
+	Up          bool      `json:"up"`
 }
 
 type topologyEdgeResp struct {
@@ -309,13 +326,14 @@ type clusterResp struct {
 
 // clusterInstanceRow is one instances row of the cluster list.
 type clusterInstanceRow struct {
-	id        uuid.UUID
-	addr      string
-	port      int
-	role      string
-	pgVersion int
-	permTier  string
-	lastSeen  time.Time
+	id          uuid.UUID
+	addr        string
+	port        int
+	role        string
+	pgVersion   int
+	permTier    string
+	lastSeen    time.Time
+	displayName *string
 }
 
 // clusterEndpoint is the host and port an instance answers on. An instance
@@ -347,14 +365,9 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	type clusterRow struct {
-		idDB     int64
-		name     sql.NullString
-		idSource string
-	}
-	var clusters []clusterRow
+	var clusters []clusterListRow
 	for rows.Next() {
-		var cr clusterRow
+		var cr clusterListRow
 		if scanErr := rows.Scan(&cr.idDB, &cr.name, &cr.idSource); scanErr != nil {
 			writeError(w, http.StatusInternalServerError, "scan failed", scanErr.Error())
 			return
@@ -370,6 +383,48 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	resp, err := a.assembleClusters(ctx, clusters)
+	if err != nil {
+		writeClusterQueryError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// writeClusterQueryError answers a failed assembleClusters with the 500 that
+// names the read that failed.
+func writeClusterQueryError(w http.ResponseWriter, err error) {
+	var qerr *clusterQueryError
+	if errors.As(err, &qerr) {
+		writeError(w, http.StatusInternalServerError, qerr.msg, qerr.err.Error())
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "query failed", err.Error())
+}
+
+// clusterListRow is one clusters row of the cluster list.
+type clusterListRow struct {
+	idDB     int64
+	name     sql.NullString
+	idSource string
+}
+
+// clusterQueryError is a failed read while the cluster list is assembled. msg
+// is the error the response names, err the cause it reports as detail.
+type clusterQueryError struct {
+	msg string
+	err error
+}
+
+func (e *clusterQueryError) Error() string { return e.msg + ": " + e.err.Error() }
+func (e *clusterQueryError) Unwrap() error { return e.err }
+
+// assembleClusters reads the instances, topology edges, sync states and replay
+// lags of the given clusters and builds their list entries, in the order given.
+// A cluster with no instance is left out. The list handler and the rename
+// handler share it, so a renamed cluster is answered exactly as the list
+// shows it.
+func (a *API) assembleClusters(ctx context.Context, clusters []clusterListRow) ([]clusterResp, error) {
 	// Each per-cluster read is issued once for all the clusters and grouped
 	// here, so the list costs the same round trips however many clusters
 	// there are. It used to be a query per cluster, on the endpoint the
@@ -380,27 +435,24 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 	}
 
 	irows, qerr := a.pool.Query(ctx,
-		`SELECT cluster_id, instance_id, addr, port, role, pg_version, perm_tier, last_seen FROM instances WHERE tenant_id='default' AND cluster_id = ANY($1) ORDER BY cluster_id, addr, port`,
+		`SELECT cluster_id, instance_id, addr, port, role, pg_version, perm_tier, last_seen, display_name FROM instances WHERE tenant_id='default' AND cluster_id = ANY($1) ORDER BY cluster_id, addr, port`,
 		cids)
 	if qerr != nil {
-		writeError(w, http.StatusInternalServerError, "query instances failed", qerr.Error())
-		return
+		return nil, &clusterQueryError{msg: "query instances failed", err: qerr}
 	}
 	instanceRows := make(map[int64][]clusterInstanceRow)
 	for irows.Next() {
 		var cid int64
 		var row clusterInstanceRow
-		if scanErr := irows.Scan(&cid, &row.id, &row.addr, &row.port, &row.role, &row.pgVersion, &row.permTier, &row.lastSeen); scanErr != nil {
+		if scanErr := irows.Scan(&cid, &row.id, &row.addr, &row.port, &row.role, &row.pgVersion, &row.permTier, &row.lastSeen, &row.displayName); scanErr != nil {
 			irows.Close()
-			writeError(w, http.StatusInternalServerError, "scan instance failed", scanErr.Error())
-			return
+			return nil, &clusterQueryError{msg: "scan instance failed", err: scanErr}
 		}
 		instanceRows[cid] = append(instanceRows[cid], row)
 	}
 	if err := irows.Err(); err != nil {
 		irows.Close()
-		writeError(w, http.StatusInternalServerError, "instances rows error", err.Error())
-		return
+		return nil, &clusterQueryError{msg: "instances rows error", err: err}
 	}
 	irows.Close()
 
@@ -408,8 +460,7 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 		`SELECT cluster_id, from_instance, to_instance, edge_type, sync_state, confidence FROM topology_edges WHERE tenant_id='default' AND cluster_id = ANY($1) ORDER BY cluster_id, from_instance, to_instance`,
 		cids)
 	if terr != nil {
-		writeError(w, http.StatusInternalServerError, "query topology edges failed", terr.Error())
-		return
+		return nil, &clusterQueryError{msg: "query topology edges failed", err: terr}
 	}
 	edgeRows := make(map[int64][]clusterEdgeRow)
 	for trows.Next() {
@@ -417,27 +468,23 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 		var edge clusterEdgeRow
 		if scanErr := trows.Scan(&cid, &edge.from, &edge.to, &edge.edgeType, &edge.syncState, &edge.confidence); scanErr != nil {
 			trows.Close()
-			writeError(w, http.StatusInternalServerError, "scan edge failed", scanErr.Error())
-			return
+			return nil, &clusterQueryError{msg: "scan edge failed", err: scanErr}
 		}
 		edgeRows[cid] = append(edgeRows[cid], edge)
 	}
 	if err := trows.Err(); err != nil {
 		trows.Close()
-		writeError(w, http.StatusInternalServerError, "topology rows error", err.Error())
-		return
+		return nil, &clusterQueryError{msg: "topology rows error", err: err}
 	}
 	trows.Close()
 
 	resolvers, err := loadStandbyResolvers(ctx, a.pool, cids)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "query instances failed", err.Error())
-		return
+		return nil, &clusterQueryError{msg: "query instances failed", err: err}
 	}
 	syncStates, err := loadSyncStates(ctx, a.pool, cids, resolvers)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "query sync state failed", err.Error())
-		return
+		return nil, &clusterQueryError{msg: "query sync state failed", err: err}
 	}
 
 	// The CURRENT max replay lag across each cluster's instances: a recent
@@ -450,8 +497,7 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 	// the last 60s is what lets a resolved lag age out.
 	maxLags, err := loadMaxReplayLags(ctx, a.pool, cids)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "query max lag failed", err.Error())
-		return
+		return nil, &clusterQueryError{msg: "query max lag failed", err: err}
 	}
 
 	now := time.Now().UTC()
@@ -523,14 +569,15 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 				hasPrimary = true
 			}
 			instances = append(instances, clusterInstanceResp{
-				InstanceID: row.id.String(),
-				Addr:       row.addr,
-				Port:       row.port,
-				Role:       row.role,
-				PGVersion:  row.pgVersion,
-				PermTier:   row.permTier,
-				LastSeen:   row.lastSeen,
-				Up:         up,
+				InstanceID:  row.id.String(),
+				DisplayName: row.displayName,
+				Addr:        row.addr,
+				Port:        row.port,
+				Role:        row.role,
+				PGVersion:   row.pgVersion,
+				PermTier:    row.permTier,
+				LastSeen:    row.lastSeen,
+				Up:          up,
 			})
 		}
 
@@ -617,7 +664,7 @@ func (a *API) handleClusters(w http.ResponseWriter, r *http.Request) {
 		}
 		resp = append(resp, cr)
 	}
-	writeJSON(w, http.StatusOK, resp)
+	return resp, nil
 }
 
 // loadMaxReplayLags returns, for each cluster in cids that has a reading in the
@@ -653,15 +700,16 @@ func loadMaxReplayLags(ctx context.Context, pool dbPool, cids []int64) (map[int6
 // ----- /api/v1/instances -----
 
 type instanceListResp struct {
-	InstanceID string    `json:"instance_id"`
-	ClusterID  string    `json:"cluster_id"`
-	Addr       string    `json:"addr"`
-	Port       int       `json:"port"`
-	Role       string    `json:"role"`
-	PGVersion  int       `json:"pg_version"`
-	PermTier   string    `json:"perm_tier"`
-	LastSeen   time.Time `json:"last_seen"`
-	Up         bool      `json:"up"`
+	InstanceID  string    `json:"instance_id"`
+	DisplayName *string   `json:"display_name"`
+	ClusterID   string    `json:"cluster_id"`
+	Addr        string    `json:"addr"`
+	Port        int       `json:"port"`
+	Role        string    `json:"role"`
+	PGVersion   int       `json:"pg_version"`
+	PermTier    string    `json:"perm_tier"`
+	LastSeen    time.Time `json:"last_seen"`
+	Up          bool      `json:"up"`
 }
 
 func (a *API) handleInstances(w http.ResponseWriter, r *http.Request) {
@@ -670,7 +718,7 @@ func (a *API) handleInstances(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := a.pool.Query(r.Context(), `
-		SELECT instance_id, cluster_id, addr, port, role, pg_version, perm_tier, last_seen
+		SELECT instance_id, cluster_id, addr, port, role, pg_version, perm_tier, last_seen, display_name
 		  FROM instances
 		 WHERE tenant_id='default'
 		 ORDER BY addr, port`)
@@ -686,7 +734,7 @@ func (a *API) handleInstances(w http.ResponseWriter, r *http.Request) {
 		var iid uuid.UUID
 		var clusterID int64
 		var instance instanceListResp
-		if err := rows.Scan(&iid, &clusterID, &instance.Addr, &instance.Port, &instance.Role, &instance.PGVersion, &instance.PermTier, &instance.LastSeen); err != nil {
+		if err := rows.Scan(&iid, &clusterID, &instance.Addr, &instance.Port, &instance.Role, &instance.PGVersion, &instance.PermTier, &instance.LastSeen, &instance.DisplayName); err != nil {
 			writeError(w, http.StatusInternalServerError, "scan instance failed", err.Error())
 			return
 		}
@@ -712,6 +760,7 @@ type instanceDatabaseResp struct {
 
 type instanceDetailResp struct {
 	InstanceID            string                 `json:"instance_id"`
+	DisplayName           *string                `json:"display_name"`
 	ClusterID             string                 `json:"cluster_id"`
 	Addr                  string                 `json:"addr"`
 	Port                  int                    `json:"port"`
@@ -752,10 +801,11 @@ func (a *API) handleInstance(w http.ResponseWriter, r *http.Request) {
 		pgVersion int
 		permTier  string
 		lastSeen  time.Time
+		display   *string
 	)
 	qErr := a.pool.QueryRow(ctx,
-		`SELECT instance_id, cluster_id, addr, port, role, pg_version, perm_tier, last_seen FROM instances WHERE instance_id=$1`,
-		iid).Scan(&dbIID, &clusterDB, &addr, &port, &role, &pgVersion, &permTier, &lastSeen)
+		`SELECT instance_id, cluster_id, addr, port, role, pg_version, perm_tier, last_seen, display_name FROM instances WHERE instance_id=$1`,
+		iid).Scan(&dbIID, &clusterDB, &addr, &port, &role, &pgVersion, &permTier, &lastSeen, &display)
 	if qErr != nil {
 		if errors.Is(qErr, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "instance not found", fmt.Sprintf("instance %s not found", idStr))
@@ -806,6 +856,7 @@ func (a *API) handleInstance(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	resp := instanceDetailResp{
 		InstanceID:            dbIID.String(),
+		DisplayName:           display,
 		ClusterID:             clusterStr,
 		Addr:                  addr,
 		Port:                  port,
