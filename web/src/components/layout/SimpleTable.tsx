@@ -4,7 +4,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
 import { useTableRows } from '@/hooks/useTableRows'
 import type { TableDefaults } from '@/hooks/useTableState'
-import type { Accessor, SortDirection } from '@/lib/tableControls'
+import { PAGE_SIZES, type Accessor, type SortDirection } from '@/lib/tableControls'
 import { cn } from '@/lib/utils'
 
 import { SortButtons } from './SortButtons'
@@ -143,7 +143,7 @@ export function SimpleTable<T>({
         <div
           tabIndex={0}
           className={cn(
-            state.size > 20
+            state.size > PAGE_SIZES[0]
               ? 'bg-card max-h-[80vh] overflow-auto rounded-lg border'
               : 'bg-card overflow-x-auto rounded-lg border',
             className,

@@ -244,7 +244,11 @@ a server restart, and signing out clears it.
 ### Web interface
 
 After signing in, the interface provides shared navigation, a time-range
-control, freshness and connection status, and a theme toggle. The pages are:
+control, freshness and connection status, and a theme toggle. Every data table
+has a search box, filters on its categorical columns, ascending/descending sort
+buttons on its sortable columns and 20 rows per page (50 or 100 on request);
+the table state is kept in the URL, so a filtered, sorted page can be shared.
+The pages are:
 
 #### Fleet
 

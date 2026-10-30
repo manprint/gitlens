@@ -54,6 +54,27 @@ web/
 Keep pure derivation in `src/lib/`: functions there should be deterministic,
 side-effect-free, and straightforward to test.
 
+## Data tables
+
+Every data table shows 20 rows per page (20, 50 or 100 through the `Rows per
+page` select) with a `Showing a–b of n <rows>.` footer that adds
+`(filtered from m)` when the search or a filter hides rows. A search box and
+filters (a select per categorical column such as state, kind, role or
+database; `multi` and `min` filter kinds exist too) narrow the loaded rows
+before they reach the table; each sortable header keeps its label
+button and gains `Sort <column> ascending/descending` buttons. Missing values
+sort last in both directions. Search, filters, sort, page and page size live in
+the URL under the table's own prefix (`<tableId>.q`, `.sort`, `.dir`, `.page`,
+`.size`, `.f.<filter>`); a value equal to its default is not written (a cleared
+default sort is written as `sort=none`), and any change other than the page
+returns to page 1.
+
+Use `DataTable` (`src/components/layout/DataTable.tsx`, TanStack columns) with a
+`tableId` and a `toolbar` spec, or `SimpleTable` (`SimpleTable.tsx`) for rows
+that expand or carry custom cells. Keep toolbar specs and columns module
+constants or memoised: the tables memoise on them. The pure parts are in
+`src/lib/tableControls.ts`, the URL state in `src/hooks/useTableState.ts`.
+
 ## How to write a test here
 
 Choose the smallest applicable kind: **pure** for deterministic functions in
