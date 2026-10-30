@@ -372,6 +372,22 @@ fleet cards, page titles, breadcrumbs, server pickers, the findings filters,
 the alert and event tables and the topology graph — with the identifier or
 address in the tooltip, and they survive restarts and inventory refreshes.
 
+The Data retention tab shows how many days of history each metrics family
+keeps (`metrics`, `metrics_statements`, `metrics_ash`, `metrics_replication`,
+`metrics_tables`, `metrics_indexes`, `metrics_bloat`) and changes it, reading
+and rewriting the TimescaleDB retention policy of the family's hypertable
+(`GET /api/v1/settings/retention`, `GET /api/v1/settings/retention/preview`,
+`PUT /api/v1/settings/retention/{family}`). The days are a whole number from
+the family's minimum (3; 8 for bloat estimates, one day past their 7-day
+compression delay) to 365.
+Preview counts the chunks and bytes a shorter retention would drop; a
+shortening, or a policy for a family that has none, is applied only after
+the confirmation (`"confirm": true`), and the chunks are deleted by
+TimescaleDB at the next run of the policy, not at once: take a backup first.
+A lengthening deletes nothing. The 90-day purges of events, unseen query
+texts, resolved alerts (with their deliveries and expired silences) and
+resolved findings are fixed and are not part of this tab.
+
 The selected time range is reflected in the URL, so a view can be shared as a
 link. Keyboard shortcuts are available for the main destinations and filters:
 
@@ -1612,6 +1628,8 @@ GET    /api/v1/statements
 GET    /api/v1/ash|ash/top
 POST   /api/v1/push
 GET    /api/v1/plans
+GET    /api/v1/settings/retention|settings/retention/preview
+PUT    /api/v1/settings/retention/{family}
 POST   /api/v1/instances/{id}/commands
 GET    /api/v1/commands/{id}
 GET    /api/v1/agents/{agent_id}/commands
@@ -2012,7 +2030,7 @@ the server is rejected, so upgrade the server before upgrading agents.
 **Server and replication:**
 - PostgreSQL 15 to 19 only; 13 and 14 are not supported, and 19 is verified on its release candidate
 - Only streaming replication is supported; logical, Patroni, and Aurora topologies are not detected
-- Raw retention is 30 days with no rollups; compression after 48h (`buffer 6h < sample_age 12h < compress_after 48h`)
+- Raw retention is 30 days by default (bloat estimates 90 days), settable per metrics family from 3 to 365 days in Settings > Data retention, with no rollups; compression after 48h (`buffer 6h < sample_age 12h < compress_after 48h`)
 - **Every in-memory structure has a fixed ceiling and drops data past it** — 32 MiB per push on the wire and 256 MiB after gzip, 64 KiB of request headers, 2-minute read/write/idle timeouts, delta and topology state evicted one hour after an instance's last sample, and at most 4 096 live sessions. None of these are configurable; see [limit 13](docs/LIMITS.md#13-every-in-memory-structure-is-bounded-and-a-bound-that-trips-drops-data) for what each one trades away.
 
 **Contention:**

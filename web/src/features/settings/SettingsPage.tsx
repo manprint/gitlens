@@ -16,6 +16,7 @@ import { CommandAudit } from './CommandAudit'
 import { InventoryTables } from './InventoryTables'
 import { NamesPanel } from './NamesPanel'
 import { PreferencesPanel } from './PreferencesPanel'
+import { RetentionPanel } from './RetentionPanel'
 import { ServerInfo } from './ServerInfo'
 import {
   AUDIT_VIEWS,
@@ -28,12 +29,10 @@ import {
 } from './settingsTabs'
 
 /**
- * What the tabs that 11.3–11.5 fill will configure (I-16). Until then they
+ * What the tabs that 11.4–11.5 fill will configure (I-16). Until then they
  * state it and offer no control.
  */
-const PLANNED_TABS: Record<'retention' | 'advisor' | 'notifications', string> = {
-  retention:
-    'How many days of history each metrics family keeps, with a preview of what a shorter retention would delete before it is applied.',
+const PLANNED_TABS: Record<'advisor' | 'notifications', string> = {
   advisor:
     'Which advisor rules run, and the observation windows of the unused-index and backup-history checks.',
   notifications:
@@ -166,7 +165,7 @@ export function SettingsPage() {
       </>
     ),
     preferences: () => <PreferencesPanel />,
-    retention: () => <PlannedTab id="retention" label="Data retention" />,
+    retention: () => <RetentionPanel />,
     advisor: () => <PlannedTab id="advisor" label="Advisor rules" />,
     notifications: () => <PlannedTab id="notifications" label="Notifications" />,
     names: () => <NamesPanel clusters={clusters} instances={instances} />,

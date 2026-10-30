@@ -134,6 +134,7 @@ export const qk = {
   advisorRules: () => ['getAdvisorRules'] as const,
   command: (id: string) => ['getCommand', id] as const,
   session: () => ['getSession'] as const,
+  retention: () => ['getRetention'] as const,
   healthz: () => ['healthz'] as const,
   readyz: () => ['readyz'] as const,
   metrics: () => ['getMetrics'] as const,

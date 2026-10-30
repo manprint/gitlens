@@ -120,3 +120,11 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | GET | `/api/v1/session` | `getSession` | Report the current browser UI session. |
 | POST | `/api/v1/session` | `createSession` | Create a browser UI session. |
 | DELETE | `/api/v1/session` | `deleteSession` | Delete the current browser UI session. |
+
+## settings
+
+| METHOD | Path | operationId | Summary |
+|---|---|---|---|
+| GET | `/api/v1/settings/retention` | `getRetention` | List the data retention of each metrics family. |
+| GET | `/api/v1/settings/retention/preview` | `previewRetention` | Preview what a retention of some days would delete. |
+| PUT | `/api/v1/settings/retention/{family}` | `setRetention` | Set the data retention of a metrics family. |

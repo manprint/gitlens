@@ -88,16 +88,16 @@ checkpoint. Capture/open and restore/close are each one STATE.md update.
 - Active scope: plan (whole `005_plan-ConsoleInsights`, no selector)
 - Scope result: RUNNING
 - Type: sub-phase
-- ID / attempt: 11.3 / 1
-- Status: OPEN (11.2 closed: unit:11.2:1)
+- ID / attempt: 11.4 / 1
+- Status: OPEN (11.3 closed: unit:11.3:1)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-opus-5-5; supervisor: Opus review agent (agent-1); exploration/mechanical: agent-3:claude-haiku-5-5
-- File / unit heading: phase_12.md → 11.3
+- File / unit heading: phase_12.md → 11.4
 - Current step: S1
-- Next action: 11.3 S1 `retention.go` with a `policyStore` seam + unit tests (D17 + settings-inventory R1–R7; destructive: backup S6 before any live shortening).
-- Next eligible plan unit: 11.3 (phase_12.md)
-- Unit base: the unit:11.2:1 commit; branch: `feat/index-analysis` (never switch or create branches)
-- Repo state: phases 0–3, 9 and 10 closed; 15.1–15.3, 17.1, 11.0–11.2 committed; only `internal/webui/dist/index.html` (never staged) and `.claude/` stay uncommitted.
+- Next action: 11.4 S1 migrations + store functions (`advisor_rule_overrides`, `server_settings`) + tests (D18, settings-inventory A1–A5, C5).
+- Next eligible plan unit: 11.4 (phase_12.md)
+- Unit base: the unit:11.3:1 commit; branch: `feat/index-analysis` (never switch or create branches)
+- Repo state: phases 0–3, 9 and 10 closed; 15.1–15.3, 17.1, 11.0–11.3 committed; only `internal/webui/dist/index.html` (never staged) and `.claude/` stay uncommitted.
 
 ## 2. Feature context and readiness
 
@@ -169,6 +169,7 @@ Required supervisor reviews cannot be silently replaced by weaker self-review.
 | sub-phase | 17.1 / 1 | 1 | agent-2:claude-opus-5-5 | NEW `web/src/lib/{units.ts,glossary.ts,captions.ts}` (+ tests), `web/src/lib/captionCoverage.test.ts`, NEW `web/src/components/layout/{Caption.tsx,InfoHint.tsx,Term.tsx,tooltipPlacement.ts}` + `captions.test.tsx`, `captionIntegration.test.tsx`, `MetricTile.test.tsx`; `MetricTile.tsx`, `Section.tsx`, `DataTable.tsx`, `web/src/components/charts/ChartCard.tsx` | §7 17.1; R-17.1 | unit:17.1:1 |
 | sub-phase | 10.1 / 1 | 1 | agent-2:claude-opus-5-5 (Opus implementer) | NEW `internal/server/{rename.go,rename_test.go,rename_integration_test.go}`, `internal/store/migrations/{0022_cluster_name_unique.sql,0023_instance_display_name.sql}`, `web/src/test/fixtures/{renameCluster.ts,renameInstance.ts}`; `internal/server/api.go` (routes, `assembleClusters`, `display_name` in instance queries), `api_test.go`, `openapi_test.go`, `internal/store/{migrate_test.go,migrate_integration_test.go}`, `api/openapi.yaml`, `web/src/api/generated.ts`, `docs/api.md` | §7 10.1; R-10.1 | unit:10.1:1 |
 | sub-phase | 10.2 / 1 | 1 | agent-2:claude-opus-5-5 (Opus implementer) | NEW `web/src/lib/names.ts` (+ test), `web/src/features/settings/{NamesPanel.tsx,RenameDialog.tsx,nameRows.ts}` (+ tests), `web/src/features/alerts/nameCells.tsx`, `web/src/features/instance/InstanceHeader.test.tsx`; `web/src/api/queries.ts` (`useRenameCluster`, `useRenameInstance`, `useCachedClusters`), `PageHeader.tsx` (`truncateTitle`), `DataTable.tsx` (`getRowId`), `Breadcrumbs.tsx`, `captions.ts`, Settings, Fleet, Cluster, Instance, Alerts/Events, Findings, Index analysis, Slowest queries, Sidebar, QueryOverview, CommandAudit, `lib/{fleet,replication}.ts`, topology files and tests; `web/e2e/console_visual.spec.ts` (CLNAME-E2E-001) | §7 10.2; R-10.2 | unit:10.2:1 |
+| sub-phase | 11.3 / 1 | 1 | agent-2:claude-opus-5-5 (Opus implementer) | NEW `internal/server/retention{,_test,_integration_test}.go`, `web/src/lib/retention{,.test}.ts`, `web/src/features/settings/RetentionPanel{,.test}.tsx`, fixtures `getRetention`/`previewRetention`/`setRetention`; `internal/server/{api.go,openapi_test.go}`, `cmd/pglens-server/main.go`, `api/openapi.yaml`, `web/src/api/{generated.ts,keys.ts,queries.ts}`, `docs/api.md`, `README.md`, `deploy/server.example.env`, `web/src/lib/captions.ts`, `web/src/features/settings/{SettingsPage.tsx,SettingsPage.tabs.test.tsx,ServerInfo.tsx}`, `web/e2e/console_visual.spec.ts` | §7 11.3; R-11.3 | unit:11.3:1 |
 | sub-phase | 11.2 / 1 | 1 | agent-2:claude-opus-5-5 (Opus implementer) | NEW `web/src/features/settings/PreferencesPanel.tsx` (+ test), `web/src/hooks/usePreferences.ts` (+ test); `lib/preferences.ts` (+ test), `lib/timerange.ts`, `lib/captions.ts`, `api/policy.ts`, `api/queries.ts`, `hooks/{useTimeRange,useTableState,useFreshness,useTheme}.ts`, `components/layout/{FreshnessBadge,DataTable}.tsx`, `features/settings/{SettingsPage.tsx,SettingsPage.tabs.test.tsx}`, `features/alerts/EventsPage.tsx`, `features/instance/SettingsSection.tsx`, `web/e2e/console_visual.spec.ts` | §7 11.2; R-11.2 | unit:11.2:1 |
 | sub-phase | 11.1 / 1 | 1 | agent-2:claude-opus-5-5 (Opus implementer) | NEW `web/src/features/settings/{settingsTabs.ts,SettingsPage.tabs.test.tsx}`, `web/src/lib/settingsInventory.test.ts`; `SettingsPage.tsx` (+ test), `InventoryTables.tsx`, `ServerInfo.tsx`, `web/src/features/locks/SignalActions.tsx` (+ test), `web/e2e/{fullhd_routes.ts,console_visual.spec.ts,ui_acceptance.spec.ts}`, `web/src/routes/fullhd_routes.test.ts`; plan `fullhd-inventory.md` | §7 11.1; R-11.1 | unit:11.1:1 |
 | sub-phase | 11.0 / 1 | 1 | agent-2:claude-opus-5-5 (Opus writer) | NEW `docs/plans/005_plan-ConsoleInsights/settings-inventory.md`; `phase_12.md` (P1 plan change, 2 lines) | R-11.0 | unit:11.0:1 |
@@ -218,13 +219,13 @@ Unit-owned paths are listed in each phase file's sub-phase `Files` field and rec
 
 ## 6. In-flight checkpoint
 
-11.3 / 1 OPEN (base = unit:11.2:1 commit). Owned (phase_12.md 11.3 Files + R7): `internal/server/api.go`, NEW `internal/server/retention.go` (+ `_test.go`, `_integration_test.go`), `api/openapi.yaml`, `web/src/api/*` (regenerated), `docs/api.md`, `README.md`, `deploy/server.example.env` (storage-policy comment), `web/src/features/settings/{ServerInfo.tsx,RetentionPanel.tsx}` (+ tests), `SettingsPage.tsx` (placeholder → panel), NEW `web/src/lib/retention.ts` (+ test), fixtures `getRetention.ts`, `previewRetention.ts`, `setRetention.ts`, `web/e2e/console_visual.spec.ts` (RET-E2E-001). Recovery boundary after S2. Before any live PUT: pglens TimescaleDB dump (S6) to `/home/agent/odoo-backups/pglens-ts-<stamp>/`.
-Method (works): Opus implementer agent per unit with a precise brief; coordinator verifies gates, deploys, runs live specs, launches a fresh read-only Opus reviewer (`model: opus`), applies findings via the implementer, records §7/§8, G-SECRETS, commits with trailers. After 11.3: 11.4, 11.5a (11.5b BLOCKED Q2), P11, then 13.2 → … per §11.
-Last durable step: 11.2 DONE (unit:11.2:1; R-11.2 APPROVED-WITH-CHANGES, fixes applied; live PREF-E2E-001 + SET-E2E-001 pass).
+11.4 / 1 OPEN (base = unit:11.3:1 commit). Owned (phase_12.md 11.4 Files): `internal/advisor/*` (engine `OverridesSource`), handlers in `internal/server` (NEW `advisor_settings.go` + tests), NEW migrations (next free numbers after 0023), `api/openapi.yaml`, `web/src/api/*` (regenerated), `docs/api.md`, NEW `web/src/features/settings/AdvisorPanel.tsx` (+ test), `RuleCatalogue.tsx` (Disabled badge), fixtures `setAdvisorRuleOverride.ts`, `getAdvisorWindows.ts`, `setAdvisorWindows.ts`, `web/e2e/console_visual.spec.ts` (ADV-E2E-001), stack `/home/agent/pglens-odoo-stack/compose.yml` (`PGLENS_ADVISOR_INTERVAL=60s`, backup first) + stack README, `web/e2e/qa/budget.ts` (`findings` 90 s). Recovery boundary after S2. A5: windows stored here have no effect until 13.2.
+Method (works): Opus implementer agent per unit with a precise brief; coordinator verifies gates, deploys, runs live specs, launches a fresh read-only Opus reviewer (`model: opus`), applies findings via the implementer, records §7/§8, G-SECRETS, commits with trailers. After 11.4: 11.5a (11.5b BLOCKED Q2), P11 (incl. `docs/LIMITS.md` R6), then 13.2 → … per §11.
+Last durable step: 11.3 DONE (unit:11.3:1; R-11.3 APPROVED-WITH-CHANGES, fixes applied; live RET-E2E-001 + SET-E2E-001 pass; live retention policies unchanged).
 Actual files/diff: none beyond `internal/webui/dist/index.html` (never staged) and `.claude/`.
 Pending edits: none.
-Last check: G-SECRETS pass (2026-10-30, before the unit:11.2:1 commit).
-Running resources: stack `pglens-odoo` up (deployed from the 11.2 tree).
+Last check: G-SECRETS pass (2026-10-30, before the unit:11.3:1 commit).
+Running resources: stack `pglens-odoo` up (deployed from the 11.3 tree).
 Stop reason / supervisor request: none.
 Research checkpoint: R3 pending (7.0).
 
@@ -318,6 +319,9 @@ Research checkpoint: R3 pending (7.0).
 | G-DEPLOY + G-VIS (11.1) | `deploy.sh` (server `3f4cf1d930a9`, agent `10ca3314a3f8`); `pnpm exec playwright test --project=desktop-fullhd -g 'SET-E2E-001\|FHD-FIT-001'` (earlier on the pre-review code also `CLNAME-E2E-001` and `SYS-UI`, 3 passed) | pass | 2 passed: seven tabs, no console errors, `assertFits` on 11 `/settings` routes at 1920×1080 and 1920×950 (tiers view 903 px content, 47 px spare at 950) | 11.1 diff after R-11.1 fixes | 2026-10-30 |
 | G-WEB-UNIT + G-WEB-STATIC (11.2) | `cd web && TZ=UTC pnpm exec vitest run --experimental.fsModuleCache=false src/lib/preferences.test.ts src/hooks src/features/settings src/lib src/api`; `make web-typecheck web-lint`; full `vitest run` (implementer) | pass | 65 files / 467 tests (PREF-001..010 discovered); full suite 160 files / 1353 tests; eslint 0 errors (1 pre-existing warning) | 11.2 diff after R-11.2 fixes | 2026-10-30 |
 | G-DEPLOY + G-VIS (11.2) | `deploy.sh` (server `a8d057f48a1d`, agent `50554e3125a1`); `pnpm exec playwright test --project=desktop-fullhd -g 'PREF-E2E-001\|SET-E2E-001'` | pass | 2 passed: 6h + 50 rows persist after reload, Overview opens on 6h, `/queries` 50 rows, defaults restored; `assertFits` on the Preferences tab | 11.2 diff after R-11.2 fixes | 2026-10-30 |
+| G-GO-FOCUS + G-GO-INT + G-API (11.3) | `go test -race -shuffle=on -count=1 ./internal/server -run 'RET\|OpenAPI'`; `go test -tags=integration -race -count=1 ./internal/server -run RETINT -v`; `make web-gen-api api-docs` + `git diff --exit-code -- web/src/api/generated.ts docs/api.md`; `go build ./... && go vet ./...`; `make lint` (implementer) | pass | RET 11 listed, RETINT 2 run (TestRETINT001 2.27 s, TestRETINT002), G-API no diff, lint 0 issues | 11.3 diff after R-11.3 fixes | 2026-10-30 |
+| G-WEB-UNIT + G-WEB-STATIC (11.3) | `cd web && TZ=UTC pnpm exec vitest run --experimental.fsModuleCache=false src/features/settings src/lib/retention.test.ts src/lib/captionCoverage.test.ts src/api`; `make web-typecheck web-lint`; full vitest (implementer) | pass | 16 files / 132 tests (RET-UI-001..007); full 162 files / 1374 | 11.3 diff after R-11.3 fixes | 2026-10-30 |
+| G-DEPLOY + G-VIS (11.3) | `deploy.sh` (server `95606c96d9bb`, agent `09fbcd514a44`); `-g 'RET-E2E-001\|SET-E2E-001'` | pass | 2 passed: `metrics_ash` 30→45→30 days (server log names the requester), destructive dialog cancelled; `timescaledb_information.jobs` retention configs identical before/after (all 30 days, `metrics_bloat` 90); tab content ends at y=722 at 1920×950 (228 px spare, same with errors) | 11.3 diff after R-11.3 fixes | 2026-10-30 |
 
 Results: pass, fail, blocked, not-run, not-applicable-yet. Only pass satisfies a required active gate. Keep relevant failing output/evidence references.
 
@@ -357,6 +361,7 @@ Results: pass, fail, blocked, not-run, not-applicable-yet. Only pass satisfies a
 | R-11.0 | Opus review agent (read-only, fresh; resumed once) | `settings-inventory.md` + plan change P1 | D16–D18, D22c, I-2/3/6/10/11/13/16, file:line claims, frozen API | CHANGES-REQUIRED (decisions on R1–R7, A1–A5, N1–N7, P1–P3, T1; majors C1 backup threshold, C2 Go seams, C3 no `resolved_reason` column, C4 `staleAfter`, C5 `getAdvisorRules` without pool) → applied (doc "Decisions (R-11.0)", phase_12 P1: `refreshInterval` gains `auto`) → **APPROVED** (plan-change review included); minor recorded for 11.2 (§8) | 2026-10-30 |
 | R-11.1 | Opus review agent (read-only, fresh) | 11.1 diff (base 8edb61c) | contract 11.1 (tab ids/order, `?tab=` default never written, history replace, lazy mount, Radix keys, placeholders I-16, fullhd routes I-13, SYS-UI-006, SET-E2E-001), SETI-001 drift oracle, nav-only test changes, D26 view splits, `/settings` links | APPROVED-WITH-CHANGES: major 1 (Databases view filtered by the hidden Instances search → status callout + Clear filter, SETTABS-008); minors 3 (axe on every view), nits 4 (unknown `tab`/`view` removed from the URL), 5 (SETTABS-009 ArrowRight), 6 (empty-fleet state inside Inventory), 7 (`role="list"`) applied; minor 2 recorded as follow-up (§8) |
 | R-11.2 | Opus review agent (read-only, fresh) | 11.2 diff (base 947fb82) | P1 (surfaces ≥ 15 s overridden, `staleAfter` ratio, `off` = no refetch/no stale badge, command/locks/activity/static untouched; every `REFRESH` consumer), P2, P3, per-field fallback, storage never throws, `useSyncExternalStore` snapshot stability, `parseRange` callers, I-16, test changes | APPROVED-WITH-CHANGES: minors 1 (`off` also disables focus/visibility refetch, PREF-010), 2 (helper text names the surfaces that keep their policy), 3 (invalid URL range → preferred default), 4 (local tables follow the preference until a size is picked) and nits 5, 6 applied; advisor note (15s speeds `inventory` fan-out ×4) recorded as follow-up (§8) |
+| R-11.3 | Opus review agent (read-only, fresh; probed a throwaway TimescaleDB 2.31 container) | 11.3 diff (base 4f05d4e) | whitelist + `%I` identifiers + bound parameters (RET-005), advisory xact lock, `drop_after` recheck inside the transaction, rollback leaves the old job, R1/R2/min_days/365, 409 body, auth/CSRF as `updateRule`, preview = `show_chunks` + `chunks_detailed_size` (compressed sizes), dialog text, `confirm` only after the checkbox | APPROVED-WITH-CHANGES: major 1 (zero-headroom fit → 228 px spare), minors 2 (refetch + clear preview after a failed apply), 3 (preview tied to the live value), 4 (`compress_created_before`; retention jobs without `drop_after` reported as `unsupported_policy`, 503 on preview/PUT), 5 (connection failures → 503), nits 7, 8, 9, 10, 12 (requester in the change log), 13 applied; #6 `docs/LIMITS.md` → P11 README obligation; #11 recorded deviation (§8) |
 | R-1.4-C1b | Opus review agent (read-only, fresh) | vis-015 ASH/lag screenshots + 1.4 diff | checklist C-1b, contract 1.4, D2 | C-1b signed off all; code APPROVED; lows: shared cached axis object mutable (accepted: ECharts clones options, cache bounded 32), `step 0s` when resolution missing (applied: `formatRangeLabel` drops step ≤ 0, CTIME-008), lag interval comment (applied); info: ASH axis spans data not selected range (pre-existing, → 1.5) |
 | R-1.3-C1 | Opus review agent (read-only, fresh) | VIS-010 screenshots (cards 1h/6h, full page 1920/1440/390) + 1.3 diff | checklist C-1, contract 1.3 | C-1 signed off all 5; code APPROVED; minors: legend overlaps y-axis name on narrow cards (→ 3.2 layout), description wording (applied: "data gaps or counter resets"), OV-STEP-001 plan text (§8) |
 | R-1.2-1 | Opus review agent (read-only, fresh) | 1.1 (70ac9b0) + 1.2 diff | contracts D1–D3, test oracles, adapted tests, tooltip injection, NaN, TZ, a11y | CHANGES-REQUIRED: 2 majors (`metricKind` missed `pg_wal_wal_fpi_bytes`/suffix rule and `pg_table_*`/`pg_index_*` counters; NaN tooltip time threw `RangeError`), 3 minors (`stepSeconds` unused, `wide` untested, fixed loading height); all applied in unit:1.2:1 (`stepSeconds` documented as informational) |
@@ -449,6 +454,7 @@ Rule (user): after **every** modification of the plan the `advisor` reviews it a
 | 1 | follow-up (R-11.1 minor 2) | `/settings?view=databases` registered `fit` | the view stacks one database table per instance, so its height grows with the fleet; it fits on the one-instance dev stack only: marked "unproven with several instances" in `fullhd-inventory.md`; 7.x (HA lab, 3 instances) / 15.4 re-measure, paginate instances if it fails | supervisor (R-11.1) | 7.x, 15.4 |
 | 1 | 11.2 file-set extensions and existing-test changes | contract 11.2 Files + R-11.0 follow-up | also changed: `web/src/features/alerts/EventsPage.tsx`, `web/src/features/instance/SettingsSection.tsx` (they call `parseRange` directly; without the preferred default the picker and data would disagree), `web/src/hooks/useTheme.ts` (header toggle reads the shared store), `web/src/lib/captions.ts` (`settings.preferences`), `web/src/api/policy.ts` (`effectiveRefresh`), NEW `web/src/hooks/usePreferences.ts`; `off` also disables focus/visibility refetch of the surfaces it stops (R-11.2); existing tests: SETTABS-004 drops Preferences from the placeholder loop and asserts the panel; one untitled `preferences.test.ts` case expects `{...DEFAULT_PREFERENCES, theme}` | supervisor (R-11.2) | 11.2 |
 | 1 | follow-up (R-11.2 advisor note) | P1 as frozen | choosing `15s` also speeds `catalog`, `statements`, `findings` and the per-instance `inventory` fan-out ×4; kept as frozen (user-facing choice, helper text states the effect); if load matters, a floor at the policy interval needs a P1 amendment | supervisor (R-11.2) | — |
+| 1 | 11.3 implementation details and deviations (R-11.3) | D17 / frozen Retention API | (a) PUT takes `pg_advisory_xact_lock(hashtext('pglens.retention'))` and rechecks `drop_after` inside the transaction (≤ 3 retries); (b) OpenAPI `RetentionBody.confirm` has no `default: false` (the default made `confirm` required in the generated TS; the description states it); (c) new optional `unsupported_policy` on the GET row: a retention job without `drop_after` is shown read-only and preview/PUT answer 503; `min_days` also reads `compress_created_before`; (d) connection failures of the PUT → 503, policy-call failures → 500; (e) the success log names the requester (`ui-session <8-hex hash>` / `api-token`, never a token) via `API.SetAuth` (one line in `cmd/pglens-server/main.go`, file-set extension); (f) a 0-chunk shortening still asks for confirmation; (g) existing tests: `openapi_test.go` refused-bodies row, `SettingsPage.tabs.test.tsx` mocks `getRetention`; (h) `docs/LIMITS.md` (R6 purges list) is left to the P11 README obligation; (i) S6 backup `/home/agent/odoo-backups/pglens-ts-20261030-125525/pglens.dump` | supervisor (R-11.3) | P11 |
 
 ## 9. Blockers
 
@@ -510,7 +516,7 @@ Rule (user): after **every** modification of the plan the `advisor` reviews it a
 | 11.0 | phase_12.md | 9.1, 17.1 | DONE | 1 | `settings-inventory.md` (live Timescale policies 2026-10-30); R-11.0 |
 | 11.1 | phase_12.md | 11.0, 10.2 | DONE | 1 | SETTABS-001..009, SETI-001, SET-E2E-001 (§7 11.1); R-11.1 |
 | 11.2 | phase_12.md | 11.1 | DONE | 1 | PREF-001..010, PREF-E2E-001 (§7 11.2); R-11.2 |
-| 11.3 | phase_12.md | 11.1 | TODO | 1 | — |
+| 11.3 | phase_12.md | 11.1 | DONE | 1 | RET-001..007, RET-INT-001/002, RET-UI-001..007, RET-E2E-001 (§7 11.3); R-11.3 |
 | 11.4 | phase_12.md | 11.1 | TODO | 1 | — |
 | 11.5 | phase_12.md | 11.1, 0.3 | TODO | 1 | — |
 | 13.2 | phase_14.md | 13.1, 11.4 | TODO | 1 | — |
@@ -666,10 +672,10 @@ Statuses: TODO, IN_PROGRESS, IN_REVIEW, DONE, SKIPPED, BLOCKED. SKIPPED retains 
 | SETTABS-* | 11.1 | G-WEB-UNIT | DONE | SETTABS-001..009 |
 | PREF-* | 11.2 | G-WEB-UNIT | DONE | PREF-001..010 |
 | PREF-E2E-* | 11.2 | G-VIS / G-QA | DONE | PREF-E2E-001 (§7 11.2) |
-| RET-* | 11.3 | G-GO-FOCUS | TODO | — |
-| RET-E2E-* | 11.3 | G-VIS / G-QA | TODO | — |
-| RET-INT-* | 11.3 | G-GO-INT | TODO | — |
-| RET-UI-* | 11.3 | G-WEB-UNIT | TODO | — |
+| RET-* | 11.3 | G-GO-FOCUS | DONE | §7 11.3 |
+| RET-E2E-* | 11.3 | G-VIS / G-QA | DONE | §7 11.3 |
+| RET-INT-* | 11.3 | G-GO-INT | DONE | §7 11.3 |
+| RET-UI-* | 11.3 | G-WEB-UNIT | DONE | §7 11.3 |
 | ADV-E2E-* | 11.4 | G-VIS / G-QA | TODO | — |
 | ADVO-* | 11.4 | G-GO-FOCUS | TODO | — |
 | ADVO-INT-* | 11.4 | G-GO-INT | TODO | — |

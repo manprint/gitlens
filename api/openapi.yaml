@@ -21,6 +21,7 @@ tags:
   - name: agent
   - name: infrastructure
   - name: session
+  - name: settings
 
 security:
   - uiSession: []
@@ -1371,6 +1372,104 @@ components:
       properties:
         accepted: { type: integer, format: int32 }
         rejected: { type: integer, format: int32 }
+    RetentionFamily:
+      type: object
+      required: [family, hypertable, days, source, min_days, max_days]
+      properties:
+        family:
+          $ref: '#/components/schemas/RetentionFamilyName'
+        hypertable:
+          type: string
+          description: The TimescaleDB hypertable of the family (public schema).
+        days:
+          type: [integer, 'null']
+          format: int32
+          description: >-
+            The live retention in days, read from the hypertable's retention
+            policy (drop_after, a part of a day rounded up); null when the
+            hypertable has no retention policy and keeps its history, or when
+            its policy has no drop_after (see unsupported_policy).
+        source:
+          type: string
+          enum: [default, custom]
+          description: >-
+            default when days equals the migration default (30 days; 90 for
+            metrics_bloat), custom otherwise, a missing policy included.
+        min_days:
+          type: integer
+          format: int32
+          description: >-
+            The shortest retention the family takes: max(3, ceil(compress_after
+            in days) + 1), computed from the live compression policy
+            (compress_after, or compress_created_before), so the retention
+            never drops below the compression horizon; 3 without a
+            compression policy.
+        max_days:
+          type: integer
+          format: int32
+          enum: [365]
+          description: The longest retention the console sets.
+        unsupported_policy:
+          type: string
+          description: >-
+            Present only when the hypertable's retention policy has no
+            drop_after (for example drop_created_before, set outside the
+            console): it describes that policy, days is null, and the console
+            neither previews nor replaces it (503 unsupported retention
+            policy).
+    RetentionFamilyName:
+      type: string
+      enum: [metrics, metrics_statements, metrics_ash, metrics_replication, metrics_tables, metrics_indexes, metrics_bloat]
+      description: A metrics family; each maps to the hypertable of the same name.
+    RetentionPreview:
+      type: object
+      required: [family, days, chunks_to_drop, bytes_to_free, oldest_chunk_at, newest_dropped_chunk_end]
+      properties:
+        family: { $ref: '#/components/schemas/RetentionFamilyName' }
+        days: { type: integer, format: int32 }
+        chunks_to_drop:
+          type: integer
+          format: int64
+          description: >-
+            Chunks whose end is older than days, as show_chunks(older_than)
+            returns them now. 0 when days is not shorter than the live
+            retention, which drops those chunks anyway.
+        bytes_to_free:
+          type: integer
+          format: int64
+          description: Total size of those chunks (chunks_detailed_size.total_bytes).
+        oldest_chunk_at:
+          type: [string, 'null']
+          format: date-time
+          description: Start of the hypertable's oldest chunk, dropped or not; null when it has none.
+        newest_dropped_chunk_end:
+          type: [string, 'null']
+          format: date-time
+          description: End of the newest chunk that would be dropped; null when none would be.
+    RetentionUpdate:
+      type: object
+      additionalProperties: false
+      required: [days]
+      properties:
+        days:
+          type: integer
+          format: int32
+          description: The new retention in days, between the family's min_days and 365.
+        confirm:
+          type: boolean
+          description: >-
+            Optional, false when absent. Must be true to shorten the retention (or to give one to a family
+            that has none): the history older than days is deleted at the next
+            policy run. Lengthening needs no confirmation.
+    RetentionConfirmationRequired:
+      type: object
+      required: [error, preview]
+      properties:
+        error:
+          type: string
+          enum: [confirmation required]
+        detail: { type: string }
+        preview: { $ref: '#/components/schemas/RetentionPreview' }
 
   responses:
     BadRequest:
@@ -2997,6 +3096,157 @@ paths:
                 default:
                   value:
                     - { id: query.slow_mean, severity: warning, scope: instance, needs: [Statements], min_tier: T0 }
+
+  /api/v1/settings/retention:
+    get:
+      tags: [settings]
+      operationId: getRetention
+      summary: List the data retention of each metrics family.
+      description: >-
+        One row per metrics family, in a fixed order, with the live TimescaleDB
+        retention policy of its hypertable and the range of days the console
+        accepts. A policy drops a whole chunk once the chunk's end is older than
+        the retention, at the policy's next run (once a day).
+      responses:
+        '200':
+          description: The seven metrics families.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/RetentionFamily' } }
+              examples:
+                default:
+                  value:
+                    - { family: metrics, hypertable: metrics, days: 30, source: default, min_days: 3, max_days: 365 }
+                    - { family: metrics_statements, hypertable: metrics_statements, days: 30, source: default, min_days: 3, max_days: 365 }
+                    - { family: metrics_ash, hypertable: metrics_ash, days: 14, source: custom, min_days: 3, max_days: 365 }
+                    - { family: metrics_replication, hypertable: metrics_replication, days: 30, source: default, min_days: 3, max_days: 365 }
+                    - { family: metrics_tables, hypertable: metrics_tables, days: 30, source: default, min_days: 3, max_days: 365 }
+                    - { family: metrics_indexes, hypertable: metrics_indexes, days: 30, source: default, min_days: 3, max_days: 365 }
+                    - { family: metrics_bloat, hypertable: metrics_bloat, days: 90, source: default, min_days: 8, max_days: 365 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '503':
+          description: The store is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/settings/retention/preview:
+    get:
+      tags: [settings]
+      operationId: previewRetention
+      summary: Preview what a retention of some days would delete.
+      description: >-
+        Counts and sizes the chunks of the family's hypertable that a retention
+        of days would drop now (show_chunks with older_than, sized by
+        chunks_detailed_size). Nothing is changed. A retention that is not
+        shorter than the live one previews 0 chunks.
+      parameters:
+        - { name: family, in: query, required: true, schema: { $ref: '#/components/schemas/RetentionFamilyName' } }
+        - { name: days, in: query, required: true, schema: { type: integer, format: int32 } }
+      responses:
+        '200':
+          description: What the retention would drop.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetentionPreview' }
+              examples:
+                default:
+                  value:
+                    family: metrics_ash
+                    days: 14
+                    chunks_to_drop: 64
+                    bytes_to_free: 41943040
+                    oldest_chunk_at: '2026-10-01T00:00:00Z'
+                    newest_dropped_chunk_end: '2026-10-16T06:00:00Z'
+        '400':
+          description: family is missing, or days is missing, not an integer, or outside the family's min_days to 365.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                default:
+                  value: { error: invalid days, detail: days of metrics_bloat must be between 8 and 365 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503':
+          description: The store is unavailable, or the family's retention policy has no drop_after (error unsupported retention policy).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/settings/retention/{family}:
+    put:
+      tags: [settings]
+      operationId: setRetention
+      summary: Set the data retention of a metrics family.
+      description: >-
+        Replaces the hypertable's retention policy in one transaction
+        (remove_retention_policy, then add_retention_policy with drop_after of
+        days); a failure rolls back and keeps the old policy. Lengthening is
+        applied at once. Shortening, or giving a retention to a family that has
+        none, deletes the history older than days at the policy's next run, so
+        it needs confirm true and is otherwise answered 409 with the preview.
+        The same days as now answer the row without rewriting the policy.
+      parameters:
+        - { name: family, in: path, required: true, schema: { $ref: '#/components/schemas/RetentionFamilyName' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RetentionUpdate' }
+            examples:
+              lengthen:
+                value: { days: 60 }
+              shorten:
+                value: { days: 14, confirm: true }
+      responses:
+        '200':
+          description: The family as getRetention lists it after the change.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetentionFamily' }
+              examples:
+                default:
+                  value: { family: metrics_ash, hypertable: metrics_ash, days: 14, source: custom, min_days: 3, max_days: 365 }
+        '400':
+          description: days is missing, not an integer, or outside the family's min_days to 365; or the body is malformed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                default:
+                  value: { error: invalid days, detail: days of metrics_ash must be between 3 and 365 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The retention would delete history and confirm is not true; nothing was changed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetentionConfirmationRequired' }
+              examples:
+                default:
+                  value:
+                    error: confirmation required
+                    detail: 'a retention of 14 days for metrics_ash deletes history at the next policy run; send confirm: true to apply it'
+                    preview:
+                      family: metrics_ash
+                      days: 14
+                      chunks_to_drop: 64
+                      bytes_to_free: 41943040
+                      oldest_chunk_at: '2026-10-01T00:00:00Z'
+                      newest_dropped_chunk_end: '2026-10-16T06:00:00Z'
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '500':
+          description: A policy call failed in the database and was rolled back; the old policy is kept.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: The store did not answer, or the family's retention policy has no drop_after (error unsupported retention policy); the old policy is kept.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/instances/{id}/commands:
     post:

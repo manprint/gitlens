@@ -7,8 +7,14 @@ import { formatTimestamp } from '@/lib/format'
 
 const LIMITS_URL = '/docs/LIMITS.md'
 
+/** The Data retention tab, where each metrics family's retention is read and set (11.3). */
+const RETENTION_TAB = '/settings?tab=retention'
+
 const limits = [
-  ['Raw retention', 'Raw data is retained for 30 days; there are no rollups.'],
+  [
+    'Raw retention',
+    'Raw data is retained for 30 days by default (bloat estimates 90 days); the Data retention tab shows and sets the live value of each metrics family. There are no rollups.',
+  ],
   ['PostgreSQL versions', 'PostgreSQL 15 through 19 are supported.'],
   ['Replication', 'Streaming replication is supported; other replication modes are not.'],
   ['Databases per instance', 'At most 10 databases per instance are monitored by default.'],
@@ -75,9 +81,18 @@ export function ServerInfo() {
               <span>
                 <strong>{label}.</strong> {detail}
               </span>
-              <a className="text-primary shrink-0 underline underline-offset-2" href={LIMITS_URL}>
-                Details
-              </a>
+              {label === 'Raw retention' ? (
+                <Link
+                  className="text-primary shrink-0 underline underline-offset-2"
+                  to={RETENTION_TAB}
+                >
+                  Data retention
+                </Link>
+              ) : (
+                <a className="text-primary shrink-0 underline underline-offset-2" href={LIMITS_URL}>
+                  Details
+                </a>
+              )}
             </li>
           ))}
         </ul>

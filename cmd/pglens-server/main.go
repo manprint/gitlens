@@ -94,6 +94,7 @@ func run() int {
 	inv := server.NewInventory(pool)
 	pipeline := server.NewPipeline(pool, nil)
 	api := server.NewAPI(pool)
+	api.SetAuth(auth)
 	topoAPI := server.NewTopologyAPI(pool)
 	ashAPI := server.NewAshAPI(pool)
 	staleness := server.NewStaleness(pool, nil)

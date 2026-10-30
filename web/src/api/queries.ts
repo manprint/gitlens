@@ -927,3 +927,70 @@ export function useRenameInstance(): UseMutationResult<
     retry: false,
   })
 }
+
+type RetentionFamily = components['schemas']['RetentionFamily']
+type RetentionPreview = components['schemas']['RetentionPreview']
+type RetentionFamilyName = components['schemas']['RetentionFamilyName']
+
+/** `GET /api/v1/settings/retention` (getRetention): the live retention of each metrics family. */
+export function useRetention() {
+  return useApiQuery({
+    policy: REFRESH.static,
+    queryFn: (signal) => getApi(() => client.GET('/api/v1/settings/retention', { signal })),
+    queryKey: qk.retention(),
+  })
+}
+
+export interface RetentionPreviewVariables {
+  family: RetentionFamilyName
+  days: number
+}
+
+/**
+ * `GET /api/v1/settings/retention/preview` (previewRetention), on demand: what
+ * a retention of `days` would delete. Nothing is changed on the server.
+ */
+export function useRetentionPreview(): UseMutationResult<
+  RetentionPreview,
+  ApiFailure,
+  RetentionPreviewVariables
+> {
+  return useMutation<RetentionPreview, ApiFailure, RetentionPreviewVariables>({
+    mutationFn: ({ family, days }) =>
+      getApi(() =>
+        client.GET('/api/v1/settings/retention/preview', {
+          params: { query: { family, days } },
+        }),
+      ),
+    retry: false,
+  })
+}
+
+export interface SetRetentionVariables {
+  family: RetentionFamilyName
+  days: number
+  /** Sent only after the destructive confirmation of a shortening. */
+  confirm?: true
+}
+
+/** `PUT /api/v1/settings/retention/{family}` (setRetention). */
+export function useSetRetention(): UseMutationResult<
+  RetentionFamily,
+  ApiFailure,
+  SetRetentionVariables
+> {
+  const queryClient = useQueryClient()
+  return useMutation<RetentionFamily, ApiFailure, SetRetentionVariables>({
+    mutationFn: ({ family, days, confirm }) =>
+      getApi(() =>
+        client.PUT('/api/v1/settings/retention/{family}', {
+          params: { path: { family } },
+          body: confirm ? { days, confirm } : { days },
+        }),
+      ),
+    // A refused or failed write may mean the live policy moved under the
+    // console (409): either way the listing is read again.
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: qk.retention() }),
+    retry: false,
+  })
+}

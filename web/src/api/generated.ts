@@ -793,6 +793,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/retention": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the data retention of each metrics family.
+         * @description One row per metrics family, in a fixed order, with the live TimescaleDB retention policy of its hypertable and the range of days the console accepts. A policy drops a whole chunk once the chunk's end is older than the retention, at the policy's next run (once a day).
+         */
+        get: operations["getRetention"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/retention/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview what a retention of some days would delete.
+         * @description Counts and sizes the chunks of the family's hypertable that a retention of days would drop now (show_chunks with older_than, sized by chunks_detailed_size). Nothing is changed. A retention that is not shorter than the live one previews 0 chunks.
+         */
+        get: operations["previewRetention"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/retention/{family}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set the data retention of a metrics family.
+         * @description Replaces the hypertable's retention policy in one transaction (remove_retention_policy, then add_retention_policy with drop_after of days); a failure rolls back and keeps the old policy. Lengthening is applied at once. Shortening, or giving a retention to a family that has none, deletes the history older than days at the policy's next run, so it needs confirm true and is otherwise answered 409 with the preview. The same days as now answer the row without rewriting the policy.
+         */
+        put: operations["setRetention"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instances/{id}/commands": {
         parameters: {
             query?: never;
@@ -2212,6 +2272,79 @@ export interface components {
             /** Format: int32 */
             rejected: number;
         };
+        RetentionFamily: {
+            family: components["schemas"]["RetentionFamilyName"];
+            /** @description The TimescaleDB hypertable of the family (public schema). */
+            hypertable: string;
+            /**
+             * Format: int32
+             * @description The live retention in days, read from the hypertable's retention policy (drop_after, a part of a day rounded up); null when the hypertable has no retention policy and keeps its history, or when its policy has no drop_after (see unsupported_policy).
+             */
+            days: number | null;
+            /**
+             * @description default when days equals the migration default (30 days; 90 for metrics_bloat), custom otherwise, a missing policy included.
+             * @enum {string}
+             */
+            source: "default" | "custom";
+            /**
+             * Format: int32
+             * @description The shortest retention the family takes: max(3, ceil(compress_after in days) + 1), computed from the live compression policy (compress_after, or compress_created_before), so the retention never drops below the compression horizon; 3 without a compression policy.
+             */
+            min_days: number;
+            /**
+             * Format: int32
+             * @description The longest retention the console sets.
+             * @enum {integer}
+             */
+            max_days: 365;
+            /** @description Present only when the hypertable's retention policy has no drop_after (for example drop_created_before, set outside the console): it describes that policy, days is null, and the console neither previews nor replaces it (503 unsupported retention policy). */
+            unsupported_policy?: string;
+        };
+        /**
+         * @description A metrics family; each maps to the hypertable of the same name.
+         * @enum {string}
+         */
+        RetentionFamilyName: "metrics" | "metrics_statements" | "metrics_ash" | "metrics_replication" | "metrics_tables" | "metrics_indexes" | "metrics_bloat";
+        RetentionPreview: {
+            family: components["schemas"]["RetentionFamilyName"];
+            /** Format: int32 */
+            days: number;
+            /**
+             * Format: int64
+             * @description Chunks whose end is older than days, as show_chunks(older_than) returns them now. 0 when days is not shorter than the live retention, which drops those chunks anyway.
+             */
+            chunks_to_drop: number;
+            /**
+             * Format: int64
+             * @description Total size of those chunks (chunks_detailed_size.total_bytes).
+             */
+            bytes_to_free: number;
+            /**
+             * Format: date-time
+             * @description Start of the hypertable's oldest chunk, dropped or not; null when it has none.
+             */
+            oldest_chunk_at: string | null;
+            /**
+             * Format: date-time
+             * @description End of the newest chunk that would be dropped; null when none would be.
+             */
+            newest_dropped_chunk_end: string | null;
+        };
+        RetentionUpdate: {
+            /**
+             * Format: int32
+             * @description The new retention in days, between the family's min_days and 365.
+             */
+            days: number;
+            /** @description Optional, false when absent. Must be true to shorten the retention (or to give one to a family that has none): the history older than days is deleted at the next policy run. Lengthening needs no confirmation. */
+            confirm?: boolean;
+        };
+        RetentionConfirmationRequired: {
+            /** @enum {string} */
+            error: "confirmation required";
+            detail?: string;
+            preview: components["schemas"]["RetentionPreview"];
+        };
     };
     responses: {
         /** @description Bad request. */
@@ -3477,6 +3610,145 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdvisorRule"][];
+                };
+            };
+        };
+    };
+    getRetention: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The seven metrics families. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetentionFamily"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description The store is unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    previewRetention: {
+        parameters: {
+            query: {
+                family: components["schemas"]["RetentionFamilyName"];
+                days: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What the retention would drop. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetentionPreview"];
+                };
+            };
+            /** @description family is missing, or days is missing, not an integer, or outside the family's min_days to 365. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            /** @description The store is unavailable, or the family's retention policy has no drop_after (error unsupported retention policy). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    setRetention: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                family: components["schemas"]["RetentionFamilyName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetentionUpdate"];
+            };
+        };
+        responses: {
+            /** @description The family as getRetention lists it after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetentionFamily"];
+                };
+            };
+            /** @description days is missing, not an integer, or outside the family's min_days to 365; or the body is malformed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            /** @description The retention would delete history and confirm is not true; nothing was changed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetentionConfirmationRequired"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            /** @description A policy call failed in the database and was rolled back; the old policy is kept. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The store did not answer, or the family's retention policy has no drop_after (error unsupported retention policy); the old policy is kept. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };

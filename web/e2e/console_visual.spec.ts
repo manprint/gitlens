@@ -8,6 +8,7 @@ import type { Page } from '@playwright/test'
 import { expect, test } from './fixtures'
 import { assertFits, measureRoutes } from './fullhd_fit'
 import { FULLHD_ROUTES, routePathname } from './fullhd_routes'
+import { run } from './qa/stack'
 import { INSTANCE_SECTIONS } from '../src/features/instance/instanceSections'
 import {
   AUDIT_VIEWS,
@@ -1307,5 +1308,161 @@ test('PREF-E2E-001 preferences persist across a reload and set the default range
     await page
       .evaluate((key) => window.localStorage.removeItem(key), PREFERENCES_KEY)
       .catch(() => undefined)
+  }
+})
+
+/** The pglens TimescaleDB container of the dev stack (read-only checks of RET-E2E-001). */
+const PGLENS_TS_CONTAINER = process.env.PGLENS_QA_TS_CONTAINER ?? 'pglens-odoo-timescaledb-1'
+/** A constant, read-only query: the retention policies of metrics_ash, by hypertable name. */
+const ASH_RETENTION_JOBS_SQL =
+  "SELECT config->>'drop_after' FROM timescaledb_information.jobs WHERE proc_name = 'policy_retention' AND hypertable_name = 'metrics_ash' ORDER BY job_id"
+
+/** drop_after of every retention job of metrics_ash, read over the container's local socket in a read-only transaction. */
+async function ashRetentionJobs(): Promise<string[]> {
+  const { stdout } = await run(
+    'docker',
+    [
+      'exec',
+      '-e',
+      'PGOPTIONS=-c default_transaction_read_only=on',
+      PGLENS_TS_CONTAINER,
+      'psql',
+      '-U',
+      'pglens',
+      '-d',
+      'pglens',
+      '-X',
+      '-A',
+      '-t',
+      '-q',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-c',
+      ASH_RETENTION_JOBS_SQL,
+    ],
+    { timeoutMs: 30_000 },
+  )
+  return stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+}
+
+interface LiveRetentionRow {
+  family: string
+  days: number | null
+}
+
+async function ashRetentionDays(api: Parameters<typeof pickInstance>[0]): Promise<number | null> {
+  const response = await api.get('/api/v1/settings/retention')
+  expect(response.ok(), `getRetention: HTTP ${response.status()}`).toBe(true)
+  const rows = (await response.json()) as LiveRetentionRow[]
+  const ash = rows.find((row) => row.family === 'metrics_ash')
+  if (!ash) throw new Error('getRetention lists no metrics_ash')
+  return ash.days
+}
+
+test('RET-E2E-001 the Data retention tab previews, confirms a shortening up to the dialog only, and applies a lengthening of metrics_ash', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, 3 * 30_000))
+  const browserErrors = collectConsoleErrors(page)
+  const original = await ashRetentionDays(api)
+  // Restoring needs a value to go back to; a family without a policy is left alone.
+  expect(original, 'metrics_ash has a retention policy on the live stack').not.toBeNull()
+  const originalDays = original ?? 30
+  const jobsBefore = await ashRetentionJobs()
+  expect(jobsBefore).toEqual([`${originalDays} days`])
+  const longer = Math.min(originalDays + 15, 365)
+  expect(longer, 'room to lengthen').toBeGreaterThan(originalDays)
+  let changed = false
+  try {
+    await assertFits(page, api, fullHdRoute('/settings?tab=retention'))
+
+    await page.setViewportSize({ width: 1920, height: 1080 })
+    await page.goto('/settings?tab=retention')
+    const table = page.getByRole('table', { name: 'Data retention by metrics family' })
+    await expect(table).toBeVisible({ timeout: 30_000 })
+    const input = table.getByRole('textbox', { name: 'New retention of metrics_ash in days' })
+    const preview = table.getByRole('button', { name: 'Preview metrics_ash' })
+    const apply = table.getByRole('button', { name: 'Apply metrics_ash' })
+    const summary = page.getByTestId('retention-preview-metrics_ash')
+    await expect(input).toHaveValue(String(originalDays))
+    await expect(apply).toBeDisabled()
+
+    // Preview 20 days: a shortening of the live 30 days (or a lengthening of a shorter one).
+    await input.fill('20')
+    await preview.click()
+    await expect(summary).toBeVisible({ timeout: 30_000 })
+    await expect(summary).toHaveText(
+      20 < originalDays
+        ? /^(Deletes \d[\d,]* chunks? \(~[\d.,]+ MiB\) at the next policy run\.|Nothing older than 20 days is stored now\.)$/
+        : 'Keeps more history: nothing is deleted.',
+    )
+    await expect(apply).toBeEnabled()
+    await page.screenshot({ path: `${ARTIFACT_DIR}/ret-e2e-001-preview.png` })
+
+    if (20 < originalDays) {
+      // The destructive dialog up to its confirmation screen, then Cancel: nothing is deleted.
+      await apply.click()
+      const dialog = page.getByRole('dialog')
+      await expect(dialog).toBeVisible()
+      await expect(dialog).toContainText(
+        /This will permanently delete \d[\d,]* chunks? \(~[\d.,]+ MiB\) of metrics_ash data older than 20 days at the next policy run\. Take a backup first\./,
+      )
+      const confirm = dialog.getByRole('button', { name: 'Delete history and apply' })
+      await expect(confirm).toBeDisabled()
+      await dialog.getByRole('checkbox').check()
+      await expect(confirm).toBeEnabled()
+      await dialog.screenshot({ path: `${ARTIFACT_DIR}/ret-e2e-001-confirm.png` })
+      await dialog.getByRole('button', { name: 'Cancel' }).click()
+      await expect(dialog).toBeHidden()
+      expect(await ashRetentionJobs(), 'Cancel leaves the policy as it was').toEqual(jobsBefore)
+    }
+
+    // A lengthening applies without a dialog.
+    await input.fill(String(longer))
+    await expect(apply).toBeDisabled()
+    await preview.click()
+    await expect(summary).toHaveText('Keeps more history: nothing is deleted.', { timeout: 30_000 })
+    changed = true
+    await apply.click()
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    await expect(table.getByRole('status')).toHaveText(`Applied: ${longer} days.`, {
+      timeout: 30_000,
+    })
+    await expect(table.getByText(`${longer} days`, { exact: true })).toBeVisible()
+    expect(await ashRetentionJobs(), 'timescaledb_information.jobs holds one job').toEqual([
+      `${longer} days`,
+    ])
+    expect(await ashRetentionDays(api)).toBe(longer)
+    await page.screenshot({ path: `${ARTIFACT_DIR}/ret-e2e-001-applied.png` })
+    browserErrors.assertClean()
+  } finally {
+    // Put the original retention back even when a step failed; it deletes nothing the
+    // original policy would keep. Never hides the real failure.
+    if (changed) {
+      let message: string | null = null
+      try {
+        const response = await api.put('/api/v1/settings/retention/metrics_ash', {
+          data: { days: originalDays, confirm: true },
+        })
+        if (!response.ok()) {
+          message = `restore metrics_ash: HTTP ${response.status()} ${await response.text()}`
+        }
+        const jobs = await ashRetentionJobs()
+        if (message === null && JSON.stringify(jobs) !== JSON.stringify(jobsBefore)) {
+          message = `restore metrics_ash: jobs ${JSON.stringify(jobs)}, want ${JSON.stringify(jobsBefore)}`
+        }
+      } catch (error) {
+        message = `restore metrics_ash: ${error instanceof Error ? error.message : String(error)}`
+      }
+      if (message !== null) {
+        console.error(`RET-E2E-001 ${message}`)
+        test.info().annotations.push({ type: 'RESTORE-FAILED', description: message })
+      }
+      expect(message, 'the original retention must be restored').toBeNull()
+    }
   }
 })

@@ -41,12 +41,23 @@ const (
 // API handles read endpoints.
 type API struct {
 	pool dbPool
+	// retention replaces the database's policy store in unit tests (11.3).
+	retention policyStore
+	// auth tells a bearer-token request from a UI session in the log of a
+	// retention change; nil names every request a UI session.
+	auth *Auth
 }
 
 // NewAPI creates an API backed by the given pool.
 // Pool may be nil in unit tests that exercise only validation logic.
 func NewAPI(pool *pgxpool.Pool) *API {
 	return &API{pool: asDBPool(pool)}
+}
+
+// SetAuth gives the API the bootstrap token check, so a retention change is
+// logged with the credential that made it (requesterOf).
+func (a *API) SetAuth(auth *Auth) {
+	a.auth = auth
 }
 
 // RegisterRoutes mounts all read API handlers onto r.
@@ -68,6 +79,7 @@ func (a *API) RegisterRoutes(r chi.Router) {
 	a.registerFindingsRoutes(r)
 	a.registerPlanRoutes(r)
 	a.registerAuditRoutes(r)
+	a.registerRetentionRoutes(r)
 }
 
 // Ready verifies that the database is reachable and the complete migration

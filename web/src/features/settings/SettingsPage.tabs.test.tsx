@@ -2,6 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { base as hostBase } from '@/test/fixtures/getInstanceHost'
+import { base as retentionBase } from '@/test/fixtures/getRetention'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { CLUSTER, INSTANCE_ID, INSTANCE_SUMMARY, NOW } from '@/test/fixture-helpers'
 import { ok } from '@/test/msw/handlers'
@@ -40,6 +41,8 @@ function renderSettings(route = '/') {
       not_monitored_count: 0,
     }),
     ok('getInstanceHost', hostBase),
+    // The Data retention tab reads the live policies (11.3).
+    ok('getRetention', retentionBase),
   )
   return renderWithProviders(<SettingsPage />, { route })
 }

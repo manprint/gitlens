@@ -85,6 +85,24 @@ export const CAPTIONS = {
     howToRead:
       'Each control states its effect. A range or page size in the address still wins over the default; Reset to defaults restores every preference.',
   },
+  'settings.retention': {
+    what: 'Days of history kept per metrics family before TimescaleDB drops its oldest chunks.',
+    source:
+      'The retention and compression policies of each hypertable (timescaledb_information.jobs), read with getRetention and replaced with setRetention.',
+    unit: 'days',
+    window:
+      'Live policies. A policy runs once a day and drops whole chunks (6 hours of data; 1 day for bloat) older than its retention.',
+    howToRead:
+      'Preview shows what a value would delete; a shorter retention asks for confirmation and deletes that history at the next policy run.',
+  },
+  'settings.retention-table': {
+    what: 'One row per metrics family: its retention now, the days it accepts, and a new value to preview and apply.',
+    source: 'getRetention for the rows, previewRetention for the preview, setRetention to apply.',
+    unit: 'days',
+    window: 'Live policies.',
+    howToRead:
+      'The shortest retention is one day past the family’s compression horizon and never under 3 days; the longest is 365 days.',
+  },
 } as const satisfies Record<string, CaptionEntry>
 
 export type CaptionId = keyof typeof CAPTIONS
