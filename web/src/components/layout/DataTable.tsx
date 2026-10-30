@@ -20,6 +20,7 @@ import {
 } from '@/hooks/useTableState'
 import { useFilteredRows, type TableToolbarSpec } from '@/hooks/useFilteredRows'
 import { PAGE_SIZES, paginate, sortRows, type Comparable } from '@/lib/tableControls'
+import type { CaptionId, ColumnHelpId } from '@/lib/captions'
 
 import { cn } from '@/lib/utils'
 
@@ -31,6 +32,8 @@ import {
   FULLHD_TABLE,
   FULLHD_TRUNCATE,
 } from './fullhdTable'
+import { Caption } from './Caption'
+import { ColumnHint, InfoHint } from './InfoHint'
 import { SortButtons } from './SortButtons'
 import { NoRowsMatch, TableFooter } from './TableFooter'
 import { TableToolbar } from './TableToolbar'
@@ -47,7 +50,7 @@ const dataTableFeatures = tableFeatures({
 /** Search box and filters above the table (D12). */
 export type DataTableToolbar<TData> = TableToolbarSpec<TData>
 
-export interface DataTableProps<TData extends RowData> {
+export interface DataTableBaseProps<TData extends RowData> {
   columns: ColumnDef<typeof dataTableFeatures, TData>[]
   data: TData[]
   emptyState: ReactNode
@@ -68,6 +71,13 @@ export interface DataTableProps<TData extends RowData> {
 }
 
 /**
+ * A captioned table (D30) shows its caption in the toolbar row with an ⓘ named
+ * after the table, so it must have its own `ariaLabel`.
+ */
+export type DataTableProps<TData extends RowData> = DataTableBaseProps<TData> &
+  ({ captionId?: undefined } | { captionId: CaptionId; ariaLabel: string })
+
+/**
  * Per-column layout hints, read from `columnDef.meta` (D26): `width` sizes the
  * column of the fixed table from 1600 px; `truncate` keeps a free-text cell on
  * one line with the full text in its `title` (from `title`, else the value).
@@ -76,6 +86,8 @@ export interface DataTableColumnMeta<TData = unknown> {
   width?: string
   truncate?: boolean
   title?: (row: TData) => string
+  /** A short explanation of the column, behind an ⓘ after its header (D30). */
+  help?: ColumnHelpId
 }
 
 function columnMeta<TData>(columnDef: { meta?: unknown }): DataTableColumnMeta<TData> {
@@ -133,6 +145,7 @@ function DataTableView<TData extends RowData>({
   total = data.length,
   budget,
   toolbarExtra,
+  captionId,
   scope = 'rows',
   ariaLabel = 'Data table',
   toolbar,
@@ -191,7 +204,11 @@ function DataTableView<TData extends RowData>({
   }
 
   return (
-    <div className="space-y-3" data-table-card>
+    <div
+      className="space-y-3"
+      data-table-card
+      {...(captionId === undefined ? {} : { 'data-caption-id': captionId })}
+    >
       <div className="flex flex-wrap items-end justify-between gap-3">
         {toolbar ? (
           // The toolbar takes the free width so its filters do not wrap beside Columns.
@@ -213,6 +230,14 @@ function DataTableView<TData extends RowData>({
         ) : (
           <span />
         )}
+        {captionId !== undefined ? (
+          // Below 1600 px the caption is a full line above the controls; from 1600 px it
+          // sits beside them, one truncated line of a bounded width (D26).
+          <div className="order-first flex w-full min-w-0 items-center gap-1 self-center min-[1600px]:order-none min-[1600px]:w-auto min-[1600px]:max-w-md min-[1600px]:min-w-48 min-[1600px]:flex-initial">
+            <Caption className="text-xs" id={captionId} marked={false} oneLine />
+            <InfoHint className="shrink-0" id={captionId} label={ariaLabel} />
+          </div>
+        ) : null}
         <details className="relative">
           <summary className="border-input bg-card text-muted-foreground hover:bg-muted hover:text-foreground inline-flex h-8 list-none items-center gap-1.5 rounded-md border px-3 text-xs font-medium shadow-xs transition-colors [&::-webkit-details-marker]:hidden">
             <Columns3 aria-hidden="true" className="size-3.5" />
@@ -264,7 +289,8 @@ function DataTableView<TData extends RowData>({
                       typeof column.columnDef.header === 'string'
                         ? column.columnDef.header
                         : column.id
-                    const width = columnMeta(column.columnDef).width
+                    const { width, help } = columnMeta(column.columnDef)
+                    const hint = help === undefined ? null : <ColumnHint id={help} label={label} />
                     return (
                       <th
                         key={header.id}
@@ -301,9 +327,13 @@ function DataTableView<TData extends RowData>({
                                 )
                               }
                             />
+                            {hint}
                           </span>
                         ) : (
-                          flexRender(column.columnDef.header, header.getContext())
+                          <>
+                            {flexRender(column.columnDef.header, header.getContext())}
+                            {hint}
+                          </>
                         )}
                       </th>
                     )

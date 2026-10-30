@@ -2,6 +2,9 @@ import { useId, type ReactNode } from 'react'
 
 import type { ApiFailure } from '@/api/client'
 import { EmptyState, ErrorState } from '@/components/state'
+import { Caption } from '@/components/layout/Caption'
+import { InfoHint } from '@/components/layout/InfoHint'
+import type { CaptionId } from '@/lib/captions'
 import { formatRangeLabel } from '@/lib/chartTime'
 import { cn } from '@/lib/utils'
 
@@ -23,6 +26,8 @@ export interface ChartCardProps {
   /** Height of the loading placeholder; match the chart's `height` (default 300). */
   height?: number
   children?: ReactNode
+  /** The chart's caption (D30): a visible line under the title and an ⓘ with the details. */
+  captionId?: CaptionId
 }
 
 const NO_FAILURE: ApiFailure = { kind: 'network', message: 'The chart data could not be loaded.' }
@@ -40,6 +45,7 @@ export function ChartCard({
   wide = false,
   height = 300,
   children,
+  captionId,
 }: ChartCardProps) {
   const titleId = `${useId().replaceAll(':', '')}-chart-title`
 
@@ -48,11 +54,20 @@ export function ChartCard({
       aria-labelledby={titleId}
       className={cn('bg-card min-w-0 rounded-xl border p-4 shadow-sm', wide && 'lg:col-span-2')}
       data-chart-card=""
+      {...(captionId === undefined ? {} : { 'data-caption-id': captionId })}
     >
-      <h3 className="text-foreground text-sm font-semibold" id={titleId}>
-        {title}
-        {unitHint ? <span className="text-muted-foreground font-normal"> ({unitHint})</span> : null}
-      </h3>
+      <div className="flex items-start justify-between gap-2">
+        <h3 className="text-foreground text-sm font-semibold" id={titleId}>
+          {title}
+          {unitHint ? (
+            <span className="text-muted-foreground font-normal"> ({unitHint})</span>
+          ) : null}
+        </h3>
+        {captionId !== undefined ? <InfoHint id={captionId} label={title} /> : null}
+      </div>
+      {captionId !== undefined ? (
+        <Caption className="mt-0.5 text-xs" id={captionId} marked={false} />
+      ) : null}
       <p className="text-muted-foreground mt-0.5 text-xs">
         {formatRangeLabel(range.from, range.to, stepSeconds)}
         {subtitle ? ` · ${subtitle}` : ''}
