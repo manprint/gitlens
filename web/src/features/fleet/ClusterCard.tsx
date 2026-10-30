@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Stale, Unknown } from '@/components/state'
 import { formatLag } from '@/lib/format'
 import { AGENT_STALE_AFTER_SECONDS, describeHealth } from '@/lib/fleet'
+import { clusterLabel, instanceAddress, instanceLabel } from '@/lib/names'
 
 interface ClusterCardProps {
   agentStaleAgeSeconds?: number
@@ -29,6 +30,7 @@ const HEALTH_ACCENT: Record<Cluster['health'], string> = {
 
 export function ClusterCard({ agentStaleAgeSeconds, alertCount = 0, cluster }: ClusterCardProps) {
   const explanation = describeHealth(cluster)
+  const label = clusterLabel(cluster, 'Unnamed cluster')
   const primary = cluster.primary
     ? cluster.instances.find((instance) => instance.instance_id === cluster.primary)
     : undefined
@@ -58,15 +60,17 @@ export function ClusterCard({ agentStaleAgeSeconds, alertCount = 0, cluster }: C
       >
         <CardHeader className="px-5">
           <div className="flex items-start justify-between gap-4">
-            <div>
-              <CardTitle className="text-base">
+            {/* A long name stays on one line; the whole name is the link's title. */}
+            <div className="min-w-0">
+              <CardTitle className="truncate text-base">
                 {/* The link stretches over the whole card, so every part of it opens the cluster. */}
                 <Link
                   to={`/clusters/${encodeURIComponent(cluster.cluster_id)}`}
-                  aria-label={`${cluster.name ?? 'Unnamed cluster'} (${cluster.cluster_id})`}
+                  aria-label={`${label} (${cluster.cluster_id})`}
                   className="after:absolute after:inset-0 after:rounded-xl focus-visible:outline-none"
+                  title={label}
                 >
-                  {cluster.name ?? 'Unnamed cluster'}
+                  {label}
                 </Link>
               </CardTitle>
               <CardDescription>
@@ -85,7 +89,13 @@ export function ClusterCard({ agentStaleAgeSeconds, alertCount = 0, cluster }: C
         <CardContent className="grid gap-3 px-5 text-sm">
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 [&_dd]:text-right [&_dd]:font-medium [&_dd]:tabular-nums">
             <dt className="text-muted-foreground">Primary</dt>
-            <dd>{primary?.addr ?? <Unknown reason="No primary address is available." />}</dd>
+            <dd>
+              {primary ? (
+                <span title={instanceAddress(primary)}>{instanceLabel(primary)}</span>
+              ) : (
+                <Unknown reason="No primary address is available." />
+              )}
+            </dd>
             <dt className="text-muted-foreground">Instances</dt>
             <dd>{cluster.instance_count}</dd>
             <dt className="text-muted-foreground">Standbys</dt>

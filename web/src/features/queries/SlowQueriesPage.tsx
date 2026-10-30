@@ -25,6 +25,7 @@ import {
   type StatementRow,
 } from '@/lib/statements'
 import { chooseInstance, readLastInstance } from '@/lib/lastInstance'
+import { clusterLabel, instanceLabel } from '@/lib/names'
 import { queryWindowOf } from '@/lib/timerange'
 import { cn } from '@/lib/utils'
 import { NativeSelect } from '@/components/ui/native-select'
@@ -69,7 +70,7 @@ function instanceOptions(clusters: readonly Cluster[]): InstanceOption[] {
   return clusters.flatMap((cluster) =>
     cluster.instances.map((instance) => ({
       id: instance.instance_id,
-      label: `${instance.addr}:${instance.port}${cluster.name ? ` · ${cluster.name}` : ''}`,
+      label: `${instanceLabel(instance)}${cluster.name ? ` · ${clusterLabel(cluster)}` : ''}`,
       up: instance.up,
     })),
   )

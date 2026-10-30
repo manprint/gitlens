@@ -8,6 +8,14 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Degraded, Unknown } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
 import { formatLag, formatPostgresVersion, formatTimestamp } from '@/lib/format'
+import { useCachedClusters } from '@/api/queries'
+import {
+  clusterNameOrId,
+  hasDisplayName,
+  instanceAddress,
+  instanceLabel,
+  nameLookup,
+} from '@/lib/names'
 
 type Instance = Schemas['Instance']
 
@@ -56,6 +64,10 @@ export function InstanceHeader({
 }: InstanceHeaderProps) {
   const role = roleLabel(instance.role)
   const lastSeen = formatTimestamp(instance.last_seen, 'UTC', 'en-GB')
+  const address = instanceAddress(instance)
+  // The owning cluster's name, from the list the shell polls; its id until that arrives.
+  const clusters = useCachedClusters()
+  const owningCluster = clusterNameOrId(nameLookup(clusters), instance.cluster_id)
 
   return (
     // From 1600 px (D26) the header takes two lines: the title beside the instance
@@ -68,9 +80,13 @@ export function InstanceHeader({
         <PageHeader
           eyebrow="Server"
           icon={Server}
-          title={`${instance.addr}:${instance.port}`}
+          // A display name is the title and the address moves to the subtitle (D15);
+          // from 1600 px the name is cut to one line, so the header keeps its height.
+          title={instanceLabel(instance)}
+          truncateTitle
           subtitle={
-            <span className="inline-flex flex-wrap items-center gap-2">
+            // From 1600 px the subtitle is one clipped line: it never wraps the header.
+            <span className="inline-flex flex-wrap items-center gap-2 min-[1600px]:flex-nowrap">
               <Badge variant={instance.up ? 'success' : 'destructive'}>
                 <span
                   aria-hidden="true"
@@ -78,6 +94,11 @@ export function InstanceHeader({
                 />
                 {instance.up ? 'up' : 'down'}
               </Badge>
+              {hasDisplayName(instance) ? (
+                <span data-testid="instance-address" title={address}>
+                  <code className="font-mono text-xs">{address}</code>
+                </span>
+              ) : null}
               <span>
                 Instance <code className="font-mono text-xs">{instance.instance_id}</code>
               </span>
@@ -133,7 +154,7 @@ export function InstanceHeader({
             {lastSeen}
           </dd>
         </div>
-        {/* The cluster id is the one value that gives way on a narrow Full HD line. */}
+        {/* The cluster label is the one value that gives way on a narrow Full HD line. */}
         <div className="min-w-0 px-4 py-3 min-[1600px]:flex min-[1600px]:items-baseline min-[1600px]:gap-1.5 min-[1600px]:px-3 min-[1600px]:py-1.5">
           <dt className="text-muted-foreground text-xs font-medium uppercase min-[1600px]:shrink-0 min-[1600px]:text-[11px]">
             Owning cluster
@@ -144,7 +165,11 @@ export function InstanceHeader({
               title={instance.cluster_id}
               to={`/clusters/${encodeURIComponent(instance.cluster_id)}`}
             >
-              <code className="font-mono text-xs">{instance.cluster_id}</code>
+              {owningCluster === instance.cluster_id ? (
+                <code className="font-mono text-xs">{instance.cluster_id}</code>
+              ) : (
+                owningCluster
+              )}
             </Link>
           </dd>
         </div>

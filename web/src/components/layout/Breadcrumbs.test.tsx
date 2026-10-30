@@ -1,8 +1,18 @@
-import { screen, within } from '@testing-library/react'
+import { act, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
+import { qk } from '@/api/keys'
+import { CLUSTER, CLUSTER_ID, INSTANCE_ID, INSTANCE_SUMMARY } from '@/test/fixture-helpers'
 import { Breadcrumbs } from './Breadcrumbs'
-import { renderWithProviders } from '@/test/render'
+import { renderWithProviders, type TestRenderResult } from '@/test/render'
+
+/** Puts the cluster list in the cache, as the shell's poll does, and lets the crumbs re-render. */
+async function cacheClusters(view: TestRenderResult, clusters: unknown[]) {
+  await act(async () => {
+    view.queryClient.setQueryData(qk.clusters(), clusters)
+    await vi.advanceTimersByTimeAsync(1)
+  })
+}
 
 // The separators are icons, so each crumb is read from its own list item.
 function crumbs(): string[] {
@@ -26,5 +36,42 @@ describe('Breadcrumbs', () => {
     renderWithProviders(<Breadcrumbs />, { route: '/instances/app%20one' })
 
     expect(crumbs()).toEqual(['Instances', 'app one'])
+  })
+
+  it('CLNAME-UI-011 names a cluster or instance crumb from the cached cluster list, id in the title', async () => {
+    const view = renderWithProviders(<Breadcrumbs />, { route: `/clusters/${CLUSTER_ID}` })
+    // Before the shell's cluster list arrives the crumb is the shortened id.
+    expect(crumbs()).toEqual(['Clusters', '9007199254…'])
+
+    await cacheClusters(view, [
+      {
+        ...CLUSTER,
+        name: 'odoo-prod',
+        instances: [{ ...INSTANCE_SUMMARY, display_name: 'odoo-db-1' }],
+      },
+    ])
+    expect(crumbs()).toEqual(['Clusters', 'odoo-prod'])
+    expect(screen.getByText('odoo-prod')).toHaveAttribute('title', CLUSTER_ID)
+  })
+
+  it('CLNAME-UI-011 an instance crumb shows its display name, else its address', async () => {
+    const view = renderWithProviders(<Breadcrumbs />, {
+      route: `/instances/${INSTANCE_ID}/queries`,
+    })
+    await cacheClusters(view, [CLUSTER])
+    expect(crumbs()).toEqual(['Instances', 'postgres.example.test:5432', 'Queries'])
+    expect(
+      within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
+        name: 'postgres.example.test:5432',
+      }),
+    ).toHaveAttribute('title', INSTANCE_ID)
+  })
+
+  it('CLNAME-UI-011 an id the cluster list does not hold keeps today’s label', async () => {
+    const view = renderWithProviders(<Breadcrumbs />, {
+      route: '/instances/00000000-0000-4000-8000-00000000abcd',
+    })
+    await cacheClusters(view, [CLUSTER])
+    expect(crumbs()).toEqual(['Instances', '00000000…'])
   })
 })

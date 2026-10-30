@@ -8,7 +8,7 @@ import { useTimeRange } from '@/hooks/useTimeRange'
 import {
   alignSeries,
   hasGaps,
-  instanceLabel,
+  replicationInstanceLabel,
   type AlignedReplicationSeries,
   type ReplicationInstance,
   type ReplicationMetricEdge,
@@ -78,7 +78,7 @@ function edgeHasGaps(aligned: AlignedReplicationSeries): boolean {
 // the application_name the primary reports, shown as is.
 function edgeHeading(group: EdgeGroup, instances: readonly ReplicationInstance[]): string {
   const sync = group.metrics.find((edge) => edge.sync_state !== undefined)?.sync_state ?? 'Unknown'
-  return `${instanceLabel(instances, group.from)} → ${instanceLabel(instances, group.to)} (${sync})`
+  return `${replicationInstanceLabel(instances, group.from)} → ${replicationInstanceLabel(instances, group.to)} (${sync})`
 }
 
 export function LagSection({

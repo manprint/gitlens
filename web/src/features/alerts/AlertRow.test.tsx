@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { Schemas } from '@/api/types'
 import { SimpleTable } from '@/components/layout/SimpleTable'
+import { nameLookup } from '@/lib/names'
+import { CLUSTER, CLUSTER_ID, INSTANCE_ID } from '@/test/fixture-helpers'
 import { renderWithProviders } from '@/test/render'
 
 import { alertColumns } from './AlertRow'
@@ -50,5 +52,59 @@ describe('AlertRow', () => {
     expect(screen.queryAllByRole('link').map((link) => link.getAttribute('href'))).toEqual([
       '/README.md#troubleshooting',
     ])
+  })
+
+  it('CLNAME-UI-012 names the cluster and instance, the id and address in the title, ids when unknown', () => {
+    const base = {
+      alert_key: 'replication-lag',
+      rule_id: 'replication-lag',
+      severity: 'warning',
+      state: 'firing',
+      datname: '',
+      labels: {},
+      value: 1,
+      summary: 'Lag',
+      started_at: instant,
+      last_eval_at: instant,
+      resolved_at: null,
+      suppressed: false,
+    }
+    const known = { ...base, cluster_id: CLUSTER_ID, instance_id: INSTANCE_ID } as unknown as Alert
+    const unknown = {
+      ...base,
+      alert_key: 'other',
+      cluster_id: '77',
+      instance_id: '00000000-0000-4000-8000-0000000000ff',
+    } as unknown as Alert
+    const names = nameLookup([
+      {
+        ...CLUSTER,
+        name: 'odoo-prod',
+        instances: [{ ...CLUSTER.instances[0], display_name: 'odoo-db-1' }],
+      },
+    ])
+    renderWithProviders(
+      <SimpleTable
+        ariaLabel="Alerts"
+        columns={alertColumns({ names, onSelect: vi.fn(), silenceFor: () => undefined })}
+        emptyState={null}
+        rowKey={(row) => row.alert_key}
+        rows={[known, unknown]}
+        tableId="alerts"
+      />,
+    )
+
+    const cluster = screen.getByRole('link', { name: 'odoo-prod' })
+    expect(cluster).toHaveAttribute('href', `/clusters/${CLUSTER_ID}`)
+    // The one-line cell keeps the id in its tooltip (D26).
+    expect(screen.getByTitle(CLUSTER_ID)).toContainElement(cluster)
+    const instance = screen.getByRole('link', { name: 'odoo-db-1' })
+    expect(instance).toHaveAttribute('href', `/instances/${INSTANCE_ID}`)
+    expect(screen.getByTitle('postgres.example.test:5432')).toContainElement(instance)
+    // Ids the cluster list does not hold stay ids.
+    expect(screen.getByRole('link', { name: '77' })).toHaveAttribute('href', '/clusters/77')
+    expect(
+      screen.getByRole('link', { name: '00000000-0000-4000-8000-0000000000ff' }),
+    ).toBeInTheDocument()
   })
 })

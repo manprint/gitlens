@@ -68,6 +68,11 @@ export interface DataTableBaseProps<TData extends RowData> {
   tableId?: string
   /** Order when the URL names none. */
   defaultSort?: { id: string; desc: boolean }
+  /**
+   * A stable key per row (TanStack `getRowId`). Without it a row is keyed by its
+   * position, so a row whose cell keeps state (a dialog, focus) must pass one.
+   */
+  getRowId?: (row: TData) => string
 }
 
 /**
@@ -149,6 +154,7 @@ function DataTableView<TData extends RowData>({
   scope = 'rows',
   ariaLabel = 'Data table',
   toolbar,
+  getRowId,
   controls,
 }: DataTableProps<TData> & { controls: TableStateControls }) {
   const { state, set, clear } = controls
@@ -170,6 +176,7 @@ function DataTableView<TData extends RowData>({
     features: dataTableFeatures,
     columns,
     data: filtered,
+    ...(getRowId === undefined ? {} : { getRowId: (row: TData) => getRowId(row) }),
     manualSorting: true,
     // One sort column: the URL holds one, so a shift-click must not start a multi-sort.
     enableMultiSort: false,

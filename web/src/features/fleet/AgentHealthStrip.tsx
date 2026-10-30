@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 
 import { formatDuration } from '@/lib/format'
 import type { AgentHealthIssue } from '@/lib/fleet'
+import { clusterLabel, instanceAddress, instanceLabel } from '@/lib/names'
 
 interface AgentHealthStripProps {
   issues: readonly AgentHealthIssue[]
@@ -31,8 +32,8 @@ export function AgentHealthStrip({ issues }: AgentHealthStripProps) {
 
       <ul className="grid gap-3 lg:grid-cols-2">
         {issues.map((issue) => {
-          const clusterLabel = issue.cluster.name ?? issue.cluster.cluster_id
-          const instanceLabel = `${issue.instance.addr} (${clusterLabel})`
+          const cluster = clusterLabel(issue.cluster, issue.cluster.cluster_id)
+          const instance = instanceLabel(issue.instance)
 
           return (
             <li
@@ -42,12 +43,13 @@ export function AgentHealthStrip({ issues }: AgentHealthStripProps) {
               <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
                 <Link
                   to={`/instances/${encodeURIComponent(issue.instance.instance_id)}`}
-                  aria-label={`Open instance ${instanceLabel}`}
+                  aria-label={`Open instance ${instance} (${cluster})`}
                   className="font-semibold underline underline-offset-2"
+                  title={instanceAddress(issue.instance)}
                 >
-                  {issue.instance.addr}
+                  {instance}
                 </Link>
-                <span className="text-muted-foreground text-xs">{clusterLabel}</span>
+                <span className="text-muted-foreground text-xs">{cluster}</span>
               </div>
               <p className="mt-2 text-sm">
                 <span className="font-medium">Likely cause:</span> {issue.reason}

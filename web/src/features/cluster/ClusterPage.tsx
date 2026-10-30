@@ -15,6 +15,7 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useTimeRange } from '@/hooks/useTimeRange'
+import { clusterLabel } from '@/lib/names'
 import { toSlotRows } from '@/lib/replication'
 import { queryWindowOf } from '@/lib/timerange'
 
@@ -93,6 +94,8 @@ export function ClusterPage({ clusterId: clusterIdOverride }: ClusterPageProps =
 
   const cluster = clustersQuery.data?.find((candidate) => candidate.cluster_id === clusterId)
   const instances = cluster?.instances ?? EMPTY_CLUSTER_INSTANCES
+  // Built from the fields, not the object: the memo below depends on the cluster's instances.
+  const title = clusterLabel({ cluster_id: clusterId, name: cluster?.name ?? null })
   const slotsData = slotsQuery.data
   const slotsUpdatedAt = slotsQuery.dataUpdatedAt
   const slots = useMemo(
@@ -212,7 +215,8 @@ export function ClusterPage({ clusterId: clusterIdOverride }: ClusterPageProps =
       <PageHeader
         icon={Network}
         eyebrow="Cluster"
-        title={cluster.name ?? `Cluster ${cluster.cluster_id}`}
+        title={title}
+        truncateTitle
         subtitle={`${cluster.instance_count} monitored instance${cluster.instance_count === 1 ? '' : 's'} · ${cluster.health}`}
         freshness={<FreshnessBadge dataUpdatedAt={topologyQuery.dataUpdatedAt} policy="cluster" />}
       />

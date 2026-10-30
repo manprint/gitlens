@@ -129,7 +129,8 @@ describe('FleetPage', () => {
       name: 'outage',
       instances: [{ ...INSTANCE_SUMMARY, up: false }],
     })
-    const alert = { ...alertBase, labels: { cluster: 'outage' } }
+    // An alert belongs to a cluster by its cluster_id (the server sets no cluster label).
+    const alert = { ...alertBase, cluster_id: '9007199254740999' }
     renderFleet([CLUSTER as unknown as Cluster, downCluster], [alert])
     await settleInitialQuery()
 
@@ -261,7 +262,7 @@ describe('FleetPage', () => {
   it('UI-FLEET-046 stops showing alert counts on cards once a refetch fails', async () => {
     server.use(
       ok('getClusters', [CLUSTER as unknown as Cluster]),
-      sequence('getAlerts', [alertBase], {
+      sequence('getAlerts', [{ ...alertBase, cluster_id: CLUSTER.cluster_id }], {
         status: 500,
         body: { error: 'internal_error', detail: 'alerts unavailable' },
       }),
@@ -318,7 +319,10 @@ describe('FleetPage', () => {
 
     expect(screen.getByRole('heading', { name: 'Agents requiring attention' })).toBeInTheDocument()
     expect(
-      screen.getByRole('link', { name: /Open instance postgres\.example\.test \(production\)/i }),
+      // The instance label is its address and port when it has no display name (D15).
+      screen.getByRole('link', {
+        name: /Open instance postgres\.example\.test:5432 \(production\)/i,
+      }),
     ).toHaveAttribute('href', `/instances/${INSTANCE_SUMMARY.instance_id}`)
     expect(screen.getByText('cause: agent stopped reporting')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'View agent troubleshooting' })).toHaveAttribute(
@@ -412,5 +416,34 @@ describe('FleetPage', () => {
     )
 
     await expect(expectNoA11yViolations(container)).resolves.toBeUndefined()
+  })
+
+  it('CLNAME-UI-016 counts an alert by its cluster_id or instance, never by a cluster label equal to a name', async () => {
+    const other = makeCluster({
+      cluster_id: '9007199254740999',
+      name: 'outage',
+      instances: [{ ...INSTANCE_SUMMARY, instance_id: '00000000-0000-4000-8000-000000000099' }],
+    })
+    const alerts = [
+      // Labelled with the production name but raised for the other cluster.
+      {
+        ...alertBase,
+        alert_key: 'a',
+        cluster_id: '9007199254740999',
+        labels: { cluster: 'production' },
+      },
+      // No cluster_id: its instance places it in production.
+      { ...alertBase, alert_key: 'b', instance_id: INSTANCE_SUMMARY.instance_id, labels: {} },
+    ]
+    renderFleet([CLUSTER as unknown as Cluster, other], alerts)
+    await settleInitialQuery()
+
+    const cards = within(screen.getByRole('list', { name: 'Cluster cards' })).getAllByRole(
+      'listitem',
+    )
+    const production = cards.find((card) => within(card).queryByText('production') !== null)
+    const outage = cards.find((card) => within(card).queryByText('outage') !== null)
+    expect(within(production!).getByText('1 firing alert')).toBeInTheDocument()
+    expect(within(outage!).getByText('1 firing alert')).toBeInTheDocument()
   })
 })

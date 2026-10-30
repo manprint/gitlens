@@ -8,6 +8,7 @@ import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { EmptyState, ErrorState } from '@/components/state'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
 import { formatTimestamp } from '@/lib/format'
+import { instanceLabel } from '@/lib/names'
 
 type InstanceSummary = Schemas['InstanceSummary']
 
@@ -149,7 +150,7 @@ function auditKey(entry: CommandAuditEntry): string {
 
 function InstanceCommandAudit({ instance }: { instance: InstanceSummary }) {
   const query = useInstanceCommandAudit(instance.instance_id, REFRESH.inventory)
-  const label = `${instance.addr}:${instance.port}`
+  const label = instanceLabel(instance)
   const entries = useMemo(
     () => sortNewestFirst((query.data ?? []).filter(isCommandAuditEntry)),
     [query.data],

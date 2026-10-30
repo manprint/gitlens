@@ -5,6 +5,7 @@ import { qk } from '@/api/keys'
 import { REFRESH } from '@/api/policy'
 import type { Alert } from '@/lib/alerts'
 import type { ClusterEvent } from '@/lib/events'
+import { CLUSTER } from '@/test/fixture-helpers'
 import { NOW } from '@/test/time'
 import { ok, sequence, status } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
@@ -301,5 +302,30 @@ describe('EventsPage Full HD layout (D26)', () => {
     expect(search.get('type')).toBe('failover_detected')
     // A narrower list starts on its first page (D23).
     expect(search.get('events.page')).toBeNull()
+  })
+
+  it('CLNAME-UI-012 the event list names clusters and instances from the cached cluster list', async () => {
+    const view = await renderPage('/events?range=1h', [
+      event({ cluster_id: CLUSTER.cluster_id, instance_id: CLUSTER.instances[0].instance_id }),
+    ])
+    await act(async () => {
+      view.queryClient.setQueryData(qk.clusters(), [
+        {
+          ...CLUSTER,
+          name: 'odoo-prod',
+          instances: [{ ...CLUSTER.instances[0], display_name: 'odoo-db-1' }],
+        },
+      ])
+      await vi.advanceTimersByTimeAsync(1)
+    })
+
+    expect(screen.getByRole('link', { name: 'odoo-prod' })).toHaveAttribute(
+      'href',
+      `/clusters/${CLUSTER.cluster_id}`,
+    )
+    expect(screen.getByRole('link', { name: 'odoo-db-1' })).toHaveAttribute(
+      'href',
+      `/instances/${CLUSTER.instances[0].instance_id}`,
+    )
   })
 })

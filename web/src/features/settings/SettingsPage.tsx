@@ -6,6 +6,7 @@ import { AlertListTruncated, EmptyState, ErrorState } from '@/components/state'
 
 import { CommandAudit } from './CommandAudit'
 import { InventoryTables } from './InventoryTables'
+import { NamesPanel } from './NamesPanel'
 import { ServerInfo } from './ServerInfo'
 import { Callout } from '@/components/ui/callout'
 
@@ -49,7 +50,7 @@ export function SettingsPage() {
         icon={Settings}
         eyebrow="System"
         freshness={<FreshnessBadge dataUpdatedAt={instancesQuery.dataUpdatedAt} policy="fleet" />}
-        subtitle="What pglens monitors and with which permissions: server build, agents and their telemetry, the instance inventory, and an audit of the commands sent to the agents."
+        subtitle="What pglens monitors and with which permissions: server build, agents and their telemetry, the instance inventory, cluster and instance names, and an audit of the commands sent to the agents."
         title="Settings and inventory"
       />
       {clustersQuery.error || alertsQuery.error || rulesQuery.error ? (
@@ -69,6 +70,8 @@ export function SettingsPage() {
       ) : null}
       <AlertListTruncated truncated={alertsQuery.truncated} />
       <InventoryTables alerts={alerts} clusters={clusters} instances={instances} rules={rules} />
+      {/* Names stays on this page until 11.1 gives it the `names` tab. */}
+      <NamesPanel clusters={clusters} instances={instances} />
       <CommandAudit instances={instances} />
       <ServerInfo />
     </div>

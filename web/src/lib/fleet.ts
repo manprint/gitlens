@@ -1,5 +1,6 @@
 import { REFRESH } from '@/api/policy'
 import type { Cluster, Schemas } from '@/api/types'
+import { instanceLabel } from '@/lib/names'
 
 export type FleetInstance = Cluster['instances'][number]
 export type FleetAlert = Schemas['Alert']
@@ -115,7 +116,7 @@ export function describeHealth(cluster: Cluster): string {
       return 'Healthy: a primary is present, all instances are up, and replay lag is within the 30 s threshold.'
     case 'degraded': {
       const downInstance = cluster.instances.find((instance) => !instance.up)
-      if (downInstance) return `Degraded: instance ${downInstance.addr} is down.`
+      if (downInstance) return `Degraded: instance ${instanceLabel(downInstance)} is down.`
 
       if (cluster.max_replay_lag_seconds != null && cluster.max_replay_lag_seconds > 0) {
         return `Degraded: standby replay lag is ${cluster.max_replay_lag_seconds} seconds.`

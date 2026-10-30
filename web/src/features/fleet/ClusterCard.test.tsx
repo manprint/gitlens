@@ -22,6 +22,21 @@ const makeCluster = (overrides: ClusterOverrides = {}): Cluster => {
 }
 
 describe('ClusterCard', () => {
+  it('CLNAME-UI-007 shows the cluster name, else Unnamed cluster', () => {
+    const { unmount } = renderWithProviders(
+      <ClusterCard cluster={makeCluster({ name: 'odoo-prod' })} />,
+    )
+    const named = screen.getByRole('link', { name: 'odoo-prod (9007199254740993)' })
+    expect(named).toHaveTextContent('odoo-prod')
+    expect(named).toHaveAttribute('title', 'odoo-prod')
+    unmount()
+
+    renderWithProviders(<ClusterCard cluster={makeCluster({ name: null })} />)
+    expect(
+      screen.getByRole('link', { name: 'Unnamed cluster (9007199254740993)' }),
+    ).toHaveTextContent('Unnamed cluster')
+  })
+
   it('renders the exact cluster id and Unknown for an unmeasured lag', () => {
     renderWithProviders(<ClusterCard cluster={baseCluster} />)
 

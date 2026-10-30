@@ -62,6 +62,21 @@ export const CAPTIONS = {
     window: 'Latest sample.',
     thresholds: 'The advisor rule conn.saturation warns above 80 % of max_connections.',
   },
+  'settings.names': {
+    what: 'Names for clusters and instances, shown in titles, breadcrumbs, server pickers, filters and alert and event tables instead of identifiers and addresses.',
+    source:
+      'clusters.name and instances.display_name, set with renameCluster and renameInstance and read from the cluster and instance lists.',
+    unit: 'names of up to 64 characters',
+    window: 'Current names; the lists refresh after each rename.',
+    howToRead:
+      'In this table a muted label marked default means no name is set: the cluster shows as Cluster and its identifier, the instance as its address and port.',
+  },
+  'settings.names-table': {
+    what: 'One row per cluster followed by one row per instance in it; Rename opens the name editor.',
+    source: 'The cluster list (getClusters) and the instance list (getInstances).',
+    window: 'Current names.',
+    howToRead: 'Names are unique without regard to case; an empty name restores the default label.',
+  },
 } as const satisfies Record<string, CaptionEntry>
 
 export type CaptionId = keyof typeof CAPTIONS

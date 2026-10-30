@@ -6,7 +6,7 @@ import {
   buildGraph,
   detectAnomalies,
   hasGaps,
-  instanceLabel,
+  replicationInstanceLabel,
   layoutGraph,
   summariseSlots,
   toSlotRows,
@@ -239,10 +239,19 @@ describe('summariseSlots', () => {
   })
 })
 
-describe('instanceLabel', () => {
+describe('replicationInstanceLabel', () => {
   it('UI-REPL-011 names a known instance by address and port and keeps anything else', () => {
-    expect(instanceLabel([PRIMARY], PRIMARY.instance_id)).toBe('primary.example.test:5432')
-    expect(instanceLabel([PRIMARY], 'walreceiver')).toBe('walreceiver')
+    expect(replicationInstanceLabel([PRIMARY], PRIMARY.instance_id)).toBe(
+      'primary.example.test:5432',
+    )
+    expect(replicationInstanceLabel([PRIMARY], 'walreceiver')).toBe('walreceiver')
+  })
+
+  it('CLNAME-UI-014 a named instance shows its display name; graph nodes carry it', () => {
+    const named = { ...PRIMARY, display_name: 'odoo-db-1' }
+    expect(replicationInstanceLabel([named], PRIMARY.instance_id)).toBe('odoo-db-1')
+    expect(buildGraph([named], []).nodes[0]?.name).toBe('odoo-db-1')
+    expect(buildGraph([PRIMARY], []).nodes[0]).not.toHaveProperty('name')
   })
 })
 

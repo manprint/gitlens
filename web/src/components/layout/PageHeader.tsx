@@ -9,6 +9,11 @@ interface PageHeaderProps {
   icon?: ComponentType<{ className?: string }>
   /** A small label above the title, such as the section of the product. */
   eyebrow?: ReactNode
+  /**
+   * From 1600 px the title is cut to one bounded line with the whole text in
+   * its tooltip: for a title a user chose (a cluster or instance name).
+   */
+  truncateTitle?: boolean
 }
 
 export function PageHeader({
@@ -18,6 +23,7 @@ export function PageHeader({
   actions,
   icon: Icon,
   eyebrow,
+  truncateTitle = false,
 }: PageHeaderProps) {
   return (
     // From 1600 px the eyebrow, title and subtitle share one line (D26).
@@ -39,7 +45,12 @@ export function PageHeader({
           ) : null}
           <h1
             id="page-title"
-            className="text-foreground text-2xl font-semibold tracking-tight break-words min-[1600px]:shrink-0 min-[1600px]:text-xl"
+            className={`text-foreground text-2xl font-semibold tracking-tight break-words min-[1600px]:text-xl ${
+              truncateTitle
+                ? 'min-[1600px]:max-w-md min-[1600px]:min-w-0 min-[1600px]:shrink-0 min-[1600px]:truncate'
+                : 'min-[1600px]:shrink-0'
+            }`}
+            {...(truncateTitle ? { title } : {})}
           >
             {title}
           </h1>

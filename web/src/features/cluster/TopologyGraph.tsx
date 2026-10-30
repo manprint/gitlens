@@ -50,6 +50,7 @@ function getReplayLag(
 function nodeLabel(node: TopologyNodeData | undefined, fallback: string): string {
   if (!node) return fallback
   if (node.unresolved) return `Unresolved endpoint ${node.id.replace(/^unresolved:/, '')}`
+  if (node.name) return node.name
   return `${node.address ?? node.id}:${node.port ?? 'Unknown'}`
 }
 

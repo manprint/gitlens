@@ -10,6 +10,11 @@ import {
   type EventSeverity,
 } from '@/lib/events'
 import { formatTimestamp } from '@/lib/format'
+import { nameLookup, type NameLookup } from '@/lib/names'
+
+import { clusterCell, clusterTitle, instanceCell, instanceTitle } from './nameCells'
+
+const NO_NAMES = nameLookup(undefined)
 
 const SEVERITY_PILL: Record<EventSeverity, string> = {
   critical: 'bg-destructive/10 text-destructive',
@@ -74,7 +79,7 @@ function detailsCell(event: ClusterEvent) {
  * The columns of the fleet event list: one line per event from 1600 px (D26),
  * newest first, the raw type always shown so an unknown type stays visible.
  */
-export function eventColumns(): SimpleColumn<ClusterEvent>[] {
+export function eventColumns(names: NameLookup = NO_NAMES): SimpleColumn<ClusterEvent>[] {
   return [
     {
       id: 'time',
@@ -120,25 +125,15 @@ export function eventColumns(): SimpleColumn<ClusterEvent>[] {
       id: 'cluster',
       header: 'Cluster',
       width: '10rem',
-      truncate: (event) => event.cluster_id ?? 'Unknown',
-      cell: (event) =>
-        event.cluster_id === null ? (
-          'Unknown'
-        ) : (
-          <Link
-            className="text-primary font-mono text-xs hover:underline"
-            to={`/clusters/${encodeURIComponent(event.cluster_id)}`}
-          >
-            {event.cluster_id}
-          </Link>
-        ),
+      truncate: (event) => clusterTitle(event.cluster_id, 'Unknown'),
+      cell: (event) => clusterCell(names, event.cluster_id, 'Unknown'),
     },
     {
       id: 'instance',
       header: 'Instance',
       width: '12rem',
-      truncate: (event) => event.instance_id ?? '—',
-      cell: (event) => (event.instance_id === null ? '—' : instanceLink(event.instance_id)),
+      truncate: (event) => instanceTitle(names, event.instance_id, '—'),
+      cell: (event) => instanceCell(names, event.instance_id, '—'),
     },
     {
       id: 'details',

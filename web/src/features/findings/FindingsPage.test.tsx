@@ -1,10 +1,11 @@
 import { act, fireEvent, screen, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw/http'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { qk } from '@/api/keys'
 import { REFRESH } from '@/api/policy'
 import { NOW } from '@/test/time'
+import { CLUSTER, CLUSTER_ID, INSTANCE_ID } from '@/test/fixture-helpers'
 import { ok, sequence, status } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 import { expectNoA11yViolations } from '@/test/a11y'
@@ -72,6 +73,11 @@ async function renderFindings(
   return renderPage(route)
 }
 
+// The Cluster and Instance filters list the fleet (10.2); every test gets one cluster.
+beforeEach(() => {
+  server.use(ok('getClusters', [CLUSTER]))
+})
+
 async function settleMutation() {
   await flushNetwork()
 }
@@ -126,17 +132,18 @@ describe('FindingsPage', () => {
     expect(screen.getByLabelText('State')).toHaveValue('degraded')
     expect(screen.getByLabelText('Severity')).toHaveValue('critical')
     expect(screen.getByLabelText('Scope')).toHaveValue('instance')
+    // Ids the fleet does not list stay selected, as themselves.
     expect(screen.getByLabelText('Cluster')).toHaveValue('42')
     expect(screen.getByLabelText('Instance')).toHaveValue('00000000-0000-0000-0000-000000000007')
 
     fireEvent.change(screen.getByLabelText('State'), { target: { value: 'all' } })
     fireEvent.change(screen.getByLabelText('Severity'), { target: { value: 'warning' } })
     fireEvent.change(screen.getByLabelText('Scope'), { target: { value: 'cluster' } })
-    fireEvent.change(screen.getByLabelText('Cluster'), { target: { value: 'cluster-9' } })
-    fireEvent.change(screen.getByLabelText('Instance'), { target: { value: 'instance-2' } })
+    fireEvent.change(screen.getByLabelText('Cluster'), { target: { value: CLUSTER_ID } })
+    fireEvent.change(screen.getByLabelText('Instance'), { target: { value: INSTANCE_ID } })
 
     expect(view.router.state.location.search).toBe(
-      '?state=all&severity=warning&scope=cluster&cluster_id=cluster-9&instance_id=instance-2',
+      `?state=all&severity=warning&scope=cluster&cluster_id=${CLUSTER_ID}&instance_id=${INSTANCE_ID}`,
     )
   })
 
@@ -671,5 +678,40 @@ describe('FindingsPage', () => {
     expect(note).toHaveAttribute('title', expect.stringMatching(/may be missing/))
     // One page of rows, each with its expand button.
     expect(screen.getAllByRole('button', { name: /^(Show|Hide) details of / })).toHaveLength(20)
+  })
+})
+
+describe('FindingsPage cluster and instance filters', () => {
+  it('CLNAME-UI-013 list the fleet by name, value the id, with All first', async () => {
+    server.use(
+      ok('getClusters', [
+        {
+          ...CLUSTER,
+          name: 'odoo-prod',
+          instances: [{ ...CLUSTER.instances[0], display_name: 'odoo-db-1' }],
+        },
+      ]),
+      ok('getFindings', [finding()]),
+      ok('getAdvisorRules', [rule()]),
+    )
+    const view = renderWithProviders(<FindingsPage />, { route: '/findings' })
+    await flushNetwork()
+
+    const cluster = screen.getByRole('combobox', { name: 'Cluster' })
+    expect(
+      within(cluster)
+        .getAllByRole('option')
+        .map((option) => option.textContent),
+    ).toEqual(['All clusters', 'odoo-prod'])
+    const instance = screen.getByRole('combobox', { name: 'Instance' })
+    expect(
+      within(instance)
+        .getAllByRole('option')
+        .map((option) => option.textContent),
+    ).toEqual(['All instances', 'odoo-db-1'])
+    fireEvent.change(instance, { target: { value: INSTANCE_ID } })
+    expect(view.router.state.location.search).toBe(`?instance_id=${INSTANCE_ID}`)
+    fireEvent.change(instance, { target: { value: '' } })
+    expect(view.router.state.location.search).toBe('')
   })
 })

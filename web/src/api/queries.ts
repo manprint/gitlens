@@ -1,8 +1,10 @@
 import {
   keepPreviousData,
+  useMutation,
   useQueries,
   useQuery,
   useQueryClient,
+  type UseMutationResult,
   type UseQueryOptions,
   type UseQueryResult,
 } from '@tanstack/react-query'
@@ -10,7 +12,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { client, type ApiFailure, toApiFailure } from './client'
 import type { AlertRule } from './alerts'
-import type { paths } from './generated'
+import type { components, paths } from './generated'
 import { qk } from './keys'
 import { REFRESH, type RefreshPolicy } from './policy'
 import { resolveQueryWindow, type QueryWindow } from '@/lib/timerange'
@@ -157,6 +159,18 @@ export function useClusters(): ApiQueryResult<Awaited<ReturnType<typeof fetchClu
     queryFn: fetchClusters,
     queryKey: qk.clusters(),
   })
+}
+
+/**
+ * The cluster list as the cache holds it, without a request of its own: the
+ * shell (AppShell) polls it on every page. Undefined until the first answer.
+ */
+export function useCachedClusters(): Awaited<ReturnType<typeof fetchClusters>> | undefined {
+  return useQuery<Awaited<ReturnType<typeof fetchClusters>>, ApiFailure>({
+    enabled: false,
+    queryFn: ({ signal }) => fetchClusters(signal),
+    queryKey: qk.clusters(),
+  }).data
 }
 
 async function fetchClusters(signal: AbortSignal) {
@@ -840,5 +854,70 @@ export function useMetrics() {
     policy: REFRESH.static,
     queryFn: (signal) => getApi(() => client.GET('/metrics', { signal })),
     queryKey: qk.metrics(),
+  })
+}
+
+export interface RenameClusterVariables {
+  clusterId: string
+  /** The new name; null clears it and the cluster gets its default label back. */
+  name: string | null
+}
+
+export interface RenameInstanceVariables {
+  instanceId: string
+  /** The new display name; null clears it and the instance is labelled by address and port. */
+  displayName: string | null
+}
+
+type RenamedCluster = components['schemas']['Cluster']
+type RenamedInstance = components['schemas']['InstanceSummary']
+
+/** Every read that shows a cluster or instance name refetches after a rename. */
+function invalidateNameQueries(queryClient: ReturnType<typeof useQueryClient>) {
+  void queryClient.invalidateQueries({ queryKey: qk.clusters() })
+  void queryClient.invalidateQueries({ queryKey: qk.instances() })
+}
+
+/** `PATCH /api/v1/clusters/{id}` (renameCluster). */
+export function useRenameCluster(): UseMutationResult<
+  RenamedCluster,
+  ApiFailure,
+  RenameClusterVariables
+> {
+  const queryClient = useQueryClient()
+  return useMutation<RenamedCluster, ApiFailure, RenameClusterVariables>({
+    mutationFn: ({ clusterId, name }) =>
+      getApi(() =>
+        client.PATCH('/api/v1/clusters/{id}', {
+          params: { path: { id: clusterId } },
+          body: { name },
+        }),
+      ),
+    onSuccess: () => invalidateNameQueries(queryClient),
+    retry: false,
+  })
+}
+
+/** `PATCH /api/v1/instances/{id}` (renameInstance). */
+export function useRenameInstance(): UseMutationResult<
+  RenamedInstance,
+  ApiFailure,
+  RenameInstanceVariables
+> {
+  const queryClient = useQueryClient()
+  return useMutation<RenamedInstance, ApiFailure, RenameInstanceVariables>({
+    mutationFn: ({ instanceId, displayName }) =>
+      getApi(() =>
+        client.PATCH('/api/v1/instances/{id}', {
+          params: { path: { id: instanceId } },
+          body: { display_name: displayName },
+        }),
+      ),
+    onSuccess: (_, { instanceId }) => {
+      invalidateNameQueries(queryClient)
+      // The instance page reads its own detail query; its header shows the name.
+      void queryClient.invalidateQueries({ queryKey: qk.instance(instanceId) })
+    },
+    retry: false,
   })
 }

@@ -2,7 +2,7 @@ import { History } from 'lucide-react'
 import { useEffect, useMemo, useRef } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
-import { useAlerts, useEvents, useSilences } from '@/api/queries'
+import { useAlerts, useCachedClusters, useEvents, useSilences } from '@/api/queries'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
@@ -10,6 +10,7 @@ import { AlertListTruncated, EmptyState, ErrorState } from '@/components/state'
 import { Input } from '@/components/ui/input'
 import { summariseAlerts, type Alert } from '@/lib/alerts'
 import { sortEventsNewestFirst, type ClusterEvent } from '@/lib/events'
+import { nameLookup } from '@/lib/names'
 import { parseRange, queryWindowOf } from '@/lib/timerange'
 import { NativeSelect } from '@/components/ui/native-select'
 import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
@@ -152,7 +153,12 @@ export function EventsPage() {
       ].sort((left, right) => left.localeCompare(right)),
     [events, selectedType],
   )
-  const eventTableColumns = useMemo(() => eventColumns(), [])
+  // Cluster and instance names come from the list the shell polls (D14, D15).
+  const cachedClusters = useCachedClusters()
+  const eventTableColumns = useMemo(
+    () => eventColumns(nameLookup(cachedClusters)),
+    [cachedClusters],
+  )
   const statusColumns = useMemo(() => alertStatusColumns(suppressionUnknown), [suppressionUnknown])
   const section = readEventsSection(searchParams.get('section'))
 

@@ -8,6 +8,7 @@ import { DataTable, type DataTableToolbar } from '@/components/layout/DataTable'
 import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState } from '@/components/state'
 import { formatPostgresVersion, formatTimestamp } from '@/lib/format'
+import { clusterLabel, hasDisplayName, instanceAddress, instanceLabel } from '@/lib/names'
 import { matchesSearch, type SearchField } from '@/lib/tableControls'
 
 type Alert = Schemas['Alert']
@@ -58,6 +59,7 @@ export interface InventoryTablesProps {
 /** The fields the Monitored instances search matches; "Databases by instance" follows it. */
 const MONITORED_INSTANCE_SEARCH: readonly SearchField<InstanceRow>[] = [
   (instance) => instance.instance_id,
+  (instance) => instance.display_name,
   (instance) => instance.addr,
   (instance) => instance.role,
   (instance) => instance.cluster_id,
@@ -123,17 +125,19 @@ function instanceColumns() {
     {
       accessorKey: 'instance_id',
       header: 'Instance',
-      cell: ({ row }: { row: { original: InstanceRow } }) => (
-        <code className="text-xs">{row.original.instance_id}</code>
-      ),
+      // A named instance shows its name; the id stays in the tooltip and the search.
+      cell: ({ row }: { row: { original: InstanceRow } }) =>
+        hasDisplayName(row.original) ? (
+          <span title={row.original.instance_id}>{instanceLabel(row.original)}</span>
+        ) : (
+          <code className="text-xs">{row.original.instance_id}</code>
+        ),
     },
     {
       accessorKey: 'addr',
       header: 'Address / port',
       cell: ({ row }: { row: { original: InstanceRow } }) => (
-        <span>
-          {row.original.addr}:{row.original.port}
-        </span>
+        <span>{instanceAddress(row.original)}</span>
       ),
     },
     {
@@ -142,7 +146,10 @@ function instanceColumns() {
       cell: ({ row }: { row: { original: InstanceRow } }) =>
         row.original.cluster_id ? (
           <Link to={`/clusters/${row.original.cluster_id}`}>
-            {row.original.cluster_name ?? row.original.cluster_id}
+            {clusterLabel(
+              { cluster_id: row.original.cluster_id, name: row.original.cluster_name },
+              row.original.cluster_id,
+            )}
           </Link>
         ) : (
           <span>Not assigned</span>
@@ -196,13 +203,14 @@ function databaseColumns() {
 
 function DatabaseInventory({ instance }: { instance: InstanceRow }) {
   const query = useInstanceDatabases(instance.instance_id, REFRESH.inventory)
-  const title = `Databases — ${instance.addr}:${instance.port}`
+  const label = instanceLabel(instance)
+  const title = `Databases — ${label}`
 
   if (query.error && !query.data) {
     return (
       <Section title={title} description="Database inventory for this monitored instance.">
         <ErrorState
-          endpoint={`databases for ${instance.addr}`}
+          endpoint={`databases for ${label}`}
           failure={query.error}
           onRetry={() => void query.refetch()}
         />
@@ -212,11 +220,7 @@ function DatabaseInventory({ instance }: { instance: InstanceRow }) {
   if (query.isPending || query.data === undefined) {
     return (
       <Section title={title} description="Database inventory for this monitored instance.">
-        <section
-          aria-busy="true"
-          aria-label={`Loading databases for ${instance.addr}`}
-          role="status"
-        >
+        <section aria-busy="true" aria-label={`Loading databases for ${label}`} role="status">
           Loading databases…
         </section>
       </Section>
@@ -236,7 +240,7 @@ function DatabaseInventory({ instance }: { instance: InstanceRow }) {
       description={`Database inventory for this monitored instance. Databases not monitored: ${query.data.not_monitored_count}.`}
     >
       <DataTable
-        ariaLabel={`Databases for ${instance.addr}:${instance.port}`}
+        ariaLabel={`Databases for ${label}`}
         tableId={`instance-databases-${instance.instance_id}`}
         toolbar={DATABASE_TOOLBAR}
         columns={databaseColumns()}

@@ -1,5 +1,9 @@
 import { Link, useLocation } from 'react-router-dom'
 import { ChevronRight } from 'lucide-react'
+import { useMemo } from 'react'
+
+import { useCachedClusters } from '@/api/queries'
+import { clusterLabel, instanceLabel, nameLookup, type NameLookup } from '@/lib/names'
 
 const segmentLabels: Record<string, string> = {
   alerts: 'Alerts',
@@ -39,17 +43,42 @@ function labelForSegment(segment: string): string {
   return label
 }
 
+/**
+ * The crumb of a cluster or instance id shows its name (D14, D15), read from the
+ * cluster list the shell polls; a miss keeps the shortened id.
+ */
+function namedLabel(parent: string | undefined, segment: string, lookup: NameLookup): string {
+  const fallback = labelForSegment(segment)
+  const id = decodeSegment(segment)
+  if (parent === 'clusters') {
+    const cluster = lookup.cluster(id)
+    return cluster ? clusterLabel(cluster, fallback) : fallback
+  }
+  if (parent === 'instances') {
+    const instance = lookup.instance(id)
+    return instance ? instanceLabel(instance) : fallback
+  }
+  return fallback
+}
+
 export function Breadcrumbs() {
   const { pathname } = useLocation()
+  const clusters = useCachedClusters()
+  const lookup = useMemo(() => nameLookup(clusters), [clusters])
   const segments = pathname.split('/').filter(Boolean)
   const items =
     segments.length === 0
-      ? [{ label: 'Fleet overview', path: '/', title: 'Fleet overview' }]
-      : segments.map((segment, index) => ({
-          label: labelForSegment(segment),
-          title: decodeSegment(segment),
-          path: `/${segments.slice(0, index + 1).join('/')}`,
-        }))
+      ? [{ label: 'Fleet overview', path: '/', title: 'Fleet overview', titled: false }]
+      : segments.map((segment, index) => {
+          const label = namedLabel(segments[index - 1], segment, lookup)
+          return {
+            label,
+            title: decodeSegment(segment),
+            path: `/${segments.slice(0, index + 1).join('/')}`,
+            // A shortened id or a name keeps the raw id in its tooltip.
+            titled: label.endsWith('…') || label !== labelForSegment(segment),
+          }
+        })
 
   return (
     <nav aria-label="Breadcrumb" className="min-w-0">
@@ -75,7 +104,7 @@ export function Breadcrumbs() {
               ) : (
                 <Link
                   className="hover:text-foreground transition-colors"
-                  {...(item.label.endsWith('…') ? { title: item.title } : {})}
+                  {...(item.titled ? { title: item.title } : {})}
                   to={item.path}
                 >
                   {item.label}

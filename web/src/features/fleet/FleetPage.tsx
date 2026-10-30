@@ -10,6 +10,7 @@ import { Section } from '@/components/layout/Section'
 import { AlertListTruncated, EmptyState, ErrorState } from '@/components/state'
 import { Input } from '@/components/ui/input'
 import { AGENT_STALE_AFTER_SECONDS, deriveAgentHealth } from '@/lib/fleet'
+import { clusterLabel } from '@/lib/names'
 
 import { AgentHealthStrip } from './AgentHealthStrip'
 import { ClusterCard } from './ClusterCard'
@@ -31,12 +32,21 @@ function readHealthFilter(value: string | null): HealthFilter {
   return HEALTH_FILTERS.includes(value as HealthFilter) ? (value as HealthFilter) : 'all'
 }
 
+/**
+ * An alert belongs to a cluster by its cluster_id, else by its instance. The
+ * server never sets a `cluster` label (its samples carry `standby` or
+ * `slot_name` only), and a cluster name is the operator's choice (D14), so a
+ * name never decides it.
+ */
 function alertMatchesCluster(
-  alert: { cluster_id?: string; labels: Record<string, unknown> },
+  alert: { cluster_id?: string | null; instance_id?: string | null },
   cluster: Cluster,
 ): boolean {
-  if (alert.cluster_id === cluster.cluster_id) return true
-  return typeof alert.labels.cluster === 'string' && alert.labels.cluster === cluster.name
+  if (alert.cluster_id) return alert.cluster_id === cluster.cluster_id
+  return (
+    typeof alert.instance_id === 'string' &&
+    cluster.instances.some((instance) => instance.instance_id === alert.instance_id)
+  )
 }
 
 function summarize(clusters: readonly Cluster[], firingAlerts: number | null): FleetSummary {
@@ -104,8 +114,11 @@ export function FleetPage() {
           if (!normalizedTextFilter) return true
           return (
             cluster.name?.toLocaleLowerCase('en-US').includes(normalizedTextFilter) === true ||
-            cluster.instances.some((instance) =>
-              instance.addr.toLocaleLowerCase('en-US').includes(normalizedTextFilter),
+            cluster.instances.some(
+              (instance) =>
+                instance.addr.toLocaleLowerCase('en-US').includes(normalizedTextFilter) ||
+                instance.display_name?.toLocaleLowerCase('en-US').includes(normalizedTextFilter) ===
+                  true,
             )
           )
         })
@@ -124,7 +137,9 @@ export function FleetPage() {
         .sort(
           (left, right) =>
             HEALTH_RANK[left.health] - HEALTH_RANK[right.health] ||
-            (left.name ?? left.cluster_id).localeCompare(right.name ?? right.cluster_id),
+            clusterLabel(left, left.cluster_id).localeCompare(
+              clusterLabel(right, right.cluster_id),
+            ),
         ),
     [
       alertsOnly,

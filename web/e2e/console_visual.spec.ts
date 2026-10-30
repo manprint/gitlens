@@ -9,6 +9,7 @@ import { expect, test } from './fixtures'
 import { assertFits, measureRoutes } from './fullhd_fit'
 import { FULLHD_ROUTES } from './fullhd_routes'
 import { INSTANCE_SECTIONS } from '../src/features/instance/instanceSections'
+import { CAPTIONS } from '../src/lib/captions'
 import {
   ARTIFACT_DIR,
   canvasNotBlank,
@@ -938,4 +939,256 @@ test('FHD-FIT-001 every fit route shows its table and pager on a Full HD screen'
     }
   }
   expect(failures, failures.join('\n')).toEqual([])
+})
+
+/** Where the names spec keeps its screenshots (C-10). */
+const NAMES_ARTIFACT_DIR = '../test/e2e/_artifacts/ui/names'
+const NAMES_TABLE = 'Cluster and instance names'
+const CLUSTER_NAME = 'odoo-prod'
+const INSTANCE_NAME = 'odoo-db-1'
+
+interface LiveNamedInstance {
+  instance_id: string
+  addr: string
+  port: number
+  display_name?: string | null
+}
+
+interface LiveNamedCluster {
+  cluster_id: string
+  name: string | null
+  instances: LiveNamedInstance[]
+}
+
+/** The picked instance (the Odoo primary) and its cluster, as the API lists them now. */
+async function namedTargets(
+  api: Parameters<typeof pickInstance>[0],
+): Promise<{ cluster: LiveNamedCluster; instance: LiveNamedInstance }> {
+  const instanceId = await pickInstance(api)
+  const clusters = (await (await api.get('/api/v1/clusters')).json()) as LiveNamedCluster[]
+  const cluster = clusters.find((candidate) =>
+    candidate.instances.some((member) => member.instance_id === instanceId),
+  )
+  if (!cluster) throw new Error(`no cluster lists the picked instance ${instanceId}`)
+  const instances = (await (await api.get('/api/v1/instances')).json()) as LiveNamedInstance[]
+  const instance = instances.find((candidate) => candidate.instance_id === instanceId)
+  if (!instance) throw new Error(`the instance list has no ${instanceId}`)
+  return { cluster, instance }
+}
+
+/** Opens Settings, narrows the Names table to the cluster and renames one row through the dialog. */
+async function renameThroughSettings(
+  page: Page,
+  clusterId: string,
+  button: string,
+  field: 'Cluster name' | 'Instance name',
+  value: string,
+  shot?: string,
+): Promise<void> {
+  await page.goto('/settings')
+  const table = page.getByRole('table', { name: NAMES_TABLE })
+  await expect(table).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('searchbox', { name: `Search ${NAMES_TABLE}` }).fill(clusterId)
+  await table.getByRole('button', { name: button, exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+  const input = dialog.getByRole('textbox', { name: field })
+  await expect(input).toBeFocused()
+  if (shot) {
+    // C-10: the inline error state, then the dialog with the new name.
+    await input.fill('x'.repeat(65))
+    await expect(dialog.getByText('Use at most 64 characters.')).toBeVisible()
+    await expect(dialog.getByRole('button', { name: 'Save' })).toBeDisabled()
+    await dialog.screenshot({ path: `${NAMES_ARTIFACT_DIR}/${shot}-error.png` })
+  }
+  await input.fill(value)
+  if (shot) await dialog.screenshot({ path: `${NAMES_ARTIFACT_DIR}/${shot}.png` })
+  await dialog.getByRole('button', { name: 'Save' }).click()
+  await expect(dialog).toBeHidden({ timeout: 30_000 })
+  // Focus returns to the row's Rename button.
+  await expect(page.locator(':focus')).toHaveText('Rename')
+}
+
+/**
+ * The Names table at 1920×950 (§8, the first captioned DataTable): its toolbar
+ * row stays one line (≤ 52 px) with the caption beside the controls, the
+ * caption text wider than 0. `/settings` itself is pending 11.1, so only the
+ * table card is measured here.
+ */
+async function assertNamesTableFits(page: Page): Promise<void> {
+  await page.setViewportSize({ width: 1920, height: 950 })
+  await page.goto('/settings')
+  await expect(page.getByRole('table', { name: NAMES_TABLE })).toBeVisible({ timeout: 30_000 })
+  const card = page.locator('[data-table-card][data-caption-id="settings.names-table"]')
+  await card.scrollIntoViewIfNeeded()
+  const toolbar = await card.locator(':scope > div').first().boundingBox()
+  const caption = await card.getByTitle(CAPTIONS['settings.names-table'].what).boundingBox()
+  expect(toolbar, 'Names table toolbar row').not.toBeNull()
+  expect(toolbar?.height ?? Infinity, 'Names table toolbar row height').toBeLessThanOrEqual(52)
+  expect(caption?.width ?? 0, 'Names table caption width').toBeGreaterThan(0)
+  await card.screenshot({ path: `${NAMES_ARTIFACT_DIR}/clname-e2e-001-names-table-1920x950.png` })
+}
+
+function fullHdRoute(path: string) {
+  const route = FULLHD_ROUTES.find((entry) => entry.path === path)
+  if (!route) throw new Error(`no Full HD route ${path}`)
+  return route
+}
+
+test('CLNAME-E2E-001 renamed clusters and instances show everywhere and clear back to the defaults', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, 8 * 30_000))
+  const browserErrors = collectConsoleErrors(page)
+  const { cluster, instance } = await namedTargets(api)
+  const clusterId = cluster.cluster_id
+  const address = `${instance.addr}:${instance.port}`
+  const original = { cluster: cluster.name, instance: instance.display_name ?? null }
+  test.info().annotations.push({
+    type: 'UNVERIFIED',
+    description:
+      '/settings: page fit pending 11.1 (the Names tab); assertFits not called, the Names table card is measured',
+  })
+
+  try {
+    // A leftover name equal to the target would leave Save disabled (unchanged): clear it first.
+    if (original.cluster === CLUSTER_NAME) {
+      expect(
+        (await api.patch(`/api/v1/clusters/${clusterId}`, { data: { name: null } })).ok(),
+      ).toBe(true)
+    }
+    if (original.instance === INSTANCE_NAME) {
+      const cleared = await api.patch(`/api/v1/instances/${instance.instance_id}`, {
+        data: { display_name: null },
+      })
+      expect(cleared.ok()).toBe(true)
+    }
+    const clusterLabel = original.cluster === CLUSTER_NAME ? null : original.cluster
+    const instanceLabel = original.instance === INSTANCE_NAME ? null : original.instance
+
+    // 1. Rename the cluster from Settings → Names.
+    await renameThroughSettings(
+      page,
+      clusterId,
+      `Rename cluster ${clusterLabel ?? `Cluster ${clusterId}`}`,
+      'Cluster name',
+      CLUSTER_NAME,
+      'clname-e2e-001-cluster-dialog',
+    )
+    await page.reload()
+    const names = page.getByRole('table', { name: NAMES_TABLE })
+    await expect(names).toBeVisible({ timeout: 30_000 })
+    await expect(names.getByText(CLUSTER_NAME, { exact: true })).toBeVisible()
+    await page.screenshot({
+      path: `${NAMES_ARTIFACT_DIR}/clname-e2e-001-settings-cluster.png`,
+      fullPage: true,
+    })
+    // The first captioned DataTable passes the §8 toolbar check at 1920×950.
+    await assertNamesTableFits(page)
+
+    // 2. The Fleet card and the Cluster page show it, and both still fit Full HD.
+    await assertFits(page, api, fullHdRoute('/'))
+    await expect(
+      page.getByRole('link', { name: `${CLUSTER_NAME} (${clusterId})`, exact: true }),
+    ).toBeVisible({ timeout: 30_000 })
+    await page.screenshot({ path: `${NAMES_ARTIFACT_DIR}/clname-e2e-001-fleet.png` })
+    await assertFits(page, api, fullHdRoute('/clusters/:clusterId?section=topology'))
+    await expect(page.getByRole('heading', { level: 1, name: CLUSTER_NAME })).toBeVisible()
+    await page.screenshot({ path: `${NAMES_ARTIFACT_DIR}/clname-e2e-001-cluster.png` })
+
+    // 3. Rename the instance; the header and the tables show it.
+    await renameThroughSettings(
+      page,
+      clusterId,
+      `Rename instance ${instanceLabel ?? address}`,
+      'Instance name',
+      INSTANCE_NAME,
+      'clname-e2e-001-instance-dialog',
+    )
+    await page.reload()
+    await expect(
+      page.getByRole('table', { name: NAMES_TABLE }).getByText(INSTANCE_NAME, { exact: true }),
+    ).toBeVisible({ timeout: 30_000 })
+    await expect(
+      page.getByRole('table', { name: 'Monitored instances' }).getByText(INSTANCE_NAME, {
+        exact: true,
+      }),
+    ).toBeVisible()
+    await page.screenshot({
+      path: `${NAMES_ARTIFACT_DIR}/clname-e2e-001-settings-instance.png`,
+      fullPage: true,
+    })
+    await assertFits(page, api, fullHdRoute('/instances/:instanceId?section=overview'))
+    const header = page.getByTestId('instance-header')
+    await expect(header.getByRole('heading', { level: 1, name: INSTANCE_NAME })).toBeVisible()
+    await expect(header.getByTestId('instance-address')).toHaveText(address)
+    await page.screenshot({ path: `${NAMES_ARTIFACT_DIR}/clname-e2e-001-instance.png` })
+
+    // 4. Clear both: the defaults come back.
+    await renameThroughSettings(
+      page,
+      clusterId,
+      `Rename instance ${INSTANCE_NAME}`,
+      'Instance name',
+      '',
+    )
+    await renameThroughSettings(
+      page,
+      clusterId,
+      `Rename cluster ${CLUSTER_NAME}`,
+      'Cluster name',
+      '',
+    )
+    await page.reload()
+    const cleared = page.getByRole('table', { name: NAMES_TABLE })
+    await expect(cleared.getByText(`Cluster ${clusterId} (default)`, { exact: true })).toBeVisible({
+      timeout: 30_000,
+    })
+    await expect(cleared.getByText(`${address} (default)`, { exact: true })).toBeVisible()
+    await page.goto('/')
+    await expect(
+      page.getByRole('link', { name: `Unnamed cluster (${clusterId})`, exact: true }),
+    ).toBeVisible({ timeout: 30_000 })
+    await page.goto(`/instances/${instance.instance_id}`)
+    await expect(page.getByRole('heading', { level: 1, name: address })).toBeVisible({
+      timeout: 30_000,
+    })
+    browserErrors.assertClean()
+  } finally {
+    // The stack keeps the names it had before the test, whatever happened above;
+    // a failed restore fails the test and says what to put back.
+    // Each restore runs on its own, so a network error on one never skips the other.
+    const restores = [
+      {
+        what: `instance ${instance.instance_id} display_name ${JSON.stringify(original.instance)}`,
+        call: () =>
+          api.patch(`/api/v1/instances/${instance.instance_id}`, {
+            data: { display_name: original.instance },
+          }),
+      },
+      {
+        what: `cluster ${clusterId} name ${JSON.stringify(original.cluster)}`,
+        call: () =>
+          api.patch(`/api/v1/clusters/${clusterId}`, { data: { name: original.cluster } }),
+      },
+    ]
+    const failed: string[] = []
+    for (const { what, call } of restores) {
+      let message: string | null = null
+      try {
+        const response = await call()
+        if (!response.ok()) {
+          message = `restore ${what}: HTTP ${response.status()} ${await response.text()}`
+        }
+      } catch (error) {
+        message = `restore ${what}: ${error instanceof Error ? error.message : String(error)}`
+      }
+      if (message === null) continue
+      console.error(`CLNAME-E2E-001 ${message}`)
+      test.info().annotations.push({ type: 'RESTORE-FAILED', description: message })
+      failed.push(message)
+    }
+    expect(failed, 'the original names must be restored').toEqual([])
+  }
 })

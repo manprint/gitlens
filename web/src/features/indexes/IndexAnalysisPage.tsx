@@ -11,6 +11,7 @@ import { EmptyState, ErrorState } from '@/components/state'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { buildIndexRows } from '@/lib/indexAnalysis'
+import { clusterLabel, instanceLabel } from '@/lib/names'
 import { chooseInstance, readLastInstance } from '@/lib/lastInstance'
 
 import { CleanupPanel, type SiblingServer } from './CleanupPanel'
@@ -48,7 +49,7 @@ function instanceOptions(clusters: readonly Cluster[]): InstanceOption[] {
   return clusters.flatMap((cluster) =>
     cluster.instances.map((instance) => ({
       id: instance.instance_id,
-      label: `${instance.addr}:${instance.port}${cluster.name ? ` · ${cluster.name}` : ''}`,
+      label: `${instanceLabel(instance)}${cluster.name ? ` · ${clusterLabel(cluster)}` : ''}`,
       up: instance.up,
     })),
   )
@@ -60,7 +61,7 @@ function siblingServers(clusters: readonly Cluster[], instanceId: string): Sibli
   )
   return (cluster?.instances ?? [])
     .filter((instance) => instance.instance_id !== instanceId)
-    .map((instance) => ({ id: instance.instance_id, label: `${instance.addr}:${instance.port}` }))
+    .map((instance) => ({ id: instance.instance_id, label: instanceLabel(instance) }))
 }
 
 /**

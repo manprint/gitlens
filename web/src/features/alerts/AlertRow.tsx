@@ -3,34 +3,28 @@ import { Link } from 'react-router-dom'
 import type { SimpleColumn } from '@/components/layout/SimpleTable'
 import { Badge } from '@/components/ui/badge'
 import { formatTimestamp } from '@/lib/format'
+import { nameLookup, type NameLookup } from '@/lib/names'
 
 import type { Alert, Silence } from '@/lib/alerts'
 import { silenceWindow } from '@/lib/alerts'
+
+import { clusterCell, clusterTitle, instanceCell, instanceTitle } from './nameCells'
 
 interface AlertColumnsOptions {
   onSelect: (alertKey: string) => void
   /** The active silence that suppresses a suppressed alert, when it is known. */
   silenceFor: (alert: Alert) => Silence | undefined
+  /** Names of the clusters and instances the rows point at; ids are shown without it. */
+  names?: NameLookup
 }
+
+const NO_NAMES = nameLookup(undefined)
 
 function remainingTime(seconds: number): string {
   if (seconds < 60) return `${Math.ceil(seconds)} seconds`
   if (seconds < 60 * 60) return `${Math.ceil(seconds / 60)} minutes`
   if (seconds < 24 * 60 * 60) return `${Math.ceil(seconds / (60 * 60))} hours`
   return `${Math.ceil(seconds / (24 * 60 * 60))} days`
-}
-
-// The server sends null for a missing cluster or instance; both read as unknown.
-function objectLink(path: string, value: string | null | undefined) {
-  if (value === null || value === undefined) return 'Unknown'
-  return (
-    <Link
-      className="text-primary font-mono text-xs hover:underline"
-      to={`${path}/${encodeURIComponent(value)}`}
-    >
-      {value}
-    </Link>
-  )
 }
 
 const SEVERITY_BADGE: Record<string, 'destructive' | 'warning' | 'secondary'> = {
@@ -98,7 +92,11 @@ function notesCell(alert: Alert, silence: Silence | undefined) {
  * The columns of the alert list: one line per alert from 1600 px (D26), the
  * alert key opens its detail, free text is cut with the full text in `title`.
  */
-export function alertColumns({ onSelect, silenceFor }: AlertColumnsOptions): SimpleColumn<Alert>[] {
+export function alertColumns({
+  onSelect,
+  silenceFor,
+  names = NO_NAMES,
+}: AlertColumnsOptions): SimpleColumn<Alert>[] {
   return [
     {
       id: 'alert',
@@ -145,15 +143,16 @@ export function alertColumns({ onSelect, silenceFor }: AlertColumnsOptions): Sim
       id: 'cluster',
       header: 'Cluster',
       width: '10rem',
-      truncate: (alert) => alert.cluster_id ?? 'Unknown',
-      cell: (alert) => objectLink('/clusters', alert.cluster_id),
+      // The server sends null for a missing cluster or instance; both read as unknown.
+      truncate: (alert) => clusterTitle(alert.cluster_id, 'Unknown'),
+      cell: (alert) => clusterCell(names, alert.cluster_id, 'Unknown'),
     },
     {
       id: 'instance',
       header: 'Instance',
       width: '12rem',
-      truncate: (alert) => alert.instance_id ?? 'Unknown',
-      cell: (alert) => objectLink('/instances', alert.instance_id),
+      truncate: (alert) => instanceTitle(names, alert.instance_id, 'Unknown'),
+      cell: (alert) => instanceCell(names, alert.instance_id, 'Unknown'),
     },
     {
       id: 'started',

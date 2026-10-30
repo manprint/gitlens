@@ -25,6 +25,7 @@ import {
 
 import type { Cluster } from '@/api/types'
 import { chooseInstance, readLastInstance, writeLastInstance } from '@/lib/lastInstance'
+import { clusterLabel, instanceLabel } from '@/lib/names'
 import { cn } from '@/lib/utils'
 
 import { Logo } from './Logo'
@@ -228,8 +229,8 @@ function InstanceSwitcher({
           </option>
           {instances.map(({ cluster, instance }) => (
             <option key={instance.instance_id} value={instance.instance_id}>
-              {instance.addr}:{instance.port}
-              {cluster.name ? ` · ${cluster.name}` : ''}
+              {instanceLabel(instance)}
+              {cluster.name ? ` · ${clusterLabel(cluster)}` : ''}
               {instance.up ? '' : ' (down)'}
             </option>
           ))}

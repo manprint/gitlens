@@ -71,6 +71,24 @@ afterEach(() => {
 })
 
 describe('ClusterPage', () => {
+  it('CLNAME-UI-007 titles the page with the cluster name, else Cluster and its id', async () => {
+    configurePage()
+    server.use(ok('getClusters', [{ ...cluster, name: 'odoo-prod' }]))
+    const { unmount } = renderPage()
+    await settle()
+    const heading = screen.getByRole('heading', { level: 1, name: 'odoo-prod' })
+    // From 1600 px a long name is cut to one line; the whole name stays in the tooltip.
+    expect(heading).toHaveAttribute('title', 'odoo-prod')
+    unmount()
+
+    server.use(ok('getClusters', [{ ...cluster, name: null }]))
+    renderPage()
+    await settle()
+    expect(
+      screen.getByRole('heading', { level: 1, name: `Cluster ${CLUSTER_ID}` }),
+    ).toBeInTheDocument()
+  })
+
   it('UI-CLUS-040 renders not found with a link back for an unknown cluster id', async () => {
     configurePage()
     server.use(status('getClusterTopology', 404))

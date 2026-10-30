@@ -2,7 +2,7 @@ import { Bell } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
-import { useAlert, useAlerts, useSilences } from '@/api/queries'
+import { useAlert, useAlerts, useCachedClusters, useSilences } from '@/api/queries'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
@@ -11,6 +11,7 @@ import { AlertListTruncated, EmptyState, ErrorState } from '@/components/state'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { matchSilence, rankAlerts, summariseAlerts, type Alert, type Silence } from '@/lib/alerts'
+import { nameLookup } from '@/lib/names'
 
 import {
   ALERTS_SECTIONS,
@@ -198,16 +199,20 @@ export function AlertsPage() {
     [silences],
   )
 
+  // Cluster and instance names come from the list the shell polls (D14, D15).
+  const cachedClusters = useCachedClusters()
+  const names = useMemo(() => nameLookup(cachedClusters), [cachedClusters])
   const columns = useMemo(
     () =>
       alertColumns({
+        names,
         onSelect: setSelectedAlertKey,
         silenceFor: (alert) =>
           alert.suppressed
             ? activeSilences.find((silence) => matchSilence(alert, silence))
             : undefined,
       }),
-    [activeSilences],
+    [activeSilences, names],
   )
   const section = readAlertsSection(searchParams.get('section'))
 

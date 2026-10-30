@@ -11,6 +11,7 @@ import { SqlText } from '@/components/layout/SqlText'
 import { Badge } from '@/components/ui/badge'
 import { useTimeRange } from '@/hooks/useTimeRange'
 import { formatBytes, formatCount, formatMilliseconds, formatPercent } from '@/lib/format'
+import { instanceLabel } from '@/lib/names'
 import { queryWindowOf } from '@/lib/timerange'
 
 type Statement = Schemas['Statement']
@@ -101,7 +102,7 @@ export function QueryOverview({ instanceId, queryid, datname }: QueryOverviewPro
   const response = statementsQuery.data as Schemas['StatementsResponse'] | undefined
   const statement = findStatement(response?.statements ?? [], queryid, datname)
   const instance = instanceQuery.data
-  const server = instance ? `${instance.addr}:${instance.port}` : null
+  const server = instance ? instanceLabel(instance) : null
   const backLink = `/instances/${encodeURIComponent(instanceId)}/queries`
 
   return (

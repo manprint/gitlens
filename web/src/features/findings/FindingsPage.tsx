@@ -2,14 +2,15 @@ import { Lightbulb } from 'lucide-react'
 import { useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
-import { useAdvisorRules, useFindings } from '@/api/queries'
+import { useAdvisorRules, useClusters, useFindings } from '@/api/queries'
+import type { Cluster } from '@/api/types'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState } from '@/components/state'
-import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { clusterLabel, instanceLabel } from '@/lib/names'
 import {
   joinCatalogue,
   rankFindings,
@@ -117,6 +118,43 @@ function SummaryButton({
   )
 }
 
+interface FilterOption {
+  value: string
+  label: string
+}
+
+const byLabel = (left: FilterOption, right: FilterOption) => left.label.localeCompare(right.label)
+
+/** An id the URL names but the cluster list does not hold stays selectable, as itself. */
+function withSelected(options: FilterOption[], selected: string): FilterOption[] {
+  return selected && !options.some((option) => option.value === selected)
+    ? [...options, { value: selected, label: selected }]
+    : options
+}
+
+/** The Cluster filter's options: every cluster by its name (D14), value the id. */
+function clusterOptions(clusters: readonly Cluster[], selected: string): FilterOption[] {
+  const options = clusters.map((cluster) => ({
+    value: cluster.cluster_id,
+    label: clusterLabel(cluster),
+  }))
+  return withSelected(options.sort(byLabel), selected)
+}
+
+/** The Instance filter's options: every instance by its name or address (D15), value the id. */
+function instanceOptions(clusters: readonly Cluster[], selected: string): FilterOption[] {
+  const seen = new Map<string, FilterOption>()
+  for (const cluster of clusters) {
+    for (const instance of cluster.instances) {
+      seen.set(instance.instance_id, {
+        value: instance.instance_id,
+        label: instanceLabel(instance),
+      })
+    }
+  }
+  return withSelected([...seen.values()].sort(byLabel), selected)
+}
+
 /**
  * One control of the findings filter line. From 1600 px the line is one row
  * (D26): the name above the control is hidden and the control keeps it as
@@ -149,6 +187,8 @@ function FilterLineNote({ children }: { children: string }) {
 export function FindingsPage() {
   const findingsQuery = useFindings({ state: 'all', limit: FINDINGS_LIMIT })
   const rulesQuery = useAdvisorRules()
+  // The Cluster and Instance filters list what the fleet reports, by name.
+  const clustersQuery = useClusters()
   const location = useLocation()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -160,6 +200,15 @@ export function FindingsPage() {
   const scope = readFilter(searchParams.get('scope'), scopeFilters, 'all')
   const clusterId = searchParams.get('cluster_id') ?? ''
   const instanceId = searchParams.get('instance_id') ?? ''
+  const fleet = clustersQuery.data
+  const clusterFilterOptions = useMemo(
+    () => clusterOptions(fleet ?? [], clusterId),
+    [clusterId, fleet],
+  )
+  const instanceFilterOptions = useMemo(
+    () => instanceOptions(fleet ?? [], instanceId),
+    [fleet, instanceId],
+  )
 
   const findings = useMemo(
     () => (findingsQuery.data ?? []) as FindingRecord[],
@@ -386,24 +435,36 @@ export function FindingsPage() {
                 </NativeSelect>
               </FilterControl>
               <FilterControl label="Cluster">
-                <Input
+                <NativeSelect
                   aria-label="Cluster"
-                  className="h-8 w-40 text-sm"
+                  className="h-8 w-44 px-2 text-sm"
                   id="findings-cluster"
                   onChange={(event) => updateFilter('cluster_id', event.target.value)}
-                  placeholder="Cluster ID"
                   value={clusterId}
-                />
+                >
+                  <option value="">All clusters</option>
+                  {clusterFilterOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </NativeSelect>
               </FilterControl>
               <FilterControl label="Instance">
-                <Input
+                <NativeSelect
                   aria-label="Instance"
-                  className="h-8 w-72 text-sm"
+                  className="h-8 w-56 px-2 text-sm"
                   id="findings-instance"
                   onChange={(event) => updateFilter('instance_id', event.target.value)}
-                  placeholder="Instance ID"
                   value={instanceId}
-                />
+                >
+                  <option value="">All instances</option>
+                  {instanceFilterOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </NativeSelect>
               </FilterControl>
               {findings.length >= FINDINGS_LIMIT ? (
                 <FilterLineNote>

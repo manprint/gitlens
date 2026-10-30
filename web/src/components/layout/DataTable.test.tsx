@@ -255,4 +255,51 @@ describe('DataTable state holders', () => {
     expect(firstName()).toBe('row-21')
     expect(router.state.location.search).toBe('')
   })
+
+  it('CLNAME-UI-015 getRowId keys rows by the caller id, so a cell keeps its state across a reorder', () => {
+    const noteColumns = [
+      { accessorKey: 'name', header: 'Name' },
+      {
+        id: 'note',
+        header: 'Note',
+        enableSorting: false,
+        cell: ({ row }: { row: { original: Row } }) => (
+          <input aria-label={`Note ${row.original.name}`} defaultValue="" />
+        ),
+      },
+    ]
+    function Reorder({ keyed }: { keyed: boolean }) {
+      const [reversed, setReversed] = useState(false)
+      const rows = ROWS.slice(0, 3)
+      return (
+        <>
+          <button onClick={() => setReversed(true)} type="button">
+            Reverse
+          </button>
+          <DataTable
+            columns={noteColumns}
+            data={reversed ? [...rows].reverse() : rows}
+            emptyState={<p>No rows</p>}
+            {...(keyed ? { getRowId: (row: Row) => row.name } : {})}
+          />
+        </>
+      )
+    }
+
+    const keyed = renderWithProviders(<Reorder keyed />)
+    fireEvent.change(screen.getByRole('textbox', { name: 'Note row-01' }), {
+      target: { value: 'kept' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Reverse' }))
+    expect(screen.getByRole('textbox', { name: 'Note row-01' })).toHaveValue('kept')
+    keyed.unmount()
+
+    // By position, the typed value stays on the first line, whichever row is there now.
+    renderWithProviders(<Reorder keyed={false} />)
+    fireEvent.change(screen.getByRole('textbox', { name: 'Note row-01' }), {
+      target: { value: 'moved' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Reverse' }))
+    expect(screen.getByRole('textbox', { name: 'Note row-01' })).toHaveValue('')
+  })
 })

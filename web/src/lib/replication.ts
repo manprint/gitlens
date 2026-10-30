@@ -1,4 +1,5 @@
 import type { Schemas, SeriesPoint } from '@/api/types'
+import { hasDisplayName } from '@/lib/names'
 
 export type ReplicationInstance = Schemas['InstanceSummary']
 export type TopologyEdge = Schemas['TopologyEdge']
@@ -9,6 +10,8 @@ export interface ReplicationNode {
   role: string | null
   address: string | null
   port: number | null
+  /** The instance's display name (D15); absent when it has none. */
+  name?: string | null
   version: number | null
   tier: Schemas['PermTier'] | null
   up: boolean | null
@@ -129,6 +132,8 @@ export function buildGraph(
   const nodes: ReplicationNode[] = instances.map((instance) => ({
     address: instance.addr,
     id: instance.instance_id,
+    // Only a named instance carries the field, so an unnamed node is unchanged.
+    ...(hasDisplayName(instance) ? { name: instance.display_name ?? null } : {}),
     port: instance.port,
     role: instance.role,
     tier: instance.perm_tier,
@@ -348,12 +353,17 @@ export function summariseSlots(slots: readonly ReplicationSlotInput[]): SlotSumm
 }
 
 /**
- * A readable name for an instance: its address and port when the cluster
- * lists it, the raw value otherwise. A replication edge's standby can be an
- * application_name no monitored instance matches, and stays as reported.
+ * A readable name for an instance: its display name, else its address and
+ * port when the cluster lists it, the raw value otherwise. A replication
+ * edge's standby can be an application_name no monitored instance matches,
+ * and stays as reported.
  */
-export function instanceLabel(instances: readonly ReplicationInstance[], id: string): string {
+export function replicationInstanceLabel(
+  instances: readonly ReplicationInstance[],
+  id: string,
+): string {
   const instance = instances.find((candidate) => candidate.instance_id === id)
+  if (instance && hasDisplayName(instance)) return instance.display_name ?? id
   if (!instance?.addr) return id
   return instance.port ? `${instance.addr}:${instance.port}` : instance.addr
 }
@@ -377,7 +387,7 @@ export function toSlotRows(
       active: slot.active,
       inactiveAgeSeconds,
       name: slot.slot_name,
-      owningInstance: instanceLabel(instances, slot.instance_id),
+      owningInstance: replicationInstanceLabel(instances, slot.instance_id),
       retainedBytes: slot.retained_bytes,
       safeWalSizeBytes: slot.safe_wal_size_bytes,
       slotType: slot.slot_type,
