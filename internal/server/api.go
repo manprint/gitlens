@@ -46,6 +46,9 @@ type API struct {
 	// advisorSettings replaces the database's advisor settings store in unit
 	// tests (11.4).
 	advisorSettings advisorSettingsStore
+	// notifications is the delivery configuration of the Notifications tab
+	// (11.5a), set by SetNotificationChannels.
+	notifications notificationChannels
 	// auth tells a bearer-token request from a UI session in the log of a
 	// retention change; nil names every request a UI session.
 	auth *Auth
@@ -84,6 +87,7 @@ func (a *API) RegisterRoutes(r chi.Router) {
 	a.registerAuditRoutes(r)
 	a.registerRetentionRoutes(r)
 	a.registerAdvisorSettingsRoutes(r)
+	a.registerNotificationChannelRoutes(r)
 }
 
 // Ready verifies that the database is reachable and the complete migration

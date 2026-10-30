@@ -121,10 +121,12 @@ func run() int {
 	var alertStore alert.Store
 	var alertSources []alert.Source
 	var alertNotifier alert.Notifier
+	// The channels are built with or without a database, so the console can
+	// read their status and send a test message through them either way.
+	channels := wireNotificationChannels(api, alertCfg)
 	if pool != nil {
 		alertStore = alert.NewPgStore(pool)
 		alertSources = []alert.Source{alert.NewMetricSource(pool, alertCfg.Interval), alert.NewEventSource(pool, alertCfg.Interval)}
-		channels := buildChannels(alertCfg)
 		if len(channels) == 0 {
 			log.Println("no alert notification channel configured; alerts will be persisted but not delivered")
 		} else {

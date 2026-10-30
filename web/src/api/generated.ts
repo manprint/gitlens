@@ -837,6 +837,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/notification-channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the alert notification channels and whether each is configured.
+         * @description Always the three kinds, in the order slack, webhook, google_chat. A channel is configured by the server environment; only the host name of its webhook address is returned, never the address.
+         */
+        get: operations["getNotificationChannels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notification-channels/{kind}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a test message through a notification channel.
+         * @description Sends the message "pglens test notification" (rule_id pglens.test, phase test, severity info) through the same channel the alerts are delivered through, and waits at most 10 seconds for it; a fast server error may be retried within them. No delivery is recorded. The body is ignored. One test per channel runs at a time. A delivery that fails is still a 200, with status failed or timeout and the redacted error.
+         */
+        post: operations["testNotificationChannel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/retention": {
         parameters: {
             query?: never;
@@ -2197,6 +2237,34 @@ export interface components {
              * @description Seconds between 3600 and 7776000, or null to reset the key to its default.
              */
             "window.backup_history"?: number | null;
+        };
+        /**
+         * @description A delivery channel of the alerts: a Slack incoming webhook, a generic JSON webhook, or a Google Chat space webhook.
+         * @enum {string}
+         */
+        NotificationChannelKind: "slack" | "webhook" | "google_chat";
+        NotificationChannel: {
+            kind: components["schemas"]["NotificationChannelKind"];
+            /** @description true when the server environment sets the channel's webhook address. */
+            configured: boolean;
+            /**
+             * @description Where the address comes from: the server environment. The console cannot store an address.
+             * @enum {string}
+             */
+            source: "env";
+            /** @description The host name of the webhook address, null when the channel is not configured or its address names no host. The address itself is never returned. */
+            host: string | null;
+        };
+        NotificationTestResult: {
+            /** @description true when the channel accepted the test message. */
+            delivered: boolean;
+            /**
+             * @description timeout when no delivery was confirmed within 10 seconds, failed for any other error.
+             * @enum {string}
+             */
+            status: "delivered" | "failed" | "timeout";
+            /** @description The channel's error with every webhook address and its secret parts removed; absent when delivered. */
+            error?: string;
         };
         /** @description Per-kind arguments: explain requires queryid and may include datname or analyze; cancel and terminate require pid and may include backend_start; pgstattuple requires schema and relation and may include datname. backend_start is the start time of the session the caller saw at pid. Send it back exactly as the API reported it. When it is given and the session at pid started at another time, the agent refuses the command and signals nothing. datname is the database the command runs in; without it, the target DSN's own database. Query text is never sent to this API. */
         CommandArgs: {
@@ -3845,6 +3913,78 @@ export interface operations {
             415: components["responses"]["UnsupportedMediaType"];
             /** @description The store is unavailable; nothing was changed. */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getNotificationChannels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The three notification channels. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationChannel"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    testNotificationChannel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The channel to test. */
+                kind: components["schemas"]["NotificationChannelKind"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The outcome of the test send. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationTestResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description The kind is not slack, webhook or google_chat. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The channel is not configured in the server environment; nothing was sent. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A test message of this channel is already being sent; nothing more was sent. */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

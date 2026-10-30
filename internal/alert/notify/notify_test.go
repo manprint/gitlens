@@ -2,6 +2,8 @@ package notify
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -57,4 +59,39 @@ func TestError_DoesNotContainWebhookURL(t *testing.T) {
 	if err != nil {
 		require.False(t, strings.Contains(err.Error(), url))
 	}
+}
+
+// NOTIF-TEST-001: the console's test message (Phase "test") reaches Slack and
+// Google Chat without the context line, whose fields it leaves empty; an alert
+// keeps it.
+func TestNOTIFTEST001_TestMessageHasNoContextLine(t *testing.T) {
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(b))
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	test := Message{RuleID: "pglens.test", Phase: "test", Severity: "info", Summary: "pglens test notification", At: time.Unix(0, 0)}
+	alert := Message{RuleID: "r", Phase: "firing", Severity: "warning", Summary: "bad", Cluster: "c1", At: time.Unix(0, 0)}
+	for _, c := range []Channel{NewSlack(srv.URL, srv.Client()), NewGoogleChat(srv.URL, srv.Client())} {
+		require.NoError(t, c.Send(context.Background(), test), c.Name())
+		require.NoError(t, c.Send(context.Background(), alert), c.Name())
+	}
+	require.Len(t, bodies, 4)
+	for i, body := range bodies {
+		if i%2 == 0 {
+			require.Contains(t, body, "INFO pglens test notification", i)
+			require.NotContains(t, body, "cluster=", i)
+			require.NotContains(t, body, `"context"`, i)
+		} else {
+			require.Contains(t, body, "cluster=c1", i)
+		}
+	}
+	var slackTest struct {
+		Blocks []map[string]any `json:"blocks"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(bodies[0]), &slackTest))
+	require.Len(t, slackTest.Blocks, 1)
+	require.JSONEq(t, `{"text":"INFO pglens test notification"}`, bodies[2])
 }

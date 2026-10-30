@@ -1,5 +1,6 @@
 import { AxeBuilder } from '@axe-core/playwright'
 import { execFile } from 'node:child_process'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
@@ -1719,6 +1720,98 @@ test('ADV-E2E-001 a rule disabled in Settings leaves the Findings page within on
       `${rule} must be enabled again${disabled ? ' (left disabled by a failed step)' : ''}`,
     ).toBeNull()
   }
+})
+
+/**
+ * The parts of the dev stack's Google Chat webhook that must never reach the
+ * console (I-10): the address, its path, the space id, and the key and token,
+ * raw and decoded. Read from the stack's `.env` for NOTI-E2E-001 and never
+ * printed: an error names the variable, never its value.
+ */
+async function stackGoogleChatSecrets(): Promise<string[]> {
+  const env = await readFile(join(STACK_DIR, '.env'), 'utf8')
+  let address = ''
+  for (const line of env.split('\n')) {
+    const match = /^\s*(?:export\s+)?PGLENS_GOOGLE_CHAT_WEBHOOK_URL\s*=\s*(.*)$/.exec(line)
+    if (match) address = (match[1] ?? '').trim().replace(/^(['"])(.*)\1$/, '$2')
+  }
+  if (address === '') throw new Error('PGLENS_GOOGLE_CHAT_WEBHOOK_URL is not set in the stack .env')
+  let url: URL
+  try {
+    url = new URL(address)
+  } catch {
+    // The parse error carries the input: a fresh error says only what failed.
+    throw new Error('PGLENS_GOOGLE_CHAT_WEBHOOK_URL in the stack .env is not a URL')
+  }
+  const rawQuery = url.search.replace(/^\?/, '').split('&')
+  const space = /\/spaces\/([^/]+)/.exec(url.pathname)?.[1] ?? ''
+  const parts = [
+    address,
+    url.pathname,
+    url.search,
+    space,
+    url.searchParams.get('key') ?? '',
+    url.searchParams.get('token') ?? '',
+    ...rawQuery.map((pair) => pair.slice(pair.indexOf('=') + 1)),
+  ]
+  // A part shorter than 8 characters identifies nothing and could match by chance.
+  return [...new Set(parts.filter((part) => part.length >= 8))]
+}
+
+test('NOTI-E2E-001 the Notifications tab shows Google Chat configured by host only, Send test delivers, and no page or response holds the webhook secret', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, 2 * 30_000))
+  const browserErrors = collectConsoleErrors(page)
+  const secrets = await stackGoogleChatSecrets()
+  expect(secrets.length, 'secret parts of the stack webhook').toBeGreaterThanOrEqual(3)
+  // Every API response the console receives, scanned at the end.
+  const bodies: Promise<string>[] = []
+  page.on('response', (response) => {
+    if (new URL(response.url()).pathname.startsWith('/api/')) {
+      bodies.push(response.text().catch(() => ''))
+    }
+  })
+
+  await assertFits(page, api, fullHdRoute('/settings?tab=notifications'))
+
+  await page.setViewportSize({ width: 1920, height: 1080 })
+  await page.goto('/settings?tab=notifications')
+  const row = page
+    .getByRole('list', { name: 'Notification channels' })
+    .getByRole('listitem', { name: 'Google Chat' })
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  await expect(row.getByText('configured', { exact: true })).toBeVisible()
+  await expect(row.getByText('chat.googleapis.com', { exact: true })).toBeVisible()
+  await expect(row.locator('code')).toHaveText(['PGLENS_GOOGLE_CHAT_WEBHOOK_URL'])
+  await expect(row).toContainText('Set by PGLENS_GOOGLE_CHAT_WEBHOOK_URL (or _FILE)')
+
+  const send = row.getByRole('button', { name: 'Send test to Google Chat' })
+  await expect(send).toBeEnabled()
+  await send.click()
+  await expect(page.getByTestId('notification-test-result-google_chat')).toHaveText('Delivered', {
+    timeout: 30_000,
+  })
+  await page.screenshot({ path: `${ARTIFACT_DIR}/noti-e2e-001-delivered.png` })
+
+  // The listing as the API answers it, besides what the page fetched.
+  const listing = await api.get('/api/v1/notification-channels')
+  expect(listing.ok(), `getNotificationChannels: HTTP ${listing.status()}`).toBe(true)
+  const scanned = [
+    { what: 'page HTML', text: await page.content() },
+    { what: 'page text', text: await page.locator('body').innerText() },
+    { what: 'getNotificationChannels', text: await listing.text() },
+    ...(await Promise.all(bodies)).map((text, index) => ({ what: `API response ${index}`, text })),
+  ]
+  expect(scanned.length, 'responses captured').toBeGreaterThan(3)
+  // A failure names where and which part, never the secret.
+  for (const { what, text } of scanned) {
+    for (const [index, secret] of secrets.entries()) {
+      expect(text.includes(secret), `${what} holds secret part ${index}`).toBe(false)
+    }
+  }
+  browserErrors.assertClean()
 })
 
 interface LiveAlert {

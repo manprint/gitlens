@@ -36,8 +36,10 @@ func (g *googleChat) Send(ctx context.Context, m Message) error {
 }
 
 func googleChatText(m Message) string {
-	text := strings.ToUpper(m.Severity) + " " + m.Summary + "\n" +
-		fmt.Sprintf("cluster=%s instance=%s database=%s value=%v at=%s", m.Cluster, m.Instance, m.Database, m.Value, m.At.Format(time.RFC3339))
+	text := strings.ToUpper(m.Severity) + " " + m.Summary
+	if !isTest(m) {
+		text += "\n" + fmt.Sprintf("cluster=%s instance=%s database=%s value=%v at=%s", m.Cluster, m.Instance, m.Database, m.Value, m.At.Format(time.RFC3339))
+	}
 	if r := []rune(text); len(r) > googleChatMaxRunes {
 		text = string(r[:googleChatMaxRunes-1]) + "…"
 	}

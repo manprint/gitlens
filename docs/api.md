@@ -126,8 +126,10 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 
 | METHOD | Path | operationId | Summary |
 |---|---|---|---|
+| GET | `/api/v1/notification-channels` | `getNotificationChannels` | List the alert notification channels and whether each is configured. |
 | GET | `/api/v1/settings/advisor-windows` | `getAdvisorWindows` | List the advisor observation windows. |
 | GET | `/api/v1/settings/retention` | `getRetention` | List the data retention of each metrics family. |
 | GET | `/api/v1/settings/retention/preview` | `previewRetention` | Preview what a retention of some days would delete. |
+| POST | `/api/v1/notification-channels/{kind}/test` | `testNotificationChannel` | Send a test message through a notification channel. |
 | PUT | `/api/v1/settings/advisor-windows` | `setAdvisorWindows` | Set or reset advisor observation windows. |
 | PUT | `/api/v1/settings/retention/{family}` | `setRetention` | Set the data retention of a metrics family. |

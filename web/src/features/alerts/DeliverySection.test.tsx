@@ -1,11 +1,17 @@
 import { render, screen, within } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 
 import { DeliverySection } from './DeliverySection'
 
 describe('DeliverySection', () => {
   it('DELIVERY-UI-001 lists Google Chat with both server variables', () => {
-    render(<DeliverySection />)
+    // The section links to Settings, Notifications, so it renders inside a router.
+    render(
+      <MemoryRouter>
+        <DeliverySection />
+      </MemoryRouter>,
+    )
     const channels = screen.getByRole('list', { name: 'Supported notification channels' })
     const cards = within(channels)
       .getAllByRole('listitem')

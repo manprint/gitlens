@@ -136,6 +136,7 @@ export const qk = {
   session: () => ['getSession'] as const,
   retention: () => ['getRetention'] as const,
   advisorWindows: () => ['getAdvisorWindows'] as const,
+  notificationChannels: () => ['getNotificationChannels'] as const,
   healthz: () => ['healthz'] as const,
   readyz: () => ['readyz'] as const,
   metrics: () => ['getMetrics'] as const,

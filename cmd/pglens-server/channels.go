@@ -19,3 +19,12 @@ func buildChannels(cfg server.AlertConfig) []notify.Channel {
 	}
 	return channels
 }
+
+// wireNotificationChannels builds the delivery channels once, without the
+// database pool, and gives the same instances to the console's test send
+// (11.5a, N3). The alert notifier is built over the returned channels.
+func wireNotificationChannels(api *server.API, cfg server.AlertConfig) []notify.Channel {
+	channels := buildChannels(cfg)
+	api.SetNotificationChannels(cfg, channels)
+	return channels
+}

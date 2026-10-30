@@ -57,6 +57,13 @@ func sendJSON(ctx context.Context, client *http.Client, url string, body []byte)
 	return last
 }
 
+// RedactError is redactError for the callers outside this package: the
+// console's test send passes a channel's error through it before the error
+// reaches a response or the log (11.5a, I-10).
+func RedactError(err error, url string) error {
+	return redactError(err, url)
+}
+
 func redactError(err error, url string) error {
 	if err == nil {
 		return nil

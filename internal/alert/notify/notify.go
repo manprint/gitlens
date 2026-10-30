@@ -23,3 +23,8 @@ type Channel interface {
 	Name() string
 	Send(context.Context, Message) error
 }
+
+// isTest reports whether m is the console's test message (Phase "test"). It
+// names no cluster, instance or database, so the chat channels leave out the
+// context line that would show them empty.
+func isTest(m Message) bool { return m.Phase == "test" }

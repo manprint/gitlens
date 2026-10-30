@@ -120,6 +120,14 @@ export const CAPTIONS = {
     howToRead:
       'A shorter window reports sooner and can raise false positives. The advisor keeps its 7-day windows until a later release reads these values.',
   },
+  'settings.notifications': {
+    what: 'Which alert delivery channels the server environment configures, with the host each one posts to, and a test message per channel.',
+    source:
+      'getNotificationChannels reads the server environment (the webhook address itself is never sent); Send test calls testNotificationChannel.',
+    window: 'Read when the tab opens; a change of the environment needs a server restart.',
+    howToRead:
+      'Send test posts "pglens test notification" through the same channel the alerts use and waits at most 10 s; a failure shows the error with the address removed.',
+  },
 } as const satisfies Record<string, CaptionEntry>
 
 export type CaptionId = keyof typeof CAPTIONS

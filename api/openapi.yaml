@@ -1245,6 +1245,50 @@ components:
           minimum: 3600
           maximum: 7776000
           description: Seconds between 3600 and 7776000, or null to reset the key to its default.
+    NotificationChannelKind:
+      type: string
+      enum: [slack, webhook, google_chat]
+      description: >-
+        A delivery channel of the alerts: a Slack incoming webhook, a generic
+        JSON webhook, or a Google Chat space webhook.
+    NotificationChannel:
+      type: object
+      required: [kind, configured, source, host]
+      properties:
+        kind: { $ref: '#/components/schemas/NotificationChannelKind' }
+        configured:
+          type: boolean
+          description: true when the server environment sets the channel's webhook address.
+        source:
+          type: string
+          enum: [env]
+          description: >-
+            Where the address comes from: the server environment. The console
+            cannot store an address.
+        host:
+          type: [string, 'null']
+          description: >-
+            The host name of the webhook address, null when the channel is not
+            configured or its address names no host. The address itself is
+            never returned.
+    NotificationTestResult:
+      type: object
+      required: [delivered, status]
+      properties:
+        delivered:
+          type: boolean
+          description: true when the channel accepted the test message.
+        status:
+          type: string
+          enum: [delivered, failed, timeout]
+          description: >-
+            timeout when no delivery was confirmed within 10 seconds, failed
+            for any other error.
+        error:
+          type: string
+          description: >-
+            The channel's error with every webhook address and its secret parts
+            removed; absent when delivered.
     CommandArgs:
       type: object
       additionalProperties: false
@@ -3315,6 +3359,82 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/notification-channels:
+    get:
+      tags: [settings]
+      operationId: getNotificationChannels
+      summary: List the alert notification channels and whether each is configured.
+      description: >-
+        Always the three kinds, in the order slack, webhook, google_chat. A
+        channel is configured by the server environment; only the host name of
+        its webhook address is returned, never the address.
+      responses:
+        '200':
+          description: The three notification channels.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/NotificationChannel' } }
+              examples:
+                default:
+                  value:
+                    - { kind: slack, configured: false, source: env, host: null }
+                    - { kind: webhook, configured: false, source: env, host: null }
+                    - { kind: google_chat, configured: true, source: env, host: chat.googleapis.com }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/notification-channels/{kind}/test:
+    post:
+      tags: [settings]
+      operationId: testNotificationChannel
+      summary: Send a test message through a notification channel.
+      description: >-
+        Sends the message "pglens test notification" (rule_id pglens.test,
+        phase test, severity info) through the same channel the alerts are
+        delivered through, and waits at most 10 seconds for it; a fast server
+        error may be retried within them. No delivery is recorded. The body
+        is ignored. One test per channel runs at a time. A delivery that fails is still a 200, with status failed
+        or timeout and the redacted error.
+      parameters:
+        - { name: kind, in: path, required: true, schema: { $ref: '#/components/schemas/NotificationChannelKind' }, description: The channel to test. }
+      responses:
+        '200':
+          description: The outcome of the test send.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationTestResult' }
+              examples:
+                delivered:
+                  value: { delivered: true, status: delivered }
+                failed:
+                  value: { delivered: false, status: failed, error: 'notification to [redacted webhook] returned HTTP 404: Not Found' }
+                timeout:
+                  value: { delivered: false, status: timeout, error: context deadline exceeded }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: The kind is not slack, webhook or google_chat.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                default:
+                  value: { error: unknown channel, detail: 'the channel kinds are slack, webhook and google_chat' }
+        '409':
+          description: The channel is not configured in the server environment; nothing was sent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                default:
+                  value: { error: channel not configured, detail: 'configure the channel in the server environment, then restart the server' }
+        '429':
+          description: A test message of this channel is already being sent; nothing more was sent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                default:
+                  value: { error: test already running, detail: 'a test message of this channel is being sent; wait for its result' }
 
   /api/v1/settings/retention:
     get:

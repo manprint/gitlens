@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { base as advisorWindowsBase } from '@/test/fixtures/getAdvisorWindows'
 import { base as hostBase } from '@/test/fixtures/getInstanceHost'
+import { base as notificationChannelsBase } from '@/test/fixtures/getNotificationChannels'
 import { base as retentionBase } from '@/test/fixtures/getRetention'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { CLUSTER, INSTANCE_ID, INSTANCE_SUMMARY, NOW } from '@/test/fixture-helpers'
@@ -47,6 +48,8 @@ function renderSettings(route = '/') {
     ok('getRetention', retentionBase),
     // The Advisor rules tab reads the stored observation windows (11.4).
     ok('getAdvisorWindows', advisorWindowsBase),
+    // The Notifications tab reads the channel status (11.5a).
+    ok('getNotificationChannels', notificationChannelsBase),
   )
   return renderWithProviders(<SettingsPage />, { route })
 }
@@ -160,14 +163,14 @@ describe('Settings tabs', () => {
     // The page's catalogue is empty here: the rules view says so.
     expect(screen.getByText('The advisor reported no rule.')).toBeVisible()
 
-    // The planned tab states what it will configure and offers no control.
-    for (const [name, text] of [['Notifications', /Whether each notification channel/]] as const) {
-      fireEvent.mouseDown(settingsTab(name))
-      const panel = screen.getByRole('tabpanel')
-      expect(within(panel).getByText(text)).toBeVisible()
-      expect(within(panel).queryByRole('button')).toBeNull()
-      expect(within(panel).queryByRole('textbox')).toBeNull()
-    }
+    // Notifications holds its channels since 11.5a: the configured one can be tested.
+    fireEvent.mouseDown(settingsTab('Notifications'))
+    await settle()
+    const notifications = screen.getByRole('list', { name: 'Notification channels' })
+    expect(within(notifications).getAllByRole('listitem')).toHaveLength(3)
+    expect(
+      within(notifications).getByRole('button', { name: 'Send test to Google Chat' }),
+    ).toBeEnabled()
   })
 
   it('SETTABS-005 has no serious accessibility violations on every tab', async () => {

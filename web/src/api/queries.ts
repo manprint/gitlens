@@ -1058,3 +1058,38 @@ export function useSetAdvisorWindows(): UseMutationResult<
     retry: false,
   })
 }
+
+type NotificationChannelKind = components['schemas']['NotificationChannelKind']
+type NotificationTestResult = components['schemas']['NotificationTestResult']
+
+/**
+ * `GET /api/v1/notification-channels` (getNotificationChannels): whether the
+ * server environment configures each channel, and the host of its address.
+ */
+export function useNotificationChannels() {
+  return useApiQuery({
+    policy: REFRESH.static,
+    queryFn: (signal) => getApi(() => client.GET('/api/v1/notification-channels', { signal })),
+    queryKey: qk.notificationChannels(),
+  })
+}
+
+/**
+ * `POST /api/v1/notification-channels/{kind}/test` (testNotificationChannel):
+ * sends one test message. Never retried: each call posts a message.
+ */
+export function useTestNotificationChannel(): UseMutationResult<
+  NotificationTestResult,
+  ApiFailure,
+  NotificationChannelKind
+> {
+  return useMutation<NotificationTestResult, ApiFailure, NotificationChannelKind>({
+    mutationFn: (kind) =>
+      getApi(() =>
+        client.POST('/api/v1/notification-channels/{kind}/test', {
+          params: { path: { kind } },
+        }),
+      ),
+    retry: false,
+  })
+}

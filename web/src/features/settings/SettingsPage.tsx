@@ -16,6 +16,7 @@ import { AdvisorPanel } from './AdvisorPanel'
 import { CommandAudit } from './CommandAudit'
 import { InventoryTables } from './InventoryTables'
 import { NamesPanel } from './NamesPanel'
+import { NotificationsPanel } from './NotificationsPanel'
 import { PreferencesPanel } from './PreferencesPanel'
 import { RetentionPanel } from './RetentionPanel'
 import { ServerInfo } from './ServerInfo'
@@ -29,32 +30,6 @@ import {
   SETTINGS_TABS,
   type SettingsTabId,
 } from './settingsTabs'
-
-/**
- * What the tab that 11.5 fills will configure (I-16). Until then it states it
- * and offers no control.
- */
-const PLANNED_TABS: Record<'notifications', string> = {
-  notifications:
-    'Whether each notification channel (Slack, webhook, Google Chat) is configured, and a test message per channel.',
-}
-
-function PlannedTab({ id, label }: { id: keyof typeof PLANNED_TABS; label: string }) {
-  return (
-    <section
-      aria-labelledby={`settings-${id}-title`}
-      className="bg-card shadow-card rounded-xl border px-5 py-4"
-    >
-      <h2 id={`settings-${id}-title`} className="text-foreground text-base font-semibold">
-        {label}
-      </h2>
-      <p className="text-muted-foreground mt-1 text-sm leading-relaxed">{PLANNED_TABS[id]}</p>
-      <p className="text-muted-foreground mt-1 text-sm leading-relaxed">
-        Nothing can be changed here yet.
-      </p>
-    </section>
-  )
-}
 
 /** The tabs with their own `?view=` views; the other tabs have none. */
 const TAB_VIEWS: Partial<Record<SettingsTabId, readonly { id: string }[]>> = {
@@ -168,7 +143,7 @@ export function SettingsPage() {
     preferences: () => <PreferencesPanel />,
     retention: () => <RetentionPanel />,
     advisor: () => <AdvisorPanel />,
-    notifications: () => <PlannedTab id="notifications" label="Notifications" />,
+    notifications: () => <NotificationsPanel />,
     names: () => <NamesPanel clusters={clusters} instances={instances} />,
     audit: () => <AuditTab instances={instances} />,
   }
