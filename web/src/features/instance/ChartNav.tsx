@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react'
 
+import { Link, useLocation } from 'react-router-dom'
+
 import { cn } from '@/lib/utils'
 
 export interface ChartNavLink {
   /** Element id of the target on the same page. */
   id: string
   label: string
+  /** An instance-page tab (`?section=`) instead of an anchor on this page. */
+  section?: string
 }
 
 interface ChartNavProps {
@@ -24,8 +28,19 @@ const READING_BAND = '-120px 0px -60% 0px'
  * bar stays in the flow instead of sliding under the header.
  * The group in the reading band is marked with `aria-current`.
  */
+const LINK =
+  'text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring inline-flex rounded-md px-2.5 py-1 text-sm font-medium focus-visible:ring-2 focus-visible:outline-none'
+
+/** The current query string with `section` set, the other parameters kept. */
+function withSection(search: string, section: string): string {
+  const params = new URLSearchParams(search)
+  params.set('section', section)
+  return `?${params.toString()}`
+}
+
 export function ChartNav({ links }: ChartNavProps) {
-  const current = useCurrentTarget(links)
+  const current = useCurrentTarget(links.filter((link) => link.section === undefined))
+  const { search } = useLocation()
 
   return (
     <nav
@@ -35,16 +50,24 @@ export function ChartNav({ links }: ChartNavProps) {
       <ul className="flex gap-1.5 overflow-x-auto whitespace-nowrap">
         {links.map((link) => (
           <li key={link.id}>
-            <a
-              aria-current={current === link.id ? 'location' : undefined}
-              className={cn(
-                'text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring inline-flex rounded-md px-2.5 py-1 text-sm font-medium focus-visible:ring-2 focus-visible:outline-none',
-                current === link.id && 'bg-muted text-foreground',
-              )}
-              href={`#${link.id}`}
-            >
-              {link.label}
-            </a>
+            {link.section === undefined ? (
+              <a
+                aria-current={current === link.id ? 'location' : undefined}
+                className={cn(LINK, current === link.id && 'bg-muted text-foreground')}
+                href={`#${link.id}`}
+              >
+                {link.label}
+              </a>
+            ) : (
+              <Link
+                className={LINK}
+                replace
+                state={{ focusSection: true }}
+                to={{ search: withSection(search, link.section) }}
+              >
+                {link.label}
+              </Link>
+            )}
           </li>
         ))}
       </ul>

@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest'
 
 import { TABS } from '@/features/indexes/IndexAnalysisPage'
+import { INSTANCE_SECTIONS } from '@/features/instance/instanceSections'
 
 import { FULLHD_ROUTES, routePathname } from '../../e2e/fullhd_routes'
 import { routeTable } from './index'
 
 /** The routes whose vertical fit may be waived: chart pages only (D26). */
-const CHART_ROUTES = ['/instances/:instanceId/ash']
+const CHART_ROUTES = [
+  '/instances/:instanceId/ash',
+  '/instances/:instanceId?section=overview',
+  '/instances/:instanceId?section=host',
+]
 
 describe('Full HD route inventory', () => {
   it('FHD-ROUTES-001 lists every router path, no unknown path and every index tab', () => {
@@ -15,6 +20,11 @@ describe('Full HD route inventory', () => {
 
     for (const path of routerPaths) expect(inventoryPaths, `missing ${path}`).toContain(path)
     for (const path of inventoryPaths) expect(routerPaths, `unknown ${path}`).toContain(path)
+    for (const { id } of INSTANCE_SECTIONS) {
+      expect(FULLHD_ROUTES.map((route) => route.path)).toContain(
+        `/instances/:instanceId?section=${id}`,
+      )
+    }
     for (const { value } of TABS) {
       expect(FULLHD_ROUTES.map((route) => route.path)).toContain(`/indexes?tab=${value}`)
     }

@@ -1,7 +1,8 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { expectNoA11yViolations } from '@/test/a11y'
+import { renderWithProviders } from '@/test/render'
 
 import { ChartNav } from './ChartNav'
 import { OVERVIEW_NAV_LINKS } from './overviewCharts'
@@ -69,7 +70,7 @@ afterEach(() => {
 describe('ChartNav', () => {
   it('OVC-005 lists six links to the groups and the Host section', () => {
     vi.stubGlobal('IntersectionObserver', FakeObserver)
-    render(<Page />)
+    renderWithProviders(<Page />, { route: '/instances/i-1?db=app' })
 
     const nav = screen.getByRole('navigation', { name: 'Chart groups' })
     const links = screen.getAllByRole('link')
@@ -80,17 +81,19 @@ describe('ChartNav', () => {
       ['WAL & checkpoints', '#wal-checkpoints'],
       ['Queries', '#queries'],
       ['Tables & indexes', '#tables-indexes'],
-      ['Host', '#host-metrics'],
+      // Host is a tab of the instance page: the link switches to it, keeping the database.
+      ['Host', '/instances/i-1?db=app&section=host'],
     ])
     expect(nav).toHaveClass('xl:sticky', 'xl:top-14')
   })
 
   it('OVC-005 marks the first visible group with aria-current and follows the scroll', () => {
     vi.stubGlobal('IntersectionObserver', FakeObserver)
-    const view = render(<Page />)
+    const view = renderWithProviders(<Page />, { route: '/instances/i-1?db=app' })
     const observer = observers.at(-1)
+    // The Host tab link has no target on the Overview: only the groups are observed.
     expect(observer?.observed.map((element) => element.id)).toEqual(
-      OVERVIEW_NAV_LINKS.map((link) => link.id),
+      OVERVIEW_NAV_LINKS.filter((link) => link.section === undefined).map((link) => link.id),
     )
     expect(observer?.options.rootMargin).toBe('-120px 0px -60% 0px')
     expect(current()).toEqual([])
@@ -108,16 +111,13 @@ describe('ChartNav', () => {
     report([['memory-io', false]])
     expect(current()).toEqual(['Memory & I/O'])
 
-    report([['host-metrics', true]])
-    expect(current()).toEqual(['Host'])
-
     view.unmount()
     expect(observer?.disconnected).toBe(true)
   })
 
   it('OVC-005 renders the links without a current one when IntersectionObserver is missing', async () => {
     vi.stubGlobal('IntersectionObserver', undefined)
-    const { container } = render(<Page />)
+    const { container } = renderWithProviders(<Page />, { route: '/instances/i-1?db=app' })
 
     expect(screen.getAllByRole('link')).toHaveLength(6)
     expect(current()).toEqual([])

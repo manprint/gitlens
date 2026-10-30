@@ -13,6 +13,8 @@
  * fit check passes.
  */
 
+import { INSTANCE_SECTIONS } from '../src/features/instance/instanceSections'
+
 export type FullHdKind = 'fit' | 'charts' | 'exempt'
 
 export interface FullHdRoute {
@@ -31,7 +33,12 @@ export const FULLHD_ROUTES: readonly FullHdRoute[] = [
   { path: '/indexes?tab=cleanup', name: 'Index analysis: cleanup', kind: 'fit' },
   { path: '/indexes?tab=dead-rows', name: 'Index analysis: dead rows', kind: 'fit' },
   { path: '/clusters/:clusterId', name: 'Cluster detail', kind: 'fit' },
-  { path: '/instances/:instanceId', name: 'Instance detail', kind: 'fit' },
+  // One entry per instance-page tab (15.2), kind from the section registry.
+  ...INSTANCE_SECTIONS.map(({ id, label, kind }): FullHdRoute => ({
+    path: `/instances/:instanceId?section=${id}`,
+    name: `Instance detail: ${label}`,
+    kind: kind === 'charts' ? 'charts' : 'fit',
+  })),
   { path: '/instances/:instanceId/ash', name: 'ASH and wait analysis', kind: 'charts' },
   { path: '/instances/:instanceId/queries', name: 'Query inspector', kind: 'fit' },
   {

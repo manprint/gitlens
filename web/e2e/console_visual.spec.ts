@@ -8,6 +8,7 @@ import type { Page } from '@playwright/test'
 import { expect, test } from './fixtures'
 import { measureRoutes } from './fullhd_fit'
 import { FULLHD_ROUTES } from './fullhd_routes'
+import { INSTANCE_SECTIONS } from '../src/features/instance/instanceSections'
 import {
   ARTIFACT_DIR,
   canvasNotBlank,
@@ -269,7 +270,8 @@ test('VIS-020 the host section charts CPU, load, memory, swap and filesystem', a
   test.setTimeout(liveTimeout(0, 3 * 30_000))
   const browserErrors = collectConsoleErrors(page)
   const instanceId = await pickHostInstance(api)
-  await page.goto(`/instances/${instanceId}?range=1h#host-metrics`)
+  // Host is its own tab of the instance page (15.2).
+  await page.goto(`/instances/${instanceId}?range=1h&section=host`)
 
   const section = page.getByRole('region', { name: 'Host metrics' })
   await expect(section).toBeVisible()
@@ -431,9 +433,12 @@ test('VIS-030 the Overview shows five chart groups, complete and separated from 
     await expect(charts.getByRole('heading', { level: 2, name: group.title })).toBeInViewport()
     await expect(nav).toBeInViewport()
   }
+  // The Host link switches to the Host tab (15.2); the Overview tab brings the charts back.
   await nav.getByRole('link', { name: 'Host', exact: true }).click()
-  await expect(page).toHaveURL(/#host-metrics$/)
+  await expect(page).toHaveURL(/[?&]section=host/)
   await expect(page.getByRole('heading', { level: 2, name: 'Host metrics' })).toBeInViewport()
+  await page.getByRole('tab', { name: 'Overview' }).click()
+  await expect(charts).toBeVisible({ timeout: 30_000 })
 
   for (const width of VIS030_WIDTHS) {
     await page.setViewportSize({ width, height: 1080 })
@@ -755,7 +760,9 @@ test('TBL-E2E-005 no data table renders more than one page of rows (I-12)', asyn
     '/settings',
     `/clusters/${clusterId}`,
     `/instances/${instanceId}/queries`,
-    `/instances/${instanceId}`,
+    // The instance page shows one section per tab (15.2): the table tabs.
+    `/instances/${instanceId}?section=catalog`,
+    `/instances/${instanceId}?section=relations`,
     '/alerts/rules',
   ]
   const clusterView = `/clusters/${clusterId}`
@@ -779,6 +786,10 @@ test('TBL-E2E-005 no data table renders more than one page of rows (I-12)', asyn
       }
       for (const { name, rows } of tables) expect(rows, `${view} · ${name}`).toBeLessThanOrEqual(20)
       continue
+    }
+    if (view.includes('section=catalog')) {
+      // The Catalog opens on Triggers, often empty; Sequences always lists rows on Odoo.
+      await page.getByRole('tab', { name: /^Sequences/ }).click()
     }
     await expect
       .poll(async () => (await dataTableRows(page)).length, { timeout: 30_000, message: view })
@@ -847,4 +858,45 @@ test('FHD-MEASURE-001 measures what every Full HD page spends its height on', as
     body: JSON.stringify(measures, null, 2),
     contentType: 'application/json',
   })
+})
+
+test('FHD-INST-001 every instance-page tab opens on the live instance', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, INSTANCE_SECTIONS.length * 30_000))
+  const browserErrors = collectConsoleErrors(page)
+  const instanceId = await pickInstance(api)
+  await page.goto(`/instances/${instanceId}`)
+  const tabs = page.getByRole('tablist', { name: 'Instance sections' })
+  await expect(tabs).toBeVisible({ timeout: 30_000 })
+
+  // The spec walks the registry, so a new section is covered without editing it.
+  for (const section of INSTANCE_SECTIONS) {
+    const tab = tabs.getByRole('tab', { name: section.label, exact: true })
+    await tab.click()
+    await expect(tab).toHaveAttribute('aria-selected', 'true')
+    if (section.id === 'overview') await expect(page).not.toHaveURL(/[?&]section=/)
+    else await expect(page).toHaveURL(new RegExp(`[?&]section=${section.id}(&|$)`))
+    await page.waitForLoadState('networkidle')
+    await expect(page.getByRole('tabpanel').first()).toBeVisible()
+    // Every tab, not only the default one, passes axe (SYS-UI-011 checks Overview only).
+    const report = await new AxeBuilder({ page }).include('main').analyze()
+    const severe = report.violations.filter(
+      (violation) => violation.impact === 'serious' || violation.impact === 'critical',
+    )
+    expect(severe, `${section.id}: ${severe.map((violation) => violation.id).join(', ')}`).toEqual(
+      [],
+    )
+  }
+
+  await page.goto(`/instances/${instanceId}?section=catalog`)
+  await expect(tabs.getByRole('tab', { name: 'Schema objects', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  await expect(page.getByRole('tablist', { name: 'Schema object kinds' })).toBeVisible({
+    timeout: 30_000,
+  })
+  browserErrors.assertClean()
 })

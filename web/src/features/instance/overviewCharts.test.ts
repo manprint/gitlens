@@ -82,9 +82,9 @@ describe('OVERVIEW_GROUPS', () => {
       'wal-checkpoints',
       'queries',
       'tables-indexes',
-      'host-metrics',
+      'host',
     ])
-    expect(OVERVIEW_NAV_LINKS.at(-1)?.label).toBe('Host')
+    expect(OVERVIEW_NAV_LINKS.at(-1)).toMatchObject({ label: 'Host', section: 'host' })
   })
 
   it('OVC-002 names only metrics the agent stores, with their kind and scope', () => {

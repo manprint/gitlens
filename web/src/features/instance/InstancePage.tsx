@@ -1,8 +1,10 @@
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { useEffect, useRef, type ReactNode } from 'react'
+import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom'
 
 import { useClusterReplication, useInstance, useInstanceDatabases } from '@/api/queries'
 import type { Schemas } from '@/api/types'
 import { ErrorState } from '@/components/state'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { selectedDatabase } from '@/lib/databases'
 
 import { InstanceHeader, type ReplayLag } from './InstanceHeader'
@@ -13,6 +15,13 @@ import { InternalsSection } from './InternalsSection'
 import { LogicalReplicationSection } from './LogicalReplicationSection'
 import { OverviewSection } from './OverviewSection'
 import { RelationsSection } from './RelationsSection'
+import {
+  DEFAULT_INSTANCE_SECTION,
+  INSTANCE_SECTIONS,
+  legacyHashToSection,
+  readInstanceSection,
+  type InstanceSectionId,
+} from './instanceSections'
 import { SettingsSection } from './SettingsSection'
 
 // The header shows the newest replay-lag reading, so a short window holds it.
@@ -57,36 +66,6 @@ interface InstancePageProps {
   instanceId?: string
 }
 
-const PAGE_SECTIONS = [
-  { id: 'instance-overview', label: 'Activity' },
-  { id: 'host-metrics', label: 'Host' },
-  { id: 'settings', label: 'Settings' },
-  { id: 'instance-relations', label: 'Tables and indexes' },
-  { id: 'catalog', label: 'Schema objects' },
-  { id: 'logical-replication', label: 'Logical replication' },
-  { id: 'internals', label: 'Internals' },
-] as const
-
-/** Jump links to the long sections below, since the overview is one long page. */
-function OnThisPage() {
-  return (
-    <nav aria-label="On this page" className="-mt-2">
-      <ul className="flex flex-wrap gap-1.5">
-        {PAGE_SECTIONS.map((section) => (
-          <li key={section.id}>
-            <a
-              className="bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground inline-flex h-7 items-center rounded-full border px-3 text-xs font-medium transition-colors"
-              href={`#${section.id}`}
-            >
-              {section.label}
-            </a>
-          </li>
-        ))}
-      </ul>
-    </nav>
-  )
-}
-
 function LoadingInstance() {
   return (
     <section aria-busy="true" aria-label="Loading instance detail" role="status">
@@ -114,7 +93,11 @@ function InstanceNotFound({ instanceId }: { instanceId: string }) {
 
 export function InstancePage({ instanceId: instanceIdOverride }: InstancePageProps = {}) {
   const { instanceId: routeInstanceId } = useParams<{ instanceId: string }>()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const location = useLocation()
+  const { hash } = location
+  const tabList = useRef<HTMLDivElement>(null)
+  const section = readInstanceSection(searchParams.get('section'))
   const instanceId = instanceIdOverride ?? routeInstanceId ?? ''
   const instanceQuery = useInstance(instanceId)
   const databasesQuery = useInstanceDatabases(instanceId)
@@ -123,6 +106,34 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
     REPLAY_LAG_WINDOW,
     { enabled: instanceQuery.data?.role === 'standby' },
   )
+
+  function showSection(next: InstanceSectionId) {
+    setSearchParams(
+      (current) => {
+        const params = new URLSearchParams(current)
+        // The default section is never written to the URL (D12).
+        if (next === DEFAULT_INSTANCE_SECTION) params.delete('section')
+        else params.set('section', next)
+        return params
+      },
+      { replace: true },
+    )
+  }
+
+  // An old in-page anchor (`#catalog`, `#host`, …) opens its section's tab.
+  const legacySection = legacyHashToSection(hash)
+  useEffect(() => {
+    if (legacySection !== null) showSection(legacySection)
+    // showSection only reads the current URL; the hash is the trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [legacySection])
+
+  // A link that switched the tab (the Overview's Host link) unmounts itself: focus the tab.
+  const focusSection = (location.state as { focusSection?: boolean } | null)?.focusSection
+  useEffect(() => {
+    if (!focusSection) return
+    tabList.current?.querySelector<HTMLElement>('[role="tab"][data-state="active"]')?.focus()
+  }, [focusSection, location.key])
 
   if (instanceQuery.error?.kind === 'not_found') {
     return <InstanceNotFound instanceId={instanceId} />
@@ -142,6 +153,24 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
     return <LoadingInstance />
   }
 
+  const instance = instanceQuery.data
+  // Every registry section has its panel: a new section without one fails the type check.
+  const content: Record<InstanceSectionId, () => ReactNode> = {
+    overview: () => {
+      if (!databasesQuery.data) return null
+      const selected = selectedDatabase(databasesQuery.data.databases, searchParams.get('db'))
+      return selected ? (
+        <OverviewSection database={selected.datname} instanceId={instanceId} />
+      ) : null
+    },
+    host: () => <HostSection instanceId={instanceId} />,
+    settings: () => <SettingsSection instanceId={instanceId} />,
+    relations: () => <RelationsSection currentTier={instance.perm_tier} instanceId={instanceId} />,
+    catalog: () => <CatalogSection instanceId={instanceId} />,
+    logical: () => <LogicalReplicationSection instanceId={instanceId} />,
+    internals: () => <InternalsSection instanceId={instanceId} />,
+  }
+
   return (
     <div className="space-y-8">
       <InstanceHeader
@@ -149,7 +178,6 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
         instance={instanceQuery.data}
         replayLag={replayLagOf(replicationQuery, instanceId)}
       />
-      <OnThisPage />
       {databasesQuery.error && !databasesQuery.data ? (
         <ErrorState
           endpoint="instance databases"
@@ -161,25 +189,26 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
           Loading instance databases…
         </section>
       ) : (
-        <>
-          <DatabaseSelector
-            databases={databasesQuery.data.databases}
-            notMonitoredCount={databasesQuery.data.not_monitored_count}
-          />
-          {(() => {
-            const selected = selectedDatabase(databasesQuery.data.databases, searchParams.get('db'))
-            return selected ? (
-              <OverviewSection database={selected.datname} instanceId={instanceId} />
-            ) : null
-          })()}
-        </>
+        <DatabaseSelector
+          databases={databasesQuery.data.databases}
+          notMonitoredCount={databasesQuery.data.not_monitored_count}
+        />
       )}
-      <HostSection instanceId={instanceId} />
-      <SettingsSection instanceId={instanceId} />
-      <RelationsSection instanceId={instanceId} currentTier={instanceQuery.data.perm_tier} />
-      <CatalogSection instanceId={instanceId} />
-      <LogicalReplicationSection instanceId={instanceId} />
-      <InternalsSection instanceId={instanceId} />
+      {/* One section at a time (15.2): only the active tab is mounted and fetched. */}
+      <Tabs onValueChange={(value) => showSection(readInstanceSection(value))} value={section}>
+        <TabsList aria-label="Instance sections" className="h-auto flex-wrap" ref={tabList}>
+          {INSTANCE_SECTIONS.map((entry) => (
+            <TabsTrigger key={entry.id} value={entry.id}>
+              {entry.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        {INSTANCE_SECTIONS.map((entry) => (
+          <TabsContent key={entry.id} value={entry.id}>
+            {content[entry.id]()}
+          </TabsContent>
+        ))}
+      </Tabs>
     </div>
   )
 }

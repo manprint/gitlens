@@ -109,7 +109,7 @@ describe('SettingsSection', () => {
 
     expect(screen.getByRole('heading', { name: 'No setting changes' })).toBeInTheDocument()
     expect(
-      screen.getByText('No observed setting changes match the selected time range and search.'),
+      screen.getByText('No observed setting changes fall in the selected time range.'),
     ).toBeInTheDocument()
   })
 

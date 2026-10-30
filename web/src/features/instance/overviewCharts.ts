@@ -369,5 +369,6 @@ export const OVERVIEW_CHART_GROUP = 'overview-charts'
 /** The anchor nav: the five chart groups, then the Host section below the Overview. */
 export const OVERVIEW_NAV_LINKS: readonly ChartNavLink[] = [
   ...OVERVIEW_GROUPS.map(({ id, title }) => ({ id, label: title })),
-  { id: 'host-metrics', label: 'Host' },
+  // Host is its own tab of the instance page (15.2): the link switches tabs.
+  { id: 'host', label: 'Host', section: 'host' },
 ]

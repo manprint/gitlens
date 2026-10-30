@@ -1,4 +1,4 @@
-import { act, fireEvent, screen } from '@testing-library/react'
+import { act, fireEvent, screen, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw/http'
 import { delay } from 'msw/utils/delay'
 import { describe, expect, it, vi } from 'vitest'
@@ -58,6 +58,7 @@ function renderPage(
     cluster_id: CLUSTER_ID,
     edges: replicationEdges,
   }),
+  route = `/instances/${INSTANCE_ID}`,
 ) {
   server.use(
     ok('getInstance', instance),
@@ -145,7 +146,7 @@ function renderPage(
     ok('queryMetrics', { series: [] }),
   )
   return renderWithProviders(<InstancePage instanceId={INSTANCE_ID} />, {
-    route: `/instances/${INSTANCE_ID}`,
+    route,
   })
 }
 
@@ -312,5 +313,123 @@ describe('InstancePage', () => {
 
     expect(screen.getByText('Replay lag: unavailable')).toBeInTheDocument()
     expect(screen.queryByTitle('Replay lag was not measured.')).not.toBeInTheDocument()
+  })
+})
+
+describe('InstancePage sections', () => {
+  const at = (query: string) =>
+    renderPage(
+      baseInstance,
+      makeGetInstanceDatabases(),
+      [],
+      undefined,
+      `/instances/${INSTANCE_ID}${query}`,
+    )
+  const tab = (name: string) => screen.getByRole('tab', { name })
+  const requested: string[] = []
+  const record = () => {
+    requested.length = 0
+    server.events.on('request:start', ({ request }) => {
+      requested.push(new URL(request.url).pathname)
+    })
+  }
+
+  it('INSTSEC-001 opens Overview by default and writes nothing to the URL (INSTSEC-009)', async () => {
+    const view = at('')
+    await settle()
+
+    expect(tab('Overview')).toHaveAttribute('aria-selected', 'true')
+    expect(view.router.state.location.search).toBe('')
+    fireEvent.mouseDown(tab('Host'))
+    await settle()
+    fireEvent.mouseDown(tab('Overview'))
+    await settle()
+    expect(tab('Overview')).toHaveAttribute('aria-selected', 'true')
+    expect(view.router.state.location.search).toBe('')
+  })
+
+  it('INSTSEC-002 ?section=host selects Host and a click writes the section', async () => {
+    const view = at('?section=host')
+    await settle()
+    expect(tab('Host')).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.mouseDown(tab('Schema objects'))
+    await settle()
+    expect(view.router.state.location.search).toBe('?section=catalog')
+    expect(tab('Schema objects')).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('INSTSEC-003 an unknown section falls back to Overview', async () => {
+    at('?section=nonsense')
+    await settle()
+    expect(tab('Overview')).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('INSTSEC-004 mounts and fetches only the active section', async () => {
+    record()
+    try {
+      at('?section=internals')
+      await settle()
+
+      expect(requested.some((path) => path.endsWith('/internals'))).toBe(true)
+      for (const other of [
+        '/settings',
+        '/triggers',
+        '/logical-replication',
+        '/tables',
+        '/host',
+        '/metrics/query',
+      ]) {
+        expect(
+          requested.some((path) => path.endsWith(other)),
+          other,
+        ).toBe(false)
+      }
+      expect(screen.queryByRole('table', { name: 'Observed PostgreSQL settings' })).toBeNull()
+    } finally {
+      server.events.removeAllListeners()
+    }
+  })
+
+  it('INSTSEC-005 a legacy in-page anchor opens its section', async () => {
+    for (const [hash, label] of [
+      ['#instance-overview', 'Overview'],
+      ['#host-metrics', 'Host'],
+      ['#host', 'Host'],
+      ['#settings', 'Settings'],
+      ['#instance-relations', 'Tables and indexes'],
+      ['#catalog', 'Schema objects'],
+      ['#logical-replication', 'Logical replication'],
+      ['#internals', 'Internals'],
+    ] as const) {
+      const view = at(hash)
+      await settle()
+      expect(tab(label), hash).toHaveAttribute('aria-selected', 'true')
+      view.unmount()
+    }
+  })
+
+  it('INSTSEC-008 the Overview Host link opens the Host tab; group links stay anchors', async () => {
+    const view = renderPage(baseInstance, {
+      ...makeGetInstanceDatabases(),
+      databases: [{ datname: 'app', monitored: true, skip_reason: null }],
+    })
+    await settle()
+    const nav = screen.getByRole('navigation', { name: 'Chart groups' })
+
+    expect(within(nav).getByRole('link', { name: 'Workload' })).toHaveAttribute('href', '#workload')
+    fireEvent.click(within(nav).getByRole('link', { name: 'Host' }))
+    await settle()
+    expect(view.router.state.location.search).toContain('section=host')
+    expect(tab('Host')).toHaveAttribute('aria-selected', 'true')
+    // The link unmounted with the Overview: focus moves to the Host tab.
+    expect(tab('Host')).toHaveFocus()
+  })
+
+  it('INSTSEC-007 the section tabs have no serious accessibility violations', async () => {
+    vi.useRealTimers()
+    const { container } = at('?section=settings')
+    await screen.findByRole('tablist', { name: 'Instance sections' })
+    await expect(expectNoA11yViolations(container)).resolves.toBeUndefined()
   })
 })

@@ -160,18 +160,16 @@ const SETTING_COLUMNS: readonly SimpleColumn<Setting>[] = [
 
 function SettingTable({ settings }: { settings: Setting[] }) {
   return (
-    <div role="region" aria-label="Observed PostgreSQL settings">
-      <SimpleTable
-        ariaLabel="Observed PostgreSQL settings"
-        columns={SETTING_COLUMNS}
-        emptyState={null}
-        rowKey={(setting) => `${setting.name}-${setting.changed_at}`}
-        rows={settings}
-        scope="settings"
-        tableId="pg-settings"
-        toolbar={SETTING_TOOLBAR}
-      />
-    </div>
+    <SimpleTable
+      ariaLabel="Observed PostgreSQL settings"
+      columns={SETTING_COLUMNS}
+      emptyState={null}
+      rowKey={(setting) => `${setting.name}-${setting.changed_at}`}
+      rows={settings}
+      scope="settings"
+      tableId="pg-settings"
+      toolbar={SETTING_TOOLBAR}
+    />
   )
 }
 
@@ -244,7 +242,7 @@ export function SettingsSection({ instanceId }: SettingsSectionProps) {
           {changedSettings.length === 0 ? (
             <EmptyState
               title="No setting changes"
-              description="No observed setting changes match the selected time range and search."
+              description="No observed setting changes fall in the selected time range."
             />
           ) : (
             <SettingTable settings={changedSettings} />
