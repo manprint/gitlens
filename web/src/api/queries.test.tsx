@@ -30,6 +30,7 @@ import {
   useInstanceDatabases,
   useInstanceHost,
   useInstanceIndexes,
+  useInstanceSearch,
   useInstanceSettings,
   useInstanceTables,
   useInstances,
@@ -47,6 +48,7 @@ import {
 import { renderWithProviders } from '@/test/render'
 import { base as clusters, empty as emptyClusters } from '@/test/fixtures/getClusters'
 import { base as topology } from '@/test/fixtures/getClusterTopology'
+import { base as searchResults } from '@/test/fixtures/searchInstance'
 import { flushNetwork } from '@/test/network'
 import { NOW } from '@/test/time'
 import { server } from '@/test/msw/server'
@@ -248,6 +250,55 @@ describe('relative windows', () => {
   })
 })
 
+function SearchReadsProbe() {
+  const [term, setTerm] = useState(' o ')
+  useStatements({ instance_id: 'instance-a', limit: 200, q: term }, { durationMs: 60 * 60 * 1_000 })
+  useFindings({ state: 'all', q: term })
+  useInstanceSearch('instance-a', { q: term, kinds: 'indexes,tables' })
+  return (
+    <button type="button" onClick={() => setTerm('  orders ')}>
+      search orders
+    </button>
+  )
+}
+
+describe('full search reads', () => {
+  afterEach(() => {
+    server.events.removeAllListeners()
+  })
+
+  // D20: the term goes to the server, which filters before its limit; a term
+  // the server would refuse asks nothing of the search endpoint.
+  it('sends q to statements, findings and the instance search, and waits for 2 characters', async () => {
+    const requested: URL[] = []
+    server.events.on('request:start', ({ request }) => {
+      requested.push(new URL(request.url))
+    })
+    server.use(
+      ok('getStatements', { statements: [], truncated: false, comparable_scope: 'cluster' }),
+      ok('getFindings', []),
+      ok('searchInstance', searchResults),
+    )
+    renderWithProviders(<SearchReadsProbe />)
+    await flushNetwork()
+    // ' o ' is one character once trimmed: no search, and no q on the reads.
+    expect(requested.filter(({ pathname }) => pathname.endsWith('/search'))).toHaveLength(0)
+    for (const suffix of ['/statements', '/findings']) {
+      const url = requested.find(({ pathname }) => pathname.endsWith(suffix))
+      expect(url?.searchParams.has('q')).toBe(false)
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: 'search orders' }))
+    await flushNetwork()
+    const find = (suffix: string) =>
+      requested.filter(({ pathname }) => pathname.endsWith(suffix)).at(-1)?.searchParams
+    expect(find('/statements')?.get('q')).toBe('orders')
+    expect(find('/findings')?.get('q')).toBe('orders')
+    expect(find('/instances/instance-a/search')?.get('q')).toBe('orders')
+    expect(find('/instances/instance-a/search')?.get('kinds')).toBe('indexes,tables')
+  })
+})
+
 describe('query hooks', () => {
   it('UI-API-010 polls at its policy interval', async () => {
     server.use(sequence('getClusters', clusters, emptyClusters))
@@ -374,6 +425,7 @@ describe('query hooks', () => {
       'getInstanceBloat',
       'getInstanceCommandAudit',
       'getCoverage',
+      'searchInstance',
       'getLocks',
       'queryMetrics',
       'getEvents',
@@ -414,6 +466,7 @@ describe('query hooks', () => {
         <HookProbe label="instance-bloat" useHook={useInstanceBloatForCoverage} />
         <HookProbe label="instance-command-audit" useHook={useInstanceCommandAuditForCoverage} />
         <HookProbe label="coverage" useHook={useCoverageForCoverage} />
+        <HookProbe label="instance-search" useHook={useInstanceSearchForCoverage} />
         <HookProbe label="locks" useHook={useLocksForCoverage} />
         <HookProbe label="query-metrics" useHook={useQueryMetricsForCoverage} />
         <HookProbe label="events" useHook={useEventsForCoverage} />
@@ -511,6 +564,10 @@ function useInstanceCommandAuditForCoverage() {
 
 function useCoverageForCoverage() {
   return useCoverage('instance-a')
+}
+
+function useInstanceSearchForCoverage() {
+  return useInstanceSearch('instance-a', { q: 'orders' })
 }
 
 function useLocksForCoverage() {

@@ -31,6 +31,7 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | GET | `/api/v1/instances/{id}/internals` | `getInstanceInternals` | Return the WAL directory, database sizes, SLRU caches, temporary files and standby replay. |
 | GET | `/api/v1/instances/{id}/logical-replication` | `getInstanceLogicalReplication` | Return the subscriptions and the logical slots' decoding rates. |
 | GET | `/api/v1/instances/{id}/partitioned-tables` | `getInstancePartitionedTables` | Return the partitioned tables, each rolled up over its partitions. |
+| GET | `/api/v1/instances/{id}/search` | `searchInstance` | Search the statements, indexes, tables and columns of an instance. |
 | GET | `/api/v1/instances/{id}/security-definer-functions` | `getInstanceSecurityDefinerFunctions` | Return the SECURITY DEFINER functions and procedures. |
 | GET | `/api/v1/instances/{id}/sequences` | `getInstanceSequences` | Return the sequences and how much of their range each has used. |
 | GET | `/api/v1/instances/{id}/settings` | `getInstanceSettings` | Return observed PostgreSQL settings. |

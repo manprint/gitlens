@@ -78,6 +78,7 @@ func (a *API) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/instances/{id}", a.handleInstance)
 	r.Patch("/api/v1/clusters/{id}", a.handleRenameCluster)
 	r.Patch("/api/v1/instances/{id}", a.handleRenameInstance)
+	r.Get("/api/v1/instances/{id}/search", a.handleSearch)
 	r.Get("/api/v1/metrics/query", a.handleMetricsQuery)
 	r.Get("/api/v1/events", a.handleEvents)
 	r.Get("/api/v1/statements", a.handleStatements)
@@ -310,6 +311,9 @@ type statementsResp struct {
 	// sent them, so a skipped check read as an instance without statements.
 	Disabled       bool    `json:"disabled,omitempty"`
 	DisabledReason *string `json:"disabled_reason,omitempty"`
+	// HasMore is sent only with q: true when more statements match than
+	// limit returned. Truncated keeps its meaning, the agent's cut.
+	HasMore *bool `json:"has_more,omitempty"`
 }
 
 // ----- /api/v1/clusters -----
@@ -1239,6 +1243,12 @@ func (a *API) handleStatements(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid limit", err.Error())
 		return
 	}
+	// q narrows the statements to those whose text, queryid or database
+	// matches (D20), before they are ranked and cut to limit.
+	_, pattern, searching, err := searchParam(w, r)
+	if err != nil {
+		return
+	}
 	// Normalize order_by. NULLS LAST: in descending order PostgreSQL puts
 	// NULLs first, so statements with no calls in the window (NULL mean)
 	// headed the "slowest" list.
@@ -1362,10 +1372,29 @@ func (a *API) handleStatements(w http.ResponseWriter, r *http.Request) {
 		), ranked AS (
 		SELECT agg.*,
 		       CASE WHEN total_calls > 0 THEN total_exec_time / total_calls END AS mean_exec
-		FROM agg
+		FROM agg`)
+	if searching {
+		// The text matched is the one the answer shows: the newest of the
+		// queryid, looked up as below.
+		fmt.Fprintf(&sb, `
+		WHERE (agg.queryid::text ILIKE $%[1]d ESCAPE '\' OR agg.datname ILIKE $%[1]d ESCAPE '\'
+		       OR (SELECT qt.query_text FROM query_texts qt
+		            WHERE qt.tenant_id='default' AND qt.cluster_id=agg.cluster_id
+		              AND qt.datname=agg.datname AND qt.queryid=agg.queryid
+		            ORDER BY qt.last_seen DESC LIMIT 1) ILIKE $%[1]d ESCAPE '\')`, argIdx)
+		args = append(args, pattern)
+		argIdx++
+	}
+	sb.WriteString(`
 		ORDER BY ` + orderClause)
 	fmt.Fprintf(&sb, " LIMIT $%d", argIdx)
-	args = append(args, limit)
+	if searching {
+		// One row past the limit says more statements match than were
+		// returned (has_more); it is dropped below.
+		args = append(args, limit+1)
+	} else {
+		args = append(args, limit)
+	}
 	sb.WriteString(`
 		)
 		SELECT r.queryid, r.datname,
@@ -1422,6 +1451,14 @@ func (a *API) handleStatements(w http.ResponseWriter, r *http.Request) {
 	if entries == nil {
 		entries = []statementEntry{}
 	}
+	var hasMore *bool
+	if searching {
+		more := len(entries) > limit
+		if more {
+			entries = entries[:limit]
+		}
+		hasMore = &more
+	}
 	truncated, err := a.instanceTruncated(ctx, iid, fromPtr, toPtr)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query failed", err.Error())
@@ -1438,6 +1475,7 @@ func (a *API) handleStatements(w http.ResponseWriter, r *http.Request) {
 		ComparableScope: "cluster",
 		Disabled:        skipReason != nil,
 		DisabledReason:  skipReason,
+		HasMore:         hasMore,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

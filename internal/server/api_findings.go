@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -148,6 +149,19 @@ func (a *API) listFindings(w http.ResponseWriter, r *http.Request) {
 			where = append(where, filter.column+"=$"+strconv.Itoa(len(args)))
 		}
 	}
+	// q keeps the findings that match in any of their texts or their
+	// evidence (D20), within the state asked for and before the limit.
+	_, pattern, searching, err := searchParam(w, r)
+	if err != nil {
+		return
+	}
+	if searching {
+		args = append(args, pattern)
+		n := "$" + strconv.Itoa(len(args))
+		match := " ILIKE " + n + ` ESCAPE '\'`
+		where = append(where, "(rule_id"+match+" OR title"+match+" OR detail"+match+" OR remediation"+match+
+			" OR object_name"+match+" OR datname"+match+" OR mute_reason"+match+" OR evidence::text"+match+")")
+	}
 	limit, err := parseLimitParam(r.URL.Query().Get("limit"), 100, 1000)
 	if err != nil {
 		writeError(w, 400, "invalid limit", err.Error())
@@ -158,7 +172,9 @@ func (a *API) listFindings(w http.ResponseWriter, r *http.Request) {
 	// state=all listing (the findings page asks for one) let 90 days of
 	// resolved critical findings fill the limit ahead of the open warnings.
 	q := "SELECT " + findingSelect + " FROM findings WHERE " + strings.Join(where, " AND ") + " ORDER BY state IN ('muted','resolved'), CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, last_seen DESC LIMIT $" + strconv.Itoa(len(args))
-	rows, err := a.pool.Query(r.Context(), q, args...)
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	rows, err := a.pool.Query(ctx, q, args...)
 	if err != nil {
 		writeError(w, 500, "finding query failed", err.Error())
 		return

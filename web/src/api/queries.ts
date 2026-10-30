@@ -365,6 +365,55 @@ export function useCoverage(id: string) {
   })
 }
 
+/** The shortest search term the server accepts, in characters once trimmed (D20). */
+export const SEARCH_MIN_LENGTH = 2
+
+/** The trimmed term, or undefined when it is too short to search (no request, no key). */
+function searchTerm(q: string | undefined): string | undefined {
+  const term = q?.trim() ?? ''
+  return [...term].length >= SEARCH_MIN_LENGTH ? term : undefined
+}
+
+/** The parameters with q trimmed, or without q when it is too short to search. */
+function withSearchTerm<T extends { q?: string }>(params: T): T {
+  const { q, ...rest } = params
+  const term = searchTerm(q)
+  return (term === undefined ? rest : { ...rest, q: term }) as T
+}
+
+/**
+ * Full search over what pglens collected for an instance (D20): statements,
+ * indexes, tables and columns, each group with its total. Nothing is asked
+ * while the trimmed term is shorter than the server accepts.
+ */
+export function useInstanceSearch(
+  instanceId: string,
+  params: QueryParameters<'/api/v1/instances/{id}/search'>,
+) {
+  const q = searchTerm(params.q)
+  return useApiQuery({
+    enabled: instanceId !== '' && q !== undefined,
+    keepPrevious: true,
+    policy: REFRESH.catalog,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/search', {
+          params: { path: { id: instanceId }, query: { ...params, q: q ?? '' } },
+          signal,
+        }),
+      ),
+    queryKey: qk.instanceSearch(
+      instanceId,
+      q,
+      params.kinds,
+      params.database,
+      params.from,
+      params.to,
+      params.limit,
+    ),
+  })
+}
+
 export function useInstanceSpatialColumns(id: string) {
   return useApiQuery({
     policy: REFRESH.catalog,
@@ -671,9 +720,10 @@ export function useEvents(params: WindowlessParameters<'/api/v1/events'>, window
 }
 
 export function useStatements(
-  params: WindowlessParameters<'/api/v1/statements'>,
+  rawParams: WindowlessParameters<'/api/v1/statements'>,
   window: QueryWindow,
 ) {
+  const params = withSearchTerm(rawParams)
   return useApiQuery({
     keepPrevious: true,
     policy: REFRESH.statements,
@@ -690,6 +740,7 @@ export function useStatements(
       window,
       params.order_by,
       params.limit,
+      params.q,
     ),
   })
 }
@@ -811,7 +862,8 @@ export function useSilences(params: QueryParameters<'/api/v1/silences'> = {}) {
   })
 }
 
-export function useFindings(params: QueryParameters<'/api/v1/findings'> = {}) {
+export function useFindings(rawParams: QueryParameters<'/api/v1/findings'> = {}) {
+  const params = withSearchTerm(rawParams)
   return useApiQuery({
     policy: REFRESH.findings,
     queryFn: (signal) =>
@@ -825,6 +877,7 @@ export function useFindings(params: QueryParameters<'/api/v1/findings'> = {}) {
       params.instance_id,
       params.cluster_id,
       params.limit,
+      params.q,
     ),
   })
 }

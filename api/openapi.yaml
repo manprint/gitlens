@@ -333,6 +333,12 @@ components:
             that ended inside the window and was followed by a complete result is
             not reported.
         comparable_scope: { type: string, enum: [cluster] }
+        has_more:
+          type: boolean
+          description: >-
+            Sent only with q: true when more statements match q in the window
+            than limit returned, false when all of them were returned. It says
+            nothing about what the agent collected; truncated does.
         disabled:
           type: boolean
           description: >-
@@ -1280,6 +1286,70 @@ components:
             s. It counts from the agent process start, so a check scheduled
             later can be pending with an expected_by already past. Null
             otherwise.
+    SearchTerm:
+      type: string
+      minLength: 2
+      maxLength: 200
+      description: >-
+        A case-insensitive substring, trimmed, 2 to 200 characters. '%', '_'
+        and '\' match themselves.
+    SearchSnippetPart:
+      type: object
+      additionalProperties: false
+      required: [text, match]
+      properties:
+        text: { type: string }
+        match: { type: boolean, description: True for a run that matches the search term. }
+    SearchHit:
+      type: object
+      additionalProperties: false
+      required: [key, title, subtitle, snippet, link]
+      properties:
+        key:
+          type: string
+          description: >-
+            Unique in its group. For an index, a table or a column it is
+            database.schema.name (database.schema.table.column), the row key of
+            the Index analysis tables; for a statement database.queryid.
+        title: { type: string, description: 'The queryid, schema.index, schema.table or schema.table.column.' }
+        subtitle: { type: string, description: 'The database, with the table of an index or the type of a column.' }
+        snippet:
+          type: array
+          items: { $ref: '#/components/schemas/SearchSnippetPart' }
+          description: >-
+            At most 160 characters of the query text, the index definition,
+            the qualified table name or the qualified column name
+            (schema.table.column), cut around the first
+            match with '…' where text was cut, white space folded, every match
+            marked. A hit that matched another field starts at the text's
+            beginning with nothing marked.
+        link:
+          type: string
+          description: >-
+            A relative console path: /queries?instance=&q= for a statement,
+            followed by &from=&to= (RFC 3339, UTC) when the request named the
+            range, /indexes?instance=&tab=indexes&focus= for an index and
+            /indexes?instance=&tab=dead-rows&focus= (the table's key) for a
+            table or a column.
+    SearchGroup:
+      type: object
+      additionalProperties: false
+      required: [kind, total, truncated, hits]
+      properties:
+        kind: { type: string, enum: [statements, indexes, tables, columns] }
+        total: { type: integer, format: int64, description: Every match of the kind, not only the hits returned. }
+        truncated: { type: boolean, description: True when total is larger than the hits returned. }
+        hits: { type: array, items: { $ref: '#/components/schemas/SearchHit' } }
+    SearchResponse:
+      type: object
+      additionalProperties: false
+      required: [q, groups]
+      properties:
+        q: { type: string, description: The search term as matched, trimmed. }
+        groups:
+          type: array
+          items: { $ref: '#/components/schemas/SearchGroup' }
+          description: One group per kind asked for, in the order statements, indexes, tables, columns.
     CoverageResponse:
       type: object
       required: [instance_id, agent_started_at, generated_at, checks, reported, total]
@@ -2733,6 +2803,96 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /api/v1/instances/{id}/search:
+    get:
+      tags: [instances]
+      operationId: searchInstance
+      summary: Search the statements, indexes, tables and columns of an instance.
+      description: >-
+        Searches what pglens collected for the instance in the range, not only
+        what a page shows: the statements with samples in the range (matched on
+        their newest query text, queryid and database, ranked by execution
+        time), the indexes on their index_def facts (qualified name, table,
+        definition), the tables and the columns on their table_columns facts
+        (qualified table name; a column on its qualified name
+        schema.table.column, so a table's name finds its columns, or its
+        type), facts seen in the range. Each
+        kind returns at most limit hits and counts all its matches. Coverage is
+        what the agent collects: the statements and tables beyond its per-check
+        limits are not stored and cannot be found.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - { name: q, in: query, required: true, schema: { $ref: '#/components/schemas/SearchTerm' } }
+        - name: kinds
+          in: query
+          required: false
+          schema: { type: string, default: 'statements,indexes,tables,columns' }
+          description: >-
+            Comma-separated subset of statements, indexes, tables and columns;
+            a repeated kind counts once, an unknown one is a 400.
+        - { name: database, in: query, required: false, schema: { type: string } }
+        - name: from
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/Timestamp' }
+          description: Start of the range. Omitted, it is 24 hours before to.
+        - name: to
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/Timestamp' }
+          description: End of the range. Omitted, it is now.
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, format: int32, default: 50, minimum: 1, maximum: 50 }
+          description: Maximum hits per kind; larger values are capped at 50.
+      responses:
+        '200':
+          description: One group per kind asked for.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SearchResponse' }
+              examples:
+                default:
+                  value:
+                    q: orders
+                    groups:
+                      - kind: statements
+                        total: 1
+                        truncated: false
+                        hits:
+                          - key: app.4242
+                            title: '4242'
+                            subtitle: app
+                            snippet: [{ text: 'SELECT * FROM ', match: false }, { text: orders, match: true }, { text: ' WHERE id = $1', match: false }]
+                            link: /queries?instance=11111111-1111-1111-1111-111111111111&q=orders
+                      - kind: indexes
+                        total: 1
+                        truncated: false
+                        hits:
+                          - key: app.public.orders_pkey
+                            title: public.orders_pkey
+                            subtitle: app · public.orders
+                            snippet: [{ text: 'CREATE UNIQUE INDEX ', match: false }, { text: orders, match: true }, { text: _pkey ON public., match: false }, { text: orders, match: true }, { text: ' USING btree (id)', match: false }]
+                            link: /indexes?instance=11111111-1111-1111-1111-111111111111&tab=indexes&focus=app.public.orders_pkey
+                      - kind: tables
+                        total: 1
+                        truncated: false
+                        hits:
+                          - key: app.public.orders
+                            title: public.orders
+                            subtitle: app
+                            snippet: [{ text: public., match: false }, { text: orders, match: true }]
+                            link: /indexes?instance=11111111-1111-1111-1111-111111111111&tab=dead-rows&focus=app.public.orders
+                      - { kind: columns, total: 0, truncated: false, hits: [] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503':
+          description: The server has no database pool.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/instances/{id}/bloat:
     get:
       tags: [instances]
@@ -2934,6 +3094,17 @@ paths:
           in: query
           required: false
           schema: { type: integer, format: int32, default: 20, minimum: 1, maximum: 1000 }
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, maxLength: 200 }
+          description: >-
+            Keeps the statements whose query text, queryid (as text) or
+            database contains the term (case-insensitive, trimmed; '%', '_'
+            and '\' match themselves), before they are ranked by order_by and
+            cut to limit. The text matched is the one returned. Absent or
+            empty is no search: every statement of the window is ranked. A
+            term of 1 or more than 200 characters once trimmed is a 400.
       responses:
         '200':
           description: Top statements and comparability scope.
@@ -3286,6 +3457,19 @@ paths:
           required: false
           schema: { type: integer, format: int32, default: 100, minimum: 1, maximum: 1000 }
           description: Maximum findings; default 100 and maximum 1000.
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, maxLength: 200 }
+          description: >-
+            Keeps the findings whose rule_id, title, detail, remediation,
+            object_name, datname, mute_reason or evidence contains the term
+            (case-insensitive, trimmed; '%', '_' and '\' match themselves),
+            within the state asked for and before limit. evidence is matched
+            in its jsonb canonical text form (evidence::text: keys sorted by
+            length then bytes, one space after ':' and ','), not as it was
+            written. Absent or empty is no search. A term of 1 or more than 200
+            characters once trimmed is a 400.
       responses:
         '200':
           description: >-

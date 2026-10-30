@@ -519,6 +519,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/instances/{id}/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search the statements, indexes, tables and columns of an instance.
+         * @description Searches what pglens collected for the instance in the range, not only what a page shows: the statements with samples in the range (matched on their newest query text, queryid and database, ranked by execution time), the indexes on their index_def facts (qualified name, table, definition), the tables and the columns on their table_columns facts (qualified table name; a column on its qualified name schema.table.column, so a table's name finds its columns, or its type), facts seen in the range. Each kind returns at most limit hits and counts all its matches. Coverage is what the agent collects: the statements and tables beyond its per-check limits are not stored and cannot be found.
+         */
+        get: operations["searchInstance"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instances/{id}/bloat": {
         parameters: {
             query?: never;
@@ -1382,6 +1402,8 @@ export interface components {
             truncated: components["schemas"]["Truncated"];
             /** @enum {string} */
             comparable_scope: "cluster";
+            /** @description Sent only with q: true when more statements match q in the window than limit returned, false when all of them were returned. It says nothing about what the agent collected; truncated does. */
+            has_more?: boolean;
             /** @description Present as true while the agent skips the stat_statements check on this instance; statements collected before are still returned. */
             disabled?: boolean;
             /** @description The reason the agent gave for skipping the check. */
@@ -2310,6 +2332,43 @@ export interface components {
              * @description While pending and the agent start is known: the start, plus the check's first-run bound (its interval, at most 30 s for an interval up to 1 minute, 120 s up to 15 minutes and 600 s beyond), plus 30 s. It counts from the agent process start, so a check scheduled later can be pending with an expected_by already past. Null otherwise.
              */
             expected_by: string | null;
+        };
+        /** @description A case-insensitive substring, trimmed, 2 to 200 characters. '%', '_' and '\' match themselves. */
+        SearchTerm: string;
+        SearchSnippetPart: {
+            text: string;
+            /** @description True for a run that matches the search term. */
+            match: boolean;
+        };
+        SearchHit: {
+            /** @description Unique in its group. For an index, a table or a column it is database.schema.name (database.schema.table.column), the row key of the Index analysis tables; for a statement database.queryid. */
+            key: string;
+            /** @description The queryid, schema.index, schema.table or schema.table.column. */
+            title: string;
+            /** @description The database, with the table of an index or the type of a column. */
+            subtitle: string;
+            /** @description At most 160 characters of the query text, the index definition, the qualified table name or the qualified column name (schema.table.column), cut around the first match with '…' where text was cut, white space folded, every match marked. A hit that matched another field starts at the text's beginning with nothing marked. */
+            snippet: components["schemas"]["SearchSnippetPart"][];
+            /** @description A relative console path: /queries?instance=&q= for a statement, followed by &from=&to= (RFC 3339, UTC) when the request named the range, /indexes?instance=&tab=indexes&focus= for an index and /indexes?instance=&tab=dead-rows&focus= (the table's key) for a table or a column. */
+            link: string;
+        };
+        SearchGroup: {
+            /** @enum {string} */
+            kind: "statements" | "indexes" | "tables" | "columns";
+            /**
+             * Format: int64
+             * @description Every match of the kind
+             */
+            total: number;
+            /** @description True when total is larger than the hits returned. */
+            truncated: boolean;
+            hits: components["schemas"]["SearchHit"][];
+        };
+        SearchResponse: {
+            /** @description The search term as matched */
+            q: string;
+            /** @description One group per kind asked for, in the order statements, indexes, tables, columns. */
+            groups: components["schemas"]["SearchGroup"][];
         };
         CoverageResponse: {
             instance_id: components["schemas"]["InstanceId"];
@@ -3443,6 +3502,50 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    searchInstance: {
+        parameters: {
+            query: {
+                q: components["schemas"]["SearchTerm"];
+                /** @description Comma-separated subset of statements, indexes, tables and columns; a repeated kind counts once, an unknown one is a 400. */
+                kinds?: string;
+                database?: string;
+                /** @description Start of the range. Omitted, it is 24 hours before to. */
+                from?: components["schemas"]["Timestamp"];
+                /** @description End of the range. Omitted, it is now. */
+                to?: components["schemas"]["Timestamp"];
+                /** @description Maximum hits per kind; larger values are capped at 50. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["InstanceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One group per kind asked for. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            /** @description The server has no database pool. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     getInstanceBloat: {
         parameters: {
             query?: {
@@ -3588,6 +3691,8 @@ export interface operations {
                 to?: components["schemas"]["Timestamp"];
                 order_by?: "calls" | "calls_rate" | "total_calls" | "total_exec_time" | "total_exec_time_ms" | "exec_time" | "total_time" | "total_rows" | "rows" | "rows_rate" | "shared_blks_hit" | "shared_blks_hit_rate" | "shared_blks_read" | "shared_blks_read_rate" | "wal_bytes" | "wal_bytes_rate" | "temp_blks_written" | "temp_blks_written_rate" | "mean_exec_time" | "mean_time";
                 limit?: number;
+                /** @description Keeps the statements whose query text, queryid (as text) or database contains the term (case-insensitive, trimmed; '%', '_' and '\' match themselves), before they are ranked by order_by and cut to limit. The text matched is the one returned. Absent or empty is no search: every statement of the window is ranked. A term of 1 or more than 200 characters once trimmed is a 400. */
+                q?: string;
             };
             header?: never;
             path?: never;
@@ -3855,6 +3960,8 @@ export interface operations {
                 cluster_id?: components["schemas"]["ClusterId"];
                 /** @description Maximum findings; default 100 and maximum 1000. */
                 limit?: number;
+                /** @description Keeps the findings whose rule_id, title, detail, remediation, object_name, datname, mute_reason or evidence contains the term (case-insensitive, trimmed; '%', '_' and '\' match themselves), within the state asked for and before limit. evidence is matched in its jsonb canonical text form (evidence::text: keys sorted by length then bytes, one space after ':' and ','), not as it was written. Absent or empty is no search. A term of 1 or more than 200 characters once trimmed is a 400. */
+                q?: string;
             };
             header?: never;
             path?: never;
