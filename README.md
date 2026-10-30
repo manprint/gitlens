@@ -361,6 +361,17 @@ the credential that asked (`api-token`, or `ui-session` with a short hash of
 the session) and the client address; it does not identify a person, since
 pglens has no user accounts.
 
+The Names panel gives a cluster a name and an instance a display name
+(`PATCH /api/v1/clusters/{id}` with `{"name": …}`, `PATCH
+/api/v1/instances/{id}` with `{"display_name": …}`). A name has 1–64
+characters, no control or invisible characters, and is unique without regard
+to case (a duplicate is refused with 409); an empty name restores the default
+labels (`Cluster <id>`, or `address:port` for an instance). The names then
+replace the identifiers wherever the console labels a cluster or an instance —
+fleet cards, page titles, breadcrumbs, server pickers, the findings filters,
+the alert and event tables and the topology graph — with the identifier or
+address in the tooltip, and they survive restarts and inventory refreshes.
+
 The selected time range is reflected in the URL, so a view can be shared as a
 link. Keyboard shortcuts are available for the main destinations and filters:
 
@@ -1584,12 +1595,14 @@ The complete route surface is:
 
 ```text
 GET    /api/v1/clusters
+PATCH  /api/v1/clusters/{id}
 GET    /api/v1/clusters/{id}/topology
 GET    /api/v1/clusters/{id}/replication
 GET    /api/v1/clusters/{id}/settings-drift
 GET    /api/v1/clusters/{id}/slots
 GET    /api/v1/instances
 GET    /api/v1/instances/{id}
+PATCH  /api/v1/instances/{id}
 GET    /api/v1/instances/{id}/activity|databases|host|settings|tables|indexes|bloat|command-audit
 GET    /api/v1/instances/{id}/workload/series
 GET    /api/v1/locks
