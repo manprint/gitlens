@@ -157,16 +157,19 @@ function DataTableView<TData extends RowData>({
     <div className="space-y-3">
       <div className="flex flex-wrap items-end justify-between gap-3">
         {toolbar ? (
-          <TableToolbar
-            activeFilterCount={activeFilterCount}
-            filters={filterSpecs}
-            label={ariaLabel}
-            onChange={set}
-            onClear={clear}
-            options={options}
-            state={state}
-            {...(toolbar.searchLabel === undefined ? {} : { searchLabel: toolbar.searchLabel })}
-          />
+          // The toolbar takes the free width so its filters do not wrap beside Columns.
+          <div className="min-w-0 flex-1">
+            <TableToolbar
+              activeFilterCount={activeFilterCount}
+              filters={filterSpecs}
+              label={ariaLabel}
+              onChange={set}
+              onClear={clear}
+              options={options}
+              state={state}
+              {...(toolbar.searchLabel === undefined ? {} : { searchLabel: toolbar.searchLabel })}
+            />
+          </div>
         ) : (
           <span />
         )}

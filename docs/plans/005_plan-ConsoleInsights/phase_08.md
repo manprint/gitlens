@@ -103,5 +103,6 @@ Plan revision: 1.
 
 ## Phase gates and closure
 - Required gates: G-GO-FOCUS (`./test/ha/hactl` + packages touched by 7.5), G-GO-INT (`HACTLINT` + touched), G-RO (if the agent changed), G-API (if the contract changed), G-WEB-STATIC/UNIT (if the UI changed), G-DEPLOY, G-HA (the STATE §3 command: `--project=desktop-fullhd e2e/ha.spec.ts -g 'LIVE-HA|HA-STATIC|HA-DRILL'` with `PGLENS_QA_ALLOW_STIMULUS=1 PGLENS_QA_ALLOW_LIFECYCLE=1` and the live environment), G-QA (`QA-CLEAN-001`).
+- Re-proof (9.4, STATE §8): with the HA stack up, run `-g 'TBL-E2E-005'`; its `/clusters/<id>` view must hold at least one data table (edges, slots or drift) and carry no `UNVERIFIED` annotation.
 - README obligation: `README.md` (replication/topology section: what pglens shows for HA, the lab topology and its limits), `docs/` HA notes, stack README (`ha/`).
 - Every sub-phase DONE (7.5 units each DONE). `advisor` reviews drill evidence against the V-checklist and the rollback readiness. Open P7, record, mark DONE. Commit per STATE §3.

@@ -531,3 +531,304 @@ test('VIS-032 the Overview has no serious accessibility violations', async ({
   }
   expect(severe).toEqual([])
 })
+
+/** The body rows of every data table on the page (I-12). */
+async function dataTableRows(page: Page): Promise<{ name: string; rows: number }[]> {
+  // Chart data tables (`… data`) and the topology graph's sr-only text
+  // equivalent are not data tables: they mirror a chart or a graph.
+  return page.locator('table:not([aria-label$=" data"])').evaluateAll((tables) =>
+    tables
+      .filter((table) => table.closest('[data-topology-edge-table]') === null)
+      .map((table) => ({
+        name: table.getAttribute('aria-label') ?? table.querySelector('caption')?.textContent ?? '',
+        rows: table.querySelectorAll(':scope > tbody > tr').length,
+      })),
+  )
+}
+
+async function firstCluster(
+  api: Parameters<typeof pickInstance>[0],
+): Promise<{ cluster_id: string; instances: unknown[] }> {
+  const response = await api.get('/api/v1/clusters')
+  expect(response.ok()).toBe(true)
+  const clusters = (await response.json()) as { cluster_id: string; instances: unknown[] }[]
+  const [first] = clusters
+  if (!first) throw new Error('the server lists no cluster')
+  return first
+}
+
+/** The `<total>` of a table footer `Showing a–b of <total> <scope>`. */
+async function footerTotal(page: Page, scope: string): Promise<number> {
+  const footer = page.getByText(new RegExp(`^Showing \\d+–\\d+ of \\d+ ${scope}`)).first()
+  await expect(footer).toBeVisible({ timeout: 30_000 })
+  return Number(new RegExp(`of (\\d+) ${scope}`).exec((await footer.textContent()) ?? '')?.[1])
+}
+
+const countOf = (text: string | null) => Number((text ?? '').replace(/[^\d.]/g, ''))
+
+test('TBL-E2E-001 the Slowest queries table shows 20 rows per page with a pager', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, 2 * 30_000))
+  const browserErrors = collectConsoleErrors(page)
+  const instanceId = await pickInstance(api)
+  await page.goto(`/queries?instance=${instanceId}&range=24h`)
+
+  const table = page.getByRole('table', { name: 'Slowest queries' })
+  await expect(table).toBeVisible({ timeout: 30_000 })
+  const rows = table.locator('tbody tr')
+  expect(await rows.count()).toBeLessThanOrEqual(20)
+  const total = await footerTotal(page, 'statements')
+  expect(total, 'the stack must hold more than one page of statements').toBeGreaterThan(20)
+  await expect(page.getByText(/^Page 1 of \d+$/)).toBeVisible()
+  await expect(page.getByText(/^Showing 1–20 of \d+ statements/)).toBeVisible()
+
+  const first = (await rows.first().textContent()) ?? ''
+  await page
+    .getByRole('navigation', { name: 'Slowest queries pagination' })
+    .getByRole('button', { name: 'Next page' })
+    .click()
+  await expect(rows.first()).not.toHaveText(first)
+  await expect(page.getByText(/^Showing 21–\d+ of \d+ statements/)).toBeVisible()
+  expect(await rows.count()).toBeLessThanOrEqual(20)
+  browserErrors.assertClean()
+})
+
+test('TBL-E2E-002 the sort buttons sort the whole loaded set and survive a reload', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, 2 * 30_000))
+  const browserErrors = collectConsoleErrors(page)
+  const instanceId = await pickInstance(api)
+  await page.goto(`/queries?instance=${instanceId}&range=24h`)
+  const table = page.getByRole('table', { name: 'Slowest queries' })
+  await expect(table).toBeVisible({ timeout: 30_000 })
+
+  await table.getByRole('button', { name: 'Sort Calls descending' }).click()
+  await expect(page).toHaveURL(/slow\.sort=calls&slow\.dir=desc/)
+  // The URL changes first; the sorted rows render with the header's aria-sort.
+  await expect(table.getByRole('columnheader', { name: /Calls/ })).toHaveAttribute(
+    'aria-sort',
+    'descending',
+  )
+  // Calls is the fourth column: Rank, Query, Database, Calls.
+  const calls = async () =>
+    (await table.locator('tbody tr td:nth-child(4)').allTextContents()).map(countOf)
+  const sorted = await calls()
+  expect(sorted.length).toBeGreaterThan(1)
+  expect(sorted[0]).toBe(Math.max(...sorted))
+  expect([...sorted].sort((a, b) => b - a)).toEqual(sorted)
+
+  await page.reload()
+  await expect(table).toBeVisible({ timeout: 30_000 })
+  await expect(table.getByRole('button', { name: 'Sort Calls descending' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+  await expect(table.getByRole('columnheader', { name: /Calls/ })).toHaveAttribute(
+    'aria-sort',
+    'descending',
+  )
+  expect(await calls()).toEqual(sorted)
+  browserErrors.assertClean()
+})
+
+test('TBL-E2E-003 Index analysis searches, filters, pages and clears the indexes', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, 2 * 30_000))
+  const browserErrors = collectConsoleErrors(page)
+  const instanceId = await pickInstance(api)
+  await page.goto(`/indexes?instance=${instanceId}`)
+  const table = page.getByRole('table', { name: 'Indexes' })
+  await expect(table).toBeVisible({ timeout: 30_000 })
+  const rows = table.locator('tbody tr')
+  expect(await rows.count()).toBeLessThanOrEqual(20)
+  const total = await footerTotal(page, 'indexes')
+
+  if (total > 20) {
+    await page
+      .getByRole('navigation', { name: 'Indexes pagination' })
+      .getByRole('button', { name: 'Next page' })
+      .click()
+    await expect(page.getByText(/^Showing 21–\d+ of \d+ indexes/)).toBeVisible()
+  }
+
+  await page.getByRole('searchbox', { name: 'Search indexes' }).fill('res_partner')
+  await expect(
+    page.getByText(/^Showing \d+–\d+ of \d+ indexes \(filtered from \d+\)/),
+  ).toBeVisible()
+  // Search returns to page 1, and every row is a res_partner index.
+  await expect(page).not.toHaveURL(/indexes\.page=/)
+  // The search also reads columns and definitions: every row names res_partner somewhere.
+  const matched = await rows.allTextContents()
+  expect(matched.length).toBeGreaterThan(0)
+  for (const row of matched) expect(row.toLowerCase()).toContain('res_partner')
+
+  // The filter must act: no rows, or only invalid indexes (each carries the badge).
+  await page.getByRole('combobox', { name: 'Filter Indexes by State' }).selectOption('invalid')
+  await expect(page).toHaveURL(/indexes\.f\.state=invalid/)
+  await expect
+    .poll(async () => {
+      if (await page.getByText('No rows match').isVisible()) return 'none'
+      const flagged = await rows.allTextContents()
+      return flagged.length > 0 && flagged.every((row) => row.includes('invalid'))
+        ? 'invalid only'
+        : 'unfiltered'
+    })
+    .not.toBe('unfiltered')
+
+  await page.getByRole('button', { name: 'Clear filters' }).click()
+  await expect(page.getByText(new RegExp(`^Showing 1–\\d+ of ${total} indexes\\.`))).toBeVisible()
+  browserErrors.assertClean()
+})
+
+test('TBL-E2E-004 the Dead rows and Cleanup tabs page their tables', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, 2 * 30_000))
+  const browserErrors = collectConsoleErrors(page)
+  const instanceId = await pickInstance(api)
+
+  await page.goto(`/indexes?instance=${instanceId}&tab=dead-rows`)
+  const dead = page.getByRole('table', { name: 'Tables' })
+  await expect(dead).toBeVisible({ timeout: 30_000 })
+  expect(await dead.locator('tbody tr').count()).toBeLessThanOrEqual(20)
+  const tables = await footerTotal(page, 'tables')
+  if (tables <= 20) {
+    test
+      .info()
+      .annotations.push({ type: 'UNVERIFIED', description: `Dead rows pager: ${tables} tables` })
+  } else {
+    await page
+      .getByRole('navigation', { name: 'Tables pagination' })
+      .getByRole('button', { name: 'Next page' })
+      .click()
+    await expect(page.getByText(/^Showing 21–\d+ of \d+ tables/)).toBeVisible()
+    expect(await dead.locator('tbody tr').count()).toBeLessThanOrEqual(20)
+  }
+
+  await page.goto(`/indexes?instance=${instanceId}&tab=cleanup`)
+  const cleanup = page.getByRole('table', { name: 'Cleanup candidates' })
+  const nothing = page.getByRole('heading', { name: 'Nothing to clean up' })
+  await expect(cleanup.or(nothing)).toBeVisible({ timeout: 30_000 })
+  if (await cleanup.isVisible()) {
+    expect(await cleanup.locator('tbody tr').count()).toBeLessThanOrEqual(20)
+    const candidates = await footerTotal(page, 'candidates')
+    if (candidates <= 20) {
+      test.info().annotations.push({
+        type: 'UNVERIFIED',
+        description: `Cleanup pager: ${candidates} candidates`,
+      })
+    } else {
+      await page
+        .getByRole('navigation', { name: 'Cleanup candidates pagination' })
+        .getByRole('button', { name: 'Next page' })
+        .click()
+      await expect(page.getByText(/^Showing 21–\d+ of \d+ candidates/)).toBeVisible()
+    }
+  }
+  browserErrors.assertClean()
+})
+
+test('TBL-E2E-005 no data table renders more than one page of rows (I-12)', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, 9 * 30_000))
+  const browserErrors = collectConsoleErrors(page)
+  const instanceId = await pickInstance(api)
+  const cluster = await firstCluster(api)
+  const clusterId = cluster.cluster_id
+  // A one-instance cluster has no edges, slots or drift to list (§8; re-proven at phase 7).
+  const standalone = cluster.instances.length <= 1
+  const views = [
+    `/queries?instance=${instanceId}&range=24h`,
+    `/indexes?instance=${instanceId}`,
+    '/findings',
+    '/settings',
+    `/clusters/${clusterId}`,
+    `/instances/${instanceId}/queries`,
+    `/instances/${instanceId}`,
+    '/alerts/rules',
+  ]
+  const clusterView = `/clusters/${clusterId}`
+  for (const view of views) {
+    await page.goto(view)
+    if (view === clusterView) {
+      // The edge table shows on request; a standalone cluster has no edges,
+      // slots or drift, so it may hold no data table at all (§8, re-proven at 7.x).
+      await page.waitForLoadState('networkidle')
+      const toggle = page.getByRole('button', { name: 'Show accessible edge table' })
+      if (await toggle.isVisible()) await toggle.click()
+      await page.waitForLoadState('networkidle')
+      const tables = await dataTableRows(page)
+      if (!standalone)
+        expect(tables.length, `${view}: a replicated cluster lists data`).toBeGreaterThan(0)
+      if (tables.length === 0) {
+        test.info().annotations.push({
+          type: 'UNVERIFIED',
+          description: `${view}: no data table on a standalone cluster`,
+        })
+      }
+      for (const { name, rows } of tables) expect(rows, `${view} · ${name}`).toBeLessThanOrEqual(20)
+      continue
+    }
+    await expect
+      .poll(async () => (await dataTableRows(page)).length, { timeout: 30_000, message: view })
+      .toBeGreaterThan(0)
+    // Let the late queries of the page land before counting.
+    await page.waitForLoadState('networkidle')
+    for (const { name, rows } of await dataTableRows(page)) {
+      expect(rows, `${view} · ${name}`).toBeLessThanOrEqual(20)
+    }
+  }
+  browserErrors.assertClean()
+})
+
+const TBL006_TABLES = [
+  { route: (id: string) => `/queries?instance=${id}&range=24h`, name: 'Slowest queries' },
+  { route: (id: string) => `/indexes?instance=${id}`, name: 'Indexes' },
+  { route: () => '/settings', name: 'Monitored instances' },
+] as const
+
+test('TBL-E2E-006 the most used tables have no serious accessibility violations', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, 6 * 30_000))
+  const instanceId = await pickInstance(api)
+  for (const { route, name } of TBL006_TABLES) {
+    await page.setViewportSize({ width: 1920, height: 1080 })
+    await page.goto(route(instanceId))
+    const table = page.getByRole('table', { name })
+    await expect(table).toBeVisible({ timeout: 30_000 })
+    await page.waitForLoadState('networkidle')
+    const report = await new AxeBuilder({ page }).analyze()
+    const severe = report.violations.filter(
+      (violation) => violation.impact === 'serious' || violation.impact === 'critical',
+    )
+    if (severe.length > 0) {
+      await test.info().attach(`axe-${name}`, {
+        body: JSON.stringify(severe, null, 2),
+        contentType: 'application/json',
+      })
+    }
+    expect(severe, name).toEqual([])
+
+    // The table with its toolbar and pager, at three widths.
+    const block = table.locator('xpath=ancestor::div[contains(@class,"space-y-3")][1]')
+    for (const width of [1440, 1024, 390] as const) {
+      await page.setViewportSize({ width, height: 1080 })
+      await block.scrollIntoViewIfNeeded()
+      await block.screenshot({
+        path: `${ARTIFACT_DIR}/tbl-e2e-006-${name.toLowerCase().replaceAll(' ', '-')}-${width}.png`,
+        style: UNSTICK,
+      })
+    }
+  }
+})

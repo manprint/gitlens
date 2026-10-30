@@ -129,13 +129,20 @@ function slowColumns(instanceId: string): DataTableProps<SlowRow>['columns'] {
         const text = statement.query_text ? normaliseQueryText(statement.query_text) : ''
         return (
           <div className="flex max-w-[36rem] min-w-0 items-center gap-2">
+            {/* The name starts with `Query <id>` and still holds the visible text (label in name). */}
             <Link
-              aria-label={`Query ${String(statement.queryid)}`}
               className="text-primary block min-w-0 truncate font-mono text-xs hover:underline"
               title={statement.query_text ?? `Query ${String(statement.queryid)}`}
               to={queryPath(instanceId, statement.queryid, statement.datname)}
             >
-              {text || `Query ${String(statement.queryid)}`}
+              {text ? (
+                <>
+                  <span className="sr-only">Query {String(statement.queryid)}: </span>
+                  {text}
+                </>
+              ) : (
+                `Query ${String(statement.queryid)}`
+              )}
             </Link>
             {statement.truncated ? <Badge variant="warning">text truncated</Badge> : null}
             {statement.query_text ? <CopyButton text={statement.query_text} /> : null}
