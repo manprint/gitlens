@@ -134,6 +134,47 @@ func TestMIGADV001(t *testing.T) {
 	require.Error(t, err, "a value is required")
 }
 
+// DL-MIG-INT-001: on a fresh store db.deadlock_rate ends up firing on any
+// deadlock (threshold 0, no duration). Run again over a rule an operator tuned,
+// 0026 leaves the rule as it is; run over a rule still at the 0006 seed, it
+// repairs it.
+func TestDLMIGINT001_DeadlockRuleDefaultsToAnyDeadlock(t *testing.T) {
+	ctx, _, pool := newMigrationTestPool(t)
+	require.NoError(t, Migrate(ctx, pool))
+
+	rule := func() (string, float64, int) {
+		var comparator string
+		var threshold float64
+		var forSeconds int
+		require.NoError(t, pool.QueryRow(ctx, `SELECT comparator, threshold, for_seconds FROM alert_rules WHERE tenant_id='default' AND rule_id='db.deadlock_rate'`).Scan(&comparator, &threshold, &forSeconds))
+		return comparator, threshold, forSeconds
+	}
+	rerun := func() {
+		t.Helper()
+		_, err := pool.Exec(ctx, `DELETE FROM schema_migrations WHERE version = 26`)
+		require.NoError(t, err)
+		require.NoError(t, Migrate(ctx, pool))
+	}
+	comparator, threshold, forSeconds := rule()
+	require.Equal(t, "gt", comparator)
+	require.Equal(t, 0.0, threshold)
+	require.Equal(t, 0, forSeconds)
+
+	_, err := pool.Exec(ctx, `UPDATE alert_rules SET threshold=0.1, for_seconds=600 WHERE rule_id='db.deadlock_rate'`)
+	require.NoError(t, err)
+	rerun()
+	_, threshold, forSeconds = rule()
+	require.Equal(t, 0.1, threshold, "a tuned rule keeps its threshold")
+	require.Equal(t, 600, forSeconds, "a tuned rule keeps its duration")
+
+	_, err = pool.Exec(ctx, `UPDATE alert_rules SET threshold=0.1, for_seconds=300 WHERE rule_id='db.deadlock_rate'`)
+	require.NoError(t, err)
+	rerun()
+	_, threshold, forSeconds = rule()
+	require.Equal(t, 0.0, threshold, "the seeded rule is repaired")
+	require.Equal(t, 0, forSeconds)
+}
+
 // MIG-NAME-001: the name migrations apply on a fresh store, apply again over
 // themselves, and leave the display_name column and both unique indexes in
 // place. Two clusters may not share a name differing only in case, while any

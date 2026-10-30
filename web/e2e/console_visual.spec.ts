@@ -9,6 +9,7 @@ import { expect, test } from './fixtures'
 import { assertFits, measureRoutes } from './fullhd_fit'
 import { FULLHD_ROUTES, routePathname } from './fullhd_routes'
 import { BUDGET } from './qa/budget'
+import { database as qaDatabase, deadlocks, lockPair, query, runCleanups } from './qa/pg'
 import { run } from './qa/stack'
 import { INSTANCE_SECTIONS } from '../src/features/instance/instanceSections'
 import {
@@ -18,6 +19,7 @@ import {
   INVENTORY_VIEWS,
   SETTINGS_TABS,
 } from '../src/features/settings/settingsTabs'
+import { deadlockRate } from '../src/lib/activity'
 import { CAPTIONS } from '../src/lib/captions'
 import {
   ARTIFACT_DIR,
@@ -1716,5 +1718,227 @@ test('ADV-E2E-001 a rule disabled in Settings leaves the Findings page within on
       message,
       `${rule} must be enabled again${disabled ? ' (left disabled by a failed step)' : ''}`,
     ).toBeNull()
+  }
+})
+
+interface LiveAlert {
+  alert_key: string
+  rule_id: string
+  state: 'pending' | 'firing' | 'resolved'
+  instance_id?: string
+  datname: string
+  value: number
+  started_at: string
+  last_eval_at: string
+}
+
+/** The alert source's lookback at the default 30-second evaluation interval. */
+const ALERT_LOOKBACK_MS = 120_000
+
+/** The tile's value as a number; the dash of an unknown value reads as NaN. */
+async function tileNumber(page: Page, label: string): Promise<number> {
+  // MetricTile renders its figure in the one tabular-nums span of the tile.
+  const text =
+    (await page
+      .getByRole('article', { name: label })
+      .locator('span.tabular-nums')
+      .first()
+      .textContent()) ?? ''
+  const match = /\d[\d,]*(?:\.\d+)?/.exec(text)
+  return match ? Number(match[0].replace(/,/g, '')) : Number.NaN
+}
+
+/** The step of the stale-sample probe: a stored sample lies at most this far after its bucket. */
+const PROBE_STEP_MS = 5_000
+
+/**
+ * The time until which the alert source can still read a deadlock sample stored
+ * before now: the newest positive pg_deadlocks_total bucket of the last five
+ * minutes, plus its step, plus the lookback. -Infinity when there is none.
+ */
+async function stalePositiveUntil(
+  api: Parameters<typeof pickInstance>[0],
+  instanceId: string,
+  datname: string,
+): Promise<number> {
+  const to = new Date()
+  const params = new URLSearchParams({
+    metric: 'pg_deadlocks_total',
+    instance_id: instanceId,
+    database: datname,
+    from: new Date(to.getTime() - 5 * 60_000).toISOString(),
+    to: to.toISOString(),
+    step: `${PROBE_STEP_MS / 1000}s`,
+  })
+  const response = await api.get(`/api/v1/metrics/query?${params.toString()}`)
+  expect(response.ok(), `metrics query answered ${response.status()}`).toBe(true)
+  const body = (await response.json()) as { series?: { ts: string; value: number | null }[] }
+  const positive = (body.series ?? [])
+    .filter((point) => point.value !== null && point.value > 0)
+    .map((point) => Date.parse(point.ts))
+  return positive.length === 0
+    ? Number.NEGATIVE_INFINITY
+    : Math.max(...positive) + PROBE_STEP_MS + ALERT_LOOKBACK_MS
+}
+
+/** The pending and firing db.deadlock_rate alerts of one database of the instance. */
+async function deadlockAlerts(
+  api: Parameters<typeof pickInstance>[0],
+  instanceId: string,
+  datname: string,
+): Promise<LiveAlert[]> {
+  const alerts = (await (
+    await api.get(
+      `/api/v1/alerts?rule_id=db.deadlock_rate&instance_id=${encodeURIComponent(instanceId)}`,
+    )
+  ).json()) as LiveAlert[]
+  return alerts.filter((alert) => alert.datname === datname)
+}
+
+/** The text of a labelled detail cell ("Lock mode", "Waits on") in a tree item. */
+function detailCell(item: ReturnType<Page['getByRole']>, label: string) {
+  return item.getByText(label, { exact: true }).first().locator('xpath=following-sibling::span[1]')
+}
+
+// The db.deadlock_rate alert of 0026 fires on any deadlock. It resolves about
+// twelve minutes after the last one (two minutes of alert lookback, then the
+// engine's ten-minute metric grace), beyond this test's budget, so only firing is
+// asserted; DL-002 in internal/alert covers the resolution.
+test('DL-E2E-001 real deadlocks show in the activity, the Locks and Overview tiles and fire db.deadlock_rate; a row wait shows its lock mode', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop-fullhd', 'stimulus runs on desktop-fullhd only')
+  // The lock-mode step, the tiles and the alert each get a budget of their own.
+  test.setTimeout(liveTimeout(60_000, BUDGET.activity + 2 * BUDGET.deadlockAlert))
+  const browserErrors = collectConsoleErrors(page)
+  const instanceId = await pickInstance(api)
+  const datname = qaDatabase()
+  try {
+    // F2: a row lock wait shows the mode and type of the lock the waiter asks for.
+    const pairName = 'qa-dl-lockmode'
+    const pair = await lockPair('dl_lockmode', 1, pairName)
+    const [waiterPid, holderPid] = (
+      await query(
+        `SELECT string_agg(pid::text, ',' ORDER BY cardinality(pg_blocking_pids(pid)) DESC)
+           FROM pg_stat_activity WHERE application_name = '${pairName}';`,
+      )
+    ).split(',')
+    await page.goto(`/instances/${instanceId}/locks`)
+    const holder = page
+      .getByRole('treeitem')
+      .filter({ hasText: new RegExp(`PID ${holderPid}(?!\\d)`) })
+      .first()
+    await expect(holder).toBeVisible({ timeout: BUDGET.activity })
+    const expand = page.getByRole('button', { name: `Expand lock session ${holderPid}` })
+    if (await expand.isVisible()) await expand.click()
+    const waiter = page
+      .getByRole('treeitem')
+      .filter({ hasText: new RegExp(`PID ${waiterPid}(?!\\d)`) })
+      .last()
+    await expect(waiter).toBeVisible()
+    await expect(detailCell(waiter, 'Lock mode')).toHaveText('ShareLock')
+    await expect(detailCell(waiter, 'Waits on')).toHaveText('transactionid')
+    await page.screenshot({ path: `${ARTIFACT_DIR}/dl-e2e-001-lock-mode.png` })
+    await pair.release()
+
+    // An episode left open by an earlier run (it holds about twelve minutes, and
+    // a full grace again after a server restart) is not evidence of these
+    // deadlocks: it is recorded before provoking them, with the time until which
+    // an earlier deadlock sample can still refresh it.
+    const prior = new Map(
+      (await deadlockAlerts(api, instanceId, datname)).map((alert) => [alert.alert_key, alert]),
+    )
+    const staleUntil = await stalePositiveUntil(api, instanceId, datname)
+
+    // The Locks page is open before the deadlocks, so its tile is read as it
+    // refetches: it shows each database's newest sample only, which is positive
+    // for one or two scrapes after a deadlock.
+    await expect(page.getByRole('article', { name: 'Deadlock rate' })).toBeVisible({
+      timeout: 30_000,
+    })
+    const provokedAt = Date.now()
+    const measured = await deadlocks(3)
+    expect(
+      measured,
+      'pg_stat_database.deadlocks grew by the provoked deadlocks',
+    ).toBeGreaterThanOrEqual(3)
+    test.info().annotations.push({ type: 'DL-E2E-001 deadlocks', description: String(measured) })
+    const deadline = provokedAt + BUDGET.deadlockAlert
+    const remaining = () => Math.max(1_000, deadline - Date.now())
+
+    // The activity API and the tile both read the newest sample of each
+    // database (deadlockRate, as the UI does), so both are polled together.
+    let apiSeen = false
+    let tileSeen = false
+    await expect
+      .poll(
+        async () => {
+          const activity = (await (
+            await api.get(`/api/v1/instances/${instanceId}/activity`)
+          ).json()) as { metrics: Parameters<typeof deadlockRate>[0] }
+          apiSeen ||= (deadlockRate(activity.metrics) ?? 0) > 0
+          tileSeen ||= (await tileNumber(page, 'Deadlock rate')) > 0
+          return apiSeen && tileSeen
+        },
+        {
+          message: 'a positive deadlock rate in the activity API and the Locks page tile',
+          intervals: [2_000],
+          timeout: remaining(),
+        },
+      )
+      .toBe(true)
+    await page.screenshot({ path: `${ARTIFACT_DIR}/dl-e2e-001-locks.png` })
+
+    await page.goto(`/instances/${instanceId}?db=${encodeURIComponent(datname)}&range=1h`)
+    await expect
+      .poll(() => tileNumber(page, 'Deadlocks in range'), {
+        message: 'the Overview Deadlocks in range tile counts the deadlocks',
+        intervals: [5_000],
+        timeout: remaining(),
+      })
+      .toBeGreaterThanOrEqual(1)
+    await page.screenshot({ path: `${ARTIFACT_DIR}/dl-e2e-001-overview.png` })
+
+    // A new episode starts at the first positive sample, scraped after the
+    // deadlocks. An episode already open is refreshed only on a pass that sees a
+    // positive sample in the lookback window; once the earlier samples have left
+    // it (staleUntil) and the deadlocks were provoked, a refresh read a new one.
+    let evidence: { alert: LiveAlert; kind: 'new episode' | 'refreshed episode' } | undefined
+    await expect
+      .poll(
+        async () => {
+          for (const alert of await deadlockAlerts(api, instanceId, datname)) {
+            if (alert.state !== 'firing') continue
+            const before = prior.get(alert.alert_key)
+            if (Date.parse(alert.started_at) >= provokedAt - 2_000) {
+              evidence = { alert, kind: 'new episode' }
+            } else if (
+              before?.started_at === alert.started_at &&
+              Date.parse(alert.last_eval_at) > Math.max(provokedAt, staleUntil)
+            ) {
+              evidence = { alert, kind: 'refreshed episode' }
+            }
+          }
+          return evidence !== undefined
+        },
+        {
+          message: `db.deadlock_rate firing for database ${datname} on these deadlocks`,
+          intervals: [5_000],
+          timeout: BUDGET.deadlockAlert,
+        },
+      )
+      .toBe(true)
+    const firedAfter = Date.now() - provokedAt
+    test.info().annotations.push({
+      type: 'DL-E2E-001 alert',
+      description: `${evidence?.kind}: firing ${Math.round(firedAfter / 1000)} s after the deadlocks were provoked (earlier samples readable until ${Number.isFinite(staleUntil) ? new Date(staleUntil).toISOString() : 'none'}; started ${evidence?.alert.started_at}, last evaluated ${evidence?.alert.last_eval_at}, value ${evidence?.alert.value})`,
+    })
+    console.log(
+      `DL-E2E-001: ${measured} deadlocks, db.deadlock_rate ${evidence?.kind} after ${firedAfter} ms`,
+    )
+    browserErrors.assertClean()
+  } finally {
+    await runCleanups()
   }
 })

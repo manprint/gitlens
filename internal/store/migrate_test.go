@@ -129,6 +129,26 @@ func TestADVW001_MigrationDefinesServerSettings(t *testing.T) {
 	require.Contains(t, sql, "PRIMARY KEY (tenant_id, key)")
 }
 
+// DL-MIG-001: 0026 makes db.deadlock_rate fire on any deadlock, and touches the
+// rule only while it still carries every value 0006 seeded, so a threshold,
+// comparator or duration an operator chose survives.
+func TestDLMIG001_DeadlockRuleFiresOnAnyDeadlock(t *testing.T) {
+	data, err := migrationFS.ReadFile("migrations/0026_deadlock_alert_any.sql")
+	require.NoError(t, err)
+	sql := string(data)
+	require.Contains(t, sql, "SET threshold = 0,")
+	require.Contains(t, sql, "for_seconds = 0,")
+	require.Contains(t, sql, "WHERE rule_id = 'db.deadlock_rate'")
+	require.Contains(t, sql, "AND comparator = 'gt'")
+	require.Contains(t, sql, "AND threshold = 0.1")
+	require.Contains(t, sql, "AND for_seconds = 300;")
+
+	seed, err := migrationFS.ReadFile("migrations/0006_alerts.sql")
+	require.NoError(t, err)
+	require.Contains(t, string(seed), "('db.deadlock_rate',             'warning',  'instance', 'pg_deadlocks_total',           'gt', 0.1,  300,",
+		"0026 matches the seeded values; a changed seed needs a matching repair")
+}
+
 // TestMigrations_SeededRuleMetricsAreProduced — a Tier 1 seed rule whose
 // metric name does not match a metric something actually emits is silently
 // dead: internal/alert's metric source queries `metrics` by exact name, so

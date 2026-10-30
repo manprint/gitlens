@@ -10,7 +10,8 @@ import { run } from './stack'
  * integers/identifiers only.
  */
 const container = () => process.env.PGLENS_QA_DB_CONTAINER ?? 'pglens-odoo-odoo-db-1'
-const database = () => process.env.PGLENS_QA_DB ?? 'odoo'
+/** The monitored database the stimulus runs in (`PGLENS_QA_DB`, `odoo` by default). */
+export const database = () => process.env.PGLENS_QA_DB ?? 'odoo'
 const PSQL = ['psql', '-U', 'odoo', '-X', '-A', '-t', '-q', '-v', 'ON_ERROR_STOP=1']
 const QUERY_TIMEOUT_MS = 600_000
 
@@ -183,6 +184,81 @@ export async function lockPair(
     'blocked waiter',
   )
   return { release }
+}
+
+const DEADLOCK_SIDES = ['qa-deadlock-a', 'qa-deadlock-b'] as const
+
+/**
+ * One side of a deadlock on `qa_tmp.dl`: update row `first`, wait until the other
+ * side holds its first row too, sleep 0.3 s, then update row `second`. The two
+ * sides take the rows in opposite orders, so PostgreSQL detects a deadlock after
+ * deadlock_timeout and cancels one of them; the handler swallows the error, so
+ * psql exits cleanly either way. The barrier polls pg_locks for the other side's
+ * transaction ID lock, which it takes with its first update; the activity
+ * snapshot is cleared on every poll because a transaction otherwise reads it once.
+ * Docker exec start-up alone can differ by more than the 0.3 s sleep, so without
+ * the barrier a side could finish before the other began, and no deadlock occur.
+ */
+function deadlockSide(other: string, first: 1 | 2, second: 1 | 2): string {
+  return `DO $$
+BEGIN
+  UPDATE ${QA_SCHEMA}.dl SET v = v + 1 WHERE id = ${first};
+  FOR i IN 1..200 LOOP
+    PERFORM pg_stat_clear_snapshot();
+    EXIT WHEN EXISTS (
+      SELECT 1 FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+       WHERE a.application_name = '${safeAppName(other)}'
+         AND l.locktype = 'transactionid' AND l.mode = 'ExclusiveLock' AND l.granted);
+    PERFORM pg_sleep(0.05);
+  END LOOP;
+  PERFORM pg_sleep(0.3);
+  UPDATE ${QA_SCHEMA}.dl SET v = v + 1 WHERE id = ${second};
+EXCEPTION WHEN deadlock_detected THEN
+  NULL;
+END $$;
+`
+}
+
+/**
+ * Provokes at least `count` real deadlocks on `qa_tmp.dl(id int primary key, v int)`
+ * (rows 1 and 2, created when missing) with two psql sessions named
+ * `qa-deadlock-a` and `qa-deadlock-b` that update the rows in opposite orders.
+ * Returns the measured increase of `pg_stat_database.deadlocks` for the database;
+ * a round that misses its deadlock is repeated, up to four rounds per deadlock.
+ */
+export async function deadlocks(count: number): Promise<number> {
+  assertStimulusAllowed()
+  const target = Number(sqlInt(count))
+  if (target <= 0) throw new GuardError('count must be positive')
+  await ensureSchema()
+  await query(
+    `CREATE TABLE IF NOT EXISTS ${QA_SCHEMA}.dl (id int PRIMARY KEY, v int NOT NULL DEFAULT 0);
+     INSERT INTO ${QA_SCHEMA}.dl(id, v) VALUES (1, 0), (2, 0) ON CONFLICT DO NOTHING;`,
+  )
+  registerCleanup(() =>
+    query(
+      `SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity
+         WHERE application_name IN ('${DEADLOCK_SIDES[0]}', '${DEADLOCK_SIDES[1]}');`,
+    ).then(() => undefined),
+  )
+  // A backend reports its deadlock to the statistics when its session ends, which
+  // the reading session may see a moment after psql returns.
+  const counter = () =>
+    queryInt(`SELECT deadlocks FROM pg_stat_database WHERE datname = current_database();`)
+  const before = await counter()
+  let delta = 0
+  for (let round = 0; round < target * 4 && delta < target; round += 1) {
+    const [a, b] = DEADLOCK_SIDES
+    await Promise.all([query(deadlockSide(b, 1, 2), a), query(deadlockSide(a, 2, 1), b)])
+    const expected = round + 1
+    const deadline = Date.now() + 2_000
+    do {
+      delta = (await counter()) - before
+      if (delta >= expected) break
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    } while (Date.now() < deadline)
+  }
+  return delta
 }
 
 /** Runs `pg_sleep(ms)` `times` times in one session; returns when done. */

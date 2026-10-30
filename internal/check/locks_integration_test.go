@@ -307,3 +307,133 @@ func metricNames(result Result) []string {
 	sort.Strings(names)
 	return names
 }
+
+// holdAndWait has holder run holdSQL in an open transaction, then starts
+// waitSQL on another session of the same pool and returns once that session
+// waits on a lock. Cleanup rolls the holder back, which lets the waiter go.
+func holdAndWait(t *testing.T, pool *pgxpool.Pool, holdSQL, waitSQL string) {
+	t.Helper()
+	ctx := context.Background()
+	holder, err := pool.Acquire(ctx)
+	require.NoError(t, err)
+	tx, err := holder.Begin(ctx)
+	require.NoError(t, err)
+	_, err = tx.Exec(ctx, holdSQL)
+	require.NoError(t, err)
+	waiter, err := pool.Acquire(ctx)
+	require.NoError(t, err)
+	var waiterPID int32
+	require.NoError(t, waiter.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&waiterPID))
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = waiter.Exec(ctx, "SET lock_timeout='10s'")
+		_, _ = waiter.Exec(ctx, waitSQL)
+	}()
+	t.Cleanup(func() {
+		_ = tx.Rollback(ctx)
+		select {
+		case <-done:
+		case <-time.After(12 * time.Second):
+			t.Log("waiting session did not finish during cleanup")
+		}
+		waiter.Release()
+		holder.Release()
+	})
+	require.Eventually(t, func() bool {
+		var waiting bool
+		err := pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE pid = $1 AND NOT granted)", waiterPID).Scan(&waiting)
+		return err == nil && waiting
+	}, 5*time.Second, 50*time.Millisecond, "the second session must wait on the lock")
+}
+
+// dropAfter runs stmt on pool when the test ends, after the cleanups
+// registered later, such as the rollback that releases a waiting session.
+func dropAfter(t *testing.T, pool *pgxpool.Pool, stmt string) {
+	t.Helper()
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), stmt); err != nil {
+			t.Logf("cleanup %q: %v", stmt, err)
+		}
+	})
+}
+
+// lockFields scrapes the lock tree from the app database and returns the lock
+// fields of the one session that waits.
+func lockFields(t *testing.T, pg *pgtest.PG) map[string]any {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := pg.Pool(t, "app", pgtest.RoleT0).Acquire(ctx)
+	require.NoError(t, err)
+	t.Cleanup(conn.Release)
+	target := &registryTestTarget{conn: conn, version: pg.Version, database: "app", instanceID: uuid.New(), clusterID: 1, role: pgtype.RolePrimary, permTier: pgtype.TierReadOnly}
+	result, err := (&locksCheck{}).Scrape(ctx, target)
+	require.NoError(t, err)
+	var tree struct {
+		Nodes []map[string]any `json:"nodes"`
+	}
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
+	var waiting []map[string]any
+	for _, n := range tree.Nodes {
+		if blocked, _ := n["blocked_by"].([]any); len(blocked) > 0 {
+			waiting = append(waiting, n)
+		}
+	}
+	require.Len(t, waiting, 1)
+	for _, n := range tree.Nodes {
+		if blocked, _ := n["blocked_by"].([]any); len(blocked) == 0 {
+			require.NotContains(t, n, "lock_mode", "the holder waits on no lock")
+		}
+	}
+	return waiting[0]
+}
+
+// DL-LOCK-INT-001: on a real server the waiting session carries the mode and
+// type of the lock it waits on. A row lock is a wait on the holder's
+// transaction ID in ShareLock mode, which is what both sessions of a deadlock
+// show; it names no relation. A relation lock in the agent's own database is
+// named; one in another database is not, because its OID would be read
+// against the wrong pg_class, but its type and mode are still reported.
+func TestDLLOCKINT001_WaitingSessionCarriesItsLock(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		t.Run("row lock", func(t *testing.T) {
+			pool := pg.Pool(t, "app", pgtest.RoleSuperuser)
+			_, err := pool.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS pglens_dl_row_probe (id integer primary key, v integer); INSERT INTO pglens_dl_row_probe VALUES (1, 0) ON CONFLICT (id) DO NOTHING")
+			require.NoError(t, err)
+			dropAfter(t, pool, "DROP TABLE IF EXISTS pglens_dl_row_probe")
+			holdAndWait(t, pool, "UPDATE pglens_dl_row_probe SET v = v + 1 WHERE id = 1", "UPDATE pglens_dl_row_probe SET v = v + 1 WHERE id = 1")
+			node := lockFields(t, pg)
+			require.Equal(t, "ShareLock", node["lock_mode"])
+			require.Equal(t, "transactionid", node["lock_type"])
+			require.NotContains(t, node, "lock_relation")
+		})
+		t.Run("relation lock in the agent's database", func(t *testing.T) {
+			pool := pg.Pool(t, "app", pgtest.RoleSuperuser)
+			_, err := pool.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS pglens_dl_relation_probe (id integer)")
+			require.NoError(t, err)
+			dropAfter(t, pool, "DROP TABLE IF EXISTS pglens_dl_relation_probe")
+			holdAndWait(t, pool, "LOCK TABLE pglens_dl_relation_probe IN ACCESS EXCLUSIVE MODE", "SELECT count(*) FROM pglens_dl_relation_probe")
+			node := lockFields(t, pg)
+			require.Equal(t, "AccessShareLock", node["lock_mode"])
+			require.Equal(t, "relation", node["lock_type"])
+			require.Equal(t, "public.pglens_dl_relation_probe", node["lock_relation"], "schema-qualified although public is on the search_path")
+		})
+		t.Run("relation lock in another database", func(t *testing.T) {
+			// The database goes once its pool is closed: cleanups run last in,
+			// first out, so this one, registered before pg.Pool registers the
+			// pool's Close, runs after it.
+			admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
+			dropAfter(t, admin, "DROP DATABASE IF EXISTS pglens_dl_other WITH (FORCE)")
+			pool := pg.Pool(t, "pglens_dl_other", pgtest.RoleSuperuser)
+			_, err := pool.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS pglens_dl_other_probe (id integer)")
+			require.NoError(t, err)
+			dropAfter(t, pool, "DROP TABLE IF EXISTS pglens_dl_other_probe")
+			holdAndWait(t, pool, "LOCK TABLE pglens_dl_other_probe IN ACCESS EXCLUSIVE MODE", "SELECT count(*) FROM pglens_dl_other_probe")
+			node := lockFields(t, pg)
+			require.Equal(t, "AccessShareLock", node["lock_mode"])
+			require.Equal(t, "relation", node["lock_type"])
+			require.NotContains(t, node, "lock_relation", "a relation of another database is not named")
+		})
+	})
+}

@@ -24,14 +24,20 @@ func scrapeLocks(t *testing.T, rows []([]any)) Result {
 
 // lockValues is one row of the locks query, in its column order. A session
 // that is blocked waits since one second after its start and has waited for
-// age seconds; a session that is not blocked waits on no lock.
+// age seconds, in ShareLock mode on a lock whose type is its wait event, and a
+// relation lock is on public.accounts; a session that is not blocked waits on
+// no lock.
 func lockValues(pid int32, wait string, blocked []int32, age float64, query string) []any {
-	var waitStart, waitDuration any
+	var waitStart, waitDuration, mode, lockType, relation any
 	if len(blocked) > 0 {
 		waitStart = lockBackendStart(pid).Add(time.Second)
 		waitDuration = age
+		mode, lockType = "ShareLock", wait
+		if wait == "relation" {
+			relation = "public.accounts"
+		}
 	}
-	return []any{pid, "app", "app", "client", "127.0.0.1", "active", "Lock", wait, 1.0, age, query, blocked, lockBackendStart(pid), waitStart, waitDuration, false}
+	return []any{pid, "app", "app", "client", "127.0.0.1", "active", "Lock", wait, 1.0, age, query, blocked, lockBackendStart(pid), waitStart, waitDuration, mode, lockType, relation, false}
 }
 
 func lockBackendStart(pid int32) time.Time {
@@ -92,9 +98,9 @@ func TestLocks_TreeJSONShape(t *testing.T) {
 // session whose start time the role may not see has none.
 func TestLocks_TreeCarriesBackendStart(t *testing.T) {
 	unseen := lockValues(3, "", nil, 0, "select 3")
-	// backend_start is the fourth column from the end: the wait start, the
-	// wait duration and the cut flag follow it.
-	unseen[len(unseen)-4] = nil
+	// backend_start is the seventh column from the end: the wait start, the
+	// wait duration, the lock mode, type and relation, and the cut flag follow it.
+	unseen[len(unseen)-7] = nil
 	result := scrapeLocks(t, []([]any){lockValues(9, "", nil, 0, "holder"), lockValues(1, "transactionid", []int32{9}, 2, "update"), unseen})
 	raw := string(result.Facts[0].ValueJSON)
 	require.Contains(t, raw, `"backend_start":"2026-10-23T09:00:00.000001Z"`)
@@ -139,7 +145,7 @@ func TestLocks_QueryIsTruncated(t *testing.T) {
 func TestLocks_SessionListIsCappedOldestFirst(t *testing.T) {
 	rows := make([][]any, 0, 105)
 	for i := 1; i <= 105; i++ {
-		rows = append(rows, []any{int32(i), "app", "app", "client", "127.0.0.1", "idle", "", "", float64(i), 0.0, "select 1", []int32(nil), nil, nil, nil, false})
+		rows = append(rows, []any{int32(i), "app", "app", "client", "127.0.0.1", "idle", "", "", float64(i), 0.0, "select 1", []int32(nil), nil, nil, nil, nil, nil, nil, false})
 	}
 	result := scrapeLocks(t, rows)
 	var tree lockTree
@@ -256,7 +262,7 @@ func TestLocks_QueryTextOnlyInNodes(t *testing.T) {
 // another identity. A session whose start is not visible has none.
 func TestLocks_SessionIDFormat(t *testing.T) {
 	unseen := lockValues(3, "", nil, 0, "select 3")
-	unseen[len(unseen)-4] = nil
+	unseen[len(unseen)-7] = nil
 	result := scrapeLocks(t, []([]any){lockValues(1, "transactionid", []int32{9}, 2, "update"), lockValues(9, "", nil, 0, "holder"), unseen})
 	var tree lockTree
 	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
@@ -291,6 +297,59 @@ func TestLocks_WaitFieldsOnWaitingSessions(t *testing.T) {
 	require.Nil(t, holder.WaitDuration)
 	require.NotContains(t, rawSession(t, result, 9), "wait_duration")
 	require.NotNil(t, tree.Sessions[0].WaitStartedAt, "the session list keeps the wait fields")
+}
+
+// DL-LOCK-001: a waiting session carries the mode and type of the lock it waits
+// on, in the tree and in the session list; a session that waits on none has
+// neither key. The tree used to carry no mode at all, so the console showed
+// "—" for both sessions of a deadlock.
+func TestDLLOCK001_WaitingSessionCarriesLockModeAndType(t *testing.T) {
+	result := scrapeLocks(t, []([]any){lockValues(1, "transactionid", []int32{9}, 2, "update"), lockValues(9, "", nil, 0, "holder")})
+	require.Contains(t, rawSession(t, result, 1), `"lock_mode":"ShareLock"`)
+	require.Contains(t, rawSession(t, result, 1), `"lock_type":"transactionid"`)
+	require.NotContains(t, rawSession(t, result, 1), "lock_relation", "a transaction ID lock names no relation")
+	for _, key := range []string{"lock_mode", "lock_type", "lock_relation"} {
+		require.NotContains(t, rawSession(t, result, 9), key)
+	}
+	var tree lockTree
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
+	waiter := tree.Nodes[0]
+	require.NotNil(t, waiter.LockMode)
+	require.Equal(t, "ShareLock", *waiter.LockMode)
+	require.NotNil(t, waiter.LockType)
+	require.Equal(t, "transactionid", *waiter.LockType)
+	require.Nil(t, waiter.LockRelation)
+	require.Nil(t, tree.Nodes[1].LockMode)
+	var listed *lockNode
+	for i := range tree.Sessions {
+		if tree.Sessions[i].PID == 1 {
+			listed = &tree.Sessions[i]
+		}
+	}
+	require.NotNil(t, listed)
+	require.NotNil(t, listed.LockMode, "the session list keeps the lock fields")
+}
+
+// DL-LOCK-002: a relation lock names its relation as the query printed it.
+func TestDLLOCK002_RelationLockNamesItsRelation(t *testing.T) {
+	result := scrapeLocks(t, []([]any){lockValues(1, "relation", []int32{9}, 2, "select"), lockValues(9, "", nil, 0, "holder")})
+	raw := rawSession(t, result, 1)
+	require.Contains(t, raw, `"lock_type":"relation"`)
+	require.Contains(t, raw, `"lock_relation":"public.accounts"`)
+}
+
+// DL-LOCK-003: the query names a relation only in the agent's own database or
+// on a shared catalog. The OID of a relation in another database would be read
+// against the agent's pg_class, where it names nothing or another table. The
+// name is schema-qualified from the catalogs, not printed by regclass, whose
+// text depends on the agent's search_path.
+func TestDLLOCK003_QueryNamesOnlyRelationsOfItsOwnDatabase(t *testing.T) {
+	require.Contains(t, locksQuery, "min(l.mode) AS mode")
+	require.Contains(t, locksQuery, "min(l.locktype) AS locktype")
+	require.Contains(t, locksQuery, "AND l.database IN (0, (SELECT oid FROM pg_database WHERE datname = current_database()))")
+	require.Contains(t, locksQuery, "THEN COALESCE(quote_ident(n.nspname) || '.' || quote_ident(c.relname), l.relation::text) END) AS relation")
+	require.Contains(t, locksQuery, "WHERE NOT l.granted GROUP BY l.pid) w ON w.pid = a.pid")
+	require.NotContains(t, locksQuery, "regclass", "a regclass name depends on the agent's search_path")
 }
 
 func rawSession(t *testing.T, result Result, pid int32) string {

@@ -17,6 +17,12 @@ export const BUDGET = {
   check15m: 150_000,
   /** hourly checks (table_columns, extensions) after an agent restart */
   checkHourly: 660_000,
+  /**
+   * a deadlock until the db.deadlock_rate alert fires: database_stats every 30 s,
+   * a push every 15 s, an alert pass every 30 s, with slack for one missed
+   * scrape and the UI polls
+   */
+  deadlockAlert: 180_000,
   /** tables/indexes every 5 minutes */
   tables: 480_000,
   /** ASH: 1 s sampling, 10 s flush */

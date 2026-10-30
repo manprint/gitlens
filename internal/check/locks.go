@@ -40,6 +40,12 @@ type lockRow struct {
 	// read from pg_locks; both are nil when it waits on none.
 	WaitStartedAt *time.Time
 	WaitDuration  *float64
+	// LockMode, LockType and LockRelation describe that lock too; nil when the
+	// session waits on none. LockRelation is nil as well when the lock names no
+	// relation, or one the agent's database cannot name (see locksQuery).
+	LockMode     *string
+	LockType     *string
+	LockRelation *string
 }
 
 // lockSessionsLimit caps the session list, which the activity view shows
@@ -84,6 +90,15 @@ type lockNode struct {
 	// clocks are the server's and the agent's clock does not enter it.
 	WaitStartedAt *time.Time `json:"wait_started_at,omitempty"`
 	WaitDuration  *float64   `json:"wait_duration,omitempty"`
+	// LockMode is the mode the session asks for on the lock it waits on, as
+	// pg_locks.mode spells it (ShareLock, ExclusiveLock, ...). LockType is
+	// pg_locks.locktype (transactionid, relation, tuple, ...). LockRelation is
+	// the relation the lock is on, schema-qualified. The tree used to
+	// carry none of them, so the console's Lock mode column read "—" for
+	// every session, the two sessions of a deadlock included.
+	LockMode     *string `json:"lock_mode,omitempty"`
+	LockType     *string `json:"lock_type,omitempty"`
+	LockRelation *string `json:"lock_relation,omitempty"`
 }
 
 // locksQuery tolerates every nullable column: client_addr is NULL for each
@@ -99,6 +114,20 @@ type lockNode struct {
 // is PostgreSQL 14 and later, so every supported version has it. The wait
 // duration is measured on the server with now(), as is the transaction age, so
 // the two clocks agree. A session that waits on no lock has NULL in both.
+//
+// The lock columns describe the same waiting lock. A backend waits on at most
+// one heavyweight lock at a time, so the min() of each column is that lock's
+// value; the aggregate only keeps the join one row per session. The relation is
+// named only when the lock is in the agent's own database or on a shared
+// catalog (pg_locks.database 0): the agent connects to one database, and the
+// OID of a relation in another one would be looked up in the wrong pg_class,
+// where it names nothing or, worse, an unrelated table. Elsewhere it is NULL,
+// and the lock type and mode remain. The name is always schema-qualified, each
+// part quoted where needed, from pg_class and pg_namespace: regclass would leave
+// the schema out whenever it is on the agent's search_path, so the same table
+// read differently from one agent configuration to the next. A relation dropped
+// meanwhile has no pg_class row and is shown by its OID. Tuple, page and extend
+// locks carry their relation too and are named the same way.
 //
 // The last column says whether the text is size minus four or more bytes long,
 // the test the query below applies, and so whether it may have been cut. The
@@ -123,9 +152,22 @@ SELECT a.pid,
        a.backend_start,
        w.waitstart,
        EXTRACT(epoch FROM now() - w.waitstart),
+       w.mode,
+       w.locktype,
+       w.relation,
        COALESCE(octet_length(a.query), 0) >= (SELECT setting::int FROM pg_settings WHERE name = 'track_activity_query_size') - 4
 FROM pg_stat_activity a
-LEFT JOIN (SELECT pid, min(waitstart) AS waitstart FROM pg_locks WHERE NOT granted GROUP BY pid) w ON w.pid = a.pid
+LEFT JOIN (SELECT l.pid,
+                  min(l.waitstart) AS waitstart,
+                  min(l.mode) AS mode,
+                  min(l.locktype) AS locktype,
+                  min(CASE WHEN l.relation IS NOT NULL
+                            AND l.database IN (0, (SELECT oid FROM pg_database WHERE datname = current_database()))
+                           THEN COALESCE(quote_ident(n.nspname) || '.' || quote_ident(c.relname), l.relation::text) END) AS relation
+           FROM pg_locks l
+           LEFT JOIN pg_class c ON c.oid = l.relation
+           LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE NOT l.granted GROUP BY l.pid) w ON w.pid = a.pid
 WHERE a.backend_type = 'client backend'
   AND a.pid <> pg_backend_pid()`
 
@@ -147,7 +189,7 @@ func (c *locksCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 	for rows.Next() {
 		var r lockRow
 		var cut bool
-		if err := rows.Scan(&r.PID, &r.Datname, &r.Username, &r.ApplicationName, &r.ClientAddr, &r.State, &r.WaitEventType, &r.WaitEvent, &r.XactAge, &r.StateAge, &r.Query, &r.BlockedBy, &r.BackendStart, &r.WaitStartedAt, &r.WaitDuration, &cut); err != nil {
+		if err := rows.Scan(&r.PID, &r.Datname, &r.Username, &r.ApplicationName, &r.ClientAddr, &r.State, &r.WaitEventType, &r.WaitEvent, &r.XactAge, &r.StateAge, &r.Query, &r.BlockedBy, &r.BackendStart, &r.WaitStartedAt, &r.WaitDuration, &r.LockMode, &r.LockType, &r.LockRelation, &cut); err != nil {
 			return Result{}, err
 		}
 		// A statement can carry a role password, and the tree is shipped to
@@ -281,6 +323,9 @@ func lockNodeOf(r lockRow) lockNode {
 		SessionID:       lockSessionID(r.PID, r.BackendStart),
 		WaitStartedAt:   r.WaitStartedAt,
 		WaitDuration:    r.WaitDuration,
+		LockMode:        r.LockMode,
+		LockType:        r.LockType,
+		LockRelation:    r.LockRelation,
 	}
 }
 

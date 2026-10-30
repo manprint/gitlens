@@ -80,6 +80,15 @@ function nodeText(value: unknown): string {
   return '—'
 }
 
+// lockTarget names the lock a session waits on: its type, and the relation when
+// the agent could name it (a relation of another database is left out).
+function lockTarget(node: LockNode): string {
+  const type = nodeText(node.lock_type)
+  if (type === '—') return type
+  const relation = nodeText(node.lock_relation)
+  return relation === '—' ? type : `${type} on ${relation}`
+}
+
 function queryBytes(query: string): number {
   return new TextEncoder().encode(query).byteLength
 }
@@ -172,9 +181,16 @@ function LockDetails({ node, sampledAt }: { node: LockNode; sampledAt: string | 
           {nodeText(node.wait_event_type)} / {nodeText(node.wait_event)}
         </span>
       </div>
+      {/* The mode, type and relation are those of the lock the session waits on;
+          a blocker that waits on nothing shows a dash. The agent sent no mode
+          before, so this cell read "—" for every session, deadlocks included. */}
       <div>
         <span className="text-muted-foreground">Lock mode</span>
-        <span className="block">{nodeText(node.lock_mode ?? node.mode)}</span>
+        <span className="block">{nodeText(node.lock_mode)}</span>
+      </div>
+      <div>
+        <span className="text-muted-foreground">Waits on</span>
+        <span className="block">{lockTarget(node)}</span>
       </div>
       <div>
         <span className="text-muted-foreground">Wait duration</span>
@@ -423,6 +439,9 @@ export function BlockingTree({
           Latest sample: {formatRelative(response.sampled_at, now)}; sample age:{' '}
           {formatDuration(age)}. Samples are collected every {SAMPLE_INTERVAL_SECONDS} seconds;
           shorter episodes can be missed. Wait durations are measured on the server at the sample.
+          Lock mode and Waits on describe the lock a waiting session asks for: its mode, its type
+          and the relation it is on; a relation in another database than the agent&apos;s is not
+          named.
         </>
       }
     >

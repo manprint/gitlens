@@ -663,6 +663,18 @@ name, so one lagging standby cannot hide behind a healthy one. `agent_down`
 skips instances whose agent was revoked: a revoked agent stops pushing by
 design.
 
+`db.deadlock_rate` fires on any deadlock, per database: its default threshold
+is a rate above 0 with no duration. `pg_deadlocks_total` is stored as a
+per-second rate over one scrape interval, so a single deadlock reads as about
+0.033 per second at the default 30-second interval; the original default (above
+0.1 per second for 300 seconds) never fired on real, sporadic deadlocks, and
+store migration 0026 resets it when it still has those values (a rule edited
+through the API is left alone). The alert source keeps the newest deadlock of
+its lookback window (two minutes at the default evaluation interval), and once
+none is left the engine holds the episode for its ten-minute metric grace: the
+alert resolves about twelve minutes after the last deadlock, and deadlocks that
+recur within that hold extend the open alert instead of notifying again.
+
 Configure Slack, Google Chat or a generic webhook with the variables above. A silence suppresses notification while the alert remains visible and continues to be evaluated.
 
 Alerts are persisted and evaluated even when no delivery channel is configured.

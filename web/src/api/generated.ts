@@ -1417,6 +1417,12 @@ export interface components {
             wait_started_at?: string;
             /** @description Seconds the session has waited for that lock, measured on the server at the sample. Absent for a session that waits on no lock. */
             wait_duration?: number;
+            /** @description Mode the session asks for on the lock it waits on, as pg_locks.mode spells it (ShareLock, AccessExclusiveLock, ...). Both sessions of a row deadlock wait in ShareLock mode on each other's transaction ID. Absent for a session that waits on no lock. */
+            lock_mode?: string;
+            /** @description Type of the lock the session waits on, pg_locks.locktype (transactionid, relation, tuple, advisory, ...). Absent for a session that waits on no lock. */
+            lock_type?: string;
+            /** @description Relation the waited-on lock is on, always schema-qualified (schema.relation, each part quoted where needed), or its OID when the relation was dropped meanwhile. Present only for a relation, tuple, page or extend lock in the database the agent connects to, or on a shared catalog; a relation of another database is not named, because the agent cannot read its catalog. */
+            lock_relation?: string;
             blocked_by?: number[];
             usename?: string;
             datname?: string;

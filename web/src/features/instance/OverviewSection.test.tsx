@@ -200,6 +200,42 @@ describe('OverviewSection', () => {
     }
   })
 
+  it('DL-UI-004 keeps the tiles measured when the newest bucket is still empty', async () => {
+    const values: Record<string, number> = {
+      pg_connections_used: 7,
+      pg_connections_limit: 100,
+      pg_xact_commit_total: 4,
+      pg_xact_rollback_total: 2,
+      pg_blks_hit_total: 99,
+      pg_blks_read_total: 1,
+    }
+    server.use(
+      http.get(metricsUrl, ({ request }) => {
+        const metric = new URL(request.url).searchParams.get('metric') ?? ''
+        return HttpResponse.json({
+          series: [
+            { ts: '2026-08-27T00:58:00Z', value: values[metric] ?? null },
+            { ts: '2026-08-27T00:59:00Z', value: values[metric] ?? null },
+            { ts: '2026-08-27T01:00:00Z', value: null },
+          ],
+        })
+      }),
+    )
+
+    renderWithProviders(<OverviewSection database="app" instanceId={INSTANCE_ID} />, {
+      route: `/instances/${INSTANCE_ID}?db=app&range=1h`,
+    })
+    await settle()
+
+    const connections = screen.getByRole('article', { name: 'Connections in use' })
+    expect(connections).toHaveTextContent('7')
+    expect(connections).toHaveTextContent('of 100')
+    expect(screen.getByRole('article', { name: 'Transactions per second' })).toHaveTextContent(
+      '6/s',
+    )
+    expect(screen.getByRole('article', { name: 'Cache hit ratio' })).toHaveTextContent('99')
+  })
+
   it('UI-INST-028 counts rolled-back transactions in the transactions tile', async () => {
     server.use(
       http.get(metricsUrl, ({ request }) => {

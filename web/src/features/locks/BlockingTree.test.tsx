@@ -260,6 +260,41 @@ describe('BlockingTree', () => {
     expect(waiter).toHaveTextContent('09:58:45')
   })
 
+  it('DL-UI-001 shows the mode, type and relation of the lock each session waits on', () => {
+    render(
+      <BlockingTree
+        response={response([
+          { pid: 10, blocked_by: [] },
+          {
+            pid: 11,
+            blocked_by: [10],
+            wait_duration: 2,
+            lock_mode: 'ShareLock',
+            lock_type: 'transactionid',
+          },
+          {
+            pid: 12,
+            blocked_by: [10],
+            wait_duration: 1,
+            lock_mode: 'AccessShareLock',
+            lock_type: 'relation',
+            lock_relation: 'public.accounts',
+          },
+        ])}
+        now={NOW}
+      />,
+    )
+
+    // Each session's details are in document order: the holder, then its waiters.
+    const cell = (label: string) =>
+      screen.getAllByText(label).map((element) => element.nextElementSibling?.textContent)
+    expect(cell('Lock mode')).toEqual(['—', 'ShareLock', 'AccessShareLock'])
+    expect(cell('Waits on')).toEqual(['—', 'transactionid', 'relation on public.accounts'])
+    expect(screen.getByText(/Lock mode and Waits on describe the lock/)).toHaveTextContent(
+      "a relation in another database than the agent's is not named",
+    )
+  })
+
   it('UI-LOCK-050 keeps signal actions enabled on a fresh lock sample', () => {
     renderWithProviders(
       <BlockingTree

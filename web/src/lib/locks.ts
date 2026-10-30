@@ -12,6 +12,12 @@ export interface LockNode {
   wait_started_at?: string | null
   /** Seconds the session had waited at the sample, measured on the server. Absent for a session that waits on none. */
   wait_duration?: number | null
+  /** Mode the session asks for on the lock it waits on (ShareLock, ...). Absent for a session that waits on none. */
+  lock_mode?: string | null
+  /** pg_locks.locktype of that lock (transactionid, relation, tuple, ...). Absent for a session that waits on none. */
+  lock_type?: string | null
+  /** Relation that lock is on. Absent when it names none, or one in a database other than the agent's. */
+  lock_relation?: string | null
   xact_age?: number | null
   state_age?: number | null
   [key: string]: unknown

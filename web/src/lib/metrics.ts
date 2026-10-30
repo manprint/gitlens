@@ -31,8 +31,56 @@ export function findResets(series: readonly MetricValue[]): number[] {
   return resets
 }
 
+/**
+ * How many trailing buckets latestValue looks back through for a measured one.
+ * The newest bucket of a range that ends now is still filling: the agent pushes
+ * every 15 seconds and scrapes database statistics every 30, so at a short query
+ * step it is often empty, and the bucket before it can be too while a push is in
+ * flight. Three buckets cover that; a longer run of empty buckets is a real gap
+ * (an agent that stopped pushing), and a tile must then read as unknown rather
+ * than show a value from before the outage.
+ */
+export const LATEST_VALUE_BUCKETS = 3
+
+/**
+ * The floor of the age bound of latestValue. The bound is twice the series step,
+ * the two buckets before the newest that LATEST_VALUE_BUCKETS lets it read, but
+ * never less than two minutes: at a step under a minute a database statistic
+ * reaches the server up to 45 seconds (one scrape and one push) after its bucket,
+ * so two steps alone would turn a healthy agent's tile to unknown.
+ */
+export const LATEST_VALUE_MIN_AGE_MS = 2 * 60_000
+
+/**
+ * The latest measured value of a series: the last non-null point among its
+ * final LATEST_VALUE_BUCKETS points whose bucket starts at most
+ * max(2 × step, LATEST_VALUE_MIN_AGE_MS) before the newest bucket, or null when
+ * there is none. The server returns every bucket up to the end of the range,
+ * so the newest bucket is the range end; the step is the spacing of the last
+ * two buckets. The time bound keeps a series with uneven or missing buckets
+ * from showing a value older than the bucket count implies; a point whose
+ * timestamp does not parse is not used. latestValue used to read the last
+ * point only, so the Overview tiles showed "—" whenever the in-progress bucket
+ * had no sample yet, on about one load in three.
+ */
 export function latestValue(series: readonly MetricSeriesPoint[]): number | null {
-  return series[series.length - 1]?.value ?? null
+  const last = series[series.length - 1]
+  if (last === undefined) return null
+  const end = Date.parse(last.ts)
+  const previous = series[series.length - 2]
+  const step = previous === undefined ? 0 : end - Date.parse(previous.ts)
+  const maxAge = Math.max(2 * (Number.isFinite(step) ? step : 0), LATEST_VALUE_MIN_AGE_MS)
+  for (
+    let index = series.length - 1;
+    index >= Math.max(0, series.length - LATEST_VALUE_BUCKETS);
+    index -= 1
+  ) {
+    const point = series[index]
+    if (point === undefined || point.value === null) continue
+    const age = end - Date.parse(point.ts)
+    if (Number.isFinite(age) && age >= 0 && age <= maxAge) return point.value
+  }
+  return null
 }
 
 /** Multiply every measured bucket by a constant, keeping gaps as gaps. */

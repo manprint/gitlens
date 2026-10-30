@@ -351,3 +351,53 @@ func TestINTALERT022_SlotLostClearsWhenNoSlotIsLost(t *testing.T) {
 		require.False(t, cleared(Alert{InstanceID: &mixed}), "one lost slot keeps the episode open beside a healthy one")
 	})
 }
+
+// DL-INT-001: one deadlock is one positive pg_deadlocks_total sample between
+// zero ones. The source returns that positive sample for as long as it is in
+// the lookback window, although newer scrapes stored zero, so the first pass
+// that runs after it was stored sees it. Once it has left the window the source
+// returns nothing for the database, and the engine closes the episode after the
+// metric grace.
+func TestDLINT001_DeadlockSampleOutlivesLaterZeroScrapes(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		pool := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		ctx := context.Background()
+		for _, stmt := range []string{
+			`DROP TABLE IF EXISTS metrics`,
+			`CREATE TABLE metrics (ts timestamptz NOT NULL, cluster_id bigint NOT NULL, instance_id uuid NOT NULL,
+				datname text NOT NULL DEFAULT '', metric text NOT NULL, value double precision)`,
+		} {
+			_, err := pool.Exec(ctx, stmt)
+			require.NoError(t, err)
+		}
+		iid := uuid.New()
+		deadlock := time.Now().UTC().Truncate(time.Second)
+		_, err := pool.Exec(ctx, `INSERT INTO metrics (ts, cluster_id, instance_id, datname, metric, value) VALUES
+			($1, 1, $2, 'odoo', 'pg_deadlocks_total', 0),
+			($3, 1, $2, 'odoo', 'pg_deadlocks_total', 1.0/30),
+			($4, 1, $2, 'odoo', 'pg_deadlocks_total', 0),
+			($5, 1, $2, 'odoo', 'pg_deadlocks_total', 0),
+			($3, 1, $2, 'odoo', 'pg_xact_commit_total', 5)`,
+			deadlock.Add(-30*time.Second), iid, deadlock, deadlock.Add(30*time.Second), deadlock.Add(60*time.Second))
+		require.NoError(t, err)
+		src := &metricSource{db: pool, interval: 30 * time.Second}
+		rule := Rule{ID: "db.deadlock_rate", Scope: ScopeInstance, Metric: "pg_deadlocks_total", Comparator: GT, Threshold: 0}
+
+		got, err := src.Samples(ctx, rule, deadlock.Add(90*time.Second))
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		require.Equal(t, iid, *got[0].InstanceID)
+		require.Equal(t, "odoo", got[0].Datname)
+		require.InDelta(t, 1.0/30, got[0].Value, 1e-9, "the deadlock wins over the newer zero scrapes")
+		require.True(t, got[0].TS.Equal(deadlock), "sample dated %s", got[0].TS)
+
+		got, err = src.Samples(ctx, rule, deadlock.Add(120*time.Second))
+		require.NoError(t, err)
+		require.Len(t, got, 1, "the window includes its first second")
+
+		got, err = src.Samples(ctx, rule, deadlock.Add(150*time.Second))
+		require.NoError(t, err)
+		require.Empty(t, got, "zero scrapes are not samples once the deadlock has left the window")
+	})
+}
