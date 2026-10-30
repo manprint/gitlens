@@ -141,9 +141,14 @@ describe('Settings tabs', () => {
     fireEvent.mouseDown(settingsTab('Names'))
     expect(view.router.state.location.search).toBe('?tab=names')
 
+    // Preferences holds its controls since 11.2.
+    fireEvent.mouseDown(settingsTab('Preferences'))
+    expect(
+      within(screen.getByRole('tabpanel')).getByRole('combobox', { name: 'Default time range' }),
+    ).toBeVisible()
+
     // The planned tabs state what they will configure and offer no control.
     for (const [name, text] of [
-      ['Preferences', /the theme, the default time range/],
       ['Advisor rules', /Which advisor rules run/],
       ['Notifications', /Whether each notification channel/],
     ] as const) {

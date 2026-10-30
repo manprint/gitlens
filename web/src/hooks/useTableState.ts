@@ -3,6 +3,8 @@ import { useSearchParams } from 'react-router-dom'
 
 import { DEFAULT_PAGE_SIZE, PAGE_SIZES, type SortDirection } from '@/lib/tableControls'
 
+import { usePreferences } from './usePreferences'
+
 /** Search, sort, page and filters of one table (D12, D23). */
 export interface TableState {
   q: string
@@ -134,8 +136,21 @@ export function countActiveFilters(state: TableState): number {
   return filters + (state.q.trim() === '' ? 0 : 1)
 }
 
+/**
+ * `defaults` with the page size of the `tablePageSize` preference when the
+ * table sets none (11.2). A `size` in the URL still wins (R-11.0 P3).
+ */
+function usePreferredDefaults(defaults: TableDefaults): TableDefaults {
+  const { tablePageSize } = usePreferences()
+  return defaults.size === undefined ? { ...defaults, size: tablePageSize } : defaults
+}
+
 /** Table state kept in the URL under `<prefix>.*`, written with `replace` navigation. */
-export function useTableState(prefix: string, defaults: TableDefaults = {}): TableStateControls {
+export function useTableState(
+  prefix: string,
+  tableDefaults: TableDefaults = {},
+): TableStateControls {
+  const defaults = usePreferredDefaults(tableDefaults)
   const [params, setParams] = useSearchParams()
   const state = readTableState(params, prefix, defaults)
 
@@ -160,12 +175,26 @@ export function useTableState(prefix: string, defaults: TableDefaults = {}): Tab
   }
 }
 
+/** Local table state; `size` undefined means the default page size. */
+type LocalTableState = Omit<TableState, 'size'> & { size: number | undefined }
+
 /** The same controls kept in component state, for tables without a URL id (no Router needed). */
-export function useLocalTableState(defaults: TableDefaults = {}): TableStateControls {
-  const [state, setState] = useState(() => initialTableState(defaults))
+export function useLocalTableState(tableDefaults: TableDefaults = {}): TableStateControls {
+  const defaults = usePreferredDefaults(tableDefaults)
+  const defaultSize = resolved(defaults).size
+  // The size stays unset until the user picks one, so a change of the
+  // `tablePageSize` preference applies at once (11.2).
+  const [stored, setStored] = useState<LocalTableState>(() => ({
+    ...initialTableState(defaults),
+    size: undefined,
+  }))
+  const state: TableState = { ...stored, size: stored.size ?? defaultSize }
 
   function set(patch: TableStatePatch) {
-    setState((current) => nextTableState(current, patch))
+    setStored((current) => {
+      const next = nextTableState({ ...current, size: current.size ?? defaultSize }, patch)
+      return { ...next, size: patch.size ?? current.size }
+    })
   }
 
   return {

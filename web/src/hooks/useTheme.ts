@@ -1,11 +1,8 @@
 import { useEffect, useState } from 'react'
 
-import {
-  readPreferences,
-  writePreferences,
-  type Preferences,
-  type ThemePreference,
-} from '@/lib/preferences'
+import { updatePreferences, type ThemePreference } from '@/lib/preferences'
+
+import { usePreferences } from './usePreferences'
 
 export type ResolvedTheme = 'dark' | 'light'
 
@@ -35,7 +32,8 @@ export interface UseThemeResult {
 }
 
 export function useTheme(): UseThemeResult {
-  const [preferences, setPreferences] = useState<Preferences>(() => readPreferences())
+  // The shared store: the header toggle and the Preferences tab show the same theme.
+  const preferences = usePreferences()
   const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() =>
     applyTheme(preferences.theme),
   )
@@ -62,15 +60,14 @@ export function useTheme(): UseThemeResult {
     }
   }, [preferences.theme])
 
-  function updatePreferences(patch: Partial<Preferences>) {
-    const next = writePreferences({ ...preferences, ...patch })
-    setPreferences(next)
+  function setTheme(theme: ThemePreference) {
+    const next = updatePreferences({ theme })
     setResolvedTheme(applyTheme(next.theme))
   }
 
   return {
     theme: preferences.theme,
     resolvedTheme,
-    setTheme: (theme) => updatePreferences({ theme }),
+    setTheme,
   }
 }

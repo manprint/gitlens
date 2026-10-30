@@ -7,6 +7,7 @@ import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { EmptyState, ErrorState, Unknown } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
+import { usePreferences } from '@/hooks/usePreferences'
 import { formatTimestamp } from '@/lib/format'
 import { parseRange } from '@/lib/timerange'
 
@@ -194,7 +195,12 @@ function SettingTable({ settings }: { settings: Setting[] }) {
 
 export function SettingsSection({ instanceId }: SettingsSectionProps) {
   const [searchParams, setSearchParams] = useSearchParams()
-  const range = useMemo(() => parseRange(searchParams, new Date()), [searchParams])
+  // The header's range picker and this section read the same default (11.2).
+  const { defaultTimeRange } = usePreferences()
+  const range = useMemo(
+    () => parseRange(searchParams, new Date(), defaultTimeRange),
+    [defaultTimeRange, searchParams],
+  )
   const changedSince = searchParams.get('changed_since') ?? range.from.toISOString()
   // The latest scrape is fetched once, unfiltered. The change table is narrowed
   // here, so the durability posture is never hidden by the selected range.

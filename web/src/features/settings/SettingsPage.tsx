@@ -15,6 +15,7 @@ import { INSTANCE_VIEW_PARAM, useInstanceView } from '@/features/instance/instan
 import { CommandAudit } from './CommandAudit'
 import { InventoryTables } from './InventoryTables'
 import { NamesPanel } from './NamesPanel'
+import { PreferencesPanel } from './PreferencesPanel'
 import { ServerInfo } from './ServerInfo'
 import {
   AUDIT_VIEWS,
@@ -27,12 +28,10 @@ import {
 } from './settingsTabs'
 
 /**
- * What the tabs that 11.2–11.5 fill will configure (I-16). Until then they
+ * What the tabs that 11.3–11.5 fill will configure (I-16). Until then they
  * state it and offer no control.
  */
-const PLANNED_TABS: Record<'preferences' | 'retention' | 'advisor' | 'notifications', string> = {
-  preferences:
-    'Console preferences kept in this browser: the theme, the default time range, the refresh interval and the table page size.',
+const PLANNED_TABS: Record<'retention' | 'advisor' | 'notifications', string> = {
   retention:
     'How many days of history each metrics family keeps, with a preview of what a shorter retention would delete before it is applied.',
   advisor:
@@ -166,7 +165,7 @@ export function SettingsPage() {
         <InventoryTables alerts={alerts} clusters={clusters} instances={instances} rules={rules} />
       </>
     ),
-    preferences: () => <PlannedTab id="preferences" label="Preferences" />,
+    preferences: () => <PreferencesPanel />,
     retention: () => <PlannedTab id="retention" label="Data retention" />,
     advisor: () => <PlannedTab id="advisor" label="Advisor rules" />,
     notifications: () => <PlannedTab id="notifications" label="Notifications" />,

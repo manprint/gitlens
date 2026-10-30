@@ -77,6 +77,14 @@ export const CAPTIONS = {
     window: 'Current names.',
     howToRead: 'Names are unique without regard to case; an empty name restores the default label.',
   },
+  'settings.preferences': {
+    what: 'Console preferences kept in this browser: the theme, the default time range, the refresh interval and the table page size.',
+    source:
+      'The pglens.preferences entry of this browser’s local storage; nothing is sent to the server.',
+    window: 'Applied at once to every open page of this browser and kept after a reload.',
+    howToRead:
+      'Each control states its effect. A range or page size in the address still wins over the default; Reset to defaults restores every preference.',
+  },
 } as const satisfies Record<string, CaptionEntry>
 
 export type CaptionId = keyof typeof CAPTIONS

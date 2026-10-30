@@ -15,6 +15,7 @@ import type { AlertRule } from './alerts'
 import type { components, paths } from './generated'
 import { qk } from './keys'
 import { REFRESH, type RefreshPolicy } from './policy'
+import { useRefreshTiming } from '@/hooks/usePreferences'
 import { resolveQueryWindow, type QueryWindow } from '@/lib/timerange'
 
 export { useCommand } from './commands'
@@ -118,6 +119,10 @@ function useApiQuery<T>({
   queryKey,
 }: UseApiQueryOptions<T>): ApiQueryResult<T> {
   const paused = useAutoRefreshPaused()
+  // The `refreshInterval` preference may replace the policy interval (R-11.0 P1).
+  const { interval } = useRefreshTiming(policy)
+  // `off` stopped a polling surface: no refetch on focus or on return to the tab either.
+  const stoppedByPreference = policy.interval > 0 && interval === 0
   const queryClient = useQueryClient()
   const query = useQuery<T, ApiFailure>({
     enabled,
@@ -131,7 +136,8 @@ function useApiQuery<T>({
     // disconnects, so the connection goes back to the pool immediately.
     queryFn: ({ signal }) => queryFn(signal),
     queryKey,
-    refetchInterval: paused || policy.interval === 0 ? false : policy.interval,
+    refetchInterval: paused || interval === 0 ? false : interval,
+    ...(stoppedByPreference ? { refetchOnWindowFocus: false } : {}),
     retry: shouldRetry,
     retryDelay: 0,
     ...(keepPrevious ? { placeholderData: keepPreviousData } : {}),
@@ -140,11 +146,11 @@ function useApiQuery<T>({
   const { refetch } = query
 
   useEffect(() => {
-    if (wasPaused.current && !paused) {
+    if (wasPaused.current && !paused && !stoppedByPreference) {
       void refetch()
     }
     wasPaused.current = paused
-  }, [paused, refetch])
+  }, [paused, refetch, stoppedByPreference])
 
   const dataUpdatedAt = queryClient.getQueryState(queryKey)?.dataUpdatedAt ?? query.dataUpdatedAt
   // The age is intentionally evaluated from the wall clock on each render.

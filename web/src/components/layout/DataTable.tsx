@@ -120,10 +120,10 @@ function defaultsOf(defaultSort: DataTableProps<RowData>['defaultSort']): TableD
 }
 
 /**
- * A searchable, filterable, sortable table paginated at 20 rows (D12, D13,
- * D23). With `tableId` its state lives in the URL, otherwise in the
- * component. The two variants are separate components so that no hook is
- * ever called conditionally.
+ * A searchable, filterable, sortable table paginated at the `tablePageSize`
+ * preference, 20 rows by default (D12, D13, D23, 11.2). With `tableId` its
+ * state lives in the URL, otherwise in the component. The two variants are
+ * separate components so that no hook is ever called conditionally.
  */
 export function DataTable<TData extends RowData>(props: DataTableProps<TData>) {
   return props.tableId === undefined ? (

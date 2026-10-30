@@ -1249,3 +1249,63 @@ test('CLNAME-E2E-001 renamed clusters and instances show everywhere and clear ba
     expect(failed, 'the original names must be restored').toEqual([])
   }
 })
+
+/** The Preferences tab's stored key (11.2); the spec clears it whatever happens. */
+const PREFERENCES_KEY = 'pglens.preferences'
+
+test('PREF-E2E-001 preferences persist across a reload and set the default range and page size', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, 2 * 30_000))
+  const browserErrors = collectConsoleErrors(page)
+  const instanceId = await pickInstance(api)
+  try {
+    await assertFits(page, api, fullHdRoute('/settings?tab=preferences'))
+
+    await page.setViewportSize({ width: 1920, height: 1080 })
+    await page.goto('/settings?tab=preferences')
+    const panel = page.getByRole('region', { name: 'Preferences', exact: true })
+    await expect(panel).toBeVisible({ timeout: 30_000 })
+    const range = panel.getByRole('combobox', { name: 'Default time range' })
+    const pageSize = panel.getByRole('combobox', { name: 'Table page size' })
+    await range.selectOption('6h')
+    await pageSize.selectOption('50')
+    await page.screenshot({ path: `${ARTIFACT_DIR}/pref-e2e-001-preferences.png` })
+
+    // I-11: read back after a reload.
+    await page.reload()
+    await expect(range).toHaveValue('6h', { timeout: 30_000 })
+    await expect(pageSize).toHaveValue('50')
+
+    // An instance Overview without `range` opens on the preferred 6 h.
+    await page.goto(`/instances/${instanceId}`)
+    await expect(page.getByRole('combobox', { name: 'Time range preset' })).toHaveValue('6h', {
+      timeout: 30_000,
+    })
+    expect(new URL(page.url()).searchParams.get('range')).toBeNull()
+
+    // A table page without `size` opens at 50 rows per page.
+    await page.goto(`/queries?instance=${instanceId}`)
+    const pager = page.getByRole('navigation', { name: 'Slowest queries pagination' })
+    await expect(pager.getByRole('combobox', { name: 'Rows per page' })).toHaveValue('50', {
+      timeout: 30_000,
+    })
+    expect(
+      await page.getByRole('table', { name: 'Slowest queries' }).locator('tbody tr').count(),
+    ).toBeLessThanOrEqual(50)
+
+    // Reset to defaults restores every preference.
+    await page.goto('/settings?tab=preferences')
+    await panel.getByRole('button', { name: 'Reset to defaults' }).click()
+    await expect(range).toHaveValue('1h')
+    await expect(pageSize).toHaveValue('20')
+    browserErrors.assertClean()
+  } finally {
+    // Restore the defaults even when a step failed.
+    // Never hides the real failure.
+    await page
+      .evaluate((key) => window.localStorage.removeItem(key), PREFERENCES_KEY)
+      .catch(() => undefined)
+  }
+})

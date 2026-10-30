@@ -2,7 +2,7 @@ import { RefreshCw } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Stale } from '@/components/state'
-import { REFRESH, type RefreshSurface } from '@/api/policy'
+import type { RefreshSurface } from '@/api/policy'
 import { useFreshness } from '@/hooks/useFreshness'
 
 interface FreshnessBadgeProps {
@@ -11,8 +11,7 @@ interface FreshnessBadgeProps {
 }
 
 export function FreshnessBadge({ dataUpdatedAt, policy }: FreshnessBadgeProps) {
-  const { age, isStale, label } = useFreshness(dataUpdatedAt, policy)
-  const { staleAfter } = REFRESH[policy]
+  const { age, isStale, label, staleAfter } = useFreshness(dataUpdatedAt, policy)
 
   if (isStale) {
     return (

@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
 import { AlertListTruncated, EmptyState, ErrorState } from '@/components/state'
 import { Input } from '@/components/ui/input'
+import { usePreferences } from '@/hooks/usePreferences'
 import { summariseAlerts, type Alert } from '@/lib/alerts'
 import { sortEventsNewestFirst, type ClusterEvent } from '@/lib/events'
 import { nameLookup } from '@/lib/names'
@@ -124,7 +125,9 @@ export function EventsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const location = useLocation()
   const navigate = useNavigate()
-  const range = parseRange(searchParams, new Date())
+  // The header's range picker and this page read the same default (11.2).
+  const { defaultTimeRange } = usePreferences()
+  const range = parseRange(searchParams, new Date(), defaultTimeRange)
   const redirectedForUnauthorized = useRef(false)
   const clusterId = searchParams.get('cluster_id') ?? ''
   const selectedType = searchParams.get('type') ?? ''

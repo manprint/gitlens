@@ -8,6 +8,8 @@ import {
   type TimeRangeResult,
 } from '@/lib/timerange'
 
+import { usePreferences } from './usePreferences'
+
 export interface TimeRangeControls {
   range: TimeRangeResult
   setPreset: (preset: RangePreset) => void
@@ -27,7 +29,9 @@ function withRangeParams(current: URLSearchParams, rangeParams: URLSearchParams)
 
 export function useTimeRange(): TimeRangeControls {
   const [searchParams, setSearchParams] = useSearchParams()
-  const range = parseRange(searchParams, new Date())
+  // The `defaultTimeRange` preference applies only when the URL names no range.
+  const { defaultTimeRange } = usePreferences()
+  const range = parseRange(searchParams, new Date(), defaultTimeRange)
 
   function setPreset(preset: RangePreset) {
     setSearchParams((current) => withRangeParams(current, new URLSearchParams({ range: preset })))

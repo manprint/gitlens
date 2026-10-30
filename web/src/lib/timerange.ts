@@ -92,8 +92,13 @@ function relativeRange(preset: RangePreset, now: Date): ValidRelativeTimeRange {
   }
 }
 
-function invalidRange(now: Date, parameter: string, reason: string): InvalidTimeRange {
-  const fallback = relativeRange(DEFAULT_RANGE, now)
+function invalidRange(
+  now: Date,
+  parameter: string,
+  reason: string,
+  defaultPreset: RangePreset,
+): InvalidTimeRange {
+  const fallback = relativeRange(defaultPreset, now)
   return { ...fallback, fallback: true, parameter, reason, valid: false }
 }
 
@@ -114,40 +119,50 @@ function absoluteRange(from: Date, to: Date): ValidAbsoluteTimeRange {
   }
 }
 
-export function parseRange(params: RangeParams, now: Date): TimeRangeResult {
+/**
+ * The range the URL names. Without `range`, `from` and `to` it is
+ * `defaultPreset` (the `defaultTimeRange` preference, 11.2); an invalid value
+ * falls back to it too and says so.
+ */
+export function parseRange(
+  params: RangeParams,
+  now: Date,
+  defaultPreset: RangePreset = DEFAULT_RANGE,
+): TimeRangeResult {
   const fromValue = paramValue(params, 'from')
   const toValue = paramValue(params, 'to')
   const rangeValue = paramValue(params, 'range')
 
   if (fromValue !== null || toValue !== null) {
     if (rangeValue !== null) {
-      return invalidRange(now, 'range', 'range cannot be combined with from and to')
+      return invalidRange(now, 'range', 'range cannot be combined with from and to', defaultPreset)
     }
     if (fromValue === null)
-      return invalidRange(now, 'from', 'from is required for an absolute range')
-    if (toValue === null) return invalidRange(now, 'to', 'to is required for an absolute range')
+      return invalidRange(now, 'from', 'from is required for an absolute range', defaultPreset)
+    if (toValue === null)
+      return invalidRange(now, 'to', 'to is required for an absolute range', defaultPreset)
 
     const from = parseAbsolute(fromValue)
-    if (!from) return invalidRange(now, 'from', 'from must be an RFC 3339 timestamp')
+    if (!from) return invalidRange(now, 'from', 'from must be an RFC 3339 timestamp', defaultPreset)
     const to = parseAbsolute(toValue)
-    if (!to) return invalidRange(now, 'to', 'to must be an RFC 3339 timestamp')
+    if (!to) return invalidRange(now, 'to', 'to must be an RFC 3339 timestamp', defaultPreset)
     if (from.getTime() > to.getTime()) {
-      return invalidRange(now, 'from/to', 'from must not be later than to')
+      return invalidRange(now, 'from/to', 'from must not be later than to', defaultPreset)
     }
     if (to.getTime() - from.getTime() > MAX_RANGE_MS) {
-      return invalidRange(now, 'from/to', 'the range cannot exceed 30 days')
+      return invalidRange(now, 'from/to', 'the range cannot exceed 30 days', defaultPreset)
     }
     return absoluteRange(from, to)
   }
 
   if (rangeValue !== null) {
     if (!Object.hasOwn(RANGE_PRESETS, rangeValue)) {
-      return invalidRange(now, 'range', `unknown preset ${rangeValue}`)
+      return invalidRange(now, 'range', `unknown preset ${rangeValue}`, defaultPreset)
     }
     return relativeRange(rangeValue as RangePreset, now)
   }
 
-  return relativeRange(DEFAULT_RANGE, now)
+  return relativeRange(defaultPreset, now)
 }
 
 /**
