@@ -1,11 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import { useInstanceSettings } from '@/api/queries'
 import type { Schemas } from '@/api/types'
 import { Section } from '@/components/layout/Section'
+import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { EmptyState, ErrorState, Unknown } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
+import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
 import { formatTimestamp } from '@/lib/format'
 import { parseRange } from '@/lib/timerange'
 
@@ -27,19 +29,6 @@ function toLocalDateTime(value: string): string {
   const date = new Date(value)
   if (!Number.isFinite(date.getTime())) return ''
   return date.toISOString().slice(0, 16)
-}
-
-function settingMatches(setting: Schemas['Setting'], search: string): boolean {
-  if (!search.trim()) return true
-  const needle = search.trim().toLowerCase()
-  return [
-    setting.name,
-    setting.value ?? '',
-    setting.unit,
-    setting.source,
-    setting.context,
-    setting.pending_restart,
-  ].some((field) => field.toLowerCase().includes(needle))
 }
 
 function DisplayValue({ setting }: { setting: Schemas['Setting'] }) {
@@ -92,57 +81,102 @@ function DurabilitySummary({ settings }: { settings: Schemas['Setting'][] }) {
   )
 }
 
-function SettingTable({ settings }: { settings: Schemas['Setting'][] }) {
+type Setting = Schemas['Setting']
+
+const SETTING_TOOLBAR: TableToolbarSpec<Setting> = {
+  searchLabel: 'Search settings',
+  searchFields: [
+    (setting) => setting.name,
+    (setting) => setting.value,
+    (setting) => setting.unit,
+    (setting) => setting.source,
+    (setting) => setting.context,
+  ],
+  filters: [
+    {
+      id: 'source',
+      label: 'Source',
+      kind: 'select',
+      accessor: (setting) => setting.source || null,
+    },
+    {
+      id: 'state',
+      label: 'State',
+      kind: 'select',
+      options: [
+        { value: 'pending', label: 'Pending restart' },
+        { value: 'in-force', label: 'In force' },
+      ],
+      accessor: (setting) => (isPendingRestart(setting) ? 'pending' : 'in-force'),
+    },
+  ],
+}
+
+const SETTING_COLUMNS: readonly SimpleColumn<Setting>[] = [
+  {
+    id: 'name',
+    header: 'Name',
+    rowHeader: true,
+    sortValue: (setting) => setting.name,
+    cell: (setting) => setting.name,
+  },
+  { id: 'value', header: 'Value', cell: (setting) => <DisplayValue setting={setting} /> },
+  {
+    id: 'unit',
+    header: 'Unit',
+    cell: (setting) => setting.unit || <Unknown reason="Unit was not reported." />,
+  },
+  {
+    id: 'source',
+    header: 'Source',
+    sortValue: (setting) => setting.source || null,
+    cell: (setting) => setting.source || <Unknown reason="Source was not reported." />,
+  },
+  {
+    id: 'context',
+    header: 'Context',
+    sortValue: (setting) => setting.context || null,
+    cell: (setting) => setting.context || <Unknown reason="Context was not reported." />,
+  },
+  {
+    id: 'changed',
+    header: 'Changed at',
+    sortValue: (setting) => Date.parse(setting.changed_at),
+    cell: (setting) => formatTimestamp(setting.changed_at, 'UTC'),
+  },
+  {
+    id: 'state',
+    header: 'State',
+    cell: (setting) => {
+      const pending = isPendingRestart(setting)
+      return (
+        <Badge variant={pending ? 'destructive' : 'secondary'}>
+          {pending ? 'Pending restart' : 'In force'}
+        </Badge>
+      )
+    },
+  },
+]
+
+function SettingTable({ settings }: { settings: Setting[] }) {
   return (
-    <div
-      className="overflow-x-auto"
-      role="region"
-      aria-label="Observed PostgreSQL settings"
-      tabIndex={0}
-    >
-      <table>
-        <caption className="sr-only">Observed PostgreSQL settings</caption>
-        <thead>
-          <tr>
-            <th scope="col">Name</th>
-            <th scope="col">Value</th>
-            <th scope="col">Unit</th>
-            <th scope="col">Source</th>
-            <th scope="col">Context</th>
-            <th scope="col">Changed at</th>
-            <th scope="col">State</th>
-          </tr>
-        </thead>
-        <tbody>
-          {settings.map((setting) => {
-            const pending = isPendingRestart(setting)
-            return (
-              <tr key={`${setting.name}-${setting.changed_at}`}>
-                <th scope="row">{setting.name}</th>
-                <td>
-                  <DisplayValue setting={setting} />
-                </td>
-                <td>{setting.unit || <Unknown reason="Unit was not reported." />}</td>
-                <td>{setting.source || <Unknown reason="Source was not reported." />}</td>
-                <td>{setting.context || <Unknown reason="Context was not reported." />}</td>
-                <td>{formatTimestamp(setting.changed_at, 'UTC')}</td>
-                <td>
-                  <Badge variant={pending ? 'destructive' : 'secondary'}>
-                    {pending ? 'Pending restart' : 'In force'}
-                  </Badge>
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
+    <div role="region" aria-label="Observed PostgreSQL settings">
+      <SimpleTable
+        ariaLabel="Observed PostgreSQL settings"
+        columns={SETTING_COLUMNS}
+        emptyState={null}
+        rowKey={(setting) => `${setting.name}-${setting.changed_at}`}
+        rows={settings}
+        scope="settings"
+        tableId="pg-settings"
+        toolbar={SETTING_TOOLBAR}
+      />
     </div>
   )
 }
 
 export function SettingsSection({ instanceId }: SettingsSectionProps) {
   const [searchParams, setSearchParams] = useSearchParams()
-  const [search, setSearch] = useState('')
   const range = useMemo(() => parseRange(searchParams, new Date()), [searchParams])
   const changedSince = searchParams.get('changed_since') ?? range.from.toISOString()
   // The latest scrape is fetched once, unfiltered. The change table is narrowed
@@ -150,10 +184,8 @@ export function SettingsSection({ instanceId }: SettingsSectionProps) {
   const query = useInstanceSettings(instanceId)
   const changedSettings = useMemo(() => {
     const since = Date.parse(changedSince)
-    return (query.data?.settings ?? []).filter(
-      (setting) => Date.parse(setting.changed_at) >= since && settingMatches(setting, search),
-    )
-  }, [changedSince, query.data?.settings, search])
+    return (query.data?.settings ?? []).filter((setting) => Date.parse(setting.changed_at) >= since)
+  }, [changedSince, query.data?.settings])
 
   function updateChangedSince(value: string) {
     setSearchParams((previous) => {
@@ -194,16 +226,6 @@ export function SettingsSection({ instanceId }: SettingsSectionProps) {
       ) : (
         <div className="space-y-5">
           <div className="flex flex-wrap items-end gap-4">
-            <label className="grid gap-1 text-sm">
-              <span>Search settings</span>
-              <Input
-                className="w-auto"
-                type="search"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="name, source, or value"
-              />
-            </label>
             <label className="grid gap-1 text-sm">
               <span>Changed since</span>
               <Input

@@ -11,6 +11,7 @@ import { renderWithProviders } from '@/test/render'
 import { ok, sequence, status } from '@/test/msw/handlers'
 import { flushNetwork } from '@/test/network'
 import { server } from '@/test/msw/server'
+import { columnTexts, dataRows, filterTable, searchTable, seq, sortTable } from '@/test/table'
 
 import { SilencesPage } from './SilencesPage'
 
@@ -319,5 +320,36 @@ describe('SilencesPage', () => {
     vi.useRealTimers()
     await expectNoA11yViolations(view.container)
     expect(view.container).toBeTruthy()
+  })
+})
+
+describe('SilencesPage table controls', () => {
+  it('TBL-UI-105 silences pages, searches, filters and sorts the silences', async () => {
+    const hour = 60 * 60 * 1000
+    const now = new Date(NOW).getTime()
+    await renderSilences(
+      seq(25).map((n, index) =>
+        makeSilence({
+          silence_id: `00000000-0000-4000-8000-0000000000${n}`,
+          reason: `job_${n}`,
+          starts_at: new Date(now - 48 * hour).toISOString(),
+          // The first four have ended; the rest end one hour apart.
+          ends_at: new Date(now + (index < 4 ? -(index + 1) : index + 1) * hour).toISOString(),
+        }),
+      ),
+    )
+    const name = 'Alert silences'
+
+    expect(dataRows(name)).toHaveLength(20)
+    searchTable(name, 'job_2')
+    expect(dataRows(name)).toHaveLength(6)
+    searchTable(name, '')
+    filterTable(name, 'State', 'expired')
+    expect(columnTexts(name, 1).sort()).toEqual(['job_01', 'job_02', 'job_03', 'job_04'])
+    filterTable(name, 'State', '')
+    sortTable(name, 'End', 'descending')
+    expect(columnTexts(name, 1)[0]).toBe('job_25')
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(dataRows(name)).toHaveLength(5)
   })
 })

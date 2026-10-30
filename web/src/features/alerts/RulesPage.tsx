@@ -7,10 +7,12 @@ import { useAlertRules } from '@/api/queries'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
+import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { EmptyState, ErrorState } from '@/components/state'
 
 import { RuleEditor } from './RuleEditor'
 import { Button } from '@/components/ui/button'
+import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
 
 function tierLabel(rule: AlertRule): string {
   const tier = String(rule.min_tier ?? rule.tier ?? '')
@@ -28,6 +30,62 @@ function valueLabel(value: number | undefined): string {
   return value === undefined ? '—' : String(value)
 }
 
+function enabledLabel(rule: AlertRule): string {
+  return rule.enabled === undefined ? '—' : rule.enabled ? 'Yes' : 'No'
+}
+
+const RULE_TOOLBAR: TableToolbarSpec<AlertRule> = {
+  searchFields: [(rule) => rule.id],
+  filters: [
+    { id: 'severity', label: 'Severity', kind: 'select', accessor: (rule) => rule.severity },
+    { id: 'enabled', label: 'Enabled', kind: 'select', accessor: enabledLabel },
+  ],
+}
+
+function ruleColumns(onEdit: (ruleId: string) => void): SimpleColumn<AlertRule>[] {
+  return [
+    {
+      id: 'rule',
+      header: 'Rule',
+      rowHeader: true,
+      sortValue: (rule) => rule.id,
+      cell: (rule) => rule.id,
+    },
+    { id: 'tier', header: 'Tier', sortValue: tierLabel, cell: tierLabel },
+    {
+      id: 'severity',
+      header: 'Severity',
+      sortValue: (rule) => rule.severity,
+      cell: (rule) => rule.severity,
+    },
+    {
+      id: 'threshold',
+      header: 'Threshold',
+      sortValue: (rule) => rule.threshold,
+      cell: (rule) => valueLabel(rule.threshold),
+    },
+    {
+      id: 'duration',
+      header: 'Duration',
+      sortValue: (rule) => rule.for_seconds,
+      cell: (rule) => (rule.for_seconds === undefined ? '—' : `${rule.for_seconds}s`),
+    },
+    { id: 'enabled', header: 'Enabled', cell: enabledLabel },
+    {
+      id: 'action',
+      header: 'Action',
+      cell: (rule) =>
+        isTierZero(rule) ? (
+          <span className="text-muted-foreground">Always on by design</span>
+        ) : (
+          <Button onClick={() => onEdit(rule.id)} size="sm" type="button" variant="outline">
+            Edit {rule.id}
+          </Button>
+        ),
+    },
+  ]
+}
+
 export function RulesPage() {
   const rulesQuery = useAlertRules()
   const [editingRuleId, setEditingRuleId] = useState<string>()
@@ -37,6 +95,7 @@ export function RulesPage() {
     [rulesQuery.data],
   )
   const editingRule = rules.find((rule) => rule.id === editingRuleId)
+  const columns = useMemo(() => ruleColumns(setEditingRuleId), [])
 
   if (rulesQuery.error && !rulesQuery.data) {
     return (
@@ -88,71 +147,16 @@ export function RulesPage() {
           description="Tier 0 staleness rules are always on by design. Tier 1 rules can be changed and are saved by the server."
           title="Configured rules"
         >
-          <div className="relative overflow-x-auto" tabIndex={0}>
-            <table className="w-full text-left text-sm" aria-label="Alert rules">
-              <thead>
-                <tr className="border-b">
-                  <th className="px-3 py-2 font-medium" scope="col">
-                    Rule
-                  </th>
-                  <th className="px-3 py-2 font-medium" scope="col">
-                    Tier
-                  </th>
-                  <th className="px-3 py-2 font-medium" scope="col">
-                    Severity
-                  </th>
-                  <th className="px-3 py-2 font-medium" scope="col">
-                    Threshold
-                  </th>
-                  <th className="px-3 py-2 font-medium" scope="col">
-                    Duration
-                  </th>
-                  <th className="px-3 py-2 font-medium" scope="col">
-                    Enabled
-                  </th>
-                  <th className="px-3 py-2 font-medium" scope="col">
-                    Action
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {rules.map((rule) => {
-                  const tierZero = isTierZero(rule)
-                  return (
-                    <tr className="border-b align-top last:border-b-0" key={rule.id}>
-                      <th className="px-3 py-3 font-medium" scope="row">
-                        {rule.id}
-                      </th>
-                      <td className="px-3 py-3">{tierLabel(rule)}</td>
-                      <td className="px-3 py-3">{rule.severity}</td>
-                      <td className="px-3 py-3">{valueLabel(rule.threshold)}</td>
-                      <td className="px-3 py-3">
-                        {rule.for_seconds === undefined ? '—' : `${rule.for_seconds}s`}
-                      </td>
-                      <td className="px-3 py-3">
-                        {rule.enabled === undefined ? '—' : rule.enabled ? 'Yes' : 'No'}
-                      </td>
-                      <td className="px-3 py-3">
-                        {tierZero ? (
-                          <span className="text-muted-foreground">Always on by design</span>
-                        ) : (
-                          <Button
-                            size="sm"
-                            variant="outline"
-
-                            onClick={() => setEditingRuleId(rule.id)}
-                            type="button"
-                          >
-                            Edit {rule.id}
-                          </Button>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+          <SimpleTable
+            ariaLabel="Alert rules"
+            columns={columns}
+            emptyState={null}
+            rowKey={(rule) => rule.id}
+            rows={rules}
+            scope="rules"
+            tableId="alert-rules"
+            toolbar={RULE_TOOLBAR}
+          />
         </Section>
       )}
 

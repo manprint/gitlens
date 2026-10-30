@@ -1,4 +1,4 @@
-import { fireEvent, screen } from '@testing-library/react'
+import { fireEvent, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { http, HttpResponse } from 'msw/http'
 
@@ -9,6 +9,7 @@ import { renderWithProviders } from '@/test/render'
 import { ok, sequence, status } from '@/test/msw/handlers'
 import { flushNetwork } from '@/test/network'
 import { server } from '@/test/msw/server'
+import { dataRows, filterTable, searchTable, seq, sortTable } from '@/test/table'
 
 import { RulesPage } from './RulesPage'
 
@@ -240,5 +241,33 @@ describe('RulesPage', () => {
     vi.useRealTimers()
     await expectNoA11yViolations(view.container)
     expect(view.container).toBeTruthy()
+  })
+})
+
+describe('RulesPage table controls', () => {
+  it('TBL-UI-104 alert-rules pages, searches, filters and sorts the rules', async () => {
+    await renderRules(
+      seq(25).map((n, index) =>
+        makeRule({
+          id: `rule_${n}`,
+          severity: index < 3 ? 'critical' : 'warning',
+          threshold: index + 1,
+        }),
+      ),
+    )
+    const name = 'Alert rules'
+    const ids = () => dataRows(name).map((row) => within(row).getByRole('rowheader').textContent)
+
+    expect(dataRows(name)).toHaveLength(20)
+    searchTable(name, 'rule_2')
+    expect(dataRows(name)).toHaveLength(6)
+    searchTable(name, '')
+    filterTable(name, 'Severity', 'critical')
+    expect(ids()).toEqual(['rule_01', 'rule_02', 'rule_03'])
+    filterTable(name, 'Severity', '')
+    sortTable(name, 'Threshold', 'descending')
+    expect(ids()[0]).toBe('rule_25')
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(dataRows(name)).toHaveLength(5)
   })
 })

@@ -20,7 +20,12 @@ export interface TableToolbarProps<T> {
   onClear: () => void
 }
 
-/** Search box, one control per filter, the active-filter count and "Clear filters" (D12). */
+/**
+ * Search box, one control per filter, the active-filter count and "Clear
+ * filters" (D12). Each control is named only by its table-scoped aria-label;
+ * the column name above it is hidden from the accessibility tree so it never
+ * shares a label with another control on the page.
+ */
 export function TableToolbar<T>({
   label,
   searchLabel,
@@ -57,8 +62,8 @@ export function TableToolbar<T>({
         const choices = options[spec.id] ?? spec.options ?? []
         if (spec.kind === 'min') {
           return (
-            <label key={spec.id} className="text-muted-foreground flex flex-col gap-1 text-xs">
-              {spec.label} at least
+            <div key={spec.id} className="text-muted-foreground flex flex-col gap-1 text-xs">
+              <span aria-hidden="true">{spec.label} at least</span>
               <Input
                 aria-label={name}
                 className="h-8 w-28 text-sm"
@@ -68,7 +73,7 @@ export function TableToolbar<T>({
                 type="number"
                 value={value}
               />
-            </label>
+            </div>
           )
         }
         if (spec.kind === 'multi') {
@@ -106,8 +111,8 @@ export function TableToolbar<T>({
           )
         }
         return (
-          <label key={spec.id} className="text-muted-foreground flex flex-col gap-1 text-xs">
-            {spec.label}
+          <div key={spec.id} className="text-muted-foreground flex flex-col gap-1 text-xs">
+            <span aria-hidden="true">{spec.label}</span>
             <NativeSelect
               aria-label={name}
               className="h-8 px-2 text-sm"
@@ -121,7 +126,7 @@ export function TableToolbar<T>({
                 </option>
               ))}
             </NativeSelect>
-          </label>
+          </div>
         )
       })}
 

@@ -1,19 +1,18 @@
-import { Fragment, useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, Search } from 'lucide-react'
+import { useMemo, type ReactNode } from 'react'
 
 import { useInstanceSettings, useInstanceTableHistory, useInstanceTables } from '@/api/queries'
 import type { Schemas } from '@/api/types'
 import { Sparkline } from '@/components/charts/Sparkline'
 import { MetricTile } from '@/components/layout/MetricTile'
+import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
+import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
 import { useTimeRange } from '@/hooks/useTimeRange'
 import {
   buildDeadRows,
   compareDeadRows,
   matchesDeadFilter,
-  matchesDeadSearch,
   readAutovacuumSettings,
   summariseDeadRows,
   trendDirection,
@@ -24,10 +23,9 @@ import {
   type DeadSortKey,
 } from '@/lib/deadRows'
 import { formatBytes, formatCount, formatPercent, formatRate, formatRelative } from '@/lib/format'
+import type { SortDirection } from '@/lib/tableControls'
 import { queryWindowOf } from '@/lib/timerange'
 import { cn } from '@/lib/utils'
-
-import { SortHeader } from './SortHeader'
 
 /** The most tables the API returns for one server. */
 export const DEAD_ROWS_LIMIT = 500
@@ -47,6 +45,135 @@ const FILTERS: readonly { value: DeadFilter; label: string; hint: string }[] = [
   { value: 'never', label: 'Never vacuumed', hint: 'No manual or automatic vacuum recorded.' },
   { value: 'flagged', label: 'Flagged by advisor', hint: 'Tables with an open advisor finding.' },
 ]
+
+function compareDead(a: DeadRow, b: DeadRow, key: string, direction: SortDirection): number {
+  return compareDeadRows(a, b, key as DeadSortKey, direction === 'desc')
+}
+
+// The page's Database select scopes the rows already: no database filter (tables inventory).
+const DEAD_TOOLBAR: TableToolbarSpec<DeadRow> = {
+  searchLabel: 'Search tables',
+  searchFields: [(row) => row.table, (row) => row.schema, (row) => row.datname],
+  filters: [
+    {
+      id: 'show',
+      label: 'Show',
+      kind: 'select',
+      options: FILTERS.filter((option) => option.value !== 'all').map(({ value, label }) => ({
+        value,
+        label,
+      })),
+      accessor: () => null,
+      predicate: (row, value) => matchesDeadFilter(row, value as DeadFilter),
+    },
+  ],
+}
+
+// compareDeadRows orders the rows: a column's sortValue only marks it sortable.
+const SORTED_BY_COMPARE = () => null
+
+/** The table columns; names and the last vacuum read best A to Z or oldest first. */
+function deadColumns(
+  database: string,
+  now: Date,
+  trends: ReadonlyMap<string, number[]>,
+): SimpleColumn<DeadRow>[] {
+  const counted = (
+    id: DeadSortKey,
+    header: string,
+    cell: (row: DeadRow) => ReactNode,
+    className = 'whitespace-nowrap',
+  ): SimpleColumn<DeadRow> => ({
+    id,
+    header,
+    sortValue: SORTED_BY_COMPARE,
+    firstDirection: 'desc',
+    className,
+    cell,
+  })
+  return [
+    {
+      id: 'table',
+      header: 'Table',
+      sortValue: SORTED_BY_COMPARE,
+      className: 'break-all',
+      cell: (row) => (
+        <>
+          <span className="text-muted-foreground">
+            {database === '' ? `${row.datname} · ` : ''}
+            {row.schema}.
+          </span>
+          <span className="font-medium">{row.table}</span>
+          {row.findings.length > 0 ? (
+            <Badge className="ml-2" variant="warning">
+              flagged
+            </Badge>
+          ) : null}
+        </>
+      ),
+    },
+    counted('dead', 'Dead', (row) => (
+      <>
+        {formatCount(row.dead)}
+        {row.deadBytes === null || row.deadBytes <= 0 ? null : (
+          <span className="text-muted-foreground block text-xs">
+            ≈ {formatBytes(row.deadBytes)}
+          </span>
+        )}
+      </>
+    )),
+    counted('ratio', 'Dead / live', (row) => percent(row.deadRatio)),
+    counted('trigger', 'Trigger', (row) => (
+      <span
+        className={cn(row.triggerShare >= 1 && 'font-medium')}
+        title={`Autovacuum starts at about ${formatCount(Math.round(row.trigger))} dead tuples.`}
+      >
+        {triggerText(row)}
+        {row.triggerShare >= 1 ? (
+          <span className="text-muted-foreground block text-xs">due</span>
+        ) : null}
+      </span>
+    )),
+    counted('size', 'Size', (row) => (row.bytes === null ? 'Unknown' : formatBytes(row.bytes))),
+    {
+      id: 'vacuum',
+      header: 'Last vacuum',
+      sortValue: SORTED_BY_COMPARE,
+      className: 'whitespace-nowrap',
+      cell: (row) => vacuumText(row, now),
+    },
+    counted('hot', 'HOT', (row) => percent(row.hotRatio)),
+    counted('writes', 'Writes', (row) =>
+      row.writeRate === null ? 'Unknown' : formatRate(row.writeRate),
+    ),
+    {
+      id: 'trend',
+      header: 'Trend',
+      className: 'whitespace-nowrap',
+      cell: (row) => {
+        const values = trends.get(row.key)
+        if (values === undefined || values.length < 2) {
+          return <span className="text-muted-foreground">—</span>
+        }
+        const direction = trendDirection(values)
+        return (
+          <span
+            className={cn(
+              'inline-flex items-center gap-2',
+              direction === 'growing' ? 'text-warning-foreground' : '',
+            )}
+          >
+            <Sparkline
+              label={`Dead tuples of ${row.table} over the selected range`}
+              values={values}
+            />
+            <span className="text-muted-foreground text-xs">{direction}</span>
+          </span>
+        )
+      },
+    },
+  ]
+}
 
 function percent(value: number | null): string {
   return value === null ? 'Unknown' : (formatPercent(value, 1) ?? 'Unknown')
@@ -141,13 +268,6 @@ interface DeadRowsPanelProps {
  */
 export function DeadRowsPanel({ instanceId, database, findings }: DeadRowsPanelProps) {
   const { range } = useTimeRange()
-  const [search, setSearch] = useState('')
-  const [filter, setFilter] = useState<DeadFilter>('all')
-  const [sort, setSort] = useState<{ key: DeadSortKey; descending: boolean }>({
-    key: 'dead',
-    descending: true,
-  })
-  const [open, setOpen] = useState<ReadonlySet<string>>(new Set())
 
   const tablesQuery = useInstanceTables(instanceId, {
     limit: DEAD_ROWS_LIMIT,
@@ -174,13 +294,6 @@ export function DeadRowsPanel({ instanceId, database, findings }: DeadRowsPanelP
     [allRows, database],
   )
   const summary = useMemo(() => summariseDeadRows(scoped), [scoped])
-  const visible = useMemo(
-    () =>
-      scoped
-        .filter((row) => matchesDeadFilter(row, filter) && matchesDeadSearch(row, search))
-        .sort((a, b) => compareDeadRows(a, b, sort.key, sort.descending)),
-    [scoped, filter, search, sort],
-  )
   const trends = useMemo(() => {
     const byTable = new Map<string, number[]>()
     for (const series of historyQuery.data?.tables ?? []) {
@@ -193,23 +306,11 @@ export function DeadRowsPanel({ instanceId, database, findings }: DeadRowsPanelP
   }, [historyQuery.data])
   // Relative times are measured from when the data was fetched, so a render stays pure.
   const now = new Date(tablesQuery.dataUpdatedAt)
-
-  function toggleSort(key: DeadSortKey) {
-    setSort((current) =>
-      current.key === key
-        ? { key, descending: !current.descending }
-        : { key, descending: key !== 'table' && key !== 'vacuum' },
-    )
-  }
-
-  function toggleOpen(key: string) {
-    setOpen((current) => {
-      const next = new Set(current)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }
+  const dataUpdatedAt = tablesQuery.dataUpdatedAt
+  const columns = useMemo(
+    () => deadColumns(database, new Date(dataUpdatedAt), trends),
+    [database, dataUpdatedAt, trends],
+  )
 
   if (tablesQuery.isPending && response === undefined) {
     return (
@@ -282,217 +383,39 @@ export function DeadRowsPanel({ instanceId, database, findings }: DeadRowsPanelP
                 Tables by dead rows
               </h2>
               <p className="text-muted-foreground mt-0.5 text-sm">
-                {formatCount(visible.length)} of {formatCount(scoped.length)} tables. Dead space is
-                an estimate: the heap size times the dead share of its tuples. The trend follows the{' '}
-                {TREND_TABLES} worst tables over the selected time range.
+                {formatCount(scoped.length)} tables. Dead space is an estimate: the heap size times
+                the dead share of its tuples. The trend follows the {TREND_TABLES} worst tables over
+                the selected time range.
               </p>
             </div>
-            <div className="relative">
-              <Search
-                aria-hidden="true"
-                className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
-              />
-              <Input
-                aria-label="Search tables"
-                className="w-72 max-w-full pl-8"
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Table, schema or database"
-                type="search"
-                value={search}
-              />
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter tables">
-            {FILTERS.map((option) => (
-              <button
-                key={option.value}
-                aria-pressed={option.value === filter}
-                className={cn(
-                  'h-8 rounded-full border px-3 text-sm font-medium transition-colors',
-                  option.value === filter
-                    ? 'bg-primary text-primary-foreground border-transparent'
-                    : 'text-muted-foreground hover:text-foreground',
-                )}
-                onClick={() => setFilter(option.value)}
-                title={option.hint}
-                type="button"
-              >
-                {option.label}
-              </button>
-            ))}
           </div>
         </div>
 
-        {visible.length === 0 ? (
-          <div className="p-5">
+        <div className="p-5">
+          {scoped.length === 0 ? (
             <EmptyState
-              description={
-                summary.tables === 0
-                  ? 'The agent has not reported table statistics for this server yet.'
-                  : 'No table matches the current filter and search.'
-              }
+              description="The agent has not reported table statistics for this server yet."
               title="No tables to show"
             />
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table aria-label="Tables" className="w-full text-sm">
-              <thead className="text-muted-foreground bg-muted/40 text-xs uppercase">
-                <tr>
-                  <th className="w-8 px-3 py-2" scope="col">
-                    <span className="sr-only">Details</span>
-                  </th>
-                  <SortHeader
-                    active={sort.key === 'table'}
-                    descending={sort.descending}
-                    label="Table"
-                    onSort={() => toggleSort('table')}
-                  />
-                  <SortHeader
-                    active={sort.key === 'dead'}
-                    descending={sort.descending}
-                    label="Dead"
-                    onSort={() => toggleSort('dead')}
-                  />
-                  <SortHeader
-                    active={sort.key === 'ratio'}
-                    descending={sort.descending}
-                    label="Dead / live"
-                    onSort={() => toggleSort('ratio')}
-                  />
-                  <SortHeader
-                    active={sort.key === 'trigger'}
-                    descending={sort.descending}
-                    label="Trigger"
-                    onSort={() => toggleSort('trigger')}
-                  />
-                  <SortHeader
-                    active={sort.key === 'size'}
-                    descending={sort.descending}
-                    label="Size"
-                    onSort={() => toggleSort('size')}
-                  />
-                  <SortHeader
-                    active={sort.key === 'vacuum'}
-                    descending={sort.descending}
-                    label="Last vacuum"
-                    onSort={() => toggleSort('vacuum')}
-                  />
-                  <SortHeader
-                    active={sort.key === 'hot'}
-                    descending={sort.descending}
-                    label="HOT"
-                    onSort={() => toggleSort('hot')}
-                  />
-                  <SortHeader
-                    active={sort.key === 'writes'}
-                    descending={sort.descending}
-                    label="Writes"
-                    onSort={() => toggleSort('writes')}
-                  />
-                  <th className="px-3 py-2 text-left font-medium" scope="col">
-                    Trend
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {visible.map((row) => {
-                  const expanded = open.has(row.key)
-                  const Chevron = expanded ? ChevronDown : ChevronRight
-                  const values = trends.get(row.key)
-                  const direction = values === undefined ? 'flat' : trendDirection(values)
-                  return (
-                    <Fragment key={row.key}>
-                      <tr className="hover:bg-muted/30 align-top">
-                        <td className="px-3 py-2">
-                          <button
-                            aria-expanded={expanded}
-                            aria-label={`${expanded ? 'Hide' : 'Show'} details of ${row.table}`}
-                            className="text-muted-foreground hover:text-foreground"
-                            onClick={() => toggleOpen(row.key)}
-                            type="button"
-                          >
-                            <Chevron aria-hidden="true" className="size-4" />
-                          </button>
-                        </td>
-                        <td className="px-3 py-2 break-all">
-                          <span className="text-muted-foreground">
-                            {database === '' ? `${row.datname} · ` : ''}
-                            {row.schema}.
-                          </span>
-                          <span className="font-medium">{row.table}</span>
-                          {row.findings.length > 0 ? (
-                            <Badge className="ml-2" variant="warning">
-                              flagged
-                            </Badge>
-                          ) : null}
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap tabular-nums">
-                          {formatCount(row.dead)}
-                          {row.deadBytes === null || row.deadBytes <= 0 ? null : (
-                            <span className="text-muted-foreground block text-xs">
-                              ≈ {formatBytes(row.deadBytes)}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap tabular-nums">
-                          {percent(row.deadRatio)}
-                        </td>
-                        <td
-                          className={cn(
-                            'px-3 py-2 whitespace-nowrap tabular-nums',
-                            row.triggerShare >= 1 && 'font-medium',
-                          )}
-                          title={`Autovacuum starts at about ${formatCount(Math.round(row.trigger))} dead tuples.`}
-                        >
-                          {triggerText(row)}
-                          {row.triggerShare >= 1 ? (
-                            <span className="text-muted-foreground block text-xs">due</span>
-                          ) : null}
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap tabular-nums">
-                          {row.bytes === null ? 'Unknown' : formatBytes(row.bytes)}
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap">{vacuumText(row, now)}</td>
-                        <td className="px-3 py-2 whitespace-nowrap tabular-nums">
-                          {percent(row.hotRatio)}
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap tabular-nums">
-                          {row.writeRate === null ? 'Unknown' : formatRate(row.writeRate)}
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap">
-                          {values === undefined || values.length < 2 ? (
-                            <span className="text-muted-foreground">—</span>
-                          ) : (
-                            <span
-                              className={cn(
-                                'inline-flex items-center gap-2',
-                                direction === 'growing' ? 'text-warning-foreground' : '',
-                              )}
-                            >
-                              <Sparkline
-                                label={`Dead tuples of ${row.table} over the selected range`}
-                                values={values}
-                              />
-                              <span className="text-muted-foreground text-xs">{direction}</span>
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                      {expanded ? (
-                        <tr className="bg-muted/20">
-                          <td colSpan={10}>
-                            <Detail now={now} row={row} />
-                          </td>
-                        </tr>
-                      ) : null}
-                    </Fragment>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+          ) : (
+            <SimpleTable
+              ariaLabel="Tables"
+              columns={columns}
+              compare={compareDead}
+              defaultSort={{ id: 'dead', desc: true }}
+              detailLabel={(row, expanded) =>
+                `${expanded ? 'Hide' : 'Show'} details of ${row.table}`
+              }
+              emptyState={null}
+              renderDetail={(row) => <Detail now={now} row={row} />}
+              rowKey={(row) => row.key}
+              rows={scoped}
+              scope="tables"
+              tableId="dead-rows"
+              toolbar={DEAD_TOOLBAR}
+            />
+          )}
+        </div>
       </section>
     </div>
   )

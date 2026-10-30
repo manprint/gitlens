@@ -1,4 +1,4 @@
-import { act, fireEvent, screen } from '@testing-library/react'
+import { act, fireEvent, screen, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw/http'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -7,6 +7,8 @@ import { INSTANCE_ID } from '@/test/fixture-helpers'
 import { ok } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 import { renderWithProviders } from '@/test/render'
+
+import { dataRows, filterTable, searchTable, seq, sortTable } from '@/test/table'
 
 import { SettingsSection } from './SettingsSection'
 
@@ -133,5 +135,37 @@ describe('SettingsSection', () => {
     expect(screen.getByRole('heading', { name: 'Durability summary' })).toBeInTheDocument()
     expect(screen.getByText('fsync')).toBeInTheDocument()
     expect(screen.getByLabelText('Durability severity: critical')).toBeInTheDocument()
+  })
+})
+
+describe('SettingsSection table controls', () => {
+  it('TBL-UI-107 pg-settings pages, searches, filters and sorts the changed settings', async () => {
+    renderSettings(
+      seq(25).map((n, index) =>
+        setting({
+          name: `setting_${n}`,
+          source: index < 4 ? 'override' : 'postgresql.conf',
+          pending_restart: index < 2 ? 'true' : 'false',
+        }),
+      ),
+    )
+    await settle()
+    const name = 'Observed PostgreSQL settings'
+    const names = () => dataRows(name).map((row) => within(row).getByRole('rowheader').textContent)
+
+    expect(dataRows(name)).toHaveLength(20)
+    searchTable(name, 'setting_2', 'Search settings')
+    expect(dataRows(name)).toHaveLength(6)
+    searchTable(name, '', 'Search settings')
+    filterTable(name, 'Source', 'override')
+    expect(dataRows(name)).toHaveLength(4)
+    filterTable(name, 'Source', '')
+    filterTable(name, 'State', 'pending')
+    expect(names()).toEqual(['setting_01', 'setting_02'])
+    filterTable(name, 'State', '')
+    sortTable(name, 'Name', 'descending')
+    expect(names()[0]).toBe('setting_25')
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(dataRows(name)).toHaveLength(5)
   })
 })

@@ -5,6 +5,7 @@ import type { Schemas } from '@/api/types'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { INSTANCE_ID, INSTANCE_SUMMARY } from '@/test/fixture-helpers'
 import { renderWithProviders } from '@/test/render'
+import { seq } from '@/test/table'
 
 import type { ReplicationGraphEdge, TopologyEdge } from '@/lib/replication'
 
@@ -197,5 +198,43 @@ describe('TopologyGraph', () => {
     expect(chart).toHaveAttribute('data-highlighted', 'true')
     expect(scrollIntoView).toHaveBeenCalledOnce()
     chart.remove()
+  })
+})
+
+describe('TopologyGraph edge table controls', () => {
+  it('TBL-UI-106 topology-edges pages, searches, filters and sorts the visible edge table', () => {
+    const edges = seq(25).map((n, index) =>
+      topology({ to: `node-${n}`, type: index < 3 ? 'logical' : 'streaming' }),
+    )
+    renderWithProviders(<TopologyGraph instances={instances} topology={edges} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Show accessible edge table' }))
+    // The second table is the visible copy; the first stays the complete text equivalent.
+    const visible = () => screen.getAllByRole('table', { name: 'Replication topology edges' })[1]!
+    const rows = () => within(within(visible()).getAllByRole('rowgroup')[1]!).getAllByRole('row')
+    const to = () => rows().map((row) => within(row).getAllByRole('cell')[1]?.textContent ?? '')
+
+    expect(
+      within(screen.getAllByRole('table', { name: 'Replication topology edges' })[0]!).getAllByRole(
+        'row',
+      ),
+    ).toHaveLength(26)
+    expect(rows()).toHaveLength(20)
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search Replication topology edges' }), {
+      target: { value: 'node-2' },
+    })
+    expect(rows()).toHaveLength(6)
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search Replication topology edges' }), {
+      target: { value: '' },
+    })
+    fireEvent.change(
+      screen.getByRole('combobox', { name: 'Filter Replication topology edges by Type' }),
+      { target: { value: 'logical' } },
+    )
+    expect(rows()).toHaveLength(3)
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
+    fireEvent.click(within(visible()).getByRole('button', { name: 'Sort To descending' }))
+    expect(to()[0]).toContain('node-25')
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(rows()).toHaveLength(5)
   })
 })

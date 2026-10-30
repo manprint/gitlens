@@ -1,8 +1,9 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw/http'
 import { describe, expect, it, vi } from 'vitest'
 
 import PlanHistory from './PlanHistory'
+import { dataRows, filterTable, searchTable, seq, sortTable } from '@/test/table'
 
 import { expectNoA11yViolations } from '@/test/a11y'
 import { renderWithProviders } from '@/test/render'
@@ -104,5 +105,44 @@ describe('PlanHistory', () => {
 
     expect(await screen.findByText(/Select two plan entries/)).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Plan comparison' })).not.toBeInTheDocument()
+  })
+})
+
+describe('PlanHistory comparison table controls', () => {
+  it('TBL-UI-108 plan-history pages, searches, filters and sorts the compared nodes', async () => {
+    vi.useRealTimers()
+    // A root with 24 child scans: 25 plan nodes; the newer plan differs in the first three.
+    const tree = (differing: boolean) => ({
+      'Node Type': 'Append',
+      'Total Cost': 100,
+      Plans: seq(24).map((n, index) => ({
+        'Node Type': differing && index < 3 ? `Index Scan ${n}` : `Seq Scan ${n}`,
+        'Total Cost': index + 1,
+      })),
+    })
+    const older = { ...plan(1, '2024-01-01T00:00:00Z', 'hash-old'), plan: tree(false) }
+    const newer = { ...plan(2, '2024-01-02T00:00:00Z', 'hash-new'), plan: tree(true) }
+    server.use(plansHandler([older, newer]))
+    renderHistory()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /hash-new/ })).toBeInTheDocument(),
+    )
+    fireEvent.click(screen.getByRole('button', { name: /hash-old/ }))
+    fireEvent.click(screen.getByRole('button', { name: /hash-new/ }))
+    const name = 'Plan comparison'
+    const paths = () => dataRows(name).map((row) => within(row).getByRole('rowheader').textContent)
+
+    expect(dataRows(name)).toHaveLength(20)
+    filterTable(name, 'Difference', 'differs')
+    expect(dataRows(name)).toHaveLength(3)
+    filterTable(name, 'Difference', '')
+    searchTable(name, 'Seq Scan 2')
+    expect(dataRows(name)).toHaveLength(5)
+    searchTable(name, '')
+    sortTable(name, 'Path', 'descending')
+    // Natural order: Plans.23 after Plans.9.
+    expect(paths()[0]).toBe('root.Plans.23')
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(dataRows(name)).toHaveLength(5)
   })
 })

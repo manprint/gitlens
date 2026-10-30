@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, type ReactNode } from 'react'
 
 import type { ApiFailure } from '@/api/client'
 import { useCreateCommand } from '@/api/commands'
@@ -7,6 +7,7 @@ import { qk } from '@/api/keys'
 import { useInstanceBloat, useInstanceIndexes, useInstanceTables } from '@/api/queries'
 import type { PermTier, Schemas } from '@/api/types'
 import { Section } from '@/components/layout/Section'
+import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { EmptyState, ErrorState, NotPermitted, Truncated, Unknown } from '@/components/state'
 import {
   commandQueueFullMessage,
@@ -15,6 +16,7 @@ import {
 } from '@/lib/commands'
 import { formatBytes, formatCount, formatPercent, formatRate, formatTimestamp } from '@/lib/format'
 import { Button } from '@/components/ui/button'
+import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
 
 const RELATION_LIMIT = 50
 
@@ -148,15 +150,41 @@ function isTableRow(item: RelationItem): boolean {
   return kind ? kind === 'table' : !stringValue(item, 'indexrelname')
 }
 
-function compareValues(left: string | number | null, right: string | number | null): number {
-  if (left === right) return 0
-  if (left === null) return 1
-  if (right === null) return -1
-  if (typeof left === 'number' && typeof right === 'number') return left - right
-  return String(left).localeCompare(String(right), undefined, {
-    numeric: true,
-    sensitivity: 'base',
-  })
+/** URL prefix of each relation list (tables inventory). */
+const RELATION_TABLE_IDS: Record<string, string> = {
+  Tables: 'relations-tables',
+  Indexes: 'relations-indexes',
+  'Table bloat estimates': 'relations-table-bloat',
+  'Index bloat estimates': 'relations-index-bloat',
+}
+
+// The four lists are already split by relation kind: no kind filter (tables inventory, §8).
+const RELATION_TOOLBAR: TableToolbarSpec<RelationItem> = {
+  searchFields: [
+    (item) => relationName(item),
+    (item) => stringValue(item, 'indexrelname'),
+    (item) => stringValue(item, 'datname'),
+  ],
+  filters: [
+    {
+      id: 'database',
+      label: 'Database',
+      kind: 'select',
+      accessor: (item) => stringValue(item, 'datname'),
+    },
+    {
+      id: 'schema',
+      label: 'Schema',
+      kind: 'select',
+      accessor: (item) => stringValue(item, 'schemaname'),
+    },
+  ],
+}
+
+function relationKey(item: RelationItem): string {
+  return ['datname', 'schemaname', 'relname', 'indexrelname', 'object_kind']
+    .map((key) => stringValue(item, key) ?? '')
+    .join('|')
 }
 
 function SortableRelationTable({
@@ -168,85 +196,35 @@ function SortableRelationTable({
   items: RelationItem[]
   columns: RelationColumn[]
 }) {
-  const [sortKey, setSortKey] = useState(columns[0]?.key ?? '')
-  const [ascending, setAscending] = useState(false)
-  const sortedItems = useMemo(() => {
-    const column = columns.find((candidate) => candidate.key === sortKey) ?? columns[0]
-    const sortValue = column?.sortValue
-    if (!sortValue) return items
-    return [...items].sort((left, right) => {
-      const result = compareValues(sortValue(left), sortValue(right))
-      return ascending ? result : -result
-    })
-  }, [ascending, columns, items, sortKey])
-
-  function toggleSort(column: RelationColumn) {
-    if (column.key === sortKey) {
-      setAscending((current) => !current)
-      return
-    }
-    setSortKey(column.key)
-    setAscending(true)
-  }
-
+  const simpleColumns = useMemo(
+    () =>
+      columns.map<SimpleColumn<RelationItem>>((column, index) => ({
+        id: column.key,
+        header: column.label,
+        ...(column.sortValue ? { sortValue: column.sortValue } : {}),
+        rowHeader: index === 0,
+        className: index === 0 ? 'font-normal' : '',
+        cell: column.render,
+      })),
+    [columns],
+  )
+  const firstKey = columns[0]?.key
+  // The first column, descending, as before the URL held the order.
   return (
-    <div className="relative overflow-x-auto" tabIndex={0}>
-      <table className="w-full text-left text-sm">
-        <caption className="sr-only">{caption}</caption>
-        <thead>
-          <tr className="text-muted-foreground border-b">
-            {columns.map((column) => {
-              const selected = column.key === sortKey
-              if (!column.sortValue) {
-                return (
-                  <th key={column.key} scope="col" className="px-3 py-2 font-medium">
-                    {column.label}
-                  </th>
-                )
-              }
-              return (
-                <th key={column.key} scope="col" className="px-3 py-2 font-medium">
-                  <button
-                    type="button"
-                    className="whitespace-nowrap hover:underline"
-                    aria-label={`Sort ${caption} by ${column.label}`}
-                    aria-pressed={selected}
-                    onClick={() => toggleSort(column)}
-                  >
-                    {column.label}
-                    {selected ? (ascending ? ' ↑' : ' ↓') : null}
-                  </button>
-                </th>
-              )
-            })}
-          </tr>
-        </thead>
-        <tbody>
-          {sortedItems.map((item, index) => (
-            <tr
-              key={`${relationName(item) ?? 'relation'}-${index}`}
-              className="border-b last:border-0"
-            >
-              {columns.map((column, columnIndex) =>
-                columnIndex === 0 ? (
-                  <th
-                    key={column.key}
-                    scope="row"
-                    className="px-3 py-2 text-left align-top font-normal"
-                  >
-                    {column.render(item)}
-                  </th>
-                ) : (
-                  <td key={column.key} className="px-3 py-2 align-top">
-                    {column.render(item)}
-                  </td>
-                ),
-              )}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <SimpleTable
+      ariaLabel={caption}
+      columns={simpleColumns}
+      emptyState={null}
+      headerToggleName={(column) => `Sort ${caption} by ${column.header}`}
+      rowKey={relationKey}
+      rows={items}
+      scope="relations"
+      tableId={
+        RELATION_TABLE_IDS[caption] ?? `relations-${caption.toLowerCase().replaceAll(' ', '-')}`
+      }
+      toolbar={RELATION_TOOLBAR}
+      {...(firstKey === undefined ? {} : { defaultSort: { id: firstKey, desc: true } })}
+    />
   )
 }
 

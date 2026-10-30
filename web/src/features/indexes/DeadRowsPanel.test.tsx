@@ -11,6 +11,7 @@ import { ok } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 import { flushNetwork } from '@/test/network'
 import { renderWithProviders } from '@/test/render'
+import { columnTexts, dataRows, filterTable, searchTable, seq, sortTable } from '@/test/table'
 
 function table(name: string, extra: Record<string, unknown> = {}) {
   return {
@@ -145,23 +146,24 @@ describe('DeadRowsPanel', () => {
     render()
     await flushNetwork(30)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Past autovacuum trigger' }))
+    const show = () => screen.getByRole('combobox', { name: 'Filter Tables by Show' })
+    fireEvent.change(show(), { target: { value: 'due' } })
     let table_ = screen.getByRole('table', { name: 'Tables' })
     expect(within(table_).getAllByRole('row')).toHaveLength(2)
     expect(within(table_).getByText('orders')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Never vacuumed' }))
+    fireEvent.change(show(), { target: { value: 'never' } })
     table_ = screen.getByRole('table', { name: 'Tables' })
     expect(within(table_).getByText('events')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'All' }))
+    fireEvent.change(show(), { target: { value: '' } })
     fireEvent.change(screen.getByLabelText('Search tables'), { target: { value: 'custom' } })
     table_ = screen.getByRole('table', { name: 'Tables' })
     expect(within(table_).getAllByRole('row')).toHaveLength(2)
     expect(within(table_).getByText('customers')).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('Search tables'), { target: { value: 'zzz' } })
-    expect(screen.getByText('No tables to show')).toBeInTheDocument()
+    expect(screen.getByText('No rows match')).toBeInTheDocument()
   })
 
   it('DEAD-UI-005 sorts by a column and flips the direction on a second click', async () => {
@@ -176,7 +178,7 @@ describe('DeadRowsPanel', () => {
       'ascending',
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /Table/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Table' }))
     rows = within(screen.getByRole('table', { name: 'Tables' })).getAllByRole('row')
     expect(rows[1]).toHaveTextContent('orders')
   })
@@ -257,5 +259,33 @@ describe('DeadRowsPanel', () => {
     await screen.findByRole('table', { name: 'Tables' })
 
     await expect(expectNoA11yViolations(container)).resolves.toBeUndefined()
+  })
+})
+
+describe('DeadRowsPanel table controls', () => {
+  it('TBL-UI-102 dead-rows pages, searches, filters and sorts the tables', async () => {
+    const tables = seq(25).map((n, position) =>
+      table(`t_${n}`, {
+        n_dead_tup: (position + 1) * 100,
+        ...(position < 3 ? {} : { last_autovacuum_at: '2026-08-26T22:00:00Z' }),
+      }),
+    )
+    render({ tables })
+    await flushNetwork(30)
+    const name = 'Tables'
+
+    expect(dataRows(name)).toHaveLength(20)
+    // compareDeadRows keeps its default: most dead tuples first.
+    expect(columnTexts(name, 1)[0]).toContain('t_25')
+    filterTable(name, 'Show', 'never')
+    expect(dataRows(name)).toHaveLength(3)
+    filterTable(name, 'Show', '')
+    searchTable(name, 't_2', 'Search tables')
+    expect(dataRows(name)).toHaveLength(6)
+    searchTable(name, '', 'Search tables')
+    sortTable(name, 'Table', 'ascending')
+    expect(columnTexts(name, 1)[0]).toContain('t_01')
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(dataRows(name)).toHaveLength(5)
   })
 })

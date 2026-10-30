@@ -3,7 +3,9 @@ import { Background, Controls, ReactFlow, type Edge, type Node, type OnInit } fr
 import '@xyflow/react/dist/style.css'
 import { useNavigate } from 'react-router-dom'
 
+import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { Button } from '@/components/ui/button'
+import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
 import type { ReplicationGraphEdge, ReplicationInstance, TopologyEdge } from '@/lib/replication'
 import { buildGraph, detectAnomalies, layoutGraph } from '@/lib/replication'
 
@@ -110,6 +112,79 @@ function EdgeTable({
         </tbody>
       </table>
     </div>
+  )
+}
+
+interface EdgeRow {
+  edge: ReplicationGraphEdge
+  from: string
+  to: string
+}
+
+const EDGE_TOOLBAR: TableToolbarSpec<EdgeRow> = {
+  searchFields: [(row) => row.from, (row) => row.to, (row) => row.edge.note],
+  filters: [
+    { id: 'type', label: 'Type', kind: 'select', accessor: (row) => row.edge.type },
+    {
+      id: 'sync',
+      label: 'Sync state',
+      kind: 'select',
+      accessor: (row) => syncLabel(row.edge.sync_state),
+    },
+  ],
+}
+
+const EDGE_COLUMNS: readonly SimpleColumn<EdgeRow>[] = [
+  { id: 'from', header: 'From', sortValue: (row) => row.from, cell: (row) => row.from },
+  { id: 'to', header: 'To', sortValue: (row) => row.to, cell: (row) => row.to },
+  { id: 'type', header: 'Type', sortValue: (row) => row.edge.type, cell: (row) => row.edge.type },
+  {
+    id: 'sync',
+    header: 'Sync state',
+    sortValue: (row) => syncLabel(row.edge.sync_state),
+    cell: (row) => syncLabel(row.edge.sync_state),
+  },
+  {
+    id: 'confidence',
+    header: 'Confidence',
+    sortValue: (row) => row.edge.confidence,
+    cell: (row) => row.edge.confidence,
+  },
+  { id: 'note', header: 'Note', cell: (row) => row.edge.note ?? '—' },
+]
+
+/**
+ * The edge table the toggle reveals: searchable, filterable, paged (D12, D23).
+ * The sr-only copy above stays the complete text equivalent of the graph.
+ */
+function VisibleEdgeTable({
+  edges,
+  nodes,
+}: {
+  edges: readonly ReplicationGraphEdge[]
+  nodes: ReadonlyMap<string, TopologyNodeData>
+}) {
+  const rows = useMemo(
+    () =>
+      edges.map((edge) => ({
+        edge,
+        from: nodeLabel(nodes.get(edge.from), edge.from),
+        to: nodeLabel(nodes.get(edge.to), edge.to),
+      })),
+    [edges, nodes],
+  )
+  return (
+    <SimpleTable
+      ariaLabel="Replication topology edges"
+      caption="Every replication topology edge and its confidence."
+      columns={EDGE_COLUMNS}
+      emptyState={<p className="text-muted-foreground text-sm">No replication edges.</p>}
+      rowKey={(row) => row.edge.id}
+      rows={rows}
+      scope="edges"
+      tableId="topology-edges"
+      toolbar={EDGE_TOOLBAR}
+    />
   )
 }
 
@@ -302,7 +377,7 @@ export function TopologyGraph({
       </div>
       {showTable ? (
         <div aria-describedby="topology-edge-table-description" id="topology-edge-table-visible">
-          <EdgeTable edges={positionedGraph.edges} nodes={nodeData} visible />
+          <VisibleEdgeTable edges={positionedGraph.edges} nodes={nodeData} />
         </div>
       ) : null}
       {selectedEdgeID ? <p className="sr-only">Selected edge {selectedEdgeID}.</p> : null}

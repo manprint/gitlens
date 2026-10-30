@@ -1,14 +1,6 @@
-import { Fragment, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import {
-  ChevronDown,
-  ChevronRight,
-  Database,
-  ListTree,
-  Search,
-  Server,
-  TriangleAlert,
-} from 'lucide-react'
+import { Database, ListTree, Server, TriangleAlert } from 'lucide-react'
 
 import { useClusters, useInstanceIndexes } from '@/api/queries'
 import { useFindings } from '@/api/queries'
@@ -18,11 +10,12 @@ import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { MetricTile } from '@/components/layout/MetricTile'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { SqlText } from '@/components/layout/SqlText'
+import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
 import { formatBytes, formatCount, formatPercent, formatRate, formatRelative } from '@/lib/format'
 import {
   buildIndexRows,
@@ -31,7 +24,6 @@ import {
   indexFindings,
   INDEX_RULES,
   matchesFilter,
-  matchesSearch,
   needsAttention,
   summariseIndexes,
   type IndexRow,
@@ -39,38 +31,85 @@ import {
 } from '@/lib/indexAnalysis'
 import { summariseColumns } from '@/lib/indexDefinition'
 import { chooseInstance, readLastInstance } from '@/lib/lastInstance'
-import { cn } from '@/lib/utils'
 
 import { CleanupPanel, type SiblingServer } from './CleanupPanel'
 import { DeadRowsPanel } from './DeadRowsPanel'
-import { SortHeader } from './SortHeader'
 
 /** The most indexes the API returns for one server. */
 export const INDEX_LIMIT = 500
 
 type Finding = Schemas['Finding']
 
-const FILTERS: readonly { value: RowFilter; label: string; hint: string }[] = [
-  { value: 'all', label: 'All', hint: 'Every index the agent reported.' },
+/** Kinds of an index for the Kind filter: a partial unique index is both unique and partial. */
+const INDEX_KINDS: readonly {
+  value: string
+  label: string
+  matches: (row: IndexRow) => boolean
+}[] = [
+  { value: 'primary', label: 'Primary', matches: (row) => row.primary },
+  { value: 'unique', label: 'Unique', matches: (row) => row.unique && !row.primary },
+  { value: 'partial', label: 'Partial', matches: (row) => row.parsed.predicate !== null },
   {
-    value: 'attention',
-    label: 'Needs attention',
-    hint: 'Indexes with an open advisor finding or an invalid state.',
+    value: 'plain',
+    label: 'Plain',
+    matches: (row) => !row.unique && !row.primary && row.parsed.predicate === null,
   },
-  {
-    value: 'unused',
-    label: 'Unused candidates',
-    hint: 'Flagged by the advisor, or never scanned since the statistics reset. Primary and unique indexes are left out of the second case.',
-  },
-  {
-    value: 'duplicate',
-    label: 'Duplicate / redundant',
-    hint: 'Indexes that share a definition with another, or are a prefix of a longer one.',
-  },
-  { value: 'partial', label: 'Partial', hint: 'Indexes with a WHERE clause.' },
-  { value: 'unique', label: 'Unique / primary', hint: 'Indexes that enforce a constraint.' },
-  { value: 'invalid', label: 'Invalid', hint: 'Indexes that failed to build.' },
 ]
+
+const ADVISOR_FLAGS: readonly { value: RowFilter; label: string }[] = [
+  { value: 'attention', label: 'Needs attention' },
+  { value: 'unused', label: 'Unused candidates' },
+  { value: 'duplicate', label: 'Duplicate / redundant' },
+]
+
+// The page's Database select scopes the rows already: no database filter (tables inventory).
+const INDEX_TOOLBAR: TableToolbarSpec<IndexRow> = {
+  searchLabel: 'Search indexes',
+  searchFields: [
+    (row) => row.name,
+    (row) => row.table,
+    (row) => row.schema,
+    (row) => row.datname,
+    (row) => row.parsed.method,
+    (row) => row.parsed.columns.map((column) => column.text).join(', '),
+    (row) => row.parsed.include.map((column) => column.text).join(', '),
+    (row) => row.definition,
+    // The advisor's reason: the title of each finding the index carries.
+    (row) =>
+      [row.unusedFinding, row.redundantFinding, row.invalidFinding, row.divergenceFinding]
+        .map((finding) => finding?.title ?? '')
+        .join(' '),
+  ],
+  filters: [
+    {
+      id: 'state',
+      label: 'State',
+      kind: 'select',
+      options: [
+        { value: 'valid', label: 'Valid' },
+        { value: 'invalid', label: 'Invalid' },
+      ],
+      accessor: (row) => (matchesFilter(row, 'invalid') ? 'invalid' : 'valid'),
+    },
+    {
+      id: 'kind',
+      label: 'Kind',
+      kind: 'select',
+      options: INDEX_KINDS.map(({ value, label }) => ({ value, label })),
+      accessor: (row) => INDEX_KINDS.find((kind) => kind.matches(row))?.value,
+      predicate: (row, value) =>
+        INDEX_KINDS.find((kind) => kind.value === value)?.matches(row) ?? false,
+    },
+    {
+      id: 'advisor',
+      label: 'Advisor flag',
+      kind: 'select',
+      options: ADVISOR_FLAGS,
+      accessor: () => null,
+      predicate: (row, value) => matchesFilter(row, value as RowFilter),
+    },
+  ],
+}
 
 type SortKey = 'name' | 'table' | 'bytes' | 'scanRate' | 'lastScan'
 
@@ -86,10 +125,6 @@ const DEFAULT_TAB: TabValue = 'indexes'
 
 function readTab(value: string | null): TabValue {
   return TABS.find((tab) => tab.value === value)?.value ?? DEFAULT_TAB
-}
-
-function readFilter(value: string | null): RowFilter {
-  return FILTERS.some((filter) => filter.value === value) ? (value as RowFilter) : 'all'
 }
 
 interface InstanceOption {
@@ -132,15 +167,73 @@ function sortValue(row: IndexRow, key: SortKey): string | number | null {
   }
 }
 
-function compareRows(a: IndexRow, b: IndexRow, key: SortKey, descending: boolean): number {
-  const left = sortValue(a, key)
-  const right = sortValue(b, key)
-  // A missing value sorts last in either direction.
-  if (left === null && right === null) return a.key.localeCompare(b.key)
-  if (left === null) return 1
-  if (right === null) return -1
-  const order = left < right ? -1 : left > right ? 1 : 0
-  return (descending ? -order : order) || a.key.localeCompare(b.key)
+/** The inventory columns; size, scans and last scan read best largest or newest first. */
+function indexColumns(showDatabase: boolean, now: Date): SimpleColumn<IndexRow>[] {
+  return [
+    {
+      id: 'name',
+      header: 'Index',
+      sortValue: (row) => sortValue(row, 'name'),
+      className: 'font-medium break-all',
+      cell: (row) => row.name,
+    },
+    {
+      id: 'table',
+      header: 'Table',
+      sortValue: (row) => sortValue(row, 'table'),
+      className: 'break-all',
+      cell: (row) => (
+        <>
+          <span className="text-muted-foreground">
+            {showDatabase ? `${row.datname} · ` : ''}
+            {row.schema}.
+          </span>
+          {row.table}
+        </>
+      ),
+    },
+    {
+      id: 'columns',
+      header: 'Columns',
+      cell: (row) => (
+        <code className="font-mono text-xs break-words">
+          {row.parsed.columns.length === 0 ? '—' : summariseColumns(row.parsed)}
+        </code>
+      ),
+    },
+    { id: 'method', header: 'Method', cell: (row) => row.parsed.method ?? '—' },
+    { id: 'flags', header: 'Flags', cell: (row) => <RowBadges row={row} /> },
+    {
+      id: 'bytes',
+      header: 'Size',
+      sortValue: (row) => sortValue(row, 'bytes'),
+      firstDirection: 'desc',
+      className: 'whitespace-nowrap',
+      cell: (row) => (row.bytes === null ? 'Unknown' : formatBytes(row.bytes)),
+    },
+    {
+      id: 'scanRate',
+      header: 'Scans',
+      sortValue: (row) => sortValue(row, 'scanRate'),
+      firstDirection: 'desc',
+      className: 'whitespace-nowrap',
+      cell: (row) => (row.scanRate === null ? 'Unknown' : formatRate(row.scanRate)),
+    },
+    {
+      id: 'cache',
+      header: 'Cache hit',
+      className: 'whitespace-nowrap',
+      cell: (row) => (row.cacheHitRatio === null ? '—' : formatPercent(row.cacheHitRatio, 1)),
+    },
+    {
+      id: 'lastScan',
+      header: 'Last scan',
+      sortValue: (row) => sortValue(row, 'lastScan'),
+      firstDirection: 'desc',
+      className: 'whitespace-nowrap',
+      cell: (row) => lastScanText(row, now),
+    },
+  ]
 }
 
 function lastScanText(row: IndexRow, now: Date): string {
@@ -327,14 +420,7 @@ interface AnalysisProps {
 function InstanceIndexes({ controls, instanceId, siblings }: AnalysisProps) {
   const [searchParams, setSearchParams] = useSearchParams()
   const database = searchParams.get('db') ?? ''
-  const filter = readFilter(searchParams.get('show'))
   const tab = readTab(searchParams.get('tab'))
-  const [search, setSearch] = useState('')
-  const [sort, setSort] = useState<{ key: SortKey; descending: boolean }>({
-    key: 'bytes',
-    descending: true,
-  })
-  const [open, setOpen] = useState<ReadonlySet<string>>(new Set())
 
   const indexesQuery = useInstanceIndexes(instanceId, { limit: INDEX_LIMIT })
   const findingsQuery = useFindings({ instance_id: instanceId, limit: 1000 })
@@ -351,13 +437,6 @@ function InstanceIndexes({ controls, instanceId, siblings }: AnalysisProps) {
     [allRows, database],
   )
   const summary = useMemo(() => summariseIndexes(scoped), [scoped])
-  const visible = useMemo(
-    () =>
-      scoped
-        .filter((row) => matchesFilter(row, filter) && matchesSearch(row, search))
-        .sort((a, b) => compareRows(a, b, sort.key, sort.descending)),
-    [scoped, filter, search, sort],
-  )
   const tables = useMemo(() => groupByTable(scoped).slice(0, 8), [scoped])
   const actionable = useMemo(
     () => indexFindings(findings).filter((finding) => finding.state === 'open'),
@@ -396,12 +475,19 @@ function InstanceIndexes({ controls, instanceId, siblings }: AnalysisProps) {
     [findings, database],
   )
   // Relative times are measured from when the data was fetched, so a render stays pure.
-  const now = new Date(indexesQuery.dataUpdatedAt)
+  const showDatabase = summary.byDatabase.length > 1 && database === ''
+  const dataUpdatedAt = indexesQuery.dataUpdatedAt
+  const columns = useMemo(
+    () => indexColumns(showDatabase, new Date(dataUpdatedAt)),
+    [showDatabase, dataUpdatedAt],
+  )
 
-  function setParam(key: 'db' | 'show', value: string) {
+  function setParam(key: 'db', value: string) {
     const next = new URLSearchParams(searchParams)
     if (value && value !== 'all') next.set(key, value)
     else next.delete(key)
+    // Another database is a new row set: every table starts on its first page (D23).
+    for (const table of ['indexes', 'cleanup', 'dead-rows']) next.delete(`${table}.page`)
     setSearchParams(next, { replace: true })
   }
 
@@ -410,23 +496,6 @@ function InstanceIndexes({ controls, instanceId, siblings }: AnalysisProps) {
     if (value === DEFAULT_TAB) next.delete('tab')
     else next.set('tab', value)
     setSearchParams(next, { replace: true })
-  }
-
-  function toggleSort(key: SortKey) {
-    setSort((current) =>
-      current.key === key
-        ? { key, descending: !current.descending }
-        : { key, descending: key === 'bytes' || key === 'scanRate' || key === 'lastScan' },
-    )
-  }
-
-  function toggleOpen(key: string) {
-    setOpen((current) => {
-      const next = new Set(current)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
   }
 
   return (
@@ -631,177 +700,37 @@ function InstanceIndexes({ controls, instanceId, siblings }: AnalysisProps) {
                         Index inventory
                       </h2>
                       <p className="text-muted-foreground mt-0.5 text-sm">
-                        {formatCount(visible.length)} of {formatCount(scoped.length)} indexes. Scan
-                        figures are per-second rates over the last collection interval.
+                        {formatCount(scoped.length)} indexes. Scan figures are per-second rates over
+                        the last collection interval.
                       </p>
                     </div>
-                    <div className="relative">
-                      <Search
-                        aria-hidden="true"
-                        className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
-                      />
-                      <Input
-                        aria-label="Search indexes"
-                        className="w-72 max-w-full pl-8"
-                        onChange={(event) => setSearch(event.target.value)}
-                        placeholder="Name, table, column or method"
-                        type="search"
-                        value={search}
-                      />
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter indexes">
-                    {FILTERS.map((option) => (
-                      <button
-                        key={option.value}
-                        aria-pressed={option.value === filter}
-                        className={cn(
-                          'h-8 rounded-full border px-3 text-sm font-medium transition-colors',
-                          option.value === filter
-                            ? 'bg-primary text-primary-foreground border-transparent'
-                            : 'text-muted-foreground hover:text-foreground',
-                        )}
-                        onClick={() => setParam('show', option.value)}
-                        title={option.hint}
-                        type="button"
-                      >
-                        {option.label}
-                      </button>
-                    ))}
                   </div>
                 </div>
 
-                {visible.length === 0 ? (
-                  <div className="p-5">
+                <div className="p-5">
+                  {scoped.length === 0 ? (
                     <EmptyState
-                      description={
-                        summary.total === 0
-                          ? 'The agent has not reported index statistics for this server yet.'
-                          : 'No index matches the current filter and search.'
-                      }
+                      description="The agent has not reported index statistics for this server yet."
                       title="No indexes to show"
                     />
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table aria-label="Indexes" className="w-full text-sm">
-                      <thead className="text-muted-foreground bg-muted/40 text-xs uppercase">
-                        <tr>
-                          <th className="w-8 px-3 py-2" scope="col">
-                            <span className="sr-only">Details</span>
-                          </th>
-                          <SortHeader
-                            active={sort.key === 'name'}
-                            descending={sort.descending}
-                            label="Index"
-                            onSort={() => toggleSort('name')}
-                          />
-                          <SortHeader
-                            active={sort.key === 'table'}
-                            descending={sort.descending}
-                            label="Table"
-                            onSort={() => toggleSort('table')}
-                          />
-                          <th className="px-3 py-2 text-left font-medium" scope="col">
-                            Columns
-                          </th>
-                          <th className="px-3 py-2 text-left font-medium" scope="col">
-                            Method
-                          </th>
-                          <th className="px-3 py-2 text-left font-medium" scope="col">
-                            Flags
-                          </th>
-                          <SortHeader
-                            active={sort.key === 'bytes'}
-                            descending={sort.descending}
-                            label="Size"
-                            onSort={() => toggleSort('bytes')}
-                          />
-                          <SortHeader
-                            active={sort.key === 'scanRate'}
-                            descending={sort.descending}
-                            label="Scans"
-                            onSort={() => toggleSort('scanRate')}
-                          />
-                          <th className="px-3 py-2 text-left font-medium" scope="col">
-                            Cache hit
-                          </th>
-                          <SortHeader
-                            active={sort.key === 'lastScan'}
-                            descending={sort.descending}
-                            label="Last scan"
-                            onSort={() => toggleSort('lastScan')}
-                          />
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {visible.map((row) => {
-                          const expanded = open.has(row.key)
-                          const Chevron = expanded ? ChevronDown : ChevronRight
-                          return (
-                            <Fragment key={row.key}>
-                              <tr className="hover:bg-muted/30 align-top">
-                                <td className="px-3 py-2">
-                                  <button
-                                    aria-expanded={expanded}
-                                    aria-label={`${expanded ? 'Hide' : 'Show'} details of ${row.name}`}
-                                    className="text-muted-foreground hover:text-foreground"
-                                    onClick={() => toggleOpen(row.key)}
-                                    type="button"
-                                  >
-                                    <Chevron aria-hidden="true" className="size-4" />
-                                  </button>
-                                </td>
-                                <td className="px-3 py-2 font-medium break-all">{row.name}</td>
-                                <td className="px-3 py-2 break-all">
-                                  <span className="text-muted-foreground">
-                                    {summary.byDatabase.length > 1 && database === ''
-                                      ? `${row.datname} · `
-                                      : ''}
-                                    {row.schema}.
-                                  </span>
-                                  {row.table}
-                                </td>
-                                <td className="px-3 py-2">
-                                  <code className="font-mono text-xs break-words">
-                                    {row.parsed.columns.length === 0
-                                      ? '—'
-                                      : summariseColumns(row.parsed)}
-                                  </code>
-                                </td>
-                                <td className="px-3 py-2">{row.parsed.method ?? '—'}</td>
-                                <td className="px-3 py-2">
-                                  <RowBadges row={row} />
-                                </td>
-                                <td className="px-3 py-2 whitespace-nowrap tabular-nums">
-                                  {row.bytes === null ? 'Unknown' : formatBytes(row.bytes)}
-                                </td>
-                                <td className="px-3 py-2 whitespace-nowrap tabular-nums">
-                                  {row.scanRate === null ? 'Unknown' : formatRate(row.scanRate)}
-                                </td>
-                                <td className="px-3 py-2 whitespace-nowrap tabular-nums">
-                                  {row.cacheHitRatio === null
-                                    ? '—'
-                                    : formatPercent(row.cacheHitRatio, 1)}
-                                </td>
-                                <td className="px-3 py-2 whitespace-nowrap">
-                                  {lastScanText(row, now)}
-                                </td>
-                              </tr>
-                              {expanded ? (
-                                <tr className="bg-muted/20">
-                                  <td colSpan={10}>
-                                    <Detail row={row} />
-                                  </td>
-                                </tr>
-                              ) : null}
-                            </Fragment>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                  ) : (
+                    <SimpleTable
+                      ariaLabel="Indexes"
+                      columns={columns}
+                      defaultSort={{ id: 'bytes', desc: true }}
+                      detailLabel={(row, expanded) =>
+                        `${expanded ? 'Hide' : 'Show'} details of ${row.name}`
+                      }
+                      emptyState={null}
+                      renderDetail={(row) => <Detail row={row} />}
+                      rowKey={(row) => row.key}
+                      rows={scoped}
+                      scope="indexes"
+                      tableId="indexes"
+                      toolbar={INDEX_TOOLBAR}
+                    />
+                  )}
+                </div>
               </section>
 
               {gaps.length > 0 ? (

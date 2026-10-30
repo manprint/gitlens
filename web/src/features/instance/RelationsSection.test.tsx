@@ -9,6 +9,7 @@ import { INSTANCE_ID } from '@/test/fixture-helpers'
 import { ok } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 import { renderWithProviders } from '@/test/render'
+import { dataRows, filterTable, searchTable, seq, sortTable } from '@/test/table'
 
 import { RelationsSection } from './RelationsSection'
 
@@ -522,5 +523,39 @@ describe('RelationsSection', () => {
       'orders_status_idx',
       'orders_legacy_idx',
     ])
+  })
+})
+
+describe('RelationsSection table controls', () => {
+  it('TBL-UI-103 relations-tables pages, searches, filters and sorts a relation list', async () => {
+    renderRelations({
+      tables: response(
+        seq(25).map((n, index) =>
+          item({
+            relname: `t_${n}`,
+            datname: index < 4 ? 'crm' : 'app',
+            n_live_tup: (index + 1) * 10,
+          }),
+        ),
+      ),
+    })
+    await settle()
+    const name = 'Tables'
+    const relations = () =>
+      dataRows(name).map((row) => within(row).getByRole('rowheader').textContent)
+
+    expect(dataRows(name)).toHaveLength(20)
+    // The first column, descending, stays the default order.
+    expect(relations()[0]).toBe('public.t_25')
+    searchTable(name, 't_2')
+    expect(dataRows(name)).toHaveLength(6)
+    searchTable(name, '')
+    filterTable(name, 'Database', 'crm')
+    expect(relations()).toEqual(['public.t_04', 'public.t_03', 'public.t_02', 'public.t_01'])
+    filterTable(name, 'Database', '')
+    sortTable(name, 'Live tuples', 'ascending')
+    expect(relations()[0]).toBe('public.t_01')
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(dataRows(name)).toHaveLength(5)
   })
 })

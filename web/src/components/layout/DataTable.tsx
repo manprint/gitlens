@@ -18,23 +18,11 @@ import {
   type TableDefaults,
   type TableStateControls,
 } from '@/hooks/useTableState'
-import {
-  applyFilters,
-  filterOptions,
-  activeFilterIds,
-  matchesSearch,
-  PAGE_SIZES,
-  paginate,
-  sortRows,
-  type Comparable,
-  type FilterOption,
-  type FilterSpec,
-  type SearchField,
-} from '@/lib/tableControls'
+import { useFilteredRows, type TableToolbarSpec } from '@/hooks/useFilteredRows'
+import { PAGE_SIZES, paginate, sortRows, type Comparable } from '@/lib/tableControls'
 
-import { Truncated } from '../state/Truncated'
 import { SortButtons } from './SortButtons'
-import { TablePagination } from './TablePagination'
+import { NoRowsMatch, TableFooter } from './TableFooter'
 import { TableToolbar } from './TableToolbar'
 
 const dataTableFeatures = tableFeatures({
@@ -42,13 +30,8 @@ const dataTableFeatures = tableFeatures({
   rowSortingFeature,
 })
 
-export interface DataTableToolbar<TData> {
-  /** Fields the search box matches (case-insensitive substring). */
-  searchFields: readonly SearchField<TData>[]
-  filters?: readonly FilterSpec<TData>[]
-  /** Overrides the `Search <table>` label. */
-  searchLabel?: string
-}
+/** Search box and filters above the table (D12). */
+export type DataTableToolbar<TData> = TableToolbarSpec<TData>
 
 export interface DataTableProps<TData extends RowData> {
   columns: ColumnDef<typeof dataTableFeatures, TData>[]
@@ -124,29 +107,12 @@ function DataTableView<TData extends RowData>({
   controls,
 }: DataTableProps<TData> & { controls: TableStateControls }) {
   const { state, set, clear } = controls
-  const filterSpecs = useMemo(() => toolbar?.filters ?? [], [toolbar?.filters])
-  const filtersKey = JSON.stringify(state.filters)
-
-  const searchFields = toolbar?.searchFields
-  const filtered = useMemo(() => {
-    if (!searchFields) return data
-    const searched = data.filter((row) => matchesSearch(row, state.q, searchFields))
-    return applyFilters(searched, filterSpecs, JSON.parse(filtersKey) as Record<string, string>)
-  }, [data, searchFields, filterSpecs, state.q, filtersKey])
-  // Only what applyFilters applies: unknown ids and unusable values in the URL do not count.
-  const activeFilterCount =
-    (toolbar && state.q.trim() !== '' ? 1 : 0) +
-    activeFilterIds(filterSpecs, JSON.parse(filtersKey) as Record<string, string>).length
-
-  const options = useMemo(() => {
-    const byId: Record<string, FilterOption[]> = {}
-    for (const spec of filterSpecs) {
-      if (spec.kind === 'min') continue
-      byId[spec.id] =
-        spec.options?.slice() ?? filterOptions(data, spec).map((value) => ({ value, label: value }))
-    }
-    return byId
-  }, [data, filterSpecs])
+  const {
+    filtered,
+    options,
+    activeFilterCount,
+    filters: filterSpecs,
+  } = useFilteredRows(data, state, toolbar)
 
   const sorting: SortingState =
     state.sort === null ? [] : [{ id: state.sort, desc: state.dir === 'desc' }]
@@ -230,13 +196,12 @@ function DataTableView<TData extends RowData>({
       </div>
 
       {filtered.length === 0 ? (
-        <div role="status" className="bg-card text-muted-foreground rounded-lg border p-4 text-sm">
-          <strong className="text-foreground font-medium">No rows match</strong> the search or
-          filters. Clear filters to show all {data.length} {scope}.
-        </div>
+        <NoRowsMatch loaded={data.length} scope={scope} />
       ) : (
         <div
           data-testid="data-table-scroll"
+          // Focusable so a wide table scrolls sideways from the keyboard.
+          tabIndex={0}
           className={
             // 20 rows fit the page; larger pages scroll inside the card under the sticky header.
             state.size > PAGE_SIZES[0]
@@ -314,27 +279,15 @@ function DataTableView<TData extends RowData>({
         </div>
       )}
 
-      <footer className="text-muted-foreground flex flex-wrap items-center justify-between gap-3 text-xs">
-        <div className="space-y-1">
-          <span className="block">
-            Showing {page.from}–{page.to} of {filtered.length} {scope}
-            {filtered.length < data.length ? ` (filtered from ${data.length})` : null}.
-          </span>
-          {budget !== undefined && total > data.length ? (
-            <Truncated shown={data.length} budget={budget} scope={scope} />
-          ) : null}
-        </div>
-        {filtered.length > PAGE_SIZES[0] ? (
-          <TablePagination
-            ariaLabel={`${ariaLabel} pagination`}
-            onPage={(next) => set({ page: next })}
-            onPageSize={(size) => set({ size })}
-            page={page.page}
-            pageCount={page.pageCount}
-            pageSize={state.size}
-          />
-        ) : null}
-      </footer>
+      <TableFooter
+        ariaLabel={ariaLabel}
+        controls={controls}
+        loaded={data.length}
+        page={page}
+        scope={scope}
+        total={total}
+        {...(budget === undefined ? {} : { budget })}
+      />
     </div>
   )
 }

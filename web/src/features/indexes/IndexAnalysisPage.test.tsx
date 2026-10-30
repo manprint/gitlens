@@ -9,6 +9,7 @@ import { ok } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 import { flushNetwork } from '@/test/network'
 import { renderWithProviders } from '@/test/render'
+import { columnTexts, dataRows, filterTable, searchTable, seq, sortTable } from '@/test/table'
 import { expectNoA11yViolations } from '@/test/a11y'
 
 function index(name: string, definition: string, extra: Record<string, unknown> = {}) {
@@ -125,12 +126,14 @@ describe('IndexAnalysisPage', () => {
     render()
     await flushNetwork(30)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Partial' }))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Filter Indexes by Kind' }), {
+      target: { value: 'partial' },
+    })
     await flushNetwork(5)
     let table = screen.getByRole('table', { name: 'Indexes' })
     expect(within(table).getAllByRole('row')).toHaveLength(2)
 
-    fireEvent.click(screen.getByRole('button', { name: 'All' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
     fireEvent.change(screen.getByLabelText('Search indexes'), { target: { value: 'legacy_ref' } })
     await flushNetwork(5)
     table = screen.getByRole('table', { name: 'Indexes' })
@@ -196,5 +199,39 @@ describe('IndexAnalysisPage', () => {
     await screen.findByRole('table', { name: 'Indexes' })
 
     await expect(expectNoA11yViolations(container)).resolves.toBeUndefined()
+  })
+})
+
+describe('IndexAnalysisPage table controls', () => {
+  it('TBL-UI-100 indexes pages, searches, filters and sorts the inventory', async () => {
+    const items = seq(25).map((n, index_) =>
+      index(`idx_${n}`, `CREATE INDEX idx_${n} ON public.orders USING btree (c${n})`, {
+        index_bytes: (index_ + 1) * 1024,
+        is_valid: index_ >= 2,
+      }),
+    )
+    const { router } = render(items)
+    await flushNetwork(30)
+    const name = 'Indexes'
+
+    expect(dataRows(name)).toHaveLength(20)
+    // Largest first by default; the name is the second cell (the first expands the row).
+    expect(columnTexts(name, 1)[0]).toBe('idx_25')
+    sortTable(name, 'Size', 'ascending')
+    expect(columnTexts(name, 1)[0]).toBe('idx_01')
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(dataRows(name)).toHaveLength(5)
+    expect(router.state.location.search).toContain('indexes.page=2')
+    // Another database is another row set: back to page 1 (D23).
+    fireEvent.change(screen.getByRole('combobox', { name: 'Database' }), {
+      target: { value: 'app' },
+    })
+    expect(router.state.location.search).not.toContain('indexes.page')
+    fireEvent.change(screen.getByRole('combobox', { name: 'Database' }), { target: { value: '' } })
+    searchTable(name, 'idx_2', 'Search indexes')
+    expect(dataRows(name)).toHaveLength(6)
+    searchTable(name, '', 'Search indexes')
+    filterTable(name, 'State', 'invalid')
+    expect(columnTexts(name, 1)).toEqual(['idx_01', 'idx_02'])
   })
 })

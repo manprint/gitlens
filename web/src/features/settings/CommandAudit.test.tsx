@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw/http'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -6,6 +6,7 @@ import { ok } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 import { INSTANCE_ID, INSTANCE_SUMMARY } from '@/test/fixture-helpers'
 import { renderWithProviders } from '@/test/render'
+import { columnTexts, dataRows, filterTable, searchTable, seq, sortTable } from '@/test/table'
 
 import { CommandAudit } from './CommandAudit'
 
@@ -21,6 +22,11 @@ async function settleAuditQuery() {
 function renderAudit(entries: AuditEntry[]) {
   server.use(ok('getInstanceCommandAudit', entries))
   return renderWithProviders(<CommandAudit instances={[INSTANCE_SUMMARY]} />)
+}
+
+// Scoped to the table: the State and Command filters list the same words.
+function auditTable() {
+  return within(screen.getByRole('table', { name: /^Command audit for / }))
 }
 
 describe('CommandAudit', () => {
@@ -94,7 +100,7 @@ describe('CommandAudit', () => {
     ])
     await settleAuditQuery()
 
-    await waitFor(() => expect(screen.getByText('rejected')).toBeInTheDocument())
+    await waitFor(() => expect(auditTable().getByText('rejected')).toBeInTheDocument())
     expect(screen.getByText('agent lacks permission')).toBeInTheDocument()
   })
 
@@ -114,7 +120,7 @@ describe('CommandAudit', () => {
     ])
     await settleAuditQuery()
 
-    await waitFor(() => expect(screen.getByText('expired')).toBeInTheDocument())
+    await waitFor(() => expect(auditTable().getByText('expired')).toBeInTheDocument())
     expect(screen.getByText('2026-09-01 02:01:00 UTC')).toBeInTheDocument()
     expect(screen.getByText('expired before the agent claimed it')).toBeInTheDocument()
   })
@@ -135,7 +141,7 @@ describe('CommandAudit', () => {
     await settleAuditQuery()
 
     expect(await screen.findByText('ui-session 9f86d081 from 192.0.2.10')).toBeInTheDocument()
-    expect(screen.getByText('requested')).toBeInTheDocument()
+    expect(auditTable().getByText('requested')).toBeInTheDocument()
     expect(screen.getByText(/Recorded:/)).toBeInTheDocument()
     expect(screen.queryByText(/Executed:/)).not.toBeInTheDocument()
     expect(screen.getByText(/credential that requested it/i)).toBeInTheDocument()
@@ -165,5 +171,41 @@ describe('CommandAudit', () => {
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('Could not load command audit')
     expect(alert).toHaveTextContent('The server returned an invalid response')
+  })
+})
+
+describe('CommandAudit table controls', () => {
+  it('TBL-UI-109 command-audit pages, searches, filters and sorts the entries', async () => {
+    renderAudit(
+      seq(25).map((n, index) => ({
+        audit_id: index + 1,
+        command_id: `00000000-0000-4000-8000-0000000000${n}`,
+        instance_id: INSTANCE_ID,
+        kind: index < 4 ? 'cancel' : 'explain',
+        args: { queryid: `q${n}` },
+        requested_by: 'api-token from 192.0.2.10',
+        executed_at: new Date(Date.UTC(2026, 7, 27, 0, index)).toISOString(),
+        outcome: index < 2 ? 'rejected' : 'ok',
+      })),
+    )
+    await settleAuditQuery()
+    const name = `Command audit for ${INSTANCE_SUMMARY.addr}:${INSTANCE_SUMMARY.port}`
+    await waitFor(() => expect(dataRows(name)).toHaveLength(20))
+
+    // Newest first stays the default order.
+    expect(columnTexts(name, 2)[0]).toContain('q25')
+    searchTable(name, 'q2')
+    expect(dataRows(name)).toHaveLength(6)
+    searchTable(name, '')
+    filterTable(name, 'Command', 'cancel')
+    expect(dataRows(name)).toHaveLength(4)
+    filterTable(name, 'Command', '')
+    filterTable(name, 'State', 'rejected')
+    expect(dataRows(name)).toHaveLength(2)
+    filterTable(name, 'State', '')
+    sortTable(name, 'Time', 'ascending')
+    expect(columnTexts(name, 2)[0]).toContain('q01')
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(dataRows(name)).toHaveLength(5)
   })
 })

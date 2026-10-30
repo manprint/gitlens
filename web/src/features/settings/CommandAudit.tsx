@@ -1,8 +1,12 @@
+import { useMemo } from 'react'
+
 import type { Schemas } from '@/api/types'
 import { REFRESH } from '@/api/policy'
 import { useInstanceCommandAudit } from '@/api/queries'
 import { Section } from '@/components/layout/Section'
+import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { EmptyState, ErrorState } from '@/components/state'
+import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
 import { formatTimestamp } from '@/lib/format'
 
 type InstanceSummary = Schemas['InstanceSummary']
@@ -91,9 +95,65 @@ function timingFields(entry: CommandAuditEntry) {
   ] as const
 }
 
+const AUDIT_TOOLBAR: TableToolbarSpec<CommandAuditEntry> = {
+  searchFields: [
+    (entry) => entry.kind,
+    (entry) => displayValue(entry.args),
+    (entry) => displayValue(entry.requested_by),
+    (entry) => entry.detail ?? entry.error,
+  ],
+  filters: [
+    { id: 'state', label: 'State', kind: 'select', accessor: entryState },
+    { id: 'kind', label: 'Command', kind: 'select', accessor: (entry) => entry.kind ?? 'unknown' },
+  ],
+}
+
+const AUDIT_COLUMNS: readonly SimpleColumn<CommandAuditEntry>[] = [
+  {
+    id: 'time',
+    header: 'Time',
+    sortValue: (entry) => Date.parse(entryTime(entry) ?? '') || null,
+    cell: (entry) => <Timestamp label="Recorded" value={entryTime(entry)} />,
+  },
+  {
+    id: 'command',
+    header: 'Command',
+    sortValue: (entry) => entry.kind ?? 'unknown',
+    cell: (entry) => entry.kind ?? 'unknown',
+  },
+  { id: 'args', header: 'Arguments', cell: (entry) => <code>{displayValue(entry.args)}</code> },
+  { id: 'requested-by', header: 'Requested by', cell: (entry) => displayValue(entry.requested_by) },
+  { id: 'state', header: 'State', sortValue: entryState, cell: entryState },
+  {
+    id: 'timing',
+    header: 'Timing and detail',
+    cell: (entry) => {
+      const state = entryState(entry)
+      const detail = entry.detail ?? entry.error
+      return (
+        <>
+          {timingFields(entry).map(([timingLabel, timingValue]) => (
+            <Timestamp key={timingLabel} label={timingLabel} value={timingValue} />
+          ))}
+          {state.toLowerCase() === 'expired' && !entry.expires_at ? <div>Expired</div> : null}
+          {detail ? <div>{detail}</div> : null}
+        </>
+      )
+    },
+  },
+]
+
+function auditKey(entry: CommandAuditEntry): string {
+  return String(entry.audit_id ?? entry.command_id ?? JSON.stringify(entry))
+}
+
 function InstanceCommandAudit({ instance }: { instance: InstanceSummary }) {
   const query = useInstanceCommandAudit(instance.instance_id, REFRESH.inventory)
   const label = `${instance.addr}:${instance.port}`
+  const entries = useMemo(
+    () => sortNewestFirst((query.data ?? []).filter(isCommandAuditEntry)),
+    [query.data],
+  )
 
   if (query.isPending) {
     return (
@@ -113,7 +173,6 @@ function InstanceCommandAudit({ instance }: { instance: InstanceSummary }) {
     )
   }
 
-  const entries = sortNewestFirst((query.data ?? []).filter(isCommandAuditEntry))
   if (entries.length === 0) {
     return (
       <EmptyState
@@ -125,48 +184,16 @@ function InstanceCommandAudit({ instance }: { instance: InstanceSummary }) {
 
   return (
     <Section description={`Newest activity first for ${label}.`} title={label}>
-      <div className="relative overflow-x-auto" tabIndex={0}>
-        <table aria-label={`Command audit for ${label}`}>
-          <thead>
-            <tr>
-              <th scope="col">Time</th>
-              <th scope="col">Command</th>
-              <th scope="col">Arguments</th>
-              <th scope="col">Requested by</th>
-              <th scope="col">State</th>
-              <th scope="col">Timing and detail</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((entry, index) => {
-              const state = entryState(entry)
-              const detail = entry.detail ?? entry.error
-              return (
-                <tr key={String(entry.audit_id ?? entry.command_id ?? index)}>
-                  <td>
-                    <Timestamp label="Recorded" value={entryTime(entry)} />
-                  </td>
-                  <td>{entry.kind ?? 'unknown'}</td>
-                  <td>
-                    <code>{displayValue(entry.args)}</code>
-                  </td>
-                  <td>{displayValue(entry.requested_by)}</td>
-                  <td>{state}</td>
-                  <td>
-                    {timingFields(entry).map(([timingLabel, timingValue]) => (
-                      <Timestamp key={timingLabel} label={timingLabel} value={timingValue} />
-                    ))}
-                    {state.toLowerCase() === 'expired' && !entry.expires_at ? (
-                      <div>Expired</div>
-                    ) : null}
-                    {detail ? <div>{detail}</div> : null}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
+      <SimpleTable
+        ariaLabel={`Command audit for ${label}`}
+        columns={AUDIT_COLUMNS}
+        emptyState={null}
+        rowKey={auditKey}
+        rows={entries}
+        scope="entries"
+        tableId={`command-audit-${instance.instance_id}`}
+        toolbar={AUDIT_TOOLBAR}
+      />
     </Section>
   )
 }

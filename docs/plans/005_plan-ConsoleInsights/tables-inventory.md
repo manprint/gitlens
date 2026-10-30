@@ -92,7 +92,7 @@ tables). The worker does not invent filters beyond it.
 | Alert rules | `features/alerts/RulesPage.tsx` ~92 | `alert-rules` | rule name, expression/summary | severity, state | |
 | Silences | `features/alerts/SilencesPage.tsx` ~174 | `silences` | matchers, comment, creator | active (`active`/`expired`) | |
 | Replication topology edges | `components/charts/TopologyGraph.tsx` ~75 | `topology-edges` | upstream/downstream names | role, state | keeps the accessible name and row/cell roles (SYS-UI-001) |
-| Relations (tables, indexes, bloat lists) | `features/instance/RelationsSection.tsx` ~194 | `relations-tables`, `relations-indexes`, `relations-table-bloat`, `relations-index-bloat` | relation name, schema | database, schema, relkind | `Sort <caption> by <label>` buttons stay and drive `useTableState`; expanded row collapses on page change |
+| Relations (tables, indexes, bloat lists) | `features/instance/RelationsSection.tsx` ~194 | `relations-tables`, `relations-indexes`, `relations-table-bloat`, `relations-index-bloat` | relation name, schema | database, schema (no relkind filter: the four lists are already split by kind and the Tables/Indexes items carry no `object_kind`; R-9.3) | `Sort <caption> by <label>` buttons stay and drive `useTableState`; expanded row collapses on page change |
 | PostgreSQL settings | `features/instance/SettingsSection.tsx` ~103 | `pg-settings` | name, category | category, restart required | |
 | Plan history | `features/queries/PlanHistory.tsx` ~108 | `plan-history` | plan id / hash | source | |
 | Command audit | `features/settings/CommandAudit.tsx` ~129 | `command-audit` | command, target | status, kind | keeps `Command audit for …` (SYS-UI-006) |

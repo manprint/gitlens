@@ -1,5 +1,5 @@
 import { BellOff } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { useDeleteSilence } from '@/api/silences'
@@ -7,8 +7,10 @@ import { useAlerts, useSilences } from '@/api/queries'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
+import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { Button } from '@/components/ui/button'
 import { AlertListTruncated, EmptyState, ErrorState } from '@/components/state'
+import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
 import { formatDuration, formatTimestamp } from '@/lib/format'
 import { silenceWindow, type Silence } from '@/lib/alerts'
 
@@ -55,6 +57,78 @@ function windowLabel(silence: Silence): string {
   return 'Expired'
 }
 
+const SILENCE_STATES = [
+  { value: 'pending', label: 'Pending' },
+  { value: 'active', label: 'Active' },
+  { value: 'expired', label: 'Expired' },
+]
+
+const SILENCE_TOOLBAR: TableToolbarSpec<Silence> = {
+  searchFields: [matcherLabel, (silence) => silence.reason],
+  filters: [
+    {
+      id: 'state',
+      label: 'State',
+      kind: 'select',
+      options: SILENCE_STATES,
+      accessor: (silence) => silenceWindow(silence, new Date()).state,
+    },
+  ],
+}
+
+function silenceColumns(
+  onEnd: (silence: Silence) => void,
+  ending: boolean,
+): SimpleColumn<Silence>[] {
+  return [
+    {
+      id: 'matchers',
+      header: 'Matchers',
+      sortValue: matcherLabel,
+      className: 'font-mono text-xs',
+      cell: matcherLabel,
+    },
+    { id: 'reason', header: 'Reason', cell: (silence) => silence.reason },
+    {
+      id: 'start',
+      header: 'Start',
+      sortValue: (silence) => Date.parse(silence.starts_at),
+      className: 'whitespace-nowrap',
+      cell: (silence) => (
+        <time dateTime={silence.starts_at}>{formatTimestamp(silence.starts_at, 'UTC')}</time>
+      ),
+    },
+    {
+      id: 'end',
+      header: 'End',
+      sortValue: (silence) => Date.parse(silence.ends_at),
+      className: 'whitespace-nowrap',
+      cell: (silence) => (
+        <time dateTime={silence.ends_at}>{formatTimestamp(silence.ends_at, 'UTC')}</time>
+      ),
+    },
+    { id: 'state', header: 'State', className: 'whitespace-nowrap', cell: windowLabel },
+    {
+      id: 'actions',
+      header: 'Actions',
+      srOnlyHeader: true,
+      className: 'text-right',
+      cell: (silence) => (
+        <Button
+          aria-label={`End silence ${silence.silence_id}`}
+          disabled={ending}
+          onClick={() => onEnd(silence)}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          End silence
+        </Button>
+      ),
+    },
+  ]
+}
+
 export function SilencesPage() {
   const silencesQuery = useSilences({ all: true })
   const alertsQuery = useAlerts({ state: 'firing' })
@@ -68,19 +142,27 @@ export function SilencesPage() {
     [silences],
   )
 
-  function endSilence(silence: Silence) {
-    if (
-      !window.confirm(
-        `End silence ${silence.silence_id}? Notifications will no longer be suppressed.`,
+  const { mutate: deleteMutate, isPending: deletePending } = deleteSilence
+  const endSilence = useCallback(
+    (silence: Silence) => {
+      if (
+        !window.confirm(
+          `End silence ${silence.silence_id}? Notifications will no longer be suppressed.`,
+        )
       )
-    )
-      return
-    setStatus(null)
-    deleteSilence.mutate(
-      { silenceId: silence.silence_id },
-      { onSuccess: () => setStatus(`Ended silence ${silence.silence_id}.`) },
-    )
-  }
+        return
+      setStatus(null)
+      deleteMutate(
+        { silenceId: silence.silence_id },
+        { onSuccess: () => setStatus(`Ended silence ${silence.silence_id}.`) },
+      )
+    },
+    [deleteMutate],
+  )
+  const columns = useMemo(
+    () => silenceColumns(endSilence, deletePending),
+    [endSilence, deletePending],
+  )
 
   if (silencesQuery.isPending || alertsQuery.isPending) {
     return (
@@ -170,53 +252,16 @@ export function SilencesPage() {
         {sortedSilences.length === 0 ? (
           <EmptyState description="No silences have been created." title="No stored silences" />
         ) : (
-          <div className="relative overflow-x-auto" tabIndex={0}>
-            <table aria-label="Alert silences" className="w-full text-left text-sm">
-              <thead>
-                <tr>
-                  <th scope="col">Matchers</th>
-                  <th scope="col">Reason</th>
-                  <th scope="col">Start</th>
-                  <th scope="col">End</th>
-                  <th scope="col">State</th>
-                  <th scope="col">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedSilences.map((silence) => (
-                  <tr key={silence.silence_id}>
-                    <td className="font-mono text-xs">{matcherLabel(silence)}</td>
-                    <td>{silence.reason}</td>
-                    <td className="whitespace-nowrap tabular-nums">
-                      <time dateTime={silence.starts_at}>
-                        {formatTimestamp(silence.starts_at, 'UTC')}
-                      </time>
-                    </td>
-                    <td className="whitespace-nowrap tabular-nums">
-                      <time dateTime={silence.ends_at}>
-                        {formatTimestamp(silence.ends_at, 'UTC')}
-                      </time>
-                    </td>
-                    <td className="whitespace-nowrap">{windowLabel(silence)}</td>
-                    <td className="text-right">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        aria-label={`End silence ${silence.silence_id}`}
-                        disabled={deleteSilence.isPending}
-                        onClick={() => endSilence(silence)}
-                        type="button"
-                      >
-                        End silence
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <SimpleTable
+            ariaLabel="Alert silences"
+            columns={columns}
+            emptyState={null}
+            rowKey={(silence) => silence.silence_id}
+            rows={sortedSilences}
+            scope="silences"
+            tableId="silences"
+            toolbar={SILENCE_TOOLBAR}
+          />
         )}
       </Section>
     </div>

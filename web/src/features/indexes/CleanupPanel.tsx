@@ -1,12 +1,13 @@
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronDown, ChevronRight } from 'lucide-react'
 
 import { useInstanceTables } from '@/api/queries'
 import { CopyButton } from '@/components/layout/CopyButton'
 import { MetricTile } from '@/components/layout/MetricTile'
+import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { EmptyState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
+import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
 import { formatBytes, formatCount, formatPercent, formatRate } from '@/lib/format'
 import type { IndexRow } from '@/lib/indexAnalysis'
 import {
@@ -31,6 +32,79 @@ const REASONS: Record<
   unused: { label: 'Unused', variant: 'warning' },
   'never-scanned': { label: 'Never scanned', variant: 'outline' },
 }
+
+const CLEANUP_TOOLBAR: TableToolbarSpec<CleanupCandidate> = {
+  searchFields: [
+    (candidate) => candidate.row.name,
+    (candidate) => `${candidate.row.schema}.${candidate.row.table}`,
+  ],
+  filters: [
+    {
+      id: 'reason',
+      label: 'Reason',
+      kind: 'select',
+      options: Object.entries(REASONS).map(([value, { label }]) => ({ value, label })),
+      accessor: (candidate) => candidate.reason,
+    },
+    {
+      id: 'basis',
+      label: 'Basis',
+      kind: 'select',
+      options: [
+        { value: 'advisor', label: 'Advisor finding' },
+        { value: 'statistics', label: 'Raw counters' },
+      ],
+      accessor: (candidate) => candidate.basis,
+    },
+  ],
+}
+
+const CLEANUP_COLUMNS: readonly SimpleColumn<CleanupCandidate>[] = [
+  {
+    id: 'index',
+    header: 'Index',
+    sortValue: (candidate) => candidate.row.name,
+    className: 'font-medium break-all',
+    cell: (candidate) => candidate.row.name,
+  },
+  {
+    id: 'table',
+    header: 'Table',
+    sortValue: (candidate) => `${candidate.row.schema}.${candidate.row.table}`,
+    className: 'break-all',
+    cell: ({ row }) => (
+      <>
+        <span className="text-muted-foreground">
+          {row.datname} · {row.schema}.
+        </span>
+        {row.table}
+      </>
+    ),
+  },
+  {
+    id: 'reason',
+    header: 'Reason',
+    cell: (candidate) => {
+      const reason = REASONS[candidate.reason]
+      return <Badge variant={reason.variant}>{reason.label}</Badge>
+    },
+  },
+  {
+    id: 'size',
+    header: 'Size',
+    sortValue: (candidate) => candidate.row.bytes,
+    className: 'whitespace-nowrap',
+    cell: ({ row }) => (row.bytes === null ? 'Unknown' : formatBytes(row.bytes)),
+  },
+  {
+    id: 'writes',
+    header: 'Index writes',
+    sortValue: (candidate) => candidate.writeRate,
+    className: 'whitespace-nowrap',
+    cell: (candidate) =>
+      candidate.writeRate === null ? 'Not measured' : formatRate(candidate.writeRate),
+  },
+]
 
 /** The servers that share a cluster with this one: they may use an index this one never scans. */
 export interface SiblingServer {
@@ -160,7 +234,6 @@ interface CleanupPanelProps {
  * runs a drop: it writes the statement, and the operator decides.
  */
 export function CleanupPanel({ instanceId, rows, siblings }: CleanupPanelProps) {
-  const [open, setOpen] = useState<ReadonlySet<string>>(new Set())
   const tablesQuery = useInstanceTables(instanceId, {
     limit: DEAD_ROWS_LIMIT,
     order_by: 'dead_tup',
@@ -174,15 +247,6 @@ export function CleanupPanel({ instanceId, rows, siblings }: CleanupPanelProps) 
   const summary = useMemo(() => summariseCleanup(candidates, totalBytes), [candidates, totalBytes])
   const script = useMemo(() => cleanupScript(candidates), [candidates])
   const statistical = candidates.filter((candidate) => candidate.basis === 'statistics').length
-
-  function toggleOpen(key: string) {
-    setOpen((current) => {
-      const next = new Set(current)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }
 
   return (
     <div className="space-y-6">
@@ -288,81 +352,21 @@ export function CleanupPanel({ instanceId, rows, siblings }: CleanupPanelProps) 
             />
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table aria-label="Cleanup candidates" className="w-full text-sm">
-              <thead className="text-muted-foreground bg-muted/40 text-xs uppercase">
-                <tr>
-                  <th className="w-8 px-3 py-2" scope="col">
-                    <span className="sr-only">Details</span>
-                  </th>
-                  <th className="px-3 py-2 text-left font-medium" scope="col">
-                    Index
-                  </th>
-                  <th className="px-3 py-2 text-left font-medium" scope="col">
-                    Table
-                  </th>
-                  <th className="px-3 py-2 text-left font-medium" scope="col">
-                    Reason
-                  </th>
-                  <th className="px-3 py-2 text-left font-medium" scope="col">
-                    Size
-                  </th>
-                  <th className="px-3 py-2 text-left font-medium" scope="col">
-                    Index writes
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {candidates.map((candidate) => {
-                  const { row } = candidate
-                  const expanded = open.has(row.key)
-                  const Chevron = expanded ? ChevronDown : ChevronRight
-                  const reason = REASONS[candidate.reason]
-                  return (
-                    <Fragment key={row.key}>
-                      <tr className="hover:bg-muted/30 align-top">
-                        <td className="px-3 py-2">
-                          <button
-                            aria-expanded={expanded}
-                            aria-label={`${expanded ? 'Hide' : 'Show'} the drop of ${row.name}`}
-                            className="text-muted-foreground hover:text-foreground"
-                            onClick={() => toggleOpen(row.key)}
-                            type="button"
-                          >
-                            <Chevron aria-hidden="true" className="size-4" />
-                          </button>
-                        </td>
-                        <td className="px-3 py-2 font-medium break-all">{row.name}</td>
-                        <td className="px-3 py-2 break-all">
-                          <span className="text-muted-foreground">
-                            {row.datname} · {row.schema}.
-                          </span>
-                          {row.table}
-                        </td>
-                        <td className="px-3 py-2">
-                          <Badge variant={reason.variant}>{reason.label}</Badge>
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap tabular-nums">
-                          {row.bytes === null ? 'Unknown' : formatBytes(row.bytes)}
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap tabular-nums">
-                          {candidate.writeRate === null
-                            ? 'Not measured'
-                            : formatRate(candidate.writeRate)}
-                        </td>
-                      </tr>
-                      {expanded ? (
-                        <tr className="bg-muted/20">
-                          <td colSpan={6}>
-                            <Detail candidate={candidate} siblings={siblings} />
-                          </td>
-                        </tr>
-                      ) : null}
-                    </Fragment>
-                  )
-                })}
-              </tbody>
-            </table>
+          <div className="p-5">
+            <SimpleTable
+              ariaLabel="Cleanup candidates"
+              columns={CLEANUP_COLUMNS}
+              detailLabel={(candidate, expanded) =>
+                `${expanded ? 'Hide' : 'Show'} the drop of ${candidate.row.name}`
+              }
+              emptyState={null}
+              renderDetail={(candidate) => <Detail candidate={candidate} siblings={siblings} />}
+              rowKey={(candidate) => candidate.row.key}
+              rows={candidates}
+              scope="candidates"
+              tableId="cleanup"
+              toolbar={CLEANUP_TOOLBAR}
+            />
           </div>
         )}
       </section>

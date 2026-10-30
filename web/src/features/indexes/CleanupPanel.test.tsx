@@ -11,6 +11,7 @@ import { ok } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 import { flushNetwork } from '@/test/network'
 import { renderWithProviders } from '@/test/render'
+import { columnTexts, dataRows, filterTable, searchTable, seq, sortTable } from '@/test/table'
 
 function index(name: string, extra: Record<string, unknown> = {}) {
   return {
@@ -252,5 +253,33 @@ describe('CleanupPanel', () => {
     await screen.findByRole('table', { name: 'Cleanup candidates' })
 
     await expect(expectNoA11yViolations(container)).resolves.toBeUndefined()
+  })
+})
+
+describe('CleanupPanel table controls', () => {
+  it('TBL-UI-101 cleanup pages, searches, filters and sorts the candidates', async () => {
+    const items = seq(25).map((n, position) =>
+      index(`cand_${n}`, {
+        index_bytes: (position + 1) * 1024,
+        ...(position < 5
+          ? { last_scan_status: 'never_since_reset', last_scan_at: null }
+          : { is_valid: false }),
+      }),
+    )
+    render({ items })
+    await flushNetwork(30)
+    const name = 'Cleanup candidates'
+
+    expect(dataRows(name)).toHaveLength(20)
+    filterTable(name, 'Reason', 'never-scanned')
+    expect(dataRows(name)).toHaveLength(5)
+    filterTable(name, 'Reason', '')
+    searchTable(name, 'cand_2')
+    expect(dataRows(name)).toHaveLength(6)
+    searchTable(name, '')
+    sortTable(name, 'Size', 'descending')
+    expect(columnTexts(name, 1)[0]).toBe('cand_25')
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(dataRows(name)).toHaveLength(5)
   })
 })

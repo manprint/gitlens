@@ -2,8 +2,10 @@ import { useMemo, useState } from 'react'
 
 import { usePlans } from '@/api/queries'
 import type { Schemas } from '@/api/types'
+import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { Degraded } from '@/components/state/Degraded'
 import { ErrorState } from '@/components/state/ErrorState'
+import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
 import { formatTimestamp } from '@/lib/format'
 
 type Plan = Schemas['Plan']
@@ -83,15 +85,75 @@ function plansDiffer(left: PlanNodeSnapshot | undefined, right: PlanNodeSnapshot
   )
 }
 
+interface ComparisonRow {
+  path: string
+  left: PlanNodeSnapshot | undefined
+  right: PlanNodeSnapshot | undefined
+  different: boolean
+}
+
+function nodeText(node: PlanNodeSnapshot | undefined): string {
+  return node ? `${node.nodeType} · cost ${node.totalCost ?? '—'}` : '—'
+}
+
+const COMPARISON_TOOLBAR: TableToolbarSpec<ComparisonRow> = {
+  searchFields: [(row) => row.path, (row) => row.left?.nodeType, (row) => row.right?.nodeType],
+  filters: [
+    {
+      id: 'difference',
+      label: 'Difference',
+      kind: 'select',
+      options: [
+        { value: 'differs', label: 'Differs' },
+        { value: 'same', label: 'Same' },
+      ],
+      accessor: (row) => (row.different ? 'differs' : 'same'),
+    },
+  ],
+}
+
+function nodeCell(row: ComparisonRow, node: PlanNodeSnapshot | undefined) {
+  return row.different ? (
+    <span className="bg-warning/15 -mx-1 block px-1" data-different="true" data-testid="plan-diff">
+      {nodeText(node)}
+    </span>
+  ) : (
+    nodeText(node)
+  )
+}
+
 function PlanComparison({ plans }: { plans: [Plan, Plan] }) {
   const [left, right] = plans
-  const leftNodes = flattenPlan(left.plan)
-  const rightNodes = flattenPlan(right.plan)
-  const paths = [
-    ...new Set([...leftNodes.map((node) => node.path), ...rightNodes.map((node) => node.path)]),
-  ]
-  const leftByPath = new Map(leftNodes.map((node) => [node.path, node]))
-  const rightByPath = new Map(rightNodes.map((node) => [node.path, node]))
+  const rows = useMemo(() => {
+    const leftNodes = flattenPlan(left.plan)
+    const rightNodes = flattenPlan(right.plan)
+    const leftByPath = new Map(leftNodes.map((node) => [node.path, node]))
+    const rightByPath = new Map(rightNodes.map((node) => [node.path, node]))
+    const paths = [
+      ...new Set([...leftNodes.map((node) => node.path), ...rightNodes.map((node) => node.path)]),
+    ]
+    return paths.map((path) => {
+      const leftNode = leftByPath.get(path)
+      const rightNode = rightByPath.get(path)
+      return { path, left: leftNode, right: rightNode, different: plansDiffer(leftNode, rightNode) }
+    })
+  }, [left.plan, right.plan])
+  // Rows keep the plan's tree order: only the path sorts, the plan columns do not.
+  const columns = useMemo<SimpleColumn<ComparisonRow>[]>(
+    () => [
+      {
+        id: 'path',
+        header: 'Path',
+        rowHeader: true,
+        sortValue: (row) => row.path,
+        className: 'font-normal',
+        cell: (row) => row.path,
+      },
+      { id: 'left', header: planKey(left), cell: (row) => nodeCell(row, row.left) },
+      { id: 'right', header: planKey(right), cell: (row) => nodeCell(row, row.right) },
+    ],
+    [left, right],
+  )
 
   return (
     <section aria-labelledby="plan-comparison-title" className="space-y-3">
@@ -101,45 +163,20 @@ function PlanComparison({ plans }: { plans: [Plan, Plan] }) {
       <p className="text-muted-foreground text-sm">
         Differing node types and total costs are highlighted.
       </p>
-      {paths.length === 0 ? (
+      {rows.length === 0 ? (
         <p className="text-muted-foreground text-sm">Neither selected entry contains plan nodes.</p>
       ) : (
-        <div className="relative overflow-x-auto" tabIndex={0}>
-          <table className="w-full text-left text-sm">
-            <caption className="sr-only">Side-by-side comparison of two query plans</caption>
-            <thead>
-              <tr>
-                <th scope="col">Path</th>
-                <th scope="col">{planKey(left)}</th>
-                <th scope="col">{planKey(right)}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {paths.map((path) => {
-                const leftNode = leftByPath.get(path)
-                const rightNode = rightByPath.get(path)
-                const different = plansDiffer(leftNode, rightNode)
-                return (
-                  <tr key={path}>
-                    <th scope="row" className="py-2 pr-3 font-normal">
-                      {path}
-                    </th>
-                    {[leftNode, rightNode].map((node, index) => (
-                      <td
-                        key={`${path}-${index}`}
-                        className={`py-2 pr-3 ${different ? 'bg-warning/15' : ''}`}
-                        data-different={different ? 'true' : undefined}
-                        data-testid={different ? 'plan-diff' : undefined}
-                      >
-                        {node ? `${node.nodeType} · cost ${node.totalCost ?? '—'}` : '—'}
-                      </td>
-                    ))}
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+        <SimpleTable
+          ariaLabel="Plan comparison"
+          caption="Side-by-side comparison of two query plans"
+          columns={columns}
+          emptyState={null}
+          rowKey={(row) => row.path}
+          rows={rows}
+          scope="plan nodes"
+          tableId="plan-history"
+          toolbar={COMPARISON_TOOLBAR}
+        />
       )}
     </section>
   )

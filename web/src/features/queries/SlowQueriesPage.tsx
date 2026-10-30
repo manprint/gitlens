@@ -1,14 +1,18 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { ArrowUpRight, ChevronDown, Database, Gauge, Hash, Server, Timer } from 'lucide-react'
+import { Database, Gauge, Hash, Server, Timer } from 'lucide-react'
 
 import { useClusters, useInstanceDatabases, useStatements } from '@/api/queries'
 import type { Cluster } from '@/api/types'
 import { CopyButton } from '@/components/layout/CopyButton'
+import {
+  DataTable,
+  type DataTableProps,
+  type DataTableToolbar,
+} from '@/components/layout/DataTable'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { MetricTile } from '@/components/layout/MetricTile'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { SqlText } from '@/components/layout/SqlText'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
 import { useTimeRange } from '@/hooks/useTimeRange'
@@ -24,8 +28,11 @@ import { queryWindowOf } from '@/lib/timerange'
 import { cn } from '@/lib/utils'
 import { NativeSelect } from '@/components/ui/native-select'
 
-/** How many statements the page ranks: the operator asked for the top 20. */
-export const SLOWEST_LIMIT = 20
+/**
+ * How many statements the page loads and ranks; the table shows 20 per page
+ * (D23). The server caps a request at 1000.
+ */
+export const STATEMENT_FETCH_LIMIT = 200
 
 type Ranking = 'mean' | 'total'
 
@@ -76,135 +83,116 @@ interface StatementsPayload {
   truncated: boolean
 }
 
-interface RankedRowProps {
-  instanceId: string
+interface SlowRow {
   rank: number
-  ranking: Ranking
   row: StatementRow
+  mean: number | null
+  total: number | null
+  calls: number | null
   share: number | null
-  /** The row's ranked value relative to the first row, for the bar length. */
-  relative: number
 }
 
-function RankedStatement({ instanceId, rank, ranking, row, share, relative }: RankedRowProps) {
-  const summary = summariseStatement(row)
-  const text = row.query_text ?? ''
-  const [expanded, setExpanded] = useState(false)
+// The search acts on the loaded statements until the server search arrives (D20).
+const SLOW_TOOLBAR: DataTableToolbar<SlowRow> = {
+  searchFields: [
+    (slow) => slow.row.query_text,
+    (slow) => String(slow.row.queryid),
+    (slow) => slow.row.datname,
+  ],
+}
 
-  return (
-    <li className="group hover:bg-muted/30 grid gap-4 px-5 py-4 transition-colors md:grid-cols-[2.5rem_minmax(0,1fr)_auto]">
-      <div className="flex items-start">
+function slowColumns(instanceId: string): DataTableProps<SlowRow>['columns'] {
+  return [
+    {
+      id: 'rank',
+      header: 'Rank',
+      accessorFn: (slow) => slow.rank,
+      cell: ({ row }) => (
         <span
           className={cn(
-            'flex size-8 items-center justify-center rounded-lg text-sm font-semibold tabular-nums',
-            rank <= 3
+            'flex size-7 items-center justify-center rounded-md text-xs font-semibold tabular-nums',
+            row.original.rank <= 3
               ? 'bg-destructive/10 text-destructive ring-destructive/20 ring-1'
               : 'bg-muted text-muted-foreground',
           )}
         >
-          {rank}
+          {row.original.rank}
         </span>
-      </div>
-
-      <div className="min-w-0 space-y-2">
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <Link
-            className="text-primary inline-flex items-center gap-1 font-semibold hover:underline"
-            to={queryPath(instanceId, row.queryid, row.datname)}
-          >
-            Query {String(row.queryid)}
-            <ArrowUpRight aria-hidden="true" className="size-3.5" />
-          </Link>
-          {row.datname ? (
-            <Badge className="font-normal" variant="outline">
-              <Database aria-hidden="true" />
-              {row.datname}
-            </Badge>
-          ) : null}
-          {row.truncated ? <Badge variant="warning">text truncated</Badge> : null}
-        </div>
-        {text ? (
-          <div className="bg-muted/40 rounded-lg border">
-            <div
-              className={cn(
-                'overflow-hidden px-3 py-2 break-words whitespace-pre-wrap',
-                !expanded && 'line-clamp-2',
-              )}
+      ),
+    },
+    {
+      id: 'query',
+      header: 'Query',
+      enableSorting: false,
+      cell: ({ row }) => {
+        const { row: statement } = row.original
+        const text = statement.query_text ? normaliseQueryText(statement.query_text) : ''
+        return (
+          <div className="flex max-w-[36rem] min-w-0 items-center gap-2">
+            <Link
+              aria-label={`Query ${String(statement.queryid)}`}
+              className="text-primary block min-w-0 truncate font-mono text-xs hover:underline"
+              title={statement.query_text ?? `Query ${String(statement.queryid)}`}
+              to={queryPath(instanceId, statement.queryid, statement.datname)}
             >
-              <SqlText sql={expanded ? text : normaliseQueryText(text)} />
-            </div>
-            <div className="flex items-center justify-between border-t px-1.5 py-0.5">
-              <button
-                aria-expanded={expanded}
-                className="text-muted-foreground hover:text-foreground inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium transition-colors"
-                onClick={() => setExpanded((current) => !current)}
-                type="button"
-              >
-                <ChevronDown
-                  aria-hidden="true"
-                  className={cn('size-3.5 transition-transform', expanded && 'rotate-180')}
-                />
-                {expanded ? 'Collapse' : 'Show full query'}
-              </button>
-              <CopyButton text={text} />
+              {text || `Query ${String(statement.queryid)}`}
+            </Link>
+            {statement.truncated ? <Badge variant="warning">text truncated</Badge> : null}
+            {statement.query_text ? <CopyButton text={statement.query_text} /> : null}
+          </div>
+        )
+      },
+    },
+    {
+      id: 'database',
+      header: 'Database',
+      accessorFn: (slow) => slow.row.datname ?? null,
+      cell: ({ row }) => row.original.row.datname ?? '—',
+    },
+    {
+      id: 'calls',
+      header: 'Calls',
+      accessorFn: (slow) => slow.calls,
+      cell: ({ row }) => (row.original.calls === null ? '—' : formatCount(row.original.calls)),
+    },
+    {
+      id: 'mean',
+      header: 'Mean time',
+      accessorFn: (slow) => slow.mean,
+      cell: ({ row }) => (
+        <span className="whitespace-nowrap">{formatMilliseconds(row.original.mean)}</span>
+      ),
+    },
+    {
+      id: 'total',
+      header: 'Total time',
+      accessorFn: (slow) => slow.total,
+      cell: ({ row }) => (
+        <span className="whitespace-nowrap">{formatMilliseconds(row.original.total)}</span>
+      ),
+    },
+    {
+      id: 'share',
+      header: 'Share of listed time',
+      accessorFn: (slow) => slow.share,
+      cell: ({ row }) => {
+        const { share } = row.original
+        return (
+          <div className="flex min-w-24 items-center gap-2">
+            <span className="w-12 text-right tabular-nums">
+              {share === null ? '—' : (formatPercent(share, 1) ?? '—')}
+            </span>
+            <div className="bg-muted h-1.5 w-16 overflow-hidden rounded-full" aria-hidden="true">
+              <div
+                className="from-primary/70 to-primary h-full rounded-full bg-gradient-to-r"
+                style={{ width: `${Math.max(2, Math.round((share ?? 0) * 100))}%` }}
+              />
             </div>
           </div>
-        ) : (
-          <p className="text-muted-foreground text-sm italic">Query text not available.</p>
-        )}
-        <div className="flex items-center gap-3" title="Relative to the slowest statement listed">
-          <div className="bg-muted h-1.5 flex-1 overflow-hidden rounded-full">
-            <div
-              className="from-primary/70 to-primary h-full rounded-full bg-gradient-to-r"
-              style={{ width: `${Math.max(2, Math.round(relative * 100))}%` }}
-            />
-          </div>
-        </div>
-      </div>
-
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4 md:w-[26rem]">
-        <div>
-          <dt className="text-muted-foreground text-xs">Mean</dt>
-          <dd
-            className={cn(
-              'font-semibold tabular-nums',
-              ranking === 'mean' ? 'text-foreground text-base' : 'text-foreground/80',
-            )}
-          >
-            {formatMilliseconds(summary.mean)}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground text-xs">Total</dt>
-          <dd
-            className={cn(
-              'font-semibold tabular-nums',
-              ranking === 'total' ? 'text-foreground text-base' : 'text-foreground/80',
-            )}
-          >
-            {formatMilliseconds(summary.total)}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground text-xs">Calls</dt>
-          <dd className="tabular-nums">
-            {summary.calls === null ? '—' : formatCount(summary.calls)}
-          </dd>
-        </div>
-        <div>
-          <dt
-            className="text-muted-foreground text-xs"
-            title="Share of the total time of the statements listed here"
-          >
-            Share of listed time
-          </dt>
-          <dd className="tabular-nums">
-            {share === null ? '—' : (formatPercent(share, 1) ?? '—')}
-          </dd>
-        </div>
-      </dl>
-    </li>
-  )
+        )
+      },
+    },
+  ]
 }
 
 interface InstanceStatementsProps {
@@ -222,7 +210,7 @@ function InstanceStatements({ controls, instanceId, ranking }: InstanceStatement
   const statementsQuery = useStatements(
     {
       instance_id: instanceId,
-      limit: SLOWEST_LIMIT,
+      limit: STATEMENT_FETCH_LIMIT,
       order_by: ORDER_BY[ranking],
       ...(database === undefined ? {} : { database }),
     },
@@ -234,10 +222,19 @@ function InstanceStatements({ controls, instanceId, ranking }: InstanceStatement
   const summaries = useMemo(() => rows.map((row) => summariseStatement(row)), [rows])
   const monitored = (databasesQuery.data?.databases ?? []).filter((entry) => entry.monitored)
 
-  const rankedValues = summaries.map((summary) =>
-    ranking === 'mean' ? summary.mean : summary.total,
+  const slowRows = useMemo<SlowRow[]>(
+    () =>
+      rows.map((row, index) => ({
+        rank: index + 1,
+        row,
+        mean: summaries[index]?.mean ?? null,
+        total: summaries[index]?.total ?? null,
+        calls: summaries[index]?.calls ?? null,
+        share: shares[index] ?? null,
+      })),
+    [rows, shares, summaries],
   )
-  const topValue = Math.max(0, ...rankedValues.map((value) => value ?? 0))
+  const columns = useMemo(() => slowColumns(instanceId), [instanceId])
   const totalTime = summaries.reduce((sum, summary) => sum + (summary.total ?? 0), 0)
   const totalCalls = summaries.reduce((sum, summary) => sum + (summary.calls ?? 0), 0)
   const slowestMean = Math.max(0, ...summaries.map((summary) => summary.mean ?? 0))
@@ -246,6 +243,8 @@ function InstanceStatements({ controls, instanceId, ranking }: InstanceStatement
     const next = new URLSearchParams(searchParams)
     if (value) next.set('db', value)
     else next.delete('db')
+    // Another database is a new ranking: back to the first page (D23).
+    next.delete('slow.page')
     setSearchParams(next, { replace: true })
   }
 
@@ -330,7 +329,7 @@ function InstanceStatements({ controls, instanceId, ranking }: InstanceStatement
             <MetricTile
               label="Statements ranked"
               value={String(rows.length)}
-              unit={`of ${SLOWEST_LIMIT}`}
+              unit={`of ${STATEMENT_FETCH_LIMIT} max`}
             />
           </div>
 
@@ -341,7 +340,7 @@ function InstanceStatements({ controls, instanceId, ranking }: InstanceStatement
             <div className="flex flex-wrap items-center justify-between gap-2 border-b px-5 py-4">
               <div>
                 <h2 className="text-base font-semibold" id="slowest-list-title">
-                  Top {SLOWEST_LIMIT} by {ranking === 'mean' ? 'mean time per call' : 'total time'}
+                  Ranked by {ranking === 'mean' ? 'mean time per call' : 'total time'}
                 </h2>
                 <p className="text-muted-foreground mt-0.5 text-sm">
                   {RANKINGS.find((option) => option.value === ranking)?.hint} Open a query to run
@@ -357,19 +356,17 @@ function InstanceStatements({ controls, instanceId, ranking }: InstanceStatement
                 />
               </div>
             ) : (
-              <ol aria-label="Slowest queries" className="divide-y">
-                {rows.map((row, index) => (
-                  <RankedStatement
-                    key={`${row.datname ?? ''}-${String(row.queryid)}`}
-                    instanceId={instanceId}
-                    rank={index + 1}
-                    ranking={ranking}
-                    relative={topValue > 0 ? (rankedValues[index] ?? 0) / topValue : 0}
-                    row={row}
-                    share={shares[index] ?? null}
-                  />
-                ))}
-              </ol>
+              <div className="p-5">
+                <DataTable
+                  ariaLabel="Slowest queries"
+                  columns={columns}
+                  data={slowRows}
+                  emptyState={null}
+                  scope="statements"
+                  tableId="slow"
+                  toolbar={SLOW_TOOLBAR}
+                />
+              </div>
             )}
             {response?.truncated ? (
               <p className="text-muted-foreground border-t px-5 py-3 text-xs">
@@ -400,6 +397,8 @@ export function SlowQueriesPage() {
     next.set(key, value)
     // A database belongs to one instance, so switching server clears it.
     if (key === 'instance') next.delete('db')
+    // A new server or ranking starts on the first page (D23).
+    next.delete('slow.page')
     setSearchParams(next, { replace: true })
   }
 
@@ -410,7 +409,7 @@ export function SlowQueriesPage() {
         icon={Gauge}
         subtitle={
           <>
-            The {SLOWEST_LIMIT} statements with the longest execution time on a server, measured by{' '}
+            The statements with the longest execution time on a server, measured by{' '}
             <code>pg_stat_statements</code> over the selected time range. Use it to find the queries
             worth optimising first.
           </>
