@@ -67,7 +67,7 @@ describe('page scaffolding primitives', () => {
     const nameHeader = screen.getByRole('columnheader', { name: /Name/ })
     expect(nameHeader).toHaveAttribute('aria-sort', 'none')
 
-    fireEvent.click(within(nameHeader).getByRole('button', { name: /Name/ }))
+    fireEvent.click(within(nameHeader).getByRole('button', { name: 'Name' }))
 
     expect(nameHeader).toHaveAttribute('aria-sort', 'ascending')
     const tableRows = within(screen.getByTestId('data-table-rows')).getAllByRole('row')
@@ -108,7 +108,7 @@ describe('page scaffolding primitives', () => {
       />,
     )
 
-    expect(screen.getByText(/Showing 2 of 2 findings/)).not.toHaveTextContent('truncated')
+    expect(screen.getByText(/Showing 1–2 of 2 findings/)).not.toHaveTextContent('truncated')
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 
@@ -123,11 +123,11 @@ describe('page scaffolding primitives', () => {
       />,
     )
 
-    expect(screen.getByText(/Showing 2 of 2 findings/)).not.toHaveTextContent('truncated')
+    expect(screen.getByText(/Showing 1–2 of 2 findings/)).not.toHaveTextContent('truncated')
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 
-  it('UI-LAYOUT-006 virtualizes tables above 200 rows', () => {
+  it('UI-LAYOUT-006 paginates tables above 20 rows', () => {
     const manyRows = Array.from({ length: 250 }, (_, index) => ({
       name: `Row ${index}`,
       value: index,
@@ -135,8 +135,8 @@ describe('page scaffolding primitives', () => {
     renderWithProviders(<DataTable columns={columns} data={manyRows} emptyState={<p>No rows</p>} />)
 
     const renderedRows = within(screen.getByTestId('data-table-rows')).getAllByRole('row')
-    expect(renderedRows.length).toBeLessThan(50)
-    expect(renderedRows.length).toBeLessThan(manyRows.length)
+    expect(renderedRows).toHaveLength(20)
+    expect(screen.getByText('Page 1 of 13')).toBeVisible()
   })
 
   it('has no serious or critical accessibility violations for a populated table', async () => {

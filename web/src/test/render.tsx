@@ -94,3 +94,13 @@ export function renderRoute(
 export function user() {
   return userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
 }
+
+/**
+ * A user-event instance on real time, for keyboard sequences: user-event's
+ * waits never resolve under the suite's fake clock. The fake clock comes back
+ * before the next test (setup.ts).
+ */
+export function realTimeUser() {
+  vi.useRealTimers()
+  return userEvent.setup()
+}
