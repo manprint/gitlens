@@ -149,6 +149,21 @@ func TestDLMIG001_DeadlockRuleFiresOnAnyDeadlock(t *testing.T) {
 		"0026 matches the seeded values; a changed seed needs a matching repair")
 }
 
+// NOTI-MIG-001: the console's webhook addresses (11.5b) are one row per tenant
+// and kind, the kind limited to the three channels, with who set it and when.
+func TestNOTIMIG001_MigrationDefinesNotificationChannels(t *testing.T) {
+	data, err := migrationFS.ReadFile("migrations/0028_notification_channels.sql")
+	require.NoError(t, err)
+	sql := string(data)
+	require.Contains(t, sql, "CREATE TABLE IF NOT EXISTS notification_channels (")
+	require.Contains(t, sql, "tenant_id text NOT NULL DEFAULT 'default',")
+	require.Contains(t, sql, "kind text NOT NULL CHECK (kind IN ('slack', 'webhook', 'google_chat')),")
+	require.Contains(t, sql, "url text NOT NULL,")
+	require.Contains(t, sql, "updated_at timestamptz NOT NULL DEFAULT now(),")
+	require.Contains(t, sql, "updated_by text NOT NULL,")
+	require.Contains(t, sql, "PRIMARY KEY (tenant_id, kind)")
+}
+
 // TestMigrations_SeededRuleMetricsAreProduced — a Tier 1 seed rule whose
 // metric name does not match a metric something actually emits is silently
 // dead: internal/alert's metric source queries `metrics` by exact name, so

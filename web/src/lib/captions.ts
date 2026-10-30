@@ -121,10 +121,11 @@ export const CAPTIONS = {
       'A shorter window reports sooner and can raise false positives. The advisor keeps its 7-day windows until a later release reads these values.',
   },
   'settings.notifications': {
-    what: 'Which alert delivery channels the server environment configures, with the host each one posts to, and a test message per channel.',
+    what: 'Which alert delivery channels are configured, from the server environment or the console, the host each posts to, and a test message per channel.',
     source:
-      'getNotificationChannels reads the server environment (the webhook address itself is never sent); Send test calls testNotificationChannel.',
-    window: 'Read when the tab opens; a change of the environment needs a server restart.',
+      'getNotificationChannels reads the environment and the addresses stored from the console (an address itself is never sent); setNotificationChannel and deleteNotificationChannel store and remove one; Send test calls testNotificationChannel.',
+    window:
+      'Read when the tab opens. An address stored from the console applies at once and overrides the environment; a change of the environment needs a server restart.',
     howToRead:
       'Send test posts "pglens test notification" through the same channel the alerts use and waits at most 10 s; a failure shows the error with the address removed.',
   },

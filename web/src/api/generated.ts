@@ -866,12 +866,36 @@ export interface paths {
         };
         /**
          * List the alert notification channels and whether each is configured.
-         * @description Always the three kinds, in the order slack, webhook, google_chat. A channel is configured by the server environment; only the host name of its webhook address is returned, never the address.
+         * @description Always the three kinds, in the order slack, webhook, google_chat. A channel is configured by an address stored from the console, which overrides the server environment, or by the server environment; only the host name of its webhook address is returned, never the address.
          */
         get: operations["getNotificationChannels"];
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notification-channels/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Store the webhook address of a notification channel.
+         * @description Stores the address in the pglens database, where it overrides the server environment, and delivers the next alert and test of the channel to it without a restart. The address is write-only: no response, page or log line holds it, an error included. It is stored without encryption at rest. No notification channel follows a redirect: a redirect answer is a failed delivery. Only this server process switches at once; another replica on the same database uses it from its next start.
+         */
+        put: operations["setNotificationChannel"];
+        post?: never;
+        /**
+         * Remove the webhook address stored from the console.
+         * @description Removes the stored address, so the channel goes back to the server environment's address, or to not configured, from its next delivery. Removing a channel with nothing stored changes nothing and is not an error.
+         */
+        delete: operations["deleteNotificationChannel"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2315,15 +2339,19 @@ export interface components {
         NotificationChannelKind: "slack" | "webhook" | "google_chat";
         NotificationChannel: {
             kind: components["schemas"]["NotificationChannelKind"];
-            /** @description true when the server environment sets the channel's webhook address. */
+            /** @description true when the channel has a webhook address, stored from the console or set by the server environment. */
             configured: boolean;
             /**
-             * @description Where the address comes from: the server environment. The console cannot store an address.
+             * @description Where the address comes from: ui when it was stored from the console (setNotificationChannel), which overrides the environment; env otherwise, including a channel that is not configured.
              * @enum {string}
              */
-            source: "env";
+            source: "env" | "ui";
             /** @description The host name of the webhook address, null when the channel is not configured or its address names no host. The address itself is never returned. */
             host: string | null;
+        };
+        NotificationChannelUpdate: {
+            /** @description The webhook address: https, or http only for localhost or a literal loopback or private address (127.0.0.0/8, ::1, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7, an IPv4 one mapped in IPv6), with a host, no fragment and no space, tab or line break. Write-only: it is never returned. */
+            url: string;
         };
         NotificationTestResult: {
             /** @description true when the channel accepted the test message. */
@@ -4043,6 +4071,105 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
         };
     };
+    setNotificationChannel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The channel to configure. */
+                kind: components["schemas"]["NotificationChannelKind"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotificationChannelUpdate"];
+            };
+        };
+        responses: {
+            /** @description The channel's status, now from the console. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationChannel"];
+                };
+            };
+            /** @description The address is missing, longer than 2048 characters, does not parse, names no host, has a fragment, a space, a tab or a line break, or uses http for a public host or another scheme; or the body has another field. The detail never quotes the address. Nothing was changed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description The kind is not slack, webhook or google_chat. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            /** @description The store is unavailable; nothing was changed. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteNotificationChannel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The channel whose stored address to remove. */
+                kind: components["schemas"]["NotificationChannelKind"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The channel's status, back to the environment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationChannel"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description The kind is not slack, webhook or google_chat. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The store is unavailable; nothing was changed. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     testNotificationChannel: {
         parameters: {
             query?: never;
@@ -4074,7 +4201,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The channel is not configured in the server environment; nothing was sent. */
+            /** @description The channel is not configured, from the console or the server environment; nothing was sent. */
             409: {
                 headers: {
                     [name: string]: unknown;

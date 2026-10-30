@@ -222,3 +222,38 @@ func TestMIGNAME001(t *testing.T) {
 	require.Equal(t, "23505", pgErr.Code)
 	require.Equal(t, "clusters_name_uniq", pgErr.ConstraintName)
 }
+
+// NOTI-MIG-INT-001: 0028 applies on a fresh store and again over itself, keeps
+// one address per tenant and kind with the tenant defaulting to 'default', and
+// refuses a kind that is not a channel.
+func TestMigrateNOTIMIGINT001_NotificationChannels(t *testing.T) {
+	ctx, _, pool := newMigrationTestPool(t)
+
+	require.NoError(t, Migrate(ctx, pool))
+	data, err := migrationFS.ReadFile("migrations/0028_notification_channels.sql")
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, string(data))
+	require.NoError(t, err, "re-apply 0028")
+	_, err = pool.Exec(ctx, `DELETE FROM schema_migrations WHERE version = 28`)
+	require.NoError(t, err)
+	require.NoError(t, Migrate(ctx, pool))
+	var recorded int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations WHERE version = 28`).Scan(&recorded))
+	require.Equal(t, 1, recorded)
+
+	_, err = pool.Exec(ctx, `INSERT INTO notification_channels (kind, url, updated_by) VALUES ('google_chat', 'https://chat.example/a', 'api-token')`)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO notification_channels (kind, url, updated_by) VALUES ('google_chat', 'https://chat.example/b', 'api-token')`)
+	require.Error(t, err, "one address per tenant and kind")
+	var (
+		tenant  string
+		updated time.Time
+	)
+	require.NoError(t, pool.QueryRow(ctx, `SELECT tenant_id, updated_at FROM notification_channels WHERE kind = 'google_chat'`).Scan(&tenant, &updated))
+	require.Equal(t, "default", tenant)
+	require.False(t, updated.IsZero())
+	_, err = pool.Exec(ctx, `INSERT INTO notification_channels (kind, url, updated_by) VALUES ('email', 'https://mail.example', 'api-token')`)
+	require.Error(t, err, "only the three channel kinds")
+	_, err = pool.Exec(ctx, `INSERT INTO notification_channels (kind, url) VALUES ('slack', 'https://hooks.example')`)
+	require.Error(t, err, "updated_by is required")
+}

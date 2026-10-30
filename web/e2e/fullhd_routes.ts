@@ -149,6 +149,13 @@ export const FULLHD_ROUTES: readonly FullHdRoute[] = [
 ]
 
 /** The pathname of an inventory entry, without its query string. */
+/** The inventory entry of `path`; throws when the inventory has none. */
+export function fullHdRoute(path: string): FullHdRoute {
+  const route = FULLHD_ROUTES.find((entry) => entry.path === path)
+  if (!route) throw new Error(`no Full HD route ${path}`)
+  return route
+}
+
 export function routePathname(path: string): string {
   return path.split('?')[0] ?? path
 }

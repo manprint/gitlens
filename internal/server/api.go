@@ -49,8 +49,11 @@ type API struct {
 	// coverage replaces the database's coverage store in unit tests (13.2).
 	coverage coverageStore
 	// notifications is the delivery configuration of the Notifications tab
-	// (11.5a), set by SetNotificationChannels.
-	notifications notificationChannels
+	// (11.5a, 11.5b), set by SetNotificationChannels.
+	notifications *notificationChannels
+	// notificationStore replaces the database's store of the addresses set
+	// from the console in unit tests (11.5b).
+	notificationStore notificationChannelStore
 	// auth tells a bearer-token request from a UI session in the log of a
 	// retention change; nil names every request a UI session.
 	auth *Auth
@@ -59,7 +62,7 @@ type API struct {
 // NewAPI creates an API backed by the given pool.
 // Pool may be nil in unit tests that exercise only validation logic.
 func NewAPI(pool *pgxpool.Pool) *API {
-	return &API{pool: asDBPool(pool)}
+	return &API{pool: asDBPool(pool), notifications: newNotificationChannels(AlertConfig{}, nil)}
 }
 
 // SetAuth gives the API the bootstrap token check, so a retention or advisor

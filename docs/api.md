@@ -132,5 +132,7 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | GET | `/api/v1/settings/retention` | `getRetention` | List the data retention of each metrics family. |
 | GET | `/api/v1/settings/retention/preview` | `previewRetention` | Preview what a retention of some days would delete. |
 | POST | `/api/v1/notification-channels/{kind}/test` | `testNotificationChannel` | Send a test message through a notification channel. |
+| PUT | `/api/v1/notification-channels/{kind}` | `setNotificationChannel` | Store the webhook address of a notification channel. |
 | PUT | `/api/v1/settings/advisor-windows` | `setAdvisorWindows` | Set or reset advisor observation windows. |
 | PUT | `/api/v1/settings/retention/{family}` | `setRetention` | Set the data retention of a metrics family. |
+| DELETE | `/api/v1/notification-channels/{kind}` | `deleteNotificationChannel` | Remove the webhook address stored from the console. |

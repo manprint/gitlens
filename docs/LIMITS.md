@@ -252,3 +252,32 @@ at the end of every advisor evaluation. The 90 days are code constants, not
 settings: neither the console nor an environment variable changes them, and the
 Data retention tab does not show them. Queued commands, the command audit and
 captured query plans have no purge and are kept.
+
+## 15. Webhook addresses stored from the console are not encrypted
+
+A webhook address set from Settings > Notifications is stored in the
+`notification_channels` table of the pglens database as plain text. The API,
+the console and the log never show it, only its host, but anyone who can read
+that table, a database dump or a backup reads the address, and with it the
+key and token of a Slack or Google Chat webhook. Protect the database, its
+dumps and its backups as you protect the server's environment file. Only the
+server process that takes the change applies it at once; another server
+replica on the same database applies it at its next start.
+
+The pglens log never holds the address, but PostgreSQL's own logging on the
+pglens database can: with `log_statement = all` (or `mod`),
+`log_min_duration_statement`, `auto_explain` or pgaudit logging the write,
+the parameters of the upsert, the address among them, reach the PostgreSQL
+log. Keep statement parameter logging off for the pglens role, or protect that
+log as the table.
+
+Storing an address is itself a capability: a console user can make the server
+post an alert to any `https` endpoint and to `localhost` or a private `http`
+address. No notification channel follows a redirect, from the environment or
+the console: a redirect answer is a failed delivery, so a checked address
+cannot hand the request on to a host that was never checked.
+
+The stored addresses are read once at start. When that read fails (the
+database is down), the server logs it and uses the environment's addresses;
+it does not retry, so an address stored from the console applies again only
+after the next start, or once it is set again from the console.

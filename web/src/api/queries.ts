@@ -1113,3 +1113,76 @@ export function useTestNotificationChannel(): UseMutationResult<
     retry: false,
   })
 }
+
+type NotificationChannelRow = components['schemas']['NotificationChannel']
+
+/** Puts a channel's new status row into the cached listing. */
+function replaceNotificationChannel(
+  rows: NotificationChannelRow[] | undefined,
+  row: NotificationChannelRow,
+): NotificationChannelRow[] | undefined {
+  return rows?.map((current) => (current.kind === row.kind ? row : current))
+}
+
+/**
+ * `PUT /api/v1/notification-channels/{kind}` (setNotificationChannel): stores
+ * a webhook address from the console. The address is write-only: the answer
+ * is the channel's status row. The mutation's variables hold the address, so
+ * the caller calls `reset()` once it settles: that detaches the observer, and
+ * gcTime 0 then drops the mutation from the mutation cache at once (with an
+ * observer attached, gcTime alone does not drop it).
+ */
+export function useSetNotificationChannel(): UseMutationResult<
+  NotificationChannelRow,
+  ApiFailure,
+  { kind: NotificationChannelKind; url: string }
+> {
+  const queryClient = useQueryClient()
+  return useMutation<
+    NotificationChannelRow,
+    ApiFailure,
+    { kind: NotificationChannelKind; url: string }
+  >({
+    mutationFn: ({ kind, url }) =>
+      getApi(() =>
+        client.PUT('/api/v1/notification-channels/{kind}', {
+          params: { path: { kind } },
+          body: { url },
+        }),
+      ),
+    onSuccess: (row) =>
+      queryClient.setQueryData<NotificationChannelRow[]>(qk.notificationChannels(), (rows) =>
+        replaceNotificationChannel(rows, row),
+      ),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: qk.notificationChannels() }),
+    gcTime: 0,
+    retry: false,
+  })
+}
+
+/**
+ * `DELETE /api/v1/notification-channels/{kind}` (deleteNotificationChannel):
+ * removes the address stored from the console; the channel goes back to the
+ * server environment.
+ */
+export function useDeleteNotificationChannel(): UseMutationResult<
+  NotificationChannelRow,
+  ApiFailure,
+  NotificationChannelKind
+> {
+  const queryClient = useQueryClient()
+  return useMutation<NotificationChannelRow, ApiFailure, NotificationChannelKind>({
+    mutationFn: (kind) =>
+      getApi(() =>
+        client.DELETE('/api/v1/notification-channels/{kind}', {
+          params: { path: { kind } },
+        }),
+      ),
+    onSuccess: (row) =>
+      queryClient.setQueryData<NotificationChannelRow[]>(qk.notificationChannels(), (rows) =>
+        replaceNotificationChannel(rows, row),
+      ),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: qk.notificationChannels() }),
+    retry: false,
+  })
+}

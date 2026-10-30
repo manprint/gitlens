@@ -24,3 +24,10 @@ export const all: NotificationChannel[] = [
   { kind: 'webhook', configured: true, source: 'env', host: 'alerts.example.net' },
   { kind: 'google_chat', configured: true, source: 'env', host: 'chat.googleapis.com' },
 ]
+
+/** Google Chat stored from the console over the environment, Slack stored with no environment value. */
+export const stored: NotificationChannel[] = [
+  { kind: 'slack', configured: true, source: 'ui', host: 'hooks.slack.com' },
+  { kind: 'webhook', configured: false, source: 'env', host: null },
+  { kind: 'google_chat', configured: true, source: 'ui', host: 'chat.googleapis.com' },
+]

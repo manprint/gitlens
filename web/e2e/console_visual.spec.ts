@@ -1,6 +1,5 @@
 import { AxeBuilder } from '@axe-core/playwright'
 import { execFile } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
@@ -8,7 +7,8 @@ import type { Page } from '@playwright/test'
 
 import { expect, test } from './fixtures'
 import { assertFits, measureRoutes } from './fullhd_fit'
-import { FULLHD_ROUTES, routePathname } from './fullhd_routes'
+import { FULLHD_ROUTES, fullHdRoute, routePathname } from './fullhd_routes'
+import { STACK_DIR, stackGoogleChatSecrets } from './notification_secrets'
 import { BUDGET } from './qa/budget'
 import { database as qaDatabase, deadlocks, lockPair, query, runCleanups } from './qa/pg'
 import { run } from './qa/stack'
@@ -171,7 +171,6 @@ test('VIS-015 replication lag shows a readable chart or states that there is no 
   browserErrors.assertClean()
 })
 
-const STACK_DIR = process.env.PGLENS_QA_STACK_DIR ?? '/home/agent/pglens-odoo-stack'
 const VIS016_WIDTHS = [1440, 1024, 390] as const
 
 test('VIS-016 ASH shows one readable chart per wait group with a clear legend', async ({
@@ -1103,12 +1102,6 @@ async function assertNamesTableFits(page: Page): Promise<void> {
   await card.screenshot({ path: `${NAMES_ARTIFACT_DIR}/clname-e2e-001-names-table-1920x950.png` })
 }
 
-function fullHdRoute(path: string) {
-  const route = FULLHD_ROUTES.find((entry) => entry.path === path)
-  if (!route) throw new Error(`no Full HD route ${path}`)
-  return route
-}
-
 test('CLNAME-E2E-001 renamed clusters and instances show everywhere and clear back to the defaults', async ({
   api,
   signedInPage: page,
@@ -1721,42 +1714,6 @@ test('ADV-E2E-001 a rule disabled in Settings leaves the Findings page within on
     ).toBeNull()
   }
 })
-
-/**
- * The parts of the dev stack's Google Chat webhook that must never reach the
- * console (I-10): the address, its path, the space id, and the key and token,
- * raw and decoded. Read from the stack's `.env` for NOTI-E2E-001 and never
- * printed: an error names the variable, never its value.
- */
-async function stackGoogleChatSecrets(): Promise<string[]> {
-  const env = await readFile(join(STACK_DIR, '.env'), 'utf8')
-  let address = ''
-  for (const line of env.split('\n')) {
-    const match = /^\s*(?:export\s+)?PGLENS_GOOGLE_CHAT_WEBHOOK_URL\s*=\s*(.*)$/.exec(line)
-    if (match) address = (match[1] ?? '').trim().replace(/^(['"])(.*)\1$/, '$2')
-  }
-  if (address === '') throw new Error('PGLENS_GOOGLE_CHAT_WEBHOOK_URL is not set in the stack .env')
-  let url: URL
-  try {
-    url = new URL(address)
-  } catch {
-    // The parse error carries the input: a fresh error says only what failed.
-    throw new Error('PGLENS_GOOGLE_CHAT_WEBHOOK_URL in the stack .env is not a URL')
-  }
-  const rawQuery = url.search.replace(/^\?/, '').split('&')
-  const space = /\/spaces\/([^/]+)/.exec(url.pathname)?.[1] ?? ''
-  const parts = [
-    address,
-    url.pathname,
-    url.search,
-    space,
-    url.searchParams.get('key') ?? '',
-    url.searchParams.get('token') ?? '',
-    ...rawQuery.map((pair) => pair.slice(pair.indexOf('=') + 1)),
-  ]
-  // A part shorter than 8 characters identifies nothing and could match by chance.
-  return [...new Set(parts.filter((part) => part.length >= 8))]
-}
 
 test('NOTI-E2E-001 the Notifications tab shows Google Chat configured by host only, Send test delivers, and no page or response holds the webhook secret', async ({
   api,

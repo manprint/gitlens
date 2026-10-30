@@ -115,6 +115,44 @@ func TestChannelNotifier_GivesUpAfterItsAttempts(t *testing.T) {
 	require.Equal(t, maxNotifyAttempts, slack.sent)
 }
 
+// NOTI-010 (notifier): a channel held in a notify.Slot is delivered to through
+// the channel the slot holds at the time of each send. An empty slot gets no
+// claim and no send, and a delivery that failed before the slot was emptied is
+// dropped on the next pass, with the failure recorded, instead of sent.
+func TestNOTI010_ChannelNotifierFollowsTheSlot(t *testing.T) {
+	a := Alert{Key: "k", RuleID: "r", Severity: SeverityWarning, State: StateFiring, StartedAt: time.Unix(1, 0), LastEvalAt: time.Unix(1, 0)}
+	store := &markStore{}
+	first := &testChannel{name: "google_chat"}
+	slot := notify.NewSlot("google_chat", first)
+	n := NewChannelNotifier(store, slot)
+	retrier := n.(interface{ Retry(context.Context) error })
+
+	require.NoError(t, n.Notify(context.Background(), a))
+	require.Equal(t, 1, first.sent)
+
+	second := &testChannel{name: "google_chat", err: errors.New("HTTP 503")}
+	slot.Store(second)
+	b := a
+	b.Key = "k2"
+	require.Error(t, n.Notify(context.Background(), b))
+	require.Equal(t, 1, first.sent, "the replaced channel gets nothing")
+	require.Equal(t, 1, second.sent)
+
+	// The address is removed before the retry: the delivery is dropped, not sent.
+	slot.Store(nil)
+	require.NoError(t, retrier.Retry(context.Background()))
+	require.NoError(t, retrier.Retry(context.Background()))
+	require.Equal(t, 1, second.sent)
+	c := a
+	c.Key = "k3"
+	require.NoError(t, n.Notify(context.Background(), c))
+	require.Equal(t, []notificationMark{
+		{phase: "fire", ok: true, attempts: 1},
+		{phase: "fire", ok: false, attempts: 1},
+		{phase: "fire", ok: false, attempts: 1},
+	}, store.marks, "no claim or send for the empty slot; the dropped delivery records its failure")
+}
+
 // TestTick_RetriesAFailedNotificationOnALaterPass — the engine makes the
 // deliveries that failed on an earlier pass again, without a new transition.
 func TestTick_RetriesAFailedNotificationOnALaterPass(t *testing.T) {

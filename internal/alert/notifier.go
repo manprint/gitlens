@@ -92,6 +92,11 @@ func (n *channelNotifier) Notify(ctx context.Context, a Alert) error {
 	// the others from delivering the same transition.
 	var errs []error
 	for _, ch := range n.channels {
+		// A channel without an address, such as one whose address the console
+		// removed (11.5b), gets no claim and no send.
+		if !notify.Configured(ch) {
+			continue
+		}
 		d := pendingDelivery{dedupID: DedupID(a), channel: ch, phase: phase, alert: a}
 		won, err := n.claim(ctx, &d)
 		if err != nil {
@@ -172,6 +177,10 @@ func (n *channelNotifier) Retry(ctx context.Context) error {
 	n.mu.Unlock()
 	var errs []error
 	for _, d := range due {
+		if !notify.Configured(d.channel) {
+			n.dropRemoved(ctx, d)
+			continue
+		}
 		if d.unclaimed {
 			won, err := n.claim(ctx, &d)
 			if err != nil {
@@ -285,6 +294,26 @@ func (n *channelNotifier) deliver(ctx context.Context, d pendingDelivery) error 
 		return fmt.Errorf("channel %s: %w", d.channel.Name(), sendErr)
 	}
 	return markErr
+}
+
+// errChannelRemoved is the error recorded for a delivery whose channel lost
+// its address before the delivery was made again.
+var errChannelRemoved = errors.New("the channel's address was removed before the delivery was made")
+
+// dropRemoved drops a pending delivery whose channel has no address any more:
+// its address was removed from the console (11.5b) after the delivery failed.
+// Nothing is sent, and a claimed delivery records the failure on its claim row.
+// The drop is not reported as undelivered: removing the address was a choice.
+func (n *channelNotifier) dropRemoved(ctx context.Context, d pendingDelivery) {
+	log.Printf("alert notifier: %s on %s (%s) dropped: the channel is no longer configured", d.dedupID, d.channel.Name(), d.phase)
+	if d.unclaimed {
+		return
+	}
+	markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	if err := n.store.MarkNotification(markCtx, d.dedupID, d.channel.Name(), d.phase, false, d.attempts, errChannelRemoved); err != nil {
+		log.Printf("alert notifier: %s on %s (%s): record the drop: %v", d.dedupID, d.channel.Name(), d.phase, err)
+	}
 }
 
 // keep queues a delivery for the next pass while it has attempts left.

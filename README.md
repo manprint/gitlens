@@ -349,8 +349,8 @@ targets, and the minimum permission tier. Muting requires a reason and expiry.
 Alerts shows firing and suppressed alerts, editable rules where permitted,
 silences with their preview, and the fleet-wide event timeline. Suppression
 does not resolve an alert; delivery to Slack, Google Chat or a generic webhook
-is configured in the server environment, and the Notifications tab of Settings
-shows its state and sends a test message.
+is configured in the server environment or from the Notifications tab of
+Settings, which shows its state and sends a test message.
 
 #### Settings
 
@@ -364,7 +364,7 @@ Settings has seven tabs, in this order. `?tab=` in the URL names the open tab
 | Preferences | theme, default time range, refresh interval and table page size of this browser |
 | Data retention | days of history kept per metrics family |
 | Advisor rules | rule on/off switches and the two observation windows |
-| Notifications | state of the Slack, generic webhook and Google Chat channels, and a test send |
+| Notifications | state of the Slack, generic webhook and Google Chat channels, a write-only URL per channel, and a test send |
 | Names | cluster names and instance display names |
 | Audit & server | the command audit and the server information (read-only) |
 
@@ -428,15 +428,36 @@ stop being degraded. A base backup still counts as recent for a fixed seven
 days, whatever the window.
 
 The Notifications tab lists the three alert delivery channels — Slack,
-generic webhook and Google Chat — with whether each is configured, the host
-name of its webhook address, and the environment variable that sets it
-(`GET /api/v1/notification-channels`). The addresses are set only in the server
-environment (`PGLENS_ALERT_SLACK_WEBHOOK_URL`, `PGLENS_WEBHOOK_URL`,
-`PGLENS_GOOGLE_CHAT_WEBHOOK_URL`, the `_FILE` forms of the Slack and Google
-Chat variables, and the legacy `PGLENS_SLACK_WEBHOOK_URL[_FILE]`; see
-[Configuration](#configuration) and `deploy/server.example.env`) and are read
-at start, so a change needs a restart. The console cannot store an address; it
-never receives, shows or logs one, only its host. Send test
+generic webhook and Google Chat — with whether each is configured, where its
+address comes from (Environment or Console), the host name of its webhook
+address, and the environment variable that sets it
+(`GET /api/v1/notification-channels`, `source` being `env` or `ui`). An address
+comes from the server environment (`PGLENS_ALERT_SLACK_WEBHOOK_URL`,
+`PGLENS_WEBHOOK_URL`, `PGLENS_GOOGLE_CHAT_WEBHOOK_URL`, the `_FILE` forms of
+the Slack and Google Chat variables, and the legacy
+`PGLENS_SLACK_WEBHOOK_URL[_FILE]`; see [Configuration](#configuration) and
+`deploy/server.example.env`), read at start, so a change there needs a
+restart; or it is stored from the console. Set URL / Replace URL
+(`PUT /api/v1/notification-channels/{kind}` with `{"url": …}`) stores the
+address in the pglens database (`notification_channels`), where it overrides
+the environment, and the next alert and test of the channel use it without a
+restart. The address must be `https`, or `http` only for `localhost` or a
+literal loopback or private address, with a host, no fragment, no spaces, tabs
+or line breaks and at most 2048 characters. A console user can therefore make
+the server post to any `https` endpoint and to private `http` addresses; no
+channel follows a redirect (a redirect answer is a failed delivery), so it
+never posts to a host that was not checked. It is write-only: the field is a
+masked text field outside any form, so no password manager offers to save it,
+that is never filled and is cleared once saved, and no response, page or
+pglens log line holds the address, only its host; the log names the channel,
+the requester and the host. PostgreSQL's own statement logging on the pglens
+database (`log_statement = all`, `log_min_duration_statement`, `auto_explain`,
+pgaudit) can log the parameters of the write, the address with them. Remove stored URL (`DELETE /api/v1/notification-channels/{kind}`, after a
+confirmation) deletes the stored address, and the channel goes back to the
+environment's address, or to not configured. The address is stored without
+encryption at rest (see `docs/LIMITS.md`). Only the server process that took
+the change switches at once; another replica on the same database uses it from
+its next start. Send test
 (`POST /api/v1/notification-channels/{kind}/test`, `kind` being `slack`,
 `webhook` or `google_chat`) posts the message "pglens test notification"
 (rule `pglens.test`, severity `info`) through the same channel the alerts use
@@ -480,8 +501,8 @@ Not configurable from the console, and why:
   would need a credential store and weaken it.
 - The agent bearer token is not rotated from the console: rotating it needs a
   change on every agent.
-- Webhook addresses are secrets and are set only in the server environment
-  today; storing them from the console is a pending decision.
+- Webhook addresses can be stored from the console but never read back: they
+  are secrets, so the console and the API only ever show their host.
 - The other server environment variables and flags (`PGLENS_DSN`,
   `PGLENS_LISTEN`, `PGLENS_UI_ENABLED`, `PGLENS_UI_SESSION_TTL`,
   `PGLENS_UI_COOKIE_SECURE`, `PGLENS_ALERT_INTERVAL`,

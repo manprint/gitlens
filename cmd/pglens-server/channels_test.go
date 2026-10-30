@@ -1,15 +1,22 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
+	"github.com/manprint/pglens/internal/alert/notify"
 	"github.com/manprint/pglens/internal/server"
 )
 
@@ -49,9 +56,11 @@ func TestNotificationChannelWiringReachesTheAlertChannel(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	api := server.NewAPI(nil)
-	channels := wireNotificationChannels(api, server.AlertConfig{WebhookURL: srv.URL + "/hook"})
-	require.Len(t, channels, 1)
-	require.Equal(t, "webhook", channels[0].Name())
+	channels := wireNotificationChannels(context.Background(), api, server.AlertConfig{WebhookURL: srv.URL + "/hook"})
+	// One slot per kind; only the webhook's holds a channel.
+	require.Len(t, channels, 3)
+	require.Equal(t, []string{"slack", "webhook", "google_chat"}, []string{channels[0].Name(), channels[1].Name(), channels[2].Name()})
+	require.Equal(t, []bool{false, true, false}, []bool{notify.Configured(channels[0]), notify.Configured(channels[1]), notify.Configured(channels[2])})
 
 	r := chi.NewRouter()
 	api.RegisterRoutes(r)
@@ -75,4 +84,39 @@ func TestNotificationChannelWiringReachesTheAlertChannel(t *testing.T) {
 		{"kind":"webhook","configured":true,"source":"env","host":"127.0.0.1"},
 		{"kind":"google_chat","configured":false,"source":"env","host":null}
 	]`, rec.Body.String())
+}
+
+// When the addresses stored from the console cannot be read at start (the
+// database is down), the environment's channel stays in its slot and delivers,
+// and the log line of the failure holds no part of the address. The read is
+// not retried: the environment's address is used until the next start.
+func TestNotificationChannelWiringKeepsTheEnvironmentWhenTheStoreFails(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	delivered := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		delivered <- struct{}{}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+	address := srv.URL + "/canaryStartPath0501?token=canaryStartTok0502"
+
+	// Nothing listens on port 1: every query fails to connect.
+	pool, err := pgxpool.New(context.Background(), "postgres://canaryDbUser:canaryDbPw@127.0.0.1:1/pglens?connect_timeout=1")
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	api := server.NewAPI(pool)
+
+	channels := wireNotificationChannels(context.Background(), api, server.AlertConfig{WebhookURL: address})
+	require.True(t, notify.Configured(channels[1]))
+	require.NoError(t, channels[1].Send(context.Background(), notify.Message{RuleID: "r"}))
+	<-delivered
+
+	logged := buf.String()
+	require.Contains(t, logged, "read the URLs stored from the console (using the environment's)")
+	for _, secret := range []string{address, "canaryStartPath0501", "canaryStartTok0502"} {
+		require.False(t, strings.Contains(logged, secret), "the log holds %q", secret)
+	}
 }

@@ -1312,19 +1312,37 @@ components:
         kind: { $ref: '#/components/schemas/NotificationChannelKind' }
         configured:
           type: boolean
-          description: true when the server environment sets the channel's webhook address.
+          description: >-
+            true when the channel has a webhook address, stored from the
+            console or set by the server environment.
         source:
           type: string
-          enum: [env]
+          enum: [env, ui]
           description: >-
-            Where the address comes from: the server environment. The console
-            cannot store an address.
+            Where the address comes from: ui when it was stored from the console
+            (setNotificationChannel), which overrides the environment; env
+            otherwise, including a channel that is not configured.
         host:
           type: [string, 'null']
           description: >-
             The host name of the webhook address, null when the channel is not
             configured or its address names no host. The address itself is
             never returned.
+    NotificationChannelUpdate:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        url:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          description: >-
+            The webhook address: https, or http only for localhost or a literal
+            loopback or private address (127.0.0.0/8, ::1, 10.0.0.0/8,
+            172.16.0.0/12, 192.168.0.0/16, fc00::/7, an IPv4 one mapped in
+            IPv6), with a host, no fragment and no space, tab or line break.
+            Write-only: it is never returned.
     NotificationTestResult:
       type: object
       required: [delivered, status]
@@ -3469,8 +3487,9 @@ paths:
       summary: List the alert notification channels and whether each is configured.
       description: >-
         Always the three kinds, in the order slack, webhook, google_chat. A
-        channel is configured by the server environment; only the host name of
-        its webhook address is returned, never the address.
+        channel is configured by an address stored from the console, which
+        overrides the server environment, or by the server environment; only
+        the host name of its webhook address is returned, never the address.
       responses:
         '200':
           description: The three notification channels.
@@ -3484,6 +3503,104 @@ paths:
                     - { kind: webhook, configured: false, source: env, host: null }
                     - { kind: google_chat, configured: true, source: env, host: chat.googleapis.com }
         '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/notification-channels/{kind}:
+    put:
+      tags: [settings]
+      operationId: setNotificationChannel
+      summary: Store the webhook address of a notification channel.
+      description: >-
+        Stores the address in the pglens database, where it overrides the
+        server environment, and delivers the next alert and test of the channel
+        to it without a restart. The address is write-only: no response, page
+        or log line holds it, an error included. It is stored without
+        encryption at rest. No notification channel follows a redirect: a
+        redirect answer is a failed delivery. Only this server process switches
+        at once; another replica on the same database uses it from its next
+        start.
+      parameters:
+        - { name: kind, in: path, required: true, schema: { $ref: '#/components/schemas/NotificationChannelKind' }, description: The channel to configure. }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationChannelUpdate' }
+            examples:
+              default:
+                value: { url: 'https://chat.googleapis.com/v1/spaces/SPACE/messages?key=KEY&token=TOKEN' }
+      responses:
+        '200':
+          description: The channel's status, now from the console.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationChannel' }
+              examples:
+                default:
+                  value: { kind: google_chat, configured: true, source: ui, host: chat.googleapis.com }
+        '400':
+          description: >-
+            The address is missing, longer than 2048 characters, does not
+            parse, names no host, has a fragment, a space, a tab or a line
+            break, or uses http for a public host or another scheme; or the body has another field. The detail
+            never quotes the address. Nothing was changed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                default:
+                  value: { error: invalid url, detail: http is accepted only for a loopback or private address; use https }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: The kind is not slack, webhook or google_chat.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                default:
+                  value: { error: unknown channel, detail: 'the channel kinds are slack, webhook and google_chat' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '503':
+          description: The store is unavailable; nothing was changed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      tags: [settings]
+      operationId: deleteNotificationChannel
+      summary: Remove the webhook address stored from the console.
+      description: >-
+        Removes the stored address, so the channel goes back to the server
+        environment's address, or to not configured, from its next delivery.
+        Removing a channel with nothing stored changes nothing and is not an
+        error.
+      parameters:
+        - { name: kind, in: path, required: true, schema: { $ref: '#/components/schemas/NotificationChannelKind' }, description: The channel whose stored address to remove. }
+      responses:
+        '200':
+          description: The channel's status, back to the environment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationChannel' }
+              examples:
+                environment:
+                  value: { kind: google_chat, configured: true, source: env, host: chat.googleapis.com }
+                none:
+                  value: { kind: slack, configured: false, source: env, host: null }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: The kind is not slack, webhook or google_chat.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                default:
+                  value: { error: unknown channel, detail: 'the channel kinds are slack, webhook and google_chat' }
+        '503':
+          description: The store is unavailable; nothing was changed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/notification-channels/{kind}/test:
     post:
@@ -3522,13 +3639,13 @@ paths:
                 default:
                   value: { error: unknown channel, detail: 'the channel kinds are slack, webhook and google_chat' }
         '409':
-          description: The channel is not configured in the server environment; nothing was sent.
+          description: The channel is not configured, from the console or the server environment; nothing was sent.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
               examples:
                 default:
-                  value: { error: channel not configured, detail: 'configure the channel in the server environment, then restart the server' }
+                  value: { error: channel not configured, detail: "set the channel's URL from the console, or in the server environment and restart the server" }
         '429':
           description: A test message of this channel is already being sent; nothing more was sent.
           content:
