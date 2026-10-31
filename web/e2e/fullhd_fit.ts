@@ -3,7 +3,7 @@ import { dirname } from 'node:path'
 
 import { expect, type APIRequestContext, type Page } from '@playwright/test'
 
-import { FULLHD_ROUTES, FULLHD_VIEWPORTS, type FullHdRoute } from './fullhd_routes'
+import { FULLHD_ROUTES, FULLHD_VIEWPORTS, routePathname, type FullHdRoute } from './fullhd_routes'
 import { pickInstance } from './visual_helpers'
 
 export const FULLHD_MEASURE_FILE = '../test/e2e/_artifacts/ui/fullhd-measure.json'
@@ -127,7 +127,122 @@ async function measurePage(page: Page): Promise<Omit<FullHdMeasure, 'route' | 'u
   })
 }
 
-async function open(page: Page, url: string, viewport: { width: number; height: number }) {
+/** The header lines that are one row at Full HD: Index analysis panels and sections. */
+const HEADER_LINES = '[data-testid="index-panel-header"], [data-testid="section-header"]'
+
+/**
+ * Lists what is wrong with the header lines of the open page (bug-HDR), one
+ * self-contained line per problem naming the check, the element and the
+ * pixels: two parts of a line that overlap (`overlap`), a part whose content
+ * spills out of its box (`child spill`), a part that leaves the line's box
+ * (`outside line`), a title another part covers (`h2 covered`), a title cut
+ * short (`h2 clipped`), or, from 1920 px, an Index analysis panel header whose
+ * parts wrapped to a second row (`wrapped`; D26 keeps it one line there).
+ * Text truncated inside a part is clipped by that part and is not reported;
+ * a part that clips its own overflow (`overflow-x` not `visible`) is not a
+ * spill either.
+ */
+export async function headerLineProblems(page: Page): Promise<string[]> {
+  return page.evaluate((selector) => {
+    const problems: string[] = []
+    const visible = (element: Element) => {
+      const box = element.getBoundingClientRect()
+      return box.width > 0 && box.height > 0 && getComputedStyle(element).visibility !== 'hidden'
+    }
+    // The element as a reader of the log finds it: test id, or tag and the start of its text.
+    const label = (element: Element) => {
+      const testId = element.getAttribute('data-testid')
+      const text = (element.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 40)
+      return testId === null
+        ? `<${element.tagName.toLowerCase()}> "${text}"`
+        : `[${testId}] "${text}"`
+    }
+    const span = (box: DOMRect) => `x ${Math.round(box.left)}..${Math.round(box.right)}`
+    // How far two boxes overlap, or 0; both axes, so parts stacked on two rows pass.
+    const overlap = (a: DOMRect, b: DOMRect) => {
+      const across = Math.min(a.right, b.right) - Math.max(a.left, b.left)
+      const down = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)
+      return across > 1 && down > 1 ? Math.round(across) : 0
+    }
+    document.querySelectorAll(selector).forEach((line) => {
+      if (!visible(line)) return
+      const where = `line ${label(line.querySelector('h2') ?? line)}`
+      const style = getComputedStyle(line)
+      const lineBox = line.getBoundingClientRect()
+      const inner = {
+        left: lineBox.left + parseFloat(style.paddingLeft),
+        right: lineBox.right - parseFloat(style.paddingRight),
+      }
+      const parts = [...line.children].filter(visible)
+      const boxes = parts.map((part) => part.getBoundingClientRect())
+      // From 1920 px an Index analysis header is one row: its parts are centred
+      // on the same line (items-center), so their middles agree within 2 px.
+      if (window.innerWidth >= 1920 && line.getAttribute('data-testid') === 'index-panel-header') {
+        const middle = (box: DOMRect) => (box.top + box.bottom) / 2
+        const first = boxes[0]
+        parts.forEach((part, i) => {
+          const box = boxes[i]!
+          if (first !== undefined && Math.abs(middle(box) - middle(first)) > 2) {
+            problems.push(
+              `wrapped: ${where}: ${label(part)} (y ${Math.round(box.top)}..${Math.round(box.bottom)}) is not on the row of ${label(parts[0]!)} (y ${Math.round(first.top)}..${Math.round(first.bottom)}) at ${window.innerWidth} px`,
+            )
+          }
+        })
+      }
+      parts.forEach((part, i) => {
+        const box = boxes[i]!
+        boxes.slice(i + 1).forEach((other, offset) => {
+          const px = overlap(box, other)
+          if (px > 0) {
+            const next = parts[i + 1 + offset]!
+            problems.push(
+              `overlap: ${where}: ${label(part)} (${span(box)}) and ${label(next)} (${span(other)}) overlap by ${px} px`,
+            )
+          }
+        })
+        if (
+          getComputedStyle(part).overflowX === 'visible' &&
+          part.scrollWidth > part.clientWidth + 1
+        ) {
+          problems.push(
+            `child spill: ${where}: ${label(part)} scrollWidth ${part.scrollWidth} > clientWidth ${part.clientWidth} (${part.scrollWidth - part.clientWidth} px)`,
+          )
+        }
+        if (box.left < inner.left - 1 || box.right > inner.right + 1) {
+          problems.push(
+            `outside line: ${where}: ${label(part)} (${span(box)}) leaves the line x ${Math.round(inner.left)}..${Math.round(inner.right)}`,
+          )
+        }
+      })
+      line.querySelectorAll('h2').forEach((title) => {
+        if (title.scrollWidth > title.clientWidth + 1) {
+          problems.push(
+            `h2 clipped: ${where}: scrollWidth ${title.scrollWidth} > clientWidth ${title.clientWidth}`,
+          )
+        }
+        const titleBox = title.getBoundingClientRect()
+        parts.forEach((part, i) => {
+          if (part.contains(title)) return
+          const px = overlap(titleBox, boxes[i]!)
+          if (px > 0) {
+            problems.push(
+              `h2 covered: ${where} (${span(titleBox)}): ${label(part)} (${span(boxes[i]!)}) covers ${px} px`,
+            )
+          }
+        })
+      })
+    })
+    return problems
+  }, HEADER_LINES)
+}
+
+/**
+ * The Index analysis header lines also hold at 1600×900, where they may wrap
+ * (outside the reference viewports, overview A2) but never overlap or spill.
+ */
+export const INDEX_HEADER_NARROW = { width: 1600, height: 900 } as const
+
+export async function open(page: Page, url: string, viewport: { width: number; height: number }) {
   await page.setViewportSize(viewport)
   await page.goto(url)
   await settle(page)
@@ -158,7 +273,9 @@ export async function measureRoutes(page: Page, api: APIRequestContext): Promise
  * Signature `assertFits(page, api, route)`: the API context resolves the
  * route's `:instanceId`, `:clusterId` and `:queryid` on the live stack.
  * no horizontal scrollbar for any kind; for `fit` no page scrollbar and no
- * table box scrolling at the default page size, and the pager on screen.
+ * table box scrolling at the default page size, and the pager on screen; for
+ * every kind, header lines whose parts do not overlap and whose titles are whole,
+ * and for the Index analysis routes the same header check at 1600×900.
  * Returns the measurements.
  */
 export async function assertFits(
@@ -178,6 +295,9 @@ export async function assertFits(
     )
     // No table card scrolls at the default page size, whatever the kind (I-13).
     expect(measure.scrollingTableBoxes, `${where}: table box scrolls`).toBe(0)
+    // Every header line keeps its parts apart and its title whole (bug-HDR).
+    const headerProblems = await headerLineProblems(page)
+    expect(headerProblems, `${where}: header line: ${headerProblems.join(' | ')}`).toEqual([])
     if (route.kind === 'fit') {
       expect(measure.scrollHeight, `${where}: page scrollbar`).toBeLessThanOrEqual(
         measure.innerHeight,
@@ -189,6 +309,13 @@ export async function assertFits(
         )
       }
     }
+  }
+  if (routePathname(route.path) === '/indexes') {
+    // The header guard also at 1600×900 (bug-HDR): no fit there, the lines only.
+    await open(page, url, INDEX_HEADER_NARROW)
+    const where = `${route.path} at ${INDEX_HEADER_NARROW.width}×${INDEX_HEADER_NARROW.height}`
+    const headerProblems = await headerLineProblems(page)
+    expect(headerProblems, `${where}: header line: ${headerProblems.join(' | ')}`).toEqual([])
   }
   return measures
 }

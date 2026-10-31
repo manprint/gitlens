@@ -181,6 +181,8 @@ describe('Full HD table layout (D26)', () => {
     )
     const title = screen.getByRole('heading', { level: 2, name: 'Rules' })
     expect(title).toHaveClass('min-[1600px]:shrink-0')
+    // The header line carries the test id the live Full HD guard measures (bug-HDR).
+    expect(screen.getByTestId('section-header')).toContainElement(title)
     expect(screen.getByTitle(description)).toHaveClass('min-[1600px]:mt-0', 'min-[1600px]:truncate')
   })
 

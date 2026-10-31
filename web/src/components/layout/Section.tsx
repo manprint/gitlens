@@ -27,7 +27,10 @@ export function Section({ title, description, children, id, actions, captionId }
       {...(id === undefined ? {} : { id })}
       {...(captionId === undefined ? {} : { 'data-caption-id': captionId })}
     >
-      <div className="flex flex-col gap-3 border-b px-5 py-4 min-[1600px]:items-center min-[1600px]:py-2.5 sm:flex-row sm:items-start sm:justify-between">
+      <div
+        className="flex flex-col gap-3 border-b px-5 py-4 min-[1600px]:items-center min-[1600px]:py-2.5 sm:flex-row sm:items-start sm:justify-between"
+        data-testid="section-header"
+      >
         {/* From 1600 px the title and its description share one line (D26). */}
         <div className="min-w-0 min-[1600px]:flex min-[1600px]:items-baseline min-[1600px]:gap-3">
           <div className="flex items-center gap-1 min-[1600px]:shrink-0">

@@ -5,7 +5,8 @@ import IndexAnalysisPage from './IndexAnalysisPage'
 
 import { base as clusters } from '@/test/fixtures/getClusters'
 import { INSTANCE_ID } from '@/test/fixture-helpers'
-import { ok } from '@/test/msw/handlers'
+import { custom as oneHourWindows } from '@/test/fixtures/getAdvisorWindows'
+import { never, ok, status } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 import { flushNetwork } from '@/test/network'
 import { renderWithProviders } from '@/test/render'
@@ -120,11 +121,13 @@ describe('IndexAnalysisPage', () => {
 
     // Each list is a view of the tab (15.3): findings, foreign keys, then the summary tile.
     fireEvent.mouseDown(screen.getByRole('tab', { name: /^Advisor findings/ }))
-    expect(screen.getByText('Advisor findings on indexes')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2, name: 'Index findings' })).toBeInTheDocument()
     const findings = screen.getByRole('table', { name: 'Index findings' })
     expect(within(findings).getByText('index.unused')).toBeInTheDocument()
     fireEvent.mouseDown(screen.getByRole('tab', { name: /^Foreign keys/ }))
-    expect(screen.getByText('Foreign keys without a covering index')).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Unindexed foreign keys' }),
+    ).toBeInTheDocument()
     fireEvent.mouseDown(screen.getByRole('tab', { name: 'Summary' }))
     expect(screen.getByRole('article', { name: 'Foreign keys w/o index' })).toHaveTextContent('1')
   })
@@ -164,8 +167,9 @@ describe('IndexAnalysisPage', () => {
     expect(screen.getByText('The list is incomplete.')).toBeInTheDocument()
   })
 
-  it('IDX-UI-008 says the unused check is pending while the advisor lacks 7 days of history', async () => {
+  it('IDX-UI-008 says the unused check is pending while the advisor lacks a window of history', async () => {
     server.use(
+      ok('getAdvisorWindows', oneHourWindows),
       ok('getClusters', clusters),
       ok('getInstanceIndexes', {
         instance_id: INSTANCE_ID,
@@ -191,6 +195,172 @@ describe('IndexAnalysisPage', () => {
     await flushNetwork(30)
 
     expect(screen.getByText('Unused-index check pending for 1 index.')).toBeInTheDocument()
+  })
+
+  /** A degraded unused-index finding on `object`, with the advisor's `reason`. */
+  function degradedUnused(id: string, object: string, reason: string) {
+    return {
+      finding_id: id,
+      rule_id: 'index.unused',
+      severity: 'warning',
+      state: 'degraded',
+      scope: 'relation',
+      datname: 'app',
+      object_name: `public.${object}`,
+      title: 'Advisor input unavailable',
+      degraded_reason: reason,
+    }
+  }
+
+  /** 20 MiB: above the advisor's 10 MiB floor, so the index can be judged. */
+  const LARGE = 20 * 1024 * 1024
+
+  /**
+   * The unused-index check pending, with `windows` answering the advisor
+   * windows; `orders_old_idx` is never scanned and `oldBytes` large.
+   */
+  function renderPending(
+    windows: Parameters<typeof server.use>[0],
+    {
+      findings = [
+        degradedUnused('f9', 'orders_old_idx', 'index usage history is shorter than the window'),
+      ] as unknown[],
+      oldBytes = LARGE,
+    } = {},
+  ) {
+    server.use(
+      windows,
+      ok('getClusters', clusters),
+      ok('getInstanceIndexes', {
+        instance_id: INSTANCE_ID,
+        items: ITEMS.map((item) =>
+          item.indexrelname === 'orders_old_idx' ? { ...item, index_bytes: oldBytes } : item,
+        ),
+        truncated: false,
+        relations_not_reported: null,
+      }),
+      ok('getFindings', findings),
+    )
+    return renderWithProviders(<IndexAnalysisPage />, { route: '/indexes' })
+  }
+
+  /** The status note whose text starts with `headline`. */
+  function noteTitle(headline: string): string {
+    const note = screen
+      .getAllByRole('status')
+      .find((element) => element.textContent?.startsWith(headline))
+    expect(note, headline).toBeDefined()
+    return note!.getAttribute('title') ?? ''
+  }
+
+  /** The pending note and the "never scanned" hint, the two texts that name the window. */
+  function windowTexts(): string[] {
+    const hint = screen.getByText('never scanned').getAttribute('title') ?? ''
+    expect(hint).toMatch(/^No scan since the statistics were reset\./)
+    return [noteTitle('Unused-index check pending'), hint]
+  }
+
+  const bounds = { default_seconds: 604800, min_seconds: 3600, max_seconds: 7776000 } as const
+
+  it.each([
+    [129600, '36 hours'],
+    [1209600, '14 days'],
+  ])(
+    'HDR-WIN-001 the unused-index texts name the configured window (%i s: %s)',
+    async (seconds, phrase) => {
+      renderPending(
+        ok('getAdvisorWindows', [
+          { key: 'window.unused_index', seconds, source: 'custom', ...bounds },
+          { key: 'window.backup_history', seconds: 604800, source: 'default', ...bounds },
+        ]),
+      )
+      await flushNetwork(30)
+
+      for (const text of windowTexts()) {
+        expect(text).toContain(`unused after ${phrase} without a scan`)
+        // Either source can complete the window: on PostgreSQL 16 and later the
+        // statistics settle it before pglens has that much history (D22b).
+        expect(text).toContain('from the pglens history or, on PostgreSQL 16 and later, from')
+        expect(text).not.toMatch(/7 days/)
+      }
+    },
+  )
+
+  it.each([
+    ['loading', never('getAdvisorWindows')],
+    ['unavailable', status('getAdvisorWindows', 503, { error: 'store unavailable', detail: '' })],
+  ])('HDR-WIN-002 while the window is %s the texts name no length', async (_state, windows) => {
+    renderPending(windows)
+    await flushNetwork(30)
+
+    for (const text of windowTexts()) {
+      expect(text).toContain('unused after its full observation window without a scan')
+      expect(text).not.toMatch(/\d+ (days?|hours?)/)
+    }
+  })
+
+  it('HDR-WIN-003 the rule texts follow the configured window, not the window of an older evaluation', async () => {
+    renderPending(
+      ok('getAdvisorWindows', [
+        { key: 'window.unused_index', seconds: 129600, source: 'custom', ...bounds },
+        { key: 'window.backup_history', seconds: 604800, source: 'default', ...bounds },
+      ]),
+      {
+        findings: [
+          degradedUnused('f9', 'orders_old_idx', 'index usage history is shorter than 7 days'),
+          // Evaluated before the window changed: its evidence still says 7 days.
+          {
+            ...FINDINGS[0],
+            finding_id: 'f8',
+            object_name: 'public.orders_customer_idx',
+            evidence: { window_seconds: 604800 },
+          },
+        ],
+      },
+    )
+    await flushNetwork(30)
+
+    for (const text of windowTexts()) {
+      expect(text).toContain('unused after 36 hours without a scan')
+      expect(text).not.toMatch(/7 days/)
+    }
+  })
+
+  it('HDR-WIN-004 the hint of a small index promises no verdict and names the floor', async () => {
+    renderPending(ok('getAdvisorWindows', oneHourWindows), { oldBytes: 8192 })
+    await flushNetwork(30)
+
+    const hint = screen.getByText('never scanned').getAttribute('title') ?? ''
+    expect(hint).toBe(
+      'No scan since the statistics were reset. The advisor never judges indexes of 10.0 MiB or less, so this is the raw counter, not a verdict.',
+    )
+  })
+
+  it('HDR-WIN-005 only a short history is pending; a check that waiting does not settle says why', async () => {
+    renderPending(ok('getAdvisorWindows', oneHourWindows), {
+      findings: [
+        degradedUnused('f9', 'orders_old_idx', 'index usage history is shorter than 1 hour'),
+        degradedUnused(
+          'f10',
+          'orders_a_idx',
+          'the unused-index window (90 days) is longer than the kept index metrics history (30 days)',
+        ),
+        degradedUnused('f11', 'orders_b_idx', 'standby scans unknown: no sibling snapshot'),
+        degradedUnused('f12', 'orders_c_idx', 'standby scans unknown: no sibling snapshot'),
+      ],
+    })
+    await flushNetwork(30)
+
+    expect(screen.getByText('Unused-index check pending for 1 index.')).toBeInTheDocument()
+    const blocked = noteTitle('Unused-index check inconclusive for 3 indexes.')
+    expect(blocked).toContain(
+      '2: Standby scans unknown: no standby of the cluster has sent a snapshot',
+    )
+    expect(blocked).toContain(
+      '1: The unused-index window (90 days) is longer than the kept index metrics history (30 days): the pglens history never covers the window, so waiting does not settle the check',
+    )
+    // Neither promises a verdict after the window.
+    expect(blocked).not.toContain('unused after')
   })
 
   it('IDX-UI-006 says so when no index was reported', async () => {

@@ -255,4 +255,24 @@ describe('IndexAnalysisPage on a Full HD screen (15.3)', () => {
 
     await expect(expectNoA11yViolations(container)).resolves.toBeUndefined()
   })
+
+  it('HDR-UI-004 the findings and foreign-key views keep their header line short: short titles, a compact Findings link', async () => {
+    render('/indexes?view=findings', true)
+    await flushNetwork(30)
+
+    const line = panelHeader()
+    expect(line).toContainElement(screen.getByRole('heading', { level: 2, name: 'Index findings' }))
+    // From 1600 px the link reads "Findings" with an arrow; its name stays "Open Findings".
+    const link = screen.getByRole('link', { name: 'Open Findings' })
+    expect(screen.getByTestId('index-panel-actions')).toContainElement(link)
+    expect(link).toHaveAttribute('href', '/findings')
+    expect(link).toHaveClass('whitespace-nowrap')
+    expect(within(link).getByText('Open')).toHaveClass('min-[1600px]:sr-only')
+
+    fireEvent.mouseDown(viewTab(/^Foreign keys/))
+    expect(
+      within(panelHeader()).getByRole('heading', { level: 2, name: 'Unindexed foreign keys' }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Open Findings' })).not.toBeInTheDocument()
+  })
 })

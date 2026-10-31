@@ -1,6 +1,8 @@
 import { useEffect, useMemo, type ReactNode } from 'react'
+import { ArrowRight } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 
+import { useAdvisorWindows } from '@/api/queries'
 import type { Schemas } from '@/api/types'
 import { CopyButton } from '@/components/layout/CopyButton'
 import { MetricTile } from '@/components/layout/MetricTile'
@@ -20,10 +22,12 @@ import {
   matchesFilter,
   needsAttention,
   summariseIndexes,
+  unusedCheckStatus,
   type ForeignKeyGap,
   type IndexRow,
   type RowFilter,
 } from '@/lib/indexAnalysis'
+import { UNUSED_INDEX_MIN_BYTES, windowPhrase } from '@/lib/indexCleanup'
 import { summariseColumns } from '@/lib/indexDefinition'
 
 import { CELL_BADGE, IndexPanel, PanelNote, type PanelStat } from './IndexPanel'
@@ -155,7 +159,11 @@ function sortValue(row: IndexRow, key: SortKey): string | number | null {
  * The inventory columns; size, scans and last scan read best largest or newest
  * first. From 1600 px every row is one line: widths, and free text truncated (D26).
  */
-function indexColumns(showDatabase: boolean, now: Date): SimpleColumn<IndexRow>[] {
+function indexColumns(
+  showDatabase: boolean,
+  now: Date,
+  unusedWindow: string,
+): SimpleColumn<IndexRow>[] {
   return [
     {
       id: 'name',
@@ -194,7 +202,12 @@ function indexColumns(showDatabase: boolean, now: Date): SimpleColumn<IndexRow>[
       ),
     },
     { id: 'method', header: 'Method', width: '5rem', cell: (row) => row.parsed.method ?? '—' },
-    { id: 'flags', header: 'Flags', width: '13rem', cell: (row) => <RowBadges row={row} /> },
+    {
+      id: 'flags',
+      header: 'Flags',
+      width: '13rem',
+      cell: (row) => <RowBadges row={row} unusedWindow={unusedWindow} />,
+    },
     {
       id: 'bytes',
       header: 'Size',
@@ -244,11 +257,53 @@ function lastScanText(row: IndexRow, now: Date): string {
   }
 }
 
-const NEVER_SCANNED_HINT =
-  'No scan since the statistics were reset. The advisor waits for 7 days of history before it calls an index unused.'
+/**
+ * How the advisor reaches an unused verdict (D22b, D22c): the configured
+ * window without a scan in the pglens history or, on PostgreSQL 16 and later,
+ * from the statistics alone (no scan since a reset at least that old, or a
+ * last scan older than the window), without waiting for pglens history.
+ */
+function unusedRuleText(unusedWindow: string): string {
+  return `The advisor calls an index unused after ${unusedWindow} without a scan: from the pglens history or, on PostgreSQL 16 and later, from the statistics when there is no scan since a reset that long ago or the last scan is older.`
+}
 
-/** The flags of an index, by name, for the badge strip's `title`. */
-function rowFlags(row: IndexRow): { label: string; variant: BadgeVariant; title?: string }[] {
+/**
+ * The "never scanned" hint. The advisor never judges an index of
+ * UNUSED_INDEX_MIN_BYTES or less (nor a primary key or a unique index, which
+ * get no such flag), so for a small one the hint promises no verdict.
+ */
+function neverScannedHint(row: IndexRow, unusedWindow: string): string {
+  const counter = 'No scan since the statistics were reset.'
+  if (row.bytes !== null && row.bytes <= UNUSED_INDEX_MIN_BYTES) {
+    return `${counter} The advisor never judges indexes of ${formatBytes(UNUSED_INDEX_MIN_BYTES)} or less, so this is the raw counter, not a verdict.`
+  }
+  return `${counter} ${unusedRuleText(unusedWindow)}`
+}
+
+/**
+ * What an unused-index check that waiting does not settle means, from the
+ * advisor's reason (`internal/advisor/rules_relation.go`); a reason this page
+ * does not know is shown as the advisor wrote it.
+ */
+function blockedReasonText(reason: string): string {
+  if (reason.includes('longer than the kept index metrics history')) {
+    return `The ${reason.replace(/^the /, '')}: the pglens history never covers the window, so waiting does not settle the check, though on PostgreSQL 16 and later the statistics still can. Shorten the window or keep index metrics longer.`
+  }
+  if (reason.startsWith('standby scans unknown')) {
+    return 'Standby scans unknown: no standby of the cluster has sent a snapshot, so a scan there cannot be ruled out. The check concludes once the standbys report.'
+  }
+  if (reason === '') return 'The advisor gave no reason.'
+  return `${reason.charAt(0).toUpperCase()}${reason.slice(1)}.`
+}
+
+/**
+ * The flags of an index, by name, for the badge strip's `title`;
+ * `unusedWindow` names the unused-index window in the "never scanned" hint.
+ */
+function rowFlags(
+  row: IndexRow,
+  unusedWindow: string,
+): { label: string; variant: BadgeVariant; title?: string }[] {
   const flags: { label: string; variant: BadgeVariant; title?: string }[] = []
   if (row.primary) flags.push({ label: 'primary', variant: 'secondary' })
   if (row.unique && !row.primary) flags.push({ label: 'unique', variant: 'secondary' })
@@ -270,7 +325,11 @@ function rowFlags(row: IndexRow): { label: string; variant: BadgeVariant; title?
     !row.primary &&
     !row.unique
   ) {
-    flags.push({ label: 'never scanned', variant: 'outline', title: NEVER_SCANNED_HINT })
+    flags.push({
+      label: 'never scanned',
+      variant: 'outline',
+      title: neverScannedHint(row, unusedWindow),
+    })
   }
   return flags
 }
@@ -278,8 +337,8 @@ function rowFlags(row: IndexRow): { label: string; variant: BadgeVariant; title?
 type BadgeVariant = 'secondary' | 'outline' | 'destructive' | 'warning'
 
 /** The badges wrap below 1600 px; from 1600 px they stay on one line, the list in the `title`. */
-function RowBadges({ row }: { row: IndexRow }) {
-  const flags = rowFlags(row)
+function RowBadges({ row, unusedWindow }: { row: IndexRow; unusedWindow: string }) {
+  const flags = rowFlags(row, unusedWindow)
   return (
     <div
       className="flex flex-wrap gap-1 min-[1600px]:flex-nowrap min-[1600px]:overflow-hidden"
@@ -622,23 +681,28 @@ export function IndexesPanel({
     }
   }, [scopedFindings])
   const attention = rows.filter(needsAttention).length
-  // index.unused waits for 7 days of usage history. Until then the advisor reports the
-  // check as degraded, and the page says so instead of showing a clean zero.
-  const unusedPending = useMemo(
-    () =>
-      indexFindings(findings).filter(
-        (finding) =>
-          finding.rule_id === INDEX_RULES.unused &&
-          finding.state === 'degraded' &&
-          (database === '' || (finding.datname ?? '') === database),
-      ).length,
-    [findings, database],
-  )
+  // index.unused waits until the pglens history covers the configured window, or
+  // on PostgreSQL 16 and later until the statistics settle it (D22b, D22c). Until
+  // then the advisor reports the check as degraded, and the page says so instead
+  // of showing a clean zero. Only a short history is pending: a window longer
+  // than the kept history or unknown standby scans are not settled by waiting,
+  // and have their own note.
+  const unusedCheck = useMemo(() => unusedCheckStatus(findings, database), [findings, database])
+  const unusedPending = unusedCheck.pending
+  const unusedBlocked = unusedCheck.blocked.reduce((sum, group) => sum + group.count, 0)
   // Relative times are measured from when the data was fetched, so a render stays pure.
   const showDatabase = summary.byDatabase.length > 1 && database === ''
+  // The configured unused-index window names the length in the rule texts
+  // below: they state the rule as it stands now, which a finding's evidence
+  // (the window of its evaluation) may predate. Until it loads, or if it cannot
+  // be read, the texts name no length.
+  const windowsQuery = useAdvisorWindows()
+  const configuredWindow =
+    windowsQuery.data?.find((window) => window.key === 'window.unused_index')?.seconds ?? null
+  const unusedWindow = windowPhrase(configuredWindow)
   const columns = useMemo(
-    () => indexColumns(showDatabase, new Date(dataUpdatedAt)),
-    [showDatabase, dataUpdatedAt],
+    () => indexColumns(showDatabase, new Date(dataUpdatedAt), unusedWindow),
+    [showDatabase, dataUpdatedAt, unusedWindow],
   )
 
   function setView(value: string) {
@@ -666,9 +730,17 @@ export function IndexesPanel({
 
   const incompleteText = `The list is incomplete. The agent reports only its busiest and largest indexes per database (checks.index_stats.top_n, 50 by default)${reported >= limit ? `, and this page shows at most ${limit}` : ''}. The counts cover the ${formatCount(reported)} indexes reported, not every index of the server. Raise top_n in the agent configuration to see more.`
   const pendingHeadline = `Unused-index check pending for ${formatCount(unusedPending)} ${unusedPending === 1 ? 'index' : 'indexes'}.`
-  const pendingText = `The advisor needs 7 days of usage history before it calls an index unused. Until then, "never scanned" is the raw statistic: no scan since the statistics were last reset.`
+  const pendingText = `${unusedRuleText(unusedWindow)} Until the advisor has a verdict, "never scanned" is the raw statistic: no scan since the statistics were last reset.`
+  const blockedHeadline = `Unused-index check inconclusive for ${formatCount(unusedBlocked)} ${unusedBlocked === 1 ? 'index' : 'indexes'}.`
+  const blockedText = unusedCheck.blocked
+    .map((group) =>
+      unusedCheck.blocked.length === 1
+        ? blockedReasonText(group.reason)
+        : `${formatCount(group.count)}: ${blockedReasonText(group.reason)}`,
+    )
+    .join(' ')
   const notes =
-    incomplete || unusedPending > 0 ? (
+    incomplete || unusedPending > 0 || unusedBlocked > 0 ? (
       <>
         {incomplete ? (
           <PanelNote title={incompleteText} tone="warning">
@@ -682,6 +754,11 @@ export function IndexesPanel({
         {unusedPending > 0 ? (
           <PanelNote title={`${pendingHeadline} ${pendingText}`}>
             <strong>{pendingHeadline}</strong> {pendingText}
+          </PanelNote>
+        ) : null}
+        {unusedBlocked > 0 ? (
+          <PanelNote title={`${blockedHeadline} ${blockedText}`}>
+            <strong>{blockedHeadline}</strong> {blockedText}
           </PanelNote>
         ) : null}
       </>
@@ -698,11 +775,12 @@ export function IndexesPanel({
         'What the indexes in scope are made of: their kinds, access methods and databases, and the tables that carry the most.',
     },
     findings: {
-      title: 'Advisor findings on indexes',
+      // Short titles keep the header line within 1920 px beside the figures and the actions.
+      title: 'Index findings',
       description: `${formatCount(counts.unused)} unused · ${formatCount(counts.duplicate)} duplicate groups · ${formatCount(counts.redundant)} redundant prefixes · ${formatCount(counts.invalid)} invalid · ${formatCount(counts.divergence)} diverging · ${formatCount(gaps.length)} foreign keys without an index`,
     },
     'foreign-keys': {
-      title: 'Foreign keys without a covering index',
+      title: 'Unindexed foreign keys',
       description:
         'Deleting or re-keying a referenced row scans the referencing table. These are indexes that are missing, so they do not appear in the inventory.',
     },
@@ -829,8 +907,18 @@ export function IndexesPanel({
         actions={
           <>
             {view === 'findings' ? (
-              <Link className="text-primary text-sm font-medium hover:underline" to="/findings">
-                Open Findings
+              // From 1600 px "Open" leaves the line and stays in the link's name, so
+              // the findings view's header line still fits at 1920 px (bug-HDR).
+              <Link
+                className="text-primary text-sm font-medium whitespace-nowrap hover:underline"
+                data-testid="index-findings-link"
+                to="/findings"
+              >
+                <span className="min-[1600px]:sr-only">Open</span> Findings
+                <ArrowRight
+                  aria-hidden="true"
+                  className="ml-0.5 inline size-3.5 align-[-0.125em]"
+                />
               </Link>
             ) : null}
             <TabsList aria-label="Index views" className="min-[1600px]:h-8!">

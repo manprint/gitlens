@@ -78,6 +78,43 @@ export function indexFindings(findings: readonly Finding[]): Finding[] {
   )
 }
 
+/**
+ * The unused-index checks the advisor could not conclude, in scope: `pending`
+ * counts those that only lack history, which a wait settles; `blocked` groups
+ * the others by the advisor's reason, which a wait does not settle (the window
+ * longer than the kept index history, the standbys' scans unknown, or any
+ * other reason the advisor gives), largest group first. The reasons are the
+ * advisor's own (`internal/advisor/rules_relation.go`).
+ */
+export interface UnusedCheckStatus {
+  pending: number
+  blocked: { reason: string; count: number }[]
+}
+
+/** The reason the advisor gives an unused-index check that only lacks history. */
+const SHORT_HISTORY_REASON = 'index usage history is shorter than '
+
+export function unusedCheckStatus(
+  findings: readonly Finding[],
+  database: string,
+): UnusedCheckStatus {
+  let pending = 0
+  const blocked = new Map<string, number>()
+  for (const finding of indexFindings(findings)) {
+    if (finding.rule_id !== INDEX_RULES.unused || finding.state !== 'degraded') continue
+    if (database !== '' && (finding.datname ?? '') !== database) continue
+    const reason = (finding.degraded_reason ?? '').trim()
+    if (reason.startsWith(SHORT_HISTORY_REASON)) pending += 1
+    else blocked.set(reason, (blocked.get(reason) ?? 0) + 1)
+  }
+  return {
+    pending,
+    blocked: [...blocked]
+      .map(([reason, count]) => ({ reason, count }))
+      .sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason)),
+  }
+}
+
 function evidenceIndexes(finding: Finding): string[] {
   const names = finding.evidence?.indexes
   return Array.isArray(names)

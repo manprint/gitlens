@@ -10,6 +10,7 @@ import {
   matchesSearch,
   needsAttention,
   summariseIndexes,
+  unusedCheckStatus,
 } from './indexAnalysis'
 
 type Finding = Schemas['Finding']
@@ -209,5 +210,49 @@ describe('foreignKeyGaps', () => {
       columns: 'customer_id',
       referenced: 'public.customers',
     })
+  })
+})
+
+describe('unusedCheckStatus (bug-HDR)', () => {
+  const degraded = (datname: string, reason: string | undefined) => ({
+    finding_id: `${datname}-${reason ?? 'none'}`,
+    rule_id: 'index.unused',
+    severity: 'warning' as const,
+    state: 'degraded' as const,
+    scope: 'relation' as const,
+    datname,
+    object_name: 'public.some_idx',
+    title: 'Advisor input unavailable',
+    ...(reason === undefined ? {} : { degraded_reason: reason }),
+  })
+
+  it('HDR-UNUSED-001 counts only a short history as pending and groups the other reasons', () => {
+    const findings = [
+      degraded('app', 'index usage history is shorter than 7 days'),
+      degraded('app', 'index usage history is shorter than 36 hours'),
+      degraded('app', 'standby scans unknown: no sibling snapshot'),
+      degraded('app', 'standby scans unknown: no sibling snapshot'),
+      degraded(
+        'app',
+        'the unused-index window (90 days) is longer than the kept index metrics history (30 days)',
+      ),
+      degraded('app', undefined),
+      degraded('other', 'index usage history is shorter than 7 days'),
+      { ...degraded('app', 'index usage history is shorter than 7 days'), state: 'open' as const },
+    ] as Finding[]
+
+    expect(unusedCheckStatus(findings, 'app')).toEqual({
+      pending: 2,
+      blocked: [
+        { reason: 'standby scans unknown: no sibling snapshot', count: 2 },
+        { reason: '', count: 1 },
+        {
+          reason:
+            'the unused-index window (90 days) is longer than the kept index metrics history (30 days)',
+          count: 1,
+        },
+      ],
+    })
+    expect(unusedCheckStatus(findings, '').pending).toBe(3)
   })
 })

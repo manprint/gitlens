@@ -123,13 +123,31 @@ the HA stack (the cluster `events` tab still renders an unpaged card list).
 `web/e2e/fullhd_routes.ts` lists the search state of Slowest queries
 (`/queries?q=res_partner`), Query inspector
 (`/instances/:instanceId/queries?q=res_partner`) and Advisor findings
-(`/findings?q=index`), pending 12.3: the box sits on the toolbar line and the
-matches fill the same table, so these pages must fit like their default state.
+(`/findings?q=index`), verified live by 12.3 (`SRCH-E2E-001`, `SRCH-E2E-002`,
+`SRCH-E2E-004` call `assertFits` on them): the box sits on the toolbar line and
+the matches fill the same table, so these pages fit like their default state.
 
 Exception: the search-results state of Index analysis (`/indexes?q=…`, any
 tab). The grouped results of "Search everything" are a user action shown above
 the tab's table, like an expanded row (D26), so that state is not listed and
 may scroll the page. From 1600 px each result list is capped at 160 px and
 scrolls inside its group, so at 1920×950 the tab's table header stays on
-screen (estimated about 640 px down; 12.3 confirms it live). Without `q` the
+screen: measured live by `SRCH-E2E-003` (12.3) at 1920×950 with `q=res_partner`,
+Indexes header top 546 px, bottom 578 px, page height 1236 px. Without `q` the
 page is measured as before.
+
+## Index analysis panel headers (bug-HDR)
+
+From 1920 px every Index analysis panel header (`index-panel-header`: the four
+Indexes views, Cleanup, Dead rows) is one line: 53 px with the view tabs, 45 px
+on Cleanup and Dead rows. The title never shrinks and the note chips truncate
+(their full text is in `title`). Between 1600 and 1919 px the header may wrap:
+at 1600 px the Indexes views take 85 px (the view tabs on a second line) and
+Dead rows 73 px (the figures on a second line); Cleanup stays one line (45 px).
+1600 px is not a reference viewport (overview A2): the D26 budget is measured at
+1920×1080 and 1920×950 only. `assertFits` checks the header lines at both
+reference viewports (and, from 1920 px, that an Index analysis header did not
+wrap) and, for the `/indexes` routes, also at 1600×900, where a wrap is allowed
+but an overlap, a spill or a part outside the card is not; `HDR-E2E-001` runs
+the same check on every `/indexes` entry after asserting that the live
+inventory shows its notes.
