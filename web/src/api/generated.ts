@@ -2333,7 +2333,7 @@ export interface components {
              */
             expected_by: string | null;
         };
-        /** @description A case-insensitive substring, trimmed, 2 to 200 characters. '%', '_' and '\' match themselves. */
+        /** @description A case-insensitive substring. The server trims it and then counts its characters (Unicode code points, not bytes): 2 to 200 after trimming, otherwise a 400. The raw value is not limited, so the length is not a schema constraint: surrounding white space does not count. '%', '_' and '\' match themselves. */
         SearchTerm: string;
         SearchSnippetPart: {
             text: string;
@@ -3691,7 +3691,7 @@ export interface operations {
                 to?: components["schemas"]["Timestamp"];
                 order_by?: "calls" | "calls_rate" | "total_calls" | "total_exec_time" | "total_exec_time_ms" | "exec_time" | "total_time" | "total_rows" | "rows" | "rows_rate" | "shared_blks_hit" | "shared_blks_hit_rate" | "shared_blks_read" | "shared_blks_read_rate" | "wal_bytes" | "wal_bytes_rate" | "temp_blks_written" | "temp_blks_written_rate" | "mean_exec_time" | "mean_time";
                 limit?: number;
-                /** @description Keeps the statements whose query text, queryid (as text) or database contains the term (case-insensitive, trimmed; '%', '_' and '\' match themselves), before they are ranked by order_by and cut to limit. The text matched is the one returned. Absent or empty is no search: every statement of the window is ranked. A term of 1 or more than 200 characters once trimmed is a 400. */
+                /** @description Keeps the statements whose query text, queryid (as text) or database contains the term (case-insensitive, trimmed; '%', '_' and '\' match themselves), before they are ranked by order_by and cut to limit. The text matched is the one returned. Absent or empty is no search: every statement of the window is ranked. The length is counted after trimming, in characters (Unicode code points): a term of 1 or more than 200 characters once trimmed is a 400, whatever white space surrounds it. */
                 q?: string;
             };
             header?: never;
@@ -3960,7 +3960,7 @@ export interface operations {
                 cluster_id?: components["schemas"]["ClusterId"];
                 /** @description Maximum findings; default 100 and maximum 1000. */
                 limit?: number;
-                /** @description Keeps the findings whose rule_id, title, detail, remediation, object_name, datname, mute_reason or evidence contains the term (case-insensitive, trimmed; '%', '_' and '\' match themselves), within the state asked for and before limit. evidence is matched in its jsonb canonical text form (evidence::text: keys sorted by length then bytes, one space after ':' and ','), not as it was written. Absent or empty is no search. A term of 1 or more than 200 characters once trimmed is a 400. */
+                /** @description Keeps the findings whose rule_id, title, detail, remediation, object_name, datname, mute_reason or evidence contains the term (case-insensitive, trimmed; '%', '_' and '\' match themselves), within the state asked for and before limit. evidence is matched in its jsonb canonical text form (evidence::text: keys sorted by length then bytes, one space after ':' and ','), not as it was written. Absent or empty is no search. The length is counted after trimming, in characters (Unicode code points): a term of 1 or more than 200 characters once trimmed is a 400, whatever white space surrounds it. */
                 q?: string;
             };
             header?: never;

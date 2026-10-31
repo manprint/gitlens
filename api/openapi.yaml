@@ -1288,10 +1288,11 @@ components:
             otherwise.
     SearchTerm:
       type: string
-      minLength: 2
-      maxLength: 200
       description: >-
-        A case-insensitive substring, trimmed, 2 to 200 characters. '%', '_'
+        A case-insensitive substring. The server trims it and then counts its
+        characters (Unicode code points, not bytes): 2 to 200 after trimming,
+        otherwise a 400. The raw value is not limited, so the length is not a
+        schema constraint: surrounding white space does not count. '%', '_'
         and '\' match themselves.
     SearchSnippetPart:
       type: object
@@ -3097,14 +3098,16 @@ paths:
         - name: q
           in: query
           required: false
-          schema: { type: string, maxLength: 200 }
+          schema: { type: string }
           description: >-
             Keeps the statements whose query text, queryid (as text) or
             database contains the term (case-insensitive, trimmed; '%', '_'
             and '\' match themselves), before they are ranked by order_by and
             cut to limit. The text matched is the one returned. Absent or
-            empty is no search: every statement of the window is ranked. A
-            term of 1 or more than 200 characters once trimmed is a 400.
+            empty is no search: every statement of the window is ranked. The
+            length is counted after trimming, in characters (Unicode code
+            points): a term of 1 or more than 200 characters once trimmed is
+            a 400, whatever white space surrounds it.
       responses:
         '200':
           description: Top statements and comparability scope.
@@ -3460,7 +3463,7 @@ paths:
         - name: q
           in: query
           required: false
-          schema: { type: string, maxLength: 200 }
+          schema: { type: string }
           description: >-
             Keeps the findings whose rule_id, title, detail, remediation,
             object_name, datname, mute_reason or evidence contains the term
@@ -3468,8 +3471,10 @@ paths:
             within the state asked for and before limit. evidence is matched
             in its jsonb canonical text form (evidence::text: keys sorted by
             length then bytes, one space after ':' and ','), not as it was
-            written. Absent or empty is no search. A term of 1 or more than 200
-            characters once trimmed is a 400.
+            written. Absent or empty is no search. The length is counted after
+            trimming, in characters (Unicode code points): a term of 1 or more
+            than 200 characters once trimmed is a 400, whatever white space
+            surrounds it.
       responses:
         '200':
           description: >-
