@@ -164,7 +164,7 @@ function classify(
       reason: 'unused',
       why:
         basis === null
-          ? 'The advisor saw no scans of this index over its usage history.'
+          ? 'The advisor saw no scans of this index within its observation window.'
           : `The advisor saw no scans of this index: ${basis}.`,
       coveredBy: null,
       basis: 'advisor',
@@ -237,8 +237,11 @@ function resetDay(value: unknown): string | null {
  * days". A verdict from an index never scanned since the statistics reset
  * (evidence `window: "since statistics reset"`) rests on that reset, not on
  * pglens's history: "PostgreSQL statistics show no scan since their reset on
- * 2026-10-01". Null when the finding predates these fields, or when its
- * observation is shorter than the window, which no verdict rests on.
+ * 2026-10-01". A verdict from an index PostgreSQL last scanned before the
+ * window (evidence `last_scan`) rests on that scan: "PostgreSQL statistics
+ * show the last scan on 2026-10-20". Null when the finding predates these
+ * fields, or when its observation is shorter than the window, which no verdict
+ * rests on.
  */
 export function observationBasis(evidence: Evidence): string | null {
   const window = seconds(evidence, 'window_seconds')
@@ -251,6 +254,11 @@ export function observationBasis(evidence: Evidence): string | null {
         ? 'PostgreSQL statistics show no scan since their last reset (time unknown)'
         : `PostgreSQL statistics show no scan since their reset on ${day}`
     return windowText === null ? reset : `${reset}; ${windowText}`
+  }
+  const lastScan = resetDay(evidence?.last_scan)
+  if (lastScan !== null) {
+    const scan = `PostgreSQL statistics show the last scan on ${lastScan}`
+    return windowText === null ? scan : `${scan}; ${windowText}`
   }
   const observed = seconds(evidence, 'observed_for_seconds')
   if (observed === null || window === null || window === 0 || observed < window) return null
@@ -279,7 +287,7 @@ function unusedWindowSeconds(
 }
 
 /** "7 days" for a known window, else a phrase that names no length. */
-function windowPhrase(window: number | null): string {
+export function windowPhrase(window: number | null): string {
   return window === null ? 'its full observation window' : formatWindow(window)
 }
 

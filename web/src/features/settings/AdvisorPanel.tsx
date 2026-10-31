@@ -433,9 +433,9 @@ function AdvisorWindows() {
       <form className="space-y-4 px-5 py-4" noValidate onSubmit={save}>
         <Callout role="note" variant="warning">
           <strong>Short windows can raise false positives.</strong> Saved windows apply at the next
-          advisor evaluation. On PostgreSQL 16 and later the statistics age counts only for an index
-          never scanned since the reset; a base backup stays recent for 7 days (30 days for a backup
-          strategy) whatever the window.
+          evaluation. On PostgreSQL 16+ an index with no scan for the window, in the statistics and
+          in pglens, is judged at once; a base backup stays recent 7 days (30 for a backup strategy)
+          whatever the window.
         </Callout>
         <ul className="text-muted-foreground grid gap-1 text-sm leading-relaxed min-[1600px]:grid-cols-2 min-[1600px]:gap-4">
           <li id={helpIds.window}>{ADVISOR_HELP.window}</li>

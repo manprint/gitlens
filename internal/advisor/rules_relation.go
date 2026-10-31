@@ -146,6 +146,25 @@ func scannedWithin(now time.Time, i IndexStat, window time.Duration) bool {
 	return i.ScanTracked && i.LastScan != nil && now.Sub(*i.LastScan) < window
 }
 
+// shortHistoryReason is the reason of an index.unused finding degraded for
+// want of history. When the store keeps less index history than the window,
+// pglens's own history never covers it, and the reason says so instead of
+// promising a verdict that waiting will not bring.
+func shortHistoryReason(window, kept time.Duration) string {
+	if kept > 0 && window > kept {
+		return "the unused-index window (" + windowText(window) + ") is longer than the kept index metrics history (" + windowText(kept) + ")"
+	}
+	return "index usage history is shorter than " + windowText(window)
+}
+
+// lastScannedBefore reports whether PostgreSQL (16 and later) recorded the last
+// scan of the index before the window. With no scan pglens saw inside the
+// window either, the index is a candidate at once, however short the
+// instance's own history is (D22b).
+func lastScannedBefore(now time.Time, i IndexStat, window time.Duration) bool {
+	return i.ScanTracked && i.LastScan != nil && now.Sub(*i.LastScan) >= window
+}
+
 // indexObservation is the effective observation window of an index (D22b):
 // the instance's own history of it, or the age of PostgreSQL's statistics when
 // that is longer. Before PostgreSQL 16 the scans made before pglens started
@@ -194,28 +213,42 @@ func init() {
 			if scannedWithin(s.Now, i, window) {
 				continue
 			}
-			sinceReset := neverScannedSinceReset(s.Now, i, window)
-			if !sinceReset {
-				if i.HistoryDays < window.Hours()/24 {
-					out = append(out, degradedRelation("index.unused", SeverityWarning, i.Datname, i.Name, "index usage history is shorter than "+windowText(window)))
-					continue
-				}
-				// IdxScan is the peak scan rate over the whole history; the
-				// latest rate alone called any index idle for five minutes
-				// unused.
-				if i.IdxScan != 0 {
-					continue
-				}
-			}
+			// Small, primary and unique indexes are never candidates, so
+			// they get no degraded finding either.
 			if i.SizeBytes <= unusedIndexBytes || i.IsPrimary || i.IsUnique {
 				continue
 			}
-			detail := fmt.Sprintf("no scan of this index was recorded in %.1f days", i.HistoryDays)
+			sinceReset := neverScannedSinceReset(s.Now, i, window)
+			lastScanBefore := lastScannedBefore(s.Now, i, window)
+			if !sinceReset {
+				// IdxScan is the peak scan rate within the window; the
+				// latest rate alone called any index idle for five minutes
+				// unused, and the peak over the whole history kept an
+				// index scanned before the window in use for good. A scan
+				// pglens saw within the window means the index is in use,
+				// however short its history.
+				if i.IdxScan != 0 {
+					continue
+				}
+				// PostgreSQL 16 and later recorded the last scan before
+				// the window, and pglens saw none since: the statistics
+				// prove the window without pglens's own history (D22b).
+				// Otherwise pglens's history must cover the window.
+				if !lastScanBefore && i.HistoryDays < window.Hours()/24 {
+					out = append(out, degradedRelation("index.unused", SeverityWarning, i.Datname, i.Name, shortHistoryReason(window, s.IndexHistoryKept)))
+					continue
+				}
+			}
+			detail := "no scan of this index was recorded in the last " + windowText(window)
 			observed := indexObservation(s.Now, i)
 			evidence := map[string]any{
 				"peak_scan_rate": i.IdxScan, "history_days": i.HistoryDays, "size_bytes": i.SizeBytes,
 				"observed_source": observed.Source, "observed_for_seconds": int64(observed.Duration / time.Second),
 				"window_seconds": int64(window / time.Second),
+			}
+			if lastScanBefore {
+				detail = "no scan of this index since " + i.LastScan.UTC().Format("2006-01-02") + ", more than " + windowText(window) + " ago"
+				evidence["last_scan"] = i.LastScan.UTC().Format(time.RFC3339)
 			}
 			if sinceReset {
 				detail = "no scan of this index since the statistics were reset, at an unknown time"

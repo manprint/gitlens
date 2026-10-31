@@ -6,9 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/manprint/pglens/internal/clock"
+	"github.com/manprint/pglens/internal/pgtype"
 )
 
 func windowAgo(d time.Duration) *time.Time {
@@ -196,4 +198,101 @@ func TestWINDOW013_LastScanAnchorsTheStatistics(t *testing.T) {
 	// A scan made after pglens's history began leaves pglens the longer one.
 	i.LastScan = windowAgo(5 * 24 * time.Hour)
 	require.Equal(t, Observation{Duration: 10 * 24 * time.Hour, Source: ObservedByPglens}, indexObservation(unusedTestNow, i))
+}
+
+// WINDOW-014 (R-P13 #5, D22b): PostgreSQL 16 last scanned the index ten days
+// ago and pglens, with an hour of history, saw no scan since: the statistics
+// prove the seven-day window, so the index is an open candidate at once.
+func TestWINDOW014_LastScanBeforeWindowJudgesAtOnce(t *testing.T) {
+	i := IndexStat{HistoryDays: 1.0 / 24, ScanTracked: true, LastScan: windowAgo(10 * 24 * time.Hour), StatsReset: windowAgo(30 * 24 * time.Hour)}
+	f := evaluateUnused(t, unusedSnapshot(i, reportingSibling(false)))
+	require.Len(t, f, 1)
+	require.Equal(t, StateOpen, f[0].State)
+	require.Empty(t, f[0].DegradedReason)
+	require.Equal(t, ObservedByPostgresStats, f[0].Evidence["observed_source"])
+	require.Equal(t, int64(10*24*3600), f[0].Evidence["observed_for_seconds"])
+	require.Equal(t, int64(7*24*3600), f[0].Evidence["window_seconds"])
+	require.Equal(t, "2026-10-13T12:00:00Z", f[0].Evidence["last_scan"])
+	require.Equal(t, "no scan of this index since 2026-10-13, more than 7 days ago", f[0].Detail)
+	require.NotContains(t, f[0].Evidence, "window", "not the never-scanned-since-reset path")
+
+	// A scan pglens recorded inside the window wins over the older label.
+	i.IdxScan = 0.2
+	require.Empty(t, evaluateUnused(t, unusedSnapshot(i, reportingSibling(false))))
+
+	// The same history on PostgreSQL 15 (no last_idx_scan) stays degraded.
+	f = evaluateUnused(t, unusedSnapshot(IndexStat{HistoryDays: 1.0 / 24}, reportingSibling(false)))
+	require.Len(t, f, 1)
+	require.Equal(t, StateDegraded, f[0].State)
+	require.Equal(t, "index usage history is shorter than 7 days", f[0].DegradedReason)
+}
+
+// WINDOW-015 (R-P13 #7): under a 60-day backup window, a base backup seen 40
+// days ago is no backup strategy, and the rule says so at once rather than
+// claiming that no base backup has been seen yet.
+func TestWINDOW015_OldBackupIsNotDegradedByALongWindow(t *testing.T) {
+	strategy := ruleByID(t, "backup.no_strategy")
+	s := configBase()
+	s.Settings["archive_mode"] = "off"
+	s.Facts["backup"] = map[string]Fact{"basebackup_running": {Key: "basebackup_running", ObservedAt: configNow.Add(-40 * 24 * time.Hour)}}
+	s.FirstSeen = configNow.Add(-45 * 24 * time.Hour)
+	s.Windows = Windows{BackupHistory: 60 * 24 * time.Hour}
+	f := strategy.Evaluate(s)
+	require.Len(t, f, 1)
+	require.Equal(t, StateOpen, f[0].State)
+	require.Equal(t, "No visible backup strategy", f[0].Title)
+
+	// Without any base backup seen, the same window still degrades.
+	delete(s.Facts, "backup")
+	f = strategy.Evaluate(s)
+	require.Len(t, f, 1)
+	require.Equal(t, StateDegraded, f[0].State)
+	require.Equal(t, "the instance has been monitored for less than 60 days and no base backup has been seen yet", f[0].Detail)
+
+	// R-P13b #3: monitored for 10 days, past a 7-day window, with no base
+	// backup ever seen: the detail names the 10 days pglens watched, not 30.
+	s.Windows = Windows{BackupHistory: 7 * 24 * time.Hour}
+	s.FirstSeen = configNow.Add(-10 * 24 * time.Hour)
+	f = strategy.Evaluate(s)
+	require.Len(t, f, 1)
+	require.Equal(t, StateOpen, f[0].State)
+	require.Equal(t, "no member of the cluster archives WAL and no base backup has been seen streaming from the cluster in 10 days of monitoring", f[0].Detail)
+	require.Equal(t, 10.0, f[0].Evidence["monitored_days"])
+}
+
+// WINDOW-016 (R-P13b #1): the engine hands the loader the windows its source
+// answers, so the index section reads its scan rates over the configured
+// window, not the default.
+func TestWINDOW016_LoaderReceivesTheConfiguredWindows(t *testing.T) {
+	e, _, id := runWithRules(t)
+	var got []Windows
+	e.load = func(_ context.Context, _ uuid.UUID, now time.Time, windows Windows) (*Snapshot, error) {
+		got = append(got, windows)
+		return &Snapshot{Now: now, InstanceID: id, PermTier: pgtype.TierReadOnly, Metrics: map[string]map[string]float64{}, Settings: map[string]string{}}, nil
+	}
+	e.SetWindowsSource(func(context.Context) Windows { return Windows{UnusedIndex: 5 * 24 * time.Hour} })
+	require.NoError(t, e.Run(context.Background()))
+	require.Equal(t, []Windows{{UnusedIndex: 5 * 24 * time.Hour, BackupHistory: 7 * 24 * time.Hour}}, got)
+}
+
+// WINDOW-017 (R-P13b #2): when the store keeps less index history than the
+// window, pglens's own history never covers it, and the degraded reason says
+// so; otherwise, or when the retention is unknown, the reason is unchanged.
+func TestWINDOW017_ReasonNamesTheKeptIndexHistory(t *testing.T) {
+	s := unusedSnapshot(IndexStat{HistoryDays: 20}, reportingSibling(false))
+	s.Windows = Windows{UnusedIndex: 60 * 24 * time.Hour}
+	s.IndexHistoryKept = 30 * 24 * time.Hour
+	f := evaluateUnused(t, s)
+	require.Len(t, f, 1)
+	require.Equal(t, StateDegraded, f[0].State)
+	require.Equal(t, "the unused-index window (60 days) is longer than the kept index metrics history (30 days)", f[0].DegradedReason)
+
+	s.IndexHistoryKept = 0
+	f = evaluateUnused(t, s)
+	require.Equal(t, "index usage history is shorter than 60 days", f[0].DegradedReason)
+
+	s = unusedSnapshot(IndexStat{HistoryDays: 2}, reportingSibling(false))
+	s.IndexHistoryKept = 30 * 24 * time.Hour
+	f = evaluateUnused(t, s)
+	require.Equal(t, "index usage history is shorter than 7 days", f[0].DegradedReason)
 }

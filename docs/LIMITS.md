@@ -113,13 +113,34 @@ Findings are advice with an attached reason, not verdicts; review the reason
 and disagree with it when the workload justifies doing so.
 
 `index.unused` needs an index to have gone unscanned for its observation
-window (`window.unused_index`, 7 days by default). On PostgreSQL 16 and later
-the window can be covered by PostgreSQL's own statistics: an index with no
-`last_idx_scan` since a statistics reset older than the window is a candidate
-at once. PostgreSQL 15 and earlier have no `last_idx_scan`, and pglens stores
-index scans as per-scrape rates, so a scan made before pglens started cannot
-be told apart: there the window is covered only by pglens's own history of the
-index, and the finding stays degraded until it is.
+window (`window.unused_index`, 7 days by default, set from the console between
+1 hour and 90 days). Only the scans pglens recorded inside the window count:
+an index scanned once, weeks before the window, is a candidate again once the
+window has passed without a scan. On PostgreSQL 16 and later PostgreSQL's own
+statistics can stand in for pglens's history: an index with no
+`last_idx_scan` since a statistics reset older than the window (or at an
+unknown time), or whose `last_idx_scan` is older than the window with no scan
+pglens recorded inside it, is a candidate at once. One PostgreSQL saw scanned
+inside the window is not a candidate. PostgreSQL 15 and earlier have no
+`last_idx_scan`, and pglens stores index scans as per-scrape rates, so a scan
+made before pglens started cannot be told apart: there the window is covered
+only by pglens's own history of the index, and the finding stays degraded
+until it is. Indexes the rule never reports (10 MiB or smaller, primary key,
+unique) get no degraded finding either. pglens's own history of an index is
+bounded by the retention of the index metrics (`metrics_indexes`, 30 days by
+default, changeable down to 3 days): with a longer window that history never
+covers it, so an index judged on pglens's history alone stays degraded, and
+the reason names both lengths ("the unused-index window (60 days) is longer
+than the kept index metrics history (30 days)"). The scans of a standby are
+read from the same kept history, so a standby scan older than the retention
+is seen only through the standby's `last_idx_scan` (PostgreSQL 16 and later).
+
+Without a base backup seen, the backup rules (`backup.no_basebackup_seen`,
+`backup.no_strategy`) stay degraded for the first `window.backup_history` of
+monitoring (7 days by default, set from the console). The recency of a base
+backup that has been seen is fixed whatever the window: it counts as recent
+for 7 days, and as a backup strategy for 30 days. A base backup seen longer
+ago than that is reported at once, never degraded, however long the window.
 
 The coverage of an instance (`GET /api/v1/instances/{id}/coverage`) expects
 each check's first result within its first-run bound of the agent process

@@ -76,7 +76,9 @@ func TestLoadSnapshot_PopulatesBoundedSections(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT datname, schemaname, relname, n_live_tup")).WithArgs(instanceID, now.Add(-15*time.Minute)).
 		WillReturnRows(pgxmock.NewRows([]string{"datname", "schemaname", "relname", "n_live_tup", "n_dead_tup", "n_mod_since_analyze", "last_autovacuum", "last_vacuum", "relfrozenxid_age", "seq_scan", "idx_scan"}).
 			AddRow("app", "public", "orders", 100.0, 4.0, 2.0, nil, nil, 10.0, 3.0, 1.0))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT DISTINCT ON (datname, schemaname, indexrelname)")).WithArgs(instanceID, now.Add(-15*time.Minute)).
+	// The peak scan rate is read over the unused-index window of the pass
+	// (three days here), the history span over every sample.
+	mock.ExpectQuery(regexp.QuoteMeta("MAX(COALESCE(idx_scan, 0)) FILTER (WHERE ts >= $3) AS peak_scan_rate")).WithArgs(instanceID, now.Add(-15*time.Minute), now.Add(-3*24*time.Hour)).
 		WillReturnRows(pgxmock.NewRows([]string{"datname", "schemaname", "relname", "indexrelname", "peak_scan_rate", "index_bytes", "is_primary", "is_unique", "is_valid", "def_hash", "history_days"}).
 			AddRow("app", "public", "orders", "orders_customer_idx", 0.25, 2048.0, false, true, true, "hash-old", 2.5))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT datname, schemaname, relname, indexrelname, object_kind, real_bytes")).WithArgs(instanceID, now.Add(-7*24*time.Hour), now.Add(-13*time.Hour)).
@@ -95,9 +97,11 @@ func TestLoadSnapshot_PopulatesBoundedSections(t *testing.T) {
 			AddRow(siblingID, snapshotStringPtr("standby"), snapshotStringPtr("setting"), snapshotStringPtr("stale_setting"), snapshotStringPtr("x"), snapshotStringPtr(""), snapshotStringPtr("user"), snapshotStringPtr(""), snapshotStringPtr(""), snapshotTimePtr(now.Add(-3*time.Hour))).
 			AddRow(siblingID, snapshotStringPtr("standby"), snapshotStringPtr("index_def"), snapshotStringPtr("public.orders_customer_idx"), snapshotStringPtr(""), snapshotStringPtr("hash-sibling"), snapshotStringPtr(""), snapshotStringPtr(""), snapshotStringPtr("app"), &siblingSeen).
 			AddRow(siblingID, snapshotStringPtr("standby"), snapshotStringPtr("index_def"), snapshotStringPtr("public.orders_label_idx"), snapshotStringPtr(""), snapshotStringPtr("hash-label"), snapshotStringPtr(""), snapshotStringPtr("2026-08-29T09:00:00Z"), snapshotStringPtr("app"), &siblingSeen).
+			AddRow(siblingID, snapshotStringPtr("standby"), snapshotStringPtr("index_def"), snapshotStringPtr("public.orders_old_label_idx"), snapshotStringPtr(""), snapshotStringPtr("hash-old-label"), snapshotStringPtr(""), snapshotStringPtr("2026-08-01T09:00:00Z"), snapshotStringPtr("app"), &siblingSeen).
 			AddRow(siblingID, snapshotStringPtr("standby"), snapshotStringPtr("backup"), snapshotStringPtr("basebackup_running"), snapshotStringPtr("1"), snapshotStringPtr(""), snapshotStringPtr(""), snapshotStringPtr(""), snapshotStringPtr(""), &siblingSeen).
 			AddRow(uuid.New(), snapshotStringPtr("standby"), nil, nil, snapshotStringPtr(""), snapshotStringPtr(""), snapshotStringPtr(""), snapshotStringPtr(""), nil, nil))
-	mock.ExpectQuery(regexp.QuoteMeta("FROM metrics_indexes m")).WithArgs(int64(42), instanceID, now.Add(-time.Hour)).
+	// A sibling's scans count within the unused-index window only.
+	mock.ExpectQuery(regexp.QuoteMeta("FROM metrics_indexes m")).WithArgs(int64(42), instanceID, now.Add(-time.Hour), now.Add(-3*24*time.Hour)).
 		WillReturnRows(pgxmock.NewRows([]string{"instance_id", "datname", "schemaname", "indexrelname"}).
 			AddRow(siblingID, "app", "public", "orders_metrics_idx"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT DISTINCT ON (slot_name, src)")).WithArgs(instanceID, now.Add(-5*time.Minute)).
@@ -105,7 +109,7 @@ func TestLoadSnapshot_PopulatesBoundedSections(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM lock_snapshots")).WithArgs(instanceID).
 		WillReturnRows(pgxmock.NewRows([]string{"ts", "tree"}))
 
-	s, err := LoadSnapshot(ctx, mock, instanceID, now)
+	s, err := LoadSnapshot(ctx, mock, instanceID, now, Windows{UnusedIndex: 3 * 24 * time.Hour})
 	require.NoError(t, err)
 	require.Equal(t, int64(42), s.ClusterID)
 	require.Equal(t, instanceID, s.InstanceID)
@@ -142,6 +146,7 @@ func TestLoadSnapshot_PopulatesBoundedSections(t *testing.T) {
 	require.Equal(t, "CREATE INDEX orders_customer_idx ON public.orders(customer_id)", s.Indexes[0].IndexDef, "the definition of the index's own database")
 	require.Equal(t, "hash-new", s.Indexes[0].DefHash)
 	require.Equal(t, 0.25, s.Indexes[0].IdxScan)
+	require.Equal(t, 3*24*time.Hour, s.Windows.UnusedIndex, "the snapshot keeps the windows it was read with")
 	require.Len(t, s.Bloat, 2)
 	require.Equal(t, "public.orders_customer_idx", s.Bloat[1].Name)
 	require.Equal(t, "index", s.Bloat[1].Kind)
@@ -166,6 +171,7 @@ func TestLoadSnapshot_PopulatesBoundedSections(t *testing.T) {
 	// an index reported with an empty label and no scan does not.
 	require.True(t, sibling.IndexScanned[indexHashKey("app", "public.orders_metrics_idx")])
 	require.True(t, sibling.IndexScanned[indexHashKey("app", "public.orders_label_idx")])
+	require.NotContains(t, sibling.IndexScanned, indexHashKey("app", "public.orders_old_label_idx"), "a last scan before the window does not count")
 	require.NotContains(t, sibling.IndexScanned, indexHashKey("app", "public.orders_customer_idx"))
 	require.Equal(t, &ReplicationInfo{Standbys: 2, MaxLagBytes: 1024, ActivePhysicalSlots: 1}, s.Replication)
 	require.NotNil(t, s.LockTree, "no stored lock tree is an empty sample")
@@ -177,7 +183,7 @@ func snapshotTimePtr(value time.Time) *time.Time { return &value }
 func TestLoadSnapshot_NilPoolReturnsInitializedSnapshot(t *testing.T) {
 	id := uuid.New()
 	now := time.Unix(100, 0).UTC()
-	s, err := LoadSnapshot(context.Background(), nil, id, now)
+	s, err := LoadSnapshot(context.Background(), nil, id, now, Windows{})
 	require.NoError(t, err)
 	require.Equal(t, id, s.InstanceID)
 	require.Equal(t, now, s.Now)

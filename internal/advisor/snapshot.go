@@ -79,13 +79,17 @@ type IndexStat struct {
 	TableName string
 	DefHash   string
 	IndexDef  string
-	// IdxScan is the highest scan rate (scans per second) recorded over the
-	// index's whole history, so zero means no scan was ever recorded. It
-	// used to be the latest rate, which is zero for any index not scanned
-	// in the last five minutes.
-	IdxScan     float64
-	SizeBytes   float64
+	// IdxScan is the highest scan rate (scans per second) recorded within
+	// the unused-index window (Windows.UnusedIndex), so zero means no scan
+	// was recorded in that window. It used to be the latest rate, which is
+	// zero for any index not scanned in the last five minutes, and then the
+	// peak over the whole history, which kept an index scanned once weeks
+	// before the window out of index.unused for good.
+	IdxScan float64
+	// HistoryDays is the span of the index's whole stored history, first
+	// sample to last, whatever the window.
 	HistoryDays float64
+	SizeBytes   float64
 	IsPrimary   bool
 	IsUnique    bool
 	IsValid     bool
@@ -136,10 +140,10 @@ type SiblingInfo struct {
 	Settings        map[string]string
 	SettingContexts map[string]string
 	IndexHashes     map[string]string
-	// IndexScanned names the indexes this sibling has scanned: those with a
-	// last scan since its statistics reset, and those with a scan anywhere in
-	// its metrics history. A standby's reads count only on the standby, so
-	// the primary needs this before it calls an index unused.
+	// IndexScanned names the indexes this sibling has scanned within the
+	// unused-index window: by its last scan label, or by a scan in its
+	// metrics history inside the window. A standby's reads count only on the
+	// standby, so the primary needs this before it calls an index unused.
 	IndexScanned map[string]bool
 	// BasebackupSeenAt is the last time a base backup was seen streaming
 	// from this sibling; nil when none ever was.
@@ -204,6 +208,10 @@ type Snapshot struct {
 	// Windows are the observation windows of this evaluation. The engine sets
 	// them from its WindowsSource; an unset window is its default.
 	Windows Windows
+	// IndexHistoryKept is how long the store keeps index metrics (the
+	// retention policy of metrics_indexes), read once per pass; zero when
+	// there is no policy or it could not be read.
+	IndexHistoryKept time.Duration
 }
 
 // windows answers the observation windows the rules judge with.
@@ -223,9 +231,11 @@ func (s *Snapshot) Metric(name string, labels map[string]string) (float64, bool)
 // LoadSnapshot obtains the instance identity in one bounded query. Additional
 // snapshot sections are populated by the advisor loaders as they are enabled;
 // an empty section is intentionally distinguishable from a zero-valued fact.
-func LoadSnapshot(ctx context.Context, pool snapshotDB, instanceID uuid.UUID, now time.Time) (*Snapshot, error) {
+// The windows are those of the pass: the index section reads its scan rates
+// over the unused-index window, and the rules judge with the same windows.
+func LoadSnapshot(ctx context.Context, pool snapshotDB, instanceID uuid.UUID, now time.Time, windows Windows) (*Snapshot, error) {
 	s := &Snapshot{
-		Now: now, InstanceID: instanceID, PermTier: pgtype.TierReadOnly,
+		Now: now, InstanceID: instanceID, PermTier: pgtype.TierReadOnly, Windows: windows,
 		Metrics: map[string]map[string]float64{}, Facts: map[string]map[string]Fact{},
 		SkippedChecks:   map[string]string{},
 		Settings:        map[string]string{},
@@ -748,7 +758,7 @@ func loadSiblings(ctx context.Context, pool snapshotDB, s *Snapshot, now time.Ti
 				sib.IndexHashes[indexHashKey(datname, *f.key)] = *f.hash
 			}
 			// An empty label is no scan since the reset, not an unknown one.
-			if f.lastScan != nil && *f.lastScan != "" {
+			if f.lastScan != nil && *f.lastScan != "" && siblingScanCounts(*f.lastScan, now, s.windows().UnusedIndex) {
 				sib.IndexScanned[indexHashKey(datname, *f.key)] = true
 			}
 		case "backup":
@@ -770,20 +780,33 @@ func loadSiblings(ctx context.Context, pool snapshotDB, s *Snapshot, now time.Ti
 	return nil
 }
 
-// loadSiblingScans marks the indexes each active sibling scanned at any point
-// in its retained metrics history. It is the only evidence for a sibling on
-// PostgreSQL 15, which cannot report last_idx_scan, and it still counts a scan
-// that predates the statistics reset the fact reports.
+// siblingScanCounts reports whether a sibling's last_idx_scan label counts as
+// a scan for index.unused: one inside the unused-index window, as on the
+// primary. A label that does not parse counts, so an unreadable label never
+// turns a standby's use into a candidate.
+func siblingScanCounts(label string, now time.Time, window time.Duration) bool {
+	last, ok := parseScanLabel(label)
+	if !ok || last == nil {
+		return true
+	}
+	return now.Sub(*last) < window
+}
+
+// loadSiblingScans marks the indexes each active sibling scanned within the
+// unused-index window of its retained metrics history, the window the primary
+// is judged over. It is the only evidence for a sibling on PostgreSQL 15,
+// which cannot report last_idx_scan, and it still counts a scan that predates
+// the statistics reset the fact reports.
 func loadSiblingScans(ctx context.Context, pool snapshotDB, s *Snapshot, now time.Time, byID map[uuid.UUID]*SiblingInfo) error {
 	if len(byID) == 0 {
 		return nil
 	}
 	rows, err := pool.Query(ctx, `SELECT m.instance_id, m.datname, m.schemaname, m.indexrelname
 		FROM metrics_indexes m
-		WHERE m.tenant_id='default' AND m.idx_scan > 0
+		WHERE m.tenant_id='default' AND m.idx_scan > 0 AND m.ts >= $4
 		  AND m.instance_id IN (SELECT i.instance_id FROM instances i
 		        WHERE i.cluster_id=$1 AND i.instance_id<>$2 AND i.last_seen >= $3)
-		GROUP BY m.instance_id, m.datname, m.schemaname, m.indexrelname`, s.ClusterID, s.InstanceID, now.Add(-siblingActiveWindow))
+		GROUP BY m.instance_id, m.datname, m.schemaname, m.indexrelname`, s.ClusterID, s.InstanceID, now.Add(-siblingActiveWindow), now.Add(-s.windows().UnusedIndex))
 	if err != nil {
 		return err
 	}
@@ -868,6 +891,10 @@ func loadTables(ctx context.Context, pool snapshotDB, s *Snapshot, now time.Time
 	return rows.Err()
 }
 
+// loadIndexes reads the indexes of the recent window with their history: its
+// span over every stored sample, and the peak scan rate within the
+// unused-index window only, so a scan older than the window does not keep an
+// index out of index.unused.
 func loadIndexes(ctx context.Context, pool snapshotDB, s *Snapshot, now time.Time) error {
 	rows, err := pool.Query(ctx, `WITH latest AS (
 		SELECT DISTINCT ON (datname, schemaname, indexrelname)
@@ -881,7 +908,7 @@ func loadIndexes(ctx context.Context, pool snapshotDB, s *Snapshot, now time.Tim
 	), history AS (
 		SELECT datname, schemaname, indexrelname,
 			EXTRACT(EPOCH FROM (MAX(ts)-MIN(ts)))/86400.0 AS history_days,
-			MAX(COALESCE(idx_scan, 0)) AS peak_scan_rate
+			MAX(COALESCE(idx_scan, 0)) FILTER (WHERE ts >= $3) AS peak_scan_rate
 		FROM metrics_indexes
 		WHERE instance_id=$1
 		GROUP BY datname, schemaname, indexrelname
@@ -892,7 +919,7 @@ func loadIndexes(ctx context.Context, pool snapshotDB, s *Snapshot, now time.Tim
 	FROM latest l
 	LEFT JOIN history h USING (datname, schemaname, indexrelname)
 	ORDER BY l.index_bytes DESC
-	LIMIT 500`, s.InstanceID, now.Add(-recentWindow))
+	LIMIT 500`, s.InstanceID, now.Add(-recentWindow), now.Add(-s.windows().UnusedIndex))
 	if err != nil {
 		return err
 	}

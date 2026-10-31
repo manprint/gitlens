@@ -410,13 +410,24 @@ func init() {
 		if archiveMode(s.Settings) == "" || deferToPrimary(s) || clusterArchiving(s) {
 			return nil
 		}
-		if last, ok := lastBasebackup(s); ok && s.Now.Sub(last) <= basebackupMaxAge {
+		last, seen := lastBasebackup(s)
+		if seen && s.Now.Sub(last) <= basebackupMaxAge {
 			return nil
 		}
-		if window := s.windows().BackupHistory; monitoredFor(s) < window {
+		// A base backup seen more than 30 days ago already answers, however
+		// short the monitored history against the window: degrading would
+		// say that no base backup has been seen yet, which is false.
+		if window := s.windows().BackupHistory; !seen && monitoredFor(s) < window {
 			return []Finding{degradedBackup("backup.no_strategy", SeverityCritical, window)}
 		}
-		return []Finding{configFinding("backup.no_strategy", SeverityCritical, "No visible backup strategy", "no member of the cluster archives WAL and no base backup has been seen streaming in the last 30 days", "Configure archiving or establish a verified base backup strategy", nil)}
+		// The detail names what pglens watched: a base backup seen too long
+		// ago, or none at all in the monitored history, which may be shorter
+		// than 30 days.
+		if seen {
+			return []Finding{configFinding("backup.no_strategy", SeverityCritical, "No visible backup strategy", "no member of the cluster archives WAL and no base backup has been seen streaming in the last 30 days", "Configure archiving or establish a verified base backup strategy", nil)}
+		}
+		days := monitoredFor(s).Hours() / 24
+		return []Finding{configFinding("backup.no_strategy", SeverityCritical, "No visible backup strategy", fmt.Sprintf("no member of the cluster archives WAL and no base backup has been seen streaming from the cluster in %.0f days of monitoring", days), "Configure archiving or establish a verified base backup strategy", map[string]any{"monitored_days": days})}
 	}})
 }
 

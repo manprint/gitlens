@@ -75,7 +75,7 @@ func TestINTADV004_EngineResolvesFixedFindings(t *testing.T) {
 		id := setupAdvisorInstance(t, pool, now)
 		problem := true
 		e := NewEngine(pool, nil, time.Minute)
-		e.load = func(context.Context, uuid.UUID, time.Time) (*Snapshot, error) {
+		e.load = func(context.Context, uuid.UUID, time.Time, Windows) (*Snapshot, error) {
 			age := float64(0)
 			if problem {
 				age = 1000
@@ -104,7 +104,7 @@ func TestINTADV005_TwoEnginesProduceOneFindingSet(t *testing.T) {
 		require.NoError(t, err)
 		now := time.Now().UTC()
 		id := setupAdvisorInstance(t, pool, now)
-		loader := func(context.Context, uuid.UUID, time.Time) (*Snapshot, error) {
+		loader := func(context.Context, uuid.UUID, time.Time, Windows) (*Snapshot, error) {
 			return advisorIntegrationSnapshot(id, now, 1000), nil
 		}
 		e1, e2 := NewEngine(pool, nil, time.Minute), NewEngine(pool, nil, time.Minute)
@@ -137,7 +137,7 @@ func TestINTADV006_SameDatabaseFindingOnTwoInstancesStaysSeparate(t *testing.T) 
 		require.NoError(t, err)
 		secondRollingBack := true
 		e := NewEngine(pool, nil, time.Minute)
-		e.load = func(_ context.Context, id uuid.UUID, _ time.Time) (*Snapshot, error) {
+		e.load = func(_ context.Context, id uuid.UUID, _ time.Time, _ Windows) (*Snapshot, error) {
 			s := advisorIntegrationSnapshot(id, now, 0)
 			ratio := 0.5
 			if id == second && !secondRollingBack {
@@ -232,7 +232,7 @@ func TestINTADV011_LeaderWithADeadSessionGivesUpTheLock(t *testing.T) {
 		require.NoError(t, err)
 		now := time.Now().UTC()
 		id := setupAdvisorInstance(t, pool, now)
-		loader := func(context.Context, uuid.UUID, time.Time) (*Snapshot, error) {
+		loader := func(context.Context, uuid.UUID, time.Time, Windows) (*Snapshot, error) {
 			return advisorIntegrationSnapshot(id, now, 1000), nil
 		}
 		e := NewEngine(pool, nil, time.Minute)

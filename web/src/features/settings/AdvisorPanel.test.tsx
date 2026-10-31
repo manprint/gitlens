@@ -201,7 +201,7 @@ describe('AdvisorPanel', () => {
     expect(screen.getByText('Short windows can raise false positives.')).toBeVisible()
     // The advisor applies the stored windows (13.2); the note says how (13.3).
     expect(screen.getByRole('note')).toHaveTextContent(
-      'Saved windows apply at the next advisor evaluation. On PostgreSQL 16 and later the statistics age counts only for an index never scanned since the reset; a base backup stays recent for 7 days (30 days for a backup strategy) whatever the window.',
+      'Saved windows apply at the next evaluation. On PostgreSQL 16+ an index with no scan for the window, in the statistics and in pglens, is judged at once; a base backup stays recent 7 days (30 for a backup strategy) whatever the window.',
     )
     const unused = screen.getByRole('textbox', { name: 'Unused-index history' })
     const backup = screen.getByRole('textbox', { name: 'Backup history' })

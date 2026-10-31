@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/manprint/pglens/internal/clock"
@@ -32,7 +33,10 @@ const advisorStepBudget = 30 * time.Second
 // a decommissioned instance does not keep them for ever.
 const unseenInstanceGrace = 24 * time.Hour
 
-type snapshotLoader func(context.Context, uuid.UUID, time.Time) (*Snapshot, error)
+// snapshotLoader loads an instance's snapshot for a pass. It takes the pass's
+// observation windows because a section can depend on them: the scan rates of
+// the indexes are read over the unused-index window.
+type snapshotLoader func(context.Context, uuid.UUID, time.Time, Windows) (*Snapshot, error)
 
 // OverridesSource reports the console's rule overrides (11.4, D18): rule id to
 // enabled. A rule absent from the map is enabled. The server reads them from
@@ -111,8 +115,8 @@ func NewEngineWithStore(pool *pgxpool.Pool, clk clock.Clock, interval time.Durat
 func newEngine(pool *pgxpool.Pool, clk clock.Clock, interval time.Duration, st Store, loader snapshotLoader) *Engine {
 	e := &Engine{pool: pool, clock: clk, interval: interval, store: st, load: loader, stepBudget: advisorStepBudget, stopCh: make(chan struct{}), doneCh: make(chan struct{})}
 	if e.load == nil {
-		e.load = func(ctx context.Context, id uuid.UUID, now time.Time) (*Snapshot, error) {
-			return LoadSnapshot(ctx, pool, id, now)
+		e.load = func(ctx context.Context, id uuid.UUID, now time.Time, windows Windows) (*Snapshot, error) {
+			return LoadSnapshot(ctx, pool, id, now, windows)
 		}
 	}
 	return e
@@ -133,6 +137,41 @@ func (e *Engine) SetWindowsSource(src WindowsSource) {
 	defer e.mu.Unlock()
 	e.windowsSrc = src
 	e.windowsAt = time.Time{}
+}
+
+// indexHistoryKeptSQL reads the drop_after of the TimescaleDB retention policy
+// of metrics_indexes, in seconds: NULL when it has none.
+const indexHistoryKeptSQL = `SELECT min(extract(epoch FROM (j.config->>'drop_after')::interval))::float8
+	  FROM timescaledb_information.jobs j
+	 WHERE j.proc_name = 'policy_retention'
+	   AND j.hypertable_schema = 'public'
+	   AND j.hypertable_name = 'metrics_indexes'`
+
+// indexHistoryKept answers, once per pass, how long the store keeps index
+// metrics: the retention policy of metrics_indexes. pglens's own history of an
+// index never grows past it, so index.unused names it when the window is
+// longer. Zero when there is no policy, no pool, or the policy cannot be read
+// (no TimescaleDB): the rule then keeps its usual reason.
+func (e *Engine) indexHistoryKept(ctx context.Context) time.Duration {
+	if e.pool == nil {
+		return 0
+	}
+	stepCtx, cancel := e.step(ctx)
+	defer cancel()
+	var seconds *float64
+	if err := e.pool.QueryRow(stepCtx, indexHistoryKeptSQL).Scan(&seconds); err != nil {
+		// A store without TimescaleDB has no such schema: nothing to log.
+		var pgErr *pgconn.PgError
+		noSchema := errors.As(err, &pgErr) && pgErr.Code == "3F000"
+		if !noSchema && !isOptionalSnapshotError(err) {
+			log.Printf("advisor engine: read the index metrics retention (ignored): %v", err)
+		}
+		return 0
+	}
+	if seconds == nil || *seconds <= 0 {
+		return 0
+	}
+	return time.Duration(*seconds * float64(time.Second))
 }
 
 // currentWindows answers the observation windows of a pass: the source's
@@ -341,6 +380,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	now := e.clock.Now()
 	disabled := e.disabledRules(ctx)
 	windows := e.currentWindows(ctx, now)
+	kept := e.indexHistoryKept(ctx)
 	stepCtx, cancel = e.step(ctx)
 	ids, err := e.store.ActiveInstances(stepCtx, now.Add(-time.Hour))
 	cancel()
@@ -361,7 +401,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		errs = append(errs, err)
 	}
 	for _, id := range ids {
-		if err := e.runInstanceWithin(ctx, id, now, disabled, windows); err != nil {
+		if err := e.runInstanceWithin(ctx, id, now, disabled, windows, kept); err != nil {
 			errs = append(errs, err)
 		}
 		// A shutdown ends the pass between instances. Stop waits for the pass
@@ -420,18 +460,19 @@ func (e *Engine) resolveDisabled(ctx context.Context, disabled map[string]bool, 
 
 // runInstanceWithin runs one instance under its own budget, so an instance
 // that exceeds it fails alone and the pass goes on to the next.
-func (e *Engine) runInstanceWithin(ctx context.Context, id uuid.UUID, now time.Time, disabled map[string]bool, windows Windows) error {
+func (e *Engine) runInstanceWithin(ctx context.Context, id uuid.UUID, now time.Time, disabled map[string]bool, windows Windows, kept time.Duration) error {
 	stepCtx, cancel := e.step(ctx)
 	defer cancel()
-	return e.runInstance(stepCtx, id, now, disabled, windows)
+	return e.runInstance(stepCtx, id, now, disabled, windows, kept)
 }
 
-func (e *Engine) runInstance(ctx context.Context, id uuid.UUID, now time.Time, disabled map[string]bool, windows Windows) error {
-	s, err := e.load(ctx, id, now)
+func (e *Engine) runInstance(ctx context.Context, id uuid.UUID, now time.Time, disabled map[string]bool, windows Windows, kept time.Duration) error {
+	s, err := e.load(ctx, id, now, windows)
 	if err != nil {
 		return fmt.Errorf("load advisor snapshot %s: %w", id, err)
 	}
 	s.Windows = windows
+	s.IndexHistoryKept = kept
 	rules := All()
 	ran := make([]string, 0, len(rules))
 	seen := []string{}

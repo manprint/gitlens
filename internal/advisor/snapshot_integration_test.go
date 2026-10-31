@@ -39,7 +39,7 @@ func TestINTADV002_LoadSnapshotUsesBoundedQueries(t *testing.T) {
 		_, err = pool.Exec(context.Background(), `INSERT INTO instances(instance_id,cluster_id,role) VALUES ($1,$2,'primary')`, instanceID, int64(9915))
 		require.NoError(t, err)
 		tracer.count.Store(0)
-		_, err = LoadSnapshot(context.Background(), pool, instanceID, time.Now())
+		_, err = LoadSnapshot(context.Background(), pool, instanceID, time.Now(), Windows{})
 		require.NoError(t, err)
 		// Two identity queries and twelve section loaders, whatever the
 		// number of relations, statements or siblings.
@@ -91,8 +91,10 @@ func TestINTADV009_LoadTablesKeepsTheOldestRelations(t *testing.T) {
 }
 
 // TestINTADV012_SiblingIndexScansComeFromLabelsAndMetrics: a standby's index
-// scans are read from its last_idx_scan label and from its metrics history.
-// An inactive sibling, and an index a sibling never scanned, count for nothing.
+// scans are read from its last_idx_scan label and from its metrics history,
+// within the unused-index window (the default 7 days here). An inactive
+// sibling, an index a sibling never scanned, and a scan before the window
+// count for nothing.
 func TestINTADV012_SiblingIndexScansComeFromLabelsAndMetrics(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
 		pg.Lock(t)
@@ -129,16 +131,18 @@ func TestINTADV012_SiblingIndexScansComeFromLabelsAndMetrics(t *testing.T) {
 		}
 		fact(metricsSibling, "public.orders_metrics_idx", `{"def_hash":"h1"}`)
 		fact(metricsSibling, "public.orders_idle_idx", `{"def_hash":"h2","last_idx_scan":""}`)
-		fact(labelSibling, "public.orders_label_idx", `{"def_hash":"h3","last_idx_scan":"2026-10-20T06:30:00Z"}`)
+		fact(labelSibling, "public.orders_label_idx", `{"def_hash":"h3","last_idx_scan":"`+now.Add(-2*24*time.Hour).Format(time.RFC3339)+`"}`)
+		fact(labelSibling, "public.orders_old_label_idx", `{"def_hash":"h4","last_idx_scan":"`+now.Add(-20*24*time.Hour).Format(time.RFC3339)+`"}`)
 		fact(labelSibling, "public.orders_idle_idx", `{"def_hash":"h2","last_idx_scan":""}`)
-		metric := func(id uuid.UUID, index string, scans float64) {
+		metric := func(id uuid.UUID, index string, scans float64, age time.Duration) {
 			_, err := pool.Exec(ctx, `INSERT INTO metrics_indexes (ts, cluster_id, instance_id, datname, schemaname, relname, indexrelname, idx_scan)
-				VALUES ($1, $2, $3, 'app', 'public', 'orders', $4, $5)`, now, cluster, id, index, scans)
+				VALUES ($1, $2, $3, 'app', 'public', 'orders', $4, $5)`, now.Add(-age), cluster, id, index, scans)
 			require.NoError(t, err)
 		}
-		metric(metricsSibling, "orders_metrics_idx", 0.5)
-		metric(metricsSibling, "orders_idle_idx", 0)
-		metric(stale, "orders_stale_idx", 3)
+		metric(metricsSibling, "orders_metrics_idx", 0.5, 0)
+		metric(metricsSibling, "orders_idle_idx", 0, 0)
+		metric(metricsSibling, "orders_old_metrics_idx", 4, 20*24*time.Hour)
+		metric(stale, "orders_stale_idx", 3, 0)
 
 		s := &Snapshot{ClusterID: cluster, InstanceID: self}
 		require.NoError(t, loadSiblings(ctx, pool, s, now))
@@ -152,7 +156,9 @@ func TestINTADV012_SiblingIndexScansComeFromLabelsAndMetrics(t *testing.T) {
 		idleKey := indexHashKey("app", "public.orders_idle_idx")
 		require.True(t, byID[metricsSibling].IndexScanned[metricsKey], "a scan in the metrics history counts")
 		require.False(t, byID[metricsSibling].IndexScanned[idleKey])
-		require.True(t, byID[labelSibling].IndexScanned[labelKey], "a last scan since the reset counts")
+		require.True(t, byID[labelSibling].IndexScanned[labelKey], "a last scan inside the window counts")
+		require.False(t, byID[labelSibling].IndexScanned[indexHashKey("app", "public.orders_old_label_idx")], "a last scan before the window does not")
+		require.False(t, byID[metricsSibling].IndexScanned[indexHashKey("app", "public.orders_old_metrics_idx")], "nor does a metrics scan before the window")
 		require.Equal(t, "h2", byID[labelSibling].IndexHashes[idleKey], "the idle index is reported")
 		require.False(t, byID[labelSibling].IndexScanned[idleKey], "an empty last scan is no scan")
 		for _, sib := range s.Siblings {

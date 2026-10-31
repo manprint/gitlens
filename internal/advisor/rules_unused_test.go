@@ -94,7 +94,7 @@ func TestRule_index_unused_PG15KeepsSevenDayHistory(t *testing.T) {
 	long := evaluateUnused(t, unusedSnapshot(IndexStat{HistoryDays: 8, StatsReset: sinceReset(30)}, reportingSibling(false)))
 	require.Len(t, long, 1)
 	require.Equal(t, StateOpen, long[0].State)
-	require.Equal(t, "no scan of this index was recorded in 8.0 days", long[0].Detail)
+	require.Equal(t, "no scan of this index was recorded in the last 7 days", long[0].Detail)
 	require.NotContains(t, long[0].Evidence, "window")
 }
 
@@ -158,4 +158,37 @@ func TestScanLabels(t *testing.T) {
 	require.False(t, tracked)
 	require.Nil(t, last)
 	require.Nil(t, reset)
+}
+
+// R-P13 #2: IdxScan is the peak within the window. An index with twenty days
+// of history and no scan inside the window is a candidate, and the detail
+// names the window, not the whole history; a scan recorded inside the window
+// keeps the index in use even while the history is still short.
+func TestRule_index_unused_JudgesScansInsideTheWindowOnly(t *testing.T) {
+	f := evaluateUnused(t, unusedSnapshot(IndexStat{HistoryDays: 20}, reportingSibling(false)))
+	require.Len(t, f, 1)
+	require.Equal(t, StateOpen, f[0].State)
+	require.Equal(t, "no scan of this index was recorded in the last 7 days", f[0].Detail)
+	require.Equal(t, 20.0, f[0].Evidence["history_days"])
+
+	require.Empty(t, evaluateUnused(t, unusedSnapshot(IndexStat{HistoryDays: 20, IdxScan: 0.01}, reportingSibling(false))))
+	require.Empty(t, evaluateUnused(t, unusedSnapshot(IndexStat{HistoryDays: 1, IdxScan: 0.01}, reportingSibling(false))),
+		"a scan inside the window answers before the history is long enough")
+}
+
+// R-P13 #8: an index the rule never reports gets no degraded finding while
+// its history is short.
+func TestRule_index_unused_ExclusionsComeBeforeTheShortHistory(t *testing.T) {
+	for _, idx := range []IndexStat{
+		{HistoryDays: 1, SizeBytes: unusedIndexBytes},
+		{HistoryDays: 1, IsPrimary: true},
+		{HistoryDays: 1, IsUnique: true},
+		{HistoryDays: 1, ScanTracked: true, StatsReset: sinceReset(2), IsUnique: true},
+	} {
+		require.Empty(t, evaluateUnused(t, unusedSnapshot(idx, reportingSibling(false))))
+	}
+	// The same index, large and neither primary nor unique, is degraded.
+	f := evaluateUnused(t, unusedSnapshot(IndexStat{HistoryDays: 1}, reportingSibling(false)))
+	require.Len(t, f, 1)
+	require.Equal(t, StateDegraded, f[0].State)
 }

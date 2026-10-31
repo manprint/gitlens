@@ -76,7 +76,7 @@ func runWithRules(t *testing.T, rules ...Rule) (*Engine, *engineTestStore, uuid.
 	store := &engineTestStore{ids: []uuid.UUID{id}}
 	e := NewEngineWithStore(nil, clock.NewFake(now), time.Minute, store)
 	e.leaderOverride = func(context.Context) (bool, error) { return true, nil }
-	e.load = func(context.Context, uuid.UUID, time.Time) (*Snapshot, error) {
+	e.load = func(context.Context, uuid.UUID, time.Time, Windows) (*Snapshot, error) {
 		return &Snapshot{Now: now, InstanceID: id, PermTier: pgtype.TierReadOnly, Metrics: map[string]map[string]float64{}, Settings: map[string]string{}}, nil
 	}
 	return e, store, id
@@ -137,7 +137,7 @@ func TestRun_DegradedRuleKeepsItsOpenFindings(t *testing.T) {
 	}}
 	e, store, _ := runWithRules(t, rule)
 	withTables := true
-	e.load = func(_ context.Context, id uuid.UUID, now time.Time) (*Snapshot, error) {
+	e.load = func(_ context.Context, id uuid.UUID, now time.Time, _ Windows) (*Snapshot, error) {
 		s := &Snapshot{Now: now, InstanceID: id, PermTier: pgtype.TierReadOnly, Metrics: map[string]map[string]float64{}, Settings: map[string]string{}}
 		if withTables {
 			s.Tables = []TableStat{}
@@ -173,7 +173,9 @@ func TestRun_DegradedRuleKeepsItsOpenFindings(t *testing.T) {
 
 func TestRun_LoadErrorStopsPass(t *testing.T) {
 	e, store, _ := runWithRules(t)
-	e.load = func(context.Context, uuid.UUID, time.Time) (*Snapshot, error) { return nil, errors.New("load failed") }
+	e.load = func(context.Context, uuid.UUID, time.Time, Windows) (*Snapshot, error) {
+		return nil, errors.New("load failed")
+	}
 	require.Error(t, e.Run(context.Background()))
 	require.Empty(t, store.findings)
 }
@@ -307,7 +309,7 @@ func TestRun_OneFailingInstanceDoesNotStopTheOthers(t *testing.T) {
 	second := uuid.New()
 	store.ids = []uuid.UUID{first, second}
 	now := time.Unix(100, 0)
-	e.load = func(_ context.Context, id uuid.UUID, _ time.Time) (*Snapshot, error) {
+	e.load = func(_ context.Context, id uuid.UUID, _ time.Time, _ Windows) (*Snapshot, error) {
 		if id == first {
 			return nil, errors.New("snapshot unavailable")
 		}
@@ -335,7 +337,7 @@ func TestRun_SlowInstanceDoesNotStopThePass(t *testing.T) {
 	store.ids = []uuid.UUID{slow, healthy}
 	e.stepBudget = 50 * time.Millisecond
 	now := time.Unix(100, 0)
-	e.load = func(ctx context.Context, id uuid.UUID, _ time.Time) (*Snapshot, error) {
+	e.load = func(ctx context.Context, id uuid.UUID, _ time.Time, _ Windows) (*Snapshot, error) {
 		if id == slow {
 			<-ctx.Done()
 			return nil, ctx.Err()
@@ -364,7 +366,7 @@ func TestRun_StopEndsThePassBetweenInstances(t *testing.T) {
 	// stop is a plain func value, so the load closure, which takes a context,
 	// does not make the call to Stop a static one that must carry that context.
 	stop := func() { e.Stop() }
-	e.load = func(_ context.Context, id uuid.UUID, _ time.Time) (*Snapshot, error) {
+	e.load = func(_ context.Context, id uuid.UUID, _ time.Time, _ Windows) (*Snapshot, error) {
 		stop()
 		return &Snapshot{Now: now, InstanceID: id, PermTier: pgtype.TierReadOnly, Metrics: map[string]map[string]float64{}, Settings: map[string]string{}}, nil
 	}
@@ -388,7 +390,7 @@ func TestRun_PassTimeIsNotBoundedByOneStep(t *testing.T) {
 	}
 	e.stepBudget = 50 * time.Millisecond
 	now := time.Unix(100, 0)
-	e.load = func(ctx context.Context, id uuid.UUID, _ time.Time) (*Snapshot, error) {
+	e.load = func(ctx context.Context, id uuid.UUID, _ time.Time, _ Windows) (*Snapshot, error) {
 		select {
 		case <-time.After(20 * time.Millisecond):
 		case <-ctx.Done():

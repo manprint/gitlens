@@ -27,7 +27,7 @@ export const WINDOW_LABELS: Record<AdvisorWindowKey, string> = {
 
 export const WINDOW_HELP: Record<AdvisorWindowKey, string> = {
   'window.unused_index':
-    'How long an index must go without a scan, in the instance history or since the statistics reset, before the unused-index check reports it.',
+    'How long an index must go without a scan, in the instance history or in the statistics, before the unused-index check reports it.',
   'window.backup_history':
     'How long an instance must have been monitored before the backup checks read "no base backup seen" as a finding rather than as not enough history.',
 }

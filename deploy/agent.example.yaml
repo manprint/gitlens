@@ -36,7 +36,9 @@ targets:
       exclude: ["^template\\d$"] # Never monitor PostgreSQL template databases.
       max: 10 # Maximum databases discovered per target; 0 means the default.
 
-# Every check runs once shortly after start (within 30 s – 10 min depending on its interval) and then on its interval.
+# Every check runs once within its first-run bound after the agent starts, then on its interval. The bound is the
+# interval, capped at 30 s for an interval of up to 1m, 2 min for one of up to 15m and 10 min beyond: an hourly
+# check first reports within 10 min. The coverage endpoint and the console's data collection banner use the same bound.
 checks:
   activity: { interval: 10s, by_application: false } # Session state and wait groups.
   locks: { interval: 10s } # Blocking/blocked lock tree at Tier 0.

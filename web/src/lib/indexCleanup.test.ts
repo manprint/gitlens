@@ -390,9 +390,30 @@ describe('unused-index wording (13.3)', () => {
     )
   })
 
+  it('COVUI-005 a verdict from a last scan before the window is worded from that scan', () => {
+    // PostgreSQL 16 recorded the last scan ten days ago and pglens saw none
+    // inside the window: the advisor judged at once, on the statistics.
+    const lastScan = evidence({
+      last_scan: '2026-10-20T06:30:00Z',
+      observed_source: 'postgres_stats',
+      observed_for_seconds: 10 * 86_400,
+      window_seconds: 7 * 86_400,
+    })
+    const [stale] = candidates(
+      [item('idle', def('idle'))],
+      [finding('index.unused', 'public.idle', lastScan)],
+    )
+    expect(stale?.why).toBe(
+      'The advisor saw no scans of this index: PostgreSQL statistics show the last scan on 2026-10-20; the window is 7 days.',
+    )
+    expect(
+      observationBasis({ last_scan: 'not a time', observed_source: 'postgres_stats' }),
+    ).toBeNull()
+  })
+
   it('COVUI-005 a finding without the numbers keeps the general sentence', () => {
     const [old] = candidates([item('idle', def('idle'))], [finding('index.unused', 'public.idle')])
-    expect(old?.why).toBe('The advisor saw no scans of this index over its usage history.')
+    expect(old?.why).toBe('The advisor saw no scans of this index within its observation window.')
     expect(observationBasis({ observed_source: 'pglens', observed_for_seconds: 60 })).toBeNull()
     expect(observationBasis({ observed_for_seconds: 'x', window_seconds: 3_600 })).toBeNull()
     expect(observationBasis(undefined)).toBeNull()

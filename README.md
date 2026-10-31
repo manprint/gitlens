@@ -248,7 +248,11 @@ control, freshness and connection status, and a theme toggle. Every data table
 has a search box, filters on its categorical columns, ascending/descending sort
 buttons on its sortable columns and 20 rows per page (50 or 100 on request);
 the table state is kept in the URL, so a filtered, sorted page can be shared.
-The pages are:
+The search box filters the rows already loaded, except on Slowest queries,
+Query Inspector and Findings, where it searches on the server, and in the
+Search everything panel of Index analysis (see
+[Queries](#queries), [Advisor](#advisor) and
+[Index analysis](#index-analysis) below). The pages are:
 
 #### Fleet
 
@@ -275,6 +279,20 @@ Instance Detail scopes metrics by database and makes unmonitored databases
 visible. It labels measured, stale, unavailable, and truncated data; shows
 counter-reset gaps, host-metric availability, pending settings restarts,
 redacted `archive_command` values, and relation-budget notices.
+
+After an agent start, the four instance dashboards — Instance Detail,
+Wait-event analysis, Query Inspector, and Locks and Activity — show a data
+collection banner while some checks of the instance have no current result
+(the [coverage endpoint](#get-apiv1instancesidcoverage)): "Collecting data: 5
+of 30 checks have a current result — the rest are expected within 8 min", or
+"are overdue" once the expected time has passed. The banner goes away once
+every check has reported. A check whose newest result failed keeps it: the
+banner turns into a warning that names the check ("Failed on its last run:
+…"), and reads "Incomplete data" when no check is still pending. From 1600 px
+wide the banner is one line in the header row (the "5/30 checks" count, with
+the full sentence in its ⓘ hint), so it adds no height to the page; narrower,
+it sits above the page. A query's detail page, the cluster page and the
+fleet-level pages do not show it.
 
 The overview mixes two scopes, and says which is which. Transactions, cache
 hits, temporary bytes and deadlocks are per database (the selected one);
@@ -331,6 +349,18 @@ confirmation, and the agent still requires the target's
 [On-demand operations](#on-demand-operations)). Plan history contains only
 explicit requests and comparisons stay within one cluster.
 
+On Slowest queries and Query Inspector the search box searches on the server
+(the statements' `q`), so it finds statements beyond the rows on screen: it
+matches the query text, `queryid` or database, ignoring case, waits 300 ms
+after the last keystroke and needs at least 2 characters. The term is kept in
+the URL as `q`, the typed text stays in the box while results load, the
+matches are highlighted in the query text, and the count says when more
+statements match than the page lists (`has_more`). It searches what the agent
+collected (its `top_n` statements), not every statement PostgreSQL ran. An
+older link that carried the table search (`slow.q` on Slowest queries,
+`statement-statistics.q` on Query Inspector) still works: on load its term
+moves to `q`, unless the link already has a `q`.
+
 #### Locks and activity
 
 Locks and Activity shows the latest blocking-tree sample and session activity,
@@ -343,6 +373,29 @@ of a target client backend; the result is recorded in command audit.
 Advisor ranks findings and explains whether each rule is open, degraded, muted,
 or resolved. Its rule catalogue shows inputs, scope, severity, affected
 targets, and the minimum permission tier. Muting requires a reason and expiry.
+
+The search box of the Findings page searches on the server (the findings'
+`q`) over every finding, whatever its state: rule, title, detail,
+remediation, object, database, mute reason and evidence. As on Slowest
+queries, it waits 300 ms after the last keystroke, needs at least 2
+characters and keeps the term in the URL as `q`. Matches are highlighted.
+While a term is entered an All states button shows the muted and resolved
+matches too, and when the state filter hides every match the empty result
+offers Search all states.
+
+#### Index analysis
+
+Index analysis has Indexes, Cleanup and Dead rows tabs for one server. Its
+Search everything panel searches all that pglens collected for the server in
+the selected range (`GET /api/v1/instances/{id}/search`), grouped as Indexes,
+Tables, Columns and Queries, with at most 50 matches per group and the total
+of each; a group with more matches than it lists says "Showing N of M". Like
+the other server searches it waits 300 ms after the last keystroke, needs at
+least 2 characters and keeps the term in the URL as `q`. From 1600 px wide
+each group's list is at most 160 px high and scrolls, so the tab's table
+stays in view. An index link opens the index, expanded, on the Indexes tab; a
+table or column link opens the table on the Dead rows tab; a query link opens
+the statement search on Slowest queries in the same range.
 
 #### Alerts
 
@@ -424,8 +477,16 @@ days; `null` resets a window to its 7-day default). The advisor reads the
 stored windows at most every 30 seconds and judges with them from its next
 evaluation: `window.unused_index` is the history `index.unused` needs, and
 `window.backup_history` the monitoring history after which the backup rules
-stop being degraded. A base backup still counts as recent for a fixed seven
-days, whatever the window.
+stop being degraded. On PostgreSQL 16 and later an index never scanned since
+a statistics reset older than `window.unused_index`, or whose `last_idx_scan`
+is older than the window with no scan pglens recorded inside it, is judged at
+once, without that history (see [Advisor findings](#advisor-findings)).
+pglens's own index history is bounded by the retention of `metrics_indexes`
+(30 days by default): with a longer window, an index judged on that history
+alone stays degraded, and the reason names the window and the kept history;
+a standby's scans are read from the same kept history. A base backup still
+counts as recent for a fixed seven days, and as a backup strategy for a fixed
+30 days, whatever the window.
 
 The Notifications tab lists the three alert delivery channels — Slack,
 generic webhook and Google Chat — with whether each is configured, where its
@@ -869,9 +930,12 @@ Mute returns the changed state and expiry; remove it with
 The rule catalogue is available from `/api/v1/advisor/rules`; it is the
 authoritative list of rule IDs, severity, scope, required inputs and minimum
 permission tier. Findings are based on collected statistics, not query plans,
-so index recommendations are candidates rather than certainties. Rules that
-need seven days of history remain degraded until that history exists, and
-host-memory rules are unavailable for remote instances.
+so index recommendations are candidates rather than certainties.
+`index.unused` and the backup rules need an observation window of history
+(`window.unused_index` and `window.backup_history`, seven days each by
+default, set in Settings → Advisor rules) and stay degraded until it exists,
+except as described below; host-memory rules are unavailable for remote
+instances.
 
 The catalogue response is a JSON array, for example:
 
@@ -898,20 +962,29 @@ How the rules read the collected data:
   the median mean of the previous week.
 - `txn.high_rollback_ratio` is evaluated per database: the share of that
   database's transactions rolled back since its statistics were reset.
-- `index.unused` waits until the index has been observed for its window
+- `index.unused` waits until pglens has watched the index for its window
   (`window.unused_index`, seven days by default) and uses its peak scan rate
-  over the whole stored history, so an index that was merely idle for a few
-  minutes is not a candidate; primary-key and unique indexes never are. The
-  observation is the longer of pglens's own history of the index and, on
-  PostgreSQL 16 and later, the time since PostgreSQL's statistics were reset:
-  an index with no `last_idx_scan` since a reset older than the window is a
-  candidate at once, and one PostgreSQL saw scanned inside the window is not.
-  The finding's evidence carries `observed_source` (`pglens` or
-  `postgres_stats`), `observed_for_seconds` and `window_seconds`; an index
-  PostgreSQL saw scanned before the window counts as observed since that
-  scan, not since the reset. PostgreSQL 15 and earlier have no
-  `last_idx_scan`, so there only pglens's history counts (see
-  `docs/LIMITS.md`).
+  within that window, so an index that was merely idle for a few minutes is
+  not a candidate, and one scanned only before the window is; primary-key and
+  unique indexes never are, nor is an index of 10 MiB or less, and those get
+  no degraded finding while the history is short either. A scan pglens
+  recorded inside the window keeps the index in use, however short the
+  history. On PostgreSQL 16 and later, PostgreSQL's own statistics shorten or
+  settle the wait: an index PostgreSQL saw scanned inside the window is not a
+  candidate, and an index never scanned since a statistics reset older than
+  the window (or at an unknown time), or last scanned before the window with
+  no scan pglens recorded inside it, is a candidate at once, without waiting
+  for pglens's history. The finding's evidence carries `observed_source`
+  (`pglens` or `postgres_stats`), `observed_for_seconds` (the longer of
+  pglens's history and PostgreSQL's statistics, counted from the last scan
+  when PostgreSQL recorded one) and `window_seconds`; a candidate never
+  scanned since the reset also carries `window: "since statistics reset"` and
+  `stats_reset`, one last scanned before the window carries `last_scan`.
+  `peak_scan_rate` is the peak within the window, `history_days` the whole
+  stored history. PostgreSQL 15 and earlier have no `last_idx_scan`, so there
+  only pglens's history counts (see `docs/LIMITS.md`). The Cleanup tab of Index analysis states what each
+  verdict rests on, for example "PostgreSQL statistics cover 9 days; the
+  window is 7 days".
 - The bloat rules read the latest bloat row of each relation: an exact
   `pgstattuple` measurement from the last seven days wins over an estimate,
   and an estimate counts for 13 hours (the estimate runs every six hours).
@@ -932,7 +1005,11 @@ How the rules read the collected data:
   taken outside the replication protocol (file-level tools, storage
   snapshots) are never seen. Until a base backup has been seen,
   `backup.no_basebackup_seen` and `backup.no_strategy` stay degraded for the
-  first `window.backup_history` of monitoring (seven days by default).
+  first `window.backup_history` of monitoring (seven days by default). The
+  recency of a backup that has been seen is fixed, whatever the window:
+  `backup.no_basebackup_seen` counts a base backup as recent for seven days,
+  and `backup.no_strategy` accepts one seen in the last 30 days as a backup
+  strategy.
 
 ### Advisor rule catalogue
 
@@ -943,7 +1020,7 @@ How the rules read the collected data:
 | `query.regression` | critical | A query is materially slower than its seven-day baseline. |
 | `query.temp_bytes_high` | warning | A query writes unusually large temporary volumes per call. |
 | `query.cache_miss_high` | info | A high-volume query has an excessive shared-buffer read ratio. |
-| `index.unused` | warning | A large non-primary index has no recorded usage over seven days. |
+| `index.unused` | warning | A large index, neither primary key nor unique, has no recorded scan within its observation window (`window.unused_index`, seven days by default). |
 | `index.duplicate` | warning | Multiple indexes share the same definition on one table. |
 | `index.redundant_prefix` | info | A shorter non-unique index is a prefix of another index. |
 | `index.invalid` | critical | An invalid index is still present and maintained on writes. |
@@ -981,7 +1058,7 @@ How the rules read the collected data:
 | `archive.failing` | critical | Archive failures dominate the observed archive attempts. |
 | `archive.stalled` | critical | The last successful archive is older than the allowed interval. |
 | `backup.no_basebackup_seen` | warning | The cluster archives WAL, but no base backup has been seen running in the last seven days. |
-| `backup.no_strategy` | critical | Neither archiving nor a visible base-backup strategy is configured. |
+| `backup.no_strategy` | critical | Neither archiving nor a visible base-backup strategy is configured: no member archives WAL and no base backup has been seen in the last 30 days. |
 | `security.monitoring_role_can_write` | critical | The role pglens connects as could write if a session of it left read-only mode: an attribute, a membership or owned objects (the `monitoring_role` check). |
 | `sequence.exhaustion_risk` | critical | A sequence has used 90% of its range, counted up to the nearer of its own bound and its column's integer type; a warning from 75%. A cycling sequence whose own bound applies is left out (the `sequences` check). |
 | `partition.future_missing` | critical | The partitions of a table range-partitioned on a date or timestamp column ended, and it has no default partition, so inserts of rows since then fail; a warning when they end within seven days, or ended into a default partition. Left out 30 days after they ended (the `partitions` check). |
@@ -1129,6 +1206,16 @@ Durability checks are `settings` (1h, instance/Tier 0), `wal` (15s,
 instance/Tier 0), `checkpointer` (30s, instance/Tier 0), `io` (30s,
 instance/Tier 0, PostgreSQL 16+), and `archiver` (60s, instance/Tier 0).
 
+Every check runs once soon after the agent starts, then on its interval. The
+first run waits a random delay below the check's first-run bound: its
+interval, capped at 30 seconds for an interval of up to 1 minute, 2 minutes
+for one of up to 15 minutes, and 10 minutes for anything longer. An hourly
+check therefore reports within 10 minutes of a start rather than an hour
+later, and the random spread keeps the checks from all running at once. The
+server uses the same bound for `expected_by` in the
+[coverage endpoint](#get-apiv1instancesidcoverage), which the console shows as
+its data collection banner.
+
 Annotated `deploy/agent.example.yaml`:
 
 ```yaml
@@ -1181,8 +1268,8 @@ targets:
                                      # when every slot is held
 
 # Per-check configuration overrides (optional)
-# Every check runs once shortly after start (within 30 s – 10 min depending on its
-# interval) and then on its interval.
+# Every check runs once within its first-run bound after the agent starts (its
+# interval, capped at 30 s, 2 min or 10 min; see below) and then on its interval.
 checks:
   instance_info:    { interval: 60s }        # General instance metadata (mandatory)
   activity:        { interval: 10s, by_application: false } # Session activity
@@ -1618,7 +1705,8 @@ that was unreachable at start — can be `pending` with an `expected_by` already
 past. An agent older than this endpoint reports neither: `agent_started_at`
 and `expected_by` are `null` and the states come from the stored results alone.
 The agent must not be newer than the server: a server that predates these
-fields refuses its pushes.
+fields refuses its pushes. The console shows this endpoint as the data
+collection banner of the instance dashboards (see [Instance](#instance)).
 
 ```json
 {
@@ -1674,6 +1762,69 @@ curl -s -b cookies.txt "localhost:8080/api/v1/statements?instance_id=11111111-11
 ```
 
 Returns top queries joined to `query_texts`, with `truncated` and `comparable_scope: "cluster"` (`queryid` is comparable only within one cluster, not across clusters or major versions).
+
+An optional `q` keeps the statements whose query text, `queryid` (as text) or
+database contains the term, before they are ranked by `order_by` and cut to
+`limit`. The match ignores case, the term is trimmed and must then be 2 to 200
+characters (otherwise `400`), and `%`, `_` and `\` match themselves; the term
+reaches the database only as a bound parameter. With `q` the response adds
+`has_more`: `true` when more statements match in the window than `limit`
+returned. It says nothing about what the agent collected; `truncated` does.
+Without `q` the response is unchanged.
+
+```sh
+curl -s -b cookies.txt "localhost:8080/api/v1/statements?instance_id=11111111-1111-1111-1111-111111111111&q=orders&limit=20" | jq '{has_more, n: (.statements | length)}'
+```
+
+`GET /api/v1/findings` takes the same `q`: it keeps the findings whose
+`rule_id`, title, detail, remediation, object name, database, mute reason or
+evidence (as its `jsonb` text) contains the term, within the state asked for
+and before `limit`.
+
+### `GET /api/v1/instances/{id}/search`
+
+```sh
+curl -s -b cookies.txt "localhost:8080/api/v1/instances/11111111-1111-1111-1111-111111111111/search?q=orders" | jq .
+```
+
+Searches what pglens collected for one instance in a range, not only what a
+page shows: statements with samples in the range (matched on their newest
+query text, `queryid` and database, ranked by execution time), indexes on
+their `index_def` facts (qualified name, table, definition), and tables and
+columns on their `table_columns` facts (a table on its qualified name, a
+column on `schema.table.column` or its type, so a table's name finds its
+columns). `q` is required and follows the rules above. Optional parameters:
+`kinds` (a comma-separated subset of `statements,indexes,tables,columns`, all
+by default; an unknown kind is a `400`), `database`, `from` (default 24 hours
+before `to`), `to` (default now) and `limit` (hits per kind, at most 50). The
+response has one group per kind with `total` (every match), `truncated` (fewer
+hits than `total`) and its `hits`; each hit carries a title, a subtitle, a
+snippet of at most 160 characters split into parts with the matches marked,
+and the console link that shows the object. What the agent does not collect —
+statements and tables beyond its per-check limits — cannot be found.
+
+The three searches (`/statements` with `q`, `/findings` with `q`, and
+`/instances/{id}/search`) run under a 5-second database timeout, as do these
+endpoints without `q`. A search that runs out of time answers `500` with the
+usual error body, `{"error": ..., "detail": ...}`, the detail being the
+database driver's error: `error` is `query failed` (or `rows error`, when the
+time runs out while the rows are read) on `/statements`, `finding query
+failed` on `/findings`, and `search failed` on `/instances/{id}/search`
+(`query failed` if it is the instance lookup that runs out). Narrow the term,
+the range or `kinds` and search again.
+
+```json
+{
+  "q": "orders",
+  "groups": [
+    {"kind": "indexes", "total": 1, "truncated": false, "hits": [
+      {"key": "app.public.orders_pkey", "title": "public.orders_pkey", "subtitle": "app · public.orders",
+       "snippet": [{"text": "CREATE UNIQUE INDEX ", "match": false}, {"text": "orders", "match": true}, {"text": "_pkey ON public.", "match": false}, {"text": "orders", "match": true}, {"text": " USING btree (id)", "match": false}],
+       "link": "/indexes?instance=11111111-1111-1111-1111-111111111111&tab=indexes&focus=app.public.orders_pkey"}
+    ]}
+  ]
+}
+```
 
 ### `GET /api/v1/ash` and `/api/v1/ash/top`
 
@@ -1810,6 +1961,7 @@ GET    /api/v1/instances/{id}
 PATCH  /api/v1/instances/{id}
 GET    /api/v1/instances/{id}/activity|databases|host|settings|tables|indexes|bloat|command-audit|coverage
 GET    /api/v1/instances/{id}/workload/series
+GET    /api/v1/instances/{id}/search
 GET    /api/v1/locks
 GET    /api/v1/metrics/query
 GET    /api/v1/events
