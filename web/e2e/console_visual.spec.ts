@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
-import type { Page } from '@playwright/test'
+import type { APIRequestContext, Page, Response as PageResponse } from '@playwright/test'
 
 import { expect, test } from './fixtures'
 import { assertFits, measureRoutes, routeUrl, routeValues } from './fullhd_fit'
@@ -2227,5 +2227,475 @@ test('COV-E2E-001 after an agent restart the data-collection banner counts check
     type: 'COV-E2E-001 complete',
     description: `${final.reported} of ${final.total} checks at ${new Date().toISOString()}`,
   })
+  browserErrors.assertClean()
+})
+
+/** The term the full-search checks look for on the Odoo stack (12.3, D20). */
+const SEARCH_TERM = 'res_partner'
+/** A term that matches nothing the stack collects. */
+const NO_MATCH_TERM = 'zzzzqqqq'
+
+interface StatementsBody {
+  statements: { queryid: string | number }[]
+  has_more?: boolean
+}
+
+interface SearchBody {
+  groups: {
+    kind: 'statements' | 'indexes' | 'tables' | 'columns'
+    total: number
+    truncated: boolean
+    hits: { key: string; title: string; link: string }[]
+  }[]
+}
+
+interface FindingBody {
+  finding_id: string
+  rule_id: string
+  state: string
+}
+
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/** The next GET answer of `path` whose query string passes `match`. */
+function apiResponse(
+  page: Page,
+  path: string,
+  match: (params: URLSearchParams) => boolean,
+): Promise<PageResponse> {
+  return page.waitForResponse(
+    (response) => {
+      const url = new URL(response.url())
+      return (
+        url.pathname === path && response.request().method() === 'GET' && match(url.searchParams)
+      )
+    },
+    { timeout: 30_000 },
+  )
+}
+
+async function getJson<T>(api: APIRequestContext, path: string): Promise<T> {
+  const response = await api.get(path)
+  if (!response.ok()) throw new Error(`GET ${path} answered ${response.status()}`)
+  return (await response.json()) as T
+}
+
+/**
+ * Screenshots in the light theme, then in the dark one (the stored preference,
+ * then a reload); `ready` waits for the searched state after the reload.
+ */
+async function shootBothThemes(
+  page: Page,
+  name: string,
+  ready: () => Promise<void>,
+): Promise<void> {
+  await shoot(page, `${name}-light`)
+  await page.evaluate(() => {
+    const key = 'pglens.preferences'
+    let stored: Record<string, unknown>
+    try {
+      stored = JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, unknown>
+    } catch {
+      stored = {}
+    }
+    localStorage.setItem(key, JSON.stringify({ ...stored, theme: 'dark' }))
+  })
+  await page.reload()
+  await expect(page.locator('html')).toHaveClass(/\bdark\b/)
+  await ready()
+  await shoot(page, `${name}-dark`)
+}
+
+test('SRCH-E2E-001 Slowest queries and the Query inspector search the server past the ranked rows and mark the matches', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, 2 * 30_000))
+  const browserErrors = collectConsoleErrors(page)
+  const instanceId = await pickInstance(api)
+  // The page's own requests: same instance, ranking and time window.
+  const ranked = (params: URLSearchParams) =>
+    params.get('instance_id') === instanceId && params.get('order_by') === 'total_exec_time'
+  const unfilteredAnswer = apiResponse(
+    page,
+    '/api/v1/statements',
+    (params) => ranked(params) && !params.has('q'),
+  )
+  await page.goto(`/queries?instance=${instanceId}&rank=total&range=24h`)
+  const unfiltered = (await (await unfilteredAnswer).json()) as StatementsBody
+  const table = page.getByRole('table', { name: 'Slowest queries' })
+  await expect(table).toBeVisible({ timeout: 30_000 })
+  const firstPage = new Set(unfiltered.statements.slice(0, 20).map((row) => String(row.queryid)))
+
+  const searchedAnswer = apiResponse(
+    page,
+    '/api/v1/statements',
+    (params) => ranked(params) && params.get('q') === SEARCH_TERM,
+  )
+  await page.locator('#slow-search').fill(SEARCH_TERM)
+  const searched = await searchedAnswer
+  expect(searched.ok(), 'the statements search answers').toBe(true)
+  await expect.poll(() => new URL(page.url()).searchParams.get('q')).toBe(SEARCH_TERM)
+  const matched = (await searched.json()) as StatementsBody
+  expect(
+    matched.statements.length,
+    `statements matching ${SEARCH_TERM} on instance ${instanceId}`,
+  ).toBeGreaterThan(0)
+  const pastFirstPage = matched.statements.filter((row) => !firstPage.has(String(row.queryid)))
+  expect(
+    pastFirstPage.length,
+    `the search reaches statements outside the first 20 ranked rows on instance ${instanceId}`,
+  ).toBeGreaterThan(0)
+
+  // The footer counts what the server answered (I-9).
+  const count = matched.statements.length
+  const note =
+    matched.has_more === true
+      ? `More than ${count} matches — narrow the search.`
+      : `${count} ${count === 1 ? 'match' : 'matches'}.`
+  await expect(page.getByText(note, { exact: true })).toBeVisible()
+  const rows = table.locator('tbody tr')
+  await expect(rows).toHaveCount(Math.min(20, count))
+  for (const text of await rows.allTextContents()) {
+    expect(text.toLowerCase()).toContain(SEARCH_TERM)
+  }
+  const mark = table.locator('mark').first()
+  await expect(mark).toBeVisible()
+  expect(((await mark.textContent()) ?? '').toLowerCase()).toBe(SEARCH_TERM)
+  await shootBothThemes(page, 'srch-e2e-001-queries', async () => {
+    await expect(table.locator('mark').first()).toBeVisible({ timeout: 30_000 })
+  })
+
+  // The Query inspector takes the same `q` and marks the statement text.
+  await page.goto(`/instances/${instanceId}/queries?q=${SEARCH_TERM}&range=24h`)
+  await expect(page.locator('#statement-search')).toHaveValue(SEARCH_TERM)
+  const statistics = page.getByRole('table', { name: 'Statement statistics' })
+  await expect(statistics.locator('summary mark').first()).toBeVisible({ timeout: 30_000 })
+  await expect(
+    page.getByText(/^(?:\d+ match(?:es)?\.|More than \d+ matches — narrow the search\.)$/),
+  ).toBeVisible()
+  await shoot(page, 'srch-e2e-001-inspector')
+
+  await assertFits(page, api, fullHdRoute('/queries?q=res_partner'))
+  await assertFits(page, api, fullHdRoute('/instances/:instanceId/queries?q=res_partner'))
+  browserErrors.assertClean()
+})
+
+test('SRCH-E2E-002 a term that matches nothing shows the no-match state on every search page', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, 2 * 30_000))
+  const browserErrors = collectConsoleErrors(page)
+  const instanceId = await pickInstance(api)
+
+  // Slowest queries: the empty state names the term and offers every statement back.
+  await page.goto(`/queries?instance=${instanceId}&rank=total&range=24h`)
+  const table = page.getByRole('table', { name: 'Slowest queries' })
+  await expect(table).toBeVisible({ timeout: 30_000 })
+  await page.locator('#slow-search').fill(NO_MATCH_TERM)
+  await expect(page.getByText(`No statement matches “${NO_MATCH_TERM}” in this range`)).toBeVisible(
+    {
+      timeout: 30_000,
+    },
+  )
+  await expect(table).toBeHidden()
+  await expect(page.locator('#slow-search')).toHaveValue(NO_MATCH_TERM)
+  await shoot(page, 'srch-e2e-002-queries')
+  await page.getByRole('button', { name: 'Show all statements' }).click()
+  await expect.poll(() => new URL(page.url()).searchParams.has('q')).toBe(false)
+  await expect(table).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator('#slow-search')).toHaveValue('')
+
+  // Index analysis: no group has a match.
+  await page.goto(`/indexes?instance=${instanceId}&tab=indexes`)
+  await expect(page.getByRole('table', { name: 'Indexes', exact: true })).toBeVisible({
+    timeout: 30_000,
+  })
+  await page.locator('#index-search').fill(NO_MATCH_TERM)
+  await expect(page.getByText(`Nothing matches “${NO_MATCH_TERM}” in this range`)).toBeVisible({
+    timeout: 30_000,
+  })
+  await shoot(page, 'srch-e2e-002-indexes')
+  await page.getByRole('button', { name: 'Clear the search' }).click()
+  await expect.poll(() => new URL(page.url()).searchParams.has('q')).toBe(false)
+  await expect(page.getByText(/^Nothing matches/)).toBeHidden()
+
+  // Findings: no finding of any state matches.
+  await page.goto('/findings')
+  await expect(page.locator('#findings-search')).toBeVisible({ timeout: 30_000 })
+  await page.locator('#findings-search').fill(NO_MATCH_TERM)
+  await expect(page.getByText(`No finding matches “${NO_MATCH_TERM}”`)).toBeVisible({
+    timeout: 30_000,
+  })
+  await expect(page.getByRole('button', { name: 'Show all findings' })).toBeVisible()
+  await shoot(page, 'srch-e2e-002-findings')
+
+  // Query inspector: the same empty state as Slowest queries, for this instance.
+  await page.goto(`/instances/${instanceId}/queries?range=24h`)
+  const statistics = page.getByRole('table', { name: 'Statement statistics' })
+  await expect(statistics).toBeVisible({ timeout: 30_000 })
+  await page.locator('#statement-search').fill(NO_MATCH_TERM)
+  await expect(page.getByText(`No statement matches “${NO_MATCH_TERM}” in this range`)).toBeVisible(
+    { timeout: 30_000 },
+  )
+  await expect(page.locator('#statement-search')).toHaveValue(NO_MATCH_TERM)
+  await shoot(page, 'srch-e2e-002-inspector')
+  await page.getByRole('button', { name: 'Show all statements' }).click()
+  await expect.poll(() => new URL(page.url()).searchParams.has('q')).toBe(false)
+  await expect(statistics).toBeVisible({ timeout: 30_000 })
+
+  await assertFits(page, api, fullHdRoute('/queries'))
+  await assertFits(page, api, fullHdRoute('/indexes?tab=indexes'))
+  await assertFits(page, api, fullHdRoute('/findings'))
+  browserErrors.assertClean()
+})
+
+test('SRCH-E2E-003 Index analysis searches everything in groups and a hit opens its index row', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, 2 * 30_000))
+  const browserErrors = collectConsoleErrors(page)
+  const instanceId = await pickInstance(api)
+  // The inventory exception (12.2): at 1920×950 the results leave the table header on screen.
+  await page.setViewportSize({ width: 1920, height: 950 })
+  await page.goto(`/indexes?instance=${instanceId}&tab=indexes`)
+  const indexes = page.getByRole('table', { name: 'Indexes', exact: true })
+  await expect(indexes).toBeVisible({ timeout: 30_000 })
+
+  const searchPath = `/api/v1/instances/${instanceId}/search`
+  const answer = apiResponse(page, searchPath, (params) => params.get('q') === SEARCH_TERM)
+  await page.locator('#index-search').fill(SEARCH_TERM)
+  const response = await answer
+  expect(response.ok(), 'the instance search answers').toBe(true)
+  const body = (await response.json()) as SearchBody
+  const searchedWindow = new URL(response.url()).searchParams
+  await expect(
+    page.getByRole('heading', { level: 2, name: `Search results for “${SEARCH_TERM}”` }),
+  ).toBeVisible()
+
+  const groupOf = (kind: SearchBody['groups'][number]['kind']) => {
+    const group = body.groups.find((candidate) => candidate.kind === kind)
+    if (!group) throw new Error(`the search answers no ${kind} group on instance ${instanceId}`)
+    return group
+  }
+  const labels = { indexes: 'Indexes', tables: 'Tables', columns: 'Columns', statements: 'Queries' }
+  for (const [kind, label] of Object.entries(labels) as [keyof typeof labels, string][]) {
+    const group = groupOf(kind)
+    expect(
+      group.total,
+      `${label} matching ${SEARCH_TERM} on instance ${instanceId}`,
+    ).toBeGreaterThan(0)
+    const list = page.getByRole('list', { name: `${label} found` })
+    await expect(list).toBeVisible()
+    await expect(list.getByRole('listitem')).toHaveCount(group.hits.length)
+    if (group.truncated) {
+      const section = page.locator('section', {
+        has: page.getByRole('heading', {
+          level: 3,
+          name: new RegExp(`^${label}\\s*[\\d,]+ match`),
+        }),
+      })
+      await expect(section.getByText(new RegExp(`^Showing ${group.hits.length} of `))).toBeVisible()
+    }
+  }
+
+  // A named object is a hit of its group; a group lists its first 50 in name
+  // order, so past them the narrower term (a match of the same rule) finds it.
+  async function assertHit(kind: 'tables' | 'columns', title: string, narrower: string) {
+    const group = groupOf(kind)
+    if (group.hits.some((hit) => hit.title === title)) {
+      const list = page.getByRole('list', { name: `${labels[kind]} found` })
+      await expect(list.getByText(title, { exact: true }).first()).toBeAttached()
+      return
+    }
+    expect(group.truncated, `${title} is among the ${kind} hits on instance ${instanceId}`).toBe(
+      true,
+    )
+    const params = new URLSearchParams({ q: narrower, kinds: kind })
+    for (const key of ['from', 'to']) {
+      const value = searchedWindow.get(key)
+      if (value !== null) params.set(key, value)
+    }
+    const narrowed = await getJson<SearchBody>(api, `${searchPath}?${params.toString()}`)
+    const hits = narrowed.groups.find((candidate) => candidate.kind === kind)?.hits ?? []
+    expect(
+      hits.map((hit) => hit.title),
+      `${title} matches ${SEARCH_TERM} on instance ${instanceId}`,
+    ).toContain(title)
+  }
+  await assertHit('tables', 'public.res_partner', 'public.res_partner')
+  await assertHit('columns', 'public.res_partner.name', 'res_partner.name')
+  const indexHit = groupOf('indexes').hits.find((hit) => /^[^.]+\.res_partner_/.test(hit.title))
+  if (!indexHit) {
+    throw new Error(`no res_partner_* index among the index hits on instance ${instanceId}`)
+  }
+
+  // The table header stays on a 1920×950 screen under the results (12.2 inventory exception).
+  await page.evaluate(() => window.scrollTo(0, 0))
+  const header = await indexes.locator('thead').boundingBox()
+  if (!header) throw new Error('the Indexes table has no header box')
+  const pageHeight = await page.evaluate(() => document.scrollingElement?.scrollHeight ?? 0)
+  const headerBottom = Math.round(header.y + header.height)
+  console.log(
+    `SRCH-E2E-003 1920×950 search results: Indexes header top ${Math.round(header.y)} px, bottom ${headerBottom} px, page height ${pageHeight} px`,
+  )
+  test.info().annotations.push({
+    type: 'SRCH-E2E-003 Indexes header at 1920×950',
+    description: `top ${Math.round(header.y)} px, bottom ${headerBottom} px, page height ${pageHeight} px`,
+  })
+  expect(header.y, 'Indexes header below the top of the screen').toBeGreaterThanOrEqual(0)
+  expect(headerBottom, 'Indexes header on a 1920×950 screen').toBeLessThanOrEqual(950)
+
+  await shootBothThemes(page, 'srch-e2e-003-indexes', async () => {
+    await expect(page.getByRole('list', { name: 'Indexes found' })).toBeVisible({
+      timeout: 30_000,
+    })
+  })
+
+  // The hit opens the Indexes tab with its row expanded; the focus leaves the URL.
+  await page.setViewportSize({ width: 1920, height: 950 })
+  await page
+    .getByRole('list', { name: 'Indexes found' })
+    .getByRole('link')
+    .filter({ has: page.getByText(indexHit.title, { exact: true }) })
+    .first()
+    .click()
+  await expect.poll(() => new URL(page.url()).searchParams.get('tab')).toBe('indexes')
+  await expect.poll(() => new URL(page.url()).searchParams.has('focus')).toBe(false)
+  const indexName = indexHit.title.slice(indexHit.title.indexOf('.') + 1)
+  await expect(
+    indexes.getByRole('button', { name: `Hide details of ${indexName}`, exact: true }).first(),
+  ).toHaveAttribute('aria-expanded', 'true', { timeout: 30_000 })
+  await expect(page.getByText(`Search results for “${SEARCH_TERM}”`)).toBeHidden()
+  await page.screenshot({ path: `${ARTIFACT_DIR}/srch-e2e-003-focused-1920x950.png` })
+
+  await assertFits(page, api, fullHdRoute('/indexes?tab=indexes'))
+  browserErrors.assertClean()
+})
+
+test('SRCH-E2E-004 Findings search narrows the list to a live rule and All states shows muted and resolved matches', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, 2 * 30_000))
+  const browserErrors = collectConsoleErrors(page)
+  // The fragment comes from the live findings: a rule whose matches include a
+  // muted or resolved finding and fewer than every finding.
+  const all = await getJson<FindingBody[]>(api, '/api/v1/findings?state=all&limit=1000')
+  const inactive = (finding: FindingBody) =>
+    finding.state === 'muted' || finding.state === 'resolved'
+  const perRule = new Map<string, number>()
+  for (const finding of all) perRule.set(finding.rule_id, (perRule.get(finding.rule_id) ?? 0) + 1)
+  const ruleIds = [...perRule.keys()]
+    .filter((ruleId) => all.some((finding) => finding.rule_id === ruleId && inactive(finding)))
+    .sort((a, b) => (perRule.get(a) ?? 0) - (perRule.get(b) ?? 0))
+  let pick: { fragment: string; matches: FindingBody[] } | undefined
+  let fallback: typeof pick
+  for (const ruleId of ruleIds) {
+    const matches = await getJson<FindingBody[]>(
+      api,
+      `/api/v1/findings?state=all&limit=1000&q=${encodeURIComponent(ruleId)}`,
+    )
+    if (matches.length === 0 || matches.length >= all.length || !matches.some(inactive)) continue
+    // Best: open and inactive matches, all on the first page.
+    if (matches.some((finding) => !inactive(finding)) && matches.length <= 20) {
+      pick = { fragment: ruleId, matches }
+      break
+    }
+    fallback ??= { fragment: ruleId, matches }
+  }
+  pick ??= fallback
+  if (!pick) {
+    throw new Error(
+      `no rule of the ${all.length} live findings has a muted or resolved finding whose search narrows the list`,
+    )
+  }
+  const { fragment, matches } = pick
+  const total = matches.length
+  const activeCount = matches.filter((finding) => !inactive(finding)).length
+  test.info().annotations.push({
+    type: 'SRCH-E2E-004 fragment',
+    description: `${fragment}: ${total} of ${all.length} findings, ${activeCount} open or degraded`,
+  })
+
+  await page.goto('/findings')
+  await expect(page.locator('#findings-search')).toBeVisible({ timeout: 30_000 })
+  await page.locator('#findings-search').fill(fragment)
+  await expect.poll(() => new URL(page.url()).searchParams.get('q')).toBe(fragment)
+  const shown = (visible: number) =>
+    page.getByText(
+      new RegExp(`^${visible} of ${total} findings matching “${escapeRegExp(fragment)}” shown`),
+    )
+  // By default the open and degraded matches only.
+  await expect(shown(activeCount)).toBeVisible({ timeout: 30_000 })
+  const table = page.getByRole('table', { name: 'Advisor findings' })
+  // The Rule cell of every row on the open page.
+  const ruleCells = () =>
+    table.evaluate((element) => {
+      const heads = [...element.querySelectorAll('thead tr:first-child > *')]
+      const column = heads.findIndex((cell) => (cell.textContent ?? '').trim() === 'Rule')
+      return [...element.querySelectorAll('[data-testid="simple-table-rows"] > tr')].map((row) =>
+        column < 0 ? null : (row.children[column]?.textContent ?? '').trim(),
+      )
+    })
+  const assertRules = async (where: string) => {
+    for (const rule of await ruleCells()) {
+      expect(rule, `${where}: a row whose Rule cell lacks ${fragment}`).toContain(fragment)
+    }
+  }
+  if (activeCount > 0) {
+    await expect(table.getByTestId('simple-table-rows').locator(':scope > tr')).toHaveCount(
+      Math.min(20, activeCount),
+    )
+    await assertRules('open and degraded matches')
+  }
+
+  const allStates = page.getByRole('button', { name: 'All states', exact: true })
+  await allStates.click()
+  await expect(allStates).toHaveAttribute('aria-pressed', 'true')
+  await expect.poll(() => new URL(page.url()).searchParams.get('state')).toBe('all')
+  await expect(shown(total)).toBeVisible()
+  await assertRules('all states, page 1')
+  // A muted or resolved match is on screen: on the first page, or further on
+  // when the fragment is the fallback with more than one page of matches.
+  const inactiveCell = table.getByRole('cell', { name: /^(?:muted|resolved)$/ }).first()
+  const pages = Math.ceil(total / 20)
+  const maxPages = Math.min(pages, 10)
+  let inactiveOn: number | null = (await inactiveCell.isVisible()) ? 1 : null
+  for (let at = 2; inactiveOn === null && at <= maxPages; at += 1) {
+    await page.getByRole('button', { name: 'Next page' }).click()
+    await expect(page.getByText(new RegExp(`Page ${at} of ${pages}`))).toBeVisible()
+    await assertRules(`all states, page ${at}`)
+    if (await inactiveCell.isVisible()) inactiveOn = at
+  }
+  if (inactiveOn === null && maxPages < pages) {
+    // Never a silent skip: the run says what it could not check.
+    test.info().annotations.push({
+      type: 'UNVERIFIED',
+      description: `SRCH-E2E-004: no muted or resolved ${fragment} match in the first ${maxPages} of ${pages} pages`,
+    })
+  } else {
+    expect(
+      inactiveOn,
+      `a muted or resolved ${fragment} match among ${pages} page(s) of All states`,
+    ).not.toBeNull()
+  }
+  if (inactiveOn !== null && inactiveOn > 1) {
+    test.info().annotations.push({
+      type: 'SRCH-E2E-004 inactive match',
+      description: `${fragment}: first muted or resolved match on page ${inactiveOn} of ${pages}`,
+    })
+  }
+  if (pages > 1 && inactiveOn !== 1) {
+    // Back to page 1 for the screenshots.
+    await page.getByRole('button', { name: 'First page' }).click()
+  }
+  await shootBothThemes(page, 'srch-e2e-004-findings', async () => {
+    await expect(shown(total)).toBeVisible({ timeout: 30_000 })
+  })
+
+  await assertFits(page, api, fullHdRoute('/findings?q=index'))
   browserErrors.assertClean()
 })

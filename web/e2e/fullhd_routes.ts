@@ -64,12 +64,7 @@ export const FULLHD_ROUTES: readonly FullHdRoute[] = [
   // toolbar line and the matches fill the same table. The search state of
   // Index analysis is not listed: its grouped results are a user action shown
   // above the tab's table, like an expanded row (D26).
-  {
-    path: '/queries?q=res_partner',
-    name: 'Slowest queries: search',
-    kind: 'fit',
-    pendingUnit: '12.3',
-  },
+  { path: '/queries?q=res_partner', name: 'Slowest queries: search', kind: 'fit' },
   { path: '/indexes?tab=indexes', name: 'Index analysis: indexes', kind: 'fit' },
   // The other views of the Indexes tab (15.3); the inventory is the default.
   ...INDEX_VIEWS.slice(1).map(({ id, label }): FullHdRoute => ({
@@ -105,7 +100,6 @@ export const FULLHD_ROUTES: readonly FullHdRoute[] = [
     path: '/instances/:instanceId/queries?q=res_partner',
     name: 'Query inspector: search',
     kind: 'fit',
-    pendingUnit: '12.3',
   },
   {
     path: '/instances/:instanceId/queries/:queryid',
@@ -124,7 +118,7 @@ export const FULLHD_ROUTES: readonly FullHdRoute[] = [
     name: `Advisor findings: ${label}`,
     kind: 'fit',
   })),
-  { path: '/findings?q=index', name: 'Advisor findings: search', kind: 'fit', pendingUnit: '12.3' },
+  { path: '/findings?q=index', name: 'Advisor findings: search', kind: 'fit' },
   // One entry per alerting tab (15.3); the default tab has no `section` in its URL.
   ...ALERTS_SECTIONS.map(({ id, label }, index): FullHdRoute => ({
     path: index === 0 ? '/alerts' : `/alerts?section=${id}`,
