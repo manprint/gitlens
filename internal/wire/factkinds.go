@@ -25,6 +25,45 @@ type BloatSkippedTable struct {
 	RelName    string `json:"relname"`
 }
 
+// AgentFlagsFact is the fact kind of the agent's own configuration for one
+// target, which the monitoring readiness view reads (D25). The agent sends it
+// in a result of its own (check AgentFlagsCheck) at start, hourly, and when
+// the data directory becomes readable or stops being so. A server that does
+// not know the kind drops the fact and counts it as an invalid fact; the rest
+// of the push is stored.
+const (
+	AgentFlagsFact  = "agent_flags"
+	AgentFlagsCheck = "agent_flags"
+	// AgentFlagsKey is the key of the one AgentFlagsFact of a target.
+	AgentFlagsKey = "agent"
+)
+
+// AgentFlags is the value of an AgentFlagsFact: switches of the agent's
+// configuration, with no secret and no path. A nil field is unknown: an agent
+// that does not report it, or one that cannot know it yet.
+type AgentFlags struct {
+	// CommandsEnabled is commands.enabled: the agent polls the server for
+	// on-demand commands (EXPLAIN, pgstattuple, cancel, terminate).
+	CommandsEnabled *bool `json:"commands_enabled,omitempty"`
+	// AllowSignal is the target's allow_signal: cancel and terminate are
+	// allowed.
+	AllowSignal *bool `json:"allow_signal,omitempty"`
+	// ByApplication is checks.activity.by_application: the activity check
+	// counts connections per application.
+	ByApplication *bool `json:"by_application,omitempty"`
+	// SessionQueryText says whether the raw text of every active session is
+	// collected. No agent setting controls it yet, so the agent leaves it nil.
+	SessionQueryText *bool `json:"session_query_text,omitempty"`
+	// HostLocal says the agent collects host metrics for the target: host
+	// collection is enabled and the target runs on the agent's host
+	// (host_local, or a local address when host_local is not set).
+	HostLocal *bool `json:"host_local,omitempty"`
+	// DataDirectoryReadable says whether the agent could measure the
+	// filesystem of the target's data directory on its last host collection.
+	// It stays nil until a collection knew the data directory.
+	DataDirectoryReadable *bool `json:"data_directory_readable,omitempty"`
+}
+
 // FactKind describes one kind of fact the server accepts.
 type FactKind struct {
 	// Check names the check that reports the kind; empty when the kind does
@@ -61,6 +100,7 @@ var factKinds = map[string]FactKind{
 	"subscription":              {Check: "logical_replication", Replace: true},
 	BloatUnreadableFact:         {Check: "bloat_estimate"},
 	"xmin_horizon":              {Check: "activity", Replace: true},
+	AgentFlagsFact:              {Check: AgentFlagsCheck, Replace: true},
 }
 
 // LookupFactKind returns the description of a fact kind, and whether the

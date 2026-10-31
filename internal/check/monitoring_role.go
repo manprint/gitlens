@@ -3,6 +3,7 @@ package check
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,7 +26,10 @@ const (
 
 // readOnlyMemberships are the roles deploy/sql/monitoring_user.sql lets the
 // monitoring role belong to; pg_database_owner only stands for owning the
-// current database, which the ownership count reports.
+// current database, which the ownership count reports. Whether the role is a
+// member of pg_monitor and of pg_read_all_stats, directly or through another
+// role (a superuser is a member of every role), is read apart: the monitoring
+// readiness view warns when either is missing.
 const monitoringRoleQuery = `SELECT r.rolname,
        r.rolsuper, r.rolcreatedb, r.rolcreaterole, r.rolreplication, r.rolbypassrls,
        CASE WHEN r.rolsuper THEN '{}'::pg_catalog.text[] ELSE ARRAY(
@@ -43,7 +47,9 @@ const monitoringRoleQuery = `SELECT r.rolname,
            AND d.refobjid = r.oid
            AND d.deptype = 'o')::pg_catalog.int8,
        (SELECT s.reset_val FROM pg_catalog.pg_settings s
-         WHERE s.name = 'default_transaction_read_only')
+         WHERE s.name = 'default_transaction_read_only'),
+       pg_catalog.pg_has_role(r.oid, 'pg_monitor', 'MEMBER'),
+       pg_catalog.pg_has_role(r.oid, 'pg_read_all_stats', 'MEMBER')
   FROM pg_catalog.pg_roles r
  WHERE r.rolname = CURRENT_USER`
 
@@ -81,7 +87,11 @@ func (c *monitoringRoleCheck) Scrape(ctx context.Context, t Target) (Result, err
 	return Result{Facts: []Fact{{
 		Kind: monitoringRoleFactKind, Key: monitoringRoleFactKey,
 		ValueText: value,
-		Labels:    map[string]string{"role": posture.Role, "read_only_default": posture.ReadOnlyDefault},
+		Labels: map[string]string{
+			"role": posture.Role, "read_only_default": posture.ReadOnlyDefault,
+			"has_pg_monitor":     strconv.FormatBool(posture.HasPgMonitor),
+			"has_read_all_stats": strconv.FormatBool(posture.HasReadAllStats),
+		},
 	}}}, nil
 }
 
@@ -96,6 +106,10 @@ type RolePosture struct {
 	// from its own, its database's and the server's settings: a session's
 	// SET does not hide it.
 	ReadOnlyDefault string
+	// HasPgMonitor and HasReadAllStats say whether the role is a member of
+	// pg_monitor and of pg_read_all_stats. Without them it cannot see other
+	// users' sessions and statements, nor every setting.
+	HasPgMonitor, HasReadAllStats bool
 }
 
 // ReadRolePosture reads the RolePosture of the connection's current user.
@@ -111,7 +125,7 @@ func ReadRolePosture(ctx context.Context, conn interface {
 		readOnlyDefault                                     *string
 	)
 	if err := conn.QueryRow(ctx, monitoringRoleQuery).Scan(&posture.Role, &super, &createDB, &createRole,
-		&replication, &bypassRLS, &memberships, &owned, &readOnlyDefault); err != nil {
+		&replication, &bypassRLS, &memberships, &owned, &readOnlyDefault, &posture.HasPgMonitor, &posture.HasReadAllStats); err != nil {
 		return RolePosture{}, fmt.Errorf("read monitoring role: %w", err)
 	}
 	for _, attr := range []struct {

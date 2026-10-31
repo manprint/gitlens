@@ -79,3 +79,44 @@ ALTER TABLE check_role_owned OWNER TO check_role_writer`)
 		require.Equal(t, "check_role_writer", f.Labels["role"])
 	})
 }
+
+// RDYLBL-001 (real role): the roles the fixtures set up like
+// deploy/sql/monitoring_user.sql are members of pg_monitor and, through it,
+// of pg_read_all_stats; so is a superuser; a login role granted neither is
+// reported as such, and its other labels keep their meaning.
+func TestRDYLBL001_RealRole(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		drop := func() {
+			_, err := admin.Exec(context.Background(), `DROP ROLE IF EXISTS check_rdylbl_plain`)
+			require.NoError(t, err)
+		}
+		drop()
+		t.Cleanup(drop)
+
+		for _, role := range []pgtest.Role{pgtest.RoleT0, pgtest.RoleT1, pgtest.RoleT2, pgtest.RoleSuperuser} {
+			f := scrapeMonitoringRole(t, pg, pg.Pool(t, "app", role), "")
+			require.Equal(t, "true", f.Labels["has_pg_monitor"], role.String())
+			require.Equal(t, "true", f.Labels["has_read_all_stats"], role.String())
+		}
+
+		_, err := admin.Exec(ctx, `CREATE ROLE check_rdylbl_plain LOGIN PASSWORD 'test';
+ALTER ROLE check_rdylbl_plain SET default_transaction_read_only = on`)
+		require.NoError(t, err)
+		cfg, err := pgxpool.ParseConfig(pg.DSN("app", pgtest.RoleSuperuser))
+		require.NoError(t, err)
+		cfg.ConnConfig.User, cfg.ConnConfig.Password = "check_rdylbl_plain", "test"
+		plain, err := pgxpool.NewWithConfig(ctx, cfg)
+		require.NoError(t, err)
+		t.Cleanup(plain.Close)
+
+		f := scrapeMonitoringRole(t, pg, plain, "")
+		require.Equal(t, monitoringRoleReadOnly, f.ValueText)
+		require.Equal(t, map[string]string{
+			"role": "check_rdylbl_plain", "read_only_default": "on",
+			"has_pg_monitor": "false", "has_read_all_stats": "false",
+		}, f.Labels)
+	})
+}

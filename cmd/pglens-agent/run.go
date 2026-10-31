@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -128,6 +129,7 @@ func runAgentCommand(args []string) {
 	scheduledDBs := map[string]map[string]bool{}                 // target name -> databases its database-scoped checks run for
 
 	configureChecks(cfg)
+	flags := newAgentFlagsState(cfg)
 	managers := make([]*agent.Manager, 0, len(cfg.Targets))
 	var ashStops []func()
 	for _, tc := range cfg.Targets {
@@ -145,6 +147,22 @@ func runAgentCommand(args []string) {
 	}
 	waitForTargets(ctx, managers, targetReadyTimeout)
 	go warnSuperuserTargets(ctx, os.Stderr, managers)
+	// The agent's own switches for the monitoring readiness view, at start
+	// and hourly. The configuration is read once per process, so a changed
+	// agent.yaml reaches the server with the restart that applies it.
+	flags.queueAll(&mu, pending, clk.Now())
+	go func() {
+		ticker := clk.NewTicker(agentFlagsInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C():
+				flags.queueAll(&mu, pending, clk.Now())
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 	for i, tc := range cfg.Targets {
 		// &mu, not "nothing": startASH below launches a goroutine that writes
 		// `pending` under this mutex, and it does so for target N while this
@@ -179,8 +197,13 @@ func runAgentCommand(args []string) {
 				}
 				buckets := groupTargetsByDataDir(localNames, hostDataDirs(ctx, local, warner))
 				collectHostByDataDir(ctx, collector, buckets, warner, os.Stderr, func(target string, sample host.Sample) {
+					now := clk.Now()
+					changed, ok := flags.observeHost(target, sample, now)
 					mu.Lock()
-					pending[target] = append(pending[target], hostWireResult(sample, clk.Now()))
+					pending[target] = append(pending[target], hostWireResult(sample, now))
+					if ok {
+						pending[target] = append(pending[target], changed)
+					}
 					mu.Unlock()
 				})
 			}
@@ -382,6 +405,98 @@ func hostWireResult(s host.Sample, now time.Time) wire.Result {
 	return r
 }
 
+// agentFlagsInterval is how often the agent repeats every target's
+// agent_flags fact, so a server that lost it (or started after the agent)
+// has it again within the hour.
+const agentFlagsInterval = time.Hour
+
+// agentFlagsWireResult is the agent_flags result of one target: switches of
+// the resolved configuration, never read from the database, and the data
+// directory readability of the last host collection (nil until one knew the
+// data directory). It carries no secret and no path.
+func agentFlagsWireResult(cfg *agent.Config, target agent.TargetConfig, dataDirReadable *bool, now time.Time) wire.Result {
+	flags := wire.AgentFlags{
+		CommandsEnabled: boolPtr(cfg.CommandsEnabled()),
+		AllowSignal:     boolPtr(target.AllowSignal),
+		ByApplication:   boolPtr(cfg.Checks["activity"].ByApplication),
+		// No agent setting collects the raw text of every active session
+		// yet, so SessionQueryText stays unknown rather than false.
+		HostLocal:             boolPtr(cfg.HostEnabled() && agent.TargetIsLocal(target)),
+		DataDirectoryReadable: dataDirReadable,
+	}
+	// A struct of booleans always marshals.
+	raw, _ := json.Marshal(flags)
+	return wire.Result{Check: wire.AgentFlagsCheck, TS: now, Facts: []wire.Fact{{Kind: wire.AgentFlagsFact, Key: wire.AgentFlagsKey, ValueJSON: raw}}}
+}
+
+// agentFlagsState builds the agent_flags results of every target and keeps the
+// data directory readability each one last reported.
+type agentFlagsState struct {
+	cfg     *agent.Config
+	targets []agent.TargetConfig
+	mu      sync.Mutex
+	// readable is the data directory readability last reported per target
+	// name; a target without an entry has reported none.
+	readable map[string]bool
+}
+
+func newAgentFlagsState(cfg *agent.Config) *agentFlagsState {
+	return &agentFlagsState{cfg: cfg, targets: cfg.Targets, readable: map[string]bool{}}
+}
+
+// results builds the result of every target.
+func (s *agentFlagsState) results(now time.Time) map[string]wire.Result {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string]wire.Result, len(s.targets))
+	for _, t := range s.targets {
+		var readable *bool
+		if v, ok := s.readable[t.Name]; ok {
+			readable = boolPtr(v)
+		}
+		out[t.Name] = agentFlagsWireResult(s.cfg, t, readable, now)
+	}
+	return out
+}
+
+// queueAll queues the result of every target, under mu.
+func (s *agentFlagsState) queueAll(mu *sync.Mutex, pending map[string][]wire.Result, now time.Time) {
+	results := s.results(now)
+	mu.Lock()
+	defer mu.Unlock()
+	for name, r := range results {
+		pending[name] = append(pending[name], r)
+	}
+}
+
+// observeHost records the data directory readability a host sample of target
+// shows, and returns the target's result when it differs from the one last
+// reported. A sample taken without the data directory (the monitoring role
+// cannot read it, or reading it failed) says nothing about it.
+func (s *agentFlagsState) observeHost(target string, sample host.Sample, now time.Time) (wire.Result, bool) {
+	var readable bool
+	switch {
+	case sample.DiskUnavailable != "":
+		readable = false
+	case sample.DiskTotalBytes != nil:
+		readable = true
+	default:
+		return wire.Result{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if previous, ok := s.readable[target]; ok && previous == readable {
+		return wire.Result{}, false
+	}
+	for _, t := range s.targets {
+		if t.Name == target {
+			s.readable[target] = readable
+			return agentFlagsWireResult(s.cfg, t, boolPtr(readable), now), true
+		}
+	}
+	return wire.Result{}, false
+}
+
 func flushEnvelope(ctx context.Context, managers []*agent.Manager, mu *sync.Mutex, pending map[string][]wire.Result, lastEdgeState *edgeStates, ashEnabled map[string]bool, scheduledDBs map[string]map[string]bool, coverage agentCoverage, pusher *agent.Pusher) {
 	mu.Lock()
 	batch := make(map[string][]wire.Result, len(pending))
@@ -548,12 +663,16 @@ func warnSuperuserTargets(ctx context.Context, w io.Writer, managers []*agent.Ma
 // on an error-free result for its check (internal/server/pipeline.go), so such a
 // skip stays until that check next succeeds. A check that keeps failing keeps
 // the skip for as long as it fails.
+//
+// The newest agent_flags result of the batch is put back the same way: it is
+// sent at start and then only hourly, so dropping it with an unreachable
+// target would leave the server without the agent's flags for an hour.
 func requeueSkips(mu *sync.Mutex, pending map[string][]wire.Result, target string, batch []wire.Result) {
 	mu.Lock()
 	defer mu.Unlock()
 	queued := map[string]bool{}
 	for _, r := range pending[target] {
-		if r.SkipReason != "" {
+		if r.SkipReason != "" || r.Check == wire.AgentFlagsCheck {
 			queued[r.Check] = true
 		}
 	}
@@ -563,6 +682,15 @@ func requeueSkips(mu *sync.Mutex, pending map[string][]wire.Result, target strin
 		}
 		queued[r.Check] = true
 		pending[target] = append(pending[target], r)
+	}
+	if queued[wire.AgentFlagsCheck] {
+		return
+	}
+	for i := len(batch) - 1; i >= 0; i-- {
+		if batch[i].Check == wire.AgentFlagsCheck {
+			pending[target] = append(pending[target], batch[i])
+			return
+		}
 	}
 }
 

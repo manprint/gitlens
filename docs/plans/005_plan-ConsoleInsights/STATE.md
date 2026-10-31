@@ -89,11 +89,11 @@ checkpoint. Capture/open and restore/close are each one STATE.md update.
 - Scope result: RUNNING
 - Type: sub-phase
 - ID / attempt: 14.1 / 1
-- Status: TODO (P13, bug-HDR, 12.3, P12 closed: unit:P12:1)
+- Status: OPEN (base unit:P12:1 commit 27beed1)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-opus-5-5; supervisor: Opus review agent (agent-1); exploration/mechanical: agent-3:claude-haiku-5-5
 - File / unit heading: phase_15.md → 14.1 Agent flags fact, evaluator, rules, endpoints, documentation
-- Current step: not started
+- Current step: S2 partial (WIP checkpoint, see §6 HANDOFF)
 - Next action: open 14.1 (read phase_15.md 14.1 + local design context), brief an Opus implementer.
 - Next eligible plan unit: 14.1
 - Unit base: the unit:11.5b:1 commit; branch: `feat/index-analysis` (never switch or create branches)
@@ -233,7 +233,7 @@ Unit-owned paths are listed in each phase file's sub-phase `Files` field and rec
 
 ## 6. In-flight checkpoint
 
-No unit open. Next: 14.1 (phase_15.md; 14.2 carries the binding header-chip note from R-13.3b).
+14.1 / 1 OPEN (base unit:P12:1 commit 27beed1). HANDOFF 2026-10-31 (user stop): WIP checkpoint commit with partial S2 by the Opus implementer (stopped mid-step, no report): `internal/wire/{factkinds.go,envelope.go}` + NEW `factkinds_test.go` (`agent_flags` kind), `cmd/pglens-agent/run.go` (`agentFlagsWireResult` emitter, +132 lines), `internal/check/monitoring_role{.go,_test.go,_integration_test.go}` (labels `has_pg_monitor`/`has_read_all_stats`). At the checkpoint: `go build ./...` ok, `go vet` + `go test` of wire/check/cmd/pglens-agent ok. NOT verified: S1 facts (config keys, `check_skip` reasons, setting `source`) not yet recorded; `knownChecks` (staleness.go) not done; emitter tests in `run_test.go`, wire-compat test (unknown kind → `invalid_fact`), RDYLBL-001 integration run, TestINTRO001 not run. To resume: re-open 14.1 with a fresh Opus implementer using `scratchpad/brief-14.1.md` (recreate from phase_15.md 14.1 if the scratchpad is gone) plus: "partial S2 is in the tree (commit WIP 14.1); review it against the contract, finish S1 report + S2, then S3–S6". 14.2 carries the binding header-chip note from R-13.3b.
 Side work (user request 2026-10-30, deadlock QA on the dev Odoo DB): unit `bug-DL` DONE (F1–F3, §8). Live specs that provoke load need `PGLENS_QA_ALLOW_STIMULUS=1`; their cleanup drops schema `qa_tmp`.
 Method (works): Opus implementer agent per unit with a precise brief; coordinator verifies gates, deploys, runs live specs, launches a fresh read-only Opus reviewer (`model: opus`), applies findings via the implementer, records §7/§8, G-SECRETS, commits with trailers. After 11.4: 11.5a (11.5b BLOCKED Q2), P11 (incl. `docs/LIMITS.md` R6), then 13.2 → … per §11.
 Last durable step: P12 DONE (unit:P12:1; R-P12 applied). Before it: 12.3 DONE (unit:12.3:1; R-12.3 applied; live SRCH-E2E 4/4). Before it: bug-HDR DONE (unit:bug-HDR:1; R-bug-HDR applied; live FHD-FIT-001 + HDR-E2E-001). Before it: P13 DONE (unit:P13:1; R-P13 + R-P13b applied; int 170, legacy UI 12/12 incl. re-run, live 8/8, matrix exit 0). Before it: 12.2 DONE (unit:12.2:1; R-12.2 + R-12.2b fixes applied; 1507/1507). Before it: 13.3 DONE (unit:13.3:1; R-13.3 + R-13.3b fixes applied; matrix 31/31 ≤ 15 min; live COV-E2E-001 ×3, SET/ADV/FHD-INST pass). Before it: 12.1 DONE (unit:12.1:1; R-12.1 fixes applied; no deploy — live proof is 12.3). Before it: 11.5b DONE (unit:11.5b:1; R-11.5b fixes applied; live NOTI-E2E-001/002 + SET-E2E-001 pass, 0 secret hits). Before it: 13.2 DONE (unit:13.2:1; R-13.2 fixes applied; live coverage 31/31 in 10 m 16 s). Before it: P11 DONE (unit:P11:1; R-P11 found BUG-RET — console retention change ran the policy at once — fixed and proven live; R-P11b fixes applied). Before it: 11.5a DONE (unit:11.5a:1; R-11.5a fixes applied; live NOTI-E2E-001 + SET-E2E-001 pass). Before it: bug-DL DONE (unit:bug-DL:1; R-bug-DL fixes applied; live DL-E2E-001 + FHD-FIT-001 pass). Before it: 11.4 DONE (unit:11.4:1; R-11.4 APPROVED-WITH-CHANGES, fixes 1–6 applied; live ADV-E2E-001 + SET-E2E-001 pass; no rule overridden afterwards; `window.unused_index` 3600 s kept on the dev stack).

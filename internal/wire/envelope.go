@@ -133,13 +133,19 @@ type Fact struct {
 }
 
 func (f Fact) Validate() error {
+	return f.validate(factKinds)
+}
+
+// validate checks f against the registry kinds. A server built before a kind
+// existed has a registry without it: its tests pass that registry.
+func (f Fact) validate(kinds map[string]FactKind) error {
 	if f.Kind == "" {
 		return fmt.Errorf("fact kind is required")
 	}
 	if f.Key == "" {
 		return fmt.Errorf("fact key is required")
 	}
-	if _, ok := LookupFactKind(f.Kind); !ok {
+	if _, ok := kinds[f.Kind]; !ok {
 		return fmt.Errorf("unknown fact kind %q", f.Kind)
 	}
 	textSet := f.ValueText != ""
