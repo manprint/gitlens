@@ -163,6 +163,38 @@ export const CAPTIONS = {
     howToRead:
       'The marked text is what matched. A link opens the index or table, expanded, on its tab, or the statement search on Slowest queries, in the same time range.',
   },
+  'locks.sessions-application': {
+    what: 'Sessions opened by your applications: one row per client session of the latest lock sample, oldest transaction first.',
+    source:
+      'getLocks sessions: client backends of pg_stat_activity (at most 100), classed as application by the server from application_name and the monitoring role.',
+    unit: 'sessions',
+    window: 'Latest lock sample, taken every 10 s.',
+    howToRead:
+      'Expand a row for every field of the session and its signal actions. Query is the normalised statement unless marked raw.',
+  },
+  'locks.sessions-pglens': {
+    what: 'Connections opened by pglens itself to collect these metrics; they are not your workload.',
+    source:
+      'getLocks sessions classed as pglens by the server: application_name pglens, pglens/… or pglens-agent/…, or the monitoring role.',
+    unit: 'sessions',
+    window: 'Latest lock sample, taken every 10 s.',
+    howToRead:
+      'A session of your application never shows here, and a pglens session never shows in the application table.',
+  },
+  'locks.connection-summary': {
+    what: 'Client connections counted by origin, application, user, client address, database and state, with each share of the total.',
+    source:
+      'getLocks connections: counted from the very sessions of the two tables; when the sample is cut, the counts of the activity scrape (pg_connections_* and pg_backends).',
+    unit: 'connections',
+    window: 'Latest lock sample, taken every 10 s.',
+    howToRead:
+      'A client address of local is a Unix socket. Counts per application need checks.activity.by_application.',
+  },
+  'locks.origin': {
+    what: 'Who opened the session: app is a connection of your application, pglens a connection pglens opened itself.',
+    source: 'The origin the server sets on each session of getLocks.',
+    window: 'Latest lock sample.',
+  },
 } as const satisfies Record<string, CaptionEntry>
 
 export type CaptionId = keyof typeof CAPTIONS

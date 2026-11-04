@@ -16,6 +16,7 @@
 import { ALERTS_SECTIONS, EVENTS_SECTIONS } from '../src/features/alerts/alertingSections'
 import { CLUSTER_SECTIONS } from '../src/features/cluster/clusterSections'
 import { INDEX_VIEWS } from '../src/features/indexes/indexViews'
+import { LOCKS_VIEWS } from '../src/features/locks/locksViews'
 import { FINDINGS_VIEWS } from '../src/features/findings/findingsViews'
 import {
   ADVISOR_VIEWS,
@@ -106,12 +107,12 @@ export const FULLHD_ROUTES: readonly FullHdRoute[] = [
     name: 'Query detail and plan history',
     kind: 'fit',
   },
-  {
-    path: '/instances/:instanceId/locks',
-    name: 'Locks and activity',
+  // One entry per Locks tab (16.3); the default tab has no `view` in its URL.
+  ...LOCKS_VIEWS.map(({ id, label }, index): FullHdRoute => ({
+    path: index === 0 ? '/instances/:instanceId/locks' : `/instances/:instanceId/locks?view=${id}`,
+    name: index === 0 ? 'Locks and activity' : `Locks and activity: ${label}`,
     kind: 'fit',
-    pendingUnit: '16.3',
-  },
+  })),
   // One entry per findings tab (15.3); the default tab has no `view` in its URL.
   ...FINDINGS_VIEWS.map(({ id, label }, index): FullHdRoute => ({
     path: index === 0 ? '/findings' : `/findings?view=${id}`,

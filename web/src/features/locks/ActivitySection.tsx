@@ -9,7 +9,6 @@ import {
   breakdown,
   connectionSaturation,
   deadlockRate,
-  hasReported,
   latestSampleAt,
   latestValue,
   oldestStateAge,
@@ -17,6 +16,13 @@ import {
 } from '@/lib/activity'
 import { formatCount, formatDuration, formatPercent, formatRelative } from '@/lib/format'
 import { sessionKey, type LockNode } from '@/lib/locks'
+import {
+  hasOrigin,
+  originSentence,
+  splitByOrigin,
+  usesOriginTables,
+  type ConnectionsSummary,
+} from '@/lib/sessions'
 import {
   XMIN_HOLDER_KIND_LABELS,
   XMIN_IDENTITY_LABELS,
@@ -26,6 +32,8 @@ import {
   xminIdentityText,
   type XminHorizon,
 } from '@/lib/xmin'
+import { ConnectionSummary } from './ConnectionSummary'
+import { SessionsTable } from './SessionsTable'
 import { SignalActions } from './SignalActions'
 
 export interface ActivityResponseLike {
@@ -68,6 +76,12 @@ function ActiveSessions({
   return (
     <div className="mt-6">
       <h3 className="font-medium">Active sessions</h3>
+      {sessions.length > 0 && !hasOrigin(sessions) ? (
+        <p className="text-muted-foreground mt-2 text-sm">
+          This server does not report the origin of a session, so application and pglens sessions
+          are not told apart.
+        </p>
+      ) : null}
       {sessions.length === 0 ? (
         <p className="text-muted-foreground mt-2 text-sm">
           No active sessions in the latest sample.
@@ -192,9 +206,15 @@ export function ActivitySection({
   currentTier = 'T0',
   instanceId,
   now = new Date(),
+  connections,
+  part = 'all',
 }: {
   response: ActivityResponseLike
   sessions?: readonly LockNode[]
+  /** The connection summary of the lock response; its absence means a server older than 16.2. */
+  connections?: ConnectionsSummary | undefined
+  /** `tiles` and `details` split the section across two views of the page. */
+  part?: 'all' | 'tiles' | 'details'
   // The sessions come from the lock sample, which can be stale while the
   // activity sample is fresh.
   sessionsStale?: boolean
@@ -222,6 +242,9 @@ export function ActivitySection({
   const oldestPreparedTransaction = latestValue(response.metrics, 'pg_oldest_prepared_xact_seconds')
   const frozenXidAge = latestValue(response.metrics, 'pg_max_datfrozenxid_age')
   const rate = deadlockRate(response.metrics)
+  const originMode = usesOriginTables(sessions ?? [], connections)
+  const showTiles = part !== 'details'
+  const showDetails = part !== 'tiles'
 
   return (
     <Section
@@ -229,7 +252,15 @@ export function ActivitySection({
       description={
         <>
           Activity is sampled every {SAMPLE_INTERVAL_SECONDS} seconds. Breakdowns are available per
-          state and per database; application counts appear only when the agent opts in.
+          state and per database
+          {connections ? (
+            <>
+              ; application counts are on by default and can be turned off in the agent. Connections
+              are split by origin: application or pglens.
+            </>
+          ) : (
+            <>; application counts appear only when the agent opts in.</>
+          )}
           {sampledAt ? <> Latest activity sample: {formatRelative(sampledAt, now)}.</> : null}
         </>
       }
@@ -240,93 +271,131 @@ export function ActivitySection({
         </Stale>
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <MetricTile
-          label="Connections used / max_connections"
-          value={
-            used !== null && limit !== null ? (
-              `${formatCount(used)} / ${formatCount(limit)}`
+      {showTiles ? (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <MetricTile
+            label="Connections used / max_connections"
+            value={
+              used !== null && limit !== null ? (
+                `${formatCount(used)} / ${formatCount(limit)}`
+              ) : (
+                <Unknown />
+              )
+            }
+            unit={
+              saturation.ratio === null
+                ? undefined
+                : (formatPercent(saturation.ratio, 1) ?? undefined)
+            }
+            detail={connections ? originSentence(connections) : undefined}
+          />
+          <MetricTile label="Longest transaction" value={durationOrUnknown(maxTransactionAge)} />
+          <MetricTile
+            label="Longest idle-in-transaction"
+            value={durationOrUnknown(maxIdleTransactionAge)}
+          />
+          <MetricTile label="Oldest state age" value={durationOrUnknown(maxStateAge)} />
+        </div>
+      ) : null}
+
+      {showDetails ? (
+        <div className="mt-6 grid gap-6 lg:grid-cols-3">
+          <div>
+            <h3 className="font-medium">Connection saturation</h3>
+            {saturation.ratio === null ? (
+              <p className="text-muted-foreground mt-2 text-sm">No connection limit sample.</p>
             ) : (
-              <Unknown />
-            )
-          }
-          unit={
-            saturation.ratio === null
-              ? undefined
-              : (formatPercent(saturation.ratio, 1) ?? undefined)
-          }
-        />
-        <MetricTile label="Longest transaction" value={durationOrUnknown(maxTransactionAge)} />
-        <MetricTile
-          label="Longest idle-in-transaction"
-          value={durationOrUnknown(maxIdleTransactionAge)}
-        />
-        <MetricTile label="Oldest state age" value={durationOrUnknown(maxStateAge)} />
-      </div>
-
-      <div className="mt-6 grid gap-6 lg:grid-cols-3">
-        <div>
-          <h3 className="font-medium">Connection saturation</h3>
-          {saturation.ratio === null ? (
-            <p className="text-muted-foreground mt-2 text-sm">No connection limit sample.</p>
-          ) : (
-            <p role="status" className="text-muted-foreground mt-2 text-sm">
-              {saturation.saturated ? 'Near max_connections.' : 'Below the saturation threshold.'}{' '}
-              The conn.near_max advisor threshold is: Connections above 80 percent of
-              max_connections.
-            </p>
-          )}
+              <p role="status" className="text-muted-foreground mt-2 text-sm">
+                {saturation.saturated ? 'Near max_connections.' : 'Below the saturation threshold.'}{' '}
+                The conn.near_max advisor threshold is: Connections above 80 percent of
+                max_connections.
+              </p>
+            )}
+          </div>
+          <div>
+            <h3 className="font-medium">Connections by database</h3>
+            <BreakdownList label="Connections by database" rows={databaseRows} />
+          </div>
+          <div>
+            <h3 className="font-medium">Backends by state</h3>
+            <BreakdownList label="Backends by state" rows={stateRows} />
+          </div>
         </div>
-        <div>
-          <h3 className="font-medium">Connections by database</h3>
-          <BreakdownList label="Connections by database" rows={databaseRows} />
-        </div>
-        <div>
-          <h3 className="font-medium">Backends by state</h3>
-          <BreakdownList label="Backends by state" rows={stateRows} />
-        </div>
-      </div>
+      ) : null}
 
-      <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <MetricTile label="Prepared transactions" value={valueOrUnknown(preparedTransactions)} />
-        <MetricTile
-          label="Oldest prepared transaction"
-          value={durationOrUnknown(oldestPreparedTransaction)}
-        />
-        <MetricTile label="Frozen-XID age" value={valueOrUnknown(frozenXidAge)} />
-        <MetricTile
-          label="Deadlock rate"
-          value={rate === null ? <Unknown /> : deadlockRateText(rate)}
-          unit="per second"
-        />
-      </div>
-      <p className="text-muted-foreground mt-3 text-sm">
-        Frozen-XID age is shown with the table.wraparound_risk framing: maintenance is urgent as the
-        age approaches {formatCount(WRAPAROUND_RISK_THRESHOLD)} transaction IDs. Deadlock rate is
-        the sum of each database's latest rate; identifying involved statements requires PostgreSQL
-        log analysis.
-      </p>
-
-      <XminHorizonBlock holder={response.xmin_horizon} metrics={response.metrics} />
-
-      <div className="mt-6">
-        <h3 className="font-medium">Connections by application</h3>
-        {hasReported(response.metrics, 'pg_connections_by_application') ? (
-          <BreakdownList label="Connections by application" rows={applicationRows} />
-        ) : (
-          <>
-            <Disabled
-              feature="Per-application activity counts"
-              configKey="checks.activity.by_application"
+      {showTiles ? (
+        <>
+          <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <MetricTile
+              label="Prepared transactions"
+              value={valueOrUnknown(preparedTransactions)}
             />
-            <p className="text-muted-foreground mt-2 text-sm">
-              This breakdown is opt-in and was not reported by the agent.
-            </p>
-          </>
-        )}
-      </div>
+            <MetricTile
+              label="Oldest prepared transaction"
+              value={durationOrUnknown(oldestPreparedTransaction)}
+            />
+            <MetricTile label="Frozen-XID age" value={valueOrUnknown(frozenXidAge)} />
+            <MetricTile
+              label="Deadlock rate"
+              value={rate === null ? <Unknown /> : deadlockRateText(rate)}
+              unit="per second"
+            />
+          </div>
+          <p className="text-muted-foreground mt-3 text-sm">
+            Frozen-XID age is shown with the table.wraparound_risk framing: maintenance is urgent as
+            the age approaches {formatCount(WRAPAROUND_RISK_THRESHOLD)} transaction IDs. Deadlock
+            rate is the sum of each database's latest rate; identifying involved statements requires
+            PostgreSQL log analysis.
+          </p>
+        </>
+      ) : null}
 
-      {sessions && instanceId ? (
+      {showDetails ? (
+        <>
+          <XminHorizonBlock holder={response.xmin_horizon} metrics={response.metrics} />
+
+          <div className="mt-6">
+            <h3 className="font-medium">Connections by application</h3>
+            <BreakdownList label="Connections by application" rows={applicationRows} />
+            {connections?.by_application_enabled === false ? (
+              <>
+                <Disabled
+                  feature="Per-application activity counts"
+                  configKey="checks.activity.by_application"
+                />
+                <p className="text-muted-foreground mt-2 text-sm">
+                  This breakdown is opt-in and was not reported by the agent.
+                </p>
+              </>
+            ) : null}
+          </div>
+
+          {connections ? (
+            <div className="mt-6">
+              <ConnectionSummary connections={connections} />
+            </div>
+          ) : null}
+        </>
+      ) : null}
+
+      {part === 'all' && originMode && sessions && instanceId ? (
+        <div className="mt-6 space-y-6">
+          {(['application', 'pglens'] as const).map((origin) => (
+            <SessionsTable
+              key={origin}
+              connections={connections}
+              currentTier={currentTier}
+              instanceId={instanceId}
+              origin={origin}
+              rows={splitByOrigin(sessions)[origin]}
+              sampleStale={sampleStale || sessionsStale}
+              sessions={sessions}
+            />
+          ))}
+        </div>
+      ) : null}
+
+      {showDetails && !originMode && sessions && instanceId ? (
         <ActiveSessions
           currentTier={currentTier}
           instanceId={instanceId}

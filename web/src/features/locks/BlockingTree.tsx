@@ -1,7 +1,8 @@
 import { Lock } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
+import type { ApiFailure } from '@/api/client'
 import { useInstance, useInstanceActivity, useLocks } from '@/api/queries'
 import type { PermTier } from '@/api/types'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -23,6 +24,16 @@ import {
   type LockPID,
 } from '@/lib/locks'
 import { Button } from '@/components/ui/button'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  splitByOrigin,
+  usesOriginTables,
+  type ConnectionsSummary,
+  type SessionOrigin,
+} from '@/lib/sessions'
+import { OriginBadge } from './OriginBadge'
+import { SessionsTable } from './SessionsTable'
+import { DEFAULT_LOCKS_VIEW, LOCKS_VIEWS, readLocksView, type LocksViewId } from './locksViews'
 
 const QUERY_BYTE_BUDGET = 2048
 const SAMPLE_INTERVAL_SECONDS = 10
@@ -33,6 +44,7 @@ export interface LocksResponseLike {
   stale: boolean
   nodes: readonly unknown[]
   sessions?: readonly unknown[]
+  connections?: ConnectionsSummary
 }
 
 interface TreeEntry {
@@ -271,6 +283,7 @@ function TreeItem({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <strong>PID {pid}</strong>
+            <OriginBadge session={tree.node} />
             {tree.cycle ? <span className="text-destructive">Cycle detected</span> : null}
             {rootBlocker ? <span className="font-medium">Root blocker</span> : null}
             <span className="text-muted-foreground">
@@ -488,6 +501,110 @@ export interface LocksPageProps {
   instanceId?: string
 }
 
+function normalizeSessions(response: LocksResponseLike | undefined): LockNode[] {
+  if (response === undefined) return []
+  return sessionsWithTreeQuery(
+    response.sessions?.map(normalizeNode).filter((node): node is LockNode => node !== null) ?? [],
+    response.nodes.map(normalizeNode).filter((node): node is LockNode => node !== null),
+  )
+}
+
+const LOCKS_SUBTITLE =
+  'Who is blocking whom right now: the blocking chains from the latest lock sample, and the sessions currently running on the instance.'
+
+interface OriginLocksProps {
+  instanceId: string
+  response: LocksResponseLike
+  sessions: readonly LockNode[]
+  currentTier: PermTier
+  activity: {
+    response: ActivityResponseLike | undefined
+    failure: ApiFailure | null
+    retry: () => void
+  }
+}
+
+// Once the server sends session origins the page has one table per tab (D26).
+function OriginLocks({ instanceId, response, sessions, currentTier, activity }: OriginLocksProps) {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const view = readLocksView(searchParams.get('view'))
+  const connections = response.connections
+  const split = useMemo(() => splitByOrigin(sessions), [sessions])
+  const sampleStale = sampleIsStale(response, new Date())
+
+  function showView(next: LocksViewId) {
+    setSearchParams(
+      (current) => {
+        const params = new URLSearchParams(current)
+        if (next === DEFAULT_LOCKS_VIEW) params.delete('view')
+        else params.set('view', next)
+        return params
+      },
+      { replace: true },
+    )
+  }
+
+  const activityBlock = (part: 'tiles' | 'details') =>
+    activity.failure ? (
+      <ErrorState failure={activity.failure} onRetry={activity.retry} endpoint="activity" />
+    ) : activity.response ? (
+      <ActivitySection
+        connections={connections}
+        currentTier={currentTier}
+        instanceId={instanceId}
+        part={part}
+        response={activity.response}
+        sessions={sessions}
+        sessionsStale={sampleStale}
+      />
+    ) : (
+      <p role="status">Loading activity sample…</p>
+    )
+
+  const table = (origin: SessionOrigin) => (
+    <SessionsTable
+      currentTier={currentTier}
+      instanceId={instanceId}
+      origin={origin}
+      rows={split[origin]}
+      sampleStale={sampleStale}
+      connections={connections}
+      sessions={sessions}
+    />
+  )
+
+  return (
+    <Tabs
+      className="gap-8 min-[1600px]:gap-4"
+      onValueChange={(value) => showView(readLocksView(value))}
+      value={view}
+    >
+      <PageHeader
+        icon={Lock}
+        eyebrow="Instance"
+        title="Locks and activity"
+        subtitle={LOCKS_SUBTITLE}
+        actions={
+          <TabsList aria-label="Locks views">
+            {LOCKS_VIEWS.map((entry) => (
+              <TabsTrigger key={entry.id} value={entry.id}>
+                {entry.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        }
+      />
+      <TabsContent className="space-y-8 min-[1600px]:space-y-4" value="overview">
+        <BlockingTree response={response} currentTier={currentTier} instanceId={instanceId} />
+        {activityBlock('tiles')}
+      </TabsContent>
+      <TabsContent value="application">{table('application')}</TabsContent>
+      <TabsContent value="pglens">{table('pglens')}</TabsContent>
+      <TabsContent value="activity">{activityBlock('details')}</TabsContent>
+    </Tabs>
+  )
+}
+
 export function LocksPage({ instanceId: explicitInstanceId }: LocksPageProps = {}) {
   const location = useLocation()
   const navigate = useNavigate()
@@ -498,6 +615,7 @@ export function LocksPage({ instanceId: explicitInstanceId }: LocksPageProps = {
   const locksQuery = useLocks(instanceId ?? '')
   const activityQuery = useInstanceActivity(instanceId ?? '')
   const response = locksQuery.data as LocksResponseLike | undefined
+  const sessions = useMemo(() => normalizeSessions(response), [response])
   const activityResponse = activityQuery.data as ActivityResponseLike | undefined
   const unauthorized =
     instanceQuery.error?.kind === 'unauthorized' ||
@@ -515,13 +633,30 @@ export function LocksPage({ instanceId: explicitInstanceId }: LocksPageProps = {
     return <p role="status">Select an instance to inspect locks.</p>
   }
 
+  if (response && usesOriginTables(sessions, response.connections)) {
+    return (
+      <OriginLocks
+        activity={{
+          response: activityResponse,
+          failure:
+            activityQuery.isError && activityResponse === undefined ? activityQuery.error : null,
+          retry: () => void activityQuery.refetch(),
+        }}
+        currentTier={instanceQuery.data?.perm_tier ?? 'T0'}
+        instanceId={instanceId}
+        response={response}
+        sessions={sessions}
+      />
+    )
+  }
+
   return (
     <div className="space-y-8 min-[1600px]:space-y-4">
       <PageHeader
         icon={Lock}
         eyebrow="Instance"
         title="Locks and activity"
-        subtitle="Who is blocking whom right now: the blocking chains from the latest lock sample, and the sessions currently running on the instance."
+        subtitle={LOCKS_SUBTITLE}
       />
       {locksQuery.isPending && response === undefined ? (
         <p role="status">Loading lock sample…</p>
@@ -549,12 +684,7 @@ export function LocksPage({ instanceId: explicitInstanceId }: LocksPageProps = {
               currentTier={instanceQuery.data?.perm_tier ?? 'T0'}
               instanceId={instanceId}
               response={activityResponse}
-              sessions={sessionsWithTreeQuery(
-                response.sessions
-                  ?.map(normalizeNode)
-                  .filter((node): node is LockNode => node !== null) ?? [],
-                response.nodes.map(normalizeNode).filter((node): node is LockNode => node !== null),
-              )}
+              sessions={sessions}
               sessionsStale={sampleIsStale(response, new Date())}
             />
           ) : (

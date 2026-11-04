@@ -716,13 +716,18 @@ test('SYS-UI-009: signal controls enforce tier and confirmation', async ({ signe
       { timeout: 60_000, intervals: [1_000, 3_000, 5_000] },
     )
     .toBe(true)
-  await page.goto(`/instances/${selectedInstanceID}/locks`)
+  // The session belongs to the application: its row is in the Application sessions
+  // table (16.3), and its signal actions are in the detail of the expanded row.
+  await page.goto(`/instances/${selectedInstanceID}/locks?view=application`)
   await expect(page.getByRole('heading', { name: 'Locks and activity' })).toBeVisible()
-  const session = page
-    .getByRole('list', { name: 'Active sessions' })
-    .getByRole('listitem')
-    .filter({ hasText: `PID ${sessionPID}` })
-  await expect(session).toBeVisible({ timeout: 60_000 })
+  const sessions = page.getByRole('table', { name: 'Application sessions' })
+  await expect(sessions).toBeVisible({ timeout: 60_000 })
+  await page.getByRole('searchbox', { name: 'Search Application sessions' }).fill(sessionPID)
+  const row = sessions.getByRole('row').filter({ hasText: sessionPID })
+  await expect(row).toBeVisible({ timeout: 60_000 })
+  await row.getByRole('button', { name: `Show details of session ${sessionPID}` }).click()
+  const session = page.getByTestId('session-detail')
+  await expect(session).toBeVisible()
   const cancel = session.getByRole('button', { name: 'Cancel query' })
   await expect(cancel).toBeVisible()
 
@@ -756,8 +761,8 @@ test('SYS-UI-009: signal controls enforce tier and confirmation', async ({ signe
     page,
     async () =>
       (await page
-        .getByRole('list', { name: 'Active sessions' })
-        .getByText(`PID ${sessionPID}`)
+        .getByRole('table', { name: 'Application sessions' })
+        .getByText(sessionPID, { exact: true })
         .count()) === 0,
     60_000,
   )

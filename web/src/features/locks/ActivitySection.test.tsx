@@ -2,6 +2,7 @@ import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { expectNoA11yViolations } from '@/test/a11y'
+import { withTruncatedConnections } from '@/test/fixtures/getLocks'
 import { renderWithProviders } from '@/test/render'
 import { NOW } from '@/test/time'
 
@@ -39,7 +40,13 @@ describe('ActivitySection', () => {
   })
 
   it('UI-LOCK-021 renders Disabled when per-application counts are not reported', () => {
-    render(<ActivitySection response={response({})} now={NOW} />)
+    render(
+      <ActivitySection
+        connections={withTruncatedConnections.connections}
+        response={response({})}
+        now={NOW}
+      />,
+    )
 
     expect(screen.getByRole('status')).toHaveTextContent('checks.activity.by_application')
     expect(screen.getByText(/breakdown is opt-in/i)).toBeInTheDocument()

@@ -2890,3 +2890,124 @@ test('VIS-RDY-001 readiness banner and tab reflect the real report, keep the hea
   }
   browserErrors.assertClean()
 })
+
+interface LocksApi {
+  sessions?: { origin?: 'application' | 'pglens' }[]
+  connections?: {
+    truncated: boolean
+    by_origin: { key: string; count: number }[]
+    totals?: { by_origin: { key: string; count: number }[] }
+  }
+}
+
+test('VIS-LOCKS-001 the Locks page splits sessions by origin into two tables that match the API, fit Full HD and show the origin split', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, 2 * 30_000))
+  const browserErrors = collectConsoleErrors(page)
+  const instanceId = await pickInstance(api)
+  const locksApi = async (): Promise<LocksApi> => {
+    const response = await api.get(`/api/v1/locks?instance_id=${instanceId}`)
+    expect(response.ok()).toBe(true)
+    return (await response.json()) as LocksApi
+  }
+  const countsOf = (body: LocksApi) => ({
+    application: (body.sessions ?? []).filter((s) => s.origin === 'application').length,
+    pglens: (body.sessions ?? []).filter((s) => s.origin === 'pglens').length,
+  })
+  const tables = {
+    application: 'Application sessions',
+    pglens: 'pglens monitoring sessions',
+  } as const
+  const tabs = { application: 'Application sessions', pglens: 'pglens sessions' } as const
+  const shown = async (name: string, expected: number): Promise<number> => {
+    if (expected === 0) return 0
+    const table = page.getByRole('table', { name })
+    await expect(table).toBeVisible({ timeout: 30_000 })
+    return table.locator('tbody > tr').count()
+  }
+
+  await page.setViewportSize({ width: 1920, height: 1080 })
+  const first = await locksApi()
+  expect(
+    (first.sessions ?? []).some((session) => session.origin !== undefined) ||
+      first.connections !== undefined,
+    'the server sends session origins (16.2)',
+  ).toBe(true)
+
+  // The page opens on the blocking view; each origin has its own tab.
+  await page.goto(`/instances/${instanceId}/locks`)
+  await expect(page.getByRole('tab', { name: 'Blocking' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+    { timeout: 30_000 },
+  )
+  await expect(page.getByRole('list', { name: 'Active sessions' })).toHaveCount(0)
+  const by = first.connections?.truncated
+    ? first.connections.totals?.by_origin
+    : first.connections?.by_origin
+  const count = (key: string) => by?.find((row) => row.key === key)?.count ?? 0
+  await expect(
+    page.getByText(`application ${count('application')} · pglens ${count('pglens')}`),
+  ).toBeVisible({ timeout: 30_000 })
+  await page.screenshot({ path: `${ARTIFACT_DIR}/vis-locks-001-blocking-1920.png` })
+
+  for (const origin of ['application', 'pglens'] as const) {
+    let expected = -1
+    let rows = -2
+    let total = -3
+    // A sample lands every 10 s: compare against API reads taken around the page load.
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const before = countsOf(await locksApi())[origin]
+      await page.goto(`/instances/${instanceId}/locks?view=${origin}`)
+      await expect(page.getByRole('tab', { name: tabs[origin] })).toHaveAttribute(
+        'aria-selected',
+        'true',
+        { timeout: 30_000 },
+      )
+      if (before > 0) {
+        await expect(page.getByRole('table', { name: tables[origin] })).toBeVisible({
+          timeout: 30_000,
+        })
+      } else {
+        await expect(
+          page.getByText(
+            origin === 'application'
+              ? 'No application sessions at this moment'
+              : 'No pglens sessions',
+          ),
+        ).toBeVisible({ timeout: 30_000 })
+      }
+      rows = await shown(tables[origin], before)
+      const footer = page.getByText(/Showing \d+–\d+ of \d+ sessions/)
+      total =
+        before === 0
+          ? 0
+          : Number(/of (\d+) sessions/.exec((await footer.first().textContent()) ?? '')?.[1])
+      expected = countsOf(await locksApi())[origin]
+      if (before === expected && total === expected) break
+    }
+    expect(total, `${origin}: table total equals the API sessions of that origin`).toBe(expected)
+    expect(rows, `${origin}: first page rows`).toBe(Math.min(20, expected))
+    await page.screenshot({ path: `${ARTIFACT_DIR}/vis-locks-001-${origin}-1920.png` })
+  }
+
+  await page.goto(`/instances/${instanceId}/locks?view=activity`)
+  await expect(page.getByRole('heading', { name: 'Connection summary' })).toBeVisible({
+    timeout: 30_000,
+  })
+  await expect(page.getByRole('list', { name: 'Connections by origin' })).toBeVisible()
+  await page.screenshot({ path: `${ARTIFACT_DIR}/vis-locks-001-activity-1920.png` })
+
+  // assertFits measures both Full HD viewports (1920×1080 and 1920×950).
+  for (const route of [
+    '/instances/:instanceId/locks',
+    '/instances/:instanceId/locks?view=application',
+    '/instances/:instanceId/locks?view=pglens',
+    '/instances/:instanceId/locks?view=activity',
+  ]) {
+    await assertFits(page, api, fullHdRoute(route))
+  }
+  browserErrors.assertClean()
+})
