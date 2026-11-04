@@ -6,12 +6,17 @@ import (
 	"time"
 
 	"github.com/manprint/pglens/internal/pgtype"
+	"github.com/manprint/pglens/internal/sessionorigin"
 )
 
 func init() {
-	Register(&activityCheck{})
+	Register(newActivityCheck())
 }
 
+func newActivityCheck() *activityCheck { return &activityCheck{byApplication: true} }
+
+// activityCheck counts connections per application unless the configuration
+// turns it off with an explicit by_application: false.
 type activityCheck struct{ byApplication bool }
 
 func (c *activityCheck) Name() string { return "activity" }
@@ -93,6 +98,19 @@ GROUP BY 1, 2
 	if err != nil {
 		return Result{}, err
 	}
+	originRows, err := queryActivityGroups(ctx, conn, activityOriginQuery)
+	if err != nil {
+		return Result{}, err
+	}
+	userRows, err := queryActivityGroups(ctx, conn, `SELECT COALESCE(usename, ''), count(*)::float8 FROM pg_stat_activity WHERE backend_type='client backend' AND pid <> pg_backend_pid() GROUP BY 1`)
+	if err != nil {
+		return Result{}, err
+	}
+	// A NULL client_addr is a Unix-socket client: it is keyed "local".
+	clientRows, err := queryActivityGroups(ctx, conn, `SELECT COALESCE(host(client_addr), 'local'), count(*)::float8 FROM pg_stat_activity WHERE backend_type='client backend' AND pid <> pg_backend_pid() GROUP BY 1`)
+	if err != nil {
+		return Result{}, err
+	}
 	stateAgeRows, err := queryActivityGroups(ctx, conn, `SELECT COALESCE(state, 'unknown'), COALESCE(max(EXTRACT(epoch FROM now() - state_change)), 0) FROM pg_stat_activity WHERE backend_type='client backend' AND pid <> pg_backend_pid() GROUP BY 1`)
 	if err != nil {
 		return Result{}, err
@@ -117,6 +135,9 @@ GROUP BY 1, 2
 		return Result{}, err
 	}
 	result := activityCheckResult(parsed, maxConnStr, c.byApplication, databaseRows, applicationRows, stateAgeRows, prepared, oldestPrepared, frozenAge)
+	result.Metrics = append(result.Metrics, activityOriginMetrics(originRows)...)
+	result.Metrics = append(result.Metrics, boundedActivityMetrics("pg_connections_by_user", "usename", userRows)...)
+	result.Metrics = append(result.Metrics, boundedActivityMetrics("pg_connections_by_client", "client_addr", clientRows)...)
 	result.Metrics = append(result.Metrics, pgtype.Metric{Name: "pg_backends_waiting_ratio", Value: waitingRatio(parsed), Kind: pgtype.KindGauge})
 	result.Metrics = append(result.Metrics, xminHorizonMetrics(holders)...)
 	result.Facts = append(result.Facts, facts...)
@@ -250,6 +271,24 @@ func activityCheckResult(rows []activityRow, maxConnStr string, byApplication bo
 		pgtype.Metric{Name: "pg_max_datfrozenxid_age", Value: frozenAge, Kind: pgtype.KindGauge},
 	)
 	return result
+}
+
+// activityOriginQuery counts client backends per origin. The agent's own
+// sessions are told by application name or by running as the user of this
+// connection; the predicate comes from sessionorigin, like the signal guard's.
+var activityOriginQuery = `SELECT CASE WHEN ` + sessionorigin.PredicateSQL("application_name", "usename") + ` THEN '` + sessionorigin.Pglens + `' ELSE '` + sessionorigin.Application + `' END, count(*)::float8 FROM pg_stat_activity WHERE backend_type='client backend' AND pid <> pg_backend_pid() GROUP BY 1`
+
+// activityOriginMetrics always emits both origins, zero included, so a
+// missing origin is never read as a missing sample.
+func activityOriginMetrics(rows []activityGroup) []pgtype.Metric {
+	counts := map[string]float64{sessionorigin.Application: 0, sessionorigin.Pglens: 0}
+	for _, row := range rows {
+		counts[row.Label] += row.Value
+	}
+	return boundedActivityMetrics("pg_connections_by_origin", "origin", []activityGroup{
+		{Label: sessionorigin.Application, Value: counts[sessionorigin.Application]},
+		{Label: sessionorigin.Pglens, Value: counts[sessionorigin.Pglens]},
+	})
 }
 
 type activityGroup struct {

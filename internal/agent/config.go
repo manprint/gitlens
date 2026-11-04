@@ -133,14 +133,31 @@ type ChecksConfig map[string]CheckConfig
 
 // CheckConfig is a single check's configuration.
 type CheckConfig struct {
-	Interval      string `yaml:"interval"`
-	TopN          int    `yaml:"top_n"`          // for every check that takes a top-N budget
-	ByApplication bool   `yaml:"by_application"` // for activity
+	Interval string `yaml:"interval"`
+	TopN     int    `yaml:"top_n"` // for every check that takes a top-N budget
+	// ByApplication (activity) is nil unless the key is set: nil means on, and
+	// only an explicit false turns the per-application counts off.
+	ByApplication *bool `yaml:"by_application,omitempty"`
+	// SessionQueryText (locks) is nil unless the key is set: nil means off.
+	// Only an explicit true ships the raw text of the sampled sessions.
+	SessionQueryText *bool `yaml:"session_query_text,omitempty"`
 	// Enabled is nil (default enabled) unless explicitly set; only "ash"
 	// consults this today (SYS-ASH-002: disabling it must produce no
 	// metrics_ash rows, no error, and an explicit "enabled": false from the
 	// API — never an empty result indistinguishable from an idle database).
 	Enabled *bool `yaml:"enabled"`
+}
+
+// ByApplicationEnabled resolves checks.activity.by_application: on unless the
+// key is explicitly false.
+func (c CheckConfig) ByApplicationEnabled() bool {
+	return c.ByApplication == nil || *c.ByApplication
+}
+
+// SessionQueryTextEnabled resolves checks.locks.session_query_text: off unless
+// the key is explicitly true.
+func (c CheckConfig) SessionQueryTextEnabled() bool {
+	return c.SessionQueryText != nil && *c.SessionQueryText
 }
 
 // LoadConfig loads the configuration from a YAML file, applying environment overrides.

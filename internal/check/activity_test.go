@@ -90,11 +90,143 @@ func TestActivity_ByDatabaseIsBounded(t *testing.T) {
 	require.Len(t, metrics, 11)
 }
 
-func TestActivity_ByApplicationDisabledByDefault(t *testing.T) {
-	res := activityCheckResult(nil, "", false, nil, []activityGroup{{Label: "api", Value: 1}}, nil, 0, 0, 0)
-	for _, m := range res.Metrics {
-		require.NotEqual(t, "pg_connections_by_application", m.Name)
+// activityMock answers the activity scrape: the grouped counts by the query
+// they come from, empty sets for the other queries.
+func activityMock(groups map[string][]activityGroup, connections []activityRow) *mockConn {
+	return &mockConn{
+		queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			key := ""
+			switch {
+			case strings.Contains(sql, "wait_event_type") && strings.Contains(sql, "max_xact_age"):
+				var rows [][]any
+				for _, r := range connections {
+					rows = append(rows, []any{*r.State, *r.WaitEventType, r.Count, r.MaxXactAge, r.MaxIdleInTxn})
+				}
+				return &mockRows{rows: rows}, nil
+			case strings.Contains(sql, "row_number() OVER"):
+				return &mockRows{}, nil
+			case strings.Contains(sql, "THEN 'pglens' ELSE"):
+				key = "origin"
+			case strings.Contains(sql, "COALESCE(usename"):
+				key = "user"
+			case strings.Contains(sql, "host(client_addr)"):
+				key = "client"
+			case strings.Contains(sql, "COALESCE(application_name, '')"):
+				key = "application"
+			case strings.Contains(sql, "COALESCE(datname"):
+				key = "database"
+			}
+			var rows [][]any
+			for _, g := range groups[key] {
+				rows = append(rows, []any{g.Label, g.Value})
+			}
+			return &mockRows{rows: rows}, nil
+		},
+		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			switch {
+			case strings.Contains(sql, "pg_prepared_xacts"):
+				return &mockRow{vals: []any{float64(0), float64(0)}}
+			case strings.Contains(sql, "datfrozenxid"):
+				return &mockRow{vals: []any{float64(0)}}
+			}
+			return &mockRow{vals: []any{"100"}}
+		},
 	}
+}
+
+func scrapeActivity(t *testing.T, c *activityCheck, groups map[string][]activityGroup, connections []activityRow) Result {
+	t.Helper()
+	res, err := c.Scrape(context.Background(), maintenanceTarget(activityMock(groups, connections)))
+	require.NoError(t, err)
+	return res
+}
+
+func metricsNamed(res Result, name string) map[string]float64 {
+	out := map[string]float64{}
+	for _, m := range res.Metrics {
+		if m.Name != name {
+			continue
+		}
+		for _, v := range m.Labels {
+			out[v] = m.Value
+		}
+		if len(m.Labels) == 0 {
+			out[""] = m.Value
+		}
+	}
+	return out
+}
+
+func TestActivity_ByApplicationEnabledByDefault(t *testing.T) {
+	c := newActivityCheck()
+	require.True(t, c.ByApplicationEnabled())
+	res := scrapeActivity(t, c, map[string][]activityGroup{"application": {{Label: "api", Value: 3}}}, nil)
+	require.Equal(t, map[string]float64{"api": 3}, metricsNamed(res, "pg_connections_by_application"))
+}
+
+// ACT-002: an explicit false hides only the per-application counts.
+func TestActivity_ByApplicationExplicitFalse(t *testing.T) {
+	c := newActivityCheck()
+	c.SetByApplication(false)
+	require.False(t, c.ByApplicationEnabled())
+	res := scrapeActivity(t, c, map[string][]activityGroup{
+		"application": {{Label: "api", Value: 3}},
+		"database":    {{Label: "app", Value: 3}},
+		"user":        {{Label: "u", Value: 3}},
+		"client":      {{Label: "10.0.0.1", Value: 3}},
+		"origin":      {{Label: "application", Value: 3}},
+	}, nil)
+	require.Empty(t, metricsNamed(res, "pg_connections_by_application"))
+	for _, name := range []string{"pg_connections_by_database", "pg_connections_by_user", "pg_connections_by_client", "pg_connections_by_origin"} {
+		require.NotEmpty(t, metricsNamed(res, name), name)
+	}
+}
+
+// ACT-001: by_user and by_client keep the top 10 and sum the rest into other.
+func TestActivity_ByUserAndClientAreBounded(t *testing.T) {
+	var users, clients []activityGroup
+	for i := 0; i < 13; i++ {
+		users = append(users, activityGroup{Label: string(rune('a' + i)), Value: float64(100 - i)})
+		clients = append(clients, activityGroup{Label: "10.0.0." + string(rune('a'+i)), Value: float64(100 - i)})
+	}
+	res := scrapeActivity(t, newActivityCheck(), map[string][]activityGroup{"user": users, "client": clients}, nil)
+	for name, label := range map[string]string{"pg_connections_by_user": "usename", "pg_connections_by_client": "client_addr"} {
+		got := 0
+		var other float64
+		for _, m := range res.Metrics {
+			if m.Name != name {
+				continue
+			}
+			got++
+			require.Contains(t, m.Labels, label)
+			if m.Labels[label] == "other" {
+				other = m.Value
+			}
+		}
+		require.Equal(t, 11, got, name)
+		require.Equal(t, float64(90+89+88), other, name)
+	}
+}
+
+// SORIGIN-002: both origins are always emitted, zero included, and sum to the
+// connection total.
+func TestSORIGIN002_OriginMetricsEmitBothOrigins(t *testing.T) {
+	res := scrapeActivity(t, newActivityCheck(),
+		map[string][]activityGroup{"origin": {{Label: "application", Value: 4}}},
+		[]activityRow{{State: strPtr("idle"), WaitEventType: strPtr("Client"), Count: 4}})
+	got := metricsNamed(res, "pg_connections_by_origin")
+	require.Equal(t, map[string]float64{"application": 4, "pglens": 0}, got)
+	require.Equal(t, got["application"]+got["pglens"], metricValue(res, "pg_connections_used", nil))
+
+	res = scrapeActivity(t, newActivityCheck(), nil, nil)
+	require.Equal(t, map[string]float64{"application": 0, "pglens": 0}, metricsNamed(res, "pg_connections_by_origin"))
+
+	res = scrapeActivity(t, newActivityCheck(),
+		map[string][]activityGroup{"origin": {{Label: "pglens", Value: 2}, {Label: "application", Value: 5}}},
+		[]activityRow{{State: strPtr("idle"), WaitEventType: strPtr("Client"), Count: 7}})
+	got = metricsNamed(res, "pg_connections_by_origin")
+	require.Equal(t, map[string]float64{"application": 5, "pglens": 2}, got)
+	require.Equal(t, 7.0, metricValue(res, "pg_connections_used", nil))
 }
 
 func TestActivity_PreparedXactsZeroWhenEmpty(t *testing.T) {

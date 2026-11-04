@@ -43,7 +43,9 @@ func TestRDYAGENT001_FlagsFromResolvedConfig(t *testing.T) {
 	require.False(t, *f.AllowSignal)
 	require.NotNil(t, f.ByApplication, "the activity check reports its value even when the key is absent")
 	require.True(t, *f.HostLocal)
-	require.Nil(t, f.SessionQueryText, "no agent setting controls it yet: unknown, never false")
+	require.True(t, *f.ByApplication, "by_application is on unless explicitly false")
+	require.NotNil(t, f.SessionQueryText, "the locks check reports its value even when the key is absent")
+	require.False(t, *f.SessionQueryText, "raw session text is opt-in")
 	require.Nil(t, f.DataDirectoryReadable, "unknown until a host collection knew the data directory")
 
 	off, on := false, true
@@ -51,7 +53,7 @@ func TestRDYAGENT001_FlagsFromResolvedConfig(t *testing.T) {
 	cfg.Commands.Enabled = &off
 	cfg.Host.Enabled = &on
 	target.AllowSignal = true
-	cfg.Checks = agent.ChecksConfig{"activity": {ByApplication: true}}
+	cfg.Checks = agent.ChecksConfig{"activity": {ByApplication: boolPtr(true)}}
 	configureChecks(cfg)
 	f = decodeFlags(t, agentFlagsWireResult(cfg, target, &on, now))
 	require.False(t, *f.CommandsEnabled)
@@ -61,7 +63,7 @@ func TestRDYAGENT001_FlagsFromResolvedConfig(t *testing.T) {
 	require.True(t, *f.DataDirectoryReadable)
 
 	// An explicit by_application: false is honoured after a true one.
-	cfg.Checks = agent.ChecksConfig{"activity": {ByApplication: false}}
+	cfg.Checks = agent.ChecksConfig{"activity": {ByApplication: boolPtr(false)}}
 	configureChecks(cfg)
 	f = decodeFlags(t, agentFlagsWireResult(cfg, target, nil, now))
 	require.False(t, *f.ByApplication)
@@ -142,4 +144,27 @@ func TestRDYAGENT004_RequeueKeepsFlags(t *testing.T) {
 	requeueSkips(&mu, pending, "t1", batch)
 	require.Len(t, pending["t1"], 1)
 	require.Equal(t, time.Unix(3, 0), pending["t1"][0].TS)
+}
+
+// S5: by_application and session_query_text follow the resolved configuration,
+// an absent key giving the defaults (true / false) even after an explicit one.
+func TestACTCFG_FlagsResolveDefaultsAndExplicitKeys(t *testing.T) {
+	now := time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC)
+	t.Cleanup(func() { configureChecks(&agent.Config{}) })
+
+	cfg, target := flagsConfig("127.0.0.1")
+	cfg.Checks = agent.ChecksConfig{
+		"activity": {ByApplication: boolPtr(false)},
+		"locks":    {SessionQueryText: boolPtr(true)},
+	}
+	configureChecks(cfg)
+	f := decodeFlags(t, agentFlagsWireResult(cfg, target, nil, now))
+	require.False(t, *f.ByApplication)
+	require.True(t, *f.SessionQueryText)
+
+	cfg.Checks = nil
+	configureChecks(cfg)
+	f = decodeFlags(t, agentFlagsWireResult(cfg, target, nil, now))
+	require.True(t, *f.ByApplication)
+	require.False(t, *f.SessionQueryText)
 }

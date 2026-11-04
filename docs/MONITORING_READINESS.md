@@ -30,6 +30,8 @@ Warnings first, then infos; each by rule id.
 
 ### RDY-ACT-01 — Per-application activity is off
 
+`checks.activity.by_application` is `true` by default, so this appears only when the agent configuration sets it to `false`.
+
 *Warning.* The agent does not count connections per application.
 
 **What you lose:** Per-application connection counts.

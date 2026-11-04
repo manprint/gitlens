@@ -37,7 +37,7 @@ func lockValues(pid int32, wait string, blocked []int32, age float64, query stri
 			relation = "public.accounts"
 		}
 	}
-	return []any{pid, "app", "app", "client", "127.0.0.1", "active", "Lock", wait, 1.0, age, query, blocked, lockBackendStart(pid), waitStart, waitDuration, mode, lockType, relation, false}
+	return []any{pid, "app", "app", "client", "127.0.0.1", "active", "Lock", wait, 1.0, age, query, blocked, 0.0, nil, nil, nil, nil, nil, lockBackendStart(pid), waitStart, waitDuration, mode, lockType, relation, false}
 }
 
 func lockBackendStart(pid int32) time.Time {
@@ -145,7 +145,7 @@ func TestLocks_QueryIsTruncated(t *testing.T) {
 func TestLocks_SessionListIsCappedOldestFirst(t *testing.T) {
 	rows := make([][]any, 0, 105)
 	for i := 1; i <= 105; i++ {
-		rows = append(rows, []any{int32(i), "app", "app", "client", "127.0.0.1", "idle", "", "", float64(i), 0.0, "select 1", []int32(nil), nil, nil, nil, nil, nil, nil, false})
+		rows = append(rows, []any{int32(i), "app", "app", "client", "127.0.0.1", "idle", "", "", float64(i), 0.0, "select 1", []int32(nil), 0.0, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, false})
 	}
 	result := scrapeLocks(t, rows)
 	var tree lockTree
@@ -369,8 +369,6 @@ func rawSession(t *testing.T, result Result, pid int32) string {
 	return ""
 }
 
-func ptrTime(t time.Time) *time.Time { return &t }
-
 func TestLocks_RequiresTierT0(t *testing.T) {
 	require.Equal(t, Requirements{Scope: ScopeInstance, PermTier: pgtype.TierReadOnly}, (&locksCheck{}).Requires())
 	require.Equal(t, 10*time.Second, (&locksCheck{}).DefaultInterval())
@@ -397,3 +395,122 @@ func labelsEqual(a, b map[string]string) bool {
 	}
 	return true
 }
+
+func scrapeLocksWith(t *testing.T, c *locksCheck, rows []([]any)) Result {
+	t.Helper()
+	mock := &mockConn{queryFunc: func(context.Context, string, ...any) (pgx.Rows, error) { return &mockRows{rows: rows}, nil }}
+	target := &SimpleTarget{ConnFunc: func(context.Context) (Conn, error) { return mock, nil }, ClockValue: clock.System()}
+	result, err := c.Scrape(context.Background(), target)
+	require.NoError(t, err)
+	return result
+}
+
+// sessionValues is lockValues with the session-detail columns set: query age,
+// the xid and xmin ages, query id, leader pid and query start.
+func sessionValues(pid int32, query string, queryAge float64, xidAge, xminAge, queryID any, leader any, queryStart any) []any {
+	v := lockValues(pid, "", nil, 0, query)
+	v[12], v[13], v[14], v[15], v[16], v[17] = queryAge, xidAge, xminAge, queryID, leader, queryStart
+	return v
+}
+
+func rawSessions(t *testing.T, result Result) []map[string]any {
+	t.Helper()
+	var raw struct {
+		Sessions []map[string]any `json:"sessions"`
+	}
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &raw))
+	return raw.Sessions
+}
+
+// SESS-001
+func TestSESS001_SessionCarriesDetailFields(t *testing.T) {
+	started := time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC)
+	result := scrapeLocks(t, []([]any){sessionValues(7, "select 1", 5.5, int64(12), int64(34), int64(-42), int32(99), started)})
+	var tree lockTree
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &tree))
+	require.Len(t, tree.Sessions, 1)
+	s := tree.Sessions[0]
+	require.Equal(t, 5.5, s.QueryAge)
+	require.Equal(t, int64(12), *s.BackendXidAge)
+	require.Equal(t, int64(34), *s.BackendXminAge)
+	require.Equal(t, "-42", s.QueryID, "the string of the bigint, sign included")
+	require.Equal(t, int32(99), *s.LeaderPID)
+	require.True(t, started.Equal(*s.QueryStart))
+	// A session with no xid, no xmin and no leader omits them.
+	raw := rawSessions(t, scrapeLocks(t, []([]any){sessionValues(8, "select 1", 0, nil, nil, nil, nil, nil)}))[0]
+	for _, k := range []string{"backend_xid_age", "backend_xmin_age", "leader_pid", "query_start", "query_id"} {
+		require.NotContains(t, raw, k)
+	}
+	require.Contains(t, raw, "query_age")
+}
+
+// SESS-002
+func TestSESS002_QueryIDOmittedWhenNullOrZero(t *testing.T) {
+	for name, id := range map[string]any{"null": nil, "zero": int64(0)} {
+		t.Run(name, func(t *testing.T) {
+			result := scrapeLocks(t, []([]any){sessionValues(7, "select 1", 1, nil, nil, id, nil, nil)})
+			require.NotContains(t, rawSessions(t, result)[0], "query_id")
+		})
+	}
+}
+
+// SESS-003: the raw text of the session list is opt-in and always passes
+// through the credential handling.
+func TestSESS003_RawSessionTextIsOptInAndRedacted(t *testing.T) {
+	cut := sessionValues(3, "DO $$ DECLARE p text := 'hunter3'; BEGIN /*", 0, nil, nil, nil, nil, nil)
+	cut[len(cut)-1] = true
+	rows := func() []([]any) {
+		return []([]any){
+			sessionValues(1, "select name from accounts", 0, nil, nil, nil, nil, nil),
+			sessionValues(2, "ALTER ROLE tmp PASSWORD 'hunter2'", 0, nil, nil, nil, nil, nil),
+			cut,
+		}
+	}
+	for _, s := range rawSessions(t, scrapeLocksWith(t, &locksCheck{}, rows())) {
+		require.NotContains(t, s, "query", "off by default")
+	}
+
+	on := &locksCheck{}
+	on.SetSessionQueryText(true)
+	require.True(t, on.SessionQueryTextEnabled())
+	result := scrapeLocksWith(t, on, rows())
+	require.NotContains(t, string(result.Facts[0].ValueJSON), "hunter")
+	byPID := map[float64]string{}
+	for _, s := range rawSessions(t, result) {
+		byPID[s["pid"].(float64)], _ = s["query"].(string)
+	}
+	require.Equal(t, "select name from accounts", byPID[1])
+	require.Equal(t, withheldQuery, byPID[2], "a credential-looking text is withheld")
+	require.Equal(t, withheldQuery, byPID[3], "a text the server cut is withheld")
+}
+
+// SESS-004: the fields the session shape had keep their names; the new ones
+// are additive.
+func TestSESS004_ExistingSessionFieldsUnchanged(t *testing.T) {
+	result := scrapeLocks(t, []([]any){lockValues(1, "relation", []int32{9}, 2, "update"), lockValues(9, "", nil, 0, "holder")})
+	var raw struct {
+		Sessions []map[string]json.RawMessage `json:"sessions"`
+	}
+	require.NoError(t, json.Unmarshal(result.Facts[0].ValueJSON, &raw))
+	var blocked map[string]json.RawMessage
+	for _, s := range raw.Sessions {
+		if string(s["pid"]) == "1" {
+			blocked = s
+		}
+	}
+	got := map[string]string{}
+	for k, v := range blocked {
+		got[k] = string(v)
+	}
+	require.Equal(t, map[string]string{
+		"pid": "1", "datname": `"app"`, "usename": `"app"`, "application_name": `"client"`, "client_addr": `"127.0.0.1"`,
+		"state": `"active"`, "wait_event_type": `"Lock"`, "wait_event": `"relation"`, "xact_age": "1", "state_age": "2",
+		"blocked_by":    "[9]",
+		"backend_start": `"2026-10-23T09:00:00.000001Z"`, "session_id": `"` + lockSessionID(1, ptrTime(lockBackendStart(1))) + `"`,
+		"wait_started_at": `"2026-10-23T09:00:01.000001Z"`, "wait_duration": "2",
+		"lock_mode": `"ShareLock"`, "lock_type": `"relation"`, "lock_relation": `"public.accounts"`,
+		"query_age": "0",
+	}, got)
+}
+
+func ptrTime(t time.Time) *time.Time { return &t }

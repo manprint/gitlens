@@ -12,6 +12,7 @@ import (
 
 	"github.com/manprint/pglens/internal/store"
 	"github.com/stretchr/testify/require"
+	"go.yaml.in/yaml/v3"
 )
 
 // TestConfig_UnknownKeyIsAnError verifies that unknown YAML keys cause parse errors.
@@ -82,17 +83,51 @@ checks: {locks: {}}`
 	require.Equal(t, time.Duration(0), cfg.GetCheckInterval("locks"))
 }
 
-func TestConfig_ByApplicationDefaultsFalse(t *testing.T) {
+func loadChecksYAML(t *testing.T, checks string) *Config {
+	t.Helper()
 	yaml := `server: {url: http://localhost:8080, token: test}
 identity_path: /tmp/id
 buffer: {path: /tmp/buf}
 targets: [{name: pg, dsn: postgres://localhost/app}]
-checks: {activity: {}}`
+checks: ` + checks
 	path := writeConfigFile(t, yaml)
 	defer func() { _ = os.Remove(path) }()
 	cfg, err := LoadConfig(path)
 	require.NoError(t, err)
-	require.False(t, cfg.Checks["activity"].ByApplication)
+	return cfg
+}
+
+// ACTCFG-001, -004
+func TestConfig_ByApplicationDefaultsTrue(t *testing.T) {
+	cfg := loadChecksYAML(t, `{activity: {}}`)
+	require.Nil(t, cfg.Checks["activity"].ByApplication, "an omitted key stays nil")
+	require.True(t, cfg.Checks["activity"].ByApplicationEnabled())
+	require.True(t, CheckConfig{}.ByApplicationEnabled())
+
+	round, err := yaml.Marshal(cfg.Checks)
+	require.NoError(t, err)
+	require.NotContains(t, string(round), "by_application")
+	var back ChecksConfig
+	require.NoError(t, yaml.Unmarshal(round, &back))
+	require.Nil(t, back["activity"].ByApplication)
+}
+
+// ACTCFG-002, -003
+func TestConfig_ByApplicationExplicitFalse(t *testing.T) {
+	cfg := loadChecksYAML(t, `{activity: {by_application: false}}`)
+	require.NotNil(t, cfg.Checks["activity"].ByApplication)
+	require.False(t, *cfg.Checks["activity"].ByApplication)
+	require.False(t, cfg.Checks["activity"].ByApplicationEnabled())
+
+	cfg = loadChecksYAML(t, `{activity: {by_application: true}}`)
+	require.True(t, cfg.Checks["activity"].ByApplicationEnabled())
+}
+
+// ACTCFG-005: the raw session text is opt-in.
+func TestConfig_SessionQueryTextDefaultsFalse(t *testing.T) {
+	require.False(t, loadChecksYAML(t, `{locks: {}}`).Checks["locks"].SessionQueryTextEnabled())
+	require.False(t, loadChecksYAML(t, `{locks: {session_query_text: false}}`).Checks["locks"].SessionQueryTextEnabled())
+	require.True(t, loadChecksYAML(t, `{locks: {session_query_text: true}}`).Checks["locks"].SessionQueryTextEnabled())
 }
 
 func TestConfig_ExampleFileParses(t *testing.T) {

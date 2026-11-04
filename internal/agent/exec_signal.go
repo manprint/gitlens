@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/manprint/pglens/internal/check"
 	"github.com/manprint/pglens/internal/command"
+	"github.com/manprint/pglens/internal/sessionorigin"
 )
 
 // SignalExecutor sends a cancel or terminate request to a verified client
@@ -59,8 +59,9 @@ func (e *SignalExecutor) Execute(ctx context.Context, target check.Target, args 
 	// its sessions are named pglens/shared, pglens/ash and pglens/<datname>,
 	// and the role default is plain "pglens" — so it matched nothing and a
 	// terminate could kill the agent's own ASH or check connections. The
-	// session's role is the robust signal; the name is a second one.
-	if ownBackend || ownRole || isPglensApplication(applicationName) {
+	// session's role is the robust signal; the name is a second one
+	// (sessionorigin owns the name rule).
+	if ownBackend || ownRole || sessionorigin.IsPglensApplication(applicationName) {
 		return nil, rejectedf("refusing to signal pglens backend pid %d", *args.PID)
 	}
 	// A caller that names the session it saw must find that session at the
@@ -107,16 +108,7 @@ func signalVerifiedBackend(ctx context.Context, conn check.Conn, function string
 		WHERE pid = $1
 		  AND backend_start = $2
 		  AND backend_type = 'client backend'
-		  AND usename IS DISTINCT FROM current_user
 		  AND pid <> pg_backend_pid()
-		  AND NOT (COALESCE(application_name, '') = 'pglens'
-		           OR starts_with(COALESCE(application_name, ''), 'pglens/')
-		           OR starts_with(COALESCE(application_name, ''), 'pglens-agent/'))`, function), pid, started).Scan(&signalled)
+		  AND NOT %s`, function, sessionorigin.PredicateSQL("application_name", "usename")), pid, started).Scan(&signalled)
 	return signalled, err
-}
-
-// isPglensApplication reports whether an application_name belongs to a
-// pglens session: "pglens" (the monitoring role's default) or "pglens/...".
-func isPglensApplication(name string) bool {
-	return name == "pglens" || strings.HasPrefix(name, "pglens/") || strings.HasPrefix(name, "pglens-agent/")
 }

@@ -416,11 +416,10 @@ const agentFlagsInterval = time.Hour
 // data directory). It carries no secret and no path.
 func agentFlagsWireResult(cfg *agent.Config, target agent.TargetConfig, dataDirReadable *bool, now time.Time) wire.Result {
 	flags := wire.AgentFlags{
-		CommandsEnabled: boolPtr(cfg.CommandsEnabled()),
-		AllowSignal:     boolPtr(target.AllowSignal),
-		ByApplication:   activityByApplication(),
-		// No agent setting collects the raw text of every active session
-		// yet, so SessionQueryText stays unknown rather than false.
+		CommandsEnabled:       boolPtr(cfg.CommandsEnabled()),
+		AllowSignal:           boolPtr(target.AllowSignal),
+		ByApplication:         activityByApplication(),
+		SessionQueryText:      locksSessionQueryText(),
 		HostLocal:             boolPtr(cfg.HostEnabled() && agent.TargetIsLocal(target)),
 		DataDirectoryReadable: dataDirReadable,
 	}
@@ -440,6 +439,21 @@ func activityByApplication() *bool {
 		}
 		if r, ok := c.(interface{ ByApplicationEnabled() bool }); ok {
 			return boolPtr(r.ByApplicationEnabled())
+		}
+	}
+	return nil
+}
+
+// locksSessionQueryText is the checks.locks.session_query_text value the locks
+// check runs with, like activityByApplication. Nil when the check is not
+// registered or does not report it.
+func locksSessionQueryText() *bool {
+	for _, c := range check.All() {
+		if c.Name() != "locks" {
+			continue
+		}
+		if r, ok := c.(interface{ SessionQueryTextEnabled() bool }); ok {
+			return boolPtr(r.SessionQueryTextEnabled())
 		}
 	}
 	return nil
@@ -855,18 +869,25 @@ func waitForTarget(ctx context.Context, mgr *agent.Manager, timeout time.Duratio
 
 func configureChecks(cfg *agent.Config) {
 	for _, c := range check.All() {
+		// An absent entry is the zero policy: activity counts per application
+		// and locks ships no raw session text, whatever an earlier call set.
 		policy, ok := cfg.Checks[c.Name()]
+		switch c.Name() {
+		case "activity":
+			if configurable, ok := c.(interface{ SetByApplication(bool) }); ok {
+				configurable.SetByApplication(policy.ByApplicationEnabled())
+			}
+		case "locks":
+			if configurable, ok := c.(interface{ SetSessionQueryText(bool) }); ok {
+				configurable.SetSessionQueryText(policy.SessionQueryTextEnabled())
+			}
+		}
 		if !ok {
 			continue
 		}
 		if policy.TopN > 0 {
 			if configurable, ok := c.(check.TopNConfigurable); ok {
 				configurable.SetTopN(policy.TopN)
-			}
-		}
-		if c.Name() == "activity" {
-			if configurable, ok := c.(interface{ SetByApplication(bool) }); ok {
-				configurable.SetByApplication(policy.ByApplication)
 			}
 		}
 	}

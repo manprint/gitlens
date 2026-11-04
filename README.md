@@ -1187,7 +1187,13 @@ arguments are emitted as `[redacted]` because they may contain credentials.
 Collected checks include `locks` (10s, instance scope, Tier 0), which reports
 sampled blocking trees and bounded wait-event gauges. The `activity` check also
 reports connection use, per-database counts, state age, prepared transactions,
-and frozen-XID age; per-application counts are opt-in.
+and frozen-XID age, and counts connections per application, per user, per client
+address and per origin (`pglens` or `application`; the sessions pglens opens
+itself are told from the application's). `checks.activity.by_application` is
+`true` by default; set it to `false` to turn the per-application counts off.
+The session list of the `locks` check carries no statement text unless
+`checks.locks.session_query_text` is `true` (default `false`); a text that may
+hold a credential is withheld even then.
 
 Maintenance checks include `table_stats` and `index_stats` (5m, database scope,
 Tier 0), `vacuum_progress` (30s, instance scope, Tier 0), and `bloat_estimate`
@@ -1272,8 +1278,8 @@ targets:
 # interval, capped at 30 s, 2 min or 10 min; see below) and then on its interval.
 checks:
   instance_info:    { interval: 60s }        # General instance metadata (mandatory)
-  activity:        { interval: 10s, by_application: false } # Session activity
-  locks:           { interval: 10s }        # Blocking tree (instance scope, T0)
+  activity:        { interval: 10s, by_application: true }  # Session activity; by_application defaults to true, false turns the per-application counts off
+  locks:           { interval: 10s, session_query_text: false } # Blocking tree (instance scope, T0); session_query_text defaults to false
   monitoring_role: { interval: 10m }        # What would let the monitoring role write (security.* rules)
   trigger_inventory: { interval: 5m }       # Triggers of each database and which are disabled (trigger.* rules)
   fk_indexes:      { interval: 15m }        # Foreign keys no index serves (index.fk_unindexed)
@@ -1740,7 +1746,8 @@ is evaluated on read from the stored facts of the last 24 hours and cached for
 is in [docs/MONITORING_READINESS.md](docs/MONITORING_READINESS.md).
 
 The agent reports its own switches (`commands.enabled`, `allow_signal`,
-`checks.activity.by_application`, whether it runs next to the server and can
+`checks.activity.by_application` (default `true`), `checks.locks.session_query_text`
+(default `false`), whether it runs next to the server and can
 read its data directory) in an `agent_flags` fact at start, hourly and when the
 data directory's readability changes. It holds no address, path or secret.
 

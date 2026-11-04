@@ -13,7 +13,15 @@ import (
 
 func init() { Register(&locksCheck{}) }
 
-type locksCheck struct{}
+// locksCheck samples the blocking tree and the session list. sessionQueryText
+// is the opt-in (checks.locks.session_query_text) that ships the text of the
+// listed sessions; it is off by default.
+type locksCheck struct{ sessionQueryText bool }
+
+func (c *locksCheck) SetSessionQueryText(enabled bool) { c.sessionQueryText = enabled }
+
+// SessionQueryTextEnabled is the value the check runs with.
+func (c *locksCheck) SessionQueryTextEnabled() bool { return c.sessionQueryText }
 
 func (c *locksCheck) Name() string { return "locks" }
 func (c *locksCheck) Requires() Requirements {
@@ -36,6 +44,15 @@ type lockRow struct {
 	Query           string
 	BlockedBy       []int32
 	BackendStart    *time.Time
+	// QueryAge is the seconds since query_start; the ages of backend_xid and
+	// backend_xmin are in transactions, never ids. QueryID is the string of the
+	// bigint, empty when NULL or 0 (compute_query_id off).
+	QueryAge       float64
+	BackendXidAge  *int64
+	BackendXminAge *int64
+	QueryID        string
+	LeaderPID      *int32
+	QueryStart     *time.Time
 	// WaitStartedAt and WaitDuration describe the lock this session waits on,
 	// read from pg_locks; both are nil when it waits on none.
 	WaitStartedAt *time.Time
@@ -99,6 +116,16 @@ type lockNode struct {
 	LockMode     *string `json:"lock_mode,omitempty"`
 	LockType     *string `json:"lock_type,omitempty"`
 	LockRelation *string `json:"lock_relation,omitempty"`
+	// QueryAge is the seconds since the current query started. BackendXidAge
+	// and BackendXminAge are ages in transactions of the session's xid and
+	// xmin (omitted when it has none). QueryID is the statement's query id as
+	// a string (omitted when NULL or 0). LeaderPID is set on a parallel worker.
+	QueryAge       float64    `json:"query_age"`
+	BackendXidAge  *int64     `json:"backend_xid_age,omitempty"`
+	BackendXminAge *int64     `json:"backend_xmin_age,omitempty"`
+	QueryID        string     `json:"query_id,omitempty"`
+	LeaderPID      *int32     `json:"leader_pid,omitempty"`
+	QueryStart     *time.Time `json:"query_start,omitempty"`
 }
 
 // locksQuery tolerates every nullable column: client_addr is NULL for each
@@ -149,6 +176,12 @@ SELECT a.pid,
        COALESCE(EXTRACT(epoch FROM now() - a.state_change), 0),
        COALESCE(a.query, ''),
        CASE WHEN a.wait_event_type = 'Lock' THEN pg_blocking_pids(a.pid) ELSE '{}'::int[] END,
+       COALESCE(EXTRACT(epoch FROM now() - a.query_start), 0),
+       age(a.backend_xid)::bigint,
+       age(a.backend_xmin)::bigint,
+       a.query_id,
+       a.leader_pid,
+       a.query_start,
        a.backend_start,
        w.waitstart,
        EXTRACT(epoch FROM now() - w.waitstart),
@@ -189,8 +222,16 @@ func (c *locksCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 	for rows.Next() {
 		var r lockRow
 		var cut bool
-		if err := rows.Scan(&r.PID, &r.Datname, &r.Username, &r.ApplicationName, &r.ClientAddr, &r.State, &r.WaitEventType, &r.WaitEvent, &r.XactAge, &r.StateAge, &r.Query, &r.BlockedBy, &r.BackendStart, &r.WaitStartedAt, &r.WaitDuration, &r.LockMode, &r.LockType, &r.LockRelation, &cut); err != nil {
+		var queryID *int64
+		if err := rows.Scan(&r.PID, &r.Datname, &r.Username, &r.ApplicationName, &r.ClientAddr, &r.State, &r.WaitEventType, &r.WaitEvent, &r.XactAge, &r.StateAge, &r.Query, &r.BlockedBy, &r.QueryAge, &r.BackendXidAge, &r.BackendXminAge, &queryID, &r.LeaderPID, &r.QueryStart, &r.BackendStart, &r.WaitStartedAt, &r.WaitDuration, &r.LockMode, &r.LockType, &r.LockRelation, &cut); err != nil {
 			return Result{}, err
+		}
+		if queryID != nil && *queryID != 0 {
+			r.QueryID = strconv.FormatInt(*queryID, 10)
+		}
+		// PostgreSQL's clock can lead the collector's by microseconds.
+		if r.QueryAge < 0 {
+			r.QueryAge = 0
 		}
 		// A statement can carry a role password, and the tree is shipped to
 		// the server and shown in the UI, so a text that may hold one is
@@ -204,10 +245,13 @@ func (c *locksCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 		r.Query = truncateUTF8(r.Query, 2048)
 		parsed = append(parsed, r)
 	}
-	return buildLocksResult(parsed, t.Clock().Now()), rows.Err()
+	return buildLocksResultText(parsed, t.Clock().Now(), c.sessionQueryText), rows.Err()
 }
 
-func buildLocksResult(rows []lockRow, sampledAt time.Time) Result {
+// buildLocksResultText builds the sample. sessionText keeps the text on the
+// session list; the rows already went through redactQueryText/withheldQuery in
+// Scrape, so a text that may hold a credential never gets here raw.
+func buildLocksResultText(rows []lockRow, sampledAt time.Time, sessionText bool) Result {
 	blocked := 0
 	blocking := make(map[int32]struct{})
 	waits := make(map[string]int)
@@ -256,7 +300,9 @@ func buildLocksResult(rows []lockRow, sampledAt time.Time) Result {
 			break
 		}
 		session := lockNodeOf(r)
-		session.Query = ""
+		if !sessionText {
+			session.Query = ""
+		}
 		sessions = append(sessions, session)
 	}
 	metrics := []pgtype.Metric{
@@ -326,6 +372,12 @@ func lockNodeOf(r lockRow) lockNode {
 		LockMode:        r.LockMode,
 		LockType:        r.LockType,
 		LockRelation:    r.LockRelation,
+		QueryAge:        r.QueryAge,
+		BackendXidAge:   r.BackendXidAge,
+		BackendXminAge:  r.BackendXminAge,
+		QueryID:         r.QueryID,
+		LeaderPID:       r.LeaderPID,
+		QueryStart:      r.QueryStart,
 	}
 }
 

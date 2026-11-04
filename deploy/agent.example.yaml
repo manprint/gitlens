@@ -40,8 +40,8 @@ targets:
 # interval, capped at 30 s for an interval of up to 1m, 2 min for one of up to 15m and 10 min beyond: an hourly
 # check first reports within 10 min. The coverage endpoint and the console's data collection banner use the same bound.
 checks:
-  activity: { interval: 10s, by_application: false } # Session state and wait groups.
-  locks: { interval: 10s } # Blocking/blocked lock tree at Tier 0.
+  activity: { interval: 10s, by_application: true } # Session state and wait groups; connection counts per application (true is the default, false turns them off).
+  locks: { interval: 10s, session_query_text: false } # Blocking/blocked lock tree at Tier 0; session_query_text: true also ships the raw text of the listed sessions (default false; a text that may hold a credential is always withheld).
   monitoring_role: { interval: 10m } # What would let the monitoring role write.
   trigger_inventory: { interval: 5m } # Triggers of each database and which are disabled.
   fk_indexes: { interval: 15m } # Foreign keys no index serves.
