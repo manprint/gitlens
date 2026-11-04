@@ -89,13 +89,13 @@ checkpoint. Capture/open and restore/close are each one STATE.md update.
 - Scope result: RUNNING
 - Type: sub-phase
 - ID / attempt: 14.1 / 1
-- Status: OPEN, BLOCKED on RDY-INT-001 (base unit:P12:1 commit 27beed1)
+- Status: DONE (unit:14.1:1)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-sonnet-5-5 (user authorised Sonnet for the whole plan, Opus 5.5 advisor, 2026-11-04); supervisor: Opus review agent (agent-1); exploration/mechanical: agent-3:claude-haiku-5-5
 - File / unit heading: phase_15.md → 14.1 Agent flags fact, evaluator, rules, endpoints, documentation
-- Current step: S1–S5 done; closure blocked by RDY-INT-001 (§9)
-- Next action: with the TimescaleDB image local, run RDY-INT-001 (`-tags=integration ./internal/server -run RDYINT`), then close 14.1 (review, STATE, commit). Do not open 14.2 before.
-- Next eligible plan unit: 14.1
+- Current step: closed
+- Next action: open the next eligible unit per §11 Execution order (14.2 needs 13.3, 15.1, 15.2, 9.1, 17.1 first).
+- Next eligible plan unit: 14.2
 - Unit base: the unit:11.5b:1 commit; branch: `feat/index-analysis` (never switch or create branches)
 - Repo state: phases 0–3 and 9–13 closed (last unit:P12:1); uncommitted only `internal/webui/dist/index.html` (never staged) and `.claude/`.
 
@@ -252,7 +252,7 @@ Research checkpoint: R3 pending (7.0).
 |-----------|---------|--------|--------------------------|---------------------|------|
 | 14.1 gates (S1–S5, partial) | G-GO-FOCUS `go test -race -shuffle=on -count=1 ./internal/readiness ./internal/check ./internal/server ./internal/wire ./internal/agent`, `./cmd/pglens-agent -run RDY`; `go vet -tags=integration ./internal/server`; `make web-gen-api api-docs` (no diff); G-BASE web (typecheck, lint, vitest) | pass | RDY-001..017, RDY-DOC-001/002, RDYAPI001–003, RDYAGENT001–004, RDYLBL-001 (real role), RDYSKIP-001 (new `internal/check/skip_reason_test.go`) all green; gofmt clean | 14.1 tree | 2026-11-04 |
 | 14.1 SQL on real Postgres | temporary test (deleted) on `postgres:18.6-alpine` with minimal DDL, agent_flags seeded with `wire.AgentFlagsFact`/`wire.AgentFlagsKey` | pass | 8 warnings/4 infos for that seed; RDY-HOST-01, RDY-CMD-01, RDY-ROLE-01, RDY-SET-02 present; G-RO pass on pg15 and pg18 | 14.1 tree | 2026-11-04 |
-| 14.1 RDY-INT-001 (G-GO-INT) | `go test -tags=integration ./internal/server -run RDYINT` | NOT RUN | needs `timescale/timescaledb:2.31.0-pg17` (absent, pulls forbidden); test written and `go vet -tags=integration` clean | — | 2026-11-04 |
+| 14.1 RDY-INT-001 (G-GO-INT) | `go test -tags=integration -race -count=1 ./internal/server -run RDY -v` | pass | RDYINT001 + RDYAPI001–003 PASS on `timescale/timescaledb:2.31.0-pg17` (pulled 2026-11-04 after the user authorised network) | 14.1 tree | 2026-11-04 |
 | 14.1 G-SECRETS | counts on `git diff HEAD`, `--cached`, `HEAD~3..HEAD`; `grep -rIc` over docs/plans web/src web/e2e test | pattern pass for the diff (0); tree: 3 hits in `web/src/features/settings/NotificationsPanel.test.tsx` (pre-existing, 6d9032b, untouched, fixtures); value check NOT RUN (stack `.env` absent) | counts only | 14.1 tree | 2026-11-04 |
 | make lint (golangci-lint v2.15.0, installed 2026-10-29 after the user authorised downloads) | `make lint` | pass | 0 issues (covers 0.3 and 13.1 Go diffs) | cf87cd7 | 2026-10-29 |
 | G-WEB-UNIT 1.3 | `cd web && TZ=UTC pnpm exec vitest run src/features/instance` | pass | 59 passed (OV-STEP-001/002, OV-CARD-001 + existing UI-INST-0xx unchanged) | 1.3 diff | 2026-10-29 |
@@ -536,7 +536,7 @@ Rule (user): after **every** modification of the plan the `advisor` reviews it a
 
 - Q2: RESOLVED 2026-10-30 by the user (yes, store write-only; see §8). No open questions.
 - RESOLVED (user authorised downloads 2026-10-29): `golangci-lint` to be installed before the next G-GO-FULL (P1 closure).
-- 14.1 BLOCKED (2026-11-04): RDY-INT-001 / G-GO-INT cannot run, image `timescale/timescaledb:2.31.0-pg17` is not local and the plan forbids pulls; live-stack gates (G-STACK/G-DEPLOY/G-VIS/G-QA/G-HA) cannot run either: Odoo stack and backups absent (`/home/agent/pglens-odoo-stack/.env` missing). Needs the user to provide the image (or lift the no-pull rule) and the stack. 14.1 stays OPEN, 14.2 not opened.
+- RESOLVED 2026-11-04: 14.1 RDY-INT-001 was blocked by the absent TimescaleDB image; the user authorised network, image pulled, test passes. Live-stack gates (Odoo stack, backups, `/home/agent/pglens-odoo-stack/.env`) are still absent: they are not needed before 14.3.
 - No other blocker.
 
 ## 10. Do-not-repeat
@@ -603,7 +603,7 @@ Rule (user): after **every** modification of the plan the `advisor` reviews it a
 | 12.1 | phase_13.md | 9.1 | DONE | 1 | SRCH-001..007, SRCH-INT-001..003 (§7 12.1); R-12.1 |
 | 12.2 | phase_13.md | 12.1, 9.3 | DONE | 1 | SRCH-UI-001..012 (§7 12.2); R-12.2, R-12.2b |
 | 12.3 | phase_13.md | 12.2 | DONE | 1 | SRCH-E2E-001..004 (§7 12.3 live); R-12.3 |
-| 14.1 | phase_15.md | 0.2, 13.2 | TODO | 1 | — |
+| 14.1 | phase_15.md | 0.2, 13.2 | DONE | 1 | RDY-*, RDY-API-*, RDY-DOC-*, RDY-INT-001 (§7 14.1); R-14.1 |
 | 14.2 | phase_15.md | 14.1, 13.3, 15.1, 15.2, 9.1, 17.1 | TODO | 1 | — |
 | 14.3 | phase_15.md | 14.2 | TODO | 1 | — |
 | 16.1 | phase_17.md | 14.1 | TODO | 1 | — |
@@ -778,10 +778,10 @@ Statuses: TODO, IN_PROGRESS, IN_REVIEW, DONE, SKIPPED, BLOCKED. SKIPPED retains 
 | COV-E2E-* | 13.3 | G-VIS / G-QA | DONE | §7 13.3 |
 | COVUI-* | 13.3 | G-WEB-UNIT | DONE | §7 13.3 |
 | INSTBAN-* | 13.3 | G-WEB-UNIT | DONE | §7 13.3 |
-| RDY-* | 14.1 | G-GO-FOCUS | TODO | — |
-| RDY-API-* | 14.1 | G-GO-FOCUS | TODO | — |
-| RDY-DOC-* | 14.1 | G-GO-FOCUS | TODO | — |
-| RDY-INT-* | 14.1 | G-GO-INT | TODO | — |
+| RDY-* | 14.1 | G-GO-FOCUS | DONE | §7 14.1 |
+| RDY-API-* | 14.1 | G-GO-FOCUS | DONE | §7 14.1 |
+| RDY-DOC-* | 14.1 | G-GO-FOCUS | DONE | §7 14.1 |
+| RDY-INT-* | 14.1 | G-GO-INT | DONE | §7 14.1 |
 | RDY-WIRE-* | 14.1 | G-GO-FOCUS | TODO | — |
 | RDYLBL-* | 14.1 | G-GO-FOCUS | TODO | — |
 | RDY-UI-* | 14.2 | G-WEB-UNIT | TODO | — |
