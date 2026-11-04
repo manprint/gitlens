@@ -183,6 +183,7 @@ func (c *checkCounterVec) Snapshot() map[checkKey]float64 {
 // of the process, and a name that is not valid text would break the scrape.
 var knownChecks = map[string]bool{
 	"activity":              true,
+	"agent_flags":           true,
 	"agent_self":            true,
 	"archiver":              true,
 	"ash":                   true,

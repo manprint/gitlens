@@ -29,6 +29,10 @@ func (c *activityCheck) DefaultInterval() time.Duration { return 10 * time.Secon
 func (c *activityCheck) Timeout() time.Duration        { return 2 * time.Second }
 func (c *activityCheck) SetByApplication(enabled bool) { c.byApplication = enabled }
 
+// ByApplicationEnabled is the value the check runs with: the configured one,
+// or the check's own default when the configuration does not name it.
+func (c *activityCheck) ByApplicationEnabled() bool { return c.byApplication }
+
 type activityRow struct {
 	State         *string
 	WaitEventType *string

@@ -418,7 +418,7 @@ func agentFlagsWireResult(cfg *agent.Config, target agent.TargetConfig, dataDirR
 	flags := wire.AgentFlags{
 		CommandsEnabled: boolPtr(cfg.CommandsEnabled()),
 		AllowSignal:     boolPtr(target.AllowSignal),
-		ByApplication:   boolPtr(cfg.Checks["activity"].ByApplication),
+		ByApplication:   activityByApplication(),
 		// No agent setting collects the raw text of every active session
 		// yet, so SessionQueryText stays unknown rather than false.
 		HostLocal:             boolPtr(cfg.HostEnabled() && agent.TargetIsLocal(target)),
@@ -427,6 +427,22 @@ func agentFlagsWireResult(cfg *agent.Config, target agent.TargetConfig, dataDirR
 	// A struct of booleans always marshals.
 	raw, _ := json.Marshal(flags)
 	return wire.Result{Check: wire.AgentFlagsCheck, TS: now, Facts: []wire.Fact{{Kind: wire.AgentFlagsFact, Key: wire.AgentFlagsKey, ValueJSON: raw}}}
+}
+
+// activityByApplication is the by_application value the activity check runs
+// with (after configureChecks), not the configuration key alone: a key the
+// configuration does not name leaves the check's own default. Nil when the
+// check is not registered or does not report it.
+func activityByApplication() *bool {
+	for _, c := range check.All() {
+		if c.Name() != "activity" {
+			continue
+		}
+		if r, ok := c.(interface{ ByApplicationEnabled() bool }); ok {
+			return boolPtr(r.ByApplicationEnabled())
+		}
+	}
+	return nil
 }
 
 // agentFlagsState builds the agent_flags results of every target and keeps the
