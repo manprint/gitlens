@@ -4,7 +4,7 @@ Read first at every session. Updated 2026-10-29 by agent-2:claude-opus-5-5 (exec
 Plan ID: 005_plan-ConsoleInsights. Revision: 1. Repo root: /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze.
 Plan baseline: `5929be2d5ffe96867a63791b8a0b18687e41f8b5` (branch `feat/index-analysis`); pre-existing uncommitted changes: see §5 (preserved; committed once as the baseline commit at 0.2 S1b, D32).
 Roster (user instruction 2026-11-04, `agent:sonnet` + "autorizzo sonnet per tutto il piano, con opus come advisor"; supersedes the 2026-10-29 "Sonnet is not used" instruction): agent-1:claude-opus-5-5 (supervisor/reviewer: the `advisor` tool, re-enabled by the user 2026-11-04, set to Opus 5.5; for a full-diff review the advisor tool is used, and a fresh read-only review agent with `model: opus` is an allowed supplement); agent-2:claude-sonnet-5-5 (implementer, the executing session); agent-3:claude-haiku-5-5 (exploration and mechanical work only, Agent tool `model: haiku`). Phase-file lines naming `agent-2:claude-opus-5-5` now read agent-2:claude-sonnet-5-5. Active execution style: handoff (the executing session implements; every point where a phase file says `advisor` is served by the advisor tool).
-State writer: the executing session (agent-2:claude-sonnet-5-5, took over 2026-11-04 after the 2026-10-31 user-stop handoff released the previous session); ownership: active.
+State writer: the executing session (agent-2:claude-sonnet-5-5, took over 2026-11-04 after the 2026-10-31 user-stop handoff released the previous session); ownership: RELEASED 2026-11-04 23:17 (reason handoff).
 
 
 ## 0. Resume and completion protocol
@@ -86,18 +86,18 @@ checkpoint. Capture/open and restore/close are each one STATE.md update.
 ## 1. Current unit and scope
 
 - Active scope: plan (whole `005_plan-ConsoleInsights`, no selector)
-- Scope result: RUNNING
+- Scope result: HANDOFF (user, 2026-11-04 23:17 local)
 - Type: sub-phase
 - ID / attempt: 16.4 / 0
-- Status: TODO (16.3 closed; no unit open)
+- Status: TODO (attempt 1 opened then stopped by the handoff before any edit; subagent killed, no diff)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-sonnet-5-5 (user authorised Sonnet for the whole plan, Opus 5.5 advisor, 2026-11-04); the unit runs in a Sonnet subagent (Agent `model: sonnet`); supervisor: advisor (Opus 5.5)
 - File / unit heading: phase_17.md → 16.4 Live proof against pg_stat_activity
 - Current step: none
-- Next action: open 16.4 (live proof, supervisor-run), then P16.
+- Next action: resume: open 16.4 (write+run web/e2e/qa/sessions.spec.ts SORIGIN-E2E-001..003, needs verified backup < 24 h: refresh with backup.sh + verify_backup.sh), then P16, then §11 order.
+- Stop latch: HANDOFF user 2026-11-04 23:17 (deadline 05-11-2026_06_30 received 22:58, cancelled by an idle-session handoff: immediate)
 - Next eligible plan unit: 16.4
-- Deadline (this run only, never §3): user `/pev-v2 handoff --deadline=05-11-2026_06_30`, received 2026-11-04 22:58 local; cutoff 06:00 (reserve 30 min): start no unit that would cross it, then H3–H6 handoff.
-- Unit base: 16.3 commit (after 95be08c); branch: `feat/index-analysis` (never switch or create branches)
+- Unit base: 8256b9f (16.3 DONE); branch: `feat/index-analysis` (never switch or create branches)
 - Repo state: phases 0–3, 9–14 closed (last unit:P14:1); uncommitted only `internal/webui/dist/index.html` (never staged) and `.claude/`.
 
 ## 2. Feature context and readiness
@@ -238,6 +238,8 @@ P14 closing (2026-11-04): the unit is the `P14` commit (STATE, header layout fil
 Actual files/diff: `Header.tsx`, `Breadcrumbs.tsx`, `CoverageBanner.tsx`, `InstancePage.tsx`, `InstanceStatusBanners.test.tsx`, `console_visual.spec.ts`, STATE, history; `internal/webui/dist/index.html` and `.claude/` never staged.
 Running resources: stack `pglens-odoo` up (deployed from the P14 tree). Backup `02-loaded-20261104T170945Z` VERIFIED (expires ~2026-11-05 17:09Z).
 Research checkpoint: R3 pending (7.0).
+
+Handoff checkpoint (2026-11-04 23:17, trigger user): 16.1 d254f85, 16.2 95be08c, 16.3 8256b9f DONE and deployed in the stack (compose `pglens-odoo`, images rebuilt from 8256b9f). 16.4 not started (subagent killed before any file change). Ownership released (reason handoff). Pending edits: none besides this STATE. Not run: SORIGIN-E2E-001..003, P16 gates/closure, everything after (4.x … 8.x). Resources: stack up and healthy; stack `agent.yaml` has `locks: { interval: 10s, session_query_text: true }` (A3; pre-16.3 copy `/tmp/claude-1000/agent.yaml.bak`, may vanish); backup `02-loaded-20261104T170945Z` VERIFIED until ~2026-11-05 17:09Z; golangci-lint v2.15.0 in GOPATH/bin; `internal/webui/dist/index.html` modified (never stage), `.claude/` untracked. Known limits: G-SECRETS (b) not runnable (webhook deferred); Odoo 169 modules; header a11y gap §8 (f).
 
 ## 7. Verification and reviews
 
