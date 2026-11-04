@@ -47,7 +47,8 @@ export const LIFECYCLE_SERVICES = ['pglens-server', 'pglens-agent', 'timescaledb
 export type LifecycleService = (typeof LIFECYCLE_SERVICES)[number]
 export const BASE_SERVICES = ['odoo-db', 'odoo', 'timescaledb', 'pglens-server', 'pglens-agent']
 
-function composeArgs(): string[] {
+/** Global `docker compose` options (project and files) of the stack. */
+export function composeArgs(): string[] {
   const args = ['compose', '-p', COMPOSE_PROJECT, '-f', join(STACK_DIR, 'compose.yml')]
   const ha = join(STACK_DIR, 'ha', 'compose.ha.yml')
   if (existsSync(ha)) args.push('-f', ha)

@@ -260,6 +260,8 @@ Research checkpoint: R3 pending (7.0).
 | 14.2 G-UI-LEGACY | `make web-build` + `go test -tags=e2e ./test/e2e/... -run UI -timeout 25m` (local images built with `make build-images`) | pass | `ok test/e2e 671s`, all TestUI_* |  14.2 tree | 2026-11-04 |
 | 0.1/2 stack rebuild (attempt 2) | `docker compose` project `pglens-odoo` (odoo-db postgres:18, odoo:18, timescaledb, pglens-server, pglens-agent); files rebuilt (not recoverable) in `/home/agent/pglens-odoo-stack/{compose.yml,agent.yaml,.env,backup.sh,restore.sh,verify_backup.sh,deploy.sh,README.md,seed/{seed_odoo.py,api.py,seed.log},load/rpc_load.py}` | pass | seed: 30006 partners, 3010 templates, 4000 orders, 8000 leads, 90059 messages, 169 modules (plan expected 187: user-visible deviation, 18 optional modules not installed); backup `02-loaded-20261104T170945Z` ENV-001/002/003 ok, byte-flipped copy exits 1 without VERIFIED; ENV-006 `calls=105` ok; T1 role `pglens_monitor` granted (postgres, odoo, template1); agent `perm_tier` T1, role primary; `session_query_text` not in `agent.yaml` (config key lands in 16.1) | rebuilt stack | 2026-11-04 |
 | 14.2 live (stack rebuilt) | `/home/agent/pglens-odoo-stack/deploy.sh` then `playwright test --project=desktop-fullhd -g VIS-RDY-001` (list count 1) | pass | G-DEPLOY ok (images from tree, server+agent healthy); VIS-RDY-001 1/1 passed (7 s) on live report partial {warning 2, info 2}: RDY-ACT-01, RDY-NOTIF-01 (warnings), RDY-SIG-01, RDY-T2-01; banner/tab/Full HD fit/header 1600+1920 checked; G-QA/G-HA not part of 14.2 | 14.2 tree | 2026-11-04 |
+| 14.3 G-QA | `PGLENS_QA_ALLOW_STIMULUS=1 PGLENS_QA_ALLOW_LIFECYCLE=1 … playwright test --project=desktop-fullhd -g 'RDY-E2E'` (list 5) | pass | RDY-E2E-003/004/005 (3.4–4.1 min each, one session), RDY-E2E-001 29.3 min (appear 36 s, clear 384 s), RDY-E2E-002 33.5 min (RDY-ROLE-01 appear 81 s, clear 594 s); each with control + sabotage + restore in finally; stack restored and verified (`track_io_timing` on, 3 role memberships, agent mount back, compose config fingerprint equal, agent.yaml byte-identical). Deviations: baseline already partial (RDY-NOTIF-01, RDY-ACT-01; no webhook, by_application key absent) so drill 5 ADDs a dummy `chat.invalid` env var and asserts RDY-NOTIF-01 disappears; extensions check adds RDY-EXT-02 (info) after agent restarts | live | 2026-11-04 |
+| P14 gates | G-GO-FOCUS `go test -race -shuffle=on -count=1 ./internal/readiness ./internal/wire ./internal/server ./internal/agent ./cmd/pglens-agent ./internal/check`; G-RO `TestINTRO001`; G-WEB-STATIC (api diff clean); G-UI-LEGACY (14.2 tree, 671 s) ; G-DEPLOY, G-VIS VIS-RDY-001, G-QA RDY-E2E | pass | all green; README/docs/LIMITS/api/MONITORING_READINESS mention readiness | P14 tree | 2026-11-04 |
 | make lint (golangci-lint v2.15.0, installed 2026-10-29 after the user authorised downloads) | `make lint` | pass | 0 issues (covers 0.3 and 13.1 Go diffs) | cf87cd7 | 2026-10-29 |
 | G-WEB-UNIT 1.3 | `cd web && TZ=UTC pnpm exec vitest run src/features/instance` | pass | 59 passed (OV-STEP-001/002, OV-CARD-001 + existing UI-INST-0xx unchanged) | 1.3 diff | 2026-10-29 |
 | INT-API-007 (1.3 S4) | `go test -tags=integration -race -count=1 ./internal/server -run StepBelowSampling` | pass | 15s: 240 buckets ≥ 40 % null; 60s: 60 buckets, 0 null | 1.3 diff | 2026-10-29 |
@@ -615,7 +617,7 @@ Rule (user): after **every** modification of the plan the `advisor` reviews it a
 | 12.3 | phase_13.md | 12.2 | DONE | 1 | SRCH-E2E-001..004 (§7 12.3 live); R-12.3 |
 | 14.1 | phase_15.md | 0.2, 13.2 | DONE | 1 | RDY-*, RDY-API-*, RDY-DOC-*, RDY-INT-001 (§7 14.1); R-14.1 |
 | 14.2 | phase_15.md | 14.1, 13.3, 15.1, 15.2, 9.1, 17.1 | DONE | 1 | RDY-UI-*, RDYLIB-*, VIS-RDY-001 (§7 14.2) |
-| 14.3 | phase_15.md | 14.2 | TODO | 1 | — |
+| 14.3 | phase_15.md | 14.2 | DONE | 1 | RDY-E2E-001..005 (§7 14.3) |
 | 16.1 | phase_17.md | 14.1 | TODO | 1 | — |
 | 16.2 | phase_17.md | 16.1 | TODO | 1 | — |
 | 16.3 | phase_17.md | 16.2, 9.1, 15.1, 17.1 | TODO | 1 | — |
@@ -797,7 +799,7 @@ Statuses: TODO, IN_PROGRESS, IN_REVIEW, DONE, SKIPPED, BLOCKED. SKIPPED retains 
 | RDY-UI-* | 14.2 | G-WEB-UNIT | DONE | §7 14.2 |
 | RDYLIB-* | 14.2 | G-WEB-UNIT | DONE | §7 14.2 |
 | VIS-RDY-* | 14.2 | G-VIS | DONE | §7 14.2 |
-| RDY-E2E-* | 14.3 | G-VIS / G-QA | TODO | — |
+| RDY-E2E-* | 14.3 | G-VIS / G-QA | DONE | §7 14.3 |
 | FHD-* | 15.1 | G-WEB-UNIT | TODO | — |
 | FHD-MEASURE-* | 15.1 | G-VIS | TODO | — |
 | FHD-ROUTES-* | 15.1 | G-WEB-UNIT | TODO | — |
