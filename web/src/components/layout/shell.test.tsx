@@ -6,6 +6,7 @@ import { AppShell } from './AppShell'
 import { Header } from './Header'
 import { base as clusters } from '@/test/fixtures/getClusters'
 import { base as coverage } from '@/test/fixtures/getCoverage'
+import { base as readiness } from '@/test/fixtures/getReadiness'
 import { ok } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 import { expectNoA11yViolations } from '@/test/a11y'
@@ -26,7 +27,7 @@ describe('application shell', () => {
 
   it('UI-SHELL-011 derives breadcrumbs from the current route', () => {
     // On an instance dashboard the shell also shows the data-collection banner (13.3).
-    server.use(ok('getCoverage', coverage))
+    server.use(ok('getCoverage', coverage), ok('getReadiness', readiness))
     renderWithProviders(<AppShell />, { route: '/instances/node-1/ash' })
 
     const breadcrumbs = screen.getByRole('navigation', { name: 'Breadcrumb' })

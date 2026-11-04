@@ -2,7 +2,7 @@ import { LayoutDashboard, Search } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
-import { useAlerts, useClusters } from '@/api/queries'
+import { useAlerts, useClusters, useReadinessSummary } from '@/api/queries'
 import type { Cluster, Schemas } from '@/api/types'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -11,6 +11,7 @@ import { AlertListTruncated, EmptyState, ErrorState } from '@/components/state'
 import { Input } from '@/components/ui/input'
 import { AGENT_STALE_AFTER_SECONDS, deriveAgentHealth } from '@/lib/fleet'
 import { clusterLabel } from '@/lib/names'
+import { clusterReadiness } from '@/lib/readiness'
 
 import { AgentHealthStrip } from './AgentHealthStrip'
 import { ClusterCard } from './ClusterCard'
@@ -71,6 +72,8 @@ function summarize(clusters: readonly Cluster[], firingAlerts: number | null): F
 export function FleetPage() {
   const clustersQuery = useClusters()
   const alertsQuery = useAlerts({ state: 'firing' })
+  // One request for every card; a failed or pending summary shows no badge.
+  const readinessSummary = useReadinessSummary().data?.instances
   const location = useLocation()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -277,6 +280,10 @@ export function FleetPage() {
                       : null
                   }
                   cluster={cluster}
+                  readiness={clusterReadiness(
+                    cluster.instances.map((instance) => instance.instance_id),
+                    readinessSummary,
+                  )}
                 />
               )
             })}

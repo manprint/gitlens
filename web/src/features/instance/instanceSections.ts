@@ -31,6 +31,13 @@ export const INSTANCE_SECTIONS = [
     captionId: null,
   },
   { id: 'internals', label: 'Internals', kind: 'table', legacyHash: 'internals', captionId: null },
+  {
+    id: 'readiness',
+    label: 'Readiness',
+    kind: 'table',
+    legacyHash: 'readiness',
+    captionId: null,
+  },
 ] as const
 
 /**

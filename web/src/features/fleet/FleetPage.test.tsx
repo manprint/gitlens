@@ -1,5 +1,5 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Cluster } from '@/api/types'
 import { qk } from '@/api/keys'
@@ -9,6 +9,7 @@ import { CLUSTER, INSTANCE_SUMMARY } from '@/test/fixture-helpers'
 import { AGENT_STALE_AFTER_SECONDS } from '@/lib/fleet'
 import { REFRESH } from '@/api/policy'
 import { renderWithProviders } from '@/test/render'
+import { partial as readinessPartial } from '@/test/fixtures/getReadinessSummary'
 import { never, ok, sequence, status } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 
@@ -32,6 +33,10 @@ function renderFleet(clusters: Cluster[], alerts: unknown[] = [], route = '/') {
 }
 
 describe('FleetPage', () => {
+  beforeEach(() => {
+    server.use(ok('getReadinessSummary', { instances: [], totals: { full: 0, partial: 0 } }))
+  })
+
   it('UI-FLEET-010 renders one card per cluster in ranked order', async () => {
     const clusters = [
       makeCluster({ cluster_id: '9007199254740994', name: 'zulu', health: 'ok' }),
@@ -157,6 +162,7 @@ describe('FleetPage', () => {
     server.resetHandlers()
     server.use(
       ok('getClusters', [CLUSTER]),
+      ok('getReadinessSummary', { instances: [], totals: { full: 0, partial: 0 } }),
       status('getAlerts', 500, { error: 'internal_error', detail: 'unavailable' }),
     )
     const view = renderWithProviders(<FleetPage />)
@@ -445,5 +451,18 @@ describe('FleetPage', () => {
     const outage = cards.find((card) => within(card).queryByText('outage') !== null)
     expect(within(production!).getByText('1 firing alert')).toBeInTheDocument()
     expect(within(outage!).getByText('1 firing alert')).toBeInTheDocument()
+  })
+
+  it('RDY-UI-010 a card shows the readiness of its instances once, from one summary request', async () => {
+    server.use(
+      ok('getClusters', [CLUSTER]),
+      ok('getAlerts', []),
+      ok('getReadinessSummary', readinessPartial),
+    )
+    renderWithProviders(<FleetPage />)
+    await settleInitialQuery()
+    const badges = screen.getAllByTestId('readiness-badge')
+    expect(badges).toHaveLength(1)
+    expect(badges[0]).toHaveTextContent('Partial · 1 warning')
   })
 })

@@ -1,7 +1,8 @@
 import { screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { Cluster } from '@/api/types'
+import { expectNoA11yViolations } from '@/test/a11y'
 import { renderWithProviders } from '@/test/render'
 import { CLUSTER } from '@/test/fixture-helpers'
 
@@ -91,5 +92,33 @@ describe('ClusterCard', () => {
     renderWithProviders(<ClusterCard cluster={baseCluster} alertCount={2} />)
 
     expect(screen.getByText('2 firing alerts')).toBeInTheDocument()
+  })
+
+  it('RDY-UI-011 no readiness prop, no badge; with one, the badge', () => {
+    const first = renderWithProviders(<ClusterCard cluster={makeCluster()} />)
+    expect(screen.queryByTestId('readiness-badge')).toBeNull()
+    first.unmount()
+    renderWithProviders(
+      <ClusterCard
+        cluster={makeCluster()}
+        readiness={{ level: 'partial', warnings: 2, infos: 0 }}
+      />,
+    )
+    expect(screen.getByTestId('readiness-badge')).toHaveTextContent('Partial · 2 warnings')
+  })
+
+  it('RDY-UI-009 a card with the readiness badge has no accessibility violations', async () => {
+    // The card is a list item: it needs its list, as the fleet page gives it.
+    const view = renderWithProviders(
+      <div role="list">
+        <ClusterCard
+          cluster={makeCluster()}
+          readiness={{ level: 'partial', warnings: 2, infos: 1 }}
+        />
+      </div>,
+    )
+    expect(screen.getByRole('status', { name: /^Monitoring: partial/ })).toBeInTheDocument()
+    vi.useRealTimers()
+    await expectNoA11yViolations(view.container)
   })
 })

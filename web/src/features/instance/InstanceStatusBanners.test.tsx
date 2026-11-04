@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppShell } from '@/components/layout/AppShell'
 import { base as clusters } from '@/test/fixtures/getClusters'
 import { complete, base as coverage } from '@/test/fixtures/getCoverage'
+import { base as readinessFull, partial as readinessPartial } from '@/test/fixtures/getReadiness'
 import { ok } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 import { flushNetwork } from '@/test/network'
@@ -81,7 +82,11 @@ function countCoverageRequests(): string[] {
 
 describe('InstanceStatusBanners in the application shell', () => {
   beforeEach(() => {
-    server.use(ok('getClusters', clusters), ok('getCoverage', coverage))
+    server.use(
+      ok('getClusters', clusters),
+      ok('getCoverage', coverage),
+      ok('getReadiness', readinessFull),
+    )
   })
 
   it('INSTBAN-002 renders the banner container above the page on an instance dashboard', async () => {
@@ -180,6 +185,43 @@ describe('InstanceStatusBanners in the application shell', () => {
       expect(within(screen.getByRole('banner')).getByTestId('coverage-banner')).toBe(banner)
       expect(screen.getAllByTestId('coverage-banner')).toHaveLength(1)
       expect(asked).toEqual(['node-1'])
+    })
+
+    it('INSTBAN-004 readiness and coverage banners: one live region and one request each, moved across 1600 px without remount', async () => {
+      const viewport = viewportWidth(1920)
+      const readinessAsked: string[] = []
+      server.use(
+        http.get('*/api/v1/instances/:id/readiness', ({ params }) => {
+          readinessAsked.push(String(params.id))
+          return Response.json(readinessPartial)
+        }),
+      )
+      const coverageAsked = countCoverageRequests()
+      renderWithProviders(<AppShell />, { route: '/instances/node-1/queries' })
+      await flushNetwork()
+
+      const header = screen.getByRole('banner')
+      const readiness = within(header).getByTestId('readiness-banner')
+      const coverageBanner = within(header).getByTestId('coverage-banner')
+      expect(within(readiness).getByRole('link')).toHaveTextContent('Partial · 1 warning')
+      expect(screen.getAllByTestId('readiness-banner')).toHaveLength(1)
+      expect(
+        screen.getAllByRole('status').filter((node) => node.matches('[aria-live="polite"]')),
+      ).toHaveLength(2)
+      expect(readinessAsked).toEqual(['node-1'])
+      expect(coverageAsked).toEqual(['node-1'])
+
+      act(() => viewport.resize(1440))
+      await flushNetwork()
+      const container = within(screen.getByRole('main')).getByTestId('instance-status-banners')
+      expect(within(container).getByTestId('readiness-banner')).toBe(readiness)
+      expect(within(container).getByTestId('coverage-banner')).toBe(coverageBanner)
+
+      act(() => viewport.resize(1920))
+      await flushNetwork()
+      expect(within(screen.getByRole('banner')).getByTestId('readiness-banner')).toBe(readiness)
+      expect(readinessAsked).toEqual(['node-1'])
+      expect(coverageAsked).toEqual(['node-1'])
     })
 
     it('INSTBAN-003 keeps the banner above the page below 1600 px', async () => {

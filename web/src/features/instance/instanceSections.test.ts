@@ -33,6 +33,7 @@ describe('instance sections registry', () => {
       'catalog',
       'logical',
       'internals',
+      'readiness',
     ])
     expect(
       INSTANCE_SECTIONS.filter((section) => section.kind === 'charts').map((section) => section.id),

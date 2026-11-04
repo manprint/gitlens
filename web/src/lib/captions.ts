@@ -129,6 +129,22 @@ export const CAPTIONS = {
     howToRead:
       'Send test posts "pglens test notification" through the same channel the alerts use and waits at most 10 s; a failure shows the error with the address removed.',
   },
+  'instance.readiness': {
+    what: 'What is not set up on this server, so some pglens features show less than they could, and how to close each gap.',
+    source:
+      'getReadiness: pglens rules over the settings, extensions, role membership, skipped checks and agent switches it already stores (settings facts, check_skip, agent_flags).',
+    window: 'Latest values; recomputed at most every 30 s.',
+    howToRead:
+      'A warning means a feature is lost or degraded; a note is off by design or optional. Each fix names where to make the change and whether it needs a restart.',
+  },
+  'fleet.readiness': {
+    what: 'Whether the agent can monitor every server of the cluster in full, or what is missing.',
+    source:
+      'getReadinessSummary: the readiness level of each instance, counted per cluster (warnings and notes added up).',
+    window: 'Latest values; refreshed every 15 s.',
+    howToRead:
+      'Partial means at least one server has a warning: open it, then its Readiness tab, for the fixes.',
+  },
   'instance.coverage': {
     what: 'How many of the checks the agent schedules for this instance have stored a result since the agent last started.',
     source:

@@ -365,6 +365,35 @@ export function useCoverage(id: string) {
   })
 }
 
+/**
+ * `GET /api/v1/instances/{id}/readiness` (getReadiness): what stops the
+ * instance from being monitored in full, with the fixes (14.1). The server
+ * caches it for 30 s, so the instance poll interval costs nothing extra.
+ */
+export function useReadiness(id: string, options: { enabled?: boolean } = {}) {
+  return useApiQuery({
+    policy: REFRESH.instance,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/readiness', {
+          params: { path: { id } },
+          signal,
+        }),
+      ),
+    queryKey: qk.readiness(id),
+    ...options,
+  })
+}
+
+/** `GET /api/v1/readiness/summary` (getReadinessSummary): the level of every instance, for the fleet cards. */
+export function useReadinessSummary() {
+  return useApiQuery({
+    policy: REFRESH.fleet,
+    queryFn: (signal) => getApi(() => client.GET('/api/v1/readiness/summary', { signal })),
+    queryKey: qk.readinessSummary(),
+  })
+}
+
 /** The shortest search term the server accepts, in characters once trimmed (D20). */
 export const SEARCH_MIN_LENGTH = 2
 

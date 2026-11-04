@@ -2699,3 +2699,94 @@ test('SRCH-E2E-004 Findings search narrows the list to a live rule and All state
   await assertFits(page, api, fullHdRoute('/findings?q=index'))
   browserErrors.assertClean()
 })
+
+test('VIS-RDY-001 readiness banner and tab reflect the real report, keep the header row, fit Full HD, offer copy buttons', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, 3 * 30_000))
+  const browserErrors = collectConsoleErrors(page)
+  const instanceId = await pickInstance(api)
+  const response = await api.get(`/api/v1/instances/${instanceId}/readiness`)
+  expect(response.ok()).toBe(true)
+  const report = (await response.json()) as {
+    level: 'full' | 'partial'
+    counts: { warning: number; info: number }
+    items: { id: string; severity: string; fixes: { snippet?: string }[] }[]
+  }
+  const banner = page.getByTestId('readiness-banner')
+  const values = await routeValues(api)
+
+  // The tab at Full HD: items listed, snippets with a copy button, fits (I-13).
+  await page.setViewportSize({ width: 1920, height: 1080 })
+  await page.goto(`/instances/${instanceId}?section=readiness`)
+  await expect(page.getByRole('heading', { name: 'Readiness', level: 2 })).toBeVisible()
+  if (report.items.length === 0) {
+    await expect(page.getByText('Monitored in full')).toBeVisible()
+  } else {
+    await expect(page.getByTestId('readiness-item')).toHaveCount(report.items.length)
+    const buttons = page.getByRole('button', { name: 'Show details' })
+    for (let index = (await buttons.count()) - 1; index >= 0; index -= 1) {
+      await buttons.nth(index).click()
+    }
+    const snippets = report.items.flatMap((item) => item.fixes.filter((fix) => fix.snippet))
+    if (snippets.length > 0) {
+      await expect(page.getByRole('button', { name: /^Copy/ }).first()).toBeVisible()
+    }
+    await page.screenshot({ path: `${ARTIFACT_DIR}/vis-rdy-001-readiness-1920-open.png` })
+    for (
+      let index = 0;
+      index < (await page.getByRole('button', { name: 'Hide details' }).count());
+    ) {
+      await page.getByRole('button', { name: 'Hide details' }).first().click()
+    }
+  }
+  await assertFits(page, api, fullHdRoute('/instances/:instanceId?section=readiness'))
+
+  // R-13.3b: the banner beside the coverage banner, with a 64-character name,
+  // keeps the header row (<= 57 px) and ends before the controls, at 1600 and 1920 px.
+  await page.route(`**/api/v1/instances/${instanceId}`, async (route) => {
+    const original = await route.fetch()
+    const body = (await original.json()) as Record<string, unknown>
+    for (const key of ['name', 'address', 'display_name']) {
+      if (typeof body[key] === 'string') body[key] = 'n'.repeat(64)
+    }
+    await route.fulfill({ response: original, json: body })
+  })
+  for (const viewport of [
+    { width: 1600, height: 950 },
+    { width: 1920, height: 1080 },
+  ]) {
+    await page.setViewportSize(viewport)
+    await page.goto(routeUrl(fullHdRoute('/instances/:instanceId?section=overview'), values))
+    await page.waitForLoadState('networkidle')
+    await expect(page.locator('[aria-busy="true"]')).toHaveCount(0, { timeout: 30_000 })
+    const where = `${viewport.width} px`
+    if (report.level === 'full') {
+      await expect(banner, `${where}: no warning, no banner`).toHaveCount(0)
+      continue
+    }
+    await expect(banner, `${where}: banner visible`).toBeVisible({ timeout: 30_000 })
+    await expect(banner).toContainText(`Partial · ${report.counts.warning} warning`)
+    await expect(banner).toHaveAttribute('data-caption-id', 'instance.readiness')
+    await expect(
+      banner.locator('xpath=ancestor::header'),
+      `${where}: banner in the header`,
+    ).toHaveCount(1)
+    const box = async (testId: string) => {
+      const found = await page.getByTestId(testId).boundingBox()
+      expect(found, `${where}: ${testId} is laid out`).not.toBeNull()
+      return found!
+    }
+    const row = await box('header-row')
+    const status = await box('header-status')
+    const controls = await box('header-controls')
+    expect(row.height, `${where}: header row height`).toBeLessThanOrEqual(57)
+    expect(
+      status.x + status.width,
+      `${where}: status slot ends before the controls`,
+    ).toBeLessThanOrEqual(controls.x)
+    await page.screenshot({ path: `${ARTIFACT_DIR}/vis-rdy-001-header-${viewport.width}.png` })
+  }
+  browserErrors.assertClean()
+})

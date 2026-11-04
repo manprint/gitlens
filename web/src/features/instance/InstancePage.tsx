@@ -23,6 +23,8 @@ import {
   type InstanceSectionId,
 } from './instanceSections'
 import { INSTANCE_VIEW_PARAM } from './instanceViews'
+import { ReadinessSection } from '@/features/readiness/ReadinessSection'
+
 import { SettingsSection } from './SettingsSection'
 
 // The header shows the newest replay-lag reading, so a short window holds it.
@@ -196,6 +198,7 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
     catalog: () => <CatalogSection instanceId={instanceId} />,
     logical: () => <LogicalReplicationSection instanceId={instanceId} />,
     internals: () => <InternalsSection instanceId={instanceId} />,
+    readiness: () => <ReadinessSection instanceId={instanceId} />,
   }
 
   return (

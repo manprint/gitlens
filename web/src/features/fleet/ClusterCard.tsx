@@ -7,6 +7,7 @@ import { Stale, Unknown } from '@/components/state'
 import { formatLag } from '@/lib/format'
 import { AGENT_STALE_AFTER_SECONDS, describeHealth } from '@/lib/fleet'
 import { clusterLabel, instanceAddress, instanceLabel } from '@/lib/names'
+import { ReadinessBadge } from '@/features/readiness/ReadinessBadge'
 
 interface ClusterCardProps {
   agentStaleAgeSeconds?: number
@@ -14,6 +15,8 @@ interface ClusterCardProps {
   // zero alerts then, because that would read as a clean cluster.
   alertCount?: number | null
   cluster: Cluster
+  // The cluster's monitoring readiness; absent means unknown, so no badge.
+  readiness?: { level: 'full' | 'partial'; warnings: number; infos: number } | null
 }
 
 function healthVariant(health: Cluster['health']): 'success' | 'warning' | 'destructive' {
@@ -28,7 +31,12 @@ const HEALTH_ACCENT: Record<Cluster['health'], string> = {
   ok: 'before:bg-success',
 }
 
-export function ClusterCard({ agentStaleAgeSeconds, alertCount = 0, cluster }: ClusterCardProps) {
+export function ClusterCard({
+  agentStaleAgeSeconds,
+  alertCount = 0,
+  cluster,
+  readiness = null,
+}: ClusterCardProps) {
   const explanation = describeHealth(cluster)
   const label = clusterLabel(cluster, 'Unnamed cluster')
   const primary = cluster.primary
@@ -126,6 +134,13 @@ export function ClusterCard({ agentStaleAgeSeconds, alertCount = 0, cluster }: C
               {alertCount} firing alert{alertCount === 1 ? '' : 's'}
             </Badge>
           ) : null}
+          {readiness === null ? null : (
+            <ReadinessBadge
+              infos={readiness.infos}
+              level={readiness.level}
+              warnings={readiness.warnings}
+            />
+          )}
         </CardContent>
       </Card>
       {cluster.id_source !== 'system_identifier' ? (

@@ -1,3 +1,5 @@
+import { ReadinessBanner } from '@/features/readiness/ReadinessBanner'
+
 import { CoverageBanner } from './CoverageBanner'
 
 /**
@@ -51,6 +53,7 @@ export function InstanceStatusBanners({
       data-placement={placement}
       data-testid="instance-status-banners"
     >
+      <ReadinessBanner compact={placement === 'header'} instanceId={instanceId} />
       <CoverageBanner compact={placement === 'header'} instanceId={instanceId} />
     </div>
   )

@@ -51,6 +51,8 @@ export const qk = {
     ['getInstanceBloat', id, limit, objectKind] as const,
   instanceCommandAudit: (id: string) => ['getInstanceCommandAudit', id] as const,
   coverage: (id: string) => ['getCoverage', id] as const,
+  readiness: (id: string) => ['getReadiness', id] as const,
+  readinessSummary: () => ['getReadinessSummary'] as const,
   instanceSearch: (
     id: string,
     q: string | undefined,

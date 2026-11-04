@@ -13,6 +13,13 @@ pglens tells you, per instance, whether it monitors that server **in full**, and
 - Snippets name the monitoring role (`<monitoring_role>` when it is not known) and never hold a credential.
 - An item is omitted, never guessed, when its input is unknown: an agent older than this feature does not report `agent_flags`, and a setting is judged only once the agent has reported its settings.
 
+## In the console
+
+- An instance page with a warning shows a **Partial · N warnings** chip (header row from 1600 px, above the page below it) that opens the instance's **Readiness** tab (`?section=readiness`). With no warning the chip is absent.
+- The **Readiness** tab lists every item, warnings first: what you lose, the evidence, and the fixes grouped by channel with ordered steps, a copy button on each snippet and a *Requires restart* badge. Notes (infos) start collapsed.
+- Fleet cards show **Full** or **Partial · N warnings** for the cluster, from one summary request; a cluster whose instances the summary does not list shows no badge.
+- All text comes from the API and is rendered as text.
+
 ## The `agent_flags` fact
 
 The agent reports what its own configuration says in one `agent_flags` fact per target, at start, hourly and when the readability of the data directory changes: `commands_enabled`, `allow_signal`, `by_application`, `session_query_text`, `host_local` and `data_directory_readable`. It carries no address, path or secret. A server that does not know the kind counts it as an invalid fact and ignores it.

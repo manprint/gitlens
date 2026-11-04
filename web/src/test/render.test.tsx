@@ -27,7 +27,12 @@ function ConsoleErrorProbe() {
 
 describe('renderWithProviders', () => {
   it('mounts the application route registry', async () => {
-    server.use(ok('getSession', session), ok('getClusters', clusters), ok('getAlerts', [alert]))
+    server.use(
+      ok('getSession', session),
+      ok('getClusters', clusters),
+      ok('getAlerts', [alert]),
+      ok('getReadinessSummary', { instances: [], totals: { full: 0, partial: 0 } }),
+    )
     renderRoute('/')
     await act(async () => {
       await import('../routes/pages')

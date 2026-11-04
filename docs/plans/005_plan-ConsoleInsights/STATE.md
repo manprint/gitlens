@@ -88,15 +88,15 @@ checkpoint. Capture/open and restore/close are each one STATE.md update.
 - Active scope: plan (whole `005_plan-ConsoleInsights`, no selector)
 - Scope result: RUNNING
 - Type: sub-phase
-- ID / attempt: 14.1 / 1
-- Status: DONE (unit:14.1:1)
+- ID / attempt: 14.2 / 1
+- Status: OPEN (WIP, code and unit tests complete; BLOCKED on G-DEPLOY/G-VIS, see §9)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-sonnet-5-5 (user authorised Sonnet for the whole plan, Opus 5.5 advisor, 2026-11-04); supervisor: Opus review agent (agent-1); exploration/mechanical: agent-3:claude-haiku-5-5
-- File / unit heading: phase_15.md → 14.1 Agent flags fact, evaluator, rules, endpoints, documentation
-- Current step: closed
-- Next action: open the next eligible unit per §11 Execution order (14.2 needs 13.3, 15.1, 15.2, 9.1, 17.1 first).
-- Next eligible plan unit: 14.2
-- Unit base: the unit:11.5b:1 commit; branch: `feat/index-analysis` (never switch or create branches)
+- File / unit heading: phase_15.md → 14.2 Readiness UI
+- Current step: gates run; VIS-RDY-001 and G-DEPLOY NOT RUN (stack absent)
+- Next action: user decides whether to rebuild the Odoo stack (phase 0.2: needs the webhook `.env` and backups only the user has); then deploy, run VIS-RDY-001 live, close 14.2.
+- Next eligible plan unit: 14.2 (resume); 14.3 needs 14.2 and the stack
+- Unit base: 9e35e11 (14.1 DONE); branch: `feat/index-analysis` (never switch or create branches)
 - Repo state: phases 0–3 and 9–13 closed (last unit:P12:1); uncommitted only `internal/webui/dist/index.html` (never staged) and `.claude/`.
 
 ## 2. Feature context and readiness
@@ -254,6 +254,11 @@ Research checkpoint: R3 pending (7.0).
 | 14.1 SQL on real Postgres | temporary test (deleted) on `postgres:18.6-alpine` with minimal DDL, agent_flags seeded with `wire.AgentFlagsFact`/`wire.AgentFlagsKey` | pass | 8 warnings/4 infos for that seed; RDY-HOST-01, RDY-CMD-01, RDY-ROLE-01, RDY-SET-02 present; G-RO pass on pg15 and pg18 | 14.1 tree | 2026-11-04 |
 | 14.1 RDY-INT-001 (G-GO-INT) | `go test -tags=integration -race -count=1 ./internal/server -run RDY -v` | pass | RDYINT001 + RDYAPI001–003 PASS on `timescale/timescaledb:2.31.0-pg17` (pulled 2026-11-04 after the user authorised network) | 14.1 tree | 2026-11-04 |
 | 14.1 G-SECRETS | counts on `git diff HEAD`, `--cached`, `HEAD~3..HEAD`; `grep -rIc` over docs/plans web/src web/e2e test | pattern pass for the diff (0); tree: 3 hits in `web/src/features/settings/NotificationsPanel.test.tsx` (pre-existing, 6d9032b, untouched, fixtures); value check NOT RUN (stack `.env` absent) | counts only | 14.1 tree | 2026-11-04 |
+| 14.2 G-WEB-STATIC | `make web-typecheck web-lint`; `prettier --check` | pass | tsc clean; eslint 0 errors, 2 pre-existing react-refresh warnings (`IndexAnalysisPage.tsx`, `InstanceStatusBanners.tsx`); prettier clean | 14.2 tree | 2026-11-04 |
+| 14.2 G-WEB-UNIT | `cd web && TZ=UTC pnpm exec vitest run` (full) | pass | 1546/1546 (baseline 1526 + 20 new: readiness lib, readiness features, INSTBAN-004, RDY-UI-010 etc.); `readiness.test.tsx` 12 tests; contract.test.ts 127 tests incl. getReadiness/getReadinessSummary fixtures | 14.2 tree | 2026-11-04 |
+| 14.2 build | `make web-build` | pass | tsc -b + vite build ok (`internal/webui/dist/index.html` modified, never staged) | 14.2 tree | 2026-11-04 |
+| 14.2 G-UI-LEGACY | `make web-build` + `go test -tags=e2e ./test/e2e/... -run UI -timeout 25m` (local images built with `make build-images`) | pass | `ok test/e2e 671s`, all TestUI_* |  14.2 tree | 2026-11-04 |
+| 14.2 G-DEPLOY, VIS-RDY-001 (G-VIS), G-QA, G-HA | — | NOT RUN | Odoo stack, backups and `/home/agent/pglens-odoo-stack/.env` absent; VIS-RDY-001 written in `web/e2e/console_visual.spec.ts` and discovered by `playwright --list` only | — | 2026-11-04 |
 | make lint (golangci-lint v2.15.0, installed 2026-10-29 after the user authorised downloads) | `make lint` | pass | 0 issues (covers 0.3 and 13.1 Go diffs) | cf87cd7 | 2026-10-29 |
 | G-WEB-UNIT 1.3 | `cd web && TZ=UTC pnpm exec vitest run src/features/instance` | pass | 59 passed (OV-STEP-001/002, OV-CARD-001 + existing UI-INST-0xx unchanged) | 1.3 diff | 2026-10-29 |
 | INT-API-007 (1.3 S4) | `go test -tags=integration -race -count=1 ./internal/server -run StepBelowSampling` | pass | 15s: 240 buckets ≥ 40 % null; 60s: 60 buckets, 0 null | 1.3 diff | 2026-10-29 |
@@ -531,12 +536,14 @@ Rule (user): after **every** modification of the plan the `advisor` reviews it a
 | 1 | bug-HDR, 12.3 and P12 notes | contract 12.3 / I-13 | (a) bug-HDR found by the coordinator on a live screenshot (pre-existing from 82f4650); from 1600 px to 1919 px Index analysis headers may wrap (85 px Indexes views, 73 px Dead rows) — 1600 is not a reference viewport (overview A2), recorded in `fullhd-inventory.md`; (b) view titles shortened ("Index findings", "Unindexed foreign keys"), Findings link compact from 1600 px (name stays "Open Findings"); (c) HDR-E2E-001 lives in new `web/e2e/index_header.spec.ts`; (d) README search docs were committed with unit:P13:1 (shared file); (e) OpenAPI drops raw `minLength`/`maxLength` on search terms (server trims, then counts code points); (f) G-UI-LEGACY combined run lost `TestUI_Failover` to a shared Playwright results dir (ENOENT on traces) — do not run live Playwright while the legacy UI e2e runs | coordinator, R-bug-HDR, R-12.3, R-P12 | — |
 | 1 | Q2 resolved (user, 2026-10-30: "si, salva") | overview Q2, settings-inventory §5 | pglens stores webhook URLs write-only in its database, no encryption at rest in v1 (documented), env stays the fallback. 11.5b unblocked; supervisor design D1–D7 for 11.5b (table `notification_channels`, `PUT`/`DELETE /api/v1/notification-channels/{kind}` operationIds `setNotificationChannel`/`deleteNotificationChannel`, validation https or http on loopback/private hosts ≤ 2048, DB overrides env, swappable channel holders so the alert path uses a change without restart, redaction of every URL ever configured, logs host only, write-only UI form + remove, NOTI-006..012, NOTI-INT-001, NOTI-UI-005..008, NOTI-E2E-002). Executed next, before 13.3 | user / supervisor | 11.5b |
 | 1 | 14.1 deviations (R-14.1, Sonnet + Opus advisor) | contract 14.1 | (a) absent non-allowlisted setting = its default only when `SettingsKnown`, otherwise the item is omitted; nil flags/role membership omit items; unknown tier = -1. (b) the DB budget is derived server-side: monitored count when ≥1 database has skip_reason `db_budget`, discovered = monitored + over-budget, else budget 0 (unknown). (c) `HostSampleWindow` exported from `internal/readiness`. (d) `standbySteps`: on a standby every SQL fix except `ALTER SYSTEM` starts with a step to run it on the primary. (e) RDY-SKIP-001 (`internal/check/skip_reason_test.go`) pins the shapes of `Requirements.Supports` reasons the evaluator parses. (f) `agent_flags.by_application` reports the effective value of the activity check (`SetByApplication`/`ByApplicationEnabled`), not the YAML key. (g) `session_query_text` is nil (unknown) until 16.1 wires an agent setting; 16.1 must emit it (D-RDY-1). (h) a config change needs an agent restart to reach agent_flags (hourly result). (i) Replace-fact prune is `last_seen < result.TS`: equal timestamps do not prune; RDY-INT-001 pushes the second result at +1 s. (j) `postgres:18.6-alpine` and `postgres:15.19-alpine` ARE local (used for SQL/G-RO checks); the TimescaleDB image is not. (k) environment: Go module downloads (build/test, testcontainers deps) occurred (REQ-24); commits use author `Fabio <fabio@git.it>` via `git -c` per the user; tgsend at `/home/agent/.bin/tgsend`. (l) roster: Sonnet 5.5 implements every unit by user authorisation, Opus 5.5 advisor. | advisor | 14.2 (consumes readiness API), 16.1 |
+| 1 | 14.2 deviations (Sonnet + Opus advisor) | contract 14.2 | (a) `ReadinessSection` expands a warning item by default only when it is the single warning (others collapsed) so the tab fits Full HD (I-13); (b) `ReadinessBadge` has `role=status` with aria-label from `readinessBadgeLabel`; banner link has aria-label `<text>. Open the readiness tab.`; (c) cluster-level badge aggregates the instance summary rows via `clusterReadiness`; (d) captions `instance.readiness`, `fleet.readiness`; (e) test adaptations: `FleetPage.test.tsx` beforeEach `getReadinessSummary` handler, `render.test.tsx`, `instanceSections.test.ts` (+`readiness` tab), `shell.test.tsx` UI-SHELL-011, `InstanceStatusBanners.test.tsx` beforeEach `getReadiness` full + INSTBAN-004; (f) docs: `docs/MONITORING_READINESS.md` "In the console"; (g) VIS-RDY-001 live spec appended, never executed | advisor | 14.3 |
 
 ## 9. Blockers
 
 - Q2: RESOLVED 2026-10-30 by the user (yes, store write-only; see §8). No open questions.
 - RESOLVED (user authorised downloads 2026-10-29): `golangci-lint` to be installed before the next G-GO-FULL (P1 closure).
 - RESOLVED 2026-11-04: 14.1 RDY-INT-001 was blocked by the absent TimescaleDB image; the user authorised network, image pulled, test passes. Live-stack gates (Odoo stack, backups, `/home/agent/pglens-odoo-stack/.env`) are still absent: they are not needed before 14.3.
+- BLOCKED 2026-11-04 (14.2): live gates G-DEPLOY, VIS-RDY-001, G-QA need the Odoo stack, backups and `/home/agent/pglens-odoo-stack/.env` (webhook secret), all absent. Rebuilding the stack (phase 0.2) is the user's decision: needs secret and backups only the user holds. 14.3 also needs the stack; strict order stops the run here.
 - No other blocker.
 
 ## 10. Do-not-repeat
@@ -546,7 +553,8 @@ Rule (user): after **every** modification of the plan the `advisor` reviews it a
 - The tokensave index serves `main` (branch `feat/index-analysis` is not tracked): read files changed on this branch directly; do not trust tokensave for them.
 - Never put the webhook URL in any file or output.
 - Git identity is not configured globally: commit with `git -c user.name=Fabio -c user.email=fabio@git.it commit …` (the repository's existing author).
-- Vitest keeps a module cache in `web/node_modules/.vitest-cache`: a new fixture file under `web/src/test/fixtures/` may not be seen by `contract.test.ts` until run with `--experimental.fsModuleCache=false` (10.1).
+- Vitest keeps a module cache in `web/node_modules/.vitest-cache`: a new fixture file under `web/src/test/fixtures/` may not be seen by `contract.test.ts` until run with `--experimental.fsModuleCache=false` (10.1). Confirmed 14.2: stale cache ran 92 of 127 contract tests (16 fixtures skipped silently, incl. getReadiness*); moving `.vitest-cache` aside gave 127 and full suite 1546. Compare test counts after adding fixtures.
+- `make build-images` (`--pull`) reached the registry once in 14.2 with user network authorisation (2026-11-04); images `ghcr.io/manprint/pglens-{agent,server}:dev` are now local (legacy UI e2e needs them).
 - The background `deploy.sh` log goes to the scratchpad (`deploy<n>.log`).
 - Never use `docker build --pull` / `make build-images` (reaches a registry): use `deploy.sh`.
 - Never run `test/harness/dump_test.go` (`-tags=e2e`, image `timescale/timescaledb:2.29.0-pg17` is not local): `make vet-tags` only compiles it.
@@ -604,7 +612,7 @@ Rule (user): after **every** modification of the plan the `advisor` reviews it a
 | 12.2 | phase_13.md | 12.1, 9.3 | DONE | 1 | SRCH-UI-001..012 (§7 12.2); R-12.2, R-12.2b |
 | 12.3 | phase_13.md | 12.2 | DONE | 1 | SRCH-E2E-001..004 (§7 12.3 live); R-12.3 |
 | 14.1 | phase_15.md | 0.2, 13.2 | DONE | 1 | RDY-*, RDY-API-*, RDY-DOC-*, RDY-INT-001 (§7 14.1); R-14.1 |
-| 14.2 | phase_15.md | 14.1, 13.3, 15.1, 15.2, 9.1, 17.1 | TODO | 1 | — |
+| 14.2 | phase_15.md | 14.1, 13.3, 15.1, 15.2, 9.1, 17.1 | OPEN (WIP, blocked live gates) | 1 | RDY-UI-*, RDYLIB-* (§7 14.2) |
 | 14.3 | phase_15.md | 14.2 | TODO | 1 | — |
 | 16.1 | phase_17.md | 14.1 | TODO | 1 | — |
 | 16.2 | phase_17.md | 16.1 | TODO | 1 | — |
@@ -784,9 +792,9 @@ Statuses: TODO, IN_PROGRESS, IN_REVIEW, DONE, SKIPPED, BLOCKED. SKIPPED retains 
 | RDY-INT-* | 14.1 | G-GO-INT | DONE | §7 14.1 |
 | RDY-WIRE-* | 14.1 | G-GO-FOCUS | TODO | — |
 | RDYLBL-* | 14.1 | G-GO-FOCUS | TODO | — |
-| RDY-UI-* | 14.2 | G-WEB-UNIT | TODO | — |
-| RDYLIB-* | 14.2 | G-WEB-UNIT | TODO | — |
-| VIS-RDY-* | 14.2 | G-VIS | TODO | — |
+| RDY-UI-* | 14.2 | G-WEB-UNIT | DONE (unit; live pending) | §7 14.2 |
+| RDYLIB-* | 14.2 | G-WEB-UNIT | DONE | §7 14.2 |
+| VIS-RDY-* | 14.2 | G-VIS | NOT RUN (spec written, stack absent) | §7 14.2 |
 | RDY-E2E-* | 14.3 | G-VIS / G-QA | TODO | — |
 | FHD-* | 15.1 | G-WEB-UNIT | TODO | — |
 | FHD-MEASURE-* | 15.1 | G-VIS | TODO | — |
