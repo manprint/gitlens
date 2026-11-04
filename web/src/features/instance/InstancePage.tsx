@@ -212,7 +212,7 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
         sectionTabs={
           <TabsList
             aria-label="Instance sections"
-            className="h-auto flex-wrap min-[1600px]:flex-nowrap"
+            className="h-auto flex-wrap min-[1600px]:flex-nowrap min-[1600px]:max-[1919px]:[&_[role=tab]]:px-1.5 min-[1600px]:max-[1919px]:[&_[role=tab]]:text-[13px]"
             ref={tabList}
           >
             {INSTANCE_SECTIONS.map((entry) => (

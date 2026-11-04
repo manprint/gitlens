@@ -207,7 +207,7 @@ export function Header({
           {statusSlot ? (
             <div
               ref={statusSlot}
-              className="flex min-w-0 flex-1 items-center overflow-x-clip p-[3px]"
+              className="flex min-w-min flex-1 items-center overflow-x-clip p-[3px]"
               data-testid="header-status"
             />
           ) : null}

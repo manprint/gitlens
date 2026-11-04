@@ -2132,6 +2132,19 @@ test('COV-E2E-001 after an agent restart the data-collection banner counts check
       banner.locator('xpath=ancestor::header'),
       `${path}: at 1920 px the banner is inside the header`,
     ).toHaveCount(1)
+    // The crumbs hold their content width before the coverage sentence does.
+    const crumb = page
+      .getByRole('navigation', { name: 'Breadcrumb' })
+      .locator('[aria-current="page"]')
+    await expect(crumb, `${path}: at 1920 px the current crumb is on the page`).toBeVisible()
+    const crumbFit = await crumb.evaluate((el) => ({
+      scroll: el.scrollWidth,
+      client: el.clientWidth,
+    }))
+    expect(
+      crumbFit.scroll,
+      `${path}: at 1920 px the current crumb is not clipped`,
+    ).toBeLessThanOrEqual(crumbFit.client)
     await assertFits(page, api, route)
     await expect(banner, `${path}: the banner was on the page while it was measured`).toBeVisible()
     await expect(banner.locator('xpath=ancestor::header')).toHaveCount(1)
@@ -2169,7 +2182,27 @@ test('COV-E2E-001 after an agent restart the data-collection banner counts check
       status.x + status.width,
       `${path} at 1600 px: the status slot ends before the controls`,
     ).toBeLessThanOrEqual(controls.x)
+    if (path.includes('section=overview')) {
+      // The section tabs end before the facts strip, so no fact sits under a tab.
+      const tabs = await page
+        .getByTestId('instance-section-tabs')
+        .locator('> *')
+        .first()
+        .boundingBox()
+      const facts = await page.locator('[data-testid="instance-header"] dl').boundingBox()
+      expect(tabs, `${path} at 1600 px: the tab list is laid out`).not.toBeNull()
+      expect(facts, `${path} at 1600 px: the facts strip is laid out`).not.toBeNull()
+      expect(
+        tabs!.x + tabs!.width,
+        `${path} at 1600 px: the section tabs end before the facts strip`,
+      ).toBeLessThanOrEqual(facts!.x + 1)
+    }
     await expect(page.getByTestId('coverage-count')).toBeVisible()
+    const countBox = await box('coverage-count')
+    expect(
+      countBox.x + countBox.width,
+      `${path} at 1600 px: the coverage count is not clipped by the status slot`,
+    ).toBeLessThanOrEqual(status.x + status.width + 1)
     if (route.kind === 'fit' && route.pendingUnit === undefined) {
       const { scrollHeight, innerHeight, scrollWidth, innerWidth } = await page.evaluate(() => ({
         scrollHeight: document.scrollingElement?.scrollHeight ?? 0,
@@ -2745,14 +2778,54 @@ test('VIS-RDY-001 readiness banner and tab reflect the real report, keep the hea
 
   // R-13.3b: the banner beside the coverage banner, with a 64-character name,
   // keeps the header row (<= 57 px) and ends before the controls, at 1600 and 1920 px.
-  await page.route(`**/api/v1/instances/${instanceId}`, async (route) => {
-    const original = await route.fetch()
-    const body = (await original.json()) as Record<string, unknown>
-    for (const key of ['name', 'address', 'display_name']) {
-      if (typeof body[key] === 'string') body[key] = 'n'.repeat(64)
+  // The crumb and the page heading read the cluster list and the instance
+  // record, each with an optional query string: match both by pattern and set
+  // every display_name in the payload.
+  const longName = 'n'.repeat(64)
+  const renameAll = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(renameAll)
+    } else if (value !== null && typeof value === 'object') {
+      const record = value as Record<string, unknown>
+      if ('display_name' in record) record.display_name = longName
+      Object.values(record).forEach(renameAll)
     }
-    await route.fulfill({ response: original, json: body })
-  })
+  }
+  await page.route(
+    new RegExp(`/api/v1/(clusters|instances/${instanceId})(\\?.*)?$`),
+    async (route) => {
+      const original = await route.fetch()
+      const body = (await original.json()) as unknown
+      renameAll(body)
+      await route.fulfill({ response: original, json: body })
+    },
+  )
+  // Both banners at once: a coverage payload with 22 of 31 checks, 8 pending and
+  // one failed check with a long name, so the sentence is as long as it gets.
+  await page.route(
+    new RegExp(`/api/v1/instances/${instanceId}/coverage(\\?.*)?$`),
+    async (route) => {
+      const original = await route.fetch()
+      const body = (await original.json()) as Record<string, unknown>
+      const checkAt = (index: number) => ({
+        check: index === 22 ? 'a_failed_check_with_a_rather_long_name' : `check_${index}`,
+        interval_seconds: 30,
+        state: index < 22 ? 'reported' : index === 22 ? 'failed' : 'pending',
+        first_result_at: index < 22 ? '2026-11-04T10:00:00Z' : null,
+        last_result_at: index < 22 ? '2026-11-04T10:01:00Z' : null,
+        expected_by: index > 22 ? new Date(Date.now() + 5 * 60_000).toISOString() : null,
+      })
+      await route.fulfill({
+        response: original,
+        json: {
+          ...body,
+          checks: Array.from({ length: 31 }, (_, index) => checkAt(index)),
+          reported: 22,
+          total: 31,
+        },
+      })
+    },
+  )
   for (const viewport of [
     { width: 1600, height: 950 },
     { width: 1920, height: 1080 },
@@ -2767,6 +2840,10 @@ test('VIS-RDY-001 readiness banner and tab reflect the real report, keep the hea
       continue
     }
     await expect(banner, `${where}: banner visible`).toBeVisible({ timeout: 30_000 })
+    await expect(
+      page.getByTestId('header-start'),
+      `${where}: the 64-character name stub is on the page`,
+    ).toContainText(longName)
     await expect(banner).toContainText(`Partial · ${report.counts.warning} warning`)
     await expect(banner).toHaveAttribute('data-caption-id', 'instance.readiness')
     await expect(
@@ -2786,6 +2863,29 @@ test('VIS-RDY-001 readiness banner and tab reflect the real report, keep the hea
       status.x + status.width,
       `${where}: status slot ends before the controls`,
     ).toBeLessThanOrEqual(controls.x)
+    const chip = await box('readiness-banner')
+    expect(
+      chip.x + chip.width,
+      `${where}: the readiness chip is not clipped by the status slot`,
+    ).toBeLessThanOrEqual(status.x + status.width + 1)
+    await expect(
+      page.getByTestId('coverage-count'),
+      `${where}: coverage count visible`,
+    ).toBeVisible()
+    const count = await box('coverage-count')
+    expect(
+      count.x + count.width,
+      `${where}: the coverage count is not clipped by the status slot`,
+    ).toBeLessThanOrEqual(status.x + status.width + 1)
+    const hint = await box('coverage-banner')
+    expect(
+      hint.x + hint.width,
+      `${where}: the coverage banner (count and info icon) ends inside the status slot`,
+    ).toBeLessThanOrEqual(status.x + status.width + 1)
+    test.info().annotations.push({
+      type: 'VIS-RDY-001 margin',
+      description: `${where}: slot right ${Math.round(status.x + status.width)} controls left ${Math.round(controls.x)}`,
+    })
     await page.screenshot({ path: `${ARTIFACT_DIR}/vis-rdy-001-header-${viewport.width}.png` })
   }
   browserErrors.assertClean()

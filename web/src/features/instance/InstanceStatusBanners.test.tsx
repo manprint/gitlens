@@ -156,7 +156,7 @@ describe('InstanceStatusBanners in the application shell', () => {
       const controls = within(header).getByTestId('header-controls')
       expect(within(start).getByRole('navigation', { name: 'Breadcrumb' })).toBeInTheDocument()
       expect(within(start).getByTestId('header-status')).toBe(slot)
-      expect(slot).toHaveClass('min-w-0', 'flex-1', 'overflow-x-clip', 'p-[3px]')
+      expect(slot).toHaveClass('min-w-min', 'flex-1', 'overflow-x-clip', 'p-[3px]')
       expect(within(start).queryByTestId('connection-indicator')).toBeNull()
       expect(within(controls).getByTestId('connection-indicator')).toBeInTheDocument()
       expect(controls).toHaveClass('xl:shrink-0')

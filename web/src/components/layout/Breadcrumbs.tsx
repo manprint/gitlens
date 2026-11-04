@@ -81,7 +81,7 @@ export function Breadcrumbs() {
         })
 
   return (
-    <nav aria-label="Breadcrumb" className="min-w-0">
+    <nav aria-label="Breadcrumb" className="min-w-0 overflow-x-clip">
       <ol className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-sm">
         {items.map((item, index) => {
           const current = index === items.length - 1

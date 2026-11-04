@@ -82,15 +82,12 @@ export function CoverageBanner({
   if (compact) {
     const rest = `${lead}${due}.${failedText === null ? '' : ` ${failedText}`}`
     return (
-      <Callout
-        {...common}
-        className="flex w-auto max-w-full min-w-0 items-center gap-1.5 px-2.5 py-1"
-      >
+      <Callout {...common} className="flex min-w-0 flex-1 items-center gap-1.5 px-2.5 py-1">
         <span className="shrink-0 font-medium whitespace-nowrap" data-testid="coverage-count">
           {data.reported}/{data.total} checks
         </span>
         <span
-          className="text-muted-foreground block min-w-0 truncate"
+          className="text-muted-foreground block w-0 min-w-0 flex-1 truncate"
           data-testid="coverage-line"
           title={failedText === null ? sentence : `${sentence} ${failedText}`}
         >
