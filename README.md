@@ -1682,6 +1682,14 @@ curl -s -b cookies.txt "localhost:8080/api/v1/locks?instance_id=11111111-1111-11
 Returns the latest sampled blocking tree. An instance with no stored tree still
 returns 200: `{"instance_id":"…","sampled_at":null,"stale":true,"nodes":[]}`.
 
+Each entry of `sessions` carries `origin` (`application` or `pglens`, classified by
+the server from `application_name` and the instance's monitoring role) and, when
+known, `query_text` with `query_text_source` (`normalised`, resolved from the
+session's `query_id`, or `raw` when the agent has `checks.locks.session_query_text`
+on). `connections` summarises the same sessions by origin, application, user,
+client, database and state; with `truncated: true` it adds `totals` from the latest
+activity scrape.
+
 ### `GET /api/v1/instances/{id}/activity`
 
 ```sh

@@ -14,6 +14,21 @@ export const withXminHolder = {
     sampled_at: '2026-10-23T10:00:00Z',
   },
 }
+export const withConnectionMetrics = {
+  ...base,
+  metrics: {
+    pg_connections_by_origin: [
+      { ts: '2026-10-23T10:00:00Z', value: 240, labels: { origin: 'application' } },
+      { ts: '2026-10-23T10:00:00Z', value: 4, labels: { origin: 'pglens' } },
+    ],
+    pg_connections_by_user: [
+      { ts: '2026-10-23T10:00:00Z', value: 244, labels: { usename: 'app' } },
+    ],
+    pg_connections_by_client: [
+      { ts: '2026-10-23T10:00:00Z', value: 244, labels: { client_addr: 'local' } },
+    ],
+  },
+}
 export function makeGetInstanceActivity(overrides: DeepPartial<typeof base> = {}) {
   return withOverrides(base, overrides)
 }

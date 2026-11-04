@@ -42,7 +42,7 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | GET | `/api/v1/instances/{id}/triggers` | `getInstanceTriggers` | Return the triggers of the instance's databases. |
 | GET | `/api/v1/instances/{id}/unindexed-foreign-keys` | `getInstanceUnindexedForeignKeys` | Return the foreign keys no index serves. |
 | GET | `/api/v1/instances/{id}/workload/series` | `getWorkloadSeries` | Return time series of the tracked statements, tables or indexes. |
-| GET | `/api/v1/locks` | `getLocks` | Return the latest sampled blocking tree. |
+| GET | `/api/v1/locks` | `getLocks` | Return the latest sampled blocking tree, sessions with origin and the connection summary. |
 | GET | `/api/v1/readiness/summary` | `getReadinessSummary` | Return the readiness level of every instance. |
 | PATCH | `/api/v1/instances/{id}` | `renameInstance` | Set or clear the display name of an instance. |
 

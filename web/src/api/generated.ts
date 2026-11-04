@@ -626,7 +626,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Return the latest sampled blocking tree. */
+        /** Return the latest sampled blocking tree, sessions with origin and the connection summary. */
         get: operations["getLocks"];
         put?: never;
         post?: never;
@@ -1546,7 +1546,7 @@ export interface components {
                 [key: string]: string;
             };
         };
-        /** @description A client session of the latest lock sample. It carries no query text; the text of a session in a blocking tree is on its node in nodes. */
+        /** @description A client session of the latest lock sample. The agent sends no raw statement text for it unless checks.locks.session_query_text is on; the server adds query_text, the normalised text resolved by query_id (or the raw text when the agent sent it). The text of a session in a blocking tree is also on its node in nodes. */
         LockSession: {
             pid?: number;
             /** @description Identity that survives PID reuse, the lower-case hex of backend_start in microseconds since the Unix epoch, a dot, and the PID. Absent when the role may not see backend_start. */
@@ -1569,6 +1569,39 @@ export interface components {
             lock_type?: string;
             /** @description Relation the waited-on lock is on, always schema-qualified (schema.relation, each part quoted where needed), or its OID when the relation was dropped meanwhile. Present only for a relation, tuple, page or extend lock in the database the agent connects to, or on a shared catalog; a relation of another database is not named, because the agent cannot read its catalog. */
             lock_relation?: string;
+            /**
+             * @description Who opened the session, set by the server: pglens when its application_name is one of pglens's (pglens, pglens/..., pglens-agent/...) or it runs as the instance's monitoring role (the role label of the latest monitoring_role fact), application otherwise.
+             * @enum {string}
+             */
+            origin?: "application" | "pglens";
+            /** @description Statement text of the session. See query_text_source. Absent when the session has no query_id the server knows a text for and the agent sent no raw text. */
+            query_text?: string;
+            /**
+             * @description normalised: the text stored for the session's query_id (constants replaced by $n). raw: the text the agent sent, only when checks.locks.session_query_text is on; credentials are withheld. The two are never mixed in one session. Absent when query_text is.
+             * @enum {string}
+             */
+            query_text_source?: "normalised" | "raw";
+            /** @description Seconds since the current query started. Absent from older agents. */
+            query_age?: number;
+            /**
+             * Format: int64
+             * @description Age in transactions of the session's xid. Absent when it has none.
+             */
+            backend_xid_age?: number;
+            /**
+             * Format: int64
+             * @description Age in transactions of the session's xmin. Absent when it has none.
+             */
+            backend_xmin_age?: number;
+            /** @description The statement's query id as a string. Absent when NULL */
+            query_id?: string;
+            /** @description Leader of the parallel query this worker belongs to. */
+            leader_pid?: number;
+            /**
+             * Format: date-time
+             * @description Start of the current query.
+             */
+            query_start?: string;
             blocked_by?: number[];
             usename?: string;
             datname?: string;
@@ -1584,7 +1617,7 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** @description A session of the blocking tree, either blocked or a blocker. Nodes are the only sessions that carry query text. */
+        /** @description A session of the blocking tree, either blocked or a blocker. Nodes are the only sessions that carry query text. Like every session, a node carries its server-set origin. */
         LockNode: components["schemas"]["LockSession"] & {
             /** @description Statement text, cut to 2048 bytes. Withheld as "[redacted]" when it may hold a credential or the server cut it short. */
             query?: string;
@@ -1599,8 +1632,32 @@ export interface components {
             stale: boolean;
             /** @description The blocked sessions and their blockers in the latest lock sample, the only sessions with query text. */
             nodes: components["schemas"]["LockNode"][];
-            /** @description Every client session in the latest lock sample, capped and oldest transaction first, without query text. */
+            /** @description Every client session in the latest lock sample, capped and oldest transaction first, each with its origin and, when known, its query text. */
             sessions: components["schemas"]["LockSession"][];
+            connections?: components["schemas"]["LockConnections"];
+        };
+        ConnectionCount: {
+            key: string;
+            /** Format: int64 */
+            count: number;
+        };
+        /** @description Each list is sorted by count, highest first, then by key. An empty application, user or database name is the key "" (a NULL client address is "local"; a NULL state is "unknown"). */
+        ConnectionGroups: {
+            by_origin: components["schemas"]["ConnectionCount"][];
+            by_application: components["schemas"]["ConnectionCount"][];
+            by_user: components["schemas"]["ConnectionCount"][];
+            by_client: components["schemas"]["ConnectionCount"][];
+            by_database: components["schemas"]["ConnectionCount"][];
+            by_state: components["schemas"]["ConnectionCount"][];
+        };
+        /** @description Summary of the connections of the latest lock sample, counted from the very sessions in sessions, so the tables and the summary agree. Both origins are always listed, zero included. Absent when no lock tree was ever sampled. */
+        LockConnections: components["schemas"]["ConnectionGroups"] & {
+            /** @description Whether per-application connection counts are collected: agent_flags.by_application when the agent reported it, otherwise whether the latest activity scrape carries them. */
+            by_application_enabled: boolean;
+            /** @description The sample was cut to its session cap, so the groups cover only the sampled sessions. */
+            truncated: boolean;
+            /** @description Present only when truncated. The counts of the latest activity scrape (pg_connections_* and pg_backends), which cover every client backend; each group is bounded to the agent's top 10 and other. A group the scrape did not carry is empty. */
+            totals?: components["schemas"]["ConnectionGroups"];
         };
         ActivityResponse: {
             instance_id: components["schemas"]["InstanceId"];

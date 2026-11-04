@@ -436,7 +436,11 @@ components:
         labels: { type: object, additionalProperties: { type: string } }
     LockSession:
       type: object
-      description: A client session of the latest lock sample. It carries no query text; the text of a session in a blocking tree is on its node in nodes.
+      description: >-
+        A client session of the latest lock sample. The agent sends no raw statement text for it unless
+        checks.locks.session_query_text is on; the server adds query_text, the normalised text resolved by
+        query_id (or the raw text when the agent sent it). The text of a session in a blocking tree is
+        also on its node in nodes.
       properties:
         pid: { type: integer }
         session_id:
@@ -462,6 +466,31 @@ components:
         lock_relation:
           type: string
           description: Relation the waited-on lock is on, always schema-qualified (schema.relation, each part quoted where needed), or its OID when the relation was dropped meanwhile. Present only for a relation, tuple, page or extend lock in the database the agent connects to, or on a shared catalog; a relation of another database is not named, because the agent cannot read its catalog.
+        origin:
+          type: string
+          enum: [application, pglens]
+          description: >-
+            Who opened the session, set by the server: pglens when its application_name is one of pglens's
+            (pglens, pglens/..., pglens-agent/...) or it runs as the instance's monitoring role (the role
+            label of the latest monitoring_role fact), application otherwise.
+        query_text:
+          type: string
+          description: >-
+            Statement text of the session. See query_text_source. Absent when the session has no query_id
+            the server knows a text for and the agent sent no raw text.
+        query_text_source:
+          type: string
+          enum: [normalised, raw]
+          description: >-
+            normalised: the text stored for the session's query_id (constants replaced by $n). raw: the text
+            the agent sent, only when checks.locks.session_query_text is on; credentials are withheld. The two
+            are never mixed in one session. Absent when query_text is.
+        query_age: { type: number, description: Seconds since the current query started. Absent from older agents. }
+        backend_xid_age: { type: integer, format: int64, description: Age in transactions of the session's xid. Absent when it has none. }
+        backend_xmin_age: { type: integer, format: int64, description: Age in transactions of the session's xmin. Absent when it has none. }
+        query_id: { type: string, description: The statement's query id as a string. Absent when NULL, 0 or the agent is older. }
+        leader_pid: { type: integer, description: Leader of the parallel query this worker belongs to. }
+        query_start: { type: string, format: date-time, description: Start of the current query. }
         blocked_by: { type: array, items: { type: integer } }
         usename: { type: string }
         datname: { type: string }
@@ -474,7 +503,7 @@ components:
         state_age: { type: number, description: Seconds since the state last changed. }
       additionalProperties: true
     LockNode:
-      description: A session of the blocking tree, either blocked or a blocker. Nodes are the only sessions that carry query text.
+      description: A session of the blocking tree, either blocked or a blocker. Nodes are the only sessions that carry query text. Like every session, a node carries its server-set origin.
       allOf:
         - $ref: '#/components/schemas/LockSession'
         - type: object
@@ -499,7 +528,52 @@ components:
         sessions:
           type: array
           items: { $ref: '#/components/schemas/LockSession' }
-          description: Every client session in the latest lock sample, capped and oldest transaction first, without query text.
+          description: Every client session in the latest lock sample, capped and oldest transaction first, each with its origin and, when known, its query text.
+        connections: { $ref: '#/components/schemas/LockConnections' }
+    ConnectionCount:
+      type: object
+      required: [key, count]
+      properties:
+        key: { type: string }
+        count: { type: integer, format: int64 }
+    ConnectionGroups:
+      type: object
+      required: [by_origin, by_application, by_user, by_client, by_database, by_state]
+      description: >-
+        Each list is sorted by count, highest first, then by key. An empty application, user or database name
+        is the key "" (a NULL client address is "local"; a NULL state is "unknown").
+      properties:
+        by_origin: { type: array, items: { $ref: '#/components/schemas/ConnectionCount' } }
+        by_application: { type: array, items: { $ref: '#/components/schemas/ConnectionCount' } }
+        by_user: { type: array, items: { $ref: '#/components/schemas/ConnectionCount' } }
+        by_client: { type: array, items: { $ref: '#/components/schemas/ConnectionCount' } }
+        by_database: { type: array, items: { $ref: '#/components/schemas/ConnectionCount' } }
+        by_state: { type: array, items: { $ref: '#/components/schemas/ConnectionCount' } }
+    LockConnections:
+      description: >-
+        Summary of the connections of the latest lock sample, counted from the very sessions in sessions, so
+        the tables and the summary agree. Both origins are always listed, zero included. Absent when no lock
+        tree was ever sampled.
+      allOf:
+        - $ref: '#/components/schemas/ConnectionGroups'
+        - type: object
+          required: [by_application_enabled, truncated]
+          properties:
+            by_application_enabled:
+              type: boolean
+              description: >-
+                Whether per-application connection counts are collected: agent_flags.by_application when the
+                agent reported it, otherwise whether the latest activity scrape carries them.
+            truncated:
+              type: boolean
+              description: The sample was cut to its session cap, so the groups cover only the sampled sessions.
+            totals:
+              description: >-
+                Present only when truncated. The counts of the latest activity scrape (pg_connections_* and
+                pg_backends), which cover every client backend; each group is bounded to the agent's top 10 and
+                other. A group the scrape did not carry is empty.
+              allOf:
+                - $ref: '#/components/schemas/ConnectionGroups'
     ActivityResponse:
       type: object
       required: [instance_id, stale, metrics, xmin_horizon]
@@ -3102,7 +3176,7 @@ paths:
     get:
       tags: [instances]
       operationId: getLocks
-      summary: Return the latest sampled blocking tree.
+      summary: Return the latest sampled blocking tree, sessions with origin and the connection summary.
       parameters:
         - name: instance_id
           in: query
