@@ -8,6 +8,7 @@ package readiness
 
 import (
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/manprint/pglens/internal/wire"
@@ -145,6 +146,9 @@ func Evaluate(in Input) Report {
 		}
 		item := rule.Build(in)
 		item.ID, item.Severity = rule.ID, rule.Severity
+		if in.Instance.IsStandby {
+			item.Fixes = standbySteps(item.Fixes)
+		}
 		report.Items = append(report.Items, item)
 		if rule.Severity == SeverityWarning {
 			report.Counts.Warning++
@@ -163,4 +167,21 @@ func Evaluate(in Input) Report {
 		report.Level = LevelPartial
 	}
 	return report
+}
+
+// standbyStep opens the steps of an SQL fix that a standby cannot take.
+const standbyStep = "This server is a standby: run the statements on its primary, they reach the standby by replication."
+
+// standbySteps returns fixes with standbyStep in front of every SQL fix that
+// changes the shared catalogue (a grant, an extension). ALTER SYSTEM changes
+// one server's own file and stays as it is. fixes is not modified.
+func standbySteps(fixes []Fix) []Fix {
+	out := make([]Fix, len(fixes))
+	for i, f := range fixes {
+		if f.Channel == ChannelSQL && !strings.Contains(f.Snippet, "ALTER SYSTEM") {
+			f.Steps = append([]string{standbyStep}, f.Steps...)
+		}
+		out[i] = f
+	}
+	return out
 }

@@ -364,3 +364,36 @@ func TestRDY016_TierUnknown(t *testing.T) {
 		require.NotContains(t, ids(Evaluate(in)), "RDY-T2-01", "tier %d", tier)
 	}
 }
+
+// RDY-017: on a standby the catalogue-changing SQL fixes say to run them on the
+// primary; ALTER SYSTEM (one server's own file) does not.
+func TestRDY017_StandbySQLFixes(t *testing.T) {
+	in := healthy()
+	in.Instance.IsStandby = true
+	in.Role.HasPgMonitor = ptr(false)
+	in.Settings["track_io_timing"] = "off"
+	in.Extensions = map[string][]string{"app": {"pg_stat_statements"}}
+	r := Evaluate(in)
+	found := map[string]bool{}
+	for _, it := range r.Items {
+		for _, f := range it.Fixes {
+			if f.Channel != ChannelSQL {
+				continue
+			}
+			found[it.ID] = true
+			if strings.Contains(f.Snippet, "ALTER SYSTEM") {
+				require.NotContains(t, f.Steps, standbyStep, it.ID)
+			} else {
+				require.Equal(t, standbyStep, f.Steps[0], it.ID)
+			}
+		}
+	}
+	require.True(t, found["RDY-ROLE-01"] && found["RDY-SET-02"] && found["RDY-EXT-02"])
+
+	in.Instance.IsStandby = false
+	for _, it := range Evaluate(in).Items {
+		for _, f := range it.Fixes {
+			require.NotContains(t, f.Steps, standbyStep, it.ID)
+		}
+	}
+}

@@ -9,6 +9,7 @@ pglens tells you, per instance, whether it monitors that server **in full**, and
 - pglens never changes the monitored server or the agent configuration (I-2): every fix is a change **you** make, through the channel shown on it:
   `console`, `agent_config` (agent.yaml), `sql` (run by a DBA), `postgres_config` (postgresql.conf), `host` (the machine or container the agent runs on).
 - A fix marked *restart required* needs a restart of PostgreSQL or of the agent; the others take effect on a reload or at the next collection.
+- On a standby, an SQL fix that changes the shared catalogue (a grant, an extension) starts with a step to run it on the primary; `ALTER SYSTEM` changes one server's own file and does not.
 - Snippets name the monitoring role (`<monitoring_role>` when it is not known) and never hold a credential.
 - An item is omitted, never guessed, when its input is unknown: an agent older than this feature does not report `agent_flags`, and a setting is judged only once the agent has reported its settings.
 

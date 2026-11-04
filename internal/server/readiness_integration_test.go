@@ -98,6 +98,9 @@ func TestRDYINT001_SeededFactsBecomeReport(t *testing.T) {
 	require.False(t, got["RDY-ROLE-01"])
 	require.Equal(t, readiness.LevelPartial, first.Level)
 
+	// The prune keeps facts last seen at or after the result's time, so the
+	// second result is one second later.
+	now = now.Add(time.Second)
 	push(extensions("plpgsql", "pgstattuple"))
 	require.True(t, ids(report())["RDY-EXT-01"], "removing the extension fact flips RDY-EXT-01 within one request")
 }
