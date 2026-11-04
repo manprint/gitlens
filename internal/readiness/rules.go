@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-// hostSampleWindow is how recent a host_disk_* sample must be for the data
+// HostSampleWindow is how recent a host_disk_* sample must be for the data
 // directory to count as measured; the server computes HasDiskTotal over it.
-const hostSampleWindow = 10 * time.Minute
+const HostSampleWindow = 10 * time.Minute
 
 // Rules returns the rule table in a fixed order. Evaluate sorts the items it
 // produces, so the order here is only the order they are evaluated in.
@@ -251,7 +251,7 @@ func appliesHost01(in Input) bool {
 func buildHost01(in Input) Item {
 	evidence := "the agent could not read the data directory's filesystem"
 	if in.Flags.DataDirectoryReadable == nil {
-		evidence = fmt.Sprintf("no host_disk_* sample in the last %d minutes", int(hostSampleWindow/time.Minute))
+		evidence = fmt.Sprintf("no host_disk_* sample in the last %d minutes", int(HostSampleWindow/time.Minute))
 	}
 	return Item{
 		Title:    "The host filesystem is not measured",

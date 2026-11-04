@@ -202,6 +202,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/instances/{id}/readiness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Return whether the instance is monitored in full, and how to close each gap.
+         * @description Evaluated from the facts and series of the last 24 hours and cached for 30 seconds per instance. The level is partial when at least one item is a warning; infos are features that are off, often by design, and never change it.
+         */
+        get: operations["getReadiness"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/readiness/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Return the readiness level of every instance.
+         * @description Same evaluation and cache as the report of one instance.
+         */
+        get: operations["getReadinessSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instances/{id}/settings": {
         parameters: {
             query?: never;
@@ -1612,6 +1652,68 @@ export interface components {
         SettingsResponse: {
             instance_id: components["schemas"]["InstanceId"];
             settings: components["schemas"]["Setting"][];
+        };
+        ReadinessFix: {
+            /**
+             * @description Where the change is made.
+             * @enum {string}
+             */
+            channel: "console" | "agent_config" | "sql" | "postgres_config" | "host";
+            title: string;
+            steps: string[];
+            /** @description Text to copy; never holds a credential. */
+            snippet?: string;
+            requires_restart: boolean;
+            /** @description Console route of a console fix. */
+            route?: string;
+        };
+        ReadinessItem: {
+            /** @description Rule id, for example RDY-EXT-01. */
+            id: string;
+            /** @enum {string} */
+            severity: "warning" | "info";
+            title: string;
+            summary: string;
+            /** @description What the gap costs. */
+            impact: string[];
+            evidence: string;
+            fixes: components["schemas"]["ReadinessFix"][];
+        };
+        ReadinessCounts: {
+            /** Format: int32 */
+            warning: number;
+            /** Format: int32 */
+            info: number;
+        };
+        ReadinessReport: {
+            instance_id: components["schemas"]["InstanceId"];
+            /**
+             * @description partial when at least one item is a warning.
+             * @enum {string}
+             */
+            level: "full" | "partial";
+            generated_at: components["schemas"]["Timestamp"];
+            counts: components["schemas"]["ReadinessCounts"];
+            /** @description Warnings first */
+            items: components["schemas"]["ReadinessItem"][];
+        };
+        ReadinessSummaryInstance: {
+            instance_id: components["schemas"]["InstanceId"];
+            /** @enum {string} */
+            level: "full" | "partial";
+            /** Format: int32 */
+            warnings: number;
+            /** Format: int32 */
+            infos: number;
+        };
+        ReadinessSummary: {
+            instances: components["schemas"]["ReadinessSummaryInstance"][];
+            totals: {
+                /** Format: int32 */
+                full: number;
+                /** Format: int32 */
+                partial: number;
+            };
         };
         TriggersResponse: {
             instance_id: components["schemas"]["InstanceId"];
@@ -3071,6 +3173,68 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+        };
+    };
+    getReadiness: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["InstanceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The readiness report. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadinessReport"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            /** @description The store is unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getReadinessSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One row per instance and the totals. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadinessSummary"];
+                };
+            };
+            /** @description The store is unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     getInstanceSettings: {

@@ -302,3 +302,14 @@ The stored addresses are read once at start. When that read fails (the
 database is down), the server logs it and uses the environment's addresses;
 it does not retry, so an address stored from the console applies again only
 after the next start, or once it is set again from the console.
+
+## 16. Monitoring readiness is evaluated on read and cached for 30 seconds
+
+The readiness report (`GET /api/v1/instances/{id}/readiness`) is computed from
+the facts and series of the last 24 hours when it is requested, and kept in
+server memory for 30 seconds per instance; nothing is stored. A change made to
+close a gap shows once the agent has reported it (a setting at its next
+settings collection, a flag at its next hourly report or restart) and the
+cache has expired. A fact older than 24 hours counts as unknown, and an item
+that depends on it is omitted, not raised. Another server replica keeps its
+own cache.

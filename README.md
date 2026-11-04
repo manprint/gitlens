@@ -1722,6 +1722,28 @@ collection banner of the instance dashboards (see [Instance](#instance)).
 }
 ```
 
+### `GET /api/v1/instances/{id}/readiness`
+
+```sh
+curl -s -b cookies.txt "localhost:8080/api/v1/instances/11111111-1111-1111-1111-111111111111/readiness" | jq .
+curl -s -b cookies.txt "localhost:8080/api/v1/readiness/summary" | jq .totals
+```
+
+Whether the instance is monitored in full. `level` is `full`, or `partial` when
+at least one item is a warning; each item names what is lost (`impact`), the
+evidence, and one or more fixes with the channel to make them through (the
+console, `agent.yaml`, SQL, `postgresql.conf` or the host), a snippet to copy
+and whether a restart is needed. Infos are features that are off, often by
+design (cancel and terminate, for one), and never change the level. The report
+is evaluated on read from the stored facts of the last 24 hours and cached for
+30 seconds per instance; the summary lists every instance. Every rule and fix
+is in [docs/MONITORING_READINESS.md](docs/MONITORING_READINESS.md).
+
+The agent reports its own switches (`commands.enabled`, `allow_signal`,
+`checks.activity.by_application`, whether it runs next to the server and can
+read its data directory) in an `agent_flags` fact at start, hourly and when the
+data directory's readability changes. It holds no address, path or secret.
+
 ### `GET /api/v1/metrics/query`
 
 ```sh
@@ -1962,6 +1984,8 @@ PATCH  /api/v1/instances/{id}
 GET    /api/v1/instances/{id}/activity|databases|host|settings|tables|indexes|bloat|command-audit|coverage
 GET    /api/v1/instances/{id}/workload/series
 GET    /api/v1/instances/{id}/search
+GET    /api/v1/instances/{id}/readiness
+GET    /api/v1/readiness/summary
 GET    /api/v1/locks
 GET    /api/v1/metrics/query
 GET    /api/v1/events

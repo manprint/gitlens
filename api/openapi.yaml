@@ -576,6 +576,61 @@ components:
       properties:
         instance_id: { $ref: '#/components/schemas/InstanceId' }
         settings: { type: array, items: { $ref: '#/components/schemas/Setting' } }
+    ReadinessFix:
+      type: object
+      required: [channel, title, steps, requires_restart]
+      properties:
+        channel: { type: string, enum: [console, agent_config, sql, postgres_config, host], description: Where the change is made. }
+        title: { type: string }
+        steps: { type: array, items: { type: string } }
+        snippet: { type: string, description: Text to copy; never holds a credential. }
+        requires_restart: { type: boolean }
+        route: { type: string, description: Console route of a console fix. }
+    ReadinessItem:
+      type: object
+      required: [id, severity, title, summary, impact, evidence, fixes]
+      properties:
+        id: { type: string, description: 'Rule id, for example RDY-EXT-01.' }
+        severity: { type: string, enum: [warning, info] }
+        title: { type: string }
+        summary: { type: string }
+        impact: { type: array, items: { type: string }, description: What the gap costs. }
+        evidence: { type: string }
+        fixes: { type: array, items: { $ref: '#/components/schemas/ReadinessFix' } }
+    ReadinessCounts:
+      type: object
+      required: [warning, info]
+      properties:
+        warning: { type: integer, format: int32 }
+        info: { type: integer, format: int32 }
+    ReadinessReport:
+      type: object
+      required: [instance_id, level, generated_at, counts, items]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        level: { type: string, enum: [full, partial], description: partial when at least one item is a warning. }
+        generated_at: { $ref: '#/components/schemas/Timestamp' }
+        counts: { $ref: '#/components/schemas/ReadinessCounts' }
+        items: { type: array, items: { $ref: '#/components/schemas/ReadinessItem' }, description: Warnings first, then infos, each by rule id. }
+    ReadinessSummaryInstance:
+      type: object
+      required: [instance_id, level, warnings, infos]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        level: { type: string, enum: [full, partial] }
+        warnings: { type: integer, format: int32 }
+        infos: { type: integer, format: int32 }
+    ReadinessSummary:
+      type: object
+      required: [instances, totals]
+      properties:
+        instances: { type: array, items: { $ref: '#/components/schemas/ReadinessSummaryInstance' } }
+        totals:
+          type: object
+          required: [full, partial]
+          properties:
+            full: { type: integer, format: int32 }
+            partial: { type: integer, format: int32 }
     TriggersResponse:
       type: object
       required: [instance_id, triggers, truncated_databases]
@@ -2227,6 +2282,76 @@ paths:
                     available: false
                     reason: target is not local to any agent
         '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/readiness:
+    get:
+      tags: [instances]
+      operationId: getReadiness
+      summary: Return whether the instance is monitored in full, and how to close each gap.
+      description: >-
+        Evaluated from the facts and series of the last 24 hours and cached for
+        30 seconds per instance. The level is partial when at least one item is
+        a warning; infos are features that are off, often by design, and never
+        change it.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+      responses:
+        '200':
+          description: The readiness report.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReadinessReport' }
+              examples:
+                default:
+                  value:
+                    instance_id: 11111111-1111-1111-1111-111111111111
+                    level: partial
+                    generated_at: '2026-11-04T09:00:00Z'
+                    counts: { warning: 1, info: 0 }
+                    items:
+                      - id: RDY-SET-02
+                        severity: warning
+                        title: track_io_timing is off
+                        summary: PostgreSQL does not time block reads and writes.
+                        impact: [I/O time charts, Per-statement I/O time]
+                        evidence: track_io_timing = off
+                        fixes:
+                          - channel: sql
+                            title: Turn it on without a restart
+                            steps: [Run the statements below as a superuser., No restart is needed.]
+                            snippet: "ALTER SYSTEM SET track_io_timing = on;\nSELECT pg_reload_conf();"
+                            requires_restart: false
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503':
+          description: The store is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/readiness/summary:
+    get:
+      tags: [instances]
+      operationId: getReadinessSummary
+      summary: Return the readiness level of every instance.
+      description: Same evaluation and cache as the report of one instance.
+      responses:
+        '200':
+          description: One row per instance and the totals.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReadinessSummary' }
+              examples:
+                default:
+                  value:
+                    instances:
+                      - { instance_id: 11111111-1111-1111-1111-111111111111, level: partial, warnings: 1, infos: 2 }
+                    totals: { full: 0, partial: 1 }
+        '503':
+          description: The store is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/instances/{id}/settings:
     get:

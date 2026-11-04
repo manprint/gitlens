@@ -31,6 +31,7 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | GET | `/api/v1/instances/{id}/internals` | `getInstanceInternals` | Return the WAL directory, database sizes, SLRU caches, temporary files and standby replay. |
 | GET | `/api/v1/instances/{id}/logical-replication` | `getInstanceLogicalReplication` | Return the subscriptions and the logical slots' decoding rates. |
 | GET | `/api/v1/instances/{id}/partitioned-tables` | `getInstancePartitionedTables` | Return the partitioned tables, each rolled up over its partitions. |
+| GET | `/api/v1/instances/{id}/readiness` | `getReadiness` | Return whether the instance is monitored in full, and how to close each gap. |
 | GET | `/api/v1/instances/{id}/search` | `searchInstance` | Search the statements, indexes, tables and columns of an instance. |
 | GET | `/api/v1/instances/{id}/security-definer-functions` | `getInstanceSecurityDefinerFunctions` | Return the SECURITY DEFINER functions and procedures. |
 | GET | `/api/v1/instances/{id}/sequences` | `getInstanceSequences` | Return the sequences and how much of their range each has used. |
@@ -42,6 +43,7 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | GET | `/api/v1/instances/{id}/unindexed-foreign-keys` | `getInstanceUnindexedForeignKeys` | Return the foreign keys no index serves. |
 | GET | `/api/v1/instances/{id}/workload/series` | `getWorkloadSeries` | Return time series of the tracked statements, tables or indexes. |
 | GET | `/api/v1/locks` | `getLocks` | Return the latest sampled blocking tree. |
+| GET | `/api/v1/readiness/summary` | `getReadinessSummary` | Return the readiness level of every instance. |
 | PATCH | `/api/v1/instances/{id}` | `renameInstance` | Set or clear the display name of an instance. |
 
 ## metrics

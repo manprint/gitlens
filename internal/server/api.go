@@ -57,6 +57,8 @@ type API struct {
 	// auth tells a bearer-token request from a UI session in the log of a
 	// retention change; nil names every request a UI session.
 	auth *Auth
+	// readinessCache holds each instance's readiness report for 30 s (14.1).
+	readinessCache readinessCache
 }
 
 // NewAPI creates an API backed by the given pool.
@@ -95,6 +97,7 @@ func (a *API) RegisterRoutes(r chi.Router) {
 	a.registerAdvisorSettingsRoutes(r)
 	a.registerNotificationChannelRoutes(r)
 	a.registerCoverageRoutes(r)
+	a.registerReadinessRoutes(r)
 }
 
 // Ready verifies that the database is reachable and the complete migration
