@@ -5,7 +5,7 @@ Read first at every session. Updated 2026-11-05 by agent-2:claude-sonnet-5-5 (ex
 Plan ID: 005_plan-ConsoleInsights. Revision: 1. Repo root: /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze.
 Plan baseline: `5929be2d5ffe96867a63791b8a0b18687e41f8b5` (branch `feat/index-analysis`); pre-existing uncommitted changes: see §5 (preserved; committed once as the baseline commit at 0.2 S1b, D32).
 Roster (user instruction 2026-11-04, `agent:sonnet` + "autorizzo sonnet per tutto il piano, con opus come advisor"; supersedes the 2026-10-29 "Sonnet is not used" instruction): agent-1:claude-opus-5-5 (supervisor/reviewer: the `advisor` tool, re-enabled by the user 2026-11-04, set to Opus 5.5; for a full-diff review the advisor tool is used, and a fresh read-only review agent with `model: opus` is an allowed supplement); agent-2:claude-sonnet-5-5 (implementer, the executing session); agent-3:claude-haiku-5-5 (exploration and mechanical work only, Agent tool `model: haiku`). Phase-file lines naming `agent-2:claude-opus-5-5` now read agent-2:claude-sonnet-5-5. Active execution style: handoff (the executing session implements; every point where a phase file says `advisor` is served by the advisor tool).
-State writer: the executing session (agent-2:claude-sonnet-5-5, took over 2026-11-04 after the 2026-10-31 user-stop handoff released the previous session); ownership: ACTIVE since 2026-11-05 08:20Z, agent-2:claude-sonnet-5-5 (took over from the released 2026-11-04 23:17 handoff; previous writer stopped).
+State writer: the executing session (agent-2:claude-sonnet-5-5, took over 2026-11-04 after the 2026-10-31 user-stop handoff released the previous session); ownership: RELEASED 2026-11-05 15:50 CET (handoff, trigger deadline); the next session takes over under the recorded takeover rule (nothing stale: released).
 
 
 ## 0. Resume and completion protocol
@@ -16,7 +16,7 @@ See `PROTOCOL.md` (static cold-start rules).
 
 - Invocation: `/pev-v3 full-autonomous:true --wip-commit execute 005` (2026-11-05, explicit); style handoff; acting as agent-2:claude-sonnet-5-5; supervisor advisor Opus 5.5.
 - Active scope: plan (whole `005_plan-ConsoleInsights`, no selector); full-autonomous true, WIP on (explicit)
-- Scope result: RUNNING
+- Scope result: RUNNING (invocation result: HANDOFF, trigger deadline, 2026-11-05 15:50 CET)
 - Type: phase
 - ID / attempt: P15 / 1
 - Status: DONE
@@ -25,11 +25,11 @@ See `PROTOCOL.md` (static cold-start rules).
 - File / unit heading: phase_16.md → P15
 - Current step: P15 closed
 - Next action: open 17.2 (strict §11 order: 17.2 → 17.3 → P17 → 6.1…6.4 → P6 → 7.0…7.5 → P7 → 8.1 → 8.2 → P8 → PLAN).
-- Stop latch: none (cleared by explicit invocation 2026-11-05)
+- Stop latch: HANDOFF deadline 2026-11-05 15:50 CET (`handoff --deadline=05-11-2026_17_00`; cleared by the next explicit invocation)
 - Deadline (this run only): `handoff --deadline=05-11-2026_17_00`, requested 2026-11-05 15:21 CET; reserve 15 min, cutoff 16:45 CET.
 - Last closure: unit:P15:1 (phase P15 DONE)
 - Unit base: HEAD (after the P16 commit); branch `feat/index-analysis` (never switch or create branches)
-- Repo state: uncommitted only `internal/webui/dist/index.html` (never staged) and `.claude/`.
+- Repo state: HEAD = handoff commit after e9459be (P15); uncommitted only `internal/webui/dist/index.html` (never staged) and `.claude/`.
 - Network: user authorised internet use (2026-11-05 message "autorizzo ad usare la rete internet"); still no push.
 - Stack: restarted 2026-11-05 08:15Z (`up -d --no-recreate`, all healthy); backup `02-loaded-20261104T170945Z` VERIFIED (created 2026-11-04T17:09:45Z, < 24 h until 2026-11-05 17:09Z).
 
@@ -114,7 +114,7 @@ Unit-owned paths are listed in each phase file's sub-phase `Files` field and rec
 
 ## 6. In-flight checkpoint
 
-Phase 5 DONE (P5 attempt 1, advisor Opus 5.5 approved after review rounds; 5.1 detail in `history.md`). STATE compacted at P5 DONE. Uncommitted: only `internal/webui/dist/index.html` (never staged) and `.claude/`. Next: 15.4. Backup `02-loaded-20261104T170945Z` stops being VERIFIED at 2026-11-05 17:09Z: take a fresh verified backup before any lifecycle/G-QA test after that time.
+Handoff (deadline 17:00 CET, stopped 15:50, no unit OPEN): P15 DONE (e9459be; WIP 55f6d39, a9542e2; advisor Opus 5.5 approved after fixes). Next action: open 17.2 (phase_18.md per §11), then 17.3 → P17 → 6.1…6.4 → …; 17.2 was not started because it would not finish with its review before the cutoff. Commands not run: none pending. Never run two Playwright jobs while a G-UI-LEGACY run is in progress (shared `test/e2e/_artifacts/ui/results`). No background process left; stack `pglens-odoo` stays up (UI 127.0.0.1:9090, built from the P15 code; exposed on 0.0.0.0:9090 at the user's request). Commit identity: no git identity is configured, use `git -c user.name=fabio -c user.email=fabio.pierri@synclab.it` as earlier commits did. Docker cleanup (CLAUDE.md rule 17): only the stack remains, nothing extra to remove. Uncommitted: only `internal/webui/dist/index.html` (never staged) and `.claude/`. Backup `02-loaded-20261104T170945Z` stops being VERIFIED at 2026-11-05 17:09Z: take a fresh verified backup before any lifecycle/G-QA test after that time.
 
 Phase 4 DONE (P4 attempt 1, advisor Opus 5.5 approved after three rounds; 4.x detail in `history.md`). STATE compacted at P4 DONE. Uncommitted: only `internal/webui/dist/index.html` (never staged) and `.claude/`. Backup `02-loaded-20261104T170945Z` stops being VERIFIED at 2026-11-05 17:09Z: take a fresh verified backup before any lifecycle/G-QA test after that time. Before a later VIS-040 run (6.2, 8.2): `suggest_ground_truth.py` (330 s) then wait 3 min.
 Running resources: stack `pglens-odoo` up and healthy (4th deploy, final P4 code). Backup `02-loaded-20261104T170945Z` VERIFIED (expires 2026-11-05 17:09Z); stack `agent.yaml` = `agent.yaml.bak-16.4`. Research checkpoint: R3 pending (7.0).
