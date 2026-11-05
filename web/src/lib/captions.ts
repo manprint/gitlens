@@ -172,7 +172,7 @@ export const CAPTIONS = {
     howToRead:
       'Weight and read cost are an upper bound of the time the statements spend today: an index cannot save more. Size comes from planner row counts. Write rates are inserts, updates and deletes per second. pglens never creates an index; review the statement before you run it.',
     thresholds:
-      'Verdict: read/write ratio of 10 or more is strong, 1 or more moderate, below 1 write-heavy. Tables under 1,000 rows are skipped.',
+      'Verdict: read/write ratio of 10 or more is strong, 1 or more moderate, below 1 write-heavy; a table with no index writes is at least moderate. Tables under 1,000 rows are skipped.',
   },
   'locks.sessions-application': {
     what: 'Sessions opened by your applications: one row per client session of the latest lock sample, oldest transaction first.',

@@ -91,6 +91,13 @@ describe('indexSuggestions', () => {
         skipped: { catalog: 41, expression: 32, small_table: 20, or_group: 14 },
       }),
     ).toContain('41 system catalogs only, 32 column inside an expression')
+    expect(
+      coverageText({
+        statements_considered: 4,
+        statements_analysed: 1,
+        skipped: { not_table: 2 },
+      }),
+    ).toContain('2 not an ordinary table')
   })
 
   it('SUGG-LIB-010 never shows a non-zero rate or cost as 0', () => {

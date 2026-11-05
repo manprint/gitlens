@@ -2313,7 +2313,7 @@ export interface components {
             statements_considered: number;
             /** Format: int32 */
             statements_analysed: number;
-            /** @description Number of statements per skip reason (for example no_text, expression, parse_error). A statement can have several reasons, and an analysed statement can have skipped parts, so the counts do not add up to statements_considered minus statements_analysed. */
+            /** @description Number of statements per skip reason (for example no_text, expression, parse_error, catalog, small_table, not_table). not_table is a relation that is not an ordinary table of the database's inventory (a view, a foreign table, or a table past the 1000-table inventory limit), reported only for a database whose agent lists every index. A statement can have several reasons, and an analysed statement can have skipped parts, so the counts do not add up to statements_considered minus statements_analysed. */
             skipped: {
                 [key: string]: number;
             };
@@ -2368,7 +2368,10 @@ export interface components {
             };
             /** Format: double */
             read_write_ratio: number;
-            /** @enum {string} */
+            /**
+             * @description From the read/write ratio of the table (calls per second of the statements that use the key over the row changes per second that touch an index): 10 or more is strong, 1 or more moderate, below 1 write_heavy. Low selectivity lowers it one step. A table that takes no index writes, or whose writes are unknown, is never write_heavy: at least moderate.
+             * @enum {string}
+             */
             verdict: "strong" | "moderate" | "write_heavy";
             /** @enum {string} */
             confidence: "high" | "medium" | "low";

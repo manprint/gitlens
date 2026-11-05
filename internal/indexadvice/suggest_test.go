@@ -389,7 +389,7 @@ func TestIDXS030_CoverageCounts(t *testing.T) {
 	in := input(
 		`SELECT 1 FROM res_partner WHERE ref = $1`,
 		`SELECT 1 FROM res_partner WHERE ref = $1 OR name = $2`,
-		`SELECT 1 FROM res_partner WHERE lower(name) = $1 OR ref = $2`,
+		`SELECT 1 FROM res_partner WHERE lower(name) = $1 AND (ref = $2 OR name = $3)`,
 		`SELECT 1 FROM tiny WHERE x = $1`,
 	)
 	tiny := partnerMeta()
@@ -400,11 +400,13 @@ func TestIDXS030_CoverageCounts(t *testing.T) {
 	require.Equal(t, 4, c.StatementsConsidered)
 	require.Equal(t, 1, c.StatementsAnalysed, "only the first statement became a candidate")
 	require.Equal(t, 1, c.Skipped[NoteSmallTable])
+	require.GreaterOrEqual(t, c.Skipped[string(SkipOrGroup)], 2, "statements 2 and 3 have an OR")
+	require.GreaterOrEqual(t, c.Skipped[string(SkipExpression)], 1, "statement 3 filters on lower(name), and also has an OR")
 	sum := 0
 	for _, n := range c.Skipped {
 		sum += n
 	}
-	require.Greater(t, sum, c.StatementsConsidered-c.StatementsAnalysed-1, "a statement can have several reasons")
+	require.Greater(t, sum, c.StatementsConsidered-c.StatementsAnalysed, "a statement can have several reasons")
 }
 
 func TestIDXS031_NoWritesIsNeverWriteHeavy(t *testing.T) {
@@ -423,4 +425,56 @@ func TestIDXS031_NoWritesIsNeverWriteHeavy(t *testing.T) {
 	meta.Writes = Writes{Ins: 5}
 	in.Tables[partner] = meta
 	require.Equal(t, VerdictWriteHeavy, Suggest(in).Suggestions[0].Verdict, "real writes still weigh")
+}
+
+// With the complete index list a primary key covers id = $1; a relation that is
+// not a table of the inventory is skipped, not suggested.
+func TestIDXS032_CompleteIndexList(t *testing.T) {
+	in := input(
+		`SELECT 1 FROM res_partner WHERE id = $1`,
+		`SELECT 1 FROM public.some_view WHERE x = $1`,
+		`SELECT 1 FROM public.pg_stat_statements WHERE queryid = $1`,
+	)
+	meta := partnerMeta()
+	meta.IndexesKnown = true
+	in.Tables[partner] = meta
+	in.IndexesComplete = map[string]bool{testDB: true}
+	pk, err := ParseIndexDef("CREATE UNIQUE INDEX res_partner_pkey ON public.res_partner USING btree (id)")
+	require.NoError(t, err)
+	in.Indexes[partner] = []IndexDef{pk}
+	out := Suggest(in)
+	require.Empty(t, out.Suggestions)
+	require.Equal(t, 1, out.Coverage.Skipped[NoteNotTable])
+	require.Equal(t, 1, out.Coverage.Skipped[string(SkipCatalog)])
+
+	in.Indexes[partner] = nil
+	require.Len(t, Suggest(in).Suggestions, 1, "without the primary key the id lookup is suggested")
+}
+
+// Without a complete list (an agent that does not report it) a relation unknown
+// to the inventory is still analysed, as before.
+func TestIDXS033_PartialIndexListKeepsOldBehaviour(t *testing.T) {
+	in := input(`SELECT 1 FROM public.other WHERE x = $1`)
+	require.Len(t, Suggest(in).Suggestions, 1)
+	require.Zero(t, Suggest(in).Coverage.Skipped[NoteNotTable])
+}
+
+// A unique index on the equality columns already resolves to one row: a longer
+// key that starts with them is not suggested, one on other columns still is.
+func TestIDXS034_UniqueIndexServesLongerEqualityKey(t *testing.T) {
+	in := input(`SELECT 1 FROM res_partner WHERE id = $1 AND active = $2`)
+	pk, err := ParseIndexDef("CREATE UNIQUE INDEX res_partner_pkey ON public.res_partner USING btree (id)")
+	require.NoError(t, err)
+	in.Indexes[partner] = []IndexDef{pk}
+	require.Empty(t, Suggest(in).Suggestions)
+
+	nonUnique, err := ParseIndexDef("CREATE INDEX res_partner_id ON public.res_partner USING btree (id)")
+	require.NoError(t, err)
+	in.Indexes[partner] = []IndexDef{nonUnique}
+	require.Len(t, Suggest(in).Suggestions, 1, "a non-unique index on id does not make (id, active) pointless")
+
+	byName, err := ParseIndexDef("CREATE UNIQUE INDEX res_partner_ref_key ON public.res_partner USING btree (ref)")
+	require.NoError(t, err)
+	in.Indexes[partner] = []IndexDef{byName}
+	require.Len(t, Suggest(in).Suggestions, 1, "a unique key the statement does not filter on is no help")
 }

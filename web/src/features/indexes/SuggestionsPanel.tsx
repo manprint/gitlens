@@ -300,7 +300,7 @@ export function SuggestionsPanel({ instanceId, database }: SuggestionsPanelProps
   }
   if (response === undefined) return null
 
-  const coverageTitle = [coverageText(response.coverage), ...response.notes].join(' ')
+  const coverageTitle = coverageText(response.coverage)
   const missing = statisticsMissing(response)
   const suggestions = response.suggestions
   const strong = suggestions.filter((row) => row.verdict === 'strong').length
@@ -330,7 +330,16 @@ export function SuggestionsPanel({ instanceId, database }: SuggestionsPanelProps
     <IndexPanel
       actions={windowControl}
       description="Columns your statements filter or sort on that no index leads with, ranked by the share of statement time they involve."
-      notes={<PanelNote title={ESTIMATE_CALLOUT}>{ESTIMATE_CALLOUT}</PanelNote>}
+      notes={
+        <>
+          <PanelNote title={ESTIMATE_CALLOUT}>{ESTIMATE_CALLOUT}</PanelNote>
+          {response.notes.map((note) => (
+            <PanelNote key={note} title={noteLabel(note)}>
+              {noteLabel(note)}
+            </PanelNote>
+          ))}
+        </>
+      }
       stats={[
         { label: 'Suggestions', value: formatCount(suggestions.length) },
         { label: 'Strong', value: formatCount(strong) },

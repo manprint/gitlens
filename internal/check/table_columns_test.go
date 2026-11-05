@@ -26,7 +26,7 @@ func scrapeTableColumnsForTest(t *testing.T, rows [][]any) Result {
 }
 
 func columnsRow(table, columns string) []any {
-	return []any{"public." + table, "public", table, "r", 1250.0, int64(40), columns}
+	return []any{"public." + table, "public", table, "r", 1250.0, int64(40), columns, `["CREATE INDEX ` + table + `_ref ON public.` + table + ` USING btree (ref)"]`}
 }
 
 func TestTableColumns_Requirements(t *testing.T) {
@@ -42,7 +42,7 @@ func TestTableColumns_ReportsOneFactPerTable(t *testing.T) {
 	columns := `[{"name":"id","attnum":1,"type":"integer","typlen":4,"notnull":true,"n_distinct":-1,"null_frac":0,"avg_width":4},{"name":"note","attnum":2,"type":"text","typlen":-1,"notnull":false}]`
 	r := scrapeTableColumnsForTest(t, [][]any{columnsRow("orders", columns)})
 	require.False(t, r.Truncated)
-	require.Len(t, r.Facts, 1)
+	require.Len(t, r.Facts, 2)
 	fact := r.Facts[0]
 	require.Equal(t, tableColumnsFactKind, fact.Kind)
 	require.Equal(t, "public.orders", fact.Key)
@@ -66,7 +66,7 @@ func TestTableColumns_ReportsOneFactPerTable(t *testing.T) {
 // A table nobody analysed reports -1 tuples: the label carries it as it is and
 // the server treats it as unknown.
 func TestTableColumns_KeepsAnUnanalysedTableOutOfTheEstimates(t *testing.T) {
-	row := []any{"public.fresh", "public", "fresh", "r", -1.0, int64(0), "[]"}
+	row := []any{"public.fresh", "public", "fresh", "r", -1.0, int64(0), "[]", "[]"}
 	r := scrapeTableColumnsForTest(t, [][]any{row})
 	require.Equal(t, "-1", r.Facts[0].Labels["reltuples"])
 	require.JSONEq(t, "[]", string(r.Facts[0].ValueJSON))
@@ -86,5 +86,25 @@ func TestTableColumns_TruncatesAtTheLimit(t *testing.T) {
 	}
 	r := scrapeTableColumnsForTest(t, rows)
 	require.True(t, r.Truncated)
-	require.Len(t, r.Facts, tableColumnsFactLimit)
+	require.Len(t, r.Facts, 2*tableColumnsFactLimit)
+}
+
+// Every index of the table is reported, so the server can tell a column no
+// index leads with; a table without index reports an empty list, not nothing.
+func TestTableColumns_ReportsEveryIndexOfTheTable(t *testing.T) {
+	r := scrapeTableColumnsForTest(t, [][]any{
+		columnsRow("orders", "[]"),
+		{"public.bare", "public", "bare", "r", 5.0, int64(1), "[]", "[]"},
+	})
+	require.Len(t, r.Facts, 4)
+	idx := r.Facts[1]
+	require.Equal(t, tableIndexesFactKind, idx.Kind)
+	require.Equal(t, "public.orders", idx.Key)
+	require.Equal(t, map[string]string{"schemaname": "public", "relname": "orders"}, idx.Labels)
+	require.JSONEq(t, `["CREATE INDEX orders_ref ON public.orders USING btree (ref)"]`, string(idx.ValueJSON))
+	require.JSONEq(t, "[]", string(r.Facts[3].ValueJSON))
+	kind, ok := wire.LookupFactKind(tableIndexesFactKind)
+	require.True(t, ok)
+	require.Equal(t, "table_columns", kind.Check)
+	require.True(t, kind.Replace)
 }

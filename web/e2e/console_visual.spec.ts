@@ -3030,6 +3030,7 @@ test('VIS-040 index suggestions show the ground-truth column of res_partner, and
   expect(response.status()).toBe(200)
   const body = (await response.json()) as {
     suggestions: {
+      schema: string
       table: string
       columns: { name: string }[]
       weight_pct: number
@@ -3049,6 +3050,16 @@ test('VIS-040 index suggestions show the ground-truth column of res_partner, and
   expect(target!.est_size_bytes).not.toBeNull()
   // res_partner.name already has an index: it is never suggested first.
   expect(partner.filter((row) => row.columns[0]?.name === 'name')).toEqual([])
+  // Every Odoo table has a primary key on id, and a view is not a table: neither
+  // is ever suggested (the agent reports every index of each table).
+  expect(
+    body.suggestions.filter(
+      (row) =>
+        (row.schema === 'public' && row.columns[0]?.name === 'id') ||
+        row.table.startsWith('pg_stat_statements'),
+    ),
+    'a primary key or a view was suggested: the index list is incomplete',
+  ).toEqual([])
 
   for (const [width, height] of [
     [1920, 1080],

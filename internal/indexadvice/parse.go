@@ -388,7 +388,9 @@ func (p *parser) children(toks []token) {
 }
 
 func isCatalog(schema, name string) bool {
-	return schema == "pg_catalog" || schema == "information_schema" || strings.HasPrefix(name, "pg_") && schema == ""
+	// A pg_-prefixed relation in any schema is a catalog or an extension view such as
+	// pg_stat_statements installed in public: no index can be added to it.
+	return schema == "pg_catalog" || schema == "information_schema" || strings.HasPrefix(name, "pg_")
 }
 
 var joinWords = map[string]bool{"join": true, "inner": true, "left": true, "right": true, "full": true, "cross": true, "natural": true}

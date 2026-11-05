@@ -200,6 +200,18 @@ describe('SuggestionsPanel', () => {
     )
   })
 
+  it('SUGG-UI-015 shows the response notes beside the estimate callout, not in the coverage line', async () => {
+    const note =
+      'The agent does not report every index definition: an index that already exists may be suggested again.'
+    render({ ...base, notes: [note] })
+    await flushNetwork(30)
+
+    expect(screen.getByTestId('suggestion-coverage')).not.toHaveTextContent(note)
+    expect(screen.getAllByRole('status').some((status) => status.textContent?.includes(note))).toBe(
+      true,
+    )
+  })
+
   it('SUGG-UI-010 names the verdict in words, not only by colour', async () => {
     const rows = [
       suggestion('aaa', { verdict: 'write_heavy', weight_pct: 5 }),

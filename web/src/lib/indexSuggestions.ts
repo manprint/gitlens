@@ -53,7 +53,7 @@ export function verdictLabel(verdict: string): string {
 
 /** The rule behind the verdict, shown as help (a documented heuristic, not a measurement). */
 export const VERDICT_RULE =
-  'Verdict is read/write ratio of the table: calls per second of the statements that use the key divided by the row changes per second that must touch an index (inserts, deletes, and updates that are not heap-only). 10 or more is strong, 1 or more is moderate, below 1 is write-heavy.'
+  'Verdict is read/write ratio of the table: calls per second of the statements that use the key divided by the row changes per second that must touch an index (inserts, deletes, and updates that are not heap-only). 10 or more is strong, 1 or more is moderate, below 1 is write-heavy. A table that takes no index writes is never write-heavy: at least moderate.'
 
 export function verdictVariant(verdict: string): 'success' | 'warning' | 'secondary' {
   if (verdict === 'strong') return 'success'
@@ -102,6 +102,7 @@ const SKIP_LABELS: Readonly<Record<string, string>> = {
   parse_error: 'could not be parsed',
   unsupported_statement: 'not a query on a table',
   catalog: 'system catalogs only',
+  not_table: 'not an ordinary table',
   small_table: 'small table',
 }
 

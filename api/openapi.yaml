@@ -1189,7 +1189,7 @@ components:
         statements_analysed: { type: integer, format: int32 }
         skipped:
           type: object
-          description: Number of statements per skip reason (for example no_text, expression, parse_error). A statement can have several reasons, and an analysed statement can have skipped parts, so the counts do not add up to statements_considered minus statements_analysed.
+          description: Number of statements per skip reason (for example no_text, expression, parse_error, catalog, small_table, not_table). not_table is a relation that is not an ordinary table of the database's inventory (a view, a foreign table, or a table past the 1000-table inventory limit), reported only for a database whose agent lists every index. A statement can have several reasons, and an analysed statement can have skipped parts, so the counts do not add up to statements_considered minus statements_analysed.
           additionalProperties: { type: integer, format: int32 }
     IndexSuggestion:
       type: object
@@ -1240,7 +1240,7 @@ components:
             delete_rate: { type: number, format: double }
             hot_update_ratio: { type: number, format: double }
         read_write_ratio: { type: number, format: double }
-        verdict: { type: string, enum: [strong, moderate, write_heavy] }
+        verdict: { type: string, enum: [strong, moderate, write_heavy], description: 'From the read/write ratio of the table (calls per second of the statements that use the key over the row changes per second that touch an index): 10 or more is strong, 1 or more moderate, below 1 write_heavy. Low selectivity lowers it one step. A table that takes no index writes, or whose writes are unknown, is never write_heavy: at least moderate.' }
         confidence: { type: string, enum: [high, medium, low] }
         notes:
           type: array

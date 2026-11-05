@@ -45,6 +45,10 @@ type indexSuggestionData struct {
 	Indexes         map[indexadvice.Key][]indexadvice.IndexDef
 	// ColumnFacts is false when no table_columns fact was reported.
 	ColumnFacts bool
+	// IndexesComplete marks the databases that reported table_indexes facts:
+	// their index list is complete. Others only know the index_def facts of
+	// the indexes the agent selected, so an existing index may be missing.
+	IndexesComplete map[string]bool
 }
 
 // indexSuggestionStore loads the data of one instance; found is false for an
@@ -160,7 +164,7 @@ func (a *API) handleIndexSuggestions(w http.ResponseWriter, r *http.Request) {
 func buildIndexSuggestions(id uuid.UUID, window time.Duration, limit int, data indexSuggestionData, now time.Time) indexSuggestionsJSON {
 	out := indexadvice.Suggest(indexadvice.Input{
 		Window: window, Statements: data.Statements, TotalExecMsRate: data.TotalExecMsRate,
-		Tables: data.Tables, Indexes: data.Indexes, Limit: limit,
+		Tables: data.Tables, Indexes: data.Indexes, IndexesComplete: data.IndexesComplete, Limit: limit,
 	})
 	out.Coverage.StatementsConsidered += data.NoText
 	if data.NoText > 0 {
@@ -172,6 +176,9 @@ func buildIndexSuggestions(id uuid.UUID, window time.Duration, limit int, data i
 		notes = append(notes, "No statement data in the window: check that pg_stat_statements is installed and reported (see the readiness hint).")
 	case !data.ColumnFacts:
 		notes = append(notes, "The table_columns check has not reported: selectivity and sizes are unknown, so every suggestion has low confidence.")
+	}
+	if data.ColumnFacts && len(data.IndexesComplete) == 0 && out.Coverage.StatementsConsidered > 0 {
+		notes = append(notes, "The agent does not report every index definition: an index that already exists may be suggested again.")
 	}
 	return indexSuggestionsJSON{
 		InstanceID: id.String(), GeneratedAt: now.UTC(), WindowSeconds: int(window / time.Second),
@@ -220,6 +227,12 @@ SELECT datname, COALESCE(labels->>'schemaname', ''), COALESCE(labels->>'relname'
  WHERE tenant_id = 'default' AND instance_id = $1 AND kind = 'index_def' AND ($2 = '' OR datname = $2)
  ORDER BY datname, key`
 
+	indexSuggestionTableIndexesSQL = `
+	SELECT datname, COALESCE(labels->>'schemaname', ''), COALESCE(labels->>'relname', ''), COALESCE(value_json::text, '[]')
+	FROM object_facts
+	WHERE tenant_id = 'default' AND instance_id = $1 AND kind = 'table_indexes' AND ($2 = '' OR datname = $2)
+	ORDER BY datname, key`
+
 	indexSuggestionColumnsSQL = `
 SELECT datname, COALESCE(labels->>'schemaname', ''), COALESCE(labels->>'relname', ''), COALESCE(labels->>'reltuples', ''), COALESCE(value_json::text, '[]')
   FROM object_facts
@@ -262,6 +275,7 @@ func (s pgIndexSuggestionStore) IndexSuggestionData(ctx context.Context, id uuid
 		TotalExecMsRate: map[string]float64{},
 		Tables:          map[indexadvice.Key]indexadvice.TableMeta{},
 		Indexes:         map[indexadvice.Key][]indexadvice.IndexDef{},
+		IndexesComplete: map[string]bool{},
 	}
 	secs := window.Seconds()
 
@@ -292,6 +306,37 @@ func (s pgIndexSuggestionStore) IndexSuggestionData(ctx context.Context, id uuid
 		return data, false, err
 	}
 
+	// table_indexes lists every index of a table: a table whose list is empty is
+	// known to have none. Its databases ignore the partial index_def facts.
+	known := map[indexadvice.Key]bool{}
+	rows, err = s.pool.Query(ctx, indexSuggestionTableIndexesSQL, id, database)
+	if err != nil {
+		return data, false, err
+	}
+	for rows.Next() {
+		var db, schema, table, defs string
+		if err := rows.Scan(&db, &schema, &table, &defs); err != nil {
+			rows.Close()
+			return data, false, err
+		}
+		var list []string
+		if json.Unmarshal([]byte(defs), &list) != nil {
+			continue
+		}
+		key := indexadvice.Key{Database: db, Schema: schema, Table: table}
+		known[key] = true
+		data.IndexesComplete[db] = true
+		for _, def := range list {
+			if parsed, perr := indexadvice.ParseIndexDef(def); perr == nil {
+				data.Indexes[key] = append(data.Indexes[key], parsed)
+			}
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return data, false, err
+	}
+
 	rows, err = s.pool.Query(ctx, indexSuggestionIndexesSQL, id, database)
 	if err != nil {
 		return data, false, err
@@ -301,6 +346,9 @@ func (s pgIndexSuggestionStore) IndexSuggestionData(ctx context.Context, id uuid
 		if err := rows.Scan(&db, &schema, &table, &name, &def); err != nil {
 			rows.Close()
 			return data, false, err
+		}
+		if data.IndexesComplete[db] {
+			continue
 		}
 		parsed, perr := indexadvice.ParseIndexDef(def)
 		if perr != nil {
@@ -337,7 +385,10 @@ func (s pgIndexSuggestionStore) IndexSuggestionData(ctx context.Context, id uuid
 		if json.Unmarshal([]byte(columns), &facts) != nil {
 			continue
 		}
-		meta := indexadvice.TableMeta{Columns: make(map[string]indexadvice.Column, len(facts))}
+		meta := indexadvice.TableMeta{
+			Columns:      make(map[string]indexadvice.Column, len(facts)),
+			IndexesKnown: known[indexadvice.Key{Database: db, Schema: schema, Table: table}],
+		}
 		for _, f := range facts {
 			col := indexadvice.Column{Type: f.Type, TypLen: f.TypLen, NDistinct: f.NDistinct}
 			if f.AvgWidth != nil {

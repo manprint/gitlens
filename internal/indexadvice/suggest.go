@@ -23,6 +23,7 @@ const (
 // Notes carried by a suggestion or counted in Coverage.Skipped.
 const (
 	NoteSmallTable         = "small_table"
+	NoteNotTable           = "not_table"
 	NoteColumnUnknown      = "column_unknown"
 	NoteTypeNotBtree       = "type_not_btree"
 	NoteSizeUnknown        = "size_unknown"
@@ -74,6 +75,9 @@ type TableMeta struct {
 	Columns    map[string]Column
 	Writes     Writes
 	HasWrites  bool
+	// IndexesKnown says the table's index definitions are the complete list
+	// (the table_indexes fact), not only the indexes the agent selected.
+	IndexesKnown bool
 }
 
 // Input of Suggest.
@@ -83,6 +87,11 @@ type Input struct {
 	TotalExecMsRate map[string]float64
 	Tables          map[Key]TableMeta
 	Indexes         map[Key][]IndexDef
+	// IndexesComplete marks the databases whose tables report every index
+	// (TableMeta.IndexesKnown). There, a relation that is not such a table (a
+	// view, a foreign table, a table past the inventory limit) is skipped as
+	// not_table: no complete index list could rule out an existing index.
+	IndexesComplete map[string]bool
 	Limit           int
 }
 
@@ -201,9 +210,9 @@ func Suggest(in Input) Output {
 		}
 		placed := false
 		for _, group := range groupPredicates(an.Predicates) {
-			c, small := buildCandidate(in, st.Database, group)
-			if small {
-				skipped[NoteSmallTable] = true
+			c, why := buildCandidate(in, st.Database, group)
+			if why != "" {
+				skipped[why] = true
 			}
 			if c == nil {
 				continue
@@ -316,10 +325,14 @@ func resolve(in Input, db, schema, table string) Key {
 }
 
 // buildCandidate applies the key rules to the predicates of one table in one
-// query scope. The second result is true when the table was skipped as small.
-func buildCandidate(in Input, db string, g predGroup) (*candidate, bool) {
+// query scope. The second result is the skip reason (small_table, not_table) or
+// empty.
+func buildCandidate(in Input, db string, g predGroup) (*candidate, string) {
 	key := resolve(in, db, g.schema, g.table)
 	meta, hasMeta := in.Tables[key]
+	if in.IndexesComplete[db] && (!hasMeta || !meta.IndexesKnown) {
+		return nil, NoteNotTable
+	}
 	// n_live_tup is 0 after a statistics reset or restore while reltuples (planner
 	// estimate) is right: the small-table rule reads reltuples first, as the size does.
 	rows := meta.RelTuples
@@ -327,7 +340,7 @@ func buildCandidate(in Input, db string, g predGroup) (*candidate, bool) {
 		rows = meta.LiveTuples
 	}
 	if hasMeta && meta.HasCounts && rows < SmallTableRows {
-		return nil, true
+		return nil, NoteSmallTable
 	}
 	c := &candidate{key: key, notes: map[string]bool{}, scope: g.scope, strict: map[string]bool{}}
 	usable := func(name string) bool {
@@ -398,11 +411,11 @@ func buildCandidate(in Input, db string, g predGroup) (*candidate, bool) {
 		}
 	}
 	if len(cols) == 0 {
-		return nil, false
+		return nil, ""
 	}
 	c.cols = cols
 	c.eqLead = min(len(eq), len(cols))
-	return c, false
+	return c, ""
 }
 
 // selectivityRank orders columns by distinct count; unknown ranks last.
@@ -432,6 +445,11 @@ func selectivityRank(meta TableMeta, name string) float64 {
 func coverage(c *candidate, defs []IndexDef, text string) (bool, []string) {
 	var overlap []string
 	for _, def := range defs {
+		if uniqueServes(def, c, text) {
+			return true, nil
+		}
+	}
+	for _, def := range defs {
 		if len(def.Columns) == 0 || def.Columns[0].Expr || def.Columns[0].Name != c.cols[0].Name {
 			continue
 		}
@@ -457,6 +475,26 @@ func coverage(c *candidate, defs []IndexDef, text string) (bool, []string) {
 	}
 	sort.Strings(overlap)
 	return false, overlap
+}
+
+// uniqueServes reports whether a unique btree index already resolves the
+// candidate's equality predicates to at most one row: every column of the index
+// is an equality column of the candidate. Extra key columns after it add
+// nothing (id = $1 AND active = $2 is served by the primary key on id).
+func uniqueServes(def IndexDef, c *candidate, text string) bool {
+	if !def.Unique || len(def.Columns) == 0 || (def.Method != "" && !strings.EqualFold(def.Method, "btree")) {
+		return false
+	}
+	eq := map[string]bool{}
+	for _, col := range c.cols[:min(c.eqLead, len(c.cols))] {
+		eq[col.Name] = true
+	}
+	for _, col := range def.Columns {
+		if col.Expr || !eq[col.Name] {
+			return false
+		}
+	}
+	return partialHolds(def.Where, c, text)
 }
 
 func partialHolds(where string, c *candidate, text string) bool {

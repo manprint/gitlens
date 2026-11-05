@@ -58,12 +58,11 @@ func seedPartnerTable(t *testing.T, pool *pgxpool.Pool, instance uuid.UUID, clus
 	}
 	seedSearchFact(t, pool, instance, cluster, "odoo", "table_columns", "public.res_partner",
 		map[string]string{"schemaname": "public", "relname": "res_partner", "relkind": "r", "reltuples": "50000", "relpages": "900"}, "", columns)
-	seedSearchFact(t, pool, instance, cluster, "odoo", "index_def", "public.res_partner_pkey",
-		map[string]string{"schemaname": "public", "relname": "res_partner", "indexrelname": "res_partner_pkey"},
-		"CREATE UNIQUE INDEX res_partner_pkey ON public.res_partner USING btree (id)", nil)
-	seedSearchFact(t, pool, instance, cluster, "odoo", "index_def", "public.res_partner_name_idx",
-		map[string]string{"schemaname": "public", "relname": "res_partner", "indexrelname": "res_partner_name_idx"},
-		"CREATE INDEX res_partner_name_idx ON public.res_partner USING btree (name)", nil)
+	seedSearchFact(t, pool, instance, cluster, "odoo", "table_indexes", "public.res_partner",
+		map[string]string{"schemaname": "public", "relname": "res_partner"}, "", []string{
+			"CREATE UNIQUE INDEX res_partner_pkey ON public.res_partner USING btree (id)",
+			"CREATE INDEX res_partner_name_idx ON public.res_partner USING btree (name)",
+		})
 	_, err := pool.Exec(context.Background(), `INSERT INTO metrics_tables (ts, cluster_id, instance_id, datname, schemaname, relname,
 			n_live_tup, reltuples, n_tup_ins, n_tup_upd, n_tup_del, n_tup_hot_upd)
 		VALUES ($1, $2, $3, 'odoo', 'public', 'res_partner', 50000, 50000, 2, 8, 0.5, 6)`, ts, cluster, instance)
@@ -156,4 +155,29 @@ func TestIDXEINT003_QueryTimeBudget(t *testing.T) {
 	require.NotEmpty(t, resp.Suggestions)
 	require.Less(t, took, budget, fmt.Sprintf("took %s", took))
 	require.False(t, math.IsNaN(resp.Suggestions[0].WeightPct))
+}
+
+// IDXE-INT-004: the complete index list stops an index that exists from being
+// suggested again, and a relation that is not a table of the inventory (a view
+// here) is skipped, not suggested.
+func TestIDXEINT004_CompleteIndexListAndNonTable(t *testing.T) {
+	pool := getSharedPool(t)
+	instance, cluster := seedSearchInstance(t, pool)
+	now := time.Now().UTC()
+	times := []time.Time{now.Add(-30 * time.Minute), now.Add(-10 * time.Minute)}
+	seedPartnerTable(t, pool, instance, cluster, now.Add(-5*time.Minute))
+	_, err := pool.Exec(context.Background(), `INSERT INTO metrics_tables (ts, cluster_id, instance_id, datname, schemaname, relname,
+			n_live_tup, reltuples, n_tup_ins, n_tup_upd, n_tup_del, n_tup_hot_upd)
+		VALUES ($1, $2, $3, 'odoo', 'public', 'some_view', 50000, 50000, 0, 0, 0, 0)`, now.Add(-5*time.Minute), cluster, instance)
+	require.NoError(t, err)
+	seedSuggestionStatement(t, pool, instance, cluster, 1, 50, 10, `SELECT 1 FROM res_partner WHERE id = $1`, times...)
+	seedSuggestionStatement(t, pool, instance, cluster, 2, 30, 5, `SELECT 1 FROM public.some_view WHERE a = $1`, times...)
+	seedSuggestionStatement(t, pool, instance, cluster, 3, 20, 4, `SELECT 1 FROM public.pg_stat_statements WHERE queryid = $1`, times...)
+
+	resp, _ := suggestionsGet(t, pool, instance, "?window=1h&database=odoo")
+	require.Empty(t, resp.Suggestions)
+	require.Equal(t, 3, resp.Coverage.StatementsConsidered)
+	require.Equal(t, 1, resp.Coverage.Skipped["not_table"])
+	require.Equal(t, 1, resp.Coverage.Skipped["catalog"])
+	require.Empty(t, resp.Notes, "the list is complete: no caveat")
 }

@@ -2365,15 +2365,11 @@
    "sql": "SELECT stats_reset FROM \"public\".\"pg_stat_statements_info\"",
    "expected": {
     "statement": "select",
-    "tables": [
-     {
-      "schema": "public",
-      "name": "pg_stat_statements_info",
-      "scope": 1
-     }
-    ],
+    "tables": [],
     "predicates": [],
-    "skipped": []
+    "skipped": [
+     "catalog"
+    ]
    }
   },
   {
@@ -2732,23 +2728,10 @@
    "sql": "WITH agg AS (\n    SELECT queryid,\n           sum(calls)::bigint             AS calls,\n           sum(total_exec_time)::float8   AS total_exec_time,\n           sum(rows)::bigint              AS rows,\n           sum(shared_blks_hit)::bigint   AS shared_blks_hit,\n           sum(shared_blks_read)::bigint  AS shared_blks_read,\n           sum(wal_bytes)::bigint         AS wal_bytes,\n           sum(temp_blks_written)::bigint AS temp_blks_written,\n           min(query)                     AS query\n      FROM \"public\".\"pg_stat_statements\"\n     WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())\n       AND queryid IS NOT NULL\n     GROUP BY queryid\n),\nranked AS (\n    (SELECT queryid FROM agg ORDER BY total_exec_time DESC LIMIT $1)\n    UNION\n    (SELECT queryid FROM agg ORDER BY calls DESC LIMIT $2)\n)\nSELECT a.queryid, a.calls, a.total_exec_time, a.rows,\n       a.shared_blks_hit, a.shared_blks_read, a.wal_bytes, a.temp_blks_written,\n       CASE WHEN octet_length(a.query) \u003c= $3 THEN a.query END,\n       (SELECT count(*) FROM agg)\n  FROM agg a\n  JOIN ranked USING (queryid)\n ORDER BY a.queryid",
    "expected": {
     "statement": "with",
-    "tables": [
-     {
-      "schema": "public",
-      "name": "pg_stat_statements",
-      "scope": 1
-     }
-    ],
-    "predicates": [
-     {
-      "schema": "public",
-      "table": "pg_stat_statements",
-      "column": "dbid",
-      "kind": "eq",
-      "scope": 1
-     }
-    ],
+    "tables": [],
+    "predicates": [],
     "skipped": [
+     "catalog",
      "catalog"
     ]
    }

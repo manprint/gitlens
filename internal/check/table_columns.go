@@ -16,6 +16,12 @@ func init() { Register(&tableColumnsCheck{}) }
 // a dropped table, or a dropped column, stops being reported.
 const tableColumnsFactKind = "table_columns"
 
+// tableIndexesFactKind is the fact kind of one table's valid index definitions,
+// reported with the table's columns. Unlike index_def, which covers only the
+// indexes index_stats selects, it lists every index of the table, so the
+// server can tell that no index leads with a column.
+const tableIndexesFactKind = "table_indexes"
+
 // tableColumnsFactLimit bounds the facts of one database, largest tables
 // first. The inventory sizes the indexes the server suggests, and a table
 // outside the limit gets a suggestion without a size estimate.
@@ -29,7 +35,8 @@ const tableColumnsFactLimit = 1000
 // so the statistics are left out and the inventory still reports every
 // column; the server then says the selectivity is unknown. The size of a table
 // is relpages and reltuples as of the last VACUUM or ANALYZE: only catalogs
-// are read, no relation is measured or locked. A view or a foreign table has
+// are read, no relation is measured or locked. The last column is the JSON
+// array of the table's valid index definitions (pg_get_indexdef). A view or a foreign table has
 // no index to size, so only ordinary, partitioned and materialized tables are
 // listed.
 const tableColumnsQuery = `WITH st AS MATERIALIZED (
@@ -50,7 +57,10 @@ SELECT pg_catalog.quote_ident(n.nspname) || '.' || pg_catalog.quote_ident(c.reln
                    FROM pg_catalog.pg_attribute a
                    JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
                    LEFT JOIN st ON st.schemaname = n.nspname AND st.tablename = c.relname AND st.attname = a.attname
-                  WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped), '[]')
+                  WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped), '[]'),
+       COALESCE((SELECT pg_catalog.jsonb_agg(pg_catalog.pg_get_indexdef(i.indexrelid) ORDER BY i.indexrelid)::pg_catalog.text
+                   FROM pg_catalog.pg_index i
+                  WHERE i.indrelid = c.oid AND i.indisvalid), '[]')
   FROM pg_catalog.pg_class c
   JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
  WHERE c.relkind IN ('r', 'p', 'm')
@@ -89,13 +99,14 @@ func (c *tableColumnsCheck) Scrape(ctx context.Context, t Target) (Result, error
 	defer rows.Close()
 	var result Result
 	for rows.Next() {
-		var key, schema, table, kind, columns string
+		var key, schema, table, kind, columns, indexes string
 		var tuples float64
 		var pages int64
-		if err := rows.Scan(&key, &schema, &table, &kind, &tuples, &pages, &columns); err != nil {
+		if err := rows.Scan(&key, &schema, &table, &kind, &tuples, &pages, &columns, &indexes); err != nil {
 			return Result{}, err
 		}
-		if len(result.Facts) == tableColumnsFactLimit {
+		// Two facts per table: its columns and its indexes.
+		if len(result.Facts) == 2*tableColumnsFactLimit {
 			result.Truncated = true
 			break
 		}
@@ -106,6 +117,9 @@ func (c *tableColumnsCheck) Scrape(ctx context.Context, t Target) (Result, error
 				"reltuples": strconv.FormatFloat(tuples, 'f', -1, 64),
 				"relpages":  strconv.FormatInt(pages, 10),
 			},
+		}, Fact{
+			Kind: tableIndexesFactKind, Key: key, ValueJSON: json.RawMessage(indexes),
+			Labels: map[string]string{"schemaname": schema, "relname": table},
 		})
 	}
 	if err := rows.Err(); err != nil {

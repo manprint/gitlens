@@ -48,14 +48,14 @@ func suggestionsFixture() indexSuggestionData {
 		},
 		TotalExecMsRate: map[string]float64{"odoo": 100},
 		Tables: map[indexadvice.Key]indexadvice.TableMeta{key: {
-			RelTuples: 50000, LiveTuples: 50000, HasCounts: true, HasWrites: true,
+			RelTuples: 50000, LiveTuples: 50000, HasCounts: true, HasWrites: true, IndexesKnown: true,
 			Columns: map[string]indexadvice.Column{
 				"ref": {Type: "character varying", AvgWidth: 12, NDistinct: &nd}, "name": {Type: "character varying", AvgWidth: 20},
 			},
 			Writes: indexadvice.Writes{Ins: 0.5, Upd: 1, Del: 0.1, HotUpd: 0.5},
 		}},
 		Indexes:     map[indexadvice.Key][]indexadvice.IndexDef{key: {{Name: "res_partner_name_idx", Table: "res_partner", Method: "btree", Columns: []indexadvice.IndexColumn{{Name: "name"}}}}},
-		ColumnFacts: true,
+		ColumnFacts: true, IndexesComplete: map[string]bool{"odoo": true},
 	}
 }
 
@@ -152,7 +152,7 @@ func TestIDXE005_DatabaseFilterReachesTheStore(t *testing.T) {
 	rec := retentionRequest(t, &API{indexSuggestions: st}, http.MethodGet, "/api/v1/instances/"+id.String()+"/index-suggestions?database=odoo%27%3B+DROP+TABLE+x%3B--", "")
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "odoo'; DROP TABLE x;--", st.database, "passed through as a bound parameter, never into SQL text")
-	for _, sql := range []string{indexSuggestionInstanceSQL, indexSuggestionStatementsSQL, indexSuggestionIndexesSQL, indexSuggestionColumnsSQL, indexSuggestionTablesSQL} {
+	for _, sql := range []string{indexSuggestionInstanceSQL, indexSuggestionStatementsSQL, indexSuggestionIndexesSQL, indexSuggestionTableIndexesSQL, indexSuggestionColumnsSQL, indexSuggestionTablesSQL} {
 		require.NotContains(t, sql, "%s")
 		require.NotContains(t, sql, "Sprintf")
 	}
@@ -163,7 +163,7 @@ func TestIDXE006_CreateStatementQuoting(t *testing.T) {
 	id := uuid.New()
 	data := suggestionsFixture()
 	data.Statements = []indexadvice.Stmt{{Database: "odoo", QueryID: 1, Text: `SELECT 1 FROM "Order" WHERE "user" = $1`, CallsRate: 1, ExecMsRate: 10}}
-	data.Tables = map[indexadvice.Key]indexadvice.TableMeta{}
+	data.Tables = map[indexadvice.Key]indexadvice.TableMeta{{Database: "odoo", Schema: "public", Table: "Order"}: {IndexesKnown: true}}
 	st := &stubIndexSuggestions{known: map[uuid.UUID]indexSuggestionData{id: data}}
 	rec := retentionRequest(t, &API{indexSuggestions: st}, http.MethodGet, "/api/v1/instances/"+id.String()+"/index-suggestions", "")
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -189,6 +189,19 @@ func TestIDXE008_NoTextAndMissingColumns(t *testing.T) {
 	require.Equal(t, 3, got.Coverage.Skipped[skipNoText])
 	require.Len(t, got.Notes, 1)
 	require.Contains(t, got.Notes[0], "table_columns")
+}
+
+// An agent that does not report table_indexes: the list may miss an index, and
+// the response says so.
+func TestIDXE009_PartialIndexListIsDisclosed(t *testing.T) {
+	t.Parallel()
+	data := suggestionsFixture()
+	data.IndexesComplete = nil
+	got := buildIndexSuggestions(uuid.New(), time.Hour, 20, data, time.Now())
+	require.Len(t, got.Notes, 1)
+	require.Contains(t, got.Notes[0], "every index definition")
+	got = buildIndexSuggestions(uuid.New(), time.Hour, 20, suggestionsFixture(), time.Now())
+	require.Empty(t, got.Notes, "a complete list needs no caveat")
 }
 
 // requireNoNulls fails on a null anywhere except the two nullable fields of the

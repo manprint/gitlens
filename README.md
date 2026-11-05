@@ -396,8 +396,13 @@ statements behind it; expanding a row shows a `CREATE INDEX CONCURRENTLY`
 statement to copy. The suggestions are estimates from heuristics. The coverage
 line says how many statements were analysed and, per reason, how many were
 skipped (a statement can have several reasons, so they do not add up to the
-rest). A table with no writes is never called write-heavy, and pglens never
-creates an index.
+rest). A table with no index writes is never called write-heavy, and pglens never
+creates an index. The agent lists every valid index of each table (the
+`table_indexes` fact, with the table's columns, hourly), so an index that
+exists is never suggested again; a relation that is not an ordinary table
+(a view) is skipped as `not_table`. An older agent only reports some index
+definitions: the response then carries a note saying an existing index may be
+suggested again.
 
 The page's Search everything panel searches all that pglens collected for the
 server in the selected range (`GET /api/v1/instances/{id}/search`), grouped as Indexes,
@@ -737,7 +742,9 @@ Security and operational boundaries:
   monitored database, the columns of its largest tables (up to 1,000), with their
   type, width and NOT NULL, and the planner's `n_distinct`, `null_frac` and
   `avg_width` where the role may read `pg_stats` (T1); the server uses them to
-  size and rank index suggestions. `extensions` reports, hourly, each
+  size and rank index suggestions. The same check reports each of those
+  tables' valid index definitions (`pg_get_indexdef`), so a suggestion never
+  repeats an index that exists. `extensions` reports, hourly, each
   database's extensions with their version and the version the server's
   installed packages would update them to; `postgis_columns` reports, hourly,
   the geometry and geography columns of each database that has PostGIS, with
@@ -1363,8 +1370,9 @@ the tracked statements (at most 5000, heaviest first), and for each key that no
 existing btree index already leads with reports its `weight_pct` (share of the
 database's statement time involving it, an upper bound of the saving), an
 estimated size, the write rates of the table, a `verdict` (`strong`,
-`moderate`, `write_heavy`), a `confidence` and a `CREATE INDEX CONCURRENTLY`
-text to review. Everything is an estimate and pglens never runs the statement;
+`moderate`, `write_heavy`: ratio 10 or more, 1 or more, below 1; a table
+that takes no index writes is at least `moderate`), a `confidence` and a
+`CREATE INDEX CONCURRENTLY` text to review. Everything is an estimate and pglens never runs the statement;
 `coverage` states how many statements were analysed and why the rest were
 skipped.
 
