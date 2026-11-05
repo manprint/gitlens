@@ -3110,7 +3110,7 @@ test('VIS-040 index suggestions show the ground-truth column of res_partner, and
   browserErrors.assertClean()
 })
 
-test('VIS-041 an expanded Odoo index shows its scan and size history, and Index tax matches PostgreSQL for res_partner', async ({
+test('VIS-041 an expanded Odoo index shows its scan and size history, and Index tax matches PostgreSQL for the reported indexes of res_partner', async ({
   api,
   signedInPage: page,
 }) => {
@@ -3136,6 +3136,8 @@ test('VIS-041 an expanded Odoo index shows its scan and size history, and Index 
       item.datname === 'odoo' && item.schemaname === 'public' && item.relname === 'res_partner',
   )
   expect(indexes.length, 'no res_partner index reported').toBeGreaterThan(1)
+  const indexesTruncated =
+    ((await indexesResponse.json()) as { truncated?: boolean }).truncated === true
   const target = indexes.find((item) => !item.is_primary) ?? indexes[0]!
 
   // The history endpoint: at least one stored point for a 6 h window.
@@ -3177,8 +3179,10 @@ test('VIS-041 an expanded Odoo index shows its scan and size history, and Index 
     await page.screenshot({ path: `${ARTIFACT_DIR}/vis-041-index-detail-${width}.png` })
   }
 
-  // Index tax against PostgreSQL's own sizes, within 1 %. The agent reports a
-  // bounded number of indexes per table: the truth is the size of those indexes.
+  // Index tax against PostgreSQL's own sizes, within 1 %. The agent reports only
+  // its largest indexes per database (checks.index_stats.top_n), so the truth is
+  // the size of the indexes reported; the whole table is never above pg_indexes_size.
+  const wholeIndexes = Number(await query(`SELECT pg_indexes_size('public.res_partner')`))
   const names = indexes.map((item) => `'${item.indexrelname.replace(/'/g, "''")}'`).join(',')
   const [indexesSize = '', heapSize = ''] = (
     await query(
@@ -3190,6 +3194,7 @@ test('VIS-041 an expanded Odoo index shows its scan and size history, and Index 
   expect(truthIndexes).toBeGreaterThan(0)
   const reported = indexes.reduce((sum, item) => sum + item.index_bytes, 0)
   expect(Math.abs(reported - truthIndexes) / truthIndexes).toBeLessThan(0.01)
+  expect(reported).toBeLessThanOrEqual(wholeIndexes * 1.01)
   const tablesResponse = await api.get(
     `/api/v1/instances/${instanceId}/tables?limit=500&order_by=size`,
   )
@@ -3202,6 +3207,7 @@ test('VIS-041 an expanded Odoo index shows its scan and size history, and Index 
   expect(partner, 'res_partner is not among the 500 largest tables').toBeDefined()
   expect(Math.abs(partner!.table_bytes - truthHeap) / truthHeap).toBeLessThan(0.01)
 
+  await page.setViewportSize({ width: 1920, height: 1080 })
   await page.goto(`/indexes?instance=${instanceId}&tab=tax&db=odoo`)
   const tax = page.getByRole('table', { name: 'Index tax' })
   await expect(tax).toBeVisible({ timeout: 30_000 })
@@ -3210,6 +3216,9 @@ test('VIS-041 an expanded Odoo index shows its scan and size history, and Index 
   await expect(row).toBeVisible()
   await expect(row).toContainText(`${indexes.length}`)
   await expect(page.getByText(/Every figure on this tab is an estimate/).first()).toBeVisible()
+  if (indexesTruncated) {
+    await expect(page.getByText('The list is incomplete.').first()).toBeVisible()
+  }
   await page.screenshot({ path: `${ARTIFACT_DIR}/vis-041-index-tax.png` })
 
   await assertFits(page, api, fullHdRoute('/indexes?tab=tax'))

@@ -60,14 +60,19 @@ const TABLES = [
   }),
 ]
 
-function render(items: unknown[] = ITEMS, tables: unknown[] = TABLES, route = '/indexes?tab=tax') {
+function render(
+  items: unknown[] = ITEMS,
+  tables: unknown[] = TABLES,
+  route = '/indexes?tab=tax',
+  truncated = false,
+) {
   server.use(
     ok('getClusters', clusters),
     ok('getInstanceIndexes', {
       instance_id: INSTANCE_ID,
       items,
-      truncated: false,
-      relations_not_reported: null,
+      truncated,
+      relations_not_reported: truncated ? 1 : null,
     }),
     ok('getInstanceTables', {
       instance_id: INSTANCE_ID,
@@ -143,6 +148,23 @@ describe('IndexTaxPanel', () => {
     await flushNetwork(30)
 
     expect(screen.getByText('No indexes to show')).toBeInTheDocument()
+  })
+
+  it('TAXPANEL-006 labels the figures as covering the reported indexes only when the list is cut', async () => {
+    render(ITEMS, TABLES, '/indexes?tab=tax', true)
+    await flushNetwork(30)
+
+    expect(screen.getByText('The list is incomplete.')).toBeInTheDocument()
+    expect(screen.getByRole('article', { name: 'Index size' })).toHaveTextContent(
+      'indexes reported',
+    )
+  })
+
+  it('TAXPANEL-007 shows no incomplete note when every index is reported', async () => {
+    render()
+    await flushNetwork(30)
+
+    expect(screen.queryByText('The list is incomplete.')).not.toBeInTheDocument()
   })
 
   it('TAXPANEL-005 has no accessibility violations', async () => {

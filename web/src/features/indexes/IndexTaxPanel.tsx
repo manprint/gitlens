@@ -138,7 +138,13 @@ interface IndexTaxPanelProps {
   /** The indexes in scope: the page's database filter already applied. */
   rows: readonly IndexRow[]
   database: string
+  /** The agent or the API cut the index list: every figure covers the reported indexes only. */
+  incomplete?: boolean
 }
+
+const INCOMPLETE_DETAIL =
+  'The agent reports only its busiest and largest indexes per database (checks.index_stats.top_n, 50 by default). Each table shows the indexes reported, so its index size and write amplification can be lower than the real ones, and tables with no reported index are missing. Raise top_n in the agent configuration to see more.'
+const INCOMPLETE = `The list is incomplete. ${INCOMPLETE_DETAIL}`
 
 const ESTIMATE =
   'Every figure on this tab is an estimate. Write amplification is the inserts, deletes and updates that are not heap-only per second, times the indexes of the table. Unused size counts indexes with no scan: the advisor stands behind it, or it rests on raw counters. Unique and primary key indexes are never counted.'
@@ -147,7 +153,12 @@ const ESTIMATE =
  * What the indexes of each table cost, computed here from the index and table
  * statistics already loaded: pglens runs no statement.
  */
-export function IndexTaxPanel({ instanceId, rows, database }: IndexTaxPanelProps) {
+export function IndexTaxPanel({
+  instanceId,
+  rows,
+  database,
+  incomplete = false,
+}: IndexTaxPanelProps) {
   // The largest tables first: the ones whose indexes cost the most are never cut.
   const tablesQuery = useInstanceTables(instanceId, { limit: TABLE_LIMIT, order_by: 'size' })
   const taxes = useMemo(
@@ -164,6 +175,11 @@ export function IndexTaxPanel({ instanceId, rows, database }: IndexTaxPanelProps
       description="What the indexes of each table cost: how many there are, how much space they hold, how much of it looks unused and how many index entries every write adds."
       notes={
         <>
+          {incomplete ? (
+            <PanelNote title={INCOMPLETE} tone="warning">
+              <strong>The list is incomplete.</strong> {INCOMPLETE_DETAIL}
+            </PanelNote>
+          ) : null}
           <PanelNote title={ESTIMATE}>
             <strong>Estimates.</strong> {ESTIMATE}
           </PanelNote>
@@ -182,7 +198,7 @@ export function IndexTaxPanel({ instanceId, rows, database }: IndexTaxPanelProps
         {
           label: 'Index size',
           value: formatBytes(summary.indexBytes),
-          detail: `${formatCount(summary.indexCount)} indexes`,
+          detail: `${formatCount(summary.indexCount)} indexes reported`,
         },
         {
           label: 'Unused size',

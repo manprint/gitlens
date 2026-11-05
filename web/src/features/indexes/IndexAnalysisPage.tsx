@@ -272,7 +272,12 @@ function InstanceIndexes({ serverControl, instanceId, siblings }: AnalysisProps)
       </TabsContent>
       <TabsContent value="tax">
         {indexesState ?? (
-          <IndexTaxPanel database={database} instanceId={instanceId} rows={scoped} />
+          <IndexTaxPanel
+            database={database}
+            incomplete={response?.truncated === true || allRows.length >= INDEX_LIMIT}
+            instanceId={instanceId}
+            rows={scoped}
+          />
         )}
       </TabsContent>
     </Tabs>
