@@ -98,6 +98,13 @@ describe('indexSuggestions', () => {
         skipped: { not_table: 2 },
       }),
     ).toContain('2 not an ordinary table')
+    expect(
+      coverageText({
+        statements_considered: 4,
+        statements_analysed: 1,
+        skipped: { index_unparsed: 1 },
+      }),
+    ).toContain('1 index definition not readable')
   })
 
   it('SUGG-LIB-010 never shows a non-zero rate or cost as 0', () => {

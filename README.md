@@ -400,7 +400,8 @@ rest). A table with no index writes is never called write-heavy, and pglens neve
 creates an index. The agent lists every valid index of each table (the
 `table_indexes` fact, with the table's columns, hourly), so an index that
 exists is never suggested again; a relation that is not an ordinary table
-(a view) is skipped as `not_table`. An older agent only reports some index
+(a view) is skipped as `not_table`, and a table whose index definition pglens
+cannot read as `index_unparsed`. An older agent only reports some index
 definitions: the response then carries a note saying an existing index may be
 suggested again.
 
