@@ -147,7 +147,7 @@ const INCOMPLETE_DETAIL =
 const INCOMPLETE = `The list is incomplete. ${INCOMPLETE_DETAIL}`
 
 const ESTIMATE =
-  'Every figure on this tab is an estimate. Write amplification is the inserts, deletes and updates that are not heap-only per second, times the indexes of the table. Unused size counts indexes with no scan: the advisor stands behind it, or it rests on raw counters. Unique and primary key indexes are never counted.'
+  'Every figure on this tab is an estimate. Write amplification is the inserts, deletes and updates that are not heap-only per second, times the indexes of the table. Unused size counts indexes with no scan: the advisor stands behind it, or it rests on raw counters. Unique and primary key indexes are never counted. Table size is the heap, without TOAST.'
 
 /**
  * What the indexes of each table cost, computed here from the index and table

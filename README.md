@@ -398,8 +398,11 @@ unused (advisor verdict, or the raw counter when none; unique and primary key
 indexes are never counted), the table's writes per second and its write
 amplification (inserts, deletes and non-HOT updates per second times the number
 of indexes). Every figure is an estimate, computed in the browser from the
-statistics already collected: the 500 largest tables have table figures, the
-others show "Not measured". Each row links to the Cleanup tab narrowed to that
+statistics already collected, over the indexes the agent reports (the largest
+ones per database, `checks.index_stats.top_n`, 50 by default; the tab says so
+when the list is cut, and a table can have more indexes than it shows). The
+table size is the heap, without TOAST. The 500 largest tables have table
+figures, the others show "Not measured". Each row links to the Cleanup tab narrowed to that
 table. The Suggestions tab (`?tab=suggestions`, window 1h, 6h, 24h or 7d in
 `?window=`) shows the result of the index suggestions API described under
 "Index suggestions": each row gives the key columns, the weight (share of the
