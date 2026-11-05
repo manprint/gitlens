@@ -196,7 +196,7 @@ describe('SuggestionsPanel', () => {
     await flushNetwork(30)
 
     expect(screen.getByTestId('suggestion-coverage')).toHaveTextContent(
-      'Analysed 2 of 3 statements (1 skipped: 1 no stored text).',
+      'Analysed 2 of 3 statements. Skipped (a statement can have several reasons): 1 no stored text.',
     )
   })
 

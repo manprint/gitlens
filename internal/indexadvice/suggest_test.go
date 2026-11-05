@@ -382,3 +382,45 @@ func TestIDXS028_QueryIDJSONString(t *testing.T) {
 		require.Contains(t, string(out), fmt.Sprintf(`"queryid":"%d"`, id))
 	}
 }
+
+// A statement is analysed when one predicate group became a candidate; a
+// statement can carry several skip reasons, so they do not sum to the rest.
+func TestIDXS030_CoverageCounts(t *testing.T) {
+	in := input(
+		`SELECT 1 FROM res_partner WHERE ref = $1`,
+		`SELECT 1 FROM res_partner WHERE ref = $1 OR name = $2`,
+		`SELECT 1 FROM res_partner WHERE lower(name) = $1 OR ref = $2`,
+		`SELECT 1 FROM tiny WHERE x = $1`,
+	)
+	tiny := partnerMeta()
+	tiny.RelTuples, tiny.LiveTuples = 10, 10
+	in.Tables[Key{testDB, "public", "tiny"}] = tiny
+	out := Suggest(in)
+	c := out.Coverage
+	require.Equal(t, 4, c.StatementsConsidered)
+	require.Equal(t, 1, c.StatementsAnalysed, "only the first statement became a candidate")
+	require.Equal(t, 1, c.Skipped[NoteSmallTable])
+	sum := 0
+	for _, n := range c.Skipped {
+		sum += n
+	}
+	require.Greater(t, sum, c.StatementsConsidered-c.StatementsAnalysed-1, "a statement can have several reasons")
+}
+
+func TestIDXS031_NoWritesIsNeverWriteHeavy(t *testing.T) {
+	in := input(`SELECT 1 FROM res_partner WHERE ref = $1`)
+	in.Statements[0].CallsRate = 0.0003
+	meta := partnerMeta()
+	meta.Writes = Writes{}
+	in.Tables[partner] = meta
+	require.Equal(t, VerdictModerate, Suggest(in).Suggestions[0].Verdict, "writes known and zero")
+
+	meta.HasWrites = false
+	in.Tables[partner] = meta
+	require.Equal(t, VerdictModerate, Suggest(in).Suggestions[0].Verdict, "writes unknown")
+
+	meta.HasWrites = true
+	meta.Writes = Writes{Ins: 5}
+	in.Tables[partner] = meta
+	require.Equal(t, VerdictWriteHeavy, Suggest(in).Suggestions[0].Verdict, "real writes still weigh")
+}

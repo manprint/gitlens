@@ -1,5 +1,5 @@
 import type { Schemas } from '@/api/types'
-import { formatBytes, formatRate } from '@/lib/format'
+import { formatBytes, formatMilliseconds, formatRate } from '@/lib/format'
 import type { SortDirection } from '@/lib/tableControls'
 
 export type IndexSuggestion = Schemas['IndexSuggestion']
@@ -74,11 +74,20 @@ export function tableText(suggestion: IndexSuggestion): string {
   return `${suggestion.database} · ${suggestion.schema}.${suggestion.table}`
 }
 
+/** A rate that is not zero is never shown as 0. */
+function rateText(rate: number): string {
+  return rate > 0 && rate < 0.01 ? '<0.01/s' : formatRate(rate)
+}
+
 /** Inserts, updates and deletes per second, in that order. */
 export function writesText(write: IndexSuggestion['write']): string {
-  return [write.insert_rate, write.update_rate, write.delete_rate]
-    .map((rate) => formatRate(rate))
-    .join(' · ')
+  return [write.insert_rate, write.update_rate, write.delete_rate].map(rateText).join(' · ')
+}
+
+/** Statement time per second; a cost that is not zero is never shown as 0. */
+export function costText(msPerSecond: number): string {
+  if (msPerSecond > 0 && msPerSecond < 0.001) return '<0.001 ms/s'
+  return `${formatMilliseconds(msPerSecond)}/s`
 }
 
 export function weightText(weightPct: number): string {
@@ -96,16 +105,15 @@ const SKIP_LABELS: Readonly<Record<string, string>> = {
   small_table: 'small table',
 }
 
-/** `Analysed N of M statements (K skipped: 3 small table, 1 OR condition).` */
+/** `Analysed N of M statements. Skipped (a statement can have several reasons): 3 small table, 1 OR condition.` */
 export function coverageText(coverage: SuggestionCoverage): string {
   const skipped = Object.entries(coverage.skipped)
     .filter(([, count]) => count > 0)
     .sort(([a, x], [b, y]) => y - x || a.localeCompare(b))
-  const total = skipped.reduce((sum, [, count]) => sum + count, 0)
-  const head = `Analysed ${coverage.statements_analysed} of ${coverage.statements_considered} statements`
-  if (skipped.length === 0) return `${head}.`
+  const head = `Analysed ${coverage.statements_analysed} of ${coverage.statements_considered} statements.`
+  if (skipped.length === 0) return head
   const reasons = skipped.map(([reason, count]) => `${count} ${SKIP_LABELS[reason] ?? reason}`)
-  return `${head} (${total} skipped: ${reasons.join(', ')}).`
+  return `${head} Skipped (a statement can have several reasons): ${reasons.join(', ')}.`
 }
 
 /** No statement in the window: the statistics are not collected, as opposed to nothing to suggest. */

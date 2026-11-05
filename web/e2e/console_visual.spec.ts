@@ -3062,6 +3062,7 @@ test('VIS-040 index suggestions show the ground-truth column of res_partner, and
       page.getByText('Suggestions are estimates from statement statistics'),
     ).toBeVisible()
 
+    await page.getByRole('searchbox', { name: 'Search suggestions' }).fill('res_partner')
     const row = table
       .locator('tbody tr')
       .filter({ hasText: 'res_partner' })

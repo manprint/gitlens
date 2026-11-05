@@ -1189,7 +1189,7 @@ components:
         statements_analysed: { type: integer, format: int32 }
         skipped:
           type: object
-          description: Number of skipped statements per reason (for example no_text, expression, parse_error).
+          description: Number of statements per skip reason (for example no_text, expression, parse_error). A statement can have several reasons, and an analysed statement can have skipped parts, so the counts do not add up to statements_considered minus statements_analysed.
           additionalProperties: { type: integer, format: int32 }
     IndexSuggestion:
       type: object

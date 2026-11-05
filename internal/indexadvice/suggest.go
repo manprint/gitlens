@@ -137,8 +137,12 @@ type Suggestion struct {
 	Notes              []string    `json:"notes"`
 }
 
-// Coverage tells how much of the workload the extractor could place. Skipped
-// counts statements per reason (extractor reasons plus small_table).
+// Coverage tells how much of the workload the extractor could place: a
+// statement is analysed when at least one of its predicate groups became a
+// candidate. Skipped counts statements per reason (extractor reasons plus
+// small_table); a statement can have several reasons and an analysed statement
+// can also have skipped groups, so the counts do not add up to
+// considered − analysed.
 type Coverage struct {
 	StatementsConsidered int            `json:"statements_considered"`
 	StatementsAnalysed   int            `json:"statements_analysed"`
@@ -195,6 +199,7 @@ func Suggest(in Input) Output {
 		for _, reason := range an.Skipped {
 			skipped[string(reason)] = true
 		}
+		placed := false
 		for _, group := range groupPredicates(an.Predicates) {
 			c, small := buildCandidate(in, st.Database, group)
 			if small {
@@ -203,10 +208,11 @@ func Suggest(in Input) Output {
 			if c == nil {
 				continue
 			}
+			placed = true
 			c.stmts = []int{si}
 			cands = append(cands, c)
 		}
-		if len(an.Predicates) > 0 {
+		if placed {
 			out.Coverage.StatementsAnalysed++
 		}
 		for reason := range skipped {
@@ -601,6 +607,10 @@ func score(in Input, stmts []Stmt, c *candidate, overlapping map[*candidate][]st
 	s.ReadWriteRatio = readWriteRatio(s.CallsRate, w)
 	s.Verdict = verdictFor(s.ReadWriteRatio, s.Selectivity.Label == "low")
 	if !writesKnown && s.Verdict == VerdictStrong {
+		s.Verdict = VerdictModerate
+	}
+	// Without writes to pay for, a low call rate never makes the index write-heavy.
+	if s.Verdict == VerdictWriteHeavy && noIndexWrites(w, writesKnown) {
 		s.Verdict = VerdictModerate
 	}
 	if s.Selectivity.Label == "low" {

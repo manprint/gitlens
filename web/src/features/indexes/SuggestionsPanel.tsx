@@ -9,9 +9,10 @@ import { EmptyState, ErrorState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
 import { NativeSelect } from '@/components/ui/native-select'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
-import { formatBytes, formatCount, formatMilliseconds } from '@/lib/format'
+import { formatBytes, formatCount } from '@/lib/format'
 import {
   compareSuggestions,
+  costText,
   coverageText,
   ESTIMATE_CALLOUT,
   estimateLabel,
@@ -121,7 +122,7 @@ function suggestionColumns(): SimpleColumn<IndexSuggestion>[] {
       'Read cost',
       (row) => (
         <span title="An upper bound of the time these statements spend today: an index cannot remove more than all of it.">
-          {formatMilliseconds(row.read_cost_ms_per_s)}/s
+          {costText(row.read_cost_ms_per_s)}
           <span className="text-muted-foreground block text-xs min-[1600px]:ml-1.5 min-[1600px]:inline">
             upper bound
           </span>
@@ -299,6 +300,7 @@ export function SuggestionsPanel({ instanceId, database }: SuggestionsPanelProps
   }
   if (response === undefined) return null
 
+  const coverageTitle = [coverageText(response.coverage), ...response.notes].join(' ')
   const missing = statisticsMissing(response)
   const suggestions = response.suggestions
   const strong = suggestions.filter((row) => row.verdict === 'strong').length
@@ -342,15 +344,11 @@ export function SuggestionsPanel({ instanceId, database }: SuggestionsPanelProps
       titleId="index-suggestions-title"
     >
       <p
-        className="text-muted-foreground border-b px-5 py-2 text-sm min-[1600px]:py-0 min-[1600px]:text-xs"
+        className="text-muted-foreground border-b px-5 py-2 text-sm min-[1600px]:truncate min-[1600px]:py-0 min-[1600px]:text-xs"
         data-testid="suggestion-coverage"
+        title={coverageTitle}
       >
-        {coverageText(response.coverage)}
-        {response.notes.map((note) => (
-          <span key={note} className="ml-2">
-            {note}
-          </span>
-        ))}
+        {coverageTitle}
       </p>
       {suggestions.length === 0 ? (
         missing ? (

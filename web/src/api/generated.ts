@@ -2313,7 +2313,7 @@ export interface components {
             statements_considered: number;
             /** Format: int32 */
             statements_analysed: number;
-            /** @description Number of skipped statements per reason (for example no_text, expression, parse_error). */
+            /** @description Number of statements per skip reason (for example no_text, expression, parse_error). A statement can have several reasons, and an analysed statement can have skipped parts, so the counts do not add up to statements_considered minus statements_analysed. */
             skipped: {
                 [key: string]: number;
             };

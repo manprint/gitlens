@@ -5,6 +5,7 @@ import { base } from '@/test/fixtures/getIndexSuggestions'
 import {
   compareSuggestions,
   coverageText,
+  costText,
   DEFAULT_SUGGESTION_WINDOW,
   estimateLabel,
   keyText,
@@ -79,7 +80,26 @@ describe('indexSuggestions', () => {
         statements_analysed: 6,
         skipped: { or_group: 1, no_text: 3, zero: 0 },
       }),
-    ).toBe('Analysed 6 of 10 statements (4 skipped: 3 no stored text, 1 OR condition).')
+    ).toBe(
+      'Analysed 6 of 10 statements. Skipped (a statement can have several reasons): 3 no stored text, 1 OR condition.',
+    )
+    // The reasons overlap: their sum may exceed the statements left over.
+    expect(
+      coverageText({
+        statements_considered: 140,
+        statements_analysed: 47,
+        skipped: { catalog: 41, expression: 32, small_table: 20, or_group: 14 },
+      }),
+    ).toContain('41 system catalogs only, 32 column inside an expression')
+  })
+
+  it('SUGG-LIB-010 never shows a non-zero rate or cost as 0', () => {
+    expect(
+      writesText({ insert_rate: 0, update_rate: 0.004, delete_rate: 2, hot_update_ratio: 0 }),
+    ).toBe('0/s · <0.01/s · 2/s')
+    expect(costText(0)).toBe('0 ms/s')
+    expect(costText(0.0002)).toBe('<0.001 ms/s')
+    expect(costText(0.094)).toBe('0.094 ms/s')
   })
 
   it('SUGG-LIB-007 tells missing statistics from no suggestion', () => {

@@ -22,8 +22,18 @@ const (
 // readWriteRatio divides the statements' call rate by the row changes that
 // must touch an index: inserts, non-HOT updates and deletes.
 func readWriteRatio(calls float64, w Writes) float64 {
-	denominator := w.Ins + (w.Upd - w.HotUpd) + w.Del
-	return calls / math.Max(denominator, minWriteRate)
+	return calls / math.Max(indexWriteRate(w), minWriteRate)
+}
+
+// indexWriteRate is the row changes per second that must touch an index.
+func indexWriteRate(w Writes) float64 {
+	return w.Ins + (w.Upd - w.HotUpd) + w.Del
+}
+
+// noIndexWrites is true when the table's writes are unknown or so rare that
+// an index costs nothing: the ratio then says nothing against the index.
+func noIndexWrites(w Writes, writesKnown bool) bool {
+	return !writesKnown || indexWriteRate(w) < minWriteRate
 }
 
 // verdictFor maps the ratio to a verdict; a low-selectivity first column

@@ -393,8 +393,11 @@ database's statement time involving the key, an upper bound of the saving),
 an estimated size (`~`, from planner statistics), the table's write rates, a
 verdict (Strong, Moderate or Write-heavy, from the read/write ratio) and the
 statements behind it; expanding a row shows a `CREATE INDEX CONCURRENTLY`
-statement to copy. The suggestions are estimates from heuristics, the coverage
-line counts the statements skipped and why, and pglens never creates an index.
+statement to copy. The suggestions are estimates from heuristics. The coverage
+line says how many statements were analysed and, per reason, how many were
+skipped (a statement can have several reasons, so they do not add up to the
+rest). A table with no writes is never called write-heavy, and pglens never
+creates an index.
 
 The page's Search everything panel searches all that pglens collected for the
 server in the selected range (`GET /api/v1/instances/{id}/search`), grouped as Indexes,
