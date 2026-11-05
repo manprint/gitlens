@@ -243,7 +243,7 @@ export async function headerLineProblems(page: Page): Promise<string[]> {
       const parts = [eyebrow, pageTitle, actions].filter(
         (part): part is Element =>
           part !== null &&
-          !part.contains(pageTitle) &&
+          (part === pageTitle || !part.contains(pageTitle)) &&
           part !== pageHeader.firstElementChild &&
           visible(part),
       )
