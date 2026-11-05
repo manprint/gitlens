@@ -18,13 +18,13 @@ See `PROTOCOL.md` (static cold-start rules).
 - Active scope: plan (whole `005_plan-ConsoleInsights`, no selector); full-autonomous true, WIP on (explicit)
 - Scope result: RUNNING
 - Type: sub-phase
-- ID / attempt: 4.3 / 1
-- Status: DONE (sub-phase 4.3 closed 2026-11-05; base 3ab35e9)
+- ID / attempt: 4.4 / 1
+- Status: IN_PROGRESS (OPEN, opened 2026-11-05; base 2c7c731; 4.4 attempt 1)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-sonnet-5-5; supervisor: advisor (Opus 5.5)
-- File / unit heading: phase_05.md → 4.3
-- Current step: 4.3 closed; 4.4 not opened
-- Next action: open 4.4 (Suggestions tab; register route in `fullhd_routes.ts`, I-13).
+- File / unit heading: phase_05.md → 4.4
+- Current step: 4.4 S1 indexSuggestions.ts + tests
+- Next action: write web/src/lib/indexSuggestions.ts (+ test), then query hook + keys, SuggestionsPanel, mount in IndexAnalysisPage, fullhd_routes.ts entry.
 - Stop latch: none (cleared by explicit invocation 2026-11-05)
 - Last closure: unit:4.3:1 (sub-phase 4.3 DONE)
 - Unit base: HEAD (after the P16 commit); branch `feat/index-analysis` (never switch or create branches)
@@ -205,7 +205,7 @@ Latest result per gate; earlier detail in `history.md`.
 | 4.1 | phase_05.md | 0.2 | DONE | 1 | IDXA-LEX-001..007, IDXA-PARSE-001..020, IDXA-DEF-001..006, IDXA-CORPUS-001/002 (120 statements), IDXA-FUZZ-001 (§7 4.1, §8) |
 | 4.2 | phase_05.md | 4.1, 3.1 | DONE | 1 | IDXS-001..027 (incl. 004b/005b/009b/018b/022..027), IDXS-W-001 (§7 4.2, §8) |
 | 4.3 | phase_05.md | 4.2 | DONE | 1 | IDXE-001..008, IDXE-INT-001..003 (§7 4.3, §8) |
-| 4.4 | phase_05.md | 4.3, 9.1, 15.1, 12.2 | TODO | 1 | — |
+| 4.4 | phase_05.md | 4.3, 9.1, 15.1, 12.2 | IN_PROGRESS | 1 | — |
 | 4.5 | phase_05.md | 4.4 | TODO | 1 | — |
 | 5.1 | phase_06.md | 4.4, 1.2, 9.1, 15.1 | TODO | 1 | — |
 | 15.3 | phase_16.md | 15.2, 9.1–9.3 | DONE | 1 | CLTAB-001..007, FHD-APPLY-001..051, FHD-FIT-001, FHD-ROUTES-001 (§7 15.3); R-15.3 |

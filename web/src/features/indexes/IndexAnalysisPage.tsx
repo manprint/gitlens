@@ -19,6 +19,7 @@ import { CleanupPanel, type SiblingServer } from './CleanupPanel'
 import { DeadRowsPanel } from './DeadRowsPanel'
 import { IndexesPanel } from './IndexesPanel'
 import { SearchEverythingBox, SearchEverythingResults } from './SearchEverything'
+import { SuggestionsPanel } from './SuggestionsPanel'
 import { INDEX_TABLE_IDS, INDEX_VIEW_PARAM } from './indexViews'
 
 /** The most indexes the API returns for one server. */
@@ -28,6 +29,7 @@ export const TABS = [
   { value: 'indexes', label: 'Indexes' },
   { value: 'cleanup', label: 'Cleanup' },
   { value: 'dead-rows', label: 'Dead rows' },
+  { value: 'suggestions', label: 'Suggestions' },
 ] as const
 
 type TabValue = (typeof TABS)[number]['value']
@@ -39,7 +41,7 @@ function readTab(value: string | null): TabValue {
 }
 
 /** Every table of the page: a database change sends each back to its first page (D23). */
-const TABLE_IDS = [...INDEX_TABLE_IDS, 'cleanup', 'dead-rows']
+const TABLE_IDS = [...INDEX_TABLE_IDS, 'cleanup', 'dead-rows', 'suggestions']
 
 interface InstanceOption {
   id: string
@@ -261,6 +263,9 @@ function InstanceIndexes({ serverControl, instanceId, siblings }: AnalysisProps)
           instanceId={instanceId}
           onFocusDone={focusDone}
         />
+      </TabsContent>
+      <TabsContent value="suggestions">
+        <SuggestionsPanel database={database} instanceId={instanceId} />
       </TabsContent>
     </Tabs>
   )

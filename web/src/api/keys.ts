@@ -47,6 +47,8 @@ export const qk = {
   instanceSecurityDefinerFunctions: (id: string) =>
     ['getInstanceSecurityDefinerFunctions', id] as const,
   instanceIndexes: (id: string, limit?: number) => ['getInstanceIndexes', id, limit] as const,
+  indexSuggestions: (id: string, window?: string, database?: string, limit?: number) =>
+    ['getIndexSuggestions', id, window, database, limit] as const,
   instanceBloat: (id: string, limit?: number, objectKind?: string) =>
     ['getInstanceBloat', id, limit, objectKind] as const,
   instanceCommandAudit: (id: string) => ['getInstanceCommandAudit', id] as const,

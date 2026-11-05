@@ -163,6 +163,17 @@ export const CAPTIONS = {
     howToRead:
       'The marked text is what matched. A link opens the index or table, expanded, on its tab, or the statement search on Slowest queries, in the same time range.',
   },
+  'indexes.suggestions': {
+    what: 'Candidate btree indexes for the columns your statements filter or sort on and no index leads with, best first. Every figure is an estimate.',
+    source:
+      'getIndexSuggestions: the normalised statements of pg_stat_statements (query_texts) parsed for equality, range, prefix and ordering predicates, with the pg_stat_statements rates, the reported index definitions and column statistics, and the table counters.',
+    unit: 'weight in % of the database statement time; read cost in ms per second',
+    window: 'The window picked on the tab (1 hour to 7 days).',
+    howToRead:
+      'Weight and read cost are an upper bound of the time the statements spend today: an index cannot save more. Size comes from planner row counts. Write rates are inserts, updates and deletes per second. pglens never creates an index; review the statement before you run it.',
+    thresholds:
+      'Verdict: read/write ratio of 10 or more is strong, 1 or more moderate, below 1 write-heavy. Tables under 1,000 rows are skipped.',
+  },
   'locks.sessions-application': {
     what: 'Sessions opened by your applications: one row per client session of the latest lock sample, oldest transaction first.',
     source:

@@ -605,6 +605,24 @@ export function useWorkloadSeries(
   })
 }
 
+export function useIndexSuggestions(
+  id: string,
+  params: QueryParameters<'/api/v1/instances/{id}/index-suggestions'> = {},
+) {
+  return useApiQuery({
+    keepPrevious: true,
+    policy: REFRESH.catalog,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/index-suggestions', {
+          params: { path: { id }, query: params },
+          signal,
+        }),
+      ),
+    queryKey: qk.indexSuggestions(id, params.window, params.database, params.limit),
+  })
+}
+
 export function useInstanceIndexes(
   id: string,
   params: QueryParameters<'/api/v1/instances/{id}/indexes'> = {},

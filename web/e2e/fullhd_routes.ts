@@ -75,6 +75,7 @@ export const FULLHD_ROUTES: readonly FullHdRoute[] = [
   })),
   { path: '/indexes?tab=cleanup', name: 'Index analysis: cleanup', kind: 'fit' },
   { path: '/indexes?tab=dead-rows', name: 'Index analysis: dead rows', kind: 'fit' },
+  { path: '/indexes?tab=suggestions', name: 'Index analysis: suggestions', kind: 'fit' },
   // One entry per cluster-page tab (15.3), kind from the tab registry.
   ...CLUSTER_SECTIONS.map(({ id, label, kind }): FullHdRoute => ({
     path: `/clusters/:clusterId?section=${id}`,
