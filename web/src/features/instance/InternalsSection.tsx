@@ -107,16 +107,19 @@ function slruColumns(): DataTableProps<SLRUCache>['columns'] {
     {
       accessorKey: 'zeroed_per_second',
       header: 'Zeroed',
+      meta: { help: 'internals.slru-zeroed' },
       cell: ({ row }) => formatRate(row.original.zeroed_per_second),
     },
     {
       accessorKey: 'flushes_per_second',
       header: 'Flushes',
+      meta: { help: 'internals.slru-flushes' },
       cell: ({ row }) => formatRate(row.original.flushes_per_second),
     },
     {
       accessorKey: 'truncates_per_second',
       header: 'Truncations',
+      meta: { help: 'internals.slru-truncations' },
       cell: ({ row }) => formatRate(row.original.truncates_per_second),
     },
   ]
@@ -128,6 +131,7 @@ function tempFileColumns(): DataTableProps<TempFileRate>['columns'] {
     {
       accessorKey: 'files_per_second',
       header: 'Files',
+      meta: { help: 'internals.temp-files-rate' },
       cell: ({ row }) => perMinute(row.original.files_per_second),
     },
     {
@@ -145,6 +149,7 @@ function conflictColumns(): DataTableProps<RecoveryConflictRate>['columns'] {
     {
       accessorKey: 'per_second',
       header: 'Queries cancelled',
+      meta: { help: 'internals.recovery-cancelled' },
       cell: ({ row }) => perMinute(row.original.per_second),
     },
   ]

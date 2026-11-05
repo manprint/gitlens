@@ -10,7 +10,7 @@ export const alertsCaptions = {
     window:
       'Every state kept by the server; resolved alerts stay listed. The engine re-evaluates the rules every 30 seconds by default.',
     howToRead:
-      'Ranked firing, then pending, then resolved; within a state critical before warning before info. The filters narrow the loaded rows in the browser and are kept in the address. Notes names the silence that suppresses an alert, with the time it has left.',
+      'Ranked firing, then resolved; within a state critical before warning before info. The filters narrow the loaded rows in the browser and are kept in the address. Notes names the silence that suppresses an alert, with the time it has left.',
   },
   'alerts.detail': {
     what: 'One alert in full: its rule, state, labels, and when it started, was last evaluated and was resolved.',
@@ -41,11 +41,11 @@ export const alertsCaptions = {
   'alerts.filter-state': {
     what: 'Shows only the alerts in the chosen state; Firing is the default and All states removes the filter.',
     source:
-      'The state column of the alerts table (pending, firing or resolved) on the alerts loaded; the filter runs in the browser.',
+      'The state column of the alerts table (firing or resolved; pending episodes stay in the engine memory and are never stored) on the alerts loaded; the filter runs in the browser.',
     unit: 'alert state',
     window: 'The loaded alerts.',
     howToRead:
-      'Pending means the rule condition holds but not yet for its whole duration; firing means it held for that duration; resolved means it no longer holds.',
+      'Firing means the rule condition held for its whole duration; resolved means it no longer holds or its subject stopped reporting. Pending is never stored, so the Pending filter shows no alert.',
   },
   'alerts.filter-severity': {
     what: 'Shows only the alerts of the chosen severity: critical, warning or info.',
@@ -106,7 +106,7 @@ export const alertsCaptions = {
   'events.filter-limit': {
     what: 'The most events the server returns for the range: 100, 500 or 1,000.',
     source:
-      'The limit parameter of the server events endpoint; the server keeps the newest events and refuses more than 1,000.',
+      'The limit parameter of the server events endpoint; the server keeps the newest events and caps any larger limit at 1,000.',
     unit: 'events',
     window: 'The selected time range.',
     howToRead:

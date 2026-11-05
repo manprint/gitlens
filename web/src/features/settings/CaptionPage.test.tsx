@@ -112,6 +112,7 @@ describe('settings captions', () => {
 
   it('CAPTION-PAGE-004 the Databases view is captioned for each instance', async () => {
     const { container } = await renderSettings('/?view=databases')
+    await screen.findByRole('table', { name: /^Databases for / })
 
     expect(expectCaptionedCards(container)).toEqual([
       'settings.inventory-databases',

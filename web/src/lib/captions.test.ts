@@ -60,6 +60,17 @@ describe('caption catalogue (D30)', () => {
     }
   })
 
+  it('CAPTION-006 every column hint is one short sentence', () => {
+    const hints = Object.entries(columnHelp)
+    expect(hints.length).toBeGreaterThanOrEqual(5)
+    for (const [id, text] of hints) {
+      expect(text.trim(), id).not.toBe('')
+      expect(text.length, id).toBeLessThanOrEqual(160)
+      expect(text, id).toMatch(/\.$/)
+      expect(text.split(/\s+/).length, id).toBeLessThanOrEqual(28)
+    }
+  })
+
   it('CAPTION-005 ids are unique and dot or kebab case', () => {
     const ids = [...Object.keys(CAPTIONS), ...Object.keys(columnHelp)]
     expect(new Set(ids).size).toBe(ids.length)

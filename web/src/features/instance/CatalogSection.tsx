@@ -386,14 +386,14 @@ function extensionColumns(): DataTableProps<Schemas['Extension']>['columns'] {
     {
       accessorKey: 'default_version',
       header: 'Packages',
-      meta: { width: '9rem' },
+      meta: { width: '11rem', help: 'catalog.extension-packages' },
       cell: ({ row }) =>
         row.original.default_version || <Unknown reason="The packages no longer carry it." />,
     },
     {
       accessorKey: 'upgrade',
       header: 'Update',
-      meta: { width: '8.5rem' },
+      meta: { width: '10.5rem', help: 'catalog.extension-update' },
       cell: ({ row }) =>
         row.original.upgrade === 'available' ? (
           <Badge variant="secondary">available</Badge>
@@ -696,7 +696,7 @@ function sequenceColumns(): DataTableProps<Sequence>['columns'] {
     {
       accessorKey: 'limit',
       header: 'Limit',
-      meta: { width: '18.5rem' },
+      meta: { width: '18.5rem', help: 'catalog.sequence-limit' },
       cell: ({ row }) => (
         <span className="inline-flex items-center gap-1">
           {formatIntegerString(row.original.limit)}
@@ -709,7 +709,7 @@ function sequenceColumns(): DataTableProps<Sequence>['columns'] {
     {
       id: 'used',
       header: 'Used',
-      meta: { width: '7.5rem' },
+      meta: { width: '9.5rem', help: 'catalog.sequence-used' },
       accessorFn: (sequence) => sequence.used_ratio,
       cell: ({ row }) => sequenceUsedCell(row.original),
     },
@@ -935,7 +935,8 @@ function partitionColumns(now: Date): DataTableProps<PartitionedTable>['columns'
       header: 'Partitions reach',
       accessorFn: (table) => table.covered_until,
       meta: {
-        width: '11.5rem',
+        help: 'catalog.partitions-reach',
+        width: '14rem',
         truncate: true,
         title: titleOf<PartitionedTable>((table) =>
           table.covered_until === null
@@ -1029,7 +1030,7 @@ function functionColumns(): DataTableProps<FunctionStat>['columns'] {
     {
       accessorKey: 'self_ms_per_second',
       header: 'Own time',
-      meta: { width: '9rem' },
+      meta: { width: '11rem', help: 'catalog.function-own-time' },
       cell: ({ row }) => `${formatMilliseconds(row.original.self_ms_per_second)}/s`,
     },
     {

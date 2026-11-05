@@ -405,6 +405,9 @@ export function AlertsPage() {
           ) : null}
 
           <Section actions={filters} captionId="alerts.list" title="Alerts">
+            <p aria-live="polite" className="text-muted-foreground mb-3 text-sm">
+              {`${visibleAlerts.length} of ${alerts.length} alerts shown; filters are kept in the URL so the view can be shared.`}
+            </p>
             {silenceId ? (
               <p className="mb-3 text-sm" role="status">
                 {silenceFilter

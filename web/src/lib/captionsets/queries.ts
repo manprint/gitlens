@@ -39,14 +39,14 @@ export const queriesCaptions = {
   'slow.total-time': {
     what: 'Execution time summed over all ranked statements, not over the whole server.',
     source:
-      'Sum of each listed statement total execution time (pg_stat_statements.total_exec_time, stored as a rate and multiplied by sample seconds).',
+      'Sum of each listed statement total execution time (pg_stat_statements.total_exec_time, stored as a rate and multiplied by sample seconds; estimated with 60 s when a sample has no duration).',
     unit: 'Milliseconds, shown in the largest fitting unit.',
     window: 'Selected time range.',
   },
   'slow.calls': {
     what: 'Number of calls summed over the ranked statements.',
     source:
-      'Sum of each listed statement calls (pg_stat_statements.calls, stored as a rate and multiplied by sample seconds).',
+      'Sum of each listed statement calls (pg_stat_statements.calls, stored as a rate and multiplied by sample seconds; estimated with 60 s when a sample has no duration).',
     unit: 'Calls.',
     window: 'Selected time range.',
   },

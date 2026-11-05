@@ -43,7 +43,7 @@ export const CAPTIONS = {
     source:
       'pg_stat_database.blks_hit / (blks_hit + blks_read), from pg_blks_hit_total and pg_blks_read_total.',
     unit: '%',
-    window: 'Selected time range.',
+    window: 'Newest sample of the selected range.',
     howToRead:
       'Reads that miss shared buffers may still come from the operating system cache, so a lower ratio is not always disk I/O.',
   },
@@ -57,7 +57,7 @@ export const CAPTIONS = {
   'index.redundant-prefix': {
     what: 'Indexes whose columns are the leading part of a longer index on the same table; the longer index can serve the same lookups.',
     source:
-      'pglens advisor rule index.redundant_prefix: non-unique btree indexes whose columns lead a longer index.',
+      'pglens advisor rule index.redundant_prefix: non-unique btree indexes whose key columns are a strict leading part of another btree index on the same table with the same predicate.',
     unit: 'indexes',
     window: 'Latest advisor evaluation.',
     howToRead:
@@ -113,7 +113,7 @@ export const CAPTIONS = {
       'The shortest retention is one day past the family’s compression horizon and never under 3 days; the longest is 365 days.',
   },
   'settings.advisor-rules-table': {
-    what: 'Switched off, a rule is skipped and its findings are resolved.',
+    what: 'The advisor rules, each with a switch that makes pglens run or skip it.',
     source:
       'getAdvisorRules for the rows; the switch calls setAdvisorRuleOverride, stored in advisor_rule_overrides.',
     window: 'Live catalogue. A change takes effect at the next advisor evaluation.',
@@ -258,6 +258,46 @@ export const columnHelp = {
   'statements.mean-time': 'Average execution time of one call, from pg_stat_statements.',
   'statements.total-time':
     'Execution time of all calls in the selected range, from pg_stat_statements.',
+  'slots.retained-bytes':
+    "WAL kept for this slot: bytes between the server's current WAL position and the oldest position the slot may still need.",
+  'slots.wal-before-invalidation':
+    'Bytes of WAL that can still be written before PostgreSQL may remove WAL this slot needs. Unlimited: no value reported, as when max_slot_wal_keep_size is -1.',
+  'slots.age-inactive':
+    "Time since the slot's last active reading in the stored history; a dash means it is active now.",
+  'logical.errors':
+    'Errors counted by pg_stat_subscription_stats since its last reset: apply worker errors first, table synchronization errors second.',
+  'logical.conflicts':
+    'Conflicts the subscription detected, from pg_stat_subscription_stats since its last reset; not available before PostgreSQL 18.',
+  'catalog.sequence-limit':
+    "Last value the sequence can give that its column accepts: the nearer of the sequence's own bound and the column type's bound.",
+  'catalog.sequence-used':
+    'Share of the range from the start value to the limit already handed out, from the last value read. A reason shows when it cannot be read.',
+  'catalog.partitions-reach':
+    "Highest upper bound among the table's range partitions, in UTC. No end means a partition has no upper limit.",
+  'catalog.extension-packages':
+    "Default version of the extension in the server's installed packages, from pg_available_extensions.",
+  'catalog.extension-update':
+    'Available when the packaged version is newer than the installed one; unknown when the packages lack the extension or the versions cannot be compared.',
+  'catalog.function-own-time':
+    "Milliseconds per second spent in the function's own code, not in functions it calls, averaged over the last hour. Total time includes them.",
+  'internals.slru-zeroed':
+    'Blocks per second the cache filled with zeros, averaged over the last hour, from pg_stat_slru.blks_zeroed.',
+  'internals.slru-flushes':
+    'Flushes of dirty cache data to disk per second, averaged over the last hour, from pg_stat_slru.flushes.',
+  'internals.slru-truncations':
+    'Times per second the cache was truncated, averaged over the last hour, from pg_stat_slru.truncates.',
+  'internals.temp-files-rate':
+    'Temporary files created per minute in this database, averaged over the last hour, from pg_stat_database.temp_files.',
+  'internals.recovery-cancelled':
+    'Queries cancelled per minute on this standby for this reason, averaged over the last hour, from pg_stat_database_conflicts.',
+  'statements.share-of-listed':
+    "This statement's total time divided by the total time of all statements listed in the table; unlisted statements are not counted.",
+  'statements.cache-hit-ratio':
+    "Shared-buffer block hits divided by hits plus reads for this statement over the range; a read may still come from the operating system's cache.",
+  'statements.wal':
+    'WAL bytes written by this statement over the selected range, estimated from per-second rates.',
+  'statements.temp-bytes-per-call':
+    'Temporary bytes written per call over the selected range: temporary blocks written, 8 KiB each, divided by calls.',
   'indexes.scans': 'Index scans counted by pg_stat_user_indexes.idx_scan since the last reset.',
   'advisor.enabled':
     'Off: the rule is not evaluated and its findings are resolved at the next evaluation. On again: they reopen if the condition still holds.',

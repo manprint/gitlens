@@ -69,7 +69,7 @@ export const fleetCaptions = {
     unit: 'one card per cluster; lag in seconds',
     window: 'Latest list; refreshed every 15 s.',
     howToRead:
-      'Max replay lag is the largest lag any standby reported in the last 60 seconds, empty when none did. Permission tiers are the T0 to T3 levels the agents hold. Health ok, degraded and critical follow the summary cards above.',
+      'Max replay lag is the largest lag any standby reported in the last 60 seconds, empty when none did. Permission tiers are the T0 to T2 levels the agents hold. Health ok, degraded and critical follow the summary cards above.',
   },
   'fleet.agent-health': {
     what: 'Instances that are down or have a firing agent-down or unreachable alert, with the likely cause and the time since they last reported.',

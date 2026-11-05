@@ -279,11 +279,12 @@ export const instanceCaptions = {
     window: 'Newest reading of the last day; sampled every 30 s.',
   },
   'host.load-average': {
-    what: 'Average number of runnable processes over the last 1, 5 or 15 minutes, as the tile label says.',
+    what: 'Linux load average over the last 1, 5 or 15 minutes: processes ready to run plus those in uninterruptible wait, usually disk I/O, as the tile label says.',
     source: 'host_load1, host_load5 and host_load15: the operating system load average.',
     unit: 'processes',
     window: 'Newest reading of the last day; sampled every 30 s.',
-    howToRead: 'Compare it with the CPU count: the load average is not a percentage.',
+    howToRead:
+      'Compare it with the CPU count only when no container CPU limit is set: the load average is host-wide, while the CPU count is then the container quota rounded up.',
   },
   'host.disk-total': {
     what: 'Total size of the filesystem that holds the PostgreSQL data directory.',
@@ -325,7 +326,8 @@ export const instanceCaptions = {
       'host_load1, host_load5, host_load15 and host_cpu_count: the operating system load average.',
     unit: 'processes',
     window: 'Selected time range; sampled every 30 s.',
-    howToRead: 'A load average above the CPU count line means more runnable processes than CPUs.',
+    howToRead:
+      'A load above the CPU count line means more processes ready to run or waiting on I/O than CPUs; under a container CPU limit the line is the quota while the load is host-wide.',
   },
   'host.chart-memory': {
     what: 'Memory in use and total memory of the host, or of the container when it has a memory limit.',

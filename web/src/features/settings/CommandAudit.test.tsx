@@ -144,9 +144,11 @@ describe('CommandAudit', () => {
     expect(auditTable().getByText('requested')).toBeInTheDocument()
     expect(screen.getByText(/Recorded:/)).toBeInTheDocument()
     expect(screen.queryByText(/Executed:/)).not.toBeInTheDocument()
-    // The caption line and the hint tooltip both hold the sentence.
-    expect(screen.getAllByText(/credential that requested it/i)[0]).toBeVisible()
-    expect(screen.getAllByText(/not the person/i)[0]).toBeVisible()
+    // The caption line is the visible one; the hint tooltip holds the same sentence.
+    expect(
+      screen.getByText(/credential that requested it/i, { ignore: '[role="tooltip"] *' }),
+    ).toBeVisible()
+    expect(screen.getByText(/not the person/i, { ignore: '[role="tooltip"] *' })).toBeVisible()
   })
 
   it('UI-SET-024 shows an empty state when no commands were recorded', async () => {

@@ -175,7 +175,7 @@ function statementColumns(
     },
     {
       id: 'share-total',
-      meta: { width: '10rem' },
+      meta: { width: '13rem', help: 'statements.share-of-listed' },
       header: 'Share of listed rows',
       enableSorting: false,
       cell: ({ row }) => {
@@ -197,7 +197,7 @@ function statementColumns(
     },
     {
       id: 'cache-hit-ratio',
-      meta: { width: '10rem' },
+      meta: { width: '12.5rem', help: 'statements.cache-hit-ratio' },
       header: 'Cache hit ratio',
       accessorFn: (row) => summariseStatement(row).cacheHitRatio,
       cell: ({ row }) => {
@@ -211,7 +211,7 @@ function statementColumns(
     },
     {
       id: 'wal-bytes',
-      meta: { width: '6.5rem' },
+      meta: { width: '8.5rem', help: 'statements.wal' },
       header: 'WAL',
       accessorFn: (row) =>
         typeof row.wal_bytes === 'number' && Number.isFinite(row.wal_bytes) ? row.wal_bytes : null,
@@ -228,7 +228,7 @@ function statementColumns(
     },
     {
       id: 'temporary-bytes',
-      meta: { width: '15rem' },
+      meta: { width: '17rem', help: 'statements.temp-bytes-per-call' },
       header: 'Temporary bytes/call',
       accessorFn: (row) => summariseStatement(row).tempBytesPerCall,
       cell: ({ row }) => {

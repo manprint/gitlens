@@ -109,7 +109,7 @@ export const glossary = {
   },
   'permission tier': {
     short:
-      'The level of database privileges pglens has on a server (T0 to T3); higher tiers enable more checks.',
+      'The level of database privileges pglens has on a server (T0 to T2); higher tiers enable more checks.',
   },
 } as const satisfies Record<string, GlossaryEntry>
 

@@ -88,6 +88,7 @@ function slotColumns(threshold: number): DataTableProps<SlotRow>['columns'] {
     {
       accessorKey: 'retainedBytes',
       header: 'Retained bytes',
+      meta: { help: 'slots.retained-bytes' },
       cell: ({ getValue }) => {
         const retainedBytes = getValue<number | null>()
         const warning = retainedBytes !== null && retainedBytes > threshold
@@ -106,6 +107,7 @@ function slotColumns(threshold: number): DataTableProps<SlotRow>['columns'] {
     {
       accessorKey: 'safeWalSizeBytes',
       header: 'WAL before invalidation',
+      meta: { help: 'slots.wal-before-invalidation' },
       // null means max_slot_wal_keep_size is unlimited (the slot is never
       // invalidated, and can retain WAL until the disk is full), or that the
       // slot has already lost WAL it needs: PostgreSQL reports NULL for both.
@@ -118,6 +120,7 @@ function slotColumns(threshold: number): DataTableProps<SlotRow>['columns'] {
     {
       accessorKey: 'inactiveAgeSeconds',
       header: 'Age inactive',
+      meta: { help: 'slots.age-inactive' },
       cell: ({ row, getValue }) =>
         row.original.active === true ? '—' : formatDuration(getValue<number | null>()),
     },

@@ -103,7 +103,7 @@ function subscriptionColumns(readAt: number): DataTableProps<Subscription>['colu
       id: 'errors',
       header: 'Errors (apply / sync)',
       accessorFn: (sub) => sub.apply_errors + sub.sync_errors,
-      meta: { width: '15rem' },
+      meta: { width: '17rem', help: 'logical.errors' },
       cell: ({ row }) =>
         `${formatCount(row.original.apply_errors)} / ${formatCount(row.original.sync_errors)}`,
     },
@@ -111,7 +111,7 @@ function subscriptionColumns(readAt: number): DataTableProps<Subscription>['colu
       id: 'conflicts',
       header: 'Conflicts',
       accessorFn: (sub) => sub.conflicts,
-      meta: { width: '9.5rem' },
+      meta: { width: '11.5rem', help: 'logical.conflicts' },
       cell: ({ row }) =>
         row.original.conflicts === null ? (
           <span className="text-muted-foreground">n/a</span>

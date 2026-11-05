@@ -181,6 +181,7 @@ function slowColumns(instanceId: string, term: string): DataTableProps<SlowRow>[
     },
     {
       id: 'share',
+      meta: { help: 'statements.share-of-listed' },
       header: 'Share of listed time',
       accessorFn: (slow) => slow.share,
       cell: ({ row }) => {

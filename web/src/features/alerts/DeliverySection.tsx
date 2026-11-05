@@ -30,7 +30,8 @@ export function DeliverySection() {
         <Link className="underline underline-offset-2" to="/settings?tab=notifications">
           Settings, Notifications
         </Link>{' '}
-        shows which channels are configured and sends a test message.
+        shows which channels are configured, stores an address that overrides the environment, and
+        sends a test message.
       </p>
 
       <ul aria-label="Supported notification channels" className="grid gap-4 sm:grid-cols-2">
