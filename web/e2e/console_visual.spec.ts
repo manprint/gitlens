@@ -3011,3 +3011,89 @@ test('VIS-LOCKS-001 the Locks page splits sessions by origin into two tables tha
   }
   browserErrors.assertClean()
 })
+
+const SUGGESTION_COLUMN = process.env.GT_COLUMN ?? 'email'
+
+test('VIS-040 index suggestions show the ground-truth column of res_partner, and not an indexed one', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, 3 * 30_000))
+  const browserErrors = collectConsoleErrors(page)
+  const instanceId = await pickInstance(api)
+  const rerun =
+    'run `python3 /home/agent/pglens-odoo-stack/load/suggest_ground_truth.py` for 5 minutes, wait 3 minutes (two statement samples), then rerun VIS-040'
+
+  const response = await api.get(
+    `/api/v1/instances/${instanceId}/index-suggestions?window=24h&limit=100&database=odoo`,
+  )
+  expect(response.status()).toBe(200)
+  const body = (await response.json()) as {
+    suggestions: {
+      table: string
+      columns: { name: string }[]
+      weight_pct: number
+      est_size_bytes: number | null
+      create_statement: string
+    }[]
+  }
+  const partner = body.suggestions.filter((row) => row.table === 'res_partner')
+  const target = partner.find((row) => row.columns[0]?.name === SUGGESTION_COLUMN)
+  expect(
+    target,
+    `no suggestion for res_partner.${SUGGESTION_COLUMN}: ${rerun}; got ${JSON.stringify(
+      body.suggestions.map((row) => `${row.table}(${row.columns.map((c) => c.name).join(',')})`),
+    )} coverage ${JSON.stringify((body as { coverage?: unknown }).coverage)}`,
+  ).toBeDefined()
+  expect(target!.weight_pct).toBeGreaterThan(0)
+  expect(target!.est_size_bytes).not.toBeNull()
+  // res_partner.name already has an index: it is never suggested first.
+  expect(partner.filter((row) => row.columns[0]?.name === 'name')).toEqual([])
+
+  for (const [width, height] of [
+    [1920, 1080],
+    [1440, 1080],
+  ] as const) {
+    await page.setViewportSize({ width, height })
+    await page.goto(`/indexes?instance=${instanceId}&tab=suggestions&db=odoo`)
+    const table = page.getByRole('table', { name: 'Index suggestions' })
+    await expect(table).toBeVisible({ timeout: 30_000 })
+    await expect(
+      page.getByText('Suggestions are estimates from statement statistics'),
+    ).toBeVisible()
+
+    const row = table
+      .locator('tbody tr')
+      .filter({ hasText: 'res_partner' })
+      .filter({
+        hasText: new RegExp(`\\b${SUGGESTION_COLUMN}\\b`),
+      })
+    await expect(row.first()).toBeVisible()
+    await expect(row.first()).toContainText('~')
+    await expect(
+      table
+        .locator('tbody tr')
+        .filter({ hasText: /res_partner/ })
+        .filter({
+          has: page.getByRole('cell', { name: 'name', exact: true }),
+        }),
+    ).toHaveCount(0)
+
+    await row
+      .first()
+      .getByRole('button', { name: /Show details of res_partner/ })
+      .click()
+    const statement = page
+      .locator('pre, code')
+      .filter({ hasText: 'CREATE INDEX CONCURRENTLY' })
+      .first()
+    await expect(statement).toContainText(
+      `CREATE INDEX CONCURRENTLY idx_res_partner_${SUGGESTION_COLUMN} ON public.res_partner (${SUGGESTION_COLUMN});`,
+    )
+    expect((await statement.innerText()).trim()).toBe(target!.create_statement)
+    await page.screenshot({ path: `${ARTIFACT_DIR}/vis-040-suggestions-${width}.png` })
+  }
+
+  await assertFits(page, api, fullHdRoute('/indexes?tab=suggestions'))
+  browserErrors.assertClean()
+})

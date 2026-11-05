@@ -18,13 +18,13 @@ See `PROTOCOL.md` (static cold-start rules).
 - Active scope: plan (whole `005_plan-ConsoleInsights`, no selector); full-autonomous true, WIP on (explicit)
 - Scope result: RUNNING
 - Type: sub-phase
-- ID / attempt: 4.4 / 1
-- Status: DONE (4.4 attempt 1 closed 2026-11-05; base 2c7c731)
+- ID / attempt: 4.5 / 1
+- Status: IN_PROGRESS (OPEN 4.5 attempt 1, opened 2026-11-05; base 214a981)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-sonnet-5-5; supervisor: advisor (Opus 5.5)
-- File / unit heading: phase_05.md → 4.4
-- Current step: 4.5 not yet opened
-- Next action: open 4.5 (live validation on the Odoo workload, VIS-040, G-DEPLOY, C-4).
+- File / unit heading: phase_05.md → 4.5
+- Current step: 4.5 S2 load running (ends ≈ 10:22Z), then wait 3 min and run VIS-040
+- Next action: after the load log shows `executions=`, wait 3 min, run VIS-040 (desktop-fullhd), C-4 review, record, completion commit.
 - Stop latch: none (cleared by explicit invocation 2026-11-05)
 - Last closure: unit:4.4:1 (sub-phase 4.4 DONE)
 - Unit base: HEAD (after the P16 commit); branch `feat/index-analysis` (never switch or create branches)
@@ -115,6 +115,7 @@ Unit-owned paths are listed in each phase file's sub-phase `Files` field and rec
 
 Phase 16 DONE (P16 attempt 2 passed the advisor review; attempt 1 failed). STATE compacted at P16 DONE (16.x rows in `history.md`). Uncommitted: only `internal/webui/dist/index.html` (rebuilt by G-UI-LEGACY, never staged) and `.claude/`. Backup `02-loaded-20261104T170945Z` stops being VERIFIED at 2026-11-05 17:09Z: take a fresh verified backup before any lifecycle/G-QA test after that time.
 Running resources: stack `pglens-odoo` up and healthy (images from 8256b9f; production code unchanged since). Backup `02-loaded-20261104T170945Z` VERIFIED (expires 2026-11-05 17:09Z); stack `agent.yaml` = `agent.yaml.bak-16.4`. Research checkpoint: R3 pending (7.0).
+4.5 S1 (2026-11-05): ground-truth column `res_partner.email` (varchar, 30006 rows, 30002 distinct, no index on it or any expression of it; `res_partner__name_index` is the indexed control). `pg_stat_statements_reset()` run on the QA Odoo db before the load. Load: `/home/agent/pglens-odoo-stack/load/suggest_ground_truth.py` (PID file `/tmp/suggest_ground_truth.pid`, 330 s at 3.3/s, log `<scratchpad>/gt-load.log`). Stack redeployed (`deploy.sh`) with build of 214a981.
 
 ## 7. Verification and reviews
 
@@ -208,7 +209,7 @@ Latest result per gate; earlier detail in `history.md`.
 | 4.2 | phase_05.md | 4.1, 3.1 | DONE | 1 | IDXS-001..027 (incl. 004b/005b/009b/018b/022..027), IDXS-W-001 (§7 4.2, §8) |
 | 4.3 | phase_05.md | 4.2 | DONE | 1 | IDXE-001..008, IDXE-INT-001..003 (§7 4.3, §8) |
 | 4.4 | phase_05.md | 4.3, 9.1, 15.1, 12.2 | DONE | 1 | SUGG-LIB-001..009, SUGG-UI-001..014, IDXS-028 (§7 4.4, §8) |
-| 4.5 | phase_05.md | 4.4 | TODO | 1 | — |
+| 4.5 | phase_05.md | 4.4 | IN_PROGRESS | 1 | — |
 | 5.1 | phase_06.md | 4.4, 1.2, 9.1, 15.1 | TODO | 1 | — |
 | 15.3 | phase_16.md | 15.2, 9.1–9.3 | DONE | 1 | CLTAB-001..007, FHD-APPLY-001..051, FHD-FIT-001, FHD-ROUTES-001 (§7 15.3); R-15.3 |
 | 15.4 | phase_16.md | 15.3, 11.1, 14.2, 16.3, 4.4, 5.1 | TODO | 1 | — |

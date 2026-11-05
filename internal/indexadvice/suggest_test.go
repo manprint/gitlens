@@ -133,14 +133,25 @@ func TestIDXS009_UnknownColumnDropped(t *testing.T) {
 func TestIDXS010_SmallTable(t *testing.T) {
 	in := input(`SELECT 1 FROM res_partner WHERE ref = $1`)
 	meta := partnerMeta()
-	meta.LiveTuples = 999
+	meta.RelTuples, meta.LiveTuples = 999, 999
 	in.Tables[partner] = meta
 	out := Suggest(in)
 	require.Empty(t, out.Suggestions)
 	require.Equal(t, 1, out.Coverage.Skipped[NoteSmallTable])
-	meta.LiveTuples = 1000
+	meta.RelTuples, meta.LiveTuples = 1000, 1000
 	in.Tables[partner] = meta
 	require.Len(t, Suggest(in).Suggestions, 1)
+}
+
+// n_live_tup is 0 after a statistics reset or a restore: reltuples decides.
+func TestIDXS029_SmallTableUsesReltuples(t *testing.T) {
+	in := input(`SELECT 1 FROM res_partner WHERE ref = $1`)
+	meta := partnerMeta()
+	meta.RelTuples, meta.LiveTuples = 30006, 0
+	in.Tables[partner] = meta
+	out := Suggest(in)
+	require.Len(t, out.Suggestions, 1)
+	require.Zero(t, out.Coverage.Skipped[NoteSmallTable])
 }
 
 func TestIDXS011_PrefixMergesIntoLonger(t *testing.T) {

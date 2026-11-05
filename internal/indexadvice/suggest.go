@@ -314,7 +314,13 @@ func resolve(in Input, db, schema, table string) Key {
 func buildCandidate(in Input, db string, g predGroup) (*candidate, bool) {
 	key := resolve(in, db, g.schema, g.table)
 	meta, hasMeta := in.Tables[key]
-	if hasMeta && meta.HasCounts && meta.LiveTuples < SmallTableRows {
+	// n_live_tup is 0 after a statistics reset or restore while reltuples (planner
+	// estimate) is right: the small-table rule reads reltuples first, as the size does.
+	rows := meta.RelTuples
+	if rows <= 0 {
+		rows = meta.LiveTuples
+	}
+	if hasMeta && meta.HasCounts && rows < SmallTableRows {
 		return nil, true
 	}
 	c := &candidate{key: key, notes: map[string]bool{}, scope: g.scope, strict: map[string]bool{}}
