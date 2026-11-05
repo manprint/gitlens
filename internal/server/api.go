@@ -57,6 +57,9 @@ type API struct {
 	// auth tells a bearer-token request from a UI session in the log of a
 	// retention change; nil names every request a UI session.
 	auth *Auth
+	// indexSuggestions replaces the database's index suggestion store in unit
+	// tests (4.3).
+	indexSuggestions indexSuggestionStore
 	// readinessCache holds each instance's readiness report for 30 s (14.1).
 	readinessCache readinessCache
 }
@@ -86,6 +89,7 @@ func (a *API) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/statements", a.handleStatements)
 	a.registerContentionRoutes(r)
 	a.registerRelationRoutes(r)
+	a.registerIndexSuggestionRoutes(r)
 	a.registerWorkloadRoutes(r)
 	a.registerSettingsRoutes(r)
 	a.registerCatalogRoutes(r)

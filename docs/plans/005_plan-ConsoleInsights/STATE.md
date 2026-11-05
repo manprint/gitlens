@@ -19,12 +19,12 @@ See `PROTOCOL.md` (static cold-start rules).
 - Scope result: RUNNING
 - Type: sub-phase
 - ID / attempt: 4.3 / 1
-- Status: TODO (4.2 DONE; 4.3 not opened)
+- Status: IN_PROGRESS (OPEN, opened 2026-11-05; base 3ab35e9; 4.3 attempt 1)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-sonnet-5-5; supervisor: advisor (Opus 5.5)
 - File / unit heading: phase_05.md → 4.3
-- Current step: —
-- Next action: read phase_05.md 4.3 and open it (execution order §11).
+- Current step: 4.3 S1 handler + route + stub tests
+- Next action: implement internal/server/index_suggestions.go (store seam), route, IDXE unit tests.
 - Stop latch: none (cleared by explicit invocation 2026-11-05)
 - Last closure: unit:4.2:1 (sub-phase 4.2 DONE)
 - Unit base: HEAD (after the P16 commit); branch `feat/index-analysis` (never switch or create branches)
