@@ -181,3 +181,21 @@ func TestIDXEINT004_CompleteIndexListAndNonTable(t *testing.T) {
 	require.Equal(t, 1, resp.Coverage.Skipped["catalog"])
 	require.Empty(t, resp.Notes, "the list is complete: no caveat")
 }
+
+// IDXE-INT-005: an index definition the parser cannot read skips the table
+// (index_unparsed) instead of suggesting an index that may exist.
+func TestIDXEINT005_UnparsedDefinitionSkipsTheTable(t *testing.T) {
+	pool := getSharedPool(t)
+	instance, cluster := seedSearchInstance(t, pool)
+	now := time.Now().UTC()
+	seedPartnerTable(t, pool, instance, cluster, now.Add(-5*time.Minute))
+	_, err := pool.Exec(context.Background(), `DELETE FROM object_facts WHERE instance_id = $1 AND kind = 'table_indexes'`, instance)
+	require.NoError(t, err)
+	seedSearchFact(t, pool, instance, cluster, "odoo", "table_indexes", "public.res_partner",
+		map[string]string{"schemaname": "public", "relname": "res_partner"}, "", []string{"this is not an index"})
+	seedSuggestionStatement(t, pool, instance, cluster, 1, 40, 12, `SELECT id FROM res_partner WHERE ref = $1`, now.Add(-30*time.Minute), now.Add(-10*time.Minute))
+
+	resp, _ := suggestionsGet(t, pool, instance, "?window=1h&database=odoo")
+	require.Empty(t, resp.Suggestions)
+	require.Equal(t, 1, resp.Coverage.Skipped["index_unparsed"])
+}

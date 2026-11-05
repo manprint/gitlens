@@ -478,3 +478,17 @@ func TestIDXS034_UniqueIndexServesLongerEqualityKey(t *testing.T) {
 	in.Indexes[partner] = []IndexDef{byName}
 	require.Len(t, Suggest(in).Suggestions, 1, "a unique key the statement does not filter on is no help")
 }
+
+// A definition the parser cannot read makes the table's list incomplete: the
+// table gets no suggestion, under its own reason.
+func TestIDXS035_UnparsedIndexDefinitionSkipsTheTable(t *testing.T) {
+	in := input(`SELECT 1 FROM res_partner WHERE ref = $1`)
+	meta := partnerMeta()
+	meta.IndexesKnown, meta.IndexesUnparsed = true, true
+	in.Tables[partner] = meta
+	in.IndexesComplete = map[string]bool{testDB: true}
+	out := Suggest(in)
+	require.Empty(t, out.Suggestions)
+	require.Equal(t, 1, out.Coverage.Skipped[NoteIndexUnparsed])
+	require.Zero(t, out.Coverage.Skipped[NoteNotTable])
+}

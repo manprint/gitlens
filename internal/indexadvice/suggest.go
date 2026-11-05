@@ -24,6 +24,7 @@ const (
 const (
 	NoteSmallTable         = "small_table"
 	NoteNotTable           = "not_table"
+	NoteIndexUnparsed      = "index_unparsed"
 	NoteColumnUnknown      = "column_unknown"
 	NoteTypeNotBtree       = "type_not_btree"
 	NoteSizeUnknown        = "size_unknown"
@@ -78,6 +79,9 @@ type TableMeta struct {
 	// IndexesKnown says the table's index definitions are the complete list
 	// (the table_indexes fact), not only the indexes the agent selected.
 	IndexesKnown bool
+	// IndexesUnparsed says an index definition of the table could not be read:
+	// its list is incomplete, so no suggestion is made for the table.
+	IndexesUnparsed bool
 }
 
 // Input of Suggest.
@@ -330,8 +334,13 @@ func resolve(in Input, db, schema, table string) Key {
 func buildCandidate(in Input, db string, g predGroup) (*candidate, string) {
 	key := resolve(in, db, g.schema, g.table)
 	meta, hasMeta := in.Tables[key]
-	if in.IndexesComplete[db] && (!hasMeta || !meta.IndexesKnown) {
-		return nil, NoteNotTable
+	if in.IndexesComplete[db] {
+		switch {
+		case hasMeta && meta.IndexesUnparsed:
+			return nil, NoteIndexUnparsed
+		case !hasMeta || !meta.IndexesKnown:
+			return nil, NoteNotTable
+		}
 	}
 	// n_live_tup is 0 after a statistics reset or restore while reltuples (planner
 	// estimate) is right: the small-table rule reads reltuples first, as the size does.

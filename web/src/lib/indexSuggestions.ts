@@ -103,6 +103,7 @@ const SKIP_LABELS: Readonly<Record<string, string>> = {
   unsupported_statement: 'not a query on a table',
   catalog: 'system catalogs only',
   not_table: 'not an ordinary table',
+  index_unparsed: 'index definition not readable',
   small_table: 'small table',
 }
 

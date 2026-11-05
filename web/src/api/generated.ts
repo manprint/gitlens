@@ -2313,7 +2313,7 @@ export interface components {
             statements_considered: number;
             /** Format: int32 */
             statements_analysed: number;
-            /** @description Number of statements per skip reason (for example no_text, expression, parse_error, catalog, small_table, not_table). not_table is a relation that is not an ordinary table of the database's inventory (a view, a foreign table, or a table past the 1000-table inventory limit), reported only for a database whose agent lists every index. A statement can have several reasons, and an analysed statement can have skipped parts, so the counts do not add up to statements_considered minus statements_analysed. */
+            /** @description Number of statements per skip reason (for example no_text, expression, parse_error, catalog, small_table, not_table, index_unparsed). index_unparsed is a table with an index definition the server could not read, so its index list is incomplete, so no index is suggested for it. not_table is a relation that is not an ordinary table of the database's inventory (a view, a foreign table, or a table past the 1000-table inventory limit), reported only for a database whose agent lists every index. A statement can have several reasons, and an analysed statement can have skipped parts, so the counts do not add up to statements_considered minus statements_analysed. */
             skipped: {
                 [key: string]: number;
             };

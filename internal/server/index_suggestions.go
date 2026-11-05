@@ -309,6 +309,7 @@ func (s pgIndexSuggestionStore) IndexSuggestionData(ctx context.Context, id uuid
 	// table_indexes lists every index of a table: a table whose list is empty is
 	// known to have none. Its databases ignore the partial index_def facts.
 	known := map[indexadvice.Key]bool{}
+	unparsed := map[indexadvice.Key]bool{}
 	rows, err = s.pool.Query(ctx, indexSuggestionTableIndexesSQL, id, database)
 	if err != nil {
 		return data, false, err
@@ -324,13 +325,18 @@ func (s pgIndexSuggestionStore) IndexSuggestionData(ctx context.Context, id uuid
 			continue
 		}
 		key := indexadvice.Key{Database: db, Schema: schema, Table: table}
-		known[key] = true
 		data.IndexesComplete[db] = true
+		var parsedList []indexadvice.IndexDef
 		for _, def := range list {
-			if parsed, perr := indexadvice.ParseIndexDef(def); perr == nil {
-				data.Indexes[key] = append(data.Indexes[key], parsed)
+			parsed, perr := indexadvice.ParseIndexDef(def)
+			if perr != nil {
+				unparsed[key] = true
+				continue
 			}
+			parsedList = append(parsedList, parsed)
 		}
+		known[key] = true
+		data.Indexes[key] = parsedList
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -386,8 +392,9 @@ func (s pgIndexSuggestionStore) IndexSuggestionData(ctx context.Context, id uuid
 			continue
 		}
 		meta := indexadvice.TableMeta{
-			Columns:      make(map[string]indexadvice.Column, len(facts)),
-			IndexesKnown: known[indexadvice.Key{Database: db, Schema: schema, Table: table}],
+			Columns:         make(map[string]indexadvice.Column, len(facts)),
+			IndexesKnown:    known[indexadvice.Key{Database: db, Schema: schema, Table: table}],
+			IndexesUnparsed: unparsed[indexadvice.Key{Database: db, Schema: schema, Table: table}],
 		}
 		for _, f := range facts {
 			col := indexadvice.Column{Type: f.Type, TypLen: f.TypLen, NDistinct: f.NDistinct}
