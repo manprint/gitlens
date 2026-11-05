@@ -385,7 +385,17 @@ offers Search all states.
 
 #### Index analysis
 
-Index analysis has Indexes, Cleanup and Dead rows tabs for one server. Its
+Index analysis has Indexes, Cleanup, Dead rows and Suggestions tabs for one
+server. The Suggestions tab (`GET /api/v1/instances/{id}/index-suggestions`,
+`?tab=suggestions`) proposes btree indexes from the statement statistics of an
+analysis window (1h, 6h, 24h or 7d, `?window=`): each row gives the key
+columns, the share of read time the index could save, an estimated size
+(`~`, from planner statistics), the table's write rates, a verdict (strong,
+moderate or write-heavy, from the read/write ratio) and the statements behind
+it; expanding a row shows a `CREATE INDEX CONCURRENTLY` statement to copy.
+These are estimates from heuristics: statements with OR conditions, expressions
+or unresolved aliases are skipped (the coverage line counts them), and pglens
+never creates an index. Its
 Search everything panel searches all that pglens collected for the server in
 the selected range (`GET /api/v1/instances/{id}/search`), grouped as Indexes,
 Tables, Columns and Queries, with at most 50 matches per group and the total
