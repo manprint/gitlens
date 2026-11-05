@@ -3065,9 +3065,7 @@ test('VIS-040 index suggestions show the ground-truth column of res_partner, and
     const row = table
       .locator('tbody tr')
       .filter({ hasText: 'res_partner' })
-      .filter({
-        hasText: new RegExp(`\\b${SUGGESTION_COLUMN}\\b`),
-      })
+      .filter({ has: page.getByRole('cell', { name: SUGGESTION_COLUMN, exact: true }) })
     await expect(row.first()).toBeVisible()
     await expect(row.first()).toContainText('~')
     await expect(

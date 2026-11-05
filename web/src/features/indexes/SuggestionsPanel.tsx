@@ -342,7 +342,7 @@ export function SuggestionsPanel({ instanceId, database }: SuggestionsPanelProps
       titleId="index-suggestions-title"
     >
       <p
-        className="text-muted-foreground border-b px-5 py-2 text-sm"
+        className="text-muted-foreground border-b px-5 py-2 text-sm min-[1600px]:py-0 min-[1600px]:text-xs"
         data-testid="suggestion-coverage"
       >
         {coverageText(response.coverage)}
