@@ -216,7 +216,7 @@ function DataTableView<TData extends RowData>({
 
   return (
     <div
-      className="space-y-3"
+      className="space-y-3 min-[1600px]:space-y-2"
       data-card=""
       data-table-card
       {...(captionId === undefined ? {} : { 'data-caption-id': captionId })}
@@ -238,20 +238,22 @@ function DataTableView<TData extends RowData>({
             />
           </div>
         ) : toolbarExtra ? (
-          <div className="flex min-w-0 flex-1 flex-wrap items-end gap-3">{toolbarExtra}</div>
+          <div className="flex min-w-0 flex-1 flex-wrap items-end gap-3 min-[1600px]:gap-x-2">
+            {toolbarExtra}
+          </div>
         ) : (
           <span />
         )}
         {captionId !== undefined ? (
           // Below 1600 px the caption is a full line above the controls; from 1600 px it
           // sits beside them, two lines at most in a bounded width (D26).
-          <div className="order-first flex w-full min-w-0 items-center gap-1 self-center min-[1600px]:order-none min-[1600px]:w-auto min-[1600px]:max-w-md min-[1600px]:min-w-48 min-[1600px]:flex-initial">
+          <div className="order-first flex w-full min-w-0 items-center gap-1 self-center min-[1600px]:order-none min-[1600px]:w-auto min-[1600px]:max-w-sm min-[1600px]:min-w-48 min-[1600px]:flex-initial">
             <Caption className="text-xs" id={captionId} marked={false} oneLine />
             <InfoHint className="shrink-0" id={captionId} label={ariaLabel} />
           </div>
         ) : null}
         <details className="relative">
-          <summary className="border-input bg-card text-muted-foreground hover:bg-muted hover:text-foreground inline-flex h-8 list-none items-center gap-1.5 rounded-md border px-3 text-xs font-medium shadow-xs transition-colors [&::-webkit-details-marker]:hidden">
+          <summary className="border-input bg-card text-muted-foreground hover:bg-muted hover:text-foreground inline-flex h-8 list-none items-center gap-1.5 rounded-md border px-3 text-xs font-medium shadow-xs transition-colors min-[1600px]:h-7 [&::-webkit-details-marker]:hidden">
             <Columns3 aria-hidden="true" className="size-3.5" />
             Columns
           </summary>

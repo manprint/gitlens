@@ -213,24 +213,20 @@ describe('IndexAnalysisPage on a Full HD screen (15.3)', () => {
     )
   })
 
-  it('FHD-APPLY-035 the title and description sit on a first row, the figures, view tabs and notes on a second, a note wraps and keeps its title', async () => {
+  it('FHD-APPLY-035 the title, description, figures, view tabs and notes share one header row, a note wraps and keeps its title', async () => {
     render('/indexes', true)
     await flushNetwork(30)
 
     const header = panelHeader()
-    const first = screen.getByTestId('index-panel-first-row')
-    const second = screen.getByTestId('index-panel-second-row')
-    expect(header).toContainElement(first)
-    expect(header).toContainElement(second)
-    expect(first).toContainElement(screen.getByRole('heading', { name: 'Index inventory' }))
-    expect(first).toHaveClass('min-[1600px]:flex-row')
+    expect(header).toContainElement(screen.getByRole('heading', { name: 'Index inventory' }))
+    expect(header).toHaveClass('min-[1600px]:flex-row')
     const tile = screen.getByRole('article', { name: 'Indexes reported' })
-    expect(second).toContainElement(tile)
+    expect(header).toContainElement(tile)
     expect(tile).toHaveAttribute('title', 'Indexes reported: 2 indexes')
-    expect(first).toContainElement(screen.getByRole('tablist', { name: 'Index views' }))
+    expect(header).toContainElement(screen.getByRole('tablist', { name: 'Index views' }))
 
     const note = noteFor('The list is incomplete.')
-    expect(second).toContainElement(note)
+    expect(header).toContainElement(note)
     expect(note.className).not.toMatch(/truncate/)
     expect(note.getAttribute('title')).toMatch(/^The list is incomplete\. .*top_n/)
     expect(screen.getByText(/^2 indexes\. Scan figures/)).toHaveClass('min-[1600px]:line-clamp-2')

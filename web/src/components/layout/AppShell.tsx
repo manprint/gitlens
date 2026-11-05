@@ -89,7 +89,7 @@ export function AppShell() {
           ref={mainRef}
           // The header is 3.5rem plus its 1px border; from 1600 px the content takes the full
           // width with a tighter vertical padding (D26).
-          className="mx-auto min-h-[calc(100vh-3.5rem-1px)] w-full max-w-[1600px] px-4 py-6 outline-none min-[1600px]:max-w-none min-[1600px]:py-4 sm:px-6 lg:px-8"
+          className="mx-auto min-h-[calc(100vh-3.5rem-1px)] w-full max-w-[1600px] px-4 py-6 outline-none min-[1600px]:max-w-none min-[1600px]:py-3 sm:px-6 lg:px-8"
           id="main"
           tabIndex={-1}
         >

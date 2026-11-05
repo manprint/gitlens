@@ -210,27 +210,41 @@ export function SimpleTable<T>({
   const columnCount = columns.length + (renderDetail ? 1 : 0)
   return (
     <div
-      className="space-y-3"
+      className="space-y-3 min-[1600px]:space-y-2"
       data-table-card
       {...(captionId === undefined ? {} : { 'data-card': '', 'data-caption-id': captionId })}
     >
-      {captionId !== undefined ? (
-        <div className="flex w-full min-w-0 items-center gap-1">
-          <Caption className="text-xs" id={captionId} marked={false} oneLine />
-          <InfoHint className="shrink-0" id={captionId} label={ariaLabel} />
+      {/* From 1600 px the caption sits beside the toolbar, two lines at most (D26), as in DataTable. */}
+      {toolbar || captionId !== undefined ? (
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          {toolbar ? (
+            <div className="min-w-0 flex-1">
+              <TableToolbar
+                activeFilterCount={view.activeFilterCount}
+                filters={view.filters}
+                label={ariaLabel}
+                onChange={set}
+                onClear={controls.clear}
+                options={view.options}
+                state={state}
+                {...(toolbar.searchLabel === undefined ? {} : { searchLabel: toolbar.searchLabel })}
+              />
+            </div>
+          ) : null}
+          {captionId !== undefined ? (
+            <div
+              className={cn(
+                'flex min-w-0 items-center gap-1',
+                toolbar
+                  ? 'order-first w-full min-[1600px]:order-none min-[1600px]:w-auto min-[1600px]:max-w-xl min-[1600px]:min-w-48 min-[1600px]:flex-initial'
+                  : 'w-full',
+              )}
+            >
+              <Caption className="text-xs" id={captionId} marked={false} oneLine />
+              <InfoHint className="shrink-0" id={captionId} label={ariaLabel} />
+            </div>
+          ) : null}
         </div>
-      ) : null}
-      {toolbar ? (
-        <TableToolbar
-          activeFilterCount={view.activeFilterCount}
-          filters={view.filters}
-          label={ariaLabel}
-          onChange={set}
-          onClear={controls.clear}
-          options={view.options}
-          state={state}
-          {...(toolbar.searchLabel === undefined ? {} : { searchLabel: toolbar.searchLabel })}
-        />
       ) : null}
       {view.filtered.length === 0 ? (
         <NoRowsMatch loaded={rows.length} scope={scope} />

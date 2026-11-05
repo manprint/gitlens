@@ -43,6 +43,7 @@ export function TablePagination({
               aria-label={label}
               disabled={disabled}
               onClick={() => onPage(target)}
+              className="min-[1600px]:size-7"
               size="icon-sm"
               type="button"
               variant="outline"
@@ -59,6 +60,7 @@ export function TablePagination({
               aria-label={label}
               disabled={disabled}
               onClick={() => onPage(target)}
+              className="min-[1600px]:size-7"
               size="icon-sm"
               type="button"
               variant="outline"
@@ -72,7 +74,7 @@ export function TablePagination({
         Rows per page
         <NativeSelect
           aria-label="Rows per page"
-          className="h-8 px-2 text-xs"
+          className="h-8 px-2 text-xs min-[1600px]:h-7"
           onChange={(event) => onPageSize(Number(event.target.value))}
           value={pageSize}
         >

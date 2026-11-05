@@ -46,7 +46,7 @@ export function TableToolbar<T>({
     onChange({ filters: { ...state.filters, [id]: value } })
 
   return (
-    <div className="flex flex-wrap items-end gap-3">
+    <div className="flex flex-wrap items-end gap-3 min-[1600px]:gap-x-2">
       <div role="search" aria-label={`${label} search`} className="relative w-full max-w-xs">
         <Search
           aria-hidden="true"
@@ -54,7 +54,7 @@ export function TableToolbar<T>({
         />
         <Input
           aria-label={searchLabel ?? `Search ${label}`}
-          className="h-8 pl-8 text-sm"
+          className="h-8 pl-8 text-sm min-[1600px]:h-7"
           onChange={(event) => onChange({ q: event.target.value })}
           placeholder="Search"
           type="search"
@@ -74,7 +74,7 @@ export function TableToolbar<T>({
               </span>
               <Input
                 aria-label={name}
-                className="h-8 w-28 text-sm"
+                className="h-8 w-28 text-sm min-[1600px]:h-7"
                 inputMode="numeric"
                 min={0}
                 onChange={(event) => setFilter(spec.id, event.target.value)}
@@ -92,7 +92,7 @@ export function TableToolbar<T>({
               <span aria-hidden="true" className="text-muted-foreground min-[1600px]:hidden">
                 {spec.label}
               </span>
-              <div className="flex h-8 flex-wrap items-center gap-3">
+              <div className="flex h-8 flex-wrap items-center gap-3 min-[1600px]:h-7">
                 {choices.map((choice) => (
                   <label key={choice.value} className="flex items-center gap-1.5 text-sm">
                     <input
@@ -125,7 +125,7 @@ export function TableToolbar<T>({
             </span>
             <NativeSelect
               aria-label={name}
-              className="h-8 px-2 text-sm"
+              className="h-8 px-2 text-sm min-[1600px]:h-7"
               onChange={(event) => setFilter(spec.id, event.target.value)}
               value={value}
             >
@@ -143,7 +143,7 @@ export function TableToolbar<T>({
       {extra}
 
       {activeFilterCount > 0 ? (
-        <div className="flex h-8 items-center gap-2 text-xs">
+        <div className="flex h-8 items-center gap-2 text-xs min-[1600px]:h-7">
           <span className="text-muted-foreground">
             {activeFilterCount} {activeFilterCount === 1 ? 'filter' : 'filters'} active
           </span>

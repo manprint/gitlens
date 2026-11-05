@@ -132,7 +132,7 @@ export function SearchBox({
           ref={input}
           aria-label={label}
           {...(description === undefined ? {} : { 'aria-describedby': descriptionId })}
-          className="h-8 pr-14 pl-8 text-sm [&::-webkit-search-cancel-button]:appearance-none"
+          className="h-8 pr-14 pl-8 text-sm min-[1600px]:h-7 [&::-webkit-search-cancel-button]:appearance-none"
           id={id}
           maxLength={SEARCH_MAX_LENGTH}
           onChange={(event) => setDraft(event.target.value)}

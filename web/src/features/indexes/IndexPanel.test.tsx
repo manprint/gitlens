@@ -37,12 +37,10 @@ function fullHdClasses(element: Element): string[] {
 }
 
 describe('IndexPanel header on a Full HD screen (bug-HDR)', () => {
-  it('HDR-UI-001 the first row keeps the whole title and gives the description the rest, two lines at most', () => {
+  it('HDR-UI-001 the title block keeps the whole title and gives the description the rest, two lines at most', () => {
     renderPanel()
     const header = screen.getByTestId('index-panel-header')
-    const first = screen.getByTestId('index-panel-first-row')
-    expect(header).toContainElement(first)
-    expect(first).toHaveClass('min-[1600px]:flex-row')
+    expect(header).toHaveClass('min-[1600px]:flex-row', 'min-[1920px]:flex-nowrap')
 
     const title = screen.getByRole('heading', { level: 2, name: 'Index inventory' })
     expect(title).toHaveClass('min-[1600px]:shrink-0', 'min-[1600px]:whitespace-nowrap')
@@ -51,52 +49,47 @@ describe('IndexPanel header on a Full HD screen (bug-HDR)', () => {
     }
 
     const titleBlock = screen.getByTestId('index-panel-title-block')
-    expect(first).toContainElement(titleBlock)
+    expect(header).toContainElement(titleBlock)
     expect(titleBlock).toContainElement(title)
-    expect(titleBlock).toHaveClass('min-[1600px]:flex', 'min-[1600px]:flex-1')
+    expect(titleBlock).toHaveClass('min-[1600px]:flex', 'min-[1600px]:min-w-min')
 
     const description = screen.getByTitle(
       'Every index the agent reported, with its size, scans and advisor flags.',
     )
     expect(titleBlock).toContainElement(description)
-    expect(description).toHaveClass(
-      'min-[1600px]:line-clamp-2',
-      'min-[1600px]:min-w-0',
-      'min-[1600px]:flex-1',
-    )
+    expect(description).toHaveClass('min-[1600px]:line-clamp-2', 'min-[1600px]:flex-[1_1_10rem]')
     expect(description.className).not.toMatch(/truncate/)
   })
 
-  it('HDR-UI-002 the notes and figures sit on a second row; a note wraps and is never cut', () => {
+  it('HDR-UI-002 the notes and figures share the one header row; a note wraps and is never cut', () => {
     renderPanel()
     const header = screen.getByTestId('index-panel-header')
-    const second = screen.getByTestId('index-panel-second-row')
-    expect(header).toContainElement(second)
-    expect(screen.getByTestId('index-panel-first-row')).not.toContainElement(second)
+    expect(screen.queryByTestId('index-panel-first-row')).toBeNull()
+    expect(screen.queryByTestId('index-panel-second-row')).toBeNull()
 
     const notes = screen.getAllByRole('status')
     expect(notes).toHaveLength(2)
     const row = screen.getByTestId('index-panel-notes')
-    expect(second).toContainElement(row)
+    expect(header).toContainElement(row)
     for (const note of notes) {
       expect(row).toContainElement(note)
       expect(note.className).not.toMatch(/truncate/)
       expect(note).toHaveAttribute('title', note.textContent)
     }
-    expect(second).toContainElement(screen.getByRole('article', { name: 'Indexes' }))
+    expect(header).toContainElement(screen.getByRole('article', { name: 'Indexes' }))
   })
 
-  it('HDR-UI-003 a second row too narrow for its parts wraps; the actions stay at the right end of the first row', () => {
+  it('HDR-UI-003 a header too narrow for its parts wraps below 1920 px; the actions stay at the right end', () => {
     renderPanel()
-    const second = screen.getByTestId('index-panel-second-row')
-    expect(second).toHaveClass('min-[1600px]:flex-wrap', 'min-[1600px]:gap-y-2')
+    const header = screen.getByTestId('index-panel-header')
+    expect(header).toHaveClass('min-[1600px]:flex-wrap', 'min-[1600px]:gap-y-2')
 
     const row = screen.getByTestId('index-panel-notes')
-    expect(row).toHaveClass('min-[1600px]:min-w-[28rem]', 'min-[1600px]:flex-1')
+    expect(row).toHaveClass('min-[1600px]:min-w-[22rem]')
+    expect(row.className).toMatch(/min-\[1600px\]:flex-\[3_0\.5_34rem\]/)
 
-    const first = screen.getByTestId('index-panel-first-row')
     const actions = screen.getByTestId('index-panel-actions')
-    expect(first).toContainElement(actions)
+    expect(header).toContainElement(actions)
     expect(actions).toContainElement(screen.getByRole('button', { name: 'Copy' }))
     expect(actions).toHaveClass('shrink-0', 'min-[1600px]:ml-auto')
   })

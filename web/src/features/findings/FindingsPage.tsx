@@ -489,7 +489,7 @@ export function FindingsPage() {
               <FilterControl hint="findings.filter-state" label="State">
                 <NativeSelect
                   aria-label="State"
-                  className="h-8 px-2 text-sm"
+                  className="h-8 px-2 text-sm min-[1600px]:h-7"
                   id="findings-state"
                   onChange={(event) =>
                     updateFilter('state', event.target.value === 'active' ? '' : event.target.value)
@@ -507,7 +507,7 @@ export function FindingsPage() {
               <FilterControl hint="findings.filter-severity" label="Severity">
                 <NativeSelect
                   aria-label="Severity"
-                  className="h-8 px-2 text-sm"
+                  className="h-8 px-2 text-sm min-[1600px]:h-7"
                   id="findings-severity"
                   onChange={(event) =>
                     updateFilter('severity', event.target.value === 'all' ? '' : event.target.value)
@@ -523,7 +523,7 @@ export function FindingsPage() {
               <FilterControl hint="findings.filter-scope" label="Scope">
                 <NativeSelect
                   aria-label="Scope"
-                  className="h-8 px-2 text-sm"
+                  className="h-8 px-2 text-sm min-[1600px]:h-7"
                   id="findings-scope"
                   onChange={(event) =>
                     updateFilter('scope', event.target.value === 'all' ? '' : event.target.value)
@@ -538,7 +538,7 @@ export function FindingsPage() {
               <FilterControl label="Cluster">
                 <NativeSelect
                   aria-label="Cluster"
-                  className="h-8 w-44 px-2 text-sm"
+                  className="h-8 w-44 px-2 text-sm min-[1600px]:h-7"
                   id="findings-cluster"
                   onChange={(event) => updateFilter('cluster_id', event.target.value)}
                   value={clusterId}
@@ -554,7 +554,7 @@ export function FindingsPage() {
               <FilterControl label="Instance">
                 <NativeSelect
                   aria-label="Instance"
-                  className="h-8 w-56 px-2 text-sm"
+                  className="h-8 w-56 px-2 text-sm min-[1600px]:h-7"
                   id="findings-instance"
                   onChange={(event) => updateFilter('instance_id', event.target.value)}
                   value={instanceId}
@@ -570,7 +570,7 @@ export function FindingsPage() {
               {/* Polite: a new search's match count is announced. */}
               <p
                 aria-live="polite"
-                className="text-muted-foreground basis-full text-sm min-[1600px]:min-w-0 min-[1600px]:flex-1 min-[1600px]:basis-auto min-[1600px]:self-center min-[1600px]:truncate"
+                className="text-muted-foreground basis-full text-sm min-[1600px]:line-clamp-2 min-[1600px]:min-w-[14rem] min-[1600px]:flex-1 min-[1600px]:basis-0 min-[1600px]:self-center min-[1600px]:text-xs"
                 title={description}
               >
                 {description}

@@ -235,7 +235,7 @@ function InstanceIndexes({ serverControl, instanceId, siblings }: AnalysisProps)
   )
 
   return (
-    <Tabs className="gap-6 min-[1600px]:gap-4" onValueChange={setTab} value={tab}>
+    <Tabs className="gap-6 min-[1600px]:gap-3" onValueChange={setTab} value={tab}>
       <IndexPageHeader actions={controls} />
       <SearchEverythingResults database={database} instanceId={instanceId} />
       {missing !== null ? (

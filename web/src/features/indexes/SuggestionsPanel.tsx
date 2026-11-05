@@ -164,7 +164,7 @@ function suggestionColumns(): SimpleColumn<IndexSuggestion>[] {
           {writesCell(row.write)}
         </span>
       ),
-      '24rem',
+      '16rem',
       { help: 'indexes.suggest-writes' },
     ),
     sortable(
@@ -178,7 +178,7 @@ function suggestionColumns(): SimpleColumn<IndexSuggestion>[] {
       '8rem',
       { help: 'indexes.suggest-verdict' },
     ),
-    sortable('statements', 'Statements', (row) => formatCount(row.statements.length), '10rem', {
+    sortable('statements', 'Statements', (row) => formatCount(row.statements.length), '11rem', {
       help: 'indexes.suggest-statements',
     }),
   ]

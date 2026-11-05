@@ -303,22 +303,18 @@ function noteFor(headline: string): HTMLElement {
 }
 
 describe('DeadRowsPanel on a Full HD screen (15.3)', () => {
-  it('FHD-APPLY-037 the title and description on a first row, the figures and notes on a second, each table row one line', async () => {
+  it('FHD-APPLY-037 the header is one row of title, description, figures and notes, each table row one line', async () => {
     render({ settings: [], truncated: true })
     await flushNetwork(30)
 
     expect(screen.getAllByRole('table')).toHaveLength(1)
     const header = panelHeader()
-    const first = screen.getByTestId('index-panel-first-row')
-    const second = screen.getByTestId('index-panel-second-row')
-    expect(header).toContainElement(first)
-    expect(header).toContainElement(second)
-    expect(first).toContainElement(screen.getByRole('heading', { name: 'Tables by dead rows' }))
-    expect(first).toHaveClass('min-[1600px]:flex-row')
-    expect(second).toContainElement(screen.getByRole('article', { name: 'Dead rows' }))
+    expect(header).toContainElement(screen.getByRole('heading', { name: 'Tables by dead rows' }))
+    expect(header).toHaveClass('min-[1600px]:flex-row')
+    expect(header).toContainElement(screen.getByRole('article', { name: 'Dead rows' }))
     for (const headline of ['The list is incomplete.', 'Vacuum due is approximate.']) {
       const note = noteFor(headline)
-      expect(second).toContainElement(note)
+      expect(header).toContainElement(note)
       expect(note.className).not.toMatch(/truncate/)
       expect(note.getAttribute('title')).toContain(headline)
     }

@@ -247,7 +247,7 @@ function indexColumns(
       sortValue: (row) => sortValue(row, 'lastScan'),
       firstDirection: 'desc',
       className: 'whitespace-nowrap',
-      width: '9rem',
+      width: '10.5rem',
       truncate: (row) => lastScanText(row, now),
       cell: (row) => lastScanText(row, now),
     },

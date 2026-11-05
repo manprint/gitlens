@@ -633,7 +633,7 @@ describe('FindingsPage', () => {
     expect(within(screen.getByTestId('simple-table-rows')).getAllByRole('row')).toHaveLength(20)
   })
 
-  it('FHD-APPLY-015 puts the summary in the section header and the hidden counts in its truncated description', async () => {
+  it('FHD-APPLY-015 puts the summary in the section header and the hidden counts in its two-line description', async () => {
     await renderFindings([
       finding({ finding_id: 'open', title: 'Visible open' }),
       finding({ finding_id: 'muted', state: 'muted', title: 'Hidden muted' }),
@@ -648,9 +648,9 @@ describe('FindingsPage', () => {
     expect(within(summary).getByRole('button', { name: /Warning\s+1/ })).toHaveClass(
       'min-[1600px]:h-6',
     )
-    // The count is a polite live region on its own truncated line of the filter group (17.2).
+    // The count is a polite live region on its own two-line clamp of the filter group (17.2).
     const description = within(section).getByText(/0 resolved findings are hidden/, {
-      selector: 'p.min-\\[1600px\\]\\:truncate',
+      selector: 'p.min-\\[1600px\\]\\:line-clamp-2',
     })
     expect(description).toHaveAttribute('aria-live', 'polite')
     expect(description).toHaveAttribute(

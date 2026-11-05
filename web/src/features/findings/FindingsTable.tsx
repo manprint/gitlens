@@ -76,7 +76,7 @@ const findingColumns = (
   {
     id: 'rule',
     header: 'Rule',
-    width: '22rem',
+    width: '21rem',
     help: 'rules.rule',
     truncate: ruleLine,
     cell: (finding) => <RuleCell ruleId={finding.rule_id} />,
@@ -84,7 +84,8 @@ const findingColumns = (
   {
     id: 'scope',
     header: 'Scope',
-    width: '8rem',
+    className: 'whitespace-nowrap',
+    width: '9rem',
     help: 'findings.scope',
     cell: (finding) => scopeLabel(finding.scope),
   },

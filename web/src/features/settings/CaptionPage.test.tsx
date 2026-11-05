@@ -65,7 +65,9 @@ async function renderSettings(route: string) {
   const view = renderWithProviders(<SettingsPage />, { route })
   await settle()
   await waitFor(() => {
+    // eslint-disable-next-line testing-library/no-node-access -- cards carry no role, only data-card
     expect(view.container.querySelector('[data-card]')).not.toBeNull()
+    // eslint-disable-next-line testing-library/no-node-access -- aria-busy has no role to query by
     expect(view.container.querySelector('[aria-busy="true"]')).toBeNull()
   })
   return view
