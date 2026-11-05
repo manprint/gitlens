@@ -204,6 +204,17 @@ func TestIDXE009_PartialIndexListIsDisclosed(t *testing.T) {
 	require.Empty(t, got.Notes, "a complete list needs no caveat")
 }
 
+// A database that reported as many tables as the agent's limit: the response
+// says a table beyond it may be suggested an index it already has.
+func TestIDXE010_TruncatedInventoryIsDisclosed(t *testing.T) {
+	t.Parallel()
+	data := suggestionsFixture()
+	data.InventoryTruncated = map[string]bool{"odoo": true}
+	got := buildIndexSuggestions(uuid.New(), time.Hour, 20, data, time.Now())
+	require.Len(t, got.Notes, 1)
+	require.Contains(t, got.Notes[0], "limit of 1000 tables")
+}
+
 // requireNoNulls fails on a null anywhere except the two nullable fields of the
 // contract: a nil slice or map would break required arrays of the schema.
 func requireNoNulls(t *testing.T, body []byte) {

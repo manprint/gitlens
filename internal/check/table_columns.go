@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/manprint/pglens/internal/pgtype"
+	"github.com/manprint/pglens/internal/wire"
 )
 
 func init() { Register(&tableColumnsCheck{}) }
@@ -25,7 +26,7 @@ const tableIndexesFactKind = "table_indexes"
 // tableColumnsFactLimit bounds the facts of one database, largest tables
 // first. The inventory sizes the indexes the server suggests, and a table
 // outside the limit gets a suggestion without a size estimate.
-const tableColumnsFactLimit = 1000
+const tableColumnsFactLimit = wire.TableInventoryLimit
 
 // tableColumnsQuery lists the tables of a database with the columns of each as
 // a JSON array: name, attribute number, type, fixed length (-1 for a variable

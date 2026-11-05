@@ -401,7 +401,11 @@ creates an index. The agent lists every valid index of each table (the
 `table_indexes` fact, with the table's columns, hourly), so an index that
 exists is never suggested again; a relation that is not an ordinary table
 (a view) is skipped as `not_table`, and a table whose index definition pglens
-cannot read as `index_unparsed`. An older agent only reports some index
+cannot read as `index_unparsed`. The agent reports the 1000 largest tables of
+each database, hourly: a database that reaches that limit may have more, so a
+relation outside its list is analysed as before and the response carries a note;
+a table created since the last report is skipped as `not_table` for up to an
+hour. An older agent only reports some index
 definitions: the response then carries a note saying an existing index may be
 suggested again.
 

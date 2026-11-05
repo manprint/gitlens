@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/manprint/pglens/internal/indexadvice"
+	"github.com/manprint/pglens/internal/wire"
 )
 
 // Missing-index suggestions (phase 4, D8). The endpoint loads the statements of
@@ -49,6 +50,9 @@ type indexSuggestionData struct {
 	// their index list is complete. Others only know the index_def facts of
 	// the indexes the agent selected, so an existing index may be missing.
 	IndexesComplete map[string]bool
+	// InventoryTruncated marks the databases that reported as many tables as the
+	// agent's limit: tables beyond it have no table_indexes fact.
+	InventoryTruncated map[string]bool
 }
 
 // indexSuggestionStore loads the data of one instance; found is false for an
@@ -164,7 +168,7 @@ func (a *API) handleIndexSuggestions(w http.ResponseWriter, r *http.Request) {
 func buildIndexSuggestions(id uuid.UUID, window time.Duration, limit int, data indexSuggestionData, now time.Time) indexSuggestionsJSON {
 	out := indexadvice.Suggest(indexadvice.Input{
 		Window: window, Statements: data.Statements, TotalExecMsRate: data.TotalExecMsRate,
-		Tables: data.Tables, Indexes: data.Indexes, IndexesComplete: data.IndexesComplete, Limit: limit,
+		Tables: data.Tables, Indexes: data.Indexes, IndexesComplete: data.IndexesComplete, InventoryTruncated: data.InventoryTruncated, Limit: limit,
 	})
 	out.Coverage.StatementsConsidered += data.NoText
 	if data.NoText > 0 {
@@ -179,6 +183,12 @@ func buildIndexSuggestions(id uuid.UUID, window time.Duration, limit int, data i
 	}
 	if data.ColumnFacts && len(data.IndexesComplete) == 0 && out.Coverage.StatementsConsidered > 0 {
 		notes = append(notes, "The agent does not report every index definition: an index that already exists may be suggested again.")
+	}
+	for _, truncated := range data.InventoryTruncated {
+		if truncated && out.Coverage.StatementsConsidered > 0 {
+			notes = append(notes, "The table list of a database reached the agent's limit of "+strconv.Itoa(wire.TableInventoryLimit)+" tables: a table beyond it may be suggested an index it already has.")
+			break
+		}
 	}
 	return indexSuggestionsJSON{
 		InstanceID: id.String(), GeneratedAt: now.UTC(), WindowSeconds: int(window / time.Second),
@@ -272,11 +282,13 @@ func (s pgIndexSuggestionStore) IndexSuggestionData(ctx context.Context, id uuid
 		return indexSuggestionData{}, false, err
 	}
 	data := indexSuggestionData{
-		TotalExecMsRate: map[string]float64{},
-		Tables:          map[indexadvice.Key]indexadvice.TableMeta{},
-		Indexes:         map[indexadvice.Key][]indexadvice.IndexDef{},
-		IndexesComplete: map[string]bool{},
+		TotalExecMsRate:    map[string]float64{},
+		Tables:             map[indexadvice.Key]indexadvice.TableMeta{},
+		Indexes:            map[indexadvice.Key][]indexadvice.IndexDef{},
+		IndexesComplete:    map[string]bool{},
+		InventoryTruncated: map[string]bool{},
 	}
+	reported := map[string]int{}
 	secs := window.Seconds()
 
 	rows, err := s.pool.Query(ctx, indexSuggestionStatementsSQL, id, secs, database, clusterID, indexSuggestionsStatementCap)
@@ -326,6 +338,10 @@ func (s pgIndexSuggestionStore) IndexSuggestionData(ctx context.Context, id uuid
 		}
 		key := indexadvice.Key{Database: db, Schema: schema, Table: table}
 		data.IndexesComplete[db] = true
+		reported[db]++
+		if reported[db] >= wire.TableInventoryLimit {
+			data.InventoryTruncated[db] = true
+		}
 		var parsedList []indexadvice.IndexDef
 		for _, def := range list {
 			parsed, perr := indexadvice.ParseIndexDef(def)
@@ -353,7 +369,7 @@ func (s pgIndexSuggestionStore) IndexSuggestionData(ctx context.Context, id uuid
 			rows.Close()
 			return data, false, err
 		}
-		if data.IndexesComplete[db] {
+		if data.IndexesComplete[db] && !data.InventoryTruncated[db] {
 			continue
 		}
 		parsed, perr := indexadvice.ParseIndexDef(def)
@@ -370,6 +386,9 @@ func (s pgIndexSuggestionStore) IndexSuggestionData(ctx context.Context, id uuid
 			parsed.Name = name
 		}
 		key := indexadvice.Key{Database: db, Schema: schema, Table: table}
+		if known[key] {
+			continue
+		}
 		data.Indexes[key] = append(data.Indexes[key], parsed)
 	}
 	rows.Close()

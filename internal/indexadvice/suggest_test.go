@@ -492,3 +492,27 @@ func TestIDXS035_UnparsedIndexDefinitionSkipsTheTable(t *testing.T) {
 	require.Equal(t, 1, out.Coverage.Skipped[NoteIndexUnparsed])
 	require.Zero(t, out.Coverage.Skipped[NoteNotTable])
 }
+
+// A database whose inventory reached the agent's limit: a relation absent from
+// it may be a table beyond the limit, so it is analysed, not skipped as
+// not_table. A table the inventory lists keeps its complete list.
+func TestIDXS036_TruncatedInventoryKeepsAbsentTables(t *testing.T) {
+	in := input(`SELECT 1 FROM public.beyond WHERE x = $1`, `SELECT 1 FROM res_partner WHERE id = $1`)
+	meta := partnerMeta()
+	meta.IndexesKnown = true
+	in.Tables[partner] = meta
+	in.IndexesComplete = map[string]bool{testDB: true}
+	pk, err := ParseIndexDef("CREATE UNIQUE INDEX res_partner_pkey ON public.res_partner USING btree (id)")
+	require.NoError(t, err)
+	in.Indexes[partner] = []IndexDef{pk}
+
+	out := Suggest(in)
+	require.Empty(t, out.Suggestions)
+	require.Equal(t, 1, out.Coverage.Skipped[NoteNotTable])
+
+	in.InventoryTruncated = map[string]bool{testDB: true}
+	out = Suggest(in)
+	require.Len(t, out.Suggestions, 1, "the table beyond the limit is analysed")
+	require.Equal(t, "beyond", out.Suggestions[0].Table)
+	require.Zero(t, out.Coverage.Skipped[NoteNotTable])
+}

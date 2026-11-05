@@ -123,3 +123,9 @@ func ReplacedFactKinds(check string) []string {
 	sort.Strings(kinds)
 	return kinds
 }
+
+// TableInventoryLimit bounds the tables of one database that the table_columns
+// check reports, largest first. A database that reports this many tables may
+// have more: the server then cannot tell a relation that is not a table from a
+// table beyond the limit.
+const TableInventoryLimit = 1000

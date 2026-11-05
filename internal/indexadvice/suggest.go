@@ -96,7 +96,11 @@ type Input struct {
 	// view, a foreign table, a table past the inventory limit) is skipped as
 	// not_table: no complete index list could rule out an existing index.
 	IndexesComplete map[string]bool
-	Limit           int
+	// InventoryTruncated marks the databases whose table inventory may stop
+	// short of the last table: an absent relation there may be a table, so it is
+	// analysed as before instead of skipped as not_table.
+	InventoryTruncated map[string]bool
+	Limit              int
 }
 
 // KeyColumn is one column of a suggested index.
@@ -338,7 +342,7 @@ func buildCandidate(in Input, db string, g predGroup) (*candidate, string) {
 		switch {
 		case hasMeta && meta.IndexesUnparsed:
 			return nil, NoteIndexUnparsed
-		case !hasMeta || !meta.IndexesKnown:
+		case hasMeta && !meta.IndexesKnown, !hasMeta && !in.InventoryTruncated[db]:
 			return nil, NoteNotTable
 		}
 	}

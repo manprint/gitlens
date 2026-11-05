@@ -16,6 +16,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
+
+	"github.com/manprint/pglens/internal/wire"
 )
 
 func suggestionsGet(t *testing.T, pool *pgxpool.Pool, instance uuid.UUID, query string) (indexSuggestionsJSON, time.Duration) {
@@ -198,4 +200,27 @@ func TestIDXEINT005_UnparsedDefinitionSkipsTheTable(t *testing.T) {
 	resp, _ := suggestionsGet(t, pool, instance, "?window=1h&database=odoo")
 	require.Empty(t, resp.Suggestions)
 	require.Equal(t, 1, resp.Coverage.Skipped["index_unparsed"])
+}
+
+// IDXE-INT-006: a database that reported as many tables as the agent's limit
+// may have more: a table beyond it is analysed, not skipped as not_table, and
+// the response carries the caveat.
+func TestIDXEINT006_TruncatedInventoryKeepsAbsentTables(t *testing.T) {
+	pool := getSharedPool(t)
+	instance, cluster := seedSearchInstance(t, pool)
+	now := time.Now().UTC()
+	seedPartnerTable(t, pool, instance, cluster, now.Add(-5*time.Minute))
+	for i := 1; i < wire.TableInventoryLimit; i++ {
+		name := fmt.Sprintf("filler_%04d", i)
+		seedSearchFact(t, pool, instance, cluster, "odoo", "table_indexes", "public."+name,
+			map[string]string{"schemaname": "public", "relname": name}, "", []string{})
+	}
+	seedSuggestionStatement(t, pool, instance, cluster, 1, 40, 12, `SELECT id FROM public.beyond WHERE ref = $1`, now.Add(-30*time.Minute), now.Add(-10*time.Minute))
+
+	resp, _ := suggestionsGet(t, pool, instance, "?window=1h&database=odoo")
+	require.Len(t, resp.Suggestions, 1)
+	require.Equal(t, "beyond", resp.Suggestions[0].Table)
+	require.Zero(t, resp.Coverage.Skipped["not_table"])
+	require.Len(t, resp.Notes, 1)
+	require.Contains(t, resp.Notes[0], "limit of 1000 tables")
 }
