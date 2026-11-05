@@ -519,6 +519,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/instances/{id}/index-suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Suggest candidate btree indexes from the tracked statements of the window.
+         * @description Advisory and read-only: pglens parses the normalised text of the statements the agent tracks (at most 5000 per request, heaviest first), extracts the equality, range, prefix-match and ordering predicates on user tables, and scores the columns that no existing btree index already leads with. weight_pct is the share of the statements' total execution time (of the same database) that involves the key, an upper bound of what the index can save. Sizes derive from planner row counts and column widths, write rates from the table counters of the window. Every figure is an estimate; a suggestion is a candidate to evaluate and pglens never runs it. coverage reports how many statements were considered and analysed and why the rest was skipped. The window defaults to 24h and must be between 1h and 7d.
+         */
+        get: operations["getIndexSuggestions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instances/{id}/indexes": {
         parameters: {
             query?: never;
@@ -2278,6 +2298,82 @@ export interface components {
             step_seconds: number;
             tables: components["schemas"]["TableHistorySeries"][];
         };
+        IndexSuggestionsResponse: {
+            instance_id: components["schemas"]["InstanceId"];
+            generated_at: components["schemas"]["Timestamp"];
+            /** Format: int32 */
+            window_seconds: number;
+            estimates_note: string;
+            coverage: components["schemas"]["IndexSuggestionCoverage"];
+            suggestions: components["schemas"]["IndexSuggestion"][];
+            notes: string[];
+        };
+        IndexSuggestionCoverage: {
+            /** Format: int32 */
+            statements_considered: number;
+            /** Format: int32 */
+            statements_analysed: number;
+            /** @description Number of skipped statements per reason (for example no_text, expression, parse_error). */
+            skipped: {
+                [key: string]: number;
+            };
+        };
+        IndexSuggestion: {
+            /** @description Stable identifier of the key (database */
+            id: string;
+            database: string;
+            schema: string;
+            table: string;
+            columns: {
+                name: string;
+                desc: boolean;
+            }[];
+            /** @description CREATE INDEX CONCURRENTLY text to review; never executed by pglens. */
+            create_statement: string;
+            /**
+             * Format: double
+             * @description Share of the database's statement execution time involving the key.
+             */
+            weight_pct: number;
+            /** Format: double */
+            read_cost_ms_per_s: number;
+            /** Format: double */
+            calls_rate: number;
+            statements: {
+                /** Format: int64 */
+                queryid: number;
+                /** Format: double */
+                share_pct: number;
+                query_text: string;
+            }[];
+            overlapping_indexes: string[];
+            selectivity: {
+                column: string;
+                /** Format: double */
+                n_distinct: number | null;
+                /** @description high, medium, low or unknown. */
+                label: string;
+            };
+            /** Format: int64 */
+            est_size_bytes: number | null;
+            write: {
+                /** Format: double */
+                insert_rate: number;
+                /** Format: double */
+                update_rate: number;
+                /** Format: double */
+                delete_rate: number;
+                /** Format: double */
+                hot_update_ratio: number;
+            };
+            /** Format: double */
+            read_write_ratio: number;
+            /** @enum {string} */
+            verdict: "strong" | "moderate" | "write_heavy";
+            /** @enum {string} */
+            confidence: "high" | "medium" | "low";
+            notes: string[];
+        };
         WorkloadSeriesResponse: {
             /**
              * Format: int64
@@ -3663,6 +3759,46 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             404: components["responses"]["NotFound"];
             /** @description The server has no database pool. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getIndexSuggestions: {
+        parameters: {
+            query?: {
+                /** @description A Go duration such as 6h, or a number of days such as 2d. From 1h to 7d. */
+                window?: string;
+                /** @description Maximum number of suggestions, best first. */
+                limit?: number;
+                /** @description Only this database; all databases of the instance when absent. */
+                database?: string;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["InstanceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Suggestions, best first, with the coverage of the analysis. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IndexSuggestionsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            /** @description The server has no database pool, or the analysis exceeded its time budget. */
             503: {
                 headers: {
                     [name: string]: unknown;

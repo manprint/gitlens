@@ -1343,6 +1343,18 @@ for statements, 600 s for tables and indexes) and to at most 1000 buckets, and
 the response states the effective `step_seconds` and each series' `kind`
 (`rate` or `gauge`). For example: `curl -s -b cookies.txt 'http://localhost:8080/api/v1/instances/<instance-id>/workload/series?source=statements&series=calls,exec_time' | jq .`.
 
+Index suggestions are available at
+`/api/v1/instances/{id}/index-suggestions?window=24h&limit=20&database=<name>`
+(window from 1h to 7d, limit 1 to 100). pglens parses the normalised text of
+the tracked statements (at most 5000, heaviest first), and for each key that no
+existing btree index already leads with reports its `weight_pct` (share of the
+database's statement time involving it, an upper bound of the saving), an
+estimated size, the write rates of the table, a `verdict` (`strong`,
+`moderate`, `write_heavy`), a `confidence` and a `CREATE INDEX CONCURRENTLY`
+text to review. Everything is an estimate and pglens never runs the statement;
+`coverage` states how many statements were analysed and why the rest were
+skipped.
+
 Host metrics for a local target are available at:
 
 ```sh
@@ -1999,6 +2011,7 @@ GET    /api/v1/instances/{id}
 PATCH  /api/v1/instances/{id}
 GET    /api/v1/instances/{id}/activity|databases|host|settings|tables|indexes|bloat|command-audit|coverage
 GET    /api/v1/instances/{id}/workload/series
+GET    /api/v1/instances/{id}/index-suggestions
 GET    /api/v1/instances/{id}/search
 GET    /api/v1/instances/{id}/readiness
 GET    /api/v1/readiness/summary

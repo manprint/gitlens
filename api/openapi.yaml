@@ -1166,6 +1166,85 @@ components:
         tables:
           type: array
           items: { $ref: '#/components/schemas/TableHistorySeries' }
+    IndexSuggestionsResponse:
+      type: object
+      required: [instance_id, generated_at, window_seconds, estimates_note, coverage, suggestions, notes]
+      properties:
+        instance_id: { $ref: '#/components/schemas/InstanceId' }
+        generated_at: { $ref: '#/components/schemas/Timestamp' }
+        window_seconds: { type: integer, format: int32 }
+        estimates_note: { type: string }
+        coverage: { $ref: '#/components/schemas/IndexSuggestionCoverage' }
+        suggestions:
+          type: array
+          items: { $ref: '#/components/schemas/IndexSuggestion' }
+        notes:
+          type: array
+          items: { type: string }
+    IndexSuggestionCoverage:
+      type: object
+      required: [statements_considered, statements_analysed, skipped]
+      properties:
+        statements_considered: { type: integer, format: int32 }
+        statements_analysed: { type: integer, format: int32 }
+        skipped:
+          type: object
+          description: Number of skipped statements per reason (for example no_text, expression, parse_error).
+          additionalProperties: { type: integer, format: int32 }
+    IndexSuggestion:
+      type: object
+      required: [id, database, schema, table, columns, create_statement, weight_pct, read_cost_ms_per_s, calls_rate, statements, overlapping_indexes, selectivity, est_size_bytes, write, read_write_ratio, verdict, confidence, notes]
+      properties:
+        id: { type: string, description: Stable identifier of the key (database, table, columns). }
+        database: { type: string }
+        schema: { type: string }
+        table: { type: string }
+        columns:
+          type: array
+          items:
+            type: object
+            required: [name, desc]
+            properties:
+              name: { type: string }
+              desc: { type: boolean }
+        create_statement: { type: string, description: CREATE INDEX CONCURRENTLY text to review; never executed by pglens. }
+        weight_pct: { type: number, format: double, description: Share of the database's statement execution time involving the key. }
+        read_cost_ms_per_s: { type: number, format: double }
+        calls_rate: { type: number, format: double }
+        statements:
+          type: array
+          items:
+            type: object
+            required: [queryid, share_pct, query_text]
+            properties:
+              queryid: { type: integer, format: int64 }
+              share_pct: { type: number, format: double }
+              query_text: { type: string }
+        overlapping_indexes:
+          type: array
+          items: { type: string }
+        selectivity:
+          type: object
+          required: [column, n_distinct, label]
+          properties:
+            column: { type: string }
+            n_distinct: { type: [number, 'null'], format: double }
+            label: { type: string, description: 'high, medium, low or unknown.' }
+        est_size_bytes: { type: [integer, 'null'], format: int64 }
+        write:
+          type: object
+          required: [insert_rate, update_rate, delete_rate, hot_update_ratio]
+          properties:
+            insert_rate: { type: number, format: double }
+            update_rate: { type: number, format: double }
+            delete_rate: { type: number, format: double }
+            hot_update_ratio: { type: number, format: double }
+        read_write_ratio: { type: number, format: double }
+        verdict: { type: string, enum: [strong, moderate, write_heavy] }
+        confidence: { type: string, enum: [high, medium, low] }
+        notes:
+          type: array
+          items: { type: string }
     WorkloadSeriesResponse:
       type: object
       required: [step_seconds, source, series]
@@ -2927,6 +3006,80 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '503':
           description: The server has no database pool.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/instances/{id}/index-suggestions:
+    get:
+      tags: [instances]
+      operationId: getIndexSuggestions
+      summary: Suggest candidate btree indexes from the tracked statements of the window.
+      description: >-
+        Advisory and read-only: pglens parses the normalised text of the statements the agent tracks
+        (at most 5000 per request, heaviest first), extracts the equality, range, prefix-match and ordering
+        predicates on user tables, and scores the columns that no existing btree index already leads with.
+        weight_pct is the share of the statements' total execution time (of the same database) that
+        involves the key, an upper bound of what the index can save. Sizes derive from planner row counts
+        and column widths, write rates from the table counters of the window. Every figure is an estimate;
+        a suggestion is a candidate to evaluate and pglens never runs it. coverage reports how many
+        statements were considered and analysed and why the rest was skipped. The window defaults to 24h
+        and must be between 1h and 7d.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - name: window
+          in: query
+          required: false
+          description: A Go duration such as 6h, or a number of days such as 2d. From 1h to 7d.
+          schema: { type: string, default: 24h }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, format: int32, minimum: 1, maximum: 100, default: 20 }
+          description: Maximum number of suggestions, best first.
+        - name: database
+          in: query
+          required: false
+          description: Only this database; all databases of the instance when absent.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Suggestions, best first, with the coverage of the analysis.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IndexSuggestionsResponse' }
+              examples:
+                default:
+                  value:
+                    instance_id: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+                    generated_at: '2026-11-05T12:00:00Z'
+                    window_seconds: 86400
+                    estimates_note: Every figure is an estimate from the statistics of the window.
+                    coverage: { statements_considered: 2, statements_analysed: 2, skipped: {} }
+                    suggestions:
+                      - id: 2d4629f99baf
+                        database: odoo
+                        schema: public
+                        table: res_partner
+                        columns: [{ name: ref, desc: false }]
+                        create_statement: 'CREATE INDEX CONCURRENTLY idx_res_partner_ref ON public.res_partner (ref);'
+                        weight_pct: 40
+                        read_cost_ms_per_s: 40
+                        calls_rate: 12
+                        statements: [{ queryid: 11, share_pct: 100, query_text: 'SELECT id FROM res_partner WHERE ref = $1' }]
+                        overlapping_indexes: []
+                        selectivity: { column: ref, n_distinct: -0.8, label: high }
+                        est_size_bytes: 1380000
+                        write: { insert_rate: 0.5, update_rate: 1, delete_rate: 0.1, hot_update_ratio: 0.5 }
+                        read_write_ratio: 10.9
+                        verdict: strong
+                        confidence: high
+                        notes: []
+                    notes: []
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503':
+          description: The server has no database pool, or the analysis exceeded its time budget.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
