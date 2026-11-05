@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
 
+import { InfoHint } from '@/components/layout/InfoHint'
+import type { CaptionId } from '@/lib/captions'
 import { cn } from '@/lib/utils'
 
 /**
@@ -93,6 +95,8 @@ interface IndexPanelProps {
   /** The id of the title, which names the section. */
   titleId: string
   title: string
+  /** The panel's caption (D30, I-16): an ⓘ beside the title. */
+  captionId?: CaptionId
   /** The hint: one truncated line from 1600 px with the full text in its `title`. */
   description: string
   stats?: readonly PanelStat[]
@@ -106,6 +110,7 @@ interface IndexPanelProps {
 export function IndexPanel({
   titleId,
   title,
+  captionId,
   description,
   stats,
   notes,
@@ -133,12 +138,24 @@ export function IndexPanel({
           className="min-[1600px]:flex min-[1600px]:flex-1 min-[1600px]:items-baseline min-[1600px]:gap-3"
           data-testid="index-panel-title-block"
         >
-          <h2
-            className="text-base font-semibold min-[1600px]:shrink-0 min-[1600px]:whitespace-nowrap"
-            id={titleId}
-          >
-            {title}
-          </h2>
+          {captionId === undefined ? (
+            <h2
+              className="text-base font-semibold min-[1600px]:shrink-0 min-[1600px]:whitespace-nowrap"
+              id={titleId}
+            >
+              {title}
+            </h2>
+          ) : (
+            <span className="inline-flex items-baseline gap-1.5 min-[1600px]:shrink-0">
+              <h2
+                className="text-base font-semibold min-[1600px]:shrink-0 min-[1600px]:whitespace-nowrap"
+                id={titleId}
+              >
+                {title}
+              </h2>
+              <InfoHint id={captionId} label={title} />
+            </span>
+          )}
           <p
             className="text-muted-foreground mt-0.5 text-sm min-[1600px]:mt-0 min-[1600px]:w-0 min-[1600px]:flex-1 min-[1600px]:truncate"
             title={description}

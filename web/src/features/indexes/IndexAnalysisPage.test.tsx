@@ -6,6 +6,7 @@ import IndexAnalysisPage from './IndexAnalysisPage'
 import { base as clusters } from '@/test/fixtures/getClusters'
 import { INSTANCE_ID } from '@/test/fixture-helpers'
 import { custom as oneHourWindows } from '@/test/fixtures/getAdvisorWindows'
+import { base as indexHistory } from '@/test/fixtures/getIndexHistory'
 import { never, ok, status } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 import { flushNetwork } from '@/test/network'
@@ -31,6 +32,8 @@ function index(name: string, definition: string, extra: Record<string, unknown> 
     ...extra,
   }
 }
+
+vi.mock('echarts-for-react/esm/core', () => ({ default: () => null }))
 
 const ITEMS = [
   index('orders_pkey', 'CREATE UNIQUE INDEX orders_pkey ON public.orders USING btree (id)', {
@@ -158,6 +161,22 @@ describe('IndexAnalysisPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show details of orders_customer_idx' }))
     expect(screen.getByText('customer_id IS NOT NULL')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Copy index definition' })).toBeInTheDocument()
+  })
+
+  it('IDX-UI-012 shows the history charts of an expanded index and the Index tax tab', async () => {
+    server.use(ok('getIndexHistory', indexHistory))
+    render()
+    await flushNetwork(30)
+
+    expect(screen.getByRole('tab', { name: 'Index tax' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Show details of orders_customer_idx' }))
+    await flushNetwork(30)
+    expect(
+      screen.getByRole('img', { name: 'Index scans of orders_customer_idx' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('img', { name: 'Index size of orders_customer_idx' }),
+    ).toBeInTheDocument()
   })
 
   it('IDX-UI-005 warns that the list is incomplete when the agent truncated it', async () => {

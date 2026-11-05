@@ -18,6 +18,7 @@ import { chooseInstance, readLastInstance } from '@/lib/lastInstance'
 import { CleanupPanel, type SiblingServer } from './CleanupPanel'
 import { DeadRowsPanel } from './DeadRowsPanel'
 import { IndexesPanel } from './IndexesPanel'
+import { IndexTaxPanel } from './IndexTaxPanel'
 import { SearchEverythingBox, SearchEverythingResults } from './SearchEverything'
 import { SuggestionsPanel } from './SuggestionsPanel'
 import { INDEX_TABLE_IDS, INDEX_VIEW_PARAM } from './indexViews'
@@ -30,6 +31,7 @@ export const TABS = [
   { value: 'cleanup', label: 'Cleanup' },
   { value: 'dead-rows', label: 'Dead rows' },
   { value: 'suggestions', label: 'Suggestions' },
+  { value: 'tax', label: 'Index tax' },
 ] as const
 
 type TabValue = (typeof TABS)[number]['value']
@@ -41,7 +43,7 @@ function readTab(value: string | null): TabValue {
 }
 
 /** Every table of the page: a database change sends each back to its first page (D23). */
-const TABLE_IDS = [...INDEX_TABLE_IDS, 'cleanup', 'dead-rows', 'suggestions']
+const TABLE_IDS = [...INDEX_TABLE_IDS, 'cleanup', 'dead-rows', 'suggestions', 'tax']
 
 interface InstanceOption {
   id: string
@@ -267,6 +269,11 @@ function InstanceIndexes({ serverControl, instanceId, siblings }: AnalysisProps)
       </TabsContent>
       <TabsContent value="suggestions">
         <SuggestionsPanel database={database} instanceId={instanceId} />
+      </TabsContent>
+      <TabsContent value="tax">
+        {indexesState ?? (
+          <IndexTaxPanel database={database} instanceId={instanceId} rows={scoped} />
+        )}
       </TabsContent>
     </Tabs>
   )

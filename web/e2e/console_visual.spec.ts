@@ -3109,3 +3109,107 @@ test('VIS-040 index suggestions show the ground-truth column of res_partner, and
   await assertFits(page, api, fullHdRoute('/indexes?tab=suggestions'))
   browserErrors.assertClean()
 })
+
+test('VIS-041 an expanded Odoo index shows its scan and size history, and Index tax matches PostgreSQL for res_partner', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, 3 * 30_000))
+  const browserErrors = collectConsoleErrors(page)
+  const instanceId = await pickInstance(api)
+
+  const indexesResponse = await api.get(`/api/v1/instances/${instanceId}/indexes?limit=500`)
+  expect(indexesResponse.status()).toBe(200)
+  const indexes = (
+    (await indexesResponse.json()) as {
+      items: {
+        datname: string
+        schemaname: string
+        relname: string
+        indexrelname: string
+        index_bytes: number
+        is_primary: boolean
+      }[]
+    }
+  ).items.filter(
+    (item) =>
+      item.datname === 'odoo' && item.schemaname === 'public' && item.relname === 'res_partner',
+  )
+  expect(indexes.length, 'no res_partner index reported').toBeGreaterThan(1)
+  const target = indexes.find((item) => !item.is_primary) ?? indexes[0]!
+
+  // The history endpoint: at least one stored point for a 6 h window.
+  const to = new Date()
+  const from = new Date(to.getTime() - 6 * 3_600_000)
+  const historyResponse = await api.get(
+    `/api/v1/instances/${instanceId}/indexes/history?database=odoo&schema=public&index=${encodeURIComponent(
+      target.indexrelname,
+    )}&from=${from.toISOString()}&to=${to.toISOString()}`,
+  )
+  expect(historyResponse.status()).toBe(200)
+  const history = (await historyResponse.json()) as {
+    points: { idx_scan_rate: number | null; index_bytes: number | null }[]
+  }
+  writeFileSync(`${ARTIFACT_DIR}/vis-041-history.json`, JSON.stringify(history, null, 2))
+  expect(history.points.filter((point) => point.index_bytes !== null).length).toBeGreaterThan(0)
+
+  // The drawer: both charts are drawn.
+  for (const [width, height] of [
+    [1920, 1080],
+    [1440, 1080],
+  ] as const) {
+    await page.setViewportSize({ width, height })
+    await page.goto(`/indexes?instance=${instanceId}&tab=indexes&db=odoo&range=6h`)
+    const table = page.getByRole('table', { name: 'Indexes' })
+    await expect(table).toBeVisible({ timeout: 30_000 })
+    await page.getByRole('searchbox', { name: 'Search indexes' }).fill(target.indexrelname)
+    await table
+      .getByRole('button', { name: `Show details of ${target.indexrelname}` })
+      .first()
+      .click()
+    for (const title of ['Index scans', 'Index size']) {
+      const card = page
+        .locator('[data-chart-card]')
+        .filter({ hasText: `${title} of ${target.indexrelname}` })
+      await expect(card).toBeVisible({ timeout: 30_000 })
+      await expect.poll(() => canvasNotBlank(card), { timeout: 30_000 }).toBe(true)
+    }
+    await page.screenshot({ path: `${ARTIFACT_DIR}/vis-041-index-detail-${width}.png` })
+  }
+
+  // Index tax against PostgreSQL's own sizes, within 1 %.
+  const [indexesSize = '', heapSize = ''] = (
+    await query(
+      `SELECT pg_indexes_size('public.res_partner') || '|' || pg_relation_size('public.res_partner')`,
+    )
+  ).split('|')
+  const truthIndexes = Number(indexesSize)
+  const truthHeap = Number(heapSize)
+  expect(truthIndexes).toBeGreaterThan(0)
+  const reported = indexes.reduce((sum, item) => sum + item.index_bytes, 0)
+  expect(Math.abs(reported - truthIndexes) / truthIndexes).toBeLessThan(0.01)
+  const tablesResponse = await api.get(
+    `/api/v1/instances/${instanceId}/tables?limit=500&order_by=size`,
+  )
+  expect(tablesResponse.status()).toBe(200)
+  const partner = (
+    (await tablesResponse.json()) as {
+      items: { datname: string; relname: string; table_bytes: number }[]
+    }
+  ).items.find((item) => item.datname === 'odoo' && item.relname === 'res_partner')
+  expect(partner, 'res_partner is not among the 500 largest tables').toBeDefined()
+  expect(Math.abs(partner!.table_bytes - truthHeap) / truthHeap).toBeLessThan(0.01)
+
+  await page.goto(`/indexes?instance=${instanceId}&tab=tax&db=odoo`)
+  const tax = page.getByRole('table', { name: 'Index tax' })
+  await expect(tax).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('searchbox', { name: 'Search Index tax' }).fill('res_partner')
+  const row = tax.locator('tbody tr').filter({ hasText: 'res_partner' }).first()
+  await expect(row).toBeVisible()
+  await expect(row).toContainText(`${indexes.length}`)
+  await expect(page.getByText(/Every figure on this tab is an estimate/).first()).toBeVisible()
+  await page.screenshot({ path: `${ARTIFACT_DIR}/vis-041-index-tax.png` })
+
+  await assertFits(page, api, fullHdRoute('/indexes?tab=tax'))
+  browserErrors.assertClean()
+})

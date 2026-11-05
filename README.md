@@ -385,8 +385,22 @@ offers Search all states.
 
 #### Index analysis
 
-Index analysis has Indexes, Cleanup, Dead rows and Suggestions tabs for one
-server. The Suggestions tab (`?tab=suggestions`, window 1h, 6h, 24h or 7d in
+Index analysis has Indexes, Cleanup, Dead rows, Suggestions and Index tax tabs for
+one server. Expanding an index on the Indexes tab shows whether it is valid,
+primary or unique, when it was last scanned, and two charts of its scan rate
+and size over the page's time range (at most 30 days, `GET
+/api/v1/instances/{id}/indexes/history`, buckets of 10 minutes or more because
+the statistics are sampled every 5 minutes). A bucket with no stored sample is
+a gap: nothing is interpolated, and an index with no stored sample at all says
+"No history yet". The Index tax tab (`?tab=tax`) lists each table with its number of indexes, the index
+size, the heap size, the index-to-table ratio, the size of the indexes that look
+unused (advisor verdict, or the raw counter when none; unique and primary key
+indexes are never counted), the table's writes per second and its write
+amplification (inserts, deletes and non-HOT updates per second times the number
+of indexes). Every figure is an estimate, computed in the browser from the
+statistics already collected: the 500 largest tables have table figures, the
+others show "Not measured". Each row links to the Cleanup tab narrowed to that
+table. The Suggestions tab (`?tab=suggestions`, window 1h, 6h, 24h or 7d in
 `?window=`) shows the result of the index suggestions API described under
 "Index suggestions": each row gives the key columns, the weight (share of the
 database's statement time involving the key, an upper bound of the saving),

@@ -185,7 +185,7 @@ describe('IndexAnalysisPage on a Full HD screen (15.3)', () => {
       within(tabs)
         .getAllByRole('tab')
         .map((tab) => tab.textContent),
-    ).toEqual(['Indexes', 'Cleanup', 'Dead rows', 'Suggestions'])
+    ).toEqual(['Indexes', 'Cleanup', 'Dead rows', 'Suggestions', 'Index tax'])
     const controls = screen.getByTestId('index-page-controls')
     expect(controls).toHaveClass('min-[1600px]:flex-nowrap')
     expect(controls).toContainElement(tabs)
