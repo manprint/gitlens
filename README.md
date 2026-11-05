@@ -248,6 +248,12 @@ control, freshness and connection status, and a theme toggle. Every data table
 has a search box, filters on its categorical columns, ascending/descending sort
 buttons on its sortable columns and 20 rows per page (50 or 100 on request);
 the table state is kept in the URL, so a filtered, sorted page can be shared.
+The supported screen is Full HD (1920×1080 full screen, about 1920×950 with the
+browser chrome): from 1600 px wide every table page shows its toolbar, its
+20-row table and its pager without a page scrollbar, and a table of 50 or 100
+rows scrolls inside its card under a sticky header. The layout is also checked
+at 2560×1440 (no horizontal scrollbar). Narrower screens keep the responsive
+layout described in [docs/LIMITS.md](docs/LIMITS.md#18-screens-below-1600-px).
 The search box filters the rows already loaded, except on Slowest queries,
 Query Inspector and Findings, where it searches on the server, and in the
 Search everything panel of Index analysis (see

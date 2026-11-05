@@ -151,3 +151,23 @@ wrap) and, for the `/indexes` routes, also at 1600×900, where a wrap is allowed
 but an overlap, a spill or a part outside the card is not; `HDR-E2E-001` runs
 the same check on every `/indexes` entry after asserting that the live
 inventory shows its notes.
+
+## 15.4 final checks (2026-11-05)
+
+- Capped table box: a page of 50 or 100 rows scrolls inside its card
+  (`FULLHD_BOX_CAP`: `max-h-[80vh]` below 1600 px, `max-h-[calc(100vh-26rem)]`
+  from 1600 px, `overflow-auto`, `relative`). The box must be positioned:
+  `sr-only` (absolute) text in a cell would otherwise lengthen the document.
+  `VIS-FHD-001` checks every table page at 1920×1080 and 1920×950 with 50 and
+  100 rows: no page scrollbar, the pager on screen, the table box scrolls.
+- `FHD-FIT-001` keeps a screenshot per route and viewport
+  (`test/e2e/_artifacts/ui/fullhd/<route>-1080.png`, `-950.png`).
+- `VIS-FHD-002` at 2560×1440 and 1366×768: no horizontal page scrollbar; the
+  Index tax table fits at 2560. Tables that scroll inside their card are
+  recorded in `sideways-tables.txt` (27 entries at 1366 and 2560 on the dev
+  stack: headers with sort and help buttons wider than their column; below
+  1600 px columns have no width hint, I-7).
+- Index tax columns at 1920: Indexes 7rem, Index size 8rem, Table size 8rem,
+  Index/table % 10rem, Unused size 13rem, Writes/s 8rem, Write amplification
+  10rem, Cleanup 7rem (narrower widths made the "incl. raw counters" note
+  overlap Writes/s).
