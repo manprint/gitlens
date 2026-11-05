@@ -207,8 +207,9 @@ export function IndexTaxPanel({
         },
         {
           label: 'Write amplification',
-          value: formatRate(summary.writeAmplification),
-          detail: 'index entries written',
+          value:
+            summary.writeAmplification === null ? UNKNOWN : formatRate(summary.writeAmplification),
+          detail: `${formatCount(summary.measuredTables)} of ${formatCount(summary.tables)} tables measured`,
         },
       ]}
       title="Index tax"

@@ -167,6 +167,22 @@ describe('IndexTaxPanel', () => {
     expect(screen.queryByText('The list is incomplete.')).not.toBeInTheDocument()
   })
 
+  it('TAXPANEL-008 says how many tables the write amplification covers, and never shows 0 for unknown', async () => {
+    render()
+    await flushNetwork(30)
+    expect(screen.getByRole('article', { name: 'Write amplification' })).toHaveTextContent(
+      '1 of 2 tables measured',
+    )
+  })
+
+  it('TAXPANEL-009 shows Not measured when no table has write rates', async () => {
+    render(ITEMS, [])
+    await flushNetwork(30)
+    const tile = screen.getByRole('article', { name: 'Write amplification' })
+    expect(tile).toHaveTextContent('Not measured')
+    expect(tile).toHaveTextContent('0 of 2 tables measured')
+  })
+
   it('TAXPANEL-005 has no accessibility violations', async () => {
     vi.useRealTimers()
     const { container } = render()

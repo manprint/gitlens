@@ -142,6 +142,14 @@ describe('summariseIndexTax', () => {
       unusedBytes: 1000,
       unusedConfirmedBytes: 0,
       writeAmplification: 6,
+      measuredTables: 1,
     })
+  })
+
+  it('INDEXTAX-007 reports no write amplification when no table has rates', () => {
+    const summary = summariseIndexTax(tax([item('a'), item('c', {}, 'lines')], []))
+    expect(summary.writeAmplification).toBeNull()
+    expect(summary.measuredTables).toBe(0)
+    expect(summary.tables).toBe(2)
   })
 })

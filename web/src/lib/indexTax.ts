@@ -139,8 +139,10 @@ export interface IndexTaxSummary {
   indexBytes: number
   unusedBytes: number
   unusedConfirmedBytes: number
-  /** Index entries per second across the tables whose rates were reported. */
-  writeAmplification: number
+  /** Index entries per second across the tables whose rates were reported; null when none were. */
+  writeAmplification: number | null
+  /** Tables whose write rates were reported. */
+  measuredTables: number
 }
 
 export function summariseIndexTax(taxes: readonly IndexTax[]): IndexTaxSummary {
@@ -150,14 +152,18 @@ export function summariseIndexTax(taxes: readonly IndexTax[]): IndexTaxSummary {
     indexBytes: 0,
     unusedBytes: 0,
     unusedConfirmedBytes: 0,
-    writeAmplification: 0,
+    writeAmplification: null,
+    measuredTables: 0,
   }
   for (const tax of taxes) {
     summary.indexCount += tax.indexCount
     summary.indexBytes += tax.indexBytes
     summary.unusedBytes += tax.unusedBytes
     summary.unusedConfirmedBytes += tax.unusedConfirmedBytes
-    summary.writeAmplification += tax.writeAmplification ?? 0
+    if (tax.writeAmplification !== null) {
+      summary.writeAmplification = (summary.writeAmplification ?? 0) + tax.writeAmplification
+      summary.measuredTables += 1
+    }
   }
   return summary
 }
