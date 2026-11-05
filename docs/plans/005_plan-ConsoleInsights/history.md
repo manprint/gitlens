@@ -541,3 +541,10 @@ audit | 16.3 gates | contract vitest `src/features/locks src/lib/{sessions,locks
 ## 2026-11-05 P16/1 failed; 16.4 attempt 2
 
 Advisor rejected P16 attempt 1: README lacked the activity metric names, the 16.4 control run did not compare with the baseline, and G-UI-LEGACY `TestUI_FindingMute` was red (spec re-clicked an already expanded finding card). 16.4 reopened as attempt 2: README metric names, `docs/LIMITS.md` §17, `compareBaseline` control run with sabotage, `openFindingCard` fix; G-UI-LEGACY 12 of 12 on the third run (second run: one unexplained post-unmute poll timeout in `TestUI_FindingMute`).
+
+## 2026-11-05 P16 DONE (attempt 2); phase 16 compaction
+
+The 16.1-16.4 board rows, §8 rows, test-family rows and gate audit rows are in the P16/1 compaction block above (old statuses); changes since: 16.4 attempt 2 (b4aa14c), `VIS-LOCKS-*` and `SORIGIN-E2E-*` PASS (§7 P16 and 16.4), P16/1 failed (no commit), P16/2 passed the advisor review. §8 rows added by attempt 2 and now settled:
+
+| 1 | 16.4 attempt 2: control run (advisor, P16/1) | control run only waited for the QA sessions to vanish | `compareBaseline` (in `sessionTruth.ts`) compares the sample after cleanup with the baseline taken before the stimulus (application total = baseline plus change in Odoo workers within the measured drift; pglens total within the range of the three truth reads minus the sampling backend); the sabotage is the sample taken while the seven QA sessions were open, which must NOT pass `compareBaseline` | supervisor (advisor) | 16.4, 6.4 |
+| 1 | 16.4 attempt 2: SYS-UI-010 spec edit | 16.4 Files list names only `web/e2e/qa/*` | `web/e2e/ui_acceptance.spec.ts` `openFindingCard` opens the card only when `aria-expanded` is not `true` (ID and intent of SYS-UI-010 kept); needed to get G-UI-LEGACY green at P16; its post-unmute poll also reports the last API state on timeout (diagnostic for one unexplained timeout, §9) | executor | P16, P15 |

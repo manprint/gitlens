@@ -18,17 +18,17 @@ See `PROTOCOL.md` (static cold-start rules).
 - Active scope: plan (whole `005_plan-ConsoleInsights`, no selector); full-autonomous true, WIP on (explicit)
 - Scope result: RUNNING
 - Type: sub-phase
-- ID / attempt: 16.4 / 2 (reopened: P16/1 failed at the advisor review, §4)
-- Status: IN_REVIEW (OPEN; all attempt-2 checks green, completion commit pending)
+- ID / attempt: 4.1 / 1
+- Status: TODO (not opened)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-sonnet-5-5; supervisor: advisor (Opus 5.5)
-- File / unit heading: phase_17.md → Phase gates and closure
-- Current step: G-SECRETS, then the attempt-2 completion commit
-- Next action: commit 16.4 attempt 2 (explicit pathspecs), rerun P16 as attempt 2 (advisor review), then 4.1.
+- File / unit heading: phase_05.md → 4.1
+- Current step: P16 closed; open 4.1
+- Next action: read phase_05.md 4.1 and open it (execution order §11).
 - Stop latch: none (cleared by explicit invocation 2026-11-05)
-- Last closure: unit:16.4:1 (4106c16); P16/1 failed (no commit)
-- Unit base: HEAD b675f31, snapshot tree 74185dd970e7245eb88b59c6b7c4d32f0e2a18c1; branch `feat/index-analysis` (never switch or create branches)
-- Repo state: uncommitted: this unit's files (README.md, docs/LIMITS.md, STATE.md, history.md, `web/e2e/ui_acceptance.spec.ts`, `web/e2e/qa/sessions.spec.ts`, `web/e2e/qa/sessionTruth.ts`); `internal/webui/dist/index.html` (never staged) and `.claude/`.
+- Last closure: unit:P16:2 (phase 16 DONE; P16/1 failed, no commit)
+- Unit base: HEAD (after the P16 commit); branch `feat/index-analysis` (never switch or create branches)
+- Repo state: uncommitted only `internal/webui/dist/index.html` (never staged) and `.claude/`.
 - Network: user authorised internet use (2026-11-05 message "autorizzo ad usare la rete internet"); still no push.
 - Stack: restarted 2026-11-05 08:15Z (`up -d --no-recreate`, all healthy); backup `02-loaded-20261104T170945Z` VERIFIED (created 2026-11-04T17:09:45Z, < 24 h until 2026-11-05 17:09Z).
 
@@ -93,7 +93,6 @@ Settled rows: `history.md` (2026-11-05 migration entry). Only unsettled rows (un
 
 | Type | ID / attempt | Plan revision | Agent | Changes | Evidence/review | Commit |
 |------|--------------|---------------|-------|---------|-----------------|--------|
-| phase-close | P16 / 1 | 1 | agent-2:claude-sonnet-5-5 | none (P16 edits only records) | failed: advisor review rejected closure (README metric names missing, control run did not compare against the baseline, G-UI-LEGACY `TestUI_FindingMute` red) | none |
 
 ## 5. Files and ownership
 
@@ -114,18 +113,17 @@ Unit-owned paths are listed in each phase file's sub-phase `Files` field and rec
 
 ## 6. In-flight checkpoint
 
-P16/1 failed (advisor); 16.4 reopened as attempt 2: README metric names, `docs/LIMITS.md` §17, control run against the baseline (`compareBaseline`), SYS-UI-010 spec fix. STATE compacted at P16/1 (removed rows in `history.md`; 16.x rows restored here until P16 is DONE). Uncommitted: README.md, docs/LIMITS.md, STATE.md, history.md, `web/e2e/ui_acceptance.spec.ts`, `web/e2e/qa/{sessions.spec,sessionTruth}.ts`. `internal/webui/dist/index.html` (rebuilt by G-UI-LEGACY, never staged) and `.claude/` never staged.
+Phase 16 DONE (P16 attempt 2 passed the advisor review; attempt 1 failed). STATE compacted at P16 DONE (16.x rows in `history.md`). Uncommitted: only `internal/webui/dist/index.html` (rebuilt by G-UI-LEGACY, never staged) and `.claude/`. Backup `02-loaded-20261104T170945Z` stops being VERIFIED at 2026-11-05 17:09Z: take a fresh verified backup before any lifecycle/G-QA test after that time.
 Running resources: stack `pglens-odoo` up and healthy (images from 8256b9f; production code unchanged since). Backup `02-loaded-20261104T170945Z` VERIFIED (expires 2026-11-05 17:09Z); stack `agent.yaml` = `agent.yaml.bak-16.4`. Research checkpoint: R3 pending (7.0).
 
 ## 7. Verification and reviews
 
 Latest result per gate; earlier detail in `history.md`.
 
-- 16.4 (2026-11-05, 4106c16): SORIGIN-E2E-001..003 passed (list = 3; 001: 7 sessions, sample = pg_stat_activity after 13 s, UI tables/tree/control run, sabotage `qa-app-a`→`pglens/qa` detected; 002: warm-up 93 s, raw leg 15 s, normalised leg 12 s after restart; 003: default counts, `by_application: false` callout, restored); QA-CLEAN-001 passed; `agent.yaml` cmp-equal to `agent.yaml.bak-16.4`; stack README paragraph added.
 - P16 gates (2026-11-05; attempt-1 results, valid for 16.4 attempt 2 because production code is unchanged): G-GO-FOCUS 5 packages ok (`-race -shuffle=on`); G-GO-INT `TestACTCFGINT001` pg15+pg18, `TestSESSAPIINT001` ok; G-RO `TestINTRO001` pg15+pg18 ok; G-API no diff (`web-gen-api api-docs`); G-WEB-UNIT `src/features/locks src/lib` 444 passed; G-DEPLOY: no production change since 8256b9f, images `pglens-server:dev` c812ba5a3f3b, `pglens-agent:dev` 043139c08de5; G-VIS `VIS-LOCKS-001` (list = 1) passed; G-QA SORIGIN-E2E-001..003 passed (001 re-run after the control-run change: sample = pg_stat_activity after 13 s, baseline control after 10 s, sabotage detected), QA-CLEAN-001 passed, `agent.yaml` cmp-equal.
-- Attempt 2 reruns (2026-11-05): G-WEB-STATIC (lint 0 errors / 2 pre-existing warnings, prettier, `tsc -b`) after the spec edits; G-UI-LEGACY `go test -tags=e2e -timeout=40m -count=1 ./test/e2e/... -run UI` after `make web-build`: run 2 failed once in `TestUI_FindingMute` at the post-unmute API poll (state not back within 60 s; cause not determined, test passed alone 3 times); the poll now reports the last API state on timeout; run 3: 12 of 12 pass (SYS-UI-001..011 incl. SYS-UI-008 BlockingTree, 009 Cancel, 011 Accessibility; ok 697 s). If `TestUI_FindingMute` fails again, its diagnostic names the last state.
+- Attempt 2 reruns (2026-11-05): G-WEB-STATIC (lint 0 errors / 2 pre-existing warnings, prettier, `tsc -b`) after the spec edits; G-UI-LEGACY `go test -tags=e2e -timeout=40m -count=1 ./test/e2e/... -run UI` after `make web-build` (12 tests: SYS-UI-000 = `TestUI_Smoke`, 001..011): run 2 failed once in `TestUI_FindingMute` at the post-unmute API poll (state not back within 60 s; cause not determined, test passed alone 3 times); the poll now reports the last API state on timeout; run 3: 12 of 12 pass (incl. SYS-UI-008 BlockingTree, 009 Cancel, 011 Accessibility; ok 697 s). If `TestUI_FindingMute` fails again, its diagnostic names the last state.
 - G-SECRETS: pattern counts over the diff 0; the only match under `web/src` is the committed canary fixture `NotificationsPanel.test.tsx` (`spaces/UICANARYSPAC…`, fake); (b) value check not runnable (webhook deferred).
-- Review P16/1 (advisor): rejected (README metric names, baseline control run, G-UI-LEGACY red); P16/2 review pending after the 16.4 attempt-2 commit.
+- Review P16 (advisor, Opus 5.5): attempt 1 rejected (README metric names, baseline control run, G-UI-LEGACY red); attempt 2 approved after record fixes (tests table, §9 FindingMute open item, README names verified against `internal/check/activity.go`, `lockSessionsLimit = 100`).
 
 ## 8. Technical revisions and deviations
 
@@ -154,15 +152,6 @@ Latest result per gate; earlier detail in `history.md`.
 | 1 | 11.5a deviations (R-11.5a) | contract 11.5 Files / N1–N7 | (a) exported `notify.RedactError`; (b) channels built once (`wireNotificationChannels`) and shared by the API and `alert.NewChannelNotifier` (N3); (c) redaction of every configured URL, its `Redacted()` form, user/password, path, query, query values and path segments ≥ 8 chars; (d) status `timeout` also when the 10 s test deadline expired (the channel turns a last-attempt timeout into text); (e) generic 409 detail (variable names live in the client, N6); (f) 429 `test already running` (one test in flight per kind); (g) test messages render without the cluster/instance context line (Slack, Google Chat); (h) extra files: `cmd/pglens-server/*`, `internal/alert/notify/*`, `web/src/api/{keys,queries}.ts`, `SettingsPage*`, `DeliverySection.test.tsx`, `captions.ts`; (i) 11.5b not implemented: BLOCKED-Q2 (UI shows the environment instructions only); (j) badge caption (I-16) → 17.2 | supervisor (R-11.5a) | 11.5b, 17.2 |
 | 1 | 13.2 deviations (R-13.2) | contract 13.2 Files | (a) new table `check_results(instance_id, check_name, datname, first_result_at, last_result_at, last_failed)` written by the ingest pipeline in the envelope transaction (`WHERE EXISTS` on the instance; flag only, never error text, I-10) — nothing durable recorded per-check result times before; (b) `FirstRunWarmupCap`/`FirstRunBound` moved to `internal/wire` (server must not import `internal/agent`); (c) `index.unused` on PG16+ skips an index whose `last_idx_scan` is inside the window (D22b, WINDOW-007) and the statistics observation is anchored on `last_idx_scan` when set; (d) `flushEnvelope` gained the coverage parameter (6 call sites); (e) `queries.test.tsx` probes `useCoverage`; (f) test file `advisor_window_source_test.go` (a `_windows` suffix is a GOOS build tag); (g) README/LIMITS written in 13.2 (PG ≤ 15 limitation, coverage endpoint, windows now effective). Migration 0027 was edited after its first dev deploy (unshipped) and reset on the dev DB (backup in `/home/agent/odoo-backups/pglens-0027-reset-*`). Follow-up (not in contract): an index last scanned before the window with short pglens history stays degraded (D22b "statistics age from last_idx_scan" shortcut not implemented) | supervisor (R-13.2) | 13.3 / later |
 | 1 | User rulings 2026-11-04 (live gates) | stack absent after sandbox reset | (a) rebuild the Odoo stack (dir `/home/agent/pglens-odoo-stack`, backups `/home/agent/odoo-backups`, images `odoo:18`/`postgres:18` were gone; network pulls authorised); files recovered from earlier transcripts impossible (not present), so `compose.yml`, `deploy.sh`, `backup.sh`, `verify_backup.sh`, `seed/*`, `load/rpc_load.py`, README are REBUILT to the 0.1/0.2 contracts (record per file in §7); this is attempt 2 of 0.1/0.2 evidence. (b) Google Chat webhook deferred by the user: G-SECRETS value half and the notification-channel live e2e are NOT RUN by user decision (tested later by the user), not BLOCKED. (c) HA topology tested as 1 primary + 2 standbys (7.x). (d) all supervisor-recommended decisions approved; finish the plan. (e) backups are still required: QA guard and HA scripts accept only a fresh `VERIFIED` backup (< 24 h); `backup.sh`/`verify_backup.sh` rebuilt and run. | user | all live units, 7.x |
-| 1 | 16.3 UI tests (R-PLAN-5/6) | review R-PLAN-5 asked for more existing UI tests to be listed | only `UI-LOCK-021` changes (D28 callout, recorded here when done); the tests that select the old `Active sessions` list and its buttons (metadata test, `UI-LOCK-052/053/055/072/073`) use fixtures without `origin`, which trigger the unchanged fallback markup, so they pass untouched; SYS-UI-008/009 (live specs) are adapted | supervisor (reviews R-PLAN-5, R-PLAN-6) | 16.3 |
-| 1 | D28 | `checks.activity.by_application` default flips to true: the two tests `TestConfig_ByApplicationDefaultsFalse` and `TestActivity_ByApplicationDisabledByDefault` change expectation in 16.1 (recorded here when done) | user REQ-40 | 16.1 |
-| 1 | 16.1 deviations (Sonnet + Opus advisor) | contract 16.1 test-expectation list | (a) the two replaced tests and two new ExplicitFalse tests as contracted. (b) beyond the list, accepted as supervisor decisions, no assertion weakened: `locks_test.go` row fixtures widened by 6 columns (mock scan needs the exact column count); `agent_flags_test.go` RDY-AGENT-001 `ByApplication` literals → `boolPtr`, and `SessionQueryText` `Nil` → `NotNil`+`False` (S5 now publishes it). (c) `configureChecks` resets activity/locks to defaults when `cfg.Checks` has no entry (deterministic repeated calls). (d) known gap for 16.2: Go `Origin()` classifies by the monitor role argument, SQL predicate by `current_user`; they differ when the DSN user is not the monitor role. | supervisor decision | 16.2 uses `Origin()` with the `monitoring_role` fact |
-| 1 | 16.2 deviations (Sonnet + Opus advisor) | contract 16.2 | (a) the stored tree lives in `lock_snapshots` (one row per instance, PK tenant+instance), not a `lock_tree` fact: SESSAPI-INT-001 seeds `lock_snapshots` + `object_facts`. (b) `connections` is optional (absent when no tree ever sampled). (c) raw text is kept in `query` and mirrored in `query_text` (existing names unchanged). (d) normalised text that may hold a credential is replaced by `redact.Withheld` (extra safeguard). (e) summary keys: empty user/application/database = `""`, NULL client = `local`, NULL state = `unknown`. (f) extra tests SESSAPI-009/010/011; README `GET /api/v1/locks` section edited. (g) advisor finding fixed by supervisor: blocking-tree `nodes` also get server-set `origin` (SESSAPI-012), the badge of 16.3 needs it and D27 forbids UI re-derivation. | supervisor decision | 16.3 reads `origin` from sessions and nodes |
-| 1 | 16.3 deviations (Sonnet + Opus advisor) | contract 16.3 | (a) UI-LOCK-021 changed as contracted (ID kept, fixture `connections.by_application_enabled:false`) + SORIGIN-UI-011; no other existing test edited. (b) `SimpleTable` instead of `DataTable` (no row detail). (c) page tabs Blocking (default) / Application sessions / pglens sessions / Activity read from `?view=` (`locksViews.ts`) because the page reached 2776 px; fallback page unchanged; accepted: Blocking is first, not Application sessions. (d) `ActivitySection` props `connections`, `part`; 4 captions `locks.sessions-application`, `locks.sessions-pglens`, `locks.connection-summary`, `locks.origin`. (e) callout shown only when `by_application_enabled === false`; a server older than 16.2 shows none. (f) supervisor fixes: VIS-LOCKS-001 API path `/api/v1/locks?instance_id=`, columns Transaction age 11rem / Query age 8rem (header overlap seen in screenshot, `assertFits` did not catch it), Activity description no longer says opt-in when `connections` is present. | supervisor decision | 16.4 live proof reads the same API |
-| 1 | 16.4 Files: `web/e2e/qa/pg.ts` READ-only | `lockPair(table, id, applicationName, waiterName = applicationName)` gained an optional waiter name (waiter `qa-waiter` apart from holder `qa-idle-tx`); default unchanged, existing callers unaffected | agent-2 (advisor guidance 2026-11-05) | harness tests unaffected (QA-CLEAN-001 passed) |
-| 1 | 16.4 -002: raw text next to normalised | SESSAPI-005: the raw text replaces the normalised one (never mixed); the raw leg asserts `Query text (raw)`, the copy button and `Query ID` = warm-up queryid; the raw-off leg asserts `Query text (normalised)` = `select pg_sleep($1)`. Warm-up uses literal `select pg_sleep(1)` (not `pg.slowQuery()`, whose `1.000` literal may change the queryid) | advisor (Opus 5.5), autonomous decision | none |
-| 1 | 16.4 attempt 2: control run (advisor, P16/1) | control run only waited for the QA sessions to vanish | `compareBaseline` (in `sessionTruth.ts`) compares the sample after cleanup with the baseline taken before the stimulus (application total = baseline plus change in Odoo workers within the measured drift; pglens total within the range of the three truth reads minus the sampling backend); the sabotage is the sample taken while the seven QA sessions were open, which must NOT pass `compareBaseline` | supervisor (advisor) | 16.4, 6.4 |
-| 1 | 16.4 attempt 2: SYS-UI-010 spec edit | 16.4 Files list names only `web/e2e/qa/*` | `web/e2e/ui_acceptance.spec.ts` `openFindingCard` opens the card only when `aria-expanded` is not `true` (ID and intent of SYS-UI-010 kept); needed to get G-UI-LEGACY green at P16 | executor | P16, P15 |
 | 1 | commit identity | sandbox lost git config ("Author identity unknown") | commits use `git -c user.name=fabio -c user.email=fabio@git.it` (same author as earlier commits); no config written | executor | all commits |
 | 1 | G-SECRETS canary | pattern count over the whole tree must be 0 | the one match under `web/src` is the fake fixture `web/src/features/settings/NotificationsPanel.test.tsx` (`UICANARYSPAC…`, `spaces/X`), committed since 6d9032b and accepted at P14; the real webhook appears nowhere | executor | final G-SECRETS |
 
@@ -172,7 +161,7 @@ Latest result per gate; earlier detail in `history.md`.
 - RESOLVED (user authorised downloads 2026-10-29): `golangci-lint` to be installed before the next G-GO-FULL (P1 closure).
 - RESOLVED 2026-11-04: 14.1 RDY-INT-001 was blocked by the absent TimescaleDB image; the user authorised network, image pulled, test passes. Live-stack gates (Odoo stack, backups, `/home/agent/pglens-odoo-stack/.env`) are still absent: they are not needed before 14.3.
 - UNBLOCKED 2026-11-04 by user ruling (rebuild stack, §8): was BLOCKED (14.2): live gates G-DEPLOY, VIS-RDY-001, G-QA need the Odoo stack, backups and `/home/agent/pglens-odoo-stack/.env` (webhook secret), all absent. Rebuilding the stack (phase 0.2) is the user's decision: needs secret and backups only the user holds. 14.3 also needs the stack; strict order stops the run here.
-- RESOLVED 2026-11-05 (16.4 attempt 2): `TestUI_FindingMute` (SYS-UI-010) failed in G-UI-LEGACY at `ui_acceptance.spec.ts:816/835` because `openFindingCard` clicked `Show details of …` on a row that was already expanded (the card stays open across the state change); the spec now opens the card only when `aria-expanded` is not `true`. `TestUI_FindingMute` passes.
+- OPEN (non-blocking, owner P15 G-UI-LEGACY run, 2026-11-05): one unexplained `TestUI_FindingMute` failure in the second full G-UI-LEGACY run at the post-unmute API poll (state not back to its real value within 60 s); the poll now reports the last API state on timeout; it passed alone 3 times and in the third full run. Earlier root cause, RESOLVED in 16.4 attempt 2: `TestUI_FindingMute` (SYS-UI-010) failed in G-UI-LEGACY at `ui_acceptance.spec.ts:816/835` because `openFindingCard` clicked `Show details of …` on a row that was already expanded (the card stays open across the state change); the spec now opens the card only when `aria-expanded` is not `true`. `TestUI_FindingMute` passes.
 - No other blocker.
 
 ## 10. Do-not-repeat
@@ -207,10 +196,6 @@ Latest result per gate; earlier detail in `history.md`.
 | 15.1 | phase_16.md | 9.3, 0.4 | DONE | 1 | FHD-001..006, FHD-ROUTES-001..003, FHD-MEASURE-001, `fullhd-inventory.md`, D26 revised (§7, §8); R-15.1 |
 | 15.2 | phase_16.md | 15.1 | DONE | 1 | INSTSEC-001..009, FHD-ROUTES-001..003, FHD-INST-001 (§7 15.2); R-15.2 |
 | 17.1 | phase_18.md | 1.2, 9.1 | DONE | 1 | CAPTION-001..005, GLOSSARY-001/002, CARD-001..005, CAPCMP-001..005, CAPTION-COVERAGE-001, CARD-COVERAGE-001 (§7 17.1); R-17.1 |
-| 16.1 | phase_17.md | 14.1 | DONE | 1 | unit:16.1:1 |
-| 16.2 | phase_17.md | 16.1 | DONE | 1 | unit:16.2:1 |
-| 16.3 | phase_17.md | 16.2, 9.1, 15.1, 17.1 | DONE | 1 | unit:16.3:1 |
-| 16.4 | phase_17.md | 16.3 | IN_PROGRESS | 2 | reopened by P16/1 failure (advisor review): control run and SYS-UI-010 spec fix; attempt 1 4106c16 |
 | 4.1 | phase_05.md | 0.2 | TODO | 1 | — |
 | 4.2 | phase_05.md | 4.1, 3.1 | TODO | 1 | — |
 | 4.3 | phase_05.md | 4.2 | TODO | 1 | — |
@@ -255,7 +240,7 @@ README obligation per phase: see the Documentation table below; each phase file'
 | 13 | phase_14.md | P13 | DONE | R-P13, R-P13b / unit:P13:1 |
 | 14 | phase_15.md | P14 | DONE | R-P14 / unit:P14:1 |
 | 15 | phase_16.md | P15 | IN_PROGRESS | — |
-| 16 | phase_17.md | P16 | IN_PROGRESS | — |
+| 16 | phase_17.md | P16 | DONE | R-P16 (advisor, attempt 2; attempt 1 rejected) / unit:P16:2 |
 | 17 | phase_18.md | P17 | TODO | — |
 | PLAN | — | PLAN | TODO | — |
 
@@ -363,17 +348,6 @@ Statuses: TODO, IN_PROGRESS, IN_REVIEW, DONE, SKIPPED, BLOCKED. SKIPPED retains 
 | T2-* | 8.1 | G-VIS | TODO | — |
 | IND-<NAME> (13 indicator tests, no numeric suffix) | 6.4 | G-QA | TODO | — |
 | LIFE-<NAME> (7 lifecycle drills, no numeric suffix) | 6.4 | G-QA | TODO | — |
-| ACT-* | 16.1 | G-GO-FOCUS | PASS | 16.1 |
-| ACTCFG-* | 16.1 | G-GO-FOCUS | PASS | 16.1 |
-| ACTCFG-INT-* | 16.1 | G-GO-INT | PASS | 16.1 |
-| SESS-* | 16.1 | G-GO-FOCUS | PASS | 16.1 |
-| SORIGIN-* | 16.1 | G-GO-FOCUS | PASS | 16.1 |
-| SESSAPI-* | 16.2 | G-GO-FOCUS | PASS | 16.2 |
-| SESSAPI-INT-* | 16.2 | G-GO-INT | PASS | 16.2 |
-| SESSLIB-* | 16.3 | G-WEB-UNIT | PASS | 16.3 |
-| SORIGIN-UI-* | 16.3 | G-WEB-UNIT | PASS | 16.3 |
-| VIS-LOCKS-* | 16.3 | G-VIS | TODO | — |
-| SORIGIN-E2E-* | 16.4 | G-VIS / G-QA | TODO | — |
 
 ### Documentation
 | Document/sections | Owning unit | Status | Evidence |
@@ -390,9 +364,6 @@ Statuses: TODO, IN_PROGRESS, IN_REVIEW, DONE, SKIPPED, BLOCKED. SKIPPED retains 
 | Report | Verdict | Current unresolved findings | Evidence |
 |--------|---------|-----------------------------|----------|
 | — | — | none | — |
-| 16.1 gates | G-GO-FOCUS `go test -race -shuffle=on -count=1 ./internal/sessionorigin ./internal/check ./internal/agent ./cmd/pglens-agent ./internal/wire ./internal/server` (named `-run 'ACTCFG|SORIGIN|ACT|SESS|ByApplication'` -v: 14 PASS, 0 FAIL/SKIP); G-GO-INT `-tags=integration -run 'ACTCFGINT|TestINTRO001'` (-v: both PASS on pg15 and pg18); G-RO TestINTRO001; gofmt; golangci-lint v2.15.0 reinstalled (GOPATH/bin) plain + `--build-tags=integration` | pass | 0 issues after removing the unused `buildLocksResult` wrapper; contract checked: by_user/by_client unconditional, labels `usename`/`client_addr`; advisor review: diff sound, gates re-run by supervisor | 16.1 diff | 2026-11-04 |
-| 16.2 gates | `go test -race -shuffle=on -count=1 -run SESSAPI -v ./internal/server` (17 PASS incl. 012, 0 FAIL); `go test -race -count=1 ./internal/server ./internal/wire ./internal/store`; G-GO-INT `-tags=integration -run SESSAPIINT` PASS (local images); golangci-lint plain + integration tag 0 issues; gofmt; G-API `make web-gen-api api-docs` stable (identical state on two regenerations, diff only the intended files); web typecheck; vitest `src/test src/api` 16 files / 215 tests | pass | advisor review: `lock_snapshots` single row per instance (no multi-row subquery), JSON tags and metric labels verified against the agent, node origin added | 16.2 diff | 2026-11-04 |
-| 16.3 gates | contract vitest `src/features/locks src/lib/{sessions,locks,activity}.test.ts` 11 files / 101 tests; full vitest + `make web-coverage-gate` 177 files / 1575 tests, coverage gate pass (global 94.2 lines / 86.2 branches, lib 96.5, features 92.2); typecheck; `make web-lint` 0 errors (2 pre-existing warnings); prettier; `make web-budget` PASS (entry 163.68 KiB); G-DEPLOY `deploy.sh` ok; G-VIS VIS-LOCKS-001 (twice, after the column fix; screenshots of application, pglens and activity tabs read: no overlap, query age one line); FHD-FIT-001 pass (2.2 min); COV-E2E-001 alone after agent restart pass (6.5 min); G-UI-LEGACY `go test -count=1 -tags=e2e ./test/e2e/... -run UI` ok 673 s (TestUI_BlockingTree/TestUI_Cancel run SYS-UI-008/009; the `chromium` project specs need that harness stack, so they fail against the odoo stack by design, not a regression) | pass | stack `agent.yaml` now has `session_query_text: true` on locks (backup `/tmp/claude-1000/agent.yaml.bak`) | 16.3 diff | 2026-11-04 |
 
 ## 12. Suspended implementation (only while auditing unfinished work)
 
