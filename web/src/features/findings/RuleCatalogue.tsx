@@ -12,7 +12,10 @@ import { Section } from '@/components/layout/Section'
 import { Badge } from '@/components/ui/badge'
 import { useKeepFocus } from '@/hooks/useKeepFocus'
 import type { AdvisorRule, FindingRecord } from '@/lib/findings'
+import { needsText, ruleText } from '@/lib/ruleText'
 import { NativeSelect } from '@/components/ui/native-select'
+
+import { scopeLabel } from './findingDisplay'
 
 const permissionTiers: readonly PermTier[] = ['T0', 'T1', 'T2']
 const tierRank: Record<PermTier, number> = { T0: 0, T1: 1, T2: 2 }
@@ -59,7 +62,7 @@ function makeRow(rule: AdvisorRule, findings: readonly FindingRecord[]): RuleCat
     enabled: rule.enabled,
     severity: rule.severity,
     scope: rule.scope,
-    needs: rule.needs.length > 0 ? rule.needs.join(', ') : 'None',
+    needs: needsText(rule.needs),
     minTier: rule.min_tier,
     firingInstances: countTargets(findings, rule.id, (finding) => finding.state === 'open'),
     nonEvaluableInstances: countTargets(
@@ -72,7 +75,7 @@ function makeRow(rule: AdvisorRule, findings: readonly FindingRecord[]): RuleCat
 
 // Severity, scope and tier already have their own selects on the toolbar line.
 const RULE_TOOLBAR: DataTableToolbar<RuleCatalogueRow> = {
-  searchFields: [(row) => row.ruleId, (row) => row.needs],
+  searchFields: [(row) => row.ruleId, (row) => ruleText(row.ruleId) ?? '', (row) => row.needs],
 }
 
 function ruleColumns(): DataTableProps<RuleCatalogueRow>['columns'] {
@@ -80,11 +83,17 @@ function ruleColumns(): DataTableProps<RuleCatalogueRow>['columns'] {
     // One line per rule from 1600 px (D26): the free-text columns truncate.
     {
       accessorKey: 'ruleId',
-      header: 'Rule ID',
+      header: 'Rule',
       // A disabled rule is not evaluated, so its counts stay at zero (11.4).
       cell: ({ row }) => (
         <>
-          {row.original.ruleId}
+          {ruleText(row.original.ruleId)}
+          {ruleText(row.original.ruleId) === undefined ? null : ' '}
+          <span
+            className={`font-mono text-xs ${ruleText(row.original.ruleId) === undefined ? '' : 'text-muted-foreground'}`}
+          >
+            {row.original.ruleId}
+          </span>
           {row.original.enabled ? null : (
             <Badge className="ml-2" title="Disabled in Settings → Advisor rules" variant="outline">
               Disabled
@@ -92,12 +101,26 @@ function ruleColumns(): DataTableProps<RuleCatalogueRow>['columns'] {
           )}
         </>
       ),
-      meta: { width: '24%', truncate: true },
+      meta: { width: '40%', truncate: true, help: 'rules.rule' as const },
     },
     { accessorKey: 'severity', header: 'Severity', enableHiding: false, meta: { width: '8rem' } },
-    { accessorKey: 'scope', header: 'Scope', enableHiding: false, meta: { width: '8rem' } },
-    { accessorKey: 'needs', header: 'Needs', meta: { truncate: true } },
-    { accessorKey: 'minTier', header: 'Minimum tier', meta: { width: '9.5rem' } },
+    {
+      accessorKey: 'scope',
+      header: 'Scope',
+      enableHiding: false,
+      cell: ({ row }) => scopeLabel(row.original.scope),
+      meta: { width: '8rem', help: 'findings.scope' as const },
+    },
+    {
+      accessorKey: 'needs',
+      header: 'Needs',
+      meta: { truncate: true, help: 'rules.needs' as const },
+    },
+    {
+      accessorKey: 'minTier',
+      header: 'Minimum tier',
+      meta: { width: '9.5rem', help: 'settings.permission-tier' as const },
+    },
     {
       accessorKey: 'firingInstances',
       header: 'Firing instances',

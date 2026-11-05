@@ -160,7 +160,7 @@ describe('IndexAnalysisPage on a Full HD screen (15.3)', () => {
     await flushNetwork(30)
 
     expect(screen.getAllByRole('table')).toHaveLength(1)
-    const findings = screen.getByRole('table', { name: 'Index findings' })
+    const findings = screen.getByRole('table', { name: 'Index findings by index' })
     expect(findings).toHaveClass('min-[1600px]:table-fixed')
     expect(within(findings).getByTitle('Unused index')).toHaveClass('min-[1600px]:truncate')
     fireEvent.click(screen.getByRole('button', { name: 'Show the detail of Unused index' }))
@@ -208,28 +208,32 @@ describe('IndexAnalysisPage on a Full HD screen (15.3)', () => {
     const flags = within(table).getByTitle('partial, unused')
     expect(flags).toHaveClass('min-[1600px]:flex-nowrap')
     expect(flags).toContainElement(partial)
-    expect(within(table).getAllByRole('button', { expanded: false })[0]).toHaveClass(
+    expect(within(table).getAllByRole('button', { name: /^Show details of/ })[0]).toHaveClass(
       'min-[1600px]:size-5',
     )
   })
 
-  it('FHD-APPLY-035 the figures and the notes sit on the header line, the notes one line with a title', async () => {
+  it('FHD-APPLY-035 the title and description sit on a first row, the figures, view tabs and notes on a second, a note wraps and keeps its title', async () => {
     render('/indexes', true)
     await flushNetwork(30)
 
-    const line = panelHeader()
-    expect(line).toContainElement(screen.getByRole('heading', { name: 'Index inventory' }))
-    expect(line).toHaveClass('min-[1600px]:flex-row')
-    const tile = screen.getByRole('article', { name: 'Indexes' })
-    expect(line).toContainElement(tile)
-    expect(tile).toHaveAttribute('title', 'Indexes: 2 reported')
-    expect(line).toContainElement(screen.getByRole('tablist', { name: 'Index views' }))
+    const header = panelHeader()
+    const first = screen.getByTestId('index-panel-first-row')
+    const second = screen.getByTestId('index-panel-second-row')
+    expect(header).toContainElement(first)
+    expect(header).toContainElement(second)
+    expect(first).toContainElement(screen.getByRole('heading', { name: 'Index inventory' }))
+    expect(first).toHaveClass('min-[1600px]:flex-row')
+    const tile = screen.getByRole('article', { name: 'Indexes reported' })
+    expect(second).toContainElement(tile)
+    expect(tile).toHaveAttribute('title', 'Indexes reported: 2 indexes')
+    expect(first).toContainElement(screen.getByRole('tablist', { name: 'Index views' }))
 
     const note = noteFor('The list is incomplete.')
-    expect(line).toContainElement(note)
-    expect(note).toHaveClass('min-[1600px]:truncate')
+    expect(second).toContainElement(note)
+    expect(note.className).not.toMatch(/truncate/)
     expect(note.getAttribute('title')).toMatch(/^The list is incomplete\. .*top_n/)
-    expect(screen.getByText(/^2 indexes\. Scan figures/)).toHaveClass('min-[1600px]:truncate')
+    expect(screen.getByText(/^2 indexes\. Scan figures/)).toHaveClass('min-[1600px]:line-clamp-2')
   })
 
   it('FHD-APPLY-038 a tab change drops the view and a database change sends the new tables to page 1', async () => {
@@ -251,7 +255,7 @@ describe('IndexAnalysisPage on a Full HD screen (15.3)', () => {
   it('FHD-APPLY-039 the findings view has no accessibility violations', async () => {
     vi.useRealTimers()
     const { container } = render('/indexes?view=findings')
-    await screen.findByRole('table', { name: 'Index findings' })
+    await screen.findByRole('table', { name: 'Index findings by index' })
 
     await expect(expectNoA11yViolations(container)).resolves.toBeUndefined()
   })

@@ -152,7 +152,7 @@ describe('Instance tabs at Full HD', () => {
     expect(follows(exact, screen.getByRole('table', { name: 'Table bloat estimates' }))).toBe(true)
   })
 
-  it('FHD-APPLY-043 the relation tables keep one line per row and the budget sits in the heading', async () => {
+  it('FHD-APPLY-043 the relation tables keep one line per row and the budget notice is whole', async () => {
     renderRelations('?view=nonsense')
     await settle()
 
@@ -164,12 +164,12 @@ describe('Instance tabs at Full HD', () => {
       'min-[1600px]:[&_td]:px-2',
       'min-[1600px]:[&_thead_.size-6]:size-5',
     )
+    // The budget notice is one whole sentence above the table, not in the heading.
     expect(
-      within(panelActions()).getByText(
-        'Showing 1 of 50 tables shared per instance across databases (truncated; budget 50).',
+      screen.getByText(
+        'This list is incomplete: the agent reports only the top tables of each database. Raise the limit with checks.table_stats.top_n.',
       ),
-    ).toBeInTheDocument()
-    expect(within(panelActions()).getByText('checks.table_stats.top_n')).toBeInTheDocument()
+    ).not.toHaveClass('min-[1600px]:truncate')
   })
 
   it('FHD-APPLY-044 the settings heading holds the durability summary and the changed-since controls', async () => {
@@ -201,7 +201,7 @@ describe('Instance tabs at Full HD', () => {
       'min-[1600px]:sr-only',
     )
     expect(within(actions).getByLabelText('Changed since')).toHaveClass('min-[1600px]:h-8')
-    expect(within(actions).getByText('Changed since')).toHaveClass('min-[1600px]:sr-only')
+    expect(within(actions).getByText('Changed since')).not.toHaveClass('min-[1600px]:sr-only')
     expect(within(actions).getByRole('button', { name: 'Use selected range' })).toBeInTheDocument()
     const table = screen.getByRole('table', { name: 'Observed PostgreSQL settings' })
     expect(table).toHaveClass('min-[1600px]:table-fixed')
@@ -344,9 +344,8 @@ describe('Instance tabs at Full HD', () => {
     )
     // No row, no toolbar: the filter and the hint stay above the empty state.
     expect(screen.getByRole('combobox', { name: 'Database' })).toBeInTheDocument()
-    expect(screen.getByText(/scans the whole referencing table/)).toHaveAttribute(
-      'title',
-      expect.stringMatching(/^Deleting a referenced row/),
+    expect(screen.getByTitle(/^Deleting a referenced row/)).toHaveTextContent(
+      /scans the whole referencing table/,
     )
 
     await openView(/^Triggers/)

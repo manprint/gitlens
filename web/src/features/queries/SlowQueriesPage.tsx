@@ -208,10 +208,17 @@ interface InstanceStatementsProps {
   /** The server and ranking controls, shown in one filter bar with the database. */
   controls: ReactNode
   instanceId: string
+  /** The name of the server whose statements are listed, for the empty state. */
+  serverLabel: string
   ranking: Ranking
 }
 
-function InstanceStatements({ controls, instanceId, ranking }: InstanceStatementsProps) {
+function InstanceStatements({
+  controls,
+  instanceId,
+  ranking,
+  serverLabel,
+}: InstanceStatementsProps) {
   const [searchParams, setSearchParams] = useSearchParams()
   const { range } = useTimeRange()
   const database = searchParams.get('db') ?? undefined
@@ -457,7 +464,7 @@ function InstanceStatements({ controls, instanceId, ranking }: InstanceStatement
           <div className="p-5">
             {shownTerm === '' ? (
               <EmptyState
-                description="No pg_stat_statements entries match this server, database and time range. Try a wider range."
+                description={`pg_stat_statements has no entries for ${serverLabel}${database === undefined ? '' : `, database ${database},`} in the selected range (${range.label}). Another server may have statements: pick it in Server, or widen the range.`}
                 title="No statements yet"
               />
             ) : (
@@ -620,6 +627,7 @@ export function SlowQueriesPage() {
             }
             instanceId={instanceId}
             ranking={ranking}
+            serverLabel={options.find((option) => option.id === instanceId)?.label ?? instanceId}
           />
         </>
       )}

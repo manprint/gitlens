@@ -3,12 +3,16 @@ import { useId } from 'react'
 import { Degraded } from '@/components/state'
 import { formatTimestamp } from '@/lib/format/timestamp'
 import { muteExpiry, type JoinedFinding } from '@/lib/findings'
+import type { NameLookup } from '@/lib/names'
+import { needText, ruleText } from '@/lib/ruleText'
 
-import { findingTarget, severityAccent, severityBadge } from './findingDisplay'
+import { findingTarget, scopeLabel, severityAccent, severityBadge } from './findingDisplay'
 import { MuteDialog } from './MuteDialog'
 
 interface FindingCardProps {
   finding: JoinedFinding
+  /** Names of the clusters and instances; ids are shown without it. */
+  names?: NameLookup | undefined
 }
 
 function formatNeed(need: string): string {
@@ -19,7 +23,7 @@ function formatNeed(need: string): string {
   if (normalized.includes('metric')) return `metric ${need.replace(/^metric[:.]/i, '')}`
   if (normalized.includes('check')) return `check ${need.replace(/^check[:.]/i, '')}`
   if (normalized.includes('host')) return 'host view'
-  return need.replaceAll('_', ' ')
+  return needText(need)
 }
 
 function formatEvidence(value: unknown): string {
@@ -67,12 +71,12 @@ function remainingMuteTime(finding: JoinedFinding): string {
   return `${Math.ceil(seconds / (24 * 60 * 60))} days`
 }
 
-export function FindingCard({ finding }: FindingCardProps) {
+export function FindingCard({ finding, names }: FindingCardProps) {
   // Not the finding id: it holds database and object names, which can
   // contain spaces and would split the aria-labelledby references.
   const domId = useId().replaceAll(':', '')
   const requirements = requirementText(finding)
-  const target = findingTarget(finding)
+  const target = findingTarget(finding, names)
   const evidence = Object.entries(finding.evidence ?? {})
 
   return (
@@ -92,13 +96,17 @@ export function FindingCard({ finding }: FindingCardProps) {
             {finding.state}
           </span>
           <span className="bg-muted text-muted-foreground rounded-full border px-2.5 py-0.5">
-            {finding.scope}
+            {scopeLabel(finding.scope)}
           </span>
         </div>
         <h3 className="text-base font-semibold" id={`finding-${domId}`}>
           {finding.title}
         </h3>
-        <p className="text-muted-foreground text-sm">Rule {finding.rule_id}</p>
+        <p className="text-muted-foreground text-sm">
+          {ruleText(finding.rule_id)}
+          {ruleText(finding.rule_id) === undefined ? null : ' '}
+          <span className="font-mono text-xs">Rule {finding.rule_id}</span>
+        </p>
         <div>
           <MuteDialog finding={finding} />
         </div>

@@ -97,8 +97,9 @@ function formattedBytes(value: number | null): string | null {
   return value === null ? null : formatBytes(value)
 }
 
+/** The figure of a rate tile; its `per second` unit follows it, so no `/s` here. */
 function formattedRate(value: number | null): string | null {
-  return value === null ? null : formatRate(value)
+  return value === null ? null : formatRate(value).replace(/\/s$/, '')
 }
 
 export function OverviewSection({ database, instanceId }: OverviewSectionProps) {
@@ -150,7 +151,8 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
           value={formattedCount(latestValue(connectionsUsed))}
         />
         <MetricTile
-          label="Transactions per second"
+          label="Transactions"
+          unit="per second"
           captionId="overview.tx-rate"
           value={formattedRate(latestValue(transactionRate))}
         />
@@ -166,6 +168,7 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
         />
         <MetricTile
           label="Checkpoints in range"
+          unit="checkpoints"
           captionId="overview.checkpoints-in-range"
           value={checkpointsInRange === null ? null : formatCount(Math.round(checkpointsInRange))}
         />
@@ -176,11 +179,13 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
         />
         <MetricTile
           label="Temporary files in range"
+          unit="files"
           captionId="overview.temp-files-in-range"
           value={tempFilesInRange === null ? null : formatCount(Math.round(tempFilesInRange))}
         />
         <MetricTile
           label="Deadlocks in range"
+          unit="deadlocks"
           captionId="overview.deadlocks-in-range"
           value={deadlocksInRange === null ? null : formatCount(Math.round(deadlocksInRange))}
         />

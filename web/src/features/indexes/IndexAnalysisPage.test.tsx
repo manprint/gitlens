@@ -111,7 +111,7 @@ describe('IndexAnalysisPage', () => {
     expect(rows).toHaveLength(4)
     expect(within(table).getByText('orders_pkey')).toBeInTheDocument()
     expect(within(table).getByText('customer_id, created_at')).toBeInTheDocument()
-    expect(screen.getByRole('article', { name: 'Indexes' })).toHaveTextContent('3')
+    expect(screen.getByRole('article', { name: 'Indexes reported' })).toHaveTextContent('3')
     // The kind counts are on the Summary view of the tab (15.3).
     fireEvent.mouseDown(screen.getByRole('tab', { name: 'Summary' }))
     expect(screen.getByRole('article', { name: 'Primary key indexes' })).toHaveTextContent('1')
@@ -125,7 +125,7 @@ describe('IndexAnalysisPage', () => {
     // Each list is a view of the tab (15.3): findings, foreign keys, then the summary tile.
     fireEvent.mouseDown(screen.getByRole('tab', { name: /^Advisor findings/ }))
     expect(screen.getByRole('heading', { level: 2, name: 'Index findings' })).toBeInTheDocument()
-    const findings = screen.getByRole('table', { name: 'Index findings' })
+    const findings = screen.getByRole('table', { name: 'Index findings by index' })
     expect(within(findings).getByText('index.unused')).toBeInTheDocument()
     fireEvent.mouseDown(screen.getByRole('tab', { name: /^Foreign keys/ }))
     expect(

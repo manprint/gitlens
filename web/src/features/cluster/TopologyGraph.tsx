@@ -179,6 +179,7 @@ function VisibleEdgeTable({
     <SimpleTable
       ariaLabel="Replication topology edges"
       caption="Every replication topology edge and its confidence."
+      captionId="topology.edges"
       columns={EDGE_COLUMNS}
       emptyState={<p className="text-muted-foreground text-sm">No replication edges.</p>}
       rowKey={(row) => row.edge.id}

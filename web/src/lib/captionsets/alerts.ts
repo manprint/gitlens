@@ -139,4 +139,49 @@ export const alertsCaptions = {
     howToRead:
       'A silence suppresses the alerts that match every matcher. It stops notifications only; the alert stays listed and keeps being evaluated. End silence stops one early or cancels a pending one.',
   },
+  'alerts.table': {
+    what: 'One row per alert: its key, severity, state, summary, cluster, instance, start time and notes.',
+    source:
+      'Server alerts endpoint over the alerts table, filled by the alert engine from the alert rules; suppression is read from the stored silences.',
+    unit: 'alerts',
+    window: 'The alerts left after the filters above; times are UTC.',
+    howToRead:
+      'The alert key opens its detail. Notes names the silence that suppresses an alert, with the time it has left. An agent alert links to a checklist.',
+  },
+  'events.table': {
+    what: 'One row per fleet event: its time, title, severity, type, cluster, instance and details.',
+    source:
+      'Server events endpoint over the events table, written by the ingest and the alert engine.',
+    unit: 'events',
+    window: 'The selected time range, newest first, cut to the event limit; times are UTC.',
+    howToRead:
+      'Type is the raw event name, always shown so an event the console does not know stays visible. Details says what to check for that type.',
+  },
+  'events.alert-status-table': {
+    what: 'One row per alert with its severity, state and whether a silence suppresses it.',
+    source:
+      'Server alerts endpoint over the alerts table, with the stored silences read for the suppression.',
+    unit: 'alerts',
+    window: 'All states kept by the server, the 500 most recently evaluated.',
+    howToRead:
+      'Suppression is Unknown when the silences could not be loaded. A suppressed alert is still evaluated.',
+  },
+  'rules.table': {
+    what: 'One row per alert rule: what it checks, its permission tier, severity, threshold, duration and whether it is enabled.',
+    source:
+      'Server alert-rules endpoint: the built-in rules compiled into the server plus the enabled rows of the alert_rules table.',
+    unit: 'rules; thresholds in the unit shown with the number',
+    window: 'Live catalogue; an edit applies at the next evaluation.',
+    howToRead:
+      'Threshold says what the metric must pass, with its unit: seconds, a share of max_connections, a share of free disk, or transactions. A rule raised by an event has no threshold.',
+  },
+  'silences.table': {
+    what: 'One row per silence: its matchers, reason, start, end and state.',
+    source:
+      'Server silences endpoint over the silences table; the state is computed in the browser from the window.',
+    unit: 'silences',
+    window: 'Pending before Start, active from Start until End, expired after End; times are UTC.',
+    howToRead:
+      'A silence suppresses the alerts that match every matcher. It stops notifications only; the alert stays listed and keeps being evaluated.',
+  },
 } as const satisfies Record<string, CaptionEntry>

@@ -41,6 +41,7 @@ function SummaryFilter({
   label,
   onClick,
   tone = 'neutral',
+  unit,
 }: {
   active: boolean
   captionId: CaptionId
@@ -50,6 +51,7 @@ function SummaryFilter({
   label: string
   onClick: () => void
   tone?: Tone
+  unit?: 'clusters' | 'instances' | 'alerts'
 }) {
   return (
     <div className="relative h-full" data-caption-id={captionId}>
@@ -70,9 +72,14 @@ function SummaryFilter({
           <span aria-hidden="true" className={cn('size-2 rounded-full', TONE_DOT[tone])} />
           {children}
         </span>{' '}
-        <strong className="text-foreground text-2xl font-semibold tracking-tight tabular-nums">
-          {count}
-        </strong>
+        <span className="flex items-baseline gap-1.5">
+          <strong className="text-foreground text-2xl font-semibold tracking-tight tabular-nums">
+            {count}
+          </strong>
+          {unit !== undefined && typeof count === 'number' ? (
+            <span className="text-muted-foreground text-xs">{unit}</span>
+          ) : null}
+        </span>
       </button>
       <InfoHint className="absolute top-2 right-2" id={captionId} label={children} />
     </div>
@@ -100,6 +107,7 @@ export function FleetSummaryBar({
           count={totalClusters}
           label={`Filter all clusters (${totalClusters})`}
           onClick={() => onHealthFilterChange('all')}
+          unit="clusters"
         >
           All clusters
         </SummaryFilter>
@@ -110,6 +118,7 @@ export function FleetSummaryBar({
           label={`Filter healthy clusters (${summary.health.ok})`}
           onClick={() => onHealthFilterChange(healthFilter === 'ok' ? 'all' : 'ok')}
           tone="ok"
+          unit="clusters"
         >
           Healthy
         </SummaryFilter>
@@ -120,6 +129,7 @@ export function FleetSummaryBar({
           label={`Filter degraded clusters (${summary.health.degraded})`}
           onClick={() => onHealthFilterChange(healthFilter === 'degraded' ? 'all' : 'degraded')}
           tone="warning"
+          unit="clusters"
         >
           Degraded
         </SummaryFilter>
@@ -130,6 +140,7 @@ export function FleetSummaryBar({
           label={`Filter critical clusters (${summary.health.critical})`}
           onClick={() => onHealthFilterChange(healthFilter === 'critical' ? 'all' : 'critical')}
           tone="critical"
+          unit="clusters"
         >
           Critical
         </SummaryFilter>
@@ -140,6 +151,7 @@ export function FleetSummaryBar({
           label={`Filter clusters with instances up (${summary.instancesUp})`}
           onClick={() => onInstanceFilterChange(instanceFilter === 'up' ? 'all' : 'up')}
           tone="ok"
+          unit="instances"
         >
           Instances up
         </SummaryFilter>
@@ -150,6 +162,7 @@ export function FleetSummaryBar({
           label={`Filter clusters with instances down (${summary.instancesDown})`}
           onClick={() => onInstanceFilterChange(instanceFilter === 'down' ? 'all' : 'down')}
           tone="critical"
+          unit="instances"
         >
           Instances down
         </SummaryFilter>
@@ -161,6 +174,7 @@ export function FleetSummaryBar({
           label={`Filter clusters with firing alerts (${summary.firingAlerts ?? 'unavailable'})`}
           onClick={() => onAlertsOnlyChange(!alertsOnly)}
           tone="warning"
+          unit="alerts"
         >
           Firing alerts
         </SummaryFilter>

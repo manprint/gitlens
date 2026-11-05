@@ -69,12 +69,21 @@ export const fleetCaptions = {
     unit: 'one card per cluster; lag in seconds',
     window: 'Latest list; refreshed every 15 s.',
     howToRead:
-      'Max replay lag is the largest lag any standby reported in the last 60 seconds, empty when none did. Permission tiers are the T0 to T2 levels the agents hold. Health ok, degraded and critical follow the summary cards above.',
+      'Max replay lag is the largest lag any standby reported in the last 60 seconds, empty when none did. Permission tier is the level of access the agent holds on each instance; its hint says what each tier allows. Health ok, degraded and critical follow the summary cards above.',
+  },
+  'fleet.permission-tiers': {
+    what: 'Permission tier the agent holds on each instance: T0 reads statistics, T1 also runs EXPLAIN for query plans, T2 also cancels or ends sessions.',
+    source:
+      'The perm_tier each instance reports with its pushes (internal/pgtype/role.go), listed once per cluster; deploy/sql/monitoring_user.sql grants a tier.',
+    unit: 'tiers',
+    window: 'Latest list; refreshed every 15 s.',
+    howToRead:
+      'A higher tier includes the lower ones. T2 actions also need the target to allow signals. A tier below what a feature needs shows that feature as not permitted.',
   },
   'fleet.agent-health': {
     what: 'Instances that are down or have a firing agent-down or unreachable alert, with the likely cause and the time since they last reported.',
     source:
-      'deriveAgentHealth in the browser: instances marked down or silent for 45 seconds, and firing alerts agent_down or instance_unreachable.',
+      'deriveAgentHealth in the browser: instances marked down or silent for 45 seconds, and firing Agent down or Instance unreachable alerts.',
     unit: 'instances',
     window: 'Latest list; refreshed every 15 s.',
     howToRead:
@@ -100,7 +109,7 @@ export const fleetCaptions = {
     thresholds: 'Retained bytes above 1 GiB are highlighted.',
   },
   'topology.graph': {
-    what: 'Replication links between the instances of this cluster; each arrow runs from a standby to the upstream it receives WAL from.',
+    what: 'Replication links between the instances of this cluster; each arrow runs from a standby (a read-only copy) to the server it copies changes from.',
     source:
       'The topology edges stored for the cluster (handleTopology in internal/server/api_topology.go), from each standby WAL receiver and the sync state on the primary.',
     unit: 'instances and replication edges',
@@ -108,8 +117,17 @@ export const fleetCaptions = {
     howToRead:
       'A dashed edge has low confidence: the standby is not streaming from that upstream right now. A banner appears when no primary or more than one primary is reported.',
   },
+  'topology.edges': {
+    what: 'The same replication links as the graph, one row per link, with its type, sync state and confidence.',
+    source:
+      'The topology edges stored for the cluster (handleTopology in internal/server/api_topology.go), shown as a table for keyboard and screen reader use.',
+    unit: 'replication edges',
+    window: 'Latest edges; refreshed every 15 s.',
+    howToRead:
+      'From is the standby and To the server it copies changes from. Low confidence means the standby is not streaming from that server right now.',
+  },
   'cluster.events': {
-    what: 'Failovers detected in this cluster, newest first and grouped by day, with the old and the new primary.',
+    what: 'Failovers detected in this cluster, newest first and grouped by day; each row shows the old and the new primary.',
     source:
       'handleTopology in internal/server/api_topology.go: events of type failover_detected, the newest 100 of the cluster.',
     unit: 'events',

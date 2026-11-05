@@ -16,6 +16,8 @@ import { HostSection } from './HostSection'
 import { InternalsSection } from './InternalsSection'
 import { LogicalReplicationSection } from './LogicalReplicationSection'
 import { OverviewSection } from './OverviewSection'
+import { RelationsSection } from './RelationsSection'
+import { SettingsSection } from './SettingsSection'
 import { INSTANCE_SECTIONS } from './instanceSections'
 
 vi.mock('echarts-for-react/esm/core', () => ({
@@ -197,7 +199,7 @@ function renderLogical() {
   })
 }
 
-function renderCatalog() {
+function renderCatalog({ noExtensions = false } = {}) {
   server.use(
     ok('getInstanceTriggers', {
       instance_id: INSTANCE_ID,
@@ -376,8 +378,46 @@ function renderCatalog() {
       truncated_databases: [],
     }),
   )
+  if (noExtensions) {
+    server.use(
+      ok('getInstanceExtensions', {
+        instance_id: INSTANCE_ID,
+        extensions: [],
+        truncated_databases: [],
+      }),
+    )
+  }
   return renderWithProviders(<CatalogSection instanceId={INSTANCE_ID} />, {
     route: `/instances/${INSTANCE_ID}`,
+  })
+}
+
+const RELATION_ROW = { schemaname: 'public', relname: 'orders', ts: NOW }
+
+function renderRelations(tables: Record<string, unknown>[], indexes: Record<string, unknown>[]) {
+  const list = (items: Record<string, unknown>[], extra = {}) => ({
+    instance_id: INSTANCE_ID,
+    items,
+    truncated: false,
+    relations_not_reported: null,
+    ...extra,
+  })
+  server.use(
+    ok('getInstanceTables', list(tables)),
+    ok('getInstanceIndexes', list(indexes)),
+    http.get('*/api/v1/instances/:id/bloat', () =>
+      HttpResponse.json({ ...list([]), skipped_tables: 0, skipped_relations: [] }),
+    ),
+  )
+  return renderWithProviders(<RelationsSection instanceId={INSTANCE_ID} currentTier="T1" />, {
+    route: `/instances/${INSTANCE_ID}`,
+  })
+}
+
+function renderSettings(settings: Schemas['Setting'][]) {
+  server.use(ok('getInstanceSettings', { instance_id: INSTANCE_ID, settings }))
+  return renderWithProviders(<SettingsSection instanceId={INSTANCE_ID} />, {
+    route: `/instances/${INSTANCE_ID}?range=1h`,
   })
 }
 
@@ -400,12 +440,10 @@ describe('instance captions', () => {
     renderOverview()
     await settle()
 
-    const tile = screen.getByRole('article', { name: 'Transactions per second' })
+    const tile = screen.getByRole('article', { name: 'Transactions' })
     expect(tile).toHaveAttribute('data-caption-id', 'overview.tx-rate')
     expect(captionOf('overview.tx-rate').what).toContain('commits and rollbacks')
-    expect(
-      within(tile).getByRole('button', { name: 'About Transactions per second' }),
-    ).toBeInTheDocument()
+    expect(within(tile).getByRole('button', { name: 'About Transactions' })).toBeInTheDocument()
   })
 
   it('CAPTION-PAGE-003 the Host section, tiles and charts are captioned', async () => {
@@ -493,6 +531,122 @@ describe('instance captions', () => {
         expect(captionOf(section.captionId as CaptionId).what, section.id).not.toBe('')
       }
     }
+  })
+
+  it('CAPTION-PAGE-009 the Internals and Logical replication panels carry their section caption', async () => {
+    const internals = renderInternals(INTERNALS)
+    await settle()
+    expect(expectCaptionedCards(internals.container)).toContain('internals.section')
+    expectCaptionText('internals.section')
+    internals.unmount()
+
+    const logical = renderLogical()
+    await settle()
+    expect(expectCaptionedCards(logical.container)).toContain('logical.section')
+    expectCaptionText('logical.section')
+  })
+
+  it('CAPTION-PAGE-010 the Internals lists keep their caption when they have nothing to list', async () => {
+    const { container } = renderInternals({
+      ...INTERNALS,
+      temp_files: [],
+      standby: { ...INTERNALS.standby!, conflicts: [] },
+    })
+    await settle()
+
+    await openTab(/Temporary files/)
+    expect(expectCaptionedCards(container)).toContain('internals.temp-files')
+    expect(screen.getByText('No query outgrew work_mem in the last hour.')).toBeInTheDocument()
+
+    await openTab(/Recovery conflicts/)
+    expect(expectCaptionedCards(container)).toContain('internals.recovery-conflicts')
+  })
+
+  it('CAPTION-PAGE-011 the Schema objects panel is captioned', async () => {
+    const { container } = renderCatalog()
+    await settle()
+    expect(expectCaptionedCards(container)).toContain('catalog.section')
+    expectCaptionText('catalog.section')
+  })
+
+  it('CAPTION-PAGE-016 an empty Schema objects list keeps its caption', async () => {
+    const { container } = renderCatalog({ noExtensions: true })
+    await settle()
+
+    await openTab(/^Extensions/)
+    expect(expectCaptionedCards(container)).toContain('catalog.extensions')
+    expectCaptionText('catalog.extensions')
+  })
+
+  it('CAPTION-PAGE-012 every Relations list and the panel are captioned', async () => {
+    const { container } = renderRelations(
+      [{ ...RELATION_ROW, n_live_tup: 10 }],
+      [{ ...RELATION_ROW, indexrelname: 'orders_pkey', object_kind: 'index' }],
+    )
+    await settle()
+
+    expect(expectCaptionedCards(container)).toEqual(
+      expect.arrayContaining(['relations.section', 'relations.tables']),
+    )
+    expectCaptionText('relations.section')
+    expectCaptionText('relations.tables')
+
+    await openTab(/^Indexes/)
+    expect(expectCaptionedCards(container)).toContain('relations.indexes')
+    expectCaptionText('relations.indexes')
+
+    await openTab(/^Table bloat/)
+    expect(expectCaptionedCards(container)).toContain('relations.table-bloat')
+    expectCaptionText('relations.table-bloat')
+
+    await openTab(/^Index bloat/)
+    expect(expectCaptionedCards(container)).toContain('relations.index-bloat')
+    expectCaptionText('relations.index-bloat')
+  })
+
+  it('CAPTION-PAGE-013 the Relations lists keep their caption when empty and name the check window', async () => {
+    const { container } = renderRelations([], [])
+    await settle()
+
+    expect(expectCaptionedCards(container)).toContain('relations.tables')
+    await openTab(/^Indexes/)
+    expect(expectCaptionedCards(container)).toContain('relations.indexes')
+    expect(screen.getAllByText(/index_stats check/).length).toBeGreaterThan(0)
+  })
+
+  it('CAPTION-PAGE-014 the Settings panel and its change table are captioned', async () => {
+    const changed = {
+      name: 'work_mem',
+      value: '4096',
+      unit: 'kB',
+      source: 'configuration file',
+      context: 'user',
+      pending_restart: 'false',
+      first_seen: NOW,
+      last_seen: NOW,
+      changed_at: NOW,
+    }
+    const { container } = renderSettings([changed])
+    await settle()
+
+    const ids = expectCaptionedCards(container)
+    expect(ids).toContain('instance.settings')
+    expect(ids).toContain('instance.settings-changes')
+    expectCaptionText('instance.settings')
+    expect(screen.getByText('Changed since')).toBeVisible()
+    for (const name of ['fsync', 'archive_mode', 'wal_level']) {
+      expect(screen.getByRole('button', { name: `About ${name}` })).toBeInTheDocument()
+    }
+  })
+
+  it('CAPTION-PAGE-015 the Settings change table keeps its caption when nothing changed', async () => {
+    const { container } = renderSettings([])
+    await settle()
+
+    expect(expectCaptionedCards(container)).toContain('instance.settings-changes')
+    expect(
+      screen.getByText('No setting changed since the date in Changed since.'),
+    ).toBeInTheDocument()
   })
 
   it('CARD-ALL-001 every Overview tile shows one figure and no bare second number', async () => {

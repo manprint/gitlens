@@ -11,13 +11,14 @@ import { EmptyState, ErrorState } from '@/components/state'
 import { Button } from '@/components/ui/button'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { buildIndexRows } from '@/lib/indexAnalysis'
+import { buildIndexRows, foreignKeyGaps } from '@/lib/indexAnalysis'
 import { clusterLabel, instanceLabel } from '@/lib/names'
 import { chooseInstance, readLastInstance } from '@/lib/lastInstance'
 
 import { CleanupPanel, type SiblingServer } from './CleanupPanel'
 import { DeadRowsPanel } from './DeadRowsPanel'
 import { IndexesPanel } from './IndexesPanel'
+import { noIndexStatsText } from './emptyText'
 import { IndexTaxPanel } from './IndexTaxPanel'
 import { SearchEverythingBox, SearchEverythingResults } from './SearchEverything'
 import { SuggestionsPanel } from './SuggestionsPanel'
@@ -137,6 +138,19 @@ function InstanceIndexes({ serverControl, instanceId, siblings }: AnalysisProps)
     [allRows, database],
   )
 
+  // Why an empty index list is empty (the Indexes, Cleanup and Index tax tabs).
+  const emptyIndexes = useMemo(
+    () =>
+      noIndexStatsText({
+        database,
+        reported: allRows.length,
+        foreignKeys: foreignKeyGaps(findings).filter(
+          (gap) => database === '' || gap.datname === database,
+        ).length,
+      }),
+    [allRows.length, database, findings],
+  )
+
   function setParam(key: 'db', value: string) {
     const next = new URLSearchParams(searchParams)
     if (value && value !== 'all') next.set(key, value)
@@ -246,6 +260,7 @@ function InstanceIndexes({ serverControl, instanceId, siblings }: AnalysisProps)
             dataUpdatedAt={indexesQuery.dataUpdatedAt}
             database={database}
             findings={findings}
+            emptyDescription={emptyIndexes}
             focusKey={tab === 'indexes' ? focusKey : undefined}
             onFocusDone={focusDone}
             findingsPending={findingsQuery.isPending}
@@ -257,7 +272,14 @@ function InstanceIndexes({ serverControl, instanceId, siblings }: AnalysisProps)
         )}
       </TabsContent>
       <TabsContent value="cleanup">
-        {indexesState ?? <CleanupPanel instanceId={instanceId} rows={scoped} siblings={siblings} />}
+        {indexesState ?? (
+          <CleanupPanel
+            emptyDescription={emptyIndexes}
+            instanceId={instanceId}
+            rows={scoped}
+            siblings={siblings}
+          />
+        )}
       </TabsContent>
       <TabsContent value="dead-rows">
         <DeadRowsPanel
@@ -275,6 +297,7 @@ function InstanceIndexes({ serverControl, instanceId, siblings }: AnalysisProps)
         {indexesState ?? (
           <IndexTaxPanel
             database={database}
+            emptyDescription={emptyIndexes}
             incomplete={response?.truncated === true || allRows.length >= INDEX_LIMIT}
             instanceId={instanceId}
             rows={scoped}

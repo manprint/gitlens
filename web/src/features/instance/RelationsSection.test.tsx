@@ -3,6 +3,7 @@ import { http, HttpResponse } from 'msw/http'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { PermTier, Schemas } from '@/api/types'
+import { captionOf } from '@/lib/captions'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { assertMatchesContract } from '@/test/contract'
 import { INSTANCE_ID } from '@/test/fixture-helpers'
@@ -128,33 +129,17 @@ describe('RelationsSection', () => {
     })
     await settle()
 
-    expect(
-      screen.getByText(
-        'Showing 1 of 50 tables shared per instance across databases (truncated; budget 50).',
-      ),
-    ).toBeInTheDocument()
-    expect(screen.getByText('checks.table_stats.top_n')).toBeInTheDocument()
+    const notice = (noun: string, key: string) =>
+      new RegExp(
+        `This list is incomplete: the agent reports only the top ${noun} of each database\\. Raise the limit with ${key.replaceAll('.', '\\.')}\\.`,
+      )
+    expect(screen.getAllByText(notice('tables', 'checks.table_stats.top_n'))).toHaveLength(1)
     await openView('Indexes')
-    expect(screen.getByText('checks.index_stats.top_n')).toBeInTheDocument()
-    expect(
-      screen.getByText(
-        'Showing 1 of 50 indexes shared per instance across databases (truncated; budget 50).',
-      ),
-    ).toBeInTheDocument()
+    expect(screen.getAllByText(notice('indexes', 'checks.index_stats.top_n'))).toHaveLength(1)
     await openView('Table bloat')
-    expect(screen.getByText('checks.bloat_estimate.top_n')).toBeInTheDocument()
-    expect(
-      screen.getByText(
-        'Showing 1 of 50 table bloat estimates shared per instance across databases (truncated; budget 50).',
-      ),
-    ).toBeInTheDocument()
+    expect(screen.getAllByText(notice('tables', 'checks.bloat_estimate.top_n'))).toHaveLength(1)
     await openView('Index bloat')
-    expect(screen.getByText('checks.bloat_estimate.top_n')).toBeInTheDocument()
-    expect(
-      screen.getByText(
-        'Showing 1 of 50 index bloat estimates shared per instance across databases (truncated; budget 50).',
-      ),
-    ).toBeInTheDocument()
+    expect(screen.getAllByText(notice('indexes', 'checks.bloat_estimate.top_n'))).toHaveLength(1)
   })
 
   it('UI-INST-051 does not show a truncation notice for complete responses', async () => {
@@ -165,16 +150,20 @@ describe('RelationsSection', () => {
     })
     await settle()
 
-    expect(screen.queryByText(/truncated; budget/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/This list is incomplete/)).not.toBeInTheDocument()
   })
 
-  it('UI-INST-052 states the bloat estimate caveat once', async () => {
+  it('UI-INST-052 states the bloat estimate caveat in the caption, not in a long description', async () => {
     renderRelations({
       bloat: bloatResponse([item({ object_kind: 'table', bloat_bytes: 2048, method: 'estimate' })]),
     })
     await settle()
 
-    expect(screen.getAllByText(/statistical estimate, not a measurement/)).toHaveLength(1)
+    await openView('Table bloat')
+    // The caveat sits in the caption's ⓘ; the old long description is gone.
+    expect(screen.getAllByText(captionOf('relations.table-bloat').what).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/statistical estimate, not a measurement/)).not.toBeInTheDocument()
+    expect(captionOf('relations.table-bloat').howToRead).toContain('Estimated, not measured')
   })
 
   it('UI-INST-053 omits never-analysed relations instead of showing zero bloat', async () => {

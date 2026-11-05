@@ -117,10 +117,10 @@ describe('Index analysis summary cards (D31)', () => {
 
     const tiles = screen.getAllByRole('article')
     expect(tiles.map((tile) => tile.getAttribute('aria-label'))).toEqual([
-      'Indexes',
+      'Indexes reported',
       'Total size',
-      'Need attention',
-      'Never scanned',
+      'Indexes needing attention',
+      'Never-scanned indexes',
       'Primary key indexes',
       'Unique indexes',
       'Partial indexes',
@@ -136,7 +136,9 @@ describe('Index analysis summary cards (D31)', () => {
     const invalid = screen.getByRole('article', { name: 'Invalid indexes' })
     expect(invalid).toHaveTextContent('Rebuild or drop')
     const duplicates = screen.getByRole('article', { name: 'Exact duplicate indexes' })
-    expect(within(duplicates).getByText('2', FIGURE)).toBeInTheDocument()
+    // Two findings without index names: each is a group of at least two indexes.
+    expect(within(duplicates).getByText('4', FIGURE)).toBeInTheDocument()
+    expect(duplicates).toHaveTextContent('in 2 groups with identical definitions')
     expect(duplicates).toHaveTextContent('Review before dropping')
   })
 

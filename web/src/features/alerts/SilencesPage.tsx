@@ -84,6 +84,7 @@ function silenceColumns(
     {
       id: 'matchers',
       header: 'Matchers',
+      help: 'silences.matchers',
       sortValue: matcherLabel,
       className: 'font-mono text-xs',
       width: '30%',
@@ -270,6 +271,7 @@ export function SilencesPage() {
         ) : (
           <SimpleTable
             ariaLabel="Alert silences"
+            captionId="silences.table"
             columns={columns}
             emptyState={null}
             rowKey={(silence) => silence.silence_id}

@@ -14,7 +14,7 @@ import { flushNetwork } from '@/test/network'
 import { renderWithProviders } from '@/test/render'
 import { columnTexts, dataRows, searchTable, seq, sortTable } from '@/test/table'
 
-const NAME = 'Index suggestions'
+const NAME = 'Suggested indexes'
 const FIRST = base.suggestions[0]!
 
 function suggestion(name: string, extra: Record<string, unknown> = {}) {
@@ -82,7 +82,32 @@ describe('SuggestionsPanel', () => {
     expect(row.getByText('40%')).toBeInTheDocument()
     expect(row.getByText('upper bound')).toBeInTheDocument()
     expect(row.getByText('~1.3 MiB')).toBeInTheDocument()
-    expect(row.getByText('0.5/s · 1/s · 0.1/s')).toBeInTheDocument()
+    expect(row.getByText('0.5 inserts/s · 1 updates/s · 0.1 deletes/s')).toBeInTheDocument()
+  })
+
+  it('SUGG-UI-016 spells the write rates out, also when they are zero or tiny', async () => {
+    render({
+      ...base,
+      suggestions: [
+        suggestion('idle', {
+          write: { insert_rate: 0, update_rate: 0, delete_rate: 0, hot_update_ratio: 0 },
+        }),
+        suggestion('tiny', {
+          write: { insert_rate: 0.004, update_rate: 12, delete_rate: 0, hot_update_ratio: 0 },
+        }),
+      ],
+    })
+    await flushNetwork(30)
+
+    expect(screen.getByText('0 inserts/s · 0 updates/s · 0 deletes/s')).toBeInTheDocument()
+    expect(screen.getByText('<0.01 inserts/s · 12 updates/s · 0 deletes/s')).toBeInTheDocument()
+  })
+
+  it('SUGG-UI-017 wraps the coverage line instead of cutting the skip reasons', async () => {
+    render()
+    await flushNetwork(30)
+
+    expect(screen.getByTestId('suggestion-coverage').className).not.toMatch(/truncate/)
   })
 
   it('SUGG-UI-003 sorts by weight and by estimated size', async () => {

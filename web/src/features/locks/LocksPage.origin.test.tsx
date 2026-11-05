@@ -65,7 +65,7 @@ describe('origin sessions on the Locks page', () => {
     render(<ActivitySection connections={withOrigins.connections} now={NOW} response={activity} />)
 
     expect(
-      within(screen.getByRole('article', { name: 'Connections used / max_connections' })).getByText(
+      within(screen.getByRole('article', { name: 'Connections used' })).getByText(
         '2 application connections · 1 pglens connection',
       ),
     ).toBeInTheDocument()
@@ -216,7 +216,9 @@ describe('origin sessions on the Locks page', () => {
 
     renderPage(originResponse, '?view=activity')
     expect(screen.getByRole('heading', { name: 'Connection summary' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Oldest xmin holder' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: 'Oldest cleanup blocker (xmin holder)' }),
+    ).toBeInTheDocument()
   })
 
   it('SORIGIN-UI-001 mounts the tables and summary for an empty sample that carries connections', () => {

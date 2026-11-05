@@ -97,7 +97,7 @@ export const instanceCaptions = {
       'Recovery conflicts are counted on a standby, so that line stays at zero on a primary.',
   },
   'overview.chart-cache-hit-ratio': {
-    what: 'Share of block reads served from shared buffers in the selected database, per query step.',
+    what: "Share of page reads found in PostgreSQL's own memory cache (shared buffers) rather than requested from the operating system, per query step.",
     source:
       'pg_stat_database blks_hit / (blks_hit + blks_read), from the pg_blks_hit_total and pg_blks_read_total rates of each step.',
     unit: '%',
@@ -122,15 +122,16 @@ export const instanceCaptions = {
     window: 'Selected time range; sampled every 30 s.',
   },
   'overview.chart-wal': {
-    what: 'WAL bytes, WAL records and full-page images written per second by the whole instance.',
+    what: 'Write-ahead log (WAL, the journal PostgreSQL writes before changing data files): bytes, records and full-page images the whole instance writes per second.',
     source:
       'pg_stat_wal wal_bytes, wal_records and wal_fpi (pg_wal_wal_bytes, pg_wal_wal_records, pg_wal_wal_fpi), counter deltas; only the columns this server has are collected.',
     unit: 'bytes per second; records and images per second on the second axis',
     window: 'Selected time range; sampled every 15 s.',
-    howToRead: 'A line is missing when the PostgreSQL version has no such pg_stat_wal column.',
+    howToRead:
+      'A full-page image is a whole page copied into the WAL the first time it changes after a checkpoint. A line is missing when the PostgreSQL version has no such pg_stat_wal column.',
   },
   'overview.chart-checkpoints': {
-    what: 'Timed and requested checkpoints started in each query step, as two lines.',
+    what: 'Checkpoints, the moments PostgreSQL writes all changed pages to the data files, started in each step: timed by the clock, or requested earlier.',
     source:
       'pg_stat_checkpointer num_timed and num_requested (pg_stat_bgwriter before PostgreSQL 17), as pg_checkpoints_timed_total and pg_checkpoints_requested_total.',
     unit: 'checkpoints per step',
@@ -204,10 +205,11 @@ export const instanceCaptions = {
       'pg_stat_user_tables.n_tup_ins, n_tup_upd, n_tup_hot_upd and n_tup_del of the tables the agent tracks, as per-second rates.',
     unit: 'rows per second',
     window: 'Selected time range; sampled every 5 minutes.',
-    howToRead: 'HOT updates are also counted in Updated.',
+    howToRead:
+      'HOT updates (the new row version stays on the same page, with no index change) are also counted in Updated.',
   },
   'overview.chart-dead-tuples': {
-    what: 'Estimated number of dead tuples added up over the tracked tables of every database.',
+    what: 'Estimated dead rows (old row versions left by updates and deletes that vacuum has not yet removed), added up over the tracked tables of every database.',
     source: 'pg_stat_user_tables.n_dead_tup of the tables the agent tracks, summed per sample.',
     unit: 'rows',
     window: 'Selected time range; sampled every 5 minutes.',
@@ -440,7 +442,7 @@ export const instanceCaptions = {
   },
 
   'internals.section': {
-    what: 'Server internals: the WAL kept in pg_wal, database sizes, SLRU caches, temporary files and, on a standby, WAL replay.',
+    what: 'Server internals the agent reports: the WAL kept in pg_wal, SLRU caches, temporary files and, on a standby, WAL replay.',
     source:
       'Checks wal_directory, database_size, slru, database_stats and recovery, read from the stored metrics of the instance.',
     window: 'Rates are averaged over the last hour.',
@@ -470,7 +472,7 @@ export const instanceCaptions = {
     howToRead: 'A dash in a growth column means no size was measured near that time.',
   },
   'internals.slru': {
-    what: 'Hit ratio and activity of each SLRU cache, the small buffer pools for transaction status, subtransactions, multixacts and similar data.',
+    what: 'Hit ratio and activity of each SLRU cache: small memory caches for transaction status, row-lock groups (multixact), subtransactions and serializable isolation.',
     source:
       'pg_stat_slru counters (slru check) as per-second rates averaged over the last hour; hit ratio is hits divided by hits plus reads.',
     unit: '% hit ratio; blocks and events per second',
@@ -517,5 +519,72 @@ export const instanceCaptions = {
     unit: 'bytes per second; transactions per second',
     window: 'Last hour; the check runs every minute.',
     thresholds: 'A spill rate of 1 MiB per second or more is marked, as in the advisor.',
+  },
+  'instance.settings': {
+    what: 'PostgreSQL settings as last read from the server: five durability settings shown first, then the settings changed in the selected range.',
+    source:
+      'pg_settings read by the settings check (name, setting, unit, source, context, pending_restart), stored as setting facts with the time of their last change.',
+    unit: 'settings',
+    window:
+      'Durability settings: the latest scrape; the change table: settings whose value changed since the chosen date, by default the start of the selected range.',
+    howToRead:
+      'A durability setting that weakens crash safety carries a critical or warning badge; its ⓘ says what the value means.',
+  },
+  'instance.settings-changes': {
+    what: 'Settings whose value changed since the chosen date, with where the value was set, when a change takes effect and whether a restart is pending.',
+    source:
+      'pg_settings facts of the instance (settings check): name, value, unit, source, context, pending_restart and the time the value last changed.',
+    window:
+      'Changes since the date in Changed since; the value shown is the latest scrape. Use selected range resets the date to the start of the range.',
+    howToRead:
+      'Pending restart means the configuration holds a new value that only a restart puts in force. Search and filters change no setting.',
+  },
+
+  'relations.section': {
+    what: 'Tables, indexes and estimated bloat of every monitored database, as last reported by the agent; one tab per list.',
+    source:
+      'Agent checks table_stats, index_stats and bloat_estimate, read from the relation metrics stored for the instance.',
+    unit: 'rows, scans per second and bytes',
+    window:
+      'Tables and indexes: reports of the last 15 minutes. Bloat estimates: the last 13 hours; exact measurements: the last 7 days.',
+    howToRead:
+      'Each list is limited by the agent budget of its check (checks.table_stats.top_n, checks.index_stats.top_n, checks.bloat_estimate.top_n), so relations beyond that budget are not reported.',
+  },
+  'relations.tables': {
+    what: 'Each table of the monitored databases with its live and dead rows, how often it is read in full, and when vacuum and analyze last ran.',
+    source:
+      'pg_stat_user_tables (table_stats check): n_live_tup, n_dead_tup, seq_scan and idx_scan as rates, last vacuum and analyze times; size from pg_total_relation_size.',
+    unit: 'rows; scans per second; bytes',
+    window: 'Reports of the last 15 minutes; the check runs every 5 minutes.',
+    howToRead:
+      'Dead ratio is dead rows divided by live rows. Scan columns are rates over the last scrape interval, not totals. The agent reports only the top tables of each database (checks.table_stats.top_n, 50 by default).',
+  },
+  'relations.indexes': {
+    what: 'Each index of the monitored databases with how often it is used, when it was last used, its size, and whether it is unique, primary and valid.',
+    source:
+      'pg_stat_user_indexes and pg_index (index_stats check): idx_scan as a rate, last_idx_scan (PostgreSQL 16 and later), pg_relation_size, indisunique, indisprimary and indisvalid.',
+    unit: 'scans per second; bytes',
+    window: 'Reports of the last 15 minutes; the check runs every 5 minutes.',
+    howToRead:
+      'The Relation column names the table the index belongs to. Bloat estimates come from another check with a longer window, so they can list indexes while this tab is empty.',
+  },
+  'relations.table-bloat': {
+    what: 'Estimated wasted space inside each table, held by deleted or old row versions, that a rebuild would give back.',
+    source:
+      'bloat_estimate check: real size from pg_relation_size against an expected size worked out from row counts and column statistics (pg_stats); pgstattuple rows are exact.',
+    unit: 'bytes; bloat ratio in %',
+    window:
+      'Newest estimate of the last 13 hours, refreshed every 6 hours; an exact measurement is kept for 7 days.',
+    howToRead:
+      'Estimated, not measured. Tables without column statistics (never analysed) and tables the monitoring role cannot read in full are not estimated; Measure exactly runs pgstattuple on one table.',
+  },
+  'relations.index-bloat': {
+    what: 'Estimated wasted space inside each btree index, held by deleted or old entries, that rebuilding the index would give back.',
+    source:
+      'bloat_estimate check: real size from pg_relation_size against an expected size worked out from row counts and column statistics (pg_stats).',
+    unit: 'bytes; bloat ratio in %',
+    window: 'Newest estimate of the last 13 hours, refreshed every 6 hours.',
+    howToRead:
+      'Estimated, not measured. Only valid btree indexes that are not partial, have no expression and sit on columns with statistics are estimated.',
   },
 } as const satisfies Record<string, CaptionEntry>

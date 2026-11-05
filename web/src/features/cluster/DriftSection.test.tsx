@@ -11,7 +11,9 @@ describe('DriftSection', () => {
     renderWithProviders(<DriftSection entries={[]} />)
 
     expect(screen.getByText('No drift detected')).toBeInTheDocument()
-    expect(screen.getByText(/match across the cluster instances/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/No setting differs between the instances of this cluster/),
+    ).toBeInTheDocument()
   })
 
   it('UI-CLUS-023 a differing setting highlights the differing instances', () => {

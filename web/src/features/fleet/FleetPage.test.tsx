@@ -330,7 +330,7 @@ describe('FleetPage', () => {
         name: /Open instance postgres\.example\.test:5432 \(production\)/i,
       }),
     ).toHaveAttribute('href', `/instances/${INSTANCE_SUMMARY.instance_id}`)
-    expect(screen.getByText('cause: agent stopped reporting')).toBeInTheDocument()
+    expect(screen.getByText('agent stopped reporting')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'View agent troubleshooting' })).toHaveAttribute(
       'href',
       '/README.md#troubleshooting',

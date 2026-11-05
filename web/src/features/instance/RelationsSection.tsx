@@ -7,7 +7,7 @@ import { qk } from '@/api/keys'
 import { useInstanceBloat, useInstanceIndexes, useInstanceTables } from '@/api/queries'
 import type { PermTier, Schemas } from '@/api/types'
 import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
-import { EmptyState, ErrorState, NotPermitted, Truncated, Unknown } from '@/components/state'
+import { EmptyState, ErrorState, NotPermitted, Unknown } from '@/components/state'
 import {
   commandQueueFullMessage,
   describeCommandState,
@@ -17,9 +17,10 @@ import { formatBytes, formatCount, formatPercent, formatRate, formatTimestamp } 
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent } from '@/components/ui/tabs'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
+import type { CaptionId, ColumnHelpId } from '@/lib/captions'
 
 import { DENSE_TABLE } from './denseTable'
-import { InstancePanel, InstanceViewTabs } from './InstancePanel'
+import { CaptionedBlock, InstancePanel, InstanceViewTabs, ToolbarNote } from './InstancePanel'
 import { RELATION_VIEW_IDS } from './instanceSections'
 import { useInstanceView, type InstanceView } from './instanceViews'
 
@@ -208,12 +209,33 @@ function relationKey(item: RelationItem): string {
     .join('|')
 }
 
+/** The hint of a column, by its key; keys not listed carry none. */
+const COLUMN_HELP: Record<string, ColumnHelpId> = {
+  relation: 'relations.relation',
+  live_tuples: 'relations.live-tuples',
+  dead_tuples: 'relations.dead-tuples',
+  dead_ratio: 'relations.dead-ratio',
+  seq_scan_rate: 'relations.seq-scan-rate',
+  idx_scan_rate: 'relations.idx-scan-rate',
+  last_vacuum: 'relations.last-vacuum',
+  last_analyze: 'relations.last-analyze',
+  last_scan: 'relations.last-scan',
+  valid: 'relations.valid',
+  real_bytes: 'relations.real-size',
+  expected_bytes: 'relations.expected-size',
+  bloat_bytes: 'relations.bloat',
+  bloat_ratio: 'relations.bloat-ratio',
+  method: 'relations.method',
+}
+
 function SortableRelationTable({
   caption,
+  captionId,
   items,
   columns,
 }: {
   caption: string
+  captionId: CaptionId
   items: RelationItem[]
   columns: RelationColumn[]
 }) {
@@ -226,6 +248,7 @@ function SortableRelationTable({
         rowHeader: index === 0,
         className: index === 0 ? 'font-normal' : '',
         cell: column.render,
+        ...(COLUMN_HELP[column.key] === undefined ? {} : { help: COLUMN_HELP[column.key] }),
         ...(column.width === undefined ? {} : { width: column.width }),
         ...(column.truncate === undefined ? {} : { truncate: column.truncate }),
       })),
@@ -236,6 +259,7 @@ function SortableRelationTable({
   return (
     <SimpleTable
       ariaLabel={caption}
+      captionId={captionId}
       columns={simpleColumns}
       emptyState={null}
       headerToggleName={(column) => `Sort ${caption} by ${column.header}`}
@@ -497,30 +521,24 @@ const INDEX_BLOAT_COLUMNS: RelationColumn[] = [
   ...BLOAT_MEASURE_COLUMNS,
 ]
 
+/**
+ * The agent sends only the top relations of each database, so a list can be
+ * incomplete; the sentence is shown whole, once, above the table.
+ */
 function BudgetNotice({
   response,
-  scope,
+  noun,
   configKey,
 }: {
   response: RelationResponse
-  scope: string
+  noun: string
   configKey: string
 }) {
   if (!response.truncated) return null
-  const shown = response.items.length
-  // From 1600 px the notice is one truncated line in the panel heading (D26).
   return (
-    <div
-      className="space-y-1 min-[1600px]:flex min-[1600px]:max-w-[40rem] min-[1600px]:min-w-0 min-[1600px]:items-baseline min-[1600px]:gap-1 min-[1600px]:space-y-0"
-      title={`Showing ${shown} of ${RELATION_LIMIT} ${scope} (truncated; budget ${RELATION_LIMIT}). This budget is shared per instance across databases. Change it at ${configKey}.`}
-    >
-      <div className="min-[1600px]:min-w-0 min-[1600px]:truncate">
-        <Truncated shown={shown} budget={RELATION_LIMIT} scope={scope} />
-      </div>
-      <p className="text-muted-foreground text-sm min-[1600px]:min-w-0 min-[1600px]:truncate">
-        This budget is shared per instance across databases. Change it at <code>{configKey}</code>.
-      </p>
-    </div>
+    <ToolbarNote status wrap>
+      {`This list is incomplete: the agent reports only the top ${noun} of each database. Raise the limit with ${configKey}.`}
+    </ToolbarNote>
   )
 }
 
@@ -530,11 +548,21 @@ interface RelationPanelProps {
   query: RelationQueryState
   columns: RelationColumn[]
   emptyDescription: string
-  scope: string
+  captionId: CaptionId
+  noun: string
   configKey: string
 }
 
-function RelationPanel({ title, endpoint, query, columns, emptyDescription }: RelationPanelProps) {
+function RelationPanel({
+  title,
+  endpoint,
+  query,
+  columns,
+  emptyDescription,
+  captionId,
+  noun,
+  configKey,
+}: RelationPanelProps) {
   if (query.error && !query.data) {
     return (
       <ErrorState endpoint={endpoint} failure={query.error} onRetry={() => void query.refetch()} />
@@ -548,9 +576,23 @@ function RelationPanel({ title, endpoint, query, columns, emptyDescription }: Re
     )
   }
   if (query.data.items.length === 0) {
-    return <EmptyState title={`No ${title.toLowerCase()}`} description={emptyDescription} />
+    return (
+      <CaptionedBlock ariaLabel={title} captionId={captionId}>
+        <EmptyState title={`No ${title.toLowerCase()}`} description={emptyDescription} />
+      </CaptionedBlock>
+    )
   }
-  return <SortableRelationTable caption={title} items={query.data.items} columns={columns} />
+  return (
+    <div className="space-y-3">
+      <BudgetNotice response={query.data} noun={noun} configKey={configKey} />
+      <SortableRelationTable
+        caption={title}
+        captionId={captionId}
+        items={query.data.items}
+        columns={columns}
+      />
+    </div>
+  )
 }
 
 /**
@@ -734,8 +776,9 @@ export function RelationsSection({
       endpoint: 'table relations',
       query: tablesQuery,
       columns: TABLE_COLUMNS,
-      emptyDescription: 'No table relations are currently reported.',
-      scope: 'tables shared per instance across databases',
+      emptyDescription: 'No table statistics arrived from the agent in the last 15 minutes.',
+      captionId: 'relations.tables',
+      noun: 'tables',
       configKey: 'checks.table_stats.top_n',
     },
     indexes: {
@@ -743,8 +786,10 @@ export function RelationsSection({
       endpoint: 'index relations',
       query: indexesQuery,
       columns: INDEX_COLUMNS,
-      emptyDescription: 'No index relations are currently reported.',
-      scope: 'indexes shared per instance across databases',
+      emptyDescription:
+        'No index usage statistics arrived from the agent in the last 15 minutes (index_stats check). Index bloat estimates cover a longer window and can list indexes anyway.',
+      captionId: 'relations.indexes',
+      noun: 'indexes',
       configKey: 'checks.index_stats.top_n',
     },
     'table-bloat': {
@@ -752,8 +797,9 @@ export function RelationsSection({
       endpoint: 'table bloat estimates',
       query: bloatTablesQuery,
       columns: bloatTableColumns,
-      emptyDescription: 'No table bloat estimates are currently reported.',
-      scope: 'table bloat estimates shared per instance across databases',
+      emptyDescription: 'No table bloat estimate was reported in the last 13 hours.',
+      captionId: 'relations.table-bloat',
+      noun: 'tables',
       configKey: 'checks.bloat_estimate.top_n',
     },
     'index-bloat': {
@@ -761,33 +807,20 @@ export function RelationsSection({
       endpoint: 'index bloat estimates',
       query: bloatIndexesQuery,
       columns: INDEX_BLOAT_COLUMNS,
-      emptyDescription: 'No index bloat estimates are currently reported.',
-      scope: 'index bloat estimates shared per instance across databases',
+      emptyDescription: 'No index bloat estimate was reported in the last 13 hours.',
+      captionId: 'relations.index-bloat',
+      noun: 'indexes',
       configKey: 'checks.bloat_estimate.top_n',
     },
   }
-  const active = panels[view]
 
   return (
     <Tabs onValueChange={showView} value={view}>
       <InstancePanel
-        title="Relations, bloat and truncation"
-        description={
-          'Tables, indexes and bloat estimates each use a top-N budget per database. A bloat estimate is a statistical estimate, not a measurement: it covers tables and btree indexes. Relations under 1 MiB, never-analysed relations, and partial and expression indexes are not estimated. Tables the monitoring role cannot read in full are not estimated either; they are counted above the table estimates. Rows with method pgstattuple are exact measurements of tables.'
-        }
+        title="Tables and indexes"
+        captionId="relations.section"
         id="instance-relations"
-        actions={
-          <>
-            {active.query.data ? (
-              <BudgetNotice
-                response={active.query.data}
-                scope={active.scope}
-                configKey={active.configKey}
-              />
-            ) : null}
-            <InstanceViewTabs label="Relation lists" views={RELATION_VIEWS} />
-          </>
-        }
+        actions={<InstanceViewTabs label="Relation lists" views={RELATION_VIEWS} />}
       >
         <TabsContent value="tables">
           <RelationPanel {...panels.tables} />

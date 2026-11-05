@@ -38,11 +38,11 @@ type Finding = Schemas['Finding']
 
 const FILTERS: readonly { value: DeadFilter; label: string; hint: string }[] = [
   { value: 'all', label: 'All', hint: 'Every table the agent reported.' },
-  { value: 'dead', label: 'With dead rows', hint: 'Tables with at least one dead tuple.' },
+  { value: 'dead', label: 'With dead rows', hint: 'Tables with at least one dead row.' },
   {
     value: 'due',
-    label: 'Past autovacuum trigger',
-    hint: 'Dead tuples at or above autovacuum_vacuum_threshold + scale_factor × live tuples.',
+    label: 'Due for automatic vacuum',
+    hint: 'Dead rows at or above autovacuum_vacuum_threshold + scale_factor × live rows.',
   },
   { value: 'never', label: 'Never vacuumed', hint: 'No manual or automatic vacuum recorded.' },
   { value: 'flagged', label: 'Flagged by advisor', hint: 'Tables with an open advisor finding.' },
@@ -85,9 +85,11 @@ function deadColumns(
     header: string,
     cell: (row: DeadRow) => ReactNode,
     width: string,
+    help?: SimpleColumn<DeadRow>['help'],
   ): SimpleColumn<DeadRow> => ({
     id,
     header,
+    ...(help === undefined ? {} : { help }),
     sortValue: SORTED_BY_COMPARE,
     firstDirection: 'desc',
     className: 'whitespace-nowrap',
@@ -120,7 +122,7 @@ function deadColumns(
     // From 1600 px the second lines (dead space, "due") sit beside the figure (D26).
     counted(
       'dead',
-      'Dead',
+      'Dead rows',
       (row) => (
         <>
           {formatCount(row.dead)}
@@ -132,15 +134,16 @@ function deadColumns(
         </>
       ),
       '10rem',
+      'indexes.dead-rows-column',
     ),
-    counted('ratio', 'Dead / live', (row) => percent(row.deadRatio), '8.5rem'),
+    counted('ratio', 'Dead / live', (row) => percent(row.deadRatio), '8.5rem', 'indexes.dead-live'),
     counted(
       'trigger',
-      'Trigger',
+      'Vacuum due',
       (row) => (
         <span
           className={cn(row.triggerShare >= 1 && 'font-medium')}
-          title={`Autovacuum starts at about ${formatCount(Math.round(row.trigger))} dead tuples.`}
+          title={`Autovacuum starts at about ${formatCount(Math.round(row.trigger))} dead rows.`}
         >
           {triggerText(row)}
           {row.triggerShare >= 1 ? (
@@ -151,6 +154,7 @@ function deadColumns(
         </span>
       ),
       '7rem',
+      'indexes.vacuum-due',
     ),
     counted(
       'size',
@@ -161,22 +165,25 @@ function deadColumns(
     {
       id: 'vacuum',
       header: 'Last vacuum',
+      help: 'indexes.dead-last-vacuum',
       sortValue: SORTED_BY_COMPARE,
       className: 'whitespace-nowrap',
       width: '10rem',
       truncate: (row) => vacuumText(row, now),
       cell: (row) => vacuumText(row, now),
     },
-    counted('hot', 'HOT', (row) => percent(row.hotRatio), '6rem'),
+    counted('hot', 'HOT', (row) => percent(row.hotRatio), '6rem', 'indexes.hot-share'),
     counted(
       'writes',
       'Writes',
       (row) => (row.writeRate === null ? 'Unknown' : formatRate(row.writeRate)),
       '7rem',
+      'indexes.dead-writes',
     ),
     {
       id: 'trend',
       header: 'Trend',
+      help: 'indexes.dead-trend',
       className: 'whitespace-nowrap',
       width: '10rem',
       cell: (row) => {
@@ -194,7 +201,7 @@ function deadColumns(
           >
             <Sparkline
               className="min-[1600px]:h-4 min-[1600px]:w-16"
-              label={`Dead tuples of ${row.table} over the selected range`}
+              label={`Dead rows of ${row.table} over the selected range`}
               values={values}
             />
             <span className="text-muted-foreground text-xs">{direction}</span>
@@ -222,9 +229,9 @@ function Detail({ row, now }: { row: DeadRow; now: Date }) {
   return (
     <div className="space-y-4 px-4 py-4">
       <dl className="grid gap-x-8 gap-y-1.5 text-sm sm:grid-cols-[auto_1fr_auto_1fr]">
-        <dt className="text-muted-foreground">Live tuples</dt>
+        <dt className="text-muted-foreground">Live rows</dt>
         <dd className="tabular-nums">{formatCount(row.live)}</dd>
-        <dt className="text-muted-foreground">Dead tuples</dt>
+        <dt className="text-muted-foreground">Dead rows</dt>
         <dd className="tabular-nums">{formatCount(row.dead)}</dd>
         <dt className="text-muted-foreground">Heap size</dt>
         <dd className="tabular-nums">
@@ -233,7 +240,7 @@ function Detail({ row, now }: { row: DeadRow; now: Date }) {
         <dt className="text-muted-foreground">With indexes and TOAST</dt>
         <dd className="tabular-nums">{row.bytes === null ? 'Unknown' : formatBytes(row.bytes)}</dd>
         <dt className="text-muted-foreground">Autovacuum starts at</dt>
-        <dd className="tabular-nums">{formatCount(Math.round(row.trigger))} dead tuples</dd>
+        <dd className="tabular-nums">{formatCount(Math.round(row.trigger))} dead rows</dd>
         <dt className="text-muted-foreground">Autovacuum runs</dt>
         <dd className="tabular-nums">
           {row.autovacuumPerDay === null ? 'Unknown' : `${row.autovacuumPerDay.toFixed(1)} per day`}
@@ -261,8 +268,7 @@ function Detail({ row, now }: { row: DeadRow; now: Date }) {
       {row.hotRatio !== null && row.hotRatio < 0.5 && (row.updateRate ?? 0) > 0 ? (
         <p className="text-sm">
           Only {percent(row.hotRatio)} of the updates are heap-only (HOT). The others write a new
-          entry in every index of the table, and leave dead tuples that vacuum has to clean there
-          too.
+          entry in every index of the table, and leave dead rows that vacuum has to clean there too.
         </p>
       ) : null}
 
@@ -297,7 +303,7 @@ interface DeadRowsPanelProps {
 }
 
 /**
- * The tables the agent reports, ranked by how many dead tuples they hold,
+ * The tables the agent reports, ranked by how many dead rows they hold,
  * with the vacuum state and the write pattern that explain them.
  */
 export function DeadRowsPanel({
@@ -372,25 +378,25 @@ export function DeadRowsPanel({
   }
 
   const incomplete = response?.truncated === true || allRows.length >= DEAD_ROWS_LIMIT
-  const incompleteText = `The list is incomplete. The agent reports the tables with the most dead tuples first, up to checks.table_stats.top_n per database (50 by default). The figures cover the ${formatCount(allRows.length)} tables reported, so the worst tables are here and the long tail is not.`
+  const incompleteText = `The list is incomplete. The agent reports the tables with the most dead rows first, up to checks.table_stats.top_n per database (50 by default). The figures cover the ${formatCount(allRows.length)} tables reported, so the worst tables are here and the long tail is not.`
   const approximateText =
-    "Autovacuum trigger is approximate. The instance's autovacuum settings are not reported yet, so the page assumes PostgreSQL's defaults (50 dead tuples plus 20% of the live ones). A table's own storage parameters can change it."
+    "Vacuum due is approximate. The instance's autovacuum settings are not reported yet, so the page assumes PostgreSQL's defaults (50 dead rows plus 20% of the live ones). A table's own storage parameters can change it."
   const notes =
     incomplete || autovacuum.source === 'default' ? (
       <>
         {incomplete ? (
           <PanelNote title={incompleteText}>
             <strong>The list is incomplete.</strong> The agent reports the tables with the most dead
-            tuples first, up to <code>checks.table_stats.top_n</code> per database (50 by default).
+            rows first, up to <code>checks.table_stats.top_n</code> per database (50 by default).
             The figures cover the {formatCount(allRows.length)} tables reported, so the worst tables
             are here and the long tail is not.
           </PanelNote>
         ) : null}
         {autovacuum.source === 'default' ? (
           <PanelNote title={approximateText}>
-            <strong>Autovacuum trigger is approximate.</strong> The instance&apos;s autovacuum
-            settings are not reported yet, so the page assumes PostgreSQL&apos;s defaults (50 dead
-            tuples plus 20% of the live ones). A table&apos;s own storage parameters can change it.
+            <strong>Vacuum due is approximate.</strong> The instance&apos;s autovacuum settings are
+            not reported yet, so the page assumes PostgreSQL&apos;s defaults (50 dead rows plus 20%
+            of the live ones). A table&apos;s own storage parameters can change it.
           </PanelNote>
         ) : null}
       </>
@@ -399,29 +405,35 @@ export function DeadRowsPanel({
   return (
     <IndexPanel
       captionId="indexes.dead-rows"
-      description={`${formatCount(scoped.length)} tables. Dead space is an estimate: the heap size times the dead share of its tuples. The trend follows the ${TREND_TABLES} worst tables over the selected time range.`}
+      description={`${formatCount(scoped.length)} tables. Dead space is an estimate: the heap size times the dead share of its rows. The trend follows the ${TREND_TABLES} worst tables over the selected time range.`}
       notes={notes}
       stats={[
         {
           label: 'Tables with dead rows',
           value: formatCount(summary.withDead),
-          unit: `of ${formatCount(summary.tables)} ${summary.tables === 1 ? 'table' : 'tables'}`,
+          unit: 'tables',
+          detail: `of ${formatCount(summary.tables)} ${summary.tables === 1 ? 'table' : 'tables'}`,
         },
         {
-          label: 'Dead tuples',
+          label: 'Dead rows',
           value: formatCount(summary.totalDead),
-          ...(summary.deadBytes > 0 ? { unit: `≈ ${formatBytes(summary.deadBytes)}` } : {}),
+          unit: 'rows',
+          ...(summary.deadBytes > 0 ? { detail: `≈ ${formatBytes(summary.deadBytes)}` } : {}),
         },
         {
           label: 'Worst table',
           value: summary.worst === null ? '—' : percent(summary.worst.deadRatio),
-          unit:
+          detail:
             summary.worst === null
-              ? `none past ${formatCount(WORST_FLOOR)} dead tuples`
+              ? `none past ${formatCount(WORST_FLOOR)} dead rows`
               : summary.worst.table,
         },
-        { label: 'Past autovacuum trigger', value: formatCount(summary.overTrigger) },
-        { label: 'Never vacuumed', value: formatCount(summary.neverVacuumed) },
+        {
+          label: 'Due for automatic vacuum',
+          value: formatCount(summary.overTrigger),
+          unit: 'tables',
+        },
+        { label: 'Never vacuumed', value: formatCount(summary.neverVacuumed), unit: 'tables' },
       ]}
       title="Tables by dead rows"
       titleId="dead-rows-title"
@@ -434,6 +446,7 @@ export function DeadRowsPanel({
       ) : (
         <SimpleTable
           ariaLabel="Tables"
+          captionId="indexes.dead-rows-table"
           columns={columns}
           compare={compareDead}
           defaultSort={{ id: 'dead', desc: true }}

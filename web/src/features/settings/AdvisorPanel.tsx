@@ -15,6 +15,7 @@ import { Callout } from '@/components/ui/callout'
 import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Tabs, TabsContent } from '@/components/ui/tabs'
+import { ruleText } from '@/lib/ruleText'
 import { InstanceViewTabs } from '@/features/instance/InstancePanel'
 import { useInstanceView } from '@/features/instance/instanceViews'
 import {
@@ -69,7 +70,7 @@ function ruleRow(rule: AdvisorRule): RuleRow {
 }
 
 const RULES_TOOLBAR: DataTableToolbar<RuleRow> = {
-  searchFields: [(row) => row.id, (row) => row.category],
+  searchFields: [(row) => row.id, (row) => ruleText(row.id) ?? '', (row) => row.category],
   filters: [
     { id: 'category', label: 'Category', kind: 'select', accessor: (row) => row.category },
     { id: 'severity', label: 'Severity', kind: 'select', accessor: (row) => row.severity },
@@ -164,7 +165,22 @@ function EnabledCell({ row }: { row: RuleRow }) {
 }
 
 const RULE_COLUMNS = [
-  { accessorKey: 'id', header: 'Rule ID', meta: { width: '24%', truncate: true } },
+  {
+    accessorKey: 'id',
+    header: 'Rule',
+    cell: ({ row }: { row: { original: RuleRow } }) => (
+      <>
+        {ruleText(row.original.id)}
+        {ruleText(row.original.id) === undefined ? null : ' '}
+        <span
+          className={`font-mono text-xs ${ruleText(row.original.id) === undefined ? '' : 'text-muted-foreground'}`}
+        >
+          {row.original.id}
+        </span>
+      </>
+    ),
+    meta: { width: '45%', truncate: true, help: 'rules.rule' as const },
+  },
   { accessorKey: 'category', header: 'Category', meta: { width: '9rem' } },
   { accessorKey: 'severity', header: 'Severity', meta: { width: '8rem' } },
   { accessorKey: 'scope', header: 'Scope', meta: { width: '8rem' } },

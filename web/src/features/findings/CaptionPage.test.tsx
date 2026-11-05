@@ -50,8 +50,9 @@ describe('findings captions (CAPTION-PAGE)', () => {
     const { container } = renderWithProviders(<FindingsPage />, { route: '/findings' })
     await flushNetwork(30)
 
-    expect(expectCaptionedCards(container)).toEqual(['findings.list'])
+    expect(expectCaptionedCards(container)).toEqual(['findings.list', 'findings.table'])
     expectCaptionLine(CAPTIONS['findings.list'].what)
+    expectCaptionLine(CAPTIONS['findings.table'].what)
     for (const name of [
       'About State filter',
       'About Severity filter',

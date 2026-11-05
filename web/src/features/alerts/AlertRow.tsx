@@ -168,6 +168,7 @@ export function alertColumns({
       id: 'notes',
       header: 'Notes',
       width: '16rem',
+      help: 'alerts.notes',
       truncate: (alert) => notesText(alert, silenceFor(alert)),
       cell: (alert) => notesCell(alert, silenceFor(alert)),
     },

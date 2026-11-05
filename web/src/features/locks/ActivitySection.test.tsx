@@ -34,9 +34,7 @@ describe('ActivitySection', () => {
     )
 
     expect(screen.getByText(/Near max_connections/)).toBeInTheDocument()
-    expect(screen.getByText(/The conn.saturation advisor threshold/)).toHaveTextContent(
-      'Connections above 80 percent of max_connections',
-    )
+    expect(screen.getByRole('status')).toHaveTextContent('go above 80 % of max_connections')
   })
 
   it('UI-LOCK-021 renders Disabled when per-application counts are not reported', () => {

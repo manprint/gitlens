@@ -238,7 +238,7 @@ export function LogicalReplicationSection({ instanceId }: { instanceId: string }
       <InstancePanel
         id="logical-replication"
         title="Logical replication"
-        description="Subscriptions this instance applies, and the logical slots it decodes for. Connection strings are never read."
+        captionId="logical.section"
         actions={
           views.length > 1 ? (
             <InstanceViewTabs label="Logical replication lists" views={views} />

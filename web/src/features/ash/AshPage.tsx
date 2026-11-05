@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { useAsh, useInstanceSettings } from '@/api/queries'
+import { Caption } from '@/components/layout/Caption'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { InfoHint } from '@/components/layout/InfoHint'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -298,12 +299,18 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
           </span>
         }
       />
-      <DrillBreadcrumb
-        groupBy={groupBy}
-        onNavigate={navigateTo}
-        waitEvent={waitEvent}
-        waitEventType={waitEventType}
-      />
+      <div className="flex w-full min-w-0 items-center gap-1">
+        <Caption className="text-xs" id="ash.page" oneLine />
+        <InfoHint className="shrink-0" id="ash.page" label="ASH and wait analysis" />
+      </div>
+      {groupBy === DEFAULT_GROUP ? null : (
+        <DrillBreadcrumb
+          groupBy={groupBy}
+          onNavigate={navigateTo}
+          waitEvent={waitEvent}
+          waitEventType={waitEventType}
+        />
+      )}
       {ashQuery.data.enabled === false ? (
         <>
           <Disabled

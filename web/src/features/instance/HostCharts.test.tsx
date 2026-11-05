@@ -117,17 +117,21 @@ describe('HostCharts', () => {
   it('HOSTCH-005 draws a CPU count reference line on the load chart', async () => {
     await renderCharts()
 
-    const option = optionWith('Load 1m', (series) => series.length === 4)
+    const option = optionWith('Load, 1 min', (series) => series.length === 4)
     expect(option.series.map(({ name }) => name)).toEqual([
-      'Load 1m',
-      'Load 5m',
-      'Load 15m',
+      'Load, 1 min',
+      'Load, 5 min',
+      'Load, 15 min',
       'CPU count',
     ])
     // The line sits on its own empty series, which the legend does not list.
     expect(option.series[3]?.data).toEqual([])
     expect(option.series[3]?.markLine?.data).toEqual([{ name: 'CPU count', yAxis: 8 }])
-    expect((option.legend as { data: string[] }).data).toEqual(['Load 1m', 'Load 5m', 'Load 15m'])
+    expect((option.legend as { data: string[] }).data).toEqual([
+      'Load, 1 min',
+      'Load, 5 min',
+      'Load, 15 min',
+    ])
     // The axis top is a round tick that always leaves room for the reference line.
     const max = (option.yAxis as { max: (extent: { max: number }) => number }).max
     expect(max({ max: 3 })).toBe(10)
@@ -149,8 +153,12 @@ describe('HostCharts', () => {
 
     const load = screen.getByRole('region', { name: /^Load average/ })
     expect(within(load).queryByRole('button', { name: /retry/i })).not.toBeInTheDocument()
-    const option = optionWith('Load 1m')
-    expect(option.series.map(({ name }) => name)).toEqual(['Load 1m', 'Load 5m', 'Load 15m'])
+    const option = optionWith('Load, 1 min')
+    expect(option.series.map(({ name }) => name)).toEqual([
+      'Load, 1 min',
+      'Load, 5 min',
+      'Load, 15 min',
+    ])
   })
 
   it('shows every card loading until its queries answer', async () => {

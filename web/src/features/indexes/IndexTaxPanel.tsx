@@ -9,6 +9,7 @@ import { formatBytes, formatCount, formatPercent, formatRate } from '@/lib/forma
 import type { IndexRow } from '@/lib/indexAnalysis'
 import { buildIndexTax, summariseIndexTax, type IndexTax } from '@/lib/indexTax'
 
+import { NO_INDEX_STATS } from './emptyText'
 import { IndexPanel, PanelNote } from './IndexPanel'
 
 const TAX_TOOLBAR: TableToolbarSpec<IndexTax> = {
@@ -57,6 +58,7 @@ function columns(instanceId: string, database: string): readonly SimpleColumn<In
     {
       id: 'index-size',
       header: 'Index size',
+      help: 'indexes.tax-index-size',
       sortValue: (tax) => tax.indexBytes,
       className: 'whitespace-nowrap',
       width: '8rem',
@@ -65,6 +67,7 @@ function columns(instanceId: string, database: string): readonly SimpleColumn<In
     {
       id: 'table-size',
       header: 'Table size',
+      help: 'indexes.tax-table-size',
       sortValue: (tax) => tax.tableBytes,
       className: 'whitespace-nowrap',
       width: '8rem',
@@ -73,6 +76,7 @@ function columns(instanceId: string, database: string): readonly SimpleColumn<In
     {
       id: 'ratio',
       header: 'Index/table %',
+      help: 'indexes.tax-ratio',
       sortValue: (tax) => tax.indexToTableRatio,
       className: 'whitespace-nowrap',
       width: '10rem',
@@ -82,6 +86,7 @@ function columns(instanceId: string, database: string): readonly SimpleColumn<In
     {
       id: 'unused',
       header: 'Unused size',
+      help: 'indexes.tax-unused',
       sortValue: (tax) => tax.unusedBytes,
       className: 'whitespace-nowrap',
       width: '13rem',
@@ -100,6 +105,7 @@ function columns(instanceId: string, database: string): readonly SimpleColumn<In
     {
       id: 'writes',
       header: 'Writes/s',
+      help: 'indexes.tax-writes',
       sortValue: (tax) => tax.writeRate,
       className: 'whitespace-nowrap',
       width: '8rem',
@@ -108,6 +114,7 @@ function columns(instanceId: string, database: string): readonly SimpleColumn<In
     {
       id: 'amplification',
       header: 'Write amplification',
+      help: 'indexes.tax-amplification',
       sortValue: (tax) => tax.writeAmplification,
       className: 'whitespace-nowrap',
       width: '10rem',
@@ -140,6 +147,8 @@ interface IndexTaxPanelProps {
   database: string
   /** The agent or the API cut the index list: every figure covers the reported indexes only. */
   incomplete?: boolean
+  /** Why the list is empty, when it is. */
+  emptyDescription?: string
 }
 
 const INCOMPLETE_DETAIL =
@@ -158,6 +167,7 @@ export function IndexTaxPanel({
   rows,
   database,
   incomplete = false,
+  emptyDescription = NO_INDEX_STATS,
 }: IndexTaxPanelProps) {
   // The largest tables first: the ones whose indexes cost the most are never cut.
   const tablesQuery = useInstanceTables(instanceId, { limit: TABLE_LIMIT, order_by: 'size' })
@@ -194,7 +204,7 @@ export function IndexTaxPanel({
         </>
       }
       stats={[
-        { label: 'Tables', value: formatCount(summary.tables) },
+        { label: 'Tables', value: formatCount(summary.tables), unit: 'tables' },
         {
           label: 'Index size',
           value: formatBytes(summary.indexBytes),
@@ -208,21 +218,22 @@ export function IndexTaxPanel({
         {
           label: 'Write amplification',
           value:
-            summary.writeAmplification === null ? UNKNOWN : formatRate(summary.writeAmplification),
-          detail: `${formatCount(summary.measuredTables)} of ${formatCount(summary.tables)} tables measured`,
+            summary.writeAmplification === null
+              ? UNKNOWN
+              : formatRate(summary.writeAmplification).replace(/\/s$/, ''),
+          ...(summary.writeAmplification === null ? {} : { unit: 'per second' as const }),
+          detail: `Index entries added per second by writes; ${formatCount(summary.measuredTables)} of ${formatCount(summary.tables)} tables measured`,
         },
       ]}
       title="Index tax"
       titleId="tax-title"
     >
       {taxes.length === 0 ? (
-        <EmptyState
-          description="The agent has not reported index statistics for this server yet."
-          title="No indexes to show"
-        />
+        <EmptyState description={emptyDescription} title="No indexes to show" />
       ) : (
         <SimpleTable
-          ariaLabel="Index tax"
+          ariaLabel="Index tax by table"
+          captionId="indexes.tax-table"
           columns={tableColumns}
           defaultSort={{ id: 'index-size', desc: true }}
           emptyState={null}

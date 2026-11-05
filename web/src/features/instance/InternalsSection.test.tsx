@@ -116,7 +116,7 @@ describe('InternalsSection', () => {
       .slice(1)
     expect(within(caches[0]!).getByText('90.0%')).toBeInTheDocument()
     expect(within(caches[0]!).getByText('10/s')).toBeInTheDocument()
-    expect(within(caches[1]!).getByText('not read')).toBeInTheDocument()
+    expect(within(caches[1]!).getByText('No reads in the last hour')).toBeInTheDocument()
 
     await openView('Temporary files')
     const temp = within(screen.getByRole('table', { name: 'Temporary files' }))

@@ -162,7 +162,7 @@ describe('RuleCatalogue', () => {
     searchTable(name, 'host')
     expect(columnTexts(name)).toEqual(['rule-01', 'rule-02', 'rule-03'])
     searchTable(name, '')
-    sortTable(name, 'Rule ID', 'descending')
+    sortTable(name, 'Rule', 'descending')
     expect(columnTexts(name)[0]).toBe('rule-25')
   })
 

@@ -143,6 +143,9 @@ function SummaryTile({
         className={`mt-1 text-2xl font-semibold tabular-nums min-[1600px]:mt-0 min-[1600px]:text-base ${value > 0 && tone ? TILE_TONE[tone] : ''}`}
       >
         {value}
+        <span className="text-muted-foreground ml-1 text-xs font-normal">
+          {value === 1 ? 'alert' : 'alerts'}
+        </span>
       </dd>
     </div>
   )
@@ -424,6 +427,7 @@ export function AlertsPage() {
             ) : null}
             <SimpleTable
               ariaLabel="Alerts"
+              captionId="alerts.table"
               columns={columns}
               emptyState={
                 <EmptyState

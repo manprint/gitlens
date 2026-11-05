@@ -13,15 +13,27 @@ const RETENTION_TAB = '/settings?tab=retention'
 const limits = [
   [
     'Raw retention',
-    'Raw data is retained for 30 days by default (bloat estimates 90 days); the Data retention tab shows and sets the live value of each metrics family. There are no rollups.',
+    'Raw data is retained for 30 days by default (bloat estimates 90 days); the Data retention tab shows and sets the live value of each group of metrics. pglens keeps no summaries: data older than its retention is deleted, not condensed into a coarser history.',
   ],
   ['PostgreSQL versions', 'PostgreSQL 15 through 19 are supported.'],
   ['Replication', 'Streaming replication is supported; other replication modes are not.'],
   ['Databases per instance', 'At most 10 databases per instance are monitored by default.'],
-  ['Relation data', 'Relation views are constrained by top-N budgets.'],
-  ['Bloat', 'Bloat is an estimate, not a table-by-table guarantee.'],
-  ['ASH', 'Active session history is statistical sampling, not a complete trace.'],
-  ['Poolers', 'There is no pooler view in this release.'],
+  [
+    'Table and index lists',
+    'For each database only the top-ranked tables and indexes are kept, up to a fixed number per check; the ones left out are not counted and not collected later.',
+  ],
+  [
+    'Bloat',
+    'Bloat, the space wasted inside tables by old row versions, is an estimate worked out from statistics; it can be wrong in either direction.',
+  ],
+  [
+    'Active session history',
+    'pglens regularly samples what busy sessions are doing; it is a sample, not a complete trace.',
+  ],
+  [
+    'Connection poolers',
+    'A pooler such as PgBouncer shares database connections between many clients; there is no pooler view in this release.',
+  ],
 ] as const
 
 function DocumentationLink() {
@@ -105,7 +117,10 @@ export function ServerInfo() {
           <li>No user accounts exist.</li>
           <li>No roles or per-user audit exist.</li>
           <li>Sessions are held in server memory and do not survive a restart.</li>
-          <li>The agent uses a separate bearer token.</li>
+          <li>
+            The agent signs in with its own secret token (a bearer token sent with its requests),
+            not with the console password.
+          </li>
           <li>There is no enrollment queue or browser revocation control.</li>
         </ul>
       </Section>

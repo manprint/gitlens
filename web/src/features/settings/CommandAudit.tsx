@@ -123,8 +123,19 @@ const AUDIT_COLUMNS: readonly SimpleColumn<CommandAuditEntry>[] = [
     cell: (entry) => entry.kind ?? 'unknown',
   },
   { id: 'args', header: 'Arguments', cell: (entry) => <code>{displayValue(entry.args)}</code> },
-  { id: 'requested-by', header: 'Requested by', cell: (entry) => displayValue(entry.requested_by) },
-  { id: 'state', header: 'State', sortValue: entryState, cell: entryState },
+  {
+    id: 'requested-by',
+    header: 'Requested by',
+    cell: (entry) => displayValue(entry.requested_by),
+    help: 'settings.audit-requested-by',
+  },
+  {
+    id: 'state',
+    header: 'State',
+    sortValue: entryState,
+    cell: entryState,
+    help: 'settings.audit-state',
+  },
   {
     id: 'timing',
     header: 'Timing and detail',
@@ -187,6 +198,7 @@ function InstanceCommandAudit({ instance }: { instance: InstanceSummary }) {
     <Section captionId="settings.command-audit-instance" title={label}>
       <SimpleTable
         ariaLabel={`Command audit for ${label}`}
+        captionId="settings.command-audit-table"
         columns={AUDIT_COLUMNS}
         emptyState={null}
         rowKey={auditKey}

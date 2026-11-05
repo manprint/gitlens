@@ -44,7 +44,11 @@ describe('ServerInfo', () => {
   it('UI-SET-012 states that no pooler view exists', async () => {
     await renderServerInfo()
 
-    expect(screen.getByText('There is no pooler view in this release.')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'A pooler such as PgBouncer shares database connections between many clients; there is no pooler view in this release.',
+      ),
+    ).toBeInTheDocument()
   })
 
   it('UI-SET-013 states the absence of user accounts and roles', async () => {

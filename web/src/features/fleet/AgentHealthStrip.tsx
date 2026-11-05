@@ -11,6 +11,13 @@ interface AgentHealthStripProps {
 
 const troubleshootingHref = '/README.md#troubleshooting'
 
+/** Shows an alert reason in words: no label prefix and no snake_case rule ids. */
+function readableReason(reason: string): string {
+  return reason
+    .replace(/^(?:cause|reason): /, '')
+    .replace(/\b[a-z]+(?:_[a-z]+)+\b/g, (id) => id.replaceAll('_', ' '))
+}
+
 export function AgentHealthStrip({ issues }: AgentHealthStripProps) {
   if (issues.length === 0) return null
 
@@ -57,7 +64,7 @@ export function AgentHealthStrip({ issues }: AgentHealthStripProps) {
                 <span className="text-muted-foreground text-xs">{cluster}</span>
               </div>
               <p className="mt-2 text-sm">
-                <span className="font-medium">Likely cause:</span> {issue.reason}
+                <span className="font-medium">Reported reason:</span> {readableReason(issue.reason)}
               </p>
               <p className="text-muted-foreground mt-1 text-xs">
                 Last seen: {formatDuration(issue.ageSeconds)} ago

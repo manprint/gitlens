@@ -1,4 +1,4 @@
-import { act, screen } from '@testing-library/react'
+import { act, screen, waitFor } from '@testing-library/react'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 
 import type { Schemas } from '@/api/types'
@@ -64,6 +64,10 @@ async function renderSettings(route: string) {
   )
   const view = renderWithProviders(<SettingsPage />, { route })
   await settle()
+  await waitFor(() => {
+    expect(view.container.querySelector('[data-card]')).not.toBeNull()
+    expect(view.container.querySelector('[aria-busy="true"]')).toBeNull()
+  })
   return view
 }
 
@@ -107,7 +111,7 @@ describe('settings captions', () => {
       'settings.inventory-agents-table',
     ])
     expect(visibleCaptions('settings.inventory-agents')).toHaveLength(1)
-    expect(screen.getByText(/no separate agent listing endpoint/i)).toBeVisible()
+    expect(screen.getByText(/no separate list of agents/i)).toBeVisible()
   })
 
   it('CAPTION-PAGE-004 the Databases view is captioned for each instance', async () => {
@@ -128,9 +132,14 @@ describe('settings captions', () => {
     await screen.findByRole('table', { name: /^Command audit for / })
 
     expect(expectCaptionedCards(container)).toEqual(
-      expect.arrayContaining(['settings.command-audit', 'settings.command-audit-instance']),
+      expect.arrayContaining([
+        'settings.command-audit',
+        'settings.command-audit-instance',
+        'settings.command-audit-table',
+      ]),
     )
     expect(visibleCaptions('settings.command-audit')).toHaveLength(1)
+    expect(visibleCaptions('settings.command-audit-table')).toHaveLength(1)
   })
 
   it('CAPTION-PAGE-006 the Server info view captions each of its four sections', async () => {

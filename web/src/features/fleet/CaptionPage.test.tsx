@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Cluster } from '@/api/types'
 import { captionOf, type CaptionId } from '@/lib/captions'
+import { partial as readinessPartial } from '@/test/fixtures/getReadinessSummary'
 import { base as alertBase } from '@/test/fixtures/getAlert'
 import { CLUSTER, INSTANCE_SUMMARY } from '@/test/fixture-helpers'
 import { renderWithProviders } from '@/test/render'
@@ -80,6 +81,18 @@ describe('fleet captions', () => {
       )
     }
     expect(screen.queryAllByRole('article')).toHaveLength(0)
+  })
+
+  it('CAPTION-PAGE-004 each cluster card explains its permission tiers and readiness', async () => {
+    server.use(ok('getReadinessSummary', readinessPartial))
+    await renderFleet()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    expect(screen.getByRole('button', { name: 'About Permission tiers' })).toBeInTheDocument()
+    expect(captionOf('fleet.permission-tiers').what.length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: 'About Readiness' })).toBeInTheDocument()
   })
 
   it('CAPTION-PAGE-003 the agent health strip carries its hint', async () => {

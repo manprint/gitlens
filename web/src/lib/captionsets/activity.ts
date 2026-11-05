@@ -8,6 +8,15 @@ const ASH_GAPS = 'A gap means no sample was stored for that bucket.'
 
 /** Captions of the activity route group (D30); rules in the plan, phase 17. */
 export const activityCaptions = {
+  'ash.page': {
+    what: 'Active Session History (ASH): pglens regularly samples what each busy server process (one per client connection) is running or waiting for.',
+    source:
+      'The ASH samples of the agent: pg_stat_activity read once per second and stored as counts per 10 second window; its own pglens sessions are left out.',
+    unit: 'average backends',
+    window: 'Selected time range.',
+    howToRead:
+      'Each chart counts backends that were not idle. A backend with no wait event is counted as CPU. Select a series to drill down from wait event type to wait event to query.',
+  },
   'ash.breakdown-types': {
     what: 'Average number of non-idle backends over time, split by the kind of wait they were in, with CPU for backends that reported no wait.',
     source: ASH_SOURCE,
@@ -158,10 +167,9 @@ export const activityCaptions = {
     what: 'Transaction IDs used since the oldest database was last frozen: the distance travelled towards transaction ID wraparound.',
     source:
       'pg_database: the largest age(datfrozenxid) over all databases (pg_max_datfrozenxid_age).',
-    unit: 'transaction IDs',
+    unit: 'transactions',
     window: 'Latest sample, taken every 10 seconds.',
-    thresholds:
-      'The advisor rule txn.wraparound_risk is critical above 1,000,000,000 transaction IDs.',
+    thresholds: 'The advisor rates the risk critical above 1,000,000,000 transaction IDs.',
   },
   'activity.deadlock-rate': {
     what: 'Deadlocks detected per second, added up over all databases.',
@@ -178,8 +186,7 @@ export const activityCaptions = {
       'pg_connections_used_ratio (connections used divided by max_connections), compared in the browser with 0.8.',
     unit: 'ratio of max_connections',
     window: 'Latest sample.',
-    thresholds:
-      'Saturated above 80 % of max_connections, the limit of the advisor rule conn.saturation.',
+    thresholds: 'Saturated above 80 % of max_connections, the level at which the advisor warns.',
   },
   'activity.by-database': {
     what: 'Client connections open now, counted per database.',
@@ -189,14 +196,14 @@ export const activityCaptions = {
     window: 'Latest sample.',
   },
   'activity.by-state': {
-    what: 'Client backends counted per session state, such as active, idle and idle in transaction.',
+    what: 'Client connections counted per session state, such as active, idle and idle in transaction.',
     source:
       'pg_stat_activity: client backends grouped by state and wait event type (pg_backends); the card adds the wait types of each state.',
-    unit: 'backends',
+    unit: 'connections',
     window: 'Latest sample.',
   },
   'activity.xmin-holder': {
-    what: 'The oldest holder of the xmin horizon: the session, slot, standby or prepared transaction that keeps vacuum from removing dead rows.',
+    what: 'The session, replication slot, standby or prepared transaction holding the oldest snapshot; vacuum cannot remove dead rows newer than it.',
     source:
       'The xmin_horizon fact of the activity check: the oldest of pg_stat_activity (backend_xmin, backend_xid), pg_replication_slots, pg_stat_replication and pg_prepared_xacts; no query text is read.',
     unit: 'transaction IDs; time since start in seconds',

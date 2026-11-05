@@ -21,7 +21,10 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
-import { InstancePanel } from './InstancePanel'
+import { ColumnHint } from '@/components/layout/InfoHint'
+import type { ColumnHelpId } from '@/lib/captions'
+
+import { CaptionedBlock, InstancePanel } from './InstancePanel'
 
 interface SettingsSectionProps {
   instanceId: string
@@ -48,6 +51,14 @@ function DisplayValue({ setting }: { setting: Schemas['Setting'] }) {
   return displayValue
 }
 
+const DURABILITY_HELP: Record<(typeof DURABILITY_SETTING_NAMES)[number], ColumnHelpId> = {
+  fsync: 'instance.durability-fsync',
+  full_page_writes: 'instance.durability-full-page-writes',
+  archive_mode: 'instance.durability-archive-mode',
+  wal_level: 'instance.durability-wal-level',
+  synchronous_commit: 'instance.durability-synchronous-commit',
+}
+
 function DurabilitySummary({ settings }: { settings: Schemas['Setting'][] }) {
   const byName = useMemo(
     () => new Map(settings.map((setting) => [setting.name, setting])),
@@ -67,7 +78,10 @@ function DurabilitySummary({ settings }: { settings: Schemas['Setting'][] }) {
               key={name}
               className="border-muted bg-muted/20 p-3 min-[1600px]:flex min-[1600px]:items-center min-[1600px]:gap-1.5 min-[1600px]:rounded-md min-[1600px]:px-2 min-[1600px]:py-1 min-[1600px]:whitespace-nowrap"
             >
-              <dt className="text-muted-foreground text-xs">{name}</dt>
+              <dt className="text-muted-foreground flex items-center gap-0.5 text-xs">
+                {name}
+                <ColumnHint id={DURABILITY_HELP[name]} label={name} />
+              </dt>
               <dd className="mt-1 flex items-center gap-2 font-medium min-[1600px]:mt-0 min-[1600px]:gap-1.5">
                 {setting ? <DisplayValue setting={setting} /> : <Unknown />}
                 {severity ? (
@@ -143,6 +157,7 @@ const SETTING_COLUMNS: readonly SimpleColumn<Setting>[] = [
   {
     id: 'source',
     header: 'Source',
+    help: 'instance.setting-source',
     sortValue: (setting) => setting.source || null,
     cell: (setting) => setting.source || <Unknown reason="Source was not reported." />,
     width: '9rem',
@@ -151,6 +166,7 @@ const SETTING_COLUMNS: readonly SimpleColumn<Setting>[] = [
   {
     id: 'context',
     header: 'Context',
+    help: 'instance.setting-context',
     sortValue: (setting) => setting.context || null,
     cell: (setting) => setting.context || <Unknown reason="Context was not reported." />,
     width: '9rem',
@@ -159,6 +175,7 @@ const SETTING_COLUMNS: readonly SimpleColumn<Setting>[] = [
   {
     id: 'changed',
     header: 'Changed at',
+    help: 'instance.setting-changed',
     sortValue: (setting) => Date.parse(setting.changed_at),
     cell: (setting) => formatTimestamp(setting.changed_at, 'UTC'),
     width: '13rem',
@@ -166,6 +183,7 @@ const SETTING_COLUMNS: readonly SimpleColumn<Setting>[] = [
   {
     id: 'state',
     header: 'State',
+    help: 'instance.setting-state',
     width: '9rem',
     cell: (setting) => {
       const pending = isPendingRestart(setting)
@@ -182,6 +200,7 @@ function SettingTable({ settings }: { settings: Setting[] }) {
   return (
     <SimpleTable
       ariaLabel="Observed PostgreSQL settings"
+      captionId="instance.settings-changes"
       columns={SETTING_COLUMNS}
       emptyState={null}
       rowKey={(setting) => `${setting.name}-${setting.changed_at}`}
@@ -234,7 +253,7 @@ export function SettingsSection({ instanceId }: SettingsSectionProps) {
     <InstancePanel
       id="settings"
       title="Settings and durability"
-      description="Observed PostgreSQL settings and restart state. The durability posture is the latest scrape; the change table is narrowed to the selected time range."
+      captionId="instance.settings"
       actions={
         query.data ? (
           <>
@@ -242,7 +261,7 @@ export function SettingsSection({ instanceId }: SettingsSectionProps) {
             {/* From 1600 px the controls share the heading line; the input keeps its name. */}
             <div className="flex flex-wrap items-end gap-4 min-[1600px]:flex-nowrap min-[1600px]:items-center min-[1600px]:gap-2">
               <label className="grid gap-1 text-sm min-[1600px]:flex min-[1600px]:items-center">
-                <span className="min-[1600px]:sr-only">Changed since</span>
+                <span>Changed since</span>
                 <Input
                   className="w-auto min-[1600px]:h-8"
                   aria-label="Changed since"
@@ -270,10 +289,15 @@ export function SettingsSection({ instanceId }: SettingsSectionProps) {
           Loading settings…
         </section>
       ) : changedSettings.length === 0 ? (
-        <EmptyState
-          title="No setting changes"
-          description="No observed setting changes fall in the selected time range."
-        />
+        <CaptionedBlock
+          ariaLabel="Observed PostgreSQL settings"
+          captionId="instance.settings-changes"
+        >
+          <EmptyState
+            title="No setting changes"
+            description="No setting changed since the date in Changed since."
+          />
+        </CaptionedBlock>
       ) : (
         <SettingTable settings={changedSettings} />
       )}

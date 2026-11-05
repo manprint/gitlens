@@ -6,6 +6,7 @@ import { REFRESH } from '@/api/policy'
 import type { Schemas } from '@/api/types'
 import { DataTable, type DataTableToolbar } from '@/components/layout/DataTable'
 import { Section } from '@/components/layout/Section'
+import { withTerms } from '@/components/layout/withTerms'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -26,6 +27,13 @@ type InstanceSummary = Schemas['InstanceSummary']
 type PermTier = Schemas['PermTier']
 
 const permissionTiers: readonly PermTier[] = ['T0', 'T1', 'T2']
+
+/** What each tier lets pglens do, in the words of the glossary (internal/pgtype/role.go). */
+const TIER_MEANING: Record<PermTier, string> = {
+  T0: 'Reads statistics only.',
+  T1: 'Also runs EXPLAIN to show query plans.',
+  T2: 'Also cancels or ends other sessions.',
+}
 const tierRank: Record<PermTier, number> = { T0: 0, T1: 1, T2: 2 }
 
 function isAgentDownAlert(alert: Alert): boolean {
@@ -36,6 +44,24 @@ function isAgentDownAlert(alert: Alert): boolean {
     alert.alert_key.startsWith('agent_down/') ||
     alert.alert_key.startsWith('instance_unreachable/')
   )
+}
+
+/**
+ * Why an agent row reads Down or Reporting, in plain words. The row is Down when the
+ * instance is not up (no report within the last 60 seconds) or an agent-down alert is
+ * open; an alert can stay open for a moment after the instance reports again, until
+ * the alert rules next run.
+ */
+function agentReason(up: boolean, alert: Alert | undefined): string {
+  const summary = alert === undefined ? '' : ` Alert: ${alert.summary}`
+  if (!up && alert !== undefined) {
+    return `No report from this agent within the expected interval; an 'Agent down' alert is open.${summary}`
+  }
+  if (alert !== undefined) {
+    return `The instance reports again, but an 'Agent down' alert is still open; it closes when the alert rules next run.${summary}`
+  }
+  if (!up) return 'No report from this agent within the expected interval.'
+  return "The instance reported recently and no 'Agent down' alert is open."
 }
 
 interface InstanceRow extends InstanceSummary {
@@ -172,7 +198,11 @@ function instanceColumns() {
       cell: ({ row }: { row: { original: InstanceRow } }) =>
         formatPostgresVersion(row.original.pg_version),
     },
-    { accessorKey: 'perm_tier', header: 'Permission tier' },
+    {
+      accessorKey: 'perm_tier',
+      header: 'Permission tier',
+      meta: { help: 'settings.permission-tier' as const },
+    },
     {
       accessorKey: 'last_seen',
       header: 'Last seen',
@@ -185,6 +215,7 @@ function instanceColumns() {
     {
       accessorKey: 'up',
       header: 'State',
+      meta: { help: 'settings.instance-state' as const },
       cell: ({ row }: { row: { original: InstanceRow } }) => (row.original.up ? 'Up' : 'Down'),
     },
     {
@@ -207,7 +238,11 @@ function databaseColumns() {
       cell: ({ row }: { row: { original: DatabaseRow } }) =>
         row.original.monitored ? 'Yes' : 'No',
     },
-    { accessorKey: 'skip_reason', header: 'Skip reason' },
+    {
+      accessorKey: 'skip_reason',
+      header: 'Skip reason',
+      meta: { help: 'settings.skip-reason' as const },
+    },
   ]
 }
 
@@ -298,10 +333,13 @@ function TierSummary({ instances, rules }: Pick<InventoryTablesProps, 'instances
               key={tier}
               className="rounded-md border p-4 min-[1600px]:px-3 min-[1600px]:py-2.5"
             >
-              <div className="min-[1600px]:flex min-[1600px]:items-baseline min-[1600px]:gap-3">
+              <div className="min-[1600px]:flex min-[1600px]:flex-wrap min-[1600px]:items-baseline min-[1600px]:gap-x-3">
                 <h3 className="font-medium">Tier {tier}</h3>
                 <p className="mt-1 text-sm min-[1600px]:mt-0">
                   <strong>Instances:</strong> {instanceCount}
+                </p>
+                <p className="text-muted-foreground mt-1 text-sm min-[1600px]:mt-0 min-[1600px]:text-xs">
+                  {withTerms(TIER_MEANING[tier])}
                 </p>
               </div>
               <div className="mt-3 text-sm min-[1600px]:mt-1.5 min-[1600px]:text-xs min-[1600px]:leading-4">
@@ -362,16 +400,15 @@ function AgentInventory({ instances, alerts }: Pick<InventoryTablesProps, 'insta
       address: `${instance.addr}:${instance.port}`,
       last_seen: instance.last_seen,
       state: isDown ? 'Down' : 'Reporting',
-      reason:
-        alert?.summary ?? (isDown ? 'The instance is not up.' : 'No firing agent_down alert.'),
+      reason: agentReason(instance.up, alert),
     }
   })
 
   return (
     <Section captionId="settings.inventory-agents" title="Agents (derived from instance telemetry)">
       <p className="text-muted-foreground mb-3 text-sm">
-        The API has no separate agent listing endpoint. This view derives agent state from instance
-        last_seen/up data and firing agent_down alerts.
+        pglens has no separate list of agents: each row is worked out from the instance&apos;s last
+        report and any open &apos;Agent down&apos; alert.
       </p>
       <DataTable
         ariaLabel="Derived agent inventory"
@@ -390,7 +427,11 @@ function AgentInventory({ instances, alerts }: Pick<InventoryTablesProps, 'insta
               </time>
             ),
           },
-          { accessorKey: 'state', header: 'State' },
+          {
+            accessorKey: 'state',
+            header: 'State',
+            meta: { help: 'settings.agent-state' as const },
+          },
           { accessorKey: 'reason', header: 'Reason' },
         ]}
         data={rows}

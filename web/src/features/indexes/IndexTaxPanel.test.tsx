@@ -93,8 +93,11 @@ describe('IndexTaxPanel', () => {
     expect(screen.getByRole('tab', { name: 'Index tax' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getAllByText(/Every figure on this tab is an estimate/).length).toBeGreaterThan(0)
     // Largest index size first: orders (3.5 MB) before events (0.2 MB).
-    expect(columnTexts('Index tax', 0)).toEqual(['app · public.orders', 'app · public.events'])
-    const [orders, events] = dataRows('Index tax')
+    expect(columnTexts('Index tax by table', 0)).toEqual([
+      'app · public.orders',
+      'app · public.events',
+    ])
+    const [orders, events] = dataRows('Index tax by table')
     const cells = (row: HTMLElement | undefined) =>
       within(row!)
         .getAllByRole('cell')
@@ -123,12 +126,12 @@ describe('IndexTaxPanel', () => {
     render(many, [])
     await flushNetwork(30)
 
-    expect(screen.getByRole('searchbox', { name: 'Search Index tax' })).toBeInTheDocument()
-    expect(dataRows('Index tax')).toHaveLength(20)
+    expect(screen.getByRole('searchbox', { name: 'Search Index tax by table' })).toBeInTheDocument()
+    expect(dataRows('Index tax by table')).toHaveLength(20)
     expect(screen.getByRole('button', { name: /next page/i })).toBeInTheDocument()
-    sortTable('Index tax', 'Indexes', 'ascending')
-    searchTable('Index tax', 't07')
-    expect(dataRows('Index tax')).toHaveLength(1)
+    sortTable('Index tax by table', 'Indexes', 'ascending')
+    searchTable('Index tax by table', 't07')
+    expect(dataRows('Index tax by table')).toHaveLength(1)
   })
 
   it('TAXPANEL-003 links each table to the Cleanup tab narrowed to that table', async () => {
@@ -186,7 +189,7 @@ describe('IndexTaxPanel', () => {
   it('TAXPANEL-005 has no accessibility violations', async () => {
     vi.useRealTimers()
     const { container } = render()
-    await screen.findByRole('table', { name: 'Index tax' })
+    await screen.findByRole('table', { name: 'Index tax by table' })
 
     await expect(expectNoA11yViolations(container)).resolves.toBeUndefined()
   })

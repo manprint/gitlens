@@ -241,7 +241,7 @@ describe('QueryListPage', () => {
     renderPage()
 
     await settle()
-    expect(screen.getByRole('columnheader', { name: 'Share of listed rows' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Share of listed time' })).toBeInTheDocument()
     expect(screen.queryByRole('columnheader', { name: 'Share of total' })).toBeNull()
   })
 

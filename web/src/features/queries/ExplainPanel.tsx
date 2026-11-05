@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 
 import { useCreateCommand } from '@/api/commands'
 import type { PermTier } from '@/api/types'
+import { InfoHint } from '@/components/layout/InfoHint'
 import { CommandSubmitError, NotPermitted } from '@/components/state'
 import {
   Dialog,
@@ -202,11 +203,16 @@ export function ExplainPanel({
     <section
       aria-labelledby="explain-panel-title"
       className="bg-card shadow-card space-y-5 rounded-xl border p-5"
+      data-card=""
+      data-caption-id="queries.explain-panel"
     >
       <header>
-        <h2 id="explain-panel-title" className="text-base font-semibold">
-          Execution plan
-        </h2>
+        <div className="flex items-center gap-1">
+          <h2 id="explain-panel-title" className="text-base font-semibold">
+            Execution plan
+          </h2>
+          <InfoHint id="queries.explain-panel" label="Execution plan" />
+        </div>
         <p className="text-muted-foreground mt-1 text-sm">
           Request an execution plan for query {String(queryid)}
           {datname ? ` in ${datname}` : ''}. The agent runs EXPLAIN on the monitored database and

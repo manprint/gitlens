@@ -13,7 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent } from '@/components/ui/tabs'
 import { formatBytes, formatCount, formatPercent, formatRate } from '@/lib/format'
 
-import { InstancePanel, InstanceViewTabs, ToolbarNote } from './InstancePanel'
+import { CaptionedBlock, InstancePanel, InstanceViewTabs, ToolbarNote } from './InstancePanel'
 import { INTERNALS_VIEW_IDS } from './instanceSections'
 import { useInstanceView, type InstanceView } from './instanceViews'
 
@@ -92,7 +92,7 @@ function slruColumns(): DataTableProps<SLRUCache>['columns'] {
         formatPercent(
           row.original.hits_per_second,
           row.original.hits_per_second + row.original.reads_per_second,
-        ) ?? <span className="text-muted-foreground">not read</span>,
+        ) ?? <span className="text-muted-foreground">No reads in the last hour</span>,
     },
     {
       accessorKey: 'reads_per_second',
@@ -186,16 +186,18 @@ function StandbyReplay({
         ]
   if (standby.conflicts.length === 0) {
     return (
-      <div className="space-y-2">
-        <p className="text-muted-foreground text-sm">
-          Replay cancelled no standby query in the last hour.
-        </p>
-        {notes.map((note) => (
-          <p key={note} className="text-muted-foreground text-sm">
-            {note}
+      <CaptionedBlock ariaLabel="Recovery conflicts" captionId="internals.recovery-conflicts">
+        <div className="space-y-2">
+          <p className="text-muted-foreground text-sm">
+            Replay cancelled no standby query in the last hour.
           </p>
-        ))}
-      </div>
+          {notes.map((note) => (
+            <p key={note} className="text-muted-foreground text-sm">
+              {note}
+            </p>
+          ))}
+        </div>
+      </CaptionedBlock>
     )
   }
   return (
@@ -335,16 +337,18 @@ export function InternalsSection({ instanceId }: { instanceId: string }) {
               total={spilling.length}
             />
           ) : (
-            <div className="space-y-2">
-              <p className="text-muted-foreground text-sm">
-                No query outgrew work_mem in the last hour.
-              </p>
-              {walNotes.map((note) => (
-                <p key={note} className="text-muted-foreground text-sm">
-                  {note}
+            <CaptionedBlock ariaLabel="Temporary files" captionId="internals.temp-files">
+              <div className="space-y-2">
+                <p className="text-muted-foreground text-sm">
+                  No query outgrew work_mem in the last hour.
                 </p>
-              ))}
-            </div>
+                {walNotes.map((note) => (
+                  <p key={note} className="text-muted-foreground text-sm">
+                    {note}
+                  </p>
+                ))}
+              </div>
+            </CaptionedBlock>
           )}
         </TabsContent>
         {standby === null ? null : (
@@ -361,7 +365,7 @@ export function InternalsSection({ instanceId }: { instanceId: string }) {
       <InstancePanel
         id="internals"
         title="Server internals"
-        description="The WAL kept in pg_wal, database sizes, the SLRU caches, temporary files and, on a standby, WAL replay. Rates are averaged over the last hour."
+        captionId="internals.section"
         actions={
           tiles === null ? undefined : (
             <>

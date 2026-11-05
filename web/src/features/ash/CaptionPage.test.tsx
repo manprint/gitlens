@@ -96,6 +96,13 @@ beforeEach(() => {
 })
 
 describe('ASH page captions', () => {
+  it('CAPTION-PAGE-034 the page states what ASH is and has its hint', () => {
+    renderAsh('/instances/instance-1/ash?range=1h')
+
+    expect(visibleCaptions('ash.page')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'About ASH and wait analysis' })).toBeInTheDocument()
+  })
+
   it('CAPTION-PAGE-030 the stacked wait types view is captioned', () => {
     const { container } = renderAsh('/instances/instance-1/ash?range=1h&view=stacked')
 

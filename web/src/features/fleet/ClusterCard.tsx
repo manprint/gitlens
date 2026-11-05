@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 
 import type { Cluster } from '@/api/types'
+import { InfoHint } from '@/components/layout/InfoHint'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Stale, Unknown } from '@/components/state'
@@ -118,7 +119,14 @@ export function ClusterCard({
                 </Stale>
               )}
             </dd>
-            <dt className="text-muted-foreground">Permission tiers</dt>
+            <dt className="text-muted-foreground flex items-center gap-1">
+              Permission tiers
+              <InfoHint
+                className="relative z-10 shrink-0"
+                id="fleet.permission-tiers"
+                label="Permission tiers"
+              />
+            </dt>
             <dd>{permissionTiers || <Unknown reason="No permission tier has been reported." />}</dd>
           </dl>
           {cluster.id_source !== 'system_identifier' ? (
@@ -135,11 +143,14 @@ export function ClusterCard({
             </Badge>
           ) : null}
           {readiness === null ? null : (
-            <ReadinessBadge
-              infos={readiness.infos}
-              level={readiness.level}
-              warnings={readiness.warnings}
-            />
+            <div className="flex items-center gap-1">
+              <ReadinessBadge
+                infos={readiness.infos}
+                level={readiness.level}
+                warnings={readiness.warnings}
+              />
+              <InfoHint className="relative z-10 shrink-0" id="fleet.readiness" label="Readiness" />
+            </div>
           )}
         </CardContent>
       </Card>

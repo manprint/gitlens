@@ -49,6 +49,15 @@ export const settingsCaptions = {
     howToRead:
       'Each entry is one event: the request, its result or its expiry. State is requested, ok, error, rejected or expired. A request the agent never claimed is shown as expired when it ran out in the queue.',
   },
+  'settings.command-audit-table': {
+    what: 'One row per audit entry of this instance; the search and the State and Command filters narrow the rows.',
+    source:
+      'Rows of the command_audit table through the server command-audit endpoint for this instance; the search and filters run in the browser.',
+    unit: 'audit entries',
+    window: 'The newest 100 entries; the Time column is UTC.',
+    howToRead:
+      'Time is when the entry was recorded. Requested by is the credential that asked, not a person. Timing and detail adds when it was requested, claimed or expires, and the result detail.',
+  },
   'settings.inventory-instances': {
     what: 'Every monitored PostgreSQL instance with its cluster, role, version, permission tier, last report time, state and host metrics availability.',
     source:
@@ -65,16 +74,16 @@ export const settingsCaptions = {
     unit: 'instances',
     window: 'Latest report of each instance.',
     howToRead:
-      'Last seen is a UTC time. Host metrics says whether the agent on the same host sends operating system figures: Available, Available (stale) when the last sample is over 90 seconds old, or Unavailable with the reason on hover.',
+      'Permission tier is T0 (reads statistics only), T1 (also runs EXPLAIN) or T2 (also cancels or ends sessions). Last seen is a UTC time. Host metrics says whether the agent on the same host sends operating system figures: Available, Available (stale) when the last sample is over 90 seconds old, or Unavailable with the reason on hover.',
   },
   'settings.permission-tiers': {
-    what: 'How many instances sit in each permission tier and which advisor rules and actions each tier unlocks.',
+    what: 'Each instance has a permission tier: T0 reads statistics only, T1 also runs EXPLAIN for query plans, T2 also cancels or ends other sessions.',
     source:
-      'Instances counted by perm_tier from the instances table; rules from the live advisor rule catalogue by minimum tier; the actions are fixed text of this page.',
+      'Instances counted by perm_tier from the instances table; the agent sets the tier from its monitoring role (member of pg_read_all_data: T1, of pg_signal_backend: T2); rules from the live advisor rule catalogue by minimum tier; the actions are fixed text of this page.',
     unit: 'instances and rules',
     window: 'Current instances and the live advisor rule catalogue.',
     howToRead:
-      'A tier unlocks its own rules and those of the lower tiers. A tier only allows an action when the target also permits it; signals need allow_signal on the target.',
+      'Each card counts the instances in that tier and lists what the tier unlocks. A tier unlocks its own rules and those of the lower tiers. A tier only allows an action when the target also permits it; signals need allow_signal on the target.',
   },
   'settings.inventory-agents': {
     what: 'One derived row per instance saying whether its agent is reporting; the server keeps no separate agent list.',
@@ -83,7 +92,7 @@ export const settingsCaptions = {
     unit: 'agents',
     window: 'Latest report of each instance; alerts firing now.',
     howToRead:
-      'Down means the instance is not up or an agent_down or instance_unreachable alert is firing for it; Reason repeats that alert summary.',
+      'Down means the instance has not reported within the last 60 seconds, or an agent-down or instance-unreachable alert is open for it. An instance can read Up on the Instances view while such an alert is still open: the alert closes when the alert rules next run. Reason says which case applies.',
   },
   'settings.inventory-agents-table': {
     what: 'One row per instance: a derived agent name, the instance address, last report time, and whether the agent is reporting.',

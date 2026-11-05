@@ -12,6 +12,8 @@ import { formatBytes } from '@/lib/format/bytes'
 import { formatDuration } from '@/lib/format/duration'
 import type { SlotRow } from '@/lib/replication'
 
+import { EmptyCaptioned } from './EmptyCaptioned'
+
 export type { SlotRow } from '@/lib/replication'
 
 export const DEFAULT_RETAINED_BYTES_THRESHOLD = 1024 ** 3
@@ -127,6 +129,13 @@ function slotColumns(threshold: number): DataTableProps<SlotRow>['columns'] {
   ]
 }
 
+const NO_SLOTS = (
+  <EmptyState
+    title="No replication slots"
+    description="No replication slot was reported for this cluster in the last 5 minutes."
+  />
+)
+
 export function SlotsSection({
   slots = [],
   failure,
@@ -145,6 +154,10 @@ export function SlotsSection({
           failure={failure}
           onRetry={onRetry ?? (() => undefined)}
         />
+      ) : sortedSlots.length === 0 ? (
+        <EmptyCaptioned ariaLabel="Replication slots" captionId="cluster.slots-table">
+          <div role="status">{NO_SLOTS}</div>
+        </EmptyCaptioned>
       ) : (
         <DataTable
           ariaLabel="Replication slots"
@@ -153,12 +166,7 @@ export function SlotsSection({
           toolbar={SLOTS_TOOLBAR}
           columns={columns}
           data={sortedSlots}
-          emptyState={
-            <EmptyState
-              title="No replication slots"
-              description="No replication slots were reported for this cluster."
-            />
-          }
+          emptyState={NO_SLOTS}
         />
       )}
     </section>

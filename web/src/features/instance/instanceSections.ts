@@ -20,13 +20,19 @@ export const INSTANCE_SECTIONS = [
     legacyHash: 'host-metrics',
     captionId: 'host.section',
   },
-  { id: 'settings', label: 'Settings', kind: 'table', legacyHash: 'settings', captionId: null },
+  {
+    id: 'settings',
+    label: 'Settings',
+    kind: 'table',
+    legacyHash: 'settings',
+    captionId: 'instance.settings',
+  },
   {
     id: 'relations',
     label: 'Tables and indexes',
     kind: 'table',
     legacyHash: 'instance-relations',
-    captionId: null,
+    captionId: 'relations.section',
   },
   {
     id: 'catalog',

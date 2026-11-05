@@ -34,15 +34,52 @@ export function InstanceViewTabs({
  * wraps onto its own line; from 1600 px it takes the free width of the toolbar
  * line, truncated, with the full text in its title (D26).
  */
-export function ToolbarNote({ children, status = false }: { children: string; status?: boolean }) {
+export function ToolbarNote({
+  children,
+  status = false,
+  wrap = false,
+}: {
+  children: string
+  status?: boolean
+  /** Keep the whole sentence on screen, for a notice a reader must be able to read in full. */
+  wrap?: boolean
+}) {
   return (
     <p
-      className="text-muted-foreground text-sm min-[1600px]:min-w-0 min-[1600px]:shrink min-[1600px]:grow min-[1600px]:basis-0 min-[1600px]:self-center min-[1600px]:truncate"
+      className={
+        wrap
+          ? 'text-muted-foreground text-sm'
+          : 'text-muted-foreground text-sm min-[1600px]:min-w-0 min-[1600px]:shrink min-[1600px]:grow min-[1600px]:basis-0 min-[1600px]:self-center min-[1600px]:truncate'
+      }
       title={children}
       {...(status ? { role: 'status' } : {})}
     >
       {children}
     </p>
+  )
+}
+
+/**
+ * A table section with nothing to list keeps its caption and ⓘ, so a reader
+ * still learns what the section shows; the empty state follows it.
+ */
+export function CaptionedBlock({
+  ariaLabel,
+  captionId,
+  children,
+}: {
+  ariaLabel: string
+  captionId: CaptionId
+  children: ReactNode
+}) {
+  return (
+    <div className="space-y-3" data-card="" data-caption-id={captionId}>
+      <div className="flex w-full min-w-0 items-center gap-1">
+        <Caption className="text-xs" id={captionId} marked={false} oneLine />
+        <InfoHint className="shrink-0" id={captionId} label={ariaLabel} />
+      </div>
+      {children}
+    </div>
   )
 }
 

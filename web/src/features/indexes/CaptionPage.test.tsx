@@ -125,13 +125,15 @@ function openHint(label: string, id: CaptionId) {
   fireEvent.click(hint(label))
   // Glossary terms split the tooltip's text nodes, so compare its text content.
   expect(screen.getByRole('tooltip')).toHaveTextContent(captionOf(id).what)
+  fireEvent.click(hint(label))
 }
 
 describe('index analysis captions', () => {
   it('CAPTION-PAGE-001 the inventory view is captioned', async () => {
     const { ids } = await pageIds('/indexes')
-    expect(ids).toContain('indexes.inventory')
+    expect(ids).toEqual(expect.arrayContaining(['indexes.inventory', 'indexes.inventory-table']))
     openHint('Index inventory', 'indexes.inventory')
+    openHint('Indexes', 'indexes.inventory-table')
   })
 
   it('CAPTION-PAGE-002 the summary view captions every tile and breakdown', async () => {
@@ -158,38 +160,48 @@ describe('index analysis captions', () => {
 
   it('CAPTION-PAGE-003 the findings view is captioned', async () => {
     const { ids } = await pageIds('/indexes?view=findings')
-    expect(ids).toContain('indexes.findings')
+    expect(ids).toEqual(expect.arrayContaining(['indexes.findings', 'indexes.findings-table']))
     openHint('Index findings', 'indexes.findings')
+    openHint('Index findings by index', 'indexes.findings-table')
   })
 
   it('CAPTION-PAGE-004 the foreign keys view is captioned', async () => {
     const { ids } = await pageIds('/indexes?view=foreign-keys')
-    expect(ids).toContain('indexes.foreign-keys')
+    expect(ids).toEqual(
+      expect.arrayContaining(['indexes.foreign-keys', 'indexes.foreign-keys-table']),
+    )
     openHint('Unindexed foreign keys', 'indexes.foreign-keys')
+    openHint('Foreign keys without an index', 'indexes.foreign-keys-table')
   })
 
   it('CAPTION-PAGE-005 the cleanup tab is captioned', async () => {
     const { ids } = await pageIds('/indexes?tab=cleanup')
-    expect(ids).toContain('indexes.cleanup')
+    expect(ids).toEqual(expect.arrayContaining(['indexes.cleanup', 'indexes.cleanup-table']))
     openHint('Indexes that look removable', 'indexes.cleanup')
+    openHint('Cleanup candidates', 'indexes.cleanup-table')
   })
 
   it('CAPTION-PAGE-006 the dead rows tab is captioned', async () => {
     const { ids } = await pageIds('/indexes?tab=dead-rows')
-    expect(ids).toContain('indexes.dead-rows')
+    expect(ids).toEqual(expect.arrayContaining(['indexes.dead-rows', 'indexes.dead-rows-table']))
     openHint('Tables by dead rows', 'indexes.dead-rows')
+    openHint('Tables', 'indexes.dead-rows-table')
   })
 
   it('CAPTION-PAGE-007 the suggestions tab is captioned', async () => {
     const { ids } = await pageIds('/indexes?tab=suggestions')
-    expect(ids).toContain('indexes.suggestions')
+    expect(ids).toEqual(
+      expect.arrayContaining(['indexes.suggestions', 'indexes.suggestions-table']),
+    )
     openHint('Index suggestions', 'indexes.suggestions')
+    openHint('Suggested indexes', 'indexes.suggestions-table')
   })
 
   it('CAPTION-PAGE-008 the index tax tab is captioned', async () => {
     const { ids } = await pageIds('/indexes?tab=tax')
-    expect(ids).toContain('indexes.tax')
+    expect(ids).toEqual(expect.arrayContaining(['indexes.tax', 'indexes.tax-table']))
     openHint('Index tax', 'indexes.tax')
+    openHint('Index tax by table', 'indexes.tax-table')
   })
 
   it('CAPTION-PAGE-009 the search results are captioned and show their caption', async () => {

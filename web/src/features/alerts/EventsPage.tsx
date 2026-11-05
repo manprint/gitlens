@@ -98,6 +98,7 @@ function alertStatusColumns(suppressionUnknown: boolean): SimpleColumn<Alert>[] 
     {
       id: 'suppression',
       header: 'Suppression',
+      help: 'alerts.suppression',
       width: '10rem',
       cell: (alert) => suppressionLabel(alert, suppressionUnknown),
     },
@@ -358,6 +359,7 @@ export function EventsPage() {
             </p>
             <SimpleTable
               ariaLabel="Fleet events"
+              captionId="events.table"
               columns={eventTableColumns}
               emptyState={
                 <EmptyState
@@ -376,6 +378,7 @@ export function EventsPage() {
           <Section captionId="events.alert-status" title="Alert status">
             <SimpleTable
               ariaLabel="Alert suppression status"
+              captionId="events.alert-status-table"
               columns={statusColumns}
               emptyState={<p className="text-muted-foreground text-sm">No alerts are loaded.</p>}
               rowKey={(alert) => alert.alert_key}

@@ -9,7 +9,7 @@ import { EmptyState, ErrorState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
 import { NativeSelect } from '@/components/ui/native-select'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
-import { formatBytes, formatCount } from '@/lib/format'
+import { formatBytes, formatCount, formatRate } from '@/lib/format'
 import {
   compareSuggestions,
   costText,
@@ -28,7 +28,6 @@ import {
   verdictVariant,
   VERDICT_RULE,
   weightText,
-  writesText,
   type IndexSuggestion,
   type SuggestionSortKey,
 } from '@/lib/indexSuggestions'
@@ -59,6 +58,19 @@ const SUGGESTION_TOOLBAR: TableToolbarSpec<IndexSuggestion> = {
 
 // compareRows orders the rows: a column's sortValue only marks it sortable.
 const SORTED_BY_COMPARE = () => null
+
+function rateWords(rate: number, noun: string): string {
+  const figure = rate > 0 && rate < 0.01 ? '<0.01' : formatRate(rate).replace(/\/s$/, '')
+  return `${figure} ${noun}/s`
+}
+
+function writesCell(write: IndexSuggestion['write']): string {
+  return [
+    rateWords(write.insert_rate, 'inserts'),
+    rateWords(write.update_rate, 'updates'),
+    rateWords(write.delete_rate, 'deletes'),
+  ].join(' · ')
+}
 
 function WeightBar({ weightPct }: { weightPct: number }) {
   const width = Math.max(0, Math.min(100, weightPct))
@@ -116,7 +128,9 @@ function suggestionColumns(): SimpleColumn<IndexSuggestion>[] {
       truncate: (row) => keyText(row.columns),
       cell: (row) => <code className="font-mono text-xs">{keyText(row.columns)}</code>,
     },
-    sortable('weight', 'Weight %', (row) => <WeightBar weightPct={row.weight_pct} />, '10rem'),
+    sortable('weight', 'Weight %', (row) => <WeightBar weightPct={row.weight_pct} />, '10rem', {
+      help: 'indexes.suggest-weight',
+    }),
     sortable(
       'cost',
       'Read cost',
@@ -129,6 +143,7 @@ function suggestionColumns(): SimpleColumn<IndexSuggestion>[] {
         </span>
       ),
       '10rem',
+      { help: 'indexes.suggest-read-cost' },
     ),
     sortable(
       'size',
@@ -139,16 +154,18 @@ function suggestionColumns(): SimpleColumn<IndexSuggestion>[] {
         </span>
       ),
       '7rem',
+      { help: 'indexes.suggest-size' },
     ),
     sortable(
       'writes',
       'Writes/s',
       (row) => (
         <span title="Inserts, updates and deletes per second of the table, in that order.">
-          {writesText(row.write)}
+          {writesCell(row.write)}
         </span>
       ),
-      '13rem',
+      '24rem',
+      { help: 'indexes.suggest-writes' },
     ),
     sortable(
       'verdict',
@@ -159,8 +176,11 @@ function suggestionColumns(): SimpleColumn<IndexSuggestion>[] {
         </Badge>
       ),
       '8rem',
+      { help: 'indexes.suggest-verdict' },
     ),
-    sortable('statements', 'Statements', (row) => formatCount(row.statements.length), '10rem'),
+    sortable('statements', 'Statements', (row) => formatCount(row.statements.length), '10rem', {
+      help: 'indexes.suggest-statements',
+    }),
   ]
 }
 
@@ -342,19 +362,20 @@ export function SuggestionsPanel({ instanceId, database }: SuggestionsPanelProps
         </>
       }
       stats={[
-        { label: 'Suggestions', value: formatCount(suggestions.length) },
-        { label: 'Strong', value: formatCount(strong) },
+        { label: 'Suggestions', value: formatCount(suggestions.length), unit: 'indexes' },
+        { label: 'Strong', value: formatCount(strong), unit: 'indexes' },
         {
           label: 'Statements analysed',
           value: formatCount(response.coverage.statements_analysed),
-          unit: `of ${formatCount(response.coverage.statements_considered)} statements`,
+          unit: 'statements',
+          detail: `of ${formatCount(response.coverage.statements_considered)} considered`,
         },
       ]}
       title="Index suggestions"
       titleId="index-suggestions-title"
     >
       <p
-        className="text-muted-foreground border-b px-5 py-2 text-sm min-[1600px]:truncate min-[1600px]:py-0 min-[1600px]:text-xs"
+        className="text-muted-foreground border-b px-5 py-2 text-sm min-[1600px]:py-1 min-[1600px]:text-xs"
         data-testid="suggestion-coverage"
         title={coverageTitle}
       >
@@ -382,7 +403,8 @@ export function SuggestionsPanel({ instanceId, database }: SuggestionsPanelProps
         )
       ) : (
         <SimpleTable
-          ariaLabel="Index suggestions"
+          ariaLabel="Suggested indexes"
+          captionId="indexes.suggestions-table"
           columns={columns}
           compare={compareRows}
           defaultSort={{ id: 'weight', desc: true }}

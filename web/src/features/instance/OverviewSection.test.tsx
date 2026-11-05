@@ -98,7 +98,7 @@ describe('OverviewSection', () => {
 
     for (const label of [
       'Connections in use',
-      'Transactions per second',
+      'Transactions',
       'Cache hit ratio',
       'WAL generated in range',
       'Checkpoints in range',
@@ -230,8 +230,8 @@ describe('OverviewSection', () => {
     const connections = screen.getByRole('article', { name: 'Connections in use' })
     expect(connections).toHaveTextContent('7')
     expect(connections).toHaveTextContent('of 100')
-    expect(screen.getByRole('article', { name: 'Transactions per second' })).toHaveTextContent(
-      '6/s',
+    expect(screen.getByRole('article', { name: 'Transactions' })).toHaveTextContent(
+      /6\s*per second/,
     )
     expect(screen.getByRole('article', { name: 'Cache hit ratio' })).toHaveTextContent('99')
   })
@@ -251,8 +251,8 @@ describe('OverviewSection', () => {
     })
     await settle()
 
-    expect(screen.getByRole('article', { name: 'Transactions per second' })).toHaveTextContent(
-      '6/s',
+    expect(screen.getByRole('article', { name: 'Transactions' })).toHaveTextContent(
+      /6\s*per second/,
     )
   })
 
@@ -319,8 +319,8 @@ describe('OverviewSection', () => {
     expect(screen.getByRole('article', { name: 'Temporary files in range' })).toHaveTextContent(
       '180',
     )
-    expect(screen.getByRole('article', { name: 'Transactions per second' })).toHaveTextContent(
-      '13/s',
+    expect(screen.getByRole('article', { name: 'Transactions' })).toHaveTextContent(
+      /13\s*per second/,
     )
   })
 

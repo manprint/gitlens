@@ -113,10 +113,11 @@ describe('alerts captions', () => {
   it('CAPTION-PAGE-001 the Alerts section, its filters and the summary are captioned', async () => {
     const { container } = await renderAlerts()
 
-    expect(expectCaptionedCards(container)).toEqual(['alerts.list'])
+    expect(expectCaptionedCards(container)).toEqual(['alerts.list', 'alerts.table'])
     expect(visibleCaptions('alerts.list')).toHaveLength(1)
+    expect(visibleCaptions('alerts.table')).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'About Alerts' })).toHaveLength(2)
     expectHints([
-      'Alerts',
       'State filter',
       'Severity filter',
       'Cluster filter',
@@ -140,7 +141,11 @@ describe('alerts captions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'replication-lag' }))
     await settle()
 
-    expect(expectCaptionedCards(container)).toEqual(['alerts.detail', 'alerts.list'])
+    expect(expectCaptionedCards(container)).toEqual([
+      'alerts.detail',
+      'alerts.list',
+      'alerts.table',
+    ])
     expect(visibleCaptions('alerts.detail')).toHaveLength(1)
   })
 
@@ -154,8 +159,9 @@ describe('alerts captions', () => {
   it('CAPTION-PAGE-005 the event timeline and its filters are captioned', async () => {
     const { container } = await renderEvents()
 
-    expect(expectCaptionedCards(container)).toEqual(['events.timeline'])
+    expect(expectCaptionedCards(container)).toEqual(['events.timeline', 'events.table'])
     expect(visibleCaptions('events.timeline')).toHaveLength(1)
+    expect(visibleCaptions('events.table')).toHaveLength(1)
     expectHints(['Event timeline', 'Cluster filter', 'Event type filter', 'Event limit filter'])
     expect(captionOf('events.filter-cluster').what).toMatch(/cluster whose ID is typed/)
   })
@@ -163,8 +169,12 @@ describe('alerts captions', () => {
   it('CAPTION-PAGE-006 the alert status tab is captioned', async () => {
     const { container } = await renderEvents('/events?range=1h&section=alerts')
 
-    expect(expectCaptionedCards(container)).toEqual(['events.alert-status'])
+    expect(expectCaptionedCards(container)).toEqual([
+      'events.alert-status',
+      'events.alert-status-table',
+    ])
     expect(visibleCaptions('events.alert-status')).toHaveLength(1)
+    expect(visibleCaptions('events.alert-status-table')).toHaveLength(1)
   })
 
   it('CAPTION-PAGE-007 the rule list and the rule editor are captioned', async () => {
@@ -172,12 +182,13 @@ describe('alerts captions', () => {
     const { container } = renderWithProviders(<RulesPage />, { route: '/alerts/rules' })
     await flushNetwork()
 
-    expect(expectCaptionedCards(container)).toEqual(['rules.list'])
+    expect(expectCaptionedCards(container)).toEqual(['rules.list', 'rules.table'])
     expect(visibleCaptions('rules.list')).toHaveLength(1)
+    expect(visibleCaptions('rules.table')).toHaveLength(1)
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit replication-lag' }))
 
-    expect(expectCaptionedCards(container)).toEqual(['rules.edit', 'rules.list'])
+    expect(expectCaptionedCards(container)).toEqual(['rules.edit', 'rules.list', 'rules.table'])
     expect(visibleCaptions('rules.edit')).toHaveLength(1)
   })
 
@@ -200,8 +211,9 @@ describe('alerts captions', () => {
     const { container } = renderWithProviders(<SilencesPage />, { route: '/alerts/silences' })
     await flushNetwork()
 
-    expect(expectCaptionedCards(container)).toEqual(['silences.list'])
+    expect(expectCaptionedCards(container)).toEqual(['silences.list', 'silences.table'])
     expect(visibleCaptions('silences.list')).toHaveLength(1)
+    expect(visibleCaptions('silences.table')).toHaveLength(1)
 
     fireEvent.click(screen.getByRole('button', { name: 'Create silence' }))
 

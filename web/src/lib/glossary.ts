@@ -107,9 +107,41 @@ export const glossary = {
     short:
       'What a session is waiting for at the moment it is sampled, such as a lock, I/O or a client.',
   },
+  backend: {
+    short:
+      'The server process PostgreSQL starts for each client connection; it runs that connection’s queries.',
+  },
+  'shared buffers': {
+    short: 'PostgreSQL’s own memory cache of table and index pages.',
+  },
+  tuple: { short: 'One version of a row stored in a table.' },
+  relation: { short: 'A table, an index or another stored object such as a sequence.' },
+  multixact: {
+    short: 'A group of transactions that hold a lock on the same row; it has its own small cache.',
+  },
+  tier: {
+    short:
+      'A level of permission pglens has on a monitored server (T0 to T2); higher tiers allow more checks.',
+  },
+  heap: {
+    short: "A table's main storage, without its indexes and the TOAST data kept out of line.",
+  },
   'permission tier': {
     short:
       'The level of database privileges pglens has on a server (T0 to T2); higher tiers enable more checks.',
+  },
+  T0: { short: 'Permission tier 0: the monitoring role can read statistics only.' },
+  T1: { short: 'Permission tier 1: everything in T0, plus running EXPLAIN to show query plans.' },
+  T2: {
+    short:
+      'Permission tier 2: everything in T1, plus cancelling or ending other sessions where the target allows it.',
+  },
+  EXPLAIN: {
+    short: 'The PostgreSQL command that shows the steps chosen to run a statement.',
+  },
+  ANALYZE: {
+    short:
+      'The EXPLAIN option that also runs the statement and reports the real time of each step.',
   },
 } as const satisfies Record<string, GlossaryEntry>
 

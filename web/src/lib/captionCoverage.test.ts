@@ -148,27 +148,7 @@ const DYNAMIC_ALLOWLIST: Record<string, Partial<Record<Tag, number>>> = {
  * `InstancePanel` and `SimpleTable` usages without a `captionId` (17.3): debt that
  * the page workers remove; entries are only ever removed and the list must end empty.
  */
-const PANEL_ALLOWLIST: Record<string, Partial<Record<PanelTag, number>>> = {
-  'features/alerts/AlertsPage.tsx': { SimpleTable: 1 },
-  'features/alerts/EventsPage.tsx': { SimpleTable: 2 },
-  'features/alerts/RulesPage.tsx': { SimpleTable: 1 },
-  'features/alerts/SilencesPage.tsx': { SimpleTable: 1 },
-  'features/cluster/TopologyGraph.tsx': { SimpleTable: 1 },
-  'features/findings/FindingsTable.tsx': { SimpleTable: 1 },
-  'features/indexes/CleanupPanel.tsx': { SimpleTable: 1 },
-  'features/indexes/DeadRowsPanel.tsx': { SimpleTable: 1 },
-  'features/indexes/IndexTaxPanel.tsx': { SimpleTable: 1 },
-  'features/indexes/IndexesPanel.tsx': { SimpleTable: 3 },
-  'features/indexes/SuggestionsPanel.tsx': { SimpleTable: 1 },
-  'features/instance/CatalogSection.tsx': { InstancePanel: 1 },
-  'features/instance/InternalsSection.tsx': { InstancePanel: 1 },
-  'features/instance/LogicalReplicationSection.tsx': { InstancePanel: 1 },
-  'features/instance/RelationsSection.tsx': { InstancePanel: 1, SimpleTable: 1 },
-  'features/instance/SettingsSection.tsx': { InstancePanel: 1, SimpleTable: 1 },
-  'features/locks/SessionsTable.tsx': { SimpleTable: 1 },
-  'features/queries/PlanHistory.tsx': { SimpleTable: 1 },
-  'features/settings/CommandAudit.tsx': { SimpleTable: 1 },
-}
+const PANEL_ALLOWLIST: Record<string, Partial<Record<PanelTag, number>>> = {}
 
 /** `MetricTile` usages with a number or free text in `unit`: none since 17.2. */
 const CARD_ALLOWLIST: Record<string, number> = {}

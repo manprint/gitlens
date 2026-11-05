@@ -202,9 +202,9 @@ export function HostCharts({ diskMeasured, instanceId, swapAbsent }: HostChartsP
 
   const cpuSeries = [{ name: 'CPU used', points: toPercent(seriesFrom(cpuUsed)) }]
   const loadSeries = [
-    { name: 'Load 1m', points: seriesFrom(load1) },
-    { name: 'Load 5m', points: seriesFrom(load5) },
-    { name: 'Load 15m', points: seriesFrom(load15) },
+    { name: 'Load, 1 min', points: seriesFrom(load1) },
+    { name: 'Load, 5 min', points: seriesFrom(load5) },
+    { name: 'Load, 15 min', points: seriesFrom(load15) },
   ]
   const memoryTotal = seriesFrom(memTotal)
   const memorySeries = [

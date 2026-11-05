@@ -34,7 +34,7 @@ import {
 import { NativeSelect } from '@/components/ui/native-select'
 
 import { DENSE_TABLE } from './denseTable'
-import { InstancePanel, InstanceViewTabs, ToolbarNote } from './InstancePanel'
+import { CaptionedBlock, InstancePanel, InstanceViewTabs, ToolbarNote } from './InstancePanel'
 import { CATALOG_VIEW_IDS } from './instanceSections'
 import { useInstanceView, type InstanceView } from './instanceViews'
 
@@ -114,7 +114,7 @@ function TruncatedNotice({
   const names = truncated.filter((name) => database === 'all' || name === database)
   if (names.length === 0) return null
   return (
-    <ToolbarNote status>
+    <ToolbarNote status wrap>
       {`${names.join(', ')} ${names.length === 1 ? 'has' : 'have'} more ${what} than the agent reports: ${kept}.`}
     </ToolbarNote>
   )
@@ -150,10 +150,12 @@ function CatalogTable<T extends RowData>({
   )
   if (table.data.length === 0) {
     return (
-      <div className="space-y-4">
-        <div className="flex flex-wrap items-end gap-3">{extra}</div>
-        <DataTable {...table} captionId={captionId} />
-      </div>
+      <CaptionedBlock ariaLabel={table.ariaLabel} captionId={captionId}>
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-end gap-3">{extra}</div>
+          <DataTable {...table} captionId={captionId} />
+        </div>
+      </CaptionedBlock>
     )
   }
   const content = <DataTable {...table} captionId={captionId} toolbarExtra={extra} />
@@ -1085,6 +1087,7 @@ function FunctionsTab({ response }: { response: Schemas['FunctionsResponse'] }) 
           {untracked.length > 0 ? (
             <ToolbarNote
               status
+              wrap
             >{`Function calls are not tracked in ${untracked.join(', ')}: track_functions is none. Set it to pl to track functions written in a procedural language; pglens never changes it.`}</ToolbarNote>
           ) : null}
         </>
@@ -1369,7 +1372,7 @@ export function CatalogSection({ instanceId }: CatalogSectionProps) {
       <InstancePanel
         id="catalog"
         title="Schema objects"
-        description="Objects the catalog checks report for each database, refreshed every few minutes to hourly."
+        captionId="catalog.section"
         actions={<InstanceViewTabs label="Schema object kinds" views={views} />}
       >
         <TabsContent value="triggers">

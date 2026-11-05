@@ -237,7 +237,7 @@ describe('CleanupPanel', () => {
     render({ items: [] })
     await flushNetwork(30)
 
-    expect(screen.getByText(/has not reported index statistics/)).toBeInTheDocument()
+    expect(screen.getByText(/No index usage statistics arrived from the agent/)).toBeInTheDocument()
   })
 
   it('CLEAN-UI-012 keeps the confirmed totals apart from the raw-counter ones', async () => {
@@ -305,36 +305,40 @@ function noteFor(headline: string): HTMLElement {
 }
 
 describe('CleanupPanel on a Full HD screen (15.3)', () => {
-  it('FHD-APPLY-036 one table under a one-line header: figures, notes with a title, compact rows', async () => {
+  it('FHD-APPLY-036 one table under a two-row header: title and description, then figures and notes, compact rows', async () => {
     render({ cluster: withStandby() })
     await flushNetwork(30)
 
     expect(screen.getAllByRole('table')).toHaveLength(1)
     const line = panelHeader()
-    expect(line).toContainElement(
+    const first = screen.getByTestId('index-panel-first-row')
+    const second = screen.getByTestId('index-panel-second-row')
+    expect(line).toContainElement(first)
+    expect(line).toContainElement(second)
+    expect(first).toContainElement(
       screen.getByRole('heading', { name: 'Indexes that look removable' }),
     )
-    expect(line).toHaveClass('min-[1600px]:flex-row')
+    expect(first).toHaveClass('min-[1600px]:flex-row')
     const tile = screen.getByRole('article', { name: 'Candidates' })
-    expect(line).toContainElement(tile)
+    expect(second).toContainElement(tile)
     // The breakdown leaves the line from 1600 px and stays in the title.
     expect(within(tile).getByText('4 confirmed · 1 raw counters')).toHaveClass(
       'min-[1600px]:hidden',
     )
-    expect(tile).toHaveAttribute('title', 'Candidates: 5 4 confirmed · 1 raw counters')
-    expect(line).toContainElement(screen.getByRole('button', { name: 'Copy cleanup script' }))
+    expect(tile).toHaveAttribute('title', 'Candidates: 5 indexes 4 confirmed · 1 raw counters')
+    expect(first).toContainElement(screen.getByRole('button', { name: 'Copy cleanup script' }))
     for (const headline of [
       'This server is part of a cluster.',
       '1 candidate rests on raw counters.',
     ]) {
       const note = noteFor(headline)
-      expect(line).toContainElement(note)
-      expect(note).toHaveClass('min-[1600px]:truncate')
+      expect(second).toContainElement(note)
+      expect(note.className).not.toMatch(/truncate/)
       expect(note.getAttribute('title')).toContain(headline)
     }
-    expect(screen.getByText(/^Primary keys and unique indexes are never listed/)).toHaveClass(
-      'min-[1600px]:truncate',
-    )
+    const description = within(first).getByText(/^Indexes that look unused, repeat another index/)
+    expect(description).toHaveTextContent('Primary keys and unique indexes are never listed')
+    expect(description).toHaveClass('min-[1600px]:line-clamp-2')
 
     const table = screen.getByRole('table', { name: 'Cleanup candidates' })
     expect(table).toHaveClass('min-[1600px]:table-fixed')

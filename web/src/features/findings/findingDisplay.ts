@@ -1,4 +1,5 @@
 import type { JoinedFinding } from '@/lib/findings'
+import { clusterNameOrId, instanceNameOrId, type NameLookup } from '@/lib/names'
 
 // The colour follows the severity name, so an unknown one stays neutral.
 export function severityAccent(severity: string): string {
@@ -16,12 +17,30 @@ export function severityBadge(severity: string): string {
   return 'bg-muted text-muted-foreground'
 }
 
-/** The object, database, instance and cluster a finding is about, most specific first. */
-export function findingTarget(finding: JoinedFinding): string[] {
+/** A finding scope in words: a relation is a table, index or another database object. */
+export function scopeLabel(scope: string): string {
+  return scope === 'relation' ? 'database object' : scope
+}
+
+/**
+ * The object, database, instance and cluster a finding is about, most specific
+ * first. With a name lookup an instance or cluster shows its name, not its id.
+ */
+export function findingTarget(finding: JoinedFinding, names?: NameLookup): string[] {
+  const instance = finding.instance_id
+    ? names
+      ? instanceNameOrId(names, String(finding.instance_id))
+      : String(finding.instance_id)
+    : undefined
+  const cluster = finding.cluster_id
+    ? names
+      ? clusterNameOrId(names, String(finding.cluster_id))
+      : String(finding.cluster_id)
+    : undefined
   return [
     finding.object_name,
     finding.datname ? `database ${finding.datname}` : undefined,
-    finding.instance_id ? `instance ${finding.instance_id}` : undefined,
-    finding.cluster_id ? `cluster ${finding.cluster_id}` : undefined,
+    instance ? `instance ${instance}` : undefined,
+    cluster ? `cluster ${cluster}` : undefined,
   ].filter((value): value is string => Boolean(value))
 }

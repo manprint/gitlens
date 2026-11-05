@@ -2,6 +2,8 @@ import { screen, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw/http'
 import { describe, expect, it } from 'vitest'
 
+import ExplainPanel from './ExplainPanel'
+import PlanHistory from './PlanHistory'
 import QueryListPage from './QueryListPage'
 import { QueryOverview } from './QueryOverview'
 import SlowQueriesPage from './SlowQueriesPage'
@@ -137,5 +139,25 @@ describe('queries captions (CAPTION-PAGE)', () => {
     const tiles = captionedArticles(container)
     expect(tiles).toHaveLength(6)
     tiles.forEach(expectClearCard)
+  })
+
+  it('CAPTION-PAGE-004 the execution plan panel is captioned and says which tier each plan needs', () => {
+    const { container } = renderWithProviders(
+      <ExplainPanel currentTier="T1" instanceId={INSTANCE_ID} queryid={42} />,
+    )
+
+    expect(expectCaptionedCards(container)).toEqual(['queries.explain-panel'])
+    expect(screen.getByRole('button', { name: 'About Execution plan' })).toBeVisible()
+    expect(CAPTIONS['queries.explain-panel'].howToRead).toMatch(/T1/)
+    expect(CAPTIONS['queries.explain-panel'].howToRead).toMatch(/allow_explain_analyze/)
+  })
+
+  it('CAPTION-PAGE-005 the plan history is captioned', async () => {
+    server.use(http.get('*/api/v1/plans', () => HttpResponse.json({ plans: [], total_shapes: 0 })))
+    const { container } = renderWithProviders(<PlanHistory instanceId={INSTANCE_ID} queryid="42" />)
+    await flushNetwork(30)
+
+    expect(expectCaptionedCards(container)).toEqual(['queries.plan-history'])
+    expect(screen.getByRole('button', { name: 'About Plan history' })).toBeVisible()
   })
 })

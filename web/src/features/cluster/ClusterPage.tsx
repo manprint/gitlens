@@ -203,6 +203,7 @@ export function ClusterPage({ clusterId: clusterIdOverride }: ClusterPageProps =
       ) : (
         <DriftSection
           entries={driftQuery.data ?? []}
+          instances={instances}
           onRetry={() => void driftQuery.refetch()}
           {...(driftQuery.error ? { failure: driftQuery.error } : {})}
         />
@@ -237,7 +238,12 @@ export function ClusterPage({ clusterId: clusterIdOverride }: ClusterPageProps =
           ))}
         </TabsList>
         <p className="text-muted-foreground text-xs">
-          Cluster identity: <code>{cluster.cluster_id}</code>
+          Cluster identity: <code>{cluster.cluster_id}</code>{' '}
+          {cluster.id_source === 'system_identifier'
+            ? '(the PostgreSQL system identifier, which pglens uses to tell clusters apart)'
+            : cluster.id_source === 'manual'
+              ? '(derived from a cluster name supplied by the user, not from the PostgreSQL system identifier)'
+              : null}
         </p>
         {CLUSTER_SECTIONS.map((entry) => (
           <TabsContent className="space-y-6 min-[1600px]:space-y-4" key={entry.id} value={entry.id}>

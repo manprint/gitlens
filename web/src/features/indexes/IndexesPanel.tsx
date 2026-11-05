@@ -33,6 +33,7 @@ import { UNUSED_INDEX_MIN_BYTES, windowPhrase } from '@/lib/indexCleanup'
 import { summariseColumns } from '@/lib/indexDefinition'
 
 import { IndexDetail } from './IndexDetail'
+import { NO_INDEX_STATS } from './emptyText'
 import { CELL_BADGE, IndexPanel, PanelNote, type PanelStat } from './IndexPanel'
 import {
   DEFAULT_INDEX_VIEW,
@@ -208,6 +209,7 @@ function indexColumns(
     {
       id: 'flags',
       header: 'Flags',
+      help: 'indexes.flags-column',
       width: '13rem',
       cell: (row) => <RowBadges row={row} unusedWindow={unusedWindow} />,
     },
@@ -223,6 +225,7 @@ function indexColumns(
     {
       id: 'scanRate',
       header: 'Scans',
+      help: 'indexes.scans',
       sortValue: (row) => sortValue(row, 'scanRate'),
       firstDirection: 'desc',
       className: 'whitespace-nowrap',
@@ -232,6 +235,7 @@ function indexColumns(
     {
       id: 'cache',
       header: 'Cache hit',
+      help: 'indexes.cache-hit',
       className: 'whitespace-nowrap',
       width: '6.5rem',
       cell: (row) => (row.cacheHitRatio === null ? '—' : formatPercent(row.cacheHitRatio, 1)),
@@ -239,6 +243,7 @@ function indexColumns(
     {
       id: 'lastScan',
       header: 'Last scan',
+      help: 'indexes.last-scan',
       sortValue: (row) => sortValue(row, 'lastScan'),
       firstDirection: 'desc',
       className: 'whitespace-nowrap',
@@ -559,6 +564,7 @@ const GAP_COLUMNS: readonly SimpleColumn<ForeignKeyGap>[] = [
   {
     id: 'severity',
     header: 'Severity',
+    help: 'indexes.fk-severity-column',
     sortValue: (gap) => gap.finding.severity,
     width: '7rem',
     cell: (gap) => (
@@ -589,6 +595,7 @@ const GAP_COLUMNS: readonly SimpleColumn<ForeignKeyGap>[] = [
   {
     id: 'columns',
     header: 'Columns',
+    help: 'indexes.fk-columns',
     width: '14rem',
     truncate: (gap) => gap.columns,
     cell: (gap) => <code className="font-mono text-xs">({gap.columns})</code>,
@@ -596,6 +603,7 @@ const GAP_COLUMNS: readonly SimpleColumn<ForeignKeyGap>[] = [
   {
     id: 'referenced',
     header: 'References',
+    help: 'indexes.fk-references',
     sortValue: (gap) => gap.referenced,
     width: '16rem',
     truncate: (gap) => gap.referenced,
@@ -644,6 +652,8 @@ interface IndexesPanelProps {
   /** The database picked on the page; empty for all of them. */
   database: string
   dataUpdatedAt: number
+  /** Why the inventory is empty, when it is. */
+  emptyDescription?: string
   /** The key of a row to expand and give focus to (a search hit, D20). */
   focusKey?: string | undefined
   /** Called once the row is shown (true) or when it is not in the list (false). */
@@ -665,6 +675,7 @@ export function IndexesPanel({
   findingsPending,
   database,
   dataUpdatedAt,
+  emptyDescription = NO_INDEX_STATS,
   focusKey,
   onFocusDone,
 }: IndexesPanelProps) {
@@ -708,9 +719,17 @@ export function IndexesPanel({
   const counts = useMemo(() => {
     const count = (rule: string) =>
       scopedFindings.filter((finding) => finding.rule_id === rule).length
+    // A duplicate finding is a group of indexes with identical definitions (two at least).
+    const duplicateIndexes = scopedFindings
+      .filter((finding) => finding.rule_id === INDEX_RULES.duplicate)
+      .reduce((sum, finding) => {
+        const names = finding.evidence?.indexes
+        return sum + (Array.isArray(names) ? names.length : 2)
+      }, 0)
     return {
       unused: count(INDEX_RULES.unused),
       duplicate: count(INDEX_RULES.duplicate),
+      duplicateIndexes,
       redundant: count(INDEX_RULES.redundantPrefix),
       invalid: count(INDEX_RULES.invalid),
       divergence: count(INDEX_RULES.divergence),
@@ -750,17 +769,21 @@ export function IndexesPanel({
   }
 
   const stats: PanelStat[] = [
-    { label: 'Indexes', value: formatCount(summary.total), unit: 'reported' },
+    { label: 'Indexes reported', value: formatCount(summary.total), unit: 'indexes' },
     { label: 'Total size', value: formatBytes(summary.bytes) },
     {
-      label: 'Need attention',
+      label: 'Indexes needing attention',
       value: formatCount(attention),
-      unit: `of ${formatCount(summary.total)} ${summary.total === 1 ? 'index' : 'indexes'}`,
+      unit: 'indexes',
+      detail: `of ${formatCount(summary.total)} ${summary.total === 1 ? 'index' : 'indexes'} reported`,
     },
     {
-      label: 'Never scanned',
+      label: 'Never-scanned indexes',
       value: formatCount(summary.neverScanned),
-      ...(summary.neverScanned > 0 ? { unit: formatBytes(summary.neverScannedBytes) } : {}),
+      unit: 'indexes',
+      ...(summary.neverScanned > 0
+        ? { detail: `${formatBytes(summary.neverScannedBytes)} in size` }
+        : {}),
     },
   ]
 
@@ -830,13 +853,11 @@ export function IndexesPanel({
   const content: Record<IndexView, () => ReactNode> = {
     inventory: () =>
       rows.length === 0 ? (
-        <EmptyState
-          description="The agent has not reported index statistics for this server yet."
-          title="No indexes to show"
-        />
+        <EmptyState description={emptyDescription} title="No indexes to show" />
       ) : (
         <SimpleTable
           ariaLabel="Indexes"
+          captionId="indexes.inventory-table"
           columns={columns}
           defaultSort={{ id: 'bytes', desc: true }}
           detailLabel={(row, expanded) => `${expanded ? 'Hide' : 'Show'} details of ${row.name}`}
@@ -907,10 +928,13 @@ export function IndexesPanel({
             detail={
               findingsPending
                 ? 'the advisor findings are loading'
-                : explained(counts.duplicate, 'groups of indexes with identical definitions')
+                : counts.duplicate === 0
+                  ? explained(0, 'groups of indexes with identical definitions')
+                  : `in ${formatCount(counts.duplicate)} ${counts.duplicate === 1 ? 'group' : 'groups'} with identical definitions`
             }
             label="Exact duplicate indexes"
-            value={findingsPending ? null : formatCount(counts.duplicate)}
+            unit="indexes"
+            value={findingsPending ? null : formatCount(counts.duplicateIndexes)}
             {...(!findingsPending && counts.duplicate > 0
               ? { status: { tone: 'warn' as const, text: 'Review before dropping' } }
               : {})}
@@ -937,6 +961,7 @@ export function IndexesPanel({
                 : explained(gaps.length, 'foreign keys that no index leads with')
             }
             label="Foreign keys without an index"
+            unit="foreign keys"
             value={findingsPending ? null : formatCount(gaps.length)}
             {...(!findingsPending && gaps.length > 0
               ? { status: { tone: 'warn' as const, text: 'Deletes scan the referencing table' } }
@@ -980,7 +1005,8 @@ export function IndexesPanel({
         />
       ) : (
         <SimpleTable
-          ariaLabel="Index findings"
+          ariaLabel="Index findings by index"
+          captionId="indexes.findings-table"
           columns={FINDING_COLUMNS}
           detailLabel={(finding, expanded) =>
             `${expanded ? 'Hide' : 'Show'} the detail of ${finding.title}`
@@ -1007,6 +1033,7 @@ export function IndexesPanel({
       ) : (
         <SimpleTable
           ariaLabel="Foreign keys without an index"
+          captionId="indexes.foreign-keys-table"
           columns={GAP_COLUMNS}
           emptyState={null}
           rowKey={(gap) => gap.finding.finding_id}

@@ -75,6 +75,22 @@ describe('SessionsTable', () => {
     ).toBeGreaterThan(0)
   })
 
+  it('CAPTION-PAGE-045 each sessions table keeps its caption, hint and column hints', () => {
+    for (const [origin, rows] of [
+      ['application', sessions.filter((s) => s.origin === 'application')],
+      ['pglens', [] as Session[]],
+    ] as const) {
+      const { unmount } = renderTable(origin, [...rows])
+
+      expect(screen.getAllByRole('button', { name: /^About /i }).length, origin).toBeGreaterThan(0)
+      unmount()
+    }
+    renderTable('application', manySessions(2))
+    for (const column of ['State', 'Wait', 'Transaction age', 'Query age', 'PID']) {
+      expect(screen.getByRole('button', { name: `About ${column}` }), column).toBeInTheDocument()
+    }
+  })
+
   it('SORIGIN-UI-003 searches, filters, sorts and pages with the shared controls', () => {
     renderTable('application', manySessions(25))
     const name = 'Application sessions'

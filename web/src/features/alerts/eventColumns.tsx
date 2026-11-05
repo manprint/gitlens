@@ -29,6 +29,14 @@ function counterResetText(event: ClusterEvent): string | null {
   return `${count} ${count === 1 ? 'counter' : 'counters'} reset${counterResetScope(event)}.`
 }
 
+const CARDINALITY_TEXT =
+  'Some metrics were dropped because the instance sent more distinct series than the configured limit.'
+
+// The shared title names the internal budget; this list says what happened.
+function eventTitle(event: ClusterEvent): string {
+  return event.type === 'cardinality_truncated' ? CARDINALITY_TEXT : describeEvent(event.type).title
+}
+
 const INVARIANT_TEXT = 'Critical invariant violation I-1: cluster identity must never change.'
 
 /** The full text of the details cell, for its `title` when the cell is cut to one line. */
@@ -95,8 +103,8 @@ export function eventColumns(names: NameLookup = NO_NAMES): SimpleColumn<Cluster
       header: 'Event',
       rowHeader: true,
       width: '16rem',
-      truncate: (event) => describeEvent(event.type).title,
-      cell: (event) => describeEvent(event.type).title,
+      truncate: eventTitle,
+      cell: eventTitle,
     },
     {
       id: 'severity',
@@ -138,6 +146,7 @@ export function eventColumns(names: NameLookup = NO_NAMES): SimpleColumn<Cluster
     {
       id: 'details',
       header: 'Details',
+      help: 'events.details',
       truncate: detailsText,
       cell: detailsCell,
     },

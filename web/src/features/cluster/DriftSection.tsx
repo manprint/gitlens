@@ -9,6 +9,9 @@ import {
 import { EmptyState } from '@/components/state/EmptyState'
 import { ErrorState } from '@/components/state/ErrorState'
 import type { components } from '@/api/generated'
+import { replicationInstanceLabel, type ReplicationInstance } from '@/lib/replication'
+
+import { EmptyCaptioned } from './EmptyCaptioned'
 
 type DriftEntry = components['schemas']['DriftEntry']
 type DriftValue = components['schemas']['DriftValue']
@@ -21,6 +24,8 @@ interface DriftTableRow {
 
 export interface DriftSectionProps {
   entries?: readonly DriftEntry[]
+  /** The cluster's instances name the columns; without them a column shows the instance id. */
+  instances?: readonly ReplicationInstance[]
   failure?: ApiFailure
   onRetry?: () => void
 }
@@ -74,13 +79,16 @@ function makeRow(entry: DriftEntry): DriftTableRow {
 
 const DRIFT_TOOLBAR: DataTableToolbar<DriftTableRow> = { searchFields: [(row) => row.name] }
 
-function driftColumns(ids: readonly string[]): DataTableProps<DriftTableRow>['columns'] {
+function driftColumns(
+  ids: readonly string[],
+  instances: readonly ReplicationInstance[],
+): DataTableProps<DriftTableRow>['columns'] {
   return [
     { accessorKey: 'name', header: 'Setting' },
     ...ids.map((instanceId) => ({
       id: `instance-${instanceId}`,
       accessorFn: (row: DriftTableRow) => row.values[instanceId],
-      header: instanceId,
+      header: replicationInstanceLabel(instances, instanceId),
       cell: ({ row }: { row: { original: DriftTableRow } }) => {
         const differing = row.original.differingInstances.has(instanceId)
         const value = row.original.values[instanceId] ?? 'Unknown'
@@ -98,10 +106,31 @@ function driftColumns(ids: readonly string[]): DataTableProps<DriftTableRow>['co
   ]
 }
 
-export function DriftSection({ entries = [], failure, onRetry }: DriftSectionProps) {
+const NO_INSTANCES: readonly ReplicationInstance[] = []
+
+export function DriftSection({
+  entries = [],
+  instances = NO_INSTANCES,
+  failure,
+  onRetry,
+}: DriftSectionProps) {
   const ids = useMemo(() => instanceIds(entries), [entries])
   const rows = useMemo(() => entries.map(makeRow), [entries])
-  const columns = useMemo(() => driftColumns(ids), [ids])
+  const columns = useMemo(() => driftColumns(ids, instances), [ids, instances])
+  // The server lists only the settings that differ between two or more instances that
+  // reported in the last hour, so an empty list also covers a cluster of one instance.
+  const alone = instances.length === 1
+  const noDrift = alone ? (
+    <EmptyState
+      title="Nothing to compare yet"
+      description="Only one instance of this cluster is monitored, so there is nothing to compare yet."
+    />
+  ) : (
+    <EmptyState
+      title="No drift detected"
+      description="No setting differs between the instances of this cluster that reported in the last hour."
+    />
+  )
 
   return (
     <section aria-labelledby="settings-drift-heading">
@@ -112,6 +141,10 @@ export function DriftSection({ entries = [], failure, onRetry }: DriftSectionPro
           failure={failure}
           onRetry={onRetry ?? (() => undefined)}
         />
+      ) : rows.length === 0 ? (
+        <EmptyCaptioned ariaLabel="Configuration drift" captionId="cluster.drift-table">
+          <div role="status">{noDrift}</div>
+        </EmptyCaptioned>
       ) : (
         <DataTable
           ariaLabel="Configuration drift"
@@ -120,12 +153,7 @@ export function DriftSection({ entries = [], failure, onRetry }: DriftSectionPro
           toolbar={DRIFT_TOOLBAR}
           columns={columns}
           data={rows}
-          emptyState={
-            <EmptyState
-              title="No drift detected"
-              description="All observed settings match across the cluster instances."
-            />
-          }
+          emptyState={noDrift}
         />
       )}
     </section>

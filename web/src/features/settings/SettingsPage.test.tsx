@@ -309,7 +309,50 @@ describe('SettingsPage', () => {
     expect(rows[2]).toHaveTextContent('Down')
     expect(rows[2]).toHaveTextContent('Agent has stopped reporting')
     expect(within(table).getAllByText(formatTimestamp(NOW, 'UTC'))).toHaveLength(2)
-    expect(screen.getByText(/no separate agent listing endpoint/i)).toBeInTheDocument()
+    expect(screen.getByText(/no separate list of agents/i)).toBeInTheDocument()
+  })
+
+  it('UI-SET-039 an agent row says in plain words why it is Down or Reporting', async () => {
+    renderSettings({
+      alerts: [baseAlert],
+      instances: [
+        { ...INSTANCE_SUMMARY, instance_id: '00000000-0000-4000-8000-000000000004', up: false },
+        { ...INSTANCE_SUMMARY, instance_id: SECOND_INSTANCE_ID, addr: 'standby.example.test' },
+        { ...INSTANCE_SUMMARY, addr: 'ok.example.test' },
+      ],
+      clusters: [],
+      route: '/?view=agents',
+    })
+    await settleInitialQueries()
+
+    const table = screen.getByRole('table', { name: 'Derived agent inventory' })
+    const rows = within(table).getAllByRole('row').slice(1)
+    const text = rows.map((row) => row.textContent ?? '')
+    expect(
+      text.some((row) => row.includes('No report from this agent within the expected interval.')),
+    ).toBe(true)
+    expect(
+      text.some((row) =>
+        row.includes(
+          "an 'Agent down' alert is still open; it closes when the alert rules next run.",
+        ),
+      ),
+    ).toBe(true)
+    expect(
+      text.some((row) =>
+        row.includes("The instance reported recently and no 'Agent down' alert is open."),
+      ),
+    ).toBe(true)
+  })
+
+  it('UI-SET-040 each tier card says what the tier lets pglens do', async () => {
+    renderSettings({ route: '/?view=tiers' })
+    await settleInitialQueries()
+
+    const [t0, t1, t2] = screen.getAllByRole('article')
+    expect(t0).toHaveTextContent('Reads statistics only.')
+    expect(t1).toHaveTextContent('Also runs EXPLAIN to show query plans.')
+    expect(t2).toHaveTextContent('Also cancels or ends other sessions.')
   })
 
   it('UI-SET-005 filters round-trip through the URL', async () => {

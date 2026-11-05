@@ -4,6 +4,7 @@ import { MetricTile } from '@/components/layout/MetricTile'
 import { Section } from '@/components/layout/Section'
 import { Degraded, ErrorState, Unknown } from '@/components/state'
 import type { CaptionId } from '@/lib/captions'
+import type { TileUnit } from '@/lib/units'
 import { formatBytes, formatCount, formatPercent } from '@/lib/format'
 
 import { HostCharts } from './HostCharts'
@@ -30,6 +31,7 @@ interface HostMetricDefinition {
   key: HostMetricKey
   label: string
   captionId: CaptionId
+  unit?: TileUnit
   format: (value: number | null) => string | null
 }
 
@@ -79,6 +81,7 @@ const METRICS: readonly HostMetricDefinition[] = [
     key: 'host_cpu_count',
     label: 'CPU count',
     captionId: 'host.cpu-count',
+    unit: 'CPUs',
     format: formatHostCount,
   },
   {
@@ -107,19 +110,19 @@ const METRICS: readonly HostMetricDefinition[] = [
   },
   {
     key: 'host_load1',
-    label: 'Load average (1m)',
+    label: 'Load average (1 min)',
     captionId: 'host.load-average',
     format: formatLoad,
   },
   {
     key: 'host_load5',
-    label: 'Load average (5m)',
+    label: 'Load average (5 min)',
     captionId: 'host.load-average',
     format: formatLoad,
   },
   {
     key: 'host_load15',
-    label: 'Load average (15m)',
+    label: 'Load average (15 min)',
     captionId: 'host.load-average',
     format: formatLoad,
   },
@@ -169,7 +172,7 @@ function HostMetricTiles({ data }: { data: Schemas['HostResponse'] }) {
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      {METRICS.map(({ captionId, format, key, label }) => {
+      {METRICS.map(({ captionId, format, key, label, unit }) => {
         const value = nullableNumber(values[key])
         const tileLabel = key === 'host_cpu_used_ratio' ? cpuUsedLabel(data.source) : label
         const shown = format(value)
@@ -178,6 +181,7 @@ function HostMetricTiles({ data }: { data: Schemas['HostResponse'] }) {
             key={key}
             captionId={captionId}
             label={tileLabel}
+            {...(unit === undefined ? {} : { unit })}
             value={
               value === null && DISK_KEYS.has(key) ? (
                 <span className="text-muted-foreground text-base font-normal">

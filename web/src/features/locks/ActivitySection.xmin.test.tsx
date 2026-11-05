@@ -33,7 +33,9 @@ describe('ActivitySection oldest xmin holder', () => {
       />,
     )
 
-    expect(screen.getByRole('heading', { name: 'Oldest xmin holder' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: 'Oldest cleanup blocker (xmin holder)' }),
+    ).toBeInTheDocument()
     expect(screen.getByText('Holder kind')).toBeInTheDocument()
     expect(screen.getByText('Session')).toBeInTheDocument()
     expect(screen.getByText('PID')).toBeInTheDocument()

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 
 import { usePlans } from '@/api/queries'
 import type { Schemas } from '@/api/types'
+import { InfoHint } from '@/components/layout/InfoHint'
 import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { Degraded } from '@/components/state/Degraded'
 import { ErrorState } from '@/components/state/ErrorState'
@@ -168,6 +169,7 @@ function PlanComparison({ plans }: { plans: [Plan, Plan] }) {
       ) : (
         <SimpleTable
           ariaLabel="Plan comparison"
+          captionId="queries.plan-comparison"
           caption="Side-by-side comparison of two query plans"
           columns={columns}
           emptyState={null}
@@ -229,11 +231,16 @@ export function PlanHistory({ queryid, instanceId, datname }: PlanHistoryProps) 
     <section
       aria-labelledby="plan-history-title"
       className="bg-card shadow-card space-y-4 rounded-xl border p-5"
+      data-card=""
+      data-caption-id="queries.plan-history"
     >
       <div>
-        <h2 id="plan-history-title" className="text-base font-semibold">
-          Plan history
-        </h2>
+        <div className="flex items-center gap-1">
+          <h2 id="plan-history-title" className="text-base font-semibold">
+            Plan history
+          </h2>
+          <InfoHint id="queries.plan-history" label="Plan history" />
+        </div>
         <p className="text-muted-foreground mt-1 text-sm">
           History contains only explicitly requested EXPLAIN plans; pglens does not sample plans
           automatically.

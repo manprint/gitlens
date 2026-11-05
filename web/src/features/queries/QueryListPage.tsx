@@ -149,7 +149,7 @@ function statementColumns(
     },
     {
       id: 'total-time',
-      meta: { width: '8rem', help: 'statements.total-time' },
+      meta: { width: '10rem', help: 'statements.total-time' },
       header: 'Total time',
       accessorFn: (row) => summariseStatement(row).total,
       cell: ({ row }) => {
@@ -163,7 +163,7 @@ function statementColumns(
     },
     {
       id: 'mean-time',
-      meta: { width: '8rem', help: 'statements.mean-time' },
+      meta: { width: '10rem', help: 'statements.mean-time' },
       header: 'Mean time',
       accessorFn: (row) => summariseStatement(row).mean,
       cell: ({ row }) => {
@@ -176,7 +176,7 @@ function statementColumns(
     {
       id: 'share-total',
       meta: { width: '13rem', help: 'statements.share-of-listed' },
-      header: 'Share of listed rows',
+      header: 'Share of listed time',
       enableSorting: false,
       cell: ({ row }) => {
         const share = row.original.totalShare

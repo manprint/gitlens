@@ -18,7 +18,7 @@ export const queriesCaptions = {
     unit: 'Calls, milliseconds, rows, percent, bytes.',
     window: 'Selected time range.',
     howToRead:
-      'Mean time is total time divided by calls. Share of listed rows is a statement total time over the total of the listed rows. Cache hit ratio is shared block hits over hits plus reads. Temporary bytes/call is temporary blocks written, 8192 bytes each, divided by calls. The column sort buttons reorder the loaded rows only.',
+      'Mean time is total time divided by calls. Share of listed time is a statement total time over the total time of the listed rows. Cache hit ratio is shared block hits over hits plus reads. Temporary bytes/call is temporary blocks written, 8192 bytes each, divided by calls. The column sort buttons reorder the loaded rows only.',
   },
   'queries.ranking': {
     what: 'The measure the server ranks statements by before keeping the top 50; the column sort buttons only reorder the rows already loaded.',
@@ -187,5 +187,41 @@ export const queriesCaptions = {
     window: 'Registry as built.',
     howToRead:
       'On an instance whose tier is lower than the rule minimum, the rule reports a degraded finding instead of being evaluated.',
+  },
+  'queries.explain-panel': {
+    what: 'Asks the agent for the execution plan of this statement: the steps PostgreSQL chooses to run it, shown as a tree.',
+    source:
+      'The agent runs EXPLAIN on the monitored database for this query id and returns the plan; the server stores it in the plan history.',
+    unit: 'plan nodes',
+    window: 'One plan per request; it describes the database at the moment of the request.',
+    howToRead:
+      'Plan needs permission tier T1 and does not run the statement. Plan with ANALYZE runs it to measure real times: the console offers it at T2, and the agent must also allow it with allow_explain_analyze.',
+  },
+  'queries.plan-history': {
+    what: 'The plans requested for this statement, newest first; pick two to compare them side by side.',
+    source:
+      'Server plans endpoint over the query_plans table, filled only by the plans requested above; the 20 newest entries for this query id.',
+    unit: 'plans',
+    window: 'Every request kept by the server, newest first, at most 20 shown.',
+    howToRead:
+      'Each entry shows when it was captured, whether it ran EXPLAIN or ANALYZE, and the plan hash; the server counts entries with the same hash as one plan shape. pglens does not sample plans by itself.',
+  },
+  'queries.plan-comparison': {
+    what: 'The nodes of two selected plans side by side, matched by their position in the plan tree.',
+    source:
+      'The two plans selected in the plan history; each node shows its type and its total cost.',
+    unit: 'plan nodes; cost in planner units',
+    window: 'The two stored plans, as captured.',
+    howToRead:
+      'Path is the position of a node in the tree. A highlighted row has a different node type or total cost, or exists in only one plan. Cost is the planner estimate, not a time.',
+  },
+  'findings.table': {
+    what: 'One row per advisor finding: its severity, title, object, rule, scope, state and when it was last seen.',
+    source:
+      'Server findings endpoint over the findings table written by the advisor engine; rule sentences come from the advisor rule catalogue.',
+    unit: 'findings',
+    window: 'The findings matching the filters above, at most 1000; last seen is a UTC timestamp.',
+    howToRead:
+      'Open a row for the detail, the advice and the evidence. Object names the cluster or instance when the fleet list knows its name. Rule shows what the rule checks, then its id.',
   },
 } as const satisfies Record<string, CaptionEntry>

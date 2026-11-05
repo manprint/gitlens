@@ -184,8 +184,8 @@ describe('AdvisorPanel', () => {
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search Advisor rules' }), {
       target: { value: '' },
     })
-    const idHeader = screen.getByRole('columnheader', { name: /Rule ID/ })
-    fireEvent.click(within(idHeader).getByRole('button', { name: 'Sort Rule ID descending' }))
+    const idHeader = screen.getByRole('columnheader', { name: /^Rule/ })
+    fireEvent.click(within(idHeader).getByRole('button', { name: 'Sort Rule descending' }))
     expect(idHeader).toHaveAttribute('aria-sort', 'descending')
     expect(firstCells()[0]).toBe('query.rule_23')
   })

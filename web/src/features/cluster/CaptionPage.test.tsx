@@ -140,6 +140,22 @@ describe('cluster, topology and lag captions', () => {
     expect(visibleCaptions('lag.edge')).toHaveLength(1)
   })
 
+  it('CAPTION-PAGE-015 an empty lag, slots or drift section keeps its caption and hint', () => {
+    const empty = [
+      [<LagSection edges={[]} />, 'lag.edge'],
+      [<SlotsSection slots={[]} />, 'cluster.slots-table'],
+      [<DriftSection entries={[]} />, 'cluster.drift-table'],
+    ] as const
+    for (const [section, id] of empty) {
+      const { container, unmount } = renderWithProviders(section)
+
+      expect(expectCaptionedCards(container), id).toEqual([id])
+      expect(visibleCaptions(id), id).toHaveLength(1)
+      expect(screen.getByRole('button', { name: /^About / }), id).toBeInTheDocument()
+      unmount()
+    }
+  })
+
   it('CARD-ALL-001 the group has no summary tile, so no card breaks the card contract', () => {
     renderWithProviders(<LagSection edges={[]} />)
 

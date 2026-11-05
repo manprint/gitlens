@@ -6,6 +6,7 @@ import { ChartCard } from '@/components/charts/ChartCard'
 import { TimeSeriesChart, type TimeSeriesTableSeries } from '@/components/charts/TimeSeriesChart'
 import { buildLagOption } from '@/components/charts/lag.options'
 import { useTimeRange } from '@/hooks/useTimeRange'
+import { EmptyCaptioned } from './EmptyCaptioned'
 import {
   alignSeries,
   hasGaps,
@@ -99,10 +100,13 @@ export function LagSection({
     <section aria-labelledby="replication-lag-heading">
       <h2 id="replication-lag-heading">Replication lag</h2>
       {groups.length === 0 ? (
-        <p role="status">
-          <Unknown reason="No replication edges were returned for this range." /> No replication lag
-          data in this range.
-        </p>
+        <EmptyCaptioned ariaLabel="Replication lag" captionId="lag.edge">
+          <p role="status">
+            <Unknown reason="No replication edges were returned for this range." /> No replication
+            lag data in this range, so there is nothing to chart. Lag is recorded for each standby
+            that copies changes from a primary of this cluster.
+          </p>
+        </EmptyCaptioned>
       ) : (
         <div className="space-y-6">
           {groups.map((group) => {

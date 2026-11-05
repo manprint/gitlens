@@ -207,7 +207,8 @@ export function SignalActions({
       {belowT2 ? (
         <>
           <p className="text-muted-foreground mt-1 text-xs">
-            Grant T2 with <code>monitoring_user.sql -v tier1=1 -v tier2=1</code>.
+            Cancelling or ending sessions needs permission tier T2. Grant it with{' '}
+            <code>monitoring_user.sql -v tier1=1 -v tier2=1</code>.
           </p>
           {actionButton('terminate', () => setPending({ kind: 'terminate', target: node }), true)}
         </>

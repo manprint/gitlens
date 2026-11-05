@@ -9,8 +9,10 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
 import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { EmptyState, ErrorState } from '@/components/state'
+import { ruleText } from '@/lib/ruleText'
 
 import { RuleEditor } from './RuleEditor'
+import { thresholdText } from './ruleThreshold'
 import { Button } from '@/components/ui/button'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
 
@@ -26,20 +28,31 @@ function isTierZero(rule: AlertRule): boolean {
   return tierLabel(rule) === 'T0'
 }
 
-function valueLabel(value: number | undefined): string {
-  return value === undefined ? '—' : String(value)
-}
-
 function enabledLabel(rule: AlertRule): string {
   return rule.enabled === undefined ? '—' : rule.enabled ? 'Yes' : 'No'
 }
 
 const RULE_TOOLBAR: TableToolbarSpec<AlertRule> = {
-  searchFields: [(rule) => rule.id],
+  searchFields: [(rule) => rule.id, (rule) => ruleText(rule.id) ?? ''],
   filters: [
     { id: 'severity', label: 'Severity', kind: 'select', accessor: (rule) => rule.severity },
     { id: 'enabled', label: 'Enabled', kind: 'select', accessor: enabledLabel },
   ],
+}
+
+function ruleLine(ruleId: string): string {
+  const text = ruleText(ruleId)
+  return text === undefined ? ruleId : `${text} ${ruleId}`
+}
+
+function RuleCell({ ruleId }: { ruleId: string }) {
+  const text = ruleText(ruleId)
+  if (text === undefined) return <>{ruleId}</>
+  return (
+    <>
+      {text} <span className="text-muted-foreground font-mono text-xs">{ruleId}</span>
+    </>
+  )
 }
 
 function ruleColumns(onEdit: (ruleId: string) => void): SimpleColumn<AlertRule>[] {
@@ -49,10 +62,18 @@ function ruleColumns(onEdit: (ruleId: string) => void): SimpleColumn<AlertRule>[
       header: 'Rule',
       rowHeader: true,
       sortValue: (rule) => rule.id,
-      truncate: (rule) => rule.id,
-      cell: (rule) => rule.id,
+      help: 'rules.rule',
+      truncate: (rule) => ruleLine(rule.id),
+      cell: (rule) => <RuleCell ruleId={rule.id} />,
     },
-    { id: 'tier', header: 'Tier', width: '6rem', sortValue: tierLabel, cell: tierLabel },
+    {
+      id: 'tier',
+      header: 'Tier',
+      width: '6rem',
+      help: 'rules.tier',
+      sortValue: tierLabel,
+      cell: tierLabel,
+    },
     {
       id: 'severity',
       header: 'Severity',
@@ -63,14 +84,17 @@ function ruleColumns(onEdit: (ruleId: string) => void): SimpleColumn<AlertRule>[
     {
       id: 'threshold',
       header: 'Threshold',
-      width: '9rem',
+      width: '16rem',
+      help: 'rules.threshold',
       sortValue: (rule) => rule.threshold,
-      cell: (rule) => valueLabel(rule.threshold),
+      truncate: thresholdText,
+      cell: thresholdText,
     },
     {
       id: 'duration',
       header: 'Duration',
-      width: '9rem',
+      width: '8rem',
+      help: 'rules.duration',
       sortValue: (rule) => rule.for_seconds,
       cell: (rule) => (rule.for_seconds === undefined ? '—' : `${rule.for_seconds}s`),
     },
@@ -174,6 +198,7 @@ export function RulesPage() {
         <Section captionId="rules.list" title="Configured rules">
           <SimpleTable
             ariaLabel="Alert rules"
+            captionId="rules.table"
             columns={columns}
             emptyState={null}
             rowKey={(rule) => rule.id}

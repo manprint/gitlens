@@ -16,7 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useSearchDraft, useShownTerm } from '@/hooks/useSearch'
 import type { CaptionId } from '@/lib/captions'
 import { searchTermOf } from '@/lib/highlight'
-import { clusterLabel, instanceLabel } from '@/lib/names'
+import { clusterLabel, instanceLabel, nameLookup } from '@/lib/names'
 import {
   joinCatalogue,
   rankFindings,
@@ -232,6 +232,7 @@ export function FindingsPage() {
   const clusterId = searchParams.get('cluster_id') ?? ''
   const instanceId = searchParams.get('instance_id') ?? ''
   const fleet = clustersQuery.data
+  const names = useMemo(() => nameLookup(fleet), [fleet])
   const clusterFilterOptions = useMemo(
     () => clusterOptions(fleet ?? [], clusterId),
     [clusterId, fleet],
@@ -587,7 +588,7 @@ export function FindingsPage() {
             </div>
 
             {visibleFindings.length > 0 ? (
-              <FindingsTable findings={visibleFindings} q={shownTerm} />
+              <FindingsTable findings={visibleFindings} names={names} q={shownTerm} />
             ) : shownTerm !== '' ? (
               <EmptyState
                 action={

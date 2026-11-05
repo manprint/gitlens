@@ -5,7 +5,7 @@ import { Caption } from '@/components/layout/Caption'
 import { InfoHint } from '@/components/layout/InfoHint'
 import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
-import type { CaptionId } from '@/lib/captions'
+import type { CaptionId, ColumnHelpId } from '@/lib/captions'
 import {
   SESSION_FILTERS,
   connectionGroup,
@@ -65,11 +65,13 @@ function textColumn(
   header: string,
   read: (session: Session) => string | null,
   width: string,
+  help?: ColumnHelpId,
 ): SimpleColumn<Session> {
   return {
     id,
     header,
     width,
+    ...(help === undefined ? {} : { help }),
     sortValue: SESSION_SORT[id],
     truncate: (session) => read(session) ?? '',
     cell: (session) => read(session) ?? NONE,
@@ -80,7 +82,8 @@ const COLUMNS: readonly SimpleColumn<Session>[] = [
   {
     id: 'pid',
     header: 'PID',
-    width: '5rem',
+    help: 'sessions.pid',
+    width: '7rem',
     sortValue: SESSION_SORT.pid,
     cell: sessionPid,
   },
@@ -88,11 +91,12 @@ const COLUMNS: readonly SimpleColumn<Session>[] = [
   textColumn('application', 'Application', sessionApplication, '10rem'),
   textColumn('database', 'Database', sessionDatabase, '8rem'),
   textColumn('client', 'Client', sessionClient, '8rem'),
-  textColumn('state', 'State', sessionState, '9rem'),
-  textColumn('wait', 'Wait', sessionWait, '10rem'),
+  textColumn('state', 'State', sessionState, '10rem', 'sessions.state'),
+  textColumn('wait', 'Wait', sessionWait, '10rem', 'sessions.wait'),
   {
     id: 'xact_age',
     header: 'Transaction age',
+    help: 'sessions.transaction-age',
     width: '11rem',
     firstDirection: 'desc',
     sortValue: SESSION_SORT.xact_age,
@@ -101,7 +105,8 @@ const COLUMNS: readonly SimpleColumn<Session>[] = [
   {
     id: 'query_age',
     header: 'Query age',
-    width: '8rem',
+    help: 'sessions.query-age',
+    width: '10rem',
     firstDirection: 'desc',
     sortValue: SESSION_SORT.query_age,
     cell: (session) => formatAge(queryAge(session)),
@@ -168,19 +173,8 @@ export function SessionsTable({
     [currentTier, instanceId, sampleStale, sessions],
   )
   return (
-    <div
-      className="space-y-2"
-      data-caption-id={meta.captionId}
-      data-card=""
-      data-origin-table={origin}
-    >
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <div className="flex items-center gap-1">
-          <h3 className="font-medium">{meta.title}</h3>
-          <InfoHint id={meta.captionId} label={meta.title} />
-        </div>
-        <Caption className="text-xs" id={meta.captionId} marked={false} oneLine />
-      </div>
+    <div className="space-y-2" data-origin-table={origin}>
+      <h3 className="font-medium">{meta.title}</h3>
       {sampleTotal !== undefined && sampleTotal > rows.length ? (
         <p className="text-muted-foreground text-xs">
           The sample holds {rows.length} of the {sampleTotal} connections of this origin: the
@@ -188,10 +182,17 @@ export function SessionsTable({
         </p>
       ) : null}
       {rows.length === 0 ? (
-        <p className="text-muted-foreground text-sm">{meta.empty}</p>
+        <div className="space-y-2" data-caption-id={meta.captionId} data-card="">
+          <div className="flex w-full min-w-0 items-center gap-1">
+            <Caption className="text-xs" id={meta.captionId} marked={false} oneLine />
+            <InfoHint className="shrink-0" id={meta.captionId} label={meta.title} />
+          </div>
+          <p className="text-muted-foreground text-sm">{meta.empty}</p>
+        </div>
       ) : (
         <SimpleTable
           ariaLabel={meta.title}
+          captionId={meta.captionId}
           columns={COLUMNS}
           defaultSort={{ id: 'xact_age', desc: true }}
           detailLabel={(row, expanded) =>

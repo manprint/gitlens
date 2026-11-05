@@ -34,7 +34,7 @@ export const indexesCaptions = {
     what: 'Foreign keys whose referencing columns no index leads with, so deleting or re-keying a referenced row scans the referencing table.',
     source:
       'Advisor rule index.fk_unindexed over the fk_unindexed facts of the fk_indexes check, which reads the catalogs only (internal/check/fk_indexes.go).',
-    unit: 'findings',
+    unit: 'foreign keys',
     window: 'Latest advisor evaluation of the open findings.',
     howToRead:
       'If rows of the referenced table are never deleted or re-keyed, the index is not needed. Up to 200 foreign keys per database are reported, the largest referencing tables first.',
@@ -122,7 +122,7 @@ export const indexesCaptions = {
       'Latest advisor evaluation; the table size is an estimate from the last vacuum or analyze.',
   },
   'indexes.cleanup': {
-    what: 'Indexes that look removable, with the space a drop gives back and the index writes it saves; pglens runs no drop.',
+    what: 'Indexes that look unused, repeat another index or are invalid, with the disk space and index writes that dropping them would save.',
     source:
       'buildCleanup (indexCleanup.ts) over the getInstanceIndexes rows and the index.* advisor findings; index writes from the insert, update and HOT update rates of getInstanceTables.',
     unit: 'indexes, bytes, index entries per second',
@@ -139,14 +139,61 @@ export const indexesCaptions = {
       'A duplicate row is a copy to drop; the copy to keep is the constraint, then the most scanned, then the largest.',
   },
   'indexes.dead-rows': {
-    what: 'Tables ranked by dead tuples, the row versions vacuum has not yet reclaimed, with their share of live rows, autovacuum trigger and last vacuum.',
+    what: 'Tables ranked by dead rows, the old row versions vacuum has not cleared yet, with their share of live rows, vacuum due ratio and last vacuum.',
     source:
       'getInstanceTables: the newest metrics_tables sample of each table (pg_stat_user_tables n_dead_tup, n_live_tup); trend from the table history; autovacuum settings from the instance settings.',
-    unit: 'tuples, percent, bytes (estimated)',
+    unit: 'rows, percent, bytes (estimated)',
     window:
       'Latest collection; the trend follows the 10 worst tables over the selected time range.',
     howToRead:
-      'Dead space is estimated as the heap size times the dead share of its tuples. The trigger is the dead-tuple count at which autovacuum is expected to start; it is approximate when the server settings are not reported.',
+      'Dead space is estimated as the heap size times the dead share of its tuples. Vacuum due is the dead-row count at which autovacuum is expected to start; it is approximate when the server settings are not reported.',
+  },
+  'indexes.inventory-table': {
+    what: 'One row per index reported: its table, key columns, kind and flags, size, scan rate, cache hit ratio and last scan; expand a row for its charts.',
+    source:
+      'getInstanceIndexes rows (pg_stat_user_indexes, pg_statio_user_indexes, pg_relation_size, pg_get_indexdef); the flags come from the index.* advisor findings.',
+    unit: 'bytes, scans per second, percent',
+    window: 'Latest collection; scan figures are rates over the last collection interval.',
+  },
+  'indexes.findings-table': {
+    what: 'One row per open advisor finding on an index, with its rule, database, object and title; expand a row for the detail and the remediation.',
+    source: 'getFindings rows of the advisor rules index.* (internal/advisor), open findings only.',
+    unit: 'findings',
+    window: 'Latest advisor evaluation.',
+  },
+  'indexes.foreign-keys-table': {
+    what: 'One row per foreign key whose columns no index leads with: its table, its columns, the table it references and the advisor remediation.',
+    source: 'getFindings rows of the advisor rule index.fk_unindexed, from the fk_indexes check.',
+    unit: 'findings',
+    window: 'Latest advisor evaluation of the open findings.',
+  },
+  'indexes.cleanup-table': {
+    what: 'One row per index that looks removable: why it is listed, its size and the index writes it receives; expand a row for the drop and rebuild statements.',
+    source:
+      'buildCleanup (indexCleanup.ts) over the getInstanceIndexes rows and the index.* advisor findings; writes from the insert and update rates of getInstanceTables.',
+    unit: 'bytes, index entries per second',
+    window: 'Latest collection and latest advisor evaluation.',
+  },
+  'indexes.dead-rows-table': {
+    what: 'One row per table, most dead rows first: dead rows, dead share, vacuum due ratio, last vacuum, HOT share, writes and trend.',
+    source:
+      'getInstanceTables (pg_stat_user_tables) with the autovacuum settings of the instance and the table history for the trend.',
+    unit: 'rows, percent, bytes (estimated), per second',
+    window: 'Latest collection; the trend follows the selected time range.',
+  },
+  'indexes.suggestions-table': {
+    what: 'One row per suggested index: its table and key columns, the share of statement time involved, an estimated size, the table writes and a verdict.',
+    source:
+      'getIndexSuggestions (internal/indexadvice): the statements of pg_stat_statements that filter or sort on a column no index leads with.',
+    unit: 'percent, milliseconds per second, bytes (estimated), per second',
+    window: 'The window picked on the tab.',
+  },
+  'indexes.tax-table': {
+    what: 'One row per table: how many indexes it has, their size against the table, the space that looks unused and the index entries its writes add.',
+    source:
+      'buildIndexTax (indexTax.ts) over the getInstanceIndexes rows and the insert, update and delete rates of getInstanceTables.',
+    unit: 'indexes, bytes, percent, index entries per second',
+    window: 'Latest collection; every figure is an estimate.',
   },
   'indexes.verdict': {
     what: 'How a suggested index weighs the reads it serves against the writes it costs: strong, moderate or write-heavy. Every verdict is an estimate.',

@@ -122,8 +122,8 @@ describe('DeadRowsPanel', () => {
     expect(rows[2]).toHaveTextContent('events')
     expect(rows[2]).toHaveTextContent('Never')
     expect(screen.getByRole('article', { name: 'Tables with dead rows' })).toHaveTextContent('2')
-    expect(screen.getByRole('article', { name: 'Dead tuples' })).toHaveTextContent('12,005')
-    expect(screen.getByRole('article', { name: 'Past autovacuum trigger' })).toHaveTextContent('1')
+    expect(screen.getByRole('article', { name: 'Dead rows' })).toHaveTextContent('12,005')
+    expect(screen.getByRole('article', { name: 'Due for automatic vacuum' })).toHaveTextContent('1')
     expect(screen.getByRole('article', { name: 'Never vacuumed' })).toHaveTextContent('1')
     expect(screen.getByRole('article', { name: 'Worst table' })).toHaveTextContent('orders')
   })
@@ -132,14 +132,14 @@ describe('DeadRowsPanel', () => {
     render({ settings: [] })
     await flushNetwork(30)
 
-    expect(screen.getByText('Autovacuum trigger is approximate.')).toBeInTheDocument()
+    expect(screen.getByText('Vacuum due is approximate.')).toBeInTheDocument()
   })
 
   it('DEAD-UI-003 does not call the trigger approximate when the settings are known', async () => {
     render()
     await flushNetwork(30)
 
-    expect(screen.queryByText('Autovacuum trigger is approximate.')).not.toBeInTheDocument()
+    expect(screen.queryByText('Vacuum due is approximate.')).not.toBeInTheDocument()
   })
 
   it('DEAD-UI-004 filters the tables and searches them', async () => {
@@ -202,7 +202,7 @@ describe('DeadRowsPanel', () => {
     await flushNetwork(30)
 
     expect(
-      screen.getByRole('img', { name: 'Dead tuples of orders over the selected range' }),
+      screen.getByRole('img', { name: 'Dead rows of orders over the selected range' }),
     ).toBeInTheDocument()
     expect(screen.getByText('growing')).toBeInTheDocument()
     // No series for the other tables: a dash, not an invented line.
@@ -213,7 +213,7 @@ describe('DeadRowsPanel', () => {
     render({ trend: emptyHistory })
     await flushNetwork(30)
 
-    expect(screen.queryByRole('img', { name: /Dead tuples of/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: /Dead rows of/ })).not.toBeInTheDocument()
   })
 
   it('DEAD-UI-009 warns that the list is incomplete when the agent truncated it', async () => {
@@ -249,7 +249,7 @@ describe('DeadRowsPanel', () => {
     await flushNetwork(30)
 
     expect(screen.getByRole('article', { name: 'Worst table' })).toHaveTextContent(
-      'none past 10,000 dead tuples',
+      'none past 10,000 dead rows',
     )
   })
 
@@ -303,19 +303,23 @@ function noteFor(headline: string): HTMLElement {
 }
 
 describe('DeadRowsPanel on a Full HD screen (15.3)', () => {
-  it('FHD-APPLY-037 one table under a one-line header, each row one line', async () => {
+  it('FHD-APPLY-037 the title and description on a first row, the figures and notes on a second, each table row one line', async () => {
     render({ settings: [], truncated: true })
     await flushNetwork(30)
 
     expect(screen.getAllByRole('table')).toHaveLength(1)
-    const line = panelHeader()
-    expect(line).toContainElement(screen.getByRole('heading', { name: 'Tables by dead rows' }))
-    expect(line).toHaveClass('min-[1600px]:flex-row')
-    expect(line).toContainElement(screen.getByRole('article', { name: 'Dead tuples' }))
-    for (const headline of ['The list is incomplete.', 'Autovacuum trigger is approximate.']) {
+    const header = panelHeader()
+    const first = screen.getByTestId('index-panel-first-row')
+    const second = screen.getByTestId('index-panel-second-row')
+    expect(header).toContainElement(first)
+    expect(header).toContainElement(second)
+    expect(first).toContainElement(screen.getByRole('heading', { name: 'Tables by dead rows' }))
+    expect(first).toHaveClass('min-[1600px]:flex-row')
+    expect(second).toContainElement(screen.getByRole('article', { name: 'Dead rows' }))
+    for (const headline of ['The list is incomplete.', 'Vacuum due is approximate.']) {
       const note = noteFor(headline)
-      expect(line).toContainElement(note)
-      expect(note).toHaveClass('min-[1600px]:truncate')
+      expect(second).toContainElement(note)
+      expect(note.className).not.toMatch(/truncate/)
       expect(note.getAttribute('title')).toContain(headline)
     }
 
@@ -327,7 +331,7 @@ describe('DeadRowsPanel on a Full HD screen (15.3)', () => {
     // The second lines of a cell sit beside the figure from 1600 px.
     expect(row.getByText(/^≈/)).toHaveClass('min-[1600px]:inline')
     expect(row.getByText('flagged')).toHaveClass('min-[1600px]:py-0')
-    expect(row.getByRole('img', { name: /Dead tuples of orders/ })).toHaveClass('min-[1600px]:h-4')
+    expect(row.getByRole('img', { name: /Dead rows of orders/ })).toHaveClass('min-[1600px]:h-4')
     expect(row.getByRole('button', { expanded: false })).toHaveClass('min-[1600px]:size-5')
   })
 })

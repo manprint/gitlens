@@ -23,6 +23,7 @@ import {
 import { summariseColumns } from '@/lib/indexDefinition'
 
 import { DEAD_ROWS_LIMIT } from './DeadRowsPanel'
+import { NO_INDEX_STATS } from './emptyText'
 import { CELL_BADGE, IndexPanel, PanelNote } from './IndexPanel'
 
 const REASONS: Record<
@@ -90,6 +91,7 @@ const CLEANUP_COLUMNS: readonly SimpleColumn<CleanupCandidate>[] = [
   {
     id: 'reason',
     header: 'Reason',
+    help: 'indexes.cleanup-reason-column',
     width: '10rem',
     cell: (candidate) => {
       const reason = REASONS[candidate.reason]
@@ -111,6 +113,7 @@ const CLEANUP_COLUMNS: readonly SimpleColumn<CleanupCandidate>[] = [
   {
     id: 'writes',
     header: 'Index writes',
+    help: 'indexes.cleanup-writes',
     sortValue: (candidate) => candidate.writeRate,
     className: 'whitespace-nowrap',
     width: '10.5rem',
@@ -240,13 +243,20 @@ interface CleanupPanelProps {
   /** The indexes in scope: the page's database filter already applied. */
   rows: readonly IndexRow[]
   siblings: readonly SiblingServer[]
+  /** Why the list is empty when no index was reported. */
+  emptyDescription?: string
 }
 
 /**
  * The indexes that look removable, with what a drop gives back. pglens never
  * runs a drop: it writes the statement, and the operator decides.
  */
-export function CleanupPanel({ instanceId, rows, siblings }: CleanupPanelProps) {
+export function CleanupPanel({
+  instanceId,
+  rows,
+  siblings,
+  emptyDescription = NO_INDEX_STATS,
+}: CleanupPanelProps) {
   const tablesQuery = useInstanceTables(instanceId, {
     limit: DEAD_ROWS_LIMIT,
     order_by: 'dead_tup',
@@ -313,12 +323,13 @@ export function CleanupPanel({ instanceId, rows, siblings }: CleanupPanelProps) 
         </>
       }
       captionId="indexes.cleanup"
-      description="Primary keys and unique indexes are never listed. Index writes are the entries every insert and every non-HOT update add to each index of the table. pglens does not run any statement: copy it, review it, run it yourself. The script holds the confirmed drops; those that rest on raw counters are in it as comments."
+      description="Indexes that look unused, repeat another index or are invalid, with the disk space and index writes that dropping them would save. Primary keys and unique indexes are never listed; pglens drops nothing: copy the script, review it and run it yourself."
       notes={notes}
       stats={[
         {
           label: 'Candidates',
           value: formatCount(summary.count),
+          unit: 'indexes',
           detail: `${formatCount(summary.confirmed.count)} confirmed · ${formatCount(summary.provisional.count)} raw counters`,
         },
         {
@@ -337,7 +348,8 @@ export function CleanupPanel({ instanceId, rows, siblings }: CleanupPanelProps) 
         },
         {
           label: 'Index writes saved',
-          value: formatRate(summary.confirmed.writeRate),
+          value: formatRate(summary.confirmed.writeRate).replace(/\/s$/, ''),
+          unit: 'per second',
           detail: [
             summary.confirmed.writeRateUnknown > 0
               ? `${formatCount(summary.confirmed.writeRateUnknown)} not measured`
@@ -350,9 +362,20 @@ export function CleanupPanel({ instanceId, rows, siblings }: CleanupPanelProps) 
             .join(' · '),
         },
         {
-          label: 'By reason',
-          value: `${formatCount(summary.byReason.unused + summary.byReason['never-scanned'])} unused`,
-          detail: `${formatCount(summary.byReason.duplicate)} duplicate · ${formatCount(summary.byReason.redundant)} redundant · ${formatCount(summary.byReason.invalid)} invalid`,
+          label: 'Unused indexes',
+          value: formatCount(summary.byReason.unused),
+          unit: 'indexes',
+          detail: 'judged unused by the advisor',
+        },
+        {
+          label: 'Duplicate or redundant indexes',
+          value: formatCount(summary.byReason.duplicate + summary.byReason.redundant),
+          unit: 'indexes',
+        },
+        {
+          label: 'Invalid indexes',
+          value: formatCount(summary.byReason.invalid),
+          unit: 'indexes',
         },
       ]}
       title="Indexes that look removable"
@@ -362,7 +385,7 @@ export function CleanupPanel({ instanceId, rows, siblings }: CleanupPanelProps) 
         <EmptyState
           description={
             rows.length === 0
-              ? 'The agent has not reported index statistics for this server yet.'
+              ? emptyDescription
               : 'No index is invalid, duplicated, redundant or unused.'
           }
           title="Nothing to clean up"
@@ -370,6 +393,7 @@ export function CleanupPanel({ instanceId, rows, siblings }: CleanupPanelProps) 
       ) : (
         <SimpleTable
           ariaLabel="Cleanup candidates"
+          captionId="indexes.cleanup-table"
           columns={CLEANUP_COLUMNS}
           detailLabel={(candidate, expanded) =>
             `${expanded ? 'Hide' : 'Show'} the drop of ${candidate.row.name}`

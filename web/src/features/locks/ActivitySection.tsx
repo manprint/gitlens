@@ -187,7 +187,7 @@ function XminHorizonBlock({
   const xmin = xminHorizonState(metrics, holder)
   return (
     <div className="mt-6">
-      <BlockHeading captionId="activity.xmin-holder" title="Oldest xmin holder" />
+      <BlockHeading captionId="activity.xmin-holder" title="Oldest cleanup blocker (xmin holder)" />
       {xmin.state === 'holder' ? (
         <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[max-content_1fr]">
           <dt className="text-muted-foreground">Holder kind</dt>
@@ -311,7 +311,7 @@ export function ActivitySection({
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <MetricTile
             captionId="activity.connections-used"
-            label="Connections used / max_connections"
+            label="Connections used"
             value={used !== null ? formatCount(used) : <Unknown />}
             unit={used !== null ? 'connections' : undefined}
             detail={
@@ -321,7 +321,7 @@ export function ActivitySection({
                     <span>
                       {saturation.ratio === null
                         ? `Limit set by max_connections: ${formatCount(limit)} connections.`
-                        : `Of ${formatCount(limit)} allowed by max_connections (${formatPercent(saturation.ratio, 1) ?? ''} used).`}
+                        : `Of ${formatCount(limit)} allowed by max_connections, the server setting for the most connections (${formatPercent(saturation.ratio, 1) ?? ''} used).`}
                     </span>
                   ) : null}{' '}
                   {connections ? <span>{originDetail(connections)}</span> : null}
@@ -356,8 +356,7 @@ export function ActivitySection({
             ) : (
               <p role="status" className="text-muted-foreground mt-2 text-sm">
                 {saturation.saturated ? 'Near max_connections.' : 'Below the saturation threshold.'}{' '}
-                The conn.saturation advisor threshold is: Connections above 80 percent of
-                max_connections.
+                The advisor warns when connections go above 80 % of max_connections.
               </p>
             )}
           </div>
@@ -366,8 +365,8 @@ export function ActivitySection({
             <BreakdownList label="Connections by database" rows={databaseRows} />
           </div>
           <div>
-            <BlockHeading captionId="activity.by-state" title="Backends by state" />
-            <BreakdownList label="Backends by state" rows={stateRows} />
+            <BlockHeading captionId="activity.by-state" title="Connections by state" />
+            <BreakdownList label="Connections by state" rows={stateRows} />
           </div>
         </div>
       ) : null}
@@ -388,7 +387,10 @@ export function ActivitySection({
             <MetricTile
               captionId="activity.frozen-xid-age"
               detail="Transaction IDs used since the oldest database was last frozen."
-              label="Frozen-XID age"
+              label="Transactions since oldest freeze"
+              unit={
+                frozenXidAge !== null && frozenXidAge !== undefined ? 'transactions' : undefined
+              }
               value={valueOrUnknown(frozenXidAge)}
             />
             <MetricTile
@@ -399,9 +401,9 @@ export function ActivitySection({
             />
           </div>
           <p className="text-muted-foreground mt-3 text-sm">
-            Frozen-XID age is shown with the txn.wraparound_risk framing: maintenance is urgent as
-            the age approaches {formatCount(WRAPAROUND_RISK_THRESHOLD)} transaction IDs. Deadlock
-            rate is the sum of each database's latest rate; identifying involved statements requires
+            Transactions since the oldest freeze: the advisor raises a critical finding at{' '}
+            {formatCount(WRAPAROUND_RISK_THRESHOLD)}, before transaction IDs run out. Deadlock rate
+            is the sum of each database's latest rate; identifying involved statements requires
             PostgreSQL log analysis.
           </p>
         </>
