@@ -623,6 +623,33 @@ export function useIndexSuggestions(
   })
 }
 
+/** Scan rate, tuple read rate and size of one index over the window. */
+export function useIndexHistory(
+  id: string,
+  params: WindowlessParameters<'/api/v1/instances/{id}/indexes/history'>,
+  window: QueryWindow,
+) {
+  return useApiQuery({
+    keepPrevious: true,
+    policy: REFRESH.instance,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/indexes/history', {
+          params: { path: { id }, query: { ...params, ...resolveQueryWindow(window) } },
+          signal,
+        }),
+      ),
+    queryKey: qk.indexHistory(
+      id,
+      params.database,
+      params.schema,
+      params.index,
+      window,
+      params.step,
+    ),
+  })
+}
+
 export function useInstanceIndexes(
   id: string,
   params: QueryParameters<'/api/v1/instances/{id}/indexes'> = {},

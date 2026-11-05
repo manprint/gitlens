@@ -29,6 +29,7 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | GET | `/api/v1/instances/{id}/host` | `getInstanceHost` | Return measurable host metrics for an instance. |
 | GET | `/api/v1/instances/{id}/index-suggestions` | `getIndexSuggestions` | Suggest candidate btree indexes from the tracked statements of the window. |
 | GET | `/api/v1/instances/{id}/indexes` | `getInstanceIndexes` | Return index relation statistics. |
+| GET | `/api/v1/instances/{id}/indexes/history` | `getIndexHistory` | Return the scan rate, tuple read rate and size of one index over time. |
 | GET | `/api/v1/instances/{id}/internals` | `getInstanceInternals` | Return the WAL directory, database sizes, SLRU caches, temporary files and standby replay. |
 | GET | `/api/v1/instances/{id}/logical-replication` | `getInstanceLogicalReplication` | Return the subscriptions and the logical slots' decoding rates. |
 | GET | `/api/v1/instances/{id}/partitioned-tables` | `getInstancePartitionedTables` | Return the partitioned tables, each rolled up over its partitions. |

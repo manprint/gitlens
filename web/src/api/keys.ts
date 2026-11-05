@@ -49,6 +49,14 @@ export const qk = {
   instanceIndexes: (id: string, limit?: number) => ['getInstanceIndexes', id, limit] as const,
   indexSuggestions: (id: string, window?: string, database?: string, limit?: number) =>
     ['getIndexSuggestions', id, window, database, limit] as const,
+  indexHistory: (
+    id: string,
+    database: string,
+    schema: string,
+    index: string,
+    window: QueryWindow,
+    step?: string,
+  ) => ['getIndexHistory', id, database, schema, index, queryWindowKey(window), step] as const,
   instanceBloat: (id: string, limit?: number, objectKind?: string) =>
     ['getInstanceBloat', id, limit, objectKind] as const,
   instanceCommandAudit: (id: string) => ['getInstanceCommandAudit', id] as const,

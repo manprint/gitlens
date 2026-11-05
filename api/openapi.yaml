@@ -1166,6 +1166,27 @@ components:
         tables:
           type: array
           items: { $ref: '#/components/schemas/TableHistorySeries' }
+    IndexHistoryPoint:
+      type: object
+      required: [ts, idx_scan_rate, idx_tup_read_rate, index_bytes]
+      properties:
+        ts: { $ref: '#/components/schemas/Timestamp' }
+        idx_scan_rate: { type: [number, 'null'], description: Scans per second, mean of the bucket. }
+        idx_tup_read_rate: { type: [number, 'null'], description: Index entries read per second, mean of the bucket. }
+        index_bytes: { type: [integer, 'null'], format: int64, description: Size at the last reading of the bucket. }
+    IndexHistoryResponse:
+      type: object
+      required: [index, step_seconds, points]
+      properties:
+        index:
+          type: object
+          required: [datname, schemaname, indexrelname]
+          properties:
+            datname: { type: string }
+            schemaname: { type: string }
+            indexrelname: { type: string }
+        step_seconds: { type: integer, format: int32, minimum: 600 }
+        points: { type: array, items: { $ref: '#/components/schemas/IndexHistoryPoint' } }
     IndexSuggestionsResponse:
       type: object
       required: [instance_id, generated_at, window_seconds, estimates_note, coverage, suggestions, notes]
@@ -2943,6 +2964,53 @@ paths:
                           - { ts: '2026-08-27T01:00:00Z', n_dead_tup: 900, n_live_tup: 5000 }
                           - { ts: '2026-08-27T01:01:00Z', n_dead_tup: 950, n_live_tup: 5000 }
         '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/indexes/history:
+    get:
+      tags: [instances]
+      operationId: getIndexHistory
+      summary: Return the scan rate, tuple read rate and size of one index over time.
+      description: >-
+        One index of one database, identified by database, schema and index name. Each point is a bucket of
+        step_seconds: idx_scan_rate and idx_tup_read_rate are the mean of the stored per-second rates of the
+        bucket, index_bytes is its last reading. Every bucket of the range is returned and a bucket with no
+        stored sample has null values; nothing is interpolated. An index the agent reported but that has no
+        sample in the range returns points as an empty list. The range defaults to the 24 hours before to
+        and is at most 30 days; the step defaults to a 120th of the range and is at least 10m, because the
+        index statistics are sampled every 5 minutes.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - { name: database, in: query, required: true, schema: { type: string, maxLength: 255 } }
+        - { name: schema, in: query, required: true, schema: { type: string, maxLength: 255 } }
+        - { name: index, in: query, required: true, description: The index name, without its schema., schema: { type: string, maxLength: 255 } }
+        - { name: from, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - { name: to, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - name: step
+          in: query
+          required: false
+          description: A Go duration such as 20m or 1h, at least 10m; the range gives at most 1000 points.
+          schema: { type: string }
+      responses:
+        '200':
+          description: The series of the index, oldest bucket first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IndexHistoryResponse' }
+              examples:
+                default:
+                  value:
+                    index: { datname: odoo, schemaname: public, indexrelname: res_partner_name_idx }
+                    step_seconds: 1200
+                    points:
+                      - { ts: '2026-11-05T10:00:00Z', idx_scan_rate: 2, idx_tup_read_rate: 20, index_bytes: 1380000 }
+                      - { ts: '2026-11-05T10:20:00Z', idx_scan_rate: null, idx_tup_read_rate: null, index_bytes: null }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503':
+          description: The server has no database pool, or the history exceeded its time budget.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/instances/{id}/workload/series:
     get:

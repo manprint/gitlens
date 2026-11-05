@@ -499,6 +499,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/instances/{id}/indexes/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Return the scan rate, tuple read rate and size of one index over time.
+         * @description One index of one database, identified by database, schema and index name. Each point is a bucket of step_seconds: idx_scan_rate and idx_tup_read_rate are the mean of the stored per-second rates of the bucket, index_bytes is its last reading. Every bucket of the range is returned and a bucket with no stored sample has null values; nothing is interpolated. An index the agent reported but that has no sample in the range returns points as an empty list. The range defaults to the 24 hours before to and is at most 30 days; the step defaults to a 120th of the range and is at least 10m, because the index statistics are sampled every 5 minutes.
+         */
+        get: operations["getIndexHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instances/{id}/workload/series": {
         parameters: {
             query?: never;
@@ -2298,6 +2318,28 @@ export interface components {
             step_seconds: number;
             tables: components["schemas"]["TableHistorySeries"][];
         };
+        IndexHistoryPoint: {
+            ts: components["schemas"]["Timestamp"];
+            /** @description Scans per second */
+            idx_scan_rate: number | null;
+            /** @description Index entries read per second */
+            idx_tup_read_rate: number | null;
+            /**
+             * Format: int64
+             * @description Size at the last reading of the bucket.
+             */
+            index_bytes: number | null;
+        };
+        IndexHistoryResponse: {
+            index: {
+                datname: string;
+                schemaname: string;
+                indexrelname: string;
+            };
+            /** Format: int32 */
+            step_seconds: number;
+            points: components["schemas"]["IndexHistoryPoint"][];
+        };
         IndexSuggestionsResponse: {
             instance_id: components["schemas"]["InstanceId"];
             generated_at: components["schemas"]["Timestamp"];
@@ -3727,6 +3769,48 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+        };
+    };
+    getIndexHistory: {
+        parameters: {
+            query: {
+                database: string;
+                schema: string;
+                /** @description The index name */
+                index: string;
+                from?: components["schemas"]["Timestamp"];
+                to?: components["schemas"]["Timestamp"];
+                /** @description A Go duration such as 20m or 1h, at least 10m; the range gives at most 1000 points. */
+                step?: string;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["InstanceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The series of the index, oldest bucket first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IndexHistoryResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            /** @description The server has no database pool, or the history exceeded its time budget. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     getWorkloadSeries: {
