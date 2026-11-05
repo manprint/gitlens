@@ -920,6 +920,7 @@
      }
     ],
     "skipped": [
+     "expression",
      "or_group"
     ]
    }
@@ -3010,12 +3011,6 @@
     "predicates": [
      {
       "table": "res_partner",
-      "column": "name",
-      "kind": "like_prefix",
-      "scope": 1
-     },
-     {
-      "table": "res_partner",
       "column": "active",
       "kind": "eq",
       "scope": 1
@@ -3029,7 +3024,9 @@
       "scope": 1
      }
     ],
-    "skipped": []
+    "skipped": [
+     "expression"
+    ]
    }
   },
   {

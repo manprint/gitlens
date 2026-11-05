@@ -18,15 +18,15 @@ See `PROTOCOL.md` (static cold-start rules).
 - Active scope: plan (whole `005_plan-ConsoleInsights`, no selector); full-autonomous true, WIP on (explicit)
 - Scope result: RUNNING
 - Type: sub-phase
-- ID / attempt: 4.1 / 1
-- Status: IN_PROGRESS (OPEN, opened 2026-11-05; S1 lexer first)
+- ID / attempt: 4.2 / 1
+- Status: TODO (4.1 DONE; 4.2 not opened)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-sonnet-5-5; supervisor: advisor (Opus 5.5)
-- File / unit heading: phase_05.md → 4.1
-- Current step: 4.1 S1 lexer
-- Next action: read phase_05.md 4.1 and open it (execution order §11).
+- File / unit heading: phase_05.md → 4.2
+- Current step: —
+- Next action: read phase_05.md 4.2 and open it (execution order §11).
 - Stop latch: none (cleared by explicit invocation 2026-11-05)
-- Last closure: unit:P16:2 (phase 16 DONE; P16/1 failed, no commit)
+- Last closure: unit:4.1:1 (sub-phase 4.1 DONE)
 - Unit base: HEAD (after the P16 commit); branch `feat/index-analysis` (never switch or create branches)
 - Repo state: uncommitted only `internal/webui/dist/index.html` (never staged) and `.claude/`.
 - Network: user authorised internet use (2026-11-05 message "autorizzo ad usare la rete internet"); still no push.
@@ -122,6 +122,7 @@ Latest result per gate; earlier detail in `history.md`.
 
 - P16 gates (2026-11-05; attempt-1 results, valid for 16.4 attempt 2 because production code is unchanged): G-GO-FOCUS 5 packages ok (`-race -shuffle=on`); G-GO-INT `TestACTCFGINT001` pg15+pg18, `TestSESSAPIINT001` ok; G-RO `TestINTRO001` pg15+pg18 ok; G-API no diff (`web-gen-api api-docs`); G-WEB-UNIT `src/features/locks src/lib` 444 passed; G-DEPLOY: no production change since 8256b9f, images `pglens-server:dev` c812ba5a3f3b, `pglens-agent:dev` 043139c08de5; G-VIS `VIS-LOCKS-001` (list = 1) passed; G-QA SORIGIN-E2E-001..003 passed (001 re-run after the control-run change: sample = pg_stat_activity after 13 s, baseline control after 10 s, sabotage detected), QA-CLEAN-001 passed, `agent.yaml` cmp-equal.
 - Attempt 2 reruns (2026-11-05): G-WEB-STATIC (lint 0 errors / 2 pre-existing warnings, prettier, `tsc -b`) after the spec edits; G-UI-LEGACY `go test -tags=e2e -timeout=40m -count=1 ./test/e2e/... -run UI` after `make web-build` (12 tests: SYS-UI-000 = `TestUI_Smoke`, 001..011): run 2 failed once in `TestUI_FindingMute` at the post-unmute API poll (state not back within 60 s; cause not determined, test passed alone 3 times); the poll now reports the last API state on timeout; run 3: 12 of 12 pass (incl. SYS-UI-008 BlockingTree, 009 Cancel, 011 Accessibility; ok 697 s). If `TestUI_FindingMute` fails again, its diagnostic names the last state.
+- 4.1 (2026-11-05): G-GO-FOCUS `go test -race -shuffle=on -count=1 -cover ./internal/indexadvice` ok, coverage 93.2 % (gate ≥ 90 %); `go test -list 'IDXA' ./internal/indexadvice` lists 36 tests; corpus 120 statements (≥ 60), all invariants of `TestIDXACORPUS002_Invariants` hold; gofmt, `go vet`, golangci-lint 0 issues. Review (advisor, Opus 5.5): fuzz target renamed to `FuzzIDXAFUZZ001` so the gate pattern discovers it, invariants asserted, `ILIKE` demoted to `expression` skip. G-SECRETS: only the host name in text.
 - G-SECRETS: pattern counts over the diff 0; the only match under `web/src` is the committed canary fixture `NotificationsPanel.test.tsx` (`spaces/UICANARYSPAC…`, fake); (b) value check not runnable (webhook deferred).
 - Review P16 (advisor, Opus 5.5): attempt 1 rejected (README metric names, baseline control run, G-UI-LEGACY red); attempt 2 approved after record fixes (tests table, §9 FindingMute open item, README names verified against `internal/check/activity.go`, `lockSessionsLimit = 100`).
 
@@ -152,6 +153,7 @@ Latest result per gate; earlier detail in `history.md`.
 | 1 | 11.5a deviations (R-11.5a) | contract 11.5 Files / N1–N7 | (a) exported `notify.RedactError`; (b) channels built once (`wireNotificationChannels`) and shared by the API and `alert.NewChannelNotifier` (N3); (c) redaction of every configured URL, its `Redacted()` form, user/password, path, query, query values and path segments ≥ 8 chars; (d) status `timeout` also when the 10 s test deadline expired (the channel turns a last-attempt timeout into text); (e) generic 409 detail (variable names live in the client, N6); (f) 429 `test already running` (one test in flight per kind); (g) test messages render without the cluster/instance context line (Slack, Google Chat); (h) extra files: `cmd/pglens-server/*`, `internal/alert/notify/*`, `web/src/api/{keys,queries}.ts`, `SettingsPage*`, `DeliverySection.test.tsx`, `captions.ts`; (i) 11.5b not implemented: BLOCKED-Q2 (UI shows the environment instructions only); (j) badge caption (I-16) → 17.2 | supervisor (R-11.5a) | 11.5b, 17.2 |
 | 1 | 13.2 deviations (R-13.2) | contract 13.2 Files | (a) new table `check_results(instance_id, check_name, datname, first_result_at, last_result_at, last_failed)` written by the ingest pipeline in the envelope transaction (`WHERE EXISTS` on the instance; flag only, never error text, I-10) — nothing durable recorded per-check result times before; (b) `FirstRunWarmupCap`/`FirstRunBound` moved to `internal/wire` (server must not import `internal/agent`); (c) `index.unused` on PG16+ skips an index whose `last_idx_scan` is inside the window (D22b, WINDOW-007) and the statistics observation is anchored on `last_idx_scan` when set; (d) `flushEnvelope` gained the coverage parameter (6 call sites); (e) `queries.test.tsx` probes `useCoverage`; (f) test file `advisor_window_source_test.go` (a `_windows` suffix is a GOOS build tag); (g) README/LIMITS written in 13.2 (PG ≤ 15 limitation, coverage endpoint, windows now effective). Migration 0027 was edited after its first dev deploy (unshipped) and reset on the dev DB (backup in `/home/agent/odoo-backups/pglens-0027-reset-*`). Follow-up (not in contract): an index last scanned before the window with short pglens history stays degraded (D22b "statistics age from last_idx_scan" shortcut not implemented) | supervisor (R-13.2) | 13.3 / later |
 | 1 | User rulings 2026-11-04 (live gates) | stack absent after sandbox reset | (a) rebuild the Odoo stack (dir `/home/agent/pglens-odoo-stack`, backups `/home/agent/odoo-backups`, images `odoo:18`/`postgres:18` were gone; network pulls authorised); files recovered from earlier transcripts impossible (not present), so `compose.yml`, `deploy.sh`, `backup.sh`, `verify_backup.sh`, `seed/*`, `load/rpc_load.py`, README are REBUILT to the 0.1/0.2 contracts (record per file in §7); this is attempt 2 of 0.1/0.2 evidence. (b) Google Chat webhook deferred by the user: G-SECRETS value half and the notification-channel live e2e are NOT RUN by user decision (tested later by the user), not BLOCKED. (c) HA topology tested as 1 primary + 2 standbys (7.x). (d) all supervisor-recommended decisions approved; finish the plan. (e) backups are still required: QA guard and HA scripts accept only a fresh `VERIFIED` backup (< 24 h); `backup.sh`/`verify_backup.sh` rebuilt and run. | user | all live units, 7.x |
+| 1 | 4.1 deviations (R-4.1) | contract 4.1 | (a) test IDs beyond the planned ranges: IDXA-LEX-007, IDXA-PARSE-017..020, IDXA-CORPUS-002 (invariants); (b) `Analysis` carries `Statement` (first verb) and tables/predicates carry `Scope` (query level, 1-based) so 4.2 can tell outer from sub-select references; (c) `ILIKE`/`~~*` are skipped as `expression` (not servable by a plain btree); `LIKE` prefix is `like_prefix`, operator class/collation choice is a 4.2 rule; (d) `MaxInput` = 64 KiB and nesting depth 48 bound the work; (e) corpus golden values were generated by `-update` and reviewed (invariants + sampled entries), not hand-written |
 | 1 | commit identity | sandbox lost git config ("Author identity unknown") | commits use `git -c user.name=fabio -c user.email=fabio@git.it` (same author as earlier commits); no config written | executor | all commits |
 | 1 | G-SECRETS canary | pattern count over the whole tree must be 0 | the one match under `web/src` is the fake fixture `web/src/features/settings/NotificationsPanel.test.tsx` (`UICANARYSPAC…`, `spaces/X`), committed since 6d9032b and accepted at P14; the real webhook appears nowhere | executor | final G-SECRETS |
 
@@ -196,7 +198,7 @@ Latest result per gate; earlier detail in `history.md`.
 | 15.1 | phase_16.md | 9.3, 0.4 | DONE | 1 | FHD-001..006, FHD-ROUTES-001..003, FHD-MEASURE-001, `fullhd-inventory.md`, D26 revised (§7, §8); R-15.1 |
 | 15.2 | phase_16.md | 15.1 | DONE | 1 | INSTSEC-001..009, FHD-ROUTES-001..003, FHD-INST-001 (§7 15.2); R-15.2 |
 | 17.1 | phase_18.md | 1.2, 9.1 | DONE | 1 | CAPTION-001..005, GLOSSARY-001/002, CARD-001..005, CAPCMP-001..005, CAPTION-COVERAGE-001, CARD-COVERAGE-001 (§7 17.1); R-17.1 |
-| 4.1 | phase_05.md | 0.2 | TODO | 1 | — |
+| 4.1 | phase_05.md | 0.2 | DONE | 1 | IDXA-LEX-001..007, IDXA-PARSE-001..020, IDXA-DEF-001..006, IDXA-CORPUS-001/002 (120 statements), IDXA-FUZZ-001 (§7 4.1, §8) |
 | 4.2 | phase_05.md | 4.1, 3.1 | TODO | 1 | — |
 | 4.3 | phase_05.md | 4.2 | TODO | 1 | — |
 | 4.4 | phase_05.md | 4.3, 9.1, 15.1, 12.2 | TODO | 1 | — |
@@ -318,11 +320,11 @@ Statuses: TODO, IN_PROGRESS, IN_REVIEW, DONE, SKIPPED, BLOCKED. SKIPPED retains 
 | CARD-ALL-* | 17.2 | G-WEB-UNIT | TODO | — |
 | CARD-INDEX-* | 17.2 | G-WEB-UNIT | TODO | — |
 | VIS-CAP-* | 17.3 | G-VIS | TODO | — |
-| IDXA-CORPUS-* | 4.1 | G-GO-FOCUS | TODO | — |
-| IDXA-DEF-* | 4.1 | G-GO-FOCUS | TODO | — |
-| IDXA-FUZZ-* | 4.1 | G-GO-FOCUS | TODO | — |
-| IDXA-LEX-* | 4.1 | G-GO-FOCUS | TODO | — |
-| IDXA-PARSE-* | 4.1 | G-GO-FOCUS | TODO | — |
+| IDXA-CORPUS-* | 4.1 | G-GO-FOCUS | DONE | IDXA-CORPUS-001/002 (120 statements: 112 live Odoo, 8 synthetic) passed (§7 4.1) |
+| IDXA-DEF-* | 4.1 | G-GO-FOCUS | DONE | IDXA-DEF-001..006 passed (§7 4.1) |
+| IDXA-FUZZ-* | 4.1 | G-GO-FOCUS | DONE | FuzzIDXAFUZZ001: 131 seed sub-tests passed; 25 s fuzz run 1.4 M execs without panic (§7 4.1) |
+| IDXA-LEX-* | 4.1 | G-GO-FOCUS | DONE | IDXA-LEX-001..007 passed (§7 4.1) |
+| IDXA-PARSE-* | 4.1 | G-GO-FOCUS | DONE | IDXA-PARSE-001..020 passed (§7 4.1) |
 | IDXS-* | 4.2 | G-GO-FOCUS | TODO | — |
 | IDXS-W-* | 4.2 | G-GO-FOCUS | TODO | — |
 | IDXE-* | 4.3 | G-GO-FOCUS | TODO | — |

@@ -84,7 +84,8 @@ func TestIDXAPARSE005_RangeBetween(t *testing.T) {
 
 func TestIDXAPARSE006_Like(t *testing.T) {
 	require.Equal(t, []string{"t.a:like_prefix"}, preds(Parse(`SELECT 1 FROM t WHERE a LIKE 'abc%'`)))
-	require.Equal(t, []string{"t.a:like_prefix"}, preds(Parse(`SELECT 1 FROM t WHERE a ILIKE 'abc%'`)))
+	require.Empty(t, preds(Parse(`SELECT 1 FROM t WHERE a ILIKE 'abc%'`)))
+	require.Equal(t, []string{"expression"}, skips(Parse(`SELECT 1 FROM t WHERE a ILIKE 'abc%'`)))
 	require.Empty(t, preds(Parse(`SELECT 1 FROM t WHERE a LIKE $1`)))
 	require.Empty(t, preds(Parse(`SELECT 1 FROM t WHERE a LIKE '%abc'`)))
 	require.Empty(t, preds(Parse(`SELECT 1 FROM t WHERE a ILIKE '%abc%'`)))

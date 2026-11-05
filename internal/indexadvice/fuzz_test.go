@@ -6,7 +6,8 @@ import (
 	"testing"
 )
 
-func FuzzParse(f *testing.F) {
+// IDXA-FUZZ-001: every corpus statement and the edge seeds parse without panic and deterministically.
+func FuzzIDXAFUZZ001(f *testing.F) {
 	raw, err := os.ReadFile(corpusPath)
 	if err == nil {
 		var file corpusFile
@@ -27,23 +28,4 @@ func FuzzParse(f *testing.F) {
 		}
 		_, _ = ParseIndexDef(sql)
 	})
-}
-
-// IDXA-FUZZ-001: the seed corpus (every corpus statement plus the edge seeds) passes.
-func TestIDXAFUZZ001_SeedsTerminate(t *testing.T) {
-	// FuzzParse runs its seeds as sub-tests under `go test`; this test pins the
-	// name of the gate and checks a few hostile inputs terminate quickly.
-	for _, in := range []string{"SELECT " + string(make([]byte, 2000)), "SELECT 1 FROM t WHERE " + repeat("a = $1 AND ", 3000) + "b = $2"} {
-		if len(in) < MaxInput {
-			Parse(in)
-		}
-	}
-}
-
-func repeat(s string, n int) string {
-	out := make([]byte, 0, len(s)*n)
-	for i := 0; i < n; i++ {
-		out = append(out, s...)
-	}
-	return string(out)
 }

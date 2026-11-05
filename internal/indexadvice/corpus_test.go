@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -46,5 +47,34 @@ func TestIDXACORPUS001_Entries(t *testing.T) {
 		t.Run(entry.ID, func(t *testing.T) {
 			require.Equal(t, entry.Expected, Parse(entry.SQL))
 		})
+	}
+}
+
+// Contract of Parse that candidate generation (4.2) relies on, checked on every
+// corpus statement independently of the stored expectation.
+func TestIDXACORPUS002_Invariants(t *testing.T) {
+	raw, err := os.ReadFile(corpusPath)
+	require.NoError(t, err)
+	var file corpusFile
+	require.NoError(t, json.Unmarshal(raw, &file))
+	for _, entry := range file.Entries {
+		got := Parse(entry.SQL)
+		tables := map[string]bool{}
+		for _, ref := range got.Tables {
+			require.NotEmpty(t, ref.Name, entry.ID)
+			require.False(t, strings.HasPrefix(ref.Schema, "pg_") || ref.Schema == "information_schema", "%s: catalog table %s.%s", entry.ID, ref.Schema, ref.Name)
+			tables[ref.Schema+"."+ref.Name] = true
+		}
+		for _, pred := range got.Predicates {
+			require.NotEmpty(t, pred.Table, entry.ID)
+			require.NotEmpty(t, pred.Column, entry.ID)
+			require.True(t, tables[pred.Schema+"."+pred.Table], "%s: predicate on %s.%s not in Tables", entry.ID, pred.Schema, pred.Table)
+			if pred.Kind == KindOrder {
+				require.Contains(t, []string{"asc", "desc"}, pred.Dir, entry.ID)
+			} else {
+				require.Empty(t, pred.Dir, entry.ID)
+				require.False(t, pred.Limit, entry.ID)
+			}
+		}
 	}
 }

@@ -749,9 +749,7 @@ func (p *parser) conjunct(sc *relScope, toks []token, level int) {
 	case op.kind == tOp && (op.text == "<" || op.text == "<=" || op.text == ">" || op.text == ">="):
 		p.emit(sc, left.qual, left.column, KindRange, "", false)
 		p.joinSide(sc, after)
-	case op.kind == tOp && (op.text == "~~" || op.text == "~~*"):
-		p.likeOperand(sc, left, after)
-	case op.is("like"), op.is("ilike"):
+	case op.kind == tOp && op.text == "~~", op.is("like"):
 		p.likeOperand(sc, left, after)
 	case op.is("in"):
 		p.emit(sc, left.qual, left.column, KindEq, "", false)
