@@ -239,6 +239,7 @@ function InstanceIndexes({ serverControl, instanceId, siblings }: AnalysisProps)
       <TabsContent value="indexes">
         {indexesState ?? (
           <IndexesPanel
+            instanceId={instanceId}
             dataUpdatedAt={indexesQuery.dataUpdatedAt}
             database={database}
             findings={findings}

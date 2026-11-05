@@ -23,7 +23,7 @@ See `PROTOCOL.md` (static cold-start rules).
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-sonnet-5-5; supervisor: advisor (Opus 5.5)
 - File / unit heading: phase_06.md → 5.1
-- Current step: 5.1 batch A (index_history.go handler + tests)
+- Current step: 5.1 batch C (IndexTaxPanel, tax tab, route entry, VIS-041); A, A2, B done
 - Next action: 5.1 (phase_06.md), then P5.
 - Stop latch: none (cleared by explicit invocation 2026-11-05)
 - Last closure: unit:P4:1 (phase 4 DONE)
@@ -112,6 +112,8 @@ Pre-existing changes to preserve (from the session start; not owned by any unit;
 Unit-owned paths are listed in each phase file's sub-phase `Files` field and recorded here when a unit opens.
 
 ## 6. In-flight checkpoint
+
+5.1 checkpoint (batch B): A server (index_history.go + unit/int tests, api.go), A2 contract (openapi.yaml, generated.ts, docs/api.md, keys/queries, fixture getIndexHistory), B (web/src/lib/indexTax.ts+test, IndexDetail.tsx+test embedded in IndexesPanel Detail, captions index.history-scans/size + indexes.tax, IndexAnalysisPage passes instanceId). Green: G-GO-FOCUS IDXH, G-GO-INT IDXHINT, G-API, typecheck/lint/prettier, vitest src/lib + src/features/indexes (472). Open: batch C, G-DEPLOY, VIS-041, advisor SQL review, README, §8 deviation (IndexDetail embedded in Detail; window = page range ≤30 d).
 
 Phase 4 DONE (P4 attempt 1, advisor Opus 5.5 approved after three rounds; 4.x detail in `history.md`). STATE compacted at P4 DONE. Uncommitted: only `internal/webui/dist/index.html` (never staged) and `.claude/`. Backup `02-loaded-20261104T170945Z` stops being VERIFIED at 2026-11-05 17:09Z: take a fresh verified backup before any lifecycle/G-QA test after that time. Before a later VIS-040 run (6.2, 8.2): `suggest_ground_truth.py` (330 s) then wait 3 min.
 Running resources: stack `pglens-odoo` up and healthy (4th deploy, final P4 code). Backup `02-loaded-20261104T170945Z` VERIFIED (expires 2026-11-05 17:09Z); stack `agent.yaml` = `agent.yaml.bak-16.4`. Research checkpoint: R3 pending (7.0).

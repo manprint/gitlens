@@ -30,6 +30,7 @@ import {
 import { UNUSED_INDEX_MIN_BYTES, windowPhrase } from '@/lib/indexCleanup'
 import { summariseColumns } from '@/lib/indexDefinition'
 
+import { IndexDetail } from './IndexDetail'
 import { CELL_BADGE, IndexPanel, PanelNote, type PanelStat } from './IndexPanel'
 import {
   DEFAULT_INDEX_VIEW,
@@ -358,7 +359,7 @@ function RowBadges({ row, unusedWindow }: { row: IndexRow; unusedWindow: string 
   )
 }
 
-function Detail({ row }: { row: IndexRow }) {
+function Detail({ row, instanceId }: { row: IndexRow; instanceId: string }) {
   const findings = [
     row.invalidFinding,
     row.unusedFinding,
@@ -443,6 +444,8 @@ function Detail({ row }: { row: IndexRow }) {
           </div>
         </div>
       ) : null}
+
+      <IndexDetail instanceId={instanceId} row={row} />
 
       {findings.length > 0 ? (
         <ul className="space-y-2">
@@ -596,6 +599,7 @@ const GAP_COLUMNS: readonly SimpleColumn<ForeignKeyGap>[] = [
 ]
 
 interface IndexesPanelProps {
+  instanceId: string
   /** The indexes in scope: the page's database filter already applied. */
   rows: readonly IndexRow[]
   /** How many indexes the agent reported for the server. */
@@ -621,6 +625,7 @@ interface IndexesPanelProps {
  * one header with the scope's figures.
  */
 export function IndexesPanel({
+  instanceId,
   rows,
   reported,
   incomplete,
@@ -805,7 +810,7 @@ export function IndexesPanel({
           defaultSort={{ id: 'bytes', desc: true }}
           detailLabel={(row, expanded) => `${expanded ? 'Hide' : 'Show'} details of ${row.name}`}
           emptyState={null}
-          renderDetail={(row) => <Detail row={row} />}
+          renderDetail={(row) => <Detail instanceId={instanceId} row={row} />}
           rowKey={(row) => row.key}
           rows={rows}
           scope="indexes"

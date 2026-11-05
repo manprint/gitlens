@@ -206,6 +206,33 @@ export const CAPTIONS = {
     source: 'The origin the server sets on each session of getLocks.',
     window: 'Latest lock sample.',
   },
+  'index.history-scans': {
+    what: 'How often queries scanned this index, per second, averaged over each bucket of the selected range.',
+    source:
+      'getIndexHistory: pg_stat_user_indexes.idx_scan, stored as a per-second rate every 5 minutes and averaged per bucket.',
+    unit: 'scans per second',
+    window: 'Selected time range, at most 30 days; buckets of 10 minutes or more.',
+    howToRead:
+      'A gap means no sample was stored for that bucket; nothing is filled in. A flat line at zero means no scan, which is not a verdict that the index is unused.',
+  },
+  'index.history-size': {
+    what: 'Size of this index at the end of each bucket of the selected range.',
+    source:
+      'getIndexHistory: pg_relation_size of the index (index_bytes) as stored every 5 minutes; the last value of each bucket.',
+    unit: 'bytes',
+    window: 'Selected time range, at most 30 days; buckets of 10 minutes or more.',
+    howToRead:
+      'A gap means no sample was stored for that bucket. A rebuild shows as a drop; growth is the table growing or the index bloating.',
+  },
+  'indexes.tax': {
+    what: 'What the indexes of each table cost: their number, size, unused space and the index entries each write adds. Every figure is an estimate.',
+    source:
+      'The index statistics (pg_stat_user_indexes) and the table statistics (pg_stat_user_tables) of the latest collection, combined in the browser; the unused size follows the advisor verdict or the raw scan counter.',
+    unit: 'bytes, writes per second, index entries per second',
+    window: 'Latest collection; rates are per second over the last interval.',
+    howToRead:
+      'Write amplification is inserts, deletes and updates that are not heap-only per second, times the number of indexes. Unique and primary key indexes are never counted as unused. Unused size is a candidate to review, not a verdict.',
+  },
 } as const satisfies Record<string, CaptionEntry>
 
 export type CaptionId = keyof typeof CAPTIONS
