@@ -19,11 +19,11 @@ See `PROTOCOL.md` (static cold-start rules).
 - Scope result: RUNNING
 - Type: sub-phase
 - ID / attempt: 5.1 / 1
-- Status: TODO (P4 closed)
+- Status: OPEN (S1 server batch A)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-sonnet-5-5; supervisor: advisor (Opus 5.5)
 - File / unit heading: phase_06.md → 5.1
-- Current step: P4 closed; open 5.1
+- Current step: 5.1 batch A (index_history.go handler + tests)
 - Next action: 5.1 (phase_06.md), then P5.
 - Stop latch: none (cleared by explicit invocation 2026-11-05)
 - Last closure: unit:P4:1 (phase 4 DONE)

@@ -60,6 +60,9 @@ type API struct {
 	// indexSuggestions replaces the database's index suggestion store in unit
 	// tests (4.3).
 	indexSuggestions indexSuggestionStore
+	// indexHistory replaces the database's index history store in unit tests
+	// (5.1).
+	indexHistory indexHistoryStore
 	// readinessCache holds each instance's readiness report for 30 s (14.1).
 	readinessCache readinessCache
 }
@@ -90,6 +93,7 @@ func (a *API) RegisterRoutes(r chi.Router) {
 	a.registerContentionRoutes(r)
 	a.registerRelationRoutes(r)
 	a.registerIndexSuggestionRoutes(r)
+	a.registerIndexHistoryRoutes(r)
 	a.registerWorkloadRoutes(r)
 	a.registerSettingsRoutes(r)
 	a.registerCatalogRoutes(r)
