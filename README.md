@@ -1367,7 +1367,8 @@ Index suggestions are available at
 `/api/v1/instances/{id}/index-suggestions?window=24h&limit=20&database=<name>`
 (window from 1h to 7d, limit 1 to 100). pglens parses the normalised text of
 the tracked statements (at most 5000, heaviest first), and for each key that no
-existing btree index already leads with reports its `weight_pct` (share of the
+existing btree index already leads with (a unique btree index on the
+key's equality columns counts as covering) reports its `weight_pct` (share of the
 database's statement time involving it, an upper bound of the saving), an
 estimated size, the write rates of the table, a `verdict` (`strong`,
 `moderate`, `write_heavy`: ratio 10 or more, 1 or more, below 1; a table

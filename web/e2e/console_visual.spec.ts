@@ -1,5 +1,6 @@
 import { AxeBuilder } from '@axe-core/playwright'
 import { execFile } from 'node:child_process'
+import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
@@ -3038,6 +3039,7 @@ test('VIS-040 index suggestions show the ground-truth column of res_partner, and
       create_statement: string
     }[]
   }
+  writeFileSync(`${ARTIFACT_DIR}/vis-040-suggestions.json`, JSON.stringify(body, null, 2))
   const partner = body.suggestions.filter((row) => row.table === 'res_partner')
   const target = partner.find((row) => row.columns[0]?.name === SUGGESTION_COLUMN)
   expect(
