@@ -167,6 +167,6 @@ export function compareSuggestions(
 }
 
 /** The query detail page of one statement. */
-export function statementLink(instanceId: string, queryid: number): string {
-  return `/instances/${encodeURIComponent(instanceId)}/queries/${encodeURIComponent(String(queryid))}`
+export function statementLink(instanceId: string, queryid: string): string {
+  return `/instances/${encodeURIComponent(instanceId)}/queries/${encodeURIComponent(queryid)}`
 }

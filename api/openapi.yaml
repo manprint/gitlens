@@ -1217,7 +1217,7 @@ components:
             type: object
             required: [queryid, share_pct, query_text]
             properties:
-              queryid: { type: integer, format: int64 }
+              queryid: { type: string, pattern: '^-?[0-9]+$', description: PostgreSQL query ID decimal string. }
               share_pct: { type: number, format: double }
               query_text: { type: string }
         overlapping_indexes:
@@ -3066,7 +3066,7 @@ paths:
                         weight_pct: 40
                         read_cost_ms_per_s: 40
                         calls_rate: 12
-                        statements: [{ queryid: 11, share_pct: 100, query_text: 'SELECT id FROM res_partner WHERE ref = $1' }]
+                        statements: [{ queryid: '11', share_pct: 100, query_text: 'SELECT id FROM res_partner WHERE ref = $1' }]
                         overlapping_indexes: []
                         selectivity: { column: ref, n_distinct: -0.8, label: high }
                         est_size_bytes: 1380000

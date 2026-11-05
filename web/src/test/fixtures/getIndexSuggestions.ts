@@ -27,7 +27,7 @@ export const base = {
       read_cost_ms_per_s: 40,
       calls_rate: 12,
       statements: [
-        { queryid: 11, share_pct: 100, query_text: 'SELECT id FROM res_partner WHERE ref = $1' },
+        { queryid: '11', share_pct: 100, query_text: 'SELECT id FROM res_partner WHERE ref = $1' },
       ],
       overlapping_indexes: [] as string[],
       selectivity: { column: 'ref', n_distinct: -0.8, label: 'high' },

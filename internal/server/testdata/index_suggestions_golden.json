@@ -26,7 +26,7 @@
       "calls_rate": 12,
       "statements": [
         {
-          "queryid": 11,
+          "queryid": "11",
           "share_pct": 100,
           "query_text": "SELECT id FROM res_partner WHERE ref = $1"
         }

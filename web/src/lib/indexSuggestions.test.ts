@@ -61,7 +61,12 @@ describe('indexSuggestions', () => {
       ]),
     ).toBe('a, b DESC')
     expect(writesText(suggestion.write)).toBe('0.5/s · 1/s · 0.1/s')
-    expect(statementLink('abc', -5)).toBe('/instances/abc/queries/-5')
+    expect(statementLink('abc', '-6200000000000000000')).toBe(
+      '/instances/abc/queries/-6200000000000000000',
+    )
+    expect(statementLink('abc', '9223372036854775807')).toBe(
+      '/instances/abc/queries/9223372036854775807',
+    )
   })
 
   it('SUGG-LIB-006 words the coverage line with the skipped reasons, most frequent first', () => {

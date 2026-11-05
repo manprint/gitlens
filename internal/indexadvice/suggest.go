@@ -95,7 +95,7 @@ type KeyColumn struct {
 // StmtShare is a statement that would use the suggested index. SharePct is its
 // share of the suggestion's read cost.
 type StmtShare struct {
-	QueryID   int64   `json:"queryid"`
+	QueryID   int64   `json:"queryid,string"`
 	SharePct  float64 `json:"share_pct"`
 	QueryText string  `json:"query_text"`
 }

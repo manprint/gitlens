@@ -2340,8 +2340,8 @@ export interface components {
             /** Format: double */
             calls_rate: number;
             statements: {
-                /** Format: int64 */
-                queryid: number;
+                /** @description PostgreSQL query ID decimal string. */
+                queryid: string;
                 /** Format: double */
                 share_pct: number;
                 query_text: string;

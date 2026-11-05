@@ -1,4 +1,5 @@
 import { act, fireEvent, screen, within } from '@testing-library/react'
+import { http, HttpResponse } from 'msw/http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import IndexAnalysisPage from './IndexAnalysisPage'
@@ -24,7 +25,11 @@ function suggestion(name: string, extra: Record<string, unknown> = {}) {
     columns: [{ name: `${name}_col`, desc: false }],
     create_statement: `CREATE INDEX CONCURRENTLY idx_${name} ON public.${name} (${name}_col);`,
     statements: [
-      { queryid: 11, share_pct: 100, query_text: `SELECT id FROM ${name} WHERE ${name}_col = $1` },
+      {
+        queryid: '11',
+        share_pct: 100,
+        query_text: `SELECT id FROM ${name} WHERE ${name}_col = $1`,
+      },
     ],
     ...extra,
   }
@@ -100,7 +105,7 @@ describe('SuggestionsPanel', () => {
   it('SUGG-UI-004 searches the table, the key columns and the statement text', async () => {
     const rows = [
       suggestion('orders', {
-        statements: [{ queryid: 5, share_pct: 100, query_text: 'SELECT 1 WHERE flag_xyz = $1' }],
+        statements: [{ queryid: '5', share_pct: 100, query_text: 'SELECT 1 WHERE flag_xyz = $1' }],
       }),
       suggestion('events'),
       suggestion('users'),
@@ -229,5 +234,38 @@ describe('SuggestionsPanel', () => {
     for (const tab of ['Indexes', 'Cleanup', 'Dead rows']) {
       expect(screen.getByRole('tab', { name: tab })).toHaveAttribute('aria-selected', 'false')
     }
+  })
+
+  it('SUGG-UI-013 shows an error, not "statistics not collected", when the analysis fails', async () => {
+    render(base)
+    server.use(
+      http.get('/api/v1/instances/:id/index-suggestions', () =>
+        HttpResponse.json({ error: 'analysis timed out' }, { status: 503 }),
+      ),
+    )
+    await flushNetwork(60)
+
+    expect(
+      screen.queryByRole('heading', { name: 'Statement statistics not collected' }),
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
+  })
+
+  it('SUGG-UI-014 links a statement by its exact 64-bit query id', async () => {
+    render({
+      ...base,
+      suggestions: [
+        suggestion('big', {
+          statements: [{ queryid: '-6200000000000000000', share_pct: 100, query_text: 'SELECT 1' }],
+        }),
+      ],
+    })
+    await flushNetwork(30)
+    fireEvent.click(screen.getByRole('button', { name: /Show details of big/ }))
+
+    expect(screen.getByRole('link', { name: '-6200000000000000000' })).toHaveAttribute(
+      'href',
+      `/instances/${INSTANCE_ID}/queries/-6200000000000000000`,
+    )
   })
 })
