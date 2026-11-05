@@ -295,6 +295,6 @@ func TestIDXS027_EmptyInput(t *testing.T) {
 
 func TestIDXS005_FractionRanksByRows(t *testing.T) {
 	out := Suggest(input(`SELECT 1 FROM res_partner WHERE ref = $1 AND write_date = $2 AND zzz = $3`))
-	require.Equal(t, "write_date,ref,zzz", names(out.Suggestions[0]), "-0.9 of 50000 rows = 45000 distinct > 40000; unknown last")
+	require.Equal(t, "write_date,ref", names(out.Suggestions[0]), "-0.9 of 50000 rows = 45000 distinct > 40000; unknown column dropped")
 	require.Contains(t, out.Suggestions[0].Notes, NoteColumnUnknown)
 }
