@@ -19,14 +19,14 @@ See `PROTOCOL.md` (static cold-start rules).
 - Scope result: RUNNING
 - Type: sub-phase
 - ID / attempt: 16.4 / 1
-- Status: IN_PROGRESS (OPEN)
+- Status: DONE (closing commit `unit:16.4:1`)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-sonnet-5-5; supervisor: advisor (Opus 5.5)
 - File / unit heading: phase_17.md → 16.4 Live proof against pg_stat_activity
-- Current step: S1 (spec + helpers)
-- Next action: write web/e2e/qa/sessions.spec.ts SORIGIN-E2E-001..003; run via G-QA.
+- Current step: closed
+- Next action: open P16 (phase closure: full gates, README obligation, advisor review of I-15 and the by_application default).
 - Stop latch: none (cleared by explicit invocation 2026-11-05)
-- Last closure: unit:16.3:1 (commit 8256b9f)
+- Last closure: unit:16.4:1 (commit by trailer lookup `PEV-Unit: 16.4`)
 - Unit base: HEAD b675f31, snapshot tree 74185dd970e7245eb88b59c6b7c4d32f0e2a18c1; branch `feat/index-analysis` (never switch or create branches)
 - Repo state: uncommitted only `internal/webui/dist/index.html` (never staged) and `.claude/`.
 - Network: user authorised internet use (2026-11-05 message "autorizzo ad usare la rete internet"); still no push.
@@ -113,16 +113,14 @@ Unit-owned paths are listed in each phase file's sub-phase `Files` field and rec
 
 ## 6. In-flight checkpoint
 
-P14 closing (2026-11-04): the unit is the `P14` commit (STATE, header layout files, spec). Before it: 14.3 DONE (4b34294), 14.2 DONE (7a23734), 14.1 DONE (9e35e11). Earlier checkpoint detail, side-work notes and the 14.1 S1 facts: `history.md`.
-Actual files/diff: `Header.tsx`, `Breadcrumbs.tsx`, `CoverageBanner.tsx`, `InstancePage.tsx`, `InstanceStatusBanners.test.tsx`, `console_visual.spec.ts`, STATE, history; `internal/webui/dist/index.html` and `.claude/` never staged.
-Running resources: stack `pglens-odoo` up (deployed from the P14 tree). Backup `02-loaded-20261104T170945Z` VERIFIED (expires ~2026-11-05 17:09Z).
-Research checkpoint: R3 pending (7.0).
-
-Handoff checkpoint (2026-11-04 23:17, trigger user): 16.1 d254f85, 16.2 95be08c, 16.3 8256b9f DONE and deployed in the stack (compose `pglens-odoo`, images rebuilt from 8256b9f). 16.4 not started (subagent killed before any file change). Ownership released (reason handoff). Pending edits: none besides this STATE. Not run: SORIGIN-E2E-001..003, P16 gates/closure, everything after (4.x … 8.x). Resources: stack up and healthy; stack `agent.yaml` has `locks: { interval: 10s, session_query_text: true }` (A3; pre-16.3 copy `/tmp/claude-1000/agent.yaml.bak`, may vanish); backup `02-loaded-20261104T170945Z` VERIFIED until ~2026-11-05 17:09Z; golangci-lint v2.15.0 in GOPATH/bin; `internal/webui/dist/index.html` modified (never stage), `.claude/` untracked. Known limits: G-SECRETS (b) not runnable (webhook deferred); Odoo 169 modules; header a11y gap §8 (f).
+16.4 DONE (SORIGIN-E2E-001..003 green, config restored byte for byte). Next: P16. Files of 16.4: `web/e2e/qa/{sessions.spec.ts,sessionTruth.ts}` (new), `web/e2e/qa/pg.ts` (`lockPair` waiter name, §8), STATE, history; stack README paragraph written outside the repo. `internal/webui/dist/index.html` and `.claude/` never staged.
+Running resources: stack `pglens-odoo` up and healthy (images from 8256b9f). Backup `02-loaded-20261104T170945Z` VERIFIED (expires 2026-11-05 17:09Z); stack `agent.yaml` = `agent.yaml.bak-16.4` (cmp equal). Research checkpoint: R3 pending (7.0). Known limits: G-SECRETS (b) not runnable (webhook deferred); header a11y gap §8 (f).
 
 ## 7. Verification and reviews
 
 Latest gate result per gate only; earlier detail in `history.md`.
+
+- 16.4 (2026-11-05): G-QA `--list -g SORIGIN-E2E` = 3; SORIGIN-E2E-001 passed (7 sessions; sample equals pg_stat_activity after 13 s; UI tables, tree and control run; sabotage `qa-app-a`→`pglens/qa` detected); -002 passed (warm-up 93 s; raw leg 15 s; normalised leg 12 s after agent restart); -003 passed (default counts; `by_application: false` callout; restored); QA-CLEAN-001 passed; `agent.yaml` cmp-equal to `agent.yaml.bak-16.4` after the run; G-WEB-STATIC green (0 errors, 2 pre-existing warnings). G-SECRETS before the commit.
 
 ## 8. Technical revisions and deviations
 
@@ -230,6 +228,8 @@ Latest gate result per gate only; earlier detail in `history.md`.
 | 1 | 14.3 deviations (Sonnet + Opus advisor) | contract 14.3 / RDY-E2E | (a) drill 5 inverted: instead of sabotaging a healthy webhook it ADDs a dummy `chat.invalid` GOOGLE_CHAT env var (runtime-built string, never matches G-SECRETS) because the webhook is deferred by user ruling 2026-11-04; (b) RDY-EXT-02 (pgstattuple info) is in the baseline on the rebuilt stack (stack difference, not a code change); (c) Odoo 169 modules vs 187 expected (rebuilt stack); (d) KNOWN GAP: the `full` branch of I-14 is never live-tested (the stack cannot reach 0 warnings while the webhook is deferred and RDY-ACT-01 is open until 16.1); covered by unit/integration only; (e) the 1600 px header chip clipping found at R-P14 screenshot review is fixed in P14 (see §7); the instance tab strip clips its trailing role chip on scroll (pre-existing scroller, not a P14 contract) | R-P14, live | P14 |
 | 1 | P14 header layout decisions (autonomous, R-P14) | R-13.3b (chip never truncated; coverage count never truncated; crumbs may truncate), 14.2 binding note | (a) at 1600 px the header-start track is ≈330 px: chip (≈152) + count/ⓘ (≈140) cannot fit beside a crumb with its "Instances ›" floor, so the crumbs yield to zero width while both banners show (the page title and the sidebar still name the instance); at 1920 px the crumb is whole (asserted in COV-E2E-001); (b) global `Breadcrumbs` nav gets `overflow-x-clip` (no overlap with the slot), no other change; (c) `CoverageBanner` compact callout grows to the slot and its sentence is `w-0 flex-1 truncate` (the sentence is the part that gives way; count and ⓘ stay whole); (d) section tabs are 13 px with `px-1.5` at 1600–1919 px only: the Readiness tab (8th) made the tab list 791 px, overlapping the facts strip (needs ≈504 px + 16 gap in a 1280 px row); a visible UI change in the window, none at ≥ 1920 or < 1600; (f) KNOWN a11y GAP (WCAG 2.4.7): in the 1600–1919 px window with both banners showing, the crumb nav is clipped to zero width, so its "Instances" link stays in the tab order with its focus ring hidden; recorded, not fixed in P14 (candidate for 15.x/8.2); (e) at ≥ 1600 the page title row shows a 64-char name overlapping the "Updated" chip (stubbed-name stress only, page content, not header; not fixed in P14) | R-P14 | P14 |
 | 1 | User rulings 2026-11-04 (live gates) | stack absent after sandbox reset | (a) rebuild the Odoo stack (dir `/home/agent/pglens-odoo-stack`, backups `/home/agent/odoo-backups`, images `odoo:18`/`postgres:18` were gone; network pulls authorised); files recovered from earlier transcripts impossible (not present), so `compose.yml`, `deploy.sh`, `backup.sh`, `verify_backup.sh`, `seed/*`, `load/rpc_load.py`, README are REBUILT to the 0.1/0.2 contracts (record per file in §7); this is attempt 2 of 0.1/0.2 evidence. (b) Google Chat webhook deferred by the user: G-SECRETS value half and the notification-channel live e2e are NOT RUN by user decision (tested later by the user), not BLOCKED. (c) HA topology tested as 1 primary + 2 standbys (7.x). (d) all supervisor-recommended decisions approved; finish the plan. (e) backups are still required: QA guard and HA scripts accept only a fresh `VERIFIED` backup (< 24 h); `backup.sh`/`verify_backup.sh` rebuilt and run. | user | all live units, 7.x |
+| 1 | 16.4 Files: `web/e2e/qa/pg.ts` READ-only | `lockPair(table, id, applicationName, waiterName = applicationName)` gained an optional waiter name (waiter `qa-waiter` apart from holder `qa-idle-tx`); default unchanged, existing callers unaffected | agent-2 (advisor guidance 2026-11-05) | harness tests unaffected (QA-CLEAN-001 passed) |
+| 1 | 16.4 -002: raw text next to normalised | SESSAPI-005: the raw text replaces the normalised one (never mixed); the raw leg asserts `Query text (raw)`, the copy button and `Query ID` = warm-up queryid; the raw-off leg asserts `Query text (normalised)` = `select pg_sleep($1)`. Warm-up uses literal `select pg_sleep(1)` (not `pg.slowQuery()`, whose `1.000` literal may change the queryid) | advisor (Opus 5.5), autonomous decision | none |
 
 ## 9. Blockers
 

@@ -146,14 +146,19 @@ export async function openSessions(
   return { close }
 }
 
-/** Session A holds a row lock on `qa_tmp.<table>` row `id`; session B waits for it. */
+/**
+ * Session A holds a row lock on `qa_tmp.<table>` row `id`; session B waits for it.
+ * Both carry `applicationName` unless `waiterName` names the waiter apart.
+ */
 export async function lockPair(
   table: string,
   id: number,
   applicationName: string,
+  waiterName: string = applicationName,
 ): Promise<{ release: () => Promise<void> }> {
   assertStimulusAllowed()
   const name = safeAppName(applicationName)
+  const waiter = safeAppName(waiterName)
   const relation = `${QA_SCHEMA}.${sqlIdent(table)}`
   const row = sqlInt(id)
   await ensureSchema()
@@ -163,7 +168,10 @@ export async function lockPair(
   )
   const lock = `BEGIN; SELECT id FROM ${relation} WHERE id = ${row} FOR UPDATE;\n`
   const children: ChildProcess[] = []
-  const release = () => endSessions(children, name)
+  const release = async () => {
+    await endSessions(children, name)
+    if (waiter !== name) await endSessions([], waiter)
+  }
   registerCleanup(release)
   children.push(holdSession(name, lock))
   await waitFor(
@@ -174,11 +182,11 @@ export async function lockPair(
     30_000,
     'lock holder',
   )
-  children.push(holdSession(name, lock))
+  children.push(holdSession(waiter, lock))
   await waitFor(
     async () =>
       (await queryInt(
-        `SELECT count(*) FROM pg_stat_activity WHERE application_name = '${name}' AND cardinality(pg_blocking_pids(pid)) > 0;`,
+        `SELECT count(*) FROM pg_stat_activity WHERE application_name = '${waiter}' AND cardinality(pg_blocking_pids(pid)) > 0;`,
       )) >= 1,
     30_000,
     'blocked waiter',
