@@ -1,0 +1,160 @@
+import type { CaptionEntry } from '../captions'
+
+/** Captions of the indexes route group (D30); rules in the plan, phase 17. */
+export const indexesCaptions = {
+  'indexes.inventory': {
+    what: 'Every index the agent reported for the server, one row per index, with its columns, access method, size, scan rate and last scan time.',
+    source:
+      'getInstanceIndexes: the newest metrics_indexes sample of each index (pg_stat_user_indexes, pg_stat_statio_user_indexes, pg_relation_size) joined with its index_def fact (pg_get_indexdef).',
+    unit: 'bytes, scans per second, percent',
+    window:
+      'Latest collection (a sample from the last 15 minutes); scan figures are rates over the last collection interval.',
+    howToRead:
+      'Need attention counts indexes with an open advisor finding or marked invalid. The agent reports only its busiest and largest indexes per database, so a missing index may still exist.',
+  },
+  'indexes.summary': {
+    what: 'How the indexes in scope break down by kind, access method, database and table, with the counts of duplicate, redundant, invalid and unindexed findings.',
+    source:
+      'Counted in the browser from the getInstanceIndexes rows (summariseIndexes) and the open index.* findings of getFindings.',
+    unit: 'indexes',
+    window: 'Latest collection and latest advisor evaluation, for the database picked on the page.',
+    howToRead:
+      'Counts cover only the indexes the agent reported. The kind counts overlap: a partial unique index is both unique and partial.',
+  },
+  'indexes.findings': {
+    what: 'Open advisor findings on indexes: unused, duplicate, redundant prefix, invalid, diverging and foreign keys without an index, one row per finding.',
+    source:
+      'getFindings rows of the advisor rules index.unused, index.duplicate, index.redundant_prefix, index.invalid, index.divergence and index.fk_unindexed (rules_relation.go, rules_catalog.go).',
+    unit: 'findings',
+    window: 'Latest advisor evaluation; only open findings are listed.',
+    howToRead:
+      'Expand a row for the detail and the remediation the advisor wrote. A finding is a candidate to review, not an instruction.',
+  },
+  'indexes.foreign-keys': {
+    what: 'Foreign keys whose referencing columns no index leads with, so deleting or re-keying a referenced row scans the referencing table.',
+    source:
+      'Advisor rule index.fk_unindexed over the fk_unindexed facts of the fk_indexes check, which reads the catalogs only (internal/check/fk_indexes.go).',
+    unit: 'findings',
+    window: 'Latest advisor evaluation of the open findings.',
+    howToRead:
+      'If rows of the referenced table are never deleted or re-keyed, the index is not needed. Up to 200 foreign keys per database are reported, the largest referencing tables first.',
+    thresholds: 'Severity is warning when the referencing table is 10 MiB or larger, info below.',
+  },
+  'indexes.summary-primary': {
+    what: 'Indexes that back a primary key constraint.',
+    source: 'getInstanceIndexes is_primary, from pg_index.indisprimary.',
+    unit: 'indexes',
+    window: 'Latest collection.',
+  },
+  'indexes.summary-unique': {
+    what: 'Unique indexes that are not a primary key.',
+    source:
+      'getInstanceIndexes is_unique without is_primary, from pg_index.indisunique and indisprimary.',
+    unit: 'indexes',
+    window: 'Latest collection.',
+  },
+  'indexes.summary-partial': {
+    what: 'Indexes with a predicate, which cover only the rows the predicate selects.',
+    source: 'The predicate parsed in the browser from the pg_get_indexdef text of the index.',
+    unit: 'indexes',
+    window: 'Latest collection.',
+  },
+  'indexes.summary-expression': {
+    what: 'Indexes with a key built from an expression, such as lower(email), instead of a plain column.',
+    source: 'The key columns parsed in the browser from the pg_get_indexdef text of the index.',
+    unit: 'indexes',
+    window: 'Latest collection.',
+  },
+  'indexes.summary-composite': {
+    what: 'Indexes with more than one key column; included columns are not counted.',
+    source: 'The key columns parsed in the browser from the pg_get_indexdef text of the index.',
+    unit: 'indexes',
+    window: 'Latest collection.',
+  },
+  'indexes.summary-invalid': {
+    what: 'Indexes PostgreSQL marks invalid: queries cannot use them, yet writes still maintain them.',
+    source: 'getInstanceIndexes is_valid, from pg_index.indisvalid.',
+    unit: 'indexes',
+    window: 'Latest collection.',
+    howToRead: 'Rebuild or drop an invalid index, as the advisor rule index.invalid advises.',
+  },
+  'indexes.breakdown-method': {
+    what: 'Number and combined size of the indexes in scope for each access method, such as btree or gin.',
+    source:
+      'Counted in the browser (summariseIndexes) from the access method in the pg_get_indexdef text and the pg_relation_size of each index.',
+    unit: 'indexes, bytes',
+    window: 'Latest collection.',
+  },
+  'indexes.breakdown-database': {
+    what: 'Number and combined size of the indexes in scope for each database.',
+    source:
+      'Counted in the browser (summariseIndexes) from getInstanceIndexes: datname and the pg_relation_size of each index.',
+    unit: 'indexes, bytes',
+    window: 'Latest collection.',
+  },
+  'indexes.breakdown-tables': {
+    what: 'The eight tables that carry the most indexes in scope, with the number and combined size of their indexes.',
+    source:
+      'Counted in the browser (groupByTable) from getInstanceIndexes: the table and the pg_relation_size of each index.',
+    unit: 'indexes, bytes',
+    window: 'Latest collection.',
+    howToRead:
+      'Every index adds work to each insert and non-HOT update of its table: a table high on this list is worth a look at the Index tax tab.',
+  },
+  'indexes.flags': {
+    what: 'Labels on an index: its kind, such as primary, unique or partial, and the advisor findings on it, such as unused, duplicate or invalid.',
+    source:
+      'rowFlags (IndexesPanel): the kind from the index definition and pg_index flags, the findings of the advisor rules index.* for this index.',
+    window: 'Latest collection and latest advisor evaluation.',
+    howToRead:
+      'Diverges means the index is absent or defined differently on a sibling server of the cluster. Never scanned is the raw counter since the last statistics reset, not the advisor verdict.',
+  },
+  'indexes.finding-rule': {
+    what: 'The advisor rule that raised the finding; critical findings are red, others amber.',
+    source: 'rule_id and severity of each getFindings row; the rules are in internal/advisor.',
+    window: 'Latest advisor evaluation.',
+  },
+  'indexes.fk-severity': {
+    what: 'How costly the missing index is: warning when the referencing table is 10 MiB or larger, info below that.',
+    source:
+      'Severity set by the advisor rule index.fk_unindexed from the table size the fk_indexes check reports (fkUnindexedWarnBytes).',
+    window:
+      'Latest advisor evaluation; the table size is an estimate from the last vacuum or analyze.',
+  },
+  'indexes.cleanup': {
+    what: 'Indexes that look removable, with the space a drop gives back and the index writes it saves; pglens runs no drop.',
+    source:
+      'buildCleanup (indexCleanup.ts) over the getInstanceIndexes rows and the index.* advisor findings; index writes from the insert, update and HOT update rates of getInstanceTables.',
+    unit: 'indexes, bytes, index entries per second',
+    window: 'Latest collection and latest advisor evaluation.',
+    howToRead:
+      'Confirmed candidates rest on an advisor finding. Raw-counter candidates only had no scan since the last statistics reset: not a verdict, and left out of the confirmed totals. Primary keys and unique indexes are never listed.',
+  },
+  'indexes.cleanup-reason': {
+    what: 'Why an index is listed: invalid, duplicate, redundant prefix or unused (advisor findings), or never scanned (raw counters only).',
+    source:
+      'classify (indexCleanup.ts): the advisor findings on the index, else the last scan status of its statistics.',
+    window: 'Latest collection and latest advisor evaluation.',
+    howToRead:
+      'A duplicate row is a copy to drop; the copy to keep is the constraint, then the most scanned, then the largest.',
+  },
+  'indexes.dead-rows': {
+    what: 'Tables ranked by dead tuples, the row versions vacuum has not yet reclaimed, with their share of live rows, autovacuum trigger and last vacuum.',
+    source:
+      'getInstanceTables: the newest metrics_tables sample of each table (pg_stat_user_tables n_dead_tup, n_live_tup); trend from the table history; autovacuum settings from the instance settings.',
+    unit: 'tuples, percent, bytes (estimated)',
+    window:
+      'Latest collection; the trend follows the 10 worst tables over the selected time range.',
+    howToRead:
+      'Dead space is estimated as the heap size times the dead share of its tuples. The trigger is the dead-tuple count at which autovacuum is expected to start; it is approximate when the server settings are not reported.',
+  },
+  'indexes.verdict': {
+    what: 'How a suggested index weighs the reads it serves against the writes it costs: strong, moderate or write-heavy. Every verdict is an estimate.',
+    source:
+      'verdictFor (internal/indexadvice/verdict.go): the call rate of the statements that use the key divided by the index writes per second of the table.',
+    window: 'The window picked on the tab.',
+    howToRead:
+      'A table with no index writes is never write-heavy. A first key column with 20 distinct values or fewer lowers the verdict one step.',
+    thresholds: 'Ratio of 10 or more is strong, 1 or more moderate, below 1 write-heavy.',
+  },
+} as const satisfies Record<string, CaptionEntry>

@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 
 import { Degraded } from '@/components/state/Degraded'
 import { Unknown } from '@/components/state/Unknown'
+import { ChartCard } from '@/components/charts/ChartCard'
 import { TimeSeriesChart, type TimeSeriesTableSeries } from '@/components/charts/TimeSeriesChart'
 import { buildLagOption } from '@/components/charts/lag.options'
 import { useTimeRange } from '@/hooks/useTimeRange'
@@ -14,7 +15,6 @@ import {
   type ReplicationMetricEdge,
 } from '@/lib/replication'
 import type { TimeRangeResult } from '@/lib/timerange'
-import { formatRangeLabel } from '@/lib/chartTime'
 
 /**
  * The server returns raw replication rows (no buckets), written by the
@@ -105,36 +105,37 @@ export function LagSection({
         </p>
       ) : (
         <div className="space-y-6">
-          {groups.map((group, index) => {
+          {groups.map((group) => {
             const aligned = alignSeries(group.metrics)
             const heading = edgeHeading(group, instances)
             const hasData = aligned.timestamps.length > 0
-            // An application_name can hold spaces, which would split an
-            // id reference in aria-labelledby.
-            const headingId = `lag-edge-${index}`
             return (
-              <article key={`${group.from}\u0000${group.to}`} aria-labelledby={headingId}>
-                <h3 id={headingId}>{heading}</h3>
-                <p className="text-muted-foreground text-xs">
-                  {formatRangeLabel(range.from, range.to, LAG_SAMPLE_SECONDS)}
-                </p>
-                {hasData ? (
-                  <>
-                    <TimeSeriesChart
-                      ariaLabel={`Replication lag for ${heading}`}
-                      option={buildLagOption(aligned)}
-                      series={tableSeries(aligned)}
-                    />
-                    {edgeHasGaps(aligned) ? (
-                      <p role="note">Gaps in this range indicate missing, unmeasured samples.</p>
-                    ) : null}
-                  </>
-                ) : (
-                  <p role="status">
-                    <Unknown reason="No replication lag sample was returned for this edge." /> No
-                    data in this range.
-                  </p>
-                )}
+              <article key={`${group.from}\u0000${group.to}`} aria-label={heading}>
+                <ChartCard
+                  captionId="lag.edge"
+                  range={range}
+                  state="ready"
+                  stepSeconds={LAG_SAMPLE_SECONDS}
+                  title={heading}
+                >
+                  {hasData ? (
+                    <>
+                      <TimeSeriesChart
+                        ariaLabel={`Replication lag for ${heading}`}
+                        option={buildLagOption(aligned)}
+                        series={tableSeries(aligned)}
+                      />
+                      {edgeHasGaps(aligned) ? (
+                        <p role="note">Gaps in this range indicate missing, unmeasured samples.</p>
+                      ) : null}
+                    </>
+                  ) : (
+                    <p role="status">
+                      <Unknown reason="No replication lag sample was returned for this edge." /> No
+                      data in this range.
+                    </p>
+                  )}
+                </ChartCard>
               </article>
             )
           })}

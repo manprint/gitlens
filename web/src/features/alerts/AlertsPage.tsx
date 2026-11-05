@@ -6,6 +6,7 @@ import { useAlert, useAlerts, useCachedClusters, useSilences } from '@/api/queri
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
+import { InfoHint } from '@/components/layout/InfoHint'
 import { SimpleTable } from '@/components/layout/SimpleTable'
 import { AlertListTruncated, EmptyState, ErrorState } from '@/components/state'
 import { Input } from '@/components/ui/input'
@@ -260,57 +261,69 @@ export function AlertsPage() {
   const filterControl = 'min-[1600px]:h-8'
   const filters = (
     <>
-      <label className={filterLabel} htmlFor="alerts-state">
-        <span className="font-medium">State</span>
-        <NativeSelect
-          className={filterControl}
-          id="alerts-state"
-          onChange={(event) => updateFilter('state', event.target.value, 'firing')}
-          value={state}
-        >
-          <option value="firing">Firing</option>
-          <option value="all">All states</option>
-          <option value="pending">Pending</option>
-          <option value="resolved">Resolved</option>
-        </NativeSelect>
-      </label>
-      <label className={filterLabel} htmlFor="alerts-severity">
-        <span className="font-medium">Severity</span>
-        <NativeSelect
-          className={filterControl}
-          id="alerts-severity"
-          onChange={(event) => updateFilter('severity', event.target.value)}
-          value={severity}
-        >
-          <option value="all">All severities</option>
-          <option value="critical">Critical</option>
-          <option value="warning">Warning</option>
-          <option value="info">Info</option>
-        </NativeSelect>
-      </label>
-      <label className={filterLabel} htmlFor="alerts-cluster">
-        <span className="font-medium">Cluster</span>
-        <Input
-          className={`w-44 ${filterControl}`}
-          id="alerts-cluster"
-          onChange={(event) => updateFilter('cluster_id', event.target.value)}
-          placeholder="Cluster ID"
-          value={clusterId}
-        />
-      </label>
-      <label className={filterLabel} htmlFor="alerts-suppressed">
-        <span className="font-medium">Suppression</span>
-        <NativeSelect
-          className={filterControl}
-          id="alerts-suppressed"
-          onChange={(event) => updateFilter('suppressed', event.target.value)}
-          value={suppressed}
-        >
-          <option value="all">All alerts</option>
-          <option value="suppressed">Suppressed</option>
-          <option value="unsuppressed">Not suppressed</option>
-        </NativeSelect>
-      </label>
+      <span className="flex items-center gap-1">
+        <label className={filterLabel} htmlFor="alerts-state">
+          <span className="font-medium">State</span>
+          <NativeSelect
+            className={filterControl}
+            id="alerts-state"
+            onChange={(event) => updateFilter('state', event.target.value, 'firing')}
+            value={state}
+          >
+            <option value="firing">Firing</option>
+            <option value="all">All states</option>
+            <option value="pending">Pending</option>
+            <option value="resolved">Resolved</option>
+          </NativeSelect>
+        </label>
+        <InfoHint id="alerts.filter-state" label="State filter" />
+      </span>
+      <span className="flex items-center gap-1">
+        <label className={filterLabel} htmlFor="alerts-severity">
+          <span className="font-medium">Severity</span>
+          <NativeSelect
+            className={filterControl}
+            id="alerts-severity"
+            onChange={(event) => updateFilter('severity', event.target.value)}
+            value={severity}
+          >
+            <option value="all">All severities</option>
+            <option value="critical">Critical</option>
+            <option value="warning">Warning</option>
+            <option value="info">Info</option>
+          </NativeSelect>
+        </label>
+        <InfoHint id="alerts.filter-severity" label="Severity filter" />
+      </span>
+      <span className="flex items-center gap-1">
+        <label className={filterLabel} htmlFor="alerts-cluster">
+          <span className="font-medium">Cluster</span>
+          <Input
+            className={`w-44 ${filterControl}`}
+            id="alerts-cluster"
+            onChange={(event) => updateFilter('cluster_id', event.target.value)}
+            placeholder="Cluster ID"
+            value={clusterId}
+          />
+        </label>
+        <InfoHint id="alerts.filter-cluster" label="Cluster filter" />
+      </span>
+      <span className="flex items-center gap-1">
+        <label className={filterLabel} htmlFor="alerts-suppressed">
+          <span className="font-medium">Suppression</span>
+          <NativeSelect
+            className={filterControl}
+            id="alerts-suppressed"
+            onChange={(event) => updateFilter('suppressed', event.target.value)}
+            value={suppressed}
+          >
+            <option value="all">All alerts</option>
+            <option value="suppressed">Suppressed</option>
+            <option value="unsuppressed">Not suppressed</option>
+          </NativeSelect>
+        </label>
+        <InfoHint id="alerts.filter-suppression" label="Suppression filter" />
+      </span>
     </>
   )
 
@@ -358,21 +371,28 @@ export function AlertsPage() {
               </TabsTrigger>
             ))}
           </TabsList>
-          {/* Firing alerts are counted by severity; suppressed alerts are shown separately. */}
-          <dl
-            aria-label="Alert summary"
-            className="grid grid-cols-2 gap-3 min-[1600px]:flex min-[1600px]:gap-2 sm:grid-cols-3 lg:grid-cols-5"
-          >
-            <SummaryTile label="Critical firing" tone="critical" value={summary.firing.critical} />
-            <SummaryTile label="Warning firing" tone="warning" value={summary.firing.warning} />
-            <SummaryTile label="Info firing" tone="info" value={summary.firing.info} />
-            <SummaryTile label="Suppressed" value={summary.suppressed} />
-            <SummaryTile label="Resolved" value={summary.resolved} />
-          </dl>
+          <div className="flex items-center gap-1">
+            {/* Firing alerts are counted by severity; suppressed alerts are shown separately. */}
+            <dl
+              aria-label="Alert summary"
+              className="grid grid-cols-2 gap-3 min-[1600px]:flex min-[1600px]:gap-2 sm:grid-cols-3 lg:grid-cols-5"
+            >
+              <SummaryTile
+                label="Critical firing"
+                tone="critical"
+                value={summary.firing.critical}
+              />
+              <SummaryTile label="Warning firing" tone="warning" value={summary.firing.warning} />
+              <SummaryTile label="Info firing" tone="info" value={summary.firing.info} />
+              <SummaryTile label="Suppressed" value={summary.suppressed} />
+              <SummaryTile label="Resolved" value={summary.resolved} />
+            </dl>
+            <InfoHint id="alerts.summary" label="Alert summary counts" />
+          </div>
         </div>
         <TabsContent className="space-y-8 min-[1600px]:space-y-4" value="alerts">
           {selectedAlertKey ? (
-            <Section title={`Alert detail: ${selectedAlertKey}`}>
+            <Section captionId="alerts.detail" title={`Alert detail: ${selectedAlertKey}`}>
               <button
                 className="mb-3 underline"
                 onClick={() => setSelectedAlertKey(null)}
@@ -384,28 +404,21 @@ export function AlertsPage() {
             </Section>
           ) : null}
 
-          <Section
-            title="Alerts"
-            description={
-              silenceId ? (
-                <span role="status">
-                  {silenceFilter
-                    ? `Showing alerts matched by silence “${silenceFilter.reason}”.`
-                    : silenceNote}{' '}
-                  <button
-                    className="text-foreground underline"
-                    onClick={() => updateFilter('silence_id', '')}
-                    type="button"
-                  >
-                    Show all alerts
-                  </button>
-                </span>
-              ) : (
-                `${visibleAlerts.length} of ${alerts.length} alerts shown; filters are kept in the URL so an alert view can be shared.`
-              )
-            }
-            actions={filters}
-          >
+          <Section actions={filters} captionId="alerts.list" title="Alerts">
+            {silenceId ? (
+              <p className="mb-3 text-sm" role="status">
+                {silenceFilter
+                  ? `Showing alerts matched by silence “${silenceFilter.reason}”.`
+                  : silenceNote}{' '}
+                <button
+                  className="text-foreground underline"
+                  onClick={() => updateFilter('silence_id', '')}
+                  type="button"
+                >
+                  Show all alerts
+                </button>
+              </p>
+            ) : null}
             <SimpleTable
               ariaLabel="Alerts"
               columns={columns}
@@ -427,10 +440,7 @@ export function AlertsPage() {
           </Section>
         </TabsContent>
         <TabsContent value="delivery">
-          <Section
-            title="Notification delivery"
-            description="Delivery is controlled by the server environment and is never edited in the browser."
-          >
+          <Section captionId="alerts.delivery" title="Notification delivery">
             <DeliverySection />
           </Section>
         </TabsContent>

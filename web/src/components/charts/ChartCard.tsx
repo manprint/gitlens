@@ -53,6 +53,7 @@ export function ChartCard({
     <section
       aria-labelledby={titleId}
       className={cn('bg-card min-w-0 rounded-xl border p-4 shadow-sm', wide && 'lg:col-span-2')}
+      data-card=""
       data-chart-card=""
       {...(captionId === undefined ? {} : { 'data-caption-id': captionId })}
     >

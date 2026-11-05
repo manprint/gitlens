@@ -386,15 +386,11 @@ export function BlockingTree({
 
   if (forest.length === 0) {
     return (
-      <Section
-        title="Blocking tree"
-        description={
-          <>
-            Latest sample: {formatRelative(response.sampled_at, now)}; sample age:{' '}
-            {formatDuration(age)}; sampled every {SAMPLE_INTERVAL_SECONDS} seconds.
-          </>
-        }
-      >
+      <Section captionId="locks.blocking-tree" title="Blocking tree">
+        <p className="text-muted-foreground mb-3 text-sm">
+          Latest sample: {formatRelative(response.sampled_at, now)}; sample age:{' '}
+          {formatDuration(age)}; sampled every {SAMPLE_INTERVAL_SECONDS} seconds.
+        </p>
         <EmptyState
           title="No lock contention in the latest sample"
           description={`No blocked sessions were present in the most recent ${SAMPLE_INTERVAL_SECONDS}-second sample.`}
@@ -445,19 +441,14 @@ export function BlockingTree({
   }
 
   return (
-    <Section
-      title="Blocking tree"
-      description={
-        <>
-          Latest sample: {formatRelative(response.sampled_at, now)}; sample age:{' '}
-          {formatDuration(age)}. Samples are collected every {SAMPLE_INTERVAL_SECONDS} seconds;
-          shorter episodes can be missed. Wait durations are measured on the server at the sample.
-          Lock mode and Waits on describe the lock a waiting session asks for: its mode, its type
-          and the relation it is on; a relation in another database than the agent&apos;s is not
-          named.
-        </>
-      }
-    >
+    <Section captionId="locks.blocking-tree" title="Blocking tree">
+      <p className="text-muted-foreground mb-3 text-sm">
+        Latest sample: {formatRelative(response.sampled_at, now)}; sample age: {formatDuration(age)}
+        . Samples are collected every {SAMPLE_INTERVAL_SECONDS} seconds; shorter episodes can be
+        missed. Wait durations are measured on the server at the sample. Lock mode and Waits on
+        describe the lock a waiting session asks for: its mode, its type and the relation it is on;
+        a relation in another database than the agent&apos;s is not named.
+      </p>
       {response.stale && age !== null ? (
         <Stale age={age} threshold={STALE_THRESHOLD_SECONDS}>
           <span>Lock data is older than the freshness threshold.</span>

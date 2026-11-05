@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 
+import { InfoHint } from '@/components/layout/InfoHint'
 import { formatDuration } from '@/lib/format'
 import type { AgentHealthIssue } from '@/lib/fleet'
 import { clusterLabel, instanceAddress, instanceLabel } from '@/lib/names'
@@ -17,14 +18,18 @@ export function AgentHealthStrip({ issues }: AgentHealthStripProps) {
     <section
       aria-labelledby="agent-health-title"
       className="border-destructive bg-destructive/10 space-y-4 rounded-xl border-2 p-5"
+      data-caption-id="fleet.agent-health"
     >
       <div>
         <p className="text-destructive text-xs font-semibold tracking-wide uppercase">
           Agent health
         </p>
-        <h2 id="agent-health-title" className="mt-1 text-xl font-semibold">
-          Agents requiring attention
-        </h2>
+        <div className="mt-1 flex items-center gap-1">
+          <h2 id="agent-health-title" className="text-xl font-semibold">
+            Agents requiring attention
+          </h2>
+          <InfoHint id="fleet.agent-health" label="Agents requiring attention" />
+        </div>
         <p className="text-muted-foreground mt-1 text-sm">
           These instances are not reporting reliably. Values for their clusters may be stale.
         </p>

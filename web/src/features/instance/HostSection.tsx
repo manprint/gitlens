@@ -3,6 +3,7 @@ import type { Schemas } from '@/api/types'
 import { MetricTile } from '@/components/layout/MetricTile'
 import { Section } from '@/components/layout/Section'
 import { Degraded, ErrorState, Unknown } from '@/components/state'
+import type { CaptionId } from '@/lib/captions'
 import { formatBytes, formatCount, formatPercent } from '@/lib/format'
 
 import { HostCharts } from './HostCharts'
@@ -28,6 +29,7 @@ type HostMetricKey =
 interface HostMetricDefinition {
   key: HostMetricKey
   label: string
+  captionId: CaptionId
   format: (value: number | null) => string | null
 }
 
@@ -67,18 +69,78 @@ const DISK_KEYS: ReadonlySet<HostMetricKey> = new Set([
 export const DISK_NOT_VISIBLE = 'Not visible to the agent'
 
 const METRICS: readonly HostMetricDefinition[] = [
-  { key: 'host_cpu_used_ratio', label: 'CPU used', format: formatRatio },
-  { key: 'host_cpu_count', label: 'CPU count', format: formatHostCount },
-  { key: 'host_mem_total_bytes', label: 'Memory total', format: formatBytes },
-  { key: 'host_mem_available_bytes', label: 'Memory available', format: formatBytes },
-  { key: 'host_swap_total_bytes', label: 'Swap total', format: formatBytes },
-  { key: 'host_swap_used_bytes', label: 'Swap used', format: formatBytes },
-  { key: 'host_load1', label: 'Load average (1m)', format: formatLoad },
-  { key: 'host_load5', label: 'Load average (5m)', format: formatLoad },
-  { key: 'host_load15', label: 'Load average (15m)', format: formatLoad },
-  { key: 'host_disk_total_bytes', label: 'Filesystem total', format: formatBytes },
-  { key: 'host_disk_free_bytes', label: 'Filesystem free', format: formatBytes },
-  { key: 'host_disk_free_ratio', label: 'Filesystem free ratio', format: formatRatio },
+  {
+    key: 'host_cpu_used_ratio',
+    label: 'CPU used',
+    captionId: 'host.cpu-used',
+    format: formatRatio,
+  },
+  {
+    key: 'host_cpu_count',
+    label: 'CPU count',
+    captionId: 'host.cpu-count',
+    format: formatHostCount,
+  },
+  {
+    key: 'host_mem_total_bytes',
+    label: 'Memory total',
+    captionId: 'host.mem-total',
+    format: formatBytes,
+  },
+  {
+    key: 'host_mem_available_bytes',
+    label: 'Memory available',
+    captionId: 'host.mem-available',
+    format: formatBytes,
+  },
+  {
+    key: 'host_swap_total_bytes',
+    label: 'Swap total',
+    captionId: 'host.swap-total',
+    format: formatBytes,
+  },
+  {
+    key: 'host_swap_used_bytes',
+    label: 'Swap used',
+    captionId: 'host.swap-used',
+    format: formatBytes,
+  },
+  {
+    key: 'host_load1',
+    label: 'Load average (1m)',
+    captionId: 'host.load-average',
+    format: formatLoad,
+  },
+  {
+    key: 'host_load5',
+    label: 'Load average (5m)',
+    captionId: 'host.load-average',
+    format: formatLoad,
+  },
+  {
+    key: 'host_load15',
+    label: 'Load average (15m)',
+    captionId: 'host.load-average',
+    format: formatLoad,
+  },
+  {
+    key: 'host_disk_total_bytes',
+    label: 'Filesystem total',
+    captionId: 'host.disk-total',
+    format: formatBytes,
+  },
+  {
+    key: 'host_disk_free_bytes',
+    label: 'Filesystem free',
+    captionId: 'host.disk-free',
+    format: formatBytes,
+  },
+  {
+    key: 'host_disk_free_ratio',
+    label: 'Filesystem free ratio',
+    captionId: 'host.disk-free-ratio',
+    format: formatRatio,
+  },
 ]
 
 // The CPU ratio comes from the container's CPU limit when the agent found one,
@@ -107,13 +169,14 @@ function HostMetricTiles({ data }: { data: Schemas['HostResponse'] }) {
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      {METRICS.map(({ format, key, label }) => {
+      {METRICS.map(({ captionId, format, key, label }) => {
         const value = nullableNumber(values[key])
         const tileLabel = key === 'host_cpu_used_ratio' ? cpuUsedLabel(data.source) : label
         const shown = format(value)
         return (
           <MetricTile
             key={key}
+            captionId={captionId}
             label={tileLabel}
             value={
               value === null && DISK_KEYS.has(key) ? (
@@ -135,11 +198,7 @@ export function HostSection({ instanceId }: HostSectionProps) {
   const query = useInstanceHost(instanceId)
 
   return (
-    <Section
-      id="host-metrics"
-      title="Host metrics"
-      description="CPU, memory, load average, and filesystem readings. Per-device IOPS, disk latency, and network metrics are not collected."
-    >
+    <Section id="host-metrics" title="Host metrics" captionId="host.section">
       {query.error && !query.data ? (
         <ErrorState
           endpoint="instance host metrics"

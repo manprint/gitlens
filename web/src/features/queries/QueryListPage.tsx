@@ -6,6 +6,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useStatements } from '@/api/queries'
 import { DataTable, type DataTableProps } from '@/components/layout/DataTable'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
+import { InfoHint } from '@/components/layout/InfoHint'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { FULL_SEARCH_HINT, SearchBox } from '@/components/layout/SearchBox'
 import { Section } from '@/components/layout/Section'
@@ -148,7 +149,7 @@ function statementColumns(
     },
     {
       id: 'total-time',
-      meta: { width: '8rem' },
+      meta: { width: '8rem', help: 'statements.total-time' },
       header: 'Total time',
       accessorFn: (row) => summariseStatement(row).total,
       cell: ({ row }) => {
@@ -162,7 +163,7 @@ function statementColumns(
     },
     {
       id: 'mean-time',
-      meta: { width: '8rem' },
+      meta: { width: '8rem', help: 'statements.mean-time' },
       header: 'Mean time',
       accessorFn: (row) => summariseStatement(row).mean,
       cell: ({ row }) => {
@@ -430,7 +431,7 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
       <Section
         id="statement-list"
         title="Statements"
-        description="Statement statistics are scoped to the selected database and time range."
+        captionId="queries.statements-section"
         actions={
           <>
             <label className="text-muted-foreground text-sm font-medium" htmlFor="statement-sort">
@@ -448,6 +449,7 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
                 </option>
               ))}
             </NativeSelect>
+            <InfoHint id="queries.ranking" label="Sort statements" />
           </>
         }
       >
@@ -462,6 +464,7 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
         {rows.length === 0 ? <div className="mb-3 flex">{searchBox}</div> : null}
         <DataTable
           ariaLabel="Statement statistics"
+          captionId="queries.statements-table"
           tableId="statement-statistics"
           columns={statementColumns(instanceId, shownTerm)}
           data={rows}

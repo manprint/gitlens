@@ -115,80 +115,116 @@ export function RuleEditor({ onCancel, rule }: RuleEditorProps) {
       </div>
 
       <form className="grid max-w-xl gap-4" noValidate onSubmit={submit}>
-        <label className="space-y-1 text-sm" htmlFor="rule-threshold">
-          <span className="font-medium">Threshold</span>
-          <Input
-            aria-describedby={errors.threshold ? 'rule-threshold-error' : undefined}
+        <div className="space-y-1">
+          <label className="space-y-1 text-sm" htmlFor="rule-threshold">
+            <span className="font-medium">Threshold</span>
+            <Input
+              aria-describedby={
+                errors.threshold
+                  ? 'rule-threshold-help rule-threshold-error'
+                  : 'rule-threshold-help'
+              }
 
-            id="rule-threshold"
-            inputMode="decimal"
-            onChange={(event) =>
-              setValues((current) => ({ ...current, threshold: event.target.value }))
-            }
-            type="number"
-            value={values.threshold}
-          />
-          {errors.threshold ? (
-            <span className="text-destructive block text-xs" id="rule-threshold-error" role="alert">
-              {errors.threshold}
-            </span>
-          ) : null}
-        </label>
+              id="rule-threshold"
+              inputMode="decimal"
+              onChange={(event) =>
+                setValues((current) => ({ ...current, threshold: event.target.value }))
+              }
+              type="number"
+              value={values.threshold}
+            />
+            {errors.threshold ? (
+              <span
+                className="text-destructive block text-xs"
+                id="rule-threshold-error"
+                role="alert"
+              >
+                {errors.threshold}
+              </span>
+            ) : null}
+          </label>
+          <p className="text-muted-foreground text-xs" id="rule-threshold-help">
+            The rule fires when its metric crosses this value. The unit is that of the rule’s
+            metric, for example seconds for clock skew.
+          </p>
+        </div>
 
-        <label className="space-y-1 text-sm" htmlFor="rule-for-seconds">
-          <span className="font-medium">Duration (seconds)</span>
-          <Input
-            aria-describedby={errors.forSeconds ? 'rule-for-seconds-error' : undefined}
+        <div className="space-y-1">
+          <label className="space-y-1 text-sm" htmlFor="rule-for-seconds">
+            <span className="font-medium">Duration (seconds)</span>
+            <Input
+              aria-describedby={
+                errors.forSeconds
+                  ? 'rule-for-seconds-help rule-for-seconds-error'
+                  : 'rule-for-seconds-help'
+              }
 
-            id="rule-for-seconds"
-            min="0"
-            onChange={(event) =>
-              setValues((current) => ({ ...current, forSeconds: event.target.value }))
-            }
-            step="1"
-            type="number"
-            value={values.forSeconds}
-          />
-          {errors.forSeconds ? (
-            <span
-              className="text-destructive block text-xs"
-              id="rule-for-seconds-error"
-              role="alert"
+              id="rule-for-seconds"
+              min="0"
+              onChange={(event) =>
+                setValues((current) => ({ ...current, forSeconds: event.target.value }))
+              }
+              step="1"
+              type="number"
+              value={values.forSeconds}
+            />
+            {errors.forSeconds ? (
+              <span
+                className="text-destructive block text-xs"
+                id="rule-for-seconds-error"
+                role="alert"
+              >
+                {errors.forSeconds}
+              </span>
+            ) : null}
+          </label>
+          <p className="text-muted-foreground text-xs" id="rule-for-seconds-help">
+            How long the condition must hold before the alert fires; 0 fires at the first
+            evaluation.
+          </p>
+        </div>
+
+        <div className="space-y-1">
+          <label className="space-y-1 text-sm" htmlFor="rule-severity">
+            <span className="font-medium">Severity</span>
+            <NativeSelect
+              aria-describedby="rule-severity-help"
+              className="w-full"
+              id="rule-severity"
+              onChange={(event) =>
+                setValues((current) => ({ ...current, severity: event.target.value as Severity }))
+              }
+              value={values.severity}
             >
-              {errors.forSeconds}
-            </span>
-          ) : null}
-        </label>
+              {SEVERITIES.map((severity) => (
+                <option key={severity} value={severity}>
+                  {severity}
+                </option>
+              ))}
+            </NativeSelect>
+          </label>
+          <p className="text-muted-foreground text-xs" id="rule-severity-help">
+            The severity given to alerts this rule raises; it ranks them in the alert list.
+          </p>
+        </div>
 
-        <label className="space-y-1 text-sm" htmlFor="rule-severity">
-          <span className="font-medium">Severity</span>
-          <NativeSelect
-            className="w-full"
-            id="rule-severity"
-            onChange={(event) =>
-              setValues((current) => ({ ...current, severity: event.target.value as Severity }))
-            }
-            value={values.severity}
-          >
-            {SEVERITIES.map((severity) => (
-              <option key={severity} value={severity}>
-                {severity}
-              </option>
-            ))}
-          </NativeSelect>
-        </label>
-
-        <label className="flex items-center gap-2 text-sm" htmlFor="rule-enabled">
-          <input
-            checked={values.enabled}
-            id="rule-enabled"
-            onChange={(event) =>
-              setValues((current) => ({ ...current, enabled: event.target.checked }))
-            }
-            type="checkbox"
-          />
-          <span className="font-medium">Enabled</span>
-        </label>
+        <div className="space-y-1">
+          <label className="flex items-center gap-2 text-sm" htmlFor="rule-enabled">
+            <input
+              aria-describedby="rule-enabled-help"
+              checked={values.enabled}
+              id="rule-enabled"
+              onChange={(event) =>
+                setValues((current) => ({ ...current, enabled: event.target.checked }))
+              }
+              type="checkbox"
+            />
+            <span className="font-medium">Enabled</span>
+          </label>
+          <p className="text-muted-foreground text-xs" id="rule-enabled-help">
+            A rule that is switched off is not evaluated and raises no alerts.
+          </p>
+        </div>
 
         {mutation.isError ? (
           <Callout variant="destructive">{mutation.error.message}</Callout>

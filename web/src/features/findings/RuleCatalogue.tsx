@@ -7,6 +7,7 @@ import {
   type DataTableToolbar,
 } from '@/components/layout/DataTable'
 import { EmptyState } from '@/components/state'
+import { InfoHint } from '@/components/layout/InfoHint'
 import { Section } from '@/components/layout/Section'
 import { Badge } from '@/components/ui/badge'
 import { useKeepFocus } from '@/hooks/useKeepFocus'
@@ -198,20 +199,23 @@ export function RuleCatalogue({ rules, findings }: RuleCatalogueProps) {
         </NativeSelect>
       </CatalogueFilter>
       <CatalogueFilter label="Available at or below">
-        <NativeSelect
-          aria-label="Available at or below"
-          className="h-8 px-2 text-sm"
-          id="catalogue-tier"
-          onChange={(event) => setMaxTier(event.target.value)}
-          value={maxTier}
-        >
-          <option value="all">All permission tiers</option>
-          {permissionTiers.map((tier) => (
-            <option key={tier} value={tier}>
-              {tier}
-            </option>
-          ))}
-        </NativeSelect>
+        <div className="flex items-center gap-1">
+          <NativeSelect
+            aria-label="Available at or below"
+            className="h-8 px-2 text-sm"
+            id="catalogue-tier"
+            onChange={(event) => setMaxTier(event.target.value)}
+            value={maxTier}
+          >
+            <option value="all">All permission tiers</option>
+            {permissionTiers.map((tier) => (
+              <option key={tier} value={tier}>
+                {tier}
+              </option>
+            ))}
+          </NativeSelect>
+          <InfoHint id="findings.catalogue-tier" label="Available at or below filter" />
+        </div>
       </CatalogueFilter>
     </>
   )
@@ -226,10 +230,7 @@ export function RuleCatalogue({ rules, findings }: RuleCatalogueProps) {
   )
 
   return (
-    <Section
-      title="Rule catalogue"
-      description="See which checks are available at each permission tier and how many targets currently exercise them."
-    >
+    <Section title="Rule catalogue" captionId="findings.rule-catalogue">
       {empty ? (
         // The table hides its toolbar without rows, so the filters that
         // emptied it stay reachable here.
@@ -240,6 +241,7 @@ export function RuleCatalogue({ rules, findings }: RuleCatalogueProps) {
       ) : (
         <DataTable
           ariaLabel="Advisor rule catalogue"
+          captionId="findings.rule-catalogue-table"
           tableId="advisor-rule-catalogue"
           toolbar={RULE_TOOLBAR}
           toolbarExtra={filterControls}

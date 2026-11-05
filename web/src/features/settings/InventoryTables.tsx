@@ -218,7 +218,7 @@ function DatabaseInventory({ instance }: { instance: InstanceRow }) {
 
   if (query.error && !query.data) {
     return (
-      <Section title={title} description="Database inventory for this monitored instance.">
+      <Section captionId="settings.inventory-databases-instance" title={title}>
         <ErrorState
           endpoint={`databases for ${label}`}
           failure={query.error}
@@ -229,7 +229,7 @@ function DatabaseInventory({ instance }: { instance: InstanceRow }) {
   }
   if (query.isPending || query.data === undefined) {
     return (
-      <Section title={title} description="Database inventory for this monitored instance.">
+      <Section captionId="settings.inventory-databases-instance" title={title}>
         <section aria-busy="true" aria-label={`Loading databases for ${label}`} role="status">
           Loading databases…
         </section>
@@ -245,12 +245,15 @@ function DatabaseInventory({ instance }: { instance: InstanceRow }) {
     .map((database) => ({ ...database, skip_reason: database.skip_reason ?? '—' }))
 
   return (
-    <Section
-      title={title}
-      description={`Database inventory for this monitored instance. Databases not monitored: ${query.data.not_monitored_count}.`}
-    >
+    <Section captionId="settings.inventory-databases-instance" title={title}>
       <DataTable
         ariaLabel={`Databases for ${label}`}
+        captionId="settings.inventory-databases-table"
+        toolbarExtra={
+          <span className="text-muted-foreground text-sm">
+            Databases not monitored: {query.data.not_monitored_count}.
+          </span>
+        }
         tableId={`instance-databases-${instance.instance_id}`}
         toolbar={DATABASE_TOOLBAR}
         columns={databaseColumns()}
@@ -270,10 +273,7 @@ function DatabaseInventory({ instance }: { instance: InstanceRow }) {
 
 function TierSummary({ instances, rules }: Pick<InventoryTablesProps, 'instances' | 'rules'>) {
   return (
-    <Section
-      title="Permission tiers"
-      description="Counts and capabilities are based on the live advisor rule catalogue and the permission contract."
-    >
+    <Section captionId="settings.permission-tiers" title="Permission tiers">
       <div className="grid gap-4 md:grid-cols-3">
         {permissionTiers.map((tier) => {
           const unlockedRules = rules.filter((rule) => tierRank[rule.min_tier] <= tierRank[tier])
@@ -368,12 +368,14 @@ function AgentInventory({ instances, alerts }: Pick<InventoryTablesProps, 'insta
   })
 
   return (
-    <Section
-      title="Agents (derived from instance telemetry)"
-      description="The API has no separate agent listing endpoint. This view derives agent state from instance last_seen/up data and firing agent_down alerts."
-    >
+    <Section captionId="settings.inventory-agents" title="Agents (derived from instance telemetry)">
+      <p className="text-muted-foreground mb-3 text-sm">
+        The API has no separate agent listing endpoint. This view derives agent state from instance
+        last_seen/up data and firing agent_down alerts.
+      </p>
       <DataTable
         ariaLabel="Derived agent inventory"
+        captionId="settings.inventory-agents-table"
         tableId="derived-agent-inventory"
         toolbar={AGENT_TOOLBAR}
         columns={[
@@ -455,12 +457,10 @@ export function InventoryTables({ alerts, clusters, instances, rules }: Inventor
     <Tabs className="gap-4" onValueChange={showView} value={view}>
       <InstanceViewTabs label="Inventory views" views={INVENTORY_VIEWS} />
       <TabsContent value="instances">
-        <Section
-          title="Instances"
-          description="Every monitored PostgreSQL instance, its cluster relationship, permission tier, and telemetry availability."
-        >
+        <Section captionId="settings.inventory-instances" title="Instances">
           <DataTable
             ariaLabel="Monitored instances"
+            captionId="settings.inventory-instances-table"
             tableId="monitored-instances"
             toolbar={INSTANCE_TOOLBAR}
             columns={instanceTableColumns}
@@ -485,10 +485,7 @@ export function InventoryTables({ alerts, clusters, instances, rules }: Inventor
       </TabsContent>
 
       <TabsContent value="databases">
-        <Section
-          title="Databases by instance"
-          description="Unmonitored databases appear first because their skip reason needs operator attention."
-        >
+        <Section captionId="settings.inventory-databases" title="Databases by instance">
           {query !== '' ? (
             // The search box is in the Instances view; say so here, where it still filters.
             <Callout className="mb-4" role="status">

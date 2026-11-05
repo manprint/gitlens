@@ -50,6 +50,7 @@ function StatementMetrics({ statement }: { statement: Statement }) {
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
       <MetricTile
+        captionId="queries.detail-mean-time"
         label="Mean time"
         value={
           statement.mean_exec_time === null || statement.mean_exec_time === undefined
@@ -58,6 +59,7 @@ function StatementMetrics({ statement }: { statement: Statement }) {
         }
       />
       <MetricTile
+        captionId="queries.detail-total-time"
         label="Total time"
         value={
           statement.total_exec_time_ms === null || statement.total_exec_time_ms === undefined
@@ -65,13 +67,24 @@ function StatementMetrics({ statement }: { statement: Statement }) {
             : formatMilliseconds(statement.total_exec_time_ms)
         }
       />
-      <MetricTile label="Calls" value={calls === null ? null : formatCount(calls)} />
       <MetricTile
+        captionId="queries.detail-calls"
+        label="Calls"
+        value={calls === null ? null : formatCount(calls)}
+      />
+      <MetricTile
+        captionId="queries.detail-rows-per-call"
         label="Rows per call"
+        unit="rows"
         value={rowsPerCall === null ? null : formatCount(Math.round(rowsPerCall * 10) / 10)}
       />
-      <MetricTile label="Cache hit ratio" value={cacheHit} />
       <MetricTile
+        captionId="queries.detail-cache-hit-ratio"
+        label="Cache hit ratio"
+        value={cacheHit}
+      />
+      <MetricTile
+        captionId="queries.detail-wal"
         label="WAL generated"
         value={
           statement.wal_bytes === null || statement.wal_bytes === undefined

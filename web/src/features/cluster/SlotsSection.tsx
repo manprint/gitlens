@@ -145,6 +145,7 @@ export function SlotsSection({
       ) : (
         <DataTable
           ariaLabel="Replication slots"
+          captionId="cluster.slots-table"
           tableId="replication-slots"
           toolbar={SLOTS_TOOLBAR}
           columns={columns}

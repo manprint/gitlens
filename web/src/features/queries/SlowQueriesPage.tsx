@@ -7,6 +7,7 @@ import type { Cluster } from '@/api/types'
 import { CopyButton } from '@/components/layout/CopyButton'
 import { DataTable, type DataTableProps } from '@/components/layout/DataTable'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
+import { InfoHint } from '@/components/layout/InfoHint'
 import { MetricTile } from '@/components/layout/MetricTile'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { FULL_SEARCH_HINT, HighlightedText, SearchBox } from '@/components/layout/SearchBox'
@@ -162,6 +163,7 @@ function slowColumns(instanceId: string, term: string): DataTableProps<SlowRow>[
     },
     {
       id: 'mean',
+      meta: { help: 'statements.mean-time' },
       header: 'Mean time',
       accessorFn: (slow) => slow.mean,
       cell: ({ row }) => (
@@ -170,6 +172,7 @@ function slowColumns(instanceId: string, term: string): DataTableProps<SlowRow>[
     },
     {
       id: 'total',
+      meta: { help: 'statements.total-time' },
       header: 'Total time',
       accessorFn: (slow) => slow.total,
       cell: ({ row }) => (
@@ -422,25 +425,30 @@ function InstanceStatements({ controls, instanceId, ranking }: InstanceStatement
           </div>
           <div className="grid gap-4 min-[1600px]:flex min-[1600px]:shrink-0 min-[1600px]:gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <MetricTile
+              captionId="slow.slowest-mean"
               className={HEADER_TILE}
               label="Slowest mean time"
               value={rows.length === 0 ? null : formatMilliseconds(slowestMean)}
             />
             <MetricTile
+              captionId="slow.total-time"
               className={HEADER_TILE}
               label="Time spent by these queries"
               value={rows.length === 0 ? null : formatMilliseconds(totalTime)}
             />
             <MetricTile
+              captionId="slow.calls"
               className={HEADER_TILE}
               label="Calls"
               value={rows.length === 0 ? null : formatCount(totalCalls)}
             />
             <MetricTile
+              captionId="slow.statements-ranked"
               className={HEADER_TILE}
+              detail={`The page ranks at most ${STATEMENT_FETCH_LIMIT} statements.`}
               label="Statements ranked"
+              unit="statements"
               value={String(rows.length)}
-              unit={`of ${STATEMENT_FETCH_LIMIT} max`}
             />
           </div>
         </div>
@@ -467,6 +475,7 @@ function InstanceStatements({ controls, instanceId, ranking }: InstanceStatement
           <div className="p-5 min-[1600px]:p-3">
             <DataTable
               ariaLabel="Slowest queries"
+              captionId="slow.table"
               columns={columns}
               data={slowRows}
               emptyState={null}
@@ -572,35 +581,38 @@ export function SlowQueriesPage() {
                   <legend className="text-muted-foreground mb-1.5 text-xs font-medium min-[1600px]:sr-only">
                     Rank by
                   </legend>
-                  <div className="bg-muted inline-flex rounded-lg p-1 min-[1600px]:p-0.5">
-                    {RANKINGS.map((option) => {
-                      const Icon = option.value === 'mean' ? Timer : Hash
-                      const active = option.value === ranking
-                      return (
-                        <label
-                          key={option.value}
-                          className={cn(
-                            'has-[:focus-visible]:ring-ring inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-3 text-sm font-medium transition-colors has-[:focus-visible]:ring-2 min-[1600px]:h-7',
-                            active
-                              ? 'bg-card text-foreground shadow-sm'
-                              : 'text-muted-foreground hover:text-foreground',
-                          )}
-                          title={option.hint}
-                        >
-                          <input
-                            checked={active}
-                            id={`slow-rank-${option.value}`}
-                            className="sr-only"
-                            name="slow-rank"
-                            onChange={() => update('rank', option.value)}
-                            type="radio"
-                            value={option.value}
-                          />
-                          <Icon aria-hidden="true" className="size-4" />
-                          {option.label}
-                        </label>
-                      )
-                    })}
+                  <div className="flex items-center gap-1">
+                    <div className="bg-muted inline-flex rounded-lg p-1 min-[1600px]:p-0.5">
+                      {RANKINGS.map((option) => {
+                        const Icon = option.value === 'mean' ? Timer : Hash
+                        const active = option.value === ranking
+                        return (
+                          <label
+                            key={option.value}
+                            className={cn(
+                              'has-[:focus-visible]:ring-ring inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-3 text-sm font-medium transition-colors has-[:focus-visible]:ring-2 min-[1600px]:h-7',
+                              active
+                                ? 'bg-card text-foreground shadow-sm'
+                                : 'text-muted-foreground hover:text-foreground',
+                            )}
+                            title={option.hint}
+                          >
+                            <input
+                              checked={active}
+                              id={`slow-rank-${option.value}`}
+                              className="sr-only"
+                              name="slow-rank"
+                              onChange={() => update('rank', option.value)}
+                              type="radio"
+                              value={option.value}
+                            />
+                            <Icon aria-hidden="true" className="size-4" />
+                            {option.label}
+                          </label>
+                        )
+                      })}
+                    </div>
+                    <InfoHint id="slow.rank-by" label="Rank by" />
                   </div>
                 </fieldset>
               </>

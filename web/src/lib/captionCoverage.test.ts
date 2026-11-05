@@ -122,117 +122,21 @@ function scan() {
   return { missing, dynamic, badUnits }
 }
 
-/** Usages without a caption when 17.1 added the rule (debt to be emptied in 17.2). */
-const CAPTION_ALLOWLIST: Record<string, Partial<Record<Tag, number>>> = {
-  'features/alerts/AlertsPage.tsx': {
-    Section: 3,
-  },
-  'features/alerts/EventsPage.tsx': {
-    Section: 2,
-  },
-  'features/alerts/RulesPage.tsx': {
-    Section: 2,
-  },
-  'features/alerts/SilencesPage.tsx': {
-    Section: 1,
-  },
-  'features/ash/AshBreakdown.tsx': {
-    ChartCard: 1,
-    Section: 1,
-  },
-  'features/ash/AshChartGrid.tsx': {
-    ChartCard: 1,
-  },
-  'features/ash/AshTopQueries.tsx': {
-    Section: 1,
-  },
-  'features/cluster/DriftSection.tsx': {
-    DataTable: 1,
-  },
-  'features/cluster/SlotsSection.tsx': {
-    DataTable: 1,
-  },
-  'features/findings/FindingsPage.tsx': {
-    Section: 1,
-  },
-  'features/findings/RuleCatalogue.tsx': {
-    DataTable: 1,
-    Section: 1,
-  },
-  'features/fleet/FleetPage.tsx': {
-    Section: 1,
-  },
-  'features/indexes/IndexesPanel.tsx': {
-    MetricTile: 8,
-  },
-  'features/instance/CatalogSection.tsx': {
-    DataTable: 2,
-  },
-  'features/instance/DatabaseSelector.tsx': {
-    Section: 1,
-  },
-  'features/instance/HostCharts.tsx': {
-    ChartCard: 2,
-  },
-  'features/instance/HostSection.tsx': {
-    MetricTile: 1,
-    Section: 1,
-  },
-  'features/instance/InternalsSection.tsx': {
-    DataTable: 4,
-    MetricTile: 2,
-  },
-  'features/instance/LogicalReplicationSection.tsx': {
-    DataTable: 2,
-  },
-  'features/instance/OverviewCharts.tsx': {
-    ChartCard: 1,
-  },
-  'features/instance/OverviewSection.tsx': {
-    MetricTile: 8,
-    Section: 1,
-  },
-  'features/locks/ActivitySection.tsx': {
-    MetricTile: 8,
-    Section: 1,
-  },
-  'features/locks/BlockingTree.tsx': {
-    Section: 2,
-  },
-  'features/queries/QueryListPage.tsx': {
-    DataTable: 1,
-    Section: 1,
-  },
-  'features/queries/QueryOverview.tsx': {
-    MetricTile: 6,
-  },
-  'features/queries/SlowQueriesPage.tsx': {
-    DataTable: 1,
-    MetricTile: 4,
-  },
-  'features/settings/CommandAudit.tsx': {
-    Section: 2,
-  },
-  'features/settings/InventoryTables.tsx': {
-    DataTable: 3,
-    Section: 7,
-  },
-  'features/settings/ServerInfo.tsx': {
-    Section: 4,
-  },
-}
+/** Usages without a caption: none since 17.2 emptied the list; a new usage must carry one. */
+const CAPTION_ALLOWLIST: Record<string, Partial<Record<Tag, number>>> = {}
 
 /** Computed caption ids; each needs a run-time test that its specs all have one. */
-const DYNAMIC_ALLOWLIST: Record<string, Partial<Record<Tag, number>>> = {}
-
-/** `MetricTile` usages with a number or free text in `unit` (debt to be emptied in 17.2). */
-const CARD_ALLOWLIST: Record<string, number> = {
-  'features/indexes/IndexesPanel.tsx': 2,
-  'features/instance/InternalsSection.tsx': 1,
-  'features/instance/OverviewSection.tsx': 1,
-  'features/locks/ActivitySection.tsx': 1,
-  'features/queries/SlowQueriesPage.tsx': 1,
+const DYNAMIC_ALLOWLIST: Record<string, Partial<Record<Tag, number>>> = {
+  'features/ash/AshBreakdown.tsx': { ChartCard: 1 },
+  'features/ash/AshChartGrid.tsx': { ChartCard: 1 },
+  'features/instance/CatalogSection.tsx': { DataTable: 2 },
+  'features/instance/HostCharts.tsx': { ChartCard: 2 },
+  'features/instance/HostSection.tsx': { MetricTile: 1 },
+  'features/instance/OverviewCharts.tsx': { ChartCard: 1 },
 }
+
+/** `MetricTile` usages with a number or free text in `unit`: none since 17.2. */
+const CARD_ALLOWLIST: Record<string, number> = {}
 
 describe('caption and card coverage (D30, D31)', () => {
   const result = scan()

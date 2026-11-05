@@ -2,7 +2,7 @@
  * The sections of the instance page, one tab each (15.2, D26): the single
  * registry used by the page, the Full HD route inventory and the tests.
  * `charts` sections are exempt from the Full HD vertical rule only.
- * `captionId` is the section's ⓘ caption, a placeholder until 17.1 fills it.
+ * `captionId` is the section's ⓘ caption; null for the sections of other route groups.
  */
 
 export const INSTANCE_SECTIONS = [
@@ -11,9 +11,15 @@ export const INSTANCE_SECTIONS = [
     label: 'Overview',
     kind: 'charts',
     legacyHash: 'instance-overview',
-    captionId: null,
+    captionId: 'overview.section',
   },
-  { id: 'host', label: 'Host', kind: 'charts', legacyHash: 'host-metrics', captionId: null },
+  {
+    id: 'host',
+    label: 'Host',
+    kind: 'charts',
+    legacyHash: 'host-metrics',
+    captionId: 'host.section',
+  },
   { id: 'settings', label: 'Settings', kind: 'table', legacyHash: 'settings', captionId: null },
   {
     id: 'relations',
@@ -22,21 +28,33 @@ export const INSTANCE_SECTIONS = [
     legacyHash: 'instance-relations',
     captionId: null,
   },
-  { id: 'catalog', label: 'Schema objects', kind: 'table', legacyHash: 'catalog', captionId: null },
+  {
+    id: 'catalog',
+    label: 'Schema objects',
+    kind: 'table',
+    legacyHash: 'catalog',
+    captionId: 'catalog.section',
+  },
   {
     id: 'logical',
     label: 'Logical replication',
     kind: 'table',
     legacyHash: 'logical-replication',
-    captionId: null,
+    captionId: 'logical.section',
   },
-  { id: 'internals', label: 'Internals', kind: 'table', legacyHash: 'internals', captionId: null },
+  {
+    id: 'internals',
+    label: 'Internals',
+    kind: 'table',
+    legacyHash: 'internals',
+    captionId: 'internals.section',
+  },
   {
     id: 'readiness',
     label: 'Readiness',
     kind: 'table',
     legacyHash: 'readiness',
-    captionId: null,
+    captionId: 'instance.readiness',
   },
 ] as const
 

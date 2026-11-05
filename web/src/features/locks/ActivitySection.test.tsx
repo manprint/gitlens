@@ -21,7 +21,7 @@ function response(metrics: ActivityResponseLike['metrics']): ActivityResponseLik
 }
 
 describe('ActivitySection', () => {
-  it('UI-LOCK-020 uses the conn.near_max 80 percent threshold', () => {
+  it('UI-LOCK-020 uses the conn.saturation 80 percent threshold', () => {
     render(
       <ActivitySection
         response={response({
@@ -34,7 +34,7 @@ describe('ActivitySection', () => {
     )
 
     expect(screen.getByText(/Near max_connections/)).toBeInTheDocument()
-    expect(screen.getByText(/The conn.near_max advisor threshold/)).toHaveTextContent(
+    expect(screen.getByText(/The conn.saturation advisor threshold/)).toHaveTextContent(
       'Connections above 80 percent of max_connections',
     )
   })

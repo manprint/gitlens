@@ -168,7 +168,12 @@ export function SessionsTable({
     [currentTier, instanceId, sampleStale, sessions],
   )
   return (
-    <div className="space-y-2" data-caption-id={meta.captionId} data-origin-table={origin}>
+    <div
+      className="space-y-2"
+      data-caption-id={meta.captionId}
+      data-card=""
+      data-origin-table={origin}
+    >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <div className="flex items-center gap-1">
           <h3 className="font-medium">{meta.title}</h3>

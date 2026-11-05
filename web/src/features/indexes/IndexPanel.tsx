@@ -120,6 +120,8 @@ export function IndexPanel({
   return (
     <section
       aria-labelledby={titleId}
+      data-card=""
+      {...(captionId === undefined ? {} : { 'data-caption-id': captionId })}
       className="bg-card shadow-card overflow-hidden rounded-xl border"
     >
       <div

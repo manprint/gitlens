@@ -134,45 +134,54 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
   const tempFilesInRange = integrateRate(tempFileRate, databaseRateStep)
 
   return (
-    <Section
-      id="instance-overview"
-      title="Instance overview"
-      description={`Transactions, cache hit ratio, temporary files and bytes, and deadlocks are for database ${database}; connections, WAL and checkpoints are instance-wide; query, table and index charts cover the statements, tables and indexes the agent tracks in every database. Each chart states its range and query step. Null buckets remain gaps; dashed lines mark data gaps or counter resets.`}
-    >
+    <Section id="instance-overview" title="Instance overview" captionId="overview.section">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricTile
           label="Connections in use"
-          unit={
+          unit="connections"
+          captionId="activity.connections-used"
+          detail={
             <>
-              of{' '}
-              {latestConnectionsLimit === null ? <Unknown /> : formatCount(latestConnectionsLimit)}
+              Out of a configured maximum of{' '}
+              {latestConnectionsLimit === null ? <Unknown /> : formatCount(latestConnectionsLimit)}{' '}
+              connections.
             </>
           }
           value={formattedCount(latestValue(connectionsUsed))}
         />
         <MetricTile
           label="Transactions per second"
+          captionId="overview.tx-rate"
           value={formattedRate(latestValue(transactionRate))}
         />
-        <MetricTile label="Cache hit ratio" value={latestCacheHitRatio} />
+        <MetricTile
+          label="Cache hit ratio"
+          captionId="overview.cache-hit-ratio"
+          value={latestCacheHitRatio}
+        />
         <MetricTile
           label="WAL generated in range"
+          captionId="overview.wal-in-range"
           value={formattedBytes(integrateRate(walRate, walStep))}
         />
         <MetricTile
           label="Checkpoints in range"
+          captionId="overview.checkpoints-in-range"
           value={checkpointsInRange === null ? null : formatCount(Math.round(checkpointsInRange))}
         />
         <MetricTile
           label="Temporary bytes in range"
+          captionId="overview.temp-bytes-in-range"
           value={formattedBytes(integrateRate(tempByteRate, databaseRateStep))}
         />
         <MetricTile
           label="Temporary files in range"
+          captionId="overview.temp-files-in-range"
           value={tempFilesInRange === null ? null : formatCount(Math.round(tempFilesInRange))}
         />
         <MetricTile
           label="Deadlocks in range"
+          captionId="overview.deadlocks-in-range"
           value={deadlocksInRange === null ? null : formatCount(Math.round(deadlocksInRange))}
         />
       </div>

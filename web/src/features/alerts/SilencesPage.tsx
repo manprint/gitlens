@@ -264,10 +264,7 @@ export function SilencesPage() {
         />
       ) : null}
 
-      <Section
-        title="Stored silences"
-        description="Pending, active, and expired silences are listed for auditability."
-      >
+      <Section captionId="silences.list" title="Stored silences">
         {sortedSilences.length === 0 ? (
           <EmptyState description="No silences have been created." title="No stored silences" />
         ) : (

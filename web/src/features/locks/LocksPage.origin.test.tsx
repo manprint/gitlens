@@ -66,7 +66,7 @@ describe('origin sessions on the Locks page', () => {
 
     expect(
       within(screen.getByRole('article', { name: 'Connections used / max_connections' })).getByText(
-        'application 2 · pglens 1',
+        '2 application connections · 1 pglens connection',
       ),
     ).toBeInTheDocument()
   })
@@ -76,7 +76,9 @@ describe('origin sessions on the Locks page', () => {
       <ActivitySection connections={withTruncatedConnections.connections} response={activity} />,
     )
 
-    expect(screen.getByText('application 240 · pglens 4')).toBeInTheDocument()
+    expect(
+      screen.getByText('240 application connections · 4 pglens connections'),
+    ).toBeInTheDocument()
   })
 
   it('SORIGIN-UI-006 badges the blocking tree nodes with their origin', () => {

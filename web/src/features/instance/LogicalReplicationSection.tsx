@@ -201,6 +201,7 @@ export function LogicalReplicationSection({ instanceId }: { instanceId: string }
         <TabsContent value="subscriptions">
           <DataTable
             ariaLabel="Subscriptions"
+            captionId="logical.subscriptions"
             tableId="subscriptions"
             toolbar={subscriptionFilters}
             columns={subscriptions}
@@ -213,6 +214,7 @@ export function LogicalReplicationSection({ instanceId }: { instanceId: string }
         <TabsContent value="slots">
           <DataTable
             ariaLabel="Logical slots"
+            captionId="logical.slots"
             tableId="logical-slots"
             toolbar={SLOT_TOOLBAR}
             toolbarExtra={

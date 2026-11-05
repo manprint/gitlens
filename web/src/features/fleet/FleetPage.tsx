@@ -257,7 +257,12 @@ export function FleetPage() {
 
       <Section
         title="Clusters"
-        description={`${visibleClusters.length} of ${clusters.length} clusters shown`}
+        captionId="fleet.clusters"
+        actions={
+          <span className="text-muted-foreground text-sm">
+            {visibleClusters.length} of {clusters.length} clusters shown
+          </span>
+        }
       >
         {visibleClusters.length > 0 ? (
           <div

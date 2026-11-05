@@ -41,10 +41,7 @@ export function DatabaseSelector({ databases, notMonitoredCount }: DatabaseSelec
   }
 
   return (
-    <Section
-      title="Database scope"
-      description="Per-database metrics are shown for one monitored database at a time."
-    >
+    <Section title="Database scope" captionId="instance.database-scope">
       {partition.monitored.length > 0 ? (
         <div className="mb-4 flex max-w-xl flex-col gap-1.5">
           <label className="text-sm font-medium" htmlFor="instance-database-selector">

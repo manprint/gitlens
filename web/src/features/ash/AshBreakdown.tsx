@@ -11,6 +11,7 @@ import {
 } from '@/components/charts/ash.options'
 import { foldOther, orderGroups, toStackedSeries, type AshBucket, type AshGroupBy } from '@/lib/ash'
 import { groupSeries } from '@/lib/ashGroups'
+import type { CaptionId } from '@/lib/captions'
 
 const MAX_VISIBLE_SERIES = ASH_WAIT_TYPES.length
 const OTHER = 'other'
@@ -22,6 +23,15 @@ const GROUP_LABELS: Record<
   queryid: 'Queries',
   wait_event: 'Wait events',
   wait_event_type: 'Wait event types',
+}
+
+const STACK_CAPTIONS: Record<
+  Extract<AshGroupBy, 'wait_event_type' | 'wait_event' | 'queryid'>,
+  CaptionId
+> = {
+  queryid: 'ash.stack-queries',
+  wait_event: 'ash.stack-events',
+  wait_event_type: 'ash.stack-types',
 }
 
 interface AshBreakdownProps {
@@ -121,12 +131,14 @@ export function AshBreakdown({
   const title = GROUP_LABELS[groupBy]
   const eventTypes = eventTypesOf(buckets)
   const interactionProps = onSeriesSelect === undefined ? {} : { onSeriesSelect }
-  const description = filterLabel
-    ? `${title} filtered by ${filterLabel}. Select a plotted series to drill deeper.`
-    : `Select a plotted series to drill from ${title.toLocaleLowerCase('en-US')} to the next level.`
-
-  return (
-    <Section title={title} description={description}>
+  const filterNote = filterLabel ? (
+    <p className="text-muted-foreground mb-3 text-sm">
+      {title} filtered by {filterLabel}.
+    </p>
+  ) : null
+  const body = (
+    <>
+      {filterNote}
       {series.length > 0 && view === 'separate' && groupBy !== 'queryid' ? (
         <AshChartGrid
           eventTypes={eventTypes}
@@ -139,6 +151,7 @@ export function AshBreakdown({
         />
       ) : series.length > 0 ? (
         <ChartCard
+          captionId={STACK_CAPTIONS[groupBy]}
           range={range}
           state="ready"
           stepSeconds={resolutionSeconds ?? 0}
@@ -159,6 +172,26 @@ export function AshBreakdown({
           description="The selected time range contains no sampled activity for this breakdown."
         />
       )}
+    </>
+  )
+
+  if (groupBy === 'wait_event_type') {
+    return (
+      <Section captionId="ash.breakdown-types" title={title}>
+        {body}
+      </Section>
+    )
+  }
+  if (groupBy === 'wait_event') {
+    return (
+      <Section captionId="ash.breakdown-events" title={title}>
+        {body}
+      </Section>
+    )
+  }
+  return (
+    <Section captionId="ash.breakdown-queries" title={title}>
+      {body}
     </Section>
   )
 }

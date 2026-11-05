@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 
 import { CopyButton } from '@/components/layout/CopyButton'
 import { Badge } from '@/components/ui/badge'
+import { CAPTIONS } from '@/lib/captions'
 import { CHANNEL_LABEL, groupByChannel, type ReadinessFix } from '@/lib/readiness'
 
 /**
@@ -14,7 +15,15 @@ function Fix({ fix }: { fix: ReadinessFix }) {
     <li className="space-y-2 rounded-md border p-3" data-testid="readiness-fix">
       <div className="flex flex-wrap items-center gap-2">
         <h5 className="text-sm font-medium">{fix.title}</h5>
-        {fix.requires_restart ? <Badge variant="warning">Requires restart</Badge> : null}
+        {fix.requires_restart ? (
+          <Badge
+            data-caption-id="readiness.requires-restart"
+            title={CAPTIONS['readiness.requires-restart'].what}
+            variant="warning"
+          >
+            Requires restart
+          </Badge>
+        ) : null}
       </div>
       {fix.steps.length > 0 ? (
         <ol className="list-decimal space-y-1 pl-5 text-sm">

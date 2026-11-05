@@ -648,9 +648,9 @@ describe('FindingsPage', () => {
     expect(within(summary).getByRole('button', { name: /Warning\s+1/ })).toHaveClass(
       'min-[1600px]:h-6',
     )
-    // The count is a polite live region inside the truncated description line.
+    // The count is a polite live region on its own truncated line of the filter group (17.2).
     const description = within(section).getByText(/0 resolved findings are hidden/, {
-      selector: 'p.min-\\[1600px\\]\\:truncate > span',
+      selector: 'p.min-\\[1600px\\]\\:truncate',
     })
     expect(description).toHaveAttribute('aria-live', 'polite')
     expect(description).toHaveAttribute(

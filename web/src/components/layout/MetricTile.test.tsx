@@ -31,7 +31,9 @@ describe('MetricTile card contract (D31)', () => {
   })
 
   it('CARD-003 a caption id marks the tile and puts the explanation behind its ⓘ', () => {
-    render(<MetricTile captionId="overview.tps" label="Transactions" value="42" unit="/s" />)
+    render(
+      <MetricTile captionId="overview.tps" label="Transactions" value="42" unit="per second" />,
+    )
     const tile = screen.getByRole('article', { name: 'Transactions' })
     expect(tile).toHaveAttribute('data-caption-id', 'overview.tps')
     // CAPCMP-005: no visible caption line on a tile, the ⓘ carries it.

@@ -18,7 +18,17 @@ import {
   type AshWaitGroupId,
 } from '@/lib/ashGroups'
 
+import type { CaptionId } from '@/lib/captions'
+
 import { AshLegend } from './AshLegend'
+
+const GROUP_CAPTIONS: Record<AshWaitGroupId, CaptionId> = {
+  client: 'ash.chart-client',
+  cpu: 'ash.chart-cpu',
+  io: 'ash.chart-io',
+  locks: 'ash.chart-locks',
+  other: 'ash.chart-other',
+}
 
 /** Charts of the grid share one tooltip pointer and zoom through this group. */
 export const ASH_CHART_GROUP = 'ash-wait-groups'
@@ -97,6 +107,7 @@ export function AshChartGrid({
 
         return (
           <ChartCard
+            captionId={GROUP_CAPTIONS[group.id]}
             key={group.id}
             range={range}
             state="ready"

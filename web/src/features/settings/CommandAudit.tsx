@@ -184,7 +184,7 @@ function InstanceCommandAudit({ instance }: { instance: InstanceSummary }) {
   }
 
   return (
-    <Section description={`Newest activity first for ${label}.`} title={label}>
+    <Section captionId="settings.command-audit-instance" title={label}>
       <SimpleTable
         ariaLabel={`Command audit for ${label}`}
         columns={AUDIT_COLUMNS}
@@ -201,10 +201,7 @@ function InstanceCommandAudit({ instance }: { instance: InstanceSummary }) {
 
 export function CommandAudit({ instances }: CommandAuditProps) {
   return (
-    <Section
-      description="This audit records the action and the credential that requested it (an API token or a UI session, and the client address), not the person: pglens has no user identity, accounts, or roles."
-      title="Command audit"
-    >
+    <Section captionId="settings.command-audit" title="Command audit">
       {instances.length === 0 ? (
         <EmptyState
           description="Add a monitored PostgreSQL instance to see command activity."

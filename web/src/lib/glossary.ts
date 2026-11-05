@@ -36,6 +36,10 @@ export const glossary = {
       'Active session history: samples of what every connected session was doing, taken every few seconds.',
   },
   FK: { short: 'Foreign key: a column that must match a key of another table.' },
+  IPC: {
+    short:
+      'Inter-process communication: a wait for another server process, such as a parallel worker.',
+  },
   PK: { short: 'Primary key: the column or columns that identify each row of a table.' },
   SLRU: {
     short:

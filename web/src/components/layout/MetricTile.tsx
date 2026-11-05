@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 
 import type { CaptionId } from '@/lib/captions'
+import { formatUnit, type TileUnit } from '@/lib/units'
 import { cn } from '@/lib/utils'
 
 import { Unknown } from '../state/Unknown'
@@ -18,7 +19,8 @@ const TONE_DOT: Record<TileTone, string> = {
 interface MetricTileProps {
   label: string
   value: ReactNode
-  unit?: ReactNode
+  /** One of the closed list (D31); anything else goes in `detail`. */
+  unit?: TileUnit | undefined
   sparkline?: ReactNode
   /** Extra classes, such as a tighter padding where tiles share a header. */
   className?: string
@@ -44,6 +46,7 @@ export function MetricTile({
   return (
     <article
       aria-label={label}
+      data-card=""
       {...(captionId === undefined ? {} : { 'data-caption-id': captionId })}
       className={cn(
         'bg-card shadow-card hover:border-primary/30 relative rounded-xl border p-4 transition-colors min-[1600px]:flex min-[1600px]:items-baseline min-[1600px]:justify-between min-[1600px]:gap-x-3 min-[1600px]:px-4 min-[1600px]:py-3',
@@ -58,7 +61,7 @@ export function MetricTile({
         <span className="text-foreground text-2xl font-semibold tracking-tight tabular-nums min-[1600px]:text-xl">
           {value ?? <Unknown />}
         </span>
-        {unit ? <span className="text-muted-foreground text-sm">{unit}</span> : null}
+        {unit ? <span className="text-muted-foreground text-sm">{formatUnit(unit)}</span> : null}
       </div>
       {status ? (
         <p

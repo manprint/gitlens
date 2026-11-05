@@ -163,6 +163,10 @@ export function SilenceEditor({
       >
         <fieldset className="space-y-3">
           <legend className="font-medium">Matchers</legend>
+          <p className="text-muted-foreground text-xs" id="silence-matchers-help">
+            An alert is silenced when it matches every matcher. The name is rule_id, severity,
+            cluster_id, instance_id, datname or any alert label; the value must equal it exactly.
+          </p>
           {matchers.map((matcher, index) => (
             <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]" key={index}>
               <label>
@@ -226,6 +230,7 @@ export function SilenceEditor({
           <label>
             <span className="text-sm">Start</span>
             <Input
+              aria-describedby="silence-window-help"
               aria-label="Start"
               onChange={(event) => setStartsAt(event.target.value)}
               type="datetime-local"
@@ -235,6 +240,7 @@ export function SilenceEditor({
           <label>
             <span className="text-sm">End</span>
             <Input
+              aria-describedby="silence-window-help"
               aria-label="End"
               onChange={(event) => setEndsAt(event.target.value)}
               type="datetime-local"
@@ -242,6 +248,10 @@ export function SilenceEditor({
             />
           </label>
         </div>
+        <p className="text-muted-foreground text-xs" id="silence-window-help">
+          The silence is in effect from Start until End, read in your browser’s time zone and stored
+          in UTC. A preset sets Start to now and End 1, 4 or 24 hours later.
+        </p>
         <div aria-label="Silence duration presets" className="flex flex-wrap gap-2" role="group">
           <span className="text-sm">Presets:</span>
           {[1, 4, 24].map((hours) => (

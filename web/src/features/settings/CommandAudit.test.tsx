@@ -144,8 +144,9 @@ describe('CommandAudit', () => {
     expect(auditTable().getByText('requested')).toBeInTheDocument()
     expect(screen.getByText(/Recorded:/)).toBeInTheDocument()
     expect(screen.queryByText(/Executed:/)).not.toBeInTheDocument()
-    expect(screen.getByText(/credential that requested it/i)).toBeInTheDocument()
-    expect(screen.getByText(/not the person/i)).toBeInTheDocument()
+    // The caption line and the hint tooltip both hold the sentence.
+    expect(screen.getAllByText(/credential that requested it/i)[0]).toBeVisible()
+    expect(screen.getAllByText(/not the person/i)[0]).toBeVisible()
   })
 
   it('UI-SET-024 shows an empty state when no commands were recorded', async () => {

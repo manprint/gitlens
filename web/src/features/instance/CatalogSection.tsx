@@ -14,6 +14,7 @@ import {
 import type { RowData } from '@tanstack/react-table'
 
 import type { Schemas } from '@/api/types'
+import type { CaptionId } from '@/lib/captions'
 import {
   DataTable,
   type DataTableProps,
@@ -130,11 +131,17 @@ function titleOf<T>(title: (row: T) => string): (row: unknown) => string {
  * empty state, where a filter that matched nothing can be undone.
  */
 function CatalogTable<T extends RowData>({
+  captionId,
   controls,
   notes,
   dense = false,
   ...table
-}: DataTableProps<T> & { controls: ReactNode; notes?: ReactNode; dense?: boolean }) {
+}: DataTableProps<T> & {
+  captionId: CaptionId
+  controls: ReactNode
+  notes?: ReactNode
+  dense?: boolean
+}) {
   const extra = (
     <>
       {controls}
@@ -145,11 +152,11 @@ function CatalogTable<T extends RowData>({
     return (
       <div className="space-y-4">
         <div className="flex flex-wrap items-end gap-3">{extra}</div>
-        <DataTable {...table} />
+        <DataTable {...table} captionId={captionId} />
       </div>
     )
   }
-  const content = <DataTable {...table} toolbarExtra={extra} />
+  const content = <DataTable {...table} captionId={captionId} toolbarExtra={extra} />
   return dense ? <div className={DENSE_TABLE}>{content}</div> : content
 }
 
@@ -264,6 +271,7 @@ function TriggersTab({ response }: { response: Schemas['TriggersResponse'] }) {
           />
         </>
       }
+      captionId="catalog.triggers"
       ariaLabel="Triggers"
       tableId="triggers"
       toolbar={TRIGGER_TOOLBAR}
@@ -344,6 +352,7 @@ function UnindexedForeignKeysTab({
           />
         </>
       }
+      captionId="catalog.foreign-keys"
       ariaLabel="Unindexed foreign keys"
       tableId="unindexed-foreign-keys"
       toolbar={FOREIGN_KEY_TOOLBAR}
@@ -423,6 +432,7 @@ function ExtensionsTab({ response }: { response: Schemas['ExtensionsResponse'] }
           />
         </>
       }
+      captionId="catalog.extensions"
       ariaLabel="Extensions"
       tableId="extensions"
       toolbar={EXTENSION_TOOLBAR}
@@ -572,6 +582,7 @@ function PostGISTab({
           />
         </>
       }
+      captionId="catalog.spatial-columns"
       ariaLabel="Spatial columns"
       tableId="spatial-columns"
       toolbar={SPATIAL_TOOLBAR}
@@ -758,6 +769,7 @@ function SequencesTab({ response }: { response: Schemas['SequencesResponse'] }) 
           />
         </>
       }
+      captionId="catalog.sequences"
       ariaLabel="Sequences"
       tableId="sequences"
       toolbar={SEQUENCE_TOOLBAR}
@@ -973,6 +985,7 @@ function PartitionsTab({
       }
       // Ten sortable columns fit 1600 px only with the dense cells (D26).
       dense
+      captionId="catalog.partitions"
       ariaLabel="Partitioned tables"
       tableId="partitioned-tables"
       toolbar={PARTITION_TOOLBAR}
@@ -1075,6 +1088,7 @@ function FunctionsTab({ response }: { response: Schemas['FunctionsResponse'] }) 
           ) : null}
         </>
       }
+      captionId="catalog.functions"
       ariaLabel="Functions"
       tableId="functions"
       toolbar={FUNCTION_TOOLBAR}
@@ -1202,6 +1216,7 @@ function SecurityDefinerTab({
           />
         </>
       }
+      captionId="catalog.security-definer"
       ariaLabel="SECURITY DEFINER functions"
       tableId="security-definer-functions"
       toolbar={SECURITY_DEFINER_TOOLBAR}

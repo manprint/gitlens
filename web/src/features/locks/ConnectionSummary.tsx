@@ -66,7 +66,7 @@ function GroupRows({
 export function ConnectionSummary({ connections }: { connections: ConnectionsSummary }) {
   const [group, setGroup] = useState<ConnectionGroupId>('by_origin')
   return (
-    <div className="space-y-2" data-caption-id="locks.connection-summary">
+    <div className="space-y-2" data-caption-id="locks.connection-summary" data-card="">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <div className="flex items-center gap-1">
           <h3 className="font-medium">Connection summary</h3>

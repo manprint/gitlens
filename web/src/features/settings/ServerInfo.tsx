@@ -49,10 +49,7 @@ export function ServerInfo() {
   return (
     // From 1600 px the cards and the limit rows are tighter, so the view fits a Full HD screen (D26).
     <div className="grid gap-8 min-[1600px]:gap-4 lg:grid-cols-2">
-      <Section
-        description="Build and session details reported by this pglens server."
-        title="Server information"
-      >
+      <Section captionId="settings.server-info" title="Server information">
         <dl className="grid gap-3 sm:grid-cols-3">
           <div className="rounded-md border p-3">
             <dt className="text-muted-foreground text-sm">Interface build</dt>
@@ -71,7 +68,11 @@ export function ServerInfo() {
         </dl>
       </Section>
 
-      <Section description={<DocumentationLink />} title="Product limits">
+      <Section
+        actions={<DocumentationLink />}
+        captionId="settings.product-limits"
+        title="Product limits"
+      >
         <ul className="space-y-3 text-sm min-[1600px]:space-y-1.5">
           {limits.map(([label, detail]) => (
             <li
@@ -98,10 +99,7 @@ export function ServerInfo() {
         </ul>
       </Section>
 
-      <Section
-        description="The current authentication boundary is deliberately small and shared."
-        title="Authentication"
-      >
+      <Section captionId="settings.authentication" title="Authentication">
         <ul className="list-disc space-y-2 pl-5 text-sm min-[1600px]:space-y-1">
           <li>One shared password protects the browser session.</li>
           <li>No user accounts exist.</li>
@@ -112,7 +110,7 @@ export function ServerInfo() {
         </ul>
       </Section>
 
-      <Section description="Navigate to the supporting operator surfaces." title="References">
+      <Section captionId="settings.references" title="References">
         <nav aria-label="Settings references" className="flex flex-wrap gap-4 text-sm">
           <a className="text-primary underline underline-offset-2" href="/docs/api.md">
             API reference

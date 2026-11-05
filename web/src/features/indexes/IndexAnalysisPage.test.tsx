@@ -114,8 +114,8 @@ describe('IndexAnalysisPage', () => {
     expect(screen.getByRole('article', { name: 'Indexes' })).toHaveTextContent('3')
     // The kind counts are on the Summary view of the tab (15.3).
     fireEvent.mouseDown(screen.getByRole('tab', { name: 'Summary' }))
-    expect(screen.getByRole('article', { name: 'Primary keys' })).toHaveTextContent('1')
-    expect(screen.getByRole('article', { name: 'Partial' })).toHaveTextContent('1')
+    expect(screen.getByRole('article', { name: 'Primary key indexes' })).toHaveTextContent('1')
+    expect(screen.getByRole('article', { name: 'Partial indexes' })).toHaveTextContent('1')
   })
 
   it('IDX-UI-002 shows the advisor findings and the foreign keys that lack an index', async () => {
@@ -132,7 +132,9 @@ describe('IndexAnalysisPage', () => {
       screen.getByRole('heading', { level: 2, name: 'Unindexed foreign keys' }),
     ).toBeInTheDocument()
     fireEvent.mouseDown(screen.getByRole('tab', { name: 'Summary' }))
-    expect(screen.getByRole('article', { name: 'Foreign keys w/o index' })).toHaveTextContent('1')
+    expect(
+      screen.getByRole('article', { name: 'Foreign keys without an index' }),
+    ).toHaveTextContent('1')
   })
 
   it('IDX-UI-003 filters the inventory and searches it', async () => {

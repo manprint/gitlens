@@ -13,6 +13,7 @@ import {
 import { TimeSeriesChart, type TimeSeriesTableSeries } from '@/components/charts/TimeSeriesChart'
 import { useTimeRange } from '@/hooks/useTimeRange'
 import { stepParam } from '@/lib/chartStep'
+import type { CaptionId } from '@/lib/captions'
 import { countGaps, countResets } from '@/lib/chartTime'
 import { cacheHitRatioSeries, scaleSeries, type MetricSeriesPoint } from '@/lib/metrics'
 import { queryWindowOf, type QueryWindow } from '@/lib/timerange'
@@ -40,6 +41,7 @@ interface Range {
 
 interface CardFrameProps {
   title: string
+  captionId: CaptionId
   unitHint: string | undefined
   wide: boolean | undefined
   range: Range
@@ -64,6 +66,7 @@ function cardState(
 
 function CardFrame({
   title,
+  captionId,
   unitHint,
   wide,
   range,
@@ -80,6 +83,7 @@ function CardFrame({
     resets > MAX_RESET_LINES ? Math.max(...series.map((item) => countGaps(item.points))) : 0
   return (
     <ChartCard
+      captionId={captionId}
       range={range}
       state={state}
       stepSeconds={stepSeconds}
@@ -171,6 +175,7 @@ function MetricChartCard({
   return (
     <CardFrame
       annotateResets={annotateResets}
+      captionId={card.captionId}
       failure={firstFailure(queries)}
       option={chartOption(
         series,
@@ -223,6 +228,7 @@ function WorkloadChartCard({
   return (
     <CardFrame
       annotateResets={annotateResets}
+      captionId={card.captionId}
       failure={
         query.error && !query.data
           ? { error: query.error, retry: () => void query.refetch() }

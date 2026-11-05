@@ -1,4 +1,5 @@
 import type { MetricUnit } from '@/components/charts/metric.options'
+import type { CaptionId } from '@/lib/captions'
 import { metricKind, SAMPLE_SECONDS, stepFor, type MetricKind } from '@/lib/chartStep'
 import type { ChartNavLink } from './ChartNav'
 import { WORKLOAD_GAUGES, WORKLOAD_SAMPLE_SECONDS, type WorkloadSource } from '@/lib/workloadSeries'
@@ -26,6 +27,8 @@ export interface WorkloadLine {
 
 interface CardBase {
   id: string
+  /** The card's caption, one entry of the instance caption set. */
+  captionId: CaptionId
   title: string
   /** Unit of the values, shown after the title, e.g. `per second`. */
   unitHint?: string
@@ -128,6 +131,7 @@ export const OVERVIEW_GROUPS: readonly ChartGroupSpec[] = [
     cards: [
       {
         id: 'transactions',
+        captionId: 'overview.chart-transactions',
         title: 'Transactions per second',
         unit: 'count',
         wide: true,
@@ -136,6 +140,7 @@ export const OVERVIEW_GROUPS: readonly ChartGroupSpec[] = [
       },
       {
         id: 'connections',
+        captionId: 'overview.chart-connections',
         title: 'Connections',
         unit: 'count',
         annotateResets: false,
@@ -147,6 +152,7 @@ export const OVERVIEW_GROUPS: readonly ChartGroupSpec[] = [
       },
       {
         id: 'deadlocks-conflicts',
+        captionId: 'overview.chart-deadlocks-conflicts',
         title: 'Deadlocks and conflicts',
         unitHint: 'per second',
         unit: 'count',
@@ -166,6 +172,7 @@ export const OVERVIEW_GROUPS: readonly ChartGroupSpec[] = [
     cards: [
       {
         id: 'cache-hit-ratio',
+        captionId: 'overview.chart-cache-hit-ratio',
         title: 'Cache hit ratio',
         unit: 'ratio',
         annotateResets: false,
@@ -175,6 +182,7 @@ export const OVERVIEW_GROUPS: readonly ChartGroupSpec[] = [
       },
       {
         id: 'blocks',
+        captionId: 'overview.chart-blocks',
         title: 'Blocks read vs hit',
         unitHint: 'blocks per second',
         unit: 'count',
@@ -186,6 +194,7 @@ export const OVERVIEW_GROUPS: readonly ChartGroupSpec[] = [
       },
       {
         id: 'temp',
+        captionId: 'overview.chart-temp',
         title: 'Temp files and bytes',
         unitHint: 'per second',
         unit: 'count',
@@ -206,6 +215,7 @@ export const OVERVIEW_GROUPS: readonly ChartGroupSpec[] = [
     cards: [
       {
         id: 'wal',
+        captionId: 'overview.chart-wal',
         title: 'WAL generation',
         unitHint: 'per second',
         unit: 'bytes',
@@ -219,6 +229,7 @@ export const OVERVIEW_GROUPS: readonly ChartGroupSpec[] = [
       },
       {
         id: 'checkpoints',
+        captionId: 'overview.chart-checkpoints',
         title: 'Checkpoints',
         unitHint: 'per step',
         unit: 'count',
@@ -231,6 +242,7 @@ export const OVERVIEW_GROUPS: readonly ChartGroupSpec[] = [
       },
       {
         id: 'checkpoint-time',
+        captionId: 'overview.chart-checkpoint-time',
         title: 'Checkpoint write and sync time',
         unitHint: 'per step',
         unit: 'ms',
@@ -251,6 +263,7 @@ export const OVERVIEW_GROUPS: readonly ChartGroupSpec[] = [
     cards: [
       {
         id: 'calls',
+        captionId: 'overview.chart-calls',
         title: 'Calls per second',
         unitHint: 'tracked statements',
         unit: 'count',
@@ -260,6 +273,7 @@ export const OVERVIEW_GROUPS: readonly ChartGroupSpec[] = [
       },
       {
         id: 'exec-time',
+        captionId: 'overview.chart-exec-time',
         title: 'Execution time per second',
         unitHint: 'ms per second, tracked statements',
         unit: 'ms',
@@ -269,6 +283,7 @@ export const OVERVIEW_GROUPS: readonly ChartGroupSpec[] = [
       },
       {
         id: 'rows',
+        captionId: 'overview.chart-rows',
         title: 'Rows per second',
         unitHint: 'tracked statements',
         unit: 'count',
@@ -278,6 +293,7 @@ export const OVERVIEW_GROUPS: readonly ChartGroupSpec[] = [
       },
       {
         id: 'statement-reads',
+        captionId: 'overview.chart-statement-reads',
         title: 'Statement block reads',
         unitHint: 'blocks per second, tracked statements',
         unit: 'count',
@@ -287,6 +303,7 @@ export const OVERVIEW_GROUPS: readonly ChartGroupSpec[] = [
       },
       {
         id: 'statement-temp',
+        captionId: 'overview.chart-statement-temp',
         title: 'Statement temp blocks',
         unitHint: 'blocks per second, tracked statements',
         unit: 'count',
@@ -305,6 +322,7 @@ export const OVERVIEW_GROUPS: readonly ChartGroupSpec[] = [
     cards: [
       {
         id: 'scans',
+        captionId: 'overview.chart-scans',
         title: 'Sequential vs index scans',
         unitHint: 'per second, tracked tables',
         unit: 'count',
@@ -317,6 +335,7 @@ export const OVERVIEW_GROUPS: readonly ChartGroupSpec[] = [
       },
       {
         id: 'tuple-churn',
+        captionId: 'overview.chart-tuple-churn',
         title: 'Tuple churn',
         unitHint: 'rows per second, tracked tables',
         unit: 'count',
@@ -331,6 +350,7 @@ export const OVERVIEW_GROUPS: readonly ChartGroupSpec[] = [
       },
       {
         id: 'dead-tuples',
+        captionId: 'overview.chart-dead-tuples',
         title: 'Dead tuples',
         unitHint: 'tracked tables',
         unit: 'count',
@@ -341,6 +361,7 @@ export const OVERVIEW_GROUPS: readonly ChartGroupSpec[] = [
       },
       {
         id: 'index-scans',
+        captionId: 'overview.chart-index-scans',
         title: 'Index scans',
         unitHint: 'per second, tracked indexes',
         unit: 'count',
@@ -350,6 +371,7 @@ export const OVERVIEW_GROUPS: readonly ChartGroupSpec[] = [
       },
       {
         id: 'index-size',
+        captionId: 'overview.chart-index-size',
         title: 'Index size',
         unitHint: 'tracked indexes',
         unit: 'bytes',

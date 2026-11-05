@@ -115,6 +115,7 @@ export function DriftSection({ entries = [], failure, onRetry }: DriftSectionPro
       ) : (
         <DataTable
           ariaLabel="Configuration drift"
+          captionId="cluster.drift-table"
           tableId="configuration-drift"
           toolbar={DRIFT_TOOLBAR}
           columns={columns}

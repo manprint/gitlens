@@ -99,10 +99,12 @@ export function AshTopQueries({
   const entries = topQueries(query.data.entries)
 
   return (
-    <Section
-      title="Top queries"
-      description={`${scopeDescription(waitEventType, waitEvent)} Query text is the normalised text from pg_stat_statements. ASH never collects live query text; it collects only query_id. This deliberate PII decision means literal values are not available here.`}
-    >
+    <Section captionId="ash.top-queries" title="Top queries">
+      <p className="text-muted-foreground mb-3 text-sm">
+        {scopeDescription(waitEventType, waitEvent)} Query text is the normalised text from
+        pg_stat_statements. ASH never collects live query text; it collects only query_id. This
+        deliberate PII decision means literal values are not available here.
+      </p>
       {entries.length > 0 ? (
         <ol className="grid gap-3" aria-label="ASH top queries">
           {entries.map((entry) => (

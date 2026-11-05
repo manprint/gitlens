@@ -12,6 +12,7 @@ import {
 } from '@/lib/events'
 import { UNKNOWN } from '@/lib/format/shared'
 import { formatTimestamp } from '@/lib/format/timestamp'
+import { Section } from '@/components/layout/Section'
 import { NativeSelect } from '@/components/ui/native-select'
 
 const SEVERITY_BORDER: Record<EventSeverity, string> = {
@@ -145,19 +146,12 @@ export function EventTimeline({ events }: EventTimelineProps) {
   }
 
   return (
-    <section
-      aria-labelledby="event-timeline-heading"
-      className="bg-card shadow-card rounded-xl border"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
-        <h2 id="event-timeline-heading" className="text-base font-semibold">
-          Event timeline
-        </h2>
+    <Section
+      actions={
         <label className="flex items-center gap-2 text-sm">
           <span className="text-muted-foreground">Event type</span>
           <NativeSelect
             aria-label="Filter events by type"
-
             value={selectedType}
             onChange={(event) => updateType(event.target.value)}
           >
@@ -171,13 +165,16 @@ export function EventTimeline({ events }: EventTimelineProps) {
               ))}
           </NativeSelect>
         </label>
-      </div>
+      }
+      captionId="cluster.events"
+      title="Event timeline"
+    >
       {groups.length === 0 ? (
-        <p className="text-muted-foreground p-5 text-sm" role="status">
+        <p className="text-muted-foreground text-sm" role="status">
           No events match this filter.
         </p>
       ) : (
-        <div className="space-y-6 p-5">
+        <div className="space-y-6">
           {groups.map((group) => (
             <section key={group.day} aria-labelledby={`event-day-${group.day}`}>
               <h3
@@ -195,6 +192,6 @@ export function EventTimeline({ events }: EventTimelineProps) {
           ))}
         </div>
       )}
-    </section>
+    </Section>
   )
 }

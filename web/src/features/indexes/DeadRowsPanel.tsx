@@ -398,13 +398,14 @@ export function DeadRowsPanel({
 
   return (
     <IndexPanel
+      captionId="indexes.dead-rows"
       description={`${formatCount(scoped.length)} tables. Dead space is an estimate: the heap size times the dead share of its tuples. The trend follows the ${TREND_TABLES} worst tables over the selected time range.`}
       notes={notes}
       stats={[
         {
           label: 'Tables with dead rows',
           value: formatCount(summary.withDead),
-          unit: `of ${formatCount(summary.tables)}`,
+          unit: `of ${formatCount(summary.tables)} ${summary.tables === 1 ? 'table' : 'tables'}`,
         },
         {
           label: 'Dead tuples',

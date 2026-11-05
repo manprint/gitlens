@@ -5,6 +5,7 @@ import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { CAPTIONS } from '@/lib/captions'
 import { severityRank, type ReadinessItem } from '@/lib/readiness'
 
 import { FixPanel } from './FixPanel'
@@ -21,7 +22,11 @@ function ItemCard({ defaultOpen, item }: { defaultOpen: boolean; item: Readiness
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={item.severity === 'warning' ? 'warning' : 'outline'}>
+            <Badge
+              data-caption-id="readiness.severity"
+              title={CAPTIONS['readiness.severity'].what}
+              variant={item.severity === 'warning' ? 'warning' : 'outline'}
+            >
               {item.severity === 'warning' ? 'Warning' : 'Note'}
             </Badge>
             <h3 className="text-sm font-semibold">{item.title}</h3>

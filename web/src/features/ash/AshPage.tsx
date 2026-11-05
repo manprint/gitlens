@@ -1,9 +1,10 @@
 import { Activity } from 'lucide-react'
 import { useEffect, useRef } from 'react'
-import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { useAsh, useInstanceSettings } from '@/api/queries'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
+import { InfoHint } from '@/components/layout/InfoHint'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Degraded, Disabled, ErrorState } from '@/components/state'
 import { useTimeRange } from '@/hooks/useTimeRange'
@@ -62,30 +63,33 @@ const LAYOUTS: readonly { value: ChartView; label: string }[] = [
 
 function ChartLayoutToggle({ onChange, view }: ChartLayoutToggleProps) {
   return (
-    <div
-      aria-label="Chart layout"
-      className="bg-muted/40 inline-flex items-center gap-1 rounded-lg border p-1 text-sm"
-      role="radiogroup"
-    >
-      {LAYOUTS.map(({ label, value }) => (
-        <label
-          className={cn(
-            'focus-within:ring-ring cursor-pointer rounded-md px-3 py-1 focus-within:ring-2',
-            view === value ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground',
-          )}
-          key={value}
-        >
-          <input
-            checked={view === value}
-            className="sr-only"
-            name="ash-chart-layout"
-            onChange={() => onChange(value)}
-            type="radio"
-            value={value}
-          />
-          {label}
-        </label>
-      ))}
+    <div className="inline-flex items-center gap-1" data-caption-id="ash.chart-layout">
+      <div
+        aria-label="Chart layout"
+        className="bg-muted/40 inline-flex items-center gap-1 rounded-lg border p-1 text-sm"
+        role="radiogroup"
+      >
+        {LAYOUTS.map(({ label, value }) => (
+          <label
+            className={cn(
+              'focus-within:ring-ring cursor-pointer rounded-md px-3 py-1 focus-within:ring-2',
+              view === value ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground',
+            )}
+            key={value}
+          >
+            <input
+              checked={view === value}
+              className="sr-only"
+              name="ash-chart-layout"
+              onChange={() => onChange(value)}
+              type="radio"
+              value={value}
+            />
+            {label}
+          </label>
+        ))}
+      </div>
+      <InfoHint id="ash.chart-layout" label="Chart layout" />
     </div>
   )
 }
@@ -302,7 +306,10 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
       />
       {ashQuery.data.enabled === false ? (
         <>
-          <Disabled feature="ASH sampling" configKey="checks.ash in the agent configuration file" />
+          <Disabled
+            feature="ASH sampling"
+            configKey="checks.ash.enabled in the agent configuration file"
+          />
           <p className="text-muted-foreground text-sm">
             Keeping ASH disabled avoids its sampling cost but removes wait-analysis visibility.
           </p>
@@ -326,6 +333,18 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
                 requires="compute_query_id=on"
               />
               <p className="text-muted-foreground text-sm">
+                {queryIdSetting === 'off' ? (
+                  <>
+                    The{' '}
+                    <Link
+                      className="underline"
+                      to={`/instances/${encodeURIComponent(instanceId)}?section=readiness`}
+                    >
+                      Readiness tab
+                    </Link>{' '}
+                    lists the item for compute_query_id and its fix.{' '}
+                  </>
+                ) : null}
                 See the{' '}
                 <a className="underline" href="/README.md#agent-configuration">
                   agent configuration in the README

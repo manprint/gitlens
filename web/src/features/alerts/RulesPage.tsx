@@ -159,7 +159,7 @@ export function RulesPage() {
 
       {/* Above the list: with 20 rows per page a form below it would open off screen (15.3). */}
       {editingRule ? (
-        <Section title="Edit rule">
+        <Section captionId="rules.edit" title="Edit rule">
           <RuleEditor
             key={editingRule.id}
             onCancel={() => setEditingRuleId(undefined)}
@@ -171,10 +171,7 @@ export function RulesPage() {
       {rules.length === 0 ? (
         <EmptyState description="No alert rules are currently available." title="No alert rules" />
       ) : (
-        <Section
-          description="Tier 0 staleness rules are always on by design. Tier 1 rules can be changed and are saved by the server."
-          title="Configured rules"
-        >
+        <Section captionId="rules.list" title="Configured rules">
           <SimpleTable
             ariaLabel="Alert rules"
             columns={columns}

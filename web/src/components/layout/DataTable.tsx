@@ -217,6 +217,7 @@ function DataTableView<TData extends RowData>({
   return (
     <div
       className="space-y-3"
+      data-card=""
       data-table-card
       {...(captionId === undefined ? {} : { 'data-caption-id': captionId })}
     >

@@ -149,7 +149,7 @@ describe('IndexAnalysisPage on a Full HD screen (15.3)', () => {
     expect(router.state.location.search).toBe('?view=summary')
     // The summary holds the tiles and the breakdowns, no table.
     expect(screen.queryAllByRole('table')).toHaveLength(0)
-    expect(screen.getByRole('article', { name: 'Primary keys' })).toHaveTextContent('1')
+    expect(screen.getByRole('article', { name: 'Primary key indexes' })).toHaveTextContent('1')
 
     fireEvent.mouseDown(viewTab('Inventory'))
     expect(router.state.location.search).toBe('')

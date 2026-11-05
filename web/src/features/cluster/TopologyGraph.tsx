@@ -3,6 +3,7 @@ import { Background, Controls, ReactFlow, type Edge, type Node, type OnInit } fr
 import '@xyflow/react/dist/style.css'
 import { useNavigate } from 'react-router-dom'
 
+import { Section } from '@/components/layout/Section'
 import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { Button } from '@/components/ui/button'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
@@ -297,17 +298,8 @@ export function TopologyGraph({
   const edgeCount = positionedGraph.edges.length
 
   return (
-    <section aria-labelledby="topology-graph-title" className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-medium" id="topology-graph-title">
-            Replication topology
-          </h2>
-          <p className="text-muted-foreground text-sm">
-            {nodeCount} instance{nodeCount === 1 ? '' : 's'}, {edgeCount} replication edge
-            {edgeCount === 1 ? '' : 's'}.
-          </p>
-        </div>
+    <Section
+      actions={
         <Button
           aria-controls="topology-edge-table"
           aria-expanded={showTable}
@@ -317,71 +309,80 @@ export function TopologyGraph({
         >
           {showTable ? 'Hide accessible edge table' : 'Show accessible edge table'}
         </Button>
-      </div>
+      }
+      captionId="topology.graph"
+      title="Replication topology"
+    >
+      <div className="space-y-4">
+        <p className="text-muted-foreground text-sm">
+          {nodeCount} instance{nodeCount === 1 ? '' : 's'}, {edgeCount} replication edge
+          {edgeCount === 1 ? '' : 's'}.
+        </p>
 
-      {hasCritical ? (
+        {hasCritical ? (
+          <div
+            aria-live="assertive"
+            className="border-destructive bg-destructive/10 rounded-lg border-2 p-3"
+            role="alert"
+          >
+            <strong>Critical replication anomaly.</strong>{' '}
+            {anomalies.multiplePrimary.length > 0
+              ? 'Split brain: more than one primary is reported.'
+              : 'No primary is reported.'}
+          </div>
+        ) : null}
+        {hasWarning ? (
+          <div
+            aria-live="polite"
+            className="border-warning bg-warning/10 rounded-lg border p-3"
+            role="status"
+          >
+            <strong>Replication topology warning.</strong>{' '}
+            {anomalies.orphanStandbys.length > 0 ? 'One or more standbys have no upstream.' : null}
+            {anomalies.orphanStandbys.length > 0 && anomalies.lowConfidenceEdges.length > 0
+              ? ' '
+              : null}
+            {anomalies.lowConfidenceEdges.length > 0
+              ? 'One or more edges have low confidence.'
+              : null}
+          </div>
+        ) : null}
+
         <div
-          aria-live="assertive"
-          className="border-destructive bg-destructive/10 rounded-lg border-2 p-3"
-          role="alert"
+          aria-label="Replication topology graph"
+          className="h-[32rem] rounded-lg border"
+          data-topology-graph
+          role="region"
         >
-          <strong>Critical replication anomaly.</strong>{' '}
-          {anomalies.multiplePrimary.length > 0
-            ? 'Split brain: more than one primary is reported.'
-            : 'No primary is reported.'}
+          <ReactFlow<TopologyFlowNode, TopologyFlowEdge>
+            edges={flowEdges}
+            fitView={false}
+            nodes={flowNodes}
+            nodeTypes={topologyNodeTypes}
+            nodesConnectable={false}
+            nodesDraggable={false}
+            onEdgeClick={handleEdgeClick}
+            onInit={handleInit}
+            onNodeClick={handleNodeClick}
+            panOnDrag
+            zoomOnScroll
+          >
+            <Background />
+            <Controls />
+          </ReactFlow>
         </div>
-      ) : null}
-      {hasWarning ? (
-        <div
-          aria-live="polite"
-          className="border-warning bg-warning/10 rounded-lg border p-3"
-          role="status"
-        >
-          <strong>Replication topology warning.</strong>{' '}
-          {anomalies.orphanStandbys.length > 0 ? 'One or more standbys have no upstream.' : null}
-          {anomalies.orphanStandbys.length > 0 && anomalies.lowConfidenceEdges.length > 0
-            ? ' '
-            : null}
-          {anomalies.lowConfidenceEdges.length > 0
-            ? 'One or more edges have low confidence.'
-            : null}
-        </div>
-      ) : null}
 
-      <div
-        aria-label="Replication topology graph"
-        className="h-[32rem] rounded-lg border"
-        data-topology-graph
-        role="region"
-      >
-        <ReactFlow<TopologyFlowNode, TopologyFlowEdge>
-          edges={flowEdges}
-          fitView={false}
-          nodes={flowNodes}
-          nodeTypes={topologyNodeTypes}
-          nodesConnectable={false}
-          nodesDraggable={false}
-          onEdgeClick={handleEdgeClick}
-          onInit={handleInit}
-          onNodeClick={handleNodeClick}
-          panOnDrag
-          zoomOnScroll
-        >
-          <Background />
-          <Controls />
-        </ReactFlow>
-      </div>
-
-      <div className="sr-only" id="topology-edge-table">
-        <p id="topology-edge-table-description">Equivalent text table for the topology graph.</p>
-        <EdgeTable edges={positionedGraph.edges} nodes={nodeData} visible={showTable} />
-      </div>
-      {showTable ? (
-        <div aria-describedby="topology-edge-table-description" id="topology-edge-table-visible">
-          <VisibleEdgeTable edges={positionedGraph.edges} nodes={nodeData} />
+        <div className="sr-only" id="topology-edge-table">
+          <p id="topology-edge-table-description">Equivalent text table for the topology graph.</p>
+          <EdgeTable edges={positionedGraph.edges} nodes={nodeData} visible={showTable} />
         </div>
-      ) : null}
-      {selectedEdgeID ? <p className="sr-only">Selected edge {selectedEdgeID}.</p> : null}
-    </section>
+        {showTable ? (
+          <div aria-describedby="topology-edge-table-description" id="topology-edge-table-visible">
+            <VisibleEdgeTable edges={positionedGraph.edges} nodes={nodeData} />
+          </div>
+        ) : null}
+        {selectedEdgeID ? <p className="sr-only">Selected edge {selectedEdgeID}.</p> : null}
+      </div>
+    </Section>
   )
 }

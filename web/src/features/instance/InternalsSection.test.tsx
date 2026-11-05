@@ -99,7 +99,7 @@ describe('InternalsSection', () => {
 
     const dir = screen.getByRole('article', { name: 'WAL directory' })
     expect(within(dir).getByText('2.0 GiB')).toBeInTheDocument()
-    expect(within(dir).getByText('128 files')).toBeInTheDocument()
+    expect(within(dir).getByText('Spread over 128 files.')).toBeInTheDocument()
     expect(screen.queryByRole('article', { name: 'WAL replay' })).not.toBeInTheDocument()
 
     const sizes = within(screen.getByRole('table', { name: 'Database sizes' }))

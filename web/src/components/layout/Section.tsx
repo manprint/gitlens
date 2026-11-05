@@ -23,6 +23,7 @@ export function Section({ title, description, children, id, actions, captionId }
   return (
     <section
       aria-labelledby={titleId}
+      data-card=""
       className="bg-card shadow-card scroll-mt-20 rounded-xl border"
       {...(id === undefined ? {} : { id })}
       {...(captionId === undefined ? {} : { 'data-caption-id': captionId })}

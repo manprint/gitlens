@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 
 import { useAdvisorWindows, useInstanceTables } from '@/api/queries'
 import { CopyButton } from '@/components/layout/CopyButton'
+import { InfoHint } from '@/components/layout/InfoHint'
 import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { EmptyState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
@@ -306,8 +307,12 @@ export function CleanupPanel({ instanceId, rows, siblings }: CleanupPanelProps) 
   return (
     <IndexPanel
       actions={
-        candidates.length > 0 ? <CopyButton subject="cleanup script" text={script} /> : undefined
+        <>
+          <InfoHint id="indexes.cleanup-reason" label="cleanup reason" />
+          {candidates.length > 0 ? <CopyButton subject="cleanup script" text={script} /> : null}
+        </>
       }
+      captionId="indexes.cleanup"
       description="Primary keys and unique indexes are never listed. Index writes are the entries every insert and every non-HOT update add to each index of the table. pglens does not run any statement: copy it, review it, run it yourself. The script holds the confirmed drops; those that rest on raw counters are in it as comments."
       notes={notes}
       stats={[
@@ -338,7 +343,7 @@ export function CleanupPanel({ instanceId, rows, siblings }: CleanupPanelProps) 
               ? `${formatCount(summary.confirmed.writeRateUnknown)} not measured`
               : null,
             summary.provisional.count > 0
-              ? `+ ${formatRate(summary.provisional.writeRate)} on raw counters`
+              ? `+ ${formatRate(summary.provisional.writeRate).replace('/s', ' per second')} on raw counters`
               : null,
           ]
             .filter((part) => part !== null)

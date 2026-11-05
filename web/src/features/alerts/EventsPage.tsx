@@ -4,6 +4,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { useAlerts, useCachedClusters, useEvents, useSilences } from '@/api/queries'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
+import { InfoHint } from '@/components/layout/InfoHint'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
 import { AlertListTruncated, EmptyState, ErrorState } from '@/components/state'
@@ -276,60 +277,79 @@ export function EventsPage() {
         </div>
         <TabsContent value="events">
           <Section
+            captionId="events.timeline"
             title="Event timeline"
-            description={`${sortedEvents.length} events in the selected range (${range.label}); cluster, event type, range and result limit are kept in the URL.`}
             actions={
               <>
-                <label className={filterLabel} htmlFor="events-cluster">
-                  <span className="font-medium">Cluster</span>
-                  <Input
-                    className={`w-44 ${filterControl}`}
-                    id="events-cluster"
-                    onChange={(event) =>
-                      updateSearchParams(
-                        searchParams,
-                        setSearchParams,
-                        'cluster_id',
-                        event.target.value,
-                      )
-                    }
-                    placeholder="All clusters"
-                    value={clusterId}
-                  />
-                </label>
-                <label className={filterLabel} htmlFor="events-type">
-                  <span className="font-medium">Event type</span>
-                  <NativeSelect
-                    className={filterControl}
-                    id="events-type"
-                    onChange={(event) =>
-                      updateSearchParams(searchParams, setSearchParams, 'type', event.target.value)
-                    }
-                    value={selectedType}
-                  >
-                    <option value="">All event types</option>
-                    {typeOptions.map((type) => (
-                      <option key={type} value={type}>
-                        {type}
-                      </option>
-                    ))}
-                  </NativeSelect>
-                </label>
-                <label className={filterLabel} htmlFor="events-limit">
-                  <span className="font-medium">Event limit</span>
-                  <NativeSelect
-                    className={filterControl}
-                    id="events-limit"
-                    onChange={(event) =>
-                      updateSearchParams(searchParams, setSearchParams, 'limit', event.target.value)
-                    }
-                    value={String(eventLimit.effective)}
-                  >
-                    <option value="100">100 events</option>
-                    <option value="500">500 events</option>
-                    <option value="1000">1,000 events</option>
-                  </NativeSelect>
-                </label>
+                <span className="flex items-center gap-1">
+                  <label className={filterLabel} htmlFor="events-cluster">
+                    <span className="font-medium">Cluster</span>
+                    <Input
+                      className={`w-44 ${filterControl}`}
+                      id="events-cluster"
+                      onChange={(event) =>
+                        updateSearchParams(
+                          searchParams,
+                          setSearchParams,
+                          'cluster_id',
+                          event.target.value,
+                        )
+                      }
+                      placeholder="All clusters"
+                      value={clusterId}
+                    />
+                  </label>
+                  <InfoHint id="events.filter-cluster" label="Cluster filter" />
+                </span>
+                <span className="flex items-center gap-1">
+                  <label className={filterLabel} htmlFor="events-type">
+                    <span className="font-medium">Event type</span>
+                    <NativeSelect
+                      className={filterControl}
+                      id="events-type"
+                      onChange={(event) =>
+                        updateSearchParams(
+                          searchParams,
+                          setSearchParams,
+                          'type',
+                          event.target.value,
+                        )
+                      }
+                      value={selectedType}
+                    >
+                      <option value="">All event types</option>
+                      {typeOptions.map((type) => (
+                        <option key={type} value={type}>
+                          {type}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                  </label>
+                  <InfoHint id="events.filter-type" label="Event type filter" />
+                </span>
+                <span className="flex items-center gap-1">
+                  <label className={filterLabel} htmlFor="events-limit">
+                    <span className="font-medium">Event limit</span>
+                    <NativeSelect
+                      className={filterControl}
+                      id="events-limit"
+                      onChange={(event) =>
+                        updateSearchParams(
+                          searchParams,
+                          setSearchParams,
+                          'limit',
+                          event.target.value,
+                        )
+                      }
+                      value={String(eventLimit.effective)}
+                    >
+                      <option value="100">100 events</option>
+                      <option value="500">500 events</option>
+                      <option value="1000">1,000 events</option>
+                    </NativeSelect>
+                  </label>
+                  <InfoHint id="events.filter-limit" label="Event limit filter" />
+                </span>
               </>
             }
           >
@@ -350,10 +370,7 @@ export function EventsPage() {
           </Section>
         </TabsContent>
         <TabsContent value="alerts">
-          <Section
-            title="Alert status"
-            description="Alert health is evaluated independently from the event history."
-          >
+          <Section captionId="events.alert-status" title="Alert status">
             <SimpleTable
               ariaLabel="Alert suppression status"
               columns={statusColumns}

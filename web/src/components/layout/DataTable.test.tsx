@@ -44,7 +44,10 @@ function firstName() {
   return within(bodyRows()[0]!).getAllByRole('cell')[0]?.textContent
 }
 
-function renderTable(route = '/', extra: Partial<Parameters<typeof DataTable<Row>>[0]> = {}) {
+function renderTable(
+  route = '/',
+  extra: Partial<Omit<Parameters<typeof DataTable<Row>>[0], 'captionId'>> = {},
+) {
   return renderWithProviders(
     <DataTable
       ariaLabel="Relations"

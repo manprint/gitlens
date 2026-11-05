@@ -8,11 +8,13 @@ import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { FULL_SEARCH_HINT, SearchBox } from '@/components/layout/SearchBox'
 import { Section } from '@/components/layout/Section'
+import { InfoHint } from '@/components/layout/InfoHint'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Button } from '@/components/ui/button'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useSearchDraft, useShownTerm } from '@/hooks/useSearch'
+import type { CaptionId } from '@/lib/captions'
 import { searchTermOf } from '@/lib/highlight'
 import { clusterLabel, instanceLabel } from '@/lib/names'
 import {
@@ -164,13 +166,28 @@ function instanceOptions(clusters: readonly Cluster[], selected: string): Filter
  * (D26): the name above the control is hidden and the control keeps it as
  * its accessible name.
  */
-function FilterControl({ label, children }: { label: string; children: ReactNode }) {
+function FilterControl({
+  label,
+  hint,
+  children,
+}: {
+  label: string
+  hint?: CaptionId
+  children: ReactNode
+}) {
   return (
     <div className="text-muted-foreground flex flex-col gap-1 text-xs">
       <span aria-hidden="true" className="font-medium min-[1600px]:hidden">
         {label}
       </span>
-      {children}
+      {hint === undefined ? (
+        children
+      ) : (
+        <div className="flex items-center gap-1">
+          {children}
+          <InfoHint id={hint} label={`${label} filter`} />
+        </div>
+      )}
     </div>
   )
 }
@@ -414,39 +431,37 @@ export function FindingsPage() {
       <TabsContent value="findings">
         <Section
           title="Findings"
-          description={
-            // Polite: a new search's match count is announced.
-            <span aria-live="polite" title={description}>
-              {description}
-            </span>
-          }
+          captionId="findings.list"
           actions={
-            <div aria-label="Finding summary" className="flex flex-wrap gap-2" role="group">
-              <SummaryButton
-                active={severity === 'critical'}
-                count={summary.critical}
-                label="Critical"
-                onClick={() => selectSeverity('critical')}
-              />
-              <SummaryButton
-                active={severity === 'warning'}
-                count={summary.warning}
-                label="Warning"
-                onClick={() => selectSeverity('warning')}
-              />
-              <SummaryButton
-                active={severity === 'info'}
-                count={summary.info}
-                label="Info"
-                onClick={() => selectSeverity('info')}
-              />
-              <SummaryButton
-                active={state === 'degraded'}
-                count={summary.degraded}
-                label="Rules not evaluated"
-                onClick={selectDegraded}
-              />
-            </div>
+            <>
+              <div aria-label="Finding summary" className="flex flex-wrap gap-2" role="group">
+                <SummaryButton
+                  active={severity === 'critical'}
+                  count={summary.critical}
+                  label="Critical"
+                  onClick={() => selectSeverity('critical')}
+                />
+                <SummaryButton
+                  active={severity === 'warning'}
+                  count={summary.warning}
+                  label="Warning"
+                  onClick={() => selectSeverity('warning')}
+                />
+                <SummaryButton
+                  active={severity === 'info'}
+                  count={summary.info}
+                  label="Info"
+                  onClick={() => selectSeverity('info')}
+                />
+                <SummaryButton
+                  active={state === 'degraded'}
+                  count={summary.degraded}
+                  label="Rules not evaluated"
+                  onClick={selectDegraded}
+                />
+              </div>
+              <InfoHint id="findings.summary" label="Finding summary" />
+            </>
           }
         >
           <div className="space-y-3">
@@ -470,7 +485,7 @@ export function FindingsPage() {
                   All states
                 </Button>
               ) : null}
-              <FilterControl label="State">
+              <FilterControl hint="findings.filter-state" label="State">
                 <NativeSelect
                   aria-label="State"
                   className="h-8 px-2 text-sm"
@@ -488,7 +503,7 @@ export function FindingsPage() {
                   <option value="resolved">Resolved</option>
                 </NativeSelect>
               </FilterControl>
-              <FilterControl label="Severity">
+              <FilterControl hint="findings.filter-severity" label="Severity">
                 <NativeSelect
                   aria-label="Severity"
                   className="h-8 px-2 text-sm"
@@ -504,7 +519,7 @@ export function FindingsPage() {
                   <option value="info">Info</option>
                 </NativeSelect>
               </FilterControl>
-              <FilterControl label="Scope">
+              <FilterControl hint="findings.filter-scope" label="Scope">
                 <NativeSelect
                   aria-label="Scope"
                   className="h-8 px-2 text-sm"
@@ -551,6 +566,14 @@ export function FindingsPage() {
                   ))}
                 </NativeSelect>
               </FilterControl>
+              {/* Polite: a new search's match count is announced. */}
+              <p
+                aria-live="polite"
+                className="text-muted-foreground basis-full text-sm min-[1600px]:min-w-0 min-[1600px]:flex-1 min-[1600px]:basis-auto min-[1600px]:self-center min-[1600px]:truncate"
+                title={description}
+              >
+                {description}
+              </p>
               {findings.length >= FINDINGS_LIMIT ? (
                 <FilterLineNote>
                   {`Only the first ${FINDINGS_LIMIT} findings were returned. Open and degraded findings come first, so muted and resolved findings may be missing from the counts and the list.`}

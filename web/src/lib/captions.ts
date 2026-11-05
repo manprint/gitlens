@@ -7,6 +7,14 @@
  * glossary. A wrong id fails the type check.
  */
 
+import { instanceCaptions } from './captionsets/instance'
+import { fleetCaptions } from './captionsets/fleet'
+import { queriesCaptions } from './captionsets/queries'
+import { alertsCaptions } from './captionsets/alerts'
+import { indexesCaptions } from './captionsets/indexes'
+import { activityCaptions } from './captionsets/activity'
+import { settingsCaptions } from './captionsets/settings'
+
 export interface CaptionEntry {
   /** What is measured, one sentence (at most 160 characters). */
   what: string
@@ -20,6 +28,7 @@ export interface CaptionEntry {
   thresholds?: string
 }
 
+/** Each route group keeps its entries in `captionsets/`; ids must be unique across them. */
 export const CAPTIONS = {
   'overview.tps': {
     what: 'Transactions committed per second in the selected database.',
@@ -233,6 +242,13 @@ export const CAPTIONS = {
     howToRead:
       'Write amplification is inserts, deletes and updates that are not heap-only per second, times the number of indexes. Unique and primary key indexes are never counted as unused. Unused size is a candidate to review, not a verdict.',
   },
+  ...instanceCaptions,
+  ...fleetCaptions,
+  ...queriesCaptions,
+  ...alertsCaptions,
+  ...indexesCaptions,
+  ...activityCaptions,
+  ...settingsCaptions,
 } as const satisfies Record<string, CaptionEntry>
 
 export type CaptionId = keyof typeof CAPTIONS

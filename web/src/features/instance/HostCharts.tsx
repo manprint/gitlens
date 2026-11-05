@@ -7,6 +7,7 @@ import { ChartGroup } from '@/components/charts/ChartGroup'
 import { buildMetricOption, mixedUnitTooltip } from '@/components/charts/metric.options'
 import { TimeSeriesChart, type TimeSeriesTableSeries } from '@/components/charts/TimeSeriesChart'
 import { useTimeRange } from '@/hooks/useTimeRange'
+import type { CaptionId } from '@/lib/captions'
 import { SAMPLE_SECONDS, stepFor, stepParam } from '@/lib/chartStep'
 import { niceCeil, subtractSeries, toPercent } from '@/lib/hostSeries'
 import type { MetricSeriesPoint } from '@/lib/metrics'
@@ -117,6 +118,7 @@ function filesystemOption(series: readonly TimeSeriesTableSeries[]): EChartsOpti
 
 interface HostCardProps {
   title: string
+  captionId: CaptionId
   unitHint?: string
   queries: readonly MetricQuery[]
   series: readonly TimeSeriesTableSeries[]
@@ -129,6 +131,7 @@ interface HostCardProps {
 
 function HostCard({
   title,
+  captionId,
   unitHint,
   queries,
   series,
@@ -146,7 +149,7 @@ function HostCard({
   }
   if (replacement !== undefined) {
     return (
-      <ChartCard {...common} state="ready">
+      <ChartCard {...common} captionId={captionId} state="ready">
         {replacement}
       </ChartCard>
     )
@@ -154,6 +157,7 @@ function HostCard({
   return (
     <ChartCard
       {...common}
+      captionId={captionId}
       state={state}
       {...(failed?.error ? { error: failed.error, onRetry: () => void failed.refetch() } : {})}
     >
@@ -233,6 +237,7 @@ export function HostCharts({ diskMeasured, instanceId, swapAbsent }: HostChartsP
         option={cpuOption(cpuSeries)}
         queries={[cpuUsed]}
         series={cpuSeries}
+        captionId="host.chart-cpu"
         title="CPU used (%)"
       />
       <HostCard
@@ -240,6 +245,7 @@ export function HostCharts({ diskMeasured, instanceId, swapAbsent }: HostChartsP
         option={loadOption(loadSeries, latestCpuCount)}
         queries={[load1, load5, load15]}
         series={loadSeries}
+        captionId="host.chart-load"
         title="Load average"
       />
       <HostCard
@@ -247,6 +253,7 @@ export function HostCharts({ diskMeasured, instanceId, swapAbsent }: HostChartsP
         option={bytesOption(memorySeries)}
         queries={[memTotal, memAvailable]}
         series={memorySeries}
+        captionId="host.chart-memory"
         title="Memory"
         unitHint="bytes"
       />
@@ -255,6 +262,7 @@ export function HostCharts({ diskMeasured, instanceId, swapAbsent }: HostChartsP
         option={bytesOption(swapSeries)}
         queries={[swapUsed, swapTotal]}
         series={swapSeries}
+        captionId="host.chart-swap"
         title="Swap"
         unitHint="bytes"
         {...(swapAbsent ? { replacement: <Explanation>{NO_SWAP_TEXT}</Explanation> } : {})}
@@ -264,6 +272,7 @@ export function HostCharts({ diskMeasured, instanceId, swapAbsent }: HostChartsP
         option={filesystemOption(filesystemSeries)}
         queries={[diskTotal, diskFree, diskFreeRatio]}
         series={filesystemSeries}
+        captionId="host.chart-filesystem"
         title="Filesystem"
         unitHint="used bytes, free %"
         {...(diskMeasured ? {} : { replacement: <Explanation>{FILESYSTEM_HINT}</Explanation> })}

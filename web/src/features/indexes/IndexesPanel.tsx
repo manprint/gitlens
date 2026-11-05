@@ -5,6 +5,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useAdvisorWindows } from '@/api/queries'
 import type { Schemas } from '@/api/types'
 import { CopyButton } from '@/components/layout/CopyButton'
+import { InfoHint } from '@/components/layout/InfoHint'
 import { MetricTile } from '@/components/layout/MetricTile'
 import { SqlText } from '@/components/layout/SqlText'
 import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
@@ -13,6 +14,7 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
 import { useFocusMissing } from '@/hooks/useSearch'
+import type { CaptionId } from '@/lib/captions'
 import { formatBytes, formatCount, formatPercent, formatRate, formatRelative } from '@/lib/format'
 import {
   foreignKeyGaps,
@@ -468,22 +470,31 @@ function Detail({ row, instanceId }: { row: IndexRow; instanceId: string }) {
 
 function Breakdown({
   title,
+  captionId,
   entries,
 }: {
   title: string
+  captionId: CaptionId
   entries: readonly { label: string; count: number; bytes: number }[]
 }) {
   return (
-    <section aria-label={title} className="bg-card shadow-card rounded-xl border p-4">
-      <h3 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
+    <section
+      aria-label={title}
+      className="bg-card shadow-card rounded-xl border p-4"
+      data-caption-id={captionId}
+      data-card=""
+    >
+      <h3 className="text-muted-foreground flex items-center gap-1 text-xs font-semibold tracking-wide uppercase">
         {title}
+        <InfoHint id={captionId} label={title} />
       </h3>
       <ul className="mt-3 space-y-1.5 text-sm">
         {entries.map((entry) => (
           <li key={entry.label} className="flex items-baseline justify-between gap-3">
             <span className="truncate font-medium">{entry.label}</span>
             <span className="text-muted-foreground shrink-0 tabular-nums">
-              {formatCount(entry.count)} · {formatBytes(entry.bytes)}
+              {formatCount(entry.count)} {entry.count === 1 ? 'index' : 'indexes'} ·{' '}
+              {formatBytes(entry.bytes)}
             </span>
           </li>
         ))}
@@ -597,6 +608,26 @@ const GAP_COLUMNS: readonly SimpleColumn<ForeignKeyGap>[] = [
     cell: (gap) => <span className="text-muted-foreground">{gap.finding.remediation ?? '—'}</span>,
   },
 ]
+
+/** The sentence that gives a tile's figure its noun; a zero says nothing was found (D31). */
+function explained(count: number, what: string): string {
+  return count === 0 ? `none found: ${what}` : what
+}
+
+const VIEW_CAPTION: Record<IndexView, CaptionId> = {
+  inventory: 'indexes.inventory',
+  summary: 'indexes.summary',
+  findings: 'indexes.findings',
+  'foreign-keys': 'indexes.foreign-keys',
+}
+
+/** The badges of a view that need a word of explanation, behind an ⓘ in the header. */
+const VIEW_BADGE_HINT: Record<IndexView, ReactNode> = {
+  inventory: <InfoHint id="indexes.flags" label="index flags" />,
+  summary: null,
+  findings: <InfoHint id="indexes.finding-rule" label="rule badge" />,
+  'foreign-keys': <InfoHint id="indexes.fk-severity" label="foreign key severity" />,
+}
 
 interface IndexesPanelProps {
   instanceId: string
@@ -724,7 +755,7 @@ export function IndexesPanel({
     {
       label: 'Need attention',
       value: formatCount(attention),
-      unit: `of ${formatCount(summary.total)}`,
+      unit: `of ${formatCount(summary.total)} ${summary.total === 1 ? 'index' : 'indexes'}`,
     },
     {
       label: 'Never scanned',
@@ -823,28 +854,109 @@ export function IndexesPanel({
     summary: () => (
       <div className="space-y-6 min-[1600px]:space-y-4">
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <MetricTile label="Primary keys" value={formatCount(summary.primary)} />
-          <MetricTile label="Unique" value={formatCount(summary.unique)} />
-          <MetricTile label="Partial" value={formatCount(summary.partial)} />
-          <MetricTile label="Expression" value={formatCount(summary.expression)} />
-          <MetricTile label="Composite" value={formatCount(summary.composite)} />
-          <MetricTile label="Invalid" value={formatCount(summary.invalid)} />
           <MetricTile
-            label="Duplicate groups"
-            value={formatCount(counts.duplicate)}
-            unit={`${formatCount(counts.redundant)} redundant prefix`}
+            captionId="indexes.summary-primary"
+            detail={explained(summary.primary, 'indexes that back a primary key')}
+            label="Primary key indexes"
+            unit="indexes"
+            value={formatCount(summary.primary)}
           />
           <MetricTile
-            label="Foreign keys w/o index"
-            value={formatCount(gaps.length)}
-            unit={findingsPending ? 'loading…' : undefined}
+            captionId="indexes.summary-unique"
+            detail={explained(summary.unique, 'unique indexes that are not a primary key')}
+            label="Unique indexes"
+            unit="indexes"
+            value={formatCount(summary.unique)}
+          />
+          <MetricTile
+            captionId="indexes.summary-partial"
+            detail={explained(
+              summary.partial,
+              'indexes that cover only the rows a predicate selects',
+            )}
+            label="Partial indexes"
+            unit="indexes"
+            value={formatCount(summary.partial)}
+          />
+          <MetricTile
+            captionId="indexes.summary-expression"
+            detail={explained(summary.expression, 'indexes with a key built from an expression')}
+            label="Expression indexes"
+            unit="indexes"
+            value={formatCount(summary.expression)}
+          />
+          <MetricTile
+            captionId="indexes.summary-composite"
+            detail={explained(summary.composite, 'indexes with more than one key column')}
+            label="Composite indexes"
+            unit="indexes"
+            value={formatCount(summary.composite)}
+          />
+          <MetricTile
+            captionId="indexes.summary-invalid"
+            detail={explained(summary.invalid, 'indexes PostgreSQL marks invalid')}
+            label="Invalid indexes"
+            unit="indexes"
+            value={formatCount(summary.invalid)}
+            {...(summary.invalid > 0
+              ? { status: { tone: 'crit' as const, text: 'Rebuild or drop' } }
+              : {})}
+          />
+          <MetricTile
+            captionId="index.duplicate"
+            detail={
+              findingsPending
+                ? 'the advisor findings are loading'
+                : explained(counts.duplicate, 'groups of indexes with identical definitions')
+            }
+            label="Exact duplicate indexes"
+            value={findingsPending ? null : formatCount(counts.duplicate)}
+            {...(!findingsPending && counts.duplicate > 0
+              ? { status: { tone: 'warn' as const, text: 'Review before dropping' } }
+              : {})}
+          />
+          <MetricTile
+            captionId="index.redundant-prefix"
+            detail={
+              findingsPending
+                ? 'the advisor findings are loading'
+                : explained(counts.redundant, 'indexes whose columns lead a longer index')
+            }
+            label="Redundant prefix indexes"
+            unit="indexes"
+            value={findingsPending ? null : formatCount(counts.redundant)}
+            {...(!findingsPending && counts.redundant > 0
+              ? { status: { tone: 'neutral' as const, text: 'Check the longer index first' } }
+              : {})}
+          />
+          <MetricTile
+            captionId="indexes.foreign-keys"
+            detail={
+              findingsPending
+                ? 'the advisor findings are loading'
+                : explained(gaps.length, 'foreign keys that no index leads with')
+            }
+            label="Foreign keys without an index"
+            value={findingsPending ? null : formatCount(gaps.length)}
+            {...(!findingsPending && gaps.length > 0
+              ? { status: { tone: 'warn' as const, text: 'Deletes scan the referencing table' } }
+              : {})}
           />
         </div>
         {summary.total > 0 ? (
           <div className="grid gap-4 lg:grid-cols-3">
-            <Breakdown title="By access method" entries={summary.byMethod} />
-            <Breakdown title="By database" entries={summary.byDatabase} />
             <Breakdown
+              captionId="indexes.breakdown-method"
+              title="By access method"
+              entries={summary.byMethod}
+            />
+            <Breakdown
+              captionId="indexes.breakdown-database"
+              title="By database"
+              entries={summary.byDatabase}
+            />
+            <Breakdown
+              captionId="indexes.breakdown-tables"
               title="Tables with the most indexes"
               entries={tables.map((group) => ({
                 label: `${group.schema}.${group.table}`,
@@ -926,6 +1038,7 @@ export function IndexesPanel({
                 />
               </Link>
             ) : null}
+            {VIEW_BADGE_HINT[view]}
             <TabsList aria-label="Index views" className="min-[1600px]:h-8!">
               {INDEX_VIEWS.map((option) => (
                 <TabsTrigger key={option.id} className="min-[1600px]:py-0.5" value={option.id}>
@@ -940,6 +1053,7 @@ export function IndexesPanel({
             </TabsList>
           </>
         }
+        captionId={VIEW_CAPTION[view]}
         description={heading[view].description}
         notes={notes}
         stats={stats}

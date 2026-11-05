@@ -14,21 +14,21 @@ See `PROTOCOL.md` (static cold-start rules).
 
 ## 1. Current unit and scope
 
-- Invocation: `/pev-v3 full-autonomous:true --wip-commit execute 005` (2026-11-05, explicit); style handoff; acting as agent-2:claude-sonnet-5-5; supervisor advisor Opus 5.5.
+- Invocation: `/pev-v3 full-autonomous:true --wip-commit execute 005` (2026-11-05 evening re-invocation, explicit; clears the handoff latch); style handoff; acting as agent-2:claude-sonnet-5-5; supervisor advisor Opus 5.5.
 - Active scope: plan (whole `005_plan-ConsoleInsights`, no selector); full-autonomous true, WIP on (explicit)
 - Scope result: RUNNING (invocation result: HANDOFF, trigger deadline, 2026-11-05 15:50 CET)
-- Type: phase
-- ID / attempt: P15 / 1
-- Status: DONE
+- Type: sub-phase
+- ID / attempt: 17.2 / 1
+- Status: OPEN (IN_PROGRESS)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-sonnet-5-5; supervisor: advisor (Opus 5.5)
 - File / unit heading: phase_16.md → P15
-- Current step: P15 closed
-- Next action: open 17.2 (strict §11 order: 17.2 → 17.3 → P17 → 6.1…6.4 → P6 → 7.0…7.5 → P7 → 8.1 → 8.2 → P8 → PLAN).
+- Current step: S1 done (scaffold: `data-card` on roots, `web/src/test/clearCard.ts`, `web/src/lib/captionsets/*.ts` merged by captions.ts); S2–S7 delegated to 6 Sonnet workers by route group (instance; fleet+cluster; queries+findings; alerts+settings; indexes; ash+locks+readiness+coverage), each writes its own captionset, tests `CaptionPage.test.tsx` and `docs/plans/005_plan-ConsoleInsights/captions-inventory.<name>.md` fragments; supervisor then empties allowlists (S8), tightens `unit` (S9), merges inventory, advisor sampling (S10)
+- Next action: collect worker reports, then S8–S10 of 17.2 (then strict §11 order: 17.2 → 17.3 → P17 → 6.1…6.4 → P6 → 7.0…7.5 → P7 → 8.1 → 8.2 → P8 → PLAN).
 - Stop latch: HANDOFF deadline 2026-11-05 15:50 CET (`handoff --deadline=05-11-2026_17_00`; cleared by the next explicit invocation)
 - Deadline (this run only): `handoff --deadline=05-11-2026_17_00`, requested 2026-11-05 15:21 CET; reserve 15 min, cutoff 16:45 CET.
 - Last closure: unit:P15:1 (phase P15 DONE)
-- Unit base: HEAD (after the P16 commit); branch `feat/index-analysis` (never switch or create branches)
+- Unit base: HEAD 3c33c3a (handoff commit after P15); branch `feat/index-analysis` (never switch or create branches)
 - Repo state: HEAD = handoff commit after e9459be (P15); uncommitted only `internal/webui/dist/index.html` (never staged) and `.claude/`.
 - Network: user authorised internet use (2026-11-05 message "autorizzo ad usare la rete internet"); still no push.
 - Stack: restarted 2026-11-05 08:15Z (`up -d --no-recreate`, all healthy); backup `02-loaded-20261104T170945Z` VERIFIED (created 2026-11-04T17:09:45Z, < 24 h until 2026-11-05 17:09Z).

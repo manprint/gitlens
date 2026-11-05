@@ -196,6 +196,7 @@ function StandbyReplay({
   return (
     <DataTable
       ariaLabel="Recovery conflicts"
+      captionId="internals.recovery-conflicts"
       tableId="recovery-conflicts"
       toolbar={CONFLICT_TOOLBAR}
       {...(notes.length === 0 ? {} : { toolbarExtra: notesOf(notes) })}
@@ -262,13 +263,17 @@ export function InternalsSection({ instanceId }: { instanceId: string }) {
         <MetricTile
           className={TILE_IN_HEADING}
           label="WAL directory"
+          captionId="internals.wal-directory"
           value={walDirectory === null ? null : formatBytes(walDirectory.bytes)}
-          unit={walDirectory === null ? null : `${formatCount(walDirectory.files)} files`}
+          {...(walDirectory === null
+            ? {}
+            : { detail: `Spread over ${formatCount(walDirectory.files)} files.` })}
         />
         {standby === null ? null : (
           <MetricTile
             className={TILE_IN_HEADING}
             label="WAL replay"
+            captionId="internals.wal-replay"
             value={
               standby.replay_paused ? (
                 <Badge variant="destructive">paused</Badge>
@@ -285,6 +290,7 @@ export function InternalsSection({ instanceId }: { instanceId: string }) {
         <TabsContent value="databases">
           <DataTable
             ariaLabel="Database sizes"
+            captionId="internals.database-sizes"
             tableId="database-sizes"
             toolbar={DATABASE_SIZE_TOOLBAR}
             {...(walNotes.length === 0 ? {} : { toolbarExtra: notesOf(walNotes) })}
@@ -298,6 +304,7 @@ export function InternalsSection({ instanceId }: { instanceId: string }) {
         <TabsContent value="slru">
           <DataTable
             ariaLabel="SLRU caches"
+            captionId="internals.slru"
             tableId="slru-caches"
             toolbar={SLRU_TOOLBAR}
             toolbarExtra={notesOf([...walNotes, SLRU_HINT])}
@@ -312,6 +319,7 @@ export function InternalsSection({ instanceId }: { instanceId: string }) {
           {spilling.length > 0 ? (
             <DataTable
               ariaLabel="Temporary files"
+              captionId="internals.temp-files"
               tableId="temporary-files"
               toolbar={TEMP_FILE_TOOLBAR}
               {...(walNotes.length === 0 ? {} : { toolbarExtra: notesOf(walNotes) })}

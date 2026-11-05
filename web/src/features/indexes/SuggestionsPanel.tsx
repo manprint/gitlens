@@ -322,13 +322,14 @@ export function SuggestionsPanel({ instanceId, database }: SuggestionsPanelProps
           </option>
         ))}
       </NativeSelect>
-      <InfoHint id="indexes.suggestions" label="Index suggestions" />
+      <InfoHint id="indexes.verdict" label="suggestion verdict" />
     </>
   )
 
   return (
     <IndexPanel
       actions={windowControl}
+      captionId="indexes.suggestions"
       description="Columns your statements filter or sort on that no index leads with, ranked by the share of statement time they involve."
       notes={
         <>
@@ -346,7 +347,7 @@ export function SuggestionsPanel({ instanceId, database }: SuggestionsPanelProps
         {
           label: 'Statements analysed',
           value: formatCount(response.coverage.statements_analysed),
-          unit: `of ${formatCount(response.coverage.statements_considered)}`,
+          unit: `of ${formatCount(response.coverage.statements_considered)} statements`,
         },
       ]}
       title="Index suggestions"
