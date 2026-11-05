@@ -102,6 +102,7 @@ func TestIDXE003_EmptyInstance(t *testing.T) {
 	var raw map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &raw))
 	require.JSONEq(t, `[]`, string(raw["suggestions"]))
+	requireNoNulls(t, rec.Body.Bytes())
 	var got indexSuggestionsJSON
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	require.Equal(t, 0, got.Coverage.StatementsConsidered)
@@ -126,6 +127,7 @@ func TestIDXE004_GoldenJSON(t *testing.T) {
 	want, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.JSONEq(t, string(want), string(body))
+	requireNoNulls(t, body)
 
 	var got indexSuggestionsJSON
 	require.NoError(t, json.Unmarshal(body, &got))
@@ -187,4 +189,28 @@ func TestIDXE008_NoTextAndMissingColumns(t *testing.T) {
 	require.Equal(t, 3, got.Coverage.Skipped[skipNoText])
 	require.Len(t, got.Notes, 1)
 	require.Contains(t, got.Notes[0], "table_columns")
+}
+
+// requireNoNulls fails on a null anywhere except the two nullable fields of the
+// contract: a nil slice or map would break required arrays of the schema.
+func requireNoNulls(t *testing.T, body []byte) {
+	t.Helper()
+	var v any
+	require.NoError(t, json.Unmarshal(body, &v))
+	var walk func(path string, v any)
+	walk = func(path string, v any) {
+		switch x := v.(type) {
+		case nil:
+			require.True(t, strings.HasSuffix(path, ".n_distinct") || strings.HasSuffix(path, ".est_size_bytes"), "null at %s", path)
+		case map[string]any:
+			for k, e := range x {
+				walk(path+"."+k, e)
+			}
+		case []any:
+			for _, e := range x {
+				walk(path+"[]", e)
+			}
+		}
+	}
+	walk("", v)
 }

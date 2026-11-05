@@ -186,17 +186,21 @@ const (
 
 	// Rates are averaged over every scrape of the instance in the window, so a
 	// statement absent from a scrape counts as zero for it. The totals are the
-	// database's whole workload, taken before the cap.
+	// database's whole workload, taken before the cap. One scan of the instance's
+	// rows feeds both the per-statement sums (grouping set 1) and the scrape
+	// count (grouping set 6, one row per distinct ts): a separate count(DISTINCT
+	// ts) would skip-scan the ts index and filter every other instance's rows.
 	indexSuggestionStatementsSQL = `
-WITH win AS (
-  SELECT count(DISTINCT ts)::double precision AS n FROM metrics_statements
-   WHERE tenant_id = 'default' AND instance_id = $1 AND ts >= now() - make_interval(secs => $2)
-), agg AS (
-  SELECT datname, queryid, sum(calls_rate) AS calls, sum(exec_time_rate_ms) AS exec
+WITH g AS (
+  SELECT datname, queryid, ts, sum(calls_rate) AS calls, sum(exec_time_rate_ms) AS exec,
+         GROUPING(datname, queryid, ts) AS gid
     FROM metrics_statements
    WHERE tenant_id = 'default' AND instance_id = $1 AND ts >= now() - make_interval(secs => $2)
-     AND ($3 = '' OR datname = $3)
-   GROUP BY datname, queryid
+   GROUP BY GROUPING SETS ((datname, queryid), (ts))
+), win AS (
+  SELECT count(*)::double precision AS n FROM g WHERE gid = 6
+), agg AS (
+  SELECT datname, queryid, calls, exec FROM g WHERE gid = 1 AND ($3 = '' OR datname = $3)
 ), total AS (
   SELECT agg.*, sum(agg.exec) OVER (PARTITION BY agg.datname) AS db_exec FROM agg
 )

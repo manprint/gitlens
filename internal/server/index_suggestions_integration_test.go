@@ -27,6 +27,7 @@ func suggestionsGet(t *testing.T, pool *pgxpool.Pool, instance uuid.UUID, query 
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/instances/"+instance.String()+"/index-suggestions"+query, http.NoBody))
 	took := time.Since(start)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	requireNoNulls(t, w.Body.Bytes())
 	var resp indexSuggestionsJSON
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	return resp, took
