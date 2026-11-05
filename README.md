@@ -1189,7 +1189,8 @@ sampled blocking trees and bounded wait-event gauges. The `activity` check also
 reports connection use, per-database counts, state age, prepared transactions,
 and frozen-XID age, and counts connections per application, per user, per client
 address and per origin (`pglens` or `application`; the sessions pglens opens
-itself are told from the application's). `checks.activity.by_application` is
+itself are told from the application's), as the metrics `pg_connections_by_application`,
+`pg_connections_by_user`, `pg_connections_by_client` and `pg_connections_by_origin`. `checks.activity.by_application` is
 `true` by default; set it to `false` to turn the per-application counts off.
 The session list of the `locks` check carries no statement text unless
 `checks.locks.session_query_text` is `true` (default `false`); a text that may

@@ -811,9 +811,11 @@ test('SYS-UI-010: finding mute and unmute update state', async ({ signedInPage, 
       if ((await pager.count()) === 0 || (await next.isDisabled())) break
       await next.click()
     }
-    await findingRow()
-      .getByRole('button', { name: /^Show details of / })
-      .click({ timeout: 10_000 })
+    // The row keeps its card open across the state change, so open it only when closed.
+    const toggle = findingRow().getByRole('button', { name: /^(Show|Hide) details of / })
+    if ((await toggle.getAttribute('aria-expanded', { timeout: 10_000 })) !== 'true') {
+      await toggle.click({ timeout: 10_000 })
+    }
   }
 
   await page.goto('/findings')
@@ -839,12 +841,22 @@ test('SYS-UI-010: finding mute and unmute update state', async ({ signedInPage, 
   await expect(mutedFinding).toContainText('UI acceptance mute')
 
   await mutedFinding.getByRole('button', { name: 'Unmute finding' }).click()
+  let lastSeen = 'no response'
   await pollAPI(async () => {
     const response = await api.get(`/api/v1/findings/${encodeURIComponent(findingID)}`)
-    if (!response.ok()) return false
+    if (!response.ok()) {
+      lastSeen = `HTTP ${response.status()}`
+      return false
+    }
     const current = await response.json()
+    lastSeen = `state=${current.state} mute_reason=${current.mute_reason ?? 'null'} (want ${realState})`
     return current.state === realState && current.mute_reason == null
-  }, 60_000)
+  }, 60_000).catch(async (error: unknown) => {
+    const shown = await page.getByRole('dialog').count()
+    throw new Error(
+      `finding ${findingID} not unmuted: last API ${lastSeen}; dialogs open ${shown}; ${String(error)}`,
+    )
+  })
   await reloadUntil(
     page,
     async () => {

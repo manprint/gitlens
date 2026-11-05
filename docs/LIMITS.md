@@ -313,3 +313,19 @@ settings collection, a flag at its next hourly report or restart) and the
 cache has expired. A fact older than 24 hours counts as unknown, and an item
 that depends on it is omitted, not raised. Another server replica keeps its
 own cache.
+
+## 17. Session origin is classified by name and role, not by intent
+
+A session counts as `pglens` when its `application_name` is `pglens`, starts
+with `pglens/` or `pglens-agent/`, or when it connects as the monitoring role
+the agent reports; every other session counts as `application`. A client that
+sets a `pglens/…` application name (or logs in as the monitoring role) is
+listed with the pglens sessions, and an agent that connects with another name
+and another role is listed with the application sessions. The classification
+is made by the server, not by the agent. The session sample holds at most 100 sessions
+(those with the oldest transactions): when it is truncated, the origin
+totals come from the latest activity scrape and the tables list the sample
+only. The raw statement text of a session is sent only when
+`checks.locks.session_query_text` is on; otherwise the normalised text is
+shown when `pg_stat_statements` has captured the statement, and a statement
+that has not finished once may show no text.

@@ -201,3 +201,41 @@ export function compareTotals(
   }
   return problems
 }
+
+/**
+ * Control run: with the QA sessions closed the sample must be back at the
+ * baseline taken before they opened. The application total moves only with the
+ * Odoo workers (`baseline.application + change in Odoo workers`, within the
+ * drift measured across the two reads that bracket the sample); the pglens
+ * total stays within the range of the three truth reads, minus the sampling
+ * backend that never counts itself.
+ */
+export function compareBaseline(
+  baseline: readonly TruthSession[],
+  before: readonly TruthSession[],
+  after: readonly TruthSession[],
+  api: ApiLocks,
+): string[] {
+  const connections = api.connections
+  if (connections === undefined) return ['the response carries no connections summary']
+  const by = connections.truncated ? connections.totals?.by_origin : connections.by_origin
+  const seen = (key: Origin) => by?.find((entry) => entry.key === key)?.count ?? 0
+  const base = truthTotals(baseline)
+  const problems: string[] = []
+  const odooBase = odooCount(baseline)
+  const drift = Math.abs(odooCount(before) - odooCount(after))
+  const expectedLow = base.application + Math.min(odooCount(before), odooCount(after)) - odooBase
+  const expectedHigh = base.application + Math.max(odooCount(before), odooCount(after)) - odooBase
+  if (seen('application') < expectedLow - drift || seen('application') > expectedHigh + drift) {
+    problems.push(
+      `application total ${seen('application')} not at the baseline ${base.application} + Odoo change [${expectedLow}, ${expectedHigh}] (drift ${drift})`,
+    )
+  }
+  const pglens = [base.pglens, truthTotals(before).pglens, truthTotals(after).pglens]
+  if (seen('pglens') < Math.min(...pglens) - 1 || seen('pglens') > Math.max(...pglens)) {
+    problems.push(
+      `pglens total ${seen('pglens')} outside the baseline range of ${pglens.join('/')}`,
+    )
+  }
+  return problems
+}

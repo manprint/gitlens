@@ -12,6 +12,7 @@ import { lockPair, openSessions, query, registerCleanup, runCleanups } from './p
 import {
   type ApiLocks,
   compare,
+  compareBaseline,
   compareTotals,
   EXACT_APPS,
   odooCount,
@@ -320,23 +321,32 @@ test('SORIGIN-E2E-001 the sample, the API summary and both tables agree with pg_
   await appA.close()
   await appB.close()
   await pair.release()
+  let settled: Bracket | undefined
   await until(
     async () => {
       const read = await bracket()
       const leftovers = (read.api.sessions ?? []).filter((row) =>
         (row.application_name ?? '').startsWith('qa-'),
       )
-      return [
+      const problems = [
         ...(leftovers.length > 0 ? [`${leftovers.length} QA sessions still in the sample`] : []),
         ...compareTotals(read.before, read.after, read.api),
+        ...compareBaseline(baseline, read.before, read.after, read.api),
       ]
+      if (problems.length === 0) settled = read
+      return problems
     },
     BUDGET.activity,
-    'control: QA sessions gone from the sample',
+    'control: sample back at the baseline, QA sessions gone',
   )
+  expect(settled, 'the control sample is recorded').toBeDefined()
+  // The control comparison is real: the sample taken while the seven QA sessions were open is not at the baseline.
+  expect(
+    compareBaseline(baseline, matched.before, matched.after, matched.api),
+    'the baseline comparison detects the seven QA sessions of the open sample',
+  ).not.toEqual([])
   await openOrigin(page, 'application', 'qa-')
   await expectRows(page, 'application', 0, BUDGET.activity)
-  expect(odooCount(await truthSessions())).toBeGreaterThanOrEqual(0)
   guard.assertClean()
 })
 
