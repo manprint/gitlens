@@ -7,7 +7,7 @@ import (
 )
 
 func TestIDXS013_SizeFormula(t *testing.T) {
-	meta := TableMeta{RelTuples: 1_000_000, Columns: map[string]Column{"a": {AvgWidth: 8}, "b": {TypLen: 16}, "c": {TypLen: -1}}}
+	meta := TableMeta{RelTuples: 1_000_000, HasCounts: true, Columns: map[string]Column{"a": {AvgWidth: 8}, "b": {TypLen: 16}, "c": {TypLen: -1}}}
 	size, notes := estimateSize(meta, true, []KeyColumn{{Name: "a"}, {Name: "b"}})
 	require.NotNil(t, size)
 	require.Equal(t, int64(1_000_000*(8+16+8+4)*1.15), *size)
@@ -19,20 +19,23 @@ func TestIDXS013_SizeFormula(t *testing.T) {
 }
 
 func TestIDXS013_SizeUnknown(t *testing.T) {
-	size, notes := estimateSize(TableMeta{}, false, []KeyColumn{{Name: "a"}})
+	size, notes := estimateSize(TableMeta{RelTuples: 5000, Columns: map[string]Column{"a": {AvgWidth: 4}}}, true, []KeyColumn{{Name: "a"}})
+	require.Nil(t, size, "counts not flagged present")
+	require.Equal(t, []string{NoteSizeUnknown}, notes)
+	size, notes = estimateSize(TableMeta{}, false, []KeyColumn{{Name: "a"}})
 	require.Nil(t, size)
 	require.Equal(t, []string{NoteSizeUnknown}, notes)
-	size, _ = estimateSize(TableMeta{RelTuples: -1}, true, []KeyColumn{{Name: "a"}})
+	size, _ = estimateSize(TableMeta{RelTuples: -1, HasCounts: true}, true, []KeyColumn{{Name: "a"}})
 	require.Nil(t, size)
-	size, _ = estimateSize(TableMeta{RelTuples: -1, LiveTuples: 100, Columns: map[string]Column{"a": {AvgWidth: 4}}}, true, []KeyColumn{{Name: "a"}})
+	size, _ = estimateSize(TableMeta{RelTuples: -1, LiveTuples: 100, HasCounts: true, Columns: map[string]Column{"a": {AvgWidth: 4}}}, true, []KeyColumn{{Name: "a"}})
 	require.Equal(t, int64(100*16*1.15), *size, "live tuples stand in for a never-analysed reltuples")
 }
 
 func TestIDXS013_BtreeType(t *testing.T) {
-	for _, typ := range []string{"json", "xml", "point", "tsvector"} {
+	for _, typ := range []string{"json", "xml", "point", "tsvector", "json[]", "json[][]", "point[]"} {
 		require.False(t, btreeType(typ), typ)
 	}
-	for _, typ := range []string{"", "text", "jsonb", "integer", "uuid"} {
+	for _, typ := range []string{"", "text", "jsonb", "integer", "uuid", "jsonb[]", "character varying(10)", "integer[]"} {
 		require.True(t, btreeType(typ), typ)
 	}
 }

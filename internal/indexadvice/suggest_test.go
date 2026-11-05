@@ -26,7 +26,7 @@ func col(typ string, n float64) Column {
 
 func partnerMeta() TableMeta {
 	return TableMeta{
-		RelTuples: 50000, LiveTuples: 50000,
+		RelTuples: 50000, LiveTuples: 50000, HasCounts: true, HasWrites: true,
 		Columns: map[string]Column{
 			"ref": col("text", 40000), "name": col("text", 1500), "active": col("boolean", 2),
 			"company_id": col("integer", 5), "write_date": col("timestamp", -0.9), "id": col("integer", -1),
@@ -88,7 +88,7 @@ func TestIDXS004_OverlapListed(t *testing.T) {
 	in.Indexes[partner] = []IndexDef{{Name: "p_ref", Method: "btree", Columns: []IndexColumn{{Name: "ref"}}}, {Name: "p_hash", Method: "hash", Columns: []IndexColumn{{Name: "ref"}}}}
 	out := Suggest(in)
 	require.Len(t, out.Suggestions, 1)
-	require.Equal(t, []string{"p_ref"}, out.Suggestions[0].OverlappingIndexes)
+	require.Equal(t, []string{"p_hash", "p_ref"}, out.Suggestions[0].OverlappingIndexes)
 	require.Equal(t, "ref,name", names(out.Suggestions[0]))
 }
 
@@ -230,6 +230,46 @@ func TestIDXS018_PartialIndex(t *testing.T) {
 	require.Len(t, Suggest(in).Suggestions, 1)
 }
 
+func TestIDXS018_NotNullPartialAndHash(t *testing.T) {
+	notNull := []IndexDef{{Name: "p_ref_nn", Method: "btree", Columns: []IndexColumn{{Name: "ref"}}, Where: "(ref IS NOT NULL)"}}
+	for _, text := range []string{
+		`SELECT 1 FROM res_partner WHERE ref = $1`,
+		`SELECT 1 FROM res_partner WHERE "res_partner"."ref" IN ($1, $2)`,
+		`SELECT 1 FROM res_partner WHERE ref > $1`,
+		`SELECT 1 FROM res_partner WHERE ref LIKE 'ab%'`,
+	} {
+		in := input(text)
+		in.Indexes[partner] = notNull
+		require.Empty(t, Suggest(in).Suggestions, text)
+	}
+	in := input(`SELECT 1 FROM res_partner WHERE name = $1 ORDER BY ref LIMIT 5`)
+	in.Indexes[partner] = notNull
+	out := Suggest(in)
+	require.Len(t, out.Suggestions, 1, "ORDER BY alone does not prove non-null")
+	in = input(`SELECT 1 FROM res_partner WHERE ref IS NULL ORDER BY ref LIMIT 5`)
+	in.Indexes[partner] = notNull
+	require.Len(t, Suggest(in).Suggestions, 1)
+
+	hash := []IndexDef{{Name: "p_ref_hash", Method: "hash", Columns: []IndexColumn{{Name: "ref"}}}}
+	in = input(`SELECT 1 FROM res_partner WHERE ref = $1`)
+	in.Indexes[partner] = hash
+	require.Empty(t, Suggest(in).Suggestions, "a hash index serves single-column equality")
+	for _, text := range []string{`SELECT 1 FROM res_partner WHERE ref > $1`, `SELECT 1 FROM res_partner WHERE ref = $1 AND name = $2`} {
+		in = input(text)
+		in.Indexes[partner] = hash
+		out = Suggest(in)
+		require.Len(t, out.Suggestions, 1, text)
+		require.Equal(t, []string{"p_ref_hash"}, out.Suggestions[0].OverlappingIndexes, text)
+	}
+}
+
+func TestIDXS018_UnmatchedPartialIsOverlap(t *testing.T) {
+	in := input(`SELECT 1 FROM res_partner WHERE ref = $1`)
+	in.Indexes[partner] = []IndexDef{{Name: "p_ref_active", Method: "btree", Columns: []IndexColumn{{Name: "ref"}}, Where: "(active)"}}
+	out := Suggest(in)
+	require.Equal(t, []string{"p_ref_active"}, out.Suggestions[0].OverlappingIndexes)
+}
+
 func TestIDXS022_IncludeAndExpressionNeverCover(t *testing.T) {
 	in := input(`SELECT 1 FROM res_partner WHERE ref = $1`)
 	in.Indexes[partner] = []IndexDef{
@@ -251,6 +291,30 @@ func TestIDXS023_MissingMetadata(t *testing.T) {
 	require.Equal(t, "x,y", names(s), "source order without statistics")
 	require.Equal(t, "public", s.Schema)
 	require.Equal(t, "unknown", s.Selectivity.Label)
+	require.Contains(t, s.Notes, NoteWritesUnknown)
+	require.Equal(t, VerdictModerate, s.Verdict, "ratio 10000 would be strong, but the writes are unknown")
+	require.Equal(t, "low", s.Confidence)
+}
+
+func TestIDXS023_CountsAndWritesUnknown(t *testing.T) {
+	in := input(`SELECT 1 FROM res_partner WHERE ref = $1`)
+	meta := partnerMeta()
+	meta.HasCounts, meta.HasWrites = false, false
+	meta.RelTuples, meta.LiveTuples = 0, 0
+	in.Tables[partner] = meta
+	in.Statements[0].CallsRate = 1000
+	out := Suggest(in)
+	require.Len(t, out.Suggestions, 1, "unknown counts must not suppress the table as small")
+	s := out.Suggestions[0]
+	require.Zero(t, out.Coverage.Skipped[NoteSmallTable])
+	require.Nil(t, s.EstSizeBytes)
+	require.Contains(t, s.Notes, NoteSizeUnknown)
+	require.Contains(t, s.Notes, NoteWritesUnknown)
+	require.Equal(t, VerdictModerate, s.Verdict)
+	require.Equal(t, "medium", s.Confidence, "high selectivity but unknown writes")
+	meta.HasWrites = true
+	in.Tables[partner] = meta
+	require.Equal(t, VerdictStrong, Suggest(in).Suggestions[0].Verdict)
 }
 
 func TestIDXS024_SchemaResolution(t *testing.T) {

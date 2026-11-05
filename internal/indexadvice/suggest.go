@@ -29,6 +29,7 @@ const (
 	NoteWidthAssumed       = "width_assumed"
 	NoteLowSelectivity     = "low_selectivity"
 	NoteSelectivityUnknown = "selectivity_unknown"
+	NoteWritesUnknown      = "writes_unknown"
 )
 
 // Key identifies a table of one monitored database.
@@ -62,12 +63,17 @@ type Writes struct {
 }
 
 // TableMeta is what the server knows about a table. A table without Columns
-// is treated as having unknown columns: none is dropped.
+// is treated as having unknown columns: none is dropped. HasCounts says
+// RelTuples/LiveTuples come from metrics_tables, HasWrites says Writes does;
+// without them the table is neither suppressed as small nor sized, and its
+// verdict is capped at moderate.
 type TableMeta struct {
 	RelTuples  float64
 	LiveTuples float64
+	HasCounts  bool
 	Columns    map[string]Column
 	Writes     Writes
+	HasWrites  bool
 }
 
 // Input of Suggest.
@@ -152,6 +158,10 @@ type candidate struct {
 	notes map[string]bool
 	stmts []int
 	scope int
+	// eqLead counts the key columns that came from equality predicates;
+	// strict holds the columns with an eq, range or like_prefix predicate.
+	eqLead int
+	strict map[string]bool
 }
 
 func (c *candidate) sig() string {
@@ -304,10 +314,10 @@ func resolve(in Input, db, schema, table string) Key {
 func buildCandidate(in Input, db string, g predGroup) (*candidate, bool) {
 	key := resolve(in, db, g.schema, g.table)
 	meta, hasMeta := in.Tables[key]
-	if hasMeta && meta.LiveTuples < SmallTableRows {
+	if hasMeta && meta.HasCounts && meta.LiveTuples < SmallTableRows {
 		return nil, true
 	}
-	c := &candidate{key: key, notes: map[string]bool{}, scope: g.scope}
+	c := &candidate{key: key, notes: map[string]bool{}, scope: g.scope, strict: map[string]bool{}}
 	usable := func(name string) bool {
 		if !hasMeta || len(meta.Columns) == 0 {
 			return true
@@ -328,6 +338,9 @@ func buildCandidate(in Input, db string, g predGroup) (*candidate, bool) {
 	var rangeCol, likeCol, orderCol string
 	orderDesc := false
 	for _, p := range g.preds {
+		if p.Kind != KindOrder && p.Kind != KindIsNull {
+			c.strict[p.Column] = true
+		}
 		switch p.Kind {
 		case KindEq:
 			if !seen[p.Column] && usable(p.Column) {
@@ -376,6 +389,7 @@ func buildCandidate(in Input, db string, g predGroup) (*candidate, bool) {
 		return nil, false
 	}
 	c.cols = cols
+	c.eqLead = min(len(eq), len(cols))
 	return c, false
 }
 
@@ -396,33 +410,52 @@ func selectivityRank(meta TableMeta, name string) float64 {
 	return nd
 }
 
-// coverage reports whether an existing btree index serves the candidate, and
-// the names of the indexes that share its first key column without covering it.
+// coverage reports whether an existing index serves the candidate, and the
+// names of the indexes that share its first key column without covering it.
+// A btree index covers when the candidate's key is a prefix of its columns; a
+// single-column hash index covers a single-column equality candidate. A
+// partial index covers only when its predicate holds for the statement: the
+// text contains it, or it is "col IS NOT NULL" and the statement compares col
+// with a strict operator (the planner proves non-null from it).
 func coverage(c *candidate, defs []IndexDef, text string) (bool, []string) {
 	var overlap []string
 	for _, def := range defs {
-		if def.Method != "" && !strings.EqualFold(def.Method, "btree") {
-			continue
-		}
 		if len(def.Columns) == 0 || def.Columns[0].Expr || def.Columns[0].Name != c.cols[0].Name {
 			continue
 		}
-		if def.Where != "" && !strings.Contains(squash(text), squash(trimOuterParens(def.Where))) {
+		isHash := strings.EqualFold(def.Method, "hash")
+		if def.Method != "" && !isHash && !strings.EqualFold(def.Method, "btree") {
 			continue
 		}
-		prefix := len(def.Columns) >= len(c.cols)
-		for i := 0; prefix && i < len(c.cols); i++ {
-			if def.Columns[i].Expr || def.Columns[i].Name != c.cols[i].Name {
-				prefix = false
+		served := partialHolds(def.Where, c, text)
+		if served && isHash {
+			served = len(def.Columns) == 1 && len(c.cols) == 1 && c.eqLead == 1
+		} else if served {
+			served = len(def.Columns) >= len(c.cols)
+			for i := 0; served && i < len(c.cols); i++ {
+				if def.Columns[i].Expr || def.Columns[i].Name != c.cols[i].Name {
+					served = false
+				}
 			}
 		}
-		if prefix {
+		if served {
 			return true, nil
 		}
 		overlap = append(overlap, def.Name)
 	}
 	sort.Strings(overlap)
 	return false, overlap
+}
+
+func partialHolds(where string, c *candidate, text string) bool {
+	if where == "" {
+		return true
+	}
+	pred := squash(trimOuterParens(where))
+	if col, ok := strings.CutSuffix(pred, " is not null"); ok && c.strict[strings.Trim(col, `"`)] {
+		return true
+	}
+	return strings.Contains(squash(text), pred)
 }
 
 func squash(s string) string {
@@ -461,6 +494,9 @@ func mergeCandidates(cands []*candidate) []*candidate {
 		}
 		r := result[target]
 		r.stmts = append(r.stmts, c.stmts...)
+		for col := range c.strict {
+			r.strict[col] = true
+		}
 		for note := range c.notes {
 			r.notes[note] = true
 		}
@@ -547,6 +583,10 @@ func score(in Input, stmts []Stmt, c *candidate, overlapping map[*candidate][]st
 		notes[n] = true
 	}
 
+	writesKnown := hasMeta && meta.HasWrites
+	if !writesKnown {
+		notes[NoteWritesUnknown] = true
+	}
 	w := meta.Writes
 	s.Write = WriteRates{InsertRate: w.Ins, UpdateRate: w.Upd, DeleteRate: w.Del}
 	if w.Upd > 0 {
@@ -554,6 +594,9 @@ func score(in Input, stmts []Stmt, c *candidate, overlapping map[*candidate][]st
 	}
 	s.ReadWriteRatio = readWriteRatio(s.CallsRate, w)
 	s.Verdict = verdictFor(s.ReadWriteRatio, s.Selectivity.Label == "low")
+	if !writesKnown && s.Verdict == VerdictStrong {
+		s.Verdict = VerdictModerate
+	}
 	if s.Selectivity.Label == "low" {
 		notes[NoteLowSelectivity] = true
 	}
@@ -566,6 +609,9 @@ func score(in Input, stmts []Stmt, c *candidate, overlapping map[*candidate][]st
 		s.Confidence = "medium"
 	}
 
+	if !writesKnown && s.Confidence == "high" {
+		s.Confidence = "medium"
+	}
 	s.Notes = make([]string, 0, len(notes))
 	for n := range notes {
 		s.Notes = append(s.Notes, n)

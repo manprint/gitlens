@@ -18,15 +18,15 @@ See `PROTOCOL.md` (static cold-start rules).
 - Active scope: plan (whole `005_plan-ConsoleInsights`, no selector); full-autonomous true, WIP on (explicit)
 - Scope result: RUNNING
 - Type: sub-phase
-- ID / attempt: 4.2 / 1
-- Status: IN_PROGRESS (OPEN, opened 2026-11-05; base e097d2b; 4.2 attempt 1)
+- ID / attempt: 4.3 / 1
+- Status: TODO (4.2 DONE; 4.3 not opened)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-sonnet-5-5; supervisor: advisor (Opus 5.5)
-- File / unit heading: phase_05.md → 4.2
-- Current step: 4.2 S1 candidate generation
-- Next action: implement internal/indexadvice/{suggest,size,verdict}.go per phase_05.md 4.2; owned paths: those + tests.
+- File / unit heading: phase_05.md → 4.3
+- Current step: —
+- Next action: read phase_05.md 4.3 and open it (execution order §11).
 - Stop latch: none (cleared by explicit invocation 2026-11-05)
-- Last closure: unit:4.1:1 (sub-phase 4.1 DONE)
+- Last closure: unit:4.2:1 (sub-phase 4.2 DONE)
 - Unit base: HEAD (after the P16 commit); branch `feat/index-analysis` (never switch or create branches)
 - Repo state: uncommitted only `internal/webui/dist/index.html` (never staged) and `.claude/`.
 - Network: user authorised internet use (2026-11-05 message "autorizzo ad usare la rete internet"); still no push.
@@ -123,6 +123,7 @@ Latest result per gate; earlier detail in `history.md`.
 - P16 gates (2026-11-05; attempt-1 results, valid for 16.4 attempt 2 because production code is unchanged): G-GO-FOCUS 5 packages ok (`-race -shuffle=on`); G-GO-INT `TestACTCFGINT001` pg15+pg18, `TestSESSAPIINT001` ok; G-RO `TestINTRO001` pg15+pg18 ok; G-API no diff (`web-gen-api api-docs`); G-WEB-UNIT `src/features/locks src/lib` 444 passed; G-DEPLOY: no production change since 8256b9f, images `pglens-server:dev` c812ba5a3f3b, `pglens-agent:dev` 043139c08de5; G-VIS `VIS-LOCKS-001` (list = 1) passed; G-QA SORIGIN-E2E-001..003 passed (001 re-run after the control-run change: sample = pg_stat_activity after 13 s, baseline control after 10 s, sabotage detected), QA-CLEAN-001 passed, `agent.yaml` cmp-equal.
 - Attempt 2 reruns (2026-11-05): G-WEB-STATIC (lint 0 errors / 2 pre-existing warnings, prettier, `tsc -b`) after the spec edits; G-UI-LEGACY `go test -tags=e2e -timeout=40m -count=1 ./test/e2e/... -run UI` after `make web-build` (12 tests: SYS-UI-000 = `TestUI_Smoke`, 001..011): run 2 failed once in `TestUI_FindingMute` at the post-unmute API poll (state not back within 60 s; cause not determined, test passed alone 3 times); the poll now reports the last API state on timeout; run 3: 12 of 12 pass (incl. SYS-UI-008 BlockingTree, 009 Cancel, 011 Accessibility; ok 697 s). If `TestUI_FindingMute` fails again, its diagnostic names the last state.
 - 4.1 (2026-11-05): G-GO-FOCUS `go test -race -shuffle=on -count=1 -cover ./internal/indexadvice` ok, coverage 93.2 % (gate ≥ 90 %); `go test -list 'IDXA' ./internal/indexadvice` lists 36 tests; corpus 120 statements (≥ 60), all invariants of `TestIDXACORPUS002_Invariants` hold; gofmt, `go vet`, golangci-lint 0 issues. Review (advisor, Opus 5.5): fuzz target renamed to `FuzzIDXAFUZZ001` so the gate pattern discovers it, invariants asserted, `ILIKE` demoted to `expression` skip. G-SECRETS: only the host name in text.
+- 4.2 (2026-11-05; evidence starts at `b10e48f`, the earlier WIP `09c8590` was committed over a failing test run by a `| tail && commit` chain, now `set -o pipefail`): G-GO-FOCUS `go test -race -shuffle=on -count=1 -cover ./internal/indexadvice` ok, coverage 94.7 %; `go test -list 'IDXS'` 38 tests; gofmt, vet, golangci-lint 0 issues. Review (advisor, Opus 5.5) found two blockers, fixed: Odoo `WHERE (col IS NOT NULL)` partial indexes (44 on the live stack) now cover strict predicates on `col`; unknown row counts/writes no longer suppress a table as small or yield a `strong` verdict (cap `moderate`, note `writes_unknown`).
 - G-SECRETS: pattern counts over the diff 0; the only match under `web/src` is the committed canary fixture `NotificationsPanel.test.tsx` (`spaces/UICANARYSPAC…`, fake); (b) value check not runnable (webhook deferred).
 - Review P16 (advisor, Opus 5.5): attempt 1 rejected (README metric names, baseline control run, G-UI-LEGACY red); attempt 2 approved after record fixes (tests table, §9 FindingMute open item, README names verified against `internal/check/activity.go`, `lockSessionsLimit = 100`).
 
@@ -154,6 +155,7 @@ Latest result per gate; earlier detail in `history.md`.
 | 1 | 13.2 deviations (R-13.2) | contract 13.2 Files | (a) new table `check_results(instance_id, check_name, datname, first_result_at, last_result_at, last_failed)` written by the ingest pipeline in the envelope transaction (`WHERE EXISTS` on the instance; flag only, never error text, I-10) — nothing durable recorded per-check result times before; (b) `FirstRunWarmupCap`/`FirstRunBound` moved to `internal/wire` (server must not import `internal/agent`); (c) `index.unused` on PG16+ skips an index whose `last_idx_scan` is inside the window (D22b, WINDOW-007) and the statistics observation is anchored on `last_idx_scan` when set; (d) `flushEnvelope` gained the coverage parameter (6 call sites); (e) `queries.test.tsx` probes `useCoverage`; (f) test file `advisor_window_source_test.go` (a `_windows` suffix is a GOOS build tag); (g) README/LIMITS written in 13.2 (PG ≤ 15 limitation, coverage endpoint, windows now effective). Migration 0027 was edited after its first dev deploy (unshipped) and reset on the dev DB (backup in `/home/agent/odoo-backups/pglens-0027-reset-*`). Follow-up (not in contract): an index last scanned before the window with short pglens history stays degraded (D22b "statistics age from last_idx_scan" shortcut not implemented) | supervisor (R-13.2) | 13.3 / later |
 | 1 | User rulings 2026-11-04 (live gates) | stack absent after sandbox reset | (a) rebuild the Odoo stack (dir `/home/agent/pglens-odoo-stack`, backups `/home/agent/odoo-backups`, images `odoo:18`/`postgres:18` were gone; network pulls authorised); files recovered from earlier transcripts impossible (not present), so `compose.yml`, `deploy.sh`, `backup.sh`, `verify_backup.sh`, `seed/*`, `load/rpc_load.py`, README are REBUILT to the 0.1/0.2 contracts (record per file in §7); this is attempt 2 of 0.1/0.2 evidence. (b) Google Chat webhook deferred by the user: G-SECRETS value half and the notification-channel live e2e are NOT RUN by user decision (tested later by the user), not BLOCKED. (c) HA topology tested as 1 primary + 2 standbys (7.x). (d) all supervisor-recommended decisions approved; finish the plan. (e) backups are still required: QA guard and HA scripts accept only a fresh `VERIFIED` backup (< 24 h); `backup.sh`/`verify_backup.sh` rebuilt and run. | user | all live units, 7.x |
 | 1 | 4.1 deviations (R-4.1) | contract 4.1 | (a) test IDs beyond the planned ranges: IDXA-LEX-007, IDXA-PARSE-017..020, IDXA-CORPUS-002 (invariants); (b) `Analysis` carries `Statement` (first verb) and tables/predicates carry `Scope` (query level, 1-based) so 4.2 can tell outer from sub-select references; (c) `ILIKE`/`~~*` are skipped as `expression` (not servable by a plain btree); `LIKE` prefix is `like_prefix`, operator class/collation choice is a 4.2 rule; (d) `MaxInput` = 64 KiB and nesting depth 48 bound the work; (e) corpus golden values were generated by `-update` and reviewed (invariants + sampled entries), not hand-written |
+| 1 | 4.2 deviations (R-4.2) | contract 4.2 / D8 | (a) `TableMeta` carries `HasCounts`/`HasWrites`: when absent the small-table rule is skipped, size is null (`size_unknown`), note `writes_unknown`, verdict capped at `moderate`, confidence at `medium`; 4.3 sets them from the presence of a `metrics_tables` row; (b) a partial index `WHERE col IS NOT NULL` covers a candidate with an eq/range/like_prefix predicate on `col` (the planner proves non-null), other partial predicates need their text in the statement; an unmatched partial or a non-covering hash/btree index sharing the first column is listed in `overlapping_indexes`; a single-column hash index covers a single-column equality candidate; (c) an ORDER BY column is a key column only with LIMIT; trailing column priority range, like_prefix, order; `isnull` is never a key column; (d) selectivity: fraction × rows ≥ 1000 also `high`; confidence mapping `low` (selectivity unknown) / `high` (first column high) / `medium` (the spec fixes only the low cap), `medium` cap when writes unknown; (e) `share_pct` = statement share of the suggestion's read cost; `Coverage.Skipped` counts statements per reason (extractor reasons + `small_table`); (f) unqualified table → unique known schema, else `public`; (g) `quoteIdent` also quotes the 106 reserved keywords of `pg_get_keywords()` (categories R, T), `btreeType` understands `format_type` spellings (`json[]`, `x(n)`); (h) extra test IDs beyond the planned list: IDXS-004b, 005b, 009b, 018b, 022..027 |
 | 1 | commit identity | sandbox lost git config ("Author identity unknown") | commits use `git -c user.name=fabio -c user.email=fabio@git.it` (same author as earlier commits); no config written | executor | all commits |
 | 1 | G-SECRETS canary | pattern count over the whole tree must be 0 | the one match under `web/src` is the fake fixture `web/src/features/settings/NotificationsPanel.test.tsx` (`UICANARYSPAC…`, `spaces/X`), committed since 6d9032b and accepted at P14; the real webhook appears nowhere | executor | final G-SECRETS |
 
@@ -199,7 +201,7 @@ Latest result per gate; earlier detail in `history.md`.
 | 15.2 | phase_16.md | 15.1 | DONE | 1 | INSTSEC-001..009, FHD-ROUTES-001..003, FHD-INST-001 (§7 15.2); R-15.2 |
 | 17.1 | phase_18.md | 1.2, 9.1 | DONE | 1 | CAPTION-001..005, GLOSSARY-001/002, CARD-001..005, CAPCMP-001..005, CAPTION-COVERAGE-001, CARD-COVERAGE-001 (§7 17.1); R-17.1 |
 | 4.1 | phase_05.md | 0.2 | DONE | 1 | IDXA-LEX-001..007, IDXA-PARSE-001..020, IDXA-DEF-001..006, IDXA-CORPUS-001/002 (120 statements), IDXA-FUZZ-001 (§7 4.1, §8) |
-| 4.2 | phase_05.md | 4.1, 3.1 | TODO | 1 | — |
+| 4.2 | phase_05.md | 4.1, 3.1 | DONE | 1 | IDXS-001..027 (incl. 004b/005b/009b/018b/022..027), IDXS-W-001 (§7 4.2, §8) |
 | 4.3 | phase_05.md | 4.2 | TODO | 1 | — |
 | 4.4 | phase_05.md | 4.3, 9.1, 15.1, 12.2 | TODO | 1 | — |
 | 4.5 | phase_05.md | 4.4 | TODO | 1 | — |
@@ -325,8 +327,8 @@ Statuses: TODO, IN_PROGRESS, IN_REVIEW, DONE, SKIPPED, BLOCKED. SKIPPED retains 
 | IDXA-FUZZ-* | 4.1 | G-GO-FOCUS | DONE | FuzzIDXAFUZZ001: 131 seed sub-tests passed; 25 s fuzz run 1.4 M execs without panic (§7 4.1) |
 | IDXA-LEX-* | 4.1 | G-GO-FOCUS | DONE | IDXA-LEX-001..007 passed (§7 4.1) |
 | IDXA-PARSE-* | 4.1 | G-GO-FOCUS | DONE | IDXA-PARSE-001..020 passed (§7 4.1) |
-| IDXS-* | 4.2 | G-GO-FOCUS | TODO | — |
-| IDXS-W-* | 4.2 | G-GO-FOCUS | TODO | — |
+| IDXS-* | 4.2 | G-GO-FOCUS | DONE | `go test -list 'IDXS'` lists 38; passed (§7 4.2) |
+| IDXS-W-* | 4.2 | G-GO-FOCUS | DONE | IDXSW001 passed (§7 4.2) |
 | IDXE-* | 4.3 | G-GO-FOCUS | TODO | — |
 | IDXE-INT-* | 4.3 | G-GO-INT | TODO | — |
 | SUGG-UI-* | 4.4 | G-WEB-UNIT | TODO | — |

@@ -1,6 +1,9 @@
 package indexadvice
 
-import "math"
+import (
+	"math"
+	"strings"
+)
 
 const (
 	tupleOverheadBytes = 8 + 4
@@ -8,9 +11,16 @@ const (
 	assumedWidth       = 32
 )
 
-// btreeType reports whether a column type can be a btree key. An empty type
-// (not reported) is accepted.
+// btreeType reports whether a column type (format_type spelling, arrays as
+// `json[]`) can be a btree key. An empty type (not reported) is accepted.
 func btreeType(typ string) bool {
+	typ = strings.TrimSpace(typ)
+	for strings.HasSuffix(typ, "[]") {
+		typ = strings.TrimSuffix(typ, "[]")
+	}
+	if i := strings.IndexByte(typ, '('); i >= 0 {
+		typ = typ[:i]
+	}
 	switch typ {
 	case "json", "xml", "point", "box", "circle", "line", "lseg", "path", "polygon", "tsvector", "tsquery":
 		return false
@@ -26,7 +36,7 @@ func estimateSize(meta TableMeta, hasMeta bool, cols []KeyColumn) (*int64, []str
 	if rows <= 0 {
 		rows = meta.LiveTuples
 	}
-	if !hasMeta || rows <= 0 {
+	if !hasMeta || !meta.HasCounts || rows <= 0 {
 		return nil, []string{NoteSizeUnknown}
 	}
 	var notes []string
