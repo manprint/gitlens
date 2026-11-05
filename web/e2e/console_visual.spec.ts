@@ -3177,10 +3177,12 @@ test('VIS-041 an expanded Odoo index shows its scan and size history, and Index 
     await page.screenshot({ path: `${ARTIFACT_DIR}/vis-041-index-detail-${width}.png` })
   }
 
-  // Index tax against PostgreSQL's own sizes, within 1 %.
+  // Index tax against PostgreSQL's own sizes, within 1 %. The agent reports a
+  // bounded number of indexes per table: the truth is the size of those indexes.
+  const names = indexes.map((item) => `'${item.indexrelname.replace(/'/g, "''")}'`).join(',')
   const [indexesSize = '', heapSize = ''] = (
     await query(
-      `SELECT pg_indexes_size('public.res_partner') || '|' || pg_relation_size('public.res_partner')`,
+      `SELECT (SELECT coalesce(sum(pg_relation_size(indexrelid)), 0) FROM pg_stat_user_indexes WHERE schemaname = 'public' AND relname = 'res_partner' AND indexrelname IN (${names})) || '|' || pg_relation_size('public.res_partner')`,
     )
   ).split('|')
   const truthIndexes = Number(indexesSize)
