@@ -14,6 +14,12 @@ interface PageHeaderProps {
    * its tooltip: for a title a user chose (a cluster or instance name).
    */
   truncateTitle?: boolean
+  /**
+   * For a header whose actions need the whole screen width to share the title
+   * line: from 1600 px the actions drop under the title, and only from 1900 px
+   * (the Full HD reference screen) do both sit on one line.
+   */
+  wrapActionsBelowFullHd?: boolean
 }
 
 export function PageHeader({
@@ -24,10 +30,17 @@ export function PageHeader({
   icon: Icon,
   eyebrow,
   truncateTitle = false,
+  wrapActionsBelowFullHd = false,
 }: PageHeaderProps) {
   return (
     // From 1600 px the eyebrow, title and subtitle share one line (D26).
-    <header className="flex flex-col gap-4 pb-2 min-[1600px]:items-center min-[1600px]:pb-0 sm:flex-row sm:items-start sm:justify-between">
+    <header
+      className={`flex flex-col gap-4 pb-2 min-[1600px]:items-center min-[1600px]:pb-0 sm:flex-row sm:items-start sm:justify-between ${
+        wrapActionsBelowFullHd
+          ? 'min-[1600px]:flex-wrap min-[1600px]:gap-y-2 min-[1900px]:flex-nowrap'
+          : ''
+      }`}
+    >
       <div className="flex min-w-0 items-start gap-4 min-[1600px]:items-center min-[1600px]:gap-3">
         {Icon ? (
           <span

@@ -160,7 +160,7 @@ function suggestionColumns(): SimpleColumn<IndexSuggestion>[] {
       ),
       '8rem',
     ),
-    sortable('statements', 'Statements', (row) => formatCount(row.statements.length), '7rem'),
+    sortable('statements', 'Statements', (row) => formatCount(row.statements.length), '10rem'),
   ]
 }
 

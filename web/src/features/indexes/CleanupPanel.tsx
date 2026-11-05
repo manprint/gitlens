@@ -112,7 +112,7 @@ const CLEANUP_COLUMNS: readonly SimpleColumn<CleanupCandidate>[] = [
     header: 'Index writes',
     sortValue: (candidate) => candidate.writeRate,
     className: 'whitespace-nowrap',
-    width: '9rem',
+    width: '10.5rem',
     cell: (candidate) =>
       candidate.writeRate === null ? 'Not measured' : formatRate(candidate.writeRate),
   },

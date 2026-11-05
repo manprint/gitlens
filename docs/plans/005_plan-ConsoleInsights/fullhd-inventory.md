@@ -162,11 +162,15 @@ inventory shows its notes.
   100 rows: no page scrollbar, the pager on screen, the table box scrolls.
 - `FHD-FIT-001` keeps a screenshot per route and viewport
   (`test/e2e/_artifacts/ui/fullhd/<route>-1080.png`, `-950.png`).
-- `VIS-FHD-002` at 2560×1440 and 1366×768: no horizontal page scrollbar; the
-  Index tax table fits at 2560. Tables that scroll inside their card are
-  recorded in `sideways-tables.txt` (27 entries at 1366 and 2560 on the dev
-  stack: headers with sort and help buttons wider than their column; below
-  1600 px columns have no width hint, I-7).
+- `assertFits` also asserts, at 1920×1080 and 1920×950, that no table scrolls
+  sideways (a last-column header with sort and help buttons was wider than its
+  declared width in Cleanup candidates, Index suggestions, Statement statistics
+  and the Advisor rule catalogue: Index writes 10.5rem, Statements 10rem,
+  Temporary bytes/call 15rem, Cannot evaluate 13rem).
+- `VIS-FHD-002` at 2560×1440 and 1366×768: no horizontal page scrollbar; at
+  2560 no table scrolls sideways either. At 1366 the tables that scroll inside
+  their card are recorded in `sideways-tables.txt` (below 1600 px columns have
+  no width hint, I-7).
 - Index tax columns at 1920: Indexes 7rem, Index size 8rem, Table size 8rem,
   Index/table % 10rem, Unused size 13rem, Writes/s 8rem, Write amplification
   10rem, Cleanup 7rem (narrower widths made the "incl. raw counters" note

@@ -234,6 +234,30 @@ export async function headerLineProblems(page: Page): Promise<string[]> {
         })
       })
     })
+    // The page header: its eyebrow, title and actions never overlap, wrapped or not.
+    const pageHeader = document.querySelector('header:has(#page-title)')
+    const pageTitle = document.getElementById('page-title')
+    if (pageHeader && pageTitle && visible(pageHeader)) {
+      const eyebrow = pageTitle.previousElementSibling
+      const actions = pageHeader.lastElementChild
+      const parts = [eyebrow, pageTitle, actions].filter(
+        (part): part is Element =>
+          part !== null &&
+          !part.contains(pageTitle) &&
+          part !== pageHeader.firstElementChild &&
+          visible(part),
+      )
+      for (let i = 0; i < parts.length; i++) {
+        for (let j = i + 1; j < parts.length; j++) {
+          const px = overlap(parts[i]!.getBoundingClientRect(), parts[j]!.getBoundingClientRect())
+          if (px > 0) {
+            problems.push(
+              `overlap: page header: ${label(parts[i]!)} and ${label(parts[j]!)} overlap by ${px} px`,
+            )
+          }
+        }
+      }
+    }
     return problems
   }, HEADER_LINES)
 }
@@ -302,6 +326,9 @@ export async function assertFits(
     )
     // No table card scrolls at the default page size, whatever the kind (I-13).
     expect(measure.scrollingTableBoxes, `${where}: table box scrolls`).toBe(0)
+    // Nor sideways: a header wider than its column must not push the card (D26).
+    const wide = await horizontallyScrollingBoxes(page)
+    expect(wide, `${where}: table scrolls sideways: ${wide.join(', ')}`).toEqual([])
     // Every header line keeps its parts apart and its title whole (bug-HDR).
     const headerProblems = await headerLineProblems(page)
     expect(headerProblems, `${where}: header line: ${headerProblems.join(' | ')}`).toEqual([])

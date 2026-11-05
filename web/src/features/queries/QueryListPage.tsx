@@ -227,7 +227,7 @@ function statementColumns(
     },
     {
       id: 'temporary-bytes',
-      meta: { width: '12rem' },
+      meta: { width: '15rem' },
       header: 'Temporary bytes/call',
       accessorFn: (row) => summariseStatement(row).tempBytesPerCall,
       cell: ({ row }) => {

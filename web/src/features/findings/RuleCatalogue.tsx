@@ -105,7 +105,7 @@ function ruleColumns(): DataTableProps<RuleCatalogueRow>['columns'] {
     {
       accessorKey: 'nonEvaluableInstances',
       header: 'Cannot evaluate',
-      meta: { width: '11rem' },
+      meta: { width: '13rem' },
     },
   ]
 }

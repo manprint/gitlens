@@ -953,6 +953,8 @@ test('FHD-FIT-001 every fit route shows its table and pager on a Full HD screen'
     } finally {
       // Passing or not, the route's last viewport (1920×950) is kept for the review.
       const slug = route.path.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'fleet'
+      // Index analysis ends at 1600×900 (header guard): back to 1920×950 for the shot.
+      await page.setViewportSize({ width: 1920, height: 950 })
       await page.screenshot({
         path: `../test/e2e/_artifacts/ui/fullhd/${slug}-950.png`,
         fullPage: true,
@@ -3311,9 +3313,9 @@ test('VIS-FHD-002 at 2560×1440 and 1366×768 the page does not scroll sideways'
           measure.innerWidth,
         )
         const wide = await horizontallyScrollingBoxes(page)
-        // Any other table may scroll inside its own card (a header with sort and help buttons can be wider than its column): recorded, not failed (below 1600 px a table scrolls inside its card: docs/LIMITS.md). The Index tax table must fit the 2560 px screen.
+        // Below 1600 px a table may scroll inside its card (recorded, docs/LIMITS.md); from 1600 px none does.
         if (wide.length > 0) sideways.push(`${where}: ${wide.join(', ')}`)
-        if (route.path === '/indexes?tab=tax' && viewport.width === 2560) {
+        if (viewport.width === 2560) {
           expect(wide, `${where}: table scrolls sideways: ${wide.join(', ')}`).toEqual([])
         }
         // The laptop size may scroll vertically; the large one never does on a fit page.

@@ -340,11 +340,9 @@ laptop, a tablet, a phone) the responsive layout applies and nothing is
 guaranteed to fit: the page may scroll vertically, the header may wrap, and a
 table whose columns do not fit (its sortable headers carry sort and help
 buttons) scrolls sideways inside its card, which takes the keyboard focus so it
-can be scrolled with the arrow keys. The page itself never scrolls sideways at
-1366 px or at 2560 px; the end-to-end check `VIS-FHD-002` lists the tables that
+can be scrolled with the arrow keys. At 1920 and 2560 px no table scrolls
+sideways (`FHD-FIT-001`, `VIS-FHD-002`). The page itself never scrolls sideways
+at 1366 px or at 2560 px; the end-to-end check `VIS-FHD-002` lists the tables that
 scroll inside their card in `test/e2e/_artifacts/ui/fullhd/sideways-tables.txt`.
 The Index tax table is one of them at 1366 px: its sort and help controls need
 about 1340 px.
-At 2560 px four tables (Cleanup candidates, Index suggestions, Statement
-statistics, Advisor rule catalogue) also scroll by 9 to 36 px inside their
-card: the header of their last column is wider than the column.
