@@ -19,11 +19,11 @@ See `PROTOCOL.md` (static cold-start rules).
 - Scope result: RUNNING
 - Type: sub-phase
 - ID / attempt: 4.1 / 1
-- Status: TODO (not opened)
+- Status: IN_PROGRESS (OPEN, opened 2026-11-05; S1 lexer first)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-sonnet-5-5; supervisor: advisor (Opus 5.5)
 - File / unit heading: phase_05.md → 4.1
-- Current step: P16 closed; open 4.1
+- Current step: 4.1 S1 lexer
 - Next action: read phase_05.md 4.1 and open it (execution order §11).
 - Stop latch: none (cleared by explicit invocation 2026-11-05)
 - Last closure: unit:P16:2 (phase 16 DONE; P16/1 failed, no commit)

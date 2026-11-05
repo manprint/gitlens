@@ -1,0 +1,3213 @@
+{
+ "entries": [
+  {
+   "id": "real-001",
+   "source": "odoo-live",
+   "sql": "BEGIN",
+   "expected": {
+    "statement": "begin",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "unsupported_statement"
+    ]
+   }
+  },
+  {
+   "id": "real-002",
+   "source": "odoo-live",
+   "sql": "BEGIN ISOLATION LEVEL REPEATABLE READ READ WRITE",
+   "expected": {
+    "statement": "begin",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "unsupported_statement"
+    ]
+   }
+  },
+  {
+   "id": "real-003",
+   "source": "odoo-live",
+   "sql": "COMMIT",
+   "expected": {
+    "statement": "commit",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "unsupported_statement"
+    ]
+   }
+  },
+  {
+   "id": "real-004",
+   "source": "odoo-live",
+   "sql": "COPY public.mail_message (id, parent_id, res_id, record_alias_domain_id, record_company_id, subtype_id, mail_activity_type_id, author_id, author_guest_id, mail_server_id, create_uid, write_uid, subject, model, record_name, message_type, email_from, message_id, reply_to, email_layout_xmlid, body, is_internal, reply_to_force_new, email_add_signature, date, pinned_at, create_date, write_date) TO stdout",
+   "expected": {
+    "statement": "copy",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "unsupported_statement"
+    ]
+   }
+  },
+  {
+   "id": "real-005",
+   "source": "odoo-live",
+   "sql": "COPY public.res_partner (id, company_id, create_date, name, title, parent_id, user_id, state_id, country_id, industry_id, color, commercial_partner_id, create_uid, write_uid, complete_name, ref, lang, tz, vat, company_registry, website, function, type, street, street2, zip, city, email, phone, mobile, commercial_company_name, company_name, barcode, comment, partner_latitude, partner_longitude, active, employee, is_company, partner_share, write_date, message_bounce, email_normalized, signup_type, calendar_last_notif_ack, plan_to_change_car, plan_to_change_bike, specific_property_product_pricelist, partner_gid, additional_info, phone_sanitized, invoice_template_pdf_report_id, supplier_rank, customer_rank, invoice_warn, autopost_bills, credit_limit, property_account_payable_id, property_account_receivable_id, property_account_position_id, property_payment_term_id, property_supplier_payment_term_id, trust, ignore_abnormal_invoice_date, ignore_abnormal_invoice_amount, invoice_sending_method, invoice_edi_format_store, property_outbound_payment_method_line_id, property_inbound_payment_method_line_id, invoice_warn_msg, debit_limit, picking_warn, property_stock_customer, property_stock_supplier, picking_warn_msg, website_id, is_published, global_location_number, peppol_endpoint, peppol_eas, buyer_id, purchase_warn, property_purchase_currency_id, receipt_reminder_email, reminder_date_before_receipt, purchase_warn_msg, sale_warn, sale_warn_msg, property_delivery_carrier_id) TO stdout",
+   "expected": {
+    "statement": "copy",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "unsupported_statement"
+    ]
+   }
+  },
+  {
+   "id": "real-006",
+   "source": "odoo-live",
+   "sql": "CREATE SCHEMA IF NOT EXISTS qa_tmp",
+   "expected": {
+    "statement": "create",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "unsupported_statement"
+    ]
+   }
+  },
+  {
+   "id": "real-007",
+   "source": "odoo-live",
+   "sql": "CREATE TABLE IF NOT EXISTS qa_tmp.sorigin (id int PRIMARY KEY, v int NOT NULL DEFAULT 0)",
+   "expected": {
+    "statement": "create",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "unsupported_statement"
+    ]
+   }
+  },
+  {
+   "id": "real-008",
+   "source": "odoo-live",
+   "sql": "DISCARD ALL",
+   "expected": {
+    "statement": "discard",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "unsupported_statement"
+    ]
+   }
+  },
+  {
+   "id": "real-009",
+   "source": "odoo-live",
+   "sql": "DROP SCHEMA IF EXISTS qa_tmp CASCADE",
+   "expected": {
+    "statement": "drop",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "unsupported_statement"
+    ]
+   }
+  },
+  {
+   "id": "real-010",
+   "source": "odoo-live",
+   "sql": "INSERT INTO \"ir_ui_view\" (\"active\", \"arch_db\", \"arch_fs\", \"arch_prev\", \"arch_updated\", \"create_date\", \"create_uid\", \"customize_show\", \"inherit_id\", \"mode\", \"model\", \"name\", \"priority\", \"track\", \"type\", \"visibility\", \"write_date\", \"write_uid\") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING \"id\"",
+   "expected": {
+    "statement": "insert",
+    "tables": [],
+    "predicates": [],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-011",
+   "source": "odoo-live",
+   "sql": "INSERT INTO \"ir_ui_view\" (\"active\", \"arch_db\", \"arch_fs\", \"arch_prev\", \"arch_updated\", \"create_date\", \"create_uid\", \"customize_show\", \"key\", \"mode\", \"name\", \"priority\", \"track\", \"type\", \"visibility\", \"write_date\", \"write_uid\") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING \"id\"",
+   "expected": {
+    "statement": "insert",
+    "tables": [],
+    "predicates": [],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-012",
+   "source": "odoo-live",
+   "sql": "INSERT INTO \"mail_followers\" (\"partner_id\", \"res_id\", \"res_model\") VALUES ($1, $2, $3), ($4, $5, $6), ($7, $8, $9), ($10, $11, $12), ($13, $14, $15), ($16, $17, $18), ($19, $20, $21), ($22, $23, $24), ($25, $26, $27), ($28, $29, $30), ($31, $32, $33), ($34, $35, $36), ($37, $38, $39), ($40, $41, $42), ($43, $44, $45), ($46, $47, $48), ($49, $50, $51), ($52, $53, $54), ($55, $56, $57), ($58, $59, $60), ($61, $62, $63), ($64, $65, $66), ($67, $68, $69), ($70, $71, $72), ($73, $74, $75), ($76, $77, $78), ($79, $80, $81), ($82, $83, $84), ($85, $86, $87), ($88, $89, $90), ($91, $92, $93), ($94, $95, $96), ($97, $98, $99), ($100, $101, $102), ($103, $104, $105), ($106, $107, $108), ($109, $110, $111), ($112, $113, $114), ($115, $116, $117), ($118, $119, $120), ($121, $122, $123), ($124, $125, $126), ($127, $128, $129), ($130, $131, $132), ($133, $134, $135), ($136, $137, $138), ($139, $140, $141), ($142, $143, $144), ($145, $146, $147), ($148, $149, $150), ($151, $152, $153), ($154, $155, $156), ($157, $158, $159), ($160, $161, $162), ($163, $164, $165), ($166, $167, $168), ($169, $170, $171), ($172, $173, $174), ($175, $176, $177), ($178, $179, $180), ($181, $182, $183), ($184, $185, $186), ($187, $188, $189), ($190, $191, $192), ($193, $194, $195), ($196, $197, $198), ($199, $200, $201), ($202, $203, $204), ($205, $206, $207), ($208, $209, $210), ($211, $212, $213), ($214, $215, $216), ($217, $218, $219), ($220, $221, $222), ($223, $224, $225), ($226, $227, $228), ($229, $230, $231), ($232, $233, $234), ($235, $236, $237), ($238, $239, $240), ($241, $242, $243), ($244, $245, $246), ($247, $248, $249), ($250, $251, $252), ($253, $254, $255), ($256, $257, $258), ($259, $260, $261), ($262, $263, $264), ($265, $266, $267), ($268, $269, $270), ($271, $272, $273), ($274, $275, $276), ($277, $278, $279), ($280, $281, $282), ($283, $284, $285), ($286, $287, $288), ($289, $290, $291), ($292, $293, $294), ($295, $296, $297), ($298, $299, $300) RETURNING \"id\"",
+   "expected": {
+    "statement": "insert",
+    "tables": [],
+    "predicates": [],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-013",
+   "source": "odoo-live",
+   "sql": "INSERT INTO \"mail_message\" (\"author_guest_id\", \"author_id\", \"body\", \"create_date\", \"create_uid\", \"date\", \"email_add_signature\", \"email_from\", \"message_id\", \"message_type\", \"model\", \"parent_id\", \"record_alias_domain_id\", \"record_company_id\", \"record_name\", \"reply_to\", \"res_id\", \"subject\", \"subtype_id\", \"write_date\", \"write_uid\") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21) RETURNING \"id\"",
+   "expected": {
+    "statement": "insert",
+    "tables": [],
+    "predicates": [],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-014",
+   "source": "odoo-live",
+   "sql": "INSERT INTO ir_model_constraint\n                            (name, create_date, write_date, create_uid, write_uid, module, model, type, definition, message)\n                        VALUES ($1,\n                                now() AT TIME ZONE $2,\n                                now() AT TIME ZONE $3,\n                                $4, $5,\n                                (SELECT id FROM ir_module_module WHERE name=$6),\n                                (SELECT id FROM ir_model WHERE model=$7),\n                                $8, $9, $10)\n                        RETURNING id",
+   "expected": {
+    "statement": "insert",
+    "tables": [],
+    "predicates": [],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-015",
+   "source": "odoo-live",
+   "sql": "INSERT INTO ir_model_data (module,name,model,res_id,noupdate)\n            VALUES ($1,$2,$3,$4,$5)\n            ON CONFLICT (module, name)\n            DO UPDATE SET (model, res_id, write_date) =\n                (EXCLUDED.model, EXCLUDED.res_id, now() at time zone $6)\n                WHERE (ir_model_data.res_id != EXCLUDED.res_id OR ir_model_data.model != EXCLUDED.model) \n            RETURNING module, name, model, res_id, create_date, write_date",
+   "expected": {
+    "statement": "insert",
+    "tables": [],
+    "predicates": [],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-016",
+   "source": "odoo-live",
+   "sql": "INSERT INTO ir_module_module_dependency (module_id, name, auto_install_required) VALUES ($1, $2, $3)",
+   "expected": {
+    "statement": "insert",
+    "tables": [],
+    "predicates": [],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-017",
+   "source": "odoo-live",
+   "sql": "INSERT INTO qa_tmp.sorigin(id) VALUES ($1) ON CONFLICT DO NOTHING",
+   "expected": {
+    "statement": "insert",
+    "tables": [],
+    "predicates": [],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-018",
+   "source": "odoo-live",
+   "sql": "RELEASE SAVEPOINT $1",
+   "expected": {
+    "statement": "release",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "unsupported_statement"
+    ]
+   }
+  },
+  {
+   "id": "real-019",
+   "source": "odoo-live",
+   "sql": "SAVEPOINT $1",
+   "expected": {
+    "statement": "savepoint",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "unsupported_statement"
+    ]
+   }
+  },
+  {
+   "id": "real-020",
+   "source": "odoo-live",
+   "sql": "SELECT \"account_analytic_distribution_model\".\"id\" FROM \"account_analytic_distribution_model\" WHERE ((((((\"account_analytic_distribution_model\".\"company_id\" IN ($1)) OR \"account_analytic_distribution_model\".\"company_id\" IS NULL) AND ((\"account_analytic_distribution_model\".\"partner_id\" IN ($2)) OR \"account_analytic_distribution_model\".\"partner_id\" IS NULL)) AND ($3 OR \"account_analytic_distribution_model\".\"partner_category_id\" IS NULL)) AND ((\"account_analytic_distribution_model\".\"product_id\" IN ($4)) OR \"account_analytic_distribution_model\".\"product_id\" IS NULL)) AND ((\"account_analytic_distribution_model\".\"product_categ_id\" IN ($5)) OR \"account_analytic_distribution_model\".\"product_categ_id\" IS NULL)) ORDER BY \"account_analytic_distribution_model\".\"sequence\"  , \"account_analytic_distribution_model\".\"id\" DESC",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "account_analytic_distribution_model",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "account_analytic_distribution_model",
+      "column": "sequence",
+      "kind": "order",
+      "dir": "asc",
+      "scope": 1
+     },
+     {
+      "table": "account_analytic_distribution_model",
+      "column": "id",
+      "kind": "order",
+      "dir": "desc",
+      "scope": 1
+     }
+    ],
+    "skipped": [
+     "or_group",
+     "or_group",
+     "or_group",
+     "or_group",
+     "or_group"
+    ]
+   }
+  },
+  {
+   "id": "real-021",
+   "source": "odoo-live",
+   "sql": "SELECT \"crm_stage\".\"id\" FROM \"crm_stage\" WHERE ((\"crm_stage\".\"team_id\" IS NULL OR (\"crm_stage\".\"team_id\" IN ($1))) AND (\"crm_stage\".\"fold\" IS NULL OR \"crm_stage\".\"fold\" = $2)) ORDER BY \"crm_stage\".\"sequence\"  , \"crm_stage\".\"id\"   LIMIT $3",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "crm_stage",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "crm_stage",
+      "column": "sequence",
+      "kind": "order",
+      "dir": "asc",
+      "limit": true,
+      "scope": 1
+     },
+     {
+      "table": "crm_stage",
+      "column": "id",
+      "kind": "order",
+      "dir": "asc",
+      "limit": true,
+      "scope": 1
+     }
+    ],
+    "skipped": [
+     "or_group",
+     "or_group"
+    ]
+   }
+  },
+  {
+   "id": "real-022",
+   "source": "odoo-live",
+   "sql": "SELECT \"crm_team\".\"id\" FROM \"crm_team\" WHERE (((\"crm_team\".\"active\" = $1) AND ((\"crm_team\".\"company_id\" IN ($2)) OR \"crm_team\".\"company_id\" IS NULL)) AND ((\"crm_team\".\"user_id\" = $3) OR (\"crm_team\".\"id\" IN (SELECT \"crm_team_member\".\"crm_team_id\" FROM \"crm_team_member\" WHERE ((\"crm_team_member\".\"active\" = $4) AND (\"crm_team_member\".\"user_id\" IN ($5))))))) ORDER BY \"crm_team\".\"sequence\" ASC , \"crm_team\".\"create_date\" DESC , \"crm_team\".\"id\" DESC",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "crm_team",
+      "scope": 1
+     },
+     {
+      "name": "crm_team_member",
+      "scope": 2
+     }
+    ],
+    "predicates": [
+     {
+      "table": "crm_team",
+      "column": "active",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "crm_team",
+      "column": "sequence",
+      "kind": "order",
+      "dir": "asc",
+      "scope": 1
+     },
+     {
+      "table": "crm_team",
+      "column": "create_date",
+      "kind": "order",
+      "dir": "desc",
+      "scope": 1
+     },
+     {
+      "table": "crm_team",
+      "column": "id",
+      "kind": "order",
+      "dir": "desc",
+      "scope": 1
+     },
+     {
+      "table": "crm_team_member",
+      "column": "active",
+      "kind": "eq",
+      "scope": 2
+     },
+     {
+      "table": "crm_team_member",
+      "column": "user_id",
+      "kind": "eq",
+      "scope": 2
+     }
+    ],
+    "skipped": [
+     "or_group",
+     "or_group"
+    ]
+   }
+  },
+  {
+   "id": "real-023",
+   "source": "odoo-live",
+   "sql": "SELECT \"id\", \"model\", \"name\", \"model_id\", \"field_description\"-\u003e\u003e$1, \"help\"-\u003e\u003e$2, \"ttype\", \"state\", \"relation\", \"index\", \"store\", \"copied\", \"on_delete\", \"related\", \"readonly\", \"required\", \"selectable\", \"size\", \"translate\", \"company_dependent\", \"relation_field\", \"relation_table\", \"column1\", \"column2\", \"currency_field\", \"sanitize\", \"sanitize_overridable\", \"sanitize_tags\", \"sanitize_attributes\", \"sanitize_style\", \"sanitize_form\", \"strip_style\", \"strip_classes\", \"tracking\" FROM \"ir_model_fields\" WHERE model IN ($3 /*, ... */)",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "ir_model_fields",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "ir_model_fields",
+      "column": "model",
+      "kind": "eq",
+      "scope": 1
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-024",
+   "source": "odoo-live",
+   "sql": "SELECT \"ir_model_access\".\"id\" FROM \"ir_model_access\" LEFT JOIN \"ir_model\" AS \"ir_model_access__model_id\" ON (\"ir_model_access\".\"model_id\" = \"ir_model_access__model_id\".\"id\") LEFT JOIN \"res_groups\" AS \"ir_model_access__group_id\" ON (\"ir_model_access\".\"group_id\" = \"ir_model_access__group_id\".\"id\") WHERE (((\"ir_model_access\".\"active\" = $1) AND (\"ir_model_access\".\"perm_read\" = $2)) AND (\"ir_model_access\".\"model_id\" = $3)) ORDER BY COALESCE(\"ir_model_access__model_id\".\"is_mail_thread\", $4) DESC , \"ir_model_access__model_id\".\"name\"-\u003e\u003e$5 ASC , \"ir_model_access__group_id\".\"name\"-\u003e\u003e$6  , \"ir_model_access\".\"name\"  , \"ir_model_access\".\"id\"",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "ir_model_access",
+      "scope": 1
+     },
+     {
+      "name": "ir_model",
+      "alias": "ir_model_access__model_id",
+      "scope": 1
+     },
+     {
+      "name": "res_groups",
+      "alias": "ir_model_access__group_id",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "ir_model_access",
+      "column": "model_id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_model",
+      "column": "id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_model_access",
+      "column": "group_id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "res_groups",
+      "column": "id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_model_access",
+      "column": "active",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_model_access",
+      "column": "perm_read",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_model_access",
+      "column": "model_id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_model_access",
+      "column": "name",
+      "kind": "order",
+      "dir": "asc",
+      "scope": 1
+     },
+     {
+      "table": "ir_model_access",
+      "column": "id",
+      "kind": "order",
+      "dir": "asc",
+      "scope": 1
+     }
+    ],
+    "skipped": [
+     "expression",
+     "expression",
+     "expression"
+    ]
+   }
+  },
+  {
+   "id": "real-025",
+   "source": "odoo-live",
+   "sql": "SELECT \"ir_model_constraint\".\"id\" FROM \"ir_model_constraint\" WHERE \"ir_model_constraint\".\"id\" IN ($1)",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "ir_model_constraint",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "ir_model_constraint",
+      "column": "id",
+      "kind": "eq",
+      "scope": 1
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-026",
+   "source": "odoo-live",
+   "sql": "SELECT \"ir_sequence\".\"id\" FROM \"ir_sequence\" LEFT JOIN \"res_company\" AS \"ir_sequence__company_id\" ON (\"ir_sequence\".\"company_id\" = \"ir_sequence__company_id\".\"id\") WHERE (((\"ir_sequence\".\"active\" = $1) AND (\"ir_sequence\".\"code\" = $2)) AND ((\"ir_sequence\".\"company_id\" IN ($3)) OR \"ir_sequence\".\"company_id\" IS NULL)) ORDER BY \"ir_sequence__company_id\".\"sequence\"  , \"ir_sequence__company_id\".\"name\"",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "ir_sequence",
+      "scope": 1
+     },
+     {
+      "name": "res_company",
+      "alias": "ir_sequence__company_id",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "ir_sequence",
+      "column": "company_id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "res_company",
+      "column": "id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_sequence",
+      "column": "active",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_sequence",
+      "column": "code",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "res_company",
+      "column": "sequence",
+      "kind": "order",
+      "dir": "asc",
+      "scope": 1
+     },
+     {
+      "table": "res_company",
+      "column": "name",
+      "kind": "order",
+      "dir": "asc",
+      "scope": 1
+     }
+    ],
+    "skipped": [
+     "or_group"
+    ]
+   }
+  },
+  {
+   "id": "real-027",
+   "source": "odoo-live",
+   "sql": "SELECT \"mail_alias\".\"id\" FROM \"mail_alias\" LEFT JOIN \"ir_model\" AS \"mail_alias__alias_model_id\" ON (\"mail_alias\".\"alias_model_id\" = \"mail_alias__alias_model_id\".\"id\") WHERE (((\"mail_alias\".\"alias_domain_id\" IS NOT NULL AND (\"mail_alias\".\"alias_parent_thread_id\" IN ($1))) AND (\"mail_alias\".\"alias_name\" != $2)) AND (\"mail_alias\".\"alias_parent_model_id\" IN (SELECT \"ir_model\".\"id\" FROM \"ir_model\" WHERE (\"ir_model\".\"model\" = $3)))) ORDER BY COALESCE(\"mail_alias__alias_model_id\".\"is_mail_thread\", $4) DESC , \"mail_alias__alias_model_id\".\"name\"-\u003e\u003e$5 ASC , \"mail_alias\".\"alias_name\"",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "mail_alias",
+      "scope": 1
+     },
+     {
+      "name": "ir_model",
+      "alias": "mail_alias__alias_model_id",
+      "scope": 1
+     },
+     {
+      "name": "ir_model",
+      "scope": 2
+     }
+    ],
+    "predicates": [
+     {
+      "table": "mail_alias",
+      "column": "alias_model_id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_model",
+      "column": "id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "mail_alias",
+      "column": "alias_parent_thread_id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "mail_alias",
+      "column": "alias_parent_model_id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "mail_alias",
+      "column": "alias_name",
+      "kind": "order",
+      "dir": "asc",
+      "scope": 1
+     },
+     {
+      "table": "ir_model",
+      "column": "model",
+      "kind": "eq",
+      "scope": 2
+     }
+    ],
+    "skipped": [
+     "expression",
+     "expression",
+     "expression"
+    ]
+   }
+  },
+  {
+   "id": "real-028",
+   "source": "odoo-live",
+   "sql": "SELECT \"mail_alias_domain\".\"id\" FROM \"mail_alias_domain\" ORDER BY \"mail_alias_domain\".\"sequence\" ASC , \"mail_alias_domain\".\"id\" ASC  LIMIT $1",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "mail_alias_domain",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "mail_alias_domain",
+      "column": "sequence",
+      "kind": "order",
+      "dir": "asc",
+      "limit": true,
+      "scope": 1
+     },
+     {
+      "table": "mail_alias_domain",
+      "column": "id",
+      "kind": "order",
+      "dir": "asc",
+      "limit": true,
+      "scope": 1
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-029",
+   "source": "odoo-live",
+   "sql": "SELECT \"mail_message\".\"id\" FROM \"mail_message\" WHERE (((\"mail_message\".\"res_id\" = $1) AND (\"mail_message\".\"model\" = $2)) AND ((\"mail_message\".\"message_type\" != $3) OR \"mail_message\".\"message_type\" IS NULL)) ORDER BY \"mail_message\".\"id\" ASC  LIMIT $4",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "mail_message",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "mail_message",
+      "column": "res_id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "mail_message",
+      "column": "model",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "mail_message",
+      "column": "id",
+      "kind": "order",
+      "dir": "asc",
+      "limit": true,
+      "scope": 1
+     }
+    ],
+    "skipped": [
+     "or_group"
+    ]
+   }
+  },
+  {
+   "id": "real-030",
+   "source": "odoo-live",
+   "sql": "SELECT \"mail_message_subtype\".\"id\" FROM \"mail_message_subtype\" WHERE \"mail_message_subtype\".\"id\" IN ($1)",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "mail_message_subtype",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "mail_message_subtype",
+      "column": "id",
+      "kind": "eq",
+      "scope": 1
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-031",
+   "source": "odoo-live",
+   "sql": "SELECT \"product_template\".\"id\", (SELECT \"account_account__exists\".id\n                        FROM \"account_account\" AS \"account_account__exists\"\n                        WHERE \"account_account__exists\".id = (\"product_template\".\"property_account_income_id\"-\u003e$1-\u003e\u003e$2)::int4), (SELECT \"account_account__exists\".id\n                        FROM \"account_account\" AS \"account_account__exists\"\n                        WHERE \"account_account__exists\".id = (\"product_template\".\"property_account_expense_id\"-\u003e$3-\u003e\u003e$4)::int4), (SELECT \"res_users__exists\".id\n                        FROM \"res_users\" AS \"res_users__exists\"\n                        WHERE \"res_users__exists\".id = (\"product_template\".\"responsible_id\"-\u003e$5-\u003e\u003e$6)::int4), (SELECT \"stock_location__exists\".id\n                        FROM \"stock_location\" AS \"stock_location__exists\"\n                        WHERE \"stock_location__exists\".id = (COALESCE(\"product_template\".\"property_stock_production\"-\u003e$7, to_jsonb($8::int4))-\u003e\u003e$9)::int4), (SELECT \"stock_location__exists\".id\n                        FROM \"stock_location\" AS \"stock_location__exists\"\n                        WHERE \"stock_location__exists\".id = (COALESCE(\"product_template\".\"property_stock_inventory\"-\u003e$10, to_jsonb($11::int4))-\u003e\u003e$12)::int4), (SELECT \"account_account__exists\".id\n                        FROM \"account_account\" AS \"account_account__exists\"\n                        WHERE \"account_account__exists\".id = (\"product_template\".\"property_account_creditor_price_difference\"-\u003e$13-\u003e\u003e$14)::int4), (\"product_template\".\"service_to_purchase\"-\u003e$15-\u003e\u003e$16)::bool, (SELECT \"project_project__exists\".id\n                        FROM \"project_project\" AS \"project_project__exists\"\n                        WHERE \"project_project__exists\".id = (\"product_template\".\"project_id\"-\u003e$17-\u003e\u003e$18)::int4), (SELECT \"project_project__exists\".id\n                        FROM \"project_project\" AS \"project_project__exists\"\n                        WHERE \"project_project__exists\".id = (\"product_template\".\"project_template_id\"-\u003e$19-\u003e\u003e$20)::int4) FROM \"product_template\" WHERE (\"product_template\".\"id\" IN ($21 /*, ... */))",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "product_template",
+      "scope": 1
+     },
+     {
+      "name": "account_account",
+      "alias": "account_account__exists",
+      "scope": 2
+     },
+     {
+      "name": "account_account",
+      "alias": "account_account__exists",
+      "scope": 3
+     },
+     {
+      "name": "res_users",
+      "alias": "res_users__exists",
+      "scope": 4
+     },
+     {
+      "name": "stock_location",
+      "alias": "stock_location__exists",
+      "scope": 5
+     },
+     {
+      "name": "stock_location",
+      "alias": "stock_location__exists",
+      "scope": 6
+     },
+     {
+      "name": "account_account",
+      "alias": "account_account__exists",
+      "scope": 7
+     },
+     {
+      "name": "project_project",
+      "alias": "project_project__exists",
+      "scope": 8
+     },
+     {
+      "name": "project_project",
+      "alias": "project_project__exists",
+      "scope": 9
+     }
+    ],
+    "predicates": [
+     {
+      "table": "product_template",
+      "column": "id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "account_account",
+      "column": "id",
+      "kind": "eq",
+      "scope": 2
+     },
+     {
+      "table": "account_account",
+      "column": "id",
+      "kind": "eq",
+      "scope": 3
+     },
+     {
+      "table": "res_users",
+      "column": "id",
+      "kind": "eq",
+      "scope": 4
+     },
+     {
+      "table": "stock_location",
+      "column": "id",
+      "kind": "eq",
+      "scope": 5
+     },
+     {
+      "table": "stock_location",
+      "column": "id",
+      "kind": "eq",
+      "scope": 6
+     },
+     {
+      "table": "account_account",
+      "column": "id",
+      "kind": "eq",
+      "scope": 7
+     },
+     {
+      "table": "project_project",
+      "column": "id",
+      "kind": "eq",
+      "scope": 8
+     },
+     {
+      "table": "project_project",
+      "column": "id",
+      "kind": "eq",
+      "scope": 9
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-032",
+   "source": "odoo-live",
+   "sql": "SELECT \"product_template_attribute_exclusion\".\"product_template_attribute_value_id\", ARRAY_AGG(\"product_template_attribute_exclusion\".\"id\" ORDER BY \"product_template_attribute_exclusion\".\"id\") FROM \"product_template_attribute_exclusion\" WHERE ((\"product_template_attribute_exclusion\".\"product_tmpl_id\" = $1) AND (\"product_template_attribute_exclusion\".\"product_template_attribute_value_id\" IN (SELECT $2 WHERE $3))) GROUP BY \"product_template_attribute_exclusion\".\"product_template_attribute_value_id\" ORDER BY \"product_template_attribute_exclusion\".\"product_template_attribute_value_id\" ASC",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "product_template_attribute_exclusion",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "product_template_attribute_exclusion",
+      "column": "product_tmpl_id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "product_template_attribute_exclusion",
+      "column": "product_template_attribute_value_id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "product_template_attribute_exclusion",
+      "column": "product_template_attribute_value_id",
+      "kind": "order",
+      "dir": "asc",
+      "scope": 1
+     }
+    ],
+    "skipped": [
+     "expression"
+    ]
+   }
+  },
+  {
+   "id": "real-033",
+   "source": "odoo-live",
+   "sql": "SELECT \"res_partner\".\"id\", \"res_partner\".\"name\", \"res_partner\".\"email\" FROM \"res_partner\" WHERE ((\"res_partner\".\"active\" = $1) AND (\"res_partner\".\"name\" ILIKE $2)) AND (((\"res_partner\".\"partner_share\" IS NULL OR \"res_partner\".\"partner_share\" = $3) OR (\"res_partner\".\"company_id\" IN (SELECT \"res_company\".\"id\" FROM \"res_company\" WHERE (\"res_company\".\"id\" IN ($4))))) OR \"res_partner\".\"company_id\" IS NULL) ORDER BY \"res_partner\".\"complete_name\" ASC , \"res_partner\".\"id\" DESC  LIMIT $5",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "res_partner",
+      "scope": 1
+     },
+     {
+      "name": "res_company",
+      "scope": 2
+     }
+    ],
+    "predicates": [
+     {
+      "table": "res_partner",
+      "column": "active",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "res_partner",
+      "column": "complete_name",
+      "kind": "order",
+      "dir": "asc",
+      "limit": true,
+      "scope": 1
+     },
+     {
+      "table": "res_partner",
+      "column": "id",
+      "kind": "order",
+      "dir": "desc",
+      "limit": true,
+      "scope": 1
+     },
+     {
+      "table": "res_company",
+      "column": "id",
+      "kind": "eq",
+      "scope": 2
+     }
+    ],
+    "skipped": [
+     "or_group"
+    ]
+   }
+  },
+  {
+   "id": "real-034",
+   "source": "odoo-live",
+   "sql": "SELECT \"res_partner\".\"id\", \"res_partner\".\"website_id\", \"res_partner\".\"is_published\", \"res_partner\".\"email_normalized\", \"res_partner\".\"message_bounce\", \"res_partner\".\"name\", \"res_partner\".\"complete_name\", \"res_partner\".\"title\", \"res_partner\".\"parent_id\", \"res_partner\".\"ref\", \"res_partner\".\"lang\", \"res_partner\".\"tz\", \"res_partner\".\"user_id\", \"res_partner\".\"vat\", \"res_partner\".\"company_registry\", \"res_partner\".\"website\", \"res_partner\".\"comment\", \"res_partner\".\"active\", \"res_partner\".\"employee\", \"res_partner\".\"function\", \"res_partner\".\"type\", \"res_partner\".\"street\", \"res_partner\".\"street2\", \"res_partner\".\"zip\", \"res_partner\".\"city\", \"res_partner\".\"state_id\", \"res_partner\".\"country_id\", \"res_partner\".\"partner_latitude\", \"res_partner\".\"partner_longitude\", \"res_partner\".\"email\", \"res_partner\".\"phone\", \"res_partner\".\"mobile\", \"res_partner\".\"is_company\", \"res_partner\".\"industry_id\", \"res_partner\".\"company_id\", \"res_partner\".\"color\", \"res_partner\".\"partner_share\", \"res_partner\".\"commercial_partner_id\", \"res_partner\".\"commercial_company_name\", \"res_partner\".\"company_name\", \"res_partner\".\"create_uid\", \"res_partner\".\"create_date\", \"res_partner\".\"write_uid\", \"res_partner\".\"write_date\", \"res_partner\".\"signup_type\", \"res_partner\".\"calendar_last_notif_ack\", \"res_partner\".\"plan_to_change_car\", \"res_partner\".\"plan_to_change_bike\", \"res_partner\".\"partner_gid\", \"res_partner\".\"additional_info\", \"res_partner\".\"phone_sanitized\", \"res_partner\".\"debit_limit\", \"res_partner\".\"invoice_warn\", \"res_partner\".\"invoice_warn_msg\", \"res_partner\".\"invoice_template_pdf_report_id\", \"res_partner\".\"supplier_rank\", \"res_partner\".\"customer_rank\", \"res_partner\".\"autopost_bills\", \"res_partner\".\"picking_warn\", \"res_partner\".\"picking_warn_msg\", \"res_partner\".\"global_location_number\", \"res_partner\".\"peppol_endpoint\", \"res_partner\".\"peppol_eas\", \"res_partner\".\"purchase_warn\", \"res_partner\".\"purchase_warn_msg\", \"res_partner\".\"buyer_id\", \"res_partner\".\"sale_warn\", \"res_partner\".\"sale_warn_msg\" FROM \"res_partner\" WHERE (\"res_partner\".\"id\" IN ($1))",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "res_partner",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "res_partner",
+      "column": "id",
+      "kind": "eq",
+      "scope": 1
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-035",
+   "source": "odoo-live",
+   "sql": "SELECT \"res_partner\".\"id\", (\"res_partner\".\"barcode\"-\u003e$1-\u003e\u003e$2)::VARCHAR, (SELECT \"product_pricelist__exists\".id\n                        FROM \"product_pricelist\" AS \"product_pricelist__exists\"\n                        WHERE \"product_pricelist__exists\".id = (\"res_partner\".\"specific_property_product_pricelist\"-\u003e$3-\u003e\u003e$4)::int4), (\"res_partner\".\"credit_limit\"-\u003e$5-\u003e\u003e$6)::double precision, (SELECT \"account_account__exists\".id\n                        FROM \"account_account\" AS \"account_account__exists\"\n                        WHERE \"account_account__exists\".id = (COALESCE(\"res_partner\".\"property_account_payable_id\"-\u003e$7, to_jsonb($8::int4))-\u003e\u003e$9)::int4), (SELECT \"account_account__exists\".id\n                        FROM \"account_account\" AS \"account_account__exists\"\n                        WHERE \"account_account__exists\".id = (COALESCE(\"res_partner\".\"property_account_receivable_id\"-\u003e$10, to_jsonb($11::int4))-\u003e\u003e$12)::int4), (SELECT \"account_fiscal_position__exists\".id\n                        FROM \"account_fiscal_position\" AS \"account_fiscal_position__exists\"\n                        WHERE \"account_fiscal_position__exists\".id = (\"res_partner\".\"property_account_position_id\"-\u003e$13-\u003e\u003e$14)::int4), (SELECT \"account_payment_term__exists\".id\n                        FROM \"account_payment_term\" AS \"account_payment_term__exists\"\n                        WHERE \"account_payment_term__exists\".id = (\"res_partner\".\"property_payment_term_id\"-\u003e$15-\u003e\u003e$16)::int4), (SELECT \"account_payment_term__exists\".id\n                        FROM \"account_payment_term\" AS \"account_payment_term__exists\"\n                        WHERE \"account_payment_term__exists\".id = (\"res_partner\".\"property_supplier_payment_term_id\"-\u003e$17-\u003e\u003e$18)::int4), (COALESCE(\"res_partner\".\"trust\"-\u003e$19, to_jsonb($20::VARCHAR))-\u003e\u003e$21)::VARCHAR, (\"res_partner\".\"ignore_abnormal_invoice_date\"-\u003e$22-\u003e\u003e$23)::bool, (\"res_partner\".\"ignore_abnormal_invoice_amount\"-\u003e$24-\u003e\u003e$25)::bool, (\"res_partner\".\"invoice_sending_method\"-\u003e$26-\u003e\u003e$27)::VARCHAR, (\"res_partner\".\"invoice_edi_format_store\"-\u003e$28-\u003e\u003e$29)::VARCHAR, (SELECT \"account_payment_method_line__exists\".id\n                        FROM \"account_payment_method_line\" AS \"account_payment_method_line__exists\"\n                        WHERE \"account_payment_method_line__exists\".id = (\"res_partner\".\"property_outbound_payment_method_line_id\"-\u003e$30-\u003e\u003e$31)::int4), (SELECT \"account_payment_method_line__exists\".id\n                        FROM \"account_payment_method_line\" AS \"account_payment_method_line__exists\"\n                        WHERE \"account_payment_method_line__exists\".id = (\"res_partner\".\"property_inbound_payment_method_line_id\"-\u003e$32-\u003e\u003e$33)::int4), (SELECT \"stock_location__exists\".id\n                        FROM \"stock_location\" AS \"stock_location__exists\"\n                        WHERE \"stock_location__exists\".id = (COALESCE(\"res_partner\".\"property_stock_customer\"-\u003e$34, to_jsonb($35::int4))-\u003e\u003e$36)::int4), (SELECT \"stock_location__exists\".id\n                        FROM \"stock_location\" AS \"stock_location__exists\"\n                        WHERE \"stock_location__exists\".id = (COALESCE(\"res_partner\".\"property_stock_supplier\"-\u003e$37, to_jsonb($38::int4))-\u003e\u003e$39)::int4), (SELECT \"res_currency__exists\".id\n                        FROM \"res_currency\" AS \"res_currency__exists\"\n                        WHERE \"res_currency__exists\".id = (\"res_partner\".\"property_purchase_currency_id\"-\u003e$40-\u003e\u003e$41)::int4), (\"res_partner\".\"receipt_reminder_email\"-\u003e$42-\u003e\u003e$43)::bool, (COALESCE(\"res_partner\".\"reminder_date_before_receipt\"-\u003e$44, to_jsonb($45::int4))-\u003e\u003e$46)::int4, (SELECT \"delivery_carrier__exists\".id\n                        FROM \"delivery_carrier\" AS \"delivery_carrier__exists\"\n                        WHERE \"delivery_carrier__exists\".id = (\"res_partner\".\"property_delivery_carrier_id\"-\u003e$47-\u003e\u003e$48)::int4) FROM \"res_partner\" WHERE (\"res_partner\".\"id\" IN ($49 /*, ... */))",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "res_partner",
+      "scope": 1
+     },
+     {
+      "name": "product_pricelist",
+      "alias": "product_pricelist__exists",
+      "scope": 2
+     },
+     {
+      "name": "account_account",
+      "alias": "account_account__exists",
+      "scope": 3
+     },
+     {
+      "name": "account_account",
+      "alias": "account_account__exists",
+      "scope": 4
+     },
+     {
+      "name": "account_fiscal_position",
+      "alias": "account_fiscal_position__exists",
+      "scope": 5
+     },
+     {
+      "name": "account_payment_term",
+      "alias": "account_payment_term__exists",
+      "scope": 6
+     },
+     {
+      "name": "account_payment_term",
+      "alias": "account_payment_term__exists",
+      "scope": 7
+     },
+     {
+      "name": "account_payment_method_line",
+      "alias": "account_payment_method_line__exists",
+      "scope": 8
+     },
+     {
+      "name": "account_payment_method_line",
+      "alias": "account_payment_method_line__exists",
+      "scope": 9
+     },
+     {
+      "name": "stock_location",
+      "alias": "stock_location__exists",
+      "scope": 10
+     },
+     {
+      "name": "stock_location",
+      "alias": "stock_location__exists",
+      "scope": 11
+     },
+     {
+      "name": "res_currency",
+      "alias": "res_currency__exists",
+      "scope": 12
+     },
+     {
+      "name": "delivery_carrier",
+      "alias": "delivery_carrier__exists",
+      "scope": 13
+     }
+    ],
+    "predicates": [
+     {
+      "table": "res_partner",
+      "column": "id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "product_pricelist",
+      "column": "id",
+      "kind": "eq",
+      "scope": 2
+     },
+     {
+      "table": "account_account",
+      "column": "id",
+      "kind": "eq",
+      "scope": 3
+     },
+     {
+      "table": "account_account",
+      "column": "id",
+      "kind": "eq",
+      "scope": 4
+     },
+     {
+      "table": "account_fiscal_position",
+      "column": "id",
+      "kind": "eq",
+      "scope": 5
+     },
+     {
+      "table": "account_payment_term",
+      "column": "id",
+      "kind": "eq",
+      "scope": 6
+     },
+     {
+      "table": "account_payment_term",
+      "column": "id",
+      "kind": "eq",
+      "scope": 7
+     },
+     {
+      "table": "account_payment_method_line",
+      "column": "id",
+      "kind": "eq",
+      "scope": 8
+     },
+     {
+      "table": "account_payment_method_line",
+      "column": "id",
+      "kind": "eq",
+      "scope": 9
+     },
+     {
+      "table": "stock_location",
+      "column": "id",
+      "kind": "eq",
+      "scope": 10
+     },
+     {
+      "table": "stock_location",
+      "column": "id",
+      "kind": "eq",
+      "scope": 11
+     },
+     {
+      "table": "res_currency",
+      "column": "id",
+      "kind": "eq",
+      "scope": 12
+     },
+     {
+      "table": "delivery_carrier",
+      "column": "id",
+      "kind": "eq",
+      "scope": 13
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-036",
+   "source": "odoo-live",
+   "sql": "SELECT \"stock_route\".\"id\" FROM \"stock_route\" WHERE \"stock_route\".\"id\" IN ($1)",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "stock_route",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "stock_route",
+      "column": "id",
+      "kind": "eq",
+      "scope": 1
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-037",
+   "source": "odoo-live",
+   "sql": "SELECT \"stock_warehouse\".\"id\" FROM \"stock_warehouse\" WHERE ((\"stock_warehouse\".\"active\" = $1) AND (\"stock_warehouse\".\"company_id\" = $2)) ORDER BY \"stock_warehouse\".\"sequence\"  , \"stock_warehouse\".\"id\"   LIMIT $3",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "stock_warehouse",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "stock_warehouse",
+      "column": "active",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "stock_warehouse",
+      "column": "company_id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "stock_warehouse",
+      "column": "sequence",
+      "kind": "order",
+      "dir": "asc",
+      "limit": true,
+      "scope": 1
+     },
+     {
+      "table": "stock_warehouse",
+      "column": "id",
+      "kind": "order",
+      "dir": "asc",
+      "limit": true,
+      "scope": 1
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-038",
+   "source": "odoo-live",
+   "sql": "SELECT $1",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-039",
+   "source": "odoo-live",
+   "sql": "SELECT $1 FROM ir_model_relation r, ir_module_module m\n                    WHERE r.module=m.id AND r.name=$2 AND m.name=$3",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "ir_model_relation",
+      "alias": "r",
+      "scope": 1
+     },
+     {
+      "name": "ir_module_module",
+      "alias": "m",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "ir_model_relation",
+      "column": "module",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_module_module",
+      "column": "id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_model_relation",
+      "column": "name",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_module_module",
+      "column": "name",
+      "kind": "eq",
+      "scope": 1
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-040",
+   "source": "odoo-live",
+   "sql": "SELECT $1 FROM pg_indexes WHERE indexname=$2",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-041",
+   "source": "odoo-live",
+   "sql": "SELECT $2 FROM ONLY \"public\".\"ir_module_category\" x WHERE \"id\" OPERATOR(pg_catalog.=) $1 FOR KEY SHARE OF x",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "schema": "public",
+      "name": "ir_module_category",
+      "alias": "x",
+      "scope": 1
+     }
+    ],
+    "predicates": [],
+    "skipped": [
+     "expression"
+    ]
+   }
+  },
+  {
+   "id": "real-042",
+   "source": "odoo-live",
+   "sql": "SELECT * FROM (\nSELECT pg_catalog.quote_ident(n.nspname) || $1 || pg_catalog.quote_ident(p.proname)\n         || $2 || pg_catalog.pg_get_function_identity_arguments(p.oid) || $3 AS signature,\n       n.nspname, p.proname, pg_catalog.pg_get_function_identity_arguments(p.oid),\n       CASE p.prokind WHEN $4 THEN $5 ELSE $6 END,\n       l.lanname, pg_catalog.pg_get_userbyid(p.proowner), COALESCE(r.rolsuper, $7) AS superuser,\n       (SELECT pg_catalog.substring(c, $8) FROM pg_catalog.unnest(p.proconfig) AS c\n         WHERE c LIKE $9 LIMIT $10) AS search_path,\n       EXISTS (SELECT $11 FROM pg_catalog.aclexplode(COALESCE(p.proacl, pg_catalog.acldefault($12, p.proowner))) a\n                WHERE a.grantee = $13 AND a.privilege_type = $14) AS public_execute\n  FROM pg_catalog.pg_proc p\n  JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace\n  JOIN pg_catalog.pg_language l ON l.oid = p.prolang\n  LEFT JOIN pg_catalog.pg_roles r ON r.oid = p.proowner\n WHERE p.prosecdef AND p.prokind IN ($15 /*, ... */)\n   AND n.nspname NOT IN ($16 /*, ... */)\n   AND n.nspname !~ $17\n   AND NOT EXISTS (SELECT $18 FROM pg_catalog.pg_depend d\n                    WHERE d.classid = $19::pg_catalog.regclass\n                      AND d.objid = p.oid AND d.deptype = $20)\n) f\n ORDER BY f.search_path IS NULL DESC, f.superuser DESC, f.public_execute DESC, f.signature\n LIMIT $21",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "expression",
+     "expression",
+     "expression",
+     "expression",
+     "expression",
+     "catalog",
+     "unresolved_alias",
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-043",
+   "source": "odoo-live",
+   "sql": "SELECT COALESCE(d.description, pg_get_constraintdef(c.oid))\n        FROM pg_constraint c\n        JOIN pg_class t ON t.oid = c.conrelid\n        LEFT JOIN pg_description d ON c.oid = d.objoid\n        WHERE t.relname = $1 AND conname = $2",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-044",
+   "source": "odoo-live",
+   "sql": "SELECT COUNT(*) FROM \"stock_route\" WHERE ((\"stock_route\".\"active\" = $1) AND (\"stock_route\".\"product_selectable\" = $2)) AND ((\"stock_route\".\"company_id\" IN ($3)) OR \"stock_route\".\"company_id\" IS NULL)",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "stock_route",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "stock_route",
+      "column": "active",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "stock_route",
+      "column": "product_selectable",
+      "kind": "eq",
+      "scope": 1
+     }
+    ],
+    "skipped": [
+     "or_group"
+    ]
+   }
+  },
+  {
+   "id": "real-045",
+   "source": "odoo-live",
+   "sql": "SELECT COUNT(*) FROM (SELECT  FROM \"ir_act_report_xml\" WHERE (\"ir_act_report_xml\".\"is_invoice_report\" = $1) LIMIT $2) t",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "ir_act_report_xml",
+      "scope": 2
+     }
+    ],
+    "predicates": [
+     {
+      "table": "ir_act_report_xml",
+      "column": "is_invoice_report",
+      "kind": "eq",
+      "scope": 2
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-046",
+   "source": "odoo-live",
+   "sql": "SELECT MAX(website_sequence) FROM product_template",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "product_template",
+      "scope": 1
+     }
+    ],
+    "predicates": [],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-047",
+   "source": "odoo-live",
+   "sql": "SELECT a.attname AS column_name,\n               coalesce(bt.typname, t.typname) AS udt_name,\n               information_schema._pg_char_max_length(information_schema._pg_truetypid(a.*, t.*), information_schema._pg_truetypmod(a.*, t.*)) AS character_maximum_length,\n               CASE WHEN a.attnotnull OR t.typtype = $1 AND t.typnotnull THEN $2\n                    ELSE $3\n               END AS is_nullable\n          FROM pg_attribute a\n          JOIN pg_class c\n            ON a.attrelid = c.oid\n          JOIN pg_namespace nc\n            ON c.relnamespace = nc.oid\n          JOIN pg_type t\n            ON a.atttypid = t.oid\n     LEFT JOIN (pg_type bt JOIN pg_namespace nbt ON bt.typnamespace = nbt.oid)\n            ON t.typtype = $4::\"char\"\n           AND t.typbasetype = bt.oid\n         WHERE nc.nspname = current_schema\n           AND a.attnum \u003e $5\n           AND NOT a.attisdropped\n           AND c.relkind IN ($6 /*, ... */)\n           AND (pg_has_role(c.relowner, $7::text) OR has_column_privilege(c.oid, a.attnum, $8))\n           AND c.relname=$9",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "unresolved_alias",
+     "expression",
+     "or_group"
+    ]
+   }
+  },
+  {
+   "id": "real-048",
+   "source": "odoo-live",
+   "sql": "SELECT a.attname, a.attnotnull\n                  FROM pg_class c, pg_attribute a\n                 WHERE c.relname=$1\n                   AND c.oid=a.attrelid\n                   AND a.attisdropped=$2\n                   AND pg_catalog.format_type(a.atttypid, a.atttypmod) NOT IN ($3 /*, ... */)\n                   AND a.attname NOT IN ($4 /*, ... */)",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "expression",
+     "expression",
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-049",
+   "source": "odoo-live",
+   "sql": "SELECT c.id, type, definition, message-\u003e\u003e$1 as message\n                    FROM ir_model_constraint c, ir_module_module m\n                    WHERE c.module=m.id AND c.name=$2 AND m.name=$3",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "ir_model_constraint",
+      "alias": "c",
+      "scope": 1
+     },
+     {
+      "name": "ir_module_module",
+      "alias": "m",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "ir_model_constraint",
+      "column": "module",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_module_module",
+      "column": "id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_model_constraint",
+      "column": "name",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_module_module",
+      "column": "name",
+      "kind": "eq",
+      "scope": 1
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-050",
+   "source": "odoo-live",
+   "sql": "SELECT c.relname\n                  FROM pg_class c\n                  JOIN pg_namespace n ON (n.oid = c.relnamespace)\n                 WHERE c.relname IN ($1 /*, ... */)\n                   AND c.relkind = $2\n                   AND n.nspname = $3",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-051",
+   "source": "odoo-live",
+   "sql": "SELECT c.relname\n          FROM pg_class c\n          JOIN pg_namespace n ON (n.oid = c.relnamespace)\n         WHERE c.relname IN ($1 /*, ... */)\n           AND c.relkind IN ($2 /*, ... */)\n           AND n.nspname = current_schema",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-052",
+   "source": "odoo-live",
+   "sql": "SELECT c.relname\n          FROM pg_class c\n          JOIN pg_namespace n ON (n.oid = c.relnamespace)\n         WHERE c.relname IN ($1)\n           AND c.relkind IN ($2 /*, ... */)\n           AND n.nspname = current_schema",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-053",
+   "source": "odoo-live",
+   "sql": "SELECT coalesce(json_agg(row_to_json(t) ORDER BY t.pid), $1::json) FROM (\n       SELECT pid, usename::text AS usename, application_name, state, datname::text AS datname,\n              query_id::text AS query_id, wait_event,\n              pg_blocking_pids(pid) AS blocked_by\n         FROM pg_stat_activity\n        WHERE backend_type = $2 AND pid \u003c\u003e pg_backend_pid()\n     ) t",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "expression",
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-054",
+   "source": "odoo-live",
+   "sql": "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind = $1 AND c.relpersistence \u003c\u003e $2 AND n.nspname NOT IN ($3 /*, ... */) AND GREATEST(c.relpages, $4)::bigint * current_setting($5)::bigint \u003e= $6 * $7 AND ((c.relrowsecurity AND row_security_active(c.oid)) OR EXISTS (SELECT $8 FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attnum \u003e $9 AND NOT a.attisdropped AND NOT has_column_privilege(c.oid, a.attnum, $10)))",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "expression",
+     "expression",
+     "expression",
+     "or_group",
+     "catalog",
+     "unresolved_alias",
+     "expression",
+     "expression",
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-055",
+   "source": "odoo-live",
+   "sql": "SELECT count(*) FROM pg_namespace WHERE nspname = $1",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-056",
+   "source": "odoo-live",
+   "sql": "SELECT count(*) FROM pg_stat_activity WHERE application_name = $1",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-057",
+   "source": "odoo-live",
+   "sql": "SELECT count(*) FROM pg_stat_activity WHERE application_name = $1 AND cardinality(pg_blocking_pids(pid)) \u003e $2",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "expression",
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-058",
+   "source": "odoo-live",
+   "sql": "SELECT count(*) FROM pg_stat_activity WHERE application_name = $1 AND state = $2",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-059",
+   "source": "odoo-live",
+   "sql": "SELECT count(*) FROM pg_stat_activity WHERE application_name LIKE $1 AND pid \u003c\u003e pg_backend_pid()",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "expression",
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-060",
+   "source": "odoo-live",
+   "sql": "SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity\n       WHERE application_name LIKE $1 AND pid \u003c\u003e pg_backend_pid()",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "expression",
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-061",
+   "source": "odoo-live",
+   "sql": "SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE application_name = $1",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-062",
+   "source": "odoo-live",
+   "sql": "SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE application_name = $1 AND pid \u003c\u003e pg_backend_pid()",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "expression",
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-063",
+   "source": "odoo-live",
+   "sql": "SELECT current_setting($1)",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-064",
+   "source": "odoo-live",
+   "sql": "SELECT d.id, d.module, d.name, d.model, d.res_id, d.noupdate, r.id\n                FROM ir_model_data d LEFT JOIN \"res_bank\" r on d.res_id=r.id\n                WHERE d.module=$1 AND d.name IN ($2)",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "ir_model_data",
+      "alias": "d",
+      "scope": 1
+     },
+     {
+      "name": "res_bank",
+      "alias": "r",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "ir_model_data",
+      "column": "res_id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "res_bank",
+      "column": "id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_model_data",
+      "column": "module",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_model_data",
+      "column": "name",
+      "kind": "eq",
+      "scope": 1
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-065",
+   "source": "odoo-live",
+   "sql": "SELECT d.model, d.res_id\n                FROM ir_model_data d\n                JOIN \"res_country\" r ON d.res_id = r.id\n                WHERE d.module = $1 AND d.name = $2",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "ir_model_data",
+      "alias": "d",
+      "scope": 1
+     },
+     {
+      "name": "res_country",
+      "alias": "r",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "ir_model_data",
+      "column": "res_id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "res_country",
+      "column": "id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_model_data",
+      "column": "module",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_model_data",
+      "column": "name",
+      "kind": "eq",
+      "scope": 1
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-066",
+   "source": "odoo-live",
+   "sql": "SELECT e.extname, n.nspname, e.extversion, COALESCE(a.default_version, $2)\n  FROM pg_catalog.pg_extension e\n  JOIN pg_catalog.pg_namespace n ON n.oid = e.extnamespace\n  LEFT JOIN pg_catalog.pg_available_extensions() AS a (name, default_version, comment) ON a.name = e.extname\n ORDER BY e.extname\n LIMIT $1",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-067",
+   "source": "odoo-live",
+   "sql": "SELECT f.model, f.name, s.value, s.id\n            FROM ir_model_fields_selection s, ir_model_fields f\n            WHERE s.field_id = f.id AND f.model IN ($1 /*, ... */)",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "ir_model_fields_selection",
+      "alias": "s",
+      "scope": 1
+     },
+     {
+      "name": "ir_model_fields",
+      "alias": "f",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "ir_model_fields_selection",
+      "column": "field_id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_model_fields",
+      "column": "id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_model_fields",
+      "column": "model",
+      "kind": "eq",
+      "scope": 1
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-068",
+   "source": "odoo-live",
+   "sql": "SELECT f.name, d.json_value\n                    FROM ir_default d\n                    JOIN ir_model_fields f ON d.field_id=f.id\n                    WHERE f.model=$1\n                        AND (d.user_id IS NULL OR d.user_id=$2)\n                        AND (d.company_id IS NULL OR d.company_id=$3)\n                        AND d.condition IS NULL\n                    ORDER BY d.user_id, d.company_id, d.id",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "ir_default",
+      "alias": "d",
+      "scope": 1
+     },
+     {
+      "name": "ir_model_fields",
+      "alias": "f",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "ir_default",
+      "column": "field_id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_model_fields",
+      "column": "id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_model_fields",
+      "column": "model",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_default",
+      "column": "condition",
+      "kind": "isnull",
+      "scope": 1
+     },
+     {
+      "table": "ir_default",
+      "column": "user_id",
+      "kind": "order",
+      "dir": "asc",
+      "scope": 1
+     },
+     {
+      "table": "ir_default",
+      "column": "company_id",
+      "kind": "order",
+      "dir": "asc",
+      "scope": 1
+     },
+     {
+      "table": "ir_default",
+      "column": "id",
+      "kind": "order",
+      "dir": "asc",
+      "scope": 1
+     }
+    ],
+    "skipped": [
+     "or_group",
+     "or_group"
+    ]
+   }
+  },
+  {
+   "id": "real-069",
+   "source": "odoo-live",
+   "sql": "SELECT fk.\"create_uid\" FROM ONLY \"public\".\"ir_model\" fk LEFT OUTER JOIN ONLY \"public\".\"res_users\" pk ON ( pk.\"id\" OPERATOR(pg_catalog.=) fk.\"create_uid\") WHERE pk.\"id\" IS NULL AND (fk.\"create_uid\" IS NOT NULL)",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "schema": "public",
+      "name": "ir_model",
+      "alias": "fk",
+      "scope": 1
+     },
+     {
+      "schema": "public",
+      "name": "res_users",
+      "alias": "pk",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "schema": "public",
+      "table": "res_users",
+      "column": "id",
+      "kind": "isnull",
+      "scope": 1
+     }
+    ],
+    "skipped": [
+     "expression"
+    ]
+   }
+  },
+  {
+   "id": "real-070",
+   "source": "odoo-live",
+   "sql": "SELECT fk.conname as name\n            FROM pg_constraint AS fk\n            JOIN pg_class AS c1 ON fk.conrelid = c1.oid\n            JOIN pg_class AS c2 ON fk.confrelid = c2.oid\n            JOIN pg_attribute AS a1 ON a1.attrelid = c1.oid AND fk.conkey[$1] = a1.attnum\n            JOIN pg_attribute AS a2 ON a2.attrelid = c2.oid AND fk.confkey[$2] = a2.attnum\n            WHERE fk.contype = $3\n            AND c1.relname = $4\n            AND a1.attname = $5\n            AND c2.relname = $6\n            AND a2.attname = $7\n            AND fk.confdeltype = $8",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "expression",
+     "expression",
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-071",
+   "source": "odoo-live",
+   "sql": "SELECT fk.conname, c1.relname, a1.attname, c2.relname, a2.attname, fk.confdeltype\n            FROM pg_constraint AS fk\n            JOIN pg_class AS c1 ON fk.conrelid = c1.oid\n            JOIN pg_class AS c2 ON fk.confrelid = c2.oid\n            JOIN pg_attribute AS a1 ON a1.attrelid = c1.oid AND fk.conkey[$1] = a1.attnum\n            JOIN pg_attribute AS a2 ON a2.attrelid = c2.oid AND fk.confkey[$2] = a2.attnum\n            WHERE fk.contype = $3 AND c1.relname IN ($4 /*, ... */)",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "expression",
+     "expression",
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-072",
+   "source": "odoo-live",
+   "sql": "SELECT id FROM ir_model WHERE model=$1",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "ir_model",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "ir_model",
+      "column": "model",
+      "kind": "eq",
+      "scope": 1
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-073",
+   "source": "odoo-live",
+   "sql": "SELECT id FROM qa_tmp.sorigin WHERE id = $1 FOR UPDATE",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "schema": "qa_tmp",
+      "name": "sorigin",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "schema": "qa_tmp",
+      "table": "sorigin",
+      "column": "id",
+      "kind": "eq",
+      "scope": 1
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-074",
+   "source": "odoo-live",
+   "sql": "SELECT idx.relname, tbl.relname, am.amname\n              FROM pg_index ix\n              JOIN pg_class idx ON idx.oid = ix.indexrelid\n              JOIN pg_class tbl ON tbl.oid = ix.indrelid\n              JOIN pg_am am ON am.oid = idx.relam\n             WHERE idx.relname IN ($1 /*, ... */)",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-075",
+   "source": "odoo-live",
+   "sql": "SELECT max(v.id)\n                     FROM ir_ui_view v\n                LEFT JOIN ir_model_data md ON (md.model = $1 AND md.res_id = v.id)\n                    WHERE md.module IN (SELECT name FROM ir_module_module) IS NOT TRUE\n                      AND v.model = $2\n                      AND v.active = $3\n                 GROUP BY coalesce(v.inherit_id, v.id)",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "ir_ui_view",
+      "alias": "v",
+      "scope": 1
+     },
+     {
+      "name": "ir_model_data",
+      "alias": "md",
+      "scope": 1
+     },
+     {
+      "name": "ir_module_module",
+      "scope": 2
+     }
+    ],
+    "predicates": [
+     {
+      "table": "ir_model_data",
+      "column": "model",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_model_data",
+      "column": "res_id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_ui_view",
+      "column": "id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_model_data",
+      "column": "module",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_ui_view",
+      "column": "model",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_ui_view",
+      "column": "active",
+      "kind": "eq",
+      "scope": 1
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-076",
+   "source": "odoo-live",
+   "sql": "SELECT model, res_id FROM ir_model_data WHERE module=$1 AND name=$2",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "ir_model_data",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "ir_model_data",
+      "column": "module",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_model_data",
+      "column": "name",
+      "kind": "eq",
+      "scope": 1
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-077",
+   "source": "odoo-live",
+   "sql": "SELECT n.nspname\n  FROM pg_catalog.pg_extension e\n  JOIN pg_catalog.pg_namespace n ON n.oid = e.extnamespace\n WHERE e.extname = $1",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-078",
+   "source": "odoo-live",
+   "sql": "SELECT n.nspname,\n       COALESCE(pg_catalog.has_table_privilege(c.oid, $1), $2)\n  FROM pg_catalog.pg_extension e\n  JOIN pg_catalog.pg_namespace n ON n.oid = e.extnamespace\n  LEFT JOIN pg_catalog.pg_class c ON c.relnamespace = n.oid AND c.relname = $3 AND c.relkind = $4\n WHERE e.extname = $5",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-079",
+   "source": "odoo-live",
+   "sql": "SELECT name, id FROM ir_model_fields WHERE model=$1",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "ir_model_fields",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "ir_model_fields",
+      "column": "model",
+      "kind": "eq",
+      "scope": 1
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-080",
+   "source": "odoo-live",
+   "sql": "SELECT nextval($1)",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-081",
+   "source": "odoo-live",
+   "sql": "SELECT now()",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-082",
+   "source": "odoo-live",
+   "sql": "SELECT pg_catalog.current_setting($1),\n       (SELECT pg_catalog.count(*)\n          FROM pg_catalog.pg_proc p\n          JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace\n          JOIN pg_catalog.pg_language l ON l.oid = p.prolang\n         WHERE n.nspname NOT IN ($2 /*, ... */)\n           AND n.nspname !~ $3\n           AND l.lanname NOT IN ($4 /*, ... */)\n           AND p.prokind IN ($5 /*, ... */)\n           AND NOT EXISTS (SELECT $6 FROM pg_catalog.pg_depend d\n                            WHERE d.classid = $7::pg_catalog.regclass\n                              AND d.objid = p.oid AND d.deptype = $8))",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "expression",
+     "expression",
+     "expression",
+     "expression",
+     "catalog",
+     "unresolved_alias",
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-083",
+   "source": "odoo-live",
+   "sql": "SELECT pg_catalog.quote_ident(n.nspname) || $1 || pg_catalog.quote_ident(c.relname) || $2 || pg_catalog.quote_ident(con.conname),\n       n.nspname, c.relname, con.conname,\n       pn.nspname || $3 || pc.relname,\n       (SELECT pg_catalog.string_agg(a.attname, $4 ORDER BY k.ord)\n          FROM pg_catalog.unnest(con.conkey) WITH ORDINALITY AS k (attnum, ord)\n          JOIN pg_catalog.pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum),\n       (SELECT pg_catalog.string_agg(pg_catalog.quote_ident(a.attname), $5 ORDER BY k.ord)\n          FROM pg_catalog.unnest(con.conkey) WITH ORDINALITY AS k (attnum, ord)\n          JOIN pg_catalog.pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum),\n       CASE WHEN c.relkind = $6\n            THEN COALESCE((WITH RECURSIVE tree (relid) AS (\n                                SELECT c.oid\n                                UNION ALL\n                                SELECT i.inhrelid FROM pg_catalog.pg_inherits i JOIN tree t ON i.inhparent = t.relid)\n                           SELECT pg_catalog.sum(pc.relpages::pg_catalog.int8)\n                             FROM tree JOIN pg_catalog.pg_class pc ON pc.oid = tree.relid\n                            WHERE pc.relkind \u003c\u003e $7), $8)\n            ELSE c.relpages END::pg_catalog.int8 * pg_catalog.current_setting($9)::pg_catalog.int8 AS bytes\n  FROM pg_catalog.pg_constraint con\n  JOIN pg_catalog.pg_class c ON c.oid = con.conrelid\n  JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace\n  JOIN pg_catalog.pg_class pc ON pc.oid = con.confrelid\n  JOIN pg_catalog.pg_namespace pn ON pn.oid = pc.relnamespace\n WHERE con.contype = $10\n   AND con.conparentid = $11\n   AND n.nspname NOT IN ($12 /*, ... */)\n   AND n.nspname !~ $13\n   AND NOT EXISTS (\n       SELECT $14\n         FROM pg_catalog.pg_index i\n         JOIN pg_catalog.pg_class ic ON ic.oid = i.indexrelid\n         JOIN pg_catalog.pg_am am ON am.oid = ic.relam\n        WHERE i.indrelid = con.conrelid\n          AND i.indisvalid\n          AND i.indpred IS NULL\n          AND am.amname IN ($15 /*, ... */)\n          AND pg_catalog.cardinality(con.conkey) \u003c= i.indnkeyatts\n          AND (pg_catalog.string_to_array(i.indkey::pg_catalog.text, $16)::pg_catalog.int2[])[$17:pg_catalog.cardinality(con.conkey)] @\u003e con.conkey\n          AND (pg_catalog.string_to_array(i.indkey::pg_catalog.text, $18)::pg_catalog.int2[])[$19:pg_catalog.cardinality(con.conkey)] \u003c@ con.conkey)\n ORDER BY bytes DESC, 1\n LIMIT $20",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "expression",
+     "expression",
+     "expression",
+     "catalog",
+     "unresolved_alias",
+     "unresolved_alias",
+     "expression",
+     "unresolved_alias",
+     "expression",
+     "expression",
+     "expression",
+     "expression",
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-084",
+   "source": "odoo-live",
+   "sql": "SELECT pg_catalog.quote_ident(n.nspname) || $1 || pg_catalog.quote_ident(c.relname) || $2 || pg_catalog.quote_ident(t.tgname),\n       n.nspname, c.relname, t.tgname, t.tgenabled::pg_catalog.text, t.tgisinternal,\n       pn.nspname || $3 || p.proname, t.tgtype::pg_catalog.int4,\n       COALESCE(con.conname, $4), COALESCE(con.contype::pg_catalog.text, $5)\n  FROM pg_catalog.pg_trigger t\n  JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid\n  JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace\n  JOIN pg_catalog.pg_proc p ON p.oid = t.tgfoid\n  JOIN pg_catalog.pg_namespace pn ON pn.oid = p.pronamespace\n  LEFT JOIN pg_catalog.pg_constraint con ON con.oid = t.tgconstraint\n  LEFT JOIN pg_catalog.pg_trigger parent ON parent.oid = t.tgparentid\n WHERE n.nspname NOT IN ($6 /*, ... */)\n   AND n.nspname !~ $7\n   AND (NOT t.tgisinternal OR t.tgenabled = $8)\n   AND (parent.oid IS NULL OR parent.tgenabled \u003c\u003e t.tgenabled)\n ORDER BY (t.tgenabled = $9) DESC, t.tgisinternal DESC, 1\n LIMIT $10",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "expression",
+     "expression",
+     "or_group",
+     "or_group",
+     "expression",
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-085",
+   "source": "odoo-live",
+   "sql": "SELECT pg_relation_size(c.oid) FROM pg_class c WHERE c.oid = $1",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-086",
+   "source": "odoo-live",
+   "sql": "SELECT pg_relation_size(c.oid), pg_get_indexdef(c.oid) FROM pg_class c WHERE c.oid = $1",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-087",
+   "source": "odoo-live",
+   "sql": "SELECT pg_total_relation_size(c.oid), pg_table_size(c.oid), COALESCE(pg_total_relation_size(c.reltoastrelid), $2) FROM pg_class c WHERE c.oid = $1",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-088",
+   "source": "odoo-live",
+   "sql": "SELECT res_id FROM ir_model_data WHERE name=$1 AND module=$2 AND model=$3",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "ir_model_data",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "ir_model_data",
+      "column": "name",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_model_data",
+      "column": "module",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_model_data",
+      "column": "model",
+      "kind": "eq",
+      "scope": 1
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-089",
+   "source": "odoo-live",
+   "sql": "SELECT s.field_id, s.value, s.name-\u003e\u003e$1, s.sequence\n            FROM ir_model_fields_selection s, ir_model_fields f\n            WHERE s.field_id = f.id AND f.model IN ($2 /*, ... */)",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "ir_model_fields_selection",
+      "alias": "s",
+      "scope": 1
+     },
+     {
+      "name": "ir_model_fields",
+      "alias": "f",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "ir_model_fields_selection",
+      "column": "field_id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_model_fields",
+      "column": "id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_model_fields",
+      "column": "model",
+      "kind": "eq",
+      "scope": 1
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-090",
+   "source": "odoo-live",
+   "sql": "SELECT s.funcid, s.schemaname, s.funcname,\n       COALESCE(pg_catalog.pg_get_function_identity_arguments(s.funcid), $1),\n       COALESCE(l.lanname, $2), s.calls, s.total_time, s.self_time\n  FROM pg_catalog.pg_stat_user_functions s\n  LEFT JOIN pg_catalog.pg_proc p ON p.oid = s.funcid\n  LEFT JOIN pg_catalog.pg_language l ON l.oid = p.prolang",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-091",
+   "source": "odoo-live",
+   "sql": "SELECT s.schemaname, s.relname,\n       COALESCE(s.seq_scan, $1), COALESCE(s.seq_tup_read, $2), COALESCE(s.idx_scan, $3), COALESCE(s.idx_tup_fetch, $4),\n       COALESCE(s.n_tup_ins, $5), COALESCE(s.n_tup_upd, $6), COALESCE(s.n_tup_del, $7), COALESCE(s.n_tup_hot_upd, $8),\n       COALESCE(s.n_live_tup, $9), COALESCE(s.n_dead_tup, $10), COALESCE(s.n_mod_since_analyze, $11),\n       s.last_vacuum, s.last_autovacuum, s.last_analyze, s.last_autoanalyze,\n       COALESCE(s.autovacuum_count, $12), COALESCE(s.autoanalyze_count, $13),\n       COALESCE(c.relpages, $14), COALESCE(c.reltuples, $15), age(c.relfrozenxid),\n       (GREATEST(c.relpages, $16)::bigint + GREATEST(COALESCE(tc.relpages, $17), $18)::bigint) * current_setting($19)::bigint,\n       c.oid\nFROM pg_stat_user_tables s\nJOIN pg_class c ON c.oid = s.relid\nLEFT JOIN pg_class tc ON tc.oid = c.reltoastrelid\nWHERE c.relkind = $20\n  AND c.relpersistence \u003c\u003e $21",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "expression",
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-092",
+   "source": "odoo-live",
+   "sql": "SELECT s.schemaname, s.relname, s.indexrelname,\n       COALESCE(s.idx_scan,$1), COALESCE(s.idx_tup_read,$2), COALESCE(s.idx_tup_fetch,$3),\n       COALESCE(io.idx_blks_read,$4), COALESCE(io.idx_blks_hit,$5),\n       (GREATEST(ic.relpages, $6)::bigint * current_setting($7)::bigint),\n       ix.indisunique, ix.indisprimary, ix.indisvalid, s.indexrelid,\n       s.last_idx_scan, $8::timestamptz,\n       (SELECT d.stats_reset FROM pg_stat_database d WHERE d.datname = current_database())\nFROM pg_stat_user_indexes s\nJOIN pg_index ix ON ix.indexrelid = s.indexrelid\nJOIN pg_class ic ON ic.oid = s.indexrelid\nLEFT JOIN pg_statio_user_indexes io ON io.indexrelid = s.indexrelid\nWHERE ic.relpersistence \u003c\u003e $9",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "expression",
+     "catalog",
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-093",
+   "source": "odoo-live",
+   "sql": "SELECT stats_reset FROM \"public\".\"pg_stat_statements_info\"",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "schema": "public",
+      "name": "pg_stat_statements_info",
+      "scope": 1
+     }
+    ],
+    "predicates": [],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-094",
+   "source": "odoo-live",
+   "sql": "SELECT t.tgisinternal, t.tgenabled::pg_catalog.text, pg_catalog.count(*)::pg_catalog.int8\n  FROM pg_catalog.pg_trigger t\n  JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid\n  JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace\n WHERE n.nspname NOT IN ($1 /*, ... */)\n   AND n.nspname !~ $2\n GROUP BY 1, 2",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "expression",
+     "expression",
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-095",
+   "source": "odoo-live",
+   "sql": "SELECT x.oid,\n       CASE WHEN pg_catalog.has_sequence_privilege(x.oid, $2)\n            THEN pg_catalog.pg_sequence_last_value(x.oid::pg_catalog.regclass) END\n  FROM pg_catalog.unnest($1::pg_catalog.oid[]) AS x (oid)",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-096",
+   "source": "odoo-live",
+   "sql": "SET SESSION lock_timeout = $1",
+   "expected": {
+    "statement": "set",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "unsupported_statement"
+    ]
+   }
+  },
+  {
+   "id": "real-097",
+   "source": "odoo-live",
+   "sql": "SET default_transaction_read_only = $1",
+   "expected": {
+    "statement": "set",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "unsupported_statement"
+    ]
+   }
+  },
+  {
+   "id": "real-098",
+   "source": "odoo-live",
+   "sql": "SET idle_in_transaction_session_timeout = $1",
+   "expected": {
+    "statement": "set",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "unsupported_statement"
+    ]
+   }
+  },
+  {
+   "id": "real-099",
+   "source": "odoo-live",
+   "sql": "SET search_path = $1, pg_temp",
+   "expected": {
+    "statement": "set",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "unsupported_statement"
+    ]
+   }
+  },
+  {
+   "id": "real-100",
+   "source": "odoo-live",
+   "sql": "SET statement_timeout = $1",
+   "expected": {
+    "statement": "set",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "unsupported_statement"
+    ]
+   }
+  },
+  {
+   "id": "real-101",
+   "source": "odoo-live",
+   "sql": "UPDATE \"ir_model_fields\" SET \"website_form_blacklisted\" = $1 WHERE \"website_form_blacklisted\" IS NULL",
+   "expected": {
+    "statement": "update",
+    "tables": [
+     {
+      "name": "ir_model_fields",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "ir_model_fields",
+      "column": "website_form_blacklisted",
+      "kind": "isnull",
+      "scope": 1
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-102",
+   "source": "odoo-live",
+   "sql": "WITH RECURSIVE __reachability AS (\n                SELECT \"id\" AS source, \"inherit_id\" AS destination\n                FROM \"ir_ui_view\"\n                WHERE \"id\" IN ($1) AND \"inherit_id\" IS NOT NULL\n            UNION\n                SELECT r.source, t.\"inherit_id\"\n                FROM __reachability r\n                JOIN \"ir_ui_view\" t ON r.destination = t.\"id\" AND t.\"inherit_id\" IS NOT NULL\n            )\n            SELECT $2 FROM __reachability\n            WHERE source = destination\n            LIMIT $3",
+   "expected": {
+    "statement": "with",
+    "tables": [
+     {
+      "name": "ir_ui_view",
+      "scope": 1
+     },
+     {
+      "name": "ir_ui_view",
+      "alias": "t",
+      "scope": 2
+     }
+    ],
+    "predicates": [
+     {
+      "table": "ir_ui_view",
+      "column": "id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_ui_view",
+      "column": "id",
+      "kind": "eq",
+      "scope": 2
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-103",
+   "source": "odoo-live",
+   "sql": "WITH RECURSIVE group_imply(gid, hid) AS (\n                        SELECT gid, hid\n                          FROM res_groups_implied_rel\n                         UNION\n                        SELECT i.gid, r.hid\n                          FROM res_groups_implied_rel r\n                          JOIN group_imply i ON (i.hid = r.gid)\n                    )\n                    INSERT INTO res_groups_users_rel (gid, uid)\n                         SELECT i.hid, r.uid\n                           FROM group_imply i, res_groups_users_rel r\n                          WHERE r.gid = i.gid\n                            AND i.gid = $1\n                         EXCEPT\n                         SELECT r.gid, r.uid\n                           FROM res_groups_users_rel r\n                           JOIN group_imply i ON (r.gid = i.hid)\n                          WHERE i.gid = $2\n                    RETURNING gid, uid",
+   "expected": {
+    "statement": "with",
+    "tables": [
+     {
+      "name": "res_groups_implied_rel",
+      "scope": 1
+     },
+     {
+      "name": "res_groups_implied_rel",
+      "alias": "r",
+      "scope": 2
+     },
+     {
+      "name": "res_groups_users_rel",
+      "alias": "r",
+      "scope": 3
+     }
+    ],
+    "predicates": [
+     {
+      "table": "res_groups_implied_rel",
+      "column": "gid",
+      "kind": "eq",
+      "scope": 2
+     },
+     {
+      "table": "res_groups_users_rel",
+      "column": "gid",
+      "kind": "eq",
+      "scope": 3
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "real-104",
+   "source": "odoo-live",
+   "sql": "WITH RECURSIVE ir_ui_view_inherits AS (\n                SELECT id, inherit_id, priority, mode, model\n                FROM ir_ui_view\n                WHERE id IN ($1 /*, ... */) AND ((($2 OR \"ir_ui_view\".\"website_id\" IS NULL) AND (\"ir_ui_view\".\"active\" = $3)))\n            UNION\n                SELECT ir_ui_view.id, ir_ui_view.inherit_id, ir_ui_view.priority,\n                       ir_ui_view.mode, ir_ui_view.model\n                FROM ir_ui_view\n                INNER JOIN ir_ui_view_inherits parent ON parent.id = ir_ui_view.inherit_id\n                WHERE coalesce(ir_ui_view.model, $4) = coalesce(parent.model, $5)\n                      AND ir_ui_view.mode = $6\n                      AND ((($7 OR \"ir_ui_view\".\"website_id\" IS NULL) AND (\"ir_ui_view\".\"active\" = $8)))\n            )\n            SELECT\n                v.id, v.inherit_id, v.mode\n            FROM ir_ui_view_inherits v\n            ORDER BY v.priority, v.id",
+   "expected": {
+    "statement": "with",
+    "tables": [
+     {
+      "name": "ir_ui_view",
+      "scope": 1
+     },
+     {
+      "name": "ir_ui_view",
+      "scope": 2
+     }
+    ],
+    "predicates": [
+     {
+      "table": "ir_ui_view",
+      "column": "id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_ui_view",
+      "column": "active",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_ui_view",
+      "column": "inherit_id",
+      "kind": "eq",
+      "scope": 2
+     },
+     {
+      "table": "ir_ui_view",
+      "column": "mode",
+      "kind": "eq",
+      "scope": 2
+     },
+     {
+      "table": "ir_ui_view",
+      "column": "active",
+      "kind": "eq",
+      "scope": 2
+     }
+    ],
+    "skipped": [
+     "or_group",
+     "expression",
+     "or_group"
+    ]
+   }
+  },
+  {
+   "id": "real-105",
+   "source": "odoo-live",
+   "sql": "WITH RECURSIVE ir_ui_view_inherits AS (\n                SELECT id, inherit_id, priority, mode, model\n                FROM ir_ui_view\n                WHERE id IN ($1) AND ((\"ir_ui_view\".\"active\" = $2))\n            UNION\n                SELECT ir_ui_view.id, ir_ui_view.inherit_id, ir_ui_view.priority,\n                       ir_ui_view.mode, ir_ui_view.model\n                FROM ir_ui_view\n                INNER JOIN ir_ui_view_inherits parent ON parent.id = ir_ui_view.inherit_id\n                WHERE coalesce(ir_ui_view.model, $3) = coalesce(parent.model, $4)\n                      AND ir_ui_view.mode = $5\n                      AND ((\"ir_ui_view\".\"active\" = $6))\n            )\n            SELECT\n                v.id, v.inherit_id, v.mode\n            FROM ir_ui_view_inherits v\n            ORDER BY v.priority, v.id",
+   "expected": {
+    "statement": "with",
+    "tables": [
+     {
+      "name": "ir_ui_view",
+      "scope": 1
+     },
+     {
+      "name": "ir_ui_view",
+      "scope": 2
+     }
+    ],
+    "predicates": [
+     {
+      "table": "ir_ui_view",
+      "column": "id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_ui_view",
+      "column": "active",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_ui_view",
+      "column": "inherit_id",
+      "kind": "eq",
+      "scope": 2
+     },
+     {
+      "table": "ir_ui_view",
+      "column": "mode",
+      "kind": "eq",
+      "scope": 2
+     },
+     {
+      "table": "ir_ui_view",
+      "column": "active",
+      "kind": "eq",
+      "scope": 2
+     }
+    ],
+    "skipped": [
+     "expression"
+    ]
+   }
+  },
+  {
+   "id": "real-106",
+   "source": "odoo-live",
+   "sql": "WITH RECURSIVE ir_ui_view_inherits AS (\n                SELECT id, inherit_id, priority, mode, model\n                FROM ir_ui_view\n                WHERE id IN ($1) AND ((($2 OR \"ir_ui_view\".\"website_id\" IS NULL) AND (\"ir_ui_view\".\"active\" = $3)))\n            UNION\n                SELECT ir_ui_view.id, ir_ui_view.inherit_id, ir_ui_view.priority,\n                       ir_ui_view.mode, ir_ui_view.model\n                FROM ir_ui_view\n                INNER JOIN ir_ui_view_inherits parent ON parent.id = ir_ui_view.inherit_id\n                WHERE coalesce(ir_ui_view.model, $4) = coalesce(parent.model, $5)\n                      AND ir_ui_view.mode = $6\n                      AND ((($7 OR \"ir_ui_view\".\"website_id\" IS NULL) AND (\"ir_ui_view\".\"active\" = $8)))\n            )\n            SELECT\n                v.id, v.inherit_id, v.mode\n            FROM ir_ui_view_inherits v\n            ORDER BY v.priority, v.id",
+   "expected": {
+    "statement": "with",
+    "tables": [
+     {
+      "name": "ir_ui_view",
+      "scope": 1
+     },
+     {
+      "name": "ir_ui_view",
+      "scope": 2
+     }
+    ],
+    "predicates": [
+     {
+      "table": "ir_ui_view",
+      "column": "id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_ui_view",
+      "column": "active",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "ir_ui_view",
+      "column": "inherit_id",
+      "kind": "eq",
+      "scope": 2
+     },
+     {
+      "table": "ir_ui_view",
+      "column": "mode",
+      "kind": "eq",
+      "scope": 2
+     },
+     {
+      "table": "ir_ui_view",
+      "column": "active",
+      "kind": "eq",
+      "scope": 2
+     }
+    ],
+    "skipped": [
+     "or_group",
+     "expression",
+     "or_group"
+    ]
+   }
+  },
+  {
+   "id": "real-107",
+   "source": "odoo-live",
+   "sql": "WITH agg AS (\n    SELECT queryid,\n           sum(calls)::bigint             AS calls,\n           sum(total_exec_time)::float8   AS total_exec_time,\n           sum(rows)::bigint              AS rows,\n           sum(shared_blks_hit)::bigint   AS shared_blks_hit,\n           sum(shared_blks_read)::bigint  AS shared_blks_read,\n           sum(wal_bytes)::bigint         AS wal_bytes,\n           sum(temp_blks_written)::bigint AS temp_blks_written,\n           min(query)                     AS query\n      FROM \"public\".\"pg_stat_statements\"\n     WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())\n       AND queryid IS NOT NULL\n     GROUP BY queryid\n),\nranked AS (\n    (SELECT queryid FROM agg ORDER BY total_exec_time DESC LIMIT $1)\n    UNION\n    (SELECT queryid FROM agg ORDER BY calls DESC LIMIT $2)\n)\nSELECT a.queryid, a.calls, a.total_exec_time, a.rows,\n       a.shared_blks_hit, a.shared_blks_read, a.wal_bytes, a.temp_blks_written,\n       CASE WHEN octet_length(a.query) \u003c= $3 THEN a.query END,\n       (SELECT count(*) FROM agg)\n  FROM agg a\n  JOIN ranked USING (queryid)\n ORDER BY a.queryid",
+   "expected": {
+    "statement": "with",
+    "tables": [
+     {
+      "schema": "public",
+      "name": "pg_stat_statements",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "schema": "public",
+      "table": "pg_stat_statements",
+      "column": "dbid",
+      "kind": "eq",
+      "scope": 1
+     }
+    ],
+    "skipped": [
+     "catalog"
+    ]
+   }
+  },
+  {
+   "id": "real-108",
+   "source": "odoo-live",
+   "sql": "WITH links AS (\n    SELECT d.objid AS seqid, d.refobjid AS relid, d.refobjsubid AS attnum,\n           CASE d.deptype WHEN $1 THEN $2 ELSE $3 END AS rank\n      FROM pg_catalog.pg_depend d\n      JOIN pg_catalog.pg_sequence ps ON ps.seqrelid = d.objid\n     WHERE d.classid = $4::pg_catalog.regclass\n       AND d.refclassid = $5::pg_catalog.regclass\n       AND d.deptype IN ($6 /*, ... */)\n       AND d.refobjsubid \u003e $7\n    UNION ALL\n    SELECT d.refobjid, ad.adrelid, ad.adnum, $8\n      FROM pg_catalog.pg_depend d\n      JOIN pg_catalog.pg_sequence ps ON ps.seqrelid = d.refobjid\n      JOIN pg_catalog.pg_attrdef ad ON ad.oid = d.objid\n     WHERE d.classid = $9::pg_catalog.regclass\n       AND d.refclassid = $10::pg_catalog.regclass\n  ), cols AS (\n    SELECT l.seqid, l.relid, l.attnum, l.rank, tn.nspname, tc.relname, a.attname,\n           pg_catalog.format_type(a.atttypid, a.atttypmod) AS typname,\n           tc.relispartition, GREATEST(tc.reltuples, $11)::pg_catalog.float8 AS reltuples,\n           CASE COALESCE(NULLIF(t.typbasetype, $12), t.oid)\n                WHEN $13::pg_catalog.regtype THEN $14::pg_catalog.int8\n                WHEN $15::pg_catalog.regtype THEN $16::pg_catalog.int8\n                WHEN $17::pg_catalog.regtype THEN $18::pg_catalog.int8 END AS type_max,\n           CASE COALESCE(NULLIF(t.typbasetype, $19), t.oid)\n                WHEN $20::pg_catalog.regtype THEN ($21)::pg_catalog.int8\n                WHEN $22::pg_catalog.regtype THEN ($23)::pg_catalog.int8\n                WHEN $24::pg_catalog.regtype THEN ($25)::pg_catalog.int8 END AS type_min\n      FROM links l\n      JOIN pg_catalog.pg_class tc ON tc.oid = l.relid\n      JOIN pg_catalog.pg_namespace tn ON tn.oid = tc.relnamespace\n      JOIN pg_catalog.pg_attribute a ON a.attrelid = l.relid AND a.attnum = l.attnum AND NOT a.attisdropped\n      JOIN pg_catalog.pg_type t ON t.oid = a.atttypid\n  )\nSELECT pg_catalog.quote_ident(n.nspname) || $26 || pg_catalog.quote_ident(c.relname),\n       c.oid, n.nspname, c.relname, pg_catalog.format_type(s.seqtypid, $27),\n       s.seqstart, s.seqincrement, s.seqmin, s.seqmax, s.seqcycle,\n       pg_catalog.has_sequence_privilege(c.oid, $28)\n         AND NOT (c.relpersistence = $29 AND pg_catalog.pg_is_in_recovery()),\n       COALESCE(col.nspname, $30), COALESCE(col.relname, $31), COALESCE(col.attname, $32),\n       COALESCE(col.typname, $33), COALESCE(col.rank, $34), col.type_max, col.type_min,\n       (SELECT pg_catalog.count(DISTINCT (x.relid, x.attnum)) FROM cols x WHERE x.seqid = c.oid)\n  FROM pg_catalog.pg_sequence s\n  JOIN pg_catalog.pg_class c ON c.oid = s.seqrelid\n  JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace\n  LEFT JOIN LATERAL (\n       SELECT x.*\n         FROM cols x\n        WHERE x.seqid = c.oid\n        ORDER BY x.type_max NULLS LAST, x.relispartition, x.rank, x.nspname, x.relname, x.attname\n        LIMIT $35) col ON $36\n WHERE n.nspname NOT IN ($37 /*, ... */)\n   AND n.nspname !~ $38\n ORDER BY CASE WHEN s.seqincrement \u003e $39\n               THEN LEAST(s.seqmax, COALESCE(col.type_max, s.seqmax))::pg_catalog.numeric - s.seqstart\n               ELSE s.seqstart - GREATEST(s.seqmin, COALESCE(col.type_min, s.seqmin))::pg_catalog.numeric END,\n          col.reltuples DESC NULLS LAST, 1\n LIMIT $40",
+   "expected": {
+    "statement": "with",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "catalog",
+     "catalog",
+     "expression",
+     "expression",
+     "expression",
+     "expression",
+     "expression",
+     "unresolved_alias",
+     "unresolved_alias"
+    ]
+   }
+  },
+  {
+   "id": "real-109",
+   "source": "odoo-live",
+   "sql": "WITH st AS MATERIALIZED (\n  SELECT DISTINCT ON (schemaname, tablename, attname)\n         schemaname, tablename, attname, n_distinct, null_frac, avg_width\n    FROM pg_catalog.pg_stats\n   WHERE schemaname NOT IN ($1 /*, ... */)\n   ORDER BY schemaname, tablename, attname, inherited)\nSELECT pg_catalog.quote_ident(n.nspname) || $2 || pg_catalog.quote_ident(c.relname),\n       n.nspname, c.relname, c.relkind::pg_catalog.text,\n       c.reltuples::pg_catalog.float8, c.relpages::pg_catalog.int8,\n       COALESCE((SELECT pg_catalog.jsonb_strip_nulls(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(\n                         $3, a.attname, $4, a.attnum,\n                         $5, pg_catalog.format_type(a.atttypid, a.atttypmod),\n                         $6, t.typlen, $7, a.attnotnull,\n                         $8, st.n_distinct, $9, st.null_frac,\n                         $10, st.avg_width) ORDER BY a.attnum))::pg_catalog.text\n                   FROM pg_catalog.pg_attribute a\n                   JOIN pg_catalog.pg_type t ON t.oid = a.atttypid\n                   LEFT JOIN st ON st.schemaname = n.nspname AND st.tablename = c.relname AND st.attname = a.attname\n                  WHERE a.attrelid = c.oid AND a.attnum \u003e $11 AND NOT a.attisdropped), $12)\n  FROM pg_catalog.pg_class c\n  JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace\n WHERE c.relkind IN ($13 /*, ... */)\n   AND n.nspname NOT IN ($14 /*, ... */)\n   AND n.nspname !~ $15\n ORDER BY c.relpages DESC, 1\n LIMIT $16",
+   "expected": {
+    "statement": "with",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "expression",
+     "catalog",
+     "expression",
+     "expression",
+     "catalog",
+     "unresolved_alias",
+     "unresolved_alias",
+     "unresolved_alias",
+     "expression"
+    ]
+   }
+  },
+  {
+   "id": "real-110",
+   "source": "odoo-live",
+   "sql": "WITH sub_followers AS (\n        SELECT fol.partner_id AS pid,\n               fol.id AS fid,\n               fol.res_id AS res_id,\n               $1 as is_follower,\n               COALESCE(subrel.follow, $2) AS subtype_follower,\n               COALESCE(subrel.internal, $3) AS internal\n          FROM mail_followers fol\n     LEFT JOIN LATERAL (\n            SELECT $4 AS follow,\n                   subtype.internal AS internal\n              FROM mail_followers_mail_message_subtype_rel m\n         LEFT JOIN mail_message_subtype subtype ON subtype.id = m.mail_message_subtype_id\n             WHERE m.mail_followers_id = fol.id AND m.mail_message_subtype_id = $5\n            ) subrel ON $6\n         WHERE fol.res_model = $7\n               AND fol.res_id IN ($8)\n\n     UNION ALL\n\n        SELECT res_partner.id AS pid,\n               $9 AS fid,\n               $10 AS res_id,\n               $11 as is_follower,\n               $12 as subtype_follower,\n               $13 as internal\n          FROM res_partner\n         WHERE res_partner.id = ANY($14)\n    )\n    SELECT partner.id as pid,\n           partner.active as active,\n           partner.lang as lang,\n           partner.partner_share as pshare,\n           sub_user.uid as uid,\n           COALESCE(sub_user.share, $15) as ushare,\n           COALESCE(sub_user.notification_type, $16) as notif,\n           sub_user.groups as groups,\n           sub_followers.res_id as res_id,\n           sub_followers.is_follower as _insert_followerslower\n      FROM res_partner partner\n      JOIN sub_followers ON sub_followers.pid = partner.id\n                        AND (sub_followers.internal IS NOT TRUE OR partner.partner_share IS NOT TRUE)\n LEFT JOIN LATERAL (\n        SELECT users.id AS uid,\n               users.share AS share,\n               users.notification_type AS notification_type,\n               ARRAY_AGG(groups_rel.gid) FILTER (WHERE groups_rel.gid IS NOT NULL) AS groups\n          FROM res_users users\n     LEFT JOIN res_groups_users_rel groups_rel ON groups_rel.uid = users.id\n         WHERE users.partner_id = partner.id AND users.active\n      GROUP BY users.id,\n               users.share,\n               users.notification_type\n      ORDER BY users.share ASC NULLS FIRST, users.id ASC\n         FETCH FIRST ROW ONLY\n         ) sub_user ON $17\n\n     WHERE sub_followers.subtype_follower OR partner.id = ANY($18)",
+   "expected": {
+    "statement": "with",
+    "tables": [
+     {
+      "name": "mail_followers",
+      "alias": "fol",
+      "scope": 1
+     },
+     {
+      "name": "mail_followers_mail_message_subtype_rel",
+      "alias": "m",
+      "scope": 2
+     },
+     {
+      "name": "mail_message_subtype",
+      "alias": "subtype",
+      "scope": 2
+     },
+     {
+      "name": "res_partner",
+      "scope": 3
+     },
+     {
+      "name": "res_partner",
+      "alias": "partner",
+      "scope": 4
+     },
+     {
+      "name": "res_users",
+      "alias": "users",
+      "scope": 5
+     },
+     {
+      "name": "res_groups_users_rel",
+      "alias": "groups_rel",
+      "scope": 5
+     }
+    ],
+    "predicates": [
+     {
+      "table": "mail_followers",
+      "column": "res_model",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "mail_followers",
+      "column": "res_id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "mail_message_subtype",
+      "column": "id",
+      "kind": "eq",
+      "scope": 2
+     },
+     {
+      "table": "mail_followers_mail_message_subtype_rel",
+      "column": "mail_message_subtype_id",
+      "kind": "eq",
+      "scope": 2
+     },
+     {
+      "table": "mail_followers_mail_message_subtype_rel",
+      "column": "mail_followers_id",
+      "kind": "eq",
+      "scope": 2
+     },
+     {
+      "table": "mail_followers_mail_message_subtype_rel",
+      "column": "mail_message_subtype_id",
+      "kind": "eq",
+      "scope": 2
+     },
+     {
+      "table": "res_partner",
+      "column": "id",
+      "kind": "eq",
+      "scope": 3
+     },
+     {
+      "table": "res_partner",
+      "column": "id",
+      "kind": "eq",
+      "scope": 4
+     },
+     {
+      "table": "res_groups_users_rel",
+      "column": "uid",
+      "kind": "eq",
+      "scope": 5
+     },
+     {
+      "table": "res_users",
+      "column": "id",
+      "kind": "eq",
+      "scope": 5
+     },
+     {
+      "table": "res_users",
+      "column": "partner_id",
+      "kind": "eq",
+      "scope": 5
+     },
+     {
+      "table": "res_users",
+      "column": "share",
+      "kind": "order",
+      "dir": "asc",
+      "limit": true,
+      "scope": 5
+     },
+     {
+      "table": "res_users",
+      "column": "id",
+      "kind": "order",
+      "dir": "asc",
+      "limit": true,
+      "scope": 5
+     }
+    ],
+    "skipped": [
+     "expression",
+     "unresolved_alias",
+     "or_group",
+     "expression",
+     "or_group",
+     "unresolved_alias",
+     "expression"
+    ]
+   }
+  },
+  {
+   "id": "real-111",
+   "source": "odoo-live",
+   "sql": "[redacted]",
+   "expected": {
+    "statement": "other",
+    "tables": [],
+    "predicates": [],
+    "skipped": [
+     "unsupported_statement"
+    ]
+   }
+  },
+  {
+   "id": "real-112",
+   "source": "odoo-live",
+   "sql": "select pg_sleep($1)",
+   "expected": {
+    "statement": "select",
+    "tables": [],
+    "predicates": [],
+    "skipped": []
+   }
+  },
+  {
+   "id": "syn-001",
+   "source": "synthetic",
+   "sql": "WITH recent AS (SELECT id FROM sale_order WHERE write_date \u003e $1) SELECT 1 FROM sale_order_line l JOIN recent r ON r.id = l.order_id WHERE l.product_id = $2",
+   "expected": {
+    "statement": "with",
+    "tables": [
+     {
+      "name": "sale_order",
+      "scope": 1
+     },
+     {
+      "name": "sale_order_line",
+      "alias": "l",
+      "scope": 2
+     }
+    ],
+    "predicates": [
+     {
+      "table": "sale_order",
+      "column": "write_date",
+      "kind": "range",
+      "scope": 1
+     },
+     {
+      "table": "sale_order_line",
+      "column": "order_id",
+      "kind": "eq",
+      "scope": 2
+     },
+     {
+      "table": "sale_order_line",
+      "column": "product_id",
+      "kind": "eq",
+      "scope": 2
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "syn-002",
+   "source": "synthetic",
+   "sql": "SELECT id FROM res_partner WHERE name ILIKE 'acme%' AND active = $1 ORDER BY name LIMIT 20",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "res_partner",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "res_partner",
+      "column": "name",
+      "kind": "like_prefix",
+      "scope": 1
+     },
+     {
+      "table": "res_partner",
+      "column": "active",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "res_partner",
+      "column": "name",
+      "kind": "order",
+      "dir": "asc",
+      "limit": true,
+      "scope": 1
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "syn-003",
+   "source": "synthetic",
+   "sql": "SELECT id FROM res_partner WHERE lower(name) = $1",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "res_partner",
+      "scope": 1
+     }
+    ],
+    "predicates": [],
+    "skipped": [
+     "expression"
+    ]
+   }
+  },
+  {
+   "id": "syn-004",
+   "source": "synthetic",
+   "sql": "SELECT 1 FROM stock_move WHERE (state = $1 OR state = $2) AND product_id = $3",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "stock_move",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "stock_move",
+      "column": "product_id",
+      "kind": "eq",
+      "scope": 1
+     }
+    ],
+    "skipped": [
+     "or_group"
+    ]
+   }
+  },
+  {
+   "id": "syn-005",
+   "source": "synthetic",
+   "sql": "DELETE FROM mail_message WHERE res_id = $1 AND model = $2",
+   "expected": {
+    "statement": "delete",
+    "tables": [
+     {
+      "name": "mail_message",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "mail_message",
+      "column": "res_id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "mail_message",
+      "column": "model",
+      "kind": "eq",
+      "scope": 1
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "syn-006",
+   "source": "synthetic",
+   "sql": "SELECT 1 FROM account_move_line l JOIN account_move m ON m.id = l.move_id WHERE m.date BETWEEN $1 AND $2 AND l.account_id IN ($3, $4)",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "account_move_line",
+      "alias": "l",
+      "scope": 1
+     },
+     {
+      "name": "account_move",
+      "alias": "m",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "account_move",
+      "column": "id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "account_move_line",
+      "column": "move_id",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "account_move_line",
+      "column": "account_id",
+      "kind": "eq",
+      "scope": 1
+     }
+    ],
+    "skipped": [
+     "expression"
+    ]
+   }
+  },
+  {
+   "id": "syn-007",
+   "source": "synthetic",
+   "sql": "SELECT a FROM t WHERE x = $1 UNION ALL SELECT b FROM u WHERE y IS NULL",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "t",
+      "scope": 1
+     },
+     {
+      "name": "u",
+      "scope": 2
+     }
+    ],
+    "predicates": [
+     {
+      "table": "t",
+      "column": "x",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "u",
+      "column": "y",
+      "kind": "isnull",
+      "scope": 2
+     }
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "id": "syn-008",
+   "source": "synthetic",
+   "sql": "SELECT /* hint */ id FROM t -- trailing\nWHERE a = $1 AND b = $$lit$$",
+   "expected": {
+    "statement": "select",
+    "tables": [
+     {
+      "name": "t",
+      "scope": 1
+     }
+    ],
+    "predicates": [
+     {
+      "table": "t",
+      "column": "a",
+      "kind": "eq",
+      "scope": 1
+     },
+     {
+      "table": "t",
+      "column": "b",
+      "kind": "eq",
+      "scope": 1
+     }
+    ],
+    "skipped": []
+   }
+  }
+ ]
+}
