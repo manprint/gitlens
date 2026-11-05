@@ -1,14 +1,23 @@
 import { AxeBuilder } from '@axe-core/playwright'
 import { execFile } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
 import type { APIRequestContext, Page, Response as PageResponse } from '@playwright/test'
 
 import { expect, test } from './fixtures'
-import { assertFits, measureRoutes, routeUrl, routeValues } from './fullhd_fit'
-import { FULLHD_ROUTES, fullHdRoute, routePathname } from './fullhd_routes'
+import {
+  assertFits,
+  horizontallyScrollingBoxes,
+  measurePage,
+  measureRoutes,
+  open as openAt,
+  routeUrl,
+  routeValues,
+  setRowsPerPage,
+} from './fullhd_fit'
+import { FULLHD_ROUTES, FULLHD_VIEWPORTS, fullHdRoute, routePathname } from './fullhd_routes'
 import { STACK_DIR, stackGoogleChatSecrets } from './notification_secrets'
 import { BUDGET } from './qa/budget'
 import { database as qaDatabase, deadlocks, lockPair, query, runCleanups } from './qa/pg'
@@ -3223,4 +3232,109 @@ test('VIS-041 an expanded Odoo index shows its scan and size history, and Index 
 
   await assertFits(page, api, fullHdRoute('/indexes?tab=tax'))
   browserErrors.assertClean()
+})
+
+test('VIS-FHD-001 with 50 and 100 rows a table scrolls inside its card and the page does not', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, FULLHD_ROUTES.length * 2 * 30_000))
+  const values = await routeValues(api)
+  const failures: string[] = []
+  const checked: string[] = []
+  for (const route of FULLHD_ROUTES) {
+    if (route.kind === 'exempt') continue
+    // PGLENS_FHD_ONLY narrows a re-run to the routes whose path contains it.
+    if (!route.path.includes(process.env.PGLENS_FHD_ONLY ?? '')) continue
+    const url = routeUrl(route, values)
+    for (const viewport of FULLHD_VIEWPORTS) {
+      for (const size of [50, 100]) {
+        const where = `${route.path} at ${viewport.width}×${viewport.height}, ${size} rows`
+        try {
+          await openAt(page, url, viewport)
+          if (!(await setRowsPerPage(page, size))) continue
+          const measure = await measurePage(page)
+          checked.push(where)
+          expect(measure.scrollWidth, `${where}: horizontal scrollbar`).toBeLessThanOrEqual(
+            measure.innerWidth,
+          )
+          if (route.kind === 'fit') {
+            expect(
+              measure.scrollHeight,
+              `${where}: page scrollbar (${measure.scrollHeight - measure.innerHeight} px over)`,
+            ).toBeLessThanOrEqual(measure.innerHeight)
+            if (measure.pagerBottom !== null) {
+              expect(measure.pagerBottom, `${where}: pager below the fold`).toBeLessThanOrEqual(
+                measure.innerHeight,
+              )
+            }
+            // Enough rows to overflow the card: the box, not the page, scrolls.
+            if (measure.rows >= 40) {
+              expect(
+                measure.scrollingTableBoxes,
+                `${where}: the table box does not scroll`,
+              ).toBeGreaterThan(0)
+            }
+          }
+        } catch (error) {
+          failures.push(
+            `${where}: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`,
+          )
+        }
+      }
+    }
+  }
+  expect(checked.length, 'no route offered the page sizes').toBeGreaterThan(0)
+  expect(failures, failures.join('\n')).toEqual([])
+})
+
+test('VIS-FHD-002 at 2560×1440 and 1366×768 the page does not scroll sideways', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, FULLHD_ROUTES.length * 2 * 30_000))
+  const values = await routeValues(api)
+  const failures: string[] = []
+  const sideways: string[] = []
+  for (const route of FULLHD_ROUTES) {
+    if (route.kind === 'exempt') continue
+    const url = routeUrl(route, values)
+    for (const viewport of [
+      { width: 2560, height: 1440 },
+      { width: 1366, height: 768 },
+    ]) {
+      const where = `${route.path} at ${viewport.width}×${viewport.height}`
+      try {
+        await openAt(page, url, viewport)
+        const measure = await measurePage(page)
+        expect(measure.scrollWidth, `${where}: horizontal scrollbar`).toBeLessThanOrEqual(
+          measure.innerWidth,
+        )
+        const wide = await horizontallyScrollingBoxes(page)
+        // Any other table may scroll inside its own card (a header with sort and help buttons can be wider than its column): recorded, not failed (below 1600 px a table scrolls inside its card: docs/LIMITS.md). The Index tax table must fit the 2560 px screen.
+        if (wide.length > 0) sideways.push(`${where}: ${wide.join(', ')}`)
+        if (route.path === '/indexes?tab=tax' && viewport.width === 2560) {
+          expect(wide, `${where}: table scrolls sideways: ${wide.join(', ')}`).toEqual([])
+        }
+        // The laptop size may scroll vertically; the large one never does on a fit page.
+        if (viewport.width === 2560 && route.kind === 'fit') {
+          expect(measure.scrollHeight, `${where}: page scrollbar`).toBeLessThanOrEqual(
+            measure.innerHeight,
+          )
+        }
+      } catch (error) {
+        failures.push(
+          `${where}: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`,
+        )
+      }
+    }
+    const slug = route.path.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'fleet'
+    await page.screenshot({
+      path: `../test/e2e/_artifacts/ui/fullhd/${slug}-1366.png`,
+      fullPage: true,
+    })
+  }
+  mkdirSync('../test/e2e/_artifacts/ui/fullhd', { recursive: true })
+  writeFileSync('../test/e2e/_artifacts/ui/fullhd/sideways-tables.txt', sideways.join('\n'))
+  expect(failures, failures.join('\n')).toEqual([])
 })

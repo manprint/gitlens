@@ -111,4 +111,10 @@ describe('Full HD route inventory', () => {
       FULLHD_ROUTES.filter((route) => route.kind === 'exempt').map((route) => route.path),
     ).toEqual(['/login', '*'])
   })
+
+  it('FHD-ROUTES-004 no entry waits for an owning unit any more', () => {
+    expect(
+      FULLHD_ROUTES.filter((route) => route.pendingUnit !== undefined).map((route) => route.path),
+    ).toEqual([])
+  })
 })

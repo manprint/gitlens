@@ -79,7 +79,9 @@ async function settle(page: Page): Promise<void> {
 }
 
 /** Measures the open page; the caller has set the viewport and waited for the data. */
-async function measurePage(page: Page): Promise<Omit<FullHdMeasure, 'route' | 'url' | 'viewport'>> {
+export async function measurePage(
+  page: Page,
+): Promise<Omit<FullHdMeasure, 'route' | 'url' | 'viewport'>> {
   return page.evaluate(() => {
     const height = (element: Element | null) =>
       element ? Math.round(element.getBoundingClientRect().height) : null
@@ -290,6 +292,11 @@ export async function assertFits(
     const measure = { route: route.path, url, viewport, ...(await measurePage(page)) }
     measures.push(measure)
     const where = `${route.path} at ${viewport.width}×${viewport.height}`
+    const slug = route.path.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'fleet'
+    await page.screenshot({
+      path: `../test/e2e/_artifacts/ui/fullhd/${slug}-${viewport.height}.png`,
+      fullPage: true,
+    })
     expect(measure.scrollWidth, `${where}: horizontal scrollbar`).toBeLessThanOrEqual(
       measure.innerWidth,
     )
@@ -318,4 +325,35 @@ export async function assertFits(
     expect(headerProblems, `${where}: header line: ${headerProblems.join(' | ')}`).toEqual([])
   }
   return measures
+}
+
+/** Table scroll boxes of the open page whose content is wider than the box (name of their card). */
+export async function horizontallyScrollingBoxes(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll('[data-testid="data-table-scroll"]')]
+      .filter((box) => box.scrollWidth > box.clientWidth + 1)
+      .map(
+        (box) =>
+          box.querySelector('table')?.getAttribute('aria-label') ??
+          box.closest('[data-table-card]')?.getAttribute('aria-label') ??
+          'table',
+      ),
+  )
+}
+
+/**
+ * Picks `size` in the first table card's "Rows per page" select and waits for
+ * the page to settle. False when the open page has no such select or no such
+ * option (a table with no pager, a page size the table does not offer).
+ */
+export async function setRowsPerPage(page: Page, size: number): Promise<boolean> {
+  const select = page.locator('[data-table-card] select[aria-label="Rows per page"]').first()
+  if ((await select.count()) === 0) return false
+  const offered = await select
+    .locator('option')
+    .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value))
+  if (!offered.includes(String(size))) return false
+  await select.selectOption(String(size))
+  await settle(page)
+  return true
 }

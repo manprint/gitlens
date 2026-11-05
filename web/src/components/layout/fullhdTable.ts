@@ -20,3 +20,11 @@ export const FULLHD_CELL =
 export const FULLHD_HEADER_CELL = 'min-[1600px]:py-1'
 /** A free-text cell: one line with an ellipsis; the full text is in its `title`. */
 export const FULLHD_TRUNCATE = 'min-[1600px]:block min-[1600px]:truncate'
+/**
+ * A page of 50 or 100 rows scrolls inside its card, under the sticky header. Below
+ * 1600 px the card stops at 80 % of the screen (unchanged); from 1600 px it stops
+ * where the page chrome (shell header, page header, tabs, toolbar, pager,
+ * padding) ends, so the page itself never scrolls (D26).
+ */
+export const FULLHD_BOX_CAP =
+  'bg-card relative max-h-[80vh] min-[1600px]:max-h-[calc(100vh-26rem)] overflow-auto rounded-lg border'

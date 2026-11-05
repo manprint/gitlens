@@ -51,7 +51,7 @@ function columns(instanceId: string, database: string): readonly SimpleColumn<In
       header: 'Indexes',
       sortValue: (tax) => tax.indexCount,
       className: 'whitespace-nowrap',
-      width: '6rem',
+      width: '7rem',
       cell: (tax) => formatCount(tax.indexCount),
     },
     {
@@ -75,7 +75,7 @@ function columns(instanceId: string, database: string): readonly SimpleColumn<In
       header: 'Index/table %',
       sortValue: (tax) => tax.indexToTableRatio,
       className: 'whitespace-nowrap',
-      width: '9rem',
+      width: '10rem',
       cell: (tax) =>
         tax.tableBytes === null ? '—' : (formatPercent(tax.indexBytes, tax.tableBytes) ?? '—'),
     },
@@ -84,7 +84,7 @@ function columns(instanceId: string, database: string): readonly SimpleColumn<In
       header: 'Unused size',
       sortValue: (tax) => tax.unusedBytes,
       className: 'whitespace-nowrap',
-      width: '11rem',
+      width: '13rem',
       cell: (tax) =>
         tax.unusedCount === 0 ? (
           '0 B'

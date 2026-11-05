@@ -22,6 +22,7 @@ import {
   FULLHD_ROW,
   FULLHD_TABLE,
   FULLHD_TRUNCATE,
+  FULLHD_BOX_CAP,
 } from './fullhdTable'
 import { SortButtons } from './SortButtons'
 import { NoRowsMatch, TableFooter } from './TableFooter'
@@ -222,7 +223,7 @@ export function SimpleTable<T>({
           tabIndex={0}
           className={cn(
             state.size > PAGE_SIZES[0]
-              ? 'bg-card max-h-[80vh] overflow-auto rounded-lg border'
+              ? FULLHD_BOX_CAP
               : 'bg-card overflow-x-auto rounded-lg border',
             className,
           )}

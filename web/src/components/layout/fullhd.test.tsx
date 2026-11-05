@@ -115,7 +115,12 @@ describe('Full HD table layout (D26)', () => {
       for (const size of [50, 100]) {
         const view = render(`/?notes.size=${size}`)
         const capped = screen.getByTestId('data-table-scroll')
-        expect(capped).toHaveClass('max-h-[80vh]', 'overflow-auto')
+        expect(capped).toHaveClass(
+          'relative',
+          'max-h-[80vh]',
+          'min-[1600px]:max-h-[calc(100vh-26rem)]',
+          'overflow-auto',
+        )
         view.unmount()
       }
     })
