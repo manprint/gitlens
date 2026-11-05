@@ -26,6 +26,14 @@ export const TILE_UNITS = [
   'findings',
   'alerts',
   'checks',
+  'checkpoints',
+  'files',
+  'deadlocks',
+  'foreign keys',
+  'instances',
+  'clusters',
+  'CPUs',
+  'transactions',
 ] as const
 
 export type TileUnit = (typeof TILE_UNITS)[number]

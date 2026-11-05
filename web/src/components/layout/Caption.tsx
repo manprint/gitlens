@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils'
 
 /**
  * The one-line explanation of a chart, table or section: what it measures
- * (D30). `oneLine` cuts it to one line from 1600 px, with the sentence in its
+ * (D30). `oneLine` cuts it to two lines from 1600 px, with the sentence in its
  * `title`. Inside a captioned card the card's root carries `data-caption-id`,
  * so the line passes `marked={false}` and each caption is counted once.
  */
@@ -24,7 +24,7 @@ export function Caption({
       {...(marked ? { 'data-caption-id': id } : {})}
       className={cn(
         'text-muted-foreground text-sm',
-        oneLine && 'min-[1600px]:min-w-0 min-[1600px]:truncate',
+        oneLine && 'min-[1600px]:line-clamp-2 min-[1600px]:min-w-0',
         className,
       )}
       {...(oneLine ? { title: what } : {})}

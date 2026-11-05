@@ -254,6 +254,14 @@ browser chrome): from 1600 px wide every table page shows its toolbar, its
 rows scrolls inside its card under a sticky header. The layout is also checked
 at 2560×1440 (no horizontal scrollbar). Narrower screens keep the responsive
 layout described in [docs/LIMITS.md](docs/LIMITS.md#18-screens-below-1600-px).
+Every card, section, table and chart has a one-line caption saying what it
+shows, and a small circled ⓘ that opens a tooltip with the source, the unit,
+the time window and how to read it; it opens on hover or keyboard focus and
+closes on Escape. Table columns that are hard to read carry an ⓘ in the
+header. Technical terms (WAL, bloat, vacuum, tiers…) are explained on hover
+from one glossary. A summary card shows one figure with its unit; any other
+number on the card is followed by what it counts, and a state is written as
+text, never shown by colour alone.
 The search box filters the rows already loaded, except on Slowest queries,
 Query Inspector and Findings, where it searches on the server, and in the
 Search everything panel of Index analysis (see

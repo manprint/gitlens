@@ -68,9 +68,9 @@ export function PageHeader({
             {title}
           </h1>
           {subtitle ? (
-            // From 1600 px the subtitle stays on one line (D26); the full text is its title.
+            // From 1600 px the subtitle stays within two lines (D26); the full text is its title.
             <p
-              className="text-muted-foreground mt-1.5 max-w-3xl text-sm leading-relaxed min-[1600px]:mt-0 min-[1600px]:max-w-none min-[1600px]:min-w-0 min-[1600px]:truncate"
+              className="text-muted-foreground mt-1.5 max-w-3xl text-sm leading-relaxed min-[1600px]:mt-0 min-[1600px]:line-clamp-2 min-[1600px]:max-w-none min-[1600px]:min-w-0"
               title={typeof subtitle === 'string' ? subtitle : undefined}
             >
               {subtitle}

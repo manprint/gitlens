@@ -174,7 +174,7 @@ describe('Full HD table layout (D26)', () => {
     const title = screen.getByRole('heading', { level: 1, name: 'Findings' })
     expect(title).toHaveClass('min-[1600px]:text-xl', 'min-[1600px]:shrink-0')
     expect(screen.getByText('Checkup')).toHaveClass('min-[1600px]:mb-0')
-    expect(screen.getByTitle(subtitle)).toHaveClass('min-[1600px]:truncate')
+    expect(screen.getByTitle(subtitle)).toHaveClass('min-[1600px]:line-clamp-2')
   })
 
   it('FHD-APPLY-007 a section puts its title and description on one line', () => {

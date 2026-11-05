@@ -12,6 +12,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
 import { useTableRows } from '@/hooks/useTableRows'
 import type { TableDefaults } from '@/hooks/useTableState'
+import type { CaptionId, ColumnHelpId } from '@/lib/captions'
 import { PAGE_SIZES, type Accessor, type SortDirection } from '@/lib/tableControls'
 import { cn } from '@/lib/utils'
 
@@ -24,6 +25,8 @@ import {
   FULLHD_TRUNCATE,
   FULLHD_BOX_CAP,
 } from './fullhdTable'
+import { Caption } from './Caption'
+import { ColumnHint, InfoHint } from './InfoHint'
 import { SortButtons } from './SortButtons'
 import { NoRowsMatch, TableFooter } from './TableFooter'
 import { TableToolbar } from './TableToolbar'
@@ -46,6 +49,8 @@ export interface SimpleColumn<T> {
   width?: string
   /** A free-text column: one line with an ellipsis from 1600 px, the full text in `title`. */
   truncate?: (row: T) => string
+  /** A short hint about the column (D30): an ⓘ after the header label. */
+  help?: ColumnHelpId
 }
 
 function cellContent<T>(column: SimpleColumn<T>, row: T): ReactNode {
@@ -59,6 +64,8 @@ function cellContent<T>(column: SimpleColumn<T>, row: T): ReactNode {
 
 export interface SimpleTableProps<T> {
   ariaLabel: string
+  /** The table's caption (D30): a one-line sentence above the toolbar, with an ⓘ for the details. */
+  captionId?: CaptionId
   /** URL prefix of the table state. */
   tableId: string
   rows: readonly T[]
@@ -104,6 +111,7 @@ export interface SimpleTableProps<T> {
  */
 export function SimpleTable<T>({
   ariaLabel,
+  captionId,
   tableId,
   rows,
   rowKey,
@@ -201,7 +209,17 @@ export function SimpleTable<T>({
 
   const columnCount = columns.length + (renderDetail ? 1 : 0)
   return (
-    <div className="space-y-3" data-table-card>
+    <div
+      className="space-y-3"
+      data-table-card
+      {...(captionId === undefined ? {} : { 'data-card': '', 'data-caption-id': captionId })}
+    >
+      {captionId !== undefined ? (
+        <div className="flex w-full min-w-0 items-center gap-1">
+          <Caption className="text-xs" id={captionId} marked={false} oneLine />
+          <InfoHint className="shrink-0" id={captionId} label={ariaLabel} />
+        </div>
+      ) : null}
       {toolbar ? (
         <TableToolbar
           activeFilterCount={view.activeFilterCount}
@@ -246,6 +264,10 @@ export function SimpleTable<T>({
                 ) : null}
                 {columns.map((column) => {
                   const direction = sortId === column.id ? state.dir : null
+                  const hint =
+                    column.help === undefined ? null : (
+                      <ColumnHint id={column.help} label={column.header} />
+                    )
                   return (
                     <th
                       key={column.id}
@@ -295,11 +317,15 @@ export function SimpleTable<T>({
                               set(next === null ? { sort: null } : { sort: column.id, dir: next })
                             }
                           />
+                          {hint}
                         </span>
                       ) : (
-                        <span className={column.srOnlyHeader ? 'sr-only' : undefined}>
-                          {column.header}
-                        </span>
+                        <>
+                          <span className={column.srOnlyHeader ? 'sr-only' : undefined}>
+                            {column.header}
+                          </span>
+                          {hint}
+                        </>
                       )}
                     </th>
                   )

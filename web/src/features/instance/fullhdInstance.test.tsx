@@ -373,7 +373,7 @@ describe('Instance tabs at Full HD', () => {
     const panel = screen.getByRole('region', { name: 'T' })
     expect(panel).toHaveClass('rounded-xl', 'border', 'min-[1600px]:border-0')
     expect(screen.getByText('Long hint')).toHaveAttribute('title', 'Long hint')
-    expect(screen.getByText('Long hint')).toHaveClass('min-[1600px]:truncate')
+    expect(screen.getByText('Long hint')).toHaveClass('min-[1600px]:line-clamp-2')
 
     const views = [{ id: 'a' }, { id: 'b' }] as const
     expect(readInstanceView(views, null)).toBe('a')

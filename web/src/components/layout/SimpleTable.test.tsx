@@ -1,7 +1,9 @@
 import { fireEvent, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
+import { CAPTIONS, columnHelp } from '@/lib/captions'
 import { expectNoA11yViolations } from '@/test/a11y'
+import { expectCaptionedCards } from '@/test/clearCard'
 import { renderWithProviders } from '@/test/render'
 import { dataRows, filterTable, searchTable, seq, sortTable } from '@/test/table'
 
@@ -144,5 +146,60 @@ describe('SimpleTable', () => {
     const { container } = renderTable('/?rel.sort=size&rel.q=rel')
     fireEvent.click(screen.getByRole('button', { name: 'Show details of rel_01' }))
     await expect(expectNoA11yViolations(container)).resolves.toBeUndefined()
+  })
+})
+
+describe('SimpleTable caption and column help (D30)', () => {
+  const HELP_COLUMNS: SimpleColumn<Row>[] = [
+    COLUMNS[0]!,
+    { id: 'kind', header: 'Kind', help: 'indexes.scans', cell: (row) => row.kind },
+    {
+      id: 'size',
+      header: 'Size',
+      help: 'statements.mean-time',
+      sortValue: (row) => row.size,
+      cell: (row) => row.size ?? '—',
+    },
+  ]
+
+  function renderCaptioned() {
+    return renderWithProviders(
+      <SimpleTable
+        ariaLabel="Relations"
+        captionId="overview.tps"
+        columns={HELP_COLUMNS}
+        emptyState={<p>No relations</p>}
+        rowKey={(row) => row.name}
+        rows={ROWS}
+        tableId="rel"
+      />,
+    )
+  }
+
+  it('SIMPLE-CAP-001 a captioned table is a card with its caption line and its ⓘ', () => {
+    const { container } = renderCaptioned()
+    expect(expectCaptionedCards(container)).toEqual(['overview.tps'])
+    const line = screen.getByTitle(CAPTIONS['overview.tps'].what)
+    expect(line).toBeVisible()
+    expect(line).toHaveClass('min-[1600px]:line-clamp-2')
+    expect(screen.getByRole('button', { name: 'About Relations' })).toBeInTheDocument()
+  })
+
+  it('SIMPLE-CAP-001 a table without captionId is not a card', () => {
+    const { container } = renderTable()
+    expect(expectCaptionedCards(container)).toEqual([])
+  })
+
+  it('SIMPLE-CAP-002 a column help adds an ⓘ and keeps the sort buttons', () => {
+    renderCaptioned()
+    const sortable = screen.getByRole('columnheader', { name: /Size/ })
+    expect(within(sortable).getByRole('button', { name: 'Sort Size ascending' })).toBeVisible()
+    fireEvent.focus(within(sortable).getByRole('button', { name: 'About Size' }))
+    expect(screen.getByRole('tooltip')).toHaveTextContent(columnHelp['statements.mean-time'])
+    const plain = screen.getByRole('columnheader', { name: /Kind/ })
+    expect(within(plain).getByRole('button', { name: 'About Kind' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: /Name/ })).not.toHaveTextContent('About')
+    fireEvent.click(within(sortable).getByRole('button', { name: 'Sort Size ascending' }))
+    expect(sortable).toHaveAttribute('aria-sort', 'ascending')
   })
 })

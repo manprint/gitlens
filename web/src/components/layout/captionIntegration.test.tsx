@@ -50,7 +50,7 @@ describe('captions on charts, sections and tables (D30)', () => {
     expect(section).toHaveAttribute('data-caption-id', 'index.duplicate')
     expect(within(section).queryByText('Old description')).not.toBeInTheDocument()
     expect(within(section).getByTitle(CAPTIONS['index.duplicate'].what)).toHaveClass(
-      'min-[1600px]:truncate',
+      'min-[1600px]:line-clamp-2',
     )
     fireEvent.focus(within(section).getByRole('button', { name: 'About Duplicates' }))
     expect(screen.getByRole('tooltip')).toHaveTextContent('Latest advisor evaluation.')

@@ -15,6 +15,7 @@ import { createPortal } from 'react-dom'
 import { CAPTIONS, columnHelp, type CaptionId, type ColumnHelpId } from '@/lib/captions'
 import { cn } from '@/lib/utils'
 
+import { withTerms } from './withTerms'
 import { placeTooltip, type TooltipSide } from './tooltipPlacement'
 
 /** Hover waits this long before the tooltip opens, so passing the pointer over it does nothing. */
@@ -189,14 +190,14 @@ export function InfoHint({
       {extra === undefined ? null : (
         <div className="text-foreground mb-2 space-y-1 border-b pb-2 text-sm">{extra}</div>
       )}
-      <p className="text-foreground mb-2 text-sm">{entry.what}</p>
+      <p className="text-foreground mb-2 text-sm">{withTerms(entry.what)}</p>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
         {FIELDS.map(([key, name]) => {
           const value = (entry as Partial<Record<(typeof FIELDS)[number][0], string>>)[key]
           return value === undefined ? null : (
             <div key={key} className="contents">
               <dt className="text-muted-foreground font-medium">{name}</dt>
-              <dd>{value}</dd>
+              <dd>{key === 'source' || key === 'howToRead' ? withTerms(value) : value}</dd>
             </div>
           )
         })}

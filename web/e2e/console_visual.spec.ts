@@ -3340,3 +3340,182 @@ test('VIS-FHD-002 at 2560×1440 and 1366×768 the page does not scroll sideways'
   writeFileSync('../test/e2e/_artifacts/ui/fullhd/sideways-tables.txt', sideways.join('\n'))
   expect(failures, failures.join('\n')).toEqual([])
 })
+
+/** VIS-CAP: the routes that show a data page, opened on the live instance at Full HD. */
+const CAPTION_ROUTES = FULLHD_ROUTES.filter((route) => route.kind !== 'exempt')
+const CAPTION_SHOTS = '../test/e2e/_artifacts/ui/captions'
+const CAPTION_VIEWPORT = { width: 1920, height: 1080 } as const
+
+function captionSlug(path: string): string {
+  return path.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'fleet'
+}
+
+async function openCaptionRoute(
+  page: Page,
+  route: (typeof CAPTION_ROUTES)[number],
+  values: Awaited<ReturnType<typeof routeValues>>,
+): Promise<void> {
+  await openAt(page, routeUrl(route, values), CAPTION_VIEWPORT)
+}
+
+test('VIS-CAP-001 every card on every route names a catalogue caption and shows no placeholder text', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, FULLHD_ROUTES.length * 30_000))
+  mkdirSync(CAPTION_SHOTS, { recursive: true })
+  const values = await routeValues(api)
+  const failures: string[] = []
+  for (const route of CAPTION_ROUTES) {
+    await test.step(route.path, async () => {
+      await openCaptionRoute(page, route, values)
+      const found = await page.evaluate(() => {
+        const cards = [...document.querySelectorAll<HTMLElement>('[data-card]')]
+        return {
+          cards: cards.length,
+          ids: cards.map((card) => card.getAttribute('data-caption-id')),
+          labels: cards.map(
+            (card) => card.getAttribute('aria-label') ?? card.querySelector('h2, h3')?.textContent,
+          ),
+          text: document.querySelector('main')?.textContent ?? '',
+        }
+      })
+      found.ids.forEach((id, index) => {
+        if (id === null) {
+          failures.push(
+            `${route.path}: card "${found.labels[index] ?? '?'}" has no data-caption-id`,
+          )
+        } else if (
+          (CAPTIONS as Record<string, { what: string } | undefined>)[id]?.what.trim() === undefined
+        ) {
+          failures.push(`${route.path}: caption ${id} is missing or empty in the catalogue`)
+        }
+      })
+      for (const bad of ['undefined', 'NaN', '[object Object]']) {
+        if (found.text.includes(bad)) failures.push(`${route.path}: page text contains "${bad}"`)
+      }
+      await page.screenshot({
+        path: `${CAPTION_SHOTS}/${captionSlug(route.path)}.png`,
+        fullPage: true,
+      })
+    })
+  }
+  expect(failures, failures.join('\n')).toEqual([])
+})
+
+test('VIS-CAP-002 every summary tile has one primary figure and gives each other number its noun', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, FULLHD_ROUTES.length * 30_000))
+  const values = await routeValues(api)
+  const failures: string[] = []
+  for (const route of CAPTION_ROUTES) {
+    await test.step(route.path, async () => {
+      await openCaptionRoute(page, route, values)
+      const problems = await page.evaluate(() => {
+        const out: string[] = []
+        for (const tile of document.querySelectorAll<HTMLElement>('article[aria-label]')) {
+          const label = tile.getAttribute('aria-label') ?? '?'
+          if (tile.querySelectorAll('.text-2xl, .min-\\[1600px\\]\\:text-xl').length !== 1) {
+            out.push(`${label}: not exactly one primary figure`)
+          }
+          if (tile.querySelector('[data-tone]') !== null) {
+            const status = tile.querySelector('[data-tone]')?.textContent?.trim() ?? ''
+            if (status === '') out.push(`${label}: tone without status text`)
+          }
+          const clone = tile.cloneNode(true) as HTMLElement
+          clone.querySelector('.text-2xl')?.remove()
+          clone.querySelectorAll('[role="tooltip"], svg, canvas, button').forEach((n) => n.remove())
+          const rest = (clone.textContent ?? '').replace(/\s+/g, ' ').trim()
+          for (const match of rest.matchAll(/\d[\d.,]*(?!\d)/g)) {
+            const after = rest.slice((match.index ?? 0) + match[0].length)
+            if (!/^\s*[A-Za-z%]/.test(after)) {
+              out.push(`${label}: "${match[0]}" is not followed by a noun`)
+            }
+          }
+        }
+        return out
+      })
+      problems.forEach((problem) => failures.push(`${route.path}: ${problem}`))
+    })
+  }
+  expect(failures, failures.join('\n')).toEqual([])
+})
+
+test('VIS-CAP-003 every ⓘ opens its tooltip on hover and on keyboard focus, inside the viewport', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, FULLHD_ROUTES.length * 90_000))
+  const values = await routeValues(api)
+  const failures: string[] = []
+  for (const route of CAPTION_ROUTES) {
+    await test.step(route.path, async () => {
+      await openCaptionRoute(page, route, values)
+      const cards = page.locator('[data-card][data-caption-id]')
+      const total = await cards.count()
+      let tabChecked = false
+      for (let index = 0; index < total; index++) {
+        const card = cards.nth(index)
+        const id = (await card.getAttribute('data-caption-id')) ?? ''
+        const what = (CAPTIONS as Record<string, { what: string } | undefined>)[id]?.what
+        const hints = card.locator('button[aria-label^="About "]:not(th *)')
+        // A card's own ⓘ is the one whose tooltip holds its catalogue text; a toolbar filter may carry another.
+        const own = await hints.evaluateAll(
+          (buttons, wanted) =>
+            buttons.findIndex((hint) =>
+              (document.getElementById(hint.getAttribute('aria-controls') ?? '')?.textContent ?? '')
+                .replace(/\s+/g, ' ')
+                .includes(wanted),
+            ),
+          (what ?? '').replace(/\s+/g, ' '),
+        )
+        const button = hints.nth(Math.max(own, 0))
+        const where = `${route.path} ${id}`
+        try {
+          if (!(await card.isVisible()) || (await button.count()) === 0) continue
+          await button.scrollIntoViewIfNeeded()
+          await button.hover({ timeout: 5_000 })
+          const tooltip = page.locator(
+            `#${await button.evaluate((el) => el.getAttribute('aria-controls'))}`,
+          )
+          await expect(tooltip, `${where}: tooltip on hover`).toBeVisible({ timeout: 1_000 })
+          const text = ((await tooltip.textContent()) ?? '').replace(/\s+/g, ' ')
+          if (what !== undefined && !text.includes(what.replace(/\s+/g, ' '))) {
+            failures.push(`${where}: tooltip lacks the catalogue text`)
+          }
+          const box = await tooltip.boundingBox()
+          if (
+            box === null ||
+            box.x < 0 ||
+            box.y < 0 ||
+            box.x + box.width > CAPTION_VIEWPORT.width ||
+            box.y + box.height > CAPTION_VIEWPORT.height
+          ) {
+            failures.push(`${where}: tooltip leaves the 1920×1080 viewport`)
+          }
+          await page.mouse.move(0, 0)
+          await expect(tooltip, `${where}: tooltip closes on leave`).toBeHidden({ timeout: 1_000 })
+          if (!tabChecked) {
+            tabChecked = true
+            await button.focus()
+            await page.keyboard.press('Shift+Tab')
+            await page.keyboard.press('Tab')
+            await expect(tooltip, `${where}: tooltip on Tab`).toBeVisible({ timeout: 1_000 })
+            await page.keyboard.press('Escape')
+            await expect(tooltip, `${where}: tooltip closes on Escape`).toBeHidden({
+              timeout: 1_000,
+            })
+            await button.blur()
+          }
+        } catch (error) {
+          failures.push(
+            `${where}: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`,
+          )
+        }
+      }
+    })
+  }
+  expect(failures, failures.join('\n')).toEqual([])
+})

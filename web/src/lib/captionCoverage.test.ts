@@ -29,6 +29,9 @@ import { isTileUnit } from './units'
 const ROOT = join(__dirname, '..')
 const TAGS = ['MetricTile', 'ChartCard', 'Section', 'DataTable'] as const
 type Tag = (typeof TAGS)[number]
+/** Panels and tables that also need a `captionId` (17.3): `InstancePanel` and `SimpleTable`. */
+const PANEL_TAGS = ['InstancePanel', 'SimpleTable'] as const
+type PanelTag = (typeof PANEL_TAGS)[number]
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -45,13 +48,13 @@ interface Usage {
 }
 
 /** Every opening element of the given tags in a TSX source. */
-export function usages(source: string, file = 'x.tsx'): Usage[] {
+export function usages(source: string, file = 'x.tsx', tags: readonly string[] = TAGS): Usage[] {
   const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
   const found: Usage[] = []
   const visit = (node: ts.Node) => {
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
       const tag = node.tagName.getText(tree)
-      if ((TAGS as readonly string[]).includes(tag)) {
+      if (tags.includes(tag)) {
         const attribute = (name: string) =>
           node.attributes.properties.find(
             (property): property is ts.JsxAttribute =>
@@ -107,10 +110,16 @@ function scan() {
   const missing: Record<string, Partial<Record<Tag, number>>> = {}
   const dynamic: Record<string, Partial<Record<Tag, number>>> = {}
   const badUnits: Record<string, number> = {}
+  const panels: Record<string, Partial<Record<PanelTag, number>>> = {}
   const files = [...sourceFiles(join(ROOT, 'features')), ...sourceFiles(join(ROOT, 'components'))]
   for (const file of files) {
     const name = relative(ROOT, file)
-    for (const usage of usages(readFileSync(file, 'utf8'), file)) {
+    const text = readFileSync(file, 'utf8')
+    for (const usage of usages(text, file, PANEL_TAGS)) {
+      const tag = usage.tag as PanelTag
+      if (usage.caption === 'missing') (panels[name] ??= {})[tag] = (panels[name]?.[tag] ?? 0) + 1
+    }
+    for (const usage of usages(text, file)) {
       const tag = usage.tag as Tag
       if (usage.caption === 'missing') (missing[name] ??= {})[tag] = (missing[name]?.[tag] ?? 0) + 1
       if (usage.caption === 'dynamic') (dynamic[name] ??= {})[tag] = (dynamic[name]?.[tag] ?? 0) + 1
@@ -119,7 +128,7 @@ function scan() {
       }
     }
   }
-  return { missing, dynamic, badUnits }
+  return { missing, dynamic, badUnits, panels }
 }
 
 /** Usages without a caption: none since 17.2 emptied the list; a new usage must carry one. */
@@ -135,6 +144,32 @@ const DYNAMIC_ALLOWLIST: Record<string, Partial<Record<Tag, number>>> = {
   'features/instance/OverviewCharts.tsx': { ChartCard: 1 },
 }
 
+/**
+ * `InstancePanel` and `SimpleTable` usages without a `captionId` (17.3): debt that
+ * the page workers remove; entries are only ever removed and the list must end empty.
+ */
+const PANEL_ALLOWLIST: Record<string, Partial<Record<PanelTag, number>>> = {
+  'features/alerts/AlertsPage.tsx': { SimpleTable: 1 },
+  'features/alerts/EventsPage.tsx': { SimpleTable: 2 },
+  'features/alerts/RulesPage.tsx': { SimpleTable: 1 },
+  'features/alerts/SilencesPage.tsx': { SimpleTable: 1 },
+  'features/cluster/TopologyGraph.tsx': { SimpleTable: 1 },
+  'features/findings/FindingsTable.tsx': { SimpleTable: 1 },
+  'features/indexes/CleanupPanel.tsx': { SimpleTable: 1 },
+  'features/indexes/DeadRowsPanel.tsx': { SimpleTable: 1 },
+  'features/indexes/IndexTaxPanel.tsx': { SimpleTable: 1 },
+  'features/indexes/IndexesPanel.tsx': { SimpleTable: 3 },
+  'features/indexes/SuggestionsPanel.tsx': { SimpleTable: 1 },
+  'features/instance/CatalogSection.tsx': { InstancePanel: 1 },
+  'features/instance/InternalsSection.tsx': { InstancePanel: 1 },
+  'features/instance/LogicalReplicationSection.tsx': { InstancePanel: 1 },
+  'features/instance/RelationsSection.tsx': { InstancePanel: 1, SimpleTable: 1 },
+  'features/instance/SettingsSection.tsx': { InstancePanel: 1, SimpleTable: 1 },
+  'features/locks/SessionsTable.tsx': { SimpleTable: 1 },
+  'features/queries/PlanHistory.tsx': { SimpleTable: 1 },
+  'features/settings/CommandAudit.tsx': { SimpleTable: 1 },
+}
+
 /** `MetricTile` usages with a number or free text in `unit`: none since 17.2. */
 const CARD_ALLOWLIST: Record<string, number> = {}
 
@@ -144,6 +179,10 @@ describe('caption and card coverage (D30, D31)', () => {
   it('CAPTION-COVERAGE-001 every captioned element has a literal caption id or an allowance', () => {
     expect(result.missing).toEqual(CAPTION_ALLOWLIST)
     expect(result.dynamic).toEqual(DYNAMIC_ALLOWLIST)
+  })
+
+  it('CAPTION-COVERAGE-002 every instance panel and simple table has a caption id or an allowance', () => {
+    expect(result.panels).toEqual(PANEL_ALLOWLIST)
   })
 
   it('CARD-COVERAGE-001 no metric tile puts a number or free text in its unit', () => {
@@ -158,6 +197,7 @@ describe('caption and card coverage (D30, D31)', () => {
       <ChartCard {...common} captionId={spec.captionId} />
       <DataTable {...table} />
       <SectionHeader title="not a Section" />
+      <InstancePanel title="D">x</InstancePanel>
       {/* <MetricTile label="in a comment" /> */}
     </>`
     expect(usages(source).map((usage) => [usage.tag, usage.caption])).toEqual([
@@ -166,6 +206,16 @@ describe('caption and card coverage (D30, D31)', () => {
       ['Section', 'literal'],
       ['ChartCard', 'dynamic'],
       ['DataTable', 'missing'],
+    ])
+    expect(
+      usages(
+        `const a = <><InstancePanel title="D" captionId="x">y</InstancePanel><SimpleTable ariaLabel="T" /></>`,
+        'x.tsx',
+        PANEL_TAGS,
+      ).map((usage) => [usage.tag, usage.caption]),
+    ).toEqual([
+      ['InstancePanel', 'literal'],
+      ['SimpleTable', 'missing'],
     ])
   })
 

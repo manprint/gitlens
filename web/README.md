@@ -75,6 +75,27 @@ that expand or carry custom cells. Keep toolbar specs and columns module
 constants or memoised: the tables memoise on them. The pure parts are in
 `src/lib/tableControls.ts`, the URL state in `src/hooks/useTableState.ts`.
 
+## Captions and summary cards
+
+Every card, section, table and chart carries a caption from the catalogue in
+`src/lib/captions.ts` (entries live in `src/lib/captionsets/<group>.ts`, one
+per route group, merged there). To add one: add an entry to the group's
+captionset (id in dot/kebab case such as `index.redundant-prefix`; `what` is one
+plain sentence, then `source`, `unit`, `window`, `howToRead`, plus `thresholds`
+when a rule applies), then pass `captionId="<id>"` to `MetricTile`, `ChartCard`,
+`Section` or `DataTable` (a table also needs `ariaLabel`). A hard column gets
+`meta: { help: '<id>' }` with a sentence in `columnHelp`. Terms are defined once
+in `src/lib/glossary.ts`; acronyms outside it and the common list fail the
+caption tests. `captionCoverage.test.ts` fails when a card has no caption; its
+allowlists are empty except the data-driven sites listed there.
+
+A summary card (`MetricTile`) shows one primary figure with a `unit` from the
+closed list in `src/lib/units.ts` (`TILE_UNITS`); anything else goes in
+`detail`, where each other number is followed by its noun, and a state is a
+`status` text. Add a unit to the list only with a test and a reason.
+`expectClearCard` (`src/test/clearCard.ts`) checks this in unit tests and the
+live specs `VIS-CAP-001..003` (`e2e/console_visual.spec.ts`) check every route.
+
 ## How to write a test here
 
 Choose the smallest applicable kind: **pure** for deterministic functions in

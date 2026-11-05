@@ -123,7 +123,8 @@ function hint(label: string) {
 
 function openHint(label: string, id: CaptionId) {
   fireEvent.click(hint(label))
-  expect(screen.getAllByText(captionOf(id).what).length).toBeGreaterThan(0)
+  // Glossary terms split the tooltip's text nodes, so compare its text content.
+  expect(screen.getByRole('tooltip')).toHaveTextContent(captionOf(id).what)
 }
 
 describe('index analysis captions', () => {
