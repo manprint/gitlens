@@ -95,7 +95,7 @@ test.describe('QA-TRACE-002 negative controls (synthetic sources only)', () => {
     const register = HEADER + row('REQ-04', `\`${fooPrefix}\``)
     const ok = checkRegister(register, [src('a.spec.ts', `test('${fooId} works', () => {})`)])
     expect(ok.failures).toEqual([])
-    expect(ok.rows[0].status).toBe('covered')
+    expect(ok.rows[0]?.status).toBe('covered')
     const comment = checkRegister(register, [src('a.spec.ts', `// ${fooId}\n/* ${fooId} */`)])
     expect(comment.uncovered).toEqual(['REQ-04'])
   })
@@ -112,9 +112,9 @@ test.describe('QA-TRACE-002 negative controls (synthetic sources only)', () => {
   test('QA-TRACE-002 exempt marker passes on an exempt row and fails elsewhere', () => {
     const ok = checkRegister(HEADER + row('REQ-01', `G-STACK (${EXEMPT_MARKER})`), [])
     expect(ok.failures).toEqual([])
-    expect(ok.rows[0].status).toBe('exempt')
+    expect(ok.rows[0]?.status).toBe('exempt')
     const bad = checkRegister(HEADER + row('REQ-04', `X (${EXEMPT_MARKER})`), [])
-    expect(bad.rows[0].status).toBe('invalid')
+    expect(bad.rows[0]?.status).toBe('invalid')
     expect(bad.failures).toHaveLength(1)
   })
 

@@ -221,12 +221,16 @@ test('IND-DEAD dead rows follow the table (appear after the updates, vanish afte
   const NOISE = 1_000
   registerCleanup(() => query(`DROP TABLE IF EXISTS ${QA_SCHEMA}.t;`).then(() => undefined))
 
-  // CONTROL: no stimulus, so the other tables stay within noise (Odoo leaves <= 14 dead rows).
-  const before = (await tablesApi()).filter((item) => item.schemaname !== QA_SCHEMA)
-  expect(
-    Math.max(0, ...before.map((item) => item.n_dead_tup)),
-    'control: dead rows of the other tables <= 1000 (measured Odoo noise <= 14, x70 slack)',
-  ).toBeLessThanOrEqual(NOISE)
+  // CONTROL: the other tables' dead rows are the baseline. Odoo accumulates them until
+  // autovacuum (res_partner reached 1002 after two days), so only their growth during the
+  // test is bounded: <= 1000 per table (measured Odoo noise <= 14 per test, x70 slack).
+  const key = (item: { schemaname: string; relname: string }) =>
+    `${item.schemaname}.${item.relname}`
+  const others = async () => (await tablesApi()).filter((item) => item.schemaname !== QA_SCHEMA)
+  const before = new Map((await others()).map((item) => [key(item), item.n_dead_tup]))
+  expect(before.size, 'control: the API lists the other tables').toBeGreaterThan(0)
+  const growth = async () =>
+    Math.max(0, ...(await others()).map((item) => item.n_dead_tup - (before.get(key(item)) ?? 0)))
 
   if (!SABOTAGE) {
     await deadRows(ROWS)
@@ -265,13 +269,8 @@ test('IND-DEAD dead rows follow the table (appear after the updates, vanish afte
   )
   const dead0 = tableOf(await tablesApi(), QA_SCHEMA, 't')?.n_dead_tup ?? ROWS
   expect(
-    Math.max(
-      0,
-      ...(await tablesApi())
-        .filter((item) => item.schemaname !== QA_SCHEMA)
-        .map((item) => item.n_dead_tup),
-    ),
-    'the stimulus is specific: other tables stay within noise',
+    await growth(),
+    'the stimulus is specific: the other tables grow within noise',
   ).toBeLessThanOrEqual(NOISE)
 
   if (!SABOTAGE) {

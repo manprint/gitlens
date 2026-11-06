@@ -71,7 +71,7 @@ function scan(src: string, regexLiterals: boolean): Scanned {
   let i = 0
   let prev = ''
   while (i < n) {
-    const c = src[i]
+    const c = src[i] ?? ''
     const d = src[i + 1]
     if (c === '/' && d === '/') {
       while (i < n && src[i] !== '\n') i++
@@ -192,7 +192,7 @@ export function checkRegister(
   for (const line of lines) {
     const m = ROW_RE.exec(line)
     if (!m) continue
-    const req = m[1]
+    const req = m[1] ?? ''
     const proof = splitCells(line)[proofCol] ?? ''
     const tokens = extractTokens(proof)
     const hasMarker = proof.includes(EXEMPT_MARKER)
